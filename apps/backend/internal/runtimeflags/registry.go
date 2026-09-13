@@ -1,6 +1,26 @@
 package runtimeflags
 
-import "github.com/kandev/kandev/internal/common/config"
+import (
+	"runtime"
+
+	"github.com/kandev/kandev/internal/common/config"
+)
+
+// ReasonPlatformUnsupported is the stable, machine-readable reason code for a
+// flag that requires a host platform this install does not run on. The
+// frontend translates it; it is never shown to the operator as raw text.
+const ReasonPlatformUnsupported = "platform_unsupported"
+
+// agentSurvivalAvailability implements the platform scope decision in
+// system-design/agent-survival-across-restart-02.md: survival is supported on
+// macOS and Linux, and unavailable on Windows, where it would trade the
+// platform's kill-on-job-close safeguard for an untested adoption handshake.
+func agentSurvivalAvailability() (bool, string) {
+	if runtime.GOOS == "windows" {
+		return false, ReasonPlatformUnsupported
+	}
+	return true, ""
+}
 
 // runtimeFlagRegistration keeps the public metadata and the typed config
 // binding for a flag together. The function fields stay internal so the HTTP
@@ -176,6 +196,25 @@ var registrations = []runtimeFlagRegistration{
 		},
 		read:  func(cfg *config.Config) bool { return cfg.Features.OfficeSessionIdentity },
 		apply: func(cfg *config.Config, value bool) { cfg.Features.OfficeSessionIdentity = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
+			Key:         "features.agentSurvival",
+			EnvVar:      "KANDEV_FEATURES_AGENT_SURVIVAL",
+			Kind:        KindFeature,
+			Label:       "Agent survival across backend restart",
+			Description: "Lets a worktree or local-executor agent session survive a backend restart by adopting its still-running standalone control server instead of killing it.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskHigh,
+			RiskDescription: "Replaces the standalone control server's kill-on-restart safeguard with an adoption handshake. " +
+				"Enable it only after reviewing the recovery and ownership guarantees, since it changes what happens to an agent " +
+				"process when the backend restarts unexpectedly. Unavailable on Windows, where the removed safeguard is depended on.",
+			RestartRequired: true,
+			Mutable:         true,
+			Available:       agentSurvivalAvailability,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.AgentSurvival },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.AgentSurvival = value },
 	},
 	{
 		definition: RuntimeFlagDefinition{

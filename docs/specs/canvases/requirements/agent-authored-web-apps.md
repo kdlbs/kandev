@@ -269,8 +269,10 @@ agent and review the canvas in the same task.
 
 #### Acceptance criteria
 
-- **AC-CANVASES-AGENT-WEB-APPS-009.1:** When canvases are enabled, the desktop
-  sidebar and workspace Canvases settings shall offer a Create canvas action.
+- **AC-CANVASES-AGENT-WEB-APPS-009.1:** When canvases are enabled, selecting
+  Set up a canvas in the empty desktop sidebar shall open task creation
+  directly without changing the current route. Workspace Canvases settings
+  shall retain its Create canvas action and the sidebar its settings shortcut.
 - **AC-CANVASES-AGENT-WEB-APPS-009.2:** The action shall open the standard task
   creation flow with a localized canvas title and prompt, no repository, an
   empty scratch path, and an eligible local executor preference.
@@ -281,15 +283,37 @@ agent and review the canvas in the same task.
   and review the canvas.
 - **AC-CANVASES-AGENT-WEB-APPS-009.5:** On a phone, workspace Canvases settings
   shall expose the same task creation flow without a canvas-only form.
-- **AC-CANVASES-AGENT-WEB-APPS-009.6:** The localized preset shall name the
-  canvas discovery, creation, skill-read, source-directory, and publication
-  steps. Tool identifiers shall remain exact in every locale.
+- **AC-CANVASES-AGENT-WEB-APPS-009.6:** The localized preset shall contain a
+  short editable request for a coordinator view listing existing tasks,
+  followed by a blank line and the exact reference `@create-canvas`.
+  Detailed authoring instructions shall be available as that saved prompt.
 - **AC-CANVASES-AGENT-WEB-APPS-009.7:** On desktop and phone, the user shall
   be able to read and edit the preset before submission. The submitted task
   shall retain those edits.
-- **AC-CANVASES-AGENT-WEB-APPS-009.8:** The preset shall direct agents to use
-  authorized live Kandev data for domain views and report any required user
-  permission review or workspace promotion.
+- **AC-CANVASES-AGENT-WEB-APPS-009.8:** The shipped saved prompt shall direct
+  agents through tool discovery, draft creation, one core skill read,
+  assigned-directory editing, and publication. It shall require authorized
+  live data and accurate release, permission-review, and promotion reporting.
+- **AC-CANVASES-AGENT-WEB-APPS-009.9:** When a structured task starts with
+  `@create-canvas`, the agent shall receive the saved definition as hidden
+  context. The task description shall retain the user's short request and
+  reference. Create without starting shall defer expansion until launch.
+- **AC-CANVASES-AGENT-WEB-APPS-009.10:** Users shall be able to customize
+  `create-canvas` through Settings > Prompts. Startup shall preserve an
+  existing same-name prompt and user edits. Removing the reference shall
+  remove its expansion from the next submitted request.
+- **AC-CANVASES-AGENT-WEB-APPS-009.11:** Desktop and phone users shall be able
+  to edit the goal, cancel, retry a failed submission, and start the task.
+  Failure shall preserve edits; cancellation shall create no task or canvas.
+  The phone action shall remain reachable without horizontal page overflow.
+
+Saved-prompt resolution follows
+[Saved Prompt Delivery](../../tasks/requirements/saved-prompt-delivery.md),
+including missing references, lookup failures, and passthrough exclusions.
+
+## Implementation plans
+
+- [Direct canvas creation and saved prompt](../../../plans/canvas-direct-creation/plan.md)
 
 ## Out of scope
 

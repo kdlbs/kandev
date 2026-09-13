@@ -20,6 +20,9 @@ This system owns workspace creation and deletion, repository attachment,
 repository sets, local repositories, branch templates, secrets, and workspace
 Git state.
 
+Workspace context identity, cached collection isolation, and navigation recovery
+after failed reads also belong here.
+
 ## Exclusions
 
 - Task-owned worktree lifetime belongs to the [task system](../tasks/README.md).
@@ -36,3 +39,4 @@ find current sources.
 
 - [Tasks](../tasks/README.md): consumes workspace repositories and worktrees.
 - [Integrations](../integrations/README.md): supplies remote repository identity.
+- [Platform](../platform/README.md): owns shared read capacity and persistence health.

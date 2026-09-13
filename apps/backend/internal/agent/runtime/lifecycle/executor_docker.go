@@ -771,7 +771,7 @@ func dockerCleanupContext(ctx context.Context, agentStopFailed bool) (context.Co
 	return ctx, func() {}
 }
 
-func (r *DockerExecutor) RecoverInstances(_ context.Context) ([]*ExecutorInstance, error) {
+func (r *DockerExecutor) RecoverInstances(_ context.Context, _ []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
 	// No-op: Docker client is initialized lazily on first use.
 	// If no session has used Docker yet, there's nothing to recover.
 	// Running containers from a previous backend process will be detected

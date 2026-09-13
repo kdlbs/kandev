@@ -339,6 +339,8 @@
       "jira_saved_views",
       "jira_task_presets",
       "kanban_hidden_step_ids",
+      "kanban_priority_filter_tokens",
+      "kanban_sort",
       "kanban_view_mode",
       "keyboard_shortcuts",
       "last_seen_display",

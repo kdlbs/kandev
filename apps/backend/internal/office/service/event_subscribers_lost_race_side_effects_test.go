@@ -47,9 +47,17 @@ func TestHandleAgentCompleted_FinishRunFailureSkipsCompletionSideEffects(t *test
 
 	// Force FinishRun's UPDATE to fail with a genuine error, matching
 	// TestSchedulerTick_AgentCompletedKeepsCheckoutWhenFinishRunFails'
-	// fault injection: a targeted fault (drop the column FinishRun sets)
-	// rather than a global read-only pragma.
-	svc.ExecSQL(t, "ALTER TABLE runs DROP COLUMN finished_at")
+	// targeted fault rather than a global read-only pragma.
+	// Block only the terminal timestamp update. The retention expression index
+	// references finished_at, so dropping the column would fail before the
+	// handler runs and would no longer exercise its guarded error path.
+	svc.ExecSQL(t, `
+		CREATE TRIGGER block_completion_finish_test
+		BEFORE UPDATE OF finished_at ON runs
+		WHEN NEW.finished_at IS NOT NULL
+		BEGIN
+			SELECT RAISE(FAIL, 'finished_at update blocked for test');
+		END`)
 
 	completed := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
 		"task_id":          taskID,
@@ -114,7 +122,13 @@ func TestHandleTasklessAgentCompleted_FinishRunFailureSkipsCompletionSideEffects
 		)
 	`, agent.ID)
 
-	svc.ExecSQL(t, "ALTER TABLE runs DROP COLUMN finished_at")
+	svc.ExecSQL(t, `
+		CREATE TRIGGER block_taskless_completion_finish_test
+		BEFORE UPDATE OF finished_at ON runs
+		WHEN NEW.finished_at IS NOT NULL
+		BEGIN
+			SELECT RAISE(FAIL, 'finished_at update blocked for test');
+		END`)
 
 	completed := bus.NewEvent(events.AgentCompleted, "test", map[string]string{
 		"agent_id":         agent.ID,

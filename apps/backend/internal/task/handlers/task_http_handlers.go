@@ -259,6 +259,9 @@ func buildTaskDTOsWithSessionInfo(
 	// batched call for the whole list: a per-task query would add a round trip
 	// per card to every board load.
 	dependencyViews := svc.BuildDependencyViews(ctx, tasks)
+	// Runner-mutability verdict is likewise derived, never stored, and must
+	// not fan out per task.
+	runnerViews := svc.BuildRunnerMutabilityViews(ctx, tasks)
 	result := make([]dto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
 		sessions := sessionsByTask[task.ID]
@@ -293,6 +296,7 @@ func buildTaskDTOsWithSessionInfo(
 		taskDTO.TaskPendingAction = dto.TaskPendingActionPtr(sessions, pendingActionsBySession)
 		dto.EnrichTaskForegroundActivity(&taskDTO, sessions, activityProvider)
 		dto.EnrichTaskDependencies(&taskDTO, dependencyProjection(dependencyViews[task.ID]), task)
+		dto.EnrichTaskRunnerMutability(&taskDTO, runnerMutabilityProjection(runnerViews[task.ID]))
 		dto.EnrichTaskStatusSummary(&taskDTO, task.ID, statusSummaries)
 		dto.EnrichTaskParkedProjection(&taskDTO, taskParkedProvider)
 		if taskDTO.StatusSummary != nil {

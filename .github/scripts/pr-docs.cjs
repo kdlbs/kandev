@@ -98,6 +98,18 @@ function pathExemption(pathname) {
   if (/\.(?:md|mdx|markdown)$/i.test(pathname)) {
     return 'Markdown file';
   }
+  if (/^\.codex\/agents\/[^/]+\.toml$/.test(pathname)) {
+    return 'Codex agent definition';
+  }
+  if (pathname === '.codex/config.toml') {
+    return 'Codex configuration';
+  }
+  if (pathname === '.claude/settings.json') {
+    return 'Claude configuration';
+  }
+  if (/^\.cursor\/rules\/[^/]+\.mdc$/.test(pathname)) {
+    return 'Cursor rule';
+  }
   if (/_test\.go$/i.test(pathname)) {
     return 'Go test file';
   }

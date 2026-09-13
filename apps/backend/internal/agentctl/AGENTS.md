@@ -15,6 +15,28 @@ agentctl exposes these route groups (see `server/api/`):
 - `/workspace/*` - File operations, search, tree
 - `/vscode/*` - VS Code integration proxy
 
+The **control server** (`server/api/control_server.go`) is a separate router from
+the per-instance ones above, and it owns the agent-survival surface:
+- `/identity` - opaque per-launch server identity, advertised capability set,
+  and this server's own resolved unowned period. Unauthenticated, because it is
+  what decides whether to authenticate. It therefore carries no filesystem path.
+- `/ownership/prove` - challenge/response proving this process holds the
+  credential the caller's record names. Also unauthenticated, for the same
+  reason, and safe because a proof is a keyed digest over a caller-chosen
+  challenge and cannot be inverted to the credential. Derivation is shared with
+  the backend through `internal/common/ownershipproof`.
+- `/api/v1/ownership/claim`, `/rotate`, `/confirm`, `/shutdown`, `/details` -
+  the authenticated ownership operations (`claim` is the renewal an owning
+  backend repeats on a cadence derived from the unowned period), plus the
+  filesystem paths kept off `/identity`.
+
+Auth on that router is `controlCredentialAuth`, which has three tiers rather
+than on/off. `/health`, `/auth/handshake`, `/identity`, and `/ownership/prove`
+are exempt entirely. The paths in `adoptionOnlyPaths` (`rotate`, `shutdown`)
+additionally accept the **superseded** credential until the rotation that
+replaced it is confirmed, so a backend that crashed mid-rotation can still
+adopt. Every other authenticated route accepts only the current credential.
+
 ## Multi-repository Git and review payloads
 
 Preserve the repository-scoped fields `repository_name`, `base_ref`, and

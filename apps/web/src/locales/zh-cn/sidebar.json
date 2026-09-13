@@ -118,5 +118,7 @@
   "failedToSyncSidebarViews": "同步侧边栏视图失败",
   "morePluginItems": "更多插件项",
   "newViewNumbered": "新视图 {{suffix}}",
-  "untitledView": "未命名视图"
+  "untitledView": "未命名视图",
+  "workspaceContextRefreshFailed": "无法刷新任务。",
+  "workspaceContextAccessDenied": "您已无法访问此工作区。"
 }

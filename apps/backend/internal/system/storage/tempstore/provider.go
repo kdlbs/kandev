@@ -19,6 +19,10 @@ import (
 const (
 	defaultScanDeadline = 60 * time.Second
 	windowsGOOS         = "windows"
+
+	reasonRootNotPresent         = "root_not_present"
+	reasonMeasurementUnavailable = "measurement_unavailable"
+	reasonDeadline               = "deadline"
 )
 
 type Status string
@@ -230,7 +234,7 @@ func (p *Provider) planRoots(candidates []RootCandidate) []rootPlan {
 			if candidate.Optional {
 				plans = append(plans, rootPlan{measurement: RootMeasurement{
 					RequestedPath: requested, Path: requested, Status: StatusNotApplicable,
-					Reason: "root_not_present",
+					Reason: reasonRootNotPresent,
 				}})
 			} else {
 				plans = append(plans, unavailablePlan(requested, false, errors.New("root does not exist")))
@@ -301,12 +305,12 @@ func unavailablePlan(requested string, optional bool, err error) rootPlan {
 	if optional && errors.Is(err, os.ErrNotExist) {
 		return rootPlan{measurement: RootMeasurement{
 			RequestedPath: requested, Path: requested, Status: StatusNotApplicable,
-			Reason: "root_not_present",
+			Reason: reasonRootNotPresent,
 		}}
 	}
 	return rootPlan{measurement: RootMeasurement{
 		RequestedPath: requested, Path: requested, Status: StatusUnavailable,
-		Reason: "measurement_unavailable", Warnings: []string{err.Error()},
+		Reason: reasonMeasurementUnavailable, Warnings: []string{err.Error()},
 	}}
 }
 
@@ -475,7 +479,7 @@ func measurementFromResult(
 			size := result.Bytes
 			measurement.Status = StatusPartial
 			measurement.SizeBytes = &size
-			measurement.Reason = "deadline"
+			measurement.Reason = reasonDeadline
 			measurement.Warnings = appendBounded(
 				measurement.Warnings, []string{result.Err.Error()}, 10,
 			)
@@ -483,7 +487,7 @@ func measurementFromResult(
 		}
 		measurement.Status = StatusUnavailable
 		measurement.SizeBytes = nil
-		measurement.Reason = "measurement_unavailable"
+		measurement.Reason = reasonMeasurementUnavailable
 		measurement.Warnings = appendBounded(measurement.Warnings, []string{result.Err.Error()}, 10)
 		return measurement
 	}
@@ -522,8 +526,8 @@ func summarize(analysis Analysis) Analysis {
 		analysis.SizeBytes = &size
 		analysis.Reason = "informational_overlap"
 		for _, root := range analysis.Roots {
-			if root.Reason == "deadline" {
-				analysis.Reason = "deadline"
+			if root.Reason == reasonDeadline {
+				analysis.Reason = reasonDeadline
 				break
 			}
 		}
@@ -534,10 +538,10 @@ func summarize(analysis Analysis) Analysis {
 		}
 	case unavailable > 0:
 		analysis.Status = StatusUnavailable
-		analysis.Reason = "measurement_unavailable"
+		analysis.Reason = reasonMeasurementUnavailable
 	case notApplicable > 0:
 		analysis.Status = StatusNotApplicable
-		analysis.Reason = "root_not_present"
+		analysis.Reason = reasonRootNotPresent
 	default:
 		analysis.Status = StatusNotApplicable
 		analysis.Reason = "no_selected_roots"

@@ -298,6 +298,7 @@ type TaskSwitcherSurfaceContentProps = {
   linking: ReturnType<typeof useMobileTaskLinking>;
 };
 
+// eslint-disable-next-line max-lines-per-function -- this surface keeps the existing mobile scroll owner intact
 function TaskSwitcherSurfaceContent({
   open,
   presentation,
@@ -313,6 +314,17 @@ function TaskSwitcherSurfaceContent({
   linking,
 }: TaskSwitcherSurfaceContentProps) {
   const { t } = useTranslation();
+  let taskLoadError: string | null = null;
+  if (data.workspaceContextError) {
+    taskLoadError = data.workspaceContextAccessDenied
+      ? t("sidebar:workspaceContextAccessDenied")
+      : t("sidebar:workspaceContextRefreshFailed");
+  } else if (data.archivedError) {
+    taskLoadError = t("sidebar:archivedLoadFailed");
+  }
+  const retryTaskLoad = data.workspaceContextError
+    ? data.retryWorkspaceContext
+    : data.retryArchivedTasks;
   const moveOptions = useMobileTaskMoveOptions({
     open,
     stepsByWorkflowId: data.stepsByWorkflowId,
@@ -376,9 +388,12 @@ function TaskSwitcherSurfaceContent({
             deletingTaskId={actions.deletingTaskId}
             archivingTaskId={actions.archivingTaskId}
             isArchiving={actions.isArchiving}
-            isLoading={data.tasksLoading}
-            loadError={data.archivedError ? t("sidebar:archivedLoadFailed") : null}
-            onRetryLoad={data.retryArchivedTasks}
+            isLoading={
+              data.tasksLoading ||
+              (data.workspaceContextPending && data.tasksWithRepositories.length === 0)
+            }
+            loadError={taskLoadError}
+            onRetryLoad={retryTaskLoad}
             retryLabel={t("sidebar:retry")}
           />
         </PluginTaskLinkActionSurfaceProvider>

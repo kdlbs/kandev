@@ -10,6 +10,7 @@ import {
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForSessionDone } from "../../helpers/session";
+import { readTranscriptScrollState, setTranscriptScrollTop } from "../../helpers/transcript-scroll";
 import { SessionPage } from "../../pages/session-page";
 
 async function waitForLaunchError(apiClient: ApiClient, workspaceId: string, taskId: string) {
@@ -261,7 +262,13 @@ test.describe("mobile task launch failure recovery", () => {
       task.session_id,
       "Waiting for mobile bootstrap recovery fixture to settle",
     );
+    await apiClient.seedAgentMessages(task.session_id, 40, "mobile bootstrap history");
 
+    const occurredAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const longDetails = Array.from(
+      { length: 12 },
+      (_, index) => `agent_bootstrap; diagnostic_line=${index + 1}; cause=permission_denied`,
+    ).join("\n");
     await apiClient.seedTaskSession(task.id, {
       state: "WAITING_FOR_INPUT",
       sessionId: task.session_id,
@@ -269,13 +276,13 @@ test.describe("mobile task launch failure recovery", () => {
       metadata: {
         last_agent_error: {
           message: "The agent could not start.",
-          occurred_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+          occurred_at: occurredAt,
           agent_execution_id: "mobile-bootstrap-execution-e2e",
           execution_id: "mobile-bootstrap-execution-e2e",
           phase: "bootstrap",
           attempt_id: "mobile-bootstrap-execution-e2e",
           code: "generic_launch_failure",
-          details: "agent_bootstrap; cause=permission_denied",
+          details: longDetails,
           stamp: "mobile-bootstrap-presentation-e2e",
           causes: [
             {
@@ -295,6 +302,14 @@ test.describe("mobile task launch failure recovery", () => {
     await expect(card).toHaveCount(1, { timeout: 30_000 });
     await expect(testPage.getByTestId("task-launch-error-entry")).toHaveCount(0);
     await expect(testPage.getByTestId("session-recovery-error")).toHaveCount(0);
+    const transcript = session.activeChat().locator(".chat-message-list").first();
+    await expect
+      .poll(async () => (await readTranscriptScrollState(transcript)).scrollOwnerCount)
+      .toBe(1);
+    const initialScroll = await readTranscriptScrollState(transcript);
+    expect(initialScroll.scrollHeight).toBeGreaterThan(initialScroll.clientHeight);
+    expect(initialScroll.scrollTop).toBe(0);
+    await expect(session.activeChat().getByTestId("chat-input-area")).toBeVisible();
 
     for (const testId of [
       "recovery-resume-button",
@@ -314,6 +329,58 @@ test.describe("mobile task launch failure recovery", () => {
     await details.getByText("Recovery details").tap();
     await expect(details).toHaveAttribute("open", "");
     await expect(card).toContainText("The required contribution access was denied.");
+    const expandedScroll = await readTranscriptScrollState(transcript);
+    expect(expandedScroll.scrollOwnerCount).toBe(1);
+    expect(expandedScroll.scrollHeight).toBeGreaterThan(expandedScroll.clientHeight);
+    const middleScrollTop = await setTranscriptScrollTop(
+      transcript,
+      Math.floor((expandedScroll.scrollHeight - expandedScroll.clientHeight) / 2),
+    );
+    expect(middleScrollTop).toBeGreaterThan(0);
+
+    const sameStampMetadata = {
+      last_agent_error: {
+        message: "The agent could not start.",
+        occurred_at: occurredAt,
+        agent_execution_id: "mobile-bootstrap-execution-e2e",
+        execution_id: "mobile-bootstrap-execution-e2e",
+        phase: "bootstrap",
+        attempt_id: "mobile-bootstrap-execution-e2e",
+        code: "generic_launch_failure",
+        details: longDetails,
+        stamp: "mobile-bootstrap-presentation-e2e",
+        causes: [
+          {
+            operation: "resume",
+            code: "permission_denied",
+            detail: "The required contribution access was denied.",
+          },
+        ],
+      },
+    };
+    await apiClient.seedTaskSession(task.id, {
+      state: "WAITING_FOR_INPUT",
+      sessionId: task.session_id,
+      agentProfileId: seedData.agentProfileId,
+      metadata: sameStampMetadata,
+    });
+    await expect
+      .poll(async () => (await readTranscriptScrollState(transcript)).scrollTop)
+      .toBeGreaterThanOrEqual(Math.max(0, middleScrollTop - 2));
+
+    await apiClient.seedTaskSession(task.id, {
+      state: "WAITING_FOR_INPUT",
+      sessionId: task.session_id,
+      agentProfileId: seedData.agentProfileId,
+      metadata: {
+        ...sameStampMetadata,
+        last_agent_error: {
+          ...sameStampMetadata.last_agent_error,
+          stamp: "mobile-bootstrap-presentation-e2e-new",
+        },
+      },
+    });
+    await expect.poll(async () => (await readTranscriptScrollState(transcript)).scrollTop).toBe(0);
     await assertNoDocumentHorizontalOverflow(testPage, "mobile bootstrap recovery presentation");
 
     await testPage.screenshot({

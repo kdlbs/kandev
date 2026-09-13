@@ -28,6 +28,27 @@ Kandev limits concurrent Git subprocesses, but every caller currently competes i
 - **AC-PLATFORM-GIT-SUBPROCESS-ADMISSION-001.7:** Empty classes are skipped, so available capacity is never reserved for work that does not exist.
 - **AC-PLATFORM-GIT-SUBPROCESS-ADMISSION-001.8:** When all three classes remain queued and admitted commands complete, each class receives a slot within at most three successful slot releases.
 
+### REQ-PLATFORM-GIT-SUBPROCESS-ADMISSION-002: Noninteractive managed Git execution
+
+**Intent:** Application-owned Git completes or fails without taking control of a user's terminal or authentication interface.
+
+#### Acceptance criteria
+
+- **AC-PLATFORM-GIT-SUBPROCESS-ADMISSION-002.1:** Every application-owned Git command shall suppress credential, host-trust, and interactive-login prompts through terminals, askpass, and supported credential managers.
+- **AC-PLATFORM-GIT-SUBPROCESS-ADMISSION-002.2:** Commands shall preserve the selected host, executor, or managed credential scope. Valid helpers and noninteractive SSH credentials shall continue to work.
+- **AC-PLATFORM-GIT-SUBPROCESS-ADMISSION-002.3:** Every managed Git network operation shall have a finite execution budget that starts after admission. Earlier lifetime cancellation shall still apply.
+- **AC-PLATFORM-GIT-SUBPROCESS-ADMISSION-002.4:** Cancellation, helper failure, and inherited output pipes shall have bounded cleanup. Each terminal path shall release its admission slot and operation-owned locks.
+- **AC-PLATFORM-GIT-SUBPROCESS-ADMISSION-002.5:** Required operations shall return credential-free failures through existing error surfaces and clear pending state. Optional comparison work shall preserve the outcomes in `AC-PLATFORM-WORKSPACE-GIT-STATUS-001.17`.
+- **AC-PLATFORM-GIT-SUBPROCESS-ADMISSION-002.6:** A later operation shall work after authentication or service recovery without restarting Kandev. Failure shall not cause credential replacement, account fallback, transport fallback, remote rewriting, or a new retry loop.
+
+These criteria apply the accepted noninteractive transport decision across application-owned Git.
+Deliberately interactive task terminals and commands entered by users remain outside this policy.
+Arbitrary third-party helpers are not trusted to honor prompt controls; process isolation and deadlines bound their execution.
+
+## System design
+
+- [Managed Git execution](../system-design/git-subprocess-execution.md)
+
 ## Migrated source detail
 
 Related issue: [#2150](https://github.com/kdlbs/kandev/issues/2150)
@@ -204,8 +225,7 @@ resolution at process startup.
 - Serializing all instance creation independently of Git admission.
 - Changing public status, log, or diff payloads.
 - Aggregating admission snapshots across Docker or remote agentctl processes.
-- Guaranteeing wall-clock completion when Git itself hangs; execution timeouts
-  continue to bound commands after admission.
+- Guaranteeing successful completion during provider outages. Execution and cleanup remain bounded under requirement `REQ-PLATFORM-GIT-SUBPROCESS-ADMISSION-002`.
 
 ## Success criteria
 
@@ -231,3 +251,5 @@ resolution at process startup.
 ## Implementation plan
 
 - [Git subprocess admission plan](../../../plans/git-subprocess-admission/plan.md)
+
+- [Noninteractive Git execution repair](../../../plans/noninteractive-git-execution/plan.md)

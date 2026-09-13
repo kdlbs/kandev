@@ -1,4 +1,5 @@
 import type { StateCreator } from "zustand";
+import type { Draft } from "immer";
 import type { KanbanSlice, KanbanSliceActions, KanbanSliceState } from "./types";
 import { generateUUID } from "@/lib/utils";
 import {
@@ -9,6 +10,42 @@ import {
   releaseTaskRemoval,
 } from "@/lib/state/task-removal";
 import { mergeStepOrderRevisions } from "@/lib/kanban/workflow-step-order";
+import {
+  WORKSPACE_CONTEXT_COLLECTIONS,
+  type WorkspaceContextCollection,
+  type WorkspaceContextReadError,
+  type WorkspaceContextReadState,
+} from "./types";
+
+function createWorkspaceContextReadState(
+  workspaceId: string | null = null,
+  generation = 0,
+  retryVersion = 0,
+  retryCycle = 0,
+): WorkspaceContextReadState {
+  return {
+    workspaceId,
+    generation,
+    pending: Object.fromEntries(
+      WORKSPACE_CONTEXT_COLLECTIONS.map((collection) => [collection, false]),
+    ) as WorkspaceContextReadState["pending"],
+    errors: Object.fromEntries(
+      WORKSPACE_CONTEXT_COLLECTIONS.map((collection) => [collection, null]),
+    ) as WorkspaceContextReadState["errors"],
+    retryAfterMs: Object.fromEntries(
+      WORKSPACE_CONTEXT_COLLECTIONS.map((collection) => [collection, null]),
+    ) as WorkspaceContextReadState["retryAfterMs"],
+    requestIds: Object.fromEntries(
+      WORKSPACE_CONTEXT_COLLECTIONS.map((collection) => [collection, null]),
+    ) as WorkspaceContextReadState["requestIds"],
+    snapshotPending: false,
+    snapshotError: null,
+    snapshotRetryAfterMs: null,
+    snapshotRequestId: null,
+    retryVersion,
+    retryCycle,
+  };
+}
 
 export const defaultKanbanState: KanbanSliceState = {
   kanban: { workflowId: null, steps: [], tasks: [] },
@@ -28,6 +65,7 @@ export const defaultKanbanState: KanbanSliceState = {
   },
   workflows: { items: [], activeId: null },
   workspaceContextGeneration: 0,
+  workspaceContextRead: createWorkspaceContextReadState(),
   tasks: {
     activeTaskId: null,
     activeSessionId: null,
@@ -122,6 +160,138 @@ type TaskActions = Pick<
   | "advanceTaskNavigationRevision"
 >;
 
+type WorkspaceContextActions = Pick<
+  KanbanSliceActions,
+  "setWorkspaceContextRead" | "setWorkspaceSnapshotRead" | "requestWorkspaceContextRefresh"
+>;
+
+type WorkspaceContextUpdate = {
+  workspaceId: string;
+  generation: number;
+  result: "pending" | "success" | WorkspaceContextReadError;
+  retryAfterMs?: number;
+  requestId?: string;
+};
+
+type WorkspaceContextCollectionUpdate = WorkspaceContextUpdate & {
+  collection: WorkspaceContextCollection;
+};
+
+function prepareWorkspaceContextRead(
+  draft: Draft<KanbanSlice>,
+  update: WorkspaceContextUpdate,
+): Draft<WorkspaceContextReadState> | null {
+  if (draft.workspaceContextGeneration !== update.generation) return null;
+  const current = draft.workspaceContextRead;
+  if (current.workspaceId !== null && current.workspaceId !== update.workspaceId) return null;
+  if (current.workspaceId === update.workspaceId && current.generation === update.generation) {
+    return current;
+  }
+  if (update.result !== "pending") return null;
+  draft.workspaceContextRead = createWorkspaceContextReadState(
+    update.workspaceId,
+    update.generation,
+    current.retryVersion,
+    current.retryCycle,
+  );
+  return draft.workspaceContextRead;
+}
+
+function ownsWorkspaceContextRequest(
+  currentRequestId: string | null,
+  result: WorkspaceContextUpdate["result"],
+  requestId: string | undefined,
+): boolean {
+  if (requestId === undefined) return currentRequestId === null;
+  return result === "pending" || currentRequestId === requestId;
+}
+
+function nextWorkspaceContextRequestId(
+  result: WorkspaceContextUpdate["result"],
+  requestId: string | undefined,
+): string | null {
+  if (requestId === undefined) return null;
+  return result === "pending" ? requestId : null;
+}
+
+function workspaceContextError(
+  result: WorkspaceContextUpdate["result"],
+): WorkspaceContextReadError | null {
+  return result === "pending" || result === "success" || result === "cancelled" ? null : result;
+}
+
+function applyWorkspaceContextRead(
+  draft: Draft<KanbanSlice>,
+  update: WorkspaceContextCollectionUpdate,
+) {
+  const read = prepareWorkspaceContextRead(draft, update);
+  if (
+    !read ||
+    !ownsWorkspaceContextRequest(
+      read.requestIds[update.collection],
+      update.result,
+      update.requestId,
+    )
+  ) {
+    return;
+  }
+  read.requestIds[update.collection] = nextWorkspaceContextRequestId(
+    update.result,
+    update.requestId,
+  );
+  read.pending[update.collection] = update.result === "pending";
+  read.errors[update.collection] = workspaceContextError(update.result);
+  read.retryAfterMs[update.collection] =
+    update.result === "transient" ? (update.retryAfterMs ?? null) : null;
+}
+
+function applyWorkspaceSnapshotRead(draft: Draft<KanbanSlice>, update: WorkspaceContextUpdate) {
+  const read = prepareWorkspaceContextRead(draft, update);
+  if (
+    !read ||
+    !ownsWorkspaceContextRequest(read.snapshotRequestId, update.result, update.requestId)
+  ) {
+    return;
+  }
+  read.snapshotRequestId = nextWorkspaceContextRequestId(update.result, update.requestId);
+  read.snapshotPending = update.result === "pending";
+  read.snapshotError = workspaceContextError(update.result);
+  read.snapshotRetryAfterMs = update.result === "transient" ? (update.retryAfterMs ?? null) : null;
+}
+
+function createWorkspaceContextActions(set: KanbanSliceSet): WorkspaceContextActions {
+  return {
+    setWorkspaceContextRead: (...args) => {
+      const [collection, workspaceId, generation, result, retryAfterMs, requestId] = args;
+      set((draft) =>
+        applyWorkspaceContextRead(draft, {
+          collection,
+          workspaceId,
+          generation,
+          result,
+          retryAfterMs,
+          requestId,
+        }),
+      );
+    },
+    setWorkspaceSnapshotRead: (workspaceId, generation, result, retryAfterMs, requestId) =>
+      set((draft) =>
+        applyWorkspaceSnapshotRead(draft, {
+          workspaceId,
+          generation,
+          result,
+          retryAfterMs,
+          requestId,
+        }),
+      ),
+    requestWorkspaceContextRefresh: (resetRetryCycle = true) =>
+      set((draft) => {
+        draft.workspaceContextRead.retryVersion += 1;
+        if (resetRetryCycle) draft.workspaceContextRead.retryCycle += 1;
+      }),
+  };
+}
+
 function createTaskActions(set: KanbanSliceSet): TaskActions {
   return {
     setActiveTask: (taskId) =>
@@ -208,6 +378,7 @@ export const createKanbanSlice: StateCreator<
   ...defaultKanbanState,
   ...createSidebarArchivedTaskActions(set),
   ...createTaskActions(set),
+  ...createWorkspaceContextActions(set),
   resetKanbanWorkspaceContext: () =>
     set((draft) => {
       const nextGeneration = draft.workspaceContextGeneration + 1;

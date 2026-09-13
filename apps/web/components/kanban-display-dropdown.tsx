@@ -16,12 +16,18 @@ import {
   pluginTaskFilterRegistrationKey,
   type PluginTaskFilterRegistration,
 } from "@/lib/plugins/registry";
-import type { Repository } from "@/lib/types/http";
+import type { Repository, TaskPriority } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
 import { useMemo, useRef, useState, type ComponentProps } from "react";
 import { useTranslation } from "react-i18next";
 import { getRepositoryPlaceholderKey } from "@/lib/kanban/repository-placeholder";
 import type { TaskListingPage } from "@/lib/task-listing/view-navigation";
+import {
+  KANBAN_SORT_OPTIONS,
+  KANBAN_SORT_LABEL_KEYS,
+  type KanbanSort,
+} from "@/lib/kanban/kanban-sort";
+import { TASK_PRIORITY_TOKENS, TASK_PRIORITY_LABEL_KEYS } from "@/lib/tasks/task-priority";
 
 type KanbanDisplayDropdownProps = {
   triggerSize?: ComponentProps<typeof Button>["size"];
@@ -103,6 +109,68 @@ function RepositorySection({
           ))}
         </SelectContent>
       </Select>
+    </div>
+  );
+}
+
+function BoardSortSection({
+  boardSort,
+  onBoardSortChange,
+}: {
+  boardSort: KanbanSort;
+  onBoardSortChange: (sort: KanbanSort) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-1.5">
+      <DropdownMenuLabel className="px-0 text-foreground">
+        {t("kanban:boardSort")}
+      </DropdownMenuLabel>
+      <Select value={boardSort} onValueChange={(value) => onBoardSortChange(value as KanbanSort)}>
+        <SelectTrigger
+          data-testid="display-board-sort"
+          aria-label={t("kanban:boardSort")}
+          className="w-full border-border"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {KANBAN_SORT_OPTIONS.map((option) => (
+            <SelectItem key={option.value} value={option.value}>
+              {t(KANBAN_SORT_LABEL_KEYS[option.value])}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+function PriorityFilterSection({
+  priorityFilterTokens,
+  onPriorityFilterChange,
+}: {
+  priorityFilterTokens: TaskPriority[];
+  onPriorityFilterChange: (token: TaskPriority) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-1.5">
+      <DropdownMenuLabel className="px-0 text-foreground">
+        {t("kanban:priorityFilter")}
+      </DropdownMenuLabel>
+      <div className="space-y-1">
+        {TASK_PRIORITY_TOKENS.map((token) => (
+          <label key={token} className="flex items-center gap-2 cursor-pointer">
+            <Checkbox
+              data-testid={`display-priority-filter-option-${token}`}
+              checked={priorityFilterTokens.includes(token)}
+              onCheckedChange={() => onPriorityFilterChange(token)}
+            />
+            <span className="text-sm text-foreground">{t(TASK_PRIORITY_LABEL_KEYS[token])}</span>
+          </label>
+        ))}
+      </div>
     </div>
   );
 }
@@ -207,6 +275,90 @@ function TasksListSection({
   );
 }
 
+type DropdownSectionsProps = KanbanDisplayDropdownProps &
+  ReturnType<typeof useKanbanDisplaySettings> & {
+    repositoryValue: string;
+  };
+
+function DropdownSections({
+  currentPage,
+  pluginFilters,
+  pluginFilterSelections,
+  onPluginFilterChange,
+  workflows,
+  activeWorkflowId,
+  repositories,
+  repositoriesLoading,
+  repositoryValue,
+  enablePreviewOnClick,
+  tasksListShowDetails,
+  boardSort,
+  priorityFilterTokens,
+  onWorkflowChange,
+  onRepositoryChange,
+  onTogglePreviewOnClick,
+  onToggleTasksListShowDetails,
+  onBoardSortChange,
+  onPriorityFilterChange,
+}: DropdownSectionsProps) {
+  return (
+    <div className="space-y-3">
+      <WorkflowSection
+        activeWorkflowId={activeWorkflowId}
+        workflows={workflows}
+        onWorkflowChange={onWorkflowChange}
+      />
+      {currentPage !== "threads" && (
+        <>
+          <DropdownMenuSeparator />
+          <RepositorySection
+            repositoryValue={repositoryValue}
+            repositories={repositories}
+            repositoriesLoading={repositoriesLoading}
+            onRepositoryChange={onRepositoryChange}
+          />
+          {currentPage === "kanban" && (
+            <>
+              <DropdownMenuSeparator />
+              <BoardSortSection boardSort={boardSort} onBoardSortChange={onBoardSortChange} />
+              <DropdownMenuSeparator />
+              <PriorityFilterSection
+                priorityFilterTokens={priorityFilterTokens}
+                onPriorityFilterChange={onPriorityFilterChange}
+              />
+            </>
+          )}
+          {pluginFilters?.map((filter) => {
+            const filterKey = pluginTaskFilterRegistrationKey(filter);
+            return (
+              <div key={filterKey} className="contents">
+                <DropdownMenuSeparator />
+                <PluginFilterSection
+                  filter={filter}
+                  filterKey={filterKey}
+                  selected={pluginFilterSelections?.[filterKey] ?? []}
+                  onChange={(values) => onPluginFilterChange?.(filterKey, values)}
+                />
+              </div>
+            );
+          })}
+          <DropdownMenuSeparator />
+          <PreviewPanelSection
+            enablePreviewOnClick={enablePreviewOnClick}
+            onTogglePreviewOnClick={onTogglePreviewOnClick}
+          />
+        </>
+      )}
+      {currentPage === "tasks" && (
+        <TasksListSection
+          tasksListShowDetails={tasksListShowDetails}
+          onToggleTasksListShowDetails={onToggleTasksListShowDetails}
+        />
+      )}
+    </div>
+  );
+}
+
 export function KanbanDisplayDropdown({
   triggerSize = "icon",
   currentPage = "kanban",
@@ -214,21 +366,8 @@ export function KanbanDisplayDropdown({
   pluginFilterSelections,
   onPluginFilterChange,
 }: KanbanDisplayDropdownProps) {
-  const {
-    workflows,
-    activeWorkflowId,
-    repositories,
-    repositoriesLoading,
-    allRepositoriesSelected,
-    selectedRepositoryId,
-    enablePreviewOnClick,
-    tasksListShowDetails,
-    onWorkflowChange,
-    onRepositoryChange,
-    onTogglePreviewOnClick,
-    onToggleTasksListShowDetails,
-  } = useKanbanDisplaySettings();
-
+  const displaySettings = useKanbanDisplaySettings();
+  const { allRepositoriesSelected, selectedRepositoryId } = displaySettings;
   const repositoryValue = allRepositoriesSelected ? "all" : (selectedRepositoryId ?? "all");
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -253,49 +392,14 @@ export function KanbanDisplayDropdown({
           if (triggerRef.current?.contains(e.target as Node)) e.preventDefault();
         }}
       >
-        <div className="space-y-3">
-          <WorkflowSection
-            activeWorkflowId={activeWorkflowId}
-            workflows={workflows}
-            onWorkflowChange={onWorkflowChange}
-          />
-          {currentPage !== "threads" && (
-            <>
-              <DropdownMenuSeparator />
-              <RepositorySection
-                repositoryValue={repositoryValue}
-                repositories={repositories}
-                repositoriesLoading={repositoriesLoading}
-                onRepositoryChange={onRepositoryChange}
-              />
-              {pluginFilters?.map((filter) => {
-                const filterKey = pluginTaskFilterRegistrationKey(filter);
-                return (
-                  <div key={filterKey} className="contents">
-                    <DropdownMenuSeparator />
-                    <PluginFilterSection
-                      filter={filter}
-                      filterKey={filterKey}
-                      selected={pluginFilterSelections?.[filterKey] ?? []}
-                      onChange={(values) => onPluginFilterChange?.(filterKey, values)}
-                    />
-                  </div>
-                );
-              })}
-              <DropdownMenuSeparator />
-              <PreviewPanelSection
-                enablePreviewOnClick={enablePreviewOnClick}
-                onTogglePreviewOnClick={onTogglePreviewOnClick}
-              />
-            </>
-          )}
-          {currentPage === "tasks" && (
-            <TasksListSection
-              tasksListShowDetails={tasksListShowDetails}
-              onToggleTasksListShowDetails={onToggleTasksListShowDetails}
-            />
-          )}
-        </div>
+        <DropdownSections
+          {...displaySettings}
+          currentPage={currentPage}
+          pluginFilters={pluginFilters}
+          pluginFilterSelections={pluginFilterSelections}
+          onPluginFilterChange={onPluginFilterChange}
+          repositoryValue={repositoryValue}
+        />
       </DropdownMenuContent>
     </DropdownMenu>
   );

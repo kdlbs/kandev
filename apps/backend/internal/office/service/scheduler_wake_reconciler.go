@@ -103,10 +103,18 @@ func (h *ParentWakeReconciler) reconcileOne(
 		return
 	}
 
+	waveKey, waveString, ok := resolveWaveIdentity(ctx, svc.repo, c.ParentTaskID, h.logger)
+	if !ok {
+		return
+	}
+
 	// The payload carries no child summaries: the prompt path derives the
 	// child list at assembly time. Nothing here can fail, so no read for the
 	// briefing can stop a wake that readiness already judged due.
-	payload := engine.OnChildrenCompletedPayload{}
+	payload := engine.OnChildrenCompletedPayload{
+		WaveKey:    waveKey,
+		WaveString: waveString,
+	}
 
 	currentKey, err := svc.repo.GetChildSetKey(ctx, c.ParentTaskID)
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/coder/acp-go-sdk"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/agentctl/acpcompat"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
@@ -289,10 +290,20 @@ func (a *Adapter) observeCodexProviderEvidence(promptGeneration uint64, event *A
 	return capacity && (systemError || wasSystemError)
 }
 
-// emitDialectContextWindow derives and enqueues an agent-specific context
-// sample while holding the same lock that protects the active session/model.
-// This keeps a model switch from interleaving between size selection and event
-// delivery.
+// emitDialectContextWindow derives an agent-specific context sample while
+// holding the same lock that protects the active session/model -- this keeps
+// a model switch from interleaving between size selection and event
+// delivery -- then delivers it after releasing that lock.
+//
+// This is a COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6): delivery uses the
+// existing sendUpdate helper, which blocks rather than drops when updatesCh is
+// full and is cancelable via lifetimeCtx/closedCh on adapter shutdown -- it
+// was already built for exactly this purpose (see its doc comment) and is
+// already used by sibling sites in this package (e.g. SetMode), so no new
+// primitive is needed here. sendUpdate must not be called while a.mu is held:
+// Close() acquires a.mu as its first act before cancelling lifetimeCtx, so
+// parking under the lock (the old sendUpdateLocked behavior this replaces)
+// would deadlock Close against this very send.
 func (a *Adapter) emitDialectContextWindow(sessionID string, meta map[string]any) *AgentEvent {
 	a.mu.Lock()
 	if a.closed || sessionID != a.sessionID {
@@ -313,15 +324,9 @@ func (a *Adapter) emitDialectContextWindow(sessionID string, meta map[string]any
 		ContextWindowRemaining: remaining,
 		ContextEfficiency:      float64(sample.used) / float64(sample.size) * 100,
 	}
-	sent := a.sendUpdateLocked(event)
-	if sent {
-		a.contextSamples[sessionID] = sample
-	}
+	a.contextSamples[sessionID] = sample
 	a.mu.Unlock()
-	if !sent {
-		a.logger.Warn("updates channel full, dropping event", zap.String("type", event.Type))
-		return nil
-	}
+	a.sendUpdate(event)
 	return &event
 }
 
@@ -633,6 +638,13 @@ func (a *Adapter) convertMessageChunkWithProtocolID(
 			}
 		}
 		event.Text = text
+		classified := routingerr.Classify(routingerr.Input{Phase: routingerr.PhasePromptSend, ProviderID: a.agentID, Stderr: text})
+		// Only an assistant chunk may carry the diagnostic-candidate marker: the
+		// downstream clearing rule only reads an unmarked assistant/thought
+		// chunk, so a marked user chunk would never be cleared by the ordinary-
+		// output path.
+		event.ProviderDiagnosticCandidate = role == "assistant" &&
+			classified.Confidence == routingerr.ConfHigh && classified.FallbackAllowed
 		return event
 	}
 

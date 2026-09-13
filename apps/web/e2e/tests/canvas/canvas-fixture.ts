@@ -29,6 +29,17 @@ export type CanvasRecord = {
   };
 };
 
+export type CanvasReleaseRecord = {
+  id: string;
+  validation_status?: string;
+  permissions?: {
+    reads?: string[];
+    writes?: string[];
+    events?: string[];
+    shared_state?: boolean;
+  };
+};
+
 export type SeededCanvas = {
   taskId: string;
   taskSessionId: string;
@@ -126,7 +137,22 @@ export async function getCanvas(
   return (await response.json()) as CanvasRecord;
 }
 
-async function waitForSessionWorkspace(
+export async function listCanvasReleases(
+  apiClient: ApiClient,
+  canvasId: string,
+): Promise<CanvasReleaseRecord[]> {
+  const response = await apiClient.rawRequest(
+    "GET",
+    `/api/v1/canvases/${encodeURIComponent(canvasId)}/releases`,
+  );
+  if (!response.ok) {
+    throw new Error(`Canvas release lookup failed (${response.status}).`);
+  }
+  const body = (await response.json()) as { releases?: CanvasReleaseRecord[] };
+  return body.releases ?? [];
+}
+
+export async function waitForSessionWorkspace(
   apiClient: ApiClient,
   taskId: string,
   sessionId: string,
@@ -150,8 +176,30 @@ async function waitForSessionWorkspace(
   return path.resolve(workspacePath);
 }
 
-function canvasManifest(canvas: CanvasRecord): string {
+export type CanvasSourceOptions = {
+  noPermissions?: boolean;
+  minimalPermissions?: boolean;
+};
+
+function canvasCapabilities(options?: CanvasSourceOptions): string[] {
+  if (options?.noPermissions) return [];
+  if (options?.minimalPermissions) return ["  api_read:", "    - tasks", "    - workflows"];
+  return [
+    "  api_read:",
+    "    - tasks",
+    "    - workflows",
+    "  api_write:",
+    "    - tasks",
+    "    - messages",
+    "  events:",
+    "    - task.updated",
+    "  state: true",
+  ];
+}
+
+function canvasManifest(canvas: CanvasRecord, options?: CanvasSourceOptions): string {
   const compactId = canvas.id.replaceAll("-", "").slice(0, 12);
+  const capabilities = canvasCapabilities(options);
   return [
     `id: "canvas-${compactId}"`,
     "api_version: 2",
@@ -168,15 +216,7 @@ function canvasManifest(canvas: CanvasRecord): string {
     "        - task-canvas",
     "        - workspace-canvas",
     "capabilities:",
-    "  api_read:",
-    "    - tasks",
-    "    - workflows",
-    "  api_write:",
-    "    - tasks",
-    "    - messages",
-    "  events:",
-    "    - task.updated",
-    "  state: true",
+    ...capabilities,
     "",
   ].join("\n");
 }
@@ -371,10 +411,14 @@ function canvasFixtureScript(canvas: CanvasRecord): string {
 })();`;
 }
 
-export function writeCanvasSource(workspacePath: string, canvas: CanvasRecord): void {
+export function writeCanvasSource(
+  workspacePath: string,
+  canvas: CanvasRecord,
+  options?: CanvasSourceOptions,
+): void {
   const sourceDirectory = path.join(workspacePath, ".kandev", "canvases", canvas.id);
   fs.mkdirSync(sourceDirectory, { recursive: true });
-  fs.writeFileSync(path.join(sourceDirectory, "manifest.yaml"), canvasManifest(canvas));
+  fs.writeFileSync(path.join(sourceDirectory, "manifest.yaml"), canvasManifest(canvas, options));
   fs.writeFileSync(
     path.join(sourceDirectory, "index.html"),
     [
@@ -420,6 +464,7 @@ export async function seedTaskCanvas(
   apiClient: ApiClient,
   seedData: SeedData,
   useMobileSubmit = false,
+  sourceOptions?: CanvasSourceOptions,
 ): Promise<SeededCanvas> {
   const title = "E2E Plugin Canvas";
   const script = [
@@ -458,6 +503,7 @@ export async function seedTaskCanvas(
     session,
     canvas,
     useMobileSubmit,
+    sourceOptions,
   });
 
   return {
@@ -501,6 +547,7 @@ type PublishTaskCanvasOptions = {
   session: SessionPage;
   canvas: CanvasRecord;
   useMobileSubmit?: boolean;
+  sourceOptions?: CanvasSourceOptions;
 };
 
 export async function publishTaskCanvas({
@@ -510,9 +557,10 @@ export async function publishTaskCanvas({
   session,
   canvas,
   useMobileSubmit = false,
+  sourceOptions,
 }: PublishTaskCanvasOptions): Promise<CanvasRecord> {
   const workspacePath = await waitForSessionWorkspace(apiClient, taskId, taskSessionId);
-  writeCanvasSource(workspacePath, canvas);
+  writeCanvasSource(workspacePath, canvas, sourceOptions);
   const sourcePath = `.kandev/canvases/${canvas.id}`;
   const publishScript = `e2e:mcp:kandev:publish_canvas_kandev(${JSON.stringify({
     canvas_id: canvas.id,

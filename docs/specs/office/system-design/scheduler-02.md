@@ -71,7 +71,7 @@ description           TEXT
 assignee_agent_id     TEXT NOT NULL
 status                TEXT NOT NULL  -- active | paused | archived
 concurrency_policy    TEXT NOT NULL  -- coalesce_if_active | skip_if_active | always_enqueue
-catch_up_policy       TEXT NOT NULL  -- enqueue_missed_with_cap | skip_missed
+catch_up_policy       TEXT NOT NULL  -- summarize_missed (enqueue_missed_with_cap deprecated alias) | skip_missed
 catch_up_max          INT  NOT NULL DEFAULT 25
 task_template         TEXT NOT NULL DEFAULT ''  -- JSON; empty -> lightweight
 variables             TEXT NOT NULL DEFAULT '[]'  -- JSON array
@@ -148,9 +148,11 @@ last_wakeup_finished_at TIMESTAMP
 
 ```go
 type RoutinePayload struct {
-    RoutineID   string         `json:"routine_id"`
-    Variables   map[string]any `json:"variables,omitempty"`
-    MissedTicks int            `json:"missed_ticks,omitempty"` // when catch-up cap collapsed N fires
+    RoutineID       string         `json:"routine_id"`
+    Variables       map[string]any `json:"variables,omitempty"`
+    MissedTicks     int            `json:"missed_ticks,omitempty"`     // ticks counted and reported for this claim's gap, excluding the tick dispatched
+    MissedSince     string         `json:"missed_since,omitempty"`     // RFC3339 timestamp of the first missed tick
+    MissedTruncated bool           `json:"missed_truncated,omitempty"` // true when the gap exceeded catch_up_max
 }
 type CommentPayload struct {
     TaskID    string `json:"task_id"`
@@ -287,7 +289,7 @@ A formal per-route authorization model (workspace membership, admin role, RBAC o
 | Atomic checkout finds task locked by another agent | Wakeup skipped, no retry. |
 | Summary builder fails on successful taskless run | Previous summary left intact; failure logged; next successful run rebuilds. |
 | Coordinator's pre-installed routine fails to install at onboarding | Logged + warned; coordinator's agent detail UI shows "no scheduled wake-ups" empty state. User can install one manually. |
-| Routine cron tick missed (scheduler down) | `enqueue_missed_with_cap` (default): fire missed ticks up to cap=25 with "missed N ticks" in next prompt context. `skip_missed`: fire current tick only. |
+| Routine cron tick missed (scheduler down) | Resume always produces exactly one run, never one per missed tick. `summarize_missed` (default, cap 25): the gap is measured and summarized as "missed N ticks" in the next prompt context. `skip_missed`: no gap is recorded or reported. See [the routine catch-up requirement](../requirements/routine-catch-up.md). |
 | Webhook signature verification fails | Trigger rejected with 401; no routine run created. |
 | Graceful shutdown begins | Queue and cron loops cancel and join before repositories and SQLite close; no scheduler logs `database is closed`. |
 
@@ -297,7 +299,7 @@ Survives a kandev process restart: all `agent_wakeup_requests` rows including `q
 
 Does NOT survive (reconstructed on next tick): in-memory claim leases - a `claimed` wakeup whose process died is picked up by the staleness/recovery path; the scheduler's claim query is the source of truth. The unstarted-task recovery sweep suppresses duplicates with its `NOT EXISTS` check on `runs`: any queued, claimed, or finished run of any age blocks redispatch, while failed and cancelled runs do not.
 
-Retention: the idempotency lookup window is 24 hours, while persisted idempotency keys remain unique; summary cap 8 KB per row; routine run history retained for inspection (no automatic prune in scope here); catch-up cap (default 25) drops missed routine ticks beyond it (not recorded individually). A live linked task remains in the concurrency gate regardless of age.
+Retention: the idempotency lookup window is 24 hours, while persisted idempotency keys remain unique; summary cap 8 KB per row; routine run history retained for inspection (no automatic prune in scope here); catch-up cap (default 25) bounds only how many missed ticks are counted and reported in the gap summary, never how many runs are dispatched — see [the routine catch-up requirement](../requirements/routine-catch-up.md). A live linked task remains in the concurrency gate regardless of age.
 
 The scheduler reads all `queued` and unexpired-retry wakeup requests on boot and resumes processing them.
 
@@ -326,7 +328,7 @@ The scheduler reads all `queued` and unexpired-retry wakeup requests on boot and
 
 - **GIVEN** a routine with a webhook trigger and `signing_mode=hmac_sha256`, **WHEN** an external system POSTs to the trigger URL with valid signature and payload `{"branch": "release/2.0"}`, **THEN** the routine fires with `{{branch}}` resolved to "release/2.0" in the task template.
 
-- **GIVEN** the scheduler was down for 3 hours, **WHEN** it restarts, **THEN** routines with `catch_up_policy=skip_missed` fire only the current tick; routines with `enqueue_missed_with_cap` fire missed ticks up to the cap (default 25), with overflow summarized as "missed N ticks" in the next prompt context.
+- **GIVEN** the scheduler was down for 3 hours, **WHEN** it restarts, **THEN** each due trigger produces exactly one run, regardless of `catch_up_policy`; routines with `catch_up_policy=skip_missed` record no gap; routines with `catch_up_policy=summarize_missed` (default) record the gap, capped at `catch_up_max` (default 25), summarized as "missed N ticks" in the next prompt context. See [the routine catch-up requirement](../requirements/routine-catch-up.md).
 
 - **GIVEN** a user on the routines page, **WHEN** they click "Run Now" on a routine with a required `{{reason}}` variable, **THEN** a modal prompts for the variable value before firing.
 

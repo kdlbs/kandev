@@ -11,6 +11,7 @@ import type { KanbanExternalLinkAvailability } from "./kanban-external-link-avai
 import type { Repository } from "@/lib/types/http";
 import { countAdmittedTasks, formatWipCount, isOverWipLimit } from "@/lib/kanban/wip-limit";
 import { partitionWipTasks } from "@/lib/kanban/wip-queue";
+import { pickKanbanColumnComparator } from "@/lib/kanban/task-order";
 import { useTranslation } from "react-i18next";
 import {
   VirtualizedColumnTaskList,
@@ -201,6 +202,8 @@ export const KanbanColumn = memo(function KanbanColumn({
     [columnRef, setNodeRef],
   );
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
+  const kanbanSort = useAppStore((state) => state.userSettings.kanbanSort);
+  const taskComparator = useMemo(() => pickKanbanColumnComparator(kanbanSort), [kanbanSort]);
 
   // Access repositories from store to pass repository names to cards
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
@@ -211,7 +214,10 @@ export const KanbanColumn = memo(function KanbanColumn({
 
   // Ordered ids of the cards rendered in this column — the source of truth for
   // shift-click range selection (matches exactly what the user sees).
-  const { admitted, queued } = useMemo(() => partitionWipTasks(tasks, step.id), [tasks, step.id]);
+  const { admitted, queued } = useMemo(
+    () => partitionWipTasks(tasks, step.id, taskComparator),
+    [tasks, step.id, taskComparator],
+  );
   const orderedTasks = useMemo(() => [...admitted, ...queued], [admitted, queued]);
 
   return (

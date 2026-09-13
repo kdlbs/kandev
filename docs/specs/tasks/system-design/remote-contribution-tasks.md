@@ -64,6 +64,23 @@ that a future push will succeed. Actual pushes keep all existing checks.
 Blocking startup failures use the
 [task launch failure projection](task-launch-failure-recovery.md).
 
+## Proposed preflight timing amendment
+
+The [startup recovery fix package](../../../plans/startup-recovery-scroll-timeout/plan.md) implements criterion 002.6.
+Use one two-minute context for the complete `preflightRemoteContributionPushes` loop.
+An earlier caller deadline or cancellation still ends the operation.
+
+`GitPushPreflight` currently uses the ordinary client with a 60-second timeout.
+Give this operation a bounded transport path that honors the complete preflight budget.
+Reuse the existing transport, authentication, response decoding, and error handling.
+Do not mutate the shared HTTP client or increase unrelated Git request timeouts.
+Direct preflight callers without a deadline also receive the two-minute bound.
+
+The normal readiness budget already exceeds this preflight budget.
+Keep readiness, ACP load, workspace refresh, and Git publication deadlines unchanged.
+A delayed permission rejection remains a rejection. Expiry never grants admission.
+Use short test budgets and controlled responses instead of CPU saturation or long sleeps.
+
 ## Migrated design source
 
 ## Why

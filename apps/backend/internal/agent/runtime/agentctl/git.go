@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 const GitPushPreflightHistoryUpdateRequired = "history_update_required"
+
+const gitPushPreflightTimeout = 2 * time.Minute
 
 // GitOperationResult represents the result of a git operation.
 // This matches the server-side process.GitOperationResult.
@@ -105,7 +108,13 @@ func (c *Client) GitPushPreflight(ctx context.Context, repo string, opts PushOpt
 		Remote:         opts.Remote,
 		ExpectedBranch: opts.ExpectedBranch,
 	}
-	return c.gitOperation(ctx, "/api/v1/git/push-preflight", payload)
+	return c.gitOperationWithClient(ctx, "/api/v1/git/push-preflight", payload, c.gitPushPreflightClient())
+}
+
+func (c *Client) gitPushPreflightClient() *http.Client {
+	client := *c.httpClient
+	client.Timeout = gitPushPreflightTimeout
+	return &client
 }
 
 // GitReplaceRemoteContribution replaces the bound contribution branch when
@@ -335,6 +344,15 @@ func (c *Client) GitCreatePR(ctx context.Context, title, body, baseBranch string
 
 // gitOperation is a helper that performs a git operation via HTTP POST.
 func (c *Client) gitOperation(ctx context.Context, path string, payload interface{}) (*GitOperationResult, error) {
+	return c.gitOperationWithClient(ctx, path, payload, c.httpClient)
+}
+
+func (c *Client) gitOperationWithClient(
+	ctx context.Context,
+	path string,
+	payload interface{},
+	httpClient *http.Client,
+) (*GitOperationResult, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -346,7 +364,7 @@ func (c *Client) gitOperation(ctx context.Context, path string, payload interfac
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute request: %w", err)
 	}
