@@ -37,7 +37,6 @@ const appStoreState = {
     showScrollToLastPrompt: false,
     showScrollToStart: false,
   },
-  kanban: { workflowId: null, steps: [], tasks: [] },
   workspaces: { activeId: null },
   taskSessions: {
     items: {
