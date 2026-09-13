@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 func newTestLogger() *logger.Logger {
@@ -748,7 +749,11 @@ esac
 	}
 
 	got := string(envBytes)
-	want := "0|Never|echo|/bin/false|ssh -oBatchMode=yes"
+	wantSSH := "ssh -oBatchMode=yes"
+	if ambientSSH := os.Getenv("GIT_SSH_COMMAND"); ambientSSH != "" {
+		wantSSH = subproc.ForceGitSSHBatchMode(ambientSSH)
+	}
+	want := "0|Never|exit 1|exit 1|" + wantSSH
 	if got != want {
 		t.Fatalf("fake git env = %q, want %q", got, want)
 	}

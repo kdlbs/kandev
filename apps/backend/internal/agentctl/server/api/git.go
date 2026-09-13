@@ -1477,6 +1477,9 @@ func (s *Server) handleGitStatusMulti(c *gin.Context) {
 		subpaths = []string{""}
 	}
 	fresh := c.Query("fresh") == queryParamTrue
+	if fresh {
+		s.procMgr.RetryUnavailableComparisonTargets()
+	}
 	// Parallel fan-out: fresh=true skips the cache, so serial scales linearly and would blow the 2s subscribe timeout for multi-repo workspaces.
 	result := MultiRepoGitStatusResult{Success: true, Repos: make([]PerRepoGitStatus, len(subpaths))}
 	ctx := c.Request.Context()
@@ -1570,7 +1573,11 @@ func (s *Server) handleGitStatus(c *gin.Context) {
 		return
 	}
 
-	status, err := wt.GetGitStatus(c.Request.Context(), c.Query("fresh") == queryParamTrue)
+	fresh := c.Query("fresh") == queryParamTrue
+	if fresh {
+		s.procMgr.RetryUnavailableComparisonTargets()
+	}
+	status, err := wt.GetGitStatus(c.Request.Context(), fresh)
 	if err != nil {
 		s.logger.Error("git status failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, GitStatusResult{

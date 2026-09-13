@@ -168,7 +168,10 @@ func materializeComparisonTarget(
 		)
 	}
 	remoteName := target.ComparisonRemoteName()
-	configuredURL, remoteErr := run(ctx, "remote", "get-url", remoteName)
+	// Read the stored URL directly. `remote get-url` applies Git's
+	// url.<base>.insteadOf transport rewrite, which can make a canonical
+	// comparison remote look like a collision when a local transport is in use.
+	configuredURL, remoteErr := run(ctx, "config", "--get", "remote."+remoteName+".url")
 	if remoteErr == nil {
 		if strings.TrimSpace(configuredURL) != target.TargetRepository.RemoteURL {
 			return comparisonTargetMaterialization{}, comparisonTargetFailure(
@@ -190,7 +193,10 @@ func materializeComparisonTarget(
 			fmt.Errorf("comparison remote push protection failed: %w", err),
 		)
 	}
-	refspec := "refs/heads/" + target.TargetBranch + ":" + target.ComparisonRef()
+	// The comparison ref is an internal cache of a moving provider branch.
+	// Force-update only this exact ref so recovery can replace a stale or
+	// partially materialized value without changing any user remote.
+	refspec := "+refs/heads/" + target.TargetBranch + ":" + target.ComparisonRef()
 	if _, err := run(ctx, "fetch", "--no-tags", remoteName, refspec); err != nil {
 		return comparisonTargetMaterialization{}, comparisonTargetFailure(
 			comparisonTargetErrorFetch,

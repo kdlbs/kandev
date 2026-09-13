@@ -102,7 +102,8 @@ func RunGitClass(ctx context.Context, class GitWorkClass, cmd *exec.Cmd) error {
 		return err
 	}
 	defer release()
-	return cmd.Run()
+	PrepareGitCommand(cmd)
+	return runManagedGit(ctx, cmd)
 }
 
 // RunGitCombinedOutputClass is RunGitClass's CombinedOutput sibling.
@@ -112,7 +113,8 @@ func RunGitCombinedOutputClass(ctx context.Context, class GitWorkClass, cmd *exe
 		return nil, err
 	}
 	defer release()
-	return cmd.CombinedOutput()
+	PrepareGitCommand(cmd)
+	return runManagedGitCombinedOutput(ctx, cmd)
 }
 
 // RunGitOutputClass is RunGitClass's Output sibling. Stderr is captured in
@@ -124,7 +126,8 @@ func RunGitOutputClass(ctx context.Context, class GitWorkClass, cmd *exec.Cmd) (
 		return nil, err
 	}
 	defer release()
-	return cmd.Output()
+	PrepareGitCommand(cmd)
+	return runManagedGitOutput(ctx, cmd)
 }
 
 // RunGitCombinedAfterAcquire starts the execution timeout only after the
@@ -141,9 +144,11 @@ func RunGitCombinedAfterAcquire(
 		return nil, wrapAdmissionError(err), nil
 	}
 	defer release()
-	execCtx, cancel := withExecTimeout(ctx, execTimeout)
+	execCtx, cancel := withGitExecTimeout(ctx, execTimeout)
 	defer cancel()
-	out, runErr := build(execCtx).CombinedOutput()
+	cmd := build(execCtx)
+	PrepareGitCommand(cmd)
+	out, runErr := runManagedGitCombinedOutput(execCtx, cmd)
 	return out, runErr, execCtx.Err()
 }
 
@@ -177,9 +182,11 @@ func RunGitOutputAfterAcquireWithExecutionContext(
 		return nil, wrapAdmissionError(err), nil
 	}
 	defer release()
-	execCtx, cancel := withExecTimeout(execBaseCtx, execTimeout)
+	execCtx, cancel := withGitExecTimeout(execBaseCtx, execTimeout)
 	defer cancel()
-	out, runErr := build(execCtx).Output()
+	cmd := build(execCtx)
+	PrepareGitCommand(cmd)
+	out, runErr := runManagedGitOutput(execCtx, cmd)
 	return out, runErr, execCtx.Err()
 }
 
@@ -195,9 +202,11 @@ func RunGitAfterAcquire(
 		return wrapAdmissionError(err), nil
 	}
 	defer release()
-	execCtx, cancel := withExecTimeout(ctx, execTimeout)
+	execCtx, cancel := withGitExecTimeout(ctx, execTimeout)
 	defer cancel()
-	runErr := build(execCtx).Run()
+	cmd := build(execCtx)
+	PrepareGitCommand(cmd)
+	runErr := runManagedGit(execCtx, cmd)
 	return runErr, execCtx.Err()
 }
 
@@ -290,5 +299,12 @@ func withExecTimeout(ctx context.Context, execTimeout time.Duration) (context.Co
 	if execTimeout <= 0 {
 		execTimeout = defaultGHExecTimeout
 	}
+	return context.WithTimeout(ctx, execTimeout)
+}
+
+// withGitExecTimeout preserves a caller's explicit Git budget, including an
+// already-expired zero budget used by required probes. Git network callers
+// choose their own positive default before invoking an AfterAcquire helper.
+func withGitExecTimeout(ctx context.Context, execTimeout time.Duration) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(ctx, execTimeout)
 }

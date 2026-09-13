@@ -14,6 +14,7 @@ import (
 	"time"
 
 	runtimeenv "github.com/kandev/kandev/internal/agent/runtime/environment"
+	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/gitconfigenv"
 	"github.com/kandev/kandev/internal/gitcredentials"
 	"github.com/kandev/kandev/internal/task/models"
@@ -98,6 +99,93 @@ exit 2
 	if !strings.Contains(string(output), "username=x-access-token") ||
 		!strings.Contains(string(output), "password=host-token") {
 		t.Fatalf("credential output = %q, want fake host helper credentials", output)
+	}
+}
+
+func TestExecutorHostGHBridgeNoninteractiveExecution(t *testing.T) {
+	ghPath := filepath.Join(t.TempDir(), "host tools", "gh")
+	if err := os.MkdirAll(filepath.Dir(ghPath), 0o700); err != nil {
+		t.Fatalf("create fake gh directory: %v", err)
+	}
+	const ghScript = `#!/bin/sh
+if [ "$1" = "auth" ] && [ "$2" = "token" ]; then
+  exit 0
+fi
+if [ "$1" = "auth" ] && [ "$2" = "git-credential" ]; then
+  cat >/dev/null
+  printf 'username=x-access-token\npassword=host-token\n'
+  exit 0
+fi
+exit 2
+`
+	if err := os.WriteFile(ghPath, []byte(ghScript), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("PATH", filepath.Dir(ghPath)+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	executor := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	executor.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{
+		policy: TaskGitCredentialPolicy{Mode: taskGitCredentialsModeExecutor},
+	})
+	request := executorHostGHBridgeRequest(nil)
+	if err := executor.configureGitCredentialBrokerForRepositories(
+		context.Background(), request,
+		[]*repoInfo{executorHostGHBridgeRepository("repo-1", "github.com")},
+	); err != nil {
+		t.Fatalf("configureGitCredentialBrokerForRepositories() error = %v", err)
+	}
+
+	env := isolatedGitEnvironment(t, request.Env)
+	input := "protocol=https\nhost=github.com\npath=acme/widgets\n\n"
+	output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
+		context.Background(),
+		subproc.GitInteractive,
+		5*time.Second,
+		func(execCtx context.Context) *osExec.Cmd {
+			cmd := osExec.CommandContext(execCtx, "git", "credential", "fill")
+			cmd.Env = env
+			cmd.Stdin = strings.NewReader(input)
+			return cmd
+		},
+	)
+	if runErr != nil || execCtxErr != nil {
+		t.Fatalf("final Git runner error = (%v, %v), output = %q", runErr, execCtxErr, output)
+	}
+	if got := string(output); !strings.Contains(got, "username=x-access-token") ||
+		!strings.Contains(got, "password=host-token") {
+		t.Fatalf("final Git runner output = %q, want routed host credentials", got)
+	}
+}
+
+func TestExecutorHostGHBridgeRecoveryAfterUnavailableProbe(t *testing.T) {
+	initialPath := t.TempDir()
+	t.Setenv("PATH", initialPath)
+	executor := newTestExecutor(t, &mockAgentManager{}, newMockRepository())
+	executor.SetTaskGitCredentialPolicyResolver(fakeTaskGitCredentialPolicyResolver{
+		policy: TaskGitCredentialPolicy{Mode: taskGitCredentialsModeExecutor},
+	})
+	request := executorHostGHBridgeRequest(nil)
+	repositories := []*repoInfo{executorHostGHBridgeRepository("repo-1", "github.com")}
+	if err := executor.configureGitCredentialBrokerForRepositories(context.Background(), request, repositories); err != nil {
+		t.Fatalf("unavailable probe configuration: %v", err)
+	}
+	if hasHostGitHubHelper(request.Env) {
+		t.Fatalf("unavailable probe installed a host helper: %#v", request.Env)
+	}
+
+	ghPath := filepath.Join(t.TempDir(), "host tools", "gh")
+	if err := os.MkdirAll(filepath.Dir(ghPath), 0o700); err != nil {
+		t.Fatalf("create recovered gh directory: %v", err)
+	}
+	if err := os.WriteFile(ghPath, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatalf("write recovered gh: %v", err)
+	}
+	t.Setenv("PATH", filepath.Dir(ghPath)+string(os.PathListSeparator)+initialPath)
+	if err := executor.configureGitCredentialBrokerForRepositories(context.Background(), request, repositories); err != nil {
+		t.Fatalf("recovered probe configuration: %v", err)
+	}
+	if !hasHostGitHubHelper(request.Env) {
+		t.Fatalf("recovered probe did not install a host helper: %#v", request.Env)
 	}
 }
 

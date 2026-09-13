@@ -49,7 +49,7 @@ func TestSchedulerTick_DirectLaunchSessionPersistFailureCountsSeparately(t *test
 	}
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
 		VALUES ('task-direct-persist-fail-1', 'ws-1', 'Build API', 'Implement endpoint', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-direct-persist-fail-1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-direct-persist-fail-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -128,7 +128,7 @@ func TestSchedulerTick_DirectLaunchZeroRowSessionWriteCountsAsPersistFailure(t *
 	}
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
 		VALUES ('task-direct-vanished-1', 'ws-1', 'Build API', 'Implement endpoint', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-direct-vanished-1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-direct-vanished-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 

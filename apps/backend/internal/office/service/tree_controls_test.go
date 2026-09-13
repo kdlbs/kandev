@@ -77,7 +77,7 @@ func TestPauseTaskTree_RecordsTerminalShapeForCancelledRuns(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"root"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestCancelTaskTree_RecordsTerminalShapeForCancelledRuns(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"root"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}

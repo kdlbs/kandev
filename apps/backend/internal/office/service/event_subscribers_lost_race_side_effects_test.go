@@ -28,7 +28,7 @@ func TestHandleAgentCompleted_FinishRunFailureSkipsCompletionSideEffects(t *test
 	createTestAgent(t, svc, "ws-1", "worker-race")
 	taskID := createOfficeTask(t, svc, "ws-1", "worker-race")
 
-	if err := svc.QueueRun(
+	if _, err := svc.QueueRun(
 		ctx, "worker-race", service.RunReasonTaskAssigned,
 		`{"task_id":"`+taskID+`"}`, "run-output-race",
 	); err != nil {
