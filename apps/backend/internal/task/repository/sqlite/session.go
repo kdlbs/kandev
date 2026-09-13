@@ -1033,6 +1033,9 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		session.State = models.TaskSessionStateCreated
 	}
 	if tx, ok := exec.(*sqlx.Tx); ok {
+		if err := r.verifyTaskRunnerResolutionTx(ctx, tx, session); err != nil {
+			return err
+		}
 		if session.TaskEnvironmentID != "" {
 			if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, session.TaskEnvironmentID); err != nil {
 				return err
@@ -1099,6 +1102,37 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 	return err
 }
 
+// verifyTaskRunnerResolutionTx rejects a session built from a task snapshot
+// that is older than the task-row lock it now holds. A runner switch and
+// session creation therefore have one total order: the switch commits first
+// and this check asks the caller to retry with the new runner, or this
+// transaction inserts the session first and the switch is rejected by its
+// mutability gate.
+func (r *Repository) verifyTaskRunnerResolutionTx(ctx context.Context, tx *sqlx.Tx, session *models.TaskSession) error {
+	if session == nil || !session.TaskRunnerResolvedFromTask {
+		return nil
+	}
+	var metadataJSON string
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT metadata FROM tasks WHERE id = ?`), session.TaskID).Scan(&metadataJSON)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: task %s no longer exists", models.ErrTaskRunnerChanged, session.TaskID)
+	}
+	if err != nil {
+		return fmt.Errorf("verify task runner resolution: %w", err)
+	}
+	metadata := make(map[string]interface{})
+	if strings.TrimSpace(metadataJSON) != "" && strings.TrimSpace(metadataJSON) != "{}" {
+		if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+			return fmt.Errorf("verify task runner resolution metadata: %w", err)
+		}
+	}
+	currentProfileID, _ := metadata[models.MetaKeyExecutorProfileID].(string)
+	if currentProfileID != session.TaskRunnerProfileAtResolution || currentProfileID != session.ExecutorProfileID {
+		return models.ErrTaskRunnerChanged
+	}
+	return nil
+}
+
 func (r *Repository) persistWorkflowSessionRouteTx(
 	ctx context.Context,
 	exec taskSessionExecutor,
@@ -1121,6 +1155,16 @@ func (r *Repository) persistWorkflowSessionRouteTx(
 	return r.setTaskMetadataKeyWithExecutor(ctx, exec, taskID, models.MetaKeyWorkflowSessionRoute, prepared, time.Now().UTC())
 }
 
+// setTaskMetadataKeyWithExecutor is SetTaskMetadataKey's tx-capable sibling,
+// following the same shape as removeTaskMetadataKeyWithExecutor: every
+// existing single-key metadata writer executes on the shared handle and
+// none accepts a transaction, but a caller inside a serialized transaction
+// (workflow session route persistence, the runner switch) needs its write to
+// land only if that transaction commits. updatedAt is supplied by the
+// caller, rather than sampled here, so the value written to the row and the
+// value the caller carries forward (into a returned task or event) are the
+// same instant rather than two independent clock reads either side of the
+// write.
 func (r *Repository) setTaskMetadataKeyWithExecutor(
 	ctx context.Context,
 	exec taskSessionExecutor,

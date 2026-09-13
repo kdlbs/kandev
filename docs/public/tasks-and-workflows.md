@@ -680,6 +680,15 @@ also fit within 1 MiB. If a limit is exceeded, shorten the feedback, selection,
 or message and retry; rejected changes and deliveries do not remove pending
 comments.
 
+Temporary connection issues are retried automatically in the background. If
+saved feedback still needs attention, an inline notice offers **Retry**. Your
+message stays in the composer while that feedback is being restored; recovery
+never sends it for you. If no saved feedback needs recovery, you can keep
+sending messages normally. **Run** remains available when the selected comment
+and primary session are eligible, even if other feedback is still being
+restored. A recovered comment must finish its own browser-draft cleanup before
+it can be run.
+
 Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`. Human edits are therefore visible to the next agent that reads the plan. A plan records intent; verify that code and review still match it.
 
 Revision history is not an immutable record of every autosave. Consecutive writes from the same author name and author kind coalesce into the latest revision for five minutes by default. Operators can set `KANDEV_PLAN_COALESCE_WINDOW_MS`; `0` disables coalescing, while an invalid or negative value falls back to five minutes.

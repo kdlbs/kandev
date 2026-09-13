@@ -170,6 +170,11 @@ owns dialect parity.
 
 ## Verification results
 
+The [Plan comment recovery follow-up](../plan-comment-recovery/plan.md) refines
+the migration and read-failure behavior from Tasks 04 and 05. Its completed work
+order records the correction and current verification; the checkboxes and
+results here describe the original delivery.
+
 The original implementation checks below are historical. Current rebase and
 review-remediation evidence is recorded separately; these results do not certify
 the latest PR head.

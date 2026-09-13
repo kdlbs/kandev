@@ -9,6 +9,7 @@ import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import type { TaskSession } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { WebSocketRequestError } from "@/lib/ws/client";
+import { useComposerActivity } from "./composer-disclosure";
 
 const ROUTE_REASON_KEYS: Record<string, string> = {
   candidate_order: "dynamicRouteReasonCandidateOrder",
@@ -211,14 +212,15 @@ export function DynamicRouteRecovery({ session }: { session: TaskSession | null 
     [session, updateSession],
   );
 
-  if (
-    !session ||
-    !session.route_state ||
-    !["waiting", "waiting_for_reset", "retry_wait", "retrying", "action_required"].includes(
-      session.route_state,
-    ) ||
-    session.route_generation === undefined
-  ) {
+  const visible =
+    Boolean(
+      session?.route_state &&
+      ["waiting", "waiting_for_reset", "retry_wait", "retrying", "action_required"].includes(
+        session.route_state,
+      ),
+    ) && session?.route_generation !== undefined;
+  useComposerActivity({ required: visible });
+  if (!visible || !session) {
     return null;
   }
   const pendingWait =

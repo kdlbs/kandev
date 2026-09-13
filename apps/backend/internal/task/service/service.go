@@ -439,6 +439,8 @@ type Service struct {
 	quickChatDir                    string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
 	branchFetcher                   *branchFetcher
 	envDestroyer                    EnvironmentDestroyer
+	wsGroupMembership               WorkspaceGroupMembershipReader
+	executorCapabilityProber        ExecutorCapabilityProber
 	sshTaskDirReclaimer             SSHTaskDirReclaimer
 	// orphanReapHostSnapshotter and orphanReapVerifier back the reap phase's
 	// host process detection. Nil selects the real platform implementation

@@ -42,7 +42,7 @@ Architecture notes and per-area conventions live alongside the code they describ
 - `apps/backend/internal/agentctl/AGENTS.md` — agentctl HTTP server: route groups, adapter model, ACP protocol.
 - `apps/backend/internal/agentctl/server/api/AGENTS.md` — reverse-proxy body rewriting (`Accept-Encoding`), iframe-blocking header stripping.
 - `apps/backend/internal/integrations/AGENTS.md` — adding a new third-party integration (Jira/Linear pattern, both backend and frontend halves). The `/add-integration` skill mirrors this for scaffolding new integrations.
-- `apps/backend/internal/office/AGENTS.md` — Office (autonomous agent management): pointer to the 15-file `docs/specs/office/` spec set with status per file, plus local traps (run-vs-task-start, retired `heartbeat` source, continuation summary scoping, participant slate ownership, routine idle-skip, dual advancement signals).
+- `apps/backend/internal/office/AGENTS.md` — Office (autonomous agent management): pointer to the `docs/specs/office/` spec set with status per file (a legacy 15-file table plus newer `requirements/`+`system-design/`-split entries, most recently task session termination and the seat-claim decision guard), plus local traps (run-vs-task-start, retired `heartbeat` source, continuation summary scoping, participant slate ownership, routine idle-skip, dual advancement signals).
 - `apps/desktop/AGENTS.md` — Tauri desktop app: runtime resources, Rust process lifecycle, packaging, signing, and smoke tests.
 - `apps/web/AGENTS.md` — Vite/React SPA frontend: shadcn imports, Go boot-payload hydration, store slice structure (incl. `office`), WS format, component conventions, TS lint limits.
 
@@ -162,21 +162,18 @@ history and remains immutable.
   `python3 scripts/list-docs.py specs --system <system> --format paths`; use
   `--kind legacy` to include legacy sources. Run `python3 scripts/list-docs.py validate` and `python3 scripts/lint-spec-files.py --all` after specification changes.
 - **Decisions:** Architecture decisions are recorded in `docs/decisions/`. Use `python3 scripts/list-docs.py decisions --format markdown` to find relevant ADRs. The `docs/decisions/INDEX.md` page contains command examples. When making significant architectural choices, create a new ADR via `/record decision`.
-- **Plans:** Implementation plans are generated from requirements and system
-  designs through `/plan`. `docs/plans/<initiative>/plan.md` is a work-package
-  manifest. Its sibling `task-<NN>-<short-slug>.md` files are work orders.
+- **Plans:** Implementation plans are generated from requirements and system designs through `/plan`. `docs/plans/<initiative>/plan.md` is a work-package manifest. Its sibling `task-<NN>-<short-slug>.md` files are work orders.
 
 ### Plan Implementation
 
-- Requirements and system designs define durable behavior and technical
-  boundaries. Plans and work orders define implementation scope, dependency
-  order, and task-level validation. Keep their statuses and results accurate.
+- Requirements and system designs define durable behavior and technical boundaries. Plans and work orders define implementation scope, dependency order, and task-level validation. Keep their statuses and results accurate.
 
 ### Observability
 
 - In dev mode (`KANDEV_MOCK_AGENT=true` or `debug.pprofEnabled`), `/debug/vars` exposes the stdlib expvar handler. Office provider-routing metrics live under `routing_*` (route attempts, fallbacks, parked runs, provider degraded/recovered counters). The metrics are also still emitted as structured `routing.metric.*` zap logs for human debugging.
 - ADR 0015's step-completion-signal telemetry lives under `workflow_*`: `workflow_step_completion_signal_received_total` (`internal/workflow/signalmetrics/`), labelled by `source` and `agent_type`, counts accepted `step_complete_kandev` signals. Its separate `workflow_step_completion_signal_fallback_used_total` counter is labelled by `agent_type` and counts manual fallback uses. The fallback button does not have a production increment site yet, so the counter remains zero until that UI ships.
 - Office stall detection (REQ-OFFICE-STALL-VISIBILITY) lives under `office_stall_*`: `office_stall_stranded_signal_total` (labelled by `gate`, which names which of the two watchdog gate sites saw it), `office_stall_decision_waiting_total`, and `office_stall_detector_skipped_total` (labelled by `reason`, so a detector that fails closed is visible rather than silent). Detection only: these counters never accompany a transition, a synthesized decision, or a queued run, because Office tasks are surfaced and never reclaimed. Also emitted as structured zap logs.
+- Office session-termination suppression (REQ-OFFICE-SESSION-TERM) lives under `office_session_term_suppressed_total`, labelled by `reason` (one of `task_reassigned`, `participant_removed`, `participant_seat_claimed`) and `outcome` (`runner` or `seat` when the agent still holds that capacity, `read_failed` when the capacity read itself failed). It counts guarded terminations that left a session live, so a suppression is distinguishable from a path that never ran. Both dimensions are closed sets; no task, agent, step or session identifier is ever a label. Also emitted as structured zap logs.
 
 ### GitHub Operations
 
