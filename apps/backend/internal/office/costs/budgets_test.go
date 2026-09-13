@@ -74,14 +74,34 @@ type claimFaultRepo struct {
 	missLevels map[string]bool
 }
 
-func (r *claimFaultRepo) Claim(ctx context.Context, policyID, periodKey, level string) (bool, error) {
+func (r *claimFaultRepo) Claim(ctx context.Context, policyID, periodKey, level string, revision int64) (bool, error) {
 	if err, ok := r.failLevels[level]; ok {
 		return false, err
 	}
 	if r.missLevels[level] {
 		return false, nil
 	}
-	return r.Repository.Claim(ctx, policyID, periodKey, level)
+	return r.Repository.Claim(ctx, policyID, periodKey, level, revision)
+}
+
+// ClaimExceeded overrides the atomic pair the same way Claim does, keyed by
+// the level whose outcome is being faulted: "exceeded" fails or misses the
+// pair before either insert is attempted (mirroring a fenced exceeded
+// insert refused or store-faulted); "alert" fails or misses only the
+// companion half, after a real exceeded insert has already run for real,
+// mirroring AC-OFFICE-COSTS-003.10's atomic rollback of the whole pair on a
+// companion-side error.
+func (r *claimFaultRepo) ClaimExceeded(ctx context.Context, policyID, periodKey string, revision int64) (bool, error) {
+	if err, ok := r.failLevels["exceeded"]; ok {
+		return false, err
+	}
+	if r.missLevels["exceeded"] {
+		return false, nil
+	}
+	if err, ok := r.failLevels["alert"]; ok {
+		return false, err
+	}
+	return r.Repository.ClaimExceeded(ctx, policyID, periodKey, revision)
 }
 
 // callOrderRecorder records events in the order they occur, for tests that
@@ -113,9 +133,21 @@ type orderRecordingRepo struct {
 	order *callOrderRecorder
 }
 
-func (r *orderRecordingRepo) Claim(ctx context.Context, policyID, periodKey, level string) (bool, error) {
-	claimed, err := r.Repository.Claim(ctx, policyID, periodKey, level)
+func (r *orderRecordingRepo) Claim(ctx context.Context, policyID, periodKey, level string, revision int64) (bool, error) {
+	claimed, err := r.Repository.Claim(ctx, policyID, periodKey, level, revision)
 	r.order.record("claim:" + level)
+	return claimed, err
+}
+
+// ClaimExceeded records both of the atomic pair's levels immediately after
+// the (single) real call returns, preserving the ordering property the test
+// cares about: both claim events precede the emission decision. It cannot
+// observe the two inserts individually from outside the transaction, but it
+// doesn't need to — only their position relative to the emission matters.
+func (r *orderRecordingRepo) ClaimExceeded(ctx context.Context, policyID, periodKey string, revision int64) (bool, error) {
+	claimed, err := r.Repository.ClaimExceeded(ctx, policyID, periodKey, revision)
+	r.order.record("claim:exceeded")
+	r.order.record("claim:alert")
 	return claimed, err
 }
 
@@ -260,7 +292,7 @@ func insertBudgetTestCostEvent(t *testing.T, execSQL func(string, ...interface{}
 	now := time.Now().UTC().Format(time.RFC3339)
 	execSQL(
 		`INSERT INTO office_cost_events (id, agent_profile_id, task_id, cost_subcents, occurred_at, created_at)
-			 VALUES (?, ?, ?, ?, ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?)`,
 		uuid.NewString(), agentID, taskID, costSubcents, now, now,
 	)
 }
@@ -283,13 +315,12 @@ func insertBudgetTestCostEventAt(
 
 func TestCheckBudget_PeriodWindowsExcludeOlderSpend(t *testing.T) {
 	cases := []struct {
-		name      string
-		period    models.BudgetPeriod
-		olderBy   time.Duration
-		wantLimit bool
+		name   string
+		period models.BudgetPeriod
+		older  time.Duration
 	}{
-		{name: "daily", period: models.BudgetPeriodDaily, olderBy: 48 * time.Hour},
-		{name: "yearly", period: models.BudgetPeriodYearly, olderBy: 400 * 24 * time.Hour},
+		{name: "daily", period: models.BudgetPeriodDaily, older: 48 * time.Hour},
+		{name: "yearly", period: models.BudgetPeriodYearly, older: 400 * 24 * time.Hour},
 	}
 
 	for _, tc := range cases {
@@ -311,7 +342,7 @@ func TestCheckBudget_PeriodWindowsExcludeOlderSpend(t *testing.T) {
 				t.Fatalf("create policy: %v", err)
 			}
 
-			insertBudgetTestCostEventAt(t, execSQL, "agent-1", "task-1", 600, time.Now().UTC().Add(-tc.olderBy))
+			insertBudgetTestCostEventAt(t, execSQL, "agent-1", "task-1", 600, time.Now().UTC().Add(-tc.older))
 			results, err := svc.CheckBudget(ctx, "ws-1", "agent-1", "project-1")
 			if err != nil {
 				t.Fatalf("CheckBudget: %v", err)
@@ -319,8 +350,8 @@ func TestCheckBudget_PeriodWindowsExcludeOlderSpend(t *testing.T) {
 			if len(results) != 1 {
 				t.Fatalf("results = %d, want 1", len(results))
 			}
-			if results[0].LimitExceed != tc.wantLimit {
-				t.Errorf("LimitExceed = %t, want %t", results[0].LimitExceed, tc.wantLimit)
+			if results[0].LimitExceed {
+				t.Fatalf("%s spend outside the window must not exceed the limit", tc.name)
 			}
 		})
 	}
@@ -590,6 +621,34 @@ func TestEvaluateProjectBudget_AlertAtThreshold(t *testing.T) {
 	}
 	if got := spy.count("budget.alert"); got != 1 {
 		t.Fatalf("budget.alert submissions = %d, want 1", got)
+	}
+}
+
+// TestCheckBudgetAndEvaluateProjectBudget_ShareAlertClaim covers the two
+// callers that can evaluate a project policy. They must use the same durable
+// claim so a cost event followed by task reassignment emits one alert.
+func TestCheckBudgetAndEvaluateProjectBudget_ShareAlertClaim(t *testing.T) {
+	spy := &budgetActivitySpy{}
+	svc, _, execSQL := newBudgetTestServiceWithActivity(t, spy)
+	ctx := context.Background()
+
+	policy := newIdempotencyTestPolicy("proj-shared-claim", 1000)
+	policy.ScopeType = models.BudgetScopeProject
+	if err := svc.CreateBudgetPolicy(ctx, policy); err != nil {
+		t.Fatalf("create policy: %v", err)
+	}
+	insertBudgetTestTask(t, execSQL, "task-shared-claim", "ws-1", "proj-shared-claim")
+	insertBudgetTestCostEvent(t, execSQL, "agent-shared-claim", "task-shared-claim", 850)
+
+	if _, err := svc.CheckBudget(ctx, "ws-1", "agent-shared-claim", "proj-shared-claim"); err != nil {
+		t.Fatalf("CheckBudget: %v", err)
+	}
+	if err := svc.EvaluateProjectBudget(ctx, "ws-1", "proj-shared-claim"); err != nil {
+		t.Fatalf("EvaluateProjectBudget: %v", err)
+	}
+
+	if got := spy.count("budget.alert"); got != 1 {
+		t.Fatalf("budget.alert submissions across callers = %d, want 1", got)
 	}
 }
 
