@@ -150,13 +150,23 @@ func (sm *StreamManager) receiveDurableAgentEvent(
 	event agentctl.AgentEvent,
 	repository AgentDeliveryRepository,
 ) (bool, error) {
-	if event.DeliveryStreamID == "" || event.DeliverySequence == 0 {
-		return true, nil
-	}
 	if event.DeliverySequence > math.MaxInt64 {
 		return false, fmt.Errorf("delivery sequence %d exceeds backend range", event.DeliverySequence)
 	}
-	deliveryEvent := durableAgentEvent(execution, event)
+	return sm.receiveDurableAgentDeliveryEvent(ctx, durableAgentEvent(execution, event), repository)
+}
+
+func (sm *StreamManager) receiveDurableAgentDeliveryEvent(
+	ctx context.Context,
+	deliveryEvent *models.AgentDeliveryEvent,
+	repository AgentDeliveryRepository,
+) (bool, error) {
+	if deliveryEvent == nil || deliveryEvent.StreamID == "" || deliveryEvent.Sequence == 0 {
+		return true, nil
+	}
+	if deliveryEvent.Sequence < 0 {
+		return false, fmt.Errorf("delivery sequence %d exceeds backend range", deliveryEvent.Sequence)
+	}
 	inserted, err := repository.ReceiveAgentDeliveryEvent(ctx, deliveryEvent, 0)
 	if err != nil {
 		return false, err
@@ -164,14 +174,14 @@ func (sm *StreamManager) receiveDurableAgentEvent(
 	if inserted {
 		return true, nil
 	}
-	cursor, err := repository.GetAgentDeliveryCursor(ctx, event.DeliveryStreamID)
+	cursor, err := repository.GetAgentDeliveryCursor(ctx, deliveryEvent.StreamID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return true, nil
 		}
 		return false, err
 	}
-	return cursor == nil || cursor.ProjectedSequence < int64(event.DeliverySequence), nil
+	return cursor == nil || cursor.ProjectedSequence < deliveryEvent.Sequence, nil
 }
 
 func (sm *StreamManager) projectDurableAgentEvent(
@@ -190,10 +200,20 @@ func (sm *StreamManager) projectDurableAgentEventWithEffect(
 	repository AgentDeliveryRepository,
 	effect *models.AgentDeliveryEffect,
 ) error {
-	if event.DeliveryStreamID == "" || event.DeliverySequence == 0 {
+	return sm.projectDurableAgentDeliveryEventWithEffect(
+		ctx, durableAgentEvent(execution, event), repository, effect,
+	)
+}
+
+func (sm *StreamManager) projectDurableAgentDeliveryEventWithEffect(
+	ctx context.Context,
+	deliveryEvent *models.AgentDeliveryEvent,
+	repository AgentDeliveryRepository,
+	effect *models.AgentDeliveryEffect,
+) error {
+	if deliveryEvent == nil || deliveryEvent.StreamID == "" || deliveryEvent.Sequence == 0 {
 		return nil
 	}
-	deliveryEvent := durableAgentEvent(execution, event)
 	_, returnError := repository.ProjectAgentDeliveryEvent(ctx, deliveryEvent, effect)
 	return returnError
 }
@@ -218,7 +238,22 @@ func (sm *StreamManager) projectAndAcknowledgeDurableAgentEventWithEffect(
 	acknowledger agentDeliveryAcknowledger,
 	effect *models.AgentDeliveryEffect,
 ) error {
-	if err := sm.projectDurableAgentEventWithEffect(ctx, execution, event, repository, effect); err != nil {
+	deliveryEvent := durableAgentEvent(execution, event)
+	if err := sm.projectDurableAgentDeliveryEventWithEffect(ctx, deliveryEvent, repository, effect); err != nil {
+		return err
+	}
+	return acknowledgeDurableAgentEvent(ctx, event, acknowledger)
+}
+
+func (sm *StreamManager) projectAndAcknowledgeDurableAgentDeliveryEventWithEffect(
+	ctx context.Context,
+	deliveryEvent *models.AgentDeliveryEvent,
+	event agentctl.AgentEvent,
+	repository AgentDeliveryRepository,
+	acknowledger agentDeliveryAcknowledger,
+	effect *models.AgentDeliveryEffect,
+) error {
+	if err := sm.projectDurableAgentDeliveryEventWithEffect(ctx, deliveryEvent, repository, effect); err != nil {
 		return err
 	}
 	return acknowledgeDurableAgentEvent(ctx, event, acknowledger)
@@ -239,6 +274,32 @@ func deliveryEffectForEvent(event agentctl.AgentEvent) *models.AgentDeliveryEffe
 		EffectKey:   effectKey,
 		StreamID:    event.DeliveryStreamID,
 		Sequence:    int64(event.DeliverySequence),
+		EffectType:  effectType,
+		State:       models.DeliveryEffectCompleted,
+		CreatedAt:   now,
+		CompletedAt: &now,
+	}
+}
+
+func deliveryEffectForDeliveryEvent(event *models.AgentDeliveryEvent) *models.AgentDeliveryEffect {
+	if event == nil || event.StreamID == "" || event.Sequence == 0 {
+		return nil
+	}
+	var payloadEvent agentctl.AgentEvent
+	if len(event.Payload) > 0 {
+		_ = json.Unmarshal(event.Payload, &payloadEvent)
+	}
+	effectKey := fmt.Sprintf("agent_delivery.event:%s:%d", event.StreamID, event.Sequence)
+	effectType := "agent_delivery.event"
+	if (event.EventType == streams.EventTypeComplete || event.EventType == streams.EventTypeError) && payloadEvent.TurnID != "" {
+		effectKey = "workflow.on_turn_complete:" + payloadEvent.TurnID
+		effectType = "workflow.on_turn_complete"
+	}
+	now := time.Now().UTC()
+	return &models.AgentDeliveryEffect{
+		EffectKey:   effectKey,
+		StreamID:    event.StreamID,
+		Sequence:    event.Sequence,
 		EffectType:  effectType,
 		State:       models.DeliveryEffectCompleted,
 		CreatedAt:   now,
@@ -273,10 +334,10 @@ func (sm *StreamManager) deliveryEffectAlreadyApplied(
 func deliveryEventIsStale(
 	ctx context.Context,
 	execution *AgentExecution,
-	event agentctl.AgentEvent,
+	event *models.AgentDeliveryEvent,
 	repository AgentDeliveryRepository,
 ) (bool, error) {
-	if event.DeliveryHarnessGeneration == 0 || event.DeliveryIncarnationID == "" {
+	if event == nil || event.HarnessGeneration == 0 || event.IncarnationID == "" {
 		return false, nil
 	}
 	reader, ok := repository.(harnessGenerationReader)
@@ -287,14 +348,14 @@ func deliveryEventIsStale(
 	if execution != nil && execution.SessionID != "" {
 		sessionID = execution.SessionID
 	}
-	current, err := reader.GetCurrentHarnessSessionGeneration(ctx, sessionID, event.DeliveryIncarnationID)
+	current, err := reader.GetCurrentHarnessSessionGeneration(ctx, sessionID, event.IncarnationID)
 	if errors.Is(err, models.ErrTaskSessionNotFound) {
 		return false, nil
 	}
 	if err != nil {
 		return false, err
 	}
-	return current != nil && current.Generation > int64(event.DeliveryHarnessGeneration), nil
+	return current != nil && current.Generation > event.HarnessGeneration, nil
 }
 
 func acknowledgeDurableAgentEvent(ctx context.Context, event agentctl.AgentEvent, acknowledger agentDeliveryAcknowledger) error {

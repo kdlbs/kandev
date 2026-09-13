@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -531,7 +533,45 @@ func sameAgentDeliveryEvent(stored, incoming *models.AgentDeliveryEvent) bool {
 		stored.SubmissionID == incoming.SubmissionID &&
 		stored.EventType == incoming.EventType &&
 		stored.Terminal == incoming.Terminal &&
-		bytes.Equal(stored.Payload, incoming.Payload)
+		sameAgentDeliveryPayload(stored.Payload, incoming.Payload)
+}
+
+// sameAgentDeliveryPayload compares the transport event content while
+// tolerating lifecycle fields that are reconstructed by the backend consumer.
+// A replayed agentctl event can be delivered to a fresh lifecycle execution;
+// its current turn and canonical message IDs are not part of the retained
+// transport identity and can therefore differ from the original projection.
+// All adapter-owned content remains strict, so a changed event at the same
+// stream sequence is still rejected.
+func sameAgentDeliveryPayload(stored, incoming []byte) bool {
+	if bytes.Equal(stored, incoming) {
+		return true
+	}
+	var storedEvent, incomingEvent streams.AgentEvent
+	if err := json.Unmarshal(stored, &storedEvent); err != nil {
+		return false
+	}
+	if err := json.Unmarshal(incoming, &incomingEvent); err != nil {
+		return false
+	}
+	stripLifecycleDeliveryFields(&storedEvent)
+	stripLifecycleDeliveryFields(&incomingEvent)
+	storedPayload, err := json.Marshal(storedEvent)
+	if err != nil {
+		return false
+	}
+	incomingPayload, err := json.Marshal(incomingEvent)
+	if err != nil {
+		return false
+	}
+	return bytes.Equal(storedPayload, incomingPayload)
+}
+
+func stripLifecycleDeliveryFields(event *streams.AgentEvent) {
+	event.TurnID = ""
+	event.CanonicalMessageID = ""
+	event.CanonicalProjection = false
+	event.CanonicalMessageAppend = false
 }
 
 type deliveryEventRows interface {

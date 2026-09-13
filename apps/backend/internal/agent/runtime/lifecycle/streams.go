@@ -331,10 +331,15 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 			execution.setDeliverySubmissionID(event.DeliverySubmissionID)
 		}
 		var deliveryEffect *models.AgentDeliveryEffect
+		var durableEvent *models.AgentDeliveryEvent
 		skipCallback := false
 		if delivery != nil {
-			process, durableSkip, effect, deliveryErr := sm.prepareDurableAgentEvent(
-				ctx, execution, event, delivery,
+			// Capture the durable record before invoking lifecycle callbacks. Those
+			// callbacks can advance or clear prompt state, but the inbox payload
+			// must remain byte-identical from admission through projection.
+			durableEvent = durableAgentEvent(execution, event)
+			process, durableSkip, effect, deliveryErr := sm.prepareDurableAgentDeliveryEvent(
+				ctx, execution, durableEvent, delivery,
 			)
 			if deliveryErr != nil {
 				sm.logger.Error("durable agent event ownership check failed",
@@ -352,7 +357,7 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 			skipCallback = durableSkip
 		}
 		event, canonicalProjected, skipEvent := sm.projectCanonicalAgentEvent(
-			ctx, execution, event, delivery, client, skipCallback,
+			ctx, execution, event, durableEvent, delivery, client, skipCallback,
 		)
 		if skipEvent {
 			return
@@ -363,7 +368,7 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 			sm.callbacks.OnAgentEvent(execution, event)
 		}
 		if delivery != nil && !canonicalProjected {
-			if deliveryErr := sm.projectAndAcknowledgeDurableAgentEventWithEffect(ctx, execution, event, delivery, client, deliveryEffect); deliveryErr != nil {
+			if deliveryErr := sm.projectAndAcknowledgeDurableAgentDeliveryEventWithEffect(ctx, durableEvent, event, delivery, client, deliveryEffect); deliveryErr != nil {
 				sm.logger.Error("durable agent event projection or acknowledgment failed",
 					zap.String("instance_id", execution.ID), zap.Error(deliveryErr))
 			}
@@ -392,21 +397,24 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 	}
 }
 
-func (sm *StreamManager) prepareDurableAgentEvent(
+func (sm *StreamManager) prepareDurableAgentDeliveryEvent(
 	ctx context.Context,
 	execution *AgentExecution,
-	event agentctl.AgentEvent,
+	durableEvent *models.AgentDeliveryEvent,
 	repository AgentDeliveryRepository,
 ) (process, skipCallback bool, effect *models.AgentDeliveryEffect, err error) {
-	stale, err := deliveryEventIsStale(ctx, execution, event, repository)
+	if durableEvent == nil || durableEvent.StreamID == "" || durableEvent.Sequence == 0 {
+		return true, false, nil, nil
+	}
+	stale, err := deliveryEventIsStale(ctx, execution, durableEvent, repository)
 	if err != nil {
 		return false, false, nil, err
 	}
-	process, err = sm.receiveDurableAgentEvent(ctx, execution, event, repository)
+	process, err = sm.receiveDurableAgentDeliveryEvent(ctx, durableEvent, repository)
 	if err != nil {
 		return false, false, nil, fmt.Errorf("admit durable agent event: %w", err)
 	}
-	effect = deliveryEffectForEvent(event)
+	effect = deliveryEffectForDeliveryEvent(durableEvent)
 	return process, stale || sm.deliveryEffectAlreadyApplied(ctx, repository, effect), effect, nil
 }
 
@@ -414,12 +422,16 @@ func (sm *StreamManager) projectCanonicalAgentEvent(
 	ctx context.Context,
 	execution *AgentExecution,
 	event agentctl.AgentEvent,
+	durableEvent *models.AgentDeliveryEvent,
 	delivery AgentDeliveryRepository,
 	client *agentctl.Client,
 	skipCallback bool,
 ) (agentctl.AgentEvent, bool, bool) {
 	if skipCallback || delivery == nil || !canonicalAgentDeliveryEvent(event) {
 		return event, false, false
+	}
+	if durableEvent == nil {
+		durableEvent = durableAgentEvent(execution, event)
 	}
 	projector, ok := delivery.(canonicalAgentDeliveryProjector)
 	if !ok {
@@ -429,7 +441,7 @@ func (sm *StreamManager) projectCanonicalAgentEvent(
 		return event, false, false
 	}
 	isAppend, err := projector.ProjectCanonicalAgentDeliveryEvent(
-		ctx, durableAgentEvent(execution, event), deliveryEffectForEvent(event),
+		ctx, durableEvent, deliveryEffectForEvent(event),
 	)
 	if err != nil {
 		sm.logger.Error("canonical agent event projection failed",
