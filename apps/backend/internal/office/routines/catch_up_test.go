@@ -182,9 +182,10 @@ func TestComputeCatchUp_ElapsedTicksOne_NoFirstMissedAt(t *testing.T) {
 }
 
 // TestComputeCatchUp_MalformedExpression: an unparseable cron expression
-// drives Unknown=true and preserves the underlying error. The caller handles
-// the trigger state for this error; the catch-up walk does not invent a next
-// run time.
+// drives Unknown=true and NextRunAt exactly 24 hours after the processing
+// instant (AC-001.11) — the failure is deterministic in the stored
+// (expression, timezone) pair, so the re-arm is the trigger's permanent
+// dispatch cadence until it is deleted and recreated.
 func TestComputeCatchUp_MalformedExpression(t *testing.T) {
 	now := time.Date(2026, 5, 10, 12, 0, 0, 0, time.UTC)
 	past := now.Add(-time.Hour)
@@ -198,14 +199,26 @@ func TestComputeCatchUp_MalformedExpression(t *testing.T) {
 	if !result.Unknown {
 		t.Fatal("Unknown = false, want true")
 	}
-	if !result.NextRunAt.IsZero() {
-		t.Errorf("NextRunAt = %v, want zero", result.NextRunAt)
+	want := now.Add(catchUpFallbackInterval)
+	if !result.NextRunAt.Equal(want) {
+		t.Errorf("NextRunAt = %v, want %v (now + 24h)", result.NextRunAt, want)
 	}
 	// AC-001.11 requires the eventual warning to name "the underlying
 	// error", which means it has to survive on catchUpResult rather than
 	// being discarded at the point of failure.
 	if result.Err == nil {
 		t.Error("Err = nil, want the underlying NextCronTime parse error")
+	}
+
+	// A second tick a day later dispatches once more, not repeatedly: the
+	// re-armed NextRunAt is itself now due, and re-computing from it
+	// produces the same 24h fallback rather than a hot loop.
+	again := computeCatchUp(trigger, routine, result.NextRunAt)
+	if !again.Unknown {
+		t.Fatal("second computeCatchUp: Unknown = false, want true")
+	}
+	if !again.NextRunAt.Equal(result.NextRunAt.Add(catchUpFallbackInterval)) {
+		t.Errorf("second NextRunAt = %v, want %v", again.NextRunAt, result.NextRunAt.Add(catchUpFallbackInterval))
 	}
 }
 

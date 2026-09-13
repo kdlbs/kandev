@@ -349,11 +349,13 @@ func TestTickScheduledTriggers_ReconciliationArmsStrandedTriggerWithoutDispatch(
 	}
 }
 
-// TestTickScheduledTriggers_MalformedExpressionRearmsWithoutDispatch verifies
-// that a legacy trigger with a malformed expression is re-armed for retry
-// without creating a run. New trigger creation rejects this input before it is
-// persisted.
-func TestTickScheduledTriggers_MalformedExpressionRearmsWithoutDispatch(t *testing.T) {
+// TestTickScheduledTriggers_MalformedExpressionRearmsWithDispatch verifies
+// that a legacy trigger with a malformed expression dispatches exactly one
+// run and is re-armed to the processing instant plus 24 hours
+// (AC-OFFICE-ROUTINE-CATCHUP-001.11), not left un-dispatched or re-armed to
+// its original due time. New trigger creation rejects this input before it
+// is persisted; this covers a row created before that validation existed.
+func TestTickScheduledTriggers_MalformedExpressionRearmsWithDispatch(t *testing.T) {
 	svc, wrapped, _ := newWrappedTestRoutineService(t)
 	ctx := context.Background()
 
@@ -376,16 +378,17 @@ func TestTickScheduledTriggers_MalformedExpressionRearmsWithoutDispatch(t *testi
 		t.Fatalf("seed malformed trigger: %v", err)
 	}
 
-	now := time.Now().UTC()
-	if err := svc.TickScheduledTriggers(ctx, now); err != nil {
+	before := time.Now().UTC()
+	if err := svc.TickScheduledTriggers(ctx, before); err != nil {
 		t.Fatalf("tick: %v", err)
 	}
+	after := time.Now().UTC()
 	runs, err := svc.ListRoutineRuns(ctx, routine.ID, 10, 0)
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	if len(runs) != 0 {
-		t.Fatalf("routine runs after malformed trigger = %d, want 0", len(runs))
+	if len(runs) != 1 {
+		t.Fatalf("routine runs after malformed trigger = %d, want 1", len(runs))
 	}
 	triggers, err := svc.ListRoutineTriggers(ctx, routine.ID)
 	if err != nil {
@@ -394,8 +397,10 @@ func TestTickScheduledTriggers_MalformedExpressionRearmsWithoutDispatch(t *testi
 	if len(triggers) != 1 || triggers[0].NextRunAt == nil {
 		t.Fatalf("triggers = %+v, want one re-armed trigger", triggers)
 	}
-	if !triggers[0].NextRunAt.Equal(past) {
-		t.Fatalf("next_run_at = %v, want original due time %v", *triggers[0].NextRunAt, past)
+	got := *triggers[0].NextRunAt
+	if got.Before(before.Add(24*time.Hour)) || got.After(after.Add(24*time.Hour)) {
+		t.Fatalf("next_run_at = %v, want within [%v, %v] (processing instant + 24h)",
+			got, before.Add(24*time.Hour), after.Add(24*time.Hour))
 	}
 }
 
