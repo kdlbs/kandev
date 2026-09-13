@@ -588,6 +588,10 @@ type TaskStatusUpdateRequest struct {
 	// ResumeIntent=true is an explicit "pick this up again" with required
 	// follow-up comment. Forces task_reopened_via_comment.
 	ResumeIntent bool
+	// SuppressStatusActivity is used by the orchestrator when it will publish
+	// the canonical task.state_changed event that owns the activity row. Gate
+	// redirects still log here because they do not publish that event.
+	SuppressStatusActivity bool
 }
 
 // UpdateTaskStatus persists a new task status, optionally creates a comment,
@@ -599,12 +603,12 @@ type TaskStatusUpdateRequest struct {
 // (dependents unblocked, parent children-completed, reopen intent,
 // session interrupt for cancellation, etc.).
 //
-// Approval gate: when the requested status is "done" and the task has
-// approvers without a current approved decision, the persisted state
-// is redirected to in_review and the function returns a typed
-// *ApprovalsPendingError (the handler maps it to HTTP 409). The
-// req.NewStatus is updated in place so downstream side-effects see
-// the redirected status.
+// Approval gate: when the requested status is "done" and either the task
+// is not yet on a terminal workflow step, or it is and has approvers
+// without a current approved decision, the persisted state is redirected
+// to in_review and the function returns a typed *ApprovalsPendingError
+// (the handler maps it to HTTP 409). The req.NewStatus is updated in
+// place so downstream side-effects see the redirected status.
 //
 // Rework / reopen: transitions leaving in_review for todo|in_progress,
 // and transitions leaving done for any non-terminal state, supersede
@@ -620,14 +624,29 @@ func (s *DashboardService) UpdateTaskStatus(ctx context.Context, req TaskStatusU
 		preStatus = exec.State
 	}
 
-	gateErr := s.applyApprovalGate(ctx, req.TaskID, &dbState, &req.NewStatus)
+	expectedStepID := ""
+	gateErr := s.applyApprovalGate(ctx, req.TaskID, &dbState, &req.NewStatus, &expectedStepID)
+	var pendingErr *ApprovalsPendingError
+	if gateErr != nil && !errors.As(gateErr, &pendingErr) {
+		return gateErr
+	}
 
-	if err := s.repo.UpdateTaskState(ctx, req.TaskID, dbState); err != nil {
+	if dbState == stateCompleted {
+		updated, err := s.repo.UpdateTaskStateIfWorkflowStep(ctx, req.TaskID, expectedStepID, dbState)
+		if err != nil {
+			return fmt.Errorf("update task state: %w", err)
+		}
+		if !updated {
+			return &WorkflowStepChangedError{TaskID: req.TaskID}
+		}
+	} else if err := s.repo.UpdateTaskState(ctx, req.TaskID, dbState); err != nil {
 		return fmt.Errorf("update task state: %w", err)
 	}
 
 	commentID := s.maybeCreateStatusComment(ctx, req)
-	s.logTaskStatusChangeActivity(ctx, req)
+	if !req.SuppressStatusActivity || pendingErr != nil {
+		s.logTaskStatusChangeActivity(ctx, req)
+	}
 	s.publishTaskStatusChanged(ctx, req)
 	s.publishCanonicalTaskUpdated(ctx, req.TaskID)
 	s.runReactivityForStatus(ctx, req, commentID, preStatus)
@@ -682,15 +701,43 @@ func (s *DashboardService) logTaskStatusChangeActivity(ctx context.Context, req 
 		fmt.Sprintf(`{"new_status":%q}`, req.NewStatus), runID, "")
 }
 
-// applyApprovalGate redirects a "done" transition to in_review when
-// approvals are pending. Mutates dbState and apiStatus in place so the
-// rest of UpdateTaskStatus persists and emits the redirected status.
-// Returns a *ApprovalsPendingError when the gate fires; nil otherwise.
+// applyApprovalGate redirects a "done" transition to in_review when the
+// task is on a non-terminal workflow step, or when it is terminal (or has
+// no workflow step at all) but approvals are pending. Mutates dbState and
+// apiStatus in place so the rest of UpdateTaskStatus persists and emits
+// the redirected status. Returns a *ApprovalsPendingError when the gate
+// fires; nil otherwise.
+//
+// A task with no resolvable workflow step (e.g. a channel task, which is
+// never placed on a workflow) has nowhere to advance to, so it falls
+// through to the approver check exactly like a terminal-step task rather
+// than being redirected forever.
+//
+// The step-position check fails CLOSED, but a lookup error is not the same
+// as a confirmed non-terminal step: it aborts the whole update (a plain,
+// non-ApprovalsPendingError error, leaving dbState/apiStatus untouched) so
+// the caller persists nothing rather than writing a redirect it cannot
+// justify. Only a successful read reporting "not terminal" persists the
+// in_review redirect.
 func (s *DashboardService) applyApprovalGate(
-	ctx context.Context, taskID string, dbState, apiStatus *string,
+	ctx context.Context, taskID string, dbState, apiStatus, expectedStepID *string,
 ) error {
 	if *dbState != stateCompleted {
 		return nil
+	}
+	currentStepID, err := s.repo.GetTaskWorkflowStepID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("approval gate: resolve task workflow step: %w", err)
+	}
+	*expectedStepID = currentStepID
+	terminal, hasStep, err := s.repo.IsTaskWorkflowStepTerminal(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("approval gate: resolve workflow step: %w", err)
+	}
+	if hasStep && !terminal {
+		*dbState = stateInReview
+		*apiStatus = statusInReviewLowercase
+		return &ApprovalsPendingError{Reason: ApprovalGateReasonWorkflowStep}
 	}
 	pending, err := s.pendingApprovers(ctx, taskID)
 	if err != nil || len(pending) == 0 {
@@ -698,7 +745,7 @@ func (s *DashboardService) applyApprovalGate(
 	}
 	*dbState = stateInReview
 	*apiStatus = statusInReviewLowercase
-	return &ApprovalsPendingError{Pending: pending}
+	return &ApprovalsPendingError{Pending: pending, Reason: ApprovalGateReasonApprovals}
 }
 
 // maybeCreateStatusComment creates the optional status-change comment

@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useState, memo } from "react";
 import { useTranslation } from "react-i18next";
 import { IconCheck, IconNetwork, IconPlus } from "@tabler/icons-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
-import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
+import { DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
+import { TaskSwitcherDrawer } from "./task-switcher-drawer";
 import { Button } from "@kandev/ui/button";
 import { QuickChatSheetButton } from "./quick-chat-sheet-button";
 import { TaskSwitcher } from "../task-switcher";
@@ -475,14 +476,14 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
 
   const surface =
     presentation === "drawer" ? (
-      <Drawer open={open} onOpenChange={handleOpenChange}>
-        <DrawerContent
-          onCloseAutoFocus={onCloseAutoFocus}
-          className="h-[88dvh] max-h-[88dvh] overflow-hidden pb-[max(0.5rem,env(safe-area-inset-bottom))]"
-        >
-          {surfaceContent}
-        </DrawerContent>
-      </Drawer>
+      <TaskSwitcherDrawer
+        key={workspaceId}
+        open={open}
+        onOpenChange={handleOpenChange}
+        onCloseAutoFocus={onCloseAutoFocus}
+      >
+        {surfaceContent}
+      </TaskSwitcherDrawer>
     ) : (
       <Sheet open={open} onOpenChange={handleOpenChange}>
         <SheetContent

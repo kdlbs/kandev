@@ -1467,6 +1467,68 @@ describe("session.state_changed → agentctl ready fallback", () => {
     );
   });
 
+  it("settles the matching workspace restore when agentctl becomes ready", () => {
+    const attempt = {
+      taskId: "t-1",
+      sessionId: "s-1",
+      environmentId: "env-1",
+      revision: 2,
+      status: "pending",
+    };
+    const completeWorkspaceRestoration = vi.fn(() => true);
+    const bumpWorkspaceFilesRefresh = vi.fn();
+    const store = makeStore({
+      environmentIdBySessionId: { "s-1": "env-1" },
+      workspaceRestoration: { byEnvironmentId: { "env-1": attempt } },
+      completeWorkspaceRestoration,
+      bumpWorkspaceFilesRefresh,
+    });
+    const handler = registerTaskSessionHandlers(store)["session.agentctl_ready"]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: "session.agentctl_ready",
+      timestamp: TS,
+      payload: { task_id: "t-1", session_id: "s-1", task_environment_id: "env-1" },
+    });
+
+    expect(completeWorkspaceRestoration).toHaveBeenCalledWith(attempt);
+    expect(bumpWorkspaceFilesRefresh).toHaveBeenCalledWith("s-1");
+  });
+
+  it("settles the matching workspace restore with sanitized agentctl error details", () => {
+    const attempt = {
+      taskId: "t-1",
+      sessionId: "s-1",
+      environmentId: "env-1",
+      revision: 2,
+      status: "pending",
+    };
+    const failWorkspaceRestoration = vi.fn();
+    const store = makeStore({
+      environmentIdBySessionId: { "s-1": "env-1" },
+      workspaceRestoration: { byEnvironmentId: { "env-1": attempt } },
+      failWorkspaceRestoration,
+    });
+    const handler = registerTaskSessionHandlers(store)["session.agentctl_error"]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: "session.agentctl_error",
+      timestamp: TS,
+      payload: {
+        task_id: "t-1",
+        session_id: "s-1",
+        task_environment_id: "env-1",
+        error_message: "backend\u0000failure",
+      },
+    });
+
+    expect(failWorkspaceRestoration).toHaveBeenCalledWith(attempt, "backendfailure");
+  });
+
   it("preserves the primary worktree when a sibling agentctl_ready arrives", () => {
     const upsertTaskSessionFromEvent = vi.fn();
     const setTaskSession = vi.fn();

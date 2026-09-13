@@ -5,7 +5,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { PluginUninstallConfirmation } from "./uninstall-plugin-dialog";
 import type { PluginRecord } from "@/lib/types/plugins";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
+});
 
 function plugin(): PluginRecord {
   return {
@@ -48,6 +51,14 @@ function Confirmation({ isFinePointer }: { isFinePointer: boolean }) {
 }
 
 describe("plugin uninstall confirmation", () => {
+  it("shows the named phone uninstall warning in a sheet", () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    render(<Confirmation isFinePointer={false} />);
+    const sheet = screen.getByRole("dialog");
+    expect(sheet.getAttribute("data-slot")).toBe("drawer-content");
+    expect(sheet.textContent).toContain("Acme Tools");
+    expect(sheet.textContent).toContain("revoke its API key");
+  });
   it("uses an anchored non-modal confirmation on fine pointers", () => {
     render(<Confirmation isFinePointer />);
 

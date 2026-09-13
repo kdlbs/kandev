@@ -220,10 +220,10 @@ func (t *envRepoTarget) verifyWorktree(worktreeID, path, branch string) error {
 
 // cutoverBuildShadows creates the final-shape shadow tables.
 func (r *Repository) cutoverBuildShadows(tx *sqlx.Tx) error {
-	if _, err := tx.Exec(finalTaskEnvironmentsDDL("task_environments_shadow")); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), finalTaskEnvironmentsDDL("task_environments_shadow")); err != nil {
 		return fmt.Errorf("cutover: create task_environments_shadow: %w", err)
 	}
-	if _, err := tx.Exec(finalTaskEnvironmentReposDDL("task_environment_repos_shadow", "task_environments_shadow")); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), finalTaskEnvironmentReposDDL("task_environment_repos_shadow", "task_environments_shadow")); err != nil {
 		return fmt.Errorf("cutover: create task_environment_repos_shadow: %w", err)
 	}
 	return r.maybeFailCutover("create_shadow")
@@ -237,7 +237,7 @@ func (r *Repository) insertNormalized(c *worktreeCutover, tx *sqlx.Tx) error {
 		if !ok {
 			return fmt.Errorf("cutover: internal: environment %s for task %s missing", envID, taskID)
 		}
-		if _, err := tx.Exec(tx.Rebind(`
+		if _, err := tx.ExecContext(r.migrationContext(), tx.Rebind(`
 			INSERT INTO task_environments_shadow (
 				id, task_id, ownership_generation, executor_type, executor_id, executor_profile_id,
 				control_port, status, materialization_session_id, workspace_path, container_id,
@@ -270,7 +270,7 @@ func (r *Repository) insertNormalized(c *worktreeCutover, tx *sqlx.Tx) error {
 		if envID == "" {
 			continue
 		}
-		if _, err := tx.Exec(tx.Rebind(
+		if _, err := tx.ExecContext(r.migrationContext(), tx.Rebind(
 			`UPDATE task_sessions SET task_environment_id = ? WHERE id = ?`),
 			envID, sessionID); err != nil {
 			return fmt.Errorf("cutover: link session %s to environment %s: %w", sessionID, envID, err)
@@ -293,7 +293,7 @@ func (c *worktreeCutover) insertRepoRow(tx *sqlx.Tx, taskID, envID string, targe
 	if target.deletedAt != nil {
 		deletedAt = *target.deletedAt
 	}
-	if _, err := tx.Exec(tx.Rebind(`
+	if _, err := tx.ExecContext(c.ctx, tx.Rebind(`
 		INSERT INTO task_environment_repos_shadow (
 			id, task_environment_id, repository_id, branch_slug,
 			worktree_id, worktree_path, worktree_branch, position,
@@ -462,11 +462,11 @@ func (r *Repository) tableColumns(tx *sqlx.Tx, table string) (map[string]bool, e
 	var rows *sql.Rows
 	var err error
 	if dialect.IsPostgres(r.db.DriverName()) {
-		rows, err = tx.Query(`
+		rows, err = tx.QueryContext(r.migrationContext(), `
 			SELECT column_name FROM information_schema.columns
 			WHERE table_name = $1 AND table_schema = current_schema()`, table)
 	} else {
-		rows, err = tx.Query(`SELECT name FROM pragma_table_info(?)`, table)
+		rows, err = tx.QueryContext(r.migrationContext(), `SELECT name FROM pragma_table_info(?)`, table)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("cutover: read columns of %s: %w", table, err)
@@ -490,18 +490,18 @@ func (r *Repository) tableColumns(tx *sqlx.Tx, table string) (map[string]bool, e
 // the swap. Postgres constraint names are restored to their canonical form
 // afterwards.
 func (r *Repository) cutoverSwap(c *worktreeCutover, tx *sqlx.Tx) error {
-	if _, err := tx.Exec(`DROP TABLE task_session_worktrees`); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), `DROP TABLE task_session_worktrees`); err != nil {
 		return fmt.Errorf("cutover: drop task_session_worktrees: %w", err)
 	}
 	// Preview-build session-delete cleanup jobs are invalid under the
 	// task-owned model; purge them before any cleanup worker can claim them.
-	if _, err := tx.Exec(tx.Rebind(`DELETE FROM task_resource_cleanup_jobs WHERE trigger = ?`), "session_delete"); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), tx.Rebind(`DELETE FROM task_resource_cleanup_jobs WHERE trigger = ?`), "session_delete"); err != nil {
 		return fmt.Errorf("cutover: purge preview session_delete cleanup jobs: %w", err)
 	}
 	if err := r.maybeFailCutover("drop_legacy"); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DROP TABLE task_environment_repos`); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), `DROP TABLE task_environment_repos`); err != nil {
 		return fmt.Errorf("cutover: drop legacy task_environment_repos: %w", err)
 	}
 	if err := r.rebindGitSnapshotEnvironmentForeignKey(c, tx); err != nil {
@@ -510,13 +510,13 @@ func (r *Repository) cutoverSwap(c *worktreeCutover, tx *sqlx.Tx) error {
 	if err := r.rebindTaskEnvironmentRecoveryClaimForeignKey(c, tx); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`DROP TABLE task_environments`); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), `DROP TABLE task_environments`); err != nil {
 		return fmt.Errorf("cutover: drop legacy task_environments: %w", err)
 	}
-	if _, err := tx.Exec(`ALTER TABLE task_environments_shadow RENAME TO task_environments`); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), `ALTER TABLE task_environments_shadow RENAME TO task_environments`); err != nil {
 		return fmt.Errorf("cutover: rename task_environments_shadow: %w", err)
 	}
-	if _, err := tx.Exec(`ALTER TABLE task_environment_repos_shadow RENAME TO task_environment_repos`); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), `ALTER TABLE task_environment_repos_shadow RENAME TO task_environment_repos`); err != nil {
 		return fmt.Errorf("cutover: rename task_environment_repos_shadow: %w", err)
 	}
 	if err := r.maybeFailCutover("swap"); err != nil {
@@ -533,7 +533,7 @@ func (r *Repository) cutoverSwap(c *worktreeCutover, tx *sqlx.Tx) error {
 		`CREATE INDEX IF NOT EXISTS idx_task_environment_repos_env_id ON task_environment_repos(task_environment_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_task_environment_repos_repository_id ON task_environment_repos(repository_id)`,
 	} {
-		if _, err := tx.Exec(stmt); err != nil {
+		if _, err := tx.ExecContext(r.migrationContext(), stmt); err != nil {
 			return fmt.Errorf("cutover: recreate index: %w", err)
 		}
 	}
@@ -556,7 +556,7 @@ func (r *Repository) cutoverRenamePostgresConstraints(tx *sqlx.Tx) error {
 	}
 	for _, rename := range renames {
 		var constraintName string
-		err := tx.QueryRow(tx.Rebind(`
+		err := tx.QueryRowContext(r.migrationContext(), tx.Rebind(`
 			SELECT conname FROM pg_constraint
 			WHERE conrelid = (SELECT oid FROM pg_class WHERE relname = ? AND relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = current_schema()))
 			  AND conname LIKE ?
@@ -564,7 +564,7 @@ func (r *Repository) cutoverRenamePostgresConstraints(tx *sqlx.Tx) error {
 		if err != nil {
 			return fmt.Errorf("cutover: find postgres constraint on %s: %w", rename.table, err)
 		}
-		if _, err := tx.Exec(fmt.Sprintf(
+		if _, err := tx.ExecContext(r.migrationContext(), fmt.Sprintf(
 			`ALTER TABLE %s RENAME CONSTRAINT %s TO %s`, rename.table, constraintName, rename.canonical)); err != nil {
 			return fmt.Errorf("cutover: rename postgres constraint %s: %w", constraintName, err)
 		}

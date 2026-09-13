@@ -1442,13 +1442,14 @@ func (h *TaskHandlers) prepareTaskSession(
 		// upgraded to a full launch here so the terminal has a PTY to attach to.
 		// (Contrast the start_agent branch below, which sets DeferredStart=true.)
 		resp, err := h.orchestrator.LaunchSession(c.Request.Context(), &orchestrator.LaunchSessionRequest{
-			TaskID:            taskID,
-			Intent:            orchestrator.IntentPrepare,
-			AgentProfileID:    body.AgentProfileID,
-			ExecutorID:        body.ExecutorID,
-			ExecutorProfileID: body.ExecutorProfileID,
-			WorkflowStepID:    resolvedStepID,
-			LaunchWorkspace:   true,
+			InitialPromptPreview: models.NewInitialPromptPreview(strings.TrimSpace(body.Description), body.Attachments),
+			TaskID:               taskID,
+			Intent:               orchestrator.IntentPrepare,
+			AgentProfileID:       body.AgentProfileID,
+			ExecutorID:           body.ExecutorID,
+			ExecutorProfileID:    body.ExecutorProfileID,
+			WorkflowStepID:       resolvedStepID,
+			LaunchWorkspace:      true,
 		})
 		if err != nil {
 			h.logger.Error("failed to prepare session for task", zap.Error(err), zap.String("task_id", taskID))
@@ -1476,12 +1477,13 @@ func (h *TaskHandlers) prepareStartAgentSession(
 	resolvedStepID string,
 ) *startAgentDispatch {
 	prepResp, err := h.orchestrator.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
-		TaskID:            taskID,
-		Intent:            orchestrator.IntentPrepare,
-		AgentProfileID:    body.AgentProfileID,
-		ExecutorID:        body.ExecutorID,
-		ExecutorProfileID: body.ExecutorProfileID,
-		WorkflowStepID:    resolvedStepID,
+		InitialPromptPreview: models.NewInitialPromptPreview(strings.TrimSpace(body.Description), body.Attachments),
+		TaskID:               taskID,
+		Intent:               orchestrator.IntentPrepare,
+		AgentProfileID:       body.AgentProfileID,
+		ExecutorID:           body.ExecutorID,
+		ExecutorProfileID:    body.ExecutorProfileID,
+		WorkflowStepID:       resolvedStepID,
 		// The async IntentStartCreated dispatch below carries the prompt. Mark
 		// this as a deferred start so a passthrough profile is not eagerly
 		// launched here with an empty prompt (which would pre-empt that

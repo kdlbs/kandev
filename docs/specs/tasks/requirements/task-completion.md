@@ -2,6 +2,7 @@
 status: draft
 system: tasks
 created: 2026-09-09
+updated: 2026-09-10
 owners:
   - kandev
 ---
@@ -112,6 +113,52 @@ does not need to reopen merely because its agent answers a question.
   conversation and workspace identity. Concurrent archive, delete, or explicit
   stop shall prevent a stale resume from resurrecting work.
 
+### REQ-TASKS-COMPLETION-003: Workspace access after conversation completion
+
+**Intent:** Let users inspect and use a retained task workspace without resuming
+its agent conversation. The task system owns admission and recovery; workspace
+ownership remains governed by the canonical task environment.
+
+#### Acceptance criteria
+
+- **AC-TASKS-COMPLETION-003.1:** When a completed session has a retained,
+  accessible task workspace, opening the task shall restore file browsing,
+  file contents, Git views, and supported workspace terminals without requiring
+  Resume. This shall also work after its previous runtime has stopped.
+- **AC-TASKS-COMPLETION-003.2:** Workspace restoration shall preserve session
+  state, completion time, transcript, task state, workflow position, primary
+  selection, and agent ownership. It shall not start an agent, dispatch a
+  prompt, or replay workflow actions.
+- **AC-TASKS-COMPLETION-003.3:** Explicit Resume shall remain available under
+  `REQ-TASKS-COMPLETION-002` after workspace restoration. Restoration shall
+  preserve the provider identity needed to continue the same conversation,
+  including across another backend restart.
+- **AC-TASKS-COMPLETION-003.4:** A FAILED or CANCELLED conversation with a
+  retained, accessible workspace shall permit workspace-only restoration.
+  Its existing agent recovery and message-admission rules shall remain unchanged.
+- **AC-TASKS-COMPLETION-003.5:** Restoration shall enforce current access and
+  ownership permissions. An archived or deleted task, an invalid session
+  reference, or cleanup that has claimed the environment shall prevent stale
+  restoration from recreating resources or exposing the workspace.
+- **AC-TASKS-COMPLETION-003.6:** Concurrent workspace requests and explicit
+  Resume shall not leave duplicate runtimes or stop a newer execution. A
+  historical session sharing an environment shall not take over its live agent.
+- **AC-TASKS-COMPLETION-003.7:** When retained workspace inventory is missing
+  or unsafe, passive restoration shall report its unavailability. It shall not
+  replace a branch, discard changes, or silently create a replacement workspace.
+- **AC-TASKS-COMPLETION-003.8:** A workspace restoration failure shall appear
+  within the affected workspace surface with a concise cause and expandable,
+  bounded technical details. It shall not appear as a page-wide session-start
+  failure, fail the conversation, or leave an indefinite preparation indicator.
+- **AC-TASKS-COMPLETION-003.9:** A recoverable failure shall offer workspace
+  Retry. An in-progress attempt shall prevent duplicate retries. Failure shall
+  not trigger an unbounded retry loop; success shall clear matching feedback.
+  A late result shall not replace feedback for a different environment or attempt.
+- **AC-TASKS-COMPLETION-003.10:** Desktop and mobile shall expose the same
+  workspace results and recovery actions. Phone controls shall have at least
+  44-pixel touch targets. Expanded details shall remain within the workspace
+  surface, preserve keyboard access, and cause no horizontal page overflow.
+
 ## Compatibility and exclusions
 
 This contract replaces name-based workflow completion and the permanent
@@ -124,3 +171,13 @@ Automatic profile reuse remains governed by
 [workflow profile sessions](workflow-profile-session-lifecycle.md). Prompt
 admission during startup follows [resume prompt queue](resume-prompt-queue.md).
 Provider restoration uses [agent recovery](../../agents/requirements/agent-resume-runtime-recovery.md).
+
+Workspace restoration does not imply read-only access: existing edit and shell
+permissions remain authoritative. This contract does not add workspace access
+for tasks with no sessions, change archive/unarchive recovery, introduce a new
+executor, or change physical workspace ownership.
+
+## Implementation plans
+
+- [Task completion and follow-ups](../../../plans/task-completion/plan.md)
+- [Workspace restoration after completion](../../../plans/completed-workspace-restoration/plan.md)

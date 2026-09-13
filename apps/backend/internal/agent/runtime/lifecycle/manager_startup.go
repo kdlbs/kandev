@@ -107,6 +107,9 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	defer func() {
 		retErr = wrapBootstrapFailure(execution, retErr)
 	}()
+	if err := m.ensureLaunchSessionStillActive(ctx, execution.SessionID, executionAdmissionAgent); err != nil {
+		return err
+	}
 	activityClaim, err := m.ensureExecutionActivity(ctx, executionID, activity.KindExecutionPreparing)
 	if err != nil {
 		return err
@@ -151,7 +154,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	// Check if we're reconnecting to an existing running agent process.
 	// When the existing process is still alive inside a remote executor (e.g., Sprites),
 	// we skip subprocess launch and go directly to ACP session initialization.
-	reuseExisting := execution.metadataBool("reuse_existing_process")
+	reuseExisting := execution.metadataBool(MetadataKeyReuseExistingProcess)
 
 	if !reuseExisting && execution.AgentCommand == "" {
 		return fmt.Errorf("execution %q has no agent command configured", executionID)
@@ -179,6 +182,11 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	taskDescription := getTaskDescriptionFromMetadata(execution)
 	approvalPolicy, agentDisplayName := m.resolveApprovalPolicyAndDisplayName(operationCtx, execution)
 
+	execution.remoteInstanceLifecycleMu.Lock()
+	if err := m.ensureLaunchSessionStillActive(operationCtx, execution.SessionID, executionAdmissionAgent); err != nil {
+		execution.remoteInstanceLifecycleMu.Unlock()
+		return err
+	}
 	var bootCommand string
 	if reuseExisting {
 		// Agent subprocess is already running inside the remote executor.
@@ -198,6 +206,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 		var err error
 		bootCommand, err = m.configureAndStartAgent(operationCtx, execution, approvalPolicy)
 		if err != nil {
+			execution.remoteInstanceLifecycleMu.Unlock()
 			return err
 		}
 
@@ -206,6 +215,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 			zap.String("task_id", execution.TaskID),
 			zap.String("command", bootCommand))
 	}
+	execution.remoteInstanceLifecycleMu.Unlock()
 
 	return m.initializeAgentSession(operationCtx, execution, bootCommand, agentDisplayName, taskDescription, approvalPolicy)
 }
@@ -232,7 +242,7 @@ func (m *Manager) preflightRemoteContributionPushes(ctx context.Context, executi
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		result, err := client.GitPushPreflight(ctx, key)
+		result, err := client.GitPushPreflight(ctx, key, agentctl.PushOptions{})
 		if err != nil {
 			return &BootstrapFailure{
 				Operation: bootstrapOperation(execution),

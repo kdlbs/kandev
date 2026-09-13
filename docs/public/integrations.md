@@ -144,13 +144,24 @@ select **Save changes** once. GitHub App creation, import, and installation rema
 GitHub workflows. The help control beside **Task Git access** explains the effective credential
 path on desktop hover or focus and in a touch-accessible drawer on mobile.
 
-- **Managed workspace credentials** (an opt-in policy) uses the selected workspace PAT, named GitHub
-  CLI account, or GitHub App through Kandev's short-lived, task/repository-scoped broker. Kandev
-  configures `agentctl` as Git's credential helper so an attached repository can redeem its
-  matching lease on demand; the returned credential is not written to the repository or Git
-  configuration. A separate broker-aware shim handles `gh`. The task receives neither the stored
-  PAT nor an App private key. An executor-profile `GH_TOKEN` or `GITHUB_TOKEN` deliberately takes
-  precedence for that task.
+- Existing workspaces keep their saved task-access policy during upgrades. A historical workspace
+  may still use managed mode. New workspaces default to **Inherit executor Git credentials**.
+- Select **Change connection** when the workspace has an automation connection. Select **Connect
+  GitHub** when it does not. Both entry points show **Task Git access**.
+- **Managed workspace credentials** use the selected PAT, named GitHub CLI account, or GitHub App
+  through Kandev's task/repository-scoped broker. Kandev provides a short-lived Git helper and `gh`
+  shim; stored PATs and App private keys are not exposed to the task. An executor-profile
+  `GH_TOKEN` or `GITHUB_TOKEN` takes precedence.
+- **Inherit executor Git credentials** does not install Kandev's helper or `gh` shim. Local and
+  Worktree tasks use host Git credentials. Docker, SSH, and cloud tasks use credentials configured
+  in the executor.
+- A disconnected workspace can select **Inherit executor Git credentials** and save only the
+  task-access setting. It does not need a PAT or GitHub App.
+- The policy applies to newly launched task processes. After a launch or resume, use **New
+  terminal** to create a fresh shell process. Reopening or reconnecting the same terminal does not
+  refresh its environment.
+- For Kandev-managed GitHub checkouts, Local and Worktree preparation follows the host's current
+  `gh` clone protocol. A user-managed checkout keeps its existing origin.
 
 For a managed **Improve Kandev** task, Kandev keeps the task attached to the canonical
 `kdlbs/kandev` repository. Before the first launch, the workspace automation connection resolves
@@ -160,15 +171,6 @@ exact fork. The canonical `origin` remains the pull, issue, and pull-request tar
 connection does not need a fork. An App connection without direct write access cannot own an
 automatic personal fork, so managed fork preparation fails closed; the Improve Kandev issue-only
 option remains available.
-
-- **Inherit executor Git credentials** is the default for newly created workspaces and does not
-  install Kandev's broker helper or `gh` shim. Local
-  and Worktree tasks use credentials already visible to the host Git process (including SSH).
-  Docker, SSH, and cloud tasks use only credentials intentionally configured in that executor.
-  For Kandev-managed GitHub checkouts, Local and Worktree preparation also updates `origin` to the
-  host's configured `gh` clone protocol. Selecting SSH therefore lets Git conditional includes that
-  match `remote.*.url` apply; switching back to managed credentials restores the canonical HTTPS
-  origin. Repositories you registered from an existing local checkout are never rewritten.
 
 If Git rejects a managed checkout with **detected dubious ownership**, the Kandev service account
 and the checkout owner do not match. Repository preparation stops and the session error identifies
@@ -292,23 +294,6 @@ issued through it. Kandev blocks deletion while any workspace or personal connec
 deletes only the encrypted catalog credential bundle, and does not delete or uninstall the App on
 GitHub. Remove the provider-side App separately only after confirming that no other deployment uses
 it.
-
-### Upgrade and recovery
-
-Workspaces that existed when workspace authentication was introduced receive a **Legacy shared** connection so upgrades do not immediately lose GitHub access. It preserves the previous installation-wide resolution behavior while the workspace is migrated. Existing workspaces and their saved task-access policies are not rewritten by the new-workspace defaults. After a legacy workspace selects a PAT, named CLI account, or App installation, it cannot return to legacy mode. Copying a workspace never copies authentication or App installation bindings.
-
-Legacy shared resolution checks an authenticated host `gh` CLI first, then backend `GITHUB_TOKEN`, backend `GH_TOKEN`, and finally the old stored `GITHUB_TOKEN`/`github_token` secret. Those ambient sources are migration compatibility only; configure an explicit workspace connection to make identity and access deterministic.
-
-For recovery:
-
-- Replace an invalid PAT or select the exact CLI account again; validation must succeed before Kandev swaps the connection.
-- Run `gh auth status --hostname github.com` as the Kandev service user when a selected CLI login disappears, then sign in that account again if necessary.
-- Reconnect **My GitHub identity** after authorization expiry/revocation. App automation remains available while the personal connection is invalid.
-- Ask an organization owner to unsuspend or reinstall an App, restore its repository selection, or grant a reported missing permission. Refresh the workspace status afterward.
-- Disconnect and repeat **Install GitHub App** when the workspace is bound to the wrong installation. Removing the binding does not uninstall the provider-side App.
-- To replace compromised App root credentials, disconnect every binding, delete the catalog
-  registration, rotate the credentials in GitHub, and add the App again. Kandev does not rotate App
-  private keys, OAuth client secrets, or webhook secrets automatically.
 
 </details>
 

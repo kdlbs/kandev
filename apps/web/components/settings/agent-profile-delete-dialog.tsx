@@ -15,6 +15,7 @@ import {
 } from "@kandev/ui/alert-dialog";
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
+import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
 import { useAppStore } from "@/components/state-provider";
 import type {
   ActiveSessionInfo,
@@ -39,6 +40,8 @@ const DELETE_PROFILE_DESCRIPTION_KEY = "agents:deleteAgentProfileDescription";
 const CANCEL_LABEL_KEY = "common:cancel";
 
 type AgentProfileDeleteConfirmationProps = {
+  profileId: string;
+  profileName: string;
   open: boolean;
   isFinePointer: boolean;
   anchorRef: RefObject<HTMLElement | null>;
@@ -52,6 +55,8 @@ type AgentProfileDeleteConfirmationProps = {
  * AgentProfileDeleteConflictDialog because its dependency lists need a modal.
  */
 export function AgentProfileDeleteConfirmation({
+  profileId,
+  profileName,
   open,
   isFinePointer,
   anchorRef,
@@ -60,26 +65,21 @@ export function AgentProfileDeleteConfirmation({
   onConfirm,
 }: AgentProfileDeleteConfirmationProps) {
   const { t } = useTranslation();
-  if (isFinePointer) {
-    return (
-      <ActionConfirmPopover
-        open={open}
-        anchorRef={anchorRef}
-        title={t(DELETE_PROFILE_TITLE_KEY)}
-        description={t(DELETE_PROFILE_DESCRIPTION_KEY)}
-        cancelLabel={t(CANCEL_LABEL_KEY)}
-        confirmLabel={t("agents:delete")}
-        confirmTestId="agent-profile-delete-confirm"
-        testId="agent-profile-delete-confirm-popover"
-        onOpenChange={onOpenChange}
-        onCancel={onCancel}
-        onConfirm={onConfirm}
-      />
-    );
-  }
-
-  if (!open) return null;
-  return (
+  const fallback = isFinePointer ? (
+    <ActionConfirmPopover
+      open={open}
+      anchorRef={anchorRef}
+      title={t(DELETE_PROFILE_TITLE_KEY)}
+      description={t(DELETE_PROFILE_DESCRIPTION_KEY)}
+      cancelLabel={t(CANCEL_LABEL_KEY)}
+      confirmLabel={t("agents:delete")}
+      confirmTestId="agent-profile-delete-confirm"
+      testId="agent-profile-delete-confirm-popover"
+      onOpenChange={onOpenChange}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+    />
+  ) : (
     <InlineConfirmActions
       density="touch"
       testId="agent-profile-delete-inline-confirmation"
@@ -91,6 +91,23 @@ export function AgentProfileDeleteConfirmation({
       onCancel={onCancel}
       onClose={() => onOpenChange(false)}
       onConfirm={onConfirm}
+    />
+  );
+  return (
+    <MobileActionConfirmation
+      open={open}
+      targetKey={profileId}
+      title={t(DELETE_PROFILE_TITLE_KEY)}
+      subject={profileName}
+      description={t(DELETE_PROFILE_DESCRIPTION_KEY)}
+      cancelLabel={t(CANCEL_LABEL_KEY)}
+      confirmLabel={t("agents:delete")}
+      confirmTestId="agent-profile-delete-confirm"
+      focusReturnRef={anchorRef}
+      onOpenChange={onOpenChange}
+      onCancel={onCancel}
+      onConfirm={onConfirm}
+      fallback={fallback}
     />
   );
 }

@@ -11,6 +11,27 @@ import (
 // gitOperationOK is the canonical success body every /api/v1/git/* POST returns.
 const gitOperationOK = `{"success":true,"operation":"pull","output":"Already up to date."}`
 
+func TestGitPushSendsPushOptions(t *testing.T) {
+	srv, got := captureServer(t, jsonResponder(http.StatusOK, gitOperationOK))
+	_, err := newHTTPOnlyClient(srv.URL).GitPush(context.Background(), "svc", PushOptions{
+		Remote: "backup", ExpectedBranch: "feature/work",
+	})
+	if err != nil {
+		t.Fatalf("GitPush() error = %v", err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(got.Body, &body); err != nil {
+		t.Fatalf("decode request body: %v", err)
+	}
+	for key, want := range map[string]any{
+		"repo": "svc", "remote": "backup", "expected_branch": "feature/work",
+	} {
+		if gotValue := body[key]; gotValue != want {
+			t.Errorf("body[%q] = %#v, want %#v", key, gotValue, want)
+		}
+	}
+}
+
 // TestGitOperations_PostExpectedPathAndPayload pins the endpoint and JSON body
 // of every thin wrapper over gitOperation. A wrapper that posts to the wrong
 // path or drops a field is the whole failure mode for this layer.
@@ -36,7 +57,7 @@ func TestGitOperations_PostExpectedPathAndPayload(t *testing.T) {
 		{
 			name: "push force with upstream",
 			call: func(c *Client) (*GitOperationResult, error) {
-				return c.GitPush(context.Background(), true, true, "svc")
+				return c.GitPush(context.Background(), "svc", PushOptions{Force: true, SetUpstream: true})
 			},
 			wantPath: "/api/v1/git/push",
 			wantBody: map[string]any{"force": true, "set_upstream": true, "repo": "svc"},
@@ -44,16 +65,43 @@ func TestGitOperations_PostExpectedPathAndPayload(t *testing.T) {
 		{
 			name: "push plain",
 			call: func(c *Client) (*GitOperationResult, error) {
-				return c.GitPush(context.Background(), false, false, "")
+				return c.GitPush(context.Background(), "", PushOptions{})
 			},
 			wantPath: "/api/v1/git/push",
 			wantBody: map[string]any{"force": false, "set_upstream": false},
 		},
 		{
-			name:     "push preflight",
-			call:     func(c *Client) (*GitOperationResult, error) { return c.GitPushPreflight(context.Background(), "svc") },
+			name: "push preflight",
+			call: func(c *Client) (*GitOperationResult, error) {
+				return c.GitPushPreflight(context.Background(), "svc", PushOptions{})
+			},
 			wantPath: "/api/v1/git/push-preflight",
 			wantBody: map[string]any{"repo": "svc"},
+		},
+		{
+			name: "push with explicit target and expected branch",
+			call: func(c *Client) (*GitOperationResult, error) {
+				return c.GitPush(context.Background(), "svc", PushOptions{
+					Remote: "backup", ExpectedBranch: "feature/work",
+				})
+			},
+			wantPath: "/api/v1/git/push",
+			wantBody: map[string]any{
+				"force": false, "set_upstream": false, "repo": "svc",
+				"remote": "backup", "expected_branch": "feature/work",
+			},
+		},
+		{
+			name: "push preflight with explicit target and expected branch",
+			call: func(c *Client) (*GitOperationResult, error) {
+				return c.GitPushPreflight(context.Background(), "svc", PushOptions{
+					Remote: "backup", ExpectedBranch: "feature/work",
+				})
+			},
+			wantPath: "/api/v1/git/push-preflight",
+			wantBody: map[string]any{
+				"repo": "svc", "remote": "backup", "expected_branch": "feature/work",
+			},
 		},
 		{
 			name: "replace remote contribution",
@@ -331,7 +379,7 @@ func TestGitOperation_HonoursContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 
-	_, err := newHTTPOnlyClient(srv.URL).GitPush(ctx, false, false, "")
+	_, err := newHTTPOnlyClient(srv.URL).GitPush(ctx, "", PushOptions{})
 	if err == nil || !strings.Contains(err.Error(), "context canceled") {
 		t.Fatalf("error = %v, want context canceled", err)
 	}
