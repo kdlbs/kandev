@@ -43,10 +43,11 @@ var terminalFailedStatuses = map[string]bool{
 }
 
 var skipOutcomes = map[string]bool{
-	RunOutcomeIdleSkipped:   true,
-	RunOutcomeBudgetBlocked: true,
-	RunOutcomeAgentInactive: true,
-	RunOutcomeTaskTreeHeld:  true,
+	RunOutcomeIdleSkipped:        true,
+	RunOutcomeBudgetBlocked:      true,
+	RunOutcomeBudgetUnmeasurable: true,
+	RunOutcomeAgentInactive:      true,
+	RunOutcomeTaskTreeHeld:       true,
 }
 
 // ClassifyTerminalRun classifies one terminal run (status not in

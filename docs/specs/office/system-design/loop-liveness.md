@@ -351,7 +351,7 @@ Counters are process-lifetime totals and reset on restart, which is what
 
 ## Terminal shapes
 
-A pure function over three persisted columns plus the activation instant. It
+A function over three persisted columns plus the activation instant. It
 writes nothing (AC-005.8) and reads no free text (AC-005.7).
 
 It is defined only over **terminal** runs, where terminal means "not `queued` and
@@ -376,7 +376,7 @@ migration.
 | `launched_completed` | `status = 'finished'` and `outcome = 'processed'` and `session_id != ''` |
 | `launched_failed` | `status IN ('failed','timed_out','cancelled')` and `session_id != ''` |
 | `silent_success` | `status = 'finished'` and `outcome = 'processed'` and `session_id = ''` |
-| `unlaunched_skipped` | `status = 'finished'` and `session_id = ''` and `outcome IN ('idle_skipped','budget_blocked','agent_inactive','task_tree_held')` |
+| `unlaunched_skipped` | `status = 'finished'` and `session_id = ''` and `outcome IN ('idle_skipped','budget_blocked','budget_unmeasurable','agent_inactive','task_tree_held')` |
 | `unlaunched_failed` | `status IN ('failed','timed_out','cancelled')` and `session_id = ''` |
 | `unclassified` | anything else, including `outcome IS NULL` and unknown values such as `no_agent_launched` |
 
@@ -549,9 +549,9 @@ Go tests only; no user-visible surface changes, so no Playwright work.
   the lost-CAS fresh-run path.
 - `internal/office/service` — terminal-shape classification table-driven and
   asserted total over the cross-product of `finished`, `failed`, `cancelled`,
-  `timed_out` and an unknown status against every outcome including
-  `no_agent_launched` and `NULL`, with a skip outcome carrying a session id landing
-  in `unclassified`; session id persisted on both launch paths; a failing session
+  `timed_out` and an unknown status against every outcome, including `NULL` and
+  the legacy value, with a session-bearing skip landing in `unclassified`;
+  session id persisted on both launch paths; a failing session
   write leaves the column at whatever it already held, does not fail the launch,
   and increments `office_loop_session_persist_failed_total` rather than the
   without-session counter; relaunch keeps the greater-`claimed_at` id and an empty

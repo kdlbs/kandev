@@ -21,8 +21,8 @@ type crossProductCase struct {
 	want      service.TerminalShape
 }
 
-// crossProductCases enumerates all 5 statuses x 7 outcomes x 2 session
-// states (70 cells) this codebase's runs.status/outcome/session_id can
+// crossProductCases enumerates all 5 statuses x 8 outcomes x 2 session
+// states (80 cells) this codebase's runs.status/outcome/session_id can
 // hold, each mapped to its expected shape by hand from the spec table.
 func crossProductCases() []crossProductCase {
 	outcomeCases := []*string{
@@ -30,6 +30,7 @@ func crossProductCases() []crossProductCase {
 		strp(service.RunOutcomeProcessed),
 		strp(service.RunOutcomeIdleSkipped),
 		strp(service.RunOutcomeBudgetBlocked),
+		strp(service.RunOutcomeBudgetUnmeasurable),
 		strp(service.RunOutcomeAgentInactive),
 		strp(service.RunOutcomeTaskTreeHeld),
 		strp("no_agent_launched"), // legacy value; not in current code
@@ -47,6 +48,8 @@ func crossProductCases() []crossProductCase {
 		{"finished", strp(service.RunOutcomeIdleSkipped), "sess-1", service.ShapeUnclassified},
 		{"finished", strp(service.RunOutcomeBudgetBlocked), "", service.ShapeUnlaunchedSkipped},
 		{"finished", strp(service.RunOutcomeBudgetBlocked), "sess-1", service.ShapeUnclassified},
+		{"finished", strp(service.RunOutcomeBudgetUnmeasurable), "", service.ShapeUnlaunchedSkipped},
+		{"finished", strp(service.RunOutcomeBudgetUnmeasurable), "sess-1", service.ShapeUnclassified},
 		{"finished", strp(service.RunOutcomeAgentInactive), "", service.ShapeUnlaunchedSkipped},
 		{"finished", strp(service.RunOutcomeAgentInactive), "sess-1", service.ShapeUnclassified},
 		{"finished", strp(service.RunOutcomeTaskTreeHeld), "", service.ShapeUnlaunchedSkipped},
@@ -65,6 +68,8 @@ func crossProductCases() []crossProductCase {
 		{"some_unknown_status", strp(service.RunOutcomeIdleSkipped), "sess-1", service.ShapeUnclassified},
 		{"some_unknown_status", strp(service.RunOutcomeBudgetBlocked), "", service.ShapeUnclassified},
 		{"some_unknown_status", strp(service.RunOutcomeBudgetBlocked), "sess-1", service.ShapeUnclassified},
+		{"some_unknown_status", strp(service.RunOutcomeBudgetUnmeasurable), "", service.ShapeUnclassified},
+		{"some_unknown_status", strp(service.RunOutcomeBudgetUnmeasurable), "sess-1", service.ShapeUnclassified},
 		{"some_unknown_status", strp(service.RunOutcomeAgentInactive), "", service.ShapeUnclassified},
 		{"some_unknown_status", strp(service.RunOutcomeAgentInactive), "sess-1", service.ShapeUnclassified},
 		{"some_unknown_status", strp(service.RunOutcomeTaskTreeHeld), "", service.ShapeUnclassified},
@@ -95,15 +100,15 @@ func crossProductCases() []crossProductCase {
 // runs.status is not the closed RunStatus enum) against every observed
 // outcome (including the legacy no_agent_launched value and NULL),
 // crossed with session_id present/absent — pinned to the exact shape
-// each of the 70 cells must produce, not just closed-set membership.
+// each of the 80 cells must produce, not just closed-set membership.
 func TestClassifyTerminalRun_CrossProduct(t *testing.T) {
 	activation := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	requestedAt := activation.Add(time.Hour)
 
 	cases := crossProductCases()
-	if len(cases) != 5*7*2 {
-		t.Fatalf("cross-product case count = %d, want %d (5 statuses x 7 outcomes x 2 session states)",
-			len(cases), 5*7*2)
+	if len(cases) != 5*8*2 {
+		t.Fatalf("cross-product case count = %d, want %d (5 statuses x 8 outcomes x 2 session states)",
+			len(cases), 5*8*2)
 	}
 
 	for _, tc := range cases {
@@ -157,6 +162,7 @@ func TestClassifyTerminalRun_NamedShapes(t *testing.T) {
 		{"silent_success", "finished", strp(service.RunOutcomeProcessed), "", service.ShapeSilentSuccess},
 		{"unlaunched_skipped/idle", "finished", strp(service.RunOutcomeIdleSkipped), "", service.ShapeUnlaunchedSkipped},
 		{"unlaunched_skipped/budget", "finished", strp(service.RunOutcomeBudgetBlocked), "", service.ShapeUnlaunchedSkipped},
+		{"unlaunched_skipped/budget_unmeasurable", "finished", strp(service.RunOutcomeBudgetUnmeasurable), "", service.ShapeUnlaunchedSkipped},
 		{"unlaunched_skipped/inactive", "finished", strp(service.RunOutcomeAgentInactive), "", service.ShapeUnlaunchedSkipped},
 		{"unlaunched_skipped/tree_held", "finished", strp(service.RunOutcomeTaskTreeHeld), "", service.ShapeUnlaunchedSkipped},
 		{"unlaunched_failed", "failed", nil, "", service.ShapeUnlaunchedFailed},

@@ -264,10 +264,11 @@ answer it with a verdict, its evidence and its thresholds.
 
 ### REQ-OFFICE-LOOP-LIVENESS-005: Separate the terminal shapes
 
-**Intent:** Five terminal dispositions write `status = 'finished'`, a sixth writes
-`status = 'failed'` with a null outcome, and a legacy value no enum contains
-survives in production data. Naming each ending apart makes "quiet because there
-is no work" and "quiet because it silently fails" different readings.
+**Intent:** Six terminal dispositions write `status = 'finished'`, a terminal
+failure writes `status = 'failed'` with a null outcome, and a legacy value no
+enum contains survives in production data. Naming each ending apart makes
+"quiet because there is no work" and "quiet because it silently fails" different
+readings.
 
 #### Acceptance criteria
 
