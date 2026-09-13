@@ -35,7 +35,8 @@ through browser storage to launcher restoration. Prove it on desktop and phone.
 
 ## Out of scope
 
-- Agent goal UI, protocol changes, cross-device selection, and transcript scroll restoration.
+- Agent goal UI and metadata retention belong to Task 02.
+- Cross-device selection and transcript scroll restoration.
 - New dialog composition, tab-order persistence, and terminal lifecycle changes.
 
 ## Acceptance
