@@ -174,6 +174,8 @@ func normalizeToolArguments(toolName string, arguments any) (any, error) {
 		return normalizeCreateTaskArguments(arguments)
 	case "resolve_review_finding_kandev":
 		return normalizeResolveReviewFindingArguments(arguments)
+	case "list_review_findings_kandev":
+		return normalizeListReviewFindingsArguments(arguments)
 	default:
 		return arguments, nil
 	}
@@ -233,6 +235,29 @@ func normalizeResolveReviewFindingArguments(arguments any) (any, error) {
 	}
 	normalized["status"] = status
 
+	return normalized, nil
+}
+
+// normalizeListReviewFindingsArguments implements AC-TWS-003.7: a `status` or
+// `severity` argument given as JSON null (or any non-string value) must be
+// treated as omitted rather than rejected by the schema layer's string-type
+// check, which runs after this normalisation and otherwise never lets the
+// call reach the handler's own omitted-value handling.
+func normalizeListReviewFindingsArguments(arguments any) (any, error) {
+	args, ok := arguments.(map[string]any)
+	if !ok {
+		return arguments, nil
+	}
+	normalized := make(map[string]any, len(args))
+	for key, value := range args {
+		normalized[key] = value
+	}
+	if _, exists := args["status"]; exists {
+		normalized["status"] = toolArgumentString(args["status"])
+	}
+	if _, exists := args[severityArg]; exists {
+		normalized[severityArg] = toolArgumentString(args[severityArg])
+	}
 	return normalized, nil
 }
 

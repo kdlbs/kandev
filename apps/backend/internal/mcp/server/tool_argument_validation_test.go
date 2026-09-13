@@ -407,6 +407,54 @@ func TestNormalizeResolveReviewFindingArguments(t *testing.T) {
 	})
 }
 
+// TestNormalizeListReviewFindingsArguments pins AC-TWS-003.7: a JSON null (or
+// any non-string value) for `status`/`severity` is rewritten to an empty
+// string before the schema layer's string-type check runs, so the call
+// reaches the handler as omitted instead of failing validation. A key that is
+// absent entirely is left absent.
+func TestNormalizeListReviewFindingsArguments(t *testing.T) {
+	t.Run("rewrites JSON null status and severity to empty string", func(t *testing.T) {
+		arguments := map[string]any{
+			"task_id":  "task-1",
+			"status":   nil,
+			"severity": nil,
+		}
+
+		normalized, err := normalizeToolArguments("list_review_findings_kandev", arguments)
+
+		require.NoError(t, err)
+		normalizedArguments, ok := normalized.(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "task-1", normalizedArguments["task_id"])
+		assert.Equal(t, "", normalizedArguments["status"])
+		assert.Equal(t, "", normalizedArguments["severity"])
+	})
+
+	t.Run("leaves an absent status or severity absent", func(t *testing.T) {
+		arguments := map[string]any{"task_id": "task-1"}
+
+		normalized, err := normalizeToolArguments("list_review_findings_kandev", arguments)
+
+		require.NoError(t, err)
+		normalizedArguments, ok := normalized.(map[string]any)
+		require.True(t, ok)
+		assert.NotContains(t, normalizedArguments, "status")
+		assert.NotContains(t, normalizedArguments, "severity")
+	})
+
+	t.Run("leaves a valid non-empty status and severity untouched", func(t *testing.T) {
+		arguments := map[string]any{"status": "resolved", "severity": "blocker"}
+
+		normalized, err := normalizeToolArguments("list_review_findings_kandev", arguments)
+
+		require.NoError(t, err)
+		normalizedArguments, ok := normalized.(map[string]any)
+		require.True(t, ok)
+		assert.Equal(t, "resolved", normalizedArguments["status"])
+		assert.Equal(t, "blocker", normalizedArguments["severity"])
+	})
+}
+
 func waitForCondition(t *testing.T, description string, condition func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)

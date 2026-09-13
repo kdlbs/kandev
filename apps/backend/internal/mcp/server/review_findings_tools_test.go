@@ -34,6 +34,30 @@ func TestListReviewFindingsTool_ForwardsTaskIDAndFilters(t *testing.T) {
 	assert.Equal(t, "blocker", payload["severity"])
 }
 
+// TestListReviewFindingsTool_JSONNullFiltersTreatedAsOmitted pins AC-TWS-003.7:
+// a `status` or `severity` argument given as explicit JSON null must reach the
+// handler as omitted rather than being rejected by the schema layer's
+// string-type check before the handler's own default/no-restriction behavior
+// ever runs.
+func TestListReviewFindingsTool_JSONNullFiltersTreatedAsOmitted(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{
+		"findings": []interface{}{}, "total_matched": float64(0), "truncated": false,
+	}}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "list_review_findings_kandev", map[string]interface{}{
+		"status":   nil,
+		"severity": nil,
+	})
+
+	require.False(t, result.IsError, "explicit JSON null must not fail schema validation")
+	assert.Equal(t, ws.ActionMCPListReviewFindings, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "", payload["status"], "a null status must reach the handler as omitted, not as literal null")
+	assert.Equal(t, "", payload["severity"], "a null severity must reach the handler as omitted, not as literal null")
+}
+
 func TestListReviewFindingsTool_ExplicitTaskIDForwardedNotBound(t *testing.T) {
 	backend := &testBackend{response: map[string]interface{}{
 		"findings": []interface{}{}, "total_matched": float64(0), "truncated": false,
