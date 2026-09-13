@@ -143,5 +143,6 @@ func waitForReaderConnections(t *testing.T, fixture statsReferenceFixture, want 
 			t.Fatalf("reader occupancy = %d, want at least %d", fixture.reader.Stats().InUse, want)
 		}
 		runtime.Gosched()
+		time.Sleep(time.Millisecond)
 	}
 }

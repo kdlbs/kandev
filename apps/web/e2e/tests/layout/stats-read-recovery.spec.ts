@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 
 test.describe("Stats section recovery", () => {
   test("keeps successful sections, retries a failed section, and gates Copy Stats", async ({
@@ -25,16 +26,28 @@ test.describe("Stats section recovery", () => {
       await route.continue();
     });
 
+    const failedDailyRead = waitForHttp(
+      testPage,
+      "GET",
+      new RegExp(`^/api/v1/workspaces/${seedData.workspaceId}/stats/daily-activity$`),
+      { predicate: (response) => response.status() === 503 },
+    );
     await testPage.goto(`/stats?workspaceId=${seedData.workspaceId}`);
+    await failedDailyRead;
     const activityStatus = testPage.getByRole("status").filter({ hasText: "Statistics" }).first();
-    await expect(activityStatus).toBeVisible({ timeout: 10_000 });
+    await expect(activityStatus).toBeVisible();
     await expect(testPage.getByRole("main").getByText("Tasks", { exact: true })).toBeVisible();
-    await expect(testPage.getByRole("button", { name: "Copy Stats", exact: true })).toBeDisabled();
 
-    await expect.poll(() => dailyRequests).toBeGreaterThanOrEqual(2);
-    await expect(activityStatus).toHaveCount(0, { timeout: 10_000 });
-    await expect(testPage.getByRole("button", { name: "Copy Stats", exact: true })).toBeEnabled({
-      timeout: 10_000,
-    });
+    const recoveredDailyRead = waitForHttp(
+      testPage,
+      "GET",
+      new RegExp(`^/api/v1/workspaces/${seedData.workspaceId}/stats/daily-activity$`),
+      { predicate: (response) => response.ok() },
+    );
+    await expect(testPage.getByRole("button", { name: "Copy Stats", exact: true })).toBeDisabled();
+    await testPage.getByRole("button", { name: "Retry", exact: true }).click();
+    await recoveredDailyRead;
+    await expect(activityStatus).toHaveCount(0);
+    await expect(testPage.getByRole("button", { name: "Copy Stats", exact: true })).toBeEnabled();
   });
 });

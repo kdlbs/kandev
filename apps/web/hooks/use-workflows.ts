@@ -32,7 +32,16 @@ function canRetryWorkspaceContext(
 }
 
 function hasPendingWorkspaceContextRead(readState: WorkspaceContextReadState): boolean {
-  return Object.values(readState.pending).some(Boolean) || readState.snapshotPending;
+  const requestIds = readState.requestIds;
+  const pendingCollection = Object.entries(readState.pending).some(
+    ([collection, pending]) =>
+      pending &&
+      (requestIds === undefined || requestIds[collection as keyof typeof requestIds] !== null),
+  );
+  const pendingSnapshot =
+    readState.snapshotPending &&
+    (readState.snapshotRequestId === undefined || readState.snapshotRequestId !== null);
+  return pendingCollection || pendingSnapshot;
 }
 
 function hasTransientWorkspaceContextError(readState: WorkspaceContextReadState): boolean {
@@ -193,14 +202,14 @@ export function useEnsureWorkspaceWorkflows() {
   const retryCycleRef = useRef({ key: "", attempts: 0 });
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryTimerKeyRef = useRef<string | null>(null);
+  const retryTimerTokenRef = useRef(0);
 
   useWorkflowsFetchEffect(workspaceId, true, true, setWorkflows, store, true, retryVersion);
 
   const recoverOnForeground = useCallback(() => {
     if (!workspaceId || !readState || readState.workspaceId !== workspaceId) return;
     if (
-      Object.values(readState.pending).some(Boolean) ||
-      readState.snapshotPending ||
+      hasPendingWorkspaceContextRead(readState) ||
       (!Object.values(readState.errors).some((error) => error === "transient") &&
         readState.snapshotError !== "transient")
     )
@@ -244,19 +253,32 @@ export function useEnsureWorkspaceWorkflows() {
       workspaceContextRetryAfter(readState),
     );
     retryTimerKeyRef.current = key;
+    const timerToken = ++retryTimerTokenRef.current;
     retryTimerRef.current = setTimeout(() => {
+      if (retryTimerKeyRef.current !== key || retryTimerTokenRef.current !== timerToken) return;
       retryTimerRef.current = null;
       retryTimerKeyRef.current = null;
+      retryTimerTokenRef.current += 1;
       if (document.visibilityState !== "visible") return;
+      const currentReadState = store.getState().workspaceContextRead;
+      if (
+        !canRetryWorkspaceContext(currentReadState, workspaceId) ||
+        hasPendingWorkspaceContextRead(currentReadState) ||
+        !hasTransientWorkspaceContextError(currentReadState)
+      )
+        return;
       retryCycleRef.current.attempts += 1;
       requestRefresh(false);
     }, delay);
-  }, [readState, requestRefresh, retryVersion, workspaceId]);
+  }, [readState, requestRefresh, retryVersion, store, workspaceId]);
 
   useEffect(() => {
     const clearWhenHidden = () => {
       if (document.visibilityState !== "hidden") return;
-      if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current);
+        retryTimerTokenRef.current += 1;
+      }
       retryTimerRef.current = null;
       retryTimerKeyRef.current = null;
     };
@@ -266,6 +288,7 @@ export function useEnsureWorkspaceWorkflows() {
       if (retryTimerRef.current) clearTimeout(retryTimerRef.current);
       retryTimerRef.current = null;
       retryTimerKeyRef.current = null;
+      retryTimerTokenRef.current += 1;
     };
   }, []);
 }

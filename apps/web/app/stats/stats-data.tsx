@@ -192,6 +192,18 @@ function clearRetryTimer(scope: StatsScope, key: StatsSectionKey): void {
   delete scope.timers[key];
 }
 
+function isCurrentStatsScope(
+  scope: StatsScope,
+  fetchKeyRef: { current: string | null },
+  scopeRef: { current: StatsScope | null },
+): boolean {
+  return (
+    fetchKeyRef.current === scope.key &&
+    scopeRef.current === scope &&
+    !scope.controller.signal.aborted
+  );
+}
+
 // eslint-disable-next-line max-lines-per-function -- one scope owns request, retry, and cancellation state
 export function useStatsSections(
   workspaceId: string | undefined,
@@ -207,6 +219,8 @@ export function useStatsSections(
   const [sections, setSections] = useState<StatsSections>(INITIAL_SECTIONS);
   const sectionsRef = useRef(sections);
   sectionsRef.current = sections;
+  const fetchKeyRef = useRef(fetchKey);
+  fetchKeyRef.current = fetchKey;
   const scopeRef = useRef<StatsScope | null>(null);
   const startRequestRef = useRef<(key: StatsSectionKey, resetAttempts: boolean) => void>(() => {});
   if (fetchKey !== trackedKey) {
@@ -258,7 +272,7 @@ export function useStatsSections(
       };
       fetchStatsSection(key, workspaceId, options, range)
         .then((data) => {
-          if (scopeRef.current !== scope || scope.controller.signal.aborted) return;
+          if (!isCurrentStatsScope(scope, fetchKeyRef, scopeRef)) return;
           scope.active.delete(key);
           scope.attempts[key] = 0;
           clearRetryTimer(scope, key);
@@ -271,13 +285,7 @@ export function useStatsSections(
           );
         })
         .catch((error: unknown) => {
-          if (
-            scopeRef.current !== scope ||
-            scope.controller.signal.aborted ||
-            isAbortError(error)
-          ) {
-            return;
-          }
+          if (!isCurrentStatsScope(scope, fetchKeyRef, scopeRef) || isAbortError(error)) return;
           scope.active.delete(key);
           const classified = classifySectionError(error, t);
           setSections((previous) => {

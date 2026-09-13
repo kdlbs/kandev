@@ -198,7 +198,7 @@ function LoadErrorNotice({
       {onRetry && retryLabel && (
         <button
           type="button"
-          className="h-11 min-h-11 shrink-0 cursor-pointer underline underline-offset-2 md:h-7 md:min-h-7"
+          className="h-11 min-h-11 shrink-0 cursor-pointer underline underline-offset-2 [@media(pointer:fine)]:h-7 [@media(pointer:fine)]:min-h-7"
           onClick={onRetry}
         >
           {retryLabel}

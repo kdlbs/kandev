@@ -272,7 +272,7 @@ async function fetchAndWriteSnapshot(
   } catch (err) {
     console.error(
       `[useAllWorkflowSnapshots] Failed to fetch snapshot for workflow "${wf.name}" (${wf.id}):`,
-      err,
+      safeErrorMessage(err),
     );
     if (
       fetchGenRef.current !== myGen ||
@@ -289,6 +289,10 @@ async function fetchAndWriteSnapshot(
       store.getState().setWorkflowSnapshot(wf.id, { ...current, isPlaceholder: false });
     }
   }
+}
+
+function safeErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function mapSnapshotTask(task: Task, stepIds: Set<string>): KanbanTask | null {
@@ -457,6 +461,7 @@ export function useAllWorkflowSnapshots(workspaceId: string | null) {
       resolveRefreshes(myGen);
     });
     return () => {
+      resolveRefreshes(myGen);
       if (fetchGenRef.current === myGen) fetchGenRef.current += 1;
       setWorkspaceSnapshotRead?.(
         request.workspaceId,

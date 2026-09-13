@@ -49,7 +49,9 @@ vi.mock("@kandev/ui/toggle-group", () => ({
 }));
 
 vi.mock("./stats-sections", () => ({
-  OverviewCards: () => <div>Overview data</div>,
+  OverviewCards: ({ git_stats }: { git_stats?: unknown }) => (
+    <div>Overview data {git_stats ? "with git" : "without git"}</div>
+  ),
   WorkloadSection: () => <div>Workload data</div>,
   RepositoryStatsGrid: () => <div>Repository data</div>,
   TopRepositories: () => <div>Top repositories data</div>,
@@ -161,7 +163,31 @@ describe("StatsPageClient", () => {
 
     render(<StatsPageClient workspaceId="ws-1" activeRange="month" />);
 
-    expect(screen.getByRole("button", { name: "Retrying…" }).hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "Retry" }).hasAttribute("disabled")).toBe(true);
+    expect(
+      screen.getAllByRole("status").some((status) => status.textContent?.includes("Retrying…")),
+    ).toBe(true);
+  });
+
+  it("keeps retained Git data visible while the Git refresh fails", () => {
+    const sections = readySections() as Record<string, unknown>;
+    sections.git = {
+      kind: "error",
+      message: "Git activity is temporarily unavailable. Try again.",
+      retryable: true,
+      data: {
+        total_commits: 2,
+        total_files_changed: 3,
+        total_insertions: 4,
+        total_deletions: 1,
+      },
+    };
+    mocks.sections = sections;
+
+    render(<StatsPageClient workspaceId="ws-1" activeRange="month" />);
+
+    expect(screen.getByText("Overview data with git")).toBeTruthy();
+    expect(screen.getByText("Git activity is temporarily unavailable. Try again.")).toBeTruthy();
   });
 
   it("enables Copy Stats only after all current sections are ready", () => {

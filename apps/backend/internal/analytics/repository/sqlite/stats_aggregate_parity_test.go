@@ -171,6 +171,8 @@ func seedStatsParityFixture(t testing.TB, dbConn *sqlx.DB) statsParityFixture {
 	insertStatsTask(t, dbConn, "task-main", "ws-main", "Main", "IN_PROGRESS", false, "", rangeStart, today)
 	insertStatsTask(t, dbConn, "task-empty", "ws-main", "Empty", "TODO", false, "", dayBefore, today.Add(-time.Hour))
 	insertStatsTask(t, dbConn, "task-old", "ws-main", "Old", "TODO", false, "", rangeStart.Add(-time.Hour), today.Add(-2*time.Hour))
+	insertStatsTask(t, dbConn, "task-archived", "ws-main", "Archived", "IN_PROGRESS", false, "", rangeStart, today.Add(-30*time.Minute))
+	statsExec(t, dbConn, `UPDATE tasks SET archived_at = ? WHERE id = ?`, today, "task-archived")
 	insertStatsTask(t, dbConn, "task-ephemeral", "ws-main", "Ephemeral", "TODO", true, "", dayBefore, dayBefore)
 	insertStatsTask(t, dbConn, "task-automation", "ws-main", "Automation", "TODO", false, taskmodels.TaskOriginAutomationRun, dayBefore, dayBefore)
 	insertStatsTask(t, dbConn, "task-other", "ws-other", "Other", "TODO", false, "", dayBefore, dayBefore)
@@ -179,6 +181,7 @@ func seedStatsParityFixture(t testing.TB, dbConn *sqlx.DB) statsParityFixture {
 	insertStatsTaskRepository(t, dbConn, "tr-main-b", "task-main", "repo-b", rangeStart)
 	insertStatsTaskRepository(t, dbConn, "tr-empty-a", "task-empty", "repo-a", dayBefore)
 	insertStatsTaskRepository(t, dbConn, "tr-old-a", "task-old", "repo-a", rangeStart.Add(-time.Hour))
+	insertStatsTaskRepository(t, dbConn, "tr-archived-a", "task-archived", "repo-a", rangeStart)
 	insertStatsTaskRepository(t, dbConn, "tr-ephemeral-a", "task-ephemeral", "repo-a", dayBefore)
 	insertStatsTaskRepository(t, dbConn, "tr-automation-a", "task-automation", "repo-a", dayBefore)
 	insertStatsTaskRepository(t, dbConn, "tr-other", "task-other", "repo-other", dayBefore)
@@ -291,19 +294,20 @@ func assertStatsAggregateParity(t *testing.T, repo *Repository, fixture statsPar
 	for _, stat := range taskStats {
 		tasksByID[stat.TaskID] = stat
 	}
-	if len(tasksByID) != 3 {
-		t.Fatalf("task stats count = %d, want 3: %+v", len(tasksByID), taskStats)
+	if len(tasksByID) != 4 {
+		t.Fatalf("task stats count = %d, want 4: %+v", len(tasksByID), taskStats)
 	}
 	assertTaskStats(t, tasksByID["task-main"], 2, 3, 6, 3, 2, 12600000, 10800000)
 	assertTaskStats(t, tasksByID["task-empty"], 1, 0, 1, 1, 0, 0, 0)
 	assertTaskStats(t, tasksByID["task-old"], 1, 1, 2, 2, 0, 3600000, 3600000)
+	assertTaskStats(t, tasksByID["task-archived"], 0, 0, 0, 0, 0, 0, 0)
 
 	rangedTaskStats, err := repo.GetTaskStats(ctx, "ws-main", &fixture.rangeStart, 10)
 	if err != nil {
 		t.Fatalf("GetTaskStats with range failed: %v", err)
 	}
-	if len(rangedTaskStats) != 2 || rangedTaskStats[0].TaskID != "task-main" || rangedTaskStats[1].TaskID != "task-empty" {
-		t.Fatalf("ranged task stats = %+v, want task-main then task-empty", rangedTaskStats)
+	if len(rangedTaskStats) != 3 || rangedTaskStats[0].TaskID != "task-main" || rangedTaskStats[1].TaskID != "task-archived" || rangedTaskStats[2].TaskID != "task-empty" {
+		t.Fatalf("ranged task stats = %+v, want task-main, task-archived, then task-empty", rangedTaskStats)
 	}
 
 	repositoryStats, err := repo.GetRepositoryStats(ctx, "ws-main", nil)
@@ -317,7 +321,7 @@ func assertStatsAggregateParity(t *testing.T, repo *Repository, fixture statsPar
 	if len(repositoriesByID) != 2 {
 		t.Fatalf("repository stats count = %d, want 2: %+v", len(repositoriesByID), repositoryStats)
 	}
-	assertRepositoryStats(t, repositoriesByID["repo-a"], 3, 0, 1, 4, 4, 9, 6, 2, 16200000, 3, 7, 45, 10)
+	assertRepositoryStats(t, repositoriesByID["repo-a"], 4, 1, 1, 4, 4, 9, 6, 2, 16200000, 3, 7, 45, 10)
 	assertRepositoryStats(t, repositoriesByID["repo-b"], 1, 0, 1, 2, 3, 6, 3, 2, 12600000, 1, 3, 20, 5)
 
 	rangedRepositoryStats, err := repo.GetRepositoryStats(ctx, "ws-main", &fixture.rangeStart)
@@ -328,7 +332,7 @@ func assertStatsAggregateParity(t *testing.T, repo *Repository, fixture statsPar
 	for _, stat := range rangedRepositoryStats {
 		rangedRepositoriesByID[stat.RepositoryID] = stat
 	}
-	assertRepositoryStats(t, rangedRepositoriesByID["repo-a"], 2, 0, 1, 4, 4, 9, 6, 2, 16200000, 2, 6, 40, 9)
+	assertRepositoryStats(t, rangedRepositoriesByID["repo-a"], 3, 1, 1, 4, 4, 9, 6, 2, 16200000, 2, 6, 40, 9)
 	assertRepositoryStats(t, rangedRepositoriesByID["repo-b"], 1, 0, 1, 2, 3, 6, 3, 2, 12600000, 1, 3, 20, 5)
 
 	daily, err := repo.GetDailyActivity(ctx, "ws-main", 7)

@@ -610,11 +610,15 @@ function useRouteData({
               settingsWorkspaceId,
             )
           : firstKnownWorkspaceId(storeWorkspaceId, cookieWorkspaceId, settingsWorkspaceId);
+      const workspaceBeforeHydration = store.getState().workspaces.activeId;
       store.getState().hydrate({
-        workspaces: { items: workspaceItems, activeId: workspaceId },
+        workspaces: { items: workspaceItems, activeId: workspaceBeforeHydration },
         workflows: { items: store.getState().workflows.items, activeId: settingsWorkflowId },
         userSettings: { ...mapUserSettingsResponse(settingsResponse), workspaceId },
       });
+      if (workspaceId !== workspaceBeforeHydration) {
+        store.getState().setActiveWorkspace(workspaceId);
+      }
       if (!workspaceId) return;
 
       const generation = store.getState().workspaceContextGeneration;

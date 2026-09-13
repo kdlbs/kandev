@@ -225,7 +225,7 @@ describe("Home startup bootstrap", () => {
     expect(mocks.router.replace).not.toHaveBeenCalled();
   });
 
-  it("settles route-owned context reads when unmounted before they resolve", async () => {
+  it("settles route-owned reads on unmount and recovers a later transient failure", async () => {
     const workflows = deferred<{ workflows: Array<Record<string, unknown>> }>();
     const repositories = deferred<{ repositories: Array<Record<string, unknown>> }>();
     mocks.listWorkflows.mockReturnValue(workflows.promise);
@@ -253,6 +253,18 @@ describe("Home startup bootstrap", () => {
       workflows: false,
       repositories: false,
     });
+
+    mocks.listWorkflows.mockRejectedValueOnce(new Error("temporary workflow failure"));
+    mocks.listRepositories.mockResolvedValueOnce({ repositories: [] });
+    const second = render(<Subject route={{ workspaceId: "ws-1" }} />);
+    await waitFor(() =>
+      expect(store.getState().workspaceContextRead.errors.workflows).toBe("transient"),
+    );
+
+    mocks.listWorkflows.mockResolvedValueOnce({ workflows: [] });
+    act(() => store.getState().requestWorkspaceContextRefresh());
+    await waitFor(() => expect(store.getState().workspaceContextRead.errors.workflows).toBeNull());
+    second.unmount();
   });
 });
 

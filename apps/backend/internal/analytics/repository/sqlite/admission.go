@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"time"
 
@@ -57,7 +58,7 @@ func normalizeAnalyticsOperationError(
 	if err == nil || parent.Err() != nil {
 		return err
 	}
-	if operation.Err() == context.DeadlineExceeded {
+	if operation.Err() == context.DeadlineExceeded && errors.Is(err, context.DeadlineExceeded) {
 		return analytics.NewAnalyticsBusyError(err)
 	}
 	return err

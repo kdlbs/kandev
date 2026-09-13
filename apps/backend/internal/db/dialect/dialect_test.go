@@ -239,7 +239,7 @@ func TestDateNowMinusDays(t *testing.T) {
 		t.Errorf("sqlite: got %q", got)
 	}
 	got = DateNowMinusDays(PGX, "?")
-	if got != "CURRENT_DATE - (? || ' days')::interval" {
+	if got != "CURRENT_DATE - (?::int * INTERVAL '1 day')" {
 		t.Errorf("pgx: got %q", got)
 	}
 }

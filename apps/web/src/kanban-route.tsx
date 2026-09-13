@@ -149,14 +149,18 @@ export function useKanbanRouteBootstrap(route: KanbanRouteSelection, skip: boole
         readActiveWorkspaceCookie(),
         settingsWorkspaceId,
       );
+      const workspaceBeforeHydration = store.getState().workspaces.activeId;
 
       store.getState().hydrate({
-        workspaces: { items: workspaceItems, activeId: activeWorkspaceId },
+        workspaces: { items: workspaceItems, activeId: workspaceBeforeHydration },
         userSettings: {
           ...mapUserSettingsResponse(settingsResponse),
           workspaceId: activeWorkspaceId,
         },
       });
+      if (activeWorkspaceId !== workspaceBeforeHydration) {
+        store.getState().setActiveWorkspace(activeWorkspaceId);
+      }
 
       if (!activeWorkspaceId) return;
 

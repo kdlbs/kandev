@@ -34,9 +34,13 @@ export function isRetryableWorkspaceContextError(error: unknown): boolean {
 export function retryAfterMilliseconds(error: unknown): number | undefined {
   if (!error || typeof error !== "object") return undefined;
   const retryAfterSeconds = (error as { retryAfterSeconds?: unknown }).retryAfterSeconds;
-  return typeof retryAfterSeconds === "number" && retryAfterSeconds > 0
-    ? retryAfterSeconds * 1000
-    : undefined;
+  if (
+    typeof retryAfterSeconds !== "number" ||
+    !Number.isFinite(retryAfterSeconds) ||
+    retryAfterSeconds <= 0
+  )
+    return undefined;
+  return Math.min(retryAfterSeconds * 1000, 2_147_483_647);
 }
 
 function apiErrorStatus(error: unknown): number | undefined {

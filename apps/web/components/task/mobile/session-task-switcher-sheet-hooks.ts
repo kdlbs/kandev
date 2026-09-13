@@ -183,10 +183,25 @@ type SheetNavOptions = {
   onOpenChange: (open: boolean) => void;
 };
 
+export type WorkspaceTaskSession = {
+  id: string;
+  updated_at?: string | null;
+};
+
+export async function loadWorkspaceTaskSessions(
+  loader: SheetNavOptions["loadTaskSessionsForTask"],
+  taskId: string,
+): Promise<WorkspaceTaskSession[]> {
+  try {
+    return await loader(taskId);
+  } catch {
+    return [];
+  }
+}
+
 // eslint-disable-next-line max-lines-per-function -- workspace switching keeps its generation guard around every async phase
 async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
   const { store, loadTaskSessionsForTask, setActiveSession, setActiveTask, onOpenChange } = opts;
-  store.getState().resetKanbanWorkspaceContext();
   store.getState().setActiveWorkspace(newWorkspaceId);
   const generation = store.getState().workspaceContextGeneration;
   const requestId = generateUUID();
@@ -256,7 +271,7 @@ async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
     }));
     const mostRecentTask = sortByUpdatedAtDesc(snapshot.tasks)[0];
     if (mostRecentTask) {
-      const sessions = await loadTaskSessionsForTask(mostRecentTask.id);
+      const sessions = await loadWorkspaceTaskSessions(loadTaskSessionsForTask, mostRecentTask.id);
       if (!isCurrentWorkspaceContext(store.getState(), newWorkspaceId, generation)) return;
       const mostRecentSession = sortByUpdatedAtDesc(sessions)[0];
       if (mostRecentSession) {

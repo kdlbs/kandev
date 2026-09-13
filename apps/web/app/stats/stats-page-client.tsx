@@ -187,12 +187,18 @@ function ErrorPanel({
             type="button"
             variant="outline"
             size="sm"
-            className="mt-3 min-h-11 cursor-pointer px-3 text-xs md:h-7 md:min-h-7"
+            className="mt-3 min-h-11 cursor-pointer px-3 text-xs [@media(pointer:fine)]:h-7 [@media(pointer:fine)]:min-h-7"
             onClick={onRetry}
             disabled={retrying}
+            aria-label={t("stats:retry")}
           >
-            {retrying ? t("stats:retrying") : t("stats:retry")}
+            {t("stats:retry")}
           </Button>
+        )}
+        {retrying && (
+          <span className="sr-only" role="status" aria-live="polite">
+            {t("stats:retrying")}
+          </span>
         )}
       </CardContent>
     </Card>
@@ -247,7 +253,7 @@ function OverviewPanel({
   // its failure must not blank the tasks/sessions/turns summary the user can
   // already see. OverviewCards.git_stats is optional → falls back to the
   // averages card when git data is missing.
-  const gitData = git.kind === "ready" ? git.data : undefined;
+  const gitData = git.kind === "loading" ? undefined : git.data;
   const cards = global.data ? <OverviewCards global={global.data} git_stats={gitData} /> : null;
   return (
     <>

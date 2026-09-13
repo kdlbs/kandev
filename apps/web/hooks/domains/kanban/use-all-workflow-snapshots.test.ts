@@ -267,6 +267,33 @@ describe("useAllWorkflowSnapshots — fetch guards", () => {
   });
 });
 
+describe("useAllWorkflowSnapshots — cleanup", () => {
+  beforeEach(() => {
+    resetMocks([{ id: "wf-A", workspaceId: "ws-A", name: "A" }]);
+  });
+
+  it("settles a refresh promise when its request is superseded by effect cleanup", async () => {
+    let resolveFetch: (value: { steps: []; tasks: [] }) => void = () => {};
+    mockFetchWorkflowSnapshot.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+    const { result, unmount } = renderHook(() => useAllWorkflowSnapshots("ws-A"));
+
+    await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(1));
+    let refreshPromise!: Promise<void>;
+    act(() => {
+      refreshPromise = result.current.refresh();
+    });
+
+    await expect(refreshPromise).resolves.toBeUndefined();
+    resolveFetch({ steps: [], tasks: [] });
+    unmount();
+  });
+});
+
 const WORKTREE_EXECUTOR_FIELDS = {
   primaryExecutorId: "exec-worktree",
   primaryExecutorType: "worktree",

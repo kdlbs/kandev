@@ -554,7 +554,7 @@ func buildRepositoryStatsQuery(drv string) string {
 			WHERE workspace_id = ? AND deleted_at IS NULL
 		), task_repository_scope AS (
 			SELECT DISTINCT er.id AS repository_id,
-				t.id AS task_id, t.state, t.workflow_step_id, t.created_at
+				t.id AS task_id, t.state, t.workflow_step_id, t.archived_at, t.created_at
 			FROM eligible_repositories er
 			JOIN task_repositories tr ON tr.repository_id = er.id
 			JOIN tasks t ON t.id = tr.task_id
@@ -562,8 +562,10 @@ func buildRepositoryStatsQuery(drv string) string {
 		), task_stats AS (
 			SELECT scope.repository_id,
 				COUNT(*) AS total_tasks,
-				COUNT(CASE WHEN ws.position = (SELECT MAX(ws2.position) FROM workflow_steps ws2 WHERE ws2.workflow_id = ws.workflow_id) THEN scope.task_id END) AS completed_tasks,
-				COUNT(CASE WHEN scope.state = 'IN_PROGRESS' THEN scope.task_id END) AS in_progress_tasks
+				COUNT(CASE WHEN scope.archived_at IS NOT NULL
+					OR ws.position = (SELECT MAX(ws2.position) FROM workflow_steps ws2 WHERE ws2.workflow_id = ws.workflow_id)
+					THEN scope.task_id END) AS completed_tasks,
+				COUNT(CASE WHEN scope.state = 'IN_PROGRESS' AND scope.archived_at IS NULL THEN scope.task_id END) AS in_progress_tasks
 			FROM task_repository_scope scope
 			LEFT JOIN workflow_steps ws ON ws.id = scope.workflow_step_id
 			WHERE `+rangeStartPredicate(drv, "scope.created_at")+`

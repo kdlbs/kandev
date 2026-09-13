@@ -157,10 +157,10 @@ func CurrentDate(driver string) string {
 // where daysExpr is a parameter placeholder (e.g., "?") for the number of days.
 //
 //	SQLite:   date('now', '-' || ? || ' days')
-//	Postgres: CURRENT_DATE - (? || ' days')::interval
+//	Postgres: CURRENT_DATE - (?::int * INTERVAL '1 day')
 func DateNowMinusDays(driver, daysExpr string) string {
 	if IsPostgres(driver) {
-		return fmt.Sprintf("CURRENT_DATE - (%s || ' days')::interval", daysExpr)
+		return fmt.Sprintf("CURRENT_DATE - (%s::int * INTERVAL '1 day')", daysExpr)
 	}
 	return fmt.Sprintf("date('now', '-' || %s || ' days')", daysExpr)
 }

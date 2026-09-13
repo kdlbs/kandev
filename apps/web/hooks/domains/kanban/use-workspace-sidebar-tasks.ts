@@ -131,7 +131,16 @@ function workspaceContextErrors(
 }
 
 function workspaceContextIsPending(read: AppState["workspaceContextRead"]): boolean {
-  return Object.values(read?.pending ?? {}).some(Boolean) || read?.snapshotPending === true;
+  const pendingCollection = Object.entries(read?.pending ?? {}).some(
+    ([collection, pending]) =>
+      pending &&
+      (read?.requestIds === undefined ||
+        read.requestIds[collection as keyof typeof read.requestIds] !== null),
+  );
+  const pendingSnapshot =
+    read?.snapshotPending === true &&
+    (read.snapshotRequestId === undefined || read.snapshotRequestId !== null);
+  return pendingCollection || pendingSnapshot;
 }
 
 function getWorkspaceContextStatus(

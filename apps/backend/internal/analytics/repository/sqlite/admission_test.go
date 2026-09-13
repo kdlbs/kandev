@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/analytics"
 )
 
 func TestAnalyticsAdmissionBound(t *testing.T) {
@@ -94,4 +96,19 @@ func TestAnalyticsAdmissionReleasesOnError(t *testing.T) {
 	}
 	release()
 
+}
+
+func TestNormalizeAnalyticsOperationErrorPreservesNonTimeoutDatabaseErrors(t *testing.T) {
+	operation, cancel := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancel()
+	storageErr := errors.New("database closed")
+
+	got := normalizeAnalyticsOperationError(context.Background(), operation, storageErr)
+
+	if !errors.Is(got, storageErr) {
+		t.Fatalf("normalized error = %v, want the storage error", got)
+	}
+	if analytics.IsAnalyticsBusy(got) {
+		t.Fatalf("normalized storage error = %v, want no analytics-busy classification", got)
+	}
 }
