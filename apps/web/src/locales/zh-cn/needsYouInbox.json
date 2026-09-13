@@ -14,7 +14,7 @@
   "errorTitle": "无法加载您的收件箱",
   "errorDescription": "加载等待您处理的问题时出错。",
   "retry": "重试",
-  "emptyTitle": "所有事项均已处理",
+  "emptyTitle": "{{workspace}} 中没有任何事项在等待您处理。",
   "emptyDescription": "此列表仅涵盖在此工作区中阻塞代理的问题,不计入其他工作区中的问题集、待处理的权限请求、父问题记录,或您自己已延后或已忽略的行。",
   "hiddenNotice_one": "有 {{count}} 个问题因您自己的忽略或延后操作而被隐藏。",
   "hiddenNotice_other": "有 {{count}} 个问题因您自己的忽略或延后操作而被隐藏。",
@@ -27,5 +27,9 @@
   "dismissed": "已忽略",
   "restore": "恢复",
   "restoreFailed": "无法恢复此问题,请重试。",
-  "truncatedNotice": "仅显示最先出现的问题,还有更多等待处理。"
+  "truncatedNotice": "仅显示最先出现的问题,还有更多等待处理。",
+  "openTask": "打开任务",
+  "questionCount_one": "此问题集中有 {{count}} 个问题",
+  "questionCount_other": "此问题集中有 {{count}} 个问题",
+  "emptyTitleUnnamedWorkspace": "此工作区中没有任何事项在等待您处理。"
 }

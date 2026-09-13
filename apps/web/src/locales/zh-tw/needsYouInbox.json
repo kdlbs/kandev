@@ -14,7 +14,7 @@
   "errorTitle": "無法載入您的收件箱",
   "errorDescription": "載入等待您處理的問題時出錯。",
   "retry": "重試",
-  "emptyTitle": "所有事項均已處理",
+  "emptyTitle": "{{workspace}} 中沒有任何事項在等待您處理。",
   "emptyDescription": "此清單僅涵蓋在此工作區中阻塞代理的問題,不計入其他工作區中的問題集、待處理的權限請求、父問題記錄,或您自己已延後或已忽略的行。",
   "hiddenNotice_one": "有 {{count}} 個問題因您自己的忽略或延後操作而被隱藏。",
   "hiddenNotice_other": "有 {{count}} 個問題因您自己的忽略或延後操作而被隱藏。",
@@ -27,5 +27,9 @@
   "dismissed": "已忽略",
   "restore": "恢復",
   "restoreFailed": "無法恢復此問題,請重試。",
-  "truncatedNotice": "僅顯示最先出現的問題,還有更多等待處理。"
+  "truncatedNotice": "僅顯示最先出現的問題,還有更多等待處理。",
+  "openTask": "開啟任務",
+  "questionCount_one": "此問題集中有 {{count}} 個問題",
+  "questionCount_other": "此問題集中有 {{count}} 個問題",
+  "emptyTitleUnnamedWorkspace": "此工作區中沒有任何事項在等待您處理。"
 }

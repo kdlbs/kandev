@@ -20,3 +20,13 @@ export function rowPrimaryText(bundle: ClarificationInboxBundle, fallback: strin
 export function rowSecondaryText(bundle: ClarificationInboxBundle): string {
   return bundle.task_title || bundle.task_id;
 }
+
+// How many questions the bundle carries, counted by the presence of a
+// clarification question rather than by message count: a bundle's message list
+// can hold context messages that are not themselves questions (design-03#D3).
+export function rowQuestionCount(bundle: ClarificationInboxBundle): number {
+  return bundle.messages.filter((message) => {
+    const metadata = message.metadata as ClarificationRequestMetadata | undefined;
+    return Boolean(metadata?.question);
+  }).length;
+}

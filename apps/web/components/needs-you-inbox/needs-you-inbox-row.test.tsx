@@ -95,6 +95,47 @@ describe("NeedsYouInboxRow", () => {
     expect(screen.getByText("Fix the deploy")).not.toBeNull();
   });
 
+  it("links to the task, which the row body itself cannot reach (design-03#D1)", () => {
+    render(<NeedsYouInboxRow bundle={bundle()} />);
+
+    const link = screen.getByTestId("needs-you-inbox-open-task");
+    expect(link.getAttribute("href")).toBe("/t/t1");
+    expect(link.textContent).toBe("Open task");
+  });
+
+  it("keeps the task reachable from the actions menu, where narrow viewports must find it (design-03#D1)", () => {
+    render(<NeedsYouInboxRow bundle={bundle()} />);
+    openRowActionsMenu();
+
+    const item = screen.getByTestId("needs-you-inbox-open-task-menu-item");
+    expect(item.getAttribute("href")).toBe("/t/t1");
+  });
+
+  it("states the bundle size only when the bundle holds more than one question (design-03#D3)", () => {
+    const { unmount } = render(<NeedsYouInboxRow bundle={bundle()} />);
+    expect(screen.queryByTestId("needs-you-inbox-row-question-count")).toBeNull();
+    unmount();
+
+    const two = bundle();
+    two.messages = [
+      two.messages[0],
+      {
+        ...two.messages[0],
+        id: "m2",
+        metadata: {
+          pending_id: "p1",
+          session_id: "s1",
+          question: { id: "q2", title: "And another", prompt: "", options: [] },
+        },
+      },
+    ];
+    render(<NeedsYouInboxRow bundle={two} />);
+
+    expect(screen.getByTestId("needs-you-inbox-row-question-count").textContent).toBe(
+      "2 questions in this bundle",
+    );
+  });
+
   it("labels the row's status through the shared Threads status vocabulary (AC .26)", () => {
     render(<NeedsYouInboxRow bundle={bundle()} />);
 

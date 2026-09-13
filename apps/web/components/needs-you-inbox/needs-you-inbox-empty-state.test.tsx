@@ -6,17 +6,46 @@ vi.mock("@/lib/api/domains/clarification-inbox-api", () => ({
   restoreClarificationInboxBundle: vi.fn(),
 }));
 
+let workspaceItems: Array<{ id: string; name: string }> = [{ id: "w1", name: "Kegmil V2" }];
+
 vi.mock("@/components/state-provider", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   useAppStore: (selector: (s: any) => unknown) =>
-    selector({ workspaces: { activeId: "w1" }, bumpNeedsYouInboxRefreshTick: vi.fn() }),
+    selector({
+      workspaces: { activeId: "w1", items: workspaceItems },
+      bumpNeedsYouInboxRefreshTick: vi.fn(),
+    }),
 }));
 
 import { NeedsYouInboxEmptyState } from "./needs-you-inbox-empty-state";
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  workspaceItems = [{ id: "w1", name: "Kegmil V2" }];
+});
 
 describe("NeedsYouInboxEmptyState", () => {
+  it("names the workspace rather than claiming the whole instance is quiet (design-03#D2)", () => {
+    render(<NeedsYouInboxEmptyState hiddenCount={0} />);
+
+    expect(screen.getByText("Nothing is waiting on you in Kegmil V2.")).not.toBeNull();
+  });
+
+  it("falls back to a workspace-less sentence when the active workspace is unresolved", () => {
+    workspaceItems = [];
+    render(<NeedsYouInboxEmptyState hiddenCount={0} />);
+
+    expect(screen.getByText("Nothing is waiting on you in this workspace.")).not.toBeNull();
+  });
+
+  it("does not congratulate: an empty queue is a normal state, not an achievement (design-03#D2)", () => {
+    const { container } = render(<NeedsYouInboxEmptyState hiddenCount={0} />);
+
+    expect(container.querySelector("svg")).toBeNull();
+    expect(container.textContent).not.toContain("!");
+    expect(container.textContent).not.toContain("caught up");
+  });
+
   it("names all four things it does not count (AC .20)", () => {
     render(<NeedsYouInboxEmptyState hiddenCount={0} />);
 

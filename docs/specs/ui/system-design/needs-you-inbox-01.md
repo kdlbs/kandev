@@ -7,7 +7,9 @@ requirements:
 # Needs-you Inbox System Design Part 1
 
 Part 2 (control flow, failure, persistence, status vocabulary, security, prior
-art) is in [`needs-you-inbox-02.md`](needs-you-inbox-02.md).
+art) is in [`needs-you-inbox-02.md`](needs-you-inbox-02.md); Part 3 (design
+source, fidelity decisions) is in
+[`needs-you-inbox-03.md`](needs-you-inbox-03.md).
 
 ## Purpose and boundaries
 

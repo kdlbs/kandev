@@ -18,6 +18,7 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { useTranslation } from "react-i18next";
+import Link from "@/components/routing/app-link";
 import { useAppStore } from "@/components/state-provider";
 import { toast } from "@/lib/toast/sonner";
 import { formatRelativeTime } from "@/lib/i18n/formats";
@@ -34,7 +35,11 @@ import type {
   ResolvedStatus,
 } from "@/hooks/domains/session/use-clarification-group";
 import { ClarificationPanelSection } from "@/components/task/chat/clarification-panel-section";
-import { rowPrimaryText, rowSecondaryText } from "@/lib/needs-you-inbox/row-presentation";
+import {
+  rowPrimaryText,
+  rowQuestionCount,
+  rowSecondaryText,
+} from "@/lib/needs-you-inbox/row-presentation";
 import { resolveThreadSessionStatus } from "@/lib/threads/thread-session-status";
 import type { TaskSessionState } from "@/lib/types/http";
 
@@ -99,10 +104,12 @@ function useRowOutcomeNotice(primaryText: string, bumpRefreshTick: () => void) {
 
 function RowActionsMenu({
   disabled,
+  taskHref,
   onDismiss,
   onSnooze,
 }: {
   disabled: boolean;
+  taskHref: string;
   onDismiss: () => void;
   onSnooze: (duration: ClarificationInboxSnoozeDuration) => void;
 }) {
@@ -122,6 +129,11 @@ function RowActionsMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
+        <DropdownMenuItem asChild className="cursor-pointer">
+          <Link href={taskHref} data-testid="needs-you-inbox-open-task-menu-item">
+            {t("needsYouInbox:openTask")}
+          </Link>
+        </DropdownMenuItem>
         <DropdownMenuItem className="cursor-pointer" onSelect={onDismiss}>
           {t("needsYouInbox:dismiss")}
         </DropdownMenuItem>
@@ -154,6 +166,8 @@ export function NeedsYouInboxRow({ bundle }: { bundle: ClarificationInboxBundle 
 
   const primaryText = rowPrimaryText(bundle, t("needsYouInbox:questionFromAgent"));
   const secondaryText = rowSecondaryText(bundle);
+  const questionCount = rowQuestionCount(bundle);
+  const taskHref = `/t/${bundle.task_id}`;
   const relativeTime = formatRelativeTime(bundle.created_at);
   const statusLabel = t(
     resolveThreadSessionStatus({
@@ -194,6 +208,14 @@ export function NeedsYouInboxRow({ bundle }: { bundle: ClarificationInboxBundle 
           <span className="min-w-0 flex-1">
             <span className="block truncate text-sm font-medium">{primaryText}</span>
             <span className="block truncate text-xs text-muted-foreground">{secondaryText}</span>
+            {questionCount > 1 && (
+              <span
+                className="block truncate text-xs text-muted-foreground"
+                data-testid="needs-you-inbox-row-question-count"
+              >
+                {t("needsYouInbox:questionCount", { count: questionCount })}
+              </span>
+            )}
           </span>
           <span className="shrink-0 text-xs text-muted-foreground">{relativeTime}</span>
           {expanded ? (
@@ -202,8 +224,23 @@ export function NeedsYouInboxRow({ bundle }: { bundle: ClarificationInboxBundle 
             <IconChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
           )}
         </button>
+        {/* The row body toggles the answer panel, so without this the task is
+            unreachable from the Inbox (design-03#D1). Withheld below `sm`,
+            where it would squeeze the title; the actions menu carries it at
+            every width. */}
+        <Button
+          asChild
+          variant="outline"
+          size="sm"
+          className="hidden shrink-0 cursor-pointer sm:inline-flex"
+        >
+          <Link href={taskHref} data-testid="needs-you-inbox-open-task">
+            {t("needsYouInbox:openTask")}
+          </Link>
+        </Button>
         <RowActionsMenu
           disabled={dismissing || snoozing}
+          taskHref={taskHref}
           onDismiss={() =>
             void runDismiss(() => dismissClarificationInboxBundle(bundle.pending_id))
           }

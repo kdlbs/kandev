@@ -7,7 +7,9 @@ requirements:
 # Needs-you Inbox System Design Part 2
 
 Part 1 (boundaries, input inventory, flag, components, data and contracts) is in
-[`needs-you-inbox-01.md`](needs-you-inbox-01.md).
+[`needs-you-inbox-01.md`](needs-you-inbox-01.md); Part 3 (design source,
+fidelity decisions) is in
+[`needs-you-inbox-03.md`](needs-you-inbox-03.md).
 
 ## Control flow
 
