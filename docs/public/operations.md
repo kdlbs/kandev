@@ -130,6 +130,14 @@ diagnostics. A later successful probe restores readiness and stateful traffic
 without a process restart. `/health` remains a pure liveness check and stays
 HTTP 200 while the process is alive.
 
+Stats requests have a separate temporary pressure response. When the shared
+analytics limit is full for too long, a Stats endpoint returns HTTP 503 with
+`error_code: "analytics_busy"` and `Retry-After: 2`. This means the analytics
+work is queued or timed out while normal reads and persistence probes remain
+available. The Stats page retries failed sections and keeps successful sections
+visible. If `persistence_unavailable` appears instead, inspect the persistence
+diagnostic because a required store failed its health check.
+
 ![Settings > System > Status showing health checks, the running version, and disk usage.](../screenshots/system-status.png)
 
 For a managed service, also check its process manager:
@@ -620,6 +628,8 @@ drawer mirrors it as the saved left sequence followed by the saved right sequenc
 | `/health` cannot connect                                  | Process-manager and launcher output                                | Confirm port ownership, database reachability, writable Kandev home, and required executables; then restart once                                                                                                                                              |
 | `/ready` stays at 503 while `/health` is 200              | Backend startup logs                                               | Process is alive but still wiring routes, seeding the agent registry, or mounting test-harness routes; give it more time before restarting                                                                                                                    |
 | Status page says unhealthy while `/ready` is 200          | `/api/v1/system/health` issue IDs                                  | Fix Git, GitHub, agent discovery, or Linux inotify warning; readiness and application diagnostics have different meanings                                                                                                                                     |
+| Stats returns `analytics_busy`                             | Stats response code and `Retry-After` header                         | Wait for the bounded retry or select **Retry** in the failed section. If pressure continues, reduce concurrent Stats loads and inspect backend logs                                                                                                             |
+| Stateful reads return `persistence_unavailable`            | `/api/v1/system/diagnostics/persistence`                           | Check the affected store and database health. This is a required-store failure, so resolve it before treating the incident as temporary analytics pressure                                                                                                        |
 | Backups page reports a 15-second create timeout           | Reload the backup list and inspect the `backup-create` job/log     | Large `VACUUM INTO` jobs can still finish; avoid double-clicking and ensure free disk                                                                                                                                                                         |
 | Backup/maintenance fails on PostgreSQL                    | Active driver on Database page                                     | Use `pg_dump`, provider snapshots, and PostgreSQL maintenance; System backup/vacuum/reset is SQLite-only                                                                                                                                                      |
 | Restored data looks stale                                 | Whether the backend was restarted immediately                      | Quit/restart; do not keep using the old open database connections                                                                                                                                                                                             |

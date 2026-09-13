@@ -1,14 +1,42 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
+import { act, renderHook, waitFor } from "@testing-library/react";
 
 const mockListWorkflows = vi.fn();
 const mockSetWorkflows = vi.fn();
+const mockSetWorkspaceContextRead = vi.fn();
+const mockRequestWorkspaceContextRefresh = vi.fn();
+
+type WorkspaceContextReadResult =
+  | "pending"
+  | "success"
+  | "transient"
+  | "access_denied"
+  | "not_found"
+  | "invalid"
+  | "cancelled"
+  | "unknown";
+
+type MockWorkspaceContextRead = {
+  workspaceId: string | null;
+  generation: number;
+  pending: { workflows: boolean; repositories: boolean; steps: boolean };
+  errors: Record<"workflows" | "repositories" | "steps", WorkspaceContextReadResult | null>;
+  retryAfterMs: Record<"workflows" | "repositories" | "steps", number | null>;
+  retryVersion: number;
+  retryCycle: number;
+  snapshotPending?: boolean;
+  snapshotError?: WorkspaceContextReadResult | null;
+  snapshotRetryAfterMs?: number | null;
+};
 
 type MockState = {
   workflows: { items: Array<{ id: string; workspaceId: string; name: string }> };
   workspaces: { activeId: string | null };
   workspaceContextGeneration: number;
   setWorkflows: typeof mockSetWorkflows;
+  workspaceContextRead?: MockWorkspaceContextRead;
+  setWorkspaceContextRead?: typeof mockSetWorkspaceContextRead;
+  requestWorkspaceContextRefresh?: typeof mockRequestWorkspaceContextRefresh;
 };
 
 let mockState: MockState = {
@@ -41,6 +69,10 @@ function makeWorkflow(id: string, workspaceId: string) {
     hidden: false,
     style: null,
   };
+}
+
+function setVisibility(value: DocumentVisibilityState) {
+  Object.defineProperty(document, "visibilityState", { configurable: true, value });
 }
 
 describe("useWorkflows — stale response guard", () => {
@@ -207,6 +239,7 @@ describe("useWorkflows — explicit workspace selection", () => {
   });
 });
 
+// eslint-disable-next-line max-lines-per-function -- related workspace recovery cases share one fixture
 describe("useEnsureWorkspaceWorkflows", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -232,4 +265,205 @@ describe("useEnsureWorkspaceWorkflows", () => {
     rerender();
     await waitFor(() => expect(mockListWorkflows).toHaveBeenCalledWith("ws-B", expect.anything()));
   });
+
+  it("bounds scheduled retry attempts and does not restart the cycle for timer refreshes", async () => {
+    vi.useFakeTimers();
+    const contextRead: MockWorkspaceContextRead = {
+      workspaceId: "ws-A",
+      generation: 0,
+      pending: { workflows: false, repositories: false, steps: false },
+      errors: { workflows: "transient", repositories: null, steps: null },
+      retryAfterMs: { workflows: null, repositories: null, steps: null },
+      retryVersion: 0,
+      retryCycle: 0,
+    };
+    mockSetWorkspaceContextRead.mockImplementation(
+      (
+        collection: "workflows" | "repositories" | "steps",
+        workspaceId: string,
+        generation: number,
+        result: WorkspaceContextReadResult,
+        retryAfterMs?: number,
+      ) => {
+        if (!mockState.workspaceContextRead) return;
+        mockState = {
+          ...mockState,
+          workspaceContextRead: {
+            ...mockState.workspaceContextRead,
+            workspaceId,
+            generation,
+            pending: {
+              ...mockState.workspaceContextRead.pending,
+              [collection]: result === "pending",
+            },
+            errors: {
+              ...mockState.workspaceContextRead.errors,
+              [collection]: result === "pending" || result === "success" ? null : result,
+            },
+            retryAfterMs: {
+              ...mockState.workspaceContextRead.retryAfterMs,
+              [collection]: result === "transient" ? (retryAfterMs ?? null) : null,
+            },
+          },
+        };
+      },
+    );
+    mockRequestWorkspaceContextRefresh.mockImplementation((resetRetryCycle = true) => {
+      if (!mockState.workspaceContextRead) return;
+      mockState = {
+        ...mockState,
+        workspaceContextRead: {
+          ...mockState.workspaceContextRead,
+          retryVersion: mockState.workspaceContextRead.retryVersion + 1,
+          retryCycle: mockState.workspaceContextRead.retryCycle + (resetRetryCycle ? 1 : 0),
+        },
+      };
+    });
+    mockState = {
+      ...mockState,
+      workspaceContextRead: contextRead,
+      setWorkspaceContextRead: mockSetWorkspaceContextRead,
+      requestWorkspaceContextRefresh: mockRequestWorkspaceContextRefresh,
+    };
+    mockListWorkflows.mockRejectedValue(new Error("offline"));
+
+    const { rerender } = renderHook(() => useEnsureWorkspaceWorkflows());
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(mockListWorkflows).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(2_000);
+    });
+    expect(mockRequestWorkspaceContextRefresh).toHaveBeenCalledWith(false);
+    rerender();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(5_000);
+    });
+    expect(mockRequestWorkspaceContextRefresh).toHaveBeenCalledTimes(2);
+    rerender();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+    });
+    expect(mockRequestWorkspaceContextRefresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("cancels a scheduled retry when the workflow loader unmounts", async () => {
+    vi.useFakeTimers();
+    mockState = {
+      ...mockState,
+      workspaceContextRead: {
+        workspaceId: "ws-A",
+        generation: 0,
+        pending: { workflows: false, repositories: false, steps: false },
+        errors: { workflows: "transient", repositories: null, steps: null },
+        retryAfterMs: { workflows: null, repositories: null, steps: null },
+        retryVersion: 0,
+        retryCycle: 0,
+      },
+      setWorkspaceContextRead: mockSetWorkspaceContextRead,
+      requestWorkspaceContextRefresh: mockRequestWorkspaceContextRefresh,
+    };
+    mockListWorkflows.mockRejectedValue(new Error("offline"));
+
+    const { unmount } = renderHook(() => useEnsureWorkspaceWorkflows());
+    unmount();
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+    });
+
+    expect(mockRequestWorkspaceContextRefresh).not.toHaveBeenCalled();
+  });
+
+  it("defers recovery while hidden and starts one bounded cycle on foreground", async () => {
+    vi.useFakeTimers();
+    setVisibility("hidden");
+    mockState = {
+      ...mockState,
+      workspaceContextRead: {
+        workspaceId: "ws-A",
+        generation: 0,
+        pending: { workflows: false, repositories: false, steps: false },
+        errors: { workflows: "transient", repositories: null, steps: null },
+        retryAfterMs: { workflows: null, repositories: null, steps: null },
+        retryVersion: 0,
+        retryCycle: 0,
+      },
+      setWorkspaceContextRead: mockSetWorkspaceContextRead,
+      requestWorkspaceContextRefresh: mockRequestWorkspaceContextRefresh,
+    };
+    mockListWorkflows.mockRejectedValue(new Error("offline"));
+
+    const { rerender } = renderHook(() => useEnsureWorkspaceWorkflows());
+    await act(async () => {
+      await Promise.resolve();
+      vi.advanceTimersByTime(10_000);
+    });
+    expect(mockRequestWorkspaceContextRefresh).not.toHaveBeenCalled();
+
+    setVisibility("visible");
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    expect(mockRequestWorkspaceContextRefresh).toHaveBeenCalledWith();
+    rerender();
+
+    await act(async () => {
+      vi.advanceTimersByTime(2_000);
+    });
+    expect(mockRequestWorkspaceContextRefresh).toHaveBeenCalledWith(false);
+  });
+
+  it("does not spend a retry attempt when a timer is replaced before dispatch", async () => {
+    vi.useFakeTimers();
+    setVisibility("visible");
+    const contextRead: MockWorkspaceContextRead = {
+      workspaceId: "ws-A",
+      generation: 0,
+      pending: { workflows: false, repositories: false, steps: false },
+      errors: { workflows: "transient", repositories: null, steps: null },
+      retryAfterMs: { workflows: null, repositories: null, steps: null },
+      retryVersion: 0,
+      retryCycle: 0,
+    };
+    mockState = {
+      ...mockState,
+      workspaceContextRead: contextRead,
+      setWorkspaceContextRead: mockSetWorkspaceContextRead,
+      requestWorkspaceContextRefresh: mockRequestWorkspaceContextRefresh,
+    };
+    mockListWorkflows.mockRejectedValue(new Error("offline"));
+
+    const { rerender } = renderHook(() => useEnsureWorkspaceWorkflows());
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    mockState = {
+      ...mockState,
+      workspaceContextRead: { ...contextRead, retryAfterMs: { ...contextRead.retryAfterMs } },
+    };
+    rerender();
+    mockState = {
+      ...mockState,
+      workspaceContextRead: { ...contextRead, retryAfterMs: { ...contextRead.retryAfterMs } },
+    };
+    rerender();
+
+    await act(async () => {
+      vi.advanceTimersByTime(2_000);
+    });
+    expect(mockRequestWorkspaceContextRefresh).toHaveBeenCalledWith(false);
+  });
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });

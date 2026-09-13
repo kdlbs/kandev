@@ -146,6 +146,7 @@ function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: HydrationState
     }
   }
   if (state.workflows) deepMerge(draft.workflows, state.workflows);
+  if (state.workspaceContextRead) deepMerge(draft.workspaceContextRead, state.workspaceContextRead);
   if (state.tasks) deepMerge(draft.tasks, state.tasks);
   if (state.workspaces) deepMerge(draft.workspaces, state.workspaces);
   if (state.repositories) deepMerge(draft.repositories, state.repositories);

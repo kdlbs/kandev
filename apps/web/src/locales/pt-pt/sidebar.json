@@ -118,5 +118,7 @@
   "morePluginItems": "Mais itens de plugins",
   "newViewNumbered": "Nova vista {{suffix}}",
   "orgChart": "Organograma",
-  "untitledView": "Vista sem título"
+  "untitledView": "Vista sem título",
+  "workspaceContextRefreshFailed": "Não foi possível atualizar as tarefas.",
+  "workspaceContextAccessDenied": "Já não tem acesso a esta área de trabalho."
 }

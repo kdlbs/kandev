@@ -189,12 +189,18 @@ function LoadErrorNotice({
   if (!error) return null;
   return (
     <div
+      role="status"
+      aria-live="polite"
       className="flex items-center gap-2 px-3 py-2 text-xs text-destructive"
       data-testid="sidebar-task-load-error"
     >
       <span className="min-w-0 flex-1">{error}</span>
       {onRetry && retryLabel && (
-        <button type="button" className="shrink-0 underline underline-offset-2" onClick={onRetry}>
+        <button
+          type="button"
+          className="h-11 min-h-11 shrink-0 cursor-pointer underline underline-offset-2 md:h-7 md:min-h-7"
+          onClick={onRetry}
+        >
           {retryLabel}
         </button>
       )}
@@ -224,12 +230,14 @@ export const TaskSwitcher = memo(function TaskSwitcher(props: TaskSwitcherProps)
     return (
       <>
         {loadErrorNotice}
-        <div
-          data-slot="task-switcher-empty-state"
-          className="px-3 py-3 text-xs text-muted-foreground"
-        >
-          {t("sidebar:noTasksYet")}
-        </div>
+        {!loadError && (
+          <div
+            data-slot="task-switcher-empty-state"
+            className="px-3 py-3 text-xs text-muted-foreground"
+          >
+            {t("sidebar:noTasksYet")}
+          </div>
+        )}
       </>
     );
   }

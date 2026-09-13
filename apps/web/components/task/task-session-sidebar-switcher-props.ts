@@ -3,6 +3,7 @@ import type { TaskSwitcher } from "./task-switcher";
 import type { useSidebarActions } from "./task-session-sidebar";
 import type { useSidebarTaskLinking } from "./task-session-sidebar-task-linking";
 import type { useSidebarSelection } from "./task-session-sidebar-selection";
+import type { WorkspaceContextReadError } from "@/lib/state/slices/kanban/types";
 
 type TaskSwitcherComponentProps = ComponentProps<typeof TaskSwitcher>;
 
@@ -37,6 +38,12 @@ export function buildTaskSwitcherProps(args: {
   retryArchivedTasks: () => void;
   archivedLoadErrorLabel: string;
   archivedRetryLabel: string;
+  workspaceContextError: WorkspaceContextReadError | null;
+  workspaceContextPending: boolean;
+  workspaceContextAccessDenied: boolean;
+  workspaceContextLoadErrorLabel: string;
+  workspaceContextAccessDeniedLabel: string;
+  retryWorkspaceContext: () => void;
   totalTaskCount: number;
   selection: ReturnType<typeof useSidebarSelection>;
 }): TaskSwitcherComponentProps {
@@ -69,11 +76,42 @@ export function buildTaskSwitcherProps(args: {
     deletingTaskId: args.sidebarActions.deletingTaskId,
     archivingTaskId: args.sidebarActions.archivingTaskId,
     isArchiving: args.sidebarActions.isArchiving,
-    isLoading: args.isLoadingWorkflow,
-    loadError: args.archivedError ? args.archivedLoadErrorLabel : null,
-    onRetryLoad: args.retryArchivedTasks,
-    retryLabel: args.archivedRetryLabel,
+    isLoading:
+      args.isLoadingWorkflow || (args.workspaceContextPending && args.totalTaskCount === 0),
+    loadError: resolveSidebarLoadError(args),
+    onRetryLoad: resolveSidebarRetry(args),
+    retryLabel: resolveSidebarRetryLabel(args),
     totalTaskCount: args.totalTaskCount,
     ...args.selection.switcherProps,
   };
+}
+
+function resolveSidebarLoadError(args: {
+  archivedError: string | null;
+  archivedLoadErrorLabel: string;
+  workspaceContextError: WorkspaceContextReadError | null;
+  workspaceContextAccessDenied: boolean;
+  workspaceContextLoadErrorLabel: string;
+  workspaceContextAccessDeniedLabel: string;
+}): string | null {
+  if (args.workspaceContextError) {
+    return args.workspaceContextAccessDenied
+      ? args.workspaceContextAccessDeniedLabel
+      : args.workspaceContextLoadErrorLabel;
+  }
+  return args.archivedError ? args.archivedLoadErrorLabel : null;
+}
+
+function resolveSidebarRetry(args: {
+  archivedError: string | null;
+  retryArchivedTasks: () => void;
+  workspaceContextError: WorkspaceContextReadError | null;
+  retryWorkspaceContext: () => void;
+}): () => void {
+  if (args.workspaceContextError) return args.retryWorkspaceContext;
+  return args.retryArchivedTasks;
+}
+
+function resolveSidebarRetryLabel(args: { archivedRetryLabel: string }): string {
+  return args.archivedRetryLabel;
 }
