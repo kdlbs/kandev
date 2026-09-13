@@ -15,13 +15,6 @@ owners:
 
 This design record preserves the technical source for the capability mapped to REQ-TASKS-REMOTE-CONTRIBUTION-TASKS-001 while the task system completes its migration.
 
-## Branch history explanation amendment
-
-The [branch history explanations](branch-history-explanations.md) design covers
-requirement 003. It defines neutral wording, bounded local-rebase evidence, and
-comparison-first actions. Its current labels and behavior supersede the earlier
-warning and replacement wording below. Other contribution contracts remain unchanged.
-
 ## Requirement mapping
 
 | Requirement | Design source |
