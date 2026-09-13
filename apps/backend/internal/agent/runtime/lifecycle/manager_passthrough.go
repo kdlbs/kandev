@@ -61,6 +61,11 @@ func (m *Manager) PreparePassthroughRunning(sessionID string) (func(), error) {
 		}
 		current.Status = v1.AgentStatusRunning
 		updated = current
+		// Passthrough turns are not bound to the ACP prompt turn captured by a
+		// previous native dispatch. Clear that identity before publishing the
+		// running snapshot so a delayed ready event cannot settle an unrelated
+		// Kandev turn after a PTY prompt starts.
+		current.setPromptTurnID("")
 		// Capture the payload under the same lock as the status claim so a
 		// competing stop/failure cannot relabel the deferred event.
 		payload = newAgentEventPayload(current)
