@@ -16,7 +16,6 @@ import (
 	officeshared "github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
-	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -170,42 +169,52 @@ func clearHandoffsMetadata(t *testing.T, repo *sqliterepo.Repository, taskID str
 }
 
 // setDeliveryHandoffSource overwrites a delivery task's stored handoff_source
-// metadata wholesale (UpdateTaskMetadata merges at the top-level key, so this
-// replaces the nested map in one call), letting tests corrupt one field
-// (typically handed_off_at) while keeping the rest realistic.
+// metadata wholesale, letting tests corrupt one field (typically
+// handed_off_at) while keeping the rest realistic. It writes through the
+// repository directly rather than svc.UpdateTaskMetadata, which now protects
+// handoff_source from generic caller-supplied metadata (see
+// service_task_metadata.go) — exactly the field these tests need to corrupt.
 func setDeliveryHandoffSource(
-	t *testing.T, svc *service.Service, deliveryTaskID, sourceTaskID, sourceWorkspaceID, sourceSessionID, callerAgentProfileID string,
+	t *testing.T, repo *sqliterepo.Repository, deliveryTaskID, sourceTaskID, sourceWorkspaceID, sourceSessionID, callerAgentProfileID string,
 	handedOffAt interface{},
 ) {
 	t.Helper()
-	_, err := svc.UpdateTaskMetadata(context.Background(), deliveryTaskID, map[string]interface{}{
-		models.MetaKeyHandoffSource: map[string]interface{}{
-			handoffSourceTaskIDKey:    sourceTaskID,
-			"source_workspace_id":     sourceWorkspaceID,
-			"source_session_id":       sourceSessionID,
-			"source_agent_profile_id": callerAgentProfileID,
-			handoffHandedOffAtKey:     handedOffAt,
-		},
+	setRawHandoffSource(t, repo, deliveryTaskID, map[string]interface{}{
+		handoffSourceTaskIDKey:    sourceTaskID,
+		"source_workspace_id":     sourceWorkspaceID,
+		"source_session_id":       sourceSessionID,
+		"source_agent_profile_id": callerAgentProfileID,
+		handoffHandedOffAtKey:     handedOffAt,
 	})
-	require.NoError(t, err)
 }
 
 // setDeliveryHandoffSourceMissingTimestampKey is setDeliveryHandoffSource's
 // sibling for AC-25b's fourth shape: handoff_source with no handed_off_at key
 // at all, distinct from a present-but-empty or present-but-unparseable value.
 func setDeliveryHandoffSourceMissingTimestampKey(
-	t *testing.T, svc *service.Service, deliveryTaskID, sourceTaskID, sourceWorkspaceID, sourceSessionID, callerAgentProfileID string,
+	t *testing.T, repo *sqliterepo.Repository, deliveryTaskID, sourceTaskID, sourceWorkspaceID, sourceSessionID, callerAgentProfileID string,
 ) {
 	t.Helper()
-	_, err := svc.UpdateTaskMetadata(context.Background(), deliveryTaskID, map[string]interface{}{
-		models.MetaKeyHandoffSource: map[string]interface{}{
-			handoffSourceTaskIDKey:    sourceTaskID,
-			"source_workspace_id":     sourceWorkspaceID,
-			"source_session_id":       sourceSessionID,
-			"source_agent_profile_id": callerAgentProfileID,
-		},
+	setRawHandoffSource(t, repo, deliveryTaskID, map[string]interface{}{
+		handoffSourceTaskIDKey:    sourceTaskID,
+		"source_workspace_id":     sourceWorkspaceID,
+		"source_session_id":       sourceSessionID,
+		"source_agent_profile_id": callerAgentProfileID,
 	})
+}
+
+// setRawHandoffSource replaces deliveryTaskID's handoff_source metadata block
+// via a direct repository read-modify-write, bypassing every service-layer
+// protection so tests can construct otherwise-unreachable corrupted shapes.
+func setRawHandoffSource(t *testing.T, repo *sqliterepo.Repository, deliveryTaskID string, source map[string]interface{}) {
+	t.Helper()
+	task, err := repo.GetTask(context.Background(), deliveryTaskID)
 	require.NoError(t, err)
+	if task.Metadata == nil {
+		task.Metadata = make(map[string]interface{})
+	}
+	task.Metadata[models.MetaKeyHandoffSource] = source
+	require.NoError(t, repo.UpdateTask(context.Background(), task))
 }
 
 // --- AC-25: a replay repair reuses the stored timestamp, not the replay's clock ---
@@ -224,7 +233,7 @@ func TestHandleHandoffTask_ReplayRepairUsesStoredTimestampNotReplayClock(t *test
 	// ever regresses to stamping the replay's own clock instead of reusing
 	// the delivery task's stored handoff_source.handed_off_at.
 	const storedTimestamp = "2020-01-01T00:00:00.000Z"
-	setDeliveryHandoffSource(t, f.svc, result1.TaskID, f.sourceTaskID, f.sourceWorkspaceID, f.sourceSessionID, f.callerAgentProfileID, storedTimestamp)
+	setDeliveryHandoffSource(t, f.repo, result1.TaskID, f.sourceTaskID, f.sourceWorkspaceID, f.sourceSessionID, f.callerAgentProfileID, storedTimestamp)
 
 	resp2, err := f.h.handleHandoffTask(f.ctx(), makeWSMessage(t, ws.ActionMCPHandoffTask, payload))
 	require.NoError(t, err)
@@ -267,9 +276,9 @@ func TestHandleHandoffTask_UnreadableStoredTimestampSurfacesPartialFailure(t *te
 
 			clearHandoffsMetadata(t, f.repo, f.sourceTaskID)
 			if tc.omitKey {
-				setDeliveryHandoffSourceMissingTimestampKey(t, f.svc, result1.TaskID, f.sourceTaskID, f.sourceWorkspaceID, f.sourceSessionID, f.callerAgentProfileID)
+				setDeliveryHandoffSourceMissingTimestampKey(t, f.repo, result1.TaskID, f.sourceTaskID, f.sourceWorkspaceID, f.sourceSessionID, f.callerAgentProfileID)
 			} else {
-				setDeliveryHandoffSource(t, f.svc, result1.TaskID, f.sourceTaskID, f.sourceWorkspaceID, f.sourceSessionID, f.callerAgentProfileID, tc.handedOffAt)
+				setDeliveryHandoffSource(t, f.repo, result1.TaskID, f.sourceTaskID, f.sourceWorkspaceID, f.sourceSessionID, f.callerAgentProfileID, tc.handedOffAt)
 			}
 
 			resp2, err := f.h.handleHandoffTask(f.ctx(), makeWSMessage(t, ws.ActionMCPHandoffTask, payload))
@@ -298,7 +307,7 @@ func TestHandleHandoffTask_CrossSourceMismatchTakesPrecedenceOverUnreadableTimes
 	require.NoError(t, err)
 	result1 := decodeHandoffResult(t, resp1)
 
-	setDeliveryHandoffSource(t, f.svc, result1.TaskID, "task-not-the-real-source", f.sourceWorkspaceID, f.sourceSessionID, f.callerAgentProfileID, "not-a-timestamp")
+	setDeliveryHandoffSource(t, f.repo, result1.TaskID, "task-not-the-real-source", f.sourceWorkspaceID, f.sourceSessionID, f.callerAgentProfileID, "not-a-timestamp")
 
 	resp2, err := f.h.handleHandoffTask(f.ctx(), makeWSMessage(t, ws.ActionMCPHandoffTask, payload))
 	require.NoError(t, err)
@@ -317,7 +326,7 @@ func TestHandleHandoffTask_ExistingReverseLinkEntryRecordedDespiteUnreadableStor
 	result1 := decodeHandoffResult(t, resp1)
 	require.True(t, result1.ReverseLinkRecorded, "precondition: the entry must already exist in the source's handoffs array")
 
-	setDeliveryHandoffSource(t, f.svc, result1.TaskID, f.sourceTaskID, f.sourceWorkspaceID, f.sourceSessionID, f.callerAgentProfileID, "not-a-timestamp")
+	setDeliveryHandoffSource(t, f.repo, result1.TaskID, f.sourceTaskID, f.sourceWorkspaceID, f.sourceSessionID, f.callerAgentProfileID, "not-a-timestamp")
 
 	resp2, err := f.h.handleHandoffTask(f.ctx(), makeWSMessage(t, ws.ActionMCPHandoffTask, payload))
 	require.NoError(t, err)
