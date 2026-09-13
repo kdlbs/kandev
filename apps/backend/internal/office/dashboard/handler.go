@@ -689,16 +689,24 @@ func (h *Handler) applyTaskMutations(c *gin.Context, taskID, actorAgentID string
 }
 
 // respondStatusUpdateError translates UpdateTaskStatus errors into HTTP
-// responses. ApprovalsPendingError → 409 with a body listing pending
-// approvers (resolved to {agent_profile_id, name}) and the redirected
-// status. Everything else → 400.
+// responses. Gate errors return 409 with a stable reason, pending approvers,
+// and the redirected status. Everything else returns 400.
 func (h *Handler) respondStatusUpdateError(c *gin.Context, err error) {
 	var pending *ApprovalsPendingError
 	if errors.As(err, &pending) {
 		c.JSON(http.StatusConflict, gin.H{
 			"error":             err.Error(),
+			"reason":            pending.ReasonCode(),
 			"pending_approvers": h.svc.resolvePendingApprovers(c.Request.Context(), pending.Pending),
 			"status":            statusInReviewLowercase,
+		})
+		return
+	}
+	var stepChanged *WorkflowStepChangedError
+	if errors.As(err, &stepChanged) {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":  err.Error(),
+			"reason": "workflow_step_changed",
 		})
 		return
 	}

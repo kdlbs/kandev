@@ -18,13 +18,21 @@ const ARIA_LABEL = "aria-label";
 
 const state = {
   features: { canvases: false },
-  workspaces: { activeId: "ws-1" as string | null },
+  workspaces: {
+    activeId: "ws-1" as string | null,
+    items: [{ id: "ws-1", name: "Workspace", office_workflow_id: null as string | null }],
+  },
   userSettings: { ...defaultState.userSettings },
 };
 
 beforeEach(() => {
   state.userSettings = { ...defaultState.userSettings };
+  state.workspaces.items[0].office_workflow_id = null;
 });
+
+vi.mock("@/hooks/use-responsive-breakpoint", () => ({
+  useResponsiveBreakpoint: () => ({ isMobile: true, isFinePointer: false }),
+}));
 
 let healthHasIssues = false;
 let statusSeverity: "none" | "unstable" | "lost" = "none";
@@ -134,6 +142,13 @@ function SectionsHost({
 }
 
 describe("AppNavSheet", () => {
+  it("offers task views for Kanban, not Office workspaces", () => {
+    const host = render(<SectionsHost />);
+    expect(screen.getByRole("button", { name: "Task views" })).not.toBeNull();
+    state.workspaces.items[0].office_workflow_id = "office-workflow";
+    host.rerender(<SectionsHost />);
+    expect(screen.queryByRole("button", { name: "Task views" })).toBeNull();
+  });
   beforeEach(() => {
     healthHasIssues = false;
     resolvedTheme = "light";

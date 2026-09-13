@@ -116,45 +116,26 @@ four grounds, verified against the tree.
 ## The tick
 
 `computeRoutineMissed` is replaced by a function returning one value object
-instead of `(int, time.Time, error)`, so the caller cannot discard a computed
-re-arm time on the error path the way it does today:
+instead of `(int, time.Time, error)`, so the caller receives the computation
+error and handles trigger state explicitly:
 
 ```go
 type catchUpResult struct {
     ElapsedTicks  int       // >= 1 on success; includes the tick due now
     FirstMissedAt time.Time // zero when ElapsedTicks <= 1
     Truncated     bool      // ElapsedTicks reached the cap with ticks still pending
-    NextRunAt     time.Time // always strictly after the processing instant
+    NextRunAt     time.Time // strictly after the processing instant on success
     Unknown       bool      // the walk failed; ElapsedTicks is not meaningful
 }
 ```
 
 Invariants the constructor guarantees, so no call site has to restate them:
 
-- `NextRunAt` is strictly after the processing instant on **every** path,
-  including `Unknown`. It is never `now`. This closes the current hot loop:
-  today the failure path arms `next_run_at` to `now`, which is immediately due
-  again on the next 30-second tick, forever.
-
-  On the failure path it is `now + catchUpFallbackInterval`, and
-  **`catchUpFallbackInterval` is 24 hours** (AC-001.11). The value is
-  load-bearing, not a defensive default, because the failure is not transient:
-  `NextCronTime` returns an error only for a cron expression that is not five
-  fields, a spec that does not parse, or a timezone `time.LoadLocation` rejects.
-  All three are deterministic in the stored `(expression, timezone)` pair and
-  not in the time argument, so retrying with a later `now` cannot succeed.
-  (`findNextMatch` never errors; an unsatisfiable expression silently returns
-  "24 hours from now", which is gap 23 and out of scope.) A trigger that lands
-  on this path stays on it until it is deleted and recreated, so the interval
-  *is* its permanent dispatch cadence. 24 hours caps that at one run per day and
-  matches `findNextMatch`'s own give-up interval, so the subsystem's two
-  fallbacks agree. Retrying at the 30-second scheduler interval would dispatch
-  roughly 2,880 runs a day against a trigger that can never succeed — the same
-  unbounded-spend defect this capability exists to close.
-
-  The failure path also emits a `Warn` naming the trigger id and the underlying
-  error, which is the only operator-visible signal that a trigger is stuck; no
-  new metric is introduced for it.
+- `NextRunAt` is strictly after the processing instant on a successful walk.
+  On `Unknown`, it is zero and `processCronTrigger` handles `Err`.
+  `ErrUnsatisfiableCron` leaves the claimed trigger disarmed. Other failures
+  restore the claimed occurrence for retry. Neither path dispatches a run or
+  records a gap; both log the underlying error.
 - `FirstMissedAt` is the armed `next_run_at` at claim time — read directly, not
   derived from the walk, so it is exact even when `Truncated` is true.
 - `Truncated` is true only when the walk stopped at the cap with the cursor
@@ -171,10 +152,11 @@ an agent session remains the separate shared-launcher contract described above.
 what would otherwise be four near-identical states into two, and it is why
 `Unknown` needs no representation in storage:
 
-- `Unknown` (the walk failed) drives the re-arm and nothing else. No summary is
-  written, because a due trigger has at least one elapsed tick but may have no
-  *missed* one, and reporting an unmeasured gap on a merely-late trigger is a
-  false positive (AC-001.6).
+- `Unknown` (the walk failed) drives the error path and nothing else. The
+  caller either disarms an unsatisfiable trigger or restores the claimed
+  occurrence for retry. No summary is written, because a due trigger has at
+  least one elapsed tick but may have no *missed* one, and reporting an
+  unmeasured gap on a merely-late trigger is a false positive (AC-001.6).
 - `catch_up_max == 1` makes `missedTicks` structurally zero, so that
   configuration never produces a summary. That is a named consequence, not an
   edge case to detect (AC-002.11).

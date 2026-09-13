@@ -1,7 +1,6 @@
 package sqlite
 
 import (
-	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -25,7 +24,7 @@ func (r *Repository) migrateTaskPriorityToTextPostgres() error {
 	}
 
 	var dataType string
-	err := r.db.Get(&dataType, `
+	err := r.db.GetContext(r.migrationContext(), &dataType, `
 		SELECT data_type
 		FROM information_schema.columns
 		WHERE table_schema = current_schema()
@@ -42,7 +41,7 @@ func (r *Repository) migrateTaskPriorityToTextPostgres() error {
 		return nil
 	}
 
-	tx, err := r.db.BeginTxx(context.Background(), nil)
+	tx, err := r.db.BeginTxx(r.migrationContext(), nil)
 	if err != nil {
 		return fmt.Errorf("begin tasks.priority migration: %w", err)
 	}
@@ -59,7 +58,7 @@ func (r *Repository) migrateTaskPriorityToTextPostgres() error {
 		{"add constraint", `ALTER TABLE tasks ADD CONSTRAINT tasks_priority_check CHECK (priority IN ('critical','high','medium','low'))`},
 	}
 	for _, statement := range statements {
-		if _, err := tx.Exec(statement.sql); err != nil {
+		if _, err := tx.ExecContext(r.migrationContext(), statement.sql); err != nil {
 			return fmt.Errorf("tasks.priority migration (%s): %w", statement.name, err)
 		}
 	}

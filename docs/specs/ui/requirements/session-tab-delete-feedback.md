@@ -2,6 +2,7 @@
 status: active
 system: ui
 created: 2026-08-05
+updated: 2026-09-10
 owners:
   - kandev
 ---
@@ -21,7 +22,7 @@ Deleting an agent session from the task tab currently shows both a progress toas
 
 - **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.1:** Clicking the X on a deletable agent-session tab continues to open the existing delete confirmation dialog.
 - **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.2:** Choosing Delete from a desktop session context menu keeps that menu mounted and opens a compact, non-modal confirmation popover anchored to the Delete item. Cancelling or dismissing the popover leaves the session unchanged.
-- **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.3:** On phone, choosing Delete from a row in the Sessions picker morphs that row into touch-sized Cancel and Delete actions. It does not open another dialog or drawer. Cancelling, selecting another session, or closing the picker clears the pending confirmation without deleting.
+- **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.3:** On phone, choosing Delete from a Sessions picker row opens a focused confirmation step in the same picker, retaining the row's geometry. Cancel restores the picker; external context change or closing it clears the unsubmitted confirmation without deleting. Presentation follows [mobile action confirmations](mobile-action-confirmations.md).
 - **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.4:** Desktop and phone confirmation surfaces share the same conversation-deletion, workspace-retention, primary-session, and only-session warnings.
 - **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.5:** After the user confirms, the X is replaced in place by a compact circular indeterminate spinner matching the terminal-tab close action, not the grid-shaped activity spinner, until the delete request settles. The close action is non-interactive and exposed as busy while the request is pending.
 - **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.6:** X-initiated deletion does not show progress or success toasts.
@@ -49,9 +50,9 @@ hides the session context the user is acting on.
 - Choosing Delete from a desktop session context menu keeps that menu mounted and opens a compact,
   non-modal confirmation popover anchored to the Delete item. Cancelling or dismissing the popover
   leaves the session unchanged.
-- On phone, choosing Delete from a row in the Sessions picker morphs that row into touch-sized
-  Cancel and Delete actions. It does not open another dialog or drawer. Cancelling, selecting
-  another session, or closing the picker clears the pending confirmation without deleting.
+- On phone, choosing Delete opens a confirmation step in the existing Sessions
+  picker with full-width actions. Cancel restores the picker. External context
+  changes or closing the picker invalidate the unsubmitted request.
 - Desktop and phone confirmation surfaces share the same conversation-deletion,
   workspace-retention, primary-session, and only-session warnings.
 - After the user confirms, the X is replaced in place by a compact circular indeterminate spinner
@@ -99,11 +100,11 @@ hides the session context the user is acting on.
   confirmation popover stays anchored to that menu item without opening an alert dialog or starting
   deletion.
 - **GIVEN** a phone viewport, **WHEN** the user chooses Delete from a Sessions picker row, **THEN**
-  that row shows touch-sized inline Cancel and Delete actions without opening an alert dialog.
-- **GIVEN** a phone row has pending delete confirmation, **WHEN** the user closes the Sessions
+  the existing picker shows a dedicated confirmation step without a second modal.
+- **GIVEN** a phone picker has pending delete confirmation, **WHEN** the user closes the Sessions
   picker externally, **THEN** the pending confirmation is cleared and reopening the picker shows
   the normal row actions without dispatching deletion.
-- **GIVEN** a phone viewport, **WHEN** the user confirms deletion from the inline row actions,
+- **GIVEN** a phone viewport, **WHEN** the user confirms deletion from the picker confirmation step,
   **THEN** the selected session is removed and the remaining session stays reachable without
   relying on a desktop tab X.
 
@@ -111,5 +112,6 @@ hides the session context the user is acting on.
 
 - Removing or redesigning the tab-X delete confirmation dialog.
 - Changing backend session-deletion semantics, active-session selection, or Dockview reconciliation.
-- Changing the Sessions picker hierarchy, drawer, or non-delete row actions.
+- Changing Sessions picker hierarchy or non-delete row actions beyond hosting
+  the shared confirmation step.
 - Replacing feedback for context-menu, mobile, stop, or resume actions.

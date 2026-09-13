@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/jmoiron/sqlx"
@@ -17,10 +18,13 @@ func (r *Repository) prepareTaskWorktreeCutoverForeignKeys() (func(), error) {
 	if dialect.IsPostgres(r.db.DriverName()) {
 		return func() {}, nil
 	}
-	if _, err := r.db.Exec(`PRAGMA foreign_keys=OFF`); err != nil {
+	if _, err := r.db.ExecContext(r.migrationContext(), `PRAGMA foreign_keys=OFF`); err != nil {
 		return nil, fmt.Errorf("cutover: disable sqlite foreign keys: %w", err)
 	}
-	return func() { _, _ = r.db.Exec(`PRAGMA foreign_keys=ON`) }, nil
+	// Cleanup must restore the connection setting even after startup context
+	// cancellation; otherwise the shared writer would retain foreign-key checks
+	// disabled for the next operation.
+	return func() { _, _ = r.db.ExecContext(context.Background(), `PRAGMA foreign_keys=ON`) }, nil
 }
 
 // rebindGitSnapshotEnvironmentForeignKey preserves an already environment-
@@ -41,7 +45,7 @@ func (r *Repository) rebindGitSnapshotEnvironmentForeignKey(c *worktreeCutover, 
 	if !dialect.IsPostgres(r.db.DriverName()) {
 		return nil
 	}
-	if _, err := tx.Exec(postgresGitSnapshotShadowForeignKeyDDL); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), postgresGitSnapshotShadowForeignKeyDDL); err != nil {
 		return fmt.Errorf("cutover: rebind git snapshot environment foreign key: %w", err)
 	}
 	return nil
@@ -53,7 +57,7 @@ func (r *Repository) rehomeGitSnapshotsForCutover(c *worktreeCutover, tx *sqlx.T
 		if survivingID == "" || survivingID == environmentID {
 			continue
 		}
-		if _, err := tx.Exec(tx.Rebind(`
+		if _, err := tx.ExecContext(r.migrationContext(), tx.Rebind(`
 			UPDATE task_session_git_snapshots
 			SET task_environment_id = ?
 			WHERE task_environment_id = ?
@@ -81,7 +85,7 @@ func (r *Repository) rebindTaskEnvironmentRecoveryClaimForeignKey(c *worktreeCut
 		if survivingID == "" || survivingID == environmentID {
 			continue
 		}
-		if _, err := tx.Exec(tx.Rebind(`
+		if _, err := tx.ExecContext(r.migrationContext(), tx.Rebind(`
 			UPDATE task_environment_recovery_claims
 			SET task_environment_id = ?
 			WHERE task_environment_id = ?
@@ -92,7 +96,7 @@ func (r *Repository) rebindTaskEnvironmentRecoveryClaimForeignKey(c *worktreeCut
 	if !dialect.IsPostgres(r.db.DriverName()) {
 		return nil
 	}
-	if _, err := tx.Exec(postgresRecoveryClaimShadowForeignKeyDDL); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), postgresRecoveryClaimShadowForeignKeyDDL); err != nil {
 		return fmt.Errorf("cutover: rebind recovery claim environment foreign key: %w", err)
 	}
 	return nil

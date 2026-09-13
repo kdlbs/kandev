@@ -140,6 +140,13 @@ export function TaskActionsMenuDialogs({
   const editBoardRow = useLastResolvedBoardRow(taskId, boardRow);
   if (!taskId) return null;
   const linkDialogTask = buildLinkDialogTask(taskId, taskTitle, boardRow);
+  const confirmationTarget = {
+    taskId,
+    taskTitle,
+    anchorRef: menu.triggerRef,
+    focusReturnRef: menu.triggerRef,
+    restoreFocusOnConfirm: true,
+  };
 
   return (
     <>
@@ -155,12 +162,8 @@ export function TaskActionsMenuDialogs({
         />
       )}
       <TaskArchiveConfirmation
+        {...confirmationTarget}
         open={menu.showArchiveConfirm}
-        anchorRef={menu.triggerRef}
-        focusReturnRef={menu.triggerRef}
-        restoreFocusOnConfirm
-        taskTitle={taskTitle}
-        taskId={taskId}
         executorType={boardRow?.primaryExecutorType ?? subjectExecutorType}
         isArchiving={isArchiving}
         onOpenChange={menu.setShowArchiveConfirm}
@@ -177,11 +180,8 @@ export function TaskActionsMenuDialogs({
         focusReturnRef={menu.triggerRef}
       />
       <TaskDetachConfirmationSurface
+        {...confirmationTarget}
         open={menu.showDetachConfirm}
-        anchorRef={menu.triggerRef}
-        focusReturnRef={menu.triggerRef}
-        restoreFocusOnConfirm
-        taskTitle={taskTitle}
         sharesParentWorkspace={boardRow?.workspaceMode === "inherit_parent"}
         onOpenChange={menu.setShowDetachConfirm}
         onConfirm={menu.handleDetachConfirm}

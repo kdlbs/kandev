@@ -45,7 +45,6 @@ whatever survived; a fan-out creates a burst hazard before either bounding
 control exists; and there is no per-tick work to replay. Each is verified
 against the tree, with its mechanism and citations, in
 [Why the fan-out was rejected](../system-design/routine-catch-up-01.md#why-the-fan-out-was-rejected).
-The wake is a "look at the world now" signal, not a queued work item.
 
 ## Terminology
 
@@ -84,14 +83,14 @@ long outage cannot turn into a burst of spend I did not authorize.
 - **AC-OFFICE-ROUTINE-CATCHUP-001.1:** When a due cron trigger is claimed, the
   system shall dispatch exactly one routine run for that claim, whatever the
   number of elapsed ticks in the gap and whatever the catch-up policy. The only
-  cases producing none are a failed arming write (AC-001.2) and a run that
-  cannot be created (AC-001.12); no case produces two.
+  cases producing none are a failed arming write (AC-001.2), a failed elapsed
+  tick computation (AC-001.6), and a run that cannot be created (AC-001.12);
+  no case produces two.
 - **AC-OFFICE-ROUTINE-CATCHUP-001.2:** When a claim is processed and the
   elapsed-tick computation succeeds, the system shall arm the trigger's
   `next_run_at` to the first match of its cron expression strictly after the
   processing instant. This shall hold identically under every catch-up policy.
-  The failure path is governed by AC-001.6 and AC-001.11 instead, because the
-  computation fails only when no cron match can be produced at all. When the
+  The failure path is governed by AC-001.6 and AC-001.11 instead. When the
   arming write itself fails, the system shall dispatch nothing for that claim
   and leave `next_run_at` null for AC-001.9 to arm later; that tick is lost and
   no routine run records it.
@@ -108,9 +107,10 @@ long outage cannot turn into a burst of spend I did not authorize.
   the other shall dispatch nothing, record no gap summary, and change no
   trigger state.
 - **AC-OFFICE-ROUTINE-CATCHUP-001.6:** When the elapsed-tick computation fails,
-  the system shall dispatch one run and record no gap summary, never reporting a
-  gap whose size it did not measure. It shall arm `next_run_at` strictly after
-  the processing instant, at the time AC-001.11 fixes.
+  the system shall record no gap summary or run. For an unsatisfiable
+  expression it shall leave `next_run_at` null; for another failure it shall
+  restore the claimed occurrence so a later tick can retry. It shall warn with
+  the underlying error.
 - **AC-OFFICE-ROUTINE-CATCHUP-001.7:** Within one scheduler tick, due triggers
   shall be processed in ascending `office_routine_triggers.next_run_at` order,
   with ties broken by ascending `office_routine_triggers.id`.
@@ -134,9 +134,10 @@ long outage cannot turn into a burst of spend I did not authorize.
   reconciliation is never overwritten: exactly one processor shall arm it, and
   none shall dispatch by way of this path. A trigger whose claim is still in
   flight shall not be armed by it. A trigger with `enabled` false shall not be
-  armed by this path. When the expression or timezone cannot be parsed, the system
-  shall leave `next_run_at` null, warn, and dispatch nothing; AC-001.11's
-  fallback does not apply, because no claim was taken and no run is owed.
+  armed by this path. When the expression or timezone cannot be parsed, the
+  system shall leave `next_run_at` null, warn, and dispatch nothing; no
+  computation-failure fallback applies because no claim was taken and no run is
+  owed.
 - **AC-OFFICE-ROUTINE-CATCHUP-001.10:** When a routine run has been created and
   its materialisation then fails — the heavy path failing to create the task, or
   the lightweight path failing to create or to dispatch the wakeup request — the
@@ -144,16 +145,17 @@ long outage cannot turn into a burst of spend I did not authorize.
   wakeup request refused because its idempotency key already exists is **not** a
   materialisation failure; that run's status shall be left as the outcome the
   concurrency policy assigned.
-- **AC-OFFICE-ROUTINE-CATCHUP-001.11:** When the elapsed-tick computation fails,
-  the system shall arm `next_run_at` to the processing instant plus 24 hours and
-  shall emit a warning naming the trigger and the underlying error. A trigger
-  whose expression or timezone can never parse shall therefore dispatch at most
-  one run per day until it is deleted and recreated.
+- **AC-OFFICE-ROUTINE-CATCHUP-001.11:** When the elapsed-tick computation fails
+  after a claim, the system shall warn with the trigger and underlying error.
+  For `ErrUnsatisfiableCron`, it shall leave `next_run_at` null. For another
+  failure, it shall re-arm the original claimed occurrence for a later retry.
+  Neither path shall dispatch a run or record a gap summary.
 - **AC-OFFICE-ROUTINE-CATCHUP-001.12:** When the routine run for a claim cannot
   be created at all, the system shall dispatch nothing and record no gap
   summary, and shall not re-attempt that tick. The trigger remains armed forward
-  per AC-001.2 or AC-001.11, whichever governed the claim, and the absence of a
-  routine run is the only record of that tick.
+  per AC-001.2 or AC-001.11, whichever governed the claim, or stays disarmed
+  for an unsatisfiable expression. The absence of a routine run is the only
+  record of that tick.
 - **AC-OFFICE-ROUTINE-CATCHUP-001.13:** `catch_up_max` shall be normalized to
   the value AC-001.4 defines before it is persisted, on every create and update
   path, and rows written before this change shall be normalized once on upgrade.
@@ -310,9 +312,9 @@ Each exclusion is a decision, not an omission.
   in the cron tick path; only `office_routine_triggers.enabled` gates firing. A
   defect, but not catch-up specific; a follow-up card carries it.
 - **Cron correctness at the tick level.** Day-of-month versus day-of-week
-  conjunction, DST behaviour, and the silent "24 hours from now" fallback for an
-  unsatisfiable expression are gap 23, carded. This document constrains what
-  happens *between* ticks and takes tick times as given.
+  conjunction, DST behaviour, and legacy unsatisfiable-trigger handling are gap
+  23, carded. This document constrains what happens *between* ticks and takes
+  tick times as given.
 - **Work-in-progress limits and budget enforcement.** Gaps 11 and 19, carded.
   This document creates no work that would need them.
 - **Retention of gap summaries.** They inherit whatever retention

@@ -302,7 +302,7 @@ These are the registered Kandev WebSocket actions. Every payload requires `sessi
 | Action | Additional payload |
 |--------|--------------------|
 | `worktree.pull` | `rebase` boolean |
-| `worktree.push` | `force` and `set_upstream` booleans |
+| `worktree.push` | `force` and `set_upstream` booleans; optional `remote` (configured remote name or exact configured push URL) and `expected_branch` (current-branch precondition) |
 | `worktree.rebase` | required `base_branch` |
 | `worktree.merge` | required `base_branch` |
 | `worktree.abort` | `operation`: exactly `merge` or `rebase` |
@@ -314,6 +314,12 @@ These are the registered Kandev WebSocket actions. Every payload requires `sessi
 | `worktree.revert_commit` | required `commit_sha`, which must be exact `HEAD` |
 | `worktree.rename_branch` | required `new_name` |
 | `worktree.reset` | required `commit_sha`; `mode` is `soft`, `mixed`, or `hard` |
+
+The optional push target fields apply to the WebSocket action and the backend
+API. An explicit target uses the expected branch as the destination and does
+not set upstream tracking. A branch mismatch returns the expected and current
+branch values. Existing contribution routing takes precedence over an explicit
+target.
 
 Example request and normal operation result:
 

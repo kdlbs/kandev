@@ -86,7 +86,7 @@ id                TEXT PRIMARY KEY
 routine_id        TEXT NOT NULL
 kind              TEXT NOT NULL  -- schedule | webhook | manual
 cron_expression   TEXT           -- when kind=schedule
-timezone          TEXT
+timezone          TEXT           -- default 'UTC'; empty on legacy rows is backfilled to 'UTC'
 next_run_at       TIMESTAMP      -- computed; atomically claimed for cron scheduling
 last_fired_at     TIMESTAMP
 public_id         TEXT UNIQUE    -- when kind=webhook

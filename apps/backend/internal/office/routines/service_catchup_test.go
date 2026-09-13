@@ -349,11 +349,11 @@ func TestTickScheduledTriggers_ReconciliationArmsStrandedTriggerWithoutDispatch(
 	}
 }
 
-// TestCreateRoutineTrigger_MalformedExpressionFallback covers AC-001.11 end
-// to end through the service: a trigger whose cron expression can never
-// parse re-arms 24 hours out and dispatches at most once per day, not
-// repeatedly.
-func TestTickScheduledTriggers_MalformedExpressionDispatchesOncePerDay(t *testing.T) {
+// TestTickScheduledTriggers_MalformedExpressionRearmsWithoutDispatch verifies
+// that a legacy trigger with a malformed expression is re-armed for retry
+// without creating a run. New trigger creation rejects this input before it is
+// persisted.
+func TestTickScheduledTriggers_MalformedExpressionRearmsWithoutDispatch(t *testing.T) {
 	svc, wrapped, _ := newWrappedTestRoutineService(t)
 	ctx := context.Background()
 
@@ -378,39 +378,24 @@ func TestTickScheduledTriggers_MalformedExpressionDispatchesOncePerDay(t *testin
 
 	now := time.Now().UTC()
 	if err := svc.TickScheduledTriggers(ctx, now); err != nil {
-		t.Fatalf("first tick: %v", err)
+		t.Fatalf("tick: %v", err)
 	}
-	runsAfterFirst, err := svc.ListRoutineRuns(ctx, routine.ID, 10, 0)
+	runs, err := svc.ListRoutineRuns(ctx, routine.ID, 10, 0)
 	if err != nil {
 		t.Fatalf("list runs: %v", err)
 	}
-	if len(runsAfterFirst) != 1 {
-		t.Fatalf("routine runs after first tick = %d, want 1", len(runsAfterFirst))
+	if len(runs) != 0 {
+		t.Fatalf("routine runs after malformed trigger = %d, want 0", len(runs))
 	}
-
-	// A tick 23 hours later must NOT dispatch again — the fallback interval
-	// hasn't elapsed.
-	if err := svc.TickScheduledTriggers(ctx, now.Add(23*time.Hour)); err != nil {
-		t.Fatalf("23h tick: %v", err)
-	}
-	runsAfter23h, err := svc.ListRoutineRuns(ctx, routine.ID, 10, 0)
+	triggers, err := svc.ListRoutineTriggers(ctx, routine.ID)
 	if err != nil {
-		t.Fatalf("list runs: %v", err)
+		t.Fatalf("list triggers: %v", err)
 	}
-	if len(runsAfter23h) != 1 {
-		t.Fatalf("routine runs after 23h = %d, want still 1 (not due yet)", len(runsAfter23h))
+	if len(triggers) != 1 || triggers[0].NextRunAt == nil {
+		t.Fatalf("triggers = %+v, want one re-armed trigger", triggers)
 	}
-
-	// A tick just past 24 hours dispatches exactly once more.
-	if err := svc.TickScheduledTriggers(ctx, now.Add(24*time.Hour+time.Minute)); err != nil {
-		t.Fatalf("24h tick: %v", err)
-	}
-	runsAfter24h, err := svc.ListRoutineRuns(ctx, routine.ID, 10, 0)
-	if err != nil {
-		t.Fatalf("list runs: %v", err)
-	}
-	if len(runsAfter24h) != 2 {
-		t.Fatalf("routine runs after 24h = %d, want 2", len(runsAfter24h))
+	if !triggers[0].NextRunAt.Equal(past) {
+		t.Fatalf("next_run_at = %v, want original due time %v", *triggers[0].NextRunAt, past)
 	}
 }
 

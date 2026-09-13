@@ -32,6 +32,10 @@ import (
 // rather than failing.
 var ErrWakeupAlreadyRequested = errors.New("wakeup request already requested")
 
+// ErrInvalidTrigger indicates a trigger create request that failed
+// validation (a client error, not a server failure).
+var ErrInvalidTrigger = errors.New("invalid routine trigger")
+
 // Repository is the persistence interface required by RoutineService.
 type Repository interface {
 	CreateRoutine(ctx context.Context, routine *Routine) error
@@ -336,20 +340,20 @@ func (s *RoutineService) ListRoutinesFromConfig(ctx context.Context, workspaceID
 // -- Trigger management --
 
 // CreateRoutineTrigger creates a trigger and computes next_run_at for cron.
-// A cron trigger is rejected outright when its expression is empty or when
-// the expression or timezone cannot be parsed: a trigger of kind "cron"
-// must never be persisted with a null next_run_at at creation
-// (AC-OFFICE-ROUTINE-CATCHUP-001.8). This is the only place that may arm a
-// cron trigger's next_run_at; the reconciliation pass in
-// TickScheduledTriggers only re-arms an already-created one.
+// A cron trigger requires a satisfiable expression: an empty expression, or
+// one that can never fire, is rejected here rather than becoming a silent
+// no-op or a wrong daily fallback at tick time.
 func (s *RoutineService) CreateRoutineTrigger(ctx context.Context, t *RoutineTrigger) error {
+	if t.Timezone == "" {
+		t.Timezone = "UTC"
+	}
 	if t.Kind == "cron" {
 		if t.CronExpression == "" {
-			return fmt.Errorf("cron trigger requires a non-empty cron expression")
+			return fmt.Errorf("%w: cron trigger requires a cron_expression", ErrInvalidTrigger)
 		}
 		next, err := shared.NextCronTime(t.CronExpression, t.Timezone, time.Now().UTC())
 		if err != nil {
-			return fmt.Errorf("invalid cron expression: %w", err)
+			return fmt.Errorf("%w: invalid cron expression: %v", ErrInvalidTrigger, err)
 		}
 		t.NextRunAt = &next
 	}
@@ -384,15 +388,6 @@ func (s *RoutineService) ListAllRoutineRuns(ctx context.Context, wsID string, li
 }
 
 // -- Dispatch --
-
-// catchUpFallbackInterval is the re-arm interval computeCatchUp uses when
-// the elapsed-tick walk fails (AC-OFFICE-ROUTINE-CATCHUP-001.11). The
-// failure is deterministic in the trigger's stored (expression, timezone)
-// pair, not in the time argument, so retrying at the 30-second scheduler
-// interval cannot succeed; 24 hours caps the trigger at one dispatch a day
-// until it is deleted and recreated, matching shared.findNextMatch's own
-// give-up interval.
-const catchUpFallbackInterval = 24 * time.Hour
 
 // catchUpReclaimAfter is how stale a claimed-but-never-armed trigger's
 // updated_at must be before the reconciliation pass in TickScheduledTriggers
@@ -460,10 +455,26 @@ func (s *RoutineService) processCronTrigger(ctx context.Context, trigger *Routin
 	}
 	result := computeCatchUp(trigger, routine, now)
 	if result.Unknown {
+		if errors.Is(result.Err, shared.ErrUnsatisfiableCron) {
+			// The expression can never fire again. ClaimTrigger already
+			// cleared next_run_at; leave it cleared rather than re-arming,
+			// which would dispatch nothing but retry (and fail) forever.
+			s.logger.Error("cron expression unsatisfiable; trigger permanently disarmed",
+				zap.String("trigger_id", trigger.ID), zap.Error(result.Err))
+			return result.Err
+		}
+		// Any other failure (for example, a temporary timezone lookup
+		// failure) is recoverable. Re-arm the original due time so the
+		// next tick can retry after the underlying issue clears.
+		if rearmErr := s.repo.UpdateTriggerNextRun(ctx, trigger.ID, trigger.NextRunAt); rearmErr != nil {
+			s.logger.Warn("re-arm trigger after recoverable catch-up failure failed",
+				zap.String("trigger_id", trigger.ID), zap.Error(rearmErr))
+		}
 		s.logger.Warn("compute routine catch-up failed",
 			zap.String("trigger_id", trigger.ID),
 			zap.String("cron_expression", trigger.CronExpression),
 			zap.Error(result.Err))
+		return result.Err
 	}
 	if err := s.repo.UpdateTriggerNextRun(ctx, trigger.ID, &result.NextRunAt); err != nil {
 		// AC-001.2: an arming-write failure means this claim dispatches
@@ -501,8 +512,9 @@ type catchUpResult struct {
 	// Truncated is true only when the walk stopped at the cap with the
 	// cursor still at or before the processing instant.
 	Truncated bool
-	// NextRunAt is strictly after the processing instant on every path,
-	// including Unknown — it is never `now`.
+	// NextRunAt is strictly after the processing instant on a successful walk.
+	// It is zero when Unknown is true; the caller chooses the error-path trigger
+	// state from Err instead of using a synthetic next run.
 	NextRunAt time.Time
 	// Unknown is true when the walk failed; ElapsedTicks, FirstMissedAt
 	// and Truncated are not meaningful in that case.
@@ -527,7 +539,7 @@ func computeCatchUp(trigger *RoutineTrigger, routine *Routine, now time.Time) ca
 		elapsed++
 		next, err := shared.NextCronTime(trigger.CronExpression, trigger.Timezone, cursor)
 		if err != nil {
-			return catchUpResult{NextRunAt: now.Add(catchUpFallbackInterval), Unknown: true, Err: err}
+			return catchUpResult{Unknown: true, Err: err}
 		}
 		cursor = next
 	}
@@ -538,7 +550,7 @@ func computeCatchUp(trigger *RoutineTrigger, routine *Routine, now time.Time) ca
 		// window cleanly, and record the count as a lower bound.
 		next, err := shared.NextCronTime(trigger.CronExpression, trigger.Timezone, now)
 		if err != nil {
-			return catchUpResult{NextRunAt: now.Add(catchUpFallbackInterval), Unknown: true, Err: err}
+			return catchUpResult{Unknown: true, Err: err}
 		}
 		cursor = next
 		truncated = true
