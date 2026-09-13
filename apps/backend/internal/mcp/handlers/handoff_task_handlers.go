@@ -15,6 +15,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/constants"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
+	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -468,15 +469,16 @@ func (h *Handlers) executeHandoff(
 	}
 
 	result, err := h.taskSvc.CreateTask(ctx, &service.CreateTaskRequest{
-		WorkspaceID:    args.TargetWorkspaceID,
-		WorkflowID:     args.WorkflowID,
-		WorkflowStepID: resolved.WorkflowStepID,
-		Title:          args.Title,
-		Description:    args.Prompt,
-		Repositories:   resolved.Repositories,
-		Metadata:       metadata,
-		StartAgent:     args.StartAgent,
-		ExternalID:     args.ExternalID,
+		WorkspaceID:            args.TargetWorkspaceID,
+		WorkflowID:             args.WorkflowID,
+		WorkflowStepID:         resolved.WorkflowStepID,
+		Title:                  args.Title,
+		Description:            args.Prompt,
+		Repositories:           resolved.Repositories,
+		Metadata:               metadata,
+		TrustedHandoffMetadata: true,
+		StartAgent:             args.StartAgent,
+		ExternalID:             args.ExternalID,
 	})
 	if err != nil {
 		h.logger.Error("handoff_task_kandev: failed to create delivery task", zap.Error(err))
@@ -749,7 +751,7 @@ func parseHandoffEntries(raw, deliveryTaskID string) (entries []handoffEntryReco
 	if trimmed == "" {
 		return nil, false, ""
 	}
-	if trimmed == "null" {
+	if trimmed == jsonNull {
 		// A genuinely absent handoffs key is reported by handoffsRawValue as
 		// "" (handled above), so a literal "null" here means the key is
 		// *present* with an explicit null value — one of AC-27's exhaustive
@@ -800,6 +802,13 @@ func sortHandoffEntries(entries []handoffEntryRecord) {
 // millisecond precision.
 func formatHandoffTimestamp(t time.Time) string {
 	return t.UTC().Format("2006-01-02T15:04:05.000Z")
+}
+
+// SetDashboardService wires the office dashboard service used to log
+// handoff_task_kandev activity entries. Optional: when nil, activity logging
+// is a no-op and never fails the handoff.
+func (h *Handlers) SetDashboardService(svc *dashboard.DashboardService) {
+	h.dashboardSvc = svc
 }
 
 // logHandoffActivity is AC-19/AC-19a: one entry in the source workspace

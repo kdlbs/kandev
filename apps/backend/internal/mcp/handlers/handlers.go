@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
+	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -303,6 +304,10 @@ type Handlers struct {
 	// Wires the list_related_tasks_kandev / *_task_document_kandev
 	// MCP tools introduced in office task handoffs phase 2.
 	handoffSvc *service.HandoffService
+
+	// Office dashboard service (optional, set via SetDashboardService).
+	// Backs handoff_task_kandev's activity logging.
+	dashboardSvc *dashboard.DashboardService
 
 	// Optional PR lister (set via SetTaskPRLister) used to enrich
 	// task-listing responses with associated pull requests.

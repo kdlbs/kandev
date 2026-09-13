@@ -5722,7 +5722,7 @@ func (s *Service) autoStartStepPrompt(
 				referenceContext, pullRequestTargetContext,
 			)
 			dispatchPrompt = sysprompt.InjectOfficeContextWithOptions(
-				taskID, sessionID, dispatchPrompt, requiresSignal,
+				taskID, sessionID, dispatchPrompt, requiresSignal, includeHandoff,
 				referenceContext, pullRequestTargetContext,
 			)
 		} else {
