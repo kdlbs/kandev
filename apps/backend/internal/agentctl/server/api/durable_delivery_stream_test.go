@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter"
@@ -161,5 +162,38 @@ func TestDeliveryAPIRejectsForeignStoredSubmission(t *testing.T) {
 	}
 	if payload["code"] != "OWNER_MISMATCH" {
 		t.Fatalf("error code = %q, want OWNER_MISMATCH", payload["code"])
+	}
+}
+
+func TestDeliveryAPICancelsCurrentSubmission(t *testing.T) {
+	server, _, deliveryJournal := newDurableDeliveryTestServer(t)
+	ctx := context.Background()
+	if _, err := deliveryJournal.PutSubmission(ctx, journal.Submission{
+		ID: "submission-cancel-api", SessionID: "session-1", IncarnationID: "session-1",
+		HarnessGeneration: 1, Hash: "hash-cancel-api", Payload: []byte("prompt"),
+	}); err != nil {
+		t.Fatalf("store submission: %v", err)
+	}
+	for _, state := range []journal.SubmissionState{
+		journal.SubmissionAccepted, journal.SubmissionDispatching, journal.SubmissionInterruptedUnknown,
+	} {
+		if _, err := deliveryJournal.TransitionSubmission(ctx, "submission-cancel-api", state, time.Time{}); err != nil {
+			t.Fatalf("transition to %s: %v", state, err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agent/submissions/submission-cancel-api/cancel", nil)
+	resp := httptest.NewRecorder()
+	server.Router().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusNoContent {
+		t.Fatalf("cancel status = %d, want %d: %s", resp.Code, http.StatusNoContent, resp.Body.String())
+	}
+	submission, err := deliveryJournal.GetSubmission(ctx, "submission-cancel-api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if submission.State != journal.SubmissionCancelled {
+		t.Fatalf("cancelled state = %q, want %q", submission.State, journal.SubmissionCancelled)
 	}
 }

@@ -625,6 +625,27 @@ func (m *Manager) RetireDeliverySubmission(ctx context.Context, id string, recov
 	return err
 }
 
+// CancelDeliverySubmission settles one prompt after an explicit user cancel.
+// Unlike retirement, cancellation is valid in the current harness generation
+// and preserves the record as an auditable terminal outcome.
+func (m *Manager) CancelDeliverySubmission(ctx context.Context, id string) error {
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return err
+	}
+	submission, err := deliveryJournal.GetSubmission(ctx, id)
+	if err != nil {
+		return err
+	}
+	switch submission.State {
+	case journal.SubmissionCancelled, journal.SubmissionCompleted, journal.SubmissionFailed:
+		return nil
+	default:
+		_, err = deliveryJournal.TransitionSubmission(ctx, id, journal.SubmissionCancelled, time.Now().UTC())
+		return err
+	}
+}
+
 // getBaseBranches returns a snapshot of cfg.BaseBranches under the
 // dedicated baseBranchesMu so callers (rescan, lazy-subpath, the
 // UpdateBaseBranches re-stamp loop) read a consistent map even when a

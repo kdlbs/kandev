@@ -190,6 +190,43 @@ func TestJournalSubmissionIdentityIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestJournalExplicitCancelSettlesUncertainSubmission(t *testing.T) {
+	j, err := Open(Config{Path: filepath.Join(t.TempDir(), "delivery.bbolt")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = j.Close() })
+	ctx := context.Background()
+	submission, err := j.PutSubmission(ctx, Submission{
+		ID: "submission-cancel", Hash: "hash-cancel", Payload: []byte("prompt"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, state := range []SubmissionState{SubmissionAccepted, SubmissionDispatching, SubmissionInterruptedUnknown} {
+		if _, err := j.TransitionSubmission(ctx, submission.ID, state, time.Time{}); err != nil {
+			t.Fatalf("transition to %s: %v", state, err)
+		}
+	}
+	if _, err := j.TransitionSubmission(ctx, submission.ID, SubmissionCancelled, time.Time{}); err != nil {
+		t.Fatalf("explicit cancel: %v", err)
+	}
+	stored, err := j.GetSubmission(ctx, submission.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.State != SubmissionCancelled {
+		t.Fatalf("cancelled state = %q, want %q", stored.State, SubmissionCancelled)
+	}
+	unresolved, err := j.HasUnresolvedSubmissions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unresolved {
+		t.Fatal("explicitly cancelled submission remained unresolved")
+	}
+}
+
 func TestJournalTerminalEventMarksSubmissionAtomically(t *testing.T) {
 	j, err := Open(Config{Path: filepath.Join(t.TempDir(), "delivery.bbolt")})
 	if err != nil {

@@ -130,6 +130,7 @@ func (s *Server) setupRoutes() {
 		api.POST("/agent/submissions", s.handleDeliverySubmission)
 		api.GET("/agent/submissions", s.handleDeliverySubmissions)
 		api.GET("/agent/submissions/:id", s.handleDeliverySubmissionByID)
+		api.POST("/agent/submissions/:id/cancel", s.handleDeliverySubmissionCancel)
 		api.POST("/agent/submissions/:id/retire", s.handleDeliverySubmissionRetire)
 		api.GET("/agent/delivery/stream", s.handleDeliveryReplay)
 		api.POST("/agent/delivery/stream/ack", s.handleDeliveryAcknowledgement)
