@@ -129,23 +129,6 @@ func TestDispatchRoutineRun_CreateRunFailureRecordsNothing(t *testing.T) {
 	}
 }
 
-// failingCreateWakeupEnqueuer forces CreateWakeupRequest to fail with a
-// non-idempotency error, to exercise the lightweight path's materialisation
-// failure (AC-OFFICE-ROUTINE-CATCHUP-001.10).
-type failingCreateWakeupEnqueuer struct {
-	createErr error
-}
-
-func (f *failingCreateWakeupEnqueuer) CreateWakeupRequest(_ context.Context, _ *routines.WakeupRequest) error {
-	return f.createErr
-}
-
-func (f *failingCreateWakeupEnqueuer) Dispatch(_ context.Context, _ string) error { return nil }
-
-func (f *failingCreateWakeupEnqueuer) FailWakeupRequest(_ context.Context, _, _ string) error {
-	return nil
-}
-
 // TestProcessCronTrigger_LightweightMaterialiseFailureMarksRunFailed covers
 // AC-OFFICE-ROUTINE-CATCHUP-001.10: a lightweight routine's
 // CreateWakeupRequest failure (not an idempotency conflict) marks the
