@@ -2,7 +2,7 @@
 status: active
 system: tasks
 created: 2026-09-02
-updated: 2026-09-11
+updated: 2026-09-13
 owners:
   - kandev
 ---
@@ -18,6 +18,9 @@ shows one shared pending set on the plan and at every session composer, then
 chooses a destination only when the user sends a message or selects **Run**.
 
 ## Terminology
+
+- **Open comment draft:** Text being entered before Add or Update succeeds;
+  it is not yet part of the persisted pending set.
 
 - **Pending plan comment:** An unsent comment anchored to selected text in the
   task's current plan.
@@ -67,6 +70,19 @@ unsent feedback.
   64 KiB and its selected text to 256 KiB, measured as UTF-8 bytes. A task plan
   shall hold at most 100 pending comments and 1 MiB of combined bodies and
   selected text. An over-limit mutation shall leave the previous snapshot intact.
+
+- **AC-TASKS-PLAN-COMMENTS-001.9:** While adding or editing a comment on the
+  same current plan, switching away from the browser and returning shall
+  preserve the open editor, entered text, and selected plan text. Background
+  refresh and reconnect shall preserve that draft during pending, successful,
+  and failed reads on desktop and phone.
+- **AC-TASKS-PLAN-COMMENTS-001.10:** Preserving an open comment draft shall
+  not automatically persist or deliver it. Add, Update, and Run remain explicit
+  actions; failed mutations shall preserve the entered text for retry.
+- **AC-TASKS-PLAN-COMMENTS-001.11:** Initial plan loading shall not display
+  another task's plan or draft. A task change, confirmed plan deletion, or
+  replacement of the current plan shall clear the outgoing transient editor
+  so its draft cannot be applied to the new context.
 
 ### REQ-TASKS-PLAN-COMMENTS-002: Selected-session composer delivery
 
@@ -205,12 +221,18 @@ migration gate without changing task ownership or backend acceptance semantics.
 
 ## Implementation plans
 
+- [Plan comment foreground preservation](../../../plans/plan-comment-foreground-preservation/plan.md)
+
 - [Task-owned plan comments](../../../plans/task-owned-plan-comments/plan.md)
   records the original delivery.
 - [Plan comment recovery](../../../plans/plan-comment-recovery/plan.md)
   implements the recovery and delivery refinements in requirement 004.
 
 ## Out of scope
+
+- Restoring an open, unsubmitted comment editor after page reload, task
+  navigation, or explicit dismissal; synchronizing that transient draft to
+  another browser or device.
 
 - Changing the task-session ownership of diff, file, pull-request,
   walkthrough, or agent-message comments.
