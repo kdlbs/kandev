@@ -96,6 +96,69 @@ func TestInboxRejectsConflictingDuplicateSequence(t *testing.T) {
 	}
 }
 
+func TestInboxAcceptsReplayWithReconstructedLifecycleFields(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-replay", "session-replay", "turn-original")
+
+	originalPayload, err := json.Marshal(streams.AgentEvent{
+		Type:               streams.EventTypeMessageChunk,
+		Text:               "hello",
+		PromptGeneration:   1,
+		TurnID:             "turn-original",
+		CanonicalMessageID: "message-original",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := &models.AgentDeliveryEvent{
+		SessionID:         "session-replay",
+		IncarnationID:     "incarnation-replay",
+		HarnessGeneration: 1,
+		StreamID:          "stream-replay",
+		Sequence:          1,
+		EventType:         streams.EventTypeMessageChunk,
+		Payload:           originalPayload,
+	}
+	if inserted, err := repo.ReceiveAgentDeliveryEvent(ctx, event, 1); err != nil || !inserted {
+		t.Fatalf("first inbox insert = %v, err=%v", inserted, err)
+	}
+
+	replayedPayload, err := json.Marshal(streams.AgentEvent{
+		Type:                   streams.EventTypeMessageChunk,
+		Text:                   "hello",
+		PromptGeneration:       1,
+		TurnID:                 "turn-reconstructed",
+		CanonicalMessageID:     "message-reconstructed",
+		CanonicalProjection:    true,
+		CanonicalMessageAppend: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replayed := *event
+	replayed.Payload = replayedPayload
+	if inserted, err := repo.ReceiveAgentDeliveryEvent(ctx, &replayed, 1); err != nil || inserted {
+		t.Fatalf("replayed inbox insert = %v, err=%v", inserted, err)
+	}
+	if _, err := repo.ProjectCanonicalAgentDeliveryEvent(ctx, &replayed, &models.AgentDeliveryEffect{
+		EffectKey:  "replay-projection",
+		StreamID:   replayed.StreamID,
+		Sequence:   replayed.Sequence,
+		EffectType: "agent_delivery.event",
+	}); err != nil {
+		t.Fatalf("project replayed event: %v", err)
+	}
+
+	message, err := repo.GetMessage(ctx, "message-original")
+	if err != nil {
+		t.Fatalf("get original canonical message: %v", err)
+	}
+	if message.Content != "hello" || message.TurnID != "turn-original" {
+		t.Fatalf("canonical message = %+v, want original lifecycle identity", message)
+	}
+}
+
 func TestProjectionRejectsMismatchedEventIdentity(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

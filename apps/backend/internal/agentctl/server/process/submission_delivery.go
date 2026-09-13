@@ -6,10 +6,24 @@ import (
 	"fmt"
 	"time"
 
+	acp "github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 )
 
 var ErrSubmissionUncertain = errors.New("agent delivery submission outcome is uncertain")
+
+type deterministicPromptFailure interface {
+	DeterministicPromptFailure() bool
+}
+
+func isKnownSubmissionFailure(err error) bool {
+	var requestErr *acp.RequestError
+	if errors.As(err, &requestErr) {
+		return true
+	}
+	var providerFailure deterministicPromptFailure
+	return errors.As(err, &providerFailure) && providerFailure.DeterministicPromptFailure()
+}
 
 // SubmissionDelivery coordinates the agentctl-side immutable submission
 // record. It is deliberately independent of the ACP prompt call so a caller
@@ -66,6 +80,13 @@ func (d *SubmissionDelivery) Dispatch(ctx context.Context, id string, call func(
 		return submission, fmt.Errorf("submission %s is not accepted: %s", id, submission.State)
 	}
 	if err := call(ctx); err != nil {
+		if isKnownSubmissionFailure(err) {
+			failed, transitionErr := d.Journal.TransitionSubmission(ctx, id, journal.SubmissionFailed, d.now())
+			if transitionErr != nil {
+				return journal.Submission{}, errors.Join(ErrSubmissionUncertain, transitionErr)
+			}
+			return failed, err
+		}
 		unknown, transitionErr := d.Journal.TransitionSubmission(ctx, id, journal.SubmissionInterruptedUnknown, d.now())
 		journal.RecordUncertainSubmission("dispatch_error")
 		if transitionErr != nil {

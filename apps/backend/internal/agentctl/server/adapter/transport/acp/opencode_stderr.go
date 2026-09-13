@@ -35,6 +35,8 @@ func (e *providerPromptError) Error() string {
 	return e.ProviderError.Message
 }
 
+func (*providerPromptError) DeterministicPromptFailure() bool { return true }
+
 // ProviderErrorFromError extracts the safe provider diagnostic from a prompt
 // error without exposing the provider-specific wrapper to lifecycle callers.
 // It first unwraps the correlated stderr diagnostic; for a structured ACP

@@ -1,6 +1,7 @@
 package lifecycle
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,31 @@ type recordingAgentDeliveryRepository struct {
 	projected     []*models.AgentDeliveryEvent
 	projectErr    error
 	projectedHook func()
+}
+
+type immutableDeliveryRepository struct {
+	recordingAgentDeliveryRepository
+}
+
+func (r *immutableDeliveryRepository) ReceiveAgentDeliveryEvent(
+	ctx context.Context,
+	event *models.AgentDeliveryEvent,
+	remoteHighWater int64,
+) (bool, error) {
+	copyEvent := *event
+	copyEvent.Payload = append([]byte(nil), event.Payload...)
+	return r.recordingAgentDeliveryRepository.ReceiveAgentDeliveryEvent(ctx, &copyEvent, remoteHighWater)
+}
+
+func (r *immutableDeliveryRepository) ProjectAgentDeliveryEvent(
+	ctx context.Context,
+	event *models.AgentDeliveryEvent,
+	effect *models.AgentDeliveryEffect,
+) (bool, error) {
+	if len(r.received) != 1 || !bytes.Equal(r.received[0].Payload, event.Payload) {
+		return false, errors.New("durable delivery payload changed between admission and projection")
+	}
+	return r.recordingAgentDeliveryRepository.ProjectAgentDeliveryEvent(ctx, event, effect)
 }
 
 func (r *recordingAgentDeliveryRepository) ReceiveAgentDeliveryEvent(_ context.Context, event *models.AgentDeliveryEvent, _ int64) (bool, error) {
@@ -168,5 +194,41 @@ func TestDurableAgentEventAdmissionProjectsOpaquePayload(t *testing.T) {
 	}
 	if process {
 		t.Fatal("projected duplicate was admitted for a second callback")
+	}
+}
+
+func TestDurableAgentEventProjectionUsesAdmissionSnapshot(t *testing.T) {
+	repository := &immutableDeliveryRepository{}
+	sm := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
+	execution := &AgentExecution{SessionID: "session-1", promptTurnID: "turn-1"}
+	event := agentctl.AgentEvent{
+		Type:                 "error",
+		DeliveryStreamID:     "session-1",
+		DeliverySequence:     1,
+		DeliverySubmissionID: "submission-1",
+	}
+	durableEvent := durableAgentEvent(execution, event)
+	process, _, effect, err := sm.prepareDurableAgentDeliveryEvent(
+		context.Background(), execution, durableEvent, repository,
+	)
+	if err != nil {
+		t.Fatalf("prepare durable event: %v", err)
+	}
+	if !process {
+		t.Fatal("first durable event was not admitted")
+	}
+
+	// Lifecycle failure handling can clear or replace the prompt turn before
+	// the stream callback reaches the projection step. The admitted payload
+	// must remain the record that gets projected and acknowledged.
+	execution.setPromptTurnID("turn-2")
+	acknowledger := &recordingAgentDeliveryAcknowledger{}
+	if err := sm.projectAndAcknowledgeDurableAgentDeliveryEventWithEffect(
+		context.Background(), durableEvent, event, repository, acknowledger, effect,
+	); err != nil {
+		t.Fatalf("project and acknowledge durable event: %v", err)
+	}
+	if len(acknowledger.acknowledged) != 1 {
+		t.Fatalf("acknowledged = %v, want one acknowledgment", acknowledger.acknowledged)
 	}
 }

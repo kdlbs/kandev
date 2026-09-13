@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	acp "github.com/coder/acp-go-sdk"
 	"github.com/kandev/kandev/internal/agentctl/journal"
 )
 
@@ -63,5 +64,38 @@ func TestSubmissionCrashWindowAndHashConflict(t *testing.T) {
 	}
 	if _, err := delivery.Admit(context.Background(), journal.Submission{ID: submission.ID, Hash: "different-hash"}); !errors.Is(err, journal.ErrSubmissionConflict) {
 		t.Fatalf("hash conflict error = %v", err)
+	}
+}
+
+func TestSubmissionKnownFailureSettlesWithoutReconciliation(t *testing.T) {
+	deliveryJournal, err := journal.Open(journal.Config{Path: filepath.Join(t.TempDir(), "delivery.bbolt")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = deliveryJournal.Close() })
+	delivery := &SubmissionDelivery{Journal: deliveryJournal}
+	submission, err := delivery.Admit(context.Background(), journal.Submission{
+		ID: "submission-known-failure", Hash: "hash-known-failure", Payload: []byte("prompt"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantErr := errors.New("provider rejected prompt")
+	requestErr := &acp.RequestError{Code: -32603, Message: wantErr.Error()}
+	settled, err := delivery.Dispatch(context.Background(), submission.ID, func(context.Context) error {
+		return requestErr
+	})
+	if !errors.Is(err, requestErr) {
+		t.Fatalf("known failure = %v, want %v", err, requestErr)
+	}
+	if settled.State != journal.SubmissionFailed {
+		t.Fatalf("settled state = %q, want %q", settled.State, journal.SubmissionFailed)
+	}
+	unresolved, err := deliveryJournal.HasUnresolvedSubmissions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unresolved {
+		t.Fatal("known failure left an unresolved submission")
 	}
 }
