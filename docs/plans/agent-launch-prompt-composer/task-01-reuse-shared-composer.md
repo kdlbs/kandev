@@ -10,6 +10,10 @@ spec: "../../specs/ui/requirements/agent-launch-prompt-composer.md"
 
 # Task 01: Reuse shared launch composer
 
+The automatic-summary preservation criterion below records the original completed
+delivery. It is superseded by [Blank handoff context](../handoff-blank-context/plan.md).
+The shared-composer acceptance and historical results remain applicable.
+
 ## Acceptance
 
 - New Agent and handoff render `TaskFormInputs` in session mode, exposing saved-prompt autocomplete, attachments, enhancement recovery, and voice without the bespoke `SessionPromptField`.

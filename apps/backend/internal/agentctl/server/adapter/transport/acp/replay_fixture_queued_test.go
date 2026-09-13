@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"io"
+	"sync"
 	"testing"
 	"time"
 
@@ -21,11 +22,16 @@ import (
 type queuedReplayFakeAgent struct {
 	replayFakeAgent
 	releaseBarrier chan struct{}
+	releaseOnce    sync.Once
+}
+
+func (f *queuedReplayFakeAgent) release() {
+	f.releaseOnce.Do(func() { close(f.releaseBarrier) })
 }
 
 func (f *queuedReplayFakeAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.PromptResponse, error) {
 	resp, err := f.replayFakeAgent.Prompt(ctx, req)
-	close(f.releaseBarrier)
+	f.release()
 	return resp, err
 }
 
@@ -105,6 +111,10 @@ func runQueuedFixtureOnce(t *testing.T, fx replayfixtures.Fixture) {
 		_ = clientToAgentW.Close()
 		_ = agentToClientW.Close()
 	})
+	// Release the worker before closing the adapter. This is idempotent with
+	// Prompt's release and prevents a failed or timed-out test from leaving the
+	// worker blocked while adapter.Close waits for it to stop.
+	t.Cleanup(fake.release)
 
 	ctx := context.Background()
 	if err := a.Initialize(ctx); err != nil {

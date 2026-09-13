@@ -235,6 +235,12 @@ type AgentExecution struct {
 	// produced a single frame for this prompt" from "it worked, then paused" —
 	// both cases otherwise bump the same lastActivityAt timestamp.
 	agentEventSincePrompt bool
+	// providerDiagnosticCandidate and providerDiagnosticText retain the
+	// sanitized marked diagnostic for the terminal evidence snapshot. A marked
+	// diagnostic does not count as ordinary output, but its text is needed to
+	// correlate a failure when stream and failure events are delivered out of order.
+	providerDiagnosticCandidate bool
+	providerDiagnosticText      string
 	// promptActivityEpoch changes when a prompt is armed or a genuine agent
 	// event arrives. Stall consumers use it to reject a snapshot that became
 	// stale while the event was crossing the bus.
@@ -370,6 +376,8 @@ func (e *AgentExecution) armPromptActivity() {
 	e.lastActivityAtMu.Lock()
 	e.lastActivityAt = time.Now()
 	e.agentEventSincePrompt = false
+	e.providerDiagnosticCandidate = false
+	e.providerDiagnosticText = ""
 	e.promptActivityEpoch++
 	e.lastActivityAtMu.Unlock()
 }
@@ -396,9 +404,11 @@ func (e *AgentExecution) promptAttemptEvidenceSnapshot() PromptAttemptEvidence {
 	e.lastActivityAtMu.Lock()
 	defer e.lastActivityAtMu.Unlock()
 	return PromptAttemptEvidence{
-		EvidenceKnown:  true,
-		OutputObserved: e.agentEventSincePrompt,
-		EffectObserved: e.agentEventSincePrompt,
+		EvidenceKnown:               true,
+		OutputObserved:              e.agentEventSincePrompt,
+		EffectObserved:              e.agentEventSincePrompt,
+		ProviderDiagnosticCandidate: e.providerDiagnosticCandidate,
+		ProviderDiagnosticText:      e.providerDiagnosticText,
 	}
 }
 
@@ -1150,6 +1160,10 @@ type WorkspaceInfo struct {
 	TaskID            string
 	SessionID         string // Task session ID (from task_sessions table)
 	TaskEnvironmentID string // Env this session belongs to (shared across sessions in same task)
+	// EnvironmentOwnerTaskID and OwnershipGeneration are the durable identity
+	// used to guard host worktree recovery across inherited environments.
+	EnvironmentOwnerTaskID string
+	OwnershipGeneration    int64
 	// ValidatedTaskEnvironmentID and ValidatedExecutorType identify the
 	// environment and executor ownership used during workspace admission. They
 	// are populated from the durable task environment, not from a session path.
@@ -1157,16 +1171,25 @@ type WorkspaceInfo struct {
 	// is missing or no longer matches the selected environment.
 	ValidatedTaskEnvironmentID string
 	ValidatedExecutorType      string
-	WorkspacePath              string // Path to the workspace/repository
-	WorkspaceFolders           []WorkspaceFolderSpec
-	WorkspaceRepositories      []WorkspaceRepositorySpec
-	TaskDirName                string
-	WorkspaceID                string
-	AgentProfileID             string // Stable Office agent identity (or the execution profile for legacy sessions)
-	ExecutionProfileID         string // Concrete CLI profile selected for this execution
-	ExecutorProfileID          string // Concrete executor profile selected for this execution
-	AgentID                    string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
-	ACPSessionID               string // Agent's session ID for conversation resumption (from session metadata)
+	// ValidatedTaskEnvironmentGeneration fences workspace attachment against a
+	// concurrent environment ownership transfer. A zero value is retained for
+	// legacy callers that do not project the generation.
+	ValidatedTaskEnvironmentGeneration int64
+	// TaskArchived and WorkspaceOwnerArchived are projected by the task service
+	// so lifecycle callers cannot restore an archived task through a cached or
+	// direct workspace entry point.
+	TaskArchived           bool
+	WorkspaceOwnerArchived bool
+	WorkspacePath          string // Path to the workspace/repository
+	WorkspaceFolders       []WorkspaceFolderSpec
+	WorkspaceRepositories  []WorkspaceRepositorySpec
+	TaskDirName            string
+	WorkspaceID            string
+	AgentProfileID         string // Stable Office agent identity (or the execution profile for legacy sessions)
+	ExecutionProfileID     string // Concrete CLI profile selected for this execution
+	ExecutorProfileID      string // Concrete executor profile selected for this execution
+	AgentID                string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
+	ACPSessionID           string // Agent's session ID for conversation resumption (from session metadata)
 	// SessionMode is the persisted session permission mode (e.g. "acceptEdits")
 	// from session metadata, declared via the set_session_mode workflow action or
 	// a user toggle. Applied as a mode override at ACP session init so a fresh

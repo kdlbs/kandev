@@ -5,8 +5,11 @@ status: planned
 wave: 3
 depends_on: ["02-profile-proxy-configuration"]
 plan: "plan.md"
-requirements: []
-acceptance_criteria: []
+requirements:
+  - REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001
+acceptance_criteria:
+  - AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.3
+  - AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.4
 system_design: []
 ---
 

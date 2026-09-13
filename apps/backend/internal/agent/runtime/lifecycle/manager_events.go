@@ -602,6 +602,12 @@ func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.Agent
 	isProviderDiagnostic := event.Type == "message_chunk" && event.ProviderDiagnosticCandidate
 	execution.lastActivityAtMu.Lock()
 	execution.lastActivityAt = time.Now()
+	if isProviderDiagnostic {
+		execution.providerDiagnosticCandidate = true
+		if text := streams.SanitizeProviderMessage(event.Text); text != "" && execution.providerDiagnosticText == "" {
+			execution.providerDiagnosticText = text
+		}
+	}
 	if isTurnContent && !isProviderDiagnostic {
 		execution.agentEventSincePrompt = true
 		execution.promptActivityEpoch++

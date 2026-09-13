@@ -134,7 +134,8 @@ type ProviderErrorExpectation struct {
 }
 
 // Expect is a fixture's full declared outcome. Every field is required
-// except ProviderError.ErrorKind and ProviderError.ModelID.
+// except ProviderError.ErrorKind and ProviderError.ModelID; an empty
+// RecordedDiagnosticCode is represented by a non-nil pointer to an empty string.
 type Expect struct {
 	Events         []string                 `json:"events"`
 	ProviderError  ProviderErrorExpectation `json:"providerError"`
@@ -148,7 +149,7 @@ type Expect struct {
 	// independent of whether it will go on to satisfy containment against
 	// the terminal message. Declared explicitly rather than defaulting so a
 	// fixture cannot assert PreResultSafe without also pinning why.
-	RecordedDiagnosticCode string `json:"recordedDiagnosticCode"`
+	RecordedDiagnosticCode *string `json:"recordedDiagnosticCode"`
 }
 
 // Fixture is one replay fixture document: one JSON file, one (Gateway, Case)

@@ -2777,9 +2777,14 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 		Message:          errMsg,
 		OccurredAt:       time.Now().UTC(),
 		AgentExecutionID: data.AgentExecutionID,
+		ExecutionID:      data.AgentExecutionID,
+		Phase:            data.Phase,
+		AttemptID:        data.AttemptID,
+		Causes:           models.NormalizeAgentErrorCauses(data.Causes),
 		RemediationURL:   providerRemediationURL(data),
 		Code:             data.FailureCode,
 		Details:          details,
+		StampValue:       data.ErrorStamp,
 	}
 	if err := s.repo.SetSessionMetadataKey(ctx, data.SessionID, models.SessionMetaKeyLastAgentError, lastErr); err != nil {
 		s.logger.Warn("failed to persist last agent error",
@@ -2797,6 +2802,16 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 			"occurred_at":        lastErr.OccurredAt.Format(time.RFC3339Nano),
 			"stamp":              lastErr.Stamp(),
 			"agent_execution_id": lastErr.AgentExecutionID,
+			"execution_id":       lastErr.ExecutionID,
+		}
+		if lastErr.Phase != "" {
+			eventData["phase"] = lastErr.Phase
+		}
+		if lastErr.AttemptID != "" {
+			eventData["attempt_id"] = lastErr.AttemptID
+		}
+		if len(lastErr.Causes) > 0 {
+			eventData["causes"] = append([]models.AgentErrorCause(nil), lastErr.Causes...)
 		}
 		if lastErr.RemediationURL != "" {
 			eventData["remediation_url"] = lastErr.RemediationURL
@@ -3057,6 +3072,31 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 		AgentExecutionID: agentExecutionID,
 		ErrorMessage:     err.Error(),
 	}
+	var bootstrapFailure *lifecycle.BootstrapFailure
+	if errors.As(err, &bootstrapFailure) && bootstrapFailure != nil {
+		failureData.ErrorMessage = bootstrapFailure.SafeDetail()
+		if failureData.ErrorMessage == "" {
+			failureData.ErrorMessage = "The agent could not start."
+		}
+		failureData.FailureCode = models.LaunchErrorCategoryGenericLaunchFailure
+		failureData.Phase = models.LaunchErrorPhaseBootstrap
+		failureData.AttemptID = agentExecutionID
+		failureData.ErrorStamp = models.StableLaunchErrorStamp(
+			taskID, sessionID, agentExecutionID, models.LaunchErrorPhaseBootstrap,
+		)
+		operation := bootstrapFailure.Operation
+		if operation == "" && fromResume {
+			operation = models.AgentErrorCauseOperationResume
+		}
+		if operation == models.AgentErrorCauseOperationResume ||
+			operation == models.AgentErrorCauseOperationRestoreWorkspace {
+			failureData.Causes = models.NormalizeAgentErrorCauses([]models.AgentErrorCause{{
+				Operation: operation,
+				Code:      bootstrapFailure.SafeCode(),
+				Detail:    bootstrapFailure.SafeDetail(),
+			}})
+		}
+	}
 	if classified := classifyManagedRuntimeNpmStartFailure(err); classified != nil {
 		failureData.ErrorMessage = "managed npm runtime failed to prepare"
 		failureData.FailureCode = string(routingerr.CodeManagedRuntimeNpmResolution)
@@ -3106,7 +3146,11 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 		return true
 	}
 
-	if !isAuthError(err.Error()) {
+	authFailure := isAuthError(err.Error())
+	if bootstrapFailure != nil && bootstrapFailure.SafeCode() == models.AgentErrorCauseCodeAuthenticationRequired {
+		authFailure = true
+	}
+	if !authFailure {
 		if fromResume {
 			s.logger.Info("suppressing toast for resume bootstrap failure",
 				zap.String("task_id", taskID),

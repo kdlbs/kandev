@@ -36,15 +36,22 @@ type AgentEventPayload struct {
 	EvidenceKnown  bool `json:"evidence_known,omitempty"`
 	OutputObserved bool `json:"output_observed,omitempty"`
 	EffectObserved bool `json:"effect_observed,omitempty"`
+	// ProviderDiagnosticCandidate carries the bounded text marker captured from
+	// a marked diagnostic stream event. It lets a terminal failure consumer
+	// correlate the diagnostic even when the stream subscription is delayed.
+	ProviderDiagnosticCandidate bool   `json:"provider_diagnostic_candidate,omitempty"`
+	ProviderDiagnosticText      string `json:"provider_diagnostic_text,omitempty"`
 }
 
 // PromptAttemptEvidence is the immutable lifecycle snapshot attached to a
 // terminal failure event. Lifecycle conservatively treats any genuine turn
 // content as both output and effect evidence, which fails replay closed.
 type PromptAttemptEvidence struct {
-	EvidenceKnown  bool
-	OutputObserved bool
-	EffectObserved bool
+	EvidenceKnown               bool
+	OutputObserved              bool
+	EffectObserved              bool
+	ProviderDiagnosticCandidate bool
+	ProviderDiagnosticText      string
 }
 
 // AgentStalledPayload describes a prompt that has stopped receiving agent events.

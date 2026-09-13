@@ -195,6 +195,9 @@ func (s *Service) observeProviderDiagnostic(
 	if evidence.output || evidence.effect {
 		return
 	}
+	if evidence.providerDiagnosticCode != "" || evidence.providerDiagnosticText != "" {
+		return
+	}
 	evidence.output = true
 	evidence.providerDiagnosticCode = classified.Code
 	evidence.providerDiagnosticText = normalizeDiagnosticText(message)
@@ -216,6 +219,8 @@ func (s *Service) withPromptAttemptEvidence(data watcher.AgentEventData) watcher
 	lifecycleEvidenceKnown := data.EvidenceKnown
 	lifecycleOutputObserved := data.OutputObserved
 	lifecycleEffectObserved := data.EffectObserved
+	lifecycleDiagnosticCandidate := data.ProviderDiagnosticCandidate
+	lifecycleDiagnosticText := data.ProviderDiagnosticText
 	evidence, ok := s.promptAttemptForSession(data.SessionID)
 	if !ok {
 		// Lifecycle evidence is only authoritative after the process-local
@@ -241,6 +246,9 @@ func (s *Service) withPromptAttemptEvidence(data watcher.AgentEventData) watcher
 	if evidence.dynamic {
 		data.DynamicRouteAttempt = true
 	}
+	if lifecycleEvidenceKnown && lifecycleDiagnosticCandidate && !evidence.output && !evidence.effect {
+		s.observeLifecycleProviderDiagnosticLocked(evidence, lifecycleDiagnosticText)
+	}
 	outputObserved := evidence.outputObservedLocked(data)
 	if lifecycleEvidenceKnown {
 		data.EvidenceKnown = true
@@ -252,6 +260,34 @@ func (s *Service) withPromptAttemptEvidence(data watcher.AgentEventData) watcher
 		data.EffectObserved = evidence.effect
 	}
 	return data
+}
+
+// observeLifecycleProviderDiagnosticLocked imports the bounded diagnostic
+// captured by lifecycle into the process-local evidence record. The stream
+// event may arrive after the terminal failure because those events use
+// separate subscriptions, so an absent or unclassifiable diagnostic fails
+// closed as ordinary output.
+func (s *Service) observeLifecycleProviderDiagnosticLocked(evidence *promptAttemptEvidence, message string) {
+	message = normalizeDiagnosticText(message)
+	if message == "" {
+		evidence.output = true
+		evidence.providerDiagnosticCode = ""
+		evidence.providerDiagnosticText = ""
+		return
+	}
+	classified := routingerr.Classify(routingerr.Input{
+		Phase:  routingerr.PhasePromptSend,
+		Stderr: message,
+	})
+	if classified.Confidence != routingerr.ConfHigh || !classified.FallbackAllowed {
+		evidence.output = true
+		evidence.providerDiagnosticCode = ""
+		evidence.providerDiagnosticText = ""
+		return
+	}
+	evidence.output = true
+	evidence.providerDiagnosticCode = classified.Code
+	evidence.providerDiagnosticText = message
 }
 
 // outputObservedLocked reports whether evidence.output should be treated as

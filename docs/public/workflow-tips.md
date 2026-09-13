@@ -20,6 +20,12 @@ Workflow prompts run with the selected executor's filesystem, credentials, and n
 3. Add automatic starts only when the executor, profile, and prompt are ready.
 4. Keep a human **Review** or **Do nothing** gate before risky changes ship.
 
+## One-time move options
+
+The workflow stepper and next-step controls keep a fast **Move here** path for ordinary transitions. Choose **Move with options** when one hand-off needs fresh context, extra one-time instructions, or should skip the destination step's saved prompt. These options are consumed by that transition only; the destination step's saved prompt and reset policy remain unchanged for later entries.
+
+Instructions are appended after the normal destination prompt, or replace it when you skip the step prompt. A move from an active agent is deferred until the current turn settles, so the reset, skip-prompt, and instructions stay together. On touch devices, the options form opens in a bottom Drawer. Pull-request draft/readiness remains a PR automation concern rather than a generic workflow move option.
+
 ## Built-in Kanban templates
 
 The template prompts are product behavior, not merely sample text. Review them before using a template in a repository with strict Git, test, or deployment rules. Kandev currently presents these five Kanban templates.
@@ -157,6 +163,14 @@ preserved.
 ### Continue a completed conversation
 
 Opening or reloading a completed task does not start its agent. If the task has a completed conversation, select **Resume** to continue that same conversation. The previous messages and provider context remain available, and the task keeps its completed state and workflow step. Select **New Agent** when you want a separate conversation. A follow-up does not run the completed step's workflow actions again.
+
+### Open a completed workspace
+
+Kandev restores a retained workspace when you open a completed task. This action restores Files, Changes, and supported workspace terminals. It does not resume the agent. It does not send a prompt.
+
+If workspace restoration fails, the affected panel shows **Workspace unavailable**. Select **Retry** to restore workspace access. Select **Technical details** to view bounded diagnostic information. The chat remains available while the workspace is unavailable.
+
+Select **Resume** in the completed conversation when you want the agent to continue. Workspace restoration and **Resume** are separate actions.
 
 Pull candidates are selected by board position, then priority, queue time, creation time, and ID. A candidate that cannot be moved is skipped. Pulling runs for every limited step; a feeder is only needed for overflow created outside the destination step.
 

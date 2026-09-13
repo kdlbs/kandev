@@ -27,6 +27,10 @@ import (
 // imports office/repository/sqlite directly (see routineWakeupAdapter).
 var ErrWakeupAlreadyRequested = errors.New("wakeup request already requested")
 
+// ErrInvalidTrigger indicates a trigger create request that failed
+// validation (a client error, not a server failure).
+var ErrInvalidTrigger = errors.New("invalid routine trigger")
+
 // Repository is the persistence interface required by RoutineService.
 type Repository interface {
 	CreateRoutine(ctx context.Context, routine *Routine) error
@@ -329,11 +333,20 @@ func (s *RoutineService) ListRoutinesFromConfig(ctx context.Context, workspaceID
 // -- Trigger management --
 
 // CreateRoutineTrigger creates a trigger and computes next_run_at for cron.
+// A cron trigger requires a satisfiable expression: an empty expression, or
+// one that can never fire, is rejected here rather than becoming a silent
+// no-op or a wrong daily fallback at tick time.
 func (s *RoutineService) CreateRoutineTrigger(ctx context.Context, t *RoutineTrigger) error {
-	if t.Kind == "cron" && t.CronExpression != "" {
+	if t.Timezone == "" {
+		t.Timezone = "UTC"
+	}
+	if t.Kind == "cron" {
+		if t.CronExpression == "" {
+			return fmt.Errorf("%w: cron trigger requires a cron_expression", ErrInvalidTrigger)
+		}
 		next, err := shared.NextCronTime(t.CronExpression, t.Timezone, time.Now().UTC())
 		if err != nil {
-			return fmt.Errorf("invalid cron expression: %w", err)
+			return fmt.Errorf("%w: invalid cron expression: %v", ErrInvalidTrigger, err)
 		}
 		t.NextRunAt = &next
 	}
@@ -402,11 +415,25 @@ func (s *RoutineService) processCronTrigger(ctx context.Context, trigger *Routin
 	// expressions (no fixed interval — we walk NextCronTime).
 	runCount, advanceTo, err := computeRoutineMissed(trigger, routine, now)
 	if err != nil {
-		s.logger.Warn("compute routine catch-up failed",
+		if errors.Is(err, shared.ErrUnsatisfiableCron) {
+			// The expression can never fire again. ClaimTrigger already
+			// cleared next_run_at; leave it cleared rather than re-arming,
+			// which would dispatch nothing but retry (and fail) forever.
+			s.logger.Error("cron expression unsatisfiable; trigger permanently disarmed",
+				zap.String("trigger_id", trigger.ID), zap.Error(err))
+			return err
+		}
+		// Any other failure (e.g. the timezone database is temporarily
+		// unavailable) is presumed recoverable: re-arm to the original due
+		// time so the next tick retries instead of leaving the trigger
+		// disarmed forever once the underlying issue clears.
+		if rearmErr := s.repo.UpdateTriggerNextRun(ctx, trigger.ID, trigger.NextRunAt); rearmErr != nil {
+			s.logger.Warn("re-arm trigger after recoverable catch-up failure failed",
+				zap.String("trigger_id", trigger.ID), zap.Error(rearmErr))
+		}
+		s.logger.Warn("compute routine catch-up failed; will retry next tick",
 			zap.String("trigger_id", trigger.ID), zap.Error(err))
-		// Fall through with sane defaults: fire once, advance one tick.
-		runCount = 1
-		advanceTo = now
+		return err
 	}
 	if err := s.repo.UpdateTriggerNextRun(ctx, trigger.ID, &advanceTo); err != nil {
 		s.logger.Warn("update trigger next_run_at failed",

@@ -7,6 +7,7 @@ import type { ActiveThread } from "@/lib/threads/active-threads";
 import type { ThreadStatus } from "@/lib/threads/thread-session-status";
 import type { TaskSession } from "@/lib/types/http";
 import { ThreadSessionStatusIcon, ThreadSessionSwitcher } from "./thread-session-switcher";
+import { ThreadTaskMenuButton } from "./thread-task-actions";
 
 export type MobileThreadNavigation = {
   onChoose: () => void;
@@ -35,7 +36,7 @@ export function MobileThreadColumnHeader({
       <div className="flex min-w-0 items-center gap-1">
         <Button
           variant="ghost"
-          className="h-auto min-h-11 min-w-0 flex-1 cursor-pointer justify-start gap-2 px-1 py-2 text-left"
+          className="h-auto min-h-11 min-w-0 flex-1 cursor-pointer justify-start gap-2 py-2 pl-1 pr-3.5 text-left"
           onClick={navigation.onChoose}
           aria-label={t("threads:chooseThreadLabel", { title: thread.title })}
           aria-haspopup="dialog"
@@ -58,6 +59,7 @@ export function MobileThreadColumnHeader({
         >
           <IconArrowsMaximize className="h-4 w-4" />
         </Button>
+        <ThreadTaskMenuButton taskId={thread.taskId} />
       </div>
       <div className="flex min-h-8 min-w-0 items-center justify-between gap-2 px-1">
         <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">

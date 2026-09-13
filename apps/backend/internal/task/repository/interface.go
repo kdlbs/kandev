@@ -493,10 +493,10 @@ type RepositorySetRepository interface {
 	// ListRepositorySetIDsByRepository reports which sets hold a repository, so a
 	// caller can publish their new shape after a deletion prunes membership.
 	ListRepositorySetIDsByRepository(ctx context.Context, repositoryID string) ([]string, error)
-	// UpdateRepositorySet writes the set's fields and, when repositoryIDs is
+	// UpdateRepositorySet writes the set's fields and, when repositoryItems is
 	// non-nil, replaces its whole membership in the same transaction so the two
-	// cannot land apart. A nil repositoryIDs leaves membership untouched.
-	UpdateRepositorySet(ctx context.Context, set *models.RepositorySet, repositoryIDs *[]string) error
+	// cannot land apart. A nil repositoryItems leaves membership untouched.
+	UpdateRepositorySet(ctx context.Context, set *models.RepositorySet, repositoryItems *[]models.RepositorySetItem) error
 	DeleteRepositorySet(ctx context.Context, id string) (bool, error)
 }
 
@@ -602,6 +602,15 @@ type TaskEnvironmentRepository interface {
 	UpdateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
 	DeleteTaskEnvironmentRepo(ctx context.Context, id string) error
 	DeleteTaskEnvironmentReposByEnv(ctx context.Context, envID string) error
+}
+
+// TaskEnvironmentRecoveryRepository is the optional durable authority
+// capability required by automatic host worktree recovery. Keeping it
+// separate preserves lightweight repository adapters used by tests and by
+// non-worktree executors.
+type TaskEnvironmentRecoveryRepository interface {
+	AcquireTaskEnvironmentRecoveryClaim(context.Context, models.TaskEnvironmentRecoveryClaimRequest) (*models.TaskEnvironmentRecoveryClaim, error)
+	ReleaseTaskEnvironmentRecoveryClaim(context.Context, *models.TaskEnvironmentRecoveryClaim) error
 }
 
 // ReviewRepository handles session file review records.

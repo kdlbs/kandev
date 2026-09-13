@@ -67,3 +67,47 @@ func TestObserveProviderDiagnosticAfterTerminalFailureClearedIsNoOp(t *testing.T
 		t.Fatal("late provider diagnostic notification resurrected evidence cleared by an earlier terminal failure")
 	}
 }
+
+// TestPromptAttemptEvidenceUsesLifecycleDiagnosticWhenFailureArrivesFirst
+// models the two NATS subscriptions that can deliver agent.failed before the
+// matching agent.stream event. The terminal lifecycle snapshot must carry the
+// marked diagnostic so a matching provider failure stays safe, while a
+// mismatched terminal message still fails closed.
+func TestPromptAttemptEvidenceUsesLifecycleDiagnosticWhenFailureArrivesFirst(t *testing.T) {
+	const diagnostic = "API Error: Repeated 529 Overloaded errors. The API is at capacity."
+
+	for _, tc := range []struct {
+		name     string
+		terminal string
+		wantSafe bool
+	}{
+		{
+			name:     "matching terminal failure",
+			terminal: "Internal error: " + diagnostic + " This is a server-side issue, usually temporary - try again in a moment.",
+			wantSafe: true,
+		},
+		{
+			name:     "mismatched terminal failure",
+			terminal: "Internal error: API Error: 500 Internal server error. This is a server-side issue, usually temporary - try again in a moment.",
+			wantSafe: false,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var service Service
+			service.beginPromptAttempt("session-1", "execution-1", 5, false)
+
+			got := service.withPromptAttemptEvidence(watcher.AgentEventData{
+				SessionID:                   "session-1",
+				AgentExecutionID:            "execution-1",
+				PromptGeneration:            5,
+				EvidenceKnown:               true,
+				ProviderDiagnosticCandidate: true,
+				ProviderDiagnosticText:      diagnostic,
+				ErrorMessage:                tc.terminal,
+			})
+			if service.promptAttemptPreResultSafe(got) != tc.wantSafe {
+				t.Fatalf("promptAttemptPreResultSafe = %v, want %v; evidence = %+v", service.promptAttemptPreResultSafe(got), tc.wantSafe, got)
+			}
+		})
+	}
+}

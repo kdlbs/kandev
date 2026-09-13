@@ -1,7 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
@@ -10,6 +10,7 @@ import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 export type IntegrationListToolbarProps = {
   title: string;
+  titleControl?: ReactNode;
   count: number;
   loading: boolean;
   lastFetchedAt: Date | null;
@@ -41,7 +42,7 @@ function RefreshControls({
   return (
     <>
       {lastFetchedAt && !loading ? (
-        <span className="whitespace-nowrap text-xs text-muted-foreground">
+        <span className="min-w-0 truncate text-xs leading-5 text-muted-foreground">
           {showUpdatedPrefix ? t("github:updated") : ""}
           {formatRelativeTime(lastFetchedAt.toISOString())}
         </span>
@@ -61,8 +62,34 @@ function RefreshControls({
   );
 }
 
+function MobileToolbarStatus({ count, ...props }: RefreshControlsProps & { count: number }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex min-w-0 items-center justify-between gap-3 md:hidden">
+      <span
+        className="shrink-0 whitespace-nowrap text-xs leading-5 text-muted-foreground"
+        data-testid="integration-mobile-result-count"
+      >
+        {props.loading ? (
+          t("integrations:loadingResults")
+        ) : (
+          <Trans
+            i18nKey="integrations:resultCount"
+            count={count}
+            components={{ count: <span className="font-medium tabular-nums text-foreground" /> }}
+          />
+        )}
+      </span>
+      <div className="flex min-w-0 items-center justify-end gap-2">
+        <RefreshControls {...props} />
+      </div>
+    </div>
+  );
+}
+
 export function IntegrationListToolbar({
   title,
+  titleControl,
   count,
   loading,
   lastFetchedAt,
@@ -83,21 +110,14 @@ export function IntegrationListToolbar({
     <div className="flex shrink-0 flex-col gap-2 border-b px-4 py-2.5 sm:px-6 md:flex-row md:flex-wrap md:items-center md:gap-3">
       <div className="flex min-w-0 items-center gap-2">
         <div className="flex min-w-0 flex-1 items-baseline gap-2 md:flex-initial">
-          <h2 className="truncate text-sm font-semibold" data-testid={titleTestId}>
-            {title}
-          </h2>
-          <span className="text-xs tabular-nums text-muted-foreground">
+          {titleControl ?? (
+            <h2 className="truncate text-sm font-semibold" data-testid={titleTestId}>
+              {title}
+            </h2>
+          )}
+          <span className="hidden text-xs tabular-nums text-muted-foreground md:inline">
             {loading ? "…" : count}
           </span>
-        </div>
-        <div className="flex items-center gap-2 md:hidden">
-          <RefreshControls
-            loading={loading}
-            lastFetchedAt={lastFetchedAt}
-            onRefresh={onRefresh}
-            refreshTestId={refreshTestId}
-            showUpdatedPrefix={false}
-          />
         </div>
       </div>
       {filter}
@@ -124,6 +144,14 @@ export function IntegrationListToolbar({
           </span>
         ) : null}
       </div>
+      <MobileToolbarStatus
+        count={count}
+        loading={loading}
+        lastFetchedAt={lastFetchedAt}
+        onRefresh={onRefresh}
+        refreshTestId={refreshTestId}
+        showUpdatedPrefix
+      />
       <div className="ml-auto hidden items-center gap-2 md:flex">
         <RefreshControls
           loading={loading}

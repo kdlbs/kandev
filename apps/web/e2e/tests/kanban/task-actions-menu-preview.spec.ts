@@ -33,6 +33,13 @@ test.describe("Task preview panel actions menu", () => {
     await expect(trigger).toHaveAttribute("aria-label", "More options");
     await trigger.click();
 
+    const menu = testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]').last();
+    const menuLabels = (await menu.locator(":scope > [role='menuitem']").allTextContents()).map(
+      (text) => text.replace(/\s+/g, " ").trim(),
+    );
+    expect(menuLabels).toEqual(["Priority", "Edit", "Link", "Move to", "Archive", "Delete"]);
+    await expect(menu.locator(":scope > [data-slot='dropdown-menu-separator']")).toHaveCount(4);
+
     const archiveItem = testPage.getByRole("menuitem", { name: "Archive" });
     await expect(archiveItem).toBeVisible();
     await archiveItem.click();
@@ -88,8 +95,10 @@ test.describe("Task preview panel actions menu", () => {
     const dialog = testPage.getByRole("alertdialog");
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText("Preview Menu Delete Task");
-    await dialog.getByTestId("delete-discard-worktree-checkbox").click();
-    await dialog.getByRole("button", { name: "Delete" }).click();
+    const deleteAction = dialog.getByRole("button", { name: "Delete", exact: true });
+    await expect(deleteAction).toBeEnabled();
+    await expect(dialog.getByTestId("delete-discard-worktree-checkbox")).toHaveCount(0);
+    await deleteAction.click();
 
     await expect(kanban.taskCardByTitle("Preview Menu Delete Task")).not.toBeVisible({
       timeout: 10_000,

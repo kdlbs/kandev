@@ -249,6 +249,9 @@ func validatePromptErrorFrame(i int, frame Frame, isLast bool) error {
 	if frame.Message == "" {
 		return fmt.Errorf("frame %d: prompt_error requires message", i)
 	}
+	if frame.Code == 0 {
+		return fmt.Errorf("frame %d: prompt_error requires non-zero code", i)
+	}
 	return validateFrameRoleUnset(i, frame.Role)
 }
 
@@ -267,11 +270,17 @@ func validateExpect(e Expect) error {
 	if e.ProviderError.Source == "" {
 		return fmt.Errorf("expect.providerError.source is required")
 	}
+	if e.ProviderError.RPCCode == 0 {
+		return fmt.Errorf("expect.providerError.rpcCode must be non-zero")
+	}
 	if e.ProviderError.ProviderID == "" {
 		return fmt.Errorf("expect.providerError.providerId is required")
 	}
 	if e.DiagnosticCode == "" {
 		return fmt.Errorf("expect.diagnosticCode is required")
+	}
+	if e.RecordedDiagnosticCode == nil {
+		return fmt.Errorf("expect.recordedDiagnosticCode is required")
 	}
 	return nil
 }

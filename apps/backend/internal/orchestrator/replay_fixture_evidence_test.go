@@ -105,8 +105,11 @@ func TestReplayFixtureEvidenceLayer(t *testing.T) {
 			var service Service
 			data, recorded := replayEvidenceLayer(&service, fx)
 
-			if string(recorded) != fx.Expect.RecordedDiagnosticCode {
-				t.Fatalf("recorded diagnostic code = %q, want %q", recorded, fx.Expect.RecordedDiagnosticCode)
+			if fx.Expect.RecordedDiagnosticCode == nil {
+				t.Fatal("fixture omitted expect.recordedDiagnosticCode")
+			}
+			if string(recorded) != *fx.Expect.RecordedDiagnosticCode {
+				t.Fatalf("recorded diagnostic code = %q, want %q", recorded, *fx.Expect.RecordedDiagnosticCode)
 			}
 
 			got := service.promptAttemptPreResultSafe(data)

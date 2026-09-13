@@ -87,6 +87,9 @@ func TestValidateFixtureRejectsStructuralViolations(t *testing.T) {
 		"prompt_error requires message": func(f *Fixture) {
 			f.Frames[len(f.Frames)-1].Message = ""
 		},
+		"prompt_error requires non-zero code": func(f *Fixture) {
+			f.Frames[len(f.Frames)-1].Code = 0
+		},
 		"frames must carry exactly one prompt_error frame, got 0": func(f *Fixture) {
 			f.Frames = f.Frames[:len(f.Frames)-1]
 		},
@@ -101,9 +104,11 @@ func TestValidateFixtureRejectsStructuralViolations(t *testing.T) {
 		"expect.events must end with the error token": func(f *Fixture) {
 			f.Expect.Events = []string{"message_chunk:diagnostic"}
 		},
-		"expect.providerError.source is required":     func(f *Fixture) { f.Expect.ProviderError.Source = "" },
-		"expect.providerError.providerId is required": func(f *Fixture) { f.Expect.ProviderError.ProviderID = "" },
-		"expect.diagnosticCode is required":           func(f *Fixture) { f.Expect.DiagnosticCode = "" },
+		"expect.providerError.source is required":        func(f *Fixture) { f.Expect.ProviderError.Source = "" },
+		"expect.providerError.rpcCode requires non-zero": func(f *Fixture) { f.Expect.ProviderError.RPCCode = 0 },
+		"expect.providerError.providerId is required":    func(f *Fixture) { f.Expect.ProviderError.ProviderID = "" },
+		"expect.diagnosticCode is required":              func(f *Fixture) { f.Expect.DiagnosticCode = "" },
+		"expect.recordedDiagnosticCode is required":      func(f *Fixture) { f.Expect.RecordedDiagnosticCode = nil },
 	}
 
 	for name, mutate := range cases {

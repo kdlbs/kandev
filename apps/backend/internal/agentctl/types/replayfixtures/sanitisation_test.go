@@ -6,6 +6,7 @@ import "testing"
 // validateFixture enforces elsewhere, so a sanitisation test that mutates one
 // field fails only on sanitisation, never on an unrelated structural check.
 func validFixture() Fixture {
+	recordedDiagnosticCode := ""
 	return Fixture{
 		Gateway:     GatewayClaudeDirect,
 		AgentID:     "claude-acp",
@@ -23,10 +24,11 @@ func validFixture() Fixture {
 			{Kind: FramePromptError, Code: -32603, Message: "API Error: 500 Internal server error."},
 		},
 		Expect: Expect{
-			Events:         []string{"message_chunk:diagnostic", "error"},
-			ProviderError:  ProviderErrorExpectation{Source: "acp_prompt", RPCCode: -32603, ProviderID: "claude-acp"},
-			DiagnosticCode: "provider_unavailable",
-			PreResultSafe:  true,
+			Events:                 []string{"message_chunk:diagnostic", "error"},
+			ProviderError:          ProviderErrorExpectation{Source: "acp_prompt", RPCCode: -32603, ProviderID: "claude-acp"},
+			DiagnosticCode:         "provider_unavailable",
+			PreResultSafe:          true,
+			RecordedDiagnosticCode: &recordedDiagnosticCode,
 		},
 	}
 }

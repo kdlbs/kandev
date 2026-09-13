@@ -15,6 +15,8 @@ func TestAgentFailedPayloadCarriesTerminalPromptEvidence(t *testing.T) {
 		useErrorEvent bool
 		wantOutput    bool
 		wantEffect    bool
+		wantCandidate bool
+		wantText      string
 	}{
 		{
 			name: "process exit with no activity",
@@ -39,6 +41,8 @@ func TestAgentFailedPayloadCarriesTerminalPromptEvidence(t *testing.T) {
 		{
 			name:          "matching ACP provider diagnostic is not model output",
 			useErrorEvent: true,
+			wantCandidate: true,
+			wantText:      "API Error: Repeated 529 Overloaded errors. The API is at capacity",
 			priorEvents: []agentctl.AgentEvent{{
 				Type:                        "message_chunk",
 				Text:                        "API Error: Repeated 529 Overloaded errors. The API is at capacity.",
@@ -51,6 +55,8 @@ func TestAgentFailedPayloadCarriesTerminalPromptEvidence(t *testing.T) {
 			useErrorEvent: true,
 			wantOutput:    true,
 			wantEffect:    true,
+			wantCandidate: true,
+			wantText:      "API Error: Repeated 529 Overloaded errors. The API is at capacity",
 			priorEvents: []agentctl.AgentEvent{
 				{
 					Type:                        "message_chunk",
@@ -105,6 +111,12 @@ func TestAgentFailedPayloadCarriesTerminalPromptEvidence(t *testing.T) {
 			}
 			if payload.OutputObserved != tc.wantOutput || payload.EffectObserved != tc.wantEffect {
 				t.Fatalf("prompt evidence = output:%v effect:%v, want output:%v effect:%v", payload.OutputObserved, payload.EffectObserved, tc.wantOutput, tc.wantEffect)
+			}
+			if payload.ProviderDiagnosticCandidate != tc.wantCandidate {
+				t.Fatalf("provider diagnostic candidate = %v, want %v", payload.ProviderDiagnosticCandidate, tc.wantCandidate)
+			}
+			if payload.ProviderDiagnosticText != tc.wantText {
+				t.Fatalf("provider diagnostic text = %q, want %q", payload.ProviderDiagnosticText, tc.wantText)
 			}
 		})
 	}

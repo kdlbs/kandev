@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { MR_PRESETS, ISSUE_PRESETS, type PresetOption, type PresetGroup } from "./presets";
 import type { SavedPreset } from "./use-saved-presets";
 import { useTranslation } from "react-i18next";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { SavedTaskViewDeleteConfirmation } from "@/components/confirmation/saved-task-view-delete-confirmation";
 import { useSavedTaskViewDeleteConfirmation } from "@/components/confirmation/use-saved-task-view-delete-confirmation";
 
@@ -174,6 +175,7 @@ function SavedSection({
 }) {
   const { t } = useTranslation();
   const deletion = useSavedTaskViewDeleteConfirmation<HTMLButtonElement>(saved);
+  const { isMobile } = useResponsiveBreakpoint();
   return (
     <>
       <SectionHeader id="saved" title={t("gitlab:saved")} />
@@ -183,7 +185,7 @@ function SavedSection({
         </div>
       )}
       {saved.map((s) => {
-        if (deletion.target?.id === s.id) {
+        if (!isMobile && deletion.target?.id === s.id) {
           return (
             <div key={s.id} className="mx-1 min-w-0 p-1">
               <SavedTaskViewDeleteConfirmation
@@ -228,23 +230,42 @@ function SavedSection({
           />
         );
       })}
-      <button
-        type="button"
-        onClick={onSaveCurrent}
-        disabled={!canSaveCurrent}
-        className={cn(
-          "mx-1 mt-1 flex min-h-11 items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors",
-          canSaveCurrent
-            ? "text-muted-foreground hover:bg-muted/50 hover:text-foreground cursor-pointer"
-            : "text-muted-foreground/50 cursor-not-allowed",
-        )}
-        title={canSaveCurrent ? t("gitlab:saveCurrentQuery") : t("gitlab:typeACustomQueryFirst")}
-        data-testid="gitlab-save-current-query"
-      >
-        <IconDeviceFloppy className="h-4 w-4 shrink-0" />
-        <span>{t("gitlab:saveCurrentQuery")}</span>
-      </button>
+      {isMobile && deletion.target && (
+        <SavedTaskViewDeleteConfirmation
+          target={deletion.target}
+          presentation="inline"
+          open
+          anchorRef={deletion.anchorRef}
+          onOpenChange={(open) => {
+            if (!open) deletion.close();
+          }}
+          onConfirm={onDelete}
+        />
+      )}
+      <SaveQueryButton enabled={canSaveCurrent} onClick={onSaveCurrent} />
     </>
+  );
+}
+
+function SaveQueryButton({ enabled, onClick }: { enabled: boolean; onClick: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!enabled}
+      className={cn(
+        "mx-1 mt-1 flex min-h-11 items-center gap-2 rounded-md px-2 py-1.5 text-xs transition-colors",
+        enabled
+          ? "text-muted-foreground hover:bg-muted/50 hover:text-foreground cursor-pointer"
+          : "text-muted-foreground/50 cursor-not-allowed",
+      )}
+      title={enabled ? t("gitlab:saveCurrentQuery") : t("gitlab:typeACustomQueryFirst")}
+      data-testid="gitlab-save-current-query"
+    >
+      <IconDeviceFloppy className="h-4 w-4 shrink-0" />
+      <span>{t("gitlab:saveCurrentQuery")}</span>
+    </button>
   );
 }
 

@@ -7,6 +7,9 @@ import type { Task } from "./kanban-card";
 
 const detachTaskMock = vi.hoisted(() => vi.fn().mockResolvedValue({ id: "task-1" }));
 const getSubtaskCountMock = vi.hoisted(() => vi.fn().mockResolvedValue({ count: 0 }));
+const getTaskDeletePreflightMock = vi.hoisted(() =>
+  vi.fn().mockResolvedValue({ requires_discard_consent: false }),
+);
 const archiveTaskMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 const deleteTaskMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock("@/lib/api/domains/kanban-api", async () => {
@@ -17,6 +20,7 @@ vi.mock("@/lib/api/domains/kanban-api", async () => {
     ...actual,
     detachTask: detachTaskMock,
     getSubtaskCount: getSubtaskCountMock,
+    getTaskDeletePreflight: getTaskDeletePreflightMock,
     archiveTask: archiveTaskMock,
     deleteTask: deleteTaskMock,
   };
@@ -28,6 +32,8 @@ afterEach(() => {
   detachTaskMock.mockClear();
   getSubtaskCountMock.mockClear();
   getSubtaskCountMock.mockResolvedValue({ count: 0 });
+  getTaskDeletePreflightMock.mockClear();
+  getTaskDeletePreflightMock.mockResolvedValue({ requires_discard_consent: false });
   archiveTaskMock.mockClear();
   archiveTaskMock.mockResolvedValue(undefined);
   deleteTaskMock.mockClear();
@@ -286,13 +292,13 @@ describe("TaskPreviewPanel actions menu — closes on Archive/Delete success (AC
     fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
 
     const dialog = await screen.findByRole("alertdialog");
-    fireEvent.click(within(dialog).getByTestId("delete-discard-worktree-checkbox"));
+    await waitFor(() => expect(getTaskDeletePreflightMock).toHaveBeenCalledWith(["task-1"], false));
     fireEvent.click(within(dialog).getByRole("button", { name: "Delete" }));
 
     await waitFor(() =>
       expect(deleteTaskMock).toHaveBeenCalledWith("task-1", {
         cascade: false,
-        discardWorktreeChanges: true,
+        discardWorktreeChanges: false,
       }),
     );
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));

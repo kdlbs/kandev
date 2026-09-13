@@ -38,7 +38,7 @@ Acceptance criteria `.17` through `.19` are owned by this part. `.20` through
 
 ## Prior art
 
-**Wiki leg (receipt).** Resolved `OBSIDIAN_VAULT_PATH=/Users/henry/Documents/henry/wiki`,
+**Wiki leg (receipt).** Resolved `OBSIDIAN_VAULT_PATH=<developer-vault-path>`,
 `QMD_WIKI_COLLECTION=wiki`. **Could not run**: no `obsidian-wiki` or `qmd` on
 `PATH`, no QMD MCP server attached, and the vault directory returns
 `Operation not permitted`, so the grep fallback was unavailable too.
