@@ -41,12 +41,11 @@ user intent for destructive replacement, and evidence-based version comparison.
 - **AC-TASKS-REMOTE-CONTRIBUTION-TASKS-002.3:** Authentication, permission, invalid destination, missing source branch, network, timeout, and unclassified preflight failures shall remain distinct from confirmed history rejection. History rejection shall not be represented as proof of write permission.
 - **AC-TASKS-REMOTE-CONTRIBUTION-TASKS-002.4:** A task with multiple repositories shall start only when every required preflight passes or qualifies for the history-only resume exception. One qualifying repository shall not hide a blocking failure in another.
 - **AC-TASKS-REMOTE-CONTRIBUTION-TASKS-002.5:** After resume, the existing Changes surface shall retain its provider/local version choices and their authorization conditions. A history-only rejection shall not create an agent failure or a recovery banner.
+- **AC-TASKS-REMOTE-CONTRIBUTION-TASKS-002.6:** Startup contribution checks shall allow up to two minutes across all required repositories, unless an earlier caller deadline or cancellation applies. A check that finishes within this budget shall not fail because of a shorter internal transport timeout. Budget expiry shall block startup and retain recovery actions.
 
 ## Proposed preflight timing amendment
 
-This amendment is draft. The [startup recovery fix package](../../../plans/startup-recovery-scroll-timeout/plan.md) owns implementation.
-
-- **AC-TASKS-REMOTE-CONTRIBUTION-TASKS-002.6:** Startup contribution checks shall allow up to two minutes across all required repositories, unless an earlier caller deadline or cancellation applies. A check that finishes within this budget shall not fail because of a shorter internal transport timeout. Budget expiry shall block startup and retain recovery actions.
+This amendment is draft. The [startup recovery fix package](../../../plans/startup-recovery-scroll-timeout/plan.md) owns implementation of criterion 002.6.
 
 ## Delivery
 

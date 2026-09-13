@@ -45,13 +45,12 @@ results, including the shared recovery owner and phone touch-target checks.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.4:** Retry shall update the existing card and disable equivalent actions while pending. Successful resume shall clear the active failure; workspace-only success shall show a nonblocking notice that the agent remains stopped.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.5:** Reload, reconnect, and reversed event order shall converge on the current failure. A stale attempt or unrelated historical error shall neither replace nor be hidden by that failure.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.6:** Desktop and phone shall expose the same recovery choices and details. Phone actions shall have at least 44-pixel touch targets, with no horizontal page overflow or extra details scroller.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.7:** Chat shall use one vertical scroll area for the recovery card, expanded details, and transcript. Opening a session with an active failure, or receiving a new failure, shall reveal the card. Later user scrolling shall remain under user control. Recovery actions and the composer shall remain reachable on desktop and phone.
 
 
 ## Proposed recovery scrolling amendment
 
-This amendment is draft. The [startup recovery fix package](../../../plans/startup-recovery-scroll-timeout/plan.md) owns implementation.
-
-- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.7:** Chat shall use one vertical scroll area for the recovery card, expanded details, and transcript. Opening a session with an active failure, or receiving a new failure, shall reveal the card. Later user scrolling shall remain under user control. Recovery actions and the composer shall remain reachable on desktop and phone.
+This amendment is draft. The [startup recovery fix package](../../../plans/startup-recovery-scroll-timeout/plan.md) owns implementation of criterion 006.7.
 
 ## Proposed recovery attempt amendment
 

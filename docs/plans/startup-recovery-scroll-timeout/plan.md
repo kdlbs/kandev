@@ -123,7 +123,7 @@ Targeted product tests and review regressions: passed.
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - `(cd apps/backend && go test -race ./internal/agent/runtime/agentctl ./internal/agent/runtime/lifecycle)`: passed.
 - `(cd apps/web && pnpm exec vitest run components/task/chat/message-list-native.test.tsx components/task/chat/message-list-native-scroll.test.ts components/quick-chat/quick-chat-session-view.test.tsx hooks/domains/session/use-session-resumption.test.ts)`: passed (110 tests), including controlled older-page settling, an in-flight page when a new failure arrives, and same-session fallback recovery attempts.
-- PR fixup regression suite: passed (118 tests), including visible task-wide and persisted-metadata recovery reveal keys and resumption of normal auto-scroll after the one-time recovery placement.
+- PR fixup regression suite: passed (119 tests), including visible task-wide and persisted-metadata recovery reveal keys and resumption of normal auto-scroll after the one-time recovery placement.
 - `(cd apps/web && pnpm run lint && pnpm run typecheck && pnpm run i18n:check)`: passed.
 - `(cd apps/backend && make build)`: passed.
 - `(cd apps/backend && make test)`: reached unrelated environment-sensitive failures in process probes, config-home discovery, launcher, and Office SQLite migration tests; the changed `agentctl` and lifecycle packages passed.
