@@ -135,3 +135,22 @@ evaluator. Workflow permissions, bounds, policy, and status rules are unchanged.
 
 Internal docs updated only. This CI implementation change has no public product
 documentation or screenshot impact.
+
+### Harness path exemption regression, 2026-09-13
+
+The path classifier now exempts the non-Markdown harness formats recognized by
+the repository harness linter: Codex agent and config TOML, Claude settings
+JSON, and Cursor rule MDC. Markdown harness files remain covered by the
+existing Markdown exemption. Arbitrary JSON, YAML, scripts, and other files
+remain subject to coverage.
+
+TDD evidence:
+
+- Red: a fixture containing the four supported harness formats required
+  documentation coverage.
+- Green: the same fixture is exempt, while unrelated implementation paths
+  still trigger coverage.
+- `node --test .github/scripts/pr-docs.test.cjs`: 51 tests passed.
+- `python3 scripts/lint-spec-files.test.py`: 36 tests passed.
+- `python3 scripts/lint-spec-files.py --all`: passed.
+- `git diff --check`: passed.

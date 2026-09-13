@@ -39,6 +39,25 @@ test('recognized documentation-only paths are exempt', () => {
   assert.equal(result.exemptPaths.length, 9);
 });
 
+// @covers AC-CI-PR-DOCS-001.2
+test('recognized harness configuration paths are exempt', () => {
+  const result = validator.classifyChangedFiles([
+    { filename: '.codex/agents/pr-poller.toml', status: 'modified' },
+    { filename: '.codex/config.toml', status: 'modified' },
+    { filename: '.claude/settings.json', status: 'modified' },
+    { filename: '.cursor/rules/kandev-harness.mdc', status: 'modified' },
+  ]);
+
+  assert.equal(result.requiresCoverage, false);
+  assert.deepEqual(result.triggeringPaths, []);
+  assert.deepEqual(result.exemptPaths, [
+    '.codex/agents/pr-poller.toml',
+    '.codex/config.toml',
+    '.claude/settings.json',
+    '.cursor/rules/kandev-harness.mdc',
+  ]);
+});
+
 // @covers AC-CI-PR-DOCS-001.3
 test('shipped files and unsupported test-like paths require coverage', () => {
   const result = validator.classifyChangedFiles([
