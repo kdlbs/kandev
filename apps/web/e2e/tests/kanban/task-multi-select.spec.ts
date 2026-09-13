@@ -217,4 +217,81 @@ test.describe("Multi-select bulk actions", () => {
     // Task should be visible in the target column
     await expect(kanban.taskCardInColumn("MS Move Task", targetStep.id)).toBeVisible();
   });
+
+  // REQ-TASKS-KANBAN-TASK-REORDERING-001.29 (F34): bulk move must land the
+  // selected tasks in a deterministic order derived from their source
+  // position, not from selection click order or network arrival order. The
+  // kanban multi-select bulk-move path previously fanned out one concurrent
+  // HTTP call per task with a caller-assigned `position: i`, so the final
+  // order depended on which request the server happened to receive first — a
+  // race that would make an order assertion here flaky by construction if the
+  // underlying fix regressed. Selecting the tasks in reverse order (and
+  // asserting against their creation order, not click order) pins that this
+  // is not an accident of how the test happens to click.
+  test("bulk move lands tasks in deterministic source order (AC.29)", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const targetStep = seedData.steps.find((s) => s.id !== seedData.startStepId);
+    if (!targetStep) {
+      test.skip(true, "Workflow has only one step — cannot test move");
+      return;
+    }
+
+    const placement = {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    };
+    // Created sequentially so arrival position (max+1 per create) fixes a
+    // known source order: first=0, second=1, third=2, fourth=3.
+    const first = await apiClient.createTask(seedData.workspaceId, "MS Order 1", placement);
+    const second = await apiClient.createTask(seedData.workspaceId, "MS Order 2", placement);
+    const third = await apiClient.createTask(seedData.workspaceId, "MS Order 3", placement);
+    const fourth = await apiClient.createTask(seedData.workspaceId, "MS Order 4", placement);
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    // Select in reverse of source order — the resulting order must not
+    // reflect this click order.
+    await kanban.selectTask(fourth.id);
+    await kanban.selectTask(third.id);
+    await kanban.selectTask(second.id);
+    await kanban.selectTask(first.id);
+    await expect(kanban.multiSelectToolbar).toContainText("4 selected");
+
+    await kanban.bulkMoveButton.click();
+    const targetOption = kanban.bulkMoveStepOption(targetStep.id);
+    await expect(targetOption).toBeVisible();
+    await targetOption.click();
+
+    await expect(kanban.taskCardInColumn("MS Order 4", targetStep.id)).toBeVisible({
+      timeout: 10000,
+    });
+
+    // Positions in the target step are consecutive and match source order,
+    // not selection order.
+    await expect
+      .poll(async () => {
+        const [t1, t2, t3, t4] = await Promise.all([
+          apiClient.getTask(first.id),
+          apiClient.getTask(second.id),
+          apiClient.getTask(third.id),
+          apiClient.getTask(fourth.id),
+        ]);
+        return { t1: t1.position, t2: t2.position, t3: t3.position, t4: t4.position };
+      })
+      .toEqual({ t1: 0, t2: 1, t3: 2, t4: 3 });
+
+    // The column itself renders them in that same order, top to bottom.
+    await expect
+      .poll(() =>
+        kanban
+          .columnByStepId(targetStep.id)
+          .locator('[data-testid="task-card-title"]')
+          .allTextContents(),
+      )
+      .toEqual(["MS Order 1", "MS Order 2", "MS Order 3", "MS Order 4"]);
+  });
 });

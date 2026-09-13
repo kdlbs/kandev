@@ -63,6 +63,9 @@ describe("KanbanCard render isolation", () => {
             },
             kanbanMulti: {
               isLoading: false,
+              orderRevisionByStepId: {},
+              pendingReorderBandKeys: {},
+              withheldReorderByBandKey: {},
               snapshots: {
                 [WORKFLOW_A]: {
                   workflowId: WORKFLOW_A,

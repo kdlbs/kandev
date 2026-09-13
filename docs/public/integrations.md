@@ -153,8 +153,17 @@ path on desktop hover or focus and in a touch-accessible drawer on mobile.
   shim; stored PATs and App private keys are not exposed to the task. An executor-profile
   `GH_TOKEN` or `GITHUB_TOKEN` takes precedence.
 - **Inherit executor Git credentials** does not install Kandev's helper or `gh` shim. Local and
-  Worktree tasks use host Git credentials. Docker, SSH, and cloud tasks use credentials configured
-  in the executor.
+  Worktree tasks use host Git credentials. For GitHub HTTPS remotes, Kandev checks the host
+  account's `gh` login for each attached GitHub host. When `gh auth token` succeeds, Kandev adds a
+  temporary HTTPS helper to the task environment. The helper uses the GitHub CLI configuration
+  visible to the Kandev backend service account. Run `gh auth login` as the OS account that runs
+  the backend; a login in another desktop terminal is not enough. The host bridge does not write
+  global Git configuration or persist helper or token state. An explicit `GH_TOKEN` or
+  `GITHUB_TOKEN` takes precedence over stored CLI credentials. For GitHub Enterprise hosts,
+  `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` have the same effect. If `gh` is unavailable
+  or not authenticated for a host, the task keeps its other inherited Git and SSH credentials.
+  Docker, SSH, and cloud tasks use credentials configured in the executor. A CLI login authenticates
+  that account, but it does not grant repository permissions.
 - A disconnected workspace can select **Inherit executor Git credentials** and save only the
   task-access setting. It does not need a PAT or GitHub App.
 - The policy applies to newly launched task processes. After a launch or resume, use **New

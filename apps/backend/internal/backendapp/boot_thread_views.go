@@ -6,12 +6,14 @@ func mapThreadViews(views []models.ThreadView) []map[string]any {
 	result := make([]map[string]any, 0, len(views))
 	for _, view := range views {
 		result = append(result, map[string]any{
-			"id":         view.ID,
-			"name":       view.Name,
-			"taskScope":  mapThreadTaskScope(view.TaskScope),
-			"filters":    mapThreadViewClauses(view.Filters),
-			"sort":       mapThreadViewSort(view.Sort),
-			"maxColumns": view.MaxColumns,
+			"id":               view.ID,
+			"name":             view.Name,
+			"taskScope":        mapThreadTaskScope(view.TaskScope),
+			"filters":          mapThreadViewClauses(view.Filters),
+			"sort":             mapThreadViewSort(view.Sort),
+			"maxColumns":       view.MaxColumns,
+			"layout":           view.Layout,
+			"autoHideComposer": view.AutoHideComposer,
 		})
 	}
 	return result
@@ -22,11 +24,13 @@ func mapThreadViewDraft(draft *models.ThreadViewDraft) map[string]any {
 		return nil
 	}
 	return map[string]any{
-		"baseViewId": draft.BaseViewID,
-		"taskScope":  mapThreadTaskScope(draft.TaskScope),
-		"filters":    mapThreadViewClauses(draft.Filters),
-		"sort":       mapThreadViewSort(draft.Sort),
-		"maxColumns": draft.MaxColumns,
+		"baseViewId":       draft.BaseViewID,
+		"taskScope":        mapThreadTaskScope(draft.TaskScope),
+		"filters":          mapThreadViewClauses(draft.Filters),
+		"sort":             mapThreadViewSort(draft.Sort),
+		"maxColumns":       draft.MaxColumns,
+		"layout":           draft.Layout,
+		"autoHideComposer": draft.AutoHideComposer,
 	}
 }
 

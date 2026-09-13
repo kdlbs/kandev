@@ -86,8 +86,16 @@ function ActivationColumn({
   return <div ref={ref} data-testid={`column-${id}`} />;
 }
 
-function ActivationFixture({ ids, focusedTaskId }: { ids: string[]; focusedTaskId?: string }) {
-  const activation = useThreadColumnActivation(ids, focusedTaskId);
+function ActivationFixture({
+  ids,
+  focusedTaskId,
+  layout = "columns",
+}: {
+  ids: string[];
+  focusedTaskId?: string;
+  layout?: string;
+}) {
+  const activation = useThreadColumnActivation(ids, focusedTaskId, layout);
   return (
     <div ref={activation.boardRef} data-testid="activation-board">
       <output data-testid="preload-ids">{[...activation.preloadTaskIds].join(",")}</output>
@@ -220,11 +228,87 @@ describe("phone position feedback", () => {
   });
 });
 
-describe("useThreadColumnActivation", () => {
-  beforeEach(() => {
-    responsiveMocks.useResponsiveBreakpoint.mockReturnValue(desktopBreakpoint());
-    vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
+function observeDesktopColumns() {
+  responsiveMocks.useResponsiveBreakpoint.mockReturnValue(desktopBreakpoint());
+  vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
+}
+
+describe("column activation during reflow", () => {
+  beforeEach(observeDesktopColumns);
+
+  it("publishes current geometry before a replacement observer reports after reflow", () => {
+    const taskIds = [TASK_A, TASK_B, TASK_C, TASK_D];
+    const view = render(<ActivationFixture ids={taskIds} />);
+    const board = screen.getByTestId("activation-board");
+    const [a, b, c, d] = taskIds.map((id) => screen.getByTestId(`column-${id}`));
+    const oldObserver = observers.at(-1)!.instance;
+    oldObserver.emit({ target: a, isIntersecting: true }, { target: b, isIntersecting: true });
+
+    vi.spyOn(board, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 360, 612));
+    vi.spyOn(a, "getBoundingClientRect").mockReturnValue(new DOMRect(-372, 0, 360, 300));
+    vi.spyOn(b, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 360, 300));
+    vi.spyOn(c, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 312, 360, 300));
+    vi.spyOn(d, "getBoundingClientRect").mockReturnValue(new DOMRect(372, 0, 360, 300));
+    view.rerender(<ActivationFixture ids={taskIds} layout="grid:360" />);
+
+    expect(ids(DETAIL_IDS)).toEqual([TASK_B, TASK_C]);
+    expect(ids(PRELOAD_IDS)).toEqual(taskIds);
+    oldObserver.emit({ target: a, isIntersecting: true }, { target: d, isIntersecting: true });
+    expect(ids(DETAIL_IDS)).toEqual([TASK_B, TASK_C]);
+
+    observers.at(-1)!.instance.emit({ target: b, isIntersecting: false });
+    expect(ids(DETAIL_IDS)).toEqual([TASK_C]);
   });
+});
+
+describe("useThreadColumnActivation", () => {
+  beforeEach(observeDesktopColumns);
+
+  // @covers AC-UI-THREADS-DECK-004.5, AC-UI-THREADS-DECK-004.6
+  it("refreshes a same-membership layout and ignores stale observer callbacks", () => {
+    const taskIds = [TASK_A, TASK_B, TASK_C, TASK_D, "e", "f"];
+    const view = render(<ActivationFixture ids={taskIds} />);
+    const oldObserver = observers.at(-1)!.instance;
+    const a = screen.getByTestId(`column-${TASK_A}`);
+    const b = screen.getByTestId(`column-${TASK_B}`);
+    oldObserver.emit({ target: a, isIntersecting: true });
+    view.rerender(<ActivationFixture ids={taskIds} layout="grid" />);
+    const gridObserver = observers.at(-1)!.instance;
+    gridObserver.emit({ target: a, isIntersecting: true }, { target: b, isIntersecting: true });
+    oldObserver.emit({ target: b, isIntersecting: false });
+    expect(ids(DETAIL_IDS)).toEqual([TASK_A, TASK_B]);
+    expect(ids(PRELOAD_IDS)).toEqual([TASK_A, TASK_B, TASK_C]);
+    expect(gridObserver).not.toBe(oldObserver);
+  });
+
+  // @covers AC-UI-THREADS-DECK-004.5
+  it("bounds thirty grid shells to visible rows plus one adjacent task on each side", () => {
+    const taskIds = Array.from({ length: 30 }, (_, index) => `task-${index}`);
+    render(<ActivationFixture ids={taskIds} layout="grid" />);
+    const observer = observers.at(-1)!.instance;
+    const visibleIds = taskIds.slice(2, 6);
+    observer.emit(
+      ...visibleIds.map((id) => ({
+        target: screen.getByTestId(`column-${id}`),
+        isIntersecting: true,
+      })),
+    );
+    expect(ids(DETAIL_IDS)).toEqual(visibleIds);
+    expect(ids(PRELOAD_IDS)).toEqual(taskIds.slice(1, 7));
+    observer.emit(
+      ...visibleIds.map((id) => ({
+        target: screen.getByTestId(`column-${id}`),
+        isIntersecting: false,
+      })),
+      { target: screen.getByTestId("column-task-29"), isIntersecting: true },
+    );
+    expect(ids(DETAIL_IDS)).toEqual(["task-29"]);
+    expect(ids(PRELOAD_IDS)).toEqual(["task-28", "task-29"]);
+  });
+});
+
+describe("column activation windows", () => {
+  beforeEach(observeDesktopColumns);
 
   it("preloads visible columns and one neighbor while detailing every visible desktop column", () => {
     render(<ActivationFixture ids={[TASK_A, TASK_B, TASK_C, TASK_D]} />);

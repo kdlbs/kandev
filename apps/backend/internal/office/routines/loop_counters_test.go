@@ -2,6 +2,7 @@ package routines_test
 
 import (
 	"context"
+	"database/sql"
 	"expvar"
 	"testing"
 	"time"
@@ -82,11 +83,18 @@ func TestTickScheduledTriggers_IncrementsTriggerClaimedCounter(t *testing.T) {
 	}
 }
 
-// Routine status gating reads the routine before claiming its trigger. An
-// unreadable or missing routine therefore leaves the trigger due and must not
-// increment the persisted-claim counter.
-func TestTickScheduledTriggers_UnreadableRoutineDoesNotClaim(t *testing.T) {
-	svc := newTestRoutineService(t)
+// AC-OFFICE-ROUTINE-STATUS-003.3 (routine-status-gating) supersedes the
+// pre-status-gate assumption this test originally checked (loop-liveness
+// AC-003.9: a claim that persists must count even when the routine lookup
+// afterward fails). The status gate now reads the routine — to decide
+// CanFire() — before ClaimTrigger runs, so an orphaned trigger is caught at
+// that read and never reaches the claim at all: there is no longer a window
+// where a claim persists but attribution fails. AC-OFFICE-ROUTINE-STATUS-003.3
+// requires exactly this: an unreadable routine must not fire and must not
+// disarm or otherwise modify the trigger, so office_loop_trigger_claimed_total
+// (attributed or unattributed) must not move either.
+func TestTickScheduledTriggers_OrphanedTrigger_NotClaimed(t *testing.T) {
+	svc, db := newTestRoutineServiceWithDB(t)
 	ctx := context.Background()
 
 	routine := newLightweightTestRoutine(t, svc)
@@ -100,22 +108,36 @@ func TestTickScheduledTriggers_UnreadableRoutineDoesNotClaim(t *testing.T) {
 		t.Fatalf("create trigger: %v", err)
 	}
 	// Orphan the trigger: delete the routine it points at without touching
-	// the trigger row. The status gate must leave the cursor and claim
-	// counter unchanged because the routine cannot be read.
+	// the trigger row (this test's in-memory DB has no _foreign_keys=on, so
+	// the ON DELETE CASCADE does not fire), so GetDueTriggers still surfaces
+	// it but GetRoutineFromConfig fails before any claim is attempted.
 	if err := svc.DeleteRoutine(ctx, routine.ID); err != nil {
 		t.Fatalf("delete routine: %v", err)
 	}
 
-	key := "workspace=_unattributed"
-	before := loopCounterInt(t, "office_loop_trigger_claimed_total", key)
+	claimedKey := "workspace=" + routine.WorkspaceID
+	unattrKey := "workspace=_unattributed"
+	claimedBefore := loopCounterInt(t, "office_loop_trigger_claimed_total", claimedKey)
+	unattrBefore := loopCounterInt(t, "office_loop_trigger_claimed_total", unattrKey)
 
 	if err := svc.TickScheduledTriggers(ctx, time.Now().UTC().Add(2*time.Minute)); err != nil {
 		t.Fatalf("tick: %v", err)
 	}
 
-	after := loopCounterInt(t, "office_loop_trigger_claimed_total", key)
-	if after != before {
-		t.Fatalf("trigger_claimed[_unattributed] delta = %d, want 0", after-before)
+	if after := loopCounterInt(t, "office_loop_trigger_claimed_total", claimedKey); after != claimedBefore {
+		t.Fatalf("trigger_claimed[workspace] delta = %d, want 0: an orphaned trigger must not be claimed", after-claimedBefore)
+	}
+	if after := loopCounterInt(t, "office_loop_trigger_claimed_total", unattrKey); after != unattrBefore {
+		t.Fatalf("trigger_claimed[_unattributed] delta = %d, want 0: an orphaned trigger must not be claimed", after-unattrBefore)
+	}
+
+	var lastFiredAt sql.NullString
+	if err := db.Get(&lastFiredAt, `SELECT last_fired_at FROM office_routine_triggers WHERE routine_id = ?`, routine.ID); err != nil {
+		t.Fatalf("read last_fired_at: %v", err)
+	}
+	if lastFiredAt.Valid {
+		t.Fatalf("trigger was claimed (last_fired_at = %q) despite its routine being deleted; "+
+			"AC-OFFICE-ROUTINE-STATUS-003.3 forbids modifying an orphaned trigger", lastFiredAt.String)
 	}
 }
 

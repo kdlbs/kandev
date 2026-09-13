@@ -22,6 +22,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 	"github.com/kandev/kandev/internal/steptelemetry"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
@@ -467,7 +468,11 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 		legacyTrigger = engine.TriggerOnTurnComplete
 	}
 	transitionCtx := engineTransitionAttribution(ctx, sessionID, legacyTrigger)
-	if err := s.updateTransitionTaskWithCapacity(transitionCtx, task, targetStep); err != nil {
+	fromStepID := ""
+	if fromStep != nil {
+		fromStepID = fromStep.ID
+	}
+	if err := s.updateTransitionTaskWithCapacity(transitionCtx, task, fromStepID, targetStep); err != nil {
 		s.logger.Warn("workflow transition rejected or failed",
 			zap.String("task_id", taskID),
 			zap.String("from_step", fromStep.Name),
@@ -578,6 +583,7 @@ func (s *Service) executeStepTransition(ctx context.Context, taskID, sessionID s
 func (s *Service) updateTransitionTaskWithCapacity(
 	ctx context.Context,
 	task *models.Task,
+	fromStepID string,
 	targetStep *wfmodels.WorkflowStep,
 ) error {
 	if targetStep == nil {
@@ -587,7 +593,7 @@ func (s *Service) updateTransitionTaskWithCapacity(
 	if !ok {
 		return fmt.Errorf("workflow step admission repository unavailable for step %s", targetStep.ID)
 	}
-	_, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, task, targetStep.ID, targetStep.WIPLimit)
+	_, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, task, fromStepID, targetStep.ID, targetStep.WIPLimit)
 	return err
 }
 
@@ -2179,13 +2185,16 @@ func (s *Service) queueOfficeAutoStartRun(ctx context.Context, task *models.Task
 }
 
 // officeAutoStartIdempotencyKey uses the immutable workflow-step transition
-// row as the per-entry component. A legacy event without that field uses the
-// task timestamp as a compatibility fallback until the event is republished.
+// row as the per-entry component. A zero stepTransitionID means the
+// per-occurrence identity is unavailable, so the enqueue goes keyless rather
+// than falling back to a time-derived key that would never suppress a
+// redelivery.
 func officeAutoStartIdempotencyKey(task *models.Task, agentProfileID, stepID string, stepTransitionID int64) string {
-	entryID := strconv.FormatInt(stepTransitionID, 10)
 	if stepTransitionID == 0 {
-		entryID = "legacy:" + task.UpdatedAt.UTC().Format(time.RFC3339Nano)
+		runsservice.ReportKeylessEnqueue(officeAutoStartRunReason, runsservice.KeylessCauseUnresolved, "zero_step_transition")
+		return ""
 	}
+	entryID := strconv.FormatInt(stepTransitionID, 10)
 	return fmt.Sprintf("%s:%s:%s:%s:%s",
 		officeAutoStartRunReason, task.ID, agentProfileID, stepID, entryID)
 }
@@ -5282,6 +5291,11 @@ const metaKeyUserMessageRecorded = "user_message_recorded"
 // processOnTurnStartViaEngine call and avoid firing on_turn_start twice for
 // one prompt.
 const MetaKeyTurnStartAlreadyProcessed = "turn_start_already_processed"
+
+// MetaKeyInitialTaskBriefDispatchPending marks a queued user prompt that lost
+// the atomic initial-task-brief admission race. Its enqueue path must wait for
+// the admitted candidate to launch before attempting a fast-path drain.
+const MetaKeyInitialTaskBriefDispatchPending = "initial_task_brief_dispatch_pending"
 
 func turnStartAlreadyProcessed(metadata map[string]interface{}) bool {
 	processed, _ := metadata[MetaKeyTurnStartAlreadyProcessed].(bool)

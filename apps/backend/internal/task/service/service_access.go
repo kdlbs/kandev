@@ -251,6 +251,23 @@ func (s *Service) authorizeWorkflowID(ctx context.Context, workflowID string) er
 	return nil
 }
 
+// authorizeWorkflowScope checks reach and one action scope for a workflow.
+// Workflow access is resolved through its workspace so callers that can read
+// a board but cannot write its tasks receive ErrForbidden.
+func (s *Service) authorizeWorkflowScope(ctx context.Context, workflowID string, scope authz.Scope) error {
+	if _, scoped := callerScope(ctx); !scoped {
+		return nil
+	}
+	workflow, err := s.workflows.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return err
+	}
+	if workflow.WorkspaceID == "" {
+		return nil
+	}
+	return s.AuthorizeWorkspaceScope(ctx, workflow.WorkspaceID, scope)
+}
+
 // AuthorizeTaskAccess is the public form of authorizeTaskID, consumed by the
 // WS gateway's subscription checks.
 func (s *Service) AuthorizeTaskAccess(ctx context.Context, taskID string) error {
@@ -296,7 +313,21 @@ func (s *Service) AuthorizeSessionScope(ctx context.Context, sessionID string, s
 // caller and that the session belongs to the supplied task. Mismatches use the
 // task not-found sentinel so callers cannot enumerate another task's sessions.
 func (s *Service) AuthorizeTaskSessionAccess(ctx context.Context, taskID, sessionID string) error {
-	if err := s.AuthorizeTaskAccess(ctx, taskID); err != nil {
+	return s.authorizeTaskSessionScope(ctx, taskID, sessionID, authz.ScopeWorkspaceRead)
+}
+
+// AuthorizeTaskSessionPromptAccess checks the task/session pair and requires
+// the session.prompt capability used to create or dispatch user messages.
+func (s *Service) AuthorizeTaskSessionPromptAccess(ctx context.Context, taskID, sessionID string) error {
+	return s.authorizeTaskSessionScope(ctx, taskID, sessionID, authz.ScopeSessionPrompt)
+}
+
+func (s *Service) authorizeTaskSessionScope(
+	ctx context.Context,
+	taskID, sessionID string,
+	scope authz.Scope,
+) error {
+	if err := s.authorizeTaskScope(ctx, taskID, scope); err != nil {
 		return err
 	}
 	session, err := s.sessions.GetTaskSession(ctx, sessionID)

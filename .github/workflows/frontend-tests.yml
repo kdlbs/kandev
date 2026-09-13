@@ -22,7 +22,7 @@ concurrency:
   # would read the cancelled check as a failure and eject the pull request.
   cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 
-# Least-privilege: the `frontend` job only reads source and runs tests.
+# Least-privilege: the frontend jobs only read source and run verification.
 # `packages: read` lets the container job pull the kandev-ci image from GHCR.
 permissions:
   contents: read
@@ -164,12 +164,28 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
+      - name: Resolve pnpm store path
+        id: pnpm-store
+        shell: bash
+        run: |
+          set -euo pipefail
+          STORE_PATH="$(pnpm store path --silent)"
+          PNPM_VERSION="$(pnpm --version)"
+          if [[ "${STORE_PATH}" != /* ]]; then
+            echo "pnpm returned a non-absolute store path: ${STORE_PATH}" >&2
+            exit 1
+          fi
+          mkdir -p "${STORE_PATH}"
+          printf 'path=%s\n' "${STORE_PATH}" >> "$GITHUB_OUTPUT"
+          printf 'version=%s\n' "${PNPM_VERSION}" >> "$GITHUB_OUTPUT"
+
       - name: Cache pnpm store
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        continue-on-error: true
         with:
-          path: ~/.local/share/pnpm/store
-          key: pnpm-${{ runner.os }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
-          restore-keys: pnpm-${{ runner.os }}-
+          path: ${{ steps.pnpm-store.outputs.path }}
+          key: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm-store.outputs.version }}-${{ hashFiles('apps/pnpm-lock.yaml') }}
+          restore-keys: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm-store.outputs.version }}-
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
@@ -371,16 +387,9 @@ jobs:
 
           node scripts/check-new-e2e-sleeps.mjs --base "${BASE_SHA}"
 
-      # Deliberately run under the variable that broke the suite, so a
-      # regression fails here instead of only in a container. React exports
-      # `act()` from its development build alone, `vitest.config.ts` pins
-      # `NODE_ENV=test` to force that build, and this image sets no NODE_ENV of
-      # its own — so without this line CI would pass with the pin deleted while
-      # every `render()` throws `TypeError: React.act is not a function` for
-      # anyone whose shell inherits the runtime image's `NODE_ENV=production`
-      # (`Dockerfile`). That gap is exactly how the breakage went unnoticed.
-      # Scoped to this step: `pnpm install` above must keep seeing devDependencies
-      # through its own resolution, not through `apps/.npmrc`'s `production=false`.
+      # Keep the production environment guard in the unsharded job. The image
+      # sets no NODE_ENV, so this reproduces the runtime value that exposed a
+      # deleted NODE_ENV=test pin in vitest.config.ts.
       - name: Run tests
         env:
           NODE_ENV: production
@@ -390,8 +399,8 @@ jobs:
         run: pnpm --filter @kandev/web build
 
   # The required check. Runs on every event, including the ones where the
-  # `frontend` job above is correctly skipped, so the merge queue always has a
-  # conclusion to read instead of a check that stays pending forever.
+  # frontend verification jobs above are correctly skipped, so the merge queue
+  # always has a conclusion to read instead of a check that stays pending.
   frontend-gate:
     name: Frontend Tests Passed
     runs-on: ${{ fromJSON(needs.runner_plan.outputs.plan).frontend_gate_runner }}

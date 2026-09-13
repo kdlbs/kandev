@@ -116,6 +116,12 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateTasksRemoveWorkflowFK(); err != nil {
 		return err
 	}
+	// Must run AFTER migrateTasksRemoveWorkflowFK: that migration recreates
+	// tasks from an explicit column list. Adding this column beforehand would
+	// have it silently dropped by the recreate on any database still carrying
+	// the legacy FK, leaving it absent for the remainder of that boot (the
+	// same hazard class as the task_sessions.name comment above).
+	_ = r.migrate.Apply("tasks.assignment_generation", `ALTER TABLE tasks ADD COLUMN assignment_generation INTEGER NOT NULL DEFAULT 0`)
 	if err := r.dropRetiredSlackIntegration(); err != nil {
 		return err
 	}
@@ -317,6 +323,10 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("workflow_steps.profile_session_start_policy", `ALTER TABLE workflow_steps ADD COLUMN profile_session_start_policy TEXT NOT NULL DEFAULT 'reuse'`)
 	_ = r.migrate.Apply("workflow_steps.profile_session_end_policy", `ALTER TABLE workflow_steps ADD COLUMN profile_session_end_policy TEXT NOT NULL DEFAULT 'park'`)
 	_ = r.migrate.Apply("workflow_steps.session_target", `ALTER TABLE workflow_steps ADD COLUMN session_target TEXT`)
+	// Kanban task reordering (REQ-TASKS-KANBAN-TASK-REORDERING-001.25). Kept
+	// compatible with databases whose workflow repository has not replayed its
+	// own migrations yet, same as the columns above.
+	_ = r.migrate.Apply("workflow_steps.order_revision", `ALTER TABLE workflow_steps ADD COLUMN order_revision INTEGER NOT NULL DEFAULT 0`)
 
 	// Slack-style unread divider: the read cursor a session advances to the
 	// latest message id whenever it becomes the visible chat panel. The

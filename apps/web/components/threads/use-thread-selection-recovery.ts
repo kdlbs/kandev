@@ -31,25 +31,36 @@ function restoreRemovedFocus(
   fallback?.focus({ preventScroll: true });
 }
 
-/** Keep the reader's column and offset across committed membership changes, without reranking. */
+/** Keep the reader's task and offset across membership and layout changes, without reranking. */
 export function useThreadSelectionRecovery(
   orderedIds: readonly string[],
   boardRef: RefObject<HTMLDivElement | null>,
   isMobile: boolean,
+  layoutKey = "columns",
 ) {
   const previous = useRef<{
     ids: readonly string[];
+    layoutKey: string;
     taskId: string | null;
     offset: number;
+    width: number | null;
     focused: Element | null;
     container: HTMLElement | null;
-  }>({ ids: [], taskId: null, offset: 0, focused: null, container: null });
+  }>({ ids: [], layoutKey, taskId: null, offset: 0, width: null, focused: null, container: null });
   const record = useCallback(
     (requestedId?: string) => {
       const board = boardRef.current;
       if (!board) return;
       const elements = columns(board);
       const bounds = board.getBoundingClientRect();
+      // CSS resize can emit scroll before the responsive layout commits.
+      // Keep the reader identity until that reflow restores its anchor.
+      if (
+        !requestedId &&
+        previous.current.width !== null &&
+        previous.current.width !== bounds.width
+      )
+        return;
       const held = previous.current.taskId;
       const heldRect = held ? elements.get(held)?.getBoundingClientRect() : null;
       const heldVisible = heldRect && heldRect.right > bounds.left && heldRect.left < bounds.right;
@@ -60,6 +71,7 @@ export function useThreadSelectionRecovery(
       previous.current = {
         ...previous.current,
         taskId,
+        width: bounds.width,
         offset: element ? element.getBoundingClientRect().left - bounds.left : 0,
         focused: board.contains(document.activeElement)
           ? document.activeElement
@@ -75,19 +87,21 @@ export function useThreadSelectionRecovery(
     const next = resolveRemainingThreadId(old.ids, orderedIds, old.taskId);
     const board = boardRef.current;
     const element = next ? columns(board).get(next) : null;
-    const changed = old.ids.join("\u0000") !== idsKey;
+    const changed = old.ids.join("\u0000") !== idsKey || old.layoutKey !== layoutKey;
     if (changed && old.ids.length > 0 && board && element) {
       if (next === old.taskId) {
-        board.scrollLeft +=
+        const adjustment =
           element.getBoundingClientRect().left - board.getBoundingClientRect().left - old.offset;
+        // Even assigning the current offset cancels an in-flight browser smooth scroll.
+        if (adjustment !== 0) board.scrollLeft += adjustment;
       } else {
         element.scrollIntoView({ inline: "start", block: "nearest", behavior: "instant" });
       }
     }
     if (changed) restoreRemovedFocus(old.focused, element, old.container);
-    previous.current = { ...old, ids: orderedIds, taskId: next };
-    record(next ?? undefined);
-  }, [idsKey, orderedIds, boardRef, record]);
+    previous.current = { ...old, ids: orderedIds, layoutKey, taskId: next };
+    if (changed) record(next ?? undefined);
+  }, [idsKey, layoutKey, orderedIds, boardRef, record]);
   const isEmpty = orderedIds.length === 0;
   useEffect(() => {
     const board = boardRef.current;
