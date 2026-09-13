@@ -248,9 +248,9 @@ func (m *mockTaskBranchProvider) ListTasksNeedingPRWatch(_ context.Context) ([]T
 	return m.tasks, m.err
 }
 
-func (m *mockTaskBranchProvider) ResolveBranchForSession(_ context.Context, _, sessionID string) string {
+func (m *mockTaskBranchProvider) ResolveBranchForWatch(_ context.Context, watch *PRWatch) string {
 	if m.branches != nil {
-		return m.branches[sessionID]
+		return m.branches[watch.SessionID]
 	}
 	return ""
 }
