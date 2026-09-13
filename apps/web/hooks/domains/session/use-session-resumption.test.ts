@@ -565,6 +565,7 @@ describe("useSessionResumption", () => {
       kind: "timeout",
       statusError: "WebSocket request timed out: task.session.status",
     });
+    expect(result.current.recoveryAttemptId).toBe(1);
     expect(mockRequest).toHaveBeenCalledTimes(2);
 
     mockRequest.mockResolvedValueOnce({
@@ -587,6 +588,7 @@ describe("useSessionResumption", () => {
     );
     expect(result.current.recoveryFailure).toBeNull();
     expect(result.current.resumptionState).toBe("running");
+    expect(result.current.recoveryAttemptId).toBe(2);
   });
 
   it("keeps a workspace restore failure as launch feedback with a launch retry", async () => {

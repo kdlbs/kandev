@@ -421,6 +421,7 @@ interface UseSessionResumptionReturn {
   error: string | null;
   notice: string | null;
   recoveryFailure: SessionRecoveryFailure | null;
+  recoveryAttemptId: number;
   taskSessionState: TaskSessionState | null;
   worktreePath: string | null;
   worktreeBranch: string | null;
@@ -723,7 +724,21 @@ export function useSessionResumption(
   taskArchiveState: TaskArchiveState = false,
   options: SessionResumptionOptions = {},
 ): UseSessionResumptionReturn {
-  const [resumptionState, setResumptionState] = useState<ResumptionState>("idle");
+  const [resumptionState, setResumptionStateState] = useState<ResumptionState>("idle");
+  const recoveryAttemptIdRef = useRef(0);
+  const recoveryAttemptActiveRef = useRef(false);
+  const setResumptionState = useCallback((nextState: ResumptionState) => {
+    const startsRecoveryAttempt = nextState === "checking" || nextState === "resuming";
+    if (startsRecoveryAttempt) {
+      if (!recoveryAttemptActiveRef.current) {
+        recoveryAttemptIdRef.current += 1;
+        recoveryAttemptActiveRef.current = true;
+      }
+    } else {
+      recoveryAttemptActiveRef.current = false;
+    }
+    setResumptionStateState(nextState);
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [recoveryFailure, setRecoveryFailure] = useState<SessionRecoveryFailure | null>(null);
@@ -786,6 +801,7 @@ export function useSessionResumption(
     error,
     notice,
     recoveryFailure,
+    recoveryAttemptId: recoveryAttemptIdRef.current,
     taskSessionState: session?.state ?? null,
     worktreePath,
     worktreeBranch,

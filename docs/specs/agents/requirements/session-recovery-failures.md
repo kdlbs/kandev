@@ -47,6 +47,12 @@ results, including the shared recovery owner and phone touch-target checks.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.6:** Desktop and phone shall expose the same recovery choices and details. Phone actions shall have at least 44-pixel touch targets, with no horizontal page overflow or extra details scroller.
 
 
+## Proposed recovery scrolling amendment
+
+This amendment is draft. The [startup recovery fix package](../../../plans/startup-recovery-scroll-timeout/plan.md) owns implementation.
+
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.7:** Chat shall use one vertical scroll area for the recovery card, expanded details, and transcript. Opening a session with an active failure, or receiving a new failure, shall reveal the card. Later user scrolling shall remain under user control. Recovery actions and the composer shall remain reachable on desktop and phone.
+
 ## Proposed recovery attempt amendment
 
 The following requirement is draft. The existing requirements remain active.

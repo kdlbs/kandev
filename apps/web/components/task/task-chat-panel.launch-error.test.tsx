@@ -114,11 +114,14 @@ vi.mock("@/components/task/chat/message-list", () => ({
   MessageList: ({
     messages,
     launchErrorOwned,
+    prependContent,
   }: {
     messages: Message[];
     launchErrorOwned?: boolean;
+    prependContent?: ReactNode;
   }) => (
     <div data-testid="message-list">
+      {prependContent}
       {!launchErrorOwned &&
         messages.map((message) => <div key={message.id}>{message.content}</div>)}
     </div>

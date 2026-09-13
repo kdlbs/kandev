@@ -1159,6 +1159,19 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     (e: React.MouseEvent<HTMLDivElement>) => routePanelMouseDown(e, panelRef),
     [],
   );
+  const launchErrorContent = launchErrorContext ? (
+    <TaskChatLaunchError
+      taskId={launchErrorContext.taskId}
+      workspaceId={launchErrorContext.workspaceId}
+      statusSummary={launchStatusSummary}
+      sessionId={resolvedSessionId}
+      sessionMetadata={session?.metadata}
+      repositories={launchErrorContext.repositories}
+    />
+  ) : null;
+  const recoveryRevealKey = launchErrorOwned
+    ? `${resolvedSessionId ?? ""}:${activeLaunchError?.stamp ?? activeLaunchError?.occurred_at ?? ""}`
+    : null;
 
   return (
     <PanelRoot
@@ -1170,17 +1183,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       onMouseDown={handlePanelMouseDown}
       className="outline-none"
     >
-      <PanelBody padding={false} className="relative">
-        {launchErrorContext && (
-          <TaskChatLaunchError
-            taskId={launchErrorContext.taskId}
-            workspaceId={launchErrorContext.workspaceId}
-            statusSummary={launchStatusSummary}
-            sessionId={resolvedSessionId}
-            sessionMetadata={session?.metadata}
-            repositories={launchErrorContext.repositories}
-          />
-        )}
+      <PanelBody padding={false} scroll={false} className="relative overflow-hidden">
         <TaskMarkdownFileLinkProvider
           taskId={taskId}
           sessionId={resolvedSessionId}
@@ -1215,6 +1218,8 @@ export const TaskChatPanel = memo(function TaskChatPanel({
             launchErrorOwned={launchErrorOwned}
             launchErrorStamp={launchErrorOwned ? activeLaunchError?.stamp : undefined}
             launchErrorOccurredAt={launchErrorOwned ? activeLaunchError?.occurred_at : undefined}
+            prependContent={launchErrorContent}
+            recoveryRevealKey={recoveryRevealKey}
             stickyPromptBar={
               showAnchoredBar && lastPromptMessage ? (
                 <AnchoredLastPromptBar
