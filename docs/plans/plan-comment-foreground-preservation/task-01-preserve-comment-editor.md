@@ -204,3 +204,25 @@ clearer historical verification record. The refresh tests now assert
 or failed read. All 12 cases pass; this strengthens coverage of existing
 behavior without a production change. The plan now labels the design-only
 validation as pre-implementation and records the subsequent code/test changes.
+
+### CI remediation: deterministic last-card fixture
+
+E2E run 34773291709, shard 14, failed the dense/sparse swimlane last-card check
+on every CI attempt. The exact test also failed locally with retries disabled.
+Its concurrent task-seeding batch did not guarantee that the highest numbered
+title received the final server-assigned arrival position. The UI orders by
+position, so scrolling to the end did not guarantee that particular card was
+visible. This expectation was introduced with the task-reordering change.
+
+The fixture now seeds all but one task concurrently and creates the intended
+tail afterward, retaining 440 cards and every virtualization, viewport, sizing,
+and navigation assertion. This is a test-only CI correction; no Kanban runtime
+behavior or documented contract changes. The full six-case swimlane suite passes
+with zero retries using the same fresh web assets and unchanged backend build.
+
+The focused case also passes four consecutive runs with `--repeat-each=4` and
+`--retries=0` (33.1 seconds), following the full suite's six passes (25.3
+seconds). Commands use `E2E_PORT_OFFSET=17 pnpm e2e:run --no-build --project chromium tests/kanban/swimlane-height.spec.ts`;
+the repeated run additionally selects `--grep 'dense and sparse workflows size independently'`.
+Changed-file ESLint, Prettier, catalog/spec validation, and whitespace checks
+pass. Final CI/review state is tracked in the task's external plan.

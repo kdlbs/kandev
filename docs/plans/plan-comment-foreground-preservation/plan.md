@@ -175,3 +175,11 @@ input remains editable. Formatting, slash, and drag controls pause until the
 read settles. A browser regression failed before this guard; all 16 desktop/
 phone scenarios and 69 focused tests now pass. See the work order for exact
 checks. PR CI and review completion are tracked separately.
+
+### CI fixture correction
+
+The full CI suite exposed a last-card assertion using a nondeterministically
+ordered seed batch in the existing swimlane height test. The exact failure was
+reproduced locally, then corrected by creating the final card after the batch.
+All six swimlane cases pass with retries disabled. This test-only remediation
+preserves the runtime scope; the work order records the failure and evidence.
