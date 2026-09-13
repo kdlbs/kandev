@@ -122,11 +122,12 @@ test.describe("Board priority sort and filter", () => {
     await kanban.goto();
     await expect(kanban.taskCardByTitle(TASK_HIGH)).toBeVisible({ timeout: VISIBLE_TIMEOUT });
 
-    // Default (created_desc): each view's pre-existing createdAt-descending
-    // order — the most recently created task first — is untouched.
+    // Default (created_desc): the Kanban view's native persisted-position
+    // order is untouched. The newer board sort refines this order only when
+    // priority_desc is selected.
     await expect
       .poll(() => columnTaskTitles(kanban, stepId), { timeout: VISIBLE_TIMEOUT })
-      .toEqual([TASK_HIGH, TASK_CRITICAL, TASK_LOW, TASK_MEDIUM]);
+      .toEqual([TASK_MEDIUM, TASK_LOW, TASK_CRITICAL, TASK_HIGH]);
 
     await setBoardSort(kanban, "priority_desc");
 

@@ -13,6 +13,7 @@ import {
 } from "./task-order";
 
 const BASE_CREATED_AT = "2026-01-01T00:00:00Z";
+const SECOND_CREATED_AT = "2026-01-02T00:00:00Z";
 // AC-001.10/002.3's "persistent" unranked origin: a stored value outside the
 // four tokens, as opposed to an absent field (the "transient" origin every
 // bare `priority: undefined` fixture in this file covers). Both must rank last.
@@ -76,7 +77,7 @@ describe("sortIdsByCreatedDesc", () => {
   // d newest … a oldest → board order is d, c, b, a.
   const taskById = new Map<string, { createdAt?: string }>([
     ["a", { createdAt: BASE_CREATED_AT }],
-    ["b", { createdAt: "2026-01-02T00:00:00Z" }],
+    ["b", { createdAt: SECOND_CREATED_AT }],
     ["c", { createdAt: "2026-01-03T00:00:00Z" }],
     ["d", { createdAt: "2026-01-04T00:00:00Z" }],
   ]);
@@ -117,7 +118,7 @@ describe("compareTasksByPriorityThenCreatedDesc", () => {
   it("breaks a tied rank by createdAt descending", () => {
     const tasks = [
       { id: "older", createdAt: BASE_CREATED_AT, priority: "high" as const },
-      { id: "newer", createdAt: "2026-01-02T00:00:00Z", priority: "high" as const },
+      { id: "newer", createdAt: SECOND_CREATED_AT, priority: "high" as const },
     ];
     expect([...tasks].sort(compareTasksByPriorityThenCreatedDesc).map((t) => t.id)).toEqual([
       "newer",
@@ -173,9 +174,22 @@ describe("pickKanbanColumnComparator", () => {
     expect([...tasks].sort(comparator).map((t) => t.id)).toEqual(["b", "z"]);
   });
 
-  it("selects the created-desc comparator under created_desc", () => {
+  it("keeps lightweight created-desc fixtures and positioned tasks on their native orders", () => {
     const comparator = pickKanbanColumnComparator("created_desc");
-    expect(comparator).toBe(compareTasksByCreatedDesc);
+    const lightweightTasks = [
+      { id: "old", createdAt: BASE_CREATED_AT },
+      { id: "new", createdAt: SECOND_CREATED_AT },
+    ];
+    expect([...lightweightTasks].sort(comparator).map((task) => task.id)).toEqual(["new", "old"]);
+
+    const positionedTasks = [
+      { id: "second", position: 1, createdAt: SECOND_CREATED_AT },
+      { id: "first", position: 0, createdAt: BASE_CREATED_AT },
+    ];
+    expect([...positionedTasks].sort(comparator).map((task) => task.id)).toEqual([
+      "first",
+      "second",
+    ]);
   });
 });
 
@@ -279,7 +293,7 @@ describe("sortIdsByDisplayOrder", () => {
     }
   >([
     ["a", { id: "a", createdAt: BASE_CREATED_AT, priority: "low" }],
-    ["b", { id: "b", createdAt: "2026-01-02T00:00:00Z", priority: "critical" }],
+    ["b", { id: "b", createdAt: SECOND_CREATED_AT, priority: "critical" }],
     ["c", { id: "c", createdAt: "2026-01-03T00:00:00Z" }],
   ]);
 
@@ -290,6 +304,19 @@ describe("sortIdsByDisplayOrder", () => {
         isPipelineView: false,
       }),
     ).toEqual(sortIdsByCreatedDesc(["a", "c", "b"], taskById));
+  });
+
+  it("uses persisted positions for positioned kanban tasks under created_desc", () => {
+    const positionedTaskById = new Map([
+      ["second", { id: "second", position: 1, createdAt: SECOND_CREATED_AT }],
+      ["first", { id: "first", position: 0, createdAt: BASE_CREATED_AT }],
+    ]);
+    expect(
+      sortIdsByDisplayOrder(["second", "first"], positionedTaskById, {
+        sortToken: "created_desc",
+        isPipelineView: false,
+      }),
+    ).toEqual(["first", "second"]);
   });
 
   it("orders by priority rank for the kanban view under priority_desc", () => {

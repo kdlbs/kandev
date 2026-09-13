@@ -25,18 +25,17 @@ sections to it rather than building one. There is no *sort* surface; that half
 of the premise holds.
 
 **Premise 2: "the board is manually ordered by drag and drop via
-`tasks.position`."** The default view is not ordered by `position`.
-`useTasksByStep` in `apps/web/components/kanban/swimlane-kanban-content.tsx`
-orders each step's cards by `compareTasksByCreatedDesc`, that is `createdAt`
-descending, and `swipeable-columns.tsx` does the same on mobile. Only the
-pipeline view (`swimlane-graph2-content.tsx`) orders by `position`. Drag and
-drop moves a card *between* steps and appends it (`calcNextPosition` returns the
-target step's count); there is no within-step drag reordering and no task
-reorder endpoint. `sortIdsByCreatedDesc` in `apps/web/lib/kanban/task-order.ts`
-exists precisely to sort a selection into "the board's visible created-desc
-order" before a bulk move assigns sequential positions.
+`tasks.position`."** The current board uses the native persisted-position
+order for live task snapshots. `useTasksByStep` in
+`apps/web/components/kanban/swimlane-kanban-content.tsx`, the mobile
+`swipeable-columns.tsx` surface, and the WIP column all use the same native
+reorder comparator. The pipeline view (`swimlane-graph2-content.tsx`) also
+uses `position` after its workflow-step key. Drag and drop can reorder cards
+within a step as well as move them between steps, and the reorder endpoint
+persists that order. Lightweight callers that do not provide a position keep
+the created-time fallback for compatibility.
 
-So there is no manual within-step ordering to override or to tiebreak inside,
+The existing native within-step order is the boundary this capability preserves,
 and the decision this card was filed to make is narrower than its brief assumed.
 It is made under `## The ordering decision`.
 
@@ -184,8 +183,8 @@ existing `position ASC` then priority `CASE` ordering, untouched.
 
 **Priority sort refines the existing order rather than replacing it.** Cards are
 ordered by priority rank first, and cards of equal rank keep the order they have
-today wherever today's comparator determines one: `createdAt` descending in the
-kanban and mobile column views, `position` ascending in the pipeline view. Where
+today wherever today's comparator determines one: native position order in the
+kanban, mobile column, and pipeline views. Where
 it determines none, because those keys tie, the final task `id` key of
 `AC-TASKS-BOARD-PRIORITY-SORT-FILTER-002.4` decides rather than the incidental
 input order; that is the only place this promise yields, and it yields to a

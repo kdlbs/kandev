@@ -66,10 +66,11 @@ rendering. It removes only tasks whose priority is outside a non-empty valid
 selection. Unranked tasks remain visible when the filter is empty and remain
 reachable under priority sorting.
 
-The kanban view keeps its existing created-time order for `created_desc`. The
-pipeline view keeps workflow-step order and position order for `created_desc`.
-For `priority_desc`, priority is the first key and the native view order is the
-tie-breaker. The pipeline step index uses the effective active workflow filter,
+The kanban and mobile views keep their existing native position order for
+`created_desc`. The pipeline view keeps workflow-step order and position order
+for `created_desc`. For `priority_desc`, priority is the first key and the
+native view order is the tie-breaker. The pipeline step index uses the effective
+active workflow filter,
 so an explicitly selected hidden workflow receives a real index. Equal unknown
 step indices still use the within-step comparator instead of producing a
 `NaN` comparison.

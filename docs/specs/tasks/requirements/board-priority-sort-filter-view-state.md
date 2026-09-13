@@ -54,7 +54,7 @@ desktop dropdown does not exist.
   view whenever the breakpoint is mobile, discarding a stored pipeline view.
   Since `AC-TASKS-BOARD-PRIORITY-SORT-FILTER-002.2` pins each view to its own
   native comparator, a person holding `pipeline` and `created_desc` shall see
-  workflow-step index then `position` on desktop and `createdAt` descending on
+  workflow-step index then `position` on desktop and native position order on
   mobile; that difference shall satisfy this criterion rather than violate it.
   Reordering the mobile surface to match the pipeline view in order to equalise
   the two shall not satisfy this criterion, and is excluded.

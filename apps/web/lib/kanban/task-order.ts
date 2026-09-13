@@ -71,7 +71,7 @@ export function pickKanbanColumnComparator(
 ): (a: PriorityRankedTask & CreatedTask, b: PriorityRankedTask & CreatedTask) => number {
   return sortToken === "priority_desc"
     ? compareTasksByPriorityThenCreatedDesc
-    : compareTasksByCreatedDesc;
+    : compareTasksByCreatedOrNativeOrder;
 }
 
 /**
@@ -150,6 +150,21 @@ function comparePipelineCreatedOrder(
   return compareTasksByCreatedDesc(left, right);
 }
 
+/**
+ * The live Kanban surface receives persisted task positions from the reorder
+ * API. Keep that native order for positioned tasks, while lightweight callers
+ * that only provide creation timestamps retain the created-desc fallback.
+ */
+function compareTasksByCreatedOrNativeOrder(
+  left: PriorityRankedTask & CreatedTask,
+  right: PriorityRankedTask & CreatedTask,
+): number {
+  if ("position" in left || "position" in right) {
+    return compareStepOrder(left as StepOrderTask, right as StepOrderTask);
+  }
+  return compareTasksByCreatedDesc(left, right);
+}
+
 export function compareStepOrder(left: StepOrderTask, right: StepOrderTask): number {
   const position = comparePositionAsc(left, right);
   if (position !== 0) return position;
@@ -186,7 +201,7 @@ export function sortTasksForPipelineView<
   });
 }
 
-/** Sort ids into the board's visible created-desc order using task lookups. */
+/** Sort ids by creation time for lightweight callers without native positions. */
 export function sortIdsByCreatedDesc(ids: string[], taskById: Map<string, CreatedTask>): string[] {
   return [...ids].sort((a, b) =>
     compareTasksByCreatedDesc(taskById.get(a) ?? {}, taskById.get(b) ?? {}),
@@ -212,12 +227,16 @@ export function sortIdsByDisplayOrder(
 ): string[] {
   const { sortToken, isPipelineView, stepIndexOf } = options;
   if (!isPipelineView) {
-    if (sortToken !== "priority_desc") return sortIdsByCreatedDesc(ids, taskById);
     return [...ids].sort((a, b) =>
-      compareTasksByPriorityThenCreatedDesc(
-        taskById.get(a) ?? { id: a },
-        taskById.get(b) ?? { id: b },
-      ),
+      sortToken === "priority_desc"
+        ? compareTasksByPriorityThenCreatedDesc(
+            taskById.get(a) ?? { id: a },
+            taskById.get(b) ?? { id: b },
+          )
+        : compareTasksByCreatedOrNativeOrder(
+            taskById.get(a) ?? { id: a },
+            taskById.get(b) ?? { id: b },
+          ),
     );
   }
 

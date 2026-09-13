@@ -48,9 +48,9 @@ order I should work in.
   default to `created_desc`, which shall order cards exactly as the board orders
   them before this capability. A person who never opens the sort control shall
   observe no change in board order, in any view. `created_desc` names **each view's
-  existing native order**, not one shared comparator: `createdAt` descending in the
-  kanban and mobile column views, and workflow-step index then `position` ascending
-  in the pipeline view, which never reads `createdAt` at all. Implementing
+  existing native order**, not one shared comparator: persisted position order in
+  the kanban and mobile column views, and workflow-step index then `position`
+  ascending in the pipeline view. Implementing
   `created_desc` as a single comparator applied uniformly to every view would
   silently reorder the pipeline view by `createdAt` and shall not satisfy this
   criterion; under `created_desc` each view's comparator is left untouched.
@@ -62,7 +62,7 @@ order I should work in.
 - **AC-TASKS-BOARD-PRIORITY-SORT-FILTER-002.4:** When the board sort token is
   `priority_desc`, each view shall order cards by a **total** key sequence, so that
   no two cards are ever left in an order the sequence does not determine:
-  - kanban and mobile column views: priority rank, then `createdAt` descending,
+  - kanban and mobile column views: priority rank, then native position order,
     then task `id` ascending;
   - pipeline view: workflow-step index, then priority rank, then `position`
     ascending, then task `id` ascending. "Workflow-step index" is the step's index
@@ -129,15 +129,14 @@ order I should work in.
   shall operate over the order the board is currently displaying, so a range spans
   the cards visibly between its endpoints and a bulk move assigns sequential
   positions in that same order. The order they operate over shall be **derived from
-  the active board sort token and the active view**, never from a fixed
-  created-descending order: under `priority_desc` a bulk move shall assign positions
+  the active board sort token and the active view**, never from a fixed comparator:
+  under `priority_desc` a bulk move shall assign positions
   in the priority-refined total order of
   `AC-TASKS-BOARD-PRIORITY-SORT-FILTER-002.4`, and under `created_desc` in that
   view's native order per `002.2`. A display-order helper that does not read the
   sort token satisfies neither this criterion nor `002.4`; the existing
-  `sortByDisplayOrder` in `apps/web/hooks/use-task-multi-select.ts` is fixed to
-  created-descending today and shall be made sort-token and view aware rather than
-  left as it is. Neither range selection nor bulk move shall operate over an order
+  `sortByDisplayOrder` in `apps/web/hooks/use-task-multi-select.ts` must remain
+  sort-token and view aware. Neither range selection nor bulk move shall operate over an order
   the person cannot see.
 - **AC-TASKS-BOARD-PRIORITY-SORT-FILTER-002.11:** A bulk move, and every other
   multi-selection action, shall act only on selected tasks the board is currently
