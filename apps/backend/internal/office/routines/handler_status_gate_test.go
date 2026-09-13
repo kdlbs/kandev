@@ -13,11 +13,11 @@ import (
 	"github.com/kandev/kandev/internal/office/routines"
 )
 
-// newTestRouter registers routine routes on a fresh gin engine backed by
+// newStatusGateTestRouter registers routine routes on a fresh gin engine backed by
 // svc, so the tests below drive the real HTTP handlers rather than calling
 // service methods directly — the 409 body shape is part of the contract
 // (AC-OFFICE-ROUTINE-STATUS-004.4) and only the handler builds it.
-func newTestRouter(svc *routines.RoutineService) *gin.Engine {
+func newStatusGateTestRouter(svc *routines.RoutineService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
 	group := engine.Group("/api/v1/office")
@@ -42,7 +42,7 @@ func decodeStatusRefusal(t *testing.T, rec *httptest.ResponseRecorder) statusRef
 
 func TestRunRoutine_PausedRoutine_Returns409WithStatusCode(t *testing.T) {
 	svc := newTestRoutineService(t)
-	router := newTestRouter(svc)
+	router := newStatusGateTestRouter(svc)
 	routine := createTestRoutine(t, svc, "HTTP Paused", "always_create")
 	routine.Status = "paused"
 	if err := svc.UpdateRoutine(context.Background(), routine); err != nil {
@@ -78,7 +78,7 @@ func TestRunRoutine_PausedRoutine_Returns409WithStatusCode(t *testing.T) {
 
 func TestRunRoutine_MissingRoutine_StaysAt500(t *testing.T) {
 	svc := newTestRoutineService(t)
-	router := newTestRouter(svc)
+	router := newStatusGateTestRouter(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/office/routines/does-not-exist/run", nil)
 	rec := httptest.NewRecorder()
@@ -107,7 +107,7 @@ func createWebhookTrigger(t *testing.T, svc *routines.RoutineService, routineID 
 
 func TestFireWebhookTrigger_PausedRoutine_Returns409WithStatusCode(t *testing.T) {
 	svc := newTestRoutineService(t)
-	router := newTestRouter(svc)
+	router := newStatusGateTestRouter(svc)
 	routine := createTestRoutine(t, svc, "Webhook Paused", "always_create")
 	routine.Status = "paused"
 	if err := svc.UpdateRoutine(context.Background(), routine); err != nil {
@@ -134,7 +134,7 @@ func TestFireWebhookTrigger_PausedRoutine_Returns409WithStatusCode(t *testing.T)
 
 func TestFireWebhookTrigger_FiringRoutine_Returns200(t *testing.T) {
 	svc := newTestRoutineService(t)
-	router := newTestRouter(svc)
+	router := newStatusGateTestRouter(svc)
 	routine := createTestRoutine(t, svc, "Webhook Firing", "always_create")
 	trigger := createWebhookTrigger(t, svc, routine.ID)
 
@@ -154,7 +154,7 @@ func TestFireWebhookTrigger_FiringRoutine_Returns200(t *testing.T) {
 // to probe a paused routine's status.
 func TestFireWebhookTrigger_BadSignature_RefusedRegardlessOfStatus(t *testing.T) {
 	svc := newTestRoutineService(t)
-	router := newTestRouter(svc)
+	router := newStatusGateTestRouter(svc)
 	routine := createTestRoutine(t, svc, "Webhook Bad Sig", "always_create")
 	routine.Status = "paused"
 	if err := svc.UpdateRoutine(context.Background(), routine); err != nil {
