@@ -53,7 +53,7 @@ func TestSchedulerOutcome_IdleSkipped_FinishRunErrorIsLogged(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonHeartbeat, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonHeartbeat, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
