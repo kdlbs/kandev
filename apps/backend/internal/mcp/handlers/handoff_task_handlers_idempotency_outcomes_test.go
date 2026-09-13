@@ -42,13 +42,14 @@ func TestHandleHandoffTask_FoundUnsettledOutcomeReportsCreationCompleteFalse(t *
 	handedOffAt := formatHandoffTimestamp(time.Now().UTC())
 
 	preCreated, err := f.svc.CreateTask(context.Background(), &service.CreateTaskRequest{
-		WorkspaceID:    f.targetWorkspaceID,
-		WorkflowID:     f.targetWorkflowID,
-		WorkflowStepID: f.targetStepID,
-		Title:          "Deliver the thing",
-		Description:    "Do the work",
-		ExternalID:     externalID,
-		Metadata:       handoffSourceMetadata(f, handedOffAt),
+		WorkspaceID:            f.targetWorkspaceID,
+		WorkflowID:             f.targetWorkflowID,
+		WorkflowStepID:         f.targetStepID,
+		Title:                  "Deliver the thing",
+		Description:            "Do the work",
+		ExternalID:             externalID,
+		Metadata:               handoffSourceMetadata(f, handedOffAt),
+		TrustedHandoffMetadata: true,
 	})
 	require.NoError(t, err)
 	require.Equal(t, service.CreateTaskOutcomeCreated, preCreated.Outcome)
@@ -77,13 +78,14 @@ func TestHandleHandoffCreatedOutcome_IdentityLostSkipsStartAndReportsMessage(t *
 	handedOffAt := formatHandoffTimestamp(time.Now().UTC())
 
 	created, err := f.svc.CreateTask(context.Background(), &service.CreateTaskRequest{
-		WorkspaceID:    f.targetWorkspaceID,
-		WorkflowID:     f.targetWorkflowID,
-		WorkflowStepID: f.targetStepID,
-		Title:          "Deliver the thing",
-		Description:    "Do the work",
-		ExternalID:     externalID,
-		Metadata:       handoffSourceMetadata(f, handedOffAt),
+		WorkspaceID:            f.targetWorkspaceID,
+		WorkflowID:             f.targetWorkflowID,
+		WorkflowStepID:         f.targetStepID,
+		Title:                  "Deliver the thing",
+		Description:            "Do the work",
+		ExternalID:             externalID,
+		Metadata:               handoffSourceMetadata(f, handedOffAt),
+		TrustedHandoffMetadata: true,
 	})
 	require.NoError(t, err)
 	task := created.Task
@@ -141,13 +143,14 @@ func TestHandleHandoffCreatedOutcome_IdentityLostReportsSurvivorWorkflowStep(t *
 	handedOffAt := formatHandoffTimestamp(time.Now().UTC())
 
 	created, err := f.svc.CreateTask(context.Background(), &service.CreateTaskRequest{
-		WorkspaceID:    f.targetWorkspaceID,
-		WorkflowID:     f.targetWorkflowID,
-		WorkflowStepID: f.targetStepID,
-		Title:          "Deliver the thing",
-		Description:    "Do the work",
-		ExternalID:     externalID,
-		Metadata:       handoffSourceMetadata(f, handedOffAt),
+		WorkspaceID:            f.targetWorkspaceID,
+		WorkflowID:             f.targetWorkflowID,
+		WorkflowStepID:         f.targetStepID,
+		Title:                  "Deliver the thing",
+		Description:            "Do the work",
+		ExternalID:             externalID,
+		Metadata:               handoffSourceMetadata(f, handedOffAt),
+		TrustedHandoffMetadata: true,
 	})
 	require.NoError(t, err)
 	// Captured before the step move below: this is the stale in-memory row
@@ -217,13 +220,14 @@ func TestHandleHandoffCreatedOutcome_IdentityLostActivityLogUsesCreatedTaskNotSu
 	handedOffAt := formatHandoffTimestamp(time.Now().UTC())
 
 	created, err := f.svc.CreateTask(context.Background(), &service.CreateTaskRequest{
-		WorkspaceID:    f.targetWorkspaceID,
-		WorkflowID:     f.targetWorkflowID,
-		WorkflowStepID: f.targetStepID,
-		Title:          "Deliver the thing",
-		Description:    "Do the work",
-		ExternalID:     externalID,
-		Metadata:       handoffSourceMetadata(f, handedOffAt),
+		WorkspaceID:            f.targetWorkspaceID,
+		WorkflowID:             f.targetWorkflowID,
+		WorkflowStepID:         f.targetStepID,
+		Title:                  "Deliver the thing",
+		Description:            "Do the work",
+		ExternalID:             externalID,
+		Metadata:               handoffSourceMetadata(f, handedOffAt),
+		TrustedHandoffMetadata: true,
 	})
 	require.NoError(t, err)
 	task := created.Task
@@ -277,13 +281,14 @@ func TestHandleHandoffCreatedOutcome_SettlementErrorHaltsWithNoReverseLinkActivi
 	handedOffAt := formatHandoffTimestamp(time.Now().UTC())
 
 	created, err := f.svc.CreateTask(context.Background(), &service.CreateTaskRequest{
-		WorkspaceID:    f.targetWorkspaceID,
-		WorkflowID:     f.targetWorkflowID,
-		WorkflowStepID: f.targetStepID,
-		Title:          "Deliver the thing",
-		Description:    "Do the work",
-		ExternalID:     externalID,
-		Metadata:       handoffSourceMetadata(f, handedOffAt),
+		WorkspaceID:            f.targetWorkspaceID,
+		WorkflowID:             f.targetWorkflowID,
+		WorkflowStepID:         f.targetStepID,
+		Title:                  "Deliver the thing",
+		Description:            "Do the work",
+		ExternalID:             externalID,
+		Metadata:               handoffSourceMetadata(f, handedOffAt),
+		TrustedHandoffMetadata: true,
 	})
 	require.NoError(t, err)
 	task := created.Task
