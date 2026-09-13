@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"testing"
@@ -112,6 +114,80 @@ func findOrphanReapRecord(snapshot *taskResourceCleanupSnapshot, pid int) (orpha
 		}
 	}
 	return orphanReapCandidateRecord{}, false
+}
+
+// A workspace can be recreated after the phase enumerates an absent root but
+// while the process identity check is still in progress. The process must not
+// receive SIGTERM when the final root check observes that recreation.
+func TestSignalOrphanReapCandidatesSkipsRecreatedRootBeforeSigterm(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		svc := newOrphanReapSignalTestService()
+		parent := t.TempDir()
+		root := filepath.Join(parent, "workspace")
+		verifier := verifierFunc(func(context.Context, int) (string, error) {
+			if err := os.Mkdir(root, 0o755); err != nil {
+				return "", err
+			}
+			return root, nil
+		})
+		signaler := newFakeOrphanReapSignaler()
+		signaler.setAlive(500, true)
+		svc.orphanReapVerifier = verifier
+		svc.orphanReapSignaler = signaler
+
+		cand := newOrphanReapOwnershipCandidate(500, 1, root, root)
+		snapshot := &taskResourceCleanupSnapshot{}
+		errs := svc.signalOrphanReapCandidates(context.Background(), "task-a", []orphanReapCandidate{cand}, snapshot)
+		if len(errs) != 0 {
+			t.Fatalf("expected no errors, got %v", errs)
+		}
+		if sent := signaler.sentSignals(); len(sent) != 0 {
+			t.Fatalf("expected no signal after root recreation during reverify, got %+v", sent)
+		}
+		rec, ok := findOrphanReapRecord(snapshot, 500)
+		if !ok || rec.Outcome != orphanReapOutcomeSkipped {
+			t.Fatalf("expected pid 500 recorded skipped after root recreation, got %+v (found=%v)", rec, ok)
+		}
+	})
+}
+
+// A workspace can also be recreated after SIGTERM and before escalation. The
+// pre-SIGKILL check must reject the candidate and avoid signalling the new
+// occupant.
+func TestSignalOrphanReapCandidatesSkipsRecreatedRootBeforeSigkill(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		svc := newOrphanReapSignalTestService()
+		parent := t.TempDir()
+		root := filepath.Join(parent, "workspace")
+		verifier := newFakeOrphanReapVerifier()
+		verifier.set(500, root)
+		signaler := newFakeOrphanReapSignaler()
+		signaler.setAlive(500, true)
+		signaler.onSignal = func(pid int, sig orphanReapSignal) {
+			if sig == orphanReapSigterm {
+				if err := os.Mkdir(root, 0o755); err != nil {
+					t.Fatalf("recreate workspace root: %v", err)
+				}
+			}
+		}
+		svc.orphanReapVerifier = verifier
+		svc.orphanReapSignaler = signaler
+
+		cand := newOrphanReapOwnershipCandidate(500, 1, root, root)
+		snapshot := &taskResourceCleanupSnapshot{}
+		errs := svc.signalOrphanReapCandidates(context.Background(), "task-a", []orphanReapCandidate{cand}, snapshot)
+		if len(errs) != 0 {
+			t.Fatalf("expected no errors, got %v", errs)
+		}
+		sent := signaler.sentSignals()
+		if len(sent) != 1 || sent[0].sig != orphanReapSigterm {
+			t.Fatalf("expected only SIGTERM before root recreation blocked escalation, got %+v", sent)
+		}
+		rec, ok := findOrphanReapRecord(snapshot, 500)
+		if !ok || rec.Outcome != orphanReapOutcomeSkipped {
+			t.Fatalf("expected pid 500 recorded skipped after root recreation, got %+v (found=%v)", rec, ok)
+		}
+	})
 }
 
 // A candidate that dies between SIGTERM and the SIGKILL check never needs

@@ -62,6 +62,8 @@ const orphanReapSettleDelay = 1 * time.Second
 // orphanReapMaxCandidates bounds one job's signalled candidates.
 const orphanReapMaxCandidates = 256
 
+const orphanReapProgressPersistAttempts = 2
+
 var errOrphanReapCandidateBoundReached = errors.New("orphan reap: candidate bound reached; remainder deferred to a later attempt")
 
 var errOrphanReapCancelledMidPhase = errors.New("orphan reap: cancelled after the phase began")
@@ -247,23 +249,17 @@ func (s *Service) runOrphanReapPhase(
 	}
 
 	sort.Slice(toSignal, func(i, j int) bool { return toSignal[i].PID < toSignal[j].PID })
-	capped := false
-	if len(toSignal) > orphanReapMaxCandidates {
-		toSignal = toSignal[:orphanReapMaxCandidates]
-		capped = true
-	}
-
-	retErrs := s.signalOrphanReapCandidates(ctx, job.TaskID, toSignal, snapshot)
-	s.recordOrphanReapAggregateOutcome(job.TaskID, snapshot, toSignal)
-	if capped {
-		retErrs = append(retErrs, errOrphanReapCandidateBoundReached)
+	phaseResult := s.signalOrphanReapCandidatesWithLimit(ctx, job.TaskID, toSignal, snapshot, orphanReapMaxCandidates)
+	s.recordOrphanReapAggregateOutcome(job.TaskID, snapshot, phaseResult.attempted)
+	if phaseResult.capReached {
+		phaseResult.errs = append(phaseResult.errs, errOrphanReapCandidateBoundReached)
 		if s.logger != nil {
 			s.logger.Warn("orphan reap candidate bound reached; remainder deferred",
 				zap.String("task_id", job.TaskID), zap.Int("bound", orphanReapMaxCandidates))
 		}
 		orphanReapCounters.Add(orphanReapCounterCapReached, 1)
 	}
-	return retErrs
+	return phaseResult.errs
 }
 
 func (s *Service) takeOrphanReapHostSnapshot(ctx context.Context) ([]hostProcess, error) {
@@ -421,13 +417,17 @@ func (s *Service) recordOrphanReapAggregateOutcome(
 // write runs on a context detached from that cancellation — the same pattern
 // retryTaskResourceCleanupJob already uses for its own transition — or every
 // cancelled attempt would silently lose this write before it reaches the DB.
-// Best-effort: a persistence failure here is logged, not folded into the
-// attempt's error, since the attempt is already retrying for its own reason.
+// The write is retried once because this helper is used after the main attempt
+// has already failed. A failure after both writes is returned to the caller so
+// the retry transition keeps the persistence problem visible.
 func (s *Service) persistOrphanReapProgressBestEffort(
 	ctx context.Context, job *models.TaskResourceCleanupJob, snapshot *taskResourceCleanupSnapshot,
-) {
+) error {
 	if len(snapshot.OrphanReapRoots) == 0 && len(snapshot.OrphanReapRecords) == 0 && len(snapshot.OrphanReapSkips) == 0 {
-		return
+		return nil
+	}
+	if s.resourceCleanups == nil {
+		return errors.New("resource cleanup repository unavailable")
 	}
 	encoded, err := json.Marshal(snapshot)
 	if err != nil {
@@ -435,16 +435,25 @@ func (s *Service) persistOrphanReapProgressBestEffort(
 			s.logger.Warn("encode resource snapshot after failed cleanup attempt",
 				zap.String("job_id", job.ID), zap.Error(err))
 		}
-		return
+		return fmt.Errorf("encode resource snapshot after failed cleanup attempt: %w", err)
 	}
 	persistCtx, cancel := detachedCleanupTransitionContext(ctx)
 	defer cancel()
-	if _, err := s.resourceCleanups.UpdateClaimedTaskResourceCleanupSnapshot(
-		persistCtx, job.ID, job.Attempts, string(encoded),
-	); err != nil && s.logger != nil {
-		s.logger.Warn("persist resource snapshot after failed cleanup attempt",
-			zap.String("job_id", job.ID), zap.Error(err))
+	var lastErr error
+	for attempt := 0; attempt < orphanReapProgressPersistAttempts; attempt++ {
+		if _, err := s.resourceCleanups.UpdateClaimedTaskResourceCleanupSnapshot(
+			persistCtx, job.ID, job.Attempts, string(encoded),
+		); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
 	}
+	if s.logger != nil {
+		s.logger.Warn("persist resource snapshot after failed cleanup attempt",
+			zap.String("job_id", job.ID), zap.Error(lastErr))
+	}
+	return lastErr
 }
 
 func resolveOrphanReapRoots(roots []string) []string {

@@ -60,7 +60,7 @@ extends (`resource_cleanup_jobs.go`), mirroring the shape of
 
 - `resource_cleanup_orphan_reap.go` — root-candidate gathering and
   confirmation, phase orchestration (`runOrphanReapPhase`), skip/candidate
-  recording, best-effort cross-attempt persistence.
+  recording, and cross-attempt persistence with retry reporting.
 - `resource_cleanup_orphan_reap_match.go` — cwd-to-root attribution
   (`attributeOrphanReapCandidates`, longest-match, AC-002.7).
 - `resource_cleanup_orphan_reap_ownership.go` — the fail-closed ownership
@@ -129,9 +129,13 @@ new `ListLiveWorkspaceSessions` **once** per phase, then applies checks at the
 narrowest unit each governs (AC-003.6):
 
 - A repository error, or an other-task stored session path that fails to
-  resolve, is phase-wide inconclusive across every currently active root —
-  `skipEveryOrphanReapRoot` records a **detection-failure** skip for each one
-  (see [Observability](#observability)).
+  resolve on the backend host, is phase-wide inconclusive across every
+  currently active root — `skipEveryOrphanReapRoot` records a
+  **detection-failure** skip for each one (see
+  [Observability](#observability)). Known remote/container executor paths
+  are a separate namespace: a path that is absent on the backend host is
+  ignored, while a path that resolves locally is retained because it can be a
+  real host mount. Unknown executor identity remains fail-closed.
 - A root equal to, inside, or **containing** another task's live session
   workspace is blocked (`orphanReapFindOverlap`, bidirectional — AC-003.2).
 - A root is blocked when another task's live recorded execution's worktree
@@ -177,22 +181,18 @@ ACs literally (`orphanReapFindOverlap` vs. `orphanReapFindContainment`) and
 does not attempt to make the two checks symmetric — that would be an AC
 change, not an implementation detail.
 
-### F26 (AC-002.3 + AC-003.6): unresolvable stored path fails every active root closed
+### F26 (AC-002.3 + AC-003.6): host and unknown unresolvable paths fail every active root closed
 
 AC-002.3 requires resolve-then-compare for "any path"; ownership compares
 other tasks' stored session paths, which need not exist on disk, so
 `filepath.EvalSymlinks` can fail on a live install with no error on Kandev's
-part. Per AC-003.6 this is fail-closed, and `otherTaskSessionPaths` applies it
-literally: **any** unresolvable other-task path makes every currently active
-root inconclusive for this attempt, not just the root it happens to resemble.
-F26's viability concern — one stale row can make the feature permanently
-inert on a long-lived install — was raised and not mitigated in the spec (the
-round-3 re-read declined a clause on the safety axis; round 4 raised the
-viability axis and the user's round-4 decision left the spec unchanged). This
-design implements the literal fail-closed behavior and relies on the Warn-level
-detection-failure logging in [Observability](#observability) to surface a
-persistently-inert phase to an operator, rather than silently and permanently
-signalling nothing.
+part. A host path, or a path whose executor identity is unknown, remains
+fail-closed: **any** such unresolvable path makes every currently active root
+inconclusive for this attempt, not just the root it happens to resemble.
+Known remote/container paths are different. Their namespace is not the
+backend host, so an absent local path is ignored; if the path resolves locally,
+the implementation protects it as a host mount. This keeps stale remote rows
+from permanently disabling cleanup while preserving local mount safety.
 
 ### F21 (AC-001.1): a root is recorded on whichever attempt actually removes it
 
@@ -240,17 +240,16 @@ per-record classification.
 The AC's two clauses conflict (the bound "counts candidates attempted", but
 "a skip under REQ-003 or AC-004.5 does not consume it" — AC-004.5's
 permission-denied outcome is only observable *after* an attempt).
-**Decision applied: the bound is enforced before ownership-approved
-candidates are signalled at all** — `runOrphanReapPhase` sorts `toSignal` by
-PID and truncates to `orphanReapMaxCandidates` (256) before calling
-`signalOrphanReapCandidates`. Every one of the 256 is attempted (signalled,
-including any that resolve to AC-004.5 permission-denied), and the remainder
-past 256 is never attempted at all this cycle — recorded as
-`errOrphanReapCandidateBoundReached`, a retryable error so a later attempt
-picks up the deferred remainder against the same durable root. This reads
-AC-007.5's first clause as authoritative and treats the second clause's
-"does not consume it" as describing candidates *filtered out before
-attempting* (an ownership skip), not candidates that failed mid-attempt.
+**Decision applied: the sender enforces the bound while it iterates the
+ownership-approved candidates** — `runOrphanReapPhase` sorts `toSignal` by PID
+and passes the full list to `signalOrphanReapCandidates`. A candidate skipped
+by ownership or by the pre-signal re-verification does not consume the
+`orphanReapMaxCandidates` (256) budget. A SIGTERM attempt that returns
+permission denied also does not consume it, because no signal was delivered.
+Successful signal attempts and other signal errors consume the budget. When
+the budget is reached, the remaining candidates are deferred and the phase
+returns `errOrphanReapCandidateBoundReached`, a retryable error, so a later
+attempt picks them up against the same durable root.
 
 ### F25 (AC-006.3 + AC-006.5): cancellation before any signal is sent
 
@@ -308,7 +307,7 @@ Every failure mode fails at the narrowest unit it governs (AC-003.6):
 | --- | --- | --- |
 | Unsupported platform | Whole phase | Skip, job succeeds |
 | Host snapshot unreadable/timed out (AC-002.6) | Whole phase | Skip, job succeeds |
-| Ownership repository error / unresolvable other-task path | Every currently active root | Skip, job succeeds |
+| Ownership repository error / unresolvable host or unknown other-task path | Every currently active root | Skip, job succeeds |
 | A root exists again at reap time (AC-001.4) | That root only | Skip, job succeeds; root stays recorded |
 | PID reused/moved before a signal (AC-003.7) | That candidate only | Skipped candidate |
 | Permission denied sending a signal (AC-004.5) | That candidate only | Skipped candidate, non-retryable |
@@ -339,10 +338,11 @@ No schema change. Three new fields on the existing durable
 **failed** cleanup attempt, via `UpdateClaimedTaskResourceCleanupSnapshot`,
 before the worker's normal retry path runs. Without this, AC-006.5's
 cross-attempt supersession would have nothing durable to supersede: the job
-only otherwise persists its final snapshot on success. This save is
-best-effort — a failure to persist here is logged and does not become part of
-the attempt's own error, since the attempt is already retrying for an
-unrelated reason.
+only otherwise persists its final snapshot on success. The helper uses a
+detached context and retries the write once. If both writes fail, it returns
+the persistence error to the cleanup job, which keeps the attempt retryable
+and makes the loss visible to the caller; a successful write (including a
+stale claim that updated no row) preserves the normal cleanup error only.
 
 ## Security
 
@@ -369,12 +369,12 @@ because it is a logging-severity decision): a **benign** skip — a completed
 check that found real ownership, or AC-001.4's "root exists again" — logs at
 Info via `recordOrphanReapRootSkip` / `recordOrphanReapPhaseSkip`. A
 **detection-failure** skip — the check itself could not run (a repository
-error, an unresolvable other-task path, or AC-002.6's unavailable host
+error, an unresolvable host or unknown other-task path, or AC-002.6's unavailable host
 snapshot) — logs at **Warn** via `recordOrphanReapRootSkipDetectionFailure` /
 `recordOrphanReapPhaseSkipDetectionFailure`, because the host conditions
 causing a detection failure are exactly what this feature exists to guard
 against, and a silent permanent Info-level skip (see
-[F26](#f26-ac-0023--ac-0036-unresolvable-stored-path-fails-every-active-root-closed))
+[F26](#f26-ac-0023--ac-0036-host-and-unknown-unresolvable-paths-fail-every-active-root-closed))
 would leave that guard invisible.
 
 ## Related decisions

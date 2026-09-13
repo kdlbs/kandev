@@ -106,6 +106,73 @@ func TestApplyOrphanReapOwnershipEmptyWorkspacePathNamesNoPath(t *testing.T) {
 	}
 }
 
+// Remote and container workspace paths use a different filesystem namespace
+// from the backend. An absent path in that namespace must not make every local
+// reap root inconclusive.
+func TestApplyOrphanReapOwnershipIgnoresRemoteSessionWorkspacePath(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	mustCreateOrphanReapTask(t, repo, "task-a")
+	mustCreateOrphanReapTask(t, repo, "task-other")
+
+	remoteWorkspace := filepath.Join(t.TempDir(), "container-workspace")
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-other-remote", TaskID: "task-other",
+		ExecutorType: string(models.ExecutorTypeLocalDocker), ExecutorID: "executor-remote",
+		Status: models.TaskEnvironmentStatusReady, WorkspacePath: remoteWorkspace,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "sess-other-remote", TaskID: "task-other", TaskEnvironmentID: "env-other-remote",
+		State: models.TaskSessionStateRunning, WorkspacePath: remoteWorkspace,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	root := t.TempDir()
+	byRoot := map[string][]orphanReapCandidate{root: {newOrphanReapOwnershipCandidate(500, 1, root, root)}}
+	snap := []hostProcess{{PID: 500, PPID: 1, Cwd: root, Command: "sh"}}
+	snapshot := &taskResourceCleanupSnapshot{}
+
+	got := svc.applyOrphanReapOwnership(ctx, "task-a", snap, byRoot, snapshot)
+	if len(got) != 1 || got[0].PID != 500 {
+		t.Fatalf("expected local candidate to remain signalable despite remote path, got %+v", got)
+	}
+	if len(snapshot.OrphanReapSkips) != 0 {
+		t.Fatalf("expected no root-level skip for remote workspace path, got %+v", snapshot.OrphanReapSkips)
+	}
+}
+
+func TestApplyOrphanReapOwnershipIgnoresRemoteExecutorWorktreePath(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	mustCreateOrphanReapTask(t, repo, "task-a")
+	mustCreateOrphanReapTask(t, repo, "task-other")
+
+	remoteWorktree := filepath.Join(t.TempDir(), "remote-worktree")
+	if err := repo.UpsertExecutorRunning(ctx, &models.ExecutorRunning{
+		ID: "exec-other-remote", SessionID: "sess-other-remote", TaskID: "task-other",
+		ExecutorID: "executor-remote", Runtime: agentruntime.RuntimeSSH,
+		Status: models.ExecutorRunningStatusRunning, WorktreePath: remoteWorktree,
+	}); err != nil {
+		t.Fatalf("UpsertExecutorRunning: %v", err)
+	}
+
+	root := t.TempDir()
+	byRoot := map[string][]orphanReapCandidate{root: {newOrphanReapOwnershipCandidate(500, 1, root, root)}}
+	snap := []hostProcess{{PID: 500, PPID: 1, Cwd: root, Command: "sh"}}
+	snapshot := &taskResourceCleanupSnapshot{}
+
+	got := svc.applyOrphanReapOwnership(ctx, "task-a", snap, byRoot, snapshot)
+	if len(got) != 1 || got[0].PID != 500 {
+		t.Fatalf("expected local candidate to remain signalable despite remote worktree path, got %+v", got)
+	}
+	if len(snapshot.OrphanReapSkips) != 0 {
+		t.Fatalf("expected no root-level skip for remote worktree path, got %+v", snapshot.OrphanReapSkips)
+	}
+}
+
 // AC-TASKS-ORPHAN-REAP-003.4: a root equal to or inside another task's live
 // recorded execution's worktree is blocked.
 // AC-TASKS-ORPHAN-REAP-003.4: the worktree, not the root, is the thing that

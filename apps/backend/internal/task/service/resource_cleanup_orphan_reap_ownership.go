@@ -2,11 +2,14 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 )
 
 // applyOrphanReapOwnership filters attributed candidates down to the ones
@@ -47,7 +50,7 @@ func (s *Service) applyOrphanReapOwnership(
 		return nil
 	}
 
-	localPIDOwner, liveWorktreeRoots, worktreeResolutionFailed := orphanReapOtherExecutorOwnership(otherExecutors, taskID)
+	localPIDOwner, liveWorktreeRoots, worktreeResolutionFailed := s.orphanReapOtherExecutorOwnership(ctx, otherExecutors, taskID)
 	if worktreeResolutionFailed {
 		// An unresolvable other-task live executor worktree path cannot be
 		// ruled out as "containing" any root, so every root this attempt
@@ -57,7 +60,7 @@ func (s *Service) applyOrphanReapOwnership(
 		return nil
 	}
 
-	otherSessionPaths, resolutionFailed := s.otherTaskSessionPaths(otherSessions, taskID)
+	otherSessionPaths, resolutionFailed := s.otherTaskSessionPaths(ctx, otherSessions, taskID)
 	if resolutionFailed {
 		// An unresolvable stored path cannot be ruled out as "containing"
 		// any root, so every root this attempt found is inconclusive.
@@ -90,8 +93,8 @@ func (s *Service) applyOrphanReapOwnership(
 // true when any live executor's worktree path could not be resolved:
 // mirrors otherTaskSessionPaths, since an unresolvable path can silently
 // fail to match a process's real (resolved) cwd.
-func orphanReapOtherExecutorOwnership(
-	otherExecutors []*models.ExecutorRunning, taskID string,
+func (s *Service) orphanReapOtherExecutorOwnership(
+	ctx context.Context, otherExecutors []*models.ExecutorRunning, taskID string,
 ) (localPIDOwner map[int]string, liveWorktreeRoots []orphanReapOwnedPath, resolutionFailed bool) {
 	localPIDOwner = map[int]string{}
 	for _, ex := range otherExecutors {
@@ -104,8 +107,27 @@ func orphanReapOtherExecutorOwnership(
 		if ex.WorktreePath == "" || !orphanReapExecutorIsLive(ex.Status) {
 			continue
 		}
+		hostOwned, known := orphanReapRuntimeRunsOnHost(ex.Runtime)
+		if !known && ex.ExecutorID != "" {
+			var err error
+			hostOwned, known, err = s.orphanReapExecutorIDRunsOnHost(ctx, ex.ExecutorID)
+			if err != nil {
+				resolutionFailed = true
+				continue
+			}
+		}
+		if !known {
+			resolutionFailed = true
+			continue
+		}
 		resolved, err := filepath.EvalSymlinks(ex.WorktreePath)
 		if err != nil {
+			// A known remote runtime stores its cwd in another filesystem
+			// namespace. Absence on this host is expected. If the path does
+			// resolve locally, keep it as a real host mount and protect it.
+			if !hostOwned && errors.Is(err, os.ErrNotExist) {
+				continue
+			}
 			resolutionFailed = true
 			continue
 		}
@@ -170,7 +192,7 @@ type orphanReapOwnedPath struct {
 // path. A session with an empty workspace_path names no path.
 // resolutionFailed is true when any non-empty path could not be resolved.
 func (s *Service) otherTaskSessionPaths(
-	sessions []*models.TaskSession, taskID string,
+	ctx context.Context, sessions []*models.TaskSession, taskID string,
 ) (paths []orphanReapOwnedPath, resolutionFailed bool) {
 	for _, sess := range sessions {
 		if sess == nil || sess.TaskID == "" || sess.TaskID == taskID {
@@ -180,14 +202,129 @@ func (s *Service) otherTaskSessionPaths(
 		if path == "" {
 			continue
 		}
+		hostOwned, known, err := s.orphanReapSessionPathRunsOnHost(ctx, sess)
+		if err != nil {
+			resolutionFailed = true
+			continue
+		}
+		if !known {
+			resolutionFailed = true
+			continue
+		}
 		resolved, err := filepath.EvalSymlinks(path)
 		if err != nil {
+			// Remote and container paths are not visible from the backend.
+			// An absent path is therefore not an ownership-check failure. A
+			// path that does resolve locally is a real host mount and remains
+			// protected by the normal containment check.
+			if !hostOwned && errors.Is(err, os.ErrNotExist) {
+				continue
+			}
 			resolutionFailed = true
 			continue
 		}
 		paths = append(paths, orphanReapOwnedPath{taskID: sess.TaskID, path: resolved})
 	}
 	return paths, resolutionFailed
+}
+
+func orphanReapRuntimeRunsOnHost(runtime agentruntime.Runtime) (hostOwned, known bool) {
+	switch runtime {
+	case agentruntime.RuntimeStandalone:
+		return true, true
+	case agentruntime.RuntimeDocker,
+		agentruntime.RuntimeRemoteDocker,
+		agentruntime.RuntimeSprites,
+		agentruntime.RuntimeSSH,
+		agentruntime.RuntimeKubernetes:
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func orphanReapExecutorTypeRunsOnHost(executorType string) (hostOwned, known bool) {
+	switch models.ExecutorType(executorType) {
+	case models.ExecutorTypeLocal, models.ExecutorTypeWorktree:
+		return true, true
+	case models.ExecutorTypeLocalDocker,
+		models.ExecutorTypeRemoteDocker,
+		models.ExecutorTypeSprites,
+		models.ExecutorTypeSSH,
+		models.ExecutorTypeKubernetes,
+		models.ExecutorTypeMockRemote:
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func (s *Service) orphanReapExecutorIDRunsOnHost(
+	ctx context.Context, executorID string,
+) (hostOwned, known bool, err error) {
+	if executorID == "" || s.executors == nil {
+		return false, false, nil
+	}
+	executor, err := s.executors.GetExecutor(ctx, executorID)
+	if err != nil {
+		if errors.Is(err, models.ErrExecutorNotFound) {
+			return false, false, nil
+		}
+		return false, false, err
+	}
+	if executor == nil {
+		return false, false, nil
+	}
+	hostOwned, known = orphanReapExecutorTypeRunsOnHost(string(executor.Type))
+	return hostOwned, known, nil
+}
+
+func (s *Service) orphanReapSessionPathRunsOnHost(
+	ctx context.Context, session *models.TaskSession,
+) (hostOwned, known bool, err error) {
+	if session == nil {
+		return false, false, nil
+	}
+	environmentID := session.TaskEnvironmentID
+	if environmentID == "" {
+		environmentID = session.EnvironmentID
+	}
+	if environmentID != "" {
+		return s.orphanReapTaskEnvironmentRunsOnHost(ctx, environmentID)
+	}
+	if session.ExecutorID != "" {
+		return s.orphanReapExecutorIDRunsOnHost(ctx, session.ExecutorID)
+	}
+	// Legacy repo-less sessions predate the environment/runtime identity and
+	// store a direct host folder. Keep resolving those paths as before; an
+	// absent path still fails closed in the caller.
+	return true, true, nil
+}
+
+func (s *Service) orphanReapTaskEnvironmentRunsOnHost(
+	ctx context.Context, environmentID string,
+) (hostOwned, known bool, err error) {
+	if s.taskEnvironments == nil {
+		return false, false, nil
+	}
+	environment, getErr := s.taskEnvironments.GetTaskEnvironment(ctx, environmentID)
+	if getErr != nil {
+		if errors.Is(getErr, repository.ErrTaskEnvironmentNotFound) {
+			return false, false, nil
+		}
+		return false, false, getErr
+	}
+	if environment == nil {
+		return false, false, nil
+	}
+	if environment.ExecutorType != "" {
+		hostOwned, known = orphanReapExecutorTypeRunsOnHost(environment.ExecutorType)
+		return hostOwned, known, nil
+	}
+	if environment.ExecutorID == "" {
+		return false, false, nil
+	}
+	return s.orphanReapExecutorIDRunsOnHost(ctx, environment.ExecutorID)
 }
 
 // orphanReapFindOverlap reports whether root is equal to, inside, or

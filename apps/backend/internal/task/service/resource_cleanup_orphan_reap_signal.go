@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"errors"
+	"os"
 	"time"
 
 	"go.uber.org/zap"
@@ -59,6 +61,18 @@ type orphanReapPendingCandidate struct {
 	lastSignal string
 }
 
+type orphanReapSigtermResult struct {
+	pending    []orphanReapPendingCandidate
+	attempted  []orphanReapCandidate
+	capReached bool
+}
+
+type orphanReapSignalPhaseResult struct {
+	errs       []error
+	attempted  []orphanReapCandidate
+	capReached bool
+}
+
 // signalOrphanReapCandidates escalates SIGTERM -> SIGKILL per PID: every
 // SIGTERM is sent before the shared grace period starts, and identity is
 // re-verified immediately before every signal. It returns a retryable error
@@ -67,6 +81,13 @@ type orphanReapPendingCandidate struct {
 func (s *Service) signalOrphanReapCandidates(
 	ctx context.Context, taskID string, candidates []orphanReapCandidate, snapshot *taskResourceCleanupSnapshot,
 ) []error {
+	return s.signalOrphanReapCandidatesWithLimit(ctx, taskID, candidates, snapshot, 0).errs
+}
+
+func (s *Service) signalOrphanReapCandidatesWithLimit(
+	ctx context.Context, taskID string, candidates []orphanReapCandidate, snapshot *taskResourceCleanupSnapshot,
+	maxCandidates int,
+) orphanReapSignalPhaseResult {
 	verifier := s.orphanReapVerifier
 	if verifier == nil {
 		verifier = defaultOrphanReapVerifier()
@@ -76,43 +97,53 @@ func (s *Service) signalOrphanReapCandidates(
 		signaler = realOrphanReapSignaler{}
 	}
 	if ctx.Err() != nil {
-		return []error{errOrphanReapCancelledMidPhase}
+		return orphanReapSignalPhaseResult{errs: []error{errOrphanReapCancelledMidPhase}}
 	}
 
-	pending := s.sendOrphanReapSigterms(ctx, taskID, candidates, snapshot, verifier, signaler)
+	termResult := s.sendOrphanReapSigterms(ctx, taskID, candidates, snapshot, verifier, signaler, maxCandidates)
+	result := orphanReapSignalPhaseResult{
+		attempted:  termResult.attempted,
+		capReached: termResult.capReached,
+	}
+	pending := termResult.pending
 	if ctx.Err() != nil {
 		// Cancellation may have broken the loop before anything reached
 		// pending; report it either way rather than falling through to the
 		// empty-pending "nothing to do" return below.
-		return s.recordOrphanReapCancelledMidPhase(snapshot, taskID, pending)
+		result.errs = s.recordOrphanReapCancelledMidPhase(snapshot, taskID, pending)
+		return result
 	}
 	if len(pending) == 0 {
-		return nil
+		return result
 	}
 	graceTimer := time.NewTimer(orphanReapGraceDelay)
 	defer graceTimer.Stop()
 	select {
 	case <-ctx.Done():
-		return s.recordOrphanReapCancelledMidPhase(snapshot, taskID, pending)
+		result.errs = s.recordOrphanReapCancelledMidPhase(snapshot, taskID, pending)
+		return result
 	case <-graceTimer.C:
 	}
 
 	killPending := s.sendOrphanReapSigkills(ctx, taskID, pending, snapshot, verifier, signaler)
 	if ctx.Err() != nil {
-		return s.recordOrphanReapCancelledMidPhase(snapshot, taskID, killPending)
+		result.errs = s.recordOrphanReapCancelledMidPhase(snapshot, taskID, killPending)
+		return result
 	}
 	if len(killPending) == 0 {
-		return nil
+		return result
 	}
 	settleTimer := time.NewTimer(orphanReapSettleDelay)
 	defer settleTimer.Stop()
 	select {
 	case <-ctx.Done():
-		return s.recordOrphanReapCancelledMidPhase(snapshot, taskID, killPending)
+		result.errs = s.recordOrphanReapCancelledMidPhase(snapshot, taskID, killPending)
+		return result
 	case <-settleTimer.C:
 	}
 
-	return s.resolveOrphanReapSurvivors(ctx, taskID, killPending, snapshot, verifier, signaler)
+	result.errs = s.resolveOrphanReapSurvivors(ctx, taskID, killPending, snapshot, verifier, signaler)
+	return result
 }
 
 func (s *Service) sendOrphanReapSigterms(
@@ -122,9 +153,14 @@ func (s *Service) sendOrphanReapSigterms(
 	snapshot *taskResourceCleanupSnapshot,
 	verifier orphanReapVerifier,
 	signaler orphanReapSignaler,
-) []orphanReapPendingCandidate {
-	pending := make([]orphanReapPendingCandidate, 0, len(candidates))
-	for _, cand := range candidates {
+	maxCandidates int,
+) orphanReapSigtermResult {
+	result := orphanReapSigtermResult{
+		pending:   make([]orphanReapPendingCandidate, 0, len(candidates)),
+		attempted: make([]orphanReapCandidate, 0, len(candidates)),
+	}
+	signalCount := 0
+	for i, cand := range candidates {
 		if ctx.Err() != nil {
 			// Cancellation stops further signalling immediately; the
 			// caller's ctx.Done() branch records everyone already in
@@ -137,6 +173,14 @@ func (s *Service) sendOrphanReapSigterms(
 			s.recordOrphanReapSkip(snapshot, taskID, cand, "pid reused or moved before signal")
 			continue
 		}
+		if maxCandidates > 0 && signalCount >= maxCandidates {
+			// Candidates that fail the identity check do not consume the
+			// budget, so the check must happen before deciding that the
+			// remainder is deferred. A candidate that passes is the first
+			// one that would exceed the bound and is left for a later retry.
+			result.capReached = i < len(candidates)
+			break
+		}
 		if ctx.Err() != nil {
 			// Cancellation can land during the reverify call itself when the
 			// verifier is context-blind (e.g. Linux's bare os.Readlink);
@@ -144,13 +188,18 @@ func (s *Service) sendOrphanReapSigterms(
 			// follow a successful reverify.
 			break
 		}
+		result.attempted = append(result.attempted, cand)
 		if err := signaler.Signal(cand.PID, orphanReapSigterm); err != nil {
 			s.recordOrphanReapSignalError(snapshot, taskID, cand, "sigterm", err)
+			if !isOrphanReapPermissionDenied(err) {
+				signalCount++
+			}
 			continue
 		}
-		pending = append(pending, orphanReapPendingCandidate{orphanReapCandidate: cand, lastSignal: orphanReapLastSignalSigtermSent})
+		signalCount++
+		result.pending = append(result.pending, orphanReapPendingCandidate{orphanReapCandidate: cand, lastSignal: orphanReapLastSignalSigtermSent})
 	}
-	return pending
+	return result
 }
 
 func (s *Service) sendOrphanReapSigkills(
@@ -280,11 +329,28 @@ func orphanReapRecordFor(cand orphanReapCandidate, outcome, reason string) orpha
 }
 
 func orphanReapReverifyInsideRoot(ctx context.Context, verifier orphanReapVerifier, pid int, root string) bool {
+	// The root was absent when enumeration ran. Re-check it before and after
+	// reading the process cwd so a recreated workspace cannot admit a reused
+	// PID to either signal phase.
+	if !orphanReapRootIsAbsent(root) {
+		return false
+	}
 	verifyCtx, cancel := context.WithTimeout(ctx, orphanReapVerifyTimeout)
 	defer cancel()
 	cwd, err := verifier.VerifyCwd(verifyCtx, pid)
 	if err != nil || cwd == "" {
 		return false
 	}
+	if !orphanReapRootIsAbsent(root) {
+		return false
+	}
 	return orphanReapPathWithinRoot(root, cwd)
+}
+
+func orphanReapRootIsAbsent(root string) bool {
+	if root == "" {
+		return false
+	}
+	_, err := os.Lstat(root)
+	return errors.Is(err, os.ErrNotExist)
 }

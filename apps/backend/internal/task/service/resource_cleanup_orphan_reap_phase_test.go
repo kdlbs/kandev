@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"syscall"
 	"testing"
 	"testing/synctest"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	commonlogger "github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 )
 
 // fakeOrphanReapHostSnapshotter never touches the real host: it returns a
@@ -26,6 +28,23 @@ import (
 type fakeOrphanReapHostSnapshotter struct {
 	snap []hostProcess
 	err  error
+}
+
+type flakyOrphanReapSnapshotRepository struct {
+	repository.TaskResourceCleanupRepository
+	failures int
+	calls    int
+}
+
+func (r *flakyOrphanReapSnapshotRepository) UpdateClaimedTaskResourceCleanupSnapshot(
+	ctx context.Context, id string, attempt int, snapshot string,
+) (bool, error) {
+	r.calls++
+	if r.failures > 0 {
+		r.failures--
+		return false, errors.New("injected snapshot write failure")
+	}
+	return r.TaskResourceCleanupRepository.UpdateClaimedTaskResourceCleanupSnapshot(ctx, id, attempt, snapshot)
 }
 
 func (f fakeOrphanReapHostSnapshotter) Snapshot(context.Context) ([]hostProcess, error) {
@@ -222,6 +241,107 @@ func TestRunOrphanReapPhaseCapsCandidatesAt256(t *testing.T) {
 		}
 		if len(snapshot.OrphanReapRecords) != orphanReapMaxCandidates {
 			t.Fatalf("expected exactly %d candidate records, got %d", orphanReapMaxCandidates, len(snapshot.OrphanReapRecords))
+		}
+	})
+}
+
+// A permission-denied candidate is recorded as skipped and must not consume
+// the per-attempt signal bound. This lets the full 256 signalable candidates
+// proceed in the same attempt.
+func TestRunOrphanReapPhaseDoesNotCountPermissionDeniedAgainstCandidateCap(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		svc, _, _ := createTestService(t)
+		root := t.TempDir()
+		if err := os.RemoveAll(root); err != nil {
+			t.Fatalf("RemoveAll: %v", err)
+		}
+
+		const deniedPID = 1000
+		const total = orphanReapMaxCandidates + 1
+		snap := make([]hostProcess, 0, total)
+		verifier := newFakeOrphanReapVerifier()
+		signaler := newFakeOrphanReapSignaler()
+		for i := 0; i < total; i++ {
+			pid := deniedPID + i
+			cwd := filepath.Join(root, strconv.Itoa(i))
+			snap = append(snap, hostProcess{PID: pid, PPID: 1, Cwd: cwd, Command: "sh"})
+			verifier.set(pid, cwd)
+			signaler.setAlive(pid, true)
+		}
+		signaler.signalErr[deniedPID] = syscall.EPERM
+		signaler.onSignal = func(pid int, sig orphanReapSignal) {
+			if sig == orphanReapSigterm && pid != deniedPID {
+				signaler.setAlive(pid, false)
+			}
+		}
+		svc.orphanReapHostSnapshotter = fakeOrphanReapHostSnapshotter{snap: snap}
+		svc.orphanReapVerifier = verifier
+		svc.orphanReapSignaler = signaler
+
+		job := &models.TaskResourceCleanupJob{TaskID: "task-a"}
+		snapshot := &taskResourceCleanupSnapshot{OrphanReapRoots: []string{root}}
+		errs := svc.runOrphanReapPhase(context.Background(), job, snapshot)
+		for _, err := range errs {
+			if errors.Is(err, errOrphanReapCandidateBoundReached) {
+				t.Fatalf("permission-denied candidate must not consume cap, got %v", errs)
+			}
+		}
+		if len(snapshot.OrphanReapRecords) != total {
+			t.Fatalf("expected all %d candidates recorded, got %d", total, len(snapshot.OrphanReapRecords))
+		}
+		if sent := signaler.sentSignals(); len(sent) != total {
+			t.Fatalf("expected one SIGTERM attempt per candidate, got %d", len(sent))
+		}
+	})
+}
+
+// Pre-signal identity skips after the budget is full must still be inspected.
+// They do not consume the budget, and when no later candidate can be signalled
+// the phase must not report a deferred remainder.
+func TestRunOrphanReapPhaseDoesNotReportCapForTrailingPreSignalSkips(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		svc, _, _ := createTestService(t)
+		root := t.TempDir()
+		if err := os.RemoveAll(root); err != nil {
+			t.Fatalf("RemoveAll: %v", err)
+		}
+
+		const trailingSkips = 10
+		const total = orphanReapMaxCandidates + trailingSkips
+		snap := make([]hostProcess, 0, total)
+		verifier := newFakeOrphanReapVerifier()
+		signaler := newFakeOrphanReapSignaler()
+		for i := 0; i < total; i++ {
+			pid := 2000 + i
+			cwd := filepath.Join(root, strconv.Itoa(i))
+			snap = append(snap, hostProcess{PID: pid, PPID: 1, Cwd: cwd, Command: "sh"})
+			if i < orphanReapMaxCandidates {
+				verifier.set(pid, cwd)
+			}
+			signaler.setAlive(pid, true)
+		}
+		signaler.onSignal = func(pid int, sig orphanReapSignal) {
+			if sig == orphanReapSigterm {
+				signaler.setAlive(pid, false)
+			}
+		}
+		svc.orphanReapHostSnapshotter = fakeOrphanReapHostSnapshotter{snap: snap}
+		svc.orphanReapVerifier = verifier
+		svc.orphanReapSignaler = signaler
+
+		job := &models.TaskResourceCleanupJob{TaskID: "task-trailing-skips"}
+		snapshot := &taskResourceCleanupSnapshot{OrphanReapRoots: []string{root}}
+		errs := svc.runOrphanReapPhase(context.Background(), job, snapshot)
+		for _, err := range errs {
+			if errors.Is(err, errOrphanReapCandidateBoundReached) {
+				t.Fatalf("trailing pre-signal skips must not report a cap, got %v", errs)
+			}
+		}
+		if len(snapshot.OrphanReapRecords) != total {
+			t.Fatalf("expected all %d candidates recorded, got %d", total, len(snapshot.OrphanReapRecords))
+		}
+		if sent := signaler.sentSignals(); len(sent) != orphanReapMaxCandidates {
+			t.Fatalf("expected exactly %d SIGTERM attempts, got %d", orphanReapMaxCandidates, len(sent))
 		}
 	})
 }
@@ -429,7 +549,9 @@ func TestPersistOrphanReapProgressBestEffortPersistsSnapshot(t *testing.T) {
 		}},
 		OrphanReapSkips: []orphanReapSkipRecord{{Root: "/tasks/" + taskID, Reason: "reap root exists again at reap time"}},
 	}
-	svc.persistOrphanReapProgressBestEffort(ctx, running, snapshot)
+	if err := svc.persistOrphanReapProgressBestEffort(ctx, running, snapshot); err != nil {
+		t.Fatalf("persistOrphanReapProgressBestEffort: %v", err)
+	}
 
 	persisted, err := repo.GetTaskResourceCleanupJob(ctx, job.ID)
 	if err != nil {
@@ -452,6 +574,59 @@ func TestPersistOrphanReapProgressBestEffortPersistsSnapshot(t *testing.T) {
 	}
 	if len(decoded.OrphanReapSkips) != 1 {
 		t.Fatalf("expected persisted skips to survive, got %+v", decoded.OrphanReapSkips)
+	}
+}
+
+func TestPersistOrphanReapProgressBestEffortRetriesWriteFailure(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	const taskID = "task-persist-progress-retry"
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: "ws-orphan-reap", Title: taskID}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	initial, err := json.Marshal(taskResourceCleanupSnapshot{})
+	if err != nil {
+		t.Fatalf("marshal initial snapshot: %v", err)
+	}
+	job := &models.TaskResourceCleanupJob{
+		ID: "job-persist-progress-retry", OperationID: "delete:" + taskID, TaskID: taskID,
+		Trigger: models.TaskResourceCleanupTriggerDelete,
+		State:   models.TaskResourceCleanupStatePending, ResourceSnapshot: string(initial),
+	}
+	if err := repo.CreateTaskResourceCleanupJob(ctx, job); err != nil {
+		t.Fatalf("CreateTaskResourceCleanupJob: %v", err)
+	}
+	claimed, err := repo.MarkTaskResourceCleanupJobRunning(ctx, job.ID)
+	if err != nil || !claimed {
+		t.Fatalf("MarkTaskResourceCleanupJobRunning: claimed=%v err=%v", claimed, err)
+	}
+	running, err := repo.GetTaskResourceCleanupJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("GetTaskResourceCleanupJob: %v", err)
+	}
+
+	flaky := &flakyOrphanReapSnapshotRepository{
+		TaskResourceCleanupRepository: repo,
+		failures:                      1,
+	}
+	svc.resourceCleanups = flaky
+	snapshot := &taskResourceCleanupSnapshot{OrphanReapRoots: []string{"/tasks/" + taskID}}
+	if err := svc.persistOrphanReapProgressBestEffort(ctx, running, snapshot); err != nil {
+		t.Fatalf("persistOrphanReapProgressBestEffort: %v", err)
+	}
+	if flaky.calls != 2 {
+		t.Fatalf("expected one retry after the injected write failure, got %d calls", flaky.calls)
+	}
+	persisted, err := repo.GetTaskResourceCleanupJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("GetTaskResourceCleanupJob after retry: %v", err)
+	}
+	var decoded taskResourceCleanupSnapshot
+	if err := json.Unmarshal([]byte(persisted.ResourceSnapshot), &decoded); err != nil {
+		t.Fatalf("unmarshal persisted snapshot: %v", err)
+	}
+	if len(decoded.OrphanReapRoots) != 1 || decoded.OrphanReapRoots[0] != "/tasks/"+taskID {
+		t.Fatalf("expected retried write to persist roots, got %+v", decoded.OrphanReapRoots)
 	}
 }
 

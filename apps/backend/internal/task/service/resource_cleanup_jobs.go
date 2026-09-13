@@ -422,7 +422,10 @@ func (s *Service) processTaskResourceCleanupJob(ctx context.Context, id string) 
 	defer s.signalCleanupDoneForTest()
 	cleanupErr := s.executeTaskResourceCleanupJob(runCtx, job, &snapshot)
 	if cleanupErr != nil {
-		s.persistOrphanReapProgressBestEffort(runCtx, job, &snapshot)
+		if persistErr := s.persistOrphanReapProgressBestEffort(runCtx, job, &snapshot); persistErr != nil {
+			cleanupErr = errors.Join(cleanupErr,
+				fmt.Errorf("persist orphan reap progress: %w", persistErr))
+		}
 		return s.retryTaskResourceCleanupJob(runCtx, job, cleanupErr)
 	}
 	encoded, err := json.Marshal(snapshot)
@@ -433,7 +436,12 @@ func (s *Service) processTaskResourceCleanupJob(ctx context.Context, id string) 
 		runCtx, job.ID, job.Attempts, string(encoded),
 	)
 	if err != nil {
-		return s.retryTaskResourceCleanupJob(runCtx, job, fmt.Errorf("persist resource snapshot outcomes: %w", err))
+		persistErr := fmt.Errorf("persist resource snapshot outcomes: %w", err)
+		if progressErr := s.persistOrphanReapProgressBestEffort(runCtx, job, &snapshot); progressErr != nil {
+			persistErr = errors.Join(persistErr,
+				fmt.Errorf("persist orphan reap progress: %w", progressErr))
+		}
+		return s.retryTaskResourceCleanupJob(runCtx, job, persistErr)
 	}
 	if !updated {
 		return nil

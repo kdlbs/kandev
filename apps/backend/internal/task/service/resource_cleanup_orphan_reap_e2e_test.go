@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
@@ -21,6 +22,9 @@ import (
 // outcome record reflects it. The child is a process this test itself owns
 // (spawned here, killed by this pipeline), so signaling it is safe.
 func TestOrphanReapEndToEndKillsRealChildAfterQuickChatDirRemoval(t *testing.T) {
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" {
+		t.Skip("orphan reap end-to-end test requires lsof/ps and POSIX signals")
+	}
 	taskSvc, _, repo := createTestService(t)
 	ctx := context.Background()
 
