@@ -195,3 +195,12 @@ Desktop/phone screenshots were recaptured after the production change.
 
 PR CI and reviewer completion remain pending; local checks do not establish
 remote CI success.
+
+### Aggregate review follow-up
+
+CodeRabbit and Claude requested explicit create-path selection checks and a
+clearer historical verification record. The refresh tests now assert
+`selectedText`, `anchorFrom`, and `anchorTo` after each desktop/phone successful
+or failed read. All 12 cases pass; this strengthens coverage of existing
+behavior without a production change. The plan now labels the design-only
+validation as pre-implementation and records the subsequent code/test changes.

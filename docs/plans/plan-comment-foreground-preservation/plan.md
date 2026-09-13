@@ -144,12 +144,13 @@ actual Drawer and proves preserved text, reachable actions, and no overflow.
 
 ## Verification results
 
-Artifact checks passed on 2026-09-13: `python3 scripts/list-docs.py validate`
+Pre-implementation artifact checks passed on 2026-09-13: `python3 scripts/list-docs.py validate`
 (267 decisions, 868 specifications), `python3 scripts/lint-spec-files.py --all`,
 and `git diff --check`. The added design section was shortened to satisfy the
 existing size limit. Work-order requirement IDs, design paths, and existing
-verification inputs were checked; the new regression file is intentionally
-created during implementation. No production or permanent test files changed.
+verification inputs were checked. That design-only step changed no production
+or permanent tests; implementation subsequently changed the panel and added
+the refresh regression file.
 Implementation complete: 48 targeted tests across five files, TypeScript,
 zero-warning changed-file ESLint, and both full browser suites pass. Chromium
 passes 8 scenarios (2.1 minutes); Pixel 5 passes 8 (1.3 minutes), both with

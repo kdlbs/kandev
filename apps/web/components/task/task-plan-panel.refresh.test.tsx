@@ -178,6 +178,11 @@ for (const touch of [false, true]) {
           expect(mutation).toHaveBeenCalledWith(
             expect.objectContaining({ body: DRAFT, taskId: TASK, planId: plan.id }),
           );
+          if (!editing) {
+            expect(mutation).toHaveBeenCalledWith(
+              expect.objectContaining({ selectedText: "Plan step", anchorFrom: 1, anchorTo: 10 }),
+            );
+          }
           expect(screen.queryByPlaceholderText(PLACEHOLDER)).toBeNull();
         });
       }
