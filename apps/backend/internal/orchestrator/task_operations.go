@@ -662,6 +662,16 @@ func (s *Service) startCreatedSession(
 		return nil, errOfficeTaskStartRequiresScheduler
 	}
 
+	seam2Res, deferred, err := s.admitOrDeferSeam2(ctx, taskID, sessionID, originFromAutoStart(autoStart),
+		seam2StartCreatedPayload(sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext, options))
+	if err != nil {
+		return nil, err
+	}
+	if deferred {
+		return nil, nil
+	}
+	defer seam2Res.releaseIfNotConsumed()
+
 	// Reserve any pending "start it later" intent for the rest of this start.
 	// Taken here rather than just before the launch: everything below persists
 	// session state this start owns, and a gate that claims the intent during
@@ -769,6 +779,7 @@ func (s *Service) startCreatedSession(
 			return nil, fmt.Errorf("session was switched but no active session found: %w", activeErr)
 		}
 		session = activeSession
+		seam2Res.rekeyToSession(ctx, activeSession.ID)
 		sessionID = activeSession.ID
 		effectiveProfileID = activeSession.AgentProfileID
 	}
@@ -885,6 +896,7 @@ func (s *Service) startCreatedSession(
 
 	// The agent is running, so the reservation becomes a consumption.
 	launchClaim.consume(ctx)
+	seam2Res.consume()
 
 	// Ensure a PR watch exists so the poller can detect PRs created by the agent.
 	// PrepareTaskSession may have already created one, but if that goroutine failed
