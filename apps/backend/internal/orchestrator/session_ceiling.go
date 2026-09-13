@@ -346,6 +346,9 @@ func (c *sessionCeilingController) rekey(ctx context.Context, fromSessionID, toS
 // Where the session is not counted there is no slot to hand off and this is an
 // ordinary admission request.
 func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admissionRequest) admissionDecision {
+	if c == nil {
+		return admissionDecision{admitted: true}
+	}
 	origin := req.origin
 	if origin != launchOriginManual && origin != launchOriginAutomatic {
 		origin = launchOriginAutomatic

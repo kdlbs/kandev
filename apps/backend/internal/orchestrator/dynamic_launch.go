@@ -879,7 +879,7 @@ func (s *Service) runDetachedDynamicSuccessorLaunch(
 			zap.Error(ctx.Err()))
 		return
 	}
-	if s.relaunchDynamicTaskAfterFailure(ctx, data, executionProfileID) {
+	if s.relaunchDynamicTaskAfterFailure(ctx, data, executionProfileID, launchOriginAutomatic) {
 		return
 	}
 	if errors.Is(ctx.Err(), context.Canceled) {
@@ -943,6 +943,17 @@ func (s *Service) stopDynamicSuccessorWorkers() {
 // and final launch error surface so the UI never has to issue a second launch
 // request.
 func (s *Service) LaunchDynamicRouteAction(ctx context.Context, sessionID string) error {
+	return s.launchDynamicRouteAction(ctx, sessionID, launchOriginManual)
+}
+
+// LaunchDynamicRouteActionForRecovery is the unattended counterpart used by
+// the policy recovery timer sweep: same successor-launch transaction, but the
+// session was never routed by a human action in this call.
+func (s *Service) LaunchDynamicRouteActionForRecovery(ctx context.Context, sessionID string) error {
+	return s.launchDynamicRouteAction(ctx, sessionID, launchOriginAutomatic)
+}
+
+func (s *Service) launchDynamicRouteAction(ctx context.Context, sessionID string, origin launchOrigin) error {
 	if s.profileExecutionResolver == nil || sessionID == "" {
 		return errors.New("dynamic route action launch is not configured")
 	}
@@ -962,14 +973,15 @@ func (s *Service) LaunchDynamicRouteAction(ctx context.Context, sessionID string
 	succeeded := false
 	defer func() {
 		if !succeeded {
-			s.markDynamicRouteActionRequired(ctx, sessionID, session.RouteGeneration, "manual dynamic route action failed")
+			s.markDynamicRouteActionRequired(ctx, sessionID, session.RouteGeneration, string(origin)+" dynamic route action failed")
 		}
 	}()
 	task, err := s.scheduler.GetTask(ctx, session.TaskID)
 	if err != nil {
 		return err
 	}
-	input, err := s.buildDynamicContinuation(ctx, task, sessionID, "", "manual dynamic route action")
+	reason := string(origin) + " dynamic route action"
+	input, err := s.buildDynamicContinuation(ctx, task, sessionID, "", reason)
 	if err != nil {
 		return err
 	}
@@ -994,9 +1006,9 @@ func (s *Service) LaunchDynamicRouteAction(ctx context.Context, sessionID string
 		AgentExecutionID:   session.AgentExecutionID,
 		AgentProfileID:     session.AgentProfileID,
 		ExecutionProfileID: session.ExecutionProfileID,
-		ErrorMessage:       "manual dynamic route action",
+		ErrorMessage:       reason,
 	}
-	if !s.relaunchDynamicTaskAfterFailure(ctx, data, session.ExecutionProfileID) {
+	if !s.relaunchDynamicTaskAfterFailure(ctx, data, session.ExecutionProfileID, origin) {
 		return errors.New("dynamic route action successor launch failed")
 	}
 	succeeded = true
@@ -1025,7 +1037,19 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 	ctx context.Context,
 	data watcher.AgentEventData,
 	executionProfileID string,
+	origin launchOrigin,
 ) (succeeded bool) {
+	seam5Res, deferredLaunch, err := s.admitOrDeferSeam5(ctx, data.TaskID, origin, seam5DynamicRelaunchPayload(data, executionProfileID))
+	if err != nil {
+		s.logger.Zap().Error("could not persist a ceiling deferral; the dynamic relaunch could not be admitted or recorded",
+			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
+		return false
+	}
+	if deferredLaunch {
+		return false
+	}
+	defer seam5Res.releaseIfNotConsumed()
+
 	defer func() {
 		if succeeded || s.profileExecutionResolver == nil || data.SessionID == "" {
 			return
@@ -1099,6 +1123,9 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 			ctx, data.TaskID, data.SessionID, session.AgentProfileID,
 			prompt.text, true, prompt.planMode, true, prompt.attachments, nil,
 		)
+		if err == nil {
+			seam5Res.consume()
+		}
 		return err == nil
 	}
 	_, err = s.launchPreparedSessionWithDynamicFallback(ctx, task, data.SessionID, executor.LaunchOptions{
@@ -1109,6 +1136,9 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 		StartAgent:           true,
 		McpMode:              executor.McpModeOffice,
 	})
+	if err == nil {
+		seam5Res.consume()
+	}
 	return err == nil
 }
 
