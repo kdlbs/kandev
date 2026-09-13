@@ -83,7 +83,11 @@ type CreateTaskRequest struct {
 	Repositories   []TaskRepositoryInput  `json:"repositories,omitempty"`
 	Position       int                    `json:"position"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
-	DeferredLaunch map[string]interface{} `json:"deferred_launch,omitempty"`
+	// TrustedHandoffMetadata allows the handoff application path to persist its
+	// server-authored provenance fields. It is internal-only and never decoded
+	// from a request body; ordinary task creation cannot forge those fields.
+	TrustedHandoffMetadata bool                   `json:"-"`
+	DeferredLaunch         map[string]interface{} `json:"deferred_launch,omitempty"`
 	// RecordAgentProfileRecentUse opts this deferred launch into task_create
 	// profile-history attribution. Only the authenticated HTTP/WS selector
 	// surfaces set it; programmatic callers such as MCP must leave it false.

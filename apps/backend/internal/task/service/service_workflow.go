@@ -384,9 +384,10 @@ func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata ma
 		task.Metadata = make(map[string]interface{})
 	}
 	for k, v := range metadata {
-		// Deferred launch ownership is server-managed. Preserve it even if a
-		// future metadata endpoint forwards the whole request map here.
-		if k == models.MetaKeyDeferredLaunch || k == models.MetaKeyStepHandoffCarry {
+		// Lifecycle and handoff provenance are server-managed. Preserve them even
+		// if a future metadata endpoint forwards the whole request map here.
+		if k == models.MetaKeyDeferredLaunch || k == models.MetaKeyStepHandoffCarry ||
+			k == models.MetaKeyHandoffSource || k == models.MetaKeyHandoffs {
 			continue
 		}
 		task.Metadata[k] = v
