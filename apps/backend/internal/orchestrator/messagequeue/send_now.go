@@ -65,6 +65,22 @@ type PendingSendNowClaim struct {
 	Accepted bool
 }
 
+// HasDurablePlanComment reports whether any source needs its caller identity
+// preserved through transcript persistence. The combined dispatch inherits
+// only the oldest source's top-level metadata, so source inspection is
+// required when Send All folds a later plan-comment admission into it.
+func (c *SendNowClaim) HasDurablePlanComment() bool {
+	if c == nil {
+		return false
+	}
+	for i := range c.Sources {
+		if c.Sources[i].IsDurablePlanComment() {
+			return true
+		}
+	}
+	return c.Dispatch.IsDurablePlanComment()
+}
+
 func sendNowSourceGenerationChanged(claim *SendNowClaim, source QueuedMessage, current int64) bool {
 	if claim == nil || source.TaskID == "" || claim.SourceGenerations == nil {
 		return false
@@ -153,7 +169,7 @@ func validateSendNowSnapshot(selected []*QueuedMessage, expected []QueuedMessage
 	return nil
 }
 
-func bindSendNowLifecycleReservations(
+func bindSendNowDeliveryReservations(
 	sources []QueuedMessage,
 	identity QueueSessionIdentity,
 ) {
@@ -161,10 +177,11 @@ func bindSendNowLifecycleReservations(
 		return
 	}
 	for index := range sources {
-		if !sources[index].IsDurableLifecycle() {
+		if !sources[index].IsDurableDelivery() {
 			continue
 		}
-		sources[index].reservedLifecycleDelivery = true
+		sources[index].reservedDelivery = true
+		sources[index].reservedLifecycleDelivery = sources[index].IsDurableLifecycle()
 		sources[index].reservationIdentity = identity
 	}
 }
@@ -216,6 +233,12 @@ func BuildSendNowEnvelope(entries []QueuedMessage) (*QueuedMessage, error) {
 
 	oldest := entries[0]
 	metadata := copyMessageMetadata(oldest.Metadata, 2)
+	// A source-level transcript receipt applies only to that source payload.
+	// The combined Send Now envelope gets its own deterministic receipt after
+	// every selected source has been claimed.
+	delete(metadata, metadataUserMessageRecorded)
+	delete(metadata, MetadataDeliveryAttempted)
+	delete(metadata, MetadataDurableTranscriptMessageID)
 	if len(references) == 0 {
 		delete(metadata, MetadataEntityReferences)
 	} else {

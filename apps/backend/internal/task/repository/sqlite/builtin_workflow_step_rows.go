@@ -15,7 +15,7 @@ type systemWorkflowStepRow struct{ stepID, workflowID string }
 // transactional per-row retry loops never run with an open read cursor over
 // the same table.
 func (r *Repository) findSystemOwnedWorkflowSteps(templateID, stepName string) ([]systemWorkflowStepRow, error) {
-	rows, err := r.db.Query(r.db.Rebind(`
+	rows, err := r.db.QueryContext(r.migrationContext(), r.db.Rebind(`
 		SELECT ws.id, ws.workflow_id FROM workflow_steps ws
 		JOIN workflows w ON w.id = ws.workflow_id
 		WHERE w.is_system = 1 AND w.workflow_template_id = ? AND ws.name = ?

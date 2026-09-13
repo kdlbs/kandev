@@ -404,6 +404,7 @@
   "terminal": "Terminal",
   "todos": "Tarefas por fazer",
   "taskLoading": "A carregar a tarefa...",
+  "taskRemovalInProgress": "A sair desta tarefa...",
   "tasks": "Tarefas",
   "taskStateBlocked": "Bloqueada",
   "taskStateCancelled": "Cancelada",

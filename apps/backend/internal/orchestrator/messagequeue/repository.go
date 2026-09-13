@@ -89,6 +89,9 @@ type Repository interface {
 	// sessions. It is used by startup recovery to remove rows whose owning
 	// workflow reservation was not committed before a process crash.
 	ListDurableLifecycleEntries(ctx context.Context) ([]QueuedMessage, error)
+	// ListDurableDeliveryEntries also includes caller-identified plan-comment
+	// receipts used for crash-safe transcript and prompt delivery.
+	ListDurableDeliveryEntries(ctx context.Context) ([]QueuedMessage, error)
 
 	// CountBySession returns the number of entries for a session.
 	CountBySession(ctx context.Context, sessionID string) (int, error)
@@ -149,13 +152,20 @@ type Repository interface {
 	// AcknowledgeByID is an internal dispatch operation that removes a reserved
 	// entry regardless of its server-owned queued_by identity.
 	AcknowledgeByID(ctx context.Context, sessionID, entryID string) error
-	AcknowledgeByIDForSession(ctx context.Context, identity QueueSessionIdentity, entryID string) error
+	AcknowledgeByIDForSession(ctx context.Context, identity QueueSessionIdentity, msg *QueuedMessage) error
+	// MarkDeliveryAttemptedForSession atomically crosses the at-most-once
+	// boundary for every supplied token-owned durable receipt.
+	MarkDeliveryAttemptedForSession(
+		ctx context.Context,
+		identity QueueSessionIdentity,
+		messages []QueuedMessage,
+	) error
 	// ReleaseDeliveryReservationForSession makes an unaccepted retained entry
 	// visible again without changing its FIFO position.
 	ReleaseDeliveryReservationForSession(
 		ctx context.Context,
 		identity QueueSessionIdentity,
-		entryID string,
+		msg *QueuedMessage,
 	) error
 
 	// TakeByID atomically returns and deletes the entry identified by entryID
@@ -255,7 +265,7 @@ type Repository interface {
 	// DiscardLifecycleReservation removes a durable in-flight row only when its
 	// persisted reservation owner matches identity. It deliberately does not
 	// require identity to remain current: stale workers use it after replacement.
-	DiscardLifecycleReservation(ctx context.Context, identity QueueSessionIdentity, entryID string) error
+	DiscardLifecycleReservation(ctx context.Context, identity QueueSessionIdentity, msg *QueuedMessage) error
 
 	// PurgeSession removes every queue row for a deleted session, including
 	// durable lifecycle rows reserved in flight, and its pending workflow move.

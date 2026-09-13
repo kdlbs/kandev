@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/office/shared"
+	"github.com/kandev/kandev/internal/runs/dedupkeys"
 	"github.com/kandev/kandev/internal/workflow/engine"
 )
 
@@ -291,6 +292,64 @@ func TestTaskCreated_WakesAssigneeFromStoredRunner(t *testing.T) {
 		}
 	}
 	t.Fatalf("expected task_assigned run for worker-created, got %#v", runs)
+}
+
+func TestTaskCreated_WithAssignmentIdentity_UsesGenerationKey(t *testing.T) {
+	svc, eb := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "worker-created-keyed")
+	insertTestTask(t, svc, "task-created-keyed", "ws-1")
+	svc.ExecSQL(t, `UPDATE tasks SET project_id = 'office-project', assignment_generation = 1 WHERE id = ?`, "task-created-keyed")
+	setTestTaskAssignee(t, svc, "task-created-keyed", "worker-created-keyed")
+
+	event := bus.NewEvent(events.TaskCreated, "task-service", map[string]any{
+		"task_id":                   "task-created-keyed",
+		"assignee_agent_profile_id": "worker-created-keyed",
+		"assignment_generation":     int64(1),
+	})
+	if err := eb.Publish(ctx, events.TaskCreated, event); err != nil {
+		t.Fatalf("publish task created event: %v", err)
+	}
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list creation runs: %v", err)
+	}
+	wantKey := dedupkeys.AssignmentKey("task-created-keyed", "worker-created-keyed", 1)
+	var creationRunCount int
+	for _, run := range runs {
+		if run.AgentProfileID != "worker-created-keyed" || run.Reason != service.RunReasonTaskAssigned {
+			continue
+		}
+		creationRunCount++
+		if run.IdempotencyKey == nil || *run.IdempotencyKey != wantKey {
+			t.Fatalf("creation run key = %v, want %q", run.IdempotencyKey, wantKey)
+		}
+	}
+	if creationRunCount != 1 {
+		t.Fatalf("creation event queued %d runs, want 1", creationRunCount)
+	}
+
+	// A replay after the first run is claimed must still use the same durable
+	// key and avoid inserting a second run.
+	svc.ExecSQL(t, `UPDATE runs SET status = 'completed' WHERE reason = ? AND idempotency_key = ?`, service.RunReasonTaskAssigned, wantKey)
+	if err := eb.Publish(ctx, events.TaskCreated, event); err != nil {
+		t.Fatalf("replay task created event: %v", err)
+	}
+	allRuns, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list replay runs: %v", err)
+	}
+	var totalTaskAssigned int
+	for _, run := range allRuns {
+		if run.AgentProfileID == "worker-created-keyed" && run.Reason == service.RunReasonTaskAssigned {
+			totalTaskAssigned++
+		}
+	}
+	if totalTaskAssigned != 1 {
+		t.Fatalf("replayed creation event queued %d runs, want 1", totalTaskAssigned)
+	}
 }
 
 func TestTaskCreated_NoopWhenNoStoredRunner(t *testing.T) {

@@ -254,6 +254,26 @@ describe("useTaskSessions live reconciliation", () => {
 });
 
 describe("useTaskSessions refreshes", () => {
+  it("retries an unloaded failed session list when the WebSocket reconnects", async () => {
+    mockState.connection.status = "disconnected";
+    mockState.taskSessionsByTask.loadedByTaskId[TASK_ID] = false;
+    mockState.taskSessionsByTask.errorByTaskId[TASK_ID] = SERVICE_UNAVAILABLE;
+    apiMock.listTaskSessions.mockResolvedValueOnce({ sessions: [session("recovered")] });
+
+    const { rerender } = renderHook(() => useTaskSessions(TASK_ID));
+    await act(async () => {});
+    expect(apiMock.listTaskSessions).not.toHaveBeenCalled();
+
+    mockState.connection.status = "connected";
+    rerender();
+
+    await waitFor(() =>
+      expect(apiMock.listTaskSessions).toHaveBeenCalledWith(TASK_ID, {
+        cache: "no-store",
+      }),
+    );
+  });
+
   it("refetches a loaded session list when the WebSocket reconnects", async () => {
     mockState.connection.status = "disconnected";
     mockState.taskSessionsByTask.itemsByTaskId[TASK_ID] = [session("old", "RUNNING")];

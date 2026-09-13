@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/gitcredentials"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -82,6 +83,33 @@ func TestResumeSession_PropagatesTaskEnvironmentPersistenceFailure(t *testing.T)
 	_, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], false)
 	if !errors.Is(err, persistErr) {
 		t.Fatalf("ResumeSession error = %v, want %v", err, persistErr)
+	}
+}
+
+func TestResumeSession_BlocksWorktreeRecoveryBeforeStateChangeOrLaunch(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	agentManager := &mockAgentManager{}
+	exec := newTestExecutor(t, agentManager, repo)
+	recoveryErr := &worktree.WorktreeRecoveryError{
+		TaskID: "task-1", Checkout: "/tasks/task-1/repo", Reason: "recovery is required",
+	}
+	exec.SetWorktreeRecoveryAdmission(func(_ context.Context, taskID string) error {
+		if taskID != "task-1" {
+			t.Fatalf("admission task ID = %q, want task-1", taskID)
+		}
+		return recoveryErr
+	})
+
+	_, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true)
+	if !errors.Is(err, worktree.ErrWorktreeCorrupted) {
+		t.Fatalf("ResumeSession() error = %v, want worktree recovery error", err)
+	}
+	if state := repo.sessions["sess-1"].State; state != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state = %s, want unchanged waiting state", state)
+	}
+	if agentManager.launchAgentCallCount != 0 {
+		t.Fatalf("LaunchAgent calls = %d, want 0", agentManager.launchAgentCallCount)
 	}
 }
 

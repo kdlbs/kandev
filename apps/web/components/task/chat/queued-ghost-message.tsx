@@ -43,7 +43,10 @@ import { AttachmentRow, type QueuedAttachment } from "@/components/task/chat/que
 import { QueuedGhostEditView } from "@/components/task/chat/queued-ghost-edit-view";
 import { t } from "@/lib/i18n";
 import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
-import { useQueuedGhostStartEdit } from "@/hooks/use-queue-edit-protection";
+import {
+  useQueuedGhostLeaseLoss,
+  useQueuedGhostStartEdit,
+} from "@/hooks/use-queue-edit-protection";
 
 /** Imperative handle for the ghost row, used by chat input "edit last queued" affordance. */
 export type QueuedGhostMessageHandle = {
@@ -74,6 +77,14 @@ function senderKindOf(entry: QueuedMessage): SenderKind {
  * backend rows and are never mergeable. */
 export function canMergeEntry(entry: QueuedMessage): boolean {
   if (entry.queued_by === "server") return false;
+  if (
+    entry.metadata &&
+    ("plan_comment_refs" in entry.metadata ||
+      "plan_comment_request_fingerprint" in entry.metadata ||
+      "client_queue_id" in entry.metadata)
+  ) {
+    return false;
+  }
   const kind = senderKindOf(entry);
   return kind === "user" || kind === "agent";
 }
@@ -555,23 +566,6 @@ function useQueuedGhostCancel({
     setEditing(false);
     await onEditComplete?.(editToken);
   }, [editTokenRef, entryContent, onEditComplete, setEditing, setValue]);
-}
-
-function useQueuedGhostLeaseLoss(
-  editing: boolean,
-  editLeaseActive: boolean,
-  entryContent: string,
-  setValue: (value: string) => void,
-  setEditing: (editing: boolean) => void,
-): void {
-  useEffect(() => {
-    if (!editing) setValue(entryContent);
-  }, [editing, entryContent, setValue]);
-  useEffect(() => {
-    if (!editing || editLeaseActive) return;
-    setValue(entryContent);
-    setEditing(false);
-  }, [editLeaseActive, editing, entryContent, setEditing, setValue]);
 }
 
 function useQueuedGhostMetadata(entry: QueuedMessage, canMerge: boolean) {

@@ -414,6 +414,7 @@
   "terminal": "Terminal",
   "todos": "Todos",
   "taskLoading": "Loading task...",
+  "taskRemovalInProgress": "Leaving this task...",
   "tasks": "Tasks",
   "taskStateBlocked": "Blocked",
   "taskStateCancelled": "Cancelled",

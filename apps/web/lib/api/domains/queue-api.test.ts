@@ -1,7 +1,9 @@
+/* eslint-disable sonarjs/no-duplicate-string -- Wire action and fixture IDs are intentionally repeated for readability. */
 import { beforeEach, describe, it, expect, vi } from "vitest";
 import type { EntityReference } from "@/lib/types/entity-reference";
 
 const getWebSocketClientMock = vi.hoisted(() => vi.fn());
+const QUEUE_ADD_ACTION = "message.queue.add";
 const SESSION_ID = `session-1`;
 const INCARNATION_ID = `incarnation-1`;
 
@@ -155,7 +157,7 @@ describe("queue reference payloads", () => {
       entity_references: [reference],
     });
 
-    expect(request).toHaveBeenCalledWith("message.queue.add", {
+    expect(request).toHaveBeenCalledWith(QUEUE_ADD_ACTION, {
       session_id: SESSION_ID,
       session_incarnation_id: INCARNATION_ID,
       task_id: "task-1",
@@ -176,7 +178,7 @@ describe("queue reference payloads", () => {
       context_files: [{ path: "src/components", name: "components", is_directory: true }],
     });
 
-    expect(request).toHaveBeenCalledWith("message.queue.add", {
+    expect(request).toHaveBeenCalledWith(QUEUE_ADD_ACTION, {
       session_id: SESSION_ID,
       session_incarnation_id: INCARNATION_ID,
       task_id: "task-1",
@@ -184,7 +186,9 @@ describe("queue reference payloads", () => {
       context_files: [{ path: "src/components", name: "components", is_directory: true }],
     });
   });
+});
 
+describe("queued message reference updates", () => {
   it("sends an explicit empty reference array when replacing a queued message", async () => {
     const request = vi.fn().mockResolvedValue({ entry_id: "q-1" });
     getWebSocketClientMock.mockReturnValue({ request });

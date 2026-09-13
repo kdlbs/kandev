@@ -118,9 +118,9 @@ its own invalidation, and its own tests, to buy nothing a user can see.
 **Ordering.** The entry order is fixed by the shared builder, so parity is
 structural rather than asserted per surface.
 
-For a normal resolved row, the top-level order is Edit, Priority, Move to, Send
-to workflow, plugin primary actions, Link, Archive, Detach from parent, a
-separator, and Delete. The Priority submenu uses the row's current priority and
+For a normal resolved row, the top-level order and dividers follow
+[Task menu grouping](task-menu-grouping.md).
+The Priority submenu uses the row's current priority and
 the same update hook as the card. If the card builder omits an entry because its
 callback is unavailable, the new surface omits that entry too.
 

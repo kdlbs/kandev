@@ -163,7 +163,7 @@ func TestAcceptedOrdinaryDispatchFailureAcknowledgesRecoveryClaim(t *testing.T) 
 	}
 	service := &Service{logger: testLogger(), messageQueue: queue}
 	service.finishQueuedMessageExecution(
-		ctx, "session-1", "session-1", reserved, nil, false, false,
+		ctx, "session-1", "session-1", reserved, nil, false, false, false,
 		&acceptedPromptDispatchError{err: errors.New("durable acceptance publication failed")},
 	)
 	pending, err := queue.ListPendingQueueDispatches(ctx)

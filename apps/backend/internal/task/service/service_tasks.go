@@ -441,7 +441,10 @@ func (s *Service) finalizeCreatedTask(ctx context.Context, prepared *preparedTas
 	}
 
 	s.publishTaskEventWithExtra(ctx, events.TaskCreated, task, nil,
-		map[string]interface{}{"assignment_generation": assignmentGenerationForCreate(task)})
+		map[string]interface{}{
+			"assignee_agent_profile_id": task.AssigneeAgentProfileID,
+			"assignment_generation":     assignmentGenerationForCreate(task),
+		})
 	s.pullTasksFromNewFeederWork(ctx, task.WorkflowID, task.WorkflowStepID)
 	if refreshed, err := s.tasks.GetTask(ctx, task.ID); err != nil {
 		s.logger.Warn("failed to refresh task after feeder pull", zap.String("task_id", task.ID), zap.Error(err))

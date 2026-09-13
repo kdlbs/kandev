@@ -13,6 +13,18 @@ type recordingTerminator struct {
 	calls []termCall
 }
 
+type recordingFailureNotifier struct {
+	calls []struct {
+		taskID, agentID string
+	}
+}
+
+func (r *recordingFailureNotifier) OnAssigneeChanged(_ context.Context, taskID, agentID string) {
+	r.calls = append(r.calls, struct {
+		taskID, agentID string
+	}{taskID: taskID, agentID: agentID})
+}
+
 type termCall struct {
 	taskID, agentID, reason string
 }
@@ -85,7 +97,9 @@ func (r *recordingReactivity) ApplyTaskMutation(_ context.Context, _ string, _ s
 func TestSetTaskAssignee_TerminatesPrevSession(t *testing.T) {
 	deps := newTestDeps(t)
 	rt := &recordingTerminator{}
+	fn := &recordingFailureNotifier{}
 	deps.svc.SetSessionTerminator(rt)
+	deps.svc.SetFailureNotifier(fn)
 	deps.svc.SetReactivityApplier(&recordingReactivity{result: &dashboard.TaskReactivityResult{}})
 
 	insertTestTask(t, deps.db, "task-r", "ws-r", "Reassign", "todo", 2)
@@ -105,6 +119,9 @@ func TestSetTaskAssignee_TerminatesPrevSession(t *testing.T) {
 	if got.taskID != "task-r" || got.agentID != "agent-prev" {
 		t.Errorf("term call: got %+v", got)
 	}
+	if len(fn.calls) != 1 || fn.calls[0].taskID != "task-r" || fn.calls[0].agentID != "agent-prev" {
+		t.Fatalf("expected prior-assignee failure notification, got %+v", fn.calls)
+	}
 }
 
 // TestSetTaskAssignee_SameAgent_DoesNotTerminateSession is the regression
@@ -116,7 +133,9 @@ func TestSetTaskAssignee_TerminatesPrevSession(t *testing.T) {
 func TestSetTaskAssignee_SameAgent_DoesNotTerminateSession(t *testing.T) {
 	deps := newTestDeps(t)
 	rt := &recordingTerminator{}
+	fn := &recordingFailureNotifier{}
 	deps.svc.SetSessionTerminator(rt)
+	deps.svc.SetFailureNotifier(fn)
 	deps.svc.SetReactivityApplier(&recordingReactivity{result: &dashboard.TaskReactivityResult{}})
 
 	insertTestTask(t, deps.db, "task-same", "ws-r", "Reassign", "todo", 2)
@@ -130,5 +149,8 @@ func TestSetTaskAssignee_SameAgent_DoesNotTerminateSession(t *testing.T) {
 
 	if len(rt.calls) != 0 {
 		t.Fatalf("same-agent reassignment must not terminate the agent's own session, got %d calls (%+v)", len(rt.calls), rt.calls)
+	}
+	if len(fn.calls) != 0 {
+		t.Fatalf("same-agent reassignment must not dismiss its failure inbox entry, got %+v", fn.calls)
 	}
 }

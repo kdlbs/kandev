@@ -12,6 +12,7 @@ import type { TaskMentionData } from "./use-inline-mention";
 import type { EntityReference } from "@/lib/types/entity-reference";
 
 const getWebSocketClientMock = vi.hoisted(() => vi.fn());
+const listTaskSessionsMock = vi.hoisted(() => vi.fn());
 const queueMock = vi.hoisted(() => vi.fn());
 const addMessageMock = vi.hoisted(() => vi.fn());
 const TASK_ID = "task-1";
@@ -23,12 +24,17 @@ const CONTEXT_DIRECTORY_PATH = "src/components";
 const storeState = vi.hoisted(() => ({
   current: {
     taskSessions: { items: {} as Record<string, unknown> },
+    queue: { metaBySessionId: {} as Record<string, { count: number }> },
     addMessage: addMessageMock,
   },
 }));
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: getWebSocketClientMock,
+}));
+
+vi.mock("@/lib/api/domains/session-api", () => ({
+  listTaskSessions: listTaskSessionsMock,
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -40,6 +46,11 @@ vi.mock("./domains/session/use-queue", () => ({
 }));
 const IMPROVE_HARNESS_PROMPT = "improve-harness";
 const IMPROVE_HARNESS_CONTENT = "Review this session for durable harness improvements.";
+
+beforeEach(() => {
+  queueMock.mockResolvedValue(true);
+  listTaskSessionsMock.mockResolvedValue({ sessions: [{ id: SESSION_ID }], total: 1 });
+});
 
 function makeState(overrides: Partial<AppState> = {}): AppState {
   const base = {

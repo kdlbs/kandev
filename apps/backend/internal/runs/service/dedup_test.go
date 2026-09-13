@@ -50,13 +50,16 @@ func TestQueueOutcomeNone_IsZeroValue(t *testing.T) {
 }
 
 func TestReportWindowedDedup(t *testing.T) {
-	reason := "test_windowed_" + t.Name()
+	reason := "agent-supplied-windowed-" + t.Name()
 	outcome := runsservice.ReportWindowedDedup(runsservice.QueueSourceRuns, reason, "some-key")
 	if outcome != runsservice.QueueOutcomeDeduped {
 		t.Fatalf("outcome = %q, want deduped", outcome)
 	}
-	if !counterHasLabel(t, "office_run_dedup_total", "reason="+reason, "kind=windowed", "queue=runs") {
-		t.Fatal("expected office_run_dedup_total to carry a windowed/runs entry for this reason")
+	if !counterHasLabel(t, "office_run_dedup_total", "reason=custom", "kind=windowed", "queue=runs") {
+		t.Fatal("expected custom reasons to share the bounded windowed/runs entry")
+	}
+	if counterHasLabel(t, "office_run_dedup_total", "reason="+reason) {
+		t.Fatal("agent-supplied reason must not create its own metric series")
 	}
 }
 
@@ -71,7 +74,7 @@ func TestReportInsertResult_NilError(t *testing.T) {
 }
 
 func TestReportInsertResult_UniqueViolation(t *testing.T) {
-	reason := "test_durable_" + t.Name()
+	reason := "agent-supplied-durable-" + t.Name()
 	violation := errors.New("UNIQUE constraint failed: runs.idempotency_key")
 	outcome, err := runsservice.ReportInsertResult(runsservice.QueueSourceRuns, reason, "k", "agent-1", violation)
 	if err != nil {
@@ -80,8 +83,11 @@ func TestReportInsertResult_UniqueViolation(t *testing.T) {
 	if outcome != runsservice.QueueOutcomeDeduped {
 		t.Fatalf("outcome = %q, want deduped", outcome)
 	}
-	if !counterHasLabel(t, "office_run_dedup_total", "reason="+reason, "kind=durable", "queue=runs") {
-		t.Fatal("expected office_run_dedup_total to carry a durable/runs entry for this reason")
+	if !counterHasLabel(t, "office_run_dedup_total", "reason=custom", "kind=durable", "queue=runs") {
+		t.Fatal("expected custom reasons to share the bounded durable/runs entry")
+	}
+	if counterHasLabel(t, "office_run_dedup_total", "reason="+reason) {
+		t.Fatal("agent-supplied reason must not create its own metric series")
 	}
 }
 
@@ -101,27 +107,34 @@ func TestReportInsertResult_OtherError_PassesThrough(t *testing.T) {
 }
 
 func TestReportDurableDedup_Wakeup(t *testing.T) {
-	reason := "test_wakeup_" + t.Name()
+	reason := "agent-supplied-wakeup-" + t.Name()
 	outcome := runsservice.ReportDurableDedup(runsservice.QueueSourceWakeup, reason, "k", "agent-1")
 	if outcome != runsservice.QueueOutcomeDeduped {
 		t.Fatalf("outcome = %q, want deduped", outcome)
 	}
-	if !counterHasLabel(t, "office_run_dedup_total", "reason="+reason, "kind=durable", "queue=wakeup") {
-		t.Fatal("expected office_run_dedup_total to carry a durable/wakeup entry for this reason")
+	if !counterHasLabel(t, "office_run_dedup_total", "reason=custom", "kind=durable", "queue=wakeup") {
+		t.Fatal("expected custom reasons to share the bounded durable/wakeup entry")
+	}
+	if counterHasLabel(t, "office_run_dedup_total", "reason="+reason) {
+		t.Fatal("agent-supplied reason must not create its own metric series")
 	}
 }
 
 func TestReportKeylessEnqueue_CountsBothCauses(t *testing.T) {
-	reasonUnresolved := "test_keyless_unresolved_" + t.Name()
-	reasonByDesign := "test_keyless_by_design_" + t.Name()
+	reasonUnresolved := "agent-supplied-keyless-unresolved-" + t.Name()
+	reasonByDesign := "agent-supplied-keyless-by-design-" + t.Name()
 
 	runsservice.ReportKeylessEnqueue(reasonUnresolved, runsservice.KeylessCauseUnresolved, "some_detail")
 	runsservice.ReportKeylessEnqueue(reasonByDesign, runsservice.KeylessCauseByDesign, "")
 
-	if !counterHasLabel(t, "office_run_dedup_keyless_total", "reason="+reasonUnresolved, "cause=unresolved") {
-		t.Fatal("expected office_run_dedup_keyless_total to carry the unresolved entry")
+	if !counterHasLabel(t, "office_run_dedup_keyless_total", "reason=custom", "cause=unresolved") {
+		t.Fatal("expected custom reasons to share the bounded unresolved entry")
 	}
-	if !counterHasLabel(t, "office_run_dedup_keyless_total", "reason="+reasonByDesign, "cause=by_design") {
-		t.Fatal("expected office_run_dedup_keyless_total to carry the by_design entry")
+	if !counterHasLabel(t, "office_run_dedup_keyless_total", "reason=custom", "cause=by_design") {
+		t.Fatal("expected custom reasons to share the bounded by_design entry")
+	}
+	if counterHasLabel(t, "office_run_dedup_keyless_total", "reason="+reasonUnresolved) ||
+		counterHasLabel(t, "office_run_dedup_keyless_total", "reason="+reasonByDesign) {
+		t.Fatal("agent-supplied reasons must not create their own keyless metric series")
 	}
 }

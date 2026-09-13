@@ -17,6 +17,7 @@ var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
 var ErrTaskNotFound = repoerrors.ErrTaskNotFound
 var ErrTaskParentMismatch = repoerrors.ErrTaskParentMismatch
 var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
+var ErrTaskPlanCommentsChanged = repoerrors.ErrTaskPlanCommentsChanged
 var ErrRepositoryNotFound = repoerrors.ErrRepositoryNotFound
 var ErrTaskEnvironmentNotFound = repoerrors.ErrTaskEnvironmentNotFound
 var ErrTaskEnvironmentOwnershipChanged = repoerrors.ErrTaskEnvironmentOwnershipChanged
@@ -286,6 +287,13 @@ type AttachmentRepository interface {
 	MarkExpiredMessageAttachments(ctx context.Context, now time.Time) ([]*models.TaskMessageAttachment, error)
 }
 
+// QueueAttachmentAdmissionRepository scopes provisional attachment claims to
+// one caller-owned queue admission so rollback can restore only that attempt.
+type QueueAttachmentAdmissionRepository interface {
+	ClaimQueuedMessageAttachments(ctx context.Context, ids []string, ownerID, workspaceID, taskID, sessionID, queueID string) error
+	RestoreQueuedMessageAttachments(ctx context.Context, ids []string, ownerID, taskID, sessionID, queueID string) error
+}
+
 // TurnRepository handles conversation turn persistence.
 type TurnRepository interface {
 	CreateTurn(ctx context.Context, turn *models.Turn) error
@@ -485,10 +493,10 @@ type RepositorySetRepository interface {
 	// ListRepositorySetIDsByRepository reports which sets hold a repository, so a
 	// caller can publish their new shape after a deletion prunes membership.
 	ListRepositorySetIDsByRepository(ctx context.Context, repositoryID string) ([]string, error)
-	// UpdateRepositorySet writes the set's fields and, when repositoryIDs is
+	// UpdateRepositorySet writes the set's fields and, when repositoryItems is
 	// non-nil, replaces its whole membership in the same transaction so the two
-	// cannot land apart. A nil repositoryIDs leaves membership untouched.
-	UpdateRepositorySet(ctx context.Context, set *models.RepositorySet, repositoryIDs *[]string) error
+	// cannot land apart. A nil repositoryItems leaves membership untouched.
+	UpdateRepositorySet(ctx context.Context, set *models.RepositorySet, repositoryItems *[]models.RepositorySetItem) error
 	DeleteRepositorySet(ctx context.Context, id string) (bool, error)
 }
 
@@ -596,6 +604,15 @@ type TaskEnvironmentRepository interface {
 	DeleteTaskEnvironmentReposByEnv(ctx context.Context, envID string) error
 }
 
+// TaskEnvironmentRecoveryRepository is the optional durable authority
+// capability required by automatic host worktree recovery. Keeping it
+// separate preserves lightweight repository adapters used by tests and by
+// non-worktree executors.
+type TaskEnvironmentRecoveryRepository interface {
+	AcquireTaskEnvironmentRecoveryClaim(context.Context, models.TaskEnvironmentRecoveryClaimRequest) (*models.TaskEnvironmentRecoveryClaim, error)
+	ReleaseTaskEnvironmentRecoveryClaim(context.Context, *models.TaskEnvironmentRecoveryClaim) error
+}
+
 // ReviewRepository handles session file review records.
 type ReviewRepository interface {
 	UpsertSessionFileReview(ctx context.Context, review *models.SessionFileReview) error
@@ -631,6 +648,10 @@ type PlanRepository interface {
 	UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) error
 	MarkTaskPlanImplementationStarted(ctx context.Context, taskID, sessionID, actor string) (*models.TaskPlan, error)
 	DeleteTaskPlan(ctx context.Context, taskID string) error
+	ListTaskPlanComments(ctx context.Context, taskID string) (*models.TaskPlanCommentSnapshot, error)
+	CreateTaskPlanComment(ctx context.Context, comment *models.TaskPlanComment) (*models.TaskPlanCommentSnapshot, error)
+	UpdateTaskPlanComment(ctx context.Context, comment *models.TaskPlanComment, expectedVersion int64) (*models.TaskPlanCommentSnapshot, error)
+	DeleteTaskPlanComment(ctx context.Context, taskID, planID, commentID string, expectedVersion int64) (*models.TaskPlanCommentSnapshot, error)
 
 	// Revision history
 	InsertTaskPlanRevision(ctx context.Context, rev *models.TaskPlanRevision) error

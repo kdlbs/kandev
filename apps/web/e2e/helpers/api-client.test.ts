@@ -47,3 +47,41 @@ describe("ApiClient.createAgentProfile", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("ApiClient user settings", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // Contract coverage for the existing settings restore flow.
+  it("round-trips the startup choice and workspace scope", async () => {
+    const baseline = {
+      startup_page: "threads",
+      workspace_id: "workspace-1",
+      workflow_filter_id: "workflow-1",
+    };
+    let saved: unknown;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith("/api/v1/app-state?path=%2Fsettings%2Fagents")) {
+          return Response.json({ interimSettingsInterlockToken: "test-token" });
+        }
+        if (url.endsWith("/api/v1/user/settings")) {
+          if (init?.method === "PATCH") saved = JSON.parse(String(init.body));
+          return Response.json({ settings: baseline });
+        }
+        throw new Error(`unexpected request: ${url}`);
+      }),
+    );
+    const client = new ApiClient("http://backend.test");
+    const { settings } = await client.getUserSettings();
+    await client.saveUserSettings({
+      startup_page: settings.startup_page,
+      workspace_id: settings.workspace_id,
+      workflow_filter_id: settings.workflow_filter_id,
+    });
+    expect(saved).toEqual(baseline);
+  });
+});

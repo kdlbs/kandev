@@ -18,7 +18,7 @@ import { getWebSocketClient } from "@/lib/ws/connection";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { useArchiveAndSwitchTask, useTaskActions } from "@/hooks/use-task-actions";
-import { useTaskRemoval } from "@/hooks/use-task-removal";
+import { useTaskRemoval, useTaskRemovalSuccessNotifier } from "@/hooks/use-task-removal";
 import type { MessageAction } from "@/components/task/chat/types";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
@@ -212,33 +212,6 @@ type DeleteActionButtonProps = Omit<ActionButtonProps, "action"> & {
   action: MessageAction & { type: "delete_task" };
 };
 
-type DeleteTaskById = ReturnType<typeof useTaskActions>["deleteTaskById"];
-type RemoveTaskFromBoard = ReturnType<typeof useTaskRemoval>["removeTaskFromBoard"];
-type TaskStore = ReturnType<typeof useAppStoreApi>;
-
-async function deleteTaskAndRemoveFromBoard({
-  taskId,
-  cascade,
-  discardWorktreeChanges,
-  store,
-  deleteTaskById,
-  removeTaskFromBoard,
-}: {
-  taskId: string;
-  cascade: boolean;
-  discardWorktreeChanges: boolean;
-  store: TaskStore;
-  deleteTaskById: DeleteTaskById;
-  removeTaskFromBoard: RemoveTaskFromBoard;
-}): Promise<void> {
-  const { activeTaskId, activeSessionId } = store.getState().tasks;
-  await deleteTaskById(taskId, { cascade, discardWorktreeChanges });
-  await removeTaskFromBoard(taskId, {
-    wasActiveTaskId: activeTaskId,
-    wasActiveSessionId: activeSessionId,
-  });
-}
-
 function DeleteActionButton({
   action,
   messageTaskId,
@@ -254,7 +227,8 @@ function DeleteActionButton({
   );
   const store = useAppStoreApi();
   const { deleteTaskById } = useTaskActions();
-  const { removeTaskFromBoard } = useTaskRemoval({ store });
+  const notifySuccess = useTaskRemovalSuccessNotifier();
+  const { runTaskRemoval } = useTaskRemoval({ store, notifySuccess });
 
   const handleDeleteConfirm = useCallback(
     async ({
@@ -267,21 +241,21 @@ function DeleteActionButton({
       if (!taskId || state === "busy") return;
       setState("busy");
       try {
-        await deleteTaskAndRemoveFromBoard({
-          taskId,
-          cascade,
-          discardWorktreeChanges,
-          store,
-          deleteTaskById,
-          removeTaskFromBoard,
-        });
-        setState("done");
+        const result = await runTaskRemoval(
+          "delete",
+          {
+            taskId,
+            mutate: () => deleteTaskById(taskId, { cascade, discardWorktreeChanges }),
+          },
+          { cascade },
+        );
+        setState(result.skipped ? "idle" : "done");
       } catch {
         setState("error");
         setTimeout(() => setState("idle"), 3000);
       }
     },
-    [state, taskId, store, deleteTaskById, removeTaskFromBoard],
+    [state, taskId, deleteTaskById, runTaskRemoval],
   );
 
   const execute = useCallback(() => {
@@ -306,7 +280,6 @@ function DeleteActionButton({
       taskTitle={messageTask?.title}
       taskId={taskId ?? undefined}
       executorType={messageTask?.primaryExecutorType}
-      requireDiscardConsent={messageTask?.primaryExecutorType == null}
       isDeleting={state === "busy"}
       onConfirm={(opts) => void handleDeleteConfirm(opts)}
     />

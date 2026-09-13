@@ -53,15 +53,24 @@ type GitPullRequest struct {
 }
 
 // GitPushRequest for POST /api/v1/git/push
+//
+// Remote and ExpectedBranch are optional. Remote is a configured remote name or
+// a remote URL that must resolve to one; ExpectedBranch is the branch the
+// caller believes it is publishing. Both are passed through untouched: this
+// surface performs no destination logic of its own.
 type GitPushRequest struct {
-	Force       bool   `json:"force"`
-	SetUpstream bool   `json:"set_upstream"`
-	Repo        string `json:"repo,omitempty"`
+	Force          bool   `json:"force"`
+	SetUpstream    bool   `json:"set_upstream"`
+	Repo           string `json:"repo,omitempty"`
+	Remote         string `json:"remote,omitempty"`
+	ExpectedBranch string `json:"expected_branch,omitempty"`
 }
 
 // GitPushPreflightRequest for POST /api/v1/git/push-preflight.
 type GitPushPreflightRequest struct {
-	Repo string `json:"repo,omitempty"`
+	Repo           string `json:"repo,omitempty"`
+	Remote         string `json:"remote,omitempty"`
+	ExpectedBranch string `json:"expected_branch,omitempty"`
 }
 
 // GitContributionRequest is shared by the managed contribution replacement
@@ -220,7 +229,12 @@ func (s *Server) handleGitPush(c *gin.Context) {
 	if gitOp == nil {
 		return
 	}
-	result, err := gitOp.Push(c.Request.Context(), req.Force, req.SetUpstream)
+	result, err := gitOp.Push(c.Request.Context(), process.PushOptions{
+		Force:          req.Force,
+		SetUpstream:    req.SetUpstream,
+		Remote:         req.Remote,
+		ExpectedBranch: req.ExpectedBranch,
+	})
 	if err != nil {
 		s.handleGitError(c, "push", err)
 		return
@@ -241,7 +255,10 @@ func (s *Server) handleGitPushPreflight(c *gin.Context) {
 	if gitOp == nil {
 		return
 	}
-	result, err := gitOp.PushPreflight(c.Request.Context())
+	result, err := gitOp.PushPreflight(c.Request.Context(), process.PushOptions{
+		Remote:         req.Remote,
+		ExpectedBranch: req.ExpectedBranch,
+	})
 	if err != nil {
 		s.handleGitError(c, "push preflight", err)
 		return

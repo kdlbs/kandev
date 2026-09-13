@@ -2,7 +2,7 @@
 status: draft
 system: tasks
 created: 2026-08-04
-updated: 2026-09-02
+updated: 2026-09-10
 owners:
   - Kandev team
 ---
@@ -41,6 +41,21 @@ This document is the migrated task-system source for the capability. The source 
   message delivered into a generating turn, the system shall surface a durable
   error for that message and shall not deliver an attachment reference whose
   bytes are absent from the session.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.8:** While a newly created task session
+  prepares its workspace, its initial message preview shall show the submitted
+  text, image previews, and file labels before the agent starts. An attachment-only
+  submission shall show its attachments without an empty text bubble.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.9:** Reloading that session during
+  preparation, or after preparation fails, shall preserve its initial preview.
+  The preview shall not imply successful agent delivery or hide preparation errors.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.10:** When a stored user message becomes
+  visible, the transcript shall replace the initial preview without duplicate
+  messages or attachments. A different session shall not inherit that preview.
+  Unloaded older history shall not cause the preview to reappear.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.11:** Desktop and phone users shall be
+  able to open preparation image previews and inspect file labels through the
+  existing attachment controls. Preview failures shall not hide prompt text
+  or other attachments, and the phone transcript shall remain within the viewport.
 
 ## Migrated source detail
 

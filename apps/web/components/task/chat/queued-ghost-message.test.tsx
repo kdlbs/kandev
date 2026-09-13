@@ -682,6 +682,19 @@ describe("canMergeEntry / canMergeWithAbove gating", () => {
     expect(canMergeEntry(entry({ queued_by: "server" }))).toBe(false);
   });
 
+  it("rejects entries carrying plan-comment admission identity", () => {
+    expect(
+      canMergeEntry(
+        entry({ queued_by: "user-1", metadata: { client_queue_id: "comment-request" } }),
+      ),
+    ).toBe(false);
+    expect(
+      canMergeEntry(
+        entry({ queued_by: "user-1", metadata: { plan_comment_refs: [{ id: "c1" }] } }),
+      ),
+    ).toBe(false);
+  });
+
   it("allows user behind user owned by the caller", () => {
     const above = entry({ id: "q-a", queued_by: "user-1" });
     const below = entry({ id: "q-b", queued_by: "user-1" });

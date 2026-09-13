@@ -71,6 +71,9 @@ func TestCreateTask_Assigned_PublishesAssignmentGenerationOne(t *testing.T) {
 	if !ok || gen != 1 {
 		t.Fatalf("assignment_generation = %#v, want int64(1)", data["assignment_generation"])
 	}
+	if got, ok := data["assignee_agent_profile_id"].(string); !ok || got != "agent-1" {
+		t.Fatalf("assignee_agent_profile_id = %#v, want agent-1", data["assignee_agent_profile_id"])
+	}
 
 	stored, err := repo.GetTask(ctx, result.Task.ID)
 	if err != nil {
@@ -106,6 +109,9 @@ func TestCreateTask_Unassigned_PublishesAssignmentGenerationZero(t *testing.T) {
 	gen, ok := data["assignment_generation"].(int64)
 	if !ok || gen != 0 {
 		t.Fatalf("assignment_generation = %#v, want int64(0)", data["assignment_generation"])
+	}
+	if got, ok := data["assignee_agent_profile_id"].(string); !ok || got != "" {
+		t.Fatalf("assignee_agent_profile_id = %#v, want empty", data["assignee_agent_profile_id"])
 	}
 
 	var persistedGen int64

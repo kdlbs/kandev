@@ -28,6 +28,8 @@ const (
 	StorageSourceQuarantine         = "quarantine"
 	StorageSourceTemporaryArtifacts = "temporary_artifacts"
 	StorageSourceDocker             = "docker"
+	StorageSourceDatabase           = "database"
+	StorageSourceDatabaseBackups    = "database_backups"
 )
 
 var storageAnalysisSources = [...]string{
@@ -36,6 +38,8 @@ var storageAnalysisSources = [...]string{
 	StorageSourceQuarantine,
 	StorageSourceTemporaryArtifacts,
 	StorageSourceDocker,
+	StorageSourceDatabase,
+	StorageSourceDatabaseBackups,
 }
 
 type StorageSourceProgress struct {

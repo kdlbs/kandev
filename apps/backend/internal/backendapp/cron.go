@@ -151,9 +151,12 @@ func (l *heartbeatTaskLister) ListActiveTasksAtStep(
 //  1. AgentInstance.Status — paused/stopped agents never receive
 //     heartbeats. (idle and working both pass; the runs scheduler's
 //     own checkout layer handles concurrency.)
-//  2. CooldownSec since LastRunFinishedAt — when a run finished
+//  2. CooldownSec (from agent_profiles) since
+//     office_agent_runtime.last_run_finished_at — when a run finished
 //     recently the gate suppresses heartbeats so the cooldown is
-//     respected end-to-end (heartbeat ≠ scheduler).
+//     respected end-to-end (heartbeat ≠ scheduler). This is a distinct
+//     column from agent_profiles' own same-named last_run_finished_at,
+//     which no Office write path stamps and must not be read here.
 type heartbeatAgentRuntime struct {
 	office *officesqlite.Repository
 }
@@ -175,11 +178,19 @@ func (r *heartbeatAgentRuntime) AllowFire(
 	case officemodels.AgentStatusPaused, officemodels.AgentStatusStopped:
 		return false, nil
 	}
-	if agent.LastRunFinishedAt != nil && agent.CooldownSec > 0 {
-		gateUntil := agent.LastRunFinishedAt.Add(time.Duration(agent.CooldownSec) * time.Second)
-		if now.Before(gateUntil) {
-			return false, nil
-		}
+	if agent.CooldownSec <= 0 {
+		return true, nil
+	}
+	runtime, err := r.office.GetAgentRuntime(ctx, agentID)
+	if err != nil {
+		return false, err
+	}
+	if runtime == nil || runtime.LastRunFinishedAt == nil {
+		return true, nil
+	}
+	gateUntil := runtime.LastRunFinishedAt.Add(time.Duration(agent.CooldownSec) * time.Second)
+	if now.Before(gateUntil) {
+		return false, nil
 	}
 	return true, nil
 }

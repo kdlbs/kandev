@@ -162,6 +162,7 @@ export function CanvasHostBody({
   runtimeUrl,
   error,
   onOpenActions,
+  onRuntimeReady,
   onRuntimeError,
   onRetry,
 }: {
@@ -173,6 +174,7 @@ export function CanvasHostBody({
   runtimeUrl: string | null;
   error: string | null;
   onOpenActions: () => void;
+  onRuntimeReady: () => void;
   onRuntimeError: () => void;
   onRetry: () => void;
 }) {
@@ -189,11 +191,12 @@ export function CanvasHostBody({
         onOpenActions={onOpenActions}
       />
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {state === "ready" && runtimeUrl ? (
+        {(state === "loading_runtime" || state === "ready") && runtimeUrl ? (
           <CanvasPage
             key={`${canvasId}:${runtimeUrl}`}
             runtimeUrl={runtimeUrl}
             title={title}
+            onLoad={onRuntimeReady}
             onError={onRuntimeError}
           />
         ) : (

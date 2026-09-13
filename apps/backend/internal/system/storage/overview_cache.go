@@ -251,6 +251,8 @@ func (c *OverviewCache) recordLegacyProgress(flight *overviewFlight, summary Sum
 		{Source: StorageSourceQuarantine, State: SourceStateReady, Value: summary.Quarantine},
 		{Source: StorageSourceTemporaryArtifacts, State: SourceStateReady, Value: summary.TemporaryArtifacts},
 		{Source: StorageSourceDocker, State: SourceStateReady, Value: summary.Docker},
+		{Source: StorageSourceDatabase, State: SourceStateReady, Value: summary.Database},
+		{Source: StorageSourceDatabaseBackups, State: SourceStateReady, Value: summary.DatabaseBackups},
 	} {
 		c.recordProgress(flight, progress)
 	}
@@ -490,6 +492,12 @@ func summaryFromSourceValues(values map[string]any) *Summary {
 	}
 	if value, ok := values[StorageSourceDocker]; ok {
 		summary.Docker = value
+	}
+	if value, ok := values[StorageSourceDatabase]; ok {
+		summary.Database = value
+	}
+	if value, ok := values[StorageSourceDatabaseBackups]; ok {
+		summary.DatabaseBackups = value
 	}
 	return summary
 }

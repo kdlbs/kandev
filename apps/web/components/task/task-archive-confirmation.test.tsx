@@ -1,10 +1,10 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { StateProvider } from "@/components/state-provider";
 
 const getSubtaskCountMock = vi.hoisted(() => vi.fn());
-const pointerState = vi.hoisted(() => ({ isFinePointer: false }));
+const pointerState = vi.hoisted(() => ({ isFinePointer: false, isMobile: false }));
 const CONFIRM_TEST_ID = "archive-task-confirm";
 const INLINE_CONFIRMATION_TEST_ID = "task-archive-inline-confirmation";
 const CLEANUP_EFFECTS_TEST_ID = "task-cleanup-effects";
@@ -22,31 +22,80 @@ import { TaskArchiveConfirmation } from "./task-archive-confirmation";
 
 afterEach(cleanup);
 beforeEach(() => {
+  pointerState.isMobile = false;
   pointerState.isFinePointer = false;
   getSubtaskCountMock.mockReset();
+});
+
+describe("TaskArchiveConfirmation phone surfaces", () => {
+  it.each([false, true])("uses a stable phone sheet even with a fine pointer: %s", async (fine) => {
+    pointerState.isMobile = true;
+    pointerState.isFinePointer = fine;
+    const count = deferredSubtaskCount();
+    getSubtaskCountMock.mockReturnValue(count.promise);
+    const onConfirm = vi.fn();
+    renderConfirmation(onConfirm);
+    const sheet = screen.getByRole("dialog", { name: /Archive task/ });
+    expect(screen.getByTestId(CONFIRM_TEST_ID).hasAttribute("disabled")).toBe(true);
+    expect(screen.queryByTestId(INLINE_CONFIRMATION_TEST_ID)).toBeNull();
+    await act(async () => count.resolve({ count: 2 }));
+    expect(screen.getByRole("dialog", { name: /Archive task/ })).toBe(sheet);
+    const cascade = screen.getByRole("checkbox");
+    expect(cascade.getAttribute("data-state")).toBe("unchecked");
+    fireEvent.click(cascade);
+    fireEvent.click(screen.getByTestId(CONFIRM_TEST_ID));
+    await waitFor(() => expect(onConfirm).toHaveBeenCalledWith({ cascade: true }));
+    expect(onConfirm).toHaveBeenCalledOnce();
+  });
+
+  it("keeps forced phone archive in a bottom sheet and cancels delayed classification", async () => {
+    pointerState.isMobile = true;
+    const count = deferredSubtaskCount();
+    getSubtaskCountMock.mockReturnValue(count.promise);
+    const onConfirm = vi.fn();
+    const onOpenChange = vi.fn();
+    renderConfirmation(onConfirm, onOpenChange, true);
+    expect(screen.getByRole("dialog").getAttribute("data-slot")).toBe("drawer-content");
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await act(async () => count.resolve({ count: 3 }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
 });
 
 function ConfirmationHarness({
   onConfirm,
   onOpenChange,
   forceDialog = false,
+  renderInline,
 }: {
   onConfirm: () => void;
   onOpenChange: (open: boolean) => void;
   forceDialog?: boolean;
+  renderInline?: (content: ReactNode) => ReactNode;
 }) {
   const anchorRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(true);
   return (
     <>
-      <button ref={anchorRef} type="button" data-testid="archive-anchor">
+      <button
+        ref={anchorRef}
+        type="button"
+        data-testid="archive-anchor"
+        onClick={() => setOpen(true)}
+      >
         Archive source
       </button>
       <button type="button" data-testid="outside-action">
         Outside action
       </button>
       <TaskArchiveConfirmation
-        open
-        onOpenChange={onOpenChange}
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          onOpenChange(next);
+        }}
         anchorRef={anchorRef}
         taskId="task-1"
         taskTitle="Task One"
@@ -54,6 +103,8 @@ function ConfirmationHarness({
         onConfirm={onConfirm}
         confirmTestId={CONFIRM_TEST_ID}
         forceDialog={forceDialog}
+        inline={Boolean(renderInline)}
+        renderInline={renderInline}
       />
     </>
   );
@@ -167,6 +218,33 @@ describe("TaskArchiveConfirmation pending dismissal", () => {
   });
 });
 
+describe("TaskArchiveConfirmation inline surface", () => {
+  // @covers AC-TASKS-THREADS-ACTIONS-004.2
+  it.each([0, 2])(
+    "wraps only simple inline confirmation, not the %s-descendant dialog",
+    async (count) => {
+      getSubtaskCountMock.mockResolvedValue({ count });
+      render(
+        <StateProvider>
+          <ConfirmationHarness
+            onConfirm={vi.fn()}
+            onOpenChange={vi.fn()}
+            renderInline={(content) => <div data-testid="inline-surface">{content}</div>}
+          />
+        </StateProvider>,
+      );
+      if (count === 0) {
+        const surface = await screen.findByTestId("inline-surface");
+        expect(await within(surface).findByTestId(CONFIRM_TEST_ID)).toBeTruthy();
+        expect(screen.queryByRole("alertdialog")).toBeNull();
+      } else {
+        expect(await screen.findByRole("alertdialog")).toBeTruthy();
+        expect(screen.queryByTestId("inline-surface")).toBeNull();
+      }
+    },
+  );
+});
+
 describe("TaskArchiveConfirmation classification", () => {
   it("does not expose an archive action while descendant classification is pending", () => {
     getSubtaskCountMock.mockReturnValue(new Promise(() => undefined));
@@ -229,7 +307,11 @@ describe("TaskArchiveConfirmation classification", () => {
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(onOpenChange).toHaveBeenCalledWith(false);
 
-    fireEvent.click(archive);
+    fireEvent.click(screen.getByTestId("archive-anchor"));
+    await waitFor(() =>
+      expect(screen.getByTestId(CONFIRM_TEST_ID).hasAttribute("disabled")).toBe(false),
+    );
+    fireEvent.click(screen.getByTestId(CONFIRM_TEST_ID));
     await waitFor(() => expect(onConfirm).toHaveBeenCalledWith({ cascade: false }));
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });

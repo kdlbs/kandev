@@ -45,7 +45,7 @@ func (r *Repository) ensureTeamAccessSchema() error {
 // visible to everyone until the setup wizard claims them, and inventing an
 // owner here would lock the single user out of their own data.
 func (r *Repository) backfillWorkspaceOwnerMembers() error {
-	_, err := r.db.Exec(`
+	_, err := r.db.ExecContext(r.migrationContext(), `
 		INSERT INTO workspace_members (workspace_id, user_id, role, added_by, created_at)
 		SELECT w.id, w.owner_id, 'owner', '', w.created_at
 		FROM workspaces w

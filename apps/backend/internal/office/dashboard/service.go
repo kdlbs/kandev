@@ -77,6 +77,7 @@ type Repository interface {
 	// bump, read back inside the same transaction that wrote the runner
 	// seat (see the sqlite implementation's doc comment).
 	UpdateTaskAssignee(ctx context.Context, taskID, assigneeID string) (int64, error)
+	UpdateTaskStateIfWorkflowStep(ctx context.Context, taskID, expectedStepID, state string) (bool, error)
 	UpdateTaskPriority(ctx context.Context, taskID, priority string) error
 	UpdateTaskProjectID(ctx context.Context, taskID, projectID string) error
 	GetTaskProjectID(ctx context.Context, taskID string) (string, error)
@@ -103,6 +104,7 @@ type Repository interface {
 	// fan-out queued for agentProfileID at (taskID, stepID). Used after a
 	// claim displaces an agent from a role.
 	CancelDisplacedParticipantRun(ctx context.Context, taskID, stepID, agentProfileID string) (int64, error)
+	IsTaskWorkflowStepTerminal(ctx context.Context, taskID string) (terminal, hasStep bool, err error)
 }
 
 // DecisionStore is the workflow-domain decisions interface required by

@@ -3,9 +3,12 @@ package webapp
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -56,7 +59,7 @@ func TestRuntimeServesEntryWithSecurityHeadersAndNoCookies(t *testing.T) {
 	if !strings.Contains(response.Body.String(), "safe") {
 		t.Fatalf("body = %q", response.Body.String())
 	}
-	if got := response.Header().Get("Content-Security-Policy"); !strings.Contains(got, "sandbox allow-scripts allow-forms") || !strings.Contains(got, "form-action 'none'") || !strings.Contains(got, "frame-ancestors http://127.0.0.1:38429") {
+	if got := response.Header().Get("Content-Security-Policy"); !strings.Contains(got, "sandbox allow-scripts allow-forms") || !strings.Contains(got, "form-action 'none'") || !strings.Contains(got, "frame-ancestors 'self' http://127.0.0.1:38429") {
 		t.Fatalf("CSP = %q", got)
 	}
 	for key, want := range map[string]string{
@@ -130,6 +133,122 @@ func TestRuntimeResolvesNestedEntryAssetsAndKeepsProtocolRoot(t *testing.T) {
 	}
 }
 
+func TestRuntimeStartupBootstrapPreservesArtifact(t *testing.T) {
+	entry := "<!doctype html>\n<html><head><meta charset=\"utf-8\"><script src=\"./app.js\"></script></head><body>ready</body></html>"
+	archive := canvasArchive(t, map[string]string{
+		"manifest.yaml":                 staticManifestYAML,
+		"ui/index.html":                 entry,
+		"ui/app.js":                     "window.__authored = true;",
+		"_kandev/host-runtime.js":       "window.__package_shadow = true;",
+		"ui/asset-without-bootstrap.js": "unchanged",
+	})
+	pkg, err := ValidatePackage(bytes.NewReader(archive))
+	if err != nil {
+		t.Fatalf("ValidatePackage: %v", err)
+	}
+	artifacts, err := NewArtifactStore(filepath.Join(t.TempDir(), "artifacts"))
+	if err != nil {
+		t.Fatalf("NewArtifactStore: %v", err)
+	}
+	artifact, err := artifacts.Put(pkg)
+	if err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	manager := NewTokenManager(nil)
+	token, err := manager.Issue(CapabilityBinding{
+		UserID: "user-1", InstanceID: "instance-1", ReleaseID: "release-1", WebAppKey: "main",
+		Placement: "task-canvas", Artifact: artifact, Entry: "ui/index.html",
+	}, 0)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	runtime := NewRuntime(manager, artifacts, nil, nil)
+
+	response := httptest.NewRecorder()
+	runtime.Serve(response, httptest.NewRequest(http.MethodGet, "/", nil), token, "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("entry status = %d, body = %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	bootstrap := `<script src="./_kandev/host-runtime.js"></script>`
+	if !strings.Contains(body, bootstrap) {
+		t.Fatalf("entry body does not contain host bootstrap: %q", body)
+	}
+	if strings.Index(body, bootstrap) >= strings.Index(body, `<script src="./app.js">`) {
+		t.Fatalf("host bootstrap was not inserted before authored scripts: %q", body)
+	}
+	if got := response.Header().Get("Content-Length"); got != fmt.Sprintf("%d", len(body)) {
+		t.Fatalf("Content-Length = %q, want %d", got, len(body))
+	}
+	stored, err := os.ReadFile(filepath.Join(artifacts.Path(artifact), "ui", "index.html"))
+	if err != nil {
+		t.Fatalf("ReadFile stored entry: %v", err)
+	}
+	if string(stored) != entry {
+		t.Fatalf("stored entry changed: %q", stored)
+	}
+
+	shadow := httptest.NewRecorder()
+	runtime.Serve(shadow, httptest.NewRequest(http.MethodGet, "/", nil), token, "_kandev/host-runtime.js")
+	if shadow.Code != http.StatusOK || strings.Contains(shadow.Body.String(), "package_shadow") || !strings.Contains(shadow.Body.String(), "startup_probe") {
+		t.Fatalf("reserved bootstrap response = %d %q", shadow.Code, shadow.Body.String())
+	}
+
+	asset := httptest.NewRecorder()
+	runtime.Serve(asset, httptest.NewRequest(http.MethodGet, "/", nil), token, "ui/asset-without-bootstrap.js")
+	if asset.Code != http.StatusOK || asset.Body.String() != "unchanged" {
+		t.Fatalf("non-entry asset response = %d %q", asset.Code, asset.Body.String())
+	}
+}
+
+func TestRuntimeBootstrapFailureDoesNotKeepArtifactContentLength(t *testing.T) {
+	archive := canvasArchive(t, map[string]string{
+		"manifest.yaml": staticManifestYAML,
+		"ui/index.html": "<!doctype html><html><head></head><body>entry</body></html>",
+	})
+	pkg, err := ValidatePackage(bytes.NewReader(archive))
+	if err != nil {
+		t.Fatalf("ValidatePackage: %v", err)
+	}
+	artifacts, err := NewArtifactStore(filepath.Join(t.TempDir(), "artifacts"))
+	if err != nil {
+		t.Fatalf("NewArtifactStore: %v", err)
+	}
+	artifact, err := artifacts.Put(pkg)
+	if err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(artifacts.Path(artifact), "ui", "index.html"), []byte("<html><head><script"), 0o600); err != nil {
+		t.Fatalf("corrupt stored entry: %v", err)
+	}
+	manager := NewTokenManager(nil)
+	token, err := manager.Issue(CapabilityBinding{
+		UserID: "user-1", InstanceID: "instance-1", ReleaseID: "release-1", WebAppKey: "main",
+		Placement: "task-canvas", Artifact: artifact, Entry: "ui/index.html",
+	}, 0)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	runtime := NewRuntime(manager, artifacts, nil, nil)
+	response := httptest.NewRecorder()
+	runtime.Serve(response, httptest.NewRequest(http.MethodGet, "/", nil), token, "")
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", response.Code)
+	}
+	if got := response.Header().Get("Content-Length"); got != "" {
+		t.Fatalf("Content-Length = %q, want no stale artifact length", got)
+	}
+}
+
+func TestInjectRuntimeBootstrapRejectsMalformedAndOversizedEntry(t *testing.T) {
+	if _, err := injectRuntimeBootstrap([]byte("<html><head><script")); !errors.Is(err, ErrRuntimeBootstrapUnavailable) {
+		t.Fatalf("malformed entry error = %v, want %v", err, ErrRuntimeBootstrapUnavailable)
+	}
+	if _, err := injectRuntimeBootstrap(bytes.Repeat([]byte("x"), int(MaxFileBytes)+1)); !errors.Is(err, ErrRuntimeBootstrapUnavailable) {
+		t.Fatalf("oversized entry error = %v, want %v", err, ErrRuntimeBootstrapUnavailable)
+	}
+}
+
 func TestRuntimeRejectsStaleCapabilityBeforeReadingArtifact(t *testing.T) {
 	manager := NewTokenManager(nil)
 	token, err := manager.Issue(CapabilityBinding{UserID: "u", InstanceID: "i", ReleaseID: "r", WebAppKey: "main", Artifact: Artifact{Digest: strings.Repeat("c", 64), RelativePath: "releases/" + strings.Repeat("c", 64)}, Entry: "ui/index.html"}, 0)
@@ -150,7 +269,7 @@ func TestRuntimeRejectsStaleCapabilityBeforeReadingArtifact(t *testing.T) {
 func TestRuntimeRevalidatesBindingAfterAuthorityRevocation(t *testing.T) {
 	archive := canvasArchive(t, map[string]string{
 		"manifest.yaml": staticManifestYAML,
-		"ui/index.html": "entry",
+		"ui/index.html": "<!doctype html><html><head></head><body>entry</body></html>",
 		"ui/app.js":     "script",
 	})
 	pkg, err := ValidatePackage(bytes.NewReader(archive))

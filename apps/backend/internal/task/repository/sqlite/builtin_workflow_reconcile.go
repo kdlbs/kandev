@@ -19,14 +19,14 @@ func (r *Repository) tryHealWorkflowStepEvents(
 	stepID, operation string,
 	mutate func(*wfmodels.StepEvents) bool,
 ) (applied, retry bool, err error) {
-	tx, err := r.db.Beginx()
+	tx, err := r.db.BeginTxx(r.migrationContext(), nil)
 	if err != nil {
 		return false, false, fmt.Errorf("begin %s reconciliation tx: %w", operation, err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	var rawEvents sql.NullString
-	if err := tx.QueryRow(tx.Rebind(`SELECT events FROM workflow_steps WHERE id = ?`), stepID).Scan(&rawEvents); err != nil {
+	if err := tx.QueryRowContext(r.migrationContext(), tx.Rebind(`SELECT events FROM workflow_steps WHERE id = ?`), stepID).Scan(&rawEvents); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return true, false, nil
 		}
@@ -60,7 +60,7 @@ func (r *Repository) tryHealWorkflowStepEvents(
 	if guardArg != nil {
 		args = append(args, guardArg)
 	}
-	res, err := tx.Exec(tx.Rebind(`
+	res, err := tx.ExecContext(r.migrationContext(), tx.Rebind(`
 		UPDATE workflow_steps SET events = ?, updated_at = ?
 		WHERE id = ? AND `+guardClause), args...)
 	if err != nil {

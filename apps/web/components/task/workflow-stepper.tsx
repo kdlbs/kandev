@@ -1,10 +1,16 @@
 "use client";
 
-import { memo, useMemo, useRef } from "react";
+import { memo, useMemo, useRef, useState } from "react";
 import { cn } from "@kandev/ui/lib/utils";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@kandev/ui/hover-card";
 import { Button } from "@kandev/ui/button";
-import { IconArrowRight } from "@tabler/icons-react";
+import { IconAdjustments, IconArrowRight } from "@tabler/icons-react";
+import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
+import {
+  WorkflowMoveOptionsFields,
+  useWorkflowMoveOptionsForm,
+  workflowMoveOptionsPayload,
+} from "./workflow-move-options";
 import { StepCapabilityIcons } from "@/components/step-capability-icons";
 import { useToolbarCollapsed } from "@/hooks/use-toolbar-collapsed";
 import {
@@ -134,7 +140,7 @@ function WorkflowStepItem({
   taskId?: string | null;
   workflowId?: string | null;
   movingToStepId: string | null;
-  onMove: (stepId: string) => void;
+  onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
 }) {
   const isCompleted = !isArchived && currentIndex >= 0 && index < currentIndex;
   const isCurrent = !isArchived && index === currentIndex;
@@ -199,32 +205,83 @@ function StepHoverContent({
   isCurrent: boolean;
   canMove: boolean;
   isMoving: boolean;
-  onMove: (stepId: string) => void;
+  onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
 }) {
   const { t } = useTranslation();
   return (
     <HoverCardContent
       side="bottom"
       align="center"
-      className="w-auto min-w-28 p-1.5 flex flex-col items-center gap-1.5"
+      data-testid="workflow-step-popover"
+      className="p-1.5 flex flex-col gap-1.5 items-center w-auto min-w-28 max-w-[calc(100vw-1rem)]"
     >
-      {canMove && (
-        <Button
-          size="sm"
-          variant="default"
-          className="cursor-pointer text-xs h-6 px-2.5 rounded-sm"
-          disabled={isMoving}
-          onClick={() => onMove(step.id)}
-        >
-          <IconArrowRight className="h-3 w-3" />
-          {isMoving ? t("task:moving") : t("task:moveHere")}
-        </Button>
-      )}
+      {canMove && <StepMoveControls step={step} isMoving={isMoving} onMove={onMove} />}
       {isCurrent && (
         <div className="text-[11px] text-muted-foreground">{t("task:currentStep")}</div>
       )}
       <StepCapabilityIcons events={step.events} agentProfileId={step.agent_profile_id} />
     </HoverCardContent>
+  );
+}
+
+/**
+ * Move button plus an opt-in inline options draft. The options stay hidden
+ * until the user reveals them, so a quick hover-and-click keeps the original
+ * zero-config move; a revealed, filled draft rides along as one-shot
+ * entry_options. Rendered only while the hover card is open, so the draft
+ * hook subscribes lazily and resets whenever the pointer leaves the step.
+ */
+function StepMoveControls({
+  step,
+  isMoving,
+  onMove,
+}: {
+  step: Step;
+  isMoving: boolean;
+  onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
+}) {
+  const { t } = useTranslation();
+  const [showOptions, setShowOptions] = useState(false);
+  const { draft, patchDraft } = useWorkflowMoveOptionsForm();
+
+  return (
+    <div className="flex w-full flex-col items-stretch gap-1.5">
+      <Button
+        size="sm"
+        variant="default"
+        className="cursor-pointer text-xs h-6 px-2.5 rounded-sm"
+        disabled={isMoving}
+        onClick={() => void onMove(step.id, workflowMoveOptionsPayload(draft))}
+        data-testid="workflow-step-move-here"
+      >
+        <IconArrowRight className="h-3 w-3" />
+        {isMoving ? t("task:moving") : t("task:moveHere")}
+      </Button>
+      {showOptions ? (
+        <div
+          className="w-64 max-w-[calc(100vw-2rem)]"
+          onKeyDown={(event) => event.stopPropagation()}
+        >
+          <WorkflowMoveOptionsFields
+            draft={draft}
+            onDraftChange={patchDraft}
+            isTouchSurface={false}
+            instructionsRows={3}
+          />
+        </div>
+      ) : (
+        <Button
+          size="sm"
+          variant="ghost"
+          className="cursor-pointer text-xs h-6 px-2.5 rounded-sm text-muted-foreground"
+          onClick={() => setShowOptions(true)}
+          data-testid="workflow-step-move-options-trigger"
+        >
+          <IconAdjustments className="h-3 w-3" />
+          {t("task:workflowMoveOptions")}
+        </Button>
+      )}
+    </div>
   );
 }
 

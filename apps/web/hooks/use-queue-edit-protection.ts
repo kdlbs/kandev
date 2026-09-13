@@ -24,6 +24,23 @@ type ActiveEdit = {
 
 const EDIT_RENEW_INTERVAL_MS = 20_000;
 
+export function useQueuedGhostLeaseLoss(
+  editing: boolean,
+  editLeaseActive: boolean,
+  entryContent: string,
+  setValue: (value: string) => void,
+  setEditing: (editing: boolean) => void,
+): void {
+  useEffect(() => {
+    if (!editing) setValue(entryContent);
+  }, [editing, entryContent, setValue]);
+  useEffect(() => {
+    if (!editing || editLeaseActive) return;
+    setValue(entryContent);
+    setEditing(false);
+  }, [editLeaseActive, editing, entryContent, setEditing, setValue]);
+}
+
 type RenewalOwnershipArgs = {
   activeEdit: ActiveEdit;
   currentEdit: ActiveEdit | null;

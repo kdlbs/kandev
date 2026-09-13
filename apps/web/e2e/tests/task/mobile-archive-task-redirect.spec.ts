@@ -96,7 +96,7 @@ test.describe("Mobile archive task redirect", () => {
     await parentRow.getByRole("button", { name: "Task actions" }).tap();
     await testPage.getByRole("menuitem", { name: "Archive", exact: true }).tap();
 
-    const archiveDialog = testPage.getByRole("alertdialog");
+    const archiveDialog = testPage.getByRole("dialog", { name: "Archive task?", exact: true });
     await expect(archiveDialog).toBeVisible();
     await archiveDialog.getByTestId("archive-cascade-checkbox").tap();
     await archiveDialog.getByRole("button", { name: "Archive", exact: true }).tap();

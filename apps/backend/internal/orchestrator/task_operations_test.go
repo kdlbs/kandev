@@ -4728,6 +4728,7 @@ type mockMessageCreator struct {
 	toolCallWrites         int
 	toolUpdateWrites       int
 	userMessageErr         error
+	idempotentUserMessages map[string]struct{}
 	permissionClaimFn      func(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
 	permissionFinishFn     func(context.Context, models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
 	permissionAuditFn      func(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error)
@@ -4753,6 +4754,27 @@ func (m *mockMessageCreator) CreateUserMessage(_ context.Context, taskID, conten
 	if m.userMessageErr != nil {
 		return m.userMessageErr
 	}
+	m.userMessages = append(m.userMessages, mockUserMessage{taskID, content, sessionID, turnID, metadata})
+	return nil
+}
+
+func (m *mockMessageCreator) CreateUserMessageIdempotent(
+	_ context.Context,
+	messageID, taskID, content, sessionID, turnID string,
+	metadata map[string]interface{},
+) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.userMessageErr != nil {
+		return m.userMessageErr
+	}
+	if m.idempotentUserMessages == nil {
+		m.idempotentUserMessages = make(map[string]struct{})
+	}
+	if _, exists := m.idempotentUserMessages[messageID]; exists {
+		return nil
+	}
+	m.idempotentUserMessages[messageID] = struct{}{}
 	m.userMessages = append(m.userMessages, mockUserMessage{taskID, content, sessionID, turnID, metadata})
 	return nil
 }
@@ -7518,6 +7540,35 @@ func TestGetTaskSessionStatus_NeedsWorkspaceRestore_TerminalWithoutWorktree(t *t
 	}
 	if resp.NeedsWorkspaceRestore {
 		t.Fatal("expected NeedsWorkspaceRestore=false for terminal session without worktree")
+	}
+}
+
+func TestGetTaskSessionStatus_NeedsWorkspaceRestore_RepositorylessEnvironment(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCompleted)
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env1", TaskID: "task1", ExecutorType: "local",
+		WorkspacePath: "/tmp/task1", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSessionStatus returned error: %v", err)
+	}
+	if !resp.NeedsWorkspaceRestore {
+		t.Fatal("expected NeedsWorkspaceRestore=true for a repository-less retained environment")
+	}
+	if resp.WorktreePath == nil || *resp.WorktreePath != "/tmp/task1" {
+		t.Fatalf("WorktreePath = %v, want canonical workspace path", resp.WorktreePath)
 	}
 }
 

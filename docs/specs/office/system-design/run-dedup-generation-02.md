@@ -72,8 +72,11 @@ neither the log text nor any alert built on this counter may call a durable hit 
 anomaly on its own. One undifferentiated counter would bury the first two.
 `cause` earns its place the same way: `by_design` is high-frequency and expected,
 `unresolved` is the generation that should have been carried and was not
-(AC-003.3), and by `reason` alone the two are indistinguishable. Cardinality is
-the run-reason enum times a small constant, the same order as `routing_*`.
+(AC-003.3), and by `reason` alone the two are indistinguishable. Metric reasons
+use the finite set of known run reasons. Any agent-supplied or future reason is
+reported as `custom`, so process-global expvar maps cannot grow once per input.
+Cardinality is therefore the known reason set plus one custom bucket times a
+small constant, the same order as `routing_*`.
 
 `office_run_dedup_total{queue="wakeup"}` increments where `CreateWakeupRequest`
 returns `ErrWakeupIdempotencyConflict` (AC-004.6); that path has no windowed

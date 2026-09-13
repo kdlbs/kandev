@@ -135,6 +135,7 @@ func TestScanUserSettingsStartupPage(t *testing.T) {
 		{name: "missing setting defaults to task overview", raw: `{"chat_submit_key":"cmd_enter"}`, want: "task_overview"},
 		{name: "unknown setting defaults to task overview", raw: `{"startup_page":"future_value"}`, want: "task_overview"},
 		{name: "last task is preserved", raw: `{"startup_page":"last_task"}`, want: "last_task"},
+		{name: "threads is preserved", raw: `{"startup_page":"threads"}`, want: "threads"},
 	}
 
 	for _, tt := range tests {

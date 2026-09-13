@@ -459,6 +459,30 @@ func (m *repositoryBackedMessageCreator) CreateUserMessage(
 	})
 }
 
+func (m *repositoryBackedMessageCreator) CreateUserMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, sessionID, turnID string,
+	metadata map[string]interface{},
+) error {
+	if _, err := m.repo.GetMessageWithPromptIndex(ctx, messageID); err == nil {
+		return nil
+	}
+	if err := m.mockMessageCreator.CreateUserMessageIdempotent(
+		ctx, messageID, taskID, content, sessionID, turnID, metadata,
+	); err != nil {
+		return err
+	}
+	return m.repo.CreateMessage(ctx, &models.Message{
+		ID:            messageID,
+		TaskID:        taskID,
+		TaskSessionID: sessionID,
+		TurnID:        turnID,
+		AuthorType:    models.MessageAuthorUser,
+		Content:       content,
+		Metadata:      metadata,
+	})
+}
+
 func (r promptHistoryErrorRepo) HasUserPromptHistory(context.Context, string) (bool, error) {
 	return false, r.err
 }

@@ -21,6 +21,18 @@ vi.mock("@kandev/ui/hover-card", () => ({
   HoverCardContent: Passthrough,
 }));
 
+// The stepper only threads the shared move-options draft through the hover
+// popover; the fields themselves are covered by the form's own tests.
+vi.mock("./workflow-move-options", () => ({
+  useWorkflowMoveOptionsForm: () => ({
+    draft: {},
+    patchDraft: vi.fn(),
+    resetDraft: vi.fn(),
+  }),
+  WorkflowMoveOptionsFields: () => null,
+  workflowMoveOptionsPayload: () => undefined,
+}));
+
 vi.mock("@/hooks/use-compact-task-chrome", () => ({
   useTouchDrawer: () => mocks.touchDrawer,
 }));
@@ -255,6 +267,32 @@ describe("WorkflowStepper compact disclosure", () => {
     expect(screen.getByTestId(MOVE_A_TEST_ID)).toBeTruthy();
     expect(screen.getByTestId(MOVE_C_TEST_ID)).toBeTruthy();
     expect(screen.queryByTestId(MOVE_D_TEST_ID)).toBeNull();
+  });
+});
+
+describe("WorkflowStepper compact disclosure options", () => {
+  it("reveals opt-in one-time move options per eligible target", () => {
+    collapsedMock.mockReturnValue(true);
+    render(
+      <WorkflowStepper
+        steps={DISCLOSURE_STEPS}
+        currentStepId="b"
+        taskId={TASK_ID}
+        workflowId={WORKFLOW_ID}
+      />,
+    );
+
+    fireEvent.mouseEnter(screen.getByRole("button", { name: TRIGGER_LABEL }));
+
+    // Only eligible, non-current targets expose the options toggle.
+    expect(screen.getByTestId("workflow-step-disclosure-options-c")).toBeTruthy();
+    expect(screen.queryByTestId("workflow-step-disclosure-options-b")).toBeNull();
+    expect(screen.queryByTestId("workflow-step-disclosure-options-d")).toBeNull();
+
+    // The options panel stays hidden until the toggle is pressed.
+    expect(screen.queryByTestId("workflow-step-disclosure-options-panel-c")).toBeNull();
+    fireEvent.click(screen.getByTestId("workflow-step-disclosure-options-c"));
+    expect(screen.getByTestId("workflow-step-disclosure-options-panel-c")).toBeTruthy();
   });
 });
 

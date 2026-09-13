@@ -465,14 +465,7 @@ func TestApplyMoveTaskImmediate_RollsBackExactHandoffAfterMoveFailure(t *testing
 	})
 	h := &Handlers{taskSvc: svc, messageQueue: queue, logger: testLogger(t).WithFields()}
 	msg := makeWSMessage(t, ws.ActionMCPMoveTask, map[string]interface{}{})
-	response, err := h.applyMoveTaskImmediate(ctx, msg, struct {
-		TaskID          string `json:"task_id"`
-		WorkflowID      string `json:"workflow_id"`
-		WorkflowStepID  string `json:"workflow_step_id"`
-		Position        int    `json:"position"`
-		Prompt          string `json:"prompt"`
-		SenderSessionID string `json:"sender_session_id"`
-	}{
+	response, err := h.applyMoveTaskImmediate(ctx, msg, moveTaskRequest{
 		TaskID: "task-rollback", WorkflowID: "missing-workflow",
 		WorkflowStepID: "missing-step", Prompt: "handoff",
 	}, session)
@@ -512,7 +505,13 @@ func (r *pendingMoveFailingQueuer) RemoveEntryForSession(
 	return nil, messagequeue.ErrEntryNotFound
 }
 
-func TestDeferMoveTask_RollsBackHandoffWhenPendingMovePersistenceFails(t *testing.T) {
+// TestDeferMoveTask_PendingMovePersistenceFailureLeavesQueueUntouched verifies
+// the deferred move path surfaces an internal error when SetPendingMove fails
+// and does not mutate the session queue. One-shot instructions now ride the
+// PendingMove's EntryOptions rather than a pre-queued hand-off, so there is no
+// hand-off message to roll back: the pre-existing queue entry must survive and
+// nothing may be removed.
+func TestDeferMoveTask_PendingMovePersistenceFailureLeavesQueueUntouched(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	seedRunningTask(
 		t, repo,
@@ -535,70 +534,9 @@ func TestDeferMoveTask_RollsBackHandoffWhenPendingMovePersistenceFails(t *testin
 	response, err := h.handleMoveTask(context.Background(), msg)
 	require.NoError(t, err)
 	assertWSError(t, response, ws.ErrorCodeInternalError)
-	require.Equal(t, []string{"queued-2"}, queue.removedIDs)
+	require.Empty(t, queue.removedIDs)
 	require.Len(t, queue.calls, 1)
 	assert.Equal(t, "preexisting", queue.calls[0].ID)
-}
-
-type rollbackContextMessageQueuer struct {
-	recordingMessageQueuer
-	queued       *messagequeue.QueuedMessage
-	rollbackCtx  context.Context
-	removedEntry string
-	takeCalled   bool
-}
-
-func (r *rollbackContextMessageQueuer) QueueMessageWithMetadata(
-	ctx context.Context,
-	sessionID, taskID, content, model, userID string,
-	planMode bool,
-	attachments []messagequeue.MessageAttachment,
-	metadata map[string]interface{},
-) (*messagequeue.QueuedMessage, error) {
-	msg, err := r.recordingMessageQueuer.QueueMessageWithMetadata(
-		ctx, sessionID, taskID, content, model, userID, planMode, attachments, metadata,
-	)
-	if err == nil {
-		msg.ID = "queued-handoff"
-		r.queued = msg
-	}
-	return msg, err
-}
-
-func (r *rollbackContextMessageQueuer) TakeQueued(ctx context.Context, _ string) (*messagequeue.QueuedMessage, bool) {
-	r.rollbackCtx = ctx
-	r.takeCalled = true
-	if r.queued == nil {
-		return nil, false
-	}
-	msg := r.queued
-	r.queued = nil
-	return msg, true
-}
-
-func (r *rollbackContextMessageQueuer) RemoveEntry(ctx context.Context, _ string, entryID string) error {
-	r.rollbackCtx = ctx
-	r.removedEntry = entryID
-	if r.queued != nil && r.queued.ID == entryID {
-		r.queued = nil
-	}
-	return nil
-}
-
-func (r *rollbackContextMessageQueuer) RemoveEntryForSession(
-	ctx context.Context,
-	identity messagequeue.QueueSessionIdentity,
-	entryID string,
-) (*messagequeue.QueueRemovalResult, error) {
-	r.rollbackCtx = ctx
-	r.removedEntry = entryID
-	if r.queued == nil || r.queued.ID != entryID ||
-		r.queued.SessionID != identity.SessionID || r.queued.TaskID != identity.TaskID {
-		return nil, messagequeue.ErrEntryNotFound
-	}
-	removed := *r.queued
-	r.queued = nil
-	return &messagequeue.QueueRemovalResult{Removed: []messagequeue.QueuedMessage{removed}}, nil
 }
 
 // TestQueueMoveTaskPrompt_NilQueueReturnsError ensures the call is safe (no panic)
@@ -657,41 +595,6 @@ func TestQueueMoveTaskPrompt_QueuesWithExpectedFields(t *testing.T) {
 	assert.Equal(t, "", got.Model)
 }
 
-func TestApplyMoveTaskImmediateRollsBackQueueWithDetachedContext(t *testing.T) {
-	taskSvc, _ := newTestTaskService(t)
-	queue := &rollbackContextMessageQueuer{}
-	h := &Handlers{
-		taskSvc:      taskSvc,
-		messageQueue: queue,
-		logger:       testLogger(t).WithFields(),
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	msg := makeWSMessage(t, ws.ActionMCPMoveTask, nil)
-	req := struct {
-		TaskID          string `json:"task_id"`
-		WorkflowID      string `json:"workflow_id"`
-		WorkflowStepID  string `json:"workflow_step_id"`
-		Position        int    `json:"position"`
-		Prompt          string `json:"prompt"`
-		SenderSessionID string `json:"sender_session_id"`
-	}{
-		TaskID:         "missing-task",
-		WorkflowID:     "missing-workflow",
-		WorkflowStepID: "missing-step",
-		Prompt:         "handoff",
-	}
-	session := &models.TaskSession{ID: "session-rollback", TaskID: req.TaskID}
-
-	resp, err := h.applyMoveTaskImmediate(ctx, msg, req, session)
-	require.NoError(t, err)
-	assertWSError(t, resp, ws.ErrorCodeInternalError)
-	require.NotNil(t, queue.rollbackCtx)
-	assert.NoError(t, queue.rollbackCtx.Err())
-	assert.Equal(t, "queued-handoff", queue.removedEntry)
-	assert.False(t, queue.takeCalled)
-	assert.Nil(t, queue.queued)
-}
 func TestHandleDeleteTask_MissingTaskID(t *testing.T) {
 	h := &Handlers{}
 	msg := makeWSMessage(t, ws.ActionMCPDeleteTask, map[string]string{})
@@ -1325,8 +1228,12 @@ func TestDeferMoveTask_AcceptsValidStep(t *testing.T) {
 	assert.Equal(t, "dst-step3", queue.pendingMoves[0].WorkflowStepID)
 	assert.Equal(t, "sess-caller3", queue.pendingMoves[0].SenderSessionID)
 	assert.NotEmpty(t, queue.pendingMoves[0].MoveID)
-	require.Len(t, queue.calls, 1)
-	assert.Equal(t, queue.pendingMoves[0].MoveID, queue.calls[0].Metadata[messagequeue.MetadataDeferredMoveID])
+	// The legacy prompt is folded into one-shot entry instructions carried on
+	// the PendingMove; no hand-off message is pre-queued at defer time —
+	// instructions ride the target-step entry overlay applied at turn-end.
+	require.NotNil(t, queue.pendingMoves[0].EntryOptions)
+	assert.Equal(t, "continue the work", queue.pendingMoves[0].EntryOptions.Instructions)
+	assert.Empty(t, queue.calls)
 }
 
 func TestMoveTaskErrorMessage_SanitizesClassifiedErrors(t *testing.T) {

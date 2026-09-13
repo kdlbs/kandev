@@ -408,6 +408,7 @@
   "terminal": "終端",
   "todos": "待辦",
   "taskLoading": "正在載入任務…",
+  "taskRemovalInProgress": "正在離開此任務…",
   "tasks": "任務",
   "taskStateBlocked": "已阻塞",
   "taskStateCancelled": "已取消",

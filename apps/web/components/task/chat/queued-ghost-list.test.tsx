@@ -20,6 +20,7 @@ vi.mock("@/hooks/domains/session/use-queue", () => ({
 
 vi.mock("@/hooks/use-queue-edit-protection", () => ({
   useQueueEditProtection: () => useQueueEditProtectionMock(),
+  useQueuedGhostLeaseLoss: () => undefined,
   useQueuedGhostStartEdit:
     ({
       onEditStart,

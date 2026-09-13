@@ -51,6 +51,8 @@ type Summary struct {
 	Quarantine         any `json:"quarantine"`
 	TemporaryArtifacts any `json:"temporary_artifacts"`
 	Docker             any `json:"docker"`
+	Database           any `json:"database"`
+	DatabaseBackups    any `json:"database_backups"`
 }
 
 type DiskCapacity struct {
