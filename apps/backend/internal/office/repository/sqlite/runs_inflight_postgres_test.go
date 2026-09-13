@@ -163,6 +163,22 @@ func TestPostgresListLiveOfficeTaskIDsForWorkspace(t *testing.T) {
 	}
 	seedPostgresAgentProfile(t, ctx, repo, "pg-live-agent-1", "pg-live-agent-type", "pg-live-ws-1", now)
 	seedPostgresAgentProfile(t, ctx, repo, "pg-live-agent-2", "pg-live-agent-type", "pg-live-ws-2", now)
+	for _, task := range []struct {
+		id, workspaceID string
+	}{
+		{"pg-task-created", "pg-live-ws-1"},
+		{"pg-task-running", "pg-live-ws-1"},
+		{"pg-task-waiting", "pg-live-ws-1"},
+		{"pg-task-completed", "pg-live-ws-1"},
+		{"pg-task-other", "pg-live-ws-2"},
+	} {
+		if _, err := repo.ExecRaw(ctx, `
+			INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?)
+		`, task.id, task.workspaceID, task.id, now, now); err != nil {
+			t.Fatalf("seed task %s: %v", task.id, err)
+		}
+	}
 
 	for _, session := range []struct {
 		id, taskID, profileID, state string
