@@ -302,7 +302,8 @@ func (r *Repository) CancelRunsForWorkspace(ctx context.Context, runIDs []string
 		args[i] = id
 	}
 	selector := fmt.Sprintf(`id IN (%s)`, strings.Join(placeholders, ","))
-	return r.CancelRunsWhere(ctx, reason, selector, args...)
+	cancelled, err := r.CancelRunsWhere(ctx, reason, selector, args...)
+	return int64(len(cancelled)), err
 }
 
 // ReleaseCheckoutsForWorkspace clears the task checkout held by each given

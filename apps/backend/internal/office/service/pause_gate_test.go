@@ -47,7 +47,7 @@ func TestQueueRun_BlockedByPause_ReturnsErrWorkspacePaused(t *testing.T) {
 	gate := &fakePauseGate{active: []*models.WorkspacePause{{ID: "pause-1", WorkspaceID: "ws-1"}}}
 	svc.SetPauseGate(gate)
 
-	err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", "")
+	_, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", "")
 	if !errors.Is(err, shared.ErrWorkspacePaused) {
 		t.Fatalf("err = %v, want shared.ErrWorkspacePaused", err)
 	}
@@ -71,7 +71,7 @@ func TestQueueRun_PauseGateError_FailsClosed(t *testing.T) {
 	}
 	svc.SetPauseGate(&fakePauseGate{errs: []error{errors.New("db unavailable")}})
 
-	err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", "")
+	_, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", "")
 	if !errors.Is(err, shared.ErrPauseGateUnavailable) {
 		t.Fatalf("err = %v, want shared.ErrPauseGateUnavailable", err)
 	}
@@ -91,7 +91,7 @@ func TestQueueRun_NoPauseGateWired_Unaffected(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", ""); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
 	runs, _ := svc.ListRuns(ctx, "ws-1")
@@ -117,7 +117,7 @@ func TestSchedulerOutcome_WorkspacePaused_TakesPriorityOverAgentInactive(t *test
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 	run, err := svc.ClaimNextRun(ctx)
@@ -153,7 +153,7 @@ func TestSchedulerIntegration_ProcessRun_PauseGateError_RequeuesRun(t *testing.T
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 	run, err := svc.ClaimNextRun(ctx)
@@ -202,7 +202,7 @@ func TestSchedulerIntegration_PrepareAndLaunch_BlockedByPause_ReleasesCheckoutAn
 		VALUES ('task-launch-paused', 'ws-1', 'Launch paused task',
 		        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-launch-paused"}`, ""); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestSchedulerIntegration_PrepareAndLaunch_PauseGateError_ReleasesCheckoutAn
 		VALUES ('task-launch-gate-error', 'ws-1', 'Launch gate error task',
 		        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-launch-gate-error"}`, ""); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}

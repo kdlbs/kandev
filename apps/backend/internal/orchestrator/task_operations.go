@@ -899,7 +899,7 @@ func (s *Service) handleSessionLaunchFailure(
 ) error {
 	failureCtx := context.WithoutCancel(ctx)
 	safeErr := routingerr.SanitizeError(launchErr)
-	s.recordSessionLaunchFailure(
+	_ = s.recordSessionLaunchFailure(
 		failureCtx, taskID, sessionID, safeErr, preloadedSession...,
 	)
 	return safeErr
@@ -908,13 +908,17 @@ func (s *Service) handleSessionLaunchFailure(
 // recordSessionLaunchFailure transitions a still-active session to FAILED and
 // updates the task only while the same failed session still owns it. Typed
 // launch-error persistence belongs to the executor's session transition.
-func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error, preloadedSession ...*models.TaskSession) {
+// Returns whether the session itself was durably transitioned to FAILED — a
+// caller that is about to force-stop the process on the strength of that
+// transition (stopNeverStartedExecution) must not do so when this reports
+// false, or it kills the process while the session row still claims RUNNING.
+func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessionID string, launchErr error, preloadedSession ...*models.TaskSession) bool {
 	_, changed := s.updateTaskSessionStateWithHook(
 		ctx, taskID, sessionID, models.TaskSessionStateFailed, launchErr.Error(), false,
 		nil, preloadedSession...,
 	)
 	if !changed {
-		return
+		return false
 	}
 	updated, err := s.updateTaskStateForEarlyLaunchFailure(ctx, taskID, sessionID)
 	if err != nil {
@@ -922,12 +926,13 @@ func (s *Service) recordSessionLaunchFailure(ctx context.Context, taskID, sessio
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.Error(err))
-		return
+		return true
 	}
 	if !updated {
-		return
+		return true
 	}
 	s.processParentChildrenCompletedForTaskState(ctx, taskID, v1.TaskStateFailed)
+	return true
 }
 
 func (s *Service) updateTaskStateForEarlyLaunchFailure(
@@ -1102,8 +1107,8 @@ type startTaskOptions struct {
 func (s *Service) StartTaskWithRoute(
 	ctx context.Context, taskID, agentProfileID string,
 	launch executor.LaunchContext, route executor.RouteOverride,
-) error {
-	_, err := s.startTask(ctx, taskID, agentProfileID,
+) (*executor.TaskExecution, error) {
+	return s.startTask(ctx, taskID, agentProfileID,
 		launch.ExecutorID, launch.ExecutorProfileID, launch.Priority,
 		launch.Prompt, launch.WorkflowStepID, launch.PlanMode, false,
 		launch.Attachments, startTaskOptions{
@@ -1111,7 +1116,6 @@ func (s *Service) StartTaskWithRoute(
 			AdditionalSkillSlugs: append([]string(nil), launch.AdditionalSkillSlugs...),
 			Route:                &route,
 		})
-	return err
 }
 
 func (s *Service) prepareExplicitWorkflowStartRoute(
@@ -3624,7 +3628,15 @@ func (s *Service) StopTask(ctx context.Context, taskID string, reason string, fo
 
 	// Stop all agents for this task
 	if err := s.executor.StopByTaskID(ctx, taskID, reason, force); err != nil {
-		return err
+		if !errors.Is(err, executor.ErrOrphanRecoveryIncomplete) {
+			return err
+		}
+		// Every session that could be reached did stop; only a registry-only
+		// orphan's row failed to load. Log it and still transition to REVIEW
+		// rather than surfacing a false "failed to stop task" to the user.
+		s.logger.Warn("task stop reached REVIEW with an orphan recovery load failure",
+			zap.String("task_id", taskID),
+			zap.Error(err))
 	}
 
 	// Move task to REVIEW state for user review
@@ -3797,7 +3809,17 @@ func (s *Service) CancelTaskExecution(ctx context.Context, taskID string, reason
 		zap.String("task_id", taskID),
 		zap.String("reason", reason),
 		zap.Bool("force", force))
-	return s.executor.StopByTaskID(ctx, taskID, reason, force)
+	err := s.executor.StopByTaskID(ctx, taskID, reason, force)
+	if err != nil && errors.Is(err, executor.ErrOrphanRecoveryIncomplete) {
+		// Every session that could be reached did stop; only a registry-only
+		// orphan's row failed to load. Log it rather than reporting a false
+		// cancellation failure to office tree controls.
+		s.logger.Warn("task execution cancelled with an orphan recovery load failure",
+			zap.String("task_id", taskID),
+			zap.Error(err))
+		return nil
+	}
+	return err
 }
 
 // CancelTaskExecutionSynchronously stops every active session for a task and

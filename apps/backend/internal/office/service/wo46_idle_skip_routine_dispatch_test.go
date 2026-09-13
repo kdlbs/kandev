@@ -32,7 +32,7 @@ func TestIdleSkip_RoutineDispatchNoTasks_Skipped(t *testing.T) {
 	}
 	// Worker defaults to skip_idle_runs=true, no tasks assigned.
 
-	if err := svc.QueueRun(ctx, agent.ID, shared.RunReasonRoutineDispatchCron, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, shared.RunReasonRoutineDispatchCron, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -98,7 +98,7 @@ func TestIdleSkip_RoutineDispatch_CoordinatorNotSkipped(t *testing.T) {
 		t.Fatalf("CEO role should default to SkipIdleRuns=false")
 	}
 
-	if err := svc.QueueRun(ctx, agent.ID, shared.RunReasonRoutineDispatchCron, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, shared.RunReasonRoutineDispatchCron, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 

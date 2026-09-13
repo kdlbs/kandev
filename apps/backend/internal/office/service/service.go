@@ -53,6 +53,30 @@ type TaskStarterWithLaunchContext interface {
 	StartTaskWithLaunchContext(ctx context.Context, taskID string, agentProfileID string, launch LaunchContext) error
 }
 
+// TaskStarterWithSession optionally returns the id of the agent session
+// a direct (non-routed) launch created, so the caller can persist it on
+// the run row (AC-OFFICE-LOOP-LIVENESS-002.7). A starter that does not
+// implement this leaves the run's session id empty, counted as a
+// without-session launch.
+type TaskStarterWithSession interface {
+	StartTaskWithEnvReturningSession(ctx context.Context, taskID string, agentProfileID string, executorID string,
+		executorProfileID string, priority string, prompt string, workflowStepID string,
+		planMode bool, attachments []v1.MessageAttachment, env map[string]string) (sessionID string, err error)
+}
+
+// TaskStarterWithLaunchContextSession combines TaskStarterWithLaunchContext
+// and TaskStarterWithSession: a starter satisfying this carries the full
+// launch context (skills included) AND returns the launched session id in
+// the same call, so neither capability has to be dropped for the other.
+// AC-OFFICE-LOOP-LIVENESS-002.7 requires the session id unconditionally, on
+// every direct launch, regardless of whether that launch also carries
+// per-run skill additions — the production adapter must satisfy this
+// rather than TaskStarterWithLaunchContext alone.
+type TaskStarterWithLaunchContextSession interface {
+	StartTaskWithLaunchContextReturningSession(ctx context.Context, taskID string, agentProfileID string,
+		launch LaunchContext) (sessionID string, err error)
+}
+
 // LaunchContext mirrors scheduler.LaunchContext so the office.service
 // package can carry the Office-built launch context (prompt, env,
 // workflow step, attachments, plan-mode, profile) into the routing

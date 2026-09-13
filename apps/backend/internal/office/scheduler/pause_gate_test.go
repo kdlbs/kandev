@@ -44,7 +44,7 @@ func TestSchedulerQueueRun_BlockedByPause_ReturnsErrWorkspacePaused(t *testing.T
 	gate := &fakeSchedulerPauseGate{active: []*models.WorkspacePause{{ID: "pause-1", WorkspaceID: "ws-1"}}}
 	ss.SetPauseGate(gate)
 
-	err := ss.QueueRun(context.Background(), "agent-paused-ws", RunReasonTaskAssigned, "{}", "")
+	_, err := ss.QueueRun(context.Background(), "agent-paused-ws", RunReasonTaskAssigned, "{}", "")
 	if !errors.Is(err, shared.ErrWorkspacePaused) {
 		t.Fatalf("err = %v, want shared.ErrWorkspacePaused", err)
 	}
@@ -71,7 +71,7 @@ func TestSchedulerQueueRun_PauseGateError_FailsClosed(t *testing.T) {
 	createChildrenCompletedAgent(t, repo, "agent-gate-error")
 	ss.SetPauseGate(&fakeSchedulerPauseGate{errs: []error{errors.New("db unavailable")}})
 
-	err := ss.QueueRun(context.Background(), "agent-gate-error", RunReasonTaskAssigned, "{}", "")
+	_, err := ss.QueueRun(context.Background(), "agent-gate-error", RunReasonTaskAssigned, "{}", "")
 	if !errors.Is(err, shared.ErrPauseGateUnavailable) {
 		t.Fatalf("err = %v, want shared.ErrPauseGateUnavailable", err)
 	}
@@ -93,7 +93,7 @@ func TestSchedulerQueueRun_NoPauseGateWired_Unaffected(t *testing.T) {
 	ss := newChildrenCompletedTestScheduler(t, repo)
 	createChildrenCompletedAgent(t, repo, "agent-no-gate")
 
-	if err := ss.QueueRun(context.Background(), "agent-no-gate", RunReasonTaskAssigned, "{}", ""); err != nil {
+	if _, err := ss.QueueRun(context.Background(), "agent-no-gate", RunReasonTaskAssigned, "{}", ""); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
 

@@ -88,22 +88,21 @@ const IdempotencyWindowHours = 24
 func (s *Service) QueueRun(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
-) error {
+) (runsservice.QueueOutcome, error) {
 	agent, err := s.guardAgentStatus(ctx, agentInstanceID)
 	if err != nil {
-		return err
+		return runsservice.QueueOutcomeNone, err
 	}
 	if err := s.checkPauseGateForAgent(ctx, agent, "queue_run"); err != nil {
-		return err
+		return runsservice.QueueOutcomeNone, err
 	}
 
 	if s.runsService != nil {
-		_, err := s.runsService.QueueRun(ctx, runsservice.QueueRunRequest{
+		return s.runsService.QueueRun(ctx, runsservice.QueueRunRequest{
 			Reason:         reason,
 			IdempotencyKey: idempotencyKey,
 			Payload:        payloadWithAgent(payload, agentInstanceID),
 		})
-		return err
 	}
 	return s.queueRunInline(ctx, agentInstanceID, reason, payload, idempotencyKey)
 }
@@ -114,28 +113,26 @@ func (s *Service) QueueRun(
 func (s *Service) queueRunInline(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
-) error {
+) (runsservice.QueueOutcome, error) {
 	if idempotencyKey != "" {
 		dup, err := s.repo.CheckIdempotencyKey(ctx, idempotencyKey, IdempotencyWindowHours)
 		if err != nil {
-			return fmt.Errorf("idempotency check: %w", err)
+			return runsservice.QueueOutcomeNone, fmt.Errorf("idempotency check: %w", err)
 		}
 		if dup {
-			s.logger.Debug("run skipped (idempotent)",
-				zap.String("key", idempotencyKey))
-			return nil
+			return runsservice.ReportWindowedDedup(runsservice.QueueSourceRuns, reason, idempotencyKey), nil
 		}
 	}
 
 	coalesced, err := s.repo.CoalesceRun(ctx, agentInstanceID, reason, CoalesceWindowSeconds, payload)
 	if err != nil {
-		return fmt.Errorf("coalesce check: %w", err)
+		return runsservice.QueueOutcomeNone, fmt.Errorf("coalesce check: %w", err)
 	}
 	if coalesced {
 		s.logger.Debug("run coalesced",
 			zap.String("agent", agentInstanceID),
 			zap.String("reason", reason))
-		return nil
+		return runsservice.QueueOutcomeCoalesced, nil
 	}
 
 	var idemKeyPtr *string
@@ -152,8 +149,13 @@ func (s *Service) queueRunInline(
 		IdempotencyKey: idemKeyPtr,
 		RequestedAt:    time.Now().UTC(),
 	}
-	if err := s.repo.CreateRun(ctx, req); err != nil {
-		return fmt.Errorf("enqueue run: %w", err)
+	insertErr := s.repo.CreateRun(ctx, req)
+	outcome, err := runsservice.ReportInsertResult(runsservice.QueueSourceRuns, reason, idempotencyKey, agentInstanceID, insertErr)
+	if err != nil {
+		return runsservice.QueueOutcomeNone, fmt.Errorf("enqueue run: %w", err)
+	}
+	if outcome == runsservice.QueueOutcomeDeduped {
+		return outcome, nil
 	}
 
 	s.logger.Info("run queued",
@@ -162,7 +164,7 @@ func (s *Service) queueRunInline(
 		zap.String("reason", reason))
 
 	s.publishRunQueued(ctx, req, idempotencyKey)
-	return nil
+	return runsservice.QueueOutcomeQueued, nil
 }
 
 // payloadWithAgent decodes the JSON payload string and adds the

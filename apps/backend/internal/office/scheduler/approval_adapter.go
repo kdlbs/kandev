@@ -47,7 +47,7 @@ func (a *DashboardApprovalAdapter) QueueApprovalRuns(
 			DecisionComment: w.DecisionComment,
 			IdempotencyKey:  w.IdempotencyKey,
 		}
-		if err := a.scheduler.QueueRunCtx(ctx, w.AgentID, c); err != nil {
+		if _, err := a.scheduler.QueueRunCtx(ctx, w.AgentID, c); err != nil {
 			if errors.Is(err, shared.ErrWorkspacePaused) {
 				// A confirmed operator pause is not a reactivity failure —
 				// the paused workspace already logged its own pause event.

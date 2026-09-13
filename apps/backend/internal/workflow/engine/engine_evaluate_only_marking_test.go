@@ -8,6 +8,8 @@ package engine
 import (
 	"context"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 // --- AC-EO-1/AC-EO-4: EvaluateOnly with a deferred transition and a
@@ -368,13 +370,18 @@ func TestHandleTrigger_EmptyOperationIDSkipsStoreCallsEvenWhenDeferred(t *testin
 // --- AC-EO-8: HandleTriggerSessionShapedOnly follows the same rules — no
 // deferred-transition case is constructible through it, so this pins the
 // AC-EO-2/AC-EO-4-false/AC-EO-7 behaviors plus the structural precondition
-// (sessionShapedActionKinds admits no transition kind) that makes AC-EO-1
+// (isSessionShapedActionKind admits no transition kind) that makes AC-EO-1
 // vacuous here. ---
 
 func TestHandleTriggerSessionShapedOnly_FollowsMarkerRulesAndFilterIsDisjointFromTransitions(t *testing.T) {
-	for kind := range sessionShapedActionKinds {
+	compiled, err := actionKindsAssignedInFunc("types.go", "CompileOnEnterAction")
+	require.NoError(t, err)
+	for _, kind := range compiled {
+		if !isSessionShapedActionKind(kind) {
+			continue
+		}
 		if isTransitionAction(kind) {
-			t.Fatalf("sessionShapedActionKinds admits transition kind %q — AC-EO-1 would become reachable through HandleTriggerSessionShapedOnly and double-dispatch step entry (AC-OFFICE-STEP-ENTRY-001)", kind)
+			t.Fatalf("isSessionShapedActionKind admits transition kind %q — AC-EO-1 would become reachable through HandleTriggerSessionShapedOnly and double-dispatch step entry (AC-OFFICE-STEP-ENTRY-001)", kind)
 		}
 	}
 
