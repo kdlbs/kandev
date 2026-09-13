@@ -27,6 +27,7 @@ import (
 )
 
 func provideLifecycleManager(
+	ctx context.Context,
 	cfg *config.Config,
 	log *logger.Logger,
 	eventBus bus.EventBus,
