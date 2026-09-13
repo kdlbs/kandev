@@ -5,6 +5,8 @@ import type { KanbanExternalLinkAvailability } from "@/components/kanban-externa
 import type { KeyboardReorderDraft } from "@/components/kanban/virtualized-column-task-list";
 
 export type SharedKanbanLayoutProps = {
+  columnHeight?: string;
+  onNaturalHeightChange?: (stepId: string, height: number) => void;
   steps: WorkflowStep[];
   moveTargetSteps: WorkflowStep[];
   tasks: Task[];
@@ -50,6 +52,8 @@ export function useSharedKanbanLayoutProps(
   const { drag, displayTasks, externalLinkAvailability } = options;
   return useMemo(
     () => ({
+      columnHeight: options.columnHeight,
+      onNaturalHeightChange: options.onNaturalHeightChange,
       steps: drag.renderedSteps,
       moveTargetSteps: options.moveTargetSteps,
       tasks: displayTasks,
@@ -74,6 +78,8 @@ export function useSharedKanbanLayoutProps(
       onCardKeyDown: options.onCardKeyDown,
     }),
     [
+      options.columnHeight,
+      options.onNaturalHeightChange,
       drag.renderedSteps,
       drag.moveTaskToStep,
       drag.temporaryStepIds,

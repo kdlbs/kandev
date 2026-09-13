@@ -224,6 +224,7 @@
   "cancelling": "正在取消…",
   "cannotMarkDoneAwaitingApprovalFrom": "無法標記為完成：正在等待 {{names}} 的批准",
   "cannotMarkDoneAwaitingApprovals": "無法標記為完成：正在等待批准",
+  "cannotMarkDoneBeforeFinalWorkflowStep": "無法標記為完成：請先將任務移至工作流的最後一步",
   "cannotPreviewThisFile": "無法預覽此檔案",
   "changeGithubIssue": "更改 GitHub 議題",
   "changes": "變更",

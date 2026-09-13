@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useRef } from "react";
+import { memo, useCallback, useLayoutEffect, useRef } from "react";
 import { useDroppable } from "@dnd-kit/core";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTranslation } from "react-i18next";
@@ -24,6 +24,7 @@ export type KeyboardReorderDraft = {
 };
 
 type VirtualizedColumnTaskListProps = {
+  onContentHeightChange?: (height: number, element: HTMLDivElement) => void;
   orderedTasks: Task[];
   queuedStartIndex: number;
   queuedCount: number;
@@ -366,7 +367,9 @@ const VirtualizedTaskRow = memo(function VirtualizedTaskRow({
   );
 }, virtualizedTaskRowPropsEqual);
 
+// eslint-disable-next-line max-lines-per-function -- coordinates virtualization and pointer/keyboard insertion indicators.
 export function VirtualizedColumnTaskList({
+  onContentHeightChange,
   orderedTasks,
   queuedStartIndex,
   queuedCount,
@@ -405,6 +408,10 @@ export function VirtualizedColumnTaskList({
     overscan: 5,
   });
   const pointerActiveIndex = findTaskIndex(orderedTasks, activeTaskId);
+  const totalHeight = virtualizer.getTotalSize();
+  useLayoutEffect(() => {
+    if (scrollRef.current) onContentHeightChange?.(totalHeight, scrollRef.current);
+  }, [onContentHeightChange, totalHeight]);
 
   return (
     <div

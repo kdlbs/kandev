@@ -849,7 +849,9 @@ export async function provisionKubernetesCluster(
     try {
       const port = await waitForPortForward(proc);
       const baseUrl = `http://127.0.0.1:${port}`;
-      await waitForHealth(`${baseUrl}/health`, 30_000, proc);
+      // /health only proves that the listener is bound; /ready gates API
+      // requests until the in-cluster backend has finished wiring routes.
+      await waitForHealth(`${baseUrl}/ready`, 30_000, proc);
       const context: InClusterBackend = {
         baseUrl,
         frontendUrl: baseUrl,

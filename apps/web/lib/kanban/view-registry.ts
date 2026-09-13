@@ -7,6 +7,7 @@ import type { WorkflowStep } from "@/components/kanban-column";
 import type { MoveTaskError } from "@/hooks/use-drag-and-drop";
 
 export type ViewContentProps = {
+  compactHeight?: boolean;
   workflowId: string;
   steps: WorkflowStep[];
   moveTargetSteps: WorkflowStep[];
