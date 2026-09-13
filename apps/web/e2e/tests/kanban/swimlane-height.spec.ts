@@ -129,6 +129,15 @@ test("dense and sparse workflows size independently and keep the final task reac
   await testPage.setViewportSize({ width: 1440, height: 900 });
   await withHeightWorkflows(apiClient, seedData, async (second) => {
     await seedLargeColumnTasks(apiClient, seedData, "Dense height", 439);
+    // Per AC-TASKS-KANBAN-TASK-REORDERING-001.28, an arriving task takes the
+    // step's highest position, so the last-created task now sorts last
+    // (bottom) instead of the first-created one: reachability must target
+    // it, not `second.seedWorkflowTaskId` (created before the batch, so it
+    // now sorts first/top and needs no scroll).
+    const final = await apiClient.createTask(seedData.workspaceId, "Dense height final", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+    });
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
     const dense = kanban.columnByStepId(seedData.startStepId);
@@ -137,13 +146,13 @@ test("dense and sparse workflows size independently and keep the final task reac
     await expect.poll(async () => (await sparse.boundingBox())?.height).toBe(200);
     await expectBoundedMountedCards(dense);
     await scrollColumnToBottom(dense.getByTestId("kanban-column-scroll"));
-    const oldest = dense.getByTestId(`task-card-${second.seedWorkflowTaskId}`);
-    await expect(oldest).toBeInViewport();
+    const last = dense.getByTestId(`task-card-${final.id}`);
+    await expect(last).toBeInViewport();
     await expectBoundedMountedCards(dense);
     expect(await taskCards(dense).count()).toBeLessThan(50);
     await expectNoDocumentOverflow(testPage);
-    await oldest.click();
-    await expect(testPage).toHaveURL(new RegExp(`/t/${second.seedWorkflowTaskId}`));
+    await last.click();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${final.id}`));
   });
 });
 
