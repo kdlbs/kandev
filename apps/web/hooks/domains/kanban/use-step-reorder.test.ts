@@ -21,12 +21,14 @@ type FakeTask = {
 type WithheldEntry = { revision: number; tasks: Array<{ id: string; position: number }> };
 
 let storeState: {
+  kanban: { tasks: FakeTask[] };
   kanbanMulti: {
     snapshots: Record<string, { tasks: FakeTask[] }>;
     pendingReorderBandKeys: Record<string, true>;
     orderRevisionByStepId: Record<string, number>;
     withheldReorderByBandKey: Record<string, WithheldEntry | undefined>;
   };
+  hydrate: (state: { kanban?: { tasks: FakeTask[] } }) => void;
   setWorkflowSnapshot: (wfId: string, snapshot: { tasks: FakeTask[] }) => void;
   setBandReorderPending: (stepId: string, band: string, pending: boolean) => void;
   setStepOrderRevision: (stepId: string, revision: number) => void;
@@ -42,11 +44,15 @@ function admittedTask(id: string, position: number): FakeTask {
 
 function resetStore(tasks: FakeTask[]) {
   storeState = {
+    kanban: { tasks: tasks.map((task) => ({ ...task })) },
     kanbanMulti: {
       snapshots: { [WORKFLOW_ID]: { tasks } },
       pendingReorderBandKeys: {},
       orderRevisionByStepId: {},
       withheldReorderByBandKey: {},
+    },
+    hydrate(state) {
+      if (state.kanban?.tasks) storeState.kanban.tasks = state.kanban.tasks;
     },
     setWorkflowSnapshot(wfId, snapshot) {
       storeState.kanbanMulti.snapshots[wfId] = snapshot;

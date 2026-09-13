@@ -148,6 +148,43 @@ function applyPositionsToTasks<T extends { id: string; position: number }>(
 
 const REORDER_BANDS: readonly ReorderBand[] = ["admitted", "queued"];
 
+function highestHeldReorderRevision(
+  withheld: AppState["kanbanMulti"]["withheldReorderByBandKey"],
+  stepId: string,
+): number {
+  return Object.entries(withheld).reduce((highest, [key, payload]) => {
+    if (!key.startsWith(`${stepId}:`) || !payload) return highest;
+    return Math.max(highest, payload.revision);
+  }, -1);
+}
+
+function holdPendingReorderTasks(
+  state: AppState,
+  stepId: string,
+  pendingBands: readonly ReorderBand[],
+  held: Record<ReorderBand, ReorderedTaskPosition[]>,
+  revision: number,
+): AppState {
+  let nextState = state;
+  for (const band of pendingBands) {
+    if (held[band].length === 0) continue;
+    const key = `${stepId}:${band}`;
+    const existing = nextState.kanbanMulti.withheldReorderByBandKey[key];
+    if (existing && existing.revision >= revision) continue;
+    nextState = {
+      ...nextState,
+      kanbanMulti: {
+        ...nextState.kanbanMulti,
+        withheldReorderByBandKey: {
+          ...nextState.kanbanMulti.withheldReorderByBandKey,
+          [key]: { revision, tasks: held[band] },
+        },
+      },
+    };
+  }
+  return nextState;
+}
+
 /**
  * Classifies every task id in an event's whole-step payload into the band it
  * currently belongs to, using this client's own last-known membership flags
@@ -190,6 +227,17 @@ function makeTaskReorderedHandler(store: StoreApi<AppState>): WsHandlers["task.r
         return state;
       }
 
+      // A pending band can hold a newer whole-step event while the applied
+      // revision remains unchanged. An older event must not update the
+      // sibling band or replace that buffered snapshot on its way through.
+      const highestHeldRevision = highestHeldReorderRevision(
+        state.kanbanMulti.withheldReorderByBandKey,
+        stepId,
+      );
+      if (revision <= highestHeldRevision) {
+        return state;
+      }
+
       // AC.27: a band with a reorder request in flight keeps its optimistic
       // order until that request resolves; this whole-step payload's
       // position for such a task is held rather than applied, while every
@@ -216,20 +264,7 @@ function makeTaskReorderedHandler(store: StoreApi<AppState>): WsHandlers["task.r
         }
       }
 
-      let nextState = state;
-      for (const band of pendingBands) {
-        if (held[band].length === 0) continue;
-        nextState = {
-          ...nextState,
-          kanbanMulti: {
-            ...nextState.kanbanMulti,
-            withheldReorderByBandKey: {
-              ...nextState.kanbanMulti.withheldReorderByBandKey,
-              [`${stepId}:${band}`]: { revision, tasks: held[band] },
-            },
-          },
-        };
-      }
+      const nextState = holdPendingReorderTasks(state, stepId, pendingBands, held, revision);
 
       if (applyNow.length === 0) {
         // Every task in this payload belongs to a band still in flight —

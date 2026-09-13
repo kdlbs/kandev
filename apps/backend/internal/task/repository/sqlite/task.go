@@ -1502,7 +1502,65 @@ const (
 	pendingMoveOptionsKey    = "options"
 )
 
+const admissionSourceRetryLimit = 8
+
+type admissionSourceChangedError struct {
+	stepID string
+}
+
+func (e *admissionSourceChangedError) Error() string {
+	if e.stepID == "" {
+		return "task source step changed"
+	}
+	return fmt.Sprintf("task source step changed to %s", e.stepID)
+}
+
 func (r *Repository) updateTaskWithWorkflowStepAdmission(
+	ctx context.Context,
+	task *models.Task,
+	sourceStepID string,
+	targetStepID string,
+	limit int,
+	admittedState *v1.TaskState,
+	queueExitPending bool,
+	expectedStepID string,
+	expectedWorkflowID string,
+	deferredMove *messagequeue.PendingMoveRecord,
+) (admitted bool, applied bool, err error) {
+	currentSourceStepID := sourceStepID
+	for attempt := 0; attempt < admissionSourceRetryLimit; attempt++ {
+		attemptCtx, unlock := r.withStepArrivalLocks(ctx, targetStepID, currentSourceStepID)
+		admitted, applied, err = r.updateTaskWithWorkflowStepAdmissionAttempt(
+			attemptCtx,
+			task,
+			currentSourceStepID,
+			targetStepID,
+			limit,
+			admittedState,
+			queueExitPending,
+			expectedStepID,
+			expectedWorkflowID,
+			deferredMove,
+		)
+		unlock()
+
+		var changed *admissionSourceChangedError
+		if !errors.As(err, &changed) {
+			return admitted, applied, err
+		}
+		if expectedStepID != "" {
+			// CAS callers preserve their existing applied=false contract when
+			// the task has left the expected step. They must not retry against
+			// the new step and turn a stale transition into a new one.
+			return false, false, nil
+		}
+		currentSourceStepID = changed.stepID
+	}
+	return false, false, fmt.Errorf("task source step kept changing after %d attempts", admissionSourceRetryLimit)
+}
+
+//nolint:cyclop,gocognit,funlen // Admission owns one transaction for locks, WIP state, and deferred moves.
+func (r *Repository) updateTaskWithWorkflowStepAdmissionAttempt(
 	ctx context.Context,
 	task *models.Task,
 	sourceStepID string,
@@ -1519,16 +1577,6 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	if task.Metadata == nil {
 		task.Metadata = map[string]interface{}{}
 	}
-
-	// A cross-step move leaves sourceStepID as well as arriving into
-	// targetStepID, and REQ-TASKS-KANBAN-TASK-REORDERING-001.26 makes it
-	// conflict with a reorder of either — a reorder of sourceStepID that
-	// races this departure must see it (and report step_changed) rather than
-	// committing against stale membership. Both locks are acquired here,
-	// sorted, mirroring lockWorkflowStepsForAdmission's target+feeder pair.
-	var unlock func()
-	ctx, unlock = r.withStepArrivalLocks(ctx, targetStepID, sourceStepID)
-	defer unlock()
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1561,6 +1609,23 @@ func (r *Repository) updateTaskWithWorkflowStepAdmission(
 	}
 	if err := r.lockWorkflowStepsForAdmission(ctx, tx, targetStepID, sourceStepID); err != nil {
 		return false, false, err
+	}
+
+	// The caller's sourceStepID came from an earlier task snapshot. Confirm it
+	// after the target and supplied source locks are held. A mismatch releases
+	// the whole transaction, and the outer loop retries with the task's real
+	// source so it acquires the complete sorted lock set before assigning an
+	// arrival position. This closes the single-move TOCTOU window without
+	// acquiring a newly discovered source beneath an already-held lock.
+	_, actualSourceStepID, found, err := r.readTaskStepInTx(ctx, tx, task.ID)
+	if err != nil {
+		return false, false, err
+	}
+	if !found {
+		return false, false, fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
+	}
+	if actualSourceStepID != sourceStepID {
+		return false, false, &admissionSourceChangedError{stepID: actualSourceStepID}
 	}
 
 	// AC-46/48 compare-and-swap precondition, only for CAS callers (see

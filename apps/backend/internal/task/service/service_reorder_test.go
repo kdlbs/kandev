@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -209,6 +210,23 @@ func TestService_ReorderStepTasksDeniesCallerWithoutWorkflowAccess(t *testing.T)
 	// The workspace's own owner remains authorized.
 	if _, err := svc.ReorderStepTasks(ctxAs("user-b"), "step-reorder-denied", "admitted", []string{"denied-b", "denied-a"}); err != nil {
 		t.Fatalf("owner reorder: %v", err)
+	}
+}
+
+func TestService_ReorderStepTasksRequiresTaskWriteScope(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	seedTeamWorkspace(t, repo, true)
+	seedUnitViewer(t, "user-carla")
+	seedReorderTestStep(t, svc, repo, "step-1", "wf-team", 0)
+
+	ctx := ctxAsRole("user-carla", authn.RoleMember)
+	eventBus.ClearEvents()
+	_, err := svc.ReorderStepTasks(ctx, "step-1", "admitted", []string{"task-team"})
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("viewer reorder = %v, want ErrForbidden", err)
+	}
+	if len(eventBus.GetPublishedEvents()) != 0 {
+		t.Fatalf("viewer reorder must publish no event, got %+v", eventBus.GetPublishedEvents())
 	}
 }
 

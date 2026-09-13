@@ -155,3 +155,12 @@ func TestHTTPReorderStepTasksInvalidRequest(t *testing.T) {
 		t.Fatalf("invalid_reorder body must carry no task list, got %v", body)
 	}
 }
+
+func TestHTTPReorderStepTasksForbidden(t *testing.T) {
+	h, _ := newReorderHandlerTest(t, "step-http-forbidden", "task-1")
+	c, rec := reorderRequestContext("step-http-forbidden", `{"band":"admitted","ordered_task_ids":["task-1"]}`)
+
+	h.handleReorderStepTasksError(c, service.ErrForbidden, nil)
+
+	require.Equal(t, http.StatusForbidden, rec.Code)
+}

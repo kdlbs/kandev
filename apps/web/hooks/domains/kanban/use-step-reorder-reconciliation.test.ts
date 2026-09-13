@@ -25,6 +25,7 @@ type FakeTask = {
 type WithheldEntry = { revision: number; tasks: Array<{ id: string; position: number }> };
 
 let storeState: {
+  kanban: { tasks: FakeTask[] };
   kanbanMulti: {
     snapshots: Record<string, { tasks: FakeTask[] }>;
     pendingReorderBandKeys: Record<string, true>;
@@ -32,6 +33,7 @@ let storeState: {
     withheldReorderByBandKey: Record<string, WithheldEntry | undefined>;
   };
   setWorkflowSnapshot: (wfId: string, snapshot: { tasks: FakeTask[] }) => void;
+  hydrate: (state: { kanban?: { tasks: FakeTask[] } }) => void;
   setBandReorderPending: (stepId: string, band: string, pending: boolean) => void;
   setStepOrderRevision: (stepId: string, revision: number) => void;
   setWithheldReorder: (stepId: string, band: string, payload: WithheldEntry | null) => void;
@@ -50,6 +52,7 @@ function queuedTask(id: string, position: number): FakeTask {
 
 function resetStore(tasks: FakeTask[]) {
   storeState = {
+    kanban: { tasks: tasks.map((task) => ({ ...task })) },
     kanbanMulti: {
       snapshots: { [WORKFLOW_ID]: { tasks } },
       pendingReorderBandKeys: {},
@@ -58,6 +61,9 @@ function resetStore(tasks: FakeTask[]) {
     },
     setWorkflowSnapshot(wfId, snapshot) {
       storeState.kanbanMulti.snapshots[wfId] = snapshot;
+    },
+    hydrate(state) {
+      if (state.kanban?.tasks) storeState.kanban.tasks = state.kanban.tasks;
     },
     setBandReorderPending(stepId, band, pending) {
       const key = `${stepId}:${band}`;
@@ -271,6 +277,7 @@ describe("useStepReorder — in-flight reconciliation (AC.27), conflict and sibl
         t.id === "q1" ? { ...t, position: 9 } : t,
       ),
     };
+    storeState.kanbanMulti.orderRevisionByStepId[STEP_ID] = 2;
 
     await act(async () => {
       resolve({
@@ -289,6 +296,62 @@ describe("useStepReorder — in-flight reconciliation (AC.27), conflict and sibl
 
     const tasks = storeState.kanbanMulti.snapshots[WORKFLOW_ID].tasks;
     expect(tasks.find((t) => t.id === "q1")?.position).toBe(9);
+  });
+});
+
+describe("useStepReorder — whole-step reconciliation", () => {
+  it("applies the accepted whole-step response to both bands and the main board copy", async () => {
+    resetStore([
+      admittedTask("a", 0),
+      admittedTask("b", 1),
+      queuedTask("q1", 8),
+      queuedTask("q2", 9),
+    ]);
+    const { promise, resolve } = deferred<{
+      workflow_step_id: string;
+      revision: number;
+      tasks: Array<{ id: string; position: number }>;
+    }>();
+    reorderStepTasks.mockReturnValue(promise);
+    const { result } = renderHook(() => useStepReorder());
+
+    let pending!: Promise<void>;
+    act(() => {
+      pending = result.current.reorderBand({
+        workflowId: WORKFLOW_ID,
+        stepId: STEP_ID,
+        band: "admitted",
+        draggedId: "b",
+        visibleOrderAfterMove: ["b", "a"],
+      });
+    });
+
+    await act(async () => {
+      resolve({
+        workflow_step_id: STEP_ID,
+        revision: 1,
+        tasks: [
+          { id: "b", position: 0 },
+          { id: "a", position: 1 },
+          { id: "q1", position: 2 },
+          { id: "q2", position: 3 },
+        ],
+      });
+      await pending;
+    });
+
+    expect(storeState.kanbanMulti.snapshots[WORKFLOW_ID].tasks).toEqual([
+      expect.objectContaining({ id: "a", position: 1 }),
+      expect.objectContaining({ id: "b", position: 0 }),
+      expect.objectContaining({ id: "q1", position: 2 }),
+      expect.objectContaining({ id: "q2", position: 3 }),
+    ]);
+    expect(storeState.kanban.tasks).toEqual([
+      expect.objectContaining({ id: "a", position: 1 }),
+      expect.objectContaining({ id: "b", position: 0 }),
+      expect.objectContaining({ id: "q1", position: 2 }),
+      expect.objectContaining({ id: "q2", position: 3 }),
+    ]);
   });
 });
 

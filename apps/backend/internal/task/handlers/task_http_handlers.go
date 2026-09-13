@@ -1774,6 +1774,8 @@ func (h *TaskHandlers) handleReorderStepTasksError(c *gin.Context, err error, re
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_reorder"})
 	case isNotFound(err):
 		c.JSON(http.StatusNotFound, gin.H{"error": "workflow step not found"})
+	case service.IsForbidden(err):
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 	default:
 		h.logger.Error("reorder step tasks failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "reorder failed"})

@@ -194,3 +194,34 @@ describe("task.reordered handler", () => {
     });
   });
 });
+
+describe("task.reordered revision buffering", () => {
+  it("keeps the newest held revision when an older event arrives later", () => {
+    const store = makeStore({ pendingReorderBandKeys: { [`${STEP_ID}:admitted`]: true } });
+    const handler = registerKanbanHandlers(store)["task.reordered"]!;
+
+    handler(
+      makeReorderedMessage(3, [
+        { id: "a", position: 30 },
+        { id: "b", position: 31 },
+        { id: "c", position: 32 },
+      ]),
+    );
+    handler(
+      makeReorderedMessage(2, [
+        { id: "a", position: 20 },
+        { id: "b", position: 21 },
+        { id: "c", position: 22 },
+      ]),
+    );
+
+    expect(store.getState().kanbanMulti.withheldReorderByBandKey[`${STEP_ID}:admitted`]).toEqual({
+      revision: 3,
+      tasks: [
+        { id: "a", position: 30 },
+        { id: "b", position: 31 },
+        { id: "c", position: 32 },
+      ],
+    });
+  });
+});

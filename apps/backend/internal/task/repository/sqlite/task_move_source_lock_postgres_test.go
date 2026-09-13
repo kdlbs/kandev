@@ -96,3 +96,110 @@ func TestPostgresCrossStepMoveLocksSourceStepAgainstConcurrentReorder(t *testing
 		t.Fatalf("moved task ended up in step %q, want %q", stored.WorkflowStepID, targetStep)
 	}
 }
+
+// TestPostgresAdmissionRechecksStaleSourceBeforeMoving proves a manual move
+// cannot miss the task's real source step when its caller snapshot is stale.
+// The reorder pauses after reading step B. The move is given a stale source A
+// and must wait for B, then arrive in C after the reorder commits. Before the
+// source recheck, it locked A and C, moved the task to C, and the paused
+// reorder wrote B's position into the task after that move.
+func TestPostgresAdmissionRechecksStaleSourceBeforeMoving(t *testing.T) {
+	const (
+		stepA = "stale-source-a"
+		stepB = "stale-source-b"
+		stepC = "stale-source-c"
+	)
+	db := openIsolatedPostgresMultiConn(t, testutil.PostgresDSNFromEnv(t), 3)
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("init postgres schema: %v", err)
+	}
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "stale-source-ws", Name: "Stale source"}); err != nil {
+		t.Fatalf("seed workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "stale-source-workflow", WorkspaceID: "stale-source-ws", Name: "Stale source"}); err != nil {
+		t.Fatalf("seed workflow: %v", err)
+	}
+	for i, stepID := range []string{stepA, stepB, stepC} {
+		if _, err := db.Exec(db.Rebind(`
+			INSERT INTO workflow_steps (id, workflow_id, name, position)
+			VALUES (?, ?, ?, ?)
+		`), stepID, "stale-source-workflow", stepID, i); err != nil {
+			t.Fatalf("seed workflow step %s: %v", stepID, err)
+		}
+	}
+
+	moving := &models.Task{
+		ID: "stale-source-moving", WorkspaceID: "stale-source-ws", WorkflowID: "stale-source-workflow",
+		WorkflowStepID: stepB, Title: "Moving", WIPAdmitted: true,
+	}
+	stays := &models.Task{
+		ID: "stale-source-stays", WorkspaceID: "stale-source-ws", WorkflowID: "stale-source-workflow",
+		WorkflowStepID: stepB, Title: "Stays", WIPAdmitted: true,
+	}
+	target := &models.Task{
+		ID: "stale-source-target", WorkspaceID: "stale-source-ws", WorkflowID: "stale-source-workflow",
+		WorkflowStepID: stepC, Title: "Target", WIPAdmitted: true,
+	}
+	for _, task := range []*models.Task{moving, stays, target} {
+		if err := repo.CreateTask(ctx, task); err != nil {
+			t.Fatalf("seed task %s: %v", task.ID, err)
+		}
+	}
+
+	reorderPaused := make(chan struct{})
+	releaseReorder := make(chan struct{})
+	var pauseOnce sync.Once
+	repo.reorderPreWriteHook = func() {
+		pauseOnce.Do(func() {
+			close(reorderPaused)
+			<-releaseReorder
+		})
+	}
+	t.Cleanup(func() {
+		repo.reorderPreWriteHook = nil
+		select {
+		case <-releaseReorder:
+		default:
+			close(releaseReorder)
+		}
+	})
+
+	var reorderErr error
+	reorderDone := make(chan struct{})
+	go func() {
+		_, _, reorderErr = repo.ReorderStepTasks(ctx, stepB, ReorderBandAdmitted, []string{moving.ID, stays.ID})
+		close(reorderDone)
+	}()
+	<-reorderPaused
+
+	// The caller's model still says A, while the persisted task is in B.
+	staleSnapshot := *moving
+	staleSnapshot.WorkflowStepID = stepA
+	moveDone := make(chan error, 1)
+	go func() {
+		_, err := repo.UpdateTaskWithWorkflowStepAdmission(ctx, &staleSnapshot, stepA, stepC, 0)
+		moveDone <- err
+	}()
+
+	close(releaseReorder)
+	<-reorderDone
+	if reorderErr != nil {
+		t.Fatalf("reorder: %v", reorderErr)
+	}
+	if err := <-moveDone; err != nil {
+		t.Fatalf("move with stale source: %v", err)
+	}
+
+	stored, err := repo.GetTask(ctx, moving.ID)
+	if err != nil {
+		t.Fatalf("reload moved task: %v", err)
+	}
+	if stored.WorkflowStepID != stepC {
+		t.Fatalf("moved task ended in step %q, want %q", stored.WorkflowStepID, stepC)
+	}
+	if stored.Position != target.Position+1 {
+		t.Fatalf("moved task position = %d, want %d after target arrival", stored.Position, target.Position+1)
+	}
+}

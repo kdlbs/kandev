@@ -47,11 +47,28 @@ function bandTaskIds(tasks: SnapshotTask[], stepId: string, band: ReorderBand): 
   return new Set(bandOrder(tasks, stepId, band).map((task) => task.id));
 }
 
+function reconciliationTaskIds(
+  tasks: SnapshotTask[],
+  stepId: string,
+  activeBand: ReorderBand,
+  pendingBands: Record<string, true>,
+): Set<string> {
+  const { admitted, queued } = partitionWipTasks(tasks, stepId);
+  const allowed = new Set<string>();
+  for (const task of admitted) {
+    if (activeBand === "admitted" || !pendingBands[`${stepId}:admitted`]) allowed.add(task.id);
+  }
+  for (const task of queued) {
+    if (activeBand === "queued" || !pendingBands[`${stepId}:queued`]) allowed.add(task.id);
+  }
+  return allowed;
+}
+
 /**
  * Applies `orderedTasks`' positions, restricted to `allowedIds` when given.
- * Restricting to the band under reconciliation keeps a whole-step response or
- * withheld snapshot from clobbering the sibling band's positions, which may
- * already be fresher (REQ-TASKS-KANBAN-TASK-REORDERING-001.27).
+ * Reconciliation allows the active band and any sibling band that is not also
+ * in flight, while keeping a second optimistic band untouched
+ * (REQ-TASKS-KANBAN-TASK-REORDERING-001.27).
  */
 function applyOrderedPositions(
   tasks: SnapshotTask[],
@@ -112,6 +129,47 @@ function pickReconciledOrder(
   return response;
 }
 
+function reconcileAndApplyReorderResponse(params: {
+  store: StoreApi<AppState>;
+  workflowId: string;
+  stepId: string;
+  band: ReorderBand;
+  candidate: { revision: number; tasks: ReorderedTaskPosition[] };
+}): void {
+  const { store, workflowId, stepId, band, candidate } = params;
+  const state = store.getState();
+  const current = state.kanbanMulti.snapshots[workflowId];
+  if (!current) return;
+
+  const bandKey = `${stepId}:${band}`;
+  const withheld = state.kanbanMulti.withheldReorderByBandKey[bandKey];
+  const chosen = pickReconciledOrder(withheld, candidate);
+  const recordedRevision = state.kanbanMulti.orderRevisionByStepId[stepId] ?? -1;
+  if (chosen.revision < recordedRevision) {
+    state.setWithheldReorder(stepId, band, null);
+    return;
+  }
+
+  const allowedIds = reconciliationTaskIds(
+    current.tasks,
+    stepId,
+    band,
+    state.kanbanMulti.pendingReorderBandKeys,
+  );
+  state.setWorkflowSnapshot(workflowId, {
+    ...current,
+    tasks: applyOrderedPositions(current.tasks, chosen.tasks, allowedIds),
+  });
+  state.hydrate({
+    kanban: {
+      ...state.kanban,
+      tasks: applyOrderedPositions(state.kanban.tasks, chosen.tasks, allowedIds),
+    },
+  });
+  state.setStepOrderRevision(stepId, Math.max(chosen.revision, recordedRevision));
+  state.setWithheldReorder(stepId, band, null);
+}
+
 /**
  * Submits a within-band reorder (REQ-TASKS-KANBAN-TASK-REORDERING-001.5,
  * .12): applies the new order optimistically, calls the reorder endpoint —
@@ -164,38 +222,19 @@ export function useStepReorder() {
         tasks: applyBandPositions(snapshot.tasks, stepId, band, nextBandOrder, admittedCount),
       });
       state.setBandReorderPending(stepId, band, true);
-
       const bandKey = `${stepId}:${band}`;
-
-      // Reconciles `candidate` against anything withheld while this band's
-      // request was in flight (REQ-TASKS-KANBAN-TASK-REORDERING-001.27),
-      // applies the result scoped to this band only, advances the revision
-      // without ever regressing it, and clears the withheld entry.
-      const reconcileAndApply = (
-        current: { tasks: SnapshotTask[] },
-        candidate: { revision: number; tasks: ReorderedTaskPosition[] },
-      ) => {
-        const withheld = store.getState().kanbanMulti.withheldReorderByBandKey[bandKey];
-        const chosen = pickReconciledOrder(withheld, candidate);
-        const allowedIds = bandTaskIds(
-          current.tasks.filter((task) => task.workflowStepId === stepId),
-          stepId,
-          band,
-        );
-        const recordedRevision = store.getState().kanbanMulti.orderRevisionByStepId[stepId] ?? -1;
-        state.setWorkflowSnapshot(workflowId, {
-          ...store.getState().kanbanMulti.snapshots[workflowId]!,
-          tasks: applyOrderedPositions(current.tasks, chosen.tasks, allowedIds),
-        });
-        state.setStepOrderRevision(stepId, Math.max(chosen.revision, recordedRevision));
-        state.setWithheldReorder(stepId, band, null);
-      };
 
       try {
         const response = await reorderStepTasks(stepId, { band, ordered_task_ids: nextBandOrder });
         const current = store.getState().kanbanMulti.snapshots[workflowId];
         if (current) {
-          reconcileAndApply(current, response);
+          reconcileAndApplyReorderResponse({
+            store,
+            workflowId,
+            stepId,
+            band,
+            candidate: response,
+          });
         }
       } catch (error) {
         const current = store.getState().kanbanMulti.snapshots[workflowId];
@@ -210,7 +249,13 @@ export function useStepReorder() {
               : null;
           if (conflictBody) {
             // step_changed (.19): reconcile silently, no error toast.
-            reconcileAndApply(current, conflictBody);
+            reconcileAndApplyReorderResponse({
+              store,
+              workflowId,
+              stepId,
+              band,
+              candidate: conflictBody,
+            });
           } else {
             const withheld = store.getState().kanbanMulti.withheldReorderByBandKey[bandKey];
             if (withheld) {
@@ -220,7 +265,13 @@ export function useStepReorder() {
               // against the LIVE snapshot, not `originalTasks`, so a sibling
               // band or another step that changed during the in-flight
               // window is preserved rather than rolled back.
-              reconcileAndApply(current, withheld);
+              reconcileAndApplyReorderResponse({
+                store,
+                workflowId,
+                stepId,
+                band,
+                candidate: withheld,
+              });
             } else {
               restoreBandOnFailure({ store, workflowId, stepId, band, originalTasks, current });
             }

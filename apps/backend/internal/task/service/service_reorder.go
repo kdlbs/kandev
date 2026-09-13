@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/task/models"
@@ -49,7 +50,7 @@ func (s *Service) ReorderStepTasks(ctx context.Context, stepID, band string, ord
 	if err != nil {
 		return nil, err
 	}
-	if err := s.authorizeWorkflowID(ctx, step.WorkflowID); err != nil {
+	if err := s.authorizeWorkflowScope(ctx, step.WorkflowID, authz.ScopeTaskWrite); err != nil {
 		return nil, err
 	}
 	reorderer, ok := s.tasks.(reorderRepository)

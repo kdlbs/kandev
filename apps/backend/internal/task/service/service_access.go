@@ -251,6 +251,23 @@ func (s *Service) authorizeWorkflowID(ctx context.Context, workflowID string) er
 	return nil
 }
 
+// authorizeWorkflowScope checks reach and one action scope for a workflow.
+// Workflow access is resolved through its workspace so callers that can read
+// a board but cannot write its tasks receive ErrForbidden.
+func (s *Service) authorizeWorkflowScope(ctx context.Context, workflowID string, scope authz.Scope) error {
+	if _, scoped := callerScope(ctx); !scoped {
+		return nil
+	}
+	workflow, err := s.workflows.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return err
+	}
+	if workflow.WorkspaceID == "" {
+		return nil
+	}
+	return s.AuthorizeWorkspaceScope(ctx, workflow.WorkspaceID, scope)
+}
+
 // AuthorizeTaskAccess is the public form of authorizeTaskID, consumed by the
 // WS gateway's subscription checks.
 func (s *Service) AuthorizeTaskAccess(ctx context.Context, taskID string) error {
