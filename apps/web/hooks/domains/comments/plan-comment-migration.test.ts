@@ -3,7 +3,7 @@ import { createAppStore } from "@/lib/state/store";
 import { COMMENTS_STORAGE_PREFIX } from "@/lib/state/slices/comments/persistence";
 import type { PlanComment } from "@/lib/state/slices/comments";
 import type { TaskPlan, TaskPlanCommentSnapshot } from "@/lib/types/http";
-import { WebSocketRequestError } from "@/lib/ws/request-error";
+import { WebSocketRequestError, toWebSocketRequestError } from "@/lib/ws/request-error";
 import { planCommentMigrationFor } from "./plan-comment-migration";
 
 const api = vi.hoisted(() => ({
@@ -228,6 +228,56 @@ describe("task-scoped plan comment recovery", () => {
   });
 });
 
+describe("legacy recovery wire errors", () => {
+  // @covers AC-TASKS-PLAN-COMMENTS-004.6
+  it.each(["INTERNAL_ERROR", "internal_error"])("automatically retries %s", async (code) => {
+    write();
+    api.createTaskPlanComment.mockRejectedValueOnce(
+      toWebSocketRequestError({ code, message: "Temporary server failure" }),
+    );
+    const { state } = setup();
+    await settle();
+    expect(state()).toMatchObject({ status: "retrying", pendingCount: 1 });
+    expect(saved()).toEqual([comment]);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(api.createTaskPlanComment).toHaveBeenCalledTimes(2);
+    expect(state()).toMatchObject({ status: "complete", pendingCount: 0 });
+    expect(saved()).toEqual([]);
+  });
+
+  it.each([
+    ["NOT_FOUND", "automatic"],
+    ["not_found", "automatic"],
+    ["NOT_FOUND", "manual"],
+    ["not_found", "manual"],
+  ])("refreshes a missing plan after %s through %s retry", async (code, trigger) => {
+    write();
+    const replacement = { ...plan, id: "plan-2" };
+    const recovered = {
+      ...snapshot,
+      plan_id: replacement.id,
+      comments: snapshot.comments.map((row) => ({ ...row, plan_id: replacement.id })),
+    };
+    plans.getTaskPlan.mockResolvedValue(replacement);
+    api.createTaskPlanComment
+      .mockRejectedValueOnce(toWebSocketRequestError({ code, message: "Plan not found" }))
+      .mockResolvedValue(recovered);
+    const { store, recovery, state } = setup();
+    await settle();
+    expect(saved()).toEqual([comment]);
+    if (trigger === "manual") await recovery.retry();
+    else await vi.advanceTimersByTimeAsync(1000);
+    await settle();
+    expect(plans.getTaskPlan).toHaveBeenCalledOnce();
+    expect(api.createTaskPlanComment).toHaveBeenLastCalledWith(
+      expect.objectContaining({ planId: replacement.id, id: comment.id, body: comment.text }),
+    );
+    expect(store.getState().taskPlans.commentsByTaskId[TASK]).toEqual(recovered);
+    expect(state()).toMatchObject({ status: "complete", pendingCount: 0 });
+    expect(saved()).toEqual([]);
+  });
+});
+
 describe("legacy recovery identity", () => {
   it("surfaces exhausted plan lookup failures for known drafts and later recovers", async () => {
     write();
@@ -311,12 +361,34 @@ describe("legacy edits during acknowledgement", () => {
     api.updateTaskPlanComment.mockRejectedValue(
       new WebSocketRequestError("Changed version", "plan_comments_changed", { snapshot: remote }),
     );
-    const { store, state } = await acknowledgeDuringLocalEdit();
+    const { store, recovery, state } = await acknowledgeDuringLocalEdit();
     await vi.advanceTimersByTimeAsync(121000);
     expect(api.updateTaskPlanComment).toHaveBeenCalledOnce();
     expect(state()).toMatchObject({ status: "failed", pendingCount: 1, failure: "conflict" });
     expect(saved()).toEqual([{ ...comment, text: EDITED_BODY }]);
     expect(store.getState().taskPlans.commentsByTaskId[TASK]).toEqual(remote);
+
+    await recovery.retry();
+    expect(api.updateTaskPlanComment).toHaveBeenCalledTimes(2);
+    expect(api.updateTaskPlanComment).toHaveBeenLastCalledWith({
+      taskId: TASK,
+      planId: PLAN,
+      id: comment.id,
+      expectedVersion: 1,
+      body: EDITED_BODY,
+    });
+    expect(state()).toMatchObject({ status: "failed", pendingCount: 1, failure: "conflict" });
+    expect(store.getState().taskPlans.commentsByTaskId[TASK]).toEqual(remote);
+    expect(saved()).toEqual([{ ...comment, text: EDITED_BODY }]);
+
+    const resolved = editedSnapshot(EDITED_BODY, 4);
+    api.updateTaskPlanComment.mockRejectedValueOnce(
+      new WebSocketRequestError("Changed version", "plan_comments_changed", { snapshot: resolved }),
+    );
+    await recovery.retry();
+    expect(state()).toMatchObject({ status: "complete", pendingCount: 0 });
+    expect(store.getState().taskPlans.commentsByTaskId[TASK]).toEqual(resolved);
+    expect(saved()).toEqual([]);
   });
 
   it("reconciles an accepted update whose response was lost", async () => {

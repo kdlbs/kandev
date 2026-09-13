@@ -233,6 +233,16 @@ discovery, store-lifetime task caches, and authoritative cleanup readback. No
 executable behavior changed. All 55 focused tests across the five affected
 coordinator, hook, and persistence test files pass, as does changed-file ESLint.
 
+Post-update review remediation on 2026-09-13 preserves the user's base merge,
+recognizes actual uppercase transient wire errors, and retains missing-plan
+refresh intent during manual Retry. Stronger deferred-read and conflict tests
+confirm serialized loading cleanup and the existing no-overwrite contract. The
+browser assertion now requires delivery of both plan and diff feedback. The
+focused suite passes 151 unit/component tests plus 24 locale-generator tests;
+static and documentation checks pass. All eight Chromium/Pixel 5 scenarios
+pass with zero retries. The work order records local verification; exact-head
+remote delivery checks remain a separate gate.
+
 ## Risks
 
 - Unknown ownership must not be mistaken for task-owned feedback. Plain Send

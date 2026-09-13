@@ -71,7 +71,7 @@ async function interceptPlanRequests(
               id: parsed.id,
               action: parsed.action,
               payload: {
-                code: "internal_error",
+                code: "INTERNAL_ERROR",
                 message: "Injected transient plan request failure",
               },
             }),
@@ -288,7 +288,8 @@ export async function assertLegacyRecoveryPreservesDraft(options: RecoveryOption
           (entry) =>
             entry.author_type === "user" &&
             entry.content.includes(message) &&
-            entry.content.includes(FEEDBACK),
+            entry.content.includes(FEEDBACK) &&
+            entry.content.includes(diff.text),
         ).length,
       { timeout: 30_000 },
     )

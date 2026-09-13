@@ -279,35 +279,32 @@ describe("usePlanComments loading", () => {
 
   it("does not let a stale plan fetch clear the replacement plan loading state", async () => {
     let rejectOld!: (error: Error) => void;
-    api.getTaskPlanComments.mockImplementationOnce(
-      () => new Promise((_resolve, reject) => (rejectOld = reject)),
-    );
-    const { result } = renderHook(
-      () => {
-        const store = useAppStoreApi();
-        return { store, comments: usePlanComments(TASK_ID) };
-      },
-      { wrapper },
-    );
-    act(() => {
+    let finishReplacement!: (value: TaskPlanCommentSnapshot) => void;
+    const replacement = { ...snapshot(2), plan_id: "plan-2", comments: [] };
+    api.getTaskPlanComments
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => (rejectOld = reject)))
+      .mockImplementationOnce(() => new Promise((resolve) => (finishReplacement = resolve)));
+    const { result } = renderHook(useTwoTaskCommentConsumers, { wrapper });
+    await act(async () => {
       result.current.store.getState().setTaskPlan(TASK_ID, taskPlan);
-      result.current.store.setState({
-        connection: { status: "connected", error: null, issueSeverity: "none" },
-      });
+      result.current.store.getState().setConnectionStatus("connected");
     });
-    await waitFor(() => expect(result.current.comments.isLoading).toBe(true));
-    act(() => {
+    expect(result.current.first.isLoading).toBe(true);
+    await act(async () => {
       result.current.store.getState().setTaskPlan(TASK_ID, { ...taskPlan, id: "plan-2" });
-      result.current.store.getState().setTaskPlanCommentsLoading(TASK_ID, true);
-      rejectOld(new Error("old plan failed"));
     });
-
-    await waitFor(() => {
-      expect(result.current.store.getState().taskPlans.commentsLoadingByTaskId[TASK_ID]).toBe(true);
-      expect(
-        result.current.store.getState().taskPlans.commentsErrorByTaskId[TASK_ID],
-      ).toBeUndefined();
-    });
+    expect(api.getTaskPlanComments).toHaveBeenCalledOnce();
+    await act(async () => rejectOld(new Error("old plan failed")));
+    expect(api.getTaskPlanComments).toHaveBeenCalledTimes(2);
+    expect(result.current.first.isLoading).toBe(true);
+    expect(result.current.second.isLoading).toBe(true);
+    expect(result.current.first.loadError).toBeNull();
+    expect(result.current.second.loadError).toBeNull();
+    await act(async () => finishReplacement(replacement));
+    expect(result.current.first.isLoading).toBe(false);
+    expect(result.current.second.isLoading).toBe(false);
+    expect(result.current.first.snapshot).toEqual(replacement);
+    expect(result.current.second.snapshot).toEqual(replacement);
   });
 });
 

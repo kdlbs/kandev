@@ -51,7 +51,7 @@ function classifyFailure(error: unknown): Failure {
   if (
     error instanceof WebSocketRequestError &&
     error.code &&
-    !["internal_error", "internal", "timeout", "not_found"].includes(error.code)
+    !["internal_error", "internal", "timeout", "not_found"].includes(error.code.toLowerCase())
   )
     return "rejected";
   return "transient";
@@ -113,7 +113,7 @@ export class PlanCommentMigration {
     this.failures = 0;
     this.failure = null;
     this.dueAt = 0;
-    this.refreshPlan = this.pending.size > 0 && !this.plan();
+    this.refreshPlan ||= this.pending.size > 0 && !this.plan();
     this.cancelTimer();
     this.scan();
     return this.kick();
@@ -352,7 +352,7 @@ export class PlanCommentMigration {
     ) {
       return acknowledgeLegacyRecord(record);
     }
-    if (error instanceof WebSocketRequestError && error.code === "not_found")
+    if (error instanceof WebSocketRequestError && error.code?.toLowerCase() === "not_found")
       this.refreshPlan = true;
     return classifyFailure(error);
   }

@@ -340,3 +340,44 @@ pnpm exec eslint hooks/domains/comments/plan-comment-loading.ts \
   hooks/domains/comments/plan-comment-migration.ts \
   lib/state/slices/comments/persistence.ts --max-warnings 0
 ```
+
+### Post-update review remediation (2026-09-13)
+
+Preserved the user's GitHub merge of the current base and refreshed frozen
+workspace dependencies. Six wire-error regressions produced four expected RED
+failures before the fix: uppercase transient errors were rejected permanently,
+and manual Retry discarded a pending missing-plan refresh. Normalize transient
+error comparisons and retain that refresh intent. The backend wire contract,
+retry schedule, and draft/admission ownership are unchanged.
+
+Strengthened two existing regressions without changing their production
+contracts. Deferred old and replacement reads prove the shared loader finishes
+old cleanup before starting the replacement; both consumers remain loading
+until that replacement settles. Conflict coverage proves Retry cannot adopt a
+newer server version to overwrite a different body. Recovery acknowledges only
+an authoritative exact body/anchor match, preserving both copies otherwise.
+
+The browser fixture now injects the backend's uppercase `INTERNAL_ERROR` and
+requires the final delivered message to contain both plan and diff feedback.
+The public task how-to already describes these outcomes; no new public copy,
+controls, layout, or mobile interaction pattern is introduced.
+
+Local verification:
+
+- The 13-file focused command in Verification passes 151 tests; adding
+  `scripts/convert-zh-cn-to-zh-hant.test.mjs` passes 175 tests across 14 files.
+- `pnpm run typecheck`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet` pass.
+- Changed-file ESLint with `--max-warnings 0` passes for the migration source,
+  its tests, the loading hook tests, and the shared browser recovery helper.
+- Harness regression tests (19), all-file harness lint (198 files), targeted
+  `pre-commit run harness-lint --files` for incoming guidance, specification
+  regression tests (36), all-file spec lint, and `python3 scripts/list-docs.py
+  validate` pass.
+- Both public-doc validators pass, including all 46 published pages.
+- Fresh Chromium verification passes four scenarios (1.1m) with
+  `pnpm e2e:run --project chromium tests/session/task-plan-comments.spec.ts -- --retries=0`.
+  Pixel 5 verification passes four scenarios (52.2s) against the same unchanged
+  build with `pnpm e2e:run --no-build --project mobile-chrome tests/session/mobile-task-plan-comments.spec.ts -- --retries=0`.
+  Both commands run from `apps/web`, with zero retries. Exact-head remote CI,
+  reviewer replies, and the requested observation window remain delivery gates,
+  not completed checks in this tracked document.
