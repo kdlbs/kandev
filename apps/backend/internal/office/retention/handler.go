@@ -11,6 +11,11 @@ import (
 
 const responseErrorKey = "error"
 
+// maxRetentionSettingsBodyBytes bounds administrator-controlled JSON before
+// the handler decodes it, so a malformed request cannot consume unbounded
+// memory.
+const maxRetentionSettingsBodyBytes = 1 << 20
+
 // HandlerConfig wires the HTTP surface to the package's own stores.
 type HandlerConfig struct {
 	SettingsStore *SettingsStore
@@ -86,8 +91,14 @@ func (h *Handler) getRetention(c *gin.Context) {
 }
 
 func (h *Handler) putRetention(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxRetentionSettingsBodyBytes)
 	body, err := c.GetRawData()
 	if err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{responseErrorKey: "request body too large"})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{responseErrorKey: "failed to read request body"})
 		return
 	}

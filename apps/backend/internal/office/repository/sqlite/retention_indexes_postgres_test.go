@@ -27,12 +27,14 @@ func TestPostgresRetentionIndexes_CreatedFreshAndReplaySafe(t *testing.T) {
 	}
 	assertPostgresIndexExists(t, conn, "idx_office_routine_runs_retention")
 	assertPostgresIndexExists(t, conn, "idx_runs_retention")
+	assertPostgresIndexExists(t, conn, "idx_office_agent_pause_recoveries_failed_run")
 
 	if _, err := sqlite.NewWithDB(conn, conn, nil); err != nil {
 		t.Fatalf("replay NewWithDB: %v", err)
 	}
 	assertPostgresIndexExists(t, conn, "idx_office_routine_runs_retention")
 	assertPostgresIndexExists(t, conn, "idx_runs_retention")
+	assertPostgresIndexExists(t, conn, "idx_office_agent_pause_recoveries_failed_run")
 }
 
 func assertPostgresIndexExists(t *testing.T, conn interface {

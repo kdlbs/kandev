@@ -442,6 +442,9 @@ func (r *Repository) migrateFailureColumns() error {
 	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_office_agent_pause_recoveries_agent ON office_agent_pause_recoveries(agent_id)`); err != nil {
 		return fmt.Errorf("idx_office_agent_pause_recoveries_agent: %w", err)
 	}
+	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_office_agent_pause_recoveries_failed_run ON office_agent_pause_recoveries(failed_run_id)`); err != nil {
+		return fmt.Errorf("idx_office_agent_pause_recoveries_failed_run: %w", err)
+	}
 	return nil
 }
 

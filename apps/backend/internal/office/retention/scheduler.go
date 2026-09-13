@@ -36,7 +36,8 @@ type SchedulerOptions struct {
 // moment of the change (fixed-delay, not fixed-rate): the sweep timer at
 // firstSweepDelay only when retention just turned on, otherwise at the
 // (possibly new) full interval; the census timer always at the full
-// interval.
+// interval. The census timer also refreshes the shared settings record, so a
+// backend that did not serve a settings write still adopts it while disabled.
 type Scheduler struct {
 	settingsStore *SettingsStore
 	sweeper       *Sweeper
@@ -155,6 +156,22 @@ func (s *Scheduler) run(ctx context.Context, settings Settings, wake <-chan stru
 
 		case <-census:
 			s.sweeper.RunCensus(ctx)
+			if latest, err := s.settingsStore.GetSettings(ctx); err == nil && latest != settings {
+				wasEnabled := settings.Enabled
+				settings = latest
+				s.mu.Lock()
+				s.latest = latest
+				s.mu.Unlock()
+
+				sweep = nil
+				if settings.Enabled {
+					if wasEnabled {
+						sweep = s.after(sweepInterval(settings))
+					} else {
+						sweep = s.after(firstSweepDelay)
+					}
+				}
+			}
 			census = s.after(sweepInterval(settings))
 
 		case <-sweep:

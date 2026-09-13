@@ -624,6 +624,7 @@ jobs:
             ./internal/notifications/store
             ./internal/office/configsync
             ./internal/office/repository/sqlite
+            ./internal/office/retention
             ./internal/orchestrator/messagequeue
             ./internal/persistence
             ./internal/persistence/storeconformance

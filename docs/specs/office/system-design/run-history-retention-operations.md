@@ -33,7 +33,7 @@ Adjacent contracts read and constrained but not owned:
 
 ### Settings
 
-One `system_settings` key, `office_run_retention`, holding a JSON document,
+One `settings` key, `office_run_retention`, holding a JSON document,
 read through a `Get`/`Save` pair with `Normalize` on both, matching
 `internal/system/storage/settings.go`. Unparseable content returns the defaults
 plus a sentinel error the caller turns into a health issue, never a boot failure
@@ -85,7 +85,7 @@ reading them to *delete by* fails closed.
 
 ### The preview marker
 
-A second `system_settings` key, `office_run_retention_preview_completed`,
+A second `settings` key, `office_run_retention_preview_completed`,
 holding a JSON object keyed by swept table name whose values are the timestamp
 at which that table's preview completed:
 `{"office_routine_runs": "...", "runs": "..."}`.
@@ -323,6 +323,9 @@ Unit tests in `internal/office/retention`, plus the frontend checks below.
   full eligible count and raises no backlog warning (003.6, 003.9).
 - A settings change written through one store handle is used by a sweep driven
   from a second handle that never saw the change notification (004.5).
+- A backend census refresh adopts a settings change written by another backend,
+  including when retention was disabled, and arms the appropriate sweep timer
+  (002.13, 004.5).
 - A sweep whose settings read fails is skipped and recorded as skipped, and
   deletes nothing under the default window (004.5).
 - A `runs` batch abandoned after its retry reports zero deleted for the three

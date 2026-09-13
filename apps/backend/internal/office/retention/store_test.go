@@ -74,6 +74,16 @@ func seedRun(t *testing.T, conn *sqlx.DB, id, agentProfileID, status string, fin
 	}
 }
 
+func seedPauseRecovery(t *testing.T, conn *sqlx.DB, agentID, taskID, failedRunID string) {
+	t.Helper()
+	if _, err := conn.Exec(conn.Rebind(`
+		INSERT INTO office_agent_pause_recoveries (agent_id, task_id, failed_run_id)
+		VALUES (?, ?, ?)
+	`), agentID, taskID, failedRunID); err != nil {
+		t.Fatalf("seed pause recovery for run %s: %v", failedRunID, err)
+	}
+}
+
 func seedRunEvent(t *testing.T, conn *sqlx.DB, runID string, seq int) {
 	t.Helper()
 	if _, err := conn.Exec(conn.Rebind(`
@@ -298,6 +308,63 @@ func TestDeleteRunBatch_DeletesSatellitesAtomicallyWithRun(t *testing.T) {
 	}
 	if n := countRows(t, conn, `SELECT COUNT(*) FROM office_run_skills WHERE run_id = ?`, runID); n != 0 {
 		t.Fatalf("%d run skill rows remain referencing a deleted run", n)
+	}
+}
+
+// TestRunRetention_PreservesActivePauseRecoveryRun proves that a failed run
+// still referenced by MarkAgentPausedFixed remains available until its
+// recovery snapshot is consumed or discarded. Count and delete must use the
+// same protection predicate so a preview cannot promise deletion that the
+// batch path applies.
+func TestRunRetention_PreservesActivePauseRecoveryRun(t *testing.T) {
+	conn := testDB(t)
+	store := NewStore(db.NewPool(conn, conn))
+	ctx := context.Background()
+
+	runID := newID()
+	failedAt := daysAgo(60)
+	seedRun(t, conn, runID, "agent-recovery", "failed", &failedAt, failedAt)
+	seedPauseRecovery(t, conn, "agent-recovery", "task-recovery", runID)
+
+	cutoff := daysAgo(30)
+	count, err := store.CountEligibleRuns(ctx, conn, cutoff, 0)
+	if err != nil {
+		t.Fatalf("CountEligibleRuns: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("eligible count = %d, want 0 while pause recovery references the run", count)
+	}
+
+	result, err := store.DeleteRunBatch(ctx, conn, cutoff, 0, 100)
+	if err != nil {
+		t.Fatalf("DeleteRunBatch: %v", err)
+	}
+	if result.RunsDeleted != 0 || result.Abandoned {
+		t.Fatalf("result = %+v, want a clean no-op while recovery is active", result)
+	}
+	if n := countRows(t, conn, `SELECT COUNT(*) FROM runs WHERE id = ?`, runID); n != 1 {
+		t.Fatalf("recovery run count = %d, want 1", n)
+	}
+
+	if _, err := conn.Exec(conn.Rebind(
+		`DELETE FROM office_agent_pause_recoveries WHERE agent_id = ? AND task_id = ?`,
+	), "agent-recovery", "task-recovery"); err != nil {
+		t.Fatalf("discard pause recovery: %v", err)
+	}
+
+	count, err = store.CountEligibleRuns(ctx, conn, cutoff, 0)
+	if err != nil {
+		t.Fatalf("CountEligibleRuns after recovery discard: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("eligible count after recovery discard = %d, want 1", count)
+	}
+	result, err = store.DeleteRunBatch(ctx, conn, cutoff, 0, 100)
+	if err != nil {
+		t.Fatalf("DeleteRunBatch after recovery discard: %v", err)
+	}
+	if result.RunsDeleted != 1 || result.Abandoned {
+		t.Fatalf("result after recovery discard = %+v, want one deleted run", result)
 	}
 }
 

@@ -251,6 +251,36 @@ func TestPutRetention_TrailingDataAfterObjectIsRejected(t *testing.T) {
 	}
 }
 
+func TestPutRetention_TopLevelNullIsRejected(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler, sweeper := newTestHandler(t)
+	router := newTestRetentionRouter(handler)
+
+	response := doRequest(router, http.MethodPut, "/api/v1/system/retention", []byte("null"))
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400: %s", response.Code, response.Body.String())
+	}
+	stored, err := sweeper.settingsStore.GetSettings(t.Context())
+	if err != nil {
+		t.Fatalf("GetSettings: %v", err)
+	}
+	if stored != DefaultSettings() {
+		t.Fatalf("stored = %+v, want unchanged defaults", stored)
+	}
+}
+
+func TestPutRetention_OversizedBodyIsRejected(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	handler, _ := newTestHandler(t)
+	router := newTestRetentionRouter(handler)
+
+	body := []byte(strings.Repeat(" ", maxRetentionSettingsBodyBytes+1))
+	response := doRequest(router, http.MethodPut, "/api/v1/system/retention", body)
+	if response.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413: %s", response.Code, response.Body.String())
+	}
+}
+
 func TestPutRetention_FractionalNumberIsRejected(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	handler, _ := newTestHandler(t)

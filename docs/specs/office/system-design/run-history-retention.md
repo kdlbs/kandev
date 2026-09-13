@@ -78,6 +78,10 @@ Verified by reading the schema owners, not assumed.
   transaction that deletes the run.
 - `runs` indexes are `idx_run_status_requested (status, requested_at)` and the
   partial unique `idx_run_idempotency`. Nothing indexes `finished_at`.
+- `office_agent_pause_recoveries.failed_run_id` identifies failed runs that an
+  active pause recovery still needs. It has no foreign key, so retention uses a
+  correlated `NOT EXISTS` predicate and the supporting
+  `idx_office_agent_pause_recoveries_failed_run` index.
 - `ScheduleRetry` (`runs/repository/sqlite/runs.go`) sets
   `status = 'queued', finished_at = NULL` on an existing run, keyed by id with
   **no status guard in its `WHERE` clause**. Any terminal run can therefore
@@ -187,7 +191,7 @@ with participant-seat, secret-transfer, or workflow-phase locking.
 **If the lock connection drops mid-sweep**, PostgreSQL releases the session's
 advisory locks as part of ending the session, so a crashed or partitioned backend
 cannot wedge retention permanently — that self-healing is the reason for a
-session lock rather than a lease row in `system_settings`, which would need its
+session lock rather than a lease row in the `settings` table, which would need its
 own expiry and its own stale-holder rule. The cost is that the surviving sweep no
 longer holds exclusivity without knowing it, so the sweep **verifies the lock
 connection is still alive between tables** and, if it is not, stops before the
@@ -222,6 +226,10 @@ sweep, and enabling retention that was disabled arms at the same 5-minute delay
 as a fresh start rather than at a full interval — otherwise an operator who
 enables retention on a 168-hour interval waits a week to see whether it works
 (AC-OFFICE-RUN-HISTORY-RETENTION-002.13).
+
+The census timer also re-reads shared settings. It runs while retention is
+disabled, so other backends discover enablement and interval changes and re-arm
+their timers.
 
 ### Eligibility, expressed once
 
@@ -288,7 +296,11 @@ database.
 
 **Runs.** History is `status IN ('finished','failed','cancelled')`, partitioned
 by `agent_profile_id`, ranked `COALESCE(finished_at, requested_at) DESC, id DESC`
-and batch-ordered `COALESCE(finished_at, requested_at) ASC, id ASC`. There is no
+and batch-ordered `COALESCE(finished_at, requested_at) ASC, id ASC`. A failed
+run named by an active `office_agent_pause_recoveries.failed_run_id` is
+protected by a `NOT EXISTS` clause in this predicate. Count, selection, and
+delete use the same clause, so a preview cannot promise deletion of a run that
+the recovery flow still needs. There is no
 `finished_at IS NOT NULL` conjunct: requiring one would make a terminal row with
 an unset stamp immortal and unobservable, which
 AC-OFFICE-RUN-HISTORY-RETENTION-001.3 forbids. `queued` and `claimed` are
@@ -340,7 +352,8 @@ polls; an unordered list would make a stable condition look like a changing one.
 
 Per batch, one transaction, satellites first, run last:
 
-1. Select up to `batch_limit` eligible run ids.
+1. Select up to `batch_limit` eligible run ids, excluding runs named by an
+   active `office_agent_pause_recoveries.failed_run_id`.
 2. `DELETE FROM run_events WHERE run_id IN (...)`
 3. `DELETE FROM office_run_route_attempts WHERE run_id IN (...)`
 4. `DELETE FROM office_run_skills WHERE run_id IN (...)`
@@ -382,10 +395,11 @@ id set (AC-OFFICE-RUN-HISTORY-RETENTION-001.6). There is no age-based delete on
 
 ### Indexes to add
 
-Neither table has an index serving the sweep.
+Retention adds indexes that serve the sweep.
 
-- `idx_office_routine_runs_retention ON office_routine_runs(routine_id, completed_at DESC, id DESC)`
-- `idx_runs_retention ON runs(agent_profile_id, finished_at DESC, id DESC)`
+- `idx_office_routine_runs_retention ON office_routine_runs(routine_id, status, (COALESCE(completed_at, created_at)) DESC, id DESC)`
+- `idx_runs_retention ON runs(agent_profile_id, status, (COALESCE(finished_at, requested_at)) DESC, id DESC)`
+- `idx_office_agent_pause_recoveries_failed_run ON office_agent_pause_recoveries(failed_run_id)`
 
 Added through the existing `office/repository/sqlite` schema path so both the
 fresh-install `CREATE` and the upgrade path get them, and recorded in the

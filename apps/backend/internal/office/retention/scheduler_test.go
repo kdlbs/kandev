@@ -231,6 +231,32 @@ func TestScheduler_DisablingStopsArmingSweepButNotCensus(t *testing.T) {
 	fake.assertNotArmed(t, firstSweepDelay)
 }
 
+func TestScheduler_ReconcilesSharedSettingsOnCensus(t *testing.T) {
+	fake := newFakeAfter()
+	settings := DefaultSettings()
+	settings.Enabled = false
+	settings.SweepIntervalHours = 1
+	scheduler, sweeper := newTestScheduler(t, settings, fake)
+
+	if err := scheduler.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer scheduler.Stop()
+	fake.waitArmed(t, sweepInterval(settings))
+
+	updated := settings
+	updated.Enabled = true
+	if _, err := sweeper.settingsStore.SaveSettings(context.Background(), updated); err != nil {
+		t.Fatalf("SaveSettings: %v", err)
+	}
+	fake.fire(t, sweepInterval(settings))
+
+	// The census timer is also the periodic shared-settings reconciliation
+	// point. Enabling retention in another backend must arm this process's
+	// first sweep even when no local PUT delivered ApplySettings.
+	fake.waitArmed(t, firstSweepDelay)
+}
+
 func TestScheduler_StartTwiceIsNoop(t *testing.T) {
 	fake := newFakeAfter()
 	settings := DefaultSettings()

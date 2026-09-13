@@ -69,7 +69,12 @@ func runEligibleSubquery() string {
 		         ORDER BY COALESCE(finished_at, requested_at) DESC, id DESC
 		       ) AS rn
 		FROM runs
-		WHERE status IN (?)`
+		WHERE status IN (?)
+		  AND NOT EXISTS (
+		    SELECT 1
+		    FROM office_agent_pause_recoveries
+		    WHERE office_agent_pause_recoveries.failed_run_id = runs.id
+		  )`
 }
 
 // CountEligibleRoutineRuns is the office_routine_runs eligibility count,

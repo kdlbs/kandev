@@ -9,12 +9,9 @@ import (
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
 
-// TestRetentionIndexes_CreatedFreshAndReplaySafe proves the two indexes the
-// retention sweep depends on (idx_office_routine_runs_retention,
-// idx_runs_retention) exist after a fresh boot and that re-running schema
-// init against the same database (the upgrade-path replay) is a no-op, not
-// an error — CREATE INDEX IF NOT EXISTS over the same COALESCE(...)
-// expression both paths must produce identically.
+// TestRetentionIndexes_CreatedFreshAndReplaySafe proves the retention indexes
+// exist after a fresh boot and that re-running schema init against the same
+// database (the upgrade-path replay) is a no-op, not an error.
 func TestRetentionIndexes_CreatedFreshAndReplaySafe(t *testing.T) {
 	conn, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -28,6 +25,7 @@ func TestRetentionIndexes_CreatedFreshAndReplaySafe(t *testing.T) {
 	}
 	assertIndexExists(t, conn, "idx_office_routine_runs_retention")
 	assertIndexExists(t, conn, "idx_runs_retention")
+	assertIndexExists(t, conn, "idx_office_agent_pause_recoveries_failed_run")
 
 	// Replay: schema init against the same, already-initialized database.
 	if _, err := sqlite.NewWithDB(conn, conn, nil); err != nil {
@@ -35,6 +33,7 @@ func TestRetentionIndexes_CreatedFreshAndReplaySafe(t *testing.T) {
 	}
 	assertIndexExists(t, conn, "idx_office_routine_runs_retention")
 	assertIndexExists(t, conn, "idx_runs_retention")
+	assertIndexExists(t, conn, "idx_office_agent_pause_recoveries_failed_run")
 }
 
 func assertIndexExists(t *testing.T, conn *sqlx.DB, name string) {

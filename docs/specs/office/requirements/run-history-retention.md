@@ -47,6 +47,9 @@ separate capability that never touches database rows.
   live decision reads. History rows are eligible for deletion.
 - **Live-state row**: a row a live decision still reads, regardless of age.
   Never eligible for age-based deletion.
+- **Recovery-protected run**: a failed `runs` row named by an active
+  `office_agent_pause_recoveries.failed_run_id`; retention keeps it until the
+  recovery row is consumed or discarded.
 - **Run satellite row**: a row keyed by a `runs` row's identifier and owned by
   it: a `run_events`, `office_run_route_attempts`, or `office_run_skills` entry.
 - **Retention window**: the age past which a history row becomes eligible,
@@ -94,7 +97,9 @@ automatically, so a scheduled routine does not grow the database without limit.
   completion timestamp in the same statement. When a `runs` row's status is
   `queued` or `claimed`, the system shall treat it as a live-state row and shall
   not delete it on age, at any age, including a run parked for a future routing
-  retry.
+  retry. A failed run referenced by an active
+  `office_agent_pause_recoveries.failed_run_id` is also live state for
+  retention and shall remain until that recovery row is consumed or discarded.
 - **AC-OFFICE-RUN-HISTORY-RETENTION-001.3:** When a history row's completion time is
   older than that table's retention window, the system shall make it eligible
   for deletion. Completion time is defined in Terminology. A row's
@@ -223,6 +228,9 @@ behavior.
   second one. A settings change re-arms the delay from the moment of the change.
   Enabling retention that was disabled arms the next sweep at the same short
   delay as AC-OFFICE-RUN-HISTORY-RETENTION-002.10 rather than at a full interval.
+  Each backend shall periodically reread the shared settings record, including
+  while retention is disabled, so a backend that did not serve a settings write
+  still adopts enablement and interval changes.
 
 ### REQ-OFFICE-RUN-HISTORY-RETENTION-005: Integrity and database engine parity
 

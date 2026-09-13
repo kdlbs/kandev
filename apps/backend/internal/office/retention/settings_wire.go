@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 )
 
 // retentionSettingsEnvelope captures each top-level field as raw JSON
@@ -41,15 +42,23 @@ type runEventsSettingsEnvelope struct {
 // SettingsStore.SaveSettings after this decode succeeds.
 func decodeRetentionSettings(body []byte) (Settings, error) {
 	defaults := DefaultSettings()
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return Settings{}, fmt.Errorf("request body: expected a JSON object")
+	}
 
-	dec := json.NewDecoder(bytes.NewReader(body))
+	dec := json.NewDecoder(bytes.NewReader(trimmed))
 	dec.DisallowUnknownFields()
 	var env retentionSettingsEnvelope
 	if err := dec.Decode(&env); err != nil {
 		return Settings{}, err
 	}
-	if dec.More() {
-		return Settings{}, fmt.Errorf("request body: unexpected data after the JSON object")
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		if err == nil {
+			return Settings{}, fmt.Errorf("request body: unexpected data after the JSON object")
+		}
+		return Settings{}, fmt.Errorf("request body: unexpected data after the JSON object: %w", err)
 	}
 
 	enabled, err := decodeBoolField(env.Enabled, "enabled", defaults.Enabled)
