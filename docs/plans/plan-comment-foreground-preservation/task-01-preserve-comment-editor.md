@@ -1,7 +1,7 @@
 ---
 id: "01-preserve-comment-editor"
 title: "Preserve the mounted comment editor"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -67,16 +67,23 @@ expected failure (input removed or body reset), then implement and run:
 (cd apps && pnpm install --frozen-lockfile)
 (cd apps/web && pnpm test -- components/task/task-plan-panel.refresh.test.tsx components/task/task-plan-panel.session-switch.test.tsx components/task/plan-selection-popover.test.tsx hooks/domains/comments/use-plan-comments.test.tsx hooks/domains/comments/plan-comment-loading.test.ts)
 (cd apps/web && pnpm run typecheck)
-(cd apps/web && pnpm exec eslint --max-warnings 0 components/task/task-plan-panel.tsx components/task/task-plan-panel.refresh.test.tsx hooks/domains/comments/use-plan-comments.test.tsx hooks/domains/comments/plan-comment-loading.test.ts e2e/tests/session/task-plan-comments.spec.ts e2e/tests/session/mobile-task-plan-comments.spec.ts)
-(cd apps/web && pnpm e2e:run --project chromium tests/session/task-plan-comments.spec.ts --retries=0)
-(cd apps/web && pnpm e2e:run --project mobile-chrome tests/session/mobile-task-plan-comments.spec.ts --retries=0)
+(cd apps/web && pnpm exec eslint --max-warnings 0 components/task/task-plan-panel.tsx components/task/task-plan-panel.refresh.test.tsx hooks/domains/comments/use-plan-comments.test.tsx hooks/domains/comments/plan-comment-loading.test.ts e2e/tests/session/task-plan-comments.spec.ts e2e/tests/session/mobile-task-plan-comments.spec.ts e2e/tests/session/plan-comment-foreground-helpers.ts)
+# Initial managed RED run builds backend and fixture plugin. If either source
+# changed or those artifacts are absent, run the managed commands without --no-build.
+(cd apps/web && pnpm run build:e2e)
+(cd apps/web && E2E_PORT_OFFSET=17 pnpm e2e:run --no-build --project chromium tests/session/task-plan-comments.spec.ts --retries=0)
+(cd apps/web && E2E_PORT_OFFSET=17 pnpm e2e:run --no-build --project mobile-chrome tests/session/mobile-task-plan-comments.spec.ts --retries=0)
 python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.py --all
 git diff --check
 ```
 
-Use the managed E2E runner's build step; never use stale assets. Run desktop
-and phone sequentially against test-base isolated data. Use causal transport
+The initial managed RED run builds all backend binaries and the fixture plugin.
+After the frontend-only fix, explicitly rebuild `build:e2e` before reusing those
+unchanged backend artifacts with `--no-build`; never use stale assets. Check
+that offset 17's backend/agentctl range is free before running, or choose and
+record another free offset. Run desktop and phone sequentially against
+test-base isolated data. Use causal transport
 waits rather than arbitrary sleeps. Inspect the rendered phone Drawer and
 desktop Popover after return. Record any headless limitation and the manual
 Alt-Tab result separately. Add no automatic focus stealing.
@@ -113,5 +120,53 @@ would hide the regression; use real inputs and assert mounted identity.
 
 ## Results
 
-Pending implementation. Diagnosis is a read-only source trace, not executed
-component or browser regression evidence.
+Implemented on 2026-09-13.
+
+RED: `pnpm test -- components/task/task-plan-panel.refresh.test.tsx` ran the
+real panel, Popover/Drawer, Zustand store, `usePlanComments`, foreground hook,
+and plan loader with deferred API responses. Eight new/edit desktop/phone
+success/failure cases failed because the input became absent during loading;
+four initial-load and identity-change controls passed. The regression also
+asserts explicit Add/Update receives the preserved body after settlement.
+
+The foreground integration coverage lives in the new panel test because it
+exercises the real hook/loader and input together. Existing hook and loader
+test files need no changes; their suites remain in the verification command.
+The E2E suites share the new `plan-comment-foreground-helpers.ts` helper; include
+it in changed-file lint. Browser checks are complete.
+
+Final verification:
+
+- The five-file `pnpm test -- ...` command above passes 48 tests, including
+  all 12 new panel regressions (eight previously failing preservation cases
+  and four identity/loading controls).
+- `pnpm run typecheck` and the full listed zero-warning ESLint command pass.
+  The corrected E2E helper also passes a final targeted ESLint/typecheck run.
+- The initial managed Chromium run built backend binaries, web assets, and the
+  fixture plugin. Its new-comment foreground regression failed because the
+  textarea disappeared during the held refresh, confirming browser RED.
+- After the one-condition production fix, `pnpm run build:e2e` passes and
+  produces fresh web assets. The backend source and fixture plugin are unchanged.
+- With `E2E_PORT_OFFSET=17`, the exact `--no-build` Chromium command above
+  passes all 8 scenarios in 2.1 minutes, and the phone command passes all 8
+  in 1.3 minutes. Both use one worker, strict WS accounting, and zero retries.
+- `python3 scripts/list-docs.py validate` passes (267 decisions and 868 specs),
+  `python3 scripts/lint-spec-files.py --all` passes, and `git diff --check` passes.
+- Desktop Popover and Pixel 5 Drawer screenshots were inspected against UI-01
+  and UI-02: entered text, selected text, and explicit actions remain visible.
+  The phone flow also asserts no document horizontal overflow.
+
+An initial full desktop run encountered a fixture workspace PATCH 404 before
+UI setup; its cause was not established. The full suite subsequently passed
+on an explicitly free port range. The new edit scenario initially clicked a
+zero-size badge wrapper; it now clicks the visible marked plan text. The stale
+run was interrupted before rerunning all scenarios. No production changes were
+made for either test setup issue.
+
+Desktop coverage changes browser tabs with `bringToFront` and also dispatches
+focus because headless browsers may not emit the OS event. Phone coverage
+uses the real foreground handler and Drawer. A manual OS Alt-Tab check was not
+performed in this headless environment. The managed fixtures cleaned up their
+owned runtime data. Screenshots and build logs are ignored or under `/tmp`.
+No public-doc changes are needed: this repairs the existing comment interaction
+without changing navigation, copy, APIs, or persistence.

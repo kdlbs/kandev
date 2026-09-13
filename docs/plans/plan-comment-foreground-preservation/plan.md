@@ -1,6 +1,6 @@
 ---
 created: 2026-09-13
-status: draft
+status: implemented
 requirements:
   - REQ-TASKS-PLAN-COMMENTS-001
 system_design:
@@ -35,8 +35,8 @@ Read-only source trace on 2026-09-13:
 
 Reproduce: open a plan, select text, open Comment, type without Add, switch
 browser focus away and back. The refresh spinner destroys the draft. Editing
-an existing comment takes the same path. This is source-trace evidence, not
-an executed browser reproduction or regression test.
+an existing comment takes the same path. This sequence was established by source trace and subsequently reproduced by
+the component tests and a Chromium regression before the correction.
 
 ## Scope
 
@@ -138,7 +138,7 @@ actual Drawer and proves preserved text, reachable actions, and no overflow.
 
 ## Work orders
 
-- [ ] [Task 01: Preserve the mounted comment editor](task-01-preserve-comment-editor.md)
+- [x] [Task 01: Preserve the mounted comment editor](task-01-preserve-comment-editor.md)
 
 ## Verification results
 
@@ -148,7 +148,14 @@ and `git diff --check`. The added design section was shortened to satisfy the
 existing size limit. Work-order requirement IDs, design paths, and existing
 verification inputs were checked; the new regression file is intentionally
 created during implementation. No production or permanent test files changed.
-Product checks and rendered browser verification remain pending implementation.
+Implementation complete: 48 targeted tests across five files, TypeScript,
+zero-warning changed-file ESLint, and both full browser suites pass. Chromium
+passes 8 scenarios (2.1 minutes); Pixel 5 passes 8 (1.3 minutes), both with
+zero retries and `E2E_PORT_OFFSET=17`. The managed RED run built backend and
+fixture artifacts; a fresh `build:e2e` after the frontend-only fix supplied
+both final `--no-build` browser runs. Desktop and phone screenshots were
+inspected. See the [work-order results](task-01-preserve-comment-editor.md#results)
+for exact commands, initial test-setup corrections, and headless limitations.
 Public docs are unchanged because this package records implementation intent.
 
 ## Risks

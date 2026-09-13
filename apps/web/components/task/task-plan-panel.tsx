@@ -187,7 +187,7 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
     title: state.plan?.title,
   });
 
-  if (state.isLoading) {
+  if (state.isLoading && !state.plan) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
         <IconLoader2 className="h-5 w-5 animate-spin mr-2" />
