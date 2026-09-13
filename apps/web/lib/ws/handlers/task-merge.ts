@@ -88,12 +88,21 @@ function mergeTaskParkedFields(
   merged.parkedEpoch = existingEpoch;
 }
 
+// Ordered delivery is not guaranteed, so a client comparing two events must
+// ignore one whose updated_at is older than the cached value rather than
+// trust arrival order. Missing timestamps on either side skip the check.
+function isStaleTaskUpdate(existing: KanbanTask, nextTask: KanbanTask): boolean {
+  if (!existing.updatedAt || !nextTask.updatedAt) return false;
+  return new Date(nextTask.updatedAt).getTime() < new Date(existing.updatedAt).getTime();
+}
+
 export function mergeTaskUpdate(
   existing: KanbanTask | undefined,
   nextTask: KanbanTask,
   payload: TaskEventPayload,
 ): KanbanTask {
   if (!existing) return nextTask;
+  if (isStaleTaskUpdate(existing, nextTask)) return existing;
   const merged = {
     ...nextTask,
     ...mergeTaskRepositoryFields(existing, nextTask),

@@ -272,6 +272,7 @@ func (s *Service) EnqueueTask(ctx context.Context, task *v1.Task) error {
 // When launchWorkspace is true, workspace infrastructure (agentctl) is launched asynchronously;
 // the frontend receives preparation progress via executor.prepare.progress WS events.
 func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, launchWorkspace bool) (string, error) {
+	ctx = executor.WithTaskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != "")
 	s.logger.Debug("preparing task session",
 		zap.String("task_id", taskID),
 		zap.String("agent_profile_id", agentProfileID),
@@ -1243,6 +1244,7 @@ func (s *Service) promoteSelectedExplicitWorkflowSession(
 
 //nolint:cyclop,funlen,gocognit // launch path threads many orthogonal concerns (workflow-step / agent-profile / office-task / config-mode / route / system-prompt wrapping); splitting it would require shared mutable state across helpers
 func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode, autoStart bool, attachments []v1.MessageAttachment, opts startTaskOptions) (*executor.TaskExecution, error) {
+	ctx = executor.WithTaskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != "")
 	// One GetWorkflowMeta read shared by profile resolution and prompt build.
 	ctx = withWorkflowMetaCache(ctx)
 	// Fail before task-state or session mutations when the selected logical

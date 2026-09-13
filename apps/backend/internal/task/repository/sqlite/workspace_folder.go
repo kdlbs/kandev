@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	kandevdb "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
@@ -114,9 +115,16 @@ func (r *Repository) createWorkspaceSourceBatchTx(ctx context.Context, tx *sqlx.
 // of the durable batch transaction. The no-op update takes the target task row
 // lock on PostgreSQL and SQLite's writer lock, so a reparent either commits
 // before this predicate (and is rejected) or after the source batch commits.
+//
+// A top-level task (ExpectedParentID == "") has no parent relation to
+// validate, but the batch still needs the same row lock: without it, a
+// folder attachment here and a concurrent runner switch's mutability read
+// could each proceed unaware of the other, letting the switch commit
+// against a task it had already judged eligible before the attachment
+// landed.
 func (r *Repository) guardWorkspaceSourceParentTx(ctx context.Context, tx *sqlx.Tx, batch *models.WorkspaceSourceBatch) error {
 	if batch.ExpectedParentID == "" {
-		return nil
+		return kandevdb.LockTaskRowInTx(ctx, tx, r.db.DriverName(), batch.TaskID)
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE tasks SET updated_at = updated_at
