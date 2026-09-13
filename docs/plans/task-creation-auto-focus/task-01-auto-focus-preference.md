@@ -147,3 +147,13 @@ Local validation: 17 tests passed with
 changed-file ESLint, TypeScript, and `build:vite` passed. The focused phone
 scenario passed with the added task-menu focus assertion; the desktop scenario
 also passed. Remote CI/review verification remains pending after the fix push.
+
+
+Claude's summary suggested verifying background plan-state isolation. Retained
+session-keyed plan initialization as required by AC .3, and strengthened the
+helper test to use real application/context stores. It verifies the background
+plan document, mode, and context are prepared while the current task/session,
+document, plan mode, and context files remain unchanged, with no navigation.
+`pnpm --dir apps/web exec vitest run task-create-dialog-helpers.test.ts`
+passed all 28 tests. This is regression coverage for the existing contract;
+no production behavior changed for this suggestion.
