@@ -25,6 +25,12 @@ import (
 // float64, so a Unix-second ceiling_queued_at comes back as 1.7576064e+09 and the
 // caller's compare-and-set can never win again. Deriving the token from the
 // database's own bytes at read time removes that failure mode from the API.
+//
+// It is exported through GetTaskDeferredLaunch and SetTaskDeferredLaunchIfUnchanged
+// as interface{} rather than as this named type, so a consumer package (the
+// orchestrator's admission controller) can thread the token through a
+// repository-shaped interface without importing this package — the same
+// structural-interface boundary every other repoStore method already keeps.
 type DeferredLaunchPrior struct {
 	present   bool
 	canonical string
@@ -35,7 +41,7 @@ type DeferredLaunchPrior struct {
 // writer create the record: the create case — two concurrent first refusals each
 // reading "no record" — is exactly the race this compare-and-set exists for, and
 // the repository's stamp-based CAS primitives cannot express it at all.
-func AbsentDeferredLaunch() DeferredLaunchPrior { return DeferredLaunchPrior{} }
+func AbsentDeferredLaunch() interface{} { return DeferredLaunchPrior{} }
 
 // GetTaskDeferredLaunch reads a task's deferred_launch record and the prior-state
 // token that a subsequent SetTaskDeferredLaunchIfUnchanged compares against.
@@ -46,7 +52,7 @@ func AbsentDeferredLaunch() DeferredLaunchPrior { return DeferredLaunchPrior{} }
 // with a present prior, leaving the caller free to replace it.
 func (r *Repository) GetTaskDeferredLaunch(
 	ctx context.Context, taskID string,
-) (map[string]interface{}, DeferredLaunchPrior, error) {
+) (map[string]interface{}, interface{}, error) {
 	var raw sql.NullString
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`SELECT metadata FROM tasks WHERE id = ?`), taskID).Scan(&raw)
 	if err != nil {
@@ -76,7 +82,7 @@ func (r *Repository) GetTaskDeferredLaunch(
 // escalates to a refusal the system could not persist. Returning the first as the
 // second would surface a red card for a case the design handles.
 func (r *Repository) SetTaskDeferredLaunchIfUnchanged(
-	ctx context.Context, taskID string, prior DeferredLaunchPrior, value map[string]interface{},
+	ctx context.Context, taskID string, prior interface{}, value map[string]interface{},
 ) (stored bool, lostCompare bool, err error) {
 	if value == nil {
 		return false, false, fmt.Errorf("deferred launch value must not be nil for task %s", taskID)

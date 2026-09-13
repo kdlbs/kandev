@@ -452,6 +452,13 @@ type sessionExecutorStore interface {
 	// without touching the keys another writer owns.
 	TakeTaskDeferredLaunchWIPKeys(ctx context.Context, taskID string) (map[string]interface{}, bool, error)
 	RestoreTaskDeferredLaunchWIPKeys(ctx context.Context, taskID string, wip map[string]interface{}) error
+	// GetTaskDeferredLaunch / SetTaskDeferredLaunchIfUnchanged provide the
+	// row-locked compare-and-set the session ceiling uses to write a
+	// ceiling_deferred record without losing a concurrent refusal's payload.
+	// The prior-state token is threaded as interface{}, opaque to this package,
+	// because it is produced by the repository from the stored row's own bytes.
+	GetTaskDeferredLaunch(ctx context.Context, taskID string) (map[string]interface{}, interface{}, error)
+	SetTaskDeferredLaunchIfUnchanged(ctx context.Context, taskID string, prior interface{}, value map[string]interface{}) (stored bool, lostCompare bool, err error)
 	ListChildCompletionRows(ctx context.Context, parentID string) ([]models.ChildCompletionRow, error)
 	// Git snapshots and commits
 	GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)

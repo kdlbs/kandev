@@ -32,6 +32,8 @@ const (
 	ceilingReasonRefused           = "ceiling"
 	ceilingReasonManualOverride    = "ceiling_manual_override"
 	ceilingReasonUnknownPopulation = "ceiling_unknown_population"
+	ceilingReasonSuperseded        = "ceiling_superseded"
+	ceilingReasonDeferWriteFailed  = "ceiling_defer_write_failed"
 )
 
 // admittedSessionLister supplies the persisted half of the population. It returns
