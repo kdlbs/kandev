@@ -2,6 +2,7 @@
 status: active
 system: tasks
 created: 2026-09-10
+updated: 2026-09-11
 owners:
   - kandev
 ---
@@ -117,7 +118,10 @@ without losing the deck's position and session behavior.
   loading, it shall retain the existing loading state. Pagination, focus, and
   conversation activation shall not reference a removed column.
 - **AC-TASKS-THREADS-ACTIONS-003.4:** A failure shall not permanently remove a
-  task from the deck or advance selection as if the operation succeeded.
+  task from the deck or be reported as success. A task provisionally hidden for
+  an archive shall return when its current task state and view still admit it,
+  without resetting surviving column order or overriding a newer reader
+  selection. An authoritative removal shall take precedence over restoration.
   Server events arriving before or after the response shall produce the same
   final result without repeated jumps.
 - **AC-TASKS-THREADS-ACTIONS-003.5:** Recovery shall keep the Threads route,
@@ -127,6 +131,19 @@ without losing the deck's position and session behavior.
 - **AC-TASKS-THREADS-ACTIONS-003.6:** Recovery and menu use shall preserve native
   horizontal swiping, stable task order, conversation drafts, session switching,
   and the existing viewport-based transcript and subscription budget.
+- **AC-TASKS-THREADS-ACTIONS-003.7:** Once the user accepts an archive from
+  Threads, its task column and conversation shall disappear in the next
+  rendered state, before waiting for the archive response or cleanup events.
+  The outgoing chat shall not remain as a blocked composer or show a
+  workspace-archived warning during that pending operation. Merely opening or
+  cancelling confirmation shall not remove the column. With confirmation
+  disabled, choosing Archive shall be the acceptance point.
+- **AC-TASKS-THREADS-ACTIONS-003.8:** Every admitted task included in an accepted
+  archive, including known descendants covered by cascade consent, shall be
+  excluded from the pending deck, thread picker, and pagination. A deep link
+  or saved explicit task scope shall not readmit it. Other eligible tasks
+  shall continue to fill available column slots under the existing limit and
+  recovery rules. Independent pending archives shall settle independently.
 
 ### REQ-TASKS-THREADS-ACTIONS-004: Responsive accessible interaction
 
@@ -181,3 +198,4 @@ without losing the deck's position and session behavior.
 
 - [System design](../system-design/threads-task-actions.md)
 - [Implementation plan](../../../plans/threads-task-actions/plan.md)
+- [Immediate archive removal follow-up](../../../plans/threads-immediate-archive/plan.md)

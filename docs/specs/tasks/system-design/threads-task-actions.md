@@ -1,6 +1,7 @@
 ---
 status: current
 system: tasks
+updated: 2026-09-12
 requirements:
   - REQ-TASKS-THREADS-ACTIONS-001
   - REQ-TASKS-THREADS-ACTIONS-002
@@ -9,6 +10,11 @@ requirements:
 ---
 
 # Threads Task Actions System Design
+
+The task-action surfaces and pending archive exclusion below are implemented.
+The [immediate archive removal plan](../../../plans/threads-immediate-archive/plan.md)
+records the extension's implementation and targeted verification separately
+from the original task-action delivery.
 
 ## Ownership and dependencies
 
@@ -30,7 +36,7 @@ commit, merge, work orders and verification results.
 | --- | --- |
 | `REQ-TASKS-THREADS-ACTIONS-001` | Shared task operations; menu composition |
 | `REQ-TASKS-THREADS-ACTIONS-002` | Target lifetime; shared task operations; failure behavior |
-| `REQ-TASKS-THREADS-ACTIONS-003` | Admission and selection recovery; state delivery |
+| `REQ-TASKS-THREADS-ACTIONS-003` | Pending archive exclusion; admission and selection recovery; state delivery |
 | `REQ-TASKS-THREADS-ACTIONS-004` | Header entry points; phone composition; dismissal and focus |
 
 ## Existing implementation boundaries
@@ -201,12 +207,72 @@ compact. The drawer owns vertical drag/scroll only while open. No new gesture
 listener, pointer capture, touch cancellation, or `touch-action: none` is added
 to the native horizontal swiper.
 
+## Pending archive exclusion
+
+`coordinateTaskRemovalBatch` publishes `taskRemoval.operationsByToken` before
+calling an archive mutation. Each operation retains its action, workspace,
+target IDs and captured cascade descendants until request reconciliation
+finishes. `stayOnListing` suppresses detail navigation, but retains this
+operation state. Reuse that intent as the Threads presentation boundary.
+
+`ThreadsPageClient` subscribes to the existing operation map and derives the
+union of `taskIds` for operations whose action is `archive`. Pass that set to
+an optional `excludedTaskIds` input on `queryThreadView`. Apply the exclusion
+before task scope, filters, sorting, limits, counts and temporary deep-link
+admission. All query candidate collections must agree on the exclusion.
+Workspace scoping remains in the existing snapshot/candidate path. Pending
+delete operations retain their current behavior in this archive-only repair.
+
+Feed the resulting candidates to `useStableThreadOrder` and `ThreadsBoard`.
+Removing membership unmounts the outgoing column and its `TaskChatPanel`,
+releasing detail activity through the existing viewport owner. A CSS-hidden
+chat, disabled composer, or per-column placeholder does not satisfy this
+boundary. The board-level task-action owner remains mounted, even when the
+last column leaves, so its captured request and error reporting can finish.
+Keep the viewport observer attached across membership changes; callback refs
+register and unregister shells without resetting surviving visibility. Rebuild
+observation when an empty/nonempty transition replaces the board element.
+This preserves surviving editor mounts without changing activation budgets.
+
+Pending intent is transient and is not part of the saved view or query
+fingerprint. Do not change snapshot task state, fabricate archive events, or
+reset stable ordering to hide a column. Existing WebSocket handling continues
+to reconcile all authoritative task/session data. Successful cleanup removes
+task rows before the coordinator releases its operation, so release cannot
+briefly readmit a successfully archived task. A rejected request releases only
+its own exclusion; eligible rows return through the ordinary query and stable
+order, while confirmed removals stay absent. Returning rows follow existing
+arrival ordering; surviving rows keep their positions.
+
+A previously consumed task/session deep link must not become a fresh focus
+request when pending exclusion temporarily changes its resolved target to
+null. Keep the focus-request identity tied to the actual URL request, separate
+from its currently rendered resolution, in the page/board focus adapter.
+Retain dismissal across temporary absence. New explicit URL requests still
+receive normal focus behavior; do not clear unrelated URL parameters or reset
+order during bookkeeping. A failed archive cannot close a newer menu or
+scroll back to its restored column. `useThreadFocusRequest` tracks the visual
+mark separately from the viewport owner's initial detail fallback. Interaction
+retires the mark without unmounting the requested conversation before the
+first visibility callback. Once a consumed request's target leaves the deck,
+its fallback is cleared and readmission cannot replace the surviving chat.
+An unconsumed request can still activate a target that resolves after hydration.
+URL-driven board callers supply an explicit stable request key; the optional
+task-ID default retains legacy dismissal semantics for non-URL callers.
+
+Desktop uses the remaining columns and their existing scroll-offset recovery.
+Phone uses the next snapped conversation, or the existing empty state, after
+the archive drawer/confirmation closes. The compact topbar, visible overflow
+entry, one transcript budget, picker, scroll owners and safe-area geometry
+remain the shipped composition. No new controls, copy or overlays are needed.
+
 ## Admission and selection recovery
 
 Let `queryThreadView` and `useStableThreadOrder` process confirmed shared state
-as today. Changes to priority can affect existing saved-view filters; moves,
-archive, delete, external updates, and manual filter changes use the same
-membership reconciliation. Do not invent a parallel admitted list or sort.
+with the pending archive exclusion above. Changes to priority can affect
+existing saved-view filters; moves, archive, delete, external updates, and
+manual filter changes use the same membership reconciliation. Do not invent a
+parallel admitted list or sort.
 
 `resolveRemainingThreadId(previousOrder, nextOrder, currentTaskId)` implements
 the requirement's successor/predecessor rule. `useThreadSelectionRecovery`
@@ -256,6 +322,9 @@ Shared removal cleanup is idempotent if a task event beats the HTTP response.
 Failure paths preserve confirmed values, release pending state, and display the
 shared localized error. Add generic error feedback at the shared action boundary
 only where the reused API currently propagates an error without visible UI.
+Pending archive recovery restores query eligibility, never task persistence or
+an archived workspace. An in-flight view/workspace change remains authoritative
+when a failed operation releases its exclusion.
 
 Server authorization remains final. Re-check availability for the captured
 task before dispatch, and exercise rejection and provider disappearance in
@@ -263,6 +332,14 @@ tests. No new permission grants or remote writes beyond the selected existing
 operation are introduced.
 
 ## Verification design
+
+The archive extension needs deferred-request regressions before any server
+archive event, plus early lifecycle events while the HTTP response remains
+held. Assert column/chat unmounting throughout that interval, query counts and
+limit refill, cascade targets, last-column recovery, independent operations,
+and rejection with a consumed deep link and newer reader interaction. Keep
+controls for cancelled confirmation and pending deletion. The follow-up plan
+owns exact commands and desktop/mobile scenario mapping.
 
 Focused TDD covers target changes during menus/confirmations, live eligibility,
 shared mutation success/failure, pending-operation guards, and deterministic

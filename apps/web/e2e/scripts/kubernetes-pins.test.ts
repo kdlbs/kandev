@@ -6,8 +6,8 @@ import {
   KIND_SHA256_AMD64,
   KIND_VERSION,
   KUBECTL_SHA256_AMD64,
-  KUBERNETES_FIXTURE_PINS,
   KUBERNETES_E2E_BASE_IMAGE,
+  KUBERNETES_FIXTURE_PINS,
   KUBERNETES_VERSION,
   resolveKubernetesFixturePin,
 } from "../fixtures/kubernetes-pins";

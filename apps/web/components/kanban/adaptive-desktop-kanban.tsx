@@ -5,6 +5,7 @@ import type { WorkflowStep } from "@/components/kanban-column";
 import { getKanbanColumnGridTemplate, KANBAN_COLUMN_MIN_PX } from "./kanban-grid-template";
 
 type AdaptiveDesktopKanbanProps = {
+  columnHeight?: string;
   steps: WorkflowStep[];
   isDragging?: boolean;
   renderColumn: (step: WorkflowStep) => ReactNode;
@@ -34,6 +35,7 @@ type PanStart = {
 };
 
 export function AdaptiveDesktopKanban({
+  columnHeight,
   steps,
   isDragging = false,
   renderColumn,
@@ -81,7 +83,11 @@ export function AdaptiveDesktopKanban({
   };
 
   return (
-    <div data-testid="desktop-kanban-layout" className="h-full min-h-0 min-w-0">
+    <div
+      data-testid="desktop-kanban-layout"
+      className="h-full min-h-0 min-w-0"
+      style={{ height: columnHeight ? "auto" : undefined }}
+    >
       <div
         ref={scrollWindowRef}
         data-testid="desktop-kanban-scroll-window"
@@ -89,6 +95,7 @@ export function AdaptiveDesktopKanban({
           isPanCandidate ? "cursor-grabbing" : ""
         } ${isPanning ? "select-none" : ""} ${isDragging ? "scrollbar-hide" : ""}`}
         style={{
+          height: columnHeight ? "auto" : undefined,
           containerType: "inline-size",
           scrollSnapType: isPanning ? "none" : undefined,
         }}
@@ -100,6 +107,7 @@ export function AdaptiveDesktopKanban({
         <div
           className="flex h-full min-h-0"
           style={{
+            height: columnHeight,
             width: `calc(max(100cqw, ${steps.length * KANBAN_COLUMN_MIN_PX}px) + ${
               isDragging ? KANBAN_DRAG_END_RESERVE : "0px"
             })`,
@@ -123,17 +131,21 @@ export function AdaptiveDesktopKanban({
               </div>
             ))}
           </div>
-          {isDragging && (
-            <div
-              data-testid="desktop-kanban-drag-end-reserve"
-              aria-hidden="true"
-              className="h-full flex-none"
-              style={{ width: KANBAN_DRAG_END_RESERVE }}
-            />
-          )}
+          {isDragging && <DragEndReserve />}
         </div>
       </div>
     </div>
+  );
+}
+
+function DragEndReserve() {
+  return (
+    <div
+      data-testid="desktop-kanban-drag-end-reserve"
+      aria-hidden="true"
+      className="h-full flex-none"
+      style={{ width: KANBAN_DRAG_END_RESERVE }}
+    />
   );
 }
 

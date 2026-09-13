@@ -107,7 +107,7 @@ describe("UsersTable confirmation presentation", () => {
     expect(screen.queryByTestId(POPOVER_TEST_ID)).toBeNull();
   });
 
-  it("morphs a phone row action into visible touch-sized status confirmation", async () => {
+  it("opens a phone status change in a named sheet", async () => {
     mocks.responsive.isFinePointer = false;
     mocks.responsive.isMobile = true;
     await renderUsersTable();
@@ -117,7 +117,8 @@ describe("UsersTable confirmation presentation", () => {
     expect(within(row).getByTestId("users-table-email").textContent).toContain(TARGET.email);
     fireEvent.click(within(row).getByTestId(STATUS_TOGGLE_TEST_ID));
 
-    const confirmation = await screen.findByTestId("users-table-inline-confirmation");
+    const confirmation = await screen.findByRole("dialog");
+    expect(confirmation.getAttribute("data-slot")).toBe("drawer-content");
     expect(confirmation.textContent).toContain(
       `Disable ${TARGET_EMAIL}? They will be signed out everywhere.`,
     );
@@ -149,7 +150,7 @@ describe("UsersTable confirmation presentation", () => {
     expect(screen.queryByTestId("users-table")).toBeNull();
 
     fireEvent.click(within(targetRow()).getByTestId(ROLE_TOGGLE_TEST_ID));
-    expect(await screen.findByTestId(POPOVER_TEST_ID)).toBeTruthy();
+    expect((await screen.findByRole("dialog")).getAttribute("data-slot")).toBe("drawer-content");
   });
 });
 

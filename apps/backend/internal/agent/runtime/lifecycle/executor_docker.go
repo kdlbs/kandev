@@ -373,9 +373,9 @@ func (r *DockerExecutor) reconnectToContainer(ctx context.Context, dockerClient 
 		ContainerIP:   containerIP,
 		WorkspacePath: dockerWorkspacePath,
 		Metadata: map[string]interface{}{
-			MetadataKeyIsRemote:      true,
-			MetadataKeyContainerID:   info.ID,
-			"reuse_existing_process": conn.reusingProcess,
+			MetadataKeyIsRemote:             true,
+			MetadataKeyContainerID:          info.ID,
+			MetadataKeyReuseExistingProcess: conn.reusingProcess,
 		},
 		AuthToken: refreshedAuthToken,
 	}, nil

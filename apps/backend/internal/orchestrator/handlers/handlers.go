@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
@@ -143,6 +144,7 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 		if archivedResponse, responseErr := taskArchivedConflictResponse(msg, err); archivedResponse != nil || responseErr != nil {
 			return archivedResponse, responseErr
 		}
+		intent := orchestrator.ResolveIntent(&req)
 		// A launch failing because the root context was cancelled or the
 		// session is already terminal is an expected shutdown teardown race,
 		// not a fault: log WARN (no stack trace) so it does not masquerade as a
@@ -150,15 +152,19 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 		if orchestrator.IsBenignLaunchTeardownErr(err) {
 			h.logger.Warn("session launch aborted during shutdown",
 				zap.String("task_id", req.TaskID),
-				zap.String("intent", string(orchestrator.ResolveIntent(&req))),
+				zap.String("intent", string(intent)),
 				zap.String("error", err.Error()))
 		} else {
 			h.logger.Error("failed to launch session",
 				zap.String("task_id", req.TaskID),
-				zap.String("intent", string(orchestrator.ResolveIntent(&req))),
+				zap.String("intent", string(intent)),
 				zap.Error(err))
 		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to launch session: "+err.Error(), nil)
+		publicErr := err
+		if intent == orchestrator.IntentRestoreWorkspace {
+			publicErr = routingerr.SanitizeError(err)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to launch session: "+publicErr.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }

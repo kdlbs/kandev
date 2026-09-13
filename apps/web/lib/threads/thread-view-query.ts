@@ -47,6 +47,8 @@ export type ThreadViewQueryOptions = {
   workspaceId?: string | null;
   requestedTaskId?: string | null;
   draft?: ThreadViewDraft | null;
+  /** Transient removal intent applies before every admission path, including deep links. */
+  excludedTaskIds?: ReadonlySet<string>;
 };
 
 export type ThreadViewQueryResult = {
@@ -460,7 +462,9 @@ export function queryThreadView(
   options: ThreadViewQueryOptions = {},
 ): ThreadViewQueryResult {
   const effectiveView = cloneViewWithDraft(view, options.draft);
-  const candidates = selectThreadCandidates(snapshots, options);
+  const candidates = selectThreadCandidates(snapshots, options).filter(
+    (candidate) => !options.excludedTaskIds?.has(candidate.taskId),
+  );
   const scoped = applyTaskScope(candidates, effectiveView.taskScope);
   const matchingCandidates = scoped
     .filter((candidate) => candidateMatches(candidate, effectiveView.filters))

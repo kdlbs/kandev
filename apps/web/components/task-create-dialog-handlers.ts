@@ -63,7 +63,7 @@ export function findDirectLocalExecutorProfile(
 
 type CreatedLocalRepositoryForm = Pick<
   DialogFormState,
-  "updateRepository" | "setExecutorId" | "setExecutorProfileId"
+  "repositories" | "updateRepository" | "setExecutorId" | "setExecutorProfileId"
 >;
 
 export function applyCreatedLocalRepository({
@@ -79,20 +79,25 @@ export function applyCreatedLocalRepository({
   repository: Repository;
   workspaceId: string;
   upsertWorkspaceRepository: (workspaceId: string, repository: Repository) => void;
-  executorSelection: DirectLocalExecutorSelection;
+  executorSelection: DirectLocalExecutorSelection | null;
 }) {
+  upsertWorkspaceRepository(workspaceId, repository);
+  if (!fs.repositories.some((row) => row.key === rowKey)) return;
+  const selection = fs.repositories.length === 1 ? executorSelection : null;
   fs.updateRepository(rowKey, {
     repositoryId: repository.id,
     localPath: undefined,
     branch: "main",
+    branchPolicyId: undefined,
   });
-  fs.setExecutorId(executorSelection.executorId);
-  fs.setExecutorProfileId(executorSelection.executorProfileId);
-  upsertWorkspaceRepository(workspaceId, repository);
+  if (selection) {
+    fs.setExecutorId(selection.executorId);
+    fs.setExecutorProfileId(selection.executorProfileId);
+  }
   syncTaskCreateLastUsed({
     repository_id: repository.id,
     branch: "main",
-    executor_profile_id: executorSelection.executorProfileId,
+    ...(selection ? { executor_profile_id: selection.executorProfileId } : {}),
   });
 }
 
@@ -446,7 +451,7 @@ export function useDialogHandlers(
   );
   const handleLocalRepositoryCreated = useCallback(
     (rowKey: string, repository: Repository) => {
-      if (!context?.workspaceId || !directLocalExecutorSelection) return;
+      if (!context?.workspaceId) return;
       applyCreatedLocalRepository({
         fs,
         rowKey,
@@ -455,7 +460,9 @@ export function useDialogHandlers(
         upsertWorkspaceRepository: context.upsertWorkspaceRepository,
         executorSelection: directLocalExecutorSelection,
       });
-      clearFreshBranch(fs);
+      if (fs.repositories.length === 1 && fs.repositories.some((row) => row.key === rowKey)) {
+        clearFreshBranch(fs);
+      }
     },
     [context, directLocalExecutorSelection, fs],
   );

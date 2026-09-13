@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useState, memo } from "react";
 import { useTranslation } from "react-i18next";
 import { IconCheck, IconNetwork, IconPlus } from "@tabler/icons-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
-import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
+import { DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
+import { TaskSwitcherDrawer } from "./task-switcher-drawer";
 import { Button } from "@kandev/ui/button";
 import { QuickChatSheetButton } from "./quick-chat-sheet-button";
 import { TaskSwitcher } from "../task-switcher";
@@ -32,7 +33,7 @@ import {
 import { useQuickChatLauncher } from "@/hooks/use-quick-chat-launcher";
 import { useMobileTaskRename } from "./use-mobile-task-rename";
 import { useSidebarTaskEdit } from "../task-session-sidebar-edit";
-import { usePortForwardingVisibility } from "../port-forwarding-visibility-provider";
+import { useOptionalPortForwardingVisibility } from "../port-forwarding-visibility-provider";
 import { buildMobileTaskSwitcherProps } from "./session-task-switcher-sheet-props";
 import { TaskSwitcherDialogs } from "./session-task-switcher-sheet-dialogs";
 type SessionTaskSwitcherSheetProps = {
@@ -41,6 +42,8 @@ type SessionTaskSwitcherSheetProps = {
   workspaceId: string | null;
   workflowId: string | null;
   presentation?: "sheet" | "drawer";
+  navigate?: (taskId: string) => void;
+  onCloseAutoFocus?: (event: Event) => void;
 };
 export function useTaskSheetSelectionController() {
   const [selectionController] = useState(createTaskSheetSelectionController);
@@ -174,12 +177,7 @@ function TaskSwitcherSurfaceHeader({
         )}
         <div className="flex items-center gap-2">
           {workspaceId && <QuickChatSheetButton workspaceId={workspaceId} onClick={onQuickChat} />}
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 gap-1 cursor-pointer"
-            onClick={onNewTask}
-          >
+          <Button variant="outline" className="gap-1 cursor-pointer" onClick={onNewTask}>
             <IconPlus className="h-4 w-4" />
             {t("task:new")}
           </Button>
@@ -397,7 +395,9 @@ function PortForwardingTaskAction({
   onClose: () => void;
 }) {
   const { t } = useTranslation();
-  const { enabled, canToggle, isUpdating, togglePortForwarding } = usePortForwardingVisibility();
+  const visibility = useOptionalPortForwardingVisibility();
+  if (!visibility) return null;
+  const { enabled, canToggle, isUpdating, togglePortForwarding } = visibility;
 
   return (
     <div className="shrink-0 border-b border-border px-2 py-1">
@@ -426,6 +426,8 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   workspaceId,
   workflowId,
   presentation = "sheet",
+  navigate,
+  onCloseAutoFocus,
 }: SessionTaskSwitcherSheetProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [subtaskTarget, setSubtaskTarget] = useState<{ id: string; title: string } | null>(null);
@@ -435,7 +437,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
     (nextOpen: boolean) => handleTaskSheetOpenChange(selectionController, nextOpen, onOpenChange),
     [onOpenChange, selectionController],
   );
-  const actions = useSheetActions(workspaceId, handleOpenChange, selectionController);
+  const actions = useSheetActions(workspaceId, handleOpenChange, selectionController, navigate);
   const rename = useMobileTaskRename();
   const edit = useSidebarTaskEdit();
   const linking = useMobileTaskLinking(workspaceId);
@@ -474,11 +476,14 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
 
   const surface =
     presentation === "drawer" ? (
-      <Drawer open={open} onOpenChange={handleOpenChange}>
-        <DrawerContent className="h-[88dvh] max-h-[88dvh] overflow-hidden pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-          {surfaceContent}
-        </DrawerContent>
-      </Drawer>
+      <TaskSwitcherDrawer
+        key={workspaceId}
+        open={open}
+        onOpenChange={handleOpenChange}
+        onCloseAutoFocus={onCloseAutoFocus}
+      >
+        {surfaceContent}
+      </TaskSwitcherDrawer>
     ) : (
       <Sheet open={open} onOpenChange={handleOpenChange}>
         <SheetContent

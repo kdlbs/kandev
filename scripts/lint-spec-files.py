@@ -9,6 +9,27 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+try:
+    from spec_metadata import (
+        VALID_DESIGN_STATUSES,
+        VALID_MIGRATION_STATUSES,
+        VALID_REQUIREMENT_STATUSES,
+        VALID_SYSTEM_STATUSES,
+        classify_path,
+        parse_frontmatter as parse_metadata_frontmatter,
+        validate_metadata,
+    )
+except ModuleNotFoundError:
+    from scripts.spec_metadata import (
+        VALID_DESIGN_STATUSES,
+        VALID_MIGRATION_STATUSES,
+        VALID_REQUIREMENT_STATUSES,
+        VALID_SYSTEM_STATUSES,
+        classify_path,
+        parse_frontmatter as parse_metadata_frontmatter,
+        validate_metadata,
+    )
+
 
 @dataclass(frozen=True)
 class Violation:
@@ -18,10 +39,6 @@ class Violation:
     message: str
 
 
-VALID_REQUIREMENT_STATUSES = {"draft", "active", "deprecated"}
-VALID_DESIGN_STATUSES = {"draft", "current", "superseded"}
-VALID_SYSTEM_STATUSES = {"draft", "active", "retired"}
-VALID_MIGRATION_STATUSES = {"in_progress", "complete"}
 SIZE_EXCEPTIONS_PATH = "docs/specs/spec-lint-exceptions.tsv"
 REQ_ID_PATTERN = r"REQ-[A-Z0-9]+(?:-[A-Z0-9]+)*-\d{3}"
 AC_ID_PATTERN = r"AC-[A-Z0-9]+(?:-[A-Z0-9]+)*-\d{3}\.\d+"
@@ -141,19 +158,8 @@ def lint_specs(
             continue
 
         assert metadata is not None
-        declared_system = metadata.get("system")
-        if declared_system != system:
-            violations.append(
-                Violation(
-                    "system-owner",
-                    path,
-                    1,
-                    f"frontmatter system must be `{system}`, found `{declared_system or ''}`",
-                )
-            )
-
         if kind == "requirement":
-            violations.extend(check_requirement_metadata(path, metadata))
+            violations.extend(check_requirement_metadata(path, metadata, system))
             reqs, criteria = collect_requirement_ids(path, text)
             if not reqs:
                 violations.append(
@@ -191,7 +197,7 @@ def lint_specs(
                         )
                     )
         else:
-            violations.extend(check_design_metadata(path, metadata))
+            violations.extend(check_design_metadata(path, metadata, system))
             references = metadata.get("requirements", [])
             if isinstance(references, list):
                 for reference in references:
@@ -406,30 +412,6 @@ def load_previous_size_exceptions(root: Path) -> dict[str, int] | None:
     return None
 
 
-def classify_path(relative: Path) -> tuple[str, str | None]:
-    parts = relative.parts
-    try:
-        spec_index = parts.index("specs")
-    except ValueError:
-        return "unknown", None
-    inside = parts[spec_index + 1 :]
-    if not inside:
-        return "unknown", None
-    if inside[0] == "guide":
-        return "guide", None
-    if inside[0] == "templates":
-        return "template", None
-    if inside[0] == "product":
-        return "product", None
-    if len(inside) >= 3 and inside[1] == "requirements":
-        return "requirement", inside[0]
-    if len(inside) >= 3 and inside[1] == "system-design":
-        return "system-design", inside[0]
-    if len(inside) == 2 and inside[1] in {"README.md", "glossary.md"}:
-        return "system-index", inside[0]
-    return "legacy", None
-
-
 def is_safe_regular_file(path: Path, root: Path) -> bool:
     if path.is_symlink() or not path.is_file():
         return False
@@ -575,120 +557,35 @@ def check_legacy_size_ratchet(
 
 
 def parse_frontmatter(text: str) -> tuple[dict | None, int, str | None]:
-    lines = text.splitlines()
-    if not lines or lines[0] != "---":
-        return None, 1, "new specification document must start with YAML frontmatter"
-    try:
-        end = lines.index("---", 1)
-    except ValueError:
-        return None, 1, "YAML frontmatter has no closing delimiter"
-
-    metadata: dict[str, str | list[str]] = {}
-    current_list: str | None = None
-    for line_number, line in enumerate(lines[1:end], start=2):
-        if re.match(r"^\s+-\s+", line) and current_list:
-            value = re.sub(r"^\s+-\s+", "", line).strip().strip('"\'`')
-            current_value = metadata.setdefault(current_list, [])
-            if not isinstance(current_value, list):
-                return None, line_number, f"frontmatter field `{current_list}` mixes scalar and list values"
-            current_value.append(value)
-            continue
-        match = re.match(r"^(?P<key>[a-z][a-z0-9_-]*):(?:\s*(?P<value>.*))?$", line)
-        if not match:
-            if not line.strip():
-                continue
-            return None, line_number, "frontmatter contains unsupported YAML"
-        key = match.group("key")
-        value = (match.group("value") or "").strip()
-        if value == "[]":
-            metadata[key] = []
-            current_list = None
-        elif value:
-            metadata[key] = value.strip('"\'`')
-            current_list = None
-        else:
-            metadata[key] = []
-            current_list = key
-    return metadata, 1, None
+    parsed = parse_metadata_frontmatter(text, require=True)
+    return parsed.metadata, parsed.line, parsed.error
 
 
-def check_requirement_metadata(path: Path, metadata: dict) -> list[Violation]:
-    status = metadata.get("status")
-    if status in VALID_REQUIREMENT_STATUSES:
-        return []
+def metadata_violations(
+    path: Path, kind: str, system: str | None, metadata: dict
+) -> list[Violation]:
     return [
-        Violation(
-            "requirement-status",
-            path,
-            1,
-            f"requirement status must be one of {sorted(VALID_REQUIREMENT_STATUSES)}, found `{status or ''}`",
-        )
+        Violation(issue.code, path, 1, issue.message)
+        for issue in validate_metadata(kind, system, metadata)
     ]
 
 
-def check_system_index_metadata(path: Path, metadata: dict, system: str | None) -> list[Violation]:
-    violations = []
-    if metadata.get("status") not in VALID_SYSTEM_STATUSES:
-        violations.append(
-            Violation(
-                "system-index-status",
-                path,
-                1,
-                f"system status must be one of {sorted(VALID_SYSTEM_STATUSES)}",
-            )
-        )
-    if metadata.get("system") != system:
-        violations.append(
-            Violation(
-                "system-owner",
-                path,
-                1,
-                f"frontmatter system must be `{system}`, found `{metadata.get('system', '')}`",
-            )
-        )
-    if metadata.get("specification_version") != "1":
-        violations.append(
-            Violation(
-                "system-index-version",
-                path,
-                1,
-                "system index must set `specification_version: 1`",
-            )
-        )
-    if metadata.get("migration") not in VALID_MIGRATION_STATUSES:
-        violations.append(
-            Violation(
-                "system-index-migration",
-                path,
-                1,
-                f"migration must be one of {sorted(VALID_MIGRATION_STATUSES)}",
-            )
-        )
-    return violations
+def check_requirement_metadata(
+    path: Path, metadata: dict, system: str | None = None
+) -> list[Violation]:
+    return metadata_violations(path, "requirement", system, metadata)
 
 
-def check_design_metadata(path: Path, metadata: dict) -> list[Violation]:
-    violations = []
-    status = metadata.get("status")
-    if status not in VALID_DESIGN_STATUSES:
-        violations.append(
-            Violation(
-                "system-design-status",
-                path,
-                1,
-                f"system-design status must be one of {sorted(VALID_DESIGN_STATUSES)}, found `{status or ''}`",
-            )
-        )
-    if not isinstance(metadata.get("requirements"), list):
-        violations.append(
-            Violation(
-                "system-design-requirements",
-                path,
-                1,
-                "system design must declare `requirements` as a YAML list, including an explicit empty list",
-            )
-        )
-    return violations
+def check_system_index_metadata(
+    path: Path, metadata: dict, system: str | None
+) -> list[Violation]:
+    return metadata_violations(path, "system-index", system, metadata)
+
+
+def check_design_metadata(
+    path: Path, metadata: dict, system: str | None = None
+) -> list[Violation]:
+    return metadata_violations(path, "system-design", system, metadata)
 
 
 def collect_requirement_ids(path: Path, text: str) -> tuple[list[tuple[str, int]], list[tuple[str, int]]]:

@@ -83,7 +83,7 @@ func TestGitOperatorRemoteContributionRoutesPushesAndPreflightToSource(t *testin
 			operator := NewGitOperator(repoDir, newTestLogger(t), nil)
 			operator.setRemoteContribution(binding)
 
-			preflight, err := operator.PushPreflight(context.Background())
+			preflight, err := operator.PushPreflight(context.Background(), PushOptions{})
 			if err != nil {
 				t.Fatalf("PushPreflight returned error: %v", err)
 			}
@@ -93,8 +93,11 @@ func TestGitOperatorRemoteContributionRoutesPushesAndPreflightToSource(t *testin
 			if got := strings.TrimSpace(runGit(t, originDir, "rev-parse", "refs/heads/feature/contribution")); got != headSHA {
 				t.Fatalf("preflight changed source branch: %q != %q", got, headSHA)
 			}
+			if preflight.PushedRemote != "" || preflight.PushedBranch != "" {
+				t.Fatalf("contribution-routed preflight = %+v, want PushedRemote and PushedBranch omitted", preflight)
+			}
 
-			forced, err := operator.Push(context.Background(), true, false)
+			forced, err := operator.Push(context.Background(), PushOptions{Force: true})
 			if err != nil {
 				t.Fatalf("forced Push returned error: %v", err)
 			}
@@ -102,7 +105,7 @@ func TestGitOperatorRemoteContributionRoutesPushesAndPreflightToSource(t *testin
 				t.Fatalf("forced Push = %+v, want a contribution force-push rejection", forced)
 			}
 
-			pushed, err := operator.Push(context.Background(), false, false)
+			pushed, err := operator.Push(context.Background(), PushOptions{})
 			if err != nil {
 				t.Fatalf("Push returned error: %v", err)
 			}
@@ -218,7 +221,7 @@ func TestGitOperatorContributionDestinationPushesWithoutChangingPullRemote(t *te
 
 	operator := NewGitOperator(repoDir, newTestLogger(t), nil)
 	operator.setContributionDestination(destination)
-	pushed, err := operator.Push(context.Background(), false, false)
+	pushed, err := operator.Push(context.Background(), PushOptions{})
 	if err != nil || !pushed.Success {
 		t.Fatalf("Push = %+v, err = %v", pushed, err)
 	}
@@ -260,7 +263,7 @@ func TestGitOperatorPush_PreservesExistingUpstream(t *testing.T) {
 	}
 
 	gitOp := NewGitOperator(suffixedDir, log, nil)
-	result, err := gitOp.Push(context.Background(), false, false)
+	result, err := gitOp.Push(context.Background(), PushOptions{})
 	if err != nil {
 		t.Fatalf("Push returned error: %v", err)
 	}
