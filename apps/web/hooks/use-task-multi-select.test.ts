@@ -561,3 +561,37 @@ describe("useTaskMultiSelect — eligibility snapshot is frozen at invocation (A
     expect(result.current.isProcessing).toBe(false);
   });
 });
+
+describe("useTaskMultiSelect — confirmation selection snapshots", () => {
+  beforeEach(() => {
+    moveTaskById.mockReset().mockResolvedValue(undefined);
+    moveTasks.mockReset();
+    deleteTaskById.mockReset().mockResolvedValue(undefined);
+    archiveTaskById.mockReset().mockResolvedValue(undefined);
+    runTaskRemovalBatch.mockReset();
+    mockRunTaskRemovalBatchDefault();
+  });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("uses the confirmation snapshot for dispatch and keeps the excluded ids selected", async () => {
+    storeApi = makeStoreApi([makeTask("a", "high"), makeTask("b", "low")], []);
+    const { useTaskMultiSelect } = await import("./use-task-multi-select");
+    const { result } = renderHook(() => useTaskMultiSelect("wf1"));
+
+    act(() => result.current.toggleSelect("a"));
+    act(() => result.current.toggleSelect("b"));
+
+    await act(async () => {
+      await result.current.bulkDelete(undefined, {
+        allIds: ["a", "b"],
+        eligibleIds: ["a"],
+      });
+    });
+
+    expect(deleteTaskById).toHaveBeenCalledTimes(1);
+    expect(deleteTaskById).toHaveBeenCalledWith("a", undefined);
+    expect(result.current.selectedIds).toEqual(new Set(["b"]));
+  });
+});

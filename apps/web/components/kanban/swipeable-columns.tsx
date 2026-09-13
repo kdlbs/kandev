@@ -4,7 +4,7 @@ import { useEffect, useCallback, useRef, useMemo, useState } from "react";
 import useEmblaCarousel from "embla-carousel-react";
 import { KanbanColumn, WorkflowStep } from "../kanban-column";
 import { Task, type KanbanPresentation } from "../kanban-card";
-import { compareStepOrder, pickKanbanColumnComparator } from "@/lib/kanban/task-order";
+import { pickKanbanColumnComparator } from "@/lib/kanban/task-order";
 import { useAppStore } from "@/components/state-provider";
 import type { KanbanExternalLinkAvailability } from "../kanban-external-link-availability";
 import type { KeyboardReorderDraft } from "./virtualized-column-task-list";
@@ -112,8 +112,7 @@ export function SwipeableColumns({
   const [emblaRef, emblaApi] = useEmblaCarousel(options);
 
   const kanbanSort = useAppStore((state) => state.userSettings.kanbanSort);
-  const comparator =
-    kanbanSort === "priority_desc" ? pickKanbanColumnComparator(kanbanSort) : compareStepOrder;
+  const comparator = pickKanbanColumnComparator(kanbanSort);
 
   const getTasksForStep = useCallback(
     (stepId: string) => {

@@ -140,6 +140,16 @@ function compareNativeStepOrderWithoutPriority(left: StepOrderTask, right: StepO
   return left.id.localeCompare(right.id);
 }
 
+function comparePipelineCreatedOrder(
+  left: { id: string; position?: number | null; createdAt?: string | null },
+  right: { id: string; position?: number | null; createdAt?: string | null },
+): number {
+  if ("position" in left || "position" in right) {
+    return comparePositionAsc(left, right);
+  }
+  return compareTasksByCreatedDesc(left, right);
+}
+
 export function compareStepOrder(left: StepOrderTask, right: StepOrderTask): number {
   const position = comparePositionAsc(left, right);
   if (position !== 0) return position;
@@ -172,7 +182,7 @@ export function sortTasksForPipelineView<
     if (stepDiff !== 0) return stepDiff;
     return sortToken === "priority_desc"
       ? comparePriorityThenNativeStepOrder(a, b)
-      : compareStepOrder(a, b);
+      : comparePipelineCreatedOrder(a, b);
   });
 }
 
@@ -220,6 +230,6 @@ export function sortIdsByDisplayOrder(
     if (stepA !== stepB) return stepA - stepB;
     return sortToken === "priority_desc"
       ? comparePriorityThenNativeStepOrder(taskA, taskB)
-      : compareStepOrder(taskA, taskB);
+      : comparePipelineCreatedOrder(taskA, taskB);
   });
 }

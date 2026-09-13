@@ -22,7 +22,7 @@ export {
 import { AdaptiveDesktopKanban } from "./adaptive-desktop-kanban";
 import type { MobileWorkflowNavigation } from "@/lib/kanban/view-registry";
 import { resolveMobileColumnIndex } from "@/lib/kanban/mobile-column-index";
-import { compareStepOrder, pickKanbanColumnComparator } from "@/lib/kanban/task-order";
+import { pickKanbanColumnComparator } from "@/lib/kanban/task-order";
 import { useSwimlaneKanbanPresentationDnd } from "@/hooks/domains/kanban/use-swimlane-kanban-dnd";
 import { useKeyboardReorder } from "@/hooks/domains/kanban/use-keyboard-reorder";
 import { countAdmittedTasks } from "@/lib/kanban/wip-limit";
@@ -89,8 +89,7 @@ function useMobileColumnIndex(workflowId: string, steps: WorkflowStep[], tasks: 
 
 function useTasksByStep(tasks: Task[]) {
   const kanbanSort = useAppStore((state) => state.userSettings.kanbanSort);
-  const comparator =
-    kanbanSort === "priority_desc" ? pickKanbanColumnComparator(kanbanSort) : compareStepOrder;
+  const comparator = pickKanbanColumnComparator(kanbanSort);
   return useCallback(
     (stepId: string) => tasks.filter((t) => t.workflowStepId === stepId).sort(comparator),
     [tasks, comparator],

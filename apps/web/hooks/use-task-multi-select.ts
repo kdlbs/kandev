@@ -67,6 +67,12 @@ export function filterIdsByPriorityFilter(
 
 type AppStoreApi = ReturnType<typeof useAppStoreApi>;
 
+/** The selection captured when a bulk confirmation surface opens. */
+export type BulkTaskActionSelection = {
+  allIds: string[];
+  eligibleIds: string[];
+};
+
 function removeTasksFromStoreImpl(store: AppStoreApi, ids: Set<string>) {
   const state = store.getState();
   const currentKanban = state.kanban;
@@ -183,6 +189,7 @@ export function useTaskMultiSelectStore() {
 type RunBulkActionOptions = {
   action: "delete" | "archive";
   ids: string[];
+  selection?: BulkTaskActionSelection;
   eligibleSelectedIds: (ids: string[]) => string[];
   per: (id: string, opts?: TaskActionOptions) => Promise<void>;
   runTaskRemovalBatch: ReturnType<typeof useTaskRemoval>["runTaskRemovalBatch"];
@@ -196,6 +203,7 @@ type RunBulkActionOptions = {
 async function runBulkAction({
   action,
   ids,
+  selection,
   eligibleSelectedIds,
   per,
   runTaskRemovalBatch,
@@ -206,8 +214,10 @@ async function runBulkAction({
   opts,
 }: RunBulkActionOptions): Promise<void> {
   if (ids.length === 0) return;
-  const idList = eligibleSelectedIds(ids);
-  const hidden = ids.filter((id) => !idList.includes(id));
+  const idList = selection?.eligibleIds ?? eligibleSelectedIds(ids);
+  const hidden = selection
+    ? selection.allIds.filter((id) => !idList.includes(id))
+    : ids.filter((id) => !idList.includes(id));
   if (idList.length === 0) {
     setSelectedIds(new Set(hidden));
     return;
@@ -267,10 +277,12 @@ function useBulkOperations({
       per: (id: string, opts?: TaskActionOptions) => Promise<void>,
       setBusy: (v: boolean) => void,
       opts?: TaskActionOptions,
+      selection?: BulkTaskActionSelection,
     ) =>
       runBulkAction({
         action,
-        ids: [...(selectedIdsRef.current ?? [])],
+        ids: selection?.allIds ?? [...(selectedIdsRef.current ?? [])],
+        selection,
         eligibleSelectedIds,
         per,
         runTaskRemovalBatch,
@@ -291,12 +303,14 @@ function useBulkOperations({
   );
 
   const bulkDelete = useCallback(
-    (opts?: TaskActionOptions) => runBulk("delete", deleteTaskById, setIsDeleting, opts),
+    (opts?: TaskActionOptions, selection?: BulkTaskActionSelection) =>
+      runBulk("delete", deleteTaskById, setIsDeleting, opts, selection),
     [runBulk, deleteTaskById, setIsDeleting],
   );
 
   const bulkArchive = useCallback(
-    (opts?: TaskActionOptions) => runBulk("archive", archiveTaskById, setIsArchiving, opts),
+    (opts?: TaskActionOptions, selection?: BulkTaskActionSelection) =>
+      runBulk("archive", archiveTaskById, setIsArchiving, opts, selection),
     [runBulk, archiveTaskById, setIsArchiving],
   );
 
@@ -532,6 +546,7 @@ export function useTaskMultiSelect(workflowId: string | null) {
     toggleSelect,
     selectRange,
     clearSelection,
+    getEligibleSelectedIds: eligibleSelectedIds,
     bulkDelete,
     bulkArchive,
     bulkMove,
