@@ -224,6 +224,8 @@ export class WorkflowSettingsPage {
   async reorderStep(card: Locator, fromName: string, toName: string): Promise<void> {
     const source = this.stepNodeByName(card, fromName).locator("button").first();
     const target = this.stepNodeByName(card, toName);
+    await source.scrollIntoViewIfNeeded();
+    await target.scrollIntoViewIfNeeded();
     const sourceBox = await source.boundingBox();
     const targetBox = await target.boundingBox();
     if (!sourceBox || !targetBox) throw new Error(`Cannot drag ${fromName} to ${toName}`);

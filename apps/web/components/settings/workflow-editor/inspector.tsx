@@ -23,7 +23,10 @@ import {
   HelpTip,
   STEP_COLORS,
 } from "@/components/settings/workflow-pipeline-editor-helpers";
-import { useStepActions } from "@/components/settings/workflow-pipeline-editor-step-actions";
+import {
+  CompleteTaskOnEnterToggle,
+  useStepActions,
+} from "@/components/settings/workflow-pipeline-editor-step-actions";
 import { isWorkflowStepValueDirty } from "@/components/settings/workflow-dirty-state";
 import { StepPromptSection } from "@/components/settings/workflow-step-prompt-section";
 
@@ -415,6 +418,13 @@ function PoliciesTab({
         rowTestId={`${step.id}-cancel-completion-row`}
         labelTestId={`${step.id}-cancel-completion-label`}
         helpTestId={`${step.id}-cancel-completion-help`}
+      />
+      <CompleteTaskOnEnterToggle
+        step={step}
+        savedStep={savedStep}
+        onUpdate={onUpdate}
+        readOnly={readOnly}
+        isFinalStep={steps[steps.length - 1]?.id === step.id}
       />
       <AutoArchivePolicy
         step={step}
