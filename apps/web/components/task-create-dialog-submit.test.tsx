@@ -637,6 +637,45 @@ describe("useTaskSubmitHandlers — runner switch (REQ-TASKS-RUNNER-SWITCH-004)"
     );
   });
 
+  it("switches back to the user's selection after retrying a partial save", async () => {
+    const onOpenChange = vi.fn();
+    updateTaskMock.mockRejectedValueOnce(new Error("network blip"));
+    updateTaskMock.mockResolvedValueOnce({ id: TASK_ID, title: ORIGINAL_TITLE });
+    const initialDeps = makeDeps({
+      isEditMode: true,
+      taskName: ORIGINAL_TITLE,
+      editingTask: editingTaskFixture(),
+      descriptionInputRef: makeRef(ORIGINAL_PROMPT),
+      executorProfileId: CHOSEN_PROFILE,
+      seededExecutorProfileId: EXISTING_PROFILE,
+      onOpenChange,
+    });
+    const { result, rerender } = renderHook(
+      ({ deps }: { deps: SubmitHandlersDeps }) => useTaskSubmitHandlers(deps),
+      { initialProps: { deps: initialDeps } },
+    );
+
+    await act(async () => {
+      await result.current.handleUpdateWithoutAgent();
+    });
+
+    expect(switchTaskRunnerMock).toHaveBeenCalledWith(TASK_ID, CHOSEN_PROFILE);
+    expect(onOpenChange).not.toHaveBeenCalled();
+
+    rerender({
+      deps: {
+        ...initialDeps,
+        executorProfileId: EXISTING_PROFILE,
+      },
+    });
+    await act(async () => {
+      await result.current.handleUpdateWithoutAgent();
+    });
+
+    expect(switchTaskRunnerMock).toHaveBeenNthCalledWith(2, TASK_ID, EXISTING_PROFILE);
+    expect(updateTaskMock).toHaveBeenCalledTimes(2);
+  });
+
   it("reports a truthful partial save when the launch fails after the save committed (AC-004.4c/4d)", async () => {
     const onOpenChange = vi.fn();
     const onSuccess = vi.fn();

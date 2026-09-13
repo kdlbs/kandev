@@ -2,7 +2,7 @@
 
 /* eslint-disable max-lines -- create and edit submit flows share one lifecycle boundary. */
 
-import { useCallback, FormEvent } from "react";
+import { useCallback, useRef, FormEvent } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import { updateTask } from "@/lib/api";
 import { useAppStore } from "@/components/state-provider";
@@ -197,17 +197,17 @@ function areEditDependenciesReady(
   return !isEditMode || editDependencies?.ready !== false;
 }
 
-// Only a final selection that differs from what the dialog seeded (stored
-// profile or resolved default) counts as a user change; reverting back to
-// the seeded value issues no switch.
+// Only a final selection that differs from the last confirmed stored runner
+// counts as a user change. The baseline advances after a successful switch,
+// so a retry can persist a deliberate change back to the previous profile.
 function computeRunnerChanged(
-  seededExecutorProfileId: string | null,
+  confirmedExecutorProfileId: string | null,
   executorProfileId: string,
 ): boolean {
   return (
-    seededExecutorProfileId !== null &&
+    confirmedExecutorProfileId !== null &&
     executorProfileId !== "" &&
-    executorProfileId !== seededExecutorProfileId
+    executorProfileId !== confirmedExecutorProfileId
   );
 }
 
@@ -217,10 +217,12 @@ async function issueRunnerSwitchIfChanged(
   runnerChanged: boolean,
   taskId: string,
   executorProfileId: string,
+  markRunnerConfirmed: (executorProfileId: string) => void,
 ): Promise<void> {
   if (!runnerChanged) return;
   try {
     await switchTaskRunner(taskId, executorProfileId);
+    markRunnerConfirmed(executorProfileId);
   } catch (error) {
     throw new RunnerSwitchRejectedError(error);
   }
@@ -334,6 +336,15 @@ export function useTaskSubmitHandlers({
   const setPlanMode = useAppStore((state) => state.setPlanMode);
   const applyAgentProfileRecentUse = useAppStore((state) => state.applyAgentProfileRecentUse);
   const isStartedEdit = computeIsTaskStarted(isEditMode, editingTask);
+  const seededRunnerRef = useRef(seededExecutorProfileId);
+  const confirmedRunnerRef = useRef<string | null>(seededExecutorProfileId);
+  if (seededRunnerRef.current !== seededExecutorProfileId) {
+    seededRunnerRef.current = seededExecutorProfileId;
+    confirmedRunnerRef.current = seededExecutorProfileId;
+  }
+  const markRunnerConfirmed = useCallback((profileId: string) => {
+    confirmedRunnerRef.current = profileId;
+  }, []);
 
   const isFreshBranchActive =
     freshBranchEnabled && isLocalExecutor && !useRemote && repositoryLocalPath !== "";
@@ -547,8 +558,13 @@ export function useTaskSubmitHandlers({
     const trimmedTitle = taskName.trim();
     if (!trimmedTitle) return null;
 
-    const runnerChanged = computeRunnerChanged(seededExecutorProfileId, executorProfileId);
-    await issueRunnerSwitchIfChanged(runnerChanged, editingTask.id, executorProfileId);
+    const runnerChanged = computeRunnerChanged(confirmedRunnerRef.current, executorProfileId);
+    await issueRunnerSwitchIfChanged(
+      runnerChanged,
+      editingTask.id,
+      executorProfileId,
+      markRunnerConfirmed,
+    );
 
     const description = isStartedEdit
       ? (editingTask.description ?? "")
@@ -586,7 +602,7 @@ export function useTaskSubmitHandlers({
     setTaskName,
     setHasDescription,
     executorProfileId,
-    seededExecutorProfileId,
+    markRunnerConfirmed,
   ]);
 
   const handleEditSubmit = useCallback(async () => {

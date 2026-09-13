@@ -38,13 +38,9 @@ func (r *Repository) UpdateTaskRepositoryComparisonTarget(
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	taskRepo, err := r.getTaskRepositoryForUpdate(ctx, tx, id)
+	taskRepo, err := r.lockTaskThenGetTaskRepository(ctx, tx, id)
 	if err != nil {
 		return nil, false, err
-	}
-	if lockErr := kandevdb.LockTaskRowInTx(ctx, tx, r.db.DriverName(), taskRepo.TaskID); lockErr != nil &&
-		!errors.Is(lockErr, kandevdb.ErrTaskRowNotFound) {
-		return nil, false, lockErr
 	}
 	current, present, err := models.LoadComparisonTarget(taskRepo.Metadata)
 	if err != nil {
@@ -124,13 +120,9 @@ func (r *Repository) UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	taskRepo, err := r.getTaskRepositoryForUpdate(ctx, tx, id)
+	taskRepo, err := r.lockTaskThenGetTaskRepository(ctx, tx, id)
 	if err != nil {
 		return nil, false, err
-	}
-	if lockErr := kandevdb.LockTaskRowInTx(ctx, tx, r.db.DriverName(), taskRepo.TaskID); lockErr != nil &&
-		!errors.Is(lockErr, kandevdb.ErrTaskRowNotFound) {
-		return nil, false, lockErr
 	}
 	_, present, err := models.LoadComparisonTarget(taskRepo.Metadata)
 	if err != nil {
@@ -149,6 +141,34 @@ func (r *Repository) UpdateTaskRepositoryBaseBranchAndClearComparisonTarget(
 		return nil, false, err
 	}
 	return taskRepo, true, nil
+}
+
+// lockTaskThenGetTaskRepository keeps the task-scoped lock order consistent
+// with UpdateTaskRepository: task row first, task-repository link second.
+// The initial task_id read is unlocked only to identify which task row to
+// lock. The link is re-read under FOR UPDATE afterwards and the owner is
+// checked again so a concurrent re-parent cannot update through a stale owner.
+func (r *Repository) lockTaskThenGetTaskRepository(ctx context.Context, tx *sqlx.Tx, id string) (*models.TaskRepository, error) {
+	var taskID string
+	err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT task_id FROM task_repositories WHERE id = ?`), id).Scan(&taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("task repository not found: %s", id)
+	}
+	if err != nil {
+		return nil, err
+	}
+	if lockErr := kandevdb.LockTaskRowInTx(ctx, tx, r.db.DriverName(), taskID); lockErr != nil &&
+		!errors.Is(lockErr, kandevdb.ErrTaskRowNotFound) {
+		return nil, lockErr
+	}
+	taskRepo, err := r.getTaskRepositoryForUpdate(ctx, tx, id)
+	if err != nil {
+		return nil, err
+	}
+	if taskRepo.TaskID != taskID {
+		return nil, fmt.Errorf("task repository %s moved from task %s to task %s during update", id, taskID, taskRepo.TaskID)
+	}
+	return taskRepo, nil
 }
 
 func (r *Repository) getTaskRepositoryForUpdate(ctx context.Context, tx *sqlx.Tx, id string) (*models.TaskRepository, error) {

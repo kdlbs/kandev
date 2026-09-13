@@ -2,9 +2,16 @@ package models
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 )
+
+// ErrTaskRunnerChanged tells a session preparer that the task's runner
+// changed after it resolved the task and before the session transaction
+// acquired the task lock. The caller must reload the task and retry before
+// persisting a session or workspace environment.
+var ErrTaskRunnerChanged = errors.New("task runner changed during session preparation")
 
 // Runner mutability reason codes. This is the closed vocabulary
 // runner_ineligible_reason is always a member of: the ten ordered condition

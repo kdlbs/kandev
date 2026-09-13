@@ -110,6 +110,35 @@ func seedRunnerSwitchTaskRepository(t *testing.T, repo *Repository, taskID, repo
 	return stored
 }
 
+func TestCreateTaskSessionRejectsStaleTaskRunnerResolution(t *testing.T) {
+	repo := newRunnerSwitchTestRepo(t)
+	ctx := context.Background()
+	seedRunnerSwitchWorkspace(t, repo, "ws-1")
+	seedRunnerSwitchTask(t, repo, "task-1", "ws-1", seedRunnerSwitchTaskOpts{
+		Metadata: `{"executor_profile_id":"profile-old"}`,
+	})
+	if err := repo.SetTaskMetadataKey(ctx, "task-1", models.MetaKeyExecutorProfileID, "profile-new"); err != nil {
+		t.Fatalf("SetTaskMetadataKey: %v", err)
+	}
+
+	session := &models.TaskSession{
+		ID:                            "session-stale-runner",
+		TaskID:                        "task-1",
+		AgentProfileID:                "agent-1",
+		ExecutorProfileID:             "profile-old",
+		TaskRunnerResolvedFromTask:    true,
+		TaskRunnerProfileAtResolution: "profile-old",
+		State:                         models.TaskSessionStateCreated,
+	}
+	err := repo.CreateTaskSession(ctx, session)
+	if !errors.Is(err, models.ErrTaskRunnerChanged) {
+		t.Fatalf("CreateTaskSession error = %v, want ErrTaskRunnerChanged", err)
+	}
+	if _, err := repo.GetTaskSession(ctx, session.ID); err == nil {
+		t.Fatal("stale session was persisted")
+	}
+}
+
 // baseRunnerSwitchRequest builds an eligible-shaped request for taskID
 // switching to targetProfileID, with the compatibility gate reporting a
 // found clone URL against repoSnapshot — the shape most tests start from
