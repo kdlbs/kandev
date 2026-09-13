@@ -1017,6 +1017,9 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     messagesLoading,
     historyRefreshPending,
     isInitialMessagesLoading,
+    historyStatus,
+    historyError,
+    retryHistory,
     groupedItems,
     allMessages,
     footerActionMessages,
@@ -1194,6 +1197,9 @@ export const TaskChatPanel = memo(function TaskChatPanel({
             sessionId={resolvedSessionId}
             messagesLoading={messagesLoading}
             historyRefreshPending={historyRefreshPending}
+            historyStatus={historyStatus}
+            historyError={historyError}
+            onRetryHistory={retryHistory}
             isWorking={isWorking}
             sessionState={session?.state}
             worktreePath={getSessionWorkspacePath(session)}

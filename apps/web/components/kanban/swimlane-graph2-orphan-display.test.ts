@@ -136,6 +136,29 @@ describe("sortGraph2Tasks (AC-UI-PIPELINE-ROW-005.1)", () => {
     expect(sorted.map((t) => t.id)).toEqual(["no-position", "first", "second"]);
   });
 
+  it("breaks a same-step position tie using the full AC.1 order rather than bare position", () => {
+    // REQ-TASKS-KANBAN-TASK-REORDERING-001.2/.38: bare `position` is not a
+    // total order, so two tasks that arrived together (same position) must
+    // still resolve deterministically via priority, then queuedAt/createdAt,
+    // then id — not fall back to whatever order they arrived in the array.
+    const sorted = sortGraph2Tasks(
+      [
+        {
+          ...makeTask("low", "todo", 1),
+          priority: "low",
+          createdAt: "2026-08-12T09:00:00Z",
+        } as Task,
+        {
+          ...makeTask("critical", "todo", 1),
+          priority: "critical",
+          createdAt: "2026-08-12T09:00:00Z",
+        } as Task,
+      ],
+      steps,
+    );
+    expect(sorted.map((t) => t.id)).toEqual(["critical", "low"]);
+  });
+
   it("breaks a step-index and position tie by task id ascending", () => {
     const sorted = sortGraph2Tasks([makeTask("b", "todo", 0), makeTask("a", "todo", 0)], steps);
     expect(sorted.map((t) => t.id)).toEqual(["a", "b"]);

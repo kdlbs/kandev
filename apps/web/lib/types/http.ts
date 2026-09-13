@@ -541,6 +541,15 @@ export type WorkflowStepDTO = {
   complete_task_on_enter: boolean;
   auto_advance_requires_signal: boolean;
   cancel_triggers_turn_complete: boolean;
+  /**
+   * Bumped by the reorder endpoint each time this step's task order changes
+   * (REQ-TASKS-KANBAN-TASK-REORDERING-001.25/.37). Seed
+   * `kanbanMulti.orderRevisionByStepId` from this on hydration so a
+   * `task.reordered` WS event received right after page load is not
+   * mistaken for the first order this client has ever seen. Optional only
+   * because older test fixtures omit it; the backend always sends it.
+   */
+  order_revision?: number;
   created_at?: string;
   updated_at?: string;
 };
@@ -555,6 +564,32 @@ export type MoveTaskResponse = {
     instructions?: string;
     skip_step_prompt?: boolean;
   };
+};
+
+/** Band discriminator for a within-step reorder request. */
+export type ReorderBand = "admitted" | "queued";
+
+/** One task's new position, as carried by every reorder response/event. */
+export type ReorderedTaskPosition = {
+  id: string;
+  position: number;
+};
+
+/**
+ * Success (200) and step_changed conflict (409) bodies for
+ * `PUT /api/v1/workflow-steps/:id/tasks/reorder` share this shape: the
+ * step's full non-hidden task list in both bands, and the revision it was
+ * written at.
+ */
+export type ReorderStepTasksResponse = {
+  workflow_step_id: string;
+  revision: number;
+  tasks: ReorderedTaskPosition[];
+};
+
+/** Body of a rejected reorder request: `step_changed` (409) or `invalid_reorder` (400). */
+export type ReorderStepTasksErrorBody = Partial<ReorderStepTasksResponse> & {
+  code: "step_changed" | "invalid_reorder";
 };
 
 /** A worktree associated with a task session (one per repo on multi-repo tasks). */

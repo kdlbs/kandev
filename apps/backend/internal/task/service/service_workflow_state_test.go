@@ -325,6 +325,32 @@ func TestQueuedTaskBeforeOrdersByPositionPriorityThenAge(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			// AC-TASKS-KANBAN-TASK-REORDERING-001.36: a nil queued_at falls back to
+			// created_at rather than skipping the key, aligning this comparator with
+			// the SQL promotion query's COALESCE(queued_at, created_at). This is the
+			// mixed-band case from sqlite/task.go's feeder create-time placement: an
+			// admitted task with queued_at set sits beside an ordinary admitted task
+			// with queued_at nil.
+			name: "a nil queued_at falls back to created_at instead of skipping the key",
+			left: &models.Task{
+				ID: "a", Position: 1, Priority: priorityMedium, QueuedAt: nil, CreatedAt: earlier,
+			},
+			right: &models.Task{
+				ID: "b", Position: 1, Priority: priorityMedium, QueuedAt: &earlier, CreatedAt: later,
+			},
+			want: true,
+		},
+		{
+			name: "a later effective queued_at loses even though created_at would have tied",
+			left: &models.Task{
+				ID: "a", Position: 1, Priority: priorityMedium, QueuedAt: &later, CreatedAt: earlier,
+			},
+			right: &models.Task{
+				ID: "b", Position: 1, Priority: priorityMedium, QueuedAt: nil, CreatedAt: earlier,
+			},
+			want: false,
+		},
 	}
 	for _, tc := range cases {
 		if got := queuedTaskBefore(tc.left, tc.right); got != tc.want {

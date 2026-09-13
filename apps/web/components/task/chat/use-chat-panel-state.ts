@@ -454,6 +454,9 @@ function useSessionData(
     historyRefreshPending,
     historyInitialized,
     hasMore: hasOlderMessages,
+    historyStatus,
+    historyError,
+    retryHistory,
   } = useSessionMessages(resolvedSessionId);
   const turns = useAppStore((state) =>
     resolvedSessionId ? state.turns.bySession[resolvedSessionId] : undefined,
@@ -490,6 +493,9 @@ function useSessionData(
     messagesLoading,
     isInitialMessagesLoading,
     historyRefreshPending,
+    historyStatus,
+    historyError,
+    retryHistory,
     ...processed,
     sessionModel,
     activeModel,

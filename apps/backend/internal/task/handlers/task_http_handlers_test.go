@@ -1401,6 +1401,10 @@ func (m *moveTaskConflictRepo) UpdateTask(ctx context.Context, task *models.Task
 	return nil
 }
 
+func (m *moveTaskConflictRepo) UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error {
+	return m.UpdateTask(ctx, task)
+}
+
 func (m *moveTaskConflictRepo) GetWorkflow(ctx context.Context, id string) (*models.Workflow, error) {
 	if m.workflows != nil {
 		if workflow, ok := m.workflows[id]; ok {

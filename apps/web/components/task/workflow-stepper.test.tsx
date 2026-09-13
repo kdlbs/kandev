@@ -4,7 +4,20 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { moveTask } from "@/lib/api";
 import { WorkflowStepper, type WorkflowStepperStep } from "./workflow-stepper";
 
-const { moveTaskMock } = vi.hoisted(() => ({ moveTaskMock: vi.fn() }));
+const { moveTaskMock, appStoreState } = vi.hoisted(() => ({
+  moveTaskMock: vi.fn(),
+  appStoreState: {
+    tasks: { activeSessionId: null },
+    chatInput: { planModeBySessionId: {} },
+    kanban: { tasks: [] },
+    kanbanMulti: { snapshots: {} },
+    taskSessions: { items: {} },
+    taskSessionsByTask: { itemsByTaskId: {} },
+    agentProfiles: { items: [] },
+    setPlanMode: vi.fn(),
+    setActiveDocument: vi.fn(),
+  },
+}));
 const mocks = vi.hoisted(() => ({ touchDrawer: false }));
 
 function Passthrough({ children }: { children: ReactNode }) {
@@ -19,6 +32,17 @@ vi.mock("@kandev/ui/hover-card", () => ({
   HoverCard: Passthrough,
   HoverCardTrigger: Passthrough,
   HoverCardContent: Passthrough,
+}));
+
+vi.mock("@/components/integrations/use-hover-popover", () => ({
+  useHoverPopover: () => ({
+    open: true,
+    onOpenChange: vi.fn(),
+    onTriggerEnter: vi.fn(),
+    onTriggerLeave: vi.fn(),
+    onContentEnter: vi.fn(),
+    onContentLeave: vi.fn(),
+  }),
 }));
 
 // The stepper only threads the shared move-options draft through the hover
@@ -86,6 +110,12 @@ afterEach(() => {
   cleanup();
   vi.clearAllMocks();
   mocks.touchDrawer = false;
+  appStoreState.kanban.tasks.length = 0;
+  const taskSessions = appStoreState.taskSessions.items as Record<string, unknown>;
+  for (const key of Object.keys(taskSessions)) {
+    delete taskSessions[key];
+  }
+  appStoreState.agentProfiles.items.length = 0;
 });
 
 // useToolbarCollapsed is mocked because the test DOM can't measure offsetWidth.
@@ -95,7 +125,7 @@ vi.mock("@/hooks/use-toolbar-collapsed", () => ({
 }));
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: () => undefined,
+  useAppStore: (selector: (state: typeof appStoreState) => unknown) => selector(appStoreState),
 }));
 vi.mock("@/lib/state/context-files-store", () => ({
   useContextFilesStore: () => vi.fn(),
@@ -123,11 +153,72 @@ const DISCLOSURE_TEST_ID = "workflow-step-disclosure";
 const MOVE_A_TEST_ID = "workflow-step-disclosure-move-a";
 const MOVE_C_TEST_ID = "workflow-step-disclosure-move-c";
 const MOVE_D_TEST_ID = "workflow-step-disclosure-move-d";
-const TRIGGER_LABEL = "Step 2 of 4: Work";
+const TRIGGER_LABEL = /Step 2 of 4: Work/;
 const SPEC_TEST_ID = "workflow-step-Spec";
 const ARIA_CURRENT = "aria-current";
+const WORK_TEST_ID = "workflow-step-Work";
+const MARKER_FOOTPRINT_HEIGHT = "h-2";
+const MARKER_FOOTPRINT_WIDTH = "w-2";
+const SPINNER_HEIGHT = "h-3.5";
+const SPINNER_WIDTH = "w-3.5";
+const MARKER_SELECTOR = "[data-marker-state]";
 
 describe("WorkflowStepper", () => {
+  it("shows a pending marker while a move request is unresolved", async () => {
+    collapsedMock.mockReturnValue(false);
+    let resolveMove!: () => void;
+    moveTaskMock.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolveMove = resolve;
+      }),
+    );
+
+    render(
+      <WorkflowStepper steps={STEPS} currentStepId="b" taskId={TASK_ID} workflowId={WORKFLOW_ID} />,
+    );
+
+    fireEvent.click(screen.getAllByRole("button", { name: "Move here" })[0]);
+
+    await waitFor(() =>
+      expect(
+        screen
+          .getByTestId("workflow-step-Spec")
+          .querySelector(MARKER_SELECTOR)
+          ?.getAttribute("data-marker-state"),
+      ).toBe("pending"),
+    );
+    const marker = screen.getByTestId("workflow-step-Spec").querySelector(MARKER_SELECTOR);
+    expect(marker?.classList.contains(MARKER_FOOTPRINT_HEIGHT)).toBe(true);
+    expect(marker?.classList.contains(MARKER_FOOTPRINT_WIDTH)).toBe(true);
+    const spinner = marker?.querySelector("svg");
+    expect(spinner?.getAttribute("data-marker-visual-size")).toBe("8");
+    expect(spinner?.classList.contains(MARKER_FOOTPRINT_HEIGHT)).toBe(true);
+    expect(spinner?.classList.contains(MARKER_FOOTPRINT_WIDTH)).toBe(true);
+
+    resolveMove();
+  });
+
+  it("keeps the current pending spinner's 14px outer decoration without changing its 8px footprint", () => {
+    collapsedMock.mockReturnValue(false);
+    (appStoreState.kanban.tasks as unknown[]).push({
+      id: TASK_ID,
+      state: "SCHEDULING",
+      workflowStepId: "b",
+    });
+
+    render(
+      <WorkflowStepper steps={STEPS} currentStepId="b" taskId={TASK_ID} workflowId={WORKFLOW_ID} />,
+    );
+
+    const marker = screen.getByTestId(WORK_TEST_ID).querySelector(MARKER_SELECTOR);
+    expect(marker?.classList.contains(MARKER_FOOTPRINT_HEIGHT)).toBe(true);
+    expect(marker?.classList.contains(MARKER_FOOTPRINT_WIDTH)).toBe(true);
+    const spinner = marker?.querySelector("svg");
+    expect(spinner?.getAttribute("data-marker-visual-size")).toBe("14");
+    expect(spinner?.classList.contains(SPINNER_HEIGHT)).toBe(true);
+    expect(spinner?.classList.contains(SPINNER_WIDTH)).toBe(true);
+  });
+
   it("renders every step when there is room (not collapsed)", () => {
     collapsedMock.mockReturnValue(false);
     render(<WorkflowStepper steps={STEPS} currentStepId="b" />);
@@ -136,7 +227,7 @@ describe("WorkflowStepper", () => {
     expect(screen.queryByTestId("workflow-stepper-minimal")).toBeNull();
     // All steps render under the persistent outer container.
     expect(screen.getByTestId(SPEC_TEST_ID)).toBeTruthy();
-    expect(screen.getByTestId("workflow-step-Work")).toBeTruthy();
+    expect(screen.getByTestId(WORK_TEST_ID)).toBeTruthy();
     expect(screen.getByTestId("workflow-step-Review")).toBeTruthy();
   });
 
@@ -163,7 +254,7 @@ describe("WorkflowStepper", () => {
     expect(screen.getByTestId("workflow-stepper-minimal")).toBeTruthy();
 
     // Current step keeps its test id + aria-current in either variant.
-    const current = screen.getByTestId("workflow-step-Work");
+    const current = screen.getByTestId(WORK_TEST_ID);
     expect(current.getAttribute(ARIA_CURRENT)).toBe("step");
     expect(screen.queryByTestId(SPEC_TEST_ID)).toBeNull();
     expect(screen.queryByTestId("workflow-step-Review")).toBeNull();
@@ -171,6 +262,69 @@ describe("WorkflowStepper", () => {
     // Position indicator reflects the current step out of the total.
     expect(screen.getByText("2/3")).toBeTruthy();
   });
+});
+
+describe("WorkflowStepper progress disclosure", () => {
+  it("keeps lifecycle details inside the existing disclosure", () => {
+    collapsedMock.mockReturnValue(true);
+    (appStoreState.kanban.tasks as unknown[]).push({
+      id: TASK_ID,
+      workflowId: WORKFLOW_ID,
+      workflowStepId: "b",
+      state: "SCHEDULING",
+    });
+    (appStoreState.agentProfiles.items as unknown[]).push({ id: "profile-1", label: "Luna" });
+    const steps = DISCLOSURE_STEPS.map((step) =>
+      step.id === "b" ? { ...step, agent_profile_id: "profile-1" } : step,
+    );
+
+    render(
+      <WorkflowStepper steps={steps} currentStepId="b" taskId={TASK_ID} workflowId={WORKFLOW_ID} />,
+    );
+
+    expect(screen.queryByText("Preparing agent")).toBeNull();
+    fireEvent.mouseEnter(screen.getByRole("button", { name: TRIGGER_LABEL }));
+
+    expect(screen.getByTestId("workflow-step-progress-b").textContent).toContain("Preparing agent");
+    expect(screen.getByTestId("workflow-step-progress-b").textContent).toContain("Luna");
+    expect(screen.getByTestId("workflow-step-disclosure-row-b").getAttribute("aria-current")).toBe(
+      "step",
+    );
+  });
+
+  it.each([
+    ["STARTING", true, "Stopping agent"],
+    ["FAILED", false, "Agent failed"],
+  ] as const)(
+    "renders %s lifecycle status in the existing full disclosure",
+    (sessionState, cancellationPending, label) => {
+      collapsedMock.mockReturnValue(false);
+      (appStoreState.kanban.tasks as unknown[]).push({
+        id: TASK_ID,
+        state: "IN_PROGRESS",
+        workflowStepId: "b",
+        primarySessionId: "session-1",
+      });
+      (appStoreState.taskSessions.items as Record<string, unknown>)["session-1"] = {
+        id: "session-1",
+        task_id: TASK_ID,
+        state: sessionState,
+        is_primary: true,
+        cancellation_pending: cancellationPending,
+      };
+
+      render(
+        <WorkflowStepper
+          steps={STEPS}
+          currentStepId="b"
+          taskId={TASK_ID}
+          workflowId={WORKFLOW_ID}
+        />,
+      );
+
+      expect(screen.getByTestId("workflow-step-progress-b").textContent).toContain(label);
+    },
+  );
 });
 
 describe("WorkflowStepper compact disclosure", () => {
@@ -338,7 +492,7 @@ describe("WorkflowStepper fallback states", () => {
     expect(screen.getByText("Archived")).toBeTruthy();
     // Archived badge carries the minimal test id for collapsed-mode detection.
     expect(screen.getByTestId("workflow-stepper-minimal")).toBeTruthy();
-    expect(screen.queryByTestId("workflow-step-Work")).toBeNull();
+    expect(screen.queryByTestId(WORK_TEST_ID)).toBeNull();
     expect(screen.queryByRole("button")).toBeNull();
   });
 

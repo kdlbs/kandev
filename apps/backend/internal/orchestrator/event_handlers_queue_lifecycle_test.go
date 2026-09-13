@@ -72,7 +72,15 @@ func TestAgentBootReadyDrainsAfterInFlightRuntimeUnavailableRequeue(t *testing.T
 		t.Fatal("timed out waiting for runtime lookup barrier")
 	}
 
-	svc.handleAgentBootReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+	resumeAttempt, ok := svc.resumeAttemptStore().current("s1")
+	if !ok || resumeAttempt == nil {
+		t.Fatal("queued prompt resume attempt was not registered before boot-ready")
+	}
+	svc.handleAgentBootReady(ctx, watcher.AgentEventData{
+		TaskID:    "t1",
+		SessionID: "s1",
+		AttemptID: resumeAttempt.identity(),
+	})
 	close(repo.allowLookup)
 
 	select {

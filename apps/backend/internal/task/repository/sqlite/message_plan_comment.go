@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/admission"
 	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
 )
 
@@ -48,6 +49,36 @@ func (r *Repository) CreateMessageWithPlanComments(
 	expectedState models.TaskSessionState,
 	claim *messagequeue.QueueAttachmentClaim,
 ) (*models.TaskPlanCommentSnapshot, error) {
+	return r.createMessageWithPlanComments(
+		ctx, message, nil, refs, requirePrimary, expectedState, claim,
+	)
+}
+
+// CreateMessageWithPlanCommentsWithInitialTaskBrief adds the atomic prepared
+// session first-prompt admission to a comment-bearing user message.
+func (r *Repository) CreateMessageWithPlanCommentsWithInitialTaskBrief(
+	ctx context.Context,
+	message *models.Message,
+	candidate *admission.InitialTaskBriefCandidate,
+	refs []models.TaskPlanCommentRef,
+	requirePrimary bool,
+	expectedState models.TaskSessionState,
+	claim *messagequeue.QueueAttachmentClaim,
+) (*models.TaskPlanCommentSnapshot, error) {
+	return r.createMessageWithPlanComments(
+		ctx, message, candidate, refs, requirePrimary, expectedState, claim,
+	)
+}
+
+func (r *Repository) createMessageWithPlanComments(
+	ctx context.Context,
+	message *models.Message,
+	candidate *admission.InitialTaskBriefCandidate,
+	refs []models.TaskPlanCommentRef,
+	requirePrimary bool,
+	expectedState models.TaskSessionState,
+	claim *messagequeue.QueueAttachmentClaim,
+) (*models.TaskPlanCommentSnapshot, error) {
 	if message.ID == "" {
 		message.ID = uuid.New().String()
 	}
@@ -74,7 +105,7 @@ func (r *Repository) CreateMessageWithPlanComments(
 		requestsInput = 1
 	}
 	return r.createMessagePlanCommentBoundary(
-		ctx, message, refs, requirePrimary, expectedState, claim, requestsInput, messageType, string(metadataJSON),
+		ctx, message, candidate, refs, requirePrimary, expectedState, claim, requestsInput, messageType, string(metadataJSON),
 	)
 }
 
@@ -90,12 +121,46 @@ func (r *Repository) CreateMessageWithPlanCommentsAndQueue(
 	claim *messagequeue.QueueAttachmentClaim,
 	maxPerSession int,
 ) (*models.TaskPlanCommentSnapshot, error) {
+	return r.createMessageWithPlanCommentsAndQueue(
+		ctx, message, queued, nil, refs, requirePrimary, expectedState, claim, maxPerSession,
+	)
+}
+
+// CreateMessageWithPlanCommentsAndQueueWithInitialTaskBrief adds the atomic
+// prepared session first-prompt admission to a queued comment-bearing message.
+func (r *Repository) CreateMessageWithPlanCommentsAndQueueWithInitialTaskBrief(
+	ctx context.Context,
+	message *models.Message,
+	queued *messagequeue.QueuedMessage,
+	candidate *admission.InitialTaskBriefCandidate,
+	refs []models.TaskPlanCommentRef,
+	requirePrimary bool,
+	expectedState models.TaskSessionState,
+	claim *messagequeue.QueueAttachmentClaim,
+	maxPerSession int,
+) (*models.TaskPlanCommentSnapshot, error) {
+	return r.createMessageWithPlanCommentsAndQueue(
+		ctx, message, queued, candidate, refs, requirePrimary, expectedState, claim, maxPerSession,
+	)
+}
+
+func (r *Repository) createMessageWithPlanCommentsAndQueue(
+	ctx context.Context,
+	message *models.Message,
+	queued *messagequeue.QueuedMessage,
+	candidate *admission.InitialTaskBriefCandidate,
+	refs []models.TaskPlanCommentRef,
+	requirePrimary bool,
+	expectedState models.TaskSessionState,
+	claim *messagequeue.QueueAttachmentClaim,
+	maxPerSession int,
+) (*models.TaskPlanCommentSnapshot, error) {
 	fields, err := prepareQueuedPlanCommentMessage(message, queued)
 	if err != nil {
 		return nil, err
 	}
 	return r.createQueuedMessagePlanCommentBoundary(
-		ctx, message, queued, refs, requirePrimary, expectedState, claim, maxPerSession, fields,
+		ctx, message, queued, candidate, refs, requirePrimary, expectedState, claim, maxPerSession, fields,
 	)
 }
 
@@ -151,25 +216,38 @@ func (r *Repository) createQueuedMessagePlanCommentBoundary(
 	ctx context.Context,
 	message *models.Message,
 	queued *messagequeue.QueuedMessage,
+	candidate *admission.InitialTaskBriefCandidate,
 	refs []models.TaskPlanCommentRef,
 	requirePrimary bool,
 	expectedState models.TaskSessionState,
 	claim *messagequeue.QueueAttachmentClaim,
 	maxPerSession int,
 	fields queuedPlanCommentMessageFields,
-) (*models.TaskPlanCommentSnapshot, error) {
+) (snapshot *models.TaskPlanCommentSnapshot, err error) {
 	originalMessage := *message
 	originalQueued := *queued
+	originalCandidateSelected := false
+	if candidate != nil {
+		originalCandidateSelected = candidate.Selected
+	}
 	restore := func() {
 		*message = originalMessage
 		*queued = originalQueued
+		if candidate != nil {
+			candidate.Selected = originalCandidateSelected
+		}
 	}
 	tx, release, err := r.beginPlanCommentTx(ctx, message.TaskID)
 	if err != nil {
 		return nil, fmt.Errorf("begin queued plan-comment message creation: %w", err)
 	}
 	defer release()
-	defer func() { _ = tx.Rollback() }()
+	defer func() {
+		_ = tx.Rollback()
+		if err != nil {
+			restore()
+		}
+	}()
 	// Task lifecycle is the outer authority. Lock it before session/turn rows so
 	// archive and admission share one task -> session lock order.
 	if err := r.guardActivePlanCommentTaskTx(ctx, tx, message.TaskID); err != nil {
@@ -178,8 +256,20 @@ func (r *Repository) createQueuedMessagePlanCommentBoundary(
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), message.TaskSessionID); err != nil {
 		return nil, err
 	}
+	contentTemplate := message.Content
+	if candidate != nil {
+		if err := r.validateInitialTaskBriefCandidate(ctx, tx, message.TaskID, candidate); err != nil {
+			return nil, err
+		}
+		if err := r.selectInitialTaskBriefCandidate(ctx, tx, message.TaskSessionID, message, candidate); err != nil {
+			return nil, err
+		}
+		if candidate.Selected {
+			contentTemplate = message.Content
+		}
+	}
 	resolved, err := plancommenttx.ResolveDirect(
-		ctx, tx, r.db, message.TaskID, message.TaskSessionID, message.Content, refs,
+		ctx, tx, r.db, message.TaskID, message.TaskSessionID, contentTemplate, refs,
 		requirePrimary, expectedState,
 	)
 	if err != nil {
@@ -207,7 +297,7 @@ func (r *Repository) createQueuedMessagePlanCommentBoundary(
 		restore()
 		return nil, err
 	}
-	snapshot, err := plancommenttx.Consume(ctx, tx, r.db, resolved)
+	snapshot, err = plancommenttx.Consume(ctx, tx, r.db, resolved)
 	if err != nil {
 		restore()
 		return nil, err
@@ -222,28 +312,56 @@ func (r *Repository) createQueuedMessagePlanCommentBoundary(
 func (r *Repository) createMessagePlanCommentBoundary(
 	ctx context.Context,
 	message *models.Message,
+	candidate *admission.InitialTaskBriefCandidate,
 	refs []models.TaskPlanCommentRef,
 	requirePrimary bool,
 	expectedState models.TaskSessionState,
 	claim *messagequeue.QueueAttachmentClaim,
 	requestsInput int,
 	messageType, metadataJSON string,
-) (*models.TaskPlanCommentSnapshot, error) {
+) (snapshot *models.TaskPlanCommentSnapshot, err error) {
 	original := *message
+	originalCandidateSelected := false
+	if candidate != nil {
+		originalCandidateSelected = candidate.Selected
+	}
+	restore := func() {
+		*message = original
+		if candidate != nil {
+			candidate.Selected = originalCandidateSelected
+		}
+	}
 	tx, release, err := r.beginPlanCommentTx(ctx, message.TaskID)
 	if err != nil {
 		return nil, fmt.Errorf("begin plan-comment message creation: %w", err)
 	}
 	defer release()
-	defer func() { _ = tx.Rollback() }()
+	defer func() {
+		_ = tx.Rollback()
+		if err != nil {
+			restore()
+		}
+	}()
 	if err := r.guardActivePlanCommentTaskTx(ctx, tx, message.TaskID); err != nil {
 		return nil, err
 	}
 	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), message.TaskSessionID); err != nil {
 		return nil, err
 	}
+	contentTemplate := message.Content
+	if candidate != nil {
+		if err := r.validateInitialTaskBriefCandidate(ctx, tx, message.TaskID, candidate); err != nil {
+			return nil, err
+		}
+		if err := r.selectInitialTaskBriefCandidate(ctx, tx, message.TaskSessionID, message, candidate); err != nil {
+			return nil, err
+		}
+		if candidate.Selected {
+			contentTemplate = message.Content
+		}
+	}
 	resolved, err := plancommenttx.ResolveDirect(
-		ctx, tx, r.db, message.TaskID, message.TaskSessionID, message.Content, refs,
+		ctx, tx, r.db, message.TaskID, message.TaskSessionID, contentTemplate, refs,
 		requirePrimary, expectedState,
 	)
 	if err != nil {
@@ -257,20 +375,16 @@ func (r *Repository) createMessagePlanCommentBoundary(
 	}
 	normalizedTime := dialect.NormalizedMicrosecond(r.db.DriverName(), "created_at")
 	if err := r.assignUserMessageBoundary(ctx, tx, message, r.db.DriverName(), normalizedTime); err != nil {
-		*message = original
 		return nil, err
 	}
 	if err := r.insertMessageRow(ctx, tx, message, requestsInput, messageType, metadataJSON); err != nil {
-		*message = original
 		return nil, err
 	}
-	snapshot, err := plancommenttx.Consume(ctx, tx, r.db, resolved)
+	snapshot, err = plancommenttx.Consume(ctx, tx, r.db, resolved)
 	if err != nil {
-		*message = original
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		*message = original
 		return nil, fmt.Errorf("commit plan-comment message creation: %w", err)
 	}
 	return snapshot, nil

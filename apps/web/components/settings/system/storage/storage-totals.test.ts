@@ -103,7 +103,9 @@ describe("storageAnalysisTotal", () => {
 
     expect(storageAnalysisTotal(summary)).toEqual({ bytes: 12, partial: true });
   });
+});
 
+describe("storageAnalysisTotal database cases", () => {
   it("adds measured database and backup bytes exactly once", () => {
     expect(
       storageAnalysisTotal({
@@ -131,6 +133,20 @@ describe("storageAnalysisTotal", () => {
         },
       }),
     ).toEqual({ bytes: 49, partial: false });
+  });
+
+  it("excludes the informational system temporary footprint from Total counted", () => {
+    expect(
+      storageAnalysisTotal({
+        ...completeSummary,
+        system_temporary: {
+          status: "measured",
+          size_bytes: 500,
+          included_in_total: false,
+          roots: [],
+        },
+      }),
+    ).toEqual({ bytes: 52, partial: false });
   });
 
   it("adds only the counted portion of a partial database footprint", () => {

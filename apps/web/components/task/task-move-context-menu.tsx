@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { IconAdjustments, IconArrowRight, IconLogicBuffer } from "@tabler/icons-react";
 import {
   ContextMenuItem,
@@ -21,6 +21,8 @@ import {
 } from "./workflow-move-options";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
+import type { WorkflowStepProgress } from "@/hooks/domains/kanban/use-workflow-step-progress";
+import { StepProgressDetails } from "./workflow-step-progress-details";
 
 export type TaskMoveStep = {
   id: string;
@@ -155,6 +157,8 @@ type TaskMoveContextMenuItemsProps = {
     entryOptions: WorkflowMoveEntryOptions | undefined,
   ) => Promise<boolean>;
   isMoving?: boolean;
+  progressByStepId?: Readonly<Record<string, WorkflowStepProgress>>;
+  agentLabelsByProfileId?: Readonly<Record<string, string>>;
   onSendToWorkflow?: (workflowId: string, stepId: string) => void;
 };
 
@@ -210,6 +214,8 @@ function StepMenuItem({
   onSelectWithOptions,
   onSubmitWithOptions,
   isMoving,
+  progress,
+  agentLabelsByProfileId,
   testIdPrefix = "task-context-step",
 }: {
   step: TaskMoveStep;
@@ -221,12 +227,20 @@ function StepMenuItem({
     entryOptions: WorkflowMoveEntryOptions | undefined,
   ) => Promise<boolean>;
   isMoving?: boolean;
+  progress?: WorkflowStepProgress;
+  agentLabelsByProfileId?: Readonly<Record<string, string>>;
   testIdPrefix?: string;
 }) {
-  const { t } = useTranslation();
-  const pointerTypeRef = useRef<string | null>(null);
   const isCurrent = step.id === currentStepId;
-  const content = <StepMenuLabel step={step} isCurrent={isCurrent} testIdPrefix={testIdPrefix} />;
+  const content = (
+    <StepMenuContent
+      step={step}
+      isCurrent={isCurrent}
+      progress={progress}
+      agentLabelsByProfileId={agentLabelsByProfileId}
+      testIdPrefix={testIdPrefix}
+    />
+  );
 
   if (!onSelectWithOptions && !onSubmitWithOptions) {
     return (
@@ -244,6 +258,44 @@ function StepMenuItem({
     );
   }
 
+  return (
+    <StepMenuSubItem
+      step={step}
+      isCurrent={isCurrent}
+      onSelect={onSelect}
+      onSelectWithOptions={onSelectWithOptions}
+      onSubmitWithOptions={onSubmitWithOptions}
+      isMoving={isMoving}
+      content={content}
+      testIdPrefix={testIdPrefix}
+    />
+  );
+}
+
+function StepMenuSubItem({
+  step,
+  isCurrent,
+  onSelect,
+  onSelectWithOptions,
+  onSubmitWithOptions,
+  isMoving,
+  content,
+  testIdPrefix,
+}: {
+  step: TaskMoveStep;
+  isCurrent: boolean;
+  onSelect: (stepId: string) => void;
+  onSelectWithOptions?: (stepId: string) => void;
+  onSubmitWithOptions?: (
+    stepId: string,
+    entryOptions: WorkflowMoveEntryOptions | undefined,
+  ) => Promise<boolean>;
+  isMoving?: boolean;
+  content: ReactNode;
+  testIdPrefix: string;
+}) {
+  const { t } = useTranslation();
+  const pointerTypeRef = useRef<string | null>(null);
   return (
     <ContextMenuSub>
       <ContextMenuSubTrigger
@@ -310,6 +362,36 @@ function StepMenuItem({
   );
 }
 
+function StepMenuContent({
+  step,
+  isCurrent,
+  progress,
+  agentLabelsByProfileId,
+  testIdPrefix,
+}: {
+  step: TaskMoveStep;
+  isCurrent: boolean;
+  progress?: WorkflowStepProgress;
+  agentLabelsByProfileId?: Readonly<Record<string, string>>;
+  testIdPrefix: string;
+}) {
+  return (
+    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+      <span className="flex min-w-0 items-center gap-2">
+        <StepMenuLabel step={step} isCurrent={isCurrent} testIdPrefix={testIdPrefix} />
+      </span>
+      {progress && (
+        <StepProgressDetails
+          progress={progress}
+          agentProfileId={step.agent_profile_id ?? undefined}
+          agentLabelsByProfileId={agentLabelsByProfileId}
+          testId={`${testIdPrefix}-progress-${step.id}`}
+        />
+      )}
+    </span>
+  );
+}
+
 function MoveToCurrentWorkflowSubmenu({
   steps,
   currentStepId,
@@ -318,6 +400,8 @@ function MoveToCurrentWorkflowSubmenu({
   onMoveToStepWithOptions,
   onSubmitWithOptions,
   isMoving,
+  progressByStepId,
+  agentLabelsByProfileId,
 }: {
   steps: TaskMoveStep[];
   currentStepId?: string | null;
@@ -329,6 +413,8 @@ function MoveToCurrentWorkflowSubmenu({
     entryOptions: WorkflowMoveEntryOptions | undefined,
   ) => Promise<boolean>;
   isMoving?: boolean;
+  progressByStepId?: Readonly<Record<string, WorkflowStepProgress>>;
+  agentLabelsByProfileId?: Readonly<Record<string, string>>;
 }) {
   const { t } = useTranslation();
   if (!onMoveToStep || steps.length <= 1) return null;
@@ -352,6 +438,8 @@ function MoveToCurrentWorkflowSubmenu({
             onSelectWithOptions={onMoveToStepWithOptions}
             onSubmitWithOptions={onSubmitWithOptions}
             isMoving={isMoving}
+            progress={progressByStepId?.[step.id]}
+            agentLabelsByProfileId={agentLabelsByProfileId}
           />
         ))}
       </ContextMenuSubContent>
@@ -457,6 +545,8 @@ export function TaskMoveContextMenuItems({
   onMoveToStepWithOptions,
   onSubmitWithOptions,
   isMoving,
+  progressByStepId,
+  agentLabelsByProfileId,
   onSendToWorkflow,
 }: TaskMoveContextMenuItemsProps) {
   const { currentSteps, targets, canMove, canSend } = taskMoveOptions(
@@ -482,6 +572,8 @@ export function TaskMoveContextMenuItems({
         onMoveToStepWithOptions={onMoveToStepWithOptions}
         onSubmitWithOptions={onSubmitWithOptions}
         isMoving={isMoving}
+        progressByStepId={progressByStepId}
+        agentLabelsByProfileId={agentLabelsByProfileId}
       />
       <SendToWorkflowSubmenu
         workflows={targets}

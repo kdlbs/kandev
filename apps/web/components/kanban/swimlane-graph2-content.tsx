@@ -13,6 +13,30 @@ import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import { useTranslation } from "react-i18next";
 import { areAllEmptyStepsAutoHidden } from "@/lib/kanban/auto-hide-empty-columns";
+import { compareStepOrder } from "@/lib/kanban/task-order";
+
+/**
+ * Pipeline row order: each step's contiguous run of rows in step-list order
+ * (a task with no resolvable current step sorts after every task that has
+ * one), then within one step the full AC.1 total order
+ * (REQ-TASKS-KANBAN-TASK-REORDERING-001.2, .38) — position is not by itself a
+ * total order, and ties are the ship-time norm for tasks that arrived
+ * together.
+ */
+export function sortGraph2Tasks(displayTasks: Task[], displaySteps: WorkflowStep[]): Task[] {
+  // A finite sentinel, not Number.POSITIVE_INFINITY: two no-resolvable-step
+  // tasks must still subtract to a finite, sortable delta so compareStepOrder
+  // below is reachable (Infinity - Infinity is NaN, which a sort comparator
+  // cannot use to order a pair).
+  const noStepSentinel = displaySteps.length;
+  const stepIndex = new Map(displaySteps.map((step, index) => [step.id, index]));
+  const resolvedStepIndex = (task: Task) => stepIndex.get(task.workflowStepId) ?? noStepSentinel;
+  return [...displayTasks].sort((a, b) => {
+    const stepDelta = resolvedStepIndex(a) - resolvedStepIndex(b);
+    if (stepDelta !== 0) return stepDelta;
+    return compareStepOrder(a, b);
+  });
+}
 
 export function getGraph2DisplayState(
   tasks: Task[],
@@ -25,32 +49,6 @@ export function getGraph2DisplayState(
     displayTasks,
     displaySteps: hasOrphans ? [...steps, { ...ORPHAN_STEP, title: orphanStepTitle }] : steps,
   };
-}
-
-/**
- * Sorts by displayed-step-index ascending (a task with no resolvable current
- * step sorts after every task that has one), then `position` ascending
- * (absent treated as 0), then task id ascending.
- */
-export function sortGraph2Tasks(tasks: Task[], displaySteps: WorkflowStep[]): Task[] {
-  // A finite sentinel, not Number.POSITIVE_INFINITY: two no-resolvable-step
-  // tasks must still subtract to a finite, sortable delta so their position/id
-  // tiebreak below is reachable (Infinity - Infinity is NaN, which a sort
-  // comparator cannot use to order a pair).
-  const noStepSentinel = displaySteps.length;
-  const stepIndex = (task: Task) => {
-    const index = displaySteps.findIndex((step) => step.id === task.workflowStepId);
-    return index === -1 ? noStepSentinel : index;
-  };
-  return [...tasks].sort((a, b) => {
-    const stepDelta = stepIndex(a) - stepIndex(b);
-    if (stepDelta !== 0) return stepDelta;
-    const positionDelta = (a.position ?? 0) - (b.position ?? 0);
-    if (positionDelta !== 0) return positionDelta;
-    if (a.id < b.id) return -1;
-    if (a.id > b.id) return 1;
-    return 0;
-  });
 }
 
 export function SwimlaneGraph2Content({

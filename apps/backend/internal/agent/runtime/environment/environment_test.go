@@ -53,6 +53,51 @@ func TestResolve_ExecutorProfileBeatsAgentProfile(t *testing.T) { // AC-1
 	}
 }
 
+func TestResolve_ComposesIndexedGitConfigAcrossSources(t *testing.T) {
+	env, records := mustResolve(t, []Definition{
+		{Key: "GIT_CONFIG_COUNT", Literal: "1", Origin: OriginAgentProfile},
+		{Key: "GIT_CONFIG_KEY_0", Literal: "core.autocrlf", Origin: OriginAgentProfile},
+		{Key: "GIT_CONFIG_VALUE_0", Literal: "input", Origin: OriginAgentProfile},
+		{Key: "GIT_CONFIG_COUNT", Literal: "2", Origin: OriginExecutorProfile},
+		{Key: "GIT_CONFIG_KEY_0", Literal: "notes.augment.mergeStrategy", Origin: OriginExecutorProfile},
+		{Key: "GIT_CONFIG_VALUE_0", Literal: "union", Origin: OriginExecutorProfile},
+		{Key: "GIT_CONFIG_KEY_1", Literal: "core.hooksPath", Origin: OriginExecutorProfile},
+		{Key: "GIT_CONFIG_VALUE_1", Literal: "/profile/hooks", Origin: OriginExecutorProfile},
+		{Key: "GIT_CONFIG_COUNT", Literal: "1", Origin: OriginManagedRuntime},
+		{Key: "GIT_CONFIG_KEY_0", Literal: "credential.https://github.com.helper", Origin: OriginManagedRuntime},
+		{Key: "GIT_CONFIG_VALUE_0", Literal: "!f() { : kandev-host-gh-bridge; gh auth git-credential \"$@\"; }; f", Origin: OriginManagedRuntime},
+	})
+	if len(records) != 0 {
+		t.Fatalf("records = %#v, want no ordinary-key override records", records)
+	}
+	want := map[string]string{
+		"GIT_CONFIG_COUNT":   "4",
+		"GIT_CONFIG_KEY_0":   "core.autocrlf",
+		"GIT_CONFIG_VALUE_0": "input",
+		"GIT_CONFIG_KEY_1":   "notes.augment.mergeStrategy",
+		"GIT_CONFIG_VALUE_1": "union",
+		"GIT_CONFIG_KEY_2":   "core.hooksPath",
+		"GIT_CONFIG_VALUE_2": "/profile/hooks",
+		"GIT_CONFIG_KEY_3":   "credential.https://github.com.helper",
+	}
+	for key, wantValue := range want {
+		if got := env[key]; got != wantValue {
+			t.Errorf("%s = %q, want %q", key, got, wantValue)
+		}
+	}
+}
+
+func TestResolve_IndexedSourceStillUsesOrdinaryConflictRules(t *testing.T) {
+	err := conflictOf(t, []Definition{
+		{Key: "PATH", Literal: "/managed", Origin: OriginManagedRuntime},
+		{Key: "PATH", Literal: "/profile", Origin: OriginExecutorProfile},
+	})
+	want := []string{OriginExecutorProfile, OriginManagedRuntime}
+	if !reflect.DeepEqual(err.Origins, want) {
+		t.Fatalf("origins = %#v, want %#v", err.Origins, want)
+	}
+}
+
 func TestResolve_ManagedRuntimeBeatsAgentProfile(t *testing.T) { // AC-2
 	env, _ := mustResolve(t, []Definition{
 		{Key: "K", Literal: "managed-value", Origin: OriginManagedRuntime},
