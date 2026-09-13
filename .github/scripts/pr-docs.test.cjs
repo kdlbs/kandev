@@ -798,6 +798,296 @@ test('coverage loading searches only the referenced requirement files', async ()
   ]);
 });
 
+function repeatedCoverageFixture() {
+  const contents = uiFixtureContents();
+  const planPath = 'docs/plans/recovery/plan.md';
+  const workOrderPath = 'docs/plans/recovery/task-01-recovery.md';
+  const designPath = 'docs/specs/ui/system-design/ui-coverage.md';
+  const requirementPath = 'docs/specs/ui/requirements/ui-coverage.md';
+  const requirementIds = [1, 2, 3].map(index => `REQ-UI-COVERAGE-00${index}`);
+  for (const pathname of [planPath, workOrderPath, designPath]) {
+    contents[pathname] = contents[pathname].replace(
+      '  - REQ-UI-COVERAGE-001',
+      requirementIds.map(id => `  - ${id}`).join('\n'),
+    );
+  }
+  contents[workOrderPath] = contents[workOrderPath].replace(
+    '  - AC-UI-COVERAGE-001.3',
+    requirementIds.map(id => `  - ${id.replace('REQ-', 'AC-')}.3`).join('\n'),
+  );
+  contents[requirementPath] = requirementIds.map(id =>
+    `### ${id}\n\n- **${id.replace('REQ-', 'AC-')}.3:** Runtime changes have a work order.\n`
+  ).join('\n');
+  const changed = runtimeAndWorkOrderDiff();
+  for (let index = 2; index <= 6; index += 1) {
+    const basename = `task-0${index}-recovery.md`;
+    const pathname = `docs/plans/recovery/${basename}`;
+    contents[pathname] = contents[workOrderPath].replace('01-recovery', `0${index}-recovery`);
+    contents[planPath] += `\n- [Task ${index}](${basename})\n`;
+    changed.push({ filename: pathname, status: 'modified', changes: 1 });
+  }
+  return { contents, changed, requirementPath, requirementIds };
+}
+
+function coverageClient(contents, changed, overrides = {}) {
+  return {
+    async getPullRequest() {
+      return pullRequest(42, SHA_B, [], changed.length);
+    },
+    async listFiles() {
+      return changed;
+    },
+    async getFile(pathname, ref) {
+      assert.equal(ref, SHA_B);
+      if (!Object.hasOwn(contents, pathname)) {
+        throw new Error('GitHub API request failed with HTTP 404: Not Found');
+      }
+      return contents[pathname];
+    },
+    ...overrides,
+  };
+}
+
+// @covers AC-CI-PR-DOCS-001.4, AC-CI-PR-DOCS-003.2
+test('six work orders sharing three requirements stay within the search quota', async () => {
+  const { contents, changed, requirementPath, requirementIds } = repeatedCoverageFixture();
+  const searches = [];
+  const client = coverageClient(contents, changed, {
+    async searchCode(requirementId, directory) {
+      searches.push({ requirementId, directory });
+      if (searches.length > 10) {
+        throw new Error('GitHub API request failed with HTTP 403: API rate limit exceeded');
+      }
+      return [requirementPath];
+    },
+  });
+
+  const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+
+  assert.equal(result.status, 'covered', result.errors.join('; '));
+  assert.equal(result.workOrders.length, 6);
+  assert.deepEqual(searches, requirementIds.map(requirementId => ({
+    requirementId,
+    directory: 'docs/specs/ui/requirements',
+  })));
+});
+
+// @covers AC-CI-PR-DOCS-001.4, AC-CI-PR-DOCS-003.2
+test('PR-only requirements and empty searches reuse a bounded directory lookup', async () => {
+  const { contents, changed, requirementPath, requirementIds } = repeatedCoverageFixture();
+  changed.push({ filename: requirementPath, status: 'added' });
+  let searches = 0;
+  let listings = 0;
+  const client = coverageClient(contents, changed, {
+    async searchCode() {
+      searches += 1;
+      return [];
+    },
+    async listDirectory(directory, ref) {
+      assert.equal(directory, 'docs/specs/ui/requirements');
+      assert.equal(ref, SHA_B);
+      listings += 1;
+      if (listings > 1) {
+        throw new Error('GitHub API request failed with HTTP 429: Too Many Requests');
+      }
+      return [{ path: requirementPath, type: 'file' }];
+    },
+  });
+
+  const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+
+  assert.equal(result.status, 'covered', result.errors.join('; '));
+  assert.equal(searches, requirementIds.length);
+  assert.equal(listings, 1);
+});
+
+// @covers AC-CI-PR-DOCS-001.4, AC-CI-PR-DOCS-001.5
+test('directory fallback reuses exact-head entries without accepting missing requirements', async t => {
+  for (const outcome of ['file', 'empty', 'missing']) {
+    await t.test(outcome, async () => {
+      const { contents, changed, requirementPath } = repeatedCoverageFixture();
+      const fallbackPath = 'docs/specs/ui/requirements/coverage.md';
+      contents[fallbackPath] = contents[requirementPath];
+      delete contents[requirementPath];
+      let listings = 0;
+      const client = coverageClient(contents, changed, {
+        async searchCode() {
+          return [];
+        },
+        async listDirectory(directory, ref) {
+          assert.equal(directory, 'docs/specs/ui/requirements');
+          assert.equal(ref, SHA_B);
+          listings += 1;
+          if (outcome === 'missing') {
+            throw new Error('GitHub API request failed with HTTP 404: Not Found');
+          }
+          return outcome === 'file' ? [{ path: fallbackPath, type: 'file' }] : [];
+        },
+      });
+
+      const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+
+      assert.equal(result.status, outcome === 'file' ? 'covered' : 'invalid', result.errors.join('; '));
+      assert.equal(listings, 1);
+    });
+  }
+});
+
+// @covers AC-CI-PR-DOCS-001.4, AC-CI-PR-DOCS-001.5
+test('designs sharing an ID reuse lookups only within their requirement directory', async () => {
+  const contents = uiFixtureContents();
+  const reference = '  - ../../specs/ui/system-design/ui-coverage.md';
+  for (const pathname of ['docs/plans/recovery/plan.md', 'docs/plans/recovery/task-01-recovery.md']) {
+    contents[pathname] = contents[pathname].replace(reference, `${reference}
+  - ../../specs/ui/system-design/shared.md
+  - ../../specs/ci/system-design/shared.md`);
+  }
+  contents['docs/specs/ui/system-design/shared.md'] = contents['docs/specs/ui/system-design/ui-coverage.md'];
+  contents['docs/specs/ci/system-design/shared.md'] = contents['docs/specs/ui/system-design/ui-coverage.md']
+    .replace('system: ui', 'system: ci');
+  contents['docs/specs/ci/requirements/shared.md'] = contents['docs/specs/ui/requirements/ui-coverage.md'];
+  const searches = [];
+  const client = coverageClient(contents, runtimeAndWorkOrderDiff(), {
+    async searchCode(requirementId, directory) {
+      searches.push({ requirementId, directory });
+      return [directory === 'docs/specs/ui/requirements'
+        ? 'docs/specs/ui/requirements/ui-coverage.md'
+        : 'docs/specs/ci/requirements/shared.md'];
+    },
+  });
+
+  const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+
+  assert.equal(result.status, 'covered', result.errors.join('; '));
+  assert.deepEqual(searches, ['ui', 'ci'].map(system => ({
+    requirementId: 'REQ-UI-COVERAGE-001',
+    directory: `docs/specs/${system}/requirements`,
+  })));
+});
+
+// @covers AC-CI-PR-DOCS-003.2
+test('lookup errors fail closed without poisoning later evaluations', async t => {
+  for (const boundary of ['searchCode', 'listDirectory']) {
+    await t.test(boundary, async () => {
+      const { contents, changed, requirementPath } = repeatedCoverageFixture();
+      changed.push({ filename: requirementPath, status: 'added' });
+      let fail = true;
+      const client = coverageClient(contents, changed, {
+        async searchCode() {
+          if (fail && boundary === 'searchCode') {
+            throw new Error('GitHub API request failed with HTTP 403: API rate limit exceeded');
+          }
+          return [];
+        },
+        async listDirectory() {
+          if (fail && boundary === 'listDirectory') {
+            throw new Error('GitHub API request failed with HTTP 503: Service Unavailable');
+          }
+          return [];
+        },
+      });
+
+      const failed = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+      assert.equal(failed.ok, false);
+      assert.equal(failed.status, 'error');
+      assert.match(failed.errors.join('; '), /GitHub API request failed/);
+      fail = false;
+      const recovered = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+      assert.equal(recovered.status, 'covered', recovered.errors.join('; '));
+    });
+  }
+});
+
+// @covers AC-CI-PR-DOCS-001.5
+test('lookup reuse preserves ambiguous requirement detection', async t => {
+  for (const source of ['search', 'PR-only file']) {
+    await t.test(source, async () => {
+      const { contents, changed, requirementPath } = repeatedCoverageFixture();
+      const duplicatePath = 'docs/specs/ui/requirements/duplicate.md';
+      contents[duplicatePath] = contents[requirementPath];
+      if (source === 'PR-only file') {
+        changed.push({ filename: duplicatePath, status: 'added' });
+      }
+      const client = coverageClient(contents, changed, {
+        async searchCode() {
+          return source === 'search' ? [requirementPath, duplicatePath] : [requirementPath];
+        },
+      });
+
+      const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+
+      assert.equal(result.status, 'invalid');
+      assert.match(result.errors.join('; '), /ambiguous definitions/);
+    });
+  }
+});
+
+// @covers AC-CI-PR-DOCS-003.1
+test('revision retries reload requirement lookups and files at the new exact head', async () => {
+  const { contents, changed, requirementPath, requirementIds } = repeatedCoverageFixture();
+  const renamedPath = 'docs/specs/ui/requirements/renamed.md';
+  let metadataReads = 0;
+  let searches = 0;
+  const client = coverageClient(contents, changed, {
+    async getPullRequest() {
+      return pullRequest(42, metadataReads++ === 0 ? SHA_B : SHA_C, [], changed.length);
+    },
+    async searchCode() {
+      searches += 1;
+      return [metadataReads === 1 ? requirementPath : renamedPath];
+    },
+    async getFile(pathname, ref) {
+      assert.equal(ref, metadataReads === 1 ? SHA_B : SHA_C);
+      if (ref === SHA_C && pathname === requirementPath) {
+        throw new Error('GitHub API request failed with HTTP 404: Not Found');
+      }
+      return contents[pathname === renamedPath ? requirementPath : pathname];
+    },
+  });
+
+  const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+
+  assert.equal(result.status, 'covered', result.errors.join('; '));
+  assert.equal(result.headSha, SHA_C);
+  assert.equal(searches, requirementIds.length * 2);
+});
+
+// @covers AC-CI-PR-DOCS-003.4
+test('merge-group members do not share cached requirement lookups or contents', async () => {
+  const { contents, changed, requirementPath } = repeatedCoverageFixture();
+  let currentMember;
+  const client = coverageClient(contents, changed, {
+    async getPullRequest(number) {
+      currentMember = number;
+      return pullRequest(number, number === 1 ? SHA_D : SHA_E, [], changed.length);
+    },
+    async searchCode() {
+      return currentMember === 1 ? [requirementPath] : [];
+    },
+    async getFile(pathname, ref) {
+      assert.equal(ref, currentMember === 1 ? SHA_D : SHA_E);
+      if (currentMember === 2 && pathname === requirementPath) {
+        throw new Error('GitHub API request failed with HTTP 404: Not Found');
+      }
+      return contents[pathname];
+    },
+  });
+
+  const result = await validator.evaluateMergeGroup({
+    client,
+    baseSha: SHA_A,
+    headSha: SHA_C,
+    entries: [
+      { baseCommit: { oid: SHA_A }, headCommit: { oid: SHA_B }, pullRequest: { number: 1, headRefOid: SHA_D } },
+      { baseCommit: { oid: SHA_B }, headCommit: { oid: SHA_C }, pullRequest: { number: 2, headRefOid: SHA_E } },
+    ],
+  });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.memberResults.map(member => member.status), ['covered', 'invalid']);
+  assert.match(result.memberResults[1].errors.join('; '), /not defined in ui requirements/);
+});
+
 test('missing referenced artifacts become invalid coverage through the API adapter', async () => {
   const contents = fixtureContents();
   const workOrderPath = 'docs/plans/recovery/task-01-recovery.md';
