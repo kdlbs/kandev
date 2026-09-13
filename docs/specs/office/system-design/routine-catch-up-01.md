@@ -124,18 +124,18 @@ type catchUpResult struct {
     ElapsedTicks  int       // >= 1 on success; includes the tick due now
     FirstMissedAt time.Time // zero when ElapsedTicks <= 1
     Truncated     bool      // ElapsedTicks reached the cap with ticks still pending
-    NextRunAt     time.Time // strictly after the processing instant on success
+    NextRunAt     time.Time // success or recoverable-error re-arm
     Unknown       bool      // the walk failed; ElapsedTicks is not meaningful
 }
 ```
 
 Invariants the constructor guarantees, so no call site has to restate them:
 
-- `NextRunAt` is strictly after the processing instant on a successful walk.
-  On `Unknown`, it is zero and `processCronTrigger` handles `Err`.
-  `ErrUnsatisfiableCron` leaves the claimed trigger disarmed. Other failures
-  restore the claimed occurrence for retry. Neither path dispatches a run or
-  records a gap; both log the underlying error.
+- `NextRunAt` is strictly after the processing instant on a successful walk or
+  a recoverable failure. On `Unknown`, `computeCatchUp` supplies the
+  processing instant plus 24 hours. `ErrUnsatisfiableCron` leaves the claimed
+  trigger disarmed; another failure re-arms it and dispatches one run without a
+  gap summary. Both paths log the underlying error.
 - `FirstMissedAt` is the armed `next_run_at` at claim time — read directly, not
   derived from the walk, so it is exact even when `Truncated` is true.
 - `Truncated` is true only when the walk stopped at the cap with the cursor
@@ -152,11 +152,11 @@ an agent session remains the separate shared-launcher contract described above.
 what would otherwise be four near-identical states into two, and it is why
 `Unknown` needs no representation in storage:
 
-- `Unknown` (the walk failed) drives the error path and nothing else. The
-  caller either disarms an unsatisfiable trigger or restores the claimed
-  occurrence for retry. No summary is written, because a due trigger has at
-  least one elapsed tick but may have no *missed* one, and reporting an
-  unmeasured gap on a merely-late trigger is a false positive (AC-001.6).
+- `Unknown` (the walk failed) drives the error path and no gap summary. The
+  caller either disarms an unsatisfiable trigger or re-arms a recoverable
+  failure for 24 hours and dispatches one run. A due trigger has at least one
+  elapsed tick but may have no *missed* one, so an unmeasured gap is a false
+  positive (AC-001.6).
 - `catch_up_max == 1` makes `missedTicks` structurally zero, so that
   configuration never produces a summary. That is a named consequence, not an
   edge case to detect (AC-002.11).

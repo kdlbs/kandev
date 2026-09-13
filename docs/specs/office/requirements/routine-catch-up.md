@@ -83,9 +83,9 @@ long outage cannot turn into a burst of spend I did not authorize.
 - **AC-OFFICE-ROUTINE-CATCHUP-001.1:** When a due cron trigger is claimed, the
   system shall dispatch exactly one routine run for that claim, whatever the
   number of elapsed ticks in the gap and whatever the catch-up policy. The only
-  cases producing none are a failed arming write (AC-001.2), a failed elapsed
-  tick computation (AC-001.6), and a run that cannot be created (AC-001.12);
-  no case produces two.
+  cases producing none are a failed arming write (AC-001.2), an unsatisfiable
+  expression (AC-001.11), and a run that cannot be created (AC-001.12); no case
+  produces two.
 - **AC-OFFICE-ROUTINE-CATCHUP-001.2:** When a claim is processed and the
   elapsed-tick computation succeeds, the system shall arm the trigger's
   `next_run_at` to the first match of its cron expression strictly after the
@@ -107,10 +107,10 @@ long outage cannot turn into a burst of spend I did not authorize.
   the other shall dispatch nothing, record no gap summary, and change no
   trigger state.
 - **AC-OFFICE-ROUTINE-CATCHUP-001.6:** When the elapsed-tick computation fails,
-  the system shall record no gap summary or run. For an unsatisfiable
-  expression it shall leave `next_run_at` null; for another failure it shall
-  restore the claimed occurrence so a later tick can retry. It shall warn with
-  the underlying error.
+  the system shall record no gap summary. For `ErrUnsatisfiableCron` it shall
+  leave `next_run_at` null and dispatch no run. For another failure it shall
+  arm `next_run_at` to the processing instant plus 24 hours and dispatch one
+  run. It shall warn with the underlying error.
 - **AC-OFFICE-ROUTINE-CATCHUP-001.7:** Within one scheduler tick, due triggers
   shall be processed in ascending `office_routine_triggers.next_run_at` order,
   with ties broken by ascending `office_routine_triggers.id`.
@@ -147,9 +147,9 @@ long outage cannot turn into a burst of spend I did not authorize.
   concurrency policy assigned.
 - **AC-OFFICE-ROUTINE-CATCHUP-001.11:** When the elapsed-tick computation fails
   after a claim, the system shall warn with the trigger and underlying error.
-  For `ErrUnsatisfiableCron`, it shall leave `next_run_at` null. For another
-  failure, it shall re-arm the original claimed occurrence for a later retry.
-  Neither path shall dispatch a run or record a gap summary.
+  For `ErrUnsatisfiableCron`, it shall leave `next_run_at` null and dispatch no
+  run. For another failure, it shall arm `next_run_at` to the processing instant
+  plus 24 hours and dispatch one run. Neither path shall record a gap summary.
 - **AC-OFFICE-ROUTINE-CATCHUP-001.12:** When the routine run for a claim cannot
   be created at all, the system shall dispatch nothing and record no gap
   summary, and shall not re-attempt that tick. The trigger remains armed forward
@@ -312,9 +312,8 @@ Each exclusion is a decision, not an omission.
   in the cron tick path; only `office_routine_triggers.enabled` gates firing. A
   defect, but not catch-up specific; a follow-up card carries it.
 - **Cron correctness at the tick level.** Day-of-month versus day-of-week
-  conjunction, DST behaviour, and legacy unsatisfiable-trigger handling are gap
-  23, carded. This document constrains what happens *between* ticks and takes
-  tick times as given.
+  conjunction and DST behaviour are gap 23, carded. A claimed unsatisfiable
+  expression follows AC-001.11; matching rules remain outside this document.
 - **Work-in-progress limits and budget enforcement.** Gaps 11 and 19, carded.
   This document creates no work that would need them.
 - **Retention of gap summaries.** They inherit whatever retention
