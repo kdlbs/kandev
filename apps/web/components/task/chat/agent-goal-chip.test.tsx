@@ -80,6 +80,25 @@ describe("AgentGoalChip", () => {
     );
   });
 
+  it("does not close the touch drawer when the trigger loses hover state", () => {
+    vi.useFakeTimers();
+    try {
+      responsiveMock.isFinePointer = false;
+      render(<AgentGoalChip goal={activeGoal()} />);
+
+      const trigger = screen.getByTestId(GOAL_CHIP_TEST_ID);
+      fireEvent.click(trigger);
+      expect(screen.getByTestId("agent-goal-drawer-content")).toBeTruthy();
+
+      fireEvent.mouseLeave(trigger);
+      act(() => vi.advanceTimersByTime(150));
+
+      expect(screen.getByTestId("agent-goal-drawer-content")).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps hover details open while crossing into the popover", () => {
     vi.useFakeTimers();
     try {

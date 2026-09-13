@@ -21,6 +21,11 @@ test.describe("mobile agent goal visibility", () => {
 
     const chip = dialog.getByTestId("agent-goal-chip");
     await expect(chip).toBeVisible({ timeout: 30_000 });
+    await expect(
+      dialog.getByText("The provider goal remains active after the thread becomes idle.", {
+        exact: false,
+      }),
+    ).toBeVisible({ timeout: 30_000 });
     const bounds = await chip.boundingBox();
     expect(bounds).not.toBeNull();
     if (!bounds) throw new Error("goal trigger bounds unavailable");
@@ -52,6 +57,11 @@ test.describe("mobile agent goal visibility", () => {
 
     await sendQuickChatMessage(dialog, testPage, "/e2e:goal-active");
     await expect(dialog.getByTestId("agent-goal-chip")).toBeVisible({ timeout: 30_000 });
+    await expect(
+      dialog.getByText("The provider goal remains active after the thread becomes idle.", {
+        exact: false,
+      }),
+    ).toBeVisible({ timeout: 30_000 });
 
     await sendQuickChatMessage(dialog, testPage, "/e2e:goal-clear");
     await expect(dialog.getByText("The provider goal was cleared.", { exact: false })).toBeVisible({

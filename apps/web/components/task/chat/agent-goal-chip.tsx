@@ -103,10 +103,12 @@ const AgentGoalTrigger = forwardRef<HTMLButtonElement, AgentGoalTriggerProps>(
         aria-expanded={open}
         aria-controls={detailsId}
         onMouseEnter={() => {
+          if (usesDrawer) return;
           onHoverChange(true);
-          if (!usesDrawer && !suppressHoverRef.current) setOpen(true);
+          if (!suppressHoverRef.current) setOpen(true);
         }}
         onMouseLeave={() => {
+          if (usesDrawer) return;
           onHoverChange(false);
           suppressHoverRef.current = false;
         }}
