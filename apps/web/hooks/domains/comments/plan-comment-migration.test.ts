@@ -160,6 +160,30 @@ describe("task-scoped plan comment recovery", () => {
     expect(saved()).toEqual([comment]);
   });
 
+  it("gives a replacement plan a fresh quiet retry burst", async () => {
+    write();
+    api.createTaskPlanComment.mockRejectedValue(new Error("offline"));
+    const { store, state } = setup();
+    await settle();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(api.createTaskPlanComment).toHaveBeenCalledTimes(2);
+
+    store.getState().setTaskPlan(TASK, { ...plan, id: "plan-2" });
+    await settle();
+    expect(api.createTaskPlanComment).toHaveBeenCalledTimes(3);
+    expect(api.createTaskPlanComment).toHaveBeenLastCalledWith(
+      expect.objectContaining({ planId: "plan-2", id: comment.id }),
+    );
+    expect(state()).toMatchObject({ status: "retrying", pendingCount: 1 });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(api.createTaskPlanComment).toHaveBeenCalledTimes(4);
+    expect(state()?.status).toBe("retrying");
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(api.createTaskPlanComment).toHaveBeenCalledTimes(5);
+    expect(state()).toMatchObject({ status: "failed", pendingCount: 1, failure: "transient" });
+    expect(saved()).toEqual([comment]);
+  });
+
   it("coalesces multiple surfaces and resume signals around one in-flight upload", async () => {
     write();
     const pending = deferred();

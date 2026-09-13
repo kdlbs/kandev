@@ -150,6 +150,7 @@ export class PlanCommentMigration {
       if (planChanged) {
         this.generation++;
         this.failure = null;
+        this.failures = 0;
         this.refreshPlan = false;
       }
       this.dueAt = 0;

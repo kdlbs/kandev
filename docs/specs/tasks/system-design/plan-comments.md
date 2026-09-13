@@ -368,7 +368,8 @@ For a task with identified drafts:
    do not overwrite them. A lost update response can reconcile only when the
    authoritative row matches the intended body and anchor. A conflict snapshot
    alone does not acknowledge a different local body.
-4. Complete migration when every identified row has been acknowledged. Do not
+4. Complete migration only after every identified row has backend
+   acknowledgement and confirmed selective browser-storage cleanup. Do not
    append an unconditional list request: a failed background snapshot refresh
    must not undo successful migration or keep an empty migration blocked.
 
@@ -405,8 +406,10 @@ seconds after the first two failures. After that burst, schedule single
 background attempts at 30, 60, then at most once per 120 seconds while visible
 and connected. These are implementation constants, not operator settings.
 Coalesced reconnect, foreground, and explicit Retry triggers can bring the next
-attempt forward, but share the in-flight operation. Only explicit Retry or
-successful recovery resets the failure budget. Disconnected or hidden periods
+attempt forward, but share the in-flight operation. Explicit Retry, successful
+recovery, or a change of plan identity resets the failure budget. A replacement
+plan gets its own quiet retry burst; confirming loaded metadata for the same
+plan does not reset its accumulated failures. Disconnected or hidden periods
 do not spend attempts. Stop scheduled work when the last consumer unmounts;
 remount rescans and resumes without a browser-global completed marker.
 

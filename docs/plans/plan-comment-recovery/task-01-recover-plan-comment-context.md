@@ -95,7 +95,7 @@ states during the focused E2E run.
 First add these named behavioral regressions against the unfixed source:
 
 - `empty legacy storage does not request migration refresh or block Send`.
-- `failed plan discovery does not block plain Send before or after a null plan`.
+- `failed plan discovery does not block plain Send before or after a null plan when no legacy drafts are identified`.
 - `successful empty snapshot recovery clears obsolete migration restrictions`.
 - `a transient legacy upload recovers without manual Retry`.
 - `Run of a persisted comment ignores unrelated legacy recovery`.
@@ -106,6 +106,8 @@ the first four, real submit hooks for message acceptance, and
 production code. Replace the existing tests that intentionally equate generic
 read failure with migration failure; retain real partial failure, UUID conflict,
 missing-plan, exact cleanup, and primary-routing coverage.
+Assert that the discovery-failure case has no identified pending rows. A
+separate known-draft case must keep Send blocked until those rows are resolved.
 
 Add fake-timer cases for bounded attempts, coalesced resume events, connected
 readiness, multiple consumers, and unmount. Keep responses deferred when proving
@@ -482,3 +484,36 @@ Local checks completed before the full-shard validation:
   `session-resume-recovery.spec.ts` together with the new helper regression
   (two tests, 16.8s), and `mobile-session-resume-recovery.spec.ts` (one test,
   20.2s). Both use the matching managed-runner project and unchanged fresh build.
+
+### Plan-local retry budgets and review wording (2026-09-13)
+
+Claude's replacement-plan finding reproduced accumulated failures from the
+previous plan immediately surfacing a Retry notice and extending ordinary-read
+backoff. Two fake-timer regressions failed against the prior implementation:
+the first upload failure on the new plan published `failed`, and its first
+background-read retry did not run after one second. Both coordinators now reset
+the failure count on plan identity change. Same-ID metadata confirmation keeps
+the existing budget, and migration still enters capped backoff after the new
+plan's own three-attempt burst. No layout, touch control, or navigation changes.
+
+The requested `needsAttention: true` fixtures already exist in
+`lib/plan-comment-recovery.test.ts` for `failed` and `waiting_for_plan` with a
+pending row; those tests pass unchanged. CodeRabbit's grouped wording findings
+are addressed: the no-plan discovery Send regression explicitly has no identified
+drafts, and migration completion requires both backend acknowledgement and
+confirmed selective browser cleanup.
+
+Local verification:
+
+- The focused command in Verification passes 186 tests across 15 files:
+  162 unit/component tests plus 24 locale-generator tests.
+- `pnpm test -- hooks/domains/comments/plan-comment-migration.test.ts
+  hooks/domains/comments/plan-comment-loading.test.ts
+  lib/plan-comment-recovery.test.ts` passes 44 tests. The loader's five tests
+  pass again after extracting duplicate fixture literals for lint.
+- Typecheck, changed-file ESLint with zero warnings, and i18n ratchet pass.
+- Fresh Chromium passes four plan-comment scenarios (1.0m); Pixel 5 passes
+  four (51.4s) using the same build and the existing Verification commands,
+  both with `--retries=0`.
+- Exact-head remote CI, review disposition, and media publication remain
+  separate delivery gates; these local results do not claim remote completion.

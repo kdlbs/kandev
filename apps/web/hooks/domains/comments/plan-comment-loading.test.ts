@@ -8,6 +8,8 @@ vi.mock("@/lib/api/domains/plan-api", () => api);
 const comments = vi.hoisted(() => ({ getTaskPlanComments: vi.fn() }));
 vi.mock("@/lib/api/domains/plan-comment-api", () => comments);
 const releases: Array<() => void> = [];
+const DATE = "2026-09-02T00:00:00Z";
+const ERROR_MESSAGE = "Could not load comments";
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -27,8 +29,8 @@ it("releases loading flags when plan hydration invalidates an in-flight read", a
     title: "Plan",
     content: "Step",
     created_by: "agent",
-    created_at: "2026-09-02T00:00:00Z",
-    updated_at: "2026-09-02T00:00:00Z",
+    created_at: DATE,
+    updated_at: DATE,
   };
   const snapshot: TaskPlanCommentSnapshot = {
     task_id: taskId,
@@ -40,7 +42,7 @@ it("releases loading flags when plan hydration invalidates an in-flight read", a
   store.getState().setTaskPlan(taskId, plan);
   store.setState((state) => ({ taskPlans: { ...state.taskPlans, loadedByTaskId: {} } }));
   store.getState().setConnectionStatus("connected");
-  const loader = planCommentLoaderFor(store, taskId, "Could not load comments");
+  const loader = planCommentLoaderFor(store, taskId, ERROR_MESSAGE);
   releases.push(loader.attach());
   let resolve!: (value: TaskPlanCommentSnapshot) => void;
   comments.getTaskPlanComments.mockImplementationOnce(
@@ -63,10 +65,43 @@ it("releases loading flags when plan hydration invalidates an in-flight read", a
   expect(store.getState().taskPlans.commentsByTaskId[taskId]).toEqual(snapshot);
 });
 
+it("restarts the background retry delay when the plan is replaced", async () => {
+  const taskId = "task-1";
+  const plan: TaskPlan = {
+    id: "plan-1",
+    task_id: taskId,
+    title: "Plan",
+    content: "Step",
+    created_by: "agent",
+    created_at: DATE,
+    updated_at: DATE,
+  };
+  const store = createAppStore();
+  store.getState().setTaskPlan(taskId, plan);
+  store.getState().setConnectionStatus("connected");
+  api.getTaskPlan.mockResolvedValue(plan);
+  comments.getTaskPlanComments.mockRejectedValue(new Error("offline"));
+  const loader = planCommentLoaderFor(store, taskId, ERROR_MESSAGE);
+  releases.push(loader.attach());
+  await loader.load(false);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(comments.getTaskPlanComments).toHaveBeenCalledTimes(2);
+
+  const replacement = { ...plan, id: "plan-2" };
+  store.getState().setTaskPlan(taskId, replacement);
+  api.getTaskPlan.mockResolvedValue(replacement);
+  await loader.load(false);
+  expect(comments.getTaskPlanComments).toHaveBeenCalledTimes(3);
+  await vi.advanceTimersByTimeAsync(999);
+  expect(comments.getTaskPlanComments).toHaveBeenCalledTimes(3);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(comments.getTaskPlanComments).toHaveBeenCalledTimes(4);
+});
+
 it("does not let a hidden wake suppress immediate visible recovery", async () => {
   const store = createAppStore();
   store.getState().setConnectionStatus("connected");
-  const loader = planCommentLoaderFor(store, "task-1", "Could not load comments");
+  const loader = planCommentLoaderFor(store, "task-1", ERROR_MESSAGE);
   releases.push(loader.attach());
   api.getTaskPlan.mockRejectedValueOnce(new Error("offline")).mockResolvedValue(null);
   await loader.load(true);
@@ -98,7 +133,7 @@ it("resumes failed ordinary reads when a cached task surface remounts", async ()
   const store = createAppStore();
   store.getState().setTaskPlan("task-1", null);
   store.getState().setConnectionStatus("connected");
-  const loader = planCommentLoaderFor(store, "task-1", "Could not load comments");
+  const loader = planCommentLoaderFor(store, "task-1", ERROR_MESSAGE);
   api.getTaskPlan.mockRejectedValueOnce(new Error("offline")).mockResolvedValue(null);
   const detach = loader.attach();
   await loader.load(true);

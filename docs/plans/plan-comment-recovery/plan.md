@@ -258,6 +258,13 @@ The helper now observes the first visible active-chat recovery action. The
 work order records both reproductions and their scoped validation; SSH product
 behavior and CI timeout/retry policy are unchanged.
 
+The final retry-scope follow-up resets accumulated failures when a plan is
+replaced, preserving a fresh quiet burst without resetting the budget on
+same-ID metadata confirmation. The work order records both failing regressions,
+186 focused tests, and eight fresh zero-retry desktop/phone scenarios. Completion
+wording now requires selective browser cleanup, and the plain-Send discovery
+regression explicitly excludes tasks with identified unresolved drafts.
+
 ## Risks
 
 - Unknown ownership must not be mistaken for task-owned feedback. Plain Send

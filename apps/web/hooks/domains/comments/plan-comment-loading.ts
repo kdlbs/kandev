@@ -52,9 +52,11 @@ class PlanCommentLoader {
 
   private observe() {
     const unsubscribe = this.store.subscribe((state, previous) => {
+      const planChanged =
+        state.taskPlans.byTaskId[this.taskId]?.id !== previous.taskPlans.byTaskId[this.taskId]?.id;
+      if (planChanged) this.failures = 0;
       if (
-        state.taskPlans.byTaskId[this.taskId]?.id !==
-          previous.taskPlans.byTaskId[this.taskId]?.id ||
+        planChanged ||
         state.taskPlans.loadedByTaskId[this.taskId] !==
           previous.taskPlans.loadedByTaskId[this.taskId]
       )
