@@ -57,6 +57,9 @@ func TestWorkflowTurnStartAndCompleteDoNotShareOperationIdentity(t *testing.T) {
 		t.Fatal("on_turn_start did not transition from Start to Complete")
 	}
 	assertStepByName(t, ctx, repo, "session-1", "Complete", stepIDs)
+	if !service.workflowStore.ledger.isApplied(workflowTurnStartOperationID("turn-1")) {
+		t.Fatal("on_turn_start operation was not marked after its transition committed")
+	}
 
 	setSessionState(t, ctx, repo, "session-1", models.TaskSessionStateRunning)
 	session, err = repo.GetTaskSession(ctx, "session-1")
@@ -67,4 +70,7 @@ func TestWorkflowTurnStartAndCompleteDoNotShareOperationIdentity(t *testing.T) {
 		t.Fatal("on_turn_complete was incorrectly deduplicated with on_turn_start")
 	}
 	assertStepByName(t, ctx, repo, "session-1", "Done", stepIDs)
+	if !service.workflowStore.ledger.isApplied("turn-1") {
+		t.Fatal("on_turn_complete operation was not marked after its transition committed")
+	}
 }
