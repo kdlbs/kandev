@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -12,6 +13,10 @@ import (
 type SettingsManager interface {
 	GetSettings(context.Context) (StorageMaintenanceSettings, error)
 	SaveSettingsWithConfirmations(context.Context, StorageMaintenanceSettings, SaveConfirmations) (StorageMaintenanceSettings, error)
+}
+
+type SettingsPatcher interface {
+	PatchSettingsWithConfirmations(context.Context, map[string]json.RawMessage, SaveConfirmations) (StorageMaintenanceSettings, error)
 }
 
 type RunLister interface {
@@ -46,6 +51,8 @@ type Summary struct {
 	Quarantine         any `json:"quarantine"`
 	TemporaryArtifacts any `json:"temporary_artifacts"`
 	Docker             any `json:"docker"`
+	Database           any `json:"database"`
+	DatabaseBackups    any `json:"database_backups"`
 }
 
 type DiskCapacity struct {
@@ -103,6 +110,39 @@ type Handler struct {
 
 func NewHandler(config HandlerConfig) *Handler {
 	return &Handler{config: config}
+}
+
+func (h *Handler) GetSettings(ctx context.Context) (StorageMaintenanceSettings, error) {
+	if h == nil || h.config.Settings == nil {
+		return StorageMaintenanceSettings{}, errors.New("storage settings are unavailable")
+	}
+	return h.config.Settings.GetSettings(ctx)
+}
+
+func (h *Handler) SaveSettingsWithConfirmations(ctx context.Context, settings StorageMaintenanceSettings, confirmations SaveConfirmations) (StorageMaintenanceSettings, error) {
+	if h == nil || h.config.Settings == nil {
+		return StorageMaintenanceSettings{}, errors.New("storage settings are unavailable")
+	}
+	updated, err := h.config.Settings.SaveSettingsWithConfirmations(ctx, settings, confirmations)
+	if err == nil && h.config.OnSettingsChanged != nil {
+		h.config.OnSettingsChanged(updated)
+	}
+	return updated, err
+}
+
+func (h *Handler) PatchSettingsWithConfirmations(ctx context.Context, changes map[string]json.RawMessage, confirmations SaveConfirmations) (StorageMaintenanceSettings, error) {
+	if h == nil || h.config.Settings == nil {
+		return StorageMaintenanceSettings{}, errors.New("storage settings are unavailable")
+	}
+	patcher, ok := h.config.Settings.(SettingsPatcher)
+	if !ok {
+		return StorageMaintenanceSettings{}, errors.New("atomic storage settings patch is unavailable")
+	}
+	updated, err := patcher.PatchSettingsWithConfirmations(ctx, changes, confirmations)
+	if err == nil && h.config.OnSettingsChanged != nil {
+		h.config.OnSettingsChanged(updated)
+	}
+	return updated, err
 }
 
 func (h *Handler) logError(message string, err error) {

@@ -5,6 +5,7 @@ import type {
   TaskSession,
   Turn,
   TaskPlan,
+  TaskPlanCommentSnapshot,
   TaskPlanRevision,
   TaskWalkthrough,
 } from "@/lib/types/http";
@@ -125,11 +126,23 @@ export type ActiveModelState = {
  * null. Reducers enforce a 2-slot cap and reject duplicates. */
 export type ComparePair = [string | null, string | null];
 
+export type PlanCommentMigrationStatus =
+  | "idle"
+  | "running"
+  | "complete"
+  | "waiting_for_plan"
+  | "failed";
+
 export type TaskPlansState = {
   byTaskId: Record<string, TaskPlan | null>;
   loadingByTaskId: Record<string, boolean>;
   loadedByTaskId: Record<string, boolean>;
   savingByTaskId: Record<string, boolean>;
+  commentsByTaskId: Record<string, TaskPlanCommentSnapshot | undefined>;
+  commentsLoadingByTaskId: Record<string, boolean>;
+  commentsLoadedByTaskId: Record<string, boolean>;
+  commentsErrorByTaskId: Record<string, string | undefined>;
+  commentsMigrationStatusByTaskId: Record<string, PlanCommentMigrationStatus | undefined>;
   revisionsByTaskId: Record<string, TaskPlanRevision[]>;
   revisionsLoadingByTaskId: Record<string, boolean>;
   revisionsLoadedByTaskId: Record<string, boolean>;
@@ -386,6 +399,10 @@ export type SessionSliceActions = {
   setTaskPlan: (taskId: string, plan: TaskPlan | null) => void;
   setTaskPlanLoading: (taskId: string, loading: boolean) => void;
   setTaskPlanSaving: (taskId: string, saving: boolean) => void;
+  setTaskPlanComments: (taskId: string, snapshot: TaskPlanCommentSnapshot) => void;
+  setTaskPlanCommentsLoading: (taskId: string, loading: boolean) => void;
+  setTaskPlanCommentsError: (taskId: string, error?: string) => void;
+  setTaskPlanCommentMigrationStatus: (taskId: string, status: PlanCommentMigrationStatus) => void;
   clearTaskPlan: (taskId: string) => void;
   markTaskPlanSeen: (taskId: string) => void;
   // Revision actions

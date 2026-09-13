@@ -5,6 +5,7 @@ import { Button } from "@kandev/ui/button";
 import { IconShieldLock } from "@tabler/icons-react";
 import { useRouter } from "@/lib/routing/client-router";
 import type { Executor } from "@/lib/types/http";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 export function ProfileConnectionSettingsAction({
   executor,
@@ -17,9 +18,8 @@ export function ProfileConnectionSettingsAction({
     return (
       <Button
         variant="outline"
-        size="sm"
         onClick={() => router.push(`/settings/executors/ssh/${encodeURIComponent(executor.id)}`)}
-        className="min-h-11 w-full cursor-pointer sm:w-auto md:min-h-7"
+        className={settingsActionClassName("w-full cursor-pointer sm:w-auto")}
         data-testid="ssh-connection-settings-link"
       >
         <IconShieldLock className="mr-1.5 h-4 w-4" />

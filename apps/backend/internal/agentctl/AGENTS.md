@@ -43,7 +43,7 @@ Protocol adapters in `server/adapter/transport/` normalize different agent CLIs:
 - `process.Manager` owns subprocess, wires stdio to adapter
 - `NewAdapter` in `server/adapter/factory.go` selects the adapter by protocol (`agent.Protocol`), not by agent type; agent identity and CLI-specific config come from Go constructors in `internal/agent/agents/`, registered by `internal/agent/registry.Registry.LoadDefaults()`
 
-The `acp` transport is split by concern across `adapter_*.go` files: `adapter.go` (core/lifecycle), `adapter_session.go` (initialize/new/load/resume/close), `adapter_prompt.go` (prompt/cancel), `adapter_updates.go` (`session/update` notification fan-out), `adapter_tools.go` (`convertToolCallUpdate` / `convertToolCallResultUpdate` -> normalized payloads), `adapter_permissions.go`, and `adapter_helpers.go`. Agent-specific ACP extensions use the package-private `acpDialect` function table in `dialect.go`; keep observed wire translation in `dialect_<agent>.go`. Dialect hooks return normalized data or request descriptions and never receive `*Adapter` or execute RPCs. Shared capability normalization used by both live sessions and utility probes belongs in `internal/agentctl/acpcompat/`. Tool-call conversion lives in `adapter_tools.go`, not `adapter.go`. See ADR-0043.
+The `acp` transport is split by concern across `adapter_*.go` files: `adapter.go` (core/lifecycle), `adapter_session.go` (initialize/new/load/resume/close), `adapter_prompt.go` (prompt/cancel), `adapter_updates.go` (`session/update` notification fan-out), `adapter_tools.go` (`convertToolCallUpdate` / `convertToolCallResultUpdate` -> normalized payloads), `adapter_permissions.go`, and `adapter_helpers.go`. Agent-specific ACP extensions use the package-private `acpDialect` function table in `dialect.go`; keep observed wire translation in `dialect_<agent>.go`. Dialect hooks return normalized data or request descriptions and never receive `*Adapter` or execute RPCs. Shared capability normalization used by both live sessions and utility probes belongs in `internal/agentctl/acpcompat/`. Tool-call conversion lives in `adapter_tools.go`, not `adapter.go`. See ADR-0043. Session lifecycle transitions are serialized: `NewSession`, `LoadSession`, and `ResetSession` (`session/new` plus the `closeSupersededSessionLocked` cleanup) each run under `Adapter.sessionTransitionMu`, because agentctl dispatches WS requests to the adapter without serialization; any new path that writes `a.sessionID` must hold that mutex for the whole transition, not just the write.
 
 **Prompt handoff and steering are negotiated, not named.** Both the foreground-idle handoff (ADR-0049) and mid-turn steering (ADR-2026-08-04) gate on the agent's `initialize` advertisement `agentCapabilities._meta.claudeCode.promptQueueing`, read once in `prompt_queueing.go` and cached on the adapter — never on `agentID`. A steer transfers the existing prompt-gate token to a human successor while the predecessor `session/prompt` is still open (`adapter_prompt_cancel.go: handOffTurnLocked`), reusing the generation-keyed completion attribution and background-work protection built for handoff. Steering is exposed via the optional `adapter.SteerablePrompter` interface (`PromptSteer` / `SupportsSteering`), so non-steering transports need no change. Delivery is opportunistic: the advertisement asserts the agent accepts a concurrent prompt, not that it folds it — both outcomes must be correct.
 
@@ -131,6 +131,19 @@ commands run through `Manager.CombinedOutput`, so teardown cancels downloads,
 drains cache mutations, and reaps installer descendants before resources are
 released.
 
+When consuming `exec.Cmd.StdoutPipe` or `StderrPipe`, start the command before
+reading and finish every reader before calling `cmd.Wait`; `Wait` closes the
+pipes after the command exits. Prefer `CombinedOutput` when separate streaming
+is not required, and test cancellation with output large enough to exercise
+pipe backpressure so a reader/Wait ordering mistake cannot deadlock teardown.
+When wait and draining must proceed concurrently, use an explicitly owned
+`os.Pipe` assigned to `cmd.Stderr`, close the parent writer after `Start`, join
+the reader with `Wait`, and bound or close the reader on timeout so stderr is
+not lost or left blocking teardown.
+Lifecycle callbacks that publish process state must complete before releasing
+readiness waiters for that same process boundary; test callback-before-waiter
+ordering.
+
 To add another agent that needs immediate kill instead of graceful stdin close:
 set `RequiresProcessKill: true` in its `Runtime()` config.
 
@@ -148,6 +161,18 @@ The strip list flows agent → instance config → process manager via a single 
 For the one-shot probe/inference path, the strip list is derived from `Runtime().StripEnv` via the shared `agents.StripEnvFor` helper — it is not an independent field on `InferenceConfig`. The derived value is propagated through `InferenceConfigDTO.StripEnv` and applied by `utility.sanitizeEnvForAgent` before spawning the ephemeral subprocess.
 
 To add another agent that needs env vars stripped: set `StripEnv: []string{"VAR_NAME"}` in its `Runtime()` — that's all.
+
+**Agent environment snapshot:** `process.Manager` snapshots `cfg.AgentEnv` at
+construction. Tracker Git must not re-read ambient `os.Environ()` at execution
+time. Install command gates/shims and `KANDEV_TEST_*` variables before manager
+construction, or pass an explicit copied `AgentEnv` snapshot; helpers that create
+managers should accept that snapshot so fixtures cannot become stale.
+
+**SSH command shapes:** SSH option rewriting may preserve only direct OpenSSH
+commands, including quoted executable paths. Do not insert options after the
+first shell word for env/assignment/exec prefixes or custom/plink wrappers;
+unsupported shapes must use a documented safe default or fail closed. Cover
+direct, quoted, prefixed, and custom forms with focused tests.
 
 ## Idle-instance reaper (`KANDEV_ACP_IDLE_TIMEOUT`)
 

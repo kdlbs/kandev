@@ -71,9 +71,9 @@ func isStepEntryMarkerUniqueViolation(err error) bool {
 // initStepTransitionsSchema's comment for why that rule doesn't apply here.
 func (r *Repository) initStepEntriesSchema() error {
 	idCol := dialect.AutoIncrementIDColumn(r.db.DriverName())
-	_, err := r.db.Exec(`
+	_, err := r.db.ExecContext(r.migrationContext(), `
 	CREATE TABLE IF NOT EXISTS workflow_step_entries (
-		` + idCol + `,
+		`+idCol+`,
 		task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
 		step_id TEXT NOT NULL,
 		entry_seq INTEGER NOT NULL,
@@ -85,7 +85,7 @@ func (r *Repository) initStepEntriesSchema() error {
 		ON workflow_step_entries(task_id, step_id);
 
 	CREATE TABLE IF NOT EXISTS workflow_step_entry_markers (
-		` + idCol + `,
+		`+idCol+`,
 		entry_id INTEGER NOT NULL REFERENCES workflow_step_entries(id) ON DELETE CASCADE,
 		position INTEGER NOT NULL,
 		kind TEXT NOT NULL,

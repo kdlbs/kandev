@@ -120,6 +120,37 @@ func (r *Repository) UpdateTaskState(ctx context.Context, taskID, state string) 
 	return nil
 }
 
+// UpdateTaskStateIfWorkflowStep updates a task only when its workflow step
+// still matches the value read by the caller. This closes the validation-to-
+// write window for status gates that depend on the current workflow step.
+func (r *Repository) UpdateTaskStateIfWorkflowStep(
+	ctx context.Context, taskID, expectedStepID, state string,
+) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks
+		SET state = ?, updated_at = CURRENT_TIMESTAMP
+		WHERE id = ? AND COALESCE(workflow_step_id, '') = ?
+	`), state, taskID, expectedStepID)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := result.RowsAffected()
+	if rows > 0 {
+		return true, nil
+	}
+
+	var exists int
+	if err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT 1 FROM tasks WHERE id = ?
+	`), taskID).Scan(&exists); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, fmt.Errorf("task not found: %s", taskID)
+		}
+		return false, err
+	}
+	return false, nil
+}
+
 // UpdateTaskAssignee writes (or clears) the per-task runner participant
 // row for a task. ADR 0005 Wave F replaced the legacy
 // tasks.assignee_agent_profile_id column with a 'runner' row in
@@ -175,9 +206,9 @@ func (r *Repository) UpdateTaskAssignee(ctx context.Context, taskID, assigneeID 
 		case sql.ErrNoRows:
 			if _, err := tx.ExecContext(ctx, tx.Rebind(`
 				INSERT INTO workflow_step_participants
-				(id, step_id, task_id, role, agent_profile_id, decision_required, position)
-				VALUES (?, ?, ?, 'runner', ?, 0, 0)
-			`), newParticipantUUID(), stepID, taskID, assigneeID); err != nil {
+				(id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at)
+				VALUES (?, ?, ?, 'runner', ?, 0, 0, ?)
+			`), newParticipantUUID(), stepID, taskID, assigneeID, time.Now().UTC()); err != nil {
 				return err
 			}
 		default:

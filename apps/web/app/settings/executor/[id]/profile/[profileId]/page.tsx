@@ -206,7 +206,7 @@ function EnvVarRow({
         variant="ghost"
         size="icon"
         onClick={() => onRemove(index)}
-        className="cursor-pointer h-9 w-9 shrink-0"
+        className="cursor-pointer shrink-0"
       >
         <IconTrash className="h-3.5 w-3.5 text-muted-foreground" />
       </Button>
@@ -241,7 +241,6 @@ function EnvVarsCard({
           <Button
             type="button"
             variant="outline"
-            size="sm"
             onClick={onAdd}
             className={settingsActionClassName("cursor-pointer")}
           >
@@ -283,7 +282,11 @@ function ProfileActions({
   const router = useRouter();
   return (
     <div className="flex items-center justify-between">
-      <Button variant="destructive" size="sm" onClick={onRequestDelete} className="cursor-pointer">
+      <Button
+        variant="destructive"
+        onClick={onRequestDelete}
+        className={settingsActionClassName("cursor-pointer")}
+      >
         <IconTrash className="h-4 w-4 mr-1" />
         {t("executors:deleteProfile")}
       </Button>
@@ -463,7 +466,6 @@ function ProfileEditHeader({ executor, profileName }: { executor: Executor; prof
       actions={
         <Button
           variant="outline"
-          size="sm"
           className={settingsActionClassName("cursor-pointer")}
           onClick={() => router.push(`/settings/executor/${executor.id}`)}
         >

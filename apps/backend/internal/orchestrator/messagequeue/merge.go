@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/kandev/kandev/internal/entityrefs"
+	"github.com/kandev/kandev/internal/task/plancomments"
 	apiv1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -30,7 +31,8 @@ var ErrMergeReferenceOverflow = errors.New("merge would exceed the per-message e
 // produced by the same sender task; workflow/server/system sources and
 // reserved in-flight targets are never mergeable.
 func mergeAllowed(source, target *QueuedMessage, queuedBy string) bool {
-	if target == nil || target.IsReservedInFlight() {
+	if target == nil || target.IsReservedInFlight() ||
+		hasPlanCommentAdmission(source.Metadata) || hasPlanCommentAdmission(target.Metadata) {
 		return false
 	}
 	if source.QueuedBy == QueuedByAgent {
@@ -45,6 +47,19 @@ func mergeAllowed(source, target *QueuedMessage, queuedBy string) bool {
 	}
 	return queuedBy != "" && !IsReservedQueuedBy(queuedBy) &&
 		source.QueuedBy == queuedBy && target.QueuedBy == queuedBy
+}
+
+func hasPlanCommentAdmission(metadata map[string]interface{}) bool {
+	for _, key := range []string{
+		plancomments.MetadataRefs,
+		plancomments.MetadataRequestFingerprint,
+		plancomments.MetadataClientQueueID,
+	} {
+		if _, ok := metadata[key]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 // mergeEntryMetadata returns a copy of the target metadata with

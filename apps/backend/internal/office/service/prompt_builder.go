@@ -12,9 +12,22 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+// RunPayloadOneTimeInstructionsKey names the run-payload field carrying a
+// workflow move's one-shot instructions. The orchestrator's office auto-start
+// path writes it (officeRunPayloadOneTimeInstructionsKey); the two packages
+// intentionally avoid importing each other, so the key is duplicated as a
+// literal on both sides.
+const RunPayloadOneTimeInstructionsKey = "one_time_instructions"
+
 // PromptContext holds the data needed to build a run prompt.
 type PromptContext struct {
 	Reason string
+
+	// OneTimeInstructions carries a workflow move's one-shot instructions for
+	// this run only. When set, BuildPrompt appends it after the per-reason
+	// prompt body. Office runs build their prompt from a template rather than
+	// the durable step, so move instructions ride on the run payload.
+	OneTimeInstructions string
 
 	// Task fields
 	TaskID          string
@@ -113,8 +126,19 @@ func BuildPrompt(pc *PromptContext) string {
 	default:
 		prompt = fmt.Sprintf("You have been woken for reason: %s.", pc.Reason)
 	}
+	prompt = appendOneTimeInstructions(prompt, pc.OneTimeInstructions)
 	prompt = appendHandoffSection(prompt, pc.HandoffContext)
 	return appendRuntimeContext(prompt, pc)
+}
+
+// appendOneTimeInstructions appends a workflow move's one-shot instructions to
+// the run prompt. Empty or whitespace-only input leaves the prompt unchanged.
+func appendOneTimeInstructions(prompt, instructions string) string {
+	instructions = strings.TrimSpace(instructions)
+	if instructions == "" {
+		return prompt
+	}
+	return prompt + "\n\n## One-time workflow move instructions\n\n" + instructions
 }
 
 // appendHandoffSection renders the office task-handoffs context block
@@ -290,7 +314,9 @@ func buildReviewStagePrompt(pc *PromptContext) string {
 	}
 	b.WriteString("\nReview the implementation carefully. Check for correctness, edge cases, and code quality.\n")
 	b.WriteString("Submit your verdict: approve if the work is satisfactory, or reject with specific feedback on what needs to change.")
-	writeDecisionContract(&b)
+	if hasDecisionAction(pc.AllowedActions) {
+		writeDecisionContract(&b)
+	}
 	return b.String()
 }
 
@@ -305,19 +331,19 @@ func buildApprovalStagePrompt(pc *PromptContext) string {
 	}
 	b.WriteString("\nConfirm that the approval requirements are met for this workflow.\n")
 	b.WriteString("Submit your verdict: approve if the requirements are met, or reject with specific feedback on what needs to change.")
-	writeDecisionContract(&b)
+	if hasDecisionAction(pc.AllowedActions) {
+		writeDecisionContract(&b)
+	}
 	return b.String()
 }
 
-// writeDecisionContract appends the explicit record_step_decision_kandev contract shared by the
-// review and approval stage prompts: a verdict must be recorded via the tool call, which the agent
-// must treat as its final action for the turn, since posting a comment alone is not a decision and
-// leaves the task stranded in review. The tool call itself does not halt the agent mid-turn (it
-// returns an ordinary result), so the prompt must not claim otherwise — it instructs the agent to
-// stop on its own after calling it.
+// writeDecisionContract appends the task-bound CLI contract shared by the
+// review and approval stage prompts. The command must be the final action for
+// the turn because a comment alone does not advance the workflow.
 func writeDecisionContract(b *strings.Builder) {
-	b.WriteString("\n\nYou must call the record_step_decision_kandev tool with decision (\"approved\" or \"rejected\") and reason to record your verdict. Make this your final tool call for the turn, then stop.")
-	b.WriteString(" Posting a comment alone is not a decision and will not advance the task.")
+	b.WriteString("\n\nUse this command as your final action for the turn:\n")
+	b.WriteString(`$KANDEV_CLI kandev task decision --decision approved --reason "..."`)
+	b.WriteString("\nUse `approved` as shown, or replace it with `rejected` when rejecting. Both require a non-empty reason, then stop. Posting a comment or using an approval-inbox command alone does not count as a workflow step decision.")
 }
 
 func buildShipStagePrompt(pc *PromptContext) string {

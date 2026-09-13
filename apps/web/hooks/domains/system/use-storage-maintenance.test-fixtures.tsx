@@ -69,7 +69,7 @@ export const overview: StorageOverviewResponse = {
     refresh_due_at: "2099-07-23T12:15:00Z",
     stale: false,
     error: null,
-    progress: { completed_sources: 5, total_sources: 5, sources: {} },
+    progress: { completed_sources: 7, total_sources: 7, sources: {} },
     partial_summary: null,
   } satisfies StorageAnalysisState,
   analyzed_at: "2026-07-23T12:00:00Z",

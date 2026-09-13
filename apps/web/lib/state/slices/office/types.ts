@@ -141,7 +141,7 @@ export type BudgetPolicy = {
   scopeType: "agent" | "project" | "workspace";
   scopeId: string;
   limitSubcents: number;
-  period: "monthly" | "total";
+  period: "daily" | "monthly" | "yearly" | "total";
   alertThresholdPct: number;
   actionOnExceed: "notify_only" | "pause_agent" | "block_new_tasks";
   createdAt: string;

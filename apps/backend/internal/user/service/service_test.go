@@ -790,7 +790,7 @@ func TestApplyStartupPage(t *testing.T) {
 		}
 	})
 
-	for _, value := range []string{models.StartupPageTaskOverview, models.StartupPageLastTask} {
+	for _, value := range []string{models.StartupPageTaskOverview, models.StartupPageLastTask, "threads"} {
 		t.Run("applies "+value, func(t *testing.T) {
 			settings := &models.UserSettings{StartupPage: models.StartupPageTaskOverview}
 			if err := applyBasicSettings(settings, &UpdateUserSettingsRequest{StartupPage: ptr(value)}); err != nil {

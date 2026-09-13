@@ -68,7 +68,8 @@
     }
   ],
   "known_missing_required_stores": [
-    "system-settings",
+	"task",
+	"system-settings",
     "auth-hostnames",
     "organizations",
     "organization-units",

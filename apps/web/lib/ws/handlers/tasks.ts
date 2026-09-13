@@ -31,6 +31,7 @@ import {
   removeArchivedTaskFromCache,
   updateTaskStatusSummaryInBothKanbans,
 } from "@/lib/ws/handlers/task-status-summary";
+import { taskRemovalOwnsDepartureForTask } from "@/lib/state/task-removal";
 const lifecycleDebug = createDebugLogger("task-lifecycle:ws");
 
 function upsertTask(
@@ -341,6 +342,10 @@ function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessag
   // different session) and follow focus to the new primary.
   const beforeState = store.getState();
   const taskId = message.payload.task_id;
+  const localRemovalOwnsDeparture = taskRemovalOwnsDepartureForTask(
+    beforeState.taskRemoval,
+    taskId,
+  );
   const previousPrimary = findTaskInState(beforeState, taskId)?.primarySessionId ?? null;
   const { archivedAt, partialArchivedTask, isArchivedUpdate, archivedWorkspaceId } =
     getTaskUpdatedArchiveContext(beforeState, message.payload, taskId);
@@ -364,7 +369,7 @@ function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessag
   );
 
   if (archivedAt) {
-    redirectAwayFromRemovedTask(taskId);
+    if (!localRemovalOwnsDeparture) redirectAwayFromRemovedTask(taskId);
     return;
   }
 

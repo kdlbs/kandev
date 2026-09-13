@@ -34,12 +34,12 @@ func NormalizeLspStatusLocation(value string) string {
 const (
 	StartupPageTaskOverview = "task_overview"
 	StartupPageLastTask     = "last_task"
+	StartupPageThreads      = "threads"
 )
 
-// NormalizeStartupPage returns the canonical startup page: last_task is
-// accepted as-is, anything else is coerced to task_overview.
+// NormalizeStartupPage preserves supported choices and defaults to task_overview.
 func NormalizeStartupPage(value string) string {
-	if value == StartupPageLastTask {
+	if value == StartupPageLastTask || value == StartupPageThreads {
 		return value
 	}
 	return StartupPageTaskOverview

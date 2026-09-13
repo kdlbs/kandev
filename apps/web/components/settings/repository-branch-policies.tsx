@@ -43,7 +43,7 @@ import {
   type PolicyDraft,
 } from "@/components/settings/repository-branch-policy-fields";
 
-const TOUCH_TARGET_CLASS = "min-h-11";
+const TOUCH_TARGET_CLASS = "max-md:min-h-11 [@media(pointer:coarse)]:min-h-11";
 const CANCEL_LABEL_KEY = "common:cancel";
 
 function PolicySurface({
@@ -431,7 +431,6 @@ export function RepositoryBranchPolicies({
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-11 w-11"
                   onClick={() => openEdit(policy)}
                   aria-label={t("workspaces:branchPolicyEdit", { name: policy.name })}
                 >
@@ -441,7 +440,6 @@ export function RepositoryBranchPolicies({
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="h-11 w-11"
                   onClick={() => setDeletePolicy(policy)}
                   aria-label={t("workspaces:branchPolicyDelete", { name: policy.name })}
                 >

@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -31,19 +32,23 @@ type TaskEventData struct {
 
 // AgentEventData contains data from agent events
 type AgentEventData struct {
-	TaskID             string                 `json:"task_id"`
-	SessionID          string                 `json:"session_id"`
-	TaskEnvironmentID  string                 `json:"task_environment_id,omitempty"`
-	AgentExecutionID   string                 `json:"agent_execution_id"`
-	AgentID            string                 `json:"agent_id,omitempty"`
-	AgentProfileID     string                 `json:"agent_profile_id"`
-	ExecutionProfileID string                 `json:"execution_profile_id,omitempty"`
-	ExitCode           *int                   `json:"exit_code,omitempty"`
-	ErrorMessage       string                 `json:"error_message,omitempty"`
-	FailureCode        string                 `json:"failure_code,omitempty"`
-	FailureDetails     string                 `json:"failure_details,omitempty"`
-	ProviderError      *streams.ProviderError `json:"provider_error,omitempty"`
-	PromptGeneration   uint64                 `json:"prompt_generation,omitempty"`
+	TaskID             string                   `json:"task_id"`
+	SessionID          string                   `json:"session_id"`
+	TaskEnvironmentID  string                   `json:"task_environment_id,omitempty"`
+	AgentExecutionID   string                   `json:"agent_execution_id"`
+	AgentID            string                   `json:"agent_id,omitempty"`
+	AgentProfileID     string                   `json:"agent_profile_id"`
+	ExecutionProfileID string                   `json:"execution_profile_id,omitempty"`
+	ExitCode           *int                     `json:"exit_code,omitempty"`
+	ErrorMessage       string                   `json:"error_message,omitempty"`
+	FailureCode        string                   `json:"failure_code,omitempty"`
+	FailureDetails     string                   `json:"failure_details,omitempty"`
+	Phase              string                   `json:"phase,omitempty"`
+	AttemptID          string                   `json:"attempt_id,omitempty"`
+	ErrorStamp         string                   `json:"error_stamp,omitempty"`
+	Causes             []models.AgentErrorCause `json:"causes,omitempty"`
+	ProviderError      *streams.ProviderError   `json:"provider_error,omitempty"`
+	PromptGeneration   uint64                   `json:"prompt_generation,omitempty"`
 	// DynamicRouteAttempt marks failures and stream evidence that belong to a
 	// dynamic provider attempt. Fallback is fail-closed unless the evidence is
 	// explicitly known to contain no output or effects.
@@ -91,6 +96,7 @@ type GitEventData = lifecycle.GitEventPayload
 type TaskMovedEventData struct {
 	TaskID           string     `json:"task_id"`
 	StepTransitionID int64      `json:"step_transition_id,omitempty"`
+	MoveID           string     `json:"move_id,omitempty"`
 	FromStepID       string     `json:"from_step_id"`
 	ToStepID         string     `json:"to_step_id"`
 	SessionID        string     `json:"session_id"`

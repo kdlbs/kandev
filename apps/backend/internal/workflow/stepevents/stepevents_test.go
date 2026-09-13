@@ -57,6 +57,7 @@ func fullStep() *models.WorkflowStep {
 
 		AutoAdvanceRequiresSignal:  true,
 		CancelTriggersTurnComplete: true,
+		CompleteTaskOnEnter:        true,
 		CreatedAt:                  created,
 		UpdatedAt:                  updated,
 	}
@@ -99,11 +100,13 @@ func TestPublishCarriesEveryStepField(t *testing.T) {
 		"wip_limit":                     step.WIPLimit,
 		"pull_from_step_id":             step.PullFromStepID,
 		"agent_profile_id":              step.AgentProfileID,
+		"session_target":                models.CloneWorkflowSessionTarget(step.SessionTarget),
 		"profile_session_start_policy":  string(step.ProfileSessionStartPolicy),
 		"profile_session_end_policy":    string(step.ProfileSessionEndPolicy),
 		"stage_type":                    string(step.StageType),
 		"auto_advance_requires_signal":  step.AutoAdvanceRequiresSignal,
 		"cancel_triggers_turn_complete": step.CancelTriggersTurnComplete,
+		"complete_task_on_enter":        step.CompleteTaskOnEnter,
 		"created_at":                    step.CreatedAt,
 		"updated_at":                    step.UpdatedAt,
 	}

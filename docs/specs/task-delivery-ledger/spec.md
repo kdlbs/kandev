@@ -314,11 +314,11 @@ evidence** relies on.
 ### `runs.outcome` (new column)
 
 Nullable TEXT on the existing `runs` table:
-`processed | budget_blocked | idle_skipped | agent_inactive | task_tree_held`.
+`processed | budget_blocked | budget_unmeasurable | idle_skipped | agent_inactive | task_tree_held`.
 
 `NULL` for every row written before activation, for any run that never reaches a terminal
 status, and for every run that reaches `status = 'failed'` (see **Office run outcome**,
-the `FailRun` bullet). On the **finished** path the writer writes one of the five values
+the `FailRun` bullet). On the **finished** path the writer writes one of the six values
 above; it never writes `''`. No database constraint is added —
 the reader is total over every possible value (see **Office run outcome**), so
 an unrecognised value degrades to `skipped` rather than breaking a query.
@@ -1488,7 +1488,7 @@ line number is a pointer (see **Citation convention**).
 | `office/service/scheduler_integration.go:218` — agent not active | `agent_inactive` |
 | `office/service/scheduler_integration.go:247` — idle skip | `idle_skipped` |
 | `office/service/scheduler_integration.go:517` — task-tree hold | `task_tree_held` |
-| `office/service/scheduler_integration.go:829` — pre-execution budget block | `budget_blocked` |
+| `office/service/budget_admission.go:120` — admission | `budget_blocked`/`budget_unmeasurable` |
 | `office/service/event_subscribers.go:408` — agent-completed for a task-bearing run | `processed` |
 | `office/service/event_subscribers.go:512` — `handleTasklessAgentCompleted` | `processed` |
 
@@ -1531,9 +1531,9 @@ transaction or a guard, because it must not change `runs.status` semantics:
   (`:44`) passes `NULL`. `NULL` is correct rather than a placeholder — a run that reached
   `status = 'failed'` is bucketed by `RunCountsByDayForAgent` on its status alone and never
   reaches the `succeeded` / `skipped` / `unclassified` buckets, so no value from the
-  five-value vocabulary would ever be read, and inventing one would assert a classification
+  six-value vocabulary would ever be read, and inventing one would assert a classification
   nothing consumes. This also makes the sentence under `### runs.outcome` exact: the
-  five-value claim describes the **finished** path; the failed path writes `NULL` in the
+  six-value claim describes the **finished** path; the failed path writes `NULL` in the
   same statement.
 - **The second caller pair of the shared repository method, and what it passes.** Changing
   that signature necessarily reaches
@@ -2085,9 +2085,8 @@ consulting `kandev_meta` — the activation instant remains the authoritative an
 
 ### Office run outcome
 
-- **GIVEN** a run blocked by the pre-execution budget check, **WHEN** it
-  finishes, **THEN** `runs.status = 'finished'` and `runs.outcome =
-  'budget_blocked'`.
+- **GIVEN** a budget block, **WHEN** it finishes, **THEN** `runs.outcome`
+  is `'budget_blocked'` if limit-reached else `'budget_unmeasurable'`.
 - **GIVEN** a run skipped because the agent is not active, **WHEN** it finishes,
   **THEN** `runs.outcome = 'agent_inactive'` — even though that path writes no
   `office_activity_log` row.
@@ -2113,7 +2112,7 @@ consulting `kandev_meta` — the activation instant remains the authoritative an
 - **GIVEN** a run that fails, **WHEN** `FailRun` transitions it through the shared
   `transitionRunTerminal` statement, **THEN** `runs.status = 'failed'` and
   `runs.outcome IS NULL` — the failed path writes `NULL` in the same statement, and no
-  value from the five-value vocabulary is invented for it.
+  value from the six-value vocabulary is invented for it.
 - **GIVEN** a day containing one failed run written that way, **WHEN**
   `RunCountsByDayForAgent` reports that day, **THEN** it counts in `failed` and in
   neither `unclassified` nor `skipped` — the `NULL` outcome is never read, because the
@@ -2135,7 +2134,7 @@ consulting `kandev_meta` — the activation instant remains the authoritative an
   **WHEN** `RunCountsByDayForAgent` reports that day, **THEN** it returns
   `succeeded = 1`, `skipped = 1`, `unclassified = 1`, `failed = 1` and
   `other = 0`.
-- **GIVEN** a `finished` run whose `outcome` holds a value outside the five
+- **GIVEN** a `finished` run whose `outcome` holds a value outside the six
  named ones, **WHEN** that day is reported, **THEN** it counts in `skipped` —
   the bucketing is total and no query errors.
 - **GIVEN** that same day, **WHEN** the agent dashboard renders it, **THEN**

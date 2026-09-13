@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- repository creation regressions share this focused row fixture. */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import type { Branch, Repository, RepositoryBranchPolicy } from "@/lib/types/http";
@@ -7,10 +8,18 @@ import { TooltipProvider } from "@kandev/ui/tooltip";
 // The unified branch mock lets tests override results and inspect whether
 // chips select an id-based or path-based source.
 const lastBranchSource = vi.hoisted((): { value: unknown } => ({ value: null }));
-const mockBranches = vi.hoisted((): { value: { branches: Branch[]; isLoading: boolean } } => ({
-  value: { branches: [], isLoading: false },
-}));
+const mockBranches = vi.hoisted(
+  (): { value: { branches: Branch[]; isLoading: boolean; isLoaded?: boolean } } => ({
+    value: { branches: [], isLoading: false, isLoaded: false },
+  }),
+);
 const mockPolicies = vi.hoisted((): { value: RepositoryBranchPolicy[] } => ({ value: [] }));
+type CreationSurfaceProps = {
+  open: boolean;
+  onCreated: (repository: Repository) => boolean | void;
+  onOpenChange: (open: boolean) => void;
+};
+const creationSurface = vi.hoisted(() => ({ props: null as CreationSurfaceProps | null }));
 
 vi.mock("@/hooks/domains/workspace/use-repository-branches", () => ({
   useBranches: (source: unknown) => {
@@ -47,17 +56,26 @@ vi.mock("@/components/repository-discovery-controls", () => ({
   RepositoryDiscoveryControls: () => <div data-testid="repository-discovery-controls" />,
 }));
 
+vi.mock("@/components/create-local-repository-surface", () => ({
+  CreateLocalRepositorySurface: (props: CreationSurfaceProps) => {
+    creationSurface.props = props;
+    return null;
+  },
+}));
+
 import { RepoChipsRow } from "./task-create-dialog-repo-chips";
 
 afterEach(() => {
   cleanup();
-  mockBranches.value = { branches: [], isLoading: false };
+  creationSurface.props = null;
+  mockBranches.value = { branches: [], isLoading: false, isLoaded: false };
   mockPolicies.value = [];
 });
 
 const REPO_FRONT_ID = "repo-front";
 const REPO_BACK_ID = "repo-back";
 const REPO_CHIP_TRIGGER = "repo-chip-trigger";
+const BRANCH_CHIP_TRIGGER = "branch-chip-trigger";
 const DISCOVERED_REPO_PATH = "/home/me/projects/local-project";
 
 function makeRepo(id: string, name: string): Repository {
@@ -190,6 +208,35 @@ describe("RepoChipsRow", () => {
     expect(screen.getAllByTestId("repo-chip")).toHaveLength(2);
   });
 
+  it("binds delayed creation to the originating row without closing a newer surface", () => {
+    const onCreated = vi.fn();
+    renderInProvider(
+      <RepoChipsRow
+        fs={makeFs({ repositories: [row({ key: "r0" }), row({ key: "r1" })] })}
+        repositories={[makeRepo(REPO_FRONT_ID, "frontend")]}
+        isTaskStarted={false}
+        workspaceId="ws-1"
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={NOOP}
+        localRepositoryCreation={{ executorSelection: null, onCreated }}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByTestId(REPO_CHIP_TRIGGER)[0]);
+    fireEvent.click(screen.getByTestId("create-local-repository-button"));
+    const firstCompletion = creationSurface.props!.onCreated;
+    creationSurface.props!.onOpenChange(false);
+
+    fireEvent.click(screen.getAllByTestId(REPO_CHIP_TRIGGER)[1]);
+    fireEvent.click(screen.getByTestId("create-local-repository-button"));
+    expect(creationSurface.props!.open).toBe(true);
+
+    const result = firstCompletion(makeRepo("repo-new", "new"));
+    expect(result).toBe(false);
+    expect(onCreated).toHaveBeenCalledWith("r0", expect.objectContaining({ id: "repo-new" }));
+    expect(creationSurface.props!.open).toBe(true);
+  });
+
   it("renders the remote chips row in Remote mode (workspace chips suppressed)", () => {
     renderInProvider(
       <RepoChipsRow
@@ -277,6 +324,116 @@ describe("RepoChipsRow", () => {
     expect(onRowBranchChange).toHaveBeenCalledWith("r0", "main");
   });
 
+  it("keeps a saved worktree base out of the checkout branch state", () => {
+    mockBranches.value = {
+      branches: [
+        { name: "main", type: "local" } as Branch,
+        { name: "develop", type: "local" } as Branch,
+      ],
+      isLoading: false,
+    };
+    const fs = makeFs({
+      repositories: [
+        row({
+          key: "r0",
+          repositoryId: REPO_FRONT_ID,
+          branch: "feature/task",
+          baseBranch: "develop",
+        }),
+      ],
+    });
+    const onRowBranchChange = vi.fn();
+    renderInProvider(
+      <RepoChipsRow
+        fs={fs}
+        repositories={[makeRepo(REPO_FRONT_ID, "frontend")]}
+        isTaskStarted={false}
+        workspaceId="ws-1"
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={onRowBranchChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(BRANCH_CHIP_TRIGGER));
+    fireEvent.click(screen.getByRole("option", { name: /^main/ }));
+
+    expect(fs.updateRepository).toHaveBeenCalledWith("r0", { baseBranch: "main" });
+    expect(onRowBranchChange).not.toHaveBeenCalled();
+  });
+
+  it("lets an applied saved base reset to the task default", () => {
+    mockBranches.value = {
+      branches: [
+        { name: "main", type: "local" } as Branch,
+        { name: "develop", type: "local" } as Branch,
+      ],
+      isLoading: false,
+      isLoaded: true,
+    };
+    const fs = makeFs({
+      repositories: [
+        row({
+          key: "r0",
+          repositoryId: REPO_FRONT_ID,
+          branch: "feature/task",
+          baseBranch: "develop",
+        }),
+      ],
+    });
+    const onRowBranchChange = vi.fn();
+    renderInProvider(
+      <RepoChipsRow
+        fs={fs}
+        repositories={[makeRepo(REPO_FRONT_ID, "frontend")]}
+        isTaskStarted={false}
+        workspaceId="ws-1"
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={onRowBranchChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(BRANCH_CHIP_TRIGGER));
+    fireEvent.click(screen.getByRole("option", { name: /^Task default/ }));
+
+    expect(fs.updateRepository).toHaveBeenCalledWith("r0", { baseBranch: undefined });
+    expect(onRowBranchChange).not.toHaveBeenCalled();
+  });
+
+  it("lets an unavailable applied saved base reset to the task default", () => {
+    mockBranches.value = {
+      branches: [{ name: "main", type: "local" } as Branch],
+      isLoading: false,
+      isLoaded: true,
+    };
+    const fs = makeFs({
+      repositories: [
+        row({
+          key: "r0",
+          repositoryId: REPO_FRONT_ID,
+          branch: "feature/task",
+          baseBranch: "retired",
+        }),
+      ],
+    });
+    renderInProvider(
+      <RepoChipsRow
+        fs={fs}
+        repositories={[makeRepo(REPO_FRONT_ID, "frontend")]}
+        isTaskStarted={false}
+        workspaceId="ws-1"
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={NOOP}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId(BRANCH_CHIP_TRIGGER));
+    const unavailable = screen.getByRole("option", { name: /retired/ });
+    expect(unavailable.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(screen.getByRole("option", { name: /^Task default/ }));
+
+    expect(fs.updateRepository).toHaveBeenCalledWith("r0", { baseBranch: undefined });
+  });
+
   it("disables branch policies for multi-repo local execution", () => {
     mockBranches.value = {
       branches: [{ name: "main", type: "local" } as Branch],
@@ -313,7 +470,7 @@ describe("RepoChipsRow", () => {
       />,
     );
 
-    fireEvent.click(screen.getAllByTestId("branch-chip-trigger")[0]);
+    fireEvent.click(screen.getAllByTestId(BRANCH_CHIP_TRIGGER)[0]);
 
     const option = screen.getByRole("option", { name: /Feature policy/ });
     expect(option.getAttribute("aria-disabled")).toBe("true");
@@ -521,7 +678,7 @@ describe("RepoChipsRow", () => {
         onRowBranchChange={NOOP}
       />,
     );
-    fireEvent.click(screen.getByTestId("branch-chip-trigger"));
+    fireEvent.click(screen.getByTestId(BRANCH_CHIP_TRIGGER));
     expect(screen.getByText("main")).toBeTruthy();
     expect(screen.getByText("origin/main")).toBeTruthy();
     mockBranches.value = { branches: [], isLoading: false };

@@ -95,13 +95,15 @@ func getPRFeedback(ctx context.Context, c Client, owner, repo string, number int
 	if checks == nil {
 		checks = []CheckRun{}
 	}
+	workflowAttention, _ := collectWorkflowAttention(ctx, c, owner, repo, pr)
 	hasIssues := hasFailingChecks(checks) || hasChangesRequested(reviews)
 	return &PRFeedback{
-		PR:        pr,
-		Reviews:   reviews,
-		Comments:  comments,
-		Checks:    checks,
-		HasIssues: hasIssues,
+		PR:                pr,
+		Reviews:           reviews,
+		Comments:          comments,
+		Checks:            checks,
+		HasIssues:         hasIssues,
+		WorkflowAttention: workflowAttention,
 	}, nil
 }
 
@@ -126,7 +128,8 @@ func getPRStatus(ctx context.Context, c Client, owner, repo string, number int) 
 	if checks == nil {
 		checks = []CheckRun{}
 	}
-	return newPRStatus(pr, reviews, checks), nil
+	workflowAttention, _ := collectWorkflowAttention(ctx, c, owner, repo, pr)
+	return newPRStatusWithWorkflow(pr, reviews, checks, workflowAttention), nil
 }
 
 // newPRStatus derives the PRStatus rollup from the three upstream reads every
@@ -140,10 +143,15 @@ func getPRStatus(ctx context.Context, c Client, owner, repo string, number int) 
 // UnresolvedReviewThreadsPopulated stays false — neither REST caller fetches
 // review threads, so SyncTaskPR must preserve whatever the GraphQL path stored.
 func newPRStatus(pr *PR, reviews []PRReview, checks []CheckRun) *PRStatus {
+	return newPRStatusWithWorkflow(pr, reviews, checks, nil)
+}
+
+func newPRStatusWithWorkflow(pr *PR, reviews []PRReview, checks []CheckRun, workflowAttention *WorkflowAttention) *PRStatus {
 	reviewState, pendingReviewCount := deriveReviewSyncState(pr, reviews)
 	total, passing := countCheckResults(checks)
 	return &PRStatus{
 		PR:                                    pr,
+		WorkflowAttention:                     workflowAttention,
 		ReviewState:                           reviewState,
 		ChecksState:                           computeOverallCheckStatus(checks),
 		MergeableState:                        pr.MergeableState,
@@ -175,6 +183,7 @@ func newPRStatus(pr *PR, reviews []PRReview, checks []CheckRun) *PRStatus {
 		// neither REST caller can see the closing actor — that's GraphQL-only
 		// (AC-15).
 		OutcomeFieldsPopulated:      true,
+		WorkflowAttentionPopulated:  workflowAttention != nil,
 		mergeQueuePopulated:         pr.mergeQueuePopulated,
 		mergeQueueRecoveryPopulated: pr.mergeQueueRecoveryPopulated,
 	}

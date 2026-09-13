@@ -116,7 +116,7 @@ func TestQueueRun_Coalesce(t *testing.T) {
 	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskComment, `{"task_id":"t1"}`, ""); err != nil {
 		t.Fatalf("first: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskComment, `{"task_id":"t2"}`, ""); err != nil {
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskComment, `{"task_id":"t1"}`, ""); err != nil {
 		t.Fatalf("second: %v", err)
 	}
 

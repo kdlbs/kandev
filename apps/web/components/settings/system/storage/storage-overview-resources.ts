@@ -1,4 +1,5 @@
 import type {
+  StorageFootprintMeasurement,
   StorageOverviewResponse,
   StorageQuarantineSummary,
   StorageSourceProgress,
@@ -13,6 +14,8 @@ import { formatGigabytes } from "./storage-units";
  */
 export type Translate = (key: string, options?: Record<string, unknown>) => string;
 export const TEMPORARY_ARTIFACTS_RESOURCE_ID = "temporary-artifacts";
+export const DATABASE_RESOURCE_ID = "database";
+export const DATABASE_BACKUPS_RESOURCE_ID = "database-backups";
 
 export interface StorageResource {
   id: string;
@@ -169,6 +172,79 @@ function quarantineResourceOrPending(
   return { ...quarantineResource(t, quarantine), source: "quarantine" };
 }
 
+function databaseResource(
+  t: Translate,
+  measurement: StorageFootprintMeasurement | null | undefined,
+  progress: StorageSourceProgress | undefined,
+  options: {
+    id: string;
+    label: string;
+    detailKey: string;
+    unknownDetailKey: string;
+    unavailableDetailKey: string;
+    notApplicableDetailKey: string;
+    source: string;
+  },
+): StorageResource {
+  if (!measurement) {
+    if (progress?.state === "pending" || progress?.state === "scanning") {
+      return pendingStorageResource(t, options.id, options.label, progress, options.source);
+    }
+    return {
+      id: options.id,
+      label: options.label,
+      value: t(STORAGE_UNAVAILABLE_VALUE_KEY),
+      detail: t(options.unknownDetailKey),
+      source: options.source,
+    };
+  }
+  switch (measurement.status) {
+    case "unavailable":
+      return {
+        id: options.id,
+        label: options.label,
+        value: t(STORAGE_UNAVAILABLE_VALUE_KEY),
+        detail: [t(options.unavailableDetailKey), measurement.path].filter(Boolean).join(" · "),
+        warning: measurement.warning,
+        source: options.source,
+      };
+    case "not_applicable":
+      return {
+        id: options.id,
+        label: options.label,
+        value: t("system:storageNotApplicableValue"),
+        detail: [t(options.notApplicableDetailKey), measurement.path].filter(Boolean).join(" · "),
+        warning: measurement.warning,
+        source: options.source,
+      };
+    case "measured": {
+      const detail = [
+        t(options.detailKey),
+        measurement.included_in_total === false
+          ? t("system:storageDatabaseAlreadyCounted")
+          : undefined,
+        measurement.reason === "partially_overlaps_existing_source"
+          ? t("system:storageDatabasePartiallyCounted")
+          : undefined,
+        measurement.path,
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      return {
+        id: options.id,
+        label: options.label,
+        value:
+          measurement.size_bytes === undefined
+            ? t(STORAGE_UNAVAILABLE_VALUE_KEY)
+            : formatGigabytes(measurement.size_bytes),
+        detail,
+        warning: measurement.warning,
+        source: options.source,
+      };
+    }
+  }
+}
+
 type DockerSummary = NonNullable<StorageSummaryPartial["docker"]>;
 
 interface DockerResourceOptions {
@@ -305,6 +381,24 @@ export function storageResources(
   const progress = overview.analysis.progress.sources;
   return [
     workspaceResource(t, summary.workspaces, progress.workspaces),
+    databaseResource(t, summary.database, progress.database, {
+      id: DATABASE_RESOURCE_ID,
+      label: t("system:storageDatabase"),
+      detailKey: "system:storageDatabaseDetail",
+      unknownDetailKey: "system:storageDatabaseUnknown",
+      unavailableDetailKey: "system:storageDatabaseUnavailable",
+      notApplicableDetailKey: "system:storageDatabaseNotApplicable",
+      source: "database",
+    }),
+    databaseResource(t, summary.database_backups, progress.database_backups, {
+      id: DATABASE_BACKUPS_RESOURCE_ID,
+      label: t("system:storageDatabaseBackups"),
+      detailKey: "system:storageDatabaseBackupsDetail",
+      unknownDetailKey: "system:storageDatabaseBackupsUnknown",
+      unavailableDetailKey: "system:storageDatabaseBackupsUnavailable",
+      notApplicableDetailKey: "system:storageDatabaseBackupsNotApplicable",
+      source: "database_backups",
+    }),
     quarantineResourceOrPending(t, summary.quarantine, progress.quarantine),
     ...goCacheResources(
       t,

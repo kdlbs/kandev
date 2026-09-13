@@ -25,6 +25,11 @@ const OPTIONS: Array<{ value: StartupPage; labelKey: string; descriptionKey: str
     labelKey: "settings:lastVisitedTask",
     descriptionKey: "settings:resumeTheMostRecentlyOpenedTask",
   },
+  {
+    value: "threads",
+    labelKey: "kanban:threads",
+    descriptionKey: "settings:openThreadsOnStartupAndHome",
+  },
 ];
 
 export function StartupPageSettingsCard({

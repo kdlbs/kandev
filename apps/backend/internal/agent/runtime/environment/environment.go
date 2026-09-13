@@ -43,7 +43,7 @@ type SecretError struct {
 }
 
 func (e *SecretError) Error() string {
-	return fmt.Sprintf("environment key %q from %s could not be resolved", e.Key, e.Origin)
+	return fmt.Sprintf("environment key %q from %s references an unavailable secret. Re-select the secret in the %s environment settings", e.Key, e.Origin, e.Origin)
 }
 
 func (e *SecretError) Unwrap() error { return e.err }

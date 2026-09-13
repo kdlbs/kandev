@@ -7,6 +7,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import { waitForHttp } from "../../helpers/causal-waits";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
+import { exerciseMultiRowCreation } from "./local-repository-multi-row-helpers";
 
 useRegularMode();
 
@@ -133,6 +134,19 @@ function taskIdFromUrl(page: Page): string {
 }
 
 test.describe("Create task with a new local repository", () => {
+  test("refreshes and creates from a second repository row", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    await openCreateTask(testPage);
+    await exerciseMultiRowCreation(testPage, apiClient, {
+      workspaceId: seedData.workspaceId,
+      parentPath: backend.tmpDir,
+      mobile: false,
+    });
+  });
   test("initializes, registers, selects, and starts from a real main repository", async ({
     testPage,
     apiClient,

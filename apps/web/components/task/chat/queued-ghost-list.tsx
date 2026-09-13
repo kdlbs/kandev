@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- queue panel keeps its responsive controls and row composition together. */
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
@@ -27,18 +28,21 @@ import { cn } from "@/lib/utils";
 import { stripSystemTags } from "@/lib/utils/system-tags";
 import {
   MergeReferenceOverflowError,
+  QueueEditConflictError,
   QueueEntryNotFoundError,
   QueueReorderError,
   QueueSendNowError,
 } from "@/lib/api/domains/queue-api";
-import { useQueue } from "@/hooks/domains/session/use-queue";
+import { useQueue, type MessageAttachment } from "@/hooks/domains/session/use-queue";
+import { useQueueEditProtection } from "@/hooks/use-queue-edit-protection";
 import { useQueuePinned } from "@/hooks/use-queue-pinned";
 import { canMergeWithAbove, QueuedGhostMessage } from "./queued-ghost-message";
 import { useQueuePanelOpenState } from "./use-queue-panel-open-state";
 import { useQueuePanelEscape } from "./use-queue-panel-escape";
 import { QueuePanelHeader } from "./queued-ghost-panel-header";
-import type { QueuedMessage } from "@/lib/state/slices/session/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
+import type { QueueEditLease } from "@/lib/api/domains/queue-api";
+import type { QueuedMessage } from "@/lib/state/slices/session/types";
 
 const HEAD_PREVIEW_MAX = 80;
 
@@ -72,8 +76,9 @@ type QueuePanelHandlerArgs = {
   editEntry: (
     entryId: string,
     content: string,
-    attachments?: undefined,
+    attachments?: MessageAttachment[],
     entityReferences?: EntityReference[],
+    lease?: QueueEditLease | null,
   ) => Promise<void>;
   removeEntry: (entryId: string) => Promise<void>;
   mergeEntry: (entryId: string) => Promise<void>;
@@ -88,6 +93,7 @@ function useSendNowPanelHandlers(sendEntryNow: (entryId: string) => Promise<void
   const sendNowErrorMessage = useCallback(
     (err: unknown) => {
       if (err instanceof QueueEntryNotFoundError) return t("chat:sendNowEntryAlreadySent");
+      if (err instanceof QueueEditConflictError) return t("chat:queueEditSaveFailed");
       if (err instanceof QueueSendNowError) {
         const messages: Record<string, string> = {
           queue_empty: "chat:sendNowQueueEmpty",
@@ -116,6 +122,7 @@ function useSendNowPanelHandlers(sendEntryNow: (entryId: string) => Promise<void
   return { handleSendEntryNow };
 }
 
+// eslint-disable-next-line max-lines-per-function -- panel actions share queue error and admission handling.
 function useQueuePanelHandlers({
   clearAll,
   editEntry,
@@ -134,10 +141,20 @@ function useQueuePanelHandlers({
   const { t } = useTranslation();
   const { handleSendEntryNow } = useSendNowPanelHandlers(sendEntryNow);
   const handleSave = useCallback(
-    async (entryId: string, content: string, entityReferences: EntityReference[]) => {
-      await editEntry(entryId, content, undefined, entityReferences);
+    async (
+      entryId: string,
+      content: string,
+      attachments: MessageAttachment[] | undefined,
+      entityReferences: EntityReference[],
+      lease?: QueueEditLease | null,
+    ) => {
+      if (!lease) {
+        toast.error(t("chat:queueEditSaveFailed"));
+        return;
+      }
+      await editEntry(entryId, content, attachments, entityReferences, lease);
     },
-    [editEntry],
+    [editEntry, t],
   );
   const handleRemove = useCallback(
     async (entryId: string) => {
@@ -238,16 +255,26 @@ type QueuePanelDisclosureProps = {
   cancellationPending: boolean;
   mergeEnabled: boolean;
   pinned: boolean;
+  editingEntryId: string | null;
+  editLeaseActive: boolean;
   onClose: () => void;
   onClear: () => void;
   onAutoRunChange: (enabled: boolean) => void;
   onAutoMergeChange: (enabled: boolean) => void;
   onTogglePin: () => void;
-  onSave: (entryId: string, content: string, refs: EntityReference[]) => Promise<void>;
+  onSave: (
+    entryId: string,
+    content: string,
+    refs: EntityReference[],
+    attachments?: MessageAttachment[],
+    lease?: QueueEditLease | null,
+  ) => Promise<void>;
   onRemove: (entryId: string) => Promise<void>;
   onMerge: (entryId: string) => Promise<void>;
   onReorder: (orderedIds: string[]) => void;
   onSendEntryNow: (entryId: string) => void;
+  onEditStart: (entryId: string) => Promise<string | false>;
+  onEditComplete: (entryId: string, editToken?: string, saved?: boolean) => Promise<void>;
 };
 
 /** Wraps QueuePanel in the collapsible open/close animation shell. */
@@ -265,6 +292,8 @@ function QueuePanelDisclosure({
   cancellationPending,
   mergeEnabled,
   pinned,
+  editingEntryId,
+  editLeaseActive,
   onClose,
   onClear,
   onAutoRunChange,
@@ -275,6 +304,8 @@ function QueuePanelDisclosure({
   onMerge,
   onReorder,
   onSendEntryNow,
+  onEditStart,
+  onEditComplete,
 }: QueuePanelDisclosureProps) {
   return (
     <Collapsible open={isOpen} onOpenChange={onOpenChange}>
@@ -294,6 +325,8 @@ function QueuePanelDisclosure({
           autoMergeAvailable={autoMergeAvailable}
           isLoading={isLoading}
           cancellationPending={cancellationPending}
+          editingEntryId={editingEntryId}
+          editLeaseActive={editLeaseActive}
           mergeEnabled={mergeEnabled}
           pinned={pinned}
           onClose={onClose}
@@ -306,6 +339,8 @@ function QueuePanelDisclosure({
           onMerge={onMerge}
           onReorder={onReorder}
           onSendEntryNow={onSendEntryNow}
+          onEditStart={onEditStart}
+          onEditComplete={onEditComplete}
         />
       </CollapsibleContent>
     </Collapsible>
@@ -320,6 +355,7 @@ function QueuePanelDisclosure({
  *   it expands a panel above the input. Drained or session-switched queues
  *   auto-collapse.
  */
+// eslint-disable-next-line max-lines-per-function -- coordinates the queue panel's responsive controls and mutations.
 export function QueueAffordance({ sessionId, children, renderStatusBar }: QueueAffordanceProps) {
   const {
     entries,
@@ -341,10 +377,14 @@ export function QueueAffordance({ sessionId, children, renderStatusBar }: QueueA
     sendEntryNow,
     cancellationPending,
   } = useQueue(sessionId);
+  const { editingEntryId, editLease, beginEdit, completeEdit } = useQueueEditProtection({
+    sessionId,
+    entries,
+  });
   const { value: pinned, toggle: togglePin } = useQueuePinned(sessionId);
   const [isOpen, setIsOpen] = useQueuePanelOpenState(sessionId, entries.length, pinned);
   const {
-    handleSave,
+    handleSave: handlePanelSave,
     handleRemove,
     handleMerge,
     handleClear,
@@ -363,15 +403,25 @@ export function QueueAffordance({ sessionId, children, renderStatusBar }: QueueA
     setAutoMerge,
   });
 
-  // Reset disclosure on session switch or full drain using render-phase state
-  // adjustment (React docs: "Adjusting some state when a prop changes"). This
-  // avoids the cascading-render anti-pattern of doing it inside useEffect.
+  const handleSave = useCallback(
+    (
+      entryId: string,
+      content: string,
+      refs: EntityReference[],
+      attachments?: MessageAttachment[],
+    ) => handlePanelSave(entryId, content, attachments, refs, editLease),
+    [editLease, handlePanelSave],
+  );
+  const handleEditComplete = useCallback(
+    (entryId: string, editToken?: string, saved = false) =>
+      completeEdit(entryId, sessionId, editToken, saved),
+    [completeEdit, sessionId],
+  );
   const close = useCallback(() => setIsOpen(false), []);
   useQueuePanelEscape(isOpen, close);
 
-  const hasEntries = !!sessionId && entries.length > 0;
   const chipNode =
-    hasEntries && !isOpen ? (
+    !!sessionId && entries.length > 0 && !isOpen ? (
       <QueueChip
         count={count}
         isFull={isFull}
@@ -380,7 +430,7 @@ export function QueueAffordance({ sessionId, children, renderStatusBar }: QueueA
       />
     ) : null;
 
-  if (!hasEntries) {
+  if (!sessionId || entries.length === 0) {
     return (
       <>
         {/* Call renderStatusBar even with null so the status bar stays mounted when the queue is empty. */}
@@ -398,6 +448,7 @@ export function QueueAffordance({ sessionId, children, renderStatusBar }: QueueA
         onOpenChange={setIsOpen}
         entries={entries}
         count={count}
+        editingEntryId={editingEntryId}
         max={max}
         isFull={isFull}
         autoRun={autoRun}
@@ -408,6 +459,9 @@ export function QueueAffordance({ sessionId, children, renderStatusBar }: QueueA
         mergeEnabled={mergeEnabled}
         pinned={pinned}
         onClose={close}
+        editLeaseActive={editLease !== null}
+        onEditStart={beginEdit}
+        onEditComplete={handleEditComplete}
         onClear={handleClear}
         onAutoRunChange={handleAutoRunChange}
         onAutoMergeChange={handleAutoMergeChange}
@@ -491,18 +545,27 @@ type QueuePanelProps = {
   cancellationPending: boolean;
   mergeEnabled: boolean;
   pinned: boolean;
+  editingEntryId: string | null;
+  editLeaseActive: boolean;
   onClose: () => void;
   onClear: () => void;
   onAutoRunChange: (enabled: boolean) => void;
   onAutoMergeChange: (enabled: boolean) => void;
   onTogglePin: () => void;
-  onSave: (entryId: string, content: string, entityReferences: EntityReference[]) => Promise<void>;
+  onSave: (
+    entryId: string,
+    content: string,
+    refs: EntityReference[],
+    attachments?: MessageAttachment[],
+    lease?: QueueEditLease | null,
+  ) => Promise<void>;
   onRemove: (entryId: string) => Promise<void>;
   onMerge: (entryId: string) => Promise<void>;
   onReorder: (orderedIds: string[]) => void;
   onSendEntryNow: (entryId: string) => void;
+  onEditStart: (entryId: string) => Promise<string | false>;
+  onEditComplete: (entryId: string, editToken?: string, saved?: boolean) => Promise<void>;
 };
-
 /** Renders the expanded queue list: header controls plus one QueuedGhostMessage
  * row per pending entry, gating each row's merge control on `mergeEnabled`. */
 type QueueReorderArgs = {
@@ -551,6 +614,67 @@ function useQueueReorder({ entries, canReorder, onReorder }: QueueReorderArgs) {
   };
 }
 
+// Reordering is disabled while a queue mutation or backend cancellation is in flight.
+type QueuePanelEntryProps = {
+  entry: QueuedMessage;
+  index: number;
+  editLeaseActive: boolean;
+  canEdit: boolean;
+  canMerge: boolean;
+  canDrag: boolean;
+  showDragHandle: boolean;
+  isDragging: boolean;
+  sendNowDisabled: boolean;
+  onSave: QueuePanelProps["onSave"];
+  onRemove: () => Promise<void>;
+  onMerge: () => Promise<void>;
+  onSendNow: () => void;
+  onEditStart: () => Promise<string | false>;
+  onEditComplete: (editToken?: string, saved?: boolean) => Promise<void>;
+};
+
+function QueuePanelEntry({
+  entry,
+  index,
+  editLeaseActive,
+  canEdit,
+  canMerge,
+  canDrag,
+  showDragHandle,
+  isDragging,
+  sendNowDisabled,
+  onSave,
+  onRemove,
+  onMerge,
+  onSendNow,
+  onEditStart,
+  onEditComplete,
+}: QueuePanelEntryProps) {
+  return (
+    <QueuedGhostMessage
+      entry={entry}
+      index={index}
+      editLeaseActive={editLeaseActive}
+      canEdit={canEdit}
+      canRemove
+      canMerge={canMerge}
+      canDrag={canDrag}
+      showDragHandle={showDragHandle}
+      isDragging={isDragging}
+      onSave={(content, entityReferences, attachments) =>
+        onSave(entry.id, content, entityReferences, attachments)
+      }
+      onRemove={onRemove}
+      onMerge={onMerge}
+      onSendNow={onSendNow}
+      sendNowDisabled={sendNowDisabled}
+      onEditStart={onEditStart}
+      onEditComplete={onEditComplete}
+    />
+  );
+}
+
+// eslint-disable-next-line max-lines-per-function -- the panel keeps responsive drag, edit, and status composition together.
 function QueuePanel({
   entries,
   count,
@@ -563,6 +687,8 @@ function QueuePanel({
   cancellationPending,
   mergeEnabled,
   pinned,
+  editingEntryId,
+  editLeaseActive,
   onClose,
   onClear,
   onAutoRunChange,
@@ -573,11 +699,11 @@ function QueuePanel({
   onMerge,
   onReorder,
   onSendEntryNow,
+  onEditStart,
+  onEditComplete,
 }: QueuePanelProps) {
   const { t } = useTranslation();
-  // Reordering is disabled while a queue mutation or backend cancellation is
-  // in flight, matching the Send Now gate; the server stays authoritative, so
-  // the optimistic order is reconciled by the refetch after the drop.
+  // The server remains authoritative; drops reconcile through refetch.
   const { ids, sensors, activeId, canReorder, handleDragStart, handleDragEnd, handleDragCancel } =
     useQueueReorder({
       entries,
@@ -604,7 +730,7 @@ function QueuePanel({
         autoRun={autoRun}
         autoMerge={autoMerge}
         autoMergeAvailable={autoMergeAvailable}
-        isLoading={isLoading}
+        isLoading={isLoading || editingEntryId !== null}
         cancellationPending={cancellationPending}
         pinned={pinned}
         onClear={onClear}
@@ -626,21 +752,28 @@ function QueuePanel({
         >
           <SortableContext items={ids} strategy={verticalListSortingStrategy}>
             {entries.map((entry, index) => (
-              <QueuedGhostMessage
+              <QueuePanelEntry
                 key={entry.id}
                 entry={entry}
                 index={index}
-                canEdit={canUserEditEntry(entry)}
-                canRemove
+                editLeaseActive={editLeaseActive}
+                canEdit={
+                  !isLoading &&
+                  !cancellationPending &&
+                  canUserEditEntry(entry) &&
+                  (editingEntryId === null || editingEntryId === entry.id)
+                }
                 canMerge={mergeEnabled && canMergeWithAbove(entry, entries[index - 1])}
                 canDrag={canReorder}
                 showDragHandle={entries.length > 1}
                 isDragging={activeId === entry.id}
-                onSave={(content, entityReferences) => onSave(entry.id, content, entityReferences)}
+                sendNowDisabled={isLoading || cancellationPending}
+                onSave={onSave}
                 onRemove={() => onRemove(entry.id)}
                 onMerge={() => onMerge(entry.id)}
                 onSendNow={() => onSendEntryNow(entry.id)}
-                sendNowDisabled={isLoading || cancellationPending}
+                onEditStart={() => onEditStart(entry.id)}
+                onEditComplete={(editToken, saved) => onEditComplete(entry.id, editToken, saved)}
               />
             ))}
           </SortableContext>

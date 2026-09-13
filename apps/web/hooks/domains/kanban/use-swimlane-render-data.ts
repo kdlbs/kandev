@@ -19,6 +19,7 @@ type TaskProjectionCacheEntry = {
   hiddenStepIds: string[] | undefined;
   repoFilter: Set<string>;
   searchQuery: string;
+  vcsSearchTextByTaskId: Record<string, string> | undefined;
   matchesPluginTaskFilters: ((taskId: string) => boolean) | undefined;
   visibleTasks: Task[];
 };
@@ -85,11 +86,78 @@ function useOrderedWorkflowLists(
   return { allOrderedWorkflows, orderedWorkflows };
 }
 
+type TaskProjectionCacheOptions = {
+  snapshots: Record<string, WorkflowSnapshotData>;
+  hiddenWorkflowStepIds: Record<string, string[]>;
+  repoFilter: Set<string>;
+  searchQuery: string;
+  vcsSearchTextByTaskId: Record<string, string> | undefined;
+  matchesPluginTaskFilters: ((taskId: string) => boolean) | undefined;
+};
+
+function useTaskProjectionCache({
+  snapshots,
+  hiddenWorkflowStepIds,
+  repoFilter,
+  searchQuery,
+  vcsSearchTextByTaskId,
+  matchesPluginTaskFilters,
+}: TaskProjectionCacheOptions) {
+  const projectionCacheRef = useRef(new Map<string, TaskProjectionCacheEntry>());
+  useEffect(() => {
+    for (const workflowId of projectionCacheRef.current.keys()) {
+      if (!(workflowId in snapshots)) projectionCacheRef.current.delete(workflowId);
+    }
+  }, [snapshots]);
+  return useCallback(
+    (workflowId: string) => {
+      const snapshot = snapshots[workflowId];
+      const hiddenStepIds = hiddenWorkflowStepIds[workflowId];
+      const cached = projectionCacheRef.current.get(workflowId);
+      if (
+        cached?.snapshot === snapshot &&
+        cached.hiddenStepIds === hiddenStepIds &&
+        cached.repoFilter === repoFilter &&
+        cached.searchQuery === searchQuery &&
+        cached.vcsSearchTextByTaskId === vcsSearchTextByTaskId &&
+        cached.matchesPluginTaskFilters === matchesPluginTaskFilters
+      ) {
+        return cached.visibleTasks;
+      }
+      const visibleTasks = projectWorkflowTasks(snapshots, workflowId, repoFilter, {
+        searchQuery,
+        vcsSearchTextByTaskId,
+        matchesPluginTaskFilters,
+        hiddenStepIds: hiddenStepIds?.length ? new Set(hiddenStepIds) : undefined,
+      }).visibleTasks;
+      projectionCacheRef.current.set(workflowId, {
+        snapshot,
+        hiddenStepIds,
+        repoFilter,
+        searchQuery,
+        vcsSearchTextByTaskId,
+        matchesPluginTaskFilters,
+        visibleTasks,
+      });
+      return visibleTasks;
+    },
+    [
+      hiddenWorkflowStepIds,
+      matchesPluginTaskFilters,
+      repoFilter,
+      searchQuery,
+      vcsSearchTextByTaskId,
+      snapshots,
+    ],
+  );
+}
+
 export function useSwimlaneRenderData(
   workflowFilter: string | null | undefined,
   selectedRepositoryIds: string[],
   searchQuery: string,
   matchesPluginTaskFilters?: (taskId: string) => boolean,
+  vcsSearchTextByTaskId?: Record<string, string>,
 ) {
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
   const isLoading = useAppStore((state) => state.kanbanMulti.isLoading);
@@ -114,43 +182,14 @@ export function useSwimlaneRenderData(
     snapshots,
   );
 
-  const projectionCacheRef = useRef(new Map<string, TaskProjectionCacheEntry>());
-  useEffect(() => {
-    for (const workflowId of projectionCacheRef.current.keys()) {
-      if (!(workflowId in snapshots)) projectionCacheRef.current.delete(workflowId);
-    }
-  }, [snapshots]);
-  const getFilteredTasks = useCallback(
-    (workflowId: string) => {
-      const snapshot = snapshots[workflowId];
-      const hiddenStepIds = hiddenWorkflowStepIds[workflowId];
-      const cached = projectionCacheRef.current.get(workflowId);
-      if (
-        cached?.snapshot === snapshot &&
-        cached.hiddenStepIds === hiddenStepIds &&
-        cached.repoFilter === repoFilter &&
-        cached.searchQuery === searchQuery &&
-        cached.matchesPluginTaskFilters === matchesPluginTaskFilters
-      ) {
-        return cached.visibleTasks;
-      }
-      const visibleTasks = projectWorkflowTasks(snapshots, workflowId, repoFilter, {
-        searchQuery,
-        matchesPluginTaskFilters,
-        hiddenStepIds: hiddenStepIds?.length ? new Set(hiddenStepIds) : undefined,
-      }).visibleTasks;
-      projectionCacheRef.current.set(workflowId, {
-        snapshot,
-        hiddenStepIds,
-        repoFilter,
-        searchQuery,
-        matchesPluginTaskFilters,
-        visibleTasks,
-      });
-      return visibleTasks;
-    },
-    [hiddenWorkflowStepIds, matchesPluginTaskFilters, repoFilter, searchQuery, snapshots],
-  );
+  const getFilteredTasks = useTaskProjectionCache({
+    snapshots,
+    hiddenWorkflowStepIds,
+    repoFilter,
+    searchQuery,
+    vcsSearchTextByTaskId,
+    matchesPluginTaskFilters,
+  });
 
   const hasLiveHiddenSteps = useCallback(
     (workflowId: string) => {
@@ -196,6 +235,7 @@ export function useWorkflowSwimlaneData(
   repoFilter: Set<string>,
   searchQuery: string,
   matchesPluginTaskFilters?: (taskId: string) => boolean,
+  vcsSearchTextByTaskId?: Record<string, string>,
 ): {
   snapshot: WorkflowSnapshotData | undefined;
   tasks: Task[];
@@ -221,10 +261,19 @@ export function useWorkflowSwimlaneData(
     if (!snapshot) return { visibleTasks: [], occupancyTasks: [] };
     return projectWorkflowTasks({ [workflowId]: snapshot }, workflowId, repoFilter, {
       searchQuery,
+      vcsSearchTextByTaskId,
       matchesPluginTaskFilters,
       hiddenStepIds: hiddenSet,
     });
-  }, [hiddenSet, matchesPluginTaskFilters, repoFilter, searchQuery, snapshot, workflowId]);
+  }, [
+    hiddenSet,
+    matchesPluginTaskFilters,
+    repoFilter,
+    searchQuery,
+    vcsSearchTextByTaskId,
+    snapshot,
+    workflowId,
+  ]);
 
   return {
     snapshot,

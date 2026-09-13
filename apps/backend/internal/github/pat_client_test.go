@@ -83,6 +83,61 @@ func TestConvertPatPR(t *testing.T) {
 	}
 }
 
+func TestExecuteGraphQLPreservesHTTPProviderRetryDeadline(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    int
+		body      string
+		configure func(http.Header, time.Time)
+		minWait   time.Duration
+	}{
+		{
+			name:    "429 retry-after",
+			status:  http.StatusTooManyRequests,
+			body:    `{"message":"rate limit exceeded"}`,
+			minWait: 119 * time.Second,
+			configure: func(headers http.Header, _ time.Time) {
+				headers.Set("Retry-After", "120")
+			},
+		},
+		{
+			name:    "403 reset",
+			status:  http.StatusForbidden,
+			body:    `{"message":"API rate limit exceeded"}`,
+			minWait: 119 * time.Second,
+			configure: func(headers http.Header, now time.Time) {
+				headers.Set("X-RateLimit-Limit", "5000")
+				headers.Set("X-RateLimit-Remaining", "0")
+				headers.Set("X-RateLimit-Reset", strconv.FormatInt(now.Add(120*time.Second).Unix(), 10))
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			now := time.Now().UTC()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				tt.configure(w.Header(), now)
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			t.Cleanup(srv.Close)
+			client := newPATClientPointingAt(t, srv.URL)
+			var out map[string]any
+			err := client.ExecuteGraphQL(context.Background(), "query Test { rateLimit { resetAt } }", nil, &out)
+			if err == nil {
+				t.Fatal("ExecuteGraphQL succeeded, want provider error")
+			}
+			var apiErr *GitHubAPIError
+			if !errors.As(err, &apiErr) {
+				t.Fatalf("error = %T %v, want GitHubAPIError", err, err)
+			}
+			if apiErr.RetryAt == nil || apiErr.RetryAt.Before(now.Add(tt.minWait)) {
+				t.Fatalf("retry deadline = %v, want at least %v", apiErr.RetryAt, now.Add(tt.minWait))
+			}
+		})
+	}
+}
+
 // TestConvertPatPR_MissingDraftAndChangedFilesLeavesUnobserved covers
 // AC-12a on the REST decode path: a response that omits draft and
 // changed_files must decode to unobserved (Observed=false), not a
@@ -232,6 +287,44 @@ func TestPATClient_ListCheckRunsPaginatesCheckRuns(t *testing.T) {
 	}
 	if got := computeOverallCheckStatus(checks); got != "failure" {
 		t.Fatalf("overall check status = %q, want failure; checks=%#v", got, checks)
+	}
+}
+
+func TestPATClient_ListWorkflowRunsPaginatesAndListsAttemptJobs(t *testing.T) {
+	c, requests := newLinkPaginatedPATServer(t, "/repos/acme/widget/actions/runs", []string{
+		`{"workflow_runs":[{"id":7,"run_attempt":1,"workflow_id":9,"name":"Run tests","event":"pull_request","status":"completed","conclusion":"action_required","head_sha":"sha","head_branch":"feature","head_repository":{"full_name":"contributor/widget-fork","name":"widget-fork","owner":{"login":"contributor"}},"html_url":"https://github.com/acme/widget/actions/runs/7","created_at":"2026-09-01T10:00:00Z","updated_at":"2026-09-01T10:00:00Z","pull_requests":[]}]}`,
+		`{"workflow_runs":[{"id":8,"run_attempt":1,"workflow_id":10,"name":"Lint","event":"pull_request","status":"completed","conclusion":"success","head_sha":"sha","head_branch":"feature","html_url":"https://github.com/acme/widget/actions/runs/8","created_at":"2026-09-01T10:00:00Z","updated_at":"2026-09-01T11:00:00Z","pull_requests":[]}]}`,
+	})
+
+	runs, err := c.ListWorkflowRuns(context.Background(), "acme", "widget", "sha")
+	if err != nil {
+		t.Fatalf("ListWorkflowRuns: %v", err)
+	}
+	if len(runs) != 2 || runs[0].HeadRepoOwner != "contributor" || runs[0].HeadRepoName != "widget-fork" {
+		t.Fatalf("runs = %#v", runs)
+	}
+	if len(*requests) != 2 {
+		t.Fatalf("workflow run requests = %d, want 2", len(*requests))
+	}
+	if got := parseQueryValues(t, (*requests)[0].Query).Get("head_sha"); got != "sha" {
+		t.Fatalf("head_sha = %q, want sha", got)
+	}
+	if got := parseQueryValues(t, (*requests)[0].Query).Get("per_page"); got != "100" {
+		t.Fatalf("per_page = %q, want 100", got)
+	}
+
+	jobClient, jobRequests := newRecordingPATServer(t, map[string]string{
+		"/repos/acme/widget/actions/runs/7/attempts/1/jobs": `{"jobs":[{"id":70,"name":"approval gate","status":"completed","conclusion":null}]}`,
+	})
+	jobs, err := jobClient.ListWorkflowRunJobs(context.Background(), "acme", "widget", 7, 1)
+	if err != nil {
+		t.Fatalf("ListWorkflowRunJobs: %v", err)
+	}
+	if len(jobs) != 1 || jobs[0].Name != "approval gate" || jobs[0].Conclusion != "" {
+		t.Fatalf("jobs = %#v", jobs)
+	}
+	if len(*jobRequests) != 1 || parseQueryValues(t, (*jobRequests)[0].Query).Get("per_page") != "100" {
+		t.Fatalf("job requests = %#v", *jobRequests)
 	}
 }
 

@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { moveTask } from "@/lib/api";
+import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 import { useAppStore } from "@/components/state-provider";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { useLayoutStore } from "@/lib/state/layout-store";
@@ -69,7 +70,7 @@ type UseWorkflowStepMoveParams = {
 
 type UseWorkflowStepMoveResult = {
   movingToStepId: string | null;
-  handleMove: (stepId: string) => Promise<boolean>;
+  handleMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
 };
 
 /**
@@ -108,7 +109,7 @@ export function useWorkflowStepMove({
   }
 
   const handleMove = useCallback(
-    async (stepId: string): Promise<boolean> => {
+    async (stepId: string, entryOptions?: WorkflowMoveEntryOptions): Promise<boolean> => {
       if (!taskId || !workflowId) return false;
       onMoveStart?.();
       disablePlanMode();
@@ -119,6 +120,7 @@ export function useWorkflowStepMove({
           workflow_id: workflowId,
           workflow_step_id: stepId,
           position: 0,
+          entry_options: entryOptions,
         });
         return true;
       } catch (err) {

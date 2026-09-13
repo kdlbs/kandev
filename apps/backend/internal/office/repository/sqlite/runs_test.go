@@ -177,7 +177,7 @@ func TestCoalesceRun(t *testing.T) {
 		t.Fatalf("create: %v", err)
 	}
 
-	coalesced, err := repo.CoalesceRun(ctx, "a1", "task_comment", 10, `{"task_id":"t2"}`)
+	coalesced, err := repo.CoalesceRun(ctx, "a1", "task_comment", 10, `{"task_id":"t1"}`)
 	if err != nil {
 		t.Fatalf("coalesce: %v", err)
 	}

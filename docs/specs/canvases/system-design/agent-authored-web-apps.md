@@ -6,7 +6,7 @@ system: canvases
 owners:
   - canvases
 created: 2026-08-26
-last_updated: 2026-09-05
+last_updated: 2026-09-10
 requirements:
   - REQ-CANVASES-AGENT-WEB-APPS-001
   - REQ-CANVASES-AGENT-WEB-APPS-002
@@ -78,10 +78,7 @@ standard web protocol that the Plugins system owns.
 
 ## Implementation baseline and feature gate
 
-Implementation starts from current `main`. PR #3061 contains the superseded
-declarative canvas implementation and must not merge as a prerequisite. The
-new implementation creates the canvas model and host surfaces directly from
-this design.
+PR #3061's declarative implementation is superseded, not a prerequisite.
 
 The runtime flag identity is `features.canvases`. Its environment variable is
 `KANDEV_FEATURES_CANVASES`. The first implementation sets `prod`, `dev`, and
@@ -188,7 +185,8 @@ The normal flow starts in a task conversation:
 8. The agent calls `publish_canvas_kandev` with the canvas ID and source path.
 9. Kandev reads that directory through the trusted task execution file API.
 10. The Plugins service validates and stores an immutable release.
-11. The canvas activates immediately when its permissions fit existing grants.
+11. The canvas activates when its permissions fit existing grants or its
+    recorded [initial creation authority](local-creation-authority.md).
 12. The task client receives a lifecycle event and opens the new canvas.
 
 The source directory is workspace-relative and scoped to the current execution.
@@ -234,6 +232,48 @@ All launch surfaces remain behind `features.canvases`. A disabled client does
 not request canvas counts, add a settings tab, or register the task preset.
 
 ## Agent authoring guidance
+
+### Discovery and creation prompts
+
+The shared task prompt uses the
+[agent discovery contract](../../agents/system-design/mcp-tool-discovery-guidance.md).
+When the resolved session profile includes `CapabilityCanvas`, it also includes
+this compact instruction:
+
+> For a requested Kandev canvas, discover `create_canvas_kandev`, `read_canvas_authoring_skill_kandev`, and `publish_canvas_kandev`.
+> Create the draft in Kandev before writing application files.
+> Read the authoring skill once and edit only inside the returned source directory.
+> Publish through MCP and report the returned release status.
+> If publication is unsuccessful, report the failure and do not claim that the canvas is published.
+> Files or a successful local build do not create a published Kandev canvas.
+
+The optional section is absent when the resolved profile lacks canvas tools.
+This covers canvas requests inside ordinary task conversations, independently
+of the guided task preset.
+
+`CanvasTaskCreateLauncher` retains the visible, editable
+`canvases:createCanvasTaskPrompt` preset in the normal `TaskCreateDialog`.
+The locale catalog owns the exact wording. It names discovery, creation,
+assigned-root authoring, live data, the single core skill read, publication,
+and honest outcome reporting. It explains permission review and promotion
+when required, and does not equate local files or a build with publication.
+
+The existing selected question capability governs any clarification. The
+preset cannot grant a question tool to an autopilot session that lacks one.
+An application goal already supplied by the user needs no repeated interview.
+
+English, Portuguese, and Simplified Chinese catalogs receive equivalent
+wording. Traditional Chinese catalogs use the repository generator. Tool names
+remain literal protocol identifiers. The pseudo-locale uses its generator.
+
+The nearest mobile exemplar is the existing full-screen `TaskCreateDialog`
+opened from workspace Canvases settings. This is a content change within that
+surface. Its scroll owner, touch controls, and navigation remain unchanged.
+Focused desktop and mobile tests cover the longer editable prompt and its
+submitted value. Tests inspect the real catalog value before replacing any
+description with mock-agent commands.
+
+### Bundled authoring skill
 
 Kandev bundles a read-only `kandev-canvas-authoring` system skill in a canvas
 embed that is separate from the Office skill embed. At startup, Kandev writes
@@ -323,6 +363,10 @@ If the declaration needs more permission, the release gets
 `pending_permission` status. The service publishes
 `canvas.release.permission_required`. The active release remains unchanged.
 
+Recorded owner-authorized first publication uses
+[the creation authority transaction](local-creation-authority.md) instead.
+The generic publish and manual review paths do not infer that authority.
+
 Rollback selects the retained prior valid release. It does not restore old
 grants that the user revoked. If the current grants do not cover the old
 release, rollback needs a permission review.
@@ -355,6 +399,41 @@ navigation projections then refresh.
 A release that adds permissions uses the same review component. Removing a
 declaration does not need approval. The effective grant contracts to the new
 declaration after activation.
+
+### Readable review surfaces
+
+`CanvasReleaseDialog` and `CanvasPromotionDialog` share a permission view model
+and human-readable provenance. Show release creation time, author kind, source
+task title, and source session name when currently authorized. Use an
+unavailable-source label for deleted or inaccessible records. Raw UUIDs stay in
+API identities and action payloads, never headings, accessible labels, or copy.
+Add optional source labels to the HTTP release/promotion projections through
+authorized task/session lookups; avoid client-side lookup waterfalls.
+
+Select the pending release by default, otherwise the active release. A compact
+release selector preserves access to retained history. Distinguish Active from
+Previous for valid releases by comparing with `active_release_id`. Render one
+grouped declaration with newly requested rows marked. Use localized semantic
+labels for reads, writes, state, and supported event/resource names; preserve
+exact normalized network origins. Unknown values have a localized unsupported
+permission label and cannot be approved silently. Keep rejection reasons and
+real validation errors separate from normal permission review.
+
+On desktop use a viewport-bounded wider dialog (target 48rem maximum width)
+with a fixed title and action footer. The single middle region can scroll;
+remove the 288px cap and repeated declared/missing-permission blocks. Pending
+release actions are Approve and Reject, retained release action is Roll back,
+and current release has Close. Reuse unchanged stale-review safeguards.
+
+On phones use the full-height focused surface pattern from `task-layout.tsx`,
+with header/footer and internal scrolling mechanics from
+`mobile-menu-sheet.tsx`. This deep release review warrants a full-height
+surface; the short host action chooser remains an inset bottom drawer.
+Use `useResponsiveBreakpoint`, dynamic viewport height, safe areas, and
+touch-only targets of at least 44px. Desktop controls remain 28px. Share
+selection, actions, loading, and errors between presentations. Dismissal returns
+focus to the opener; a release change during review refreshes the selection and
+disables stale actions. No horizontal document overflow is permitted.
 
 ## Quick Chat editing
 
@@ -556,6 +635,14 @@ The iframe can remain visible during an event-stream reconnect. The host shows
 the offline state outside the application. If the runtime token expires, the
 host requests a new URL and reloads the same active release.
 
+Receiving a descriptor keeps `loading_runtime` and mounts the frame behind its
+loading cover. `CanvasHostSurface` must mount during this state, not only Ready.
+Only the current [plugin startup acknowledgement](../../plugins/system-design/isolated-web-app-contributions.md#runtime-startup-protocol)
+sets Ready. A failed or absent acknowledgement within 15 seconds tears down the
+frame and exposes Retry and Releases. Do not claim a specific CSP or network
+cause from the generic timeout. Retry, renewal, navigation, and authority
+changes fence old callbacks. Appearance remains applied before reveal.
+
 If the release is unavailable, the host offers Edit, Releases, Roll back, or
 Remove according to current permissions. It never loads a rejected artifact.
 
@@ -575,23 +662,14 @@ repositories, sessions, or external services by itself.
 The plugin runtime repeats resource authorization for each request. Canvas
 authorization does not replace task or workspace authorization.
 
-## Baseline from the superseded declarative work
-
-The declarative implementation is not on `main` and is not a released
-contract. PR #3061 must close or remain unmerged. Implementation does not merge
-that block model before it creates the plugin-backed model.
-
-Development databases that ran PR #3061 can keep unused declarative tables.
-The new implementation does not read them. It does not add a destructive
-startup migration for those development-only tables.
-
 ## Failure handling
 
 - A missing task agent disables the create prompt and shows how to start one.
 - A source read error preserves the active release.
 - A package validation error returns safe file and rule diagnostics to the
   authoring agent.
-- A permission increase creates a pending release.
+- A permission increase after initial owner-authorized publication creates a
+  pending release.
 - A promotion transaction either changes scope and grants together or changes
   neither.
 - A Quick Chat launch error leaves releases unchanged.

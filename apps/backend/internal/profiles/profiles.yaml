@@ -92,17 +92,19 @@ features:
     dev:  "false"
     e2e:  "false"
 
-  # High-risk Office per-agent session identity experiment: keys an Office
-  # task's session on the run's own agent instead of the runner seat. Off in
-  # every profile because it is an experimental, high-risk, path-scoped change
-  # to durable session identity and existing session rows are not migrated. A
-  # live (task_id, agent_profile_id) pair is guarded in-transaction on the
-  # office session creation path instead of by a table-level constraint.
-  # Pre-existing duplicate rows are retained and resolved by selection.
+  # High-risk Office per-agent session identity: keys an Office task's session
+  # on the run's own agent instead of the runner seat, and binds an agent's
+  # decision re-evaluation to its own calling session. Default-on in every
+  # profile; it remains a high-risk, path-scoped change to durable session
+  # identity. A live (task_id, agent_profile_id) pair is guarded in-transaction
+  # on the office session creation path instead of by a table-level constraint.
+  # Pre-existing duplicate rows stay safe by selection, not migration. Disabling
+  # this toggle and restarting reverts to runner-seat binding and task-active-
+  # session decision re-evaluation.
   KANDEV_FEATURES_OFFICE_SESSION_IDENTITY:
-    prod: "false"
-    dev:  "false"
-    e2e:  "false"
+    prod: "true"
+    dev:  "true"
+    e2e:  "true"
 
 # ── Mock providers ────────────────────────────────────────────────
 # Swap real third-party services for in-memory fakes. Production

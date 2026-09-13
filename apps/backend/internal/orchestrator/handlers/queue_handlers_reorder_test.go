@@ -106,6 +106,25 @@ func TestWsReorder(t *testing.T) {
 		require.Len(t, status.Entries, 1)
 		assert.Equal(t, second.ID, status.Entries[0].ID)
 	})
+	t.Run("rejects reorder while an entry is leased for editing", func(t *testing.T) {
+		handlers, svc := setupQueueHandlers(t)
+		ctx := context.Background()
+		first, err := svc.QueueMessage(ctx, "s", "t", "first", "", messagequeue.QueuedByUser, false, nil)
+		require.NoError(t, err)
+		second, err := svc.QueueMessage(ctx, "s", "t", "second", "", messagequeue.QueuedByUser, false, nil)
+		require.NoError(t, err)
+		_, err = svc.BeginEdit(ctx, "s", first.ID, "connection-a")
+		require.NoError(t, err)
+
+		response, err := handlers.wsReorder(ctx, createTestMessage(t, ws.ActionMessageQueueReorder, map[string]interface{}{
+			"session_id":  "s",
+			"ordered_ids": []string{second.ID, first.ID},
+		}))
+		require.NoError(t, err)
+		assert.Equal(t, ws.MessageTypeError, response.Type)
+		assert.Equal(t, "edit_conflict", parseError(t, response).Code)
+		assert.Equal(t, first.ID, svc.GetStatus(ctx, "s").Entries[0].ID)
+	})
 
 	t.Run("denies when the session is not authorized", func(t *testing.T) {
 		log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "console", OutputPath: "stderr"})

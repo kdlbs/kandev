@@ -9,6 +9,7 @@ import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useRouter } from "@/lib/routing/client-router";
 import { linkToTask } from "@/lib/links";
 import type { Task } from "@/lib/types/http";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 export type CanvasTaskCreateLauncherProps = {
   workspaceId: string | null;
@@ -36,7 +37,7 @@ export function CanvasTaskCreateLauncher({ workspaceId }: CanvasTaskCreateLaunch
     <>
       <Button
         type="button"
-        className="min-h-11 w-full cursor-pointer md:min-h-7 md:w-auto"
+        className={controlSizingClassName("standard", "w-full cursor-pointer md:w-auto")}
         data-testid="settings-create-canvas"
         onClick={() => setOpen(true)}
       >

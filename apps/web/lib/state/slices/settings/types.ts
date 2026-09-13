@@ -382,6 +382,10 @@ export type NotificationProvidersState = {
   loading: boolean;
 };
 
+export type NotificationProvidersUpdate = Omit<NotificationProvidersState, "appriseAvailable"> & {
+  appriseAvailable?: boolean;
+};
+
 export type SettingsDataState = {
   executorsLoaded: boolean;
   agentsLoaded: boolean;
@@ -528,7 +532,8 @@ export type SettingsSliceActions = {
   setSpritesInstances: (instances: SpritesInstance[]) => void;
   setSpritesLoading: (loading: boolean) => void;
   removeSpritesInstance: (name: string) => void;
-  setNotificationProviders: (state: NotificationProvidersState) => void;
+  setNotificationProviders: (state: NotificationProvidersUpdate) => void;
+  setAppriseAvailable: (available: boolean) => void;
   setNotificationProvidersLoading: (loading: boolean) => void;
   setSettingsData: (next: Partial<SettingsDataState>) => void;
   setSleepInhibition: (response: SleepInhibitionResponse) => void;

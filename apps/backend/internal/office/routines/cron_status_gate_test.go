@@ -26,6 +26,18 @@ import (
 // entries the status-gating design requires.
 func newObservedRoutineService(t *testing.T) (*routines.RoutineService, *observer.ObservedLogs) {
 	t.Helper()
+	svc, observed, _ := newObservedRoutineServiceWithRepo(t)
+	return svc, observed
+}
+
+// newObservedRoutineServiceWithRepo is newObservedRoutineService plus the
+// backing repository, for tests that need to write a trigger row directly
+// (bypassing CreateRoutineTrigger's validation) to model data that predates
+// or otherwise bypassed that validation.
+func newObservedRoutineServiceWithRepo(
+	t *testing.T,
+) (*routines.RoutineService, *observer.ObservedLogs, routines.Repository) {
+	t.Helper()
 	db, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
@@ -42,7 +54,7 @@ func newObservedRoutineService(t *testing.T) (*routines.RoutineService, *observe
 	if err != nil {
 		t.Fatalf("new logger: %v", err)
 	}
-	return routines.NewRoutineService(repo, log, &noopActivity{}), observed
+	return routines.NewRoutineService(repo, log, &noopActivity{}), observed, repo
 }
 
 // createStatusGatedRoutine creates a routine with an every-minute cron
@@ -287,13 +299,19 @@ func TestTickScheduledTriggers_NonUTCScheduleSuppressionAdvancesCursor(t *testin
 }
 
 // TestTickScheduledTriggers_NeverMatchingExpression_CursorUnchangedAndLoggedOnce
-// covers AC-OFFICE-ROUTINE-STATUS-002.1/-002.8: findNextMatch's silent
-// `after + 24h` fallback for an expression naming no slot (Feb 30 never
-// occurs) must be rejected by the match check rather than written as if it
-// were a real slot, and the failure log is bounded to once per trigger per
-// process (AC-OFFICE-ROUTINE-STATUS-003.6) even across repeated ticks.
+// covers AC-OFFICE-ROUTINE-STATUS-002.1/-002.8: a trigger whose stored cron
+// expression can never fire (Feb 30 never occurs) must not have its cursor
+// silently advanced when it turns up due, and the failure log is bounded to
+// once per trigger per process (AC-OFFICE-ROUTINE-STATUS-003.6) even across
+// repeated ticks. CreateRoutineTrigger now rejects an unsatisfiable
+// expression at creation time (shared.NextCronTime returns
+// shared.ErrUnsatisfiableCron instead of a silent fallback), so this
+// fixture writes the trigger row directly through the repository to model
+// data that predates that validation or otherwise bypassed it (e.g. a
+// direct database edit), which is the case suppressCronSlot's error path
+// still has to handle defensively.
 func TestTickScheduledTriggers_NeverMatchingExpression_CursorUnchangedAndLoggedOnce(t *testing.T) {
-	svc, observed := newObservedRoutineService(t)
+	svc, observed, repo := newObservedRoutineServiceWithRepo(t)
 	ctx := context.Background()
 
 	routine := &models.Routine{
@@ -307,24 +325,17 @@ func TestTickScheduledTriggers_NeverMatchingExpression_CursorUnchangedAndLoggedO
 	if err := svc.CreateRoutine(ctx, routine); err != nil {
 		t.Fatalf("create routine: %v", err)
 	}
-	if err := svc.CreateRoutineTrigger(ctx, &models.RoutineTrigger{
+	staleNext := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	if err := repo.CreateRoutineTrigger(ctx, &models.RoutineTrigger{
 		RoutineID:      routine.ID,
 		Kind:           "cron",
 		CronExpression: "0 0 30 2 *", // Feb 30 never exists
 		Timezone:       "UTC",
+		NextRunAt:      &staleNext,
 		Enabled:        true,
 	}); err != nil {
 		t.Fatalf("create trigger: %v", err)
 	}
-	triggers, err := svc.ListRoutineTriggers(ctx, routine.ID)
-	if err != nil || len(triggers) != 1 {
-		t.Fatalf("list triggers: triggers=%v err=%v", triggers, err)
-	}
-	// CreateRoutineTrigger computes next_run_at the same way the firing
-	// path does (no match check on create — out of scope), so it already
-	// holds findNextMatch's after+24h fallback. Ticking just past it makes
-	// the trigger due for the suppression path under test.
-	staleNext := *triggers[0].NextRunAt
 
 	for i := 0; i < 3; i++ {
 		tickNow := staleNext.Add(time.Duration(i+1) * time.Minute)
@@ -333,7 +344,7 @@ func TestTickScheduledTriggers_NeverMatchingExpression_CursorUnchangedAndLoggedO
 		}
 	}
 
-	triggers, err = svc.ListRoutineTriggers(ctx, routine.ID)
+	triggers, err := svc.ListRoutineTriggers(ctx, routine.ID)
 	if err != nil || len(triggers) != 1 {
 		t.Fatalf("list triggers: triggers=%v err=%v", triggers, err)
 	}

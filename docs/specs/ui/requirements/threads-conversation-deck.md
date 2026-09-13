@@ -129,6 +129,33 @@ desktop and mobile navigation.
 - **AC-UI-THREADS-DECK-003.7:** Loading, empty-session, and recoverable
   session-list failure states shall remain inside their task column and shall
   not block horizontal navigation to other columns.
+- **AC-UI-THREADS-DECK-003.8:** On a phone, each snapped conversation shall fill
+  the available content width. The composer and prose shall remain contained;
+  wide code and tables may scroll within their own content region.
+- **AC-UI-THREADS-DECK-003.9:** On a phone, the task title shall open a bottom
+  sheet listing admitted threads in stable order with their attention state and
+  workflow context. Selecting a row shall reveal its conversation and close the
+  sheet. When several threads are available, the page topbar shall show the
+  visible task's position and thread count.
+- **AC-UI-THREADS-DECK-003.10:** The phone page header shall keep the selected
+  view and navigation menu directly reachable without horizontal scrolling.
+  Secondary tools and status shall remain available from that menu.
+- **AC-UI-THREADS-DECK-003.11:** Phone task headers shall prioritize the title,
+  attention state, session picker, and Open task action. Workflow and step
+  metadata shall remain available in the thread picker. New standalone controls
+  shall have a minimum 44-pixel touch target.
+- **AC-UI-THREADS-DECK-003.12:** The phone page header shall group page identity
+  and the selected view in one control. Task titles shall have up to two lines.
+  With multiple threads, position and bounded, noninteractive page indicators
+  shall sit inline in the existing page topbar, without instruction text or an
+  additional row. Indicators shall follow the visible thread after swiping or
+  picker selection. Small decks shall include page dots. Empty decks and a
+  single thread shall omit the indicator.
+- **AC-UI-THREADS-DECK-003.13:** While a phone swipe makes a different thread
+  nearest the viewport center, the page indicator shall update during the
+  gesture, without waiting for release, snap completion, session membership,
+  or transcript loading. Reversing the swipe shall restore the indicator for
+  the nearest thread. Loading completion alone shall not change its position.
 
 ## Out of scope
 
