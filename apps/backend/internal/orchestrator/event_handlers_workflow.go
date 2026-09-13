@@ -6225,14 +6225,23 @@ func (s *Service) resetAgentContextWithError(
 		zap.String("agent_execution_id", executionID))
 
 	previousACPSessionID := s.currentACPSessionID(sessionID)
-	if err := s.agentManager.ResetAgentContext(ctx, executionID); err != nil {
+	// The lifecycle manager synchronously republishes setup events that arrived
+	// during session replacement. Those publications enter the orchestrator's
+	// stream handler, which acquires this same guard. Keep reset admission fenced
+	// by the reset marker and lifecycle lock, but yield the stream guard while the
+	// provider operation and its event replay run; reacquire it before any result
+	// reconciliation or failure settlement.
+	resetGuard.unlock()
+	resetErr := s.agentManager.ResetAgentContext(ctx, executionID)
+	resetGuard.relock()
+	if resetErr != nil {
 		s.logger.Error("failed to reset agent context",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName),
-			zap.Error(err))
+			zap.Error(resetErr))
 		s.reconcileFailedContextReset(ctx, taskID, session, executionID, previousACPSessionID)
-		return settleFailure(executionID, fmt.Errorf("provider context reset: %w", err))
+		return settleFailure(executionID, fmt.Errorf("provider context reset: %w", resetErr))
 	}
 
 	// Clear the old resume token only after the provider reset succeeds. This

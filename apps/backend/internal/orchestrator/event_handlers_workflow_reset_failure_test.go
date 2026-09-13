@@ -29,6 +29,23 @@ type workflowResetFailureBarrierRepo struct {
 	once    sync.Once
 }
 
+type blockingWorkflowResetAgentManager struct {
+	*mockAgentManager
+	resetStarted chan struct{}
+	resetRelease chan struct{}
+	resetOnce    sync.Once
+}
+
+func (m *blockingWorkflowResetAgentManager) ResetAgentContext(ctx context.Context, _ string) error {
+	m.resetOnce.Do(func() { close(m.resetStarted) })
+	select {
+	case <-m.resetRelease:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
 func (r *workflowResetFailureBarrierRepo) SetSessionMetadataKey(
 	ctx context.Context, sessionID, key string, value interface{},
 ) error {
@@ -330,6 +347,44 @@ func TestProcessOnEnter_ResetFailureSettlementOwnsSuccessorAdmission(t *testing.
 		_, err = repo.GetTaskSession(context.Background(), "s1")
 		require.ErrorIs(t, err, models.ErrTaskSessionNotFound)
 	})
+}
+
+func TestResetAgentContext_BlocksDeletionWhileProviderCallIsInFlight(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-reset")
+	session, err := repo.GetTaskSession(context.Background(), "s1")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateWaitingForInput
+	require.NoError(t, repo.UpdateTaskSession(context.Background(), session))
+
+	manager := &blockingWorkflowResetAgentManager{
+		mockAgentManager: &mockAgentManager{repoForExecutionLookup: repo},
+		resetStarted:     make(chan struct{}),
+		resetRelease:     make(chan struct{}),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), manager)
+	svc.executor = executor.NewExecutor(manager, repo, testLogger(), executor.ExecutorConfig{})
+
+	resetDone := make(chan error, 1)
+	go func() {
+		_, resetErr := svc.resetAgentContextWithError(
+			context.Background(), "t1", session, "Review Step",
+		)
+		resetDone <- resetErr
+	}()
+	waitForWorkflowResetBarrier(t, manager.resetStarted)
+
+	deleteErr := svc.DeleteSession(context.Background(), "s1")
+	require.ErrorIs(t, deleteErr, ErrSessionResetInProgress)
+	_, err = repo.GetTaskSession(context.Background(), "s1")
+	require.NoError(t, err, "deletion must not remove a session during provider reset")
+
+	close(manager.resetRelease)
+	require.NoError(t, <-resetDone)
+	require.NoError(t, svc.DeleteSession(context.Background(), "s1"))
+	_, err = repo.GetTaskSession(context.Background(), "s1")
+	require.ErrorIs(t, err, models.ErrTaskSessionNotFound)
 }
 
 func waitForWorkflowResetBarrier(t *testing.T, entered <-chan struct{}) {

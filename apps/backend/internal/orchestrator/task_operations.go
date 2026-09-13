@@ -4318,6 +4318,9 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	if s.isSessionResetInProgress(sessionID) {
+		return ErrSessionResetInProgress
+	}
 
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
