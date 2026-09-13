@@ -144,7 +144,7 @@ func TestQueueRunCtx_WaveCarryingRequest_NotCoalesced(t *testing.T) {
 
 // TestQueueRunCtx_WaveCarryingRequest_NotCoalescedIntoNonWaveRow isolates
 // the REQUEST side of AC-OFFICE-WAKE-WAVE-IDENTITY-002.14 specifically: the
-// existing QUEUED row for the same agent+reason carries NO wave identity,
+// existing QUEUED row for the same agent+reason+task carries NO wave identity,
 // so CoalesceRun's own row-side guard (`AND wake_wave_key = ”`) would
 // happily accept it as a merge candidate — only queueRun's own
 // request-side check (`if waveKey == ""`) can prevent a merge here.
@@ -161,18 +161,20 @@ func TestQueueRunCtx_WaveCarryingRequest_NotCoalescedIntoNonWaveRow(t *testing.T
 		Reason:         RunReasonTaskChildrenCompleted,
 		TaskID:         "parent-1",
 		IdempotencyKey: "k1",
+		ExtraPayload:   map[string]any{"marker": "plain-row"},
 	}
 	if err := ss.QueueRunCtx(ctx, "agent-1", first); err != nil {
 		t.Fatalf("queue first: %v", err)
 	}
 
-	const waveKey = "task_children_completed:parent-2:bbbb"
+	const waveKey = "task_children_completed:parent-1:bbbb"
 	second := RunContext{
 		Reason:         RunReasonTaskChildrenCompleted,
-		TaskID:         "parent-2",
+		TaskID:         "parent-1",
 		IdempotencyKey: "k2",
 		WaveKey:        waveKey,
-		WaveString:     "parent-2|child-2",
+		WaveString:     "parent-1|child-2",
+		ExtraPayload:   map[string]any{"marker": "wave-row"},
 	}
 	if err := ss.QueueRunCtx(ctx, "agent-1", second); err != nil {
 		t.Fatalf("queue second: %v", err)
@@ -191,6 +193,21 @@ func TestQueueRunCtx_WaveCarryingRequest_NotCoalescedIntoNonWaveRow(t *testing.T
 	}
 	if persistedWaveKey != waveKey {
 		t.Fatalf("persisted wake_wave_key = %q, want %q (second row's wave identity must survive uncoalesced)", persistedWaveKey, waveKey)
+	}
+
+	var plainPayload string
+	row = ss.repo.ReaderDB().QueryRowx(
+		ss.repo.ReaderDB().Rebind(`SELECT payload FROM runs WHERE reason = ? AND wake_wave_key = ''`),
+		RunReasonTaskChildrenCompleted)
+	if err := row.Scan(&plainPayload); err != nil {
+		t.Fatalf("scan plain row payload: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(plainPayload), &decoded); err != nil {
+		t.Fatalf("decode plain row payload: %v", err)
+	}
+	if decoded["marker"] != "plain-row" {
+		t.Fatalf("plain row marker = %v, want plain-row (wave request must not overwrite it)", decoded["marker"])
 	}
 }
 

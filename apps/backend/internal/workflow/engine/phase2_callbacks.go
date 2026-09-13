@@ -101,7 +101,9 @@ func (c QueueRunCallback) Execute(ctx context.Context, in ActionInput) (ActionRe
 	}
 	reason := queueRunReason(in)
 	var waveKey, waveString string
-	if reason == reasonTaskChildrenCompleted {
+	// The wave belongs to the trigger task. A queue_run action can target a
+	// different task, which must keep the ordinary task-scoped admission path.
+	if reason == reasonTaskChildrenCompleted && taskID == in.State.TaskID {
 		waveKey, waveString = waveIdentityPayload(in.Payload)
 	}
 	for _, agentID := range agentIDs {

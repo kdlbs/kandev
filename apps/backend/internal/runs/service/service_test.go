@@ -3,7 +3,6 @@ package service_test
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
@@ -805,10 +804,13 @@ func TestQueueRun_ExistingWaveCarryingRow_NotMergedInto(t *testing.T) {
 	ctx := context.Background()
 
 	first, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
+		AgentProfileID: "a1",
+		TaskID:         "parent-1",
 		Reason:         "task_children_completed",
+		IdempotencyKey: "wave-first",
 		WakeWaveKey:    "task_children_completed:parent-1:aaaa",
 		WakeWaveString: "parent-1|child-1",
-		Payload:        map[string]any{"agent_profile_id": "a1", "task_id": "parent-1"},
+		Payload:        map[string]any{"marker": "wave-row"},
 	})
 	if err != nil {
 		t.Fatalf("queue first run: %v", err)
@@ -821,8 +823,11 @@ func TestQueueRun_ExistingWaveCarryingRow_NotMergedInto(t *testing.T) {
 	// own — an ordinary request that would coalesce into a plain queued
 	// row for the same (agent, reason) inside the window.
 	second, err := svc.QueueRun(ctx, runsservice.QueueRunRequest{
-		Reason:  "task_children_completed",
-		Payload: map[string]any{"agent_profile_id": "a1", "task_id": "parent-2"},
+		AgentProfileID: "a1",
+		TaskID:         "parent-1",
+		Reason:         "task_children_completed",
+		IdempotencyKey: "plain-second",
+		Payload:        map[string]any{"marker": "plain-row"},
 	})
 	if err != nil {
 		t.Fatalf("queue second run: %v", err)
@@ -856,8 +861,12 @@ func TestQueueRun_ExistingWaveCarryingRow_NotMergedInto(t *testing.T) {
 	if firstRow.CoalescedCount != 1 {
 		t.Fatalf("first row coalesced_count = %d, want 1 (unmerged)", firstRow.CoalescedCount)
 	}
-	if !strings.Contains(firstRow.Payload, "parent-1") || strings.Contains(firstRow.Payload, "parent-2") {
-		t.Fatalf("first row payload = %s, want unchanged (still parent-1, never parent-2)", firstRow.Payload)
+	var firstPayload map[string]any
+	if err := json.Unmarshal([]byte(firstRow.Payload), &firstPayload); err != nil {
+		t.Fatalf("decode first row payload: %v", err)
+	}
+	if firstPayload["marker"] != "wave-row" {
+		t.Fatalf("first row marker = %v, want wave-row (the plain request must not overwrite it)", firstPayload["marker"])
 	}
 }
 

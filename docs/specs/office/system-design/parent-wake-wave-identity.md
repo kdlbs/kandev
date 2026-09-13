@@ -210,22 +210,18 @@ collapses to one run: an agent holding two roles is not two waves.
 
 `runs` is written three ways, not two, and the third is easy to miss because it is an
 UPDATE. `runs/service.QueueRun` consults `CoalesceRun` **before** `insertRun`, and
-`CoalesceRun` merges the request into an existing `queued` row for the same agent and
-reason inside a time window, incrementing `coalesced_count` and **replacing that
-row's payload**. `shouldCoalesceRun` excludes only `task_comment:`-prefixed keys, so
-`task_children_completed` is eligible, and `CoalesceRun`'s task-scoping predicate
-applies **only** when `reason == 'task_assigned'`.
+`CoalesceRun` merges the request into an existing `queued` row for the same agent,
+reason, and task bucket inside a time window, incrementing `coalesced_count` and
+**replacing that row's payload**. `shouldCoalesceRun` excludes only
+`task_comment:`-prefixed keys, so `task_children_completed` is eligible.
 
-So a children-completed wake can merge into a queued one for a **different parent**.
-That row then carries parent A's wave columns and parent B's payload, and the backstop
-matches runs to parents through the payload: A has no matching run and is correctly
-re-queued, while B's row shows A's wave string, never matches B's current wave, and B
-is queued a **second** time. The duplicate this capability removes survives, through a
-path the constraint never sees.
+When both payloads contain a task ID, `CoalesceRun` compares those IDs for every
+reason. A request for a different parent therefore remains a separate row. Wave
+requests skip this update path and use the durable wave identity index instead.
 
 Note what is *not* the mechanism: two engine-path producers deriving the same
 `wakeOperationID` are already collapsed upstream by `CheckIdempotencyKey`. Coalescing
-bites where the keys differ — here, different parents.
+still handles different keys when the agent, reason, and task bucket match.
 
 The decision (.002.14): **a request carrying a wave identity is never merged, and a
 queued run carrying one is never merged into.** The guard is on the wave columns, not
@@ -233,11 +229,9 @@ the reason string, so a future wave-keyed reason is covered without a second edi
 Both requests are then reconciled by `idx_run_wake_wave`, the stronger mechanism
 anyway: exact and unbounded, where coalescing is approximate and windowed.
 
-One behaviour change follows and is accepted rather than hidden: two wakes for
-different parents addressed to the same agent inside the window now produce two runs
-where one previously absorbed and discarded the other. That is a correction — the
-absorbed wake was silently lost. The asymmetric `task_assigned` scoping that causes
-it stays; narrowing that belongs to whoever owns `CoalesceRun`.
+Different parents addressed to the same agent inside the window stay in separate rows
+because their task buckets differ. Requests for the same task can still coalesce when
+they do not carry a wave identity.
 
 ### Existing identifiers are untouched
 
@@ -431,13 +425,11 @@ action targets `workspace.ceo_agent` while the cascade wakes the parent's assign
 raises no equivalence question. Two payload sources have to agree for the cases that
 do collide.
 
-**Child summaries: equal, and equally empty.** The prompt reads them from the run
-payload's `children` key (`enrichChildrenContext`,
-`office/service/scheduler_integration.go`); no producer writes that key, so all four
-queue a payload with none and that prompt section can never fill — a latent defect
-filed separately. A change that starts populating `children` from one producer must
-populate it from all four, or this AC breaks and prompt quality becomes a race
-outcome.
+**Child summaries: equal, from current storage.** Prompt assembly calls
+`enrichChildrenContext`, which reads `GetChildSummaries` from the task repository.
+The four producers do not need to write a `children` payload key. Each surviving run
+therefore receives the current stored child summaries when the scheduler builds the
+prompt.
 
 **Workflow-authored action payload: NOT equal today; this design fixes it.**
 `queueRunPayload` copies `in.Action.QueueRun.Payload` onto the run verbatim, so every

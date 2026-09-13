@@ -33,6 +33,39 @@ func TestQueueRunCallback_OnChildrenCompletedCopiesWaveIdentity(t *testing.T) {
 	}
 }
 
+func TestQueueRunCallback_CrossTaskChildrenCompletedLeavesWaveIdentityEmpty(t *testing.T) {
+	q := &fakeRunQueue{}
+	cb := QueueRunCallback{
+		Adapter:   q,
+		TaskSteps: fakeTaskSteps{id: "step-target"},
+	}
+	in := newQueueRunInput("agent_profile_id:agent-target", "task-2")
+	in.Trigger = TriggerOnChildrenCompleted
+	in.Action.QueueRun.Reason = reasonTaskChildrenCompleted
+	in.Payload = OnChildrenCompletedPayload{
+		WaveKey:    "task_children_completed:task-1:deadbeef",
+		WaveString: "task-1|child-1,child-2",
+	}
+
+	if _, err := cb.Execute(t.Context(), in); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(q.calls) != 1 {
+		t.Fatalf("expected 1 queue run call, got %d", len(q.calls))
+	}
+	got := q.calls[0]
+	if got.TaskID != "task-2" {
+		t.Fatalf("task_id = %q, want task-2", got.TaskID)
+	}
+	if got.WorkflowStepID != "step-target" {
+		t.Fatalf("workflow_step_id = %q, want step-target", got.WorkflowStepID)
+	}
+	if got.WaveKey != "" || got.WaveString != "" {
+		t.Fatalf("WaveKey/WaveString = %q/%q, want both empty for a cross-task action",
+			got.WaveKey, got.WaveString)
+	}
+}
+
 // TestQueueRunCallback_OtherTriggersLeaveWaveIdentityEmpty is the
 // regression guard: any trigger other than on_children_completed must
 // never populate WaveKey/WaveString, even though ActionInput.Payload is a
