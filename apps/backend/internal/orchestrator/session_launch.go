@@ -376,6 +376,7 @@ func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (
 	execution, err := s.ResumeTaskSessionWithOptions(ctx, req.TaskID, req.SessionID, executor.ResumeOptions{
 		AllowBranchReplacement:      req.AllowBranchReplacement,
 		AllowCompletedSessionResume: req.AllowCompletedSessionResume,
+		Origin:                      string(originFromAutoStart(req.AutoStart)),
 	})
 	if err != nil {
 		return nil, err

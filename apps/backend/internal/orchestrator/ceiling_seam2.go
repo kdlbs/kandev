@@ -9,47 +9,6 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// seam2Reservation tracks the session-keyed admission reservation seam 2 takes
-// for a session that already exists (AC-4d). Unlike seam 1's launch-scoped
-// reservation, this one is keyed by the session id from the moment it is taken.
-// rekeyToSession only moves it when startCreatedSession's on_turn_start redirect
-// switches to a different, already-active session mid-start (AC-4e).
-type seam2Reservation struct {
-	controller *sessionCeilingController
-	key        string
-	consumed   bool
-}
-
-// rekeyToSession moves the reservation from the session it was gated under onto
-// the replacement session the redirect actually launches, as one operation so
-// the population never momentarily drops.
-func (r *seam2Reservation) rekeyToSession(ctx context.Context, sessionID string) {
-	if r == nil || r.controller == nil || r.consumed || sessionID == "" || sessionID == r.key {
-		return
-	}
-	if r.controller.rekey(ctx, r.key, sessionID) {
-		r.key = sessionID
-	}
-}
-
-// consume marks the reservation as belonging to a session that is now actually
-// running, so releaseIfNotConsumed becomes a no-op.
-func (r *seam2Reservation) consume() {
-	if r == nil {
-		return
-	}
-	r.consumed = true
-}
-
-// releaseIfNotConsumed is the deferred cleanup for every return path between
-// admission and the launch actually succeeding.
-func (r *seam2Reservation) releaseIfNotConsumed() {
-	if r == nil || r.controller == nil || r.consumed {
-		return
-	}
-	r.controller.release(r.key)
-}
-
 // seam2StartCreatedPayload builds the AC-42d "start_created" replay row from
 // startCreatedSession's own frame, at the point the gate is consulted — before
 // the profile override, prompt composition, and workflow/plan transforms below
@@ -91,7 +50,7 @@ func seam2StartCreatedPayload(
 // sessions, and for calling reservation.consume once the launch succeeds.
 func (s *Service) admitOrDeferSeam2(
 	ctx context.Context, taskID, sessionID string, origin launchOrigin, startPayload map[string]interface{},
-) (reservation *seam2Reservation, deferred bool, err error) {
+) (reservation *sessionKeyedCeilingReservation, deferred bool, err error) {
 	decision := s.sessionCeiling.admit(ctx, admissionRequest{
 		taskID:    taskID,
 		sessionID: sessionID,
@@ -99,7 +58,7 @@ func (s *Service) admitOrDeferSeam2(
 		seam:      "startCreatedSession",
 	})
 	if decision.admitted {
-		return &seam2Reservation{controller: s.sessionCeiling, key: decision.reservationKey}, false, nil
+		return &sessionKeyedCeilingReservation{controller: s.sessionCeiling, key: decision.reservationKey}, false, nil
 	}
 
 	if err := s.deferCeilingRefusal(ctx, taskID, models.CeilingLaunchStartCreated, startPayload, decision.reasonCode); err != nil {

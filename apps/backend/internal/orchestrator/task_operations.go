@@ -2846,6 +2846,15 @@ func (s *Service) resumeTaskSessionWithContinuation(
 	if isOfficeTask {
 		return nil, decorateResumeFailure(errOfficeTaskResumeRequiresScheduler)
 	}
+	seam4Res, deferred, err := s.admitOrDeferSeam4(ctx, taskID, sessionID, launchOrigin(options.Origin), seam4ResumePayload(sessionID, options))
+	if err != nil {
+		return nil, err
+	}
+	if deferred {
+		return nil, nil
+	}
+	defer seam4Res.releaseIfNotConsumed()
+
 	if _, err := s.resolveDynamicLaunchExecution(resumeCtx, session, session.AgentProfileID, true); err != nil {
 		if attemptErr := s.validateResumeAttempt(attempt); attemptErr != nil {
 			s.cleanupCancelledResumeAttempt(attempt)
@@ -2943,6 +2952,7 @@ func (s *Service) resumeTaskSessionWithContinuation(
 		return nil, attemptErr
 	}
 	execution.SessionState = v1.TaskSessionState(readySession.State)
+	seam4Res.consume()
 	persistBranchRecovery()
 
 	// Backfill the initial user message when a prior failed launch never got

@@ -113,7 +113,7 @@ func TestSeam2ReservationRekeyMovesThePopulationUnit(t *testing.T) {
 	if !decision.admitted {
 		t.Fatal("expected admission")
 	}
-	reservation := &seam2Reservation{controller: controller, key: decision.reservationKey}
+	reservation := &sessionKeyedCeilingReservation{controller: controller, key: decision.reservationKey}
 
 	reservation.rekeyToSession(ctx, "redirect-session")
 	if reservation.key != "redirect-session" {

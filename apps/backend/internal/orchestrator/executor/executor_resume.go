@@ -748,6 +748,14 @@ type ResumeOptions struct {
 	// or a pinned follow-up dispatch. It does not change the global terminal
 	// session predicate or permit implicit resume paths.
 	AllowCompletedSessionResume bool
+	// Origin carries the session ceiling's explicit automatic/manual launch
+	// classification ("automatic" or "manual") from the caller into
+	// ResumeTaskSessionWithOptions's admission gate. A plain string rather
+	// than the orchestrator package's own type, since this package must not
+	// import orchestrator. Left empty, the gate classifies the resume as
+	// automatic and logs the omission — it is never silently treated as a
+	// manual override.
+	Origin string
 }
 
 type cancellableResumeContextKey struct{}
