@@ -422,15 +422,19 @@ idempotency suppression is unaffected (005.4).
 Three columns are added by `r.migrate.Apply`:
 `workflow_step_entries.marker_positions`,
 `workflow_step_entry_markers.skip_reason`, and `runs.entry_triggered`.
-`MigrateLogger.Apply` logs a failed `ALTER` at WARNING and returns
-(`internal/db/migratelog.go`), so a column can be absent at runtime without
-startup having failed. SQL naming a missing column fails the whole statement,
-not just the new clause - for `runs.entry_triggered` that means every run
-enqueue, not only the exclusion.
+The delivered `marker_positions` ALTER uses the task repository's required
+migration logger. `runMigrations` checks `Err()` after this `Apply`, so an
+unexpected failure returns from repository construction and prevents startup.
+Existing rows receive `''`. The `skip_reason`
+and `runs.entry_triggered` migrations belong to deferred Tasks 04 and 08; define
+their probe policy when those tasks land. SQL naming a missing column fails the
+whole statement.
 
-Each reader therefore probes with the `columnExists` shape `runs.outcome`
-already uses, once at startup, and degrades explicitly rather than issuing the
-statement:
+The table describes deferred readers; `marker_positions` still fails startup
+before recovery when its required migration fails.
+
+Deferred readers probe once at startup with the `columnExists` shape
+`runs.outcome` already uses, then degrade explicitly:
 
 | Column | Probe fails -> |
 |---|---|
@@ -438,15 +442,13 @@ statement:
 | `workflow_step_entries.marker_positions` | one ERROR; the startup scan is skipped for that process start, entries left non-terminal for a later start (AC-...-004.11, 004.2) |
 | `workflow_step_entry_markers.skip_reason` | shares the scan's probe; the scan cannot record a skip reason without it, so it is skipped under the same rule |
 
-A probe that errors for any other reason is treated as "column absent" and takes
-the same degraded path. The probe exists to avoid issuing a statement that
-cannot succeed; a probe whose own answer is unknown gives no more license to
-issue it than a definite "no" does.
+Other probe errors mean "column absent". Probing avoids
+issuing a statement that cannot succeed; an unknown answer gives no more
+license to issue it than a definite "no" does.
 
-Degrading is chosen over failing startup because both requirements state the
-scan and the exclusion as improvements over today's behaviour, not as
-preconditions for serving: a backend that starts without them behaves as the
-one shipping now does.
+For deferred readers, degrading is chosen because their requirements treat the
+scan and exclusion as improvements over today's behaviour. This does not
+override the required `marker_positions` migration.
 
 ## Diagnostics
 
@@ -552,17 +554,15 @@ leading key is not reintroduced.
   change and one enqueued after carry different keys for the same entry, so a
   deployment that lands mid-round can duplicate one round's runs once. Strictly
   better than duplicating every round; no migration is proposed.
-- **Unconditional allocation adds one row per arrival** at a step declaring a
-  marker-bearing kind, on routes that previously allocated none.
+- **Allocation remains on the existing `on_turn_complete` route** this round;
+  manual moves, WIP promotion, and workflow switches are deferred to Task 04.
 - **The task lock widens a critical section** that currently admits concurrent
   sessions of one task. Turn completion already serializes per session; the
   change makes contention visible where it was previously silent corruption.
-- **Three ALTER migrations run on existing databases.** `MigrateLogger.Apply`
-  swallows failures at WARN, which "Migrated columns are probed before use"
-  handles. The residual risk is that a probe failure degrades silently from the
-  operator's view except for one ERROR line: a backend whose
-  `marker_positions` ALTER failed runs indefinitely with no startup recovery
-  and no second signal.
+- **Three ALTER migrations run on existing databases.** The delivered
+  `marker_positions` migration is required; a failure stops startup after the
+  final `Err()` check. Deferred columns retain their future probe policy, with
+  one ERROR for a failed probe.
 - **`marker_positions` is a denormalized copy** of what the ownership
   declaration would say at allocation time. That is deliberate - it is what
   makes `unresolvable` decidable - but it means an entry allocated before a

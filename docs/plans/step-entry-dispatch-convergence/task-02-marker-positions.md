@@ -33,7 +33,9 @@ the store alone, without loading a workflow declaration.
 - `BuildPendingAllocation` returning the position set it already computes, and
   `allocateStepEntryIfPending` persisting it.
 - Making allocation unconditional for a step declaring at least one
-  marker-bearing kind.
+  marker-bearing kind on the existing `ResultHolder`-gated
+  `on_turn_complete` route. Manual moves, WIP promotion, and workflow-switch
+  routes remain deferred to Task 04.
 - Test coverage for the atomic decision clear (008.1) and for an allocation
   failure that fails the transition as a unit (008.3).
 
@@ -79,8 +81,9 @@ Task 01, which owns the declaration the position set is computed from.
 - A test over a step whose every kind is marker-bearing cannot distinguish a
   persisted set from one recomputed from the declaration. The shipped Review
   step is not that shape, and the test must use one that is not either.
-- Unconditional allocation adds one row per arrival on routes that previously
-  allocated none.
+- Allocation remains gated by the existing `on_turn_complete` route this round;
+  extending it to manual moves, WIP promotion, and workflow switches is
+  deferred to Task 04.
 
 ## Parallelism
 
@@ -99,7 +102,9 @@ hardening rounds. `workflow_step_entries.marker_positions` was added via an
 idempotent `ADD COLUMN` migration; `BuildPendingAllocation` computes the ordered
 marker-bearing position set from the ownership declaration and
 `allocateStepEntryIfPending` persists it inside the same transaction as the entry
-row. Testing round 1 found the atomicity guarantee (AC-008.1) and the
+row on the existing `ResultHolder`-gated `on_turn_complete` route. Manual moves,
+WIP promotion, and workflow-switch routes remain deferred to Task 04. Testing
+round 1 found the atomicity guarantee (AC-008.1) and the
 allocation-failure ERROR log (AC-008.3) were untested; Build round 2
 (`1ee2eb149`) closed both with a SQLite trigger-based fault injection between the
 delete and marker-complete steps, and an ERROR log at both error-return sites in

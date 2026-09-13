@@ -138,11 +138,17 @@ subquery gains `AND entry_triggered = 0`.
 
 ### Migrated column probes
 
-`runs.entry_triggered`, `workflow_step_entries.marker_positions`, and
-`workflow_step_entry_markers.skip_reason` are each probed once at startup with
-the `columnExists` shape `runs.outcome` uses. A failed probe emits one ERROR
-and takes the degraded path rather than issuing a statement that cannot
-succeed. A probe that errors for any other reason is treated as absent.
+The delivered `workflow_step_entries.marker_positions` ALTER uses the task
+repository's required migration logger. `runMigrations` checks `Err()` after
+that migration, so an unexpected failure stops repository startup before any
+reader can issue a query against a missing column.
+
+The deferred `runs.entry_triggered` and `workflow_step_entry_markers.skip_reason`
+columns are each planned to be probed once at startup with the `columnExists`
+shape `runs.outcome` uses. A failed probe emits one ERROR and takes the
+degraded path rather than issuing a statement that cannot succeed. A probe
+that errors for any other reason is treated as absent. These probe rules do not
+change the required migration contract for `marker_positions`.
 
 ### Diagnostics and fan-out
 
