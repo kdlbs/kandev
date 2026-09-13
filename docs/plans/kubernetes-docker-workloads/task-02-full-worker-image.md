@@ -127,3 +127,8 @@ A bounded `build.sh --build --verify` attempt did not complete. No image ID,
 source/browser image verification or supported full runtime matrix is claimed.
 The disposable build resources were removed. Complete the image build and
 verification on a suitable isolated test host before running task 03.
+
+`python3 k8s/worker-images/full/build_test.py` passed after reproducing a failed
+verification leaving an untracked container. The verifier now has an exact
+owned name and explicit cleanup. This process-boundary test uses a fake Docker
+command and does not replace real image/container acceptance.

@@ -26,7 +26,15 @@ builder="kandev-full-$(basename "$scratch" | tr '[:upper:].' '[:lower:]-')"
 tag=${FULL_WORKER_TAG:-"kandev-full-worker:$builder"}
 if docker image inspect "$tag" >/dev/null 2>&1; then echo 'Refusing to overwrite an existing image tag' >&2; exit 1; fi
 container="buildx_buildkit_${builder}0"
-cleanup() { docker buildx rm "$builder" >/dev/null 2>&1 || true; rm -rf "$scratch"; }
+verify_started=false
+verify_container="${builder}-verify"
+cleanup() {
+  if [[ "$verify_started" == true ]]; then
+    docker rm --force "$verify_container" >/dev/null 2>&1 || true
+  fi
+  docker buildx rm "$builder" >/dev/null 2>&1 || true
+  rm -rf "$scratch"
+}
 trap cleanup EXIT
 printf '[worker.oci]\n  max-parallelism = 1\n  gc = true\n  reservedSpace = "1GB"\n  maxUsedSpace = "12GB"\n' > "$scratch/buildkitd.toml"
 docker buildx create --name "$builder" --driver docker-container \
@@ -42,7 +50,8 @@ timeout 1800 docker buildx build --builder "$builder" --platform "$PLATFORM" --l
 id=$(docker image inspect --format '{{.Id}}' "$tag")
 printf 'FULL_WORKER_IMAGE=%s\nIMAGE_ID=%s\nPLATFORM=%s\nBUILD_LIMITS=%s\n' "$tag" "$id" "$PLATFORM" "$limits"
 if [[ ${2:-} == --verify ]]; then
-  timeout 600 docker run --rm --init --cpus=2 --memory=4g --memory-swap=4g --pids-limit=512 \
+  verify_started=true
+  timeout 600 docker run --rm --name "$verify_container" --init --cpus=2 --memory=4g --memory-swap=4g --pids-limit=512 \
     --user 1000:1000 --cap-drop=ALL --security-opt=no-new-privileges \
     --tmpfs /workspace:rw,uid=1000,gid=1000,size=2g --tmpfs /run/kandev:rw,uid=1000,gid=1000,size=16m \
     -e HOME=/run/kandev/home "$id" bash -ceu 'mkdir -p "$HOME"; /opt/full-worker/smoke.sh --tools'
