@@ -179,6 +179,7 @@ signals, and task-scoped scheduling contracts.
 - [Task Launch Failure Recovery](system-design/task-launch-failure-recovery.md)
 - [Task Create Launch Preview](system-design/task-create-launch-preview.md)
 - [Task priority visibility](system-design/task-priority-visibility.md)
+- [Board priority sort and filter](system-design/board-priority-sort-filter.md)
 - [WIP Limits and Visible Overflow Queues](system-design/wip-limit-pull-system.md)
 - [Workflow completion-signal payload delivery](system-design/workflow-completion-signal-payload-delivery.md)
 - [Signal-Gated Manual Move Visibility](system-design/workflow-signal-gated-manual-move-visibility.md)
