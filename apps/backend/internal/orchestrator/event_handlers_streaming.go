@@ -729,6 +729,7 @@ func (s *Service) handleStreamingEventKind(
 		return
 	}
 	if payload.Data.CanonicalProjection {
+		s.publishCanonicalMessageEvent(ctx, payload)
 		return
 	}
 	if s.messageCreator == nil {
@@ -747,6 +748,57 @@ func (s *Service) handleStreamingEventKind(
 	}
 	turnID := s.getActiveTurnID(payload.SessionID)
 	s.createStreamingChunk(ctx, kind, messageID, payload.TaskID, payload.Data.Text, payload.SessionID, turnID, createFn)
+}
+
+type canonicalMessageEventPublisher interface {
+	PublishMessageEvent(context.Context, string, *models.Message) error
+}
+
+type canonicalMessageReader interface {
+	GetMessage(context.Context, string) (*models.Message, error)
+}
+
+// publishCanonicalMessageEvent announces a message that was already persisted
+// by the durable delivery projector. The projector owns the canonical write;
+// this notification only keeps connected clients current without duplicating
+// that write through the legacy streaming-message path.
+func (s *Service) publishCanonicalMessageEvent(
+	ctx context.Context,
+	payload *lifecycle.AgentStreamEventPayload,
+) {
+	if payload == nil || payload.Data == nil || payload.Data.MessageID == "" || s.repo == nil {
+		return
+	}
+	publisher, ok := s.messageCreator.(canonicalMessageEventPublisher)
+	if !ok {
+		return
+	}
+	reader, ok := s.repo.(canonicalMessageReader)
+	if !ok {
+		s.logger.Debug("canonical message reader is unavailable",
+			zap.String("session_id", payload.SessionID),
+			zap.String("message_id", payload.Data.MessageID))
+		return
+	}
+	message, err := reader.GetMessage(ctx, payload.Data.MessageID)
+	if err != nil || message == nil {
+		s.logger.Warn("failed to load canonical message for notification",
+			zap.String("session_id", payload.SessionID),
+			zap.String("message_id", payload.Data.MessageID),
+			zap.Error(err))
+		return
+	}
+	eventType := events.MessageUpdated
+	if !payload.Data.IsAppend {
+		eventType = events.MessageAdded
+	}
+	if err := publisher.PublishMessageEvent(ctx, eventType, message); err != nil {
+		s.logger.Warn("failed to publish canonical message notification",
+			zap.String("session_id", payload.SessionID),
+			zap.String("message_id", payload.Data.MessageID),
+			zap.String("event_type", eventType),
+			zap.Error(err))
+	}
 }
 
 // handleMessageStreamingEvent handles streaming message events for real-time text updates.

@@ -1714,6 +1714,13 @@ func (a *messageCreatorAdapter) AppendAgentMessage(ctx context.Context, messageI
 	return a.svc.AppendMessageContent(ctx, messageID, additionalContent)
 }
 
+// PublishMessageEvent announces a message that was already persisted by a
+// canonical projector. It is used by the orchestrator's durable streaming
+// path to notify connected clients without repeating the message write.
+func (a *messageCreatorAdapter) PublishMessageEvent(ctx context.Context, eventType string, message *models.Message) error {
+	return a.svc.PublishMessageEvent(ctx, eventType, message)
+}
+
 // CreateThinkingMessageStreaming creates a new thinking message with a pre-generated ID.
 // This is used for real-time streaming of agent thinking/reasoning content.
 func (a *messageCreatorAdapter) CreateThinkingMessageStreaming(ctx context.Context, messageID, taskID, content, agentSessionID, turnID string) error {

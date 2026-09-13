@@ -11,6 +11,7 @@ import (
 	"time"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -230,5 +231,34 @@ func TestDurableAgentEventProjectionUsesAdmissionSnapshot(t *testing.T) {
 	}
 	if len(acknowledger.acknowledged) != 1 {
 		t.Fatalf("acknowledged = %v, want one acknowledgment", acknowledger.acknowledged)
+	}
+}
+
+func TestDeliveryEffectAllowsSuccessfulRetryAfterTerminalFailure(t *testing.T) {
+	streamID := "stream-managed-runtime-retry"
+	errorEvent := agentctl.AgentEvent{
+		Type:                 streams.EventTypeError,
+		TurnID:               "turn-managed-runtime-retry",
+		DeliveryStreamID:     streamID,
+		DeliverySequence:     1,
+		DeliverySubmissionID: "prompt-managed-runtime-retry",
+	}
+	completeEvent := errorEvent
+	completeEvent.Type = streams.EventTypeComplete
+	completeEvent.DeliverySequence = 2
+
+	failureEffect := deliveryEffectForEvent(errorEvent)
+	successEffect := deliveryEffectForEvent(completeEvent)
+	if failureEffect == nil || successEffect == nil {
+		t.Fatal("terminal events must produce delivery effects")
+	}
+	if failureEffect.EffectKey == successEffect.EffectKey {
+		t.Fatalf("failure and successful retry share effect key %q", failureEffect.EffectKey)
+	}
+	if got, want := failureEffect.EffectKey, "agent_delivery.event:"+streamID+":1"; got != want {
+		t.Fatalf("failure effect key = %q, want %q", got, want)
+	}
+	if got, want := successEffect.EffectKey, "workflow.on_turn_complete:turn-managed-runtime-retry"; got != want {
+		t.Fatalf("success effect key = %q, want %q", got, want)
 	}
 }

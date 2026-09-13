@@ -797,18 +797,28 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 		})
 		return resp
 	}
-	if resp := unresolvedDeliveryResponse(msg, deliveryCapability); resp != nil {
+	// A steer is part of the already-admitted foreground generation. It is
+	// deliberately allowed to overlap that generation, so the predecessor's
+	// in-flight submission must not block the concurrent ACP prompt. The
+	// predecessor remains the durable owner of the shared turn and its terminal
+	// event settles the journal entry. Independent prompts still fail closed
+	// until unresolved delivery has been reconciled.
+	if resp := unresolvedDeliveryResponse(msg, deliveryCapability, req.Steer); resp != nil {
 		return resp
 	}
 	submissionID := ""
-	if deliveryCapability.Durable {
+	if deliveryCapability.Durable && !req.Steer {
 		var resp *ws.Message
 		submissionID, resp = s.admitDurablePrompt(ctx, msg, req)
 		if resp != nil {
 			return resp
 		}
 	}
-	durableDelivery := deliveryCapability.Durable
+	// A steer shares the foreground generation and its predecessor's durable
+	// submission. It must enter the ACP prompt path directly; attempting to
+	// dispatch an empty replacement submission would either trip the journal's
+	// ownership checks or silently skip the steer.
+	durableDelivery := deliveryCapability.Durable && !req.Steer
 
 	// Start prompt processing asynchronously.
 	// Completion is signaled via the WebSocket complete event, not this response.
@@ -861,8 +871,8 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 	return resp
 }
 
-func unresolvedDeliveryResponse(msg *ws.Message, capability journal.StorageCapability) *ws.Message {
-	if !capability.Durable || !capability.Unresolved {
+func unresolvedDeliveryResponse(msg *ws.Message, capability journal.StorageCapability, steer bool) *ws.Message {
+	if steer || !capability.Durable || !capability.Unresolved {
 		return nil
 	}
 	resp, _ := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, "durable delivery requires reconciliation before a new prompt", map[string]interface{}{

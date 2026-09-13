@@ -265,7 +265,10 @@ func deliveryEffectForEvent(event agentctl.AgentEvent) *models.AgentDeliveryEffe
 	}
 	effectKey := fmt.Sprintf("agent_delivery.event:%s:%d", event.DeliveryStreamID, event.DeliverySequence)
 	effectType := "agent_delivery.event"
-	if (event.Type == streams.EventTypeComplete || event.Type == streams.EventTypeError) && event.TurnID != "" {
+	// A managed-runtime retry can emit an error and then complete the same
+	// logical turn. Keep failures sequence-scoped so the later completion can
+	// still claim the workflow effect key.
+	if event.Type == streams.EventTypeComplete && event.TurnID != "" {
 		effectKey = "workflow.on_turn_complete:" + event.TurnID
 		effectType = "workflow.on_turn_complete"
 	}
@@ -291,7 +294,10 @@ func deliveryEffectForDeliveryEvent(event *models.AgentDeliveryEvent) *models.Ag
 	}
 	effectKey := fmt.Sprintf("agent_delivery.event:%s:%d", event.StreamID, event.Sequence)
 	effectType := "agent_delivery.event"
-	if (event.EventType == streams.EventTypeComplete || event.EventType == streams.EventTypeError) && payloadEvent.TurnID != "" {
+	// A managed-runtime retry can emit an error and then complete the same
+	// logical turn. Keep failures sequence-scoped so the later completion can
+	// still claim the workflow effect key.
+	if event.EventType == streams.EventTypeComplete && payloadEvent.TurnID != "" {
 		effectKey = "workflow.on_turn_complete:" + payloadEvent.TurnID
 		effectType = "workflow.on_turn_complete"
 	}
