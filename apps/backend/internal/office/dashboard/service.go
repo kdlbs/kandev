@@ -74,8 +74,11 @@ type Repository interface {
 	GetRunsByCommentIDs(ctx context.Context, commentIDs []string) (map[string]sqlite.CommentRunStatus, error)
 	UpdateTaskState(ctx context.Context, taskID, state string) error
 	GetTaskExecutionFields(ctx context.Context, taskID string) (*sqlite.TaskExecutionFields, error)
+	// UpdateTaskAssignee returns the task's assignment_generation after the
+	// bump, read back inside the same transaction that wrote the runner
+	// seat (see the sqlite implementation's doc comment).
+	UpdateTaskAssignee(ctx context.Context, taskID, assigneeID string) (int64, error)
 	UpdateTaskStateIfWorkflowStep(ctx context.Context, taskID, expectedStepID, state string) (bool, error)
-	UpdateTaskAssignee(ctx context.Context, taskID, assigneeID string) error
 	UpdateTaskPriority(ctx context.Context, taskID, priority string) error
 	UpdateTaskProjectID(ctx context.Context, taskID, projectID string) error
 	GetTaskProjectID(ctx context.Context, taskID string) (string, error)
@@ -270,6 +273,11 @@ type MarkFixedHandler interface {
 type TaskReactivityChange struct {
 	NewStatus     *string
 	NewAssigneeID *string
+	// AssignmentGeneration is the value UpdateTaskAssignee's transaction
+	// committed and read back, carried here rather than re-read. Nil means
+	// the caller could not supply one (e.g. the read-back itself failed);
+	// the pipeline then enqueues the task_assigned wake keyless.
+	AssignmentGeneration *int64
 	// PrevAssigneeID is the assignee BEFORE the mutation. Required when
 	// NewAssigneeID is set so the pipeline can detect a real change and
 	// hand off the previous assignee's session.

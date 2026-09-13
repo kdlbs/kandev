@@ -199,6 +199,7 @@ const (
 	ActionACPHeartbeat                   = "acp.heartbeat"
 	ActionTaskCreated                    = "task.created"
 	ActionTaskUpdated                    = "task.updated"
+	ActionTaskReordered                  = "task.reordered"
 	ActionTaskDeleted                    = "task.deleted"
 	ActionTaskStateChanged               = "task.state_changed"
 	ActionSessionWorkspaceSourcesUpdated = "session.workspace_sources.updated"

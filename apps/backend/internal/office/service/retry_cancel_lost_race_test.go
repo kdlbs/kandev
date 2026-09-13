@@ -27,7 +27,7 @@ func TestHandleRunFailure_LostCancelRaceDoesNotPublishFalseCancelled(t *testing.
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", "k-stale-retry-race"); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, "{}", "k-stale-retry-race"); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 	run, err := svc.ClaimNextRun(ctx)
@@ -98,7 +98,7 @@ func TestSchedulerIntegration_CancelStaleRunLostRaceDoesNotPublishOrLog(t *testi
 		(id, workspace_id, workflow_step_id, title, created_at, updated_at)
 		VALUES ('task-moved-step-race', 'ws-1', 'step-current', 'Moved task',
 		        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-moved-step-race","workflow_step_id":"step-old"}`, ""); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}

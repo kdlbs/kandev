@@ -46,7 +46,7 @@ func TestSchedulerIntegration_IdleSkipLostRaceDoesNotLogFalseActivity(t *testing
 	}
 	// Worker defaults to skip_idle_runs=true, no tasks assigned.
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonHeartbeat, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonHeartbeat, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -103,7 +103,7 @@ func TestSchedulerIntegration_BudgetBlockedLostRaceDoesNotLogFalseActivity(t *te
 	insertTestTask(t, svc, "task-budget-race", "ws-1")
 	insertTestCostEvent(t, svc, agent.ID, "task-budget-race", int64(600))
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-budget-race"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}

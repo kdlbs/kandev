@@ -504,6 +504,8 @@ function previewPanelStepProps(stepMove: PreviewStepMove) {
     taskWorkflowId: stepMove.taskWorkflowId,
     isArchived: stepMove.isArchived,
     movingToStepId: stepMove.movingToStepId,
+    progressByStepId: stepMove.progressByStepId,
+    agentLabelsByProfileId: stepMove.agentLabelsByProfileId,
     onMoveStep: stepMove.handleMove,
     onDisclosureOpenChange: stepMove.handleDisclosureOpenChange,
     moveError: stepMove.moveError,

@@ -387,6 +387,9 @@ describe("TaskTitleHoverCard — description and parent content (AC-UI-PIPELINE-
               },
             },
             isLoading: false,
+            orderRevisionByStepId: {},
+            pendingReorderBandKeys: {},
+            withheldReorderByBandKey: {},
           },
         }}
       >

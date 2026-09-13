@@ -30,7 +30,7 @@ func TestRunLifecycle_StepCompleteEventsEmitted(t *testing.T) {
 
 	// Queue + claim a run for the task so handleAgentTurnMessageSaved
 	// resolves a runID via GetClaimedRunByTaskID.
-	if err := svc.QueueRun(
+	if _, err := svc.QueueRun(
 		ctx, "worker-1", service.RunReasonTaskAssigned,
 		`{"task_id":"`+taskID+`"}`, "lifecycle-init",
 	); err != nil {
@@ -102,7 +102,7 @@ func TestRunLifecycle_StepCompleteEventsEmitted(t *testing.T) {
 	// no longer find a claimed run. To exercise the persistence path
 	// directly, we re-queue + claim once more and seed an activity
 	// row tagged with the run id.
-	if err := svc.QueueRun(
+	if _, err := svc.QueueRun(
 		ctx, "worker-1", service.RunReasonTaskComment,
 		`{"task_id":"`+taskID+`"}`, "lifecycle-second",
 	); err != nil {
@@ -131,7 +131,7 @@ func TestRunLifecycle_ErrorEventEmitted(t *testing.T) {
 	createTestAgent(t, svc, "ws-1", "worker-1")
 	taskID := createOfficeTask(t, svc, "ws-1", "worker-1")
 
-	if err := svc.QueueRun(
+	if _, err := svc.QueueRun(
 		ctx, "worker-1", service.RunReasonTaskAssigned,
 		`{"task_id":"`+taskID+`"}`, "lifecycle-error",
 	); err != nil {
@@ -249,7 +249,7 @@ func TestQueueRun_PublishesOfficeRunQueued(t *testing.T) {
 
 	const idemKey = "task_comment:cm-123"
 	payload := `{"task_id":"` + taskID + `","comment_id":"cm-123"}`
-	if err := svc.QueueRun(ctx, "worker-1", service.RunReasonTaskComment, payload, idemKey); err != nil {
+	if _, err := svc.QueueRun(ctx, "worker-1", service.RunReasonTaskComment, payload, idemKey); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
 
@@ -293,7 +293,7 @@ func TestFinishRun_PublishesOfficeRunProcessed(t *testing.T) {
 	createTestAgent(t, svc, "ws-1", "worker-1")
 	taskID := createOfficeTask(t, svc, "ws-1", "worker-1")
 
-	if err := svc.QueueRun(
+	if _, err := svc.QueueRun(
 		ctx, "worker-1", service.RunReasonTaskComment,
 		`{"task_id":"`+taskID+`","comment_id":"cm-1"}`, "task_comment:cm-1",
 	); err != nil {
@@ -353,7 +353,7 @@ func TestFinishRun_PublishesOfficeRunProcessedForSourceCommentTask(t *testing.T)
 	sourceTaskID := "source-task"
 	insertTestTask(t, svc, sourceTaskID, "ws-1")
 
-	if err := svc.QueueRun(
+	if _, err := svc.QueueRun(
 		ctx, "worker-1", service.RunReasonTaskComment,
 		`{"task_id":"`+targetTaskID+`","source_task_id":"`+sourceTaskID+`","comment_id":"cm-source"}`,
 		"task_comment:cm-source:target",
@@ -406,7 +406,7 @@ func TestFailRun_PublishesOfficeRunProcessedFailed(t *testing.T) {
 	createTestAgent(t, svc, "ws-1", "worker-1")
 	taskID := createOfficeTask(t, svc, "ws-1", "worker-1")
 
-	if err := svc.QueueRun(
+	if _, err := svc.QueueRun(
 		ctx, "worker-1", service.RunReasonTaskComment,
 		`{"task_id":"`+taskID+`","comment_id":"cm-2"}`, "task_comment:cm-2",
 	); err != nil {

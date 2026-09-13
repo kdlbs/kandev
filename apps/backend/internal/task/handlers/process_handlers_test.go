@@ -89,6 +89,9 @@ func (m *mockRepository) GetTasksByIDs(ctx context.Context, ids []string) ([]*mo
 func (m *mockRepository) UpdateTask(ctx context.Context, task *models.Task) error {
 	return nil
 }
+func (m *mockRepository) UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error {
+	return nil
+}
 func (m *mockRepository) DeleteTask(ctx context.Context, id string) error {
 	return nil
 }
@@ -442,6 +445,9 @@ func (m *mockRepository) ListActiveTaskSessions(ctx context.Context) ([]*models.
 	return nil, nil
 }
 func (m *mockRepository) ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
+	return nil, nil
+}
+func (m *mockRepository) ListLiveWorkspaceSessions(ctx context.Context) ([]*models.TaskSession, error) {
 	return nil, nil
 }
 func (m *mockRepository) CancelActiveTaskSessionsByTaskID(ctx context.Context, taskID, reason string) ([]*models.TaskSession, error) {

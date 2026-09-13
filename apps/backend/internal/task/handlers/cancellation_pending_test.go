@@ -66,7 +66,7 @@ func (o *orchestratorWithCancellation) CancellationPending(string) bool {
 	return o.pending
 }
 
-func (o messageOrchestratorWithCancellation) CancellationPending(sessionID string) bool {
+func (o *messageOrchestratorWithCancellation) CancellationPending(sessionID string) bool {
 	return o.pendingBySession[sessionID]
 }
 

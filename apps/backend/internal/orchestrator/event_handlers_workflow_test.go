@@ -46,7 +46,7 @@ func TestUpdateTransitionTaskWithCapacity_QueuesFullLimitedStep(t *testing.T) {
 	task.WorkflowStepID = "step2"
 	target := &wfmodels.WorkflowStep{ID: "step2", WorkflowID: "wf1", WIPLimit: 1}
 
-	err = svc.updateTransitionTaskWithCapacity(ctx, task, target)
+	err = svc.updateTransitionTaskWithCapacity(ctx, task, "step1", target)
 	if err != nil {
 		t.Fatalf("updateTransitionTaskWithCapacity: %v", err)
 	}

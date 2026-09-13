@@ -111,9 +111,10 @@ mtime as sufficient evidence.
   are closed or abandoned, have no recent owner lease/heartbeat, and are older than a fixed 24-hour
   stale interval. The action uses an explicit `temporary_artifacts` selection through the existing
   activity gate and a reversible confirmation.
-- Temporary-artifact cleanup is manual-only in the first release. Scheduled maintenance and an
-  unscoped full **Run now** never delete this resource, and `storage_maintenance` gains no temp
-  toggle. A future scheduled opt-in requires a separate operational decision.
+- Temporary-artifact cleanup is disabled by default. When the saved temporary-artifact policy is
+  enabled, scheduled maintenance and an unscoped full **Run now** also consider this provider.
+  Explicit `temporary_artifacts` cleanup remains available independently of the option. The
+  provider still moves eligible roots to quarantine and never claims shared or legacy files.
 - Manual **Analyze** is read-only, does not require the idle gate, and never changes files,
   containers, images, caches, or database rows.
 - Each cleanup resource has its own enablement and threshold. The initial defaults are:
@@ -281,8 +282,10 @@ Decision: [ADR-2026-08-08-owned-temp-artifact-cleanup](../../../decisions/2026-0
   as ownership.
 - Explicit cleanup atomically renames an eligible root on the same filesystem into
   `<KANDEV_HOME_DIR>/trash/temporary-artifacts/` and records a `temporary_artifact` quarantine entry.
-  A cross-device rename has no copy/delete fallback. Restore is allowed while the original path is
-  free; permanent deletion follows the existing quarantine retention and path-safety rules.
+  When the destination is on another filesystem, Kandev stages and verifies a copy under quarantine,
+  publishes it atomically, and removes the original only after revalidating its identity. Restore is
+  allowed while the original path is free; permanent deletion follows the existing quarantine
+  retention and path-safety rules.
 - Existing unmarked `/tmp/kandev-agent/*` directories and arbitrary shared temp files remain host
   policy data even when their names resemble a registered prefix.
 
