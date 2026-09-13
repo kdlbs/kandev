@@ -759,7 +759,7 @@
         "height": 851
       },
       "deviceScaleFactor": 2.75,
-      "viewport_source": "Pixel 5 preset or explicit short viewport; confirmed by captured viewport PNG dimensions."
+      "viewport_source": "Viewport confirmed by captured PNG dimensions; screen metrics confirmed in a separate browser probe of the same configuration."
     },
     {
       "case": "task-mobile-threads-compos-d64ef-stion-by-touch-short-phone--mobile-chrome",
@@ -886,10 +886,10 @@
       },
       "screen": {
         "width": 393,
-        "height": 851
+        "height": 500
       },
       "deviceScaleFactor": 2.75,
-      "viewport_source": "Pixel 5 preset or explicit short viewport; confirmed by captured viewport PNG dimensions."
+      "viewport_source": "Viewport confirmed by captured PNG dimensions; screen metrics confirmed in a separate browser probe of the same configuration."
     }
   ]
 }
