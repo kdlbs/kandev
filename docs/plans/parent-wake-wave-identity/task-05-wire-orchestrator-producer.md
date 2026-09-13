@@ -8,6 +8,9 @@ plan: "plan.md"
 requirements:
   - REQ-OFFICE-WAKE-WAVE-IDENTITY-002
   - REQ-OFFICE-WAKE-WAVE-IDENTITY-004
+acceptance_criteria:
+  - AC-OFFICE-WAKE-WAVE-IDENTITY-002.1
+  - AC-OFFICE-WAKE-WAVE-IDENTITY-004.3
 system_design:
   - ../../specs/office/system-design/parent-wake-wave-identity.md
 ---

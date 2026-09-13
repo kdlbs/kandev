@@ -7,6 +7,16 @@ depends_on: ["01-wave-identity-primitives", "02-wave-identity-persistence"]
 plan: "plan.md"
 requirements:
   - REQ-OFFICE-WAKE-WAVE-IDENTITY-003
+acceptance_criteria:
+  - AC-OFFICE-WAKE-WAVE-IDENTITY-003.1
+  - AC-OFFICE-WAKE-WAVE-IDENTITY-003.2
+  - AC-OFFICE-WAKE-WAVE-IDENTITY-003.3
+  - AC-OFFICE-WAKE-WAVE-IDENTITY-003.4
+  - AC-OFFICE-WAKE-WAVE-IDENTITY-003.5
+  - AC-OFFICE-WAKE-WAVE-IDENTITY-003.6
+  - AC-OFFICE-WAKE-WAVE-IDENTITY-003.8
+  - AC-OFFICE-WAKE-WAVE-IDENTITY-003.9
+  - AC-OFFICE-WAKE-WAVE-IDENTITY-003.10
 system_design:
   - ../../specs/office/system-design/parent-wake-wave-identity.md
 ---
