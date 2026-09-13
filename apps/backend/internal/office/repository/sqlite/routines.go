@@ -31,7 +31,7 @@ func (r *Repository) CreateRoutineTrigger(ctx context.Context, t *models.Routine
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), t.ID, t.RoutineID, t.Kind, t.CronExpression, t.Timezone,
 		t.PublicID, t.SigningMode, t.Secret, t.NextRunAt, t.LastFiredAt,
-		t.Enabled, t.CreatedAt, t.UpdatedAt)
+		boolToInt(t.Enabled), t.CreatedAt, t.UpdatedAt)
 	return err
 }
 

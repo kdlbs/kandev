@@ -21,6 +21,10 @@ type PRWatchSyncResult struct {
 	Found      bool      // true when status applied (PR data exists)
 	Changed    bool      // numbered watches only: true if checks/review state moved
 	SyncFailed bool      // true when SyncTaskPR returned an error — callers must NOT publish events
+	// DiscoveryResolved indicates that the provider lookup completed, even if
+	// a later database write failed. It keeps health admission focused on
+	// provider evidence rather than task persistence.
+	DiscoveryResolved bool
 }
 
 // SyncWatchesBatched runs the batched GraphQL queries for the supplied
@@ -37,7 +41,7 @@ type PRWatchSyncResult struct {
 // TriggerPRSyncAll / ListWorkspaceTaskPRs background refresh share, so a
 // 40-watch workspace fans out to ~2 gh subprocess calls instead of 40.
 func (s *Service) SyncWatchesBatched(ctx context.Context, watches []*PRWatch) ([]PRWatchSyncResult, error) {
-	return s.syncWatchesBatchedWithClient(ctx, s.client, "legacy", watches)
+	return s.syncWatchesBatchedWithClient(ctx, s.client, "legacy", "", 0, watches)
 }
 
 // SyncWorkspaceWatchesBatched resolves one automation credential and rejects
@@ -60,11 +64,26 @@ func (s *Service) SyncWorkspaceWatchesBatched(
 	if err != nil {
 		return nil, err
 	}
-	return s.syncWatchesBatchedWithClient(ctx, resolved.Client, resolved.CacheScope, watches)
+	credentialGeneration := int64(0)
+	if resolved.credential != nil {
+		credentialGeneration = resolved.credential.CredentialGeneration
+	}
+	return s.syncWatchesBatchedWithClient(
+		ctx, resolved.Client, resolved.CacheScope, workspaceID, credentialGeneration, watches,
+	)
+}
+
+type prWatchBatchGroup struct {
+	key            string
+	target         prDiscoveryHealthTarget
+	representative *PRWatch
+	watches        []*PRWatch
+	numbered       bool
+	attempt        prDiscoveryWatchAttempt
 }
 
 func (s *Service) syncWatchesBatchedWithClient(
-	ctx context.Context, client Client, cacheScope string, watches []*PRWatch,
+	ctx context.Context, client Client, cacheScope, workspaceID string, credentialGeneration int64, watches []*PRWatch,
 ) ([]PRWatchSyncResult, error) {
 	if len(watches) == 0 {
 		return nil, nil
@@ -73,24 +92,249 @@ func (s *Service) syncWatchesBatchedWithClient(
 	if err != nil {
 		return nil, err
 	}
-	numbered, searching := splitPRWatches(watches)
-	statuses, err := s.fetchBatchedWatchStatuses(ctx, client, exec, cacheScope, numbered, searching)
-	if err != nil {
-		return nil, err
+	groupsByKey := make(map[string]*prWatchBatchGroup, len(watches))
+	groups := make([]*prWatchBatchGroup, 0, len(watches))
+	for _, watch := range watches {
+		if watch == nil {
+			continue
+		}
+		target := prDiscoveryTargetForWatch(watch)
+		key := target.key()
+		group := groupsByKey[key]
+		if group == nil {
+			group = &prWatchBatchGroup{
+				key:            key,
+				target:         target,
+				representative: watch,
+				numbered:       target.PRNumber > 0,
+			}
+			groupsByKey[key] = group
+			groups = append(groups, group)
+		}
+		group.watches = append(group.watches, watch)
+	}
+	admittedGroups := make([]*prWatchBatchGroup, 0, len(groups))
+	leaderGroups := make([]*prWatchBatchGroup, 0, len(groups))
+	joinedGroups := make([]*prWatchBatchGroup, 0, len(groups))
+	for _, group := range groups {
+		// Register duplicate consumers before the representative performs the
+		// atomic admission decision. The representative is registered by
+		// beginPRDiscoveryWatch so another entry point cannot observe it as a
+		// consumer before it has joined an existing attempt.
+		for _, watch := range group.watches[1:] {
+			s.trackPRDiscoveryWatchConsumer(workspaceID, cacheScope, credentialGeneration, watch)
+		}
+		attempt, ok := s.beginPRDiscoveryWatch(
+			workspaceID, cacheScope, credentialGeneration, group.representative,
+		)
+		if !ok {
+			continue
+		}
+		group.attempt = attempt
+		admittedGroups = append(admittedGroups, group)
+		if attempt.joined {
+			joinedGroups = append(joinedGroups, group)
+		} else {
+			leaderGroups = append(leaderGroups, group)
+		}
+	}
+	if len(admittedGroups) == 0 {
+		return noOpPRWatchSyncResults(watches), nil
+	}
+	admitted := make([]*PRWatch, 0, len(leaderGroups))
+	for _, group := range leaderGroups {
+		admitted = append(admitted, group.representative)
+	}
+	var statuses *batchedWatchStatuses
+	if len(leaderGroups) > 0 {
+		numbered, searching := splitPRWatches(admitted)
+		statuses, err = s.fetchBatchedWatchStatuses(ctx, client, exec, cacheScope, numbered, searching)
+		if err != nil {
+			if s.handleBatchedDiscoveryFetchError(
+				workspaceID, cacheScope, credentialGeneration, leaderGroups, admitted, numbered, searching, err,
+			) {
+				// Schema and throttling failures are not eligible for the legacy
+				// per-watch fallback: it would repeat the same rejected provider
+				// request once for every watch. Keep those targets paused under the
+				// shared retry deadline.
+				return noOpPRWatchSyncResults(watches), nil
+			}
+			// Other provider failures retain the existing transport fallback. Do
+			// not leave the batch attempt active or impose a health deadline before
+			// the caller can try the per-watch path.
+			return nil, err
+		}
 	}
 	if statuses == nil {
 		statuses = &batchedWatchStatuses{}
 	}
 
-	results := make([]PRWatchSyncResult, 0, len(watches))
+	resultsByWatch := make(map[*PRWatch]PRWatchSyncResult, len(watches))
 	now := time.Now().UTC()
-	for _, w := range numbered {
-		results = append(results, s.applyBatchedNumberedWatch(ctx, cacheScope, w, statuses.byKey, now))
+	for _, group := range leaderGroups {
+		if group.attempt.result.invalidated() {
+			continue
+		}
+		var representativeResult PRWatchSyncResult
+		for index, watch := range group.watches {
+			var result PRWatchSyncResult
+			if group.numbered {
+				result = s.applyBatchedNumberedWatch(ctx, cacheScope, watch, statuses.byKey, now)
+			} else {
+				result = s.applyBatchedSearchingWatch(ctx, client, cacheScope, watch, statuses, now, false, false, false)
+			}
+			resultsByWatch[watch] = result
+			if index == 0 {
+				representativeResult = result
+			}
+		}
+		if group.numbered {
+			s.completePRDiscoveryWatchAttempt(
+				group.attempt, representativeResult.Status, true, representativeResult.SyncFailed, nil, false,
+			)
+			if s.isRepoCachedAsMissingForScope(cacheScope, group.target.Owner, group.target.Repo) {
+				s.finishPRDiscoveryWatchFailureCategory(
+					workspaceID, cacheScope, credentialGeneration, group.attempt,
+					PRDiscoveryHealthUnavailable,
+				)
+			} else {
+				// A successful known-PR query can legitimately return no alias
+				// when the PR is no longer open. That is still a provider success.
+				s.finishPRDiscoveryWatchSuccess(
+					workspaceID, cacheScope, credentialGeneration, group.attempt,
+				)
+			}
+			s.forgetPRDiscoveryWatchAttempt(workspaceID, cacheScope, credentialGeneration, group.attempt)
+			continue
+		}
+
+		s.completePRDiscoveryWatchAttempt(
+			group.attempt, representativeResult.Status, representativeResult.DiscoveryResolved,
+			representativeResult.SyncFailed, nil, false,
+		)
+		if representativeResult.DiscoveryResolved {
+			s.finishPRDiscoveryWatchSuccess(
+				workspaceID, cacheScope, credentialGeneration, group.attempt,
+			)
+			for _, watch := range group.watches {
+				result := resultsByWatch[watch]
+				target := prDiscoveryTargetForWatch(watch)
+				if result.Status != nil && result.Status.PR != nil && !result.SyncFailed {
+					target = prDiscoveryHealthTarget{
+						Owner:    result.Status.PR.RepoOwner,
+						Repo:     result.Status.PR.RepoName,
+						Branch:   watch.Branch,
+						PRNumber: result.Status.PR.Number,
+					}
+				}
+				s.trackPRDiscoveryWatchTarget(
+					workspaceID, cacheScope, credentialGeneration, watch, target,
+				)
+			}
+			s.forgetPRDiscoveryWatchAttempt(workspaceID, cacheScope, credentialGeneration, group.attempt)
+			continue
+		}
+		if representativeResult.SyncFailed {
+			// An unresolved alias whose fallback failed is an unavailable
+			// discovery result. If the fallback was not due yet, release the
+			// attempt and preserve any existing failure without inventing a new
+			// one.
+			s.finishPRDiscoveryWatchFailureCategory(
+				workspaceID, cacheScope, credentialGeneration, group.attempt,
+				PRDiscoveryHealthUnavailable,
+			)
+			s.forgetPRDiscoveryWatchAttempt(workspaceID, cacheScope, credentialGeneration, group.attempt)
+			continue
+		}
+		s.releasePRDiscoveryWatch(
+			workspaceID, cacheScope, credentialGeneration, group.attempt,
+		)
+		s.forgetPRDiscoveryWatchAttempt(workspaceID, cacheScope, credentialGeneration, group.attempt)
 	}
-	for _, w := range searching {
-		results = append(results, s.applyBatchedSearchingWatch(ctx, client, cacheScope, w, statuses, now))
+	for _, group := range joinedGroups {
+		status, resolved, syncFailed, sharedErr, suppressFallback := group.attempt.result.wait(ctx)
+		if sharedErr != nil {
+			if suppressFallback {
+				continue
+			}
+			return nil, sharedErr
+		}
+		if status == nil && !resolved && syncFailed {
+			continue
+		}
+		if group.numbered {
+			byKey := make(map[string]*PRStatus, 1)
+			if status != nil {
+				byKey[prStatusCacheKey(group.target.Owner, group.target.Repo, group.target.PRNumber)] = status
+			}
+			for _, watch := range group.watches {
+				resultsByWatch[watch] = s.applyBatchedNumberedWatch(ctx, cacheScope, watch, byKey, now)
+			}
+		} else {
+			byKey := make(map[string]*PRStatus, 1)
+			if status != nil {
+				byKey[graphqlBranchKey(group.target.Owner, group.target.Repo, group.target.Branch)] = status
+			}
+			sharedStatuses := &batchedWatchStatuses{byKey: byKey}
+			for _, watch := range group.watches {
+				resultsByWatch[watch] = s.applyBatchedSearchingWatch(
+					ctx, client, cacheScope, watch, sharedStatuses, now, true, resolved, syncFailed,
+				)
+			}
+		}
+	}
+	results := make([]PRWatchSyncResult, 0, len(watches))
+	for _, watch := range watches {
+		if result, ok := resultsByWatch[watch]; ok {
+			results = append(results, result)
+		} else {
+			results = append(results, PRWatchSyncResult{Watch: watch})
+		}
 	}
 	return results, nil
+}
+
+func noOpPRWatchSyncResults(watches []*PRWatch) []PRWatchSyncResult {
+	results := make([]PRWatchSyncResult, 0, len(watches))
+	for _, watch := range watches {
+		results = append(results, PRWatchSyncResult{Watch: watch})
+	}
+	return results
+}
+
+func (s *Service) handleBatchedDiscoveryFetchError(
+	workspaceID, cacheScope string,
+	credentialGeneration int64,
+	leaderGroups []*prWatchBatchGroup,
+	admitted, numbered, searching []*PRWatch,
+	err error,
+) bool {
+	failed := admitted
+	if strings.Contains(err.Error(), "batched branch query") {
+		failed = searching
+	} else if strings.Contains(err.Error(), "batched PR query") {
+		failed = numbered
+	}
+	category := classifyPRDiscoveryError(err)
+	pauseFailedTargets := category == PRDiscoveryHealthInvalidQuery || category == PRDiscoveryHealthRateLimited
+	failedSet := make(map[string]struct{}, len(failed))
+	for _, watch := range failed {
+		failedSet[prDiscoveryTargetForWatch(watch).key()] = struct{}{}
+	}
+	for _, group := range leaderGroups {
+		if _, failed := failedSet[group.key]; failed && pauseFailedTargets {
+			s.finishPRDiscoveryWatchFailure(
+				workspaceID, cacheScope, credentialGeneration, group.attempt, err,
+			)
+		} else {
+			s.releasePRDiscoveryWatch(
+				workspaceID, cacheScope, credentialGeneration, group.attempt,
+			)
+		}
+		s.completePRDiscoveryWatchAttempt(group.attempt, nil, false, true, err, pauseFailedTargets)
+		s.forgetPRDiscoveryWatchAttempt(workspaceID, cacheScope, credentialGeneration, group.attempt)
+	}
+	return pauseFailedTargets
 }
 
 const (
@@ -542,14 +786,16 @@ func (s *Service) applyBatchedNumberedWatch(
 func (s *Service) lookupSearchingWatchPR(
 	ctx context.Context, client Client, cacheScope string, w *PRWatch,
 	branchKey string, statuses *batchedWatchStatuses, lastChecked *time.Time,
-) (*PR, error) {
+) (*PR, bool, error) {
 	if lastChecked != nil && time.Since(*lastChecked) < PRSyncFreshnessWindow {
-		return nil, nil
+		return nil, false, nil
 	}
 	if _, definitive := statuses.branchResolvedEmpty[branchKey]; definitive {
-		return s.findPRInForkParent(ctx, client, cacheScope, w.Owner, w.Repo, w.Branch)
+		pr, err := s.findPRInForkParent(ctx, client, cacheScope, w.Owner, w.Repo, w.Branch)
+		return pr, true, err
 	}
-	return s.findPRByBranchInForkNetwork(ctx, client, cacheScope, w.Owner, w.Repo, w.Branch)
+	pr, err := s.findPRByBranchInForkNetwork(ctx, client, cacheScope, w.Owner, w.Repo, w.Branch)
+	return pr, true, err
 }
 
 // applyBatchedSearchingWatch mirrors Poller.applyDetectedPR on the service
@@ -557,6 +803,7 @@ func (s *Service) lookupSearchingWatchPR(
 // branch lookup returns one; otherwise we just bump last_checked_at.
 func (s *Service) applyBatchedSearchingWatch(
 	ctx context.Context, client Client, cacheScope string, w *PRWatch, statuses *batchedWatchStatuses, now time.Time,
+	skipFallback, sharedResolved, sharedSyncFailed bool,
 ) PRWatchSyncResult {
 	// Read the previous probe time before the stamp below overwrites it —
 	// lookupSearchingWatchPR throttles on it.
@@ -570,27 +817,35 @@ func (s *Service) applyBatchedSearchingWatch(
 	}
 	branchKey := graphqlBranchKey(w.Owner, w.Repo, w.Branch)
 	status, ok := statuses.byKey[branchKey]
+	discoveryResolved := ok && status != nil && status.PR != nil
 	if !ok || status == nil || status.PR == nil {
-		pr, err := s.lookupSearchingWatchPR(ctx, client, cacheScope, w, branchKey, statuses, lastChecked)
+		if skipFallback {
+			return PRWatchSyncResult{Watch: w, DiscoveryResolved: sharedResolved, SyncFailed: sharedSyncFailed}
+		}
+		pr, attempted, err := s.lookupSearchingWatchPR(ctx, client, cacheScope, w, branchKey, statuses, lastChecked)
 		if err != nil {
 			s.logger.Debug("failed to search parent repository for PR",
 				zap.String("watch_id", w.ID), zap.String("branch", w.Branch), zap.Error(err))
 			return PRWatchSyncResult{Watch: w, SyncFailed: true}
 		}
-		if pr == nil {
+		if !attempted {
 			return PRWatchSyncResult{Watch: w}
+		}
+		discoveryResolved = true
+		if pr == nil {
+			return PRWatchSyncResult{Watch: w, DiscoveryResolved: true}
 		}
 		status = &PRStatus{PR: pr}
 	}
 	if err := s.rebindPRWatchRepository(ctx, w, status.PR); err != nil {
 		s.logger.Error("failed to rebind PR watch to detected repository",
 			zap.String("watch_id", w.ID), zap.Int("pr_number", status.PR.Number), zap.Error(err))
-		return PRWatchSyncResult{Watch: w, Status: status, Found: true, SyncFailed: true}
+		return PRWatchSyncResult{Watch: w, Status: status, Found: true, SyncFailed: true, DiscoveryResolved: discoveryResolved}
 	}
 	if err := s.store.UpdatePRWatchPRNumber(ctx, w.ID, status.PR.Number); err != nil {
 		s.logger.Error("failed to update PR watch with detected PR",
 			zap.String("watch_id", w.ID), zap.Int("pr_number", status.PR.Number), zap.Error(err))
-		return PRWatchSyncResult{Watch: w, Status: status, Found: true}
+		return PRWatchSyncResult{Watch: w, Status: status, Found: true, DiscoveryResolved: discoveryResolved}
 	}
 	if _, err := s.associatePRWithTaskForSession(
 		ctx, w.WorkspaceID, w.SessionID, w.TaskID, w.RepositoryID, status.PR,
@@ -598,9 +853,9 @@ func (s *Service) applyBatchedSearchingWatch(
 	); err != nil {
 		s.logger.Error("failed to associate detected PR with task",
 			zap.String("task_id", w.TaskID), zap.Int("pr_number", status.PR.Number), zap.Error(err))
-		return PRWatchSyncResult{Watch: w, Status: status, Found: true}
+		return PRWatchSyncResult{Watch: w, Status: status, Found: true, DiscoveryResolved: discoveryResolved}
 	}
 	s.logger.Info("detected PR for session branch (batched)",
 		zap.String("watch_id", w.ID), zap.String("branch", w.Branch), zap.Int("pr_number", status.PR.Number))
-	return PRWatchSyncResult{Watch: w, Status: status, Found: true}
+	return PRWatchSyncResult{Watch: w, Status: status, Found: true, DiscoveryResolved: discoveryResolved}
 }

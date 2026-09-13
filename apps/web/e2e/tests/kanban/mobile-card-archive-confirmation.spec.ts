@@ -46,7 +46,7 @@ async function openArchiveMenu(testPage: Page, taskId: string): Promise<Locator>
 }
 
 test.describe("Mobile Kanban card archive confirmation", () => {
-  test("uses a contained dark dialog and archives the card after confirmation", async ({
+  test("uses a compact dark bottom sheet and archives the card after confirmation", async ({
     testPage,
     apiClient,
     seedData,
@@ -74,7 +74,7 @@ test.describe("Mobile Kanban card archive confirmation", () => {
 
     const archiveTrigger = await openArchiveMenu(testPage, task.id);
 
-    const dialog = testPage.getByRole("alertdialog", { name: /Archive task/ });
+    const dialog = testPage.getByRole("dialog", { name: /Archive task/ });
     await expect(dialog).toBeVisible();
     await expect(dialog).toContainText(TASK_TITLE);
     await expect(dialog.getByTestId("task-confirmation-outcome")).toContainText(TASK_TITLE);
@@ -83,25 +83,32 @@ test.describe("Mobile Kanban card archive confirmation", () => {
     await expect(testPage.getByTestId(INLINE_CONFIRMATION_TEST_ID)).toHaveCount(0);
 
     await waitForFiniteAnimations(dialog);
+    await expect(testPage.getByText("Kandev update available", { exact: true })).toBeHidden();
     await prCapture.screenshot("after-dark", {
-      caption:
-        "After: mobile Kanban uses the contained archive alert dialog without changing card layout.",
+      caption: "Mobile Kanban uses a compact archive bottom sheet without changing card layout.",
     });
     const [dialogBox, viewport, surfaceColors] = await Promise.all([
       dialog.boundingBox(),
       testPage.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight })),
       dialog.evaluate((element) => {
         const styles = getComputedStyle(element);
-        return { backgroundColor: styles.backgroundColor, foregroundColor: styles.color };
+        const surface = getComputedStyle(element, "::before");
+        return {
+          backgroundColor: surface.backgroundColor,
+          foregroundColor: styles.color,
+          inset: Number.parseFloat(surface.left),
+        };
       }),
     ]);
     if (!dialogBox) throw new Error("mobile archive dialog has no layout box");
-    expect(dialogBox.x).toBeGreaterThanOrEqual(12);
-    expect(viewport.width - (dialogBox.x + dialogBox.width)).toBeGreaterThanOrEqual(12);
+    expect(dialogBox.x + surfaceColors.inset).toBeGreaterThanOrEqual(8);
+    expect(
+      viewport.width - (dialogBox.x + dialogBox.width) + surfaceColors.inset,
+    ).toBeGreaterThanOrEqual(8);
     expect(dialogBox.y).toBeGreaterThanOrEqual(0);
     expect(dialogBox.y + dialogBox.height).toBeLessThanOrEqual(viewport.height);
-    const dialogCenterY = dialogBox.y + dialogBox.height / 2;
-    expect(Math.abs(dialogCenterY - viewport.height / 2)).toBeLessThanOrEqual(8);
+    expect(Math.abs(dialogBox.y + dialogBox.height - viewport.height)).toBeLessThanOrEqual(1);
+    expect(dialogBox.height).toBeLessThan(viewport.height * 0.8);
     expect(surfaceColors.backgroundColor).not.toBe("rgba(0, 0, 0, 0)");
     expect(surfaceColors.backgroundColor).toMatch(/^rgb/);
     expect(surfaceColors.foregroundColor).toMatch(/^rgb/);
@@ -134,7 +141,7 @@ test.describe("Mobile Kanban card archive confirmation", () => {
     expect(testPage.url()).toBe(startUrl);
 
     await openArchiveMenu(testPage, task.id);
-    const reopenedDialog = testPage.getByRole("alertdialog", { name: /Archive task/ });
+    const reopenedDialog = testPage.getByRole("dialog", { name: /Archive task/ });
     await expect(reopenedDialog).toBeVisible();
     const archiveResponse = waitForHttp(
       testPage,
@@ -171,6 +178,7 @@ test.describe("Mobile Kanban card archive confirmation", () => {
     await archiveResponse;
     await expect(card).not.toBeVisible();
     await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
+    await expect(testPage.getByTestId("mobile-action-confirmation")).toHaveCount(0);
     await expect(testPage.getByTestId(INLINE_CONFIRMATION_TEST_ID)).toHaveCount(0);
   });
 });

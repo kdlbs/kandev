@@ -7,6 +7,8 @@ import { createStandardProfile, openTaskSession } from "../../helpers/git-helper
 import { assertNoHorizontalOverflow } from "../../helpers/session-stream-overload";
 import { waitForLatestSessionDone } from "../../helpers/session";
 import { attachGatewayTrafficCapture, type GatewayTrafficFrame } from "../../helpers/ws-traffic";
+import { requireBox } from "../../helpers/layout-assertions";
+import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
 import { closeQuickTerminalTab } from "../terminal/terminal-test-helpers";
 import { swipeDeckLeft } from "./mobile-threads-swipe-helpers";
 
@@ -46,6 +48,17 @@ async function expectSwipeCue(page: Page, column: Locator, total: number) {
 }
 
 test.describe("Mobile Threads view", () => {
+  let previousViewSettings: Record<string, unknown> | null = null;
+  test.afterEach(async ({ apiClient }) => {
+    if (!previousViewSettings) return;
+    const restored = await apiClient.rawRequest(
+      "PATCH",
+      "/api/v1/user/settings",
+      previousViewSettings,
+    );
+    previousViewSettings = null;
+    expect(restored.ok).toBe(true);
+  });
   test("reaches the deck from the drawer and pages one full-width column", async ({
     testPage,
     apiClient,
@@ -495,7 +508,14 @@ test.describe("Mobile Threads view", () => {
   test("confirms deletion of a saved view inside the native drawer", async ({
     testPage,
     apiClient,
-  }) => {
+  }, testInfo) => {
+    await testPage.setViewportSize({ width: 393, height: 640 });
+    const { settings } = await apiClient.getUserSettings();
+    previousViewSettings = {
+      thread_views: settings.thread_views ?? [],
+      thread_active_view_id: settings.thread_active_view_id ?? "view-all-threads",
+      thread_view_draft: settings.thread_view_draft ?? null,
+    };
     const baseView = {
       task_scope: { mode: "all", task_ids: [] },
       filters: [],
@@ -519,17 +539,56 @@ test.describe("Mobile Threads view", () => {
     const drawer = testPage.getByTestId("threads-mobile-view-drawer");
     await drawer.getByTestId("threads-mobile-view-settings").tap();
     const editor = drawer.getByTestId("threads-view-editor");
+    // Invalid input stays local; a valid persisted draft intentionally hides Delete.
+    await editor.getByTestId("threads-max-columns").fill("0");
+    await expect(editor.getByTestId("threads-max-columns")).toHaveAttribute("aria-invalid", "true");
+    await editor.getByTestId("threads-view-delete").scrollIntoViewIfNeeded();
+    const scrollRegion = drawer.getByTestId("threads-mobile-view-drawer-scroll-region");
+    const scrollTop = await scrollRegion.evaluate((element) => element.scrollTop);
+    expect(scrollTop).toBeGreaterThan(0);
+    await waitForFiniteAnimations(drawer);
+    const originalBox = await requireBox(drawer, "view editor");
+    const drawerId = await drawer.getAttribute("id");
     await editor.getByTestId("threads-view-delete").tap();
-    const confirmation = editor.getByTestId("saved-task-view-delete-confirmation");
+    const confirmation = drawer.getByTestId("saved-task-view-delete-confirmation");
     await expect(confirmation).toHaveAccessibleName("Delete Release threads?");
     await expect(testPage.locator('[role="dialog"]:visible')).toHaveCount(1);
+    // @covers AC-UI-MOBILE-CONFIRMATION-002.4
+    const compactBox = await expectContentSizedBottomConfirmation(drawer, confirmation);
+    const viewportHeight = testPage.viewportSize()!.height;
+    expect(compactBox.height).toBeLessThan(viewportHeight * 0.6);
+    await expect(drawer).toHaveAttribute("id", drawerId!);
+    await expect(testPage.getByText("Kandev update available", { exact: true })).toBeHidden();
+    await testPage.screenshot({ path: testInfo.outputPath("compact-view-confirmation.png") });
+    await testInfo.attach("confirmation bounds", {
+      body: JSON.stringify({
+        editor: originalBox,
+        confirmation: compactBox,
+        viewportHeight,
+        drawerScroll: await drawer.evaluate((element) => ({
+          top: element.scrollTop,
+          height: element.scrollHeight,
+          clientHeight: element.clientHeight,
+        })),
+      }),
+      contentType: "application/json",
+    });
+    await expectContentSizedBottomConfirmation(drawer, confirmation);
     for (const action of await confirmation.getByRole("button").all()) {
       const box = await action.boundingBox();
       expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
     }
     await confirmation.getByRole("button", { name: "Cancel" }).tap();
     await expect(drawer).toBeVisible();
+    await waitForFiniteAnimations(drawer);
+    expect((await requireBox(drawer, "restored view editor")).height).toBeCloseTo(
+      originalBox.height,
+      0,
+    );
     await expect(editor.getByTestId("threads-view-delete")).toBeFocused();
+    expect(await scrollRegion.evaluate((element) => element.scrollTop)).toBe(scrollTop);
+    await expect(editor.getByTestId("threads-max-columns")).toHaveValue("0");
+    await expect(editor.getByTestId("threads-max-columns")).toHaveAttribute("aria-invalid", "true");
 
     await editor.getByTestId("threads-view-delete").tap();
     const deletedViewResponse = testPage.waitForResponse(
@@ -538,7 +597,7 @@ test.describe("Mobile Threads view", () => {
         response.request().method() === "PATCH" &&
         response.url().includes("/api/v1/user/settings"),
     );
-    await editor
+    await drawer
       .getByTestId("saved-task-view-delete-confirmation")
       .getByRole("button", { name: "Delete Release threads" })
       .tap();

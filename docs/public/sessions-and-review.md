@@ -59,7 +59,9 @@ Right-click an agent tab on desktop to manage it. Available actions depend on it
 | **Handoff**        | Opens the launch dialog with Blank context. Select a summary when you want to include this conversation                                                                 |
 | **Close Others**   | Closes other visible agent panels without deleting their sessions                                                                                                          |
 
-Stopping is not deletion. Resume succeeds only while the executor still has the session record needed to continue. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can force a fresh session instead. The failure banner offers **Start fresh** when continuation is unavailable.
+Stopping is not deletion. Resume succeeds only while the executor still has the session record needed to continue. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can force a fresh session instead. When startup or resume fails, Kandev shows one recovery card in the selected session's chat. It labels the safe cause, keeps technical details collapsed, and offers **Resume**, **Restore read-only workspace**, or **Start fresh session** when each action is valid.
+
+**Restore read-only workspace** makes the existing files available for inspection without claiming that the agent resumed. A successful restore keeps the recovery card visible until a later resume succeeds. Kandev keeps the card in the chat scroll area and uses stacked touch-sized actions on phones. A failure in another session or an unrelated provider error remains on its own existing surface.
 
 Stopping a turn does not itself run the next queued message. If pending rows remain, Kandev sets their session's **Auto-run** switch to OFF. Expand the queue and turn Auto-run ON when you want FIFO processing to continue.
 
@@ -110,6 +112,11 @@ Actions apply to the task whose menu you opened, even if its selected session
 changes. Canceling a confirmation leaves the task unchanged. See
 [archive and deletion behavior](tasks-and-workflows.md#archive-unarchive-and-delete)
 for confirmation preferences and cleanup consequences.
+
+Once you confirm **Archive**, its conversation disappears immediately while
+cleanup continues. With archive confirmation disabled, choosing **Archive** is
+enough. If the request fails, the task returns when your current filters and
+column limit allow, without taking focus from the thread you are using.
 
 If an action or view filter removes your current thread, Threads selects the
 next remaining thread, otherwise the previous one. If neither survives from

@@ -521,10 +521,13 @@ func (r *Repository) reconcileTaskEnvironmentReposTx(
 	existing, repos []*models.TaskEnvironmentRepo,
 	replacePhysical bool,
 ) error {
-	byKey, legacyFlatByRepo := indexTaskEnvironmentReposTx(existing)
+	byKey, legacyFlatByRepo, soleByRepo := indexTaskEnvironmentReposTx(existing)
 	matched := make(map[string]struct{}, len(repos))
 	for position, incoming := range repos {
 		row := findTaskEnvironmentRepoTransition(byKey, legacyFlatByRepo, incoming)
+		if row == nil && !replacePhysical {
+			row = takeSoleUntrackedTaskEnvironmentRepo(byKey, soleByRepo, incoming)
+		}
 		if row == nil {
 			if incoming == nil || incoming.RepositoryID == "" {
 				continue
@@ -547,19 +550,40 @@ func (r *Repository) reconcileTaskEnvironmentReposTx(
 	return r.tombstoneOmittedTaskEnvironmentReposTx(ctx, tx, existing, matched)
 }
 
-func indexTaskEnvironmentReposTx(rows []*models.TaskEnvironmentRepo) (map[string]*models.TaskEnvironmentRepo, map[string]*models.TaskEnvironmentRepo) {
+func indexTaskEnvironmentReposTx(rows []*models.TaskEnvironmentRepo) (
+	map[string]*models.TaskEnvironmentRepo,
+	map[string]*models.TaskEnvironmentRepo,
+	map[string]*models.TaskEnvironmentRepo,
+) {
 	byKey := make(map[string]*models.TaskEnvironmentRepo, len(rows))
 	legacyFlatByRepo := make(map[string]*models.TaskEnvironmentRepo)
+	soleByRepo := make(map[string]*models.TaskEnvironmentRepo)
+	ambiguousRepo := make(map[string]struct{})
 	for _, row := range rows {
 		if row == nil {
 			continue
 		}
 		byKey[row.RepositoryID+"\x00"+row.BranchSlug] = row
-		if row.RepositoryID != "" && row.BranchSlug == "" {
+		if row.RepositoryID == "" {
+			continue
+		}
+		if row.BranchSlug == "" {
 			legacyFlatByRepo[row.RepositoryID] = row
 		}
+		if row.DeletedAt != nil || row.Status == "failed" || row.Status == worktreeRepoStatusDeleted {
+			continue
+		}
+		if _, ambiguous := ambiguousRepo[row.RepositoryID]; ambiguous {
+			continue
+		}
+		if _, seen := soleByRepo[row.RepositoryID]; seen {
+			delete(soleByRepo, row.RepositoryID)
+			ambiguousRepo[row.RepositoryID] = struct{}{}
+			continue
+		}
+		soleByRepo[row.RepositoryID] = row
 	}
-	return byKey, legacyFlatByRepo
+	return byKey, legacyFlatByRepo, soleByRepo
 }
 
 func findTaskEnvironmentRepoTransition(
@@ -582,6 +606,26 @@ func findTaskEnvironmentRepoTransition(
 	return row
 }
 
+// takeSoleUntrackedTaskEnvironmentRepo reuses the only active inventory row
+// for a repository when a non-replacement transition has no branch identity.
+// Local resumes intentionally do not select or switch branches, so the
+// existing canonical row is the only safe branch identity to retain.
+func takeSoleUntrackedTaskEnvironmentRepo(
+	byKey, soleByRepo map[string]*models.TaskEnvironmentRepo,
+	incoming *models.TaskEnvironmentRepo,
+) *models.TaskEnvironmentRepo {
+	if incoming == nil || incoming.RepositoryID == "" || incoming.BranchSlug != "" {
+		return nil
+	}
+	row := soleByRepo[incoming.RepositoryID]
+	if row != nil {
+		delete(soleByRepo, incoming.RepositoryID)
+		delete(byKey, row.RepositoryID+"\x00"+row.BranchSlug)
+		byKey[incoming.RepositoryID+"\x00"] = row
+	}
+	return row
+}
+
 func (r *Repository) updateTaskEnvironmentRepoTransitionTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
@@ -589,7 +633,12 @@ func (r *Repository) updateTaskEnvironmentRepoTransitionTx(
 	position int,
 	replacePhysical bool,
 ) error {
-	row.BranchSlug = incoming.BranchSlug
+	// An incoming transition with untracked branch identity (a non-worktree
+	// local/local_pc resume never stamps req.BaseBranch) must not overwrite
+	// a row's already-known real branch with an empty one; preserve it.
+	if replacePhysical || incoming.BranchSlug != "" || row.BranchSlug == "" {
+		row.BranchSlug = incoming.BranchSlug
+	}
 	if replacePhysical || incoming.WorktreeID != "" {
 		row.WorktreeID = incoming.WorktreeID
 		row.WorktreePath = incoming.WorktreePath

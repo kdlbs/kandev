@@ -120,3 +120,37 @@ func TestIsKnownSafeGitFlagRejectsRebaseAndAbortVariants(t *testing.T) {
 		}
 	}
 }
+
+func TestIsValidExpectedBranchName(t *testing.T) {
+	for _, tc := range []struct {
+		branch string
+		want   bool
+	}{
+		{branch: "main", want: true},
+		{branch: "feature/work", want: true},
+		{branch: "release/v1.2.3", want: true},
+		{branch: "", want: false},
+		{branch: "HEAD", want: false},
+		{branch: "ORIG_HEAD", want: false},
+		{branch: "FETCH_HEAD", want: false},
+		{branch: "MERGE_HEAD", want: false},
+		{branch: "main/", want: false},
+		{branch: "a//b", want: false},
+		{branch: "a..b", want: false},
+		{branch: "main.lock", want: false},
+		{branch: "-flag", want: false},
+		{branch: "has space", want: false},
+		// A local branch may legally carry this name, and it is validated as
+		// itself rather than as the "main" IsValidBaseBranchRef would strip to.
+		{branch: "origin/main", want: true},
+		// Distinguishes this validator from IsValidBaseBranchRef, which strips
+		// the prefix and then rejects the leading dash of the remainder.
+		{branch: "origin/-dash", want: true},
+	} {
+		t.Run(tc.branch, func(t *testing.T) {
+			if got := IsValidExpectedBranchName(tc.branch); got != tc.want {
+				t.Errorf("IsValidExpectedBranchName(%q) = %v, want %v", tc.branch, got, tc.want)
+			}
+		})
+	}
+}

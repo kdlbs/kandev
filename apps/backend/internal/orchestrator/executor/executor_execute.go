@@ -217,6 +217,25 @@ func (e *Executor) handleAgentProcessStartFailure(
 		return
 	}
 
+	owned, ownershipErr := e.bootstrapFailureOwnsSession(ctx, sessionID, agentExecutionID)
+	if ownershipErr != nil {
+		e.logger.Warn("failed to verify execution before bootstrap failure projection",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", agentExecutionID),
+			zap.Error(ownershipErr))
+		e.stopFailedStartExecution(ctx, agentExecutionID, "bootstrap ownership check")
+		return
+	}
+	if !owned {
+		e.logger.Info("ignoring bootstrap failure from superseded execution",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", agentExecutionID))
+		e.stopFailedStartExecution(ctx, agentExecutionID, "superseded bootstrap failure")
+		return
+	}
+
 	// Let the orchestrator handle auth errors as recoverable failures and
 	// (for resume) suppress the toast before the session is marked FAILED.
 	if e.onAgentStartFailed != nil && e.onAgentStartFailed(
@@ -225,14 +244,26 @@ func (e *Executor) handleAgentProcessStartFailure(
 		return
 	}
 
-	changed, finalState, updateErr := e.transitionSessionState(
-		ctx, taskID, sessionID, models.TaskSessionStateFailed, startErr.Error(),
+	errorValue := e.buildBootstrapLastAgentError(
+		ctx, taskID, sessionID, agentExecutionID, startErr, fromResume,
 	)
-	if updateErr != nil {
-		e.logger.Warn("failed to mark session as failed after start error",
+	changed, finalState, transitionErr := e.commitBootstrapFailure(
+		ctx, taskID, sessionID, agentExecutionID, errorValue,
+	)
+	if transitionErr != nil {
+		e.logger.Warn("failed to commit bootstrap failure projection",
+			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
-			zap.Error(updateErr))
+			zap.String("agent_execution_id", agentExecutionID),
+			zap.Error(transitionErr))
+	} else if !changed {
+		// An ownership or compare-and-set miss means a newer execution won the
+		// race. Do not
+		// transition the successor's session or replace its cleanup owner.
+		e.stopFailedStartExecution(ctx, agentExecutionID, "superseded bootstrap failure")
+		return
 	}
+
 	if changed && finalState == models.TaskSessionStateFailed && escalateTaskOnFailure {
 		if updateErr := e.writeTaskFailedForRuntime(ctx, taskID, sessionID); updateErr != nil {
 			e.logger.Warn("failed to mark task as failed after start error",

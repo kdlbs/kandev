@@ -62,6 +62,10 @@ func (kubernetesLaunchProfileResolver) ResolveProfile(
 
 type kubernetesLaunchProfileReader struct{}
 
+func (kubernetesLaunchProfileReader) GetTask(context.Context, string) (*models.Task, error) {
+	return &models.Task{ID: "task-1"}, nil
+}
+
 func (kubernetesLaunchProfileReader) GetTaskSession(context.Context, string) (*models.TaskSession, error) {
 	return &models.TaskSession{ID: "session-1", TaskID: "task-1", ExecutorProfileID: "profile-k8s"}, nil
 }

@@ -74,6 +74,7 @@ type Repository interface {
 	GetRunsByCommentIDs(ctx context.Context, commentIDs []string) (map[string]sqlite.CommentRunStatus, error)
 	UpdateTaskState(ctx context.Context, taskID, state string) error
 	GetTaskExecutionFields(ctx context.Context, taskID string) (*sqlite.TaskExecutionFields, error)
+	UpdateTaskStateIfWorkflowStep(ctx context.Context, taskID, expectedStepID, state string) (bool, error)
 	UpdateTaskAssignee(ctx context.Context, taskID, assigneeID string) error
 	UpdateTaskPriority(ctx context.Context, taskID, priority string) error
 	UpdateTaskProjectID(ctx context.Context, taskID, projectID string) error
@@ -105,6 +106,7 @@ type Repository interface {
 	CancelDisplacedParticipantRun(
 		ctx context.Context, taskID, stepID, agentProfileID string,
 	) ([]runssqlite.CancelledRun, error)
+	IsTaskWorkflowStepTerminal(ctx context.Context, taskID string) (terminal, hasStep bool, err error)
 }
 
 // DecisionStore is the workflow-domain decisions interface required by

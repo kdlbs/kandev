@@ -1,11 +1,13 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
+import type { ReactNode } from "react";
 import { IntegrationListToolbar } from "@/components/integrations/integration-list-toolbar";
 import { RepoFilterCombobox } from "./repo-filter-combobox";
 
 type ListToolbarProps = {
   title: string;
+  titleControl?: ReactNode;
   count: number;
   loading: boolean;
   lastFetchedAt: Date | null;
@@ -21,6 +23,7 @@ type ListToolbarProps = {
 
 export function ListToolbar({
   title,
+  titleControl,
   count,
   loading,
   lastFetchedAt,
@@ -37,6 +40,7 @@ export function ListToolbar({
   return (
     <IntegrationListToolbar
       title={title}
+      titleControl={titleControl}
       count={count}
       loading={loading}
       lastFetchedAt={lastFetchedAt}

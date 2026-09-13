@@ -35,6 +35,13 @@ DIAGRAM (optional)
 POSSIBLE IMPROVEMENTS (optional)
   One line: risk level + what could go wrong or be improved. Skip if negligible.
 
+DOCUMENTATION COVERAGE
+  The `PR documentation coverage` status uses a deterministic path and artifact
+  check. Runtime, workflow, configuration, and other non-exempt changes need a
+  changed work order linked to its plan, requirements, acceptance criteria, and
+  system design. The exact `no-docs-allow` label is a maintainer exception. The
+  check does not claim semantic completeness or require planning before coding.
+
 RELATED ISSUES
   Use "Closes #N" if this resolves an issue. Remove the line if there is no related issue.
 
