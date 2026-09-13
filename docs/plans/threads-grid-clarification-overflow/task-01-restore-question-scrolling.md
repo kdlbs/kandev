@@ -345,3 +345,11 @@ Developer :9998 and parent playground :48431 were never touched.
 
 Screenshots are retained on an orphan media commit, rather than as binaries in
 the fix branch. Final rendered examples: [Grid at 90%](https://raw.githubusercontent.com/kdlbs/kandev/e0c9e9c77703f7a2efc2729f5c26fb883c29be0a/grid-90-last-option.png), [Grid Submit](https://raw.githubusercontent.com/kdlbs/kandev/e0c9e9c77703f7a2efc2729f5c26fb883c29be0a/grid-100-submit.png), [short phone](https://raw.githubusercontent.com/kdlbs/kandev/e0c9e9c77703f7a2efc2729f5c26fb883c29be0a/phone-short-last-option.png), [phone Submit](https://raw.githubusercontent.com/kdlbs/kandev/e0c9e9c77703f7a2efc2729f5c26fb883c29be0a/phone-submit.png).
+
+### PR review correction
+
+PR #3655's documentation finding corrected the parent package's stale
+"pending results" reference to "completed results", matching this plan's
+implemented status. The historical parent evidence remains intact. This
+documentation-only correction passed catalog validation, specification lint
+and diff checks; production code, tests and screenshots are unchanged.
