@@ -213,44 +213,6 @@ function ClarificationCard(props: CardProps) {
   );
 }
 
-// buildOutcome projects a settled submitState + the hook's lastResult into
-// the settled-outcome report. "submitting"/"idle" never reach here (guarded
-// by the caller's transition check), and "ok" always has a lastResult by the
-// time the transition fires (set in the same ownsRequest branch as
-// submitState).
-function buildOutcome(
-  submitState: "ok" | "error" | "expired",
-  lastResult: ReturnType<typeof useClarificationGroup>["lastResult"],
-): ClarificationOutcome {
-  if (submitState === "expired") return { kind: "no_longer_active" };
-  if (submitState === "error") return { kind: "submission_failed" };
-  return {
-    kind: "resolved",
-    claimedByThisCaller: lastResult?.claimed !== false,
-    status: lastResult?.status,
-  };
-}
-
-// useOutcomeCallback mirrors useResolveCallback's transition guard (fire
-// once per settle, inheriting the hook's ownership fence for free since
-// lastResult/submitState only update for the request that still owns it) but
-// covers all four settled outcomes instead of only the "this caller won" one.
-function useOutcomeCallback(
-  submitState: ReturnType<typeof useClarificationGroup>["submitState"],
-  lastResult: ReturnType<typeof useClarificationGroup>["lastResult"],
-  onOutcome: ((outcome: ClarificationOutcome) => void) | undefined,
-) {
-  const last = useRef(submitState);
-  useEffect(() => {
-    if (last.current !== submitState && onOutcome) {
-      if (submitState === "ok" || submitState === "error" || submitState === "expired") {
-        onOutcome(buildOutcome(submitState, lastResult));
-      }
-    }
-    last.current = submitState;
-  }, [submitState, lastResult, onOutcome]);
-}
-
 function useResolveCallback(
   submitState: ReturnType<typeof useClarificationGroup>["submitState"],
   onResolved: () => void,
@@ -632,7 +594,7 @@ export function ClarificationInputOverlay({
     () => sortMessagesByQuestionIndex(resolveQuestionMessages(messages)),
     [messages],
   );
-  const group = useClarificationGroup(sortedMessages);
+  const group = useClarificationGroup(sortedMessages, onOutcome);
   const isSubmitting = group.submitState === "submitting";
   const [customDrafts, setCustomDrafts] = useState<Record<string, string>>({});
   const [rawActiveIndex, setActiveIndex] = useState(0);
@@ -646,7 +608,6 @@ export function ClarificationInputOverlay({
   const sharedContext = readSharedContext(sortedMessages[0]);
 
   useResolveCallback(group.submitState, onResolved);
-  useOutcomeCallback(group.submitState, group.lastResult, onOutcome);
 
   // group is a fresh object every render, but its submitCollected callback is
   // memoised by the hook — depend on the function only so this useCallback

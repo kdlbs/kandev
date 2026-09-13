@@ -24,9 +24,11 @@ var testInboxNow = time.Date(2026, time.September, 12, 12, 0, 0, 0, time.UTC)
 // authorization plus task/session lookups for the task_title/session_state
 // enrichment.
 type fakeInboxTasks struct {
-	authzErr error
-	tasks    map[string]*taskmodels.Task
-	sessions map[string]*taskmodels.TaskSession
+	authzErr          error
+	tasks             map[string]*taskmodels.Task
+	sessions          map[string]*taskmodels.TaskSession
+	taskBatchCalls    int
+	sessionBatchCalls int
 }
 
 func (f *fakeInboxTasks) AuthorizeWorkspaceScope(context.Context, string, authz.Scope) error {
@@ -47,6 +49,30 @@ func (f *fakeInboxTasks) GetTaskSession(_ context.Context, id string) (*taskmode
 	return nil, errors.New("session not found")
 }
 
+func (f *fakeInboxTasks) GetTasksByIDs(_ context.Context, ids []string) ([]*taskmodels.Task, error) {
+	f.taskBatchCalls++
+	result := make([]*taskmodels.Task, 0, len(ids))
+	for _, id := range ids {
+		if task := f.tasks[id]; task != nil {
+			result = append(result, task)
+		}
+	}
+	return result, nil
+}
+
+func (f *fakeInboxTasks) BatchGetSessionsForTasks(_ context.Context, taskIDs []string) (map[string][]*taskmodels.TaskSession, error) {
+	f.sessionBatchCalls++
+	result := make(map[string][]*taskmodels.TaskSession)
+	for _, taskID := range taskIDs {
+		for _, session := range f.sessions {
+			if session != nil && (session.TaskID == taskID || session.TaskID == "") {
+				result[taskID] = append(result[taskID], session)
+			}
+		}
+	}
+	return result, nil
+}
+
 type sidecarUpsertCall struct {
 	userID, pendingID string
 	state             taskmodels.ClarificationSidecarState
@@ -59,6 +85,7 @@ type sidecarUpsertCall struct {
 // the inbox handlers' own message hydration.
 type fakeInboxBundleStore struct {
 	stubMessageStore
+	batchMessageCalls int
 
 	page    *taskmodels.ClarificationBundlePage
 	listErr error
@@ -75,6 +102,20 @@ type fakeInboxBundleStore struct {
 
 	states    map[string]taskmodels.ClarificationInboxHiddenBundle
 	statesErr error
+}
+
+func (f *fakeInboxBundleStore) FindMessagesByPendingIDs(
+	_ context.Context, pendingIDs []string,
+) (map[string][]*taskmodels.Message, error) {
+	f.batchMessageCalls++
+	if f.findErr != nil {
+		return nil, f.findErr
+	}
+	result := make(map[string][]*taskmodels.Message, len(pendingIDs))
+	for _, pendingID := range pendingIDs {
+		result[pendingID] = f.messages[pendingID]
+	}
+	return result, nil
 }
 
 func (f *fakeInboxBundleStore) ListUnresolvedClarificationBundles(
@@ -372,6 +413,48 @@ func TestHttpListInbox_SuccessShape_RewritesQuestionIndexAndTrimsContext(t *test
 	// The original message's metadata must not have been mutated in place.
 	if msgs["p1"][0].Metadata["question_index"] != 5 || msgs["p1"][1].Metadata["question_index"] != 3 {
 		t.Fatalf("source message metadata was mutated: %+v", msgs["p1"])
+	}
+}
+
+func TestBuildInboxBundleViews_UsesBatchHydration(t *testing.T) {
+	createdAt := testInboxNow.Add(-time.Hour)
+	msgs := map[string][]*taskmodels.Message{
+		"p1": {{ID: "m1", TaskSessionID: "s1", TaskID: "t1", Metadata: map[string]any{"pending_id": "p1", "question_id": "q1"}}},
+		"p2": {{ID: "m2", TaskSessionID: "s2", TaskID: "t2", Metadata: map[string]any{"pending_id": "p2", "question_id": "q2"}}},
+	}
+	bundles := &fakeInboxBundleStore{}
+	tasks := &fakeInboxTasks{
+		tasks: map[string]*taskmodels.Task{
+			"t1": {ID: "t1", Title: "First task"},
+			"t2": {ID: "t2", Title: "Second task"},
+		},
+		sessions: map[string]*taskmodels.TaskSession{
+			"s1": {ID: "s1", TaskID: "t1", State: "WAITING_FOR_INPUT"},
+			"s2": {ID: "s2", TaskID: "t2", State: "RUNNING"},
+		},
+	}
+	h := newInboxTestHandler(t, msgs, alwaysAllowAuthorizer{}, tasks, bundles)
+	views, err := h.buildInboxBundleViews(context.Background(), []taskmodels.ClarificationBundleSummary{
+		{PendingID: "p1", TaskID: "t1", SessionID: "s1", CreatedAt: createdAt},
+		{PendingID: "p2", TaskID: "t2", SessionID: "s2", CreatedAt: createdAt.Add(time.Minute)},
+	})
+	if err != nil {
+		t.Fatalf("buildInboxBundleViews: %v", err)
+	}
+	if len(views) != 2 {
+		t.Fatalf("views = %d, want 2", len(views))
+	}
+	if bundles.batchMessageCalls != 1 {
+		t.Fatalf("batch message calls = %d, want 1", bundles.batchMessageCalls)
+	}
+	if tasks.taskBatchCalls != 1 {
+		t.Fatalf("task batch calls = %d, want 1", tasks.taskBatchCalls)
+	}
+	if tasks.sessionBatchCalls != 1 {
+		t.Fatalf("session batch calls = %d, want 1", tasks.sessionBatchCalls)
+	}
+	if views[1].TaskTitle != "Second task" || views[1].SessionState != "RUNNING" {
+		t.Fatalf("second view enrichment = %+v", views[1])
 	}
 }
 

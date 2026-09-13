@@ -8,7 +8,13 @@ import { NeedsYouInboxHiddenPanel } from "./needs-you-inbox-hidden-panel";
 // congratulation, and the workspace is named so the sentence is never read as a
 // claim about the whole instance (design-03#D2). Hidden bundles are disclosed
 // only when the operator actually has some (AC .20).
-export function NeedsYouInboxEmptyState({ hiddenCount }: { hiddenCount: number }) {
+export function NeedsYouInboxEmptyState({
+  hiddenCount,
+  listRevision = 0,
+}: {
+  hiddenCount: number;
+  listRevision?: number;
+}) {
   const { t } = useTranslation();
   const workspaceName = useAppStore(
     (s) => s.workspaces?.items?.find((w) => w.id === s.workspaces.activeId)?.name,
@@ -26,7 +32,9 @@ export function NeedsYouInboxEmptyState({ hiddenCount }: { hiddenCount: number }
         </p>
         <p className="mt-1 text-xs text-muted-foreground">{t("needsYouInbox:emptyDescription")}</p>
       </div>
-      {hiddenCount > 0 && <NeedsYouInboxHiddenPanel hiddenCount={hiddenCount} />}
+      {hiddenCount > 0 && (
+        <NeedsYouInboxHiddenPanel hiddenCount={hiddenCount} listRevision={listRevision} />
+      )}
     </div>
   );
 }

@@ -40,6 +40,10 @@ export function selectNeedsYouInboxHiddenCount(state: AppState): number {
   return selectActiveWorkspaceState(state).hiddenCount;
 }
 
+export function selectNeedsYouInboxRevision(state: AppState): number {
+  return selectActiveWorkspaceState(state).appliedGeneration;
+}
+
 export function selectNeedsYouInboxHasMore(state: AppState): boolean {
   return selectActiveWorkspaceState(state).hasMore;
 }

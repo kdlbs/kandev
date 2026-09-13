@@ -30,11 +30,12 @@ type inboxWorkspaceAuthorizer interface {
 	AuthorizeWorkspaceScope(ctx context.Context, workspaceID string, scope authz.Scope) error
 }
 
-// inboxTaskLookup resolves the task_title/session_state enrichment fields:
-// both degrade to "" on lookup failure rather than failing the page.
+// inboxTaskLookup resolves the task_title/session_state enrichment fields in
+// bounded batch reads. Enrichment degrades to empty fields on lookup failure
+// rather than failing the page.
 type inboxTaskLookup interface {
-	GetTask(ctx context.Context, id string) (*taskmodels.Task, error)
-	GetTaskSession(ctx context.Context, id string) (*taskmodels.TaskSession, error)
+	GetTasksByIDs(ctx context.Context, ids []string) ([]*taskmodels.Task, error)
+	BatchGetSessionsForTasks(ctx context.Context, taskIDs []string) (map[string][]*taskmodels.TaskSession, error)
 }
 
 // inboxTaskService is the combined dependency the Needs-you Inbox handlers
@@ -49,7 +50,7 @@ type inboxTaskService interface {
 // dismiss/snooze sidecar (needs-you-inbox design, "Persistence").
 type inboxBundleStore interface {
 	ListUnresolvedClarificationBundles(ctx context.Context, opts taskmodels.ListClarificationBundlesOptions) (*taskmodels.ClarificationBundlePage, error)
-	FindMessagesByPendingID(ctx context.Context, pendingID string) ([]*taskmodels.Message, error)
+	FindMessagesByPendingIDs(ctx context.Context, pendingIDs []string) (map[string][]*taskmodels.Message, error)
 	UpsertClarificationInboxSidecar(ctx context.Context, userID, pendingID string, state taskmodels.ClarificationSidecarState, snoozeUntil *time.Time, now time.Time) error
 	DeleteClarificationInboxSidecar(ctx context.Context, userID, pendingID string) error
 	CountHiddenClarificationBundles(ctx context.Context, opts taskmodels.ListClarificationBundlesOptions) (taskmodels.ClarificationInboxHiddenSummary, error)
@@ -278,12 +279,33 @@ func (h *Handlers) buildInboxHiddenResponse(
 func (h *Handlers) buildInboxBundleViews(
 	ctx context.Context, bundles []taskmodels.ClarificationBundleSummary,
 ) ([]inboxBundleView, error) {
+	if len(bundles) == 0 {
+		return []inboxBundleView{}, nil
+	}
+	pendingIDs := make([]string, 0, len(bundles))
+	taskIDs := make([]string, 0, len(bundles))
+	seenPendingIDs := make(map[string]struct{}, len(bundles))
+	seenTaskIDs := make(map[string]struct{}, len(bundles))
+	for _, bundle := range bundles {
+		if _, seen := seenPendingIDs[bundle.PendingID]; !seen {
+			seenPendingIDs[bundle.PendingID] = struct{}{}
+			pendingIDs = append(pendingIDs, bundle.PendingID)
+		}
+		if _, seen := seenTaskIDs[bundle.TaskID]; !seen && bundle.TaskID != "" {
+			seenTaskIDs[bundle.TaskID] = struct{}{}
+			taskIDs = append(taskIDs, bundle.TaskID)
+		}
+	}
+	messagesByPendingID, err := h.inboxBundles.FindMessagesByPendingIDs(ctx, pendingIDs)
+	if err != nil {
+		return nil, err
+	}
+	taskTitles := h.batchInboxTaskTitles(ctx, taskIDs)
+	sessionStates := h.batchInboxSessionStates(ctx, taskIDs)
+
 	views := make([]inboxBundleView, 0, len(bundles))
 	for _, b := range bundles {
-		msgs, err := h.inboxBundles.FindMessagesByPendingID(ctx, b.PendingID)
-		if err != nil {
-			return nil, err
-		}
+		msgs := messagesByPendingID[b.PendingID]
 		if len(msgs) == 0 {
 			h.logger.Warn("needs-you inbox bundle has no resolvable messages; omitting from page",
 				zap.String("pending_id", b.PendingID))
@@ -297,11 +319,49 @@ func (h *Handlers) buildInboxBundleViews(
 			CreatedAt:    b.CreatedAt.UTC().Format(time.RFC3339),
 			Context:      inboxBundleContext(ordered),
 			Messages:     renderInboxMessages(ordered),
-			TaskTitle:    h.resolveTaskTitle(ctx, b.TaskID),
-			SessionState: h.resolveSessionState(ctx, b.SessionID),
+			TaskTitle:    taskTitles[b.TaskID],
+			SessionState: sessionStates[b.SessionID],
 		})
 	}
 	return views, nil
+}
+
+func (h *Handlers) batchInboxTaskTitles(ctx context.Context, taskIDs []string) map[string]string {
+	titles := make(map[string]string, len(taskIDs))
+	if len(taskIDs) == 0 {
+		return titles
+	}
+	tasks, err := h.inboxTasks.GetTasksByIDs(ctx, taskIDs)
+	if err != nil {
+		h.logger.Warn("failed to batch-load needs-you inbox task titles", zap.Error(err))
+		return titles
+	}
+	for _, task := range tasks {
+		if task != nil {
+			titles[task.ID] = task.Title
+		}
+	}
+	return titles
+}
+
+func (h *Handlers) batchInboxSessionStates(ctx context.Context, taskIDs []string) map[string]string {
+	states := make(map[string]string, len(taskIDs))
+	if len(taskIDs) == 0 {
+		return states
+	}
+	sessionsByTaskID, err := h.inboxTasks.BatchGetSessionsForTasks(ctx, taskIDs)
+	if err != nil {
+		h.logger.Warn("failed to batch-load needs-you inbox session states", zap.Error(err))
+		return states
+	}
+	for _, sessions := range sessionsByTaskID {
+		for _, session := range sessions {
+			if session != nil {
+				states[session.ID] = string(session.State)
+			}
+		}
+	}
+	return states
 }
 
 // orderInboxMessages sorts a copy of msgs into AC .10's canonical order:
@@ -370,30 +430,6 @@ func inboxBundleContext(ordered []*taskmodels.Message) string {
 		return ""
 	}
 	return v
-}
-
-// resolveTaskTitle degrades to "" on any lookup failure.
-func (h *Handlers) resolveTaskTitle(ctx context.Context, taskID string) string {
-	if taskID == "" {
-		return ""
-	}
-	task, err := h.inboxTasks.GetTask(ctx, taskID)
-	if err != nil || task == nil {
-		return ""
-	}
-	return task.Title
-}
-
-// resolveSessionState degrades to "" on any lookup failure.
-func (h *Handlers) resolveSessionState(ctx context.Context, sessionID string) string {
-	if sessionID == "" {
-		return ""
-	}
-	session, err := h.inboxTasks.GetTaskSession(ctx, sessionID)
-	if err != nil || session == nil {
-		return ""
-	}
-	return string(session.State)
 }
 
 // parseInboxListQuery implements the query-validation table shared by the

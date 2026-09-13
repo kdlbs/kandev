@@ -96,19 +96,19 @@ describe("NeedsYouInboxRow", () => {
   });
 
   it("links to the task, which the row body itself cannot reach (design-03#D1)", () => {
-    render(<NeedsYouInboxRow bundle={bundle()} />);
+    render(<NeedsYouInboxRow bundle={bundle({ session_id: "secondary-session" })} />);
 
     const link = screen.getByTestId("needs-you-inbox-open-task");
-    expect(link.getAttribute("href")).toBe("/t/t1");
+    expect(link.getAttribute("href")).toBe("/t/t1?sessionId=secondary-session");
     expect(link.textContent).toBe("Open task");
   });
 
   it("keeps the task reachable from the actions menu, where narrow viewports must find it (design-03#D1)", () => {
-    render(<NeedsYouInboxRow bundle={bundle()} />);
+    render(<NeedsYouInboxRow bundle={bundle({ session_id: "secondary-session" })} />);
     openRowActionsMenu();
 
     const item = screen.getByTestId("needs-you-inbox-open-task-menu-item");
-    expect(item.getAttribute("href")).toBe("/t/t1");
+    expect(item.getAttribute("href")).toBe("/t/t1?sessionId=secondary-session");
   });
 
   it("states the bundle size only when the bundle holds more than one question (design-03#D3)", () => {

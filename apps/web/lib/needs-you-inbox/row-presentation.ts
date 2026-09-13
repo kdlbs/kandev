@@ -10,7 +10,7 @@ function firstQuestion(bundle: ClarificationInboxBundle) {
 // context, else the caller-supplied localized fallback. Never blank.
 export function rowPrimaryText(bundle: ClarificationInboxBundle, fallback: string): string {
   const question = firstQuestion(bundle);
-  if (question?.title) return question.title;
+  if (question?.title?.trim()) return question.title;
   if (question?.prompt) return question.prompt;
   if (bundle.context) return bundle.context;
   return fallback;

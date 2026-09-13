@@ -51,7 +51,12 @@ function HiddenRow({
   );
 }
 
-function useHiddenList(workspaceId: string | null, open: boolean, hiddenCount: number) {
+function useHiddenList(
+  workspaceId: string | null,
+  open: boolean,
+  hiddenCount: number,
+  listRevision: number,
+) {
   const [status, setStatus] = useState<HiddenListStatus>("idle");
   const [bundles, setBundles] = useState<ClarificationInboxHiddenBundle[]>([]);
   const [total, setTotal] = useState<number | null>(null);
@@ -98,24 +103,36 @@ function useHiddenList(workspaceId: string | null, open: boolean, hiddenCount: n
   // hidden set changed elsewhere (another row dismissed/snoozed, or a snooze
   // expiring): re-enumerate so the disclosed total and rows stay reconciled
   // with it rather than showing what this panel happened to load last.
-  const previousHiddenCount = useRef(hiddenCount);
+  const previousListState = useRef({ hiddenCount, listRevision });
   useEffect(() => {
-    if (previousHiddenCount.current === hiddenCount) return;
-    previousHiddenCount.current = hiddenCount;
+    const previous = previousListState.current;
+    previousListState.current = { hiddenCount, listRevision };
+    if (previous.hiddenCount === hiddenCount && previous.listRevision === listRevision) return;
     if (open) void load();
-  }, [hiddenCount, open, load]);
+  }, [hiddenCount, listRevision, open, load]);
 
   return { status, bundles, total, load };
 }
 
 // Discloses how many answerable bundles this operator's own dismiss or
 // snooze is hiding, and lets them enumerate and restore one.
-export function NeedsYouInboxHiddenPanel({ hiddenCount }: { hiddenCount: number }) {
+export function NeedsYouInboxHiddenPanel({
+  hiddenCount,
+  listRevision = 0,
+}: {
+  hiddenCount: number;
+  listRevision?: number;
+}) {
   const { t } = useTranslation();
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const bumpRefreshTick = useAppStore((s) => s.bumpNeedsYouInboxRefreshTick);
   const [open, setOpen] = useState(false);
-  const { status, bundles, total, load } = useHiddenList(workspaceId, open, hiddenCount);
+  const { status, bundles, total, load } = useHiddenList(
+    workspaceId,
+    open,
+    hiddenCount,
+    listRevision,
+  );
   const displayCount = total ?? hiddenCount;
 
   const toggle = useCallback(() => {

@@ -498,6 +498,7 @@ Copying this entire file is unnecessary and can freeze old defaults in a deploym
 | `features.multiTenancy` | `KANDEV_FEATURES_MULTI_TENANCY` | off | Experimental organizations above authenticated users. Requires `features.auth`; startup is refused otherwise. |
 | `features.dynamicAgentRouting` | `KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING` | off | Experimental dynamic profiles with ordered provider-error fallback. |
 | `features.canvases` | `KANDEV_FEATURES_CANVASES` | off | Experimental agent-authored isolated web-app canvases for tasks and workspaces. High risk. |
+| `features.needsYouInbox` | `KANDEV_FEATURES_NEEDS_YOU_INBOX` | off | Needs-you Inbox for clarification questions across tasks in the active workspace. |
 | `features.officeSessionIdentity` | `KANDEV_FEATURES_OFFICE_SESSION_IDENTITY` | on | Office participant sessions: each participant agent gets its own session per task. The live `(task_id, agent_profile_id)` pair is guarded in-transaction, not by a table-level index. Pre-existing duplicate rows are retained and resolved by selection. Two Kandev processes must not write the same SQLite file. |
 | `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` | off | High-risk diagnostic endpoints and ACP frame logging. |
 
@@ -515,6 +516,11 @@ Kandev exposes no canvas tools, routes, events, background work, or navigation.
 The database can contain canvas migrations, but Kandev does not read or change
 canvas data while the flag is off. See [Agent-authored Canvases](canvases.md)
 for the experimental user workflow.
+
+`features.needsYouInbox` is off in the production profile and on in the
+development and E2E profiles. Restart Kandev after changing it because the
+backend registers the Inbox routes at startup. With the flag off, the Inbox
+routes, boot count, sidebar entry, and page are unavailable.
 
 For a risky release feature that has not graduated, keep the flag off in the
 shipped profiles, enable it only on a selected install through an admin override
@@ -612,6 +618,7 @@ no public YAML key:
 - Runtime flags and diagnostics: `KANDEV_FEATURES_OFFICE`,
   `KANDEV_FEATURES_AUTH`,
   `KANDEV_FEATURES_MULTI_TENANCY`,
+  `KANDEV_FEATURES_NEEDS_YOU_INBOX`,
   `KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF`,
   `KANDEV_FEATURES_CLAUDE_MID_TURN_STEERING`,
   `KANDEV_DEBUG_AGENT_MESSAGES`, `KANDEV_DEBUG_ACP_MAX_FILES`,

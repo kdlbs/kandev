@@ -119,6 +119,16 @@ export type ClarificationOutcome =
   | { kind: "no_longer_active" }
   | { kind: "submission_failed" };
 
+function clarificationOutcome(result: ClarificationRespondResult): ClarificationOutcome {
+  if (result.state === "expired") return { kind: "no_longer_active" };
+  if (result.state === "error") return { kind: "submission_failed" };
+  return {
+    kind: "resolved",
+    claimedByThisCaller: result.claimed !== false,
+    status: result.status,
+  };
+}
+
 export type ClarificationGroupApi = {
   pendingId: string | null;
   total: number;
@@ -284,6 +294,7 @@ type RunClarificationRequestArgs = {
   inflightRef: { current: boolean };
   setSubmitState: (state: SubmitState) => void;
   setLastResult: (result: ClarificationRespondResult) => void;
+  onOutcome?: (outcome: ClarificationOutcome) => void;
   updateMessage: (message: Message) => void;
 };
 
@@ -302,6 +313,7 @@ async function runClarificationRequest(args: RunClarificationRequestArgs) {
     inflightRef,
     setSubmitState,
     setLastResult,
+    onOutcome,
     updateMessage,
   } = args;
   const requestGeneration = ++requestGenerationRef.current;
@@ -315,6 +327,7 @@ async function runClarificationRequest(args: RunClarificationRequestArgs) {
     if (ownsRequest()) {
       setSubmitState(result.state);
       setLastResult(result);
+      onOutcome?.(clarificationOutcome(result));
     }
     if (result.state === "ok") {
       // Applies against the submit-time bundle snapshot regardless of which
@@ -332,6 +345,7 @@ async function runClarificationRequest(args: RunClarificationRequestArgs) {
     if (ownsRequest()) {
       setSubmitState("error");
       setLastResult({ state: "error" });
+      onOutcome?.({ kind: "submission_failed" });
     }
   } finally {
     // Only release the mutex if this exact request still owns it. A bundle
@@ -390,6 +404,7 @@ type UseClarificationSubmissionArgs = {
   setAnswers: (answers: Record<string, ClarificationAnswer>) => void;
   setSubmitState: (state: SubmitState) => void;
   setLastResult: (result: ClarificationRespondResult) => void;
+  onOutcome?: (outcome: ClarificationOutcome) => void;
   updateMessage: (message: Message) => void;
   defaultSkipReason: string;
 };
@@ -409,6 +424,7 @@ function baseClarificationRequestArgs(
     inflightRef: common.inflightRef,
     setSubmitState: common.setSubmitState,
     setLastResult: common.setLastResult,
+    onOutcome: common.onOutcome,
     updateMessage: common.updateMessage,
   };
 }
@@ -429,6 +445,7 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
     setAnswers,
     setSubmitState,
     setLastResult,
+    onOutcome,
     updateMessage,
     defaultSkipReason,
   } = args;
@@ -468,6 +485,7 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
       setAnswers,
       setSubmitState,
       setLastResult,
+      onOutcome,
       updateMessage,
     ],
   );
@@ -493,6 +511,7 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
       inflightRef,
       setSubmitState,
       setLastResult,
+      onOutcome,
       updateMessage,
       defaultSkipReason,
     ],
@@ -527,6 +546,7 @@ function useClarificationSubmission(args: UseClarificationSubmissionArgs) {
 // presses ArrowRight on the last step.
 export function useClarificationGroup(
   messages: readonly Message[] | null | undefined,
+  onOutcome?: (outcome: ClarificationOutcome) => void,
 ): ClarificationGroupApi {
   const { t } = useTranslation();
   const storeApi = useAppStoreApi();
@@ -596,6 +616,7 @@ export function useClarificationGroup(
     setAnswers,
     setSubmitState,
     setLastResult,
+    onOutcome,
     updateMessage: storeApi.getState().updateMessage,
     defaultSkipReason: t("task:userSkippedClarification"),
   });

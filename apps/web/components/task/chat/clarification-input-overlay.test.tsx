@@ -481,6 +481,47 @@ describe("ClarificationInputOverlay — submit failure feedback", () => {
   });
 });
 
+describe("ClarificationInputOverlay — outcome lifetime", () => {
+  it("delivers a delayed losing outcome after the overlay unmounts", async () => {
+    let resolveResponse: ((response: Response) => void) | undefined;
+    fetchMock.mockImplementationOnce(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveResponse = resolve;
+        }),
+    );
+    const onOutcome = vi.fn();
+    const { unmount } = renderOverlay(
+      [clarMessage({ id: "m1", questionId: "q1", index: 0, total: 1 })],
+      { onOutcome },
+    );
+
+    fireEvent.click(screen.getByTestId(TESTID_OPTION));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    unmount();
+
+    resolveResponse?.(
+      new Response(
+        JSON.stringify({
+          success: true,
+          claimed: false,
+          status: "answered",
+          response: { answers: [{ question_id: "q1", selected_options: ["o1"] }] },
+        }),
+        { status: 200 },
+      ),
+    );
+
+    await vi.waitFor(() =>
+      expect(onOutcome).toHaveBeenCalledWith({
+        kind: "resolved",
+        claimedByThisCaller: false,
+        status: "answered",
+      }),
+    );
+  });
+});
+
 describe("ClarificationInputOverlay — bundle-local state", () => {
   it("resets custom drafts and the active question when the bundle changes", async () => {
     const bundleA = [

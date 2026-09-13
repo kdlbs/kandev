@@ -8,6 +8,7 @@ import {
   selectNeedsYouInboxBundles,
   selectNeedsYouInboxHasMore,
   selectNeedsYouInboxHiddenCount,
+  selectNeedsYouInboxRevision,
   selectNeedsYouInboxStatus,
 } from "@/lib/state/slices/needs-you-inbox/selectors";
 import type { ClarificationInboxBundle } from "@/lib/types/clarification-inbox";
@@ -37,10 +38,12 @@ function NeedsYouInboxList({
   bundles,
   hasMore,
   hiddenCount,
+  listRevision,
 }: {
   bundles: readonly ClarificationInboxBundle[];
   hasMore: boolean;
   hiddenCount: number;
+  listRevision: number;
 }) {
   const { t } = useTranslation();
   return (
@@ -55,7 +58,9 @@ function NeedsYouInboxList({
           {t("needsYouInbox:truncatedNotice")}
         </p>
       )}
-      {hiddenCount > 0 && <NeedsYouInboxHiddenPanel hiddenCount={hiddenCount} />}
+      {hiddenCount > 0 && (
+        <NeedsYouInboxHiddenPanel hiddenCount={hiddenCount} listRevision={listRevision} />
+      )}
     </>
   );
 }
@@ -69,6 +74,7 @@ export function NeedsYouInboxPageClient() {
   const status = useAppStore(selectNeedsYouInboxStatus);
   const bundles = useAppStore(selectNeedsYouInboxBundles);
   const hiddenCount = useAppStore(selectNeedsYouInboxHiddenCount);
+  const listRevision = useAppStore(selectNeedsYouInboxRevision);
   const hasMore = useAppStore(selectNeedsYouInboxHasMore);
   const bumpRefreshTick = useAppStore((s) => s.bumpNeedsYouInboxRefreshTick);
   const retry = useCallback(() => bumpRefreshTick(), [bumpRefreshTick]);
@@ -83,9 +89,16 @@ export function NeedsYouInboxPageClient() {
           {t("common:loading")}
         </p>
       )}
-      {viewMode === "empty" && <NeedsYouInboxEmptyState hiddenCount={hiddenCount} />}
+      {viewMode === "empty" && (
+        <NeedsYouInboxEmptyState hiddenCount={hiddenCount} listRevision={listRevision} />
+      )}
       {viewMode === "list" && (
-        <NeedsYouInboxList bundles={bundles} hasMore={hasMore} hiddenCount={hiddenCount} />
+        <NeedsYouInboxList
+          bundles={bundles}
+          hasMore={hasMore}
+          hiddenCount={hiddenCount}
+          listRevision={listRevision}
+        />
       )}
     </PageShell>
   );

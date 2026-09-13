@@ -158,6 +158,11 @@ function RowActionsMenu({
   );
 }
 
+function taskHrefForBundle(bundle: ClarificationInboxBundle): string {
+  if (!bundle.session_id) return `/t/${bundle.task_id}`;
+  return `/t/${bundle.task_id}?sessionId=${encodeURIComponent(bundle.session_id)}`;
+}
+
 export function NeedsYouInboxRow({ bundle }: { bundle: ClarificationInboxBundle }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
@@ -167,7 +172,7 @@ export function NeedsYouInboxRow({ bundle }: { bundle: ClarificationInboxBundle 
   const primaryText = rowPrimaryText(bundle, t("needsYouInbox:questionFromAgent"));
   const secondaryText = rowSecondaryText(bundle);
   const questionCount = rowQuestionCount(bundle);
-  const taskHref = `/t/${bundle.task_id}`;
+  const taskHref = taskHrefForBundle(bundle);
   const relativeTime = formatRelativeTime(bundle.created_at);
   const statusLabel = t(
     resolveThreadSessionStatus({

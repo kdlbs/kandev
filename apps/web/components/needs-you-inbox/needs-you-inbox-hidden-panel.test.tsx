@@ -258,4 +258,28 @@ describe("NeedsYouInboxHiddenPanel staleness guards", () => {
       screen.getByText("3 questions are hidden by your own dismiss or snooze."),
     ).not.toBeNull();
   });
+
+  it("re-enumerates while open when a newer main-list response keeps the same hidden count", async () => {
+    mocks.listHidden.mockResolvedValueOnce({
+      bundles: [hiddenBundle({ pending_id: "p1", context: "First" })],
+      count: 1,
+      total: 1,
+    });
+    const { rerender } = render(<NeedsYouInboxHiddenPanel hiddenCount={1} listRevision={1} />);
+    fireEvent.click(screen.getByText(SHOW_HIDDEN));
+    await screen.findByText("First");
+
+    // A newer main-list response replaced one hidden row with another, so the
+    // count stayed at one while the disclosed set changed.
+    mocks.listHidden.mockResolvedValueOnce({
+      bundles: [hiddenBundle({ pending_id: "p2", context: "Second" })],
+      count: 1,
+      total: 1,
+    });
+    rerender(<NeedsYouInboxHiddenPanel hiddenCount={1} listRevision={2} />);
+
+    expect(await screen.findByText("Second")).not.toBeNull();
+    expect(screen.queryByText("First")).toBeNull();
+    expect(mocks.listHidden).toHaveBeenCalledTimes(2);
+  });
 });

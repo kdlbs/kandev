@@ -5,6 +5,7 @@ import { rowPrimaryText, rowSecondaryText } from "./row-presentation";
 
 const FALLBACK = "fallback";
 const QUESTION_FROM_AGENT = "Question from agent";
+const QUESTION_PROMPT = "Which plan?";
 
 function bundle(overrides: Partial<ClarificationInboxBundle> = {}): ClarificationInboxBundle {
   return {
@@ -49,8 +50,15 @@ describe("rowPrimaryText", () => {
   });
 
   it("falls back to the prompt when the title is empty", () => {
-    const b = bundle({ messages: [messageWithQuestion({ prompt: "Which plan?" })] });
-    expect(rowPrimaryText(b, FALLBACK)).toBe("Which plan?");
+    const b = bundle({ messages: [messageWithQuestion({ prompt: QUESTION_PROMPT })] });
+    expect(rowPrimaryText(b, FALLBACK)).toBe(QUESTION_PROMPT);
+  });
+
+  it("falls back to the prompt when the title contains only whitespace", () => {
+    const b = bundle({
+      messages: [messageWithQuestion({ title: "  \n", prompt: QUESTION_PROMPT })],
+    });
+    expect(rowPrimaryText(b, FALLBACK)).toBe(QUESTION_PROMPT);
   });
 
   it("falls back to the bundle context when title and prompt are both empty", () => {
