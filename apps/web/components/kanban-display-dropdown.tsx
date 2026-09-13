@@ -2,13 +2,8 @@
 
 import { Button } from "@kandev/ui/button";
 import { Checkbox } from "@kandev/ui/checkbox";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@kandev/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
+import { DropdownMenuLabel, DropdownMenuSeparator } from "@kandev/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { IconAdjustmentsHorizontal } from "@tabler/icons-react";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
@@ -18,7 +13,7 @@ import {
 } from "@/lib/plugins/registry";
 import type { Repository, TaskPriority } from "@/lib/types/http";
 import type { WorkflowsState } from "@/lib/state/slices";
-import { useMemo, useRef, useState, type ComponentProps } from "react";
+import { useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { getRepositoryPlaceholderKey } from "@/lib/kanban/repository-placeholder";
 import type { TaskListingPage } from "@/lib/task-listing/view-navigation";
@@ -28,6 +23,12 @@ import {
   type KanbanSort,
 } from "@/lib/kanban/kanban-sort";
 import { TASK_PRIORITY_TOKENS, TASK_PRIORITY_LABEL_KEYS } from "@/lib/tasks/task-priority";
+import { DisplaySettingsDisclosure } from "@/components/display-settings-disclosure";
+import {
+  buildDisplayBooleanSummary,
+  buildDisplayFilterSummary,
+  buildDisplaySortSummary,
+} from "@/components/display-settings-summary";
 
 type KanbanDisplayDropdownProps = {
   triggerSize?: ComponentProps<typeof Button>["size"];
@@ -36,6 +37,16 @@ type KanbanDisplayDropdownProps = {
   pluginFilters?: PluginTaskFilterRegistration[];
   pluginFilterSelections?: Record<string, string[]>;
   onPluginFilterChange?: (filterId: string, values: string[]) => void;
+};
+
+type DisplaySettingsGroup = "filters" | "sort" | "preview" | "list-rows";
+type DisplaySettingsExpansion = Record<DisplaySettingsGroup, boolean>;
+
+const COLLAPSED_DISPLAY_SETTINGS: DisplaySettingsExpansion = {
+  filters: false,
+  sort: false,
+  preview: false,
+  "list-rows": false,
 };
 
 function WorkflowSection({
@@ -254,81 +265,119 @@ function TasksListSection({
 }) {
   const { t } = useTranslation();
   return (
-    <>
-      <DropdownMenuSeparator />
-      <div className="space-y-1.5">
-        <DropdownMenuLabel className="px-0 text-foreground">
-          {t("kanban:listRows")}
-        </DropdownMenuLabel>
-        <label className="flex items-center gap-2 cursor-pointer">
-          <Checkbox
-            checked={tasksListShowDetails}
-            onCheckedChange={(checked) => onToggleTasksListShowDetails(checked === true)}
-          />
-          <span className="text-sm text-foreground">{t("kanban:showTaskDetails")}</span>
-        </label>
-        <p className="pl-6 text-xs text-muted-foreground">
-          {t("kanban:addRepositoryPullRequestSessionParent")}
-        </p>
-      </div>
-    </>
+    <div className="space-y-1.5">
+      <DropdownMenuLabel className="px-0 text-foreground">{t("kanban:listRows")}</DropdownMenuLabel>
+      <label className="flex items-center gap-2 cursor-pointer">
+        <Checkbox
+          data-testid="display-task-details-toggle"
+          checked={tasksListShowDetails}
+          onCheckedChange={(checked) => onToggleTasksListShowDetails(checked === true)}
+        />
+        <span className="text-sm text-foreground">{t("kanban:showTaskDetails")}</span>
+      </label>
+      <p className="pl-6 text-xs text-muted-foreground">
+        {t("kanban:addRepositoryPullRequestSessionParent")}
+      </p>
+    </div>
+  );
+}
+
+function DisplaySettingsGroup({
+  group,
+  title,
+  summary,
+  expanded,
+  onExpandedChange,
+  children,
+}: {
+  group: DisplaySettingsGroup;
+  title: string;
+  summary: string;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+  children: ReactNode;
+}) {
+  return (
+    <DisplaySettingsDisclosure
+      testId={`display-settings-${group}`}
+      title={title}
+      summary={summary}
+      expanded={expanded}
+      onExpandedChange={onExpandedChange}
+      className="px-0"
+      contentClassName="space-y-3 pb-1"
+    >
+      {children}
+    </DisplaySettingsDisclosure>
   );
 }
 
 type DropdownSectionsProps = KanbanDisplayDropdownProps &
   ReturnType<typeof useKanbanDisplaySettings> & {
     repositoryValue: string;
+    expandedGroups: DisplaySettingsExpansion;
+    onExpandedChange: (group: DisplaySettingsGroup, expanded: boolean) => void;
   };
 
-function DropdownSections({
-  currentPage,
-  pluginFilters,
-  pluginFilterSelections,
-  onPluginFilterChange,
-  workflows,
-  activeWorkflowId,
-  repositories,
-  repositoriesLoading,
-  repositoryValue,
-  enablePreviewOnClick,
-  tasksListShowDetails,
-  boardSort,
-  priorityFilterTokens,
-  onWorkflowChange,
-  onRepositoryChange,
-  onTogglePreviewOnClick,
-  onToggleTasksListShowDetails,
-  onBoardSortChange,
-  onPriorityFilterChange,
-}: DropdownSectionsProps) {
+function DesktopFiltersGroup({
+  settings,
+  expanded,
+  onExpandedChange,
+}: {
+  settings: DropdownSectionsProps;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const showRepository = settings.currentPage !== "threads";
+  const showPriority = settings.currentPage === "kanban";
+  const visiblePluginFilters =
+    settings.currentPage === "threads" ? [] : (settings.pluginFilters ?? []);
   return (
-    <div className="space-y-3">
+    <DisplaySettingsGroup
+      group="filters"
+      title={t("kanban:filters")}
+      summary={buildDisplayFilterSummary({
+        t,
+        activeWorkflowId: settings.activeWorkflowId,
+        workflows: settings.workflows,
+        showWorkflow: true,
+        repositoryValue: settings.repositoryValue,
+        repositories: settings.repositories,
+        repositoriesLoading: settings.repositoriesLoading,
+        showRepository,
+        priorityFilterTokens: settings.priorityFilterTokens,
+        showPriority,
+        pluginFilters: visiblePluginFilters,
+        pluginFilterSelections: settings.pluginFilterSelections,
+      })}
+      expanded={expanded}
+      onExpandedChange={onExpandedChange}
+    >
       <WorkflowSection
-        activeWorkflowId={activeWorkflowId}
-        workflows={workflows}
-        onWorkflowChange={onWorkflowChange}
+        activeWorkflowId={settings.activeWorkflowId}
+        workflows={settings.workflows}
+        onWorkflowChange={settings.onWorkflowChange}
       />
-      {currentPage !== "threads" && (
+      {showRepository && (
         <>
           <DropdownMenuSeparator />
           <RepositorySection
-            repositoryValue={repositoryValue}
-            repositories={repositories}
-            repositoriesLoading={repositoriesLoading}
-            onRepositoryChange={onRepositoryChange}
+            repositoryValue={settings.repositoryValue}
+            repositories={settings.repositories}
+            repositoriesLoading={settings.repositoriesLoading}
+            onRepositoryChange={settings.onRepositoryChange}
           />
-          {currentPage === "kanban" && (
+          {showPriority && (
             <>
               <DropdownMenuSeparator />
-              <BoardSortSection boardSort={boardSort} onBoardSortChange={onBoardSortChange} />
-              <DropdownMenuSeparator />
               <PriorityFilterSection
-                priorityFilterTokens={priorityFilterTokens}
-                onPriorityFilterChange={onPriorityFilterChange}
+                priorityFilterTokens={settings.priorityFilterTokens}
+                onPriorityFilterChange={settings.onPriorityFilterChange}
               />
             </>
           )}
-          {pluginFilters?.map((filter) => {
+          {visiblePluginFilters.map((filter) => {
             const filterKey = pluginTaskFilterRegistrationKey(filter);
             return (
               <div key={filterKey} className="contents">
@@ -336,24 +385,70 @@ function DropdownSections({
                 <PluginFilterSection
                   filter={filter}
                   filterKey={filterKey}
-                  selected={pluginFilterSelections?.[filterKey] ?? []}
-                  onChange={(values) => onPluginFilterChange?.(filterKey, values)}
+                  selected={settings.pluginFilterSelections?.[filterKey] ?? []}
+                  onChange={(values) => settings.onPluginFilterChange?.(filterKey, values)}
                 />
               </div>
             );
           })}
-          <DropdownMenuSeparator />
-          <PreviewPanelSection
-            enablePreviewOnClick={enablePreviewOnClick}
-            onTogglePreviewOnClick={onTogglePreviewOnClick}
-          />
         </>
       )}
-      {currentPage === "tasks" && (
-        <TasksListSection
-          tasksListShowDetails={tasksListShowDetails}
-          onToggleTasksListShowDetails={onToggleTasksListShowDetails}
-        />
+    </DisplaySettingsGroup>
+  );
+}
+
+function DropdownSections(props: DropdownSectionsProps) {
+  const { t } = useTranslation();
+  const showRepository = props.currentPage !== "threads";
+  const showPriority = props.currentPage === "kanban";
+  return (
+    <div className="space-y-3">
+      <DesktopFiltersGroup
+        settings={props}
+        expanded={props.expandedGroups.filters}
+        onExpandedChange={(expanded) => props.onExpandedChange("filters", expanded)}
+      />
+      {showPriority && (
+        <DisplaySettingsGroup
+          group="sort"
+          title={t("kanban:sort")}
+          summary={buildDisplaySortSummary(t, props.boardSort)}
+          expanded={props.expandedGroups.sort}
+          onExpandedChange={(expanded) => props.onExpandedChange("sort", expanded)}
+        >
+          <BoardSortSection
+            boardSort={props.boardSort}
+            onBoardSortChange={props.onBoardSortChange}
+          />
+        </DisplaySettingsGroup>
+      )}
+      {showRepository && (
+        <DisplaySettingsGroup
+          group="preview"
+          title={t("kanban:previewPanel")}
+          summary={buildDisplayBooleanSummary(t, props.enablePreviewOnClick)}
+          expanded={props.expandedGroups.preview}
+          onExpandedChange={(expanded) => props.onExpandedChange("preview", expanded)}
+        >
+          <PreviewPanelSection
+            enablePreviewOnClick={props.enablePreviewOnClick}
+            onTogglePreviewOnClick={props.onTogglePreviewOnClick}
+          />
+        </DisplaySettingsGroup>
+      )}
+      {props.currentPage === "tasks" && (
+        <DisplaySettingsGroup
+          group="list-rows"
+          title={t("kanban:listRows")}
+          summary={buildDisplayBooleanSummary(t, props.tasksListShowDetails)}
+          expanded={props.expandedGroups["list-rows"]}
+          onExpandedChange={(expanded) => props.onExpandedChange("list-rows", expanded)}
+        >
+          <TasksListSection
+            tasksListShowDetails={props.tasksListShowDetails}
+            onToggleTasksListShowDetails={props.onToggleTasksListShowDetails}
+          />
+        </DisplaySettingsGroup>
       )}
     </div>
   );
@@ -371,10 +466,15 @@ export function KanbanDisplayDropdown({
   const repositoryValue = allRepositoriesSelected ? "all" : (selectedRepositoryId ?? "all");
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState(COLLAPSED_DISPLAY_SETTINGS);
+  const handleOpenChange = (nextOpen: boolean) => {
+    setOpen(nextOpen);
+    if (!nextOpen) setExpandedGroups(COLLAPSED_DISPLAY_SETTINGS);
+  };
 
   return (
-    <DropdownMenu open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger asChild>
+    <Popover open={open} onOpenChange={handleOpenChange}>
+      <PopoverTrigger asChild>
         <Button
           ref={triggerRef}
           variant="outline"
@@ -384,12 +484,19 @@ export function KanbanDisplayDropdown({
         >
           <IconAdjustmentsHorizontal className="h-4 w-4" />
         </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
+      </PopoverTrigger>
+      <PopoverContent
         align="end"
-        className="w-[280px] p-3"
+        data-testid="display-settings-content"
+        className="w-[280px] max-h-(--radix-popover-content-available-height) overflow-y-auto p-3"
         onPointerDownOutside={(e) => {
-          if (triggerRef.current?.contains(e.target as Node)) e.preventDefault();
+          const target = e.target as HTMLElement;
+          if (
+            triggerRef.current?.contains(target) ||
+            target.closest("[data-radix-select-content]")
+          ) {
+            e.preventDefault();
+          }
         }}
       >
         <DropdownSections
@@ -399,8 +506,12 @@ export function KanbanDisplayDropdown({
           pluginFilterSelections={pluginFilterSelections}
           onPluginFilterChange={onPluginFilterChange}
           repositoryValue={repositoryValue}
+          expandedGroups={expandedGroups}
+          onExpandedChange={(group, expanded) =>
+            setExpandedGroups((current) => ({ ...current, [group]: expanded }))
+          }
         />
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </PopoverContent>
+    </Popover>
   );
 }

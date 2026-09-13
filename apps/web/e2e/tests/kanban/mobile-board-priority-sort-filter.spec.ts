@@ -1,5 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
+import { expandDisplaySettingsGroup } from "../../helpers/display-settings";
 
 // docs/specs/tasks/requirements/board-priority-sort-filter-view-state.md
 // REQ-003: the priority filter and board sort control must be reachable and
@@ -10,7 +11,7 @@ const TASK_CRITICAL = "Mobile sort task critical";
 const TASK_MEDIUM = "Mobile sort task medium";
 
 async function openMobileMenu(testPage: import("@playwright/test").Page) {
-  await testPage.getByRole("button", { name: "Open menu" }).click();
+  await testPage.getByRole("button", { name: "Open menu" }).tap();
   await testPage.getByTestId("mobile-home-menu-card").waitFor({ state: "visible" });
 }
 
@@ -56,9 +57,10 @@ test.describe("Mobile board priority sort and filter", () => {
     await expect(kanban.taskCardByTitle(TASK_MEDIUM)).toBeVisible({ timeout: 10_000 });
 
     await openMobileMenu(testPage);
+    await expandDisplaySettingsGroup(testPage, "filters", "mobile");
     const criticalOption = testPage.getByTestId("mobile-priority-filter-option-critical");
     await expect(criticalOption).toBeVisible();
-    await criticalOption.click();
+    await criticalOption.tap();
     await closeMobileMenu(testPage);
 
     await expect(kanban.taskCardByTitle(TASK_CRITICAL)).toBeVisible({ timeout: 10_000 });
@@ -97,6 +99,8 @@ test.describe("Mobile board priority sort and filter", () => {
     await expect(kanban.taskCardByTitle(TASK_MEDIUM)).not.toBeVisible();
 
     await openMobileMenu(testPage);
+    await expandDisplaySettingsGroup(testPage, "filters", "mobile");
+    await expandDisplaySettingsGroup(testPage, "sort", "mobile");
     await expect(testPage.getByTestId("mobile-board-sort")).toContainText("Priority");
     await expect(testPage.getByTestId("mobile-priority-filter-option-critical")).toHaveAttribute(
       "data-state",
