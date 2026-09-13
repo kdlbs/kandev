@@ -754,6 +754,7 @@ func mapKanbanStepState(step taskdto.WorkflowStepDTO) map[string]any {
 		"stage_type":                   nullString(step.StageType),
 		"wip_limit":                    step.WIPLimit,
 		"pull_from_step_id":            nullString(step.PullFromStepID),
+		"order_revision":               step.OrderRevision,
 	}
 }
 

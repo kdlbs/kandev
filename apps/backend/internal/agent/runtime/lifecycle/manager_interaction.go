@@ -1319,7 +1319,9 @@ func (m *Manager) initializeACPSessionForRestart(
 	execution.ACPSessionID = result.SessionID
 
 	if m.sessionManager.eventPublisher != nil {
-		m.sessionManager.eventPublisher.PublishACPSessionCreated(execution, result.SessionID)
+		m.sessionManager.eventPublisher.PublishACPSessionCreatedWithAttempt(
+			execution, result.SessionID, ResumeAttemptIDFromContext(ctx),
+		)
 	}
 
 	return nil
@@ -1776,16 +1778,30 @@ func (m *Manager) MarkReady(executionID string) error {
 // Publishes events.AgentBootReady. Returns error if execution not found.
 func (m *Manager) MarkBootReady(executionID string) error {
 	execution, exists := m.executionStore.Get(executionID)
-	if exists {
-		m.finalWorkspaceRefresh(execution, "startup_grace")
+	if !exists {
+		return fmt.Errorf("execution %q not found", executionID)
 	}
-	err := m.markReadyEventWithContext(context.Background(), executionID, events.AgentBootReady, false)
-	if err == nil {
-		if exists {
+	err := m.markBootReadyForStartup(
+		context.Background(), executionID, execution.startupAttemptSnapshot(),
+	)
+	return err
+}
+
+func (m *Manager) markBootReadyForStartup(
+	ctx context.Context,
+	executionID string,
+	startupGeneration uint64,
+) error {
+	err := m.markReadyEventWithStartupGeneration(
+		ctx, executionID, events.AgentBootReady, false, startupGeneration,
+		func(execution *AgentExecution) {
+			m.finalWorkspaceRefresh(execution, "startup_grace")
+		},
+		func(execution *AgentExecution) {
 			m.setRuntimeInterest(execution.SessionID, false)
-		}
-		m.releaseActivity(executionActivityKey(executionID))
-	}
+			m.releaseActivity(executionActivityKey(execution.ID))
+		},
+	)
 	return err
 }
 
@@ -1803,7 +1819,17 @@ func (m *Manager) markBootReadyFromFailed(ctx context.Context, executionID strin
 	if execution.Status != v1.AgentStatusFailed {
 		return nil
 	}
-	return m.markReadyEventWithContext(ctx, executionID, events.AgentBootReady, false)
+	startupGeneration := execution.startupAttemptSnapshot()
+	if attemptID := ResumeAttemptIDFromContext(ctx); attemptID != "" {
+		var found bool
+		startupGeneration, found = execution.startupGenerationForAttemptID(attemptID)
+		if !found {
+			return fmt.Errorf("execution %q has no startup generation for resume attempt %q", executionID, attemptID)
+		}
+	}
+	return m.markReadyEventWithStartupGeneration(
+		ctx, executionID, events.AgentBootReady, false, startupGeneration, nil, nil,
+	)
 }
 
 // markReadyEventWithContext flips executionID to Ready and publishes
@@ -1827,6 +1853,53 @@ func (m *Manager) markBootReadyFromFailed(ctx context.Context, executionID strin
 // immutable payload captured while Ready was set, so handleAgentReady can
 // reject it if another prompt generation starts before delivery.
 func (m *Manager) markReadyEventWithContext(ctx context.Context, executionID, eventType string, asyncPublish bool) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found", executionID)
+	}
+	return m.markReadyEventWithStartupGeneration(
+		ctx, executionID, eventType, asyncPublish, execution.startupAttemptSnapshot(), nil, nil,
+	)
+}
+
+func (m *Manager) markReadyEventWithStartupGeneration(
+	ctx context.Context,
+	executionID, eventType string,
+	asyncPublish bool,
+	startupGeneration uint64,
+	before func(*AgentExecution),
+	after func(*AgentExecution),
+) error {
+	execution, exists := m.executionStore.Get(executionID)
+	if !exists {
+		return fmt.Errorf("execution %q not found", executionID)
+	}
+	var readyErr error
+	accepted := execution.withStartupAttempt(startupGeneration, func(attemptID string) {
+		if before != nil {
+			before(execution)
+		}
+		readyErr = m.markReadyEventForExecution(
+			ctx, execution, eventType, asyncPublish, attemptID,
+		)
+		if readyErr == nil && after != nil {
+			after(execution)
+		}
+	})
+	if !accepted {
+		return fmt.Errorf("execution %q startup generation %d is stale", executionID, startupGeneration)
+	}
+	return readyErr
+}
+
+func (m *Manager) markReadyEventForExecution(
+	ctx context.Context,
+	execution *AgentExecution,
+	eventType string,
+	asyncPublish bool,
+	attemptID string,
+) error {
+	executionID := execution.ID
 	var payload AgentEventPayload
 	var updated *AgentExecution
 	var alreadyReady bool
@@ -1837,6 +1910,7 @@ func (m *Manager) markReadyEventWithContext(ctx context.Context, executionID, ev
 		}
 		execution.Status = v1.AgentStatusReady
 		payload = newAgentEventPayload(execution)
+		payload.AttemptID = attemptID
 		updated = execution
 	}); err != nil {
 		if errors.Is(err, ErrExecutionNotFound) {
@@ -1902,6 +1976,18 @@ func (m *Manager) markCompletedWithTurnID(
 	errorMessage, turnID string,
 	failureEvidence *PromptAttemptEvidence,
 ) error {
+	return m.markCompletedWithTurnIDAndAttempt(
+		executionID, exitCode, errorMessage, turnID, failureEvidence, "",
+	)
+}
+
+func (m *Manager) markCompletedWithTurnIDAndAttempt(
+	executionID string,
+	exitCode int,
+	errorMessage, turnID string,
+	failureEvidence *PromptAttemptEvidence,
+	attemptID string,
+) error {
 	execution, exists := m.executionStore.Get(executionID)
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
@@ -1931,10 +2017,7 @@ func (m *Manager) markCompletedWithTurnID(
 			zap.Int("exit_code", exitCode))
 		return nil
 	}
-	if (exitCode != 0 || errorMessage != "") && failureEvidence == nil {
-		evidence := execution.promptAttemptEvidenceSnapshot()
-		failureEvidence = &evidence
-	}
+	failureEvidence = ensureCompletionFailureEvidence(execution, exitCode, errorMessage, failureEvidence)
 
 	_ = m.executionStore.WithLock(executionID, func(exec *AgentExecution) {
 		now := time.Now()
@@ -1974,13 +2057,28 @@ func (m *Manager) markCompletedWithTurnID(
 	}
 	if eventType == events.AgentFailed {
 		m.eventPublisher.publishAgentEventWithTurnIDAndEvidence(
-			context.Background(), eventType, execution, turnID, failureEvidence,
+			WithResumeAttemptID(context.Background(), attemptID), eventType, execution, turnID, failureEvidence,
 		)
 		return nil
 	}
-	m.eventPublisher.publishAgentEventWithTurnID(context.Background(), eventType, execution, turnID)
+	m.eventPublisher.publishAgentEventWithTurnID(
+		WithResumeAttemptID(context.Background(), attemptID), eventType, execution, turnID,
+	)
 
 	return nil
+}
+
+func ensureCompletionFailureEvidence(
+	execution *AgentExecution,
+	exitCode int,
+	errorMessage string,
+	failureEvidence *PromptAttemptEvidence,
+) *PromptAttemptEvidence {
+	if (exitCode == 0 && errorMessage == "") || failureEvidence != nil {
+		return failureEvidence
+	}
+	evidence := execution.promptAttemptEvidenceSnapshot()
+	return &evidence
 }
 
 // isTerminalStatus reports whether a status is a final execution state that

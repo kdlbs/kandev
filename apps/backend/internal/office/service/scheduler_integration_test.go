@@ -112,7 +112,7 @@ func TestSchedulerIntegration_CancelStaleRunRecordsTerminalShape(t *testing.T) {
 		(id, workspace_id, workflow_step_id, title, created_at, updated_at)
 		VALUES ('task-moved-step-shape', 'ws-1', 'step-current', 'Moved task',
 		        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-moved-step-shape","workflow_step_id":"step-old"}`, ""); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}

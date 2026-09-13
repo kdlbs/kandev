@@ -52,6 +52,21 @@ func TestMapKanbanStepStateIncludesAutoAdvanceRequiresSignal(t *testing.T) {
 	}
 }
 
+// TestMapKanbanStepStateIncludesOrderRevision covers the Build-phase fix for
+// missing order_revision on HTTP hydration: without this field in the boot
+// payload, the frontend has no way to seed kanbanMulti.orderRevisionByStepId
+// before the first task.reordered WS event arrives, so that event's revision
+// gate accepts whatever arrives first — even a stale reorder.
+func TestMapKanbanStepStateIncludesOrderRevision(t *testing.T) {
+	step := mapKanbanStepState(taskdto.WorkflowStepDTO{
+		ID:            "step-revisioned",
+		OrderRevision: 7,
+	})
+	if step["order_revision"] != int64(7) {
+		t.Fatalf("order_revision = %#v, want 7", step["order_revision"])
+	}
+}
+
 // TestMapKanbanTaskStateIncludesAutoStartFailed regression-tests Review round
 // 2's MAJOR finding: mapKanbanTaskState is a camelCase whitelist that omitted
 // auto_start_failed, so a task whose auto-start already failed rendered with

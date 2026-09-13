@@ -98,6 +98,9 @@ describe("kanban slice workspace transition", () => {
           },
         },
         isLoading: true,
+        orderRevisionByStepId: {},
+        pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
       },
       workflows: {
         items: [{ id: WORKFLOW_ID, workspaceId: ARCHIVED_WORKSPACE_ID, name: "Workflow A" }],
@@ -242,5 +245,26 @@ describe("kanban slice resume-skipped marker", () => {
 
     store.getState().setResumeSkipped("session-running", false);
     expect(store.getState().tasks.resumeSkippedSessionIds["session-running"]).toBeUndefined();
+  });
+});
+
+describe("kanban slice step order revision and in-flight reorder tracking", () => {
+  it("records and overwrites a step's last-applied order revision", () => {
+    const store = makeStore();
+    store.getState().setStepOrderRevision("step-1", 3);
+    expect(store.getState().kanbanMulti.orderRevisionByStepId["step-1"]).toBe(3);
+
+    store.getState().setStepOrderRevision("step-1", 4);
+    expect(store.getState().kanbanMulti.orderRevisionByStepId["step-1"]).toBe(4);
+  });
+
+  it("marks and clears a band as pending, keyed by step and band", () => {
+    const store = makeStore();
+    store.getState().setBandReorderPending("step-1", "admitted", true);
+    expect(store.getState().kanbanMulti.pendingReorderBandKeys["step-1:admitted"]).toBe(true);
+    expect(store.getState().kanbanMulti.pendingReorderBandKeys["step-1:queued"]).toBeUndefined();
+
+    store.getState().setBandReorderPending("step-1", "admitted", false);
+    expect(store.getState().kanbanMulti.pendingReorderBandKeys["step-1:admitted"]).toBeUndefined();
   });
 });

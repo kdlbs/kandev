@@ -10,6 +10,8 @@ const responsive = vi.hoisted(() => ({
 }));
 const EMPTY_CANDIDATES: never[] = [];
 const VIEW_PICKER_TEST_ID = "threads-view-picker";
+const VIEW_SETTINGS_TEST_ID = "threads-view-settings";
+const MOBILE_VIEW_TRIGGER_TEST_ID = "threads-mobile-view-trigger";
 const DELETE_ACTION_TEST_ID = "threads-view-delete";
 const MOBILE_DRAWER_TEST_ID = "threads-mobile-view-drawer";
 
@@ -20,6 +22,8 @@ const ALL_VIEW: ThreadView = {
   filters: [],
   sort: { key: "attention", direction: "asc" },
   maxColumns: null,
+  layout: "columns",
+  autoHideComposer: false,
 };
 const REVIEW_VIEW: ThreadView = {
   ...ALL_VIEW,
@@ -79,7 +83,7 @@ describe("ThreadsViewControls", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId("threads-view-settings"));
+    fireEvent.click(screen.getByTestId(VIEW_SETTINGS_TEST_ID));
     fireEvent.click(screen.getByTestId(DELETE_ACTION_TEST_ID));
 
     expect(state.deleteThreadView).not.toHaveBeenCalled();
@@ -109,7 +113,7 @@ describe("ThreadsViewControls", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId("threads-mobile-view-trigger"));
+    fireEvent.click(screen.getByTestId(MOBILE_VIEW_TRIGGER_TEST_ID));
     fireEvent.click(await screen.findByTestId("threads-mobile-view-settings"));
     const trigger = await screen.findByTestId(DELETE_ACTION_TEST_ID);
     const drawerId = screen.getByTestId(MOBILE_DRAWER_TEST_ID).id;
@@ -147,7 +151,7 @@ describe("ThreadsViewControls", () => {
     );
 
     expect(screen.getByTestId(VIEW_PICKER_TEST_ID)).toBeTruthy();
-    expect(screen.getByText("2 of 5 columns")).toBeTruthy();
+    expect(screen.getByText("2 of 5 chats")).toBeTruthy();
     expect(screen.getByText("3 hidden")).toBeTruthy();
 
     fireEvent.pointerDown(screen.getByTestId(VIEW_PICKER_TEST_ID));
@@ -166,7 +170,7 @@ describe("ThreadsViewControls", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId("threads-view-settings"));
+    fireEvent.click(screen.getByTestId(VIEW_SETTINGS_TEST_ID));
     expect(screen.getByTestId("threads-view-editor")).toBeTruthy();
     fireEvent.click(screen.getByTestId("threads-filter-add"));
 
@@ -205,7 +209,7 @@ describe("ThreadsViewControls mobile composition", () => {
       />,
     );
 
-    const trigger = screen.getByTestId("threads-mobile-view-trigger");
+    const trigger = screen.getByTestId(MOBILE_VIEW_TRIGGER_TEST_ID);
     expect(trigger).toBeTruthy();
     expect(screen.queryByTestId(VIEW_PICKER_TEST_ID)).toBeNull();
 
@@ -225,6 +229,8 @@ describe("ThreadsViewControls mobile composition", () => {
       filters: [],
       sort: ALL_VIEW.sort,
       maxColumns: null,
+      layout: "columns",
+      autoHideComposer: false,
     };
     render(
       <ThreadsViewControls
@@ -235,7 +241,7 @@ describe("ThreadsViewControls mobile composition", () => {
       />,
     );
 
-    fireEvent.click(screen.getByTestId("threads-mobile-view-trigger"));
+    fireEvent.click(screen.getByTestId(MOBILE_VIEW_TRIGGER_TEST_ID));
     fireEvent.click(await screen.findByTestId("threads-mobile-view-settings"));
     expect(await screen.findByTestId("threads-view-editor")).toBeTruthy();
     fireEvent.click(screen.getByTestId("threads-open-task-picker"));
@@ -243,5 +249,104 @@ describe("ThreadsViewControls mobile composition", () => {
     fireEvent.click(screen.getByTestId("threads-task-picker-back"));
     expect(screen.getByTestId("threads-view-editor")).toBeTruthy();
     expect(screen.getByTestId(MOBILE_DRAWER_TEST_ID)).toBeTruthy();
+  });
+});
+
+describe("Threads saved-view draft protection", () => {
+  it.each(["desktop", "phone", "tablet"])(
+    "requires Save or Discard before switching on %s",
+    async (mode) => {
+      responsive.isMobile = mode === "phone";
+      responsive.isFinePointer = mode === "desktop";
+      responsive.usesDesktopWorkbench = mode !== "phone";
+      state.threadViews.draft = { ...ALL_VIEW, baseViewId: ALL_VIEW.id, layout: "grid" };
+      render(
+        <ThreadsViewControls
+          candidates={EMPTY_CANDIDATES}
+          admittedCount={0}
+          matchingCount={0}
+          hiddenCount={0}
+        />,
+      );
+      if (mode === "desktop") fireEvent.pointerDown(screen.getByTestId(VIEW_PICKER_TEST_ID));
+      else fireEvent.click(screen.getByTestId(MOBILE_VIEW_TRIGGER_TEST_ID));
+      const option = await screen.findByTestId(
+        mode === "desktop"
+          ? "threads-view-option-view-review"
+          : "threads-mobile-view-option-view-review",
+      );
+      expect(option.matches('[disabled], [aria-disabled="true"]')).toBe(true);
+      expect(
+        screen.getByText("Save or discard your changes in View settings before switching views."),
+      ).toBeTruthy();
+      fireEvent.click(option);
+      expect(state.setThreadActiveView).not.toHaveBeenCalled();
+    },
+  );
+});
+
+describe("Threads Display settings", () => {
+  function controls() {
+    return (
+      <ThreadsViewControls
+        candidates={EMPTY_CANDIDATES}
+        admittedCount={2}
+        matchingCount={5}
+        hiddenCount={3}
+      />
+    );
+  }
+
+  it("keeps layout selection inside the configurator with the existing draft actions", async () => {
+    state.updateThreadViewDraft.mockImplementationOnce((patch) => {
+      state.threadViews.draft = { ...ALL_VIEW, baseViewId: ALL_VIEW.id, ...patch };
+    });
+    const view = render(controls());
+    expect(screen.queryByTestId("threads-layout-shortcut")).toBeNull();
+    expect(screen.queryByRole("combobox")).toBeNull();
+    fireEvent.click(screen.getByTestId(VIEW_SETTINGS_TEST_ID));
+    fireEvent.keyDown(screen.getByTestId("threads-layout-select"), { key: "ArrowDown" });
+    fireEvent.keyDown(await screen.findByRole("option", { name: "Grid" }), { key: "Enter" });
+    expect(state.updateThreadViewDraft).toHaveBeenCalledExactlyOnceWith({ layout: "grid" });
+    view.rerender(controls());
+    expect(await screen.findByTestId("threads-view-settings-popover")).toBeTruthy();
+    expect(screen.getByTestId("threads-view-save")).toBeTruthy();
+    expect(screen.getByTestId("threads-view-discard")).toBeTruthy();
+    expect(state.saveThreadViewDraftOverwrite).not.toHaveBeenCalled();
+  });
+
+  it("shows draft presentation values and sends minimal editor patches", async () => {
+    state.threadViews.draft = {
+      ...ALL_VIEW,
+      baseViewId: ALL_VIEW.id,
+      layout: "grid",
+      autoHideComposer: true,
+    };
+    render(controls());
+    expect(screen.queryByTestId("threads-layout-shortcut")).toBeNull();
+    fireEvent.click(screen.getByTestId(VIEW_SETTINGS_TEST_ID));
+    expect(screen.getByTestId("threads-layout-select").textContent).toBe("Grid");
+    const toggle = screen.getByRole("switch", { name: "Auto-hide composer" });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(toggle);
+    expect(state.updateThreadViewDraft).toHaveBeenLastCalledWith({ autoHideComposer: false });
+    fireEvent.keyDown(screen.getByTestId("threads-layout-select"), { key: "ArrowDown" });
+    fireEvent.keyDown(await screen.findByRole("option", { name: "Columns" }), { key: "Enter" });
+    expect(state.updateThreadViewDraft).toHaveBeenLastCalledWith({ layout: "columns" });
+    expect(screen.getByLabelText("Maximum chats")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("threads-view-discard"));
+    expect(state.discardThreadViewDraft).toHaveBeenCalledOnce();
+  });
+
+  it("uses the existing drawer on a wide coarse-pointer tablet", async () => {
+    responsive.usesDesktopWorkbench = true;
+    responsive.isFinePointer = false;
+    render(controls());
+    expect(screen.queryByTestId("threads-layout-shortcut")).toBeNull();
+    fireEvent.click(screen.getByTestId(MOBILE_VIEW_TRIGGER_TEST_ID));
+    fireEvent.click(await screen.findByTestId("threads-mobile-view-settings"));
+    expect(screen.getAllByTestId(MOBILE_DRAWER_TEST_ID)).toHaveLength(1);
+    expect(screen.getByRole("switch", { name: "Auto-hide composer" })).toBeTruthy();
+    expect(screen.getByTestId("threads-touch-composer-hint")).toBeTruthy();
   });
 });

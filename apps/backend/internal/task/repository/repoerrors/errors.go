@@ -12,6 +12,10 @@ var ErrWorkspaceNotFound = errors.New("workspace not found")
 // ErrTaskNotFound reports that no task row matched the supplied id.
 var ErrTaskNotFound = errors.New("task not found")
 
+// ErrInitialTaskBriefStale reports that a prepared task's description changed
+// before its first direct message could be admitted.
+var ErrInitialTaskBriefStale = errors.New("initial task brief is stale")
+
 // ErrMessageNotFound reports that no message row matched the supplied id.
 var ErrMessageNotFound = errors.New("message not found")
 
@@ -105,3 +109,16 @@ var ErrExecutorProfileNotFound = errors.New("executor profile not found")
 // compatibility-gate snapshot, a failed metadata write, or a failed commit.
 // It is the one retriable outcome: a caller may repeat the request.
 var ErrRunnerEvaluationUnavailable = errors.New("runner switch evaluation unavailable")
+
+// ErrStepChanged reports that a reorder's submitted band membership no
+// longer exactly matches the band's persisted membership
+// (REQ-TASKS-KANBAN-TASK-REORDERING-001.19). The whole request is rejected
+// atomically and the caller reconciles to the authoritative order the error
+// carries, silently rather than showing the user a message.
+var ErrStepChanged = errors.New("step_changed")
+
+// ErrInvalidReorder reports a malformed reorder request
+// (REQ-TASKS-KANBAN-TASK-REORDERING-001.18): no valid band named, an empty or
+// duplicate id list, or an id that names a task outside the named step/band.
+// Unlike ErrStepChanged this implies nothing about the persisted order.
+var ErrInvalidReorder = errors.New("invalid_reorder")

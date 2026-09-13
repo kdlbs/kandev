@@ -108,10 +108,14 @@ describe("useSessionResumption archive lifecycle", () => {
       await Promise.resolve();
     });
 
-    expect(mockRequest).toHaveBeenCalledWith("task.session.status", {
-      task_id: TASK_ID,
-      session_id: SESSION_ID,
-    });
+    expect(mockRequest).toHaveBeenCalledWith(
+      "task.session.status",
+      {
+        task_id: TASK_ID,
+        session_id: SESSION_ID,
+      },
+      10000,
+    );
   });
 
   it("does not start an agent after unarchive when automatic start is disabled", async () => {

@@ -419,13 +419,14 @@ type ActivityTargetType string
 
 // Known activity target types (subset; new domains add new values).
 const (
-	ActivityTargetAgent   ActivityTargetType = "agent"
-	ActivityTargetTask    ActivityTargetType = "task"
-	ActivityTargetProject ActivityTargetType = "project"
-	ActivityTargetBudget  ActivityTargetType = "budget"
-	ActivityTargetSkill   ActivityTargetType = "skill"
-	ActivityTargetChannel ActivityTargetType = "channel"
-	ActivityTargetRoutine ActivityTargetType = "routine"
+	ActivityTargetAgent     ActivityTargetType = "agent"
+	ActivityTargetTask      ActivityTargetType = "task"
+	ActivityTargetProject   ActivityTargetType = "project"
+	ActivityTargetBudget    ActivityTargetType = "budget"
+	ActivityTargetSkill     ActivityTargetType = "skill"
+	ActivityTargetChannel   ActivityTargetType = "channel"
+	ActivityTargetRoutine   ActivityTargetType = "routine"
+	ActivityTargetWorkspace ActivityTargetType = "workspace"
 )
 
 // String implements fmt.Stringer.
@@ -437,3 +438,13 @@ type ActivityAction string
 
 // String implements fmt.Stringer.
 func (a ActivityAction) String() string { return string(a) }
+
+// Workspace pause/resume activity actions (workspace-kill-switch). Noop
+// covers every request that committed neither a pause nor a release: a
+// repeat pause of an already-paused workspace, a resume of a workspace
+// that isn't paused, and a resume that loses a concurrent CAS race.
+const (
+	ActivityActionWorkspacePaused    ActivityAction = "workspace_paused"
+	ActivityActionWorkspaceResumed   ActivityAction = "workspace_resumed"
+	ActivityActionWorkspacePauseNoop ActivityAction = "workspace_pause_noop"
+)

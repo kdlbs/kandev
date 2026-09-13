@@ -8,10 +8,17 @@ import {
   recordTaskRemovalResult,
   releaseTaskRemoval,
 } from "@/lib/state/task-removal";
+import { mergeStepOrderRevisions } from "@/lib/kanban/workflow-step-order";
 
 export const defaultKanbanState: KanbanSliceState = {
   kanban: { workflowId: null, steps: [], tasks: [] },
-  kanbanMulti: { snapshots: {}, isLoading: false },
+  kanbanMulti: {
+    snapshots: {},
+    isLoading: false,
+    orderRevisionByStepId: {},
+    pendingReorderBandKeys: {},
+    withheldReorderByBandKey: {},
+  },
   sidebarArchivedTasks: {
     itemsByWorkspaceId: {},
     loadedByWorkspaceId: {},
@@ -231,6 +238,15 @@ export const createKanbanSlice: StateCreator<
   setWorkflowSnapshot: (workflowId, data) =>
     set((draft) => {
       draft.kanbanMulti.snapshots[workflowId] = data;
+      // Seed this workflow's steps into orderRevisionByStepId even when it
+      // is not the currently-active board (hydrate() only walks the active
+      // kanban.steps), so a task.reordered WS event for a background
+      // "All Workflows" column is still gated on a real revision rather
+      // than the no-recorded-revision fallback.
+      draft.kanbanMulti.orderRevisionByStepId = mergeStepOrderRevisions(
+        draft.kanbanMulti.orderRevisionByStepId,
+        data.steps,
+      );
     }),
   setKanbanMultiLoading: (loading) =>
     set((draft) => {
@@ -257,5 +273,27 @@ export const createKanbanSlice: StateCreator<
       const snapshot = draft.kanbanMulti.snapshots[workflowId];
       if (!snapshot) return;
       snapshot.tasks = snapshot.tasks.filter((t) => t.id !== taskId);
+    }),
+  setStepOrderRevision: (stepId, revision) =>
+    set((draft) => {
+      draft.kanbanMulti.orderRevisionByStepId[stepId] = revision;
+    }),
+  setBandReorderPending: (stepId, band, pending) =>
+    set((draft) => {
+      const key = `${stepId}:${band}`;
+      if (pending) {
+        draft.kanbanMulti.pendingReorderBandKeys[key] = true;
+      } else {
+        delete draft.kanbanMulti.pendingReorderBandKeys[key];
+      }
+    }),
+  setWithheldReorder: (stepId, band, payload) =>
+    set((draft) => {
+      const key = `${stepId}:${band}`;
+      if (payload) {
+        draft.kanbanMulti.withheldReorderByBandKey[key] = payload;
+      } else {
+        delete draft.kanbanMulti.withheldReorderByBandKey[key];
+      }
     }),
 });

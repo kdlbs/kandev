@@ -10,6 +10,7 @@ const defaultStreamCoalesceWindow = 100 * time.Millisecond
 type coalescedStreamChunk struct {
 	eventType string
 	messageID string
+	attemptID string
 	content   string
 	isAppend  bool
 }
@@ -29,6 +30,7 @@ type streamCoalescer struct {
 	publish        func(coalescedStreamChunk)
 	lastEventType  string
 	lastMessageID  string
+	lastAttemptID  string
 	forceImmediate bool
 	received       int
 	coalesced      int
@@ -64,14 +66,17 @@ func (c *streamCoalescer) add(chunk coalescedStreamChunk) {
 	}
 	c.received++
 
-	sameAsLast := c.lastEventType == chunk.eventType && c.lastMessageID == chunk.messageID
+	sameAsLast := c.lastEventType == chunk.eventType &&
+		c.lastMessageID == chunk.messageID &&
+		c.lastAttemptID == chunk.attemptID
 	immediate := !chunk.isAppend || c.forceImmediate || !sameAsLast
 	c.forceImmediate = false
 	switch {
 	case immediate:
 		ready = c.detachLocked(ready)
 		ready = append(ready, chunk)
-	case c.pending != nil && c.pending.eventType == chunk.eventType && c.pending.messageID == chunk.messageID:
+	case c.pending != nil && c.pending.eventType == chunk.eventType &&
+		c.pending.messageID == chunk.messageID && c.pending.attemptID == chunk.attemptID:
 		c.pending.content += chunk.content
 		c.coalesced++
 	default:
@@ -83,6 +88,7 @@ func (c *streamCoalescer) add(chunk coalescedStreamChunk) {
 	}
 	c.lastEventType = chunk.eventType
 	c.lastMessageID = chunk.messageID
+	c.lastAttemptID = chunk.attemptID
 	c.mu.Unlock()
 
 	c.publishReady(ready)
