@@ -207,7 +207,7 @@ func seedSelfReviewTask(t *testing.T, deps *testDeps, taskID, agentID string) {
 	if err := deps.svc.AddTaskReviewer(ctx, "", taskID, agentID); err != nil {
 		t.Fatalf("seat %s as reviewer: %v", agentID, err)
 	}
-	if err := deps.repo.UpdateTaskAssignee(ctx, taskID, agentID); err != nil {
+	if _, err := deps.repo.UpdateTaskAssignee(ctx, taskID, agentID); err != nil {
 		t.Fatalf("make %s the runner: %v", agentID, err)
 	}
 }
@@ -252,7 +252,7 @@ func TestSetTaskAssignee_TerminatesWhenPrevRunnerKeepsNothing(t *testing.T) {
 	deps.svc.SetReactivityApplier(&recordingReactivity{result: &dashboard.TaskReactivityResult{}})
 
 	insertTestTask(t, deps.db, "task-plain", "ws-self", "Plain", "todo", 2)
-	if err := deps.repo.UpdateTaskAssignee(context.Background(), "task-plain", "agent-prev"); err != nil {
+	if _, err := deps.repo.UpdateTaskAssignee(context.Background(), "task-plain", "agent-prev"); err != nil {
 		t.Fatalf("seed runner: %v", err)
 	}
 
@@ -291,7 +291,7 @@ func TestAddTaskReviewer_ClaimKeepsSessionOfDisplacedRunner(t *testing.T) {
 	`); err != nil {
 		t.Fatalf("seed auto seat: %v", err)
 	}
-	if err := deps.repo.UpdateTaskAssignee(context.Background(), "claim-dual", "agent-auto"); err != nil {
+	if _, err := deps.repo.UpdateTaskAssignee(context.Background(), "claim-dual", "agent-auto"); err != nil {
 		t.Fatalf("make agent-auto the runner: %v", err)
 	}
 

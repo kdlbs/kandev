@@ -43,7 +43,7 @@ func TestSuppressedTermination_IsCounted(t *testing.T) {
 	if err := deps.svc.AddTaskReviewer(ctx, "", "task-metric", "agent-dual"); err != nil {
 		t.Fatalf("add reviewer: %v", err)
 	}
-	if err := deps.repo.UpdateTaskAssignee(ctx, "task-metric", "agent-dual"); err != nil {
+	if _, err := deps.repo.UpdateTaskAssignee(ctx, "task-metric", "agent-dual"); err != nil {
 		t.Fatalf("set runner: %v", err)
 	}
 
@@ -77,7 +77,7 @@ func TestSuppressionLabels_AreBounded(t *testing.T) {
 	if err := deps.svc.AddTaskReviewer(ctx, "", "task-labels", "agent-bounded"); err != nil {
 		t.Fatalf("add reviewer: %v", err)
 	}
-	if err := deps.repo.UpdateTaskAssignee(ctx, "task-labels", "agent-bounded"); err != nil {
+	if _, err := deps.repo.UpdateTaskAssignee(ctx, "task-labels", "agent-bounded"); err != nil {
 		t.Fatalf("set runner: %v", err)
 	}
 	if got := removeReviewer(t, deps, rt, "task-labels", "agent-bounded"); got != 0 {

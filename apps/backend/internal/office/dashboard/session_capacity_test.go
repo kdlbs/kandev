@@ -66,7 +66,7 @@ func TestRemoveParticipant_SuppressesWhenAgentIsRunner(t *testing.T) {
 	if err := deps.svc.AddTaskReviewer(ctx, "", "task-runner", "agent-dual"); err != nil {
 		t.Fatalf("add reviewer: %v", err)
 	}
-	if err := deps.repo.UpdateTaskAssignee(ctx, "task-runner", "agent-dual"); err != nil {
+	if _, err := deps.repo.UpdateTaskAssignee(ctx, "task-runner", "agent-dual"); err != nil {
 		t.Fatalf("set runner: %v", err)
 	}
 
@@ -104,7 +104,7 @@ func TestRemoveParticipant_TerminatesWhenNoCapacityRemains(t *testing.T) {
 		t.Fatalf("add reviewer: %v", err)
 	}
 	// Someone else runs the task, so the removed agent retains nothing.
-	if err := deps.repo.UpdateTaskAssignee(ctx, "task-last", "agent-runner"); err != nil {
+	if _, err := deps.repo.UpdateTaskAssignee(ctx, "task-last", "agent-runner"); err != nil {
 		t.Fatalf("set runner: %v", err)
 	}
 
@@ -142,7 +142,7 @@ func TestRemoveParticipant_StaleSeatAtLeftStepDoesNotSuppress(t *testing.T) {
 	if err := deps.svc.AddTaskReviewer(ctx, "", "task-moved", "agent-stale"); err != nil {
 		t.Fatalf("add reviewer: %v", err)
 	}
-	if err := deps.repo.UpdateTaskAssignee(ctx, "task-moved", "agent-runner"); err != nil {
+	if _, err := deps.repo.UpdateTaskAssignee(ctx, "task-moved", "agent-runner"); err != nil {
 		t.Fatalf("set runner: %v", err)
 	}
 	// The task advances. The reviewer seat written at the previous step
@@ -178,7 +178,7 @@ func TestRemoveParticipant_NoCurrentStepLeavesOnlyRunnerCapacity(t *testing.T) {
 	if err := deps.svc.AddTaskReviewer(ctx, "", "task-nostep", "agent-seated"); err != nil {
 		t.Fatalf("add reviewer: %v", err)
 	}
-	if err := deps.repo.UpdateTaskAssignee(ctx, "task-nostep", "agent-runner"); err != nil {
+	if _, err := deps.repo.UpdateTaskAssignee(ctx, "task-nostep", "agent-runner"); err != nil {
 		t.Fatalf("set runner: %v", err)
 	}
 	moveTaskToStep(t, deps.db, "task-nostep", "")
@@ -238,7 +238,7 @@ func TestRemoveParticipant_CapacityRegainedBeforeReadSuppresses(t *testing.T) {
 	if err := deps.svc.AddTaskReviewer(ctx, "", "task-regained", "agent-back"); err != nil {
 		t.Fatalf("add reviewer: %v", err)
 	}
-	if err := deps.repo.UpdateTaskAssignee(ctx, "task-regained", "agent-runner"); err != nil {
+	if _, err := deps.repo.UpdateTaskAssignee(ctx, "task-regained", "agent-runner"); err != nil {
 		t.Fatalf("set runner: %v", err)
 	}
 
