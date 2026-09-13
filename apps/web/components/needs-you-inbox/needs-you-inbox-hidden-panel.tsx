@@ -51,24 +51,34 @@ function HiddenRow({
   );
 }
 
-function useHiddenList(workspaceId: string | null, open: boolean) {
+function useHiddenList(workspaceId: string | null, open: boolean, hiddenCount: number) {
   const [status, setStatus] = useState<HiddenListStatus>("idle");
   const [bundles, setBundles] = useState<ClarificationInboxHiddenBundle[]>([]);
   const [total, setTotal] = useState<number | null>(null);
   const generationRef = useRef(0);
+  // Read inside `load` instead of `workspaceId` itself: a restore captures
+  // this closure while its DELETE is in flight, and a workspace switch during
+  // that wait must not let the stale continuation apply workspace A's read to
+  // workspace B's panel (or bump the shared generation past B's own request).
+  const currentWorkspaceIdRef = useRef(workspaceId);
+  currentWorkspaceIdRef.current = workspaceId;
 
   const load = useCallback(async () => {
-    if (!workspaceId) return;
+    if (!workspaceId || currentWorkspaceIdRef.current !== workspaceId) return;
     const generation = ++generationRef.current;
     setStatus("loading");
     try {
       const page = await listHiddenClarificationInbox(workspaceId);
-      if (generationRef.current !== generation) return;
+      if (generationRef.current !== generation || currentWorkspaceIdRef.current !== workspaceId) {
+        return;
+      }
       setBundles(page.bundles);
       setTotal(page.total);
       setStatus("ready");
     } catch {
-      if (generationRef.current !== generation) return;
+      if (generationRef.current !== generation || currentWorkspaceIdRef.current !== workspaceId) {
+        return;
+      }
       setStatus("error");
     }
   }, [workspaceId]);
@@ -84,6 +94,17 @@ function useHiddenList(workspaceId: string | null, open: boolean) {
     if (open) void load();
   }, [workspaceId, open, load]);
 
+  // The main list's hidden count is the only signal this panel gets that the
+  // hidden set changed elsewhere (another row dismissed/snoozed, or a snooze
+  // expiring): re-enumerate so the disclosed total and rows stay reconciled
+  // with it rather than showing what this panel happened to load last.
+  const previousHiddenCount = useRef(hiddenCount);
+  useEffect(() => {
+    if (previousHiddenCount.current === hiddenCount) return;
+    previousHiddenCount.current = hiddenCount;
+    if (open) void load();
+  }, [hiddenCount, open, load]);
+
   return { status, bundles, total, load };
 }
 
@@ -94,7 +115,7 @@ export function NeedsYouInboxHiddenPanel({ hiddenCount }: { hiddenCount: number 
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const bumpRefreshTick = useAppStore((s) => s.bumpNeedsYouInboxRefreshTick);
   const [open, setOpen] = useState(false);
-  const { status, bundles, total, load } = useHiddenList(workspaceId, open);
+  const { status, bundles, total, load } = useHiddenList(workspaceId, open, hiddenCount);
   const displayCount = total ?? hiddenCount;
 
   const toggle = useCallback(() => {

@@ -183,3 +183,79 @@ describe("NeedsYouInboxHiddenPanel", () => {
     expect(screen.getByText(WORKSPACE_TWO_CONTEXT)).not.toBeNull();
   });
 });
+
+describe("NeedsYouInboxHiddenPanel staleness guards", () => {
+  it("does not let a restore begun before a workspace switch overwrite the new workspace's panel", async () => {
+    mocks.listHidden.mockResolvedValueOnce({
+      bundles: [hiddenBundle({ pending_id: "w1-p1", context: WORKSPACE_ONE_CONTEXT })],
+      count: 1,
+      total: 1,
+    });
+    const { rerender } = render(<NeedsYouInboxHiddenPanel hiddenCount={1} />);
+    fireEvent.click(screen.getByText(SHOW_HIDDEN));
+    await screen.findByText(WORKSPACE_ONE_CONTEXT);
+
+    let resolveRestore: (() => void) | undefined;
+    mocks.restore.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveRestore = resolve;
+        }),
+    );
+    fireEvent.click(screen.getByText("Restore"));
+
+    mocks.activeWorkspaceId = "w2";
+    // Both the workspace-change and the hiddenCount-change effects can fire
+    // on this rerender; give every call the same answer rather than pinning
+    // an exact call count that isn't this test's concern.
+    mocks.listHidden.mockResolvedValue({ bundles: [], count: 0, total: 0 });
+    rerender(<NeedsYouInboxHiddenPanel hiddenCount={0} />);
+    await screen.findByText("Nothing is currently hidden.");
+
+    const callsBeforeRestoreSettles = mocks.listHidden.mock.calls.length;
+    await act(async () => {
+      resolveRestore?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // The stale w1 continuation must not re-fetch w1 nor reintroduce its row.
+    expect(mocks.listHidden.mock.calls.length).toBe(callsBeforeRestoreSettles);
+    expect(screen.getByText("Nothing is currently hidden.")).not.toBeNull();
+    expect(screen.queryByText(WORKSPACE_ONE_CONTEXT)).toBeNull();
+  });
+
+  it("re-enumerates while open when the main list's hidden count changes elsewhere", async () => {
+    mocks.listHidden.mockResolvedValueOnce({
+      bundles: [
+        hiddenBundle({ pending_id: "p1", context: "First" }),
+        hiddenBundle({ pending_id: "p2", context: "Second" }),
+      ],
+      count: 2,
+      total: 2,
+    });
+    const { rerender } = render(<NeedsYouInboxHiddenPanel hiddenCount={2} />);
+    fireEvent.click(screen.getByText(SHOW_HIDDEN));
+    await screen.findByText("First");
+    await screen.findByText("Second");
+
+    // Another row was dismissed elsewhere: the main list's hiddenCount grew
+    // without any action inside this panel.
+    mocks.listHidden.mockResolvedValueOnce({
+      bundles: [
+        hiddenBundle({ pending_id: "p1", context: "First" }),
+        hiddenBundle({ pending_id: "p2", context: "Second" }),
+        hiddenBundle({ pending_id: "p3", context: "Third" }),
+      ],
+      count: 3,
+      total: 3,
+    });
+    rerender(<NeedsYouInboxHiddenPanel hiddenCount={3} />);
+
+    expect(await screen.findByText("Third")).not.toBeNull();
+    expect(mocks.listHidden).toHaveBeenCalledTimes(2);
+    expect(
+      screen.getByText("3 questions are hidden by your own dismiss or snooze."),
+    ).not.toBeNull();
+  });
+});

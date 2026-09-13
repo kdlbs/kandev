@@ -28,7 +28,7 @@ const clarificationInboxSidecarSchemaDDL = `
 `
 
 func (r *Repository) initClarificationInboxSidecarSchema() error {
-	_, err := r.db.Exec(clarificationInboxSidecarSchemaDDL)
+	_, err := r.db.ExecContext(r.migrationContext(), clarificationInboxSidecarSchemaDDL)
 	return err
 }
 

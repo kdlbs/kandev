@@ -12,6 +12,13 @@ import { readBootPayload } from "@/src/boot-payload";
 const PERIODIC_REFRESH_MS = 60_000;
 // A skewed client clock asking early must not spin; floor the reschedule.
 const MIN_SNOOZE_RESCHEDULE_MS = 5_000;
+// `next_snooze_expiry` is serialized at whole-second RFC3339 precision while
+// the stored expiry can carry subsecond precision, so firing exactly at the
+// reported instant can land up to a second before the row is actually
+// eligible: the re-read then reports the same (still-future) expiry string,
+// and an unchanged effect dependency never rearms the timeout. Firing a
+// second late instead guarantees the read crosses the real boundary.
+const SNOOZE_RESCHEDULE_BUFFER_MS = 1_000;
 
 // Applies the boot-hydration producer (needs-you-inbox
 // design-01#Data-and-contracts) via seedNeedsYouInboxBoot, so the badge
@@ -144,7 +151,7 @@ export function useNeedsYouInboxController() {
   useEffect(() => {
     if (!enabled || !workspaceId || !nextSnoozeExpiry) return;
     const delay = Math.max(
-      new Date(nextSnoozeExpiry).getTime() - Date.now(),
+      new Date(nextSnoozeExpiry).getTime() - Date.now() + SNOOZE_RESCHEDULE_BUFFER_MS,
       MIN_SNOOZE_RESCHEDULE_MS,
     );
     const timeout = window.setTimeout(() => void refresh(workspaceId), delay);

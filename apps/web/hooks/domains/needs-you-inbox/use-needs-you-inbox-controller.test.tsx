@@ -133,10 +133,39 @@ describe("useNeedsYouInboxController", () => {
     });
     expect(listClarificationInboxMock).toHaveBeenCalledTimes(1);
 
+    // The reported expiry is whole-second RFC3339; the reschedule buffer
+    // (below) pushes the actual timer 1s past it so the re-read always
+    // crosses the real, possibly-subsecond boundary.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(11_000);
+    });
+
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("delays the re-read a second past the reported second-precision expiry", async () => {
+    vi.useFakeTimers();
+    const soon = new Date(Date.now() + 10_000).toISOString();
+    listClarificationInboxMock.mockResolvedValueOnce(page({ next_snooze_expiry: soon }));
+    listClarificationInboxMock.mockResolvedValue(page());
+
+    renderController(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(1);
+
+    // Firing exactly at the reported (truncated) instant would still see the
+    // bundle as snoozed on a server storing subsecond precision; the buffer
+    // means nothing has re-read yet at this point.
     await act(async () => {
       await vi.advanceTimersByTimeAsync(10_000);
     });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(1);
 
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
     expect(listClarificationInboxMock).toHaveBeenCalledTimes(2);
   });
 });
