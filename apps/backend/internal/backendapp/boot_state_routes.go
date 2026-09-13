@@ -639,7 +639,7 @@ func (b bootStateBuilder) addNeedsYouInboxState(
 		return
 	}
 	count, hasMore, nextSnoozeExpiry, err := clarification.InboxBootSummary(
-		ctx, b.p.taskRepo, workspaceID, clarification.InboxUserID(ctx), time.Now(),
+		ctx, b.p.taskRepo, workspaceID, clarification.InboxUserID(ctx), time.Now().UTC(),
 	)
 	if err != nil {
 		b.logBootError("get needs-you inbox boot summary", err)

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
@@ -41,7 +41,7 @@ function HiddenRow({
       <Button
         type="button"
         variant="ghost"
-        size="sm"
+        size="default"
         className="cursor-pointer shrink-0"
         onClick={() => onRestore(bundle.pending_id)}
       >
@@ -51,23 +51,40 @@ function HiddenRow({
   );
 }
 
-function useHiddenList(workspaceId: string | null) {
+function useHiddenList(workspaceId: string | null, open: boolean) {
   const [status, setStatus] = useState<HiddenListStatus>("idle");
   const [bundles, setBundles] = useState<ClarificationInboxHiddenBundle[]>([]);
+  const [total, setTotal] = useState<number | null>(null);
+  const generationRef = useRef(0);
 
   const load = useCallback(async () => {
     if (!workspaceId) return;
+    const generation = ++generationRef.current;
     setStatus("loading");
     try {
       const page = await listHiddenClarificationInbox(workspaceId);
+      if (generationRef.current !== generation) return;
       setBundles(page.bundles);
+      setTotal(page.total);
       setStatus("ready");
     } catch {
+      if (generationRef.current !== generation) return;
       setStatus("error");
     }
   }, [workspaceId]);
 
-  return { status, bundles, load };
+  const previousWorkspaceId = useRef(workspaceId);
+  useEffect(() => {
+    if (previousWorkspaceId.current === workspaceId) return;
+    previousWorkspaceId.current = workspaceId;
+    generationRef.current += 1;
+    setBundles([]);
+    setTotal(null);
+    setStatus("idle");
+    if (open) void load();
+  }, [workspaceId, open, load]);
+
+  return { status, bundles, total, load };
 }
 
 // Discloses how many answerable bundles this operator's own dismiss or
@@ -77,7 +94,8 @@ export function NeedsYouInboxHiddenPanel({ hiddenCount }: { hiddenCount: number 
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const bumpRefreshTick = useAppStore((s) => s.bumpNeedsYouInboxRefreshTick);
   const [open, setOpen] = useState(false);
-  const { status, bundles, load } = useHiddenList(workspaceId);
+  const { status, bundles, total, load } = useHiddenList(workspaceId, open);
+  const displayCount = total ?? hiddenCount;
 
   const toggle = useCallback(() => {
     setOpen((current) => {
@@ -104,12 +122,12 @@ export function NeedsYouInboxHiddenPanel({ hiddenCount }: { hiddenCount: number 
     <div className="rounded-lg border border-border p-4" data-testid="needs-you-inbox-hidden-panel">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-muted-foreground">
-          {t("needsYouInbox:hiddenNotice", { count: hiddenCount })}
+          {t("needsYouInbox:hiddenNotice", { count: displayCount })}
         </p>
         <Button
           type="button"
           variant="outline"
-          size="sm"
+          size="default"
           className="cursor-pointer"
           onClick={toggle}
         >

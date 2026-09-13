@@ -175,7 +175,13 @@ type Handlers struct {
 	// never read them.
 	inboxTasks   inboxTaskService
 	inboxBundles inboxBundleStore
-	now          func() time.Time
+	// now always returns a UTC instant. The sidecar's snooze_until is
+	// persisted and compared as SQLite TEXT (mattn/go-sqlite3 formats a
+	// time.Time with whatever offset it carries), so a non-UTC value here
+	// would make snooze expiry a lexical string comparison across mismatched
+	// offsets rather than a true instant comparison — wrong exactly at a DST
+	// transition (AC .24/.32, "evaluated against server time").
+	now func() time.Time
 }
 
 // NewHandlers creates new clarification handlers.
@@ -200,7 +206,7 @@ func NewHandlers(
 		logger:         log.WithFields(zap.String("component", "clarification-handlers")),
 		inboxTasks:     inboxTasks,
 		inboxBundles:   inboxBundles,
-		now:            time.Now,
+		now:            func() time.Time { return time.Now().UTC() },
 	}
 }
 

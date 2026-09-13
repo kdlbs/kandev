@@ -179,7 +179,7 @@ export function NeedsYouInboxRow({ bundle }: { bundle: ClarificationInboxBundle 
       <div className="flex items-center gap-3 px-4 py-2.5">
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-3 text-left cursor-pointer"
+          className="flex min-w-0 flex-1 items-center gap-3 text-left cursor-pointer max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
           onClick={() => setExpanded((current) => !current)}
           aria-expanded={expanded}
           data-testid="needs-you-inbox-row-toggle"

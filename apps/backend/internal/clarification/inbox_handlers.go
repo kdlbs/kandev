@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -288,7 +289,7 @@ func (h *Handlers) buildInboxBundleViews(
 				zap.String("pending_id", b.PendingID))
 			continue
 		}
-		ordered := orderBundleMessages(msgs)
+		ordered := orderInboxMessages(msgs)
 		views = append(views, inboxBundleView{
 			PendingID:    b.PendingID,
 			TaskID:       b.TaskID,
@@ -301,6 +302,37 @@ func (h *Handlers) buildInboxBundleViews(
 		})
 	}
 	return views, nil
+}
+
+// orderInboxMessages sorts a copy of msgs into AC .10's canonical order:
+// question_index ascending (absent, negative, or non-numeric normalizes to
+// zero), ties broken by question_id ascending. This is deliberately its own
+// sort rather than a reuse of orderBundleMessages, whose D2/L5 order
+// tie-breaks by created_at/message id for MCP resolution semantics and does
+// not clamp a negative index to zero; the two consumers have different
+// contracts and must not be forced to share one implementation.
+func orderInboxMessages(msgs []*taskmodels.Message) []*taskmodels.Message {
+	sorted := make([]*taskmodels.Message, len(msgs))
+	copy(sorted, msgs)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		qi, qj := normalizedInboxQuestionIndex(sorted[i].Metadata), normalizedInboxQuestionIndex(sorted[j].Metadata)
+		if qi != qj {
+			return qi < qj
+		}
+		return questionIDFromMetadata(sorted[i].Metadata) < questionIDFromMetadata(sorted[j].Metadata)
+	})
+	return sorted
+}
+
+// normalizedInboxQuestionIndex clamps a negative index to zero on top of
+// questionIndexFromMetadata's existing absent/non-numeric-to-zero handling,
+// so every non-positive-index case collapses to the same rank and the
+// question_id tie-break decides order for all of them alike (AC .10).
+func normalizedInboxQuestionIndex(meta map[string]any) int {
+	if idx := questionIndexFromMetadata(meta); idx > 0 {
+		return idx
+	}
+	return 0
 }
 
 // renderInboxMessages projects each message through Message.ToAPI() and

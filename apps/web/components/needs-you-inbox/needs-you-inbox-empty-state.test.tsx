@@ -17,10 +17,14 @@ import { NeedsYouInboxEmptyState } from "./needs-you-inbox-empty-state";
 afterEach(() => cleanup());
 
 describe("NeedsYouInboxEmptyState", () => {
-  it("names what it does not count", () => {
+  it("names all four things it does not count (AC .20)", () => {
     render(<NeedsYouInboxEmptyState hiddenCount={0} />);
 
-    expect(screen.getByText(/does not count bundles in other workspaces/)).not.toBeNull();
+    const description = screen.getByText(/does not count bundles in other workspaces/);
+    expect(description.textContent).toContain("bundles in other workspaces");
+    expect(description.textContent).toContain("pending permission requests");
+    expect(description.textContent).toContain("parent-question records");
+    expect(description.textContent).toContain("snoozed or dismissed rows");
   });
 
   it("does not imply anything is hidden when nothing is (AC .20)", () => {

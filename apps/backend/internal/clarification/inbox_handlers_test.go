@@ -375,6 +375,66 @@ func TestHttpListInbox_SuccessShape_RewritesQuestionIndexAndTrimsContext(t *test
 	}
 }
 
+func TestHttpListInbox_OrderInboxMessages_NegativeAndAbsentIndexTieBreakByQuestionID(t *testing.T) {
+	bundleCreatedAt := testInboxNow.Add(-time.Hour)
+	// m-z is created before m-a but claims a negative index (-5); m-a has no
+	// question_index at all. AC .10 normalizes both to rank zero and then
+	// tie-breaks by question_id ascending ("q-a" < "q-z"), so m-a must sort
+	// first despite being created later and despite orderBundleMessages'
+	// distinct D2/L5 contract (which would keep -5 strictly below 0 and
+	// tie-break by created_at/message id, ordering m-z first).
+	msgs := map[string][]*taskmodels.Message{
+		"p1": {
+			{
+				ID: "m-z", TaskSessionID: "s1", TaskID: "t1", CreatedAt: bundleCreatedAt,
+				Metadata: map[string]any{"pending_id": "p1", "question_id": "q-z", "question_index": -5},
+			},
+			{
+				ID: "m-a", TaskSessionID: "s1", TaskID: "t1", CreatedAt: bundleCreatedAt.Add(time.Minute),
+				Metadata: map[string]any{"pending_id": "p1", "question_id": "q-a"},
+			},
+			{
+				ID: "m-mid", TaskSessionID: "s1", TaskID: "t1", CreatedAt: bundleCreatedAt,
+				Metadata: map[string]any{"pending_id": "p1", "question_id": "q-mid", "question_index": 2},
+			},
+		},
+	}
+	bundles := &fakeInboxBundleStore{
+		page: &taskmodels.ClarificationBundlePage{
+			Bundles: []taskmodels.ClarificationBundleSummary{
+				{PendingID: "p1", TaskID: "t1", SessionID: "s1", CreatedAt: bundleCreatedAt},
+			},
+		},
+	}
+	tasks := &fakeInboxTasks{
+		tasks:    map[string]*taskmodels.Task{"t1": {ID: "t1", Title: "Fix the thing"}},
+		sessions: map[string]*taskmodels.TaskSession{"s1": {ID: "s1", State: "WAITING_FOR_INPUT"}},
+	}
+	h := newInboxTestHandler(t, msgs, alwaysAllowAuthorizer{}, tasks, bundles)
+
+	rec := runInboxGet(h, "/api/v1/clarification-inbox?workspace_id=w1", h.httpListInbox)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200: %s", rec.Code, rec.Body.String())
+	}
+
+	var resp inboxListResponse
+	decodeInboxBody(t, rec, &resp)
+	if len(resp.Bundles) != 1 || len(resp.Bundles[0].Messages) != 3 {
+		t.Fatalf("expected 1 bundle with 3 messages, got %+v", resp)
+	}
+	got := []string{
+		resp.Bundles[0].Messages[0].ID,
+		resp.Bundles[0].Messages[1].ID,
+		resp.Bundles[0].Messages[2].ID,
+	}
+	want := []string{"m-a", "m-z", "m-mid"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("message order = %v, want %v", got, want)
+		}
+	}
+}
+
 func TestHttpListInbox_EmptyResult_NeverNullBundles(t *testing.T) {
 	h := newInboxTestHandler(t, nil, alwaysAllowAuthorizer{}, &fakeInboxTasks{}, &fakeInboxBundleStore{})
 	rec := runInboxGet(h, "/api/v1/clarification-inbox?workspace_id=w1", h.httpListInbox)

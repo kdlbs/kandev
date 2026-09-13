@@ -8,7 +8,7 @@ import type {
 const BASE = "/api/v1/clarification-inbox";
 
 // One canonical parameter set (design-02#Control-flow): every caller passes
-// only workspaceId. No cursor -- v1 never forward-pages (F38).
+// only workspaceId. No cursor -- v1 never forward-pages.
 export function listClarificationInbox(
   workspaceId: string,
   options?: ApiRequestOptions,

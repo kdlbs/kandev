@@ -19,8 +19,9 @@ export type ClarificationInboxPage = {
   count: number;
   hidden_count: number;
   next_snooze_expiry: string | null;
-  // Present exactly when the page was truncated; absent means exhausted (F42:
-  // used only as a truncation boolean, never echoed back as a v1 cursor).
+  // Present exactly when the page was truncated; absent means exhausted.
+  // Used only as a truncation boolean; v1 never echoes it back as a request
+  // cursor.
   next_cursor?: string;
 };
 

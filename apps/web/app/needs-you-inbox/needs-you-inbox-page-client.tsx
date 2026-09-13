@@ -17,7 +17,7 @@ import { NeedsYouInboxHiddenPanel } from "@/components/needs-you-inbox/needs-you
 
 type ViewMode = "error" | "loading" | "empty" | "list";
 
-// F42: a page reporting truncation while listing zero rows means enrichment
+// A page reporting truncation while listing zero rows means enrichment
 // emptied a page the query had filled, so this resolves to the retryable
 // "error" state rather than "empty" (design-01#Data-and-contracts).
 function resolveViewMode(
@@ -74,7 +74,7 @@ export function NeedsYouInboxPageClient() {
   const viewMode = resolveViewMode(status, bundles.length, hiddenCount, hasMore);
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-y-auto p-6">
       {viewMode === "error" && <NeedsYouInboxErrorState onRetry={retry} />}
       {viewMode === "loading" && (
         <p className="text-sm text-muted-foreground" role="status" aria-live="polite">

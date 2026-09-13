@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   restore: vi.fn(),
   bumpRefreshTick: vi.fn(),
   toastError: vi.fn(),
+  activeWorkspaceId: "w1",
 }));
 
 vi.mock("@/lib/api/domains/clarification-inbox-api", () => ({
@@ -22,7 +23,7 @@ vi.mock("@/components/state-provider", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   useAppStore: (selector: (s: any) => unknown) =>
     selector({
-      workspaces: { activeId: "w1" },
+      workspaces: { activeId: mocks.activeWorkspaceId },
       bumpNeedsYouInboxRefreshTick: mocks.bumpRefreshTick,
     }),
 }));
@@ -30,6 +31,8 @@ vi.mock("@/components/state-provider", () => ({
 import { NeedsYouInboxHiddenPanel } from "./needs-you-inbox-hidden-panel";
 
 const SHOW_HIDDEN = "Show hidden";
+const WORKSPACE_ONE_CONTEXT = "From workspace one";
+const WORKSPACE_TWO_CONTEXT = "From workspace two";
 
 function hiddenBundle(
   overrides: Partial<ClarificationInboxHiddenBundle> = {},
@@ -54,6 +57,7 @@ beforeEach(() => {
   mocks.restore.mockReset().mockResolvedValue(undefined);
   mocks.bumpRefreshTick.mockReset();
   mocks.toastError.mockReset();
+  mocks.activeWorkspaceId = "w1";
 });
 
 afterEach(() => cleanup());
@@ -105,5 +109,77 @@ describe("NeedsYouInboxHiddenPanel", () => {
 
     fireEvent.click(screen.getByText(SHOW_HIDDEN));
     expect(await screen.findByText("Could not load hidden questions. Try again.")).not.toBeNull();
+  });
+
+  it("prefers the fetched total over a stale hiddenCount prop once loaded", async () => {
+    mocks.listHidden.mockResolvedValue({ bundles: [hiddenBundle()], count: 1, total: 5 });
+    render(<NeedsYouInboxHiddenPanel hiddenCount={1} />);
+
+    expect(screen.getByText("1 question is hidden by your own dismiss or snooze.")).not.toBeNull();
+
+    fireEvent.click(screen.getByText(SHOW_HIDDEN));
+    await screen.findByTestId("needs-you-inbox-hidden-row");
+
+    expect(
+      screen.getByText("5 questions are hidden by your own dismiss or snooze."),
+    ).not.toBeNull();
+  });
+
+  it("clears the stale list and re-fetches when the active workspace changes", async () => {
+    mocks.listHidden.mockResolvedValue({
+      bundles: [hiddenBundle({ pending_id: "w1-p1", context: WORKSPACE_ONE_CONTEXT })],
+      count: 1,
+      total: 1,
+    });
+    const { rerender } = render(<NeedsYouInboxHiddenPanel hiddenCount={1} />);
+
+    fireEvent.click(screen.getByText(SHOW_HIDDEN));
+    await screen.findByText(WORKSPACE_ONE_CONTEXT);
+    expect(mocks.listHidden).toHaveBeenCalledWith("w1");
+
+    mocks.activeWorkspaceId = "w2";
+    mocks.listHidden.mockResolvedValue({
+      bundles: [hiddenBundle({ pending_id: "w2-p1", context: WORKSPACE_TWO_CONTEXT })],
+      count: 1,
+      total: 1,
+    });
+    rerender(<NeedsYouInboxHiddenPanel hiddenCount={1} />);
+
+    expect(await screen.findByText(WORKSPACE_TWO_CONTEXT)).not.toBeNull();
+    expect(screen.queryByText(WORKSPACE_ONE_CONTEXT)).toBeNull();
+    expect(mocks.listHidden).toHaveBeenLastCalledWith("w2");
+  });
+
+  it("discards a stale in-flight response from the previous workspace", async () => {
+    let resolveFirst: ((value: unknown) => void) | undefined;
+    mocks.listHidden.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        }),
+    );
+    const { rerender } = render(<NeedsYouInboxHiddenPanel hiddenCount={1} />);
+    fireEvent.click(screen.getByText(SHOW_HIDDEN));
+
+    mocks.activeWorkspaceId = "w2";
+    mocks.listHidden.mockResolvedValue({
+      bundles: [hiddenBundle({ pending_id: "w2-p1", context: WORKSPACE_TWO_CONTEXT })],
+      count: 1,
+      total: 1,
+    });
+    rerender(<NeedsYouInboxHiddenPanel hiddenCount={1} />);
+    await screen.findByText(WORKSPACE_TWO_CONTEXT);
+
+    await act(async () => {
+      resolveFirst?.({
+        bundles: [hiddenBundle({ pending_id: "w1-p1", context: WORKSPACE_ONE_CONTEXT })],
+        count: 1,
+        total: 1,
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.queryByText(WORKSPACE_ONE_CONTEXT)).toBeNull();
+    expect(screen.getByText(WORKSPACE_TWO_CONTEXT)).not.toBeNull();
   });
 });

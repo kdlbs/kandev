@@ -15,7 +15,7 @@
   "errorDescription": "載入等待您處理的問題時出錯。",
   "retry": "重試",
   "emptyTitle": "所有事項均已處理",
-  "emptyDescription": "此清單僅涵蓋在此工作區中阻塞代理的問題,不計入其他工作區中的問題集、待處理的權限請求或父問題記錄。",
+  "emptyDescription": "此清單僅涵蓋在此工作區中阻塞代理的問題,不計入其他工作區中的問題集、待處理的權限請求、父問題記錄,或您自己已延後或已忽略的行。",
   "hiddenNotice_one": "有 {{count}} 個問題因您自己的忽略或延後操作而被隱藏。",
   "hiddenNotice_other": "有 {{count}} 個問題因您自己的忽略或延後操作而被隱藏。",
   "showHidden": "顯示隱藏項",

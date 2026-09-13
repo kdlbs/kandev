@@ -15,7 +15,7 @@
   "errorDescription": "Ocorreu um erro ao carregar as perguntas que aguardam a sua resposta.",
   "retry": "Repetir",
   "emptyTitle": "Está tudo em dia",
-  "emptyDescription": "Esta lista abrange apenas perguntas que bloqueiam um agente neste espaço de trabalho. Não conta bundles noutros espaços de trabalho, pedidos de permissão pendentes ou registos de perguntas-mãe.",
+  "emptyDescription": "Esta lista abrange apenas perguntas que bloqueiam um agente neste espaço de trabalho. Não conta bundles noutros espaços de trabalho, pedidos de permissão pendentes, registos de perguntas-mãe, nem as suas próprias linhas adiadas ou ignoradas.",
   "hiddenNotice_one": "{{count}} pergunta está oculta pelo seu próprio ignorar ou adiar.",
   "hiddenNotice_other": "{{count}} perguntas estão ocultas pelo seu próprio ignorar ou adiar.",
   "showHidden": "Mostrar ocultas",
