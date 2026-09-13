@@ -200,7 +200,7 @@ func TestAutoPostAgentComment_RecordsSuccessForActingAgent(t *testing.T) {
 		taskID := uuidish("task-fail-runner", i)
 		insertSyntheticTask(t, svc, taskID, "ws-1", "runner-pm4")
 		w := queueAndReadRun(t, svc, "runner-pm4", taskID)
-		if err := svc.HandleAgentFailure(ctx, w, "boom"); err != nil {
+		if _, err := svc.HandleAgentFailure(ctx, w, "boom"); err != nil {
 			t.Fatalf("handle failure (runner) %d: %v", i, err)
 		}
 	}
@@ -208,7 +208,7 @@ func TestAutoPostAgentComment_RecordsSuccessForActingAgent(t *testing.T) {
 		taskID := uuidish("task-fail-critic", i)
 		insertSyntheticTask(t, svc, taskID, "ws-1", "critic4")
 		w := queueAndReadRun(t, svc, "critic4", taskID)
-		if err := svc.HandleAgentFailure(ctx, w, "boom"); err != nil {
+		if _, err := svc.HandleAgentFailure(ctx, w, "boom"); err != nil {
 			t.Fatalf("handle failure (critic) %d: %v", i, err)
 		}
 	}

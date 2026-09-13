@@ -12,6 +12,7 @@ import (
 	officemodels "github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	officeroutines "github.com/kandev/kandev/internal/office/routines"
+	officeservice "github.com/kandev/kandev/internal/office/service"
 	schedulercron "github.com/kandev/kandev/internal/scheduler/cron"
 	tasksqlite "github.com/kandev/kandev/internal/task/repository/sqlite"
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
@@ -48,6 +49,10 @@ func startCronScheduler(
 	routines := schedulercron.NewRoutinesHandler(routineTicker, nil, log)
 	loop := schedulercron.NewLoop(schedulercron.DefaultTickInterval, log,
 		heartbeat, budget, routines, officeRecovery, parentWakeReconciler)
+	// AC-OFFICE-LOOP-LIVENESS-003.6: published once, at boot, so a flat
+	// office_loop_cron_tick_total is distinguishable from a restarted
+	// process versus a genuinely stopped loop.
+	officeservice.RecordLoopProcessStarted(time.Now().UTC().Format(time.RFC3339))
 	loop.Start(ctx)
 	log.Info("phase 5 cron loop started",
 		zap.Duration("interval", schedulercron.DefaultTickInterval))

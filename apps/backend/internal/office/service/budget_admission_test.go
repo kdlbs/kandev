@@ -101,7 +101,7 @@ func TestAdmitRun_NoEvaluatorWired_UnattendedCancels(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -128,7 +128,7 @@ func TestAdmitRun_NoEvaluatorWired_AttendedLaunches(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 	insertTestTask(t, svc, "task-no-evaluator-attended", "ws-1")
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-no-evaluator-attended"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -163,7 +163,7 @@ func TestAdmitRun_EvaluatorFault_DefersThenFailsWithoutEscalation(t *testing.T) 
 		t.Fatalf("create agent: %v", err)
 	}
 	insertTestTask(t, svc, "task-evaluator-fault", "ws-1")
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-evaluator-fault"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -180,7 +180,14 @@ func TestAdmitRun_EvaluatorFault_DefersThenFailsWithoutEscalation(t *testing.T) 
 
 	// Drive the run to MaxRetryCount and re-process it directly (bypassing
 	// the real backoff delay, exactly as the existing retry tests do).
+	// FailRun's guarded write only takes effect while the row is still
+	// status='claimed' (Review round 3, R3-1), so the deferred row —
+	// left 'queued' by the first tick above — must be reclaimed before
+	// ProcessRunForTest, mirroring scheduler_run_outcome_test.go.
+	svc.ExecSQL(t, `UPDATE runs SET retry_count = ?, status = 'claimed' WHERE id = ?`,
+		service.MaxRetryCount, run.ID)
 	run.RetryCount = service.MaxRetryCount
+	run.Status = "claimed"
 	service.ProcessRunForTest(svc, ctx, run)
 
 	failed, err := svc.GetRun(ctx, run.ID)
@@ -222,7 +229,7 @@ func TestAdmitRun_UnevaluatedPolicy_NamesPolicyInDeferral(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 	insertTestTask(t, svc, "task-unevaluated-policy", "ws-1")
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-unevaluated-policy"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -272,7 +279,7 @@ func TestFinishPolicyBlock_ClearsStaleAgentWorkingStatus(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 	run, err := svc.ClaimNextRun(ctx)
@@ -301,7 +308,7 @@ func TestCancelBudgetRun_ClearsStaleAgentWorkingStatus(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 	run, err := svc.ClaimNextRun(ctx)
@@ -338,7 +345,7 @@ func TestFailRunNoEscalation_ClearsStaleAgentWorkingStatus(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 	run, err := svc.ClaimNextRun(ctx)
@@ -381,7 +388,7 @@ func TestProcessRun_MissingAgentReleasesPriorCheckout(t *testing.T) {
 		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
 		VALUES ('task-routed-missing', 'ws-1', 'Routed task', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	`)
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-routed-missing"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -438,7 +445,7 @@ func TestProcessRun_WorkspaceLookupErrorReleasesPriorCheckout(t *testing.T) {
 		INSERT INTO tasks (id, workspace_id, title, created_at, updated_at)
 		VALUES ('task-routed-lookup-error', 'ws-1', 'Routed task', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
 	`)
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-routed-lookup-error"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -489,7 +496,7 @@ func TestAdmitRun_RepeatedDeferral_AttemptIncrementsPerActivity(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 	insertTestTask(t, svc, "task-attempt-increments", "ws-1")
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-attempt-increments"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -529,7 +536,7 @@ func TestAdmitRun_DefaultCeiling_BlocksUnattendedRunWithZeroPolicies(t *testing.
 		t.Fatalf("create agent: %v", err)
 	}
 	insertTestCostEvent(t, svc, agent.ID, "task-default-ceiling", int64(600_000))
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -614,7 +621,7 @@ func TestAdmitRun_PricingDegradedBlock_UnmeasurableOutcome(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -645,7 +652,7 @@ func TestAdmitRun_DefaultCeiling_ExemptsAttendedRun(t *testing.T) {
 	}
 	insertTestCostEvent(t, svc, agent.ID, "task-default-ceiling-attended", int64(600_000))
 	insertTestTask(t, svc, "task-default-ceiling-attended-run", "ws-1")
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-default-ceiling-attended-run"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -704,7 +711,7 @@ func TestBudgetAdmission_ActionsAreDistinguishable(t *testing.T) {
 		if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 			t.Fatalf("create agent: %v", err)
 		}
-		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 			t.Fatalf("queue: %v", err)
 		}
 		run, err := svc.ClaimNextRun(ctx)
@@ -725,7 +732,7 @@ func TestBudgetAdmission_ActionsAreDistinguishable(t *testing.T) {
 		if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 			t.Fatalf("create agent: %v", err)
 		}
-		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 			t.Fatalf("queue: %v", err)
 		}
 		run, err := svc.ClaimNextRun(ctx)
@@ -745,7 +752,7 @@ func TestBudgetAdmission_ActionsAreDistinguishable(t *testing.T) {
 		if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 			t.Fatalf("create agent: %v", err)
 		}
-		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 			t.Fatalf("queue: %v", err)
 		}
 		run, err := svc.ClaimNextRun(ctx)
@@ -768,7 +775,7 @@ func TestBudgetAdmission_ActionsAreDistinguishable(t *testing.T) {
 		if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 			t.Fatalf("create agent: %v", err)
 		}
-		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 			t.Fatalf("queue: %v", err)
 		}
 		service.RunSchedulerTick(svc, ctx)
@@ -787,7 +794,7 @@ func TestBudgetAdmission_ActionsAreDistinguishable(t *testing.T) {
 		if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 			t.Fatalf("create agent: %v", err)
 		}
-		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 			t.Fatalf("queue: %v", err)
 		}
 		run, err := svc.ClaimNextRun(ctx)
@@ -818,7 +825,7 @@ func TestBudgetAdmission_ActionsAreDistinguishable(t *testing.T) {
 		if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 			t.Fatalf("create agent: %v", err)
 		}
-		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 			t.Fatalf("queue: %v", err)
 		}
 		run, err := svc.ClaimNextRun(ctx)
@@ -840,7 +847,7 @@ func TestBudgetAdmission_ActionsAreDistinguishable(t *testing.T) {
 		if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 			t.Fatalf("create agent: %v", err)
 		}
-		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 			t.Fatalf("queue: %v", err)
 		}
 		run, err := svc.ClaimNextRun(ctx)
@@ -863,7 +870,7 @@ func TestBudgetAdmission_ActionsAreDistinguishable(t *testing.T) {
 		if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 			t.Fatalf("create agent: %v", err)
 		}
-		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 			t.Fatalf("queue: %v", err)
 		}
 		run, err := svc.ClaimNextRun(ctx)
@@ -884,7 +891,7 @@ func TestBudgetAdmission_ActionsAreDistinguishable(t *testing.T) {
 		if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 			t.Fatalf("create agent: %v", err)
 		}
-		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 			t.Fatalf("queue: %v", err)
 		}
 		run, err := svc.ClaimNextRun(ctx)
@@ -911,7 +918,7 @@ func TestBudgetAdmission_ActionsAreDistinguishable(t *testing.T) {
 		if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 			t.Fatalf("create agent: %v", err)
 		}
-		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 			t.Fatalf("queue: %v", err)
 		}
 		service.RunSchedulerTick(svc, ctx)

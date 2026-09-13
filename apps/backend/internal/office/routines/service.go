@@ -13,7 +13,9 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/office/shared"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
@@ -38,6 +40,7 @@ type Repository interface {
 	ListRoutines(ctx context.Context, workspaceID string) ([]*Routine, error)
 	UpdateRoutine(ctx context.Context, routine *Routine) error
 	DeleteRoutine(ctx context.Context, id string) error
+	TouchRoutineLastRun(ctx context.Context, routineID string, at time.Time) error
 
 	CreateRoutineTrigger(ctx context.Context, t *RoutineTrigger) error
 	ListTriggersByRoutineID(ctx context.Context, routineID string) ([]*RoutineTrigger, error)
@@ -63,7 +66,6 @@ type Repository interface {
 	// read-then-write race between them.
 	UpdateRunStatusIfTaskCreated(ctx context.Context, runID string, status models.RoutineRunStatus, linkedTaskID string) (bool, error)
 	UpdateRunCoalesced(ctx context.Context, runID, coalescedIntoRunID string) error
-	TouchRoutineLastRun(ctx context.Context, routineID string, at time.Time) error
 	// GetTaskTerminalStatus reads a task's real lifecycle state directly
 	// (not via the TaskMoved event — see applyConcurrencyPolicy) and
 	// reports "" when it is active, "done", "failed", "cancelled", or
@@ -96,6 +98,10 @@ type WakeupRequest struct {
 	Payload        string
 	IdempotencyKey string
 	RequestedAt    time.Time
+	// CausationID is copied from the firing RoutineRun
+	// (AC-OFFICE-LOOP-LIVENESS-002.2) so downstream runs and wakeup
+	// requests correlate back to the fire that produced them.
+	CausationID string
 }
 
 // RoutineWorkflowEnsurer materialises (lazily) the routine system
@@ -386,6 +392,7 @@ func (s *RoutineService) ListAllRoutineRuns(ctx context.Context, wsID string, li
 
 // TickScheduledTriggers queries due cron triggers, claims each, and dispatches.
 func (s *RoutineService) TickScheduledTriggers(ctx context.Context, now time.Time) error {
+	service.IncLoopCronTick(now.Format(time.RFC3339))
 	triggers, err := s.repo.GetDueTriggers(ctx, now)
 	if err != nil {
 		return fmt.Errorf("get due triggers: %w", err)
@@ -423,6 +430,10 @@ func (s *RoutineService) processCronTrigger(ctx context.Context, trigger *Routin
 	if err != nil || !claimed {
 		return err
 	}
+	// routine was already read (and its status checked) before the claim
+	// above, so there is nothing left to fail here — attribute the metric
+	// straight from it instead of re-fetching.
+	service.IncLoopTriggerClaimed(routine.WorkspaceID)
 	// Catch-up cap: count how many cron ticks elapsed between the missed
 	// trigger.NextRunAt (inclusive) and now, capped at routine.CatchUpMax.
 	// Mirror of the agent_heartbeat catch-up math, adapted for cron
@@ -449,6 +460,11 @@ func (s *RoutineService) processCronTrigger(ctx context.Context, trigger *Routin
 			zap.String("trigger_id", trigger.ID), zap.Error(err))
 		return err
 	}
+	// The claimed tick: UpdateTriggerNextRun below advances the trigger
+	// row's next_run_at to the next slot, so trigger.NextRunAt is captured
+	// here, before that write, and carried through to the key builder
+	// rather than re-read afterward.
+	claimedTick := trigger.NextRunAt
 	if err := s.repo.UpdateTriggerNextRun(ctx, trigger.ID, &advanceTo); err != nil {
 		s.logger.Warn("update trigger next_run_at failed",
 			zap.String("trigger_id", trigger.ID), zap.Error(err))
@@ -462,7 +478,7 @@ func (s *RoutineService) processCronTrigger(ctx context.Context, trigger *Routin
 		// runCount-1 as missed_ticks ("you missed N since the last fire").
 		missedForPayload = runCount - 1
 	}
-	_, err = s.DispatchRoutineRunWithMissed(ctx, routine, trigger, shared.RoutineSourceCron, nil, missedForPayload)
+	_, err = s.DispatchRoutineRunWithMissed(ctx, routine, trigger, shared.RoutineSourceCron, nil, missedForPayload, claimedTick)
 	return err
 }
 
@@ -581,7 +597,7 @@ func (s *RoutineService) DispatchRoutineRun(
 	source string,
 	provided map[string]string,
 ) (*RoutineRun, error) {
-	return s.dispatchRoutineRun(ctx, routine, trigger, source, provided, "", 0)
+	return s.dispatchRoutineRun(ctx, routine, trigger, source, provided, "", 0, nil)
 }
 
 // DispatchRoutineRunWithIdempotencyKey dispatches a fire with an explicit
@@ -595,7 +611,7 @@ func (s *RoutineService) DispatchRoutineRunWithIdempotencyKey(
 	provided map[string]string,
 	idempotencyKey string,
 ) (*RoutineRun, error) {
-	return s.dispatchRoutineRun(ctx, routine, trigger, source, provided, idempotencyKey, 0)
+	return s.dispatchRoutineRun(ctx, routine, trigger, source, provided, idempotencyKey, 0, nil)
 }
 
 // DispatchRoutineRunWithMissed is the cron-tick entry point that
@@ -605,6 +621,12 @@ func (s *RoutineService) DispatchRoutineRunWithIdempotencyKey(
 // learns "you missed N-1 ticks" via wakeup.RoutinePayload.MissedTicks.
 // Manual fires (UI / API) call DispatchRoutineRun directly with no
 // missed-tick attribution.
+//
+// claimedTick is the scheduled tick processCronTrigger claimed off the
+// trigger row before advancing it — the dedup key's occurrence identity
+// for a cron fire. It travels as a parameter rather than being re-read
+// from the trigger row, which by dispatch time already names the next
+// slot.
 func (s *RoutineService) DispatchRoutineRunWithMissed(
 	ctx context.Context,
 	routine *Routine,
@@ -612,8 +634,9 @@ func (s *RoutineService) DispatchRoutineRunWithMissed(
 	source string,
 	provided map[string]string,
 	missedTicks int,
+	claimedTick *time.Time,
 ) (*RoutineRun, error) {
-	return s.dispatchRoutineRun(ctx, routine, trigger, source, provided, "", missedTicks)
+	return s.dispatchRoutineRun(ctx, routine, trigger, source, provided, "", missedTicks, claimedTick)
 }
 
 func (s *RoutineService) dispatchRoutineRun(
@@ -624,6 +647,7 @@ func (s *RoutineService) dispatchRoutineRun(
 	provided map[string]string,
 	idempotencyKey string,
 	missedTicks int,
+	claimedTick *time.Time,
 ) (*RoutineRun, error) {
 	now := time.Now().UTC()
 	defaults := parseDeclaredDefaults(routine.Variables)
@@ -648,9 +672,38 @@ func (s *RoutineService) dispatchRoutineRun(
 		TriggerPayload:      string(payloadJSON),
 		DispatchFingerprint: fingerprint,
 		StartedAt:           &now,
+		// CausationID is minted once per fire (AC-OFFICE-LOOP-LIVENESS-002.1)
+		// and copied onto every wakeup request and run this fire produces.
+		CausationID: uuid.New().String(),
 	}
 	if err := s.repo.CreateRoutineRun(ctx, run); err != nil {
 		return nil, fmt.Errorf("create run: %w", err)
+	}
+
+	// AC-003.1/AC-003.9 (Review round 3, R3-4): office_loop_routine_run_total
+	// counts this fire's CreateRoutineRun above — a write that just
+	// succeeded — not whatever applyConcurrencyPolicy/materialiseRoutineRun
+	// do afterward. A single deferred increment fires exactly once no
+	// matter which return path below is taken, labelled by whatever
+	// disposition was reached; it defaults to "failed" (the existing
+	// RoutineRunStatus value, not an invented one) so a fire that created
+	// a real row but then errored is still counted rather than silently
+	// dropped.
+	disposition := string(models.RoutineRunStatusFailed)
+	defer func() {
+		service.IncLoopRoutineRun(routine.WorkspaceID, source, disposition)
+	}()
+
+	// AC-OFFICE-LOOP-LIVENESS-001.1: advances last_run_at for every
+	// dispatch, whatever disposition the run later reaches — so it must
+	// run before applyConcurrencyPolicy, which can short-circuit into a
+	// coalesced or skipped return. Errors are logged and counted, never
+	// returned (AC-001.7): a routine that fired must not read as having
+	// failed to fire because a bookkeeping write lost a lock.
+	if err := s.repo.TouchRoutineLastRun(ctx, routine.ID, *run.StartedAt); err != nil {
+		service.IncLoopLastRunAtWriteFailed(routine.WorkspaceID)
+		s.logger.Warn("touch routine last_run_at",
+			zap.String("routine_id", routine.ID), zap.Error(err))
 	}
 
 	status, err := s.applyConcurrencyPolicy(ctx, routine, run, fingerprint)
@@ -658,18 +711,26 @@ func (s *RoutineService) dispatchRoutineRun(
 		return run, err
 	}
 	if status != "" {
+		disposition = string(status)
 		return run, nil
 	}
 
-	if err := s.materialiseRoutineRun(ctx, routine, run, tmpl, title, description, vars, source, idempotencyKey, missedTicks); err != nil {
+	if err := s.materialiseRoutineRun(ctx, routine, run, tmpl, title, description, vars, source, idempotencyKey, missedTicks, claimedTick); err != nil {
 		return run, err
 	}
-
-	if err := s.repo.TouchRoutineLastRun(ctx, routine.ID, now); err != nil {
-		s.logger.Warn("touch routine last_run_at",
-			zap.String("routine", routine.Name), zap.Error(err))
+	// A nil error only means materialiseRoutineRun's terminal write
+	// succeeded, not that the write it made was a success: the
+	// lightweight path finalizes with a nil error even when the wakeup
+	// enqueue itself failed, persisting run.Status=failed. Disposition
+	// must reflect that instead of assuming "task_created" (the
+	// dispatched-successfully label, shared by the heavy path and a
+	// lightweight done) whenever this call merely didn't error.
+	if run.Status == models.RoutineRunStatusFailed {
+		disposition = string(models.RoutineRunStatusFailed)
+	} else {
+		disposition = string(models.RoutineRunStatusTaskCreated)
 	}
-	routine.LastRunAt = &now
+
 	s.logger.Info("routine run dispatched",
 		zap.String("routine", routine.Name),
 		zap.String("run_id", run.ID),
@@ -697,11 +758,12 @@ func (s *RoutineService) materialiseRoutineRun(
 	source string,
 	idempotencyKey string,
 	missedTicks int,
+	claimedTick *time.Time,
 ) error {
 	if tmpl.Title != "" && s.workflowEnsurer != nil && s.taskCreator != nil {
 		return s.materialiseHeavyRoutineRun(ctx, routine, run, title, description)
 	}
-	return s.materialiseLightweightRoutineRun(ctx, routine, run, vars, source, idempotencyKey, missedTicks)
+	return s.materialiseLightweightRoutineRun(ctx, routine, run, vars, source, idempotencyKey, missedTicks, claimedTick)
 }
 
 // materialiseHeavyRoutineRun creates a real task in the routine system
@@ -760,11 +822,12 @@ func (s *RoutineService) materialiseLightweightRoutineRun(
 	source string,
 	idempotencyKey string,
 	missedTicks int,
+	claimedTick *time.Time,
 ) error {
 	if s.wakeup == nil || routine.AssigneeAgentProfileID == "" {
 		return s.finalizeLightweightRun(ctx, run, models.RoutineRunStatusDone)
 	}
-	idemKey := buildRoutineIdempotencyKey(routine.ID, run.TriggerID, source, run.ID, idempotencyKey, run.StartedAt)
+	idemKey := buildRoutineIdempotencyKey(source, routine.ID, run.TriggerID, idempotencyKey, claimedTick, run.ID)
 	payloadStr, _ := marshalRoutinePayload(routine.ID, vars, missedTicks)
 	req := &WakeupRequest{
 		ID:             uuid.New().String(),
@@ -774,6 +837,7 @@ func (s *RoutineService) materialiseLightweightRoutineRun(
 		Payload:        payloadStr,
 		IdempotencyKey: idemKey,
 		RequestedAt:    time.Now().UTC(),
+		CausationID:    run.CausationID,
 	}
 	if err := s.wakeup.CreateWakeupRequest(ctx, req); err != nil {
 		if errors.Is(err, ErrWakeupAlreadyRequested) {
@@ -785,6 +849,7 @@ func (s *RoutineService) materialiseLightweightRoutineRun(
 			zap.String("routine", routine.Name), zap.Error(err))
 		return s.finalizeLightweightRun(ctx, run, models.RoutineRunStatusFailed)
 	}
+	service.IncLoopWakeupCreated(routine.WorkspaceID, req.Source)
 	if err := s.wakeup.Dispatch(ctx, req.ID); err != nil {
 		s.logger.Warn("dispatch routine wakeup request",
 			zap.String("routine", routine.Name),
@@ -817,27 +882,37 @@ func (s *RoutineService) finalizeLightweightRun(
 }
 
 // buildRoutineIdempotencyKey composes the source-level dedup key for a
-// routine fire. Cron fires use the trigger and minute bucket. Manual and
-// webhook fires use a unique run identity unless the caller supplies an
-// explicit request key, so distinct event deliveries never collide.
+// routine fire. An explicit request key (a webhook delivery header, say)
+// always wins, so distinct event deliveries never collide. Otherwise the
+// occurrence identity depends on the source: a cron fire claims a scheduled
+// slot off the trigger row (ClaimTrigger's compare-and-swap means exactly
+// one RoutineRun exists per slot, so the slot - not the run - is the
+// occurrence, and a catch-up collapsing several missed ticks into one fire
+// is still one occurrence). A manual or webhook fire claims no slot, so
+// RoutineRun.ID is its only durable distinguishing identity, and two such
+// fires are two distinct occurrences by design.
+//
+// A cron source with no claimed tick, or a source this table does not
+// recognise, has no occurrence identity to name and goes keyless.
 func buildRoutineIdempotencyKey(
-	routineID, triggerID, source, runID, explicitKey string, startedAt *time.Time,
+	source, routineID, triggerID, explicitKey string, claimedTick *time.Time, routineRunID string,
 ) string {
 	if explicitKey != "" {
 		return fmt.Sprintf("routine:%s:%s:%s", routineID, source, explicitKey)
 	}
-	if source != shared.RoutineSourceCron {
-		return fmt.Sprintf("routine:%s:%s:%s", routineID, source, runID)
+	switch source {
+	case shared.RoutineSourceCron:
+		if claimedTick == nil {
+			runsservice.ReportKeylessEnqueue(shared.RoutineDispatchReason(source), runsservice.KeylessCauseUnresolved, "cron_no_claimed_tick")
+			return ""
+		}
+		return fmt.Sprintf("routine:%s:%s:tick:%d", routineID, triggerID, claimedTick.Unix())
+	case "manual", "webhook":
+		return fmt.Sprintf("routine:%s:run:%s", routineID, routineRunID)
+	default:
+		runsservice.ReportKeylessEnqueue(shared.RoutineDispatchReason(source), runsservice.KeylessCauseUnresolved, "unrecognised_routine_source")
+		return ""
 	}
-	now := time.Now().UTC()
-	if startedAt != nil {
-		now = *startedAt
-	}
-	minute := now.Unix() / 60
-	if triggerID == "" {
-		return fmt.Sprintf("routine:%s:%s:%d", routineID, source, minute)
-	}
-	return fmt.Sprintf("routine:%s:%s:%d", routineID, triggerID, minute)
 }
 
 // marshalRoutinePayload renders the wakeup-request payload for a

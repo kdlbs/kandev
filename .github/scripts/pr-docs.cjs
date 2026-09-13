@@ -1111,6 +1111,8 @@ async function loadCoverageContents({ client, changedFiles, headSha }) {
   }
   const contents = {};
   const loaded = new Set();
+  const requirementSearches = new Map();
+  const requirementDirectories = new Map();
   let documentCount = 0;
   let totalBytes = 0;
   async function load(pathname) {
@@ -1213,7 +1215,14 @@ async function loadCoverageContents({ client, changedFiles, headSha }) {
       const unresolvedRequirementIds = [];
       if (typeof client.searchCode === 'function') {
         for (const requirementId of workOrder.requirements ?? []) {
-          const matches = await client.searchCode(requirementId, requirementDirectory);
+          const searchKey = JSON.stringify([requirementDirectory, requirementId]);
+          if (!requirementSearches.has(searchKey)) {
+            requirementSearches.set(
+              searchKey,
+              await client.searchCode(requirementId, requirementDirectory),
+            );
+          }
+          const matches = requirementSearches.get(searchKey);
           if (matches.length === 0) {
             unresolvedRequirementIds.push(requirementId);
           }
@@ -1225,14 +1234,18 @@ async function loadCoverageContents({ client, changedFiles, headSha }) {
         unresolvedRequirementIds.push(...(workOrder.requirements ?? []));
       }
       if (unresolvedRequirementIds.length > 0 && typeof client.listDirectory === 'function') {
-        let entries = [];
-        try {
-          entries = await client.listDirectory(requirementDirectory, headSha);
-        } catch (error) {
-          if (!isMissingResourceError(error)) {
-            throw error;
+        if (!requirementDirectories.has(requirementDirectory)) {
+          let entries = [];
+          try {
+            entries = await client.listDirectory(requirementDirectory, headSha);
+          } catch (error) {
+            if (!isMissingResourceError(error)) {
+              throw error;
+            }
           }
+          requirementDirectories.set(requirementDirectory, entries);
         }
+        const entries = requirementDirectories.get(requirementDirectory);
         const candidateNames = new Set(unresolvedRequirementIds.map(requirementId => {
           const parts = requirementId.split('-');
           return `${parts.slice(2).join('-').replace(/-\d+$/, '').toLowerCase()}.md`;
