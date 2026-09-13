@@ -279,6 +279,7 @@ function useNativeScrollMetrics(
 
 function NativeScrollManagementHarness({
   items,
+  messages = [],
   metrics,
   loadMore = async () => 0,
   sessionId = null,
@@ -292,6 +293,7 @@ function NativeScrollManagementHarness({
   recoveryRevealKey = null,
 }: {
   items: RenderItem[];
+  messages?: Message[];
   metrics?: NativeScrollMetrics;
   loadMore?: () => Promise<number>;
   sessionId?: string | null;
@@ -306,15 +308,10 @@ function NativeScrollManagementHarness({
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   useNativeScrollMetrics(scrollRef, metrics);
-  const useNativeScrollManagementWithRecovery = useNativeScrollManagement as unknown as (
-    params: Parameters<typeof useNativeScrollManagement>[0] & {
-      recoveryRevealKey?: string | null;
-    },
-  ) => ReturnType<typeof useNativeScrollManagement>;
-  const { sentinelRef, showRecovery } = useNativeScrollManagementWithRecovery({
+  const { sentinelRef, showRecovery } = useNativeScrollManagement({
     scrollRef,
     items,
-    messages: [],
+    messages,
     isWorking: false,
     sessionId,
     enabled,
@@ -627,6 +624,46 @@ describe("useNativeScrollManagement transcript pagination", () => {
       />,
     );
     expect(metrics.scrollTop).toBe(0);
+  });
+
+  it("resumes normal auto-scroll after the initial recovery placement is consumed", () => {
+    const metrics = { scrollHeight: 100, scrollTop: 0, clientHeight: 50 };
+    const firstMessage = { id: "first-message" } as Message;
+    const scrollerMessages = [firstMessage];
+    const activity = transcriptActivity(OLDEST_ACTIVITY_ID, "turn-1");
+    const newest = transcriptMessage(NEWEST_MESSAGE_ID);
+    const { rerender } = render(
+      <NativeScrollManagementHarness
+        items={[activity, newest]}
+        messages={scrollerMessages}
+        metrics={metrics}
+        sessionId={RECOVERY_SESSION_ID}
+        enabled
+        hasMore={false}
+        recoveryRevealKey="session-recovery:placement-1"
+      />,
+    );
+    const scroller = screen.getByTestId(NATIVE_SCROLL_MANAGEMENT_TEST_ID);
+
+    metrics.scrollTop = 50;
+    act(() => {
+      scroller.dispatchEvent(new WheelEvent("wheel", { deltaY: 100 }));
+      scroller.dispatchEvent(new Event("scroll"));
+    });
+    metrics.scrollHeight = 150;
+    rerender(
+      <NativeScrollManagementHarness
+        items={[activity, newest]}
+        messages={[...scrollerMessages, { id: "second-message" } as Message]}
+        metrics={metrics}
+        sessionId={RECOVERY_SESSION_ID}
+        enabled
+        hasMore={false}
+        recoveryRevealKey="session-recovery:placement-1"
+      />,
+    );
+
+    expect(metrics.scrollTop).toBe(2_147_483_647);
   });
 
   // @covers AC-UI-TRANSCRIPT-AUTO-SCROLL-001.11

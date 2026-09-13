@@ -149,8 +149,16 @@ Review fixes:
   failure arrives. A real downward wheel, key, pointer, or touch gesture gives
   scroll ownership back to the reader, after which normal message anchoring
   resumes.
+- The reveal key now follows the recovery surface that is actually rendered,
+  including task-wide errors while another session is selected and persisted
+  session metadata fallbacks.
+- The one-time recovery placement latch clears after the initial reveal even
+  while feedback remains visible, so normal bottom-follow, activation catch-up,
+  and persisted-offset restoration resume afterward.
 - Quick Chat fallback recovery keys now use the session, monotonic recovery
   attempt, and outcome identity. Clearing feedback re-arms the reveal latch.
   Duplicate same-attempt state, including changed translated error text,
   keeps the existing key.
-- Added controlled pagination and same-session recovery regression coverage.
+- Added controlled pagination, same-session recovery, visible-error-key, and
+  post-reveal auto-scroll regression coverage. The review cleanup also names
+  the raw resumption setter clearly and removes the obsolete test harness cast.

@@ -56,8 +56,12 @@ import { TaskChatLaunchError } from "./simple/components/task-chat-launch-error"
 import { isTypedTaskLaunchError } from "./simple/components/task-launch-error-entry";
 import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
-import { isTaskLaunchErrorOwnedBySession } from "@/components/task/chat/types";
+import {
+  isTaskLaunchErrorOwnedBySession,
+  isTaskLaunchErrorVisibleForSession,
+} from "@/components/task/chat/types";
 import { TaskMarkdownFileLinkProvider } from "@/components/shared/task-markdown-file-link-provider";
+import { selectSessionRecoveryError } from "@/lib/session-recovery-presentation";
 
 /** Returns a `clarificationKey` that increments each time a pending
  * clarification is resolved, letting the composer reset its input state for
@@ -1031,6 +1035,17 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     pendingClarificationGroup,
   } = panelState;
   const activeLaunchError = launchStatusSummary?.active_error;
+  const selectedSessionRecoveryError = selectSessionRecoveryError(
+    activeLaunchError,
+    resolvedSessionId,
+    session?.metadata,
+  );
+  const visibleRecoveryError =
+    selectedSessionRecoveryError ??
+    (isTypedTaskLaunchError(activeLaunchError) &&
+    isTaskLaunchErrorVisibleForSession(activeLaunchError, resolvedSessionId)
+      ? activeLaunchError
+      : null);
   const launchErrorOwned = Boolean(
     isTypedTaskLaunchError(activeLaunchError) &&
     isTaskLaunchErrorOwnedBySession(activeLaunchError, resolvedSessionId),
@@ -1169,8 +1184,8 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       repositories={launchErrorContext.repositories}
     />
   ) : null;
-  const recoveryRevealKey = launchErrorOwned
-    ? `${resolvedSessionId ?? ""}:${activeLaunchError?.stamp ?? activeLaunchError?.occurred_at ?? ""}`
+  const recoveryRevealKey = visibleRecoveryError
+    ? `${resolvedSessionId ?? ""}:${visibleRecoveryError.stamp || visibleRecoveryError.occurred_at}`
     : null;
 
   return (

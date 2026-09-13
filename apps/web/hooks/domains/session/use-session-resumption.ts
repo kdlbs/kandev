@@ -724,7 +724,7 @@ export function useSessionResumption(
   taskArchiveState: TaskArchiveState = false,
   options: SessionResumptionOptions = {},
 ): UseSessionResumptionReturn {
-  const [resumptionState, setResumptionStateState] = useState<ResumptionState>("idle");
+  const [resumptionState, setResumptionStateRaw] = useState<ResumptionState>("idle");
   const recoveryAttemptIdRef = useRef(0);
   const recoveryAttemptActiveRef = useRef(false);
   const setResumptionState = useCallback((nextState: ResumptionState) => {
@@ -737,7 +737,7 @@ export function useSessionResumption(
     } else {
       recoveryAttemptActiveRef.current = false;
     }
-    setResumptionStateState(nextState);
+    setResumptionStateRaw(nextState);
   }, []);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
