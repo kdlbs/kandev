@@ -36,7 +36,7 @@ type ImproveKandevDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   workspaceId: string | null;
-  onSuccess?: (task: Task) => void;
+  onSuccess?: (task: Task, meta?: { autoFocus?: boolean }) => void;
 };
 
 type Mode = "intro" | "create";
@@ -581,7 +581,7 @@ function ImproveKandevCreateStage({
   bootstrap: BootstrapState;
   captureLogs: boolean;
   setCaptureLogs: (capture: boolean) => void;
-  onSuccess?: (task: Task) => void;
+  onSuccess?: (task: Task, meta?: { autoFocus?: boolean }) => void;
   externalBlockedReason: string | null;
   improveWorkspaceMissing: boolean;
   workspaceChoiceConfirmed: boolean;
@@ -591,9 +591,9 @@ function ImproveKandevCreateStage({
   onCancel: () => void;
 }) {
   const handleSuccess = useCallback(
-    (task: Task) => {
+    (task: Task, _mode?: "create" | "edit", meta?: { autoFocus?: boolean }) => {
       onOpenChange(false);
-      onSuccess?.(task);
+      onSuccess?.(task, meta);
     },
     [onOpenChange, onSuccess],
   );

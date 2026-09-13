@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import {
+  activatePlanMode,
   autoSelectBranch,
   buildCreateTaskPayload,
   buildRepositoriesPayload,
@@ -330,4 +331,31 @@ describe("buildCreateTaskPayload priority", () => {
   it("defaults to medium when no priority is selected", () => {
     expect(buildCreateTaskPayload(base).priority).toBe("medium");
   });
+});
+
+it("initializes a planning session without navigating when auto-focus is off", () => {
+  const setActiveDocument = vi.fn();
+  const setPlanMode = vi.fn();
+  const router = {
+    push: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+    refresh: vi.fn(),
+    prefetch: vi.fn(),
+  };
+  activatePlanMode({
+    taskId: "task-plan",
+    sessionId: "session-plan",
+    autoFocus: false,
+    setActiveDocument,
+    setPlanMode,
+    router,
+  });
+  expect(setPlanMode).toHaveBeenCalledWith("session-plan", true);
+  expect(setActiveDocument).toHaveBeenCalledWith("session-plan", {
+    type: "plan",
+    taskId: "task-plan",
+  });
+  expect(router.push).not.toHaveBeenCalled();
 });

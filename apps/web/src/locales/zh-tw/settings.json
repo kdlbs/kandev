@@ -789,5 +789,7 @@
   "unitAddMember": "新增",
   "unitRemoveMember": "移除成員",
   "unitPickPerson": "選擇成員",
-  "unitActionFailed": "操作未成功。"
+  "unitActionFailed": "操作未成功。",
+  "autoFocusNewTasks": "自動聚焦新任務",
+  "autoFocusNewTasksHelp": "自動開啟新建立的任務。關閉此選項可保留目前檢視。任務和代理仍會按要求啟動。"
 }
