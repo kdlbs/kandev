@@ -90,6 +90,9 @@ is needed for one persistent boolean. Creation shells retain their existing
 phone composition. When automatic opening is disabled, the shared dialog captures
 the opening control before child input-focus effects and restores it on dismissal
 if it remains mounted. An explicit caller focus-return ref takes precedence.
+The phone task drawer captures its own surviving opener before taking focus
+and supplies that ref for background creation, since its New button unmounts
+when the drawer closes.
 
 ## Verification mapping
 

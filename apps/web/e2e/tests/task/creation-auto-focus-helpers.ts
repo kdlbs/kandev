@@ -3,6 +3,7 @@ import type { ApiClient } from "../../helpers/api-client";
 import { KanbanPage } from "../../pages/kanban-page";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { waitForHttp } from "../../helpers/causal-waits";
 
 async function saveFocusPreference(page: Page, enabled: boolean, mobile: boolean) {
   await page.goto("/settings/general/task-actions");
@@ -34,16 +35,25 @@ async function submitTask(page: Page, title: string, withAgent: boolean, mobile:
   await dialog.getByTestId("task-title-input").fill(title);
   await dialog.getByTestId("task-description-input").fill("/e2e:simple-message");
   if (!withAgent && !mobile) {
-    await expect(dialog.getByTestId("submit-start-agent")).toBeEnabled({ timeout: 30_000 });
+    await expect(dialog.getByTestId("submit-start-agent")).toBeEnabled();
     await dialog.getByTestId("submit-start-agent-chevron").click();
   }
   const submit =
     !withAgent && mobile
       ? dialog.getByRole("button", { name: "Create only", exact: true })
       : page.getByTestId(withAgent ? "submit-start-agent" : "submit-create-without-agent");
-  await expect(submit).toBeEnabled({ timeout: 30_000 });
+  await expect(submit).toBeEnabled();
   await submit.click();
   await expect(dialog).toBeHidden();
+}
+
+async function openCreationDialog(page: Page, open: () => Promise<void>) {
+  // Local repository status supplies the default branch used by submit eligibility.
+  const repositoryReady = waitForHttp(page, "GET", /\/repositories\/local-status$/);
+  await open();
+  const response = await repositoryReady;
+  expect(response.ok()).toBe(true);
+  await response.finished();
 }
 
 async function openFromTask(page: Page, mobile: boolean) {
@@ -87,7 +97,7 @@ export async function verifyCreationAutoFocus(
     const opener = mobile
       ? (board as MobileKanbanPage).mobileFab
       : page.getByTestId("create-task-button");
-    await opener.click();
+    await openCreationDialog(page, () => opener.click());
     await submitTask(page, "Background task one", false, mobile);
     await expect(page).toHaveURL(listingURL);
     await expect(opener).toBeFocused();
@@ -101,9 +111,10 @@ export async function verifyCreationAutoFocus(
     await expect(page).toHaveURL(new RegExp(`/t/${firstID}`));
     await new SessionPage(page).waitForLoad();
     const activeURL = page.url();
-    await openFromTask(page, mobile);
+    await openCreationDialog(page, () => openFromTask(page, mobile));
     await submitTask(page, "Background task with agent", true, mobile);
     await expect(page).toHaveURL(activeURL);
+    if (mobile) await expect(page.getByTestId("mobile-session-menu")).toBeFocused();
     const secondID = await taskID(api, workspaceID, "Background task with agent");
     await expect
       .poll(
@@ -117,7 +128,7 @@ export async function verifyCreationAutoFocus(
     await saveFocusPreference(page, true, mobile);
     await page.goto(activeURL);
     await new SessionPage(page).waitForLoad();
-    await openFromTask(page, mobile);
+    await openCreationDialog(page, () => openFromTask(page, mobile));
     await submitTask(page, "Focused task again", false, mobile);
     const focusedID = await taskID(api, workspaceID, "Focused task again");
     await expect(page).toHaveURL(new RegExp(`/t/${focusedID}`));

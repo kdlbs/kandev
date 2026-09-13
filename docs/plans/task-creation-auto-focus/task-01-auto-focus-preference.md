@@ -129,3 +129,21 @@ implementation; a guard in only the submit helper is incomplete.
 Implementation and verification complete on 2026-09-13. Backend user/settings catalog and boot projection tests passed. The broad frontend run passed 315 tests across 25 files; subsequent focused runs passed the final dialog (11 tests), Azure launcher, and user-settings fixture changes. TypeScript, changed-file ESLint, Prettier, localization checks and ratchet, settings catalog consistency, native builds, and the web build passed. Desktop browser verification passed, including saved false after reload, retained listing/task URLs, opener focus, manual opening, background agent execution, and re-enabled navigation. Phone browser verification also passed, including the native Create only control, creation from the task switcher, saved preference, 44px touch target, no horizontal overflow, opener focus, background agent execution, and re-enabled navigation. Public documentation validation passed (62 tests, 46 pages). All acceptance criteria are covered; there is no unresolved UI mismatch. Changes remain uncommitted.
 
 Native builds replace the original full `make build-backend` command: the full target also cross-compiles remote helpers for Linux ARM and macOS, which these browser scenarios do not exercise. The full target was stopped after native agentctl built. Go checks use `GOCACHE=/tmp/kandev-auto-focus-go-cache` because the default cache is read-only in this environment.
+
+
+### Review remediation
+
+Codex review identified detached drawer-opener focus and extended UI readiness
+assertions. A phone E2E regression reproduced focus remaining on the document.
+The drawer now passes its surviving opener to the creation dialog when
+background creation is selected. The shared browser helper arms a wait for the
+observed repository local-status response before opening creation, then checks
+submit eligibility with the default assertion timeout. Local status supplies
+the preferred default branch; the probe was removed after identifying this
+causal chain.
+
+Local validation: 17 tests passed with
+`pnpm --dir apps/web exec vitest run session-task-switcher-sheet.test.tsx task-create-dialog.test.tsx`;
+changed-file ESLint, TypeScript, and `build:vite` passed. The focused phone
+scenario passed with the added task-menu focus assertion; the desktop scenario
+also passed. Remote CI/review verification remains pending after the fix push.
