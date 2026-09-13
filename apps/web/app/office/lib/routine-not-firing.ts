@@ -15,10 +15,18 @@ export function isRoutineNotFiringError(error: unknown): error is ApiError {
 
 type Translate = (key: string, options?: Record<string, unknown>) => string;
 
-function refusedStatus(error: ApiError): string {
+const ROUTINE_STATUS_LABEL_KEYS: Record<string, string> = {
+  active: "office:routineStatusActive",
+  archived: "office:routineStatusArchived",
+  paused: "office:routineStatusPaused",
+};
+
+function refusedStatus(error: ApiError, t: Translate): string {
   if (!error.body || typeof error.body !== "object") return "";
   const status = (error.body as { status?: unknown }).status;
-  return typeof status === "string" ? status : "";
+  if (typeof status !== "string") return "";
+  const labelKey = ROUTINE_STATUS_LABEL_KEYS[status];
+  return labelKey ? t(labelKey) : status;
 }
 
 /**
@@ -31,7 +39,7 @@ function refusedStatus(error: ApiError): string {
  */
 export function routineNotFiringMessage(error: unknown, t: Translate, fallbackKey: string): string {
   if (isRoutineNotFiringError(error)) {
-    return t("office:routineNotFiring", { status: refusedStatus(error) });
+    return t("office:routineNotFiring", { status: refusedStatus(error, t) });
   }
   if (error instanceof Error && error.message.trim()) return error.message;
   return t(fallbackKey);

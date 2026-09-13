@@ -184,9 +184,10 @@ status, so pausing means one thing everywhere.
 - **AC-OFFICE-ROUTINE-STATUS-004.2:** When a webhook fire targets a trigger whose
   routine has no firing status, the system shall refuse the request with HTTP 409
   and shall create no run row, wakeup request, or task.
-- **AC-OFFICE-ROUTINE-STATUS-004.3:** When a webhook fire carries an invalid
-  signature, the system shall refuse it on the signature, whatever the routine's
-  status, so that the response does not disclose the status.
+- **AC-OFFICE-ROUTINE-STATUS-004.3:** When an enabled webhook fire has an invalid
+  signature, the system shall refuse it on the signature regardless of routine
+  status, so the response does not disclose status. Disabled triggers retain their
+  existing refusal precedence.
 - **AC-OFFICE-ROUTINE-STATUS-004.4:** When a fire is refused on status, the
   response body shall name the observed status and shall carry a stable
   machine-readable code identifying a status refusal, distinct from every other

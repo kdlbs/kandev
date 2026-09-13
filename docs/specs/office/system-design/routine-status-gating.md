@@ -43,11 +43,11 @@ Adjacent contracts this design uses but does not own:
   compares against, alongside the existing `RoutineConcurrencyPolicy` and
   `RoutineCatchUpPolicy` types in `enums.go`, so no caller re-derives the rule from
   string literals.
-- **`office/shared`** owns cron expression evaluation, and gains one exported
-  predicate for checking that a computed time is a time an expression actually names.
-  See [the match check](#the-match-check) for why the check cannot be expressed with
-  the package's existing exported surface, and why it is added here rather than in
-  `office/routines`.
+- **`office/shared`** owns cron expression evaluation. `NextCronTime` validates and
+  parses the five-field expression, applies its timezone and DST rules, and reports
+  an impossible expression with `ErrUnsatisfiableCron`. The routines service uses
+  this existing helper for both suppression and catch-up, so it does not maintain a
+  second cron parser.
 - **`office/routines` service** owns the gate on both the cron path and the manual
   path. `processCronTrigger` consults the predicate before claiming; `FireManual`
   consults it on the routine it already reads and returns a refusal its handler can
@@ -142,61 +142,25 @@ loser of a race changes no rows and does nothing
    after the claim, where a failure leaves the cursor cleared and the trigger
    permanently dead.
 3. **Evaluate `CanFire()`.** When it is false, compute the first slot strictly
-   after `now` from the trigger's cron expression and timezone, check it against
-   [the match check](#the-match-check), call `AdvanceTriggerWithoutFiring` with the
-   observed cursor as the compare value, log routine id, trigger id, and observed
-   status, and return. No claim, no run row, no wakeup, no task.
+   after `now` from the trigger's cron expression and timezone with
+   `shared.NextCronTime`, call `AdvanceTriggerWithoutFiring` with the observed cursor
+   as the compare value, log routine id, trigger id, and observed status, and return.
+   No claim, no run row, no wakeup, no task.
 4. **Claim the trigger.** Unchanged, and only reached on the firing path.
 5. **Compute outage catch-up and dispatch.** Unchanged.
 
-`shared.NextCronTime` returns the first match strictly after its argument
-(`findNextMatch` starts at `after` truncated to the minute plus one minute), so
-step 3 needs no additional guard against re-selecting the slot it is suppressing.
+### Cron cursor calculation
 
-### The match check
+The suppression path uses `shared.NextCronTime` as its single cursor calculation.
+The helper validates the strict five-field syntax, resolves the trigger timezone,
+and applies the shared DST policy before returning the next slot.
 
-Step 3 needs one guard in the other direction. `findNextMatch` searches 366 days
-and, finding nothing, returns `after + 24h` with **no error** rather than reporting
-that the expression names no slot. An expression like `0 0 30 2 *` therefore yields a
-cursor the schedule never names, and the trigger would drift forward a day at a time
-forever, each hop looking like a legitimate advance. So step 3 checks that the
-computed time actually matches the trigger's expression before writing it, and routes
-a mismatch to the failure path below (AC-OFFICE-ROUTINE-STATUS-002.1, -002.8): cursor
-untouched, nothing fired, suppressed again next tick.
-
-That check has no callable implementation today, which is why
-[Components](#components-and-responsibilities) assigns it an owner rather than leaving
-it to the builder. `office/shared/cron.go` exports exactly one symbol, `NextCronTime`;
-`cronSpec`, `parseCronSpec` and `matchesSpec` are all unexported, so `office/routines`
-cannot perform the check at all with the package's current surface. Three approaches
-exist and they are not equivalent:
-
-- **Export a match predicate from `office/shared`.** Chosen. It adds one exported
-  function next to the parser it depends on, and changes no existing behavior.
-- **Change `NextCronTime` to return an error on the fallback.** Rejected. It is the
-  cleanest expression of the underlying bug, but `computeRoutineMissed` on the firing
-  path calls the same helper, so changing its error contract changes outage-catch-up
-  behavior, which belongs to a different capability. That path is deliberately left
-  alone here.
-- **Re-implement cron matching inside `office/routines`.** Rejected: two parsers for
-  one expression syntax, which will drift.
-
-The new predicate takes an expression, a timezone and a time, and reports whether that
-time is one the expression names, returning the same class of error `NextCronTime`
-already returns for a malformed expression or an unloadable timezone. It parses the
-expression rather than consulting any cached state, so it stays correct if the parser
-gains syntax later.
-
-**The comparison is performed in the trigger's timezone.** The predicate loads that
-location and converts the given instant into it before comparing any field. This is the
-one detail the check cannot leave to its caller: a cron expression names wall-clock
-values in its own zone, but `NextCronTime` returns its result in UTC, so a predicate
-that compared the instant exactly as handed to it would read UTC wall-clock fields
-against a spec written in another zone. For `0 9 * * *` in `America/New_York` that is
-hour 13 against a spec naming hour 9 — no match, for a cursor that is perfectly correct.
-Every non-UTC routine would then fail the check on every suppressed slot, route to the
-failure path below, and sit with a frozen cursor and a permanently due trigger. The
-check is only meaningful against the same clock the expression is written in.
+`NextCronTime` returns the first match strictly after its argument and returns the
+result in UTC. It performs the wall-clock calculation in the trigger's timezone,
+applies the shared DST policy, and reports `ErrUnsatisfiableCron` when no future date
+can satisfy the expression. Suppression uses that error contract directly. It leaves
+the cursor unchanged on an error, so the trigger remains due and the operator can fix
+the expression. No separate match predicate or duplicate parser is needed.
 
 ### The firing-status predicate
 
@@ -358,13 +322,11 @@ so a follow-up cannot ship one without the other.
   is accepted because the state is rare and self-clearing at the next restart.
   Making the reconciler cheaper or more frequent is named out of scope in the
   requirements.
-- **The new cursor cannot be computed.** Either `shared.NextCronTime` rejects the
-  input, on a malformed expression or an unloadable timezone, or it returns a time
-  that [the match check](#the-match-check) rejects, which is how its silent
-  `after + 24h` fallback for a schedule with no match is caught. Both suppress without
-  writing, logged under the repeat bound. The trigger stays due and is suppressed again
-  every tick, which is correct: the routine is not firing either way, and the
-  misconfiguration is the operator's to fix.
+- **The new cursor cannot be computed.** `shared.NextCronTime` rejects a malformed
+  expression, an unloadable timezone, or an unsatisfiable expression. Suppression
+  leaves the cursor unchanged, logs under the repeat bound, and retries on the next
+  tick. The trigger stays due, which is correct: the routine is not firing either way,
+  and the misconfiguration is the operator's to fix.
 - **Cursor advance write fails.** Same outcome: no fire, cursor unchanged, logged
   under the repeat bound, re-evaluated next tick. The evaluation repeats every tick
   until the write succeeds; the log entry does not.
