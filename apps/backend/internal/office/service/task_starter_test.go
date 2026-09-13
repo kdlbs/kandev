@@ -127,7 +127,7 @@ func TestSchedulerTick_ResolvedRecoveryRunReentersAdmissionWithSameIdentity(t *t
 		t.Fatalf("create agent: %v", err)
 	}
 	insertTestTask(t, svc, "task-recovery-1", "ws-1")
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-recovery-1","session_id":"session-recovery-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}

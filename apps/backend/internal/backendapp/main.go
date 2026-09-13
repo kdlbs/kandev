@@ -112,8 +112,6 @@ import (
 	officeskills "github.com/kandev/kandev/internal/office/skills"
 	officewakeup "github.com/kandev/kandev/internal/office/wakeup"
 	orchexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
-	taskmodels "github.com/kandev/kandev/internal/task/models"
-	v1 "github.com/kandev/kandev/pkg/api/v1"
 
 	// Runs queue (Phase 3 of task-model-unification)
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
