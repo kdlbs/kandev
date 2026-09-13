@@ -21,8 +21,12 @@ conversation at a time with swipe/picker navigation and the normal composer.
 
 The user approved implementation on 2026-09-11. The initial five orders are done.
 The scoped polish requested on 2026-09-12 is also complete in Task 06.
-The feature is committed and open for review in PR #3626. Review remediation
-retains the existing implementation boundaries and is recorded below.
+The feature merged in PR #3626 on 2026-09-13 at
+`f718c50666eb7175e39087294afabc70ac39f3a7`. Review remediation retains the
+existing implementation boundaries and is recorded below. The focused
+[Grid clarification overflow follow-up](../threads-grid-clarification-overflow/plan.md)
+records a later conformance repair; its pending results do not replace this
+package's historical evidence.
 Read the previews first, then the work order
 for the implementation boundary being changed.
 
