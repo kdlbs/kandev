@@ -162,15 +162,11 @@ history and remains immutable.
   `python3 scripts/list-docs.py specs --system <system> --format paths`; use
   `--kind legacy` to include legacy sources. Run `python3 scripts/list-docs.py validate` and `python3 scripts/lint-spec-files.py --all` after specification changes.
 - **Decisions:** Architecture decisions are recorded in `docs/decisions/`. Use `python3 scripts/list-docs.py decisions --format markdown` to find relevant ADRs. The `docs/decisions/INDEX.md` page contains command examples. When making significant architectural choices, create a new ADR via `/record decision`.
-- **Plans:** Implementation plans are generated from requirements and system
-  designs through `/plan`. `docs/plans/<initiative>/plan.md` is a work-package
-  manifest. Its sibling `task-<NN>-<short-slug>.md` files are work orders.
+- **Plans:** Implementation plans are generated from requirements and system designs through `/plan`. `docs/plans/<initiative>/plan.md` is a work-package manifest. Its sibling `task-<NN>-<short-slug>.md` files are work orders.
 
 ### Plan Implementation
 
-- Requirements and system designs define durable behavior and technical
-  boundaries. Plans and work orders define implementation scope, dependency
-  order, and task-level validation. Keep their statuses and results accurate.
+- Requirements and system designs define durable behavior and technical boundaries. Plans and work orders define implementation scope, dependency order, and task-level validation. Keep their statuses and results accurate.
 
 ### Observability
 
