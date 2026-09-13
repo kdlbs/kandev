@@ -13,11 +13,13 @@ func validSubmissionTransition(from, to SubmissionState) bool {
 	}
 	switch from {
 	case SubmissionPrepared:
-		return to == SubmissionAccepted
+		return to == SubmissionAccepted || to == SubmissionCancelled
 	case SubmissionAccepted:
 		return to == SubmissionDispatching || to == SubmissionCancelled
 	case SubmissionDispatching:
 		return to == SubmissionCompleted || to == SubmissionFailed || to == SubmissionCancelled || to == SubmissionInterruptedUnknown
+	case SubmissionInterruptedUnknown:
+		return to == SubmissionCancelled
 	default:
 		return false
 	}

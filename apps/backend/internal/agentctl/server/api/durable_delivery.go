@@ -181,6 +181,26 @@ func (s *Server) handleDeliverySubmissionRetire(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+func (s *Server) handleDeliverySubmissionCancel(c *gin.Context) {
+	deliveryJournal, ok := s.getDeliveryJournal(c)
+	if !ok {
+		return
+	}
+	submission, err := deliveryJournal.GetSubmission(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		writeDeliveryError(c, err)
+		return
+	}
+	if !s.validateDeliverySubmission(c, submission) {
+		return
+	}
+	if err := s.procMgr.CancelDeliverySubmission(c.Request.Context(), submission.ID); err != nil {
+		writeDeliveryError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 func (s *Server) handleDeliveryReplay(c *gin.Context) {
 	deliveryJournal, ok := s.getDeliveryJournal(c)
 	if !ok {
@@ -368,6 +388,8 @@ func writeDeliveryError(c *gin.Context, err error) {
 		status, code = http.StatusConflict, deliveryOwnerMismatchCode
 	case errors.Is(err, journal.ErrSubmissionNotFound):
 		status, code = http.StatusNotFound, "SUBMISSION_NOT_FOUND"
+	case errors.Is(err, journal.ErrSubmissionState):
+		status, code = http.StatusConflict, "SUBMISSION_STATE"
 	}
 	c.JSON(status, gin.H{"code": code, "message": code})
 }

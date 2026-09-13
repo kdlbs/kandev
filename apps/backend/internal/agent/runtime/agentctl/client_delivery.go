@@ -125,6 +125,13 @@ func (c *Client) RetireDeliverySubmission(ctx context.Context, id string) error 
 	return c.doDeliveryRequest(ctx, http.MethodPost, path, nil, nil)
 }
 
+// CancelDeliverySubmission settles a prompt after an explicit user cancel.
+// The agentctl peer keeps the terminal record so reconnects cannot resend it.
+func (c *Client) CancelDeliverySubmission(ctx context.Context, id string) error {
+	path := "/api/v1/agent/submissions/" + url.PathEscape(id) + "/cancel"
+	return c.doDeliveryRequest(ctx, http.MethodPost, path, nil, nil)
+}
+
 // ReplayDelivery reads events after a committed cursor. Cursor expiration is
 // returned as an error so the caller can perform the explicit recovery path.
 func (c *Client) ReplayDelivery(ctx context.Context, streamID string, after uint64, limit int) ([]journal.Event, journal.Stream, error) {

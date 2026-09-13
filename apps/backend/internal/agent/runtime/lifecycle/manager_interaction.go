@@ -374,7 +374,7 @@ func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExec
 		m.logger.Warn("agent stream disconnected before cancel; escalating locally",
 			zap.String("execution_id", executionID),
 			zap.Error(cancelErr))
-		return m.escalateStuckCancel(ctx, execution, snapshot.finished)
+		return m.escalateStuckCancel(ctx, execution, snapshot.finished, client)
 	}
 
 	// The agent did not end the in-flight session/prompt RPC after cancel (e.g. it
@@ -384,7 +384,7 @@ func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExec
 		m.logger.Warn("agent cancel not acknowledged; escalating immediately",
 			zap.String("execution_id", executionID),
 			zap.Error(cancelErr))
-		return m.escalateStuckCancel(ctx, execution, snapshot.finished)
+		return m.escalateStuckCancel(ctx, execution, snapshot.finished, client)
 	}
 
 	m.logger.Info("agent cancel sent, waiting for turn completion",
@@ -411,7 +411,20 @@ func (m *Manager) cancelAgentExecution(ctx context.Context, execution *AgentExec
 // have handleAgentReady try to re-acquire that same guard reentrantly and
 // deadlock forever on the non-reentrant sync.Mutex. See
 // markReadyEventWithContext's doc comment for the full explanation.
-func (m *Manager) escalateStuckCancel(ctx context.Context, execution *AgentExecution, ch <-chan struct{}) error {
+func (m *Manager) escalateStuckCancel(
+	ctx context.Context,
+	execution *AgentExecution,
+	ch <-chan struct{},
+	clients ...*agentctlclient.Client,
+) error {
+	var client *agentctlclient.Client
+	if len(clients) > 0 {
+		client = clients[0]
+	} else {
+		var release func()
+		client, release = execution.AcquireAgentCtlClient()
+		defer release()
+	}
 	m.logger.Warn("timed out waiting for in-flight prompt to finish after cancel; escalating",
 		zap.String("execution_id", execution.ID),
 		zap.String("session_id", execution.SessionID))
@@ -458,6 +471,20 @@ func (m *Manager) escalateStuckCancel(ctx context.Context, execution *AgentExecu
 	select {
 	case <-execution.promptDoneCh:
 	default:
+	}
+
+	if submissionID := execution.deliverySubmissionIDSnapshot(); submissionID != "" && client != nil {
+		settleCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deliveryReconciliationTimeout)
+		settleErr := client.CancelDeliverySubmission(settleCtx, submissionID)
+		cancel()
+		if settleErr != nil {
+			m.logger.Warn("failed to settle durable prompt after cancel escalation",
+				zap.String("execution_id", execution.ID),
+				zap.String("submission_id", submissionID),
+				zap.Error(settleErr))
+			return errors.Join(ErrCancelEscalated, settleErr)
+		}
+		execution.clearDeliverySubmissionID(submissionID)
 	}
 
 	if err := ctx.Err(); err != nil {

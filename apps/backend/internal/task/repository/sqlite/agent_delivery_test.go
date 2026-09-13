@@ -257,6 +257,61 @@ func TestCanonicalAgentDeliveryProjectionPersistsNewlineFreeChunksExactlyOnce(t 
 	}
 }
 
+func TestCanonicalAgentDeliveryProjectionPersistsThinkingInMetadata(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-canonical-thinking", "session-canonical-thinking", "turn-canonical-thinking")
+
+	for sequence, reasoning := range []string{"inspect the repository", " and compare the changes"} {
+		sequenceNumber := int64(sequence + 1)
+		wire := streams.AgentEvent{
+			Type:               streams.EventTypeReasoning,
+			ReasoningText:      reasoning,
+			TurnID:             "turn-canonical-thinking",
+			CanonicalMessageID: "canonical-thinking-1",
+		}
+		payload, err := json.Marshal(wire)
+		if err != nil {
+			t.Fatal(err)
+		}
+		event := &models.AgentDeliveryEvent{
+			SessionID:         "session-canonical-thinking",
+			IncarnationID:     "incarnation-canonical-thinking",
+			HarnessGeneration: 1,
+			StreamID:          "stream-canonical-thinking",
+			Sequence:          sequenceNumber,
+			EventType:         streams.EventTypeReasoning,
+			Payload:           payload,
+		}
+		if inserted, err := repo.ReceiveAgentDeliveryEvent(ctx, event, sequenceNumber); err != nil || !inserted {
+			t.Fatalf("receive reasoning sequence %d = %v, err=%v", sequenceNumber, inserted, err)
+		}
+		if _, err := repo.ProjectCanonicalAgentDeliveryEvent(ctx, event, &models.AgentDeliveryEffect{
+			EffectKey:  "canonical-thinking:" + fmt.Sprint(sequence),
+			StreamID:   event.StreamID,
+			Sequence:   sequenceNumber,
+			EffectType: "agent_delivery.event",
+		}); err != nil {
+			t.Fatalf("project reasoning sequence %d: %v", sequenceNumber, err)
+		}
+	}
+
+	message, err := repo.GetMessage(ctx, "canonical-thinking-1")
+	if err != nil {
+		t.Fatalf("get canonical thinking message: %v", err)
+	}
+	if message.Content != "" {
+		t.Fatalf("canonical thinking content = %q, want empty content column", message.Content)
+	}
+	thinking, ok := message.Metadata["thinking"].(string)
+	if !ok {
+		t.Fatalf("canonical thinking metadata = %#v, missing thinking string", message.Metadata)
+	}
+	if thinking != "inspect the repository and compare the changes" {
+		t.Fatalf("canonical thinking metadata = %q, want concatenated reasoning", thinking)
+	}
+}
+
 func TestCanonicalAgentDeliveryProjectionLeavesOutOfOrderEventsForReplay(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

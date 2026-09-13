@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
@@ -110,25 +111,27 @@ func (r *Repository) persistCanonicalAgentMessageTx(
 	}
 	now := r.nowUTC()
 	var existingContent string
+	var existingMetadata string
 	err = tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT content FROM task_session_messages WHERE id = ?`), messageID).Scan(&existingContent)
+		SELECT content, metadata FROM task_session_messages WHERE id = ?`), messageID).Scan(&existingContent, &existingMetadata)
 	switch {
 	case err == nil:
-		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-			UPDATE task_session_messages
-			SET content = ?, updated_at = ?
-			WHERE id = ?`), existingContent+content, now, messageID); err != nil {
-			return false, fmt.Errorf("append canonical agent message: %w", err)
-		}
-		return true, nil
+		return r.updateCanonicalAgentMessageTx(
+			ctx, tx, messageID, messageType, existingContent, existingMetadata, content, now,
+		)
 	case err != sql.ErrNoRows:
 		return false, fmt.Errorf("load canonical agent message: %w", err)
 	}
-	metadata, err := json.Marshal(map[string]interface{}{
+	messageMetadata := map[string]interface{}{
 		"durable_delivery":   true,
 		"delivery_stream_id": event.StreamID,
 		"delivery_sequence":  event.Sequence,
-	})
+	}
+	if messageType == string(models.MessageTypeThinking) {
+		messageMetadata["thinking"] = content
+		content = ""
+	}
+	metadata, err := json.Marshal(messageMetadata)
 	if err != nil {
 		return false, fmt.Errorf("encode canonical agent message metadata: %w", err)
 	}
@@ -142,6 +145,50 @@ func (r *Repository) persistCanonicalAgentMessageTx(
 		return false, fmt.Errorf("insert canonical agent message: %w", err)
 	}
 	return false, nil
+}
+
+func (r *Repository) updateCanonicalAgentMessageTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	messageID, messageType, existingContent, existingMetadata, content string,
+	now time.Time,
+) (bool, error) {
+	if messageType == string(models.MessageTypeThinking) {
+		metadata, err := mergeThinkingMetadata(existingMetadata, content)
+		if err != nil {
+			return false, err
+		}
+		if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+			UPDATE task_session_messages
+			SET metadata = ?, updated_at = ?
+			WHERE id = ?`), metadata, now, messageID); err != nil {
+			return false, fmt.Errorf("append canonical agent thinking message: %w", err)
+		}
+		return true, nil
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_session_messages
+		SET content = ?, updated_at = ?
+		WHERE id = ?`), existingContent+content, now, messageID); err != nil {
+		return false, fmt.Errorf("append canonical agent message: %w", err)
+	}
+	return true, nil
+}
+
+func mergeThinkingMetadata(raw, content string) (string, error) {
+	metadata := make(map[string]interface{})
+	if raw != "" {
+		if err := json.Unmarshal([]byte(raw), &metadata); err != nil {
+			return "", fmt.Errorf("decode canonical agent thinking metadata: %w", err)
+		}
+	}
+	existing, _ := metadata["thinking"].(string)
+	metadata["thinking"] = existing + content
+	encoded, err := json.Marshal(metadata)
+	if err != nil {
+		return "", fmt.Errorf("encode canonical agent thinking metadata: %w", err)
+	}
+	return string(encoded), nil
 }
 
 func (r *Repository) canonicalDeliveryTurnTx(
