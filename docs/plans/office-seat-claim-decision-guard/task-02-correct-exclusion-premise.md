@@ -7,6 +7,7 @@ depends_on:
   - "01-cover-claim-decision-guard"
 plan: "plan.md"
 requirements:
+  - REQ-OFFICE-SEAT-GUARD-001
   - REQ-OFFICE-SEAT-GUARD-002
 acceptance_criteria:
   - AC-OFFICE-SEAT-GUARD-002.4
