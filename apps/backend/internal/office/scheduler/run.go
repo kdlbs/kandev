@@ -20,6 +20,7 @@ import (
 	"github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/office/shared"
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
@@ -118,13 +119,13 @@ type RunContext struct {
 	// task_changes_requested has the context inline.
 	DecisionComment string `json:"decision_comment,omitempty"`
 
-	// IdempotencyKey, when non-empty, overrides the default
-	// "{reason}:{taskID}:{agentID}" key QueueRunCtx mints. The default
-	// key is permanently unique per (reason, task, agent) — fine for
-	// reasons that fire at most once per task, wrong for a reason that
-	// can legitimately recur (e.g. task_children_completed across
-	// repeated delegation waves). Callers that recur build their own
-	// key that changes with the thing that makes each occurrence
+	// IdempotencyKey is the dedup identity QueueRunCtx passes through
+	// verbatim. Empty means no dedup — the run enqueues keyless — not
+	// "derive one for me": QueueRunCtx no longer synthesises a
+	// "{reason}:{taskID}:{agentID}" default, which was permanently unique
+	// per (reason, task, agent) and silently swallowed every later
+	// legitimate occurrence for the same triple. Callers that want dedup
+	// build a key that changes with the thing that makes each occurrence
 	// distinct. Excluded from the JSON payload: it must never change
 	// encodeRunContext's output shape, which CoalesceRun compares for
 	// equality and taskIDFromPayload parses.
@@ -298,7 +299,7 @@ func (ss *SchedulerService) SetProjectSkillDirResolver(fn func(agentTypeID strin
 func (ss *SchedulerService) QueueRun(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
-) error {
+) (runsservice.QueueOutcome, error) {
 	return ss.queueRun(ctx, agentInstanceID, reason, payload, idempotencyKey, "", "")
 }
 
@@ -307,43 +308,41 @@ func (ss *SchedulerService) QueueRun(
 // never coalesced in and a wave-carrying queued run is never coalesced
 // into — and (b) classifies CreateRun's idx_run_wake_wave violation as an
 // already-delivered wake rather than an error: this call site inserts
-// directly (not through runs/service), so runs/service's own
-// classification doesn't cover it. A concurrent duplicate of this same
-// request can just as well lose the race on idx_run_idempotency instead
-// of idx_run_wake_wave — both keys identify the identical operation for
-// the identical row, so either violation means the wake is already
-// recorded and neither is an error, mirroring runs/service.insertRun's
-// own two-way classification.
+// directly (not through runs/service), so ReportInsertResult's own
+// idx_run_idempotency-only classification doesn't cover it. A concurrent
+// duplicate of this same request can just as well lose the race on
+// idx_run_idempotency instead of idx_run_wake_wave — both keys identify the
+// identical operation for the identical row, so either violation means the
+// wake is already recorded and neither is an error, mirroring
+// runs/service.QueueRun's own two-way classification.
 func (ss *SchedulerService) queueRun(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey, waveKey, waveString string,
-) error {
+) (runsservice.QueueOutcome, error) {
 	if err := ss.guardAgentStatus(ctx, agentInstanceID); err != nil {
-		return err
+		return runsservice.QueueOutcomeNone, err
 	}
 
 	if idempotencyKey != "" {
 		dup, err := ss.repo.CheckIdempotencyKey(ctx, idempotencyKey, IdempotencyWindowHours)
 		if err != nil {
-			return fmt.Errorf("idempotency check: %w", err)
+			return runsservice.QueueOutcomeNone, fmt.Errorf("idempotency check: %w", err)
 		}
 		if dup {
-			ss.logger.Debug("run skipped (idempotent)",
-				zap.String("key", idempotencyKey))
-			return nil
+			return runsservice.ReportWindowedDedup(runsservice.QueueSourceRuns, reason, idempotencyKey), nil
 		}
 	}
 
 	if waveKey == "" {
 		coalesced, err := ss.repo.CoalesceRun(ctx, agentInstanceID, reason, CoalesceWindowSeconds, payload)
 		if err != nil {
-			return fmt.Errorf("coalesce check: %w", err)
+			return runsservice.QueueOutcomeNone, fmt.Errorf("coalesce check: %w", err)
 		}
 		if coalesced {
 			ss.logger.Debug("run coalesced",
 				zap.String("agent", agentInstanceID),
 				zap.String("reason", reason))
-			return nil
+			return runsservice.QueueOutcomeCoalesced, nil
 		}
 	}
 
@@ -363,47 +362,43 @@ func (ss *SchedulerService) queueRun(
 		WakeWaveString: waveString,
 		RequestedAt:    time.Now().UTC(),
 	}
-	if err := ss.repo.CreateRun(ctx, req); err != nil {
-		if waveKey != "" && runssqlite.IsWakeWaveUniqueViolation(err) {
-			shared.ParentWakeDedupedTotal.Add(1)
-			ss.logger.Debug("run skipped (wave already woken)",
-				zap.String("wave_key", waveKey))
-			return nil
-		}
-		if idempotencyKey != "" && runssqlite.IsIdempotencyKeyUniqueViolation(err) {
-			ss.logger.Debug("run skipped (idempotency index race)",
-				zap.String("key", idempotencyKey))
-			return nil
-		}
-		return fmt.Errorf("enqueue run: %w", err)
+	insertErr := ss.repo.CreateRun(ctx, req)
+	if waveKey != "" && runssqlite.IsWakeWaveUniqueViolation(insertErr) {
+		runsservice.ParentWakeDedupedTotal.Add(1)
+		ss.logger.Debug("run skipped (wave already woken)",
+			zap.String("wave_key", waveKey))
+		return runsservice.QueueOutcomeDeduped, nil
+	}
+	outcome, err := runsservice.ReportInsertResult(runsservice.QueueSourceRuns, reason, idempotencyKey, agentInstanceID, insertErr)
+	if err != nil {
+		return runsservice.QueueOutcomeNone, fmt.Errorf("enqueue run: %w", err)
+	}
+	if outcome == runsservice.QueueOutcomeDeduped {
+		return outcome, nil
 	}
 
 	ss.logger.Info("run queued",
 		zap.String("id", req.ID),
 		zap.String("agent", agentInstanceID),
 		zap.String("reason", reason))
-	return nil
+	return runsservice.QueueOutcomeQueued, nil
 }
 
-// QueueRunCtx is the typed variant of QueueRun that takes a
-// structured RunContext. The context is JSON-encoded into the
-// payload column so the agent runtime can deserialise it. The
-// idempotency key is c.IdempotencyKey when the caller set one;
-// otherwise it defaults to "{reason}:{taskID}:{agentID}" so the same
-// agent never gets two runs for the same task+reason within the
-// idempotency window.
+// QueueRunCtx is the typed variant of QueueRun that takes a structured
+// RunContext. The context is JSON-encoded into the payload column so the
+// agent runtime can deserialise it. The idempotency key is c.IdempotencyKey
+// verbatim — an empty key enqueues with no dedup identity rather than
+// falling back to a "{reason}:{taskID}:{agentID}" default that would be
+// permanently unique per (reason, task, agent) and silently swallow every
+// later legitimate occurrence for the same triple.
 func (ss *SchedulerService) QueueRunCtx(
 	ctx context.Context, agentInstanceID string, c RunContext,
-) error {
+) (runsservice.QueueOutcome, error) {
 	payload, err := encodeRunContext(c)
 	if err != nil {
-		return fmt.Errorf("encode run context: %w", err)
+		return runsservice.QueueOutcomeNone, fmt.Errorf("encode run context: %w", err)
 	}
-	idempotencyKey := c.IdempotencyKey
-	if idempotencyKey == "" {
-		idempotencyKey = fmt.Sprintf("%s:%s:%s", c.Reason, c.TaskID, agentInstanceID)
-	}
-	return ss.queueRun(ctx, agentInstanceID, c.Reason, payload, idempotencyKey, c.WaveKey, c.WaveString)
+	return ss.queueRun(ctx, agentInstanceID, c.Reason, payload, c.IdempotencyKey, c.WaveKey, c.WaveString)
 }
 
 // encodeRunContext JSON-encodes c. When c.ExtraPayload is empty the output

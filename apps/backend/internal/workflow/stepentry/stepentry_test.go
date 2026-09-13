@@ -38,7 +38,7 @@ func TestComputeDigestDeterministicAndPositionSensitive(t *testing.T) {
 	}
 }
 
-func TestIsEngineOwnedOnEnter(t *testing.T) {
+func TestIsMarkerBearing(t *testing.T) {
 	cases := map[wfmodels.OnEnterActionType]bool{
 		wfmodels.OnEnterClearDecisions:             true,
 		wfmodels.OnEnterQueueRunForEachParticipant: true,
@@ -50,9 +50,73 @@ func TestIsEngineOwnedOnEnter(t *testing.T) {
 		wfmodels.OnEnterSetSessionMode:             false,
 	}
 	for kind, want := range cases {
-		if got := IsEngineOwnedOnEnter(kind); got != want {
-			t.Errorf("IsEngineOwnedOnEnter(%s) = %v, want %v", kind, got, want)
+		if got := IsMarkerBearing(kind); got != want {
+			t.Errorf("IsMarkerBearing(%s) = %v, want %v", kind, got, want)
 		}
+	}
+}
+
+// TestOwnershipTableMatchesDesign asserts the ownership declaration's
+// membership matches the system design's table exactly, both dispatcher and
+// marker-bearing columns classified independently for every reachable kind.
+func TestOwnershipTableMatchesDesign(t *testing.T) {
+	cases := map[wfmodels.OnEnterActionType]Ownership{
+		wfmodels.OnEnterClearDecisions:             {Dispatcher: DispatcherLedger, MarkerBearing: true},
+		wfmodels.OnEnterQueueRunForEachParticipant: {Dispatcher: DispatcherLedger, MarkerBearing: true},
+		wfmodels.OnEnterQueueRun:                   {Dispatcher: DispatcherLedger, MarkerBearing: false},
+		wfmodels.OnEnterRunCodeReview:              {Dispatcher: DispatcherLedger, MarkerBearing: false},
+		wfmodels.OnEnterEnsureParticipantSeat:      {Dispatcher: DispatcherLedger, MarkerBearing: false},
+		wfmodels.OnEnterEnablePlanMode:             {Dispatcher: DispatcherMarker, MarkerBearing: false},
+		wfmodels.OnEnterAutoStartAgent:             {Dispatcher: DispatcherMarker, MarkerBearing: false},
+		wfmodels.OnEnterResetAgentContext:          {Dispatcher: DispatcherMarker, MarkerBearing: false},
+		wfmodels.OnEnterSetSessionMode:             {Dispatcher: DispatcherMarker, MarkerBearing: false},
+		wfmodels.OnEnterConfigureSession:           {Dispatcher: DispatcherMarker, MarkerBearing: false},
+	}
+	for kind, want := range cases {
+		got, ok := Owner(string(kind))
+		if !ok {
+			t.Errorf("Owner(%s): expected a classification, found none", kind)
+			continue
+		}
+		if got != want {
+			t.Errorf("Owner(%s) = %+v, want %+v", kind, got, want)
+		}
+		if OwnedByLedger(string(kind)) != (want.Dispatcher == DispatcherLedger) {
+			t.Errorf("OwnedByLedger(%s) disagrees with Owner", kind)
+		}
+		if OwnedByMarker(string(kind)) != (want.Dispatcher == DispatcherMarker) {
+			t.Errorf("OwnedByMarker(%s) disagrees with Owner", kind)
+		}
+		if MarkerBearing(string(kind)) != want.MarkerBearing {
+			t.Errorf("MarkerBearing(%s) disagrees with Owner", kind)
+		}
+	}
+	if len(cases) != 10 {
+		t.Fatalf("expected exactly 10 classified kinds (the design's table), got %d", len(cases))
+	}
+	// Checking cases against ownershipTable one direction (above) does not
+	// catch an entry added to ownershipTable that this test's own literal
+	// was never updated to include — both maps could still have the same
+	// size by coincidence, or the production table could simply be larger.
+	// Comparing lengths directly closes that gap: this test has direct
+	// access to the private table (same package), so a classified kind this
+	// test doesn't know about fails loudly here instead of silently passing.
+	if len(ownershipTable) != len(cases) {
+		t.Fatalf("ownershipTable has %d classified kinds but this test only checks %d — a kind was added to the production table without updating this test", len(ownershipTable), len(cases))
+	}
+}
+
+// TestOwnershipTableUnclassifiedKind asserts an unknown kind is classified by
+// neither accessor, rather than defaulting to either dispatcher.
+func TestOwnershipTableUnclassifiedKind(t *testing.T) {
+	if _, ok := Owner("move_to_next"); ok {
+		t.Fatalf("expected move_to_next (a transition action, not an entry action) to be unclassified")
+	}
+	if OwnedByLedger("move_to_next") || OwnedByMarker("move_to_next") {
+		t.Fatalf("expected an unclassified kind to be owned by neither dispatcher")
+	}
+	if MarkerBearing("move_to_next") {
+		t.Fatalf("expected an unclassified kind to be non-marker-bearing")
 	}
 }
 
@@ -91,6 +155,38 @@ func TestBuildPendingAllocationTracksDeclaredPositions(t *testing.T) {
 	}
 	if pending.Digest != ComputeDigest(actions) {
 		t.Errorf("expected pending.Digest to match ComputeDigest(actions)")
+	}
+}
+
+// TestSerializePositions covers AC-OFFICE-STEP-ENTRY-DISPATCH-002.1/.9: the
+// encoding allocateStepEntryIfPending persists into
+// workflow_step_entries.marker_positions must actually carry the allocated
+// positions, in order — a version that always returned "" would otherwise
+// pass every other test in this package (BuildPendingAllocation's own
+// callers never re-parse it).
+func TestSerializePositions(t *testing.T) {
+	cases := []struct {
+		name      string
+		positions []EnginePosition
+		want      string
+	}{
+		{name: "empty", positions: nil, want: ""},
+		{name: "single", positions: []EnginePosition{{Position: 0, Kind: "clear_decisions"}}, want: "0"},
+		{
+			name: "multi preserves order",
+			positions: []EnginePosition{
+				{Position: 0, Kind: "clear_decisions"},
+				{Position: 2, Kind: "queue_run_for_each_participant"},
+			},
+			want: "0,2",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SerializePositions(tc.positions); got != tc.want {
+				t.Fatalf("SerializePositions(%+v) = %q, want %q", tc.positions, got, tc.want)
+			}
+		})
 	}
 }
 

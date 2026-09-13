@@ -52,7 +52,7 @@ func TestWaveIdentityRace_CascadeVsEngineRoutedPath_CollapsesToOneRun(t *testing
 	go func() {
 		defer wg.Done()
 		<-start
-		cascadeErr = ss.QueueRunCtx(ctx, "agent-1", RunContext{
+		_, cascadeErr = ss.QueueRunCtx(ctx, "agent-1", RunContext{
 			Reason:         RunReasonTaskChildrenCompleted,
 			TaskID:         "parent-1",
 			IdempotencyKey: "task_children_completed:parent-1:agent-1:cascade",

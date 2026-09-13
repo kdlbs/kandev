@@ -133,6 +133,7 @@ func (r *Repository) initSchema() error {
 		return fmt.Errorf("required office migration: %w", err)
 	}
 	r.activateRunOutcome()
+	r.activateLoopLiveness()
 	return nil
 }
 
@@ -426,6 +427,9 @@ func (r *Repository) createRunTables() error {
 		-- plain string the backstop's candidate query compares.
 		wake_wave_key TEXT NOT NULL DEFAULT '',
 		wake_wave_string TEXT NOT NULL DEFAULT '',
+		-- causation_id (office-loop-liveness): copied from the wakeup
+		-- request that created this run. '' means uncorrelated.
+		causation_id TEXT NOT NULL DEFAULT '',
 		requested_at TIMESTAMP NOT NULL,
 		claimed_at TIMESTAMP,
 		finished_at TIMESTAMP
@@ -505,6 +509,7 @@ func (r *Repository) createRoutineTables() error {
 		started_at TIMESTAMP,
 		completed_at TIMESTAMP,
 		created_at TIMESTAMP NOT NULL,
+		causation_id TEXT NOT NULL DEFAULT '',
 		FOREIGN KEY (routine_id) REFERENCES office_routines(id) ON DELETE CASCADE
 	);
 	CREATE INDEX IF NOT EXISTS idx_office_routine_runs_active_fingerprint
@@ -746,7 +751,8 @@ func (r *Repository) createAgentWakeupRequestTable() error {
 		run_id                TEXT NOT NULL DEFAULT '',
 		requested_at          TIMESTAMP NOT NULL,
 		claimed_at            TIMESTAMP,
-		finished_at           TIMESTAMP
+		finished_at           TIMESTAMP,
+		causation_id          TEXT NOT NULL DEFAULT ''
 	);
 	CREATE INDEX IF NOT EXISTS idx_wakeup_agent_status ON agent_wakeup_requests(agent_profile_id, status);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_wakeup_idempotency ON agent_wakeup_requests(idempotency_key)

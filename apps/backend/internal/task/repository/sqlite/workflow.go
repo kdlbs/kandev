@@ -67,7 +67,7 @@ func (r *Repository) AddTaskToWorkflow(ctx context.Context, taskID, workflowID, 
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	r.dispatchStepEntry(ctx, taskID, workflowID, workflowStepID, formatEntryID(transitionID))
+	r.dispatchStepEntry(ctx, taskID, workflowID, workflowStepID, formatEntryID(transitionID), 0)
 	return nil
 }
 

@@ -29,7 +29,7 @@ func TestQueueRunCtx_WaveCarryingRequest_DedupesPastIdempotencyWindow(t *testing
 		WaveKey:        "task_children_completed:parent-1:deadbeef",
 		WaveString:     "parent-1|child-1,child-2",
 	}
-	if err := ss.QueueRunCtx(ctx, "agent-1", first); err != nil {
+	if _, err := ss.QueueRunCtx(ctx, "agent-1", first); err != nil {
 		t.Fatalf("queue first: %v", err)
 	}
 	if got := runsCountForReason(t, ss, RunReasonTaskChildrenCompleted); got != 1 {
@@ -42,7 +42,7 @@ func TestQueueRunCtx_WaveCarryingRequest_DedupesPastIdempotencyWindow(t *testing
 	// read) but the same wave — must still dedupe via the wave key.
 	second := first
 	second.IdempotencyKey = "task_children_completed:parent-1:agent-1:wave-a-retry"
-	if err := ss.QueueRunCtx(ctx, "agent-1", second); err != nil {
+	if _, err := ss.QueueRunCtx(ctx, "agent-1", second); err != nil {
 		t.Fatalf("queue racing: %v", err)
 	}
 	if got := runsCountForReason(t, ss, RunReasonTaskChildrenCompleted); got != 1 {
@@ -75,7 +75,7 @@ func TestQueueRunCtx_IdempotencyIndexRace_ClassifiedAsDedupe(t *testing.T) {
 		WaveKey:        "task_children_completed:parent-1:wave-a",
 		WaveString:     "parent-1|child-1,child-2",
 	}
-	if err := ss.QueueRunCtx(ctx, "agent-1", first); err != nil {
+	if _, err := ss.QueueRunCtx(ctx, "agent-1", first); err != nil {
 		t.Fatalf("queue first: %v", err)
 	}
 	if got := runsCountForReason(t, ss, RunReasonTaskChildrenCompleted); got != 1 {
@@ -91,7 +91,7 @@ func TestQueueRunCtx_IdempotencyIndexRace_ClassifiedAsDedupe(t *testing.T) {
 	second := first
 	second.WaveKey = "task_children_completed:parent-1:wave-b"
 	second.WaveString = "parent-1|child-1,child-2,child-3"
-	if err := ss.QueueRunCtx(ctx, "agent-1", second); err != nil {
+	if _, err := ss.QueueRunCtx(ctx, "agent-1", second); err != nil {
 		t.Fatalf("queue racing (idempotency index): %v", err)
 	}
 	if got := runsCountForReason(t, ss, RunReasonTaskChildrenCompleted); got != 1 {
@@ -130,10 +130,10 @@ func TestQueueRunCtx_WaveCarryingRequest_NotCoalesced(t *testing.T) {
 		WaveKey:        "wave-key-2",
 		WaveString:     "parent-2|child-2",
 	}
-	if err := ss.QueueRunCtx(ctx, "agent-1", first); err != nil {
+	if _, err := ss.QueueRunCtx(ctx, "agent-1", first); err != nil {
 		t.Fatalf("queue first: %v", err)
 	}
-	if err := ss.QueueRunCtx(ctx, "agent-1", second); err != nil {
+	if _, err := ss.QueueRunCtx(ctx, "agent-1", second); err != nil {
 		t.Fatalf("queue second: %v", err)
 	}
 
@@ -163,7 +163,7 @@ func TestQueueRunCtx_WaveCarryingRequest_NotCoalescedIntoNonWaveRow(t *testing.T
 		IdempotencyKey: "k1",
 		ExtraPayload:   map[string]any{"marker": "plain-row"},
 	}
-	if err := ss.QueueRunCtx(ctx, "agent-1", first); err != nil {
+	if _, err := ss.QueueRunCtx(ctx, "agent-1", first); err != nil {
 		t.Fatalf("queue first: %v", err)
 	}
 
@@ -176,7 +176,7 @@ func TestQueueRunCtx_WaveCarryingRequest_NotCoalescedIntoNonWaveRow(t *testing.T
 		WaveString:     "parent-1|child-2",
 		ExtraPayload:   map[string]any{"marker": "wave-row"},
 	}
-	if err := ss.QueueRunCtx(ctx, "agent-1", second); err != nil {
+	if _, err := ss.QueueRunCtx(ctx, "agent-1", second); err != nil {
 		t.Fatalf("queue second: %v", err)
 	}
 
@@ -228,10 +228,10 @@ func TestQueueRunCtx_NonWaveRequest_StillCoalesces(t *testing.T) {
 
 	first := RunContext{Reason: RunReasonTaskBlockersResolved, TaskID: "task-1", IdempotencyKey: "k1"}
 	second := RunContext{Reason: RunReasonTaskBlockersResolved, TaskID: "task-1", IdempotencyKey: "k2"}
-	if err := ss.QueueRunCtx(ctx, "agent-1", first); err != nil {
+	if _, err := ss.QueueRunCtx(ctx, "agent-1", first); err != nil {
 		t.Fatalf("queue first: %v", err)
 	}
-	if err := ss.QueueRunCtx(ctx, "agent-1", second); err != nil {
+	if _, err := ss.QueueRunCtx(ctx, "agent-1", second); err != nil {
 		t.Fatalf("queue second: %v", err)
 	}
 
@@ -277,7 +277,7 @@ func TestQueueRunCtx_ExtraPayloadTaskID_CannotRedirectRun(t *testing.T) {
 			"task_id": "foreign-task-99",
 		},
 	}
-	if err := ss.QueueRunCtx(ctx, "agent-1", c); err != nil {
+	if _, err := ss.QueueRunCtx(ctx, "agent-1", c); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -310,7 +310,7 @@ func TestQueueRunCtx_ExtraPayloadAgentProfileID_PassesThroughUnfiltered(t *testi
 			"agent_profile_id": "foreign-agent-99",
 		},
 	}
-	if err := ss.QueueRunCtx(ctx, "agent-1", c); err != nil {
+	if _, err := ss.QueueRunCtx(ctx, "agent-1", c); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
