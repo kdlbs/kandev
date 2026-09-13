@@ -77,7 +77,11 @@ func TestPostgresCountHiddenClarificationBundles_MatchesEnumerationAndReportsEar
 		t.Fatalf("init postgres schema: %v", err)
 	}
 	ctx := context.Background()
-	now := time.Now().UTC()
+	// Postgres `timestamptz` stores microsecond precision; Go's time.Now()
+	// carries nanoseconds, so comparing the exact written value on read-back
+	// needs the same truncation the column itself performs, or an unlucky
+	// nanosecond remainder fails a numerically-correct round trip.
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	dismissedID := seedAnswerablePostgresBundle(t, repo, 102)
 	snoozedSoonID := seedAnswerablePostgresBundle(t, repo, 103)
@@ -158,7 +162,9 @@ func TestPostgresGetClarificationInboxSidecarStates_ResolvesStateAndExpiry(t *te
 		t.Fatalf("init postgres schema: %v", err)
 	}
 	ctx := context.Background()
-	now := time.Now().UTC()
+	// See the truncation note in TestPostgresCountHiddenClarificationBundles_
+	// MatchesEnumerationAndReportsEarliestExpiry above.
+	now := time.Now().UTC().Truncate(time.Microsecond)
 	dismissedID := seedAnswerablePostgresBundle(t, repo, 107)
 	snoozedID := seedAnswerablePostgresBundle(t, repo, 108)
 	snoozeUntil := now.Add(time.Hour)
