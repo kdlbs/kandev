@@ -16,31 +16,38 @@ func TestInitializeSession_LoadFailureDoesNotCreateReplacement(t *testing.T) {
 	tests := []struct {
 		name    string
 		message string
+		reason  RestoreReason
 	}{
 		{
 			name:    "serialized deadline",
 			message: "internal error: context deadline exceeded",
+			reason:  RestoreReasonNone,
 		},
 		{
 			name:    "serialized internal error",
 			message: "internal error: provider failed while loading the session",
+			reason:  RestoreReasonUnknown,
 		},
 		{
 			name:    "unrelated missing resource",
 			message: "internal error: resource not found while resolving configuration",
+			reason:  RestoreReasonConfiguration,
 		},
 		{
 			name:    "authentication failure",
 			message: "authentication required",
+			reason:  RestoreReasonAuthentication,
 		},
 		{
 			name: "missing rollout for a different session",
 			message: `load session failed: failed to load session: {"code":-32603,"message":"Internal error",` +
 				`"data":{"details":"no rollout found for thread id another-session"}}`,
+			reason: RestoreReasonUnknown,
 		},
 		{
 			name:    "unstructured missing rollout phrase",
 			message: "internal error: no rollout found for thread id saved-session",
+			reason:  RestoreReasonUnknown,
 		},
 	}
 
@@ -95,13 +102,18 @@ func TestInitializeSession_LoadFailureDoesNotCreateReplacement(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected session/load failure")
 			}
-			cause := err
-			var restoreErr *RestoreRequiredError
-			if errors.As(err, &restoreErr) {
-				cause = restoreErr.Unwrap()
-			}
-			if cause == nil || !strings.Contains(cause.Error(), tt.message) {
-				t.Fatalf("restore cause = %v, want cause containing %q", cause, tt.message)
+			if tt.reason == RestoreReasonNone {
+				if !strings.Contains(err.Error(), tt.message) {
+					t.Fatalf("error = %q, want transport cause %q", err, tt.message)
+				}
+			} else {
+				var restoreErr *RestoreRequiredError
+				if !errors.As(err, &restoreErr) {
+					t.Fatalf("error = %q, want RestoreRequiredError", err)
+				}
+				if restoreErr.Decision.Reason != tt.reason {
+					t.Fatalf("restore reason = %q, want %q", restoreErr.Decision.Reason, tt.reason)
+				}
 			}
 
 			for _, action := range mock.getActionLog() {
@@ -113,23 +125,26 @@ func TestInitializeSession_LoadFailureDoesNotCreateReplacement(t *testing.T) {
 	}
 }
 
-func TestInitializeSession_LoadCompatibilityFailureBlocksAutomaticReplacement(t *testing.T) {
+func TestInitializeSession_LoadCompatibilityFailureBlocksReplacement(t *testing.T) {
 	tests := []struct {
 		name    string
 		message string
+		reason  RestoreReason
 	}{
-		{name: "method not found", message: "method not found"},
-		{name: "capability mismatch", message: "agent does not support session loading (LoadSession capability is false)"},
-		{name: "unknown session", message: "Resource not found"},
+		{name: "method not found", message: "method not found", reason: RestoreReasonUnknown},
+		{name: "capability mismatch", message: "agent does not support session loading (LoadSession capability is false)", reason: RestoreReasonNativeResumeUnsupported},
+		{name: "unknown session", message: "Resource not found", reason: RestoreReasonNativeStateMissing},
 		{
 			name: "missing provider rollout",
 			message: `load session failed: failed to load session: {"code":-32603,"message":"Internal error",` +
 				`"data":{"details":"no rollout found for thread id saved-session"}}`,
+			reason: RestoreReasonUnknown,
 		},
 		{
 			name: "missing auggie session",
 			message: `load session failed: failed to load session: {"code":-32602,"message":"Invalid params",` +
 				`"data":{"details":"Session not found: saved-session"}}`,
+			reason: RestoreReasonUnknown,
 		},
 	}
 
@@ -181,11 +196,14 @@ func TestInitializeSession_LoadCompatibilityFailureBlocksAutomaticReplacement(t 
 				nil,
 			)
 			if err == nil {
-				t.Fatal("expected native restore failure to require an explicit recovery action")
+				t.Fatal("expected compatibility failure")
 			}
 			var restoreErr *RestoreRequiredError
 			if !errors.As(err, &restoreErr) {
 				t.Fatalf("error = %v, want RestoreRequiredError", err)
+			}
+			if restoreErr.Decision.Reason != tt.reason {
+				t.Fatalf("restore reason = %q, want %q", restoreErr.Decision.Reason, tt.reason)
 			}
 
 			actions := mock.getActionLog()
