@@ -105,7 +105,7 @@ func TestFinishAndFailRun(t *testing.T) {
 		t.Fatal("expected claimed run")
 	}
 
-	if err := svc.FinishRun(ctx, req.ID, service.RunOutcomeProcessed); err != nil {
+	if _, err := svc.FinishRun(ctx, req.ID, service.RunOutcomeProcessed); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
 
@@ -141,7 +141,7 @@ func TestFailRun_WritesFailedStatusAndNullOutcome(t *testing.T) {
 		t.Fatal("expected claimed run")
 	}
 
-	if err := svc.FailRun(ctx, req.ID); err != nil {
+	if _, err := svc.FailRun(ctx, req.ID); err != nil {
 		t.Fatalf("fail: %v", err)
 	}
 
@@ -157,14 +157,19 @@ func TestFailRun_WritesFailedStatusAndNullOutcome(t *testing.T) {
 	}
 }
 
-// TestTransitionRunTerminal_LastWriterWinsOnStatusAndOutcome is Review
-// round 2's lower-priority TEST-002 (spec:2130-2132): two terminal callers
-// reaching the same run row must never leave status and outcome
-// disagreeing, because transitionRunTerminal's underlying FinishRun writes
-// both columns in a single UPDATE statement. This drives both orderings —
-// FinishRun-then-FailRun and FailRun-then-FinishRun — and asserts the row
-// always ends up wholly consistent with whichever call went last.
-func TestTransitionRunTerminal_LastWriterWinsOnStatusAndOutcome(t *testing.T) {
+// TestTransitionRunTerminal_FirstWriterWinsOnStatusAndOutcome supersedes
+// Review round 2's lower-priority TEST-002 (spec:2130-2132) under Review
+// round 3's R3-1 guard: transitionRunTerminal's underlying FinishRun now
+// only writes while the row is still status = 'claimed' (the same guard
+// that stops a stale write from clobbering a concurrent cancel), so two
+// terminal callers reaching the same row no longer race to "whichever
+// wrote last" — the first write reaches a real terminal state and every
+// later one is a no-op that leaves status and outcome exactly as the
+// first write left them. This drives both orderings — FinishRun-then-
+// FailRun and FailRun-then-FinishRun — and asserts the row stays
+// consistent with whichever call went FIRST, and that the second call
+// reports wrote=false.
+func TestTransitionRunTerminal_FirstWriterWinsOnStatusAndOutcome(t *testing.T) {
 	ctx := context.Background()
 
 	queueAndClaim := func(t *testing.T, svc *service.Service) string {
@@ -186,36 +191,46 @@ func TestTransitionRunTerminal_LastWriterWinsOnStatusAndOutcome(t *testing.T) {
 	t.Run("FailRun after FinishRun", func(t *testing.T) {
 		svc := newTestService(t)
 		id := queueAndClaim(t, svc)
-		if err := svc.FinishRun(ctx, id, service.RunOutcomeProcessed); err != nil {
-			t.Fatalf("finish: %v", err)
+		wrote, err := svc.FinishRun(ctx, id, service.RunOutcomeProcessed)
+		if err != nil || !wrote {
+			t.Fatalf("finish: wrote=%v err=%v, want wrote=true", wrote, err)
 		}
-		if err := svc.FailRun(ctx, id); err != nil {
-			t.Fatalf("fail: %v", err)
-		}
-		got, err := svc.GetRun(ctx, id)
+		wrote, err = svc.FailRun(ctx, id)
 		if err != nil {
-			t.Fatalf("get run: %v", err)
-		}
-		if got.Status != models.RunStatusFailed || got.Outcome != nil {
-			t.Fatalf("row = {status: %q, outcome: %v}, want the later FailRun write: {failed, nil}", got.Status, got.Outcome)
-		}
-	})
-
-	t.Run("FinishRun after FailRun", func(t *testing.T) {
-		svc := newTestService(t)
-		id := queueAndClaim(t, svc)
-		if err := svc.FailRun(ctx, id); err != nil {
 			t.Fatalf("fail: %v", err)
 		}
-		if err := svc.FinishRun(ctx, id, service.RunOutcomeProcessed); err != nil {
-			t.Fatalf("finish: %v", err)
+		if wrote {
+			t.Error("fail: wrote = true, want false (run was already finished, not claimed)")
 		}
 		got, err := svc.GetRun(ctx, id)
 		if err != nil {
 			t.Fatalf("get run: %v", err)
 		}
 		if got.Status != models.RunStatusFinished || got.Outcome == nil || *got.Outcome != service.RunOutcomeProcessed {
-			t.Fatalf("row = {status: %q, outcome: %v}, want the later FinishRun write: {finished, %q}", got.Status, got.Outcome, service.RunOutcomeProcessed)
+			t.Fatalf("row = {status: %q, outcome: %v}, want the FIRST write preserved: {finished, %q}", got.Status, got.Outcome, service.RunOutcomeProcessed)
+		}
+	})
+
+	t.Run("FinishRun after FailRun", func(t *testing.T) {
+		svc := newTestService(t)
+		id := queueAndClaim(t, svc)
+		wrote, err := svc.FailRun(ctx, id)
+		if err != nil || !wrote {
+			t.Fatalf("fail: wrote=%v err=%v, want wrote=true", wrote, err)
+		}
+		wrote, err = svc.FinishRun(ctx, id, service.RunOutcomeProcessed)
+		if err != nil {
+			t.Fatalf("finish: %v", err)
+		}
+		if wrote {
+			t.Error("finish: wrote = true, want false (run was already failed, not claimed)")
+		}
+		got, err := svc.GetRun(ctx, id)
+		if err != nil {
+			t.Fatalf("get run: %v", err)
+		}
+		if got.Status != models.RunStatusFailed || got.Outcome != nil {
+			t.Fatalf("row = {status: %q, outcome: %v}, want the FIRST write preserved: {failed, nil}", got.Status, got.Outcome)
 		}
 	})
 }

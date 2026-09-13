@@ -33,18 +33,36 @@ const (
 //
 // No retry is scheduled — the user resolves via Resume session in the
 // chat or Mark fixed in the inbox.
+//
+// Returns wrote=false when MarkRunFailed's guarded write was a no-op —
+// the run reached a terminal state through another writer (e.g. a
+// concurrent cancel) between the caller's read and this call — so
+// callers know not to treat a cancelled/already-terminal run as a
+// genuine agent failure (Review round 3, R3-1).
 func (s *Service) HandleAgentFailure(
 	ctx context.Context,
 	run *models.Run,
 	errorMessage string,
-) error {
-	if err := s.repo.MarkRunFailed(ctx, run.ID, errorMessage); err != nil {
-		return fmt.Errorf("mark run failed: %w", err)
+) (bool, error) {
+	wrote, err := s.repo.MarkRunFailed(ctx, run.ID, errorMessage)
+	if err != nil {
+		return false, fmt.Errorf("mark run failed: %w", err)
+	}
+	if !wrote {
+		// Nothing to classify, release, or escalate: the row's real
+		// terminal state was written by someone else. Still make sure
+		// the agent isn't left stuck "working" from the launch.
+		s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
+		return false, nil
 	}
 	// MarkRunFailed bypasses transitionRunTerminal (this is the office v1
-	// failure path, not FailRun), so the checkout release that lives there
-	// has to be duplicated here — otherwise every agent-error terminal
-	// transition leaks the task checkout the same way FinishRun used to.
+	// failure path, not FailRun), so the checkout release and terminal-shape
+	// count that live there have to be duplicated here — otherwise every
+	// agent-error terminal transition leaks the task checkout the same way
+	// FinishRun used to, and every genuine post-launch crash goes uncounted
+	// in office_loop_terminal_total. MarkRunFailed writes status='failed'
+	// with outcome left untouched (NULL for a launched run), matching FailRun.
+	s.recordTerminalShape(ctx, run, RunStatusFailed, nil)
 	s.releaseTaskCheckoutForRun(ctx, run)
 	// Leave "working" before the auto-pause decision below, not after: the
 	// reset is a working → idle CAS, so running it first lets a subsequent
@@ -78,7 +96,7 @@ func (s *Service) HandleAgentFailure(
 		}
 	}
 
-	return nil
+	return true, nil
 }
 
 // RecordAgentSuccess resets the consecutive-failure counter for the

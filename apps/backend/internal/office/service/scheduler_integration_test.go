@@ -44,7 +44,7 @@ func TestSchedulerIntegration_TickProcessesRun(t *testing.T) {
 	}
 
 	// Finish the run.
-	if err := svc.FinishRun(ctx, run.ID, service.RunOutcomeProcessed); err != nil {
+	if _, err := svc.FinishRun(ctx, run.ID, service.RunOutcomeProcessed); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
 
@@ -91,6 +91,40 @@ func TestSchedulerIntegration_CancelsRunForMovedWorkflowStep(t *testing.T) {
 	}
 	if runs[0].Status != service.RunStatusCancelled {
 		t.Fatalf("run status = %q, want %q", runs[0].Status, service.RunStatusCancelled)
+	}
+}
+
+// cancelStaleRun bypasses transitionRunTerminal's own counting the same
+// way HandleAgentFailure does, so it must record its own terminal shape
+// or office_loop_terminal_total silently misses every stale-claim
+// cancellation (Review round 1, R1-1).
+func TestSchedulerIntegration_CancelStaleRunRecordsTerminalShape(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	ctx := context.Background()
+
+	agent := makeAgent("worker-moved-step-shape", models.AgentRoleWorker)
+	agent.ExecutorPreference = `{"type":"local_pc"}`
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	svc.ExecSQL(t, `INSERT INTO tasks
+		(id, workspace_id, workflow_step_id, title, created_at, updated_at)
+		VALUES ('task-moved-step-shape', 'ws-1', 'step-current', 'Moved task',
+		        CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+		`{"task_id":"task-moved-step-shape","workflow_step_id":"step-old"}`, ""); err != nil {
+		t.Fatalf("queue run: %v", err)
+	}
+
+	key := service.LoopMetricLabel("workspace", "ws-1", "shape", string(service.ShapeUnlaunchedFailed))
+	before := terminalShapeExpvarInt(t, key)
+
+	service.RunSchedulerTick(svc, ctx)
+
+	after := terminalShapeExpvarInt(t, key)
+	if after != before+1 {
+		t.Fatalf("unlaunched_failed delta = %d, want 1", after-before)
 	}
 }
 
@@ -236,7 +270,7 @@ func TestSchedulerIntegration_AtCapacityStaysQueued(t *testing.T) {
 	}
 
 	// Finish the first run.
-	if err := svc.FinishRun(ctx, first.ID, service.RunOutcomeProcessed); err != nil {
+	if _, err := svc.FinishRun(ctx, first.ID, service.RunOutcomeProcessed); err != nil {
 		t.Fatalf("finish: %v", err)
 	}
 
@@ -314,7 +348,7 @@ func TestSchedulerIntegration_PromptBuiltCorrectly(t *testing.T) {
 				t.Errorf("prompt should contain %q, got: %s", tt.contains, prompt)
 			}
 
-			_ = svc.FinishRun(ctx, run.ID, service.RunOutcomeProcessed)
+			_, _ = svc.FinishRun(ctx, run.ID, service.RunOutcomeProcessed)
 		})
 	}
 }
