@@ -362,8 +362,8 @@ func (r *Repository) GetDailyActivity(
 	ctx = operationCtx
 
 	drv := r.ro.DriverName()
-	dateStart := dialect.DateOf(drv, dialect.DateNowMinusDays(drv, "?"))
-	datePlus := dialect.DateOf(drv, dialect.DatePlusOneDay(drv, "date"))
+	dateStart := dialect.DateNowMinusDays(drv, "?")
+	datePlus := dialect.DatePlusOneDay(drv, "date")
 	curDate := dialect.CurrentDate(drv)
 	dateOfTurn := dialect.DateOf(drv, "turn.started_at")
 	dateOfMsg := dialect.DateOf(drv, "msg.created_at")

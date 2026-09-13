@@ -146,7 +146,7 @@ func TestDateOf(t *testing.T) {
 		t.Errorf("sqlite: got %q", got)
 	}
 	got = DateOf(PGX, "created_at")
-	if got != "(created_at)::date" {
+	if got != "(created_at AT TIME ZONE 'UTC')::date" {
 		t.Errorf("pgx: got %q", got)
 	}
 }
@@ -228,7 +228,7 @@ func TestCurrentDate(t *testing.T) {
 	if CurrentDate(SQLite3) != "date('now')" {
 		t.Errorf("sqlite: got %q", CurrentDate(SQLite3))
 	}
-	if CurrentDate(PGX) != "CURRENT_DATE" {
+	if CurrentDate(PGX) != "(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date" {
 		t.Errorf("pgx: got %q", CurrentDate(PGX))
 	}
 }
@@ -239,7 +239,7 @@ func TestDateNowMinusDays(t *testing.T) {
 		t.Errorf("sqlite: got %q", got)
 	}
 	got = DateNowMinusDays(PGX, "?")
-	if got != "CURRENT_DATE - (?::int * INTERVAL '1 day')" {
+	if got != "(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date - (?::int)" {
 		t.Errorf("pgx: got %q", got)
 	}
 }
@@ -250,7 +250,7 @@ func TestDatePlusOneDay(t *testing.T) {
 		t.Errorf("sqlite: got %q", got)
 	}
 	got = DatePlusOneDay(PGX, "date")
-	if got != "(date)::date + INTERVAL '1 day'" {
+	if got != "(date)::date + 1" {
 		t.Errorf("pgx: got %q", got)
 	}
 }

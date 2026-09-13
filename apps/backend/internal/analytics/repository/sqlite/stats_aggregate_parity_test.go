@@ -139,6 +139,9 @@ func TestStatsAggregateParity(t *testing.T) {
 			t.Skip("set KANDEV_TEST_POSTGRES_DSN to run PostgreSQL parity")
 		}
 		dbConn := testutil.OpenIsolatedPostgres(t, dsn)
+		if _, err := dbConn.Exec(`SET TIME ZONE 'Pacific/Honolulu'`); err != nil {
+			t.Fatalf("set PostgreSQL test timezone: %v", err)
+		}
 		if _, err := dbConn.Exec(`CREATE TABLE IF NOT EXISTS kandev_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '')`); err != nil {
 			t.Fatalf("create kandev_meta: %v", err)
 		}
