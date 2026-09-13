@@ -367,6 +367,7 @@ func (r *Repository) GetDailyActivity(
 	curDate := dialect.CurrentDate(drv)
 	dateOfTurn := dialect.DateOf(drv, "turn.started_at")
 	dateOfMsg := dialect.DateOf(drv, "msg.created_at")
+	dateText := dialect.DateText(drv, "d.date")
 
 	query := fmt.Sprintf(`
 		WITH RECURSIVE dates(date) AS (
@@ -398,7 +399,7 @@ func (r *Repository) GetDailyActivity(
 			GROUP BY md.activity_date
 		)
 		SELECT
-			d.date,
+			%s AS date,
 			COALESCE(turn_activity.turn_count, 0) AS turn_count,
 			COALESCE(message_activity.message_count, 0) AS message_count,
 			COALESCE(turn_activity.task_count, 0) AS task_count
@@ -406,7 +407,7 @@ func (r *Repository) GetDailyActivity(
 		LEFT JOIN turn_activity ON turn_activity.activity_date = d.date
 		LEFT JOIN message_activity ON message_activity.activity_date = d.date
 		ORDER BY d.date ASC
-	`, dateStart, datePlus, curDate, dateOfTurn, dateOfTurn, dateOfMsg)
+	`, dateStart, datePlus, curDate, dateOfTurn, dateOfTurn, dateOfMsg, dateText)
 
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), days-1, workspaceID)
 	if err != nil {
@@ -448,6 +449,7 @@ func (r *Repository) GetCompletedTaskActivity(
 	datePlus := dialect.DatePlusOneDay(drv, "date")
 	curDate := dialect.CurrentDate(drv)
 	dateOfCompleted := dialect.DateOf(drv, "COALESCE(ts.completed_at, t.archived_at)")
+	dateText := dialect.DateText(drv, "d.date")
 
 	query := fmt.Sprintf(`
 		WITH RECURSIVE dates(date) AS (
@@ -455,7 +457,7 @@ func (r *Repository) GetCompletedTaskActivity(
 			UNION ALL
 			SELECT %s FROM dates WHERE date < %s
 		)
-		SELECT d.date, COALESCE(activity.completed_tasks, 0) as completed_tasks
+		SELECT %s AS date, COALESCE(activity.completed_tasks, 0) as completed_tasks
 		FROM dates d
 		LEFT JOIN (
 			SELECT %s as activity_date, COUNT(DISTINCT t.id) as completed_tasks
@@ -472,7 +474,7 @@ func (r *Repository) GetCompletedTaskActivity(
 			GROUP BY %s
 		) activity ON activity.activity_date = d.date
 		ORDER BY d.date ASC
-	`, dateStart, datePlus, curDate, dateOfCompleted, dateOfCompleted)
+	`, dateStart, datePlus, curDate, dateText, dateOfCompleted, dateOfCompleted)
 
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), days-1, workspaceID)
 	if err != nil {

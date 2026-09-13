@@ -146,7 +146,16 @@ func TestDateOf(t *testing.T) {
 		t.Errorf("sqlite: got %q", got)
 	}
 	got = DateOf(PGX, "created_at")
-	if got != "(created_at AT TIME ZONE 'UTC')::date" {
+	if got != "(created_at)::date" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
+func TestDateText(t *testing.T) {
+	if got := DateText(SQLite3, "date"); got != "date(date)" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	if got := DateText(PGX, "date"); got != "to_char(date, 'YYYY-MM-DD')" {
 		t.Errorf("pgx: got %q", got)
 	}
 }

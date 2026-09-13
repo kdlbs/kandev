@@ -24,15 +24,28 @@ func DurationMs(driver, end, start string) string {
 	return fmt.Sprintf("(julianday(%s) - julianday(%s)) * 86400000", end, start)
 }
 
-// DateOf returns the SQL expression to extract the UTC date portion from a
-// timestamp. Application timestamps are stored as UTC, so PostgreSQL must
-// avoid applying the connection's local timezone while extracting the date.
+// DateOf returns the SQL expression to extract the date portion from a
+// timestamp. PostgreSQL timestamp columns in the application schema contain
+// UTC wall-clock values without a timezone, so casting them to date is stable
+// across connection timezone settings.
 //
 //	SQLite:   date(expr)
-//	Postgres: (expr AT TIME ZONE 'UTC')::date
+//	Postgres: (expr)::date
 func DateOf(driver, expr string) string {
 	if IsPostgres(driver) {
-		return fmt.Sprintf("(%s AT TIME ZONE 'UTC')::date", expr)
+		return fmt.Sprintf("(%s)::date", expr)
+	}
+	return fmt.Sprintf("date(%s)", expr)
+}
+
+// DateText returns a date expression as YYYY-MM-DD text for scanning into the
+// analytics model's string date fields.
+//
+//	SQLite:   date(expr)
+//	Postgres: to_char(expr, 'YYYY-MM-DD')
+func DateText(driver, expr string) string {
+	if IsPostgres(driver) {
+		return fmt.Sprintf("to_char(%s, 'YYYY-MM-DD')", expr)
 	}
 	return fmt.Sprintf("date(%s)", expr)
 }
