@@ -40,6 +40,9 @@ const (
 	metaKeyUpdatedAt       = "updated_at"
 	metaKeyExecutorProfile = "executor_profile_id"
 	metaKeyWorkflowStepID  = "workflow_step_id"
+	metaKeyPrompt          = "prompt"
+	metaKeyPlanMode        = "plan_mode"
+	metaKeyAttachments     = "attachments"
 )
 
 // metaVariantWarning is the status-message variant that drives the frontend's
@@ -318,7 +321,7 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 		return
 	}
 
-	if _, err := s.promptTask(ctx, taskID, sessionID, cp.text, cp.model, cp.planMode, cp.attachments, false, promptTaskOptions{
+	if _, err := s.promptTask(ctx, taskID, sessionID, cp.text, cp.model, cp.planMode, cp.attachments, false, launchOriginAutomatic, promptTaskOptions{
 		onAccepted: cp.onAccepted,
 	}); err != nil {
 		if ctx.Err() != nil {

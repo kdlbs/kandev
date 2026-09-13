@@ -7309,7 +7309,7 @@ func TestEnsureSessionRunning_OfficeWithoutRuntimeEnvFailsClosed(t *testing.T) {
 		t.Fatalf("failed to reload session: %v", err)
 	}
 
-	err = svc.ensureSessionRunning(ctx, "session1", session)
+	err = svc.ensureSessionRunning(ctx, "session1", session, launchOriginManual)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "office tasks must be restarted through Office")
 	assert.False(t, startAgentProcessCalled)
@@ -7337,7 +7337,7 @@ func TestEnsureSessionRunning_OfficeWaitingForInputFailsClosed(t *testing.T) {
 
 	session, err := repo.GetTaskSession(ctx, "session1")
 	require.NoError(t, err)
-	err = svc.ensureSessionRunning(ctx, "session1", session)
+	err = svc.ensureSessionRunning(ctx, "session1", session, launchOriginManual)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "office tasks must be resumed through Office")
 	assert.False(t, launchCalled)
@@ -7403,7 +7403,7 @@ func TestEnsureSessionRunning_WaitingForInputUsesResumePath(t *testing.T) {
 	}
 
 	// Should fail because there is no executor running record (resume path)
-	err = svc.ensureSessionRunning(ctx, "session1", session)
+	err = svc.ensureSessionRunning(ctx, "session1", session, launchOriginManual)
 	if err == nil {
 		t.Fatal("expected error for WAITING_FOR_INPUT session without executor record")
 	}
@@ -7434,7 +7434,7 @@ func TestEnsureSessionRunning_CreatedWithoutExecutionUsesResumePath(t *testing.T
 
 	// AgentExecutionID is empty → should NOT take prepared workspace path
 	// Should fail with "not resumable" because no executor running record
-	err = svc.ensureSessionRunning(ctx, "session1", session)
+	err = svc.ensureSessionRunning(ctx, "session1", session, launchOriginManual)
 	if err == nil {
 		t.Fatal("expected error for CREATED session without executor record")
 	}

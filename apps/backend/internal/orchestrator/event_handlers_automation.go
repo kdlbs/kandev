@@ -797,7 +797,7 @@ func (s *Service) promptAutomationContinuation(
 	session *models.TaskSession,
 	prompt string,
 ) (automation.RunDispatch, error) {
-	result, err := s.PromptTask(ctx, task.ID, session.ID, prompt, "", false, nil, true)
+	result, err := s.promptTask(ctx, task.ID, session.ID, prompt, "", false, nil, true, launchOriginAutomatic, promptTaskOptions{})
 	if err != nil {
 		return automation.RunDispatch{}, err
 	}

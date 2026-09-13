@@ -5628,7 +5628,7 @@ func (s *Service) autoStartStepPrompt(
 
 	const maxRetryAttempts = 5
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
-		_, err := s.promptTask(ctx, taskID, sessionID, dispatchPrompt, "", planMode, attachments, false, promptTaskOptions{
+		_, err := s.promptTask(ctx, taskID, sessionID, dispatchPrompt, "", planMode, attachments, false, launchOriginAutomatic, promptTaskOptions{
 			requireNonterminalSession: true,
 			// dispatchPrompt is already fully composed for this step entry
 			// (handoff included, see the ErrExecutionNotFound branch below):
@@ -5645,6 +5645,18 @@ func (s *Service) autoStartStepPrompt(
 		}
 		if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
 			requeueTaken()
+			return err
+		}
+		// AC-47c2: the two seam-3 dispositions carry opposite restoration
+		// obligations. A deferred refusal already holds the prompt and its
+		// AC-47c(c) strings in the written record, so requeuing here would
+		// redeliver the same content twice; an undeferred one (AC-47c1) is
+		// the caller's own to restore, exactly like the terminalized branch
+		// above.
+		if refusal, ok := isSeam3Refusal(err); ok {
+			if !refusal.deferred {
+				requeueTaken()
+			}
 			return err
 		}
 
@@ -5997,7 +6009,7 @@ func (s *Service) queueAutoStartPrompt(
 	if handoffText != "" {
 		meta[messagequeue.MetadataStepHandoff] = handoffText
 	}
-	_, err := s.messageQueue.QueueMessageWithMetadata(
+	queued, err := s.messageQueue.QueueMessageWithMetadata(
 		ctx,
 		sessionID,
 		taskID,
@@ -6012,7 +6024,7 @@ func (s *Service) queueAutoStartPrompt(
 		return fmt.Errorf("failed to queue workflow auto-start prompt: %w", err)
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
-	s.scheduleAutoResumeForWorkflowQueue(ctx, sessionID)
+	s.scheduleAutoResumeForWorkflowQueue(ctx, sessionID, queued.ID)
 	return nil
 }
 
@@ -6027,14 +6039,14 @@ func (s *Service) queueAutoStartPrompt(
 // crashed just before the on_enter transition). If the agent is alive when
 // the queue is written but dies later, the queue is drained by the next
 // handleAgentBootReady (manual or automatic resume).
-func (s *Service) scheduleAutoResumeForWorkflowQueue(ctx context.Context, sessionID string) {
+func (s *Service) scheduleAutoResumeForWorkflowQueue(ctx context.Context, sessionID, queuedMessageID string) {
 	if s.executor == nil {
 		return
 	}
 	if exec, ok := s.executor.GetExecutionBySession(sessionID); ok && exec != nil {
 		return
 	}
-	go s.tryEnsureExecution(context.WithoutCancel(ctx), sessionID)
+	go s.tryEnsureExecution(context.WithoutCancel(ctx), sessionID, seam3CallShapeQueueDrain, launchOriginAutomatic, queuedMessageID)
 }
 
 // flipStaleRunningToWaiting flips the session to WAITING_FOR_INPUT when its

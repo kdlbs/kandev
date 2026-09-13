@@ -24,9 +24,9 @@ func seam2StartCreatedPayload(
 	return map[string]interface{}{
 		metaKeySessionID:                 sessionID,
 		metaKeyAgentProfileID:            agentProfileID,
-		"prompt":                         prompt,
-		"plan_mode":                      planMode,
-		"attachments":                    attachments,
+		metaKeyPrompt:                    prompt,
+		metaKeyPlanMode:                  planMode,
+		metaKeyAttachments:               attachments,
 		"references":                     references,
 		"prompt_reference_context":       promptReferenceContext,
 		"skip_message_record":            skipMessageRecord,

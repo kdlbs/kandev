@@ -1466,6 +1466,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 	}
 	_, err := s.promptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
 		promptContent, queuedMsg.Model, queuedMsg.PlanMode, attachments, false,
+		launchOriginAutomatic,
 		promptTaskOptions{
 			claimEntryID:         claimEntryID,
 			lifecyclePrompt:      lifecyclePrompt,

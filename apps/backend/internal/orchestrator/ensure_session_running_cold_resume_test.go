@@ -150,7 +150,7 @@ func TestEnsureSessionRunning_ColdResumeReapsAndRetriesOnPromptReadyTimeout(t *t
 		t.Fatalf("reload: %v", err)
 	}
 
-	if err := svc.ensureSessionRunning(ctx, "session1", session); err != nil {
+	if err := svc.ensureSessionRunning(ctx, "session1", session, launchOriginManual); err != nil {
 		t.Fatalf("expected cold resume to reap the wedged launch and retry, got: %v", err)
 	}
 	if got := launchCalls.Load(); got != 2 {
