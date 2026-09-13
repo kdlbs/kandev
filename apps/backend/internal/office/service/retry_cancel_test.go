@@ -29,7 +29,7 @@ func TestCancelPendingRetriesForTask_RecordsTerminalShape(t *testing.T) {
 		VALUES (?, ?, 'Build API', 'Implement endpoint', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
 		taskID, agent.WorkspaceID)
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"`+taskID+`"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}

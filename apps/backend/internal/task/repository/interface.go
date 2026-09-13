@@ -23,6 +23,8 @@ var ErrTaskEnvironmentNotFound = repoerrors.ErrTaskEnvironmentNotFound
 var ErrTaskEnvironmentOwnershipChanged = repoerrors.ErrTaskEnvironmentOwnershipChanged
 var ErrWIPLimitExceeded = wfmodels.ErrWIPLimitExceeded
 var ErrExternalIDConflict = repoerrors.ErrExternalIDConflict
+var ErrStepChanged = repoerrors.ErrStepChanged
+var ErrInvalidReorder = repoerrors.ErrInvalidReorder
 
 // WorkspaceRepository handles workspace CRUD.
 type WorkspaceRepository interface {
@@ -55,7 +57,17 @@ type TaskRepository interface {
 	CreateTask(ctx context.Context, task *models.Task) error
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error)
+	// UpdateTask writes the full task row, preserving whatever position is
+	// currently persisted regardless of what task.Position holds — a
+	// pre-transaction read is not authoritative once a concurrent reorder or
+	// arrival may have moved the row (REQ-TASKS-KANBAN-TASK-REORDERING-001.28/
+	// .31). Use UpdateTaskWithExplicitPosition for the one caller that must
+	// write a literal position.
 	UpdateTask(ctx context.Context, task *models.Task) error
+	// UpdateTaskWithExplicitPosition is UpdateTask's counterpart that writes
+	// task.Position as given, for the generic task-update API's explicit
+	// position field (predates REQ-TASKS-KANBAN-TASK-REORDERING-001).
+	UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error
 	DeleteTask(ctx context.Context, id string) error
 	ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error)
 	ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error)
@@ -365,6 +377,14 @@ type SessionRepository interface {
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+	// ListLiveWorkspaceSessions returns every session across all tasks in one of
+	// the five live states (CREATED, STARTING, RUNNING, IDLE,
+	// WAITING_FOR_INPUT), each carrying its effective workspace_path. Unlike
+	// ListActiveTaskSessions it includes IDLE, because this method exists
+	// only for the orphan-reap workspace-ownership check, not for the
+	// several unrelated "active session" callers that must not change
+	// behavior by picking up IDLE sessions.
+	ListLiveWorkspaceSessions(ctx context.Context) ([]*models.TaskSession, error)
 	CancelActiveTaskSessionsByTaskID(ctx context.Context, taskID, reason string) ([]*models.TaskSession, error)
 	HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error)
 	GetActiveTaskInfoByAgentProfile(ctx context.Context, agentProfileID string) ([]agentdto.ActiveTaskInfo, error)

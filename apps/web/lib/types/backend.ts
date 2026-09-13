@@ -22,6 +22,7 @@ import type {
   Agent,
   AvailableAgent,
   ForegroundActivity,
+  ReorderBand,
   TaskPendingAction,
   TaskPriority,
   TaskSessionState,
@@ -79,6 +80,14 @@ export type KanbanUpdatePayload = {
     description?: string;
     state?: TaskState;
   }>;
+};
+
+export type TaskReorderedPayload = {
+  workspace_id?: string;
+  workflow_step_id: string;
+  band: ReorderBand;
+  revision: number;
+  tasks: Array<{ id: string; position: number }>;
 };
 
 export type TaskEventPayload = {
@@ -430,6 +439,7 @@ export type BackendMessageMap = SessionBackendMessageMap &
   import("@/lib/types/http").WalkthroughBackendMessageMap &
   import("@/lib/types/review").ReviewBackendMessageMap & {
     "kanban.update": BackendMessage<"kanban.update", KanbanUpdatePayload>;
+    "task.reordered": BackendMessage<"task.reordered", TaskReorderedPayload>;
     "task.created": BackendMessage<"task.created", TaskEventPayload>;
     "task.updated": BackendMessage<"task.updated", TaskEventPayload>;
     "task.deleted": BackendMessage<"task.deleted", TaskEventPayload>;

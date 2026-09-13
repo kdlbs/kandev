@@ -128,7 +128,11 @@ test("dense and sparse workflows size independently and keep the final task reac
   test.setTimeout(120_000);
   await testPage.setViewportSize({ width: 1440, height: 900 });
   await withHeightWorkflows(apiClient, seedData, async (second) => {
-    await seedLargeColumnTasks(apiClient, seedData, "Dense height", 439);
+    const denseTaskCount = 439;
+    await seedLargeColumnTasks(apiClient, seedData, "Dense height", denseTaskCount);
+    const { tasks } = await apiClient.listTasks(seedData.workspaceId);
+    const finalTask = tasks.find((task) => task.title === `Dense height ${denseTaskCount}`);
+    if (!finalTask) throw new Error("final dense task was not created");
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
     const dense = kanban.columnByStepId(seedData.startStepId);
@@ -137,13 +141,13 @@ test("dense and sparse workflows size independently and keep the final task reac
     await expect.poll(async () => (await sparse.boundingBox())?.height).toBe(200);
     await expectBoundedMountedCards(dense);
     await scrollColumnToBottom(dense.getByTestId("kanban-column-scroll"));
-    const oldest = dense.getByTestId(`task-card-${second.seedWorkflowTaskId}`);
-    await expect(oldest).toBeInViewport();
+    const finalCard = dense.getByTestId(`task-card-${finalTask.id}`);
+    await expect(finalCard).toBeInViewport();
     await expectBoundedMountedCards(dense);
     expect(await taskCards(dense).count()).toBeLessThan(50);
     await expectNoDocumentOverflow(testPage);
-    await oldest.click();
-    await expect(testPage).toHaveURL(new RegExp(`/t/${second.seedWorkflowTaskId}`));
+    await finalCard.click();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${finalTask.id}`));
   });
 });
 

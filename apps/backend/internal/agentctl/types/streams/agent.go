@@ -120,6 +120,11 @@ type AgentEvent struct {
 	// values.
 	Type string `json:"type"`
 
+	// AttemptID identifies the recovery attempt that owns this callback. It is
+	// assigned by lifecycle at the startup stream boundary and is immutable for
+	// the lifetime of the callback.
+	AttemptID string `json:"attempt_id,omitempty"`
+
 	// SessionID is the current session identifier.
 	SessionID string `json:"session_id,omitempty"`
 

@@ -29,6 +29,7 @@ type mockAgentManager struct {
 	resolveAgentProfileFunc          func(ctx context.Context, profileID string) (*AgentProfileInfo, error)
 	setExecutionDescriptionFunc      func(ctx context.Context, agentExecutionID string, description string) error
 	setExecutionEnvFunc              func(ctx context.Context, agentExecutionID string, env map[string]string) error
+	executorProfileEnvFunc           func(ctx context.Context, sessionID, taskEnvironmentID string) (map[string]string, error)
 	getExecutionIDForSessionFunc     func(ctx context.Context, sessionID string) (string, error)
 	listExecutionsForTaskFunc        func(taskID string) []lifecycle.ExecutionReference
 	isAgentCommandConfiguredFunc     func(agentExecutionID string) bool
@@ -76,6 +77,13 @@ func (m *mockAgentManager) SetExecutionEnv(ctx context.Context, executionID stri
 		return m.setExecutionEnvFunc(ctx, executionID, env)
 	}
 	return nil
+}
+
+func (m *mockAgentManager) ExecutorProfileEnvForSession(ctx context.Context, sessionID, taskEnvironmentID string) (map[string]string, error) {
+	if m.executorProfileEnvFunc != nil {
+		return m.executorProfileEnvFunc(ctx, sessionID, taskEnvironmentID)
+	}
+	return nil, nil
 }
 
 func (m *mockAgentManager) SetMcpMode(_ context.Context, _ string, _ string) error {
@@ -801,7 +809,10 @@ func (m *mockRepository) GetTasksByIDs(ctx context.Context, ids []string) ([]*mo
 	return out, nil
 }
 func (m *mockRepository) UpdateTask(ctx context.Context, task *models.Task) error { return nil }
-func (m *mockRepository) DeleteTask(ctx context.Context, id string) error         { return nil }
+func (m *mockRepository) UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error {
+	return nil
+}
+func (m *mockRepository) DeleteTask(ctx context.Context, id string) error { return nil }
 func (m *mockRepository) ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error) {
 	return nil, nil
 }

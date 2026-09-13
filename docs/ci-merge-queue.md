@@ -4,6 +4,14 @@ The `main` ruleset enabled the merge queue and six required checks on
 2026-08-16. This document records the workflow preparation, active rules, and
 the Stable release exception.
 
+### Claude execution budget
+
+The automatic same-repository review, approved fork review, and interactive
+Claude jobs each have a 30-minute GitHub job timeout. The timeout bounds runner
+execution and a cancelled job cannot report a successful review. It does not
+bound approval or queue waits. An approval that expires before a job starts is
+an approval outcome, and must be measured separately from Claude execution.
+
 ## Why
 
 Before activation, `main`'s ruleset (id `13341245`) had `deletion`,
@@ -118,31 +126,35 @@ absence of a filter rather than the presence of specific entries.
 ### External CI runner capacity
 
 The normal Linux CI workflows have one activation switch, one percentage
-control, and two runner tiers. The switch and percentage are unset by default,
-so the workflows use GitHub-hosted runners.
+control, and two runner tiers. The current read-only snapshot on 2026-09-12
+is shown below. The switch is off, so current jobs use GitHub-hosted runners;
+the retained percentage is the next pilot value.
 
-| Variable | Pilot value | Purpose |
-| -------- | ----------- | ------- |
-| `KANDEV_CI_EXTERNAL_ENABLED` | unset | Set to `true` to allow external assignments |
-| `KANDEV_CI_EXTERNAL_PERCENT` | unset or `0` | Assign 0 to 100 percent of eligible jobs |
-| `KANDEV_CI_RUNNER_LIGHT` | `ubicloud-standard-2-ubuntu-2404` | Control and aggregate jobs |
-| `KANDEV_CI_RUNNER_STANDARD` | `ubicloud-standard-4-ubuntu-2404` | Eligible browser and frontend test jobs |
+| Variable | Current value | Pilot value | Purpose |
+| -------- | ------------ | ----------- | ------- |
+| `KANDEV_CI_EXTERNAL_ENABLED` | `false` | `true` | Allow external assignments |
+| `KANDEV_CI_EXTERNAL_PERCENT` | `20` | `20` | Assign 0 to 100 percent of eligible job instances |
+| `KANDEV_CI_RUNNER_LIGHT` | `ubicloud-standard-2-ubuntu-2404` | same | Control and aggregate jobs |
+| `KANDEV_CI_RUNNER_STANDARD` | `ubicloud-standard-4-ubuntu-2404` | same | Eligible browser and frontend test jobs |
 
 Set `KANDEV_CI_EXTERNAL_ENABLED` to the exact value `true` when the Actions queue
-needs extra capacity. Set it to `false`, or remove it, after the queue returns
-to its normal level. The two tier variables stay configured between bursts, so
-changing the instance type requires only an Actions variable update.
+needs extra capacity. Set it to `false` after the queue returns to its normal
+level. The two tier variables stay configured between bursts, so changing the
+instance type requires only an Actions variable update.
 
-Set `KANDEV_CI_EXTERNAL_PERCENT` to `50` for a pilot. The E2E matrix then sends
-seven of fourteen normal shards to the standard tier. Backend checkout and
-report-token jobs remain on GitHub-hosted runners; the aggregate backend gate
-and frontend jobs are eligible. Singleton jobs use a stable hash cohort, so
-their share approaches the percentage across workflow runs.
+The 20% pilot sends a stable cohort of eligible instances to the configured
+tiers. For E2E this assigns two of fourteen normal shards per run because matrix
+allocation uses a floor. The frontend workflow has two unit-test instances, so
+the 20% pilot assigns zero of those instances; its singleton static and gate
+jobs still use stable hash cohorts. Backend checkout, static checks,
+service jobs, Windows, and the protected test shards remain on GitHub-hosted
+runners. Singleton jobs use a stable hash cohort, so their share approaches the
+percentage across workflow runs.
 
-Leave the percentage unset for the default GitHub-only mode. Set it to `100`
-to send every eligible job with a non-empty tier label to external capacity.
-Malformed or out-of-range values fail closed to GitHub-hosted runners and emit
-a planner warning.
+Set the percentage to `0` for an explicit GitHub-only allocation. Set it to
+`100` to send every eligible job with a non-empty tier label to external
+capacity. Malformed or out-of-range values fail closed to GitHub-hosted runners
+and emit a planner warning.
 
 The reusable `.github/actions/plan-external-runners` composite action runs on
 the planner job's `ubuntu-latest` checkout. Each workflow declares its eligible
@@ -159,32 +171,68 @@ label is unavailable, GitHub leaves the job queued or fails it. Clear the
 invalid label and rerun the workflow. Jobs already queued or running keep their
 original runner. New jobs use the current variables.
 
-The E2E build and report jobs, Docker/Kind shards, Kubernetes compatibility
-jobs, Playwright image job, desktop smoke job, backend checkout/static/test
-shards, Postgres service job, architecture and harness linters, and Windows job
-stay on GitHub-hosted runners. Release, publishing, signing, deployment, and
+The eligible families are the E2E normal-shard matrix and gate, the backend
+aggregate test gate, the frontend static verification job, the frontend unit
+test matrix, and their lightweight change-detection and gate jobs. The E2E build
+and report jobs, Docker/Kind shards, Kubernetes compatibility jobs, Playwright
+image job, desktop smoke job, backend checkout/static/test shards, Postgres
+service job, architecture and harness linters, and Windows job stay on
+GitHub-hosted runners. Release, publishing, signing, deployment, and
 credential-bearing jobs stay on their existing runners. The workflows do not
 add permissions, secrets, or persistent state.
 
-The same switch and tier labels apply to eligible E2E, backend-gate, and
-frontend jobs. Architecture-lint, action-pinning, and harness-lint stay hosted
-and do not create planner jobs. The planner does not change job names, test
-selection, matrix values, artifacts, dependencies, timeouts, permissions, or
-required conclusions.
+The same switch and tier labels apply to eligible E2E, backend-gate, frontend
+static verification, frontend unit-test matrix, and frontend gate jobs.
+Architecture-lint, action-pinning, and harness-lint stay hosted and do not
+create planner jobs. The planner does not change job names, test selection,
+matrix values, artifacts, dependencies, timeouts, permissions, or required
+conclusions.
 
-Pilot procedure:
+Pilot procedure. An operator must supply an approved provider budget and the
+provider's current rate before activation. Unknown rates, fees, or budget are
+an activation blocker.
 
-1. Merge the workflow change while `KANDEV_CI_EXTERNAL_ENABLED` and
-   `KANDEV_CI_EXTERNAL_PERCENT` are unset.
+1. Merge the workflow change while `KANDEV_CI_EXTERNAL_ENABLED=false`.
 2. Install the [Ubicloud GitHub App](https://www.ubicloud.com/docs/github-actions-integration) for this repository.
-3. Set both tier variables to the pilot labels in the table. Leave Premium
-   Runners disabled. Premium is an account-level setting, not a per-job tier.
-4. Set `KANDEV_CI_EXTERNAL_PERCENT=50` for the first pilot.
-5. Set `KANDEV_CI_EXTERNAL_ENABLED=true` while the queue is full.
-6. Compare at least three runs for queue delay, job duration, runner label,
-   image setup, and failures.
-7. Set the switch to `false` after the queue recovers. Keep the labels and
-   percentage for the next burst.
+3. Confirm both tier variables match the approved labels. Leave Premium Runners
+   disabled. Premium is an account-level setting, not a per-job tier.
+4. Record the current variable snapshot and provider budget in the run record.
+5. Activate the 20% pilot for newly dispatched workflows:
+
+   ```bash
+   gh variable set KANDEV_CI_EXTERNAL_ENABLED --repo kdlbs/kandev --body true
+   gh variable set KANDEV_CI_EXTERNAL_PERCENT --repo kdlbs/kandev --body 20
+   ```
+
+6. Compare at least three representative frontend, E2E, or backend runs. For
+   each eligible job record workflow run attempt, runner label, created time,
+   `started_at`, `completed_at`, queue delay, execution duration, setup/cache
+   steps, conclusion, and billed runner minutes. Keep protected hosted jobs in
+   the comparison so queue relief is not confused with code speed.
+7. Stop the pilot for newly dispatched workflows after the sample or when the
+   budget is reached:
+
+   ```bash
+   gh variable set KANDEV_CI_EXTERNAL_ENABLED --repo kdlbs/kandev --body false
+   gh variable set KANDEV_CI_EXTERNAL_PERCENT --repo kdlbs/kandev --body 0
+   ```
+
+   Jobs already queued or running keep their original runner assignment.
+
+Cost calculation for each pilot sample:
+
+```text
+external runner-minutes = sum(external job execution seconds) / 60
+external cost = external runner-minutes / 60 * provider hourly rate
+                + provider setup, storage, or transfer fees
+```
+
+Compare that cost with the GitHub-hosted minute accounting and record the
+provider rate, billing granularity, and any free allowance. The percentage
+controls assignment of job instances; it does not promise the same percentage
+of billed minutes. Do not expand the percentage until three comparable runs
+show queue relief without an unacceptable failure rate, execution regression,
+or budget overrun.
 
 Use the [Ubicloud runner type reference](https://www.ubicloud.com/docs/github-actions-integration/runner-types) when changing a tier. Use GitHub's [runner selection reference](https://docs.github.com/en/actions/how-tos/write-workflows/choose-where-workflows-run/choose-the-runner-for-a-job) for `runs-on` expressions. Do not enable [Ubicloud Premium Runners](https://www.ubicloud.com/docs/github-actions-integration/use-premium-runners) for this pilot.
 

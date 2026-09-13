@@ -160,6 +160,9 @@ func (r *Repository) createCoreTables() error {
 	if err := r.createApprovalTables(); err != nil {
 		return err
 	}
+	if err := r.createWorkspacePauseTable(); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -499,6 +502,8 @@ func (r *Repository) createRoutineTables() error {
 		started_at TIMESTAMP,
 		completed_at TIMESTAMP,
 		created_at TIMESTAMP NOT NULL,
+		skip_reason TEXT NOT NULL DEFAULT '',
+		pause_id TEXT NOT NULL DEFAULT '',
 		causation_id TEXT NOT NULL DEFAULT '',
 		FOREIGN KEY (routine_id) REFERENCES office_routines(id) ON DELETE CASCADE
 	);

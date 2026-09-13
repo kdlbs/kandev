@@ -615,6 +615,14 @@ type RoutineRun struct {
 	StartedAt            *time.Time       `json:"started_at" db:"started_at"`
 	CompletedAt          *time.Time       `json:"completed_at" db:"completed_at"`
 	CreatedAt            time.Time        `json:"created_at" db:"created_at"`
+	// SkipReason carries exactly one value today, "workspace_paused",
+	// distinguishing a workspace-pause skip from every other skip cause
+	// (e.g. skip_if_active concurrency). Empty for a run not skipped by a
+	// pause.
+	SkipReason string `json:"skip_reason" db:"skip_reason"`
+	// PauseID names the office_workspace_pauses row that blocked this
+	// fire. Empty when SkipReason is empty.
+	PauseID string `json:"pause_id" db:"pause_id"`
 	// CausationID is minted once per fire in dispatchRoutineRun
 	// (REQ-OFFICE-LOOP-LIVENESS-002) — the origin id every wakeup
 	// request and run this fire produces carries forward. "" only for

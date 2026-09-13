@@ -563,7 +563,7 @@ func wireBootReadySimulator(svc *Service, agentMgr *mockAgentManager, newExecID 
 			Status:           v1.AgentStatusReady,
 		}, nil
 	}
-	agentMgr.startAgentProcessFunc = func(_ context.Context, executionID string) error {
+	agentMgr.startAgentProcessFunc = func(startCtx context.Context, executionID string) error {
 		agentMgr.mu.Lock()
 		sessionID := preparedSessionID
 		agentMgr.mu.Unlock()
@@ -572,6 +572,7 @@ func wireBootReadySimulator(svc *Service, agentMgr *mockAgentManager, newExecID 
 			TaskID:           "task-1",
 			SessionID:        sessionID,
 			AgentExecutionID: executionID,
+			AttemptID:        executor.ResumeAttemptIDFromContext(startCtx),
 			AgentProfileID:   profileImpl,
 		})
 		return nil

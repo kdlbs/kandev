@@ -13,6 +13,7 @@ import {
   type DisclosureMove,
   type WorkflowStepperStep,
 } from "./task/workflow-step-disclosure";
+import type { WorkflowStepProgress } from "@/hooks/domains/kanban/use-workflow-step-progress";
 import { TaskActionsMenuTrigger } from "./task/task-actions-menu-trigger";
 import { TaskActionsMenuDialogs } from "./task/task-actions-menu-dialogs";
 import { useTaskActionsMenu, type TaskActionsMenuBoardRow } from "@/hooks/use-task-actions-menu";
@@ -31,6 +32,8 @@ interface TaskPreviewPanelProps {
   taskWorkflowId?: string | null;
   isArchived?: boolean;
   movingToStepId?: string | null;
+  progressByStepId?: Readonly<Record<string, WorkflowStepProgress>>;
+  agentLabelsByProfileId?: Readonly<Record<string, string>>;
   onMoveStep?: DisclosureMove;
   onDisclosureOpenChange?: (open: boolean) => void;
   moveError?: unknown;
@@ -126,6 +129,8 @@ interface PreviewPanelHeaderProps {
   taskWorkflowId: string | null;
   isArchived: boolean;
   movingToStepId: string | null;
+  progressByStepId?: Readonly<Record<string, WorkflowStepProgress>>;
+  agentLabelsByProfileId?: Readonly<Record<string, string>>;
   onMoveStep?: DisclosureMove;
   onDisclosureOpenChange?: (open: boolean) => void;
   menuEntries: ReturnType<typeof useTaskActionsMenu>["entries"];
@@ -143,6 +148,8 @@ function PreviewPanelHeader({
   taskWorkflowId,
   isArchived,
   movingToStepId,
+  progressByStepId,
+  agentLabelsByProfileId,
   onMoveStep,
   onDisclosureOpenChange,
   menuEntries,
@@ -179,6 +186,8 @@ function PreviewPanelHeader({
               workflowId={taskWorkflowId}
               isArchived={isArchived}
               movingToStepId={movingToStepId}
+              progressByStepId={progressByStepId}
+              agentLabelsByProfileId={agentLabelsByProfileId}
               onMove={handleMoveStep}
               onDisclosureOpenChange={onDisclosureOpenChange}
             />
@@ -228,6 +237,8 @@ export function TaskPreviewPanel({
   taskWorkflowId = null,
   isArchived = false,
   movingToStepId = null,
+  progressByStepId,
+  agentLabelsByProfileId,
   onMoveStep,
   onDisclosureOpenChange,
   moveError = null,
@@ -264,6 +275,8 @@ export function TaskPreviewPanel({
         taskWorkflowId={taskWorkflowId}
         isArchived={isArchived}
         movingToStepId={movingToStepId}
+        progressByStepId={progressByStepId}
+        agentLabelsByProfileId={agentLabelsByProfileId}
         onMoveStep={onMoveStep}
         onDisclosureOpenChange={onDisclosureOpenChange}
         menuEntries={menu.entries}

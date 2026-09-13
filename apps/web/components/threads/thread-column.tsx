@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type HTMLAttributes,
+  type RefObject,
+} from "react";
 import { IconArrowsMaximize } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
@@ -11,6 +18,8 @@ import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { selectThreadSessionId } from "@/lib/threads/thread-session-selection";
 import { resolveThreadColumnStatus, type ThreadStatus } from "@/lib/threads/thread-session-status";
 import { ThreadConversation } from "./thread-conversation";
+import { ComposerDisclosureContext } from "@/components/task/chat/composer-disclosure";
+import { useComposerDisclosure } from "@/components/task/chat/use-composer-disclosure";
 import { ThreadSessionStatusIcon, ThreadSessionSwitcher } from "./thread-session-switcher";
 import { ThreadTaskMenuButton, useThreadTaskContextMenu } from "./thread-task-actions";
 import {
@@ -91,19 +100,22 @@ function ThreadMeta({
 }
 
 /**
- * Brings a deep-linked column into view once.
+ * Keeps an initial deep link reachable until the reader interacts with the deck.
  *
- * The effect is keyed on `isFocused` alone, and the column is keyed by task id,
- * so a column that only mounts when a later snapshot lands still scrolls, while
- * a column that merely re-renders with fresh messages does not yank the deck
- * back under the reader.
+ * Board resizing can interrupt the initial smooth scroll. Reassert the target
+ * after that reflow, but never on ordinary transcript updates.
  */
-function useScrollWhenFocused(isFocused: boolean) {
+function useScrollWhenFocused(isFocused: boolean, layoutKey: string) {
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
     if (!isFocused) return;
-    ref.current?.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
-  }, [isFocused]);
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    ref.current?.scrollIntoView({
+      inline: "center",
+      block: "nearest",
+      behavior: reducedMotion ? "instant" : "smooth",
+    });
+  }, [isFocused, layoutKey]);
   return ref;
 }
 
@@ -205,8 +217,10 @@ function ThreadSessionMembership({
 
 type ThreadColumnProps = {
   thread: ActiveThread;
+  autoHideComposer?: boolean;
   mobileNavigation?: MobileThreadNavigation;
   isFocused?: boolean;
+  layoutKey?: string;
   isPreloaded?: boolean;
   isDetailActive?: boolean;
   requestedSessionId?: string | null;
@@ -262,7 +276,7 @@ function ThreadColumnHeader({
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 shrink-0 cursor-pointer"
+            className="h-7 w-7 shrink-0 cursor-pointer [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
             aria-label={t("threads:openTask")}
             onClick={() => onOpenTask(thread.taskId)}
           >
@@ -331,10 +345,45 @@ function ThreadColumnBody({
   );
 }
 
+function useThreadComposerInteraction(
+  enabled: boolean,
+  sessionId: string | null,
+  tileRef: RefObject<HTMLElement | null>,
+) {
+  const controller = useComposerDisclosure({ enabled, sessionId });
+  const returningFocus = useRef(false);
+  const disclosure = {
+    ...controller,
+    collapse: () => {
+      if (!controller.canCollapse) return;
+      controller.collapse();
+      returningFocus.current = true;
+      tileRef.current?.focus({ preventScroll: true });
+      returningFocus.current = false;
+    },
+  };
+  const bindings: HTMLAttributes<HTMLElement> = {
+    tabIndex: enabled ? 0 : undefined,
+    onPointerEnter: (event) => controller.pointerEnter(event.pointerType),
+    onPointerLeave: (event) => controller.pointerLeave(event.pointerType),
+    onFocusCapture: () => controller.focus(returningFocus.current),
+    onBlurCapture: controller.blur,
+    onKeyDown: (event) => {
+      if (event.target === event.currentTarget && event.key === "Enter" && !event.repeat) {
+        event.preventDefault();
+        controller.reveal();
+      }
+    },
+  };
+  return { disclosure, bindings };
+}
+
 export function ThreadColumn({
   thread,
+  autoHideComposer = false,
   mobileNavigation,
   isFocused = false,
+  layoutKey = "columns",
   isPreloaded = false,
   isDetailActive = false,
   requestedSessionId = null,
@@ -380,13 +429,12 @@ export function ThreadColumn({
   const handleRequestedSessionResolved = useCallback(() => {
     setRequestedSessionResolved(true);
   }, []);
-  const handleInvalidRequestedSession = useCallback(
-    (taskId: string, sessionId: string) => {
-      onInvalidRequestedSession?.(taskId, sessionId);
-    },
-    [onInvalidRequestedSession],
+  const focusRef = useScrollWhenFocused(isFocused, layoutKey);
+  const composer = useThreadComposerInteraction(
+    autoHideComposer,
+    isDetailActive ? selectedSessionId : null,
+    focusRef,
   );
-  const focusRef = useScrollWhenFocused(isFocused);
   const setColumnRef = useCallback(
     (element: HTMLElement | null) => {
       focusRef.current = element;
@@ -396,50 +444,53 @@ export function ThreadColumn({
   );
 
   return (
-    <section
-      ref={setColumnRef}
-      data-thread-column-id={thread.taskId}
-      data-testid={`thread-column-${thread.taskId}`}
-      data-focused={isFocused ? "true" : undefined}
-      aria-label={t("threads:columnLabel", { title: thread.title })}
-      // Phone: one column fills the viewport and snaps, so the deck is paged
-      // instead of pinch-scrolled.
-      //
-      // Desktop: columns share the width rather than taking a fixed slice, so
-      // two threads fill the board instead of leaving it mostly empty. The min
-      // width is the floor they stop shrinking at, which is what turns a busy
-      // deck into a horizontal scroll rather than a row of slivers.
-      //
-      // Two marks, deliberately different properties so they can coexist
-      // without fighting over one ring colour:
-      //   ring    — where the caret is. A composer's own border tracks agent
-      //             state, not focus, so in a deck of composers nothing else
-      //             says where typing would land.
-      //   outline — the column a deep link asked for.
-      className="flex h-full min-h-0 min-w-0 w-full shrink-0 snap-start flex-col overflow-hidden bg-card focus-within:ring-2 focus-within:ring-ring data-[focused=true]:outline data-[focused=true]:outline-2 data-[focused=true]:outline-offset-[-2px] data-[focused=true]:outline-primary md:w-auto md:min-w-[360px] md:flex-1 md:shrink md:rounded-lg md:border md:data-[focused=true]:outline-offset-2"
-    >
-      <ThreadColumnHeader
-        thread={thread}
-        mobileNavigation={mobileNavigation}
-        status={status}
-        sessions={sessions}
-        selectedSessionId={selectedSessionId}
-        onSelectSession={handleSelectSession}
-        onOpenTask={onOpenTask}
-      />
-      <ThreadColumnBody
-        taskId={thread.taskId}
-        isPreloaded={isPreloaded}
-        isDetailActive={isDetailActive}
-        requestedSessionId={requestedSessionResolved ? null : requestedSessionId}
-        selectedSessionId={selectedSessionId}
-        selectedSession={selectedSession}
-        sessionListReady={sessionListReady}
-        onSelectSession={handleSelectSession}
-        onSessions={handleSessionListState}
-        onRequestedSessionResolved={handleRequestedSessionResolved}
-        onInvalidRequestedSession={handleInvalidRequestedSession}
-      />
-    </section>
+    <ComposerDisclosureContext value={composer.disclosure}>
+      <section
+        {...composer.bindings}
+        ref={setColumnRef}
+        data-thread-column-id={thread.taskId}
+        data-testid={`thread-column-${thread.taskId}`}
+        data-focused={isFocused ? "true" : undefined}
+        aria-label={t("threads:columnLabel", { title: thread.title })}
+        // Phone: one column fills the viewport and snaps, so the deck is paged
+        // instead of pinch-scrolled.
+        //
+        // Desktop: columns share the width rather than taking a fixed slice, so
+        // two threads fill the board instead of leaving it mostly empty. The min
+        // width is the floor they stop shrinking at, which is what turns a busy
+        // deck into a horizontal scroll rather than a row of slivers.
+        //
+        // Two marks, deliberately different properties so they can coexist
+        // without fighting over one ring colour:
+        //   ring    — where the caret is. A composer's own border tracks agent
+        //             state, not focus, so in a deck of composers nothing else
+        //             says where typing would land.
+        //   outline — the column a deep link asked for.
+        className="flex h-full min-h-0 min-w-0 w-full shrink-0 snap-start flex-col overflow-hidden bg-card focus-within:ring-2 focus-within:ring-ring data-[focused=true]:outline data-[focused=true]:outline-2 data-[focused=true]:outline-offset-[-2px] data-[focused=true]:outline-primary md:w-auto md:min-w-[360px] md:flex-1 md:shrink md:rounded-lg md:border md:data-[focused=true]:outline-offset-2"
+      >
+        <ThreadColumnHeader
+          thread={thread}
+          mobileNavigation={mobileNavigation}
+          status={status}
+          sessions={sessions}
+          selectedSessionId={selectedSessionId}
+          onSelectSession={handleSelectSession}
+          onOpenTask={onOpenTask}
+        />
+        <ThreadColumnBody
+          taskId={thread.taskId}
+          isPreloaded={isPreloaded}
+          isDetailActive={isDetailActive}
+          requestedSessionId={requestedSessionResolved ? null : requestedSessionId}
+          selectedSessionId={selectedSessionId}
+          selectedSession={selectedSession}
+          sessionListReady={sessionListReady}
+          onSelectSession={handleSelectSession}
+          onSessions={handleSessionListState}
+          onRequestedSessionResolved={handleRequestedSessionResolved}
+          onInvalidRequestedSession={onInvalidRequestedSession}
+        />
+      </section>
+    </ComposerDisclosureContext>
   );
 }
