@@ -11,9 +11,12 @@ requirements:
 ## Purpose and boundaries
 
 This design makes the routine cron tick's resume behaviour explicit, gives the
-gap it crosses a durable record, and delivers that record to the woken agent —
-REQ-001 and REQ-002. Renaming the policy value that misdescribes all of it is
-REQ-003, in [part 2](routine-catch-up-02.md).
+gap it crosses a durable record, and carries that record into the assembled
+prompt for eligible lightweight runs — REQ-001 and REQ-002. The existing shared
+launcher rejects taskless runs, so prompt assembly is the boundary covered here;
+actual taskless session delivery is a separate shared-scheduler contract.
+Renaming the policy value that misdescribes all of it is REQ-003, in
+[part 2](routine-catch-up-02.md).
 
 The Office system owns the outcome: the trigger table, the routine-run table,
 the wakeup queue, and the routine prompt path are all Office primitives.
@@ -160,8 +163,9 @@ Invariants the constructor guarantees, so no call site has to restate them:
 `missedTicks = ElapsedTicks - 1`, floored at zero. The catch-up policy decides
 whether that number is *reported*, never whether runs are *created*: the tick
 dispatches exactly one run either way. `skip_missed` and `summarize_missed`
-therefore differ in exactly one observable: whether the woken agent is told
-about the gap.
+therefore differ in exactly one observable: whether the eligible lightweight
+run's assembled prompt includes the gap context. Whether a taskless run reaches
+an agent session remains the separate shared-launcher contract described above.
 
 **A gap summary exists only when `missedTicks >= 1`.** This single rule collapses
 what would otherwise be four near-identical states into two, and it is why
@@ -496,9 +500,9 @@ Three hops, of which only the last is new.
    wake that created the run, and no coalesced request adds, changes or removes
    them (AC-002.10). Nothing is lost, because each claim's gap is already
    durable on its own `office_routine_runs` row and readable through the
-   routine-run API (AC-002.6, AC-002.8). What the agent gets is one coherent
-   statement about the tick its run was created for, rather than a silent
-   mixture of two claims' measurements.
+   routine-run API (AC-002.6, AC-002.8). The assembled prompt carries one
+   coherent statement about the tick its run was created for, rather than a
+   silent mixture of two claims' measurements.
 3. `buildPromptContext` is called with `run.Payload`, which is `"{}"` for every
    wakeup-derived run. The call site at `scheduler_integration.go:375` passes
    `run.ContextSnapshot` as an additional argument, and `buildPromptContext`

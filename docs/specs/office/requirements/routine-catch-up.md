@@ -14,8 +14,8 @@ A routine's cron trigger can come due while the backend is not running to
 process it. On resume its armed `next_run_at` is in the past, sometimes far in
 the past. What the system does at that moment is a correctness property of an
 unattended loop: it decides how much work resumes, how much is spent in the
-first minute after a restart, and what the woken agent believes about the
-world.
+first minute after restart, and what the prompt says. The launcher rejects
+taskless runs, so lightweight runs may not reach an agent session.
 
 Four surfaces describe this moment, and they do not agree.
 
@@ -61,8 +61,8 @@ The wake is a "look at the world now" signal, not a queued work item.
   never be dispatched.
 - **Gap summary:** the durable record of a gap: missed-tick count, first-missed
   timestamp, and whether the count was truncated.
-- **Summarizing policy:** the catch-up policy that reports the gap to the woken
-  agent, named `summarize_missed` here.
+- **Summarizing policy:** records the gap in the lightweight prompt, named
+  `summarize_missed` here.
 - **Lightweight / heavy routine:** empty versus non-empty `task_template`, as
   in [Office Scheduler](scheduler.md).
 
@@ -167,9 +167,8 @@ anywhere. Nothing is discarded, because no run was ever going to be created for
 a missed tick; what is bounded is the counting. The exact gap boundary is
 preserved even when the count is truncated.
 
-**As an** agent woken after an outage, **I want** to know how long the gap was
-and whether the count I was given is exact, **so that** I can decide whether the
-gap changes what I should do.
+**As an** assembled run after an outage, **I want** prompt context to state the
+gap and whether its count is exact, **so that** an agent can choose what to do.
 
 #### Acceptance criteria
 
