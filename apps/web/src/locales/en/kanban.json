@@ -81,6 +81,7 @@
   "queuedCount_other": "{{count}} queued",
   "queuedForStep": "Queued for {{step}}",
   "queuedSection": "Queued",
+  "reorderPositionAnnouncement": "{{title}}, position {{position}} of {{total}}",
   "repository": "Repository",
   "searchPlaceholder": "Search...",
   "searchSection": "Search",

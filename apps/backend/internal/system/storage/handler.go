@@ -50,6 +50,7 @@ type Summary struct {
 	GoCache            any `json:"go_cache"`
 	Quarantine         any `json:"quarantine"`
 	TemporaryArtifacts any `json:"temporary_artifacts"`
+	SystemTemporary    any `json:"system_temporary"`
 	Docker             any `json:"docker"`
 	Database           any `json:"database"`
 	DatabaseBackups    any `json:"database_backups"`

@@ -21,7 +21,7 @@ import {
 } from "./storage-gating";
 import { StorageDiskCapacityCard } from "./storage-disk-capacity-card";
 import { StorageOverviewCard } from "./storage-overview-card";
-import { StoragePolicyCard } from "./storage-policy-card";
+import { StoragePolicyCard } from "./storage-policy-card-root";
 import { StorageQuarantineCard } from "./storage-quarantine-card";
 import { StorageRunHistory } from "./storage-run-history";
 import { SettingsTarget } from "../../settings-target";
@@ -325,6 +325,7 @@ function StoragePrimarySections({
           onChange={setDraft}
           onAdopt={controller.adopt}
           onCleanDependencies={() => void controller.runNow(["workspace_dependencies"])}
+          onCleanTemporaryArtifacts={onRunTemporaryArtifacts}
         />
       )}
     </div>

@@ -1,5 +1,5 @@
-import { act, renderHook, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { StateProvider, useAppStoreApi } from "@/components/state-provider";
 import type { TaskPlan, TaskPlanCommentSnapshot } from "@/lib/types/http";
 
@@ -70,9 +70,87 @@ function setUpApis() {
   api.getTaskPlanComments.mockResolvedValue(snapshot());
 }
 
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+
 // eslint-disable-next-line max-lines-per-function -- Loading and reconnect cases share one task-plan store fixture.
 describe("usePlanComments loading", () => {
   beforeEach(setUpApis);
+
+  it("loads a replacement plan after an older in-flight read settles", async () => {
+    let finishOld!: (value: TaskPlanCommentSnapshot) => void;
+    const replacement = { ...snapshot(2), plan_id: "plan-2", comments: [] };
+    api.getTaskPlanComments
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishOld = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(replacement);
+    const { result } = renderHook(useTwoTaskCommentConsumers, { wrapper });
+    await act(async () => {
+      result.current.store.getState().setTaskPlan(TASK_ID, taskPlan);
+      result.current.store.getState().setConnectionStatus("connected");
+    });
+    await act(async () =>
+      result.current.store.getState().setTaskPlan(TASK_ID, { ...taskPlan, id: "plan-2" }),
+    );
+    await act(async () => finishOld(snapshot()));
+    expect(result.current.first.snapshot).toEqual(replacement);
+  });
+
+  it("ignores an old response after deletion and restoration of the same plan", async () => {
+    let rejectOld!: (error: Error) => void;
+    api.getTaskPlanComments.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectOld = reject;
+        }),
+    );
+    const { result } = renderHook(useTwoTaskCommentConsumers, { wrapper });
+    await act(async () => {
+      result.current.store.getState().setTaskPlan(TASK_ID, taskPlan);
+      result.current.store.getState().setConnectionStatus("connected");
+    });
+    await act(async () => {
+      result.current.store.getState().setTaskPlan(TASK_ID, null);
+      result.current.store.getState().setTaskPlan(TASK_ID, taskPlan);
+      result.current.store.getState().setTaskPlanComments(TASK_ID, snapshot(5));
+      rejectOld(new Error("old generation failed"));
+    });
+    expect(result.current.first.loadError).toBeNull();
+    expect(result.current.first.comments[0]?.version).toBe(5);
+  });
+
+  it("retries failed background discovery without losing displayed context", async () => {
+    vi.useFakeTimers();
+    planApi.getTaskPlan.mockRejectedValueOnce(new Error("offline")).mockResolvedValue(taskPlan);
+    const { result } = renderHook(useTwoTaskCommentConsumers, { wrapper });
+    await act(async () => {
+      result.current.store.getState().setTaskPlan(TASK_ID, taskPlan);
+      result.current.store.getState().setTaskPlanComments(TASK_ID, snapshot());
+      result.current.store.getState().setConnectionStatus("connected");
+    });
+    expect(result.current.first.comments[0]?.version).toBe(1);
+    await act(async () => vi.advanceTimersByTimeAsync(1000));
+    expect(planApi.getTaskPlan).toHaveBeenCalledTimes(2);
+    expect(result.current.first.loadError).toBeNull();
+    expect(result.current.first.comments[0]?.version).toBe(1);
+  });
+
+  it("does not request plan comments on foreground events while disconnected", async () => {
+    const { result } = renderHook(useTwoTaskCommentConsumers, { wrapper });
+    await act(async () => result.current.store.getState().setTaskPlan(TASK_ID, taskPlan));
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    expect(planApi.getTaskPlan).not.toHaveBeenCalled();
+    expect(api.getTaskPlanComments).not.toHaveBeenCalled();
+    await act(async () => result.current.store.getState().setConnectionStatus("connected"));
+    await act(async () => window.dispatchEvent(new Event("focus")));
+    await waitFor(() => expect(api.getTaskPlanComments).toHaveBeenCalled());
+  });
 
   it("loads the current plan before comments when only a task composer is mounted", async () => {
     const { result } = renderHook(
@@ -201,35 +279,32 @@ describe("usePlanComments loading", () => {
 
   it("does not let a stale plan fetch clear the replacement plan loading state", async () => {
     let rejectOld!: (error: Error) => void;
-    api.getTaskPlanComments.mockImplementationOnce(
-      () => new Promise((_resolve, reject) => (rejectOld = reject)),
-    );
-    const { result } = renderHook(
-      () => {
-        const store = useAppStoreApi();
-        return { store, comments: usePlanComments(TASK_ID) };
-      },
-      { wrapper },
-    );
-    act(() => {
+    let finishReplacement!: (value: TaskPlanCommentSnapshot) => void;
+    const replacement = { ...snapshot(2), plan_id: "plan-2", comments: [] };
+    api.getTaskPlanComments
+      .mockImplementationOnce(() => new Promise((_resolve, reject) => (rejectOld = reject)))
+      .mockImplementationOnce(() => new Promise((resolve) => (finishReplacement = resolve)));
+    const { result } = renderHook(useTwoTaskCommentConsumers, { wrapper });
+    await act(async () => {
       result.current.store.getState().setTaskPlan(TASK_ID, taskPlan);
-      result.current.store.setState({
-        connection: { status: "connected", error: null, issueSeverity: "none" },
-      });
+      result.current.store.getState().setConnectionStatus("connected");
     });
-    await waitFor(() => expect(result.current.comments.isLoading).toBe(true));
-    act(() => {
+    expect(result.current.first.isLoading).toBe(true);
+    await act(async () => {
       result.current.store.getState().setTaskPlan(TASK_ID, { ...taskPlan, id: "plan-2" });
-      result.current.store.getState().setTaskPlanCommentsLoading(TASK_ID, true);
-      rejectOld(new Error("old plan failed"));
     });
-
-    await waitFor(() => {
-      expect(result.current.store.getState().taskPlans.commentsLoadingByTaskId[TASK_ID]).toBe(true);
-      expect(
-        result.current.store.getState().taskPlans.commentsErrorByTaskId[TASK_ID],
-      ).toBeUndefined();
-    });
+    expect(api.getTaskPlanComments).toHaveBeenCalledOnce();
+    await act(async () => rejectOld(new Error("old plan failed")));
+    expect(api.getTaskPlanComments).toHaveBeenCalledTimes(2);
+    expect(result.current.first.isLoading).toBe(true);
+    expect(result.current.second.isLoading).toBe(true);
+    expect(result.current.first.loadError).toBeNull();
+    expect(result.current.second.loadError).toBeNull();
+    await act(async () => finishReplacement(replacement));
+    expect(result.current.first.isLoading).toBe(false);
+    expect(result.current.second.isLoading).toBe(false);
+    expect(result.current.first.snapshot).toEqual(replacement);
+    expect(result.current.second.snapshot).toEqual(replacement);
   });
 });
 

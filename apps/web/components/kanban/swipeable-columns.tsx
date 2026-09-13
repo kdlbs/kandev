@@ -4,9 +4,10 @@ import { useEffect, useCallback, useRef, useMemo, useState } from "react";
 import useEmblaCarousel from "embla-carousel-react";
 import { KanbanColumn, WorkflowStep } from "../kanban-column";
 import { Task, type KanbanPresentation } from "../kanban-card";
-import { pickKanbanColumnComparator } from "@/lib/kanban/task-order";
-import type { KanbanExternalLinkAvailability } from "../kanban-external-link-availability";
+import { compareStepOrder, pickKanbanColumnComparator } from "@/lib/kanban/task-order";
 import { useAppStore } from "@/components/state-provider";
+import type { KanbanExternalLinkAvailability } from "../kanban-external-link-availability";
+import type { KeyboardReorderDraft } from "./virtualized-column-task-list";
 
 type SwipeableColumnsProps = {
   steps: WorkflowStep[];
@@ -31,6 +32,9 @@ type SwipeableColumnsProps = {
   onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
   externalLinkAvailability: KanbanExternalLinkAvailability;
+  activeTaskId?: string | null;
+  keyboardDraft?: KeyboardReorderDraft | null;
+  onCardKeyDown?: (event: React.KeyboardEvent, task: Task) => void;
 };
 
 /** Two-way sync between Embla's carousel position and the external activeIndex. */
@@ -90,6 +94,9 @@ export function SwipeableColumns({
   onSelectRange,
   isMultiSelectMode,
   externalLinkAvailability,
+  activeTaskId,
+  keyboardDraft,
+  onCardKeyDown,
 }: SwipeableColumnsProps) {
   // Stable options to avoid Embla reinitializing on every activeIndex change
   const [initialIndex] = useState(activeIndex);
@@ -105,7 +112,9 @@ export function SwipeableColumns({
   const [emblaRef, emblaApi] = useEmblaCarousel(options);
 
   const kanbanSort = useAppStore((state) => state.userSettings.kanbanSort);
-  const comparator = pickKanbanColumnComparator(kanbanSort);
+  const comparator =
+    kanbanSort === "priority_desc" ? pickKanbanColumnComparator(kanbanSort) : compareStepOrder;
+
   const getTasksForStep = useCallback(
     (stepId: string) => {
       return tasks
@@ -145,6 +154,9 @@ export function SwipeableColumns({
               onSelectRange={onSelectRange}
               isMultiSelectMode={isMultiSelectMode}
               externalLinkAvailability={externalLinkAvailability}
+              activeTaskId={activeTaskId}
+              keyboardDraft={keyboardDraft}
+              onCardKeyDown={onCardKeyDown}
               hideHeader
             />
           </div>

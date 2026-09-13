@@ -13,6 +13,7 @@ import {
   type RefObject,
 } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
+import { ComposerFooterAllocation } from "./chat/composer-disclosure";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import {
   type ChatInputContainerHandle,
@@ -1017,6 +1018,9 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     messagesLoading,
     historyRefreshPending,
     isInitialMessagesLoading,
+    historyStatus,
+    historyError,
+    retryHistory,
     groupedItems,
     allMessages,
     footerActionMessages,
@@ -1194,6 +1198,9 @@ export const TaskChatPanel = memo(function TaskChatPanel({
             sessionId={resolvedSessionId}
             messagesLoading={messagesLoading}
             historyRefreshPending={historyRefreshPending}
+            historyStatus={historyStatus}
+            historyError={historyError}
+            onRetryHistory={retryHistory}
             isWorking={isWorking}
             sessionState={session?.state}
             worktreePath={getSessionWorkspacePath(session)}
@@ -1233,37 +1240,39 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         )}
         <SessionSearchOverlay search={search} agentLabel={agentLabel} agentName={agentName} />
       </PanelBody>
-      {!isArchived && (
-        <ClarificationPanelSection
-          pending={Boolean(pendingClarification)}
-          messages={pendingClarificationGroup}
-          onResolved={handleClarificationResolved}
-          shortcutScopeRef={panelRef}
-          maxHeightVh={50}
+      <ComposerFooterAllocation>
+        {!isArchived && (
+          <ClarificationPanelSection
+            pending={Boolean(pendingClarification)}
+            messages={pendingClarificationGroup}
+            onResolved={handleClarificationResolved}
+            shortcutScopeRef={panelRef}
+            maxHeightVh={50}
+          />
+        )}
+        <ChatFooter
+          isArchived={isArchived}
+          chatInputRef={chatInputRef}
+          clarificationKey={clarificationKey}
+          onClarificationResolved={handleClarificationResolved}
+          handleSubmit={handleSubmit}
+          handleCancelTurn={handleCancelTurn}
+          showRequestChangesTooltip={showRequestChangesTooltip}
+          onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
+          panelState={panelState}
+          isSending={isSending}
+          hideSessionsDropdown={hideSessionsDropdown}
+          hidePlanMode={embedded}
+          showScrollToLastPrompt={showScrollButton}
+          onScrollToLastPrompt={scrollToLastPrompt}
+          lastPromptScrollDirection={scrollDirection}
+          showScrollToStart={showScrollToStartButton}
+          onScrollToStart={scrollToStart}
+          statusTaskId={statusTaskId ?? taskIdHint}
+          showAgentStartHint={showAgentStartHint}
+          launchErrorOwned={launchErrorOwned}
         />
-      )}
-      <ChatFooter
-        isArchived={isArchived}
-        chatInputRef={chatInputRef}
-        clarificationKey={clarificationKey}
-        onClarificationResolved={handleClarificationResolved}
-        handleSubmit={handleSubmit}
-        handleCancelTurn={handleCancelTurn}
-        showRequestChangesTooltip={showRequestChangesTooltip}
-        onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
-        panelState={panelState}
-        isSending={isSending}
-        hideSessionsDropdown={hideSessionsDropdown}
-        hidePlanMode={embedded}
-        showScrollToLastPrompt={showScrollButton}
-        onScrollToLastPrompt={scrollToLastPrompt}
-        lastPromptScrollDirection={scrollDirection}
-        showScrollToStart={showScrollToStartButton}
-        onScrollToStart={scrollToStart}
-        statusTaskId={statusTaskId ?? taskIdHint}
-        showAgentStartHint={showAgentStartHint}
-        launchErrorOwned={launchErrorOwned}
-      />
+      </ComposerFooterAllocation>
     </PanelRoot>
   );
 });

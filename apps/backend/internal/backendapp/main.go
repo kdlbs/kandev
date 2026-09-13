@@ -97,6 +97,7 @@ import (
 	officelabels "github.com/kandev/kandev/internal/office/labels"
 	officemodels "github.com/kandev/kandev/internal/office/models"
 	officeonboarding "github.com/kandev/kandev/internal/office/onboarding"
+	officepause "github.com/kandev/kandev/internal/office/pause"
 	officeprojects "github.com/kandev/kandev/internal/office/projects"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	officeroutines "github.com/kandev/kandev/internal/office/routines"
@@ -106,6 +107,7 @@ import (
 	officeskills "github.com/kandev/kandev/internal/office/skills"
 	officewakeup "github.com/kandev/kandev/internal/office/wakeup"
 	orchexecutor "github.com/kandev/kandev/internal/orchestrator/executor"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 
 	// Runs queue (Phase 3 of task-model-unification)
 	runsscheduler "github.com/kandev/kandev/internal/runs/scheduler"
@@ -1229,7 +1231,7 @@ func startGatewayAndServe(
 	}
 
 	log.Info("API configured",
-		zap.String("websocket", "/ws"),
+		zap.String("websocket", websocketRoutePath),
 		zap.String("health", "/health"),
 		zap.String("http", "/api/v1"),
 	)
@@ -1474,6 +1476,10 @@ func wireOfficeSvcsDependencies(
 	orchestratorSvc.SetOfficeTaskStatusUpdater(services.OfficeSvcs.Dashboard)
 	// Wire the office service as the retry canceller for task reassignment.
 	services.OfficeSvcs.Dashboard.SetRetryCanceller(services.Office)
+	// Wire the office service as the terminal-shape recorder so a
+	// dashboard-driven displaced-run cancellation still counts toward
+	// office_loop_terminal_total.
+	services.OfficeSvcs.Dashboard.SetTerminalShapeRecorder(services.Office)
 	// Wire the office service as the task canceller for status→cancelled hard-cancels.
 	services.OfficeSvcs.Dashboard.SetTaskCanceller(services.Office)
 	// Route the Office "No parent" mutation through the canonical task detach
@@ -1573,6 +1579,13 @@ type schedulerTaskStarterAdapter struct {
 	orch *orchestrator.Service
 }
 
+// The production routed-launch adapter is required to satisfy
+// TaskStarterWithSession — no silent fallback to a session-less launch
+// (AC-OFFICE-LOOP-LIVENESS-002.7). A compile-time assertion pins this
+// harder than a runtime wiring test: dropping the method fails the
+// build, not just a test run.
+var _ officescheduler.TaskStarterWithSession = (*schedulerTaskStarterAdapter)(nil)
+
 // StartTask starts a task on the orchestrator with the given launch parameters.
 func (a *schedulerTaskStarterAdapter) StartTask(
 	ctx context.Context,
@@ -1594,6 +1607,32 @@ func (a *schedulerTaskStarterAdapter) StartTaskWithRoute(
 	launch officescheduler.LaunchContext,
 	route officescheduler.RouteOverride,
 ) error {
+	_, err := a.startTaskWithRoute(ctx, taskID, agentProfileID, launch, route)
+	return err
+}
+
+// StartTaskWithRouteReturningSession implements
+// officescheduler.TaskStarterWithSession so the routed launch path can
+// persist the session id it started (AC-OFFICE-LOOP-LIVENESS-002.7).
+func (a *schedulerTaskStarterAdapter) StartTaskWithRouteReturningSession(
+	ctx context.Context,
+	taskID, agentProfileID string,
+	launch officescheduler.LaunchContext,
+	route officescheduler.RouteOverride,
+) (string, error) {
+	execution, err := a.startTaskWithRoute(ctx, taskID, agentProfileID, launch, route)
+	if err != nil || execution == nil {
+		return "", err
+	}
+	return execution.SessionID, nil
+}
+
+func (a *schedulerTaskStarterAdapter) startTaskWithRoute(
+	ctx context.Context,
+	taskID, agentProfileID string,
+	launch officescheduler.LaunchContext,
+	route officescheduler.RouteOverride,
+) (*orchexecutor.TaskExecution, error) {
 	return a.orch.StartTaskWithRoute(ctx, taskID, agentProfileID,
 		orchexecutor.LaunchContext{
 			ExecutorID:        launch.ExecutorID,
@@ -1797,7 +1836,7 @@ type engineStepEntryDispatcherAdapter struct {
 // ActionRunCodeReview once SetReviewRunner has been called. This mirrors
 // switchWorkflowDispatcher's existing lazy read of svc.workflowEngine
 // (workflow_callbacks.go).
-func (a *engineStepEntryDispatcherAdapter) DispatchStepEntry(ctx context.Context, taskID, workflowID, stepID, entryID string) {
+func (a *engineStepEntryDispatcherAdapter) DispatchStepEntry(ctx context.Context, taskID, workflowID, stepID, entryID string, markerEntryID int64) {
 	eng := a.engineProvider.WorkflowEngine()
 	if eng == nil {
 		a.log.Warn("step entry dispatch skipped: workflow engine not initialised",
@@ -1807,7 +1846,7 @@ func (a *engineStepEntryDispatcherAdapter) DispatchStepEntry(ctx context.Context
 			zap.String("entry_id", entryID))
 		return
 	}
-	results := eng.DispatchStepEntry(ctx, taskID, workflowID, stepID, entryID)
+	results := eng.DispatchStepEntry(ctx, taskID, workflowID, stepID, entryID, markerEntryID)
 	for _, result := range results {
 		fields := []zap.Field{
 			zap.String("task_id", taskID),
@@ -2069,19 +2108,101 @@ func backfillAgentDefaultSkills(
 	}
 }
 
-// newOfficeTaskStarter wraps orchestratorSvc.StartTaskWithEnvAndSkills in the
-// officeservice.TaskStarterWithLaunchContextFunc adapter. Extracted from
-// initOfficeServices to keep that function under the funlen cap.
+// newOfficeTaskStarter wraps orchestratorSvc.StartTaskWithEnvAndSkills in an
+// adapter that also implements officeservice.TaskStarterWithLaunchContextSession,
+// so the direct (non-routed) launch path forwards per-run skill additions and
+// persists the session id the orchestrator's *executor.TaskExecution already
+// carries (AC-OFFICE-LOOP-LIVENESS-002.7) instead of discarding it. Extracted
+// from initOfficeServices to keep that function under the funlen cap.
 func newOfficeTaskStarter(orchestratorSvc *orchestrator.Service) officeservice.TaskStarter {
-	return officeservice.TaskStarterWithLaunchContextFunc(
-		func(ctx context.Context, taskID, agentProfileID string, launch officeservice.LaunchContext) error {
-			_, err := orchestratorSvc.StartTaskWithEnvAndSkills(ctx, taskID, agentProfileID,
-				launch.ExecutorID, launch.ExecutorProfileID, launch.Priority, launch.Prompt,
-				launch.WorkflowStepID, launch.PlanMode, false, launch.Attachments, launch.Env,
-				launch.AdditionalSkillSlugs)
-			return err
-		},
-	)
+	return &officeOrchestratorTaskStarter{orch: orchestratorSvc}
+}
+
+// officeOrchestratorTaskStarter satisfies officeservice.TaskStarter,
+// TaskStarterWithEnv, TaskStarterWithLaunchContext, TaskStarterWithSession,
+// and TaskStarterWithLaunchContextSession against the orchestrator service's
+// direct launch path.
+type officeOrchestratorTaskStarter struct {
+	orch *orchestrator.Service
+}
+
+// The production direct-launch adapter is required to satisfy
+// TaskStarterWithLaunchContextSession for the same reason as the routed
+// adapter above (AC-OFFICE-LOOP-LIVENESS-002.7): the session id must be
+// recorded unconditionally, whether or not the launch also carries skills.
+var _ officeservice.TaskStarterWithLaunchContextSession = (*officeOrchestratorTaskStarter)(nil)
+
+// StartTask implements officeservice.TaskStarter.
+func (a *officeOrchestratorTaskStarter) StartTask(
+	ctx context.Context, taskID, agentProfileID, executorID,
+	executorProfileID string, priority string, prompt, workflowStepID string,
+	planMode bool, attachments []v1.MessageAttachment,
+) error {
+	_, err := a.startTaskWithEnvAndSkills(ctx, taskID, agentProfileID, executorID,
+		executorProfileID, priority, prompt, workflowStepID, planMode, attachments, nil, nil)
+	return err
+}
+
+// StartTaskWithEnv implements officeservice.TaskStarterWithEnv.
+func (a *officeOrchestratorTaskStarter) StartTaskWithEnv(
+	ctx context.Context, taskID, agentProfileID, executorID,
+	executorProfileID string, priority string, prompt, workflowStepID string,
+	planMode bool, attachments []v1.MessageAttachment, env map[string]string,
+) error {
+	_, err := a.startTaskWithEnvAndSkills(ctx, taskID, agentProfileID, executorID,
+		executorProfileID, priority, prompt, workflowStepID, planMode, attachments, env, nil)
+	return err
+}
+
+// StartTaskWithEnvReturningSession implements
+// officeservice.TaskStarterWithSession.
+func (a *officeOrchestratorTaskStarter) StartTaskWithEnvReturningSession(
+	ctx context.Context, taskID, agentProfileID, executorID,
+	executorProfileID string, priority string, prompt, workflowStepID string,
+	planMode bool, attachments []v1.MessageAttachment, env map[string]string,
+) (string, error) {
+	execution, err := a.startTaskWithEnvAndSkills(ctx, taskID, agentProfileID, executorID,
+		executorProfileID, priority, prompt, workflowStepID, planMode, attachments, env, nil)
+	if err != nil || execution == nil {
+		return "", err
+	}
+	return execution.SessionID, nil
+}
+
+// StartTaskWithLaunchContext implements officeservice.TaskStarterWithLaunchContext.
+func (a *officeOrchestratorTaskStarter) StartTaskWithLaunchContext(
+	ctx context.Context, taskID, agentProfileID string, launch officeservice.LaunchContext,
+) error {
+	_, err := a.startTaskWithEnvAndSkills(ctx, taskID, agentProfileID,
+		launch.ExecutorID, launch.ExecutorProfileID, launch.Priority, launch.Prompt,
+		launch.WorkflowStepID, launch.PlanMode, launch.Attachments, launch.Env,
+		launch.AdditionalSkillSlugs)
+	return err
+}
+
+// StartTaskWithLaunchContextReturningSession implements
+// officeservice.TaskStarterWithLaunchContextSession.
+func (a *officeOrchestratorTaskStarter) StartTaskWithLaunchContextReturningSession(
+	ctx context.Context, taskID, agentProfileID string, launch officeservice.LaunchContext,
+) (string, error) {
+	execution, err := a.startTaskWithEnvAndSkills(ctx, taskID, agentProfileID,
+		launch.ExecutorID, launch.ExecutorProfileID, launch.Priority, launch.Prompt,
+		launch.WorkflowStepID, launch.PlanMode, launch.Attachments, launch.Env,
+		launch.AdditionalSkillSlugs)
+	if err != nil || execution == nil {
+		return "", err
+	}
+	return execution.SessionID, nil
+}
+
+func (a *officeOrchestratorTaskStarter) startTaskWithEnvAndSkills(
+	ctx context.Context, taskID, agentProfileID, executorID,
+	executorProfileID string, priority string, prompt, workflowStepID string,
+	planMode bool, attachments []v1.MessageAttachment, env map[string]string, additionalSkillSlugs []string,
+) (*orchexecutor.TaskExecution, error) {
+	return a.orch.StartTaskWithEnvAndSkills(ctx, taskID, agentProfileID,
+		executorID, executorProfileID, priority, prompt,
+		workflowStepID, planMode, false, attachments, env, additionalSkillSlugs)
 }
 
 // newAgentAuth wraps officeagents.NewAgentAuth with a dev-mode warning when
@@ -2172,6 +2293,19 @@ func buildOfficeFeatureServices(
 	gitMgr := configloader.NewGitManager(cfgLoader.BasePath(), cfgLoader, log)
 	configSyncSvc := initOfficeConfigSyncService(repo, services.GitHub, services.GitLab, log)
 
+	// Workspace kill switch: one pause gate wired into every launch/gate
+	// site (routine dispatch, both QueueRun paths, run processing, and
+	// the wakeup dispatcher). services.Office satisfies TaskCanceller
+	// (it already delegates to the orchestrator via SetTaskCanceller);
+	// services.Task satisfies WorkspaceChecker.
+	pauseSvc := officepause.NewService(repo, services.Office, services.Task, log)
+	routineSvc.SetPauseGate(pauseSvc)
+	routineWakeupDispatcher.SetPauseGate(pauseSvc)
+	schedulerSvc.SetPauseGate(pauseSvc)
+	if services.Office != nil {
+		services.Office.SetPauseGate(pauseSvc)
+	}
+
 	return &office.Services{
 		Agents:       agentSvc,
 		Skills:       skillSvc,
@@ -2189,6 +2323,7 @@ func buildOfficeFeatureServices(
 		Scheduler:    schedulerSvc,
 		TreeControls: services.Office,
 		Workspaces:   services.Office,
+		Pause:        pauseSvc,
 		Repo:         repo,
 		GitManager:   gitMgr,
 		KandevHome:   homeDir,

@@ -62,6 +62,8 @@ func (r *Repository) runMigrations() error {
 	r.migrateParentWakeReceiptColumns()
 	r.migrate.Apply("task_workspace_groups.ownership_generation",
 		`ALTER TABLE task_workspace_groups ADD COLUMN ownership_generation INTEGER NOT NULL DEFAULT 1`)
+	r.migrateWorkspacePauseSkipAttribution()
+	r.migrateLoopLivenessCausationID()
 	if err := r.migrate.Err(); err != nil {
 		return err
 	}
@@ -81,6 +83,49 @@ func (r *Repository) backfillRoutineTriggerTimezones() error {
 		return fmt.Errorf("office_routine_triggers.timezone backfill: %w", err)
 	}
 	return nil
+}
+
+// migrateWorkspacePauseSkipAttribution adds the columns a blocked routine
+// fire uses to record why it was skipped and which pause blocked it. The
+// partial unique index runs after both ADD COLUMNs so it never executes
+// against a schema that lacks pause_id.
+func (r *Repository) migrateWorkspacePauseSkipAttribution() {
+	_ = r.migrate.Apply("office_routine_runs.skip_reason",
+		`ALTER TABLE office_routine_runs ADD COLUMN skip_reason TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("office_routine_runs.pause_id",
+		`ALTER TABLE office_routine_runs ADD COLUMN pause_id TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("idx_office_routine_run_pause_once",
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_office_routine_run_pause_once
+			ON office_routine_runs(routine_id, pause_id) WHERE pause_id != ''`)
+}
+
+// migrateLoopLivenessCausationID adds the causation_id correlation
+// column to all three rows in the wake-to-run chain
+// (REQ-OFFICE-LOOP-LIVENESS-002): the routine fire, the wakeup request
+// it produces, and the run the wakeup request produces. "" rather than
+// NULL, because every existing row predates this feature and a reader
+// must treat "legacy" and "uncorrelated" identically. Each column gets
+// its own partial index (excluding "") so a backward correlation walk
+// from a run to its originating fire is a direct lookup on every
+// dialect, not a table scan — NFR-2 is symmetric with the forward walk.
+func (r *Repository) migrateLoopLivenessCausationID() {
+	_ = r.migrate.Apply("office_routine_runs.causation_id",
+		`ALTER TABLE office_routine_runs ADD COLUMN causation_id TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("idx_office_routine_runs_causation_id",
+		`CREATE INDEX IF NOT EXISTS idx_office_routine_runs_causation_id
+			ON office_routine_runs(causation_id) WHERE causation_id != ''`)
+
+	_ = r.migrate.Apply("agent_wakeup_requests.causation_id",
+		`ALTER TABLE agent_wakeup_requests ADD COLUMN causation_id TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("idx_agent_wakeup_requests_causation_id",
+		`CREATE INDEX IF NOT EXISTS idx_agent_wakeup_requests_causation_id
+			ON agent_wakeup_requests(causation_id) WHERE causation_id != ''`)
+
+	_ = r.migrate.Apply("runs.causation_id",
+		`ALTER TABLE runs ADD COLUMN causation_id TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("idx_runs_causation_id",
+		`CREATE INDEX IF NOT EXISTS idx_runs_causation_id
+			ON runs(causation_id) WHERE causation_id != ''`)
 }
 
 // migrateContinuationScope adds runs.continuation_scope for databases
@@ -595,6 +640,7 @@ func (r *Repository) runTaskPriorityRecreate() error {
 		{"external_id", `ALTER TABLE tasks ADD COLUMN external_id TEXT COLLATE BINARY`},
 		{"external_id_settled_at", `ALTER TABLE tasks ADD COLUMN external_id_settled_at TIMESTAMP`},
 		{"assignee_user_id", `ALTER TABLE tasks ADD COLUMN assignee_user_id TEXT NOT NULL DEFAULT ''`},
+		{"assignment_generation", `ALTER TABLE tasks ADD COLUMN assignment_generation INTEGER NOT NULL DEFAULT 0`},
 	}
 	for _, column := range legacyColumns {
 		if _, err := conn.ExecContext(ctx, column.stmt); err != nil && !db.IsDuplicateColumnError(err) {
@@ -657,7 +703,8 @@ func taskPriorityMigrationStatements() []string {
 			checkout_run_id TEXT,
 			external_id TEXT COLLATE BINARY,
 			external_id_settled_at TIMESTAMP,
-			assignee_user_id TEXT NOT NULL DEFAULT ''
+			assignee_user_id TEXT NOT NULL DEFAULT '',
+			assignment_generation INTEGER NOT NULL DEFAULT 0
 		)`,
 		// archived_by_cascade_id and external_id/external_id_settled_at are
 		// added to the task schema by task/repository/sqlite/base.go
@@ -677,7 +724,7 @@ func taskPriorityMigrationStatements() []string {
 			origin, project_id,
 			labels, identifier,
 			checkout_agent_id, checkout_at, checkout_run_id,
-			external_id, external_id_settled_at, assignee_user_id
+			external_id, external_id_settled_at, assignee_user_id, assignment_generation
 		) SELECT
 			id, COALESCE(workspace_id,''), COALESCE(workflow_id,''),
 			COALESCE(workflow_step_id,''), title, COALESCE(description,''),
@@ -692,7 +739,7 @@ func taskPriorityMigrationStatements() []string {
 			COALESCE(labels,'[]'), identifier,
 			checkout_agent_id, checkout_at, checkout_run_id,
 			external_id, external_id_settled_at,
-			COALESCE(assignee_user_id,'')
+			COALESCE(assignee_user_id,''), COALESCE(assignment_generation,0)
 		FROM tasks`,
 		`DROP TABLE tasks`,
 		`ALTER TABLE tasks_priority_new RENAME TO tasks`,

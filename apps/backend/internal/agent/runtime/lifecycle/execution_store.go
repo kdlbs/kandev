@@ -221,6 +221,39 @@ func (s *ExecutionStore) ActivePromptGeneration(executionID string) uint64 {
 	return gen
 }
 
+// ExecutionReference identifies one registered execution without requiring a
+// later lookup through the session index. Both IDs are captured from the same
+// execution-store snapshot so a caller can keep targeting the original
+// execution if a session later acquires a replacement.
+type ExecutionReference struct {
+	SessionID   string
+	ExecutionID string
+}
+
+// ListExecutionsForTask returns the session and execution IDs of executions
+// registered in-memory under taskID. It is a read-only snapshot, independent
+// of any session's persisted database state. Task-scoped stop uses it to
+// recover an execution whose session row is already terminal (for example,
+// FAILED) but whose prior teardown attempt failed.
+func (s *ExecutionStore) ListExecutionsForTask(taskID string) []ExecutionReference {
+	if taskID == "" {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	var references []ExecutionReference
+	for _, execution := range s.executions {
+		if execution.TaskID == taskID && execution.SessionID != "" && execution.ID != "" {
+			references = append(references, ExecutionReference{
+				SessionID:   execution.SessionID,
+				ExecutionID: execution.ID,
+			})
+		}
+	}
+	return references
+}
+
 // GetByTaskEnvironmentID returns any execution associated with a task environment ID.
 func (s *ExecutionStore) GetByTaskEnvironmentID(taskEnvironmentID string) (*AgentExecution, bool) {
 	s.mu.RLock()

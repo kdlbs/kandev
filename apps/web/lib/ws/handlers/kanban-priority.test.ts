@@ -143,6 +143,9 @@ describe("kanban.update handler — priority preservation in the multi-workflow 
       kanban: { workflowId: WORKFLOW_ID, steps: [], tasks: [] },
       kanbanMulti: {
         isLoading: false,
+        orderRevisionByStepId: {},
+        pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
         snapshots: {
           [WORKFLOW_ID]: {
             workflowId: WORKFLOW_ID,
@@ -197,6 +200,9 @@ describe("kanban.update handler — priority preservation in the multi-workflow 
           },
         },
         isLoading: false,
+        orderRevisionByStepId: {},
+        pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
       },
     } as Partial<AppState>);
 

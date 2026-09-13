@@ -309,10 +309,8 @@ function removeCommentMark(editor: Editor | null, commentId: string) {
 }
 
 function planCommentRunDisabledReason(
-  migrationReady: boolean,
   reason: ReturnType<typeof resolvePlanCommentRunAvailability>["reason"],
 ) {
-  if (!migrationReady) return t("task:planCommentMigrationPending");
   if (reason === "no-primary-session") return t("task:noPrimarySessionForPlanComment");
   if (reason === "primary-session-unavailable") {
     return t("task:primarySessionUnavailableForPlanComment");
@@ -434,10 +432,7 @@ function PlanSelectionPopoverWrapper({
   const runUnavailableReason = useAppStore(
     (state) => resolvePlanCommentRunAvailability(state, taskId).reason,
   );
-  const migrationReady = useAppStore((state) =>
-    taskId ? state.taskPlans.commentsMigrationStatusByTaskId[taskId] === "complete" : false,
-  );
-  const runDisabledReason = planCommentRunDisabledReason(migrationReady, runUnavailableReason);
+  const runDisabledReason = planCommentRunDisabledReason(runUnavailableReason);
   const { handleAdd, handleAddAndRun, runError } = usePlanSelectionCommentActions({
     textSelection,
     commentState,

@@ -4,11 +4,30 @@ import { describe, expect, it, vi } from "vitest";
 import { ToastProvider } from "@/components/toast-provider";
 import { shouldShowChatFocusHint, useChatInputContainer } from "./use-chat-input-container";
 import type { ChatInputContainerHandle } from "./chat-input-container";
+import { ComposerDisclosureContext } from "./composer-disclosure";
+import { useComposerDisclosure } from "./use-composer-disclosure";
+import * as files from "./file-attachment";
 
 const callerPlaceholder = "Continue working on the task...";
 
-function renderInputState(overrides: Partial<Parameters<typeof useChatInputContainer>[0]> = {}) {
-  return renderHook(
+function renderInputState(
+  overrides: Partial<Parameters<typeof useChatInputContainer>[0]> = {},
+  autoHide = false,
+) {
+  let disclosure: ReturnType<typeof useComposerDisclosure>;
+  function Wrapper({ children }: { children: React.ReactNode }) {
+    disclosure = useComposerDisclosure({ enabled: autoHide, sessionId: "session-1" });
+    return React.createElement(
+      ToastProvider,
+      null,
+      React.createElement(
+        ComposerDisclosureContext,
+        { value: autoHide ? disclosure : null },
+        children,
+      ),
+    );
+  }
+  const hook = renderHook(
     (currentOverrides: Partial<Parameters<typeof useChatInputContainer>[0]>) =>
       useChatInputContainer({
         ref: createRef<ChatInputContainerHandle>(),
@@ -37,10 +56,65 @@ function renderInputState(overrides: Partial<Parameters<typeof useChatInputConta
       }),
     {
       initialProps: overrides,
-      wrapper: ({ children }) => React.createElement(ToastProvider, null, children),
+      wrapper: Wrapper,
     },
   );
+  return { ...hook, disclosure: () => disclosure };
 }
+
+describe("useChatInputContainer disclosure activity", () => {
+  it("holds the composer while files are being processed before attachments exist", async () => {
+    localStorage.clear();
+    let finish!: (value: null) => void;
+    const processing = new Promise<null>((resolve) => {
+      finish = resolve;
+    });
+    const process = vi.spyOn(files, "processFile").mockReturnValueOnce(processing);
+    try {
+      const { result, disclosure } = renderInputState({}, true);
+      let added!: Promise<void>;
+      act(() => {
+        added = result.current.addFiles([new File(["draft"], "draft.txt")]);
+      });
+      expect(disclosure().expanded).toBe(true);
+      expect(disclosure().canCollapse).toBe(false);
+      await act(async () => {
+        finish(null);
+        await added;
+      });
+      expect(disclosure().canCollapse).toBe(true);
+    } finally {
+      process.mockRestore();
+      finish(null);
+    }
+  });
+
+  // @covers AC-UI-THREADS-DECK-005.4
+  it("reports native draft and context-picker activity to the Threads owner", () => {
+    localStorage.clear();
+    const { result, disclosure } = renderInputState({}, true);
+    expect(disclosure().expanded).toBe(false);
+    act(() => result.current.handleChange("kept draft"));
+    expect(disclosure().expanded).toBe(true);
+    act(() => disclosure().collapse());
+    expect(disclosure().expanded).toBe(false);
+    expect(result.current.value).toBe("kept draft");
+    act(() => {
+      disclosure().reveal();
+      result.current.setContextPopoverOpen(true);
+    });
+    expect(disclosure().expanded).toBe(true);
+  });
+
+  it.each(["isSending", "needsRecovery", "isFailed", "executorUnavailable"] as const)(
+    "forces the composer open and prevents collapse during %s",
+    (flag) => {
+      const { disclosure } = renderInputState({ [flag]: true }, true);
+      expect(disclosure().expanded).toBe(true);
+      expect(disclosure().canCollapse).toBe(false);
+    },
+  );
+});
 
 describe("useChatInputContainer", () => {
   it("@covers AC-UI-SESSION-START-COMPOSER-READINESS-001.1 keeps editing available while startup blocks submission", () => {

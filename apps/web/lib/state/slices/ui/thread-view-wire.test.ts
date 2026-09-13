@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { ThreadViewApi, ThreadViewDraftApi } from "@/lib/types/http-user-settings";
 import {
   fromApiThreadDraft,
   fromApiThreadView,
@@ -15,6 +16,8 @@ describe("thread view wire mapping", () => {
       filters: [{ id: "f1", dimension: "pendingAction", op: "in", value: ["permission"] }],
       sort: { key: "lastActivityAt", direction: "desc" },
       max_columns: 3,
+      layout: "grid",
+      auto_hide_composer: true,
     };
     const view = fromApiThreadView(api);
     expect(view).toEqual({
@@ -24,6 +27,8 @@ describe("thread view wire mapping", () => {
       filters: [{ id: "f1", dimension: "pendingAction", op: "in", value: ["permission"] }],
       sort: { key: "lastActivityAt", direction: "desc" },
       maxColumns: 3,
+      layout: "grid",
+      autoHideComposer: true,
     });
     expect(toApiThreadView(view)).toEqual(api);
   });
@@ -58,5 +63,41 @@ describe("thread view wire mapping", () => {
     });
     expect(draft.maxColumns).toBeNull();
     expect(toApiThreadDraft(draft).max_columns).toBeNull();
+  });
+
+  // @covers AC-UI-THREADS-SAVED-VIEWS-005.1, AC-UI-THREADS-SAVED-VIEWS-005.3
+  it.each([
+    [{}, "columns", false],
+    [{ layout: "grid", auto_hide_composer: true }, "grid", true],
+    [{ layout: "unknown", auto_hide_composer: true }, "columns", true],
+    [{ layout: {}, auto_hide_composer: true }, "columns", true],
+    [{ layout: "grid", auto_hide_composer: "true" }, "grid", false],
+  ])("normalizes presentation independently: %j", (fields, layout, autoHideComposer) => {
+    const api = {
+      id: "view-one",
+      name: "One",
+      base_view_id: "view-one",
+      task_scope: { mode: "selected" as const, task_ids: ["task-sentinel"] },
+      filters: [],
+      sort: { key: "priority", direction: "desc" },
+      max_columns: 7,
+      ...fields,
+    };
+    // A persisted payload may predate the fields or contain an unknown value.
+    for (const value of [
+      fromApiThreadView(api as ThreadViewApi),
+      fromApiThreadDraft(api as ThreadViewDraftApi),
+    ]) {
+      expect(value).toMatchObject({
+        layout,
+        autoHideComposer,
+        maxColumns: 7,
+        taskScope: { mode: "selected", taskIds: ["task-sentinel"] },
+      });
+    }
+    expect(toApiThreadDraft(fromApiThreadDraft(api as ThreadViewDraftApi))).toMatchObject({
+      layout,
+      auto_hide_composer: autoHideComposer,
+    });
   });
 });

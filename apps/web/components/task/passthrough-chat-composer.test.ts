@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ContextFile } from "@/lib/state/context-files-store";
 import type { DiffComment } from "@/lib/diff/types";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
+import { planCommentRecovery } from "@/lib/plan-comment-recovery";
 import {
   buildContextFilesMeta,
   buildPassthroughFinalMessage,
@@ -88,7 +89,15 @@ function panelState(overrides: Record<string, unknown> = {}) {
     walkthroughComments: [],
     messageComments: [],
     planModeEnabled: false,
-    planCommentMigration: { status: "complete", isReady: true, isBlocking: false, retry: vi.fn() },
+    planCommentMigration: {
+      status: "complete",
+      pendingCount: 0,
+      failure: null,
+      needsAttention: false,
+      isReady: true,
+      isBlocking: false,
+      retry: vi.fn(),
+    },
     handleClearPRFeedback: vi.fn(),
     clearSessionPlanComments: vi.fn(),
     handleClearWalkthroughComments: vi.fn(),
@@ -286,20 +295,38 @@ describe("passthrough chat composer plan context", () => {
 });
 
 describe("passthrough chat composer cleanup", () => {
-  it("rejects delivery while legacy plan comments are not migrated", () => {
+  it("accepts plain delivery after background read failures without identified drafts", () => {
     expect(() =>
       assertPlanCommentMigrationReady(
         panelState({
           planCommentMigration: {
-            status: "failed",
-            isReady: false,
-            isBlocking: true,
+            ...planCommentRecovery({ status: "failed", pendingCount: 0, failure: "transient" }),
             retry: vi.fn(),
           },
         }),
       ),
-    ).toThrow("Saved plan comments are still being restored. Retry before sending.");
+    ).not.toThrow();
   });
+  it.each(["transient", "conflict", "rejected"] as const)(
+    "preserves blocked delivery without promising retries for %s recovery",
+    (failure) => {
+      expect(() =>
+        assertPlanCommentMigrationReady(
+          panelState({
+            planCommentMigration: {
+              status: "failed",
+              pendingCount: 1,
+              failure,
+              needsAttention: true,
+              isReady: false,
+              isBlocking: true,
+              retry: vi.fn(),
+            },
+          }),
+        ),
+      ).toThrow("Saved plan comments are still being restored. Your message is kept.");
+    },
+  );
 
   it("clears session context but leaves task plan comments to the backend snapshot", () => {
     const state = panelState({

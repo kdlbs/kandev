@@ -24,6 +24,11 @@ const mocks = vi.hoisted(() => ({
     taskMRs: { byWorkspaceId: {} },
     comments: { byTaskId: {} },
     userSettings: { sidebarTaskColors: {} },
+    kanban: { tasks: [] },
+    kanbanMulti: { snapshots: {} },
+    taskSessions: { items: {} },
+    taskSessionsByTask: { itemsByTaskId: {} },
+    agentProfiles: { items: [] },
   },
 }));
 

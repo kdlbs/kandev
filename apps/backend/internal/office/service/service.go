@@ -53,6 +53,30 @@ type TaskStarterWithLaunchContext interface {
 	StartTaskWithLaunchContext(ctx context.Context, taskID string, agentProfileID string, launch LaunchContext) error
 }
 
+// TaskStarterWithSession optionally returns the id of the agent session
+// a direct (non-routed) launch created, so the caller can persist it on
+// the run row (AC-OFFICE-LOOP-LIVENESS-002.7). A starter that does not
+// implement this leaves the run's session id empty, counted as a
+// without-session launch.
+type TaskStarterWithSession interface {
+	StartTaskWithEnvReturningSession(ctx context.Context, taskID string, agentProfileID string, executorID string,
+		executorProfileID string, priority string, prompt string, workflowStepID string,
+		planMode bool, attachments []v1.MessageAttachment, env map[string]string) (sessionID string, err error)
+}
+
+// TaskStarterWithLaunchContextSession combines TaskStarterWithLaunchContext
+// and TaskStarterWithSession: a starter satisfying this carries the full
+// launch context (skills included) AND returns the launched session id in
+// the same call, so neither capability has to be dropped for the other.
+// AC-OFFICE-LOOP-LIVENESS-002.7 requires the session id unconditionally, on
+// every direct launch, regardless of whether that launch also carries
+// per-run skill additions — the production adapter must satisfy this
+// rather than TaskStarterWithLaunchContext alone.
+type TaskStarterWithLaunchContextSession interface {
+	StartTaskWithLaunchContextReturningSession(ctx context.Context, taskID string, agentProfileID string,
+		launch LaunchContext) (sessionID string, err error)
+}
+
 // LaunchContext mirrors scheduler.LaunchContext so the office.service
 // package can carry the Office-built launch context (prompt, env,
 // workflow step, attachments, plan-mode, profile) into the routing
@@ -335,6 +359,12 @@ type Service struct {
 	// task reaches a terminal step. Wired to the routines.RoutineService
 	// at startup; nil in tests that don't exercise routines.
 	routineRunSyncer RoutineRunSyncer
+
+	// pauseGate is the workspace-pause read used to block run queuing
+	// (QueueRun) and finalize processing terminally (see
+	// scheduler_integration.go). Optional — nil means the kill switch
+	// gate is not wired (older tests, transitional deployments).
+	pauseGate shared.PauseGate
 }
 
 // RoutineRunSyncer is the surface the office service needs from the
@@ -387,6 +417,11 @@ func (s *Service) SetBudgetChecker(b BudgetEvaluator) { s.budgetChecker = b }
 
 // SetPricingLookup wires the models.dev pricing lookup.
 func (s *Service) SetPricingLookup(p shared.PricingLookup) { s.pricingLookup = p }
+
+// SetPauseGate wires the workspace-pause read used by QueueRun and run
+// processing to enforce the operator kill switch. Optional — when nil,
+// neither gate is enforced.
+func (s *Service) SetPauseGate(g shared.PauseGate) { s.pauseGate = g }
 
 // SetAgentTokenMinter wires the runtime token minter after feature services are constructed.
 func (s *Service) SetAgentTokenMinter(minter AgentTokenMinter) {

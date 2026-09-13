@@ -19,6 +19,16 @@ export class OfficeApiClient {
     return res.json() as Promise<T>;
   }
 
+  /** Like {@link request}, but returns the raw Response instead of throwing on non-2xx —
+   * for endpoints a test exercises across success and rejection status codes (409, 503). */
+  async rawRequest(method: string, path: string, body?: unknown): Promise<Response> {
+    return fetch(`${this.baseUrl}/api/v1/office${path}`, {
+      method,
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  }
+
   // --- Onboarding ---
 
   async getOnboardingState(): Promise<Record<string, unknown>> {
@@ -563,6 +573,31 @@ export class OfficeApiClient {
       data,
     );
     return res.routine ?? (res as unknown as Record<string, unknown>);
+  }
+
+  /** Manual fire (AC-OFFICE-KILL-SWITCH-002.4). Raw: a paused workspace answers 409. */
+  async runRoutine(routineId: string): Promise<Response> {
+    return this.rawRequest("POST", `/routines/${routineId}/run`);
+  }
+
+  // --- Workspace pause (kill switch) ---
+
+  async getWorkspacePause(wsId: string): Promise<{
+    workspace_id: string;
+    paused: boolean;
+    pause: Record<string, unknown> | null;
+  }> {
+    return this.request("GET", `/workspaces/${wsId}/pause`);
+  }
+
+  /** Raw: exercised at both 200 (success) and 400 (invalid reason). */
+  async pauseWorkspace(wsId: string, reason: string): Promise<Response> {
+    return this.rawRequest("POST", `/workspaces/${wsId}/pause`, { reason });
+  }
+
+  /** Raw: exercised at 200 both paused and not-paused. */
+  async resumeWorkspace(wsId: string, reason?: string): Promise<Response> {
+    return this.rawRequest("POST", `/workspaces/${wsId}/resume`, reason ? { reason } : undefined);
   }
 
   // --- Costs ---

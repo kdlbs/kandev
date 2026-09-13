@@ -216,6 +216,7 @@ describe("filterIdsByPriorityFilter", () => {
 });
 
 const moveTaskById = vi.fn();
+const moveTasks = vi.fn();
 const deleteTaskById = vi.fn();
 const archiveTaskById = vi.fn();
 const runTaskRemovalBatch = vi.fn();
@@ -227,6 +228,9 @@ vi.mock("@/hooks/use-task-actions", () => ({
     archiveTaskById,
     renameTaskById: vi.fn(),
   }),
+}));
+vi.mock("@/hooks/use-task-workflow-move", () => ({
+  useTaskWorkflowMove: () => moveTasks,
 }));
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile: false }),
@@ -324,6 +328,19 @@ vi.mock("@/components/state-provider", () => ({
 describe("useTaskMultiSelect — bulk actions exclude priority-filtered-out tasks (AC-002.11)", () => {
   beforeEach(() => {
     moveTaskById.mockReset().mockResolvedValue(undefined);
+    moveTasks
+      .mockReset()
+      .mockImplementation(async (ids: string[], workflowId: string, targetStepId: string) => {
+        await Promise.all(
+          ids.map((id, position) =>
+            moveTaskById(id, {
+              workflow_id: workflowId,
+              workflow_step_id: targetStepId,
+              position,
+            }),
+          ),
+        );
+      });
     deleteTaskById.mockReset().mockResolvedValue(undefined);
     archiveTaskById.mockReset().mockResolvedValue(undefined);
     runTaskRemovalBatch.mockReset();
@@ -437,6 +454,19 @@ describe("useTaskMultiSelect — bulk actions exclude priority-filtered-out task
 describe("useTaskMultiSelect — eligibility snapshot is frozen at invocation (AC-002.11)", () => {
   beforeEach(() => {
     moveTaskById.mockReset().mockResolvedValue(undefined);
+    moveTasks
+      .mockReset()
+      .mockImplementation(async (ids: string[], workflowId: string, targetStepId: string) => {
+        await Promise.all(
+          ids.map((id, position) =>
+            moveTaskById(id, {
+              workflow_id: workflowId,
+              workflow_step_id: targetStepId,
+              position,
+            }),
+          ),
+        );
+      });
     deleteTaskById.mockReset().mockResolvedValue(undefined);
     archiveTaskById.mockReset().mockResolvedValue(undefined);
     runTaskRemovalBatch.mockReset();
