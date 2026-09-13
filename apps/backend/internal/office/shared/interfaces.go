@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/office/models"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
 )
 
@@ -39,8 +40,11 @@ type AgentWriter interface {
 // Implemented by the run feature (and transitionally by office/service.Service).
 type RunQueuer interface {
 	// QueueRun enqueues a run for agentInstanceID with the given reason, payload,
-	// and optional idempotency key (empty string disables deduplication).
-	QueueRun(ctx context.Context, agentInstanceID, reason, payload, idempotencyKey string) error
+	// and optional idempotency key (empty string disables deduplication). The
+	// returned QueueOutcome reports what actually happened (queued / deduped /
+	// coalesced / none-on-error) so callers that need to distinguish a fresh
+	// insert from a no-op don't have to infer it from side effects.
+	QueueRun(ctx context.Context, agentInstanceID, reason, payload, idempotencyKey string) (runsservice.QueueOutcome, error)
 }
 
 // WorkflowEngineDispatcher routes typed office task events through the

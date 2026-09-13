@@ -229,7 +229,10 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 		si.logger.Info("run skipped (agent not active)",
 			zap.String("run_id", runID),
 			zap.String("agent_status", string(agent.Status)))
-		_ = si.svc.FinishRun(ctx, runID, RunOutcomeAgentInactive)
+		if _, err := si.svc.FinishRun(ctx, runID, RunOutcomeAgentInactive); err != nil {
+			si.logger.Error("failed to finish agent-inactive run",
+				zap.String("run_id", runID), zap.Error(err))
+		}
 		return
 	}
 
@@ -251,6 +254,19 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 		si.logger.Info("run skipped (no actionable tasks)",
 			zap.String("run_id", runID),
 			zap.String("agent", agent.Name))
+		si.svc.clearAgentWorking(ctx, agent.ID, runID)
+		wrote, err := si.svc.FinishRun(ctx, runID, RunOutcomeIdleSkipped)
+		if err != nil {
+			si.logger.Error("failed to finish idle-skipped run",
+				zap.String("run_id", runID), zap.Error(err))
+			return
+		}
+		if !wrote {
+			// Another writer already moved the run out of claimed; it did
+			// not actually end via an idle skip, so there is nothing to
+			// log.
+			return
+		}
 		si.svc.LogActivityWithRun(ctx, agent.WorkspaceID,
 			"scheduler", "office-scheduler",
 			"run_idle_skipped", "run", runID,
@@ -258,8 +274,6 @@ func (si *SchedulerIntegration) processRun(ctx context.Context, run *models.Run)
 				"agent":    agent.Name,
 				"agent_id": agent.ID,
 			}), runID, "")
-		si.svc.clearAgentWorking(ctx, agent.ID, runID)
-		_ = si.svc.FinishRun(ctx, runID, RunOutcomeIdleSkipped)
 		return
 	}
 
@@ -547,7 +561,10 @@ func (si *SchedulerIntegration) isTaskTreeGated(ctx context.Context, runID, task
 		zap.String("task_id", taskID),
 		zap.String("hold_id", hold.ID),
 		zap.String("mode", hold.Mode))
-	_ = si.svc.FinishRun(ctx, runID, RunOutcomeTaskTreeHeld)
+	if _, err := si.svc.FinishRun(ctx, runID, RunOutcomeTaskTreeHeld); err != nil {
+		si.logger.Error("failed to finish tree-held run",
+			zap.String("run_id", runID), zap.String("task_id", taskID), zap.Error(err))
+	}
 	return true
 }
 
@@ -606,12 +623,19 @@ func (si *SchedulerIntegration) launchAgent(
 		return launched
 	}
 	var err error
-	if starter, ok := si.svc.taskStarter.(TaskStarterWithLaunchContext); ok {
+	var sessionID string
+	switch starter := si.svc.taskStarter.(type) {
+	case TaskStarterWithLaunchContextSession:
+		sessionID, err = starter.StartTaskWithLaunchContextReturningSession(ctx, taskID, launch.ProfileID, launch)
+	case TaskStarterWithLaunchContext:
 		err = starter.StartTaskWithLaunchContext(ctx, taskID, launch.ProfileID, launch)
-	} else if starter, ok := si.svc.taskStarter.(TaskStarterWithEnv); ok {
+	case TaskStarterWithSession:
+		sessionID, err = starter.StartTaskWithEnvReturningSession(ctx, taskID, launch.ProfileID, "", "", "",
+			launch.Prompt, "", false, nil, launch.Env)
+	case TaskStarterWithEnv:
 		err = starter.StartTaskWithEnv(ctx, taskID, launch.ProfileID, "", "", "",
 			launch.Prompt, "", false, nil, launch.Env)
-	} else {
+	default:
 		err = si.svc.taskStarter.StartTask(ctx, taskID, launch.ProfileID, "", "", "",
 			launch.Prompt, "", false, nil)
 	}
@@ -626,7 +650,35 @@ func (si *SchedulerIntegration) launchAgent(
 		_ = si.svc.HandleRunFailure(ctx, run, err)
 		return false
 	}
+	IncLoopLaunch(agent.WorkspaceID)
+	si.persistLaunchedSession(ctx, runID, agent.WorkspaceID, sessionID)
 	return true
+}
+
+// persistLaunchedSession stores the session id a successful direct
+// launch produced (AC-OFFICE-LOOP-LIVENESS-002.7) — the scheduler-side
+// counterpart to scheduler.SchedulerService.persistLaunchedSession for
+// the routed launch path. See that method's doc comment for the
+// without-session / persist-failed counter semantics (AC-002.8, .11).
+func (si *SchedulerIntegration) persistLaunchedSession(
+	ctx context.Context, runID, workspaceID, sessionID string,
+) {
+	if sessionID == "" {
+		IncLoopLaunchWithoutSession(workspaceID)
+		return
+	}
+	wrote, err := si.svc.repo.SetRunSessionID(ctx, runID, sessionID)
+	if err != nil {
+		si.logger.Warn("persist launched session id failed",
+			zap.String("run_id", runID), zap.String("session_id", sessionID), zap.Error(err))
+		IncLoopSessionPersistFailed(workspaceID)
+		return
+	}
+	if !wrote {
+		si.logger.Warn("persist launched session id matched no row",
+			zap.String("run_id", runID), zap.String("session_id", sessionID))
+		IncLoopSessionPersistFailed(workspaceID)
+	}
 }
 
 // failTasklessRun terminally fails a run that launchAgent determined has
@@ -665,16 +717,25 @@ func (si *SchedulerIntegration) launchAgent(
 func (si *SchedulerIntegration) failTasklessRun(
 	ctx context.Context, run *models.Run, agent *models.AgentInstance, msg string,
 ) {
-	si.svc.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{
-		"phase":         "scheduler.launch",
-		"error_message": msg,
-	})
 	si.releaseCheckoutIfNeeded(ctx, run)
-	if err := si.svc.repo.MarkRunFailed(ctx, run.ID, msg); err != nil {
+	wrote, err := si.svc.repo.MarkRunFailed(ctx, run.ID, msg)
+	if err != nil {
 		si.logger.Error("failed to mark taskless run as failed",
 			zap.String("run_id", run.ID), zap.Error(err))
 		return // don't publish a terminal event when persistence failed
 	}
+	if !wrote {
+		// Already terminal via another writer (e.g. a concurrent cancel)
+		// between the caller's read and this write — nothing to classify,
+		// publish, or log as a scheduler-launch error on this run's
+		// timeline (Review round 3, R3-1).
+		return
+	}
+	si.svc.AppendRunEvent(ctx, run.ID, "error", "error", map[string]interface{}{
+		"phase":         "scheduler.launch",
+		"error_message": msg,
+	})
+	si.svc.recordTerminalShape(ctx, run, RunStatusFailed, nil)
 	run.ErrorMessage = msg
 
 	// Settle the auto-dismiss decision before publishing: the frontend
@@ -728,10 +789,16 @@ func (si *SchedulerIntegration) failUnlaunchableRun(
 		"error_message": msg,
 	})
 	si.releaseCheckoutIfNeeded(ctx, run)
-	if err := si.svc.HandleAgentFailure(ctx, run, msg); err != nil {
+	wrote, err := si.svc.HandleAgentFailure(ctx, run, msg)
+	if err != nil {
 		si.logger.Error("failed to handle agent failure for unlaunchable run",
 			zap.String("run_id", run.ID), zap.Error(err))
 		return // don't publish a terminal event when persistence failed
+	}
+	if !wrote {
+		// Already terminal via another writer — nothing to publish
+		// (Review round 3, R3-1).
+		return
 	}
 	run.ErrorMessage = msg
 	si.svc.publishRunProcessedForWorkspace(ctx, run.ID, RunStatusFailed, run, agent.WorkspaceID)

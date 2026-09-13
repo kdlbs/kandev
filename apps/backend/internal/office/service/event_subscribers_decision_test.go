@@ -39,7 +39,7 @@ func TestHandleAgentCompleted_WarnsWhenReviewDecisionMissing(t *testing.T) {
 	taskID := createOfficeTask(t, svc, "ws-1", "reviewer-1")
 
 	payload := `{"task_id":"` + taskID + `","stage_type":"review","workflow_step_id":"step-1"}`
-	if err := svc.QueueRun(ctx, "reviewer-1", service.RunReasonTaskAssigned, payload, "review-no-decision"); err != nil {
+	if _, err := svc.QueueRun(ctx, "reviewer-1", service.RunReasonTaskAssigned, payload, "review-no-decision"); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
 	run, err := svc.ClaimNextRun(ctx)
@@ -91,7 +91,7 @@ func TestHandleAgentCompleted_WarnsOnLegacyReviewStartedReason(t *testing.T) {
 	taskID := createOfficeTask(t, svc, "ws-1", "reviewer-1")
 
 	payload := `{"task_id":"` + taskID + `","workflow_step_id":"step-1","agent_profile_id":"reviewer-1"}`
-	if err := svc.QueueRun(ctx, "reviewer-1", "review_started", payload, "review-started-no-decision"); err != nil {
+	if _, err := svc.QueueRun(ctx, "reviewer-1", "review_started", payload, "review-started-no-decision"); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
 	run, err := svc.ClaimNextRun(ctx)
@@ -139,7 +139,7 @@ func TestHandleAgentCompleted_WarnsOnStageIDKeyedPayload(t *testing.T) {
 	taskID := createOfficeTask(t, svc, "ws-1", "reviewer-1")
 
 	payload := `{"task_id":"` + taskID + `","stage_type":"approval","stage_id":"step-1"}`
-	if err := svc.QueueRun(ctx, "reviewer-1", service.RunReasonTaskAssigned, payload, "approval-stage-id-no-decision"); err != nil {
+	if _, err := svc.QueueRun(ctx, "reviewer-1", service.RunReasonTaskAssigned, payload, "approval-stage-id-no-decision"); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
 	run, err := svc.ClaimNextRun(ctx)
@@ -179,7 +179,7 @@ func TestHandleAgentCompleted_WarnsOnLegacyApprovalStartedReason(t *testing.T) {
 	createTestAgent(t, svc, "ws-1", "approver-1")
 	taskID := createOfficeTask(t, svc, "ws-1", "approver-1")
 	payload := `{"task_id":"` + taskID + `","workflow_step_id":"step-approval","agent_profile_id":"approver-1"}`
-	if err := svc.QueueRun(ctx, "approver-1", "approval_started", payload, "approval-started-no-decision"); err != nil {
+	if _, err := svc.QueueRun(ctx, "approver-1", "approval_started", payload, "approval-started-no-decision"); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
 	run, err := svc.ClaimNextRun(ctx)
@@ -219,7 +219,7 @@ func TestHandleAgentCompleted_WarnsOnTaskReviewRequested(t *testing.T) {
 	svc.ExecSQL(t, `INSERT INTO workflow_steps (id, stage_type) VALUES (?, ?)`, "step-review-requested", "approval")
 
 	payload := `{"task_id":"` + taskID + `","role":"approver"}`
-	if err := svc.QueueRun(ctx, "approver-1", service.RunReasonTaskReviewRequested, payload, "task-review-requested-no-decision"); err != nil {
+	if _, err := svc.QueueRun(ctx, "approver-1", service.RunReasonTaskReviewRequested, payload, "task-review-requested-no-decision"); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
 	run, err := svc.ClaimNextRun(ctx)
@@ -259,7 +259,7 @@ func TestHandleAgentCompleted_UsesAuthoritativeStageTypeWhenPayloadOmitsIt(t *te
 	svc.ExecSQL(t, `INSERT INTO workflow_steps (id, stage_type) VALUES (?, ?)`, "step-authoritative-decision", "approval")
 
 	payload := `{"task_id":"` + taskID + `","workflow_step_id":"step-authoritative-decision"}`
-	if err := svc.QueueRun(ctx, "approver-1", service.RunReasonTaskAssigned, payload, "authoritative-decision-no-decision"); err != nil {
+	if _, err := svc.QueueRun(ctx, "approver-1", service.RunReasonTaskAssigned, payload, "authoritative-decision-no-decision"); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
 	run, err := svc.ClaimNextRun(ctx)
@@ -301,7 +301,7 @@ func TestHandleAgentCompleted_NoWarnWhenReviewDecisionRecorded(t *testing.T) {
 	taskID := createOfficeTask(t, svc, "ws-1", "reviewer-1")
 
 	payload := `{"task_id":"` + taskID + `","stage_type":"review","workflow_step_id":"step-1"}`
-	if err := svc.QueueRun(ctx, "reviewer-1", service.RunReasonTaskAssigned, payload, "review-with-decision"); err != nil {
+	if _, err := svc.QueueRun(ctx, "reviewer-1", service.RunReasonTaskAssigned, payload, "review-with-decision"); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
 	run, err := svc.ClaimNextRun(ctx)
@@ -347,7 +347,7 @@ func TestHandleAgentCompleted_NoWarnForWorkStage(t *testing.T) {
 	taskID := createOfficeTask(t, svc, "ws-1", "builder-1")
 
 	payload := `{"task_id":"` + taskID + `","stage_type":"work","workflow_step_id":"step-1"}`
-	if err := svc.QueueRun(ctx, "builder-1", service.RunReasonTaskAssigned, payload, "work-stage"); err != nil {
+	if _, err := svc.QueueRun(ctx, "builder-1", service.RunReasonTaskAssigned, payload, "work-stage"); err != nil {
 		t.Fatalf("queue run: %v", err)
 	}
 	run, err := svc.ClaimNextRun(ctx)

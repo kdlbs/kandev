@@ -10,6 +10,7 @@ import (
 
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
 func TestCapabilitiesMarshalProjectCapabilityKeys(t *testing.T) {
@@ -1221,14 +1222,14 @@ type spawnRunCall struct {
 func (r *recordingRunSpawner) QueueRun(
 	_ context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
-) error {
+) (runsservice.QueueOutcome, error) {
 	r.calls = append(r.calls, spawnRunCall{
 		AgentID:        agentInstanceID,
 		Reason:         reason,
 		Payload:        payload,
 		IdempotencyKey: idempotencyKey,
 	})
-	return nil
+	return runsservice.QueueOutcomeQueued, nil
 }
 
 type recordingAgentModifier struct {

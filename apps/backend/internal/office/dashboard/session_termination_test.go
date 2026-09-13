@@ -13,6 +13,18 @@ type recordingTerminator struct {
 	calls []termCall
 }
 
+type recordingFailureNotifier struct {
+	calls []struct {
+		taskID, agentID string
+	}
+}
+
+func (r *recordingFailureNotifier) OnAssigneeChanged(_ context.Context, taskID, agentID string) {
+	r.calls = append(r.calls, struct {
+		taskID, agentID string
+	}{taskID: taskID, agentID: agentID})
+}
+
 type termCall struct {
 	taskID, agentID, reason string
 }
@@ -85,12 +97,14 @@ func (r *recordingReactivity) ApplyTaskMutation(_ context.Context, _ string, _ s
 func TestSetTaskAssignee_TerminatesPrevSession(t *testing.T) {
 	deps := newTestDeps(t)
 	rt := &recordingTerminator{}
+	fn := &recordingFailureNotifier{}
 	deps.svc.SetSessionTerminator(rt)
+	deps.svc.SetFailureNotifier(fn)
 	deps.svc.SetReactivityApplier(&recordingReactivity{result: &dashboard.TaskReactivityResult{}})
 
 	insertTestTask(t, deps.db, "task-r", "ws-r", "Reassign", "todo", 2)
 	// Seed prev assignee directly via the underlying repo update.
-	if err := deps.repo.UpdateTaskAssignee(context.Background(), "task-r", "agent-prev"); err != nil {
+	if _, err := deps.repo.UpdateTaskAssignee(context.Background(), "task-r", "agent-prev"); err != nil {
 		t.Fatalf("seed prev assignee: %v", err)
 	}
 
@@ -104,5 +118,39 @@ func TestSetTaskAssignee_TerminatesPrevSession(t *testing.T) {
 	got := rt.calls[0]
 	if got.taskID != "task-r" || got.agentID != "agent-prev" {
 		t.Errorf("term call: got %+v", got)
+	}
+	if len(fn.calls) != 1 || fn.calls[0].taskID != "task-r" || fn.calls[0].agentID != "agent-prev" {
+		t.Fatalf("expected prior-assignee failure notification, got %+v", fn.calls)
+	}
+}
+
+// TestSetTaskAssignee_SameAgent_DoesNotTerminateSession is the regression
+// test for Review round 3 Finding 5: a repeat assignment to the agent that
+// already holds the seat must not flip that agent's own live session row to
+// COMPLETED. The reactivity pipeline correctly declines to hard-cancel this
+// case (AC-OFFICE-RUN-DEDUP-001.3 treats it as a real occurrence, not an
+// interrupt), and the persisted-row side effect must agree.
+func TestSetTaskAssignee_SameAgent_DoesNotTerminateSession(t *testing.T) {
+	deps := newTestDeps(t)
+	rt := &recordingTerminator{}
+	fn := &recordingFailureNotifier{}
+	deps.svc.SetSessionTerminator(rt)
+	deps.svc.SetFailureNotifier(fn)
+	deps.svc.SetReactivityApplier(&recordingReactivity{result: &dashboard.TaskReactivityResult{}})
+
+	insertTestTask(t, deps.db, "task-same", "ws-r", "Reassign", "todo", 2)
+	if _, err := deps.repo.UpdateTaskAssignee(context.Background(), "task-same", "agent-x"); err != nil {
+		t.Fatalf("seed prev assignee: %v", err)
+	}
+
+	if err := deps.svc.SetTaskAssigneeAsAgent(context.Background(), "", "task-same", "agent-x"); err != nil {
+		t.Fatalf("set assignee: %v", err)
+	}
+
+	if len(rt.calls) != 0 {
+		t.Fatalf("same-agent reassignment must not terminate the agent's own session, got %d calls (%+v)", len(rt.calls), rt.calls)
+	}
+	if len(fn.calls) != 0 {
+		t.Fatalf("same-agent reassignment must not dismiss its failure inbox entry, got %+v", fn.calls)
 	}
 }

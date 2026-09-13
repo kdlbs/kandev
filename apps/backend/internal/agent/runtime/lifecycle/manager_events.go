@@ -600,19 +600,20 @@ func isTerminalToolUpdate(event agentctl.AgentEvent) bool {
 func (m *Manager) recordActivity(execution *AgentExecution, event agentctl.AgentEvent) {
 	_, isTurnContent := turnContentEventTypes[event.Type]
 	isProviderDiagnostic := event.Type == "message_chunk" && event.ProviderDiagnosticCandidate
-	execution.lastActivityAtMu.Lock()
-	execution.lastActivityAt = time.Now()
-	if isProviderDiagnostic {
-		execution.providerDiagnosticCandidate = true
-		if text := streams.SanitizeProviderMessage(event.Text); text != "" && execution.providerDiagnosticText == "" {
-			execution.providerDiagnosticText = text
+	if isTurnContent {
+		execution.lastActivityAtMu.Lock()
+		execution.lastActivityAt = time.Now()
+		if isProviderDiagnostic {
+			execution.providerDiagnosticCandidate = true
+			if text := streams.SanitizeProviderMessage(event.Text); text != "" && execution.providerDiagnosticText == "" {
+				execution.providerDiagnosticText = text
+			}
+		} else {
+			execution.agentEventSincePrompt = true
+			execution.promptActivityEpoch++
 		}
+		execution.lastActivityAtMu.Unlock()
 	}
-	if isTurnContent && !isProviderDiagnostic {
-		execution.agentEventSincePrompt = true
-		execution.promptActivityEpoch++
-	}
-	execution.lastActivityAtMu.Unlock()
 
 	// Gate firstActivityOnce on `Status != Ready` so a delayed metadata
 	// event arriving after MarkBootReady can't accidentally fire
