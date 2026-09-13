@@ -45,7 +45,7 @@ func TestSchedulerTick_TasklessRunFailsInsteadOfFinishing(t *testing.T) {
 
 	// Mirrors wakeup/dispatcher.go's createFreshRun: reason from the
 	// routine trigger, payload literally "{}" (no task_id).
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -74,6 +74,103 @@ func TestSchedulerTick_TasklessRunFailsInsteadOfFinishing(t *testing.T) {
 	}
 }
 
+// TestSchedulerTick_TasklessRunRecordsTerminalShape is the Testing round 3
+// regression test. failTasklessRun calls repo.MarkRunFailed directly
+// (not through HandleAgentFailure), so it bypassed office_loop_terminal_total
+// entirely — the same bypass class Review round 1 (R1-1) fixed for the other
+// three production terminal-writers, just missed here. A taskless run never
+// launches, so it must classify as unlaunched_failed.
+func TestSchedulerTick_TasklessRunRecordsTerminalShape(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	ctx := context.Background()
+
+	agent := &models.AgentInstance{
+		ID:                 "coordinator-terminal-shape",
+		WorkspaceID:        "ws-1",
+		Name:               "coordinator-terminal-shape",
+		Role:               models.AgentRoleCEO,
+		Status:             models.AgentStatusIdle,
+		ExecutorPreference: `{"type":"worktree"}`,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	key := service.LoopMetricLabel("workspace", "ws-1", "shape", string(service.ShapeUnlaunchedFailed))
+	before := terminalShapeExpvarInt(t, key)
+
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	service.RunSchedulerTick(svc, ctx)
+
+	after := terminalShapeExpvarInt(t, key)
+	if after != before+1 {
+		t.Fatalf("unlaunched_failed delta = %d, want 1", after-before)
+	}
+}
+
+// TestFailTasklessRun_LostRaceDoesNotAppendSpuriousErrorEvent is the PR
+// fixup round 2 regression test (CodeRabbit). failTasklessRun used to
+// call AppendRunEvent before checking MarkRunFailed's wrote result, so a
+// run a concurrent writer (e.g. a cancel) already made terminal still
+// picked up a "scheduler.launch" error event on its timeline — a spurious
+// entry on a run whose actual outcome was decided by the other writer.
+// AppendRunEvent must only fire once wrote=true confirms this call won
+// the terminal-write race.
+func TestFailTasklessRun_LostRaceDoesNotAppendSpuriousErrorEvent(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	ctx := context.Background()
+
+	agent := &models.AgentInstance{
+		ID:                 "coordinator-taskless-race",
+		WorkspaceID:        "ws-1",
+		Name:               "coordinator-taskless-race",
+		Role:               models.AgentRoleCEO,
+		Status:             models.AgentStatusIdle,
+		ExecutorPreference: `{"type":"worktree"}`,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+	run, err := svc.ClaimNextRun(ctx)
+	if err != nil || run == nil {
+		t.Fatalf("claim: %v %v", run, err)
+	}
+
+	// Another writer wins the terminal-transition race before
+	// failTasklessRun below runs: the row is already finished, so
+	// MarkRunFailed's guarded UPDATE (status = 'claimed') matches nothing.
+	if _, err := svc.FinishRun(ctx, run.ID, service.RunOutcomeProcessed); err != nil {
+		t.Fatalf("finish (simulating the winning writer): %v", err)
+	}
+
+	service.FailTasklessRunForTest(svc, ctx, run, agent, "scheduler cannot launch a taskless run")
+
+	events, err := svc.ListRunEventsForTest(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("list run events: %v", err)
+	}
+	for _, e := range events {
+		if e.EventType == "error" {
+			t.Fatalf("expected no error event appended for a lost taskless-fail race; got %+v", e)
+		}
+	}
+
+	survivor, err := svc.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if survivor.Status != service.RunStatusFinished {
+		t.Fatalf("status = %q, want the winning writer's finished state to survive", survivor.Status)
+	}
+}
+
 // TestSchedulerTick_TaskBoundRunStillLaunches is the regression guard
 // alongside the taskless-failure fix above: an ordinary task-bound run with
 // a wired task starter must still launch normally and stay `claimed` (not
@@ -99,7 +196,7 @@ func TestSchedulerTick_TaskBoundRunStillLaunches(t *testing.T) {
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
 		VALUES ('task-wo35-1', 'ws-1', 'Build API', 'Implement endpoint', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-wo35-1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-wo35-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -159,7 +256,7 @@ func TestSchedulerTick_TasklessRunsDoNotAutoPauseAgent(t *testing.T) {
 	// mirrors 3 ticks of the pre-installed coordinator heartbeat routine.
 	const firesAtThreshold = 3
 	for i := 0; i < firesAtThreshold; i++ {
-		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 			t.Fatalf("queue taskless run %d: %v", i, err)
 		}
 		service.RunSchedulerTick(svc, ctx)
@@ -184,7 +281,7 @@ func TestSchedulerTick_TasklessRunsDoNotAutoPauseAgent(t *testing.T) {
 	// failures: a task-bound run queued afterwards must still launch.
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
 		VALUES ('task-wo35-pause-1', 'ws-1', 'Build API', 'Implement endpoint', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-wo35-pause-1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"task-wo35-pause-1"}`, ""); err != nil {
 		t.Fatalf("queue task-bound run: %v", err)
 	}
 	service.RunSchedulerTick(svc, ctx)
@@ -233,7 +330,7 @@ func TestSchedulerTick_TasklessRunFailure_PublishesResolvableWorkspaceEvent(t *t
 	}
 	t.Cleanup(func() { _ = sub.Unsubscribe() })
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 	service.RunSchedulerTick(svc, ctx)
@@ -294,7 +391,7 @@ func TestSchedulerTick_UnlaunchableRun_PublishesResolvableWorkspaceEvent(t *test
 	}
 	t.Cleanup(func() { _ = sub.Unsubscribe() })
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-wo35-unlaunchable"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -349,7 +446,7 @@ func TestSchedulerTick_RepeatTasklessFailures_OnlyFirstStaysInInbox(t *testing.T
 	const fires = 3
 	var firstRunID string
 	for i := 0; i < fires; i++ {
-		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+		if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 			t.Fatalf("queue taskless run %d: %v", i, err)
 		}
 		service.RunSchedulerTick(svc, ctx)
@@ -415,7 +512,7 @@ func TestSchedulerTick_RepeatTasklessFailures_StayVisiblePerRoutineScope(t *test
 
 	queueRoutineFailure := func(scope, idempotencyKey string) string {
 		t.Helper()
-		if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, idempotencyKey); err != nil {
+		if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, idempotencyKey); err != nil {
 			t.Fatalf("queue routine %s: %v", scope, err)
 		}
 		runs, err := svc.ListRuns(ctx, "ws-1")

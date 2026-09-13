@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
+	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/workflow/stepentry"
@@ -78,6 +79,7 @@ func (r *Repository) initStepEntriesSchema() error {
 		step_id TEXT NOT NULL,
 		entry_seq INTEGER NOT NULL,
 		digest TEXT NOT NULL,
+		marker_positions TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMP NOT NULL,
 		UNIQUE(task_id, step_id, entry_seq)
 	);
@@ -111,17 +113,25 @@ func (r *Repository) initStepEntriesSchema() error {
 // workflow_step_entries row inside tx. entry_seq is the 1-based count of
 // prior entries into (task_id, step_id) for this task, so a task
 // re-entering the same step after a rejection round gets a fresh entry
-// rather than reusing the first one. When a ResultHolder is also attached,
-// the allocated (entry_id, entry_seq) is written back through it so a
-// caller several calls further up the stack can read it after commit.
+// rather than reusing the first one. marker_positions persists the exact
+// allocated position set (stepentry.SerializePositions) so a later reader
+// never has to re-derive "which positions were marker-bearing at allocation
+// time" from the step's current (possibly since-edited) declaration
+// (AC-OFFICE-STEP-ENTRY-DISPATCH-002.9). When a ResultHolder is also
+// attached, the allocated (entry_id, entry_seq) is additionally written back
+// through it so a caller several calls further up the stack (outside this
+// transaction's own call chain) can read it after commit; entryID is always
+// returned directly too, so a caller in the same call chain (updateTaskTx)
+// does not need to pre-attach one.
 //
-// No-op (returns nil) when no PendingAllocation is attached — the common
-// case for write paths that haven't opted into step-entry allocation this
-// round (e.g. manual moves, still using the legacy processOnEnter path).
-func (r *Repository) allocateStepEntryIfPending(ctx context.Context, tx stepTransitionTx, taskID string, occurredAt time.Time) error {
+// entryID is 0 (no-op, no error) when no PendingAllocation is attached — the
+// common case for write paths that haven't opted into step-entry allocation
+// this round (e.g. manual moves, still using the legacy processOnEnter
+// path).
+func (r *Repository) allocateStepEntryIfPending(ctx context.Context, tx stepTransitionTx, taskID string, occurredAt time.Time) (int64, error) {
 	pending, ok := stepentry.FromContext(ctx)
 	if !ok {
-		return nil
+		return 0, nil
 	}
 
 	var seqCount int64
@@ -129,25 +139,34 @@ func (r *Repository) allocateStepEntryIfPending(ctx context.Context, tx stepTran
 		SELECT COUNT(*) FROM workflow_step_entries WHERE task_id = ? AND step_id = ?
 	`), taskID, pending.StepID).Scan(&seqCount)
 	if err != nil {
-		return fmt.Errorf("count prior step entries: %w", err)
+		if r.log != nil {
+			r.log.Error("step entry allocation failed: count prior entries",
+				zap.String("task_id", taskID), zap.String("step_id", pending.StepID), zap.Error(err))
+		}
+		return 0, fmt.Errorf("count prior step entries: %w", err)
 	}
 	entrySeq := seqCount + 1
+	markerPositions := stepentry.SerializePositions(pending.Positions)
 
 	var entryID int64
 	err = tx.QueryRowContext(ctx, r.db.Rebind(`
-		INSERT INTO workflow_step_entries (task_id, step_id, entry_seq, digest, created_at)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO workflow_step_entries (task_id, step_id, entry_seq, digest, marker_positions, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)
 		RETURNING id
-	`), taskID, pending.StepID, entrySeq, pending.Digest, occurredAt).Scan(&entryID)
+	`), taskID, pending.StepID, entrySeq, pending.Digest, markerPositions, occurredAt).Scan(&entryID)
 	if err != nil {
-		return fmt.Errorf("allocate step entry: %w", err)
+		if r.log != nil {
+			r.log.Error("step entry allocation failed: insert entry row",
+				zap.String("task_id", taskID), zap.String("step_id", pending.StepID), zap.Error(err))
+		}
+		return 0, fmt.Errorf("allocate step entry: %w", err)
 	}
 
 	if holder, ok := stepentry.ResultHolderFromContext(ctx); ok {
 		holder.EntryID = entryID
 		holder.EntrySeq = entrySeq
 	}
-	return nil
+	return entryID, nil
 }
 
 // ClaimStepEntryMarker attempts to claim (entryID, position) for execution,

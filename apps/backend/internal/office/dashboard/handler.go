@@ -44,6 +44,7 @@ type Handler struct {
 	gitMgr       *configloader.GitManager
 	runDetail    RunDetailRepo
 	agentSummary AgentSummaryRepository
+	loopHealth   LoopHealthRepo
 	handoff      *taskservice.HandoffService
 	guard        ActiveSourceChecker
 	logger       *logger.Logger
@@ -75,6 +76,9 @@ func NewHandler(svc *DashboardService, labelRepo labelFetcher, gitMgr *configloa
 	}
 	if r, ok := labelRepo.(AgentSummaryRepository); ok {
 		h.agentSummary = r
+	}
+	if r, ok := labelRepo.(LoopHealthRepo); ok {
+		h.loopHealth = r
 	}
 	return h
 }
@@ -127,6 +131,8 @@ func RegisterRoutes(api *gin.RouterGroup, svc *DashboardService, labelRepo label
 	api.GET("/workspaces/:wsId/routing/preview", h.getWorkspaceRoutingPreview)
 	api.GET("/runs/:id/attempts", h.listRunAttempts)
 	api.GET("/agents/:id/route", h.getAgentRoute)
+
+	registerLoopHealthRoutes(api, h)
 }
 
 // -- Dashboard --

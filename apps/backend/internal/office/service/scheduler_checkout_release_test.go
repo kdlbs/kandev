@@ -63,7 +63,7 @@ func TestSchedulerTick_AgentCompletedReleasesTaskCheckout(t *testing.T) {
 
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
 		VALUES ('task-checkout-release-1', 'ws-1', 'Build API', 'Implement endpoint', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-checkout-release-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestSchedulerTick_AgentFailedReleasesTaskCheckout(t *testing.T) {
 
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
 		VALUES ('task-checkout-fail-1', 'ws-1', 'Build API', 'Implement endpoint', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-checkout-fail-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestSchedulerTick_TasklessAgentCompletedStampsRuntime(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonHeartbeat, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonHeartbeat, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 	claimed, err := svc.ClaimNextRun(ctx)
