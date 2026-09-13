@@ -10,7 +10,7 @@ const NeedsYouInboxPageClient = lazy(() =>
 export function NeedsYouInboxRoute({ enabled }: { enabled: boolean }) {
   if (!enabled) return <AuthRouteRedirect />;
   return (
-    <Suspense fallback={<RouteLoading routeNameKey="sidebar:needsYouInbox" />}>
+    <Suspense fallback={<RouteLoading routeNameKey="sidebar:inbox" />}>
       <NeedsYouInboxPageClient />
     </Suspense>
   );

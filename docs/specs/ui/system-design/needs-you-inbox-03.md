@@ -60,6 +60,21 @@ that are not themselves questions, so the count filters on the presence of a
 clarification question. A single-question bundle renders no count line, because
 the line would then restate the row above it.
 
+**D4. The sidebar entry is named Inbox and uses `IconInbox`.** The deck draws
+the destination as **Inbox**; "Needs you" is the label of the first of its three
+tabs. When v1 collapsed to one bucket the tab name was promoted to the
+destination name, which put a bucket label in the sidebar and gave the entry an
+icon the deck never assigned it. The destination is the Inbox whether it renders
+one bucket or three, so adding the history and failed buckets later changes the
+tabs and not the sidebar.
+
+The one exception is Office mode. AC .1 through .3 keep this entry present
+regardless of mode, and Office renders its own `/office/inbox` entry already
+labelled Inbox, so in that mode two identically named rows would be
+indistinguishable. There, and only there, this entry falls back to "Needs you".
+The deck did not have to solve this: it assumed the kanban workspace, where
+Office's row is gated out and no collision exists.
+
 ## Deck decisions this capability does not adopt
 
 Each is a recorded decision rather than an omission; all are listed in the

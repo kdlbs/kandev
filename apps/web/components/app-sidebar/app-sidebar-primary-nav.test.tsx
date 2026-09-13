@@ -185,24 +185,29 @@ describe("AppSidebarPrimaryNav — Needs-you Inbox nav entry", () => {
     state.features.needsYouInbox = false;
     renderNav(false);
 
-    expect(screen.queryByRole("link", { name: "Needs you" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Inbox" })).toBeNull();
   });
 
-  it("renders gated on the flag alone, independent of Office mode", () => {
+  it("names the destination Inbox, not the bucket it renders (design-03#D4)", () => {
     state.features.needsYouInbox = true;
     mode = "kanban";
     renderNav(false);
 
-    const link = screen.getByRole("link", { name: "Needs you" });
+    const link = screen.getByRole("link", { name: "Inbox" });
     expect(link.getAttribute("href")).toBe("/needs-you-inbox");
+    expect(screen.queryByRole("link", { name: "Needs you" })).toBeNull();
   });
 
-  it("still renders while in Office mode", () => {
+  it("still renders while in Office mode, distinguishable from Office's own Inbox (design-03#D4)", () => {
     state.features.needsYouInbox = true;
     mode = "office";
     renderNav(false);
 
-    expect(screen.getByRole("link", { name: "Needs you" })).not.toBeNull();
+    // AC .3 keeps both entries present, so they must not share a name.
+    expect(screen.getByRole("link", { name: "Needs you" }).getAttribute("href")).toBe(
+      "/needs-you-inbox",
+    );
+    expect(screen.getByRole("link", { name: "Inbox" }).getAttribute("href")).toBe("/office/inbox");
   });
 
   it("shows the count from the active workspace's needs-you-inbox state as a badge", () => {
@@ -210,7 +215,7 @@ describe("AppSidebarPrimaryNav — Needs-you Inbox nav entry", () => {
     state.needsYouInbox.byWorkspaceId["ws-1"] = { count: 3 };
     renderNav(false);
 
-    const link = screen.getByRole("link", { name: "Needs you" });
+    const link = screen.getByRole("link", { name: "Inbox" });
     expect(link.textContent).toContain("3");
   });
 
@@ -219,7 +224,7 @@ describe("AppSidebarPrimaryNav — Needs-you Inbox nav entry", () => {
     state.needsYouInbox.byWorkspaceId["ws-1"] = { count: 50, hasMore: true };
     renderNav(false);
 
-    const link = screen.getByRole("link", { name: "Needs you" });
+    const link = screen.getByRole("link", { name: "Inbox" });
     expect(link.textContent).toContain("50+");
   });
 });

@@ -26,6 +26,17 @@ vi.mock("@/components/state-provider", () => ({
     }),
 }));
 
+// The shell is the app's own chrome (topbar, nav trigger, scroll container)
+// and pulls the whole nav context in with it; these cases are about which view
+// the page resolves to, so it is stubbed down to the title it is handed.
+vi.mock("@/components/page-shell", () => ({
+  PageShell: ({ title, children }: { title: string; children: React.ReactNode }) => (
+    <div data-testid="stub-page-shell" data-title={title}>
+      {children}
+    </div>
+  ),
+}));
+
 vi.mock("@/components/needs-you-inbox/needs-you-inbox-row", () => ({
   NeedsYouInboxRow: ({ bundle }: { bundle: ClarificationInboxBundle }) => (
     <div data-testid="stub-row">{bundle.pending_id}</div>
@@ -76,6 +87,12 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe("NeedsYouInboxPageClient", () => {
+  it("titles the route Inbox, which the app top bar owns (design-03#D4)", () => {
+    render(<NeedsYouInboxPageClient />);
+
+    expect(screen.getByTestId("stub-page-shell").getAttribute("data-title")).toBe("Inbox");
+  });
+
   it("renders a row per listed bundle", () => {
     state = {
       status: "ready",

@@ -2,6 +2,7 @@
 
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { PageShell } from "@/components/page-shell";
 import { useAppStore } from "@/components/state-provider";
 import {
   selectNeedsYouInboxBundles,
@@ -59,9 +60,10 @@ function NeedsYouInboxList({
   );
 }
 
-// v1 renders no tab strip and no page title (design-01#Components): the
-// layout starts at the toolbar with p-6 space-y-4 and the app top bar owns
-// the title.
+// v1 renders no tab strip and no in-page title (design-01#Components). The
+// title belongs to the app top bar, which is PageShell's, so this route mounts
+// the same chrome every other top-level route does rather than an unlabelled
+// bare div -- that chrome also carries the phone nav trigger (design-03#D4).
 export function NeedsYouInboxPageClient() {
   const { t } = useTranslation();
   const status = useAppStore(selectNeedsYouInboxStatus);
@@ -74,7 +76,7 @@ export function NeedsYouInboxPageClient() {
   const viewMode = resolveViewMode(status, bundles.length, hiddenCount, hasMore);
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col space-y-4 overflow-y-auto p-6">
+    <PageShell title={t("sidebar:inbox")} contentClassName="space-y-4 p-6">
       {viewMode === "error" && <NeedsYouInboxErrorState onRetry={retry} />}
       {viewMode === "loading" && (
         <p className="text-sm text-muted-foreground" role="status" aria-live="polite">
@@ -85,6 +87,6 @@ export function NeedsYouInboxPageClient() {
       {viewMode === "list" && (
         <NeedsYouInboxList bundles={bundles} hasMore={hasMore} hiddenCount={hiddenCount} />
       )}
-    </div>
+    </PageShell>
   );
 }

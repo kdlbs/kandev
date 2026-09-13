@@ -1,6 +1,6 @@
 "use client";
 
-import { IconHome, IconInbox, IconMessageCircle, IconMessageQuestion } from "@tabler/icons-react";
+import { IconHome, IconInbox, IconMessageCircle } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { selectOfficeInboxCount } from "@/lib/state/slices/office/selectors";
@@ -57,10 +57,14 @@ export function AppSidebarPrimaryNav({ collapsed }: AppSidebarPrimaryNavProps) {
           collapsed={collapsed}
         />
       )}
+      {/* The destination is the Inbox (design-03#D4). "Needs you" names the one
+          bucket it renders, not the place, and is used only in Office mode,
+          where AC .3 keeps this entry present alongside Office's own Inbox row
+          and two identically named rows would be indistinguishable. */}
       {needsYouInboxEnabled && (
         <AppSidebarNavItem
-          icon={IconMessageQuestion}
-          label={t("sidebar:needsYouInbox")}
+          icon={IconInbox}
+          label={inOffice ? t("sidebar:needsYouInbox") : t("sidebar:inbox")}
           href={NEEDS_YOU_INBOX_HREF}
           badge={needsYouInboxCount}
           badgeSuffix={needsYouInboxHasMore ? "+" : undefined}
