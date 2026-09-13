@@ -454,8 +454,9 @@ func TestExecutorHostGHBridgeEligibility(t *testing.T) {
 		}
 		hostsMu.Lock()
 		defer hostsMu.Unlock()
-		if strings.Join(hosts, ",") != "github.com,ghe.example" {
-			t.Fatalf("probed hosts = %v, want [github.com ghe.example]", hosts)
+		sort.Strings(hosts)
+		if strings.Join(hosts, ",") != "ghe.example,github.com" {
+			t.Fatalf("probed hosts = %v, want [ghe.example github.com]", hosts)
 		}
 	})
 
