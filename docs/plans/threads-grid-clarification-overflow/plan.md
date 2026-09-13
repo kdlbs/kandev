@@ -1,6 +1,6 @@
 ---
 created: 2026-09-13
-status: draft
+status: implemented
 requirements:
   - REQ-UI-THREADS-DECK-004
   - REQ-UI-THREADS-DECK-005
@@ -24,9 +24,9 @@ particularly [Task 02](../threads-layouts/task-02-render-grid.md),
 [Task 06](../threads-layouts/task-06-presentation-polish.md). Their recorded
 results remain historical; this package does not reopen or replace them.
 
-Diagnosis and this package are complete. Production implementation and permanent
-tests require a later explicit implementation request under `/fix`. No PR has
-been opened, and no merge or queue action belongs to this package.
+Diagnosis and this package are complete. The user authorized implementation
+after the handoff on 2026-09-13. Task 01 is implemented and verified; no merge or queue action
+belongs to this package.
 
 ## Scope
 
@@ -186,7 +186,7 @@ is accepted as proof of the user's 90% condition.
 
 ## Work orders
 
-- [ ] [Task 01: Restore required-question scrolling](task-01-restore-question-scrolling.md)
+- [x] [Task 01: Restore required-question scrolling](task-01-restore-question-scrolling.md)
 
 One sequential work order; no dependencies beyond the already merged parent.
 No delegation is authorized.
@@ -201,12 +201,28 @@ browser configuration before application behavior (inherited deviceScaleFactor
 with viewport null); the corrected run used native zoom without that emulation.
 See [exact commands/results](evidence.md#validation).
 
-Production RED/GREEN, affected desktop/mobile suites, keyboard submission,
-full action containment, and regression checks remain pending Task 01.
-Document validation passed: the catalog validated 267 decisions and 868
-specifications; all specification files passed lint; `git diff --check` passed.
-Local requirement/AC and artifact-link validation also passed. The hook receipt
-is recorded in the task plan/handoff.
+Implementation on refreshed main `4e4b29b29` is complete. The production change
+only overrides vertical overscroll behavior when the existing Threads context
+is present. All four native-zoom wheel cases failed before the change. Final
+coverage passes for all 17 affected desktop cases and five mobile cases, with
+46 compatibility unit tests, typecheck, scoped lint, and the i18n ratchet also
+passing. Every browser run used one worker, zero retries, and current built
+assets. No suites overlapped.
+
+The first GREEN attempt exposed an incorrect test expectation about native
+work-start auto-follow; a second exposed a synthetic frozen-scroll setup.
+Both test-only corrections, their scoped reruns, exact commands and results
+are recorded in [Task 01 Results](task-01-restore-question-scrolling.md#results).
+The production correction did not change during those iterations.
+[Final geometry](evidence/implementation-geometry.json) records successful
+click/tap targets and native browser zoom. Desktop and phone screenshots were
+visually checked against the previews above. Isolated runtimes and temporary
+native-browser profiles were removed by fixture cleanup.
+
+Internal documentation is updated. Existing public documentation already
+describes answering questions inside Threads and independent conversation
+scrolling; this repair adds no setting, navigation, label or public contract.
+The normal commit-hook receipt and publication state are in the task handoff.
 
 ## Risks
 

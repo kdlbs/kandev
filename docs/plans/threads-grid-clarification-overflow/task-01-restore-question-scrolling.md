@@ -1,7 +1,7 @@
 ---
 id: "01-restore-question-scrolling"
 title: "Restore required-question scrolling"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -31,8 +31,8 @@ system_design:
 
 Allow the existing clarification scroller to chain vertical input through its
 clipped wrapper into the bounded Threads footer. Preserve all other question,
-composer, transcript, layout, and submission behavior. This order is pending;
-start only after the user's explicit implementation request.
+composer, transcript, layout, and submission behavior. The user explicitly
+authorized implementation on 2026-09-13 after the design handoff.
 
 ## In scope
 
@@ -244,6 +244,104 @@ keep that setup explicit. Never touch developer :9998 or parent playground
 
 ## Results
 
-Pending explicit implementation authorization. No production or permanent test
-change has been made. Planning evidence is in `evidence.md`; later RED/GREEN
-results must be recorded independently here and in `plan.md`.
+Implementation and task-defined verification are complete. Refreshed main is
+`4e4b29b29e7680c0ed6c5de003a8dfe7e8b2fb94`; its one intervening Office fix has no
+overlap with this work. The unpushed documentation commit was rebased onto that
+main before edits. Planning evidence remains in `evidence.md`.
+
+### Change and conformance
+
+`ClarificationPanelSection` now overrides only `overscrollBehaviorY` to `auto`
+when `useComposerDisclosureContext()` is non-null. This covers auto-hide on,
+auto-hide off, Columns and touch Threads; normal task/Quick Chat keep their
+existing containment. No height limit, resize behavior, disclosure state,
+transcript owner, question action, or phone composition changed.
+
+Permanent coverage adds four native-zoom Grid cases, one keyboard case, one
+Columns case and two phone touch cases. Existing scenarios remain intact.
+The normal-chat resize spec's local `retries: 1` override was removed so the
+explicit zero-retry run applies to all affected cases.
+
+`AC-UI-THREADS-DECK-005.5` and `005.6` are restored. All mapped preservation
+criteria use the existing deck requirements and design; no new AC or contract
+was introduced. Internal docs are updated; public docs need no change because
+the existing independent-scroll and in-Threads answer behavior is restored.
+
+### Validation receipt
+
+The frozen install from diagnosis remained valid: the intervening main commit
+changed neither package manifest nor lockfile. Commands ran from the locations
+specified in Verification. Every browser run was headless, strict WS, one
+worker and retries zero; no browser suites overlapped.
+
+| Check | Result |
+| --- | --- |
+| Five named unit files | 5 files, 46 tests passed (17.23s) |
+| `pnpm run typecheck` | Passed |
+| Named scoped ESLint command, also including `e2e/tests/chat/clarification-resize.spec.ts` | Passed; rerun on the final changed test code |
+| `pnpm run i18n:ratchet` | Passed, one modified production file clean; 644 guard entries intact |
+| `make -C apps/backend build-dev e2e-plugin-package` | Passed on refreshed main |
+| `make build-web-e2e` | Passed; Vite completed in 9.13s after the final production edit |
+| Desktop discovery | 17 tests in 2 files |
+| Desktop behavioral RED, Grid grep | All 4 failed at full-containment/hit assertions after actual wheel input |
+| First full desktop GREEN attempt | 13 passed, 4 failed (4.7m); all question submissions succeeded, but the added post-submit history assertion contradicted native work-start auto-follow |
+| Six-case desktop correction/capture run | 4 passed, 2 failed (1.7m); synthetic scrollTop after disabling auto-scroll did not update the native frozen offset |
+| Final four-case Grid rerun | 4 passed (1.2m); uses real transcript wheel input, preserves history before Submit, verifies follow when enabled and the frozen offset when disabled |
+| Mobile discovery | 5 tests in 1 file |
+| Documentation catalog/spec lint and diff checks | Passed: 267 decisions, 873 specifications; all spec files clean |
+| Full mobile command with `CAPTURE_PR_ASSETS=1` | 5 passed (1.2m), including both new touch cases |
+
+The full desktop command is the one listed in Verification. Its 11 unchanged
+compatibility cases all passed. The two new keyboard/Columns cases passed in
+both the full run and the six-case rerun. Only the four edited Grid cases
+needed the last rerun. Thus all 17 affected desktop cases pass on the final
+production implementation, with every changed regression run after its last
+edit. Exact supplemental commands, from `apps/web`:
+
+```bash
+pnpm e2e:run --host --no-build --shards 1 --project chromium tests/task/threads-composer-disclosure.spec.ts --grep 'scrolls long required questions through the Grid footer' --workers=1 --retries=0
+CAPTURE_PR_ASSETS=1 pnpm e2e:run --host --no-build --shards 1 --project chromium tests/task/threads-composer-disclosure.spec.ts --grep 'scrolls long required questions|answers a long required question|keeps long required answers' --workers=1 --retries=0
+CAPTURE_PR_ASSETS=1 pnpm e2e:run --host --no-build --shards 1 --project chromium tests/task/threads-composer-disclosure.spec.ts --grep 'scrolls long required questions' --workers=1 --retries=0
+CAPTURE_PR_ASSETS=1 pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome tests/task/mobile-threads-composer-disclosure.spec.ts --workers=1 --retries=0
+```
+
+### Final behavior and geometry
+
+The [raw geometry](evidence/implementation-geometry.json) records each actual
+activation. Chromium `149.0.7827.55` used a 1366x768 content viewport at native
+zoom 1 and 1517x853 at native zoom 0.9, with visualViewport scale 1. Native tab
+zoom was verified through `chrome.tabs.getZoom`; device scale and CSS zoom
+were not substitutes.
+
+The Grid footer remains 198.50 CSS px at 100% and 240.87 CSS px at 90%; the
+transcript retains its 80px floor. Every final option, Next, Back and Submit
+had its full box inside all clipping ancestors and passed center hit-testing
+before mouse activation. The agent received exactly `db=q1_opt3`,
+`language=q2_opt3`, `deploy=q3_opt2`; the pending overlay cleared. Tab,
+Shift+Tab, Enter and Space completed the same bundle in the keyboard case.
+Neighbor boxes and deck scroll offsets remained unchanged.
+
+Pixel 5 (393x851) and short 393x500 phone emulation completed that same exchange
+with CDP touch start/move/end and real taps. Option rows measured 56.5px high,
+Submit 44px; full containment and real hits passed. One active conversation,
+the visible composer, viewport clearance, no document horizontal overflow,
+the 767/768px transition and saved Grid/auto-hide preferences passed. Existing
+900px coarse-pointer tablet, draft, model, attachment and cancellation cases
+also passed. Screenshots were inspected against UI-01/UI-02.
+
+Phone verification uses emulation's safe-area values and a resized viewport;
+it does not simulate an OS keyboard, physical display cutout, Safari, or a
+hardware trackpad. No failure remains in the exercised browser paths.
+
+### Isolation and teardown
+
+The final Grid run owned `/tmp/kandev-e2e-0-JmMopy`; the phone run owned
+`/tmp/kandev-e2e-0-CdFlQo`. Both used the worker's isolated port 18100 and were
+fully removed by fixture teardown; absence checks passed. While such a fixture
+owns that port, the exact fallback is `scripts/kandev-kill 18100 --yes`.
+Do not apply that historical command to a future occupant. Temporary
+`threads-question-zoom-*` profiles/extensions close in `finally`; none remain.
+Developer :9998 and parent playground :48431 were never touched.
+
+Screenshots are retained on an orphan media commit, rather than as binaries in
+the fix branch. Final rendered examples: [Grid at 90%](https://raw.githubusercontent.com/kdlbs/kandev/e0c9e9c77703f7a2efc2729f5c26fb883c29be0a/grid-90-last-option.png), [Grid Submit](https://raw.githubusercontent.com/kdlbs/kandev/e0c9e9c77703f7a2efc2729f5c26fb883c29be0a/grid-100-submit.png), [short phone](https://raw.githubusercontent.com/kdlbs/kandev/e0c9e9c77703f7a2efc2729f5c26fb883c29be0a/phone-short-last-option.png), [phone Submit](https://raw.githubusercontent.com/kdlbs/kandev/e0c9e9c77703f7a2efc2729f5c26fb883c29be0a/phone-submit.png).

@@ -84,7 +84,7 @@ scrolled above the visible footer (y=160.95), while the outer footer remained
 unmoved. At 100%, the final option began at y=419.75 below a y=397 footer end.
 The native transcript stayed 80px high in all four cases.
 
-![Real 90% zoom: final option clipped after wheel scrolling](evidence/grid-90-before.png)
+![Real 90% zoom: final option clipped after wheel scrolling](https://raw.githubusercontent.com/kdlbs/kandev/e0c9e9c77703f7a2efc2729f5c26fb883c29be0a/diagnosis-grid-90-before.png)
 
 These are Playwright screenshots taken at native zoom; use the raw DOM metrics
 for CSS geometry, not the exported bitmap dimensions as physical screen size.
@@ -143,7 +143,7 @@ coordinates, ancestor geometry, pending-clear observation, and agent receipt.
 The probe proves the scroll-chain cause and feasibility of a narrow correction;
 it is not production GREEN or a complete final containment/keyboard/mobile audit.
 
-![Real submission after the temporary DOM-only change](evidence/grid-90-submitted-dom-probe.png)
+![Real submission after the temporary DOM-only change](https://raw.githubusercontent.com/kdlbs/kandev/e0c9e9c77703f7a2efc2729f5c26fb883c29be0a/diagnosis-grid-90-dom-probe.png)
 
 ## Coverage gap
 

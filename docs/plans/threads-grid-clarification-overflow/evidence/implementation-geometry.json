@@ -1,0 +1,875 @@
+{
+  "units": "CSS px",
+  "desktop": [
+    {
+      "case": "task-threads-composer-disc-21925-er-zoom-0-9-auto-hide-true--chromium",
+      "native_zoom": {
+        "browser": "149.0.7827.55",
+        "zoom": 0.9,
+        "width": 1517,
+        "height": 853,
+        "devicePixelRatio": 0.8999999761581421,
+        "visualScale": 1
+      },
+      "before": {
+        "x": 918.8889465332031,
+        "y": 538.6371803283691,
+        "width": 1131.5972900390625,
+        "height": 56.68402862548828,
+        "top": 510.295166015625,
+        "bottom": 566.9791946411133,
+        "clip": {
+          "top": 199.7916717529297,
+          "bottom": 439.54864501953125,
+          "left": 333.107666015625,
+          "right": 1504.670166015625
+        },
+        "contained": false,
+        "hit": false,
+        "footerScrollTop": 0,
+        "innerScrollTop": 0,
+        "tile": {
+          "x": 331.9965515136719,
+          "y": 51.99652862548828,
+          "width": 1173.7848205566406,
+          "height": 388.66320037841797
+        },
+        "footer": {
+          "x": 333.107666015625,
+          "y": 198.68057250976562,
+          "width": 1171.5625,
+          "height": 240.86807250976562
+        }
+      },
+      "targets": [
+        {
+          "target": "Next",
+          "x": 1453.6372623443604,
+          "y": 423.3941249847412,
+          "width": 62.1006965637207,
+          "height": 26.197917938232422,
+          "top": 410.295166015625,
+          "bottom": 436.4930839538574,
+          "clip": {
+            "top": 198.68057250976562,
+            "bottom": 439.54864501953125,
+            "left": 333.107666015625,
+            "right": 1504.670166015625
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 177.7777862548828,
+          "innerScrollTop": 48.88888931274414
+        },
+        {
+          "target": "Back",
+          "x": 384.7309284210205,
+          "y": 423.3941249847412,
+          "width": 63.281253814697266,
+          "height": 26.197917938232422,
+          "top": 410.295166015625,
+          "bottom": 436.4930839538574,
+          "clip": {
+            "top": 198.68057250976562,
+            "bottom": 439.54864501953125,
+            "left": 333.107666015625,
+            "right": 1504.670166015625
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 177.7777862548828,
+          "innerScrollTop": 48.88888931274414
+        },
+        {
+          "target": "3\nSQLite\nEmbedded database for simplicity",
+          "x": 918.8889465332031,
+          "y": 311.9704933166504,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "top": 283.62847900390625,
+          "bottom": 340.31250762939453,
+          "clip": {
+            "top": 198.68057250976562,
+            "bottom": 439.54864501953125,
+            "left": 333.107666015625,
+            "right": 1504.670166015625
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 177.7777862548828,
+          "innerScrollTop": 48.88888931274414
+        },
+        {
+          "target": "3\nRust\nBest for systems work",
+          "x": 918.8889465332031,
+          "y": 311.9704933166504,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "top": 283.62847900390625,
+          "bottom": 340.31250762939453,
+          "clip": {
+            "top": 198.68057250976562,
+            "bottom": 439.54864501953125,
+            "left": 333.107666015625,
+            "right": 1504.670166015625
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 177.7777862548828,
+          "innerScrollTop": 48.88888931274414
+        },
+        {
+          "target": "2\nBare metal\nRun directly on hosts",
+          "x": 918.8889465332031,
+          "y": 249.29687881469727,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "top": 220.95486450195312,
+          "bottom": 277.6388931274414,
+          "clip": {
+            "top": 198.68057250976562,
+            "bottom": 385.8159770965576,
+            "left": 333.107666015625,
+            "right": 1504.670166015625
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 226.6666717529297,
+          "innerScrollTop": 0
+        },
+        {
+          "target": "Submit",
+          "x": 1379.4879035949707,
+          "y": 217.33507633209229,
+          "width": 82.4826431274414,
+          "height": 23.97569465637207,
+          "top": 205.34722900390625,
+          "bottom": 229.32292366027832,
+          "clip": {
+            "top": 198.68057250976562,
+            "bottom": 439.54864501953125,
+            "left": 333.107666015625,
+            "right": 1504.670166015625
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 4.44444465637207,
+          "innerScrollTop": 0
+        }
+      ]
+    },
+    {
+      "case": "task-threads-composer-disc-4addc-oter-zoom-1-auto-hide-true--chromium",
+      "native_zoom": {
+        "browser": "149.0.7827.55",
+        "zoom": 1,
+        "width": 1366,
+        "height": 768,
+        "devicePixelRatio": 1,
+        "visualScale": 1
+      },
+      "before": {
+        "x": 843,
+        "y": 538,
+        "width": 980,
+        "height": 56.5,
+        "top": 509.75,
+        "bottom": 566.25,
+        "clip": {
+          "top": 199.5,
+          "bottom": 397,
+          "left": 333,
+          "right": 1353
+        },
+        "contained": false,
+        "hit": false,
+        "footerScrollTop": 0,
+        "innerScrollTop": 0,
+        "tile": {
+          "x": 332,
+          "y": 52,
+          "width": 1022,
+          "height": 346
+        },
+        "footer": {
+          "x": 333,
+          "y": 198.5,
+          "width": 1020,
+          "height": 198.5
+        }
+      },
+      "targets": [
+        {
+          "target": "Next",
+          "x": 1302.015625,
+          "y": 359.25,
+          "width": 61.96875,
+          "height": 26,
+          "top": 346.25,
+          "bottom": 372.25,
+          "clip": {
+            "top": 198.5,
+            "bottom": 383.5,
+            "left": 333,
+            "right": 1353
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 200,
+          "innerScrollTop": 90
+        },
+        {
+          "target": "Back",
+          "x": 384.5703125,
+          "y": 359.25,
+          "width": 63.140625,
+          "height": 26,
+          "top": 346.25,
+          "bottom": 372.25,
+          "clip": {
+            "top": 198.5,
+            "bottom": 383.5,
+            "left": 333,
+            "right": 1353
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 200,
+          "innerScrollTop": 90
+        },
+        {
+          "target": "3\nSQLite\nEmbedded database for simplicity",
+          "x": 843,
+          "y": 248,
+          "width": 980,
+          "height": 56.5,
+          "top": 219.75,
+          "bottom": 276.25,
+          "clip": {
+            "top": 198.5,
+            "bottom": 383.5,
+            "left": 333,
+            "right": 1353
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 200,
+          "innerScrollTop": 90
+        },
+        {
+          "target": "3\nRust\nBest for systems work",
+          "x": 843,
+          "y": 248,
+          "width": 980,
+          "height": 56.5,
+          "top": 219.75,
+          "bottom": 276.25,
+          "clip": {
+            "top": 198.5,
+            "bottom": 383.5,
+            "left": 333,
+            "right": 1353
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 200,
+          "innerScrollTop": 90
+        },
+        {
+          "target": "2\nBare metal\nRun directly on hosts",
+          "x": 843,
+          "y": 253.5,
+          "width": 980,
+          "height": 56.5,
+          "top": 225.25,
+          "bottom": 281.75,
+          "clip": {
+            "top": 198.5,
+            "bottom": 361.5,
+            "left": 333,
+            "right": 1353
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 222,
+          "innerScrollTop": 0
+        },
+        {
+          "target": "Submit",
+          "x": 1227.7109375,
+          "y": 221.5,
+          "width": 82.578125,
+          "height": 24,
+          "top": 209.5,
+          "bottom": 233.5,
+          "clip": {
+            "top": 199.5,
+            "bottom": 397,
+            "left": 333,
+            "right": 1353
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 0,
+          "innerScrollTop": 0
+        }
+      ]
+    },
+    {
+      "case": "task-threads-composer-disc-acf88-ter-zoom-1-auto-hide-false--chromium",
+      "native_zoom": {
+        "browser": "149.0.7827.55",
+        "zoom": 1,
+        "width": 1366,
+        "height": 768,
+        "devicePixelRatio": 1,
+        "visualScale": 1
+      },
+      "before": {
+        "x": 843,
+        "y": 538,
+        "width": 980,
+        "height": 56.5,
+        "top": 509.75,
+        "bottom": 566.25,
+        "clip": {
+          "top": 199.5,
+          "bottom": 397,
+          "left": 333,
+          "right": 1353
+        },
+        "contained": false,
+        "hit": false,
+        "footerScrollTop": 0,
+        "innerScrollTop": 0,
+        "tile": {
+          "x": 332,
+          "y": 52,
+          "width": 1022,
+          "height": 346
+        },
+        "footer": {
+          "x": 333,
+          "y": 198.5,
+          "width": 1020,
+          "height": 198.5
+        }
+      },
+      "targets": [
+        {
+          "target": "Next",
+          "x": 1302.015625,
+          "y": 359.25,
+          "width": 61.96875,
+          "height": 26,
+          "top": 346.25,
+          "bottom": 372.25,
+          "clip": {
+            "top": 198.5,
+            "bottom": 383.5,
+            "left": 333,
+            "right": 1353
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 200,
+          "innerScrollTop": 90
+        },
+        {
+          "target": "Back",
+          "x": 384.5703125,
+          "y": 359.25,
+          "width": 63.140625,
+          "height": 26,
+          "top": 346.25,
+          "bottom": 372.25,
+          "clip": {
+            "top": 198.5,
+            "bottom": 383.5,
+            "left": 333,
+            "right": 1353
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 200,
+          "innerScrollTop": 90
+        },
+        {
+          "target": "3\nSQLite\nEmbedded database for simplicity",
+          "x": 843,
+          "y": 248,
+          "width": 980,
+          "height": 56.5,
+          "top": 219.75,
+          "bottom": 276.25,
+          "clip": {
+            "top": 198.5,
+            "bottom": 383.5,
+            "left": 333,
+            "right": 1353
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 200,
+          "innerScrollTop": 90
+        },
+        {
+          "target": "3\nRust\nBest for systems work",
+          "x": 843,
+          "y": 248,
+          "width": 980,
+          "height": 56.5,
+          "top": 219.75,
+          "bottom": 276.25,
+          "clip": {
+            "top": 198.5,
+            "bottom": 383.5,
+            "left": 333,
+            "right": 1353
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 200,
+          "innerScrollTop": 90
+        },
+        {
+          "target": "2\nBare metal\nRun directly on hosts",
+          "x": 843,
+          "y": 253.5,
+          "width": 980,
+          "height": 56.5,
+          "top": 225.25,
+          "bottom": 281.75,
+          "clip": {
+            "top": 198.5,
+            "bottom": 361.5,
+            "left": 333,
+            "right": 1353
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 222,
+          "innerScrollTop": 0
+        },
+        {
+          "target": "Submit",
+          "x": 1227.7109375,
+          "y": 221.5,
+          "width": 82.578125,
+          "height": 24,
+          "top": 209.5,
+          "bottom": 233.5,
+          "clip": {
+            "top": 199.5,
+            "bottom": 397,
+            "left": 333,
+            "right": 1353
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 0,
+          "innerScrollTop": 0
+        }
+      ]
+    },
+    {
+      "case": "task-threads-composer-disc-d0198-r-zoom-0-9-auto-hide-false--chromium",
+      "native_zoom": {
+        "browser": "149.0.7827.55",
+        "zoom": 0.9,
+        "width": 1517,
+        "height": 853,
+        "devicePixelRatio": 0.8999999761581421,
+        "visualScale": 1
+      },
+      "before": {
+        "x": 918.8889465332031,
+        "y": 538.6371803283691,
+        "width": 1131.5972900390625,
+        "height": 56.68402862548828,
+        "top": 510.295166015625,
+        "bottom": 566.9791946411133,
+        "clip": {
+          "top": 199.7916717529297,
+          "bottom": 439.54864501953125,
+          "left": 333.107666015625,
+          "right": 1504.670166015625
+        },
+        "contained": false,
+        "hit": false,
+        "footerScrollTop": 0,
+        "innerScrollTop": 0,
+        "tile": {
+          "x": 331.9965515136719,
+          "y": 51.99652862548828,
+          "width": 1173.7848205566406,
+          "height": 388.66320037841797
+        },
+        "footer": {
+          "x": 333.107666015625,
+          "y": 198.68057250976562,
+          "width": 1171.5625,
+          "height": 240.86807250976562
+        }
+      },
+      "targets": [
+        {
+          "target": "Next",
+          "x": 1453.6372623443604,
+          "y": 423.3941249847412,
+          "width": 62.1006965637207,
+          "height": 26.197917938232422,
+          "top": 410.295166015625,
+          "bottom": 436.4930839538574,
+          "clip": {
+            "top": 198.68057250976562,
+            "bottom": 439.54864501953125,
+            "left": 333.107666015625,
+            "right": 1504.670166015625
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 177.7777862548828,
+          "innerScrollTop": 48.88888931274414
+        },
+        {
+          "target": "Back",
+          "x": 384.7309284210205,
+          "y": 423.3941249847412,
+          "width": 63.281253814697266,
+          "height": 26.197917938232422,
+          "top": 410.295166015625,
+          "bottom": 436.4930839538574,
+          "clip": {
+            "top": 198.68057250976562,
+            "bottom": 439.54864501953125,
+            "left": 333.107666015625,
+            "right": 1504.670166015625
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 177.7777862548828,
+          "innerScrollTop": 48.88888931274414
+        },
+        {
+          "target": "3\nSQLite\nEmbedded database for simplicity",
+          "x": 918.8889465332031,
+          "y": 311.9704933166504,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "top": 283.62847900390625,
+          "bottom": 340.31250762939453,
+          "clip": {
+            "top": 198.68057250976562,
+            "bottom": 439.54864501953125,
+            "left": 333.107666015625,
+            "right": 1504.670166015625
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 177.7777862548828,
+          "innerScrollTop": 48.88888931274414
+        },
+        {
+          "target": "3\nRust\nBest for systems work",
+          "x": 918.8889465332031,
+          "y": 311.9704933166504,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "top": 283.62847900390625,
+          "bottom": 340.31250762939453,
+          "clip": {
+            "top": 198.68057250976562,
+            "bottom": 439.54864501953125,
+            "left": 333.107666015625,
+            "right": 1504.670166015625
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 177.7777862548828,
+          "innerScrollTop": 48.88888931274414
+        },
+        {
+          "target": "2\nBare metal\nRun directly on hosts",
+          "x": 918.8889465332031,
+          "y": 249.29687881469727,
+          "width": 1131.5972900390625,
+          "height": 56.68402862548828,
+          "top": 220.95486450195312,
+          "bottom": 277.6388931274414,
+          "clip": {
+            "top": 198.68057250976562,
+            "bottom": 385.8159770965576,
+            "left": 333.107666015625,
+            "right": 1504.670166015625
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 226.6666717529297,
+          "innerScrollTop": 0
+        },
+        {
+          "target": "Submit",
+          "x": 1379.4879035949707,
+          "y": 217.33507633209229,
+          "width": 82.4826431274414,
+          "height": 23.97569465637207,
+          "top": 205.34722900390625,
+          "bottom": 229.32292366027832,
+          "clip": {
+            "top": 198.68057250976562,
+            "bottom": 439.54864501953125,
+            "left": 333.107666015625,
+            "right": 1504.670166015625
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 4.44444465637207,
+          "innerScrollTop": 0
+        }
+      ]
+    }
+  ],
+  "mobile": [
+    {
+      "case": "task-mobile-threads-compos-d673a--question-by-touch-Pixel-5--mobile-chrome",
+      "input": "CDP touch start/move/end and touchscreen tap",
+      "targets": [
+        {
+          "target": "Next",
+          "x": 342.015625,
+          "y": 568.75,
+          "width": 61.96875,
+          "height": 26,
+          "top": 555.75,
+          "bottom": 581.75,
+          "clip": {
+            "top": 230,
+            "bottom": 593.5,
+            "left": 0,
+            "right": 393
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 0,
+          "innerScrollTop": 159
+        },
+        {
+          "target": "Back",
+          "x": 51.5703125,
+          "y": 568.75,
+          "width": 63.140625,
+          "height": 26,
+          "top": 555.75,
+          "bottom": 581.75,
+          "clip": {
+            "top": 230,
+            "bottom": 593.5,
+            "left": 0,
+            "right": 393
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 0,
+          "innerScrollTop": 159
+        },
+        {
+          "target": "3\nSQLite\nEmbedded database for simplicity",
+          "x": 196.5,
+          "y": 457.5,
+          "width": 353,
+          "height": 56.5,
+          "top": 429.25,
+          "bottom": 485.75,
+          "clip": {
+            "top": 230,
+            "bottom": 593.5,
+            "left": 0,
+            "right": 393
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 0,
+          "innerScrollTop": 159
+        },
+        {
+          "target": "3\nRust\nBest for systems work",
+          "x": 196.5,
+          "y": 457.5,
+          "width": 353,
+          "height": 56.5,
+          "top": 429.25,
+          "bottom": 485.75,
+          "clip": {
+            "top": 230,
+            "bottom": 593.5,
+            "left": 0,
+            "right": 393
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 0,
+          "innerScrollTop": 159
+        },
+        {
+          "target": "2\nBare metal\nRun directly on hosts",
+          "x": 196.5,
+          "y": 458,
+          "width": 353,
+          "height": 56.5,
+          "top": 429.75,
+          "bottom": 486.25,
+          "clip": {
+            "top": 230,
+            "bottom": 593.5,
+            "left": 0,
+            "right": 393
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 0,
+          "innerScrollTop": 96
+        },
+        {
+          "target": "Submit",
+          "x": 144.5,
+          "y": 252,
+          "width": 257,
+          "height": 44,
+          "top": 230,
+          "bottom": 274,
+          "clip": {
+            "top": 230,
+            "bottom": 593.5,
+            "left": 0,
+            "right": 393
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 0,
+          "innerScrollTop": 40
+        }
+      ]
+    },
+    {
+      "case": "task-mobile-threads-compos-d64ef-stion-by-touch-short-phone--mobile-chrome",
+      "input": "CDP touch start/move/end and touchscreen tap",
+      "targets": [
+        {
+          "target": "Next",
+          "x": 342.015625,
+          "y": 454.75,
+          "width": 61.96875,
+          "height": 26,
+          "top": 441.75,
+          "bottom": 467.75,
+          "clip": {
+            "top": 230,
+            "bottom": 480,
+            "left": 0,
+            "right": 393
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 0,
+          "innerScrollTop": 273
+        },
+        {
+          "target": "Back",
+          "x": 51.5703125,
+          "y": 454.75,
+          "width": 63.140625,
+          "height": 26,
+          "top": 441.75,
+          "bottom": 467.75,
+          "clip": {
+            "top": 230,
+            "bottom": 480,
+            "left": 0,
+            "right": 393
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 0,
+          "innerScrollTop": 273
+        },
+        {
+          "target": "3\nSQLite\nEmbedded database for simplicity",
+          "x": 196.5,
+          "y": 343.5,
+          "width": 353,
+          "height": 56.5,
+          "top": 315.25,
+          "bottom": 371.75,
+          "clip": {
+            "top": 230,
+            "bottom": 480,
+            "left": 0,
+            "right": 393
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 0,
+          "innerScrollTop": 273
+        },
+        {
+          "target": "3\nRust\nBest for systems work",
+          "x": 196.5,
+          "y": 343.5,
+          "width": 353,
+          "height": 56.5,
+          "top": 315.25,
+          "bottom": 371.75,
+          "clip": {
+            "top": 230,
+            "bottom": 480,
+            "left": 0,
+            "right": 393
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 0,
+          "innerScrollTop": 273
+        },
+        {
+          "target": "2\nBare metal\nRun directly on hosts",
+          "x": 196.5,
+          "y": 344,
+          "width": 353,
+          "height": 56.5,
+          "top": 315.75,
+          "bottom": 372.25,
+          "clip": {
+            "top": 230,
+            "bottom": 480,
+            "left": 0,
+            "right": 393
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 0,
+          "innerScrollTop": 210
+        },
+        {
+          "target": "Submit",
+          "x": 144.5,
+          "y": 254,
+          "width": 257,
+          "height": 44,
+          "top": 232,
+          "bottom": 276,
+          "clip": {
+            "top": 230,
+            "bottom": 480,
+            "left": 0,
+            "right": 393
+          },
+          "contained": true,
+          "hit": true,
+          "footerScrollTop": 0,
+          "innerScrollTop": 38
+        }
+      ]
+    }
+  ]
+}
