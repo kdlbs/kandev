@@ -59,7 +59,7 @@ func TestCancelRun_QueuedRunIsCancelled(t *testing.T) {
 	repo := newTestRepo(t)
 	id := seedCancelRun(t, repo, "t1", "queued", nil, nil)
 
-	if err := repo.CancelRun(context.Background(), id, "run_too_old"); err != nil {
+	if _, err := repo.CancelRun(context.Background(), id, "run_too_old"); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 
@@ -79,7 +79,7 @@ func TestCancelRun_ClaimedRunIsCancelled(t *testing.T) {
 	repo := newTestRepo(t)
 	id := seedCancelRun(t, repo, "t1", "claimed", nil, nil)
 
-	if err := repo.CancelRun(context.Background(), id, "execution_too_old"); err != nil {
+	if _, err := repo.CancelRun(context.Background(), id, "execution_too_old"); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 
@@ -115,7 +115,7 @@ func TestCancelRun_TerminalRunIsUntouched(t *testing.T) {
 			repo := newTestRepo(t)
 			id := seedCancelRun(t, repo, "t1", tc.status, tc.cancelReason, &finished)
 
-			if err := repo.CancelRun(context.Background(), id, "task_reassigned"); err != nil {
+			if _, err := repo.CancelRun(context.Background(), id, "task_reassigned"); err != nil {
 				t.Fatalf("cancel: %v", err)
 			}
 
@@ -155,16 +155,16 @@ func TestCancelRunsWhere_RowsAffected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cancel terminal: %v", err)
 	}
-	if rows != 0 {
-		t.Errorf("rows affected = %d, want 0 for an already-terminal run", rows)
+	if len(rows) != 0 {
+		t.Errorf("rows affected = %d, want 0 for an already-terminal run", len(rows))
 	}
 
 	rows, err = repo.CancelRunsWhere(ctx, "tree_cancelled", `id = ?`, queued)
 	if err != nil {
 		t.Fatalf("cancel queued: %v", err)
 	}
-	if rows != 1 {
-		t.Errorf("rows affected = %d, want 1", rows)
+	if len(rows) != 1 {
+		t.Errorf("rows affected = %d, want 1", len(rows))
 	}
 }
 
@@ -177,7 +177,7 @@ func TestBulkCancelRuns_OnlyCancelsEligibleRuns(t *testing.T) {
 	claimed := seedCancelRun(t, repo, "t1", "claimed", nil, nil)
 	done := seedCancelRun(t, repo, "t1", "finished", nil, &finished)
 
-	if err := repo.BulkCancelRuns(ctx, []string{queued, claimed, done}, "task_reassigned"); err != nil {
+	if _, err := repo.BulkCancelRuns(ctx, []string{queued, claimed, done}, "task_reassigned"); err != nil {
 		t.Fatalf("bulk cancel: %v", err)
 	}
 
@@ -204,12 +204,12 @@ func TestCancelRunsForTasks_MixedSetCountMatches(t *testing.T) {
 	claimed := seedCancelRun(t, repo, "t1", "claimed", nil, nil)
 	done := seedCancelRun(t, repo, "t1", "finished", nil, &finished)
 
-	count, err := repo.CancelRunsForTasks(ctx, []string{"t1"}, "tree_paused")
+	cancelled, err := repo.CancelRunsForTasks(ctx, []string{"t1"}, "tree_paused")
 	if err != nil {
 		t.Fatalf("cancel for tasks: %v", err)
 	}
-	if count != 2 {
-		t.Errorf("count = %d, want 2 (queued + claimed, not the finished run)", count)
+	if len(cancelled) != 2 {
+		t.Errorf("count = %d, want 2 (queued + claimed, not the finished run)", len(cancelled))
 	}
 	for _, id := range []string{queued, claimed} {
 		if run := fetchRun(t, repo, id); run.Status != "cancelled" {
@@ -229,12 +229,12 @@ func TestCancelRunsForTasks_MatchesPayloadTaskID(t *testing.T) {
 	mine := seedCancelRun(t, repo, "t1", "queued", nil, nil)
 	other := seedCancelRun(t, repo, "t2", "queued", nil, nil)
 
-	count, err := repo.CancelRunsForTasks(ctx, []string{"t1"}, "tree_cancelled")
+	cancelled, err := repo.CancelRunsForTasks(ctx, []string{"t1"}, "tree_cancelled")
 	if err != nil {
 		t.Fatalf("cancel for tasks: %v", err)
 	}
-	if count != 1 {
-		t.Fatalf("count = %d, want 1", count)
+	if len(cancelled) != 1 {
+		t.Fatalf("count = %d, want 1", len(cancelled))
 	}
 	if run := fetchRun(t, repo, mine); run.Status != "cancelled" {
 		t.Errorf("t1 run status = %q, want cancelled", run.Status)
@@ -253,15 +253,15 @@ func TestCancelPaths_EmptySliceIsANoOp(t *testing.T) {
 	ctx := context.Background()
 	id := seedCancelRun(t, repo, "t1", "queued", nil, nil)
 
-	if err := repo.BulkCancelRuns(ctx, nil, "task_reassigned"); err != nil {
+	if _, err := repo.BulkCancelRuns(ctx, nil, "task_reassigned"); err != nil {
 		t.Errorf("bulk cancel with no ids: %v", err)
 	}
-	count, err := repo.CancelRunsForTasks(ctx, nil, "tree_cancelled")
+	cancelled, err := repo.CancelRunsForTasks(ctx, nil, "tree_cancelled")
 	if err != nil {
 		t.Errorf("cancel for tasks with no task ids: %v", err)
 	}
-	if count != 0 {
-		t.Errorf("count = %d, want 0", count)
+	if len(cancelled) != 0 {
+		t.Errorf("count = %d, want 0", len(cancelled))
 	}
 	if run := fetchRun(t, repo, id); run.Status != "queued" {
 		t.Errorf("unrelated run status = %q, want queued", run.Status)

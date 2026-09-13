@@ -180,7 +180,14 @@ func TestAdmitRun_EvaluatorFault_DefersThenFailsWithoutEscalation(t *testing.T) 
 
 	// Drive the run to MaxRetryCount and re-process it directly (bypassing
 	// the real backoff delay, exactly as the existing retry tests do).
+	// FailRun's guarded write only takes effect while the row is still
+	// status='claimed' (Review round 3, R3-1), so the deferred row —
+	// left 'queued' by the first tick above — must be reclaimed before
+	// ProcessRunForTest, mirroring scheduler_run_outcome_test.go.
+	svc.ExecSQL(t, `UPDATE runs SET retry_count = ?, status = 'claimed' WHERE id = ?`,
+		service.MaxRetryCount, run.ID)
 	run.RetryCount = service.MaxRetryCount
+	run.Status = "claimed"
 	service.ProcessRunForTest(svc, ctx, run)
 
 	failed, err := svc.GetRun(ctx, run.ID)

@@ -501,12 +501,17 @@ func (s *DashboardService) cancelDisplacedRun(ctx context.Context, taskID, stepI
 	if displacedAgentID == "" {
 		return
 	}
-	if _, err := s.repo.CancelDisplacedParticipantRun(ctx, taskID, stepID, displacedAgentID); err != nil {
+	cancelled, err := s.repo.CancelDisplacedParticipantRun(ctx, taskID, stepID, displacedAgentID)
+	if err != nil {
 		s.logger.Warn("cancel displaced participant run failed",
 			zap.String("task_id", taskID),
 			zap.String("step_id", stepID),
 			zap.String("agent_profile_id", displacedAgentID),
 			zap.Error(err))
+		return
+	}
+	if s.terminalShapeRecorder != nil {
+		s.terminalShapeRecorder.RecordCancelledRunTerminalShapes(ctx, cancelled)
 	}
 }
 
