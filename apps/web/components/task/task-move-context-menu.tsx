@@ -336,7 +336,7 @@ function StepMenuSubItem({
           // this wrapper (bubble phase, after the field handled them) so the
           // menu's typeahead never yanks focus off the instructions field or the
           // agent-profile combobox search while the user is typing.
-          <div className="p-1" onKeyDown={(event) => event.stopPropagation()}>
+          <div className="p-2" onKeyDown={(event) => event.stopPropagation()}>
             <WorkflowMoveOptionsForm
               isMoving={isMoving ?? false}
               isTouchSurface={false}
