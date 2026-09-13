@@ -8,10 +8,12 @@ import "github.com/kandev/kandev/internal/db/dialect"
 // a column in place; PostgreSQL can apply the equivalent ALTER directly.
 func (r *Repository) migrateTaskSessionMessagesTurnNullable() error {
 	if dialect.IsPostgres(r.db.DriverName()) {
-		r.migrate.Apply(
+		if err := r.migrate.Apply(
 			"task_session_messages.turn_id_nullable",
 			`ALTER TABLE task_session_messages ALTER COLUMN turn_id DROP NOT NULL`,
-		)
+		); err != nil {
+			return err
+		}
 		return nil
 	}
 

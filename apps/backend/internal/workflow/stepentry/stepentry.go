@@ -9,7 +9,7 @@
 // Only clear_decisions and queue_run_for_each_participant are marker-bearing
 // (carry a step-entry marker and an allocated position). queue_run and
 // run_code_review are ledger-owned but not marker-bearing — see
-// ownershipTable's doc comment for the full ten-kind classification.
+// ownershipTable's doc comment for the full eleven-kind classification.
 package stepentry
 
 import (

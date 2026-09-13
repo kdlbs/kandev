@@ -71,6 +71,7 @@ func TestOwnershipTableMatchesDesign(t *testing.T) {
 		wfmodels.OnEnterResetAgentContext:          {Dispatcher: DispatcherMarker, MarkerBearing: false},
 		wfmodels.OnEnterSetSessionMode:             {Dispatcher: DispatcherMarker, MarkerBearing: false},
 		wfmodels.OnEnterConfigureSession:           {Dispatcher: DispatcherMarker, MarkerBearing: false},
+		wfmodels.OnEnterRunScript:                  {Dispatcher: DispatcherMarker, MarkerBearing: false},
 	}
 	for kind, want := range cases {
 		got, ok := Owner(string(kind))
@@ -91,8 +92,8 @@ func TestOwnershipTableMatchesDesign(t *testing.T) {
 			t.Errorf("MarkerBearing(%s) disagrees with Owner", kind)
 		}
 	}
-	if len(cases) != 10 {
-		t.Fatalf("expected exactly 10 classified kinds (the design's table), got %d", len(cases))
+	if len(cases) != 11 {
+		t.Fatalf("expected exactly 11 classified kinds (the design's table), got %d", len(cases))
 	}
 	// Checking cases against ownershipTable one direction (above) does not
 	// catch an entry added to ownershipTable that this test's own literal
