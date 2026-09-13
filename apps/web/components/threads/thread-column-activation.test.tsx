@@ -259,6 +259,26 @@ describe("useThreadColumnActivation", () => {
     expect(ids(PRELOAD_IDS)).toEqual([TASK_B, TASK_C, TASK_D]);
   });
 
+  // @covers AC-TASKS-THREADS-ACTIONS-003.5, AC-TASKS-THREADS-ACTIONS-003.6
+  it.each([
+    { change: "removal", nextIds: [TASK_A, TASK_B] },
+    { change: "readmission", nextIds: [TASK_A, TASK_B, TASK_C, TASK_D] },
+  ])("retains the surviving visible chat through $change", ({ nextIds }) => {
+    const view = render(<ActivationFixture ids={[TASK_A, TASK_B, TASK_C]} />);
+    observers[0].instance.emit({
+      target: screen.getByTestId(`column-${TASK_B}`),
+      isIntersecting: true,
+    });
+    expect(ids(DETAIL_IDS)).toEqual([TASK_B]);
+
+    view.rerender(<ActivationFixture ids={nextIds} />);
+
+    expect(ids(DETAIL_IDS)).toEqual([TASK_B]);
+    expect(observers[0].instance.observed).toEqual(
+      new Set(nextIds.map((id) => screen.getByTestId(`column-${id}`))),
+    );
+  });
+
   it("gives phone only the nearest visible snap column as detail owner", () => {
     responsiveMocks.useResponsiveBreakpoint.mockReturnValue(mobileBreakpoint());
     render(<ActivationFixture ids={[TASK_A, TASK_B, TASK_C]} />);

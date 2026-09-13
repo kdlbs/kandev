@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -183,7 +184,11 @@ func (h *Handler) createTrigger(c *gin.Context) {
 		Enabled:        true,
 	}
 	if err := h.svc.CreateRoutineTrigger(c.Request.Context(), trigger); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		status := http.StatusInternalServerError
+		if errors.Is(err, ErrInvalidTrigger) {
+			status = http.StatusBadRequest
+		}
+		c.JSON(status, gin.H{"error": err.Error()})
 		return
 	}
 	trigger.Secret = "" // redact before sending response

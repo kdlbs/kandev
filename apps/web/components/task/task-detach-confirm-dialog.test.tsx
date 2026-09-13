@@ -6,9 +6,43 @@ import {
   TaskDetachConfirmPopover,
   TaskDetachInlineConfirmation,
   TaskDetachTargetConfirmDialog,
+  TaskDetachConfirmationSurface,
 } from "./task-detach-confirm-dialog";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
+});
+
+it("routes phone detach to a sheet with the named hierarchy-only consequence", async () => {
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+  const onConfirm = vi.fn();
+  function Phone() {
+    const [open, setOpen] = useState(true);
+    const anchorRef = useRef<HTMLButtonElement>(null);
+    return (
+      <>
+        <button ref={anchorRef}>Child task</button>
+        <TaskDetachConfirmationSurface
+          taskId="child"
+          open={open}
+          anchorRef={anchorRef}
+          taskTitle="Child task"
+          sharesParentWorkspace
+          onOpenChange={setOpen}
+          onConfirm={onConfirm}
+        />
+      </>
+    );
+  }
+  render(<Phone />);
+  const sheet = await screen.findByRole("dialog", { name: "Detach task from parent?" });
+  expect(sheet.getAttribute("data-slot")).toBe("drawer-content");
+  expect(sheet.textContent).toContain("Child task");
+  expect(sheet.textContent).toContain("shares its parent's workspace");
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  expect(onConfirm).not.toHaveBeenCalled();
+});
 
 function PopoverHarness({ onConfirm = vi.fn() }: { onConfirm?: () => void | Promise<void> }) {
   const [open, setOpen] = useState(true);

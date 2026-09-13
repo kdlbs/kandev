@@ -1,4 +1,13 @@
 {
+  "views": "视图",
+  "viewPicker": "视图：{{view}}",
+  "loadingSavedQueries": "正在加载已保存的查询...",
+  "savedQueriesLoadFailed": "无法加载已保存的查询。",
+  "pageOf": "第 {{page}} 页，共 {{total}} 页",
+  "choosePage": "选择结果页",
+  "resultRange": "第 {{start}}–{{end}} 项，共 {{total}} 项",
+  "previousPage": "上一页",
+  "nextPage": "下一页",
   "aRegistrationCanBeReusedAcross": "一个注册可跨工作区复用，也可将工作和个人应用分开。每个工作区自行选择并安装凭据。",
   "accountsUnavailable": "账户不可用",
   "actionPromptPlaceholderHelp": "输入 {{token}} 可查看可用占位符。执行操作时会替换 <4>{{url}}</4> 和 <7>{{title}}</7>。",

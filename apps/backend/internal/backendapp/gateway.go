@@ -293,7 +293,7 @@ func provideGateway(
 		portHandlers.RegisterHandlers(gateway.Dispatcher)
 	}
 
-	go gateway.Hub.Run(ctx)
+	go gateway.Hub.Run(processRuntimeContext(ctx))
 	gateways.RegisterTaskNotifications(ctx, eventBus, gateway.Hub, log)
 	if taskRepo != nil && eventBus != nil {
 		var loadPullRequests statussummary.PullRequestLoader

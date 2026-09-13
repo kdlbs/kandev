@@ -464,6 +464,7 @@ function useSessionData(
   );
   const lastAgentError = useMemo(() => readLastAgentError(session?.metadata), [session?.metadata]);
   const processed = useProcessedMessages(messages, taskId, resolvedSessionId, taskDescription, {
+    initialPromptPreview: session?.metadata?.initial_prompt_preview,
     historyInitialized,
     hasOlderMessages,
     lastAgentError,

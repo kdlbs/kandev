@@ -1,21 +1,19 @@
 "use client";
 
-import { useRef } from "react";
 import { useDraggable } from "@dnd-kit/core";
 import { KanbanCardContextMenu } from "@/components/kanban-card-context-menu";
 import { KanbanCardShell } from "@/components/kanban-card-content";
-import { KanbanCardDialogs } from "@/components/kanban-card-dialogs";
 import { useActiveWorkspaceRepositories } from "@/components/kanban-card-repositories";
 export { resolveTaskRepositoryChips } from "@/components/kanban-card-repositories";
 import {
-  buildKanbanCardMenuEntries,
-  useKanbanCardMoveTargets,
-} from "@/components/kanban-card-menu-items";
-import { useTaskPluginLinkActions } from "@/components/task/task-session-sidebar-link-actions";
+  KanbanCardDialogs,
+  useKanbanCardMenus,
+  type KanbanCardMenuState,
+} from "@/components/kanban-card-menu";
+export { buildPluginMenuContext } from "@/components/kanban-card-menu";
 import { useAppStore } from "@/components/state-provider";
 import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
 import { TaskDetachConfirmationSurface } from "@/components/task/task-detach-confirm-dialog";
-import { type ExternalLinkProvider } from "@/components/task/task-external-link-dialog";
 import type { KanbanExternalLinkAvailability } from "./kanban-external-link-availability";
 import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
 import { useTaskMultiSelectStore } from "@/hooks/use-task-multi-select";
@@ -54,214 +52,6 @@ export interface KanbanCardProps {
   onRangeSelect?: (taskId: string) => void;
   isMultiSelectMode?: boolean;
 }
-
-function useKanbanCardMoveMenuActions({
-  task,
-  steps,
-  isSelected,
-  selectedIds,
-  onMove,
-}: Pick<KanbanCardProps, "task" | "steps" | "isSelected" | "selectedIds" | "onMove">) {
-  const moveTargets = useKanbanCardMoveTargets(task.id, steps);
-  const moveTasks = useTaskWorkflowMove();
-  const { sortByDisplayOrder, getWorkflowIdForTask } = useTaskMultiSelectStore();
-
-  const runMoveTasks = (
-    taskIds: string[],
-    workflowId: string,
-    stepId: string,
-    destination: "step" | "workflow",
-  ) => {
-    void moveTasks(taskIds, workflowId, stepId, destination).catch(() => {
-      // useTaskWorkflowMove already shows the failure toast.
-    });
-  };
-  const moveToStepFromDropdown = (stepId: string) => {
-    if (onMove) return onMove(task, stepId);
-    if (moveTargets.currentWorkflowId) {
-      runMoveTasks([task.id], moveTargets.currentWorkflowId, stepId, "step");
-    }
-  };
-  const selectedTaskIds = isSelected && selectedIds?.size ? [...selectedIds] : [task.id];
-  const orderedSelectedIds = () => sortByDisplayOrder(selectedTaskIds);
-  const isMixedWorkflowSelection =
-    selectedTaskIds.length > 1 &&
-    new Set(selectedTaskIds.map((id) => getWorkflowIdForTask(id))).size > 1;
-  const moveSelectedToStep = (stepId: string) => {
-    if (selectedTaskIds.length === 1 && selectedTaskIds[0] === task.id && onMove) {
-      onMove(task, stepId);
-      return;
-    }
-    if (!moveTargets.currentWorkflowId) return;
-    runMoveTasks(orderedSelectedIds(), moveTargets.currentWorkflowId, stepId, "step");
-  };
-
-  return {
-    moveTargets,
-    moveToStepFromDropdown,
-    moveSelectedToStep: isMixedWorkflowSelection ? undefined : moveSelectedToStep,
-    sendTaskToWorkflow: (workflowId: string, stepId: string) => {
-      runMoveTasks([task.id], workflowId, stepId, "workflow");
-    },
-    sendSelectionToWorkflow: (workflowId: string, stepId: string) => {
-      runMoveTasks(orderedSelectedIds(), workflowId, stepId, "workflow");
-    },
-  };
-}
-
-function externalLinkHandlers(
-  availability: KanbanCardProps["externalLinkAvailability"],
-  setExternalLinkProvider: (provider: ExternalLinkProvider) => void,
-) {
-  return {
-    onLinkJiraTicket: availability.jira ? () => setExternalLinkProvider("jira") : undefined,
-    onLinkLinearIssue: availability.linear ? () => setExternalLinkProvider("linear") : undefined,
-    onLinkSentryIssue: availability.sentry ? () => setExternalLinkProvider("sentry") : undefined,
-  };
-}
-
-/** Link-dialog openers shared by both the dropdown and context menu builds. */
-function buildLinkDialogHandlers(
-  externalLinkAvailability: KanbanExternalLinkAvailability,
-  dialogs: ReturnType<typeof useTaskMenuDialogState>,
-) {
-  return {
-    onLinkPullRequest: () => dialogs.setShowPRDialog(true),
-    onLinkIssue: () => dialogs.setShowIssueDialog(true),
-    onLinkMergeRequest: externalLinkAvailability.gitlab
-      ? () => dialogs.setShowMRDialog(true)
-      : undefined,
-    ...externalLinkHandlers(externalLinkAvailability, dialogs.setExternalLinkProvider),
-  };
-}
-
-export function buildPluginMenuContext(
-  task: Task,
-  workspaceId: string | null,
-  presentation: KanbanPresentation,
-): PluginTaskMenuContext {
-  return {
-    workspaceId: workspaceId ?? "",
-    taskId: task.id,
-    taskTitle: task.title,
-    workflowStepId: task.workflowStepId ?? null,
-    presentation,
-  };
-}
-
-function useKanbanCardMenus({
-  task,
-  workspaceId,
-  presentation = "desktop",
-  steps,
-  isDeleting,
-  isArchiving,
-  isSelected,
-  selectedIds,
-  onEdit,
-  onDelete,
-  onArchive,
-  onMove,
-  externalLinkAvailability,
-}: Pick<
-  KanbanCardProps,
-  | "task"
-  | "workspaceId"
-  | "presentation"
-  | "externalLinkAvailability"
-  | "steps"
-  | "isDeleting"
-  | "isArchiving"
-  | "isSelected"
-  | "selectedIds"
-  | "onEdit"
-  | "onDelete"
-  | "onArchive"
-  | "onMove"
->) {
-  const pluginLinkActions = useTaskPluginLinkActions(task.id, task.repositories ?? []);
-  // Plugins load asynchronously and can be disabled/uninstalled at runtime;
-  // re-render on any registry change so a menu action a plugin registers
-  // after this card already mounted still appears, and one whose plugin was
-  // just disabled doesn't linger as a stale entry.
-  usePluginRegistry();
-  const moveMenu = useKanbanCardMoveMenuActions({ task, steps, isSelected, selectedIds, onMove });
-  const dialogs = useTaskMenuDialogState();
-  const { detachTask, detachingTaskId } = useDetachTask();
-  const updateTaskPriority = useUpdateTaskPriority();
-  const detachAnchorRef = useRef<HTMLDivElement>(null);
-  const detachFocusReturnRef = useRef<HTMLButtonElement>(null);
-  const isDetaching = detachingTaskId === task.id;
-  const disabled = Boolean(isDeleting || isArchiving || isDetaching);
-  const actingOnMultiSelection = Boolean(isSelected && selectedIds && selectedIds.size > 1);
-
-  const handleDetachConfirm = async () => {
-    try {
-      await detachTask(task.id);
-      dialogs.setShowDetachConfirm(false);
-    } catch (error) {
-      console.error("Failed to detach task:", error);
-    }
-  };
-
-  const requestDetachConfirmation = () => {
-    // Let Radix finish the menu's pointer sequence before the non-modal
-    // popover opens; otherwise the initiating menu event is an outside click.
-    window.setTimeout(() => dialogs.setShowDetachConfirm(true), 300);
-  };
-
-  const requestArchiveConfirmation = () => {
-    // Let Radix finish the menu's pointer sequence before the local surface
-    // opens; otherwise the initiating menu event is treated as outside input.
-    window.setTimeout(() => dialogs.setShowArchiveConfirm(true), 300);
-  };
-
-  const menuBase = {
-    currentWorkflowId: moveMenu.moveTargets.currentWorkflowId,
-    currentStepId: task.workflowStepId,
-    workflows: moveMenu.moveTargets.workflowItems,
-    stepsByWorkflowId: moveMenu.moveTargets.stepsByWorkflowId,
-    disabled,
-    isDeleting,
-    isArchiving,
-    isDetaching,
-    parentTaskId: task.parentTaskId,
-    currentPriority: task.priority,
-    onSelectPriority: (priority: TaskPriority) => void updateTaskPriority(task.id, priority),
-    onEdit: onEdit ? () => onEdit(task) : undefined,
-    onArchive: onArchive ? requestArchiveConfirmation : undefined,
-    onDelete: onDelete ? () => dialogs.setShowDeleteConfirm(true) : undefined,
-    onDetach: task.parentTaskId && !actingOnMultiSelection ? requestDetachConfirmation : undefined,
-    ...buildLinkDialogHandlers(externalLinkAvailability, dialogs),
-    pluginLinkActions,
-  };
-
-  const pluginMenuContext = buildPluginMenuContext(task, workspaceId, presentation);
-
-  return {
-    ...dialogs,
-    dropdownMenuEntries: buildKanbanCardMenuEntries({
-      ...menuBase,
-      onMoveToStep: moveMenu.moveToStepFromDropdown,
-      onSendToWorkflow: moveMenu.sendTaskToWorkflow,
-      pluginMenuContext,
-    }),
-    contextMenuEntries: buildKanbanCardMenuEntries({
-      ...menuBase,
-      onMoveToStep: moveMenu.moveSelectedToStep,
-      onSendToWorkflow: moveMenu.sendSelectionToWorkflow,
-      pluginMenuContext,
-    }),
-    isDetaching,
-    detachAnchorRef,
-    detachFocusReturnRef,
-    archiveAnchorRef: detachFocusReturnRef,
-    archiveFocusReturnRef: detachFocusReturnRef,
-    handleDetachConfirm,
-  };
-}
-
-export type KanbanCardMenuState = ReturnType<typeof useKanbanCardMenus>;
 
 /**
  * Cmd/Ctrl-click toggles a single card; Shift-click range-selects within the
@@ -364,6 +154,7 @@ function KanbanCardFrame({
         </KanbanCardContextMenu>
       </div>
       <TaskDetachConfirmationSurface
+        taskId={task.id}
         open={menu.showDetachConfirm}
         anchorRef={menu.detachAnchorRef}
         focusReturnRef={menu.detachFocusReturnRef}

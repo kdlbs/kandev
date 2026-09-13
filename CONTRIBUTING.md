@@ -30,6 +30,12 @@ discussed the direction before opening the PR. Link the issue from the PR. If
 an agent is preparing the change, it must stop and report missing discussion
 instead of opening the PR.
 
+### Documentation coverage
+
+When implementing a feature or fix, update the relevant requirements, system
+design, plan, and work-order files. CI runs a linter to check PR documentation
+coverage.
+
 ## How to Contribute
 
 1. **Fork and branch.** Create a feature branch from `main`.

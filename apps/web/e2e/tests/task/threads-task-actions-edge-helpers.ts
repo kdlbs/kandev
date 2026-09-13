@@ -134,9 +134,11 @@ export async function lateArchiveOutcome(
     await ui.pick("Archive");
     await expect.poll(() => pending !== null).toBe(true);
     await expect(page.getByTestId("archive-task-confirm")).toHaveCount(0);
+    await expect(ui.column(a.id)).toHaveCount(0);
     await ui.open(b.id);
     await expect(ui.choice("Delete")).toBeDisabled();
     await pending!.continue();
+    pending = null;
     await expect(ui.column(a.id)).toHaveCount(0);
     await expect(ui.choice("Delete")).toBeEnabled();
     await ui.nested("Priority");
@@ -145,6 +147,7 @@ export async function lateArchiveOutcome(
     expect((await api.getTask(a.id)).priority).not.toBe("critical");
     await expect(ui.trigger(b.id)).toBeFocused();
   } finally {
+    if (pending) await (pending as Route).abort();
     await page.unroute(`**/api/v1/tasks/${a.id}/archive`);
     await api.saveUserSettings({ confirm_task_archive: true });
   }

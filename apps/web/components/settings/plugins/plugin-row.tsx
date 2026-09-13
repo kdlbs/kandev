@@ -16,6 +16,7 @@ import { PluginRepoLink } from "./plugin-repo-link";
 import { PluginStatusBadge } from "./plugin-status-badge";
 import { PluginErrorDiagnostic } from "./plugin-error-diagnostic";
 import { PluginUninstallConfirmation } from "./uninstall-plugin-dialog";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type { MarketplaceEntry, PluginRecord } from "@/lib/types/plugins";
 import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
 import { controlSizingClassName } from "@kandev/ui/control-sizing";
@@ -489,31 +490,18 @@ function PluginRowActions({
   onUpdate,
 }: PluginRowActionsProps) {
   const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
   const updateEntry = update?.hasUpdate ? update.latest : undefined;
   return (
     <div className="relative z-10 flex flex-wrap items-center gap-2 shrink-0">
       {updateEntry && onUpdate && (
-        <Button
-          variant="default"
-          size="sm"
-          data-testid={`plugin-update-${plugin.id}`}
-          className={controlSizingClassName(
-            "compact",
-            "cursor-pointer gap-1 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11",
-          )}
-          aria-busy={update?.busy ? "true" : undefined}
+        <PluginUpdateButton
+          pluginId={plugin.id}
+          entry={updateEntry}
+          updating={!!update?.busy}
           disabled={busy}
-          onClick={() => onUpdate(updateEntry)}
-        >
-          {update?.busy ? (
-            <IconLoader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <IconArrowUpCircle className="h-4 w-4" />
-          )}
-          {update?.busy
-            ? t("plugins:updating")
-            : t("plugins:updateToVersion", { version: updateEntry.version })}
-        </Button>
+          onUpdate={onUpdate}
+        />
       )}
       {canEnable && (
         <Button
@@ -543,7 +531,7 @@ function PluginRowActions({
           {t("plugins:disable")}
         </Button>
       )}
-      {(isFinePointer || !confirmingUninstall) && (
+      {(isMobile || isFinePointer || !confirmingUninstall) && (
         <Button
           ref={uninstallAnchorRef}
           variant="ghost"
@@ -571,5 +559,42 @@ function PluginRowActions({
         {t("plugins:settings")}
       </Link>
     </div>
+  );
+}
+
+function PluginUpdateButton({
+  pluginId,
+  entry,
+  updating,
+  disabled,
+  onUpdate,
+}: {
+  pluginId: string;
+  entry: MarketplaceEntry;
+  updating: boolean;
+  disabled: boolean;
+  onUpdate: (entry: MarketplaceEntry) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <Button
+      variant="default"
+      size="sm"
+      data-testid={`plugin-update-${pluginId}`}
+      className={controlSizingClassName(
+        "compact",
+        "cursor-pointer gap-1 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11",
+      )}
+      aria-busy={updating ? "true" : undefined}
+      disabled={disabled}
+      onClick={() => onUpdate(entry)}
+    >
+      {updating ? (
+        <IconLoader2 className="h-4 w-4 animate-spin" />
+      ) : (
+        <IconArrowUpCircle className="h-4 w-4" />
+      )}
+      {updating ? t("plugins:updating") : t("plugins:updateToVersion", { version: entry.version })}
+    </Button>
   );
 }

@@ -6,6 +6,7 @@ import {
   IconCircleDashed,
   IconChevronLeft,
   IconChevronRight,
+  IconHelpCircle,
 } from "@tabler/icons-react";
 import { cn } from "@kandev/ui/lib/utils";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
@@ -28,7 +29,7 @@ export type Graph2StepNodeProps = {
   hasPrev: boolean;
   hasNext: boolean;
   onMoveTask: (task: Task, targetStepId: string) => void;
-  onOpenTask: (task: Task) => void;
+  onOpenTask?: (task: Task) => void;
   prevStepId?: string;
   nextStepId?: string;
   prevStepTitle?: string;
@@ -41,23 +42,61 @@ export type Graph2StepNodeProps = {
 const NODE_CLASS =
   "w-[130px] h-[36px] rounded-lg shrink-0 px-2.5 flex flex-col items-start justify-center";
 
+/**
+ * A completed step: every step keeps its own labelled pill, matching the
+ * Kanban card's step run. Muted rather than green — the run's only color
+ * signal is the current step's accent border and the row's amber
+ * needs-attention edge; a third hue on every past step competed with both.
+ */
 function PastNode({ step }: { step: WorkflowStep }) {
   return (
-    <div className={cn(NODE_CLASS, "border border-muted-foreground/20 bg-muted/30")}>
+    <div
+      data-testid="graph2-step-node-past"
+      title={step.title}
+      className={cn(NODE_CLASS, "border border-muted-foreground/20 bg-muted/30")}
+    >
       <div className="flex items-center gap-1.5 w-full">
-        <IconCheck className="h-3 w-3 text-green-500 shrink-0" />
+        <IconCheck className="h-3 w-3 text-muted-foreground/50 shrink-0" />
         <span className="text-[11px] text-muted-foreground truncate">{step.title}</span>
       </div>
     </div>
   );
 }
 
+/** A not-yet-reached step: dashed to distinguish it from a completed one. */
 function FutureNode({ step }: { step: WorkflowStep }) {
   return (
-    <div className={cn(NODE_CLASS, "border border-dashed border-muted-foreground/20 bg-muted/10")}>
+    <div
+      data-testid="graph2-step-node-future"
+      title={step.title}
+      className={cn(NODE_CLASS, "border border-dashed border-muted-foreground/20 bg-muted/10")}
+    >
       <div className="flex items-center gap-1.5 w-full">
         <IconCircleDashed className="h-3 w-3 text-muted-foreground/40 shrink-0" />
         <span className="text-[11px] text-muted-foreground/40 truncate">{step.title}</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The synthetic labelled marker rendered when a task has no resolvable
+ * current step: `workflowStepId` is empty, so it matches no displayed step.
+ * It carries fixed unassigned-step copy rather than a step title, and no move
+ * controls, there being no current step for either direction.
+ */
+export function Graph2UnassignedStepMarker() {
+  const { t } = useTranslation();
+  const label = t("kanban:pipelineUnassignedStep");
+  return (
+    <div
+      data-testid="graph2-step-node-unassigned"
+      title={label}
+      className={cn(NODE_CLASS, "border border-dashed border-muted-foreground/40 bg-muted/20")}
+    >
+      <div className="flex items-center gap-1.5 w-full">
+        <IconHelpCircle className="h-3 w-3 text-muted-foreground/60 shrink-0" />
+        <span className="text-[11px] font-medium text-muted-foreground truncate">{label}</span>
       </div>
     </div>
   );
@@ -67,13 +106,13 @@ function MoveButton({
   direction,
   isMoving,
   label,
-  showTooltip,
+  showTooltip = true,
   onClick,
 }: {
   direction: "left" | "right";
   isMoving?: boolean;
   label: string;
-  showTooltip: boolean;
+  showTooltip?: boolean;
   onClick: (e: React.MouseEvent) => void;
 }) {
   const posClass = direction === "left" ? "-left-3" : "-right-3";
@@ -84,6 +123,7 @@ function MoveButton({
       aria-label={label}
       disabled={isMoving}
       onClick={onClick}
+      onContextMenu={(e) => e.stopPropagation()}
       className={cn(
         `absolute ${posClass} top-1/2 -translate-y-1/2 z-10`,
         "h-5 w-5 rounded-full bg-background border border-border shadow-sm",
@@ -95,10 +135,17 @@ function MoveButton({
       <Icon className="h-3 w-3" />
     </button>
   );
+  // The tooltip names the destination step. Keep the trigger wrapper for the
+  // default card/pipeline behavior, while allowing visible destinations to
+  // opt out when the caller already renders that name in the run.
   if (!showTooltip) return button;
   return (
     <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
+      <TooltipTrigger asChild>
+        <span tabIndex={isMoving ? 0 : -1} className="inline-flex">
+          {button}
+        </span>
+      </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
   );
@@ -116,8 +163,8 @@ export function Graph2StepNode({
   nextStepId,
   prevStepTitle,
   nextStepTitle,
-  prevStepHidden = false,
-  nextStepHidden = false,
+  prevStepHidden,
+  nextStepHidden,
   isMoving,
 }: Graph2StepNodeProps) {
   const { t } = useTranslation();
@@ -136,10 +183,6 @@ export function Graph2StepNode({
 
   // Current phase
   const running = isRunningState(task.state);
-
-  const handleClick = () => {
-    onOpenTask(task);
-  };
 
   const showMoveControls = isHovered || isFocused;
 
@@ -168,9 +211,13 @@ export function Graph2StepNode({
         />
       )}
 
+      {/* onOpenTask is not yet threaded through PipelineStepNodes, so this
+          onClick is inert today; an unhandled right-click still bubbles to
+          the row's own context menu, same as the title. */}
       <button
         type="button"
-        onClick={handleClick}
+        title={step.title}
+        onClick={() => onOpenTask?.(task)}
         className={cn(
           NODE_CLASS,
           "cursor-pointer transition-colors bg-background hover:bg-accent/30",

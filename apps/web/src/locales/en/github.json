@@ -1,4 +1,13 @@
 {
+  "views": "Views",
+  "viewPicker": "Views: {{view}}",
+  "loadingSavedQueries": "Loading saved queries...",
+  "savedQueriesLoadFailed": "Saved queries could not be loaded.",
+  "pageOf": "Page {{page}} of {{total}}",
+  "choosePage": "Choose results page",
+  "resultRange": "{{start}}–{{end}} of {{total}}",
+  "previousPage": "Previous page",
+  "nextPage": "Next page",
   "aRegistrationCanBeReusedAcross": "A registration can be reused across workspaces, or you can keep work and personal Apps separate. Each workspace selects and installs its own credential.",
   "accountsUnavailable": "Accounts unavailable",
   "actionPromptPlaceholderHelp": "Type {{token}} to see available placeholders. <4>{{url}}</4> and <7>{{title}}</7> are substituted when the action runs.",

@@ -1,4 +1,13 @@
 {
+  "views": "Vĩēŵś",
+  "viewPicker": "Vĩēŵś: {{view}}",
+  "loadingSavedQueries": "Ĺōàďĩńĝ śàvēď qũēŕĩēś...",
+  "savedQueriesLoadFailed": "Śàvēď qũēŕĩēś ćōũĺď ńōţ ƀē ĺōàďēď.",
+  "pageOf": "Ƥàĝē {{page}} ōƒ {{total}}",
+  "choosePage": "Ćĥōōśē ŕēśũĺţś ƥàĝē",
+  "resultRange": "{{start}}–{{end}} ōƒ {{total}}",
+  "previousPage": "Ƥŕēvĩōũś ƥàĝē",
+  "nextPage": "Ńēxţ ƥàĝē",
   "aRegistrationCanBeReusedAcross": "À ŕēĝĩśţŕàţĩōń ćàń ƀē ŕēũśēď àćŕōśś ŵōŕķśƥàćēś, ōŕ ŷōũ ćàń ķēēƥ ŵōŕķ àńď ƥēŕśōńàĺ Àƥƥś śēƥàŕàţē. Ēàćĥ ŵōŕķśƥàćē śēĺēćţś àńď ĩńśţàĺĺś ĩţś ōŵń ćŕēďēńţĩàĺ.",
   "accountsUnavailable": "Àććōũńţś ũńàvàĩĺàƀĺē",
   "actionPromptPlaceholderHelp": "Ţŷƥē {{token}} ţō śēē àvàĩĺàƀĺē ƥĺàćēĥōĺďēŕś. <4>{{url}}</4> àńď <7>{{title}}</7> àŕē śũƀśţĩţũţēď ŵĥēń ţĥē àćţĩōń ŕũńś.",

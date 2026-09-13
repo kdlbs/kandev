@@ -1,5 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { MobileGitHubPage } from "../../pages/mobile-github-page";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
 
 const DEFAULT_REPO = "mobileorg/defaultrepo";
 const DEFAULT_REPO_ISSUE = "Mobile issue in saved default repo";
@@ -8,6 +10,97 @@ const SAVED_QUERY_FILTER = "assignee:@me is:open mobile-saved-default-repo-e2e";
 const DEFAULTS_TIMESTAMP = "2026-08-07T00:00:00Z";
 
 test.describe("Mobile /github sidebar", () => {
+  // @covers AC-INTEGRATIONS-GITHUB-MOBILE-001.1
+  test("opens the save form after the Views drawer releases focus", async ({
+    testPage,
+    apiClient,
+  }) => {
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("test-user");
+    const github = new MobileGitHubPage(testPage);
+    await github.goto();
+    await github.mobileMenuButton.tap();
+    await expect(github.mobileSidebar).toBeVisible();
+    await testPage.addStyleTag({
+      content:
+        '[data-testid="github-mobile-sidebar"][data-state="closed"] { animation-duration: 1s !important; transition-duration: 1s !important; }',
+    });
+    await github.mobileSidebar.getByRole("button", { name: "Save current query" }).tap();
+    const dialog = testPage.getByRole("dialog", { name: "Save query", exact: true });
+    await expect(dialog).toBeVisible();
+    expect(await github.mobileSidebar.isVisible()).toBe(false);
+    await dialog.getByLabel("Name", { exact: true }).fill("Keep this draft");
+    await expect(dialog.getByLabel("Name", { exact: true })).toBeFocused();
+    await dialog.getByRole("button", { name: "Cancel", exact: true }).tap();
+    await expect(dialog).toBeHidden();
+    await expect(github.mobileMenuButton).toBeFocused();
+  });
+
+  // @covers AC-INTEGRATIONS-GITHUB-MOBILE-001.2
+  test("keeps the view picker open while changing result kind", async ({ testPage, apiClient }) => {
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("test-user");
+    const github = new MobileGitHubPage(testPage);
+    await github.goto();
+    await github.mobileMenuButton.tap();
+    await github.mobileSidebar.getByRole("button", { name: "Issues", exact: true }).tap();
+    await expect(github.mobileSidebar).toBeVisible();
+    await github.presetByLabel("Mentions").tap();
+    await expect(github.mobileSidebar).toBeHidden();
+    await expect(github.toolbarTitle).toContainText("Mentions");
+    await expect(github.mobileMenuButton).toBeFocused();
+  });
+
+  // @covers AC-INTEGRATIONS-GITHUB-MOBILE-001.1
+  test("retains a failed save for retry", async ({ testPage, apiClient, seedData }) => {
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetUser("test-user");
+    const baseline = await testPage.request.get("/api/v1/github/workspace-settings", {
+      params: { workspace_id: seedData.workspaceId },
+    });
+    expect(baseline.ok()).toBe(true);
+    const settings = await baseline.json();
+    const github = new MobileGitHubPage(testPage);
+    await github.goto();
+    await github.mobileMenuButton.tap();
+    await github.mobileSidebar.getByRole("button", { name: "Save current query" }).tap();
+    const dialog = testPage.getByRole("dialog", { name: "Save query" });
+    await dialog.getByLabel("Name", { exact: true }).fill("Retry my view");
+    let failSave = true;
+    await testPage.route("**/api/v1/github/workspace-settings", async (route) => {
+      if (route.request().method() === "PUT" && failSave) {
+        failSave = false;
+        await route.fulfill({ status: 503, json: { error: "settings unavailable" } });
+      } else await route.continue();
+    });
+    try {
+      const failed = testPage.waitForResponse(
+        (response) =>
+          response.url().includes("/api/v1/github/workspace-settings") && response.status() === 503,
+      );
+      await dialog.getByRole("button", { name: "Save", exact: true }).tap();
+      await failed;
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue("Retry my view");
+      const saved = testPage.waitForResponse(
+        (response) =>
+          response.url().includes("/api/v1/github/workspace-settings") &&
+          response.request().method() === "PUT" &&
+          response.ok(),
+      );
+      await dialog.getByRole("button", { name: "Save", exact: true }).tap();
+      await saved;
+      await expect(dialog).toBeHidden();
+      await expect(github.toolbarTitle).toHaveText("Retry my view");
+    } finally {
+      await testPage.unroute("**/api/v1/github/workspace-settings");
+      const restored = await testPage.request.put("/api/v1/github/workspace-settings", {
+        data: { workspace_id: seedData.workspaceId, saved_presets: settings.saved_presets ?? [] },
+      });
+      expect(restored.ok()).toBe(true);
+    }
+  });
+
   test.describe("saved default views", () => {
     test.afterEach(async ({ testPage, seedData }) => {
       const cleanupResponse = await testPage.request.put("/api/v1/github/workspace-settings", {
@@ -58,7 +151,6 @@ test.describe("Mobile /github sidebar", () => {
       await page.mobileMenuButton.tap();
       await page.mobileSidebar.getByRole("button", { name: "Issues", exact: true }).tap();
       await expect(page.toolbarTitle).toContainText("Assigned");
-      await page.mobileMenuButton.tap();
 
       const defaultAction = page.savedQueryDefaultAction(savedLabel);
       const actionBox = await defaultAction.boundingBox();
@@ -95,7 +187,7 @@ test.describe("Mobile /github sidebar", () => {
     });
   });
 
-  test("hamburger opens sheet and selecting a preset updates the toolbar", async ({
+  test("Views opens the drawer and selecting a preset updates the toolbar", async ({
     testPage,
     apiClient,
   }) => {
@@ -118,7 +210,7 @@ test.describe("Mobile /github sidebar", () => {
     await page.goto();
 
     // On a mobile viewport the inline desktop sidebar is hidden and the
-    // hamburger menu button is visible.
+    // named Views button is visible.
     await expect(page.mobileMenuButton).toBeVisible();
     await expect(page.inlineSidebar).toBeHidden();
 
@@ -209,6 +301,7 @@ test.describe("Mobile /github sidebar", () => {
     await page.goto();
     await page.mobileMenuButton.tap();
     await page.mobileSidebar.getByRole("button", { name: "Issues", exact: true }).tap();
+    await page.mobileSidebar.getByRole("button", { name: "Done", exact: true }).tap();
     const queryInput = testPage.getByPlaceholder(/Custom query/);
     await queryInput.fill(SAVED_QUERY_FILTER);
     await queryInput.press("Enter");
@@ -255,7 +348,6 @@ test.describe("Mobile /github sidebar", () => {
     await page.mobileMenuButton.waitFor({ state: "visible" });
     await page.mobileMenuButton.tap();
     await page.mobileSidebar.getByRole("button", { name: "Issues", exact: true }).tap();
-    await page.mobileMenuButton.tap();
     await page.savedQueryByLabel(savedQuery).tap();
     await expect(page.repoFilterTrigger).toContainText(DEFAULT_REPO);
     await expect(page.issueRowByTitle(DEFAULT_REPO_ISSUE)).toBeVisible();
@@ -270,17 +362,24 @@ test.describe("Mobile /github sidebar", () => {
     const deleteAction = page.mobileSidebar.getByRole("button", {
       name: `Delete ${savedQuery} saved query`,
     });
+    await waitForFiniteAnimations(page.mobileSidebar);
     const deleteBox = await deleteAction.boundingBox();
     expect(deleteBox?.height ?? 0).toBeGreaterThanOrEqual(44);
     expect(deleteBox?.width ?? 0).toBeGreaterThanOrEqual(44);
+    const originalDialogId = await page.mobileSidebar.getAttribute("id");
+    await expect(page.mobileSidebar).toHaveAttribute("data-vaul-drawer-direction", "bottom");
     await deleteAction.tap();
     const deleteConfirmation = page.mobileSidebar.getByTestId(
       "saved-task-view-delete-confirmation",
     );
     await expect(deleteConfirmation).toHaveAccessibleName(`Delete ${savedQuery}?`);
+    await expectContentSizedBottomConfirmation(page.mobileSidebar, deleteConfirmation);
     await expect(testPage.locator('[role="dialog"]:visible')).toHaveCount(1);
+    await expect(page.mobileSidebar).toHaveAttribute("id", originalDialogId!);
+    await expect(deleteConfirmation.getByRole("button", { name: "Back" })).toBeVisible();
+    await waitForFiniteAnimations(page.mobileSidebar);
     await prCapture.screenshot("saved-query-delete-mobile", {
-      caption: "A saved integration query confirms inline without nesting another sheet.",
+      caption: "A saved integration query becomes a confirmation step inside the filter sheet.",
     });
     await deleteConfirmation.getByRole("button", { name: "Cancel" }).tap();
     await expect(page.savedQueryByLabel(savedQuery)).toBeVisible();
