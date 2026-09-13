@@ -291,8 +291,7 @@ func waitForPIDExit(t *testing.T, pid int, timeout time.Duration) {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		err := syscall.Kill(pid, 0)
-		if errors.Is(err, syscall.ESRCH) {
+		if testPIDExited(pid) {
 			return
 		}
 		select {
@@ -302,4 +301,24 @@ func waitForPIDExit(t *testing.T, pid int, timeout time.Duration) {
 			t.Fatalf("Git descendant %d remained alive", pid)
 		}
 	}
+}
+
+func testPIDExited(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	if errors.Is(err, syscall.ESRCH) {
+		return true
+	}
+	if err != nil {
+		return false
+	}
+
+	// A descendant is reparented when its Git leader exits. Some Unix test
+	// runners retain the killed child as a zombie briefly, so signal-zero alone
+	// still reports it as present even though it can no longer run.
+	data, readErr := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if readErr != nil {
+		return false
+	}
+	closeParen := strings.LastIndex(string(data), ")")
+	return closeParen >= 0 && len(data) > closeParen+2 && (data[closeParen+2] == 'Z' || data[closeParen+2] == 'X')
 }

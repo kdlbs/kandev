@@ -117,7 +117,7 @@ func waitForProcessGitPIDExit(t *testing.T, pid int, timeout time.Duration) {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		if errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
+		if processGitPIDExited(pid) {
 			return
 		}
 		select {
@@ -127,4 +127,24 @@ func waitForProcessGitPIDExit(t *testing.T, pid int, timeout time.Duration) {
 			t.Fatalf("Git child %d remained alive", pid)
 		}
 	}
+}
+
+func processGitPIDExited(pid int) bool {
+	err := syscall.Kill(pid, 0)
+	if errors.Is(err, syscall.ESRCH) {
+		return true
+	}
+	if err != nil {
+		return false
+	}
+
+	// Orphaned descendants can remain as zombies briefly after the process
+	// group is killed. They cannot execute, although signal-zero still finds
+	// their PID.
+	data, readErr := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+	if readErr != nil {
+		return false
+	}
+	closeParen := strings.LastIndex(string(data), ")")
+	return closeParen >= 0 && len(data) > closeParen+2 && (data[closeParen+2] == 'Z' || data[closeParen+2] == 'X')
 }
