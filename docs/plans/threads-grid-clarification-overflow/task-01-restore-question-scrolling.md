@@ -321,7 +321,8 @@ before mouse activation. The agent received exactly `db=q1_opt3`,
 Shift+Tab, Enter and Space completed the same bundle in the keyboard case.
 Neighbor boxes and deck scroll offsets remained unchanged.
 
-Pixel 5 (393x851) and short 393x500 phone emulation completed that same exchange
+Pixel 5 (393x727 content viewport, 393x851 emulated screen) and short 393x500
+phone emulation completed that same exchange
 with CDP touch start/move/end and real taps. Option rows measured 56.5px high,
 Submit 44px; full containment and real hits passed. One active conversation,
 the visible composer, viewport clearance, no document horizontal overflow,
@@ -353,3 +354,38 @@ PR #3655's documentation finding corrected the parent package's stale
 implemented status. The historical parent evidence remains intact. This
 documentation-only correction passed catalog validation, specification lint
 and diff checks; production code, tests and screenshots are unchanged.
+
+### Compatibility with concurrent main
+
+Main advanced to `89bf7657a28fd1ed58452d57abe631c175e08a05` with provider
+diagnostics changes. No files overlap this fix, but the agent lifecycle is a
+shared contract. PR head `d1ad7d66ce5eaf721455640ce7f513735af3e353` and that
+base produced conflict-free synthetic merge
+`d72049ea50c95fe7c78a28638aad69f61b498f00`, tested in a detached disposable
+worktree. The frontend runtime, packages, manifest and lockfile are identical
+to the tested fix; the only additional web change is an upstream transport
+recovery E2E spec. The PR branch was not rebased or merged.
+
+After `cd apps && pnpm install --frozen-lockfile` (903 packages, 4.1s), current
+backend/plugin and Vite assets were built. The first managed build stopped
+before tests because an existing `/tmp/.git` marker confused Go's VCS lookup.
+An environment-only override was replaced by an explicit Make override, since
+the Makefile owns `GOFLAGS`. The successful commands from the disposable root
+were `make -C apps/backend GOFLAGS='-v -buildvcs=false' build-dev e2e-plugin-package`
+and `make build-web-e2e` (8.41s). Only optional Go VCS metadata was disabled;
+the application's build version/commit still identified the synthetic merge.
+
+Sequential commands from its `apps/web`, each using current assets, strict WS,
+one worker and zero retries:
+
+```bash
+E2E_PORT_OFFSET=20 pnpm e2e:run --host --no-build --shards 1 --project chromium tests/task/threads-composer-disclosure.spec.ts --grep 'zoom 0.9' --workers=1 --retries=0
+E2E_PORT_OFFSET=20 pnpm e2e:run --host --no-build --shards 1 --project mobile-chrome tests/task/mobile-threads-composer-disclosure.spec.ts --grep 'short phone' --workers=1 --retries=0
+```
+
+Both native 90% Grid cases passed (32.4s total), followed by the short-phone
+touch/submission case (17.9s total). Fixture roots
+`/tmp/kandev-e2e-0-yU6fwf` and `/tmp/kandev-e2e-0-4CMTkQ` were removed by teardown.
+The separate evidence correction records Pixel 5's actual 393x727 viewport
+and 393x851 screen, verified against its PNG dimensions at device scale 2.75;
+all 36 recorded activation targets remain fully contained and hit-test true.

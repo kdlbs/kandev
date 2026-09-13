@@ -749,7 +749,17 @@
           "footerScrollTop": 0,
           "innerScrollTop": 40
         }
-      ]
+      ],
+      "viewport": {
+        "width": 393,
+        "height": 727
+      },
+      "screen": {
+        "width": 393,
+        "height": 851
+      },
+      "deviceScaleFactor": 2.75,
+      "viewport_source": "Pixel 5 preset or explicit short viewport; confirmed by captured viewport PNG dimensions."
     },
     {
       "case": "task-mobile-threads-compos-d64ef-stion-by-touch-short-phone--mobile-chrome",
@@ -869,7 +879,17 @@
           "footerScrollTop": 0,
           "innerScrollTop": 38
         }
-      ]
+      ],
+      "viewport": {
+        "width": 393,
+        "height": 500
+      },
+      "screen": {
+        "width": 393,
+        "height": 851
+      },
+      "deviceScaleFactor": 2.75,
+      "viewport_source": "Pixel 5 preset or explicit short viewport; confirmed by captured viewport PNG dimensions."
     }
   ]
 }
