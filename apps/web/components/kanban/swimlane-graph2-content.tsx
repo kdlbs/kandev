@@ -13,7 +13,7 @@ import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import { useTranslation } from "react-i18next";
 import { areAllEmptyStepsAutoHidden } from "@/lib/kanban/auto-hide-empty-columns";
-import { sortTasksForPipelineView } from "@/lib/kanban/task-order";
+import { compareStepOrder, sortTasksForPipelineView } from "@/lib/kanban/task-order";
 
 /**
  * Pipeline row order: each step's contiguous run of rows in step-list order
@@ -28,6 +28,17 @@ export function sortGraph2Tasks(
   displaySteps: WorkflowStep[],
   sortToken: Parameters<typeof sortTasksForPipelineView>[2] = "created_desc",
 ): Task[] {
+  if (sortToken === "created_desc" && displayTasks.some((task) => "position" in task)) {
+    const noStepSentinel = displaySteps.length;
+    const stepIndex = new Map(displaySteps.map((step, index) => [step.id, index]));
+    return [...displayTasks].sort((left, right) => {
+      const stepDiff =
+        (stepIndex.get(left.workflowStepId) ?? noStepSentinel) -
+        (stepIndex.get(right.workflowStepId) ?? noStepSentinel);
+      if (stepDiff !== 0) return stepDiff;
+      return compareStepOrder(left, right);
+    });
+  }
   return sortTasksForPipelineView(displayTasks, displaySteps, sortToken);
 }
 
