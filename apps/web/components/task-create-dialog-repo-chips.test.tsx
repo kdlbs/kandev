@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- repository creation regressions share this focused row fixture. */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import type { Branch, Repository, RepositoryBranchPolicy } from "@/lib/types/http";
@@ -13,6 +14,12 @@ const mockBranches = vi.hoisted(
   }),
 );
 const mockPolicies = vi.hoisted((): { value: RepositoryBranchPolicy[] } => ({ value: [] }));
+type CreationSurfaceProps = {
+  open: boolean;
+  onCreated: (repository: Repository) => boolean | void;
+  onOpenChange: (open: boolean) => void;
+};
+const creationSurface = vi.hoisted(() => ({ props: null as CreationSurfaceProps | null }));
 
 vi.mock("@/hooks/domains/workspace/use-repository-branches", () => ({
   useBranches: (source: unknown) => {
@@ -49,10 +56,18 @@ vi.mock("@/components/repository-discovery-controls", () => ({
   RepositoryDiscoveryControls: () => <div data-testid="repository-discovery-controls" />,
 }));
 
+vi.mock("@/components/create-local-repository-surface", () => ({
+  CreateLocalRepositorySurface: (props: CreationSurfaceProps) => {
+    creationSurface.props = props;
+    return null;
+  },
+}));
+
 import { RepoChipsRow } from "./task-create-dialog-repo-chips";
 
 afterEach(() => {
   cleanup();
+  creationSurface.props = null;
   mockBranches.value = { branches: [], isLoading: false, isLoaded: false };
   mockPolicies.value = [];
 });
@@ -191,6 +206,35 @@ describe("RepoChipsRow", () => {
       />,
     );
     expect(screen.getAllByTestId("repo-chip")).toHaveLength(2);
+  });
+
+  it("binds delayed creation to the originating row without closing a newer surface", () => {
+    const onCreated = vi.fn();
+    renderInProvider(
+      <RepoChipsRow
+        fs={makeFs({ repositories: [row({ key: "r0" }), row({ key: "r1" })] })}
+        repositories={[makeRepo(REPO_FRONT_ID, "frontend")]}
+        isTaskStarted={false}
+        workspaceId="ws-1"
+        onRowRepositoryChange={NOOP}
+        onRowBranchChange={NOOP}
+        localRepositoryCreation={{ executorSelection: null, onCreated }}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByTestId(REPO_CHIP_TRIGGER)[0]);
+    fireEvent.click(screen.getByTestId("create-local-repository-button"));
+    const firstCompletion = creationSurface.props!.onCreated;
+    creationSurface.props!.onOpenChange(false);
+
+    fireEvent.click(screen.getAllByTestId(REPO_CHIP_TRIGGER)[1]);
+    fireEvent.click(screen.getByTestId("create-local-repository-button"));
+    expect(creationSurface.props!.open).toBe(true);
+
+    const result = firstCompletion(makeRepo("repo-new", "new"));
+    expect(result).toBe(false);
+    expect(onCreated).toHaveBeenCalledWith("r0", expect.objectContaining({ id: "repo-new" }));
+    expect(creationSurface.props!.open).toBe(true);
   });
 
   it("renders the remote chips row in Remote mode (workspace chips suppressed)", () => {

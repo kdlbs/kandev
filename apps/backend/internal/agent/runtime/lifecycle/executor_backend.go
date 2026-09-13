@@ -203,6 +203,7 @@ const (
 	MetadataKeySpriteState              = "sprite_state"
 	MetadataKeySpriteCreatedAt          = "sprite_created_at"
 	MetadataKeyLocalPort                = "local_port"
+	MetadataKeyReuseExistingProcess     = "reuse_existing_process"
 
 	// Kubernetes executor connection metadata. These names mirror the persisted
 	// executor config parsed by internal/agent/kubernetes.
@@ -381,6 +382,8 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyAllowUserNamespaces:      true,
 	MetadataKeyContainerID:              true,
 	MetadataKeyWorktreeBranch:           true,
+	metadataCheckoutBranch:              true,
+	metadataCheckoutRef:                 true,
 	MetadataKeyRemoteContributions:      true,
 	MetadataKeyContributionDestinations: true,
 	MetadataKeyOfficeAgentProfileID:     true,

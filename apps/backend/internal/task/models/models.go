@@ -733,16 +733,20 @@ const SessionMetaKeyLastAgentError = "last_agent_error"
 // RemediationURL is only ever set from an adapter-validated provider
 // diagnostic; it is never reconstructed from the error message.
 type LastAgentError struct {
-	Message          string     `json:"message"`
-	OccurredAt       time.Time  `json:"occurred_at"`
-	AgentExecutionID string     `json:"agent_execution_id,omitempty"`
-	RemediationURL   string     `json:"remediation_url,omitempty"`
-	Code             string     `json:"code,omitempty"`
-	Details          string     `json:"details,omitempty"`
-	RecoveryActions  []string   `json:"recovery_actions,omitempty"`
-	TaskRepositoryID string     `json:"task_repository_id,omitempty"`
-	StampValue       string     `json:"stamp,omitempty"`
-	DismissedAt      *time.Time `json:"dismissed_at,omitempty"`
+	Message          string            `json:"message"`
+	OccurredAt       time.Time         `json:"occurred_at"`
+	AgentExecutionID string            `json:"agent_execution_id,omitempty"`
+	ExecutionID      string            `json:"execution_id,omitempty"`
+	Phase            string            `json:"phase,omitempty"`
+	AttemptID        string            `json:"attempt_id,omitempty"`
+	Causes           []AgentErrorCause `json:"causes,omitempty"`
+	RemediationURL   string            `json:"remediation_url,omitempty"`
+	Code             string            `json:"code,omitempty"`
+	Details          string            `json:"details,omitempty"`
+	RecoveryActions  []string          `json:"recovery_actions,omitempty"`
+	TaskRepositoryID string            `json:"task_repository_id,omitempty"`
+	StampValue       string            `json:"stamp,omitempty"`
+	DismissedAt      *time.Time        `json:"dismissed_at,omitempty"`
 }
 
 func LoadLastAgentError(metadata map[string]interface{}) (LastAgentError, bool) {
@@ -765,7 +769,52 @@ func mapToLastAgentError(raw interface{}, out *LastAgentError) error {
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(data, out)
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+
+	// Optional bootstrap fields are deliberately decoded independently. A
+	// malformed optional field must not hide a valid legacy session error.
+	optional := map[string]json.RawMessage{}
+	for _, key := range []string{"execution_id", "phase", "attempt_id", "causes"} {
+		if value, ok := fields[key]; ok {
+			optional[key] = value
+			delete(fields, key)
+		}
+	}
+	legacyData, err := json.Marshal(fields)
+	if err != nil {
+		return err
+	}
+	if err := json.Unmarshal(legacyData, out); err != nil {
+		return err
+	}
+	if value, ok := optional["execution_id"]; ok {
+		var executionID string
+		if json.Unmarshal(value, &executionID) == nil {
+			out.ExecutionID = executionID
+		}
+	}
+	if value, ok := optional["phase"]; ok {
+		var phase string
+		if json.Unmarshal(value, &phase) == nil {
+			out.Phase = phase
+		}
+	}
+	if value, ok := optional["attempt_id"]; ok {
+		var attemptID string
+		if json.Unmarshal(value, &attemptID) == nil {
+			out.AttemptID = attemptID
+		}
+	}
+	if value, ok := optional["causes"]; ok {
+		var causes []AgentErrorCause
+		if json.Unmarshal(value, &causes) == nil {
+			out.Causes = causes
+		}
+	}
+	return nil
 }
 
 func (e LastAgentError) Stamp() string {

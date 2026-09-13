@@ -184,6 +184,10 @@ type GitPushRequest struct {
 	Force       bool   `json:"force"`
 	SetUpstream bool   `json:"set_upstream"`
 	Repo        string `json:"repo,omitempty"`
+	// Remote and ExpectedBranch are optional and forwarded uninterpreted; the
+	// workspace git operator owns every destination decision.
+	Remote         string `json:"remote,omitempty"`
+	ExpectedBranch string `json:"expected_branch,omitempty"`
 }
 
 // GitContributionRequest carries the provider-head lease for a managed
@@ -331,13 +335,18 @@ func (h *GitHandlers) wsPush(ctx context.Context, msg *ws.Message) (*ws.Message,
 		return nil, fmt.Errorf("session_id is required")
 	}
 
-	client, releaseClient, err := h.getAgentCtlClient(ctx, req.SessionID)
+	agentClient, releaseClient, err := h.getAgentCtlClient(ctx, req.SessionID)
 	defer releaseClient()
 	if err != nil {
 		return nil, err
 	}
 
-	result, err := client.GitPush(ctx, req.Force, req.SetUpstream, req.Repo)
+	result, err := agentClient.GitPush(ctx, req.Repo, client.PushOptions{
+		Force:          req.Force,
+		SetUpstream:    req.SetUpstream,
+		Remote:         req.Remote,
+		ExpectedBranch: req.ExpectedBranch,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("push failed: %w", err)
 	}

@@ -141,10 +141,8 @@ export function WorkspaceRepoChips({
           onPolicySelected={onPolicySelected}
           showBranchPolicies={showBranchPolicies}
           showDiscoveryControls={showDiscoveryControls}
-          onCreateRepository={
-            rows.length === 1 && onCreateRepository ? () => onCreateRepository(row.key) : undefined
-          }
-          onRefreshRepositories={rows.length === 1 ? onRefreshRepositories : undefined}
+          onCreateRepository={onCreateRepository ? () => onCreateRepository(row.key) : undefined}
+          onRefreshRepositories={onRefreshRepositories}
           repositoriesRefreshing={repositoriesRefreshing}
           onRemove={() => onRemove(row.key)}
         />

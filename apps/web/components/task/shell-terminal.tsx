@@ -25,6 +25,7 @@ import { suppressIOSKeyboardAssists } from "@/lib/terminal/suppress-ios-keyboard
 import { sendShellInput } from "@/lib/terminal/send-shell-input";
 import { WorkspaceUnavailable } from "./workspace-unavailable";
 import { useTranslation } from "react-i18next";
+import { useWorkspaceRestoration } from "@/hooks/domains/session/use-workspace-restoration";
 import { t } from "@/lib/i18n";
 
 type ShellTerminalProps = {
@@ -388,21 +389,30 @@ function useShellSessionState(propSessionId: string | undefined, isReadOnlyMode:
   );
   const agentctlStatus = useSessionAgentctl(isReadOnlyMode ? null : sessionId);
   const taskId = session?.task_id ?? null;
+  const workspaceRestoration = useWorkspaceRestoration(taskId, isReadOnlyMode ? null : sessionId);
   const isSessionFailed = !isReadOnlyMode && isFailed;
   const shellOutput = useAppStore((state) => {
     if (!sessionId || isReadOnlyMode) return "";
     const envKey = state.environmentIdBySessionId[sessionId] ?? sessionId;
     return state.shell.outputs[envKey] || "";
   });
-  const canSubscribe = Boolean(sessionId && isActive && !isReadOnlyMode && !agentctlStatus.isError);
+  const canSubscribe = Boolean(
+    sessionId &&
+    isActive &&
+    !isReadOnlyMode &&
+    !agentctlStatus.isError &&
+    (!workspaceRestoration.status || workspaceRestoration.status === "ready"),
+  );
   return {
     sessionId,
     taskId,
+    isActive,
     isSessionFailed,
     errorMessage,
     shellOutput,
     canSubscribe,
     agentctlStatusKey: agentctlStatus.status,
+    workspaceRestoration,
   };
 }
 
@@ -433,7 +443,12 @@ export function ShellTerminal({
     shellOutput,
     canSubscribe,
     agentctlStatusKey,
+    workspaceRestoration,
   } = useShellSessionState(propSessionId, isReadOnlyMode);
+  const workspaceBlocked =
+    !isReadOnlyMode &&
+    workspaceRestoration.status !== null &&
+    workspaceRestoration.status !== "ready";
   useReadOnlyOutputSync({
     xtermRef,
     isReadOnlyMode,
@@ -482,10 +497,16 @@ export function ShellTerminal({
     onClose: search.close,
   });
 
-  useShellInputHandler({ xtermRef, onDataDisposableRef, isReadOnlyMode, taskId, sessionId });
+  useShellInputHandler({
+    xtermRef,
+    onDataDisposableRef,
+    isReadOnlyMode: isReadOnlyMode || workspaceBlocked,
+    taskId,
+    sessionId,
+  });
   useShellTerminalKeyHandler({
     xtermRef,
-    isReadOnlyMode,
+    isReadOnlyMode: isReadOnlyMode || workspaceBlocked,
     sessionId,
     send,
     onFindInPanel: search.open,
@@ -524,7 +545,7 @@ export function ShellTerminal({
       </div>
     );
   }
-  if (isSessionFailed) {
+  if (isSessionFailed && workspaceRestoration.status === null) {
     return <WorkspaceUnavailable error={errorMessage} />;
   }
   return (
@@ -536,6 +557,15 @@ export function ShellTerminal({
     >
       <div ref={terminalRef} className="h-full w-full" />
       {searchBar}
+      {workspaceBlocked && (
+        <div className="absolute inset-0 z-10 bg-background">
+          <WorkspaceUnavailable
+            restoration={workspaceRestoration.attempt}
+            onRetry={() => void workspaceRestoration.restore()}
+            retryDisabled={workspaceRestoration.status === "pending"}
+          />
+        </div>
+      )}
     </div>
   );
 }

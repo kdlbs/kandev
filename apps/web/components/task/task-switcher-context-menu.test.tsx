@@ -33,6 +33,7 @@ vi.mock("@/hooks/use-compact-task-chrome", () => ({
 
 afterEach(() => {
   cleanup();
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
   pluginRegistry.unregisterPlugin(PLUGIN_ID);
 });
 
@@ -47,8 +48,23 @@ function task(overrides: Partial<TaskSwitcherItem> = {}): TaskSwitcherItem {
 }
 
 function ArchiveAwareRow({ archiveConfirmation }: { archiveConfirmation?: ReactNode }) {
-  return <div data-testid="task-row">Task 1{archiveConfirmation}</div>;
+  return (
+    <div data-testid="task-row" data-inline-confirmation={Boolean(archiveConfirmation)}>
+      Task 1{archiveConfirmation}
+    </div>
+  );
 }
+
+it("keeps phone rows intact while archive hands off from the menu to a sheet", async () => {
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+  const { onArchiveTask } = renderWithDragHandle();
+  await openContextMenu();
+  fireEvent.click(screen.getByRole("menuitem", { name: /archive/i }));
+  await screen.findByRole("dialog", { name: /Archive task/ });
+  expect(screen.queryByRole("menu")).toBeNull();
+  expect(screen.getByTestId("task-row").getAttribute("data-inline-confirmation")).toBe("false");
+  expect(onArchiveTask).not.toHaveBeenCalled();
+});
 
 /**
  * Stands in for the dnd-kit drag handle that wraps the row. In the real tree

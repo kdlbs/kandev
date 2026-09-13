@@ -169,6 +169,9 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if _, err := lockTaskSessionRow(ctx, tx, running.SessionID); err != nil {
+		return err
+	}
 	var environmentID sql.NullString
 	if queryErr := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT COALESCE(task_environment_id, '') FROM task_sessions WHERE id = ?`), running.SessionID).Scan(&environmentID); queryErr != nil && queryErr != sql.ErrNoRows {
 		return queryErr

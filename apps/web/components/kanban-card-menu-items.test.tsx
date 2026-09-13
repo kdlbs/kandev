@@ -19,6 +19,7 @@ function renderNodeText(node: ReactNode): string {
 }
 
 const PluginBitbucketIcon = () => null;
+const WORKFLOW_ONE_NAME = "Workflow 1";
 
 // Regression: React synthetic events bubble through the fiber tree from a Radix portal; without stopPropagation the parent Card's onClick fires instead of the confirm dialog.
 describe("KanbanCardDropdownMenuItems — click propagation", () => {
@@ -212,6 +213,92 @@ describe("buildKanbanCardMenuEntries — !onEdit does not disable plugin edit ac
   });
 });
 
+describe("buildKanbanCardMenuEntries — 'primary' group plugin actions", () => {
+  const PLUGIN_ID = "kandev-plugin-tags";
+
+  afterEach(() => {
+    pluginRegistry.unregisterPlugin(PLUGIN_ID);
+  });
+
+  function entryKeys(entries: KanbanCardMenuEntry[]) {
+    return entries.map((entry) => entry.key);
+  }
+
+  it("renders a 'primary' group action as a flat item after the move group and before Archive", () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskMenuAction({
+      id: "quick-tag",
+      label: "Quick tag",
+      icon: PluginBitbucketIcon,
+      group: "primary",
+      run: vi.fn(),
+    });
+
+    const entries = buildKanbanCardMenuEntries({
+      currentWorkflowId: "wf-1",
+      workflows: [
+        { id: "wf-1", name: WORKFLOW_ONE_NAME },
+        { id: "wf-2", name: "Workflow 2" },
+      ],
+      stepsByWorkflowId: {
+        "wf-1": [
+          { id: "s1", title: "Step 1" },
+          { id: "s2", title: "Step 2" },
+        ],
+        "wf-2": [{ id: "s3", title: "Step 3" }],
+      },
+      onSendToWorkflow: vi.fn(),
+      onLinkPullRequest: vi.fn(),
+      onArchive: vi.fn(),
+    });
+
+    const keys = entryKeys(entries);
+    const sendToIndex = keys.indexOf("send-to-workflow");
+    const primaryIndex = keys.indexOf(`plugin-primary-${PLUGIN_ID}-quick-tag`);
+    const archiveIndex = keys.indexOf("archive");
+
+    expect(sendToIndex).toBeGreaterThanOrEqual(0);
+    expect(primaryIndex).toBeGreaterThanOrEqual(0);
+    expect(archiveIndex).toBeGreaterThanOrEqual(0);
+    expect(sendToIndex).toBeLessThan(primaryIndex);
+    expect(primaryIndex).toBeLessThan(archiveIndex);
+
+    const primaryEntry = entries[primaryIndex];
+    expect(primaryEntry.kind).toBe("item");
+    if (primaryEntry.kind === "item") {
+      expect(primaryEntry.label).toBe("Quick tag");
+      expect((primaryEntry.icon as { type?: unknown })?.type).toBe(PluginBitbucketIcon);
+    }
+  });
+
+  it("does not add a 'primary' entry when visible(context) returns false", () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskMenuAction({
+      id: "quick-tag",
+      label: "Quick tag",
+      group: "primary",
+      visible: () => false,
+      run: vi.fn(),
+    });
+
+    const entries = buildKanbanCardMenuEntries({ workflows: [], stepsByWorkflowId: {} });
+
+    expect(entryKeys(entries)).not.toContain(`plugin-primary-${PLUGIN_ID}-quick-tag`);
+  });
+
+  it("leaves the 'edit' group submenu unaffected by 'primary' group registrations", () => {
+    pluginRegistry.forPlugin(PLUGIN_ID).registerTaskMenuAction({
+      id: "quick-tag",
+      label: "Quick tag",
+      group: "primary",
+      run: vi.fn(),
+    });
+
+    const entries = buildKanbanCardMenuEntries({ workflows: [], stepsByWorkflowId: {} });
+    const editMenu = entries.find((entry) => entry.key === "edit");
+
+    expect(editMenu?.kind).toBe("item");
+  });
+});
+
 describe("buildKanbanCardMenuEntries — detach", () => {
   const baseArgs = {
     workflows: [],
@@ -347,7 +434,7 @@ describe("useKanbanCardMoveTargets — explicit steps (AC-TASKS-TASK-ACTIONS-MEN
               snapshots: {
                 [WORKFLOW_ID]: {
                   workflowId: WORKFLOW_ID,
-                  workflowName: "Workflow 1",
+                  workflowName: WORKFLOW_ONE_NAME,
                   steps: [
                     { id: "step-a", title: "Todo", color: "blue", position: 0 },
                     { id: HIDDEN_STEP_ID, title: "Hidden step", color: "gray", position: 1 },
@@ -407,7 +494,7 @@ describe("useKanbanCardMoveTargets — card hot path has no kanban.tasks/hiddenW
               snapshots: {
                 [WORKFLOW_ID]: {
                   workflowId: WORKFLOW_ID,
-                  workflowName: "Workflow 1",
+                  workflowName: WORKFLOW_ONE_NAME,
                   steps: [{ id: "step-a", title: "Todo", color: "blue", position: 0 }],
                   tasks: [
                     {
@@ -479,5 +566,48 @@ describe("useKanbanCardMoveTargets — card hot path has no kanban.tasks/hiddenW
       }));
     });
     expect(renderCount).toBe(countAfterMount);
+  });
+});
+
+describe("buildKanbanCardMenuEntries — move-only disabled state", () => {
+  it("disables move entries without disabling unrelated task actions", () => {
+    const entries = buildKanbanCardMenuEntries({
+      currentWorkflowId: "wf-1",
+      currentStepId: "step-1",
+      workflows: [
+        { id: "wf-1", name: WORKFLOW_ONE_NAME },
+        { id: "wf-2", name: "Workflow 2" },
+      ],
+      stepsByWorkflowId: {
+        "wf-1": [
+          { id: "step-1", title: "Step 1" },
+          { id: "step-2", title: "Step 2" },
+        ],
+        "wf-2": [{ id: "step-3", title: "Step 3" }],
+      },
+      moveDisabled: true,
+      onEdit: vi.fn(),
+      onSelectPriority: vi.fn(),
+      onMoveToStep: vi.fn(),
+      onSendToWorkflow: vi.fn(),
+      onLinkPullRequest: vi.fn(),
+      onArchive: vi.fn(),
+      onDelete: vi.fn(),
+    });
+
+    const entry = (key: string) => entries.find((candidate) => candidate.key === key);
+    const disabled = (key: string) => {
+      const candidate = entry(key);
+      return candidate?.kind === "item" || candidate?.kind === "submenu"
+        ? candidate.disabled
+        : undefined;
+    };
+    expect(disabled("edit")).toBe(false);
+    expect(disabled("priority")).toBe(false);
+    expect(disabled("move-to")).toBe(true);
+    expect(disabled("send-to-workflow")).toBe(true);
+    expect(disabled("link")).toBe(false);
+    expect(disabled("archive")).toBe(false);
+    expect(disabled("delete")).toBe(false);
   });
 });

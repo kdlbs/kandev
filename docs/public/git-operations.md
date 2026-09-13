@@ -95,6 +95,30 @@ If the repository is intentionally offline, open its workspace repository settin
 but it is not required for a normal local-only base. Keep the setting enabled when remote freshness
 is important for later task launches.
 
+### Branch names in executor scripts
+
+The `repository.branch` placeholder supplies an upstream branch name to executor scripts.
+For example, `origin/main` and `refs/remotes/origin/main` both produce `main` for clone and fetch commands.
+This applies to current and saved scripts that use the placeholder.
+
+Kandev removes one recognized prefix. Names such as `feature/login` and `upstream/main` remain unchanged.
+Use `refs/heads/origin/topic` to identify a literal upstream branch named `origin/topic`.
+The stored task base reference and `worktree.base_branch` remain unchanged.
+A missing upstream branch still fails preparation.
+
+### Review a PR in a remote workspace
+
+When you select a GitHub PR for a new remote workspace, Kandev checks out the fetched PR head before the agent starts.
+This includes fork PRs on Sprites, Docker, SSH, and Kubernetes.
+Kandev fetches the PR head from the base repository and keeps the selected base branch for comparison.
+
+Review checkout does not require permission to push to the fork.
+It does not configure a fork push destination or grant edit access.
+If the selected PR or branch cannot be fetched, preparation fails instead of starting on the base branch.
+
+Resuming an existing workspace preserves its branch, local commits, and uncommitted changes.
+A newly recreated workspace fetches the selected PR again.
+Existing workspaces that previously started on the wrong branch are not reset automatically.
 ### Files remain, but Git metadata is missing
 
 A linked worktree stores its files separately from its Git administrative
@@ -278,7 +302,7 @@ These are the registered Kandev WebSocket actions. Every payload requires `sessi
 | Action | Additional payload |
 |--------|--------------------|
 | `worktree.pull` | `rebase` boolean |
-| `worktree.push` | `force` and `set_upstream` booleans |
+| `worktree.push` | `force` and `set_upstream` booleans; optional `remote` (configured remote name or exact configured push URL) and `expected_branch` (current-branch precondition) |
 | `worktree.rebase` | required `base_branch` |
 | `worktree.merge` | required `base_branch` |
 | `worktree.abort` | `operation`: exactly `merge` or `rebase` |
@@ -290,6 +314,12 @@ These are the registered Kandev WebSocket actions. Every payload requires `sessi
 | `worktree.revert_commit` | required `commit_sha`, which must be exact `HEAD` |
 | `worktree.rename_branch` | required `new_name` |
 | `worktree.reset` | required `commit_sha`; `mode` is `soft`, `mixed`, or `hard` |
+
+The optional push target fields apply to the WebSocket action and the backend
+API. An explicit target uses the expected branch as the destination and does
+not set upstream tracking. A branch mismatch returns the expected and current
+branch values. Existing contribution routing takes precedence over an explicit
+target.
 
 Example request and normal operation result:
 

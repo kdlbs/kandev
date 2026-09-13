@@ -175,6 +175,10 @@ The compatibility fixture uses the same exact-name ownership marker, narrow
 teardown, foreign-image refusal, and credential-redacted diagnostics as the full
 suite. Unsupported version selectors fail before provisioning.
 
+The compatibility runtime image is the immutable `kandev-ci:runtime-latest`
+image used by CI. It includes the lifecycle tools required by the backend, so
+the fixture does not resolve Ubuntu packages during every matrix job.
+
 ### Remote-executor fixture contracts
 
 Host-only `file://` fixtures are not reachable from an SSH or Docker target. Use a disposable provider-shaped HTTP Git fixture with a target-side URL rewrite; if the spec also uses host-local `GitHelper` or LSP paths, materialize a local clone at the expected temporary path. Verify both the remote checkout and every host-local fixture consumer.

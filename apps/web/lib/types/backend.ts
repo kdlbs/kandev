@@ -35,6 +35,7 @@ import type {
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { GitEventPayload } from "@/lib/types/git-events";
 import type {
+  GitHubPRDiscoveryHealthUpdate,
   GitHubRateLimitUpdate,
   TaskCIAutomationOptions,
   TaskPR,
@@ -562,6 +563,10 @@ export type BackendMessageMap = SessionBackendMessageMap &
       TaskCIAutomationOptions
     >;
     "github.rate_limit.updated": BackendMessage<"github.rate_limit.updated", GitHubRateLimitUpdate>;
+    "github.pr_discovery_health.updated": BackendMessage<
+      "github.pr_discovery_health.updated",
+      GitHubPRDiscoveryHealthUpdate
+    >;
     "gitlab.task_mr.updated": BackendMessage<
       "gitlab.task_mr.updated",
       TaskMR & { workspace_id: string }

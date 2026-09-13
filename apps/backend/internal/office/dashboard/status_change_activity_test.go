@@ -145,3 +145,20 @@ func TestUpdateTaskStatus_LogsActivityBeforePublishingEvent(t *testing.T) {
 			"the WS broadcast (and any refetch it triggers) could race ahead of the activity write")
 	}
 }
+
+func TestUpdateTaskStatus_SuppressStatusActivityLeavesCanonicalEventOwner(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTask(t, deps.db, "suppressed-activity", "ws-suppressed", "Suppressed", "todo", 0)
+
+	if err := deps.svc.UpdateTaskStatus(context.Background(), dashboard.TaskStatusUpdateRequest{
+		TaskID:                 "suppressed-activity",
+		NewStatus:              "in_progress",
+		SuppressStatusActivity: true,
+	}); err != nil {
+		t.Fatalf("update task status: %v", err)
+	}
+
+	if hasStatusChangeActivity(t, deps, "suppressed-activity", "ws-suppressed") {
+		t.Fatal("status activity was written even though the canonical state event owns it")
+	}
+}

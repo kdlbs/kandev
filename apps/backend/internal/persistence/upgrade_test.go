@@ -82,6 +82,13 @@ func TestProvide_TakesSnapshotOnUpgrade(t *testing.T) {
 
 	// The backup should be a readable SQLite DB containing the seeded row.
 	snapPath := filepath.Join(backupDir, entries[0].Name())
+	info, err := os.Stat(snapPath)
+	if err != nil {
+		t.Fatalf("stat snapshot: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("snapshot mode = %#o, want 0600", got)
+	}
 	snap, err := sqlx.Open("sqlite3", snapPath)
 	if err != nil {
 		t.Fatalf("open snapshot: %v", err)

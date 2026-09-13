@@ -1,8 +1,10 @@
 // GitHub integration types
 
 import type { GitHubAppRegistration } from "./github-app";
+import type { GitHubPRDiscoveryHealth } from "./github-pr-discovery";
 
 export * from "./github-app";
+export * from "./github-pr-discovery";
 
 export type GitHubAuthMethod =
   | "gh_cli"
@@ -89,6 +91,7 @@ export type GitHubStatus = {
   required_scopes: string[];
   diagnostics?: AuthDiagnostics;
   rate_limit?: GitHubRateLimitInfo;
+  pr_discovery_health?: GitHubPRDiscoveryHealth;
 };
 
 export type GitHubRateLimitResource = "core" | "graphql" | "search";
