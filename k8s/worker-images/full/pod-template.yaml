@@ -33,7 +33,9 @@ template:
         args:
           - -ceu
           - |
-            mtu=$(cat /sys/class/net/eth0/mtu)
+            iface=$({ ip -4 route show default; ip -6 route show default; } | awk '$1 == "default" {for (i=1; i<NF; i++) if ($i == "dev") {print $(i+1); exit}}')
+            test -n "$iface"
+            mtu=$(cat "/sys/class/net/$iface/mtu")
             test "$mtu" -ge 576
             exec dockerd --host=unix:///run/docker/docker.sock --group=1000 --mtu="$mtu" --default-network-opt=bridge=com.docker.network.driver.mtu="$mtu" --storage-driver=overlay2
         securityContext:

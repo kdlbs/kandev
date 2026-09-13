@@ -132,3 +132,9 @@ verification on a suitable isolated test host before running task 03.
 verification leaving an untracked container. The verifier now has an exact
 owned name and explicit cleanup. This process-boundary test uses a fake Docker
 command and does not replace real image/container acceptance.
+
+`python3 -m unittest discover -s k8s/worker-images/full -p '*_test.py'`
+passes three tests. The daemon startup regression first reproduced failure on a
+non-eth0 interface. Startup now reads the default-route interface (IPv4, then
+IPv6) and its MTU, rejecting missing routes and invalid MTUs. This executes the
+template shell with command fixtures; actual CNI compatibility remains unverified.
