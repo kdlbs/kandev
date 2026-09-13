@@ -3349,6 +3349,7 @@ func (s *Service) mergedACPSessionInfo(
 			}
 		}
 	}
+	existingACPSessionID := stringFromMap(info, "session_id")
 	if data.ACPSessionID != "" {
 		info["session_id"] = data.ACPSessionID
 	}
@@ -3358,8 +3359,16 @@ func (s *Service) mergedACPSessionInfo(
 	if data.SessionUpdatedAt != "" {
 		info["updated_at"] = data.SessionUpdatedAt
 	}
-	if data.SessionMeta != nil {
-		info["meta"] = data.SessionMeta
+	attachmentChanged := data.ACPSessionID != "" &&
+		existingACPSessionID != "" &&
+		data.ACPSessionID != existingACPSessionID
+	if data.SessionMeta != nil || attachmentChanged {
+		existingMeta, _ := info["meta"].(map[string]any)
+		incomingMeta := data.SessionMeta
+		if incomingMeta == nil {
+			incomingMeta = map[string]any{}
+		}
+		info["meta"] = mergeACPGoalMeta(existingMeta, incomingMeta, attachmentChanged)
 	}
 	return info, nil
 }

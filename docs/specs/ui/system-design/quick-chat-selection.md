@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: ui
 requirements:
   - REQ-UI-QUICK-TERMINAL-003
@@ -92,4 +92,3 @@ terminal/config visits, ordered fallback, authoritative deletion, and delayed hy
 Desktop and phone E2E select a non-first conversation, dismiss, reload, and reopen.
 They assert the active content identity and unchanged conversation count.
 The fix package is [Quick Chat selection](../../../plans/quick-chat-selection/plan.md).
-

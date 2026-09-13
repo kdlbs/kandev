@@ -199,3 +199,83 @@ describe("session.info_updated partial updates", () => {
     expect(store.getState().setTaskSession).not.toHaveBeenCalled();
   });
 });
+
+describe("session.info_updated goal metadata", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("preserves an active goal when unrelated ACP metadata arrives", () => {
+    const activeGoal = {
+      objective: "Coordinate contributor PR reviews",
+      status: "active",
+      createdAt: 10,
+      updatedAt: 20,
+    };
+    const store = makeStore({
+      taskSessions: {
+        items: {
+          [SESSION_ID]: makeSession({
+            metadata: {
+              acp: {
+                session_id: ACP_SESSION_ID,
+                title: SESSION_TITLE,
+                updated_at: SESSION_INFO_UPDATED_AT,
+                meta: { goal: activeGoal },
+              },
+            },
+          }),
+        },
+      },
+    } as Partial<AppState>);
+    const handler = registerSessionInfoHandlers(store)["session.info_updated"]!;
+
+    handler(
+      makeMessage(
+        makePayload({
+          session_meta: { codex: { threadStatus: "idle" } },
+          session_updated_at: SPARSE_SESSION_INFO_UPDATED_AT,
+        }),
+      ),
+    );
+
+    expect(store.getState().setTaskSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: {
+          acp: expect.objectContaining({
+            meta: { codex: { threadStatus: "idle" }, goal: activeGoal },
+          }),
+        },
+      }),
+    );
+  });
+
+  it("records the live ACP snapshot timestamp for goal reconciliation", () => {
+    const activeGoal = {
+      objective: "Coordinate contributor PR reviews",
+      status: "active",
+      createdAt: 10,
+      updatedAt: 20,
+    };
+    const store = makeStore();
+    const handler = registerSessionInfoHandlers(store)["session.info_updated"]!;
+
+    handler(
+      makeMessage(
+        makePayload({
+          session_meta: { goal: activeGoal },
+          session_updated_at: SPARSE_SESSION_INFO_UPDATED_AT,
+        }),
+      ),
+    );
+
+    expect(store.getState().setTaskSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        goal_reconciliation: expect.objectContaining({
+          cleared: false,
+          sourceUpdatedAt: SPARSE_SESSION_INFO_UPDATED_AT,
+        }),
+      }),
+    );
+  });
+});

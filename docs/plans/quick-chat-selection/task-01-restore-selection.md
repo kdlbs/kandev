@@ -1,7 +1,7 @@
 ---
 id: "01-restore-selection"
 title: "Remember and restore conversation selection"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -72,7 +72,7 @@ Run from the repository root. On a fresh worktree, install once with
 `(cd apps && pnpm install --frozen-lockfile)` before package commands.
 
 ```bash
-(cd apps/web && pnpm exec vitest run hooks/use-quick-chat-launcher.test.ts hooks/use-quick-chat-resync.test.ts lib/quick-chat/selection-storage.test.ts lib/state/slices/ui/quick-chat-selection.test.ts lib/state/slices/ui/quick-chat-actions.test.ts lib/state/slices/ui/quick-chat-sync.test.ts lib/state/slices/auth lib/state/hydration)
+(cd apps/web && pnpm exec vitest run hooks/use-quick-chat-launcher.test.ts hooks/use-quick-chat-resync.test.ts lib/quick-chat/selection-storage.test.ts lib/state/slices/ui/quick-chat-selection.test.ts lib/state/slices/ui/quick-chat-selection-actions.test.ts lib/state/slices/ui/quick-chat-actions.test.ts lib/state/slices/ui/quick-chat-sync.test.ts lib/state/slices/auth lib/state/hydration)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm run lint)
 (cd apps/web && pnpm run i18n:ratchet)
@@ -126,4 +126,19 @@ Do not persist setup IDs, secrets, or conversation text.
 
 ## Results
 
-Pending. No implementation or new test execution during planning.
+Implemented remembered Quick Chat selection for each user, workspace, and
+conversation kind. The bounded local-storage codec validates entries and keeps
+the latest explicit choices. The UI slice now tracks readiness, selection
+revisions, and pending restoration. Explicit opens and tab selections update
+the remembered choice, while background refreshes, terminal activation, and
+fallback selection do not. Close, delete, hydration, resync, and identity
+changes clear or restore only the affected scope. Quick Chat waits for an
+authoritative list before mounting a remembered or fallback conversation.
+
+Verification passed:
+
+- Focused Quick Chat Vitest: 11 files, 135 tests passed. Review regressions cover hydration restoring the remembered tab and delayed opens carrying persisted mixed-tab order after removal.
+- `pnpm run typecheck`, `pnpm run lint`, and `pnpm run i18n:ratchet` passed.
+- Desktop Quick Chat E2E: 25 tests passed. Cross-device and terminal E2E: 4 tests passed.
+- Mobile Quick Chat and terminal E2E passed with the goal flow: 2 combined tests and 1 mobile terminal test.
+- `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check` passed.

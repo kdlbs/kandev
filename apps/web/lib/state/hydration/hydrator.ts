@@ -7,6 +7,7 @@ import {
   mergeHydratedQuickChatSessions,
   reconcileQuickTerminalTabs,
 } from "@/lib/state/slices/ui/quick-chat-sync";
+import { findRememberedQuickChatSession } from "@/lib/state/slices/ui/quick-chat-selection";
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
 import { mergeAgentProfileRecentUseState } from "@/lib/agent-profile-recent-use";
 import {
@@ -526,6 +527,9 @@ export function hydrateUI(draft: Draft<AppState>, state: HydrationState): void {
     // adopts previously unseen sessions and never removes or regresses tabs.
     if (state.quickChat.sessions) {
       draft.quickChat = mergeHydratedQuickChatSessions(draft.quickChat, state.quickChat.sessions);
+      for (const session of state.quickChat.sessions) {
+        draft.quickChat.selectionReadyByWorkspace[session.workspaceId] = true;
+      }
       restoreQuickChatSelection(draft, draft.quickChat.sessions, draft.quickChat.activeSessionId);
     }
     if (state.quickChat.terminalTabs) hydrateQuickTerminalState(draft, state.quickChat);
@@ -596,11 +600,15 @@ function restoreQuickChatSelection(
   ) {
     return;
   }
-  const previousWorkspaceId = previousSessions.find(
-    (session) => session.sessionId === previousActiveSessionId,
-  )?.workspaceId;
+  const workspaceId = previousWorkspaceId(previousSessions, previousActiveSessionId);
+  const rememberedSession = findRememberedHydrationSession(draft, workspaceId);
+  if (rememberedSession) {
+    draft.quickChat.activeSessionId = rememberedSession.sessionId;
+    draft.quickChat.activeKind = "conversation";
+    return;
+  }
   const fallbackSession =
-    draft.quickChat.sessions.find((session) => session.workspaceId === previousWorkspaceId) ??
+    draft.quickChat.sessions.find((session) => session.workspaceId === workspaceId) ??
     draft.quickChat.sessions[0];
   if (fallbackSession) {
     draft.quickChat.activeSessionId = fallbackSession.sessionId;
@@ -608,7 +616,7 @@ function restoreQuickChatSelection(
     return;
   }
   const fallbackTerminal = draft.quickChat.terminalTabs.find(
-    (tab) => tab.workspaceId === previousWorkspaceId,
+    (tab) => tab.workspaceId === workspaceId,
   );
   if (fallbackTerminal) {
     draft.quickChat.activeKind = "terminal";
@@ -617,6 +625,39 @@ function restoreQuickChatSelection(
   }
   draft.quickChat.activeSessionId = null;
   if (draft.quickChat.terminalTabs.length === 0) draft.quickChat.isOpen = false;
+}
+
+function previousWorkspaceId(
+  sessions: AppState["quickChat"]["sessions"],
+  activeSessionId: string | null,
+): string | undefined {
+  return sessions.find((session) => session.sessionId === activeSessionId)?.workspaceId;
+}
+
+function findRememberedHydrationSession(
+  draft: Draft<AppState>,
+  preferredWorkspaceId: string | undefined,
+): AppState["quickChat"]["sessions"][number] | undefined {
+  const workspaceIds = [
+    preferredWorkspaceId,
+    ...draft.quickChat.rememberedSelectionOrder,
+    ...Object.keys(draft.quickChat.rememberedSelectionByWorkspace),
+  ];
+  const seen = new Set<string>();
+  for (const workspaceId of workspaceIds) {
+    if (!workspaceId || seen.has(workspaceId)) continue;
+    seen.add(workspaceId);
+    for (const kind of ["chat", "config"] as const) {
+      const remembered = findRememberedQuickChatSession(
+        draft.quickChat.sessions,
+        draft.quickChat.rememberedSelectionByWorkspace,
+        workspaceId,
+        kind,
+      );
+      if (remembered) return remembered;
+    }
+  }
+  return undefined;
 }
 
 /**

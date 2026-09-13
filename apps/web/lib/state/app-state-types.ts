@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- AppState keeps the explicit cross-slice store contract in one type. */
 import type { HydrationOptions } from "./hydration/hydrator";
 import type {
   Repository,
@@ -397,7 +398,6 @@ export type AppState = KanbanSlice & {
   closeQuickChatSession: (sessionId: string) => void;
   setActiveQuickChatSession: (sessionId: string, workspaceId: string) => void;
   renameQuickChatSession: (sessionId: string, name: string) => void;
-  setQuickChatInitialPrompt: UIA["setQuickChatInitialPrompt"];
   setSessionFailureNotification: (n: UISliceTypes.SessionFailureNotification | null) => void;
   setTaskDeletedNotification: (n: UISliceTypes.TaskDeletedNotification | null) => void;
   setUpdateAvailableNotification: (n: UISliceTypes.UpdateAvailableNotification | null) => void;
@@ -635,7 +635,14 @@ export type AppState = KanbanSlice & {
   restoreRichOutputAnimations: UIA["restoreRichOutputAnimations"];
   acknowledgeAgentErrors: UIA["acknowledgeAgentErrors"];
   dismissAgentError: UIA["dismissAgentError"];
-} & Pick<UIA, "setThreadActiveView" | "createThreadView"> &
+} & Pick<
+    UIA,
+    | "setThreadActiveView"
+    | "createThreadView"
+    | "setQuickChatInitialPrompt"
+    | "requestQuickChatOpen"
+    | "setQuickChatSelectionIdentity"
+  > &
   GitHubSliceActions &
   GitLabSliceActions &
   JiraSliceActions &

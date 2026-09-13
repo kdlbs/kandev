@@ -1,5 +1,113 @@
 import type { TaskSession } from "@/lib/types/http";
 import { mergePendingActionProjection } from "./task-session-projection-actions";
+import { getAgentGoal, isAgentGoalSnapshotNewer, mergeAgentGoalMetadata } from "@/lib/agent-goal";
+
+function asMetadataRecord(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function hasACPAttachmentChanged(existing: TaskSession, incoming: TaskSession): boolean {
+  const currentACP = asMetadataRecord(existing.metadata?.acp);
+  const incomingACP = asMetadataRecord(incoming.metadata?.acp);
+  const currentSessionID = typeof currentACP?.session_id === "string" ? currentACP.session_id : "";
+  const incomingSessionID =
+    typeof incomingACP?.session_id === "string" ? incomingACP.session_id : "";
+  return (
+    currentSessionID !== "" && incomingSessionID !== "" && currentSessionID !== incomingSessionID
+  );
+}
+
+function goalReconciliationForAttachment(
+  metadata: Record<string, unknown> | undefined,
+  revision: number,
+) {
+  const goal = getAgentGoal(metadata);
+  return {
+    revision,
+    cleared: goal === null,
+    watermark: goal ? { createdAt: goal.createdAt, updatedAt: goal.updatedAt } : null,
+  };
+}
+
+function mergeGoalReconciliation(
+  existing: TaskSession,
+  incoming: TaskSession,
+  mergedMetadata: TaskSession["metadata"],
+  attachmentChanged: boolean,
+) {
+  if (incoming.goal_reconciliation) return incoming.goal_reconciliation;
+  if (!attachmentChanged) {
+    const reconciliation = existing.goal_reconciliation;
+    const incomingUpdatedAt = readACPUpdatedAt(incoming.metadata?.acp);
+    if (
+      reconciliation &&
+      !reconciliation.cleared &&
+      hasIncomingGoalClear(incoming) &&
+      incomingUpdatedAt &&
+      isAgentGoalSnapshotNewer(incomingUpdatedAt, reconciliation)
+    ) {
+      return {
+        ...reconciliation,
+        revision: reconciliation.revision + 1,
+        cleared: true,
+        sourceUpdatedAt: incomingUpdatedAt,
+      };
+    }
+    return reconciliation;
+  }
+  const mergedACP = asMetadataRecord(mergedMetadata?.acp);
+  const mergedMeta = asMetadataRecord(mergedACP?.meta);
+  return goalReconciliationForAttachment(
+    mergedMeta,
+    (existing.goal_reconciliation?.revision ?? 0) + 1,
+  );
+}
+
+function readACPUpdatedAt(value: unknown): string | undefined {
+  const record = asMetadataRecord(value);
+  return typeof record?.updated_at === "string" ? record.updated_at : undefined;
+}
+
+function hasIncomingGoalClear(session: TaskSession): boolean {
+  const acp = asMetadataRecord(session.metadata?.acp);
+  const meta = asMetadataRecord(acp?.meta);
+  return meta?.goal === null && Object.prototype.hasOwnProperty.call(meta ?? {}, "goal");
+}
+
+function mergeSessionMetadata(
+  existing: TaskSession,
+  incoming: TaskSession,
+): TaskSession["metadata"] {
+  if (incoming.metadata == null) return existing.metadata;
+  const current = existing.metadata ?? {};
+  const next = { ...current, ...incoming.metadata };
+  const currentACP = asMetadataRecord(current.acp);
+  const incomingACP = asMetadataRecord(incoming.metadata.acp);
+  if (!currentACP && !incomingACP) return next;
+
+  const currentACPRecord = currentACP ?? {};
+  const incomingACPRecord = incomingACP ?? {};
+  const attachmentChanged = hasACPAttachmentChanged(existing, incoming);
+  const mergedACP = { ...currentACPRecord, ...incomingACPRecord };
+  if (incoming.goal_reconciliation) {
+    mergedACP.meta = incomingACPRecord.meta;
+  } else if (incomingACPRecord.meta !== undefined || attachmentChanged) {
+    const currentMeta = asMetadataRecord(currentACPRecord.meta);
+    const incomingMeta = asMetadataRecord(incomingACPRecord.meta);
+    mergedACP.meta = mergeAgentGoalMetadata(currentMeta, incomingMeta, {
+      attachmentChanged,
+      source: "hydration",
+      reconciliation: existing.goal_reconciliation,
+      snapshotUpdatedAt: readACPUpdatedAt(incomingACPRecord),
+    });
+  } else if (currentACPRecord.meta !== undefined) {
+    mergedACP.meta = currentACPRecord.meta;
+  }
+  next.acp = mergedACP;
+  return next;
+}
 
 /** Merge the runtime cancellation projection using its process-local revision. */
 function mergeCancellationProjection(
@@ -97,7 +205,16 @@ export function mergeTaskSession(existing: TaskSession, incoming: TaskSession): 
     existingRouteGeneration !== undefined &&
     (incomingRouteGeneration === undefined || incomingRouteGeneration < existingRouteGeneration);
   const pendingAction = mergePendingActionProjection(existing, incoming);
+  const attachmentChanged = hasACPAttachmentChanged(existing, incoming);
   const merged = { ...existing, ...incoming };
+  merged.metadata = mergeSessionMetadata(existing, incoming);
+  const goalReconciliation = mergeGoalReconciliation(
+    existing,
+    incoming,
+    merged.metadata,
+    attachmentChanged,
+  );
+  if (goalReconciliation) merged.goal_reconciliation = goalReconciliation;
   // A backend session update never carries the frontend-only projection owner.
   // Its absence is the revocation signal for an optimistic resume rollback.
   if (incoming.resume_projection_id === undefined) delete merged.resume_projection_id;

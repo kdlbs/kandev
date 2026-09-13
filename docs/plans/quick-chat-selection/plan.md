@@ -1,6 +1,6 @@
 ---
 created: 2026-09-13
-status: draft
+status: implemented
 requirements:
   - REQ-UI-QUICK-TERMINAL-003
   - REQ-AGENTS-GOAL-VISIBILITY-001
@@ -18,7 +18,7 @@ Restore the last selected conversation for each workspace and conversation kind.
 Keep the preference across reloads without allowing background updates to change it.
 A second outcome exposes active provider goals beside the existing Todos/PR information.
 Two sequential work orders deliver selection first, then retained goal state and its chat disclosure.
-Implementation is pending an explicit implementation request.
+Implementation is complete. The two work orders were executed sequentially in this session.
 
 ## Evidence and classification
 
@@ -245,15 +245,15 @@ Assert the chosen session ID, not a missing test selector.
 
 ## Work orders
 
-- [ ] [Task 01: Remember and restore conversation selection](task-01-restore-selection.md)
-- [ ] [Task 02: Retain and disclose active agent goals](task-02-goal-visibility.md)
+- [x] [Task 01: Remember and restore conversation selection](task-01-restore-selection.md)
+- [x] [Task 02: Retain and disclose active agent goals](task-02-goal-visibility.md)
 
-Execute sequentially in this session. Each work order owns its exact checks.
-Task 02 follows Task 01 for integration of the shared Quick Chat surface.
+Executed sequentially in this session. Each work order records its checks.
+Task 02 followed Task 01 for integration of the shared Quick Chat surface.
 
 ## Verification results
 
-Expanded-package planning validation passed:
+Package validation passed:
 
 - `python3 scripts/list-docs.py validate`: 265 decisions and 829 specifications.
 - `python3 scripts/lint-spec-files.test.py`: 36 tests passed.
@@ -261,11 +261,15 @@ Expanded-package planning validation passed:
 - Package-relative file links: checked for all three plan/work-order files and the goal specification pair.
 - `git diff --check -- docs/specs docs/plans/quick-chat-selection`: passed.
 
-Implementation test commands remain pending in the two work orders.
+Implementation validation passed:
 
-No production or permanent test changes in this package.
-The earlier baseline ran three existing suites with 55 passing tests.
-That result does not prove the proposed restoration behavior.
+- Task 01 focused Vitest: 11 files, 135 tests passed, including hydration restoration and delayed persisted-order fallback regressions.
+- Task 02 focused Vitest: 10 files, 92 tests passed, including live goal snapshot freshness, fresh reconnect clear, and real pointer-mode transition regressions.
+- Backend targeted tests, race tests, `make lint`, and `make -C apps/backend build` passed.
+- Web `typecheck`, `lint`, `i18n:ratchet`, and `i18n:check` passed.
+- Desktop Quick Chat and goal E2E passed, including 25 Quick Chat tests, 4 cross-device/terminal tests, and 3 goal tests.
+- Mobile Quick Chat, terminal, and goal E2E passed, including the selected-tab flow and the 44px touch-drawer coverage.
+- `python3 scripts/validate-public-docs.mjs`, `git diff --check`, and the E2E sleep ratchet passed.
 
 ## Risks
 

@@ -1,7 +1,7 @@
 ---
 id: "02-goal-visibility"
 title: "Retain and disclose active agent goals"
-status: pending
+status: done
 wave: 2
 depends_on:
   - "01-restore-selection"
@@ -113,7 +113,7 @@ Do not run desktop and mobile simultaneously. New test files below belong to thi
 (cd apps/backend && go test ./internal/agentctl/server/adapter/transport/acp -run 'Test.*(Goal|SessionInfo)' -count=1)
 (cd apps/backend && go test -race ./internal/orchestrator -run 'TestHandleSessionInfoEvent|Test.*Goal' -count=1)
 (cd apps/backend && go test ./cmd/mock-agent -count=1)
-(cd apps/web && pnpm exec vitest run lib/ws/handlers/session-info.test.ts lib/agent-goal.test.ts components/task/chat/agent-goal-chip.test.tsx components/task/chat/chat-status-bar.test.tsx components/task/chat/chat-input-area.test.tsx lib/state/hydration)
+(cd apps/web && pnpm exec vitest run lib/ws/handlers/session-info.test.ts lib/agent-goal.test.ts components/task/chat/agent-goal-chip.test.tsx components/task/chat/chat-status-bar.test.tsx components/task/chat/chat-input-area.test.tsx lib/state/slices/session/session-merge-goal.test.ts lib/state/hydration)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm run lint)
 (cd apps/web && pnpm run i18n:check)
@@ -177,4 +177,25 @@ Keep the work in the primary session; this package does not authorize delegation
 
 ## Results
 
-Pending. This design turn does not implement or run the new regressions.
+Implemented typed ACP goal retention and read-only disclosure. The backend
+recognizes the documented goal extension, preserves it across unrelated session
+metadata updates, retains explicit null clearing, rejects malformed or stale
+snapshots, and resets the projection when the ACP attachment changes. The
+frontend keeps a narrow typed goal projection through live updates and
+hydration, prevents late data from resurrecting a cleared goal, and isolates
+the selected session. The shared status row now renders the localized Goal
+Active chip for task chat and Quick Chat. Desktop uses a hover, focus, and click
+popover. Phone and coarse pointers use a bounded bottom drawer with a fixed
+header, safe-area handling, internal objective scrolling, and a 44px trigger.
+Mock-agent scenarios cover active, unrelated metadata, complete, clear, and
+long-objective states. Public documentation and all locale catalogs were
+updated.
+
+Verification passed:
+
+- Backend goal, session-info, adapter conversion, mock-agent, and race tests passed.
+- `make lint` and `make -C apps/backend build` passed.
+- Focused goal Vitest: 10 files, 92 tests passed. The final goal component/session subset passed 22 tests, including live snapshot freshness, fresh reconnect clearing, and a real pointer-mode transition.
+- `pnpm run typecheck`, `pnpm run lint`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet` passed.
+- Desktop goal E2E: 3 tests passed. Mobile goal E2E: 1 test passed after the final trigger refactor.
+- `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, public-doc validation, and `git diff --check` passed.

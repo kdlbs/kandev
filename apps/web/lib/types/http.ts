@@ -19,6 +19,7 @@ import type {
 import type { OnEnterActionType, StepEvents } from "./workflow-actions";
 import type { EntityReference } from "./entity-reference";
 import type { TaskStatusSummary } from "./task-status-summary";
+import type { AgentGoalReconciliation } from "@/lib/agent-goal";
 
 export type { TaskStatusSummary } from "./task-status-summary";
 
@@ -647,6 +648,8 @@ export type TaskSession = ActiveSubagentCountFields & {
   pending_action_revision?: TaskPendingActionRevision;
   error_message?: string;
   metadata?: Record<string, unknown> | null;
+  /** Frontend-only ordering guard for live ACP goal updates and stale hydration. */
+  goal_reconciliation?: AgentGoalReconciliation;
   agent_profile_snapshot?: Record<string, unknown> | null;
   executor_snapshot?: Record<string, unknown> | null;
   environment_snapshot?: Record<string, unknown> | null;
