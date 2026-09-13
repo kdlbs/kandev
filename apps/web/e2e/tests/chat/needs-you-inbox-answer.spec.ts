@@ -1,8 +1,10 @@
 // AC-UI-NEEDS-YOU-INBOX-001.30: listing an answerable bundle, expanding it,
 // and answering it in place must remove the row (the convergence re-read)
 // and resume the blocked task, without ever navigating to the task page.
+import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import { waitForAgentMessage, waitForSessionState } from "../../helpers/session";
+import { PrAssetCapture } from "../../helpers/pr-asset-capture";
 
 test.describe("Needs-you Inbox answer flow", () => {
   test("answering a row removes it and resumes the task without navigation (AC .30)", async ({
@@ -11,6 +13,10 @@ test.describe("Needs-you Inbox answer flow", () => {
     seedData,
   }) => {
     test.setTimeout(90_000);
+    const prCapture = new PrAssetCapture(
+      testPage,
+      path.join(__dirname, "needs-you-inbox-answer.spec.ts"),
+    );
     const title = "Needs-you Inbox Answer Flow";
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
@@ -39,10 +45,14 @@ test.describe("Needs-you Inbox answer flow", () => {
 
     const row = testPage.getByTestId("needs-you-inbox-row").filter({ hasText: title });
     await expect(row).toBeVisible({ timeout: 30_000 });
+    await prCapture.screenshot("inbox-list", { caption: "Needs-you Inbox list" });
 
     await row.getByTestId("needs-you-inbox-row-toggle").click();
     const overlay = row.getByTestId("clarification-overlay");
     await expect(overlay).toBeVisible({ timeout: 15_000 });
+    await prCapture.screenshot("inbox-row-expanded", {
+      caption: "Row expanded to answer in place",
+    });
 
     await overlay.getByTestId("clarification-option").filter({ hasText: "PostgreSQL" }).click();
 
@@ -58,5 +68,6 @@ test.describe("Needs-you Inbox answer flow", () => {
     // agent's own post-answer message is the unambiguous proof the blocked
     // tool call was actually released and the turn ran to completion.
     await waitForAgentMessage(apiClient, task.session_id, "You answered:", 30_000);
+    prCapture.flush();
   });
 });
