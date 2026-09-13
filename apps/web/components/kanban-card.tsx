@@ -15,15 +15,7 @@ import { useAppStore } from "@/components/state-provider";
 import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
 import { TaskDetachConfirmationSurface } from "@/components/task/task-detach-confirm-dialog";
 import type { KanbanExternalLinkAvailability } from "./kanban-external-link-availability";
-import { useTaskWorkflowMove } from "@/hooks/use-task-workflow-move";
-import { useTaskMultiSelectStore } from "@/hooks/use-task-multi-select";
 import type { TaskActionOptions } from "@/hooks/use-task-actions";
-import { useDetachTask } from "@/hooks/use-detach-task";
-import { useUpdateTaskPriority } from "@/hooks/use-update-task-priority";
-import { useTaskMenuDialogState } from "@/hooks/use-task-menu-dialog-state";
-import { type TaskPriority } from "@/lib/types/http";
-import type { PluginTaskMenuContext } from "@/lib/plugins/types";
-import { usePluginRegistry } from "@/lib/plugins/registry";
 import type { Task, RepositoryChip, WorkflowStep, KanbanPresentation } from "./kanban-card-types";
 
 export type { Task, RepositoryChip, WorkflowStep, KanbanPresentation };
