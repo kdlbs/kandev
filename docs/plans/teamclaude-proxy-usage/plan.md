@@ -3,7 +3,8 @@ created: 2026-09-03
 status: in_progress
 requirements:
   - REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001
-system_design: []
+system_design:
+  - ../../specs/platform/system-design/provider-error-recovery.md
 legacy_specs: []
 ---
 

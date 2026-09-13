@@ -10,7 +10,8 @@ requirements:
 acceptance_criteria:
   - AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.3
   - AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.4
-system_design: []
+system_design:
+  - ../../specs/platform/system-design/provider-error-recovery.md
 ---
 
 # Task 03: Add OpenRouter Key-Usage Adapter
