@@ -23,6 +23,7 @@ let activeSessionId: string | null = null;
 let isOpen = false;
 let rememberedSelectionByWorkspace: Record<string, { chat?: string; config?: string }> = {};
 let selectionReadyByWorkspace: Record<string, boolean> = { [WORKSPACE_ID]: true };
+let selectionRevisionByWorkspace: Record<string, number> = {};
 let quickChatTabOrderByWorkspace: Record<string, string[]> = {};
 let sessions: Array<{
   sessionId: string;
@@ -42,6 +43,7 @@ vi.mock("@/components/state-provider", () => ({
         activeSessionId,
         rememberedSelectionByWorkspace,
         selectionReadyByWorkspace,
+        selectionRevisionByWorkspace,
         tabOrderByWorkspace: {},
       },
       userSettings: { quickChatTabOrderByWorkspace },
@@ -56,6 +58,7 @@ beforeEach(() => {
   isOpen = false;
   rememberedSelectionByWorkspace = {};
   selectionReadyByWorkspace = { [WORKSPACE_ID]: true };
+  selectionRevisionByWorkspace = {};
   quickChatTabOrderByWorkspace = {};
   openQuickChat.mockReset();
   closeQuickChat.mockReset();
@@ -133,6 +136,7 @@ describe("useQuickChatLauncher typed sessions", () => {
       { sessionId: ACTIVE_CONFIG_ID, workspaceId: WORKSPACE_ID, kind: "config" },
     ];
     activeSessionId = ACTIVE_CONFIG_ID;
+    selectionRevisionByWorkspace = { [WORKSPACE_ID]: 1 };
     const { result } = renderHook(() => useQuickChatLauncher(WORKSPACE_ID, "config"));
 
     act(() => result.current());
@@ -187,6 +191,7 @@ describe("useQuickChatLauncher delayed selection", () => {
     activeSessionId = hydrated.quickChat.activeSessionId;
     rememberedSelectionByWorkspace = hydrated.quickChat.rememberedSelectionByWorkspace;
     selectionReadyByWorkspace = hydrated.quickChat.selectionReadyByWorkspace;
+    selectionRevisionByWorkspace = hydrated.quickChat.selectionRevisionByWorkspace;
 
     const { result } = renderHook(() => useQuickChatLauncher(WORKSPACE_ID));
 

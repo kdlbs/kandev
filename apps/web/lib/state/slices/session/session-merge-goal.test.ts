@@ -174,4 +174,45 @@ describe("TaskSession reconnect goal hydration", () => {
       sourceUpdatedAt: FRESH_GOAL_SNAPSHOT_AT,
     });
   });
+
+  it("uses the fresh task snapshot revision when ACP metadata time is unchanged", () => {
+    const existing = session(
+      {
+        acp: {
+          session_id: "acp-1",
+          updated_at: LIVE_GOAL_SNAPSHOT_AT,
+          meta: { goal: ACTIVE_GOAL },
+        },
+      },
+      {
+        updated_at: LIVE_GOAL_SNAPSHOT_AT,
+        goal_reconciliation: {
+          revision: 1,
+          cleared: false,
+          watermark: { createdAt: 10, updatedAt: 20 },
+          sourceUpdatedAt: LIVE_GOAL_SNAPSHOT_AT,
+        },
+      },
+    );
+
+    const merged = mergeTaskSession(
+      existing,
+      session(
+        {
+          acp: {
+            session_id: "acp-1",
+            updated_at: LIVE_GOAL_SNAPSHOT_AT,
+            meta: { goal: null },
+          },
+        },
+        { updated_at: FRESH_GOAL_SNAPSHOT_AT },
+      ),
+    );
+
+    expect(merged.metadata?.acp).toMatchObject({ meta: { goal: null } });
+    expect(merged.goal_reconciliation).toMatchObject({
+      cleared: true,
+      sourceUpdatedAt: FRESH_GOAL_SNAPSHOT_AT,
+    });
+  });
 });

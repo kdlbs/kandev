@@ -3301,6 +3301,14 @@ func (s *Service) handleSessionInfoEvent(ctx context.Context, payload *lifecycle
 	if !s.resumeAttemptAllowsExecution(payload.SessionID, payload.ExecutionID, payload.AttemptID) {
 		return
 	}
+	if currentACPSessionID := s.currentACPSessionID(payload.SessionID); currentACPSessionID != "" &&
+		payload.Data.ACPSessionID != "" && payload.Data.ACPSessionID != currentACPSessionID {
+		s.logger.Info("dropping session info from stale ACP session generation",
+			zap.String("session_id", payload.SessionID),
+			zap.String("acp_session_id", payload.Data.ACPSessionID),
+			zap.String("current_acp_session_id", currentACPSessionID))
+		return
+	}
 	info, err := s.mergedACPSessionInfo(ctx, payload.SessionID, payload.Data)
 	if err != nil {
 		s.logger.Warn("failed to read existing ACP session info",
@@ -3379,7 +3387,18 @@ func (s *Service) mergedACPSessionInfo(
 		if incomingMeta == nil {
 			incomingMeta = map[string]any{}
 		}
-		info["meta"] = mergeACPGoalMeta(existingMeta, incomingMeta, attachmentChanged)
+		mergedMeta, clearWatermark := mergeACPGoalMetaWithClearWatermark(
+			existingMeta,
+			incomingMeta,
+			attachmentChanged,
+			info[goalClearWatermarkInfoKey],
+		)
+		info["meta"] = mergedMeta
+		if clearWatermark == nil {
+			delete(info, goalClearWatermarkInfoKey)
+		} else {
+			info[goalClearWatermarkInfoKey] = clearWatermark
+		}
 	}
 	return info, nil
 }

@@ -1,3 +1,5 @@
+import { parseTurnTimestamp } from "@/lib/state/slices/session/turn-actions";
+
 export type AgentGoalStatus = "active" | "paused" | "blocked" | "limited" | "complete";
 
 export type AgentGoal = {
@@ -104,9 +106,9 @@ export function isAgentGoalSnapshotNewer(
   reconciliation: AgentGoalReconciliation | undefined,
 ): boolean {
   if (!snapshotUpdatedAt || !reconciliation?.sourceUpdatedAt) return false;
-  const snapshotTime = Date.parse(snapshotUpdatedAt);
-  const sourceTime = Date.parse(reconciliation.sourceUpdatedAt);
-  return !Number.isNaN(snapshotTime) && !Number.isNaN(sourceTime) && snapshotTime > sourceTime;
+  const snapshotTime = parseTurnTimestamp(snapshotUpdatedAt);
+  const sourceTime = parseTurnTimestamp(reconciliation.sourceUpdatedAt);
+  return snapshotTime !== null && sourceTime !== null && snapshotTime > sourceTime;
 }
 
 /** Returns the accepted goal from ACP metadata, or null for absent/invalid values. */
@@ -144,7 +146,7 @@ export function mergeAgentGoalMetadata(
     return mergeClearedGoal(next, current.goal, options);
   }
 
-  return mergeLiveGoal(next, current, incoming ?? {}, existingHasGoal, options);
+  return mergeLiveGoal(next, current, incoming ?? {}, options);
 }
 
 function mergeAttachedGoal(
@@ -183,7 +185,6 @@ function mergeLiveGoal(
   next: Record<string, unknown>,
   current: Record<string, unknown>,
   incoming: Record<string, unknown>,
-  existingHasGoal: boolean,
   options: {
     attachmentChanged?: boolean;
     source?: "live" | "hydration";
@@ -193,7 +194,7 @@ function mergeLiveGoal(
 ): Record<string, unknown> {
   const parsed = parseAgentGoal(incoming.goal);
   if (!parsed) {
-    setInvalidGoalFallback(next, current, existingHasGoal);
+    next.goal = null;
     return next;
   }
 
@@ -222,15 +223,6 @@ function shouldRetainHydrationGoal(
     parseAgentGoal(currentGoal) !== null &&
     !isAgentGoalSnapshotNewer(options.snapshotUpdatedAt, options.reconciliation)
   );
-}
-
-function setInvalidGoalFallback(
-  next: Record<string, unknown>,
-  current: Record<string, unknown>,
-  existingHasGoal: boolean,
-): void {
-  if (existingHasGoal) next.goal = current.goal;
-  else delete next.goal;
 }
 
 function shouldRetainClearedGoal(

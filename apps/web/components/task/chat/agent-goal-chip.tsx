@@ -67,6 +67,7 @@ type AgentGoalTriggerProps = {
   suppressHoverRef: { current: boolean };
   triggerRef: { current: HTMLButtonElement | null };
   triggerWasFocusedRef: { current: boolean };
+  onHoverChange: (hovered: boolean) => void;
   usesDrawer: boolean;
 } & Omit<ComponentPropsWithoutRef<"button">, "ref">;
 
@@ -80,6 +81,7 @@ const AgentGoalTrigger = forwardRef<HTMLButtonElement, AgentGoalTriggerProps>(
       suppressHoverRef,
       triggerRef,
       triggerWasFocusedRef,
+      onHoverChange,
       usesDrawer,
       ...buttonProps
     },
@@ -101,9 +103,11 @@ const AgentGoalTrigger = forwardRef<HTMLButtonElement, AgentGoalTriggerProps>(
         aria-expanded={open}
         aria-controls={detailsId}
         onMouseEnter={() => {
+          onHoverChange(true);
           if (!usesDrawer && !suppressHoverRef.current) setOpen(true);
         }}
         onMouseLeave={() => {
+          onHoverChange(false);
           suppressHoverRef.current = false;
         }}
         onFocus={() => {
@@ -147,6 +151,7 @@ type AgentGoalPopoverProps = {
   triggerRef: { current: HTMLButtonElement | null };
   triggerWasFocusedRef: { current: boolean };
   restoringFocusRef: { current: boolean };
+  onHoverChange: (hovered: boolean) => void;
 };
 
 function AgentGoalPopover({
@@ -159,6 +164,7 @@ function AgentGoalPopover({
   triggerRef,
   triggerWasFocusedRef,
   restoringFocusRef,
+  onHoverChange,
 }: AgentGoalPopoverProps) {
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -184,6 +190,8 @@ function AgentGoalPopover({
           suppressHoverRef.current = true;
           setOpen(false);
         }}
+        onMouseEnter={() => onHoverChange(true)}
+        onMouseLeave={() => onHoverChange(false)}
       >
         <AgentGoalDetails goal={goal} />
       </PopoverContent>
@@ -220,6 +228,7 @@ function AgentGoalDrawer({ children, detailsId, goal, open, setOpen }: AgentGoal
               variant="ghost"
               size="icon-sm"
               aria-label={t("task:goalCloseDetails")}
+              className="[@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
             >
               <IconX aria-hidden="true" />
             </Button>
@@ -239,6 +248,9 @@ export function AgentGoalChip({ goal }: AgentGoalChipProps) {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const triggerWasFocusedRef = useRef(false);
   const restoringFocusRef = useRef(false);
+  const triggerHoveredRef = useRef(false);
+  const contentHoveredRef = useRef(false);
+  const hoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const detailsId = `agent-goal-details-${useId()}`;
   const isActive = goal?.status === "active";
 
@@ -246,7 +258,32 @@ export function AgentGoalChip({ goal }: AgentGoalChipProps) {
     if (!isActive) setOpen(false);
   }, [isActive]);
 
+  useEffect(
+    () => () => {
+      if (hoverCloseTimerRef.current !== null) clearTimeout(hoverCloseTimerRef.current);
+    },
+    [],
+  );
+
   if (!isActive || !goal) return null;
+
+  const setHoverPresence = (region: "trigger" | "content", hovered: boolean) => {
+    if (region === "trigger") triggerHoveredRef.current = hovered;
+    else contentHoveredRef.current = hovered;
+    if (hovered) {
+      if (hoverCloseTimerRef.current !== null) {
+        clearTimeout(hoverCloseTimerRef.current);
+        hoverCloseTimerRef.current = null;
+      }
+      return;
+    }
+    if (triggerHoveredRef.current || contentHoveredRef.current) return;
+    if (hoverCloseTimerRef.current !== null) clearTimeout(hoverCloseTimerRef.current);
+    hoverCloseTimerRef.current = setTimeout(() => {
+      hoverCloseTimerRef.current = null;
+      if (!triggerHoveredRef.current && !contentHoveredRef.current) setOpen(false);
+    }, 100);
+  };
 
   const trigger = (
     <AgentGoalTrigger
@@ -257,6 +294,7 @@ export function AgentGoalChip({ goal }: AgentGoalChipProps) {
       suppressHoverRef={suppressHoverRef}
       triggerRef={triggerRef}
       triggerWasFocusedRef={triggerWasFocusedRef}
+      onHoverChange={(hovered) => setHoverPresence("trigger", hovered)}
       usesDrawer={usesDrawer}
     />
   );
@@ -279,6 +317,7 @@ export function AgentGoalChip({ goal }: AgentGoalChipProps) {
       triggerRef={triggerRef}
       triggerWasFocusedRef={triggerWasFocusedRef}
       restoringFocusRef={restoringFocusRef}
+      onHoverChange={(hovered) => setHoverPresence("content", hovered)}
     >
       {trigger}
     </AgentGoalPopover>

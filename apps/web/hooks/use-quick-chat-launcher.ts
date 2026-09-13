@@ -30,6 +30,9 @@ export function useQuickChatLauncher(
   const isQuickChatOpen = useAppStore((state) => state.quickChat.isOpen);
   const quickChatSessions = useAppStore((state) => state.quickChat.sessions);
   const activeSessionId = useAppStore((state) => state.quickChat.activeSessionId);
+  const selectionRevision = useAppStore(
+    (state) => state.quickChat.selectionRevisionByWorkspace[workspaceId ?? ""] ?? 0,
+  );
   const rememberedSelection = useAppStore(
     (state) => state.quickChat.rememberedSelectionByWorkspace[workspaceId ?? ""],
   );
@@ -58,7 +61,9 @@ export function useQuickChatLauncher(
       (session) => session.workspaceId === workspaceId && (session.kind ?? "chat") === kind,
     );
     const existingSession =
-      matchingSessions.find((session) => session.sessionId === activeSessionId) ??
+      (selectionRevision > 0
+        ? matchingSessions.find((session) => session.sessionId === activeSessionId)
+        : undefined) ??
       matchingSessions.find((session) => session.sessionId === rememberedSelection?.[kind]) ??
       (selectionReady ? orderQuickChatTabs(matchingSessions, [], tabOrder).sessions[0] : undefined);
     if (!selectionReady && !existingSession) {
@@ -87,6 +92,7 @@ export function useQuickChatLauncher(
     quickChatSessions,
     kind,
     activeSessionId,
+    selectionRevision,
     rememberedSelection,
     selectionReady,
     tabOrder,

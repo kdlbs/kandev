@@ -1,6 +1,7 @@
 import type { TaskSession } from "@/lib/types/http";
 import { mergePendingActionProjection } from "./task-session-projection-actions";
 import { getAgentGoal, isAgentGoalSnapshotNewer, mergeAgentGoalMetadata } from "@/lib/agent-goal";
+import { parseTurnTimestamp } from "./turn-actions";
 
 function asMetadataRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -40,7 +41,7 @@ function mergeGoalReconciliation(
   if (incoming.goal_reconciliation) return incoming.goal_reconciliation;
   if (!attachmentChanged) {
     const reconciliation = existing.goal_reconciliation;
-    const incomingUpdatedAt = readACPUpdatedAt(incoming.metadata?.acp);
+    const incomingUpdatedAt = readGoalSnapshotUpdatedAt(incoming);
     if (
       reconciliation &&
       !reconciliation.cleared &&
@@ -68,6 +69,19 @@ function mergeGoalReconciliation(
 function readACPUpdatedAt(value: unknown): string | undefined {
   const record = asMetadataRecord(value);
   return typeof record?.updated_at === "string" ? record.updated_at : undefined;
+}
+
+function readGoalSnapshotUpdatedAt(session: TaskSession): string | undefined {
+  const candidates = [readACPUpdatedAt(session.metadata?.acp), session.updated_at];
+  let newest: string | undefined;
+  let newestTime: bigint | null = null;
+  for (const candidate of candidates) {
+    const candidateTime = parseTurnTimestamp(candidate);
+    if (candidateTime === null || (newestTime !== null && candidateTime <= newestTime)) continue;
+    newest = candidate;
+    newestTime = candidateTime;
+  }
+  return newest;
 }
 
 function hasIncomingGoalClear(session: TaskSession): boolean {
@@ -100,7 +114,7 @@ function mergeSessionMetadata(
       attachmentChanged,
       source: "hydration",
       reconciliation: existing.goal_reconciliation,
-      snapshotUpdatedAt: readACPUpdatedAt(incomingACPRecord),
+      snapshotUpdatedAt: readGoalSnapshotUpdatedAt(incoming),
     });
   } else if (currentACPRecord.meta !== undefined) {
     mergedACP.meta = currentACPRecord.meta;

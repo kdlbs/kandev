@@ -25,7 +25,9 @@ import { getQuickChatSetupSessionId, isQuickChatSetupSessionId } from "./quick-c
 import type { QuickChatSession, QuickChatSessionKind, QuickChatState, UISlice } from "./types";
 
 type ImmerSet = (recipe: (draft: Draft<UISlice>) => void) => void;
-type ImmerGet = () => Pick<UISlice, "quickChat">;
+type ImmerGet = () => Pick<UISlice, "quickChat"> & {
+  userSettings?: { quickChatTabOrderByWorkspace?: Record<string, string[]> };
+};
 
 function findWorkspaceConfigSession(
   sessions: UISlice["quickChat"]["sessions"],
@@ -68,6 +70,7 @@ function persistRememberedSelection(get: ImmerGet): void {
 function bumpSelectionRevision(quickChat: Draft<QuickChatState>, workspaceId: string): void {
   quickChat.selectionRevisionByWorkspace[workspaceId] =
     (quickChat.selectionRevisionByWorkspace[workspaceId] ?? 0) + 1;
+  if (quickChat.pendingOpen?.workspaceId === workspaceId) quickChat.pendingOpen = null;
 }
 
 function rememberSelectedSession(
@@ -146,6 +149,7 @@ function resolvePendingOpen(
   quickChat: Draft<QuickChatState>,
   workspaceId: string,
   sessions: QuickChatSession[],
+  persistedTabOrder?: string[],
 ): void {
   const pending = quickChat.pendingOpen;
   if (
@@ -160,7 +164,7 @@ function resolvePendingOpen(
     quickChat.rememberedSelectionByWorkspace,
     workspaceId,
     pending.kind,
-    pending.tabOrder ?? quickChat.tabOrderByWorkspace[workspaceId],
+    pending.tabOrder ?? quickChat.tabOrderByWorkspace[workspaceId] ?? persistedTabOrder,
   );
   if (sessionId) {
     quickChat.activeSessionId = sessionId;
@@ -293,26 +297,69 @@ function buildQuickChatOrderActions(set: ImmerSet) {
   };
 }
 
+function closeQuickChatAction(set: ImmerSet) {
+  return () =>
+    set((draft) => {
+      draft.quickChat.isOpen = false;
+      if (draft.quickChat.pendingOpen) {
+        bumpSelectionRevision(draft.quickChat, draft.quickChat.pendingOpen.workspaceId);
+        draft.quickChat.pendingOpen = null;
+      }
+    });
+}
+
+function closeQuickChatSessionAction(set: ImmerSet, get: ImmerGet) {
+  return (sessionId: string) => {
+    const sessions = get().quickChat.sessions;
+    set((draft) => {
+      const closing = sessions.find((session) => session.sessionId === sessionId);
+      const wasActiveConversation =
+        draft.quickChat.activeKind === "conversation" &&
+        draft.quickChat.activeSessionId === sessionId;
+      draft.quickChat = closeQuickChatSession(draft.quickChat, sessionId);
+      clearRememberedSession(draft.quickChat, sessions, sessionId);
+      if (!closing || !wasActiveConversation) return;
+      const replacement = draft.quickChat.sessions.find(
+        (session) => session.sessionId === draft.quickChat.activeSessionId,
+      );
+      if (
+        replacement &&
+        replacement.workspaceId === closing.workspaceId &&
+        (replacement.kind ?? "chat") === (closing.kind ?? "chat")
+      ) {
+        rememberSelectedSession(draft.quickChat, replacement);
+      }
+    });
+    persistRememberedSelection(get);
+  };
+}
+
+function syncQuickChatSessionsAction(set: ImmerSet, get: ImmerGet) {
+  return (workspaceId: string, sessions: QuickChatSession[]) => {
+    set((draft) => {
+      if (draft.quickChat.pendingOpen?.workspaceId !== workspaceId) {
+        draft.quickChat.pendingOpen = null;
+      }
+      draft.quickChat = reconcileQuickChatSessions(draft.quickChat, workspaceId, sessions);
+      clearMissingRememberedSelections(draft.quickChat, workspaceId, sessions);
+      draft.quickChat.selectionReadyByWorkspace[workspaceId] = true;
+      resolvePendingOpen(
+        draft.quickChat,
+        workspaceId,
+        sessions,
+        get().userSettings?.quickChatTabOrderByWorkspace?.[workspaceId],
+      );
+    });
+    persistRememberedSelection(get);
+  };
+}
+
 function buildQuickChatSessionActions(set: ImmerSet, get: ImmerGet) {
   return {
     addQuickChatSession: addQuickChatSession(set, get),
     openQuickChat: openQuickChat(set, get),
-    closeQuickChat: () =>
-      set((draft) => {
-        draft.quickChat.isOpen = false;
-        if (draft.quickChat.pendingOpen) {
-          bumpSelectionRevision(draft.quickChat, draft.quickChat.pendingOpen.workspaceId);
-          draft.quickChat.pendingOpen = null;
-        }
-      }),
-    closeQuickChatSession: (sessionId: string) => {
-      const sessions = get().quickChat.sessions;
-      set((draft) => {
-        draft.quickChat = closeQuickChatSession(draft.quickChat, sessionId);
-        clearRememberedSession(draft.quickChat, sessions, sessionId);
-      });
-      persistRememberedSelection(get);
-    },
+    closeQuickChat: closeQuickChatAction(set),
+    closeQuickChatSession: closeQuickChatSessionAction(set, get),
     setActiveQuickChatSession: (sessionId: string, workspaceId: string) => {
       let selected = false;
       set((draft) => {
@@ -339,15 +386,7 @@ function buildQuickChatSessionActions(set: ImmerSet, get: ImmerGet) {
         draft.quickChat.syncRevisionByWorkspace[session.workspaceId] =
           (draft.quickChat.syncRevisionByWorkspace[session.workspaceId] ?? 0) + 1;
       }),
-    syncQuickChatSessions: (workspaceId: string, sessions: QuickChatSession[]) => {
-      set((draft) => {
-        draft.quickChat = reconcileQuickChatSessions(draft.quickChat, workspaceId, sessions);
-        clearMissingRememberedSelections(draft.quickChat, workspaceId, sessions);
-        draft.quickChat.selectionReadyByWorkspace[workspaceId] = true;
-        resolvePendingOpen(draft.quickChat, workspaceId, sessions);
-      });
-      persistRememberedSelection(get);
-    },
+    syncQuickChatSessions: syncQuickChatSessionsAction(set, get),
     syncQuickTerminalTabs: (workspaceId: string, tabs: UISlice["quickChat"]["terminalTabs"]) =>
       set((draft) => {
         draft.quickChat = reconcileQuickTerminalTabs(draft.quickChat, workspaceId, tabs);
@@ -450,11 +489,12 @@ function buildQuickChatSelectionActions(set: ImmerSet) {
     setQuickChatSelectionIdentity: (identity: string | null) =>
       set((draft) => {
         if (draft.quickChat.selectionStorageIdentity === identity) return;
+        const hadSelectionIdentity = draft.quickChat.selectionStorageIdentity !== null;
         const loaded = loadQuickChatSelection(identity);
         draft.quickChat.selectionStorageIdentity = identity;
         draft.quickChat.rememberedSelectionByWorkspace = loaded.selections;
         draft.quickChat.rememberedSelectionOrder = loaded.order;
-        draft.quickChat.selectionReadyByWorkspace = {};
+        if (hadSelectionIdentity) draft.quickChat.selectionReadyByWorkspace = {};
         draft.quickChat.selectionRevisionByWorkspace = {};
         draft.quickChat.pendingOpen = null;
       }),

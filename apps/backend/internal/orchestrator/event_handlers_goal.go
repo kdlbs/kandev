@@ -6,9 +6,65 @@ import (
 )
 
 const (
-	goalKey              = "goal"
-	goalObjectiveMaxSize = 16 * 1024
+	goalKey                   = "goal"
+	goalObjectiveMaxSize      = 16 * 1024
+	goalClearWatermarkInfoKey = "_kandev_goal_clear_watermark"
 )
+
+func mergeACPGoalMetaWithClearWatermark(
+	existing, incoming map[string]any,
+	attachmentChanged bool,
+	existingClearWatermark any,
+) (map[string]any, map[string]any) {
+	merged := mergeACPGoalMeta(existing, incoming, attachmentChanged)
+	if attachmentChanged {
+		return merged, nil
+	}
+
+	watermark := parseACPGoalWatermark(existingClearWatermark)
+	incomingGoal, incomingHasGoal := incoming[goalKey]
+	if !incomingHasGoal {
+		return merged, watermark
+	}
+	if incomingGoal == nil {
+		if existingGoal, ok := parseACPGoal(existing[goalKey]); ok {
+			return merged, goalWatermark(existingGoal)
+		}
+		return merged, watermark
+	}
+	parsed, ok := parseACPGoal(incomingGoal)
+	if !ok {
+		if existingGoal, existingOK := parseACPGoal(existing[goalKey]); existingOK {
+			return merged, goalWatermark(existingGoal)
+		}
+		return merged, watermark
+	}
+	if watermark != nil && !goalIsAtLeastAsFresh(parsed, watermark) {
+		merged[goalKey] = nil
+		return merged, watermark
+	}
+	return merged, nil
+}
+
+func goalWatermark(goal map[string]any) map[string]any {
+	return map[string]any{
+		"createdAt": goal["createdAt"],
+		"updatedAt": goal["updatedAt"],
+	}
+}
+
+func parseACPGoalWatermark(value any) map[string]any {
+	record, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+	createdAt, createdOK := goalNumber(record["createdAt"])
+	updatedAt, updatedOK := goalNumber(record["updatedAt"])
+	if !createdOK || !updatedOK {
+		return nil
+	}
+	return map[string]any{"createdAt": createdAt, "updatedAt": updatedAt}
+}
 
 var supportedGoalStatuses = map[string]struct{}{
 	"active":   {},
@@ -50,11 +106,10 @@ func mergeACPGoalMeta(
 
 	parsed, ok := parseACPGoal(incomingGoal)
 	if !ok {
-		if existingHasGoal {
-			merged[goalKey] = existingGoal
-		} else {
-			delete(merged, goalKey)
-		}
+		// A present but malformed replacement is an explicit non-active
+		// projection. Retaining an older active goal would misrepresent the
+		// provider after it has changed or invalidated the goal payload.
+		merged[goalKey] = nil
 		return merged
 	}
 

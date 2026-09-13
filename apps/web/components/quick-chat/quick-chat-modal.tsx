@@ -86,9 +86,10 @@ function QuickChatActiveContent({
     (session) => session.kind === "config",
   );
 
+  if (quickChat.pendingQuickChatOpen) return <QuickChatSelectionLoading />;
+
   return (
     <>
-      {quickChat.pendingQuickChatOpen ? <QuickChatSelectionLoading /> : null}
       <QuickChatTerminalContent quickChat={quickChat} />
       <QuickChatConversationContent
         workspaceId={workspaceId}

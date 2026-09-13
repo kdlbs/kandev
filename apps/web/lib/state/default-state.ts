@@ -199,6 +199,9 @@ function mergeQuickChatState(initialState: HydrationState): DefaultState["quickC
   for (const session of sessions ?? []) {
     merged.selectionReadyByWorkspace[session.workspaceId] = true;
   }
+  if (sessions?.length === 0 && initialState.workspaces?.activeId) {
+    merged.selectionReadyByWorkspace[initialState.workspaces.activeId] = true;
+  }
   return merged;
 }
 

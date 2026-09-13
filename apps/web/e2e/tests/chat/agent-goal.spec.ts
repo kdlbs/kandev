@@ -47,6 +47,18 @@ test.describe("agent goal visibility", () => {
       timeout: 30_000,
     });
 
+    await session.sendMessageViaButton("/e2e:goal-complete");
+    await session.expectChatResponseVisible("The provider goal is complete.", 0, {
+      timeout: 30_000,
+    });
+    await expect(session.activeChat().getByTestId("agent-goal-chip")).toBeHidden({
+      timeout: 15_000,
+    });
+
+    await session.sendMessageViaButton("/e2e:goal-active");
+    await expect(session.activeChat().getByTestId("agent-goal-chip")).toBeVisible({
+      timeout: 30_000,
+    });
     await session.sendMessageViaButton("/e2e:goal-clear");
     await session.expectChatResponseVisible("The provider goal was cleared.", 0, {
       timeout: 30_000,

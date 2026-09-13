@@ -34,8 +34,24 @@ test.describe("mobile agent goal visibility", () => {
     await expect(drawer).toContainText("The agent may continue automatically between replies.");
     await assertNoDocumentHorizontalOverflow(testPage, "mobile agent goal drawer");
 
-    await testPage.getByRole("button", { name: "Close goal details" }).tap();
+    const close = testPage.getByRole("button", { name: "Close goal details" });
+    const closeBounds = await close.boundingBox();
+    expect(closeBounds).not.toBeNull();
+    if (!closeBounds) throw new Error("goal close bounds unavailable");
+    expect(closeBounds.width).toBeGreaterThanOrEqual(44);
+    expect(closeBounds.height).toBeGreaterThanOrEqual(44);
+
+    await close.tap();
     await expect(drawer).toBeHidden();
+
+    await sendQuickChatMessage(dialog, testPage, "/e2e:goal-complete");
+    await expect(dialog.getByText("The provider goal is complete.", { exact: false })).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(dialog.getByTestId("agent-goal-chip")).toBeHidden({ timeout: 15_000 });
+
+    await sendQuickChatMessage(dialog, testPage, "/e2e:goal-active");
+    await expect(dialog.getByTestId("agent-goal-chip")).toBeVisible({ timeout: 30_000 });
 
     await sendQuickChatMessage(dialog, testPage, "/e2e:goal-clear");
     await expect(dialog.getByText("The provider goal was cleared.", { exact: false })).toBeVisible({

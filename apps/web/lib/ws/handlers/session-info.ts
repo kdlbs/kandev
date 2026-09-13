@@ -20,46 +20,54 @@ export function registerSessionInfoHandlers(store: StoreApi<AppState>): WsHandle
       if (!existing) return;
       const existingACP = readExistingACP(existing.metadata?.acp);
       if (isStaleSessionInfoUpdate(payload.session_updated_at, existingACP.updated_at)) return;
-      const attachmentChanged =
-        Boolean(payload.acp_session_id) &&
-        Boolean(existingACP.session_id) &&
-        payload.acp_session_id !== existingACP.session_id;
-      const meta =
-        payload.session_meta !== undefined || attachmentChanged
-          ? mergeAgentGoalMetadata(existingACP.meta, payload.session_meta, {
-              attachmentChanged,
-              source: "live",
-              reconciliation: existing.goal_reconciliation,
-            })
-          : existingACP.meta;
-      const nextSession: TaskSession = {
-        ...existing,
-        metadata: {
-          ...(existing.metadata ?? {}),
-          acp: {
-            session_id: payload.acp_session_id || existingACP.session_id,
-            title: payload.session_title || existingACP.title,
-            updated_at: payload.session_updated_at || existingACP.updated_at,
-            meta,
-          },
-        },
-      };
-      const reconciliation = nextLiveGoalReconciliation(
-        existing.goal_reconciliation,
-        getAgentGoal(existingACP.meta),
-        payload.session_meta,
-        attachmentChanged,
-        meta,
-      );
-      if (reconciliation) {
-        nextSession.goal_reconciliation = withGoalSnapshotTimestamp(
-          reconciliation,
-          payload.session_updated_at,
-        );
-      }
-      store.getState().setTaskSession(nextSession);
+      store.getState().setTaskSession(buildNextSessionInfoSession(existing, payload));
     },
   };
+}
+
+function buildNextSessionInfoSession(
+  existing: TaskSession,
+  payload: SessionInfoPayload,
+): TaskSession {
+  const existingACP = readExistingACP(existing.metadata?.acp);
+  const attachmentChanged =
+    Boolean(payload.acp_session_id) &&
+    Boolean(existingACP.session_id) &&
+    payload.acp_session_id !== existingACP.session_id;
+  const meta =
+    payload.session_meta !== undefined || attachmentChanged
+      ? mergeAgentGoalMetadata(existingACP.meta, payload.session_meta, {
+          attachmentChanged,
+          source: "live",
+          reconciliation: existing.goal_reconciliation,
+        })
+      : existingACP.meta;
+  const nextSession: TaskSession = {
+    ...existing,
+    metadata: {
+      ...(existing.metadata ?? {}),
+      acp: {
+        session_id: payload.acp_session_id || existingACP.session_id,
+        title: payload.session_title || existingACP.title,
+        updated_at: payload.session_updated_at || existingACP.updated_at,
+        meta,
+      },
+    },
+  };
+  const reconciliation = nextLiveGoalReconciliation(
+    existing.goal_reconciliation,
+    getAgentGoal(existingACP.meta),
+    payload.session_meta,
+    attachmentChanged,
+    meta,
+  );
+  if (reconciliation) {
+    nextSession.goal_reconciliation =
+      attachmentChanged || hasGoalField(payload.session_meta)
+        ? withGoalSnapshotTimestamp(reconciliation, payload.session_updated_at)
+        : reconciliation;
+  }
+  return nextSession;
 }
 
 function withGoalSnapshotTimestamp(

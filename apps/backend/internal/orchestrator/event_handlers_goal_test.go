@@ -71,6 +71,45 @@ func TestMergeACPGoalMetaPreservesOrderedClear(t *testing.T) {
 	require.Nil(t, retained[goalKey])
 }
 
+func TestMergeACPGoalMetaTreatsMalformedReplacementAsInactive(t *testing.T) {
+	active := map[string]any{"goal": testACPGoal("active", 100, 200)}
+	malformed := map[string]any{"goal": testACPGoal("running", 100, 201)}
+
+	merged := mergeACPGoalMeta(active, malformed, false)
+	require.Contains(t, merged, goalKey)
+	require.Nil(t, merged[goalKey])
+}
+
+func TestMergeACPGoalMetaKeepsOlderGoalCleared(t *testing.T) {
+	active := map[string]any{"goal": testACPGoal("active", 100, 200)}
+	cleared, watermark := mergeACPGoalMetaWithClearWatermark(
+		active,
+		map[string]any{"goal": nil},
+		false,
+		nil,
+	)
+	require.Nil(t, cleared[goalKey])
+	require.Equal(t, map[string]any{"createdAt": float64(100), "updatedAt": float64(200)}, watermark)
+
+	older, retainedWatermark := mergeACPGoalMetaWithClearWatermark(
+		cleared,
+		map[string]any{"goal": testACPGoal("active", 100, 199)},
+		false,
+		watermark,
+	)
+	require.Nil(t, older[goalKey])
+	require.Equal(t, watermark, retainedWatermark)
+
+	newer, noWatermark := mergeACPGoalMetaWithClearWatermark(
+		cleared,
+		map[string]any{"goal": testACPGoal("active", 100, 201)},
+		false,
+		watermark,
+	)
+	require.Equal(t, "active", newer[goalKey].(map[string]any)["status"])
+	require.Nil(t, noWatermark)
+}
+
 func TestMergeACPGoalMetaResetsOnAttachmentChange(t *testing.T) {
 	active := map[string]any{"goal": testACPGoal("active", 100, 200)}
 	cleared := mergeACPGoalMeta(active, map[string]any{"codex": "new-attachment"}, true)
@@ -129,4 +168,35 @@ func TestHandleSessionInfoEvent_GoalSurvivesUnrelatedMetadata(t *testing.T) {
 	payload, ok := eb.events[1].event.Data.(lifecycle.SessionInfoEventPayload)
 	require.True(t, ok)
 	require.Equal(t, goal, payload.SessionMeta["goal"])
+}
+
+func TestHandleSessionInfoEvent_DropsObsoleteACPAttachment(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	eb := &recordingEventBus{}
+	agentManager := &mockAgentManager{
+		getACPSessionIDForSessionFunc: func(string) (string, bool) {
+			return "acp-current", true
+		},
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentManager)
+	svc.eventBus = eb
+
+	svc.handleSessionInfoEvent(ctx, &lifecycle.AgentStreamEventPayload{
+		TaskID:    "t1",
+		SessionID: "s1",
+		Data: &lifecycle.AgentStreamEventData{
+			ACPSessionID: "acp-old",
+			SessionMeta: map[string]any{
+				"goal": testACPGoal("active", 10, 20),
+			},
+		},
+	})
+
+	updated, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	_, hasACP := updated.Metadata["acp"]
+	require.False(t, hasACP)
+	require.Empty(t, eb.events)
 }
