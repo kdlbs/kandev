@@ -1,4 +1,4 @@
-import { type Page } from "@playwright/test";
+import { type Locator, type Page } from "@playwright/test";
 import { test, expect, type SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { SessionPage } from "../../pages/session-page";
@@ -7,6 +7,17 @@ import { CHAT_MENTION_RECENCY_STORAGE_KEY } from "../../../lib/chat-mention-rece
 
 const RECENT_PROMPT_NAME = "Project-Mention-Recency-Prompt";
 const STRONGER_PROMPT_NAME = "Mention-Recency-Strong-Prompt";
+
+async function typeMention(editor: Locator, query: string) {
+  await expect(editor).toBeEditable();
+  await editor.tap();
+  // Clear through an editor transaction so a dismissed trigger resets first.
+  await editor.press("ControlOrMeta+A");
+  await editor.press("Backspace");
+  await expect.poll(() => editor.textContent()).toBe("");
+  await editor.tap();
+  await editor.pressSequentially(`@${query}`);
+}
 
 async function openReadyTask(page: Page, apiClient: ApiClient, seedData: SeedData) {
   const task = await apiClient.createTaskWithAgent(
@@ -59,9 +70,7 @@ test.describe("Mobile chat mention recency", () => {
       await waitForPromptInStore(testPage, STRONGER_PROMPT_NAME);
       const editor = await session.composerReady();
 
-      await editor.tap();
-      await editor.fill("");
-      await editor.pressSequentially("@mention");
+      await typeMention(editor, "mention");
       const baselineMenu = testPage.getByRole("listbox", {
         name: /Mention tasks, files, prompts/i,
       });
@@ -69,8 +78,7 @@ test.describe("Mobile chat mention recency", () => {
       await expect(baselineMenu.getByRole("option").first()).toContainText(STRONGER_PROMPT_NAME);
       await editor.press("Escape");
 
-      await editor.fill("");
-      await editor.pressSequentially("@Project-Mention");
+      await typeMention(editor, "Project-Mention");
       const uniqueMenu = testPage.getByRole("listbox", {
         name: /Mention tasks, files, prompts/i,
       });
@@ -78,8 +86,7 @@ test.describe("Mobile chat mention recency", () => {
       await uniqueMenu.getByRole("option").filter({ hasText: RECENT_PROMPT_NAME }).tap();
       await expect(uniqueMenu).toHaveCount(0);
 
-      await editor.fill("");
-      await editor.pressSequentially("@mention");
+      await typeMention(editor, "mention");
       const rankedMenu = testPage.getByRole("listbox", {
         name: /Mention tasks, files, prompts/i,
       });

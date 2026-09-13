@@ -654,9 +654,12 @@ export class SessionPage {
     return this.page.getByTestId("reset-context-confirm");
   }
 
-  /** "Resume session" button shown after agent crash. */
+  /** Observe the first visible recovery action, including while it is already resuming. */
   recoveryResumeButton(): Locator {
-    return this.page.getByTestId("recovery-resume-button");
+    return this.activeChat()
+      .getByTestId("recovery-resume-button")
+      .filter({ visible: true })
+      .first();
   }
 
   /** Error returned by a manual session recovery action. */

@@ -30,6 +30,7 @@ import { getTaskPlanComments } from "@/lib/api/domains/plan-comment-api";
 import { listTaskSessions } from "@/lib/api/domains/session-api";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { captureTaskSessionActivityEpochs } from "@/lib/state/slices/session/activity-epochs";
+import { hasPendingPlanCommentMigration } from "./plan-comment-migration";
 
 /**
  * Format a single comment into markdown suitable for sending to the agent.
@@ -211,7 +212,6 @@ export class PlanCommentRunError extends Error {
     readonly code:
       | PlanCommentRunUnavailableReason
       | "plan-comment-not-persisted"
-      | "plan-comment-migration-pending"
       | "plan-comments-changed"
       | "primary-session-changed"
       | "delivery-failed",
@@ -227,8 +227,6 @@ function planCommentRunErrorMessage(code: PlanCommentRunError["code"]): string {
       return t("task:noPrimarySessionForPlanComment");
     case "primary-session-unavailable":
       return t("task:primarySessionUnavailableForPlanComment");
-    case "plan-comment-migration-pending":
-      return t("task:planCommentMigrationPending");
     case "plan-comment-not-persisted":
       return t("task:planCommentNotReadyToRun");
     case "plan-comments-changed":
@@ -246,10 +244,11 @@ async function runTaskPlanComment(
   storeApi: ReturnType<typeof useAppStoreApi>,
   clientAdmissionId: string,
 ): Promise<{ queued: boolean }> {
-  if (storeApi.getState().taskPlans.commentsMigrationStatusByTaskId[taskId] !== "complete") {
-    throw new PlanCommentRunError("plan-comment-migration-pending");
-  }
-  if (!comment.version || comment.version < 1) {
+  if (
+    !comment.version ||
+    comment.version < 1 ||
+    hasPendingPlanCommentMigration(storeApi, taskId, comment.id)
+  ) {
     throw new PlanCommentRunError("plan-comment-not-persisted");
   }
   const availability = resolvePlanCommentRunAvailability(storeApi.getState(), taskId);
