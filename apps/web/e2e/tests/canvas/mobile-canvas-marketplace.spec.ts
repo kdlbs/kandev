@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { expectTouchControl } from "../../helpers/control-sizing";
 import { enableCanvasFeature } from "./canvas-fixture";
 
 const CANVAS_ENTRY = {
@@ -79,6 +80,18 @@ test.describe("Canvas marketplace on mobile", () => {
       await mockCanvasCatalog(testPage);
       await testPage.goto("/settings/plugins");
       await testPage.getByTestId("plugins-tab-canvases").tap();
+
+      const marketplace = testPage.getByTestId("canvas-marketplace");
+      const toolbar = marketplace.getByTestId("canvas-marketplace-toolbar");
+      await expectTouchControl(toolbar.getByRole("button", { name: "Refresh", exact: true }));
+      await expectTouchControl(toolbar.getByRole("button", { name: "Sources", exact: true }));
+      await expectTouchControl(
+        toolbar.getByRole("button", { name: "Install canvas", exact: true }),
+      );
+      await expectTouchControl(marketplace.getByTestId("canvas-marketplace-search"));
+      await expectTouchControl(marketplace.getByTestId("canvas-marketplace-workspace"));
+      await expectTouchControl(marketplace.getByTestId("canvas-marketplace-category"));
+      await expectTouchControl(marketplace.getByTestId("canvas-marketplace-sort"));
 
       const card = testPage.getByTestId(`canvas-marketplace-entry-${CANVAS_ENTRY.id}`);
       await expect(card).toBeVisible();

@@ -1,4 +1,6 @@
 import { expect, test } from "../../fixtures/test-base";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import { expectControlHeight } from "../../helpers/control-sizing";
 import { enableCanvasFeature } from "./canvas-fixture";
 
 const CANVAS_ENTRY = {
@@ -99,6 +101,19 @@ test.describe("Canvas marketplace", () => {
       await expect(card.locator(`img[alt="${CANVAS_ENTRY.previews[0].alt}"]`)).toBeVisible();
       await expect(testPage.getByTestId("canvas-marketplace-search")).toBeVisible();
 
+      const marketplace = testPage.getByTestId("canvas-marketplace");
+      const toolbar = marketplace.getByTestId("canvas-marketplace-toolbar");
+      await expectControlHeight(toolbar.getByRole("button", { name: "Refresh", exact: true }), 28);
+      await expectControlHeight(toolbar.getByRole("button", { name: "Sources", exact: true }), 28);
+      await expectControlHeight(
+        toolbar.getByRole("button", { name: "Install canvas", exact: true }),
+        28,
+      );
+      await expectControlHeight(marketplace.getByTestId("canvas-marketplace-search"), 28);
+      await expectControlHeight(marketplace.getByTestId("canvas-marketplace-workspace"), 28);
+      await expectControlHeight(marketplace.getByTestId("canvas-marketplace-category"), 28);
+      await expectControlHeight(marketplace.getByTestId("canvas-marketplace-sort"), 28);
+
       await card.getByRole("button").first().click();
       const detail = testPage.getByTestId(`canvas-marketplace-detail-${CANVAS_ENTRY.id}`);
       await expect(detail).toBeVisible();
@@ -126,8 +141,23 @@ test.describe("Canvas marketplace", () => {
       await expect(
         manualDialog.getByRole("button", { name: "Upload bundle", exact: true }),
       ).toBeVisible();
+      await waitForFiniteAnimations(manualDialog);
+      await expectControlHeight(
+        manualDialog.getByRole("button", { name: "Upload bundle", exact: true }),
+        28,
+      );
+      await expectControlHeight(
+        manualDialog.getByRole("button", { name: "Direct link", exact: true }),
+        28,
+      );
+      await expectControlHeight(
+        manualDialog.getByRole("button", { name: "Cancel", exact: true }),
+        28,
+      );
       await manualDialog.getByRole("button", { name: "Direct link", exact: true }).click();
-      await expect(manualDialog.getByLabel("Direct link", { exact: true })).toBeVisible();
+      const directLink = manualDialog.getByLabel("Direct link", { exact: true });
+      await expect(directLink).toBeVisible();
+      await expectControlHeight(directLink, 28);
       await expect(manualDialog.getByText("Screenshot", { exact: false })).toHaveCount(0);
     } finally {
       await releaseFeature();

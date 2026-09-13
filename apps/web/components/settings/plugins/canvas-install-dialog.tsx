@@ -20,6 +20,7 @@ import {
   DrawerTitle,
 } from "@kandev/ui/drawer";
 import { Input } from "@kandev/ui/input";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { useCanvasInstall } from "@/hooks/domains/canvas/use-canvas-install";
 import { canvasHref } from "@/lib/api/domains/canvas-api";
@@ -130,7 +131,7 @@ export function CanvasInstallDialog({
             <Button
               type="button"
               variant={mode === "upload" ? "secondary" : "outline"}
-              className="min-h-11 flex-1 cursor-pointer"
+              className={settingsActionClassName("flex-1 cursor-pointer")}
               onClick={() => updateMode("upload")}
             >
               {t("plugins:uploadBundle")}
@@ -138,7 +139,7 @@ export function CanvasInstallDialog({
             <Button
               type="button"
               variant={mode === "url" ? "secondary" : "outline"}
-              className="min-h-11 flex-1 cursor-pointer"
+              className={settingsActionClassName("flex-1 cursor-pointer")}
               onClick={() => updateMode("url")}
             >
               {t("plugins:directLink")}
@@ -152,7 +153,7 @@ export function CanvasInstallDialog({
                 type="file"
                 accept={CANVAS_BUNDLE_ACCEPT}
                 onChange={(event) => updateFile(event.target.files?.[0] ?? null)}
-                className="min-h-11 cursor-pointer"
+                className="cursor-pointer"
               />
             </label>
           ) : (
@@ -163,7 +164,6 @@ export function CanvasInstallDialog({
                 value={url}
                 onChange={(event) => updateUrl(event.target.value)}
                 placeholder={t("plugins:bundleUrlPlaceholder")}
-                className="min-h-11"
                 inputMode="url"
               />
             </label>
@@ -203,14 +203,19 @@ export function CanvasInstallDialog({
   );
   const footer = (
     <div className="flex shrink-0 flex-col-reverse gap-2 border-t px-4 py-3 md:flex-row md:justify-end">
-      <Button type="button" variant="outline" className="min-h-11 cursor-pointer" onClick={close}>
+      <Button
+        type="button"
+        variant="outline"
+        className={settingsActionClassName("cursor-pointer")}
+        onClick={close}
+      >
         {t("common:cancel")}
       </Button>
       {!install.result &&
         (install.review ? (
           <Button
             type="button"
-            className="min-h-11 cursor-pointer"
+            className={settingsActionClassName("cursor-pointer")}
             disabled={install.loading}
             onClick={() => void install.confirm()}
           >
@@ -219,7 +224,7 @@ export function CanvasInstallDialog({
         ) : (
           <Button
             type="button"
-            className="min-h-11 cursor-pointer"
+            className={settingsActionClassName("cursor-pointer")}
             disabled={install.loading || (!entry && (mode === "upload" ? !file : !url.trim()))}
             onClick={() => void inspect()}
           >

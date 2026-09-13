@@ -8,6 +8,7 @@ import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { useAppStore } from "@/components/state-provider";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import { useMarketplace } from "@/hooks/domains/plugins/use-marketplace";
 import type { CatalogQuery } from "@/lib/api/domains/marketplace-api";
@@ -17,6 +18,7 @@ import { CanvasInstallDialog } from "./canvas-install-dialog";
 import { CanvasMarketplaceDetail } from "./canvas-marketplace-detail";
 
 const ALL_CATEGORIES = "__all__";
+const CANVAS_ACTION_CLASS = settingsActionClassName("cursor-pointer");
 
 export function resolveCanvasMarketplaceWorkspaceId(
   currentWorkspaceId: string,
@@ -109,7 +111,10 @@ export function CanvasMarketplace() {
   return (
     <div className="space-y-4" data-testid="canvas-marketplace">
       <div className="flex flex-col gap-3 rounded-xl border border-border/70 bg-card p-4">
-        <div className="flex flex-col gap-2 md:flex-row md:items-center">
+        <div
+          className="flex flex-col gap-2 md:flex-row md:items-center"
+          data-testid="canvas-marketplace-toolbar"
+        >
           <div className="min-w-0 flex-1">
             <h2 className="text-lg font-semibold">{t("plugins:tabCanvases")}</h2>
             <p className="text-sm text-muted-foreground">
@@ -118,7 +123,7 @@ export function CanvasMarketplace() {
           </div>
           <Button
             variant="outline"
-            className="min-h-11 cursor-pointer md:min-h-9"
+            className={CANVAS_ACTION_CLASS}
             onClick={() => void reload()}
             disabled={loading}
           >
@@ -128,14 +133,14 @@ export function CanvasMarketplace() {
           {canManageSources && (
             <Button
               variant="outline"
-              className="min-h-11 cursor-pointer md:min-h-9"
+              className={CANVAS_ACTION_CLASS}
               onClick={() => setSourcesOpen(true)}
             >
               {t("plugins:sources")}
             </Button>
           )}
           <Button
-            className="min-h-11 cursor-pointer md:min-h-9"
+            className={CANVAS_ACTION_CLASS}
             onClick={() => {
               setInstallEntry(null);
               setInstallOpen(true);
@@ -152,10 +157,7 @@ export function CanvasMarketplace() {
             data-testid="canvas-marketplace-search"
           />
           <Select value={workspaceId || undefined} onValueChange={setWorkspaceId}>
-            <SelectTrigger
-              className="min-h-11 md:min-h-9"
-              data-testid="canvas-marketplace-workspace"
-            >
+            <SelectTrigger data-testid="canvas-marketplace-workspace">
               <SelectValue placeholder={t("plugins:selectWorkspace")} />
             </SelectTrigger>
             <SelectContent>
@@ -168,10 +170,7 @@ export function CanvasMarketplace() {
           </Select>
           <div className="flex gap-2">
             <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger
-                className="min-h-11 min-w-0 flex-1 md:min-h-9"
-                data-testid="canvas-marketplace-category"
-              >
+              <SelectTrigger className="min-w-0 flex-1" data-testid="canvas-marketplace-category">
                 <SelectValue placeholder={t("plugins:category")} />
               </SelectTrigger>
               <SelectContent>
@@ -184,10 +183,7 @@ export function CanvasMarketplace() {
               </SelectContent>
             </Select>
             <Select value={sort} onValueChange={(value) => setSort(value as CatalogQuery["sort"])}>
-              <SelectTrigger
-                className="min-h-11 min-w-0 flex-1 md:min-h-9"
-                data-testid="canvas-marketplace-sort"
-              >
+              <SelectTrigger className="min-w-0 flex-1" data-testid="canvas-marketplace-sort">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -310,7 +306,7 @@ function CanvasMarketplaceCard({
       <div className="flex items-center justify-between gap-2 border-t px-4 py-3">
         <span className="text-xs text-muted-foreground">{entry.source_name}</span>
         <Button
-          className="min-h-11 cursor-pointer md:min-h-9"
+          className={CANVAS_ACTION_CLASS}
           variant="outline"
           onClick={onInstall}
           disabled={entry.install_state === "installed"}
