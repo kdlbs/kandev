@@ -251,6 +251,13 @@ plus 24 locale-generator tests, and eight zero-retry desktop/phone scenarios.
 The public Run guidance and blocked-Send previews now state their eligibility
 conditions explicitly. Remote exact-head checks remain separate delivery gates.
 
+Further current-head review distinguishes unknown from confirmed-absent plan
+state, retaining the same-ID metadata exception. CI also exposed an unchanged
+readiness helper matching overlapping Resume controls during SSH reconnect.
+The helper now observes the first visible active-chat recovery action. The
+work order records both reproductions and their scoped validation; SSH product
+behavior and CI timeout/retry policy are unchanged.
+
 ## Risks
 
 - Unknown ownership must not be mistaken for task-owned feedback. Plain Send

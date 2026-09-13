@@ -419,7 +419,9 @@ records, and cannot clear identified draft evidence just to release Send.
 Each operation captures task/plan identity and a generation. Recheck before
 each upload, state write, and acknowledgement. Task or plan invalidation cancels
 future work and rejects late completion from the previous generation. A
-successful current-generation upload removes only its exact legacy row; it
+transition between unknown and confirmed-absent plan state also invalidates
+lookups; confirming loaded metadata for the same existing plan only wakes work.
+A successful current-generation upload removes only its exact legacy row; it
 does not delete an entire storage key containing other records.
 
 ### Delivery restriction

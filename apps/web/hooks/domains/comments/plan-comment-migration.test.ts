@@ -80,9 +80,9 @@ function setup(connected = true) {
 function settle() {
   return vi.advanceTimersByTimeAsync(0);
 }
-function deferred() {
-  let resolve!: (value: TaskPlanCommentSnapshot) => void;
-  const promise = new Promise<TaskPlanCommentSnapshot>((done) => {
+function deferred<T = TaskPlanCommentSnapshot>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
     resolve = done;
   });
   return { promise, resolve };
@@ -303,6 +303,29 @@ describe("legacy recovery wire errors", () => {
 });
 
 describe("legacy recovery identity", () => {
+  it("ignores a late plan lookup after another reader confirms absence", async () => {
+    write();
+    const lookup = deferred<TaskPlan | null>();
+    plans.getTaskPlan.mockReturnValueOnce(lookup.promise);
+    const store = createAppStore();
+    store.getState().setConnectionStatus("connected");
+    const recovery = planCommentMigrationFor(store, TASK);
+    releases.push(recovery.attach(vi.fn()));
+    recovery.update({ sessionIds: [SESSION], complete: true, loading: false });
+    await settle();
+    expect(plans.getTaskPlan).toHaveBeenCalledOnce();
+    store.getState().setTaskPlan(TASK, null);
+    lookup.resolve(plan);
+    await settle();
+    expect(store.getState().taskPlans.byTaskId[TASK]).toBeNull();
+    expect(api.createTaskPlanComment).not.toHaveBeenCalled();
+    expect(saved()).toEqual([comment]);
+    expect(store.getState().taskPlans.commentsMigrationByTaskId[TASK]).toMatchObject({
+      status: "waiting_for_plan",
+      pendingCount: 1,
+    });
+  });
+
   it("surfaces exhausted plan lookup failures for known drafts and later recovers", async () => {
     write();
     plans.getTaskPlan.mockRejectedValue(new Error("offline"));

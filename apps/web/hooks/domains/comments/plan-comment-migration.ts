@@ -137,8 +137,11 @@ export class PlanCommentMigration {
 
   private observe() {
     const unsubscribe = this.store.subscribe((state, previous) => {
+      const plan = state.taskPlans.byTaskId[this.taskId];
+      const previousPlan = previous.taskPlans.byTaskId[this.taskId];
+      // Unknown and confirmed-absent plans are different recovery scopes.
       const planChanged =
-        state.taskPlans.byTaskId[this.taskId]?.id !== previous.taskPlans.byTaskId[this.taskId]?.id;
+        plan?.id !== previousPlan?.id || (plan === null) !== (previousPlan === null);
       const loadedChanged =
         state.taskPlans.loadedByTaskId[this.taskId] !==
         previous.taskPlans.loadedByTaskId[this.taskId];

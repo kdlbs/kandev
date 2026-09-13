@@ -149,6 +149,9 @@ Planned focused additions:
 - `apps/web/hooks/domains/comments/use-run-comment-legacy-recovery.test.tsx`:
   real-store recovery and Run integration for selected cleanup, reload, direct
   delivery, queue admission, and unrelated pending rows.
+- CI remediation: `apps/web/e2e/pages/session-page.ts` and
+  `apps/web/e2e/tests/session/session-page-recovery.spec.ts` scope readiness to
+  the active recovery action when restart surfaces overlap.
 - `apps/web/e2e/tests/session/plan-comment-recovery-helpers.ts`: correlated
   failure controls shared by the desktop and phone specs.
 
@@ -177,6 +180,8 @@ the command complete.
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm test -- hooks/domains/comments/use-run-comment-legacy-recovery.test.tsx)
 (cd apps/web && pnpm exec eslint hooks/domains/comments/use-run-comment-legacy-recovery.test.tsx --max-warnings 0)
+(cd apps/web && pnpm e2e:run --project chromium tests/session/session-page-recovery.spec.ts -- --retries=0)
+(cd apps/web && pnpm e2e:run --project containers tests/ssh/add-workspace-sources.spec.ts -- --retries=0)
 (cd apps/web && pnpm exec eslint lib/plan-comment-recovery.ts lib/state/slices/comments/persistence.ts lib/state/slices/session/types.ts lib/state/slices/session/session-slice.ts lib/state/app-state-types.ts hooks/domains/comments/plan-comment-migration.ts hooks/domains/comments/plan-comment-loading.ts hooks/domains/comments/use-plan-comment-migration.ts hooks/domains/comments/use-plan-comments.ts hooks/domains/comments/use-run-comment.ts components/task/plan-comment-migration-notice.tsx components/task/task-plan-panel.tsx components/task/chat/chat-input-area.tsx components/task/passthrough-chat-composer.tsx)
 (cd apps/web && pnpm exec eslint lib/plan-comment-recovery.test.ts lib/state/slices/comments/persistence.test.ts lib/state/slices/session/task-plan-comment-actions.test.ts hooks/domains/comments/plan-comment-migration.test.ts hooks/domains/comments/plan-comment-loading.test.ts hooks/domains/comments/use-plan-comment-migration.test.tsx hooks/domains/comments/use-plan-comments.test.tsx hooks/domains/comments/use-run-comment.test.ts hooks/domains/comments/use-run-comment-primary-recovery.test.ts components/task/chat/chat-input-area.test.tsx components/task/passthrough-chat-composer.test.ts components/task/plan-comment-migration-notice.test.tsx components/task/task-plan-panel.session-switch.test.tsx e2e/tests/session/plan-comment-recovery-helpers.ts e2e/tests/session/task-plan-comments.spec.ts e2e/tests/session/mobile-task-plan-comments.spec.ts)
 (cd apps/web && pnpm run i18n:check)
@@ -433,3 +438,47 @@ Local verification:
   no new control, layout, gesture, or scroll owner is introduced.
 - Exact-head remote CI and bot dispositions remain delivery gates. No success
   is inferred from unavailable GitHub evidence.
+
+### Confirmed absence and CI recovery targeting (2026-09-13)
+
+Codex's later current-head finding reproduced a stale lookup restoring a plan
+after an independent reader confirmed absence. The scope comparison now treats
+unknown (`undefined`) and absent (`null`) as different states. Its new deferred
+test first restored the old plan incorrectly, then passed with no upload, the
+local draft retained, and `waiting_for_plan` status. The same-ID metadata test
+still confirms a single upload.
+
+CI run 34733427521, job 103661040449, failed the SSH workspace-source reconnect
+test because `waitForChatIdle` matched both a resuming startup card and the
+failed-session banner. The helper and spec match the unchanged authoritative
+base df3c9142; no upstream fix was available. The exact spec reproduced the
+strict-mode failure locally with retries disabled. A deterministic browser
+regression separately reproduced the unscoped three-control match. The page
+object now targets the first visible recovery control in the active chat,
+including disabled/in-flight controls, rather than another surface's action.
+No production SSH behavior, public contract, retry count, or timeout changed.
+
+Local checks completed before the full-shard validation:
+
+- 184 focused tests across 15 files (160 unit/component plus 24 locale-generator)
+  and 62 coordinator/loader/hook tests pass. Typecheck, zero-warning changed-file
+  ESLint, and i18n ratchet pass.
+- Fresh desktop and phone plan-comment scenarios pass with zero retries:
+  four Chromium cases (1.0m) and four Pixel 5 cases (55.4s).
+- The new helper-level browser regression passes (2.6s), and the exact SSH
+  reconnect test passes (26.7s), both with zero retries.
+- Public-doc validation, all-file specification lint, and `git diff --check`
+  pass.
+- All 13 tests in the failed shard pass in 3.8m with `CI=true`, one worker,
+  the six manifest-selected files in their original order, and `--retries=0`:
+  `tests/docker/agent-config-copy.spec.ts`,
+  `tests/docker/lsp-file-intelligence.spec.ts`,
+  `tests/docker/managed-runtime-npm-recovery.spec.ts`,
+  `tests/ssh/add-workspace-sources.spec.ts`, `tests/ssh/executor-crud.spec.ts`,
+  and `tests/ssh/managed-runtime-npm-recovery.spec.ts`, using
+  `pnpm e2e:run --no-build --project containers` from `apps/web`.
+  Exact-head remote CI remains a separate gate.
+- Existing worktree recovery callers also pass with zero retries: desktop
+  `session-resume-recovery.spec.ts` together with the new helper regression
+  (two tests, 16.8s), and `mobile-session-resume-recovery.spec.ts` (one test,
+  20.2s). Both use the matching managed-runner project and unchanged fresh build.
