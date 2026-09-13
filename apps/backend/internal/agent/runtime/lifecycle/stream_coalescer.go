@@ -10,6 +10,7 @@ const defaultStreamCoalesceWindow = 100 * time.Millisecond
 type coalescedStreamChunk struct {
 	eventType        string
 	messageID        string
+	attemptID        string
 	content          string
 	isAppend         bool
 	diagnostic       bool
@@ -31,6 +32,7 @@ type streamCoalescer struct {
 	publish              func(coalescedStreamChunk)
 	lastEventType        string
 	lastMessageID        string
+	lastAttemptID        string
 	lastDiagnostic       bool
 	lastPromptGeneration uint64
 	forceImmediate       bool
@@ -74,8 +76,12 @@ func (c *streamCoalescer) add(chunk coalescedStreamChunk) {
 	// the marker for the merged text. A promptGeneration change gets the same
 	// treatment: merging chunks from two different prompt attempts would stamp
 	// the merged text with only one attempt's generation, breaking downstream
-	// recovery-evidence correlation for the other attempt's content.
+	// recovery-evidence correlation for the other attempt's content. An
+	// attemptID change is likewise a correlation-key change: it identifies the
+	// immutable recovery attempt that owns the callback, so merging across an
+	// attemptID boundary would relabel one attempt's content with another's.
 	sameAsLast := c.lastEventType == chunk.eventType && c.lastMessageID == chunk.messageID &&
+		c.lastAttemptID == chunk.attemptID &&
 		c.lastDiagnostic == chunk.diagnostic && c.lastPromptGeneration == chunk.promptGeneration
 	immediate := !chunk.isAppend || c.forceImmediate || !sameAsLast
 	c.forceImmediate = false
@@ -84,6 +90,7 @@ func (c *streamCoalescer) add(chunk coalescedStreamChunk) {
 		ready = c.detachLocked(ready)
 		ready = append(ready, chunk)
 	case c.pending != nil && c.pending.eventType == chunk.eventType && c.pending.messageID == chunk.messageID &&
+		c.pending.attemptID == chunk.attemptID &&
 		c.pending.diagnostic == chunk.diagnostic && c.pending.promptGeneration == chunk.promptGeneration:
 		c.pending.content += chunk.content
 		c.coalesced++
@@ -96,6 +103,7 @@ func (c *streamCoalescer) add(chunk coalescedStreamChunk) {
 	}
 	c.lastEventType = chunk.eventType
 	c.lastMessageID = chunk.messageID
+	c.lastAttemptID = chunk.attemptID
 	c.lastDiagnostic = chunk.diagnostic
 	c.lastPromptGeneration = chunk.promptGeneration
 	c.mu.Unlock()

@@ -12,6 +12,7 @@ import { useAppStore } from "@/components/state-provider";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
 import {
   EnsureSessionErrorBanner,
+  getSessionRecoveryRetry,
   SessionRecoveryFeedback,
 } from "@/components/task/ensure-session-error";
 import { TaskMoveErrorBanner } from "@/components/task/task-move-error-banner";
@@ -109,6 +110,7 @@ function resolveCurrentStepId(
 }
 
 function buildTaskTopBarProps(params: {
+  task: Task | null;
   taskProps: ReturnType<typeof resolveTaskProps>;
   actionsMenuBoardRow: ReturnType<typeof useTaskActionsMenuBoardRow>;
   workflowSteps: ReturnType<typeof useWorkflowStepsMapped>;
@@ -132,6 +134,7 @@ function buildTaskTopBarProps(params: {
     workflowSteps,
     currentStepId: resolveCurrentStepId(params.sessionWorkflowStepId, taskProps.workflowStepId),
     workflowId: taskProps.workflowId,
+    taskState: params.task?.state ?? null,
     workspaceId: taskProps.workspaceId,
     projectId: taskProps.projectId,
     issueUrl: taskProps.issueUrl,
@@ -269,7 +272,7 @@ function TaskPageRecoveryFeedback({
       error={resumption.error}
       notice={resumption.notice}
       recoveryFailure={resumption.recoveryFailure}
-      onRetry={() => void resumption.resumeSession()}
+      onRetry={getSessionRecoveryRetry(resumption)}
       retryDisabled={
         resumption.resumptionState === "checking" || resumption.resumptionState === "resuming"
       }
@@ -325,6 +328,7 @@ function useTaskPageDerivedProps({
     agentctlStatus,
   });
   const topBarProps = buildTaskTopBarProps({
+    task,
     taskProps,
     actionsMenuBoardRow,
     workflowSteps,

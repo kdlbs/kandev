@@ -12,6 +12,10 @@ var ErrWorkspaceNotFound = errors.New("workspace not found")
 // ErrTaskNotFound reports that no task row matched the supplied id.
 var ErrTaskNotFound = errors.New("task not found")
 
+// ErrInitialTaskBriefStale reports that a prepared task's description changed
+// before its first direct message could be admitted.
+var ErrInitialTaskBriefStale = errors.New("initial task brief is stale")
+
 // ErrMessageNotFound reports that no message row matched the supplied id.
 var ErrMessageNotFound = errors.New("message not found")
 

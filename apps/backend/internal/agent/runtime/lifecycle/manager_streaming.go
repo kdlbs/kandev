@@ -29,6 +29,7 @@ func (m *Manager) streamCoalescer(execution *AgentExecution) *streamCoalescer {
 				chunk.isAppend,
 				chunk.diagnostic,
 				chunk.promptGeneration,
+				chunk.attemptID,
 			)
 		})
 	}
@@ -71,6 +72,7 @@ func (m *Manager) enqueueStreamingContent(
 	isAppend bool,
 	diagnostic bool,
 	promptGeneration uint64,
+	attemptID string,
 ) {
 	if content == "" {
 		return
@@ -78,6 +80,7 @@ func (m *Manager) enqueueStreamingContent(
 	m.streamCoalescer(execution).add(coalescedStreamChunk{
 		eventType:        eventType,
 		messageID:        messageID,
+		attemptID:        attemptID,
 		content:          content,
 		isAppend:         isAppend,
 		diagnostic:       diagnostic,
@@ -113,12 +116,13 @@ func (m *Manager) publishProtocolMessage(
 	content string,
 	diagnostic bool,
 	promptGeneration uint64,
+	attemptID string,
 ) {
 	execution.messageMu.Lock()
 	messageID, isAppend := protocolRecordID(&execution.protocolMessageIDs, protocolMessageID)
 	execution.messageMu.Unlock()
 
-	m.publishStreamingContent(execution, "message_streaming", messageID, content, isAppend, diagnostic, promptGeneration)
+	m.publishStreamingContent(execution, "message_streaming", messageID, content, isAppend, diagnostic, promptGeneration, attemptID)
 }
 
 func (m *Manager) appendAssistantHistoryChunk(execution *AgentExecution, content string) {
@@ -198,7 +202,7 @@ func persistAssistantHistory(
 // flushPendingLegacyMessage closes only the ID-less assistant stream. It is
 // used when an explicit protocol message begins so buffered legacy content is
 // published first and a later ID-less chunk cannot append across that boundary.
-func (m *Manager) flushPendingLegacyMessage(execution *AgentExecution, promptGeneration uint64) {
+func (m *Manager) flushPendingLegacyMessage(execution *AgentExecution, promptGeneration uint64, attemptID string) {
 	execution.messageMu.Lock()
 	content := execution.messageBuffer.String()
 	diagnostic := execution.messageBufferDiagnostic
@@ -216,10 +220,10 @@ func (m *Manager) flushPendingLegacyMessage(execution *AgentExecution, promptGen
 		// The final direct append must follow any coalesced legacy chunk that
 		// was already emitted for this record.
 		m.flushStreamCoalescer(execution)
-		m.publishStreamingMessageFinal(execution, messageID, trimmed, diagnostic, promptGeneration)
+		m.publishStreamingMessageFinal(execution, messageID, trimmed, diagnostic, promptGeneration, attemptID)
 		return
 	}
-	m.publishStreamingMessage(execution, trimmed, diagnostic, promptGeneration)
+	m.publishStreamingMessage(execution, trimmed, diagnostic, promptGeneration, attemptID)
 	execution.messageMu.Lock()
 	execution.currentMessageID = ""
 	execution.messageMu.Unlock()
@@ -227,7 +231,7 @@ func (m *Manager) flushPendingLegacyMessage(execution *AgentExecution, promptGen
 
 // flushPendingLegacyThinking is the reasoning-stream counterpart of
 // flushPendingLegacyMessage.
-func (m *Manager) flushPendingLegacyThinking(execution *AgentExecution, promptGeneration uint64) {
+func (m *Manager) flushPendingLegacyThinking(execution *AgentExecution, promptGeneration uint64, attemptID string) {
 	execution.messageMu.Lock()
 	content := execution.thinkingBuffer.String()
 	execution.thinkingBuffer.Reset()
@@ -243,10 +247,10 @@ func (m *Manager) flushPendingLegacyThinking(execution *AgentExecution, promptGe
 		// The final direct append must follow any coalesced legacy chunk that
 		// was already emitted for this record.
 		m.flushStreamCoalescer(execution)
-		m.publishStreamingThinkingFinal(execution, messageID, trimmed, promptGeneration)
+		m.publishStreamingThinkingFinal(execution, messageID, trimmed, promptGeneration, attemptID)
 		return
 	}
-	m.publishStreamingThinking(execution, trimmed, promptGeneration)
+	m.publishStreamingThinking(execution, trimmed, promptGeneration, attemptID)
 	execution.messageMu.Lock()
 	execution.currentThinkingID = ""
 	execution.messageMu.Unlock()
@@ -257,12 +261,13 @@ func (m *Manager) publishProtocolThinking(
 	protocolMessageID string,
 	content string,
 	promptGeneration uint64,
+	attemptID string,
 ) {
 	execution.messageMu.Lock()
 	messageID, isAppend := protocolRecordID(&execution.protocolThinkingIDs, protocolMessageID)
 	execution.messageMu.Unlock()
 
-	m.enqueueStreamingContent(execution, thinkingStreamingEventType, messageID, content, isAppend, false, promptGeneration)
+	m.enqueueStreamingContent(execution, thinkingStreamingEventType, messageID, content, isAppend, false, promptGeneration, attemptID)
 }
 
 func (m *Manager) publishStreamingContent(
@@ -273,8 +278,9 @@ func (m *Manager) publishStreamingContent(
 	isAppend bool,
 	diagnostic bool,
 	promptGeneration uint64,
+	attemptID string,
 ) {
-	m.enqueueStreamingContent(execution, eventType, messageID, content, isAppend, diagnostic, promptGeneration)
+	m.enqueueStreamingContent(execution, eventType, messageID, content, isAppend, diagnostic, promptGeneration, attemptID)
 }
 
 func (m *Manager) publishStreamingContentNow(
@@ -285,7 +291,11 @@ func (m *Manager) publishStreamingContentNow(
 	isAppend bool,
 	diagnostic bool,
 	promptGeneration uint64,
+	attemptID string,
 ) {
+	if attemptID == "" {
+		attemptID = execution.currentStartupAttemptID()
+	}
 	event := AgentStreamEventData{
 		Type:                        eventType,
 		Text:                        content,
@@ -303,6 +313,7 @@ func (m *Manager) publishStreamingContentNow(
 		Timestamp:      time.Now().UTC().Format(time.RFC3339Nano),
 		AgentID:        execution.ID,
 		ExecutionID:    execution.ID,
+		AttemptID:      attemptID,
 		AgentProfileID: execution.officeProfileID(),
 		TaskID:         execution.TaskID,
 		SessionID:      execution.SessionID,
@@ -314,7 +325,7 @@ func (m *Manager) publishStreamingContentNow(
 // publishStreamingMessage publishes a streaming message event for real-time text updates.
 // It creates a new message on first call (currentMessageID empty) or appends to existing.
 // The message ID is generated and set synchronously to avoid race conditions.
-func (m *Manager) publishStreamingMessage(execution *AgentExecution, content string, diagnostic bool, promptGeneration uint64) {
+func (m *Manager) publishStreamingMessage(execution *AgentExecution, content string, diagnostic bool, promptGeneration uint64, attemptID string) {
 	execution.messageMu.Lock()
 	isAppend := execution.currentMessageID != ""
 	messageID := execution.currentMessageID
@@ -332,7 +343,7 @@ func (m *Manager) publishStreamingMessage(execution *AgentExecution, content str
 		zap.Bool("is_append", isAppend),
 		zap.Int("content_length", len(content)))
 
-	m.enqueueStreamingContent(execution, "message_streaming", messageID, content, isAppend, diagnostic, promptGeneration)
+	m.enqueueStreamingContent(execution, "message_streaming", messageID, content, isAppend, diagnostic, promptGeneration, attemptID)
 }
 
 // flushMessageBuffer extracts any accumulated message from the buffer and returns it.
@@ -344,7 +355,7 @@ func (m *Manager) publishStreamingMessage(execution *AgentExecution, content str
 // a fresh execution.promptGenerationSnapshot() taken here: some callers (the
 // terminal-completion path) already hold execution.promptLifecycleMu across
 // this call, and that mutex is not reentrant.
-func (m *Manager) flushMessageBuffer(execution *AgentExecution, promptGeneration uint64) string {
+func (m *Manager) flushMessageBuffer(execution *AgentExecution, promptGeneration uint64, attemptID string) string {
 	m.flushStreamCoalescer(execution)
 	execution.messageMu.Lock()
 	agentMessage := execution.messageBuffer.String()
@@ -365,11 +376,11 @@ func (m *Manager) flushMessageBuffer(execution *AgentExecution, promptGeneration
 	if trimmedThinking != "" {
 		if currentThinkingID != "" {
 			// Append to existing streaming thinking message
-			m.publishStreamingThinkingFinal(execution, currentThinkingID, trimmedThinking, promptGeneration)
+			m.publishStreamingThinkingFinal(execution, currentThinkingID, trimmedThinking, promptGeneration, attemptID)
 		} else {
 			// No streaming thinking message exists yet - create one with all the content
 			// This happens when thinking content has no newlines (never triggered streaming)
-			m.publishStreamingThinking(execution, trimmedThinking, promptGeneration)
+			m.publishStreamingThinking(execution, trimmedThinking, promptGeneration, attemptID)
 		}
 		// Clear the thinking ID that publishStreamingThinking may have set as a side effect.
 		// After a flush (tool call or complete), the next thinking segment must start a new message.
@@ -383,11 +394,11 @@ func (m *Manager) flushMessageBuffer(execution *AgentExecution, promptGeneration
 	if trimmedMessage != "" {
 		if currentMsgID != "" {
 			// Publish final append to the streaming message
-			m.publishStreamingMessageFinal(execution, currentMsgID, trimmedMessage, messageDiagnostic, promptGeneration)
+			m.publishStreamingMessageFinal(execution, currentMsgID, trimmedMessage, messageDiagnostic, promptGeneration, attemptID)
 		} else {
 			// No streaming message exists yet - create one with all the content
 			// This happens when message content has no newlines (never triggered streaming)
-			m.publishStreamingMessage(execution, trimmedMessage, messageDiagnostic, promptGeneration)
+			m.publishStreamingMessage(execution, trimmedMessage, messageDiagnostic, promptGeneration, attemptID)
 		}
 		// Clear the message ID that publishStreamingMessage may have set as a side effect.
 		// After a flush (tool call or complete), the next text segment must start a new message.
@@ -408,19 +419,20 @@ func (m *Manager) publishStreamingMessageFinal(
 	messageID, content string,
 	diagnostic bool,
 	promptGeneration uint64,
+	attemptID string,
 ) {
 	m.logger.Debug("publishing final streaming message chunk",
 		zap.String("execution_id", execution.ID),
 		zap.String("message_id", messageID),
 		zap.Int("content_length", len(content)))
 
-	m.publishStreamingContentNow(execution, "message_streaming", messageID, content, true, diagnostic, promptGeneration)
+	m.publishStreamingContentNow(execution, "message_streaming", messageID, content, true, diagnostic, promptGeneration, attemptID)
 }
 
 // publishStreamingThinking publishes a streaming thinking event for real-time thinking updates.
 // It creates a new thinking message on first call (currentThinkingID empty) or appends to existing.
 // The message ID is generated and set synchronously to avoid race conditions.
-func (m *Manager) publishStreamingThinking(execution *AgentExecution, content string, promptGeneration uint64) {
+func (m *Manager) publishStreamingThinking(execution *AgentExecution, content string, promptGeneration uint64, attemptID string) {
 	execution.messageMu.Lock()
 	isAppend := execution.currentThinkingID != ""
 	thinkingID := execution.currentThinkingID
@@ -434,18 +446,18 @@ func (m *Manager) publishStreamingThinking(execution *AgentExecution, content st
 
 	// Reasoning chunks never carry the provider-diagnostic marker: only an
 	// assistant message_chunk can classify as a diagnostic candidate.
-	m.enqueueStreamingContent(execution, thinkingStreamingEventType, thinkingID, content, isAppend, false, promptGeneration)
+	m.enqueueStreamingContent(execution, thinkingStreamingEventType, thinkingID, content, isAppend, false, promptGeneration, attemptID)
 }
 
 // publishStreamingThinkingFinal publishes the final chunk of a streaming thinking message.
 // This is called during flush to append any remaining buffered thinking content.
-func (m *Manager) publishStreamingThinkingFinal(execution *AgentExecution, thinkingID, content string, promptGeneration uint64) {
+func (m *Manager) publishStreamingThinkingFinal(execution *AgentExecution, thinkingID, content string, promptGeneration uint64, attemptID string) {
 	m.logger.Debug("publishing final streaming thinking chunk",
 		zap.String("execution_id", execution.ID),
 		zap.String("thinking_id", thinkingID),
 		zap.Int("content_length", len(content)))
 
-	m.publishStreamingContentNow(execution, thinkingStreamingEventType, thinkingID, content, true, false, promptGeneration)
+	m.publishStreamingContentNow(execution, thinkingStreamingEventType, thinkingID, content, true, false, promptGeneration, attemptID)
 }
 
 // updateExecutionError updates an execution with an error

@@ -840,6 +840,10 @@ func (a *lifecycleAdapter) RecoverAgentPromptStream(ctx context.Context, session
 	return a.mgr.RecoverAgentPromptStream(ctx, sessionID)
 }
 
+func (a *lifecycleAdapter) BindResumeAttempt(ctx context.Context, sessionID, attemptID string) error {
+	return a.mgr.BindResumeAttempt(ctx, sessionID, attemptID)
+}
+
 // IsPassthroughSession checks if the given session is running in passthrough (PTY) mode.
 func (a *lifecycleAdapter) IsPassthroughSession(ctx context.Context, sessionID string) bool {
 	return a.mgr.IsPassthroughSession(ctx, sessionID)
@@ -1025,6 +1029,18 @@ func (w *orchestratorWrapper) ResumeTaskSession(ctx context.Context, taskID, tas
 	return err
 }
 
+// HasActiveSessionRecoveryForFailure forwards the correlated prompt-error
+// ownership seam. Historical session errors never suppress a new failure.
+func (w *orchestratorWrapper) HasActiveSessionRecoveryForFailure(ctx context.Context, taskID, taskSessionID string, failure error) bool {
+	return w.svc.HasActiveSessionRecoveryForFailure(ctx, taskID, taskSessionID, failure)
+}
+
+// ResumeTaskSessionAndPrompt keeps the recovery attempt alive through prompt
+// provider acceptance for the handler's internal retry.
+func (w *orchestratorWrapper) ResumeTaskSessionAndPrompt(ctx context.Context, taskID, taskSessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
+	return w.svc.ResumeTaskSessionAndPrompt(ctx, taskID, taskSessionID, prompt, model, planMode, attachments)
+}
+
 // StartCreatedSession forwards to the orchestrator service, discarding the TaskExecution result.
 func (w *orchestratorWrapper) StartCreatedSession(ctx context.Context, taskID, sessionID, agentProfileID, prompt string, skipMessageRecord, planMode, autoStart bool, attachments []v1.MessageAttachment, references []v1.EntityReference) error {
 	_, err := w.svc.StartCreatedSession(ctx, taskID, sessionID, agentProfileID, prompt, skipMessageRecord, planMode, autoStart, attachments, references)
@@ -1046,10 +1062,12 @@ func (w *orchestratorWrapper) StartCreatedSessionWithPromptContext(
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
 	promptReferenceContext string,
+	promptReferencesPrepared bool,
 ) (*executor.TaskExecution, error) {
 	return w.svc.StartCreatedSessionWithPromptContext(
 		ctx, taskID, sessionID, agentProfileID, prompt,
 		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+		promptReferencesPrepared,
 	)
 }
 
@@ -1063,12 +1081,33 @@ func (w *orchestratorWrapper) StartCreatedSessionWithPromptContextAndCanvasGuida
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
 	promptReferenceContext string,
+	promptReferencesPrepared bool,
 	canvasGuidanceResolved, includeCanvasGuidance bool,
 ) (*executor.TaskExecution, error) {
 	return w.svc.StartCreatedSessionWithPromptContextAndCanvasGuidance(
 		ctx, taskID, sessionID, agentProfileID, prompt,
 		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
-		canvasGuidanceResolved, includeCanvasGuidance,
+		promptReferencesPrepared, canvasGuidanceResolved, includeCanvasGuidance,
+	)
+}
+
+// StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt
+// forwards a first direct prompt whose task brief was admitted and persisted
+// before launch.
+func (w *orchestratorWrapper) StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	canvasGuidanceResolved, includeCanvasGuidance bool,
+) (*executor.TaskExecution, error) {
+	return w.svc.StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+		promptReferencesPrepared, canvasGuidanceResolved, includeCanvasGuidance,
 	)
 }
 

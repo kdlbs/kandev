@@ -30,6 +30,10 @@ const AgentCtlPort = ports.AgentCtl
 // AgentExecution represents a running agent execution
 type AgentExecution struct {
 	ID string
+	// ResumeAttemptID identifies the immutable recovery attempt that created or
+	// started this execution. It is copied onto every lifecycle callback so a
+	// delayed callback cannot be accepted by a replacement attempt.
+	ResumeAttemptID string
 	// RunID identifies the Office run that launched this execution. It is
 	// retained after runtime environment cleanup so delayed stop events can
 	// still be attributed to the correct run.
@@ -268,7 +272,17 @@ type AgentExecution struct {
 	// promptLifecycleMu is held by workspace rebind waiting for readiness.
 	startupAttemptGeneration uint64
 	startupRecoveryStarted   bool
-	startupLifecycleMu       sync.Mutex
+	// startupAttemptIDs preserves the recovery identity for each startup
+	// generation. The execution ID can be reused by managed-runtime repair, so
+	// callbacks must use their captured generation identity instead of the
+	// execution's current mutable label.
+	startupAttemptIDs  map[uint64]string
+	startupLifecycleMu sync.Mutex
+	// startupCallbackMu leases the complete callback mutation. Startup
+	// replacement and adopted-execution binding take its write lock, so a
+	// callback cannot validate one generation and mutate another after the
+	// validation lock is released.
+	startupCallbackMu sync.RWMutex
 }
 
 func (e *AgentExecution) isSessionInitialized() bool {
@@ -427,16 +441,25 @@ func (e *AgentExecution) promptActivityEpochSnapshot() uint64 {
 // beginStartupAttempt starts a generation for a new ACP process. Generation
 // zero is reserved for executions that predate startup tracking.
 func (e *AgentExecution) beginStartupAttempt() uint64 {
+	return e.beginStartupAttemptWithID("")
+}
+
+func (e *AgentExecution) beginStartupAttemptWithID(attemptID string) uint64 {
+	e.startupCallbackMu.Lock()
+	defer e.startupCallbackMu.Unlock()
 	e.startupLifecycleMu.Lock()
 	defer e.startupLifecycleMu.Unlock()
 	e.startupAttemptGeneration++
 	e.startupRecoveryStarted = false
+	e.recordStartupAttemptIDLocked(e.startupAttemptGeneration, attemptID)
 	return e.startupAttemptGeneration
 }
 
 // beginStartupRecovery advances the startup generation exactly once. The
 // caller uses the returned generation when wiring the replacement streams.
 func (e *AgentExecution) beginStartupRecovery() (uint64, bool) {
+	e.startupCallbackMu.Lock()
+	defer e.startupCallbackMu.Unlock()
 	e.startupLifecycleMu.Lock()
 	defer e.startupLifecycleMu.Unlock()
 	if e.startupRecoveryStarted {
@@ -444,7 +467,50 @@ func (e *AgentExecution) beginStartupRecovery() (uint64, bool) {
 	}
 	e.startupRecoveryStarted = true
 	e.startupAttemptGeneration++
+	currentAttemptID := e.startupAttemptIDs[e.startupAttemptGeneration-1]
+	e.recordStartupAttemptIDLocked(e.startupAttemptGeneration, currentAttemptID)
 	return e.startupAttemptGeneration, true
+}
+
+func (e *AgentExecution) recordStartupAttemptIDLocked(generation uint64, attemptID string) {
+	if attemptID == "" {
+		attemptID = e.ResumeAttemptID
+	}
+	if e.startupAttemptIDs == nil {
+		e.startupAttemptIDs = make(map[uint64]string)
+	}
+	e.startupAttemptIDs[generation] = attemptID
+	// Keep a small bounded history so delayed callbacks can still be attributed
+	// without retaining every retry for the execution lifetime.
+	if generation > 8 {
+		delete(e.startupAttemptIDs, generation-8)
+	}
+}
+
+// bindStartupAttemptIDWithLease assigns a recovery identity to the current
+// startup generation. It lets a prompt-owned resume adopt an execution whose
+// stream was started by an earlier ordinary launch without accepting a new
+// stream or changing the generation that its callbacks already captured.
+func (e *AgentExecution) bindStartupAttemptIDWithLease(attemptID string) bool {
+	if e == nil || attemptID == "" {
+		return false
+	}
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	e.recordStartupAttemptIDLocked(e.startupAttemptGeneration, attemptID)
+	return true
+}
+
+func (e *AgentExecution) currentStartupAttemptID() string {
+	if e == nil {
+		return ""
+	}
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	if attemptID, ok := e.startupAttemptIDs[e.startupAttemptGeneration]; ok {
+		return attemptID
+	}
+	return e.ResumeAttemptID
 }
 
 func (e *AgentExecution) finishStartupRecovery() {
@@ -459,10 +525,48 @@ func (e *AgentExecution) startupAttemptSnapshot() uint64 {
 	return e.startupAttemptGeneration
 }
 
+func (e *AgentExecution) startupGenerationForAttemptID(attemptID string) (uint64, bool) {
+	if e == nil || attemptID == "" {
+		return 0, false
+	}
+	e.startupLifecycleMu.Lock()
+	defer e.startupLifecycleMu.Unlock()
+	for generation, candidate := range e.startupAttemptIDs {
+		if candidate == attemptID {
+			return generation, true
+		}
+	}
+	return 0, false
+}
+
 func (e *AgentExecution) acceptsStartupAttempt(generation uint64) bool {
 	e.startupLifecycleMu.Lock()
 	defer e.startupLifecycleMu.Unlock()
 	return e.startupAttemptGeneration == generation
+}
+
+// withStartupAttempt leases one callback's immutable startup identity through
+// all of its state and publication work. A generation check by itself is not
+// sufficient because a replacement can advance the generation immediately
+// after that check and before the callback mutates buffers or status.
+func (e *AgentExecution) withStartupAttempt(generation uint64, callback func(attemptID string)) bool {
+	if e == nil || callback == nil {
+		return false
+	}
+	e.startupCallbackMu.RLock()
+	defer e.startupCallbackMu.RUnlock()
+	e.startupLifecycleMu.Lock()
+	if e.startupAttemptGeneration != generation {
+		e.startupLifecycleMu.Unlock()
+		return false
+	}
+	attemptID := e.startupAttemptIDs[generation]
+	if attemptID == "" {
+		attemptID = e.ResumeAttemptID
+	}
+	e.startupLifecycleMu.Unlock()
+	callback(attemptID)
+	return true
 }
 
 // signalPromptCompletionForStartupGeneration claims the current startup
@@ -471,6 +575,21 @@ func (e *AgentExecution) acceptsStartupAttempt(generation uint64) bool {
 // execution, so checking and sending under the same mutex prevents an old
 // stream from publishing into the replacement prompt's channel.
 func (e *AgentExecution) signalPromptCompletionForStartupGeneration(
+	startupGeneration uint64,
+	signal PromptCompletionSignal,
+) bool {
+	if e == nil {
+		return false
+	}
+	e.startupCallbackMu.RLock()
+	defer e.startupCallbackMu.RUnlock()
+	return e.signalPromptCompletionForStartupGenerationLeased(startupGeneration, signal)
+}
+
+// signalPromptCompletionForStartupGenerationLeased is called by a callback
+// that already holds startupCallbackMu. Keeping the implementation separate
+// avoids recursive read-lock acquisition when a writer is waiting.
+func (e *AgentExecution) signalPromptCompletionForStartupGenerationLeased(
 	startupGeneration uint64,
 	signal PromptCompletionSignal,
 ) bool {

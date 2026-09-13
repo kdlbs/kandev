@@ -750,6 +750,50 @@ type ResumeOptions struct {
 	AllowCompletedSessionResume bool
 }
 
+type cancellableResumeContextKey struct{}
+
+// WithCancellableResumeContext marks a resume whose startup context is owned
+// by the orchestrator's process-local recovery attempt. Ordinary executor
+// callers retain the historical detached startup behavior.
+func WithCancellableResumeContext(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, cancellableResumeContextKey{}, true)
+}
+
+// WithResumeAttemptID carries the immutable orchestrator recovery identity
+// through executor and lifecycle callbacks.
+func WithResumeAttemptID(ctx context.Context, attemptID string) context.Context {
+	return lifecycle.WithResumeAttemptID(ctx, attemptID)
+}
+
+// ResumeAttemptIDFromContext returns the recovery identity carried by ctx.
+func ResumeAttemptIDFromContext(ctx context.Context) string {
+	return lifecycle.ResumeAttemptIDFromContext(ctx)
+}
+
+// IsCancellableResumeContext reports whether startup cancellation belongs to a
+// process-local orchestrator resume attempt.
+func IsCancellableResumeContext(ctx context.Context) bool {
+	return isCancellableResumeContext(ctx)
+}
+
+func isCancellableResumeContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	marked, _ := ctx.Value(cancellableResumeContextKey{}).(bool)
+	return marked
+}
+
+func resumeOwnedCleanupContext(ctx context.Context) context.Context {
+	if isCancellableResumeContext(ctx) {
+		return context.WithoutCancel(ctx)
+	}
+	return ctx
+}
+
 // ResumeSession restarts an existing task session using its stored worktree.
 // When startAgent is false, only the executor runtime is started (agent process is not launched).
 func (e *Executor) ResumeSession(ctx context.Context, session *models.TaskSession, startAgent bool) (*TaskExecution, error) {
@@ -854,7 +898,8 @@ func (e *Executor) resumeSession(
 	if recoveryAdmission != nil {
 		launchCtx = worktree.WithRecoveryClaim(ctx, recoveryAdmission.Claim())
 	}
-	defer func() { _ = releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission) }()
+	cleanupCtx := resumeOwnedCleanupContext(launchCtx)
+	defer func() { _ = releaseSelectedWorktreeRecovery(cleanupCtx, &recoveryAdmission) }()
 
 	e.logger.Debug("resuming agent session",
 		zap.String("task_id", session.TaskID),
@@ -897,6 +942,17 @@ func (e *Executor) resumeSession(
 		}
 		resp, err = e.agentManager.LaunchAgent(launchCtx, req)
 	}
+	if err != nil && isCancellableResumeContext(launchCtx) && launchCtx.Err() != nil {
+		// The cancellation owner reconciles the session state. Do not run the
+		// normal resume rollback, which could win a STARTING -> prior-state CAS
+		// before that owner finishes its cancellation projection.
+		if resp != nil && resp.AgentExecutionID != "" {
+			e.cleanupUnstartedExecutionAfterPersistError(
+				cleanupCtx, session.ID, resp.AgentExecutionID, launchCtx.Err(),
+			)
+		}
+		return nil, launchCtx.Err()
+	}
 	if err != nil {
 		if startAgent {
 			e.rollbackResumeStateAfterFailure(
@@ -913,14 +969,16 @@ func (e *Executor) resumeSession(
 
 	if !startAgent {
 		if err := e.persistResumeState(launchCtx, task.ID, session, false); err != nil {
-			e.cleanupUnstartedExecutionAfterPersistError(launchCtx, session.ID, resp.AgentExecutionID, err)
+			e.cleanupUnstartedExecutionAfterPersistError(cleanupCtx, session.ID, resp.AgentExecutionID, err)
 			return nil, err
 		}
 	}
 	if err := e.persistTaskEnvironment(launchCtx, task.ID, session, existingEnv, req, resp, execCfg); err != nil {
-		e.cleanupUnstartedExecutionAfterPersistError(launchCtx, session.ID, resp.AgentExecutionID, err)
-		e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
-		if startAgent {
+		e.cleanupUnstartedExecutionAfterPersistError(cleanupCtx, session.ID, resp.AgentExecutionID, err)
+		if !isCancellableResumeContext(launchCtx) || launchCtx.Err() == nil {
+			e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
+		}
+		if startAgent && (!isCancellableResumeContext(launchCtx) || launchCtx.Err() == nil) {
 			e.rollbackResumeStateAfterFailure(launchCtx, task.ID, session.ID, resumeInitialState, err,
 				resumeCredentialSnapshotBackupIfPersisted(credentialSnapshotPersisted, previousCredentialSnapshot))
 		}
@@ -956,7 +1014,7 @@ func (e *Executor) resumeSession(
 			!completedResume,
 		)
 	}
-	if releaseErr := releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission); releaseErr != nil {
+	if releaseErr := releaseSelectedWorktreeRecovery(cleanupCtx, &recoveryAdmission); releaseErr != nil {
 		return execution, fmt.Errorf("release worktree recovery admission: %w", releaseErr)
 	}
 	return execution, nil

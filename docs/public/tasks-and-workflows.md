@@ -35,6 +35,8 @@ The task carries the outcome through the workflow. The repository and session pr
 
 Workflow position and runtime state are different. Moving a card changes its workflow step; it does not prove that an agent ran, code was committed, review passed, or a pull request merged.
 
+During a move and while the destination agent is preparing or starting, the destination marker shows a spinner in the existing marker space. Open the existing step disclosure to see the lifecycle status and agent profile. On touch devices, these details appear in the existing **Move to** Drawer. A destination without auto-start settles after the move and remains available for a later agent start.
+
 ## Move a task with one-time entry options
 
 The normal **Move here** and next-step actions use the destination step's saved workflow defaults. When one transition needs an exception, open **Move with options** from the workflow stepper, Chat status bar, or passthrough toolbar. The options apply only to that entry and never rewrite the workflow step.
@@ -321,6 +323,8 @@ A task created with **Create without starting agent** opens in a prepared workbe
 />
 
 If the selected profile is unhealthy or incompatible with the executor, fix that configuration before launch. Starting an agent is separate from moving the task through its workflow; entry actions and turn-complete transitions can move or restart work afterward.
+
+When you send a message from Chat before selecting **Start agent**, Kandev keeps the task description in the first user prompt and places your instruction after it. The combined prompt is stored and remains after reload. Later messages contain only their own text.
 
 By default, a running session keeps the coarse **Generating** state and queues
 another message even if Kandev detects background work. Operators can opt into
