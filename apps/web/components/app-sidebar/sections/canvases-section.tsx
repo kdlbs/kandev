@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import type { RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { IconLayoutGrid, IconListDetails } from "@tabler/icons-react";
 import Link from "@/components/routing/app-link";
@@ -22,8 +23,15 @@ import {
   SIDEBAR_ITEM_INACTIVE,
 } from "../app-sidebar-constants";
 import { AppSidebarSection } from "../app-sidebar-section";
+import { CanvasTaskCreateLauncher } from "@/components/canvas/canvas-task-create-launcher";
 
 const EMPTY_CANVASES: Canvas[] = [];
+
+type WorkspaceCanvasesState = {
+  workspaceId: string | null;
+  canvases: Canvas[];
+  status: "loading" | "ready" | "error";
+};
 
 export function isActiveWorkspaceCanvas(canvas: Canvas): boolean {
   return (
@@ -33,13 +41,14 @@ export function isActiveWorkspaceCanvas(canvas: Canvas): boolean {
   );
 }
 
-export function useWorkspaceCanvases(
+function useWorkspaceCanvasesState(
   workspaceId: string | null,
   includeArchived = false,
-): Canvas[] {
-  const [loaded, setLoaded] = useState<{ workspaceId: string | null; canvases: Canvas[] }>({
+): { canvases: Canvas[]; ready: boolean } {
+  const [loaded, setLoaded] = useState<WorkspaceCanvasesState>({
     workspaceId: null,
     canvases: EMPTY_CANVASES,
+    status: "loading",
   });
   const requestRef = useRef(0);
   const lifecycleRevision = useCanvasLifecycleRevision();
@@ -47,25 +56,43 @@ export function useWorkspaceCanvases(
   useEffect(() => {
     const requestId = ++requestRef.current;
     if (!workspaceId) {
-      setLoaded({ workspaceId: null, canvases: EMPTY_CANVASES });
+      setLoaded({ workspaceId: null, canvases: EMPTY_CANVASES, status: "ready" });
       return;
     }
 
     setLoaded((current) => ({
       workspaceId,
       canvases: current.workspaceId === workspaceId ? current.canvases : EMPTY_CANVASES,
+      status: "loading",
     }));
     listWorkspaceCanvases(workspaceId, { includeArchived })
       .then((response) => {
         if (requestRef.current !== requestId) return;
-        setLoaded({ workspaceId, canvases: response?.canvases ?? EMPTY_CANVASES });
+        setLoaded({
+          workspaceId,
+          canvases: response?.canvases ?? EMPTY_CANVASES,
+          status: "ready",
+        });
       })
       .catch(() => {
-        if (requestRef.current === requestId) setLoaded({ workspaceId, canvases: EMPTY_CANVASES });
+        if (requestRef.current === requestId) {
+          setLoaded({ workspaceId, canvases: EMPTY_CANVASES, status: "error" });
+        }
       });
   }, [includeArchived, lifecycleRevision, workspaceId]);
 
-  return loaded.workspaceId === workspaceId ? loaded.canvases : EMPTY_CANVASES;
+  const sameWorkspace = loaded.workspaceId === workspaceId;
+  return {
+    canvases: sameWorkspace ? loaded.canvases : EMPTY_CANVASES,
+    ready: sameWorkspace && loaded.status === "ready",
+  };
+}
+
+export function useWorkspaceCanvases(
+  workspaceId: string | null,
+  includeArchived = false,
+): Canvas[] {
+  return useWorkspaceCanvasesState(workspaceId, includeArchived).canvases;
 }
 
 function OpenCanvasSettingsShortcut({ workspaceId }: { workspaceId: string }) {
@@ -103,16 +130,24 @@ function CanvasRow({ canvas, active }: { canvas: Canvas; active: boolean }) {
   );
 }
 
-function EmptyCanvasRow({ workspaceId }: { workspaceId: string }) {
+function EmptyCanvasRow({
+  onOpen,
+  triggerRef,
+}: {
+  onOpen: () => void;
+  triggerRef: RefObject<HTMLButtonElement | null>;
+}) {
   const { t } = useTranslation();
   return (
-    <Link
-      href={workspaceCanvasSettingsHref(workspaceId)}
+    <button
+      ref={triggerRef}
+      type="button"
       data-testid="sidebar-canvases-empty"
-      className="rounded-md px-2.5 py-1.5 text-[13px] text-muted-foreground hover:bg-muted/60 hover:text-foreground cursor-pointer"
+      onClick={onOpen}
+      className="min-h-8 w-full cursor-pointer rounded-md px-2.5 py-1.5 text-left text-[13px] font-medium text-muted-foreground hover:bg-muted/60 hover:text-foreground [@media(pointer:coarse)]:min-h-11"
     >
       {t("canvases:setUpCanvas")}
-    </Link>
+    </button>
   );
 }
 
@@ -122,29 +157,43 @@ export function CanvasesSection({ collapsed }: { collapsed: boolean }) {
   const enabled = useFeature("canvases");
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
   const workspaceId = enabled ? activeWorkspaceId : null;
-  const canvases = useWorkspaceCanvases(workspaceId);
+  const { canvases, ready } = useWorkspaceCanvasesState(workspaceId);
   const activeCanvases = canvases.filter(isActiveWorkspaceCanvas);
+  const sectionHeaderRef = useRef<HTMLButtonElement>(null);
 
   if (!enabled || !activeWorkspaceId) return null;
 
   return (
-    <AppSidebarSection
-      id={APP_SIDEBAR_SECTION_IDS.canvases}
-      label={t("canvases:canvases")}
-      collapsed={collapsed}
-      icon={IconLayoutGrid}
-      headerAction={<OpenCanvasSettingsShortcut workspaceId={activeWorkspaceId} />}
-      headerActionVisibility="always"
-      collapsedSummary={activeCanvases.length > 0 ? activeCanvases.length : undefined}
-      defaultExpanded={false}
+    <CanvasTaskCreateLauncher
+      workspaceId={activeWorkspaceId}
+      presentation="sidebar"
+      focusReturnRef={sectionHeaderRef}
     >
-      {activeCanvases.length === 0 ? (
-        <EmptyCanvasRow workspaceId={activeWorkspaceId} />
-      ) : (
-        activeCanvases.map((canvas) => (
-          <CanvasRow key={canvas.id} canvas={canvas} active={pathname === canvasHref(canvas.id)} />
-        ))
+      {({ onOpen, triggerRef }) => (
+        <AppSidebarSection
+          id={APP_SIDEBAR_SECTION_IDS.canvases}
+          label={t("canvases:canvases")}
+          collapsed={collapsed}
+          icon={IconLayoutGrid}
+          headerAction={<OpenCanvasSettingsShortcut workspaceId={activeWorkspaceId} />}
+          headerActionVisibility="always"
+          collapsedSummary={activeCanvases.length > 0 ? activeCanvases.length : undefined}
+          defaultExpanded={false}
+          headerRef={sectionHeaderRef}
+        >
+          {ready && activeCanvases.length === 0 ? (
+            <EmptyCanvasRow onOpen={onOpen} triggerRef={triggerRef} />
+          ) : (
+            activeCanvases.map((canvas) => (
+              <CanvasRow
+                key={canvas.id}
+                canvas={canvas}
+                active={pathname === canvasHref(canvas.id)}
+              />
+            ))
+          )}
+        </AppSidebarSection>
       )}
-    </AppSidebarSection>
+    </CanvasTaskCreateLauncher>
   );
 }

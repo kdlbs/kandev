@@ -110,7 +110,6 @@ export function AppSidebarWorkspacePicker({
   const workspaces = useAppStore((s) => s.workspaces);
   const startupPage = useAppStore((s) => s.userSettings.startupPage);
   const selectWorkspace = useSelectWorkspace();
-  const resetKanbanWorkspaceContext = useAppStore((s) => s.resetKanbanWorkspaceContext);
   const { open, setOpen } = useMenuOpenState(controlledOpen, onOpenChange);
 
   const activeWorkspace = workspaces.items.find((w) => w.id === workspaces.activeId);
@@ -130,7 +129,6 @@ export function AppSidebarWorkspacePicker({
         onActionComplete?.();
         return;
       }
-      resetKanbanWorkspaceContext();
       selectWorkspace(workspace);
       if (workspaceType(workspace) === "kanban") {
         router.push(workspaceHomeHref(workspace, startupPage));
@@ -140,16 +138,7 @@ export function AppSidebarWorkspacePicker({
       setOpen(false);
       onActionComplete?.();
     },
-    [
-      activeId,
-      startupPage,
-      router,
-      selectWorkspace,
-      resetKanbanWorkspaceContext,
-      officeEnabled,
-      onActionComplete,
-      setOpen,
-    ],
+    [activeId, startupPage, router, selectWorkspace, officeEnabled, onActionComplete, setOpen],
   );
   const handleNavigate = useCallback(
     (href: string) => {

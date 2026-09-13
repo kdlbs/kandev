@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- the mobile task switcher owns its complete data and action boundary */
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
@@ -30,6 +31,12 @@ import { useArchivedTaskState } from "../task-archived-context";
 import { buildArchivedSidebarItem } from "../task-session-sidebar-archived-item";
 import type { SidebarItemContext } from "../task-session-sidebar-item";
 import type { TaskSwitcherItem } from "../task-switcher";
+import {
+  classifyWorkspaceContextReadError,
+  isCurrentWorkspaceContext,
+  retryAfterMilliseconds,
+} from "@/lib/state/workspace-context";
+import { generateUUID } from "@/lib/utils";
 
 function findSheetTask(
   state: ReturnType<ReturnType<typeof useAppStoreApi>["getState"]>,
@@ -44,6 +51,7 @@ function findSheetTask(
   return undefined;
 }
 
+// eslint-disable-next-line max-lines-per-function -- task projection and recovery status share one memoized view model
 export function useSheetData(workspaceId: string | null) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const {
@@ -55,6 +63,10 @@ export function useSheetData(workspaceId: string | null) {
     isLoading: tasksLoading,
     archivedError,
     retryArchivedTasks,
+    workspaceContextError,
+    workspaceContextPending,
+    workspaceContextAccessDenied,
+    retryWorkspaceContext,
   } = useWorkspaceSidebarTasks(workspaceId);
   const steps = useAppStore((state) => state.kanban.steps);
   const workspaces = useAppStore((state) => state.workspaces.items);
@@ -89,8 +101,11 @@ export function useSheetData(workspaceId: string | null) {
       stepColorById: new Map(allSteps.map((step) => [step.id, step.color])),
       automaticColorSettings,
     };
-    const items: TaskSwitcherItem[] = allTasks.map((task) => toSheetItem(task, ctx));
+    const items: TaskSwitcherItem[] = workspaceContextAccessDenied
+      ? []
+      : allTasks.map((task) => toSheetItem(task, ctx));
     if (
+      !workspaceContextAccessDenied &&
       archivedState.isArchived &&
       archivedState.archivedTaskId &&
       !items.some((task) => task.id === archivedState.archivedTaskId)
@@ -122,6 +137,7 @@ export function useSheetData(workspaceId: string | null) {
     wipQueueByTaskId,
     automaticColorSettings,
     archivedState,
+    workspaceContextAccessDenied,
   ]);
 
   const dialogSteps = useMemo(
@@ -145,6 +161,10 @@ export function useSheetData(workspaceId: string | null) {
     tasksLoading,
     archivedError,
     retryArchivedTasks,
+    workspaceContextError,
+    workspaceContextPending,
+    workspaceContextAccessDenied,
+    retryWorkspaceContext,
     tasksWithRepositories,
     dialogSteps,
   };
@@ -163,21 +183,73 @@ type SheetNavOptions = {
   onOpenChange: (open: boolean) => void;
 };
 
+export type WorkspaceTaskSession = {
+  id: string;
+  updated_at?: string | null;
+};
+
+export async function loadWorkspaceTaskSessions(
+  loader: SheetNavOptions["loadTaskSessionsForTask"],
+  taskId: string,
+): Promise<WorkspaceTaskSession[]> {
+  try {
+    return await loader(taskId);
+  } catch {
+    return [];
+  }
+}
+
+// eslint-disable-next-line max-lines-per-function -- workspace switching keeps its generation guard around every async phase
 async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
   const { store, loadTaskSessionsForTask, setActiveSession, setActiveTask, onOpenChange } = opts;
+  store.getState().setActiveWorkspace(newWorkspaceId);
+  const generation = store.getState().workspaceContextGeneration;
+  const requestId = generateUUID();
+  store
+    .getState()
+    .setWorkspaceContextRead(
+      "workflows",
+      newWorkspaceId,
+      generation,
+      "pending",
+      undefined,
+      requestId,
+    );
   store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: true } }));
   try {
     const workflowsResponse = await listWorkflows(newWorkspaceId, {
       cache: "no-store",
       includeHidden: true,
     });
+    if (!isCurrentWorkspaceContext(store.getState(), newWorkspaceId, generation)) return;
     const newWorkspaceWorkflows = workflowsResponse.workflows ?? [];
     const firstWorkflow = newWorkspaceWorkflows.find((w) => !w.hidden);
     if (!firstWorkflow) {
+      store
+        .getState()
+        .setWorkspaceContextRead(
+          "workflows",
+          newWorkspaceId,
+          generation,
+          "success",
+          undefined,
+          requestId,
+        );
       store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: false } }));
       return;
     }
     const snapshot = await fetchWorkflowSnapshot(firstWorkflow.id);
+    if (!isCurrentWorkspaceContext(store.getState(), newWorkspaceId, generation)) return;
+    store
+      .getState()
+      .setWorkspaceContextRead(
+        "workflows",
+        newWorkspaceId,
+        generation,
+        "success",
+        undefined,
+        requestId,
+      );
     store.setState((state) => ({
       ...state,
       workflows: {
@@ -199,7 +271,8 @@ async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
     }));
     const mostRecentTask = sortByUpdatedAtDesc(snapshot.tasks)[0];
     if (mostRecentTask) {
-      const sessions = await loadTaskSessionsForTask(mostRecentTask.id);
+      const sessions = await loadWorkspaceTaskSessions(loadTaskSessionsForTask, mostRecentTask.id);
+      if (!isCurrentWorkspaceContext(store.getState(), newWorkspaceId, generation)) return;
       const mostRecentSession = sortByUpdatedAtDesc(sessions)[0];
       if (mostRecentSession) {
         setActiveSession(mostRecentTask.id, mostRecentSession.id);
@@ -211,7 +284,20 @@ async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
     onOpenChange(false);
   } catch (error) {
     console.error("Failed to switch workspace:", error);
-    store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: false } }));
+    const state = store.getState();
+    if (!isCurrentWorkspaceContext(state, newWorkspaceId, generation)) return;
+    state.setWorkspaceContextRead(
+      "workflows",
+      newWorkspaceId,
+      generation,
+      classifyWorkspaceContextReadError(error),
+      retryAfterMilliseconds(error),
+      requestId,
+    );
+    store.setState((current) => ({
+      ...current,
+      kanban: { ...current.kanban, isLoading: false },
+    }));
   }
 }
 

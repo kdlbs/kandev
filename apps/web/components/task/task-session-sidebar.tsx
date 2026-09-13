@@ -83,6 +83,10 @@ function useSidebarData(workspaceId: string | null) {
     isLoading: isLoadingWorkflow,
     archivedError,
     retryArchivedTasks,
+    workspaceContextError,
+    workspaceContextPending,
+    workspaceContextAccessDenied,
+    retryWorkspaceContext,
   } = useWorkspaceSidebarTasks(workspaceId);
 
   const tasksWithRepositories = useMemo(() => {
@@ -142,6 +146,10 @@ function useSidebarData(workspaceId: string | null) {
     isLoadingWorkflow,
     archivedError,
     retryArchivedTasks,
+    workspaceContextError,
+    workspaceContextPending,
+    workspaceContextAccessDenied,
+    retryWorkspaceContext,
     tasksWithRepositories,
     workflows,
   };
@@ -425,6 +433,7 @@ export function useSidebarActions(store: StoreApi) {
   };
 }
 
+// eslint-disable-next-line max-lines-per-function -- desktop sidebar wiring must preserve one shared task surface
 export const TaskSessionSidebar = memo(function TaskSessionSidebar({
   workspaceId,
   hideFilterBar,
@@ -443,6 +452,10 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     isLoadingWorkflow,
     archivedError,
     retryArchivedTasks,
+    workspaceContextError,
+    workspaceContextPending,
+    workspaceContextAccessDenied,
+    retryWorkspaceContext,
     tasksWithRepositories,
   } = useSidebarData(workspaceId);
 
@@ -461,13 +474,14 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     ) ?? [];
 
   const displayTasks = useMemo(() => {
+    if (workspaceContextAccessDenied) return [];
     if (MOCK_SIDEBAR) return MOCK_ITEMS;
     return preparingTaskId
       ? tasksWithRepositories.map((t) =>
           t.id === preparingTaskId ? { ...t, sessionState: "STARTING" as TaskSessionState } : t,
         )
       : tasksWithRepositories;
-  }, [tasksWithRepositories, preparingTaskId]);
+  }, [tasksWithRepositories, preparingTaskId, workspaceContextAccessDenied]);
 
   const toggleSidebarGroupCollapsed = useAppStore((state) => state.toggleSidebarGroupCollapsed);
   const collapsedSubtaskParents = useAppStore((state) => state.collapsedSubtaskParents);
@@ -507,6 +521,12 @@ export const TaskSessionSidebar = memo(function TaskSessionSidebar({
     retryArchivedTasks,
     archivedLoadErrorLabel: t("sidebar:archivedLoadFailed"),
     archivedRetryLabel: t("sidebar:retry"),
+    workspaceContextError,
+    workspaceContextPending,
+    workspaceContextAccessDenied,
+    workspaceContextLoadErrorLabel: t("sidebar:workspaceContextRefreshFailed"),
+    workspaceContextAccessDeniedLabel: t("sidebar:workspaceContextAccessDenied"),
+    retryWorkspaceContext,
     totalTaskCount: displayTasks.length,
     selection,
   });

@@ -76,6 +76,14 @@ type QueueRunRequest struct {
 	Reason         string
 	IdempotencyKey string
 	Payload        map[string]any
+	// WakeWaveKey and WakeWaveString are the completion-wave identity
+	// (parent-wake-wave-identity). When WakeWaveKey is non-empty, QueueRun
+	// never coalesces this request into an existing row, is never merged
+	// into by a later request, and idx_run_wake_wave deduplicates a second
+	// insert for the same (WakeWaveKey, AgentProfileID) into
+	// QueueOutcomeDeduped instead of an error.
+	WakeWaveKey    string
+	WakeWaveString string
 }
 
 // CoalesceWindowSeconds is the default coalescing window. When two
@@ -206,6 +214,18 @@ func (s *Service) QueueRun(ctx context.Context, req QueueRunRequest) (QueueOutco
 	}
 
 	row, insertErr := s.insertRun(ctx, agentInstanceID, req, payload)
+	// idx_run_wake_wave has no windowed pre-check the way IdempotencyKey
+	// does — it must stay unbounded — so this is the only place a
+	// wave-carrying conflict is caught. Checked before ReportInsertResult
+	// (which only classifies idx_run_idempotency) so the two indexes'
+	// independent meanings ("same dispatch" vs "same wave") stay
+	// distinguishable to the caller and to office_run_dedup_total's labels.
+	if runssqlite.IsWakeWaveUniqueViolation(insertErr) {
+		s.log.Debug("run skipped (wake wave index race)",
+			zap.String("wake_wave_key", req.WakeWaveKey))
+		ParentWakeDedupedTotal.Add(1)
+		return QueueOutcomeDeduped, nil
+	}
 	// idx_run_idempotency has no time bound, so a conflict here can come
 	// from a row older than IdempotencyWindowHours, not just the windowed
 	// race CheckIdempotencyKey guards against above. ReportInsertResult
@@ -250,6 +270,8 @@ func (s *Service) insertRun(
 		CoalescedCount: 1,
 		IdempotencyKey: idemKeyPtr,
 		RequestedAt:    time.Now().UTC(),
+		WakeWaveKey:    req.WakeWaveKey,
+		WakeWaveString: req.WakeWaveString,
 	}
 	if err := s.repo.CreateRun(ctx, row); err != nil {
 		return nil, fmt.Errorf("enqueue run: %w", err)
@@ -297,8 +319,14 @@ func runPayload(req QueueRunRequest, agentInstanceID string) map[string]any {
 	return out
 }
 
+// shouldCoalesceRun decides whether a request may be merged into an
+// existing queued row. A wave-carrying request is never coalesced:
+// coalescing replaces the target row's payload without moving its
+// recorded identity, which would leave a run whose wave columns no
+// longer describe the wake it delivers. idx_run_wake_wave, not this
+// window, is what reconciles wave-carrying requests.
 func shouldCoalesceRun(req QueueRunRequest) bool {
-	return !commentkeys.HasTaskCommentPrefix(req.IdempotencyKey)
+	return req.WakeWaveKey == "" && !commentkeys.HasTaskCommentPrefix(req.IdempotencyKey)
 }
 
 // publishRunQueued emits the OfficeRunQueued bus event so the WS

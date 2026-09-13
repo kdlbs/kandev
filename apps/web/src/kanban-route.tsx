@@ -18,9 +18,15 @@ import {
 } from "@/lib/routing/route-bootstrap";
 import { useRouter } from "@/lib/routing/client-router";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import {
+  classifyWorkspaceContextReadError,
+  isCurrentWorkspaceContext,
+  retryAfterMilliseconds,
+} from "@/lib/state/workspace-context";
 import { isOfficeWorkspace } from "@/lib/state/slices/workspace/selectors";
 import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
 import type { Workflow } from "@/lib/types/http";
+import { generateUUID } from "@/lib/utils";
 
 export type KanbanRouteSelection = {
   workspaceId?: string;
@@ -75,6 +81,7 @@ function useKanbanWorkspaceMismatchRedirect(route: KanbanRouteSelection): string
   const redirectHref =
     officeEnabled && isOfficeWorkspace(targetWorkspace) ? workspaceHomeHref(targetWorkspace) : null;
 
+  // eslint-disable-next-line max-lines-per-function -- bootstrap keeps its cancellation guard with its effect
   useEffect(() => {
     if (redirectHref) router.replace(redirectHref);
   }, [redirectHref, router]);
@@ -88,6 +95,7 @@ function useKanbanWorkspaceMismatchRedirect(route: KanbanRouteSelection): string
  * arrangement, and a second bootstrap would be a second source of truth for
  * which workspace is active.
  */
+// eslint-disable-next-line max-lines-per-function, complexity -- route bootstrap owns one guarded async lifecycle
 export function useKanbanRouteBootstrap(route: KanbanRouteSelection, skip: boolean) {
   const store = useAppStoreApi();
   const selection = useMemo(
@@ -98,11 +106,16 @@ export function useKanbanRouteBootstrap(route: KanbanRouteSelection, skip: boole
   const hydrated = useAppStore(
     (state) => state.userSettings.loaded && hasHydratedKanbanRouteState(state, selection),
   );
+  const workspaceContextRetryVersion = useAppStore(
+    (state) => state.workspaceContextRead.retryVersion,
+  );
 
+  // eslint-disable-next-line max-lines-per-function -- bootstrap keeps its cancellation guard with its effect
   useEffect(() => {
     promoteLegacyWorkspaceSelection(store.getState().workspaces.items);
     if (skip) return;
     if (
+      workspaceContextRetryVersion === 0 &&
       store.getState().userSettings.loaded &&
       hasHydratedKanbanRouteState(store.getState(), selection)
     ) {
@@ -111,17 +124,24 @@ export function useKanbanRouteBootstrap(route: KanbanRouteSelection, skip: boole
     }
 
     let cancelled = false;
+    const requestIds = new Map<
+      "workflows" | "repositories",
+      { workspaceId: string; generation: number; requestId: string }
+    >();
 
+    // eslint-disable-next-line max-lines-per-function, complexity -- each branch preserves a distinct workspace read outcome
     async function bootstrap() {
       const [workspacesResponse, settingsResponse] = await Promise.all([
-        listWorkspaces({ cache: "no-store" }).catch(() => ({ workspaces: [], total: 0 })),
+        listWorkspaces({ cache: "no-store" }).catch(() => null),
         fetchUserSettings({ cache: "no-store" }).catch(() => null),
       ]);
       if (cancelled) return;
 
       const settingsWorkspaceId = settingsResponse?.settings?.workspace_id || null;
       const settingsWorkflowId = settingsResponse?.settings?.workflow_filter_id || null;
-      const workspaceItems = workspacesResponse.workspaces.map(mapWorkspaceItem);
+      const workspaceItems = workspacesResponse
+        ? workspacesResponse.workspaces.map(mapWorkspaceItem)
+        : store.getState().workspaces.items;
       promoteLegacyWorkspaceSelection(workspaceItems);
       const activeWorkspaceId = resolveKanbanRouteWorkspaceId(
         workspaceItems,
@@ -129,14 +149,18 @@ export function useKanbanRouteBootstrap(route: KanbanRouteSelection, skip: boole
         readActiveWorkspaceCookie(),
         settingsWorkspaceId,
       );
+      const workspaceBeforeHydration = store.getState().workspaces.activeId;
 
       store.getState().hydrate({
-        workspaces: { items: workspaceItems, activeId: activeWorkspaceId },
+        workspaces: { items: workspaceItems, activeId: workspaceBeforeHydration },
         userSettings: {
           ...mapUserSettingsResponse(settingsResponse),
           workspaceId: activeWorkspaceId,
         },
       });
+      if (activeWorkspaceId !== workspaceBeforeHydration) {
+        store.getState().setActiveWorkspace(activeWorkspaceId);
+      }
 
       if (!activeWorkspaceId) return;
 
@@ -147,34 +171,94 @@ export function useKanbanRouteBootstrap(route: KanbanRouteSelection, skip: boole
         return;
       }
 
-      const [workflowsResponse, repositoriesResponse] = await Promise.all([
-        listWorkflows(activeWorkspaceId, { cache: "no-store", includeHidden: true }).catch(() => ({
-          workflows: [],
-        })),
-        listRepositories(activeWorkspaceId, undefined, { cache: "no-store" }).catch(() => ({
-          repositories: [],
-        })),
-      ]);
-      if (cancelled) return;
-
-      const workflowId = resolveDesiredWorkflowId({
-        activeWorkflowId: selection.workflowId ?? null,
-        settingsWorkflowId,
-        workspaceWorkflows: workflowsResponse.workflows,
-      });
-
-      store.getState().hydrate({
-        userSettings: {
-          ...mapUserSettingsResponse(settingsResponse),
+      const generation = store.getState().workspaceContextGeneration;
+      for (const collection of ["workflows", "repositories"] as const) {
+        const requestId = generateUUID();
+        requestIds.set(collection, {
           workspaceId: activeWorkspaceId,
-          workflowId,
-        },
-        workflows: {
-          items: workflowsResponse.workflows.map(mapWorkflowItem),
-          activeId: workflowId,
-        },
-      });
-      store.getState().setRepositories(activeWorkspaceId, repositoriesResponse.repositories);
+          generation,
+          requestId,
+        });
+        store
+          .getState()
+          .setWorkspaceContextRead(
+            collection,
+            activeWorkspaceId,
+            generation,
+            "pending",
+            undefined,
+            requestId,
+          );
+      }
+      const [workflowsResult, repositoriesResult] = await Promise.all([
+        settleKanbanRead(
+          listWorkflows(activeWorkspaceId, { cache: "no-store", includeHidden: true }),
+        ),
+        settleKanbanRead(listRepositories(activeWorkspaceId, undefined, { cache: "no-store" })),
+      ]);
+      if (
+        cancelled ||
+        !isCurrentWorkspaceContext(store.getState(), activeWorkspaceId, generation)
+      ) {
+        return;
+      }
+
+      const currentState = store.getState();
+      for (const [collection, result] of [
+        ["workflows", workflowsResult],
+        ["repositories", repositoriesResult],
+      ] as const) {
+        const requestId = requestIds.get(collection)?.requestId;
+        if (result.ok) {
+          currentState.setWorkspaceContextRead(
+            collection,
+            activeWorkspaceId,
+            generation,
+            "success",
+            undefined,
+            requestId,
+          );
+        } else {
+          currentState.setWorkspaceContextRead(
+            collection,
+            activeWorkspaceId,
+            generation,
+            classifyWorkspaceContextReadError(result.error),
+            retryAfterMilliseconds(result.error),
+            requestId,
+          );
+        }
+      }
+
+      const workspaceWorkflows = workflowsResult.ok
+        ? workflowsResult.value.workflows
+        : currentState.workflows.items.filter(
+            (workflow) => workflow.workspaceId === activeWorkspaceId,
+          );
+      const workflowId = workflowsResult.ok
+        ? resolveDesiredWorkflowId({
+            activeWorkflowId: selection.workflowId ?? null,
+            settingsWorkflowId,
+            workspaceWorkflows,
+          })
+        : currentState.workflows.activeId;
+
+      if (workflowsResult.ok) {
+        store.getState().hydrate({
+          userSettings: {
+            ...mapUserSettingsResponse(settingsResponse),
+            workspaceId: activeWorkspaceId,
+            workflowId,
+          },
+          workflows: {
+            items: workflowsResult.value.workflows.map(mapWorkflowItem),
+            activeId: workflowId,
+          },
+        });
+      }
+      if (repositoriesResult.ok) {
+        store.getState().setRepositories(activeWorkspaceId, repositoriesResult.value.repositories);
+      }
     }
 
     void bootstrap().then(() => {
@@ -182,11 +266,32 @@ export function useKanbanRouteBootstrap(route: KanbanRouteSelection, skip: boole
     });
     return () => {
       cancelled = true;
+      const state = store.getState();
+      for (const [collection, request] of requestIds) {
+        state.setWorkspaceContextRead(
+          collection,
+          request.workspaceId,
+          request.generation,
+          "cancelled",
+          undefined,
+          request.requestId,
+        );
+      }
     };
-  }, [selection, skip, store]);
+  }, [selection, skip, store, workspaceContextRetryVersion]);
 
   // Completion is tied to this route request, including empty and failed fetches.
   return hydrated || completedSelection === selection;
+}
+
+type KanbanReadResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
+
+async function settleKanbanRead<T>(promise: Promise<T>): Promise<KanbanReadResult<T>> {
+  try {
+    return { ok: true, value: await promise };
+  } catch (error) {
+    return { ok: false, error };
+  }
 }
 
 function mapWorkflowItem(workflow: Workflow) {

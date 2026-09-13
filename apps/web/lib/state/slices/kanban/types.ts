@@ -185,6 +185,10 @@ export type KanbanState = {
     issueUrl?: string;
     issueNumber?: number;
     statusSummary?: TaskStatusSummary | null;
+    /** Whether the executor profile can be switched right now. Never gap-filled on merge. */
+    runnerEditable?: boolean;
+    /** Machine-readable reason for `runnerEditable`. Never gap-filled on merge. */
+    runnerIneligibleReason?: string;
   }>;
   isLoading?: boolean;
 };
@@ -257,6 +261,32 @@ export type WorkflowsState = {
   activeId: string | null;
 };
 
+export const WORKSPACE_CONTEXT_COLLECTIONS = ["workflows", "repositories", "steps"] as const;
+export type WorkspaceContextCollection = (typeof WORKSPACE_CONTEXT_COLLECTIONS)[number];
+export type WorkspaceContextReadError =
+  | "transient"
+  | "access_denied"
+  | "not_found"
+  | "invalid"
+  | "cancelled"
+  | "unknown";
+export type WorkspaceContextReadState = {
+  workspaceId: string | null;
+  generation: number;
+  pending: Record<WorkspaceContextCollection, boolean>;
+  errors: Record<WorkspaceContextCollection, WorkspaceContextReadError | null>;
+  retryAfterMs: Record<WorkspaceContextCollection, number | null>;
+  /** Request owner for each collection's latest asynchronous read. */
+  requestIds: Record<WorkspaceContextCollection, string | null>;
+  /** Snapshot reads are tracked separately from the workflow list read. */
+  snapshotPending: boolean;
+  snapshotError: WorkspaceContextReadError | null;
+  snapshotRetryAfterMs: number | null;
+  snapshotRequestId: string | null;
+  retryVersion: number;
+  retryCycle: number;
+};
+
 export type TaskState = {
   activeTaskId: string | null;
   activeSessionId: string | null;
@@ -284,6 +314,7 @@ export type KanbanSliceState = {
   sidebarArchivedTasks: SidebarArchivedTasksState;
   workflows: WorkflowsState;
   workspaceContextGeneration: number;
+  workspaceContextRead: WorkspaceContextReadState;
   tasks: TaskState;
   /** Browser-local removal intent. It is deliberately excluded from hydration. */
   taskRemoval: TaskRemovalState;
@@ -291,6 +322,23 @@ export type KanbanSliceState = {
 
 export type KanbanSliceActions = {
   resetKanbanWorkspaceContext: () => void;
+  // eslint-disable-next-line max-params -- positional arguments mirror the store action's small read contract
+  setWorkspaceContextRead: (
+    collection: WorkspaceContextCollection,
+    workspaceId: string,
+    generation: number,
+    result: "pending" | "success" | WorkspaceContextReadError,
+    retryAfterMs?: number,
+    requestId?: string,
+  ) => void;
+  setWorkspaceSnapshotRead: (
+    workspaceId: string,
+    generation: number,
+    result: "pending" | "success" | WorkspaceContextReadError,
+    retryAfterMs?: number,
+    requestId?: string,
+  ) => void;
+  requestWorkspaceContextRefresh: (resetRetryCycle?: boolean) => void;
   setActiveWorkflow: (workflowId: string | null) => void;
   setWorkflows: (workflows: WorkflowsState["items"]) => void;
   reorderWorkflowItems: (workflowIds: string[]) => void;

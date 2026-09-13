@@ -147,6 +147,8 @@ function makeFs(): DialogFormState {
     setExecutorId: () => {},
     executorProfileId: "",
     setExecutorProfileId: () => {},
+    setExecutorProfileIdFromSeed: () => {},
+    seededExecutorProfileId: null,
     discoveredRepositories: [],
     setDiscoveredRepositories: () => {},
     discoverReposLoading: false,
@@ -321,36 +323,43 @@ describe("DialogPromptSection (CLI-mode parity)", () => {
   });
 });
 
+const SELECTOR_TEST_ID = "agent-selector-stub";
+const AgentSelectorStub = () => (
+  <button type="button" data-testid="agent-selector-stub">
+    selector
+  </button>
+);
+const ExecutorSelectorStub = () => <button type="button">executor</button>;
+const createEditSelectorsBaseProps: Omit<
+  ComponentProps<typeof CreateEditSelectors>,
+  "agentCompatState"
+> = {
+  isTaskStarted: false,
+  agentProfiles: [{ id: "agent-1", label: "Codex", agent_name: "codex" } as never],
+  agentProfilesLoading: false,
+  agentProfileOptions: [],
+  agentProfileId: "",
+  onAgentProfileChange: () => {},
+  isCreatingSession: false,
+  executorProfileOptions: [],
+  executorProfileId: "exec-profile-1",
+  onExecutorProfileChange: () => {},
+  executorsLoading: false,
+  AgentSelectorComponent: AgentSelectorStub,
+  ExecutorProfileSelectorComponent: ExecutorSelectorStub,
+  workflowAgentLocked: false,
+  executorProfileName: "Docker",
+  selectedAgentProfileName: null,
+  effectiveWorkflowName: null,
+  runnerEditable: true,
+  runnerIneligibleReason: "eligible",
+};
+
 describe("CreateEditSelectors", () => {
   const WORKFLOW_NAME = "Development";
   const EXECUTOR_NAME = "Fly";
   const EMPTY_STATE_TEST_ID = "agent-profile-empty-state";
-  const SELECTOR_TEST_ID = "agent-selector-stub";
-  const AgentSelectorStub = () => (
-    <button type="button" data-testid="agent-selector-stub">
-      selector
-    </button>
-  );
-  const ExecutorSelectorStub = () => <button type="button">executor</button>;
-  const baseProps: Omit<ComponentProps<typeof CreateEditSelectors>, "agentCompatState"> = {
-    isTaskStarted: false,
-    agentProfiles: [{ id: "agent-1", label: "Codex", agent_name: "codex" } as never],
-    agentProfilesLoading: false,
-    agentProfileOptions: [],
-    agentProfileId: "",
-    onAgentProfileChange: () => {},
-    isCreatingSession: false,
-    executorProfileOptions: [],
-    executorProfileId: "exec-profile-1",
-    onExecutorProfileChange: () => {},
-    executorsLoading: false,
-    AgentSelectorComponent: AgentSelectorStub,
-    ExecutorProfileSelectorComponent: ExecutorSelectorStub,
-    workflowAgentLocked: false,
-    executorProfileName: "Docker",
-    selectedAgentProfileName: null,
-    effectiveWorkflowName: null,
-  };
+  const baseProps = createEditSelectorsBaseProps;
 
   // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.4
   it("links credential setup to the selected executor profile", () => {
@@ -429,5 +438,93 @@ describe("CreateEditSelectors", () => {
     expect(screen.getByRole("link", { name: /configure credentials/i }).getAttribute("href")).toBe(
       "/settings/executors/exec-profile-1",
     );
+  });
+});
+
+// REQ-TASKS-RUNNER-SWITCH-004: runner-editability gating is independent of
+// the agent-compatibility rendering exercised above, split into its own
+// block to keep each describe's setup focused.
+describe("CreateEditSelectors — runner editability (REQ-TASKS-RUNNER-SWITCH-004)", () => {
+  const RUNNER_NOTE_TEST_ID = "runner-ineligible-note";
+  const baseProps = createEditSelectorsBaseProps;
+
+  // AC-TASKS-RUNNER-SWITCH-004.3: runner editability is independent of
+  // isTaskStarted — the previous state-only gate must no longer govern it.
+  it("shows the executor selector for a started task that is still runner-editable", () => {
+    render(
+      <CreateEditSelectors
+        {...baseProps}
+        agentCompatState="compatible"
+        isTaskStarted={true}
+        runnerEditable={true}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "executor" })).toBeTruthy();
+    expect(screen.queryByTestId(SELECTOR_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(RUNNER_NOTE_TEST_ID)).toBeNull();
+  });
+
+  // AC-TASKS-RUNNER-SWITCH-004.2
+  it("presents the projected reason instead of the selector when not runner-editable", () => {
+    render(
+      <CreateEditSelectors
+        {...baseProps}
+        agentCompatState="compatible"
+        runnerEditable={false}
+        runnerIneligibleReason="session_exists"
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "executor" })).toBeNull();
+    expect(screen.getByTestId(RUNNER_NOTE_TEST_ID).textContent).toBeTruthy();
+  });
+
+  // AC-TASKS-RUNNER-SWITCH-004.4b: never an empty reason or a raw code — an
+  // unrecognized reason renders the same copy as evaluation_unavailable.
+  it("falls back to the evaluation-unavailable copy for an unrecognized reason code", () => {
+    render(
+      <CreateEditSelectors
+        {...baseProps}
+        agentCompatState="compatible"
+        runnerEditable={false}
+        runnerIneligibleReason="some_future_reason_this_dialog_predates"
+      />,
+    );
+    const unrecognized = screen.getByTestId(RUNNER_NOTE_TEST_ID).textContent;
+    cleanup();
+
+    render(
+      <CreateEditSelectors
+        {...baseProps}
+        agentCompatState="compatible"
+        runnerEditable={false}
+        runnerIneligibleReason="evaluation_unavailable"
+      />,
+    );
+    const known = screen.getByTestId(RUNNER_NOTE_TEST_ID).textContent;
+
+    expect(unrecognized).toBeTruthy();
+    expect(unrecognized).toBe(known);
+  });
+
+  // AC-TASKS-RUNNER-SWITCH-004.2: the reason is presented unconditionally
+  // whenever runner_editable is false — a started task is not a carve-out.
+  // session_exists is itself one of the ineligibility reasons, so this is
+  // the common shape for any task with a primary session, not an edge case.
+  it("shows the ineligible reason for a started, runner-ineligible task instead of rendering nothing", () => {
+    render(
+      <CreateEditSelectors
+        {...baseProps}
+        agentCompatState="compatible"
+        isTaskStarted={true}
+        runnerEditable={false}
+        runnerIneligibleReason="session_exists"
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "executor" })).toBeNull();
+    expect(screen.queryByTestId(SELECTOR_TEST_ID)).toBeNull();
+    expect(screen.getByTestId(RUNNER_NOTE_TEST_ID).textContent).toBeTruthy();
   });
 });

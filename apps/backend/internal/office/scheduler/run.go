@@ -20,7 +20,10 @@ import (
 	"github.com/kandev/kandev/internal/office/routing"
 	"github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/office/shared"
+	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 	runsservice "github.com/kandev/kandev/internal/runs/service"
+	"github.com/kandev/kandev/internal/workflow/engine"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 // ErrRoutingNotSupported is returned by TaskStarter.StartTaskWithRoute
@@ -89,9 +92,17 @@ const (
 // Run.Payload column so the agent runtime can pick the right
 // system prompt template based on the reason.
 type RunContext struct {
-	Reason                string   `json:"reason"`
-	TaskID                string   `json:"task_id"`
-	WorkspaceID           string   `json:"workspace_id,omitempty"`
+	Reason      string `json:"reason"`
+	TaskID      string `json:"task_id"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	// WorkflowStepID is the parent's workflow step at wake time. An
+	// engine-routed producer's request always carries it (runs/service's
+	// runPayload copies it from the typed field), and
+	// evaluateRunStaleness reads it to cancel a queued run whose parent
+	// has since moved to a different step. Left empty, that guard never
+	// applies — so cascade must set this whenever it can be resolved, or
+	// the two producers' wakes for the same wave are not equivalent.
+	WorkflowStepID        string   `json:"workflow_step_id,omitempty"`
 	ActorID               string   `json:"actor_id,omitempty"`
 	ActorType             string   `json:"actor_type,omitempty"` // "user" | "agent"
 	CommentID             string   `json:"comment_id,omitempty"`
@@ -120,6 +131,20 @@ type RunContext struct {
 	// encodeRunContext's output shape, which CoalesceRun compares for
 	// equality and taskIDFromPayload parses.
 	IdempotencyKey string `json:"-"`
+
+	// WaveKey and WaveString carry a completion-wave identity onto the
+	// persisted run (models.Run.WakeWaveKey / WakeWaveString), not into
+	// the JSON payload: they gate admission via idx_run_wake_wave and
+	// coalescing, not agent-facing content. Empty means "no wave
+	// identity" — the ordinary idempotency-key path applies instead.
+	WaveKey    string `json:"-"`
+	WaveString string `json:"-"`
+
+	// ExtraPayload, when non-empty, is merged onto the JSON-encoded
+	// payload by encodeRunContext (workflow-authored keys win over any
+	// struct field of the same name). Left nil, encodeRunContext's
+	// output is byte-identical to a plain struct marshal.
+	ExtraPayload map[string]any `json:"-"`
 }
 
 // Run status constants.
@@ -177,7 +202,32 @@ type SchedulerService struct {
 	kandevBasePathFn        func() string
 	agentTypeResolver       func(profileID string) string
 	projectSkillDirResolver func(agentTypeID string) string
+	workflowStepGetter      WorkflowStepGetter
+	participantStore        engine.ParticipantStore
 	pauseGate               shared.PauseGate
+}
+
+// WorkflowStepGetter resolves a workflow step by ID. Implemented by
+// workflow/service.Service.GetStep; wired via SetWorkflowStepGetter so the
+// cascade producer can resolve the parent's current step without an
+// engine dependency, for payload parity with the engine-routed producers.
+type WorkflowStepGetter interface {
+	GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error)
+}
+
+// SetWorkflowStepGetter wires the workflow step lookup used for payload
+// parity. Left nil, cascade wakes queue without a merged action payload.
+func (ss *SchedulerService) SetWorkflowStepGetter(g WorkflowStepGetter) {
+	ss.workflowStepGetter = g
+}
+
+// SetParticipantStore wires the participant seat resolution used for
+// queue_run_for_each_participant payload parity — the same
+// engine.ParticipantStore instance the workflow engine itself uses
+// (workflow/adapters.ParticipantAdapter in production). Left nil, cascade
+// never attaches a for-each-participant action's payload.
+func (ss *SchedulerService) SetParticipantStore(store engine.ParticipantStore) {
+	ss.participantStore = store
 }
 
 // NewSchedulerService creates a new SchedulerService.
@@ -259,6 +309,25 @@ func (ss *SchedulerService) QueueRun(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
 ) (runsservice.QueueOutcome, error) {
+	return ss.queueRun(ctx, agentInstanceID, reason, payload, idempotencyKey, "", "")
+}
+
+// queueRun is QueueRun plus an optional completion-wave identity. A
+// non-empty waveKey (a) skips CoalesceRun — a wave-carrying request is
+// never coalesced in and a wave-carrying queued run is never coalesced
+// into — and (b) classifies CreateRun's idx_run_wake_wave violation as an
+// already-delivered wake rather than an error: this call site inserts
+// directly (not through runs/service), so ReportInsertResult's own
+// idx_run_idempotency-only classification doesn't cover it. A concurrent
+// duplicate of this same request can just as well lose the race on
+// idx_run_idempotency instead of idx_run_wake_wave — both keys identify the
+// identical operation for the identical row, so either violation means the
+// wake is already recorded and neither is an error, mirroring
+// runs/service.QueueRun's own two-way classification.
+func (ss *SchedulerService) queueRun(
+	ctx context.Context,
+	agentInstanceID, reason, payload, idempotencyKey, waveKey, waveString string,
+) (runsservice.QueueOutcome, error) {
 	agent, err := ss.guardAgentStatus(ctx, agentInstanceID)
 	if err != nil {
 		return runsservice.QueueOutcomeNone, err
@@ -277,15 +346,17 @@ func (ss *SchedulerService) QueueRun(
 		}
 	}
 
-	coalesced, err := ss.repo.CoalesceRun(ctx, agentInstanceID, reason, CoalesceWindowSeconds, payload)
-	if err != nil {
-		return runsservice.QueueOutcomeNone, fmt.Errorf("coalesce check: %w", err)
-	}
-	if coalesced {
-		ss.logger.Debug("run coalesced",
-			zap.String("agent", agentInstanceID),
-			zap.String("reason", reason))
-		return runsservice.QueueOutcomeCoalesced, nil
+	if waveKey == "" {
+		coalesced, err := ss.repo.CoalesceRun(ctx, agentInstanceID, reason, CoalesceWindowSeconds, payload)
+		if err != nil {
+			return runsservice.QueueOutcomeNone, fmt.Errorf("coalesce check: %w", err)
+		}
+		if coalesced {
+			ss.logger.Debug("run coalesced",
+				zap.String("agent", agentInstanceID),
+				zap.String("reason", reason))
+			return runsservice.QueueOutcomeCoalesced, nil
+		}
 	}
 
 	var idemKeyPtr *string
@@ -300,9 +371,17 @@ func (ss *SchedulerService) QueueRun(
 		Status:         RunStatusQueued,
 		CoalescedCount: 1,
 		IdempotencyKey: idemKeyPtr,
+		WakeWaveKey:    waveKey,
+		WakeWaveString: waveString,
 		RequestedAt:    time.Now().UTC(),
 	}
 	insertErr := ss.repo.CreateRun(ctx, req)
+	if waveKey != "" && runssqlite.IsWakeWaveUniqueViolation(insertErr) {
+		runsservice.ParentWakeDedupedTotal.Add(1)
+		ss.logger.Debug("run skipped (wave already woken)",
+			zap.String("wave_key", waveKey))
+		return runsservice.QueueOutcomeDeduped, nil
+	}
 	outcome, err := runsservice.ReportInsertResult(runsservice.QueueSourceRuns, reason, idempotencyKey, agentInstanceID, insertErr)
 	if err != nil {
 		return runsservice.QueueOutcomeNone, fmt.Errorf("enqueue run: %w", err)
@@ -332,15 +411,69 @@ func (ss *SchedulerService) QueueRunCtx(
 	if err != nil {
 		return runsservice.QueueOutcomeNone, fmt.Errorf("encode run context: %w", err)
 	}
-	return ss.QueueRun(ctx, agentInstanceID, c.Reason, payload, c.IdempotencyKey)
+	return ss.queueRun(ctx, agentInstanceID, c.Reason, payload, c.IdempotencyKey, c.WaveKey, c.WaveString)
 }
 
+// encodeRunContext JSON-encodes c. When c.ExtraPayload is empty the output
+// is a plain struct marshal, byte-identical to before ExtraPayload existed.
+// Otherwise ExtraPayload's keys are overlaid onto the encoded object, then
+// c's own envelope fields are re-applied on top — workflow-authored content
+// keys win, but a workflow-authored payload can never redirect the run's
+// identity. This mirrors runs/service.runPayload's precedence for task_id
+// and workflow_step_id: P1 never goes through that function (it inserts via
+// ss.repo.CreateRun directly), so encodeRunContext is the only place that
+// guarantee can be enforced for the cascade path. Without it, a queue_run
+// action's payload.task_id would silently override task.ParentID and
+// misdirect the wake to a foreign task — task_id is what
+// SchedulerIntegration.extractTaskID reads to check out and budget the run.
+//
+// Unlike runPayload, this does not re-assert agent_profile_id: RunContext
+// carries no typed recipient field to re-assert from (the run's actual
+// AgentProfileID column is set separately, from queueRun's own
+// agentInstanceID parameter, never from this payload). A workflow-authored
+// ExtraPayload["agent_profile_id"] therefore passes through unfiltered —
+// currently inert, since no reader in this codebase consults
+// payload["agent_profile_id"] for dispatch or routing (both use the DB
+// column instead). See
+// TestQueueRunCtx_ExtraPayloadAgentProfileID_PassesThroughUnfiltered, which
+// pins this as a known non-guarantee rather than an oversight.
 func encodeRunContext(c RunContext) (string, error) {
 	b, err := json.Marshal(c)
 	if err != nil {
 		return "", err
 	}
-	return string(b), nil
+	if len(c.ExtraPayload) == 0 {
+		return string(b), nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		return "", err
+	}
+	for k, v := range c.ExtraPayload {
+		m[k] = v
+	}
+	m["task_id"] = c.TaskID
+	m["reason"] = c.Reason
+	if c.WorkspaceID != "" {
+		m["workspace_id"] = c.WorkspaceID
+	} else {
+		delete(m, "workspace_id")
+	}
+	if c.ChildTaskID != "" {
+		m["child_task_id"] = c.ChildTaskID
+	} else {
+		delete(m, "child_task_id")
+	}
+	if c.WorkflowStepID != "" {
+		m["workflow_step_id"] = c.WorkflowStepID
+	} else {
+		delete(m, "workflow_step_id")
+	}
+	merged, err := json.Marshal(m)
+	if err != nil {
+		return "", err
+	}
+	return string(merged), nil
 }
 
 // guardAgentStatus returns an error if the agent is paused or stopped,

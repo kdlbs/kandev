@@ -118,5 +118,7 @@
   "failedToSyncSidebarViews": "同步側邊欄檢視失敗",
   "morePluginItems": "更多外掛項",
   "newViewNumbered": "新檢視 {{suffix}}",
-  "untitledView": "未命名檢視"
+  "untitledView": "未命名檢視",
+  "workspaceContextRefreshFailed": "無法重新整理任務。",
+  "workspaceContextAccessDenied": "您已無法存取此工作區。"
 }

@@ -8,7 +8,10 @@ import {
   selectTaskFromSheet,
 } from "./session-task-switcher-sheet-selection";
 import type { TaskPendingAction, TaskSession } from "@/lib/types/http";
-import { useSheetArchiveActions } from "./session-task-switcher-sheet-hooks";
+import {
+  loadWorkspaceTaskSessions,
+  useSheetArchiveActions,
+} from "./session-task-switcher-sheet-hooks";
 
 type SheetTask = Parameters<typeof toSheetItem>[0];
 type SheetCtx = Parameters<typeof toSheetItem>[1];
@@ -303,6 +306,19 @@ describe("selectPendingTaskFromSheet", () => {
     expect(setActiveTask).toHaveBeenCalledWith(taskId);
     expect(navigate).toHaveBeenCalledWith(taskId);
     expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe("loadWorkspaceTaskSessions", () => {
+  it("keeps workspace recovery successful when task-session loading fails", async () => {
+    const sessions = await loadWorkspaceTaskSessions(
+      vi.fn(async () => {
+        throw new Error("session read failed");
+      }),
+      "task-1",
+    );
+
+    expect(sessions).toEqual([]);
   });
 });
 
