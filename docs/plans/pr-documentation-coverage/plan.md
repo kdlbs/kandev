@@ -66,6 +66,15 @@ Execute sequentially. No subagents are authorized.
 
 ## Verification results
 
+Task 01's 2026-09-13 regression fix reuses requirement searches and directory
+listings within each exact-head snapshot. Its deterministic quota regression
+now uses three searches for six work orders. All 50 Node tests, five workflow
+contract tests, documentation catalog/specification checks, and whitespace
+checks pass. A GET-only evaluation of exact PR #3626 head `93abff34efe8c9ab2bec68acb8e6aba1eb2a23d4`
+returned covered with three searches and no failed requests. See Task 01 for
+red/green evidence and limits. Consumption by trusted `main` and the new PR's
+CI/review gates remain delivery work; no status override or merge is claimed.
+
 Design validation on 2026-09-10:
 
 - `python3 scripts/lint-spec-files.test.py`: 36 tests passed.
