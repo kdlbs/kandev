@@ -260,6 +260,7 @@ function PlanPanelContent({
           key={`${taskId}-${state.editorKey}`}
           taskId={taskId}
           value={state.draftContent}
+          readOnly={state.isLoading}
           onChange={state.setDraftContent}
           placeholder={t("task:startTypingYourPlan")}
           mobileBottomOffset={mobileBottomOffset}

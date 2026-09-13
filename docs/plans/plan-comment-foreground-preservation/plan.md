@@ -60,7 +60,9 @@ subtree mounted when the current task has a cached plan. Leave shared loader
 network-state semantics intact. Use current task plan state, not a sticky
 "ever loaded" flag that could show task A's content for task B.
 Keep `usePlanSelection` resets for task change and confirmed deletion or
-replacement. Do not add autosave for unfinished comments or disable refresh.
+replacement. While loading, keep plan content read-only and hide its editing
+controls; leave the comment input editable. Restore plan editing on settlement.
+Do not add autosave for unfinished comments or disable refresh.
 
 This follows completed [task-owned comments](../task-owned-plan-comments/plan.md)
 and [recovery](../plan-comment-recovery/plan.md) packages. Their results remain
@@ -164,3 +166,11 @@ Public docs are unchanged because this package records implementation intent.
 - An overbroad loading guard can expose stale content for another task.
 - Headless focus differs from OS Alt-Tab; record the event mechanism tested
   and a manual return check when available.
+
+### Review remediation
+
+Plan content is temporarily read-only during background reads, while comment
+input remains editable. Formatting, slash, and drag controls pause until the
+read settles. A browser regression failed before this guard; all 16 desktop/
+phone scenarios and 69 focused tests now pass. See the work order for exact
+checks. PR CI and review completion are tracked separately.

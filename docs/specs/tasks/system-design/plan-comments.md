@@ -317,18 +317,17 @@ prompt than the user reviewed.
 
 ### Open comment editor during background reads
 
-For `AC-TASKS-PLAN-COMMENTS-001.9` through `.11`, `TaskPlanPanel` uses its
-full-panel loading placeholder only when no current plan is available.
-Revalidation keeps `PlanPanelContent`, Tiptap, and the comment Popover/Drawer
-mounted, preserving their local input state without storage or backend writes.
-Keep foreground/reconnect refresh, shared loading flags, retry budgets, and
-snapshot reconciliation intact. Same-plan refresh must not reinitialize the
-body from persisted text. `usePlanSelection` still clears transient state on
-task or plan identity changes; dismissal and mutation lifecycles stay intact.
+For `AC-TASKS-PLAN-COMMENTS-001.9` through `.11`, `TaskPlanPanel` shows its
+full-panel loading placeholder only without a current plan. Revalidation keeps
+the content and comment Popover/Drawer mounted. Tiptap becomes read-only and
+hides formatting, slash, and drag controls until settlement, preventing plan
+edits that an incoming revision could overwrite. Comment input stays editable.
+No draft storage, backend writes, or loader semantics change. Same-plan refresh
+must not reset comment text. Task/plan identity changes still clear selection.
 
-Component tests retain real inputs and assert DOM identity and draft text
-during pending, successful, and failed foreground reads. Include initial-load
-and owner-change controls, and desktop/phone Add/Update browser regressions.
+Tests assert input identity and text across pending, successful, and failed
+reads, initial loading and owner changes, plus desktop/phone Add/Update and
+plan read-only transitions.
 
 ### Persisted comment lifecycle
 

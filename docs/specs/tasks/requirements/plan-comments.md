@@ -75,7 +75,8 @@ unsent feedback.
   same current plan, switching away from the browser and returning shall
   preserve the open editor, entered text, and selected plan text. Background
   refresh and reconnect shall preserve that draft during pending, successful,
-  and failed reads on desktop and phone.
+  and failed reads on desktop and phone. Plan content editing shall pause during
+  the read and resume on settlement; the open comment remains editable.
 - **AC-TASKS-PLAN-COMMENTS-001.10:** Preserving an open comment draft shall
   not automatically persist or deliver it. Add, Update, and Run remain explicit
   actions; failed mutations shall preserve the entered text for retry.

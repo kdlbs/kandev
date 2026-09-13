@@ -125,6 +125,11 @@ export async function assertCommentSurvivesForeground(options: Options) {
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));
   await expect.poll(control.held).toBe(true);
   try {
+    await expect(session.planPanel.locator(".ProseMirror")).toHaveAttribute(
+      "contenteditable",
+      "false",
+    );
+    await expect(input).toBeEditable();
     await expect(input).toHaveValue(DRAFT);
     expect(await originalInput!.evaluate((element) => element.isConnected)).toBe(true);
     expect(control.mutations()).toBe(0);
@@ -145,6 +150,10 @@ export async function assertCommentSurvivesForeground(options: Options) {
     .toBe(false);
   await expect(input).toHaveValue(DRAFT);
   expect(await originalInput!.evaluate((element) => element.isConnected)).toBe(true);
+  await expect(session.planPanel.locator(".ProseMirror")).toHaveAttribute(
+    "contenteditable",
+    "true",
+  );
   if (mobile) await assertNoDocumentHorizontalOverflow(page, "foreground comment draft");
   await page.screenshot({ path: test.info().outputPath("foreground-comment.png") });
   await page.getByRole("button", { name: editing ? "Update" : "Add", exact: true }).click();

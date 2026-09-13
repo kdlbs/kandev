@@ -170,3 +170,28 @@ performed in this headless environment. The managed fixtures cleaned up their
 owned runtime data. Screenshots and build logs are ignored or under `/tmp`.
 No public-doc changes are needed: this repairs the existing comment interaction
 without changing navigation, copy, APIs, or persistence.
+
+### Review remediation: pending plan edits
+
+Codex identified that keeping the plan mounted also allowed content edits while
+an incoming revision could replace them. `TaskPlanPanel` now passes loading as
+Tiptap read-only state. The editor remains mounted, suppresses formatting,
+slash, and drag controls during the read, and resumes editing on success or
+failure. The separate comment input stays editable on desktop and phone.
+
+The browser RED assertion expected `contenteditable=false` during the held read
+and received `true` on the previous implementation. After the fix, both full
+comment suites pass (8 Chromium and 8 mobile-chrome, zero retries), using
+`E2E_PORT_OFFSET=17`, a fresh `pnpm run build:e2e`, and unchanged backend/plugin
+binaries from the earlier managed build. The shared helper now asserts both
+read-only and restored editing, plus comment editability while pending.
+
+The original five focused test files still pass (48 tests). Running
+`pnpm test -- components/editors/tiptap/tiptap-plan-editor.test.tsx components/editors/tiptap/plan-bubble-menu.test.tsx`
+adds 21 passing tests, including a real Tiptap read-only transition proving
+stable editor/input identity and no content publication. TypeScript,
+changed-file ESLint, documentation catalog, and specification checks pass.
+Desktop/phone screenshots were recaptured after the production change.
+
+PR CI and reviewer completion remain pending; local checks do not establish
+remote CI success.
