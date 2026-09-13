@@ -42,3 +42,15 @@ func (m *Manager) AckTurnOutcome(instanceID string, turnID int64) {
 	}
 	inst.turnOutcome.Ack(turnID)
 }
+
+// ClearTurnOutcome retires the prior terminal outcome before a new prompt is
+// accepted. The prompt generation floor prevents a terminal event from an
+// older turn, still waiting in the process manager's output path, from
+// repopulating the slot after it was cleared.
+func (m *Manager) ClearTurnOutcome(instanceID string, promptGeneration uint64) {
+	inst, found := m.GetInstance(instanceID)
+	if !found {
+		return
+	}
+	inst.turnOutcome.Clear(promptGeneration)
+}

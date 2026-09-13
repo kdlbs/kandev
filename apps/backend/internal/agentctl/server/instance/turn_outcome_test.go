@@ -124,6 +124,40 @@ func TestAckTurnOutcomeOnUnknownInstanceIsANoOp(t *testing.T) {
 	mgr.AckTurnOutcome("missing", 1)
 }
 
+func TestClearTurnOutcomeRetiresPriorOutcomeAndRejectsOlderLateEvents(t *testing.T) {
+	mgr := newTurnOutcomeTestManager(t)
+	addTestInstance(t, mgr, "inst-1")
+	firstID, _ := mgr.RetainTurnOutcome("inst-1", streams.AgentEvent{
+		Type:             streams.EventTypeComplete,
+		PromptGeneration: 1,
+	})
+	if firstID == 0 {
+		t.Fatal("first retained outcome did not receive an identifier")
+	}
+
+	mgr.ClearTurnOutcome("inst-1", 2)
+	if _, hasOutcome, _ := mgr.PeekTurnOutcome("inst-1"); hasOutcome {
+		t.Fatal("ClearTurnOutcome left the prior terminal outcome retained")
+	}
+
+	mgr.RetainTurnOutcome("inst-1", streams.AgentEvent{
+		Type:             streams.EventTypeError,
+		PromptGeneration: 1,
+	})
+	if _, hasOutcome, _ := mgr.PeekTurnOutcome("inst-1"); hasOutcome {
+		t.Fatal("late terminal event from the prior generation repopulated the slot")
+	}
+
+	mgr.RetainTurnOutcome("inst-1", streams.AgentEvent{
+		Type:             streams.EventTypeComplete,
+		PromptGeneration: 2,
+	})
+	outcome, hasOutcome, _ := mgr.PeekTurnOutcome("inst-1")
+	if !hasOutcome || outcome.Event.PromptGeneration != 2 {
+		t.Fatalf("current-generation outcome = %+v, retained = %v; want generation 2", outcome, hasOutcome)
+	}
+}
+
 // TestRetainTurnOutcomeAllocatesStrictlyIncreasingIdentifiersAcrossInstances
 // pins AC-EXECUTORS-SURVIVAL-004.1: the identifier is unique across every
 // turn of every instance this control server supervises, not just within

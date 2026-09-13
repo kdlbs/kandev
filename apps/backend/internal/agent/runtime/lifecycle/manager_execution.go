@@ -1005,7 +1005,7 @@ func (m *Manager) prepareExecutionCreateRequest(
 			PreviousExecutionID:            info.AgentExecutionID,
 			AuthToken:                      authToken,
 			BootstrapNonce:                 m.revealRuntimeSecret(ctx, info.Metadata, MetadataKeyBootstrapNonceSecret),
-			AgentctlStartupConfig:          m.agentctlStartupConfig,
+			AgentctlStartupConfig:          agentctlStartupConfigForExecutor(m.agentctlStartupConfig, info.ExecutorType),
 			RemoteContributions:            remoteContributions,
 			ContributionDestinations:       contributionDestinations,
 			ManagedRuntimeVersion:          managedRuntimeVersion,

@@ -3125,6 +3125,27 @@ func (s *Service) Start(ctx context.Context) error {
 	return nil
 }
 
+// StartEventWatcher subscribes the orchestrator before lifecycle recovery.
+// Recovery can publish an agent event before Service.Start completes its
+// startup reconciliation, so those subscriptions must exist first.
+// Watcher.Start is idempotent; Service.Start can call it again at its normal
+// startup point without replacing these subscriptions.
+func (s *Service) StartEventWatcher(ctx context.Context) error {
+	if s.watcher == nil {
+		return errors.New("orchestrator event watcher is not configured")
+	}
+	return s.watcher.Start(ctx)
+}
+
+// StopEventWatcher removes subscriptions created by StartEventWatcher when a
+// later startup phase fails before Service.Start owns the watcher lifecycle.
+func (s *Service) StopEventWatcher() error {
+	if s.watcher == nil {
+		return nil
+	}
+	return s.watcher.Stop()
+}
+
 // Stop stops all orchestrator components
 func (s *Service) Stop() error {
 	s.mu.Lock()

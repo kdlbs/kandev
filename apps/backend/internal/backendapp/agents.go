@@ -25,7 +25,6 @@ import (
 )
 
 func provideLifecycleManager(
-	ctx context.Context,
 	cfg *config.Config,
 	log *logger.Logger,
 	eventBus bus.EventBus,
@@ -135,9 +134,15 @@ func provideLifecycleManager(
 	// orphan.
 	lifecycleMgr.SetExecutorRunningWriter(runningWriter)
 
+	// Install the startup recovery guard before the standalone backend gets its
+	// unstoppable-session sink. Both must refer to the same guard instance, or a
+	// failed duplicate stop can retain a different guard than the one launch
+	// admission checks.
+	lifecycleMgr.SetRecoveryGuard(startupRecoveryGuard)
+
 	// Wire recovery's bounded stop-retry budget (AC-EXECUTORS-SURVIVAL-002.13/
 	// 002.15) and the AC-EXECUTORS-SURVIVAL-002.16 unstoppable-session sink
-	// into the standalone backend before Start runs its recovery pass.
+	// into the standalone backend before recovery starts.
 	standaloneExec.SetRecoveryRetryConfig(cfg.Agentctl.RecoveryReadTimeout, cfg.Agentctl.RecoveryReadRetries)
 	standaloneExec.SetUnstoppableSessionRecorder(lifecycleMgr.RecoveryGuard())
 
@@ -213,18 +218,7 @@ func provideLifecycleManager(
 	// StopAgentWithReason needs the capability state to decide survivable
 	// detach versus terminating stop on backend shutdown.
 	lifecycleMgr.SetAgentSurvivalEnabled(cfg.Features.AgentSurvival)
-	// AC-EXECUTORS-SURVIVAL-002.8: install the guard startupRecoveryGuard
-	// already took against the recovery-inventory read at startup step 3,
-	// before this backend's control-server adoption attempt ran, so Start's
-	// own (idempotent) guard-taking observes these sessions rather than
-	// leaving them unguarded until now.
-	lifecycleMgr.SetRecoveryGuard(startupRecoveryGuard)
-
-	if err := lifecycleMgr.Start(ctx); err != nil {
-		return nil, err
-	}
-
-	log.Info("Agent Manager initialized",
+	log.Info("Agent Manager configured",
 		zap.Int("runtimes", len(executorRegistry.List())),
 		zap.Int("agent_types", len(agentRegistry.List())))
 	return lifecycleMgr, nil

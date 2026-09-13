@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/kandev/kandev/internal/secrets"
@@ -22,6 +23,9 @@ func TestStoreControlServerCredentialCreatesWhenNoExistingSecretID(t *testing.T)
 	}
 	if secretID == "" {
 		t.Fatal("secretID is empty, want a generated ID")
+	}
+	if !strings.HasPrefix(secretID, controlServerCredentialSecretIDPrefix) {
+		t.Fatalf("secretID = %q, want an internal runtime secret ID", secretID)
 	}
 
 	got, err := store.Reveal(context.Background(), secretID)

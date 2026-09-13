@@ -682,6 +682,11 @@ func (s *Server) handleWSPrompt(ctx context.Context, msg *ws.Message) *ws.Messag
 		return resp
 	}
 
+	// The retained slot belongs to the previous terminal turn. Clear it before
+	// accepting this prompt so recovery cannot replay an old completion as the
+	// result of the new turn.
+	s.procMgr.ClearTurnOutcome(req.PromptGeneration)
+
 	// Cancel any pending permissions so the agent isn't blocked waiting for
 	// the user to approve a previous tool call while processing the new prompt.
 	s.procMgr.CancelPendingPermissions()

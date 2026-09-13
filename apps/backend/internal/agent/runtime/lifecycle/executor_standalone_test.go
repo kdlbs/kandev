@@ -690,6 +690,43 @@ func TestStandaloneExecutorRecoverInstancesExhaustingLoserStopDropsAndStopsWinne
 	}
 }
 
+// TestStandaloneExecutorRecoverInstancesLoserFailureWinnerSuccessRetainsGuard
+// pins the ownership handoff when only the losing duplicate cannot be
+// stopped. A successful winner stop must not release the session guard while
+// the loser is still alive.
+func TestStandaloneExecutorRecoverInstancesLoserFailureWinnerSuccessRetainsGuard(t *testing.T) {
+	control := newStandaloneControlServer(t, true)
+	control.listInstances = []*agentctlclient.InstanceInfo{
+		{ID: "winner", Port: 5001, SessionID: "session-1"},
+		{ID: "loser", Port: 5002, SessionID: "session-1"},
+	}
+	control.deleteFailures["loser"] = 999
+	exec := control.executor(t)
+	exec.SetRecoveryRetryConfig(50*time.Millisecond, 0)
+	guard := NewRecoveryGuard()
+	guard.AcquireOrObserve("session-1")
+	exec.SetUnstoppableSessionRecorder(guard)
+
+	recovered, err := exec.RecoverInstances(context.Background(), []*models.ExecutorRunning{{
+		SessionID: "session-1", AgentExecutionID: "winner",
+	}})
+	if err != nil {
+		t.Fatalf("RecoverInstances: %v", err)
+	}
+	if len(recovered) != 0 {
+		t.Fatalf("recovered = %+v, want none", recovered)
+	}
+	if err := guard.CheckLaunchAllowed("session-1"); !errors.Is(err, ErrSessionUnstoppableAgent) {
+		t.Fatalf("guard after winner stop success = %v, want ErrSessionUnstoppableAgent", err)
+	}
+
+	control.mu.Lock()
+	defer control.mu.Unlock()
+	if len(control.deleted) != 1 || control.deleted[0] != "winner" {
+		t.Fatalf("deleted = %v, want only winner; the loser stop failed", control.deleted)
+	}
+}
+
 // TestStandaloneExecutorRecoverInstancesJointStopFailureRetainsSessionUnstoppable
 // pins AC-EXECUTORS-SURVIVAL-002.16: when both the losing duplicate's stop
 // and the winner's own stop exhaust their retries, the session is recorded

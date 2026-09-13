@@ -547,30 +547,31 @@ func (t *jointFailureTracker) onLoserStopFailed(sessionID string) {
 	}
 	once, _ := t.handled.LoadOrStore(sessionID, &sync.Once{})
 	once.(*sync.Once).Do(func() {
+		// The loser has already proved that this session cannot be made
+		// single-owner. Retain the guard before stopping the winner so a
+		// successful winner stop cannot release the protection for a still-live
+		// loser.
+		if t.exec.unstoppableRecorder != nil {
+			t.exec.unstoppableRecorder.RetainAsUnstoppable(sessionID)
+		}
 		t.exec.stopWinnerAfterLoserFailure(sessionID, winner)
 	})
 }
 
 // stopWinnerAfterLoserFailure stops a session's winning instance on the same
 // bounded retry terms after one of its losing duplicates could not be
-// stopped; on failure it reports the session to the installed
-// UnstoppableSessionRecorder (AC-EXECUTORS-SURVIVAL-002.16). Always runs to
-// completion once started, even past the recovery deadline
-// (AC-EXECUTORS-SURVIVAL-003.7).
+// stopped. The caller retains the session guard before entering this method,
+// and that retention survives either winner-stop result (AC-EXECUTORS-
+// SURVIVAL-002.16). Always runs to completion once started, even past the
+// recovery deadline (AC-EXECUTORS-SURVIVAL-003.7).
 func (r *StandaloneExecutor) stopWinnerAfterLoserFailure(sessionID string, winner *agentctl.InstanceInfo) {
 	if err := r.stopWithRetry(context.Background(), winner.ID); err != nil {
 		r.logger.Warn("failed to stop the winning instance after its losing duplicate could not be stopped; retaining session as unstoppable",
 			zap.String("instance_id", winner.ID), zap.String("session_id", sessionID), zap.Error(err))
-		if r.unstoppableRecorder != nil {
-			r.unstoppableRecorder.RetainAsUnstoppable(sessionID)
-		}
 		return
 	}
 	r.logger.Warn("stopped the winning instance because its losing duplicate could not be stopped; session left not re-tracked",
 		zap.String("instance_id", winner.ID), zap.String("session_id", sessionID))
-	if r.unstoppableRecorder != nil {
-		r.unstoppableRecorder.Release(sessionID)
-	}
 }
 
 // indexRecordsBySession maps every named recovery-inventory record by

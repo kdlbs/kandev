@@ -12,6 +12,13 @@ type TurnOutcomeRecorder interface {
 	RetainTurnOutcome(instanceID string, event adapter.AgentEvent) (turnID int64, ok bool)
 }
 
+// turnOutcomeClearer is an optional extension implemented by the instance
+// manager. A new prompt retires the previous terminal outcome before it can
+// be mistaken for the prompt that is now in flight after a backend restart.
+type turnOutcomeClearer interface {
+	ClearTurnOutcome(instanceID string, promptGeneration uint64)
+}
+
 // SetTurnOutcomeRecorder wires the instance-level outcome retention sink for
 // this process manager. Called once by instance.Manager.CreateInstance right
 // after constructing the process manager and before Start can be reached
@@ -24,6 +31,21 @@ func (m *Manager) SetTurnOutcomeRecorder(instanceID string, recorder TurnOutcome
 	defer m.mu.Unlock()
 	m.turnOutcomeInstanceID = instanceID
 	m.turnOutcomeRecorder = recorder
+}
+
+// ClearTurnOutcome retires the previous terminal outcome before a new prompt
+// is dispatched. The generation floor also rejects a late delivery of an
+// older terminal event that races this clear operation.
+func (m *Manager) ClearTurnOutcome(promptGeneration uint64) {
+	m.mu.RLock()
+	recorder := m.turnOutcomeRecorder
+	instanceID := m.turnOutcomeInstanceID
+	m.mu.RUnlock()
+	clearer, ok := recorder.(turnOutcomeClearer)
+	if !ok {
+		return
+	}
+	clearer.ClearTurnOutcome(instanceID, promptGeneration)
 }
 
 // recordTerminalOutcome retains event if it is one of the two terminal event

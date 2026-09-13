@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/secrets"
 )
 
@@ -14,6 +16,8 @@ import (
 // models.ControlServerRecord.CredentialSecretID -- so a fixed, non-unique
 // name is safe.
 const controlServerCredentialSecretName = "agent-survival-control-server-credential"
+
+const controlServerCredentialSecretIDPrefix = "kandev-runtime:control-server:"
 
 // storeControlServerCredential durably stores the control server's ownership
 // credential and returns the secret ID that
@@ -40,7 +44,11 @@ func storeControlServerCredential(ctx context.Context, store secrets.SecretStore
 		return "", errors.New("control server credential is required")
 	}
 
-	if existingSecretID != "" {
+	// Older installations used a generated, user-visible secret ID. Do not
+	// update that row during rotation because it would expose the control-server
+	// bearer credential through the user secret APIs. New and migrated rows use
+	// the internal runtime prefix and remain hidden by UserVisibleStore.
+	if isControlServerCredentialSecretID(existingSecretID) {
 		reused, err := tryReuseCredentialSecret(ctx, store, existingSecretID, token)
 		if err != nil {
 			return "", err
@@ -51,13 +59,20 @@ func storeControlServerCredential(ctx context.Context, store secrets.SecretStore
 	}
 
 	secret := &secrets.SecretWithValue{
-		Secret: secrets.Secret{Name: controlServerCredentialSecretName},
-		Value:  token,
+		Secret: secrets.Secret{
+			ID:   controlServerCredentialSecretIDPrefix + uuid.NewString(),
+			Name: controlServerCredentialSecretName,
+		},
+		Value: token,
 	}
 	if err := store.Create(ctx, secret); err != nil {
 		return "", err
 	}
 	return secret.ID, nil
+}
+
+func isControlServerCredentialSecretID(id string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(id)), controlServerCredentialSecretIDPrefix)
 }
 
 // tryReuseCredentialSecret overwrites existingSecretID in place with token

@@ -605,7 +605,6 @@ func startAgentInfrastructure(
 	// AGENT MANAGER
 	// ============================================
 	lifecycleMgr, err := provideLifecycleManager(
-		ctx,
 		cfg,
 		log,
 		eventBus,
@@ -710,11 +709,8 @@ func startAgentInfrastructure(
 	}
 	services.Task.SetWorkflowMovePreflight(orchestratorSvc)
 	orchestratorSvc.SetAgentctlBinaryPath(agentctlBinaryPath)
-	// AC-EXECUTORS-SURVIVAL-003.1: lifecycleMgr.Start already ran
-	// synchronously inside provideLifecycleManager above, so every session's
-	// re-tracking outcome is already decided by the time orchestratorSvc.Start
-	// (called later, from startGatewayAndServe) runs its own startup
-	// reconciliation and consults this checker.
+	// The checker is populated by lifecycleMgr.Start below before the
+	// orchestrator's startup reconciliation runs.
 	orchestratorSvc.SetRetrackedSessionChecker(lifecycleMgr.WasSessionRetracked)
 	orchestratorSvc.SetRouteActionHandler(dynamicRouteActionHandler(
 		repos.Task,
@@ -889,6 +885,22 @@ func startAgentInfrastructure(
 	// and replaces the shared database pool. A five-minute sweep pass
 	// overlapping that would race the pool swap.
 	databaseQuiesce = addRuntimeCleanup(deliveryCleanup)
+
+	// Recovery publishes agent events synchronously. Subscribe the orchestrator
+	// after all event-handler dependencies are wired, but before lifecycle
+	// recovery, so a retained terminal outcome cannot be published into an empty
+	// in-memory bus while Service.Start is still doing its startup reconciliation.
+	// Service.Start calls Watcher.Start again; the watcher is idempotent and keeps
+	// these subscriptions.
+	if err := orchestratorSvc.StartEventWatcher(ctx); err != nil {
+		log.Error("Failed to start orchestrator event watcher for agent recovery", zap.Error(err))
+		return false
+	}
+	if err := lifecycleMgr.Start(ctx); err != nil {
+		_ = orchestratorSvc.StopEventWatcher()
+		log.Error("Failed to recover agent manager", zap.Error(err))
+		return false
+	}
 
 	return startGatewayAndServe(ctx, cfg, log, eventBus, agentRuntimeAvailability, dbPool, repos, services,
 		agentSettingsController, lifecycleMgr, agentRegistry, orchestratorSvc, msgCreator, repoCloner, agentctlBinaryPath,

@@ -26,8 +26,9 @@ type TurnOutcome struct {
 // state at re-track time, and design 03 explicitly leaves applying that one
 // state as the whole job of AC-EXECUTORS-SURVIVAL-004.2.
 type turnOutcomeState struct {
-	mu       sync.Mutex
-	retained *TurnOutcome
+	mu                      sync.Mutex
+	retained                *TurnOutcome
+	minimumPromptGeneration uint64
 }
 
 // Retain records event as the instance's new last terminal outcome under
@@ -36,6 +37,9 @@ type turnOutcomeState struct {
 func (s *turnOutcomeState) Retain(turnID int64, event streams.AgentEvent) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if event.PromptGeneration != 0 && event.PromptGeneration < s.minimumPromptGeneration {
+		return
+	}
 	s.retained = &TurnOutcome{TurnID: turnID, Event: event}
 }
 
@@ -61,5 +65,17 @@ func (s *turnOutcomeState) Ack(turnID int64) {
 	defer s.mu.Unlock()
 	if s.retained != nil && s.retained.TurnID == turnID {
 		s.retained = nil
+	}
+}
+
+// Clear retires the current outcome and records the generation of the prompt
+// that follows it. Terminal events from older generations are ignored when
+// they arrive late through the process manager's output path.
+func (s *turnOutcomeState) Clear(promptGeneration uint64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.retained = nil
+	if promptGeneration > s.minimumPromptGeneration {
+		s.minimumPromptGeneration = promptGeneration
 	}
 }

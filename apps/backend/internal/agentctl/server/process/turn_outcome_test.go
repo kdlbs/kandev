@@ -12,7 +12,8 @@ import (
 // standing in for instance.Manager without importing it (process must not
 // import instance, which already imports process).
 type fakeTurnOutcomeRecorder struct {
-	calls []fakeTurnOutcomeCall
+	calls      []fakeTurnOutcomeCall
+	clearCalls []fakeTurnOutcomeClearCall
 }
 
 type fakeTurnOutcomeCall struct {
@@ -20,9 +21,37 @@ type fakeTurnOutcomeCall struct {
 	event      adapter.AgentEvent
 }
 
+type fakeTurnOutcomeClearCall struct {
+	instanceID       string
+	promptGeneration uint64
+}
+
 func (f *fakeTurnOutcomeRecorder) RetainTurnOutcome(instanceID string, event adapter.AgentEvent) (int64, bool) {
 	f.calls = append(f.calls, fakeTurnOutcomeCall{instanceID: instanceID, event: event})
 	return int64(len(f.calls)), true
+}
+
+func (f *fakeTurnOutcomeRecorder) ClearTurnOutcome(instanceID string, promptGeneration uint64) {
+	f.clearCalls = append(f.clearCalls, fakeTurnOutcomeClearCall{
+		instanceID:       instanceID,
+		promptGeneration: promptGeneration,
+	})
+}
+
+func TestClearTurnOutcomeForwardsPromptGenerationToRecorder(t *testing.T) {
+	recorder := &fakeTurnOutcomeRecorder{}
+	m := &Manager{}
+	m.SetTurnOutcomeRecorder("instance-1", recorder)
+
+	m.ClearTurnOutcome(9)
+
+	if len(recorder.clearCalls) != 1 {
+		t.Fatalf("clear calls = %d, want 1", len(recorder.clearCalls))
+	}
+	call := recorder.clearCalls[0]
+	if call.instanceID != "instance-1" || call.promptGeneration != 9 {
+		t.Fatalf("clear call = %+v, want instance-1/generation-9", call)
+	}
 }
 
 // TestRecordTerminalOutcomeRetainsCompleteAndErrorEvents pins
