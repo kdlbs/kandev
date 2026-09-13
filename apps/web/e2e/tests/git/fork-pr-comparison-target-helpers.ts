@@ -454,5 +454,6 @@ function listenComparisonTargetServer(server: Server): Promise<number> {
 function closeComparisonTargetServer(server: Server): Promise<void> {
   return new Promise((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()));
+    server.closeAllConnections();
   });
 }
