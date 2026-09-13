@@ -10,7 +10,7 @@
  * indicators, so nothing here participates in composing or sending a message.
  */
 
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { WorkflowMoveProceedButton } from "@/components/task/workflow-move-proceed-button";
 import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
@@ -32,7 +32,6 @@ import { shouldShowProceed } from "./types";
 import { getAgentGoal } from "@/lib/agent-goal";
 import { useComposerDisclosureContext } from "./composer-disclosure";
 import { cn } from "@/lib/utils";
-import type { AppState } from "@/lib/state/app-state-types";
 
 type TodoDisplayItem = {
   text: string;
@@ -79,15 +78,6 @@ function readACPMetadata(metadata: Record<string, unknown> | null | undefined): 
   const acp = metadata?.acp;
   if (!acp || typeof acp !== "object" || Array.isArray(acp)) return undefined;
   return (acp as Record<string, unknown>).meta;
-}
-
-function getActiveAgentGoal(
-  state: AppState,
-  sessionId: string | null,
-): ReturnType<typeof getAgentGoal> {
-  if (!sessionId) return null;
-  const goal = getAgentGoal(readACPMetadata(state.taskSessions.items[sessionId]?.metadata));
-  return goal?.status === "active" ? goal : null;
 }
 
 function getRightControlVisibility({
@@ -188,7 +178,13 @@ export function ChatStatusBar({
   // Asked here rather than inside the button so the cluster still renders when
   // the Threads jump is the only right-hand control this session qualifies for.
   const showThreadsLink = useIsDeckThread(taskId, sessionId);
-  const activeGoal = useAppStore((state) => getActiveAgentGoal(state, sessionId));
+  const activeGoalMetadata = useAppStore((state) =>
+    sessionId ? readACPMetadata(state.taskSessions.items[sessionId]?.metadata) : undefined,
+  );
+  const activeGoal = useMemo(() => {
+    const goal = getAgentGoal(activeGoalMetadata);
+    return goal?.status === "active" ? goal : null;
+  }, [activeGoalMetadata]);
   const { canShare, showRightControls } = getRightControlVisibility({
     taskId,
     sessionId,

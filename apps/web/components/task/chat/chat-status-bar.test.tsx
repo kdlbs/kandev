@@ -1,35 +1,50 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
-import type { ComponentProps } from "react";
+import { useSyncExternalStore, type ComponentProps } from "react";
 import { ChatStatusBar, shouldRenderChatStatusBar } from "./chat-status-bar";
 
-const mockState = {
-  userSettings: { showTranscriptAutoScrollControl: false },
-  taskSessions: {
-    items: {
-      "session-1": {
-        id: "session-1",
-        task_id: "",
-        state: "IDLE",
-        metadata: {
-          acp: {
-            meta: {
-              goal: {
-                objective: "Coordinate contributor PR reviews",
-                status: "active",
-                createdAt: 10,
-                updatedAt: 20,
+const statusStore = vi.hoisted(() => {
+  const state = {
+    userSettings: { showTranscriptAutoScrollControl: false },
+    taskSessions: {
+      items: {
+        "session-1": {
+          id: "session-1",
+          task_id: "",
+          state: "IDLE",
+          metadata: {
+            acp: {
+              meta: {
+                goal: {
+                  objective: "Coordinate contributor PR reviews",
+                  status: "active",
+                  createdAt: 10,
+                  updatedAt: 20,
+                },
               },
             },
           },
         },
       },
     },
-  },
-};
+  };
+  const listeners = new Set<() => void>();
+  return {
+    state,
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+  };
+});
 
 vi.mock("@/components/state-provider", () => ({
-  useAppStore: (selector: (state: typeof mockState) => unknown) => selector(mockState),
+  useAppStore: <T,>(selector: (state: typeof statusStore.state) => T) =>
+    useSyncExternalStore(
+      statusStore.subscribe,
+      () => selector(statusStore.state),
+      () => selector(statusStore.state),
+    ),
 }));
 
 vi.mock("@/components/task/workflow-move-proceed-button", () => ({
