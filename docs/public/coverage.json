@@ -216,7 +216,9 @@
         "apps/backend/internal/mcp/server/question_handlers.go",
         "apps/backend/internal/mcp/handlers/question_handlers.go",
         "apps/backend/internal/clarification/resolver.go",
-        "apps/web/components/task/dockview-session-tabs.ts"
+        "apps/web/components/task/dockview-session-tabs.ts",
+        "apps/web/components/threads/thread-task-actions.tsx",
+        "apps/web/components/task/task-management-surface.tsx"
       ],
       "tests": [
         "apps/backend/internal/mcp/handlers/spawn_session_test.go",
@@ -224,7 +226,9 @@
         "apps/backend/internal/mcp/handlers/agent_permissions_test.go",
         "apps/backend/internal/integration/agent_permission_mcp_test.go",
         "apps/backend/internal/mcp/server/external_integration_test.go",
-        "apps/web/components/task/dockview-session-tabs.test.ts"
+        "apps/web/components/task/dockview-session-tabs.test.ts",
+        "apps/web/e2e/tests/task/threads-task-actions.spec.ts",
+        "apps/web/e2e/tests/task/mobile-threads-task-actions.spec.ts"
       ],
       "mcpTools": [
         "answer_question_kandev",

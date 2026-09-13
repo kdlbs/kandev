@@ -19,6 +19,10 @@ import {
 } from "@/hooks/use-clarification-escape-guard";
 import { ConfigChatSetup } from "@/components/config-chat/config-chat-setup";
 import { useConfigChat } from "@/components/config-chat/use-config-chat";
+import {
+  MobileConfirmationHost,
+  MobileConfirmationHostBody,
+} from "@/components/confirmation/mobile-confirmation-host";
 
 const QuickTerminalTabView = dynamic(
   () => import("./quick-terminal-tab-view").then((module) => module.QuickTerminalTabView),
@@ -174,41 +178,52 @@ export const QuickChatModal = memo(function QuickChatModal({ workspaceId }: Quic
   );
   return (
     <ClarificationEscapeGuardProvider value={escapeGuardRegistry}>
-      <Dialog open={quickChat.isOpen} onOpenChange={quickChat.handleOpenChange}>
-        <DialogContent
-          className="!left-0 !top-0 !h-dvh !max-h-dvh !w-screen !max-w-none !translate-x-0 !translate-y-0 flex flex-col gap-0 p-0 pt-safe pb-safe shadow-2xl sm:!left-1/2 sm:!top-1/2 sm:!h-[85vh] sm:!max-h-[85vh] sm:!w-[var(--quick-chat-width)] sm:!max-w-[calc(100vw-2rem)] sm:!-translate-x-1/2 sm:!-translate-y-1/2"
-          style={{ "--quick-chat-width": `${width}px` } as CSSProperties}
-          showCloseButton={false}
-          overlayClassName="bg-black/20 sm:bg-black/40 sm:backdrop-blur-sm"
-          onEscapeKeyDown={(event) => {
-            // A pending, expanded clarification (or an open suggestion popup,
-            // or the reverse-search overlay) handles this Escape itself and
-            // the modal stays open -- but only when that widget's own guard
-            // predicate reports it will actually act on this exact keydown
-            // (matching its enabled/scope/modifier state), so Escape never
-            // goes silently swallowed with nothing left to handle it. Once no
-            // guard claims it (e.g. a second, now-unguarded Escape), the modal
-            // closes, matching the main task chat panel's two-stage Escape
-            // after #2729.
-            for (const test of escapeGuardsRef.current.values()) {
-              if (test(event)) {
-                event.preventDefault();
-                break;
-              }
-            }
-          }}
-        >
-          <DialogTitle className="sr-only">{t("common:commandQuickChat")}</DialogTitle>
-          <QuickChatResizeHandle edge="left" {...leftResizeHandleProps} />
-          <QuickChatResizeHandle edge="right" {...rightResizeHandleProps} />
-          <QuickChatContent
-            workspaceId={workspaceId}
-            configChat={configChat}
-            quickChat={quickChat}
-            setQuickChatInitialPrompt={setQuickChatInitialPrompt}
-          />
-        </DialogContent>
-      </Dialog>
+      <MobileConfirmationHost open={quickChat.isOpen} key={workspaceId}>
+        {({ contentProps }) => (
+          <Dialog open={quickChat.isOpen} onOpenChange={quickChat.handleOpenChange}>
+            <DialogContent
+              {...contentProps}
+              className="!left-0 !top-0 !h-dvh !max-h-dvh !w-screen !max-w-none !translate-x-0 !translate-y-0 flex flex-col gap-0 p-0 pt-safe pb-safe shadow-2xl sm:!left-1/2 sm:!top-1/2 sm:!h-[85vh] sm:!max-h-[85vh] sm:!w-[var(--quick-chat-width)] sm:!max-w-[calc(100vw-2rem)] sm:!-translate-x-1/2 sm:!-translate-y-1/2"
+              style={{ "--quick-chat-width": `${width}px` } as CSSProperties}
+              showCloseButton={false}
+              overlayClassName="bg-black/20 sm:bg-black/40 sm:backdrop-blur-sm"
+              onEscapeKeyDown={(event) => {
+                if (contentProps.onEscapeKeyDown) {
+                  contentProps.onEscapeKeyDown(event);
+                  return;
+                }
+                // A pending, expanded clarification (or an open suggestion popup,
+                // or the reverse-search overlay) handles this Escape itself and
+                // the modal stays open -- but only when that widget's own guard
+                // predicate reports it will actually act on this exact keydown
+                // (matching its enabled/scope/modifier state), so Escape never
+                // goes silently swallowed with nothing left to handle it. Once no
+                // guard claims it (e.g. a second, now-unguarded Escape), the modal
+                // closes, matching the main task chat panel's two-stage Escape
+                // after #2729.
+                for (const test of escapeGuardsRef.current.values()) {
+                  if (test(event)) {
+                    event.preventDefault();
+                    break;
+                  }
+                }
+              }}
+            >
+              <MobileConfirmationHostBody>
+                <DialogTitle className="sr-only">{t("common:commandQuickChat")}</DialogTitle>
+                <QuickChatResizeHandle edge="left" {...leftResizeHandleProps} />
+                <QuickChatResizeHandle edge="right" {...rightResizeHandleProps} />
+                <QuickChatContent
+                  workspaceId={workspaceId}
+                  configChat={configChat}
+                  quickChat={quickChat}
+                  setQuickChatInitialPrompt={setQuickChatInitialPrompt}
+                />
+              </MobileConfirmationHostBody>
+            </DialogContent>
+          </Dialog>
+        )}
+      </MobileConfirmationHost>
 
       <QuickChatDeleteDialog
         sessionToDelete={quickChat.sessionToClose}

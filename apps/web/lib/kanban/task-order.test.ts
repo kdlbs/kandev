@@ -313,4 +313,23 @@ describe("sortIdsByDisplayOrder", () => {
       }),
     ).toEqual(["p2", "p1"]);
   });
+
+  it("applies within-step ordering when all step indices are unknown", () => {
+    const pipelineTaskById = new Map([
+      ["low", { id: "low", workflowStepId: "hidden", position: 0, priority: "low" as const }],
+      [
+        "critical",
+        { id: "critical", workflowStepId: "hidden", position: 1, priority: "critical" as const },
+      ],
+    ]);
+    const stepIndexOf = () => Infinity;
+
+    expect(
+      sortIdsByDisplayOrder(["low", "critical"], pipelineTaskById, {
+        sortToken: "priority_desc",
+        isPipelineView: true,
+        stepIndexOf,
+      }),
+    ).toEqual(["critical", "low"]);
+  });
 });

@@ -89,7 +89,7 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
     }
   });
 
-  test("discovers, reviews, and operates the first task canvas from the workbench", async ({
+  test("discovers and operates an owner-created task canvas from the workbench", async ({
     testPage,
     apiClient,
     backend,
@@ -119,28 +119,11 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
           { timeout: 20_000 },
         )
         .toBe(1);
-      await expect(testPage.getByTestId("canvas-host-state")).toHaveText(
-        "Permission review required",
-      );
-      await testPage.getByRole("button", { name: "Releases and permissions", exact: true }).click();
-
-      const releasesDialog = testPage.getByTestId("canvas-releases-dialog");
-      await expect(releasesDialog).toBeVisible();
-      await expect(
-        releasesDialog.getByTestId(
-          `canvas-release-permissions-${seeded.canvas.pending_release?.id}`,
-        ),
-      ).toBeVisible();
-      await releasesDialog.getByRole("button", { name: "Approve release", exact: true }).click();
-      const closeReleasesDialog = releasesDialog
-        .locator('[data-slot="dialog-footer"]')
-        .getByRole("button", { name: "Close", exact: true });
-      await expect(closeReleasesDialog).toBeVisible();
-      await closeReleasesDialog.click();
-
       await expect(testPage.getByTestId("canvas-host-state")).toHaveText("Ready", {
         timeout: 20_000,
       });
+      expect(seeded.canvas.pending_release).toBeUndefined();
+      expect(seeded.canvas.active_release_status).toBe("valid");
       await expect(testPage.getByTestId("web-app-frame")).toHaveAttribute(
         "data-frame-state",
         "ready",
@@ -311,6 +294,52 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
         .poll(() => fixture.getByTestId("canvas-fixture-appearance-background").textContent())
         .not.toBe(lightBackground);
     } finally {
+      if (canvasId) await removeCanvas(apiClient, canvasId);
+      await releaseFeature();
+    }
+  });
+
+  test("shows recoverable startup failure and retries with a fresh runtime", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+
+    const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
+    let contextFailures = 0;
+    await testPage.route("**/_kandev/v1/context", async (route) => {
+      if (contextFailures === 0) {
+        contextFailures += 1;
+        await route.abort();
+        return;
+      }
+      await route.continue();
+    });
+    let canvasId: string | undefined;
+    try {
+      const seeded = await seedTaskCanvas(testPage, apiClient, seedData);
+      canvasId = seeded.canvas.id;
+
+      await expect(testPage.getByTestId("canvas-host-state")).toHaveText("Canvas unavailable", {
+        timeout: 20_000,
+      });
+      await expect(testPage.getByTestId("web-app-frame")).toHaveCount(0);
+      await expect(testPage.getByRole("button", { name: "Try again", exact: true })).toBeVisible();
+
+      await testPage.getByRole("button", { name: "Try again", exact: true }).click();
+      await expect(testPage.getByTestId("canvas-host-state")).toHaveText("Ready", {
+        timeout: 20_000,
+      });
+      await expect(testPage.getByTestId("web-app-frame")).toHaveAttribute(
+        "data-frame-state",
+        "ready",
+        { timeout: 20_000 },
+      );
+      expect(contextFailures).toBe(1);
+    } finally {
+      await testPage.unroute("**/_kandev/v1/context");
       if (canvasId) await removeCanvas(apiClient, canvasId);
       await releaseFeature();
     }

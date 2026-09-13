@@ -4,7 +4,7 @@ import { buildTaskActionsMenuEntries } from "./task-actions-menu-entries";
 import type { KanbanCardMenuEntry } from "@/components/kanban-card-menu-items";
 
 const PLUGIN_ID = "test-task-actions-menu-plugin";
-const DELETE_SEPARATOR = "delete-separator";
+const REMOVE_SEPARATOR = "remove-separator";
 
 function itemKeys(entries: KanbanCardMenuEntry[]): string[] {
   return entries.map((entry) => entry.key);
@@ -59,14 +59,17 @@ describe("buildTaskActionsMenuEntries — normal tier", () => {
   it("presents the full card order for a resolved, unarchived subject", () => {
     const entries = buildTaskActionsMenuEntries("normal", baseArgs);
     expect(itemKeys(entries)).toEqual([
-      "edit",
       "priority",
+      "edit-separator",
+      "edit",
+      "relationships-separator",
+      "link",
+      "detach",
+      "move-separator",
       "move-to",
       "send-to-workflow",
-      "link",
+      REMOVE_SEPARATOR,
       "archive",
-      "detach",
-      DELETE_SEPARATOR,
       "delete",
     ]);
   });
@@ -129,7 +132,7 @@ describe("buildTaskActionsMenuEntries — archived tier", () => {
     const entries = buildTaskActionsMenuEntries("archived", baseArgs);
     expect(itemKeys(entries)).toEqual([
       `plugin-primary-${PLUGIN_ID}-primary-action`,
-      DELETE_SEPARATOR,
+      REMOVE_SEPARATOR,
       "delete",
     ]);
   });
@@ -148,7 +151,7 @@ describe("buildTaskActionsMenuEntries — unresolved board row tier", () => {
 
   it("presents only Archive and Delete when no plugin action is admitted", () => {
     const entries = buildTaskActionsMenuEntries("unresolved-row", baseArgs);
-    expect(itemKeys(entries)).toEqual(["archive", DELETE_SEPARATOR, "delete"]);
+    expect(itemKeys(entries)).toEqual(["archive", "delete"]);
   });
 
   it("orders admitted plugin primary actions before Archive", () => {
@@ -162,8 +165,8 @@ describe("buildTaskActionsMenuEntries — unresolved board row tier", () => {
     const entries = buildTaskActionsMenuEntries("unresolved-row", baseArgs);
     expect(itemKeys(entries)).toEqual([
       `plugin-primary-${PLUGIN_ID}-primary-action`,
+      REMOVE_SEPARATOR,
       "archive",
-      DELETE_SEPARATOR,
       "delete",
     ]);
   });

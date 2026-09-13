@@ -44,6 +44,7 @@ function ModelRow({
       keywords={[model.name, model.description ?? "", model.id]}
       onSelect={() => !model.disabled && onSelect(model.id)}
       disabled={model.disabled}
+      aria-label={model.name}
       data-testid={selected ? "model-config-selected-row" : undefined}
       className={selectorOptions.selectorOptionClassName(selected, model.disabled)}
     >

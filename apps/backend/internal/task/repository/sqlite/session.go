@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryclaim"
 )
 
 type taskSessionExecutor interface {
@@ -677,6 +678,9 @@ func (r *Repository) createTaskSessionWithWorkspaceBinding(
 	default:
 		return fmt.Errorf("%w: existing task environment is not attachable", models.ErrWorkspaceReuseUnsafe)
 	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, session.TaskEnvironmentID); err != nil {
+		return err
+	}
 
 	if err := r.applyInitialRuntimeSeedTx(ctx, tx, session); err != nil {
 		return err
@@ -775,6 +779,9 @@ func (r *Repository) createTaskSessionWithSharedGroupWorkspaceBinding(
 		return err
 	}
 	session.TaskEnvironmentID = candidate.ID
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, session.TaskEnvironmentID); err != nil {
+		return err
+	}
 	if err := r.applyInitialRuntimeSeedTx(ctx, tx, session); err != nil {
 		return err
 	}
@@ -816,6 +823,9 @@ func (r *Repository) bindReadySharedGroupEnvironment(
 		return fmt.Errorf("%w: retry after the shared workspace launch completes", models.ErrWorkspacePreparing)
 	default:
 		return fmt.Errorf("%w: shared workspace is not attachable", models.ErrWorkspaceReuseUnsafe)
+	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, session.TaskEnvironmentID); err != nil {
+		return err
 	}
 	if err := r.applyInitialRuntimeSeedTx(ctx, tx, session); err != nil {
 		return err
@@ -859,6 +869,9 @@ func (r *Repository) failAbandonedWorkspaceMaterialization(
 	}
 	if !abandoned {
 		return false, nil
+	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
+		return false, err
 	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_environments
@@ -1020,6 +1033,11 @@ func (r *Repository) createTaskSession(ctx context.Context, exec taskSessionExec
 		session.State = models.TaskSessionStateCreated
 	}
 	if tx, ok := exec.(*sqlx.Tx); ok {
+		if session.TaskEnvironmentID != "" {
+			if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, session.TaskEnvironmentID); err != nil {
+				return err
+			}
+		}
 		if err := r.prepareWorkflowInitialSessionTx(ctx, tx, session); err != nil {
 			return err
 		}
@@ -1587,7 +1605,15 @@ func (r *Repository) ListNonTerminalSessionsByAgentInstance(ctx context.Context,
 // Use UpdateSessionMetadata for metadata changes.
 func (r *Repository) UpdateTaskSession(ctx context.Context, session *models.TaskSession) error {
 	session.UpdatedAt = time.Now().UTC()
-	return r.updateTaskSession(ctx, r.db, session)
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.updateTaskSession(ctx, tx, session); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // UpdateTaskSessionIfCurrentState persists a full session row only while the
@@ -1600,7 +1626,19 @@ func (r *Repository) UpdateTaskSessionIfCurrentState(
 	expected models.TaskSessionState,
 ) (bool, error) {
 	session.UpdatedAt = time.Now().UTC()
-	return r.updateTaskSessionWithStateGuard(ctx, r.db, session, &expected)
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	changed, err := r.updateTaskSessionWithStateGuard(ctx, tx, session, &expected)
+	if err != nil || !changed {
+		return changed, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // UpdateTaskSessionIfCurrentStateRemovingMetadataKeys persists a full session
@@ -1725,6 +1763,11 @@ func (r *Repository) updateTaskSessionWithStateGuard(
 	session *models.TaskSession,
 	expected *models.TaskSessionState,
 ) (bool, error) {
+	if tx, ok := exec.(*sqlx.Tx); ok {
+		if err := r.ensureTaskSessionEnvironmentAvailableTx(ctx, tx, session.ID, session.TaskEnvironmentID); err != nil {
+			return false, err
+		}
+	}
 	agentProfileSnapshotJSON, err := json.Marshal(session.AgentProfileSnapshot)
 	if err != nil {
 		return false, fmt.Errorf("failed to serialize agent profile snapshot: %w", err)
@@ -1785,6 +1828,37 @@ func (r *Repository) updateTaskSessionWithStateGuard(
 		return false, err
 	}
 	return rows > 0, nil
+}
+
+// ensureTaskSessionEnvironmentAvailableTx protects full-row session updates
+// that can attach a session to an environment. The current environment and a
+// newly supplied environment are both checked because a stale session object
+// can otherwise move an environment pointer through an active recovery claim.
+func (r *Repository) ensureTaskSessionEnvironmentAvailableTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	sessionID, nextEnvironmentID string,
+) error {
+	var current sql.NullString
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+		SELECT task_environment_id FROM task_sessions WHERE id = ?
+	`), sessionID).Scan(&current); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	if current.Valid && current.String != "" {
+		if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, current.String); err != nil {
+			return err
+		}
+	}
+	if nextEnvironmentID != "" && (!current.Valid || current.String != nextEnvironmentID) {
+		if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, nextEnvironmentID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // RenameTaskSession updates just the user-supplied name of an agent session.
@@ -3245,6 +3319,13 @@ func (r *Repository) DeleteTaskSessionWithAttachments(
 	if err := r.confirmTaskSessionDeletionIdentityTx(ctx, tx, session); err != nil {
 		return nil, err
 	}
+	var environmentID string
+	if err := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT COALESCE(task_environment_id, '') FROM task_sessions WHERE id = ?`), session.ID).Scan(&environmentID); err != nil {
+		return nil, fmt.Errorf("load deleted session environment: %w", err)
+	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, r.db, tx, environmentID); err != nil {
+		return nil, err
+	}
 	deletedAttachments, err := r.purgeTaskSessionStateTx(ctx, tx, session)
 	if err != nil {
 		return nil, err
@@ -3410,13 +3491,23 @@ func (r *Repository) ListTaskSessionWorktrees(ctx context.Context, sessionID str
 // than the value captured at worktree creation.
 func (r *Repository) UpdateTaskSessionWorktreeBranch(ctx context.Context, sessionID, branch string) error {
 	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensureTaskSessionEnvironmentAvailableTx(ctx, tx, sessionID, ""); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_environment_repos SET worktree_branch = ?, updated_at = ?
 		WHERE task_environment_id = (SELECT task_environment_id FROM task_sessions WHERE id = ?)
 		  AND deleted_at IS NULL
 		  AND status = 'active'
-	`), branch, now, sessionID)
-	return err
+	`), branch, now, sessionID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // UpdateTaskSessionWorktreeBranchByRepository updates the cached worktree_branch
@@ -3425,15 +3516,25 @@ func (r *Repository) UpdateTaskSessionWorktreeBranch(ctx context.Context, sessio
 // branch snapshots.
 func (r *Repository) UpdateTaskSessionWorktreeBranchByRepository(ctx context.Context, sessionID, repositoryID, branch string) error {
 	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensureTaskSessionEnvironmentAvailableTx(ctx, tx, sessionID, ""); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_environment_repos
 		SET worktree_branch = ?, updated_at = ?
 		WHERE task_environment_id = (SELECT task_environment_id FROM task_sessions WHERE id = ?)
 		  AND repository_id = ?
 		  AND deleted_at IS NULL
 		  AND status = 'active'
-	`), branch, now, sessionID, repositoryID)
-	return err
+	`), branch, now, sessionID, repositoryID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // UpdateTaskSessionWorktreeBranchByWorktree updates exactly one worktree row.
@@ -3441,15 +3542,25 @@ func (r *Repository) UpdateTaskSessionWorktreeBranchByRepository(ctx context.Con
 // branches from the same repository.
 func (r *Repository) UpdateTaskSessionWorktreeBranchByWorktree(ctx context.Context, sessionID, worktreeID, branch string) error {
 	now := time.Now().UTC()
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.ensureTaskSessionEnvironmentAvailableTx(ctx, tx, sessionID, ""); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_environment_repos
 		SET worktree_branch = ?, updated_at = ?
 		WHERE task_environment_id = (SELECT task_environment_id FROM task_sessions WHERE id = ?)
 		  AND worktree_id = ?
 		  AND deleted_at IS NULL
 		  AND status = 'active'
-	`), branch, now, sessionID, worktreeID)
-	return err
+	`), branch, now, sessionID, worktreeID); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // ListWorktreesBySessionIDs returns the active environment-repository rows for

@@ -10,6 +10,7 @@ import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { revealSecret } from "@/lib/api/domains/secrets-api";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import { SecretDeleteConfirmation } from "./secrets-delete-dialog";
+import { useConfirmationBoundary } from "@/components/confirmation/mobile-action-confirmation";
 
 type SecretListItemRowProps = {
   secret: SecretListItem;
@@ -77,7 +78,10 @@ export function SecretListItemRow({
   isDeleteBlocked = false,
 }: SecretListItemRowProps) {
   const { t } = useTranslation();
-  const { isFinePointer } = useResponsiveBreakpoint();
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
+  useConfirmationBoundary(isDeleteConfirming, `${workspaceId}:${secret.id}`, () =>
+    onDeleteCancel(),
+  );
   const [revealed, setRevealed] = useState(false);
   const [revealedValue, setRevealedValue] = useState<string | null>(null);
   const [revealing, setRevealing] = useState(false);
@@ -134,7 +138,7 @@ export function SecretListItemRow({
           isDeleteConfirming={isDeleteConfirming}
           isDeleteLoading={isDeleteLoading}
           isDeleteBlocked={isDeleteBlocked}
-          isFinePointer={isFinePointer}
+          isFinePointer={isMobile || isFinePointer}
           revealed={revealed}
           revealing={revealing}
           deleteAnchorRef={deleteAnchorRef}

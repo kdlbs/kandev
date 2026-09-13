@@ -22,9 +22,26 @@ async function approvePendingCanvasThroughHost(
   canvas: CanvasRecord,
 ): Promise<CanvasRecord> {
   const pendingReleaseId = canvas.pending_release?.id;
-  if (!pendingReleaseId) throw new Error("The canvas has no pending release to approve.");
 
   await expect(page).toHaveURL(new RegExp(`${canvasHref(canvas.id)}$`), { timeout: 30_000 });
+  if (!pendingReleaseId) {
+    await expect(page.getByTestId("canvas-host-state")).toHaveText("Ready", {
+      timeout: 20_000,
+    });
+    let activeCanvas: CanvasRecord | null = null;
+    await expect
+      .poll(
+        async () => {
+          activeCanvas = await getCanvas(apiClient, canvas.id);
+          return activeCanvas?.active_release_status === "valid";
+        },
+        { timeout: 30_000, message: "The owner-created canvas release did not activate." },
+      )
+      .toBe(true);
+    if (!activeCanvas) throw new Error("The active canvas record was empty.");
+    return activeCanvas;
+  }
+
   await expect(page.getByTestId("canvas-host-state")).toHaveText("Permission review required");
   await page.getByTestId("canvas-mobile-actions").tap();
   const actionsSheet = page.getByTestId("canvas-mobile-actions-sheet");
@@ -187,7 +204,6 @@ test.describe("Plugin-backed canvases on mobile", () => {
         canvas,
         useMobileSubmit: true,
       });
-
       await approvePendingCanvasThroughHost(testPage, apiClient, published);
 
       const createdTask = await apiClient.getTask(taskId);
@@ -206,7 +222,7 @@ test.describe("Plugin-backed canvases on mobile", () => {
     }
   });
 
-  test("automatically opens a pending release and approves it through mobile host controls", async ({
+  test("opens an owner-created canvas without an initial permission review", async ({
     testPage,
     apiClient,
     backend,

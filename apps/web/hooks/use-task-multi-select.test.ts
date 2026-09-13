@@ -141,6 +141,16 @@ describe("buildPipelineStepIndexOf", () => {
     expect(indexOf(undefined)).toBe(Infinity);
   });
 
+  it("indexes an explicitly selected hidden workflow", () => {
+    const hiddenWorkflows = [{ id: "improve", name: "Improve Kandev", hidden: true }];
+    const hiddenSnapshots = {
+      improve: { steps: [{ id: "improve-todo", position: 0 }] },
+    };
+    const indexOf = buildPipelineStepIndexOf(hiddenWorkflows, hiddenSnapshots, {}, "improve");
+
+    expect(indexOf("improve-todo")).toBe(0);
+  });
+
   it("accumulates indices across workflows in swimlane render order, so a later workflow's first step never ties with an earlier workflow's first step", () => {
     const multiWorkflows = [
       { id: "wf-1", name: "Workflow 1" },

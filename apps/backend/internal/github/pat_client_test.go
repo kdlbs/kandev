@@ -83,6 +83,61 @@ func TestConvertPatPR(t *testing.T) {
 	}
 }
 
+func TestExecuteGraphQLPreservesHTTPProviderRetryDeadline(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    int
+		body      string
+		configure func(http.Header, time.Time)
+		minWait   time.Duration
+	}{
+		{
+			name:    "429 retry-after",
+			status:  http.StatusTooManyRequests,
+			body:    `{"message":"rate limit exceeded"}`,
+			minWait: 119 * time.Second,
+			configure: func(headers http.Header, _ time.Time) {
+				headers.Set("Retry-After", "120")
+			},
+		},
+		{
+			name:    "403 reset",
+			status:  http.StatusForbidden,
+			body:    `{"message":"API rate limit exceeded"}`,
+			minWait: 119 * time.Second,
+			configure: func(headers http.Header, now time.Time) {
+				headers.Set("X-RateLimit-Limit", "5000")
+				headers.Set("X-RateLimit-Remaining", "0")
+				headers.Set("X-RateLimit-Reset", strconv.FormatInt(now.Add(120*time.Second).Unix(), 10))
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			now := time.Now().UTC()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				tt.configure(w.Header(), now)
+				w.WriteHeader(tt.status)
+				_, _ = w.Write([]byte(tt.body))
+			}))
+			t.Cleanup(srv.Close)
+			client := newPATClientPointingAt(t, srv.URL)
+			var out map[string]any
+			err := client.ExecuteGraphQL(context.Background(), "query Test { rateLimit { resetAt } }", nil, &out)
+			if err == nil {
+				t.Fatal("ExecuteGraphQL succeeded, want provider error")
+			}
+			var apiErr *GitHubAPIError
+			if !errors.As(err, &apiErr) {
+				t.Fatalf("error = %T %v, want GitHubAPIError", err, err)
+			}
+			if apiErr.RetryAt == nil || apiErr.RetryAt.Before(now.Add(tt.minWait)) {
+				t.Fatalf("retry deadline = %v, want at least %v", apiErr.RetryAt, now.Add(tt.minWait))
+			}
+		})
+	}
+}
+
 // TestConvertPatPR_MissingDraftAndChangedFilesLeavesUnobserved covers
 // AC-12a on the REST decode path: a response that omits draft and
 // changed_files must decode to unobserved (Observed=false), not a

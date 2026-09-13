@@ -160,8 +160,9 @@ export function sortIdsByDisplayOrder(
   return [...ids].sort((a, b) => {
     const taskA = taskById.get(a) ?? { id: a };
     const taskB = taskById.get(b) ?? { id: b };
-    const stepDiff = indexOf(taskA.workflowStepId) - indexOf(taskB.workflowStepId);
-    if (stepDiff !== 0) return stepDiff;
+    const stepA = indexOf(taskA.workflowStepId);
+    const stepB = indexOf(taskB.workflowStepId);
+    if (stepA !== stepB) return stepA - stepB;
     return withinStep(taskA, taskB);
   });
 }

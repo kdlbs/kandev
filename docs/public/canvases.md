@@ -48,8 +48,11 @@ The host shows canvas controls outside the app frame. The app runs in a sandboxe
 The **Releases and permissions** control is available on task and workspace
 canvas hosts. It shows each release's declared reads, writes, events, shared
 state, exact external origins, missing grants, protocol version, and safe
-source provenance. Use it to approve or reject the first task release. A task
-canvas cannot run until its pending permissions are approved.
+source provenance. A valid first release from a new owner-created task canvas
+uses its recorded initial permission policy and can activate without a second
+approval. Use the control to review legacy drafts, imported packages, and later
+permission increases. A pending release cannot run until its permissions are
+approved.
 
 The host receives canvas lifecycle notifications through WebSocket. It
 refreshes visible task, workspace, release, and direct-host projections after
@@ -57,6 +60,23 @@ creation, release activation, promotion, archive, restore, or removal. It
 tears down the old iframe before it loads a replacement runtime after an
 authority change. This also limits the lifetime of direct browser requests to
 approved external origins.
+
+The runtime response allows framing from the same Kandev origin. This supports
+custom DNS names, IP addresses, ports, and HTTPS deployments when the parent
+and runtime use the same origin. An unrelated parent, including a nested
+foreign parent, remains blocked. Local launcher and Tauri origins remain exact
+development exceptions. Kandev does not use forwarded host headers to expand
+the policy.
+
+The host mounts the runtime while it is loading and waits for a bounded startup
+acknowledgement before it reveals the app. Kandev injects a host-owned bootstrap
+before the packaged entry scripts. The bootstrap reports a document error or
+checks the relative context route after document load. The host accepts only the
+current frame, current attempt nonce, and protocol version. A frame that does
+not acknowledge within 15 seconds becomes unavailable and shows **Try again**
+and **Releases and permissions** outside the failed frame. Retry creates a new
+runtime binding and startup attempt. This check confirms document and context
+startup; it does not certify application business health.
 
 Kandev calculates effective access from the package declaration, instance grant, trusted task or workspace scope, and current caller authorization. A release receives only the intersection of those permissions. See [Security and trust](security.md#isolated-web-applications) for the security boundary.
 
@@ -82,6 +102,19 @@ If promotion adds a permission, Kandev keeps the current active release until a 
 Every published release is immutable. Kandev retains the active release, one prior valid release, and a pending release when one exists.
 
 Use the release review to inspect the manifest, source actor, declared Kandev access, and exact network origins. A release that requests no new access can replace the active release after validation. A release that requests more access stays pending and does not change the active app.
+
+The review selects the pending release first, otherwise the active release, and
+keeps that selection while retained history is available. It shows the created
+date, Active or Previous status, and readable task or session source labels
+when the current user can still access them. Deleted or inaccessible sources
+show a safe unavailable label. Permission groups appear once in plain language;
+new access is marked, unknown permission kinds cannot be approved, and exact
+HTTPS origins remain visible.
+
+On desktop the review uses a wider viewport-bounded dialog with a single
+scrolling middle region and fixed actions. On phones it becomes a full-height
+surface with a scrolling review region and fixed, touch-sized actions. Closing
+the review returns focus to its opener.
 
 Reject a pending release to keep the current app. Use rollback to select the retained prior release. Rollback does not restore grants that a user already revoked. Kandev starts a new permission review if the selected release needs access that is not currently granted.
 

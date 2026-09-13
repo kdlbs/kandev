@@ -158,10 +158,10 @@ history and remains immutable.
   `docs/specs/<system>/system-design/`. Read `docs/specs/README.md` and the
   relevant file in `docs/specs/guide/`. Choose the owner from the durable
   contract, not the affected code layer. Keep one vertical requirement/design
-  pair and include its UI outcomes there. Use `docs/specs/INDEX.md` only to
-  find unmigrated legacy specifications. Run `python3
-  scripts/lint-spec-files.py --all` after specification changes.
-- **Decisions:** Architecture decisions are recorded in `docs/decisions/`. Read `docs/decisions/INDEX.md` for an overview. When making significant architectural choices, create a new ADR via `/record decision`.
+  pair and include its UI outcomes there. Find current documents with
+  `python3 scripts/list-docs.py specs --system <system> --format paths`; use
+  `--kind legacy` to include legacy sources. Run `python3 scripts/list-docs.py validate` and `python3 scripts/lint-spec-files.py --all` after specification changes.
+- **Decisions:** Architecture decisions are recorded in `docs/decisions/`. Use `python3 scripts/list-docs.py decisions --format markdown` to find relevant ADRs. The `docs/decisions/INDEX.md` page contains command examples. When making significant architectural choices, create a new ADR via `/record decision`.
 - **Plans:** Implementation plans are generated from requirements and system
   designs through `/plan`. `docs/plans/<initiative>/plan.md` is a work-package
   manifest. Its sibling `task-<NN>-<short-slug>.md` files are work orders.

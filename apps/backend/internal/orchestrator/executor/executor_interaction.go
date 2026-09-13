@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
@@ -667,8 +668,22 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 		return nil, err
 	}
 
-	req.Env = e.applyPreferredShellEnv(ctx, req.ExecutorType, req.Env)
-	if err := e.stopPreparedModelSwitchAgent(ctx, executionID); err != nil {
+	selectedEnv, err := e.resolveEnvironmentForAdmission(ctx, task.ID, req.TaskEnvironmentID)
+	if err != nil {
+		return nil, err
+	}
+	recoveryAdmission, err := e.admitSelectedWorktreeRecovery(ctx, task.ID, session, selectedEnv, req.ExecutorType)
+	if err != nil {
+		return nil, err
+	}
+	launchCtx := ctx
+	if recoveryAdmission != nil {
+		launchCtx = worktree.WithRecoveryClaim(ctx, recoveryAdmission.Claim())
+	}
+	defer func() { _ = releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission) }()
+
+	req.Env = e.applyPreferredShellEnv(launchCtx, req.ExecutorType, req.Env)
+	if err := e.stopPreparedModelSwitchAgent(launchCtx, executionID); err != nil {
 		return nil, err
 	}
 
@@ -681,7 +696,7 @@ func (e *Executor) SwitchModel(ctx context.Context, taskID, sessionID, newModel,
 		zap.Bool("use_worktree", req.UseWorktree),
 		zap.String("repository_path", req.RepositoryPath))
 
-	if err := e.launchModelSwitchAgent(ctx, task.ID, sessionID, newModel, session, req, existingRunning); err != nil {
+	if err := e.launchModelSwitchAgent(launchCtx, task.ID, sessionID, newModel, session, req, existingRunning); err != nil {
 		return nil, err
 	}
 

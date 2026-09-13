@@ -65,7 +65,7 @@ export function IntegrationStartTaskMenu<T extends IntegrationTaskPreset>({
           return (
             <DropdownMenuItem
               key={preset.id}
-              className="min-h-11 cursor-pointer gap-2 sm:min-h-8"
+              className="min-h-11 cursor-pointer gap-2 md:min-h-8 [@media(pointer:coarse)]:min-h-11"
               onSelect={() => onSelect(preset)}
               data-testid={itemTestId}
               data-preset-id={preset.id}

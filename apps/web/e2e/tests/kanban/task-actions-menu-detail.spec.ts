@@ -33,6 +33,13 @@ test.describe("Task detail top bar actions menu", () => {
     await expect(trigger).toHaveAttribute("aria-label", "More options");
     await trigger.click();
 
+    const menu = testPage.locator('[data-slot="dropdown-menu-content"][data-state="open"]').last();
+    const menuLabels = (await menu.locator(":scope > [role='menuitem']").allTextContents()).map(
+      (text) => text.replace(/\s+/g, " ").trim(),
+    );
+    expect(menuLabels).toEqual(["Priority", "Edit", "Link", "Move to", "Archive", "Delete"]);
+    await expect(menu.locator(":scope > [data-slot='dropdown-menu-separator']")).toHaveCount(4);
+
     await expect(testPage.getByRole("menuitem", { name: "Edit" })).toBeVisible();
     await expect(testPage.getByRole("menuitem", { name: "Delete" })).toBeVisible();
     const archiveItem = testPage.getByRole("menuitem", { name: "Archive" });

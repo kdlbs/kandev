@@ -5,6 +5,7 @@ import { getBuiltInLayoutProfile } from "@/lib/layout/layout-profiles";
 
 const mocks = vi.hoisted(() => ({
   finePointer: true,
+  isMobile: false,
   savedLayouts: [] as Array<Record<string, unknown>>,
   updateUserSettings: vi.fn(),
   setUserSettings: vi.fn(),
@@ -31,7 +32,7 @@ vi.mock("@/lib/i18n", () => ({
 }));
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
-  useResponsiveBreakpoint: () => ({ isFinePointer: mocks.finePointer }),
+  useResponsiveBreakpoint: () => ({ isFinePointer: mocks.finePointer, isMobile: mocks.isMobile }),
 }));
 
 vi.mock("@/lib/toast/sonner", () => ({
@@ -143,6 +144,7 @@ function deferred<T>() {
 
 beforeEach(() => {
   mocks.finePointer = true;
+  mocks.isMobile = false;
   mocks.savedLayouts = [savedLayout()];
   mocks.updateUserSettings.mockReset();
   mocks.setUserSettings.mockReset();
@@ -166,6 +168,26 @@ afterEach(() => {
 });
 
 describe("LayoutPresetSelector saved-layout deletion", () => {
+  it("hands the phone menu off to a sheet without applying the layout", async () => {
+    mocks.isMobile = true;
+    mocks.finePointer = false;
+    render(<LayoutPresetSelector />);
+    const trigger = screen.getByTestId("layout-preset-trigger");
+    await openSavedLayouts();
+    fireEvent.click(screen.getByTestId(SAVED_DELETE_TEST_ID));
+    const sheet = await screen.findByRole("dialog", { name: "Delete Saved layout?" });
+    expect(sheet.getAttribute("data-slot")).toBe("drawer-content");
+    expect(document.querySelector('[data-slot="dropdown-menu-content"]')).toBeNull();
+    fireEvent.click(within(sheet).getByRole("button", { name: "common:cancel" }));
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(mocks.applyCustomLayout).not.toHaveBeenCalled();
+    expect(mocks.updateUserSettings).not.toHaveBeenCalled();
+    await openSavedLayouts();
+    fireEvent.click(screen.getByTestId(SAVED_DELETE_TEST_ID));
+    fireEvent.click(await screen.findByTestId(SAVED_DELETE_CONFIRM_TEST_ID));
+    await waitFor(() => expect(mocks.updateUserSettings).toHaveBeenCalledTimes(1));
+    expect(mocks.savedLayouts).toEqual([]);
+  });
   it("anchors desktop confirmation to the menu action and keeps cancel local", async () => {
     render(<LayoutPresetSelector />);
     await openSavedLayouts();

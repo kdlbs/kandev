@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -76,19 +77,39 @@ func repositorySetsToListResponse(sets []*models.RepositorySet) dto.ListReposito
 // repositorySetCreateBody is the create payload. workspace_id is read from the
 // path on HTTP and from the payload over WebSocket.
 type repositorySetCreateBody struct {
-	WorkspaceID   string   `json:"workspace_id"`
-	Name          string   `json:"name"`
-	Description   string   `json:"description"`
-	RepositoryIDs []string `json:"repository_ids"`
+	WorkspaceID   string                              `json:"workspace_id"`
+	Name          string                              `json:"name"`
+	Description   string                              `json:"description"`
+	RepositoryIDs *[]string                           `json:"repository_ids"`
+	Repositories  *[]service.RepositorySetMemberInput `json:"repositories"`
+}
+
+func (b repositorySetCreateBody) serviceRequest(workspaceID string) (*service.CreateRepositorySetRequest, error) {
+	if b.RepositoryIDs != nil && b.Repositories != nil {
+		return nil, fmt.Errorf("%w: repositories and repository_ids cannot both be provided", service.ErrInvalidRepositorySet)
+	}
+	req := &service.CreateRepositorySetRequest{
+		WorkspaceID: workspaceID,
+		Name:        b.Name,
+		Description: b.Description,
+	}
+	if b.RepositoryIDs != nil {
+		req.RepositoryIDs = *b.RepositoryIDs
+	}
+	if b.Repositories != nil {
+		req.Repositories = *b.Repositories
+	}
+	return req, nil
 }
 
 // repositorySetUpdateBody patches a set. Pointers distinguish "absent" from
 // "set to empty": an absent repository_ids leaves membership alone, while an
 // explicitly empty one is a rejected request rather than a silent wipe.
 type repositorySetUpdateBody struct {
-	Name          *string   `json:"name"`
-	Description   *string   `json:"description"`
-	RepositoryIDs *[]string `json:"repository_ids"`
+	Name          *string                             `json:"name"`
+	Description   *string                             `json:"description"`
+	RepositoryIDs *[]string                           `json:"repository_ids"`
+	Repositories  *[]service.RepositorySetMemberInput `json:"repositories"`
 }
 
 // repositorySetStatus maps a service error to its HTTP status. Categories are
@@ -160,12 +181,12 @@ func (h *RepositorySetHandlers) httpCreateRepositorySet(c *gin.Context) {
 	if !h.resolveWritableWorkspace(c, workspaceID) {
 		return
 	}
-	set, err := h.service.CreateRepositorySet(c.Request.Context(), &service.CreateRepositorySetRequest{
-		WorkspaceID:   workspaceID,
-		Name:          body.Name,
-		Description:   body.Description,
-		RepositoryIDs: body.RepositoryIDs,
-	})
+	request, err := body.serviceRequest(workspaceID)
+	if err != nil {
+		h.abortWithRepositorySetError(c, "create repository set", err)
+		return
+	}
+	set, err := h.service.CreateRepositorySet(c.Request.Context(), request)
 	if err != nil {
 		h.abortWithRepositorySetError(c, "create repository set", err)
 		return
@@ -200,6 +221,7 @@ func (h *RepositorySetHandlers) httpUpdateRepositorySet(c *gin.Context) {
 		Name:          body.Name,
 		Description:   body.Description,
 		RepositoryIDs: body.RepositoryIDs,
+		Repositories:  body.Repositories,
 	})
 	if err != nil {
 		h.abortWithRepositorySetError(c, "update repository set", err)
@@ -300,12 +322,11 @@ func (h *RepositorySetHandlers) wsCreateRepositorySet(ctx context.Context, msg *
 	if errMsg, blocked := h.wsRejectReadOnlyWorkspace(ctx, msg, req.WorkspaceID); blocked {
 		return errMsg, nil
 	}
-	set, err := h.service.CreateRepositorySet(ctx, &service.CreateRepositorySetRequest{
-		WorkspaceID:   req.WorkspaceID,
-		Name:          req.Name,
-		Description:   req.Description,
-		RepositoryIDs: req.RepositoryIDs,
-	})
+	request, err := req.serviceRequest(req.WorkspaceID)
+	if err != nil {
+		return h.wsRepositorySetError(msg, "create repository set", err)
+	}
+	set, err := h.service.CreateRepositorySet(ctx, request)
 	if err != nil {
 		return h.wsRepositorySetError(msg, "create repository set", err)
 	}
@@ -341,6 +362,7 @@ func (h *RepositorySetHandlers) wsUpdateRepositorySet(ctx context.Context, msg *
 		Name:          req.Name,
 		Description:   req.Description,
 		RepositoryIDs: req.RepositoryIDs,
+		Repositories:  req.Repositories,
 	})
 	if err != nil {
 		return h.wsRepositorySetError(msg, "update repository set", err)

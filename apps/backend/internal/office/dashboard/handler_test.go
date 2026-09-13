@@ -282,13 +282,38 @@ func insertTestTask(t *testing.T, db *sqlx.DB, id, wsID, title, state string, pr
 	t.Helper()
 	// Give every test task a deterministic workflow_step_id so the office
 	// participant lookup (which now resolves through the task's step) has
-	// a stable target.
+	// a stable target, and back it with a last-position "Done" workflow
+	// step so the approval gate's step-position check (which the approver
+	// tests here don't otherwise exercise) treats the task as ready to
+	// complete by default.
+	stepID := "step-" + id
+	seedTerminalWorkflowStep(t, db, stepID)
 	_, err := db.Exec(`
 		INSERT INTO tasks (id, workspace_id, title, state, priority, identifier, workflow_step_id, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-	`, id, wsID, title, state, intPriorityLabel(priority), id, "step-"+id)
+	`, id, wsID, title, state, intPriorityLabel(priority), id, stepID)
 	if err != nil {
 		t.Fatalf("insert task %s: %v", id, err)
+	}
+}
+
+// seedTerminalWorkflowStep backs stepID with a single-step workflow whose
+// step is last-by-position and named "Done" — the shape
+// IsTaskWorkflowStepTerminal treats as terminal.
+func seedTerminalWorkflowStep(t *testing.T, db *sqlx.DB, stepID string) {
+	t.Helper()
+	workflowID := "wf-" + stepID
+	if _, err := db.Exec(`
+		INSERT OR IGNORE INTO workflows (id, workspace_id, name, created_at, updated_at)
+		VALUES (?, '', 'Test Workflow', datetime('now'), datetime('now'))
+	`, workflowID); err != nil {
+		t.Fatalf("seed workflow for step %s: %v", stepID, err)
+	}
+	if _, err := db.Exec(`
+		INSERT OR IGNORE INTO workflow_steps (id, workflow_id, name, position, created_at, updated_at)
+		VALUES (?, ?, 'Done', 0, datetime('now'), datetime('now'))
+	`, stepID, workflowID); err != nil {
+		t.Fatalf("seed terminal workflow_step %s: %v", stepID, err)
 	}
 }
 

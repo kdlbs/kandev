@@ -1028,6 +1028,7 @@ func TestServerModeOffice_RegistersCorrectTools(t *testing.T) {
 
 	// Office mode should NOT have kanban tools
 	assert.NotContains(t, tools, "create_task_kandev")
+	assert.NotContains(t, tools, "create_office_task_kandev")
 	assert.NotContains(t, tools, "list_tasks_kandev")
 	assert.NotContains(t, tools, "update_task_kandev")
 	assert.NotContains(t, tools, "list_workspaces_kandev")

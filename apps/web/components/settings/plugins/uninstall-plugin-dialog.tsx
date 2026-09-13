@@ -5,6 +5,7 @@ import { Trans, useTranslation } from "react-i18next";
 
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
+import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
 import type { PluginRecord } from "@/lib/types/plugins";
 
 type UninstallPluginConfirmationProps = {
@@ -40,39 +41,50 @@ export function PluginUninstallConfirmation({
   );
   const confirmAriaLabel = t("plugins:confirmUninstall");
 
-  if (!isFinePointer) {
-    if (!open) return null;
-    return (
-      <InlineConfirmActions
-        density="touch"
-        testId="plugin-uninstall-inline-confirmation"
-        ariaLabel={t("plugins:uninstallPlugin")}
-        description={description}
-        cancelLabel={t("plugins:cancel")}
-        confirmLabel={t("plugins:confirmUninstall")}
-        confirmAriaLabel={confirmAriaLabel}
-        confirmTestId="plugin-uninstall-confirm"
-        onCancel={onCancel}
-        onClose={() => onOpenChange(false)}
-        onConfirm={onConfirm}
-      />
-    );
-  }
-
-  return (
+  const fallback = !isFinePointer ? (
+    <InlineConfirmActions
+      density="touch"
+      testId="plugin-uninstall-inline-confirmation"
+      ariaLabel={t("plugins:uninstallPlugin")}
+      description={description}
+      cancelLabel={t("plugins:cancel")}
+      confirmLabel={confirmAriaLabel}
+      confirmAriaLabel={confirmAriaLabel}
+      confirmTestId="plugin-uninstall-confirm"
+      onCancel={onCancel}
+      onClose={() => onOpenChange(false)}
+      onConfirm={onConfirm}
+    />
+  ) : (
     <ActionConfirmPopover
       open={open}
       anchorRef={anchorRef}
       title={t("plugins:uninstallPlugin")}
       description={description}
       cancelLabel={t("plugins:cancel")}
-      confirmLabel={t("plugins:confirmUninstall")}
+      confirmLabel={confirmAriaLabel}
       confirmAriaLabel={confirmAriaLabel}
       confirmTestId="plugin-uninstall-confirm"
       testId="plugin-uninstall-confirm-popover"
       onOpenChange={onOpenChange}
       onCancel={onCancel}
       onConfirm={onConfirm}
+    />
+  );
+  return (
+    <MobileActionConfirmation
+      open={open}
+      targetKey={target.id}
+      title={t("plugins:uninstallPlugin")}
+      description={description}
+      cancelLabel={t("plugins:cancel")}
+      confirmLabel={confirmAriaLabel}
+      confirmAriaLabel={confirmAriaLabel}
+      confirmTestId="plugin-uninstall-confirm"
+      onOpenChange={onOpenChange}
+      onConfirm={onConfirm}
+      focusReturnRef={anchorRef}
+      fallback={fallback}
     />
   );
 }

@@ -29,10 +29,11 @@ export function buildPipelineStepIndexOf(
   workflows: WorkflowLike[],
   snapshots: Record<string, { steps: Array<{ id: string; position: number }> }>,
   hiddenWorkflowStepIds: Record<string, string[]>,
+  workflowFilter: string | null | undefined = null,
 ): (stepId: string | undefined) => number {
   const indexByStepId = new Map<string, number>();
   let offset = 0;
-  for (const workflow of selectWorkflowSwimlanes(null, workflows, snapshots)) {
+  for (const workflow of selectWorkflowSwimlanes(workflowFilter, workflows, snapshots)) {
     const snapshot = snapshots[workflow.id];
     if (!snapshot) continue;
     const hidden = new Set(hiddenWorkflowStepIds[workflow.id] ?? []);
@@ -173,6 +174,7 @@ export function useTaskMultiSelectStore() {
             state.workflows.items,
             state.kanbanMulti.snapshots,
             state.userSettings.hiddenWorkflowStepIds ?? {},
+            state.workflows.activeId,
           )
         : undefined;
 

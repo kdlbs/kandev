@@ -40,6 +40,7 @@ failure and recovery contracts.
 - [Kubernetes worker presets](requirements/kubernetes-worker-presets.md)
 - [Kubernetes startup timing](requirements/kubernetes-startup-timing.md)
 - [Kubernetes retained compute visibility](requirements/kubernetes-retained-compute.md)
+- [SSH Session Transport Liveness](requirements/ssh-transport-liveness.md)
 
 ### System design
 
@@ -55,16 +56,18 @@ failure and recovery contracts.
 - [Kubernetes worker presets](system-design/kubernetes-worker-presets.md)
 - [Kubernetes startup timing](system-design/kubernetes-startup-timing.md)
 - [Kubernetes retained compute visibility](system-design/kubernetes-retained-compute.md)
+- [SSH Session Transport Liveness](system-design/ssh-transport-liveness.md)
 
 ## Migration record
 
 Migration remains in progress while legacy source detail is extracted from the
-canonical requirement and system-design documents above.
+canonical requirement and system-design documents. Use the catalog command to
+find current sources.
 
 The [Kubernetes executor foundation](../kubernetes-executor/spec.md) remains
 the current lifecycle contract. The three Kubernetes pairs own additive
-presets, launch diagnostics, and retained-compute visibility. They do not replace
-the foundation's resource ownership, recovery, or cleanup rules.
+presets, launch diagnostics, and retained-compute visibility. They do not
+replace the foundation's resource ownership, recovery, or cleanup rules.
 
 ## Related systems
 

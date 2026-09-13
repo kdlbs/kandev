@@ -19,6 +19,8 @@ type TaskRemovalOptions = {
   store: StoreApi<AppState>;
   /** Whether to call performLayoutSwitch when switching sessions (desktop sidebar uses this) */
   useLayoutSwitch?: boolean;
+  /** Listing surfaces own their viewport selection and must not navigate to task detail. */
+  stayOnListing?: boolean;
   /** Show one localized success message after a fully successful operation. */
   notifySuccess?: TaskRemovalSuccessNotifier;
 };
@@ -595,12 +597,13 @@ async function removeTaskFromBoardFromStore(params: {
   taskId: string;
   opts?: RemoveFromBoardOptions;
   useLayoutSwitch: boolean;
+  stayOnListing: boolean;
   loadTaskSessionsForTask: (taskId: string) => Promise<TaskSession[]>;
 }): Promise<RemoveFromBoardResult> {
-  const { store, taskId, opts, useLayoutSwitch, loadTaskSessionsForTask } = params;
+  const { store, taskId, opts, useLayoutSwitch, stayOnListing, loadTaskSessionsForTask } = params;
   const { excludedTaskIds, removedTaskIds } = removalTaskIdsForBoard(store, taskId, opts);
   if (!opts?.switchOnly) removeTasksFromSnapshots(store, removedTaskIds);
-  if (!shouldSwitchAfterRemoval(store, taskId, opts)) {
+  if (stayOnListing || !shouldSwitchAfterRemoval(store, taskId, opts)) {
     return { switchedTaskId: null, excludedTaskIds };
   }
 
@@ -629,6 +632,7 @@ async function removeTaskFromBoardFromStore(params: {
 export function useTaskRemoval({
   store,
   useLayoutSwitch = false,
+  stayOnListing = false,
   notifySuccess,
 }: TaskRemovalOptions) {
   const loadTaskSessionsForTask = useCallback(
@@ -655,9 +659,10 @@ export function useTaskRemoval({
         taskId,
         opts,
         useLayoutSwitch,
+        stayOnListing,
         loadTaskSessionsForTask,
       }),
-    [store, useLayoutSwitch, loadTaskSessionsForTask],
+    [store, useLayoutSwitch, stayOnListing, loadTaskSessionsForTask],
   );
 
   const getRemovalIds = useCallback(
@@ -672,12 +677,12 @@ export function useTaskRemoval({
       opts?: TaskRemovalRunOptions,
     ): Promise<TaskRemovalBatchResult> =>
       coordinateTaskRemovalBatch(
-        { store, removeTaskFromBoard, getRemovalIds, notifySuccess },
+        { store, removeTaskFromBoard, getRemovalIds, notifySuccess, stayOnListing },
         action,
         requests,
         opts,
       ),
-    [getRemovalIds, notifySuccess, removeTaskFromBoard, store],
+    [getRemovalIds, notifySuccess, removeTaskFromBoard, stayOnListing, store],
   );
 
   const runTaskRemoval = useCallback(
