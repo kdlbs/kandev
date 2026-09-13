@@ -382,35 +382,39 @@ describe("useSubmitHandler task plan comments", () => {
       expect(toastMock).not.toHaveBeenCalled();
     },
   );
-  it("blocks delivery while legacy comments still need migration", async () => {
-    const { result } = renderHook(() =>
-      useSubmitHandler(
-        panelState({
-          planCommentMigration: {
-            status: "failed",
-            pendingCount: 1,
-            failure: "transient",
-            needsAttention: true,
-            isReady: false,
-            isBlocking: true,
-            retry: vi.fn(),
-          },
-        }),
-      ),
-    );
+  it.each(["transient", "conflict", "rejected"] as const)(
+    "preserves blocked delivery without promising retries for %s recovery",
+    async (failure) => {
+      const { result } = renderHook(() =>
+        useSubmitHandler(
+          panelState({
+            planCommentMigration: {
+              status: "failed",
+              pendingCount: 1,
+              failure,
+              needsAttention: true,
+              isReady: false,
+              isBlocking: true,
+              retry: vi.fn(),
+            },
+          }),
+        ),
+      );
 
-    await act(async () => {
-      await expect(result.current.handleSubmit({ message: "Keep my draft" })).resolves.toBe(false);
-    });
+      await act(async () => {
+        await expect(result.current.handleSubmit({ message: "Keep my draft" })).resolves.toBe(
+          false,
+        );
+      });
 
-    expect(handleSendMessageMock).not.toHaveBeenCalled();
-    expect(toastMock).toHaveBeenCalledWith({
-      title: "Message not sent",
-      description:
-        "Saved plan comments are still being restored. Connection issues retry automatically; your message is kept.",
-      variant: "error",
-    });
-  });
+      expect(handleSendMessageMock).not.toHaveBeenCalled();
+      expect(toastMock).toHaveBeenCalledWith({
+        title: "Message not sent",
+        description: "Saved plan comments are still being restored. Your message is kept.",
+        variant: "error",
+      });
+    },
+  );
 
   it("submits displayed IDs and versions without clearing the shared snapshot locally", async () => {
     const clearSessionPlanComments = vi.fn();

@@ -307,25 +307,26 @@ describe("passthrough chat composer cleanup", () => {
       ),
     ).not.toThrow();
   });
-  it("rejects delivery while legacy plan comments are not migrated", () => {
-    expect(() =>
-      assertPlanCommentMigrationReady(
-        panelState({
-          planCommentMigration: {
-            status: "failed",
-            pendingCount: 1,
-            failure: "transient",
-            needsAttention: true,
-            isReady: false,
-            isBlocking: true,
-            retry: vi.fn(),
-          },
-        }),
-      ),
-    ).toThrow(
-      "Saved plan comments are still being restored. Connection issues retry automatically; your message is kept.",
-    );
-  });
+  it.each(["transient", "conflict", "rejected"] as const)(
+    "preserves blocked delivery without promising retries for %s recovery",
+    (failure) => {
+      expect(() =>
+        assertPlanCommentMigrationReady(
+          panelState({
+            planCommentMigration: {
+              status: "failed",
+              pendingCount: 1,
+              failure,
+              needsAttention: true,
+              isReady: false,
+              isBlocking: true,
+              retry: vi.fn(),
+            },
+          }),
+        ),
+      ).toThrow("Saved plan comments are still being restored. Your message is kept.");
+    },
+  );
 
   it("clears session context but leaves task plan comments to the backend snapshot", () => {
     const state = panelState({

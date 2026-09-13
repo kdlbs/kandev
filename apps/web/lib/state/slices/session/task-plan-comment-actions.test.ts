@@ -57,9 +57,9 @@ describe("task plan comment state", () => {
     store.getState().setTaskPlan(TASK_ID, plan());
     store.getState().setTaskPlanComments(TASK_ID, snapshot(2));
     store.getState().setTaskPlanCommentMigrationState(TASK_ID, {
-      status: "complete",
-      pendingCount: 0,
-      failure: null,
+      status: "failed",
+      pendingCount: 2,
+      failure: "conflict",
     });
     store.getState().setTaskPlanComments(TASK_ID, snapshot(99, "old-plan"));
     expect(store.getState().taskPlans.commentsByTaskId[TASK_ID]).toEqual(snapshot(2));
@@ -69,7 +69,7 @@ describe("task plan comment state", () => {
     expect(store.getState().taskPlans.commentsLoadedByTaskId[TASK_ID]).toBe(false);
     expect(store.getState().taskPlans.commentsMigrationByTaskId[TASK_ID]).toEqual({
       status: "idle",
-      pendingCount: 0,
+      pendingCount: 2,
       failure: null,
     });
   });
@@ -79,9 +79,9 @@ describe("task plan comment state", () => {
     store.getState().setTaskPlan(TASK_ID, plan());
     store.getState().setTaskPlanComments(TASK_ID, snapshot(1));
     store.getState().setTaskPlanCommentMigrationState(TASK_ID, {
-      status: "complete",
-      pendingCount: 0,
-      failure: null,
+      status: "failed",
+      pendingCount: 2,
+      failure: "conflict",
     });
 
     store.getState().setTaskPlan(TASK_ID, null);
@@ -90,7 +90,7 @@ describe("task plan comment state", () => {
     expect(store.getState().taskPlans.commentsLoadedByTaskId[TASK_ID]).toBe(true);
     expect(store.getState().taskPlans.commentsMigrationByTaskId[TASK_ID]).toEqual({
       status: "idle",
-      pendingCount: 0,
+      pendingCount: 2,
       failure: null,
     });
   });

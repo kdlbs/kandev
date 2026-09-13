@@ -76,11 +76,11 @@ No restoration row for empty/discovering/transient-read states.
 
 UI-02 (real unresolved feedback requiring attention):
 Desktop: [Saved plan feedback needs attention.] [Retry]
-         [Your retained message               ] [Send]
+         [Your retained message               ] [Send blocked]
 Phone:   [Saved plan feedback needs attention.]
          [Retry: touch target >=44px           ]
          [Your retained message               ]
-         [Existing composer actions + Send    ]
+         [Existing composer actions + Send blocked]
 ```
 
 UI-01 covers `AC-TASKS-PLAN-COMMENTS-004.5`, `.6`, `.8`; UI-02 covers `.1`,
@@ -146,6 +146,9 @@ Planned focused additions:
 - `apps/web/lib/plan-comment-recovery.ts`: shared recovery projection and
   Send restriction policy, with `plan-comment-recovery.test.ts`.
 - `apps/web/components/task/plan-comment-migration-notice.test.tsx`.
+- `apps/web/hooks/domains/comments/use-run-comment-legacy-recovery.test.tsx`:
+  real-store recovery and Run integration for selected cleanup, reload, direct
+  delivery, queue admission, and unrelated pending rows.
 - `apps/web/e2e/tests/session/plan-comment-recovery-helpers.ts`: correlated
   failure controls shared by the desktop and phone specs.
 
@@ -172,6 +175,8 @@ the command complete.
 (cd apps && pnpm install --frozen-lockfile)
 (cd apps && pnpm --filter @kandev/web test -- lib/plan-comment-recovery.test.ts lib/state/slices/comments/persistence.test.ts lib/state/slices/session/task-plan-comment-actions.test.ts hooks/domains/comments/plan-comment-migration.test.ts hooks/domains/comments/plan-comment-loading.test.ts hooks/domains/comments/use-plan-comment-migration.test.tsx hooks/domains/comments/use-plan-comments.test.tsx hooks/domains/comments/use-run-comment.test.ts hooks/domains/comments/use-run-comment-primary-recovery.test.ts components/task/chat/chat-input-area.test.tsx components/task/passthrough-chat-composer.test.ts components/task/plan-comment-migration-notice.test.tsx components/task/task-plan-panel.session-switch.test.tsx)
 (cd apps/web && pnpm run typecheck)
+(cd apps/web && pnpm test -- hooks/domains/comments/use-run-comment-legacy-recovery.test.tsx)
+(cd apps/web && pnpm exec eslint hooks/domains/comments/use-run-comment-legacy-recovery.test.tsx --max-warnings 0)
 (cd apps/web && pnpm exec eslint lib/plan-comment-recovery.ts lib/state/slices/comments/persistence.ts lib/state/slices/session/types.ts lib/state/slices/session/session-slice.ts lib/state/app-state-types.ts hooks/domains/comments/plan-comment-migration.ts hooks/domains/comments/plan-comment-loading.ts hooks/domains/comments/use-plan-comment-migration.ts hooks/domains/comments/use-plan-comments.ts hooks/domains/comments/use-run-comment.ts components/task/plan-comment-migration-notice.tsx components/task/task-plan-panel.tsx components/task/chat/chat-input-area.tsx components/task/passthrough-chat-composer.tsx)
 (cd apps/web && pnpm exec eslint lib/plan-comment-recovery.test.ts lib/state/slices/comments/persistence.test.ts lib/state/slices/session/task-plan-comment-actions.test.ts hooks/domains/comments/plan-comment-migration.test.ts hooks/domains/comments/plan-comment-loading.test.ts hooks/domains/comments/use-plan-comment-migration.test.tsx hooks/domains/comments/use-plan-comments.test.tsx hooks/domains/comments/use-run-comment.test.ts hooks/domains/comments/use-run-comment-primary-recovery.test.ts components/task/chat/chat-input-area.test.tsx components/task/passthrough-chat-composer.test.ts components/task/plan-comment-migration-notice.test.tsx components/task/task-plan-panel.session-switch.test.tsx e2e/tests/session/plan-comment-recovery-helpers.ts e2e/tests/session/task-plan-comments.spec.ts e2e/tests/session/mobile-task-plan-comments.spec.ts)
 (cd apps/web && pnpm run i18n:check)
@@ -381,3 +386,50 @@ Local verification:
   Both commands run from `apps/web`, with zero retries. Exact-head remote CI,
   reviewer replies, and the requested observation window remain delivery gates,
   not completed checks in this tracked document.
+
+### Follow-up selected cleanup and aggregate suggestions (2026-09-13)
+
+Codex identified the selected legacy row awaiting browser cleanup. The backend's
+durable UUID admission ledger already prevents resurrection: existing SQLite
+`TestPlanCommentCreateReplayDoesNotResurrectRetiredComment` passes. The remaining
+problem is a stranded local row after Run consumes the acknowledgement source.
+Run now queries the existing task recovery owner for only that selected ID,
+without creating a new owner or depending on unrelated recovery status.
+
+The real-store hook regression first failed for both immediate and queued Run
+because admission succeeded before cleanup. Both now wait for their own cleanup,
+allow one delivery after reload, and retain no draft on a subsequent reload.
+A separate case allows a cleaned selected row while another legacy row remains.
+The fixture models the actual backend replay ledger, including consumed IDs.
+
+Claude's two aggregate suggestions are addressed. A deferred upload regression
+first observed two calls when a load confirmed the same plan; metadata changes
+now wake recovery without invalidating its generation. Both composers' blocked
+message is neutral for transient, conflict, and rejected recovery. All six copy
+cases failed against the old wording before updating all five locales and the
+pseudo catalog. Traditional Chinese is generator-derived with the existing
+override preserved; unrelated generated translation changes are excluded.
+
+CodeRabbit's grouped suggestions and nitpick are addressed: both desktop/phone
+previews mark Send blocked, public Run availability includes selected-comment
+and primary-session eligibility, post-release recovery polling allows 15 seconds,
+and plan replacement/deletion tests preserve a nonzero pending count while
+resetting status and failure.
+
+Local verification:
+
+- The focused commands in Verification pass 159 unit/component tests across
+  14 files. Adding the locale-generator tests passes 183 tests across 15 files.
+  A final targeted run after test organization and translation cleanup passes
+  67 tests across the four directly affected coordinator/composer/Run files.
+- Typecheck, changed-file ESLint with zero warnings, i18n checks/ratchet,
+  specification regression tests (36), all-file spec lint, docs catalog, and
+  both public-doc validators pass.
+- Fresh Chromium passes four scenarios in 1.0m; fresh Pixel 5 passes four in
+  48.9s, both with `--retries=0`. They cover existing Send/Run routing, empty-chat
+  read failures, automatic recovery, draft/focus retention, and delivery of
+  both plan and diff context. Cleanup denial/reload and metadata ordering are
+  deterministic real-store regressions with identical mobile/desktop logic;
+  no new control, layout, gesture, or scroll owner is introduced.
+- Exact-head remote CI and bot dispositions remain delivery gates. No success
+  is inferred from unavailable GitHub evidence.

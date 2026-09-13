@@ -440,7 +440,12 @@ plan, clears obsolete read errors but never acknowledges unresolved local rows.
 Run selects one persisted comment. Remove the unrelated task-wide migration
 status check from `runTaskPlanComment` and the selection toolbar; keep persisted
 version, primary availability, exact reference, and server acceptance checks.
-Other legacy records remain pending. Add-and-Run must still await persistence
+The recovery owner must also report no identified pending legacy record for
+that selected ID, including an acknowledged upload awaiting browser cleanup.
+Consuming its server row first would leave the retained local row without a
+matching acknowledgement on reload; durable UUID admission prevents recreation
+but does not finish browser cleanup. Unrelated records do not participate in
+this selected-ID check and remain pending. Add-and-Run must still await persistence
 of the selected new comment before invoking Run.
 
 ## Failure and recovery

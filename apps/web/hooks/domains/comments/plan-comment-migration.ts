@@ -119,6 +119,10 @@ export class PlanCommentMigration {
     return this.kick();
   }
 
+  hasPendingComment(commentId: string) {
+    return [...this.pending.values()].some(({ record }) => record.comment.id === commentId);
+  }
+
   private plan() {
     return this.store.getState().taskPlans.byTaskId[this.taskId];
   }
@@ -134,12 +138,12 @@ export class PlanCommentMigration {
   private observe() {
     const unsubscribe = this.store.subscribe((state, previous) => {
       const planChanged =
-        state.taskPlans.byTaskId[this.taskId]?.id !==
-          previous.taskPlans.byTaskId[this.taskId]?.id ||
+        state.taskPlans.byTaskId[this.taskId]?.id !== previous.taskPlans.byTaskId[this.taskId]?.id;
+      const loadedChanged =
         state.taskPlans.loadedByTaskId[this.taskId] !==
-          previous.taskPlans.loadedByTaskId[this.taskId];
+        previous.taskPlans.loadedByTaskId[this.taskId];
       const connectionChanged = state.connection.status !== previous.connection.status;
-      if (!planChanged && !connectionChanged) return;
+      if (!planChanged && !loadedChanged && !connectionChanged) return;
       if (planChanged) {
         this.generation++;
         this.failure = null;
@@ -384,4 +388,12 @@ export function planCommentMigrationFor(store: StoreApi<AppState>, taskId: strin
     tasks.set(taskId, recovery);
   }
   return recovery;
+}
+
+export function hasPendingPlanCommentMigration(
+  store: StoreApi<AppState>,
+  taskId: string,
+  commentId: string,
+) {
+  return recoveries.get(store)?.get(taskId)?.hasPendingComment(commentId) ?? false;
 }

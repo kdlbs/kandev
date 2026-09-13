@@ -126,13 +126,13 @@ initial retry burst or encounters an actionable rejection.
 ```text
 Desktop:
 [Saved plan feedback needs attention.              ] [Retry]
-[Your retained message                             ] [Send]
+[Your retained message                             ] [Send blocked]
 
 Phone (same inline region, wrapping when needed):
 [Saved plan feedback needs attention.]
 [Retry: touch target >=44px           ]
 [Your retained message               ]
-[Existing composer actions + Send    ]
+[Existing composer actions + Send blocked]
 ```
 
 Required: only genuine unresolved task feedback can produce this row; Send
@@ -242,6 +242,14 @@ focused suite passes 151 unit/component tests plus 24 locale-generator tests;
 static and documentation checks pass. All eight Chromium/Pixel 5 scenarios
 pass with zero retries. The work order records local verification; exact-head
 remote delivery checks remain a separate gate.
+
+The next review follow-up scopes Run eligibility to cleanup of its selected
+legacy ID, preserves in-flight uploads when a load confirms the same plan,
+and uses neutral blocked-Send copy for every recovery failure class. The
+work order records RED-to-GREEN evidence, 159 focused unit/component tests
+plus 24 locale-generator tests, and eight zero-retry desktop/phone scenarios.
+The public Run guidance and blocked-Send previews now state their eligibility
+conditions explicitly. Remote exact-head checks remain separate delivery gates.
 
 ## Risks
 

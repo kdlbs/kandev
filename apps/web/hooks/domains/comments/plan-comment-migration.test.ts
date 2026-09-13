@@ -193,6 +193,30 @@ describe("task-scoped plan comment recovery", () => {
     await recovery.wake();
     expect(state()?.status).toBe("complete");
   });
+});
+
+describe("legacy recovery scope lifecycle", () => {
+  it("keeps an in-flight upload when a load confirms the same plan identity", async () => {
+    write();
+    const pending = deferred();
+    api.createTaskPlanComment.mockReturnValueOnce(pending.promise);
+    const { store, state } = setup(false);
+    store.setState((previous) => ({
+      taskPlans: {
+        ...previous.taskPlans,
+        loadedByTaskId: { ...previous.taskPlans.loadedByTaskId, [TASK]: false },
+      },
+    }));
+    store.getState().setConnectionStatus("connected");
+    await settle();
+    expect(api.createTaskPlanComment).toHaveBeenCalledOnce();
+    store.getState().setTaskPlan(TASK, plan);
+    pending.resolve(snapshot);
+    await settle();
+    expect(api.createTaskPlanComment).toHaveBeenCalledOnce();
+    expect(state()).toMatchObject({ status: "complete", pendingCount: 0 });
+    expect(saved()).toEqual([]);
+  });
 
   it("stops timers when the last surface unmounts and resumes on remount", async () => {
     write();

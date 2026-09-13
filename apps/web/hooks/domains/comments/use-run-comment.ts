@@ -30,6 +30,7 @@ import { getTaskPlanComments } from "@/lib/api/domains/plan-comment-api";
 import { listTaskSessions } from "@/lib/api/domains/session-api";
 import { findTaskInSnapshots } from "@/lib/kanban/find-task";
 import { captureTaskSessionActivityEpochs } from "@/lib/state/slices/session/activity-epochs";
+import { hasPendingPlanCommentMigration } from "./plan-comment-migration";
 
 /**
  * Format a single comment into markdown suitable for sending to the agent.
@@ -243,7 +244,11 @@ async function runTaskPlanComment(
   storeApi: ReturnType<typeof useAppStoreApi>,
   clientAdmissionId: string,
 ): Promise<{ queued: boolean }> {
-  if (!comment.version || comment.version < 1) {
+  if (
+    !comment.version ||
+    comment.version < 1 ||
+    hasPendingPlanCommentMigration(storeApi, taskId, comment.id)
+  ) {
     throw new PlanCommentRunError("plan-comment-not-persisted");
   }
   const availability = resolvePlanCommentRunAvailability(storeApi.getState(), taskId);

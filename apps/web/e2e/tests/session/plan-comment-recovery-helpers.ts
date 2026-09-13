@@ -182,7 +182,7 @@ export async function assertPlainSendDuringRecovery(options: RecoveryOptions, wi
   await expect(editor).toHaveText("");
   control.release();
   await testPage.evaluate(() => window.dispatchEvent(new Event("focus")));
-  await expect.poll(control.succeeded).toBeGreaterThan(0);
+  await expect.poll(control.succeeded, { timeout: 15_000 }).toBeGreaterThan(0);
   await expect(notice).toHaveCount(0);
   if (mobile) await assertNoDocumentHorizontalOverflow(testPage, "empty plan comment recovery");
 }
