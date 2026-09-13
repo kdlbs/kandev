@@ -174,6 +174,8 @@ type UserSettings struct {
 	QuickChatTabOrderByWorkspace      map[string][]string               `json:"quick_chat_tab_order_by_workspace"`
 	KanbanHiddenStepIDs               map[string][]string               `json:"kanban_hidden_step_ids"`
 	WorkflowIDsWithAutoHideEmptySteps []string                          `json:"workflow_ids_with_auto_hide_empty_steps"`
+	KanbanSort                        string                            `json:"kanban_sort"`
+	KanbanPriorityFilterTokens        []string                          `json:"kanban_priority_filter_tokens"`
 	Revision                          int64                             `json:"revision"`
 	CreatedAt                         time.Time                         `json:"created_at"`
 	UpdatedAt                         time.Time                         `json:"updated_at"`

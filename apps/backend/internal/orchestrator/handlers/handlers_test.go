@@ -59,6 +59,51 @@ func TestBranchRecoveryConflictResponsePreservesRecoveryDetails(t *testing.T) {
 	require.Equal(t, "resume_new_branch", payload.Details["recovery_action"])
 }
 
+func TestSessionRecoveryGuardConflictResponseMapsRetryableToConflict(t *testing.T) {
+	msg := createTestMessage(t, ws.ActionSessionLaunch, map[string]interface{}{})
+	err := &orchestrator.SessionRecoveryGuardError{
+		Cause:     errors.New("session is guarded pending recovery"),
+		SessionID: "session-1",
+		Retryable: true,
+	}
+
+	response, responseErr := sessionRecoveryGuardConflictResponse(msg, err)
+	require.NoError(t, responseErr)
+	require.NotNil(t, response)
+	payload := parseError(t, response)
+	require.Equal(t, ws.ErrorCodeConflict, payload.Code)
+	require.Equal(t, "session_recovery_in_progress", payload.Details["kind"])
+	require.Equal(t, true, payload.Details["retryable"])
+	require.Equal(t, "session-1", payload.Details["session_id"])
+}
+
+func TestSessionRecoveryGuardConflictResponseMapsNonRetryableToUnavailable(t *testing.T) {
+	msg := createTestMessage(t, ws.ActionSessionLaunch, map[string]interface{}{})
+	err := &orchestrator.SessionRecoveryGuardError{
+		Cause:     errors.New("session has an unstoppable agent from a prior launch"),
+		SessionID: "session-2",
+		Retryable: false,
+	}
+
+	response, responseErr := sessionRecoveryGuardConflictResponse(msg, err)
+	require.NoError(t, responseErr)
+	require.NotNil(t, response)
+	payload := parseError(t, response)
+	require.Equal(t, ws.ErrorCodeUnavailable, payload.Code)
+	require.Equal(t, "session_recovery_unstoppable", payload.Details["kind"])
+	require.Equal(t, false, payload.Details["retryable"])
+	require.Equal(t, "session-2", payload.Details["session_id"])
+}
+
+func TestSessionRecoveryGuardConflictResponseIgnoresUnrelatedError(t *testing.T) {
+	msg := createTestMessage(t, ws.ActionSessionLaunch, map[string]interface{}{})
+
+	response, responseErr := sessionRecoveryGuardConflictResponse(msg, errors.New("boom"))
+
+	require.NoError(t, responseErr)
+	require.Nil(t, response)
+}
+
 func TestWsEnsureSessionRequestParsesAutoStartOverride(t *testing.T) {
 	tests := []struct {
 		name      string

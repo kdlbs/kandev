@@ -143,6 +143,9 @@ func (e *Executor) probeHostGitHubHosts(
 	}
 	cancel()
 	workers.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 
 	available := make([]string, 0, len(candidates))
 	for _, index := range candidates {

@@ -44,7 +44,7 @@ export interface TaskCardMenuParams {
   onMove?: (task: Task, targetStepId: string) => void;
 }
 
-function useKanbanCardMoveMenuActions({
+export function useKanbanCardMoveMenuActions({
   task,
   steps,
   isSelected,
@@ -53,7 +53,8 @@ function useKanbanCardMoveMenuActions({
 }: Pick<TaskCardMenuParams, "task" | "steps" | "isSelected" | "selectedIds" | "onMove">) {
   const moveTargets = useKanbanCardMoveTargets(task.id, steps);
   const moveTasks = useTaskWorkflowMove();
-  const { sortByDisplayOrder, getWorkflowIdForTask } = useTaskMultiSelectStore();
+  const { sortByDisplayOrder, getWorkflowIdForTask, eligibleSelectedIds } =
+    useTaskMultiSelectStore();
 
   const runMoveTasks = (
     taskIds: string[],
@@ -74,7 +75,8 @@ function useKanbanCardMoveMenuActions({
       runMoveTasks([task.id], moveTargets.currentWorkflowId, stepId, "step");
     }
   };
-  const selectedTaskIds = isSelected && selectedIds?.size ? [...selectedIds] : [task.id];
+  const selectedTaskIds =
+    isSelected && selectedIds?.size ? eligibleSelectedIds([...selectedIds]) : [task.id];
   const orderedSelectedIds = () => sortByDisplayOrder(selectedTaskIds);
   const isMixedWorkflowSelection =
     selectedTaskIds.length > 1 &&

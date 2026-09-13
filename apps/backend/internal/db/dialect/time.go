@@ -24,13 +24,28 @@ func DurationMs(driver, end, start string) string {
 	return fmt.Sprintf("(julianday(%s) - julianday(%s)) * 86400000", end, start)
 }
 
-// DateOf returns the SQL expression to extract the date portion from a timestamp.
+// DateOf returns the SQL expression to extract the date portion from a
+// timestamp. PostgreSQL timestamp columns in the application schema contain
+// UTC wall-clock values without a timezone, so casting them to date is stable
+// across connection timezone settings.
 //
 //	SQLite:   date(expr)
 //	Postgres: (expr)::date
 func DateOf(driver, expr string) string {
 	if IsPostgres(driver) {
 		return fmt.Sprintf("(%s)::date", expr)
+	}
+	return fmt.Sprintf("date(%s)", expr)
+}
+
+// DateText returns a date expression as YYYY-MM-DD text for scanning into the
+// analytics model's string date fields.
+//
+//	SQLite:   date(expr)
+//	Postgres: to_char(expr, 'YYYY-MM-DD')
+func DateText(driver, expr string) string {
+	if IsPostgres(driver) {
+		return fmt.Sprintf("to_char(%s, 'YYYY-MM-DD')", expr)
 	}
 	return fmt.Sprintf("date(%s)", expr)
 }
@@ -142,13 +157,13 @@ func GreatestTimestamp(driver, left, right string) string {
 	return fmt.Sprintf("max(%s, %s)", left, right)
 }
 
-// CurrentDate returns the SQL expression for the current date (no time component).
+// CurrentDate returns the current UTC date (without a time component).
 //
 //	SQLite:   date('now')
-//	Postgres: CURRENT_DATE
+//	Postgres: (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date
 func CurrentDate(driver string) string {
 	if IsPostgres(driver) {
-		return "CURRENT_DATE"
+		return "(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date"
 	}
 	return "date('now')"
 }
@@ -157,10 +172,10 @@ func CurrentDate(driver string) string {
 // where daysExpr is a parameter placeholder (e.g., "?") for the number of days.
 //
 //	SQLite:   date('now', '-' || ? || ' days')
-//	Postgres: CURRENT_DATE - (? || ' days')::interval
+//	Postgres: (CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date - (?::int)
 func DateNowMinusDays(driver, daysExpr string) string {
 	if IsPostgres(driver) {
-		return fmt.Sprintf("CURRENT_DATE - (%s || ' days')::interval", daysExpr)
+		return fmt.Sprintf("(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date - (%s::int)", daysExpr)
 	}
 	return fmt.Sprintf("date('now', '-' || %s || ' days')", daysExpr)
 }
@@ -168,10 +183,10 @@ func DateNowMinusDays(driver, daysExpr string) string {
 // DatePlusOneDay returns the SQL expression to add one day to a date expression.
 //
 //	SQLite:   date(expr, '+1 day')
-//	Postgres: (expr)::date + INTERVAL '1 day'
+//	Postgres: (expr)::date + 1
 func DatePlusOneDay(driver, expr string) string {
 	if IsPostgres(driver) {
-		return fmt.Sprintf("(%s)::date + INTERVAL '1 day'", expr)
+		return fmt.Sprintf("(%s)::date + 1", expr)
 	}
 	return fmt.Sprintf("date(%s, '+1 day')", expr)
 }

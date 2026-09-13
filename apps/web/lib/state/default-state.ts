@@ -32,6 +32,7 @@ export const defaultState = {
   sidebarArchivedTasks: defaultKanbanState.sidebarArchivedTasks,
   workflows: defaultKanbanState.workflows,
   workspaceContextGeneration: defaultKanbanState.workspaceContextGeneration,
+  workspaceContextRead: defaultKanbanState.workspaceContextRead,
   tasks: defaultKanbanState.tasks,
   taskRemoval: defaultKanbanState.taskRemoval,
   workspaces: defaultWorkspaceState.workspaces,
@@ -406,6 +407,26 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     kanban: { ...defaultState.kanban, ...initialState.kanban },
     kanbanMulti: { ...defaultState.kanbanMulti, ...initialState.kanbanMulti },
     workflows: { ...defaultState.workflows, ...initialState.workflows },
+    workspaceContextRead: {
+      ...defaultState.workspaceContextRead,
+      ...initialState.workspaceContextRead,
+      pending: {
+        ...defaultState.workspaceContextRead.pending,
+        ...initialState.workspaceContextRead?.pending,
+      },
+      errors: {
+        ...defaultState.workspaceContextRead.errors,
+        ...initialState.workspaceContextRead?.errors,
+      },
+      retryAfterMs: {
+        ...defaultState.workspaceContextRead.retryAfterMs,
+        ...initialState.workspaceContextRead?.retryAfterMs,
+      },
+      requestIds: {
+        ...defaultState.workspaceContextRead.requestIds,
+        ...initialState.workspaceContextRead?.requestIds,
+      },
+    },
     workspaceContextGeneration: mergeWorkspaceContextGeneration(initialState),
     tasks: { ...defaultState.tasks, ...initialState.tasks },
     workspaces: { ...defaultState.workspaces, ...initialState.workspaces },

@@ -74,13 +74,8 @@ type WorkflowMoveOptionsFieldsProps = {
 };
 
 /**
- * Reset-context, skip-step-prompt, and one-time instructions fields. Font size
- * is inherited from the hosting surface (Dialog, Drawer, and the stepper hover
- * card all share the `text-xs/relaxed` popover base) so the fields never stand
- * out larger than the surrounding chrome. Checkboxes align to the first text
- * line so a wrapping label reads cleanly. The skip-step-prompt consequence is
- * disclosed through an info-icon tooltip (hover on desktop, focus/tap on touch)
- * rather than an always-visible paragraph.
+ * Move fields own their typography because portaled menus do not share the
+ * dialog/popover text baseline. Touch surfaces retain larger labels and targets.
  */
 export function WorkflowMoveOptionsFields({
   draft,
@@ -89,14 +84,16 @@ export function WorkflowMoveOptionsFields({
   instructionsRows = 4,
 }: WorkflowMoveOptionsFieldsProps) {
   const { t } = useTranslation();
-  const rowClass = isTouchSurface ? "flex items-center gap-3 min-h-11" : "flex items-start gap-2.5";
+  const rowClass = isTouchSurface
+    ? "flex items-center gap-2.5 min-h-11"
+    : "flex items-start gap-2.5";
   const checkboxClass = cn("shrink-0", !isTouchSurface && "mt-0.5");
   const hintButtonClass = cn(
     "inline-flex shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
     isTouchSurface ? "size-11" : "mt-0.5 size-4",
   );
   return (
-    <div className="grid gap-3.5">
+    <div className={cn("grid min-w-0 gap-3 text-xs/relaxed", isTouchSurface && "text-sm/relaxed")}>
       <label className={rowClass}>
         <Checkbox
           className={checkboxClass}
@@ -133,7 +130,7 @@ export function WorkflowMoveOptionsFields({
         </Tooltip>
       </div>
       <label className="grid gap-1.5">
-        <span>{t("task:workflowMoveInstructions")}</span>
+        <span className="font-medium">{t("task:workflowMoveInstructions")}</span>
         <Textarea
           value={draft.instructions}
           onChange={(event) => onDraftChange({ instructions: event.target.value })}

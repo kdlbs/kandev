@@ -490,6 +490,7 @@ export const WorkflowSection = memo(function WorkflowSection(workflowProps: Work
 
 export type DialogPromptSectionProps = {
   isSessionMode: boolean;
+  promptReferencesEnabled?: boolean;
   isTaskStarted: boolean;
   initialDescription: string;
   fs: DialogFormState;
@@ -531,6 +532,7 @@ function importBindings<T>(
 
 export function DialogPromptSection({
   isSessionMode,
+  promptReferencesEnabled = false,
   isTaskStarted,
   initialDescription,
   fs,
@@ -556,6 +558,7 @@ export function DialogPromptSection({
       <TaskFormInputs
         key={fs.openCycle}
         isSessionMode={isSessionMode}
+        promptReferencesEnabled={promptReferencesEnabled}
         workspaceId={workspaceId}
         autoFocus={shouldAutoFocus}
         initialDescription={initialDescription}

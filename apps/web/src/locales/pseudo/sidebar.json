@@ -119,5 +119,7 @@
   "failedToSyncSidebarTaskPrefs": "Ƒàĩĺēď ţō śŷńć śĩďēƀàŕ ţàśķ ƥŕēƒś",
   "failedToSyncSidebarViews": "Ƒàĩĺēď ţō śŷńć śĩďēƀàŕ vĩēŵś",
   "newViewNumbered": "Ńēŵ vĩēŵ {{suffix}}",
-  "untitledView": "Ũńţĩţĺēď vĩēŵ"
+  "untitledView": "Ũńţĩţĺēď vĩēŵ",
+  "workspaceContextRefreshFailed": "Ćōũĺď ńōţ ŕēƒŕēśĥ ţàśķś.",
+  "workspaceContextAccessDenied": "Ŷōũ ńō ĺōńĝēŕ ĥàvē àććēśś ţō ţĥĩś ŵōŕķśƥàćē."
 }

@@ -2,6 +2,7 @@ import { test, expect } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { expectTaskDescription } from "../../pages/task-description-editor";
 import { seedIncompatibleAgentScenario, seedLockedWorkflow } from "./agent-compatibility-helpers";
 
 // Exercises the regular task-create dialog (New Task in the sidebar), so run
@@ -291,7 +292,7 @@ test.describe("Task creation", () => {
       await expect(dialog.getByTestId("task-description-input")).toHaveCount(0);
 
       await toggle.click();
-      await expect(dialog.getByTestId("task-description-input")).toHaveValue(description);
+      await expectTaskDescription(dialog.getByTestId("task-description-input"), description);
       await expect(toggle).toHaveAttribute("aria-pressed", "false");
       await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
       await expect(dialog).not.toBeVisible();
@@ -522,7 +523,7 @@ test.describe("Task creation", () => {
 
     const descInput = testPage.getByTestId("task-description-input");
     await descInput.fill("This is a test description");
-    await expect(descInput).toHaveValue("This is a test description");
+    await expectTaskDescription(descInput, "This is a test description");
   });
 
   test("start agent: creates task, starts session, navigates to session", async ({ testPage }) => {

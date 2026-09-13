@@ -40,7 +40,24 @@ type Server struct {
 	metricsCollector *metrics.Collector
 	lspInstaller     lspInstallerRegistry
 
+	// credentialSource, when set via SetCredentialSource, authenticates this
+	// instance's requests and streams against the control server's single
+	// rotating credential instead of the static cfg.AuthToken captured at
+	// construction (design 01 "Single driver",
+	// AC-EXECUTORS-CONTROL-OWNERSHIP-002.6). Nil preserves the legacy
+	// static-token behavior every test constructing a Server without a
+	// running control server alongside it relies on.
+	credentialSource InstanceCredentialSource
+
 	upgrader websocket.Upgrader
+}
+
+// SetCredentialSource wires this instance server's authentication and
+// stream lifetime to the control server's single rotating credential,
+// replacing the static per-instance token captured at construction. Call
+// once, before the server starts accepting requests.
+func (s *Server) SetCredentialSource(src InstanceCredentialSource) {
+	s.credentialSource = src
 }
 
 // NewServer creates a new API server for an agent instance.
@@ -71,7 +88,7 @@ func NewServer(cfg *config.InstanceConfig, procMgr *process.Manager, mcpServer *
 	// - /health: liveness probe
 	// - /sse, /message, /mcp: MCP endpoints used by the agent subprocess which
 	//   runs in the same trust boundary but does not possess the auth token.
-	s.router.Use(bearerTokenAuth(cfg.AuthToken, "/health", "/sse", "/message", "/mcp"))
+	s.router.Use(s.instanceAuth(cfg.AuthToken, "/health", "/sse", "/message", "/mcp"))
 	// Validate X-Instance-ID so a client that holds a stale port (because
 	// the previous instance was deleted and the port recycled to a new
 	// instance) gets a clean 404 instead of accidentally configuring or

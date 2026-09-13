@@ -1053,7 +1053,7 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		McpProfile:                     reqWithWorktree.McpProfile,
 		AuthToken:                      launchAuthToken,
 		BootstrapNonce:                 m.revealRuntimeSecret(ctx, metadata, MetadataKeyBootstrapNonceSecret),
-		AgentctlStartupConfig:          m.agentctlStartupConfig,
+		AgentctlStartupConfig:          agentctlStartupConfigForExecutor(m.agentctlStartupConfig, reqWithWorktree.ExecutorType),
 		OnProgress:                     onProgress,
 		RemoteContributions:            remoteContributions,
 		ContributionDestinations:       contributionDestinations,
@@ -1342,6 +1342,15 @@ func (m *Manager) publishLaunchPrepareCompleted(req *LaunchRequest, result *EnvP
 // If req.SessionID is empty (quick chat / pre-session contexts), no
 // deduplication key exists and we fall through to direct execution.
 func (m *Manager) Launch(ctx context.Context, req *LaunchRequest) (*AgentExecution, error) {
+	// AC-EXECUTORS-SURVIVAL-002.8/002.16: refuse rather than queue or block a
+	// launch for a session whose recovery guard is currently held. Checked
+	// first, before any activity lease or singleflight coalescing, so a
+	// guarded session can never partially acquire launch-path state.
+	if req.SessionID != "" {
+		if err := m.recoveryGuard.CheckLaunchAllowed(req.SessionID); err != nil {
+			return nil, err
+		}
+	}
 	if req.SessionID == "" {
 		activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStarting)
 		if err != nil {
@@ -1807,6 +1816,12 @@ func (m *Manager) registerAndPublishExecution(
 		}
 		return fmt.Errorf("failed to register execution: %w", addErr)
 	}
+	// This execution is durably in the store as of the Add above, and it got
+	// there via Launch -- never via the recovery path, which adds directly to
+	// executionStore and marks retrackedSessions instead -- so sessionID's row
+	// is "created this lifetime" from this point on (see
+	// standaloneOwnSessions).
+	m.markSessionCreatedThisLifetime(sessionID)
 	isKubernetes := execution.RuntimeName == agentruntime.RuntimeKubernetes
 	var createdRuntimeSecrets map[string]bool
 	if isKubernetes {

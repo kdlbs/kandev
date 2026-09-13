@@ -100,19 +100,32 @@ type StuckParentCandidate struct {
 //   - the NOT EXISTS against runs drops a candidate with a queued or
 //     claimed task_children_completed run (still in flight, regardless of
 //     which child set it was requested for — wait for it to resolve rather
-//     than race a duplicate) or a terminal one requested at or after
-//     newest_child_updated_at (it already reflects the current child set,
-//     including a failed or cancelled wake that must remain terminal under
-//     the Office runtime contract). A terminal run requested *before* the
-//     newest child update does NOT block: that run saw a stale child set, so
-//     it must not be treated as having delivered this one — this is R3-A's
-//     fix, replacing a plain "any terminal run ever" check that let one
-//     finished run permanently immunize a parent against every later
-//     child-set change.
+//     than race a duplicate) or a terminal one whose wake_wave_string
+//     matches the parent's current wave string (parent-wake-wave-identity):
+//     it already delivered this exact wave, including a failed or
+//     cancelled one that must remain terminal under the Office runtime
+//     contract and be unblocked only by an explicit retry or a real
+//     wave-member change. A separate clause keeps a parent-scoped (not
+//     per-row) compatibility path for pre-upgrade rows: only when the
+//     parent has no task_children_completed run carrying a wave identity
+//     at all (wake_wave_key is empty), in any status, does a terminal run
+//     requested at or after newest_child_updated_at still block under the
+//     original timestamp rule — this is R3-A's fix, replacing a plain "any
+//     terminal run ever" check that let one finished run permanently
+//     immunize a parent against every later child-set change. The
+//     compatibility path is bounded and self-clearing: the first wave-keyed
+//     run recorded for a parent retires it for that parent from then on.
 //     queueChildrenCompletedRun and cascadeChildrenCompleted (the
 //     edge-triggered delivery paths) never write a receipt, so the receipt
 //     alone cannot tell a healthy edge-delivered wake from a lost one;
 //     evidence of delivery has to come from runs itself.
+//   - a second EXISTS, over the wave-member predicate (not archived, not
+//     ephemeral, not automation-origin — the same predicate
+//     ListWaveMembers applies), removes a parent with no possible wave from
+//     candidacy: without it such a parent would be listed every tick,
+//     found to have no wave, queue nothing, and be listed again. Additive
+//     and narrowing only — it sits
+//     beside the existing archived-only EXISTS, never replacing it.
 //   - requiring a non-empty assignee_agent_profile_id drops a candidate
 //     with no resolvable runner, and the INNER JOIN against agent_profiles
 //     drops one whose runner is paused, stopped, pending approval, or
@@ -133,6 +146,11 @@ type StuckParentCandidate struct {
 // redundant closing of that race window, not the primary filter).
 func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit int) ([]StuckParentCandidate, error) {
 	driver := r.ro.DriverName()
+	// Shared with the wave-member EXISTS gate below, which spells it
+	// literally with a "c." alias (matching the system design's worked
+	// SQL) — this unaliased form is what OrderedIDConcat's own
+	// "SELECT id FROM tasks WHERE <where>" subquery needs.
+	waveMemberPredicate := "parent_id = p.id AND archived_at IS NULL AND is_ephemeral = 0 AND COALESCE(origin, '') != 'automation_run'"
 	newestChildUpdatedAtText := dialect.SecondPrecisionText(driver, "MAX(c.updated_at)")
 	requestedAtText := dialect.SecondPrecisionText(driver, "w.requested_at")
 	var rows []StuckParentCandidate
@@ -150,6 +168,7 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 						ORDER BY id
 					) c
 				), '') AS child_set_key,
+				p.id || '|' || COALESCE(`+dialect.OrderedIDConcat(driver, waveMemberPredicate)+`, '') AS wave_string,
 				(
 					SELECT `+newestChildUpdatedAtText+` FROM tasks c
 					WHERE c.parent_id = p.id AND c.archived_at IS NULL
@@ -162,6 +181,13 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 			  AND EXISTS (
 			      SELECT 1 FROM tasks c
 			      WHERE c.parent_id = p.id AND c.archived_at IS NULL
+			  )
+			  AND EXISTS (
+			      SELECT 1 FROM tasks c
+			      WHERE c.parent_id = p.id
+			        AND c.archived_at IS NULL
+			        AND c.is_ephemeral = 0
+			        AND COALESCE(c.origin, '') != 'automation_run'
 			  )
 			  AND NOT EXISTS (
 			      SELECT 1 FROM tasks c
@@ -196,13 +222,28 @@ func (r *Repository) ListStuckParents(ctx context.Context, reason string, limit 
 		            w.status IN ('queued', 'claimed')
 		            OR (
 		                w.status IN ('finished', 'failed', 'cancelled')
-		                AND `+requestedAtText+` >= s.newest_child_updated_at
+		                AND w.wake_wave_string = s.wave_string
 		            )
 		        )
 		  )
+		  AND (
+		      EXISTS (
+		          SELECT 1 FROM runs w
+		          WHERE `+dialect.JSONExtract(driver, "w.payload", "task_id")+` = s.parent_task_id
+		            AND w.reason = ?
+		            AND w.wake_wave_key <> ''
+		      )
+		      OR NOT EXISTS (
+		          SELECT 1 FROM runs w
+		          WHERE `+dialect.JSONExtract(driver, "w.payload", "task_id")+` = s.parent_task_id
+		            AND w.reason = ?
+		            AND w.status IN ('finished', 'failed', 'cancelled')
+		            AND `+requestedAtText+` >= s.newest_child_updated_at
+		      )
+		  )
 		ORDER BY s.parent_task_id
 		LIMIT ?
-	`), reason, limit)
+	`), reason, reason, reason, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -284,8 +325,9 @@ type childSetKeyAndGenerationRow struct {
 }
 
 // GetChildSetKey returns the deterministic key for the parent's current
-// active child set. It reads child ids and states separately from the
-// aggregate query so the same logic works on SQLite and PostgreSQL.
+// active child set, formatted by formatChildSetKey — the same "id:state"
+// comma-joined form ListStuckParents computes in SQL via
+// childSetKeyAggregate, so the two must stay byte-identical.
 func (r *Repository) GetChildSetKey(ctx context.Context, parentTaskID string) (string, error) {
 	var rows []childSetKeyRow
 	if err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`

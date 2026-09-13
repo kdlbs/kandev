@@ -5,6 +5,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/persistence"
 )
 
@@ -37,7 +38,7 @@ func (r *Repository) activateLoopLiveness() {
 		{"agent_wakeup_requests", causationIDColumn},
 		{"runs", causationIDColumn},
 	} {
-		exists, err := columnExists(r.db, probe.table, probe.column)
+		exists, err := db.ColumnExists(r.db, probe.table, probe.column)
 		if err != nil {
 			r.logActivationWarn("loop liveness schema probe failed", err)
 			return

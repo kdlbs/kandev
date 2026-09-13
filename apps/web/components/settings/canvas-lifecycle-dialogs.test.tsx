@@ -517,6 +517,15 @@ describe("CanvasReleaseDialog review surface", () => {
     expect(screen.getByRole("button", { name: COPY.rollbackRelease })).toBeTruthy();
   });
 
+  it("uses the wide responsive desktop review surface", async () => {
+    mockListCanvasReleases.mockResolvedValue({ releases: [release()] });
+
+    render(<CanvasReleaseDialog canvas={canvas} open onOpenChange={vi.fn()} />);
+
+    await screen.findByTestId("canvas-release-review-release-pending");
+    expect(screen.getByTestId("canvas-releases-dialog").className).toContain("sm:max-w-[48rem]");
+  });
+
   it("keeps the phone review full-height with a fixed safe-area footer", async () => {
     responsive.isMobile = true;
     mockListCanvasReleases.mockResolvedValue({ releases: [release()] });

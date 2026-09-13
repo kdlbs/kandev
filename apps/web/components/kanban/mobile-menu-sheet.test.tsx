@@ -77,6 +77,8 @@ function defaultDisplaySettings() {
     snapshots: {},
     hiddenWorkflowStepIds: {},
     workflowIdsWithAutoHideEmptySteps: [],
+    boardSort: "created_desc" as "created_desc" | "priority_desc",
+    priorityFilterTokens: [] as string[],
     onWorkflowChange: vi.fn(),
     onRepositoryChange: vi.fn(),
     onTogglePreviewOnClick: vi.fn(),
@@ -85,6 +87,8 @@ function defaultDisplaySettings() {
     onToggleAutoHideEmpty: vi.fn(),
     effectiveTaskListingView: "kanban",
     onViewModeChange: vi.fn(),
+    onBoardSortChange: vi.fn(),
+    onPriorityFilterChange: vi.fn(),
   };
 }
 
@@ -166,5 +170,58 @@ describe("MobileMenuSheet — Columns control for the focused workflow", () => {
     expect(screen.queryByText("Repository")).toBeNull();
     expect(screen.queryByText("Preview panel")).toBeNull();
     expect(screen.getByText("Workflow")).not.toBeNull();
+  });
+});
+
+describe("MobileMenuSheet — board sort and priority filter", () => {
+  it("renders the board sort select and priority filter checkboxes on the phone kanban page", () => {
+    renderSheet({ currentPage: "kanban" });
+
+    expect(screen.getByTestId("mobile-board-sort")).not.toBeNull();
+    expect(screen.getByTestId("mobile-priority-filter-option-critical")).not.toBeNull();
+    expect(screen.getByTestId("mobile-priority-filter-option-high")).not.toBeNull();
+    expect(screen.getByTestId("mobile-priority-filter-option-medium")).not.toBeNull();
+    expect(screen.getByTestId("mobile-priority-filter-option-low")).not.toBeNull();
+  });
+
+  it("names the board sort select by what it selects, not its current value", () => {
+    renderSheet({ currentPage: "kanban" });
+
+    expect(screen.getByRole("combobox", { name: "Board sort" })).not.toBeNull();
+  });
+
+  it("renders nothing on the tasks page", () => {
+    renderSheet({ currentPage: "tasks" });
+
+    expect(screen.queryByTestId("mobile-board-sort")).toBeNull();
+    expect(screen.queryByTestId(/mobile-priority-filter-option-/)).toBeNull();
+  });
+
+  it("reflects the current priority filter selection", () => {
+    useKanbanDisplaySettingsMock.mockReturnValue({
+      ...defaultDisplaySettings(),
+      priorityFilterTokens: ["critical"],
+    });
+    renderSheet({ currentPage: "kanban" });
+
+    expect(
+      screen.getByTestId("mobile-priority-filter-option-critical").getAttribute("data-state"),
+    ).toBe("checked");
+    expect(
+      screen.getByTestId("mobile-priority-filter-option-high").getAttribute("data-state"),
+    ).toBe("unchecked");
+  });
+
+  it("invokes onPriorityFilterChange when tapping a priority option", () => {
+    const onPriorityFilterChange = vi.fn();
+    useKanbanDisplaySettingsMock.mockReturnValue({
+      ...defaultDisplaySettings(),
+      onPriorityFilterChange,
+    });
+    renderSheet({ currentPage: "kanban" });
+
+    screen.getByTestId("mobile-priority-filter-option-high").click();
+
+    expect(onPriorityFilterChange).toHaveBeenCalledWith("high");
   });
 });

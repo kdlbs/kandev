@@ -119,5 +119,7 @@
   "failedToSyncSidebarTaskPrefs": "Failed to sync sidebar task prefs",
   "failedToSyncSidebarViews": "Failed to sync sidebar views",
   "newViewNumbered": "New view {{suffix}}",
-  "untitledView": "Untitled view"
+  "untitledView": "Untitled view",
+  "workspaceContextRefreshFailed": "Could not refresh tasks.",
+  "workspaceContextAccessDenied": "You no longer have access to this workspace."
 }
