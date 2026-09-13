@@ -107,7 +107,16 @@ function ResourceRow({
         </span>
       </AccordionTrigger>
       <AccordionContent className="px-3">
-        <p className="break-all text-muted-foreground">{resource.detail}</p>
+        <p className="break-words text-muted-foreground">{resource.detail}</p>
+        {resource.detailLines && resource.detailLines.length > 0 && (
+          <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+            {resource.detailLines.map((line, index) => (
+              <p key={`${resource.id}-detail-${index}`} className="break-words">
+                {line}
+              </p>
+            ))}
+          </div>
+        )}
         {resource.warning && <p className="mt-2 break-words text-amber-600">{resource.warning}</p>}
         {resource.id === "go-cache" && (
           <StorageActionButton

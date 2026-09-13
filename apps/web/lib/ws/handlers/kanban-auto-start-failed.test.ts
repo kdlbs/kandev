@@ -46,51 +46,54 @@ function makeUpdateMessage(workflowId: string, tasks: unknown[], steps: unknown[
   };
 }
 
-describe("kanban.update handler — autoStartFailed preservation", () => {
-  it("preserves autoStartFailed from existing tasks", () => {
-    const store = makeStore({
-      kanban: {
-        workflowId: WORKFLOW_ID,
-        steps: [],
-        tasks: [
-          {
-            id: TASK_ID,
-            workflowId: WORKFLOW_ID,
-            workflowStepId: STEP_ID,
-            title: TASK_TITLE,
-            position: 0,
-            autoStartFailed: true,
-          },
-        ],
-      },
-      kanbanMulti: {
-        isLoading: false,
-        snapshots: {
-          [WORKFLOW_ID]: {
-            workflowId: WORKFLOW_ID,
-            workflowName: "WF1",
-            steps: [],
-            tasks: [
-              {
-                id: TASK_ID,
-                workflowId: WORKFLOW_ID,
-                workflowStepId: STEP_ID,
-                title: TASK_TITLE,
-                position: 0,
-                autoStartFailed: true,
-              },
-            ],
-          },
+function makeAutoStartFailedTask(autoStartFailed: boolean) {
+  return {
+    id: TASK_ID,
+    workflowId: WORKFLOW_ID,
+    workflowStepId: STEP_ID,
+    title: TASK_TITLE,
+    position: 0,
+    autoStartFailed,
+  };
+}
+
+function makeAutoStartFailedStore(kanbanFlag: boolean, snapshotFlag: boolean) {
+  return makeStore({
+    kanban: {
+      workflowId: WORKFLOW_ID,
+      steps: [],
+      tasks: [makeAutoStartFailedTask(kanbanFlag)],
+    },
+    kanbanMulti: {
+      isLoading: false,
+      orderRevisionByStepId: {},
+      pendingReorderBandKeys: {},
+      withheldReorderByBandKey: {},
+      snapshots: {
+        [WORKFLOW_ID]: {
+          workflowId: WORKFLOW_ID,
+          workflowName: "WF1",
+          steps: [],
+          tasks: [makeAutoStartFailedTask(snapshotFlag)],
         },
       },
-    } as Partial<AppState>);
+    },
+  } as Partial<AppState>);
+}
 
-    const handler = registerKanbanHandlers(store)["kanban.update"]!;
-    handler(
-      makeUpdateMessage(WORKFLOW_ID, [
-        { id: TASK_ID, workflowStepId: STEP_ID, title: TASK_TITLE, position: 0 },
-      ]),
-    );
+function runAutoStartFailedUpdate(store: StoreApi<AppState>) {
+  const handler = registerKanbanHandlers(store)["kanban.update"]!;
+  handler(
+    makeUpdateMessage(WORKFLOW_ID, [
+      { id: TASK_ID, workflowStepId: STEP_ID, title: TASK_TITLE, position: 0 },
+    ]),
+  );
+}
+
+describe("kanban.update handler — autoStartFailed preservation", () => {
+  it("preserves autoStartFailed from existing tasks", () => {
+    const store = makeAutoStartFailedStore(true, true);
+    runAutoStartFailedUpdate(store);
 
     const task = store.getState().kanban.tasks.find((t) => t.id === TASK_ID);
     expect(task?.autoStartFailed).toBe(true);
@@ -107,49 +110,8 @@ describe("kanban.update handler — autoStartFailed preservation", () => {
     // the kanbanMulti merge only falls back to the snapshot's value when the
     // primary lookup is `undefined` (task absent), not when it resolves to an
     // explicit false.
-    const store = makeStore({
-      kanban: {
-        workflowId: WORKFLOW_ID,
-        steps: [],
-        tasks: [
-          {
-            id: TASK_ID,
-            workflowId: WORKFLOW_ID,
-            workflowStepId: STEP_ID,
-            title: TASK_TITLE,
-            position: 0,
-            autoStartFailed: false,
-          },
-        ],
-      },
-      kanbanMulti: {
-        isLoading: false,
-        snapshots: {
-          [WORKFLOW_ID]: {
-            workflowId: WORKFLOW_ID,
-            workflowName: "WF1",
-            steps: [],
-            tasks: [
-              {
-                id: TASK_ID,
-                workflowId: WORKFLOW_ID,
-                workflowStepId: STEP_ID,
-                title: TASK_TITLE,
-                position: 0,
-                autoStartFailed: true,
-              },
-            ],
-          },
-        },
-      },
-    } as Partial<AppState>);
-
-    const handler = registerKanbanHandlers(store)["kanban.update"]!;
-    handler(
-      makeUpdateMessage(WORKFLOW_ID, [
-        { id: TASK_ID, workflowStepId: STEP_ID, title: TASK_TITLE, position: 0 },
-      ]),
-    );
+    const store = makeAutoStartFailedStore(false, true);
+    runAutoStartFailedUpdate(store);
 
     const snapshotTask = store
       .getState()

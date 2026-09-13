@@ -62,6 +62,8 @@ export function usePresentationToken(key: string | null | undefined): number {
 type UseWorkflowStepMoveParams = {
   taskId?: string | null;
   workflowId?: string | null;
+  currentStepId?: string | null;
+  taskState?: string | null;
   /** Identity of the presentation issuing the move; see `usePresentationToken`. */
   presentationToken: number;
   onMoveStart?: () => void;
@@ -70,8 +72,34 @@ type UseWorkflowStepMoveParams = {
 
 type UseWorkflowStepMoveResult = {
   movingToStepId: string | null;
+  /** Accepted destination retained until the task projection reaches it. */
+  progressingToStepId: string | null;
   handleMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
 };
+
+type ProgressMove = {
+  requestId: number;
+  sourceStepId: string | null;
+  targetStepId: string;
+};
+
+const TERMINAL_TASK_STATES = new Set(["COMPLETED", "FAILED", "CANCELLED"]);
+
+function shouldClearProgressMove(
+  move: ProgressMove,
+  currentStepId: string | null | undefined,
+  taskState: string | null | undefined,
+  priorMoveTargets: ReadonlyMap<number, string>,
+): boolean {
+  if (taskState && TERMINAL_TASK_STATES.has(taskState)) return true;
+  if (currentStepId === move.targetStepId) return true;
+  return Boolean(
+    move.sourceStepId &&
+    currentStepId &&
+    currentStepId !== move.sourceStepId &&
+    !Array.from(priorMoveTargets.values()).includes(currentStepId),
+  );
+}
 
 /**
  * The single implementation of the compact stepper's move request. Extracted
@@ -84,17 +112,22 @@ type UseWorkflowStepMoveResult = {
 export function useWorkflowStepMove({
   taskId,
   workflowId,
+  currentStepId,
+  taskState,
   presentationToken,
   onMoveStart,
   onMoveError,
 }: UseWorkflowStepMoveParams): UseWorkflowStepMoveResult {
   const disablePlanMode = useDisablePlanMode();
   const [movingToStepId, setMovingToStepId] = useState<string | null>(null);
+  const [progressingToStepId, setProgressingToStepId] = useState<string | null>(null);
   // Only the in-flight step's own button is disabled, so every other step stays
   // clickable and two moves can overlap. This counter marks which one is the
   // latest; a slower predecessor must not own the banner or the loading state.
   const moveRequestRef = useRef(0);
   const tokenRef = useRef(presentationToken);
+  const progressMoveRef = useRef<ProgressMove | null>(null);
+  const priorMoveTargetsRef = useRef(new Map<number, string>());
 
   // Invalidate synchronously in the render that changes `presentationToken`,
   // not in a passive effect: a `moveTask` rejection can reach its `catch`
@@ -105,7 +138,25 @@ export function useWorkflowStepMove({
     // A new presentation invalidates any request still in flight from the one
     // it replaced, and starts with no disabled control of its own.
     moveRequestRef.current += 1;
+    progressMoveRef.current = null;
+    priorMoveTargetsRef.current.clear();
     setMovingToStepId(null);
+    setProgressingToStepId(null);
+  }
+  if (
+    progressingToStepId &&
+    progressMoveRef.current &&
+    shouldClearProgressMove(
+      progressMoveRef.current,
+      currentStepId,
+      taskState,
+      priorMoveTargetsRef.current,
+    )
+  ) {
+    progressMoveRef.current = null;
+    priorMoveTargetsRef.current.clear();
+    setMovingToStepId(null);
+    setProgressingToStepId(null);
   }
 
   const handleMove = useCallback(
@@ -114,7 +165,19 @@ export function useWorkflowStepMove({
       onMoveStart?.();
       disablePlanMode();
       const requestId = ++moveRequestRef.current;
+      if (progressMoveRef.current) {
+        priorMoveTargetsRef.current.set(
+          progressMoveRef.current.requestId,
+          progressMoveRef.current.targetStepId,
+        );
+      }
+      progressMoveRef.current = {
+        requestId,
+        sourceStepId: currentStepId ?? null,
+        targetStepId: stepId,
+      };
       setMovingToStepId(stepId);
+      setProgressingToStepId(stepId);
       try {
         await moveTask(taskId, {
           workflow_id: workflowId,
@@ -125,14 +188,21 @@ export function useWorkflowStepMove({
         return true;
       } catch (err) {
         console.error("[useWorkflowStepMove] Failed to move task:", err);
-        if (requestId === moveRequestRef.current) onMoveError?.(err);
+        if (requestId === moveRequestRef.current) {
+          progressMoveRef.current = null;
+          priorMoveTargetsRef.current.clear();
+          setProgressingToStepId(null);
+          onMoveError?.(err);
+        } else {
+          priorMoveTargetsRef.current.delete(requestId);
+        }
         return false;
       } finally {
         if (requestId === moveRequestRef.current) setMovingToStepId(null);
       }
     },
-    [taskId, workflowId, disablePlanMode, onMoveStart, onMoveError],
+    [taskId, workflowId, currentStepId, disablePlanMode, onMoveStart, onMoveError],
   );
 
-  return { movingToStepId, handleMove };
+  return { movingToStepId, progressingToStepId, handleMove };
 }

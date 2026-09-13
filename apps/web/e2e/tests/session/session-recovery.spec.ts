@@ -2,9 +2,11 @@ import { type Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForSessionState } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 import {
   cleanupDelayedResumeFixture,
+  createFailOnResumeProfile,
   seedDelayedResumeFixture,
   waitForSessionReady,
   waitForQueuedCount,
@@ -80,28 +82,6 @@ async function seedStaleContextWindow(testPage: Page): Promise<void> {
   });
 }
 
-/**
- * Create an ACP profile for the mock agent that fails on resume. The
- * mock-agent's ACP LoadSession handler exits 1 when --fail-on-resume is set,
- * simulating an agent that can't restore a previous conversation — the
- * scenario that previously left the original recovery message's
- * "Resume session requested" button stuck on screen.
- */
-async function createACPProfileWithFailOnResume(apiClient: ApiClient, name: string) {
-  const { agents } = await apiClient.listAgents();
-  const mockAgent = agents.find((a) => a.name === "mock-agent");
-  if (!mockAgent) {
-    throw new Error(
-      `mock-agent not found in listAgents() (got ${agents.map((a) => `${a.id}=${a.name}`).join(", ")})`,
-    );
-  }
-  return apiClient.createAgentProfile(mockAgent.id, name, {
-    model: "mock-fast",
-    cli_passthrough: false,
-    cli_flags: [{ description: "fail on ACP resume", flag: "--fail-on-resume", enabled: true }],
-  });
-}
-
 // Worst-case wait for the manual-recovery banner after `/crash`. The mock
 // agent's crash is a real subprocess exit whose ACP-level error carries the
 // same "peer disconnected before response" text the routingerr classifier
@@ -117,6 +97,61 @@ const CRASH_RECOVERY_TIMEOUT = 170_000;
 
 test.describe("Session recovery", () => {
   test.describe.configure({ retries: 1 });
+
+  test("cancelling delayed resume fences the old work before a retry", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(150_000);
+
+    const fixture = await seedDelayedResumeFixture(
+      testPage,
+      apiClient,
+      seedData,
+      backend,
+      "Session cancel and retry recovery",
+    );
+
+    try {
+      // Cancel the actual STARTING session while the provider load is held by
+      // the delayed mock agent. This is the browser path that used to leave a
+      // resume continuation alive after cancellation.
+      await expect(fixture.session.cancelAgentButton()).toBeVisible({ timeout: 15_000 });
+      await fixture.session.cancelAgentButton().click();
+      await waitForSessionState(apiClient, {
+        taskId: fixture.task.id,
+        sessionId: fixture.identity.sessionId,
+        expectedState: "WAITING_FOR_INPUT",
+        message: "Waiting for delayed resume cancellation",
+        timeout: 30_000,
+      });
+      // Retry the same saved conversation through the normal composer. The
+      // old delayed callback must not publish a second response or consume
+      // this new attempt.
+      await waitForSessionReady(
+        testPage,
+        apiClient,
+        fixture.task.id,
+        fixture.identity.sessionId,
+        90_000,
+      );
+      await expect(fixture.session.activeChat().getByTestId("chat-input-editor")).toHaveAttribute(
+        "contenteditable",
+        "true",
+        { timeout: 30_000 },
+      );
+
+      await fixture.session.sendMessage("/e2e:simple-message");
+      await fixture.session.expectChatResponseVisible("simple mock response", 1, {
+        timeout: 60_000,
+      });
+      await expect(fixture.session.activeChat().getByText("simple mock response")).toHaveCount(2);
+    } finally {
+      await cleanupDelayedResumeFixture(apiClient, fixture);
+    }
+  });
 
   test("session startup keeps the composer editable and queues a submitted prompt", async ({
     testPage,
@@ -307,10 +342,7 @@ test.describe("Session recovery", () => {
     test.setTimeout(220_000);
 
     // Unique suffix so a swallowed cleanup from a prior run doesn't collide on name.
-    const profile = await createACPProfileWithFailOnResume(
-      apiClient,
-      `ACP Fail On Resume ${Date.now()}`,
-    );
+    const profile = await createFailOnResumeProfile(apiClient, `ACP Fail On Resume ${Date.now()}`);
 
     try {
       const session = await seedTaskWithSession(

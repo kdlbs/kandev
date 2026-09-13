@@ -58,6 +58,7 @@ type StorageMaintenanceSettings struct {
 	QuarantineRetentionHours int               `json:"quarantine_retention_hours"`
 	Workspaces               WorkspaceSettings `json:"workspaces"`
 	KandevContainers         ResourceSettings  `json:"kandev_containers"`
+	TemporaryArtifacts       ResourceSettings  `json:"temporary_artifacts"`
 	GoCache                  GoCacheSettings   `json:"go_cache"`
 	Docker                   DockerSettings    `json:"docker"`
 }
@@ -70,6 +71,7 @@ func DefaultSettings() StorageMaintenanceSettings {
 		QuarantineRetentionHours: 168,
 		Workspaces:               WorkspaceSettings{Enabled: true},
 		KandevContainers:         ResourceSettings{Enabled: true},
+		TemporaryArtifacts:       ResourceSettings{Enabled: false},
 		GoCache: GoCacheSettings{
 			MaxBytes: 16106127360,
 		},

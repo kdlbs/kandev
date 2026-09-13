@@ -107,6 +107,30 @@ func TestScheduledRunnerPersistsSkippedBusy(t *testing.T) {
 	}
 }
 
+func TestRunnerPassesCapturedSettingsSnapshotToCleanupProvider(t *testing.T) {
+	provider := &snapshotCleanupProvider{}
+	runner := NewRunner(RunnerConfig{
+		Activity: activity.NewCoordinator(activity.Options{}),
+		Store:    &recordingRunStore{},
+		Providers: []CleanupProvider{
+			provider,
+		},
+		NewID: func() string { return "settings-snapshot" },
+	})
+	settings := DefaultSettings()
+	settings.Enabled = true
+	settings.IdleForMinutes = 0
+	settings.TemporaryArtifacts.Enabled = true
+	settings.QuarantineRetentionHours = 48
+
+	if _, err := runner.Run(context.Background(), RunTriggerScheduled, settings); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if provider.received != settings {
+		t.Fatalf("provider received settings = %#v, want captured snapshot %#v", provider.received, settings)
+	}
+}
+
 func TestTaskAdmissionCancelsProviderBeforeProceeding(t *testing.T) {
 	coordinator := activity.NewCoordinator(activity.Options{})
 	provider := &cancellableProvider{started: make(chan struct{}), stopped: make(chan struct{})}
@@ -254,6 +278,10 @@ type recordingCleanupProvider struct {
 	calls int
 }
 
+type snapshotCleanupProvider struct {
+	received StorageMaintenanceSettings
+}
+
 type cancelAfterCreateRunStore struct {
 	cancel      context.CancelFunc
 	transitions []RunState
@@ -310,6 +338,20 @@ func (p *recordingCleanupProvider) Name() string { return "recording" }
 
 func (p *recordingCleanupProvider) Cleanup(context.Context) (map[string]any, error) {
 	p.calls++
+	return map[string]any{"cleaned": true}, nil
+}
+
+func (p *snapshotCleanupProvider) Name() string { return "settings-snapshot" }
+
+func (p *snapshotCleanupProvider) Cleanup(context.Context) (map[string]any, error) {
+	return nil, errors.New("runner did not use settings snapshot")
+}
+
+func (p *snapshotCleanupProvider) CleanupWithSettings(
+	_ context.Context,
+	settings StorageMaintenanceSettings,
+) (map[string]any, error) {
+	p.received = settings
 	return map[string]any{"cleaned": true}, nil
 }
 

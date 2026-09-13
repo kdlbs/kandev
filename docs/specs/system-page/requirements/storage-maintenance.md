@@ -2,7 +2,7 @@
 status: active
 system: system-page
 created: 2026-07-14
-updated: 2026-09-10
+updated: 2026-09-12
 owners:
   - cfl
 ---
@@ -73,7 +73,52 @@ Remote database sizing, additional cleanup controls, backup retention changes, d
 host-wide reconciliation, and additional categories such as logs are outside this extension.
 The existing application size-unit convention remains unchanged.
 
+### REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-003: System temporary storage visibility
+
+**Status:** Active.
+
+**Intent:** Operators can inspect shared temporary storage without granting cleanup ownership.
+
+#### Acceptance criteria
+
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-003.1:** Analysis shall measure the service temporary folder and, on Unix, `/tmp` when it resolves to a distinct folder.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-003.2:** Each folder shall show its resolved path, measured size, and completeness. Aliases and nested roots shall not increase the combined measurement twice.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-003.3:** The temporary-folder measurement shall appear as an informational footprint outside Total counted. Its explanation shall identify overlap with classified resources.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-003.4:** Registered Kandev artifacts shall retain their separate classification and existing contribution to Total counted. Shared and legacy files shall not appear as reclaimable Kandev artifacts.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-003.5:** Analysis shall join existing scan progress, caching, and Analyze refresh. Slow temporary-folder scans shall not delay policy, history, or completed sources.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-003.6:** Unreadable, disappearing, or unscanned entries shall produce visible partial results. An unavailable folder shall not appear as measured zero.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-003.7:** Analysis shall not read file contents, follow nested symlinks, cross nested mounts, change ownership, or remove files.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-003.8:** Desktop and phone users shall inspect sizes, long paths, and limitations without horizontal page scrolling. Copy shall use the selected language.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-003.9:** Existing storage access restrictions shall apply. Analysis requests shall not accept arbitrary paths from clients.
+
+### REQ-SYSTEM-PAGE-STORAGE-MAINTENANCE-004: Scheduled cleanup of owned temporary artifacts
+
+**Status:** Active.
+
+**Intent:** Operators can include verified Kandev artifacts in maintenance while shared files remain protected.
+
+#### Acceptance criteria
+
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-004.1:** A persisted temporary-artifact cleanup option shall default to disabled, including after upgrade.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-004.2:** When the option is enabled, scheduled and full manual maintenance shall consider registered artifacts. Scheduling shall still require the global schedule option.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-004.3:** Explicit temporary-artifact cleanup shall remain available with the option disabled. Other resource-specific actions shall not clean temporary artifacts.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-004.4:** Cleanup shall require verified ownership, an inactive lifecycle, and at least 24 hours since closure or abandonment. Uncertain ownership or liveness shall protect the artifact.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-004.5:** Cleanup shall revalidate eligibility at mutation time. Busy overrides shall never bypass ownership, liveness, age, or path checks.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-004.6:** Eligible artifacts shall enter recoverable quarantine. A same-filesystem move shall use rename; a cross-filesystem move shall use a staged, verified copy under quarantine, publish it atomically, and remove the original only after source identity is revalidated. Copy, publication, or identity failures shall leave the original intact and report a failure.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-004.7:** Results shall distinguish quarantined bytes from freed space. Existing retention, restore, cancellation, and run-history behavior shall remain available.
+- **AC-SYSTEM-PAGE-STORAGE-MAINTENANCE-004.8:** Desktop and phone users shall inspect cleanup scope, save the option, run explicit cleanup, and inspect its result. Existing mutation restrictions shall apply.
+
+#### Exclusions
+
+Shared-file deletion, legacy-directory adoption, arbitrary cleanup paths, configurable stale age,
+new artifact producers, remote temporary folders, and changes to inherited agent temporary variables
+are outside this extension. Whole-host disk reconciliation remains outside storage analysis.
+
 ## System design
+
+The implemented temporary-storage extension is defined in
+[Temporary storage visibility and cleanup](../system-design/storage-temporary-folders.md).
+Its [implementation package](../../../plans/storage-temporary-folders/plan.md) contains completed work orders.
 
 The draft database extension is defined in [Database storage analysis](../system-design/storage-database-footprint.md).
 
