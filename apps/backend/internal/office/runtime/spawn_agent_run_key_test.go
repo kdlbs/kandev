@@ -138,8 +138,10 @@ func TestActionsSpawnAgentRun_EmptyKey_NotPrefixed_ByDesign(t *testing.T) {
 	if got := runs.calls[0].IdempotencyKey; got != "" {
 		t.Fatalf("idempotency key = %q, want empty (keyless by design)", got)
 	}
-	if !spawnAgentRunKeylessCounterHasLabel(t, "test_spawn_empty_key", "by_design") {
-		t.Fatal("expected office_run_dedup_keyless_total to carry a by_design entry for this reason")
+	// Reason isn't in runs/service's bounded metricReasons allowlist, so it
+	// buckets to "custom" on the label rather than surviving verbatim.
+	if !spawnAgentRunKeylessCounterHasLabel(t, "custom", "by_design") {
+		t.Fatal("expected office_run_dedup_keyless_total to carry a custom/by_design entry")
 	}
 }
 
@@ -175,8 +177,10 @@ func TestActionsSpawnAgentRun_NoCallerRunID_EnqueuesKeylessUnresolved(t *testing
 	if got := runs.calls[0].IdempotencyKey; got != "" {
 		t.Fatalf("idempotency key = %q, want empty (keyless, no caller run to prefix with)", got)
 	}
-	if !spawnAgentRunKeylessCounterHasLabel(t, "test_spawn_no_caller_run", "unresolved") {
-		t.Fatal("expected office_run_dedup_keyless_total to carry an unresolved entry")
+	// Reason isn't in runs/service's bounded metricReasons allowlist, so it
+	// buckets to "custom" on the label rather than surviving verbatim.
+	if !spawnAgentRunKeylessCounterHasLabel(t, "custom", "unresolved") {
+		t.Fatal("expected office_run_dedup_keyless_total to carry a custom/unresolved entry")
 	}
 }
 

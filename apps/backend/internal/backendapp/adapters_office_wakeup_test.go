@@ -59,8 +59,10 @@ func TestRoutineWakeupAdapter_CreateWakeupRequest_DurableConflictReportsCounter(
 		t.Fatalf("second create error = %v, want ErrWakeupIdempotencyConflict", err)
 	}
 
-	if !counterHasLabel(t, "office_run_dedup_total", "reason="+reason, "kind=durable", "queue=wakeup") {
-		t.Fatal("expected office_run_dedup_total to carry a durable/wakeup entry for this reason")
+	// reason isn't in runs/service's bounded metricReasons allowlist, so the
+	// label buckets it to "custom" rather than carrying it verbatim.
+	if !counterHasLabel(t, "office_run_dedup_total", "reason=custom", "kind=durable", "queue=wakeup") {
+		t.Fatal("expected office_run_dedup_total to carry a custom/durable/wakeup entry")
 	}
 }
 
