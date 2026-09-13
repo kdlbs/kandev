@@ -48,7 +48,9 @@ and deep-link behavior.
 - A new `useThreadColumnActivation` hook produces two sets. The preload set
   contains visible columns plus at most one adjacent column on each side. The
   detail set contains only intersecting desktop columns. On phone it contains
-  only the nearest snapped column.
+  only the nearest snapped column. The same viewport owner exposes a separate
+  lightweight `mobileTaskId` for pagination and picker context; that identity
+  does not depend on membership hydration or detail mounting.
 - `ThreadColumn` always renders the task shell. It mounts the session-list
   adapter only while preloaded and mounts `ThreadConversation` only while
   detail-active.
@@ -159,6 +161,40 @@ If `IntersectionObserver` is unavailable, the board activates the focused URL
 column or first column. Pointer, focus, and scroll interactions can promote a
 new column. The fallback must not activate every conversation.
 
+### Phone position feedback
+
+`useThreadColumnActivation` also derives the phone's presentation position from
+the existing board and registered shell geometry. A passive board scroll
+listener schedules at most one `requestAnimationFrame` measurement. It chooses
+the shell nearest the board center and updates `mobileTaskId` only when that
+identity changes. It measures registered shells in stable order, not the
+IntersectionObserver's asynchronously delivered membership set.
+
+Both adjacent shells can remain intersecting as a swipe crosses their
+midpoint. Equal intersecting-ID sets therefore cannot suppress phone position
+updates. Position must not be read from `detailTaskIds`, a loaded transcript,
+the focused URL marker, or a completion callback.
+
+Initial measurement, board resize, and admitted-order changes reconcile the
+same position. Before usable geometry exists, the focused admitted task or
+first admitted task is the fallback; empty decks yield null. Native swipe,
+picker scrolling, and deep-link scrolling all use this one path. There is no
+touch interception, scroll-end debounce, second shell registry, stored
+preference, or network request. Leaving phone mode or unmounting removes
+listeners/resize observation and cancels any pending frame. Leaving phone mode
+also clears its measured identity, so returning uses the current fallback
+until the new phone geometry is available.
+
+The indicator and thread picker's selected row consume `mobileTaskId` directly
+through the board. Their update never enlarges the detail/preload window or
+mounts a second phone transcript. Existing viewport-bounded loading and
+column-local session selections keep their separate responsibilities.
+Position changes also invalidate the nearest-visible detail calculation and
+provide its conservative phone fallback. An edge-adjacent column can remain
+intersecting at zero area after snapping; unchanged visibility membership must
+not leave the previous column detail-active. The detail set remains bounded to
+one visible phone column and is never gated by transcript loading completion.
+
 ## Deep links
 
 `linkToThreads` accepts an optional `sessionId` and produces a URL with
@@ -184,9 +220,41 @@ horizontal gesture region. The metadata row shows a compact
 the label, selected state, and the same agent identity or grid spinner used by
 desktop tabs. The sheet owns vertical scrolling and safe-area padding.
 
-Long metadata truncates in the left region. Desktop tabs scroll inside the
-right region. The task column, board, and document keep their existing
-horizontal overflow ownership.
+Phone columns use the board's full content width, without an inset outer card
+or a neighboring-card peek. The board retains horizontal snap ownership; each
+transcript owns vertical scrolling. Flex ancestors allow width shrinking, and
+the composer stays within the dynamic-height app shell and its safe-area rules.
+Code and tables retain their local horizontal scrolling.
+
+The phone column header uses a two-line title button, an Open task action, and
+a second row for attention and the existing session picker. Position/count
+appears inline beside the view control in the page topbar, with no instruction
+text or extra task-header row. Decks of up to seven threads also show decorative
+page dots; larger decks retain the numeric position without an overflowing dot
+row. Empty and single-thread decks omit the indicator. The board's header
+render slot receives `mobileTaskId` from phone position feedback, so the page
+derives the ordinal from stable order during the swipe. The page does not copy
+that identity into state or synchronize it through a loading callback.
+The title opens one board-owned `MobileThreadPicker`, using the inset
+`MobilePickerSheet` pattern. It lists the admitted task summaries in stable
+order, including workflow, step, and attention. Selecting a task scrolls its
+existing shell into view; viewport activation still owns transcript mounting.
+This reuses the focused-column navigation pattern from `MobileColumnTabs` and
+does not duplicate session selection or store state.
+
+`KanbanHeaderMobile` uses the shared
+[Mobile Workspace Topbar](mobile-quick-chat-topbar.md) composition. Threads
+supplies its page identity and selected saved view in the unboxed stacked title
+control, with pagination alongside it. The saved-view editor continues to use
+its existing drawer; listing navigation and secondary workspace actions use
+the shared menu. Saved-view semantics are not introduced into Kanban or List.
+
+Desktop metadata and tabs keep their existing regions. Phone pickers own their
+internal vertical scrolling, clear safe areas, and return focus on dismissal.
+If the opening task disappears while its picker is open, focus returns to the
+current mounted phone thread or the first remaining column, without scrolling.
+Leaving phone layout closes the thread picker; returning does not reopen it.
+Long labels truncate inside controls without document-level horizontal overflow.
 
 ## Failure and recovery
 
@@ -213,6 +281,14 @@ conversation switching, agent identity, running spinners, deep links, and
 horizontal scroll activation. Phone Playwright covers one active snapped
 conversation, the picker sheet, 44-pixel rows, safe-area containment, and zero
 document overflow.
+
+Phone position tests cross the midpoint while the same two shells remain
+intersecting, reverse that geometry, resize, remove the current task, and
+unmount with a scheduled frame. Browser coverage holds a real touch drag past
+the midpoint before touch release and verifies the topbar's new position while
+the destination's detail loading is delayed. It must not wait for the new chat
+to mount before asserting position. Settled swipes and picker navigation still
+prove the one-phone-transcript budget.
 
 ## Related decisions
 

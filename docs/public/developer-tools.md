@@ -13,6 +13,17 @@ Kandev includes short-lived chat, reusable AI helpers, dictation, file and edito
 2. Use a task session for work that needs files, review, or workflow state.
 3. Add utility agents, editors, language servers, or terminals only when their host boundary is acceptable.
 
+## Configure Apprise notifications
+
+To detect Apprise after you install it, open **Settings > Preferences > Notifications** and select
+**Rescan Apprise** under **External Providers**. Kandev checks for the `apprise` executable in the
+environment of the running Kandev backend. When it is found, **Add Apprise Provider** becomes
+available. Rescanning does not save notification drafts or send a notification.
+
+If Kandev does not detect Apprise, check the `PATH` used by the backend process. If you install
+Apprise in a directory already in that `PATH`, rescan. If you install it elsewhere or change `PATH`
+after Kandev starts, restart Kandev so the running backend receives the new environment, then rescan.
+
 ## Quick Chat
 
 Quick Chat is an agent conversation outside the board. Use it for repository orientation, experiments, and disposable questions that do not need workflow state, review gates, dependencies, or a delivery record.
@@ -32,6 +43,12 @@ Use the arrow keys and **Tab** or **Enter**, or select a row with pointer or tou
 Use `@` for files, saved prompts, and the current plan. New task lookup is under `#`; existing saved or sent `@task` references remain readable and sendable.
 
 Select **Quick Chat** beside **New Task** in the expanded sidebar, or select its standalone row in the collapsed sidebar.
+
+On a phone, open the topbar menu in **Kanban**, **List**, or **Threads**, then
+select **Quick Chat** or **Quick terminal**. The menu closes before the tool
+opens. The topbar menu button shows Quick Chat activity: a blue dot while a chat
+is running and a green dot when a reply is ready to read. Terminal tabs do not
+contribute to this activity indicator.
 
 ### Start a chat
 
@@ -101,6 +118,8 @@ Closing the floating Settings panel preserves the conversation. To delete it, op
 Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusable prompts. A saved prompt needs a unique name and non-empty content.
 
 Type `@` in the task chat composer and select a prompt. The visible message keeps the `@name`; Kandev expands the prompt content into hidden system context for the agent. References are recognized only at the start of the text or after whitespace and must match the stored name. Prompt content can reference other saved prompts. Expansion stops at a depth of eight, skips cycles, and includes each prompt only once.
+
+Initial task and Quick Chat launches also expand known references when no workflow step is configured. The stored message and the prompt sent to the agent keep the same saved-prompt context.
 
 The Settings prompt editor also offers the same `@name` completion when you edit a saved prompt, a workflow prompt, a workflow step, an automation instruction, a quick action, or a provider watch. The prompt being edited is excluded from its own completion list, so selecting a reference cannot create a direct self-reference by accident. The same `@name` reference works in a workflow step's Prompt field and in a GitHub Review Watch's prompt; see [Saved prompt references in step prompts](workflow-tips.md#saved-prompt-references-in-step-prompts).
 

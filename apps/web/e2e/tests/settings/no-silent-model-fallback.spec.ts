@@ -1,15 +1,14 @@
 import { expect, test } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import {
+  createExecutorOnlyModelProfile,
   createModelVariationProfile,
   createMismatchedProfile,
-  MODEL_VARIATION_BASE,
-  UNIQUE_MODEL_VARIATION,
-  UNADVERTISED_MODEL,
 } from "../session/model-mismatch-warning-helpers";
+import { launchExecutorOnlyModelProfile } from "./profile-model-selection-helpers";
 
 test.describe("executor-authoritative model selection", () => {
-  test("keeps a host-mismatched profile selectable", async ({ testPage, apiClient }) => {
+  test("keeps a host-mismatched profile selectable", async ({ testPage, apiClient, prCapture }) => {
     const profile = await createMismatchedProfile(apiClient, "Host mismatch selectable profile");
     try {
       const kanban = new KanbanPage(testPage);
@@ -28,24 +27,27 @@ test.describe("executor-authoritative model selection", () => {
         .getByRole("option", { name: profile.name, exact: false });
       await expect(option).toBeVisible();
       await expect(option).toBeEnabled();
-      const warning = option.getByTestId("agent-profile-model-probe-warning");
-      await expect(warning).toBeVisible();
-      const warningText = `The host probe did not advertise ${UNADVERTISED_MODEL}. The selected executor will decide the model at launch.`;
-      await expect(dialog).not.toContainText(warningText);
-      await warning.hover();
-      await expect(
-        testPage
-          .locator('[data-slot="tooltip-content"]:not([data-state="closed"])')
-          .filter({ hasText: warningText }),
-      ).toBeVisible();
-      await option.click();
+      await expect(option.getByTestId("agent-profile-model-probe-warning")).toHaveCount(0);
+      await expect(option.locator(".tabler-icon-alert-triangle")).toHaveCount(0);
+      await prCapture.screenshot("desktop-profile-options", {
+        caption: "Saved profiles remain selectable without host-model warnings.",
+      });
+      const search = testPage.locator("[cmdk-input]");
+      await search.fill(profile.name);
+      await search.press("Enter");
+      await expect(testPage.getByRole("listbox")).not.toBeVisible();
+      await expect(selector).toContainText(profile.name);
+      await prCapture.screenshot("desktop-selected-profile", {
+        caption: "The selected profile keeps its name without a model advisory.",
+      });
+      await expect(selector.locator(".tabler-icon-alert-triangle")).toHaveCount(0);
       await expect(selector.locator("button")).toHaveCount(0);
     } finally {
       await apiClient.deleteAgentProfile(profile.id, true).catch(() => {});
     }
   });
 
-  test("names one host-advertised variation while keeping the profile selectable", async ({
+  test("selects a unique-variation profile without a host model advisory", async ({
     testPage,
     apiClient,
   }) => {
@@ -70,18 +72,27 @@ test.describe("executor-authoritative model selection", () => {
         .getByRole("option", { name: profile.name, exact: false });
       await expect(option).toBeVisible();
       await expect(option).toBeEnabled();
-      const warning = option.getByTestId("agent-profile-model-probe-warning");
-      await expect(warning).toBeVisible();
-      const warningText = `The host probe found one possible variation of ${MODEL_VARIATION_BASE}: ${UNIQUE_MODEL_VARIATION}. The selected executor will decide the model at launch.`;
-      await warning.hover();
-      await expect(
-        testPage
-          .locator('[data-slot="tooltip-content"]:not([data-state="closed"])')
-          .filter({ hasText: warningText }),
-      ).toBeVisible();
+      await expect(option.getByTestId("agent-profile-model-probe-warning")).toHaveCount(0);
+      await expect(option.locator(".tabler-icon-alert-triangle")).toHaveCount(0);
       await option.click();
+      await expect(testPage.getByRole("listbox")).not.toBeVisible();
+      await expect(selector).toContainText(profile.name);
+      await expect(selector.locator(".tabler-icon-alert-triangle")).toHaveCount(0);
     } finally {
       await apiClient.deleteAgentProfile(profile.id, true).catch(() => {});
+    }
+  });
+  // @covers AC-AGENTS-NO-SILENT-MODEL-FALLBACK-003.5
+  // @covers AC-AGENTS-NO-SILENT-MODEL-FALLBACK-003.6
+  test("launches a host-mismatched profile on its requested executor model without a warning", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const profile = await createExecutorOnlyModelProfile(apiClient);
+    try {
+      await launchExecutorOnlyModelProfile(testPage, apiClient, profile, false);
+    } finally {
+      await apiClient.deleteAgentProfile(profile.id, true);
     }
   });
 });

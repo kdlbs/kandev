@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/entityrefs"
+	"github.com/kandev/kandev/internal/task/plancomments"
 	apiv1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -675,6 +676,18 @@ func TestRemoveEntry(t *testing.T) {
 		assert.ErrorIs(t, err, ErrEntryNotFound)
 	})
 
+	t.Run("invalidates an edit lease for the removed entry", func(t *testing.T) {
+		svc := setupService(t)
+		ctx := context.Background()
+		entry, err := svc.QueueMessage(ctx, "s", "t", "editable", "", QueuedByUser, false, nil)
+		require.NoError(t, err)
+		lease, err := svc.BeginEdit(ctx, "s", entry.ID, "connection-a")
+		require.NoError(t, err)
+
+		require.NoError(t, svc.RemoveEntry(ctx, "s", entry.ID))
+		assert.ErrorIs(t, svc.EndEdit(ctx, "s", entry.ID, lease.LeaseID, "connection-a"), ErrEditLeaseNotFound)
+	})
+
 	t.Run("rejects deletion from a foreign session", func(t *testing.T) {
 		svc := setupService(t)
 		ctx := context.Background()
@@ -720,7 +733,7 @@ func TestRemoveEntry(t *testing.T) {
 		reserved, ok := svc.ReserveQueued(ctx, "s")
 		require.True(t, ok)
 		assert.ErrorIs(t, svc.RemoveEntry(ctx, "s", reserved.ID), ErrEntryNotFound)
-		require.NoError(t, svc.AcknowledgeQueued(ctx, "s", reserved.ID))
+		require.NoError(t, svc.AcknowledgeQueued(ctx, reserved))
 	})
 }
 
@@ -762,7 +775,7 @@ func TestCancelAllPreservesDurableEntryReservedInFlight(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 3, removed)
 	assert.Equal(t, 0, svc.GetStatus(ctx, "s").Count)
-	require.NoError(t, svc.AcknowledgeQueued(ctx, "s", reserved.ID))
+	require.NoError(t, svc.AcknowledgeQueued(ctx, reserved))
 }
 
 func TestGetStatus(t *testing.T) {
@@ -815,7 +828,10 @@ func TestGetStatus(t *testing.T) {
 		require.NoError(t, svc.RequeueAtHead(ctx, reserved))
 		assert.Equal(t, 1, svc.GetStatus(ctx, "s").Count)
 
-		require.NoError(t, svc.AcknowledgeQueued(ctx, "s", reserved.ID))
+		require.ErrorIs(t, svc.AcknowledgeQueued(ctx, reserved), ErrLifecycleReservationChanged)
+		current, ok := svc.ReserveQueued(ctx, "s")
+		require.True(t, ok)
+		require.NoError(t, svc.AcknowledgeQueued(ctx, current))
 		assert.Equal(t, 0, svc.GetStatus(ctx, "s").Count)
 	})
 
@@ -835,6 +851,38 @@ func TestGetStatus(t *testing.T) {
 		require.True(t, ok)
 		assert.False(t, taken.IsReservedLifecycleDelivery())
 	})
+}
+func TestTakeQueuedDoesNotDeleteReservedLifecycleHead(t *testing.T) {
+	svc := setupService(t)
+	ctx := context.Background()
+
+	_, _, accepted, err := svc.QueueLifecycleMessageWithCoalesceKey(
+		ctx, "s", "t", "pr merged", "", QueuedByWorkflow, false, nil,
+		map[string]interface{}{"origin": "github_pr_automation"},
+		"github-pr:repo:1:merged", true,
+	)
+	require.NoError(t, err)
+	require.True(t, accepted)
+
+	reserved, ok := svc.ReserveQueued(ctx, "s")
+	require.True(t, ok)
+	require.NotNil(t, reserved)
+
+	taken, ok := svc.TakeQueued(ctx, "s")
+	assert.False(t, ok)
+	assert.Nil(t, taken)
+
+	restored, ok, err := svc.TakeQueuedEntry(ctx, "s", reserved.ID)
+	require.NoError(t, err)
+	require.True(t, ok, "destructive head cleanup must not consume a reserved lifecycle row")
+	require.Equal(t, reserved.ID, restored.ID)
+}
+func TestQueuedMessageLegacyGitLabLifecycleOriginIsDurable(t *testing.T) {
+	message := &QueuedMessage{Metadata: map[string]interface{}{
+		"origin": "gitlab_mr_automation",
+	}}
+
+	require.True(t, message.IsDurableLifecycle())
 }
 
 func TestTransferSession(t *testing.T) {
@@ -1072,6 +1120,34 @@ func TestMemoryRepository_MergeIntoAbove_MixedKindsRejected(t *testing.T) {
 
 	_, err = repo.MergeIntoAbove(ctx, "s1", "missing", "alice")
 	assert.ErrorIs(t, err, ErrEntryNotFound)
+}
+
+func TestMemoryRepository_MergeIntoAbove_PlanCommentAdmissionRejected(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		sourceMetadata map[string]interface{}
+		targetMetadata map[string]interface{}
+	}{
+		{name: "source", sourceMetadata: map[string]interface{}{plancomments.MetadataClientQueueID: "comment-request"}},
+		{name: "target", targetMetadata: map[string]interface{}{plancomments.MetadataRefs: []interface{}{}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			repo := NewMemoryRepository()
+			target := &QueuedMessage{SessionID: "s1", TaskID: "t1", Content: "target", QueuedBy: "alice", Metadata: test.targetMetadata}
+			require.NoError(t, repo.Insert(ctx, target, 0))
+			source := &QueuedMessage{SessionID: "s1", TaskID: "t1", Content: "source", QueuedBy: "alice", Metadata: test.sourceMetadata}
+			require.NoError(t, repo.Insert(ctx, source, 0))
+
+			_, err := repo.MergeIntoAbove(ctx, "s1", source.ID, "alice")
+			assert.ErrorIs(t, err, ErrNoMergeTarget)
+			items, listErr := repo.ListBySession(ctx, "s1")
+			require.NoError(t, listErr)
+			require.Len(t, items, 2)
+			assert.Equal(t, target.ID, items[0].ID)
+			assert.Equal(t, source.ID, items[1].ID)
+		})
+	}
 }
 
 // TestMemoryRepository_MergeIntoAbove_ReferenceOverflow asserts an over-cap

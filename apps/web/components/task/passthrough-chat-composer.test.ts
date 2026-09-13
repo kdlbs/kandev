@@ -6,6 +6,7 @@ import {
   buildContextFilesMeta,
   buildPassthroughFinalMessage,
   buildPassthroughPlanContext,
+  assertPlanCommentMigrationReady,
   clearPassthroughComposerContext,
   formatPassthroughBaseMessage,
 } from "./passthrough-chat-composer";
@@ -61,6 +62,21 @@ function messageComment() {
   } as never;
 }
 
+function planComment() {
+  return {
+    id: "plan-comment-1",
+    sessionId: "",
+    taskId: TASK_ID,
+    planId: "plan-1",
+    version: 2,
+    source: "plan",
+    text: "Split this step.",
+    selectedText: "Large step",
+    createdAt: "2026-09-02T00:00:00Z",
+    status: "pending",
+  } as const;
+}
+
 function panelState(overrides: Record<string, unknown> = {}) {
   return {
     resolvedSessionId: SESSION_ID,
@@ -72,6 +88,7 @@ function panelState(overrides: Record<string, unknown> = {}) {
     walkthroughComments: [],
     messageComments: [],
     planModeEnabled: false,
+    planCommentMigration: { status: "complete", isReady: true, isBlocking: false, retry: vi.fn() },
     handleClearPRFeedback: vi.fn(),
     clearSessionPlanComments: vi.fn(),
     handleClearWalkthroughComments: vi.fn(),
@@ -120,6 +137,18 @@ describe("passthrough chat composer metadata helpers", () => {
     expect(result.commentsToSend.map((item) => item.id)).toEqual(["message-comment-1"]);
   });
 
+  it("keeps task plan comment text out of the client-formatted passthrough message", () => {
+    const result = formatPassthroughBaseMessage(
+      "Ship it",
+      undefined,
+      [],
+      panelState({ planComments: [planComment()] }),
+    );
+
+    expect(result.formatted).toBe("Ship it");
+    expect(result.formatted).not.toContain("Split this step.");
+  });
+
   it("merges selected context files with inline file, prompt, and task mentions", async () => {
     const inlineTask: TaskMentionData = {
       taskId: "task-2",
@@ -161,6 +190,23 @@ describe("passthrough chat composer metadata helpers", () => {
 });
 
 describe("passthrough chat composer plan context", () => {
+  it("returns displayed task plan comment refs for backend expansion", async () => {
+    const result = await buildPassthroughFinalMessage({
+      taskId: TASK_ID,
+      content: "Please continue",
+      pendingComments: [],
+      panelState: panelState({ planComments: [planComment()] }),
+      getState: () =>
+        ({
+          kanban: { steps: [] },
+          kanbanMulti: { snapshots: {} },
+          taskPlans: { byTaskId: {} },
+        }) as never,
+    });
+
+    expect(result.planCommentRefs).toEqual([{ id: "plan-comment-1", version: 2 }]);
+  });
+
   it("expands selected plan context and strips the literal @Plan mention", async () => {
     const result = await buildPassthroughFinalMessage({
       taskId: TASK_ID,
@@ -240,7 +286,22 @@ describe("passthrough chat composer plan context", () => {
 });
 
 describe("passthrough chat composer cleanup", () => {
-  it("clears ephemeral context and re-adds plan context when plan mode stays enabled", () => {
+  it("rejects delivery while legacy plan comments are not migrated", () => {
+    expect(() =>
+      assertPlanCommentMigrationReady(
+        panelState({
+          planCommentMigration: {
+            status: "failed",
+            isReady: false,
+            isBlocking: true,
+            retry: vi.fn(),
+          },
+        }),
+      ),
+    ).toThrow("Saved plan comments are still being restored. Retry before sending.");
+  });
+
+  it("clears session context but leaves task plan comments to the backend snapshot", () => {
     const state = panelState({
       planModeEnabled: true,
       pendingPRFeedback: [{ id: "feedback-1" }],
@@ -259,7 +320,7 @@ describe("passthrough chat composer cleanup", () => {
     clearPassthroughComposerContext(state as never);
 
     expect(state.handleClearPRFeedback).toHaveBeenCalledTimes(1);
-    expect(state.clearSessionPlanComments).toHaveBeenCalledTimes(1);
+    expect(state.clearSessionPlanComments).not.toHaveBeenCalled();
     expect(state.handleClearWalkthroughComments).toHaveBeenCalledTimes(1);
     expect(state.handleClearMessageComments).toHaveBeenCalledTimes(1);
     expect(state.clearEphemeral).toHaveBeenCalledWith(SESSION_ID);

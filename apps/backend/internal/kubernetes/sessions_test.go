@@ -67,6 +67,7 @@ func TestHTTPListSessionsAllowsMemberAndGetsOnlyAuthorizedRecordedPods(t *testin
 		SessionID: "session-1", TaskID: "task-1", PodName: "pod-1",
 		PodPhase: "Running", ContainerState: "running", Restarts: 2,
 		WorkspaceKind: "empty_dir", CreatedAt: createdAt.Format(time.RFC3339),
+		SessionState: "RUNNING", RetentionState: "active",
 	}}, rows)
 	require.Equal(t, []string{"task-1", "task-2"}, access.calls)
 	require.Len(t, clientset.Actions(), 1)
@@ -455,6 +456,7 @@ func TestListSessionsFailsClosedOnPodIdentityMismatch(t *testing.T) {
 	require.Equal(t, []SessionRow{{
 		SessionID: "session-1", TaskID: "task-1", PodName: "pod-1",
 		WorkspaceKind: "empty_dir", CreatedAt: createdAt.Format(time.RFC3339),
+		SessionState: "RUNNING", RetentionState: "unknown",
 		FailureReason: "Pod identity does not match runtime inventory",
 	}}, rows)
 }
@@ -489,6 +491,7 @@ func TestListSessionsUsesAuthoritativeRunningExecutorAfterSessionRepoint(t *test
 		SessionID: "session-1", TaskID: "task-1", PodName: "pod-1",
 		PodPhase: "Running", ContainerState: "running", Restarts: 2,
 		WorkspaceKind: "empty_dir", CreatedAt: createdAt.Format(time.RFC3339),
+		SessionState: "RUNNING", RetentionState: "active",
 	}}, rows)
 }
 
@@ -710,6 +713,7 @@ func kubernetesTaskSession(sessionID, taskID, executorID, profileID string) *mod
 	return &models.TaskSession{
 		ID: sessionID, TaskID: taskID, ExecutorID: executorID,
 		ExecutorProfileID: profileID, TaskEnvironmentID: "environment-1",
+		State: models.TaskSessionStateRunning,
 	}
 }
 
@@ -736,6 +740,7 @@ func kubernetesOwnedPodForIdentity(
 		ObjectMeta: metav1.ObjectMeta{
 			Name: podName, Namespace: "kandev", UID: types.UID(podUID), Labels: labels,
 		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "kandev-agent"}}},
 		Status: corev1.PodStatus{
 			Phase: corev1.PodRunning,
 			ContainerStatuses: []corev1.ContainerStatus{{

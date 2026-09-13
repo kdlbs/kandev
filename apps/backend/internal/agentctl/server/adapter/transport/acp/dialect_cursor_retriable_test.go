@@ -12,6 +12,8 @@ import (
 
 const cursorRetriableStreamResetChunk = "Error: RetriableError: HTTP/2 stream closed with error code CANCEL (0x8)"
 
+const cursorRetriableStreamResetLeadingCanceledChunk = "Error: RetriableError: [canceled] HTTP/2 stream closed with error code CANCEL (0x8)"
+
 func cursorMessageNotification(sessionID, text string) acpsdk.SessionNotification {
 	return makeNotification(sessionID, acpsdk.SessionUpdate{
 		AgentMessageChunk: &acpsdk.SessionUpdateAgentMessageChunk{
@@ -39,6 +41,19 @@ func TestCursorRetriableStreamResetSuppressesExactCurrentChunk(t *testing.T) {
 
 	if events := drainEvents(a); len(events) != 0 {
 		t.Fatalf("exact Cursor control chunk emitted %d events: %+v", len(events), events)
+	}
+}
+
+func TestCursorRetriableStreamResetSuppressesLeadingCanceledCurrentChunk(t *testing.T) {
+	a, turn := newCursorPromptTurn(t, 7)
+
+	a.handleACPUpdate(cursorMessageNotification("session-1", cursorRetriableStreamResetLeadingCanceledChunk), 7)
+
+	if !turn.cursorRetriableFailure() {
+		t.Fatal("leading-[canceled] Cursor control chunk did not set retriable marker")
+	}
+	if events := drainEvents(a); len(events) != 0 {
+		t.Fatalf("leading-[canceled] Cursor control chunk emitted %d events: %+v", len(events), events)
 	}
 }
 

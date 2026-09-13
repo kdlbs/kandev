@@ -1,0 +1,278 @@
+name: Label pull request size
+
+on:
+  pull_request_target: # zizmor: ignore[dangerous-triggers] base-controlled metadata-only workflow
+    types: [opened, reopened, synchronize]
+
+concurrency:
+  group: pr-size-label-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+permissions:
+  pull-requests: write
+
+jobs:
+  label:
+    name: Label pull request size
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Calculate and apply pull request size
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const sizeLabelDefinitions = {
+              small: {
+                color: '0E8A16',
+                description: 'Pull request changes 0-10 application files',
+              },
+              medium: {
+                color: 'FBCA04',
+                description: 'Pull request changes 11-50 application files',
+              },
+              big: {
+                color: 'D93F0B',
+                description: 'Pull request changes 51 or more application files',
+              },
+            };
+
+            function isCountedFile(filename) {
+              if (typeof filename !== 'string' || !filename.startsWith('apps/')) {
+                return false;
+              }
+
+              const pathSegments = filename.split('/');
+              if (pathSegments.includes('node_modules')) {
+                return false;
+              }
+
+              const excludedDirectories = [
+                'apps/backend/internal/agentctl/server/api/scripts/',
+                'apps/backend/internal/webapp/embedded/generated/',
+                'apps/backend/scripts/',
+                'apps/backend/cmd/sqlguard/',
+                'apps/backend/internal/db/sqlguard/',
+                'apps/web/e2e/scripts/',
+                'apps/web/generated/',
+                'apps/web/eslint-rules/',
+                'apps/web/scripts/',
+              ];
+              if (excludedDirectories.some(prefix => filename.startsWith(prefix))) {
+                return false;
+              }
+
+              const excludedAssetDirectories = [
+                'apps/backend/internal/notifications/providers/assets/',
+                'apps/desktop/src-tauri/icons/',
+                'apps/web/lib/assets/',
+                'apps/web/public/',
+                'apps/web/src/assets/',
+              ];
+              if (excludedAssetDirectories.some(prefix => filename.startsWith(prefix))) {
+                return false;
+              }
+
+              const basename = filename.split('/').pop() ?? '';
+              const extension = basename.includes('.') ? basename.split('.').pop() : '';
+              const excludedAssetExtensions = new Set([
+                'avif',
+                'bmp',
+                'bin',
+                'dmg',
+                'dll',
+                'gif',
+                'icns',
+                'ico',
+                'jpeg',
+                'jpg',
+                'otf',
+                'pdf',
+                'png',
+                'so',
+                'svg',
+                'ttf',
+                'wasm',
+                'webp',
+                'woff',
+                'woff2',
+              ]);
+              if (excludedAssetExtensions.has(extension)) {
+                return false;
+              }
+
+              const toolSettingNames = new Set([
+                'commitlint.config.mjs',
+                'eslint.config.mjs',
+                'eslint.e2e-sleeps.config.mjs',
+                'eslint.i18n.config.mjs',
+                'eslint.i18n.options.mjs',
+                'playwright.config.ts',
+                'postcss.config.mjs',
+                'prettier.config.mjs',
+                'stylelint.config.mjs',
+                'tailwind.config.ts',
+                'vite.config.ts',
+                'vitest.config.ts',
+                'vitest.monaco-editor.ts',
+                'vitest.setup.ts',
+              ]);
+              if (toolSettingNames.has(basename)) {
+                return false;
+              }
+
+              if (/^apps\/web\/src\/locales\/[^/]+\/[^/]+\.json$/.test(filename)) {
+                return true;
+              }
+
+              const countedExtensions = new Set([
+                'c',
+                'cc',
+                'cpp',
+                'css',
+                'go',
+                'graphql',
+                'gql',
+                'h',
+                'html',
+                'js',
+                'jsx',
+                'mjs',
+                'mts',
+                'proto',
+                'rs',
+                'scss',
+                'sql',
+                'ts',
+                'tsx',
+              ]);
+              return countedExtensions.has(extension);
+            }
+
+            function classifySize(count) {
+              if (count <= 10) {
+                return 'small';
+              }
+              if (count <= 50) {
+                return 'medium';
+              }
+              return 'big';
+            }
+
+            function staleSizeLabels(currentLabels, targetLabel) {
+              const sizeLabels = new Set(['small', 'medium', 'big']);
+              return currentLabels.filter(
+                label => sizeLabels.has(label) && label !== targetLabel,
+              );
+            }
+
+            function isAlreadyExistingLabelError(error) {
+              const status = error?.status ?? error?.response?.status;
+              return (
+                status === 422 &&
+                Array.isArray(error?.response?.data?.errors) &&
+                error.response.data.errors.some(detail => detail?.code === 'already_exists')
+              );
+            }
+
+            function summaryTableRow(countedFileCount, targetLabel) {
+              return [String(countedFileCount), targetLabel];
+            }
+
+            const pullNumber = context.payload.pull_request?.number;
+            if (!Number.isInteger(pullNumber)) {
+              throw new Error('pull-request number is missing from the event');
+            }
+
+            const changedFiles = await github.paginate(
+              github.rest.pulls.listFiles,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.pull_request.number,
+                per_page: 100,
+              },
+            );
+            if (changedFiles.length >= 3000) {
+              throw new Error(
+                'changed-file result may be incomplete at GitHub’s 3,000-file limit',
+              );
+            }
+
+            const countedFileCount = changedFiles.filter(file =>
+              isCountedFile(file?.filename),
+            ).length;
+            const targetLabel = classifySize(countedFileCount);
+
+            for (const [name, definition] of Object.entries(sizeLabelDefinitions)) {
+              try {
+                await github.rest.issues.getLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name,
+                });
+              } catch (error) {
+                const status = error?.status ?? error?.response?.status;
+                if (status !== 404) {
+                  throw error;
+                }
+                try {
+                  await github.rest.issues.createLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name,
+                    color: definition.color,
+                    description: definition.description,
+                  });
+                } catch (createError) {
+                  if (!isAlreadyExistingLabelError(createError)) {
+                    throw createError;
+                  }
+                  await github.rest.issues.getLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    name,
+                  });
+                }
+              }
+            }
+
+            const currentLabels = await github.paginate(
+              github.rest.issues.listLabelsOnIssue,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pullNumber,
+                per_page: 100,
+              },
+            );
+            const currentLabelNames = currentLabels
+              .map(label => label?.name)
+              .filter(name => typeof name === 'string');
+
+            if (!currentLabelNames.includes(targetLabel)) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pullNumber,
+                labels: [targetLabel],
+              });
+            }
+
+            for (const label of staleSizeLabels(currentLabelNames, targetLabel)) {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pullNumber,
+                name: label,
+              });
+            }
+
+            core.summary.addHeading(`Pull request size for #${pullNumber}`);
+            core.summary.addTable([
+              [
+                { data: 'Counted application files', header: true },
+                { data: 'Size label', header: true },
+              ],
+              summaryTableRow(countedFileCount, targetLabel),
+            ]);
+            await core.summary.write();

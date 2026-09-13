@@ -15,6 +15,7 @@ import {
   useSelectableProfileOptions,
 } from "./agent-profile-setup-controls";
 import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 type StepTierProfilesProps = {
   tierProfileIds: Partial<Record<Tier, string>>;
@@ -162,7 +163,10 @@ function TierProfileSelector({
         onValueChange={onChange}
         disabled={options.length === 0}
         placeholder={t("office:selectProfile")}
-        triggerClassName="border border-input rounded-md px-3 h-9 w-full"
+        triggerClassName={controlSizingClassName(
+          "standard",
+          "border border-input rounded-md px-3 w-full",
+        )}
       />
     </div>
   );

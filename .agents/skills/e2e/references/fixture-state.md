@@ -10,6 +10,16 @@ For tests using agent models, modes, commands, or options, treat
 or test ID and bounded-poll for the semantic capability before interacting.
 Avoid arbitrary sleeps and `force: true` clicks.
 
+## Managed-runtime capability probes
+
+Host-utility capability checks call the managed agent's `IsInstalled()` probe
+before they invoke the managed `npx` path. If a fixture replaces `npx` to test
+package recovery, also put a discoverable executable for that agent on the
+fixture `PATH` (for example, a scoped `opencode` shim). Assert that the initial
+capability state is `ok` before exercising recovery; otherwise the fixture can
+stop at `not_installed` and never test the intended path. Verify with the
+focused containers test and `--retries=0`.
+
 ## Remembered workflow selection
 
 After seeding tasks in multiple workflows, set

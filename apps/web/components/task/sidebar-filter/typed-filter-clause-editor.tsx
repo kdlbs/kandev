@@ -114,11 +114,7 @@ export function TypedFilterClauseEditor<Dimension extends string, Op extends str
         value={clause.dimension}
         onValueChange={(value) => changeDimension(value as Dimension)}
       >
-        <SelectTrigger
-          size="sm"
-          className="h-7 w-32 shrink-0 text-xs"
-          data-testid={testIds.dimension}
-        >
+        <SelectTrigger className="w-32 shrink-0 text-xs" data-testid={testIds.dimension}>
           <SelectValue>{getDimensionLabel(clause.dimension)}</SelectValue>
         </SelectTrigger>
         <SelectContent>
@@ -131,7 +127,7 @@ export function TypedFilterClauseEditor<Dimension extends string, Op extends str
       </Select>
 
       <Select value={clause.op} onValueChange={(value) => changeOp(value as Op)}>
-        <SelectTrigger size="sm" className="h-7 w-24 shrink-0 text-xs" data-testid={testIds.op}>
+        <SelectTrigger className="w-24 shrink-0 text-xs" data-testid={testIds.op}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -150,7 +146,6 @@ export function TypedFilterClauseEditor<Dimension extends string, Op extends str
         valueTestId={
           meta.valueKind === "text" ? (testIds.textValue ?? testIds.value) : testIds.value
         }
-        mobile={mobile}
         onChange={(value) => onChange({ ...clause, value })}
         valuePlaceholder={meta.placeholder ?? t("task:value")}
         selectValuePlaceholder={t("task:selectValue")}
@@ -161,7 +156,7 @@ export function TypedFilterClauseEditor<Dimension extends string, Op extends str
         type="button"
         variant="ghost"
         size="icon"
-        className="h-6 w-6 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
+        className="shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
         onClick={onRemove}
         data-testid={testIds.remove}
         aria-label={t("task:removeFilter")}
@@ -191,7 +186,6 @@ function FilterValueInput<Dimension extends string, Op extends string>({
   meta,
   options,
   valueTestId,
-  mobile,
   onChange,
   valuePlaceholder,
   selectValuePlaceholder,
@@ -201,7 +195,6 @@ function FilterValueInput<Dimension extends string, Op extends string>({
   meta: TypedFilterMeta<Dimension, Op>;
   options: ValueOption[];
   valueTestId: string;
-  mobile: boolean;
   onChange: (value: TypedFilterValue) => void;
   valuePlaceholder: string;
   selectValuePlaceholder: string;
@@ -215,7 +208,7 @@ function FilterValueInput<Dimension extends string, Op extends string>({
         value={String(clause.value ?? "")}
         onChange={(event) => onChange(event.target.value)}
         placeholder={valuePlaceholder}
-        className={cn("h-7 min-w-0 flex-1 text-xs", mobile && "h-11")}
+        className="min-w-0 flex-1 text-xs"
         data-testid={valueTestId}
       />
     );
@@ -224,20 +217,13 @@ function FilterValueInput<Dimension extends string, Op extends string>({
   const multi = clause.op === "in" || clause.op === "not_in";
   if (multi) {
     const selected = Array.isArray(clause.value) ? clause.value.map(String) : [];
-    return (
-      <FilterMultiSelect
-        options={options}
-        selected={selected}
-        onChange={onChange}
-        className={mobile ? "h-11" : undefined}
-      />
-    );
+    return <FilterMultiSelect options={options} selected={selected} onChange={onChange} />;
   }
 
   const current = String(clause.value ?? "");
   return (
     <Select value={current} onValueChange={onChange}>
-      <SelectTrigger size="sm" className="h-7 min-w-0 flex-1 text-xs" data-testid={valueTestId}>
+      <SelectTrigger className="min-w-0 flex-1 text-xs" data-testid={valueTestId}>
         <SelectValue placeholder={selectValuePlaceholder} />
       </SelectTrigger>
       <SelectContent>

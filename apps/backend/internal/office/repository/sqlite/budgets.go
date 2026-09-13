@@ -303,7 +303,7 @@ func (r *Repository) claimExceededTx(
 // recreate is visible rather than silently leaving the old three-column
 // key in place.
 func (r *Repository) recreateBudgetClaimsForRevision() error {
-	exists, err := columnExists(r.db, "office_budget_claims", "revision")
+	exists, err := db.ColumnExists(r.db, "office_budget_claims", "revision")
 	if err != nil {
 		return fmt.Errorf("probe office_budget_claims.revision: %w", err)
 	}

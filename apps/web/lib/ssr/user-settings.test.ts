@@ -55,9 +55,19 @@ describe("user settings revision ordering", () => {
 
 describe("startup page user settings", () => {
   it("normalizes startup page preferences", () => {
+    expect(parseStartupPage("threads")).toBe("threads");
     expect(parseStartupPage("last_task")).toBe("last_task");
     expect(parseStartupPage(undefined)).toBe("task_overview");
     expect(parseStartupPage("future_value")).toBe("task_overview");
+  });
+
+  // @covers AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-003.3
+  it("maps Threads and preserves it when a later settings patch omits startup page", () => {
+    const current = mapUserSettingsData({ startup_page: "threads" });
+    expect(current.startupPage).toBe("threads");
+    expect(mapUserSettingsData({ tasks_list_show_details: true }, current).startupPage).toBe(
+      "threads",
+    );
   });
 
   it("defaults startup page and maps the last-task choice", () => {

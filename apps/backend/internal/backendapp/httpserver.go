@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/config"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/startup"
 	"go.uber.org/zap"
 )
 
@@ -57,13 +58,20 @@ func (hs *handlerSwitch) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // GET /health's body is identical to healthHandler's in helpers.go (status
 // "ok", service, mode, version) since /health is a pure liveness probe and
 // its shape must not depend on startup progress.
-func newBootstrapHandler(version string) http.Handler {
+func newBootstrapHandler(version string, reporters ...*startup.Reporter) http.Handler {
+	progress := startup.New(nil)
+	if len(reporters) > 0 {
+		progress = reporters[0]
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet || r.URL.Path != "/health" {
 			body := map[string]any{
 				statusKey:       startingStatus,
 				serviceFieldKey: kandevName,
 				versionFieldKey: version,
+			}
+			if r.Method == http.MethodGet && r.URL.Path == "/ready" {
+				body["startup"] = progress.Snapshot()
 			}
 			writeBootstrapJSON(w, http.StatusServiceUnavailable, body)
 			return
@@ -91,8 +99,8 @@ func writeBootstrapJSON(w http.ResponseWriter, status int, body map[string]any) 
 // The returned handlerSwitch is later Store()d with the real router; the
 // returned *http.Server and *serverListeners are the same instances that
 // must flow unmodified into awaitShutdown, so shutdown needs no changes.
-func bindBootstrapListeners(cfg *config.Config, log *logger.Logger, version string) (*handlerSwitch, *http.Server, *serverListeners, error) {
-	handler := newHandlerSwitch(newBootstrapHandler(version))
+func bindBootstrapListeners(cfg *config.Config, log *logger.Logger, version string, reporters ...*startup.Reporter) (*handlerSwitch, *http.Server, *serverListeners, error) {
+	handler := newHandlerSwitch(newBootstrapHandler(version, reporters...))
 	server := &http.Server{
 		Handler:      handler,
 		ReadTimeout:  cfg.Server.ReadTimeoutDuration(),

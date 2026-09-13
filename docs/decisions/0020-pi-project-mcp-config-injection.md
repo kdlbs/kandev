@@ -17,8 +17,10 @@ gives Kandev a non-global injection point.
 
 Pi uses a dedicated `mcpconfig.PiStrategy` that writes or merges
 `<workspace>/.pi/mcp.json` under the `mcpServers` key. The strategy emits Pi's
-remote transport spelling (`streamable-http`) and preserves existing user
-settings and servers when the file already exists.
+remote transport spelling (`streamable-http`) and marks Kandev-supplied servers
+`eager` so their session-scoped tools are registered when the session starts.
+It preserves existing user settings and servers when the file already exists;
+the lifecycle of unrelated user-supplied servers is not changed.
 
 For passthrough sessions, Pi declares the strategy on `PassthroughConfig`, using
 the existing passthrough MCP materialization path. For ACP sessions, Pi declares

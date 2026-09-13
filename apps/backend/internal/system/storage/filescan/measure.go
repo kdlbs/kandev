@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -23,6 +24,7 @@ type Root struct {
 	SymlinkPolicy SymlinkPolicy
 	MissingOK     bool
 	Exclude       func(string, fs.DirEntry) bool
+	OverlapRoots  []string
 }
 
 type ProgressPhase string
@@ -45,8 +47,9 @@ type Progress struct {
 }
 
 type Result struct {
-	Bytes int64
-	Err   error
+	Bytes           int64
+	OverlappedBytes int64
+	Err             error
 }
 
 type Limiter struct {
@@ -75,8 +78,9 @@ type rootPlan struct {
 }
 
 type partitionResult struct {
-	bytes int64
-	err   error
+	bytes           int64
+	overlappedBytes int64
+	err             error
 }
 
 type progressTracker struct {
@@ -139,6 +143,7 @@ func (l *Limiter) Measure(ctx context.Context, roots []Root, notify func(Progres
 				continue
 			}
 			results[index].Bytes += measured.bytes
+			results[index].OverlappedBytes += measured.overlappedBytes
 		}
 		results[index].Err = errors.Join(errs...)
 	}
@@ -180,10 +185,10 @@ func (l *Limiter) measurePartition(ctx context.Context, item partition, tracker 
 		return partitionResult{err: err}
 	}
 	tracker.partitionStarted(item)
-	bytes, err := walkPartition(ctx, item.root, item.path)
+	bytes, overlappedBytes, err := walkPartition(ctx, item.root, item.path)
 	tracker.partitionCompleted(item, bytes, err)
 	l.release()
-	return partitionResult{bytes: bytes, err: err}
+	return partitionResult{bytes: bytes, overlappedBytes: overlappedBytes, err: err}
 }
 
 func (l *Limiter) acquire(ctx context.Context) error {
@@ -249,8 +254,9 @@ func planDirectory(ctx context.Context, rootIndex int, root Root) ([]partition, 
 	return partitions, nil
 }
 
-func walkPartition(ctx context.Context, root Root, path string) (int64, error) {
+func walkPartition(ctx context.Context, root Root, path string) (int64, int64, error) {
 	var total int64
+	var overlapped int64
 	err := filepath.WalkDir(path, func(path string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -281,12 +287,31 @@ func walkPartition(ctx context.Context, root Root, path string) (int64, error) {
 			return err
 		}
 		total += info.Size()
+		if pathWithinAny(path, root.OverlapRoots) {
+			overlapped += info.Size()
+		}
 		return nil
 	})
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	return total, nil
+	return total, overlapped, nil
+}
+
+func pathWithinAny(path string, roots []string) bool {
+	for _, root := range roots {
+		if pathWithin(path, root) {
+			return true
+		}
+	}
+	return false
+}
+
+func pathWithin(path, root string) bool {
+	path = filepath.Clean(path)
+	root = filepath.Clean(root)
+	relative, err := filepath.Rel(root, path)
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }
 
 func (t *progressTracker) partitionStarted(item partition) {

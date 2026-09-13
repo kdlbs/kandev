@@ -1,4 +1,4 @@
-import { test, expect } from "../../fixtures/office-fixture";
+import { test, expect, moveTaskToTerminalStep } from "../../fixtures/office-fixture";
 
 test.describe("Subtask checklist — stepper (blocker chain)", () => {
   test("stepper renders for children linked with a blocker chain", async ({
@@ -95,6 +95,7 @@ test.describe("Subtask checklist — stepper (blocker chain)", () => {
 
   test("completed first step highlights second step as active", async ({
     testPage,
+    apiClient,
     officeApi,
     officeSeed,
   }) => {
@@ -115,6 +116,11 @@ test.describe("Subtask checklist — stepper (blocker chain)", () => {
       blocked_by: [step1Id],
       workflow_id: officeSeed.workflowId,
     });
+
+    // The office approval gate redirects a "done" write to in_review unless
+    // the task is already on its workflow's terminal step; park step1 there
+    // so this generic-stepper-UI assertion isn't coupled to workflow position.
+    await moveTaskToTerminalStep(apiClient, officeSeed.workflowId, step1Id);
 
     // Mark first child as COMPLETED via the office status endpoint.
     await officeApi.updateTaskStatus(step1Id, "COMPLETED", "done");

@@ -11,6 +11,7 @@ export function buildStateOverrides(m: DefaultState) {
     workflows: m.workflows,
     workspaceContextGeneration: m.workspaceContextGeneration,
     tasks: m.tasks,
+    taskRemoval: m.taskRemoval,
     workspaces: m.workspaces,
     repositories: m.repositories,
     repositoryBranches: m.repositoryBranches,

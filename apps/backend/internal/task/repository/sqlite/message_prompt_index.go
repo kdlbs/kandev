@@ -243,14 +243,33 @@ func (r *Repository) executeBoundaryTransaction(
 	if err := lockSessionTurnWrites(ctx, tx, driver, message.TaskSessionID); err != nil {
 		return err
 	}
+	if err := r.assignUserMessageBoundary(ctx, tx, message, driver, nm); err != nil {
+		return err
+	}
+	if err := r.insertMessageRow(ctx, tx, message, requestsInput, messageType, metadataJSON); err != nil {
+		restore()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		restore()
+		return fmt.Errorf("commit user message creation: %w", err)
+	}
+	return nil
+}
 
+func (r *Repository) assignUserMessageBoundary(
+	ctx context.Context,
+	tx messageBoundaryExecer,
+	message *models.Message,
+	driver, normalizedTime string,
+) error {
 	now := r.nowUTC()
 	created := message.CreatedAt
 	if created.IsZero() {
 		created = now
 	}
 
-	maxKeyStr, maxKeyValid, err := r.readSessionMaxUserKey(ctx, tx, driver, nm, message.TaskSessionID)
+	maxKeyStr, maxKeyValid, err := r.readSessionMaxUserKey(ctx, tx, driver, normalizedTime, message.TaskSessionID)
 	if err != nil {
 		return err
 	}
@@ -273,14 +292,6 @@ func (r *Repository) executeBoundaryTransaction(
 	message.PromptIndex = seq
 	if message.UpdatedAt.IsZero() {
 		message.UpdatedAt = created
-	}
-	if err := r.insertMessageRow(ctx, tx, message, requestsInput, messageType, metadataJSON); err != nil {
-		restore()
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		restore()
-		return fmt.Errorf("commit user message creation: %w", err)
 	}
 	return nil
 }

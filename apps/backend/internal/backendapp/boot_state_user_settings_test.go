@@ -102,13 +102,19 @@ func TestMapUserSettingsStateIncludesNormalizedMCPTaskAgentProfileDefault(t *tes
 
 // TestMapUserSettingsStateIncludesNormalizedStartupPage verifies boot state normalizes the startup page.
 func TestMapUserSettingsStateIncludesNormalizedStartupPage(t *testing.T) {
-	state := mapUserSettingsState(userdto.UserSettingsResponse{
-		Settings: userdto.UserSettingsDTO{StartupPage: "future_value"},
-	}, "workspace-1")
-
-	got, ok := state["startupPage"].(string)
-	if !ok || got != usermodels.StartupPageTaskOverview {
-		t.Fatalf("startupPage = %#v, want task_overview", state["startupPage"])
+	for _, tt := range []struct{ value, want string }{
+		{"future_value", usermodels.StartupPageTaskOverview},
+		{"threads", "threads"},
+		{usermodels.StartupPageLastTask, usermodels.StartupPageLastTask},
+	} {
+		t.Run(tt.value, func(t *testing.T) {
+			state := mapUserSettingsState(userdto.UserSettingsResponse{
+				Settings: userdto.UserSettingsDTO{StartupPage: tt.value},
+			}, "workspace-1")
+			if got := state["startupPage"]; got != tt.want {
+				t.Fatalf("startupPage = %#v, want %q", got, tt.want)
+			}
+		})
 	}
 }
 

@@ -1,7 +1,7 @@
 import type { WorkspaceId } from "./ids";
 
 export type MCPTaskAgentProfileDefault = "current_task" | "workspace_default";
-export type StartupPage = "task_overview" | "last_task";
+export type StartupPage = "task_overview" | "last_task" | "threads";
 export type LspStatusLocation = "toolbar" | "status_bar";
 export type LastSeenDisplay = "absolute" | "relative";
 

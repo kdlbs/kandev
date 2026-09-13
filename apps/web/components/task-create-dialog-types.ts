@@ -1,4 +1,5 @@
 import type React from "react";
+import type { RefObject } from "react";
 import type {
   LocalRepository,
   Repository,
@@ -85,6 +86,10 @@ export interface TaskCreateDialogProps {
   extraFormSlot?: React.ReactNode;
   bottomSlot?: React.ReactNode;
   submitBlockedReason?: string | null;
+  /** Element to return keyboard focus to on close, confirmed or cancelled.
+   * Omitted callers keep Radix's default restore-to-previously-focused-element
+   * behavior. */
+  focusReturnRef?: RefObject<HTMLElement | null>;
 }
 
 export type DialogPromptEnhance = {
@@ -114,6 +119,8 @@ export type TaskRepoRow = {
   /** On-machine repo path, when the user picked from discovered repos. */
   localPath?: string;
   branch: string;
+  /** Explicit effective base copied from a repository set or chosen in the form. */
+  baseBranch?: string;
   /** Saved repository policy selected for this row. */
   branchPolicyId?: string;
 };
@@ -631,6 +638,9 @@ export type DialogFormBodyProps = {
     save?: {
       workspaceId: string;
       rows: TaskRepoRow[];
+      repositories: Repository[];
+      isLocalExecutor: boolean;
+      freshBranchEnabled: boolean;
       open: boolean;
       setOpen: (open: boolean) => void;
     } | null;

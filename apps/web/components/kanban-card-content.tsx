@@ -4,16 +4,7 @@ import { useEffect, useState, type RefObject } from "react";
 import { useTranslation } from "react-i18next";
 import { CSS, type Transform } from "@dnd-kit/utilities";
 import type { DraggableAttributes, DraggableSyntheticListeners } from "@dnd-kit/core";
-import {
-  IconAlertCircle,
-  IconArrowsMaximize,
-  IconDots,
-  IconLock,
-  IconSubtask,
-  IconUsersGroup,
-} from "@tabler/icons-react";
-import { Badge } from "@kandev/ui/badge";
-import { AssigneeBadge } from "@/components/kanban-card-assignee-badge";
+import { IconArrowsMaximize, IconDots, IconUsersGroup } from "@tabler/icons-react";
 import { Card, CardContent } from "@kandev/ui/card";
 import { Checkbox } from "@kandev/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@kandev/ui/dropdown-menu";
@@ -25,10 +16,14 @@ import {
   type KanbanCardMenuEntry,
 } from "@/components/kanban-card-menu-items";
 import { TaskCardIndicators, TaskCardTags } from "@/components/kanban-card-plugin-slots";
+import {
+  KanbanCardBadges,
+  KanbanCardRelationship,
+  RepoChipRow,
+} from "@/components/kanban-card-status-strip";
 import { KanbanCardPriorityIndicator } from "@/components/kanban-card-priority-indicator";
-import { RepoChipRow } from "@/components/kanban-card-repository-chips";
 import { CardTitle } from "@/components/kanban-card-title";
-import { useAppStore, useAppStoreApi } from "@/components/state-provider";
+import { useAppStoreApi } from "@/components/state-provider";
 import { RemoteCloudTooltip } from "@/components/task/remote-cloud-tooltip";
 import { useTaskPendingInput } from "@/hooks/use-task-pending-input";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
@@ -41,7 +36,6 @@ import {
 } from "@/lib/ui/state-icons";
 import { cn } from "@/lib/utils";
 import { needsAction } from "@/lib/utils/needs-action";
-import { canShowHumanAssignee } from "@/lib/auth/human-assignee";
 import type { RepositoryChip, Task } from "@/components/kanban-card";
 
 const kanbanStatusDebug = createDebugLogger("kanban:task-status");
@@ -122,126 +116,45 @@ export function KanbanCardBody({
   );
 }
 
-function KanbanCardRelationship({ task }: { task: Task }) {
-  const { t } = useTranslation();
-  const parentTitle = useAppStore((s) => {
-    if (!task.parentTaskId) return null;
-    return s.kanban.tasks.find((t) => t.id === task.parentTaskId)?.title ?? null;
-  });
+// Status markers that mask the launch spinner and gate the resting no-affordance
+// case. Keep them together so the renderer stays easy to audit.
+type StatusMaskFlags = {
+  needsMe: boolean;
+  showInterrupted: boolean;
+  showAutoStartFailed: boolean;
+  parkedOnBackgroundWork: boolean;
+  showWorkspaceOrphaned: boolean;
+};
 
-  if (!task.parentTaskId) return null;
-  const relationshipTitle = parentTitle ?? "Subtask";
-
+function hasNoStatusAffordance(
+  showRunningSpinner: boolean,
+  hasActivity: boolean,
+  flags: StatusMaskFlags,
+): boolean {
   return (
-    <div
-      data-testid="task-parent-relationship"
-      title={relationshipTitle}
-      className="mt-1 flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground"
-    >
-      <IconSubtask className="h-3 w-3 shrink-0" />
-      <span className="shrink-0 font-medium">{t("kanban:subtaskOf")}</span>
-      <span className="min-w-0 truncate">{relationshipTitle}</span>
-    </div>
+    !showRunningSpinner &&
+    !flags.needsMe &&
+    !hasActivity &&
+    !flags.showInterrupted &&
+    !flags.showAutoStartFailed &&
+    !flags.parkedOnBackgroundWork &&
+    !flags.showWorkspaceOrphaned
   );
 }
 
-function KanbanCardBadges({ task }: { task: Task }) {
-  const { t } = useTranslation();
-  const showHumanAssignee = useAppStore((s) => canShowHumanAssignee(s.auth));
-  const showRow = hasCardBadges(task, showHumanAssignee);
-
-  if (!showRow) return null;
-
-  return (
-    <div className="flex flex-wrap items-center justify-end gap-2 mt-1 min-w-0">
-      {task.blocked && <BlockedBadge task={task} />}
-      {showHumanAssignee && task.assigneeUserId && <AssigneeBadge userId={task.assigneeUserId} />}
-      {task.queuedForStepId && (
-        <Badge
-          variant="secondary"
-          className="text-xs h-5"
-          title={t("kanban:queuedForStep", {
-            step:
-              task.queuedForStepTitle ??
-              t("kanban:workflowStepFallback", { stepId: task.queuedForStepId }),
-          })}
-        >
-          {t("kanban:queuedForStep", {
-            step: task.queuedForStepTitle ?? t("kanban:nextCapacity"),
-          })}
-        </Badge>
-      )}
-      {task.sessionCount && task.sessionCount > 1 && (
-        <Badge variant="secondary" className="text-xs h-5">
-          {t("kanban:sessionCount", { count: task.sessionCount })}
-        </Badge>
-      )}
-      {task.reviewStatus === "pending" && task.state !== "IN_PROGRESS" && (
-        <div className="flex items-center gap-1 text-amber-700 dark:text-amber-600">
-          <IconAlertCircle className="h-3.5 w-3.5" />
-          <span className="text-[10px] font-medium">{t("kanban:approvalRequired")}</span>
-        </div>
-      )}
-      {task.reviewStatus === "changes_requested" && (
-        <Badge
-          variant="outline"
-          className="border-amber-500 text-amber-600 bg-amber-50 dark:bg-amber-950/50 text-xs h-5"
-        >
-          {t("kanban:changesRequested")}
-        </Badge>
-      )}
-    </div>
-  );
-}
-
-/**
- * Blocked badge — the card-level signal that this task will not start on its
- * own. Distinguishes a failed predecessor (chain halted, needs a human) from
- * merely pending ones, because those need different actions from the user.
- *
- * The predecessor list is on the payload already, so the title needs no fetch.
- * The count is rendered as text rather than hover-only so the state is readable
- * on a touch device.
- */
-function BlockedBadge({ task }: { task: Task }) {
-  const { t } = useTranslation();
-  const count = task.dependsOn?.length ?? 0;
-  const failed = task.blockedReason === "failed";
-  const names = (task.dependsOn ?? []).map((ref) => ref.title || ref.id).join(", ");
-  return (
-    <Badge
-      variant="outline"
-      className={cn(
-        // Same pill formula as the dependency chip above the composer: rounded
-        // outline, 10% tint, 35% border, colour as the text. Keeps the two
-        // surfaces for one concept looking like one thing.
-        "h-5 gap-1 rounded-full px-2 text-xs font-medium leading-none",
-        failed
-          ? "border-red-500/40 bg-red-500/10 text-red-600 dark:text-red-400"
-          : "border-primary/35 bg-primary/10 text-primary",
-      )}
-      title={
-        failed
-          ? t("kanban:blockedPredecessorFailed", { tasks: names })
-          : t("kanban:blockedByTasksTitle", { tasks: names })
-      }
-      data-testid="kanban-card-blocked-badge"
-    >
-      <IconLock className="h-3 w-3" />
-      {failed ? t("kanban:blockedFailed") : t("kanban:blockedByCount", { count })}
-    </Badge>
-  );
-}
-
-function hasCardBadges(task: Task, showHumanAssignee: boolean): boolean {
-  return Boolean(
-    (task.sessionCount && task.sessionCount > 1) ||
-    task.reviewStatus === "changes_requested" ||
-    task.reviewStatus === "pending" ||
-    task.queuedForStepId ||
-    (showHumanAssignee && task.assigneeUserId) ||
-    task.blocked,
-  );
+function resolveForegroundActivity(
+  task: Task,
+  showRunningSpinner: boolean,
+  flags: StatusMaskFlags,
+): Task["foregroundActivity"] {
+  const shouldForceGenerating =
+    showRunningSpinner &&
+    !flags.needsMe &&
+    !flags.showAutoStartFailed &&
+    !flags.parkedOnBackgroundWork &&
+    !flags.showWorkspaceOrphaned &&
+    task.foregroundActivity !== "background";
+  return shouldForceGenerating ? "generating" : task.foregroundActivity;
 }
 
 // renderTaskStatusIcon resolves the card status icon, or null when the actions
@@ -259,48 +172,27 @@ export function renderTaskStatusIcon(
   hasPendingClarification: boolean,
   hasPendingPermission: boolean,
 ) {
-  const showQuestionIcon = shouldUseQuestionTaskIcon(task.state, hasPendingClarification);
-  const showPermissionIcon = shouldUsePermissionTaskIcon(hasPendingPermission);
-  const needsMe = showQuestionIcon || showPermissionIcon;
-  const showInterrupted = !!task.interrupted;
-  const showAutoStartFailed = !!task.autoStartFailed;
-  const parkedOnBackgroundWork = !!task.parkedOnBackgroundWork;
+  const flags: StatusMaskFlags = {
+    needsMe:
+      shouldUseQuestionTaskIcon(task.state, hasPendingClarification) ||
+      shouldUsePermissionTaskIcon(hasPendingPermission),
+    showInterrupted: !!task.interrupted,
+    showAutoStartFailed: !!task.autoStartFailed,
+    parkedOnBackgroundWork: !!task.parkedOnBackgroundWork,
+    showWorkspaceOrphaned: !!task.workspaceOrphaned,
+  };
   const hasActivity =
     task.foregroundActivity === "generating" || task.foregroundActivity === "background";
-  if (
-    !showRunningSpinner &&
-    !needsMe &&
-    !hasActivity &&
-    !showInterrupted &&
-    !showAutoStartFailed &&
-    !parkedOnBackgroundWork
-  ) {
-    return null;
-  }
-  // A "needs me" prompt (pending clarification / permission) must not be masked
-  // by the launch-spinner short-circuit — a mid-turn prompt can coincide with a
-  // coarse running state. Live foreground activity still wins, handled inside
-  // getTaskStateIcon. A failed auto-start must not be masked either: startTask
-  // sets the task to SCHEDULING before the launch, so a launch failure before
-  // session creation leaves a session-less SCHEDULING/IN_PROGRESS task, which
-  // reads as showRunningSpinner=true — the exact shape the failure marker exists
-  // to surface. The parked affordance (AC-58) is likewise never masked by the
-  // generic spinner — it renders through getTaskStateIcon below.
-  const foregroundActivity =
-    showRunningSpinner &&
-    !needsMe &&
-    !showAutoStartFailed &&
-    !parkedOnBackgroundWork &&
-    task.foregroundActivity !== "background"
-      ? "generating"
-      : task.foregroundActivity;
+  if (hasNoStatusAffordance(showRunningSpinner, hasActivity, flags)) return null;
+  const foregroundActivity = resolveForegroundActivity(task, showRunningSpinner, flags);
   return getTaskStateIcon(task.state, "h-4 w-4", {
     hasPendingClarification,
     foregroundActivity,
     hasPendingPermission,
-    interrupted: showInterrupted,
-    autoStartFailed: showAutoStartFailed,
-    parkedOnBackgroundWork,
+    interrupted: flags.showInterrupted,
+    autoStartFailed: flags.showAutoStartFailed,
+    parkedOnBackgroundWork: flags.parkedOnBackgroundWork,
+    workspaceOrphaned: flags.showWorkspaceOrphaned,
   });
 }
 
@@ -368,6 +260,7 @@ function KanbanCardActions({
   const pendingInput = useTaskPendingInput(task.primarySessionId, {
     taskId: task.id,
     taskPendingAction: task.taskPendingAction,
+    statusSummary: task.statusSummary,
     primarySessionState: task.primarySessionState,
     primarySessionPendingAction: task.primarySessionPendingAction,
   });

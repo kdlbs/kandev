@@ -218,13 +218,14 @@ func (s *CostService) recordClaimFailure(policyID, level string, err error) {
 }
 
 // periodCutoff returns the time.Time at which the policy's spend window
-// starts. A zero time means "no filter" (lifetime / total).
+// starts. A zero time means "no filter" (lifetime / total) or an unknown
+// period retained for compatibility with stored policies.
 func periodCutoff(period string, now time.Time) time.Time {
-	if period == budgetPeriodMonthly {
-		n := now.UTC()
-		return time.Date(n.Year(), n.Month(), 1, 0, 0, 0, 0, time.UTC)
+	start, ok := windowStart(models.BudgetPeriod(period), now)
+	if !ok {
+		return time.Time{}
 	}
-	return time.Time{}
+	return start
 }
 
 // periodKeyFor renders a period boundary as the claim's stored identity.
@@ -376,6 +377,9 @@ func (s *CostService) pauseAgentForBudget(ctx context.Context, agentID string) b
 
 // CreateBudgetPolicy creates a new budget policy.
 func (s *CostService) CreateBudgetPolicy(ctx context.Context, policy *BudgetPolicy) error {
+	if err := validateBudgetPolicyWrite(policy); err != nil {
+		return err
+	}
 	return s.repo.CreateBudgetPolicy(ctx, policy)
 }
 
@@ -391,6 +395,9 @@ func (s *CostService) GetBudgetPolicy(ctx context.Context, id string) (*BudgetPo
 
 // UpdateBudgetPolicy updates a budget policy.
 func (s *CostService) UpdateBudgetPolicy(ctx context.Context, policy *BudgetPolicy) error {
+	if err := validateBudgetPolicyWrite(policy); err != nil {
+		return err
+	}
 	return s.repo.UpdateBudgetPolicy(ctx, policy)
 }
 

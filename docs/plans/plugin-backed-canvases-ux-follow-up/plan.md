@@ -180,6 +180,14 @@ shards, with lower limits on low-memory hosts. Higher parallelism requires an
 explicit opt-in environment variable, and the E2E skill documents the safe
 defaults for future sessions.
 
+## Follow-up repair
+
+The [canvas runtime and permission repair](../canvas-runtime-permission-fixes/plan.md)
+adds startup acknowledgement before appearance reveal and replaces the release
+review layout. Its work orders 03-04 own those changes and desktop/mobile tests.
+The external ACP evaluation remains pending here; this repair neither completes
+that evaluation nor replaces this package's historical results.
+
 ## Risks
 
 - A feature-aware tab catalog can accidentally fetch canvas data while the

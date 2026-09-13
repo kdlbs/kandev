@@ -132,6 +132,9 @@ func (m *Manager) cleanupBranchIdentity(
 		branchRef = "refs/heads/" + wt.Branch
 	}
 	expectedOID := strings.TrimSpace(wt.CleanupHeadOID)
+	if wt.CleanupHeadOIDUnavailable && pathPresent {
+		return "", "", fmt.Errorf("cleanup worktree path %q reappeared without immutable expected commit", wt.Path)
+	}
 	if expectedOID == "" && pathPresent {
 		output, err := m.runBoundedGitInspect(ctx, wt.Path, "rev-parse", "--verify", "HEAD^{commit}")
 		if err != nil {

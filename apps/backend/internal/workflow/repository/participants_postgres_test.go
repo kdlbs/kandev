@@ -18,7 +18,7 @@ import (
 // query would fail outright (`column "rowid" does not exist`) rather than
 // silently pick the wrong row. Running the exact resolution path against a
 // real Postgres connection is the only way to prove the fixed
-// `ORDER BY created_at DESC, agent_profile_id ASC` actually executes there.
+// `ORDER BY created_at DESC, id ASC` actually executes there.
 // Skips unless KANDEV_TEST_POSTGRES_DSN is set.
 func TestPostgresResolveCurrentRunner_FallsBackToLatestTaskRunner(t *testing.T) {
 	repo := setupPostgresDecisionTestRepo(t, testutil.PostgresDSNFromEnv(t), 1)

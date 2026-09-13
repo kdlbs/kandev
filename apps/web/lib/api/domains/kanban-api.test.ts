@@ -3,7 +3,9 @@ import {
   attachTaskWorkspaceSources,
   detachTask,
   deleteTask,
+  getTaskDeletePreflight,
   listTasksByWorkspace,
+  moveTask,
   updateTask,
   updateTaskPortForwarding,
 } from "./kanban-api";
@@ -34,6 +36,30 @@ describe("deleteTask", () => {
       `${API_BASE_URL}/api/v1/tasks/task-1?cascade=true&discard_worktree_changes=true`,
     );
     expect(init?.method).toBe("DELETE");
+  });
+});
+
+describe("getTaskDeletePreflight", () => {
+  it("posts the exact scope and bypasses caches", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(JSON.stringify({ requires_discard_consent: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+
+    await expect(
+      getTaskDeletePreflight(["task-1", "task-2"], true, { baseUrl: API_BASE_URL }),
+    ).resolves.toEqual({ requires_discard_consent: true });
+
+    expect(fetchSpy).toHaveBeenCalledOnce();
+    const [url, init] = fetchSpy.mock.calls[0];
+    expect(url).toBe(`${API_BASE_URL}/api/v1/tasks/delete-preflight`);
+    expect(init).toMatchObject({
+      method: "POST",
+      body: JSON.stringify({ task_ids: ["task-1", "task-2"], cascade: true }),
+      cache: "no-store",
+    });
   });
 });
 
@@ -173,6 +199,75 @@ describe("listTasksByWorkspace", () => {
     expect(fetchSpy).toHaveBeenCalledOnce();
     expect(fetchSpy.mock.calls[0][0]).toBe(
       `${API_BASE_URL}/api/v1/workspaces/ws-1/tasks?page=2&page_size=100&only_archived=true&sort=updated_desc`,
+    );
+  });
+});
+
+describe("moveTask", () => {
+  const workflowId = "workflow-1";
+  const workflowStepId = "step-2";
+
+  it("normalizes one-shot entry options and omits blank values", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ task: { id: "task-1" }, workflow_step: { id: workflowStepId } }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+
+    await moveTask(
+      "task-1",
+      {
+        workflow_id: workflowId,
+        workflow_step_id: workflowStepId,
+        position: 0,
+        entry_options: {
+          reset_context: true,
+          instructions: "  Start the verification pass.  ",
+          skip_step_prompt: true,
+        },
+      },
+      { baseUrl: API_BASE_URL },
+    );
+
+    const [, init] = fetchSpy.mock.calls[0];
+    expect(init?.body).toBe(
+      JSON.stringify({
+        workflow_id: workflowId,
+        workflow_step_id: workflowStepId,
+        position: 0,
+        entry_options: {
+          reset_context: true,
+          skip_step_prompt: true,
+          instructions: "Start the verification pass.",
+        },
+      }),
+    );
+  });
+
+  it("keeps destination-only move payloads unchanged", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({ task: { id: "task-1" }, workflow_step: { id: workflowStepId } }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
+    );
+
+    await moveTask(
+      "task-1",
+      { workflow_id: workflowId, workflow_step_id: workflowStepId, position: 0 },
+      { baseUrl: API_BASE_URL },
+    );
+
+    const [, init] = fetchSpy.mock.calls[0];
+    expect(init?.body).toBe(
+      JSON.stringify({ workflow_id: workflowId, workflow_step_id: workflowStepId, position: 0 }),
     );
   });
 });

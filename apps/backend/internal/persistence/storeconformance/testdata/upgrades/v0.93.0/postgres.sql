@@ -455,6 +455,16 @@ CREATE TABLE office_budget_policies (
     updated_at timestamp without time zone NOT NULL
 );
 
+CREATE TABLE office_budget_claims (
+    policy_id text NOT NULL,
+    period_key text NOT NULL,
+    level text NOT NULL,
+    claimed_at timestamp without time zone NOT NULL,
+    CONSTRAINT office_budget_claims_pkey PRIMARY KEY (policy_id, period_key, level),
+    CONSTRAINT office_budget_claims_policy_id_fkey FOREIGN KEY (policy_id)
+        REFERENCES office_budget_policies(id) ON DELETE CASCADE
+);
+
 
 
 CREATE TABLE office_channels (

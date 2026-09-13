@@ -97,7 +97,7 @@ export function NumberField({
         disabled={disabled}
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
-        className={settingsControlClassName("h-11")}
+        className={settingsControlClassName()}
         data-testid={testId}
         data-settings-dirty={isDirty}
       />

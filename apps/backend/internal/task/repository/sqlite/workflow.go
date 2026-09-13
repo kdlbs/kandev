@@ -270,30 +270,54 @@ func (r *Repository) UpdateWorkflow(ctx context.Context, workflow *models.Workfl
 // DeleteWorkflowsByWorkspace deletes all workflows for a workspace except the excluded IDs (E2E cleanup).
 // Relies on CASCADE foreign keys to remove workflow_steps.
 func (r *Repository) DeleteWorkflowsByWorkspace(ctx context.Context, workspaceID string, excludeIDs []string) (int64, error) {
-	if len(excludeIDs) == 0 {
-		result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM workflows WHERE workspace_id = ?`), workspaceID)
-		if err != nil {
-			return 0, err
-		}
-		rows, _ := result.RowsAffected()
-		return rows, nil
-	}
-
-	query, args, err := sqlx.In(`DELETE FROM workflows WHERE workspace_id = ? AND id NOT IN (?)`, workspaceID, excludeIDs)
+	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return 0, err
 	}
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	defer func() { _ = tx.Rollback() }()
+
+	var query string
+	var args []interface{}
+	if len(excludeIDs) == 0 {
+		query = `DELETE FROM workflows WHERE workspace_id = ?`
+		args = []interface{}{workspaceID}
+	} else {
+		query, args, err = sqlx.In(`DELETE FROM workflows WHERE workspace_id = ? AND id NOT IN (?)`, workspaceID, excludeIDs)
+		if err != nil {
+			return 0, err
+		}
+	}
+	cleanupQuery := `
+		DELETE FROM task_workflow_session_bindings
+		WHERE workflow_id IN (SELECT id FROM workflows WHERE ` + query[len("DELETE FROM workflows WHERE "):] + `)
+	`
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(cleanupQuery), args...); err != nil {
+		return 0, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
 	if err != nil {
 		return 0, err
 	}
 	rows, _ := result.RowsAffected()
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
 	return rows, nil
 }
 
 // DeleteWorkflow deletes a workflow by ID
 func (r *Repository) DeleteWorkflow(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM workflows WHERE id = ?`), id)
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM task_workflow_session_bindings WHERE workflow_id = ?
+	`), id); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`DELETE FROM workflows WHERE id = ?`), id)
 	if err != nil {
 		return err
 	}
@@ -302,7 +326,7 @@ func (r *Repository) DeleteWorkflow(ctx context.Context, id string) error {
 	if rows == 0 {
 		return fmt.Errorf("workflow not found: %s", id)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // ListWorkflows returns workflows for the given workspace, excluding hidden by default.

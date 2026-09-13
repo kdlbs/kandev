@@ -3,7 +3,9 @@ status: current
 system: ui
 requirements:
   - REQ-UI-ADAPTIVE-KANBAN-001
+  - REQ-UI-ADAPTIVE-KANBAN-002
 created: 2026-09-05
+updated: 2026-09-11
 owners:
   - kandev
 ---
@@ -13,13 +15,16 @@ owners:
 
 The UI system owns the desktop Kanban grid, its contained horizontal overflow, and its drag-time geometry.
 
-This design covers desktop column sizing and drag scroll anchoring. It does not change workflow data, move permissions, or task persistence.
+This design covers column sizing, workflow heights, and drag scroll anchoring. It does not change workflow data, move permissions, or task persistence.
+
+Workflow-height allocation, horizontal sizing, and drag behavior are implemented and covered by focused browser tests.
 
 ## Requirement mapping
 
 | Requirement | Design sections |
 | --- | --- |
 | `REQ-UI-ADAPTIVE-KANBAN-001` | [Components and responsibilities](#components-and-responsibilities), [Drag control flow](#drag-control-flow), [Responsive boundaries](#responsive-boundaries) |
+| `REQ-UI-ADAPTIVE-KANBAN-002` | [Workflow height allocation](#workflow-height-allocation), [Height measurement](#height-measurement), [Responsive boundaries](#responsive-boundaries) |
 
 ## Components and responsibilities
 
@@ -57,13 +62,70 @@ If the source step no longer exists, the hook keeps the current scroll position.
 
 ## Responsive boundaries
 
-The desktop layout uses this design. The tablet layout keeps its two-column snap-scrolling surface.
+The desktop layout uses this design. The tablet layout keeps its two-column snap-scrolling surface and uses the same workflow height allocation.
 
 The phone layout keeps one focused column and separate touch drop targets. This correction does not change mobile composition or touch behavior.
 
 The existing mobile auto-hide E2E scenario covers the nearest mobile surface. It proves touch destinations and document-width containment.
 
+## Workflow height allocation
+
+`SwimlaneContainer` selects the sizing mode after `useRenderedWorkflowLayout` resolves visible workflows.
+
+- Phone Kanban retains its existing full-height focused workflow.
+- A single rendered desktop or tablet workflow retains full-height columns.
+- Several rendered workflows use compact heights. Collapsed workflows still count toward this condition.
+- Pipeline retains its existing content height.
+
+The sortable wrapper must not assign the parent height to every compact lane. `SwimlaneSection` retains its header outside the collapse guard.
+An optional presentation prop on `ViewContentProps` carries the compact mode into `SwimlaneKanbanContent`.
+That component owns a definite column-area height between 200px and 400px. Constants use root-font-scaled units equivalent to these values.
+The workflow header and native horizontal scrollbar add their own measured height outside this column area.
+The tablet layout receives the definite height directly. The desktop inner track receives it through `AdaptiveDesktopKanban`.
+The desktop outer scroll window uses intrinsic height so its native horizontal scrollbar stays outside the column area.
+`KanbanDragSurface` keeps the existing wrapper, while descendant columns resolve `h-full` against the bounded track.
+
+The outer swimlane container owns vertical travel between workflows. Each column owns vertical travel through its tasks.
+The desktop scroll window retains horizontal overflow. The document never becomes a board scroll owner.
+On a short viewport, the outer container scrolls instead of compressing lanes below the minimum.
+
+## Height measurement
+
+`VirtualizedColumnTaskList` already obtains its logical content height from `virtualizer.getTotalSize()`.
+An optional callback reports this total after layout, including measured rows and the WIP divider.
+`KanbanColumn` adds its measured header, spacing, and padding before reporting its natural height to the workflow.
+The total must not come from the constrained column box or its viewport height.
+
+The workflow computes `clamp(max(column natural heights), minimum, maximum)` over the current display steps.
+The empty set uses the minimum only when an actual column area renders. Existing no-column empty states retain intrinsic height.
+Initial unmeasured columns use the minimum. The virtualizer then mounts its first window and supplies estimates plus measured row heights.
+Callbacks and measurements remain local to the lane. Unchanged values cause no state update.
+`useCompactSwimlaneHeight` owns the lane measurements and drag freeze. `useColumnNaturalHeight` observes column chrome and adds logical row totals.
+Removed steps discard their measurements. Width changes remeasure mounted rows and header chrome.
+Observers disconnect on unmount and remain disabled outside compact mode.
+
+During a task drag, the lane retains its last settled height so temporary destinations do not move the target vertically.
+After drop or cancellation, the current projection determines the height again.
+New callbacks must participate in `KanbanColumn` memo comparisons and remain stable to preserve render isolation.
+
+No setting, API, dependency, migration, or new user-facing copy is required.
+This extends the existing layout boundary and requires no new ADR.
+
+## Mobile design contract
+
+Home remains the entry point. `MobileColumnTabs` is the shipped navigator exemplar.
+The hierarchy remains workflow, step, then tasks. The temporary drawer selects context, while the focused column owns task scrolling.
+Task taps navigate directly. Existing dynamic viewport sizing, safe-area clearance, and touch controls remain in place.
+The compact mode never applies below the canonical 768px phone boundary.
+Responsive changes do not overwrite saved desktop preferences.
+
 ## Test strategy
+
+- A desktop geometry regression seeds two sparse workflows and asserts that both headers and first cards fit at 1440 by 900.
+- Mixed sparse and dense lanes prove independent heights, bounded mounts, and access to the last task.
+- Collapse, filters, empty retained lanes, and preview resizing prove mode changes and measurement cleanup.
+- Tablet coverage uses `tabletTestPage`. Phone coverage uses the configured Pixel 5 and widths adjacent to 768px.
+- The implementation plan names the exact suites and acceptance mappings.
 
 - Component tests assert that drag state uses a trailing spacer and does not use end padding.
 - The Chromium Kanban E2E scenario compares every rendered desktop column before and during drag.

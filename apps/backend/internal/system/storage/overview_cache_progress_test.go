@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/system/storage/databasestore"
 )
 
 func TestOverviewCacheReadStartsColdScanWithoutWaiting(t *testing.T) {
@@ -74,6 +76,42 @@ func TestOverviewCachePreservesSourceFailureOnSuccessfulScan(t *testing.T) {
 	}
 	if progress.Error == nil || *progress.Error != "go cache unavailable" {
 		t.Fatalf("Go-cache source error = %v, want provider error", progress.Error)
+	}
+}
+
+func TestSummaryFromSourceValuesIncludesDatabaseMeasurementsWithoutInventingMissingRows(t *testing.T) {
+	databaseSize := int64(12)
+	database := databasestore.Measurement{
+		Status:          databasestore.StatusMeasured,
+		SizeBytes:       &databaseSize,
+		Path:            "/data/kandev.db",
+		IncludedInTotal: true,
+	}
+	summary := summaryFromSourceValues(map[string]any{StorageSourceDatabase: database})
+	if summary == nil {
+		t.Fatal("summary = nil, want database partial summary")
+	}
+	if got, ok := summary.Database.(databasestore.Measurement); !ok || got.SizeBytes == nil || *got.SizeBytes != 12 {
+		t.Fatalf("database partial value = %#v, want measured 12 bytes", summary.Database)
+	}
+	if summary.DatabaseBackups != nil {
+		t.Fatalf("missing backup value = %#v, want unknown nil", summary.DatabaseBackups)
+	}
+}
+
+func TestNewAnalysisStateIncludesDatabaseSources(t *testing.T) {
+	state := newAnalysisState(1, time.Minute)
+	for _, source := range []string{StorageSourceDatabase, StorageSourceDatabaseBackups} {
+		progress, ok := state.Progress.Sources[source]
+		if !ok || progress.State != SourceStatePending {
+			t.Fatalf("source %q progress = %#v, want pending", source, progress)
+		}
+	}
+	if len(storageAnalysisSources) != 7 {
+		t.Fatalf("source list length = %d, want 7", len(storageAnalysisSources))
+	}
+	if state.Progress.TotalSources != len(storageAnalysisSources) {
+		t.Fatalf("total sources = %d, want 7", state.Progress.TotalSources)
 	}
 }
 

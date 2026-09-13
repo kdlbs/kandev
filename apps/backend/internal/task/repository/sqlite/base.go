@@ -16,15 +16,16 @@ import (
 
 // Repository provides SQLite-based task storage operations.
 type Repository struct {
-	db                *sqlx.DB // writer
-	ro                *sqlx.DB // reader (read-only pool)
-	ownsDB            bool
-	log               *logger.Logger
-	migrate           *db.MigrateLogger
-	queuePurgeMu      sync.RWMutex
-	queuePurger       func(context.Context, string)
-	queuePurgePrepare func(context.Context, string)
-	queuePurgeNotify  func(context.Context, string)
+	db                      *sqlx.DB // writer
+	ro                      *sqlx.DB // reader (read-only pool)
+	ownsDB                  bool
+	log                     *logger.Logger
+	migrate                 *db.MigrateLogger
+	queuePurgeMu            sync.RWMutex
+	queuePurger             func(context.Context, string)
+	queuePurgePrepare       func(context.Context, string)
+	queuePurgeNotify        func(context.Context, string)
+	queueSessionPurgeNotify func(context.Context, string, string)
 	// clockNow is a test-only clock seam. Set it before any concurrent
 	// repository call; it carries no synchronization.
 	clockNow func() time.Time
@@ -107,6 +108,13 @@ func (r *Repository) nowUTC() time.Time {
 	return time.Now().UTC()
 }
 
+func (r *Repository) migrationContext() context.Context {
+	if r.migrate == nil {
+		return context.Background()
+	}
+	return r.migrate.Context()
+}
+
 // SetTaskQueuePurger registers the orchestrator-owned queue cleanup for
 // in-memory queues. SQLite queues are also purged in the task mutation
 // transaction; this callback keeps the explicitly ephemeral queue equivalent.
@@ -158,20 +166,56 @@ func (r *Repository) notifyTaskQueuePurged(ctx context.Context, taskID string) {
 	}
 }
 
+// SetTaskSessionQueuePurgeNotifier registers a post-commit observer for queue
+// rows removed by DeleteTaskSession.
+func (r *Repository) SetTaskSessionQueuePurgeNotifier(notifier func(context.Context, string, string)) {
+	r.queuePurgeMu.Lock()
+	defer r.queuePurgeMu.Unlock()
+	r.queueSessionPurgeNotify = notifier
+}
+
+func (r *Repository) notifyTaskSessionQueuePurged(ctx context.Context, taskID, sessionID string) {
+	r.queuePurgeMu.RLock()
+	notifier := r.queueSessionPurgeNotify
+	r.queuePurgeMu.RUnlock()
+	if notifier != nil {
+		notifier(ctx, taskID, sessionID)
+	}
+}
+
 // NewWithDB creates a new SQLite repository with an existing database connection (shared ownership).
 func NewWithDB(writer, reader *sqlx.DB, log *logger.Logger) (*Repository, error) {
-	return newRepository(writer, reader, log, false)
+	return NewWithDBContext(context.Background(), writer, reader, log)
+}
+
+// NewWithDBContext creates a repository with an existing database connection
+// while observing cancellation at schema-step boundaries and in
+// context-aware migration statements. A statement that has already entered
+// the database driver can finish before that driver reports cancellation; the
+// caller retains pool ownership until this constructor returns.
+func NewWithDBContext(ctx context.Context, writer, reader *sqlx.DB, log *logger.Logger) (*Repository, error) {
+	return newRepositoryContext(ctx, writer, reader, log, false)
 }
 
 func newRepository(writer, reader *sqlx.DB, log *logger.Logger, ownsDB bool) (*Repository, error) {
+	return newRepositoryContext(context.Background(), writer, reader, log, ownsDB)
+}
+
+func newRepositoryContext(ctx context.Context, writer, reader *sqlx.DB, log *logger.Logger, ownsDB bool) (*Repository, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	repo := &Repository{
 		db:      writer,
 		ro:      reader,
 		ownsDB:  ownsDB,
 		log:     log,
-		migrate: db.NewRequiredMigrateLogger(writer, log),
+		migrate: db.NewRequiredMigrateLoggerContext(writer, log, ctx),
 	}
-	if err := repo.initSchema(); err != nil {
+	if err := repo.initSchemaContext(ctx); err != nil {
 		if ownsDB {
 			if closeErr := writer.Close(); closeErr != nil {
 				return nil, fmt.Errorf("failed to close database after schema error: %w", closeErr)

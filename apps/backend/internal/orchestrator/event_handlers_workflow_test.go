@@ -564,8 +564,12 @@ func TestPublishSessionWaitingEvent(t *testing.T) {
 		if _, exists := data["agent_profile_id"]; exists {
 			t.Errorf("expected agent_profile_id to be absent, got %v", data["agent_profile_id"])
 		}
-		if _, exists := data["session_metadata"]; exists {
-			t.Errorf("expected session_metadata to be absent, got %v", data["session_metadata"])
+		metadata, exists := data["session_metadata"].(map[string]interface{})
+		if !exists {
+			t.Fatalf("expected initial session metadata, got %v", data["session_metadata"])
+		}
+		if metadata[models.SessionMetaKeyOrigin] != models.SessionOriginTaskInitial {
+			t.Errorf("expected initial session origin, got %v", metadata[models.SessionMetaKeyOrigin])
 		}
 	})
 

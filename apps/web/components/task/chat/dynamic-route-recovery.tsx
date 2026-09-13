@@ -151,7 +151,7 @@ function DynamicRouteRecoveryActions({
       <Button
         type="button"
         variant="outline"
-        className="min-h-11 min-w-11 gap-1.5"
+        className="gap-1.5"
         disabled={pendingAction !== null}
         onClick={() => onAction("retry")}
         data-testid="dynamic-route-retry"
@@ -162,7 +162,7 @@ function DynamicRouteRecoveryActions({
       <Button
         type="button"
         variant="default"
-        className="min-h-11 min-w-11 gap-1.5"
+        className="gap-1.5"
         disabled={pendingAction !== null}
         onClick={() => onAction("skip")}
         data-testid="dynamic-route-try-next"
@@ -174,7 +174,6 @@ function DynamicRouteRecoveryActions({
         <Button
           type="button"
           variant="outline"
-          className="min-h-11 min-w-11"
           disabled={pendingAction !== null}
           onClick={() => onAction("cancel_wait")}
           data-testid="dynamic-route-cancel-wait"
@@ -185,7 +184,6 @@ function DynamicRouteRecoveryActions({
       <Button
         type="button"
         variant="destructive"
-        className="min-h-11 min-w-11"
         disabled={pendingAction !== null}
         onClick={() => onAction("stop")}
         data-testid="dynamic-route-stop"

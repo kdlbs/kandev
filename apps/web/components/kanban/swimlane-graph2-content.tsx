@@ -1,7 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useSwimlaneMove } from "@/hooks/domains/kanban/use-swimlane-move";
+import { useTaskMoveGuard } from "@/hooks/domains/kanban/use-task-move-guard";
+import { useAppStore } from "@/components/state-provider";
+import { useActiveWorkspaceRepositories } from "@/components/kanban-card-repositories";
+import { useKanbanExternalLinkAvailability } from "@/components/kanban-external-link-availability";
 import { Graph2TaskPipeline } from "./graph2-task-pipeline";
 import { ORPHAN_STEP, ORPHAN_STEP_ID, remapOrphanTasks } from "./swimlane-kanban-content";
 import type { ViewContentProps } from "@/lib/kanban/view-registry";
@@ -23,6 +27,32 @@ export function getGraph2DisplayState(
   };
 }
 
+/**
+ * Sorts by displayed-step-index ascending (a task with no resolvable current
+ * step sorts after every task that has one), then `position` ascending
+ * (absent treated as 0), then task id ascending.
+ */
+export function sortGraph2Tasks(tasks: Task[], displaySteps: WorkflowStep[]): Task[] {
+  // A finite sentinel, not Number.POSITIVE_INFINITY: two no-resolvable-step
+  // tasks must still subtract to a finite, sortable delta so their position/id
+  // tiebreak below is reachable (Infinity - Infinity is NaN, which a sort
+  // comparator cannot use to order a pair).
+  const noStepSentinel = displaySteps.length;
+  const stepIndex = (task: Task) => {
+    const index = displaySteps.findIndex((step) => step.id === task.workflowStepId);
+    return index === -1 ? noStepSentinel : index;
+  };
+  return [...tasks].sort((a, b) => {
+    const stepDelta = stepIndex(a) - stepIndex(b);
+    if (stepDelta !== 0) return stepDelta;
+    const positionDelta = (a.position ?? 0) - (b.position ?? 0);
+    if (positionDelta !== 0) return positionDelta;
+    if (a.id < b.id) return -1;
+    if (a.id > b.id) return 1;
+    return 0;
+  });
+}
+
 export function SwimlaneGraph2Content({
   workflowId,
   steps,
@@ -30,6 +60,7 @@ export function SwimlaneGraph2Content({
   tasks,
   onPreviewTask,
   onOpenTask,
+  onEditTask,
   onDeleteTask,
   onArchiveTask,
   onMoveError,
@@ -37,13 +68,17 @@ export function SwimlaneGraph2Content({
   archivingTaskId,
   selectedIds,
   onToggleSelect,
+  onSelectRange,
   isMultiSelectMode,
 }: ViewContentProps) {
   const { t } = useTranslation();
   const { moveTask } = useSwimlaneMove(workflowId, {
     onMoveError,
   });
-  const [movingTaskId, setMovingTaskId] = useState<string | null>(null);
+  const { movingTaskIds, handleMoveTask } = useTaskMoveGuard(moveTask);
+  const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const repositories = useActiveWorkspaceRepositories();
+  const externalLinkAvailability = useKanbanExternalLinkAvailability(workspaceId);
   const { displayTasks, displaySteps } = useMemo(
     () => getGraph2DisplayState(tasks, steps, t("kanban:needsReassignment")),
     [tasks, steps, t],
@@ -54,24 +89,10 @@ export function SwimlaneGraph2Content({
   }, [displaySteps, moveTargetSteps]);
 
   const sortedTasks = useMemo(
-    () =>
-      [...displayTasks].sort((a, b) => {
-        const aStepIdx = displaySteps.findIndex((c) => c.id === a.workflowStepId);
-        const bStepIdx = displaySteps.findIndex((c) => c.id === b.workflowStepId);
-        if (aStepIdx !== bStepIdx) return aStepIdx - bStepIdx;
-        return (a.position ?? 0) - (b.position ?? 0);
-      }),
+    () => sortGraph2Tasks(displayTasks, displaySteps),
     [displayTasks, displaySteps],
   );
-
-  const handleMoveTask = async (task: (typeof tasks)[number], targetStepId: string) => {
-    setMovingTaskId(task.id);
-    try {
-      await moveTask(task, targetStepId);
-    } finally {
-      setMovingTaskId(null);
-    }
-  };
+  const orderedTaskIds = useMemo(() => sortedTasks.map((task) => task.id), [sortedTasks]);
 
   if (displayTasks.length === 0) {
     return (
@@ -101,16 +122,24 @@ export function SwimlaneGraph2Content({
             task={task}
             steps={displaySteps}
             moveTargetSteps={pipelineMoveTargetSteps}
+            workspaceId={workspaceId}
+            externalLinkAvailability={externalLinkAvailability}
+            repositories={repositories}
             onMoveTask={handleMoveTask}
             onPreviewTask={onPreviewTask}
             onOpenTask={onOpenTask}
+            onEditTask={onEditTask}
             onDeleteTask={onDeleteTask}
             onArchiveTask={onArchiveTask}
-            isMoving={movingTaskId === task.id}
+            isMoving={movingTaskIds.has(task.id)}
             isDeleting={deletingTaskId === task.id}
             isArchiving={archivingTaskId === task.id}
             isSelected={selectedIds?.has(task.id)}
+            selectedIds={selectedIds}
             onToggleSelect={onToggleSelect}
+            onRangeSelect={
+              onSelectRange ? (taskId) => onSelectRange(taskId, orderedTaskIds) : undefined
+            }
             isMultiSelectMode={isMultiSelectMode}
           />
         ))}

@@ -85,6 +85,15 @@ describe("agent profile recent-use websocket sync", () => {
 });
 
 describe("startup page websocket sync", () => {
+  it("retains Threads through live updates that omit the startup choice", () => {
+    const store = makeStore();
+    const handler = registerUsersHandlers(store)["user.settings.updated"];
+    handler?.(userSettingsMessage({ startup_page: "threads" }));
+    expect(store.getState().userSettings.startupPage).toBe("threads");
+    handler?.(userSettingsMessage({ tasks_list_show_details: true }));
+    expect(store.getState().userSettings.startupPage).toBe("threads");
+  });
+
   it("applies startup page preferences and normalizes unknown values", () => {
     const store = makeStore();
 

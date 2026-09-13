@@ -1,5 +1,13 @@
 import type { StateCreator } from "zustand";
 import type { KanbanSlice, KanbanSliceActions, KanbanSliceState } from "./types";
+import { generateUUID } from "@/lib/utils";
+import {
+  advanceTaskNavigationRevision,
+  beginTaskRemoval,
+  createTaskRemovalState,
+  recordTaskRemovalResult,
+  releaseTaskRemoval,
+} from "@/lib/state/task-removal";
 
 export const defaultKanbanState: KanbanSliceState = {
   kanban: { workflowId: null, steps: [], tasks: [] },
@@ -20,6 +28,7 @@ export const defaultKanbanState: KanbanSliceState = {
     lastSessionByTaskId: {},
     resumeSkippedSessionIds: {},
   },
+  taskRemoval: createTaskRemovalState(),
 };
 
 type KanbanSliceSet = Parameters<
@@ -95,23 +104,36 @@ function createSidebarArchivedTaskActions(set: KanbanSliceSet): SidebarArchivedT
 type TaskActions = Pick<
   KanbanSliceActions,
   | "setActiveTask"
+  | "setActiveTaskAuto"
   | "setActiveSession"
   | "setActiveSessionAuto"
   | "clearActiveSession"
   | "setResumeSkipped"
+  | "beginTaskRemoval"
+  | "recordTaskRemovalResult"
+  | "releaseTaskRemoval"
+  | "advanceTaskNavigationRevision"
 >;
 
 function createTaskActions(set: KanbanSliceSet): TaskActions {
   return {
     setActiveTask: (taskId) =>
       set((draft) => {
+        draft.taskRemoval = advanceTaskNavigationRevision(draft.taskRemoval);
         draft.tasks.activeTaskId = taskId;
         draft.tasks.activeSessionId = null;
         // New task → drop any pin; the pin only applies within a single task.
         draft.tasks.pinnedSessionId = null;
       }),
+    setActiveTaskAuto: (taskId) =>
+      set((draft) => {
+        draft.tasks.activeTaskId = taskId;
+        draft.tasks.activeSessionId = null;
+        draft.tasks.pinnedSessionId = null;
+      }),
     setActiveSession: (taskId, sessionId) =>
       set((draft) => {
+        draft.taskRemoval = advanceTaskNavigationRevision(draft.taskRemoval);
         draft.tasks.activeTaskId = taskId;
         draft.tasks.activeSessionId = sessionId;
         // User-initiated selection: pin so WS auto-replace handoff respects it.
@@ -126,6 +148,29 @@ function createTaskActions(set: KanbanSliceSet): TaskActions {
         draft.tasks.activeTaskId = taskId;
         draft.tasks.activeSessionId = sessionId;
         draft.tasks.lastSessionByTaskId[taskId] = sessionId;
+      }),
+    beginTaskRemoval: (input) => {
+      let token: string | null = null;
+      set((draft) => {
+        const candidate = generateUUID();
+        const next = beginTaskRemoval(draft.taskRemoval, { ...input, token: candidate });
+        if (!next) return;
+        draft.taskRemoval = next;
+        token = candidate;
+      });
+      return token;
+    },
+    recordTaskRemovalResult: (token, taskIds, outcome) =>
+      set((draft) => {
+        draft.taskRemoval = recordTaskRemovalResult(draft.taskRemoval, token, taskIds, outcome);
+      }),
+    releaseTaskRemoval: (token) =>
+      set((draft) => {
+        draft.taskRemoval = releaseTaskRemoval(draft.taskRemoval, token);
+      }),
+    advanceTaskNavigationRevision: () =>
+      set((draft) => {
+        draft.taskRemoval = advanceTaskNavigationRevision(draft.taskRemoval);
       }),
     clearActiveSession: () =>
       set((draft) => {

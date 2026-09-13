@@ -39,7 +39,7 @@ function AgentPickerPopover({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="cursor-pointer h-7 text-xs">
+        <Button variant="outline" className="cursor-pointer text-xs">
           {selected?.name ?? t("office:assignee")}
         </Button>
       </PopoverTrigger>
@@ -80,7 +80,7 @@ function ProjectPickerPopover({
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="cursor-pointer h-7 text-xs">
+        <Button variant="outline" className="cursor-pointer text-xs">
           {selected?.name ?? t("office:project")}
         </Button>
       </PopoverTrigger>
@@ -146,7 +146,7 @@ export function NewTaskSelectorRow({ draft, onUpdate }: Props) {
           <Tooltip>
             <TooltipTrigger asChild>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" size="icon" className="h-7 w-7 cursor-pointer">
+                <Button variant="ghost" size="icon" className="cursor-pointer">
                   <IconDotsVertical className="h-4 w-4" />
                 </Button>
               </DropdownMenuTrigger>

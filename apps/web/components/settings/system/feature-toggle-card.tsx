@@ -9,6 +9,7 @@ import { IconFlask, IconLock, IconRefresh } from "@tabler/icons-react";
 import type { TFunction } from "i18next";
 import type { RuntimeFlagState } from "@/lib/types/runtime-flags";
 import { SettingsCard } from "@/components/settings/settings-card";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 type FeatureToggleCardProps = {
   flag: RuntimeFlagState;
@@ -57,10 +58,9 @@ export function FeatureToggleCard({
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <Button
             variant="outline"
-            size="sm"
             disabled={saving || flag.env_locked || !flag.mutable || flag.override_value == null}
             onClick={onReset}
-            className="cursor-pointer disabled:cursor-not-allowed"
+            className={settingsActionClassName("disabled:cursor-not-allowed")}
           >
             <IconRefresh className="mr-1 h-3.5 w-3.5" />
             {t("system:featureToggleUseDefault")}

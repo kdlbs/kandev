@@ -58,12 +58,13 @@ func newIdempotencyTestPolicy(scopeID string, limit int64) *models.BudgetPolicy 
 	}
 }
 
-// monthlyPeriodKey mirrors the RFC3339-UTC month-start rendering the
+// monthlyPeriodKeyAt mirrors the RFC3339-UTC month-start rendering the
 // service computes internally, for tests that assert on stored claim rows.
-func monthlyPeriodKey() string {
-	now := time.Now().UTC()
+func monthlyPeriodKeyAt(now time.Time) string {
 	return time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC).Format(time.RFC3339)
 }
+
+func monthlyPeriodKey() string { return monthlyPeriodKeyAt(time.Now().UTC()) }
 
 func TestCheckBudget_EvaluateTwice_AlertEmitsOnce(t *testing.T) {
 	repo, _, execSQL := newBudgetTestRepo(t)
@@ -583,13 +584,14 @@ func TestCheckBudget_PeriodKeyMatchesSpendBoundary(t *testing.T) {
 	}
 	insertBudgetTestCostEvent(t, execSQL, "agent-period", "task-1", 850)
 
-	// Captured before CheckBudget so the comparison can't compute a
-	// different month boundary than the evaluation did if the two calls
-	// straddle a UTC month rollover.
-	wantKey := monthlyPeriodKey()
+	// The evaluation reads the clock once. Accept the month containing either
+	// endpoint because a test can straddle a UTC month rollover while the
+	// evaluation runs.
+	before := time.Now().UTC()
 	if _, err := svc.CheckBudget(ctx, "ws-1", "agent-period", "proj-1"); err != nil {
 		t.Fatalf("CheckBudget: %v", err)
 	}
+	after := time.Now().UTC()
 
 	var gotKey string
 	if err := queryRow(
@@ -597,8 +599,12 @@ func TestCheckBudget_PeriodKeyMatchesSpendBoundary(t *testing.T) {
 	).Scan(&gotKey); err != nil {
 		t.Fatalf("query claim period_key: %v", err)
 	}
-	if gotKey != wantKey {
-		t.Fatalf("claim period_key = %q, want %q (must match the spend rollup's boundary)", gotKey, wantKey)
+	wantKeys := map[string]struct{}{
+		monthlyPeriodKeyAt(before): {},
+		monthlyPeriodKeyAt(after):  {},
+	}
+	if _, ok := wantKeys[gotKey]; !ok {
+		t.Fatalf("claim period_key = %q, want one of %v (must match the spend rollup's boundary)", gotKey, wantKeys)
 	}
 }
 

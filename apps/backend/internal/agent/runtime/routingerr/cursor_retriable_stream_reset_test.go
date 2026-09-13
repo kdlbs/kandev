@@ -1,8 +1,13 @@
 package routingerr
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 const realCursorRetriableStreamReset = "Error: RetriableError: HTTP/2 stream closed with error code CANCEL (0x8)"
+
+const leadingCanceledCursorRetriableStreamReset = "Error: RetriableError: [canceled] HTTP/2 stream closed with error code CANCEL (0x8)"
 
 const wantCursorRetriableStreamResetRuleID = "cursor.retriable_stream_reset.v1"
 
@@ -106,6 +111,56 @@ func TestClassifyCursorRetriable(t *testing.T) {
 	})
 	if overlapped.Code != CodeProviderOverloaded {
 		t.Fatalf("overlapping overload classified as %q, want %q", overlapped.Code, CodeProviderOverloaded)
+	}
+}
+
+func TestClassifyCursorRetriableLeadingCanceled(t *testing.T) {
+	resetInjection()
+
+	e := Classify(Input{
+		Phase:      PhasePromptSend,
+		ProviderID: "cursor-acp",
+		Stderr:     leadingCanceledCursorRetriableStreamReset,
+	})
+	if e == nil {
+		t.Fatal("expected non-nil Error")
+	}
+	if e.Code != CodeAgentTransportLost {
+		t.Fatalf("Code = %q, want %q", e.Code, CodeAgentTransportLost)
+	}
+	if !e.AutoRetryable {
+		t.Fatal("AutoRetryable = false, want true")
+	}
+	if e.FallbackAllowed {
+		t.Fatal("FallbackAllowed = true, want false")
+	}
+	if got := Decide(ContextKanban, e, time.Time{}); got != DecisionShortRetry {
+		t.Fatalf("Decide(ContextKanban, ...) = %q, want %q", got, DecisionShortRetry)
+	}
+	if e.Class != ClassTransient {
+		t.Fatalf("Class = %q, want %q", e.Class, ClassTransient)
+	}
+	if e.Confidence != ConfHigh {
+		t.Fatalf("Confidence = %q, want %q", e.Confidence, ConfHigh)
+	}
+	if e.UserAction {
+		t.Fatal("UserAction = true, want false")
+	}
+}
+
+func TestClassifyCursorRetriableCancellationRemainsManual(t *testing.T) {
+	resetInjection()
+
+	for _, message := range []string{
+		"context canceled: " + leadingCanceledCursorRetriableStreamReset,
+		"cancel escalated: " + leadingCanceledCursorRetriableStreamReset,
+	} {
+		t.Run(message, func(t *testing.T) {
+			e := Classify(Input{Phase: PhasePromptSend, Stderr: message})
+			if got := Decide(ContextKanban, e, time.Time{}); got != DecisionManual {
+				t.Fatalf("Decide(ContextKanban, Classify(%q)) = %q, want %q", message, got, DecisionManual)
+			}
+		})
 	}
 }
 

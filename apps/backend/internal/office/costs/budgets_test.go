@@ -297,6 +297,66 @@ func insertBudgetTestCostEvent(t *testing.T, execSQL func(string, ...interface{}
 	)
 }
 
+func insertBudgetTestCostEventAt(
+	t *testing.T,
+	execSQL func(string, ...interface{}),
+	agentID, taskID string,
+	costSubcents int64,
+	at time.Time,
+) {
+	t.Helper()
+	occurredAt := at.UTC().Format(time.RFC3339)
+	execSQL(
+		`INSERT INTO office_cost_events (id, agent_profile_id, task_id, cost_subcents, occurred_at, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?)`,
+		uuid.NewString(), agentID, taskID, costSubcents, occurredAt, occurredAt,
+	)
+}
+
+func TestCheckBudget_PeriodWindowsExcludeOlderSpend(t *testing.T) {
+	cases := []struct {
+		name   string
+		period models.BudgetPeriod
+		older  time.Duration
+	}{
+		{name: "daily", period: models.BudgetPeriodDaily, older: 48 * time.Hour},
+		{name: "yearly", period: models.BudgetPeriodYearly, older: 400 * 24 * time.Hour},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, repo, execSQL := newBudgetTestService(t)
+			ctx := context.Background()
+			createBudgetTestAgent(t, repo, "ws-1", "agent-1")
+
+			policy := &models.BudgetPolicy{
+				WorkspaceID:       "ws-1",
+				ScopeType:         models.BudgetScopeAgent,
+				ScopeID:           "agent-1",
+				LimitSubcents:     500,
+				Period:            tc.period,
+				AlertThresholdPct: 80,
+				ActionOnExceed:    models.BudgetActionNotifyOnly,
+			}
+			if err := svc.CreateBudgetPolicy(ctx, policy); err != nil {
+				t.Fatalf("create policy: %v", err)
+			}
+
+			insertBudgetTestCostEventAt(t, execSQL, "agent-1", "task-1", 600, time.Now().UTC().Add(-tc.older))
+			results, err := svc.CheckBudget(ctx, "ws-1", "agent-1", "project-1")
+			if err != nil {
+				t.Fatalf("CheckBudget: %v", err)
+			}
+			if len(results) != 1 {
+				t.Fatalf("results = %d, want 1", len(results))
+			}
+			if results[0].LimitExceed {
+				t.Fatalf("%s spend outside the window must not exceed the limit", tc.name)
+			}
+		})
+	}
+}
+
 func TestCheckBudget_UnderThreshold(t *testing.T) {
 	svc, repo, execSQL := newBudgetTestService(t)
 	ctx := context.Background()
@@ -550,12 +610,45 @@ func TestEvaluateProjectBudget_AlertAtThreshold(t *testing.T) {
 	insertBudgetTestTask(t, execSQL, "task-1", "ws-1", "proj-1")
 	insertBudgetTestCostEvent(t, execSQL, "agent-1", "task-1", int64(850))
 
-	if err := svc.EvaluateProjectBudget(ctx, "ws-1", "proj-1"); err != nil {
-		t.Fatalf("EvaluateProjectBudget: %v", err)
+	for i := 0; i < 2; i++ {
+		if err := svc.EvaluateProjectBudget(ctx, "ws-1", "proj-1"); err != nil {
+			t.Fatalf("EvaluateProjectBudget[%d]: %v", i, err)
+		}
 	}
 
 	if !hasBudgetActivity(spy.calls, "budget.alert", "proj-1") {
 		t.Errorf("expected budget.alert for proj-1, got calls=%+v", spy.calls)
+	}
+	if got := spy.count("budget.alert"); got != 1 {
+		t.Fatalf("budget.alert submissions = %d, want 1", got)
+	}
+}
+
+// TestCheckBudgetAndEvaluateProjectBudget_ShareAlertClaim covers the two
+// callers that can evaluate a project policy. They must use the same durable
+// claim so a cost event followed by task reassignment emits one alert.
+func TestCheckBudgetAndEvaluateProjectBudget_ShareAlertClaim(t *testing.T) {
+	spy := &budgetActivitySpy{}
+	svc, _, execSQL := newBudgetTestServiceWithActivity(t, spy)
+	ctx := context.Background()
+
+	policy := newIdempotencyTestPolicy("proj-shared-claim", 1000)
+	policy.ScopeType = models.BudgetScopeProject
+	if err := svc.CreateBudgetPolicy(ctx, policy); err != nil {
+		t.Fatalf("create policy: %v", err)
+	}
+	insertBudgetTestTask(t, execSQL, "task-shared-claim", "ws-1", "proj-shared-claim")
+	insertBudgetTestCostEvent(t, execSQL, "agent-shared-claim", "task-shared-claim", 850)
+
+	if _, err := svc.CheckBudget(ctx, "ws-1", "agent-shared-claim", "proj-shared-claim"); err != nil {
+		t.Fatalf("CheckBudget: %v", err)
+	}
+	if err := svc.EvaluateProjectBudget(ctx, "ws-1", "proj-shared-claim"); err != nil {
+		t.Fatalf("EvaluateProjectBudget: %v", err)
+	}
+
+	if got := spy.count("budget.alert"); got != 1 {
+		t.Fatalf("budget.alert submissions across callers = %d, want 1", got)
 	}
 }
 
@@ -580,12 +673,17 @@ func TestEvaluateProjectBudget_ExceededAtLimit(t *testing.T) {
 	insertBudgetTestTask(t, execSQL, "task-1", "ws-1", "proj-1")
 	insertBudgetTestCostEvent(t, execSQL, "agent-1", "task-1", int64(600))
 
-	if err := svc.EvaluateProjectBudget(ctx, "ws-1", "proj-1"); err != nil {
-		t.Fatalf("EvaluateProjectBudget: %v", err)
+	for i := 0; i < 2; i++ {
+		if err := svc.EvaluateProjectBudget(ctx, "ws-1", "proj-1"); err != nil {
+			t.Fatalf("EvaluateProjectBudget[%d]: %v", i, err)
+		}
 	}
 
 	if !hasBudgetActivity(spy.calls, "budget.exceeded", "proj-1") {
 		t.Errorf("expected budget.exceeded for proj-1, got calls=%+v", spy.calls)
+	}
+	if got := spy.count("budget.exceeded"); got != 1 {
+		t.Fatalf("budget.exceeded submissions = %d, want 1", got)
 	}
 }
 

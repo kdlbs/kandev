@@ -1,4 +1,5 @@
 import { expect, test } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
 import type { ApiClient } from "../../helpers/api-client";
 import type { Page } from "@playwright/test";
@@ -21,9 +22,26 @@ async function approvePendingCanvasThroughHost(
   canvas: CanvasRecord,
 ): Promise<CanvasRecord> {
   const pendingReleaseId = canvas.pending_release?.id;
-  if (!pendingReleaseId) throw new Error("The canvas has no pending release to approve.");
 
   await expect(page).toHaveURL(new RegExp(`${canvasHref(canvas.id)}$`), { timeout: 30_000 });
+  if (!pendingReleaseId) {
+    await expect(page.getByTestId("canvas-host-state")).toHaveText("Ready", {
+      timeout: 20_000,
+    });
+    let activeCanvas: CanvasRecord | null = null;
+    await expect
+      .poll(
+        async () => {
+          activeCanvas = await getCanvas(apiClient, canvas.id);
+          return activeCanvas?.active_release_status === "valid";
+        },
+        { timeout: 30_000, message: "The owner-created canvas release did not activate." },
+      )
+      .toBe(true);
+    if (!activeCanvas) throw new Error("The active canvas record was empty.");
+    return activeCanvas;
+  }
+
   await expect(page.getByTestId("canvas-host-state")).toHaveText("Permission review required");
   await page.getByTestId("canvas-mobile-actions").tap();
   const actionsSheet = page.getByTestId("canvas-mobile-actions-sheet");
@@ -119,6 +137,21 @@ test.describe("Plugin-backed canvases on mobile", () => {
       // the option, so this remains deterministic under strict locators.
       await testPage.getByRole("button", { name: "E2E Workflow", exact: true }).last().tap();
 
+      const defaultPrompt = await dialog.getByTestId("task-description-input").inputValue();
+      for (const tool of [
+        "create_canvas_kandev",
+        "read_canvas_authoring_skill_kandev",
+        "publish_canvas_kandev",
+      ]) {
+        expect(defaultPrompt, `mobile preset is missing ${tool}`).toContain(tool);
+      }
+      expect(defaultPrompt).not.toContain("e2e:mcp:");
+      await expect
+        .poll(() =>
+          testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        )
+        .toBe(true);
+
       const canvasTitle = "E2E Guided Canvas";
       const taskTitle = "E2E Guided Canvas Task";
       const description = [
@@ -131,12 +164,9 @@ test.describe("Plugin-backed canvases on mobile", () => {
       await dialog.getByTestId("task-title-input").fill(taskTitle);
       await dialog.getByTestId("task-description-input").fill(description);
 
-      const responsePromise = testPage.waitForResponse(
-        (response) =>
-          response.url().endsWith("/api/v1/tasks") && response.request().method() === "POST",
-      );
       const startAgent = dialog.getByTestId("submit-start-agent");
-      await expect(startAgent).toBeEnabled({ timeout: 30_000 });
+      await expect(startAgent).toBeEnabled();
+      const responsePromise = waitForHttp(testPage, "POST", /\/api\/v1\/tasks$/);
       await startAgent.tap();
       const response = await responsePromise;
       const responseBody = await response.text();
@@ -174,10 +204,10 @@ test.describe("Plugin-backed canvases on mobile", () => {
         canvas,
         useMobileSubmit: true,
       });
-
       await approvePendingCanvasThroughHost(testPage, apiClient, published);
 
       const createdTask = await apiClient.getTask(taskId);
+      expect(createdTask.description).toBe(description);
       expect(createdTask.repositories ?? []).toHaveLength(0);
       const { sessions } = await apiClient.listTaskSessions(taskId);
       expect(
@@ -192,7 +222,7 @@ test.describe("Plugin-backed canvases on mobile", () => {
     }
   });
 
-  test("automatically opens a pending release and approves it through mobile host controls", async ({
+  test("opens an owner-created canvas without an initial permission review", async ({
     testPage,
     apiClient,
     backend,

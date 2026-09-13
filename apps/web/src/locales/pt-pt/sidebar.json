@@ -1,4 +1,5 @@
 {
+  "taskViews": "Vistas de tarefas",
   "archivedLoadFailed": "Não foi possível carregar as tarefas arquivadas",
   "retry": "Tentar novamente",
   "activeWorkspaceBadge": "Ativa",

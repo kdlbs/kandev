@@ -26,6 +26,7 @@ import {
   type PRTaskIconDisclosureProps,
 } from "./pr-task-icon-disclosure";
 import { getTaskPRAutomationSummary, type TaskPRInfo } from "./pr-task-automation";
+import { getTaskPRWorkflowAttention } from "./pr-workflow-attention";
 
 export type { TaskPRInfo } from "./pr-task-automation";
 export { getTaskPRAutomationSummary } from "./pr-task-automation";
@@ -79,6 +80,7 @@ export function hasPRChecksPassedWithoutReviewWaitForDisplay(pr: TaskPR): boolea
 // syncs that do not populate check details.
 export function isPRReadyToMerge(pr: TaskPR): boolean {
   if (pr.state !== "open") return false;
+  if (getTaskPRWorkflowAttention(pr)) return false;
   if (!hasExplicitPRChecksPassed(pr)) return false;
   if (pr.mergeable_state !== "clean") return false;
   // Guard against stale mergeable_state: enforce required_reviews to match GitHub's gate.
@@ -165,6 +167,7 @@ export function getPRStatusColor(pr: TaskPR): string {
   }
   const blockerColor = openMergeBlockerColor(pr);
   if (blockerColor) return blockerColor;
+  if (getTaskPRWorkflowAttention(pr)) return YELLOW_500;
   if (isPRReadyToMerge(pr)) {
     return EMERALD_400;
   }

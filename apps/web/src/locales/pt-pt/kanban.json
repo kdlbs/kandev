@@ -62,6 +62,8 @@
   "openPreviewOnClick": "Abrir a pré-visualização ao clicar",
   "overWipLimit": "Acima do limite de WIP",
   "pipeline": "Pipeline",
+  "pipelineRowPosition": "{{title}}, passo {{position}} de {{total}}",
+  "pipelineUnassignedStep": "Não atribuído",
   "previewPanel": "Painel de pré-visualização",
   "previousStep": "Passo anterior",
   "priority": "Prioridade",

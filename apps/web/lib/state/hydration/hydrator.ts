@@ -15,6 +15,11 @@ import {
   reconcileActiveTurnAfterHydrationDraft,
   seedSettledSessionBoundaries,
 } from "@/lib/state/slices/session/turn-actions";
+import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
+import {
+  readMcpAttachmentHistory,
+  shouldReplaceMcpAttachmentHistory,
+} from "@/lib/state/slices/session-runtime/mcp-attachment-reconciliation";
 import { preserveOmittedExecutorFields } from "@/lib/kanban/map-task";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
 
@@ -453,6 +458,28 @@ function hydrateSessionRuntime(
     mergeSessionMap(target.bySessionId, source.bySessionId, activeSessionId, forceMergeSessionId);
   };
 
+  /** Hydrate MCP history without allowing a stale forced route snapshot to regress live evidence. */
+  const mergeHydratedMcpStatus = (source: Record<string, unknown> | undefined): void => {
+    if (!source) return;
+    const target = draft.sessionMcpStatus.bySessionId as unknown as Record<
+      string,
+      MCPAttachmentHistory
+    >;
+    for (const [sessionId, rawHistory] of Object.entries(source)) {
+      const shouldForceMerge = forceMergeSessionId === sessionId;
+      if (!shouldForceMerge && sessionId === activeSessionId) continue;
+
+      const incoming = readMcpAttachmentHistory(rawHistory);
+      if (!incoming) continue;
+
+      const existing = target[sessionId];
+      if (!shouldForceMerge && existing) continue;
+      if (shouldReplaceMcpAttachmentHistory(existing, incoming)) {
+        target[sessionId] = incoming;
+      }
+    }
+  };
+
   if (state.terminal) deepMerge(draft.terminal, state.terminal);
   if (state.shell) {
     mergeSessionMap(
@@ -482,7 +509,9 @@ function hydrateSessionRuntime(
     Object.assign(draft.environmentIdBySessionId, state.environmentIdBySessionId);
   }
   mergeBySession("sessionModels");
-  mergeBySession("sessionMcpStatus");
+  mergeHydratedMcpStatus(
+    state.sessionMcpStatus?.bySessionId as Record<string, unknown> | undefined,
+  );
   if (state.agents) deepMerge(draft.agents, state.agents);
   mergeBySession("prepareProgress");
 }

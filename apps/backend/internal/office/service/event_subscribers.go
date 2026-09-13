@@ -448,7 +448,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 }
 
 // warnIfReviewDecisionMissing flags a review or approval run that finished
-// without the agent ever calling record_step_decision_kandev. A reviewer can
+// without the agent ever recording a workflow decision. A reviewer can
 // post a full critique and reject the work in a comment, but if that comment
 // never becomes a recorded decision the workflow engine has nothing to act
 // on and the task strands in its current step forever. This does not fix
@@ -1145,10 +1145,11 @@ func (s *Service) queueChildrenCompletedRun(ctx context.Context, parentID string
 
 	// Derived the same way as ParentWakeReconciler's recovery dispatch
 	// (wakeOperationID) so both producers land on the identical operation
-	// id for the same parent + child set. That shared id is what lets
-	// idx_run_idempotency actually dedupe the pair when the reconciler
-	// races this edge-triggered path for the same completion wave.
-	childSetKey, err := s.repo.GetChildSetKey(ctx, parentID)
+	// id for the same parent + child set + generation. That shared id is
+	// what lets idx_run_idempotency actually dedupe the pair when the
+	// reconciler races this edge-triggered path for the same completion
+	// wave.
+	childSetKey, generation, err := s.repo.GetChildSetKeyAndGeneration(ctx, parentID)
 	if err != nil {
 		return fmt.Errorf("get child set key: %w", err)
 	}
@@ -1157,7 +1158,7 @@ func (s *Service) queueChildrenCompletedRun(ctx context.Context, parentID string
 	// child list at assembly time from the parent's current children, so a
 	// summary read at this point would pay for data that is discarded and
 	// would make the wake's content depend on which producer won the race.
-	key := wakeOperationID(parentID, childSetKey)
+	key := wakeOperationID(parentID, childSetKey, generation)
 	return s.dispatchEngineTrigger(ctx, parentID, engine.TriggerOnChildrenCompleted,
 		engine.OnChildrenCompletedPayload{}, key)
 }

@@ -57,7 +57,7 @@ func TestRecreateBudgetClaimsForRevision_FailureIsVisible(t *testing.T) {
 		Repository:                  runssqlite.NewWithDB(sqlDB, sqlDB),
 		db:                          sqlDB,
 		ro:                          sqlDB,
-		migrate:                     db.NewMigrateLogger(sqlDB, nil),
+		migrate:                     db.NewRequiredMigrateLogger(sqlDB, nil),
 		failBudgetClaimsRecreateErr: errors.New("injected recreate failure"),
 	}
 
@@ -126,7 +126,7 @@ func TestRecreateBudgetClaimsForRevision_AtomicAcrossDropAndCreate(t *testing.T)
 		Repository: runssqlite.NewWithDB(sqlDB, sqlDB),
 		db:         sqlDB,
 		ro:         sqlDB,
-		migrate:    db.NewMigrateLogger(sqlDB, nil),
+		migrate:    db.NewRequiredMigrateLogger(sqlDB, nil),
 	}
 
 	repo.failBudgetClaimsRecreateAfterDropErr = errors.New("injected crash between drop and create")

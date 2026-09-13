@@ -60,14 +60,16 @@ Autonomous agents consume tokens on every turn, and when multiple agents run una
 [state machine](../system-design/costs-01.md#state-machine) defines them as
 crossing events ("spend crosses `alert_threshold_pct`"). Budget evaluation is
 implemented as a level check that runs on unrelated triggers: after every cost
-event, before every agent launch, and after every task reassignment into a
-project. Once a policy sits above its threshold each of those writes another
-activity row, so one over-budget policy floods the Office inbox (which lists
-`budget.alert` rows and counts them toward the badge) with duplicates carrying no
-new information — a reassignment adding no spend at all still produces one. This
-requirement makes the notification idempotent per policy, per period, per level,
-while leaving enforcement (pausing an agent, blocking a run) the level check it
-must remain.
+event, through the pre-execution budget API, and after every task reassignment
+into a project. Once a policy sits above its threshold each of those writes
+another activity row, so one over-budget policy floods the Office inbox (which
+lists both budget notification rows and counts them toward the badge) with
+duplicates carrying no new information. A reassignment adding no spend at all
+still produces one. This requirement makes the notification idempotent per
+policy, per period, per level, while leaving enforcement (pausing an agent,
+blocking a run) the level check it must remain. The current scheduler admission
+path uses `admitRun` and the pure-read `EvaluatePreLaunch` evaluator; that path
+does not emit these notification rows.
 
 **User story:** As a workspace owner with an over-budget project, I want one
 budget notification per policy per period, so that my inbox stays usable and a
@@ -97,21 +99,17 @@ Terminology used below is defined in [Terminology](#terminology).
   already exists for the level that the current spend reaches, for that policy
   and evaluation period, the system shall record no activity row for that level.
 - **AC-OFFICE-COSTS-002.4:** AC-OFFICE-COSTS-002.1 through AC-OFFICE-COSTS-002.3 shall hold identically
-  for every caller that evaluates a policy: the post-cost-event hook, the
-  pre-execution budget gate, and the task-reassignment project evaluation. The
-  behavior shall be implemented once, at the single evaluation function all
-  callers converge on, so that no caller carries its own copy of it and a future
-  fourth caller inherits it.
-- **AC-OFFICE-COSTS-002.4a:** The task-reassignment caller named in
-  AC-OFFICE-COSTS-002.4 does not exist in this repository yet; it arrives with
-  PR #3276. Its clause of AC-OFFICE-COSTS-002.4 is therefore conditional on that
-  call site being present. When it is absent at implementation time, the
-  implementer shall record the deferral in the task plan under a heading reading
-  exactly `## DEFERRED: AC-OFFICE-COSTS-002.4 reassignment coverage`, naming the
-  absent symbol and the PR it waits on. That heading is the auditable record: a
-  code comment does not satisfy this criterion, and AC-OFFICE-COSTS-002.4 shall not
-  be reported as fully closed while it is present. The other two callers are
-  unaffected and remain fully required.
+  for every caller that evaluates a policy through `evaluatePolicy`: the
+  post-cost-event hook, the `CheckPreExecutionBudget` API, and the
+  task-reassignment project evaluation. The behavior shall be implemented once,
+  at the single evaluation function all these callers converge on, so that no
+  caller carries its own copy of it. The current scheduler admission path uses
+  `admitRun` and the pure-read `EvaluatePreLaunch` evaluator; it does not emit
+  these notification rows.
+- **AC-OFFICE-COSTS-002.4a:** The task-reassignment caller
+  `EvaluateProjectBudget` SHALL use the same `evaluatePolicy` path. Tests SHALL
+  cover alert, exceeded, and repeated-evaluation behavior for this caller, plus
+  claim sharing with `CheckBudget`.
 - **AC-OFFICE-COSTS-002.5:** When an evaluation records an exceeded-level claim,
   the system shall also record the alert-level claim for the same policy and
   period, so that a spend that jumps from below the alert level to above the
@@ -265,15 +263,12 @@ These exclusions scope `REQ-OFFICE-COSTS-002`.
   separate contract change.
 - **Unifying the three spend-window implementations.** `costs.periodCutoff`,
   `backendapp.budgetEvaluator.spendForPolicy` and `cron.periodStartFor` each
-  compute a period boundary and disagree: the first two treat `daily` and
-  `yearly` policies as lifetime windows even though `BudgetPeriod.Valid()`
-  accepts them, and the third understands `weekly`, which the enum does not.
-  AC-OFFICE-COSTS-002.6 sidesteps the disagreement by deriving the claim period from
-  the same window the policy's spend already uses, so a claim can never reset on a
-  schedule the spend does not. It does not fix the divergence. A follow-up should
-  make one function authoritative and decide what `daily` and `yearly` mean; until
-  then a `daily` policy keeps a lifetime spend window and a single non-resetting
-  claim.
+  compute a period boundary for a different caller. The cost evaluator uses
+  calendar starts for `daily`, `monthly`, and `yearly` policies, and `lifetime`
+  for `total`. The backend cron evaluator computes a monthly start and uses a
+  lifetime window for other periods. The scheduler cron helper also supports
+  weekly periods. This requirement does not unify these implementations or
+  change the separate cron notification channel.
 - **The cron budget-alert trigger.** `internal/scheduler/cron.BudgetHandler` fires
   `engine.TriggerOnBudgetAlert` on its own thresholds (50/80/90/100) with its own
   in-process dedup, and is inert in production because
@@ -283,8 +278,8 @@ These exclusions scope `REQ-OFFICE-COSTS-002`.
 - **Resolving or expiring inbox items.** `budget.alert` rows are surfaced as inbox
   items with a hardcoded `active` status and no resolve action. This requirement
   reduces how many are created; it adds no lifecycle to the ones that exist.
-- **`budget.exceeded` visibility.** Only `budget.alert` feeds the Office inbox list
-  and badge count; `budget.exceeded` reaches the activity log only. This requirement
-  makes both idempotent without changing which surfaces read them.
+- **`budget.exceeded` visibility.** The Office inbox list and badge count read both
+  `budget.alert` and `budget.exceeded` activity rows. This requirement makes both
+  idempotent without changing which surfaces read them.
 - **A user-facing setting for notification frequency.** Idempotency is
   unconditional; no per-policy "re-notify every N" control.

@@ -5,7 +5,7 @@
     {
       "engine": "sqlite3",
       "file": "sqlite.sql",
-      "sha256": "e1b490607af347314fce11bb3352bf91599eab4c651a1521a60142e73a3b2d5d",
+      "sha256": "b7c763f6c3f1f6000e8a8f90a123ee3b114582bdd3a0aabf162eedae18cf57a3",
       "sentinels": {
         "fixture.sentinel": "v0.93.0-sqlite-sentinel"
       },
@@ -37,7 +37,7 @@
     {
       "engine": "pgx",
       "file": "postgres.sql",
-      "sha256": "f4f26d8d67610ef94a2d5cc308392be7a353efdd3e36e8469fb5ed11d774d165",
+      "sha256": "5b5072e79d88d580a8dd76acf308fb054f97b20754081dccae9ce0b7ac60fa2e",
       "sentinels": {
         "fixture.sentinel": "v0.93.0-postgres-sentinel"
       },
@@ -68,7 +68,8 @@
     }
   ],
   "known_missing_required_stores": [
-    "system-settings",
+	"task",
+	"system-settings",
     "auth-hostnames",
     "organizations",
     "organization-units",

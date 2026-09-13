@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import {
   IconAdjustments,
+  IconAlertTriangle,
   IconArrowLeft,
   IconCheck,
   IconChevronDown,
@@ -17,9 +18,14 @@ import {
   DropdownMenuTrigger,
 } from "@kandev/ui/dropdown-menu";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
+import {
+  MobileConfirmationHost,
+  MobileConfirmationHostBody,
+} from "@/components/confirmation/mobile-confirmation-host";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
+import { MobileListingContext } from "@/components/kanban/mobile-listing-context";
 import { isActionConfirmationTarget } from "@/components/confirmation/action-confirm-popover";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import {
@@ -299,6 +305,7 @@ function MobileThreadsViewControls({
   onDismissSyncError,
 }: MobileThreadsViewControlsProps) {
   const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
   const activeViewName = threadViewName(activeView, t);
   const [open, setOpen] = useState(false);
   const [page, setPage] = useState<"views" | "editor">("views");
@@ -326,7 +333,7 @@ function MobileThreadsViewControls({
 
   return (
     <>
-      {syncError && (
+      {syncError && !isMobile && (
         <ThreadViewSyncError
           error={syncError}
           mobile
@@ -334,100 +341,139 @@ function MobileThreadsViewControls({
           onDismiss={onDismissSyncError}
         />
       )}
-      <Button
-        type="button"
-        variant="outline"
-        className="min-h-11 max-w-[12rem] shrink-0 cursor-pointer gap-1 px-3 text-xs"
-        onClick={openViews}
-        aria-label={t("threads:viewPickerLabel", { name: activeViewName })}
-        data-testid="threads-mobile-view-trigger"
-        ref={triggerRef}
-      >
-        <IconAdjustments className="h-4 w-4 shrink-0" />
-        <span className="truncate">{activeViewName}</span>
-        <IconChevronDown className="h-3.5 w-3.5 shrink-0" />
-      </Button>
-      <Drawer
-        open={open}
-        onOpenChange={(nextOpen) => {
-          setOpen(nextOpen);
-          if (nextOpen) setPage("views");
-        }}
-      >
-        <DrawerContent
-          className="h-[min(90dvh,48rem)] max-h-[calc(100dvh-1rem)] overflow-hidden pb-[max(0.75rem,env(safe-area-inset-bottom))]"
-          data-testid="threads-mobile-view-drawer"
-          onCloseAutoFocus={(event) => {
-            event.preventDefault();
-            triggerRef.current?.focus();
-          }}
-          onAnimationEnd={(event) => {
-            if (event.currentTarget.dataset.state === "closed") {
-              triggerRef.current?.focus();
-            }
-          }}
+      {isMobile ? (
+        <MobileListingContext
+          context={t("threads:title")}
+          label={activeViewName}
+          onClick={openViews}
+          aria-label={t("threads:viewPickerLabel", { name: activeViewName })}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          data-testid="threads-mobile-view-trigger"
+          ref={triggerRef}
+        />
+      ) : (
+        <Button
+          type="button"
+          variant="outline"
+          className="min-h-11 min-w-0 max-w-[12rem] shrink cursor-pointer gap-1 px-3 text-xs"
+          onClick={openViews}
+          aria-label={t("threads:viewPickerLabel", { name: activeViewName })}
+          data-testid="threads-mobile-view-trigger"
+          ref={triggerRef}
         >
-          <DrawerHeader className="shrink-0 border-b px-4 pb-3 pt-2 text-left">
-            <div className="flex items-center gap-2">
-              {page === "editor" && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-11 w-11 shrink-0 cursor-pointer"
-                  onClick={() => setPage("views")}
-                  aria-label={t("threads:backToViewEditor")}
-                  data-testid="threads-mobile-view-back"
-                >
-                  <IconArrowLeft className="h-4 w-4" />
-                </Button>
-              )}
-              <DrawerTitle className="text-base">
-                {page === "editor" ? t("threads:viewSettings") : t("threads:title")}
-              </DrawerTitle>
-            </div>
-          </DrawerHeader>
-          <div
-            className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
-            data-testid="threads-mobile-view-drawer-scroll-region"
+          <IconAdjustments className="h-4 w-4 shrink-0" />
+          <span className="truncate">{activeViewName}</span>
+          <IconChevronDown className="h-3.5 w-3.5 shrink-0" />
+        </Button>
+      )}
+      {syncError && isMobile && (
+        <span
+          role="status"
+          className="shrink-0 text-destructive"
+          data-testid="threads-mobile-view-sync-status"
+        >
+          <IconAlertTriangle aria-hidden="true" className="h-4 w-4" />
+          <span className="sr-only">{t("threads:failedToSyncViews")}</span>
+        </span>
+      )}
+      <MobileConfirmationHost open={open} surface="drawer">
+        {({ contentProps }) => (
+          <Drawer
+            open={open}
+            onOpenChange={(nextOpen) => {
+              setOpen(nextOpen);
+              if (nextOpen) setPage("views");
+            }}
           >
-            {page === "views" ? (
-              <MobileThreadViewList
-                activeView={activeView}
-                views={views}
-                admittedCount={admittedCount}
-                matchingCount={matchingCount}
-                hiddenCount={hiddenCount}
-                disabledReason={disabledReason}
-                onSelect={selectView}
-                onNewView={startNewView}
-                onOpenSettings={() => setPage("editor")}
-              />
-            ) : (
-              <ThreadsViewEditor
-                activeView={activeView}
-                draft={draft}
-                candidates={candidates}
-                repositories={repositories}
-                viewCount={viewCount}
-                canDelete={canDelete}
-                mobile
-                onUpdate={onUpdate}
-                onSave={onSave}
-                onSaveAs={onSaveAs}
-                onDiscard={onDiscard}
-                onRename={onRename}
-                onDelete={(viewId) => {
-                  onDelete(viewId);
-                  closeDrawer();
-                }}
-                onDuplicate={onDuplicate}
-                onReapplySort={onReapplySort}
-              />
-            )}
-          </div>
-        </DrawerContent>
-      </Drawer>
+            <DrawerContent
+              aria-describedby={undefined}
+              {...contentProps}
+              className="h-[min(90dvh,48rem)] max-h-[calc(100dvh-1rem)] overflow-hidden pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+              data-testid="threads-mobile-view-drawer"
+              onCloseAutoFocus={(event) => {
+                event.preventDefault();
+                triggerRef.current?.focus();
+              }}
+              onAnimationEnd={(event) => {
+                if (event.currentTarget.dataset.state === "closed") {
+                  triggerRef.current?.focus();
+                }
+              }}
+            >
+              <MobileConfirmationHostBody>
+                <DrawerHeader className="shrink-0 border-b px-4 pb-3 pt-2 text-left">
+                  <div className="flex items-center gap-2">
+                    {page === "editor" && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-11 w-11 shrink-0 cursor-pointer"
+                        onClick={() => setPage("views")}
+                        aria-label={t("threads:backToViewEditor")}
+                        data-testid="threads-mobile-view-back"
+                      >
+                        <IconArrowLeft className="h-4 w-4" />
+                      </Button>
+                    )}
+                    <DrawerTitle className="text-base">
+                      {page === "editor" ? t("threads:viewSettings") : t("threads:title")}
+                    </DrawerTitle>
+                  </div>
+                </DrawerHeader>
+                <div
+                  className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+                  data-testid="threads-mobile-view-drawer-scroll-region"
+                >
+                  {syncError && isMobile && (
+                    <ThreadViewSyncError
+                      error={syncError}
+                      mobile
+                      onRetry={onRetrySync}
+                      onDismiss={onDismissSyncError}
+                    />
+                  )}
+                  {page === "views" ? (
+                    <MobileThreadViewList
+                      activeView={activeView}
+                      views={views}
+                      admittedCount={admittedCount}
+                      matchingCount={matchingCount}
+                      hiddenCount={hiddenCount}
+                      disabledReason={disabledReason}
+                      onSelect={selectView}
+                      onNewView={startNewView}
+                      onOpenSettings={() => setPage("editor")}
+                    />
+                  ) : (
+                    <ThreadsViewEditor
+                      activeView={activeView}
+                      draft={draft}
+                      candidates={candidates}
+                      repositories={repositories}
+                      viewCount={viewCount}
+                      canDelete={canDelete}
+                      mobile
+                      onUpdate={onUpdate}
+                      onSave={onSave}
+                      onSaveAs={onSaveAs}
+                      onDiscard={onDiscard}
+                      onRename={onRename}
+                      onDelete={(viewId) => {
+                        onDelete(viewId);
+                        closeDrawer();
+                      }}
+                      onDuplicate={onDuplicate}
+                      onReapplySort={onReapplySort}
+                    />
+                  )}
+                </div>
+              </MobileConfirmationHostBody>
+            </DrawerContent>
+          </Drawer>
+        )}
+      </MobileConfirmationHost>
     </>
   );
 }

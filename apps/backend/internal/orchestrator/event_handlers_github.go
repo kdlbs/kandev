@@ -644,6 +644,7 @@ func (s *Service) autoStartReviewTask(
 	if s.shouldSkipTerminalPRAutoStart(ctx, task) {
 		return
 	}
+	createAutoStartOwned := s.ownsAutoStartOnCreateInFlight(task.ID)
 	// Compete for the one-shot auto-start token set at task creation.
 	// The promotion that ran inside CreateTask may have already triggered
 	// autoStartTaskForStep (Path A) asynchronously; only the first claimer
@@ -673,8 +674,16 @@ func (s *Service) autoStartReviewTask(
 			zap.String("task_id", task.ID),
 			zap.Error(err))
 		s.restoreAutoStartClaim(ctx, task.ID, "review.auto_start")
+		if createAutoStartOwned || s.ownsAutoStartOnCreateInFlight(task.ID) {
+			s.restoreAutoStartOnCreate(ctx, task.ID, "review.auto_start")
+		}
 		return
 	}
+	// The watcher path can win the permanent review guard while the
+	// create-time path is still preparing its detached launch. A successful
+	// watcher launch satisfies that intent too, so clear the durable marker
+	// owned by the other path.
+	s.completeAutoStartOnCreate(ctx, task.ID, "review.auto_start")
 	s.logger.Info("auto-started review task",
 		zap.String("task_id", task.ID),
 		zap.Int("pr_number", evt.PR.Number))

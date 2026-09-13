@@ -36,16 +36,30 @@ Route the request before you write:
 
 Do not create a generic `spec.md` file.
 
+When routing to `docs/specs/product/`, read `docs/specs/product/README.md`
+before editing. Treat its **Product document index** as the local index: read
+every linked product document and any co-located `INDEX.md`, `AGENTS.md`,
+`CLAUDE.md`, or other instruction file when present. Product files provide
+cross-system context, not feature requirements; preserve proposed and
+open-question language instead of promoting it to an active contract without
+confirmation.
+
 ## Workflow
 
 ### 1. Locate the owning system
 
-Read `docs/specs/README.md` and the likely system `README.md`. If the system has
-not migrated, use `docs/specs/INDEX.md` to locate the legacy source.
+Read `docs/specs/README.md` and the likely system `README.md`. If the system
+has not migrated, run this command to locate the legacy source:
 
-Search all system indexes, requirements, and designs for the capability name
-and its main nouns. Update an existing capability when it owns the same actor,
-lifecycle, and contract.
+    python3 scripts/list-docs.py specs --kind legacy --format paths
+
+Search the catalog, requirements, and designs for the capability name and its
+main nouns:
+
+    python3 scripts/list-docs.py specs --text <capability-term> --format paths
+
+Update an existing capability when it owns the same actor, lifecycle, and
+contract.
 
 Choose the system that owns the source of truth and durable contract. Do not
 choose an owner from the code directories that change. Record one sentence in
@@ -65,9 +79,10 @@ requirements. A new system needs a `README.md` based on the system template.
 
 ### 2. Confirm intent
 
-Use `/interview-me` when a missing product choice changes behavior, ownership,
-permissions, persistence, or a public contract. Do not hide an unresolved
-choice in a draft.
+Run the `/interview-me` assumption check, reusing answers from earlier phases.
+Resolve material choices before writing the affected contract. Preserve settled
+terminology and decision rationale in the owning artifacts through that skill.
+Do not hide an unresolved choice in a draft.
 
 ### 3. Write requirements
 
@@ -113,13 +128,27 @@ design can include backend services, storage, projections, frontend components,
 responsive behavior, and tests. Do not create a parallel UI design for those
 same requirements.
 
-### 5. Update the system index
+### 5. Update the system boundary
 
-Add the new documents to the system `README.md`. State the system boundary and
-link adjacent systems when ownership can be confused.
+Update the system `README.md` only when the system boundary, migration record,
+or related-system links change. State the system boundary and link adjacent
+systems when ownership can be confused. Do not add a requirement or
+system-design list.
+
+Before and after adding required links, run `wc -c <system>/README.md`. Near
+the 12 KiB `system-index` limit, keep every required link but use concise
+labels or other non-semantic compression; never add a size exception. Rerun
+the specification linter after the index update. Also search the README for
+count or list summaries, update them when the authoritative pair count changes,
+and verify that each stated count matches the indexed requirement/design pairs.
 
 During migration, name the new source as authoritative. Replace the old source
 with a link or archive it. Do not leave two editable sources of truth.
+
+If a migration branch merges or rebases a moving base, re-inventory the
+migration root after the update. Review files newly added by the base, migrate
+them or explicitly record them as unmigrated additions before marking the
+migration complete, then rerun the full specification lint.
 
 ### 6. Validate
 
@@ -131,13 +160,18 @@ Review the artifacts before you run the linter:
   details.
 - Every acceptance criterion states a testable behavior. No criterion delegates
   its meaning to migrated source detail.
+- Selection, restoration, and recovery criteria state candidate eligibility,
+  invalid or ambiguous fallback behavior, and forbidden side effects.
 - Designs map requirement IDs without copying requirement text.
+- Each design identifier that names existing code matches the current source.
+  Use `rg` to confirm exact symbols before the artifact is complete.
 - New files do not copy the legacy `Migrated source detail` wrapper.
-- New artifacts appear in the owning system index.
+- New artifacts appear in the catalog command output for the owning system.
 
 Run:
 
 ```bash
+python3 scripts/list-docs.py validate
 python3 scripts/lint-spec-files.test.py
 python3 scripts/lint-spec-files.py --all
 git diff --check -- docs/specs docs/decisions
@@ -145,6 +179,10 @@ git diff --check -- docs/specs docs/decisions
 
 If a file reaches its size limit, split it by capability, lifecycle, or contract
 boundary. Do not add a size exception for a new document.
+
+An existing `legacy_size_exceptions` value is a frozen ratchet. When a legacy
+file grows, reduce or split the content and lower the exception to the resulting
+exact byte size; never raise the ceiling merely to silence lint.
 
 ## Design-package behavior
 
