@@ -5,7 +5,16 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/platform/pr-watch-and-storage-bounds.md"
+requirements:
+  - REQ-INTEGRATIONS-PR-WATCH-IDENTITY-001
+acceptance_criteria:
+  - AC-INTEGRATIONS-PR-WATCH-IDENTITY-001.1
+  - AC-INTEGRATIONS-PR-WATCH-IDENTITY-001.2
+  - AC-INTEGRATIONS-PR-WATCH-IDENTITY-001.3
+  - AC-INTEGRATIONS-PR-WATCH-IDENTITY-001.4
+  - AC-INTEGRATIONS-PR-WATCH-IDENTITY-001.5
+system_design:
+  - ../../specs/integrations/system-design/pr-watch-identity.md
 ---
 
 # Task 01: Migrate PR watches to task ownership

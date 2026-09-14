@@ -1,7 +1,24 @@
 ---
-spec: docs/specs/platform/pr-watch-and-storage-bounds.md
 created: 2026-08-31
+updated: 2026-09-14
 status: done
+requirements:
+  - REQ-INTEGRATIONS-PR-WATCH-IDENTITY-001
+  - REQ-INTEGRATIONS-PR-WATCH-IDENTITY-002
+  - REQ-INTEGRATIONS-PROVIDER-BACKOFF-001
+  - REQ-INTEGRATIONS-PROVIDER-BACKOFF-002
+  - REQ-PLATFORM-TASK-SUMMARY-CONTENTION-001
+  - REQ-TASKS-BOUNDED-SESSION-HISTORY-001
+  - REQ-TASKS-BOUNDED-SESSION-HISTORY-002
+  - REQ-SYSTEM-PAGE-DATABASE-MAINTENANCE-001
+system_design:
+  - ../../specs/integrations/system-design/pr-watch-identity.md
+  - ../../specs/integrations/system-design/provider-failure-backoff.md
+  - ../../specs/platform/system-design/task-summary-contention.md
+  - ../../specs/tasks/system-design/bounded-session-history.md
+  - ../../specs/system-page/system-design/database-maintenance-command.md
+legacy_specs:
+  - ../../specs/platform/pr-watch-and-storage-bounds.md
 ---
 
 # Implementation Plan: Canonical PR Monitoring and Bounded Task Storage

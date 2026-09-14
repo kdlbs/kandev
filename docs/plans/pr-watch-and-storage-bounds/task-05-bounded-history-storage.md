@@ -5,7 +5,20 @@ status: done
 wave: 2
 depends_on: ["01-canonical-watch-migration"]
 plan: "plan.md"
-spec: "../../specs/platform/pr-watch-and-storage-bounds.md"
+requirements:
+  - REQ-TASKS-BOUNDED-SESSION-HISTORY-001
+  - REQ-TASKS-BOUNDED-SESSION-HISTORY-002
+acceptance_criteria:
+  - AC-TASKS-BOUNDED-SESSION-HISTORY-001.1
+  - AC-TASKS-BOUNDED-SESSION-HISTORY-001.2
+  - AC-TASKS-BOUNDED-SESSION-HISTORY-001.3
+  - AC-TASKS-BOUNDED-SESSION-HISTORY-002.1
+  - AC-TASKS-BOUNDED-SESSION-HISTORY-002.2
+  - AC-TASKS-BOUNDED-SESSION-HISTORY-002.3
+  - AC-TASKS-BOUNDED-SESSION-HISTORY-002.4
+  - AC-TASKS-BOUNDED-SESSION-HISTORY-002.5
+system_design:
+  - ../../specs/tasks/system-design/bounded-session-history.md
 ---
 
 # Task 05: Bound history hydration and operational payload storage

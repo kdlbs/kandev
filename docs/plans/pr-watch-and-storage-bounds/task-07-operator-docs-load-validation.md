@@ -5,7 +5,18 @@ status: done
 wave: 3
 depends_on: ["06-database-maintenance-command"]
 plan: "plan.md"
-spec: "../../specs/platform/pr-watch-and-storage-bounds.md"
+requirements:
+  - REQ-INTEGRATIONS-PR-WATCH-IDENTITY-002
+  - REQ-PLATFORM-TASK-SUMMARY-CONTENTION-001
+  - REQ-SYSTEM-PAGE-DATABASE-MAINTENANCE-001
+acceptance_criteria:
+  - AC-INTEGRATIONS-PR-WATCH-IDENTITY-002.3
+  - AC-PLATFORM-TASK-SUMMARY-CONTENTION-001.4
+  - AC-SYSTEM-PAGE-DATABASE-MAINTENANCE-001.5
+system_design:
+  - ../../specs/integrations/system-design/pr-watch-identity.md
+  - ../../specs/platform/system-design/task-summary-contention.md
+  - ../../specs/system-page/system-design/database-maintenance-command.md
 ---
 
 # Task 07: Document operations and validate sustained load

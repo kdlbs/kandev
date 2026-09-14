@@ -5,7 +5,16 @@ status: done
 wave: 1
 depends_on: ["02-idempotent-polling-events"]
 plan: "plan.md"
-spec: "../../specs/platform/pr-watch-and-storage-bounds.md"
+requirements:
+  - REQ-PLATFORM-TASK-SUMMARY-CONTENTION-001
+acceptance_criteria:
+  - AC-PLATFORM-TASK-SUMMARY-CONTENTION-001.1
+  - AC-PLATFORM-TASK-SUMMARY-CONTENTION-001.2
+  - AC-PLATFORM-TASK-SUMMARY-CONTENTION-001.3
+  - AC-PLATFORM-TASK-SUMMARY-CONTENTION-001.4
+  - AC-PLATFORM-TASK-SUMMARY-CONTENTION-001.5
+system_design:
+  - ../../specs/platform/system-design/task-summary-contention.md
 ---
 
 # Task 03: Coalesce task-status projection contention

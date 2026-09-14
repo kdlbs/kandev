@@ -5,7 +5,15 @@ status: done
 wave: 3
 depends_on: ["04-github-auth-backoff-observability", "05-bounded-history-storage"]
 plan: "plan.md"
-spec: "../../specs/platform/pr-watch-and-storage-bounds.md"
+requirements:
+  - REQ-SYSTEM-PAGE-DATABASE-MAINTENANCE-001
+acceptance_criteria:
+  - AC-SYSTEM-PAGE-DATABASE-MAINTENANCE-001.1
+  - AC-SYSTEM-PAGE-DATABASE-MAINTENANCE-001.2
+  - AC-SYSTEM-PAGE-DATABASE-MAINTENANCE-001.3
+  - AC-SYSTEM-PAGE-DATABASE-MAINTENANCE-001.4
+system_design:
+  - ../../specs/system-page/system-design/database-maintenance-command.md
 ---
 
 # Task 06: Provide safe database retention maintenance
