@@ -109,7 +109,13 @@ describe("fromDockviewApi — right-column ownership", () => {
           },
         ],
         [
-          { id: RIGHT_TOP_GROUP, panels: [{ id: "files", component: "files" }] },
+          {
+            id: RIGHT_TOP_GROUP,
+            panels: [
+              { id: "session:session-b", component: "chat" },
+              { id: "files", component: "files" },
+            ],
+          },
           { id: RIGHT_BOTTOM_GROUP, panels: [{ id: "terminal-default", component: "terminal" }] },
         ],
       ]),

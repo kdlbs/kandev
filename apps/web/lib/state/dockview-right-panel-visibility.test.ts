@@ -7,6 +7,8 @@ const CENTER_GROUP_ID = "group-center";
 const RIGHT_COLUMN_ID = "right";
 const RIGHT_GROUP_ID = "group-right-top";
 const SESSION_PANEL_ID = "session:session-a";
+const PR_DETAILS_PANEL_ID = "pr-detail";
+const PR_DETAILS_PANEL_TITLE = "PR Details";
 const MOCK_TERMINAL = vi.hoisted(() => ({ id: "terminal-default" }));
 
 vi.mock("@/lib/local-storage", () => ({
@@ -183,6 +185,12 @@ it("shows the standard right column from a compact layout", async () => {
             id: CENTER_GROUP_ID,
             panels: [
               { id: SESSION_PANEL_ID, component: "chat", title: "Agent" },
+              { id: "browser", component: "browser", title: "Browser" },
+              {
+                id: PR_DETAILS_PANEL_ID,
+                component: PR_DETAILS_PANEL_ID,
+                title: PR_DETAILS_PANEL_TITLE,
+              },
               { id: "files", component: "files", title: "Files" },
               { id: "changes", component: "changes", title: "Changes" },
               { id: MOCK_TERMINAL.id, component: "terminal", title: "Terminal" },
@@ -208,6 +216,8 @@ it("shows the standard right column from a compact layout", async () => {
   ]);
   expect(appliedState?.columns[0]?.groups[0]?.panels.map((panel) => panel.id)).toEqual([
     SESSION_PANEL_ID,
+    "browser",
+    PR_DETAILS_PANEL_ID,
   ]);
   const panelIds = appliedState?.columns.flatMap((column) =>
     column.groups.flatMap((group) => group.panels.map((panel) => panel.id)),
@@ -303,7 +313,11 @@ it("preserves right-named panels that belong to a mixed center column", async ()
             panels: [
               { id: SESSION_PANEL_ID, component: "chat", title: "Agent" },
               { id: "files", component: "files", title: "Files" },
-              { id: "pr-detail", component: "pr-detail", title: "PR Details" },
+              {
+                id: PR_DETAILS_PANEL_ID,
+                component: PR_DETAILS_PANEL_ID,
+                title: PR_DETAILS_PANEL_TITLE,
+              },
             ],
           },
         ],
@@ -328,7 +342,7 @@ it("preserves right-named panels that belong to a mixed center column", async ()
   expect(appliedState?.columns[0]?.groups[0]?.panels.map((panel) => panel.id)).toEqual([
     SESSION_PANEL_ID,
     "files",
-    "pr-detail",
+    PR_DETAILS_PANEL_ID,
   ]);
   await flushRaf();
 });
@@ -433,7 +447,11 @@ it("keeps a center fallback PR Details tab when hiding right panels", async () =
             id: CENTER_GROUP_ID,
             panels: [
               { id: SESSION_PANEL_ID, component: "chat", title: "Agent" },
-              { id: "pr-detail", component: "pr-detail", title: "PR Details" },
+              {
+                id: PR_DETAILS_PANEL_ID,
+                component: PR_DETAILS_PANEL_ID,
+                title: PR_DETAILS_PANEL_TITLE,
+              },
             ],
           },
         ],
@@ -455,7 +473,7 @@ it("keeps a center fallback PR Details tab when hiding right panels", async () =
   expect(appliedState?.columns.map((column) => column.id)).toEqual([CENTER_COLUMN_ID]);
   expect(appliedState?.columns[0]?.groups[0]?.panels.map((panel) => panel.id)).toEqual([
     SESSION_PANEL_ID,
-    "pr-detail",
+    PR_DETAILS_PANEL_ID,
   ]);
   await flushRaf();
 });
@@ -471,7 +489,11 @@ it("keeps a center fallback PR Details tab when showing right panels", async () 
             id: CENTER_GROUP_ID,
             panels: [
               { id: SESSION_PANEL_ID, component: "chat", title: "Agent" },
-              { id: "pr-detail", component: "pr-detail", title: "PR Details" },
+              {
+                id: PR_DETAILS_PANEL_ID,
+                component: PR_DETAILS_PANEL_ID,
+                title: PR_DETAILS_PANEL_TITLE,
+              },
             ],
           },
         ],
@@ -496,7 +518,7 @@ it("keeps a center fallback PR Details tab when showing right panels", async () 
   const appliedState = vi.mocked(applyLayout).mock.calls.at(-1)?.[1];
   expect(appliedState?.columns[0]?.groups[0]?.panels.map((panel) => panel.id)).toEqual([
     SESSION_PANEL_ID,
-    "pr-detail",
+    PR_DETAILS_PANEL_ID,
   ]);
   await flushRaf();
 });

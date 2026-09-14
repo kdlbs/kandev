@@ -30,6 +30,10 @@ test.describe("mobile right-panel navigation", () => {
     await expect(testPage.getByTestId("mobile-task-layout")).toBeVisible();
     await expect(testPage.getByTestId("tablet-task-layout")).toHaveCount(0);
     await expect(testPage.getByTestId("task-right-panels-toggle")).toHaveCount(0);
+    expect((await testPage.viewportSize())?.width).toBe(393);
+    await expect
+      .poll(() => testPage.evaluate(() => matchMedia("(any-pointer: coarse)").matches))
+      .toBe(true);
 
     const chat = testPage.getByRole("button", { name: "Chat", exact: true });
     const files = testPage.getByRole("button", { name: "Files", exact: true });

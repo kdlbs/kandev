@@ -117,10 +117,59 @@ test.describe("right-panel visibility", () => {
     await expect(toggle).toBeEnabled();
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
 
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForDockviewReady();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
     await expect(session.files).toBeVisible();
     await expect(session.terminal).toBeVisible();
+  });
+
+  test("keeps the toggle disabled while maximized and restores visibility after exit and reload", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { session } = await openDesktopTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Maximized right-panel visibility",
+      { width: 1600, height: 900 },
+    );
+    const toggle = testPage.getByTestId("task-right-panels-toggle");
+    await expect(toggle).toBeEnabled();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+
+    await session.clickTab("Files");
+    await session.clickMaximize();
+    await session.expectMaximized();
+
+    await expect(toggle).toBeDisabled();
+    await expect(toggle).toHaveAttribute(
+      "title",
+      "Right panels are unavailable while a panel is maximized",
+    );
+    await expect(toggle.locator("..")).toHaveAttribute(
+      "aria-label",
+      "Right panels are unavailable while a panel is maximized",
+    );
+
+    await session.clickMaximize();
+    await expect(toggle).toBeEnabled();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(session.files).toBeVisible();
+
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForDockviewReady();
+    await expect(toggle).toBeEnabled();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(session.files).toBeVisible();
+    await session.expectLayoutHealthy();
   });
 
   test("supports keyboard activation while keeping focus on the persistent control", async ({

@@ -118,7 +118,7 @@ See the [full package preview and scenario matrix](plan.md#ascii-ui-preview).
 2. Added the compact reopen and mixed-center store regressions and observed the expected behavioral failures before production changes.
 3. Implemented the adapter, control, and layout fixes with their component and store tests.
 4. Added browser coverage, inspected the rendered compositions through browser assertions, and ran the checks below.
-5. Fixed the review findings with production-shaped serializer coverage, A/B environment restore coverage, duplicate-ID reconciliation, and maximize/exit coverage.
+5. Fixed the review findings with production-shaped serializer coverage, A/B environment restore coverage, duplicate-ID reconciliation, maximized disabled/exit/reload coverage, and compact reload coverage.
 6. Updated public instructions, work-order results, and plan status while retaining unexecuted matrix cases.
 
 ## Verification
@@ -195,28 +195,35 @@ Implementation is complete. The shared localized header control selects the
 Dockview or tablet layout adapter, remains available after hiding the right
 column, and is omitted on phones. Tablet rendering now follows stored right
 column visibility, compact desktop can explicitly reopen the right column, and
-mixed center panels remain intact.
+mixed center panels remain intact. Maximized Dockview disables the control with
+an accessible reason and restores the authoritative visibility on exit.
 
 The TDD sequence recorded the expected RED regressions before the production
-changes, followed by GREEN review coverage: the focused set passed 9 files and
-109 tests. The full web unit suite passed 2,058 files with 17,788 passing and
-4 skipped tests. The review coverage includes production-shaped compact and mixed captures, A/B
-environment round trips, duplicate-ID reconciliation, and maximize/exit state
-and persistence assertions.
+changes, followed by GREEN review coverage. The final focused set passed 9
+files and 102 tests, and the store-focused follow-up passed 2 files and 45
+tests. The earlier full web unit suite passed 2,058 files with 17,788 passing
+and 4 skipped tests. The review coverage includes production-shaped compact
+capture and reload, mixed capture, A/B environment round trips, duplicate-ID
+reconciliation, and maximize/exit state and persistence assertions.
 
-The managed Chromium E2E run passed the executed desktop, compact, tablet,
-reload, and keyboard cases. The final managed mobile-chrome run passed 1 phone
-navigation test. Typecheck, full lint, targeted ESLint, Prettier, i18n checks
-and ratchet, production Vite build, public-doc validation, specification
-validation, and `git diff --check` all passed.
+The managed Chromium fixup E2E run passed 5 right-panel tests covering desktop,
+compact reload and reopen, tablet persistence, maximized disabled/exit/reload,
+and keyboard activation. The managed mobile-chrome run passed 1 phone
+navigation test with Pixel 5 device and coarse-pointer assertions. Typecheck,
+full lint, targeted ESLint, Prettier, i18n checks and ratchet, production Vite
+build, public-doc validation, specification validation, and `git diff --check`
+all passed.
 
 The tablet component test uses mocked panel primitives and persistence callbacks;
 it asserts conditional rendering and center identity. The browser test asserts
-the stored tablet hide/show round trip. The component test covers focus after a
-click, and the browser test covers native Enter and Space activation. The
-retained matrix in `plan.md` still contains resize handoffs, the 1280-pixel
-coarse-pointer case, all four sidebar combinations, archived-task restoration,
-and the wider-to-phone handoff, which are not claimed by these results.
+the stored tablet visibility round trip; saved split geometry remains in the
+retained matrix. The component test covers focus after a click and the
+accessible disabled maximized wrapper, while the browser test covers native
+Enter and Space activation plus maximized exit and reload. The retained matrix
+in `plan.md` still contains resize handoffs, the 1280-pixel coarse-pointer case,
+all four sidebar combinations, archived-task restoration, mixed center/right
+browser fixtures, and the wider-to-phone handoff, which are not claimed by
+these results.
 
 Localized labels were added to all supported catalogs, and
 `docs/public/tasks-and-workflows.md` now documents the wider-layout toggle and

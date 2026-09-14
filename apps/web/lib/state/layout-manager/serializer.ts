@@ -254,11 +254,21 @@ function captureNode(
 /** Panel IDs that indicate the "right" column when no structural identity exists. */
 const RIGHT_PANEL_IDS = new Set(["files", "changes"]);
 
+function hasCanonicalRightIdentity(column: Pick<LayoutColumn, "id" | "groups">): boolean {
+  const groups = column.groups ?? [];
+  return (
+    column.id === "right" ||
+    groups.some((group) => group.id === RIGHT_TOP_GROUP || group.id === RIGHT_BOTTOM_GROUP)
+  );
+}
+
 /** True when the column contains the Agent surface or the canonical center group. */
 export function isCenterColumn(column: Pick<LayoutColumn, "id" | "groups">): boolean {
+  if (hasCanonicalRightIdentity(column)) return false;
+  const groups = column.groups ?? [];
   return (
     column.id === "center" ||
-    column.groups.some(
+    groups.some(
       (group) =>
         group.id === CENTER_GROUP ||
         group.panels.some(
@@ -271,14 +281,10 @@ export function isCenterColumn(column: Pick<LayoutColumn, "id" | "groups">): boo
 
 /** True when the column owns the standard right-side groups or column ID. */
 export function isRightColumn(column: Pick<LayoutColumn, "id" | "groups">): boolean {
+  if (hasCanonicalRightIdentity(column)) return true;
   if (isCenterColumn(column)) return false;
-  return (
-    column.id === "right" ||
-    column.groups.some(
-      (group) => group.id === RIGHT_TOP_GROUP || group.id === RIGHT_BOTTOM_GROUP,
-    ) ||
-    column.groups.some((group) => group.panels.some((panel) => RIGHT_PANEL_IDS.has(panel.id)))
-  );
+  const groups = column.groups ?? [];
+  return groups.some((group) => group.panels.some((panel) => RIGHT_PANEL_IDS.has(panel.id)));
 }
 
 /** Determine column ID and pinned status from its groups. */

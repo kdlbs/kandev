@@ -33,7 +33,9 @@ Add `TaskRightPanelsToggle` in `apps/web/components/task/task-right-panels-toggl
 Place it immediately before `LayoutPresetSelector` in `TopbarToolsGroup` within `task-top-bar.tsx`.
 Render it outside the archived-task editor-actions gate when a supported workbench exists.
 `task-page-inner.tsx` already excludes the desktop header on phones.
-Use `useResponsiveBreakpoint` to select the active layout and pointer sizing.
+Use `useResponsiveBreakpoint` to select the active layout. The shared icon
+button supplies the coarse-pointer hit area so the control does not need a
+second pointer-size branch.
 
 Use a shared Button and Tooltip with matching accessible next-action text:
 `Show right panels` or `Hide right panels`. Set `aria-expanded` from effective visibility.

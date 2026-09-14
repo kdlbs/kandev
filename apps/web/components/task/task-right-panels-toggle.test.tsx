@@ -2,7 +2,6 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  isFinePointer: true,
   state: {
     isSupported: true,
     isReady: true,
@@ -15,10 +14,7 @@ const HIDE_RIGHT_PANELS = "Hide right panels";
 const SHOW_RIGHT_PANELS = "Show right panels";
 const RIGHT_PANELS_UNAVAILABLE = "Right panels are unavailable while a panel is maximized";
 const TOGGLE_TEST_ID = "task-right-panels-toggle";
-
-vi.mock("@/hooks/use-responsive-breakpoint", () => ({
-  useResponsiveBreakpoint: () => ({ isFinePointer: mocks.isFinePointer }),
-}));
+const ARIA_LABEL_ATTRIBUTE = "aria-label";
 
 vi.mock("@/hooks/use-task-right-panels-toggle", () => ({
   useTaskRightPanelsToggle: () => mocks.state,
@@ -45,7 +41,6 @@ import { TaskRightPanelsToggle } from "./task-right-panels-toggle";
 afterEach(cleanup);
 
 beforeEach(() => {
-  mocks.isFinePointer = true;
   mocks.state = {
     isSupported: true,
     isReady: true,
@@ -60,7 +55,7 @@ describe("TaskRightPanelsToggle", () => {
     render(<TaskRightPanelsToggle sessionId="session-1" />);
 
     const button = screen.getByTestId(TOGGLE_TEST_ID);
-    expect(button.getAttribute("aria-label")).toBe(HIDE_RIGHT_PANELS);
+    expect(button.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(HIDE_RIGHT_PANELS);
     expect(button.getAttribute("aria-expanded")).toBe("true");
     expect(button.getAttribute("title")).toBe(HIDE_RIGHT_PANELS);
 
@@ -75,12 +70,11 @@ describe("TaskRightPanelsToggle", () => {
     render(<TaskRightPanelsToggle sessionId="session-1" />);
 
     const button = screen.getByTestId(TOGGLE_TEST_ID);
-    expect(button.getAttribute("aria-label")).toBe(SHOW_RIGHT_PANELS);
+    expect(button.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(SHOW_RIGHT_PANELS);
     expect(button.getAttribute("aria-expanded")).toBe("false");
   });
 
-  it("keeps coarse-pointer controls at the touch target size", () => {
-    mocks.isFinePointer = false;
+  it("uses the shared touch-sized icon button", () => {
     render(<TaskRightPanelsToggle sessionId="session-1" />);
 
     expect(screen.getByTestId(TOGGLE_TEST_ID).className).toContain(
@@ -102,8 +96,11 @@ describe("TaskRightPanelsToggle", () => {
 
     const button = screen.getByTestId(TOGGLE_TEST_ID) as HTMLButtonElement;
     expect(button.disabled).toBe(true);
-    expect(button.getAttribute("aria-label")).toBe(RIGHT_PANELS_UNAVAILABLE);
+    expect(button.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBeNull();
     expect(button.getAttribute("title")).toBe(RIGHT_PANELS_UNAVAILABLE);
+    expect(button.parentElement?.tagName).toBe("SPAN");
+    expect(button.parentElement?.getAttribute("tabindex")).toBe("0");
+    expect(button.parentElement?.getAttribute(ARIA_LABEL_ATTRIBUTE)).toBe(RIGHT_PANELS_UNAVAILABLE);
   });
 
   it("restores focus after a layout transition disables the button", () => {

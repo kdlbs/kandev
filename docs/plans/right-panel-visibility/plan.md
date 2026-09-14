@@ -142,9 +142,9 @@ A second behavioral RED covers compact reopening. Missing selectors alone do not
 
 ## E2E tests
 
-The executed `apps/web/e2e/tests/layout/right-panel-visibility.spec.ts` coverage uses the `chromium` project for desktop, compact desktop, and the 900-pixel coarse-pointer tablet fallback. It asserts desktop hide/show, center-width recovery, hidden and visible desktop reloads, compact reopening, tablet hide/show persistence, and keyboard activation with focus retention.
+The executed `apps/web/e2e/tests/layout/right-panel-visibility.spec.ts` coverage uses the `chromium` project for desktop, compact desktop, and the 900-pixel coarse-pointer tablet fallback. It asserts desktop hide/show, center-width recovery, hidden and visible desktop reloads, compact hidden-state reload and reopening, maximized disabled-state and exit/reload recovery, tablet hide/show persistence, and keyboard activation with focus retention.
 
-The executed `apps/web/e2e/tests/layout/mobile-right-panel-visibility.spec.ts` coverage uses the `mobile-chrome` project to assert the existing full-screen Chat, Files, and Terminal navigation and the absence of the wider-layout toggle on phones.
+The executed `apps/web/e2e/tests/layout/mobile-right-panel-visibility.spec.ts` coverage uses the `mobile-chrome` project with Pixel 5 device settings to assert the existing full-screen Chat, Files, and Terminal navigation, coarse-pointer input, and the absence of the wider-layout toggle on phones.
 
 The following browser scenarios remain the planned regression matrix. They are retained here because the current implementation run does not assert every case:
 
@@ -169,15 +169,15 @@ Implementation is complete. The new control is shared by desktop and tablet adap
 Checks passed:
 
 - `pnpm install --frozen-lockfile` from `apps`.
-- Review-focused unit tests: 9 files, 109 tests.
+- Review-focused unit tests after fixup: 9 files, 102 tests; the store-focused follow-up passed 45 tests in 2 files.
 - Full web unit suite: 2,058 files, 17,788 passed and 4 skipped tests.
 - `pnpm run typecheck` and `pnpm run lint` from `apps/web`.
 - Targeted ESLint for changed source and browser files.
 - Prettier check for changed TypeScript, TSX, and JSON files.
 - `pnpm run i18n:check` and `pnpm run i18n:ratchet` from `apps/web`.
 - `pnpm --filter @kandev/web build:vite` from `apps`.
-- Managed Chromium E2E: the executed desktop, compact, tablet, reload, and keyboard cases passed.
-- Managed mobile-chrome E2E: 1 test passed.
+- Managed Chromium E2E fixup run: 5 right-panel tests passed, including compact reload, maximized disabled/exit/reload, tablet persistence, and keyboard activation.
+- Managed mobile-chrome E2E fixup run: 1 test passed with Pixel 5 device and coarse-pointer assertions.
 - `node --test scripts/validate-public-docs.test.mjs`: 62 tests passed.
 - `node scripts/validate-public-docs.mjs`: 46 published documents validated.
 - `python3 scripts/list-docs.py validate`: 267 decisions and 896 specifications.
@@ -186,7 +186,7 @@ Checks passed:
 
 The implementation adds localized labels in all five supported catalogs and updates the public task-workspace instructions.
 
-The assertions above cover the review regressions. The retained browser matrix is broader than this run. The tablet component test uses mocked panel primitives and persistence callbacks, so it proves conditional composition and center identity only; the browser test proves the stored hide/show round trip. The component test proves focus retention after a click, while the browser test proves native Enter and Space activation. Resize handoffs, archived-task restoration, the 1280-pixel coarse-pointer case, all four sidebar combinations, and the wider-to-phone handoff remain planned coverage.
+The assertions above cover the review regressions. The retained browser matrix is broader than this run. The tablet component test uses mocked panel primitives and persistence callbacks, so it proves conditional composition and center identity only; the browser test proves the stored visibility round trip, while saved split geometry remains in the retained matrix. The component test proves focus retention after a click and the disabled maximized accessibility wrapper; the browser test proves native Enter and Space activation plus maximized exit/reload recovery. Resize handoffs, archived-task restoration, the 1280-pixel coarse-pointer case, all four sidebar combinations, mixed center/right browser fixtures, and the wider-to-phone handoff remain planned coverage.
 
 New files were inspected explicitly; work-order references resolve to the new requirement and design.
 Implementation commands and browser results are recorded above and in the completed work order.

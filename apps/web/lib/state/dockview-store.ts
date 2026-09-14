@@ -606,12 +606,6 @@ function columnHasRightPanel(column: LayoutState["columns"][number]): boolean {
 }
 
 /**
- * Return a copy of the layout with right-owned tabs (changes/files/terminal,
- * plus pr-detail in right columns) stripped from their groups; groups and
- * columns left empty are dropped, and `activePanel` falls back to the first
- * remaining panel.
- */
-/**
  * The compact built-in preset places the standard right panels in the center
  * group as tabs. When the user asks to show a separate right column, those
  * preset-owned tabs must move with it so Dockview never receives duplicate
@@ -625,20 +619,26 @@ function isCompactDefaultLayout(state: LayoutState, profile: LayoutProfileIdenti
   if (column.id !== "center" || column.groups.length !== 1) return false;
   const [group] = column.groups;
   if (group.id !== CENTER_GROUP || group.panels.length === 0) return false;
-  return group.panels.every(
-    (panel) =>
-      panel.id === "chat" || panel.id.startsWith("session:") || RIGHT_PANEL_IDS.has(panel.id),
-  );
+  return group.panels.some((panel) => panel.id === "chat" || panel.id.startsWith("session:"));
 }
 
+/**
+ * Return a copy of the layout with right-owned tabs (changes/files/terminal,
+ * plus pr-detail in right columns) stripped from their groups; groups and
+ * columns left empty are dropped, and `activePanel` falls back to the first
+ * remaining panel.
+ */
 function removeRightPanelTabs(state: LayoutState, includeCompactCenter = false): LayoutState {
   const columns = state.columns
     .map((col) => {
       if (!isRightColumn(col) && !(includeCompactCenter && col.id === "center")) return col;
+      const preserveCenterPrDetails = includeCompactCenter && col.id === "center";
       const groups = col.groups
         .map((group) => {
           const panels = group.panels.filter(
-            (panel) => !RIGHT_PANEL_IDS.has(panel.id) && panel.id !== "pr-detail",
+            (panel) =>
+              !RIGHT_PANEL_IDS.has(panel.id) &&
+              (preserveCenterPrDetails || panel.id !== "pr-detail"),
           );
           if (panels.length === group.panels.length) return group;
           const activePanel = panels.some((panel) => panel.id === group.activePanel)
