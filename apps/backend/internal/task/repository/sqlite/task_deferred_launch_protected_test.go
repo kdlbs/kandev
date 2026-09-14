@@ -75,6 +75,64 @@ func TestUpdateTaskPreservesWinningDeferredLaunchAgainstStaleUpdate(t *testing.T
 	}
 }
 
+// TestUpdateTaskPreservesWinningDeferredLaunchAgainstStaleUpdateWhileTitlePending
+// pins the same race as TestUpdateTaskPreservesWinningDeferredLaunchAgainstStaleUpdate,
+// but for a task that also carries agent_title_pending — the normal shape of a
+// freshly created task whose auto-start immediately hit the session ceiling.
+// updateTaskTx has a second query shape for this case (the title-pending
+// merge-patch), and it must protect deferred_launch exactly like the plain
+// case: the ceiling's own CAS write (here, a replay stripping ceiling_deferred
+// entirely) must survive a concurrently-committing stale snapshot that still
+// holds the pre-strip value.
+func TestUpdateTaskPreservesWinningDeferredLaunchAgainstStaleUpdateWhileTitlePending(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	ctx := context.Background()
+	insertTask(t, repo.db, "task-deferred-title-pending-race")
+	if _, err := repo.db.ExecContext(ctx, `
+		UPDATE tasks SET metadata = ? WHERE id = ?
+	`, `{"agent_title_pending":true,"agent_title_owner_session_id":"session-owner","deferred_launch":{"prompt":"original","ceiling_launch_kind":"start_created","ceiling_deferred":true}}`, "task-deferred-title-pending-race"); err != nil {
+		t.Fatalf("seed pending title + deferred launch: %v", err)
+	}
+
+	stale, err := repo.GetTask(ctx, "task-deferred-title-pending-race")
+	if err != nil {
+		t.Fatalf("load stale task: %v", err)
+	}
+
+	// Models a replay attempt: the ceiling's own CAS writer strips
+	// ceiling_deferred (key removed, not set false) before re-attempting the
+	// launch.
+	_, prior, err := repo.GetTaskDeferredLaunch(ctx, "task-deferred-title-pending-race")
+	if err != nil {
+		t.Fatalf("read deferred launch prior: %v", err)
+	}
+	stored, lostCompare, err := repo.SetTaskDeferredLaunchIfUnchanged(ctx, "task-deferred-title-pending-race", prior,
+		map[string]interface{}{"prompt": "original", "ceiling_launch_kind": "start_created"})
+	if err != nil || lostCompare || !stored {
+		t.Fatalf("simulate concurrent ceiling replay strip: stored=%v lostCompare=%v err=%v", stored, lostCompare, err)
+	}
+
+	// The stale request-scoped update commits after the strip, still holding
+	// agent_title_pending:true (routing it through the title-pending query
+	// shape) and the pre-strip deferred_launch value.
+	stale.Description = "updated concurrently"
+	if err := repo.UpdateTaskPreservingDeferredLaunch(ctx, stale); err != nil {
+		t.Fatalf("stale UpdateTaskPreservingDeferredLaunch: %v", err)
+	}
+
+	current, err := repo.GetTask(ctx, "task-deferred-title-pending-race")
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	deferred, _ := current.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	if deferred["ceiling_deferred"] == true {
+		t.Fatalf("deferred_launch = %#v, want ceiling_deferred to stay stripped, not resurrected by the stale title-pending write", deferred)
+	}
+	if current.Description != "updated concurrently" {
+		t.Fatalf("description = %q, want stale update to retain its unrelated change", current.Description)
+	}
+}
+
 // TestUpdateTaskStillDeletesUnrelatedMetadataKeysByOmission guards the fix
 // above against the regression it could easily introduce: protecting
 // deferred_launch must not turn UpdateTaskPreservingDeferredLaunch's metadata

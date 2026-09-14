@@ -1146,19 +1146,23 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 	task.UpdatedAt = r.nowUTC()
 
 	metadataExpr := "?"
-	// protectDeferredLaunch only re-strips/merges when the title-pending
-	// branch below does not already own the query: that branch's own merge
-	// expression passes deferred_launch through unchanged (it only ever
-	// touches the two title-pending keys), so stripping the payload here
-	// first would drop deferred_launch from the write entirely instead of
-	// protecting it.
-	if protectDeferredLaunch && !models.IsAgentTitlePending(task.Metadata) {
-		metadataExpr = protectedTaskMetadataMergeExpression(r.db.DriverName())
+	// protectDeferredLaunch strips deferred_launch from the payload
+	// regardless of which query shape below owns the write: a key absent
+	// from the patch document leaves the row's own current value in place
+	// for both merge mechanisms (json_patch/jsonb `||` in the title-pending
+	// branch below, and the explicit splice protectedTaskMetadataMergeExpression
+	// performs for the plain-replace branch), so a stale in-memory snapshot
+	// can never resurrect or clobber whatever the session ceiling's own CAS
+	// writers did to that key in the meantime.
+	if protectDeferredLaunch {
 		stripped, err := json.Marshal(stripProtectedTaskMetadata(task.Metadata))
 		if err != nil {
 			return "", 0, err
 		}
 		metadata = stripped
+		if !models.IsAgentTitlePending(task.Metadata) {
+			metadataExpr = protectedTaskMetadataMergeExpression(r.db.DriverName())
+		}
 	}
 	updateQuery := fmt.Sprintf(`
 		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = %s, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
@@ -2211,13 +2215,17 @@ func pendingTaskMetadataMergeExpression(driver string) string {
 
 // stripProtectedTaskMetadata returns a shallow clone of metadata with
 // deferred_launch removed, for updateTaskTx's protectDeferredLaunch mode
-// (UpdateTaskPreservingDeferredLaunch). The key is owned by its own
-// compare-and-set writers (the session ceiling's admission machinery) and
-// can change between the moment a request-scoped caller read this snapshot
-// and the moment this write commits. Stripping it from the write payload —
-// combined with protectedTaskMetadataMergeExpression's merge against the
-// row's current value — means a stale snapshot can never resurrect or
-// clobber whatever those writers did to it in between.
+// (UpdateTaskPreservingDeferredLaunch), applied to the write payload
+// regardless of which of the two query shapes below owns the write. The key
+// is owned by its own compare-and-set writers (the session ceiling's
+// admission machinery) and can change between the moment a request-scoped
+// caller read this snapshot and the moment this write commits. A key absent
+// from the payload leaves the row's own current value in place under both
+// merge mechanisms: protectedTaskMetadataMergeExpression's explicit splice
+// for the plain-replace shape, and pendingTaskMetadataMergeExpression's
+// json_patch/jsonb `||` merge for the agent-title-pending shape. Either way
+// a stale snapshot can never resurrect or clobber whatever the ceiling's own
+// writers did to the key in between.
 //
 // step_handoff_carry is deliberately NOT included here even though
 // service_task_metadata.go's protectedTaskMetadataUpdate treats it the same
