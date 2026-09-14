@@ -9,6 +9,26 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+func validateWorkspaceClaimAliases(volumes, desired []corev1.Volume) error {
+	var claim string
+	for _, volume := range desired {
+		if volume.Name == WorkspaceVolumeName && volume.PersistentVolumeClaim != nil {
+			claim = volume.PersistentVolumeClaim.ClaimName
+			break
+		}
+	}
+	if claim == "" {
+		return nil
+	}
+	for _, volume := range volumes {
+		if volume.Name != WorkspaceVolumeName && volume.PersistentVolumeClaim != nil &&
+			volume.PersistentVolumeClaim.ClaimName == claim {
+			return errors.New("workspace claim must only be referenced by the owned workspace volume")
+		}
+	}
+	return nil
+}
+
 // companionWithoutWorkspaceGrant validates and removes the one permitted grant
 // from a copy, leaving all other fields subject to the reserved-field checks.
 func companionWithoutWorkspaceGrant(container *corev1.Container) (*corev1.Container, *corev1.VolumeMount, error) {

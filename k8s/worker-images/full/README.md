@@ -46,6 +46,10 @@ Its Docker data is a separate disposable 12-GiB `emptyDir`. Pod-wide non-root
 policy is deliberately absent because it would conflict with this daemon.
 No host namespaces, hostPath or service-account token are requested.
 
+The agent can control the privileged daemon through that socket. The main
+container's non-root security context does not contain commands that use Docker.
+Schedule these Pods only on a worker node pool isolated from trusted workloads.
+
 The daemon reads the Pod interface MTU and applies it to default and
 user-defined bridges. Verify nested HTTPS transfers for the actual CNI/runtime.
 The preparation script waits at most 60 seconds (plus a bounded client call)

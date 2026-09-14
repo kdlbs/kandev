@@ -397,6 +397,9 @@ func validateRequiredMainContainerFields(admitted, desired *corev1.Container) er
 }
 
 func validateAdmittedVolumes(admitted, desired []corev1.Volume) error {
+	if err := validateWorkspaceClaimAliases(admitted, desired); err != nil {
+		return err
+	}
 	for _, required := range desired {
 		if isReservedVolumeName(required.Name) && countVolumes(admitted, required) != 1 {
 			return errors.New("admitted Pod mutated a reserved volume")

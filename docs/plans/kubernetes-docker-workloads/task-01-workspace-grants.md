@@ -121,3 +121,10 @@ Validation:
 
 Real API defaulting and Docker lifecycle evidence remain assigned to task 03.
 No neutral mount default normalization has been introduced.
+
+Review regression: a writable PVC alias at `/cache` initially bypassed a read-only
+workspace grant in both managed-PVC and existing-claim modes. Composition and
+admission now reject those aliases while allowing unrelated PVC mounts.
+`TestWorkspaceGrantAdmissionRejectsClaimAlias` failed before the fix; the full
+Kubernetes package passed afterward with `GOMAXPROCS=2 go test -p 1
+./internal/agent/kubernetes -count=1 -timeout=90s` (0.281s test execution).

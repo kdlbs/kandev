@@ -225,6 +225,10 @@ redirected paths, devices and overlapping mounts are rejected. Init and ephemera
 containers cannot receive this grant. Runtime and auth mounts remain private to
 the main container.
 
+In PVC modes, a second volume cannot reference the workspace claim under another
+name. This is checked during composition and admission, including aliases mounted
+outside `/workspace`. Unrelated PVC mounts remain allowed.
+
 Admission must preserve each grant on the same named container exactly once;
 added, removed, transferred or changed grants fail before bootstrap. Replacement
 Pods use the recorded launch template and claim identity, even after profile edits.
@@ -319,6 +323,10 @@ change. The main agent remains non-root and connects over a Pod-local Unix
 socket; Docker data is disposable. Use the supplied complete prepare script
 so daemon readiness precedes clone/setup/agent installation and caches are
 created only after clone.
+
+The agent controls a privileged root daemon through the socket; its non-root
+container security context does not contain Docker commands. Schedule these
+Pods only on a worker node pool isolated from trusted workloads.
 
 Ordinary Stop retains companion compute. Only `/workspace` is shared for nested
 bind mounts; agent-only HOME/temp paths and full Docker-executor parity are not

@@ -23,6 +23,9 @@ template:
           requests: {cpu: 250m, memory: 512Mi}
           limits: {cpu: '2', memory: 4Gi}
         env:
+          # This socket controls the privileged daemon. The main container's
+          # security context does not contain Docker commands. Use a worker
+          # node pool isolated from trusted workloads.
           - {name: DOCKER_HOST, value: 'unix:///run/docker/docker.sock'}
         volumeMounts:
           - {name: docker-socket, mountPath: /run/docker}
