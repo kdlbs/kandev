@@ -58,6 +58,21 @@ function allKnownSessionIds(appStore: ReturnType<typeof useAppStoreApi>): Set<st
   return new Set(Object.values(sessionsByTask).flatMap((sessions) => sessions.map((s) => s.id)));
 }
 
+/**
+ * True only when the store marks the active task's session list as loaded.
+ * Before that the list may be partial (WS events seed single sessions into a
+ * not-yet-loaded list) or empty (pre-hydration reload), and pruning persisted
+ * hidden IDs against it would erase the reload record before the full session
+ * list arrives.
+ */
+function isTaskSessionListAuthoritative(
+  appStore: ReturnType<typeof useAppStoreApi>,
+  tid: string | null,
+): boolean {
+  if (!tid) return false;
+  return appStore.getState().taskSessionsByTask.loadedByTaskId[tid] === true;
+}
+
 function shouldSkipHiddenEffectiveSession(
   effectiveSessionId: string,
   hiddenSessionIds: Set<string>,
@@ -72,7 +87,6 @@ function shouldSkipHiddenEffectiveSession(
 }
 
 function pruneHiddenSessionIds(
-  api: DockviewApi,
   envId: string | null,
   hiddenSessionIds: Set<string>,
   knownSessionIds: Set<string>,
@@ -636,13 +650,17 @@ export function runAutoSessionTabEffect(
 
   // Keep hide intent for sessions belonging to inactive tasks that share this
   // environment. Prune only sessions that are gone from the whole store, not
-  // merely absent from the currently selected task.
-  pruneHiddenSessionIds(
-    api,
-    currentEnvId,
-    refs.hiddenSessionIdsRef.current,
-    allKnownSessionIds(appStore),
-  );
+  // merely absent from the currently selected task, and only after the active
+  // task's session list is authoritatively loaded: an empty or partial list
+  // before hydration would erase the persisted hide record and resurrect the
+  // closed panels once the reload finishes.
+  if (isTaskSessionListAuthoritative(appStore, tid)) {
+    pruneHiddenSessionIds(
+      currentEnvId,
+      refs.hiddenSessionIdsRef.current,
+      allKnownSessionIds(appStore),
+    );
+  }
 
   if (!effectiveSessionId) {
     if (isDebug()) debug("useAutoSessionTab: no effectiveSessionId, returning");

@@ -76,7 +76,10 @@ function makeAutoSessionAppStore(taskId: string | null, sessionIds: string[]) {
   return {
     getState: () => ({
       tasks: { activeTaskId: taskId },
-      taskSessionsByTask: { itemsByTaskId },
+      taskSessionsByTask: {
+        itemsByTaskId,
+        loadedByTaskId: taskId ? { [taskId]: true } : {},
+      },
     }),
   };
 }

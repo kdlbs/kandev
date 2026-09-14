@@ -19,6 +19,7 @@ function makeAppStore() {
         itemsByTaskId: {
           [TASK_ID]: [{ id: ACTIVE_SESSION_ID }, { id: HIDDEN_SESSION_ID }],
         },
+        loadedByTaskId: { [TASK_ID]: true },
       },
     }),
   };
@@ -131,6 +132,7 @@ describe("hidden session tab state", () => {
             "task-A": [{ id: ACTIVE_SESSION_ID }, { id: HIDDEN_SESSION_ID }],
             "task-B": [{ id: "session-task-b" }],
           },
+          loadedByTaskId: { "task-A": true, "task-B": true },
         },
       }),
     };
@@ -218,6 +220,117 @@ describe("hidden session tab persistence record", () => {
         runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, makeRefs() as never);
       });
 
+      expect(JSON.parse(window.sessionStorage.getItem(storageKey) ?? "[]")).toEqual([]);
+    } finally {
+      window.sessionStorage.removeItem(storageKey);
+    }
+  });
+});
+
+describe("hidden session tab pruning after hydration", () => {
+  it("defers pruning when the session list starts empty and hydrates later", () => {
+    // Regression: after a reload the effect can run before the task's session
+    // list hydrates. Pruning the persisted hide record against that empty list
+    // erased it, so the hidden panel resurrected once the sessions arrived.
+    const storageKey = "kandev.dockview.env-hidden-sessions-v1.env-hydrate";
+    window.sessionStorage.removeItem(storageKey);
+
+    try {
+      const beforeReload = makeReorderingAutoSessionApi();
+      const appStore = makeAppStore();
+
+      runInEnvironment(beforeReload.api, "env-hydrate", () => {
+        runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, makeRefs() as never);
+        hideSessionPanel(beforeReload.api, HIDDEN_SESSION_ID);
+      });
+      expect(JSON.parse(window.sessionStorage.getItem(storageKey) ?? "[]")).toEqual([
+        HIDDEN_SESSION_ID,
+      ]);
+
+      // Fresh API after reload; the store has no sessions and does not yet
+      // mark the task's list as loaded.
+      const afterReload = makeReorderingAutoSessionApi();
+      const emptyStore = {
+        getState: () => ({
+          tasks: { activeTaskId: TASK_ID },
+          taskSessionsByTask: {
+            itemsByTaskId: {},
+            loadedByTaskId: {},
+          },
+        }),
+      };
+      runInEnvironment(afterReload.api, "env-hydrate", () => {
+        runAutoSessionTabEffect(ACTIVE_SESSION_ID, emptyStore as never, makeRefs() as never);
+      });
+
+      // The record survives the pre-hydration pass.
+      expect(JSON.parse(window.sessionStorage.getItem(storageKey) ?? "[]")).toEqual([
+        HIDDEN_SESSION_ID,
+      ]);
+
+      // Hydration completes: the list loads and the effect reconciles; the
+      // hidden session exists, so the record keeps it and the panel stays
+      // absent while the active session renders.
+      runInEnvironment(afterReload.api, "env-hydrate", () => {
+        runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, makeRefs() as never);
+      });
+      expect(afterReload.api.getPanel(`session:${ACTIVE_SESSION_ID}`)).not.toBeNull();
+      expect(afterReload.api.getPanel(`session:${HIDDEN_SESSION_ID}`)).toBeNull();
+      expect(JSON.parse(window.sessionStorage.getItem(storageKey) ?? "[]")).toEqual([
+        HIDDEN_SESSION_ID,
+      ]);
+    } finally {
+      window.sessionStorage.removeItem(storageKey);
+    }
+  });
+
+  it("prunes the persisted record only once hydration is authoritative", () => {
+    const storageKey = "kandev.dockview.env-hidden-sessions-v1.env-prune";
+    window.sessionStorage.removeItem(storageKey);
+
+    try {
+      const { api } = makeReorderingAutoSessionApi();
+      const appStore = makeAppStore();
+
+      runInEnvironment(api, "env-prune", () => {
+        runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, makeRefs() as never);
+        hideSessionPanel(api, HIDDEN_SESSION_ID);
+      });
+      expect(JSON.parse(window.sessionStorage.getItem(storageKey) ?? "[]")).toEqual([
+        HIDDEN_SESSION_ID,
+      ]);
+
+      // The session disappears from the store but the list has not reloaded,
+      // so the record must survive until the refreshed list confirms it.
+      const staleListStore = {
+        getState: () => ({
+          tasks: { activeTaskId: TASK_ID },
+          taskSessionsByTask: {
+            itemsByTaskId: { [TASK_ID]: [{ id: ACTIVE_SESSION_ID }] },
+            loadedByTaskId: { [TASK_ID]: false },
+          },
+        }),
+      };
+      runInEnvironment(api, "env-prune", () => {
+        runAutoSessionTabEffect(ACTIVE_SESSION_ID, staleListStore as never, makeRefs() as never);
+      });
+      expect(JSON.parse(window.sessionStorage.getItem(storageKey) ?? "[]")).toEqual([
+        HIDDEN_SESSION_ID,
+      ]);
+
+      // The refreshed list loads without the hidden session; pruning removes it.
+      const refreshedStore = {
+        getState: () => ({
+          tasks: { activeTaskId: TASK_ID },
+          taskSessionsByTask: {
+            itemsByTaskId: { [TASK_ID]: [{ id: ACTIVE_SESSION_ID }] },
+            loadedByTaskId: { [TASK_ID]: true },
+          },
+        }),
+      };
+      runInEnvironment(api, "env-prune", () => {
+        runAutoSessionTabEffect(ACTIVE_SESSION_ID, refreshedStore as never, makeRefs() as never);
+      });
       expect(JSON.parse(window.sessionStorage.getItem(storageKey) ?? "[]")).toEqual([]);
     } finally {
       window.sessionStorage.removeItem(storageKey);
