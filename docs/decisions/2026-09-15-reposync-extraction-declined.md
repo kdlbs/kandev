@@ -21,9 +21,9 @@ forced by physical code sharing rather than by either domain's requirements.
 The decision then was to build `internal/office/configsync` standalone, reusing
 workflow sync's pattern rather than its package, and to revisit the extraction
 once the second domain was real rather than predicted. The system design set the
-condition for this revisit explicitly: "'not worth extracting' is only a
-defensible verdict once both halves exist to be compared." Both halves now exist.
-This ADR is that revisit.
+condition for this revisit explicitly, in wording it no longer carries and this
+ADR now preserves: "'not worth extracting' is only a defensible verdict once both
+halves exist to be compared." Both halves now exist. This ADR is that revisit.
 
 ### The four round-4 predictions, all now shipped
 
@@ -64,19 +64,23 @@ itself.
 
 ### The shared surface, itemized
 
-The genuinely common, collision-free surface is roughly 120 lines. The count is
-given per item so a future reader can check it rather than take it on trust;
-figures are non-test lines, `workflowsync` / `configsync`.
+The genuinely common, collision-free surface is roughly 126 lines. The count is
+given per item so a future reader can check it rather than take it on trust, which
+only works if the counting rule is stated: **every figure below is physical lines,
+including doc comments and internal blank lines, over the span named in its own
+row.** Figures are `workflowsync` / `configsync`, non-test.
 
-| Item | Lines | Status |
-| --- | --- | --- |
-| `Poller` | 81 / 83 | Identical in logic; the only non-comment difference is the logger component string |
-| Client provider interfaces + compile-time assertions | 27 / 28 | Identical but for one comment line |
-| Provider-neutral directory entry struct | 6 / 6 | Same three fields; unexported `dirEntry` here, exported `DirEntry` there |
-| Per-workspace lock helper | 4 / 4 | Byte-identical |
-| Provider constants | 2 / 2 | Byte-identical |
+| Item | Lines | Span counted | Status |
+| --- | --- | --- | --- |
+| `Poller` | 81 / 83 | All of `poller.go`, which holds the 60s tick constant, the struct and its four methods, and nothing else | Identical in logic; the only non-comment difference is the logger component string |
+| Client provider interfaces + compile-time assertions | 28 / 29 | Both interface declarations plus the `var` assertion block, first doc comment through the closing `)` | Identical but for one comment line (`configsync` documents "Satisfied by github.Service." on both interfaces, `workflowsync` on only one) |
+| Provider-neutral directory entry struct | 8 / 6 | The struct with its doc comment, three lines here and one there | Same three fields; unexported `dirEntry` here, exported `DirEntry` there. The declarations themselves are 5 lines on both sides |
+| Per-workspace lock helper | 4 / 4 | The function; neither side has a doc comment | Byte-identical |
+| Provider constants | 5 / 5 | The `const` block with its doc comment | Byte-identical, comment included |
+| **Total** | **126 / 127** | | |
 
-Three further candidates were examined and are **not** part of that surface:
+Three further candidates were examined. Two are **not** part of that surface;
+the third is, and is listed here only because it is easy to assume otherwise:
 
 - **Content hashing.** `workflowsync/service.go:325` (`contentHash`, 8 lines) and
   `configsync/reconcile_run.go:441` (`computeRunHash`, 22 lines) share a purpose
@@ -94,10 +98,10 @@ Three further candidates were examined and are **not** part of that surface:
   lines) is registered onto a router group the caller owns, takes the workspace
   from the `:wsId` path parameter, and deliberately does not re-authorize because
   `officeWorkspaceScopeMiddleware` has already scope-checked it. The workspace
-  source, the mount model, and the authorization model all differ. This is a
-  sixth seam, not shared code.
-- **Provider constants** are in the table above: genuinely shareable, and two
-  lines.
+  source, the mount model, and the authorization model all differ. This is a seam,
+  not shared code, and it is counted in the Decision's tally below.
+- **Provider constants** are in the table above: genuinely shareable, and five
+  lines under the convention stated there.
 
 Two asymmetries appeared only once the second package was real. The stores are
 not the same table under two names: config sync adds an ownership manifest table
@@ -119,7 +123,7 @@ A shared layer would have to parameterize the verdict formula, the provider
 default policy, the run deadline, the empty-path meaning, the walk shape, the
 warning caps (backend retention and frontend render, separately), the store
 schema and its migration history, and the HTTP controller's workspace source and
-authorization model, in order to save roughly 120 lines that do not collide.
+authorization model, in order to save roughly 126 lines that do not collide.
 Every one of those seams exists to let the two domains disagree, which means the
 abstraction would encode the disagreement rather than remove it.
 
@@ -142,30 +146,47 @@ and nothing in the build enforces that. This is accepted: no such change has bee
 required so far, and the seven divergences above are evidence that most changes
 apply to exactly one domain.
 
-The two packages may drift further apart. **This supersedes the bounding
-assumption in `docs/specs/office/system-design/config-sync.md`**, which accepted
-the duplication on the grounds that Office was being built to "the *same*
-vocabulary (identical column names, the same `SyncResult` field shape, the same
-poll-and-record lifecycle) so a later extraction is a merge of two working
-implementations rather than a redesign". That assumption was reasonable when the
-extraction was still expected. Now that it is declined, holding the vocabulary
-aligned buys nothing and would constrain both domains for a merge that is not
-going to happen. Each package owns its contract, and neither honors a
-behavior-preservation invariant for the other.
+The two packages may drift further apart. **This supersedes three statements in
+`docs/specs/office/system-design/config-sync.md`**. That design has been updated
+so none of them still reads as pending, which makes this ADR their only record;
+they are quoted in full here for that reason:
+
+- *Purpose and boundaries*: "Extracting the common mechanics is deferred so it
+  can be designed against two working implementations rather than one working and
+  one imagined." The deferral is resolved. Nothing is pending.
+- *`internal/office/configsync` (new)*: the vocabulary and lifecycle are
+  identical "by *convention*, enforced by this design and by tests, not by a
+  shared type". The convention is retired, and it was never actually enforced by
+  tests: no shipped test compares the two packages' column names, field shapes,
+  or lifecycle.
+- *Prior art and alternatives*: the duplication is "bounded by building Office to
+  the *same* vocabulary (identical column names, the same `SyncResult` field
+  shape, the same poll-and-record lifecycle) so a later extraction is a merge of
+  two working implementations rather than a redesign. A follow-up card carries
+  the extraction". This ADR is the disposition of that follow-up card.
+
+All three were reasonable when the extraction was still expected. Now that it is
+declined, holding the vocabulary aligned buys nothing and would constrain both
+domains for a merge that is not going to happen. Each package owns its contract,
+and neither honors a behavior-preservation invariant for the other.
 
 Both client provider interfaces stay duplicated, but each keeps its
 compile-time assertion that the real `github.Service` and `gitlab.Service`
 satisfy it, so drift in either integration's workspace-routed methods still
 breaks the build in both packages rather than surfacing at wiring time.
 
-Poller lifecycle duplication remains until the follow-up is taken up. That work
-is tracked as Kandev card `fc386556-8101-49a6-ac22-97b526c66e50` ("Unify backend
+Poller lifecycle duplication remains. That work is tracked as Kandev card `fc386556-8101-49a6-ac22-97b526c66e50` ("Unify backend
 Poller Start/Stop lifecycle across 5 packages"), scoped repo-wide and
 independent of this decision: whatever home it picks, it does not reopen the
 question of a `reposync` library for these two.
 
 **Revisit this decision if any of the following holds.** Absent one of them, two
-similar packages is the intended steady state and no revisit is owed:
+similar packages is the intended steady state and no revisit is owed. Nothing in
+the build or in CI watches for these; they are checked by whoever is already
+editing one of the two packages. The first two are state, readable from the code
+at any moment. The third is a count over time, so it needs somewhere to
+accumulate or it resets with each reader's memory: the Occurrences list below is
+that place.
 
 - A third repository-sync domain is proposed. Three callers change the
   arithmetic: the shared surface is paid for once and amortized across three,
@@ -173,10 +194,19 @@ similar packages is the intended steady state and no revisit is owed:
   rather than a coincidence of two.
 - The divergence count materially shrinks, for example because a requirement
   change aligns the verdict formula and the provider policy. The seam count, not
-  the line count, is what made this a no.
+  the line count, is what made this a no. The seven divergences are tabulated in
+  Context across two tables; re-reading them against the code is the whole check.
 - A behavior change is required in both domains at once, twice. The first time
   is the cost this ADR accepts; a repeat indicates the domains are coupled in a
-  way this analysis did not find.
+  way this analysis did not find. Append each occurrence below, with the date,
+  the change, and both call sites.
+
+### Occurrences
+
+None recorded. This list is only as good as the discipline of appending to it,
+and it is the sole record: there is no counter anywhere else, so an occurrence
+that goes unwritten here is an occurrence that did not happen as far as the next
+reader is concerned.
 
 ## Alternatives considered
 
@@ -184,7 +214,7 @@ similar packages is the intended steady state and no revisit is owed:
 a minimum of a verdict hook and a provider-policy hook, and the shipped code adds
 a deadline policy, an empty-path policy, a walk-shape strategy, two warning-cap
 policies, a store/migration seam, and a controller mount/authorization seam.
-Rejected: that is nine parameterization points, and they would buy roughly 120
+Rejected: that is nine parameterization points, and they would buy roughly 126
 shared lines of which only the `Poller`'s 81 are logic rather than declarations,
 and the `Poller` belongs in a five-package home this library would not serve. The
 original design's `Domain` seam had no verdict or provider hook at all, so the
@@ -213,5 +243,6 @@ without failing CI.
 `docs/specs/office/requirements/config-sync.md` and its siblings define the
 Office contract whose acceptance criteria drove most of the divergences above.
 `docs/specs/office/system-design/config-sync.md` records the original deferral
-and the condition for this revisit; see Consequences for the one assumption of
-its that this ADR supersedes.
+and the condition for this revisit; see Consequences for the three statements of
+its that this ADR supersedes. That design's Related decisions section links back
+to this ADR.

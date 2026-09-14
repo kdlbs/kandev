@@ -35,9 +35,9 @@ Office config sync is built standalone, as `internal/office/configsync`. It
 reuses workflow sync's *pattern* — the same field vocabulary, provider-dispatch
 shape, and poll-and-record lifecycle — but not its *package*: no shared library
 is extracted, and `internal/workflowsync` is neither modified nor imported.
-Extracting the common mechanics is deferred so it can be designed against two
-working implementations rather than one working and one imagined; the reasoning
-is under [Prior art and alternatives](#prior-art-and-alternatives).
+Extracting the common mechanics was deferred until both implementations existed
+to be compared. That question has since been settled as a decline, so no
+extraction is pending; see [Related decisions](#related-decisions).
 
 ## Requirement mapping
 
@@ -79,10 +79,10 @@ the reconciliation, and the HTTP surface. Nothing in it is shared with
 | `Runner` | Per-workspace lock, authorization, fetch, reconcile, `recordFailure`. |
 | `Controller` | The four HTTP handlers. |
 
-The field vocabulary, the status columns, and the poll-and-record lifecycle are
-deliberately identical to `workflow_sync_configs` — that is the requirement the
-task sets — but the identity is by *convention*, enforced by this design and by
-tests, not by a shared type.
+The field vocabulary, the status columns, and the poll-and-record lifecycle
+started out identical to `workflow_sync_configs` — that is the requirement the
+task sets — but the identity was convention, never a shared type or a test, and
+it is no longer maintained; see [Related decisions](#related-decisions).
 
 ### `internal/workflowsync` (unchanged)
 
@@ -499,14 +499,9 @@ differences in a library written before either caller exists is speculative
 abstraction, which the repository's engineering principles rule out directly.
 
 Deferring costs genuine duplication — two poll loops, two config stores, two
-status cards — and that cost is accepted rather than argued away. It is bounded
-by building Office to the *same* vocabulary (identical column names, the same
-`SyncResult` field shape, the same poll-and-record lifecycle) so a later
-extraction is a merge of two working implementations rather than a redesign. A
-follow-up card carries the extraction and the five collisions above, sequenced
-after this ships: doing it first re-imports the coupling this narrowing removed,
-and "not worth extracting" is only a defensible verdict once both halves exist
-to be compared.
+status cards — and that cost is accepted rather than argued away. The extraction
+was taken up once both halves shipped, and declined: the five collisions above
+are seams, not a library. The vocabulary is no longer held aligned.
 
 `synthesis/pbt-from-ears-bridge.md` treats EARS acceptance criteria as
 **universal properties** - for any input where the trigger holds, the response
@@ -556,6 +551,9 @@ no step in this order can regress a shipped feature.
 
 ## Related decisions
 
+- [Decline the `internal/reposync` extraction](../../../decisions/2026-09-15-reposync-extraction-declined.md)
+  is the disposition of the card this design deferred to. It supersedes three
+  statements above, rewritten here and quoted there.
 - [ADR 0031](../../../decisions/0031-office-skill-reference-files.md) defined
   skill support files and `file_inventory`, which round 2's `references/`
   request exists to populate.
