@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -2883,11 +2884,32 @@ func agentFailureStamp(data watcher.AgentEventData) string {
 	)
 }
 
-// handleLaunchFailed moves a pre-agent launch failure to the task-owned
-// projection. The executor has already persisted the source session marker
-// when this callback runs; retaining that marker as dismissed metadata keeps
-// the originating session correlated without exposing duplicate recovery
-// controls in the session view.
+// launchFailureIsTaskOwned reports whether the launch producer proved that a
+// failure affects the task's shared workspace or workflow. Generic launch
+// errors remain session-owned so a profile-specific startup failure cannot
+// surface recovery controls on another session.
+func launchFailureIsTaskOwned(lastError models.LastAgentError, launchErr error) bool {
+	if lastError.Scope == models.ErrorScopeTask {
+		return true
+	}
+	switch lastError.Code {
+	case models.LaunchErrorCategoryBaseBranchMissing,
+		models.LaunchErrorCategoryDefaultBranchUnresolved,
+		models.LaunchErrorCategoryWorkspaceCheckoutFailed,
+		models.LaunchErrorCategoryPRAlreadyClosed:
+		return true
+	case models.LaunchErrorCategoryGenericLaunchFailure:
+		var recoveryErr *worktree.WorktreeRecoveryError
+		return errors.As(launchErr, &recoveryErr)
+	default:
+		return false
+	}
+}
+
+// handleLaunchFailed projects shared workspace failures at task scope while
+// retaining profile-specific startup failures on their originating session.
+// The executor has already persisted the source session marker when this
+// callback runs.
 func (s *Service) handleLaunchFailed(
 	ctx context.Context,
 	taskID, sessionID, _ string,
@@ -2905,6 +2927,15 @@ func (s *Service) handleLaunchFailed(
 	}
 	lastError, found := models.LoadLastAgentError(session.Metadata)
 	if !found || lastError.IsDismissed() {
+		return
+	}
+	if !launchFailureIsTaskOwned(lastError, launchErr) {
+		if err := s.persistBootstrapFailureMessage(ctx, taskID, sessionID, session.AgentExecutionID, lastError); err != nil {
+			s.logger.Warn("failed to persist session-owned launch failure history",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
 		return
 	}
 	taskError := models.TaskLaunchError{
@@ -3049,7 +3080,10 @@ func providerRemediationURL(data watcher.AgentEventData) string {
 // createRecoveryStatusMessage builds and persists the ActionMessage shown in
 // the session transcript after a recoverable agent failure. Its stable message
 // identity keeps retries and bootstrap failures idempotent.
-func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.AgentEventData) {
+func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.AgentEventData) error {
+	if s.messageCreator == nil {
+		return fmt.Errorf("recovery status message creator is unavailable")
+	}
 	authErr := isAuthError(data.ErrorMessage)
 	resumeCorrupted := routingerr.IsResumeCorrupted(data.ErrorMessage)
 	displayMsg := agentFailureMessage(data)
@@ -3120,6 +3154,15 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		meta["actions"] = buildRecoveryActions(data.TaskID, data.SessionID, hasResumeToken, authErr, resumeCorrupted)
 	}
 
+	return s.persistRecoveryStatusMessage(ctx, data, statusMsg, meta)
+}
+
+func (s *Service) persistRecoveryStatusMessage(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	statusMsg string,
+	meta map[string]interface{},
+) error {
 	messageID := uuid.NewSHA1(
 		uuid.NameSpaceOID,
 		[]byte("session-recovery:"+data.SessionID+":"+agentFailureStamp(data)),
@@ -3138,7 +3181,9 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		s.logger.Warn("failed to create recovery status message",
 			zap.String("task_id", data.TaskID),
 			zap.Error(err))
+		return err
 	}
+	return nil
 }
 
 // applyProviderQuotaMetadata promotes only a validated OpenCode terminal

@@ -167,7 +167,7 @@ The shared repository can contain other edits. Do not revert unrelated changes.
 
 ## Results
 
-Complete on September 14, 2026. Session failures are persisted as chronological, stamp-scoped messages. Same-stamp writes are idempotent, resolved entries retain their message and details, and later agent output no longer removes or hides them. The accepted bootstrap terminal path now produces the durable entry with safe bootstrap details and existing recovery choices, and Office failures use the same session-history producer. Recovery-specific transcript reveal and prepend behavior was removed while ordinary older-history anchor restoration remains.
+Complete on September 14, 2026. Session failures are persisted as chronological, stamp-scoped messages. Same-stamp writes are idempotent, resolved entries retain their message and details, and later agent output no longer removes or hides them. The accepted bootstrap terminal path now produces the durable entry with safe bootstrap details and existing recovery choices, and Office failures use the same session-history producer. Profile-specific pre-agent failures retain their session scope. Bootstrap state admission requires an execution-fenced repository commit; when that commit succeeds but the transcript write fails, the executor retries the same idempotent message identity. Recovery-specific transcript reveal and prepend behavior was removed while ordinary older-history anchor restoration remains.
 
 Validation passed:
 
@@ -176,3 +176,4 @@ Validation passed:
 - Frontend typecheck, lint, i18n checks, and Vite build passed.
 - Real bootstrap admission, Office failure production, stale retirement fencing, and reload-retained history regressions passed.
 - Chromium and Mobile Chrome launch-recovery suites passed with 4 and 3 tests respectively.
+- The bootstrap repair regression and the profile-specific session ownership regression passed in the full orchestrator suite.

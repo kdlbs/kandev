@@ -3031,6 +3031,88 @@ func TestTransitionBootstrapFailurePersistsSessionHistory(t *testing.T) {
 	require.Len(t, retainedMessages, 1, "recovery retirement must retain the chronological entry")
 }
 
+type failOnceBootstrapMessageCreator struct {
+	*serviceBackedMessageCreator
+	err error
+}
+
+func (m *failOnceBootstrapMessageCreator) CreateSessionMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, sessionID, messageType, turnID string,
+	metadata map[string]interface{}, requestsInput bool,
+) error {
+	if m.err != nil {
+		err := m.err
+		m.err = nil
+		return err
+	}
+	return m.serviceBackedMessageCreator.CreateSessionMessageIdempotent(
+		ctx,
+		messageID,
+		taskID,
+		content,
+		sessionID,
+		messageType,
+		turnID,
+		metadata,
+		requestsInput,
+	)
+}
+
+func TestTransitionBootstrapFailureReturnsRepairableHistoryError(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "bootstrap-repair-task", "bootstrap-repair-session", "step1")
+	session, err := repo.GetTaskSession(ctx, "bootstrap-repair-session")
+	require.NoError(t, err)
+	session.State = models.TaskSessionStateStarting
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	seedExecutorRunning(t, repo, "bootstrap-repair-session", "bootstrap-repair-task", "exec-repair")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	creator := &failOnceBootstrapMessageCreator{
+		serviceBackedMessageCreator: newServiceBackedMessageCreator(repo),
+		err:                         errors.New("transcript temporarily unavailable"),
+	}
+	svc.messageCreator = creator
+	failure := models.LastAgentError{
+		Message:          "The agent could not start.",
+		OccurredAt:       time.Date(2026, 9, 14, 11, 0, 0, 0, time.UTC),
+		Scope:            models.ErrorScopeSession,
+		AgentExecutionID: "exec-repair",
+		ExecutionID:      "exec-repair",
+		Phase:            models.LaunchErrorPhaseBootstrap,
+		AttemptID:        "exec-repair",
+		Code:             models.LaunchErrorCategoryGenericLaunchFailure,
+		Details:          "operation=agent_bootstrap; cause=provider unavailable",
+		StampValue:       "bootstrap-repair-failure",
+	}
+
+	changed, state, err := svc.transitionBootstrapFailure(
+		ctx,
+		"bootstrap-repair-task",
+		"bootstrap-repair-session",
+		"exec-repair",
+		models.TaskSessionStateStarting,
+		"",
+		failure,
+	)
+	require.Error(t, err)
+	require.True(t, changed, "the state admission succeeded even though history needed repair")
+	require.Equal(t, models.TaskSessionStateFailed, state)
+	messages, err := repo.ListMessages(ctx, "bootstrap-repair-session")
+	require.NoError(t, err)
+	require.Empty(t, messages)
+
+	require.NoError(t, svc.persistBootstrapFailureMessage(
+		ctx, "bootstrap-repair-task", "bootstrap-repair-session", "exec-repair", failure,
+	))
+	messages, err = repo.ListMessages(ctx, "bootstrap-repair-session")
+	require.NoError(t, err)
+	require.Len(t, messages, 1, "the bounded repair must restore the accepted failure entry")
+	require.Equal(t, "bootstrap-repair-failure", messages[0].Metadata["error_stamp"])
+}
+
 func TestSetSessionStartingRejectsTerminalSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

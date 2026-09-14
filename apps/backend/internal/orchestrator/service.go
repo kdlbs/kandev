@@ -1705,6 +1705,7 @@ func NewService(
 	})
 	exec.SetOnSessionStateTransition(s.transitionTaskSessionState)
 	exec.SetOnBootstrapFailureTransition(s.transitionBootstrapFailure)
+	exec.SetOnBootstrapFailureMessageRepair(s.persistBootstrapFailureMessage)
 	exec.SetOnSessionStarting(func(
 		ctx context.Context,
 		taskID string,

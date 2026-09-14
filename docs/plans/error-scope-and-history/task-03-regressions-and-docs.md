@@ -168,7 +168,7 @@ The shared repository can contain other edits. Do not revert unrelated changes.
 
 ## Results
 
-Complete on September 14, 2026. The desktop and phone fixtures cover retained session history, ordinary scroll anchoring, shared task errors across session and Plan surfaces, sibling recovery, legacy readability, duplicate stamps, reload, delayed output, no-session recovery, phone drawer bounds, touch targets, and document overflow. Backend and composed frontend regressions also cover the real bootstrap and Office producers, persisted/provisional representation deduplication, cold-projector task scope, and stale snapshot retirement. Public session and task recovery guidance now matches the shipped scope and history behavior.
+Complete on September 14, 2026. The desktop and phone fixtures cover retained session history, ordinary scroll anchoring, shared task errors across session and Plan surfaces, sibling recovery, legacy readability, duplicate stamps, reload, delayed output, no-session recovery, phone drawer bounds, touch targets, and document overflow. Backend and composed frontend regressions also cover the real bootstrap and Office producers, persisted/provisional representation deduplication, legacy recovery controls, cold-projector task scope, stale snapshot retirement, live shared-summary replacement, one assertive announcement per stamp, and mobile top-bar geometry. Public session and task recovery guidance now matches the shipped scope and history behavior.
 
 Validation passed:
 
@@ -178,3 +178,4 @@ Validation passed:
 - `python3 scripts/list-docs.py validate` and `python3 scripts/lint-spec-files.py --all`: passed.
 - `git diff --check`: passed.
 - Review regression suites and the complete selected backend package run: passed.
+- The composed task panel assertion counts persisted and provisional recovery representations together and passed with the affected frontend suite.

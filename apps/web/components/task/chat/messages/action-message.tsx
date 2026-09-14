@@ -13,26 +13,51 @@ import { parseRetryAt, retryCountdownLabel } from "./transient-retry";
 import { hasSessionRecoveryResolutionAfter } from "@/hooks/processed-message-filtering";
 import { ActionButtons } from "./action-message-actions";
 import { SessionRecoveryActionButtons, sessionRecoveryAction } from "./action-message-recovery";
-import { lastAgentErrorStamp, readLastAgentError } from "@/lib/session-last-agent-error";
+import {
+  lastAgentErrorStamp,
+  readLastAgentError,
+  type LastAgentError,
+} from "@/lib/session-last-agent-error";
 
 function isSessionActive(state?: TaskSessionState) {
   return state === "RUNNING" || state === "STARTING" || state === "COMPLETED";
 }
 
-function currentSessionRecoveryStamp(sessionMetadata: Record<string, unknown> | null) {
+function currentSessionRecoveryError(sessionMetadata: Record<string, unknown> | null) {
   if (!sessionMetadata) return null;
-  const current = readLastAgentError(sessionMetadata);
-  return current ? lastAgentErrorStamp(current) : null;
+  return readLastAgentError(sessionMetadata);
 }
 
 function isCurrentRecoveryMessage(
   isRecoveryMessage: boolean,
   messageRecoveryStamp: string | undefined,
-  currentRecoveryStamp: string | null,
+  currentRecoveryError: LastAgentError | null,
+  comment: Message,
 ) {
   if (!isRecoveryMessage) return true;
+  if (!currentRecoveryError) return true;
+  const currentRecoveryStamp = lastAgentErrorStamp(currentRecoveryError);
   if (messageRecoveryStamp) return currentRecoveryStamp === messageRecoveryStamp;
-  return currentRecoveryStamp === null;
+  return legacyRecoveryMessageMatchesError(comment, currentRecoveryError);
+}
+
+function legacyRecoveryMessageMatchesError(comment: Message, currentError: LastAgentError) {
+  const content = comment.content.trim();
+  const message = currentError.message.trim();
+  if (!content || !message) return false;
+
+  const contentMatches =
+    content === message ||
+    content === `Agent encountered an error: ${message}` ||
+    (content.startsWith("Agent encountered an error:") && content.endsWith(message));
+  if (!contentMatches) return false;
+
+  // Metadata is written before the transcript row. Exclude an older legacy
+  // row with the same text when both sides carry usable timestamps.
+  if (!currentError.occurredAt) return true;
+  const occurredAt = Date.parse(currentError.occurredAt);
+  const createdAt = Date.parse(comment.created_at);
+  return Number.isNaN(occurredAt) || Number.isNaN(createdAt) || createdAt >= occurredAt;
 }
 
 function shouldShowRecoveryActions({
@@ -91,12 +116,13 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
   // that came back failed — a failed boot row, or a session driven to FAILED —
   // must surface its card again, buttons included, or the retry is unreachable.
   const recoveryFailedAgain = agentBootFailed || sessionState === "FAILED";
-  const currentRecoveryStamp = currentSessionRecoveryStamp(sessionMetadata ?? null);
+  const currentRecoveryError = currentSessionRecoveryError(sessionMetadata ?? null);
   const messageRecoveryStamp = metadata?.recovery_stamp ?? metadata?.error_stamp;
   const isCurrentRecovery = isCurrentRecoveryMessage(
     isRecoveryMessage,
     messageRecoveryStamp,
-    currentRecoveryStamp,
+    currentRecoveryError,
+    comment,
   );
   const recoveryActionsVisible = shouldShowRecoveryActions({
     isRecoveryMessage,

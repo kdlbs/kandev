@@ -332,6 +332,24 @@ describe("ActionMessage — session recovery history", () => {
     expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
   });
 
+  it("keeps controls for an unstamped legacy row matching the current failure", () => {
+    const legacy = recoveryMessage(true);
+    legacy.content = "Agent encountered an error: The agent could not start.";
+    legacy.metadata = {
+      ...(legacy.metadata as Record<string, unknown>),
+      error_stamp: undefined,
+    };
+
+    renderAction(legacy, "WAITING_FOR_INPUT", "", undefined, {
+      last_agent_error: {
+        message: "The agent could not start.",
+        occurred_at: legacy.created_at,
+      },
+    });
+
+    expect(screen.getByTestId(RESUME_TEST_ID)).toBeTruthy();
+  });
+
   it("keeps the historical recovery entry after a successful resume settles back to waiting", async () => {
     const errorMsg = recoveryMessage(true);
 

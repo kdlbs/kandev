@@ -1,25 +1,30 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { TaskSharedError } from "./task-shared-error";
 
-const state = vi.hoisted(() => ({ isMobile: false }));
-const context = vi.hoisted(() => ({
-  taskId: "task-1",
-  workspaceId: "workspace-1",
-  statusSummary: {
-    revision: 4,
-    updated_at: "2026-09-14T10:00:00Z",
-    task_error: {
-      scope: "task" as const,
-      stamp: "task-error-1",
-      occurred_at: "2026-09-14T09:59:00Z",
-      preview: "The task could not be prepared.",
-      recovery_actions: ["retry_launch" as const],
+const { context, state, taskPreview } = vi.hoisted(() => {
+  const taskPreview = "The task could not be prepared.";
+  const state = { isMobile: false };
+  const context = {
+    taskId: "task-1",
+    workspaceId: "workspace-1",
+    statusSummary: {
+      revision: 4,
+      updated_at: "2026-09-14T10:00:00Z",
+      task_error: {
+        scope: "task" as const,
+        stamp: "task-error-1",
+        occurred_at: "2026-09-14T09:59:00Z",
+        preview: taskPreview,
+        recovery_actions: ["retry_launch" as const],
+      },
     },
-  },
-  repositories: [],
-}));
+    repositories: [],
+    claimTaskErrorAnnouncement: vi.fn((_stamp: string) => true),
+  };
+  return { context, state, taskPreview };
+});
 
 vi.mock("@/components/task/task-launch-error-context", () => ({
   useTaskLaunchErrorContext: () => context,
@@ -54,6 +59,11 @@ vi.mock("@kandev/ui/drawer", () => ({
 }));
 
 describe("TaskSharedError", () => {
+  beforeEach(() => {
+    context.claimTaskErrorAnnouncement.mockReset();
+    context.claimTaskErrorAnnouncement.mockReturnValue(true);
+  });
+
   afterEach(() => {
     cleanup();
   });
@@ -63,7 +73,9 @@ describe("TaskSharedError", () => {
     render(<TaskSharedError />);
 
     expect(screen.getByTestId("task-shared-error")).toBeTruthy();
-    expect(screen.getByText("The task could not be prepared.")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByTestId("task-shared-error-announcement").textContent).toContain(taskPreview);
+    expect(screen.getByText(taskPreview)).toBeTruthy();
     expect(screen.queryByTestId("task-shared-error-details-content")).toBeNull();
 
     fireEvent.click(screen.getByTestId("task-shared-error-details"));
@@ -80,5 +92,22 @@ describe("TaskSharedError", () => {
 
     fireEvent.click(screen.getByTestId("task-shared-error-details"));
     expect(screen.getByTestId("task-shared-error-details-content")).toBeTruthy();
+  });
+
+  it("announces a new task error stamp once across component remounts", () => {
+    let announcedStamp: string | null = null;
+    context.claimTaskErrorAnnouncement.mockImplementation((stamp: string) => {
+      if (announcedStamp === stamp) return false;
+      announcedStamp = stamp;
+      return true;
+    });
+
+    const first = render(<TaskSharedError />);
+    expect(screen.getByTestId("task-shared-error-announcement").textContent).toContain(taskPreview);
+    first.unmount();
+
+    render(<TaskSharedError />);
+    expect(screen.getByTestId("task-shared-error-announcement").textContent).toBe("");
+    expect(context.claimTaskErrorAnnouncement).toHaveBeenCalledTimes(2);
   });
 });

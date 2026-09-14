@@ -160,7 +160,7 @@ The shared repository can contain other edits. Do not revert unrelated changes.
 
 ## Results
 
-Complete on September 14, 2026. Normalized failures now carry explicit session or task scope. Task-owned errors are projected independently as `task_error`, preserve originating session correlation, and render once above task content. Baseline restoration and fallback derivation route explicit scope before applying legacy session-ID inference, so clearing task metadata also clears the task-owned active error without a session refresh. Desktop details use a dialog. Phone details use a safe-area-aware, internally scrolling drawer with touch-sized controls. Existing recovery guards and legacy sessionless task errors remain supported.
+Complete on September 14, 2026. Normalized failures now carry explicit session or task scope. Task-owned errors are projected independently as `task_error`, preserve originating session correlation, and render once above task content. Baseline restoration and fallback derivation route explicit scope before applying legacy session-ID inference, so clearing task metadata also clears the task-owned active error without a session refresh. The shared surface reads the live summary after hydration and emits one assertive announcement for each task and error stamp. Desktop details use a dialog. Phone details use a safe-area-aware, internally scrolling drawer with touch-sized controls and no nested top-bar padding. Existing recovery guards and legacy sessionless task errors remain supported.
 
 Validation passed:
 
@@ -169,3 +169,4 @@ Validation passed:
 - Frontend typecheck, lint, i18n checks, and Vite build passed.
 - Cold-projector clearing and composed-panel single-representation regressions passed.
 - Chromium and Mobile Chrome launch-recovery suites passed with 4 and 3 tests respectively.
+- The live-summary replacement, one-announcement remount, and mobile top-bar geometry regressions passed.

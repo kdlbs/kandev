@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import {
@@ -34,8 +34,22 @@ export function TaskSharedError({
   const context = useTaskLaunchErrorContext();
   const error = statusSummaryTaskError(context?.statusSummary);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const localAnnouncementStampRef = useRef<string | null>(null);
   const { isMobile } = useResponsiveBreakpoint();
   const { t } = useTranslation();
+  const launchNeedsAttention = t("task:launchNeedsAttention");
+  const errorStamp = error?.stamp ?? "";
+  const [announcement, setAnnouncement] = useState("");
+
+  useEffect(() => {
+    if (!context || !error || !errorStamp) return;
+    const shouldAnnounce = context.claimTaskErrorAnnouncement
+      ? context.claimTaskErrorAnnouncement(errorStamp)
+      : localAnnouncementStampRef.current !== errorStamp;
+    if (!shouldAnnounce) return;
+    localAnnouncementStampRef.current = errorStamp;
+    setAnnouncement(`${error.preview}. ${launchNeedsAttention}`);
+  }, [context, error, errorStamp, launchNeedsAttention]);
 
   if (!context || !error) return null;
 
@@ -56,7 +70,6 @@ export function TaskSharedError({
           isMobile && reserveMobileTopBar && "mt-[calc(3.5rem+env(safe-area-inset-top,0px))]",
         )}
         data-testid="task-shared-error"
-        role="alert"
       >
         <IconAlertTriangle
           className="mt-0.5 h-4 w-4 shrink-0 text-destructive"
@@ -64,7 +77,7 @@ export function TaskSharedError({
         />
         <div className="min-w-0 flex-1">
           <p className="text-sm font-medium text-destructive">{error.preview}</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">{t("task:launchNeedsAttention")}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{launchNeedsAttention}</p>
         </div>
         <Button
           type="button"
@@ -77,6 +90,14 @@ export function TaskSharedError({
           {t("task:showDetails")}
         </Button>
       </section>
+      <p
+        aria-atomic="true"
+        aria-live="assertive"
+        className="sr-only"
+        data-testid="task-shared-error-announcement"
+      >
+        {announcement}
+      </p>
 
       {isMobile ? (
         <Drawer open={detailsOpen} onOpenChange={setDetailsOpen} direction="bottom">
@@ -86,7 +107,7 @@ export function TaskSharedError({
           >
             <DrawerHeader>
               <DrawerTitle>{error.preview}</DrawerTitle>
-              <DrawerDescription>{t("task:launchNeedsAttention")}</DrawerDescription>
+              <DrawerDescription>{launchNeedsAttention}</DrawerDescription>
             </DrawerHeader>
             <div className="min-h-0 overflow-y-auto overscroll-contain px-4 pb-4" data-vaul-no-drag>
               {details}
@@ -98,7 +119,7 @@ export function TaskSharedError({
           <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{error.preview}</DialogTitle>
-              <DialogDescription>{t("task:launchNeedsAttention")}</DialogDescription>
+              <DialogDescription>{launchNeedsAttention}</DialogDescription>
             </DialogHeader>
             {details}
           </DialogContent>

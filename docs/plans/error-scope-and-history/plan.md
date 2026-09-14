@@ -43,14 +43,14 @@ The generic timeout label defect remains a separate diagnostic finding. This pac
 ## Technical approach
 
 Task 01 extends the existing fenced error admission and persisted message path.
-Keep one marker per session/stamp, preserve markers after resolution, and render recovery actions only on the current error.
+Keep one marker per session/stamp, preserve markers after resolution, and render recovery actions only on the current error. Bootstrap failures use the execution-fenced terminal commit and then create the same idempotent session message. If that accepted commit is followed by a transcript write failure, the executor retries the same message identity. Profile-specific pre-agent failures remain session-owned, while shared worktree failures use task scope, and Office sessions use the same history producer.
 Remove activity-based error filtering, active-session body hiding, and error-specific scroll placement across task Chat and Quick Chat.
 
 Task 02 adds explicit scope to normalized error metadata and exposes independent `TaskStatusSummary.task_error`.
 Project existing task metadata independently of session errors. Preserve aggregate `active_error` compatibility.
-Mount one shared task-shell alert with a desktop dialog or phone drawer. Retain existing action authorization and stamp guards.
+Mount one shared task-shell alert with a desktop dialog or phone drawer. Retain existing action authorization and stamp guards. Read the live status summary after hydration, announce each task error stamp once, and remove duplicate mobile top padding while retaining the outer task-shell offset.
 
-Task 03 proves recovery followed by new messages, pagination, reload, tab switching, mixed scopes, and mobile geometry.
+Task 03 proves recovery followed by new messages, pagination, reload, tab switching, mixed scopes, and mobile geometry. Its composed panel assertions count persisted recovery rows and provisional notices together, and legacy unstamped rows retain controls only when they match the current session error.
 Update public recovery guidance only after the behavior exists.
 
 ## ASCII UI preview
@@ -149,6 +149,7 @@ Use causal waits, not arbitrary sleeps. Rebuild through the managed runner.
 Implementation is complete. Session failures now remain chronological transcript entries with stamp-scoped controls. Task and workspace preparation failures now project independently to one task-shell surface above task tabs, with desktop dialog and phone drawer details.
 
 The review remediation is included in this completed package. Accepted bootstrap failures now write the same idempotent, safe session-history entry as other recoverable failures, including Office sessions. The panel keeps a provisional error notice only until its persisted message arrives. Status-summary restoration honors explicit task/session scope even when a task error carries an originating session ID. Recovery retirement uses a stamp-fenced write and publishes inactive state only after that write wins.
+The review fixup also makes bootstrap admission fail closed when an execution-fenced repository commit is unavailable, repairs an accepted terminal state after a transcript write error, and preserves profile-specific launch failures on their originating session. The shared task surface refreshes from the live summary, emits one assertive announcement per task and stamp, and avoids nested mobile top-bar spacing.
 
 Product verification on September 14:
 
@@ -164,6 +165,14 @@ Product verification on September 14:
 - Mobile Chrome launch-recovery E2E: 3 passed.
 - Public documentation validators and specification validators: passed.
 - `git diff --check`: passed.
+
+Review-fixup verification on September 14:
+
+- `go test ./internal/orchestrator -count=1`: passed.
+- The executor and status-summary package suites: passed.
+- The five affected frontend suites: 65 tests passed.
+- Frontend typecheck and lint: passed.
+- Frontend localization checks and Vite build: passed.
 
 The implementation changed production and permanent test files as required by the work orders. The provider timeout diagnosis and repair remain outside this package.
 

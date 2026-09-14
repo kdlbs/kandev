@@ -10,6 +10,8 @@ import type { Repository, RepositoryScript } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import type { Layout } from "react-resizable-panels";
 import { useTaskCanvasLifecycleActivation } from "./dockview-canvas-activation";
+import { statusSummaryTaskError } from "@/lib/task-status-summary";
+import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 
 // Re-export for backwards compatibility
 export type { SelectedDiff } from "@/hooks/use-session-layout-state";
@@ -73,6 +75,8 @@ export const TaskLayout = memo(function TaskLayout({
   taskCanvases = [],
 }: TaskLayoutProps) {
   const { isMobile, usesDesktopWorkbench, isFullDesktop } = useResponsiveBreakpoint();
+  const launchErrorContext = useTaskLaunchErrorContext();
+  const hasSharedTaskError = Boolean(statusSummaryTaskError(launchErrorContext?.statusSummary));
   useTaskCanvasLifecycleActivation({ taskId, workspaceId, isMobile });
   const router = useRouter();
   const onOpenCanvas = useCallback(
@@ -101,6 +105,7 @@ export const TaskLayout = memo(function TaskLayout({
         onTaskUnarchived={onTaskUnarchived}
         taskCanvases={taskCanvases}
         onOpenCanvas={onOpenCanvas}
+        hasSharedTaskError={hasSharedTaskError}
       />
     );
   }

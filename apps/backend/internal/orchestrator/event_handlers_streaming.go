@@ -1373,13 +1373,9 @@ func (s *Service) transitionBootstrapFailure(
 
 	committer, ok := s.repo.(bootstrapFailureCommitter)
 	if !ok {
-		changed, finalState, err := s.transitionTaskSessionState(
-			ctx, taskID, sessionID, models.TaskSessionStateFailed, errorValue.Message, nil,
+		return false, expectedState, fmt.Errorf(
+			"bootstrap failure requires an execution-fenced repository commit",
 		)
-		if changed && finalState == models.TaskSessionStateFailed {
-			s.persistBootstrapFailureMessage(ctx, taskID, sessionID, agentExecutionID, errorValue)
-		}
-		return changed, finalState, err
 	}
 	changed, updatedAt, err := committer.CommitBootstrapFailureIfCurrentExecution(
 		ctx,
@@ -1395,12 +1391,12 @@ func (s *Service) transitionBootstrapFailure(
 	}
 	refreshed, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		return false, models.TaskSessionStateFailed, fmt.Errorf("get session after bootstrap failure commit: %w", err)
+		return true, models.TaskSessionStateFailed, fmt.Errorf("get session after bootstrap failure commit: %w", err)
 	}
 	if refreshed == nil {
-		return false, models.TaskSessionStateFailed, fmt.Errorf("get session after bootstrap failure commit: session %q is nil", sessionID)
+		return true, models.TaskSessionStateFailed, fmt.Errorf("get session after bootstrap failure commit: session %q is nil", sessionID)
 	}
-	s.persistBootstrapFailureMessage(ctx, taskID, sessionID, agentExecutionID, errorValue)
+	messageErr := s.persistBootstrapFailureMessage(ctx, taskID, sessionID, agentExecutionID, errorValue)
 	authoritativeUpdatedAt := updatedAt.UTC()
 	s.publishAcceptedTaskSessionState(
 		ctx,
@@ -1412,6 +1408,9 @@ func (s *Service) transitionBootstrapFailure(
 		&authoritativeUpdatedAt,
 		refreshed,
 	)
+	if messageErr != nil {
+		return true, models.TaskSessionStateFailed, fmt.Errorf("persist bootstrap failure history: %w", messageErr)
+	}
 	return true, models.TaskSessionStateFailed, nil
 }
 
@@ -1422,11 +1421,11 @@ func (s *Service) persistBootstrapFailureMessage(
 	ctx context.Context,
 	taskID, sessionID, agentExecutionID string,
 	errorValue models.LastAgentError,
-) {
+) error {
 	if s.messageCreator == nil {
-		return
+		return fmt.Errorf("bootstrap failure message creator is unavailable")
 	}
-	s.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+	return s.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
 		TaskID:           taskID,
 		SessionID:        sessionID,
 		AgentExecutionID: agentExecutionID,

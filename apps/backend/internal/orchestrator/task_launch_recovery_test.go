@@ -221,6 +221,69 @@ func TestHandleLaunchFailedProjectsTaskErrorAndRetiresSessionMarker(t *testing.T
 	}
 }
 
+func TestHandleLaunchFailedKeepsProfileSpecificFailureOnSession(t *testing.T) {
+	repo := setupTestRepo(t)
+	const (
+		taskID    = "task-session-owned-launch-failure"
+		sessionID = "session-session-owned-launch-failure"
+	)
+	seedSession(t, repo, taskID, sessionID, "step1")
+	session, err := repo.GetTaskSession(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	session.AgentProfileID = "profile-specific"
+	if err := repo.UpdateTaskSession(context.Background(), session); err != nil {
+		t.Fatalf("UpdateTaskSession: %v", err)
+	}
+	lastError := models.LastAgentError{
+		Message:         "The agent could not start.",
+		OccurredAt:      time.Date(2026, 9, 14, 10, 30, 0, 0, time.UTC),
+		Scope:           models.ErrorScopeSession,
+		Code:            models.LaunchErrorCategoryGenericLaunchFailure,
+		Details:         "profile environment could not be resolved",
+		RecoveryActions: []string{models.RecoveryActionRetryLaunch},
+		StampValue:      "profile-specific-launch-failure",
+	}
+	if err := repo.SetSessionMetadataKey(
+		context.Background(), sessionID, models.SessionMetaKeyLastAgentError, lastError,
+	); err != nil {
+		t.Fatalf("SetSessionMetadataKey: %v", err)
+	}
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	svc.handleLaunchFailed(
+		context.Background(), taskID, sessionID, "repo-1", errors.New("profile env resolution failed"),
+	)
+
+	task, err := repo.GetTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if _, found := models.LoadTaskLaunchError(task.Metadata); found {
+		t.Fatal("profile-specific launch failure was incorrectly promoted to task scope")
+	}
+	updated, err := repo.GetTaskSession(context.Background(), sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession after launch failure: %v", err)
+	}
+	retained, found := models.LoadLastAgentError(updated.Metadata)
+	if !found || retained.IsDismissed() || retained.Stamp() != lastError.Stamp() {
+		t.Fatalf("session launch error = %#v, want active profile-specific marker", retained)
+	}
+	if updated.AgentProfileID != "profile-specific" {
+		t.Fatalf("session profile = %q, want profile-specific", updated.AgentProfileID)
+	}
+	if len(messages.sessionMessages) != 1 {
+		t.Fatalf("session recovery messages = %d, want 1", len(messages.sessionMessages))
+	}
+	if messages.sessionMessages[0].metadata["scope"] != models.ErrorScopeSession {
+		t.Fatalf("recovery message scope = %#v, want session", messages.sessionMessages[0].metadata["scope"])
+	}
+}
+
 func TestRecoverTaskLaunchRejectsStaleStampBeforeMutation(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedTaskLaunchRecoveryFixture(t, repo, "task-stale", "task-repo-stale", models.RecoveryActionPickBaseBranch)
