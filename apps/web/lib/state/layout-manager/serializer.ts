@@ -300,10 +300,20 @@ export function isCenterColumn(column: Pick<LayoutColumn, "id" | "groups">): boo
   );
 }
 
+/** Content panes retain their flexible sizing when tool tabs are merged into them. */
+function contextualPanel(column: Pick<LayoutColumn, "groups">): LayoutPanel | undefined {
+  return column.groups
+    .flatMap((group) => group.panels)
+    .find(
+      (panel) =>
+        panel.component === "plan" || panel.component === "browser" || panel.component === "vscode",
+    );
+}
+
 /** True when the column owns the standard right-side groups or column ID. */
 export function isRightColumn(column: Pick<LayoutColumn, "id" | "groups">): boolean {
   if (hasCanonicalRightIdentity(column)) return true;
-  if (isCenterColumn(column)) return false;
+  if (isCenterColumn(column) || contextualPanel(column)) return false;
   const groups = column.groups ?? [];
   return groups.some((group) => group.panels.some((panel) => RIGHT_PANEL_IDS.has(panel.id)));
 }
@@ -324,7 +334,7 @@ function inferColumnMeta(
 
   if (isRightColumn(column)) return { columnId: "right", isPinned: true };
 
-  const firstPanelId = groups[0].panels[0]?.id;
+  const firstPanelId = contextualPanel(column)?.id ?? groups[0].panels[0]?.id;
   if (firstPanelId) return { columnId: firstPanelId, isPinned: false };
 
   return { columnId: `col-${index}`, isPinned: false };

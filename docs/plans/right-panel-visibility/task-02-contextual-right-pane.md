@@ -312,3 +312,27 @@ existing `59.15625` pixel delta failure, while the LSP capacity-release test pas
 mobile file-viewer test passed one test in 13.1 seconds. No additional source fix was justified by these unrelated
 failures. The contextual right-pane unit, browser, typecheck, lint, localization, documentation, specification,
 and diff checks remain passed as recorded above.
+
+## Manual resize restoration follow-up (2026-09-14)
+
+A real Browser divider drag reproduced a 100-pixel width reset after hide/show.
+Preview inherited Files and Changes tabs from Default. Capture then classified
+that content pane as the pinned right sidebar and restored its default width.
+
+Capture now retains the flexible identity of Plan, Browser, and VS Code panes
+when they contain tool tabs. Canonical default right groups remain pinned,
+including when they contain a Browser tab. Reordering tool tabs does not change
+the content pane identity. This implements the existing width preservation
+requirement; toggle placement and phone navigation do not change.
+
+Validation:
+
+- Before the fix: Browser drag/toggle E2E failed with a 100-pixel width difference;
+  three serializer cases failed because content panes were classified as `right`.
+- After the fix: 130 tests passed across 10 affected unit files.
+- The full right-panel visibility Chromium file passed all 10 tests without retries.
+  The new Default, Plan, and Preview cases drag the real divider and compare widths
+  within two pixels across three hide/show cycles.
+- Web typecheck and focused ESLint passed. The serializer suite passed all 12
+  tests after test organization cleanup. The phone navigation regression passed
+  without retries (1 mobile-Chromium test).

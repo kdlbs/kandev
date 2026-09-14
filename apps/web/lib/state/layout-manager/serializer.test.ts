@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { DockviewApi } from "dockview-react";
 import { filterEphemeral, fromDockviewApi, toSerializedDockview } from "./serializer";
-import { panel, PROMPT_HISTORY_PANEL_ID, RIGHT_BOTTOM_GROUP, RIGHT_TOP_GROUP } from "./constants";
+import {
+  panel,
+  CENTER_GROUP,
+  PROMPT_HISTORY_PANEL_ID,
+  RIGHT_BOTTOM_GROUP,
+  RIGHT_TOP_GROUP,
+} from "./constants";
 import type { LayoutPanel, LayoutState } from "./types";
 
 const SESSION_PANEL_ID = "session:session-a";
@@ -24,7 +30,7 @@ function layoutWithPromptHistory(extraPanels: LayoutPanel[] = []): LayoutState {
         id: "center",
         groups: [
           {
-            id: "group-center",
+            id: CENTER_GROUP,
             panels: [panel(PROMPT_HISTORY_PANEL_ID), ...extraPanels],
           },
         ],
@@ -151,6 +157,68 @@ describe("fromDockviewApi — right-column ownership", () => {
       RIGHT_TOP_GROUP,
       RIGHT_BOTTOM_GROUP,
     ]);
+  });
+});
+
+describe("contextual pane width ownership", () => {
+  it.each(["browser", "plan", "vscode"])(
+    "keeps a %s pane unpinned after merging tool tabs",
+    (component) => {
+      const captured = fromDockviewApi(
+        makeCapturedApi([
+          [{ id: CENTER_GROUP, panels: [{ id: SESSION_PANEL_ID, component: "chat" }] }],
+          [
+            {
+              id: "group-1",
+              panels: [
+                { id: component, component },
+                { id: "files", component: "files" },
+                { id: "changes", component: "changes" },
+              ],
+            },
+          ],
+        ]),
+      );
+      expect(captured.columns[1]).toMatchObject({ id: component, width: 400 });
+      expect(captured.columns[1].pinned).toBeUndefined();
+    },
+  );
+
+  it("keeps canonical right groups pinned even with a Browser tab", () => {
+    const captured = fromDockviewApi(
+      makeCapturedApi([
+        [{ id: CENTER_GROUP, panels: [{ id: SESSION_PANEL_ID, component: "chat" }] }],
+        [
+          {
+            id: RIGHT_TOP_GROUP,
+            panels: [
+              { id: "browser", component: "browser" },
+              { id: "files", component: "files" },
+            ],
+          },
+        ],
+      ]),
+    );
+    expect(captured.columns[1]).toMatchObject({ id: "right", pinned: true });
+  });
+
+  it("recognizes a content pane after its tool tabs are reordered", () => {
+    const captured = fromDockviewApi(
+      makeCapturedApi([
+        [{ id: CENTER_GROUP, panels: [{ id: SESSION_PANEL_ID, component: "chat" }] }],
+        [
+          {
+            id: "group-1",
+            panels: [
+              { id: "files", component: "files" },
+              { id: "browser:custom", component: "browser" },
+            ],
+          },
+        ],
+      ]),
+    );
+    expect(captured.columns[1]).toMatchObject({ id: "browser:custom" });
+    expect(captured.columns[1].pinned).toBeUndefined();
   });
 });
 
