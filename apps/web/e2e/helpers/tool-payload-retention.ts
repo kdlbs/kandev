@@ -203,7 +203,8 @@ export async function runRetention(page: Page, touch = false) {
 }
 
 export async function expectTouchTarget(locator: Locator) {
-  await locator.scrollIntoViewIfNeeded();
+  // Center the control clear of the sticky settings header and Save bar.
+  await locator.evaluate((el) => el.scrollIntoView({ block: "center", behavior: "instant" }));
   const bounds = await locator.boundingBox();
   expect(bounds).not.toBeNull();
   expect(bounds!.height).toBeGreaterThanOrEqual(44);

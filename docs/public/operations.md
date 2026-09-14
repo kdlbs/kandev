@@ -376,22 +376,22 @@ To disable automatic deletion:
 3. Select **Save changes**.
 4. Check the retention status. It must show that deletion is disabled.
 
-## Tool payload cleanup
+## Messages compaction
 
 Open **Settings > System > Data & Logs** to reduce old tool details in a SQLite
-database. **Tool payload cleanup** is independent of Office run history retention
+database. **Messages compaction** is independent of Office run history retention
 and is disabled by default. The initial period is three calendar months.
 
 1. Set **Tasks inactive for** to whole weeks or calendar months.
 2. Select **Analyze savings** to estimate the reduction before enabling cleanup.
    Analysis is optional and does not remove message payloads.
-3. Select **Enable automatic cleanup**.
+3. Select **Automatic compaction**.
 4. Choose **Create backup (recommended)** or **Continue without backup**.
 5. Select **Save changes**. A selected backup must finish verification before
    cleanup starts. If preparation fails, retry it or cancel preparation.
 
-The first cleanup starts after preparation. Later checks run daily while the
-backend is running. **Run cleanup now** uses the saved policy. Disabling cleanup
+The first cleanup starts after preparation. Later checks run every 24 hours while the
+backend is running. **Compact messages now** uses the saved policy. Disabling cleanup
 stops later batches, but does not restore details already removed.
 
 Activity includes task and session updates and conversation messages. Renaming

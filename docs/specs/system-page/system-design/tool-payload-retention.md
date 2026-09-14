@@ -258,14 +258,19 @@ handling, job status, backup list, and `useIsAdmin` conventions.
 Saving an enablement draft requires an explicit inline backup choice. A save
 with pending backup means 'Preparing', not 'Enabled'. Disable is always available.
 
-Control order: description, enabled switch, age, Analyze, estimate, first-cleanup
-review, then last/next cleanup and Run cleanup now. Backups and compaction remain
+The card is titled Messages compaction. Control order: description, compact age
+controls and Analyze savings, estimate, Automatic compaction switch, backup
+review, then last/next run and Compact messages now. Place the switch beside its
+label. Show the 24-hour check frequency and that Kandev must be running. Keep
+scan counts, skipped reasons, and scan windows in expandable analysis/run
+details; show outcomes, timestamps, partial results, and errors outside them.
+Bound the card width on desktop. Backups and database compaction remain
 reachable in their existing sections. Do not expose batch limits or SQL paths.
 The [plan previews](../../../plans/tool-payload-retention/plan.md#ascii-ui-preview)
 define desktop/phone structure and material states.
 
-Use the existing settings route scroll owner. Phones stack the age controls and
-actions, with 44px touch targets and safe-area clearance for the shared Save bar.
+Use the existing settings route scroll owner. Phones keep the number and unit side by side, with the
+analysis action below them. Use 44px touch targets and safe-area clearance for the shared Save bar.
 No nested dialogs or hover-only actions. Errors use focusable inline summaries.
 Use `t()` for all states in en, pt-pt, zh-cn, zh-hk, and zh-tw.
 

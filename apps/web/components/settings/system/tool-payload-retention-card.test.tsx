@@ -143,7 +143,7 @@ it("shows unsupported engine capability and prevents mutations", async () => {
 
 it("activates the switch through its visible touch label", async () => {
   await open();
-  fireEvent.click(screen.getByText("Enable automatic cleanup"));
+  fireEvent.click(screen.getByText("Automatic compaction"));
   expect(screen.getByTestId(ENABLED_TEST_ID).getAttribute("aria-checked")).toBe("true");
   expect(contributor.canSave).toBe(false);
 });

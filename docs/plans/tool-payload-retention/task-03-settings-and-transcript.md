@@ -168,3 +168,37 @@ and removed-detail transcript rendering. Office retention remains independent.
   Phone flows cover 320px and 390px, touch targets, and horizontal overflow.
 - Member/admin browser tests exercise both system routes and server-side denial
   of retention analysis and mutations. Final browser totals are in the plan.
+
+## Approved UX refinement (implemented)
+
+This refinement supersedes the earlier layout previews. Messages compaction
+uses the existing shared Save changes/Discard controls and explicit backup
+consent; the automatic schedule is unchanged.
+
+Desktop (bounded card width):
+
+```text
+Messages compaction
+Remove old tool inputs and outputs; keep message metadata.
+Tasks inactive for [3] [Months v] [Analyze savings]
+Analysis outcome and timestamp
+> Analysis details
+------------------------------------------------------
+[off] Automatic compaction
+Checks every 24 hours while Kandev is running.
+First run starts after backup preparation.
+[Backup choice appears here when enabling]
+Last run: <status and time>   > Run details
+Next check: <time or Disabled>
+[Compact messages now]
+Space reuse and database file compaction explanation
+```
+
+Phone: number and unit remain adjacent; Analyze savings takes its own full-width
+row. Controls and disclosure summaries have 44px touch targets. The existing
+settings page owns scrolling and the shared Save bar. Partial results, stale
+estimates, and errors remain visible outside collapsed details.
+
+Validation: focused component/hook tests, desktop backup/skip flows, and phone
+flows at 320px and 390px, including disclosure and control geometry checks.
+User requested no commit.

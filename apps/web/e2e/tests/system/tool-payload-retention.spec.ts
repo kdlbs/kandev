@@ -33,8 +33,22 @@ test.describe("Tool payload retention", () => {
       try {
         await page.goto(RETENTION_ROUTE);
         await expect(page.getByTestId("tool-payload-enabled")).not.toBeChecked();
+        const age = await page.getByTestId("tool-payload-age").boundingBox();
+        const unit = await page.getByTestId("tool-payload-unit").boundingBox();
+        expect(age!.width).toBeLessThanOrEqual(90);
+        expect(unit!.width).toBeLessThanOrEqual(140);
+        expect(Math.abs(age!.y - unit!.y)).toBeLessThan(2);
+        const toggle = await page.getByTestId("tool-payload-enabled").boundingBox();
+        const label = await page.getByText("Automatic compaction", { exact: true }).boundingBox();
+        expect(label!.x - toggle!.x - toggle!.width).toBeLessThanOrEqual(12);
+        await expect(
+          page.getByText("Checks every 24 hours while Kandev is running."),
+        ).toBeVisible();
         await expect(page.getByTestId("tool-payload-run")).toBeDisabled();
         await analyzeRetention(page);
+        await page.getByTestId("tool-payload-retention-card").screenshot({
+          path: `/tmp/compaction-desktop-${choice}.png`,
+        });
         const analyzed = await retentionStatus(page);
         expect(analyzed.policy.enabled).toBe(false);
         expect(analyzed.last_analysis?.eligible_messages).toBeGreaterThanOrEqual(1);

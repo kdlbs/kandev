@@ -31,7 +31,21 @@ test.describe("Tool payload retention on phones", () => {
           await expectTouchTarget(page.getByTestId(id));
         }
         await expectTouchTarget(page.locator('label[for="tool-payload-enabled"]'));
+        await expect(
+          page.getByText("Checks every 24 hours while Kandev is running."),
+        ).toBeVisible();
+        const ageBox = await page.getByTestId("tool-payload-age").boundingBox();
+        const unitBox = await page.getByTestId("tool-payload-unit").boundingBox();
+        expect(Math.abs(ageBox!.y - unitBox!.y)).toBeLessThan(2);
         await analyzeRetention(page, true);
+        await page.getByTestId("tool-payload-retention-card").screenshot({
+          path: `/tmp/compaction-mobile-${width}.png`,
+        });
+        const details = page.getByTestId("tool-payload-estimate").locator("details");
+        await expect(details).not.toHaveAttribute("open");
+        await details.locator("summary").tap();
+        await expect(details).toHaveAttribute("open");
+        await details.locator("summary").tap();
         await page.getByTestId("tool-payload-age").fill("26");
         await page.getByTestId("tool-payload-unit").tap();
         await page.getByRole("option", { name: "Weeks", exact: true }).tap();

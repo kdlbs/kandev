@@ -11,6 +11,7 @@ import { useToolPayloadRetentionDraft } from "@/hooks/domains/system/use-tool-pa
 import { SYSTEM_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/system";
 import { ApiError } from "@/lib/api/client";
 import {
+  ToolPayloadAutomation,
   ToolPayloadBackupReview,
   ToolPayloadRetentionFields,
 } from "./tool-payload-retention-fields";
@@ -171,26 +172,33 @@ function RetentionContent({
     <>
       {!status.supported && <p>{t("system:toolPayload.unsupported")}</p>}
       {!admin && <p>{t("system:toolPayload.adminOnly")}</p>}
-      <ToolPayloadRetentionFields model={model} pending={remote.pending} />
-      <Button
-        variant="outline"
-        className={settingsActionClassName("w-full cursor-pointer md:w-auto")}
-        data-testid="tool-payload-analyze"
-        disabled={!model.canEdit || model.invalid || remote.active || remote.pending}
-        onClick={() => act(remote.analyze(draft.age))}
-      >
-        {t("system:toolPayload.analyze")}
-      </Button>
+      <div className="flex flex-col gap-3 md:flex-row md:items-center">
+        <ToolPayloadRetentionFields model={model} pending={remote.pending} />
+        <Button
+          variant="outline"
+          className={settingsActionClassName("w-full cursor-pointer md:w-auto")}
+          data-testid="tool-payload-analyze"
+          disabled={!model.canEdit || model.invalid || remote.active || remote.pending}
+          onClick={() => act(remote.analyze(draft.age))}
+        >
+          {t("system:toolPayload.analyze")}
+        </Button>
+      </div>
+      <p id="tool-payload-age-help" className="text-xs text-muted-foreground">
+        {t("system:toolPayload.ageHelp")}
+      </p>
       <div role="status" aria-live="polite" className="space-y-3">
         {(remote.pending || remote.acceptedId) && (
           <p className="text-sm">{t("system:toolPayload.pending")}</p>
         )}
         <ToolPayloadAnalysis status={status} age={draft.age} />
       </div>
+      <ToolPayloadAutomation model={model} pending={remote.pending} />
       <ToolPayloadBackupReview model={model} pending={remote.pending} />
       <Preparation remote={remote} canEdit={model.canEdit} dirty={model.dirty} />
       <ToolPayloadRetentionResults status={status} />
       <CleanupActions remote={remote} model={model} />
+      <p className="text-xs text-muted-foreground">{t("system:toolPayload.compactionHelp")}</p>
     </>
   );
 }
@@ -203,7 +211,7 @@ export function ToolPayloadRetentionCard() {
     <SettingsCard
       discoveryTargetId={SYSTEM_SETTINGS_TARGETS.toolPayloadRetention}
       data-testid="tool-payload-retention-card"
-      className="min-w-0"
+      className="min-w-0 max-w-3xl"
     >
       <SettingsCardHeader
         title={t("system:toolPayload.title")}

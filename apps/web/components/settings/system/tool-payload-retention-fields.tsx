@@ -14,25 +14,11 @@ export function ToolPayloadRetentionFields({ model, pending }: { model: Draft; p
   const disabled = !canEdit || pending;
   return (
     <>
-      <label
-        className="flex min-h-7 cursor-pointer items-center justify-between gap-4 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
-        htmlFor="tool-payload-enabled"
-      >
-        <span>{t("system:toolPayload.enabled")}</span>
-        <Switch
-          id="tool-payload-enabled"
-          data-testid="tool-payload-enabled"
-          checked={draft.enabled}
-          disabled={disabled}
-          className="cursor-pointer"
-          onCheckedChange={(enabled) => model.setEnabled(enabled)}
-        />
-      </label>
-      <div className="space-y-2">
+      <div className="flex flex-col gap-2 md:flex-row md:flex-wrap md:items-center">
         <label htmlFor="tool-payload-age" className="text-sm font-medium">
           {t("system:toolPayload.age")}
         </label>
-        <div className="grid min-w-0 grid-cols-1 gap-2 md:grid-cols-2">
+        <div className="flex min-w-0 items-center gap-2">
           <Input
             id="tool-payload-age"
             data-testid="tool-payload-age"
@@ -43,7 +29,7 @@ export function ToolPayloadRetentionFields({ model, pending }: { model: Draft; p
             disabled={disabled}
             aria-invalid={model.invalid}
             aria-describedby="tool-payload-age-help"
-            className={settingsControlClassName()}
+            className={settingsControlClassName("w-20 shrink-0")}
             onChange={(e) =>
               setDraft({ ...draft, age: { ...draft.age, value: Number(e.target.value) } })
             }
@@ -59,7 +45,7 @@ export function ToolPayloadRetentionFields({ model, pending }: { model: Draft; p
             <SelectTrigger
               aria-label={t("system:toolPayload.unit")}
               data-testid="tool-payload-unit"
-              className={settingsControlClassName("w-full cursor-pointer")}
+              className={settingsControlClassName("w-32 cursor-pointer")}
             >
               <SelectValue />
             </SelectTrigger>
@@ -69,9 +55,6 @@ export function ToolPayloadRetentionFields({ model, pending }: { model: Draft; p
             </SelectContent>
           </Select>
         </div>
-        <p id="tool-payload-age-help" className="text-xs text-muted-foreground">
-          {t("system:toolPayload.ageHelp")}
-        </p>
         {model.invalid && (
           <p role="alert" className="text-sm text-destructive">
             {t("system:toolPayload.invalidAge")}
@@ -79,6 +62,32 @@ export function ToolPayloadRetentionFields({ model, pending }: { model: Draft; p
         )}
       </div>
     </>
+  );
+}
+export function ToolPayloadAutomation({ model, pending }: { model: Draft; pending: boolean }) {
+  const { t } = useTranslation();
+  const { draft, canEdit } = model;
+  if (!draft) return null;
+  const disabled = !canEdit || pending;
+  return (
+    <div className="space-y-1 border-t pt-4">
+      <label
+        className="flex min-h-7 cursor-pointer items-center gap-2 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+        htmlFor="tool-payload-enabled"
+      >
+        <Switch
+          id="tool-payload-enabled"
+          data-testid="tool-payload-enabled"
+          checked={draft.enabled}
+          disabled={disabled}
+          className="cursor-pointer"
+          onCheckedChange={(enabled) => model.setEnabled(enabled)}
+        />
+        <span>{t("system:toolPayload.enabled")}</span>
+      </label>
+      <p className="text-xs text-muted-foreground">{t("system:toolPayload.schedule")}</p>
+      <p className="text-xs text-muted-foreground">{t("system:toolPayload.firstRun")}</p>
+    </div>
   );
 }
 export function ToolPayloadBackupReview({ model, pending }: { model: Draft; pending: boolean }) {
