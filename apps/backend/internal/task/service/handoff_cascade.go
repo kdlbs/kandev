@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	orchmodels "github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
 )
 
 type workspaceEnvironmentRepository interface {
@@ -558,13 +559,21 @@ func (s *HandoffService) transferWorkspaceGroupEnvironmentOwnership(
 		return nil, fmt.Errorf("preserve workspace group %s: task environment repository unavailable", group.ID)
 	}
 	env, err := environments.GetTaskEnvironment(ctx, group.MaterializedEnvironmentID)
+	// A positively absent environment carries no ownership, so there is nothing
+	// to transfer and the caller may proceed. Absence must come from the typed
+	// sentinel or a nil row returned with a nil error: any other failure is an
+	// uncertain signal and stays fatal, so ownership is never abandoned on a
+	// transient error. Skipping the transfer is not evidence that the group's
+	// physical resources are gone and never authorizes teardown.
+	if errors.Is(err, repository.ErrTaskEnvironmentNotFound) {
+		return nil, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("load materialized environment %s for workspace group %s: %w",
 			group.MaterializedEnvironmentID, group.ID, err)
 	}
 	if env == nil {
-		return nil, fmt.Errorf("materialized environment %s for workspace group %s not found",
-			group.MaterializedEnvironmentID, group.ID)
+		return nil, nil
 	}
 	if _, leaving := departing[env.TaskID]; !leaving {
 		return nil, nil

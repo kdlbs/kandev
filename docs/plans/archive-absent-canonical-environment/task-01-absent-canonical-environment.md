@@ -1,7 +1,7 @@
 ---
 id: "01-absent-canonical-environment"
 title: "Tolerate an absent canonical environment on archive"
-status: pending
+status: in_progress
 wave: 1
 depends_on: []
 plan: "plan.md"
