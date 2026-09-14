@@ -109,14 +109,14 @@ async function getQuorumGuards(
   apiClient: { rawRequest: (method: string, path: string) => Promise<Response> },
   workspaceId: string,
   taskId: string,
-): Promise<Array<{ role: string; satisfied: boolean; reason?: string }>> {
+): Promise<Array<{ role: string; required_count: number; satisfied: boolean; reason?: string }>> {
   const res = await apiClient.rawRequest(
     "GET",
     `/api/v1/office/workspaces/${workspaceId}/tasks/${taskId}/quorum`,
   );
   expect(res.ok).toBe(true);
   const body = (await res.json()) as {
-    guards: Array<{ role: string; satisfied: boolean; reason?: string }>;
+    guards: Array<{ role: string; required_count: number; satisfied: boolean; reason?: string }>;
   };
   return body.guards;
 }
@@ -215,11 +215,20 @@ test.describe("Office workflow quorum-guarded transitions", () => {
 
     // AC-25: the Review step's guard is unsatisfied (reviewer has not
     // decided yet), so the diagnostic read reports one awaiting entry.
+    //
+    // AC-OFFICE-SEAT-PROVENANCE-006.1/-006.2: the guard must require
+    // exactly one decision. That count is the operator-visible consequence
+    // of the claim above — a registration that added a second seat instead
+    // of claiming the cast one leaves the role reading "reviewer" and the
+    // listing arguably explicable, and shows up only here, as a gate that
+    // silently never fires because it is waiting on two decisions a single
+    // reviewer can never supply.
     await expect
-      .poll(
-        async () => (await getQuorumGuards(apiClient, officeSeed.workspaceId, task.id))[0]?.role,
-      )
-      .toBe("reviewer");
+      .poll(async () => {
+        const guard = (await getQuorumGuards(apiClient, officeSeed.workspaceId, task.id))[0];
+        return guard && { role: guard.role, requiredCount: guard.required_count };
+      })
+      .toEqual({ role: "reviewer", requiredCount: 1 });
 
     // AC-25 UI presentation: the badge renders the awaiting state.
     await testPage.goto(`/office/tasks/${task.id}`);

@@ -62,6 +62,7 @@ func TestWebSocketCatalogContainsOnlyAuthorizedGitLabActions(t *testing.T) {
 	authorized := map[string]bool{
 		"ActionGitLabCheckSessionMR":          true,
 		"ActionGitLabTaskMRUpdated":           true,
+		"ActionGitLabTaskMRDeleted":           true,
 		"ActionGitLabTaskMRAutomationUpdated": true,
 	}
 	_, sourceFile, _, ok := runtime.Caller(0)

@@ -149,6 +149,12 @@ export const defaultUIState: UISliceState = {
     tabOrderByWorkspace: {},
     tabOrderSyncErrorByWorkspace: {},
     tabOrderSyncPendingByWorkspace: {},
+    rememberedSelectionByWorkspace: {},
+    rememberedSelectionOrder: [],
+    selectionStorageIdentity: null,
+    selectionReadyByWorkspace: {},
+    selectionRevisionByWorkspace: {},
+    pendingOpen: null,
   },
   sessionFailureNotification: null,
   taskDeletedNotification: null,
@@ -385,7 +391,7 @@ export const createUISlice: StateCreator<UISlice, [["zustand/immer", never]], []
   ...buildDismissedAgentErrors(set),
   ...buildNotificationActions(set),
   ...buildQuickTerminalActions(set),
-  ...buildQuickChatActions(set),
+  ...buildQuickChatActions(set, get),
   setRightPanelActiveTab: (sessionId, tab) =>
     set((draft) => {
       draft.rightPanel.activeTabBySessionId[sessionId] = tab;

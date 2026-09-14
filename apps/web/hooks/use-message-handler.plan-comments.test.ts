@@ -204,6 +204,34 @@ describe("useMessageHandler queued plan comments", () => {
   });
 });
 
+describe("useMessageHandler ordinary queue admission", () => {
+  it("passes a stable admission ID for ordinary queued messages", async () => {
+    selectedSession("WAITING_FOR_INPUT");
+    const { result } = renderHook(() =>
+      useMessageHandler({
+        resolvedSessionId: SESSION_ID,
+        taskId: TASK_ID,
+        sessionModel: null,
+        activeModel: null,
+        hasPendingClarification: true,
+      }),
+    );
+
+    await act(async () => {
+      await result.current.handleSendMessage({ message: "Keep this queued" });
+    });
+
+    expect(queueMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: TASK_ID,
+        content: "Keep this queued",
+        clientQueueId: expect.any(String),
+      }),
+    );
+    expect(queueMock.mock.calls[0]?.[0]?.planCommentRefs).toBeUndefined();
+  });
+});
+
 describe("useMessageHandler plan comment retries", () => {
   it("reuses an unresolved queue admission ID on manual retry", async () => {
     selectedSession("RUNNING", "generating");

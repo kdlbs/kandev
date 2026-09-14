@@ -6,15 +6,15 @@ wave: 1
 depends_on: []
 plan: "plan.md"
 requirements:
-  - REQ-TASKS-RUNTIME-CLEANUP-001
+  - REQ-TASKS-MANAGED-BRANCH-COMPACTION-001
 acceptance_criteria:
-  - AC-TASKS-RUNTIME-CLEANUP-001.18
-  - AC-TASKS-RUNTIME-CLEANUP-001.19
-  - AC-TASKS-RUNTIME-CLEANUP-001.20
-  - AC-TASKS-RUNTIME-CLEANUP-001.21
-  - AC-TASKS-RUNTIME-CLEANUP-001.22
+  - AC-TASKS-MANAGED-BRANCH-COMPACTION-001.1
+  - AC-TASKS-MANAGED-BRANCH-COMPACTION-001.2
+  - AC-TASKS-MANAGED-BRANCH-COMPACTION-001.3
+  - AC-TASKS-MANAGED-BRANCH-COMPACTION-001.4
+  - AC-TASKS-MANAGED-BRANCH-COMPACTION-001.5
 system_design:
-  - ../../specs/tasks/system-design/runtime-cleanup.md
+  - ../../specs/tasks/system-design/managed-branch-compaction.md
 ---
 
 # Task 01: Implement Safe Managed-Branch Compaction and Recovery
@@ -77,8 +77,8 @@ git diff --check origin/main...HEAD
 - `apps/backend/internal/worktree/`
 - `docs/decisions/2026-08-30-compact-integrated-managed-branches.md`
 - `docs/public/`
-- `docs/specs/tasks/requirements/runtime-cleanup.md`
-- `docs/specs/tasks/system-design/runtime-cleanup.md`
+- `docs/specs/tasks/requirements/managed-branch-compaction.md`
+- `docs/specs/tasks/system-design/managed-branch-compaction.md`
 
 ## Dependencies
 
@@ -95,8 +95,8 @@ None.
 
 ## Inputs
 
-- REQ-TASKS-RUNTIME-CLEANUP-001 and AC-TASKS-RUNTIME-CLEANUP-001.18 through
-  AC-TASKS-RUNTIME-CLEANUP-001.22.
+- REQ-TASKS-MANAGED-BRANCH-COMPACTION-001 and AC-TASKS-MANAGED-BRANCH-COMPACTION-001.1 through
+  AC-TASKS-MANAGED-BRANCH-COMPACTION-001.5.
 - Task runtime-cleanup system design and the managed-branch compaction ADR.
 - Existing worktree manager locking, task cleanup, and storage-maintenance
   patterns.

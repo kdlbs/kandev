@@ -2,9 +2,9 @@
 created: 2026-09-14
 status: implemented
 requirements:
-  - REQ-TASKS-RUNTIME-CLEANUP-001
+  - REQ-TASKS-MANAGED-BRANCH-COMPACTION-001
 system_design:
-  - ../../specs/tasks/system-design/runtime-cleanup.md
+  - ../../specs/tasks/system-design/managed-branch-compaction.md
 legacy_specs: []
 ---
 
@@ -56,17 +56,17 @@ supports idempotent retry across interruptions.
 
 ## Tests
 
-- AC-TASKS-RUNTIME-CLEANUP-001.18: cleanup policy tests cover managed ownership,
+- AC-TASKS-MANAGED-BRANCH-COMPACTION-001.1: cleanup policy tests cover managed ownership,
   ambiguous/legacy/external/shared rows, liveness, protected refs, integration,
   and concurrent cleanup.
-- AC-TASKS-RUNTIME-CLEANUP-001.19: cleanup, archived maintenance, GC reachability,
+- AC-TASKS-MANAGED-BRANCH-COMPACTION-001.2: cleanup, archived maintenance, GC reachability,
   recreate, and `RecoverBranchStatus` tests prove exact restoration and
   interruption-safe recovery finalization.
-- AC-TASKS-RUNTIME-CLEANUP-001.20: command-boundary tests prove one explicit
+- AC-TASKS-MANAGED-BRANCH-COMPACTION-001.3: command-boundary tests prove one explicit
   local expected-head deletion and retention on head races.
-- AC-TASKS-RUNTIME-CLEANUP-001.21: receipt and metrics tests cover fixed reason
+- AC-TASKS-MANAGED-BRANCH-COMPACTION-001.4: receipt and metrics tests cover fixed reason
   labels and deduplicated counts.
-- AC-TASKS-RUNTIME-CLEANUP-001.22: archived maintenance tests cover bounded
+- AC-TASKS-MANAGED-BRANCH-COMPACTION-001.5: archived maintenance tests cover bounded
   selection, archive/session races, later integration, idempotency, and live-ref
   restoration.
 

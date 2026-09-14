@@ -424,6 +424,7 @@ func TestRegisterGitHandlers(t *testing.T) {
 	actions := []string{
 		ws.ActionWorktreePull,
 		ws.ActionWorktreePush,
+		ws.ActionWorktreeContributionHistoryExplanation,
 		ws.ActionWorktreeRebase,
 		ws.ActionWorktreeMerge,
 		ws.ActionWorktreeAbort,

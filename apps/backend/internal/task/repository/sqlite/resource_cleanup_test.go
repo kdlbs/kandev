@@ -68,6 +68,134 @@ func TestTaskResourceCleanupJobClaimAndRetry(t *testing.T) {
 	}
 }
 
+func TestCancelTaskResourceCleanupJobIfPendingDoesNotOverwriteRunningClaims(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForHealTests(t)
+	pending := &models.TaskResourceCleanupJob{
+		ID: "job-cancel-pending", OperationID: "archive:pending", TaskID: "task-cancel-pending",
+		Trigger: models.TaskResourceCleanupTriggerCascadeArchive,
+		State:   models.TaskResourceCleanupStatePending, ResourceSnapshot: `{}`,
+	}
+	running := &models.TaskResourceCleanupJob{
+		ID: "job-cancel-running", OperationID: "archive:running", TaskID: "task-cancel-running",
+		Trigger: models.TaskResourceCleanupTriggerCascadeArchive,
+		State:   models.TaskResourceCleanupStateRunning, ResourceSnapshot: `{}`,
+	}
+	for _, job := range []*models.TaskResourceCleanupJob{pending, running} {
+		if err := repo.CreateTaskResourceCleanupJob(ctx, job); err != nil {
+			t.Fatalf("CreateTaskResourceCleanupJob(%s): %v", job.ID, err)
+		}
+	}
+
+	cancelled, err := repo.CancelTaskResourceCleanupJobIfPending(ctx, pending.ID)
+	if err != nil || !cancelled {
+		t.Fatalf("pending cancellation = %v, %v; want true", cancelled, err)
+	}
+	cancelled, err = repo.CancelTaskResourceCleanupJobIfPending(ctx, pending.ID)
+	if err != nil || cancelled {
+		t.Fatalf("second pending cancellation = %v, %v; want false", cancelled, err)
+	}
+	cancelled, err = repo.CancelTaskResourceCleanupJobIfPending(ctx, running.ID)
+	if err != nil || cancelled {
+		t.Fatalf("running cancellation = %v, %v; want false", cancelled, err)
+	}
+	got, err := repo.GetTaskResourceCleanupJob(ctx, running.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.State != models.TaskResourceCleanupStateRunning {
+		t.Fatalf("running state = %q, want running", got.State)
+	}
+}
+
+func TestRestoreCancelledTaskResourceCleanupJobIfUnchangedFencesNewerClaim(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForHealTests(t)
+	job := &models.TaskResourceCleanupJob{
+		ID: "job-restore", OperationID: "archive:restore", TaskID: "task-restore",
+		Trigger: models.TaskResourceCleanupTriggerCascadeArchive,
+		State:   models.TaskResourceCleanupStateCancelled, Attempts: 3, ResourceSnapshot: `{}`,
+	}
+	if err := repo.CreateTaskResourceCleanupJob(ctx, job); err != nil {
+		t.Fatalf("CreateTaskResourceCleanupJob: %v", err)
+	}
+
+	restored, err := repo.RestoreCancelledTaskResourceCleanupJobIfUnchanged(ctx, job.ID, 3, "unknown")
+	if err != nil || !restored {
+		t.Fatalf("first restore = %v, %v; want true", restored, err)
+	}
+	got, err := repo.GetTaskResourceCleanupJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("GetTaskResourceCleanupJob after restore: %v", err)
+	}
+	if got.State != models.TaskResourceCleanupStatePrepared || got.LastError != "unknown" || got.CompletedAt != nil {
+		t.Fatalf("restored job = %+v, want prepared with open completion", got)
+	}
+
+	started, err := repo.StartPreparedTaskResourceCleanupJob(ctx, job.ID)
+	if err != nil || !started {
+		t.Fatalf("start restored job = %v, %v; want true", started, err)
+	}
+	claimed, err := repo.MarkTaskResourceCleanupJobRunning(ctx, job.ID)
+	if err != nil || !claimed {
+		t.Fatalf("claim restored job = %v, %v; want true", claimed, err)
+	}
+
+	restored, err = repo.RestoreCancelledTaskResourceCleanupJobIfUnchanged(ctx, job.ID, 3, "stale")
+	if err != nil {
+		t.Fatalf("stale restore: %v", err)
+	}
+	if restored {
+		t.Fatal("stale restore succeeded after a newer claim")
+	}
+	got, err = repo.GetTaskResourceCleanupJob(ctx, job.ID)
+	if err != nil {
+		t.Fatalf("GetTaskResourceCleanupJob after stale restore: %v", err)
+	}
+	if got.State != models.TaskResourceCleanupStateRunning || got.Attempts != 4 || got.LastError == "stale" {
+		t.Fatalf("newer claim was overwritten: %+v", got)
+	}
+}
+
+func TestCancelArchiveTaskResourceCleanupJobsLeavesRunningClaims(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForHealTests(t)
+	for _, job := range []*models.TaskResourceCleanupJob{
+		{
+			ID: "job-broad-pending", OperationID: "archive:broad-pending", TaskID: "task-broad",
+			Trigger: models.TaskResourceCleanupTriggerCascadeArchive,
+			State:   models.TaskResourceCleanupStatePending, ResourceSnapshot: `{}`,
+		},
+		{
+			ID: "job-broad-running", OperationID: "archive:broad-running", TaskID: "task-broad",
+			Trigger: models.TaskResourceCleanupTriggerCascadeArchive,
+			State:   models.TaskResourceCleanupStateRunning, ResourceSnapshot: `{}`,
+		},
+	} {
+		if err := repo.CreateTaskResourceCleanupJob(ctx, job); err != nil {
+			t.Fatalf("CreateTaskResourceCleanupJob(%s): %v", job.ID, err)
+		}
+	}
+
+	if err := repo.CancelArchiveTaskResourceCleanupJobs(ctx, "task-broad"); err != nil {
+		t.Fatalf("CancelArchiveTaskResourceCleanupJobs: %v", err)
+	}
+	pending, err := repo.GetTaskResourceCleanupJob(ctx, "job-broad-pending")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending.State != models.TaskResourceCleanupStateCancelled {
+		t.Fatalf("pending state = %q, want cancelled", pending.State)
+	}
+	running, err := repo.GetTaskResourceCleanupJob(ctx, "job-broad-running")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if running.State != models.TaskResourceCleanupStateRunning {
+		t.Fatalf("running state = %q, want running", running.State)
+	}
+}
+
 func TestListPreparedTaskResourceCleanupJobsExcludesRunnableStates(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepoForHealTests(t)
@@ -128,49 +256,6 @@ func TestHasActiveTaskResourceCleanupJobTracksAdmissionStates(t *testing.T) {
 				t.Fatalf("active = %v, want %v", active, tt.active)
 			}
 		})
-	}
-}
-
-func TestTaskResourceCleanupJobStaleClaimCannotOverwriteCancellation(t *testing.T) {
-	ctx := context.Background()
-	repo := newRepoForHealTests(t)
-	job := &models.TaskResourceCleanupJob{
-		ID: "job-cancel-race", OperationID: "archive:cancel-race", TaskID: "task-cancel-race",
-		Trigger: models.TaskResourceCleanupTriggerArchive,
-		State:   models.TaskResourceCleanupStatePending, ResourceSnapshot: `{"worktree":"preserve-me"}`,
-	}
-	if err := repo.CreateTaskResourceCleanupJob(ctx, job); err != nil {
-		t.Fatalf("CreateTaskResourceCleanupJob: %v", err)
-	}
-	claimed, err := repo.MarkTaskResourceCleanupJobRunning(ctx, job.ID)
-	if err != nil || !claimed {
-		t.Fatalf("claim = %v, %v; want true", claimed, err)
-	}
-	claimedJob, err := repo.GetTaskResourceCleanupJob(ctx, job.ID)
-	if err != nil {
-		t.Fatalf("GetTaskResourceCleanupJob after claim: %v", err)
-	}
-	if err := repo.CancelArchiveTaskResourceCleanupJobs(ctx, job.TaskID); err != nil {
-		t.Fatalf("CancelArchiveTaskResourceCleanupJobs: %v", err)
-	}
-	updated, err := repo.CompleteClaimedTaskResourceCleanupJob(
-		ctx, job.ID, claimedJob.Attempts, models.TaskResourceCleanupStateSucceeded, "", nil,
-	)
-	if err != nil {
-		t.Fatalf("CompleteClaimedTaskResourceCleanupJob: %v", err)
-	}
-	if updated {
-		t.Fatal("stale claimed completion overwrote cancellation")
-	}
-	got, err := repo.GetTaskResourceCleanupJob(ctx, job.ID)
-	if err != nil {
-		t.Fatalf("GetTaskResourceCleanupJob: %v", err)
-	}
-	if got.State != models.TaskResourceCleanupStateCancelled || got.Attempts != claimedJob.Attempts {
-		t.Fatalf("job = state %q attempts %d, want cancelled generation %d", got.State, got.Attempts, claimedJob.Attempts)
-	}
-	if got.ResourceSnapshot != job.ResourceSnapshot || got.CompletedAt == nil {
-		t.Fatalf("cancelled job lost historical metadata: %#v", got)
 	}
 }
 

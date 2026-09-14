@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 )
 
 // HandoffCleaner is the office task-handoffs cleanup adapter that
@@ -41,16 +42,83 @@ func NewHandoffCleaner(mgr *Manager, log *logger.Logger, extraRoots ...string) *
 	}
 }
 
+func (c *HandoffCleaner) ValidateManagedRoot(path string) error {
+	if err := c.requireManagedRoot(path); err != nil {
+		return err
+	}
+	root, err := c.managedRootFor(path)
+	if err != nil {
+		return err
+	}
+	return rejectSymlinkComponents(root, path)
+}
+
+// CreateManagedDirectory creates a restore path through no-follow directory
+// descriptors, so a component replacement cannot redirect MkdirAll.
+func (c *HandoffCleaner) CreateManagedDirectory(path string, mode os.FileMode) error {
+	if err := c.requireManagedRoot(path); err != nil {
+		return err
+	}
+	root, err := c.managedRootFor(path)
+	if err != nil {
+		return err
+	}
+	handle, err := storageworkspaces.CreateDirectoryNoFollow(root, path, mode)
+	if err != nil {
+		return err
+	}
+	return handle.Close()
+}
+
+func (c *HandoffCleaner) removeManagedDirectory(ctx context.Context, path string) error {
+	root, err := c.managedRootFor(path)
+	if err != nil {
+		return err
+	}
+	handle, err := storageworkspaces.OpenDirectoryNoFollow(root, path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer func() {
+		_ = handle.Close()
+	}()
+	return handle.RemoveDirectory(ctx)
+}
+
+func (c *HandoffCleaner) managedRootFor(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	for _, root := range c.managedRoots() {
+		rootAbs, rootErr := filepath.Abs(root)
+		if rootErr == nil && isDescendant(rootAbs, abs) {
+			return rootAbs, nil
+		}
+	}
+	return "", fmt.Errorf("managed-root guard: %s is not inside a managed root", path)
+}
+
 // CleanupPlainFolder removes a Kandev-owned plain folder. The path
 // MUST resolve to a location under one of the configured managed
 // roots; anything else is rejected up front so a corrupted
 // materialized_path can never delete arbitrary user files.
-func (c *HandoffCleaner) CleanupPlainFolder(_ context.Context, path string) error {
+func (c *HandoffCleaner) CleanupPlainFolder(ctx context.Context, path string) error {
 	if err := c.requireManagedRoot(path); err != nil {
 		return err
 	}
+	root, err := c.managedRootFor(path)
+	if err != nil {
+		return err
+	}
+	if err := rejectSymlinkComponents(root, path); err != nil {
+		return err
+	}
 	c.logger.Info("cleanup plain folder", zap.String("path", path))
-	if err := os.RemoveAll(path); err != nil {
+	if err := c.removeManagedDirectory(ctx, path); err != nil {
 		return fmt.Errorf("remove %s: %w", path, err)
 	}
 	return nil
@@ -61,7 +129,8 @@ func (c *HandoffCleaner) CleanupPlainFolder(_ context.Context, path string) erro
 // repository-scoped lock + git-worktree-remove + cleanup script.
 //
 // Terminal handoff cleanup uses the manager's metadata-aware compaction: only
-// unambiguously managed, fully integrated local refs are removed.
+// unambiguously managed, fully integrated local refs are removed; every other
+// branch is left intact so pushed PR / remote refs and unpublished work survive.
 func (c *HandoffCleaner) CleanupSingleRepoWorktree(ctx context.Context, worktreeID string) error {
 	if c.manager == nil {
 		return errors.New("worktree manager not configured")
@@ -88,12 +157,22 @@ func (c *HandoffCleaner) CleanupMultiRepoRoot(ctx context.Context, rootPath stri
 	if err := c.requireManagedRoot(rootPath); err != nil {
 		return err
 	}
+	root, err := c.managedRootFor(rootPath)
+	if err != nil {
+		return err
+	}
+	if err := rejectSymlinkComponents(root, rootPath); err != nil {
+		return err
+	}
+	if len(worktreeIDs) == 0 {
+		return errors.New("multi-repo worktree inventory is empty")
+	}
 	receipt := newBranchCleanupReceipt()
 	var cleanupErrs []error
 	seen := make(map[string]struct{}, len(worktreeIDs))
 	for _, id := range worktreeIDs {
-		if id == "" {
-			continue
+		if strings.TrimSpace(id) == "" {
+			return errors.New("multi-repo worktree inventory contains an empty ID")
 		}
 		if _, ok := seen[id]; ok {
 			continue
@@ -115,23 +194,20 @@ func (c *HandoffCleaner) CleanupMultiRepoRoot(ctx context.Context, rootPath stri
 	if len(cleanupErrs) > 0 {
 		return errors.Join(cleanupErrs...)
 	}
-	if err := os.RemoveAll(rootPath); err != nil {
+	if err := c.removeManagedDirectory(ctx, rootPath); err != nil {
 		return fmt.Errorf("remove multi-repo root %s: %w", rootPath, err)
 	}
 	return nil
 }
 
-// CleanupRemoteEnvironment is a stub: remote environments
-// (sprites etc.) are managed by per-provider services that the
-// office service does not import. The cleaner records the pending
-// state via cleanup_status; provider-specific deletion is wired in a
-// follow-up commit when the materializer flips owned_by_kandev for
-// remote envs (today the executor does not do that).
+// CleanupRemoteEnvironment cannot safely claim success without a provider
+// deletion implementation. Returning an error keeps the group in
+// cleanup_failed so the environment is visible for retry or operator action.
 func (c *HandoffCleaner) CleanupRemoteEnvironment(_ context.Context, provider, environmentID string) error {
-	c.logger.Info("cleanup remote environment (no-op)",
+	c.logger.Error("remote environment cleanup is not configured",
 		zap.String("provider", provider),
 		zap.String("environment_id", environmentID))
-	return nil
+	return fmt.Errorf("remote environment cleanup is not configured for provider %q", provider)
 }
 
 // requireManagedRoot rejects paths that do not resolve to a location
@@ -202,6 +278,27 @@ func resolveExistingPrefix(path string) string {
 		}
 		prefix = parent
 	}
+}
+
+// validated directory is replaced by a symlink before a destructive call.
+// Destructive operations accept only stable, non-symlink path components;
+// managed roots themselves are configured paths and are validated separately.
+func rejectSymlinkComponents(root, path string) error {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return fmt.Errorf("managed-root guard: inspect path: %w", err)
+	}
+	rootAbs, err := filepath.Abs(root)
+	if err != nil {
+		return fmt.Errorf("managed-root guard: inspect root: %w", err)
+	}
+	for current := abs; isDescendant(rootAbs, current) && current != rootAbs; current = filepath.Dir(current) {
+		info, err := os.Lstat(current)
+		if err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("managed-root guard: symlink component %s is not allowed", current)
+		}
+	}
+	return nil
 }
 
 func (c *HandoffCleaner) managedRoots() []string {

@@ -12,6 +12,7 @@ import { WebSocketRequestError } from "@/lib/ws/client";
 // assert that handleCreateSubmit honours CLI-mode parity: empty prompt → no
 // create call; non-empty prompt → call with that prompt in the payload.
 
+let autoFocusNewTasks = true;
 const pushMock = vi.fn();
 const TASK_ID = "task-1";
 const RENAMED_TITLE = "Renamed task";
@@ -33,6 +34,7 @@ vi.mock("@/components/toast-provider", () => ({
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (s: unknown) => unknown) =>
     selector({
+      userSettings: { autoFocusNewTasks },
       setActiveDocument: vi.fn(),
       setPlanMode: vi.fn(),
       applyAgentProfileRecentUse: vi.fn(),
@@ -203,6 +205,7 @@ function makeDeps(overrides: Partial<SubmitHandlersDeps>): SubmitHandlersDeps {
 }
 
 beforeEach(() => {
+  autoFocusNewTasks = true;
   resetTaskCreateLastUsedSync({ clearQueued: true });
   buildCreateTaskPayloadMock.mockClear();
   buildRepositoriesPayloadMock.mockReset();
@@ -987,5 +990,50 @@ describe("taskSubmitErrorMessage", () => {
 
   it("preserves non-repository error messages", () => {
     expect(taskSubmitErrorMessage(new Error("ordinary failure"))).toBe("ordinary failure");
+  });
+});
+
+// @covers AC-TASKS-CREATION-AUTO-FOCUS-001.2, AC-TASKS-CREATION-AUTO-FOCUS-001.3
+describe("creation auto-focus policy", () => {
+  it.each([false, true])(
+    "keeps passthrough navigation gated by %s while completing creation",
+    async (enabled) => {
+      autoFocusNewTasks = enabled;
+      const deps = makeDeps({
+        isPassthroughProfile: true,
+        descriptionInputRef: makeRef("Start this task"),
+        createTask: vi.fn().mockResolvedValue({ id: TASK_ID, session_id: "new-session" }),
+      });
+      const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+      await act(async () => {
+        await result.current.handleSubmit({ preventDefault() {} } as never);
+      });
+      expect(deps.onSuccess).toHaveBeenCalledWith(
+        expect.objectContaining({ id: TASK_ID }),
+        "create",
+        expect.objectContaining({ autoFocus: enabled, willNavigate: enabled }),
+      );
+      expect(deps.onOpenChange).toHaveBeenCalledWith(false);
+      expect(deps.clearDraft).toHaveBeenCalled();
+      expect(pushMock).toHaveBeenCalledTimes(enabled ? 1 : 0);
+    },
+  );
+  it("propagates disabled focus for creation without an agent", async () => {
+    autoFocusNewTasks = false;
+    const deps = makeDeps({
+      descriptionInputRef: makeRef("Create only"),
+      createTask: vi.fn().mockResolvedValue({ id: TASK_ID }),
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+    await act(async () => {
+      await result.current.handleCreateWithoutAgent();
+    });
+    expect(deps.onSuccess).toHaveBeenCalledWith(
+      expect.objectContaining({ id: TASK_ID }),
+      "create",
+      expect.objectContaining({ autoFocus: false }),
+    );
+    expect(deps.onOpenChange).toHaveBeenCalledWith(false);
+    expect(pushMock).not.toHaveBeenCalled();
   });
 });

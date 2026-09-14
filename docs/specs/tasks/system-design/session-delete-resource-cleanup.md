@@ -139,11 +139,11 @@ materialization and before the workspace is exposed for reuse. A worktree that
 was physically created but cannot be persisted because task cleanup won a race
 is compensated before it becomes task state.
 
-### Schema normalization
-
+Schema normalization is governed by the migration-only source-alias catalog in
+[Workspace Deletion Table Registry](workspace-deletion-table-registry.md).
 SQLite and PostgreSQL migrations backfill canonical rows from
-`task_environment_repos`, legacy flat `task_environments` worktree fields, and
-`task_session_worktrees`. Sessions with a valid `task_environment_id` retain it.
+`task_environment_repos`, deprecated flat `task_environments` worktree fields,
+and `task_session_worktrees`.
 Legacy sessions are assigned to the matching existing environment or to a
 normalized task-owned environment created for their connected worktree group.
 Canonical `task_environment_repos` rows take precedence when the legacy flat
@@ -257,13 +257,16 @@ Session deletion follows:
 stopped session -> quiesced runtime -> session/reference deletion -> task retained
 ```
 
-Task lifecycle cleanup follows:
+Task lifecycle cleanup follows, qualified by job policy:
 
 ```text
 active task -> prepared cleanup barrier -> complete inventory snapshot
             -> archive/delete mutation -> pending durable worker
-            -> running -> succeeded | retry_wait | failed
+            -> running -> succeeded | retry_wait (cascade_retry, never failed)
+                       | succeeded | retry_wait | failed (bounded_terminal only)
 ```
+
+Cascade-critical archive/unarchive jobs use `cascade_retry` and never enter terminal `failed`; exhausted attempts retain diagnostics and retry on capped schedule. Only non-restorable delete/shutdown jobs use `bounded_terminal` and may enter retained `failed`. The generic `failed` transition elsewhere in this document means the bounded-terminal case only.
 
 Session creation and canonical environment-repository persistence serialize with
 the owning task row and check for an active prepared task cleanup barrier.
