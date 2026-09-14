@@ -39,7 +39,9 @@ contracts against their providers; conversation persistence
 
 Searching rows are unique on `(task_id, repository_id, branch)` where
 `pr_number = 0`; discovered rows are unique on `(task_id, repository_id,
-pr_number)` where `pr_number != 0`. `session_id` is nullable provenance. The
+pr_number)` where `pr_number != 0`. `session_id` is optional provenance
+stored as `TEXT NOT NULL DEFAULT ''` (empty string when unknown), never a
+unique-key component. The
 transactional upgrade migration runs after the existing version-change
 snapshot boundary, prefers discovered rows while merging the newest status,
 check, review, and comment watermarks, removes orphaned rows, and is
@@ -91,7 +93,7 @@ writes.
 ## Payload storage and retention candidates
 
 A payload above the inline threshold is stored in
-`task_message_payload_content` keyed by digest with compression encoding, byte
+`task_message_payloads` keyed by digest with compression encoding, byte
 size, and an internal reference; message rows retain the lightweight
 projection. Explicit detail loading verifies the digest before returning
 content. Equivalent Git snapshots within one session and digest group share
