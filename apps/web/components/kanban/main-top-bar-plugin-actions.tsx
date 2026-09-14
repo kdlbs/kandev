@@ -60,7 +60,7 @@ export function MainTopBarPluginActions(props: {
 
   return (
     <div
-      className="flex shrink-0 items-center gap-2 [&_[data-slot=button]]:!size-8 [&_[data-slot=button]]:!p-0 [&_[data-slot=button]_svg]:!size-4"
+      className="flex min-w-0 flex-wrap items-center gap-2 [&_[data-slot=button]]:!size-8 [&_[data-slot=button]]:!p-0 [&_[data-slot=button]_svg]:!size-4"
       data-testid="mobile-main-top-bar-plugin-actions"
     >
       {content}

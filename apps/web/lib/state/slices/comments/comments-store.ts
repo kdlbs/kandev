@@ -95,6 +95,25 @@ function hydrateSessionInState(state: CommentsState, sessionId: string): void {
   state.bySession[sessionId] = ids;
 }
 
+/** Drop an uploaded legacy row after storage performed its exact-match cleanup. */
+function forgetMigratedPlanCommentInState(
+  state: CommentsState,
+  sessionId: string,
+  commentId: string,
+): void {
+  const sessionIds = state.bySession[sessionId];
+  if (sessionIds) {
+    const index = sessionIds.indexOf(commentId);
+    if (index !== -1) sessionIds.splice(index, 1);
+    if (sessionIds.length === 0) delete state.bySession[sessionId];
+  }
+  const stillReferenced = Object.values(state.bySession).some((ids) => ids.includes(commentId));
+  if (stillReferenced) return;
+  delete state.byId[commentId];
+  state.pendingForChat = state.pendingForChat.filter((id) => id !== commentId);
+  if (state.editingCommentId === commentId) state.editingCommentId = null;
+}
+
 export const useCommentsStore = create<CommentsSlice>()(
   immer<CommentsSlice>((set, get) => ({
     ...defaultState,
@@ -144,6 +163,9 @@ export const useCommentsStore = create<CommentsSlice>()(
       set((state) => clearSessionInState(state, sessionId)),
 
     hydrateSession: (sessionId: string) => set((state) => hydrateSessionInState(state, sessionId)),
+
+    forgetMigratedPlanComment: (sessionId: string, commentId: string) =>
+      set((state) => forgetMigratedPlanCommentInState(state, sessionId, commentId)),
 
     getCommentsForFile: (
       sessionId: string,

@@ -207,7 +207,9 @@ func (m *Manager) createReboundACPSession(ctx context.Context, execution *AgentE
 		return err
 	}
 	if m.eventPublisher != nil {
-		m.eventPublisher.PublishACPSessionCreated(execution, newSessionID)
+		m.eventPublisher.PublishACPSessionCreatedWithAttempt(
+			execution, newSessionID, ResumeAttemptIDFromContext(ctx),
+		)
 	}
 	return nil
 }

@@ -9,6 +9,7 @@ import {
 import { pluginRegistry } from "@/lib/plugins/registry";
 import type { NavItem } from "@/lib/plugins/types";
 import type { GitHubStatus } from "@/lib/types/github";
+import { defaultState } from "@/lib/state/default-state";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 
 const useGitHubStatusMock = vi.hoisted(() => vi.fn());
@@ -68,6 +69,7 @@ vi.mock("@/components/state-provider", () => ({
   useAppStore: (
     selector: (state: {
       workspaces: { activeId: string | null; items: Array<{ id: string }> };
+      userSettings: typeof defaultState.userSettings;
       // The navigation manifest resolves hrefs against the active mode, so
       // `useInOffice` (and through it `useFeature`) now runs in this tree.
       features: Record<string, boolean>;
@@ -75,6 +77,7 @@ vi.mock("@/components/state-provider", () => ({
   ) =>
     selector({
       workspaces: { activeId: activeWorkspaceRef.id, items: activeWorkspaceRef.items },
+      userSettings: { ...defaultState.userSettings },
       features: { office: false },
     }),
 }));

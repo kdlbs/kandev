@@ -4,6 +4,7 @@ import ptCanvases from "@/src/locales/pt-pt/canvases.json";
 import zhCnCanvases from "@/src/locales/zh-cn/canvases.json";
 import zhHkCanvases from "@/src/locales/zh-hk/canvases.json";
 import zhTwCanvases from "@/src/locales/zh-tw/canvases.json";
+import { buildCanvasCreateTaskPrompt, CANVAS_CREATE_PROMPT_REFERENCE } from "./canvas-task-prompt";
 import { describe, expect, it } from "vitest";
 
 const canvasCatalogs = {
@@ -15,31 +16,31 @@ const canvasCatalogs = {
   pseudo: pseudoCanvases,
 };
 
-const requiredCanvasTools = [
-  "create_canvas_kandev",
-  "read_canvas_authoring_skill_kandev",
-  "publish_canvas_kandev",
-];
-
 describe("canvas creation task preset", () => {
-  it("keeps the authoring workflow and callable tool names in every catalog", () => {
+  it("keeps a short localized goal in every catalog", () => {
     for (const [locale, catalog] of Object.entries(canvasCatalogs)) {
       const prompt = catalog.createCanvasTaskPrompt;
       expect(prompt, locale).toMatch(/\S/);
-      for (const tool of requiredCanvasTools) {
-        expect(prompt, `${locale} is missing ${tool}`).toContain(tool);
-      }
+      expect(prompt, locale).not.toContain("create_canvas_kandev");
+      expect(prompt, locale).not.toContain("read_canvas_authoring_skill_kandev");
+      expect(prompt, locale).not.toContain("publish_canvas_kandev");
     }
   });
 
-  it("requires Kandev publication instead of treating files or a build as a release", () => {
-    const prompt = enCanvases.createCanvasTaskPrompt;
+  it("appends the exact saved-prompt reference outside localization", () => {
+    for (const [locale, catalog] of Object.entries(canvasCatalogs)) {
+      expect(buildCanvasCreateTaskPrompt(catalog.createCanvasTaskPrompt), locale).toBe(
+        `${catalog.createCanvasTaskPrompt}\n\n${CANVAS_CREATE_PROMPT_REFERENCE}`,
+      );
+    }
+  });
 
-    expect(prompt).toContain("Create the draft in Kandev");
-    expect(prompt).toContain("Build inside the returned directory");
-    expect(prompt).toContain("A local build alone does not publish a canvas inside Kandev");
-    expect(prompt).toContain("If publication is unsuccessful, report the failure");
-    expect(prompt).toContain("do not claim that the canvas is published");
-    expect(prompt).toContain("report the limitation instead of claiming");
+  it("keeps the English goal editable while leaving authoring instructions to the saved prompt", () => {
+    expect(enCanvases.createCanvasTaskPrompt).toBe(
+      "Create a new Kandev canvas with a coordinator view that lists the existing tasks.",
+    );
+    expect(buildCanvasCreateTaskPrompt(enCanvases.createCanvasTaskPrompt)).toBe(
+      "Create a new Kandev canvas with a coordinator view that lists the existing tasks.\n\n@create-canvas",
+    );
   });
 });

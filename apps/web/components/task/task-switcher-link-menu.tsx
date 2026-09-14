@@ -10,14 +10,10 @@ import {
   IconLink,
   IconTicket,
 } from "@tabler/icons-react";
-import {
-  ContextMenuItem,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
-} from "@kandev/ui/context-menu";
+import { ContextMenuItem, ContextMenuSub, ContextMenuSubTrigger } from "@kandev/ui/context-menu";
+import { TaskContextMenuSubContent as ContextMenuSubContent } from "./task-context-menu-sub-content";
 import { resolvePluginIcon } from "@/lib/plugins/icons";
-import type { PluginIcon } from "@/lib/plugins/types";
+import type { PluginLinkMenuAction } from "./task-session-sidebar-link-actions";
 import { useTaskPluginLinkActions } from "./task-session-sidebar-link-actions";
 import type { TaskSwitcherItem } from "./task-switcher-types";
 
@@ -57,7 +53,82 @@ export function selectTaskLinkActions(
   };
 }
 
+export function taskLinkMenuOptions(actions: Partial<ReturnType<typeof selectTaskLinkActions>>) {
+  return [
+    {
+      id: "pull-request",
+      labelKey: "task:githubPullRequest",
+      Icon: IconGitPullRequest,
+      onSelect: actions.onLinkPullRequest,
+    },
+    {
+      id: "issue",
+      labelKey: "task:githubIssue",
+      Icon: IconCircleDot,
+      onSelect: actions.onLinkIssue,
+    },
+    {
+      id: "merge-request",
+      labelKey: "task:gitlabMergeRequest",
+      Icon: IconBrandGitlab,
+      onSelect: actions.onLinkMergeRequest,
+    },
+    {
+      id: "jira",
+      labelKey: "task:jiraTicket",
+      Icon: IconTicket,
+      onSelect: actions.onLinkJiraTicket,
+    },
+    {
+      id: "linear",
+      labelKey: "task:linearIssue",
+      Icon: IconCircleDot,
+      onSelect: actions.onLinkLinearIssue,
+    },
+    {
+      id: "sentry",
+      labelKey: "task:sentryIssue",
+      Icon: IconBrandSentry,
+      onSelect: actions.onLinkSentryIssue,
+    },
+  ].filter((option) => option.onSelect !== undefined);
+}
+
 export function TaskPluginLinkMenu({
+  task,
+  disabled,
+  closeMenu,
+  linkActions,
+  pluginLinkActions: suppliedPluginLinkActions,
+}: {
+  task?: TaskSwitcherItem;
+  disabled?: boolean;
+  closeMenu: () => void;
+  linkActions: Partial<ReturnType<typeof selectTaskLinkActions>>;
+  pluginLinkActions?: PluginLinkMenuAction[];
+}) {
+  if (suppliedPluginLinkActions) {
+    return (
+      <TaskLinkMenuWithActions
+        disabled={disabled}
+        closeMenu={closeMenu}
+        linkActions={linkActions}
+        pluginLinkActions={suppliedPluginLinkActions}
+      />
+    );
+  }
+  if (!task) return null;
+  return (
+    <TaskLinkMenuWithTask
+      task={task}
+      disabled={disabled}
+      closeMenu={closeMenu}
+      linkActions={linkActions}
+    />
+  );
+}
+
+function TaskLinkMenuWithTask({
   task,
   disabled,
   closeMenu,
@@ -66,9 +137,30 @@ export function TaskPluginLinkMenu({
   task: TaskSwitcherItem;
   disabled?: boolean;
   closeMenu: () => void;
-  linkActions: ReturnType<typeof selectTaskLinkActions>;
+  linkActions: Partial<ReturnType<typeof selectTaskLinkActions>>;
 }) {
   const pluginLinkActions = useTaskPluginLinkActions(task.id, task.repositoryLinks ?? []);
+  return (
+    <TaskLinkMenuWithActions
+      disabled={disabled}
+      closeMenu={closeMenu}
+      linkActions={linkActions}
+      pluginLinkActions={pluginLinkActions}
+    />
+  );
+}
+
+function TaskLinkMenuWithActions({
+  disabled,
+  closeMenu,
+  linkActions,
+  pluginLinkActions,
+}: {
+  disabled?: boolean;
+  closeMenu: () => void;
+  linkActions: Partial<ReturnType<typeof selectTaskLinkActions>>;
+  pluginLinkActions: PluginLinkMenuAction[];
+}) {
   return (
     <TaskLinkMenu
       disabled={disabled}
@@ -101,7 +193,7 @@ function TaskLinkMenu({
   onLinkJiraTicket?: () => void;
   onLinkLinearIssue?: () => void;
   onLinkSentryIssue?: () => void;
-  pluginLinkActions?: { id: string; label: string; icon?: PluginIcon; onSelect: () => void }[];
+  pluginLinkActions?: PluginLinkMenuAction[];
 }) {
   const { t } = useTranslation();
   if (
@@ -122,46 +214,24 @@ function TaskLinkMenu({
         {t("task:link")}
       </ContextMenuSubTrigger>
       <ContextMenuSubContent className="w-56">
-        {onLinkPullRequest ? (
-          <ContextMenuItem disabled={disabled} onSelect={onLinkPullRequest}>
-            <IconGitPullRequest className="mr-2 h-4 w-4" />
-            {t("task:githubPullRequest")}
-          </ContextMenuItem>
-        ) : null}
-        {onLinkIssue ? (
-          <ContextMenuItem disabled={disabled} onSelect={onLinkIssue}>
-            <IconCircleDot className="mr-2 h-4 w-4" />
-            {t("task:githubIssue")}
-          </ContextMenuItem>
-        ) : null}
-        {onLinkMergeRequest ? (
+        {taskLinkMenuOptions({
+          onLinkPullRequest,
+          onLinkIssue,
+          onLinkMergeRequest,
+          onLinkJiraTicket,
+          onLinkLinearIssue,
+          onLinkSentryIssue,
+        }).map(({ id, labelKey, Icon, onSelect }) => (
           <ContextMenuItem
-            className="min-h-12! sm:min-h-7!"
+            key={id}
+            className={id === "merge-request" ? "min-h-12! sm:min-h-7!" : undefined}
             disabled={disabled}
-            onSelect={onLinkMergeRequest}
+            onSelect={onSelect}
           >
-            <IconBrandGitlab className="mr-2 h-4 w-4" />
-            {t("task:gitlabMergeRequest")}
+            <Icon className="mr-2 h-4 w-4" />
+            {t(labelKey)}
           </ContextMenuItem>
-        ) : null}
-        {onLinkJiraTicket ? (
-          <ContextMenuItem disabled={disabled} onSelect={onLinkJiraTicket}>
-            <IconTicket className="mr-2 h-4 w-4" />
-            {t("task:jiraTicket")}
-          </ContextMenuItem>
-        ) : null}
-        {onLinkLinearIssue ? (
-          <ContextMenuItem disabled={disabled} onSelect={onLinkLinearIssue}>
-            <IconCircleDot className="mr-2 h-4 w-4" />
-            {t("task:linearIssue")}
-          </ContextMenuItem>
-        ) : null}
-        {onLinkSentryIssue ? (
-          <ContextMenuItem disabled={disabled} onSelect={onLinkSentryIssue}>
-            <IconBrandSentry className="mr-2 h-4 w-4" />
-            {t("task:sentryIssue")}
-          </ContextMenuItem>
-        ) : null}
+        ))}
         {pluginLinkActions.map((action) => (
           <ContextMenuItem
             key={action.id}

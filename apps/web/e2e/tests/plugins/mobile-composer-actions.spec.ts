@@ -14,6 +14,7 @@ import { expect, test } from "../../fixtures/test-base";
 import { installFixturePlugin, PLUGIN_ID } from "../../helpers/plugin-fixture";
 import { SessionPage } from "../../pages/session-page";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
+import { expectTaskDescription } from "../../pages/task-description-editor";
 import type { ApiClient } from "../../helpers/api-client";
 import type { Locator, Page } from "@playwright/test";
 
@@ -151,7 +152,7 @@ test.describe("Mobile plugin composer actions", () => {
     await caretBackFromEnd(description, " tail".length);
 
     await composerAction.getByTestId("e2e-composer-insert").tap();
-    await expect(description).toHaveValue(`head ${DICTATED} tail`);
+    await expectTaskDescription(description, `head ${DICTATED} tail`);
 
     // The dialog still owns its own scrolling and the page does not pan.
     await expectNoHorizontalOverflow(testPage);
@@ -198,7 +199,7 @@ test.describe("Mobile plugin composer actions", () => {
     await caretBackFromEnd(description, " tail".length);
 
     await composerAction.getByTestId("e2e-composer-insert").tap();
-    await expect(description).toHaveValue(`head ${DICTATED} tail`);
+    await expectTaskDescription(description, `head ${DICTATED} tail`);
 
     await composerAction.getByTestId("e2e-composer-submit").tap();
     await expect(composerAction).toHaveAttribute("data-status", "submitted");

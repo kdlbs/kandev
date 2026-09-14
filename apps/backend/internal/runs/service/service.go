@@ -12,7 +12,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -26,18 +25,6 @@ import (
 	"github.com/kandev/kandev/internal/runs/commentkeys"
 	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 )
-
-// errIdempotencyKeyConflict signals that insertRun's CreateRun failed
-// because idx_run_idempotency rejected a duplicate idempotency_key —
-// distinct from the earlier CheckIdempotencyKey miss, which only looks
-// within IdempotencyWindowHours. Two independent producers deriving the
-// same operation id for the same event can both pass that fast-path check
-// before either commits (or the colliding row can simply be older than the
-// window); the unique index is what actually stops the second insert.
-// QueueRun treats this as a durable dedupe hit: QueueOutcomeDeduped, not an
-// error, so the losing producer's caller does not abort or log a spurious
-// failure for what is really a no-op.
-var errIdempotencyKeyConflict = errors.New("idempotency key conflict")
 
 // RunQueueAdapter is the interface the workflow engine uses to enqueue
 // runs from queue_run actions. Phase 2 final's parallel agent
@@ -60,8 +47,8 @@ const (
 	// already exists in the durable idempotency index, so nothing was inserted.
 	QueueOutcomeDeduped QueueOutcome = "deduped"
 	// QueueOutcomeCoalesced means the request was merged into an existing
-	// queued row for the same agent + reason within the coalescing
-	// window, so nothing new was inserted.
+	// queued row for the same agent, reason, and task bucket within the
+	// coalescing window, so nothing new was inserted.
 	QueueOutcomeCoalesced QueueOutcome = "coalesced"
 )
 
@@ -89,12 +76,22 @@ type QueueRunRequest struct {
 	Reason         string
 	IdempotencyKey string
 	Payload        map[string]any
+	// WakeWaveKey and WakeWaveString are the completion-wave identity
+	// (parent-wake-wave-identity). When WakeWaveKey is non-empty, QueueRun
+	// never coalesces this request into an existing row, is never merged
+	// into by a later request, and idx_run_wake_wave deduplicates a second
+	// insert for the same (WakeWaveKey, AgentProfileID) into
+	// QueueOutcomeDeduped instead of an error.
+	WakeWaveKey    string
+	WakeWaveString string
 }
 
 // CoalesceWindowSeconds is the default coalescing window. When two
-// queue_run requests for the same (agent, reason) land within this
-// window, the second is merged into the first by bumping
-// coalesced_count and replacing the payload.
+// queue_run requests for the same agent, reason, and task bucket land
+// within this window, the second is merged into the first by bumping
+// coalesced_count and replacing the payload. A task bucket is the
+// nonempty task_id, or the taskless bucket when task_id is missing,
+// null, or empty.
 const CoalesceWindowSeconds = 5
 
 // IdempotencyWindowHours is the lookback used by the fast duplicate query.
@@ -167,7 +164,7 @@ func (s *Service) SubscribeSignal() <-chan struct{} { return s.signalCh }
 //  1. Resolve agent_profile_id (from the request field, payload fallback,
 //     or a wired resolver).
 //  2. Recent idempotency check on req.IdempotencyKey if set.
-//  3. Coalescing (5s window for same agent + reason).
+//  3. Coalescing (5s window for same agent, reason, and task bucket).
 //  4. Insert into runs table.
 //  5. Publish OfficeRunQueued.
 //  6. Signal the scheduler (B3.5 — event-driven claim).
@@ -178,34 +175,32 @@ func (s *Service) SubscribeSignal() <-chan struct{} { return s.signalCh }
 func (s *Service) QueueRun(ctx context.Context, req QueueRunRequest) (QueueOutcome, error) {
 	agentInstanceID, err := s.resolveAgentInstance(ctx, req)
 	if err != nil {
-		return "", err
+		return QueueOutcomeNone, err
 	}
 	if agentInstanceID == "" {
-		return "", fmt.Errorf("queue run: agent_profile_id is required")
+		return QueueOutcomeNone, fmt.Errorf("queue run: agent_profile_id is required")
 	}
 
 	if req.IdempotencyKey != "" {
 		dup, err := s.repo.CheckIdempotencyKey(ctx, req.IdempotencyKey, IdempotencyWindowHours)
 		if err != nil {
-			return "", fmt.Errorf("idempotency check: %w", err)
+			return QueueOutcomeNone, fmt.Errorf("idempotency check: %w", err)
 		}
 		if dup {
-			s.log.Debug("run skipped (idempotent)",
-				zap.String("key", req.IdempotencyKey))
-			return QueueOutcomeDeduped, nil
+			return ReportWindowedDedup(QueueSourceRuns, req.Reason, req.IdempotencyKey), nil
 		}
 	}
 
 	payloadMap := runPayload(req, agentInstanceID)
 	payload, err := encodePayload(payloadMap)
 	if err != nil {
-		return "", fmt.Errorf("encode payload: %w", err)
+		return QueueOutcomeNone, fmt.Errorf("encode payload: %w", err)
 	}
 
 	if shouldCoalesceRun(req) {
 		coalesced, err := s.repo.CoalesceRun(ctx, agentInstanceID, req.Reason, CoalesceWindowSeconds, payload)
 		if err != nil {
-			return "", fmt.Errorf("coalesce check: %w", err)
+			return QueueOutcomeNone, fmt.Errorf("coalesce check: %w", err)
 		}
 		if coalesced {
 			s.log.Debug("run coalesced",
@@ -218,20 +213,29 @@ func (s *Service) QueueRun(ctx context.Context, req QueueRunRequest) (QueueOutco
 		}
 	}
 
-	row, err := s.insertRun(ctx, agentInstanceID, req, payload)
+	row, insertErr := s.insertRun(ctx, agentInstanceID, req, payload)
+	// idx_run_wake_wave has no windowed pre-check the way IdempotencyKey
+	// does — it must stay unbounded — so this is the only place a
+	// wave-carrying conflict is caught. Checked before ReportInsertResult
+	// (which only classifies idx_run_idempotency) so the two indexes'
+	// independent meanings ("same dispatch" vs "same wave") stay
+	// distinguishable to the caller and to office_run_dedup_total's labels.
+	if runssqlite.IsWakeWaveUniqueViolation(insertErr) {
+		s.log.Debug("run skipped (wake wave index race)",
+			zap.String("wake_wave_key", req.WakeWaveKey))
+		ParentWakeDedupedTotal.Add(1)
+		return QueueOutcomeDeduped, nil
+	}
+	// idx_run_idempotency has no time bound, so a conflict here can come
+	// from a row older than IdempotencyWindowHours, not just the windowed
+	// race CheckIdempotencyKey guards against above. ReportInsertResult
+	// classifies that as a no-op dedupe rather than a hard error.
+	outcome, err := ReportInsertResult(QueueSourceRuns, req.Reason, req.IdempotencyKey, agentInstanceID, insertErr)
 	if err != nil {
-		// idx_run_idempotency has no time bound, so a conflict here can
-		// come from a row older than IdempotencyWindowHours, not just the
-		// windowed race CheckIdempotencyKey guards against above. Either
-		// way the existing row is definitionally the same operation this
-		// key identifies, so treat it as a no-op dedupe rather than a hard
-		// error (see errIdempotencyKeyConflict's doc comment).
-		if errors.Is(err, errIdempotencyKeyConflict) {
-			s.log.Debug("run skipped (idempotency index race)",
-				zap.String("key", req.IdempotencyKey))
-			return QueueOutcomeDeduped, nil
-		}
-		return "", err
+		return QueueOutcomeNone, err
+	}
+	if outcome == QueueOutcomeDeduped {
+		return outcome, nil
 	}
 
 	s.log.Info("run queued",
@@ -245,7 +249,10 @@ func (s *Service) QueueRun(ctx context.Context, req QueueRunRequest) (QueueOutco
 }
 
 // insertRun creates the runs row and returns it. Pulled out of
-// QueueRun to keep the latter under the funlen budget.
+// QueueRun to keep the latter under the funlen budget. The returned error is
+// the raw CreateRun error (wrapped for context, never reclassified) — the
+// caller runs it through ReportInsertResult, which does its own unique-index
+// classification against the original error chain.
 func (s *Service) insertRun(
 	ctx context.Context, agentInstanceID string, req QueueRunRequest, payload string,
 ) (*models.Run, error) {
@@ -263,11 +270,10 @@ func (s *Service) insertRun(
 		CoalescedCount: 1,
 		IdempotencyKey: idemKeyPtr,
 		RequestedAt:    time.Now().UTC(),
+		WakeWaveKey:    req.WakeWaveKey,
+		WakeWaveString: req.WakeWaveString,
 	}
 	if err := s.repo.CreateRun(ctx, row); err != nil {
-		if runssqlite.IsIdempotencyKeyUniqueViolation(err) {
-			return nil, errIdempotencyKeyConflict
-		}
 		return nil, fmt.Errorf("enqueue run: %w", err)
 	}
 	return row, nil
@@ -313,8 +319,14 @@ func runPayload(req QueueRunRequest, agentInstanceID string) map[string]any {
 	return out
 }
 
+// shouldCoalesceRun decides whether a request may be merged into an
+// existing queued row. A wave-carrying request is never coalesced:
+// coalescing replaces the target row's payload without moving its
+// recorded identity, which would leave a run whose wave columns no
+// longer describe the wake it delivers. idx_run_wake_wave, not this
+// window, is what reconciles wave-carrying requests.
 func shouldCoalesceRun(req QueueRunRequest) bool {
-	return !commentkeys.HasTaskCommentPrefix(req.IdempotencyKey)
+	return req.WakeWaveKey == "" && !commentkeys.HasTaskCommentPrefix(req.IdempotencyKey)
 }
 
 // publishRunQueued emits the OfficeRunQueued bus event so the WS

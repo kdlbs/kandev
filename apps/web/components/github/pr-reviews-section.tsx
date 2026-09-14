@@ -4,6 +4,7 @@ import { Button } from "@kandev/ui/button";
 import type { PRReview, RequestedReviewer } from "@/lib/types/github";
 import { CollapsibleSection, FeedbackItemRow } from "./pr-shared";
 import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 function ReviewStateIcon({ state }: { state: string }) {
   if (state === "APPROVED") return <IconCheck className="h-3.5 w-3.5 text-green-500 shrink-0" />;
@@ -157,9 +158,11 @@ function SubmittedReviewRow({
             <div className="basis-full w-full sm:basis-auto sm:w-auto">
               <Button
                 type="button"
-                size="sm"
                 variant="outline"
-                className="h-8 min-h-11 w-full max-w-full sm:w-auto sm:min-h-0 shrink-0 cursor-pointer px-2 text-[10px] [@media(pointer:coarse)]:min-h-11"
+                className={controlSizingClassName(
+                  "standard",
+                  "w-full max-w-full shrink-0 cursor-pointer px-2 text-[10px] sm:w-auto",
+                )}
                 data-testid={`pr-rerequest-review-${normalizeLogin(review.author)}`}
                 aria-label={t("github:reRequestReviewFrom", { author: review.author })}
                 onClick={() => onReRequest(review.author)}

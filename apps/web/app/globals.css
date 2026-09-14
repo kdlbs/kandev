@@ -419,6 +419,24 @@ html[data-rendering-engine="webkit"] [data-webkit-safe-motion="true"][data-state
     width: auto !important;
     min-width: 0 !important;
     transform: none !important;
+    will-change: auto !important;
+  }
+
+  /* The root positioner owns one backdrop outside the scrolling menu.
+     Submenus keep that layer, and Radix retains outside-interaction handling. */
+  [data-radix-popper-content-wrapper]:has(> .mobile-menu-root)::before {
+    @apply bg-black/80 supports-backdrop-filter:backdrop-blur-xs;
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 100ms;
+  }
+
+  [data-radix-popper-content-wrapper]:has(> .mobile-menu-root[data-state="open"])::before {
+    opacity: 1;
   }
 
   :is(

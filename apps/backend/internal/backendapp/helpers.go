@@ -65,6 +65,7 @@ import (
 	notificationhandlers "github.com/kandev/kandev/internal/notifications/handlers"
 	officeagents "github.com/kandev/kandev/internal/office/agents"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/retention"
 	officetestharness "github.com/kandev/kandev/internal/office/testharness"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/org"
@@ -119,6 +120,9 @@ const (
 	serviceFieldKey          = "service"
 	kandevName               = "kandev"
 	startingStatus           = "starting"
+	healthRoutePath          = "/health"
+	readyRoutePath           = "/ready"
+	websocketRoutePath       = "/ws"
 )
 
 // buildSessionDataProvider constructs the session data provider function used by the WebSocket hub
@@ -776,6 +780,7 @@ func registerRoutes(p routeParams) {
 	handoffSvc := taskservice.NewHandoffService(p.taskRepo, p.taskRepo, handoffDocSvc,
 		p.officeRepo, p.officeRepo, p.log)
 	p.taskSvc.SetWorkspacePolicyAttacher(handoffSvc)
+	p.taskSvc.SetWorkspaceGroupMembershipReader(p.officeRepo)
 	handoffSvc.SetCommentReader(&officeCommentReaderAdapter{reader: p.officeRepo})
 	// Phase 6 wirings — materializer hook + disk cleaner. The
 	// SessionWorktreeReader and WorkspaceCleaner interfaces are both
@@ -793,6 +798,11 @@ func registerRoutes(p routeParams) {
 	// the kanban board doesn't react to subtree archive/delete until a
 	// full reload.
 	handoffSvc.SetTaskEventPublisher(p.taskSvc)
+	// Startup repair for the workspace_orphaned board marker: stamps historical
+	// unmarked orphaned tasks and clears stale claims left by a crashed clear.
+	// Must run after SetTaskEventPublisher above (publishing needs it) and
+	// before the gateway accepts clients.
+	handoffSvc.RepairOrphanedWorkspaceMarkers(context.Background())
 	handoffSvc.SetVacatedStepReconciler(p.taskSvc)
 	// Per-user scoping for the cascade is installed by
 	// TaskHandlers.SetHandoffService, which is the call that makes the archive /
@@ -885,7 +895,7 @@ func registerRoutes(p routeParams) {
 	// but it does not gate on that flag — liveness must not depend on
 	// readiness, or the crash loop docs/specs/startup-listener-before-
 	// recovery/spec.md exists to fix comes back.
-	p.router.GET("/health", healthHandler(p))
+	p.router.GET(healthRoutePath, healthHandler(p))
 
 	// /ready is a readiness probe. It returns 200 only after main has
 	// flipped the package-level `ready` flag — which happens after route
@@ -896,7 +906,7 @@ func registerRoutes(p routeParams) {
 	// instead of racing ahead and hitting 404s on routes that aren't wired
 	// yet. See docs/specs/health-endpoint-version/spec.md for the exact
 	// contract this endpoint now owns.
-	p.router.GET("/ready", readyHandler(p))
+	p.router.GET(readyRoutePath, readyHandler(p))
 
 	// /api/v1/features is a public, unauthenticated read of the runtime
 	// feature-flag map. The frontend SSR-fetches it once per page render to
@@ -933,7 +943,7 @@ func registerRoutes(p routeParams) {
 		} else {
 			p.router.NoRoute(func(c *gin.Context) {
 				path := c.Request.URL.Path
-				if strings.HasPrefix(path, "/api/") || path == "/ws" || path == "/health" || path == "/ready" {
+				if strings.HasPrefix(path, "/api/") || path == websocketRoutePath || path == healthRoutePath || path == readyRoutePath {
 					c.AbortWithStatus(http.StatusNotFound)
 					return
 				}
@@ -1054,7 +1064,7 @@ func webAppHandlerOptions(p routeParams) []webapp.HandlerOption {
 func webRuntimeConfig(debug bool, titlePrefix string, req *http.Request) webapp.RuntimeConfig {
 	return webapp.RuntimeConfig{
 		APIPrefix:                         "/api/v1",
-		WebSocketPath:                     "/ws",
+		WebSocketPath:                     websocketRoutePath,
 		LSPAutoInstallPreferenceLanguages: lspinstaller.AutoInstallPreferenceLanguages(),
 		Debug:                             debug,
 		// Gates QA-only UI (the pseudo-locale option). Separate from Debug: the
@@ -1512,6 +1522,7 @@ func registerSecondaryRoutes(
 
 	registerHealthRoutes(p)
 	registerSystemRoutes(p)
+	registerRetentionRoutes(p)
 	if p.runtimeFlagsSvc != nil {
 		runtimeflags.RegisterRoutes(p.router, p.runtimeFlagsSvc)
 	}
@@ -1713,6 +1724,23 @@ func registerSystemRoutes(p routeParams) {
 	p.systemSvc.RegisterRoutes(p.router, p.log)
 }
 
+// registerRetentionRoutes mounts GET/PUT /api/v1/system/retention. It is a
+// separate group from systemSvc's own /api/v1/system group (rather than a
+// field on system.Service) because internal/office/retention cannot be
+// imported by internal/system without inverting the existing system ->
+// office dependency direction; gin allows two RouterGroups to share a path
+// prefix as long as no route collides, and none does here. Read/admin
+// split mirrors system.Service.RegisterRoutes: GET is member-readable,
+// PUT requires the admin-scoped settings-manage permission.
+func registerRetentionRoutes(p routeParams) {
+	if p.services == nil || p.services.Retention == nil {
+		return
+	}
+	read := p.router.Group("/api/v1/system")
+	admin := read.Group("", authz.RequireOrgScope(authz.ScopeOrgSettingsManage))
+	retention.RegisterRoutes(read, admin, p.services.Retention.Handler)
+}
+
 // registerHealthRoutes sets up the system health endpoint with all health checkers.
 func registerHealthRoutes(p routeParams) {
 	var githubProvider health.GitHubStatusProvider
@@ -1737,6 +1765,9 @@ func registerHealthRoutes(p routeParams) {
 	}
 	if p.systemSvc != nil && p.systemSvc.StorageRuntime != nil {
 		checkers = append(checkers, p.systemSvc.StorageRuntime)
+	}
+	if p.services != nil && p.services.Retention != nil {
+		checkers = append(checkers, p.services.Retention.Checker)
 	}
 	healthSvc := health.NewService(p.log, checkers...)
 	health.RegisterRoutes(p.router, healthSvc, p.log)
@@ -1900,6 +1931,42 @@ func registerMCPAndDebugRoutes(
 	mcpHandlers.SetRemoteContributionService(newRemoteContributionCoordinator(p.services.GitHub, p.services.GitLab))
 	// Wire config-mode dependencies for agent-native configuration
 	mcpHandlers.SetConfigDeps(p.services.Workflow, p.agentSettingsController, p.mcpConfigSvc)
+	mcpHandlers.SetSettingsBroadcaster(p.gateway.Hub)
+	if settingsRegistry, err := buildSettingsRegistry(); err != nil {
+		p.log.Error("failed to build settings catalog", zap.Error(err))
+	} else {
+		mcpHandlers.SetSettingsCatalog(settingsRegistry)
+		var storageSettings settingsStorageService
+		if p.systemSvc != nil {
+			storageSettings = p.systemSvc.Storage
+		}
+		mcpHandlers.SetSettingsOperations(newSettingsOperations(
+			settingsRegistry,
+			p.agentSettingsController,
+			p.services.User,
+			settingsDomainDependencies{
+				broadcaster:   p.gateway.Hub,
+				authEnabled:   func() bool { return p.authSvc != nil && p.authSvc.Mode() != auth.ModeDisabled },
+				task:          p.taskSvc,
+				workflow:      p.services.Workflow,
+				workflowCtrl:  wfCtrl,
+				prompts:       p.services.Prompts,
+				utility:       p.services.Utility,
+				editors:       p.services.Editor,
+				notifications: p.notificationCtrl,
+				runtimeFlags:  p.services.RuntimeFlags,
+				storage:       storageSettings,
+				automation:    automationServiceFromComponents(p.services.Automation),
+				agent:         p.agentSettingsController,
+				jira:          settingsJiraServiceFromPointer(p.services.Jira),
+				linear:        settingsLinearServiceFromPointer(p.services.Linear),
+				sentry:        settingsSentryServiceFromPointer(p.services.Sentry),
+				github:        settingsGitHubServiceFromPointer(p.services.GitHub),
+				gitlab:        settingsGitLabServiceFromPointer(p.services.GitLab),
+				azureDevOps:   settingsAzureDevOpsServiceFromPointer(p.services.AzureDevOps),
+			},
+		))
+	}
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
 	mcpHandlers.SetPromptReader(p.services.Prompts)

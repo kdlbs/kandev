@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import { settledBoundingBox } from "../../helpers/settled-box";
 
 const SECRET_VALUE = "e2e-mobile-secret-delete-redaction-value";
 const REFERENCE_KINDS = ["agent_profile", "executor_profile", "repository"] as const;
@@ -19,7 +21,7 @@ function conflictReferences() {
 }
 
 test.describe("mobile-secrets-delete", () => {
-  test("confirms inline at the target row without exposing the value", async ({
+  test("confirms in a named sheet without exposing the value", async ({
     testPage,
     apiClient,
     prCapture,
@@ -39,12 +41,12 @@ test.describe("mobile-secrets-delete", () => {
       const trigger = row.getByRole("button", { name: `Delete secret ${name}` });
       await trigger.tap();
 
-      const inline = row.getByTestId("secret-delete-inline-confirmation");
+      const inline = testPage.getByRole("dialog", { name: `Delete secret ${name}` });
       await expect(inline).toBeVisible();
       await expect(inline).toContainText(
         `This will permanently remove ${name}. This action cannot be undone.`,
       );
-      const warningBox = await inline.locator("p").boundingBox();
+      const warningBox = await inline.getByTestId("mobile-confirmation-body").boundingBox();
       expect(warningBox).not.toBeNull();
       expect(warningBox!.x).toBeGreaterThanOrEqual(0);
       expect(warningBox!.x + warningBox!.width).toBeLessThanOrEqual(testPage.viewportSize()!.width);
@@ -62,8 +64,9 @@ test.describe("mobile-secrets-delete", () => {
         expect(box!.height).toBeGreaterThanOrEqual(44);
       }
       await assertNoDocumentHorizontalOverflow(testPage, "mobile secret deletion confirmation");
+      await waitForFiniteAnimations(inline);
       await prCapture.screenshot("mobile-secrets-delete-confirmation", {
-        caption: "Mobile secret row inline confirmation",
+        caption: "Mobile secret deletion confirmation sheet. The secret value is never shown.",
       });
 
       await inline.getByRole("button", { name: "Cancel" }).tap();
@@ -71,8 +74,8 @@ test.describe("mobile-secrets-delete", () => {
       expect((await apiClient.listSecrets()).some((item) => item.id === secret.id)).toBe(true);
 
       await row.getByRole("button", { name: `Delete secret ${name}` }).tap();
-      await row
-        .getByTestId("secret-delete-inline-confirmation")
+      await testPage
+        .getByRole("dialog", { name: `Delete secret ${name}` })
         .getByTestId("secret-delete-confirm")
         .tap();
       await expect(row).toHaveCount(0);
@@ -138,7 +141,8 @@ test.describe("mobile-secrets-delete", () => {
       await expect(referenceCards.last()).toBeInViewport();
       const close = conflictDialog.getByRole("button", { name: "Close" });
       await expect(close).toBeVisible();
-      expect((await close.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      const closeBox = await settledBoundingBox(close);
+      expect(closeBox.height).toBeGreaterThanOrEqual(44);
       await expect(row).toBeVisible();
       await expect(testPage.locator("body")).not.toContainText(SECRET_VALUE);
       await expect(testPage.locator("body")).not.toContainText("secret_in_use");

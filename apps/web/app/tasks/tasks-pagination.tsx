@@ -10,6 +10,7 @@ import {
   PaginationItem,
 } from "@kandev/ui/pagination";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import {
   IconChevronLeft,
   IconChevronRight,
@@ -121,7 +122,7 @@ function RowsPerPageSelect({
       >
         <SelectTrigger
           data-testid="tasks-pagination-page-size"
-          className="h-10 w-[76px] cursor-pointer sm:h-8"
+          className={controlSizingClassName("standard", "w-[76px] cursor-pointer")}
         >
           <SelectValue placeholder={pagination.pageSize} />
         </SelectTrigger>

@@ -352,7 +352,7 @@ function InstanceSelectRow({ state }: { state: DialogState }) {
     <div className="space-y-1 max-w-sm">
       <Label className="text-xs text-muted-foreground">{t("sentry:sentryInstance")}</Label>
       <Select value={instanceId || undefined} onValueChange={setInstanceId}>
-        <SelectTrigger className="h-8 text-xs" data-testid="sentry-browse-instance-select">
+        <SelectTrigger className="text-xs" data-testid="sentry-browse-instance-select">
           <SelectValue placeholder={t("sentry:selectAnInstanceToBrowse")} />
         </SelectTrigger>
         <SelectContent>
@@ -415,7 +415,7 @@ function LabeledInput({ id, label, value, onChange, placeholder }: LabeledInputP
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className="h-8 text-xs"
+        className="text-xs"
       />
     </div>
   );
@@ -433,7 +433,7 @@ function ProjectFilterSelect({ value, projects, onChange }: ProjectFilterSelectP
     <div className="space-y-1">
       <Label className="text-xs text-muted-foreground">{t("sentry:project")}</Label>
       <Select value={value || "__all__"} onValueChange={(v) => onChange(v === "__all__" ? "" : v)}>
-        <SelectTrigger className="h-8 text-xs">
+        <SelectTrigger className="text-xs">
           <SelectValue placeholder={t("sentry:allProjects")} />
         </SelectTrigger>
         <SelectContent>
@@ -455,7 +455,7 @@ function PeriodSelect({ value, onChange }: { value: Period; onChange: (v: Period
     <div className="space-y-1">
       <Label className="text-xs text-muted-foreground">{t("sentry:period")}</Label>
       <Select value={value} onValueChange={(v) => onChange(v as Period)}>
-        <SelectTrigger className="h-8 text-xs">
+        <SelectTrigger className="text-xs">
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

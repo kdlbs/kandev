@@ -5,9 +5,11 @@ import { useTranslation } from "react-i18next";
 import Link from "@/components/routing/app-link";
 import { useParams } from "@/lib/routing/client-router";
 import { IconCopy, IconTrash } from "@tabler/icons-react";
+import { IconAlertTriangle } from "@tabler/icons-react";
 import { Badge } from "@kandev/ui/badge";
 import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
+import { Alert, AlertDescription, AlertTitle } from "@kandev/ui/alert";
 import { Separator } from "@kandev/ui/separator";
 import { Switch } from "@kandev/ui/switch";
 import { useToast } from "@/components/toast-provider";
@@ -39,6 +41,7 @@ import {
 } from "@/components/settings/agent-profile-duplicate-action";
 import { CustomCLIFlagsCard } from "@/components/settings/cli-flags-field";
 import { ProfileEnabledHelp } from "@/components/settings/profile-enabled-help";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 export {
   ProfileEnvVarsEditor,
@@ -62,6 +65,7 @@ import type { AgentProfileMcpConfig } from "@/lib/types/http";
 import { useAgentProfileSettings } from "@/app/settings/agents/[agentId]/profiles/[profileId]/use-agent-profile-settings";
 import { agentProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useConfirmationBoundary } from "@/components/confirmation/mobile-action-confirmation";
 import { DynamicAgentProfileEditor } from "@/components/settings/dynamic-agent-profile-editor";
 import { isHandledApiError } from "@/lib/api/client";
 
@@ -110,7 +114,7 @@ function ProfileEditorHeader({
           variant="outline"
           onClick={onDuplicate}
           data-testid="duplicate-profile-header"
-          className="min-h-11 w-full md:w-auto"
+          className={settingsActionClassName("w-full md:w-auto")}
           disabled={duplicating}
           aria-busy={duplicating}
           title={t("agents:duplicateProfileNamed", { name: savedProfileName })}
@@ -134,15 +138,23 @@ function ProfileEditorHeader({
 }
 
 type DeleteProfileCardProps = {
+  profile: AgentProfile;
   onDelete: () => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onConfirm: () => void | Promise<void>;
 };
 
-function DeleteProfileCard({ onDelete, open, onOpenChange, onConfirm }: DeleteProfileCardProps) {
+function DeleteProfileCard({
+  profile,
+  onDelete,
+  open,
+  onOpenChange,
+  onConfirm,
+}: DeleteProfileCardProps) {
   const { t } = useTranslation();
-  const { isFinePointer } = useResponsiveBreakpoint();
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
+  useConfirmationBoundary(open, profile.id, onOpenChange);
   const deleteAnchorRef = useRef<HTMLButtonElement>(null);
   const closeDeleteConfirmation = () => {
     onOpenChange(false);
@@ -158,7 +170,7 @@ function DeleteProfileCard({ onDelete, open, onOpenChange, onConfirm }: DeletePr
           <p className="text-sm font-medium">{t("agents:removeThisProfile")}</p>
           <p className="text-xs text-muted-foreground">{t("agents:actionCannotBeUndone")}</p>
         </div>
-        {!open || isFinePointer ? (
+        {!open || isFinePointer || isMobile ? (
           <Button
             ref={deleteAnchorRef}
             variant="destructive"
@@ -170,9 +182,11 @@ function DeleteProfileCard({ onDelete, open, onOpenChange, onConfirm }: DeletePr
             {t("agents:delete")}
           </Button>
         ) : null}
-        {!isFinePointer && open ? (
+        {!isMobile && !isFinePointer && open ? (
           <div className="basis-full min-w-0">
             <AgentProfileDeleteConfirmation
+              profileId={profile.id}
+              profileName={profile.name}
               open={open}
               isFinePointer={false}
               anchorRef={deleteAnchorRef}
@@ -183,8 +197,10 @@ function DeleteProfileCard({ onDelete, open, onOpenChange, onConfirm }: DeletePr
           </div>
         ) : null}
       </CardContent>
-      {isFinePointer ? (
+      {isMobile || isFinePointer ? (
         <AgentProfileDeleteConfirmation
+          profileId={profile.id}
+          profileName={profile.name}
           open={open}
           isFinePointer
           anchorRef={deleteAnchorRef}
@@ -401,8 +417,17 @@ function ProfileEditor({
   const settingsAgents = useAppStore((state) => state.settingsAgents.items);
   const syncAgentsToStore = useSyncAgentsToStore();
   const { items: secrets } = useSecrets();
-  const { draft, setDraft, savedProfile, setSavedProfile, setSaveStatus, isDirty } =
-    useProfileEditorState(profile, permissionSettings);
+  const {
+    draft,
+    setDraft,
+    savedProfile,
+    setSaveStatus,
+    isDirty,
+    hasExternalConflict,
+    markProfileSubmitted,
+    acceptProfileSaveResponse,
+    discardProfileDraft,
+  } = useProfileEditorState(profile, permissionSettings);
   const [utilityConflict, setUtilityConflict] = useState<UtilityAgentReference[]>([]);
   const updateDraft = useCallback(
     (patch: Partial<AgentProfile>) => {
@@ -422,9 +447,9 @@ function ProfileEditor({
     agent,
     draft,
     savedProfile,
-    setSavedProfile,
-    setDraft,
     setSaveStatus,
+    markProfileSubmitted,
+    acceptProfileSaveResponse,
     settingsAgents,
     syncAgentsToStore,
     toast,
@@ -434,10 +459,12 @@ function ProfileEditor({
     id: `agent-profile:${draft.id}`,
     revision: JSON.stringify(draft),
     isDirty,
-    canSave: Boolean(draft.name.trim()) && !modelConfigResolutionPending,
-    invalidReason: profileSaveInvalidReason(draft.name, modelConfigResolutionPending, t),
+    canSave: Boolean(draft.name.trim()) && !modelConfigResolutionPending && !hasExternalConflict,
+    invalidReason: hasExternalConflict
+      ? t("agents:profileExternalChangeInvalidReason")
+      : profileSaveInvalidReason(draft.name, modelConfigResolutionPending, t),
     save: () => handleSave(),
-    discard: () => setDraft(savedProfile),
+    discard: discardProfileDraft,
   });
   const deleteState = useProfileDelete(agent, draft, settingsAgents, syncAgentsToStore, toast);
 
@@ -450,6 +477,24 @@ function ProfileEditor({
 
   return (
     <div className="space-y-8">
+      {hasExternalConflict ? (
+        <Alert variant="destructive" data-testid="profile-external-change-alert">
+          <IconAlertTriangle className="h-4 w-4" />
+          <AlertTitle>{t("agents:profileExternalChangeTitle")}</AlertTitle>
+          <AlertDescription className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <span>{t("agents:profileExternalChangeDescription")}</span>
+            <Button
+              type="button"
+              variant="outline"
+              className="min-h-11 shrink-0"
+              onClick={discardProfileDraft}
+              data-testid="profile-external-change-discard"
+            >
+              {t("agents:profileExternalChangeDiscard")}
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
       <ProfileEditorHeader
         agentName={agent.name}
         agentDisplayName={profile.agentDisplayName ?? ""}
@@ -485,6 +530,7 @@ function ProfileEditor({
       />
 
       <DeleteProfileCard
+        profile={savedProfile}
         onDelete={deleteState.requestDelete}
         open={deleteState.showDeleteConfirm}
         onOpenChange={deleteState.setShowDeleteConfirm}

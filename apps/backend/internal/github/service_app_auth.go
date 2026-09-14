@@ -457,6 +457,7 @@ type WorkspaceAuthStatus struct {
 	TokenConfigured              bool                       `json:"token_configured"`
 	RequiredScopes               []string                   `json:"required_scopes"`
 	RateLimit                    *GitHubRateLimitInfo       `json:"rate_limit,omitempty"`
+	PRDiscoveryHealth            *PRDiscoveryHealth         `json:"pr_discovery_health,omitempty"`
 }
 
 func (s *Service) GetWorkspaceAuthStatus(
@@ -501,6 +502,10 @@ func (s *Service) getWorkspaceAuthStatus(
 		WorkspaceID: workspaceID, Personal: personal, RequiredScopes: RequiredGitHubScopes,
 		AuthMethod: AuthMethodNone,
 	}
+	// A status response is authoritative for the current connection. Seed an
+	// explicit runtime-scoped unknown projection so a disconnected or
+	// unauthenticated response clears health from a previous connection.
+	status.PRDiscoveryHealth = s.ensurePRDiscoveryHealth().snapshot(workspaceID, "", 0)
 	if connection == nil {
 		return status, nil
 	}
@@ -530,6 +535,11 @@ func (s *Service) getWorkspaceAuthStatus(
 	s.seedWorkspaceRateLimit(ctx, automation, refreshRateLimit)
 	status.Automation.RateLimit = rateLimitInfoForTracker(automation.RateTracker)
 	status.RateLimit = status.Automation.RateLimit
+	status.PRDiscoveryHealth = s.ensurePRDiscoveryHealth().snapshot(
+		workspaceID,
+		credentialCacheScope(automation, CredentialPurposeAutomation),
+		automation.CredentialGeneration,
+	)
 
 	s.populateEffectivePersonalActors(ctx, workspaceID, userID, status)
 	return status, nil

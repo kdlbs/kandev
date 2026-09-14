@@ -12,9 +12,22 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+// RunPayloadOneTimeInstructionsKey names the run-payload field carrying a
+// workflow move's one-shot instructions. The orchestrator's office auto-start
+// path writes it (officeRunPayloadOneTimeInstructionsKey); the two packages
+// intentionally avoid importing each other, so the key is duplicated as a
+// literal on both sides.
+const RunPayloadOneTimeInstructionsKey = "one_time_instructions"
+
 // PromptContext holds the data needed to build a run prompt.
 type PromptContext struct {
 	Reason string
+
+	// OneTimeInstructions carries a workflow move's one-shot instructions for
+	// this run only. When set, BuildPrompt appends it after the per-reason
+	// prompt body. Office runs build their prompt from a template rather than
+	// the durable step, so move instructions ride on the run payload.
+	OneTimeInstructions string
 
 	// Task fields
 	TaskID          string
@@ -76,6 +89,16 @@ type PromptContext struct {
 	// renders metadata + the fetch-tool name so the agent can call
 	// get_task_document_kandev to read content.
 	HandoffContext *v1.TaskContext
+
+	// Routine catch-up gap fields. Populated by buildPromptContext only
+	// when the run's reason is one of the three routine-dispatch reasons
+	// and its ContextSnapshot decodes a wakeup.RoutinePayload carrying a
+	// gap (AC-OFFICE-ROUTINE-CATCHUP-002.5). MissedTicks is 0 when no gap
+	// was measured or reported for this run's claim, in which case
+	// BuildPrompt renders no wake-context line at all.
+	MissedTicks     int
+	MissedSince     string
+	MissedTruncated bool
 }
 
 // BuildPrompt generates a structured prompt for a run reason.
@@ -113,8 +136,41 @@ func BuildPrompt(pc *PromptContext) string {
 	default:
 		prompt = fmt.Sprintf("You have been woken for reason: %s.", pc.Reason)
 	}
+	prompt = appendOneTimeInstructions(prompt, pc.OneTimeInstructions)
+	prompt = appendMissedTicksSection(prompt, pc)
 	prompt = appendHandoffSection(prompt, pc.HandoffContext)
 	return appendRuntimeContext(prompt, pc)
+}
+
+// appendOneTimeInstructions appends a workflow move's one-shot instructions to
+// the run prompt. Empty or whitespace-only input leaves the prompt unchanged.
+func appendOneTimeInstructions(prompt, instructions string) string {
+	instructions = strings.TrimSpace(instructions)
+	if instructions == "" {
+		return prompt
+	}
+	return prompt + "\n\n## One-time workflow move instructions\n\n" + instructions
+}
+
+// appendMissedTicksSection renders the gap a routine's cron tick measured
+// for this run's claim, when one was recorded (AC-OFFICE-ROUTINE-CATCHUP-002.5).
+// Renders nothing when MissedTicks is 0 — the no-gap-summary case (walk
+// failed, policy is skip_missed, catch_up_max is 1, or the tick was merely
+// late with no missed ticks) must produce no missed-tick statement at all
+// (AC-002.3), and a manual or webhook fire never sets MissedTicks in the
+// first place (AC-002.12).
+func appendMissedTicksSection(prompt string, pc *PromptContext) string {
+	if pc == nil || pc.MissedTicks <= 0 {
+		return prompt
+	}
+	if !strings.HasSuffix(prompt, "\n") {
+		prompt += "\n"
+	}
+	line := fmt.Sprintf("\nYou missed %d scheduled tick(s) since %s.", pc.MissedTicks, pc.MissedSince)
+	if pc.MissedTruncated {
+		line += " This count is a lower bound (more ticks were missed than could be counted)."
+	}
+	return prompt + line
 }
 
 // appendHandoffSection renders the office task-handoffs context block

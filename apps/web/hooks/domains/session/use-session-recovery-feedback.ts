@@ -5,6 +5,7 @@ type RecoveryResumptionState = "resumed" | "running";
 type RecoveryFeedbackSetters = {
   setError: (value: string | null) => void;
   setNotice?: (value: string | null) => void;
+  setRecoveryFailure?: (value: null) => void;
   setResumptionState: (value: RecoveryResumptionState) => void;
 };
 
@@ -20,7 +21,7 @@ export function useSessionRecoveryFeedback(
   notice: string | null,
   setters: RecoveryFeedbackSetters,
 ): void {
-  const { setError, setNotice, setResumptionState } = setters;
+  const { setError, setNotice, setRecoveryFailure, setResumptionState } = setters;
   const lastObservedSessionRef = useRef<{ id: string | null; state?: string }>({
     id: sessionId,
     state: sessionState,
@@ -33,6 +34,16 @@ export function useSessionRecoveryFeedback(
     if (!stateChanged || !isActiveSessionState(sessionState)) return;
     if (error !== null) setError(null);
     if (notice !== null) setNotice?.(null);
+    setRecoveryFailure?.(null);
     setResumptionState(sessionState === "RUNNING" ? "running" : "resumed");
-  }, [error, notice, sessionId, sessionState, setError, setNotice, setResumptionState]);
+  }, [
+    error,
+    notice,
+    sessionId,
+    sessionState,
+    setError,
+    setNotice,
+    setRecoveryFailure,
+    setResumptionState,
+  ]);
 }

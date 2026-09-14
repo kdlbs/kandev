@@ -1,3 +1,10 @@
+import type { RefObject } from "react";
+
+export type QuickChatLauncherFocusOptions = {
+  silent?: boolean;
+  returnFocusRef?: RefObject<HTMLElement | null>;
+};
+
 let launcherFocus: HTMLElement | null = null;
 let launcherFocusShouldBeSilent = false;
 let quickChatCloseHandler: (() => void) | null = null;
@@ -11,10 +18,12 @@ function markFocusAsSilent(element: HTMLElement): void {
 }
 
 /** Records the control that opened the shared Quick Chat surface. */
-export function captureQuickChatLauncherFocus(options: { silent?: boolean } = {}): void {
+export function captureQuickChatLauncherFocus(options: QuickChatLauncherFocusOptions = {}): void {
   launcherFocusShouldBeSilent = false;
   if (typeof document === "undefined") return;
-  launcherFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  launcherFocus =
+    options.returnFocusRef?.current ??
+    (document.activeElement instanceof HTMLElement ? document.activeElement : null);
   launcherFocusShouldBeSilent = options.silent ?? true;
 }
 

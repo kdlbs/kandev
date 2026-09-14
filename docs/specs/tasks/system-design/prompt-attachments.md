@@ -4,6 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-PROMPT-ATTACHMENTS-001
 created: 2026-09-01
+updated: 2026-09-10
 owners:
   - Kandev team
 ---
@@ -110,6 +111,94 @@ backend derives those values from authenticated and persisted state.
 
 Task-scoped idempotency applies only when the stored task matches. Session
 scoping remains strict when the stored claim contains a session identity.
+
+## Initial preview during workspace preparation
+
+This proposed extension covers AC-TASKS-PROMPT-ATTACHMENTS-001.8 through
+AC-TASKS-PROMPT-ATTACHMENTS-001.11. The task system owns the submitted
+attachment set and its session binding. Transcript history still follows the
+[UI history design](../../ui/system-design/task-prompt-transcript-visibility.md).
+
+The task-create handlers currently prepare a session synchronously, then start
+it asynchronously. `prepareStartAgentSession` does not forward the submitted
+text or attachments. `postLaunchCreated` and `postLaunchStart` record the
+initial user message after launch. Until then, `useProcessedMessages` builds a
+text-only task-description fallback.
+
+Pass an internal, display-only initial-preview value through the task-create
+prepare path, including prepare-only creation. Persist it in the target
+session's metadata as `initial_prompt_preview` before publishing the created
+session or starting workspace preparation. Use an internal preparation option;
+do not make preview data a second agent-dispatch input or change passthrough
+prepare upgrades. The value contains `content` and `attachments`, using the
+existing display descriptor fields: `attachment_id`, `type`, `name`,
+`mime_type`, `size_bytes`, and `delivery_mode`. Only validated file-backed
+descriptors from the successful task attachment claim enter this value.
+Do not copy inline bytes, storage paths, hidden prompts, or arbitrary metadata.
+
+Use the existing session metadata persistence and session publication path.
+No new endpoint or table is needed. An atomic metadata-key update must preserve
+other session keys. A failed preview write must stop this preparation path
+before background work starts and use its existing failure handling.
+Reused sessions must not acquire another initial preview. Legacy inline-only
+attachments keep their existing post-launch behavior; this extension targets
+the file-backed web submission path.
+
+The snapshot remains session-owned across reload and preparation failure. It
+is display data, not evidence of delivery, a turn, a prompt ordinal, or a retry
+queue. Retain it with the session so a delayed metadata hydration cannot revive
+a deleted key. Existing session deletion removes it. Stored user messages are
+always authoritative once loaded. Retries must not copy the snapshot into a
+different session or alter attachment claim/delivery semantics.
+
+`useSessionState` already provides the resolved session. Pass its validated
+preview through `useSessionData` to `useProcessedMessages`. Validate unknown
+metadata before mapping it to `Message.metadata.attachments`; reject malformed
+entries independently. Never combine task-wide attachment inventory with the
+current session or read the transient `deferred_launch` metadata as display state.
+
+Render one synthetic user row only when history is initialized, no older
+history remains, and no stored user row is visible. Prefer the session preview
+when it has text or valid attachments; otherwise preserve the existing legacy
+task-description fallback. Keep the synthetic row's existing identity and
+missing-timestamp behavior. Include the preview in memo dependencies so late
+session hydration updates the row. Do not insert it into persisted message
+state or enable persisted-message mutations for it.
+
+Reuse `chat-message.tsx` image and resource attachment rendering, including
+`attachmentContentUrl` and the existing image dialog. Correct its local
+attachment type to represent optional inline bytes and file-backed IDs.
+Continue to authorize content reads through the existing attachment service.
+An inaccessible image must not remove the surrounding message or siblings.
+
+### Desktop and phone composition
+
+Both surfaces show the initial user row above existing preparation progress.
+Images and compact file labels wrap inside that row, above its text. The primary
+action is opening an image. No additional navigation or toolbar is introduced.
+The phone entry is the existing task Chat view. Reuse the dedicated phone
+composition in `components/task/task-layout.tsx`, the attachment controls in
+`chat-message.tsx`, and the mixed-attachment mobile E2E exemplar.
+
+The transcript remains the single vertical scroll owner. Existing full-height
+layout, safe-area handling, image-dialog dismissal, focus return, and touch
+targets remain in effect. Inline attachment content fits this brief review
+task without an intermediate picker. Desktop and phone share the preview data
+and replacement logic; no responsive preference is persisted.
+
+### Verification boundaries
+
+Backend tests pause before workspace launch and verify persisted preview
+metadata, fresh reads, prepare-only behavior, claim rejection, and unrelated
+session isolation. Frontend tests cover descriptor mapping, attachment-only
+content, malformed metadata, late hydration, history guards, and replacement.
+Desktop and mobile browser tests open both attachments during preparation,
+reload, then observe one stored initial message after launch. Include failure
+and unavailable-content cases without suppressing existing progress errors.
+
+## Implementation plans
+
+- [Preparation attachment previews](../../../plans/preparation-attachment-previews/plan.md)
 
 ## Observability
 

@@ -10,12 +10,10 @@
  * indicators, so nothing here participates in composing or sending a message.
  */
 
-import { IconArrowRight } from "@tabler/icons-react";
-import { useTranslation } from "react-i18next";
-import { Button } from "@kandev/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import type { ReactNode } from "react";
 import { useAppStore } from "@/components/state-provider";
+import { WorkflowMoveProceedButton } from "@/components/task/workflow-move-proceed-button";
+import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 import { PRStatusChip } from "@/components/github/pr-status-chip";
 import { MRStatusChip } from "@/components/gitlab/mr-status-chip";
 import { TaskDependencyChip } from "@/components/task/task-dependency-chip";
@@ -29,6 +27,9 @@ import { TodoIndicator } from "./todo-indicator";
 import { AutoScrollToggleButton } from "./auto-scroll-toggle-button";
 import { PRMergedBanner, PRClosedBanner } from "./pr-archive-banners";
 import { AutopilotChatChip, useTaskAutopilot } from "./task-autopilot-chat-chip";
+import { shouldShowProceed } from "./types";
+import { useComposerDisclosureContext } from "./composer-disclosure";
+import { cn } from "@/lib/utils";
 
 type TodoDisplayItem = {
   text: string;
@@ -107,8 +108,9 @@ export type ChatStatusBarProps = {
   sessionId: string | null;
   sessionState: string | null;
   nextStepName: string | null;
-  onProceed: () => void;
+  onProceed: (options?: WorkflowMoveEntryOptions) => boolean | void | Promise<boolean | void>;
   isAgentBusy: boolean;
+  hasPendingClarification: boolean;
   isMoving: boolean;
   queueChip?: ReactNode;
   showScrollToLastPrompt?: boolean;
@@ -118,6 +120,27 @@ export type ChatStatusBarProps = {
   onScrollToStart?: () => void;
 };
 
+export function ComposerCIStatus({
+  taskId,
+  sessionId,
+  standalone = false,
+}: {
+  taskId: string | null;
+  sessionId: string | null;
+  standalone?: boolean;
+}) {
+  return (
+    <div
+      className={cn("flex flex-wrap items-center gap-1.5 empty:hidden", standalone && "px-2 py-1")}
+    >
+      <PRStatusChip taskId={taskId} />
+      <MRStatusChip taskId={taskId} />
+      <AzureDevOpsTaskPullRequestChip taskId={taskId} />
+      <RegisteredChangeRequestStatus taskId={taskId} sessionId={sessionId} surface="composer" />
+    </div>
+  );
+}
+
 export function ChatStatusBar({
   todoItems,
   taskId,
@@ -126,6 +149,7 @@ export function ChatStatusBar({
   nextStepName,
   onProceed,
   isAgentBusy,
+  hasPendingClarification,
   isMoving,
   queueChip,
   showScrollToLastPrompt,
@@ -134,9 +158,9 @@ export function ChatStatusBar({
   showScrollToStart,
   onScrollToStart,
 }: ChatStatusBarProps) {
-  const { t } = useTranslation();
+  const separateCI = useComposerDisclosureContext()?.enabled;
   const showTodos = todoItems.length > 0;
-  const showProceed = !!nextStepName && !isAgentBusy;
+  const showProceed = shouldShowProceed(nextStepName, isAgentBusy, hasPendingClarification);
   const autopilot = useTaskAutopilot(taskId);
   const showAutoScrollControl = useAppStore(
     (state) => state.userSettings.showTranscriptAutoScrollControl,
@@ -173,10 +197,7 @@ export function ChatStatusBar({
       {showTodos && <TodoIndicator todos={todoItems} />}
       {autopilot && <AutopilotChatChip />}
       <TaskDependencyChip taskId={taskId} />
-      <PRStatusChip taskId={taskId} />
-      <MRStatusChip taskId={taskId} />
-      <AzureDevOpsTaskPullRequestChip taskId={taskId} />
-      <RegisteredChangeRequestStatus taskId={taskId} sessionId={sessionId} surface="composer" />
+      {!separateCI && <ComposerCIStatus taskId={taskId} sessionId={sessionId} />}
       {queueChip}
       {/* Distinct per-banner keys: the key remounts the banner on task switch
           so its dismissed state re-initialises, and keeping the two suffixes
@@ -199,24 +220,14 @@ export function ChatStatusBar({
           />
         </div>
       )}
-      {showProceed && (
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className={`${showRightControls ? "" : "ml-auto "}h-6 gap-1 px-2.5 text-xs cursor-pointer text-primary`}
-              onClick={onProceed}
-              disabled={isMoving}
-              data-testid="proceed-next-step"
-            >
-              {nextStepName}
-              <IconArrowRight className="h-3.5 w-3.5" />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>{t("task:moveTaskToTheNextWorkflow")}</TooltipContent>
-        </Tooltip>
+      {showProceed && nextStepName && (
+        <WorkflowMoveProceedButton
+          nextStepName={nextStepName}
+          onProceed={onProceed}
+          isMoving={isMoving}
+          className={`${showRightControls ? "" : "ml-auto "}h-6`}
+          testId="proceed-next-step"
+        />
       )}
     </div>
   );

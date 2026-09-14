@@ -44,6 +44,12 @@ Use `@` for files, saved prompts, and the current plan. New task lookup is under
 
 Select **Quick Chat** beside **New Task** in the expanded sidebar, or select its standalone row in the collapsed sidebar.
 
+On a phone, open the topbar menu in **Kanban**, **List**, or **Threads**, then
+select **Quick Chat** or **Quick terminal**. The menu closes before the tool
+opens. The topbar menu button shows Quick Chat activity: a blue dot while a chat
+is running and a green dot when a reply is ready to read. Terminal tabs do not
+contribute to this activity indicator.
+
 ### Start a chat
 
 1. Turn on **Configuration chat** when the conversation should inspect or change Kandev configuration. This option is hidden when the workspace already has a configuration conversation.
@@ -113,12 +119,25 @@ Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusab
 
 Type `@` in the task chat composer and select a prompt. The visible message keeps the `@name`; Kandev expands the prompt content into hidden system context for the agent. References are recognized only at the start of the text or after whitespace and must match the stored name. Prompt content can reference other saved prompts. Expansion stops at a depth of eight, skips cycles, and includes each prompt only once.
 
+In the new task form, the same completion inserts an editable `@name` chip.
+Select the chip to preview the saved prompt, or use its remove action to delete
+that occurrence. Task creation submits the visible alias text, so later prompt
+updates apply when the task launches. Unknown names and aliases in code spans or
+link destinations remain ordinary text.
+
+Kandev always seeds an editable built-in prompt named `create-canvas`. When
+canvases are enabled, the workspace canvas setup form references it as
+`@create-canvas`, so the task description stays short while the agent receives
+the canvas authoring workflow at launch. Editing the prompt changes later
+canvas tasks; a user prompt with the same name keeps its own content.
+
 Initial task and Quick Chat launches also expand known references when no workflow step is configured. The stored message and the prompt sent to the agent keep the same saved-prompt context.
 
 The Settings prompt editor also offers the same `@name` completion when you edit a saved prompt, a workflow prompt, a workflow step, an automation instruction, a quick action, or a provider watch. The prompt being edited is excluded from its own completion list, so selecting a reference cannot create a direct self-reference by accident. The same `@name` reference works in a workflow step's Prompt field and in a GitHub Review Watch's prompt; see [Saved prompt references in step prompts](workflow-tips.md#saved-prompt-references-in-step-prompts).
 
 Kandev seeds these built-ins:
 
+- `create-canvas`
 - `code-review`
 - `open-pr`
 - `merge-base`

@@ -40,6 +40,22 @@ def run_tests_step(workflow: str) -> str:
     return remainder.partition(NEXT_STEP_MARKER)[0]
 
 
+def frontend_job(workflow: str) -> str:
+    """Return the frontend job body, up to the required gate."""
+    _, separator, remainder = workflow.partition("  frontend:\n")
+    if not separator:
+        raise AssertionError("frontend-tests.yml has no frontend job")
+    return remainder.partition("\n  frontend-gate:")[0]
+
+
+def frontend_gate_job(workflow: str) -> str:
+    """Return the required frontend gate body."""
+    _, separator, remainder = workflow.partition("  frontend-gate:\n")
+    if not separator:
+        raise AssertionError("frontend-tests.yml has no frontend-gate job")
+    return remainder
+
+
 def trigger_block(workflow: str, trigger: str) -> str:
     """Return `trigger`'s block under `on:`, up to the next top-level key."""
     block = re.search(rf"(?m)^  {trigger}:\n(?:^ {{4}}.*\n|^\n)*", workflow)
@@ -49,6 +65,78 @@ def trigger_block(workflow: str, trigger: str) -> str:
 
 
 class FrontendTestsWorkflowContractTest(unittest.TestCase):
+    def test_cache_resolves_the_container_pnpm_store_before_restore(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        job = frontend_job(workflow)
+        resolve_index = job.find("- name: Resolve pnpm store path")
+        cache_index = job.find("- name: Cache pnpm store")
+        install_index = job.find("- name: Install dependencies")
+
+        self.assertGreaterEqual(resolve_index, 0, "store resolution step is missing")
+        self.assertGreaterEqual(cache_index, 0, "cache step is missing")
+        self.assertGreaterEqual(install_index, 0, "dependency installation step is missing")
+        self.assertLess(resolve_index, cache_index)
+        self.assertLess(cache_index, install_index)
+        resolve_step = job[resolve_index:cache_index]
+        cache_step = job[cache_index:install_index]
+
+        self.assertIn("id: pnpm-store", resolve_step)
+        self.assertIn("pnpm store path --silent", resolve_step)
+        self.assertIn('pnpm --version', resolve_step)
+        self.assertIn('mkdir -p "${STORE_PATH}"', resolve_step)
+        self.assertIn('printf \'path=%s\\n\' "${STORE_PATH}"', resolve_step)
+        self.assertIn("path: ${{ steps.pnpm-store.outputs.path }}", cache_step)
+        self.assertIn("runner.os", cache_step)
+        self.assertIn("runner.arch", cache_step)
+        self.assertIn("steps.pnpm-store.outputs.version", cache_step)
+        self.assertIn("hashFiles('apps/pnpm-lock.yaml')", cache_step)
+        self.assertIn(
+            "restore-keys: pnpm-${{ runner.os }}-${{ runner.arch }}-${{ steps.pnpm-store.outputs.version }}-",
+            cache_step,
+        )
+        self.assertIn("continue-on-error: true", cache_step)
+
+    def test_cache_failure_does_not_replace_frozen_installation(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        job = frontend_job(workflow)
+        cache_index = job.index("- name: Cache pnpm store")
+        install_index = job.index("- name: Install dependencies")
+        install_step = job[install_index:].partition(NEXT_STEP_MARKER)[0]
+
+        self.assertLess(cache_index, install_index)
+        self.assertIn("pnpm install --frozen-lockfile", install_step)
+
+    def test_frontend_job_keeps_unsharded_unit_tests_and_static_checks(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        job = frontend_job(workflow)
+
+        self.assertIn("- name: Run tests\n", job)
+        self.assertIn("NODE_ENV: production", job)
+        self.assertIn("pnpm --filter @kandev/web test", job)
+        self.assertIn("- name: Run lint\n", job)
+        self.assertIn("- name: Run typecheck\n", job)
+        self.assertIn("- name: Build\n", job)
+        self.assertNotIn("FRONTEND_TEST_SHARD", job)
+        self.assertNotIn("matrix:", job)
+
+    def test_frontend_tests_remain_outside_the_planner_until_adoption_evidence(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        planner = workflow.partition("  changes:\n")[0]
+
+        self.assertNotIn('"name":"frontend_tests"', planner)
+        self.assertNotIn("  frontend_tests:\n", workflow)
+
+    def test_required_gate_requires_every_frontend_verification_result(self) -> None:
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        gate = frontend_gate_job(workflow)
+
+        self.assertIn(
+            "needs: [changes, frontend, runner_plan]",
+            gate,
+        )
+        self.assertNotIn("FRONTEND_TESTS_RESULT:", gate)
+        self.assertNotIn("Frontend test matrix finished with result:", gate)
+
     def test_test_step_reproduces_the_production_environment(self) -> None:
         step = run_tests_step(WORKFLOW.read_text(encoding="utf-8"))
 

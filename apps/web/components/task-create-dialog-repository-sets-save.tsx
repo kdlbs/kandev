@@ -17,8 +17,12 @@ import { Textarea } from "@kandev/ui/textarea";
 import { createRepositorySet } from "@/lib/api";
 import { ApiError } from "@/lib/api/client";
 import { useAppStore } from "@/components/state-provider";
+import type { Repository } from "@/lib/types/http";
 import type { TaskRepoRow } from "@/components/task-create-dialog-types";
-import { selectedRepositoryIdsForSet } from "@/components/task-create-dialog-repository-sets";
+import {
+  selectedRepositoryIdsForSet,
+  selectedRepositoryMembersForSet,
+} from "@/components/task-create-dialog-repository-sets";
 
 type SaveRepositorySetDialogProps = {
   open: boolean;
@@ -26,6 +30,12 @@ type SaveRepositorySetDialogProps = {
   workspaceId: string;
   /** The picker's current rows; only workspace repository rows can be saved. */
   rows: TaskRepoRow[];
+  /** Workspace defaults are needed to capture the effective local base. */
+  repositories?: Repository[];
+  /** Local execution keeps the checkout branch separate from the base. */
+  isLocalExecutor?: boolean;
+  /** Fresh-branch mode uses the selected row branch as the fork base. */
+  freshBranchEnabled?: boolean;
 };
 
 /**
@@ -33,14 +43,17 @@ type SaveRepositorySetDialogProps = {
  *
  * This is the definition path that does not make the user leave a task they are
  * in the middle of creating: it creates the set and leaves the draft untouched.
- * Branches are not saved, matching the model - a set holds repositories, and the
- * branch is chosen per task.
+ * Base choices are saved as part of each ordered member. Checkout state for a
+ * local executor is intentionally not part of the set.
  */
 export function SaveRepositorySetDialog({
   open,
   onOpenChange,
   workspaceId,
   rows,
+  repositories,
+  isLocalExecutor = false,
+  freshBranchEnabled = false,
 }: SaveRepositorySetDialogProps) {
   const { t } = useTranslation();
   const upsertRepositorySet = useAppStore((state) => state.upsertRepositorySet);
@@ -50,9 +63,14 @@ export function SaveRepositorySetDialog({
   const [saving, setSaving] = useState(false);
 
   const repositoryIds = useMemo(() => selectedRepositoryIdsForSet(rows), [rows]);
+  const repositoryMembers = useMemo(
+    () => selectedRepositoryMembersForSet(rows, repositories, isLocalExecutor, freshBranchEnabled),
+    [rows, repositories, isLocalExecutor, freshBranchEnabled],
+  );
   // A row that names a discovered local path, a remote URL, or nothing at all is
   // not a workspace repository, so it cannot be a member.
   const excludedRowCount = rows.filter((row) => !row.repositoryId).length;
+  const duplicateRowCount = rows.length - excludedRowCount - repositoryIds.length;
 
   const handleSubmit = async () => {
     const trimmed = name.trim();
@@ -63,7 +81,7 @@ export function SaveRepositorySetDialog({
       const created = await createRepositorySet(workspaceId, {
         name: trimmed,
         description: description.trim(),
-        repositoryIds,
+        repositories: repositoryMembers,
       });
       upsertRepositorySet(workspaceId, created);
       setName("");
@@ -93,6 +111,7 @@ export function SaveRepositorySetDialog({
             description={description}
             memberCount={repositoryIds.length}
             excludedRowCount={excludedRowCount}
+            duplicateRowCount={duplicateRowCount}
             error={error}
             onNameChange={setName}
             onDescriptionChange={setDescription}
@@ -121,6 +140,7 @@ type SaveRepositorySetFieldsProps = {
   description: string;
   memberCount: number;
   excludedRowCount: number;
+  duplicateRowCount: number;
   error: string | null;
   onNameChange: (value: string) => void;
   onDescriptionChange: (value: string) => void;
@@ -132,6 +152,7 @@ function SaveRepositorySetFields({
   description,
   memberCount,
   excludedRowCount,
+  duplicateRowCount,
   error,
   onNameChange,
   onDescriptionChange,
@@ -164,6 +185,11 @@ function SaveRepositorySetFields({
       {excludedRowCount > 0 ? (
         <p className="text-xs text-muted-foreground" data-testid="repository-set-save-excluded">
           {t("task:repositorySetsSaveExcludedRows", { count: excludedRowCount })}
+        </p>
+      ) : null}
+      {duplicateRowCount > 0 ? (
+        <p className="text-xs text-muted-foreground" data-testid="repository-set-save-duplicates">
+          {t("task:repositorySetsSaveDuplicateRows", { count: duplicateRowCount })}
         </p>
       ) : null}
       {error ? (

@@ -1,5 +1,6 @@
 import type { QueueMessageParams } from "@/lib/api/domains/queue-api";
 import type { EntityReference } from "@/lib/types/entity-reference";
+import type { TaskPlanCommentRef } from "@/lib/types/http";
 
 export type MessageAttachment = {
   type: string;
@@ -19,4 +20,7 @@ export type QueueMessageInput = {
   attachments?: MessageAttachment[];
   entityReferences?: EntityReference[];
   contextFilesMeta?: QueueMessageParams["context_files"];
+  clientQueueId?: string;
+  planCommentRefs?: TaskPlanCommentRef[];
+  requirePrimarySession?: boolean;
 };
