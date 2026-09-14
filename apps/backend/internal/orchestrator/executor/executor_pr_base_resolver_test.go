@@ -47,7 +47,7 @@ func TestResolveTaskRepoInfo_PRBaseLookupFailureKeepsStoredBase(t *testing.T) {
 	}
 }
 
-func TestResolveTaskRepoInfo_KeepsMissingIntegrationRefEmpty(t *testing.T) {
+func TestResolveTaskRepoInfo_FallsBackToTaskRepositoryBaseForIntegrationRef(t *testing.T) {
 	repo := newMockRepository()
 	repo.repositories["repo-1"] = &models.Repository{
 		ID:            "repo-1",
@@ -67,8 +67,8 @@ func TestResolveTaskRepoInfo_KeepsMissingIntegrationRefEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolveTaskRepoInfo() error: %v", err)
 	}
-	if info.IntegrationRef != "" {
-		t.Fatalf("IntegrationRef = %q, want empty so cleanup fails closed", info.IntegrationRef)
+	if info.IntegrationRef != "main" {
+		t.Fatalf("IntegrationRef = %q, want task repository base", info.IntegrationRef)
 	}
 }
 
