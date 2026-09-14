@@ -128,7 +128,12 @@ export function InboxHistoryRow({ bundle }: { bundle: InboxHistoryBundle }) {
           <Badge variant="secondary" data-testid="inbox-history-row-reason">
             {t(inboxHistoryReasonLabelKey(bundle.reason))}
           </Badge>
-          <span className="shrink-0 text-xs text-muted-foreground">{relativeTime}</span>
+          <span
+            className="shrink-0 text-xs text-muted-foreground"
+            data-testid="inbox-history-row-asked-time"
+          >
+            {relativeTime}
+          </span>
           {expanded ? (
             <IconChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
           ) : (
