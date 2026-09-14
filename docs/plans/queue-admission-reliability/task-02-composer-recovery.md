@@ -1,7 +1,7 @@
 ---
 id: "02-composer-recovery"
 title: "Composer recovery and feedback"
-status: pending
+status: completed
 wave: 2
 depends_on:
   - "01-durable-admission"
@@ -65,7 +65,7 @@ No new scroll owner or navigation is introduced. Compare rendered screenshots wi
 Run from the repository root. If workspace dependencies are absent, first run `(cd apps && pnpm install --frozen-lockfile)`.
 
 ```bash
-(cd apps/web && pnpm exec vitest run hooks/use-message-handler.test.ts hooks/domains/session/use-queue.test.ts hooks/domains/session/use-queue.plan-comments.test.ts lib/api/domains/queue-api.test.ts lib/api/domains/queue-api.plan-comments.test.ts lib/api/domains/queue-api.admission.test.ts components/task/chat/chat-input-area.test.tsx)
+(cd apps/web && pnpm exec vitest run hooks/use-message-handler.test.ts hooks/use-message-handler.plan-comments.test.ts hooks/domains/session/use-queue.test.ts hooks/domains/session/use-queue.plan-comments.test.ts lib/api/domains/queue-api.test.ts lib/api/domains/queue-api.plan-comments.test.ts lib/api/domains/queue-api.admission.test.ts components/task/chat/chat-input-area.test.tsx)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm run i18n:check)
 (cd apps/web && pnpm e2e:run --project chromium tests/chat/queue-admission-reliability.spec.ts)
@@ -118,4 +118,15 @@ Unbounded transcript pagination delays useful feedback. Raw server errors are no
 
 ## Results
 
-Pending. Diagnostic tests passed during planning, but implementation and rendered verification have not started.
+Implemented stable ordinary admission IDs, 10-second and 30-second request budgets, bounded reconciliation with one same-identity retry, typed queue rejection errors, draft and attachment preservation, and localized composer feedback. Task chat and Quick Chat share the recovery behavior, with desktop and mobile browser coverage. Added the five locale catalogs and updated the public sessions guide.
+
+Verification passed:
+
+- The targeted Vitest command above: 8 files, 142 tests.
+- `pnpm run typecheck`, `pnpm run lint`, `pnpm run i18n:check`, and `pnpm run build`.
+- `pnpm run e2e:sleep-ratchet`.
+- Chromium admission E2E: 4 passed.
+- Mobile Chrome admission E2E: 2 passed.
+- `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check`.
+
+Review remediation passed: unrecognized structured WebSocket conflicts preserve their original error identity, code, and details for plan-comment and primary-session recovery. The pseudo-locale retains the named `count` component tags, and unrelated generated catalog churn was removed.

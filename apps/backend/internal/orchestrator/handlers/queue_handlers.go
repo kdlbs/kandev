@@ -121,6 +121,34 @@ type QueueIdentityAttachmentAdmissionService interface {
 	) (*messagequeue.QueuedMessage, error)
 }
 
+// QueueIdentityClientAdmissionService admits a browser queue message with a
+// caller-owned identity that can be replayed after an uncertain response.
+type QueueIdentityClientAdmissionService interface {
+	LookupQueueAdmissionWithClientQueueID(
+		context.Context,
+		messagequeue.QueueSessionIdentity,
+		string,
+		string,
+		string,
+		string,
+		bool,
+		[]messagequeue.MessageAttachment,
+		map[string]interface{},
+	) (*messagequeue.QueuedMessage, bool, error)
+	QueueMessageWithMetadataForSessionWithClientQueueID(
+		context.Context,
+		messagequeue.QueueSessionIdentity,
+		string,
+		string,
+		string,
+		string,
+		bool,
+		[]messagequeue.MessageAttachment,
+		map[string]interface{},
+		*messagequeue.QueueAttachmentClaim,
+	) (*messagequeue.QueuedMessage, bool, error)
+}
+
 type QueueIdentityMutationService interface {
 	AppendContentForSession(context.Context, messagequeue.QueueSessionIdentity, string, string, string, bool, []messagequeue.MessageAttachment) (*messagequeue.QueuedMessage, bool, error)
 	UpdateMessageWithMetadataForSession(context.Context, messagequeue.QueueSessionIdentity, string, string, []messagequeue.MessageAttachment, map[string]interface{}, string) error
@@ -574,11 +602,21 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 	if messagequeue.IsReservedQueuedBy(req.UserID) {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, reservedIdentityError(req.UserID), nil)
 	}
-	references, err := h.validateSubmittedReferences(ctx, req.SessionID, req.TaskID, req.EntityReferences)
-	if err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, queueInvalidReferences, nil)
+	var err error
+	identifiedOrdinary := req.ClientQueueID != "" && len(req.PlanCommentRefs) == 0
+	if identifiedOrdinary {
+		references, normalizeErr := entityrefs.NormalizeForSubmission(req.EntityReferences)
+		if normalizeErr != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, queueInvalidReferences, nil)
+		}
+		req.EntityReferences = references
+	} else {
+		references, validationErr := h.validateSubmittedReferences(ctx, req.SessionID, req.TaskID, req.EntityReferences)
+		if validationErr != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, queueInvalidReferences, nil)
+		}
+		req.EntityReferences = references
 	}
-	req.EntityReferences = references
 
 	// Default empty user_id to QueuedByUser so the entry has a non-empty owner;
 	// the UpdateMessage handler relies on this so its filter against agent
@@ -594,13 +632,19 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 	var snapshot *models.TaskPlanCommentSnapshot
 	var replay bool
 	var queued *messagequeue.QueuedMessage
-	if len(req.PlanCommentRefs) > 0 {
+	switch {
+	case identifiedOrdinary:
+		queued, replay, err = h.admitIdentifiedOrdinaryQueuedMessage(ctx, &req, queuedBy, metadata)
+		if errors.Is(err, errQueueInvalidReferences) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, queueInvalidReferences, nil)
+		}
+	case len(req.PlanCommentRefs) > 0:
 		result, admissionErr := h.admitPlanCommentQueuedMessage(ctx, &req, queuedBy, metadata)
 		err = admissionErr
 		if result != nil {
 			queued, snapshot, replay = result.Message, result.Snapshot, result.Replay
 		}
-	} else {
+	default:
 		queued, err = h.admitQueuedMessage(ctx, &req, queuedBy, metadata)
 	}
 	if err != nil {
@@ -608,6 +652,18 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 			return h.queueFullResponse(ctx, msg, messagequeue.QueueSessionIdentity{
 				TaskID: req.TaskID, SessionID: req.SessionID, SessionIncarnationID: req.SessionIncarnationID,
 			})
+		}
+		if len(req.PlanCommentRefs) == 0 {
+			if errors.Is(err, messagequeue.ErrQueueIDConflict) {
+				return ws.NewError(msg.ID, msg.Action, "queue_id_conflict", "client_queue_id is already used", nil)
+			}
+			if errors.Is(err, messagequeue.ErrSessionIdentityMismatch) ||
+				errors.Is(err, messagequeue.ErrTaskInactive) {
+				return ws.NewError(msg.ID, msg.Action, "queue_session_unavailable", "Session is no longer available", nil)
+			}
+			if errors.Is(err, messagequeue.ErrQueueAdmissionUnavailable) {
+				return ws.NewError(msg.ID, msg.Action, "queue_admission_unavailable", "Queue admission is unavailable", nil)
+			}
 		}
 		if errors.Is(err, messagequeue.ErrTaskInactive) {
 			// The task was archived or deleted between the caller's
@@ -644,13 +700,44 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 }
 
 var (
+	errQueueInvalidReferences        = errors.New("invalid queued entity references")
 	errQueuedAttachmentUnavailable   = errors.New("queued attachment unavailable")
 	errQueuedAttachmentRollback      = errors.New("queued attachment rollback failed")
 	errAttachmentCleanupLeaseActive  = errors.New("queue attachment cleanup blocked by edit lease")
 	errAttachmentCleanupEntryChanged = errors.New("queue attachment cleanup entry changed")
 )
 
+func (h *QueueHandlers) admitIdentifiedOrdinaryQueuedMessage(
+	ctx context.Context,
+	req *wsQueueMessageRequest,
+	queuedBy string,
+	metadata map[string]interface{},
+) (*messagequeue.QueuedMessage, bool, error) {
+	queued, replay, err := h.lookupIdentifiedQueuedMessage(ctx, req, queuedBy, metadata)
+	if err != nil || replay {
+		return queued, replay, err
+	}
+	references, err := h.validateSubmittedReferences(ctx, req.SessionID, req.TaskID, req.EntityReferences)
+	if err != nil {
+		replayed, replayedFound, lookupErr := h.lookupIdentifiedQueuedMessage(ctx, req, queuedBy, metadata)
+		if lookupErr == nil && replayedFound {
+			return replayed, true, nil
+		}
+		return nil, false, errQueueInvalidReferences
+	}
+	req.EntityReferences = references
+	metadata = orchestrator.NewUserMessageMeta().
+		WithContextFiles(req.ContextFiles).
+		WithEntityReferences(req.EntityReferences).
+		ToMap()
+	queued, err = h.admitIdentifiedQueuedMessage(ctx, req, queuedBy, metadata)
+	return queued, false, err
+}
+
 func (h *QueueHandlers) admitQueuedMessage(ctx context.Context, req *wsQueueMessageRequest, queuedBy string, metadata map[string]interface{}) (*messagequeue.QueuedMessage, error) {
+	if req.ClientQueueID != "" {
+		return h.admitIdentifiedQueuedMessage(ctx, req, queuedBy, metadata)
+	}
 	if !h.requiresQueueIdentity() {
 		if h.attachmentClaimer == nil || len(req.Attachments) == 0 {
 			return h.queueService.QueueMessageWithMetadata(
@@ -749,6 +836,63 @@ func (h *QueueHandlers) admitQueuedMessage(ctx context.Context, req *wsQueueMess
 	)
 }
 
+func (h *QueueHandlers) admitIdentifiedQueuedMessage(
+	ctx context.Context,
+	req *wsQueueMessageRequest,
+	queuedBy string,
+	metadata map[string]interface{},
+) (*messagequeue.QueuedMessage, error) {
+	if !h.requiresQueueIdentity() {
+		return nil, messagequeue.ErrQueueAdmissionUnavailable
+	}
+	admissions, ok := h.queueService.(QueueIdentityClientAdmissionService)
+	if !ok {
+		return nil, messagequeue.ErrQueueAdmissionUnavailable
+	}
+	identity := messagequeue.QueueSessionIdentity{
+		TaskID: req.TaskID, SessionID: req.SessionID, SessionIncarnationID: req.SessionIncarnationID,
+	}
+	var claim *messagequeue.QueueAttachmentClaim
+	if len(req.Attachments) > 0 && h.attachmentClaimer != nil {
+		preparer, canPrepare := h.attachmentClaimer.(QueueAttachmentClaimPreparer)
+		if !canPrepare {
+			return nil, messagequeue.ErrQueueAdmissionUnavailable
+		}
+		prepared, err := preparer.PrepareQueueAttachmentClaim(ctx, req.TaskID, queueAttachmentsToV1(req.Attachments))
+		if err != nil {
+			return nil, fmt.Errorf("%w: %v", errQueuedAttachmentUnavailable, err)
+		}
+		claim = &prepared
+	}
+	queued, _, err := admissions.QueueMessageWithMetadataForSessionWithClientQueueID(
+		ctx, identity, req.ClientQueueID, req.Content, req.Model, queuedBy,
+		req.PlanMode, req.Attachments, metadata, claim,
+	)
+	return queued, err
+}
+
+func (h *QueueHandlers) lookupIdentifiedQueuedMessage(
+	ctx context.Context,
+	req *wsQueueMessageRequest,
+	queuedBy string,
+	metadata map[string]interface{},
+) (*messagequeue.QueuedMessage, bool, error) {
+	if !h.requiresQueueIdentity() {
+		return nil, false, messagequeue.ErrQueueAdmissionUnavailable
+	}
+	admissions, ok := h.queueService.(QueueIdentityClientAdmissionService)
+	if !ok {
+		return nil, false, messagequeue.ErrQueueAdmissionUnavailable
+	}
+	identity := messagequeue.QueueSessionIdentity{
+		TaskID: req.TaskID, SessionID: req.SessionID, SessionIncarnationID: req.SessionIncarnationID,
+	}
+	return admissions.LookupQueueAdmissionWithClientQueueID(
+		ctx, identity, req.ClientQueueID, req.Content, req.Model, queuedBy,
+		req.PlanMode, req.Attachments, metadata,
+	)
+}
+
 func (h *QueueHandlers) admitPlanCommentQueuedMessage(
 	ctx context.Context,
 	req *wsQueueMessageRequest,
@@ -782,14 +926,14 @@ func (h *QueueHandlers) admitPlanCommentQueuedMessage(
 }
 
 func validatePlanCommentQueueRequest(req wsQueueMessageRequest) string {
+	if len(req.ClientQueueID) > messagequeue.MaxQueueAdmissionIDLength {
+		return "client_queue_id is too long"
+	}
 	if len(req.PlanCommentRefs) == 0 {
 		return ""
 	}
 	if req.ClientQueueID == "" {
 		return "client_queue_id is required with plan comments"
-	}
-	if len(req.ClientQueueID) > 128 {
-		return "client_queue_id is too long"
 	}
 	if plancomments.ContainsReservedPlaceholder(req.Content) {
 		return "content contains a reserved plan comment marker"

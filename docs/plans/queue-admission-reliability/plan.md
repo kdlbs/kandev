@@ -1,6 +1,6 @@
 ---
 created: 2026-09-14
-status: draft
+status: completed
 requirements:
   - REQ-TASKS-QUEUE-ADMISSION-001
 system_design:
@@ -13,8 +13,7 @@ legacy_specs: []
 ## Overview
 
 Repair ordinary composer queue submissions for [issue #3663](https://github.com/kdlbs/kandev/issues/3663).
-Implement durable server replay protection first. Then enable client recovery and verify desktop and phone outcomes.
-This is a design handoff. All work orders remain pending until an explicit implementation request.
+Durable server replay protection, client recovery, localized feedback, and desktop and phone verification are complete.
 
 ## Evidence and root cause
 
@@ -31,7 +30,7 @@ The authenticated user is `carlosflorencio`, now assigned to the issue.
 A temporary Vitest reproduction called real `queueMessage` with an ordinary payload and a mocked timeout.
 It confirmed one request, two request arguments, no client ID, and immediate rejection without reconciliation.
 The reproduction plus existing plan-comment API and message-handler suites passed: 3 files, 37 tests.
-The temporary file was removed. No production or permanent test changes were made.
+The temporary file was removed. At that investigation stage, no production or permanent test changes had been made.
 
 The issue's claim that a timeout proves the request never reaches the server is not established.
 A late buffered request can still arrive. This makes server deduplication a prerequisite for safe retries.
@@ -44,8 +43,8 @@ Existing resume requirements cover startup, and plan-comment requirements cover 
 Neither defines recoverable ordinary admission during RUNNING. The new queue-admission requirement defines that missing contract.
 The existing merge requirement remains authoritative; routing ordinary prompts through the comment-only path would violate its intended behavior.
 
-Confirmed scope: investigation, assignment, and fix package. No user interview is needed to preserve the existing queue and draft behavior.
-The receipt design is proposed for review, with alternatives recorded in the ADR. No implementation or delegation is authorized.
+Confirmed scope: investigation, assignment, implementation, and verification. No user interview was needed to preserve the existing queue and draft behavior.
+The receipt design and alternatives are recorded in the ADR. The implementation follows the sequential work orders.
 
 ## Scope
 
@@ -113,7 +112,7 @@ All suffixes reference `AC-TASKS-QUEUE-ADMISSION-001`.
 | .6, .8 | `chat-input-area.test.tsx` and desktop/mobile E2E: rejection versus uncertainty and retained attachments |
 
 New test files and names are implementation targets. TDD must first show failures for the specified missing behavior.
-The temporary diagnostic test asserted current behavior; it is not the future regression assertion.
+The temporary diagnostic test asserted the then-current behavior; it is not the implementation regression assertion.
 
 ## E2E tests
 
@@ -128,24 +127,23 @@ Record expected injected transport errors with the harness rather than globally 
 
 ## Work orders
 
-- [ ] [Task 01: Durable ordinary queue admission](task-01-durable-admission.md)
-- [ ] [Task 02: Composer recovery and feedback](task-02-composer-recovery.md)
+- [x] [Task 01: Durable ordinary queue admission](task-01-durable-admission.md) (completed)
+- [x] [Task 02: Composer recovery and feedback](task-02-composer-recovery.md) (completed)
 
-Execute sequentially. Task 02 depends on the server replay guarantee from Task 01.
+Executed sequentially. Task 02 depended on the server replay guarantee from Task 01.
 
 ## Verification results
 
 Diagnostic evidence: 3 Vitest files, 37 tests passed. Temporary reproduction removed.
 Specification validation passed: 268 decisions and 904 specifications validated. All specification files passed.
-`git diff --check` passed. Package inventory contains both pending work orders.
-Implementation checks: pending. Browser and backend regression suites are specified, not yet run.
+`git diff --check` passed. The package inventory contains two completed work orders.
+Implementation checks passed: backend build and lint, focused backend and race suites, SQL guard, persistence store conformance, 142 focused web tests, typecheck, web lint, i18n validation, production build, and the desktop and mobile admission E2E suites.
+Review remediation checks passed: structured WebSocket conflict preservation, staged-upload full-capacity rejection, full-fold acceptance timestamps with replay stability, and pseudo-locale component-tag preservation.
+The Postgres admission parity test was discovered and skipped because `KANDEV_TEST_POSTGRES_DSN` was not set; it remains available for configured database CI.
 
 ## Risks
 
-- Receipt creation outside the insertion/fold transaction permits duplicates after crash.
-- Receipt metadata inside merge comparison can disable automatic merge.
-- Attachment preparation before replay lookup can reject a valid retry.
-- Receipt cleanup on queue removal can resurrect deliberately removed work.
 - A later deliberate Send after uncertainty can duplicate the original admission; this package does not promise otherwise.
 - Deployment must update the server before enabling ordinary client retries. Mixed older backends do not honor ordinary IDs.
-- Public docs remain unchanged during planning. Task 02 updates the existing sessions guide when behavior ships.
+- PostgreSQL parity still needs execution in an environment with `KANDEV_TEST_POSTGRES_DSN`.
+- Public session guidance now documents the shipped admission and recovery behavior.

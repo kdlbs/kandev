@@ -1,7 +1,7 @@
 ---
 id: "01-durable-admission"
 title: "Durable ordinary queue admission"
-status: pending
+status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -92,4 +92,18 @@ A queue-row foreign key with cascading deletion defeats receipt retention.
 
 ## Results
 
-Pending. No backend changes or backend tests were run during planning.
+Implemented durable ordinary admission across the SQLite and PostgreSQL-backed repositories, with memory parity for tests. Admission receipts bind the request fingerprint to task, session, and incarnation identity; exact replays return the stored result, conflicts fail without mutation, and receipt writes remain atomic with queue insertion, Auto-merge, and attachment claims. Task and session cleanup remove receipts while clear and queue-row removal preserve replay protection.
+
+Verification passed:
+
+- `go test -tags fts5 ./internal/orchestrator/messagequeue ./internal/orchestrator/handlers -count=1`
+- `go test -tags fts5 -race ./internal/orchestrator/messagequeue -run 'TestQueueAdmissionConcurrentReplay|TestQueueAdmissionLifecycle|TestQueueAdmissionAttachmentReplay' -count=1`
+- `make -C apps/backend build`
+- `make -C apps/backend lint`
+- `go run ./cmd/sqlguard ./internal`
+- `go test -race ./internal/persistence/storeconformance`
+- `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check`
+
+The PostgreSQL receipt durability test was added and run with `-v`; it skipped because `KANDEV_TEST_POSTGRES_DSN` was not set.
+
+Review remediation passed: full-capacity identified admissions with staged attachment IDs return `queue_full` before any claim or Auto-merge mutation, and memory admission follows the same rule. Full-capacity folds now assign one acceptance timestamp before insertion or folding, with SQLite and memory regressions proving the stored timestamp advances and exact replay does not advance it again.
