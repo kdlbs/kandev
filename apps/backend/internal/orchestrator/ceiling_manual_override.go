@@ -16,13 +16,17 @@ import (
 const ceilingManualOverrideMetadataKey = "ceiling_manual_override"
 
 // recordManualOverrideIfAdmitted implements AC-14/AC-53: once a manually
-// admitted launch actually reaches a session, it stamps a once-per-session
-// audit record on the session and writes the AC-14 card warning. It is a
-// no-op unless this launch was an actual override (an ordinary admission
-// never reaches here with manualOverride set) and a session exists to attach
-// to — called only from the point each seam's reservation is consumed or
-// rebound onto a real session, so AC-14b's "the launch failed before a
-// session existed" case never reaches this at all.
+// admitted reservation is settled onto a real session, it stamps a
+// once-per-session audit record on the session and writes the AC-14 card
+// warning. It is a no-op unless this launch was an actual override (an
+// ordinary admission never reaches here with manualOverride set) and a
+// session exists to attach to — called from the point each seam's
+// reservation is bound to that session id, independent of whether the
+// launch or resume attempt that follows later succeeds or fails, so a
+// failure between admission and agent start can never erase the only
+// evidence an override happened. AC-14b's "the launch failed before a
+// session existed" case (seam 1's pre-session-creation window) still never
+// reaches this at all.
 func (s *Service) recordManualOverrideIfAdmitted(
 	ctx context.Context, taskID, sessionID string, manualOverride bool, population int, populationKnown bool, ceiling int,
 ) {

@@ -2,12 +2,15 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
 )
 
 // seam5EventData builds the watcher.AgentEventData shape
@@ -125,4 +128,50 @@ func TestRelaunchDynamicTaskAfterFailure_ManualOverCeilingIsAdmitted(t *testing.
 	if record := deferredLaunchOf(t, svcB, "seam5-it-manual-b"); record != nil {
 		t.Fatalf("a manual override must never write a ceiling_deferred record: %+v", record)
 	}
+}
+
+// TestRelaunchDynamicTaskAfterFailure_ManualOverCeilingIsAuditedEvenWhenTheLaunchFails
+// pins AC-14/AC-53's unconditional audit contract: the record must be written
+// once the reservation is admitted onto the session being relaunched, not only
+// once the subsequent StartCreatedSession call has also succeeded. A launch
+// failure between admission and agent start must not erase the only evidence
+// a ceiling override happened.
+func TestRelaunchDynamicTaskAfterFailure_ManualOverCeilingIsAuditedEvenWhenTheLaunchFails(t *testing.T) {
+	ctx := context.Background()
+	svcA, _ := newSeam5TestService(t, "seam5-it-fail-a", "seam5-it-fail-session-a", "seam5-it-fail-exec-a")
+	svcA.sessionCeiling = newSessionCeilingController(1, nil, nil)
+
+	if !svcA.relaunchDynamicTaskAfterFailure(ctx, seam5EventData("seam5-it-fail-a", "seam5-it-fail-session-a", "seam5-it-fail-exec-a"), "profile-1", launchOriginAutomatic) {
+		t.Fatal("first automatic relaunch was not admitted")
+	}
+
+	// Session B deliberately has no executors_running row, so the ensuing
+	// StartCreatedSession call takes the full synchronous LaunchAgent path
+	// (not the existing-workspace fast path) where the injected failure
+	// actually propagates back to this function.
+	repoB := setupTestRepo(t)
+	seedTaskAndSession(t, repoB, "seam5-it-fail-b", "seam5-it-fail-session-b", models.TaskSessionStateRunning)
+	sessionB, err := repoB.GetTaskSession(ctx, "seam5-it-fail-session-b")
+	require.NoError(t, err)
+	sessionB.AgentProfileID = "profile-1"
+	require.NoError(t, repoB.UpdateTaskSession(ctx, sessionB))
+	taskRepoB := newMockTaskRepo()
+	seedMockTaskState(taskRepoB, "seam5-it-fail-b", v1.TaskStateInProgress)
+	launchErr := errors.New("relaunch failed")
+	agentMgrB := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return nil, launchErr
+		},
+	}
+	svcB := createTestServiceWithScheduler(repoB, newMockStepGetter(), taskRepoB, agentMgrB)
+	svcB.lastTurnPrompt.Store("seam5-it-fail-session-b", capturedPrompt{text: "retry the task"})
+	svcB.sessionCeiling = svcA.sessionCeiling
+
+	relaunched := svcB.relaunchDynamicTaskAfterFailure(ctx, seam5EventData("seam5-it-fail-b", "seam5-it-fail-session-b", "seam5-it-fail-exec-b"), "profile-1", launchOriginManual)
+	require.False(t, relaunched, "the forced launch failure must surface as an unsuccessful relaunch")
+
+	session, err := repoB.GetTaskSession(ctx, "seam5-it-fail-session-b")
+	require.NoError(t, err)
+	require.NotNil(t, session.Metadata[ceilingManualOverrideMetadataKey],
+		"a manual override must be audited even when the relaunch subsequently fails")
 }
