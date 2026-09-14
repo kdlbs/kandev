@@ -67,6 +67,8 @@
   "openPreviewOnClick": "Ōƥēń ƥŕēvĩēŵ ōń ćĺĩćķ",
   "overWipLimit": "Ōvēŕ ŴĨƤ ĺĩḿĩţ",
   "pipeline": "Ƥĩƥēĺĩńē",
+  "pipelineRowPosition": "{{title}}, śţēƥ {{position}} ōƒ {{total}}",
+  "pipelineUnassignedStep": "Ũńàśśĩĝńēď",
   "previewPanel": "Ƥŕēvĩēŵ Ƥàńēĺ",
   "previousStep": "Ƥŕēvĩōũś śţēƥ",
   "priority": "Ƥŕĩōŕĩţŷ",
@@ -79,6 +81,7 @@
   "queuedCount_other": "{{count}} qũēũēď",
   "queuedForStep": "Qũēũēď ƒōŕ {{step}}",
   "queuedSection": "Qũēũēď",
+  "reorderPositionAnnouncement": "{{title}}, ƥōśĩţĩōń {{position}} ōƒ {{total}}",
   "repository": "Ŕēƥōśĩţōŕŷ",
   "searchPlaceholder": "Śēàŕćĥ...",
   "searchSection": "Śēàŕćĥ",
@@ -115,5 +118,9 @@
   "noWorkflowsAvailableYet": "Ńō ŵōŕķƒĺōŵś àvàĩĺàƀĺē ŷēţ.",
   "pullToRefreshPull": "Ƥũĺĺ ţō ŕēƒŕēśĥ",
   "pullToRefreshRefreshing": "Ŕēƒŕēśĥĩńĝ ţàśķś",
-  "pullToRefreshRelease": "Ŕēĺēàśē ţō ŕēƒŕēśĥ"
+  "pullToRefreshRelease": "Ŕēĺēàśē ţō ŕēƒŕēśĥ",
+  "boardSort": "Ɓōàŕď śōŕţ",
+  "boardSortCreatedDesc": "Ńēŵēśţ ƒĩŕśţ",
+  "boardSortPriorityDesc": "Ƥŕĩōŕĩţŷ",
+  "priorityFilter": "Ƥŕĩōŕĩţŷ ƒĩĺţēŕ"
 }

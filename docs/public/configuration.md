@@ -188,6 +188,11 @@ startup setting, not a database or Settings value.
 | `agentctl.idleTimeout`               | `KANDEV_ACP_IDLE_TIMEOUT`         | Go duration, `1h`                 | Idle managed-agent reaping timeout. Zero disables reaping.                                                                                                                                                                                            |
 | `agentctl.idleReaperInterval`        | `KANDEV_ACP_IDLE_REAPER_INTERVAL` | Go duration, `1m`                 | Interval between idle-agent scans.                                                                                                                                                                                                                    |
 | `agentctl.notificationQueueCapacity` | `KANDEV_ACP_NOTIF_QUEUE`          | integer `1024`-`131072`, `131072` | ACP inbound notification queue capacity. An out-of-range YAML value fails startup; an invalid or out-of-range environment value uses the built-in default.                                                                                            |
+| `agentctl.recoveryDeadline` | `KANDEV_ACP_RECOVERY_DEADLINE` | Go duration `1s`-`5m`, `30s` | Single bound covering one startup's control-server adoption, instance enumeration, and session reconstruction. Unlike the settings above, an invalid or out-of-range environment value **fails startup** rather than falling back to the default. |
+| `agentctl.recoveryReadTimeout` | `KANDEV_ACP_RECOVERY_READ_TIMEOUT` | Go duration `100ms`-`1h`, `2s` | Per-attempt timeout for each read of a surviving control server during recovery. An invalid or out-of-range environment value fails startup. The combined budget with `agentctl.recoveryReadRetries` must also fit the lesser of 6s and one fifth of `agentctl.recoveryDeadline`, so values above a few seconds fail startup regardless of the range. |
+| `agentctl.recoveryReadRetries` | `KANDEV_ACP_RECOVERY_READ_RETRIES` | integer `0`-`10`, `2` | Retries per recovery read, on top of the first attempt. The resulting budget must not exceed the lesser of 6s and one fifth of `agentctl.recoveryDeadline`, or startup fails. An invalid or out-of-range environment value fails startup. |
+| `agentctl.unownedPeriod` | `KANDEV_ACP_UNOWNED_PERIOD` | Go duration, `10m` | How long a standalone control server keeps running with no backend renewing ownership before it shuts itself down. Raised to a one-minute floor, and clamped to half `agentctl.idleTimeout` when that is enabled and shorter; an invalid or negative environment value uses the default. |
+| `agentctl.detachedEventLimit` | `KANDEV_ACP_DETACHED_EVENT_LIMIT` | integer `1`-`10000`, `100` | Per-instance agent events retained while no backend is attached. An invalid or out-of-range environment value fails startup. |
 | `planning.coalesceWindowMs`          | `KANDEV_PLAN_COALESCE_WINDOW_MS`  | integer `>= 0`, `300000`          | Same-author plan revision coalescing window in milliseconds.                                                                                                                                                                                          |
 | `observability.otlpEndpoint`         | `OTEL_EXPORTER_OTLP_ENDPOINT`     | URL, empty                        | OTLP tracing endpoint. Treat the value and emitted spans as sensitive.                                                                                                                                                                                |
 | `office.schedulerTickMs`             | `KANDEV_OFFICE_SCHEDULER_TICK_MS` | positive integer, `5000`          | Office queued/retry run safety-net interval in milliseconds.                                                                                                                                                                                          |
@@ -441,6 +446,11 @@ agentctl:
   idleTimeout: "1h"
   idleReaperInterval: "1m"
   notificationQueueCapacity: 131072
+  recoveryDeadline: "30s"
+  recoveryReadTimeout: "2s"
+  recoveryReadRetries: 2
+  unownedPeriod: "10m"
+  detachedEventLimit: 100
 
 planning:
   coalesceWindowMs: 300000
@@ -499,6 +509,7 @@ Copying this entire file is unnecessary and can freeze old defaults in a deploym
 | `features.dynamicAgentRouting` | `KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING` | off | Experimental dynamic profiles with ordered provider-error fallback. |
 | `features.canvases` | `KANDEV_FEATURES_CANVASES` | off | Experimental agent-authored isolated web-app canvases for tasks and workspaces. High risk. |
 | `features.officeSessionIdentity` | `KANDEV_FEATURES_OFFICE_SESSION_IDENTITY` | on | Office participant sessions: each participant agent gets its own session per task. The live `(task_id, agent_profile_id)` pair is guarded in-transaction, not by a table-level index. Pre-existing duplicate rows are retained and resolved by selection. Two Kandev processes must not write the same SQLite file. |
+| `features.agentSurvival` | `KANDEV_FEATURES_AGENT_SURVIVAL` | off | Experimental. Lets the `agentctl` control server and its running agents outlive a backend restart or upgrade, for the `local_pc` and worktree executors only. The restarted backend takes the surviving server over and reconnects to the sessions still running on it. **Unavailable on Windows**, where surviving the backend means giving up the Job Object that guarantees agent processes are cleaned up. |
 | `debug.devMode` | `KANDEV_DEBUG_DEV_MODE` | off | High-risk diagnostic endpoints and ACP frame logging. |
 
 The `KANDEV_FEATURES_*` values have no canonical YAML keys. They are selected
@@ -507,6 +518,11 @@ database-backed toggle controls in this section. Use **Settings → System →
 Feature Toggles** for persistent product changes.
 
 UI changes are persisted in the database and require a restart. An explicitly set environment value wins and locks the UI control. Otherwise a database override wins over the embedded profile/default. Resetting a toggle removes its database override.
+
+A toggle can also be **unavailable**, which is distinct from being off: the
+build or platform cannot support it, so the control is disabled and shows the
+reason rather than accepting a value. Neither an environment variable nor a
+database override enables an unavailable toggle.
 
 `features.canvases` is off in the `prod`, `dev`, and `e2e` profiles. Restart Kandev
 after enabling or disabling it. The restart is required because Kandev registers
@@ -572,6 +588,11 @@ overrides.
 | `agentctl.idleTimeout`               | `KANDEV_ACP_IDLE_TIMEOUT`         |     `1h` | Go duration after which idle managed agentctl instances are reaped; `0` disables. Invalid uses default.                                                                                                                                                                     |
 | `agentctl.idleReaperInterval`        | `KANDEV_ACP_IDLE_REAPER_INTERVAL` |     `1m` | Go duration between idle scans.                                                                                                                                                                                                                                             |
 | `agentctl.notificationQueueCapacity` | `KANDEV_ACP_NOTIF_QUEUE`          | `131072` | Per-connection ACP inbound notification capacity. YAML values outside `1024`-`131072` fail startup; invalid or out-of-range environment values use `131072`.                                                                                                                |
+| `agentctl.recoveryDeadline` | `KANDEV_ACP_RECOVERY_DEADLINE` | `30s` | Bound on one startup's adoption, enumeration, and session reconstruction. Accepts `1s`-`5m`. Out-of-range or unparseable values fail startup from either source; they are never replaced by the default. |
+| `agentctl.recoveryReadTimeout` | `KANDEV_ACP_RECOVERY_READ_TIMEOUT` | `2s` | Per-attempt read timeout during recovery. Accepts `100ms`-`1h`, but the combined budget below caps the usable value at the lesser of 6s and one fifth of `agentctl.recoveryDeadline`. Out-of-range or unparseable values fail startup. |
+| `agentctl.recoveryReadRetries` | `KANDEV_ACP_RECOVERY_READ_RETRIES` | `2` | Retries after the first recovery read attempt. Accepts `0`-`10`. Startup also fails when `recoveryReadTimeout * (retries + 1)` exceeds the lesser of 6s and one fifth of `recoveryDeadline`. |
+| `agentctl.unownedPeriod` | `KANDEV_ACP_UNOWNED_PERIOD` | `10m` | Time a standalone control server tolerates having no backend renew ownership before shutting itself down. Effective value is raised to a one-minute floor and, when `agentctl.idleTimeout` is enabled and not longer, clamped to half of it. Invalid or negative environment values use the default. |
+| `agentctl.detachedEventLimit` | `KANDEV_ACP_DETACHED_EVENT_LIMIT` | `100` | Agent events retained per instance while no backend is attached. Accepts `1`-`10000`. Out-of-range or unparseable values fail startup. |
 | `planning.coalesceWindowMs`          | `KANDEV_PLAN_COALESCE_WINDOW_MS`  | `300000` | Non-negative milliseconds for same-author plan revision coalescing; invalid/negative uses five minutes.                                                                                                                                                                     |
 | `office.schedulerTickMs`             | `KANDEV_OFFICE_SCHEDULER_TICK_MS` |   `5000` | Positive integer safety-net interval for queued/retry run claiming. New-run signals are event-driven.                                                                                                                                                                       |
 | `observability.otlpEndpoint`         | `OTEL_EXPORTER_OTLP_ENDPOINT`     |    unset | Enables OTLP/HTTP tracing for backend and agentctl spans; unset uses a no-op tracer.                                                                                                                                                                                        |

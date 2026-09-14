@@ -20,12 +20,15 @@ export function buildEditMenuEntry({
   onEdit,
   disabled,
   context,
+  forceFlat,
 }: {
   onEdit?: () => void;
   disabled?: boolean;
   context: PluginTaskMenuContext;
+  /** Skip the plugin `edit`-group lookup and always return the flat item. */
+  forceFlat?: boolean;
 }): KanbanCardMenuEntry {
-  const pluginActions = visiblePluginMenuActions("edit", context);
+  const pluginActions = forceFlat ? [] : visiblePluginMenuActions("edit", context);
 
   const icon = <IconPencil className="mr-2 h-4 w-4" />;
 

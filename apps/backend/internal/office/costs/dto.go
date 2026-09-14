@@ -48,3 +48,15 @@ type UpdateBudgetRequest struct {
 type BudgetListResponse struct {
 	Budgets []*BudgetPolicy `json:"budgets"`
 }
+
+// DefaultCeilingResponse reports the built-in default ceiling's current
+// effective limit (AC-OFFICE-BUDGET-003.5).
+type DefaultCeilingResponse struct {
+	LimitSubcents int64 `json:"limit_subcents"`
+}
+
+// SetDefaultCeilingRequest is the request body for writing the built-in
+// default ceiling's limit.
+type SetDefaultCeilingRequest struct {
+	LimitSubcents int64 `json:"limit_subcents"`
+}

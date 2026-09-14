@@ -13,6 +13,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCKERFILE = REPO_ROOT / ".github" / "docker" / "ci-base" / "Dockerfile"
 IMAGE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "ci-base-image.yml"
 E2E_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "e2e-tests.yml"
+BACKEND_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "backend-tests.yml"
+FRONTEND_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "frontend-tests.yml"
 LINT_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "lint-action-pinning.yml"
 IMAGE_DIGEST_RESOLVER = REPO_ROOT / ".github" / "scripts" / "resolve-image-digest.sh"
 VALID_IMAGE_INDEX = (
@@ -153,6 +155,18 @@ cat "${FAKE_DOCKER_MANIFEST}"
         self.assertIn("type=gha,scope=desktop", workflow)
         self.assertIn("type=gha,scope=runtime", workflow)
         self.assertIn("desktop-latest", workflow)
+
+    def test_container_jobs_use_the_baked_corepack_cache(self) -> None:
+        dockerfile = DOCKERFILE.read_text(encoding="utf-8")
+
+        self.assertIn("COREPACK_HOME=/root/.cache/node/corepack", dockerfile)
+        for workflow_path in (E2E_WORKFLOW, BACKEND_WORKFLOW, FRONTEND_WORKFLOW):
+            workflow = workflow_path.read_text(encoding="utf-8")
+            self.assertIn(
+                "COREPACK_HOME: /root/.cache/node/corepack",
+                workflow,
+                workflow_path.name,
+            )
 
     def test_desktop_job_uses_image_without_live_bootstrap_downloads(self) -> None:
         workflow = E2E_WORKFLOW.read_text(encoding="utf-8")

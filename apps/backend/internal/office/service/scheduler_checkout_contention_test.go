@@ -42,7 +42,7 @@ func TestSchedulerTick_ContendedCheckoutRequeuesRun(t *testing.T) {
 		t.Fatalf("seed checkout: ok=%v err=%v", ok, err)
 	}
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-contended-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -21,10 +22,12 @@ import (
 	systemmetrics "github.com/kandev/kandev/internal/system/metrics"
 	systemsettings "github.com/kandev/kandev/internal/system/settings"
 	storagepkg "github.com/kandev/kandev/internal/system/storage"
+	"github.com/kandev/kandev/internal/system/storage/databasestore"
 	"github.com/kandev/kandev/internal/system/storage/dockerstore"
 	"github.com/kandev/kandev/internal/system/storage/filescan"
 	"github.com/kandev/kandev/internal/system/storage/gocache"
 	"github.com/kandev/kandev/internal/system/storage/tempartifacts"
+	"github.com/kandev/kandev/internal/system/storage/tempstore"
 	"github.com/kandev/kandev/internal/system/storage/workspaces"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/worktree"
@@ -165,8 +168,9 @@ func prepareStorageDependencies(
 	tempProvider := tempartifacts.NewProvider(tempartifacts.ProviderConfig{
 		Registry: tempArtifacts, Store: store, HomeDir: cfg.ResolvedHomeDir(),
 		TrashDir: filepath.Join(cfg.ResolvedHomeDir(), "trash"),
-		Scanner:  scanner,
+		Scanner:  scanner, Settings: settings,
 	})
+	systemTemporary := tempstore.New(systemTemporaryConfig(scanner))
 	if err := tempProvider.Reconcile(context.Background()); err != nil {
 		logError("reconcile temporary artifact quarantine", err)
 	}
@@ -175,6 +179,12 @@ func prepareStorageDependencies(
 	goCache := gocache.New(gocache.Config{
 		HomeDir: cfg.ResolvedHomeDir(), TrashDir: filepath.Join(cfg.ResolvedHomeDir(), "trash"),
 		Settings: settings, Store: store, Scanner: scanner,
+	})
+	database := databasestore.New(databasestore.Config{
+		Driver:        cfg.Database.Driver,
+		DatabasePath:  storageDatabasePath(cfg),
+		Scanner:       scanner,
+		ExistingRoots: storageExistingMeasurementRoots(cfg.ResolvedHomeDir()),
 	})
 	lifecycleMgr.SetActivityCoordinator(coordinator)
 	lifecycleMgr.SetManagedGoCacheEnvironmentProvider(goCache)
@@ -188,7 +198,8 @@ func prepareStorageDependencies(
 	overview := &storageOverview{
 		settings: settings, quarantine: store, workspaceFactory: workspaceFactory, goCache: goCache,
 		docker: dockerProvider, dockerClient: dockerClient, dockerHost: cfg.Docker.Host,
-		homeDir: cfg.ResolvedHomeDir(), tempArtifacts: tempProvider,
+		homeDir: cfg.ResolvedHomeDir(), tempArtifacts: tempProvider, database: database,
+		systemTemporary: systemTemporary,
 	}
 	cachedOverview := newStorageOverviewCache(overview, eventBus, log, logError)
 	quarantine := &workspaceQuarantineController{
@@ -202,6 +213,17 @@ func prepareStorageDependencies(
 		quarantine:     quarantine,
 		providers:      storageCleanupProviders(settings, workspaceFactory, goCache, dockerProvider, quarantine, tempProvider),
 	}, nil
+}
+
+func systemTemporaryConfig(scanner *filescan.Limiter) tempstore.Config {
+	config := tempstore.Config{Scanner: scanner}
+	if root := os.Getenv("KANDEV_E2E_SYSTEM_TEMP_ROOT"); root != "" {
+		// The browser fixture supplies a disposable root so E2E analysis never
+		// reads the host's shared temporary directory.
+		config.EffectiveRoot = root
+		config.UnixRoot = root
+	}
+	return config
 }
 
 func newStorageOverviewCache(
@@ -305,9 +327,11 @@ type storageOverview struct {
 	workspaceFactory workspaceFactory
 	workspaceAnalyze func(context.Context, storagepkg.StorageMaintenanceSettings) (workspaces.Analysis, error)
 	goCache          *gocache.Provider
+	database         *databasestore.Provider
 	goCacheAnalyze   func(context.Context) (gocache.Analysis, error)
 	docker           *dockerstore.Provider
 	tempArtifacts    *tempartifacts.Provider
+	systemTemporary  *tempstore.Provider
 	dockerClient     *lazyStorageDocker
 	dockerHost       string
 	homeDir          string
@@ -332,6 +356,10 @@ func (o *storageOverview) summary(
 	if err != nil {
 		return storagepkg.Summary{}, err
 	}
+	var databaseExistingRoots []string
+	if o.goCache != nil {
+		databaseExistingRoots, _ = o.goCache.MeasurementRoots(settings)
+	}
 	reporter := newStorageProgressReporter(notify)
 	var (
 		workspaceSummary  workspaces.Analysis
@@ -343,9 +371,15 @@ func (o *storageOverview) summary(
 		dockerSummary     dockerstore.Analysis
 		tempSummary       tempartifacts.Analysis
 		tempErr           error
+		databaseSummary   databasestore.Measurement
+		databaseErr       error
+		backupSummary     databasestore.Measurement
+		backupErr         error
+		systemTempSummary tempstore.Analysis
+		systemTempErr     error
 	)
 	var measurements sync.WaitGroup
-	measurements.Add(4)
+	measurements.Add(6)
 	workspaceAnalyze := o.workspaceAnalyze
 	if workspaceAnalyze == nil {
 		workspaceAnalyze = func(ctx context.Context, settings storagepkg.StorageMaintenanceSettings) (workspaces.Analysis, error) {
@@ -380,6 +414,18 @@ func (o *storageOverview) summary(
 		dockerSummary = o.docker.Analyze(ctx)
 		reporter.complete(storagepkg.StorageSourceDocker, dockerSummaryMap(dockerSummary), nil)
 	}()
+	go func() {
+		defer measurements.Done()
+		reporter.start(storagepkg.StorageSourceDatabase)
+		databaseSummary, databaseErr = o.analyzeDatabase(ctx, reporter, databaseExistingRoots)
+		reporter.complete(storagepkg.StorageSourceDatabase, databaseSummary, databaseErr)
+	}()
+	go func() {
+		defer measurements.Done()
+		reporter.start(storagepkg.StorageSourceDatabaseBackups)
+		backupSummary, backupErr = o.analyzeDatabaseBackups(ctx, reporter, databaseExistingRoots)
+		reporter.complete(storagepkg.StorageSourceDatabaseBackups, backupSummary, backupErr)
+	}()
 	if o.tempArtifacts != nil {
 		measurements.Add(1)
 		go func() {
@@ -395,6 +441,25 @@ func (o *storageOverview) summary(
 		reporter.start(storagepkg.StorageSourceTemporaryArtifacts)
 		reporter.complete(storagepkg.StorageSourceTemporaryArtifacts, tempSummary, nil)
 	}
+	if o.systemTemporary != nil {
+		measurements.Add(1)
+		go func() {
+			defer measurements.Done()
+			reporter.start(storagepkg.StorageSourceSystemTemporary)
+			systemTempSummary, systemTempErr = o.analyzeSystemTemporary(ctx, reporter)
+			reporter.complete(
+				storagepkg.StorageSourceSystemTemporary,
+				summaryValue(systemTempSummary, systemTempErr), systemTempErr,
+			)
+		}()
+	} else {
+		systemTempSummary = tempstore.Analysis{
+			Status: tempstore.StatusNotApplicable, IncludedInTotal: false,
+			Roots: []tempstore.RootMeasurement{}, Reason: "system temporary provider unavailable",
+		}
+		reporter.start(storagepkg.StorageSourceSystemTemporary)
+		reporter.complete(storagepkg.StorageSourceSystemTemporary, systemTempSummary, nil)
+	}
 	measurements.Wait()
 	if err := ctx.Err(); err != nil {
 		return storagepkg.Summary{}, err
@@ -402,6 +467,8 @@ func (o *storageOverview) summary(
 	return summaryFromMeasurements(
 		workspaceSummary, workspaceErr, goCacheSummary, goCacheErr,
 		quarantineSummary, quarantineErr, tempSummary, tempErr, dockerSummary,
+		databaseSummary, databaseErr, backupSummary, backupErr,
+		systemTempSummary, systemTempErr,
 	), nil
 }
 
@@ -415,13 +482,77 @@ func summaryFromMeasurements(
 	tempSummary tempartifacts.Analysis,
 	tempErr error,
 	dockerSummary dockerstore.Analysis,
+	databaseSummary databasestore.Measurement,
+	databaseErr error,
+	backupSummary databasestore.Measurement,
+	backupErr error,
+	systemTempSummary tempstore.Analysis,
+	systemTempErr error,
 ) storagepkg.Summary {
 	return storagepkg.Summary{
 		Workspaces:         summaryValue(workspaceSummary, workspaceErr),
 		GoCache:            summaryValue(goCacheSummary, goCacheErr),
 		Quarantine:         summaryValue(quarantineSummary, quarantineErr),
 		TemporaryArtifacts: summaryValue(tempSummary, tempErr),
+		SystemTemporary:    summaryValue(systemTempSummary, systemTempErr),
 		Docker:             dockerSummaryMap(dockerSummary),
+		Database:           databaseMeasurementValue(databaseSummary, databaseErr),
+		DatabaseBackups:    databaseMeasurementValue(backupSummary, backupErr),
+	}
+}
+
+func (o *storageOverview) analyzeDatabase(
+	ctx context.Context,
+	reporter *storageProgressReporter,
+	existingRoots []string,
+) (databasestore.Measurement, error) {
+	if o.database == nil {
+		return databasestore.Measurement{
+			Status: databasestore.StatusNotApplicable,
+			Reason: databasestore.ReasonUnsupportedDriver,
+		}, nil
+	}
+	return o.database.AnalyzeDatabase(
+		ctx, reporter.filesystem(storagepkg.StorageSourceDatabase), existingRoots...,
+	)
+}
+
+func (o *storageOverview) analyzeDatabaseBackups(
+	ctx context.Context,
+	reporter *storageProgressReporter,
+	existingRoots []string,
+) (databasestore.Measurement, error) {
+	if o.database == nil {
+		return databasestore.Measurement{
+			Status: databasestore.StatusNotApplicable,
+			Reason: databasestore.ReasonUnsupportedDriver,
+		}, nil
+	}
+	return o.database.AnalyzeBackups(
+		ctx, reporter.filesystem(storagepkg.StorageSourceDatabaseBackups), existingRoots...,
+	)
+}
+
+func databaseMeasurementValue(measurement databasestore.Measurement, err error) any {
+	if measurement.Status != "" {
+		return measurement
+	}
+	return summaryValue(measurement, err)
+}
+
+func storageDatabasePath(cfg *config.Config) string {
+	if cfg != nil && strings.TrimSpace(cfg.Database.Path) != "" {
+		return cfg.Database.Path
+	}
+	if cfg == nil {
+		return ""
+	}
+	return filepath.Join(cfg.ResolvedDataDir(), "kandev.db")
+}
+
+func storageExistingMeasurementRoots(homeDir string) []string {
+	return []string{
+		filepath.Join(homeDir, "tasks"),
 	}
 }
 
@@ -437,10 +568,15 @@ type temporaryArtifactsProgressAnalyzer interface {
 	AnalyzeWithProgress(context.Context, func(filescan.Progress)) (tempartifacts.Analysis, error)
 }
 
+type systemTemporaryProgressAnalyzer interface {
+	AnalyzeWithProgress(context.Context, func(filescan.Progress)) (tempstore.Analysis, error)
+}
+
 var (
 	_ workspaceProgressAnalyzer          = (*workspaces.Provider)(nil)
 	_ goCacheProgressAnalyzer            = (*gocache.Provider)(nil)
 	_ temporaryArtifactsProgressAnalyzer = (*tempartifacts.Provider)(nil)
+	_ systemTemporaryProgressAnalyzer    = (*tempstore.Provider)(nil)
 )
 
 func (o *storageOverview) analyzeWorkspaces(
@@ -473,6 +609,15 @@ func (o *storageOverview) analyzeTemporaryArtifacts(
 ) (tempartifacts.Analysis, error) {
 	return o.tempArtifacts.AnalyzeWithProgress(
 		ctx, reporter.filesystem(storagepkg.StorageSourceTemporaryArtifacts),
+	)
+}
+
+func (o *storageOverview) analyzeSystemTemporary(
+	ctx context.Context,
+	reporter *storageProgressReporter,
+) (tempstore.Analysis, error) {
+	return o.systemTemporary.AnalyzeWithProgress(
+		ctx, reporter.filesystem(storagepkg.StorageSourceSystemTemporary),
 	)
 }
 

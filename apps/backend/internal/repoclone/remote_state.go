@@ -4,7 +4,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/subproc"
 )
@@ -42,17 +45,12 @@ func (c *Cloner) InspectLocalRepositoryRemoteRefState(
 	if strings.TrimSpace(repositoryPath) == "" {
 		return RemoteRefStateUnknown, fmt.Errorf("repository path is required")
 	}
-	cmd := subproc.NewGitCommand(ctx, "-C", repositoryPath, "ls-remote", "--refs", "origin")
-	cleanup, err := configureGitCommand(cmd, nil)
+	output, stderr, err := runConfiguredGitOutput(ctx, gitFetchTimeout,
+		[]string{"-C", repositoryPath, "ls-remote", "--refs", "origin"},
+		func(cmd *exec.Cmd) (func(), error) { return configureGitCommand(cmd, nil) },
+	)
 	if err != nil {
-		return RemoteRefStateUnknown, err
-	}
-	defer cleanup()
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	output, err := subproc.RunGitOutputClass(ctx, subproc.GitLifecycle, cmd)
-	if err != nil {
-		diagnostic := redactCloneOutput(stderr.String(), "")
+		diagnostic := redactCloneOutput(stderr, "")
 		return RemoteRefStateUnknown, fmt.Errorf("inspect local repository refs: %s: %w",
 			strings.TrimSpace(diagnostic), err)
 	}
@@ -60,21 +58,49 @@ func (c *Cloner) InspectLocalRepositoryRemoteRefState(
 }
 
 func (c *Cloner) remoteRefState(ctx context.Context, cloneURL string, auth *cloneAuth) (RemoteRefState, error) {
-	cmd := subproc.NewGitCommand(ctx, "ls-remote", "--refs", "--", cloneURL)
-	cleanup, err := configureGitCommand(cmd, auth)
+	output, stderr, err := runConfiguredGitOutput(ctx, gitFetchTimeout,
+		[]string{"ls-remote", "--refs", "--", cloneURL},
+		func(cmd *exec.Cmd) (func(), error) { return configureGitCommand(cmd, auth) },
+	)
 	if err != nil {
-		return RemoteRefStateUnknown, err
-	}
-	defer cleanup()
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-	output, err := subproc.RunGitOutputClass(ctx, subproc.GitLifecycle, cmd)
-	if err != nil {
-		diagnostic := redactCloneOutput(stderr.String(), authToken(auth))
+		diagnostic := redactCloneOutput(stderr, authToken(auth))
 		return RemoteRefStateUnknown, fmt.Errorf("inspect remote refs: %s: %w",
 			strings.TrimSpace(diagnostic), err)
 	}
 	return parseRemoteRefState(string(output))
+}
+
+func runConfiguredGitOutput(
+	ctx context.Context,
+	execTimeout time.Duration,
+	args []string,
+	configure func(*exec.Cmd) (func(), error),
+) ([]byte, string, error) {
+	template := subproc.NewGitCommand(ctx, args...)
+	cleanup, err := configure(template)
+	if err != nil {
+		return nil, "", err
+	}
+	defer cleanup()
+
+	var stderr bytes.Buffer
+	output, runErr, execCtxErr := subproc.RunGitOutputAfterAcquire(
+		ctx,
+		subproc.GitLifecycle,
+		execTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			cmd := subproc.NewGitCommand(execCtx, args...)
+			cmd.Dir = template.Dir
+			cmd.Env = append([]string(nil), template.Env...)
+			cmd.ExtraFiles = append([]*os.File(nil), template.ExtraFiles...)
+			cmd.Stderr = &stderr
+			return cmd
+		},
+	)
+	if runErr == nil {
+		runErr = execCtxErr
+	}
+	return output, stderr.String(), runErr
 }
 
 func parseRemoteRefState(output string) (RemoteRefState, error) {

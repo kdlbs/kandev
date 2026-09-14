@@ -181,6 +181,52 @@ func TestPrepareSession_Success(t *testing.T) {
 	}
 }
 
+func TestPrepareSessionRetriesTaskRunnerChangedAfterReload(t *testing.T) {
+	repo := newMockRepository()
+	taskID := "task-runner-retry"
+	repo.tasks[taskID] = &models.Task{
+		ID:          taskID,
+		WorkspaceID: "workspace-runner-retry",
+		Metadata:    map[string]interface{}{models.MetaKeyExecutorProfileID: "profile-old"},
+	}
+	createAttempts := 0
+	repo.createTaskSessionFunc = func(_ context.Context, session *models.TaskSession) error {
+		createAttempts++
+		if createAttempts == 1 {
+			repo.mu.Lock()
+			repo.tasks[taskID].Metadata[models.MetaKeyExecutorProfileID] = "profile-new"
+			repo.mu.Unlock()
+			return models.ErrTaskRunnerChanged
+		}
+		repo.mu.Lock()
+		repo.sessions[session.ID] = session
+		repo.mu.Unlock()
+		return nil
+	}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	task := &v1.Task{
+		ID:          taskID,
+		WorkspaceID: "workspace-runner-retry",
+		Metadata:    map[string]interface{}{models.MetaKeyExecutorProfileID: "profile-old"},
+	}
+	ctx := WithTaskRunnerProfileExplicit(context.Background(), false)
+
+	sessionID, err := exec.PrepareSession(ctx, task, "agent-profile", "executor", "profile-old", "")
+	if err != nil {
+		t.Fatalf("PrepareSession: %v", err)
+	}
+	if createAttempts != 2 {
+		t.Fatalf("CreateTaskSession attempts = %d, want 2", createAttempts)
+	}
+	created := repo.sessions[sessionID]
+	if created == nil {
+		t.Fatalf("session %q was not stored", sessionID)
+	}
+	if created.ExecutorProfileID != "profile-new" {
+		t.Fatalf("session executor profile = %q, want profile-new", created.ExecutorProfileID)
+	}
+}
+
 func TestPrepareSession_SharedGroupUsesTransactionalWorkspaceBinding(t *testing.T) {
 	repo := newMockRepository()
 	exec := newTestExecutor(t, &mockAgentManager{}, repo)

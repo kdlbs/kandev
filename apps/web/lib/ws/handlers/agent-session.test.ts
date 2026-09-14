@@ -109,6 +109,34 @@ describe("message.queue.status_changed handler", () => {
       autoRun: false,
     });
   });
+
+  it("preserves the known queue capacity when an older publisher omits max", () => {
+    const setQueueEntries = vi.fn();
+    const store = makeStore({
+      setQueueEntries,
+      queue: {
+        bySessionId: { "s-1": [] },
+        metaBySessionId: {
+          "s-1": { count: 1, max: 10, mergeEnabled: true, autoRun: true },
+        },
+      },
+    });
+    const handler = registerTaskSessionHandlers(store)["message.queue.status_changed"]!;
+
+    handler({
+      id: "queue-status-capacity-compat",
+      type: "notification",
+      action: "message.queue.status_changed",
+      payload: { session_id: "s-1", entries: [], count: 0 },
+    } as never);
+
+    expect(setQueueEntries).toHaveBeenCalledWith("s-1", [], {
+      count: 0,
+      max: 10,
+      mergeEnabled: true,
+      autoRun: true,
+    });
+  });
 });
 function makeIncarnationPolicyStore(setQueueEntries: ReturnType<typeof vi.fn>) {
   return makeStore({
@@ -1437,6 +1465,68 @@ describe("session.state_changed → agentctl ready fallback", () => {
       "t-1",
       expect.objectContaining({ id: "s-1", task_environment_id: "env-1" }),
     );
+  });
+
+  it("settles the matching workspace restore when agentctl becomes ready", () => {
+    const attempt = {
+      taskId: "t-1",
+      sessionId: "s-1",
+      environmentId: "env-1",
+      revision: 2,
+      status: "pending",
+    };
+    const completeWorkspaceRestoration = vi.fn(() => true);
+    const bumpWorkspaceFilesRefresh = vi.fn();
+    const store = makeStore({
+      environmentIdBySessionId: { "s-1": "env-1" },
+      workspaceRestoration: { byEnvironmentId: { "env-1": attempt } },
+      completeWorkspaceRestoration,
+      bumpWorkspaceFilesRefresh,
+    });
+    const handler = registerTaskSessionHandlers(store)["session.agentctl_ready"]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: "session.agentctl_ready",
+      timestamp: TS,
+      payload: { task_id: "t-1", session_id: "s-1", task_environment_id: "env-1" },
+    });
+
+    expect(completeWorkspaceRestoration).toHaveBeenCalledWith(attempt);
+    expect(bumpWorkspaceFilesRefresh).toHaveBeenCalledWith("s-1");
+  });
+
+  it("settles the matching workspace restore with sanitized agentctl error details", () => {
+    const attempt = {
+      taskId: "t-1",
+      sessionId: "s-1",
+      environmentId: "env-1",
+      revision: 2,
+      status: "pending",
+    };
+    const failWorkspaceRestoration = vi.fn();
+    const store = makeStore({
+      environmentIdBySessionId: { "s-1": "env-1" },
+      workspaceRestoration: { byEnvironmentId: { "env-1": attempt } },
+      failWorkspaceRestoration,
+    });
+    const handler = registerTaskSessionHandlers(store)["session.agentctl_error"]!;
+
+    handler({
+      id: "m",
+      type: "notification",
+      action: "session.agentctl_error",
+      timestamp: TS,
+      payload: {
+        task_id: "t-1",
+        session_id: "s-1",
+        task_environment_id: "env-1",
+        error_message: "backend\u0000failure",
+      },
+    });
+
+    expect(failWorkspaceRestoration).toHaveBeenCalledWith(attempt, "backendfailure");
   });
 
   it("preserves the primary worktree when a sibling agentctl_ready arrives", () => {

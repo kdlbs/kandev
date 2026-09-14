@@ -15,6 +15,28 @@ agentctl exposes these route groups (see `server/api/`):
 - `/workspace/*` - File operations, search, tree
 - `/vscode/*` - VS Code integration proxy
 
+The **control server** (`server/api/control_server.go`) is a separate router from
+the per-instance ones above, and it owns the agent-survival surface:
+- `/identity` - opaque per-launch server identity, advertised capability set,
+  and this server's own resolved unowned period. Unauthenticated, because it is
+  what decides whether to authenticate. It therefore carries no filesystem path.
+- `/ownership/prove` - challenge/response proving this process holds the
+  credential the caller's record names. Also unauthenticated, for the same
+  reason, and safe because a proof is a keyed digest over a caller-chosen
+  challenge and cannot be inverted to the credential. Derivation is shared with
+  the backend through `internal/common/ownershipproof`.
+- `/api/v1/ownership/claim`, `/rotate`, `/confirm`, `/shutdown`, `/details` -
+  the authenticated ownership operations (`claim` is the renewal an owning
+  backend repeats on a cadence derived from the unowned period), plus the
+  filesystem paths kept off `/identity`.
+
+Auth on that router is `controlCredentialAuth`, which has three tiers rather
+than on/off. `/health`, `/auth/handshake`, `/identity`, and `/ownership/prove`
+are exempt entirely. The paths in `adoptionOnlyPaths` (`rotate`, `shutdown`)
+additionally accept the **superseded** credential until the rotation that
+replaced it is confirmed, so a backend that crashed mid-rotation can still
+adopt. Every other authenticated route accepts only the current credential.
+
 ## Multi-repository Git and review payloads
 
 Preserve the repository-scoped fields `repository_name`, `base_ref`, and
@@ -131,6 +153,19 @@ commands run through `Manager.CombinedOutput`, so teardown cancels downloads,
 drains cache mutations, and reaps installer descendants before resources are
 released.
 
+When consuming `exec.Cmd.StdoutPipe` or `StderrPipe`, start the command before
+reading and finish every reader before calling `cmd.Wait`; `Wait` closes the
+pipes after the command exits. Prefer `CombinedOutput` when separate streaming
+is not required, and test cancellation with output large enough to exercise
+pipe backpressure so a reader/Wait ordering mistake cannot deadlock teardown.
+When wait and draining must proceed concurrently, use an explicitly owned
+`os.Pipe` assigned to `cmd.Stderr`, close the parent writer after `Start`, join
+the reader with `Wait`, and bound or close the reader on timeout so stderr is
+not lost or left blocking teardown.
+Lifecycle callbacks that publish process state must complete before releasing
+readiness waiters for that same process boundary; test callback-before-waiter
+ordering.
+
 To add another agent that needs immediate kill instead of graceful stdin close:
 set `RequiresProcessKill: true` in its `Runtime()` config.
 
@@ -148,6 +183,18 @@ The strip list flows agent → instance config → process manager via a single 
 For the one-shot probe/inference path, the strip list is derived from `Runtime().StripEnv` via the shared `agents.StripEnvFor` helper — it is not an independent field on `InferenceConfig`. The derived value is propagated through `InferenceConfigDTO.StripEnv` and applied by `utility.sanitizeEnvForAgent` before spawning the ephemeral subprocess.
 
 To add another agent that needs env vars stripped: set `StripEnv: []string{"VAR_NAME"}` in its `Runtime()` — that's all.
+
+**Agent environment snapshot:** `process.Manager` snapshots `cfg.AgentEnv` at
+construction. Tracker Git must not re-read ambient `os.Environ()` at execution
+time. Install command gates/shims and `KANDEV_TEST_*` variables before manager
+construction, or pass an explicit copied `AgentEnv` snapshot; helpers that create
+managers should accept that snapshot so fixtures cannot become stale.
+
+**SSH command shapes:** SSH option rewriting may preserve only direct OpenSSH
+commands, including quoted executable paths. Do not insert options after the
+first shell word for env/assignment/exec prefixes or custom/plink wrappers;
+unsupported shapes must use a documented safe default or fail closed. Cover
+direct, quoted, prefixed, and custom forms with focused tests.
 
 ## Idle-instance reaper (`KANDEV_ACP_IDLE_TIMEOUT`)
 

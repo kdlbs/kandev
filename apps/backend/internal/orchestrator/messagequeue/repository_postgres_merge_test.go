@@ -572,15 +572,16 @@ func TestPostgresRepository_TransferSession_RaceWithSourceInsert(t *testing.T) {
 	}
 }
 
-// TestPostgresRepository_AcknowledgeByID_RaceWithRestore proves the ack is
-// cross-process serialized on the session lock: an autocommit DELETE could
-// otherwise remove a row a concurrent backend just restored/reinserted,
-// losing durable retry state. The competing backend holds the session lock,
-// the ack blocks on it, and only after release does the ack delete the row.
-func TestPostgresRepository_AcknowledgeByID_RaceWithSessionLock(t *testing.T) {
+// TestPostgresRepository_AcknowledgeReserved_RaceWithSessionLock proves the
+// attempt-scoped ack is cross-process serialized on the session lock.
+func TestPostgresRepository_AcknowledgeReserved_RaceWithSessionLock(t *testing.T) {
 	repoA, repoB, _ := newTestPostgresRepoPair(t)
 	ctx := context.Background()
-	entry := insertAutoMergeEntry(t, repoA, defaultAutoMergeEntry("ack", "first"))
+	entry := insertDurableLifecycleEntry(t, repoA, "ack")
+	reserved, err := repoA.ReserveHead(ctx, entry.SessionID)
+	if err != nil || reserved == nil {
+		t.Fatalf("reserve lifecycle entry: msg=%+v err=%v", reserved, err)
+	}
 	dbA := repoA.(*sqliteRepository).db
 
 	lockTx, err := dbA.BeginTxx(ctx, nil)
@@ -603,7 +604,7 @@ func TestPostgresRepository_AcknowledgeByID_RaceWithSessionLock(t *testing.T) {
 	ackPID := pgBackendPID(t, repoB.(*sqliteRepository).db)
 	ackDone := make(chan error, 1)
 	go func() {
-		ackDone <- repoB.AcknowledgeByID(ctx, "ack", entry.ID)
+		ackDone <- repoB.AcknowledgeReserved(ctx, reserved)
 	}()
 
 	waitForWaitingLocks(t, lockTx, ackPID, 1, "ack on the session lock")
@@ -815,7 +816,7 @@ func TestPostgresRepository_CancellationIncludesAllOriginsAndPreservesReservatio
 	repo := newTestPostgresRepo(t)
 	ctx := context.Background()
 
-	reservedEntry := insertDurableLifecycleEntry(t, repo, "s1")
+	_ = insertDurableLifecycleEntry(t, repo, "s1")
 	reserved, err := repo.ReserveHead(ctx, "s1")
 	if err != nil || reserved == nil {
 		t.Fatalf("reserve lifecycle entry: msg=%+v err=%v", reserved, err)
@@ -835,7 +836,7 @@ func TestPostgresRepository_CancellationIncludesAllOriginsAndPreservesReservatio
 	if removed != 4 {
 		t.Fatalf("removed = %d, want 4", removed)
 	}
-	if err := repo.AcknowledgeByID(ctx, "s1", reservedEntry.ID); err != nil {
+	if err := repo.AcknowledgeReserved(ctx, reserved); err != nil {
 		t.Fatalf("reserved entry did not survive clear: %v", err)
 	}
 }

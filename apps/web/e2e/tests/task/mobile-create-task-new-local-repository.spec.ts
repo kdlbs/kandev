@@ -6,6 +6,7 @@ import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
+import { exerciseMultiRowCreation } from "./local-repository-multi-row-helpers";
 
 useRegularMode();
 
@@ -178,6 +179,19 @@ function expectMainRepository(repositoryPath: string): void {
 }
 
 test.describe("Create task with a new local repository on mobile", () => {
+  test("refreshes and creates from a second repository row", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    await openCreateTask(testPage);
+    await exerciseMultiRowCreation(testPage, apiClient, {
+      workspaceId: seedData.workspaceId,
+      parentPath: backend.tmpDir,
+      mobile: true,
+    });
+  });
   test("creates and selects the repository in a contained, scrollable drawer", async ({
     testPage,
     apiClient,

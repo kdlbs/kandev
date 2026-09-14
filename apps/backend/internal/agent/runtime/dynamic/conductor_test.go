@@ -151,9 +151,12 @@ func TestConductorSanitizesAndPersistsPrebuiltContinuation(t *testing.T) {
 	}
 	const secret = "sk-prebuiltABCD1234567890"
 	prebuilt := &Continuation{
-		Conversation:  "Authorization: " + secret,
-		ToolSummary:   "tool output token=" + secret,
-		FailureReason: "provider failed with token=" + secret,
+		TaskDescription:   "task token=" + secret,
+		Conversation:      "Authorization: " + secret,
+		ToolSummary:       "tool output token=" + secret,
+		RepositorySummary: "origin token=" + secret,
+		PlanSummary:       "plan token=" + secret,
+		FailureReason:     "provider failed with token=" + secret,
 	}
 	downstream := &recordingConductorTestDownstream{}
 	store := &conductorContinuationStore{}
@@ -184,7 +187,8 @@ func TestConductorSanitizesAndPersistsPrebuiltContinuation(t *testing.T) {
 		t.Fatalf("saved continuation count = %d, want 1", len(store.saved))
 	}
 	saved := store.saved[0].Continuation
-	if strings.Contains(saved.Conversation+saved.ToolSummary+saved.FailureReason, secret) {
+	if strings.Contains(saved.TaskDescription+saved.Conversation+saved.ToolSummary+
+		saved.RepositorySummary+saved.PlanSummary+saved.FailureReason, secret) {
 		t.Fatalf("persisted continuation retained the raw secret: %#v", saved)
 	}
 }

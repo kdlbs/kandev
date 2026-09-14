@@ -17,6 +17,8 @@ import (
 	"github.com/kandev/kandev/internal/office/shared"
 )
 
+const runtimeInternalErrorMessage = "internal runtime error"
+
 // Handler exposes run-scoped runtime actions to agent processes.
 type Handler struct {
 	agentSvc    *agents.AgentService
@@ -476,7 +478,7 @@ func (h *Handler) respondRuntimeError(
 	targetID string,
 	err error,
 ) {
-	if errors.Is(err, errTaskTitleRequired) || errors.Is(err, ErrProjectRequired) {
+	if errors.Is(err, errTaskTitleRequired) || errors.Is(err, ErrProjectRequired) || errors.Is(err, ErrReasonTooLong) {
 		h.appendDeniedRunEvent(c.Request.Context(), runCtx, action, targetType, targetID, err)
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -498,9 +500,10 @@ func (h *Handler) respondRuntimeError(
 		zap.String("target_id", targetID),
 		zap.String("run_id", runCtx.RunID),
 		zap.String("agent_id", runCtx.AgentID),
+		zap.String("session_id", runCtx.SessionID),
 		zap.Error(err),
 	)
-	c.JSON(http.StatusInternalServerError, gin.H{"error": "internal runtime error"})
+	c.JSON(http.StatusInternalServerError, gin.H{"error": runtimeInternalErrorMessage})
 }
 
 func (h *Handler) respondTaskStatusError(c *gin.Context, runCtx RunContext, taskID string, err error) {

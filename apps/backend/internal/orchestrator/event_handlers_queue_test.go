@@ -246,6 +246,19 @@ func (m *hookedMessageCreator) CreateUserMessage(
 	return m.mockMessageCreator.CreateUserMessage(ctx, taskID, content, sessionID, turnID, metadata)
 }
 
+func (m *hookedMessageCreator) CreateUserMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, sessionID, turnID string,
+	metadata map[string]interface{},
+) error {
+	if m.beforeCreate != nil {
+		m.beforeCreate()
+	}
+	return m.mockMessageCreator.CreateUserMessageIdempotent(
+		ctx, messageID, taskID, content, sessionID, turnID, metadata,
+	)
+}
+
 func TestExecuteQueuedMessage_LifecycleRequeueAfterArchiveIsDiscardedBeforeUnarchiveDrain(t *testing.T) {
 	ctx := context.Background()
 	baseRepo := setupTestRepo(t)
@@ -470,7 +483,7 @@ func TestFinishQueuedMessageExecution_SuccessLeavesRecreatedSessionQueueEmpty(t 
 	); err != nil {
 		t.Fatalf("replace session incarnation: %v", err)
 	}
-	svc.finishQueuedMessageExecution(ctx, "s1", "s1", queued, reservation, true, false, nil)
+	svc.finishQueuedMessageExecution(ctx, "s1", "s1", queued, reservation, true, false, false, nil)
 
 	replacement := identity
 	replacement.SessionIncarnationID = "replacement-incarnation"

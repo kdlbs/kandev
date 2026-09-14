@@ -275,7 +275,7 @@ func TestFinishRun_SetsStatusAndFinishedAt(t *testing.T) {
 	before := time.Now().UTC().Add(-time.Second)
 	run := mustCreateRun(t, repo, fullRun())
 
-	if err := repo.FinishRun(ctx, run.ID, "finished", nil); err != nil {
+	if _, err := repo.FinishRun(ctx, run.ID, "finished", nil); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 	got := mustGetRun(t, repo, run.ID)
@@ -285,6 +285,35 @@ func TestFinishRun_SetsStatusAndFinishedAt(t *testing.T) {
 	}
 	if !got.FinishedAt.After(before) {
 		t.Errorf("finished_at = %s, want after %s", got.FinishedAt, before)
+	}
+}
+
+// TestFinishRun_ReturnsFullRowWithTheReaderClosed pins the property a
+// terminal-shape classifier depends on: FinishRun's own RETURNING
+// clause carries every field needed to classify the transition (here,
+// SessionID), so a caller never needs a separate read through r.ro to
+// get it.
+func TestFinishRun_ReturnsFullRowWithTheReaderClosed(t *testing.T) {
+	repo, _, reader := newTestRepoWithHandles(t)
+	ctx := context.Background()
+	run := mustCreateRun(t, repo, fullRun())
+
+	if err := reader.Close(); err != nil {
+		t.Fatalf("close reader: %v", err)
+	}
+
+	got, err := repo.FinishRun(ctx, run.ID, "finished", nil)
+	if err != nil {
+		t.Fatalf("finish run with the reader closed: %v", err)
+	}
+	if got == nil {
+		t.Fatal("finish run returned a nil row")
+	}
+	checkString(t, "status", string(got.Status), "finished")
+	checkString(t, "session_id", got.SessionID, "sess-7")
+	checkString(t, "agent_profile_id", got.AgentProfileID, "agent-42")
+	if got.FinishedAt == nil {
+		t.Fatalf("finished_at = nil, want a stamp")
 	}
 }
 

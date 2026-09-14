@@ -103,15 +103,21 @@ export function KanbanTaskShell({
 // background-running task reads distinctly and never as done,
 // and carry the sidebar's rich "needs me" reading — pending clarification /
 // permission — so the header distinguishes waiting-for-input.
+function simpleTaskPendingFallback(task: Task | null) {
+  if (!task) return {};
+  return {
+    taskId: task.id,
+    taskPendingAction: task.task_pending_action,
+    statusSummary: task.status_summary,
+    primarySessionState: task.primary_session_state,
+    primarySessionPendingAction: task.primary_session_pending_action,
+  };
+}
+
 function simpleTaskHeaderData(task: Task | null) {
   return {
     primarySessionId: task?.primary_session_id,
-    pendingFallback: {
-      taskId: task?.id,
-      taskPendingAction: task?.task_pending_action,
-      primarySessionState: task?.primary_session_state,
-      primarySessionPendingAction: task?.primary_session_pending_action,
-    },
+    pendingFallback: simpleTaskPendingFallback(task),
     identifier: task?.id?.slice(0, 8),
     title: task?.title ?? t("tasks:loading"),
     state: task?.state ?? null,

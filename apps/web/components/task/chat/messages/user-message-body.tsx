@@ -8,7 +8,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/
 import { MemoizedMarkdown } from "@/components/shared/memoized-markdown";
 import { cn } from "@/lib/utils";
 import { t } from "@/lib/i18n";
-import { splitWorkflowInstructions } from "@/lib/utils/workflow-instructions";
+import { splitMessageSegments } from "@/lib/utils/workflow-instructions";
 
 type UserMessageBodyOptions = {
   hasContent: boolean;
@@ -48,54 +48,96 @@ function UserMessageMarkdown({
   );
 }
 
-function CollapsedWorkflowInstructions({
+function CollapsedInstructions({
+  label,
+  testId,
   instructions,
-  rest,
   promptMentionComponents,
   taskId,
   worktreePath,
   onOpenFile,
 }: {
+  label: string;
+  testId: string;
   instructions: string;
-  rest: string;
+  promptMentionComponents?: Components;
+  taskId: string;
+  worktreePath?: string;
+  onOpenFile?: (path: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <Collapsible open={open} onOpenChange={setOpen}>
+      <CollapsibleTrigger
+        className="flex w-full cursor-pointer items-center gap-1 rounded-md bg-muted/40 px-2 py-1 text-left text-xs text-muted-foreground hover:bg-muted/60"
+        data-testid={testId}
+      >
+        <IconChevronRight
+          className={cn("h-3.5 w-3.5 shrink-0 transition-transform", open && "rotate-90")}
+        />
+        <span>{label}</span>
+      </CollapsibleTrigger>
+      <CollapsibleContent className="pt-2">
+        <UserMessageMarkdown
+          content={instructions}
+          promptMentionComponents={promptMentionComponents}
+          taskId={taskId}
+          worktreePath={worktreePath}
+          onOpenFile={onOpenFile}
+        />
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+function MessageSegments({
+  content,
+  promptMentionComponents,
+  taskId,
+  worktreePath,
+  onOpenFile,
+}: {
+  content: string;
   promptMentionComponents?: Components;
   taskId: string;
   worktreePath?: string;
   onOpenFile?: (path: string) => void;
 }) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
+  const segments = splitMessageSegments(content);
   return (
     <div className="space-y-2">
-      <Collapsible open={open} onOpenChange={setOpen}>
-        <CollapsibleTrigger
-          className="flex w-full cursor-pointer items-center gap-1 rounded-md bg-muted/40 px-2 py-1 text-left text-xs text-muted-foreground hover:bg-muted/60"
-          data-testid="workflow-instructions-toggle"
-        >
-          <IconChevronRight
-            className={cn("h-3.5 w-3.5 shrink-0 transition-transform", open && "rotate-90")}
-          />
-          <span>{t("workflows:workflowInstructionsCollapsed")}</span>
-        </CollapsibleTrigger>
-        <CollapsibleContent className="pt-2">
-          <UserMessageMarkdown
-            content={instructions}
+      {segments.map((segment, index) => {
+        if (segment.type === "text") {
+          return (
+            <UserMessageMarkdown
+              key={`text-${index}`}
+              content={segment.content}
+              promptMentionComponents={promptMentionComponents}
+              taskId={taskId}
+              worktreePath={worktreePath}
+              onOpenFile={onOpenFile}
+            />
+          );
+        }
+        const isMove = segment.kind === "move";
+        return (
+          <CollapsedInstructions
+            key={`instructions-${segment.kind}-${index}`}
+            label={t(
+              isMove
+                ? "workflows:workflowMoveInstructionsCollapsed"
+                : "workflows:workflowInstructionsCollapsed",
+            )}
+            testId={isMove ? "workflow-move-instructions-toggle" : "workflow-instructions-toggle"}
+            instructions={segment.content}
             promptMentionComponents={promptMentionComponents}
             taskId={taskId}
             worktreePath={worktreePath}
             onOpenFile={onOpenFile}
           />
-        </CollapsibleContent>
-      </Collapsible>
-      {rest.trim() !== "" && (
-        <UserMessageMarkdown
-          content={rest}
-          promptMentionComponents={promptMentionComponents}
-          taskId={taskId}
-          worktreePath={worktreePath}
-          onOpenFile={onOpenFile}
-        />
-      )}
+        );
+      })}
     </div>
   );
 }
@@ -115,21 +157,8 @@ export function renderUserMessageBody({
     return <pre className="whitespace-pre-wrap font-mono text-xs">{rawContent || content}</pre>;
   }
   if (hasContent) {
-    const split = splitWorkflowInstructions(content);
-    if (split.hasInstructions) {
-      return (
-        <CollapsedWorkflowInstructions
-          instructions={split.instructions}
-          rest={split.rest}
-          promptMentionComponents={promptMentionComponents}
-          taskId={taskId}
-          worktreePath={worktreePath}
-          onOpenFile={onOpenFile}
-        />
-      );
-    }
     return (
-      <UserMessageMarkdown
+      <MessageSegments
         content={content}
         promptMentionComponents={promptMentionComponents}
         taskId={taskId}

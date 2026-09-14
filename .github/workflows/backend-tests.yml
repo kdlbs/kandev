@@ -32,6 +32,11 @@ permissions:
   contents: read
   packages: read
 
+env:
+  # Container jobs may override HOME. Keep Corepack pointed at the pnpm cache
+  # prepared in the CI image.
+  COREPACK_HOME: /root/.cache/node/corepack
+
 jobs:
   runner_plan:
     name: Plan external runner allocation
@@ -84,6 +89,9 @@ jobs:
         env:
           PATTERNS: |
             apps/backend/**
+            apps/web/lib/settings-discovery/contract.generated.json
+            apps/web/lib/settings-discovery/profile-contract.generated.json
+            scripts/settings-contract-ci.test.mjs
             # check-make-shells also lints the root Makefile's $(shell ...)
             # probes, so a change there has to be able to trip it.
             Makefile
@@ -177,6 +185,10 @@ jobs:
 
       - name: Build
         run: go build -v ./cmd/kandev
+
+      - name: Verify settings catalog contract
+        working-directory: ${{ github.workspace }}
+        run: node --test scripts/settings-contract-ci.test.mjs
 
       - name: Check required-store SQL portability
         run: go run ./cmd/sqlguard ./internal
@@ -612,6 +624,7 @@ jobs:
             ./internal/notifications/store
             ./internal/office/configsync
             ./internal/office/repository/sqlite
+            ./internal/office/retention
             ./internal/orchestrator/messagequeue
             ./internal/persistence
             ./internal/persistence/storeconformance
@@ -756,3 +769,8 @@ jobs:
           go test -race -v
           -run '^(TestExplicitLocalRepositoryWindowsPathSemantics|TestListDirectory.*|TestDriveRootsFromMask|TestSplitAbsForRoot)$'
           ./internal/task/service
+
+      # Pure GOOS-branch logic (no syscalls), but it must actually observe
+      # Windows to prove the unavailable branch, not just compile under it.
+      - name: Test Windows agent-survival flag availability
+        run: go test -race -v -run '^TestAgentSurvivalAvailabilityMatchesPlatformScope$' ./internal/runtimeflags

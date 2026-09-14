@@ -21,6 +21,7 @@ type SavedPromptDeliveryScenarioOptions = {
 export async function openMobileQuickChatSetup(page: Page): Promise<Locator> {
   await page.goto("/");
   await page.waitForLoadState("networkidle");
+  await page.getByTestId("mobile-topbar-menu").tap();
   await page.getByTestId("mobile-quick-chat-button").tap();
 
   const dialog = page.getByRole("dialog", { name: "Quick Chat" });

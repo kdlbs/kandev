@@ -449,6 +449,112 @@ test.describe("PR status badge", () => {
     await expect(icon).toHaveClass(/text-yellow-500/);
   });
 
+  test("explains a jobless fork workflow approval and recovers after refresh", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    test.setTimeout(120_000);
+
+    const { task } = await seedBadgeTest(
+      apiClient,
+      seedData.workspaceId,
+      seedData.agentProfileId,
+      seedData.repositoryId,
+      "Workflow approval attention",
+    );
+    const headSHA = "workflow-head-143";
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 143,
+      pr_url: "https://github.com/testorg/testrepo/pull/143",
+      pr_title: "Workflow approval attention",
+      head_branch: "feat/workflow-approval",
+      base_branch: "main",
+      author_login: "test-user",
+      state: "open",
+      head_sha: headSHA,
+      head_repo_owner: "contributor",
+      head_repo_name: "testrepo-fork",
+      review_state: "approved",
+      mergeable_state: "clean",
+    });
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 143,
+      workflow_runs: [
+        {
+          id: 34494307522,
+          run_attempt: 1,
+          workflow_id: 93444456632,
+          name: "Run tests",
+          event: "pull_request",
+          status: "completed",
+          conclusion: "action_required",
+          head_sha: headSHA,
+          head_branch: "feat/workflow-approval",
+          head_repo_owner: "contributor",
+          head_repo_name: "testrepo-fork",
+          html_url: "https://github.com/testorg/testrepo/actions/runs/34494307522",
+          pull_requests: [
+            {
+              number: 143,
+              head_sha: headSHA,
+              head_branch: "feat/workflow-approval",
+              head_repo_owner: "contributor",
+              head_repo_name: "testrepo-fork",
+            },
+          ],
+        },
+      ],
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    let session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.hoverPRTopbar();
+    const notice = session.prTopbarPopover().getByTestId("pr-workflow-attention");
+    await expect(notice).toContainText("Awaiting maintainer approval");
+    await expect(notice).toContainText("Run tests");
+    await expect(notice.getByTestId("pr-workflow-attention-link")).toHaveAttribute(
+      "href",
+      "https://github.com/testorg/testrepo/actions/runs/34494307522",
+    );
+    await expect
+      .poll(async () => (await apiClient.listTaskPRs(task.id))[0]?.workflow_attention?.state)
+      .toBe("approval_required");
+    await prCapture.screenshot("desktop-workflow-approval-attention", {
+      caption: "Desktop PR popover explains a workflow approval gate",
+    });
+
+    await testPage.reload();
+    session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.hoverPRTopbar();
+    await expect(session.prTopbarPopover().getByTestId("pr-workflow-attention")).toContainText(
+      "Awaiting maintainer approval",
+    );
+
+    await apiClient.mockGitHubSeedPRFeedback({
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 143,
+      workflow_runs: [],
+    });
+    await testPage.reload();
+    session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.hoverPRTopbar();
+    await expect
+      .poll(async () => (await apiClient.listTaskPRs(task.id))[0]?.workflow_attention?.state)
+      .toBe("none");
+    await expect(session.prTopbarPopover().getByTestId("pr-workflow-attention")).toHaveCount(0);
+  });
+
   /**
    * When reviewers approved, CI passes, and GitHub's mergeable_state is clean,
    * the badge must show the ready-to-merge state so the user knows the PR

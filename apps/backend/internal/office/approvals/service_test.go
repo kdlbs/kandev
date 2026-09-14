@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/office/approvals"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
 // noopActivityLogger implements shared.ActivityLogger without importing shared.
@@ -23,7 +24,9 @@ func (n *noopActivityLogger) LogActivityWithRun(_ context.Context, _, _, _, _, _
 // noopRunQueuer implements approvals.RunQueuer as a no-op.
 type noopRunQueuer struct{}
 
-func (n *noopRunQueuer) QueueRun(_ context.Context, _, _, _, _ string) error { return nil }
+func (n *noopRunQueuer) QueueRun(_ context.Context, _, _, _, _ string) (runsservice.QueueOutcome, error) {
+	return runsservice.QueueOutcomeQueued, nil
+}
 
 type fakeAgentWriter struct {
 	statuses map[string]string

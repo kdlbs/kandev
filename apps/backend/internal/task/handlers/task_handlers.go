@@ -196,6 +196,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/tasks/:id/environment/reset", h.httpResetTaskEnvironment)
 	api.GET("/task-sessions/:id/turns", h.httpListSessionTurns)
 	api.POST("/tasks", h.httpCreateTask)
+	api.POST("/tasks/delete-preflight", h.httpTaskDeletePreflight)
 	api.PATCH("/tasks/:id", h.httpUpdateTask)
 	api.PATCH("/tasks/:id/port-forwarding", h.httpUpdateTaskPortForwarding)
 	api.POST("/tasks/:id/detach", h.httpDetachTask)
@@ -223,6 +224,11 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.GET("/workflows/:id/task-count", h.httpGetWorkflowTaskCount)
 	api.GET("/workflow/steps/:id/task-count", h.httpGetStepTaskCount)
 
+	// Kanban task reordering (REQ-TASKS-KANBAN-TASK-REORDERING-001.17): the
+	// only request surface for a reorder, mirroring the hyphenated
+	// collection-reorder precedent PUT /api/v1/workspaces/:id/workflows/reorder.
+	api.PUT("/workflow-steps/:id/tasks/reorder", h.httpReorderStepTasks)
+
 	// Session workflow review endpoints
 	api.POST("/sessions/:id/approve", h.httpApproveSession)
 
@@ -245,6 +251,7 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskMove, h.wsMoveTask)
 	dispatcher.RegisterFunc(ws.ActionTaskState, h.wsUpdateTaskState)
 	dispatcher.RegisterFunc(ws.ActionTaskArchive, h.wsArchiveTask)
+	dispatcher.RegisterFunc(ws.ActionTaskRunner, h.wsUpdateTaskRunner)
 	dispatcher.RegisterFunc(ws.ActionTaskSessionList, h.wsListTaskSessions)
 	// Git snapshot handler (commits and cumulative diff are handled by agent/handlers/git_handlers.go)
 	dispatcher.RegisterFunc(ws.ActionSessionGitSnapshots, h.wsGetGitSnapshots)
@@ -261,6 +268,10 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskPlanRevisionGet, h.wsGetTaskPlanRevision)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanRevert, h.wsRevertTaskPlan)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanImplement, h.wsMarkTaskPlanImplementationStarted)
+	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentsList, h.wsListTaskPlanComments)
+	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentCreate, h.wsCreateTaskPlanComment)
+	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentUpdate, h.wsUpdateTaskPlanComment)
+	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentDelete, h.wsDeleteTaskPlanComment)
 }
 
 // convertToServiceRepos converts dto.TaskRepositoryInput slice to service.TaskRepositoryInput slice.

@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { holdMutationResponse } from "./removal-transition-helpers";
 
 test.describe("Delete task redirect", () => {
   /**
@@ -100,5 +101,64 @@ test.describe("Delete task redirect", () => {
 
     // Should redirect to the home page
     await expect(testPage).not.toHaveURL(/\/t\//, { timeout: 15_000 });
+  });
+
+  test("keeps the outgoing detail out of the DOM while the last delete response is held", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Held Delete Task",
+      seedData.agentProfileId,
+      {
+        description: 'e2e:message("held delete response")',
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await expect(session.chat.getByText("held delete response").last()).toBeVisible({
+      timeout: 30_000,
+    });
+
+    const documentRequests: string[] = [];
+    testPage.on("request", (request) => {
+      if (
+        request.isNavigationRequest() &&
+        request.frame() === testPage.mainFrame() &&
+        request.resourceType() === "document"
+      ) {
+        documentRequests.push(request.url());
+      }
+    });
+    const gate = await holdMutationResponse(testPage, `**/api/v1/tasks/${task.id}*`, "DELETE");
+
+    try {
+      await session.deleteTaskInSidebar("Held Delete Task", { waitForCompletion: false });
+      await gate.backendResponseReady;
+
+      // The backend lifecycle event may already have cleared selection, but
+      // the local operation still owns the route until its mutation settles.
+      await expect(testPage.getByTestId("task-removal-status")).toBeVisible({ timeout: 10_000 });
+      await expect(session.activeChat()).toHaveCount(0);
+      expect(gate.requestCount()).toBe(1);
+      expect(documentRequests).toHaveLength(0);
+
+      gate.release();
+      await expect(testPage).not.toHaveURL(/\/t\//, { timeout: 15_000 });
+      expect(gate.requestCount()).toBe(1);
+      expect(documentRequests).toHaveLength(0);
+    } finally {
+      gate.release();
+      await gate.dispose();
+    }
   });
 });

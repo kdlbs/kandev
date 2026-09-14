@@ -10,6 +10,8 @@ const launchError = {
   category: "workspace_checkout_failed",
 };
 
+const messageListRecoveryRevealKeys = vi.hoisted(() => [] as Array<string | null | undefined>);
+
 const priorTranscriptMessage = {
   id: "prior-transcript",
   author_type: "agent",
@@ -35,7 +37,11 @@ const appStoreState = {
 
 const panelState = {
   resolvedSessionId: "prior-session",
-  session: { state: "FAILED", error_message: "The prior session stopped." },
+  session: {
+    state: "FAILED",
+    error_message: "The prior session stopped.",
+    metadata: null as Record<string, unknown> | null,
+  },
   taskId: "task-1",
   isWorking: false,
   messagesLoading: false,
@@ -114,15 +120,23 @@ vi.mock("@/components/task/chat/message-list", () => ({
   MessageList: ({
     messages,
     launchErrorOwned,
+    prependContent,
+    recoveryRevealKey,
   }: {
     messages: Message[];
     launchErrorOwned?: boolean;
-  }) => (
-    <div data-testid="message-list">
-      {!launchErrorOwned &&
-        messages.map((message) => <div key={message.id}>{message.content}</div>)}
-    </div>
-  ),
+    prependContent?: ReactNode;
+    recoveryRevealKey?: string | null;
+  }) => {
+    messageListRecoveryRevealKeys.push(recoveryRevealKey);
+    return (
+      <div data-testid="message-list">
+        {prependContent}
+        {!launchErrorOwned &&
+          messages.map((message) => <div key={message.id}>{message.content}</div>)}
+      </div>
+    );
+  },
 }));
 
 vi.mock("./simple/components/task-chat-launch-error", () => ({
@@ -198,7 +212,10 @@ vi.mock("react-i18next", () => ({
 
 import { TaskChatPanel } from "./task-chat-panel";
 
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  messageListRecoveryRevealKeys.length = 0;
+});
 
 describe("TaskChatPanel launch-error ownership", () => {
   it("keeps a task-wide card and prior failed-session surfaces together", () => {
@@ -209,5 +226,26 @@ describe("TaskChatPanel launch-error ownership", () => {
     );
     expect(screen.getByTestId("session-stopped-banner")).toBeTruthy();
     expect(screen.getByText(priorTranscriptMessage.content)).toBeTruthy();
+    expect(messageListRecoveryRevealKeys.at(-1)).toBe("prior-session:task-wide-launch-error");
+  });
+
+  it("reveals a persisted bootstrap fallback for the selected session", () => {
+    const previousMetadata = panelState.session.metadata;
+    panelState.session.metadata = {
+      last_agent_error: {
+        message: "The selected session could not start.",
+        phase: "bootstrap",
+        occurred_at: "2026-08-20T11:00:00Z",
+        stamp: "persisted-bootstrap-error",
+      },
+    };
+
+    try {
+      render(<TaskChatPanel sessionId="prior-session" taskId="task-1" />);
+
+      expect(messageListRecoveryRevealKeys.at(-1)).toBe("prior-session:persisted-bootstrap-error");
+    } finally {
+      panelState.session.metadata = previousMetadata;
+    }
   });
 });

@@ -1,4 +1,5 @@
 {
+  "taskViews": "任務視圖",
   "archivedLoadFailed": "無法載入已歸檔任務",
   "collapseAllBranches": "全部摺疊",
   "orgChart": "組織架構",
@@ -117,5 +118,7 @@
   "failedToSyncSidebarViews": "同步側邊欄視圖失敗",
   "morePluginItems": "更多外掛程式項",
   "newViewNumbered": "新視圖 {{suffix}}",
-  "untitledView": "未命名視圖"
+  "untitledView": "未命名視圖",
+  "workspaceContextRefreshFailed": "無法刷新任務。",
+  "workspaceContextAccessDenied": "您已無法存取此工作區。"
 }

@@ -141,7 +141,7 @@ export type BudgetPolicy = {
   scopeType: "agent" | "project" | "workspace";
   scopeId: string;
   limitSubcents: number;
-  period: "monthly" | "total";
+  period: "daily" | "monthly" | "yearly" | "total";
   alertThresholdPct: number;
   actionOnExceed: "notify_only" | "pause_agent" | "block_new_tasks";
   createdAt: string;
@@ -202,6 +202,12 @@ export type RoutineRun = {
   linkedTaskId?: string;
   coalescedIntoRunId?: string;
   dispatchFingerprint?: string;
+  // Gap summary measured for the claim that created this run (absent when no
+  // gap was recorded — never a stored zero). See
+  // docs/specs/office/requirements/routine-catch-up.md AC-002.
+  catchUpMissedTicks?: number;
+  catchUpFirstMissedAt?: string;
+  catchUpTruncated?: boolean;
   startedAt?: string;
   completedAt?: string;
   createdAt: string;
@@ -490,6 +496,18 @@ export type {
   AgentRoutingSliceState,
 } from "./routing-types";
 
+// --- Workspace kill switch (pause) types ---
+//
+// Defined in `./pause-types` (kept out of this file to stay under the
+// 600-line cap), same split as routing-types above.
+
+export type {
+  WorkspacePauseRecord,
+  WorkspacePauseStatus,
+  WorkspacePauseSliceState,
+  WorkspacePauseOutcome,
+} from "./pause-types";
+
 import type {
   AgentRouteData,
   AgentRoutePreview,
@@ -501,6 +519,7 @@ import type {
   RunAttemptsState,
   WorkspaceRouting,
 } from "./routing-types";
+import type { WorkspacePauseOutcome, WorkspacePauseSliceState } from "./pause-types";
 
 // --- Slice state & actions ---
 
@@ -561,6 +580,7 @@ export type OfficeSliceState = {
     runAttempts: RunAttemptsState;
     agentRouting: AgentRoutingSliceState;
     taskQuorum: TaskQuorumSliceState;
+    pause: WorkspacePauseSliceState;
   };
 };
 
@@ -608,6 +628,14 @@ export type OfficeSliceActions = {
   appendRunAttempt: (runId: string, attempt: RouteAttempt) => void;
   setAgentRouting: (agentId: string, data: AgentRouteData | undefined) => void;
   setTaskQuorum: (taskId: string, quorum: QuorumResponseDTO) => void;
+  beginPauseRequest: () => number;
+  resetPauseState: () => void;
+  applyPauseResponse: (
+    tag: number,
+    responseWorkspaceId: string,
+    activeWorkspaceId: string | null,
+    outcome: WorkspacePauseOutcome,
+  ) => boolean;
 };
 
 export type OfficeSlice = OfficeSliceState & OfficeSliceActions;

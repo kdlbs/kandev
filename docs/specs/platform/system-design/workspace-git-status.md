@@ -124,19 +124,17 @@ A branch name alone is not a complete comparison identity. A task may be attache
 
 The instance's effective Git environment is authoritative for Kandev-owned workspace Git commands. This environment contains executor credentials and managed credential-helper entries. The process manager gives a detached environment copy to each workspace tracker. This rule applies to root, repository, submodule, rescan, and lazy trackers.
 
-Each tracker starts Git with its instance environment, not the ambient environment of agentctl. The command environment preserves managed `GIT_CONFIG_*` entries and the command and options from a direct OpenSSH command, while placing `BatchMode=yes` before inherited batch-mode options. Unsupported shell prefixes or wrappers use the safe non-interactive default. It also enforces the established non-interactive controls:
-
-- `GIT_TERMINAL_PROMPT=0`
-- `GCM_INTERACTIVE=Never`
-- `GIT_ASKPASS=echo`
-- `SSH_ASKPASS=/bin/false`
-- `GIT_SSH_COMMAND=ssh -oBatchMode=yes` when the instance does not supply an SSH command
-
-These values prevent Git, Git Credential Manager, and SSH from reading the launcher terminal. Each command keeps the existing Git-command deadline and throttle behavior.
+Each tracker starts Git with its instance environment. Final execution preparation follows
+[Managed Git execution](git-subprocess-execution.md), including deny-only askpass,
+SSH option preservation, finite execution budgets, and bounded helper cleanup.
+The shared boundary applies controls after caller environment assembly. Tracker-specific
+index selection and optional-lock suppression remain owned by the tracker.
 
 The process manager sets an explicit target to `pending` before it starts network work. It then materializes the target with the manager's lifetime context. Initial materialization, live updates, rescan, and lazy tracker creation do not wait for the fetch. A successful fetch publishes the exact comparison ref and starts a detached status refresh. An error publishes a bounded unavailable state. Manager shutdown cancels unfinished materialization.
 
 Kandev selects the transport before it starts a comparison-target command. Canonical comparison targets remain HTTPS. An HTTPS authentication or transport error does not start an SSH retry. This rule prevents a command from changing identity, host trust, or credential scope after the first error. Kandev does not rewrite `origin`, the checkout upstream, or push routing.
+
+An explicit fresh status request may re-evaluate an unavailable comparison target once. A moving target refresh may force-update only its deterministic internal comparison ref, so a stale cache does not block recovery; user remotes and push routing are unchanged.
 
 This contract follows [ADR-2026-08-31-deterministic-noninteractive-git-transport](../../../decisions/2026-08-31-deterministic-noninteractive-git-transport.md).
 
@@ -234,3 +232,5 @@ Existing Git-status routes remain in place. Their result and stream payloads add
 ## Implementation plan
 
 See [Workspace Git Status Scalability plan](../../../plans/workspace-git-status-scalability/plan.md), [Workspace Git Status Dependency-Tree Exclusion plan](../../../plans/workspace-git-status-dependency-tree-exclusion/plan.md), [Fork PR Comparison Targets plan](../../../plans/fork-pr-comparison-targets/plan.md), [Non-interactive Comparison-target Git plan](../../../plans/noninteractive-comparison-target-git/plan.md), and [Mixed Staged and Unstaged Changes plan](../../../plans/mixed-staged-unstaged-changes/plan.md).
+
+The [shared Git execution repair](../../../plans/noninteractive-git-execution/plan.md) extends enforcement beyond comparison commands.

@@ -13,6 +13,7 @@ import { CreateAgentDialog } from "./components/create-agent-dialog";
 import { EmptyState } from "../components/shared/empty-state";
 import { PageHeader } from "../components/shared/page-header";
 import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 type AgentsPageClientProps = {
   initialAgents: AgentProfile[];
@@ -52,7 +53,10 @@ export function AgentsPageClient({ initialAgents, initialWorkspaceId }: AgentsPa
       <PageHeader
         title={t("office:agents")}
         action={
-          <Button size="sm" className="cursor-pointer" onClick={() => setShowCreate(true)}>
+          <Button
+            className={controlSizingClassName("standard", "cursor-pointer")}
+            onClick={() => setShowCreate(true)}
+          >
             <IconPlus className="h-4 w-4 mr-1" />
             {t("office:newAgent")}
           </Button>
@@ -66,8 +70,7 @@ export function AgentsPageClient({ initialAgents, initialWorkspaceId }: AgentsPa
           action={
             <Button
               variant="outline"
-              size="sm"
-              className="cursor-pointer"
+              className={controlSizingClassName("standard", "cursor-pointer")}
               onClick={() => setShowCreate(true)}
             >
               <IconPlus className="h-4 w-4 mr-1" />

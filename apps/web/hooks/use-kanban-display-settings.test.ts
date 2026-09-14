@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => {
     snapshots: {} as Record<string, unknown>,
     repositoryIds: [] as string[],
     hiddenWorkflowStepIds: {} as Record<string, string[]>,
+    kanbanSort: "created_desc" as "created_desc" | "priority_desc",
+    kanbanPriorityFilterTokens: [] as string[],
   };
 });
 
@@ -45,6 +47,8 @@ vi.mock("@/hooks/use-user-display-settings", () => ({
       repositoryIds: mocks.repositoryIds,
       tasksListShowDetails: false,
       hiddenWorkflowStepIds: mocks.hiddenWorkflowStepIds,
+      kanbanSort: mocks.kanbanSort,
+      kanbanPriorityFilterTokens: mocks.kanbanPriorityFilterTokens,
     },
     commitSettings: mocks.commitSettings,
     repositories: [],
@@ -71,6 +75,8 @@ function resetMocks() {
   mocks.snapshots = {};
   mocks.repositoryIds = [];
   mocks.hiddenWorkflowStepIds = {};
+  mocks.kanbanSort = "created_desc";
+  mocks.kanbanPriorityFilterTokens = [];
   window.history.replaceState({}, "", "/");
 }
 
@@ -134,6 +140,9 @@ describe("useKanbanDisplaySettings — step visibility", () => {
       workflowId: mocks.workflowId,
       repositoryIds: ["repo-1"],
       hiddenWorkflowStepIds: { [mocks.workflowId]: ["step-a"] },
+      workflowIdsWithAutoHideEmptySteps: undefined,
+      kanbanSort: mocks.kanbanSort,
+      kanbanPriorityFilterTokens: mocks.kanbanPriorityFilterTokens,
     });
   });
 
@@ -161,5 +170,51 @@ describe("useKanbanDisplaySettings — step visibility", () => {
         hiddenWorkflowStepIds: { "workflow-2": ["step-z"], [mocks.workflowId]: ["step-a"] },
       }),
     );
+  });
+});
+
+describe("useKanbanDisplaySettings — board sort and priority filter", () => {
+  it("commits the selected board sort token, preserving other settings", () => {
+    mocks.repositoryIds = ["repo-1"];
+    const { result } = renderHook(() => useKanbanDisplaySettings());
+
+    act(() => result.current.onBoardSortChange("priority_desc"));
+
+    expect(mocks.commitSettings).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repositoryIds: ["repo-1"],
+        kanbanSort: "priority_desc",
+      }),
+    );
+  });
+
+  it("toggling a priority token adds it to an empty selection", () => {
+    const { result } = renderHook(() => useKanbanDisplaySettings());
+
+    act(() => result.current.onPriorityFilterChange("critical"));
+
+    expect(mocks.commitSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ kanbanPriorityFilterTokens: ["critical"] }),
+    );
+  });
+
+  it("toggling an already-selected priority token removes it", () => {
+    mocks.kanbanPriorityFilterTokens = ["critical", "high"];
+    const { result } = renderHook(() => useKanbanDisplaySettings());
+
+    act(() => result.current.onPriorityFilterChange("critical"));
+
+    expect(mocks.commitSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ kanbanPriorityFilterTokens: ["high"] }),
+    );
+  });
+
+  it("exposes the current board sort and priority filter selection", () => {
+    mocks.kanbanSort = "priority_desc";
+    mocks.kanbanPriorityFilterTokens = ["low"];
+    const { result } = renderHook(() => useKanbanDisplaySettings());
+
+    expect(result.current.boardSort).toBe("priority_desc");
+    expect(result.current.priorityFilterTokens).toEqual(["low"]);
   });
 });
