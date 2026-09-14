@@ -129,6 +129,7 @@ Kandev can run any agent CLI as a TUI inside a terminal, even when it does not s
 |:--------:|-------------|
 | **Local Process** | Runs the agent as a local process on the host machine |
 | **Docker** | Runs the agent in an isolated Docker container |
+| **Kubernetes** | Runs each task session in an administrator-configured Pod with managed, existing, or disposable workspace storage |
 | **SSH** | Runs the agent on a remote server over SSH |
 | **Sprites** | Runs the agent in a remote cloud environment via [sprites.dev](https://sprites.dev) |
 
@@ -236,8 +237,7 @@ graph LR
     end
 ```
 
-We also want to add support for this remote runtime:
-- **K8s operator** - run agents in a Kubernetes cluster, with auto-scaling and resource management.
+See the [Kubernetes guide](docs/public/k8s.md) for executor configuration and lifecycle. The executor uses ordinary Pods and does not require an operator.
 
 <details>
 <summary><strong>Development</strong></summary>
