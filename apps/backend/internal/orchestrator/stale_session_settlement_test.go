@@ -205,6 +205,62 @@ func TestSettleStaleSessionRefusesActiveAdministrativeOwnership(t *testing.T) {
 	}
 }
 
+func TestSettleStaleSessionRefusesUnattributedCreatedSessionAnomaly(t *testing.T) {
+	ctx := context.Background()
+	svc, repo, request := seedStaleSettlement(t)
+
+	// Reproduce the orphaned-lifecycle anomaly shape: the target session is a
+	// pure materialization (CREATED state, no turn rows, no completion intent,
+	// empty conversation). Process materialization is never inference or turn
+	// evidence, so settlement must refuse without mutation and without
+	// claiming any launch authority — the incident classification stays
+	// "unattributed lifecycle anomaly", never "unauthorized launch".
+	created, err := repo.GetTaskSession(ctx, request.TargetSessionID)
+	if err != nil || created == nil {
+		t.Fatalf("load target session = (%v, %v)", created, err)
+	}
+	created.State = models.TaskSessionStateCreated
+	if err := repo.UpdateTaskSession(ctx, created); err != nil {
+		t.Fatalf("set target session to CREATED: %v", err)
+	}
+	// Strip every durable inference surface down to the materialization
+	// itself: no prompt-attempt evidence, no completion intent, no turn rows,
+	// no conversation messages.
+	db := repo.DB()
+	for _, statement := range []string{
+		`DELETE FROM session_completion_intents WHERE session_id = 's1'`,
+		`DELETE FROM task_session_turns WHERE task_session_id = 's1'`,
+		`DELETE FROM task_session_messages WHERE task_session_id = 's1'`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			t.Fatalf("strip inference evidence (%q): %v", statement, err)
+		}
+	}
+
+	_, err = svc.SettleStaleSession(ctx, request)
+	if !errors.Is(err, ErrStaleSessionNotStale) {
+		t.Fatalf("SettleStaleSession error = %v, want active_turn/not_stale", err)
+	}
+	var remainingTurns int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM task_session_turns WHERE task_session_id = 's1'`).Scan(&remainingTurns); err != nil {
+		t.Fatalf("count remaining turns: %v", err)
+	}
+	if remainingTurns != 0 {
+		t.Fatalf("remaining turn rows = %d, want 0 (refusal must not create turns)", remainingTurns)
+	}
+	var auditResult string
+	row := repo.DB().QueryRowContext(ctx, `
+		SELECT result FROM session_control_events
+		WHERE target_session_id = ? AND target_turn_id = ?
+	`, request.TargetSessionID, request.TargetTurnID)
+	if err := row.Scan(&auditResult); err != nil {
+		t.Fatalf("query refusal audit: %v", err)
+	}
+	if auditResult != "not_stale" {
+		t.Fatalf("audit result = %q, want not_stale (no launch-authority claim)", auditResult)
+	}
+}
+
 func seedStaleSettlement(t *testing.T) (*Service, *sqliterepo.Repository, StaleSessionSettlementRequest) {
 	t.Helper()
 	ctx := context.Background()
