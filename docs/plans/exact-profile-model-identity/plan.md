@@ -19,9 +19,10 @@ Kandev never sends a speculative `SetModel` for an unadvertised model. When
 the requested exact model cannot be attested, the launch fails before
 inference instead of silently substituting a provider default.
 
-Existing contracts qualify: the requirement and system designs live in
-`docs/specs/agents/` and are carried in this revision unchanged; the work
-order references them per the documentation coverage policy.
+The requirement and system designs in `docs/specs/agents/` define the
+semantic contract for exact profile model identity. This delivery updates
+that contract so launch and workflow entry never infer a model variation or
+silently accept a provider default for an exact profile.
 
 ## Tasks
 
@@ -29,6 +30,6 @@ order references them per the documentation coverage policy.
 
 ## Notes
 
-- The work order is the delivery package for this change; the requirement
-  and system-design files are pre-existing contracts with no semantic edit
-  in this pull request.
+- The work order is the delivery package for this change. The requirement
+  and system-design files record the semantic changes for exact model
+  attestation, strict failure, and explicit fallback behavior.

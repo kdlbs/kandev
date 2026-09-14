@@ -30,6 +30,22 @@ func (r *firstReusableLookupErrorRepo) ListTaskSessions(ctx context.Context, tas
 	return r.sessionExecutorStore.ListTaskSessions(ctx, taskID)
 }
 
+// firstReusableLookupEmptyRepo makes only the validated lookup empty. A
+// second lookup would return the parked profile session, reproducing the
+// unsafe reuse-without-a-candidate path.
+type firstReusableLookupEmptyRepo struct {
+	sessionExecutorStore
+	calls int
+}
+
+func (r *firstReusableLookupEmptyRepo) ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error) {
+	r.calls++
+	if r.calls == 1 {
+		return []*models.TaskSession{}, nil
+	}
+	return r.sessionExecutorStore.ListTaskSessions(ctx, taskID)
+}
+
 func TestPrepareWorkflowStepSession_FailsClosedWhenInitialReusableLookupFails(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
@@ -55,6 +71,34 @@ func TestPrepareWorkflowStepSession_FailsClosedWhenInitialReusableLookupFails(t 
 	persisted, err := fixture.repo.GetTaskSession(ctx, parked.ID)
 	require.NoError(t, err)
 	require.False(t, persisted.IsPrimary, "the uninspected parked session must not be promoted")
+}
+
+func TestExactModelWorkflowStartPolicyForcesNewAfterEmptyValidatedLookup(t *testing.T) {
+	ctx := context.Background()
+	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
+	parked := &models.TaskSession{
+		ID: "session-b", TaskID: "t1", AgentProfileID: "profile-b", ExecutorID: "exec-local",
+		ExecutorProfileID: "ep1", TaskEnvironmentID: "env-1", State: models.TaskSessionStateWaitingForInput,
+		StartedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
+	}
+	require.NoError(t, fixture.repo.CreateTaskSession(ctx, parked))
+	flaky := &firstReusableLookupEmptyRepo{sessionExecutorStore: fixture.svc.repo}
+	fixture.svc.repo = flaky
+	target := &wfmodels.WorkflowStep{
+		ID: "step-b", WorkflowID: "wf1", AgentProfileID: "profile-b",
+		ProfileSessionStartPolicy: models.WorkflowProfileSessionStartPolicyReuse,
+	}
+	source := &wfmodels.WorkflowStep{ID: "step-a", WorkflowID: "wf1", AgentProfileID: "profile-a"}
+
+	startPolicy, selected, err := fixture.svc.exactModelWorkflowStartPolicy(
+		ctx, "t1", fixture.current.ID, target, source, "profile-b",
+		models.WorkflowProfileSessionStartPolicyReuse,
+	)
+
+	require.NoError(t, err)
+	require.Equal(t, models.WorkflowProfileSessionStartPolicyNew, startPolicy)
+	require.Nil(t, selected, "an empty validated lookup must not return a reuse candidate")
+	require.Equal(t, 1, flaky.calls, "the exact-model decision must use one validated lookup")
 }
 
 func TestPreflightWorkflowStepCredentials_ValidatesSameProfileReplacement(t *testing.T) {

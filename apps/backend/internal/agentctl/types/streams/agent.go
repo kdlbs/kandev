@@ -482,6 +482,9 @@ type SessionModelState struct {
 	CurrentModelID string             `json:"current_model_id,omitempty"`
 	Models         []SessionModelInfo `json:"models,omitempty"`
 	ConfigOptions  []ConfigOption     `json:"config_options,omitempty"`
+	// ConfigOptionsSettled distinguishes a complete empty provider snapshot
+	// from the transient empty state sent before startup settles.
+	ConfigOptionsSettled bool `json:"config_options_settled,omitempty"`
 }
 
 // AuthMethodInfo represents an authentication method from ACP initialize.

@@ -565,13 +565,25 @@ func (m *Manager) reapplySessionModelAfterResetWithClient(
 	client *agentctlclient.Client,
 	newSessionID, modelID string,
 ) error {
+	return m.reapplySessionModelAfterResetWithClientAndState(
+		ctx, execution, client, execution.GetModelState(), newSessionID, modelID,
+	)
+}
+
+func (m *Manager) reapplySessionModelAfterResetWithClientAndState(
+	ctx context.Context,
+	execution *AgentExecution,
+	client *agentctlclient.Client,
+	modelState *CachedModelState,
+	newSessionID, modelID string,
+) error {
 	if client == nil || modelID == "" {
 		return nil
 	}
 	policy := m.resolveStartModelPolicy(ctx, execution.AgentProfileID)
 	policy.Model = modelID
 	decision, err := applyStartModelPolicy(
-		ctx, m.logger, client, execution.GetModelState(), policy,
+		ctx, m.logger, client, modelState, policy,
 	)
 	if err != nil {
 		m.logger.Warn("failed to re-apply session model after context reset",
@@ -609,16 +621,32 @@ func cacheSessionModelStateFromClient(execution *AgentExecution, client *agentct
 	if execution == nil || client == nil {
 		return false
 	}
-	state := client.GetLastSessionModelState()
-	if state == nil {
+	state, ready := sessionModelStateFromClient(client)
+	if !ready {
 		return false
 	}
-	execution.SetModelState(&CachedModelState{
-		CurrentModelID: state.CurrentModelID,
-		Models:         state.Models,
-		ConfigOptions:  state.ConfigOptions,
-	})
+	execution.SetModelState(state)
 	return true
+}
+
+func sessionModelStateFromClient(client *agentctlclient.Client) (*CachedModelState, bool) {
+	if client == nil {
+		return nil, false
+	}
+	state := client.GetLastSessionModelState()
+	if state == nil {
+		return nil, false
+	}
+	cached := &CachedModelState{
+		CurrentModelID:       state.CurrentModelID,
+		Models:               state.Models,
+		ConfigOptions:        state.ConfigOptions,
+		ConfigOptionsSettled: state.ConfigOptionsSettled,
+	}
+	if !freshSessionModelCatalogReady(cached) {
+		return nil, false
+	}
+	return cached, true
 }
 
 func waitForFreshSessionModelStateFromClient(

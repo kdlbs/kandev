@@ -3860,6 +3860,12 @@ func (s *Service) exactModelWorkflowStartPolicy(
 			zap.Error(err))
 		return startPolicy, nil, fmt.Errorf("find reusable session for exact model identity: %w", err)
 	}
+	if existing == nil {
+		// The lookup above is the validated candidate decision. Do not return
+		// reuse with a nil candidate, because the switch path would perform a
+		// second lookup against a potentially changed session set.
+		return models.WorkflowProfileSessionStartPolicyNew, nil, nil
+	}
 	requiresFreshSession, err := s.workflowEntryRequiresFreshExactModelSession(ctx, existing, step, sourceStep, profileID)
 	if err != nil {
 		return startPolicy, nil, err

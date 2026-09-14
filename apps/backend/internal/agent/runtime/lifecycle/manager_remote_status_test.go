@@ -361,7 +361,6 @@ func TestPrepareRestartedKubernetesAgentctl_RejectsUnadvertisedExactModel(t *tes
 	}
 	client := createTestClient(t, mock.server.URL)
 	t.Cleanup(client.Close)
-	require.NoError(t, client.StreamUpdates(context.Background(), func(agentctl.AgentEvent) {}, nil, nil))
 	mgr := newRemoteStatusManager(t, &MockExecutor{name: executor.NameKubernetes})
 	mgr.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{Model: "gpt-5.4"}}
 	mgr.sessionManager = NewSessionManager(newTestLogger(), newTestStopCh(t))
@@ -392,7 +391,6 @@ func TestPrepareRestartedKubernetesAgentctl_RestoresPersistedRuntimeModel(t *tes
 	t.Cleanup(oldClient.Close)
 	refreshedClient := createTestClient(t, refreshedMock.server.URL)
 	t.Cleanup(refreshedClient.Close)
-	require.NoError(t, refreshedClient.StreamUpdates(context.Background(), func(agentctl.AgentEvent) {}, nil, nil))
 	mgr := newRemoteStatusManager(t, &MockExecutor{name: executor.NameKubernetes})
 	mgr.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{Model: "gpt-5.6-terra"}}
 	mgr.workspaceInfoProvider = &mockWorkspaceInfoProvider{infos: map[string]*WorkspaceInfo{
@@ -418,6 +416,50 @@ func TestPrepareRestartedKubernetesAgentctl_RestoresPersistedRuntimeModel(t *tes
 	require.NoError(t, err)
 	require.Empty(t, oldMock.getSetModelIDs(), "the stale agentctl must not receive a model restore")
 	require.Equal(t, []string{"gpt-5.6-luna"}, refreshedMock.getSetModelIDs())
+}
+
+func TestPrepareRestartedKubernetesAgentctl_WaitsForDelayedReplacementCatalog(t *testing.T) {
+	mock := newRestartMockAgentctlServer(t, false, false)
+	mock.newModelState = &streams.SessionModelState{}
+	mock.newLateEventDelay = 20 * time.Millisecond
+	mock.newLateEventSent = make(chan struct{})
+	mock.newLateEvent = &agentctl.AgentEvent{
+		Type:           streams.EventTypeSessionModels,
+		CurrentModelID: "gpt-5.6-luna",
+		SessionModels:  []streams.SessionModelInfo{{ModelID: "gpt-5.6-luna"}},
+	}
+	client := createTestClient(t, mock.server.URL)
+	t.Cleanup(client.Close)
+	mgr := newRemoteStatusManager(t, &MockExecutor{name: executor.NameKubernetes})
+	mgr.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{Model: "gpt-5.6-luna"}}
+	mgr.sessionManager = NewSessionManager(newTestLogger(), newTestStopCh(t))
+	agentConfig, ok := newTestRegistry().Get("claude-acp")
+	require.True(t, ok)
+	execution := &AgentExecution{
+		ID: "exec-1", TaskID: "task-1", SessionID: "session-1", AgentProfileID: "profile-1",
+		WorkspacePath: "/workspace", AgentCommand: "agent", agentctl: newReadyAgentctlClient(t, newTestLogger()),
+	}
+	execution.SetModelState(&CachedModelState{
+		CurrentModelID: "old-model",
+		Models:         []streams.SessionModelInfo{{ModelID: "old-model"}},
+	})
+	refresh := &RemoteInstanceRefresh{
+		Instance: &ExecutorInstance{Client: client}, ProcessRestarted: true, AgentConfig: agentConfig,
+	}
+
+	_, err := mgr.prepareRestartedKubernetesAgentctl(context.Background(), execution, refresh)
+
+	require.NoError(t, err)
+	require.Equal(t, []string{"gpt-5.6-luna"}, mock.getSetModelIDs())
+	require.Eventually(t, func() bool {
+		state := execution.GetModelState()
+		return state != nil && state.CurrentModelID == "gpt-5.6-luna"
+	}, time.Second, time.Millisecond)
+	select {
+	case <-mock.newLateEventSent:
+	default:
+		t.Fatal("replacement session_models event was not sent through the staged stream")
+	}
 }
 
 func TestPollOneRemoteStatusReattachesKubernetesClientWithoutRestartingAgent(t *testing.T) {

@@ -60,9 +60,23 @@ Each managed runtime has a reviewed Kandev default. If you have not selected a
 version, Kandev uses that exact default for probes, sessions, standalone
 inference, containers, and SSH commands. A successful version update stores
 your exact selection for this Kandev installation. The selection takes
-precedence over the default until you choose **Use Kandev default**. Kandev
-does not store the default as a user selection, so later Kandev releases can
-move unmodified installations to their reviewed defaults.
+precedence for the current default generation. **Use Kandev default** clears
+it, and a later shipped package or reviewed default resets it during startup.
+Kandev does not store the default as a user selection.
+
+When a Kandev upgrade changes the managed package or its reviewed default,
+Kandev removes the older selection during startup before the service becomes
+ready. New probes and launches then use the reviewed default for that release.
+On the first startup with this generation tracking, Kandev treats an existing
+selection without a generation marker as legacy and resets it once.
+When the package and default stay the same, Kandev preserves your selection
+across restarts and unrelated upgrades. A process that is already running is
+not replaced, so the new default applies when Kandev starts a future process.
+
+After startup, open the update control to select any validated stable version,
+including an older version. This lets you roll back the new default when a
+provider or environment requires it. The selection remains active until you
+change it or a later Kandev release changes that agent's package or default.
 
 When the cached npm check finds a newer stable release, the update control has
 a blue dot and its accessible label includes the effective and latest
@@ -228,10 +242,12 @@ stale browser action does not replace a newer route decision.
 
 The model list shown while editing a profile comes from a host probe. It is an
 editing hint, not a launch gate. A profile remains selectable when its saved
-model is missing from that host list. Profile selectors do not show a model
-warning for this difference. Inspect the model list in profile settings for
-discovery details. Authentication, installation, and probe-failure indicators
-remain visible on profile selectors.
+model is missing from that host list. Profile selectors show an amber warning
+icon for this difference. On a desktop pointer, hover or focus the icon to
+read its tooltip. On a touch device, select the icon to open its warning
+drawer. Inspect the model list in profile settings for discovery details.
+Authentication, installation, and probe-failure indicators remain visible on
+profile selectors.
 
 At task launch, the selected executor's ACP catalog is authoritative. Kandev
 sends the requested model only when the executor advertises it. An exact

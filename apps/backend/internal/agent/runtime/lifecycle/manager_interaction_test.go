@@ -61,6 +61,10 @@ type restartMockAgentctlServer struct {
 	resetResponseDelay           time.Duration
 	resetLateEvent               *agentctl.AgentEvent
 	resetLateEventSent           chan struct{}
+	newLateEvent                 *agentctl.AgentEvent
+	newLateEventDelay            time.Duration
+	newLateEventSent             chan struct{}
+	newLateEventOnce             sync.Once
 	onReset                      func()
 	onSessionNew                 func()
 	onCacheRepair                func()
@@ -352,6 +356,18 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 			data, _ := json.Marshal(resp)
 			if err := conn.WriteMessage(websocket.TextMessage, data); err != nil {
 				return
+			}
+			if msg.Action == "agent.session.new" && m.newLateEvent != nil {
+				if m.newLateEventDelay > 0 {
+					time.Sleep(m.newLateEventDelay)
+				}
+				eventData, _ := json.Marshal(m.newLateEvent)
+				if err := conn.WriteMessage(websocket.TextMessage, eventData); err != nil {
+					return
+				}
+				if m.newLateEventSent != nil {
+					m.newLateEventOnce.Do(func() { close(m.newLateEventSent) })
+				}
 			}
 		}
 	})

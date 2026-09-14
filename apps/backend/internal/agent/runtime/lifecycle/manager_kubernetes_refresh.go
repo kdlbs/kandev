@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
+	agentctlclient "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/secrets"
@@ -211,6 +212,30 @@ func (m *Manager) prepareRestartedKubernetesAgentctl(
 	if refresh.AgentConfig == nil || m.sessionManager == nil {
 		return "", nil
 	}
+	closeStagedStream, err := m.connectStagedKubernetesAgentctlStream(ctx, execution, client)
+	if err != nil {
+		return "", err
+	}
+	defer closeStagedStream()
+
+	policy := m.resolveStartModelPolicy(ctx, execution.AgentProfileID)
+	runtimeModel, _, _ := m.sessionRuntimeOverrides(ctx, execution)
+	modelID := policy.Model
+	if runtimeModel != "" {
+		modelID = runtimeModel
+	}
+	var previousModelState *CachedModelState
+	restoreModelState := false
+	if modelID != "" {
+		previousModelState = execution.GetModelState()
+		execution.SetModelState(nil)
+		restoreModelState = true
+		defer func() {
+			if restoreModelState {
+				execution.SetModelState(previousModelState)
+			}
+		}()
+	}
 	result, err := m.sessionManager.InitializeSession(
 		ctx, client, refresh.AgentConfig, execution.ACPSessionID,
 		execution.WorkspacePath, kubernetesRefreshMcpServers(refresh.McpServers),
@@ -218,21 +243,64 @@ func (m *Manager) prepareRestartedKubernetesAgentctl(
 	if err != nil {
 		return "", fmt.Errorf("resume ACP session after Kubernetes restart: %w", err)
 	}
-	policy := m.resolveStartModelPolicy(ctx, execution.AgentProfileID)
-	runtimeModel, _, _ := m.sessionRuntimeOverrides(ctx, execution)
-	modelID := policy.Model
-	if runtimeModel != "" {
-		modelID = runtimeModel
+	if err := m.applyRestartedKubernetesModel(
+		ctx, execution, client, result.SessionID, modelID,
+	); err != nil {
+		return "", fmt.Errorf("apply start model after Kubernetes restart: %w", err)
 	}
-	if modelID != "" {
-		if !cacheSessionModelStateFromClient(execution, client) {
-			waitForFreshSessionModelStateFromClient(ctx, m.logger, execution, client)
-		}
-		if err := m.reapplySessionModelAfterResetWithClient(ctx, execution, client, result.SessionID, modelID); err != nil {
-			return "", fmt.Errorf("apply start model after Kubernetes restart: %w", err)
-		}
-	}
+	restoreModelState = false
 	return result.SessionID, nil
+}
+
+func (m *Manager) applyRestartedKubernetesModel(
+	ctx context.Context,
+	execution *AgentExecution,
+	client *agentctlclient.Client,
+	sessionID, modelID string,
+) error {
+	if modelID == "" {
+		return nil
+	}
+	modelState, ready := sessionModelStateFromClient(client)
+	if !ready {
+		waitForFreshSessionModelStateFromClient(ctx, m.logger, execution, client)
+		modelState, ready = sessionModelStateFromClient(client)
+	}
+	if !ready {
+		// Keep policy evaluation independent from any late event delivered by
+		// the old, still-published client while the replacement is staged.
+		execution.SetModelState(nil)
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return fmt.Errorf("wait for replacement session model catalog: %w", ctxErr)
+		}
+	}
+	if ready {
+		execution.SetModelState(modelState)
+	}
+	return m.reapplySessionModelAfterResetWithClientAndState(
+		ctx, execution, client, modelState, sessionID, modelID,
+	)
+}
+
+func (m *Manager) connectStagedKubernetesAgentctlStream(
+	ctx context.Context,
+	execution *AgentExecution,
+	client *agentctlclient.Client,
+) (func(), error) {
+	if client == nil {
+		return nil, errors.New("connect staged Kubernetes agentctl stream: client is unavailable")
+	}
+	if client.HasAgentStream() {
+		return client.CloseUpdatesStream, nil
+	}
+	var mcpHandler agentctlclient.MCPHandler
+	if m.streamManager != nil {
+		mcpHandler = m.streamManager.mcpHandlerFor(execution)
+	}
+	if err := client.StreamUpdates(ctx, func(agentctlclient.AgentEvent) {}, mcpHandler, nil); err != nil {
+		return nil, fmt.Errorf("connect staged Kubernetes agentctl stream: %w", err)
+	}
+	return client.CloseUpdatesStream, nil
 }
 
 func kubernetesRefreshMcpServers(configs []McpServerConfig) []agentctltypes.McpServer {
