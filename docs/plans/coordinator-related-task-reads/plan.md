@@ -46,7 +46,7 @@ inspect task topology without the broader `api_read:tasks` read surface.
 ## Requirement coverage
 
 | Requirement | Covered by |
-| --- | --- | 
+| --- | --- |
 | `REQ-OFFICE-TASKS-001` | Relation-scoped `list_related_tasks_kandev` behavior and the Coordinator compact-tree exception, delivered by [task-01-coordinator-relation-authorization](task-01-coordinator-relation-authorization.md). |
 | `REQ-OFFICE-AGENTS-001` | Persisted CEO/Coordinator capability derivation and its independent document-read boundary (`AC-OFFICE-AGENTS-001.9`), delivered by [task-01-coordinator-relation-authorization](task-01-coordinator-relation-authorization.md). |
 | `REQ-PLUGINS-PLUGINS-001` | Capability-gated `GetTaskRelations` Host RPC on the frozen plugin contract, delivered by [task-01-coordinator-relation-authorization](task-01-coordinator-relation-authorization.md). |
