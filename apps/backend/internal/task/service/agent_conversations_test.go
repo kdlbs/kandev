@@ -552,8 +552,14 @@ func TestEnsureRepairsMissingPrimarySession(t *testing.T) {
 	if desc2.TaskID != desc.TaskID {
 		t.Fatalf("TaskID changed")
 	}
-	if desc2.SessionID == "" || desc2.SessionID == desc.SessionID {
-		t.Fatalf("expected new SessionID, got %q", desc2.SessionID)
+	if desc2.SessionID != desc.SessionID {
+		t.Fatalf("SessionID = %q, want stable identity %q", desc2.SessionID, desc.SessionID)
+	}
+	if desc2.SessionID != conversationPrimarySessionID(desc.TaskID) {
+		t.Fatalf("SessionID = %q, want deterministic identity for task %q", desc2.SessionID, desc.TaskID)
+	}
+	if got := deps.sess.count(); got != 1 {
+		t.Fatalf("session count after repair = %d, want 1", got)
 	}
 }
 
