@@ -2289,7 +2289,7 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 	}
 	go func() {
 		launchCtx := context.WithoutCancel(ctx)
-		metadataClaimed, claimOK := s.claimDeferredLaunch(launchCtx, task.ID, eventName)
+		wip, claimOK := s.claimDeferredLaunch(launchCtx, task.ID, eventName)
 		if !claimOK {
 			if createClaimed {
 				s.restoreAutoStartOnCreate(launchCtx, task.ID, eventName)
@@ -2307,7 +2307,7 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 				launchErr = errors.New("deferred launch returned an unsuccessful response")
 			}
 			s.logger.Error(eventName+": failed to launch deferred task", zap.String("task_id", task.ID), zap.Error(launchErr))
-			s.restoreDeferredLaunch(launchCtx, task.ID, raw, eventName, metadataClaimed)
+			s.restoreDeferredLaunch(launchCtx, task.ID, wip, eventName)
 			if restoreQueuePromotion {
 				s.restoreTaskLifecycleToken(launchCtx, task.ID, models.MetaKeyQueuePromotionPending, queuePromotionLifecycleToken(task), eventName)
 			}
@@ -2323,45 +2323,36 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 			s.recordSuccessfulDeferredTaskProfileAsync(launchCtx, intent.UserID, launchResp.AgentProfileID)
 		}
 		delete(task.Metadata, models.MetaKeyDeferredLaunch)
-		if metadataClaimed {
-			task.UpdatedAt = time.Now().UTC()
-			s.publishTaskUpdated(launchCtx, task)
-			return
-		}
 		task.UpdatedAt = time.Now().UTC()
-		if updateErr := s.repo.UpdateTask(launchCtx, task); updateErr == nil {
-			s.publishTaskUpdated(launchCtx, task)
-		}
+		s.publishTaskUpdated(launchCtx, task)
 	}()
 	return true
 }
 
-func (s *Service) claimDeferredLaunch(ctx context.Context, taskID, eventName string) (bool, bool) {
-	remover, ok := s.repo.(taskMetadataKeyRemover)
-	if !ok {
-		return false, true
+// claimDeferredLaunch reserves the launch-intent keys of a task's shared
+// deferred_launch record for the gate that is about to fire (WIP promotion or
+// dependency resolution). It takes only the launch-intent keys and leaves any
+// concurrently-written ceiling_* keys in place (AC-59a) — the same sub-key
+// take/restore protocol claimDeferredLaunchForStart uses for the direct-start
+// path, so the two consumers of the shared record can never clobber each
+// other's half of it.
+func (s *Service) claimDeferredLaunch(ctx context.Context, taskID, eventName string) (map[string]interface{}, bool) {
+	wip, claimed, err := s.repo.TakeTaskDeferredLaunchWIPKeys(ctx, taskID)
+	if err != nil {
+		s.logger.Warn(eventName+": failed to claim deferred launch", zap.String("task_id", taskID), zap.Error(err))
+		return nil, false
 	}
-	claimed, err := remover.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyDeferredLaunch)
-	if err != nil || !claimed {
-		if err != nil {
-			s.logger.Warn(eventName+": failed to claim deferred launch", zap.String("task_id", taskID), zap.Error(err))
-		}
-		return false, false
-	}
-	return true, true
+	return wip, claimed
 }
 
-func (s *Service) restoreDeferredLaunch(ctx context.Context, taskID string, raw interface{}, eventName string, claimed bool) {
-	if !claimed {
+// restoreDeferredLaunch puts a failed launch's claimed keys back, merging
+// into whatever the record holds now rather than replacing it — so a ceiling
+// record written while the launch was in flight survives the restore.
+func (s *Service) restoreDeferredLaunch(ctx context.Context, taskID string, wip map[string]interface{}, eventName string) {
+	if len(wip) == 0 {
 		return
 	}
-	setter, ok := s.repo.(interface {
-		SetTaskMetadataKey(context.Context, string, string, interface{}) error
-	})
-	if !ok {
-		return
-	}
-	if err := setter.SetTaskMetadataKey(ctx, taskID, models.MetaKeyDeferredLaunch, raw); err != nil {
+	if err := s.repo.RestoreTaskDeferredLaunchWIPKeys(ctx, taskID, wip); err != nil {
 		s.logger.Warn(eventName+": failed to restore deferred launch intent", zap.String("task_id", taskID), zap.Error(err))
 	}
 }
