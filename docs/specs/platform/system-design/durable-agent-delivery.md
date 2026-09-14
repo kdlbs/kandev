@@ -266,7 +266,8 @@ The journal allocates the sequence and records the normalized payload before pub
 Every durable event carries submission identity where applicable.
 Tool IDs, message IDs, permission-request IDs, and terminal outcomes retain their stable association.
 
-The backend reconnects using its highest contiguous committed inbox sequence.
+The backend reconnects using its highest contiguous projected sequence.
+This implementation acknowledges after projection, so acknowledged pruning cannot remove work still needed by the projector.
 Agentctl replays later records, then joins the same stream at a captured high-water mark.
 A writer cannot create a gap between replay and live delivery.
 Duplicate delivery is allowed. Sequence gaps are not.
@@ -331,7 +332,7 @@ Lifecycle queries the same agentctl owner, submission state, and stream identity
 It makes at most three attempts within a ten-second connection-recovery window.
 The existing request cancellation and shutdown contexts can end this window early.
 
-A reachable live owner resumes event intake from the inbox cursor.
+A reachable live owner resumes event intake from the projected cursor.
 A durable terminal outcome is projected before lifecycle publishes completion.
 An accepted but undispatched submission follows the controlled dispatch rule.
 A dispatching submission without a recoverable live process becomes `interrupted_unknown`.
@@ -354,6 +355,110 @@ A replacement conversation additionally requires the explicit context-continuati
 
 This package does not change executor parent-death behavior.
 If the executor terminates the harness, recovery retains journal evidence and uses native restore or explicit context continuation.
+
+## Surviving-process adoption
+
+This section applies the delivery contract to a process retained by executor survival.
+It covers delivery requirements 003 through 007 without changing process-lifetime policy.
+The [reconciliation package](../../../plans/durable-agent-session-reconciliation/plan.md) owns implementation evidence.
+
+The executor remains responsible for installation proof, credential rotation, ownership fencing, recovery deadlines, and workspace allowlists.
+The delivery layer verifies the stream owner only after executor ownership succeeds.
+Successful adoption does not call ACP initialize, load, resume, or new.
+It does not advance a harness generation or resend an existing prompt.
+
+### Discovery and reconstruction
+
+Extend authenticated `GET /api/v1/agent/delivery` with an instance-scoped recovery descriptor.
+The descriptor includes protocol version, journal health, session/incarnation/generation, stream ID, and retained bounds.
+It also identifies the active submission or retained terminal submission without exposing payloads or credentials.
+Use existing submission lookup routes for bounded reconciliation of the identified record.
+The descriptor is a consistent snapshot of identity and current submission association.
+Stream watermarks can advance after that snapshot.
+
+`buildRecoveredInstances` and lifecycle reconstruction must restore these values before stream connection or prompt admission:
+
+| Value | Authority |
+| --- | --- |
+| Kandev session and execution | Correlated executor inventory and existing session record |
+| Incarnation and harness generation | Current backend SQL session/generation records |
+| Stream identity and original workspace | Persisted generation identity and original workspace checkpoint |
+| Peer stream owner and retained bounds | Authenticated descriptor, compared with SQL identity |
+| Current turn and submission | Existing SQL submission/queue association, reconciled with the peer record |
+| Replay position | SQL projected cursor for that exact stream |
+| Protocol capability | Authenticated descriptor, cached on the new client |
+
+Do not derive a replacement identity from the process PID or connection ID.
+Do not replace an unresolved owner with session-ID or generation-one defaults.
+An absent cursor permits zero only for a matching stream whose retained bounds include its first event.
+A database error never means an absent cursor.
+An owner mismatch, expired cursor, or unavailable journal produces typed blocked recovery.
+
+A new client's empty capability cache means undiscovered, not legacy.
+The discovery result must reach `DurableDeliveryCapabilityForExecution` before the orchestrator chooses a submission protocol.
+A missing route alone is insufficient legacy evidence after authentication, routing, or transport failure.
+Use a successfully authenticated compatible legacy peer and confirm that SQL contains no unresolved v1 submission before legacy admission.
+An incompatible version or configured journal failure never selects legacy recovery.
+
+Discovery must also restore a quiet active prompt's submission identity.
+Waiting for the next event cannot establish safe Stop behavior for a silent harness.
+Multiple possible active owners remain blocked until reconciliation identifies the original submission.
+
+### Ordered recovery and terminal publication
+
+For a durable peer, bypass direct `applyRecoveredTurnOutcome` processing.
+Replay through the existing inbox and canonical projection pipeline from the exact projected cursor.
+Capture a high-water mark and process bounded pages until that mark is reached.
+A page limit of 1000 is not a replay completion boundary.
+Preserve ordering across concurrent live events, acknowledgments, and connection replacement.
+
+Canonical transcript effects preceding a terminal event must commit before that event can release subsequent work.
+Persisted effect identity and current turn/generation fences govern terminal application.
+Acknowledge only after the required projection commits.
+An ACK loss permits duplicate delivery but not duplicate completion or workflow advancement.
+A replayed old terminal cannot complete a successor prompt.
+
+Keep the adoption guard until identity and required replay are reconciled.
+A captured running state with no terminal event can release the transient guard after replay catches up.
+Normal active-turn admission still holds subsequent work.
+A deadline or evidence error leaves the session visibly blocked and Stop available.
+Transient guard release never clears a durable recovery requirement.
+
+`ControlTurnID` remains a control-server-local legacy deduplication token.
+It does not replace durable `TurnID`, submission identity, or stream sequence.
+Retain the terminal-slot read/apply/ACK path only for positively identified legacy peers.
+Do not fall back to it after a durable journal or projection error.
+
+### Producer and shutdown contract
+
+All normalized durable event producers use the journal commit barrier before publication.
+This includes adapter updates, prompt errors, process exits, and direct process-manager notifications.
+An event commits once even when both retention and live delivery observe it.
+Storage failure prevents publication and unsafe admission.
+Preserve bounded buffering and cancellation release without holding execution locks across storage or network work.
+
+Backend detach leaves the surviving instance and its journal open.
+Actual instance shutdown releases blocked writers and closes its journal owner.
+The existing ownership reaper remains in force.
+No change extends survival to remote runtimes or passthrough sessions.
+
+### Persistence, UI, and rollout
+
+Reuse existing SQL generation, submission, queue-claim, cursor, and effect records.
+No new table is required by this design.
+Any implementation-driven schema extension requires owner registration, SQLite fresh/replay/upgrade coverage, and PostgreSQL behavior evidence.
+Preserve retained journals during compatible upgrades and supported rollback.
+
+Shared recovery controls apply ownership guards before offering native replacement or context continuation.
+Durable uncertainty keeps Stop and state-only retry available on desktop and mobile.
+The existing explicit continuation action still requires authorization and a new generation checkpoint.
+Office and automation work remains parked under existing budget, provenance, and queue admission rules.
+
+The existing survival toggle controls detached lifetime only.
+Compatible durable delivery remains automatic with that toggle on or off.
+Do not add a durable-delivery toggle or make journal errors look like disabled survival.
+Reuse existing `agent_restore_*` and `agent_delivery_*` metrics with bounded failure labels.
+Do not put submission IDs or stream IDs in metric labels or expose runtime credentials in recovery state.
 
 ## Compatibility and release
 
