@@ -65,7 +65,7 @@ export function CreationAutoFocusSettings() {
             checked={draft}
             data-settings-dirty={isDirty}
             onCheckedChange={setDraft}
-            className="shrink-0 cursor-pointer [@media(pointer:coarse)]:after:inset-0 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
+            className="shrink-0 cursor-pointer [@media(pointer:coarse)]:after:-inset-y-3.5"
           />
         </div>
       </CardContent>

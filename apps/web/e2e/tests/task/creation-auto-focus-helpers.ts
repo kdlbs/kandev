@@ -13,13 +13,29 @@ async function saveFocusPreference(page: Page, enabled: boolean, mobile: boolean
   await toggle.scrollIntoViewIfNeeded();
   if (mobile) {
     const box = await toggle.boundingBox();
-    expect(box!.height).toBeGreaterThanOrEqual(44);
-    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.width).toBeGreaterThan(box!.height * 1.5);
+    const touchArea = await toggle.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const after = getComputedStyle(element, "::after");
+      return {
+        height: bounds.height - parseFloat(after.top) - parseFloat(after.bottom),
+        width: bounds.width - parseFloat(after.left) - parseFloat(after.right),
+      };
+    });
+    expect(touchArea.height).toBeGreaterThanOrEqual(44);
+    expect(touchArea.width).toBeGreaterThanOrEqual(44);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBe(
       await page.evaluate(() => document.documentElement.clientWidth),
     );
   }
-  await toggle.click();
+  if (mobile) {
+    const box = (await toggle.boundingBox())!;
+    // Tap the expanded target above the visible track.
+    await page.touchscreen.tap(box.x + box.width / 2, box.y - 10);
+  } else {
+    await toggle.click();
+  }
+  await expect(toggle).toBeChecked({ checked: enabled });
   await page
     .getByTestId("settings-floating-save")
     .getByRole("button", { name: "Save changes" })
