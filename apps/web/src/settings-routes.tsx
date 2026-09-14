@@ -554,7 +554,7 @@ function UpdatesRoute() {
   );
 }
 
-function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
+export function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
   const store = useAppStoreApi();
   const bootstrappedRef = useRef(false);
 
@@ -565,8 +565,23 @@ function SettingsRouteBootstrap({ pathname }: { pathname: string }) {
 
     async function bootstrap() {
       const initialState = await loadSettingsInitialState();
-      if (!cancelled && Object.keys(initialState).length > 0) {
-        store.getState().hydrate(initialState);
+      if (cancelled || Object.keys(initialState).length === 0) return;
+      const desiredWorkspaceId = initialState.workspaces?.activeId ?? null;
+      const workspaceBeforeHydration = store.getState().workspaces.activeId;
+      // Routing the actual switch through `setActiveWorkspace` (rather than
+      // letting `hydrate` overwrite `activeId` directly) keeps
+      // `activeIdRevision` accurate for consumers that key staleness off it,
+      // such as the Failed-inbox cache.
+      store.getState().hydrate(
+        initialState.workspaces
+          ? {
+              ...initialState,
+              workspaces: { ...initialState.workspaces, activeId: workspaceBeforeHydration },
+            }
+          : initialState,
+      );
+      if (initialState.workspaces && desiredWorkspaceId !== workspaceBeforeHydration) {
+        store.getState().setActiveWorkspace(desiredWorkspaceId);
       }
     }
 
