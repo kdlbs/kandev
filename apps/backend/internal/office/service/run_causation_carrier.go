@@ -23,6 +23,22 @@ func carrierMetadataFromRun(run *models.Run) map[string]interface{} {
 	}
 }
 
+// carrierFromRun builds the TaskBoundaryCarrier struct form of the same
+// lineage carrierMetadataFromRun encodes as metadata, for callers that
+// queue a run directly (runsservice.QueueRunRequest's Carrier* fields)
+// rather than writing it onto a child task.
+func carrierFromRun(run *models.Run) TaskBoundaryCarrier {
+	return TaskBoundaryCarrier{
+		CausationID:    run.CausationID,
+		CausationDepth: run.CausationDepth,
+		CreatingRunID:  run.ID,
+		HumanRooted:    run.HumanRooted,
+		RoutineID:      run.RoutineID,
+		ActorKind:      run.ActorKind,
+		ActorID:        run.ActorID,
+	}
+}
+
 // carrierMetadataFromCarrier converts a resolved TaskBoundaryCarrier back
 // into the map[string]interface{} shape carrierMetadataFromRun produces,
 // so a carrier already read off one task's metadata can be forwarded

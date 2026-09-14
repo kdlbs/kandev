@@ -1851,13 +1851,15 @@ func (a *engineStepEntryDispatcherAdapter) DispatchStepEntry(ctx context.Context
 // other — so this adapter is a field-by-field copy.
 type runsServiceEngineAdapter struct {
 	svc *runsservice.Service
-	// officeSvc sources the actor for every request, per
-	// AC-OFFICE-RUN-CAUSATION-001.23's declared source for "a wake queued
-	// because of a task": req.TaskID is always populated (the engine
-	// resolves it before calling QueueRun), so this path reads the
-	// task-boundary carrier the same way office/service.QueueRunFromTaskBoundary
-	// does, rather than reaching the queue with no actor at all. Nil only
-	// in tests that construct this adapter directly.
+	// officeSvc sources the actor and causation lineage for every
+	// request: req.TaskID is always populated (the engine resolves it
+	// before calling QueueRun), so this path resolves the task-boundary
+	// carrier off it, preferring the run currently claimed against that
+	// task over the task's own already-resolved carrier — the same
+	// live-run preference office/service.TaskBoundaryCarrierMetadata
+	// applies for create_child_task, needed here so a chain of queue_run
+	// actions also advances the causation depth hop by hop. Nil only in
+	// tests that construct this adapter directly.
 	officeSvc *officeservice.Service
 }
 
@@ -1868,7 +1870,7 @@ func (a *runsServiceEngineAdapter) QueueRun(
 ) (workflowengine.QueueOutcome, error) {
 	var carrier officeservice.TaskBoundaryCarrier
 	if a.officeSvc != nil && req.TaskID != "" {
-		carrier = a.officeSvc.TaskBoundaryCarrier(ctx, req.TaskID)
+		carrier = a.officeSvc.TaskBoundaryCarrierForRunQueue(ctx, req.TaskID)
 	}
 	humanRooted := carrier.HumanRooted
 	outcome, err := a.svc.QueueRun(ctx, runsservice.QueueRunRequest{

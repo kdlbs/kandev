@@ -234,6 +234,21 @@ func (s *Service) TaskBoundaryCarrierMetadata(ctx context.Context, taskID string
 	return carrierMetadataFromCarrier(s.TaskBoundaryCarrier(ctx, taskID))
 }
 
+// TaskBoundaryCarrierForRunQueue resolves the causation carrier a run
+// queued because of taskID should carry, applying the same live-run
+// preference as TaskBoundaryCarrierMetadata: the run currently claimed
+// against taskID (the turn actually queuing this run, e.g. the workflow
+// engine's queue_run action) wins over taskID's own already-resolved
+// carrier, so depth keeps advancing hop by hop across a chain instead of
+// freezing at the task's original creating-run carrier. Only when no run
+// is claimed against taskID does this fall back to taskID's own carrier.
+func (s *Service) TaskBoundaryCarrierForRunQueue(ctx context.Context, taskID string) TaskBoundaryCarrier {
+	if run, err := s.repo.GetClaimedRunByTaskID(ctx, taskID); err == nil && run != nil {
+		return carrierFromRun(run)
+	}
+	return s.TaskBoundaryCarrier(ctx, taskID)
+}
+
 // queueRunInline performs the legacy in-office insert path used when
 // no runs service is wired (older tests, transitional deployments).
 // Behaviour matches the pre-Phase-3 implementation.

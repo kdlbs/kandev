@@ -35,7 +35,7 @@ import (
 )
 
 func newRunsEngineAdapterActorTestHarness(t *testing.T) (
-	*runsServiceEngineAdapter, *taskservice.Service, *officesqlite.Repository,
+	*runsServiceEngineAdapter, *taskservice.Service, *officesqlite.Repository, *officeservice.Service,
 ) {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "engine-adapter.db"))
@@ -102,7 +102,7 @@ func newRunsEngineAdapterActorTestHarness(t *testing.T) (
 	officeSvc.SetRunsService(runsSvc)
 
 	adapter := &runsServiceEngineAdapter{svc: runsSvc, officeSvc: officeSvc}
-	return adapter, taskSvc, officeRepo
+	return adapter, taskSvc, officeRepo, officeSvc
 }
 
 func seedTaskWithCarrier(t *testing.T, taskSvc *taskservice.Service, carrierMetadata map[string]interface{}) string {
@@ -132,7 +132,7 @@ func seedTaskWithCarrier(t *testing.T, taskSvc *taskservice.Service, carrierMeta
 // TaskID) sources its actor from the task-boundary carrier rather than
 // reaching the queue with none.
 func TestRunsServiceEngineAdapter_QueueRunInheritsTaskCarrier(t *testing.T) {
-	adapter, taskSvc, officeRepo := newRunsEngineAdapterActorTestHarness(t)
+	adapter, taskSvc, officeRepo, _ := newRunsEngineAdapterActorTestHarness(t)
 	ctx := context.Background()
 
 	agent := &officemodels.AgentInstance{
@@ -191,7 +191,7 @@ func TestRunsServiceEngineAdapter_QueueRunInheritsTaskCarrier(t *testing.T) {
 // fallback for a task that never carried a carrier at all: the resulting
 // run roots as an unattributed system actor, exactly as before this fix.
 func TestRunsServiceEngineAdapter_QueueRunNoCarrierRootsAsSystemActor(t *testing.T) {
-	adapter, taskSvc, officeRepo := newRunsEngineAdapterActorTestHarness(t)
+	adapter, taskSvc, officeRepo, _ := newRunsEngineAdapterActorTestHarness(t)
 	ctx := context.Background()
 
 	agent := &officemodels.AgentInstance{
@@ -221,5 +221,93 @@ func TestRunsServiceEngineAdapter_QueueRunNoCarrierRootsAsSystemActor(t *testing
 	if run.CausationID != run.ID || run.ParentRunID != "" || run.CausationDepth != 0 {
 		t.Errorf("lineage = {causation=%q parent=%q depth=%d}, want a fresh root",
 			run.CausationID, run.ParentRunID, run.CausationDepth)
+	}
+}
+
+// TestRunsServiceEngineAdapter_QueueRunPrefersLiveClaimedRunOverStaleTaskCarrier
+// pins the same live-run preference already applied to create_child_task's
+// carrier resolution: when queue_run fires from a task's own currently
+// executing turn, the run actually claimed against that task must win over
+// the task's own stale, already-resolved carrier, so the depth ceiling
+// keeps advancing hop by hop instead of freezing at whatever value the
+// task's original creating run recorded.
+func TestRunsServiceEngineAdapter_QueueRunPrefersLiveClaimedRunOverStaleTaskCarrier(t *testing.T) {
+	adapter, taskSvc, officeRepo, officeSvc := newRunsEngineAdapterActorTestHarness(t)
+	ctx := context.Background()
+
+	turnAgent := &officemodels.AgentInstance{
+		WorkspaceID:           "ws-1",
+		Name:                  "turn-agent",
+		Role:                  officemodels.AgentRoleWorker,
+		Status:                officemodels.AgentStatusIdle,
+		MaxConcurrentSessions: 1,
+	}
+	if err := officeRepo.CreateAgentInstance(ctx, turnAgent); err != nil {
+		t.Fatalf("create turn agent: %v", err)
+	}
+	targetAgent := &officemodels.AgentInstance{
+		WorkspaceID: "ws-1",
+		Name:        "target-agent",
+		Role:        officemodels.AgentRoleWorker,
+		Status:      officemodels.AgentStatusIdle,
+	}
+	if err := officeRepo.CreateAgentInstance(ctx, targetAgent); err != nil {
+		t.Fatalf("create target agent: %v", err)
+	}
+
+	// The task's own stored carrier claims a shallow, stale lineage, as if
+	// it were written long ago and never touched again.
+	taskID := seedTaskWithCarrier(t, taskSvc, map[string]interface{}{
+		models.MetaKeyOfficeCarrierCausationID:    "stale-causation",
+		models.MetaKeyOfficeCarrierCausationDepth: 5,
+		models.MetaKeyOfficeCarrierCreatingRunID:  "stale-run",
+		models.MetaKeyOfficeCarrierHumanRooted:    false,
+		models.MetaKeyOfficeCarrierRoutineID:      "",
+		models.MetaKeyOfficeCarrierActorKind:      string(officemodels.ActorKindSystem),
+		models.MetaKeyOfficeCarrierActorID:        "",
+	})
+
+	// A run is now actually executing the task's turn.
+	if err := officeSvc.QueueRunWithActor(ctx, turnAgent.ID, "task_assigned",
+		`{"task_id":"`+taskID+`"}`, "", officemodels.ActorKindAgent, "turn-agent-actor", ""); err != nil {
+		t.Fatalf("queue live run: %v", err)
+	}
+	liveRun, err := officeSvc.ClaimNextRun(ctx)
+	if err != nil || liveRun == nil {
+		t.Fatalf("claim live run: %v (run=%v)", err, liveRun)
+	}
+
+	// queue_run fires from that live turn, targeting a different agent.
+	if _, err := adapter.QueueRun(ctx, workflowengine.QueueRunRequest{
+		AgentProfileID: targetAgent.ID,
+		TaskID:         taskID,
+		Reason:         "on_enter",
+	}); err != nil {
+		t.Fatalf("QueueRun: %v", err)
+	}
+
+	runs, err := officeRepo.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	var queued *officemodels.Run
+	for _, r := range runs {
+		if r.AgentProfileID == targetAgent.ID {
+			queued = r
+		}
+	}
+	if queued == nil {
+		t.Fatalf("expected a run queued against target agent; got %d runs total", len(runs))
+	}
+	if queued.ParentRunID != liveRun.ID {
+		t.Errorf("parent_run_id = %q, want the live run %q (not the stale forwarded stale-run)",
+			queued.ParentRunID, liveRun.ID)
+	}
+	if queued.CausationDepth != liveRun.CausationDepth+1 {
+		t.Errorf("causation_depth = %d, want %d (live run's depth + 1, not the stale forwarded 6)",
+			queued.CausationDepth, liveRun.CausationDepth+1)
+	}
+	if queued.CausationID != liveRun.CausationID {
+		t.Errorf("causation_id = %q, want the live run's %q", queued.CausationID, liveRun.CausationID)
 	}
 }
