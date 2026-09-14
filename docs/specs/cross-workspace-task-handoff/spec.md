@@ -1,12 +1,12 @@
 ---
 status: draft
 created: 2026-09-02
-updated: 2026-09-02
-revision: 4
+updated: 2026-09-15
+revision: 5
 owner: nova28
 ---
 
-# Cross-workspace task handoff (`handoff_task_kandev`)
+# Cross-workspace task handoff (`kandev task handoff`)
 
 ## Why
 
@@ -28,7 +28,8 @@ assumed:
   (`internal/mcp/server/server.go:1332`) and so *could* cross, but it is not in
   the Office toolset (`apps/backend/config/prompts/office-context.md` lists the
   Office inventory and does not include it), and that same file instructs Office
-  agents to "not search for additional Kandev MCP tools".
+  agents to "not search for additional Kandev MCP tools" — a sentence this spec
+  now keeps true rather than amends (AC-3).
 
 So a correct gate decision could not translate into work and a human created the
 delivery card by hand.
@@ -39,15 +40,46 @@ workspace when only the decision-maker needs it, and the resulting row would be
 indistinguishable in the activity log from ordinary task creation — making the
 highest-consequence action in the discovery flow the least auditable one.
 
+### Mechanism revision (revision 5)
+
+Revisions 1-4 specified this capability as a narrow MCP tool,
+`handoff_task_kandev`. The maintainer approved the **direction** and rejected that
+**mechanism**: an Office agent may create and control tasks in a kanban workspace,
+but through the CLI, not a new MCP tool. Two reasons, both checked against the tree
+rather than accepted on authority:
+
+1. `office-context.md` already tells Office agents that Office state changes go
+   through `$KANDEV_CLI` and that no further Kandev MCP tools exist to be found.
+   The withdrawn tool was the first Office-mutation MCP tool in a prompt saying
+   such tools do not exist, and revision 4 papered over the contradiction with a
+   conditional placeholder rather than removing it.
+2. No authorisation is lost by moving. `contextFromRequest` re-derives the
+   capability set from the signed run token on every request, so the route has the
+   same never-trust-the-payload property the MCP principal gave, against an
+   identity the caller equally cannot forge.
+
+What moved is the transport and the gating vocabulary. What did not: the
+execution-time re-derivation, target-workspace ownership scoping, two-way
+provenance under a key-scoped compare-and-set, all four idempotency outcomes
+surfaced rather than collapsed, and the synchronous observed launch. R3-R7 are
+unchanged apart from naming the new surface.
+
+**One interpretation is recorded rather than left implicit.** The decision said
+the runtime capability key replaces the MCP gating entirely; it did **not** ask
+for the Office permission `can_handoff_tasks` to be withdrawn, and the originating
+card requires a grant "per agent or per role". That grant lives in
+`shared.ResolvePermissions`, which is what `FromAgent` reads to build every other
+runtime capability. So `can_handoff_tasks` survives as the operator-visible grant
+(AC-7) and now feeds `handoff_task` (AC-8) instead of an `mcpprofile.Capability`.
+Withdrawing it too would delete the per-agent control the card asked for.
+
 ### What this spec is not
 
-It is not a delivery-argument resolver. Which workspace, workflow, repository and
-profiles a discovery project delivers into is carried elsewhere (today, in the
-Office project record's prose). This spec supplies the **call**; that supplies the
-**arguments**. Both are needed, and neither is sufficient alone.
-
-It is also not a second idempotency mechanism. Create-idempotency already exists,
-is specified, and is reused verbatim here; see R6.
+It is not a delivery-argument resolver: this spec supplies the **call**, the Office
+project record supplies the **arguments**, and neither is sufficient alone. It is
+not a second idempotency mechanism either — create-idempotency already exists, is
+specified, and is reused verbatim here (R6). Both exclusions are restated with
+their full reasoning under **Out of scope**.
 
 ## Prior art
 
@@ -56,47 +88,39 @@ is specified, and is reused verbatim here; see R6.
 **Receipt.** `wiki-query @henry`; resolved
 `OBSIDIAN_VAULT_PATH=/Users/henry/Documents/henry/wiki`, QMD collection `wiki`
 (443 docs) over the `mcp__qmd__query` MCP transport, not the grep fallback. Three
-searches (lex + vec + hyde) on cross-boundary delegation and provenance
-back-links, then one on least-privilege tool surfaces. `obsidian-wiki` is not
+searches (lex + vec + hyde) on cross-boundary delegation and provenance back-links,
+then one on least-privilege tool surfaces. `obsidian-wiki` is not
 installed, so the GraphRAG pre-pass was skipped. The skill's `log.md` append was
 refused by the sandbox (the vault is outside this worktree); not routed around.
-
-Two pages already hold positions that outrank fresh reasoning here.
+Revision 5 re-uses this receipt unchanged: the mechanism moved, the prior art did
+not.
 
 **`[[closure-governance]]`** (tier core, draft, updated 2026-08-05) diagnoses this
-exact shape one layer up: *"We do not have a gate shortage. We have zero enforced
-dispositions."* Ours is the same failure displaced by one step: the agent **may**
-decide, and then nothing may act on the decision. Two of its five closure elements
-are adopted directly:
-
-- **Named authority** — "a config file naming who may approve". Here: a
-  capability granted per agent or per role, not a global widening (R2).
-- **Evidence that cannot be invented** — "chat-only output is not sufficient";
-  a canonical stored record. Here: provenance written to both task rows and to
-  the activity log, not narrated in a comment or a prompt (R4).
-
-Its third element, **a clock** (a deadline on an open disposition), is
-deliberately not adopted: a handed-off card's clock is the delivery workflow it
-lands in, which already has one. Named, not silent.
+shape one layer up: *"We do not have a gate shortage. We have zero enforced
+dispositions."* Ours is the same failure displaced by one step — the agent may
+decide, and nothing may act on the decision. Two of its five closure elements are
+adopted: **named authority** ("a config file naming who may approve") becomes a
+grant per agent or per role rather than a global widening (R2); **evidence that
+cannot be invented** ("chat-only output is not sufficient") becomes provenance
+written to both task rows and the activity log, not narrated in a comment (R4).
+Its third element, **a clock**, is deliberately not adopted: a handed-off card's
+clock is the delivery workflow it lands in, which already has one.
 
 **`[[queryable-company]]`** (draft, updated 2026-05-26) supplies the recording
-obligation: *"If it is recorded, it happened to the AI. If it did not get
-recorded, it did not happen to your intelligence."* That is the argument for the
-handoff being a distinct, queryable activity verb rather than an ordinary
-`create_task` row.
+obligation: *"If it is recorded, it happened to the AI."* That is the argument for
+a distinct, queryable activity verb rather than an ordinary `create_task` row.
+**Where we depart:** the same page argues for trust-by-default *instead of* a
+permission model, resting on an egalitarian org. We take the recording obligation
+and reject that conclusion — Kandev's workspace boundary is also its **ownership**
+boundary under per-user scoping (`service_access.go:37`), the callers are
+unattended agents, and a card created in someone else's workspace can start an
+executor. Auditability *and* least privilege.
 
-**Where we depart from it.** The same page argues for trust-by-default *instead
-of* a permission model, resting on an egalitarian org. We take the recording
-obligation and reject the permission conclusion. Kandev's workspace boundary is
-also its **ownership** boundary under per-user scoping
-(`internal/task/service/service_access.go:37`), the callers are unattended agents
-rather than employees whose transcripts colleagues read, and a card created in
-someone else's workspace can start an executor. Auditability *and* least
-privilege, not auditability instead of it.
-
-**`[[agent-tool-registry]]`** contributes the DRY+MECE resolver discipline: two
-tools that do the same thing make the agent pick poorly. That is an independent
-argument for R5's same-workspace refusal.
+**`[[agent-tool-registry]]`** contributes DRY+MECE resolver discipline: two tools
+that do the same thing make the agent pick poorly. That is an independent argument
+for R5's same-workspace refusal, and — recorded in revision 5 — an argument the
+maintainer's CLI decision strengthens rather than weakens, since it leaves exactly
+one Office mutation surface instead of two.
 
 ### What other products shipped
 
@@ -105,31 +129,31 @@ workspace task delegation agent handoff between projects" (a first query
 containing commas failed with an fts5 syntax error and was rewritten). Two
 documents read in full.
 
-**Augment Code / Cosmos, "Delegating Work"** is the closest shipped analogue. A
-manager Expert launches a **Worker** — "a separate Cosmos session with its own
-VM, Environment, integrations, and permissions". Two vendor claims map onto this
-spec: a session "should be explicitly prompted about when to launch a worker …
-Cosmos does not launch one implicitly" (a boundary crossing gets its own verb);
-and "keep worker permissions narrow".
-
-**Warp, "Handoff between local and cloud agents"** names three directions, states
-explicitly *what carries over*, and is honest that handoff is *best-effort*: when
-the receiving side cannot apply the prior state it "reports which changes failed
-to apply and continues". The borrowing is reporting partial success rather than
-implying completeness — see AC-29.
+**Augment Code / Cosmos, "Delegating Work"** is the closest shipped analogue: a
+manager Expert launches a **Worker**, "a separate Cosmos session with its own VM,
+Environment, integrations, and permissions". Two vendor claims map onto this spec
+— a session "should be explicitly prompted about when to launch a worker … Cosmos
+does not launch one implicitly" (a boundary crossing gets its own verb), and "keep
+worker permissions narrow". **Warp, "Handoff between local and cloud agents"**
+states explicitly what carries over and is honest that handoff is *best-effort*:
+the receiving side "reports which changes failed to apply and continues". The
+borrowing is reporting partial success rather than implying completeness (AC-29).
 
 **What we do differently.** Neither records a **two-way** link as a hard
 requirement. Warp forks forward; Augment's Expert-to-Expert coordination uses a
-shared integration — "the pull request is the medium" — which works only because
-a PR already exists. Here the whole point is that the work has not started, so
-there is no shared artefact to coordinate through: the reverse link is
-load-bearing, and R4 makes it a contract rather than a best effort. We also cross
-an ownership boundary neither product's handoff crosses, which is why R2 exists.
+shared integration — "the pull request is the medium" — which works only because a
+PR already exists. Here the work has not started, so there is no shared artefact to
+coordinate through: the reverse link is load-bearing, and R4 makes it a contract
+rather than a best effort. We also cross an ownership boundary neither product's
+handoff crosses, which is why R2 exists.
 
 ## Terminology
 
-**Source task** — the Office task whose session calls the tool; its workspace is
-the **source workspace**. **Target workspace** — the one named by
+**The handoff action** — the `kandev task handoff` command and the
+`POST /api/v1/office/runtime/handoffs` route behind it, as one contract. Criteria
+below say "the action" when a requirement binds both, "the command" for the CLI
+alone, and "the route" for the backend alone. **Source task** — the Office task whose run invokes the action; its
+workspace is the **source workspace**. **Target workspace** — the one named by
 `target_workspace_id`, which must differ. **Delivery task** — the task created
 there.
 
@@ -144,22 +168,16 @@ rows, sampled while closing the round-1 and round-3 review findings respectively
 | Office task creation writes **no** launch metadata | `adapters_office.go:171` |
 | `CreateTaskInput` has no `agent_profile_id` or `executor_profile_id` field, so those keys in a `POST /runtime/tasks` body are dropped by `encoding/json` silently; `unsupportedField()` rejects six other keys but not these two | `internal/office/runtime/actions.go:44-76` |
 | `create_task_kandev` does **not** silently discard an explicit executor: `resolveMCPInheritedExecutors` threads `executorProfileID` through and only fills it when empty | `internal/mcp/handlers/handlers.go:1444` |
-| `create_task_kandev` already refuses an unresolvable agent profile with `errMCPAgentProfileRequired` mapped to `ErrorCodeValidation` | `handlers.go:847`, `:1315` |
-| Tool registration is a declarative profile registry: `profileToolGroup{name, enabled, register}` with `surfaceEnabled` / `capabilityEnabled` / `andProfilePredicates` | `internal/mcp/server/server.go:980-1020` |
-| Capabilities are typed and additive; the Office surface is `SurfaceOfficeTask` | `internal/mcp/profile/profile.go:16-30` |
+| `create_task_kandev` already refuses an unresolvable agent profile with `errMCPAgentProfileRequired` mapped to HTTP 400 | `handlers.go:847`, `:1315` |
 | The session profile is derived from the task row at launch | `executor_execute.go:61-100` |
+| Discovery is explicitly **not** an authorisation boundary: an agent "can still send a raw WebSocket action". The equivalent here is that role instructions are advisory and the route is the gate | `internal/mcp/handlers/automation_authorization.go:33-35` |
 | Office role permissions are role defaults merged with per-agent JSON overrides, with an anti-escalation check | `internal/office/shared/permissions.go` |
 | An Office `AgentInstance` **is** an `AgentProfile` (type alias), carrying `WorkspaceID`, `Role`, `Permissions` | `internal/office/models/models.go:57`, `internal/agent/settings/models/models.go:134-189` |
-| In-session MCP calls carry a server-derived principal (`WorkspaceID`, `CallerTaskID`, `CallerSessionID`, `Surface`) built from the execution, never from the payload | `internal/mcp/scope/principal.go:35-72` |
 | They also carry the task owner's identity, so `authorizeWorkspaceID` applies and a foreign-owner workspace is denied with a *not-found* sentinel (no existence leak) | `internal/mcp/scope/scope.go:1-18`, `internal/task/service/service_access.go:43-56` |
-| Tool discovery is explicitly **not** an authorisation boundary: "an agent can still send a raw WebSocket action" | `internal/mcp/handlers/automation_authorization.go:33-35` |
-| `record_step_decision_kandev` precedes this as an Office-only, role-gated MCP tool: session → `AgentProfileID` → role → `shared.ErrForbidden` → `ws.ErrorCodeForbidden` | `internal/mcp/handlers/agent_decision_handlers.go:31-91` |
+| `POST /runtime/task/decision` precedes this as an Office-only, authenticated runtime action taking no identity argument: `contextFromRequest` → capability → `shared.ErrForbidden` → HTTP 403 | `internal/office/runtime/handler.go:83-112` |
 | Task titles are capped at 60 runes with a typed error | `internal/task/service/task_title.go:11-21` |
 | Activity entries are workspace-scoped and logging failures are swallowed by design | `internal/office/shared/activity.go:29-60` |
 | `resolveMCPDestinationStep(workflowID, startAgent)` returns the first `auto_start_agent` step when `startAgent` is true, otherwise the start step | `handlers.go:1597-1620` |
-| `TestSyspromptToolNames_ExactlyMatchMCPOfficeMode` asserts the Office prompt advertises **exactly** the `ModeOffice` inventory (set equality, not subset) | `internal/mcp/server/sysprompt_sync_test.go:243-259` |
-| The Office prompt already has a precedent for a conditionally advertised instruction: the `{step_complete_instruction}` placeholder | `internal/sysprompt/sysprompt.go:170-186`, `config/prompts/office-context.md:21` |
-| `TestOfficeContext_ContainsOnlyOfficeCapabilities` asserts `create_task_kandev` never appears in the Office prompt | `internal/sysprompt/sysprompt_test.go:248-262` |
 | **Create-idempotency is already specified and shipped.** Four outcomes — Created, Found-settled, Found-unsettled, Created-identity-lost — and `creation_complete` means only "the returned task finished its required synchronous work" | `docs/specs/tasks/requirements/external-id-idempotency.md` |
 | **Both Found outcomes have no side effects**: no task row, session, launch, repository attachment, workspace-policy write, branch, or `task.created` event | same file, *What* |
 | Releasing an identity because a create reported `creation_complete: false`, then re-creating, is the documented **unsafe** move; it reintroduces the duplicate | same file, *The one unsafe thing a caller can do* |
@@ -174,8 +192,6 @@ rows, sampled while closing the round-1 and round-3 review findings respectively
 | Task **priority exists**: a `priority` column, `defaultPriority = "medium"`, validation against a four-value enum, a create-time write and an update-time patch | `base_schema.go:377`, `service_tasks.go:33,785-790,830`, `service_requests.go:77,125` |
 | The activity log is entirely Office-scoped: models, repository and every reader live under `internal/office/`, read by `ListActivityEntries(workspaceID, …)` | `internal/office/repository/sqlite/activity.go:65-130` |
 | `LogActivityWithRun`'s `details` parameter is a plain `string`, and its `runID` / `sessionID` are documented as "pass empty when genuinely user-initiated" | `internal/office/shared/activity.go:38-60` |
-| `internal/mcp/server/handoff_handlers.go` already exists and implements an **unrelated** same-workspace parent/child *document* handoff | `handoff_handlers.go:28-32` |
-| `ws.NewError` carries a `details map[string]interface{}`; the MCP tool surface's error helper is `mcp.NewToolResultError(string)`, a single string | `pkg/websocket/message.go:114`, `handoff_handlers.go:80` |
 | A legacy spec over 32,768 bytes registers a ceiling in `spec-lint-exceptions.tsv` that must **equal the file size exactly** — `size < ceiling` is a `stale-size-exception` violation, so a ceiling may not carry headroom | `scripts/lint-spec-files.py`, `check_size_exception_catalog` |
 | The size **ratchet** compares only against the sidecar in HEAD's first parent; a path absent there is skipped, so a **new** entry may be set to any size at or above the default limit. It may only be lowered once committed | `scripts/lint-spec-files.py`, `load_previous_size_exceptions`, `check_legacy_size_ratchet` |
 | `isOfficeRequest(req)` is the **write-time** office predicate — true when `Origin` is `agent_created`, `routine` or `onboarding`, **or** `ProjectID` is set. It gates `assignIdentifier`, which consumes the workspace task sequence and stamps a `PREFIX-N` identifier | `internal/task/service/service_tasks.go:116,293,844-855` |
@@ -187,7 +203,14 @@ rows, sampled while closing the round-1 and round-3 review findings respectively
 | A **key-scoped** metadata compare-and-set already exists: `SetTaskMetadataKeyIfStamp` patches a single JSON key via `json_set`/`jsonb_set` under a `FOR UPDATE` row lock, leaving sibling keys untouched | `internal/task/repository/sqlite/metadata_launch_error_cas.go:37,119,165-167` |
 | `UpdateTaskIfWorkflowMatches` guards a scalar column but writes the **whole** marshalled metadata blob through `updateTaskTx`, exactly as plain `UpdateTask` does | `task.go:556-578` |
 | `validateMCPWorkflowWorkspace` has **three** branches, not two: not-found → `Validation`, any other read error → `InternalError`, wrong workspace → `Validation` | `handlers.go:1233-1242` |
-| The only office-run resolver is task-keyed — `ResolveRunForTask` → `GetClaimedRunByTaskID`. The `Run` record itself carries `SessionID` and `AgentProfileID` | `internal/office/service/activity.go:55-64`, `internal/office/models/models.go:383,394` |
+| The agent CLI's `task` group dispatches from `runTaskCmd`'s switch and each subcommand builds its request with `newKandevClient()` + `client.do`, POSTing to `/api/v1/office/runtime/...`; `taskDecision` rejects positional arguments with `fs.NArg() > 0` | `cmd/agentctl/kandev_task.go:15-32,35-70` |
+| Runtime capability keys are a flat `Capability*` constant set with a `Capabilities` struct field per key, an `Allows` switch case, and an `AllowedKeys()` slice in stable order; `FromAgent` derives each one either unconditionally or from `shared.HasPermission(perms, …)` | `internal/office/runtime/capabilities.go`, `internal/office/runtime/context.go:6-21` |
+| `contextFromRequest` validates the run JWT, loads the agent, re-derives `FromAgent(agent)`, then overlays the **signed** `claims.Capabilities` JSON. Identity is never read from the request body | `internal/office/runtime/handler.go:408-439` |
+| `RunContext` carries `WorkspaceID`, `AgentID`, `TaskID`, `RunID` and `SessionID`, all token-derived; `ContextBuilder.Build` mints the capability snapshot from `FromAgent(agent).WithTaskScope(taskID)` and persists it on the run | `internal/office/runtime/context.go:23-36`, `internal/office/runtime/context_builder.go:39-68` |
+| The runtime surface's error contract is `400` for validation, `403` for `shared.ErrForbidden`, `409` for pending approvals and `500` carrying a **fixed generic** `runtimeInternalErrorMessage`; a refusal also appends a denied run event | `internal/office/runtime/handler.go:473-507` |
+| `bindClosedJSON` already exists on the runtime surface: `DisallowUnknownFields` plus a one-JSON-value check. `POST /runtime/tasks` does **not** use it — it uses permissive `bindJSON` plus an `unsupportedField()` denylist, which is why unknown keys are dropped silently there | `internal/office/runtime/handler.go:115-135,447-466` |
+| `appendActionRunEvent` / `appendDeniedRunEvent` already record a per-run audit trail keyed by `action`, independent of the Office activity log | `internal/office/runtime/handler.go:554-592` |
+| `PermCanHandoffTasks` is already present in all seven `defaultPermsForRole` branches (`true` for `AgentRoleCEO` only) | `internal/office/shared/permissions.go` |
 | `models.PublicTaskMetadata`, which `dto.FromTask` applies, is a **denylist**: it clones the map and strips only two keys inside `deferred_launch`. Arbitrary new top-level keys pass through unredacted | `internal/task/models/public_metadata.go:8-22`, `dto.go:885` |
 
 | `defaultPermsForRole` lists **every** boolean permission key explicitly in all seven branches (six named roles plus `default:` for specialist and unknown), including the `false` ones; `HasPermission` separately reads a missing key as false | `internal/office/shared/permissions.go` |
@@ -195,58 +218,53 @@ rows, sampled while closing the round-1 and round-3 review findings respectively
 | Permission `Label` / `Description` are English string literals in Go, served by the backend settings endpoint. **No** permission key appears in `apps/web/src/locales/**` | `handler_settings.go`, `apps/web/src/locales/` |
 | Both profile-belongs predicates already ship side by side: `AgentProfileBelongs` returns `WorkspaceID == "" \|\| WorkspaceID == workspaceID`; `ExecutorProfileBelongs` takes the workspace as `_ string` and returns existence only | `internal/backendapp/turn_adapters.go` |
 | `ExecutorProfile` has **no** workspace field; `AgentProfile.WorkspaceID` is documented "Empty = global / kanban-legacy" | `internal/task/models/models.go`, `internal/agent/settings/models/models.go` |
-| `internal/mcp/handlers` imports `office/dashboard`, `office/shared`, `office/models` — and **not** `office/service`. Its Office dependency is `dashboardSvc *dashboard.DashboardService`, wired by `SetDashboardService` | `internal/mcp/handlers/handlers.go`, `internal/mcp/handlers/agent_decision_handlers.go` |
-| `DashboardService`'s exported run surface is `ListRuns(wsID)`, `GetLiveRuns`, `GetRunsByCommentIDs` — no single-run-by-id accessor. `RunResolver` is `ResolveRunForTask(ctx, taskID) string`, held unexported and wired via `SetRunResolver` from the office service at startup | `internal/office/dashboard/service.go`, `internal/backendapp/main.go` |
-| `office/service.Service.GetRun(ctx, id) (*models.Run, error)` exists and returns the full run; `GetClaimedRunByTaskID` is `ORDER BY claimed_at DESC LIMIT 1`, so it yields exactly one candidate | `internal/office/service/failure.go`, `internal/runs/repository/sqlite/runs.go` |
 
 Two corrections to the originating card, recorded so no one re-derives them:
 
-1. The card says "Passing the executor alone silently discards it today." That is
-   true of `POST /runtime/tasks`, where the field does not exist on
-   `CreateTaskInput` — not of `create_task_kandev`, which preserves it. R3 stands
-   on its own grounds and does not rest on the wrong premise.
+1. "Passing the executor alone silently discards it today" is true of
+   `POST /runtime/tasks`, where the field does not exist on `CreateTaskInput` —
+   not of `create_task_kandev`, which preserves it. R3 does not rest on that
+   premise.
 2. The card lists `priority` as optional. It is excluded, but **not** because the
-   concept is missing — see **Out of scope**, which revision 2 corrects.
+   concept is missing — see **Out of scope**.
 
 ## Determinism and boundary rules
 
 - **D1 — the delivery task is a kanban task, not an Office task.** It is created
   through the same task-service path `create_task_kandev` uses, and
-  `IsFromOffice` is false. Rationale: the Office creation path writes no launch
-  metadata, and `IsFromOffice` selects `SurfaceOfficeTask` at session launch
+  `IsFromOffice` is false. The Office creation path writes no launch metadata, and
+  `IsFromOffice` selects `SurfaceOfficeTask` at session launch
   (`executor_execute.go:88`) — a delivery card marked office-owned would come up
   with the Office toolset and no kanban tools.
-- **D2 — the tool supplies no `Origin`, so the delivery task is `manual`.** It
+- **D2 — the action supplies no `Origin`, so the delivery task is `manual`.** It
   passes no origin at all, exactly as `create_task_kandev` does, and `buildTask`
-  defaults the column to `TaskOriginManual`. Revision 2 said the delivery task
-  "keeps the existing agent-created origin"; that was wrong twice and is corrected
-  here. There is no agent-created origin to keep on the path D1 mandates —
-  `create_task_kandev` sets none, and `TaskOriginAgentCreated` is written only by
-  the Office runtime create path that D1 excludes. And setting it would *break*
-  D1: `Origin == TaskOriginAgentCreated` makes `isOfficeRequest(req)` true, which
-  is the task service's own write-time definition of "should create an office
-  task", and that runs `assignIdentifier` — consuming the target workspace's task
-  sequence and stamping the delivery card with an office `PREFIX-N` identifier no
-  other kanban card on that board carries. No *new* origin value is introduced
-  either: `Task.Origin` selects behaviour (`TaskOriginAutomationRun` switches the
-  whole MCP surface), so a new value would be a behavioural change wearing an
-  audit label. The handoff is distinguished by metadata and by the activity verb.
-  Observed by AC-23a.
+  defaults the column to `TaskOriginManual`. Setting `TaskOriginAgentCreated`
+  would *break* D1: it makes `isOfficeRequest(req)` true — the task service's
+  write-time definition of "should create an office task" — which runs
+  `assignIdentifier`, consuming the target workspace's task sequence and stamping
+  the card with an office `PREFIX-N` identifier no other kanban card there
+  carries. No *new* origin value is introduced either: `Task.Origin` selects
+  behaviour, so a new value would be a behavioural change wearing an audit label.
+  The handoff is distinguished by metadata and by the activity verb. Observed by
+  AC-23a.
 - **D2a — "office" means two different things here, and the delivery task must be
   non-office under both.** `isOfficeRequest` is the **write-time** predicate, keyed
-  on `Origin` and `ProjectID`, and it gates office-only creation side effects.
+  on `Origin` and `ProjectID`, gating office-only creation side effects.
   `Task.IsFromOffice` is the **read-time** SQL projection over office-workflow
-  membership and `project_id`, and it is what selects `SurfaceOfficeTask` at
-  session launch. `Origin` does not affect the second, so passing the
-  `IsFromOffice` test alone does not satisfy D1. The delivery task therefore
-  carries no `project_id`, lands in a non-office target workflow, and carries no
-  office-triggering `Origin`.
-- **D3 — three independent gates.** (1) discovery: the profile capability decides
-  registration; (2) execution: the backend handler re-derives the permission from
-  the trusted principal; (3) ownership: the existing per-user workspace scoping on
-  the target. Each is load-bearing. (1) alone is not a boundary; (2) alone would
-  let an agent act in a workspace its owner cannot see; (3) alone would let any
-  Office agent hand off inside its own owner's estate.
+  membership and `project_id`, and selects `SurfaceOfficeTask` at session launch.
+  `Origin` does not affect the second, so passing the `IsFromOffice` test alone
+  does not satisfy D1. The delivery task therefore carries no `project_id`, lands
+  in a non-office target workflow, and carries no office-triggering `Origin`.
+- **D3 — two gates, plus advisory discoverability.** (1) execution: the route
+  re-derives the capability from the signed run token; (2) ownership: the
+  existing per-user workspace scoping on the target. Both are load-bearing — (1)
+  alone would let an agent act in a workspace its owner cannot see, and (2) alone
+  would let any Office agent hand off inside its own owner's estate. Role
+  instructions (AC-4) decide only whether an agent is *told* the command exists;
+  that is not a third gate and SHALL NOT be treated as one. Revisions 1-4 counted
+  MCP tool registration as gate (1) while also recording that discovery is not a
+  boundary; the CLI mechanism removes the ambiguity by having no registration
+  step at all.
 - **D3a — evaluation order is a total order, because a partial one leaks and
   because "which error is named" is otherwise undefined.** Checks run in exactly
   this sequence, and the **first** failure is the one reported; no call reports two
@@ -257,21 +275,20 @@ Two corrections to the originating card, recorded so no one re-derives them:
      present but whitespace-only; `title` over 60 runes. Within this group, ties
      are broken by the argument order of the R1 table, top to bottom.
   2. **Same-workspace refusal** (AC-22). It compares the payload's
-     `target_workspace_id` against the principal's own workspace and reads no
-     resource, so it cannot leak; placing it here also means a caller that
-     mistakenly targets itself is told so rather than being told it lacks a
-     permission.
-  3. **Gate (2) — the handoff permission**, re-derived from the trusted principal.
-  4. **Gate (3) — target workspace ownership**, via the existing scoping.
+     `target_workspace_id` against `runCtx.WorkspaceID` and reads no resource, so
+     it cannot leak; placing it here also means a caller that mistakenly targets
+     itself is told so rather than told it lacks a permission.
+  3. **Gate (1) — the handoff capability**, re-derived from the run token.
+  4. **Gate (2) — target workspace ownership**, via the existing scoping.
   5. **Target-resource checks**, in this order: `workflow_id`; destination step
      resolution; `agent_profile_id`; `executor_profile_id`; `repository_id`;
      `base_branch`.
   6. **Idempotency resolution and the create itself** (R6).
 
   Steps 1 and 2 name no target resource. Every check from step 5 on reads one, and
-  running any of them before steps 3 and 4 would let an unauthorised agent
-  distinguish a real workflow id from a fabricated one by the error it gets back,
-  defeating AC-10 and AC-11.
+  running any before steps 3 and 4 would let an unauthorised agent distinguish a
+  real workflow id from a fabricated one by the error returned, defeating AC-10
+  and AC-11.
 - **D3b — the post-create sequence is a total order too, because settlement,
   linking, auditing and launching are not interchangeable.** After D3a step 6 the
   tool performs exactly these, in this order:
@@ -286,35 +303,29 @@ Two corrections to the originating card, recorded so no one re-derives them:
      `start_agent` was true.
 
   A step that refuses ends the call and no later step runs; AC-25a's mismatch
-  refusal at step 3 is the reachable case, and it writes no reverse link, no
-  activity entry and no launch.
+  refusal at step 3 is the reachable case, writing no reverse link, no activity
+  entry and no launch.
 
-  Rationale, stated so nobody reorders these by accident: settlement must precede
-  launch because an unsettled or identity-lost create must not start an agent —
-  the rule the existing create path already follows — and the reverse-link
-  **attempt** must precede the launch so that the source-side record is given its
-  chance while the call can still report the result in one response. Activity sits
-  between them because it is the only step that cannot fail the call, so its
-  position changes no outcome.
+  Rationale, so nobody reorders these by accident: settlement precedes launch
+  because an unsettled or identity-lost create must not start an agent (the rule
+  the existing create path follows), and the reverse-link **attempt** precedes the
+  launch so the source-side record gets its chance while the call can still report
+  the result in one response. Activity sits between them because it is the only
+  step that cannot fail the call, so its position changes no outcome.
 
-  **What this ordering does and does not buy.** It does **not** make the launch
-  conditional on the reverse link, and no reader should infer that it does: what
-  makes a running delivery task's source findable is the **forward** link, which
-  D4 guarantees unconditionally by writing it inside the create itself, "so a
-  delivery task with no source is unreachable by any interleaving". The reverse
-  link is a source-side **index** over that same fact, with AC-25's replay as its
-  repair path. A reverse-link failure is therefore not a refusal (AC-29 makes it a
-  non-error), step 3 does not end the call, and steps 4 and 5 still run — including
-  the launch. AC-32 states this as an explicit exhaustion of its own conditions.
-  An earlier revision of this rationale claimed the ordering guaranteed that "a
-  delivery task that is already running is never one whose source card cannot be
-  found"; ordering alone cannot deliver that and only gating could, so the sentence
-  overclaimed and is corrected here rather than being turned into a gate.
+  **What this ordering does not buy.** It does **not** make the launch
+  conditional on the reverse link. What makes a running delivery task's source
+  findable is the **forward** link, which D4 writes inside the create itself; the
+  reverse link is a source-side index over that same fact, repaired by AC-25's
+  replay. So a reverse-link failure is not a refusal (AC-29), step 3 does not end
+  the call, and steps 4 and 5 still run, including the launch. Ordering alone
+  cannot guarantee a running delivery task always has a findable source card;
+  only gating could, and AC-29 declines to gate.
 - **D3c — a lookup that fails to execute is never a validation error.** Across
   every target-resource check in D3a step 5, a backend read that fails for a
-  reason other than absence SHALL be reported as `ErrorCodeInternalError` and
+  reason other than absence SHALL be reported as HTTP 500 and
   SHALL be safe to retry; only a read that executes and returns no row, or returns
-  a row belonging to another workspace, SHALL be `ErrorCodeValidation`. AC-15b
+  a row belonging to another workspace, SHALL be HTTP 400. AC-15b
   already says this for step resolution; AC-12b generalises it to the rest.
   Rationale: telling an automated caller that a transient database failure was its
   own input mistake makes it give up on a call it should have retried, and the
@@ -342,7 +353,7 @@ Two corrections to the originating card, recorded so no one re-derives them:
   version field: adding one now would be a version nobody reads, and the keys are
   additive, so a later shape change introduces a new key rather than reinterpreting
   this one.
-- **D9 — this tool never stamps `auto_start_on_create`.** That marker is a
+- **D9 — this action never stamps `auto_start_on_create`.** That marker is a
   positive opt-in whose absence deliberately means *do not launch*, and a create
   path that launched on absence is recorded in the code as a fixed bug. Stamping
   it here would reintroduce that bug for cross-workspace cards specifically — the
@@ -356,92 +367,137 @@ Two corrections to the originating card, recorded so no one re-derives them:
 
 ## What
 
-### R1 — one narrow tool, on the Office surface only
+### R1 — one narrow command, on the Office CLI surface only
 
-- **AC-1.** The system SHALL register an MCP tool named `handoff_task_kandev` as
-  one entry in the declarative profile registry (`profileToolGroups`) whose
-  predicate is `andProfilePredicates(office, capabilityEnabled(<the handoff
-  capability>))`. The tool SHALL therefore be absent from the Kanban, External,
-  Configuration and Automation surfaces regardless of capability, and absent from
-  the Office surface without it.
+- **AC-1.** The system SHALL expose the handoff as `kandev task handoff`, a new
+  subcommand of the existing `task` group in
+  `apps/backend/cmd/agentctl/kandev_task.go`, dispatched from `runTaskCmd`'s switch
+  alongside `get`, `update`, `create` and `decision`, and named in that function's
+  usage line. It SHALL obtain credentials through `newKandevClient()` and issue its
+  request through `client.do`, as its siblings do. No new transport, client or
+  credential path SHALL be introduced.
 
-- **AC-2.** The system SHALL define the handoff capability as a new value of the
-  existing `mcpprofile.Capability` type. No new gating mechanism SHALL be
-  introduced.
+- **AC-1a.** No MCP tool SHALL back this capability on any surface. The
+  `handoff_task_kandev` tool, its `profileToolGroups` entry, its
+  `mcpprofile.Capability` value, `internal/mcp/server/handoff_task_tool.go` and
+  its handler in `internal/mcp/handlers/` SHALL NOT exist. This is a deletion, not
+  a deprecation: the Office prompt says Office state changes go through
+  `$KANDEV_CLI` and that no further Kandev MCP tools are to be sought, and a tool
+  contradicting that sentence is the defect this revision removes.
 
-- **AC-2a.** The tool's registration, handler and tests SHALL NOT be added to
-  `internal/mcp/server/handoff_handlers.go`, which already implements the
-  unrelated same-workspace parent/child **document** handoff
-  (`list_task_documents_kandev`, `write_task_document_kandev`). The word "handoff"
-  is already taken in that package; this tool lives in its own file so the two
-  concepts are not conflated by name.
+- **AC-2.** The command SHALL POST to a new authenticated Office runtime route
+  `POST /api/v1/office/runtime/handoffs`, mounted in `runtime.RegisterRoutes`
+  alongside `POST /runtime/tasks`. The route SHALL derive every identity field
+  from the signed run token through the existing `contextFromRequest`, and SHALL
+  NOT accept, read or honour any caller identity, workspace, agent, role or
+  capability field from the request body, path or query string.
 
-- **AC-3.** `apps/backend/config/prompts/office-context.md` SHALL advertise the
-  tool through a **placeholder** resolved at prompt-format time, filled only when
-  the capability is granted, in the manner of `{step_complete_instruction}`. The
-  raw template returned by `sysprompt.OfficeContext()` SHALL NOT contain the
-  literal `handoff_task_kandev`, so
-  `TestSyspromptToolNames_ExactlyMatchMCPOfficeMode` continues to hold unchanged
-  for the ungranted profile. A new assertion SHALL cover the granted form: the
-  resolved prompt's `_kandev` tool set equals the registered tool set of an
-  Office profile carrying the capability.
+- **AC-2a.** The route SHALL decode its body with the existing `bindClosedJSON`
+  helper, which sets `DisallowUnknownFields` and rejects a body carrying more
+  than one JSON value. A body carrying a field outside the AC-5 set SHALL
+  therefore be refused with HTTP 400 naming the offending field, before any
+  write. No new decoding mechanism SHALL be introduced. (`POST /runtime/tasks`
+  uses permissive `bindJSON` plus an `unsupportedField()` denylist, which is what
+  silently drops `agent_profile_id` today; this route SHALL NOT copy it.)
 
-- **AC-4.** The same file's instruction not to search for additional Kandev MCP
-  tools SHALL be amended so it does not contradict a tool the same prompt
-  advertises. The amended sentence SHALL still forbid discovering tools **not**
-  listed in that prompt.
+- **AC-3.** `apps/backend/config/prompts/office-context.md` SHALL NOT mention
+  `handoff_task_kandev`, and the `{handoff_tool_instruction}` placeholder together
+  with its `internal/sysprompt` resolution SHALL be removed. That file's sentence
+  directing Office state changes through `$KANDEV_CLI kandev ...` and forbidding
+  the discovery of further Kandev MCP tools SHALL be restored to its pre-change
+  wording and SHALL again be true without qualification.
+  `TestSyspromptToolNames_ExactlyMatchMCPOfficeMode` SHALL pass unchanged and SHALL
+  NOT gain a granted-form assertion: there is no granted form, because the Office
+  MCP inventory is now identical with and without the handoff capability.
 
-- **AC-5.** The tool SHALL accept exactly these arguments, and reject any call
-  carrying an argument outside this set with `ErrorCodeValidation` naming the
-  offending argument:
+- **AC-4.** Discoverability SHALL be per role and SHALL live in the role's own
+  instructions rather than in a tool registry.
+  `internal/office/configloader/instructions/ceo/AGENTS.md` SHALL document the
+  command, its required flags, and the fact that it targets a **different**
+  workspace. No other role's instructions SHALL document it. Because instructions
+  are advisory and discovery is not a boundary (D3), an agent whose instructions
+  omit the command is refused by AC-9, not by its ignorance of it.
 
-  | Argument | Required | Notes |
-  |---|---|---|
-  | `target_workspace_id` | yes | Must differ from the caller's workspace (R5) |
-  | `workflow_id` | yes | Must belong to `target_workspace_id` |
-  | `title` | yes | ≤ 60 runes |
-  | `prompt` | yes | The delivery agent's first user message |
-  | `agent_profile_id` | yes | See R3 |
-  | `executor_profile_id` | yes | See R3 |
-  | `repository_id` | no | Must already exist in `target_workspace_id` (AC-5b) |
-  | `base_branch` | no | Only with `repository_id` (AC-5b) |
-  | `start_agent` | no | Default **false** (R7) |
-  | `external_id` | no | Create-idempotency key (R6) |
+- **AC-5.** The command SHALL accept exactly these flags, which map one-to-one
+  onto the request body's JSON fields. It SHALL reject an unknown flag, which
+  `flag.ContinueOnError` already does, and SHALL reject any positional argument,
+  as `taskDecision` already does via `fs.NArg() > 0`:
 
-  A required argument that is absent, empty, or whitespace-only SHALL be rejected
-  with `ErrorCodeValidation` naming that argument. Rejection SHALL happen before
-  any write.
+  | Flag | JSON field | Required | Notes |
+  |---|---|---|---|
+  | `--target-workspace-id` | `target_workspace_id` | yes | Must differ from the caller's workspace (R5) |
+  | `--workflow-id` | `workflow_id` | yes | Must belong to `target_workspace_id` |
+  | `--title` | `title` | yes | ≤ 60 runes |
+  | `--prompt` | `prompt` | yes | The delivery agent's first user message |
+  | `--agent-profile-id` | `agent_profile_id` | yes | See R3 |
+  | `--executor-profile-id` | `executor_profile_id` | yes | See R3 |
+  | `--repository-id` | `repository_id` | no | Must already exist in `target_workspace_id` (AC-5b) |
+  | `--base-branch` | `base_branch` | no | Only with `--repository-id` (AC-5b) |
+  | `--start-agent` | `start_agent` | no | Bool, default **false** (R7) |
+  | `--external-id` | `external_id` | no | Create-idempotency key (R6) |
+
+  A required field that is absent, empty or whitespace-only SHALL be rejected
+  with HTTP 400 naming it, before any write.
 
 - **AC-5a.** An **optional string** argument that is present but empty or
-  whitespace-only SHALL be rejected with `ErrorCodeValidation` naming it, rather
+  whitespace-only SHALL be rejected with HTTP 400 naming it, rather
   than being silently treated as absent. A caller that means "no repository" omits
   the key; a blank value is a caller bug and is reported as one.
 
 - **AC-5b.** `repository_id`, when supplied, SHALL attach exactly one repository
   to the delivery task as its only repository entry. It SHALL be validated to
-  exist in `target_workspace_id` and SHALL be refused with `ErrorCodeValidation`
+  exist in `target_workspace_id` and SHALL be refused with HTTP 400
   otherwise. `base_branch` supplied **without** `repository_id` SHALL be refused
-  with `ErrorCodeValidation` naming `base_branch`, rather than ignored.
+  with HTTP 400 naming `base_branch`, rather than ignored.
   `repository_id` supplied without `base_branch` SHALL use that repository's
   `default_branch`, matching the existing explicit-repository behaviour. When
   `repository_id` is omitted the delivery task SHALL be created with no
   repositories, and no repository SHALL be inherited from the source task.
 
+- **AC-5c.** Every criterion in this spec SHALL be enforced at the **route**, not
+  only in the command. The command MAY refuse an obviously malformed invocation
+  locally for a faster message, but each such refusal SHALL also hold when the
+  route is called directly with the equivalent body. A check implemented only in
+  the CLI is not a boundary, for the reason tool registration was not one: the
+  agent can reach the route itself.
+
+- **AC-5d.** Refusals SHALL use the runtime surface's existing error contract,
+  onto which this spec's error names map exactly:
+
+  | This spec says | The route returns |
+  |---|---|
+  | HTTP 400 | `http.StatusBadRequest` with `{"error": <message naming the field>}` |
+  | HTTP 403 | `http.StatusForbidden` with `{"error": <message>}` |
+  | HTTP 500 | `http.StatusInternalServerError` with the fixed generic `runtimeInternalErrorMessage` |
+
+  The 500 body SHALL remain that fixed generic message: it names no resource, so
+  D3c's internal branch discloses nothing the validation branches may not. No new
+  error envelope SHALL be introduced, and the command SHALL surface the route's
+  `error` string verbatim through the existing `handleResponse`.
+
+- **AC-5e.** The command SHALL distinguish a flag that was **not supplied** from
+  one supplied with an empty value — `flag.FlagSet.Visit` reports only flags
+  actually set — and SHALL include a supplied-but-empty flag in the request body so
+  the route can apply AC-5a. It SHALL NOT build its payload with the
+  `if value != "" { … }` idiom the sibling subcommands use: that idiom silently
+  drops a blank value, which would make AC-5a unreachable through the command and
+  turn a caller bug into a success.
+
 - **AC-6.** A `title` longer than 60 runes SHALL be rejected with
-  `ErrorCodeValidation` whose message states **both** the 60-rune limit and the
+  HTTP 400 whose message states **both** the 60-rune limit and the
   actual rune length. Length SHALL be counted in runes against the same limit
   `service.ValidateTaskTitle` enforces; a title of exactly 60 runes is accepted.
-  The tool SHALL compose this message itself: `ValidateTaskTitle`'s own message
+  The action SHALL compose this message itself: `ValidateTaskTitle`'s own message
   states only the limit (`"task titles must be %d characters or fewer"`) and
   reusing it verbatim would not satisfy this criterion. The title SHALL NOT be
   truncated.
 
 - **AC-6a.** No length limit SHALL be imposed on `prompt`. This is a decision, not
-  an omission: the task `description` column is unconstrained `TEXT`, so there is
-  no column limit to defer to, and inventing one here would put a cap on
-  cross-workspace handoffs that same-workspace creation does not have. The
-  transport's own message-size limit is the only bound, and exceeding it is a
-  transport error rather than a validation failure.
+  an omission: the task `description` column is unconstrained `TEXT`, so there is no
+  column limit to defer to, and inventing one would cap cross-workspace handoffs
+  where same-workspace creation is uncapped. The transport's own message-size limit
+  is the only bound, and exceeding it is a transport error, not a validation
+  failure.
 
 ### R2 — authorisation is granted per agent or per role, and enforced at execution
 
@@ -495,31 +551,52 @@ Two corrections to the originating card, recorded so no one re-derives them:
   (`can_create_tasks`, `can_approve`, `can_manage_own_skills` and `max_subtask_depth`
   are all absent from `apps/web/src/locales/**`). Adding locale entries for this key
   is therefore **not** part of this change, and no `i18n:check` obligation arises from
-  it. Revision 3 of this spec asserted the opposite under
-  `## User-visible surfaces touched`; that was wrong and is corrected there too.
+  it.
 
-- **AC-8.** An Office session's MCP profile SHALL carry the handoff capability if
-  and only if `shared.HasPermission(shared.ResolvePermissions(role, permissions),
-  can_handoff_tasks)` is true for the agent profile backing that session. Role
-  defaults merged with per-agent overrides is the single source; no second
-  resolution path SHALL be added.
+- **AC-8.** The system SHALL define a new **runtime** capability key
+  `CapabilityHandoffTask = "handoff_task"` in
+  `internal/office/runtime/capabilities.go`, a matching `CanHandoffTasks bool`
+  field carrying the JSON tag `handoff_task` on `runtime.Capabilities`
+  (`internal/office/runtime/context.go`), a case for it in `Capabilities.Allows`,
+  and an entry in `AllowedKeys()` at the same position it occupies in the struct
+  so the stable key order stays aligned with the field order. `FromAgent` SHALL
+  set it to `shared.HasPermission(perms, shared.PermCanHandoffTasks)` — the same
+  resolution every other permission-derived capability in that function uses.
+  Role defaults merged with per-agent overrides (AC-7) therefore remain the single
+  source of the grant, and no second resolution path SHALL be added.
 
-- **AC-9.** The backend handler SHALL re-derive the permission at execution time
-  from the trusted principal (`mcpscope.PrincipalFromContext` →
-  `CallerSessionID` → session → `AgentProfileID` → agent profile → role and
-  permissions) and SHALL refuse with `ws.ErrorCodeForbidden` when it is not
-  granted. It SHALL NOT read the caller's identity, workspace, role or capability
-  from the request payload. This holds even when the tool was never advertised to
-  that session: discovery is not a boundary
-  (`automation_authorization.go:33-35`). When no principal is present, or the
-  session or agent profile it names cannot be loaded, the call SHALL be refused
-  with `ws.ErrorCodeForbidden` and no write SHALL occur. A lookup failure SHALL
-  NOT fall through to an unscoped internal caller, which the task service reads
-  as "allow everything".
+- **AC-8a.** The `mcpprofile.Capability` value added for the withdrawn MCP tool
+  SHALL be removed; the runtime capability replaces it outright rather than sitting
+  alongside it. `internal/mcp/profile` SHALL carry no handoff capability, so no MCP
+  surface can gate, advertise or reach this feature.
 
-- **AC-10.** An unauthorised call SHALL return a message that names the missing
-  permission and says it is granted per agent or per role. The message SHALL NOT
-  disclose whether `target_workspace_id` exists.
+- **AC-8b.** A run's persisted capability snapshot SHALL carry `handoff_task` when
+  and only when AC-8 grants it. `ContextBuilder.Build` already derives it from
+  `FromAgent`, so no new call site is required; it is stated because the snapshot
+  is what the run token carries, and therefore what AC-9 re-reads.
+
+- **AC-9.** The route SHALL authorise from the trusted run token and from nothing
+  else. `contextFromRequest` SHALL resolve the agent from
+  `claims.AgentProfileID`, re-derive capabilities with `FromAgent(agent)`, and
+  overlay the signed `claims.Capabilities`. That overlay is safe precisely
+  because the claims are JWT-signed and are never request-body input; the route
+  SHALL NOT read the caller's identity, workspace, role or capability from the
+  payload. The route SHALL refuse with HTTP 403 when
+  `runCtx.Capabilities.Allows(CapabilityHandoffTask)` is false, and no write SHALL
+  occur. This holds however the agent learned of the command: instructions are
+  advisory and discovery is not a boundary.
+
+- **AC-9a.** A request with no bearer token, an invalid token, or a token naming an
+  agent that cannot be loaded SHALL be refused by the existing `contextFromRequest`
+  failure paths with **HTTP 401**, and no write SHALL occur.
+  This is a deliberate change from the withdrawn MCP contract, which folded a
+  missing caller into the forbidden code because its transport had no
+  unauthenticated state. Neither refusal SHALL fall through to an unscoped
+  internal caller, which the task service reads as "allow everything".
+
+- **AC-10.** An unauthorised call SHALL return a message naming the missing
+  permission and saying it is granted per agent or per role. It SHALL NOT disclose
+  whether `target_workspace_id` exists.
 
 - **AC-11.** The target workspace SHALL be authorised by the existing per-user
   scoping before any write. A workspace whose owner is not the source task's
@@ -529,38 +606,35 @@ Two corrections to the originating card, recorded so no one re-derives them:
 
 - **AC-12.** `workflow_id` SHALL be validated to belong to `target_workspace_id`.
   A workflow that does not exist, and a workflow that exists in another
-  workspace, SHALL both be refused with `ErrorCodeValidation` and the **same**
+  workspace, SHALL both be refused with HTTP 400 and the **same**
   message, which names only `workflow_id` and states that it is not a workflow of
   the target workspace. The message SHALL NOT name, echo, or otherwise disclose
   the workspace the workflow actually belongs to, and the two cases SHALL NOT be
   distinguishable by message, code, or timing class.
 
-- **AC-12a.** The tool SHALL NOT reuse `validateMCPWorkflowWorkspace`'s message.
-  That helper's message embeds the owning workspace id
-  (`"workflow_id %q belongs to workspace_id %q, not %q"`), which is exactly the
-  disclosure AC-12 forbids; it has no no-leak property and is not a model for
-  this tool. `create_task_kandev`'s use of it is unchanged — that tool's caller
-  already names its own workspace, so the same message discloses nothing new
-  there. Reusing the helper's *validation* is permitted; emitting its message to
-  a cross-workspace caller is not.
+- **AC-12a.** The action SHALL NOT reuse `validateMCPWorkflowWorkspace`'s message,
+  which embeds the owning workspace id
+  (`"workflow_id %q belongs to workspace_id %q, not %q"`) — exactly the disclosure
+  AC-12 forbids. `create_task_kandev`'s use of it is unchanged: that caller already
+  names its own workspace, so the message discloses nothing new there. Reusing the
+  helper's *validation* is permitted; emitting its message to a cross-workspace
+  caller is not.
 
-- **AC-12b.** Every target-resource check in D3a step 5 — `repository_id`
-  (AC-5b), target workspace ownership (AC-11), `workflow_id` (AC-12),
-  `agent_profile_id` and `executor_profile_id` (AC-14), and step resolution
-  (AC-15b) — SHALL distinguish absence from failure per D3c: a read that executes
-  and finds nothing (or finds a row in another workspace) is
-  `ErrorCodeValidation`; a read that fails to execute is `ErrorCodeInternalError`
-  and SHALL be safe to retry. In both cases no write SHALL occur. The tool SHALL
-  NOT fold a transient backend failure into a `Validation` refusal for any of the
-  five. `validateMCPWorkflowWorkspace` already models this correctly with three
-  branches — not-found → `Validation`, other read error → `InternalError`, wrong
-  workspace → `Validation` — and AC-12/AC-12a govern only the two `Validation`
-  ones; this criterion covers the third for `workflow_id` and imposes the same
-  shape on the other four. AC-11's refusal remains indistinguishable from
-  not-found, so its *failure* branch SHALL NOT disclose existence either.
+- **AC-12b.** Every target-resource check in D3a step 5 — `repository_id` (AC-5b),
+  target workspace ownership (AC-11), `workflow_id` (AC-12), `agent_profile_id` and
+  `executor_profile_id` (AC-14), and step resolution (AC-15b) — SHALL distinguish
+  absence from failure per D3c: a read that executes and finds nothing (or finds a
+  row in another workspace) is HTTP 400; a read that fails to execute is HTTP 500
+  and SHALL be safe to retry. In both cases no write SHALL occur, and a transient
+  backend failure SHALL NOT be folded into a validation refusal for any of the
+  five. `validateMCPWorkflowWorkspace` models this correctly with three branches;
+  AC-12/AC-12a govern only its two validation ones, and this criterion covers the
+  third for `workflow_id` and imposes the same shape on the other four. AC-11's
+  refusal stays indistinguishable from not-found, so its *failure* branch SHALL NOT
+  disclose existence either.
 
 - **AC-12c.** `workflow_id` SHALL additionally be refused with
-  `ErrorCodeValidation` when it equals the target workspace's
+  HTTP 400 when it equals the target workspace's
   `office_workflow_id`, with a message saying the target must be a delivery
   workflow rather than the workspace's office workflow. Without this, D1 is
   defeated through an argument the caller controls: `IsFromOffice` is true when a
@@ -573,16 +647,16 @@ Two corrections to the originating card, recorded so no one re-derives them:
 
 ### R3 — both profiles are required, and the delivery task is startable
 
-- **AC-13.** The tool SHALL reject a call omitting `agent_profile_id` **or**
-  `executor_profile_id` with `ErrorCodeValidation` naming the missing one, even
+- **AC-13.** The action SHALL reject a call omitting `agent_profile_id` **or**
+  `executor_profile_id` with HTTP 400 naming the missing one, even
   when a workspace, workflow or step default could have supplied it. Rationale:
   the caller is choosing on behalf of a workspace it does not run in, and a
-  silently-defaulted profile is exactly the failure this tool exists to stop
+  silently-defaulted profile is exactly the failure this action exists to stop
   reproducing. This is a deliberate divergence from `create_task_kandev`, whose
   resolution chain remains unchanged.
 
 - **AC-14.** Both ids SHALL be validated before any write; one that does not resolve
-  SHALL be rejected with `ErrorCodeValidation` naming which of the two failed. When
+  SHALL be rejected with HTTP 400 naming which of the two failed. When
   both are unresolvable, `agent_profile_id` SHALL be the one named, per D3a's order.
   "Resolves" is defined per id type in AC-14b, because it is **not** the same test for
   the two and neither test is derivable from the phrase "usable in the target
@@ -615,7 +689,7 @@ Two corrections to the originating card, recorded so no one re-derives them:
   `AgentProfileBelongs` returns
   `profile.WorkspaceID == "" || profile.WorkspaceID == workspaceID`, and
   `ExecutorProfileBelongs` takes the workspace id as `_ string` and returns existence
-  only. This tool SHALL match that shape. It need not call those methods — they hang
+  only. This action SHALL match that shape. It need not call those methods — they hang
   off a GitLab-watch validator — but it SHALL NOT diverge from their semantics, because
   two different answers to "does this profile belong to this workspace?" in one codebase
   is the defect, whichever one is written second.
@@ -639,7 +713,7 @@ Two corrections to the originating card, recorded so no one re-derives them:
   and executor in its launch metadata, so it can be started later from the board
   even when `start_agent` was false.
 
-- **AC-15a.** The tool SHALL NOT accept a `workflow_step_id` argument. The
+- **AC-15a.** The action SHALL NOT accept a `workflow_step_id` argument. The
   destination step SHALL be resolved server-side by the existing
   `resolveMCPDestinationStep` semantics for the requested `start_agent` value:
   the workflow's first auto-start step when `start_agent` is true, otherwise its
@@ -649,11 +723,11 @@ Two corrections to the originating card, recorded so no one re-derives them:
 - **AC-15b.** Step resolution SHALL distinguish configuration from failure, which
   `resolveMCPDestinationStep`'s bare empty-string return does not: it yields `""`
   for a nil controller, an empty workflow id, a failed step listing, a nil
-  response, and a genuine no-match alike. The tool SHALL therefore read the target
+  response, and a genuine no-match alike. The action SHALL therefore read the target
   workflow's steps such that it can tell these apart, and:
   - a workflow whose steps list successfully but yield no resolvable step, and a
-    workflow with zero steps, SHALL be refused with `ErrorCodeValidation`;
-  - a failure to read the steps SHALL be refused with `ErrorCodeInternalError`
+    workflow with zero steps, SHALL be refused with HTTP 400;
+  - a failure to read the steps SHALL be refused with HTTP 500
     and SHALL be safe to retry;
   - in both cases no write SHALL occur, and no card SHALL be created that sits on
     no step.
@@ -688,9 +762,9 @@ Two corrections to the originating card, recorded so no one re-derives them:
 
   | Field | Value |
   |---|---|
-  | `source_task_id` | the principal's `CallerTaskID` |
-  | `source_workspace_id` | the principal's `WorkspaceID` |
-  | `source_session_id` | the principal's `CallerSessionID` |
+  | `source_task_id` | `runCtx.TaskID` |
+  | `source_workspace_id` | `runCtx.WorkspaceID` |
+  | `source_session_id` | `runCtx.SessionID` |
   | `source_agent_profile_id` | the agent profile resolved in AC-9 |
   | `handed_off_at` | D7's timestamp, RFC 3339 UTC, millisecond precision |
 
@@ -698,8 +772,8 @@ Two corrections to the originating card, recorded so no one re-derives them:
   any Found outcome (R6), consistent with the external-id contract's rule that a
   second create returns the existing task unchanged.
 
-  Every field is required. When the principal carries an empty `CallerTaskID` or
-  `CallerSessionID`, the call SHALL be refused with `ws.ErrorCodeForbidden` and no
+  Every field is required. When the run token carries an empty `TaskID` or
+  `SessionID`, the call SHALL be refused with HTTP 403 and no
   write SHALL occur, on the same fail-closed grounds as AC-9: a delivery task
   whose provenance names no source, or a source task that cannot be found to
   receive the reverse link, is worse than no delivery task.
@@ -733,57 +807,28 @@ Two corrections to the originating card, recorded so no one re-derives them:
   nothing here SHALL attempt to deduplicate them.
 
 - **AC-19a.** Each entry's fields SHALL be: actor type `agent`; actor id the
-  source agent profile id from AC-16; session id the principal's
-  `CallerSessionID`; run id per the rule below; and `details` a JSON-encoded
-  string with exactly the fields in the table below. The principal carries no run
-  id, so it is looked up, and a lookup that finds nothing SHALL NOT fail the call
-  (D6).
+  source agent profile id from AC-16; session id `runCtx.SessionID`; run id
+  `runCtx.RunID`; and `details` a JSON-encoded string with exactly the fields in
+  the table below. All three identity fields come from the signed run token, so
+  none is looked up and none can name another agent's run.
 
-  **Run id.** It SHALL be the id of an office run whose `SessionID` equals the
-  principal's `CallerSessionID`, and the **empty string** otherwise —
-  `LogActivityWithRun` documents empty as the correct value rather than a defect.
-  The tool SHALL NOT write a candidate run's id unverified: two agents can hold
-  claimed runs against the same source task, so a task-keyed lookup can return a run
-  belonging to a different agent, and a wrong run id is worse than none in the one
-  record R4 exists to make trustworthy.
+  **The run identity needs no lookup at all on this mechanism.** `RunContext`
+  already carries `RunID`, `SessionID` and `AgentID`, all derived from the signed
+  run token by `contextFromRequest`, so the route SHALL read them from `runCtx`
+  and SHALL NOT resolve a run from the task id. No `RunResolver` method, no
+  `DashboardService` pass-through and no `SetDashboardService` wiring SHALL be
+  added for this feature, and none SHALL be required for it to function.
 
-  **The comparison is not reachable from the calling package today, so this criterion
-  names the seam.** No new *repository* method is required — `GetRunByID` already
-  returns a `Run` carrying `SessionID`, as does `office/service.Service.GetRun` — but
-  `internal/mcp/handlers` cannot reach either: it imports `office/dashboard`,
-  `office/shared` and `office/models` and has **no** import of `office/service`, and
-  the Office dependency it holds (`dashboardSvc *dashboard.DashboardService`, wired by
-  the existing `SetDashboardService`) exposes no single-run-by-id accessor —
-  `ListRuns`, `GetLiveRuns` and `GetRunsByCommentIDs` only. The `RunResolver` seam
-  (`internal/office/dashboard/service.go`) returns a bare id and discards the `Run`.
-  Leaving this unsaid would make the wiring an unreviewed implementation choice with at
-  least three defensible answers, so:
+  Recorded so nobody reintroduces the seam: revisions 1-4 needed one because
+  `internal/mcp/handlers` has no import of `office/service` and its only Office
+  dependency exposes no single-run-by-id accessor, so a task-keyed resolver had to
+  be threaded through `dashboardSvc` — three hops, each wired at startup, one of
+  which was in fact left unwired. A route inside `internal/office/runtime` starts
+  from an authenticated run and already knows which run it is.
 
-  - The existing `RunResolver` interface SHALL gain **one** method that resolves and
-    verifies in a single call — `ResolveRunForTaskAndSession(ctx, taskID, sessionID)
-    string` — returning the claimed run's id when that run's `SessionID` equals
-    `sessionID`, and the **empty string** otherwise (including no claimed run, and a
-    read error, per D6).
-  - It SHALL be implemented by the office service that already satisfies `RunResolver`
-    and is wired through `SetRunResolver` at startup, reusing its existing run read
-    rather than adding a repository method.
-  - `DashboardService` SHALL expose it as an **exported pass-through**, so the tool
-    reaches it through the `dashboardSvc` the handler package already holds. No new
-    dependency, field, or import SHALL be added to `Handlers`.
-
-  Rationale for putting the comparison behind the seam rather than in the tool: `Run`
-  lives in the office packages, and `handlers` deliberately sees a bare id today. A
-  seam that returns an already-verified id preserves that boundary, whereas handing
-  `handlers` a whole `Run` widens it for one field. Any equivalent wiring that keeps
-  `Handlers` free of a new Office dependency and returns an id already verified against
-  `sessionID` satisfies this criterion; filtering `ListRuns` client-side does **not**,
-  because it reads every run in a workspace to answer a single-row question.
-
-  **Not a defect:** when the source task's newest claimed run belongs to another
-  session, the result is the empty string even though a matching run may exist
-  elsewhere. That is the intended, explicitly-blessed outcome — empty is a correct
-  value here and D6 makes activity non-load-bearing — not a case for widening the
-  lookup.
+  A run id that is empty (a token minted without one) SHALL be treated exactly as
+  D6 treats any other activity shortfall: the entry is written with an empty run
+  id, or skipped, and the call still succeeds.
 
   **`details` fields**, identical on both sides, with `counterpart` meaning the
   other side of the handoff:
@@ -818,10 +863,10 @@ Two corrections to the originating card, recorded so no one re-derives them:
 ### R5 — same-workspace handoff is refused
 
 - **AC-22.** When `target_workspace_id` equals the caller's own workspace as
-  derived from the trusted principal, the call SHALL be refused with
-  `ErrorCodeValidation` and a message naming `POST /runtime/tasks` as the path
-  for same-workspace creation. The comparison SHALL use the principal's
-  workspace, never a payload-supplied source workspace, and SHALL run at D3a
+  derived from the run token, the call SHALL be refused with
+  HTTP 400 and a message naming `kandev task create` as the path
+  for same-workspace creation. The comparison SHALL use `runCtx.WorkspaceID`,
+  never a payload-supplied source workspace, and SHALL run at D3a
   step 2 — before the permission check, so a caller that targets itself is told
   what it actually did wrong.
 
@@ -829,13 +874,13 @@ Two corrections to the originating card, recorded so no one re-derives them:
   new field, capability or workspace input on the Office runtime create path.
 
 - **AC-23a.** The delivery task SHALL be observably a kanban task, per D1 and D2a.
-  Specifically it SHALL be created with **no** `Origin` supplied by the tool — so
+  Specifically it SHALL be created with **no** `Origin` supplied by the action — so
   the stored origin is `manual` — with no `project_id`, and in the caller-supplied
   target workflow. Consequently `isOfficeRequest` SHALL be false for the create
   request, the task SHALL NOT be assigned an office identifier (its `identifier`
   SHALL be empty, and the target workspace's task sequence SHALL NOT be
   incremented by this call), and the stored task SHALL read back with
-  `IsFromOffice` false. The tool SHALL NOT pass `TaskOriginAgentCreated`, and
+  `IsFromOffice` false. The action SHALL NOT pass `TaskOriginAgentCreated`, and
   SHALL NOT introduce a new origin value. Testable directly: create a delivery
   task and assert the origin, the empty identifier, the unchanged workspace task
   sequence, and `IsFromOffice`. Asserting `IsFromOffice` alone is insufficient
@@ -849,7 +894,7 @@ The external-id mechanism is already specified in
 document, and `docs/specs/tasks/system-design/external-id-idempotency.md`. This
 spec **reuses** it and does not restate, reinterpret, or extend it.
 
-- **AC-24.** When `external_id` is supplied, the tool SHALL obtain its outcome
+- **AC-24.** When `external_id` is supplied, the action SHALL obtain its outcome
   from that mechanism unchanged and SHALL surface **which of the four outcomes**
   occurred — `created`, `found_settled`, `found_unsettled`,
   `created_identity_lost` — together with `creation_complete`, whose meaning is
@@ -858,7 +903,7 @@ spec **reuses** it and does not restate, reinterpret, or extend it.
   "already existed" without discarding the one signal that contract calls
   safety-critical.
 
-- **AC-24a.** On either **Found** outcome the tool SHALL perform no target-side
+- **AC-24a.** On either **Found** outcome the action SHALL perform no target-side
   work whatsoever — no second task, no session, no launch, no repository
   attachment, no workspace-policy write, no `task.created` event — matching the
   no-side-effect rule the external-id contract states and the data-loss guard
@@ -875,32 +920,32 @@ spec **reuses** it and does not restate, reinterpret, or extend it.
   trace on the side that received the work, which is precisely what R4 exists to
   prevent.
 
-- **AC-24b.** On `found_unsettled` the tool SHALL return the task with
+- **AC-24b.** On `found_unsettled` the action SHALL return the task with
   `creation_complete: false` and SHALL NOT release the identity, SHALL NOT create
   a second task, and SHALL NOT wait, poll, or retry internally for settlement.
-  Releasing and re-creating is the documented unsafe move, and this tool SHALL
+  Releasing and re-creating is the documented unsafe move, and this action SHALL
   NOT expose or perform it. The response message SHALL say that the delivery task
   exists, that another create may still be finishing it, and that the safe
   responses are to proceed with the returned id or escalate to a human.
 
-- **AC-24c.** On `created_identity_lost` the tool SHALL report that outcome
+- **AC-24c.** On `created_identity_lost` the action SHALL report that outcome
   explicitly and SHALL state in the response message that the delivery task
   exists but no longer holds the `external_id`, so an identical replay would
   create a **second** task. The caller is to record the returned id rather than
   replay.
 
-- **AC-24d.** On the `created` path the tool SHALL **settle the external id
+- **AC-24d.** On the `created` path the action SHALL **settle the external id
   itself**, because the create call cannot do it. `Service.CreateTask` returns
   only three outcomes and its own contract states that the fourth,
   `CreatedIdentityLost`, "is not produced here — it is decided by the handler
-  during settlement, after this call returns". The tool SHALL therefore call
+  during settlement, after this call returns". The action SHALL therefore call
   `SettleExternalID` for the task it created, at D3b step 2 — after the create and
   before any launch dispatch — and SHALL map its result as follows:
   - settled: `outcome` is `created` and `creation_complete` is true;
   - **not** settled: `outcome` is `created_identity_lost`, `creation_complete` is
     true, the surviving task is the one returned, and no launch SHALL be
     dispatched (AC-32);
-  - a settlement error: `ErrorCodeInternalError`. The delivery task SHALL NOT be
+  - a settlement error: HTTP 500. The delivery task SHALL NOT be
     deleted, and the message SHALL carry the task id so the caller does not lose
     it.
 
@@ -918,7 +963,7 @@ spec **reuses** it and does not restate, reinterpret, or extend it.
   forever, which is the one outcome AC-24b tells the caller to escalate.
   Scenario 4 depends on this step having run.
 
-- **AC-25.** On either Found outcome the tool SHALL still ensure the source
+- **AC-25.** On either Found outcome the action SHALL still ensure the source
   task's reverse-link entry for that delivery task exists, adding it when absent
   and leaving it untouched when present. This is a **source-side** write, in the
   source workspace, to a task the external-id mechanism knows nothing about; it
@@ -930,7 +975,7 @@ spec **reuses** it and does not restate, reinterpret, or extend it.
   stored `handoff_source.handed_off_at`** (AC-16), not taken from this call's
   clock. AC-17 defines that field as "the same instant as this handoff's AC-16
   record", and on a replay the AC-16 record is the one already stored on the found
-  task — write-once by AC-16 and never re-stamped by D7. The tool therefore reads
+  task — write-once by AC-16 and never re-stamped by D7. The action therefore reads
   that value during the AC-25a check it already performs, and writes it verbatim.
   Substituting a fresh timestamp SHALL NOT happen: it would contradict D7, and
   because AC-28 sorts by this field it would also place a repair at the end of a
@@ -940,10 +985,10 @@ spec **reuses** it and does not restate, reinterpret, or extend it.
   after it, so AC-28's re-sort on every append is what keeps the stored array
   ordered; a repair SHALL NOT be assumed to belong at the end of the list.
 
-- **AC-25a.** Before performing AC-25's repair the tool SHALL compare the found
+- **AC-25a.** Before performing AC-25's repair the action SHALL compare the found
   task's `handoff_source.source_task_id` (AC-16) with the calling source task id.
   When they differ, or when the found task carries **no** `handoff_source` record
-  at all, the tool SHALL refuse with `ErrorCodeValidation`, SHALL write no
+  at all, the action SHALL refuse with HTTP 400, SHALL write no
   reverse-link entry, and SHALL state that the `external_id` is already held by a
   task this source did not hand off. Rationale: external-id uniqueness is
   `(workspace_id, external_id)` and cross-workspace or global uniqueness is
@@ -953,14 +998,14 @@ spec **reuses** it and does not restate, reinterpret, or extend it.
   else — provenance that reads as true in one direction and false in the other.
 
 - **AC-25b.** AC-25a's check passing does not make the rest of the stored record
-  usable, so the tool SHALL additionally verify that the found task's
+  usable, so the action SHALL additionally verify that the found task's
   `handoff_source.handed_off_at` is **readable** before writing AC-25's repair.
   It is unreadable when the field is missing, is not a string, or does not parse
   as an RFC 3339 timestamp. That list is **exhaustive**, and matches the malformed
   test AC-27 applies to a reverse-link entry, because a value that fails here would
   produce exactly such an entry if written.
 
-  On an unreadable value the tool SHALL surface the **AC-29 partial failure** — the
+  On an unreadable value the action SHALL surface the **AC-29 partial failure** — the
   full AC-33 object, `reverse_link_recorded: false`, and a `reverse_link_error`
   naming the unreadable stored timestamp — and SHALL make **no write** to
   `handoffs`. It SHALL NOT substitute a fresh timestamp, SHALL NOT write an entry
@@ -996,7 +1041,7 @@ spec **reuses** it and does not restate, reinterpret, or extend it.
   whose `handed_off_at` is missing or unparseable is malformed by AC-27's own
   exhaustive definition, so the next handoff from this source task would read a
   corrupt list and be refused — leaving the source card unable to hand off again
-  "until a human repairs it" (AC-27), caused by the tool itself. This case is
+  "until a human repairs it" (AC-27), caused by the action itself. This case is
   reachable because `handoff_source` is not immune to the whole-blob metadata
   writers recorded under **Out of scope**, which is the same exposure AC-27 already
   accepts for `handoffs`.
@@ -1028,25 +1073,20 @@ spec **reuses** it and does not restate, reinterpret, or extend it.
     and is corrected here. It guards a scalar column but then writes the whole
     marshalled metadata blob through `updateTaskTx`, exactly as plain `UpdateTask`
     does, so modelling on it would reproduce the read-modify-write this criterion
-    exists to forbid. `repoerrors.ErrWorkflowResolutionConflict` remains the model
-    for the **typed conflict error**, which is the part of that precedent that
-    does transfer.
-  - The append SHALL NOT go through `Service.UpdateTaskMetadata`. That path is
-    `GetTask` → shallow key-merge → `UpdateTask` with no lock, no compare-and-set,
-    and no version column, which is precisely the last-write-wins read-modify-write
-    this criterion forbids.
+    forbids. `repoerrors.ErrWorkflowResolutionConflict` remains the model for the
+    **typed conflict error**, the part of it that does transfer.
+  - The append SHALL NOT go through `Service.UpdateTaskMetadata`: `GetTask` →
+    shallow key-merge → `UpdateTask`, with no lock, no compare-and-set and no
+    version column, is the last-write-wins pattern this criterion forbids.
   - **Scope of the guarantee.** The write SHALL touch no metadata key other than
-    `handoffs`, and a concurrent write to any other key SHALL NOT cause a spurious
+    `handoffs`, and a concurrent write to another key SHALL NOT cause a spurious
     conflict. Durability is guaranteed **against other `handoffs` writers**: two
-    concurrent handoffs from the same source task SHALL both appear in the list,
-    and neither SHALL be lost. It is **not** guaranteed against the whole-blob
+    concurrent handoffs from one source task SHALL both appear, neither lost. It is **not** guaranteed against the whole-blob
     writers that still exist (`Service.UpdateTaskMetadata`, and `Service.UpdateTask`
     via `protectedTaskMetadataUpdate`): one of those that reads the row before this
     CAS commits and writes after it can still revert the append, and no primitive
-    available to this tool can prevent that. Revision 2 promised the stronger
-    guarantee; it was undeliverable and is narrowed here rather than left as prose
-    nobody could satisfy. The residual is recorded under **Out of scope** with its
-    mitigation, and AC-25's replay-as-repair is that mitigation.
+    available to this action can prevent that. The residual is recorded under
+    **Out of scope**, with AC-25's replay-as-repair as its mitigation.
   - An **absent** `handoffs` key SHALL compare equal to the empty array, so the
     first handoff from a source task is an ordinary append and two concurrent
     first handoffs still cannot lose one.
@@ -1061,7 +1101,7 @@ spec **reuses** it and does not restate, reinterpret, or extend it.
     That list is **exhaustive**. No other property of an entry makes it malformed: in
     particular an entry carrying **additional unknown fields** is well-formed, SHALL
     NOT be refused, and SHALL be preserved unchanged through the append. AC-17 defines
-    what this tool *writes*; refusing to read anything wider would let one future
+    what this action *writes*; refusing to read anything wider would let one future
     additive change brick every source task that had already been handed off. An empty
     array is likewise well-formed — it has no entries to be malformed — and behaves
     exactly as an absent key.
@@ -1073,7 +1113,7 @@ spec **reuses** it and does not restate, reinterpret, or extend it.
     drop the entry, error, or sort it arbitrarily — differ in whether provenance is
     silently lost.
 
-    On either shape the tool SHALL make **no write** to `handoffs` and SHALL surface
+    On either shape the action SHALL make **no write** to `handoffs` and SHALL surface
     the **AC-29 partial failure**: the full AC-33 object, `reverse_link_recorded:
     false`, and a `reverse_link_error` naming the corruption. It SHALL NOT retry, and
     SHALL NOT drop, coerce, normalise or re-sort the malformed data. Discarding an
@@ -1082,12 +1122,12 @@ spec **reuses** it and does not restate, reinterpret, or extend it.
     the delivery task id, which is the thing the caller must not lose.
 
     **This is a correction, not only an addition.** Revision 3 said the non-array case
-    SHALL be "refused with `ErrorCodeInternalError`", which contradicted AC-29 and this
+    SHALL be "refused with HTTP 500", which contradicted AC-29 and this
     criterion's own result contract. By D3b the `handoffs` write happens at step 3,
     which is reached only after the delivery task exists — on the created path and on
     both Found paths alike — so a hard error here would discard the task id in exactly
     the situation AC-29 was written to prevent. There is no reachable case in which
-    this write is attempted and no delivery task exists, so `ErrorCodeInternalError` was
+    this write is attempted and no delivery task exists, so HTTP 500 was
     unreachable-as-intended and wrong where it was reachable.
 
     A source task whose `handoffs` is corrupt therefore cannot hand off again until a
@@ -1097,14 +1137,12 @@ spec **reuses** it and does not restate, reinterpret, or extend it.
     - *stale value* — the stored `handoffs` no longer equals the value read. This
       is the retryable conflict: return the typed conflict error and retry from a
       fresh read.
-    - *source task missing* — no row with that id, whether deleted concurrently or
-      never present. This SHALL NOT be retried, SHALL NOT be reported as a
-      conflict, and SHALL surface as the AC-29 partial failure with
-      `reverse_link_recorded: false`, because the delivery task exists and no
-      retry can bring the source back.
+    - *source task missing* — no row with that id, deleted concurrently or never
+      present. SHALL NOT be retried, SHALL NOT be reported as a conflict, and SHALL
+      surface as the AC-29 partial failure with `reverse_link_recorded: false`: the
+      delivery task exists and no retry brings the source back.
     - *any other write failure* — SHALL NOT be retried and SHALL surface directly
-      as the AC-29 partial failure. Only the stale-value case is retryable: a
-      failing write is not made more likely to succeed by repeating it, and
+      as the AC-29 partial failure. Only the stale-value case is retryable;
       AC-25's replay-as-repair is the caller-side remedy.
     - *corrupt data* — the stored `handoffs` is a non-array or contains a malformed
       entry, per the clause above. SHALL NOT be retried, SHALL NOT be overwritten,
@@ -1119,29 +1157,29 @@ spec **reuses** it and does not restate, reinterpret, or extend it.
 
 - **AC-28.** The reverse-link list SHALL be ordered by `handed_off_at` ascending,
   with `task_id` ascending (lexicographic over UTF-8 code points) as the tiebreak
-  for equal timestamps. "Insertion order" is not an ordering and SHALL NOT be
-  relied on — and it genuinely diverges here rather than merely being untrustworthy:
+  for equal timestamps. "Insertion order" is not an ordering and SHALL NOT be relied
+  on — it genuinely diverges here rather than merely being untrustworthy, because
   AC-25's repair appends an entry carrying the **original** handoff's timestamp, so
   a repair written today can sort ahead of entries appended before it. The order
-  SHALL be re-established on every append, so the stored
-  array is sorted at rest and a reader needs no sort of its own. This sort SHALL only
-  ever run on a list that has passed AC-27's corruption check, so it never encounters
-  an entry missing the keys it sorts by; a list containing one is refused before any
-  ordering is computed, and SHALL NOT be partially sorted, filtered, or written back.
+  SHALL be re-established on every append, so the array is sorted at rest and a
+  reader needs no sort of its own. This sort SHALL only run on a list that has
+  passed AC-27's corruption check; a list containing a malformed entry is refused
+  before any ordering is computed, and SHALL NOT be partially sorted, filtered, or
+  written back.
 
 - **AC-29.** When the delivery task exists but the AC-17 reverse-link write fails
-  — whether after a `created` outcome or during AC-25's repair — the tool SHALL
+  — whether after a `created` outcome or during AC-25's repair — the action SHALL
   return a **non-error** result carrying the full AC-33 object with
   `reverse_link_recorded: false` and a `reverse_link_error` message. It SHALL NOT
   return an error result, and SHALL NOT delete the delivery task.
-  - Rationale: the delivery task genuinely exists, and its id is the single most
-    important thing the caller must not lose. An error result on this surface is
+  - Rationale: the delivery task exists, and its id is the single most important
+    thing the caller must not lose. An error result on this surface is
     `mcp.NewToolResultError(string)` — one string — so the id would have to be
     parsed out of prose, and AC-25's replay-as-repair depends on the caller
     holding it reliably. A structured field is machine-checkable in a way an error
     string is not, and `reverse_link_recorded: false` is a stronger claim than a
     generic failure because it names exactly what is broken.
-  - "Success" here means the tool completed and the delivery task exists. It does
+  - "Success" here means the action completed and the delivery task exists. It does
     **not** mean the handoff is fully recorded, and the object says so.
   - `reverse_link_error` SHALL instruct an identical replay when `external_id` was
     supplied, which AC-25 turns into a repair. When it was not, it SHALL say so
@@ -1156,9 +1194,10 @@ spec **reuses** it and does not restate, reinterpret, or extend it.
   successful call. The three Found and identity-lost outcomes are reachable only
   when `external_id` was supplied.
 
-- **AC-30.** When `external_id` is omitted, the call is not idempotent. The tool
-  description SHALL say so and SHALL tell the caller to derive a stable
-  `external_id` from the deciding artefact when a retry is possible. The tool
+- **AC-30.** When `external_id` is omitted, the call is not idempotent. The
+  command's `--external-id` flag help and the CEO instructions (AC-4) SHALL say
+  so and SHALL tell the caller to derive a stable `external_id` from the deciding
+  artefact when a retry is possible. The action
   SHALL NOT invent one from `title`, which changes freely between attempts, and
   SHALL NOT generate one itself — the external-id contract forbids
   system-generated identities.
@@ -1166,64 +1205,53 @@ spec **reuses** it and does not restate, reinterpret, or extend it.
 ### R7 — start semantics are reported, not assumed
 
 - **AC-31.** `start_agent` SHALL default to **false**, diverging from
-  `create_task_kandev`'s default of true. The tool description SHALL state the
-  divergence and its reason: a cross-workspace card starting immediately in a
+  `create_task_kandev`'s default of true. The `--start-agent` flag help and the
+  CEO instructions (AC-4) SHALL state the divergence and its reason: a cross-workspace card starting immediately in a
   workspace the caller does not run in is the riskiest available default.
 
 - **AC-32.** The response SHALL report `started`, which SHALL be `true` **if and
   only if** all three hold: `start_agent` was true; the outcome was `created`;
-  and the launch call the tool made for the delivery task **returned to the tool
+  and the launch call the action made for the delivery task **returned to the route
   without error**. That return is the linearization point, and it is the only one
   — `started` SHALL NOT be derived from the destination step's configuration, and
-  SHALL NOT be inferred from anything the tool did not itself observe.
+  SHALL NOT be inferred from anything the action did not itself observe.
   - **The launch SHALL be dispatched synchronously and its error observed.** The
-    tool SHALL call the session launcher directly, in-line at D3b step 5, bounded
-    by `constants.AgentLaunchTimeout` — the same bound the existing auto-start
-    path applies — and SHALL wait for its result before composing the response. It SHALL NOT reuse
-    `launchAutoStartTask`: that helper has no return value, runs `LaunchSession`
-    inside a goroutine and logs-and-discards the error, and returns silently when
-    the launcher is nil or the profile is empty. Reusing it would make this
-    criterion's condition trivially true, `start_error` unreachable, and a
-    launcher-less deployment report `started: true` with nothing launched.
-    Blocking is acceptable here precisely because `start_agent` defaults to false
-    (AC-31), so only a caller that explicitly asked to start a cross-workspace
-    card waits, and that caller is the one that wants the answer.
-  - `started: true` does **not** assert that the executor process is up, that a
-    session is ready, or that the first prompt was accepted. It asserts that the
-    launch call returned without error.
-  - When the launch is attempted and fails — including a nil launcher, and
-    including the timeout elapsing — `started` SHALL be `false` and the response
-    SHALL carry a `start_error` message naming which. The delivery task SHALL NOT
-    be deleted and the call SHALL NOT become an error: the card exists and is
-    startable from the board, which is the outcome that matters.
+    route SHALL call the session launcher directly, in-line at D3b step 5, bounded
+    by `constants.AgentLaunchTimeout` (the bound the existing auto-start path
+    applies), and SHALL wait for its result before composing the response. It SHALL
+    NOT reuse `launchAutoStartTask`: that helper has no return value, runs
+    `LaunchSession` in a goroutine, logs-and-discards the error, and returns
+    silently when the launcher is nil or the profile empty. Reusing it would make
+    this criterion trivially true, `start_error` unreachable, and a launcher-less
+    deployment report `started: true` with nothing launched. Blocking is acceptable
+    because `start_agent` defaults to false (AC-31).
+  - `started: true` does **not** assert the executor is up, a session is ready, or
+    the first prompt was accepted — only that the launch call returned no error.
+  - When the launch is attempted and fails — including a nil launcher and the
+    timeout elapsing — `started` SHALL be `false` and the response SHALL carry a
+    `start_error` naming which. The delivery task SHALL NOT be deleted and the call
+    SHALL NOT become an error: the card exists and is startable from the board,
+    which is the outcome that matters.
   - On either Found outcome, and on `created_identity_lost`, `started` SHALL be
-    `false` and no launch SHALL be attempted — AC-24a forbids it for the former,
-    and AC-24d for the latter. Neither case SHALL carry a `start_error`: nothing
-    was attempted, so there is no failure to report.
+    `false` and no launch SHALL be attempted (AC-24a and AC-24d respectively).
+    Neither SHALL carry a `start_error`: nothing was attempted.
   - **`reverse_link_recorded` is deliberately NOT a fourth condition, and the three
     above are exhaustive.** A `created` call with `start_agent: true` whose
-    reverse-link write failed — AC-27's stale-value retries exhausted, source task
-    deleted, or corrupt `handoffs`; AC-25b's case is Found-only and so never
-    co-occurs with a launch — SHALL
-    still dispatch the launch and SHALL report `started` on the same three
-    conditions as any other created call. The response then carries
-    `reverse_link_recorded: false` **and** `started: true` together, and that
-    combination is correct rather than contradictory. Reasons, stated because the
-    opposite reading is available to anyone who reads D3b's ordering as a
-    dependency: the delivery task's own **forward** provenance is already durable
-    (D4 writes `handoff_source` inside the create), so the launched agent's source
-    is findable from the delivery side regardless; the reverse link is a
-    source-side index whose repair path is an identical replay (AC-25); and
-    withholding the launch would contradict AC-29's governing philosophy that "the
-    card exists and is startable from the board, which is the outcome that
-    matters". Gating here would buy nothing D4 does not already guarantee while
-    turning a repairable index failure into a silent refusal to do the work the
-    caller asked for. Anyone who wants the launch gated on the reverse link is
-    proposing a **change to this criterion**, not an implementation detail of it.
+    reverse-link write failed — AC-27's retries exhausted, source task deleted, or
+    corrupt `handoffs`; AC-25b's case is Found-only and never co-occurs with a
+    launch — SHALL still dispatch the launch and report `started` on the same three
+    conditions. `reverse_link_recorded: false` **and** `started: true` together is
+    correct, not contradictory: the delivery task's **forward** provenance is
+    already durable (D4 writes `handoff_source` inside the create) and the reverse
+    link is a source-side index repaired by an identical replay (AC-25). Gating
+    would buy nothing D4 does not already guarantee, while turning a repairable
+    index failure into a silent refusal to do the work asked for. Wanting the
+    launch gated on the reverse link is a **change to this criterion**, not an
+    implementation detail of it.
 
 - **AC-32a.** `start_agent: false` **is** honoured at create time, including when
   the step AC-15a resolves carries an `auto_start_agent` `on_enter` action. Per
-  D9 this tool does not stamp `auto_start_on_create`, and without that positive
+  D9 this action does not stamp `auto_start_on_create`, and without that positive
   opt-in `task.created` does not evaluate the destination step's `on_enter`
   actions. A delivery task may still be launched later by the delivery workflow —
   for example when someone moves the card onto an auto-start step — but that is
@@ -1283,7 +1311,7 @@ spec **reuses** it and does not restate, reinterpret, or extend it.
 | Title over 60 runes | refuse, naming limit and actual length | `Validation` |
 | Target workspace equals source workspace | refuse, name `POST /runtime/tasks` | `Validation` |
 | Capability absent, or revoked since session start | refuse, no write | `Forbidden` |
-| No principal, or session/agent profile unloadable | refuse, no write | `Forbidden` |
+| No/invalid run token, or agent profile unloadable | refuse, no write | HTTP 401 (AC-9a) |
 | Target workspace not visible to the source task's owner | refuse, indistinguishable from missing | not-found |
 | `workflow_id` missing or in another workspace | refuse, one message for both, no owner disclosed | `Validation` |
 | Workflow has no resolvable step, or no steps | refuse | `Validation` |
@@ -1308,20 +1336,23 @@ spec **reuses** it and does not restate, reinterpret, or extend it.
 
 Each exclusion is a contract, not a silence.
 
-- **`priority`.** The originating card lists it as optional. Kandev **does** have
-  task priority — a `priority` column, a `defaultPriority` of `"medium"`,
-  validation against a four-value enum, a create-time write and an update-time
-  patch all exist. Revision 1 of this spec claimed otherwise and was wrong; the
-  exclusion stands on different grounds. It is excluded because the Office runtime
-  create path rejects it outright via `unsupportedField()`, so the two creation
-  paths would disagree; because prioritising a card is a decision belonging to the
-  workflow that will deliver it, not to the workspace handing it over; and because
-  no named consumer wants it. A follow-up that wants it should say who reads it.
+- **`priority`.** Kandev **does** have task priority (a column, a `"medium"`
+  default, a four-value enum, create and update paths). It is excluded because the
+  Office runtime create path rejects it via `unsupportedField()`, so the two
+  creation paths would disagree; because prioritising a card belongs to the
+  workflow that will deliver it; and because no named consumer wants it. A
+  follow-up that wants it should say who reads it.
+- **An MCP tool for this capability.** Excluded permanently, not deferred; see
+  *Mechanism revision*. Re-exposing it over MCP would reopen the
+  `office-context.md` contradiction AC-3 closes, so it needs a new decision.
+- **A dedicated settings toggle for the runtime capability.** `handoff_task` is
+  derived from `can_handoff_tasks` (AC-8), not separately editable. Runtime
+  capabilities have no operator surface today, and adding one for a single key
+  would create a second place to grant the same thing.
 - **Resolving the delivery binding.** Which workspace, workflow, repository and
-  profiles a discovery project delivers into. Today that lives in the Office
-  project record's prose. This spec takes those as arguments. A follow-up giving
-  the project record typed delivery fields would supply them; it does not change
-  this tool's contract.
+  profiles a discovery project delivers into; today that lives in the Office
+  project record's prose. This spec takes them as arguments. A follow-up giving the
+  project record typed delivery fields does not change this action's contract.
 - **`blocked_by`, `parent_id`, `workspace_mode`, `autopilot`, `repository_url`,
   `local_path`.** Cross-workspace dependencies are already rejected by the task
   service's edge validator, and a cross-workspace parent has no defined meaning.
@@ -1329,17 +1360,14 @@ Each exclusion is a contract, not a silence.
   second boundary crossing inside one call. `repository_id` (which must already
   exist in the target workspace) is the safe subset.
 - **Hardening the whole-blob metadata writers.** `Service.UpdateTaskMetadata` and
-  `Service.UpdateTask` (via `protectedTaskMetadataUpdate`) both read the task's
-  metadata and write the entire blob back with no version check. One of them that
-  reads the source task before AC-27's compare-and-set commits, and writes after
-  it, silently reverts the `handoffs` append. AC-27's guarantee is narrowed to
-  exclude this, and closing it properly means converting every metadata writer to
-  key-scoped writes — a change to a shared path used by unrelated features
-  (the GitHub issue store among them), which is a second feature wearing this
-  one's clothes. The mitigation that already exists is AC-25: an identical replay
-  with the same `external_id` repairs a missing reverse link, and AC-30 tells the
-  caller to supply one. A follow-up that wants the stronger guarantee should
-  convert those writers, not widen this tool.
+  `Service.UpdateTask` (via `protectedTaskMetadataUpdate`) read a task's metadata
+  and write the whole blob back with no version check, so one that reads the source
+  task before AC-27's compare-and-set and writes after it silently reverts the
+  append. AC-27's guarantee is narrowed to exclude this. Closing it properly means
+  converting every metadata writer to key-scoped writes — a shared path used by
+  unrelated features, which is a second feature wearing this one's clothes. The
+  existing mitigation is AC-25's replay repair, which AC-30 tells the caller to
+  make possible.
 - **Any change to the external-id mechanism.** Its four outcomes, its
   no-side-effect rule, its refusal to detect liveness, and its
   `(workspace_id, external_id)` uniqueness are consumed as-is. AC-25a works
@@ -1355,19 +1383,20 @@ Each exclusion is a contract, not a silence.
   delivery workflow owns the clock once the card lands.
 - **Predicting a later launch.** AC-32a is explicit that a delivery card may be
   started afterwards by the target workflow; observing or reporting that is not
-  this tool's job.
+  this action's job.
 
 ## Scenarios
 
 1. **The motivating case.** A CEO-role Office agent in workspace A reaches a GO
-   decision and calls `handoff_task_kandev` with workspace B, B's delivery
-   workflow, title, prompt, both profiles, and an `external_id` derived from the
-   discovery epic. B's board shows a startable card; A's task records the id it
-   created; both activity logs show a handoff, not a create. The response reports
+   decision and runs `$KANDEV_CLI kandev task handoff` naming workspace B, B's
+   delivery workflow, title, prompt, both profiles, and an `external_id` derived
+   from the discovery epic. B's board shows a startable card; A's task records the
+   id; both activity logs show a handoff, not a create. The response reports
    `outcome: created`, `started: false`, `reverse_link_recorded: true`.
-2. **A worker tries the same call.** A `worker`-role agent never sees the tool;
-   if it sends the raw action anyway, AC-9 refuses it with `Forbidden` and no
-   write, and the message does not reveal whether workspace B exists.
+2. **A worker tries the same call.** A `worker`-role agent's instructions never
+   mention the command; if it invokes the CLI anyway, or posts to the route
+   directly, AC-9 refuses with HTTP 403 and no write, without revealing whether
+   workspace B exists.
 3. **Executor omitted.** Refused naming `executor_profile_id` (AC-13), rather
    than creating a card that inherits from a workspace the caller does not run
    in.
@@ -1389,23 +1418,23 @@ Each exclusion is a contract, not a silence.
     replay-as-repair the caller was told to use.
 
 13. **The delivery card's forward record was clobbered.** An unrelated whole-blob
-    metadata write (the residual recorded under **Out of scope**) left
-    `handoff_source` present with a `source_task_id` that still matches but a
-    `handed_off_at` that no longer parses. The replay is not refused — the task is
-    this source's own — but no reverse-link entry is written, `handed_off_at` comes
-    back empty, and `reverse_link_error` names the unreadable timestamp (AC-25b).
-    Writing the entry anyway would have made the source task's `handoffs` corrupt
-    by AC-27's definition and blocked every future handoff from that card.
+    metadata write (the **Out of scope** residual) left `handoff_source` present
+    with a matching `source_task_id` but a `handed_off_at` that no longer parses.
+    The replay is not refused — the task is this source's own — but no reverse-link
+    entry is written, `handed_off_at` comes back empty, and `reverse_link_error`
+    names the unreadable timestamp (AC-25b). Writing the entry anyway would have
+    made `handoffs` corrupt by AC-27's definition and blocked every future handoff
+    from that card.
 5. **Retry while the first create is still running.** The replay observes
-   `outcome: found_unsettled`, `creation_complete: false`. The tool returns the
+   `outcome: found_unsettled`, `creation_complete: false`. The action returns the
    task id and says another create may still be finishing it. It does not release
    the identity and does not create a second task (AC-24b).
-6. **Same workspace by mistake.** Refused, pointing at `POST /runtime/tasks`
+6. **Same workspace by mistake.** Refused, pointing at `kandev task create`
    (AC-22) — one obvious way to do each thing — and refused *before* the
    permission check, so the message describes the real mistake.
 7. **The landing step auto-starts.** `start_agent: false` was requested and the
    resolved start step carries an `auto_start_agent` `on_enter` action. No launch
-   happens: this tool does not stamp `auto_start_on_create` (D9), so the response
+   happens: this action does not stamp `auto_start_on_create` (D9), so the response
    reports `started: false` truthfully (AC-32a). If someone later moves the card
    onto an auto-start step, the delivery workflow starts it; that is outside this
    response's horizon.
@@ -1435,116 +1464,95 @@ Each exclusion is a contract, not a silence.
 
 ## Verification notes
 
-- The Office prompt/inventory equality test (`sysprompt_sync_test.go:243`) is the
-  highest-risk regression: it is set equality, so any unconditional mention of the
-  new tool in `office-context.md` breaks it. AC-3 keeps it passing.
-- `TestOfficeContext_ContainsOnlyOfficeCapabilities` (`sysprompt_test.go:248`)
-  asserts `create_task_kandev` never appears in the Office prompt.
-  `handoff_task_kandev` does not contain that substring, so it is unaffected and
-  must not be relaxed.
-- AC-9 must be tested by sending the action directly, not by asserting the tool
-  is unregistered. Checking registration does not test the boundary.
-- AC-26a and AC-27 need real concurrent calls, not two sequential ones. AC-27's
-  key-scoping clause needs a concurrent write to a *different* metadata key on the
-  same source task, which is the case a handoff-versus-handoff test will miss.
-- AC-12 needs both a non-existent workflow id and a real workflow in a third
+Each bullet names a test obligation and the weaker test it must not become.
+
+- **The route, not only the command.** Every criterion SHALL be exercised against
+  `POST /runtime/handoffs` with a signed run token. AC-5c makes CLI-only
+  enforcement a non-boundary, so a test that drives `kandev task handoff` proves
+  flag wiring and nothing about the gate.
+- **The MCP surface is gone.** `TestSyspromptToolNames_ExactlyMatchMCPOfficeMode`
+  and `TestOfficeContext_ContainsOnlyOfficeCapabilities` SHALL pass with no edit and
+  no new assertion; a diff touching either signals an incomplete withdrawal.
+- **AC-8 capability grant** needs three agents: a granted CEO, a non-CEO role, and
+  a CEO whose per-agent override clears `can_handoff_tasks`. The third is what
+  distinguishes a permission-derived grant from a bare role check.
+- **AC-9 / AC-9a** need a granted call, an ungranted call (403), and a call with
+  no/invalid token (401) — asserting no write in both refusals.
+- **AC-19a** asserts the entry's identity fields against the token's own
+  `RunID`/`SessionID`/`AgentID`, plus a token minted with no run id, which must
+  not fail the call (D6).
+- **AC-26a and AC-27** need real concurrent calls, not two sequential ones. AC-27
+  needs **five**: two concurrent handoffs from one source task (both appear); a
+  concurrent write to a *different* metadata key (no spurious conflict, and the
+  write touches only `handoffs`); a source task deleted between read and write
+  (AC-29 partial failure, not a retry loop); a `handoffs` value that is not an
+  array; and an array holding a malformed entry. The last two assert **both** the
+  AC-29 partial failure **and** byte-identical stored metadata — a response-only
+  test passes against an implementation that silently drops the bad entry.
+- **AC-12** needs a non-existent workflow id and a real workflow in a third
   workspace, asserting the two responses are identical.
-- AC-32a needs a target workflow whose start step carries an `auto_start_agent`
-  `on_enter` action, asserting no session is created and `started` is false.
-  Asserting only the response field would pass against a stamped
-  `auto_start_on_create` too.
-- AC-23a must assert the stored origin, the empty identifier and the unchanged
-  target-workspace task sequence. Asserting `IsFromOffice` alone passes against
-  the office-triggering origin the criterion forbids (D2a), so that assertion on
-  its own is not a test of this criterion.
-- AC-24d needs a test that creates with an `external_id` and then **replays**,
-  asserting `found_settled`. A test that only checks the first call's response
-  passes identically whether or not settlement ran, which is exactly how this
-  defect stayed invisible.
-- AC-27 needs **five** separate tests, because one covers only the easy case: two
-  concurrent handoffs from the same source task (both appear); a concurrent write
-  to a *different* metadata key (no spurious conflict, and the write touches only
-  `handoffs`); a source task deleted between the read and the write (AC-29
-  partial failure, not a retry loop); a `handoffs` value that is not an array; and a
-  `handoffs` array containing a malformed entry. The last two must assert **both**
-  halves — the AC-29 partial failure is returned **and** the stored metadata is
-  byte-identical afterwards. A test that only checks the response would pass against
-  an implementation that dropped the unreadable entry, which is the specific failure
-  the clause forbids.
-- AC-7a needs a test that adds the key and asserts
-  `TestPermissionMetadataMatchesKnownPermissionKeys` still passes — that existing test
-  *is* the check, so the work is to keep it green, and a change that updates only one
-  of the two lists must be seen to fail it. AC-7b's `Label` and `Description` are
-  asserted as literals; there is no locale assertion to write, because there is no
-  locale key.
-- AC-14b needs three agent-profile cases — global (empty `WorkspaceID`, accepted),
-  target-scoped (accepted), and **source-scoped** (refused) — plus one executor-profile
-  case proving a profile is accepted regardless of any workspace, since it has no
-  workspace field. The source-scoped refusal is the one that matters: an implementation
-  that validates existence only passes the other three.
-- AC-19a's run id needs a source task carrying **two** claimed runs from different
-  sessions, asserting the entry records the caller's run id when the caller's run is
-  the newest and the **empty string** when it is not. Asserting only the happy path
-  passes against an implementation that never compares `SessionID` at all.
-- AC-32 must assert `start_error` is actually reachable — a nil launcher, or a
-  launcher returning an error, with `started: false`. A test that only exercises
-  the success path would pass against the fire-and-forget helper this criterion
-  forbids.
-- AC-32's exhaustion clause needs its own test: a `created` call with
-  `start_agent: true` whose reverse-link write fails, asserting a session **was**
-  launched and the response carries `reverse_link_recorded: false` together with
-  `started: true`. This is the one assertion that fails against an implementation
-  which read D3b's ordering as a dependency and added a fourth gate; every other
-  AC-32 test passes against both.
-- AC-25's timestamp rule needs a replay whose delivery task carries a **known,
-  distinctly older** `handed_off_at`, asserting the repaired `handoffs` entry and
-  the AC-33 response both carry that stored value and not the replay's clock. A
-  test using a freshly-created task passes against an implementation that stamps
-  `time.Now()`, because the two values are indistinguishable within the test's
-  runtime — the stored value must be old enough that substituting the clock is
-  visible.
-- AC-25b needs three cases — `handed_off_at` absent, present but not a string, and
-  present but unparseable — each asserting the AC-29 partial failure, an **empty**
-  `handed_off_at` in the response, and that the source task's `handoffs` is
-  byte-identical afterwards. It also needs two precedence cases: a found task whose
-  `source_task_id` mismatches **and** whose timestamp is unreadable must produce
-  AC-25a's `Validation` refusal, not this partial failure; and a found task whose
-  timestamp is unreadable but whose reverse-link entry already exists must report
-  `reverse_link_recorded: true` with no `reverse_link_error` and an empty
-  `handed_off_at`. An implementation that checks the timestamp before the presence
-  test passes the first four cases and fails that last one.
-- AC-33's Found-path source table needs a replay against a delivery task that has
-  been **moved** to a different workflow and step since creation, asserting the
-  response reports the stored/current values rather than the request's. Passing the
-  same arguments the create used cannot detect this — the two sources are equal
-  there, which is exactly why the divergence went unstated.
-- AC-28 needs an out-of-order case: append a handoff, then repair an older one, and
-  assert the stored array is sorted by `handed_off_at` with the repair **not** last.
-- AC-15c needs a workflow with two steps sharing a `position`, asserting the same
-  step is chosen across repeated calls. Storing them in the other order and
-  re-running is what catches a slice-order implementation.
+- **AC-32a** needs a target workflow whose start step carries an
+  `auto_start_agent` `on_enter` action, asserting no session is created and
+  `started` is false. Asserting only the response field passes against a stamped
+  `auto_start_on_create`.
+- **AC-23a** asserts the stored origin, the empty identifier, and the unchanged
+  target-workspace task sequence. `IsFromOffice` alone passes against the
+  office-triggering origin D2a forbids.
+- **AC-24d** needs a create with an `external_id` and then a **replay**, asserting
+  `found_settled`. Checking only the first call passes whether or not settlement
+  ran, which is how this defect stayed invisible.
+- **AC-7a** is kept green by the existing
+  `TestPermissionMetadataMatchesKnownPermissionKeys`; a change updating only one
+  of the two lists must be seen to fail it. AC-7b's strings are asserted as
+  literals, with no locale assertion, because no locale key exists.
+- **AC-14b** needs three agent-profile cases — global (empty `WorkspaceID`),
+  target-scoped, and **source-scoped** (refused) — plus one executor-profile case.
+  The source-scoped refusal is the one an existence-only implementation fails.
+- **AC-32** must show `start_error` is reachable (nil launcher, or a launcher
+  returning an error, with `started: false`), and its exhaustion clause needs a
+  `created` call with `start_agent: true` whose reverse-link write fails,
+  asserting a session **was** launched alongside `reverse_link_recorded: false`.
+  That last one is what fails against an implementation reading D3b's ordering as
+  a dependency.
+- **AC-25** needs a replay whose delivery task carries a known, distinctly **older**
+  `handed_off_at`, asserting the repaired entry and the AC-33 response both carry
+  the stored value. A freshly-created task cannot distinguish it from `time.Now()`.
+- **AC-25b** needs `handed_off_at` absent, non-string, and unparseable — each
+  asserting the AC-29 partial failure, an empty `handed_off_at`, and byte-identical
+  stored `handoffs` — plus two precedence cases: a `source_task_id` mismatch *and*
+  unreadable timestamp must give AC-25a's refusal; an unreadable timestamp whose
+  reverse-link entry already exists must report `reverse_link_recorded: true` with
+  no error. An implementation checking the timestamp first fails only that last one.
+- **AC-33** needs a replay against a delivery task **moved** to a different
+  workflow and step since creation, asserting stored/current values rather than the
+  request's. Replaying the create's own arguments cannot detect this.
+- **AC-28** needs an out-of-order case: append a handoff, then repair an older one,
+  and assert the array is sorted by `handed_off_at` with the repair **not** last.
+- **AC-15c** needs a workflow with two steps sharing a `position`, asserting the
+  same step across repeated calls, and again with the storage order reversed.
 - **This file exceeds the linter's 32,768-byte `legacy` limit and is registered in
   `docs/specs/spec-lint-exceptions.tsv`.** That ceiling must equal the file's size
-  **exactly**: a file smaller than its ceiling is a `stale-size-exception`
-  violation, and a raised ceiling is a `legacy-size-ratchet` violation. Any edit
-  to this file therefore requires updating the TSV to the new size in the same
-  commit, and the size may only go down.
+  **exactly**, and may only go down. Any edit requires updating the TSV in the same
+  commit.
 
 ### User-visible surfaces touched
 
 - **Office activity log** — two new action verbs (AC-19). Rendered by the existing
   activity surface on the source side; AC-19b records that the target-side entry
   has no reader.
+- **Agent CLI surface** — a new `kandev task handoff` subcommand, visible to Office
+  agents through their role instructions (AC-4) rather than a tool registry. It is
+  agent-facing: there is no web rendering of it.
 - **Agent permission settings** — one new permission key appears in the Office
   agent permission editor, which requires **both** `AllPermissionKeys()` and
   `allPermissionMeta()` to be updated at the same index (AC-7a). Its `Label` and
   `Description` are **English string literals in Go** (AC-7b), delivered by the
   backend settings endpoint. **No locale work is required**: no permission key
   exists in `apps/web/src/locales/**` today, so there is nothing to translate and no
-  `i18n:check` obligation. Revision 3 said this needed "a translated label in all
-  five locales"; that was false and is corrected here.
+  `i18n:check` obligation.
 - **Target workspace board** — a new card appears. No new rendering.
 
-No new page, route, or interaction flow. The Playwright surface is limited to the
+No new web page or interaction flow. The one new HTTP route is agent-facing and
+token-authenticated, not a UI route. The Playwright surface is limited to the
 permission toggle's presence and label; an end-to-end handoff needs two workspaces
 and a real executor, which the mock harness does not provide.
