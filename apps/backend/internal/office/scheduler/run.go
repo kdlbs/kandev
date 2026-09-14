@@ -15,10 +15,15 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/pause"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routing"
 	"github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/office/shared"
+	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
+	"github.com/kandev/kandev/internal/workflow/engine"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 )
 
 // ErrRoutingNotSupported is returned by TaskStarter.StartTaskWithRoute
@@ -87,9 +92,17 @@ const (
 // Run.Payload column so the agent runtime can pick the right
 // system prompt template based on the reason.
 type RunContext struct {
-	Reason                string   `json:"reason"`
-	TaskID                string   `json:"task_id"`
-	WorkspaceID           string   `json:"workspace_id,omitempty"`
+	Reason      string `json:"reason"`
+	TaskID      string `json:"task_id"`
+	WorkspaceID string `json:"workspace_id,omitempty"`
+	// WorkflowStepID is the parent's workflow step at wake time. An
+	// engine-routed producer's request always carries it (runs/service's
+	// runPayload copies it from the typed field), and
+	// evaluateRunStaleness reads it to cancel a queued run whose parent
+	// has since moved to a different step. Left empty, that guard never
+	// applies — so cascade must set this whenever it can be resolved, or
+	// the two producers' wakes for the same wave are not equivalent.
+	WorkflowStepID        string   `json:"workflow_step_id,omitempty"`
 	ActorID               string   `json:"actor_id,omitempty"`
 	ActorType             string   `json:"actor_type,omitempty"` // "user" | "agent"
 	CommentID             string   `json:"comment_id,omitempty"`
@@ -107,17 +120,31 @@ type RunContext struct {
 	// task_changes_requested has the context inline.
 	DecisionComment string `json:"decision_comment,omitempty"`
 
-	// IdempotencyKey, when non-empty, overrides the default
-	// "{reason}:{taskID}:{agentID}" key QueueRunCtx mints. The default
-	// key is permanently unique per (reason, task, agent) — fine for
-	// reasons that fire at most once per task, wrong for a reason that
-	// can legitimately recur (e.g. task_children_completed across
-	// repeated delegation waves). Callers that recur build their own
-	// key that changes with the thing that makes each occurrence
+	// IdempotencyKey is the dedup identity QueueRunCtx passes through
+	// verbatim. Empty means no dedup — the run enqueues keyless — not
+	// "derive one for me": QueueRunCtx no longer synthesises a
+	// "{reason}:{taskID}:{agentID}" default, which was permanently unique
+	// per (reason, task, agent) and silently swallowed every later
+	// legitimate occurrence for the same triple. Callers that want dedup
+	// build a key that changes with the thing that makes each occurrence
 	// distinct. Excluded from the JSON payload: it must never change
 	// encodeRunContext's output shape, which CoalesceRun compares for
 	// equality and taskIDFromPayload parses.
 	IdempotencyKey string `json:"-"`
+
+	// WaveKey and WaveString carry a completion-wave identity onto the
+	// persisted run (models.Run.WakeWaveKey / WakeWaveString), not into
+	// the JSON payload: they gate admission via idx_run_wake_wave and
+	// coalescing, not agent-facing content. Empty means "no wave
+	// identity" — the ordinary idempotency-key path applies instead.
+	WaveKey    string `json:"-"`
+	WaveString string `json:"-"`
+
+	// ExtraPayload, when non-empty, is merged onto the JSON-encoded
+	// payload by encodeRunContext (workflow-authored keys win over any
+	// struct field of the same name). Left nil, encodeRunContext's
+	// output is byte-identical to a plain struct marshal.
+	ExtraPayload map[string]any `json:"-"`
 }
 
 // Run status constants.
@@ -175,6 +202,32 @@ type SchedulerService struct {
 	kandevBasePathFn        func() string
 	agentTypeResolver       func(profileID string) string
 	projectSkillDirResolver func(agentTypeID string) string
+	workflowStepGetter      WorkflowStepGetter
+	participantStore        engine.ParticipantStore
+	pauseGate               shared.PauseGate
+}
+
+// WorkflowStepGetter resolves a workflow step by ID. Implemented by
+// workflow/service.Service.GetStep; wired via SetWorkflowStepGetter so the
+// cascade producer can resolve the parent's current step without an
+// engine dependency, for payload parity with the engine-routed producers.
+type WorkflowStepGetter interface {
+	GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error)
+}
+
+// SetWorkflowStepGetter wires the workflow step lookup used for payload
+// parity. Left nil, cascade wakes queue without a merged action payload.
+func (ss *SchedulerService) SetWorkflowStepGetter(g WorkflowStepGetter) {
+	ss.workflowStepGetter = g
+}
+
+// SetParticipantStore wires the participant seat resolution used for
+// queue_run_for_each_participant payload parity — the same
+// engine.ParticipantStore instance the workflow engine itself uses
+// (workflow/adapters.ParticipantAdapter in production). Left nil, cascade
+// never attaches a for-each-participant action's payload.
+func (ss *SchedulerService) SetParticipantStore(store engine.ParticipantStore) {
+	ss.participantStore = store
 }
 
 // NewSchedulerService creates a new SchedulerService.
@@ -242,38 +295,68 @@ func (ss *SchedulerService) SetProjectSkillDirResolver(fn func(agentTypeID strin
 	ss.projectSkillDirResolver = fn
 }
 
+// SetPauseGate wires the workspace-pause read used by QueueRun to
+// enforce the operator kill switch. Optional — when nil the gate is
+// not enforced.
+func (ss *SchedulerService) SetPauseGate(g shared.PauseGate) {
+	ss.pauseGate = g
+}
+
 // QueueRun enqueues a run request for an agent instance.
 // It checks agent status, idempotency, and attempts coalescing before inserting.
 // Implements shared.RunQueuer.
 func (ss *SchedulerService) QueueRun(
 	ctx context.Context,
 	agentInstanceID, reason, payload, idempotencyKey string,
-) error {
-	if err := ss.guardAgentStatus(ctx, agentInstanceID); err != nil {
-		return err
+) (runsservice.QueueOutcome, error) {
+	return ss.queueRun(ctx, agentInstanceID, reason, payload, idempotencyKey, "", "")
+}
+
+// queueRun is QueueRun plus an optional completion-wave identity. A
+// non-empty waveKey (a) skips CoalesceRun — a wave-carrying request is
+// never coalesced in and a wave-carrying queued run is never coalesced
+// into — and (b) classifies CreateRun's idx_run_wake_wave violation as an
+// already-delivered wake rather than an error: this call site inserts
+// directly (not through runs/service), so ReportInsertResult's own
+// idx_run_idempotency-only classification doesn't cover it. A concurrent
+// duplicate of this same request can just as well lose the race on
+// idx_run_idempotency instead of idx_run_wake_wave — both keys identify the
+// identical operation for the identical row, so either violation means the
+// wake is already recorded and neither is an error, mirroring
+// runs/service.QueueRun's own two-way classification.
+func (ss *SchedulerService) queueRun(
+	ctx context.Context,
+	agentInstanceID, reason, payload, idempotencyKey, waveKey, waveString string,
+) (runsservice.QueueOutcome, error) {
+	agent, err := ss.guardAgentStatus(ctx, agentInstanceID)
+	if err != nil {
+		return runsservice.QueueOutcomeNone, err
+	}
+	if err := ss.checkPauseGate(ctx, agent); err != nil {
+		return runsservice.QueueOutcomeNone, err
 	}
 
 	if idempotencyKey != "" {
 		dup, err := ss.repo.CheckIdempotencyKey(ctx, idempotencyKey, IdempotencyWindowHours)
 		if err != nil {
-			return fmt.Errorf("idempotency check: %w", err)
+			return runsservice.QueueOutcomeNone, fmt.Errorf("idempotency check: %w", err)
 		}
 		if dup {
-			ss.logger.Debug("run skipped (idempotent)",
-				zap.String("key", idempotencyKey))
-			return nil
+			return runsservice.ReportWindowedDedup(runsservice.QueueSourceRuns, reason, idempotencyKey), nil
 		}
 	}
 
-	coalesced, err := ss.repo.CoalesceRun(ctx, agentInstanceID, reason, CoalesceWindowSeconds, payload)
-	if err != nil {
-		return fmt.Errorf("coalesce check: %w", err)
-	}
-	if coalesced {
-		ss.logger.Debug("run coalesced",
-			zap.String("agent", agentInstanceID),
-			zap.String("reason", reason))
-		return nil
+	if waveKey == "" {
+		coalesced, err := ss.repo.CoalesceRun(ctx, agentInstanceID, reason, CoalesceWindowSeconds, payload)
+		if err != nil {
+			return runsservice.QueueOutcomeNone, fmt.Errorf("coalesce check: %w", err)
+		}
+		if coalesced {
+			ss.logger.Debug("run coalesced",
+				zap.String("agent", agentInstanceID),
+				zap.String("reason", reason))
+			return runsservice.QueueOutcomeCoalesced, nil
+		}
 	}
 
 	var idemKeyPtr *string
@@ -288,61 +371,152 @@ func (ss *SchedulerService) QueueRun(
 		Status:         RunStatusQueued,
 		CoalescedCount: 1,
 		IdempotencyKey: idemKeyPtr,
+		WakeWaveKey:    waveKey,
+		WakeWaveString: waveString,
 		RequestedAt:    time.Now().UTC(),
 	}
-	if err := ss.repo.CreateRun(ctx, req); err != nil {
-		return fmt.Errorf("enqueue run: %w", err)
+	insertErr := ss.repo.CreateRun(ctx, req)
+	if waveKey != "" && runssqlite.IsWakeWaveUniqueViolation(insertErr) {
+		runsservice.ParentWakeDedupedTotal.Add(1)
+		ss.logger.Debug("run skipped (wave already woken)",
+			zap.String("wave_key", waveKey))
+		return runsservice.QueueOutcomeDeduped, nil
+	}
+	outcome, err := runsservice.ReportInsertResult(runsservice.QueueSourceRuns, reason, idempotencyKey, agentInstanceID, insertErr)
+	if err != nil {
+		return runsservice.QueueOutcomeNone, fmt.Errorf("enqueue run: %w", err)
+	}
+	if outcome == runsservice.QueueOutcomeDeduped {
+		return outcome, nil
 	}
 
 	ss.logger.Info("run queued",
 		zap.String("id", req.ID),
 		zap.String("agent", agentInstanceID),
 		zap.String("reason", reason))
-	return nil
+	return runsservice.QueueOutcomeQueued, nil
 }
 
-// QueueRunCtx is the typed variant of QueueRun that takes a
-// structured RunContext. The context is JSON-encoded into the
-// payload column so the agent runtime can deserialise it. The
-// idempotency key is c.IdempotencyKey when the caller set one;
-// otherwise it defaults to "{reason}:{taskID}:{agentID}" so the same
-// agent never gets two runs for the same task+reason within the
-// idempotency window.
+// QueueRunCtx is the typed variant of QueueRun that takes a structured
+// RunContext. The context is JSON-encoded into the payload column so the
+// agent runtime can deserialise it. The idempotency key is c.IdempotencyKey
+// verbatim — an empty key enqueues with no dedup identity rather than
+// falling back to a "{reason}:{taskID}:{agentID}" default that would be
+// permanently unique per (reason, task, agent) and silently swallow every
+// later legitimate occurrence for the same triple.
 func (ss *SchedulerService) QueueRunCtx(
 	ctx context.Context, agentInstanceID string, c RunContext,
-) error {
+) (runsservice.QueueOutcome, error) {
 	payload, err := encodeRunContext(c)
 	if err != nil {
-		return fmt.Errorf("encode run context: %w", err)
+		return runsservice.QueueOutcomeNone, fmt.Errorf("encode run context: %w", err)
 	}
-	idempotencyKey := c.IdempotencyKey
-	if idempotencyKey == "" {
-		idempotencyKey = fmt.Sprintf("%s:%s:%s", c.Reason, c.TaskID, agentInstanceID)
-	}
-	return ss.QueueRun(ctx, agentInstanceID, c.Reason, payload, idempotencyKey)
+	return ss.queueRun(ctx, agentInstanceID, c.Reason, payload, c.IdempotencyKey, c.WaveKey, c.WaveString)
 }
 
+// encodeRunContext JSON-encodes c. When c.ExtraPayload is empty the output
+// is a plain struct marshal, byte-identical to before ExtraPayload existed.
+// Otherwise ExtraPayload's keys are overlaid onto the encoded object, then
+// c's own envelope fields are re-applied on top — workflow-authored content
+// keys win, but a workflow-authored payload can never redirect the run's
+// identity. This mirrors runs/service.runPayload's precedence for task_id
+// and workflow_step_id: P1 never goes through that function (it inserts via
+// ss.repo.CreateRun directly), so encodeRunContext is the only place that
+// guarantee can be enforced for the cascade path. Without it, a queue_run
+// action's payload.task_id would silently override task.ParentID and
+// misdirect the wake to a foreign task — task_id is what
+// SchedulerIntegration.extractTaskID reads to check out and budget the run.
+//
+// Unlike runPayload, this does not re-assert agent_profile_id: RunContext
+// carries no typed recipient field to re-assert from (the run's actual
+// AgentProfileID column is set separately, from queueRun's own
+// agentInstanceID parameter, never from this payload). A workflow-authored
+// ExtraPayload["agent_profile_id"] therefore passes through unfiltered —
+// currently inert, since no reader in this codebase consults
+// payload["agent_profile_id"] for dispatch or routing (both use the DB
+// column instead). See
+// TestQueueRunCtx_ExtraPayloadAgentProfileID_PassesThroughUnfiltered, which
+// pins this as a known non-guarantee rather than an oversight.
 func encodeRunContext(c RunContext) (string, error) {
 	b, err := json.Marshal(c)
 	if err != nil {
 		return "", err
 	}
-	return string(b), nil
+	if len(c.ExtraPayload) == 0 {
+		return string(b), nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		return "", err
+	}
+	for k, v := range c.ExtraPayload {
+		m[k] = v
+	}
+	m["task_id"] = c.TaskID
+	m["reason"] = c.Reason
+	if c.WorkspaceID != "" {
+		m["workspace_id"] = c.WorkspaceID
+	} else {
+		delete(m, "workspace_id")
+	}
+	if c.ChildTaskID != "" {
+		m["child_task_id"] = c.ChildTaskID
+	} else {
+		delete(m, "child_task_id")
+	}
+	if c.WorkflowStepID != "" {
+		m["workflow_step_id"] = c.WorkflowStepID
+	} else {
+		delete(m, "workflow_step_id")
+	}
+	merged, err := json.Marshal(m)
+	if err != nil {
+		return "", err
+	}
+	return string(merged), nil
 }
 
-// guardAgentStatus returns an error if the agent is paused or stopped.
-func (ss *SchedulerService) guardAgentStatus(ctx context.Context, agentInstanceID string) error {
+// guardAgentStatus returns an error if the agent is paused or stopped,
+// and otherwise the resolved agent — checkPauseGate reuses this fetch
+// instead of looking the agent up a second time.
+func (ss *SchedulerService) guardAgentStatus(ctx context.Context, agentInstanceID string) (*models.AgentInstance, error) {
 	agent, err := ss.svc.GetAgentFromConfig(ctx, agentInstanceID)
 	if err != nil {
-		return fmt.Errorf("get agent instance: %w", err)
+		return nil, fmt.Errorf("get agent instance: %w", err)
 	}
 	switch agent.Status {
 	case models.AgentStatusPaused:
-		return fmt.Errorf("agent %s is paused", agentInstanceID)
+		return nil, fmt.Errorf("agent %s is paused", agentInstanceID)
 	case models.AgentStatusStopped:
-		return fmt.Errorf("agent %s is stopped", agentInstanceID)
+		return nil, fmt.Errorf("agent %s is stopped", agentInstanceID)
 	case models.AgentStatusPendingApproval:
-		return fmt.Errorf("agent %s is pending approval", agentInstanceID)
+		return nil, fmt.Errorf("agent %s is pending approval", agentInstanceID)
+	}
+	return agent, nil
+}
+
+// checkPauseGate blocks queuing when agent's workspace is paused (the
+// operator kill switch). Takes the already-resolved agent — usually
+// guardAgentStatus's return value — rather than re-resolving it, so the
+// two checks can never see two different snapshots of the agent's
+// workspace. Fails closed on a gate-read error
+// (shared.ErrPauseGateUnavailable) — this write hasn't happened yet, so
+// failing the call is the whole retry story; the caller's own retry (or
+// the next event) tries again.
+func (ss *SchedulerService) checkPauseGate(ctx context.Context, agent *models.AgentInstance) error {
+	if ss.pauseGate == nil {
+		return nil
+	}
+	active, err := ss.pauseGate.PauseState(ctx, agent.WorkspaceID)
+	if err != nil {
+		pause.RecordGateError("scheduler_queue_run")
+		ss.logger.Warn("queue run: pause gate read failed",
+			zap.String("agent", agent.ID), zap.Error(err))
+		return shared.ErrPauseGateUnavailable
+	}
+	if active != nil {
+		pause.RecordBlocked("scheduler_queue_run")
+		return shared.ErrWorkspacePaused
 	}
 	return nil
 }

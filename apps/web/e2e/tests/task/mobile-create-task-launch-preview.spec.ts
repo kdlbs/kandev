@@ -1,6 +1,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
+import { expectTaskDescription } from "../../pages/task-description-editor";
 
 useRegularMode();
 
@@ -106,7 +107,7 @@ test.describe("mobile task-create launch prompt preview", () => {
       );
 
       await toggle.tap();
-      await expect(dialog.getByTestId("task-description-input")).toHaveValue(description);
+      await expectTaskDescription(dialog.getByTestId("task-description-input"), description);
       await expect(toggle).toHaveAttribute("aria-pressed", "false");
       const pageWidth = await testPage.evaluate(() => ({
         scroll: document.documentElement.scrollWidth,

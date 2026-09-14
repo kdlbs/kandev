@@ -49,6 +49,32 @@ describe("ChangeRequestTaskStatusSummary layout", () => {
     expect(label.className).toContain("[overflow-wrap:anywhere]");
   });
 
+  it("keeps same-kind rows addressable when a summary supplies row ids", () => {
+    render(
+      <ChangeRequestTaskStatusSummary
+        summaries={[
+          {
+            number: 9,
+            title: "Mixed CI state",
+            rows: [
+              { kind: "ci", status: "failed", tone: "danger" },
+              {
+                kind: "ci",
+                id: "workflow-attention",
+                status: "workflow_unavailable",
+                tone: "muted",
+              },
+            ],
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getAllByTestId("pr-task-status-ci").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("pr-task-status-ci-workflow-attention")).toBeTruthy();
+    expect(screen.getByTestId("pr-task-status-ci-workflow-attention-value")).toBeTruthy();
+  });
+
   it("renders the author below the title and omits a blank identity", () => {
     const { rerender } = render(
       <ChangeRequestTaskStatusSummary

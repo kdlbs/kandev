@@ -293,7 +293,7 @@ func TestHandleCreateTask_AssociatesExistingRemoteContribution(t *testing.T) {
 	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
 	h.SetRemoteContributionService(remote)
 
-	resp, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
 		"workspace_id":     workspaces[0].ID,
 		"workflow_id":      workflows[0].ID,
 		"title":            "Remote contribution",
@@ -369,7 +369,7 @@ func TestHandleCreateTask_RollsBackWhenRemoteContributionAssociationFails(t *tes
 	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
 	h.SetRemoteContributionService(remote)
 
-	resp, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
 		"workspace_id":     workspaces[0].ID,
 		"workflow_id":      workflows[0].ID,
 		"title":            "Rollback contribution",
@@ -457,7 +457,7 @@ func TestHandleCreateTask_RejectsOverlongTitle(t *testing.T) {
 	}))
 
 	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
-	resp, err := h.handleCreateTask(ctx, makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
+	resp, err := h.handleCreateTask(mcpTestKanbanContext(ctx, workspaces[0].ID, source.ID, "source-title-session"), makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
 		"source_task_id": source.ID,
 		"workspace_id":   workspaces[0].ID,
 		"workflow_id":    workflows[0].ID,
@@ -582,7 +582,7 @@ func TestHandleCreateTask_RejectsAssigneeAgentProfileID(t *testing.T) {
 		"start_agent":               false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 }
@@ -896,7 +896,7 @@ func TestHandleCreateTask_TopLevel_MissingWorkspaceID(t *testing.T) {
 
 	resp, err := h.handleCreateTask(context.Background(), msg)
 	require.NoError(t, err)
-	assertWSError(t, resp, ws.ErrorCodeValidation)
+	assertWSError(t, resp, ws.ErrorCodeUnauthorized)
 }
 
 func TestHandleCreateTask_TopLevel_MissingWorkflowID(t *testing.T) {
@@ -908,7 +908,7 @@ func TestHandleCreateTask_TopLevel_MissingWorkflowID(t *testing.T) {
 
 	resp, err := h.handleCreateTask(context.Background(), msg)
 	require.NoError(t, err)
-	assertWSError(t, resp, ws.ErrorCodeValidation)
+	assertWSError(t, resp, ws.ErrorCodeUnauthorized)
 }
 
 func TestHandleCreateTask_StartAgentRequiresResolvableAgentProfile(t *testing.T) {
@@ -933,7 +933,7 @@ func TestHandleCreateTask_StartAgentRequiresResolvableAgentProfile(t *testing.T)
 		"description":  "This should not be persisted without a profile.",
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 
@@ -964,7 +964,7 @@ func TestHandleCreateTask_StartAgentFalseRequiresResolvableAgentProfile(t *testi
 		"start_agent":  false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 
@@ -1012,7 +1012,7 @@ func TestHandleCreateTask_StartAgentFalsePersistsInheritedAgentProfile(t *testin
 		"start_agent":    false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestKanbanContext(ctx, workspaces[0].ID, source.ID, "source-session"), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -1068,7 +1068,7 @@ func TestHandleCreateTask_StartAgentFalsePersistsInheritedExecutorID(t *testing.
 		"start_agent":    false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestKanbanContext(ctx, workspaces[0].ID, source.ID, "source-session"), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -1087,7 +1087,7 @@ func TestHandleCreateTask_StartAgentFalsePersistsInheritedExecutorID(t *testing.
 }
 
 func TestHandleCreateTask_InheritsDeferredSourceTaskMetadata(t *testing.T) {
-	svc, _ := newTestTaskService(t)
+	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
 	workspaces, err := svc.ListWorkspaces(ctx)
 	require.NoError(t, err)
@@ -1107,6 +1107,10 @@ func TestHandleCreateTask_InheritsDeferredSourceTaskMetadata(t *testing.T) {
 	})
 	source := sourceResult.Task
 	require.NoError(t, err)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "deferred-source-session", TaskID: source.ID,
+		State: models.TaskSessionStateWaitingForInput, IsPrimary: true,
+	}))
 
 	h := &Handlers{
 		taskSvc: svc,
@@ -1121,7 +1125,7 @@ func TestHandleCreateTask_InheritsDeferredSourceTaskMetadata(t *testing.T) {
 		"start_agent":    false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestKanbanContext(ctx, workspaces[0].ID, source.ID, "deferred-source-session"), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -1138,7 +1142,7 @@ func TestHandleCreateTask_InheritsDeferredSourceTaskMetadata(t *testing.T) {
 	assert.Equal(t, "metadata-executor", task.Metadata[models.MetaKeyExecutorID])
 }
 
-func TestHandleCreateTask_SourceTaskMetadataWinsOverSessionAndDefaults(t *testing.T) {
+func TestHandleCreateTask_VerifiedCreatorSessionProfileWinsOverSourceMetadataAndDefaults(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
 	workspaces, err := svc.ListWorkspaces(ctx)
@@ -1192,7 +1196,7 @@ func TestHandleCreateTask_SourceTaskMetadataWinsOverSessionAndDefaults(t *testin
 		"start_agent":    false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestKanbanContext(ctx, workspaces[0].ID, source.ID, "source-primary-session"), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -1205,11 +1209,11 @@ func TestHandleCreateTask_SourceTaskMetadataWinsOverSessionAndDefaults(t *testin
 	task, err := svc.GetTask(ctx, created.ID)
 	require.NoError(t, err)
 	require.NotNil(t, task.Metadata)
-	assert.Equal(t, "source-metadata-profile", task.Metadata[models.MetaKeyAgentProfileID])
+	assert.Equal(t, workspaceDefaultProfileID, task.Metadata[models.MetaKeyAgentProfileID])
 	assert.Equal(t, "source-metadata-executor", task.Metadata[models.MetaKeyExecutorProfileID])
 }
 
-func TestHandleCreateTask_InheritsSourceTaskProfileAndSessionExecutor(t *testing.T) {
+func TestHandleCreateTask_VerifiedCreatorSessionProfileAndExecutorWinOverSourceMetadata(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
 	workspaces, err := svc.ListWorkspaces(ctx)
@@ -1251,7 +1255,7 @@ func TestHandleCreateTask_InheritsSourceTaskProfileAndSessionExecutor(t *testing
 		"start_agent":    false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestKanbanContext(ctx, workspaces[0].ID, source.ID, "source-session-executor"), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -1264,7 +1268,7 @@ func TestHandleCreateTask_InheritsSourceTaskProfileAndSessionExecutor(t *testing
 	task, err := svc.GetTask(ctx, created.ID)
 	require.NoError(t, err)
 	require.NotNil(t, task.Metadata)
-	assert.Equal(t, "source-metadata-profile", task.Metadata[models.MetaKeyAgentProfileID])
+	assert.Equal(t, "session-profile", task.Metadata[models.MetaKeyAgentProfileID])
 	assert.Equal(t, "session-executor-profile", task.Metadata[models.MetaKeyExecutorProfileID])
 }
 
@@ -1314,7 +1318,7 @@ func TestHandleCreateTask_WorkflowSwitchedSessionProfileWinsOverStaleMetadata(t 
 		"start_agent":    false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestKanbanContext(ctx, workspaces[0].ID, source.ID, "workflow-switched-session"), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -1378,7 +1382,7 @@ func TestHandleCreateTask_ExplicitAgentStillInheritsRoutedSessionExecutor(t *tes
 		"start_agent":      false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestKanbanContext(ctx, workspaces[0].ID, source.ID, "workflow-switched-session-explicit-agent"), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -1530,7 +1534,7 @@ func TestResolveMCPAutoStartConfig_WorkspaceDefaultUsesTargetWorkspace(t *testin
 }
 
 func TestHandleCreateTask_WorkspaceDefaultPersistsTargetProfileAndInheritedExecutor(t *testing.T) {
-	svc, _ := newTestTaskService(t)
+	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
 	workspaces, err := svc.ListWorkspaces(ctx)
 	require.NoError(t, err)
@@ -1555,6 +1559,10 @@ func TestHandleCreateTask_WorkspaceDefaultPersistsTargetProfileAndInheritedExecu
 	})
 	source := sourceResult.Task
 	require.NoError(t, err)
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "workspace-default-session", TaskID: source.ID,
+		State: models.TaskSessionStateWaitingForInput, IsPrimary: true,
+	}))
 
 	h := &Handlers{
 		taskSvc: svc,
@@ -1571,7 +1579,7 @@ func TestHandleCreateTask_WorkspaceDefaultPersistsTargetProfileAndInheritedExecu
 		"start_agent":    false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestKanbanContext(ctx, workspaces[0].ID, source.ID, "workspace-default-session"), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 	var created struct {
@@ -1620,7 +1628,7 @@ func TestHandleCreateTask_OmittedProfileFailuresCreateNoTask(t *testing.T) {
 				"start_agent":  false,
 			})
 
-			resp, err := h.handleCreateTask(ctx, msg)
+			resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 			require.NoError(t, err)
 			assertWSError(t, resp, tt.wantCode)
 			tasks, err := svc.ListTasks(ctx, workflows[0].ID)
@@ -1678,7 +1686,7 @@ func TestHandleCreateTask_InheritsDeferredParentTaskMetadata(t *testing.T) {
 		"start_agent": false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -1736,7 +1744,7 @@ func TestHandleCreateTask_MetadataExecutorProfileClearsSessionExecutorID(t *test
 		"start_agent":    false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestKanbanContext(ctx, workspaces[0].ID, source.ID, "mixed-source-session"), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -1772,7 +1780,7 @@ func TestHandleCreateTask_InvalidWorkflowReturnsValidationError(t *testing.T) {
 		"start_agent":  false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 
@@ -1810,7 +1818,7 @@ func TestHandleCreateTask_StepOutsideWorkflowReturnsValidationError(t *testing.T
 		"start_agent":      false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
@@ -1848,7 +1856,7 @@ func TestHandleCreateTask_StartAgentUsesWorkspaceDefaultAgentProfile(t *testing.
 		"description":  "This should launch with the workspace default profile.",
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -2480,7 +2488,7 @@ func TestHandleCreateTask_SubtaskBaseBranchOverride(t *testing.T) {
 		"start_agent":      false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -2529,7 +2537,7 @@ func TestHandleCreateTask_SubtaskBaseBranchOverride_ExplicitReposWin(t *testing.
 		"start_agent": false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -2565,7 +2573,7 @@ func TestHandleCreateTask_SubtaskDefaultsToParentWorkspaceAndWorkflow(t *testing
 		"start_agent":      false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -2602,7 +2610,7 @@ func TestHandleCreateTask_SubtaskCanRequestNewWorkspaceMode(t *testing.T) {
 		"start_agent":      false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
 
@@ -2650,22 +2658,12 @@ func TestHandleCreateTask_SubtaskHonorsExplicitWorkspaceAndWorkflow(t *testing.T
 		"start_agent":      false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
-	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
-
-	var created struct {
-		ID string `json:"id"`
-	}
-	require.NoError(t, json.Unmarshal(resp.Payload, &created))
-
-	subtask, err := svc.GetTask(ctx, created.ID)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+	tasks, err := svc.ListTasks(ctx, "wf-1")
 	require.NoError(t, err)
-	assert.Equal(t, "ws-2", subtask.WorkspaceID, "explicit workspace should win over parent default")
-	assert.Equal(t, "wf-2", subtask.WorkflowID, "explicit workflow should win over parent default")
-	assert.Equal(t, "step-other", subtask.WorkflowStepID, "explicit step should be preserved with explicit workflow")
-	require.Len(t, subtask.Repositories, 1)
-	assert.Equal(t, "repo-other", subtask.Repositories[0].RepositoryID)
+	assert.Len(t, tasks, 1, "cross-workspace parent must not create a task")
 }
 
 func TestHandleCreateTask_SubtaskExplicitWorkspaceAutoResolvesWorkflow(t *testing.T) {
@@ -2693,19 +2691,12 @@ func TestHandleCreateTask_SubtaskExplicitWorkspaceAutoResolvesWorkflow(t *testin
 		"start_agent":      false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
-	require.Equalf(t, ws.MessageTypeResponse, resp.Type, "create_task should succeed; payload: %s", string(resp.Payload))
-
-	var created struct {
-		ID string `json:"id"`
-	}
-	require.NoError(t, json.Unmarshal(resp.Payload, &created))
-
-	subtask, err := svc.GetTask(ctx, created.ID)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+	tasks, err := svc.ListTasks(ctx, "wf-1")
 	require.NoError(t, err)
-	assert.Equal(t, "ws-2", subtask.WorkspaceID)
-	assert.Equal(t, "wf-2", subtask.WorkflowID, "workflow should auto-resolve inside the explicitly chosen workspace")
+	assert.Len(t, tasks, 1, "cross-workspace parent must not create a task")
 }
 
 func TestHandleCreateTask_SubtaskRejectsWorkflowFromDifferentWorkspace(t *testing.T) {
@@ -2727,13 +2718,13 @@ func TestHandleCreateTask_SubtaskRejectsWorkflowFromDifferentWorkspace(t *testin
 		"start_agent":      false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 
 	var ep ws.ErrorPayload
 	require.NoError(t, json.Unmarshal(resp.Payload, &ep))
-	assert.Contains(t, ep.Message, "belongs to workspace_id \"ws-2\", not \"ws-1\"")
+	assert.Contains(t, ep.Message, "workflow_id and workspace_id must refer to the same workspace")
 }
 
 func TestResolveTaskRepositories_ParentWithExplicitRepos_OverridesRepoButInheritsWorkspace(t *testing.T) {
@@ -2924,7 +2915,7 @@ func TestHandleCreateTask_AutoResolvesWorkspaceAndWorkflow(t *testing.T) {
 		"start_agent":      false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	require.NotNil(t, resp)
 	if resp.Type == ws.MessageTypeError {
@@ -2992,7 +2983,7 @@ func TestHandleCreateTask_AutoResolveFailsWithMultipleWorkflows(t *testing.T) {
 		"start_agent": false,
 	})
 
-	resp, err := h.handleCreateTask(ctx, msg)
+	resp, err := h.handleCreateTask(mcpTestExternalContext(ctx), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
 }
@@ -3009,13 +3000,9 @@ func TestHandleCreateTask_NewFields_Unmarshalled(t *testing.T) {
 		"execution_policy": `{"stages":[]}`,
 	})
 
-	// taskSvc is nil so CreateTask will panic before we reach it; the payload
-	// must at least parse cleanly. The handler returns a validation error about
-	// workspace_id being absent (not a parse error) only when those fields are
-	// missing — here all required fields are present so it will reach taskSvc.
-	// To avoid a nil-pointer panic we just verify the unmarshal path by sending
-	// a payload that fails a post-unmarshal check (missing workspace) which
-	// exercised the request struct fields.
+	// taskSvc is nil, so use a payload that fails the trusted-caller admission
+	// after JSON decoding. This exercises the request struct fields without
+	// reaching task creation.
 	msgMissingWs := makeWSMessage(t, ws.ActionMCPCreateTask, map[string]interface{}{
 		"title":            "My task",
 		"execution_policy": `{"stages":[]}`,
@@ -3023,8 +3010,8 @@ func TestHandleCreateTask_NewFields_Unmarshalled(t *testing.T) {
 
 	resp, err := h.handleCreateTask(context.Background(), msgMissingWs)
 	require.NoError(t, err)
-	// Should fail on workspace_id validation, not on JSON unmarshal
-	assertWSError(t, resp, ws.ErrorCodeValidation)
+	// The payload parsed before the trusted-caller admission rejection.
+	assertWSError(t, resp, ws.ErrorCodeUnauthorized)
 	_ = msg // payload with all fields — tested implicitly through struct definition
 }
 
@@ -3037,8 +3024,8 @@ func TestHandleCreateTask_BlockedBy_Accepted(t *testing.T) {
 
 	resp, err := h.handleCreateTask(context.Background(), msg)
 	require.NoError(t, err)
-	// Fails on workspace_id, not on blocked_by parsing
-	assertWSError(t, resp, ws.ErrorCodeValidation)
+	// The trusted-caller admission rejects before blocked_by is resolved.
+	assertWSError(t, resp, ws.ErrorCodeUnauthorized)
 }
 
 func TestHandleClarificationTimeout_DetachesMessages(t *testing.T) {

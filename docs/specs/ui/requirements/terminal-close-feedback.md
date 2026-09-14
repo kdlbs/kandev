@@ -2,6 +2,7 @@
 status: active
 system: ui
 created: 2026-08-14
+updated: 2026-09-10
 owners:
   - kandev
 ---
@@ -13,6 +14,11 @@ Closing a task terminal is a UI decision. Waiting for shell teardown after the u
 
 ## Requirements
 
+Phone presentation follows the planned
+[mobile action confirmation contract](mobile-action-confirmations.md).
+The immediate local dismissal and background teardown behavior here remains
+authoritative across every viewport.
+
 ### REQ-UI-TERMINAL-CLOSE-FEEDBACK-001: Terminal close feedback
 
 **Intent:** Closing a task terminal is a UI decision. Waiting for shell teardown after the user confirms leaves the terminal tab, content, or picker row on screen and makes the task surface feel blocked by backend cleanup that should be invisible.
@@ -20,12 +26,12 @@ Closing a task terminal is a UI decision. Waiting for shell teardown after the u
 #### Acceptance criteria
 
 - **AC-UI-TERMINAL-CLOSE-FEEDBACK-001.1:** Every action that permanently destroys a task terminal requires destructive confirmation before teardown starts. Cancelling leaves the terminal unchanged.
-- **AC-UI-TERMINAL-CLOSE-FEEDBACK-001.2:** Confirmation stays at the action locus instead of blocking the page: desktop and tablet use a compact popover anchored to the close control; the phone close control morphs into inline Cancel and Close terminal actions inside the existing terminal picker row.
-- **AC-UI-TERMINAL-CLOSE-FEEDBACK-001.3:** Dockview tab close and context-menu Terminate share the same anchored confirmation. Terminal rows inside the add-panel menu use that same close-anchored popover. Parked-terminal rows morph in place to inline Cancel and Close actions.
+- **AC-UI-TERMINAL-CLOSE-FEEDBACK-001.2:** Desktop and tablet use a compact popover anchored to the close control. Phone close uses a focused confirmation step in the terminal picker, retaining the row's geometry and restoring the picker on Cancel.
+- **AC-UI-TERMINAL-CLOSE-FEEDBACK-001.3:** Dockview tab close and context-menu Terminate share the same anchored confirmation. Terminal rows inside the non-phone add-panel menu use that same close-anchored popover. Non-phone parked-terminal rows retain inline Cancel and Close actions; phone rows use the shared mobile surface.
 - **AC-UI-TERMINAL-CLOSE-FEEDBACK-001.4:** The add-panel confirmation remains open while pointer movement returns focus to its owning menu, so the user can move from the row close control into the popover actions.
 - **AC-UI-TERMINAL-CLOSE-FEEDBACK-001.5:** On fine-pointer layouts, the add-panel terminal row keeps the standard compact menu-row height; its trailing close control does not make that row taller than adjacent entries. Coarse-pointer layouts retain a 44px row and close target.
 - **AC-UI-TERMINAL-CLOSE-FEEDBACK-001.6:** Task-terminal confirmation never uses a browser-native `confirm()` dialog.
-- **AC-UI-TERMINAL-CLOSE-FEEDBACK-001.7:** Terminal close confirmation never adds a page-level backdrop or full modal. Unrelated task UI remains available until the user confirms or dismisses the local confirmation.
+- **AC-UI-TERMINAL-CLOSE-FEEDBACK-001.7:** Non-phone terminal close confirmation shall retain its local non-modal behavior. Phone confirmation shall use one active sheet: reuse the open picker, or open a compact bottom sheet from a page after its menu closes.
 - **AC-UI-TERMINAL-CLOSE-FEEDBACK-001.8:** Confirming removes every local representation of the target immediately: the confirmation, terminal tab or picker row, mounted terminal content, and active selection.
 
 ## Migrated source detail
@@ -40,20 +46,19 @@ backend cleanup that should be invisible.
 
 - Every action that permanently destroys a task terminal requires destructive confirmation before
   teardown starts. Cancelling leaves the terminal unchanged.
-- Confirmation stays at the action locus instead of blocking the page: desktop and tablet use a
-  compact popover anchored to the close control; the phone close control morphs into inline Cancel
-  and Close terminal actions inside the existing terminal picker row.
+- Desktop and tablet use a compact popover anchored to the close control;
+  phone close opens a confirmation step inside the terminal picker.
 - Dockview tab close and context-menu Terminate share the same anchored confirmation. Terminal rows
-  inside the add-panel menu use that same close-anchored popover. Parked-terminal rows morph in
-  place to inline Cancel and Close actions.
+  inside the non-phone add-panel menu use that same close-anchored popover.
+  Non-phone parked-terminal rows retain inline Cancel and Close actions.
 - The add-panel confirmation remains open while pointer movement returns focus to its owning menu,
   so the user can move from the row close control into the popover actions.
 - On fine-pointer layouts, the add-panel terminal row keeps the standard compact menu-row height;
   its trailing close control does not make that row taller than adjacent entries. Coarse-pointer
   layouts retain a 44px row and close target.
 - Task-terminal confirmation never uses a browser-native `confirm()` dialog.
-- Terminal close confirmation never adds a page-level backdrop or full modal. Unrelated task UI
-  remains available until the user confirms or dismisses the local confirmation.
+- Non-phone confirmation stays local and non-modal. Phone confirmation uses
+  one sheet, reusing the picker when already open.
 - Confirming removes every local representation of the target immediately: the confirmation,
   terminal tab or picker row, mounted terminal content, and active selection.
 - The existing sibling-terminal fallback happens as part of that immediate local removal.
@@ -99,7 +104,7 @@ reconciliation retain their existing backend ownership and persistence behavior.
   and Close terminal actions remain reachable.
 - **GIVEN** an add-panel menu on a fine-pointer layout, **WHEN** terminal rows are rendered beside
   ordinary menu entries, **THEN** both use the same compact row height.
-- **GIVEN** a terminal row in the parked-terminal menu, **WHEN** the user activates its destructive
+- **GIVEN** a non-phone terminal row in the parked-terminal menu, **WHEN** the user activates its destructive
   action, **THEN** that row shows inline Cancel and Close actions.
 - **GIVEN** any task-terminal close request is pending, **WHEN** the user activates its close control
   again, **THEN** no second teardown request is sent.
@@ -110,11 +115,11 @@ reconciliation retain their existing backend ownership and persistence behavior.
 - **GIVEN** the close confirmation is open, **WHEN** the user cancels it, **THEN** no teardown starts
   and the terminal remains unchanged.
 - **GIVEN** a phone viewport with two task terminals, **WHEN** the user confirms a terminal close from
-  the terminal picker, **THEN** the inline confirmation, row, and mounted terminal disappear
+  the terminal picker, **THEN** the confirmation step, row, and mounted terminal disappear
   immediately and the sibling terminal remains reachable.
 - **GIVEN** a phone terminal, **WHEN** its close control is activated, **THEN**
-  that row replaces the close control with touch-sized Cancel and Close terminal actions without
-  opening another modal or drawer.
+  the picker shows a dedicated confirmation step with full-width actions;
+  Cancel restores the same picker state without opening another modal.
 - **GIVEN** a tablet viewport, **WHEN** terminal teardown is pending from the right-panel strip,
   **THEN** the target tab is already absent and the task layout remains usable.
 
@@ -124,8 +129,7 @@ reconciliation retain their existing backend ownership and persistence behavior.
 - Changing `user_shell.destroy`, PTY termination, terminal persistence, or active-tab fallback
   semantics.
 - Changing Quick Terminal tabs in Quick Chat or the terminal on Settings > Agents.
-- Generalizing localized confirmation into a repository-wide primitive before another concrete
-  consumer establishes the shared API.
+- Changing shared mobile presentation outside its owning confirmation contract.
 - Adding durable teardown jobs, cancellation controls, progress indicators, or success toasts.
 
 ## Implementation plan

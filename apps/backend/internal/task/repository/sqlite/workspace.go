@@ -217,6 +217,16 @@ func (r *Repository) deleteWorkspaceCascade(
 	if err != nil {
 		return nil, nil, err
 	}
+	// Lock every workflow_steps row this workspace owns BEFORE any task row:
+	// ReorderStepTasks and lockTaskStepForWrite's callers (Archive/Delete/
+	// Unarchive) both lock a step before the task rows inside it, so this
+	// cascade must acquire the same two resources in the same order or a
+	// concurrent reorder of one of these steps can deadlock against it on
+	// Postgres (each transaction waiting on the resource the other already
+	// holds). Sorted id order mirrors the task-row locking below.
+	if err := r.lockWorkspaceStepRowsInTx(ctx, tx, id); err != nil {
+		return nil, nil, err
+	}
 	// Establish the global lock order task-row -> queue-session before
 	// purging the queues: lifecycle admission takes the task row first and
 	// then the session lock, so taking session locks first here would invert
@@ -401,6 +411,42 @@ func (r *Repository) listWorkspaceCascadeDeleteWorkflows(
 	defer func() { _ = rows.Close() }()
 
 	return scanWorkflowRows(rows)
+}
+
+// lockWorkspaceStepRowsInTx locks (Postgres FOR UPDATE; no-op on SQLite,
+// whose single writer connection already serializes) every workflow_steps
+// row belonging to workspaceID's workflows, in sorted id order. Called before
+// any task-row lock in the delete cascade so it acquires steps and tasks in
+// the same order ReorderStepTasks and lockTaskStepForWrite's callers do.
+func (r *Repository) lockWorkspaceStepRowsInTx(ctx context.Context, tx *sqlx.Tx, workspaceID string) error {
+	rows, err := tx.QueryContext(ctx, r.db.Rebind(`
+		SELECT id FROM workflow_steps
+		WHERE workflow_id IN (SELECT id FROM workflows WHERE workspace_id = ?)
+		ORDER BY id
+	`), workspaceID)
+	if err != nil {
+		return fmt.Errorf("list workspace step rows to lock: %w", err)
+	}
+	var stepIDs []string
+	for rows.Next() {
+		var stepID string
+		if err := rows.Scan(&stepID); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan workspace step row to lock: %w", err)
+		}
+		stepIDs = append(stepIDs, stepID)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("list workspace step rows to lock: %w", err)
+	}
+	_ = rows.Close()
+	for _, stepID := range stepIDs {
+		if err := lockWorkflowStepForWrite(ctx, tx, r.db.DriverName(), r.db.Rebind, stepID); err != nil {
+			return fmt.Errorf("lock workspace cascade step row %s: %w", stepID, err)
+		}
+	}
+	return nil
 }
 
 // ListWorkspaces returns all workspaces

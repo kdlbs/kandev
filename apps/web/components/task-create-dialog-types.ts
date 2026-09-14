@@ -1,4 +1,5 @@
 import type React from "react";
+import type { RefObject } from "react";
 import type {
   LocalRepository,
   Repository,
@@ -36,6 +37,25 @@ export type TaskCreateSubmit = (
   payload: Parameters<typeof createTask>[0],
 ) => Promise<CreateTaskResponse>;
 
+/**
+ * Shape of the task being edited that both `TaskCreateDialogProps.editingTask`
+ * and `SubmitHandlersDeps.editingTask` need. `runnerEditable`/
+ * `runnerIneligibleReason` gate the executor-profile selector independently
+ * of `state`.
+ */
+export type TaskEditTarget = {
+  id: string;
+  title: string;
+  description?: string;
+  workflowStepId: string;
+  state?: Task["state"];
+  repositoryId?: string;
+  repositories?: TaskRepositorySnapshot[];
+  primaryExecutorProfileId?: string;
+  runnerEditable?: boolean;
+  runnerIneligibleReason?: string;
+};
+
 export interface TaskCreateDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -51,15 +71,7 @@ export interface TaskCreateDialogProps {
       on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
     };
   }>;
-  editingTask?: {
-    id: string;
-    title: string;
-    description?: string;
-    workflowStepId: string;
-    state?: Task["state"];
-    repositoryId?: string;
-    repositories?: TaskRepositorySnapshot[];
-  } | null;
+  editingTask?: TaskEditTarget | null;
   onSuccess?: (
     task: Task,
     mode: "create" | "edit",
@@ -85,6 +97,10 @@ export interface TaskCreateDialogProps {
   extraFormSlot?: React.ReactNode;
   bottomSlot?: React.ReactNode;
   submitBlockedReason?: string | null;
+  /** Element to return keyboard focus to on close, confirmed or cancelled.
+   * Omitted callers keep Radix's default restore-to-previously-focused-element
+   * behavior. */
+  focusReturnRef?: RefObject<HTMLElement | null>;
 }
 
 export type DialogPromptEnhance = {
@@ -114,6 +130,8 @@ export type TaskRepoRow = {
   /** On-machine repo path, when the user picked from discovered repos. */
   localPath?: string;
   branch: string;
+  /** Explicit effective base copied from a repository set or chosen in the form. */
+  baseBranch?: string;
   /** Saved repository policy selected for this row. */
   branchPolicyId?: string;
 };
@@ -350,6 +368,12 @@ export type TaskCreateEffectsArgs = {
    * clobbered by the executor's async settle on mount.
    */
   preserveBranch?: string;
+  /**
+   * The task's own stored executor profile, when editing a task that has one.
+   * Seeds the picker directly instead of the create-mode "resolve a default"
+   * autopick.
+   */
+  editingTaskExecutorProfileId?: string | null;
 };
 
 import type { FileAttachment } from "@/components/task/chat/file-attachment";
@@ -420,6 +444,21 @@ export type DialogFormState = {
   setExecutorId: (v: string) => void;
   executorProfileId: string;
   setExecutorProfileId: (v: string) => void;
+  /**
+   * Writes executorProfileId from an autopick/stored-profile seed effect
+   * only, never from the user's own picker. This is the sole writer
+   * seededExecutorProfileId tracks, so a user selection can never be
+   * mistaken for a seed regardless of which write lands first.
+   */
+  setExecutorProfileIdFromSeed: (v: string) => void;
+  /**
+   * The executor profile id the dialog seeded for this open cycle (stored
+   * value in edit mode, resolved default in create mode) — never a value the
+   * user chose. Null until a value has been seeded. Submit flows compare the
+   * final selection against this to decide whether the user actually changed
+   * the runner.
+   */
+  seededExecutorProfileId: string | null;
   discoveredRepositories: LocalRepository[];
   setDiscoveredRepositories: (v: LocalRepository[]) => void;
   discoverReposLoading: boolean;
@@ -503,15 +542,9 @@ export type SubmitHandlersDeps = {
   agentProfileId: string;
   executorId: string;
   executorProfileId: string;
-  editingTask?: {
-    id: string;
-    title: string;
-    description?: string;
-    workflowStepId: string;
-    state?: Task["state"];
-    repositoryId?: string;
-    repositories?: TaskRepositorySnapshot[];
-  } | null;
+  /** See {@link DialogFormState.seededExecutorProfileId}. */
+  seededExecutorProfileId: string | null;
+  editingTask?: TaskEditTarget | null;
   onSuccess?: (
     task: Task,
     mode: "create" | "edit",
@@ -631,6 +664,9 @@ export type DialogFormBodyProps = {
     save?: {
       workspaceId: string;
       rows: TaskRepoRow[];
+      repositories: Repository[];
+      isLocalExecutor: boolean;
+      freshBranchEnabled: boolean;
       open: boolean;
       setOpen: (open: boolean) => void;
     } | null;
@@ -680,4 +716,8 @@ export type DialogFormBodyProps = {
    * hands-free.
    */
   onComposerSubmit?: () => boolean | Promise<boolean>;
+  /** From computeRunnerEditable: gates the executor-profile selector independently of isTaskStarted. */
+  runnerEditable: boolean;
+  /** From computeRunnerIneligibleReason: presented when runnerEditable is false. */
+  runnerIneligibleReason: string;
 };

@@ -16,6 +16,7 @@ import type { AgentProfile, AgentRole } from "@/lib/state/slices/office/types";
 import { AgentRoutingCard } from "./agent-routing-card";
 import { reportsToOptions } from "./reports-to-options";
 import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 type AgentConfigurationTabProps = {
   agent: AgentProfile;
@@ -338,7 +339,7 @@ function ReportsToField({
       >
         <SelectTrigger
           id="cfg-reports-to"
-          className="mt-1 min-h-11 w-full cursor-pointer md:min-h-7"
+          className={controlSizingClassName("standard", "mt-1 w-full cursor-pointer")}
         >
           <SelectValue placeholder={t("office:noneTopLevel")} />
         </SelectTrigger>
@@ -400,7 +401,9 @@ function IdentityCard({
           <div className="flex-1">
             <Label>{t("office:role")}</Label>
             <Select value={role} onValueChange={(v) => onRoleChange(v as AgentRole)}>
-              <SelectTrigger className="mt-1 min-h-11 w-full cursor-pointer md:min-h-7">
+              <SelectTrigger
+                className={controlSizingClassName("standard", "mt-1 w-full cursor-pointer")}
+              >
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

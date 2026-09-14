@@ -44,6 +44,24 @@ func JSONExtractPath(driver, col string, segments ...string) string {
 	return fmt.Sprintf("json_extract(%s, '$.%s')", col, strings.Join(segments, "."))
 }
 
+// JSONTypeIsString returns a WHERE-clause fragment asserting the JSON value
+// at path is itself a string. JSONExtract's Postgres ->> operator converts
+// any JSON type to text, so a caller that compares its result against a
+// bound string parameter can match a non-string stored value (e.g. a JSON
+// number) whose text form happens to equal the parameter. SQLite's
+// json_extract mostly avoids this by preserving storage class, except that
+// a JSON object/array is itself returned as text. Checking the stored
+// value's declared JSON type closes both gaps identically.
+//
+//	SQLite:   json_type(col, '$.path') = 'text'
+//	Postgres: jsonb_typeof(col::jsonb->'path') = 'string'
+func JSONTypeIsString(driver, col, path string) string {
+	if IsPostgres(driver) {
+		return fmt.Sprintf("jsonb_typeof(%s::jsonb->'%s') = 'string'", col, path)
+	}
+	return fmt.Sprintf("json_type(%s, '$.%s') = 'text'", col, path)
+}
+
 // JSONExtractIsNotNull returns the SQL fragment to check that a JSON path is not null.
 //
 //	SQLite:   json_extract(col, '$.path') IS NOT NULL

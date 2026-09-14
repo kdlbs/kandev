@@ -48,7 +48,7 @@ type workflowLimitedMoveRepository interface {
 }
 
 type workflowMoveAdmissionRepository interface {
-	UpdateTaskWithWorkflowStepAdmission(ctx context.Context, task *models.Task, targetStepID string, limit int) (bool, error)
+	UpdateTaskWithWorkflowStepAdmission(ctx context.Context, task *models.Task, sourceStepID, targetStepID string, limit int) (bool, error)
 }
 
 // workflowMoveAdmissionCASRepository is the AC-46/48 compare-and-swap
@@ -518,7 +518,7 @@ func (s *workflowStore) applyTransition(
 		); err != nil {
 			return fmt.Errorf("update task workflow step: %w", err)
 		}
-	} else if err := s.updateTransitionTask(transitionCtx, task, targetStep); err != nil {
+	} else if err := s.updateTransitionTask(transitionCtx, task, fromStepID, targetStep); err != nil {
 		return fmt.Errorf("update task workflow step: %w", err)
 	}
 
@@ -785,7 +785,7 @@ func (s *workflowStore) commitCASRoute(ctx context.Context, task *models.Task, t
 	if err != nil {
 		return false, fmt.Errorf("load next step after %s: %w", targetStep.ID, err)
 	}
-	if wfmodels.IsTerminalStep(targetStep, next) {
+	if wfmodels.IsTerminalStep(targetStep, next) || (next == nil && wfmodels.IsTerminalStepName(targetStep.Name)) {
 		stateRepo, ok := s.repo.(workflowMoveAdmissionStateCASRepository)
 		if !ok {
 			return false, fmt.Errorf("workflow terminal state CAS repository unavailable for step %s", targetStep.ID)
@@ -846,7 +846,7 @@ func markDeferredMoveApplied(task *models.Task, moveID string) error {
 	return nil
 }
 
-func (s *workflowStore) updateTransitionTask(ctx context.Context, task *models.Task, targetStep *wfmodels.WorkflowStep) error {
+func (s *workflowStore) updateTransitionTask(ctx context.Context, task *models.Task, fromStepID string, targetStep *wfmodels.WorkflowStep) error {
 	if targetStep == nil {
 		return s.repo.UpdateTask(ctx, task)
 	}
@@ -854,7 +854,7 @@ func (s *workflowStore) updateTransitionTask(ctx context.Context, task *models.T
 	if !ok {
 		return fmt.Errorf("workflow step admission repository unavailable for step %s", targetStep.ID)
 	}
-	_, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, task, targetStep.ID, targetStep.WIPLimit)
+	_, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, task, fromStepID, targetStep.ID, targetStep.WIPLimit)
 	return err
 }
 
@@ -1040,7 +1040,7 @@ func (s *workflowStore) pullOneFeederTask(
 				continue
 			}
 		} else if admissionRepo, ok := s.repo.(workflowMoveAdmissionRepository); ok {
-			claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, vacatedStep.ID, vacatedStep.WIPLimit)
+			claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, fromStepID, vacatedStep.ID, vacatedStep.WIPLimit)
 			if err != nil {
 				s.logger.Warn("failed to promote feeder task", zap.String("task_id", candidate.ID), zap.Error(err))
 				skipped[candidate.ID] = struct{}{}
@@ -1105,7 +1105,7 @@ func (s *workflowStore) promoteSameStepTask(ctx context.Context, candidate *mode
 			return s.pullOneFeederTask(ctx, pullRepo, limitedRepo, step, position, skipped)
 		}
 	} else if admissionRepo, ok := s.repo.(workflowMoveAdmissionRepository); ok {
-		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, step.ID, step.WIPLimit)
+		claimed, err := admissionRepo.UpdateTaskWithWorkflowStepAdmission(ctx, candidate, fromStepID, step.ID, step.WIPLimit)
 		if err != nil {
 			s.logger.Warn("failed to promote same-step queued task", zap.String("task_id", candidate.ID), zap.Error(err))
 			skipped[candidate.ID] = struct{}{}
@@ -1178,34 +1178,13 @@ func (s *workflowStore) nextQueuedSameStepTask(ctx context.Context, stepID strin
 	return best
 }
 
+// queuedTaskBefore is the WIP promotion comparator
+// (REQ-TASKS-KANBAN-TASK-REORDERING-001.1, .36): position, priority rank,
+// queued_at (coalesced to created_at when absent), created_at, id. Delegates
+// to models.StepOrderLess, the single source of truth this comparator's
+// byte-identical task/service copy and the reorder repository also use.
 func queuedTaskBefore(left, right *models.Task) bool {
-	if left.Position != right.Position {
-		return left.Position < right.Position
-	}
-	priority := func(value string) int {
-		switch value {
-		case "critical":
-			return 0
-		case "high":
-			return 1
-		case "medium":
-			return 2
-		case "low":
-			return 3
-		default:
-			return 4
-		}
-	}
-	if priority(left.Priority) != priority(right.Priority) {
-		return priority(left.Priority) < priority(right.Priority)
-	}
-	if left.QueuedAt != nil && right.QueuedAt != nil && !left.QueuedAt.Equal(*right.QueuedAt) {
-		return left.QueuedAt.Before(*right.QueuedAt)
-	}
-	if !left.CreatedAt.Equal(right.CreatedAt) {
-		return left.CreatedAt.Before(right.CreatedAt)
-	}
-	return left.ID < right.ID
+	return models.StepOrderLess(left, right)
 }
 
 func (s *workflowStore) feederCandidateBlocked(ctx context.Context, taskID string) bool {

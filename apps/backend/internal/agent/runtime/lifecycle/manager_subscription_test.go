@@ -269,17 +269,18 @@ func TestAggregator_FailedPausedPushIsRetriedOnUnchangedContribution(t *testing.
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
-		modes <- body.Mode
 		if body.Mode == string(WorkspacePollModePaused) {
 			mu.Lock()
 			pausedCalls++
 			call := pausedCalls
 			mu.Unlock()
 			if call == 1 {
+				modes <- body.Mode
 				w.WriteHeader(http.StatusServiceUnavailable)
 				return
 			}
 		}
+		modes <- body.Mode
 		w.WriteHeader(http.StatusOK)
 	}))
 	t.Cleanup(srv.Close)

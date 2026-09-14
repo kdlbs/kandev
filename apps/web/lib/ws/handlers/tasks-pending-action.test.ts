@@ -17,6 +17,9 @@ function pendingStore(taskPendingAction?: PendingAction) {
     kanban: { workflowId: "wf1", steps: [], tasks: [task] },
     kanbanMulti: {
       isLoading: false,
+      orderRevisionByStepId: {},
+      pendingReorderBandKeys: {},
+      withheldReorderByBandKey: {},
       snapshots: {
         wf1: { workflowId: "wf1", workflowName: "Workflow", steps: [], tasks: [task] },
       },

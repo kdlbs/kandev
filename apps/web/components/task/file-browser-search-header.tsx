@@ -31,6 +31,7 @@ export function FileBrowserSearchHeader({
       <Input
         ref={searchInputRef}
         type="text"
+        controlSize="none"
         value={localSearchQuery}
         onChange={onSearchChange}
         onKeyDown={(e) => {

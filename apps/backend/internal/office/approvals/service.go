@@ -9,6 +9,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 
 	"go.uber.org/zap"
 )
@@ -29,7 +30,7 @@ type AgentWriter interface {
 
 // RunQueuer enqueues run requests for agent instances.
 type RunQueuer interface {
-	QueueRun(ctx context.Context, agentInstanceID, reason, payload, idempotencyKey string) error
+	QueueRun(ctx context.Context, agentInstanceID, reason, payload, idempotencyKey string) (runsservice.QueueOutcome, error)
 }
 
 // ApprovalService handles approval CRUD and decide logic.
@@ -215,6 +216,7 @@ func (s *ApprovalService) queueApprovalRun(ctx context.Context, approval *Approv
 		approval.ID, approval.Type, approval.Status, approval.DecisionNote,
 	)
 	idempotencyKey := "approval:" + approval.ID
-	return s.runs.QueueRun(ctx, approval.RequestedByAgentProfileID,
+	_, err := s.runs.QueueRun(ctx, approval.RequestedByAgentProfileID,
 		"approval_resolved", payload, idempotencyKey)
+	return err
 }

@@ -37,6 +37,13 @@ An empty value uses the workflow profile, then the active session profile.
 A selected profile stays attached to its own `task_sessions.agent_profile_id`.
 Routing never rewrites a live session to impersonate another profile.
 
+The planned explicit initial-session and earlier-step targets extend this
+profile-only path. Their contract, persistence, and same-profile session
+replacement rules are owned by
+[Workflow Profile Session Lifecycle](workflow-profile-session-lifecycle.md#explicit-recipient-contract).
+The control flow below remains the compatibility behavior for steps without
+an explicit target.
+
 `workflow_steps.profile_session_start_policy` governs whether the destination
 step reuses an eligible session or starts a fresh conversation. The source
 step's `workflow_steps.profile_session_end_policy` governs whether the replaced

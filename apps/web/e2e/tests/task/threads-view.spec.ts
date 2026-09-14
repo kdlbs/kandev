@@ -237,7 +237,7 @@ test.describe("Threads view", () => {
     await savedViewResponse;
 
     await expect(board.locator("[data-thread-column-id]")).toHaveCount(1);
-    await expect(testPage.getByTestId("threads-view-count")).toContainText("1 of 3 columns");
+    await expect(testPage.getByTestId("threads-view-count")).toContainText("1 of 3 chats");
     await expect(testPage.getByTestId("threads-view-count")).toContainText("2 hidden");
 
     // The saved view remains active after a full page bootstrap.

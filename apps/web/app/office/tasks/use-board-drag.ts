@@ -11,6 +11,16 @@ import {
 import { toast } from "@/lib/toast/sonner";
 import { t } from "@/lib/i18n";
 import type { OfficeTask, OfficeTaskStatus } from "@/lib/state/slices/office/types";
+import {
+  beginWrite,
+  endWrite,
+  nextTaskSequence,
+  recordWriteFailed,
+  recordWriteSettled,
+  shouldRestoreAfterFailedWrite,
+  TASK_SCOPE,
+  type TaskScopeValues,
+} from "@/lib/state/office-task-content-sync";
 
 /**
  * Collaborators for `applyStatusDrop`, injected so the drop rules can be
@@ -48,24 +58,75 @@ export async function applyStatusDrop(
   // pixels, not a move. Sending it would burn a PATCH and a WS round-trip.
   if (snapshot.status === targetStatus) return;
 
+  const sequence = nextTaskSequence(taskId);
+  const taskScopeBefore: TaskScopeValues = {
+    status: snapshot.status,
+    rawStatus: snapshot.rawStatus,
+  };
+  const taskScopePatch: TaskScopeValues = {
+    status: targetStatus,
+    rawStatus: targetStatus,
+  };
+  beginWrite(taskId, TASK_SCOPE, sequence, taskScopeBefore, taskScopePatch);
+
   deps.patchTask(taskId, { status: targetStatus });
   try {
     await deps.updateStatus(taskId, targetStatus);
+    recordWriteSettled(taskId, TASK_SCOPE, sequence, taskScopePatch);
+    const reconciliation = endWrite(taskId, TASK_SCOPE, sequence);
+    if (reconciliation) {
+      deps.patchTask(taskId, toOfficeTaskReconciliationPatch(reconciliation));
+    }
   } catch (err) {
     if (err instanceof ApprovalGateError) {
-      // The backend already redirected and persisted this status server-side
-      // before returning the error (see ApprovalGateError), so the board is
-      // wrong if it rolls back to the pre-drop snapshot here. Patch status
-      // only: spreading the snapshot would reinstate its stale rawStatus and
-      // the card would re-normalize back to the old column.
-      deps.patchTask(taskId, { status: err.redirectedStatus });
+      // The backend has already persisted the redirected status at this
+      // write's sequence regardless of whether the UI ends up showing it, so
+      // a later-failing, lower-sequence move must see this as settled rather
+      // than treating it as unresolved and clobbering it.
+      recordWriteSettled(taskId, TASK_SCOPE, sequence, {
+        status: err.redirectedStatus,
+        rawStatus: err.redirectedStatus,
+      });
     } else {
-      deps.patchTask(taskId, snapshot);
+      recordWriteFailed(taskId, TASK_SCOPE, sequence);
+    }
+    // Only settle onto this failure's outcome if no later-sequenced move on
+    // this task has already succeeded or is still in flight — otherwise this
+    // stale failure would clobber newer, server-confirmed state.
+    const shouldRestore = shouldRestoreAfterFailedWrite(taskId, TASK_SCOPE, sequence);
+    const reconciliation = endWrite(taskId, TASK_SCOPE, sequence);
+    if (reconciliation) {
+      deps.patchTask(taskId, toOfficeTaskReconciliationPatch(reconciliation));
+    } else if (shouldRestore) {
+      if (err instanceof ApprovalGateError) {
+        // The backend already redirected and persisted this status server-side
+        // before returning the error (see ApprovalGateError), so the board is
+        // wrong if it rolls back to the pre-drop snapshot here. Patch status
+        // only: spreading the snapshot would reinstate its stale rawStatus and
+        // the card would re-normalize back to the old column.
+        deps.patchTask(taskId, { status: err.redirectedStatus });
+      } else {
+        deps.patchTask(taskId, {
+          status: snapshot.status,
+          rawStatus: snapshot.rawStatus,
+        });
+      }
     }
     // The approver gate arrives here already translated into a sentence
     // naming who still has to sign off.
     deps.onError(err instanceof Error ? err.message : t("task:failedToMoveTask"));
   }
+}
+
+function toOfficeTaskReconciliationPatch(values: TaskScopeValues): Partial<OfficeTask> {
+  const patch: Partial<OfficeTask> = {};
+  if (Object.prototype.hasOwnProperty.call(values, "status")) {
+    patch.status = values.status as OfficeTaskStatus;
+  }
+  if (Object.prototype.hasOwnProperty.call(values, "rawStatus")) {
+    patch.rawStatus = values.rawStatus as string | undefined;
+  }
+  return patch;
 }
 
 /**

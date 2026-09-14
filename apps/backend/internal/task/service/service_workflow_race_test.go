@@ -31,6 +31,7 @@ type workflowMoveRaceRepo struct {
 func (r *workflowMoveRaceRepo) UpdateTaskWithWorkflowStepAdmissionAndState(
 	ctx context.Context,
 	task *models.Task,
+	sourceStepID string,
 	targetStepID string,
 	limit int,
 	admittedState *v1.TaskState,
@@ -42,7 +43,7 @@ func (r *workflowMoveRaceRepo) UpdateTaskWithWorkflowStepAdmissionAndState(
 		r.inject()
 	}
 	return r.Repository.UpdateTaskWithWorkflowStepAdmissionAndState(
-		ctx, task, targetStepID, limit, admittedState, queueExitPending, expectedWorkflowID,
+		ctx, task, sourceStepID, targetStepID, limit, admittedState, queueExitPending, expectedWorkflowID,
 	)
 }
 

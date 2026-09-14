@@ -467,6 +467,11 @@ export function useDialogFormState(
     form.descriptionInputRef,
   );
 
+  const { seededExecutorProfileId, setExecutorProfileIdFromSeed } = useSeededExecutorProfileId(
+    open,
+    form.setExecutorProfileId,
+  );
+
   return {
     ...form,
     ...discovery,
@@ -479,7 +484,46 @@ export function useDialogFormState(
     branchesByUrl,
     prInfoByUrl,
     clearDraft,
+    seededExecutorProfileId,
+    setExecutorProfileIdFromSeed,
   };
+}
+
+/**
+ * Tracks the executorProfileId value written through
+ * setExecutorProfileIdFromSeed each open cycle, whether it arrives via the
+ * create-mode autopick or the edit-mode stored-profile seed effect. Resets
+ * on each open rising edge. This is "what the dialog put there", independent
+ * of any later or earlier user selection: only a write through the
+ * returned setExecutorProfileIdFromSeed counts, never the plain
+ * setExecutorProfileId a user's own picker uses.
+ *
+ * The reset is keyed on `open`'s own rising edge via an effect, not on
+ * comparing openCycle during render: openCycle bumps via its own effect on
+ * the same rising edge, and a seed write triggered by that same edge can
+ * land in the same subsequent render as the bump. A render-phase comparison
+ * can't distinguish "openCycle just changed because the dialog opened" from
+ * "openCycle changed and this cycle's seed already arrived", so it would
+ * wipe a same-transition seed the instant it was written.
+ */
+function useSeededExecutorProfileId(open: boolean, setExecutorProfileId: (v: string) => void) {
+  const seededRef = useRef<string | null>(null);
+  const prevOpenRef = useRef(false);
+  useEffect(() => {
+    const wasOpen = prevOpenRef.current;
+    prevOpenRef.current = open;
+    if (open && !wasOpen) {
+      seededRef.current = null;
+    }
+  }, [open]);
+  const setExecutorProfileIdFromSeed = useCallback(
+    (value: string) => {
+      seededRef.current = value;
+      setExecutorProfileId(value);
+    },
+    [setExecutorProfileId],
+  );
+  return { seededExecutorProfileId: seededRef.current, setExecutorProfileIdFromSeed };
 }
 
 /**

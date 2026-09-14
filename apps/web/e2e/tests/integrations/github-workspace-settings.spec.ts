@@ -7,6 +7,39 @@ type ReviewWatchesResponse = {
 };
 
 test.describe("GitHub workspace settings", () => {
+  test("keeps PR discovery failure separate from quota and clears on newer recovery", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    await apiClient.mockGitHubReset();
+    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
+    const fixture = await stubGitHubRateLimits(testPage, seedData.workspaceId);
+    await testPage.goto(`/settings/workspaces/${seedData.workspaceId}/integrations/github`);
+
+    const automation = testPage.getByTestId("github-workspace-automation");
+    await expect(automation.getByTestId("github-pr-discovery-health").first()).toContainText(
+      "PR discovery failed",
+    );
+    const rateLimitHelp = automation.getByRole("button", { name: "Show GitHub API limits" });
+    await rateLimitHelp.hover();
+    const rateLimitTooltip = testPage
+      .getByRole("tooltip")
+      .filter({ hasText: "PR discovery failed" });
+    await expect(rateLimitTooltip).toContainText("PR discovery failed");
+    await expect(rateLimitTooltip).toContainText("Invalid query");
+    await expect(rateLimitTooltip).toContainText(
+      "API rate limit: 3,210 of 5,000 requests remaining",
+    );
+
+    fixture.recoverPRDiscovery();
+    await automation.getByRole("button", { name: "Refresh GitHub connection" }).click();
+    await expect(automation.getByTestId("github-pr-discovery-health")).toHaveCount(0);
+  });
+
   test("keeps review watch pause and resume visible after save", async ({
     testPage,
     apiClient,

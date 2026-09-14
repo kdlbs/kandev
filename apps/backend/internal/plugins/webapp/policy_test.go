@@ -18,7 +18,7 @@ func TestBuildContentSecurityPolicyIsGrantBoundAndOpaque(t *testing.T) {
 		"object-src 'none'",
 		"script-src 'self' 'unsafe-inline'",
 		"connect-src 'self' https://api.example.com:443",
-		"frame-ancestors http://127.0.0.1:38429 tauri://localhost http://tauri.localhost",
+		"frame-ancestors 'self' http://127.0.0.1:38429 tauri://localhost http://tauri.localhost",
 	} {
 		if !strings.Contains(policy, required) {
 			t.Fatalf("policy %q missing %q", policy, required)
@@ -29,6 +29,16 @@ func TestBuildContentSecurityPolicyIsGrantBoundAndOpaque(t *testing.T) {
 	}
 	if strings.Contains(policy, "'unsafe-eval'") || strings.Contains(policy, "script-src https://") {
 		t.Fatalf("policy enables eval or remote scripts: %q", policy)
+	}
+}
+
+func TestBuildContentSecurityPolicyIncludesSelf(t *testing.T) {
+	policy, err := BuildContentSecurityPolicy(nil, []string{"http://127.0.0.1:38429"})
+	if err != nil {
+		t.Fatalf("BuildContentSecurityPolicy() unexpected error: %v", err)
+	}
+	if !strings.Contains(policy, "frame-ancestors 'self' http://127.0.0.1:38429") {
+		t.Fatalf("policy %q does not include the host origin", policy)
 	}
 }
 

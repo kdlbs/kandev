@@ -2,7 +2,9 @@ import type { StoreApi } from "zustand";
 import type { AppState } from "@/lib/state/store";
 import type { WsHandlers } from "@/lib/ws/handlers/types";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
+import type { ReorderBand, ReorderedTaskPosition } from "@/lib/types/http";
 import { mergeTaskRepositoryFields } from "@/lib/ws/handlers/task-repositories";
+import { partitionWipTasks } from "@/lib/kanban/wip-queue";
 
 type KanbanTask = KanbanState["tasks"][number];
 type KanbanStep = KanbanState["steps"][number];
@@ -69,6 +71,7 @@ type KanbanUpdateTask = {
   description?: string;
   position?: number;
   state?: KanbanTask["state"];
+  priority?: KanbanTask["priority"];
   repository_id?: string;
   repositories?: KanbanTask["repositories"];
   is_ephemeral?: boolean;
@@ -86,7 +89,6 @@ type KanbanUpdateTask = {
   blocks?: KanbanTask["blocks"];
   start_when_unblocked?: boolean;
   startWhenUnblocked?: boolean;
-  priority?: KanbanTask["priority"];
 };
 
 /**
@@ -111,6 +113,7 @@ function preserveMultiSnapshotFields(
   | "foregroundActivity"
   | "interrupted"
   | "autoStartFailed"
+  | "workspaceOrphaned"
   | "priority"
 > {
   return {
@@ -124,12 +127,189 @@ function preserveMultiSnapshotFields(
     foregroundActivity: preserveIfUndefined(t.foregroundActivity, fallback?.foregroundActivity),
     interrupted: preserveIfUndefined(t.interrupted, fallback?.interrupted),
     autoStartFailed: preserveIfUndefined(t.autoStartFailed, fallback?.autoStartFailed),
+    workspaceOrphaned: preserveIfUndefined(t.workspaceOrphaned, fallback?.workspaceOrphaned),
     priority: preserveIfUndefined(t.priority, fallback?.priority),
+  };
+}
+
+function applyPositionsToTasks<T extends { id: string; position: number }>(
+  tasks: T[],
+  positionById: Map<string, number>,
+): T[] {
+  let changed = false;
+  const next = tasks.map((task) => {
+    const position = positionById.get(task.id);
+    if (position === undefined || task.position === position) return task;
+    changed = true;
+    return { ...task, position };
+  });
+  return changed ? next : tasks;
+}
+
+const REORDER_BANDS: readonly ReorderBand[] = ["admitted", "queued"];
+
+function highestHeldReorderRevision(
+  withheld: AppState["kanbanMulti"]["withheldReorderByBandKey"],
+  stepId: string,
+): number {
+  return Object.entries(withheld).reduce((highest, [key, payload]) => {
+    if (!key.startsWith(`${stepId}:`) || !payload) return highest;
+    return Math.max(highest, payload.revision);
+  }, -1);
+}
+
+function holdPendingReorderTasks(
+  state: AppState,
+  stepId: string,
+  pendingBands: readonly ReorderBand[],
+  held: Record<ReorderBand, ReorderedTaskPosition[]>,
+  revision: number,
+): AppState {
+  let nextState = state;
+  for (const band of pendingBands) {
+    if (held[band].length === 0) continue;
+    const key = `${stepId}:${band}`;
+    const existing = nextState.kanbanMulti.withheldReorderByBandKey[key];
+    if (existing && existing.revision >= revision) continue;
+    nextState = {
+      ...nextState,
+      kanbanMulti: {
+        ...nextState.kanbanMulti,
+        withheldReorderByBandKey: {
+          ...nextState.kanbanMulti.withheldReorderByBandKey,
+          [key]: { revision, tasks: held[band] },
+        },
+      },
+    };
+  }
+  return nextState;
+}
+
+/**
+ * Classifies every task id in an event's whole-step payload into the band it
+ * currently belongs to, using this client's own last-known membership flags
+ * (a reorder never changes band membership, so a stale-but-recent local copy
+ * is a safe classifier). A task not found locally (e.g. not yet hydrated on
+ * this client) is left unclassified so its position is applied rather than
+ * held against nothing.
+ */
+function classifyTasksByBand(
+  tasks: ReorderedTaskPosition[],
+  stepId: string,
+  membershipSources: KanbanTask[][],
+): Map<string, ReorderBand> {
+  const byId = new Map<string, ReorderBand>();
+  for (const source of membershipSources) {
+    const stepTasks = source.filter((task) => task.workflowStepId === stepId);
+    if (stepTasks.length === 0) continue;
+    const { admitted, queued } = partitionWipTasks(stepTasks, stepId);
+    for (const task of admitted) if (!byId.has(task.id)) byId.set(task.id, "admitted");
+    for (const task of queued) if (!byId.has(task.id)) byId.set(task.id, "queued");
+  }
+  const result = new Map<string, ReorderBand>();
+  for (const task of tasks) {
+    const band = byId.get(task.id);
+    if (band) result.set(task.id, band);
+  }
+  return result;
+}
+
+function makeTaskReorderedHandler(store: StoreApi<AppState>): WsHandlers["task.reordered"] {
+  return (message) => {
+    const { workflow_step_id: stepId, revision, tasks } = message.payload;
+
+    store.setState((state) => {
+      // Asymmetric revision gate (Decision 11 / F31): an unsolicited event
+      // only applies on a strictly-greater revision. A step with no recorded
+      // revision (-1) accepts the first order it ever receives.
+      const currentRevision = state.kanbanMulti.orderRevisionByStepId[stepId] ?? -1;
+      if (revision <= currentRevision) {
+        return state;
+      }
+
+      // A pending band can hold a newer whole-step event while the applied
+      // revision remains unchanged. An older event must not update the
+      // sibling band or replace that buffered snapshot on its way through.
+      const highestHeldRevision = highestHeldReorderRevision(
+        state.kanbanMulti.withheldReorderByBandKey,
+        stepId,
+      );
+      if (revision <= highestHeldRevision) {
+        return state;
+      }
+
+      // AC.27: a band with a reorder request in flight keeps its optimistic
+      // order until that request resolves; this whole-step payload's
+      // position for such a task is held rather than applied, while every
+      // other task in the same payload (the sibling band, or another step
+      // entirely) is applied immediately.
+      const pendingBands = REORDER_BANDS.filter(
+        (band) => state.kanbanMulti.pendingReorderBandKeys[`${stepId}:${band}`],
+      );
+      const bandByTaskId = pendingBands.length
+        ? classifyTasksByBand(tasks, stepId, [
+            state.kanban.tasks,
+            ...Object.values(state.kanbanMulti.snapshots).map((s) => s.tasks),
+          ])
+        : new Map<string, ReorderBand>();
+
+      const held: Record<ReorderBand, ReorderedTaskPosition[]> = { admitted: [], queued: [] };
+      const applyNow: ReorderedTaskPosition[] = [];
+      for (const task of tasks) {
+        const band = bandByTaskId.get(task.id);
+        if (band && pendingBands.includes(band)) {
+          held[band].push(task);
+        } else {
+          applyNow.push(task);
+        }
+      }
+
+      const nextState = holdPendingReorderTasks(state, stepId, pendingBands, held, revision);
+
+      if (applyNow.length === 0) {
+        // Every task in this payload belongs to a band still in flight —
+        // nothing observable changes yet, so the revision scalar is left
+        // alone; the withheld snapshot above carries the revision forward
+        // for reconciliation once the in-flight request resolves.
+        return nextState;
+      }
+
+      const positionById = new Map(applyNow.map((task) => [task.id, task.position]));
+      const nextKanbanTasks = applyPositionsToTasks(nextState.kanban.tasks, positionById);
+      let snapshotsChanged = false;
+      const nextSnapshots: typeof nextState.kanbanMulti.snapshots = {};
+      for (const [workflowId, snapshot] of Object.entries(nextState.kanbanMulti.snapshots)) {
+        const nextTasks = applyPositionsToTasks(snapshot.tasks, positionById);
+        if (nextTasks !== snapshot.tasks) {
+          snapshotsChanged = true;
+          nextSnapshots[workflowId] = { ...snapshot, tasks: nextTasks };
+        } else {
+          nextSnapshots[workflowId] = snapshot;
+        }
+      }
+
+      return {
+        ...nextState,
+        kanban:
+          nextKanbanTasks === nextState.kanban.tasks
+            ? nextState.kanban
+            : { ...nextState.kanban, tasks: nextKanbanTasks },
+        kanbanMulti: {
+          ...nextState.kanbanMulti,
+          snapshots: snapshotsChanged ? nextSnapshots : nextState.kanbanMulti.snapshots,
+          orderRevisionByStepId: {
+            ...nextState.kanbanMulti.orderRevisionByStepId,
+            [stepId]: revision,
+          },
+        },
+      };
+    });
   };
 }
 
 export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
   return {
+    "task.reordered": makeTaskReorderedHandler(store),
     "kanban.update": (message) => {
       const workflowId = message.payload.workflowId;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -141,6 +321,7 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
         events: step.events,
         show_in_command_panel: step.show_in_command_panel,
         agent_profile_id: step.agent_profile_id,
+        auto_advance_requires_signal: step.auto_advance_requires_signal,
         wip_limit: step.wip_limit,
         pull_from_step_id: step.pull_from_step_id ?? null,
       }));
@@ -174,7 +355,11 @@ export function registerKanbanHandlers(store: StoreApi<AppState>): WsHandlers {
               taskPendingAction: existing?.taskPendingAction,
               interrupted: existing?.interrupted,
               autoStartFailed: existing?.autoStartFailed,
+              workspaceOrphaned: existing?.workspaceOrphaned,
               foregroundActivity: existing?.foregroundActivity,
+              // A lightweight kanban.update may omit priority entirely; fall
+              // back to the cached value rather than silently downgrading an
+              // already-known priority to unranked. An explicit `null` clears it.
               priority: preserveIfUndefined(task.priority, existing?.priority),
               ...queueFields(task, existing),
               ...dependencyFields(task, existing),
