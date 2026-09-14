@@ -18,6 +18,7 @@ import {
   readLastAgentError,
   type LastAgentError,
 } from "@/lib/session-last-agent-error";
+import { legacyRecoveryMessageMatchesError } from "@/lib/session-recovery-presentation";
 
 function isSessionActive(state?: TaskSessionState) {
   return state === "RUNNING" || state === "STARTING" || state === "COMPLETED";
@@ -38,29 +39,11 @@ function isCurrentRecoveryMessage(
   if (!currentRecoveryError) return true;
   const currentRecoveryStamp = lastAgentErrorStamp(currentRecoveryError);
   if (messageRecoveryStamp) return currentRecoveryStamp === messageRecoveryStamp;
-  return legacyRecoveryMessageMatchesError(comment, currentRecoveryError);
-}
-
-function legacyRecoveryMessageMatchesError(comment: Message, currentError: LastAgentError) {
-  const content = comment.content.trim();
-  const message = currentError.message.trim();
-  if (!content || !message) return false;
-
-  const contentMatches =
-    content === message ||
-    content === `Agent encountered an error: ${message}` ||
-    content === `Agent startup failed: ${message}` ||
-    ((content.startsWith("Agent encountered an error:") ||
-      content.startsWith("Agent startup failed:")) &&
-      content.endsWith(message));
-  if (!contentMatches) return false;
-
-  // Metadata is written before the transcript row. Exclude an older legacy
-  // row with the same text when both sides carry usable timestamps.
-  if (!currentError.occurredAt) return true;
-  const occurredAt = Date.parse(currentError.occurredAt);
-  const createdAt = Date.parse(comment.created_at);
-  return Number.isNaN(occurredAt) || Number.isNaN(createdAt) || createdAt >= occurredAt;
+  return legacyRecoveryMessageMatchesError(
+    comment.content,
+    comment.created_at,
+    currentRecoveryError,
+  );
 }
 
 function shouldShowRecoveryActions({

@@ -16,6 +16,7 @@ import {
 } from "@/lib/utils/pending-clarification";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { lastAgentErrorStamp, type LastAgentError } from "@/lib/session-last-agent-error";
+import { legacyRecoveryMessageMatchesError } from "@/lib/session-recovery-presentation";
 import {
   buildChildrenByParentToolCallId,
   buildPermissionsByToolCallId,
@@ -398,10 +399,9 @@ export function insertLastAgentErrorItem(
   persistedMessages: Message[] = [],
 ): RenderItem[] {
   if (!resolvedSessionId || !error) return items;
-  const stamp = lastAgentErrorStamp(error);
   if (
     persistedMessages.some((message) =>
-      isPersistedRecoveryForSession(message, resolvedSessionId, stamp),
+      isPersistedRecoveryForSession(message, resolvedSessionId, error),
     )
   ) {
     return items;
@@ -419,13 +419,16 @@ export function insertLastAgentErrorItem(
 function isPersistedRecoveryForSession(
   message: Message,
   sessionId: string,
-  stamp: string,
+  error: LastAgentError,
 ): boolean {
   if (message.session_id !== sessionId) return false;
   const metadata = message.metadata as Record<string, unknown> | undefined;
   if (metadata?.recovery_actions !== true) return false;
   const messageStamp = metadata.error_stamp ?? metadata.recovery_stamp ?? metadata.failure_stamp;
-  return typeof messageStamp === "string" && messageStamp !== "" && messageStamp === stamp;
+  if (typeof messageStamp === "string" && messageStamp !== "") {
+    return messageStamp === lastAgentErrorStamp(error);
+  }
+  return legacyRecoveryMessageMatchesError(message.content, message.created_at, error);
 }
 
 /** Builds the todo checklist from the latest persisted `todo`-type message,

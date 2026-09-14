@@ -1,5 +1,6 @@
 import type { TaskStatusSummaryActiveError } from "./types/task-status-summary";
 import { lastAgentErrorStamp, readLastAgentError } from "./session-last-agent-error";
+import type { LastAgentError } from "./session-last-agent-error";
 import type {
   ResumptionState,
   SessionRecoveryFailure,
@@ -72,4 +73,33 @@ export function ownsSessionRecoveryChat(
   sessionMetadata?: Record<string, unknown> | null,
 ): boolean {
   return selectSessionRecoveryError(activeError, sessionId, sessionMetadata) !== null;
+}
+
+/** Matches a pre-stamp recovery row to the active session error safely. */
+export function legacyRecoveryMessageMatchesError(
+  contentValue: string,
+  createdAt: string | undefined,
+  currentError: LastAgentError,
+): boolean {
+  const content = contentValue.trim();
+  const message = currentError.message.trim();
+  if (!content || !message) return false;
+
+  const contentMatches =
+    content === message ||
+    content === `Agent encountered an error: ${message}` ||
+    content === `Agent startup failed: ${message}` ||
+    ((content.startsWith("Agent encountered an error:") ||
+      content.startsWith("Agent startup failed:")) &&
+      content.endsWith(message));
+  if (!contentMatches) return false;
+
+  // Metadata is written before the transcript row. Exclude an older legacy
+  // row with the same text when both sides carry usable timestamps.
+  if (!currentError.occurredAt) return true;
+  const occurredAt = Date.parse(currentError.occurredAt);
+  const messageCreatedAt = Date.parse(createdAt ?? "");
+  return (
+    Number.isNaN(occurredAt) || Number.isNaN(messageCreatedAt) || messageCreatedAt >= occurredAt
+  );
 }
