@@ -272,6 +272,52 @@ func TestListInboxHistoryBundlesPendingIDReuseAcrossTurns(t *testing.T) {
 	}
 }
 
+// TestListInboxHistoryBundlesPendingIDReusePermissionGroupKeyDistinguishesRequests
+// pins that once a reused pending_id's second request is itself superseded and
+// returned, its PermissionGroupKey is its own request_id rather than the first
+// (already-resolved) request's -- message hydration keys off this field to
+// keep the two requests' rendered content apart even though
+// FindMessagesByPendingIDs returns every message sharing the raw pending_id.
+func TestListInboxHistoryBundlesPendingIDReusePermissionGroupKeyDistinguishesRequests(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Date(2026, time.September, 1, 17, 0, 0, 0, time.UTC)
+
+	seedInboxHistorySession(t, repo, "task-reused-group-key", "session-reused-group-key", "ws-1", models.TaskSessionStateWaitingForInput, false)
+	createPendingActionTurn(t, repo, "task-reused-group-key", "session-reused-group-key", "turn-a-old", base, base)
+	createInteractionMessage(t, repo, "perm-group-key-old", "task-reused-group-key", "session-reused-group-key", "turn-a-old",
+		models.MessageTypePermissionRequest,
+		map[string]interface{}{"pending_id": "pending-reused-group-key", "request_id": "req-old-group-key", "status": "approved"},
+		base)
+
+	createPendingActionTurn(t, repo, "task-reused-group-key", "session-reused-group-key", "turn-b-new", base.Add(time.Minute), base.Add(time.Minute))
+	createInteractionMessage(t, repo, "perm-group-key-new", "task-reused-group-key", "session-reused-group-key", "turn-b-new",
+		models.MessageTypePermissionRequest,
+		map[string]interface{}{"pending_id": "pending-reused-group-key", "request_id": "req-new-group-key"},
+		base.Add(time.Minute))
+
+	// A third turn supersedes turn-b-new without answering it, making the new
+	// request itself History-eligible.
+	createPendingActionTurn(t, repo, "task-reused-group-key", "session-reused-group-key", "turn-c", base.Add(2*time.Minute), base.Add(2*time.Minute))
+	createPendingActionMessage(t, repo, "ordinary-group-key", "task-reused-group-key", "session-reused-group-key", "turn-c",
+		models.MessageTypeMessage, "<missing>", base.Add(2*time.Minute))
+
+	page, err := repo.ListInboxHistoryBundles(ctx, unscopedHistoryOpts("ws-1", 50))
+	if err != nil {
+		t.Fatalf("ListInboxHistoryBundles: %v", err)
+	}
+	bundle, found := findHistoryBundle(page.Bundles, "pending-reused-group-key")
+	if !found {
+		t.Fatalf("history listing did not return the superseded reused-pending_id bundle: %+v", page.Bundles)
+	}
+	if bundle.Reason != models.ClarificationHistoryReasonSuperseded {
+		t.Fatalf("reason = %q, want superseded", bundle.Reason)
+	}
+	if bundle.PermissionGroupKey != "req-new-group-key" {
+		t.Fatalf("PermissionGroupKey = %q, want req-new-group-key (must not resolve to the old, already-resolved request's key)", bundle.PermissionGroupKey)
+	}
+}
+
 // TestListInboxHistoryBundlesExcludesArchivedAndParentQuestion pins AC .4
 // (archived task) and AC .2's parent_question eligibility clause.
 func TestListInboxHistoryBundlesExcludesArchivedAndParentQuestion(t *testing.T) {

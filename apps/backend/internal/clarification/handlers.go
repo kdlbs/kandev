@@ -29,6 +29,7 @@ const (
 	metaTaskIDKey     = "task_id"
 	metaPendingIDKey  = "pending_id"
 	metaRejectedKey   = "rejected"
+	metaRequestIDKey  = "request_id"
 
 	clarificationPersistenceTimeout = 30 * time.Second
 

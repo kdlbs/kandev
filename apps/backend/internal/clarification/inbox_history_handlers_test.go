@@ -281,6 +281,64 @@ func TestOrderInboxHistoryMessages_ThreeKeySort(t *testing.T) {
 	}
 }
 
+// TestBuildInboxHistoryBundleViews_FiltersReusedPendingIDMessagesByPermissionGroupKey
+// pins that FindMessagesByPendingIDs returning both an old (unrelated,
+// already-resolved) and a new permission message under one reused pending_id
+// does not leak the old request's content into the new request's bundle:
+// filterMessagesByPermissionGroupKey must narrow hydration down to the
+// bundle's own PermissionGroupKey before rendering.
+func TestBuildInboxHistoryBundleViews_FiltersReusedPendingIDMessagesByPermissionGroupKey(t *testing.T) {
+	created := testInboxNow.Add(-time.Hour)
+	oldMsg := &taskmodels.Message{
+		ID: "perm-old-msg", TaskSessionID: "sess-1", TaskID: "task-1",
+		Type: taskmodels.MessageTypePermissionRequest, Content: "old: delete /tmp?",
+		CreatedAt: created,
+		Metadata:  map[string]any{"request_id": "req-old"},
+	}
+	newMsg := &taskmodels.Message{
+		ID: "perm-new-msg", TaskSessionID: "sess-1", TaskID: "task-1",
+		Type: taskmodels.MessageTypePermissionRequest, Content: "new: run tests?",
+		CreatedAt: created.Add(time.Minute),
+		Metadata:  map[string]any{"request_id": "req-new"},
+	}
+	// FindMessagesByPendingIDs returns every message sharing the raw
+	// pending_id, including the old, unrelated request's once a provider
+	// reuses it.
+	msgs := map[string][]*taskmodels.Message{
+		"pend-reused": {oldMsg, newMsg},
+	}
+	tasks := &fakeInboxTasksWithWorkflow{fakeInboxTasks: &fakeInboxTasks{
+		tasks: map[string]*taskmodels.Task{"task-1": {ID: "task-1", Title: "Do the thing"}},
+	}}
+	bundles := &fakeInboxBundleStoreWithHistory{fakeInboxBundleStore: &fakeInboxBundleStore{}}
+	h := newInboxHistoryTestHandler(t, msgs, tasks, bundles)
+
+	views, err := h.buildInboxHistoryBundleViews(context.Background(), []taskmodels.ClarificationHistoryBundleSummary{
+		{
+			PendingID:          "pend-reused",
+			TaskID:             "task-1",
+			SessionID:          "sess-1",
+			CreatedAt:          created.Add(time.Minute),
+			Reason:             taskmodels.ClarificationHistoryReasonSuperseded,
+			AskingTurnID:       "turn-b",
+			PermissionGroupKey: "req-new",
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildInboxHistoryBundleViews: %v", err)
+	}
+	if len(views) != 1 {
+		t.Fatalf("expected 1 view, got %d: %+v", len(views), views)
+	}
+	got := views[0]
+	if len(got.Messages) != 1 {
+		t.Fatalf("expected the reused pending_id's hydration to keep only the bundle's own request's message, got %d: %+v", len(got.Messages), got.Messages)
+	}
+	if got.Messages[0].ID != "perm-new-msg" {
+		t.Fatalf("expected only the new request's message to render, got %q (old, unrelated request's content leaked through)", got.Messages[0].ID)
+	}
+}
+
 func TestInboxHistoryBundleKind_PermissionVsClarification(t *testing.T) {
 	perm := []*taskmodels.Message{{Type: taskmodels.MessageTypePermissionRequest}}
 	if got := inboxHistoryBundleKind(perm); got != "permission" {

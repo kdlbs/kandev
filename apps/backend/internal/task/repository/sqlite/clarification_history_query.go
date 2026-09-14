@@ -90,7 +90,7 @@ const inboxHistoryWhereClause = `WHERE r.has_pending = 1
 // already references by CTE column name.
 const inboxHistorySelectColumns = `r.pending_id, r.session_id, r.task_id, r.created_at, r.bundle_type,
        r.turn_id, r.current_turn_id, r.turn_mismatch, r.permission_not_newest,
-       r.is_session_ended, r.is_unreadable`
+       r.is_session_ended, r.is_unreadable, r.permission_group_key`
 
 // inboxHistoryQueryBase builds the two CTEs shared by the page and count
 // queries: `bundles` groups messages into per-pending_id aggregates exactly
@@ -135,6 +135,7 @@ func inboxHistoryQueryBase(drv string) string {
         MIN(m.created_at) AS created_at,
         MIN(m.type) AS bundle_type,
         MIN(m.turn_id) AS turn_id,
+        %[8]s AS permission_group_key,
         MAX(CASE WHEN COALESCE(%[2]s, '') IN ('', 'pending') THEN 1 ELSE 0 END) AS has_pending,
         MAX(CASE WHEN %[3]s = '' THEN 1 ELSE 0 END) AS has_missing_question_id,
         MAX(CASE WHEN pr.rn IS NOT NULL AND pr.rn > 1 THEN 1 ELSE 0 END) AS permission_not_newest
@@ -205,19 +206,20 @@ func scanInboxHistoryBundleRows(rows *sql.Rows, isPostgres bool) ([]models.Clari
 			currentTurnID                                    sql.NullString
 			turnMismatch, permissionNotNewest                int
 			isSessionEnded, isUnreadable                     int
+			permissionGroupKey                               string
 			createdAt                                        time.Time
 		)
 		if isPostgres {
 			if err := rows.Scan(&pendingID, &sessionID, &taskID, &createdAt, &bundleType,
 				&turnID, &currentTurnID, &turnMismatch, &permissionNotNewest,
-				&isSessionEnded, &isUnreadable); err != nil {
+				&isSessionEnded, &isUnreadable, &permissionGroupKey); err != nil {
 				return nil, err
 			}
 		} else {
 			var createdAtRaw string
 			if err := rows.Scan(&pendingID, &sessionID, &taskID, &createdAtRaw, &bundleType,
 				&turnID, &currentTurnID, &turnMismatch, &permissionNotNewest,
-				&isSessionEnded, &isUnreadable); err != nil {
+				&isSessionEnded, &isUnreadable, &permissionGroupKey); err != nil {
 				return nil, err
 			}
 			createdAt = parseLegacyTimestamp(createdAtRaw)
@@ -225,11 +227,12 @@ func scanInboxHistoryBundleRows(rows *sql.Rows, isPostgres bool) ([]models.Clari
 
 		isSuperseded := turnMismatch == 1 || (bundleType == "permission_request" && permissionNotNewest == 1)
 		summary := models.ClarificationHistoryBundleSummary{
-			PendingID:    pendingID,
-			SessionID:    sessionID,
-			TaskID:       taskID,
-			CreatedAt:    createdAt,
-			AskingTurnID: turnID,
+			PendingID:          pendingID,
+			SessionID:          sessionID,
+			TaskID:             taskID,
+			CreatedAt:          createdAt,
+			AskingTurnID:       turnID,
+			PermissionGroupKey: permissionGroupKey,
 		}
 		switch {
 		case isSuperseded:

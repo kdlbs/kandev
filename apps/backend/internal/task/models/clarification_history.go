@@ -41,6 +41,15 @@ type ClarificationHistoryBundleSummary struct {
 	// and has no separate superseding turn to name, so this stays empty --
 	// AC .10 requires the field omitted, never a fabricated identifier.
 	SupersedingTurnID string
+	// PermissionGroupKey identifies which logical request this bundle's rows
+	// belong to when a permission pending_id is reused across two distinct
+	// requests: the request's own request_id, falling back to a message id
+	// when request_id is absent. Empty for a clarification bundle, whose
+	// pending_id is never reused. Message hydration must filter a
+	// pending_id's messages down to this key before rendering, since
+	// FindMessagesByPendingIDs returns every message sharing the raw
+	// pending_id regardless of which logical request it belongs to.
+	PermissionGroupKey string
 }
 
 // ListClarificationHistoryOptions filters and paginates

@@ -120,7 +120,7 @@ func (h *Handlers) buildInboxHistoryBundleViews(
 
 	views := make([]inboxHistoryBundleView, 0, len(bundles))
 	for _, b := range bundles {
-		msgs := messagesByPendingID[b.PendingID]
+		msgs := filterMessagesByPermissionGroupKey(messagesByPendingID[b.PendingID], b.PermissionGroupKey)
 		if len(msgs) == 0 {
 			h.logger.Warn("inbox history bundle has no resolvable messages; omitting from page",
 				zap.String("pending_id", b.PendingID))
@@ -177,6 +177,40 @@ func buildInboxHistoryBundleView(
 		view.StepStartsNoAgent = flag
 	}
 	return view
+}
+
+// filterMessagesByPermissionGroupKey keeps only the messages belonging to
+// this bundle's own logical request. FindMessagesByPendingIDs returns every
+// message sharing a raw pending_id, including an unrelated request's when a
+// permission pending_id has been reused (clarification_history_query.go's
+// permissionGroupKeyExpr comment); groupKey is empty for a clarification
+// bundle, whose pending_id is never reused, so every message passes
+// unfiltered.
+func filterMessagesByPermissionGroupKey(msgs []*taskmodels.Message, groupKey string) []*taskmodels.Message {
+	if groupKey == "" {
+		return msgs
+	}
+	filtered := make([]*taskmodels.Message, 0, len(msgs))
+	for _, m := range msgs {
+		if permissionGroupKeyFromMessage(m) == groupKey {
+			filtered = append(filtered, m)
+		}
+	}
+	return filtered
+}
+
+// permissionGroupKeyFromMessage mirrors clarification_history_query.go's
+// permissionGroupKeyExpr exactly: a permission message's own request_id,
+// falling back to its message id when request_id is absent; empty for any
+// other message type.
+func permissionGroupKeyFromMessage(m *taskmodels.Message) string {
+	if m.Type != taskmodels.MessageTypePermissionRequest {
+		return ""
+	}
+	if requestID := stringFromMetadata(m.Metadata, metaRequestIDKey); requestID != "" {
+		return requestID
+	}
+	return m.ID
 }
 
 // inboxHistoryBundleKind derives AC .12/.30's kind label from the bundle's
