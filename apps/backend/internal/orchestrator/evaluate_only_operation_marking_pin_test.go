@@ -16,10 +16,12 @@ package orchestrator
 // agent_error_fire_site_pin_test.go, reusing its shared AST-walk helpers.
 
 import (
+	"bytes"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
@@ -29,6 +31,8 @@ import (
 
 var registeredEvaluateOnlyOperationMarkingSites = []string{
 	"internal/orchestrator/Service.dispatchKanbanAgentErrorTrigger",
+	"internal/orchestrator/Service.processOnTurnCompleteViaEngineWithCause",
+	"internal/orchestrator/Service.processOnTurnStartViaEngine",
 	// evaluateChildrenCompleted sets DeferOperationMark: true (added by
 	// #3447), not this spec's OperationMarkDeferred output flag. Its caller,
 	// processOnChildrenCompleted, marks the operation itself via
@@ -160,7 +164,16 @@ func findEvaluateOnlyOperationMarkingSites(root string) (map[string]bool, error)
 	found := make(map[string]bool)
 	fset := token.NewFileSet()
 	for _, path := range paths {
-		file, parseErr := parser.ParseFile(fset, path, nil, 0)
+		source, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return nil, readErr
+		}
+		if !bytes.Contains(source, []byte("HandleInput")) ||
+			!bytes.Contains(source, []byte("EvaluateOnly")) ||
+			!bytes.Contains(source, []byte("OperationID")) {
+			continue
+		}
+		file, parseErr := parser.ParseFile(fset, path, source, 0)
 		if parseErr != nil {
 			return nil, parseErr
 		}

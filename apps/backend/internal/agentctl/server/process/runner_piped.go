@@ -76,7 +76,7 @@ func (r *ProcessRunner) StartPiped(req PipedStartRequest) (*PipedProcess, error)
 	r.publishStatus(proc)
 
 	if err := r.startAndActivate(
-		proc, cmd, id, streams.stdoutReader, streams.stderrReader, false, !req.PipeStderr,
+		proc, cmd, id, streams.stdoutReader, streams.stderrReader, nil, false, !req.PipeStderr,
 	); err != nil {
 		return nil, err
 	}

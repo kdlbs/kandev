@@ -254,6 +254,7 @@ type PersistWorkflowDraftParams = {
   draftSteps: WorkflowStep[];
   savedSteps: WorkflowStep[];
   progress: WorkflowDraftSaveProgress;
+  deletedStepIds?: string[];
 };
 
 export async function persistWorkflowDraft({
@@ -261,6 +262,7 @@ export async function persistWorkflowDraft({
   draftSteps,
   savedSteps,
   progress,
+  deletedStepIds = [],
 }: PersistWorkflowDraftParams): Promise<{ workflow: Workflow; steps: WorkflowStep[] }> {
   const isNewWorkflow = workflow.id.startsWith(TEMP_WORKFLOW_PREFIX);
   const persistedWorkflow = await ensurePersistedWorkflow(workflow, progress);
@@ -275,6 +277,7 @@ export async function persistWorkflowDraft({
   await createMissingSteps(updatedWorkflow.id, draftSteps, progress.stepIds);
   const remappedSteps = remapWorkflowDraftSteps(draftSteps, updatedWorkflow.id, progress.stepIds);
   await updateChangedSteps(remappedSteps, savedSteps);
+  await deleteRemovedSteps(deletedStepIds, isNewWorkflow);
   if (remappedSteps.length > 0) {
     await reorderWorkflowStepsAction(
       updatedWorkflow.id,
@@ -282,6 +285,11 @@ export async function persistWorkflowDraft({
     );
   }
   return { workflow: updatedWorkflow, steps: remappedSteps };
+}
+
+async function deleteRemovedSteps(stepIds: string[], isNewWorkflow: boolean) {
+  if (isNewWorkflow) return;
+  for (const stepId of stepIds) await deleteWorkflowStepAction(stepId);
 }
 
 async function ensurePersistedWorkflow(

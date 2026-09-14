@@ -220,6 +220,7 @@ func TestProcessManualMoveLifecycle_UnknownSourceKeepsLifecyclePending(t *testin
 	fixture.svc.processManualMoveLifecycleWithFeederBarrier(
 		ctx, "t1", fixture.current, nil, target,
 		"missing-source", target.ID, "Test",
+		0,
 	)
 
 	stored, err := fixture.repo.GetTask(ctx, "t1")

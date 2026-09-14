@@ -934,6 +934,21 @@ test('six work orders sharing three requirements stay within the search quota', 
 });
 
 // @covers AC-CI-PR-DOCS-001.4, AC-CI-PR-DOCS-003.2
+test('changed requirement definitions do not depend on code-search indexing', async () => {
+  const { contents, changed, requirementPath } = repeatedCoverageFixture();
+  changed.push({ filename: requirementPath, status: 'added', changes: 1 });
+  const client = coverageClient(contents, changed, {
+    async searchCode() {
+      throw new Error('GitHub API request failed with HTTP 503: Service Unavailable');
+    },
+  });
+
+  const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+
+  assert.equal(result.status, 'covered', result.errors.join('; '));
+});
+
+// @covers AC-CI-PR-DOCS-001.4, AC-CI-PR-DOCS-003.2
 test('PR-only requirements and empty searches reuse a bounded directory lookup', async () => {
   const { contents, changed, requirementPath, requirementIds } = repeatedCoverageFixture();
   changed.push({ filename: requirementPath, status: 'added' });
@@ -1031,20 +1046,21 @@ test('lookup errors fail closed without poisoning later evaluations', async t =>
   for (const boundary of ['searchCode', 'listDirectory']) {
     await t.test(boundary, async () => {
       const { contents, changed, requirementPath } = repeatedCoverageFixture();
-      changed.push({ filename: requirementPath, status: 'added' });
+      const fallbackPath = 'docs/specs/ui/requirements/coverage.md';
+      contents[fallbackPath] = contents[requirementPath];
       let fail = true;
       const client = coverageClient(contents, changed, {
         async searchCode() {
           if (fail && boundary === 'searchCode') {
             throw new Error('GitHub API request failed with HTTP 403: API rate limit exceeded');
           }
-          return [];
+          return boundary === 'searchCode' ? [requirementPath] : [];
         },
         async listDirectory() {
           if (fail && boundary === 'listDirectory') {
             throw new Error('GitHub API request failed with HTTP 503: Service Unavailable');
           }
-          return [];
+          return [{ path: fallbackPath, type: 'file' }];
         },
       });
 

@@ -22,11 +22,13 @@ test.describe("Workflow task completion on mobile", () => {
     const settings = new WorkflowSettingsPage(testPage);
     await settings.goto(seedData.workspaceId);
     const card = await settings.findWorkflowCard(workflow.name, { waitForName: true });
-    await settings.selectStep(card, "Draft", true);
+    const firstPanel = await settings.selectStep(card, "Draft", true);
+    await firstPanel.getByTestId("workflow-editor-tab-policies").tap();
     await expect(settings.completeTaskOnEnterCheckbox(card, first.id)).toHaveCount(0);
     await expect(settings.completeTaskOnEnterHelp(card, first.id)).toHaveCount(0);
 
-    await settings.selectStep(card, "Done", true);
+    const finalPanel = await settings.selectStep(card, "Done", true);
+    await finalPanel.getByTestId("workflow-editor-tab-policies").tap();
     const checkbox = settings.completeTaskOnEnterCheckbox(card, final.id);
     const help = settings.completeTaskOnEnterHelp(card, final.id);
     await expect(checkbox).toBeChecked();

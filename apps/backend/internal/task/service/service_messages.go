@@ -205,7 +205,7 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 
 	// Ensure we have a turn ID - get active turn or start a new one
 	turnID := req.TurnID
-	if turnID == "" {
+	if turnID == "" && !req.SkipTurn {
 		var turn *models.Turn
 		if req.CompletedTurn {
 			turn, err = s.createCompletedTurn(ctx, session)
@@ -488,6 +488,19 @@ func (s *Service) validateMessageReplay(
 // It includes retry logic to handle transient database errors and ensure
 // message chunks are not lost during streaming.
 func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *CreateMessageRequest) (*models.Message, error) {
+	unlock := s.lockMessageCreation(id)
+	defer unlock()
+
+	// Resolve idempotency before session or turn side effects. A replay must
+	// return the committed row without creating an orphan completed turn.
+	existing, err := s.messages.GetMessageWithPromptIndex(ctx, id)
+	if err == nil && existing != nil {
+		return existing, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("check existing message: %w", err)
+	}
+
 	if err := preparePlanCommentMessageRequest(req); err != nil {
 		return nil, err
 	}
@@ -497,6 +510,15 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 	session, err := s.getSessionWithRetry(ctx, req.TaskSessionID, id, messageCreateMaxRetries, messageCreateRetryDelay)
 	if err != nil {
 		return nil, err
+	}
+	if req.CompletedTurn && req.TurnID == "" && !req.SkipTurn {
+		turn, turnErr := s.createCompletedTurn(ctx, session)
+		if turnErr != nil {
+			return nil, turnErr
+		}
+		copyRequest := *req
+		copyRequest.TurnID = turn.ID
+		req = &copyRequest
 	}
 
 	message, err := s.buildMessage(ctx, id, req, session)
@@ -605,7 +627,7 @@ func (s *Service) buildMessage(ctx context.Context, id string, req *CreateMessag
 	}
 
 	turnID := req.TurnID
-	if turnID == "" {
+	if turnID == "" && !req.SkipTurn {
 		if turn, err := s.getOrStartTurnWithRetry(
 			ctx,
 			req.TaskSessionID,
@@ -636,6 +658,31 @@ func (s *Service) buildMessage(ctx context.Context, id string, req *CreateMessag
 		// CreatedAt deliberately left zero: the repository's atomic per-session
 		// create boundary assigns it (live creates advance a colliding key).
 	}, nil
+}
+
+func (s *Service) lockMessageCreation(id string) func() {
+	s.messageCreateLocksMu.Lock()
+	if s.messageCreateLocks == nil {
+		s.messageCreateLocks = make(map[string]*messageCreateLock)
+	}
+	lock, ok := s.messageCreateLocks[id]
+	if !ok {
+		lock = &messageCreateLock{}
+		s.messageCreateLocks[id] = lock
+	}
+	lock.refs++
+	s.messageCreateLocksMu.Unlock()
+
+	lock.mu.Lock()
+	return func() {
+		lock.mu.Unlock()
+		s.messageCreateLocksMu.Lock()
+		lock.refs--
+		if lock.refs == 0 && s.messageCreateLocks[id] == lock {
+			delete(s.messageCreateLocks, id)
+		}
+		s.messageCreateLocksMu.Unlock()
+	}
 }
 
 // createMessageWithRetry persists a message with retry logic for transient DB errors.

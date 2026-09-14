@@ -621,9 +621,24 @@ func (s *Service) MoveTaskWithOptions(
 		}
 	}
 	stateAfterAdmission := *task
+	sessionID := ""
+	lifecycleOccurrenceID := ""
+	lifecycleExitCompleted := false
 	if stepChanged {
 		if err := s.syncTaskStateForWorkflowMove(ctx, &stateAfterAdmission, oldStepID, workflowStepID, opts); err != nil {
 			return nil, fmt.Errorf("failed to sync task state for workflow move: %w", err)
+		}
+		if activeSession := s.resolvePrimaryOrActiveSession(ctx, id); activeSession != nil {
+			sessionID = activeSession.ID
+			if s.workflowMoveLifecycleGate != nil {
+				lifecycleOccurrenceID = uuid.NewString()
+				if err := s.workflowMoveLifecycleGate.BeforeWorkflowMove(
+					ctx, id, oldStepID, workflowStepID, sessionID, lifecycleOccurrenceID,
+				); err != nil {
+					return nil, fmt.Errorf("workflow move blocked by source-step lifecycle: %w", err)
+				}
+				lifecycleExitCompleted = true
+			}
 		}
 	}
 
@@ -647,6 +662,13 @@ func (s *Service) MoveTaskWithOptions(
 		task.QueuedAt = nil
 		task.Metadata[models.MetaKeyQueuedMoveExitPending] = map[string]interface{}{
 			"from_step_id": oldStepID,
+		}
+		if lifecycleExitCompleted {
+			task.Metadata[models.MetaKeyQueuedMoveExitPending] = map[string]interface{}{
+				"from_step_id":   oldStepID,
+				"exit_completed": true,
+				"occurrence_id":  lifecycleOccurrenceID,
+			}
 		}
 		// The one-shot options ride on the pending marker itself: it is the
 		// sole live transport for a direct optioned move. task.moved publishes
@@ -673,13 +695,16 @@ func (s *Service) MoveTaskWithOptions(
 	// the move whenever an active session exists. The admission repository removes
 	// the queued-exit marker for admitted tasks, so this separate marker carries
 	// the barrier across the task.moved event without changing WIP admission.
-	sessionID := ""
 	if stepChanged {
-		if activeSession := s.resolvePrimaryOrActiveSession(ctx, id); activeSession != nil {
-			sessionID = activeSession.ID
-			task.Metadata[models.MetaKeyManualMoveLifecyclePending] = map[string]interface{}{
+		if sessionID != "" {
+			descriptor := map[string]interface{}{
 				"from_step_id": oldStepID,
 			}
+			if lifecycleExitCompleted {
+				descriptor["exit_completed"] = true
+				descriptor["occurrence_id"] = lifecycleOccurrenceID
+			}
+			task.Metadata[models.MetaKeyManualMoveLifecyclePending] = descriptor
 		}
 	}
 

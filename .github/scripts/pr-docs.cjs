@@ -1233,21 +1233,39 @@ async function loadCoverageContents({ client, changedFiles, headSha }) {
       const referencedRequirementIds = designRequirements.filter(requirementId =>
         workOrderRequirements.has(requirementId)
       );
-      if (typeof client.searchCode === 'function') {
+      const changedRequirementIds = new Set();
+      for (const pathname of requirementPaths) {
+        const content = await load(pathname);
+        if (typeof content !== 'string') {
+          continue;
+        }
         for (const requirementId of referencedRequirementIds) {
-          const searchKey = JSON.stringify([requirementDirectory, requirementId]);
-          if (!requirementSearches.has(searchKey)) {
-            requirementSearches.set(
-              searchKey,
-              await client.searchCode(requirementId, requirementDirectory),
-            );
+          if (requirementHeadingPattern(requirementId).test(content)) {
+            changedRequirementIds.add(requirementId);
           }
-          const matches = requirementSearches.get(searchKey);
-          if (matches.length === 0) {
-            unresolvedRequirementIds.push(requirementId);
+        }
+      }
+      if (typeof client.searchCode === 'function') {
+        try {
+          for (const requirementId of referencedRequirementIds) {
+            const searchKey = JSON.stringify([requirementDirectory, requirementId]);
+            if (!requirementSearches.has(searchKey)) {
+              requirementSearches.set(
+                searchKey,
+                await client.searchCode(requirementId, requirementDirectory),
+              );
+            }
+            const matches = requirementSearches.get(searchKey);
+            if (matches.length === 0) {
+              unresolvedRequirementIds.push(requirementId);
+            }
+            for (const pathname of matches) {
+              requirementPaths.add(pathname);
+            }
           }
-          for (const pathname of matches) {
-            requirementPaths.add(pathname);
+        } catch (error) {
+          if (referencedRequirementIds.some(requirementId => !changedRequirementIds.has(requirementId))) {
+            throw error;
           }
         }
       } else {

@@ -30,11 +30,13 @@ test.describe("Workflow task completion", () => {
     const card = await settings.findWorkflowCard(workflow.name, { waitForName: true });
     await expect(card).toBeVisible();
 
-    await settings.selectStep(card, "Review");
+    const reviewPanel = await settings.selectStep(card, "Review");
+    await reviewPanel.getByTestId("workflow-editor-tab-policies").click();
     await expect(settings.completeTaskOnEnterCheckbox(card, middle.id)).toHaveCount(0);
     await expect(settings.completeTaskOnEnterHelp(card, middle.id)).toHaveCount(0);
 
-    await settings.selectStep(card, "Done");
+    const donePanel = await settings.selectStep(card, "Done");
+    await donePanel.getByTestId("workflow-editor-tab-policies").click();
     const checkbox = settings.completeTaskOnEnterCheckbox(card, done.id);
     const help = settings.completeTaskOnEnterHelp(card, done.id);
     await expect(checkbox).toBeChecked();
@@ -61,16 +63,19 @@ test.describe("Workflow task completion", () => {
     await testPage.reload();
     await settings.goto(seedData.workspaceId);
     const reloadedCard = await settings.findWorkflowCard(workflow.name, { waitForName: true });
-    await settings.selectStep(reloadedCard, "Done");
+    const reloadedDonePanel = await settings.selectStep(reloadedCard, "Done");
+    await reloadedDonePanel.getByTestId("workflow-editor-tab-policies").click();
     await expect(settings.completeTaskOnEnterCheckbox(reloadedCard, done.id)).not.toBeChecked();
 
     // Move the saved step away from the end and back. Its persisted value stays
     // attached to the step, while the control follows final position.
     await settings.reorderStep(reloadedCard, "Done", "Review");
-    await settings.selectStep(reloadedCard, "Done");
+    const movedDonePanel = await settings.selectStep(reloadedCard, "Done");
+    await movedDonePanel.getByTestId("workflow-editor-tab-policies").click();
     await expect(settings.completeTaskOnEnterCheckbox(reloadedCard, done.id)).toHaveCount(0);
     await settings.reorderStep(reloadedCard, "Done", "Review");
-    await settings.selectStep(reloadedCard, "Done");
+    const restoredDonePanel = await settings.selectStep(reloadedCard, "Done");
+    await restoredDonePanel.getByTestId("workflow-editor-tab-policies").click();
     await expect(settings.completeTaskOnEnterCheckbox(reloadedCard, done.id)).toBeVisible();
     await expect(settings.completeTaskOnEnterCheckbox(reloadedCard, done.id)).not.toBeChecked();
     if (await settings.floatingSave.isVisible().catch(() => false)) {
