@@ -62,7 +62,11 @@ describe("CommitDiffView error state", () => {
     expect(screen.getByRole("alert").textContent).toContain("Commit detail unavailable");
     expect(screen.queryByText("No files in this commit")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    const retryButton = screen.getByRole("button", { name: "Retry" });
+    expect(retryButton.getAttribute("data-size")).toBe("default");
+    expect(retryButton.className).toContain("h-7");
+    expect(retryButton.className).toContain("pointer:coarse");
+    fireEvent.click(retryButton);
     expect(mocks.refetch).toHaveBeenCalledOnce();
   });
 });

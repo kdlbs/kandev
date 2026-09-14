@@ -974,9 +974,10 @@ func TestServerModeConfig_ToolCount(t *testing.T) {
 
 	s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeConfig)
 	tools := getRegisteredToolNames(s)
-	// Baseline 36 tools plus the audited cross-workspace transfer tool.
+	// Baseline 36 tools plus the five compact settings tools and the audited
+	// cross-workspace transfer tool.
 	assert.NotContains(t, tools, "step_complete_kandev", "step_complete_kandev requires a live task session; must NOT register in config mode")
-	assert.Equal(t, 37, len(tools))
+	assert.Equal(t, 42, len(tools))
 }
 
 func TestServerModeConfig_ToolDescriptions(t *testing.T) {
@@ -1031,6 +1032,7 @@ func TestServerModeOffice_RegistersCorrectTools(t *testing.T) {
 
 	// Office mode should NOT have kanban tools
 	assert.NotContains(t, tools, "create_task_kandev")
+	assert.NotContains(t, tools, "create_office_task_kandev")
 	assert.NotContains(t, tools, "list_tasks_kandev")
 	assert.NotContains(t, tools, "update_task_kandev")
 	assert.NotContains(t, tools, "list_workspaces_kandev")
@@ -1153,9 +1155,10 @@ func TestServerModeExternal_ToolCount(t *testing.T) {
 
 	s := New(backend, "", "", 0, log, "", true, ModeExternal)
 	tools := getRegisteredToolNames(s)
-	// Baseline 42 tools plus the audited cross-workspace transfer tool.
+	// Baseline 42 tools plus the five compact settings tools and the audited
+	// cross-workspace transfer tool.
 	// add_branch_to_task_kandev is task-mode only — external coding agents have no live session to attach a worktree to.
-	assert.Equal(t, 43, len(tools))
+	assert.Equal(t, 48, len(tools))
 	assert.NotContains(t, tools, "add_branch_to_task_kandev")
 }
 

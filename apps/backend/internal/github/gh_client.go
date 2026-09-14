@@ -772,6 +772,40 @@ func (c *GHClient) ListCheckRuns(ctx context.Context, owner, repo, ref string) (
 	return mergeChecks(convertRawCheckRuns(checkRunsRaw), convertRawStatusContexts(statusRaw)), nil
 }
 
+func (c *GHClient) ListWorkflowRuns(ctx context.Context, owner, repo, headSHA string) ([]WorkflowRun, error) {
+	runsOut, err := c.run(ctx, "api", "--paginate",
+		fmt.Sprintf("repos/%s/%s/actions/runs?head_sha=%s&per_page=100", owner, repo, url.QueryEscape(headSHA)),
+		"--jq", ".workflow_runs[]")
+	if err != nil {
+		return nil, fmt.Errorf("list workflow runs: %w", err)
+	}
+	runsRaw, err := decodeGHWorkflowRuns(runsOut)
+	if err != nil {
+		return nil, fmt.Errorf("parse workflow runs: %w", err)
+	}
+	runs := make([]WorkflowRun, 0, len(runsRaw))
+	for _, raw := range runsRaw {
+		runs = append(runs, convertRawWorkflowRun(raw))
+	}
+	return runs, nil
+}
+
+func (c *GHClient) ListWorkflowRunJobs(ctx context.Context, owner, repo string, runID int64, attempt int) ([]WorkflowJob, error) {
+	endpoint := fmt.Sprintf("repos/%s/%s/actions/runs/%d/jobs?per_page=100", owner, repo, runID)
+	if attempt > 0 {
+		endpoint = fmt.Sprintf("repos/%s/%s/actions/runs/%d/attempts/%d/jobs?per_page=100", owner, repo, runID, attempt)
+	}
+	jobsOut, err := c.run(ctx, "api", "--paginate", endpoint, "--jq", ".jobs[]")
+	if err != nil {
+		return nil, fmt.Errorf("list workflow jobs: %w", err)
+	}
+	jobsRaw, err := decodeGHWorkflowJobs(jobsOut)
+	if err != nil {
+		return nil, fmt.Errorf("parse workflow jobs: %w", err)
+	}
+	return convertRawWorkflowJobs(jobsRaw), nil
+}
+
 // decodeGHCheckRuns decodes whitespace-separated JSON check-run objects
 // emitted by gh --paginate --jq '.check_runs[]'.
 func decodeGHCheckRuns(out string) ([]ghCheckRun, error) {

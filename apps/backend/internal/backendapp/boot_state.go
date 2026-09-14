@@ -776,6 +776,10 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 	// Dependency state is derived per read (never stored, so the auto-start gate
 	// can never read a stale value). One batched call for the whole boot payload.
 	dependencyViews := b.p.taskSvc.BuildDependencyViews(ctx, tasks)
+	// The boot payload is a board-snapshot projection path, so it must run the
+	// runner-mutability evaluation itself rather than rely on
+	// FromTaskWithSessionInfo's fail-closed default.
+	runnerViews := b.p.taskSvc.BuildRunnerMutabilityViews(ctx, tasks)
 	result := make([]taskdto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
 		if task == nil {
@@ -821,6 +825,7 @@ func (b bootStateBuilder) taskDTOsWithSessionInfo(ctx context.Context, tasks []*
 			taskdto.EnrichTaskParkedProjection(&dto, b.p.orchestratorSvc)
 		}
 		taskdto.EnrichTaskDependencies(&dto, bootDependencyProjection(dependencyViews[task.ID]), task)
+		taskdto.EnrichTaskRunnerMutability(&dto, bootRunnerMutabilityProjection(runnerViews[task.ID]))
 		taskdto.EnrichTaskStatusSummary(&dto, task.ID, statusSummaries)
 		if dto.StatusSummary != nil {
 			switch {

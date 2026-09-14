@@ -151,6 +151,14 @@ func TestSentinelsMatchThroughWrapping(t *testing.T) {
 	}
 }
 
+func TestPlanCommentErrorMapsMissingTask(t *testing.T) {
+	out, mapErr := PlanCommentError(request(), repository.ErrTaskNotFound, nil)
+	payload := decode(t, out, mapErr)
+	if payload.Code != ws.ErrorCodeNotFound || payload.Message != wantTaskNotFound {
+		t.Fatalf("plan comment task-not-found response = %#v", payload)
+	}
+}
+
 // TestContentTooLargeMapsToValidationWithDetails pins the dynamic-message
 // branch (REQ-TASKS-PLAN-CONTENT-SIZE-LIMIT-002/-003): CreateError and
 // UpdateError report service.PlanContentTooLargeError as VALIDATION_ERROR

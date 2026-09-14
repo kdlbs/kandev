@@ -234,6 +234,9 @@ func ciAutomationSessionCanReceivePrompt(session *models.TaskSession) bool {
 	if session == nil {
 		return false
 	}
+	if models.IsCompletionFollowUpSession(session.Metadata) {
+		return false
+	}
 	switch session.State {
 	case models.TaskSessionStateCreated,
 		models.TaskSessionStateStarting,

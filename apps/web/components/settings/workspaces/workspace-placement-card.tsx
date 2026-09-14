@@ -7,6 +7,7 @@ import { Button } from "@kandev/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Combobox } from "@/components/combobox";
 import { toast } from "@/lib/toast/sonner";
+import { settingsControlClassName } from "../settings-control";
 import { useOrgUnits } from "@/hooks/domains/org/use-org-units";
 import { placeWorkspace } from "@/lib/api/domains/org-units-api";
 import { hasScope, SCOPE } from "@/lib/types/team-access";
@@ -70,7 +71,7 @@ export function WorkspacePlacementCard({ workspaceId, unitId, scopes }: Props) {
           placeholder={t("workspaces:placement.pick")}
           searchPlaceholder={t("workspaces:placement.search")}
           emptyMessage={t("workspaces:placement.none")}
-          triggerClassName="h-9 w-full max-w-sm justify-between"
+          triggerClassName={settingsControlClassName("w-full max-w-sm justify-between")}
           testId="workspace-placement-picker"
         />
         {!canManage && (

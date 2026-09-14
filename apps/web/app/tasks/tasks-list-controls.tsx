@@ -10,6 +10,7 @@ import {
   TASKS_LIST_GROUP_OPTIONS,
   TASKS_LIST_SORT_OPTIONS,
 } from "@/lib/tasks/tasks-list-options";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 export function TasksListControls({
   showArchived,
@@ -59,7 +60,9 @@ export function TasksListControls({
         onChange={onTasksListGroupChange}
         testId="tasks-list-group"
       />
-      <Label className="flex h-11 items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none lg:h-9">
+      <Label
+        className={`${controlSizingClassName("standard")} flex items-center gap-2 text-sm text-muted-foreground cursor-pointer select-none`}
+      >
         <Checkbox
           checked={showArchived}
           onCheckedChange={(checked) => onShowArchivedChange(checked === true)}
@@ -88,7 +91,10 @@ function ListOptionSelect<T extends string>({
     <div className="flex items-center gap-2">
       <span className="text-sm text-muted-foreground">{label}</span>
       <Select value={value} onValueChange={(next) => onChange(next as T)}>
-        <SelectTrigger data-testid={testId} className="h-10 w-[150px] cursor-pointer lg:h-9">
+        <SelectTrigger
+          data-testid={testId}
+          className={controlSizingClassName("standard", "w-[150px] cursor-pointer")}
+        >
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

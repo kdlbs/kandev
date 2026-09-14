@@ -31,6 +31,7 @@ type recordingEventBus struct {
 type recordedEvent struct {
 	subject string
 	event   *bus.Event
+	ctx     context.Context
 }
 
 // taskServiceStateRepository exercises runtime task-state reconciliation
@@ -341,8 +342,8 @@ func (r failSetSessionMetadataRepo) SetSessionMetadataKey(
 	return errors.New("set session metadata failed")
 }
 
-func (b *recordingEventBus) Publish(_ context.Context, subject string, event *bus.Event) error {
-	b.events = append(b.events, recordedEvent{subject: subject, event: event})
+func (b *recordingEventBus) Publish(ctx context.Context, subject string, event *bus.Event) error {
+	b.events = append(b.events, recordedEvent{subject: subject, event: event, ctx: ctx})
 	return nil
 }
 func (b *recordingEventBus) Subscribe(string, bus.EventHandler) (bus.Subscription, error) {

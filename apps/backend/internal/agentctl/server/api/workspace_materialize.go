@@ -8,8 +8,10 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/gin-gonic/gin"
@@ -733,13 +735,33 @@ func clearMaterializedQuarantine(root *os.Root) error {
 }
 
 func materializeGitOutput(ctx context.Context, args ...string) (string, error) {
-	cmd := subproc.NewGitCommand(ctx, args...)
-	output, err := subproc.RunGitCombinedOutputClass(ctx, subproc.GitLifecycle, cmd)
-	if err != nil {
+	output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
+		ctx,
+		subproc.GitLifecycle,
+		materializeGitTimeout(args),
+		func(execCtx context.Context) *exec.Cmd {
+			return subproc.NewGitCommand(execCtx, args...)
+		},
+	)
+	if runErr != nil || execCtxErr != nil {
 		if ctx.Err() != nil {
 			return "", ctx.Err()
 		}
 		return "", errors.New("git command failed")
 	}
 	return string(output), nil
+}
+
+func materializeGitTimeout(args []string) time.Duration {
+	for index := 0; index < len(args); index++ {
+		switch args[index] {
+		case "-C":
+			index++
+		case "clone", "push", "submodule":
+			return 5 * time.Minute
+		case "fetch", "pull", "ls-remote":
+			return 30 * time.Second
+		}
+	}
+	return 30 * time.Second
 }

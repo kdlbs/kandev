@@ -21,6 +21,18 @@ Run it locally or self-host it on your own infrastructure. Use the [mobile remot
 
 Open source, multi-provider, no telemetry, not tied to any cloud.
 
+## Distribution
+
+Kandev is distributed as a native Go binary for each supported platform. The
+compiled web frontend is embedded in that binary. The binary serves the web UI
+and API, so the application server does not need Node.js, a separate web
+server, or a frontend build at runtime.
+
+Homebrew, Scoop, release archives, and the desktop app run this native binary
+directly. The npm/npx package adds a small Node.js platform selector, so Node.js
+is required to launch Kandev through npm/npx but not by the application server.
+Release bundles also include `agentctl` helpers for task environments.
+
 ## Vision
 
 > **Humans stay in control.** Define tasks, build agentic workflows with gates, review every change, decide what ships.
@@ -236,7 +248,7 @@ We also want to add support for this remote runtime:
 apps/
 ├── backend/    # Go backend (orchestrator, lifecycle, agentctl, WS gateway)
 ├── web/        # Vite/React frontend (SPA, Zustand, real-time subscriptions)
-├── cli/        # CLI tool (npx kandev launcher)
+├── cli/        # npm shim for the native Go runtime
 ├── desktop/    # Tauri desktop shell
 └── packages/   # Shared UI components & types
 ```

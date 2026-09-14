@@ -43,7 +43,7 @@ export function TypedSortPicker<Key extends string>({
       className={`flex items-center gap-1.5${mobile ? " [&_button]:min-h-11 [&_[role=combobox]]:min-h-11" : ""}`}
     >
       <Select value={value.key} onValueChange={(key) => onChange({ ...value, key: key as Key })}>
-        <SelectTrigger size="sm" className="h-7 min-w-0 flex-1 text-xs" data-testid={testIds.key}>
+        <SelectTrigger className="min-w-0 flex-1 text-xs" data-testid={testIds.key}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -63,8 +63,7 @@ export function TypedSortPicker<Key extends string>({
         <Button
           type="button"
           variant="outline"
-          size="sm"
-          className={mobile ? "h-11 cursor-pointer" : "h-7 cursor-pointer"}
+          className="cursor-pointer"
           onClick={() =>
             onChange({ ...value, direction: value.direction === "asc" ? "desc" : "asc" })
           }

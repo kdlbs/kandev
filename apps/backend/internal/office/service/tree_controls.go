@@ -55,9 +55,11 @@ func (s *Service) PauseTaskTree(ctx context.Context, rootTaskID string) (*models
 		return nil, fmt.Errorf("create pause members: %w", err)
 	}
 	s.cancelTaskExecutions(ctx, members, "tree_paused")
-	if _, err := s.repo.CancelRunsForTasks(ctx, memberTaskIDs(members), "tree_paused"); err != nil {
+	cancelled, err := s.repo.CancelRunsForTasks(ctx, memberTaskIDs(members), "tree_paused")
+	if err != nil {
 		s.logger.Warn("cancel runs for paused tree failed", zap.Error(err))
 	}
+	s.recordTerminalShapesForCancelledRuns(ctx, cancelled)
 	s.publishTreeHoldEvent(ctx, events.OfficeTaskTreeHoldCreated, hold)
 	return hold, nil
 }
@@ -99,9 +101,11 @@ func (s *Service) CancelTaskTree(ctx context.Context, rootTaskID, cancelledBy st
 	if err := s.repo.BulkReleaseTaskCheckout(ctx, memberTaskIDs(members)); err != nil {
 		return nil, fmt.Errorf("release task checkouts: %w", err)
 	}
-	if _, err := s.repo.CancelRunsForTasks(ctx, memberTaskIDs(members), "tree_cancelled"); err != nil {
+	cancelled, err := s.repo.CancelRunsForTasks(ctx, memberTaskIDs(members), "tree_cancelled")
+	if err != nil {
 		s.logger.Warn("cancel runs for cancelled tree failed", zap.Error(err))
 	}
+	s.recordTerminalShapesForCancelledRuns(ctx, cancelled)
 	_ = cancelledBy
 	s.publishTreeHoldEvent(ctx, events.OfficeTaskTreeHoldCreated, hold)
 	return hold, nil

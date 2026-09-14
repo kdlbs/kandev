@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { agentProfileId as toAgentProfileId } from "@/lib/types/ids";
 import type { AgentProfile } from "@/lib/types/http";
 import type {
@@ -9,6 +9,11 @@ import type {
   DynamicErrorClass,
   DynamicErrorPolicy,
 } from "@/lib/types/agent-profile";
+import {
+  isProfileRevisionNewer,
+  reconcileAgentProfileSnapshot,
+  sameEditableProfile,
+} from "@/components/settings/agent-profile-reconciliation";
 
 type DynamicAgentProfileEditorDraftProps = {
   profile: AgentProfile;
@@ -20,6 +25,9 @@ export type DynamicAgentProfileEditorDraft = {
   candidates: DynamicAgentCandidate[];
   profileEnabled: boolean;
   dynamicVersion: number;
+  currentProfile: AgentProfile;
+  savedProfile: AgentProfile;
+  hasExternalConflict: boolean;
   updateName: (name: string) => void;
   updateProfileEnabled: (enabled: boolean) => void;
   addCandidate: (executionProfileId: string) => void;
@@ -32,6 +40,8 @@ export type DynamicAgentProfileEditorDraft = {
     patch: Partial<DynamicErrorPolicy>,
   ) => void;
   applyProfile: (profile: AgentProfile) => void;
+  markProfileSubmitted: (profile: AgentProfile | null) => void;
+  acceptProfileSaveResponse: (profile: AgentProfile, submitted: AgentProfile) => void;
   reset: () => void;
 };
 
@@ -66,8 +76,22 @@ export function useDynamicAgentProfileEditorDraft({
   );
   const [profileEnabled, setProfileEnabled] = useState(profile.enabled !== false);
   const [dynamicVersion, setDynamicVersion] = useState(profile.dynamic?.version ?? 1);
+  const [savedProfile, setSavedProfile] = useState(profile);
+  const [hasExternalConflict, setHasExternalConflict] = useState(false);
+  const previousProfileRef = useRef(profile);
+  const submittedProfileRef = useRef<AgentProfile | null>(null);
+  const savedProfileRef = useRef(savedProfile);
+  const currentProfileRef = useRef(profile);
 
-  const initialCandidates = profile.dynamic?.candidates ?? [];
+  const currentProfile = {
+    ...profile,
+    name,
+    enabled: profileEnabled,
+    dynamic: { version: dynamicVersion, candidates },
+  };
+  savedProfileRef.current = savedProfile;
+  currentProfileRef.current = currentProfile;
+
   const notifyDraft = (
     nextName: string,
     nextCandidates: DynamicAgentCandidate[],
@@ -161,24 +185,74 @@ export function useDynamicAgentProfileEditorDraft({
   };
 
   const reset = () => {
-    setName(profile.name);
-    setProfileEnabled(profile.enabled !== false);
-    setCandidates(initialCandidates);
-    setDynamicVersion(profile.dynamic?.version ?? 1);
-  };
-
-  const applyProfile = (nextProfile: AgentProfile) => {
+    const nextProfile = savedProfileRef.current;
     setName(nextProfile.name);
     setProfileEnabled(nextProfile.enabled !== false);
     setCandidates(nextProfile.dynamic?.candidates ?? []);
     setDynamicVersion(nextProfile.dynamic?.version ?? 1);
+    setHasExternalConflict(false);
+    submittedProfileRef.current = null;
   };
+
+  const applyProfile = useCallback((nextProfile: AgentProfile) => {
+    setName(nextProfile.name);
+    setProfileEnabled(nextProfile.enabled !== false);
+    setCandidates(nextProfile.dynamic?.candidates ?? []);
+    setDynamicVersion(nextProfile.dynamic?.version ?? 1);
+  }, []);
+
+  const markProfileSubmitted = useCallback((submitted: AgentProfile | null) => {
+    submittedProfileRef.current = submitted;
+  }, []);
+
+  const acceptProfileSaveResponse = useCallback(
+    (nextProfile: AgentProfile, submitted: AgentProfile) => {
+      if (!isProfileRevisionNewer(nextProfile, savedProfileRef.current)) {
+        submittedProfileRef.current = null;
+        return;
+      }
+      setSavedProfile(nextProfile);
+      if (sameEditableProfile(currentProfileRef.current, submitted)) applyProfile(nextProfile);
+      setHasExternalConflict(false);
+      submittedProfileRef.current = null;
+    },
+    [applyProfile],
+  );
+
+  useEffect(() => {
+    const previous = previousProfileRef.current;
+    previousProfileRef.current = profile;
+    if (profile.id !== previous.id) {
+      submittedProfileRef.current = null;
+      setSavedProfile(profile);
+      applyProfile(profile);
+      setHasExternalConflict(false);
+      return;
+    }
+
+    const result = reconcileAgentProfileSnapshot({
+      previous,
+      incoming: profile,
+      draft: currentProfileRef.current,
+      saved: savedProfileRef.current,
+      submitted: submittedProfileRef.current,
+      conflicted: hasExternalConflict,
+    });
+    if (result.kind === "ignored") return;
+    setSavedProfile(result.saved);
+    if (!sameEditableProfile(result.draft, currentProfileRef.current)) applyProfile(result.draft);
+    setHasExternalConflict(result.conflicted);
+    if (result.kind === "own-acknowledgement") submittedProfileRef.current = null;
+  }, [applyProfile, hasExternalConflict, profile]);
 
   return {
     name,
     candidates,
     profileEnabled,
     dynamicVersion,
+    currentProfile,
+    savedProfile,
+    hasExternalConflict,
     updateName,
     updateProfileEnabled,
     addCandidate,
@@ -187,6 +261,8 @@ export function useDynamicAgentProfileEditorDraft({
     updateCandidate,
     updateCandidatePolicy,
     applyProfile,
+    markProfileSubmitted,
+    acceptProfileSaveResponse,
     reset,
   };
 }

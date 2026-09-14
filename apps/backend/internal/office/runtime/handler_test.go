@@ -13,6 +13,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 
 	settingsstore "github.com/kandev/kandev/internal/agent/settings/store"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -740,6 +742,56 @@ func TestRuntimeHandler_UpdateTaskStatusReturnsInternalErrorForOperationalFailur
 	if resp.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusInternalServerError, resp.Body.String())
 	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Error != runtimeInternalErrorMessage {
+		t.Fatalf("error = %q, want stable internal error", body.Error)
+	}
+}
+
+func TestRuntimeHandler_LogsInternalErrorWithoutExposingCause(t *testing.T) {
+	core, observed := observer.New(zap.ErrorLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create test logger: %v", err)
+	}
+	h := newRuntimeHandlerHarnessWithLogger(t, Capabilities{
+		CanUpdateTaskStatus: true,
+	}.WithTaskScope("task-1"), log)
+	underlyingErr := errors.New("update task state: database unavailable")
+	h.status.err = underlyingErr
+
+	resp := h.request(t, http.MethodPost, "/runtime/tasks/task-1/status", map[string]string{
+		"status": "done",
+	})
+
+	if resp.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d; body=%s", resp.Code, http.StatusInternalServerError, resp.Body.String())
+	}
+	var body struct {
+		Error string `json:"error"`
+	}
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Error != runtimeInternalErrorMessage {
+		t.Fatalf("error = %q, want stable internal error", body.Error)
+	}
+	entries := observed.All()
+	if len(entries) != 1 {
+		t.Fatalf("error log entries = %d, want 1", len(entries))
+	}
+	entry := entries[0]
+	if entry.Message != "office runtime action failed" {
+		t.Fatalf("log message = %q, want runtime action failure", entry.Message)
+	}
+	if got := fmt.Sprint(entry.ContextMap()["error"]); got != underlyingErr.Error() {
+		t.Fatalf("logged error = %q, want %q", got, underlyingErr.Error())
+	}
 }
 
 func TestRuntimeHandler_UpdateTaskStatusAuditsWrappedAuthorizationFailure(t *testing.T) {
@@ -762,12 +814,28 @@ func newRuntimeHandlerHarness(t *testing.T, caps Capabilities) *handlerHarness {
 	return newRuntimeHandlerHarnessWithProjectManager(t, caps, nil)
 }
 
+func newRuntimeHandlerHarnessWithLogger(t *testing.T, caps Capabilities, log *logger.Logger) *handlerHarness {
+	return newRuntimeHandlerHarnessWithProjectManagerAndLogger(t, caps, nil, log)
+}
+
 func newRuntimeHandlerHarnessWithProjectManager(
 	t *testing.T,
 	caps Capabilities,
 	projectManagerFactory func(*sqlite.Repository) ProjectManager,
 ) *handlerHarness {
+	return newRuntimeHandlerHarnessWithProjectManagerAndLogger(t, caps, projectManagerFactory, logger.Default())
+}
+
+func newRuntimeHandlerHarnessWithProjectManagerAndLogger(
+	t *testing.T,
+	caps Capabilities,
+	projectManagerFactory func(*sqlite.Repository) ProjectManager,
+	log *logger.Logger,
+) *handlerHarness {
 	t.Helper()
+	if log == nil {
+		log = logger.Default()
+	}
 	gin.SetMode(gin.TestMode)
 	db, err := sqlx.Open("sqlite3", ":memory:")
 	if err != nil {
@@ -781,7 +849,7 @@ func newRuntimeHandlerHarnessWithProjectManager(
 	if err != nil {
 		t.Fatalf("new repo: %v", err)
 	}
-	agentSvc := agents.NewAgentService(repo, logger.Default(), nil)
+	agentSvc := agents.NewAgentService(repo, log, nil)
 	agentSvc.SetAuth(agents.NewAgentAuth("runtime-handler-test-key"))
 	agent := &models.AgentInstance{
 		ID:          "agent-1",
@@ -824,7 +892,7 @@ func newRuntimeHandlerHarnessWithProjectManager(
 		nil,
 		runEvents,
 		decisions,
-		logger.Default(),
+		log,
 	))
 	return &handlerHarness{
 		router:     router,

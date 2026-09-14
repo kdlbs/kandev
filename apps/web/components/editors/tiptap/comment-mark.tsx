@@ -426,6 +426,8 @@ export function rehydrateCommentMarks(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   editor: any,
   comments: CommentForEditor[],
+  onUnresolvedComments?: (ids: string[]) => void,
+  onResolvedComments?: (ids: string[]) => void,
 ): void {
   if (!editor) return;
 
@@ -465,13 +467,20 @@ export function rehydrateCommentMarks(
       };
 
       const docSize = doc.content.size;
+      const unresolvedIds: string[] = [];
+      const resolvedIds: string[] = [];
       for (const comment of toApply) {
         const range = resolveCommentRange(comment, doc, docSize, getTextData);
         if (range) {
           tr = tr.addMark(range.from, range.to, markType.create({ commentId: comment.id }));
           changed = true;
+          resolvedIds.push(comment.id);
+        } else {
+          unresolvedIds.push(comment.id);
         }
       }
+      if (resolvedIds.length > 0) onResolvedComments?.(resolvedIds);
+      if (unresolvedIds.length > 0) onUnresolvedComments?.(unresolvedIds);
     }
 
     if (changed) {

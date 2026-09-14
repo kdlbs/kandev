@@ -472,7 +472,7 @@ func (s *shutdownDeadlineExecutor) StopInstance(
 	return nil
 }
 
-func (s *shutdownDeadlineExecutor) RecoverInstances(context.Context) ([]*lifecycle.ExecutorInstance, error) {
+func (s *shutdownDeadlineExecutor) RecoverInstances(context.Context, []*models.ExecutorRunning) ([]*lifecycle.ExecutorInstance, error) {
 	return nil, nil
 }
 
@@ -2027,6 +2027,7 @@ func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 			TaskEnvironments: taskRepo,
 			Reviews:          taskRepo,
 			StatusSummaries:  taskRepo,
+			WorkspaceFolders: taskRepo,
 		},
 		eventBus,
 		log,

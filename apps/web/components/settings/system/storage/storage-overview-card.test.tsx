@@ -56,12 +56,18 @@ const degradedOverview = {
     refresh_due_at: "2099-07-23T12:15:00Z",
     stale: false,
     error: null,
-    progress: { completed_sources: 5, total_sources: 5, sources: {} },
+    progress: { completed_sources: 8, total_sources: 8, sources: {} },
     partial_summary: null,
   } satisfies StorageAnalysisState,
   analyzed_at: "2026-07-23T12:00:00Z",
   last_run: null,
 } satisfies StorageOverviewResponse;
+
+const DATABASE_PATH = "/data/kandev.db";
+const DATABASE_BACKUP_PATH = "/data/backups";
+const DATABASE_TRIGGER_TEST_ID = "storage-resource-database-trigger";
+const DATABASE_BACKUPS_TRIGGER_TEST_ID = "storage-resource-database-backups-trigger";
+const STORAGE_ANALYSIS_TOTAL_TEST_ID = "storage-analysis-total";
 
 afterEach(cleanup);
 
@@ -156,10 +162,195 @@ describe("StorageOverviewCard", () => {
     expect(
       screen.getByTestId("storage-resource-docker-image-layers-trigger").textContent,
     ).toContain("14 GB");
-    expect(screen.getByTestId("storage-analysis-total").textContent).toContain(
+    expect(screen.getByTestId(STORAGE_ANALYSIS_TOTAL_TEST_ID).textContent).toContain(
       "Total counted: 47 GB",
     );
     expect(screen.getByTestId("storage-analysis-total-partial")).toBeTruthy();
+  });
+});
+
+describe("StorageOverviewCard system temporary resources", () => {
+  it("shows system temporary roots as informational and excludes them from the total", () => {
+    const overview = {
+      ...degradedOverview,
+      summary: {
+        ...degradedOverview.summary,
+        workspaces: { total_bytes: 5 * 1024 ** 3, active_bytes: 0, candidate_bytes: 0 },
+        go_cache: { ...degradedOverview.summary.go_cache, size_bytes: 2 * 1024 ** 3 },
+        quarantine: { count: 0, size_bytes: 3 * 1024 ** 3 },
+        temporary_artifacts: {
+          available: true,
+          total_count: 1,
+          total_bytes: 4 * 1024 ** 3,
+          stale_count: 0,
+        },
+        docker: {
+          ...degradedOverview.summary.docker,
+          available: true,
+        },
+        system_temporary: {
+          status: "partial",
+          size_bytes: 100 * 1024 ** 3,
+          included_in_total: false,
+          roots: [
+            {
+              requested_path: "/tmp",
+              path: "/tmp",
+              status: "partial",
+              size_bytes: 100 * 1024 ** 3,
+              skipped_count: 2,
+            },
+          ],
+          warnings: ["Some entries could not be measured"],
+        },
+      },
+    } satisfies StorageOverviewResponse;
+
+    render(<StorageOverviewCard overview={overview} onRunGoCache={vi.fn()} />);
+
+    const trigger = screen.getByTestId("storage-resource-system-temporary-trigger");
+    expect(trigger.textContent).toContain("100 GB");
+    fireEvent.click(trigger);
+    expect(screen.getByTestId("storage-resource-system-temporary").textContent).toContain("/tmp");
+    expect(screen.getByTestId("storage-resource-system-temporary").textContent).toContain(
+      "Partial",
+    );
+    expect(screen.getByTestId("storage-resource-system-temporary").textContent).toContain(
+      "2 entries skipped",
+    );
+    expect(screen.getByTestId(STORAGE_ANALYSIS_TOTAL_TEST_ID).textContent).toContain(
+      "Total counted: 14 GB",
+    );
+  });
+});
+
+describe("StorageOverviewCard database footprint", () => {
+  it("renders database rows with paths, scope details, and total contribution", () => {
+    const overview = {
+      ...degradedOverview,
+      summary: {
+        ...degradedOverview.summary,
+        database: {
+          status: "measured",
+          size_bytes: 5 * 1024 ** 3,
+          path: DATABASE_PATH,
+          included_in_total: true,
+        },
+        database_backups: {
+          status: "measured",
+          size_bytes: 3 * 1024 ** 3,
+          path: DATABASE_BACKUP_PATH,
+          included_in_total: true,
+        },
+      },
+      analysis: {
+        ...degradedOverview.analysis,
+        progress: {
+          completed_sources: 8,
+          total_sources: 8,
+          sources: {
+            database: { state: "ready", completed_items: 1, bytes_scanned: 5 * 1024 ** 3 },
+            database_backups: { state: "ready", completed_items: 1, bytes_scanned: 3 * 1024 ** 3 },
+          },
+        },
+      },
+    } satisfies StorageOverviewResponse;
+
+    render(<StorageOverviewCard overview={overview} onRunGoCache={vi.fn()} />);
+
+    expect(screen.getByTestId(DATABASE_TRIGGER_TEST_ID).textContent).toContain("5 GB");
+    expect(screen.getByTestId(DATABASE_BACKUPS_TRIGGER_TEST_ID).textContent).toContain("3 GB");
+    fireEvent.click(screen.getByTestId(DATABASE_TRIGGER_TEST_ID));
+    fireEvent.click(screen.getByTestId(DATABASE_BACKUPS_TRIGGER_TEST_ID));
+    expect(screen.getByTestId("storage-resource-database").textContent).toContain(DATABASE_PATH);
+    expect(screen.getByTestId("storage-resource-database-backups").textContent).toContain(
+      DATABASE_BACKUP_PATH,
+    );
+    expect(screen.getByTestId(STORAGE_ANALYSIS_TOTAL_TEST_ID).textContent).toContain(
+      "Total counted: 8 GB",
+    );
+    expect(screen.getByTestId("storage-analysis-scope").textContent).toContain(
+      "do not represent all host filesystem usage",
+    );
+  });
+
+  it("renders unavailable and not-applicable database states without zero bytes", () => {
+    const overview = {
+      ...degradedOverview,
+      summary: {
+        ...degradedOverview.summary,
+        database: {
+          status: "unavailable",
+          included_in_total: false,
+          path: DATABASE_PATH,
+          reason: "measurement_failed",
+        },
+        database_backups: {
+          status: "not_applicable",
+          included_in_total: false,
+          path: DATABASE_BACKUP_PATH,
+          reason: "unsupported_driver",
+        },
+      },
+    } satisfies StorageOverviewResponse;
+
+    render(<StorageOverviewCard overview={overview} onRunGoCache={vi.fn()} />);
+
+    expect(screen.getByTestId(DATABASE_TRIGGER_TEST_ID).textContent).toContain("Unavailable");
+    expect(screen.getByTestId(DATABASE_BACKUPS_TRIGGER_TEST_ID).textContent).toContain(
+      "Not applicable",
+    );
+    expect(screen.getByTestId(DATABASE_TRIGGER_TEST_ID).textContent).not.toContain("0 GB");
+    fireEvent.click(screen.getByTestId(DATABASE_BACKUPS_TRIGGER_TEST_ID));
+    expect(screen.getByTestId("storage-resource-database-backups").textContent).toContain(
+      DATABASE_BACKUP_PATH,
+    );
+  });
+
+  it("renders missing database measurements as unknown instead of complete", () => {
+    render(<StorageOverviewCard overview={degradedOverview} onRunGoCache={vi.fn()} />);
+
+    const trigger = screen.getByTestId(DATABASE_TRIGGER_TEST_ID);
+    expect(trigger.textContent).toContain("Unavailable");
+    expect(trigger.textContent).not.toContain("Measurement complete");
+    fireEvent.click(trigger);
+    expect(screen.getByTestId("storage-resource-database").textContent).toContain(
+      "Database measurement is not available in this response.",
+    );
+  });
+});
+
+describe("StorageOverviewCard database progress", () => {
+  it("renders pending and scanning database rows while measurements are absent", () => {
+    const overview = {
+      ...degradedOverview,
+      analysis: {
+        ...degradedOverview.analysis,
+        state: "scanning",
+        progress: {
+          completed_sources: 2,
+          total_sources: 8,
+          sources: {
+            database: { state: "pending", completed_items: 0, bytes_scanned: 0 },
+            database_backups: {
+              state: "scanning",
+              completed_items: 2,
+              total_items: 4,
+              bytes_scanned: 128,
+            },
+          },
+        },
+      },
+    } satisfies StorageOverviewResponse;
+
+    render(<StorageOverviewCard overview={overview} onRunGoCache={vi.fn()} />);
+
+    expect(screen.getByTestId(DATABASE_TRIGGER_TEST_ID).textContent).toContain(
+      "Waiting to measure",
+    );
+    expect(screen.getByTestId(DATABASE_BACKUPS_TRIGGER_TEST_ID).textContent).toContain(
+      "Measuring 2 of 4",
+    );
   });
 });
 
@@ -267,13 +458,15 @@ describe("StorageOverviewCard refresh and policy state", () => {
         stale: false,
         progress: {
           completed_sources: 1,
-          total_sources: 5,
+          total_sources: 8,
           sources: {
             workspaces: { state: "ready", completed_items: 3, total_items: 3, bytes_scanned: 42 },
             go_cache: { state: "scanning", completed_items: 1, total_items: 4, bytes_scanned: 10 },
             quarantine: { state: "pending", completed_items: 0, bytes_scanned: 0 },
             temporary_artifacts: { state: "pending", completed_items: 0, bytes_scanned: 0 },
             docker: { state: "pending", completed_items: 0, bytes_scanned: 0 },
+            database: { state: "pending", completed_items: 0, bytes_scanned: 0 },
+            database_backups: { state: "pending", completed_items: 0, bytes_scanned: 0 },
           },
         },
         partial_summary: {
@@ -288,7 +481,7 @@ describe("StorageOverviewCard refresh and policy state", () => {
 
     render(<StorageOverviewCard overview={overview} onRunGoCache={vi.fn()} />);
 
-    expect(screen.getByTestId("storage-analysis-total").textContent).toContain(
+    expect(screen.getByTestId(STORAGE_ANALYSIS_TOTAL_TEST_ID).textContent).toContain(
       "Counted so far: 2 GB",
     );
     expect(screen.getByTestId("storage-analysis-total-partial")).toBeTruthy();

@@ -29,6 +29,7 @@ import type {
 import { markdownComponents, remarkPlugins } from "@/components/shared/markdown-components";
 import { useTranslation } from "react-i18next";
 import { azureActionDisplayCopy } from "./azure-devops-workspace-defaults";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 type BoardContext = {
   board: AzureDevOpsBoard;
@@ -100,8 +101,7 @@ function AssignmentActions({
     <div className="flex flex-wrap gap-2">
       <Button
         type="button"
-        size="sm"
-        className="min-h-11 cursor-pointer"
+        className="cursor-pointer"
         disabled={saving}
         onClick={() => onChange("assign_current_user")}
         data-testid="azure-work-item-assign-current-user"
@@ -111,9 +111,8 @@ function AssignmentActions({
       {assignedTo && (
         <Button
           type="button"
-          size="sm"
           variant="outline"
-          className="min-h-11 cursor-pointer"
+          className="cursor-pointer"
           disabled={saving}
           onClick={() => onChange("unassign")}
           data-testid="azure-work-item-unassign"
@@ -155,7 +154,7 @@ function BoardActions({
         <Select value={columnId} onValueChange={setColumnId}>
           <SelectTrigger
             id="azure-work-item-column"
-            className="min-h-11 flex-1"
+            className="flex-1"
             data-testid="azure-work-item-column"
           >
             <SelectValue />
@@ -173,7 +172,7 @@ function BoardActions({
             value={String(columnDone)}
             onValueChange={(value) => setColumnDone(value === "true")}
           >
-            <SelectTrigger className="min-h-11 sm:w-40" data-testid="azure-work-item-column-done">
+            <SelectTrigger className="sm:w-40" data-testid="azure-work-item-column-done">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -184,7 +183,7 @@ function BoardActions({
         )}
         <Button
           type="button"
-          className="min-h-11 cursor-pointer"
+          className="cursor-pointer"
           disabled={
             saving || (columnId === context.item.columnId && columnDone === context.item.columnDone)
           }
@@ -223,7 +222,7 @@ function QuickActions({
               key={action.id}
               type="button"
               variant="outline"
-              className="min-h-11 cursor-pointer"
+              className="cursor-pointer"
               onClick={() => onStartTask(item, action)}
             >
               <IconPlus className="h-4 w-4" />
@@ -285,9 +284,8 @@ function DetailBody({
             {state.error}
             <Button
               type="button"
-              size="sm"
               variant="outline"
-              className="min-h-11 cursor-pointer"
+              className="cursor-pointer"
               onClick={() => void state.refresh()}
             >
               <IconRefresh className="h-4 w-4" /> {t("azuredevops:retry")}
@@ -371,9 +369,8 @@ function DetailBody({
           <h3 className="text-sm font-semibold">{t("azuredevops:discussion")}</h3>
           <Button
             type="button"
-            size="sm"
             variant="ghost"
-            className="min-h-11 cursor-pointer"
+            className="cursor-pointer"
             onClick={() => void state.retryComments()}
             disabled={state.commentsLoading}
           >
@@ -395,7 +392,7 @@ function DetailBody({
           <Button
             type="button"
             variant="outline"
-            className="min-h-11 w-full cursor-pointer"
+            className="w-full cursor-pointer"
             onClick={state.loadOlderComments}
             disabled={state.commentsLoading}
           >
@@ -458,7 +455,7 @@ export function AzureDevOpsWorkItemDetail({
             type="button"
             variant="ghost"
             size="icon"
-            className="min-h-11 min-w-11 cursor-pointer"
+            className={controlSizingClassName("icon", "cursor-pointer")}
           >
             <a
               href={state.item?.webUrl ?? initialItem?.webUrl}
@@ -474,7 +471,7 @@ export function AzureDevOpsWorkItemDetail({
           type="button"
           variant="ghost"
           size="icon"
-          className="min-h-11 min-w-11 cursor-pointer"
+          className={controlSizingClassName("icon", "cursor-pointer")}
           aria-label={t("azuredevops:closeWorkItemDetails")}
           data-testid="azure-work-item-detail-close"
           onClick={() => onOpenChange(false)}

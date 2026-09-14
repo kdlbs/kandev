@@ -7,18 +7,44 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 )
+
+const GitPushPreflightHistoryUpdateRequired = "history_update_required"
+
+const gitPushPreflightTimeout = 2 * time.Minute
 
 // GitOperationResult represents the result of a git operation.
 // This matches the server-side process.GitOperationResult.
 type GitOperationResult struct {
-	Success        bool     `json:"success"`
-	Operation      string   `json:"operation"`
-	Output         string   `json:"output"`
-	Error          string   `json:"error,omitempty"`
-	ErrorCode      string   `json:"error_code,omitempty"`
-	ConflictFiles  []string `json:"conflict_files,omitempty"`
-	RecoveryBranch string   `json:"recovery_branch,omitempty"`
+	Success         bool     `json:"success"`
+	Operation       string   `json:"operation"`
+	Output          string   `json:"output"`
+	Error           string   `json:"error,omitempty"`
+	ErrorCode       string   `json:"error_code,omitempty"`
+	PreflightReason string   `json:"preflight_reason,omitempty"`
+	ConflictFiles   []string `json:"conflict_files,omitempty"`
+	RecoveryBranch  string   `json:"recovery_branch,omitempty"`
+	// Destination a push or preflight validated. A push populates these only
+	// when the request carried an explicit push target.
+	PushedRemote string `json:"pushed_remote,omitempty"`
+	PushedBranch string `json:"pushed_branch,omitempty"`
+	// Branches accompanying a mismatch refusal. CurrentBranch is empty for a
+	// detached HEAD.
+	ExpectedBranch string `json:"expected_branch,omitempty"`
+	CurrentBranch  string `json:"current_branch,omitempty"`
+	// BaselinePublished marks a mismatch refusal after empty-remote first
+	// publication already published the baseline in this request.
+	BaselinePublished bool `json:"baseline_published,omitempty"`
+}
+
+// PushOptions carries the optional inputs of a push or push-preflight call.
+// The zero value reproduces the behavior of a request that names neither.
+type PushOptions struct {
+	Force          bool
+	SetUpstream    bool
+	Remote         string
+	ExpectedBranch string
 }
 
 // PRCreateResult represents the result of a PR creation operation.
@@ -48,29 +74,47 @@ func (c *Client) GitPull(ctx context.Context, rebase bool, repo string) (*GitOpe
 }
 
 // GitPush performs a git push operation on the worktree.
-// If force is true, uses --force-with-lease.
-// If setUpstream is true, uses --set-upstream.
+// If opts.Force is true, uses --force-with-lease.
+// If opts.SetUpstream is true, uses --set-upstream.
+// opts.Remote and opts.ExpectedBranch are optional and passed through.
 // repo is the multi-repo subpath (e.g. "kandev"); empty for single-repo workspaces.
-func (c *Client) GitPush(ctx context.Context, force, setUpstream bool, repo string) (*GitOperationResult, error) {
+func (c *Client) GitPush(ctx context.Context, repo string, opts PushOptions) (*GitOperationResult, error) {
 	payload := struct {
-		Force       bool   `json:"force"`
-		SetUpstream bool   `json:"set_upstream"`
-		Repo        string `json:"repo,omitempty"`
+		Force          bool   `json:"force"`
+		SetUpstream    bool   `json:"set_upstream"`
+		Repo           string `json:"repo,omitempty"`
+		Remote         string `json:"remote,omitempty"`
+		ExpectedBranch string `json:"expected_branch,omitempty"`
 	}{
-		Force:       force,
-		SetUpstream: setUpstream,
-		Repo:        repo,
+		Force:          opts.Force,
+		SetUpstream:    opts.SetUpstream,
+		Repo:           repo,
+		Remote:         opts.Remote,
+		ExpectedBranch: opts.ExpectedBranch,
 	}
 	return c.gitOperation(ctx, "/api/v1/git/push", payload)
 }
 
-// GitPushPreflight validates the configured contribution push target without
-// mutating the remote. repo is the multi-repo workspace subpath.
-func (c *Client) GitPushPreflight(ctx context.Context, repo string) (*GitOperationResult, error) {
+// GitPushPreflight validates the push destination without mutating the remote.
+// repo is the multi-repo workspace subpath; opts carries the optional explicit
+// push target and expected branch.
+func (c *Client) GitPushPreflight(ctx context.Context, repo string, opts PushOptions) (*GitOperationResult, error) {
 	payload := struct {
-		Repo string `json:"repo,omitempty"`
-	}{Repo: repo}
-	return c.gitOperation(ctx, "/api/v1/git/push-preflight", payload)
+		Repo           string `json:"repo,omitempty"`
+		Remote         string `json:"remote,omitempty"`
+		ExpectedBranch string `json:"expected_branch,omitempty"`
+	}{
+		Repo:           repo,
+		Remote:         opts.Remote,
+		ExpectedBranch: opts.ExpectedBranch,
+	}
+	return c.gitOperationWithClient(ctx, "/api/v1/git/push-preflight", payload, c.gitPushPreflightClient())
+}
+
+func (c *Client) gitPushPreflightClient() *http.Client {
+	client := *c.httpClient
+	client.Timeout = gitPushPreflightTimeout
+	return &client
 }
 
 // GitReplaceRemoteContribution replaces the bound contribution branch when
@@ -300,6 +344,15 @@ func (c *Client) GitCreatePR(ctx context.Context, title, body, baseBranch string
 
 // gitOperation is a helper that performs a git operation via HTTP POST.
 func (c *Client) gitOperation(ctx context.Context, path string, payload interface{}) (*GitOperationResult, error) {
+	return c.gitOperationWithClient(ctx, path, payload, c.httpClient)
+}
+
+func (c *Client) gitOperationWithClient(
+	ctx context.Context,
+	path string,
+	payload interface{},
+	httpClient *http.Client,
+) (*GitOperationResult, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -311,7 +364,7 @@ func (c *Client) gitOperation(ctx context.Context, path string, payload interfac
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute request: %w", err)
 	}

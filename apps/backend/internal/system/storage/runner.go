@@ -22,6 +22,13 @@ type CleanupProvider interface {
 	Cleanup(ctx context.Context) (map[string]any, error)
 }
 
+// SettingsSnapshotCleanupProvider receives the immutable settings captured when
+// a maintenance run was queued. Providers use it to keep eligibility and
+// retention decisions consistent for the lifetime of the run.
+type SettingsSnapshotCleanupProvider interface {
+	CleanupWithSettings(context.Context, StorageMaintenanceSettings) (map[string]any, error)
+}
+
 // ExplicitCleanupProvider may opt into behavior reserved for a specifically named manual run.
 type ExplicitCleanupProvider interface {
 	CleanupExplicit(ctx context.Context) (map[string]any, error)
@@ -111,7 +118,7 @@ func (r *Runner) Run(
 	if _, err := r.transitionRun(ctx, run.ID, RunStateRunning, nil, ""); err != nil {
 		return MaintenanceRun{}, err
 	}
-	result, runErr := r.runProviders(lease.Context())
+	result, runErr := r.runProviders(lease.Context(), settings)
 	return r.finishRun(ctx, run.ID, lease.Context(), result, runErr)
 }
 
@@ -161,14 +168,25 @@ func (r *Runner) createRun(
 	return run, nil
 }
 
-func (r *Runner) runProviders(ctx context.Context) (map[string]any, error) {
+func (r *Runner) runProviders(
+	ctx context.Context,
+	settings StorageMaintenanceSettings,
+) (map[string]any, error) {
 	results := make(map[string]any, len(r.providers))
 	var errs []error
 	for _, provider := range r.providers {
 		if ctx.Err() != nil {
 			break
 		}
-		providerResult, err := provider.Cleanup(ctx)
+		var (
+			providerResult map[string]any
+			err            error
+		)
+		if snapshotProvider, ok := provider.(SettingsSnapshotCleanupProvider); ok {
+			providerResult, err = snapshotProvider.CleanupWithSettings(ctx, settings)
+		} else {
+			providerResult, err = provider.Cleanup(ctx)
+		}
 		entry := map[string]any{"result": providerResult}
 		if err != nil {
 			entry["error"] = err.Error()

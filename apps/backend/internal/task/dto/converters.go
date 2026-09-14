@@ -23,11 +23,14 @@ func FromWorkflowStep(step *wfmodels.WorkflowStep) WorkflowStepDTO {
 		AgentProfileID:             step.AgentProfileID,
 		ProfileSessionStartPolicy:  models.NormalizeWorkflowProfileSessionStartPolicy(string(step.ProfileSessionStartPolicy)),
 		ProfileSessionEndPolicy:    models.NormalizeWorkflowProfileSessionEndPolicy(string(step.ProfileSessionEndPolicy)),
+		SessionTarget:              wfmodels.CloneWorkflowSessionTarget(step.SessionTarget),
 		WIPLimit:                   step.WIPLimit,
 		PullFromStepID:             step.PullFromStepID,
 		StageType:                  string(step.StageType),
 		AutoAdvanceRequiresSignal:  step.AutoAdvanceRequiresSignal,
 		CancelTriggersTurnComplete: step.CancelTriggersTurnComplete,
+		CompleteTaskOnEnter:        step.CompleteTaskOnEnter,
+		OrderRevision:              step.OrderRevision,
 	}
 	if hasStepEvents(step.Events) {
 		events := &StepEventsDTO{}

@@ -19,7 +19,7 @@ export const SETTINGS_TYPOGRAPHY = {
   error: "text-sm/relaxed text-destructive",
   meta: "text-[10px]/relaxed text-muted-foreground",
   control: "text-sm md:text-xs",
-  mobileAction: "min-h-11 text-sm md:min-h-7 md:text-xs",
+  mobileAction: "text-sm md:text-xs",
 } as const;
 
 type SettingsFieldDescriptionProps = ComponentProps<"p">;

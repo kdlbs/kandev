@@ -18,6 +18,10 @@ system_design:
 
 # Task 02: Canvas creation preset
 
+Subsequent design: [direct canvas creation](../canvas-direct-creation/plan.md)
+moves the detailed preset into a saved prompt. This completed work order
+records the earlier implementation; the new package owns replacement tests.
+
 ## Summary
 
 Strengthen the editable Create canvas prompt with explicit MCP discovery and

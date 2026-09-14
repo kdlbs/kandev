@@ -207,7 +207,7 @@ function DiagnosticBundleActions({
   return (
     <div className="flex w-full sm:w-auto">
       <Button
-        className="min-h-11 w-full cursor-pointer sm:w-auto"
+        className="w-full cursor-pointer sm:w-auto"
         disabled={pending}
         onClick={onCustomize}
         data-testid="customize-diagnostic-bundle"

@@ -64,6 +64,10 @@ func (r *authzWSRepo) UpdateTask(_ context.Context, task *models.Task) error {
 	return nil
 }
 
+func (r *authzWSRepo) UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error {
+	return r.UpdateTask(ctx, task)
+}
+
 func (r *authzWSRepo) writes() int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
