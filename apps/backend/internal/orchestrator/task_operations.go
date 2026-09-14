@@ -2857,6 +2857,7 @@ func (s *Service) resumeTaskSessionWithContinuation(
 		return nil, nil
 	}
 	defer seam4Res.releaseIfNotConsumed()
+	s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, seam4Res.manualOverride, seam4Res.population, seam4Res.populationKnown, seam4Res.ceiling)
 
 	if _, err := s.resolveDynamicLaunchExecution(resumeCtx, session, session.AgentProfileID, true); err != nil {
 		if attemptErr := s.validateResumeAttempt(attempt); attemptErr != nil {
@@ -2956,7 +2957,6 @@ func (s *Service) resumeTaskSessionWithContinuation(
 	}
 	execution.SessionState = v1.TaskSessionState(readySession.State)
 	seam4Res.consume()
-	s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, seam4Res.manualOverride, seam4Res.population, seam4Res.populationKnown, seam4Res.ceiling)
 	persistBranchRecovery()
 
 	// Backfill the initial user message when a prior failed launch never got
