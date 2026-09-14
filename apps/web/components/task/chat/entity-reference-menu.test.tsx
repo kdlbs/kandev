@@ -125,7 +125,7 @@ describe("EntityReferenceMenu", () => {
     );
   });
 
-  it("renders descriptor-driven groups with a generic fallback and 44px touch rows", () => {
+  it("renders descriptor-driven groups with a generic fallback and 44px touch rows", async () => {
     const reference: EntityReference = {
       version: 1,
       ref: "mention:v1:plugin:acme:incident:scope:incident-9",
@@ -155,13 +155,13 @@ describe("EntityReferenceMenu", () => {
     expect(screen.getByTestId("entity-reference-menu")).toBeTruthy();
     expect(screen.getByText("Incident")).toBeTruthy();
     expect(screen.getByTestId("entity-reference-generic-icon")).toBeTruthy();
-    const row = screen.getByRole("option", { name: /#INC-9.*Authentication outage/ });
+    const row = await screen.findByRole("option", { name: /#INC-9.*Authentication outage/ });
     expect(row.className).toContain("min-h-11");
     fireEvent.click(row);
     expect(onSelect).toHaveBeenCalledWith(reference);
   });
 
-  it("renders a plugin pull request without a provider-specific composer branch", () => {
+  it("renders a plugin pull request without a provider-specific composer branch", async () => {
     const reference: EntityReference = {
       version: 1,
       ref: "mention:v1:plugin%3Aexample%3Areviews:pull_request:workspace-1:pull-42",
@@ -189,7 +189,7 @@ describe("EntityReferenceMenu", () => {
       onSelect,
     );
 
-    const row = screen.getByRole("option", { name: /#PR-42.*Fix authentication/ });
+    const row = await screen.findByRole("option", { name: /#PR-42.*Fix authentication/ });
     expect(screen.getByText("Example reviews")).toBeTruthy();
     expect(screen.getByText("Pull request")).toBeTruthy();
     expect(row.querySelector("svg")?.getAttribute("class")).toContain("h-4");

@@ -1,7 +1,7 @@
 ---
 status: current
 system: ui
-updated: 2026-08-24
+updated: 2026-09-11
 requirements:
   - REQ-UI-COMPOSER-OVERLAY-001
 ---
@@ -11,9 +11,10 @@ requirements:
 ## Purpose and boundaries
 
 The shared `PopupMenu` primitive positions composer suggestion surfaces from a
-direct point or an editor-provided client rectangle. This design corrects its
-vertical geometry when mobile browsers retain layout-viewport caret coordinates
-below a software-keyboard-reduced visual viewport.
+direct client-coordinate point or an editor-provided client rectangle. The
+browser may report caret rectangles in a different coordinate space from
+fixed-position CSS while its software keyboard pans the visual viewport.
+Positioning must normalize that boundary before applying containment.
 
 The primitive owns viewport containment, maximum size, reflow subscriptions,
 listbox structure, touch-row size, and focus-preserving pointer behavior. Each
@@ -28,12 +29,14 @@ draft serialization.
 
 ## Components and responsibilities
 
-- `PopupMenu` in `apps/web/components/task/chat/popup-menu.tsx` resolves the
-  anchor, reads viewport bounds, subscribes to viewport changes, portals the
-  surface to `document.body`, and renders one labelled listbox.
-- `computePopupMenuStyle` performs deterministic horizontal and vertical
-  geometry without reading the DOM. It is the unit-test boundary for viewport
-  containment.
+- `PopupMenu` in `apps/web/components/task/chat/popup-menu.tsx` owns the portal,
+  anchor contract, positioning lifetime, and one labelled listbox.
+- `positionPopupMenu` in the adjacent `popup-menu-position.ts` integrates
+  Floating UI's DOM platform with the product's size and placement constraints.
+  The library normalizes client rectangles into fixed-position coordinates,
+  including WebKit's visual viewport offsets. Unit tests exercise the real DOM
+  platform with controlled browser measurements, not a mocked positioning
+  algorithm.
 - `MentionMenu`, `SlashCommandMenu`, and `EntityReferenceMenu` use the default
   above-anchor placement for chat and shared prompt-composer suggestions.
 - `PlanSlashMenu` uses the same primitive with below-anchor placement. Its
@@ -44,13 +47,12 @@ draft serialization.
 
 `PopupMenu` accepts one of two transient anchor contracts:
 
-- a direct `{x, y}` fixed-position point; or
+- a direct `{x, y}` client-coordinate point; or
 - a `clientRect` callback whose top or bottom edge supplies the placement point.
 
-The browser's `window.visualViewport`, when present, supplies `offsetLeft`,
-`offsetTop`, `width`, and `height`. Otherwise `window.innerWidth` and
-`window.innerHeight` supply a zero-offset fallback viewport. No value is stored
-or sent over an API.
+The DOM positioning platform reads the browser's visual viewport, or falls
+back to the document viewport when that API is absent. Callers must not add
+visual offsets themselves. No value is stored or sent over an API.
 
 The existing placement contract remains explicit: `above` renders the
 surface's bottom edge above its normalized anchor; `below` renders the surface's
@@ -61,32 +63,32 @@ attached to its composer.
 
 ## Geometry and reflow
 
-`computePopupMenuStyle` shall use the current viewport rectangle for both axes:
+Positioning uses Floating UI with a virtual caret reference, fixed strategy,
+explicit `top-start` or `bottom-start` placement, and these ordered operations:
 
-1. Derive padded viewport bounds with the existing eight-pixel margin.
-2. Clamp popup width and left position to the padded horizontal bounds.
-3. For `above`, derive the rendered bottom edge from `position.y - margin` and
-   clamp that edge to the padded vertical bounds. Calculate available height
-   from the clamped edge to the padded viewport top, not from the raw layout
-   anchor. Keep the existing `translateY(-100%)` transform so short result sets
-   stay bottom-anchored. When the requested edge is already inside the bounds,
-   clamping must be an identity operation so the surface remains directly
-   adjacent to the composer.
-4. For `below`, retain top-edge placement and calculate height from its
-   normalized top edge to the padded viewport bottom. Cover this path so the
-   above-placement repair cannot change its transform or ordinary geometry.
-5. Cap the outer surface at the existing menu-height limit, subtract the header
-   height for the internally scrollable listbox, and never produce a negative
-   size.
+1. Offset the surface eight pixels from the caret.
+2. Size it against normalized clipping bounds with eight-pixel viewport insets,
+   a 420-pixel width cap and a 280-pixel height cap. Use the available space on
+   the requested side before shifting, so long lists shrink without covering a
+   visible composer and short lists remain naturally caret-adjacent.
+3. For an above menu with less adjacent room than a heading, 44-pixel row and
+   list padding, allow the available viewport height instead. This prevents an
+   occluded anchor from collapsing an otherwise usable menu to zero height.
+4. Shift the measured surface into the padded viewport on both axes. Do not
+   flip sides. The below-menu path retains its explicit bottom-caret placement
+   and does not adopt the above-menu minimum-room fallback.
 
-When the software keyboard leaves a composer anchor below the visual viewport,
-step 3 moves the rendered bottom edge to the visible viewport's padded bottom.
-The list then grows upward into visible space. Anchors already inside the
-viewport retain their current geometry and composer adjacency.
+The surface is a flex column with a non-shrinking heading and one shrinking,
+internally scrollable listbox. Its height is content-driven up to the cap;
+there is no assumed fixed heading height or vertical translation transform.
 
-While open, `PopupMenu` continues to rerender on window resize and on visual
-viewport resize or scroll. The geometry helper then recomputes from the current
-bounds. No polling, global store, or new observer is required.
+While mounted, `autoUpdate` observes ancestor and visual viewport scroll/resize
+and reference/menu size and layout changes. Result or anchor changes also
+refresh positioning through the React effect. There is no polling or global
+mutation observer. The effect removes all subscriptions on close/replacement.
+A revision guard rejects stale asynchronous sizing and position writes. The
+menu starts hidden until its first position resolves, so it cannot flash at
+the document origin.
 
 ## Interaction contract
 
@@ -100,9 +102,11 @@ popup on mobile; it is not a navigation flow that warrants a drawer.
 
 1. A composer recognizes `@`, `#`, or `/` and supplies a direct point or live
    client rectangle.
-2. `PopupMenu` resolves the placement point and current viewport.
-3. `computePopupMenuStyle` returns the contained fixed-position rectangle.
-4. A viewport event increments the local revision and repeats steps 2 and 3.
+2. `PopupMenu` mounts its body portal and starts the positioning lifetime.
+3. The DOM platform normalizes the anchor and computes contained fixed CSS
+   coordinates. Only the current positioning revision may apply the result.
+4. A viewport, layout, or content change repeats positioning without retriggering
+   the suggestion plugin.
 5. The consumer handles touch or keyboard selection and updates the draft.
 
 ## Failure and recovery
@@ -134,14 +138,14 @@ result data or URLs.
 
 ## Observability
 
-No production telemetry is added. Deterministic geometry unit tests cover raw
-layout anchors outside a shrunken visual viewport. A phone-browser E2E covers a
-saved-prompt result after the page and composer reflow to a keyboard-sized
-viewport, including direct composer adjacency, containment, touch selection,
-and focus retention. Existing mobile `#` and `/` scenarios provide
-sibling-consumer regressions. Browser evidence must resize the page layout with
-the visible viewport; replacing only `visualViewport` describes an occluded
-composer and is not valid visual evidence for adjacency.
+No production telemetry is added. Unit tests cover the recorded Safari
+client-coordinate/visual-offset combination through the real DOM platform,
+ordinary Chromium geometry, occluded anchors, below placement, reflow, and
+cleanup. Browser E2E covers both layout resizing (adjacency) and offset-only
+viewport changes (occluded-anchor containment) for `@` and `#`, including
+touch selection and retained focus. Offset-only stimuli do not prove adjacency
+or emulate WebKit. Neither Chromium nor desktop WebKit emulation certifies a
+real iOS software keyboard; keep physical-device results separately identified.
 
 ## Related decisions
 

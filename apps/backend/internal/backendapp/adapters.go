@@ -22,6 +22,7 @@ import (
 	githubsvc "github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
+	taskhandlers "github.com/kandev/kandev/internal/task/handlers"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
@@ -324,6 +325,23 @@ func newLifecycleAdapter(mgr *lifecycle.Manager, reg *registry.Registry, log *lo
 
 // LaunchAgent creates a new agentctl instance for a task.
 // Agent subprocess is NOT started - call StartAgentProcess() explicitly.
+// wrapSessionRecoveryGuardError translates the raw lifecycle recovery-guard
+// sentinels into an orchestrator.SessionRecoveryGuardError so callers outside
+// internal/agent/runtime/ can distinguish a retryable in-progress recovery
+// from a non-retryable unstoppable-agent condition without importing
+// lifecycle directly. Errors that are not guard-related pass through
+// unchanged.
+func wrapSessionRecoveryGuardError(err error, sessionID string) error {
+	switch {
+	case errors.Is(err, lifecycle.ErrSessionRecoveryGuarded):
+		return &orchestrator.SessionRecoveryGuardError{Cause: err, SessionID: sessionID, Retryable: true}
+	case errors.Is(err, lifecycle.ErrSessionUnstoppableAgent):
+		return &orchestrator.SessionRecoveryGuardError{Cause: err, SessionID: sessionID, Retryable: false}
+	default:
+		return err
+	}
+}
+
 func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
 	// WorkspacePath wins when set (repo-less task with picked folder); otherwise
 	// fall back to RepositoryURL (legacy: this carries a local filesystem path
@@ -342,7 +360,7 @@ func (a *lifecycleAdapter) LaunchAgent(ctx context.Context, req *executor.Launch
 	// Create the agentctl execution (does NOT start agent process)
 	execution, err := a.mgr.Launch(ctx, launchReq)
 	if err != nil {
-		return nil, err
+		return nil, wrapSessionRecoveryGuardError(err, req.SessionID)
 	}
 
 	// Extract worktree info from metadata if available
@@ -583,6 +601,12 @@ func (a *lifecycleAdapter) SetExecutionEnv(ctx context.Context, agentExecutionID
 	return a.mgr.SetExecutionEnv(ctx, agentExecutionID, env)
 }
 
+// ExecutorProfileEnvForSession resolves the current executor profile
+// environment for a prepared workspace before its agent process starts.
+func (a *lifecycleAdapter) ExecutorProfileEnvForSession(ctx context.Context, sessionID, taskEnvironmentID string) (map[string]string, error) {
+	return a.mgr.ExecutorProfileEnvForSession(ctx, sessionID, taskEnvironmentID)
+}
+
 // SetMcpMode changes the MCP tool mode on an existing execution's agentctl instance.
 func (a *lifecycleAdapter) SetMcpMode(ctx context.Context, executionID string, mode string) error {
 	return a.mgr.SetMcpMode(ctx, executionID, mode)
@@ -626,13 +650,29 @@ func normalizeRuntimeStopError(err error) error {
 }
 
 // RowLiveness classifies the liveness of the OS process backing an
-// executors_running row using the runtime-aware host-local probe. It is the
-// orchestrator's window into the platform-split liveness check (kept in the
-// lifecycle package) used by startup reconciliation
-// (#1597 runtime-aware liveness). A local check never runs against a
+// executors_running row. It is the orchestrator's window into the
+// platform-split liveness check (kept in the lifecycle package) used outside
+// a reconciliation pass — e.g. the single-session idle reclaim path — and
+// always takes its own fresh adopted-server enumeration for a standalone row
+// rather than reusing one a pass cached (see RowLivenessScoped for the
+// pass-scoped sibling). A local/enumeration check never runs against a
 // remote/SSH row — such rows return Unknown.
 func (a *lifecycleAdapter) RowLiveness(row *models.ExecutorRunning) models.ProcessLiveness {
-	return lifecycle.RowProcessLiveness(row)
+	return a.mgr.RowLiveness(row)
+}
+
+// NewStandaloneLivenessScope takes one adopted-server enumeration for reuse
+// across every row of a single reconciliation pass (design 02 "Persistence":
+// "It has two kinds of caller, and only one of them is a pass"). Satisfies
+// the orchestrator's optional standaloneLivenessScoper capability.
+func (a *lifecycleAdapter) NewStandaloneLivenessScope(ctx context.Context) interface{} {
+	return a.mgr.NewStandaloneLivenessScope(ctx)
+}
+
+// RowLivenessScoped classifies row's liveness reusing scope (from
+// NewStandaloneLivenessScope) instead of taking a fresh enumeration.
+func (a *lifecycleAdapter) RowLivenessScoped(row *models.ExecutorRunning, scope interface{}) models.ProcessLiveness {
+	return a.mgr.RowLivenessScoped(row, scope)
 }
 
 // GetAgentStatus returns the status of an agent execution
@@ -839,6 +879,10 @@ func (a *lifecycleAdapter) RecoverAgentPromptStream(ctx context.Context, session
 	return a.mgr.RecoverAgentPromptStream(ctx, sessionID)
 }
 
+func (a *lifecycleAdapter) BindResumeAttempt(ctx context.Context, sessionID, attemptID string) error {
+	return a.mgr.BindResumeAttempt(ctx, sessionID, attemptID)
+}
+
 // IsPassthroughSession checks if the given session is running in passthrough (PTY) mode.
 func (a *lifecycleAdapter) IsPassthroughSession(ctx context.Context, sessionID string) bool {
 	return a.mgr.IsPassthroughSession(ctx, sessionID)
@@ -899,6 +943,10 @@ func (a *lifecycleAdapter) GetExecutionIDForSession(ctx context.Context, session
 	return a.mgr.GetExecutionIDForSession(ctx, sessionID)
 }
 
+func (a *lifecycleAdapter) ListExecutionsForTask(taskID string) []lifecycle.ExecutionReference {
+	return a.mgr.ListExecutionsForTask(taskID)
+}
+
 func (a *lifecycleAdapter) GetRemoteRuntimeStatusBySession(ctx context.Context, sessionID string) (*executor.RemoteRuntimeStatus, error) {
 	status, ok := a.mgr.GetRemoteStatusBySessionID(ctx, sessionID)
 	if !ok || status == nil {
@@ -931,6 +979,7 @@ func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID st
 		AutoApprove:                info.AutoApprove,
 		DangerouslySkipPermissions: info.DangerouslySkipPermissions,
 		CLIPassthrough:             info.CLIPassthrough,
+		EnvVars:                    append([]models.ProfileEnvVar(nil), info.EnvVars...),
 		SupportsMCP:                info.SupportsMCP,
 	}, nil
 }
@@ -1006,6 +1055,8 @@ type orchestratorWrapper struct {
 	svc *orchestrator.Service
 }
 
+var _ taskhandlers.AtomicQueuedPromptCoordinator = (*orchestratorWrapper)(nil)
+
 // PromptTask forwards directly to the orchestrator service.
 // Attachments (images) are passed through to the agent.
 func (w *orchestratorWrapper) PromptTask(ctx context.Context, taskID, taskSessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment, dispatchOnly bool) (*orchestrator.PromptResult, error) {
@@ -1016,6 +1067,18 @@ func (w *orchestratorWrapper) PromptTask(ctx context.Context, taskID, taskSessio
 func (w *orchestratorWrapper) ResumeTaskSession(ctx context.Context, taskID, taskSessionID string) error {
 	_, err := w.svc.ResumeTaskSession(ctx, taskID, taskSessionID)
 	return err
+}
+
+// HasActiveSessionRecoveryForFailure forwards the correlated prompt-error
+// ownership seam. Historical session errors never suppress a new failure.
+func (w *orchestratorWrapper) HasActiveSessionRecoveryForFailure(ctx context.Context, taskID, taskSessionID string, failure error) bool {
+	return w.svc.HasActiveSessionRecoveryForFailure(ctx, taskID, taskSessionID, failure)
+}
+
+// ResumeTaskSessionAndPrompt keeps the recovery attempt alive through prompt
+// provider acceptance for the handler's internal retry.
+func (w *orchestratorWrapper) ResumeTaskSessionAndPrompt(ctx context.Context, taskID, taskSessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
+	return w.svc.ResumeTaskSessionAndPrompt(ctx, taskID, taskSessionID, prompt, model, planMode, attachments)
 }
 
 // StartCreatedSession forwards to the orchestrator service, discarding the TaskExecution result.
@@ -1039,10 +1102,12 @@ func (w *orchestratorWrapper) StartCreatedSessionWithPromptContext(
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
 	promptReferenceContext string,
+	promptReferencesPrepared bool,
 ) (*executor.TaskExecution, error) {
 	return w.svc.StartCreatedSessionWithPromptContext(
 		ctx, taskID, sessionID, agentProfileID, prompt,
 		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+		promptReferencesPrepared,
 	)
 }
 
@@ -1056,12 +1121,33 @@ func (w *orchestratorWrapper) StartCreatedSessionWithPromptContextAndCanvasGuida
 	attachments []v1.MessageAttachment,
 	references []v1.EntityReference,
 	promptReferenceContext string,
+	promptReferencesPrepared bool,
 	canvasGuidanceResolved, includeCanvasGuidance bool,
 ) (*executor.TaskExecution, error) {
 	return w.svc.StartCreatedSessionWithPromptContextAndCanvasGuidance(
 		ctx, taskID, sessionID, agentProfileID, prompt,
 		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
-		canvasGuidanceResolved, includeCanvasGuidance,
+		promptReferencesPrepared, canvasGuidanceResolved, includeCanvasGuidance,
+	)
+}
+
+// StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt
+// forwards a first direct prompt whose task brief was admitted and persisted
+// before launch.
+func (w *orchestratorWrapper) StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt(
+	ctx context.Context,
+	taskID, sessionID, agentProfileID, prompt string,
+	skipMessageRecord, planMode, autoStart bool,
+	attachments []v1.MessageAttachment,
+	references []v1.EntityReference,
+	promptReferenceContext string,
+	promptReferencesPrepared bool,
+	canvasGuidanceResolved, includeCanvasGuidance bool,
+) (*executor.TaskExecution, error) {
+	return w.svc.StartCreatedSessionWithPromptContextAndCanvasGuidancePreservingDirectPrompt(
+		ctx, taskID, sessionID, agentProfileID, prompt,
+		skipMessageRecord, planMode, autoStart, attachments, references, promptReferenceContext,
+		promptReferencesPrepared, canvasGuidanceResolved, includeCanvasGuidance,
 	)
 }
 
@@ -1151,6 +1237,14 @@ func (w *orchestratorWrapper) QueueUserPrompt(ctx context.Context, taskID, sessi
 	return w.svc.QueueUserPrompt(ctx, taskID, sessionID, prompt, model, planMode, attachments, metadata, userMessageRecorded)
 }
 
+func (w *orchestratorWrapper) MaxQueuedPromptsPerSession() int {
+	return w.svc.MaxQueuedPromptsPerSession()
+}
+
+func (w *orchestratorWrapper) NotifyQueuedUserPrompt(ctx context.Context, taskID, sessionID string) {
+	w.svc.NotifyQueuedUserPrompt(ctx, taskID, sessionID)
+}
+
 // StepRequiresCompletionSignal forwards to the orchestrator service.
 func (w *orchestratorWrapper) StepRequiresCompletionSignal(ctx context.Context, taskID string) bool {
 	return w.svc.StepRequiresCompletionSignal(ctx, taskID)
@@ -1173,6 +1267,10 @@ func (w *orchestratorWrapper) SteerEligible(sessionID string, state models.TaskS
 
 func (w *orchestratorWrapper) SteerTask(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
 	return w.svc.SteerTask(ctx, taskID, sessionID, prompt, model, planMode, attachments)
+}
+
+func (w *orchestratorWrapper) SteerRecordedMessage(ctx context.Context, taskID, sessionID, prompt, model string, planMode bool, attachments []v1.MessageAttachment) (*orchestrator.PromptResult, error) {
+	return w.svc.SteerRecordedMessage(ctx, taskID, sessionID, prompt, model, planMode, attachments)
 }
 
 // subagentContextAdapter adapts the task service to the
@@ -1253,6 +1351,22 @@ func (a *messageCreatorAdapter) CreateAgentMessage(ctx context.Context, taskID, 
 // CreateUserMessage creates a message with author_type="user"
 func (a *messageCreatorAdapter) CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error {
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+		TaskSessionID: agentSessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		Content:       content,
+		AuthorType:    "user",
+		Metadata:      metadata,
+	})
+	return err
+}
+
+func (a *messageCreatorAdapter) CreateUserMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, agentSessionID, turnID string,
+	metadata map[string]interface{},
+) error {
+	_, err := a.svc.CreateMessageIdempotent(ctx, messageID, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
 		TaskID:        taskID,
 		TurnID:        turnID,

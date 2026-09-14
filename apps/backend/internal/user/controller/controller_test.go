@@ -135,7 +135,7 @@ func TestUpdateUserSettingsMapsStartupPage(t *testing.T) {
 		StartupPage: models.StartupPageTaskOverview,
 	}}
 	controller := NewController(service.NewService(repo, nil, log))
-	want := models.StartupPageLastTask
+	want := "threads"
 
 	response, err := controller.UpdateUserSettings(context.Background(), dto.UpdateUserSettingsRequest{
 		StartupPage: &want,

@@ -73,6 +73,52 @@ func TestCutoverPostgres_NormalizesLegacyFlatEnvironment(t *testing.T) {
 	}
 }
 
+func TestCutoverPostgres_RebindsRecoveryClaimForeignKey(t *testing.T) {
+	db := openLegacyPostgres(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := legacySeed{envID: "env-pg-recovery-claim", taskID: "task-pg-recovery-claim"}
+	seedLegacyTask(t, db, seed, now)
+	seedLegacyFlatEnv(t, db, seed, "wt-pg-recovery-claim", "/tasks/recovery-claim", "feature/recovery-claim", now)
+	if _, err := db.Exec(`
+		CREATE TABLE task_environment_recovery_claims (
+			task_environment_id TEXT PRIMARY KEY,
+			owner_task_id TEXT NOT NULL,
+			ownership_generation BIGINT NOT NULL,
+			session_id TEXT NOT NULL,
+			operation_id TEXT NOT NULL,
+			executor_type TEXT NOT NULL,
+			created_at TIMESTAMP NOT NULL,
+			updated_at TIMESTAMP NOT NULL,
+			FOREIGN KEY (task_environment_id) REFERENCES task_environments(id) ON DELETE CASCADE
+		)`); err != nil {
+		t.Fatalf("create legacy recovery claim table: %v", err)
+	}
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_environment_recovery_claims (
+			task_environment_id, owner_task_id, ownership_generation, session_id,
+			operation_id, executor_type, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`),
+		seed.envID, seed.taskID, 1, "session-pg-recovery-claim", "operation-pg-recovery-claim", "host", now, now); err != nil {
+		t.Fatalf("seed legacy recovery claim: %v", err)
+	}
+
+	if _, err := NewWithDB(db, db, nil); err != nil {
+		t.Fatalf("postgres cutover with recovery claim: %v", err)
+	}
+	var referencedTable string
+	if err := db.Get(&referencedTable, `
+		SELECT referenced.relname
+		FROM pg_constraint constraint_row
+		JOIN pg_class referenced ON referenced.oid = constraint_row.confrelid
+		WHERE constraint_row.conrelid = 'task_environment_recovery_claims'::regclass
+		  AND constraint_row.contype = 'f'`); err != nil {
+		t.Fatalf("read recovery claim foreign key: %v", err)
+	}
+	if referencedTable != "task_environments" {
+		t.Fatalf("recovery claim foreign key references %q, want task_environments", referencedTable)
+	}
+}
+
 // TestCutoverPostgres_OrphanedSessionWorktreeUsesFlatOwner proves PostgreSQL
 // uses the shared recoverable-orphan classification during cutover.
 func TestCutoverPostgres_OrphanedSessionWorktreeUsesFlatOwner(t *testing.T) {

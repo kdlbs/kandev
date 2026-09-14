@@ -31,26 +31,33 @@ func (s *Service) SetTaskDependencyReader(reader TaskDependencyReader) {
 }
 
 // dependencyBlocksAutoStart reports whether taskID has an unresolved dependency
-// and therefore must not be launched by an automated path.
+// and therefore must not be launched by an automated path. gateErrored reports
+// whether the block came from a failed read rather than a genuine dependency
+// block: a genuine block is already covered by dependency-resolution launch
+// paths (evaluateDependentAfterPredecessorChange, reconcileDependencyLaunchesOnStartup),
+// but a read failure is not, so a caller holding a one-shot launch token must
+// restore it only in that case — restoring on every genuine block would burn
+// recoverTaskLifecycleAttempt's bounded retry budget on every startup for as
+// long as the task stays blocked.
 //
-// Fails CLOSED: a read error returns true. Failing open would launch work whose
-// predecessor may never have run, which is the single outcome task dependencies
-// exist to prevent.
-func (s *Service) dependencyBlocksAutoStart(ctx context.Context, taskID, eventName string) bool {
+// Fails CLOSED: a read error returns blocked=true. Failing open would launch
+// work whose predecessor may never have run, which is the single outcome task
+// dependencies exist to prevent.
+func (s *Service) dependencyBlocksAutoStart(ctx context.Context, taskID, eventName string) (blocked, gateErrored bool) {
 	if s.dependencyReader == nil {
-		return false
+		return false, false
 	}
-	blocked, reason, err := s.dependencyReader.DependencyGate(ctx, taskID)
+	isBlocked, reason, err := s.dependencyReader.DependencyGate(ctx, taskID)
 	if err != nil {
 		s.logger.Warn(eventName+": dependency lookup failed; skipping auto-start",
 			zap.String("task_id", taskID), zap.Error(err))
-		return true
+		return true, true
 	}
-	if blocked {
+	if isBlocked {
 		s.logger.Debug(eventName+": task has unresolved dependencies; skipping auto-start",
 			zap.String("task_id", taskID), zap.String("blocked_reason", reason))
 	}
-	return blocked
+	return isBlocked, false
 }
 
 // handleTaskDependenciesForTerminalState reacts to a task reaching a terminal
@@ -116,7 +123,7 @@ func (s *Service) evaluateDependentAfterPredecessorChange(
 			zap.String("task_id", task.ID))
 		return
 	}
-	s.autoStartTaskForStep(ctx, task.ID, task.WorkflowStepID, events.TaskDependenciesResolved, 0)
+	s.autoStartTaskForStep(ctx, task.ID, task.WorkflowStepID, events.TaskDependenciesResolved, 0, false)
 }
 
 // publishDependenciesResolved announces that a task's last unresolved
@@ -185,6 +192,6 @@ func (s *Service) reconcileDependencyLaunchesOnStartup(ctx context.Context) {
 		}
 		s.logger.Info("startup: launching task whose dependencies resolved while down",
 			zap.String("task_id", candidate.TaskID))
-		s.autoStartTaskForStep(ctx, candidate.TaskID, candidate.WorkflowStepID, "startup.dependencies_resolved", 0)
+		s.autoStartTaskForStep(ctx, candidate.TaskID, candidate.WorkflowStepID, "startup.dependencies_resolved", 0, false)
 	}
 }

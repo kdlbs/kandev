@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/dto"
@@ -137,9 +138,13 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 
 	resp, err := h.service.LaunchSession(ctx, &req)
 	if err != nil {
-		if recoveryResponse, responseErr := taskArchivedConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
-			return recoveryResponse, responseErr
+		if guardResponse, responseErr := sessionRecoveryGuardConflictResponse(msg, err); guardResponse != nil || responseErr != nil {
+			return guardResponse, responseErr
 		}
+		if archivedResponse, responseErr := taskArchivedConflictResponse(msg, err); archivedResponse != nil || responseErr != nil {
+			return archivedResponse, responseErr
+		}
+		intent := orchestrator.ResolveIntent(&req)
 		// A launch failing because the root context was cancelled or the
 		// session is already terminal is an expected shutdown teardown race,
 		// not a fault: log WARN (no stack trace) so it does not masquerade as a
@@ -147,15 +152,19 @@ func (h *Handlers) wsLaunchSession(ctx context.Context, msg *ws.Message) (*ws.Me
 		if orchestrator.IsBenignLaunchTeardownErr(err) {
 			h.logger.Warn("session launch aborted during shutdown",
 				zap.String("task_id", req.TaskID),
-				zap.String("intent", string(orchestrator.ResolveIntent(&req))),
+				zap.String("intent", string(intent)),
 				zap.String("error", err.Error()))
 		} else {
 			h.logger.Error("failed to launch session",
 				zap.String("task_id", req.TaskID),
-				zap.String("intent", string(orchestrator.ResolveIntent(&req))),
+				zap.String("intent", string(intent)),
 				zap.Error(err))
 		}
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to launch session: "+err.Error(), nil)
+		publicErr := err
+		if intent == orchestrator.IntentRestoreWorkspace {
+			publicErr = routingerr.SanitizeError(err)
+		}
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to launch session: "+publicErr.Error(), nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)
 }
@@ -260,6 +269,23 @@ func branchRecoveryConflictResponse(msg *ws.Message, err error) (*ws.Message, er
 	return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeConflict, err.Error(), branchRecoveryErr.Details())
 }
 
+// sessionRecoveryGuardConflictResponse surfaces the startup recovery guard's
+// two distinct refusal reasons: a retryable in-progress recovery maps to
+// CONFLICT (the caller should retry once recovery resolves), and a
+// non-retryable unstoppable-agent condition maps to UNAVAILABLE (only a
+// backend restart clears it).
+func sessionRecoveryGuardConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
+	var guardErr *orchestrator.SessionRecoveryGuardError
+	if !errors.As(err, &guardErr) {
+		return nil, nil
+	}
+	code := ws.ErrorCodeUnavailable
+	if guardErr.Retryable {
+		code = ws.ErrorCodeConflict
+	}
+	return ws.NewError(msg.ID, msg.Action, code, err.Error(), guardErr.Details())
+}
+
 func taskArchivedConflictResponse(msg *ws.Message, err error) (*ws.Message, error) {
 	if !errors.Is(err, executor.ErrTaskArchived) {
 		return nil, nil
@@ -304,6 +330,9 @@ func (h *Handlers) wsRecoverSession(ctx context.Context, msg *ws.Message) (*ws.M
 		}
 		if recoveryResponse, responseErr := branchRecoveryConflictResponse(msg, err); recoveryResponse != nil || responseErr != nil {
 			return recoveryResponse, responseErr
+		}
+		if guardResponse, responseErr := sessionRecoveryGuardConflictResponse(msg, err); guardResponse != nil || responseErr != nil {
+			return guardResponse, responseErr
 		}
 		h.logger.Error("failed to recover session",
 			zap.String("task_id", req.TaskID),

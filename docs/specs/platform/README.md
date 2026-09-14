@@ -15,11 +15,17 @@ The platform system owns cross-cutting runtime services, configuration,
 observability, notifications, localization, lifecycle safety, and shared
 operational guarantees.
 
+Shared read-capacity protection and aggregate reporting availability belong here.
+Domain systems retain ownership of source records and workspace context identity.
+
 ## Ownership
 
 This system owns startup and shutdown contracts, process and port-independent
 runtime safety, configuration precedence, diagnostics, notifications,
 localization, feature toggles, health, and shared session recovery services.
+
+Settings discovery and interface parity belong to Platform. Each settings domain
+retains ownership of its values, validation, authority, and persistence.
 
 ## Exclusions
 
@@ -31,6 +37,12 @@ localization, feature toggles, health, and shared session recovery services.
 ## Specification map
 
 ### Requirements
+
+- [CI performance](requirements/ci-performance.md)
+
+- [Startup lifecycle](requirements/startup-lifecycle.md)
+
+- [Agent-accessible Kandev settings](requirements/agent-settings-parity.md)
 
 
 
@@ -75,6 +87,13 @@ localization, feature toggles, health, and shared session recovery services.
 
 ### System design
 
+- [CI performance](system-design/ci-performance.md)
+
+- [Startup lifecycle](system-design/startup-lifecycle.md)
+
+- [Agent-accessible Kandev settings](system-design/agent-settings-parity.md)
+- [Core settings domain adoption](system-design/agent-settings-domains.md)
+
 
 
 - [Agent process exit and stderr drain](system-design/agent-process-exit-drain.md)
@@ -104,10 +123,12 @@ localization, feature toggles, health, and shared session recovery services.
 ## Migration record
 
 Migration remains in progress while legacy source detail is extracted from the
-canonical requirement and system-design documents above.
+canonical requirement and system-design documents. Use the catalog command to
+find current sources.
 
 ## Related systems
 
 - [Agents](../agents/README.md): consumes shared runtime services.
 - [Executors](../executors/README.md): owns execution-environment details.
 - [Desktop](../desktop/README.md): embeds platform startup and shutdown.
+- [Workspaces](../workspaces/README.md): owns cached context identity and read recovery.

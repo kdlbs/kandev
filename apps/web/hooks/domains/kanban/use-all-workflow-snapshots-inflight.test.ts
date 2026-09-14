@@ -10,6 +10,7 @@ type SnapshotTask = {
   state: "IN_PROGRESS" | "REVIEW";
   updatedAt?: string;
   autoStartFailed?: boolean;
+  workspaceOrphaned?: boolean;
   parentTaskId?: string;
   statusSummary?: {
     revision: number;
@@ -459,6 +460,56 @@ describe("useAllWorkflowSnapshots auto-start marker races", () => {
           expect.objectContaining({
             id: "task-with-live-auto-start-marker",
             autoStartFailed: true,
+          }),
+        ],
+      }),
+    );
+  });
+
+  it("keeps a newer live workspace-orphaned marker when an older snapshot finishes later", async () => {
+    resetState();
+    let resolveFetch: (value: unknown) => void = () => {};
+    mocks.fetchWorkflowSnapshot.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveFetch = resolve;
+      }),
+    );
+
+    renderHook(() => useAllWorkflowSnapshots(WORKSPACE_ID));
+    await waitFor(() =>
+      expect(mocks.fetchWorkflowSnapshot).toHaveBeenCalledWith(WORKFLOW_ID, expect.anything()),
+    );
+
+    setLightweightSnapshot({
+      id: "task-with-live-orphan-marker",
+      workflowStepId: STEP_ID,
+      title: "Live orphan marker",
+      position: 0,
+      state: "IN_PROGRESS",
+      workspaceOrphaned: true,
+    });
+    resolveFetch({
+      steps: [{ id: STEP_ID, name: "Doing", color: null, position: 0 }],
+      tasks: [
+        {
+          id: "task-with-live-orphan-marker",
+          workflow_step_id: STEP_ID,
+          title: "Live orphan marker",
+          position: 0,
+          state: "IN_PROGRESS",
+          workspace_orphaned: false,
+        },
+      ],
+    });
+
+    await waitFor(() => expect(mocks.setWorkflowSnapshot).toHaveBeenCalled());
+    expect(mocks.setWorkflowSnapshot).toHaveBeenCalledWith(
+      WORKFLOW_ID,
+      expect.objectContaining({
+        tasks: [
+          expect.objectContaining({
+            id: "task-with-live-orphan-marker",
+            workspaceOrphaned: true,
           }),
         ],
       }),

@@ -286,6 +286,45 @@ func TestDeleteTaskTree_NoCascadeNormalizesInheritedChildren(t *testing.T) {
 	}
 }
 
+// AC-005.6: a marked inherit_parent child whose parent is non-cascade
+// deleted ends with mode = shared_group AND no orphan keys, in one write.
+func TestDeleteTaskTree_NoCascadeClearsOrphanMarkerOnInheritedChildren(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("child", "root", "ws-1")
+	tasks.tasks["child"].Metadata = map[string]interface{}{
+		"workspace": map[string]interface{}{
+			"mode":                     workspaceModeInheritParent,
+			orphanedWorkspaceKey:       true,
+			orphanedReasonWorkspaceKey: orphanedReasonParentArchived,
+			orphanedParentIDKey:        "root",
+			orphanedAtKey:              "2026-09-05T00:00:00Z",
+		},
+	}
+
+	svc := NewHandoffService(&fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)}, nil, nil, nil, nil, nil)
+	if _, err := svc.DeleteTaskTree(context.Background(), "root", false); err != nil {
+		t.Fatalf("DeleteTaskTree: %v", err)
+	}
+
+	child, err := tasks.GetTask(context.Background(), "child")
+	if err != nil {
+		t.Fatalf("GetTask(child): %v", err)
+	}
+	if child == nil {
+		t.Fatal("no-cascade delete removed the child")
+	}
+	workspace, _ := child.Metadata["workspace"].(map[string]interface{})
+	if workspace["mode"] != workspaceModeSharedGroup {
+		t.Fatalf("child workspace mode = %#v, want %q", workspace["mode"], workspaceModeSharedGroup)
+	}
+	for _, key := range []string{orphanedWorkspaceKey, orphanedReasonWorkspaceKey, orphanedParentIDKey, orphanedAtKey} {
+		if _, ok := workspace[key]; ok {
+			t.Fatalf("child workspace[%q] still present after non-cascade delete: %#v", key, workspace)
+		}
+	}
+}
+
 func (c *recordingCleanupCoordinator) StartPreparedTaskResourceCleanup(_ context.Context, operationID string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()

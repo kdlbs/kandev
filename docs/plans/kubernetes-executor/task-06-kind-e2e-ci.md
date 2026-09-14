@@ -46,9 +46,17 @@ jobs, and E2E README are implemented and verified.
   node
   `kindest/node:v1.34.8@sha256:02722c2dedddcfc00febf5d27fbeb9b7b2c14294c82109ff4a85d89ac9ba3256`.
 - Runtime base:
-  `ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517`.
-  Its `apt-get` package resolution is not snapshot-pinned; this is a documented
-  nonblocking reproducibility limitation for the fixture.
+  `ghcr.io/kdlbs/kandev-ci:runtime-sha-6f288a23c526@sha256:b9636e1c20adb0fcce1c65858a767fb1b0fe48a15ac5688b9c623163575efb8d`.
+  The compatibility fixture reuses the immutable CI runtime image, including
+  its lifecycle tools, instead of resolving Ubuntu packages on every runner.
+
+### CI timeout remediation
+
+The compatibility fixture now uses the pinned Kandev CI runtime image and the
+container workflow pre-pulls it with bounded retries. The per-run image build
+copies the current artifacts without contacting an Ubuntu package mirror. The
+Kubernetes pin contract test covers the immutable image reference and the
+absence of the package-install step.
 
 ### Fresh build identity
 

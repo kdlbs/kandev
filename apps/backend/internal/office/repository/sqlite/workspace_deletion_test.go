@@ -146,6 +146,7 @@ func seedWorkspaceDeletionRows(t *testing.T, repo *sqlite.Repository, workspaceI
 	execRaw(t, repo, `INSERT INTO office_channels (id, workspace_id, agent_profile_id, platform, created_at, updated_at) VALUES (?, ?, ?, 'slack', ?, ?)`, workspaceID+"-channel", workspaceID, agentID, now, now)
 	execRaw(t, repo, `INSERT INTO office_approvals (id, workspace_id, type, created_at, updated_at) VALUES (?, ?, 'test', ?, ?)`, workspaceID+"-approval", workspaceID, now, now)
 	execRaw(t, repo, `INSERT INTO office_activity_log (id, workspace_id, actor_type, actor_id, action, created_at) VALUES (?, ?, 'agent', ?, 'created', ?)`, workspaceID+"-activity", workspaceID, agentID, now)
+	execRaw(t, repo, `INSERT INTO office_workspace_pauses (id, workspace_id, reason, created_by, created_by_kind, created_at) VALUES (?, ?, 'test', ?, 'user', ?)`, workspaceID+"-pause", workspaceID, agentID, now)
 	execRaw(t, repo, `INSERT INTO office_onboarding (workspace_id, completed, ceo_agent_id, created_at) VALUES (?, 1, ?, ?)`, workspaceID, agentID, now)
 	execRaw(t, repo, `INSERT INTO office_workspace_governance (workspace_id, key, value) VALUES (?, 'require_approval_for_new_agents', 1)`, workspaceID)
 	execRaw(t, repo, `INSERT INTO office_workspace_routing (workspace_id, enabled, default_tier, provider_order, provider_profiles, updated_at) VALUES (?, 1, 'balanced', '["codex"]', '{}', ?)`, workspaceID, now)
@@ -177,6 +178,7 @@ func assertWorkspaceOfficeRows(t *testing.T, db *sqlx.DB, workspaceID string, wa
 		"office_channels",
 		"office_approvals",
 		"office_activity_log",
+		"office_workspace_pauses",
 		"office_onboarding",
 		"office_workspace_governance",
 	} {

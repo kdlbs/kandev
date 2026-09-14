@@ -6,7 +6,7 @@ system: canvases
 owners:
   - canvases
 created: 2026-08-26
-last_updated: 2026-09-08
+last_updated: 2026-09-10
 ---
 
 # Agent-authored web-app canvases Requirements
@@ -119,9 +119,11 @@ can open it from the workspace sidebar.
 - **AC-CANVASES-AGENT-WEB-APPS-003.3:** When promotion completes, the canvas
   shall appear in navigation for that workspace only.
 - **AC-CANVASES-AGENT-WEB-APPS-003.4:** An agent shall not promote, demote, or
-  grant permissions to a canvas.
-- **AC-CANVASES-AGENT-WEB-APPS-003.5:** When a release requests new permissions,
-  the current release shall remain active until a user approves the new set.
+  directly grant permissions to a canvas. Owner-authorized first publication
+  shall follow [local creation authority](local-creation-authority.md).
+- **AC-CANVASES-AGENT-WEB-APPS-003.5:** Except for owner-authorized first
+  publication, a release that requests new permissions shall await user review.
+  Any current release shall remain active until the user approves the new set.
 
 ### REQ-CANVASES-AGENT-WEB-APPS-004: Agent-assisted workspace editing
 
@@ -198,6 +200,13 @@ canvas through native Kandev navigation.
 - **AC-CANVASES-AGENT-WEB-APPS-006.7:** Release, permission, and promotion
   controls shall explain their effect through pointer and keyboard help on
   desktop and visible descriptions on touch surfaces.
+- **AC-CANVASES-AGENT-WEB-APPS-006.8:** Release review shall keep its primary
+  actions visible outside the scrolling content. On desktop, the surface shall
+  use the available viewport; on phones, it shall provide a focused full-height
+  view with one content scroll region and safe-area clearance.
+- **AC-CANVASES-AGENT-WEB-APPS-006.9:** A two-permission review shall expose
+  both permissions and its actions without scrolling at 1280 by 720 CSS pixels.
+  Longer reviews shall keep actions reachable at 390 by 844 CSS pixels.
 
 ### REQ-CANVASES-AGENT-WEB-APPS-007: Visible runtime and release state
 
@@ -216,6 +225,21 @@ blocked by permissions, invalid, or using a prior release.
 - **AC-CANVASES-AGENT-WEB-APPS-007.4:** A release history shall identify the
   active release, author kind, creation time, validation result, and permission
   change without showing source content in logs.
+- **AC-CANVASES-AGENT-WEB-APPS-007.5:** A runtime URL or iframe load event
+  alone shall not display Ready. Until the current frame acknowledges startup,
+  the host shall display Loading. After 15 seconds without acknowledgement,
+  it shall show an unavailable state with Retry and Releases actions.
+- **AC-CANVASES-AGENT-WEB-APPS-007.6:** Retry, release replacement, token
+  renewal, and canvas navigation shall ignore acknowledgements from previous
+  frame attempts. An unavailable frame shall not cover recovery controls.
+- **AC-CANVASES-AGENT-WEB-APPS-007.7:** Release and promotion review shall
+  show readable release dates, status, and source labels. Internal release,
+  task, and session identifiers shall not appear as visible labels or fallback
+  copy. Missing sources shall have a readable unavailable label.
+- **AC-CANVASES-AGENT-WEB-APPS-007.8:** Review shall describe each permission
+  once in plain language, identify newly requested access, and show exact
+  external origins. Ordinary permission review shall not appear as a validation
+  failure. Active and retained valid releases shall have distinct labels.
 
 ### REQ-CANVASES-AGENT-WEB-APPS-008: Bounded agent authoring
 
@@ -245,8 +269,10 @@ agent and review the canvas in the same task.
 
 #### Acceptance criteria
 
-- **AC-CANVASES-AGENT-WEB-APPS-009.1:** When canvases are enabled, the desktop
-  sidebar and workspace Canvases settings shall offer a Create canvas action.
+- **AC-CANVASES-AGENT-WEB-APPS-009.1:** When canvases are enabled, selecting
+  Set up a canvas in the empty desktop sidebar shall open task creation
+  directly without changing the current route. Workspace Canvases settings
+  shall retain its Create canvas action and the sidebar its settings shortcut.
 - **AC-CANVASES-AGENT-WEB-APPS-009.2:** The action shall open the standard task
   creation flow with a localized canvas title and prompt, no repository, an
   empty scratch path, and an eligible local executor preference.
@@ -257,15 +283,37 @@ agent and review the canvas in the same task.
   and review the canvas.
 - **AC-CANVASES-AGENT-WEB-APPS-009.5:** On a phone, workspace Canvases settings
   shall expose the same task creation flow without a canvas-only form.
-- **AC-CANVASES-AGENT-WEB-APPS-009.6:** The localized preset shall name the
-  canvas discovery, creation, skill-read, source-directory, and publication
-  steps. Tool identifiers shall remain exact in every locale.
+- **AC-CANVASES-AGENT-WEB-APPS-009.6:** The localized preset shall contain a
+  short editable request for a coordinator view listing existing tasks,
+  followed by a blank line and the exact reference `@create-canvas`.
+  Detailed authoring instructions shall be available as that saved prompt.
 - **AC-CANVASES-AGENT-WEB-APPS-009.7:** On desktop and phone, the user shall
   be able to read and edit the preset before submission. The submitted task
   shall retain those edits.
-- **AC-CANVASES-AGENT-WEB-APPS-009.8:** The preset shall direct agents to use
-  authorized live Kandev data for domain views and report any required user
-  permission review or workspace promotion.
+- **AC-CANVASES-AGENT-WEB-APPS-009.8:** The shipped saved prompt shall direct
+  agents through tool discovery, draft creation, one core skill read,
+  assigned-directory editing, and publication. It shall require authorized
+  live data and accurate release, permission-review, and promotion reporting.
+- **AC-CANVASES-AGENT-WEB-APPS-009.9:** When a structured task starts with
+  `@create-canvas`, the agent shall receive the saved definition as hidden
+  context. The task description shall retain the user's short request and
+  reference. Create without starting shall defer expansion until launch.
+- **AC-CANVASES-AGENT-WEB-APPS-009.10:** Users shall be able to customize
+  `create-canvas` through Settings > Prompts. Startup shall preserve an
+  existing same-name prompt and user edits. Removing the reference shall
+  remove its expansion from the next submitted request.
+- **AC-CANVASES-AGENT-WEB-APPS-009.11:** Desktop and phone users shall be able
+  to edit the goal, cancel, retry a failed submission, and start the task.
+  Failure shall preserve edits; cancellation shall create no task or canvas.
+  The phone action shall remain reachable without horizontal page overflow.
+
+Saved-prompt resolution follows
+[Saved Prompt Delivery](../../tasks/requirements/saved-prompt-delivery.md),
+including missing references, lookup failures, and passthrough exclusions.
+
+## Implementation plans
+
+- [Direct canvas creation and saved prompt](../../../plans/canvas-direct-creation/plan.md)
 
 ## Out of scope
 
@@ -274,6 +322,6 @@ agent and review the canvas in the same task.
 - Canvas invitations, collaborator roles, or multi-user live editing.
 - Demotion from workspace scope to task scope.
 - A marketplace or cross-instance package import flow.
-- Automatic publication of a release that requests new permissions.
+- Automatic permission increases after owner-authorized first publication.
 - General top-bar, sidebar-widget, or arbitrary-slot plugin contributions.
 - A custom server-side runtime for agent-generated backend code.

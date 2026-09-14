@@ -139,6 +139,28 @@ func (r *Repository) recordStepTransition(ctx context.Context, tx stepTransition
 	return id, nil
 }
 
+// GetLatestTaskStepTransitionID returns the immutable ledger identity of the
+// task's latest workflow-step entry. Loaded task projections intentionally do
+// not carry the transient transition field, so retryable workflow routing uses
+// this read when it needs to reconstruct the current entry after a restart.
+func (r *Repository) GetLatestTaskStepTransitionID(ctx context.Context, taskID string) (int64, error) {
+	var id int64
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(`
+		SELECT id
+		FROM task_step_transitions
+		WHERE task_id = ?
+		ORDER BY id DESC
+		LIMIT 1
+	`), taskID).Scan(&id)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
 // formatEntryID converts recordStepTransition's ledger identifier into the
 // step-entry requirement's entry identity string (AC-OFFICE-STEP-ENTRY-
 // 001.2, .7). id 0 means recordStepTransition was a no-op — dispatchStepEntry

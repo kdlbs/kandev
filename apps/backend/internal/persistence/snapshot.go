@@ -1,6 +1,7 @@
 package persistence
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -36,13 +37,38 @@ func SnapshotSQLite(writer *sqlx.DB, path string) (int64, error) {
 // which produces a clean, defragmented snapshot including all WAL frames.
 // Returns the size of the created file in bytes.
 func snapshotSQLite(writer *sqlx.DB, path string) (int64, error) {
-	if _, err := writer.Exec(`VACUUM INTO ?`, path); err != nil {
+	return snapshotSQLiteContext(context.Background(), writer, path)
+}
+
+func snapshotSQLiteContext(ctx context.Context, writer *sqlx.DB, path string) (int64, error) {
+	_, statErr := os.Lstat(path)
+	if statErr != nil && !os.IsNotExist(statErr) {
+		return 0, fmt.Errorf("inspect snapshot destination %s: %w", path, statErr)
+	}
+	pathExisted := statErr == nil
+	installed := false
+	defer func() {
+		if !installed && !pathExisted {
+			// VACUUM INTO writes the destination incrementally. A canceled or
+			// failed statement can leave a partial SQLite file behind, which
+			// must not be mistaken for a usable backup on retry.
+			_ = os.Remove(path)
+		}
+	}()
+	if _, err := writer.ExecContext(ctx, `VACUUM INTO ?`, path); err != nil {
 		return 0, fmt.Errorf("vacuum into %s: %w", path, err)
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, fmt.Errorf("snapshot canceled after vacuum into %s: %w", path, err)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return 0, fmt.Errorf("stat snapshot %s: %w", path, err)
 	}
+	if err := ctx.Err(); err != nil {
+		return 0, fmt.Errorf("snapshot canceled before installing %s: %w", path, err)
+	}
+	installed = true
 	return info.Size(), nil
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 )
@@ -98,6 +99,23 @@ func seedWakeRunAt(t *testing.T, repo *sqlite.Repository, ctx context.Context, r
 	}
 }
 
+// seedWakeRunWithWave is seedWakeRunAt plus the two wave-identity columns,
+// so tests can simulate a run recorded by a wave-identity-aware producer
+// (Tasks 03-05) rather than a pre-upgrade run (wake_wave_key/wake_wave_string
+// left empty).
+func seedWakeRunWithWave(
+	t *testing.T, repo *sqlite.Repository, ctx context.Context,
+	runID, parentID, reason, status, requestedAtExpr, waveKey, waveString string,
+) {
+	t.Helper()
+	if _, err := repo.ExecRaw(ctx, fmt.Sprintf(`
+		INSERT INTO runs (id, agent_profile_id, reason, payload, status, requested_at, wake_wave_key, wake_wave_string)
+		VALUES (?, 'agent-x', ?, ?, ?, %s, ?, ?)
+	`, requestedAtExpr), runID, reason, fmt.Sprintf(`{"task_id":%q}`, parentID), status, waveKey, waveString); err != nil {
+		t.Fatalf("seed wave run: %v", err)
+	}
+}
+
 // insertTaskAt is insertTask with an explicit created_at/updated_at
 // timestamp, so tests can control a child's ordering relative to a run's
 // requested_at without relying on wall-clock delay between statements.
@@ -172,6 +190,42 @@ func TestGetChildSetKey_UsesActiveChildren(t *testing.T) {
 	}
 	if got != "child-b:COMPLETED,child-c:CANCELLED" {
 		t.Fatalf("child set key = %q, want child-b:COMPLETED,child-c:CANCELLED", got)
+	}
+}
+
+func TestGetChildSetKeyAndGeneration_UsesActiveChildren(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	const (
+		parentID = "parent-1"
+		wsID     = "ws-1"
+		oldTime  = "2026-01-01 00:05:00"
+		newTime  = "2026-01-01 00:10:00"
+	)
+
+	insertTaskAt(t, repo, ctx, parentID, wsID, oldTime)
+	insertTaskAt(t, repo, ctx, "child-b", wsID, oldTime)
+	setChildStateAt(t, repo, ctx, parentID, "child-b", "COMPLETED", oldTime)
+	insertTaskAt(t, repo, ctx, "child-a", wsID, newTime)
+	setChildStateAt(t, repo, ctx, parentID, "child-a", "CANCELLED", newTime)
+	insertTaskAt(t, repo, ctx, "child-archived", wsID, newTime)
+	setChildStateAt(t, repo, ctx, parentID, "child-archived", "FAILED", newTime)
+	if _, err := repo.ExecRaw(ctx,
+		`UPDATE tasks SET archived_at = ? WHERE id = ?`, newTime, "child-archived",
+	); err != nil {
+		t.Fatalf("archive child: %v", err)
+	}
+
+	key, generation, err := repo.GetChildSetKeyAndGeneration(ctx, parentID)
+	if err != nil {
+		t.Fatalf("GetChildSetKeyAndGeneration: %v", err)
+	}
+	if key != "child-a:CANCELLED,child-b:COMPLETED" {
+		t.Fatalf("child set key = %q, want child-a:CANCELLED,child-b:COMPLETED", key)
+	}
+	if generation != newTime {
+		t.Fatalf("child generation = %q, want %q", generation, newTime)
 	}
 }
 
@@ -508,6 +562,132 @@ func TestListStuckParents_RecoversAfterChildSetChangesPastFinishedRun(t *testing
 	}
 }
 
+// waitForNextWholeSecond blocks until the wall clock crosses into a new
+// second, so a CURRENT_TIMESTAMP write taken after it is guaranteed to
+// produce different text than one taken before it. Used to reproduce R1-F1:
+// the original bug was a same-wall-clock-second collision between a bound
+// time.Time (microsecond precision) and a CURRENT_TIMESTAMP write (second
+// precision) — a real gap is needed on one side of the comparison for the
+// collision on the other side to be observable at all.
+//
+// testing/synctest cannot be used here because the gap is needed in
+// SQLite's own CURRENT_TIMESTAMP writer — fake-time advancement only
+// applies to Go's time package, not to the database's clock.
+func waitForNextWholeSecond(t *testing.T) {
+	t.Helper()
+	time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(1100 * time.Millisecond)))
+}
+
+// TestListStuckParents_ReadmitsAfterChildReopenedAndRecompleted is the
+// reopened-child regression test: a child that completes, is moved back to a
+// non-terminal state, and completes again (a supported board action)
+// produces a byte-identical child_set_key (it encodes "id:state" only), so
+// neither the receipt-mismatch arm nor the missing-delivery-evidence arm
+// admits the parent. Only a receipt whose child_generation no longer matches
+// the child's fresh updated_at can tell the two completions apart.
+//
+// Both sides of that comparison are driven through their real production
+// writers — UpsertWakeReceiptTx for the receipt, UpdateTaskState's
+// CURRENT_TIMESTAMP write for the child — with the reopen landing in the
+// same wall-clock second as the receipt's delivered_at, reproducing R1-F1:
+// a receipt whose delivered_at (a bound time.Time, microsecond precision)
+// falls in the same second as a reopen's tasks.updated_at (CURRENT_TIMESTAMP,
+// second precision) previously made `newest_child_updated_at > delivered_at`
+// false — the shorter string sorts lower than the longer one for an equal
+// second — even though the reopen was chronologically later and represents a
+// genuinely new generation. Hand-written literals in one format cannot
+// surface this: the bug is specifically about two producers disagreeing on
+// text format, not about elapsed wall-clock time.
+func TestListStuckParents_ReadmitsAfterChildReopenedAndRecompleted(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	const (
+		parentID = "parent-1"
+		wsID     = "ws-1"
+	)
+
+	insertTask(t, repo, ctx, parentID, wsID, "Parent", "", "")
+	if _, err := repo.ExecRaw(ctx,
+		`UPDATE tasks SET project_id = 'office-project' WHERE id = ?`, parentID,
+	); err != nil {
+		t.Fatalf("mark parent as Office task: %v", err)
+	}
+	childID := parentID + "-child-0"
+	insertTask(t, repo, ctx, childID, wsID, "Child", "", "")
+	if _, err := repo.ExecRaw(ctx,
+		`UPDATE tasks SET parent_id = ? WHERE id = ?`, parentID, childID,
+	); err != nil {
+		t.Fatalf("attach child to parent: %v", err)
+	}
+	seedWakeAgentProfile(t, repo, ctx, parentID+"-agent", "idle")
+	seedRunner(t, repo, ctx, parentID)
+
+	if err := repo.UpdateTaskState(ctx, childID, "COMPLETED"); err != nil {
+		t.Fatalf("complete child: %v", err)
+	}
+
+	preDelivery, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+	if err != nil {
+		t.Fatalf("ListStuckParents (pre-delivery): %v", err)
+	}
+	if len(preDelivery) != 1 || preDelivery[0].ParentTaskID != parentID {
+		t.Fatalf("ListStuckParents (pre-delivery) = %#v, want exactly [%s]", preDelivery, parentID)
+	}
+
+	// A real gap between the original completion and delivery: without it,
+	// the reopen below (which lands in the same second as delivery) would
+	// also land in the same second as the original completion, making the
+	// two generations indistinguishable by construction rather than by bug.
+	waitForNextWholeSecond(t)
+
+	// Record the delivery receipt the way recordReceipt does: through
+	// UpsertWakeReceiptTx, carrying the generation the sweep observed
+	// (never re-read at commit time).
+	tx, err := repo.Writer().BeginTxx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	if err := repo.UpsertWakeReceiptTx(
+		ctx, tx, parentID, preDelivery[0].ChildSetKey, "", "op-1",
+		preDelivery[0].NewestChildUpdatedAt, time.Now().UTC(),
+	); err != nil {
+		t.Fatalf("upsert wake receipt: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit receipt tx: %v", err)
+	}
+
+	// Control: no child mutation since the receipt was delivered, so the
+	// parent must still be excluded.
+	afterDelivery, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+	if err != nil {
+		t.Fatalf("ListStuckParents (after delivery): %v", err)
+	}
+	if len(afterDelivery) != 0 {
+		t.Fatalf("after delivery: candidates = %#v, want none (receipt already covers this child set)", afterDelivery)
+	}
+
+	// The child is reopened and re-completed through the same production
+	// writer used above, immediately after delivery — landing in the same
+	// wall-clock second as delivered_at. The resulting child_set_key is
+	// byte-identical to before (same "id:state").
+	if err := repo.UpdateTaskState(ctx, childID, "IN_PROGRESS"); err != nil {
+		t.Fatalf("reopen child: %v", err)
+	}
+	if err := repo.UpdateTaskState(ctx, childID, "COMPLETED"); err != nil {
+		t.Fatalf("recomplete child: %v", err)
+	}
+
+	after, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+	if err != nil {
+		t.Fatalf("ListStuckParents (after reopen): %v", err)
+	}
+	if len(after) != 1 || after[0].ParentTaskID != parentID {
+		t.Fatalf("LOST WAKE NOT RECOVERABLE: after reopen+recomplete, ListStuckParents returned %#v; want exactly [%s]", after, parentID)
+	}
+}
+
 // TestListStuckParents_OrdersDeterministically is R2-C's regression test:
 // the capped query must not depend on incidental scan order.
 func TestListStuckParents_OrdersDeterministically(t *testing.T) {
@@ -531,5 +711,54 @@ func TestListStuckParents_OrdersDeterministically(t *testing.T) {
 		if c.ParentTaskID != want[i] {
 			t.Fatalf("candidates[%d] = %q, want %q (candidates not ordered): %#v", i, c.ParentTaskID, want[i], candidates)
 		}
+	}
+}
+
+// TestListStuckParents_ThirdTierOrdersByCreatedAtNotID is RunnerProjection's
+// third-tier regression test: when no participant matches the parent's
+// current step and the step has no primary agent, the pick among the
+// task's other runner rows must follow created_at, not the row identifier.
+// created_at and id are set in opposite order here, so a pick driven by id
+// (or by insertion order) returns the wrong agent.
+func TestListStuckParents_ThirdTierOrdersByCreatedAtNotID(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	const parentID = "parent-tier3"
+	insertTask(t, repo, ctx, parentID, "ws-1", "Parent", "", "")
+	if _, err := repo.ExecRaw(ctx, `
+		UPDATE tasks SET project_id = 'office-project', workflow_step_id = 'step-parent' WHERE id = ?
+	`, parentID); err != nil {
+		t.Fatalf("mark parent: %v", err)
+	}
+	childID := parentID + "-child-0"
+	insertTask(t, repo, ctx, childID, "ws-1", "Child", "", "")
+	if _, err := repo.ExecRaw(ctx,
+		`UPDATE tasks SET parent_id = ?, state = 'COMPLETED' WHERE id = ?`, parentID, childID,
+	); err != nil {
+		t.Fatalf("set child state: %v", err)
+	}
+
+	seedWakeAgentProfile(t, repo, ctx, "agent-recent", "idle")
+	seedWakeAgentProfile(t, repo, ctx, "agent-old", "idle")
+
+	if _, err := repo.ExecRaw(ctx, `
+		INSERT INTO workflow_step_participants (id, step_id, task_id, role, agent_profile_id, created_at)
+		VALUES
+			('aa-tier3-1', 'other-step-1', ?, 'runner', 'agent-recent', '2024-06-01 00:00:00'),
+			('zz-tier3-2', 'other-step-2', ?, 'runner', 'agent-old',    '2024-01-01 00:00:00')
+	`, parentID, parentID); err != nil {
+		t.Fatalf("seed tier-3 runners: %v", err)
+	}
+
+	candidates, err := repo.ListStuckParents(ctx, "task_children_completed", 5)
+	if err != nil {
+		t.Fatalf("ListStuckParents: %v", err)
+	}
+	if len(candidates) != 1 || candidates[0].ParentTaskID != parentID {
+		t.Fatalf("candidates = %#v, want exactly [%s]", candidates, parentID)
+	}
+	if candidates[0].AssigneeAgentProfileID != "agent-recent" {
+		t.Fatalf("assignee = %q, want %q (latest created_at, not largest id)", candidates[0].AssigneeAgentProfileID, "agent-recent")
 	}
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // TestResolveResumeTaskEnvironment_ReusesInheritedEnvironment is a regression
@@ -53,6 +54,43 @@ func TestResolveResumeTaskEnvironment_ReusesInheritedEnvironment(t *testing.T) {
 	}
 	if session.TaskEnvironmentID != "env-parent" {
 		t.Fatalf("session.TaskEnvironmentID = %q, want env-parent", session.TaskEnvironmentID)
+	}
+}
+
+func TestPrepareResumeRepositorySettings_RejectsInheritedExecutorMismatch(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	repo.tasks["task-parent"] = &models.Task{ID: "task-parent"}
+	repo.taskEnvironments["env-parent"] = &models.TaskEnvironment{
+		ID:           "env-parent",
+		TaskID:       "task-parent",
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Status:       models.TaskEnvironmentStatusReady,
+	}
+	task := &v1.Task{
+		ID:          "task-child",
+		WorkspaceID: "ws-1",
+		Metadata: map[string]interface{}{
+			"workspace": map[string]interface{}{"mode": "shared_group"},
+		},
+	}
+	session := &models.TaskSession{
+		ID:                "sess-child",
+		TaskID:            task.ID,
+		AgentProfileID:    "profile-123",
+		TaskEnvironmentID: "env-parent",
+	}
+	req := &LaunchAgentRequest{
+		TaskID:       task.ID,
+		ExecutorType: string(models.ExecutorTypeLocalDocker),
+	}
+
+	_, _, _, err := exec.prepareResumeRepositorySettings(context.Background(), task, session, req)
+	if !errors.Is(err, models.ErrWorkspaceReuseUnsafe) {
+		t.Fatalf("prepareResumeRepositorySettings() error = %v, want ErrWorkspaceReuseUnsafe", err)
+	}
+	if session.TaskEnvironmentID != "env-parent" {
+		t.Fatalf("session TaskEnvironmentID = %q, want env-parent", session.TaskEnvironmentID)
 	}
 }
 
