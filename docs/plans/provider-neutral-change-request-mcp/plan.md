@@ -171,6 +171,13 @@ Implementation validation on 2026-09-14:
   management failure details, historical queued protocol migration for wrapped
   and passthrough prompts, targeted GitLab affected identities, and read-to-
   management cleanup of legacy GitLab associations.
+
+Review remediation also covers GitLab connection and repository lookup errors,
+unresolved legacy rows that must not block unrelated mutations, principal
+binding before task lookup, task/provider membership preflight, typed Kandev
+catalog source checks, and a real no-catalog CI automation path. Stable public
+mutation details keep raw provider errors in logs while preserving operation,
+rollback, link, and state-known fields for callers.
 - `make -C apps/backend test`: the changed packages passed, but the aggregate
   target returned nonzero on existing environment-sensitive config, launcher,
   Office migration, and process-probe tests. Config and launcher passed when

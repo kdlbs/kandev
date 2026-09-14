@@ -93,3 +93,6 @@ Validation passed:
 
 - `go test ./internal/mcp/server ./internal/mcp/handlers ./internal/backendapp ./internal/task/dto ./pkg/api/v1 -count=1`
 - `go test -race ./internal/backendapp -run 'TaskChange|ChangeRequest' -count=1`
+- Read regressions cover GitLab connection failures, failed repository identity
+  lookups, unresolved legacy identities, and principal binding before task
+  existence lookup.

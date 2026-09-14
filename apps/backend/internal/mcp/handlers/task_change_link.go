@@ -143,7 +143,7 @@ func (h *Handlers) handleManageTaskChangeRequest(ctx context.Context, msg *ws.Me
 	}
 	if err != nil {
 		return taskChangeLinkMutationError(msg, TaskChangeLinkMutationResult{
-			TaskID: payload.TaskID, OperationError: err.Error(), StateKnown: false,
+			TaskID: payload.TaskID, StateKnown: false,
 		}, err)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]any{keyTaskID: payload.TaskID, "links": links})
@@ -151,7 +151,7 @@ func (h *Handlers) handleManageTaskChangeRequest(ctx context.Context, msg *ws.Me
 
 func taskChangeLinkMutationError(msg *ws.Message, result TaskChangeLinkMutationResult, err error) (*ws.Message, error) {
 	if result.OperationError == "" && err != nil {
-		result.OperationError = err.Error()
+		result.OperationError = "task change request operation failed"
 	}
 	details := map[string]interface{}{
 		keyTaskID:     result.TaskID,

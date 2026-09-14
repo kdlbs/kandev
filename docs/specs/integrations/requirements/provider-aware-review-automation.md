@@ -259,8 +259,9 @@ releases the per-MR singleflight for later work.
 
 ## Proposed contract transition
 
-The [task change request MCP draft](task-change-link-mcp.md) proposes replacing
-the provider-specific tool-name criteria at cutover. Current runtime propagation,
-provider union, authorization, and lifecycle behavior remain the baseline.
-The [successor plan](../../../plans/provider-neutral-change-request-mcp/plan.md)
-owns implementation and reconciliation of the discovery criteria and duplicate prose.
+The [task change request MCP contract](task-change-link-mcp.md) defines the
+provider-neutral discovery criteria implemented for the planned 0.95.0 cutover.
+The four neutral management, read, automation, and outcome tools supersede the
+provider-specific discovery criteria at that cutover. Current runtime
+propagation, provider union, authorization, and lifecycle behavior remain the
+baseline for the successor implementation.

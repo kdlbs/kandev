@@ -371,15 +371,21 @@ func TestTaskChangeCoordinatorReportsRollbackFailure(t *testing.T) {
 	}
 	coordinator := taskChangeLinkCoordinator{tasks: taskSvc, gitlab: gitlabLinks}
 
-	_, err := coordinator.ReplaceTaskChange(context.Background(), mcphandlers.TaskChangeLinkRequest{
-		TaskID: "task-1",
-		Link:   mcphandlers.TaskChangeLink{Provider: "gitlab", RepositoryID: "repo-1", Number: 42},
-		Old:    &mcphandlers.TaskChangeLink{Provider: "gitlab", RepositoryID: "repo-1", Number: 7},
+	result, err := coordinator.ManageTaskChangeRequest(context.Background(), mcphandlers.TaskChangeLinkRequest{
+		Operation: "replace",
+		TaskID:    "task-1",
+		Link:      mcphandlers.TaskChangeLink{Provider: "gitlab", RepositoryID: "repo-1", Number: 42},
+		Old:       &mcphandlers.TaskChangeLink{Provider: "gitlab", RepositoryID: "repo-1", Number: 7},
 	})
 	if err == nil || !strings.Contains(err.Error(), "delete failed") || !strings.Contains(err.Error(), "rollback failed") ||
 		!strings.Contains(err.Error(), "active task change links") || !strings.Contains(err.Error(), "42") {
 		t.Fatalf("ReplaceTaskChange error = %v, want both failures and active links", err)
 	}
+	require.Error(t, err)
+	assert.Equal(t, taskChangeMutationOperationError, result.OperationError)
+	assert.Equal(t, taskChangeMutationRollbackError, result.RollbackError)
+	assert.NotContains(t, result.OperationError, "delete failed")
+	assert.NotContains(t, result.RollbackError, "rollback failed")
 }
 
 func TestTaskChangeCoordinatorUnlinksStaleAssociationWithoutCurrentRepository(t *testing.T) {
@@ -457,6 +463,42 @@ func TestTaskChangeCoordinatorReplacesReadResolvedLegacyGitLabAssociation(t *tes
 	assert.Equal(t, []mcphandlers.TaskChangeLink{{Provider: "gitlab", RepositoryID: "repo-1", Number: 42}}, result.Links)
 }
 
+func TestTaskChangeCoordinatorSkipsUnrelatedUnresolvedSameNumberMR(t *testing.T) {
+	taskSvc, repos := newTaskChangeCoordinatorHarness(t)
+	seedTaskChangeCoordinatorTask(t, repos, "ws-1", "task-1", "repo-1", "https://gitlab.example.test", "group", "project")
+	gitlabLinks := &fakeGitLabChangeLinks{mrs: []*gitlab.TaskMR{
+		{ID: "unresolved", TaskID: "task-1", RepositoryID: "", Host: "https://gitlab.other.test", ProjectPath: "other/project", MRIID: 7},
+		{ID: "legacy", TaskID: "task-1", RepositoryID: "", Host: "https://gitlab.example.test", ProjectPath: "group/project", MRIID: 7},
+	}}
+	coordinator := taskChangeLinkCoordinator{tasks: taskSvc, gitlab: gitlabLinks}
+
+	links, err := coordinator.UnlinkTaskChange(context.Background(), mcphandlers.TaskChangeLinkRequest{
+		TaskID: "task-1",
+		Link:   mcphandlers.TaskChangeLink{Provider: "gitlab", RepositoryID: "repo-1", Number: 7},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"legacy"}, gitlabLinks.unlinked)
+	require.Len(t, links, 1)
+	assert.Equal(t, mcphandlers.TaskChangeLink{Provider: "gitlab", RepositoryID: "", Number: 7}, links[0])
+}
+
+func TestTaskChangeCoordinatorListsUnresolvedGitLabRowsWithoutBlocking(t *testing.T) {
+	taskSvc, repos := newTaskChangeCoordinatorHarness(t)
+	seedTaskChangeCoordinatorTask(t, repos, "ws-1", "task-1", "repo-1", "https://gitlab.example.test", "group", "project")
+	gitlabLinks := &fakeGitLabChangeLinks{mrs: []*gitlab.TaskMR{
+		{ID: "unresolved", TaskID: "task-1", RepositoryID: "", Host: "https://gitlab.other.test", ProjectPath: "other/project", MRIID: 7},
+		{ID: "linked", TaskID: "task-1", RepositoryID: "repo-1", MRIID: 42},
+	}}
+	coordinator := taskChangeLinkCoordinator{tasks: taskSvc, gitlab: gitlabLinks}
+
+	links, err := coordinator.list(context.Background(), "task-1")
+	require.NoError(t, err)
+	assert.Equal(t, []mcphandlers.TaskChangeLink{
+		{Provider: "gitlab", RepositoryID: "", Number: 7},
+		{Provider: "gitlab", RepositoryID: "repo-1", Number: 42},
+	}, links)
+}
+
 func TestTaskChangeManagementDispatchesThroughHandlerAndCoordinator(t *testing.T) {
 	taskSvc, repos := newTaskChangeCoordinatorHarness(t)
 	seedTaskChangeCoordinatorTask(t, repos, "ws-1", "task-1", "repo-1", "https://gitlab.example.test", "group", "project")
@@ -499,8 +541,10 @@ func TestTaskChangeManagementDispatchesFailureCompensationStateThroughHandler(t 
 	require.Equal(t, ws.MessageTypeError, response.Type)
 	var errorPayload ws.ErrorPayload
 	require.NoError(t, json.Unmarshal(response.Payload, &errorPayload))
-	assert.Equal(t, "old unlink failed", errorPayload.Details["operation_error"])
-	assert.Equal(t, "rollback failed", errorPayload.Details["rollback_error"])
+	assert.Equal(t, taskChangeMutationOperationError, errorPayload.Details["operation_error"])
+	assert.Equal(t, taskChangeMutationRollbackError, errorPayload.Details["rollback_error"])
+	assert.NotContains(t, errorPayload.Details["operation_error"], "old unlink failed")
+	assert.NotContains(t, errorPayload.Details["rollback_error"], "rollback failed")
 	assert.Equal(t, true, errorPayload.Details["state_known"])
 	assert.Len(t, errorPayload.Details["links"], 2)
 }

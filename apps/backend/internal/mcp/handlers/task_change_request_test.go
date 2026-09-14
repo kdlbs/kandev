@@ -129,7 +129,8 @@ func TestManageTaskChangeRequestCarriesFailureState(t *testing.T) {
 	var errorPayload ws.ErrorPayload
 	require.NoError(t, json.Unmarshal(response.Payload, &errorPayload))
 	assert.Equal(t, ws.ErrorCodeValidation, errorPayload.Code)
-	assert.Equal(t, "old unlink failed; rollback failed", errorPayload.Details["operation_error"])
+	assert.Equal(t, "task change request operation failed", errorPayload.Details["operation_error"])
+	assert.NotContains(t, errorPayload.Details["operation_error"], "old unlink failed")
 }
 
 func TestManageTaskChangeRequestRichServiceReceivesOldIdentity(t *testing.T) {
@@ -191,7 +192,7 @@ func TestManageTaskChangeRequestRichServiceReturnsCompensationState(t *testing.T
 				{Provider: "gitlab", RepositoryID: "repo-old", Number: 7},
 				{Provider: "gitlab", RepositoryID: "repo-new", Number: 42},
 			},
-			OperationError: "old unlink failed", RollbackError: "rollback failed", StateKnown: true,
+			OperationError: "task change request operation failed", RollbackError: "task change request rollback could not be completed", StateKnown: true,
 		},
 	}
 	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
@@ -211,8 +212,8 @@ func TestManageTaskChangeRequestRichServiceReturnsCompensationState(t *testing.T
 	require.NotNil(t, response)
 	var errorPayload ws.ErrorPayload
 	require.NoError(t, json.Unmarshal(response.Payload, &errorPayload))
-	assert.Equal(t, "old unlink failed", errorPayload.Details["operation_error"])
-	assert.Equal(t, "rollback failed", errorPayload.Details["rollback_error"])
+	assert.Equal(t, "task change request operation failed", errorPayload.Details["operation_error"])
+	assert.Equal(t, "task change request rollback could not be completed", errorPayload.Details["rollback_error"])
 	assert.Equal(t, true, errorPayload.Details["state_known"])
 	assert.Len(t, errorPayload.Details["links"], 2)
 }

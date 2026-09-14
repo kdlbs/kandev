@@ -102,3 +102,6 @@ Validation passed:
 - `go test ./internal/backendapp -run 'TestChangeRequestAutomationAssociationReportsOnlyTargetedGitLabMR' -count=1`
   passed with a production-shaped task-wide provider response containing two
   MRs.
+- Task-scope preflight now verifies that each selected provider is attached to
+  the bound task before any provider write; the regression covers a prompt-only
+  update for a provider absent from the task.

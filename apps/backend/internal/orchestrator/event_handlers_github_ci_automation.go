@@ -14,6 +14,7 @@ import (
 	"go.uber.org/zap"
 
 	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
@@ -1258,7 +1259,7 @@ func ciAutomationOutcomeToolForSession(session *models.TaskSession) (string, boo
 		return "", false
 	}
 	server, ok := history.CurrentServer("kandev")
-	if !ok || server.Source != "" && server.Source != "kandev" {
+	if !ok || server.Source != "" && server.Source != streams.MCPServerSourceKandev {
 		return "", false
 	}
 	for _, tool := range server.Tools {

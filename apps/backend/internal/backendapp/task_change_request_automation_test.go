@@ -21,8 +21,12 @@ func (l taskChangeRequestAutomationTaskLookup) GetTask(context.Context, string) 
 	return l.task, nil
 }
 
-func (l taskChangeRequestAutomationTaskLookup) GetRepository(context.Context, string) (*models.Repository, error) {
-	return nil, nil
+func (l taskChangeRequestAutomationTaskLookup) GetRepository(_ context.Context, id string) (*models.Repository, error) {
+	provider := "github"
+	if id == "repo-gl" {
+		provider = "gitlab"
+	}
+	return &models.Repository{ID: id, WorkspaceID: l.task.WorkspaceID, Provider: provider}, nil
 }
 
 type taskChangeRequestAutomationGitHubFake struct {
@@ -67,6 +71,7 @@ func (f *taskChangeRequestAutomationGitHubFake) UpdateTaskCIOptions(
 type taskChangeRequestAutomationGitLabFake struct {
 	mrs       []*gitlab.TaskMR
 	options   *gitlab.TaskMRAutomationResponse
+	status    *gitlab.Status
 	updateErr error
 	updates   []gitlab.TaskMRAutomationPatch
 	callOrder *[]string
@@ -84,6 +89,9 @@ func (f *taskChangeRequestAutomationGitLabFake) GetTaskMRAutomationResponse(cont
 }
 
 func (f *taskChangeRequestAutomationGitLabFake) GetStatusForWorkspace(context.Context, string) (*gitlab.Status, error) {
+	if f.status != nil {
+		return f.status, nil
+	}
 	return &gitlab.Status{Authenticated: true, AuthMethod: gitlab.AuthMethodPAT, TokenConfigured: true}, nil
 }
 
@@ -101,7 +109,13 @@ func (f *taskChangeRequestAutomationGitLabFake) UpdateTaskMRAutomationOptions(
 }
 
 func automationTaskForTest() *models.Task {
-	return &models.Task{ID: "task-1", WorkspaceID: "workspace-1"}
+	return &models.Task{
+		ID: "task-1", WorkspaceID: "workspace-1",
+		Repositories: []*models.TaskRepository{
+			{RepositoryID: "repo-gh"},
+			{RepositoryID: "repo-gl"},
+		},
+	}
 }
 
 func automationGitHubChangeForTest() *github.TaskPR {
@@ -208,6 +222,37 @@ func TestChangeRequestAutomationPreflightRejectsUnresolvedWithoutWrites(t *testi
 	require.Len(t, result.Providers, 1)
 	assert.Equal(t, mcphandlers.TaskChangeRequestAutomationProviderFailed, result.Providers[0].Status)
 	assert.Equal(t, "preflight_failed", result.Providers[0].ErrorCode)
+}
+
+func TestChangeRequestAutomationPreflightRequiresSelectedProviderOnTask(t *testing.T) {
+	prompt := "use this prompt"
+	gitlabFake := &taskChangeRequestAutomationGitLabFake{}
+	lookup := taskChangeRequestAutomationTaskLookup{
+		task: &models.Task{
+			ID: "task-1", WorkspaceID: "workspace-1",
+			Repositories: []*models.TaskRepository{{RepositoryID: "repo-gh"}},
+		},
+	}
+	coordinator := newTaskChangeRequestAutomationCoordinator(
+		lookup, &taskChangeRequestAutomationGitHubFake{}, gitlabFake, nil, nil,
+	)
+
+	result, err := coordinator.UpdateTaskChangeRequestAutomation(context.Background(), "task-1", mcphandlers.TaskChangeRequestAutomationRequest{
+		Target: mcphandlers.TaskChangeRequestAutomationTarget{
+			Scope: mcphandlers.TaskChangeRequestAutomationScopeTask, Providers: []string{"gitlab"},
+		},
+		Patch: mcphandlers.TaskChangeRequestAutomationPatch{
+			AutoFixPromptOverride: &prompt,
+		},
+	})
+
+	require.Error(t, err)
+	assert.Empty(t, gitlabFake.updates)
+	assert.Equal(t, mcphandlers.TaskChangeRequestAutomationStatusFailed, result.Status)
+	require.Len(t, result.Providers, 1)
+	assert.Equal(t, mcphandlers.TaskChangeRequestAutomationProviderFailed, result.Providers[0].Status)
+	assert.Equal(t, "preflight_failed", result.Providers[0].ErrorCode)
+	assert.Contains(t, result.Providers[0].ErrorMessage, "not attached")
 }
 
 func TestChangeRequestAutomationAssociationReportsOnlyTargetedGitLabMR(t *testing.T) {

@@ -257,7 +257,8 @@ number. For example:
 `replace` also requires `old_provider`, `old_repository_id`, and `old_number`.
 Replacement supports one provider at a time. Every successful mutation returns
 the resulting active link set, and the target task must be reachable from the
-calling task's workspace.
+the calling task's workspace. For replacement, `old_provider` must equal
+`provider`; cross-provider replacement is rejected.
 
 Use `update_task_change_request_automation_kandev` for an exact association or
 for all current links of explicitly selected providers on the current task.

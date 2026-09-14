@@ -232,15 +232,18 @@ func (h *Handlers) handleGetTaskChangeRequests(ctx context.Context, msg *ws.Mess
 	if h.taskSvc == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "task service is not available", nil)
 	}
-	task, err := h.taskSvc.GetTask(ctx, taskID)
-	if err != nil || task == nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found", nil)
-	}
 	principal, ok := mcpscope.PrincipalFromContext(ctx)
 	if !ok || strings.TrimSpace(principal.WorkspaceID) == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "trusted MCP caller identity is required", nil)
 	}
-	if taskID != principal.CallerTaskID || task.WorkspaceID != principal.WorkspaceID {
+	if taskID != principal.CallerTaskID {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "task is outside the current MCP caller scope", nil)
+	}
+	task, err := h.taskSvc.GetTask(ctx, principal.CallerTaskID)
+	if err != nil || task == nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "task not found", nil)
+	}
+	if task.WorkspaceID != principal.WorkspaceID {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "task is outside the current MCP caller scope", nil)
 	}
 	if h.taskChangeRequestReader == nil {

@@ -15,15 +15,20 @@ import (
 )
 
 type taskChangeRequestReadTaskLookup struct {
-	task *models.Task
+	task             *models.Task
+	repositories     map[string]*models.Repository
+	repositoryErrors map[string]error
 }
 
 func (l taskChangeRequestReadTaskLookup) GetTask(context.Context, string) (*models.Task, error) {
 	return l.task, nil
 }
 
-func (l taskChangeRequestReadTaskLookup) GetRepository(context.Context, string) (*models.Repository, error) {
-	return nil, nil
+func (l taskChangeRequestReadTaskLookup) GetRepository(_ context.Context, id string) (*models.Repository, error) {
+	if err := l.repositoryErrors[id]; err != nil {
+		return nil, err
+	}
+	return l.repositories[id], nil
 }
 
 type taskChangeRequestReadProviderFake struct {
@@ -161,6 +166,62 @@ func TestGitLabTaskChangeRequestReadMarksDuplicateCanonicalIdentityAmbiguous(t *
 	require.Len(t, changes, 2)
 	assert.Equal(t, mcphandlers.TaskChangeRequestIdentityAmbiguous, changes[0].IdentityStatus)
 	assert.Equal(t, mcphandlers.TaskChangeRequestIdentityAmbiguous, changes[1].IdentityStatus)
+}
+
+func TestGitLabTaskChangeRequestReadSurfacesConnectionError(t *testing.T) {
+	task := &models.Task{ID: "task-1", WorkspaceID: "workspace-1"}
+	gitlabFake := &taskChangeRequestAutomationGitLabFake{
+		status: &gitlab.Status{
+			Authenticated: true, AuthMethod: gitlab.AuthMethodPAT, TokenConfigured: true,
+			ConnectionError: "GitLab endpoint returned 503",
+		},
+	}
+	reader := taskChangeRequestReader{
+		tasks: taskChangeRequestReadTaskLookup{task: task},
+		providers: []taskChangeRequestProviderAdapter{
+			gitlabTaskChangeRequestAdapter{tasks: taskChangeRequestReadTaskLookup{task: task}, service: gitlabFake},
+		},
+	}
+
+	result, err := reader.GetTaskChangeRequests(context.Background(), task.ID)
+	require.NoError(t, err)
+	assert.False(t, result.Complete)
+	require.Len(t, result.Errors, 1)
+	assert.Equal(t, mcphandlers.TaskChangeRequestProviderGitLab, result.Errors[0].Provider)
+	assert.Equal(t, mcphandlers.TaskChangeRequestProviderStatusFailed, result.ProviderCapabilities[0].Status)
+}
+
+func TestGitLabTaskChangeRequestReadRejectsPartialRepositoryResolution(t *testing.T) {
+	task := &models.Task{
+		ID: "task-1", WorkspaceID: "workspace-1",
+		Repositories: []*models.TaskRepository{{RepositoryID: "repo-gl"}},
+	}
+	lookupErr := errors.New("repository lookup unavailable")
+	lookup := taskChangeRequestReadTaskLookup{
+		task:             task,
+		repositoryErrors: map[string]error{"repo-gl": lookupErr},
+	}
+	gitlabFake := &taskChangeRequestAutomationGitLabFake{
+		mrs: []*gitlab.TaskMR{{
+			RepositoryID: "", Host: "https://gitlab.example.test",
+			ProjectPath: "group/project", MRIID: 42,
+		}},
+	}
+	reader := taskChangeRequestReader{
+		tasks: lookup,
+		providers: []taskChangeRequestProviderAdapter{
+			gitlabTaskChangeRequestAdapter{tasks: lookup, service: gitlabFake},
+		},
+	}
+
+	result, err := reader.GetTaskChangeRequests(context.Background(), task.ID)
+	require.NoError(t, err)
+	assert.False(t, result.Complete)
+	require.Len(t, result.ChangeRequests, 1)
+	assert.Nil(t, result.ChangeRequests[0].RepositoryID)
+	assert.Equal(t, mcphandlers.TaskChangeRequestIdentityUnresolved, result.ChangeRequests[0].IdentityStatus)
+	require.Len(t, result.Errors, 1)
+	assert.Equal(t, "provider_read_failed", result.Errors[0].Code)
 }
 
 type taskChangeRequestReadRepositoryLookup struct {

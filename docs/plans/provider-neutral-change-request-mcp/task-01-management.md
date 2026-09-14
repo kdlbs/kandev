@@ -111,3 +111,6 @@ Validation passed:
   These cover rich replacement old-identity forwarding, serialized rollback
   and unknown-state details, and WebSocket handler-to-coordinator success and
   compensation paths.
+- Additional coordinator regressions cover exact cleanup when a legacy GitLab
+  row is resolved from its stored host and project path, while unrelated
+  unresolved rows remain visible without blocking the requested mutation.

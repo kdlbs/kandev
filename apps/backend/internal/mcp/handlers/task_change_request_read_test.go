@@ -82,3 +82,29 @@ func TestGetTaskChangeRequestsRejectsInjectedExecutionIdentity(t *testing.T) {
 	assert.Equal(t, ws.MessageTypeError, response.Type)
 	assert.Equal(t, 0, recorder.called)
 }
+
+func TestGetTaskChangeRequestsChecksPrincipalBeforeTaskLookup(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateWorkspace(context.Background(), &models.Workspace{
+		ID: "workspace-1", Name: "Workspace", CreatedAt: now, UpdatedAt: now,
+	}))
+	recorder := &taskChangeRequestReadRecorder{}
+	h := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, testLogger(t))
+	h.SetTaskChangeRequestReadService(recorder)
+	ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
+		WorkspaceID: "workspace-1", CallerTaskID: "task-current", CallerSessionID: "session-1",
+		Surface: mcpprofile.SurfaceKanbanTask,
+	})
+
+	response, err := h.handleGetTaskChangeRequests(ctx, makeWSMessage(t, ws.ActionMCPGetTaskChangeRequests, map[string]interface{}{
+		"task_id": "task-does-not-exist",
+	}))
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	assert.Equal(t, ws.MessageTypeError, response.Type)
+	var payload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(response.Payload, &payload))
+	assert.Equal(t, ws.ErrorCodeForbidden, payload.Code)
+	assert.Equal(t, 0, recorder.called)
+}

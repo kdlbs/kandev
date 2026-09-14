@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
+	"github.com/kandev/kandev/internal/task/models"
 	"go.uber.org/zap"
 )
 
@@ -91,7 +92,7 @@ func (c *taskChangeRequestAutomationCoordinator) UpdateTaskChangeRequestAutomati
 		return result, errors.New("failed to read task change request state")
 	}
 
-	preflights, firstPreflightErr := c.preflightAutomationProviders(request, providers, snapshot, &result)
+	preflights, firstPreflightErr := c.preflightAutomationProviders(ctx, request, providers, snapshot, task, &result)
 	if firstPreflightErr != nil {
 		return result, firstPreflightErr
 	}
@@ -125,15 +126,17 @@ func (c *taskChangeRequestAutomationCoordinator) readTaskChangeRequestSnapshot(
 }
 
 func (c *taskChangeRequestAutomationCoordinator) preflightAutomationProviders(
+	ctx context.Context,
 	request mcphandlers.TaskChangeRequestAutomationRequest,
 	providers []string,
 	snapshot mcphandlers.TaskChangeRequestReadResponse,
+	task *models.Task,
 	result *mcphandlers.TaskChangeRequestAutomationResult,
 ) (map[string]taskChangeRequestAutomationPreflight, error) {
 	preflights := make(map[string]taskChangeRequestAutomationPreflight, len(providers))
 	var firstErr error
 	for _, provider := range providers {
-		preflight, err := c.preflightProvider(request, provider, snapshot)
+		preflight, err := c.preflightProvider(ctx, request, provider, snapshot, task)
 		if err == nil {
 			preflights[provider] = preflight
 			continue
@@ -213,10 +216,19 @@ func automationTargetProviders(target mcphandlers.TaskChangeRequestAutomationTar
 }
 
 func (c *taskChangeRequestAutomationCoordinator) preflightProvider(
+	ctx context.Context,
 	request mcphandlers.TaskChangeRequestAutomationRequest,
 	provider string,
 	snapshot mcphandlers.TaskChangeRequestReadResponse,
+	task *models.Task,
 ) (taskChangeRequestAutomationPreflight, error) {
+	attached, err := c.taskHasProvider(ctx, task, provider)
+	if err != nil {
+		return taskChangeRequestAutomationPreflight{}, err
+	}
+	if !attached {
+		return taskChangeRequestAutomationPreflight{}, fmt.Errorf("%s provider is not attached to task", provider)
+	}
 	settings := taskChangeRequestProviderSettings(snapshot, provider)
 	if settings == nil || settings.Status != mcphandlers.TaskChangeRequestProviderStatusAvailable || !settings.Available {
 		return taskChangeRequestAutomationPreflight{}, fmt.Errorf("%s provider is unavailable", provider)
@@ -231,6 +243,34 @@ func (c *taskChangeRequestAutomationCoordinator) preflightProvider(
 		return preflightAssociationAutomation(request, provider, preflight)
 	}
 	return preflightTaskAutomation(request, provider, preflight)
+}
+
+func (c *taskChangeRequestAutomationCoordinator) taskHasProvider(
+	ctx context.Context, task *models.Task, provider string,
+) (bool, error) {
+	if task == nil || c.tasks == nil {
+		return false, errors.New("task provider membership could not be verified")
+	}
+	for _, taskRepository := range task.Repositories {
+		if taskRepository == nil || strings.TrimSpace(taskRepository.RepositoryID) == "" {
+			continue
+		}
+		repository, err := c.tasks.GetRepository(ctx, taskRepository.RepositoryID)
+		if err != nil {
+			c.logger.Warn("task change request automation repository lookup failed",
+				zap.String("task_id", task.ID),
+				zap.String("repository_id", taskRepository.RepositoryID),
+				zap.Error(err))
+			return false, errors.New("task provider membership could not be verified")
+		}
+		if repository == nil || repository.WorkspaceID != task.WorkspaceID {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(repository.Provider), strings.TrimSpace(provider)) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func preflightAssociationAutomation(

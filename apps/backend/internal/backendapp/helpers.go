@@ -2005,7 +2005,7 @@ func registerMCPAndDebugRoutes(
 		p.taskSvc, p.services.GitHub, p.services.GitLab, p.eventBus, p.log,
 	))
 	mcpHandlers.SetTaskChangeLinkService(taskChangeLinkCoordinator{
-		tasks: p.taskSvc, github: p.services.GitHub, gitlab: p.services.GitLab,
+		tasks: p.taskSvc, github: p.services.GitHub, gitlab: p.services.GitLab, logger: p.log,
 	})
 	// Reuse the cross-task handoff service constructed in registerRoutes —
 	// the same instance backs the MCP path and the HTTP Kanban path so

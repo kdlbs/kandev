@@ -151,3 +151,6 @@ Validation passed:
   protocol.
 - `go test ./internal/backendapp -run 'TestTaskChangeCoordinator(Unlinks|Replaces)ReadResolvedLegacyGitLabAssociation' -count=1`
   passed with canonical identity resolution and stale-association cleanup.
+- A production-shaped CI automation regression clears the session catalog and
+  verifies that the missing-catalog error is recorded before dispatch, with no
+  fix attempt or merge operation.

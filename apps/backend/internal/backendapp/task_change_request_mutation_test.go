@@ -54,8 +54,10 @@ func TestTaskChangeCoordinatorTypedReplacementFailureState(t *testing.T) {
 	})
 
 	require.Error(t, err)
-	assert.Contains(t, result.OperationError, "delete failed")
-	assert.Contains(t, result.RollbackError, "rollback failed")
+	assert.Equal(t, taskChangeMutationOperationError, result.OperationError)
+	assert.Equal(t, taskChangeMutationRollbackError, result.RollbackError)
+	assert.NotContains(t, result.OperationError, "delete failed")
+	assert.NotContains(t, result.RollbackError, "rollback failed")
 	assert.True(t, result.StateKnown)
 	assert.ElementsMatch(t, []mcphandlers.TaskChangeLink{
 		{Provider: "gitlab", RepositoryID: "repo-1", Number: 7},

@@ -20,6 +20,8 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type archiveBeforeLifecycleQueueRepo struct {
@@ -61,6 +63,30 @@ type autoFixStateFailureThenStoreService struct {
 type autoMergeFailureThenReviewRequestService struct {
 	*storeBackedLifecycleGitHubService
 	pr *github.TaskPR
+}
+
+type catalogAwareGitHubService struct {
+	*mockGitHubService
+}
+
+func (s *catalogAwareGitHubService) BindTaskCIAutoFixAttemptTurn(context.Context, github.TaskCIAutoFixAttemptBinding) error {
+	return nil
+}
+
+func (s *catalogAwareGitHubService) ReportTaskCIAutoFixOutcome(context.Context, github.TaskCIAutoFixOutcomeReport) error {
+	return nil
+}
+
+func (s *catalogAwareGitHubService) ReconcileTaskCIAutoFixTurnCompletion(context.Context, string, string, string) error {
+	return nil
+}
+
+func (s *catalogAwareGitHubService) ReconcileTaskCIAutoFixQueuedDispatchFailure(context.Context, github.TaskCIAutoFixAttemptBinding) error {
+	return nil
+}
+
+func (s *catalogAwareGitHubService) ReconcileTaskCIAutoFixProviderProgress(context.Context, github.TaskCIAutoFixProviderProgress) error {
+	return nil
 }
 
 func (s *autoFixStateFailureThenStoreService) GetTaskCIPRState(ctx context.Context, taskID, repositoryID string, prNumber int) (*github.TaskCIPRAutomationState, error) {
@@ -3459,6 +3485,41 @@ func TestHandleTaskPRCIAutoFixDirectDispatchPersistsWideMetadataEndToEnd(t *test
 	if gotMeta["pr_number"] != 42 || gotMeta["owner"] != "acme" || gotMeta["repo"] != "widget" {
 		t.Fatalf("expected PR identity from the driven PR, got %+v", gotMeta)
 	}
+}
+
+func TestHandleTaskPRCIAutoFixRecordsMissingCatalogBeforeDispatch(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
+	session, err := repo.GetTaskSession(ctx, "session-1")
+	require.NoError(t, err)
+	session.Metadata = map[string]interface{}{}
+	require.NoError(t, repo.UpdateTaskSessionWithMetadata(ctx, session, session.Metadata))
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	ghSvc := &catalogAwareGitHubService{mockGitHubService: &mockGitHubService{
+		ciOptionsResp: &github.TaskCIOptionsResponse{
+			TaskID:                 "task-1",
+			AutoFixEnabled:         true,
+			EffectiveAutoFixPrompt: "Fix the PR\n\n{{pr.feedback}}",
+		},
+		prFeedback: &github.PRFeedback{
+			Comments: []github.PRComment{{ID: 99, Body: "plain PR comment should trigger auto-fix"}},
+		},
+	}}
+	svc.SetGitHubService(ghSvc)
+	now := time.Now().UTC()
+	pr := &github.TaskPR{
+		TaskID: "task-1", WorkspaceID: "ws1", RepositoryID: "repo-1",
+		Owner: "acme", Repo: "widget", PRNumber: 42, State: "open",
+		ChecksState: "success", LastSyncedAt: &now,
+	}
+
+	require.NoError(t, svc.handleTaskPRCIAutomationWithRefresh(ctx, pr, false))
+	require.Len(t, ghSvc.ciErrors, 1)
+	require.NotNil(t, ghSvc.ciErrors[0].LastError)
+	assert.Contains(t, *ghSvc.ciErrors[0].LastError, "MCP tool catalog is unavailable")
+	assert.Empty(t, ghSvc.fixAttempts)
+	assert.Equal(t, 0, ghSvc.mergeCalls)
 }
 
 func ptrString(value string) *string {

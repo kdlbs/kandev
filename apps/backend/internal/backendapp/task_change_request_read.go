@@ -488,7 +488,11 @@ func (a gitlabTaskChangeRequestAdapter) readGitLabTaskChangeRequests(
 		result.Errors = append(result.Errors, err)
 		return
 	}
-	result.ChangeRequests = a.gitLabTaskChangeRequests(ctx, task, mrs)
+	changes, resolveErr := a.gitLabTaskChangeRequestsWithErrors(ctx, task, mrs)
+	result.ChangeRequests = changes
+	if resolveErr != nil {
+		result.Errors = append(result.Errors, resolveErr)
+	}
 }
 
 func (a gitlabTaskChangeRequestAdapter) readGitLabStatus(
@@ -501,6 +505,9 @@ func (a gitlabTaskChangeRequestAdapter) readGitLabStatus(
 	}
 	if status == nil {
 		return
+	}
+	if connectionErr := strings.TrimSpace(status.ConnectionError); connectionErr != "" {
+		result.Errors = append(result.Errors, errors.New(connectionErr))
 	}
 	result.Configured = strings.TrimSpace(status.AuthMethod) != "" && strings.TrimSpace(status.AuthMethod) != "none"
 	result.Configured = result.Configured || status.TokenConfigured || strings.TrimSpace(status.Username) != ""
@@ -536,13 +543,24 @@ func (a gitlabTaskChangeRequestAdapter) readGitLabAutomationSettings(
 func (a gitlabTaskChangeRequestAdapter) gitLabTaskChangeRequests(
 	ctx context.Context, task *models.Task, mrs []*gitlab.TaskMR,
 ) []mcphandlers.TaskChangeRequest {
+	changes, _ := a.gitLabTaskChangeRequestsWithErrors(ctx, task, mrs)
+	return changes
+}
+
+func (a gitlabTaskChangeRequestAdapter) gitLabTaskChangeRequestsWithErrors(
+	ctx context.Context, task *models.Task, mrs []*gitlab.TaskMR,
+) ([]mcphandlers.TaskChangeRequest, error) {
 	changes := make([]mcphandlers.TaskChangeRequest, 0, len(mrs))
 	pathsByIdentity := make(map[string]map[string]struct{})
+	var resolveErrs []error
 	for _, mr := range mrs {
 		if mr == nil {
 			continue
 		}
-		change := a.gitLabTaskChangeRequest(ctx, task, mr)
+		change, err := a.gitLabTaskChangeRequestWithError(ctx, task, mr)
+		if err != nil {
+			resolveErrs = append(resolveErrs, err)
+		}
 		change.ProviderProjectPath = strings.Trim(strings.TrimSpace(mr.ProjectPath), "/")
 		change.ProviderRepositoryID = strings.TrimSpace(mr.RepositoryID)
 		changes = append(changes, change)
@@ -564,12 +582,19 @@ func (a gitlabTaskChangeRequestAdapter) gitLabTaskChangeRequests(
 			change.IdentityStatus = mcphandlers.TaskChangeRequestIdentityAmbiguous
 		}
 	}
-	return changes
+	return changes, errors.Join(resolveErrs...)
 }
 
 func (a gitlabTaskChangeRequestAdapter) gitLabTaskChangeRequest(
 	ctx context.Context, task *models.Task, mr *gitlab.TaskMR,
 ) mcphandlers.TaskChangeRequest {
+	change, _ := a.gitLabTaskChangeRequestWithError(ctx, task, mr)
+	return change
+}
+
+func (a gitlabTaskChangeRequestAdapter) gitLabTaskChangeRequestWithError(
+	ctx context.Context, task *models.Task, mr *gitlab.TaskMR,
+) (mcphandlers.TaskChangeRequest, error) {
 	change := mcphandlers.TaskChangeRequest{
 		Provider:            mcphandlers.TaskChangeRequestProviderGitLab,
 		Number:              mr.MRIID,
@@ -587,48 +612,72 @@ func (a gitlabTaskChangeRequestAdapter) gitLabTaskChangeRequest(
 		UpdatedAt:           taskChangeRequestTimePointer(mr.UpdatedAt),
 		IdentityStatus:      mcphandlers.TaskChangeRequestIdentityUnresolved,
 	}
-	if repositoryID, identityStatus := a.resolveGitLabRepositoryIdentity(ctx, task, mr); repositoryID != "" {
+	if repositoryID, identityStatus, err := a.resolveGitLabRepositoryIdentityWithError(ctx, task, mr); err != nil {
+		return change, err
+	} else if repositoryID != "" {
 		change.RepositoryID = &repositoryID
 		change.IdentityStatus = identityStatus
 	} else {
 		change.IdentityStatus = identityStatus
 	}
-	return change
+	return change, nil
 }
 
 func (a gitlabTaskChangeRequestAdapter) resolveGitLabRepositoryIdentity(
 	ctx context.Context, task *models.Task, mr *gitlab.TaskMR,
 ) (string, string) {
+	repositoryID, identityStatus, _ := a.resolveGitLabRepositoryIdentityWithError(ctx, task, mr)
+	return repositoryID, identityStatus
+}
+
+func (a gitlabTaskChangeRequestAdapter) resolveGitLabRepositoryIdentityWithError(
+	ctx context.Context, task *models.Task, mr *gitlab.TaskMR,
+) (string, string, error) {
 	if repositoryID := strings.TrimSpace(mr.RepositoryID); repositoryID != "" {
-		return repositoryID, mcphandlers.TaskChangeRequestIdentityResolved
+		return repositoryID, mcphandlers.TaskChangeRequestIdentityResolved, nil
 	}
 	if a.tasks == nil || task == nil {
-		return "", mcphandlers.TaskChangeRequestIdentityUnresolved
+		return "", mcphandlers.TaskChangeRequestIdentityUnresolved, nil
 	}
-	candidates := a.gitLabRepositoryCandidates(ctx, task, mr)
+	candidates, err := a.gitLabRepositoryCandidatesWithError(ctx, task, mr)
+	if err != nil {
+		return "", mcphandlers.TaskChangeRequestIdentityUnresolved, err
+	}
 	switch len(candidates) {
 	case 0:
-		return "", mcphandlers.TaskChangeRequestIdentityUnresolved
+		return "", mcphandlers.TaskChangeRequestIdentityUnresolved, nil
 	case 1:
 		for repositoryID := range candidates {
-			return repositoryID, mcphandlers.TaskChangeRequestIdentityResolved
+			return repositoryID, mcphandlers.TaskChangeRequestIdentityResolved, nil
 		}
 	default:
-		return "", mcphandlers.TaskChangeRequestIdentityAmbiguous
+		return "", mcphandlers.TaskChangeRequestIdentityAmbiguous, nil
 	}
-	return "", mcphandlers.TaskChangeRequestIdentityUnresolved
+	return "", mcphandlers.TaskChangeRequestIdentityUnresolved, nil
 }
 
 func (a gitlabTaskChangeRequestAdapter) gitLabRepositoryCandidates(
 	ctx context.Context, task *models.Task, mr *gitlab.TaskMR,
 ) map[string]struct{} {
+	candidates, _ := a.gitLabRepositoryCandidatesWithError(ctx, task, mr)
+	return candidates
+}
+
+func (a gitlabTaskChangeRequestAdapter) gitLabRepositoryCandidatesWithError(
+	ctx context.Context, task *models.Task, mr *gitlab.TaskMR,
+) (map[string]struct{}, error) {
 	candidates := make(map[string]struct{})
+	var lookupErrs []error
 	for _, taskRepository := range task.Repositories {
 		if taskRepository == nil || strings.TrimSpace(taskRepository.RepositoryID) == "" {
 			continue
 		}
 		repository, err := a.tasks.GetRepository(ctx, taskRepository.RepositoryID)
-		if err != nil || repository == nil || repository.WorkspaceID != task.WorkspaceID {
+		if err != nil {
+			lookupErrs = append(lookupErrs, err)
+			continue
+		}
+		if repository == nil || repository.WorkspaceID != task.WorkspaceID {
 			continue
 		}
 		if !strings.EqualFold(strings.TrimSpace(repository.Provider), mcphandlers.TaskChangeRequestProviderGitLab) {
@@ -642,7 +691,7 @@ func (a gitlabTaskChangeRequestAdapter) gitLabRepositoryCandidates(
 		}
 		candidates[repository.ID] = struct{}{}
 	}
-	return candidates
+	return candidates, errors.Join(lookupErrs...)
 }
 
 func sameGitLabProjectPath(repository *models.Repository, projectPath string) bool {

@@ -95,3 +95,6 @@ Validation passed:
 
 - `go test ./internal/mcp/server ./internal/mcp/handlers -count=1`
 - `go test ./internal/orchestrator ./internal/github -run 'AutoFix|CIAuto|Outcome' -count=1`
+- Outcome protocol selection now compares the typed Kandev MCP source constant,
+  with the historical queued-block fixture retained independently from the
+  current protocol template.
