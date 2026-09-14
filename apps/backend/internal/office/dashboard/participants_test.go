@@ -411,15 +411,35 @@ func TestAddTaskReviewer_ClaimingAutoSeatCancelsDisplacedRunAndLogsActivity(t *t
 		t.Fatalf("displaced run status = %q, want cancelled", gotRun.Status)
 	}
 
-	var activityCount int
-	if err := deps.db.Get(&activityCount, `
-		SELECT COUNT(*) FROM office_activity_log
+	// AC-OFFICE-SEAT-ASSURANCE-002.8: the claim's activity entry is asserted
+	// by content, not by count. A count alone passes with an empty or wrong
+	// payload, which is exactly the entry an operator cannot act on — it must
+	// name the task, the step, the role, the agent displaced and the agent
+	// that displaced it (AC-OFFICE-SEAT-PROVENANCE-002.9).
+	var details []string
+	if err := deps.db.Select(&details, `
+		SELECT details FROM office_activity_log
 		WHERE target_id = 'claim1' AND action = 'task_participant_claimed'
 	`); err != nil {
-		t.Fatalf("count claim activity: %v", err)
+		t.Fatalf("read claim activity: %v", err)
 	}
-	if activityCount != 1 {
-		t.Fatalf("claim activity entries = %d, want 1", activityCount)
+	if len(details) != 1 {
+		t.Fatalf("claim activity entries = %d, want 1", len(details))
+	}
+	var payload map[string]string
+	if err := json.Unmarshal([]byte(details[0]), &payload); err != nil {
+		t.Fatalf("decode claim activity details %q: %v", details[0], err)
+	}
+	for _, field := range []struct{ key, want string }{
+		{"task_id", "claim1"},
+		{"step_id", stepID},
+		{"role", "reviewer"},
+		{"displaced_agent_profile_id", "agent-auto"},
+		{"claiming_agent_profile_id", "agent-claiming"},
+	} {
+		if got := payload[field.key]; got != field.want {
+			t.Errorf("claim activity details[%q] = %q, want %q", field.key, got, field.want)
+		}
 	}
 }
 

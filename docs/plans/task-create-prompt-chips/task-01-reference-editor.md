@@ -44,6 +44,10 @@ remains plain text, with recognized references as removable inline chips.
 
 ## ASCII UI preview
 
+Historical preview from the completed implementation. The
+[compact-chip follow-up](../compact-task-prompt-chips/plan.md) now proposes
+one enclosing border and revised sizing; it owns new geometry verification.
+
 UI-01/02 excerpt from the [full preview](plan.md#ascii-ui-preview), criteria `.1` to `.6`:
 
 ```text

@@ -45,6 +45,10 @@ Preserve shared form services and prove the complete desktop and phone interacti
 
 ## ASCII UI preview
 
+Historical preview from the completed implementation. The
+[compact-chip follow-up](../compact-task-prompt-chips/plan.md) now proposes
+one enclosing border and revised sizing; it owns new geometry verification.
+
 UI-01/02 excerpt from the [full preview](plan.md#ascii-ui-preview), criteria `.1` through `.7`:
 
 ```text

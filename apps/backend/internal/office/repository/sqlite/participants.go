@@ -196,6 +196,14 @@ type ParticipantWriteResult struct {
 	DisplacedAgentProfileID string
 }
 
+// ErrEmptyAgentProfileID is returned by AddTaskParticipant when the
+// registration names no agent. A seat exists to name an agent: one naming
+// nobody satisfies the natural key, is counted by the quorum guard, and can
+// never be woken or decided. Exported as a single identity so callers
+// distinguish it from the store's nil-error "unchanged" outcome without
+// matching on a message.
+var ErrEmptyAgentProfileID = errors.New("participant: agent_profile_id required")
+
 // AddTaskParticipant registers agentID in role for taskID, claiming an
 // unclaimed automatic seat in place when one exists rather than always
 // inserting a second seat into the role's slate. Returns
@@ -211,7 +219,17 @@ type ParticipantWriteResult struct {
 // resolved on the transaction handle, inside that lock — never through the
 // read-only pool, which would escape the exclusion as surely as a
 // mismatched lock key would on the server dialect.
+//
+// A registration naming no agent is refused with ErrEmptyAgentProfileID
+// before the transaction begins, so it takes no exclusion and leaves
+// nothing to roll back. Only the empty identifier: a whitespace identifier
+// names no agent profile and stays governed by the claim search's own
+// existence check.
 func (r *Repository) AddTaskParticipant(ctx context.Context, taskID, agentID, role string) (ParticipantWriteResult, error) {
+	if agentID == "" {
+		return ParticipantWriteResult{}, ErrEmptyAgentProfileID
+	}
+
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return ParticipantWriteResult{}, fmt.Errorf("begin tx: %w", err)

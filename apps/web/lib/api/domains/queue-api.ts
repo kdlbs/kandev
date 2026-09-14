@@ -2,6 +2,7 @@ import type { QueueStatus, QueuedMessage } from "@/lib/state/slices/session/type
 import type { EntityReference } from "@/lib/types/entity-reference";
 import type { Message, TaskPlanCommentRef } from "@/lib/types/http";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import { WebSocketRequestError } from "@/lib/ws/request-error";
 // i18n-exempt: precondition diagnostic for a programmer error; callers branch
 // on the error type, never render this message.
 const WS_CLIENT_UNAVAILABLE = "WebSocket client not available";
@@ -17,6 +18,23 @@ export class QueueFullError extends Error {
     this.name = "QueueFullError";
     this.queueSize = queueSize;
     this.max = max;
+  }
+}
+
+export type QueueAdmissionErrorCode =
+  | "validation"
+  | "identity-conflict"
+  | "session-unavailable"
+  | "unavailable";
+
+/** Error returned when an identified queue admission is rejected deterministically. */
+export class QueueAdmissionError extends Error {
+  readonly code: QueueAdmissionErrorCode;
+
+  constructor(code: QueueAdmissionErrorCode) {
+    super(code);
+    this.name = "QueueAdmissionError";
+    this.code = code;
   }
 }
 
@@ -103,13 +121,33 @@ type WSError = {
   details?: { queue_size?: number; max?: number; [k: string]: unknown };
 };
 
+const QUEUE_ADMISSION_ERROR_CODES: Readonly<Record<string, QueueAdmissionErrorCode>> = {
+  queue_id_conflict: "identity-conflict",
+  queue_session_unavailable: "session-unavailable",
+  queue_admission_unavailable: "unavailable",
+  UNAVAILABLE: "unavailable",
+  VALIDATION_ERROR: "validation",
+  NOT_FOUND: "session-unavailable",
+};
+
+type QueueErrorContext = "admission" | "operation";
+
 function asWSError(err: unknown): WSError | undefined {
   // Some WS error payloads omit `code` and only carry `message`/`details`;
   // narrowing on `code` alone would drop those and stringify the whole object
   // as the eventual Error message ("[object Object]"). Real Error instances
-  // are skipped so they pass through unchanged in `rethrowQueueError`.
-  if (typeof err !== "object" || err === null || err instanceof Error) {
+  // pass through unchanged, except for structured request errors from the WS
+  // client, which retain their wire code for queue-specific mapping.
+  if (typeof err !== "object" || err === null) {
     return undefined;
+  }
+  if (err instanceof Error) {
+    if (!(err instanceof WebSocketRequestError)) return undefined;
+    return {
+      code: err.code,
+      message: err.message,
+      details: err.details as WSError["details"],
+    };
   }
   if ("code" in err || "message" in err || "details" in err) {
     return err as WSError;
@@ -117,33 +155,33 @@ function asWSError(err: unknown): WSError | undefined {
   return undefined;
 }
 
-function knownQueueError(wsErr: WSError): Error | undefined {
-  switch (wsErr.code) {
-    case "queue_full": {
-      const size = typeof wsErr.details?.queue_size === "number" ? wsErr.details.queue_size : 0;
-      const max = typeof wsErr.details?.max === "number" ? wsErr.details.max : 0;
-      return new QueueFullError(size, max);
-    }
-    case "entry_not_found":
-      return new QueueEntryNotFoundError();
-    case "edit_conflict":
-    case "queue_conflict":
-      return new QueueEditConflictError();
-    case "merge_reference_overflow":
-      return new MergeReferenceOverflowError();
-    default:
-      if (wsErr.code && QUEUE_SEND_NOW_ERROR_CODES.has(wsErr.code as QueueSendNowErrorCode)) {
-        return new QueueSendNowError(wsErr.code as QueueSendNowErrorCode, wsErr.message);
-      }
-      return undefined;
+function knownQueueError(wsErr: WSError, context: QueueErrorContext): Error | undefined {
+  if (wsErr.code === "queue_full") {
+    const size = typeof wsErr.details?.queue_size === "number" ? wsErr.details.queue_size : 0;
+    const max = typeof wsErr.details?.max === "number" ? wsErr.details.max : 0;
+    return new QueueFullError(size, max);
   }
+  if (context === "admission") {
+    const admissionCode = wsErr.code ? QUEUE_ADMISSION_ERROR_CODES[wsErr.code] : undefined;
+    if (admissionCode) return new QueueAdmissionError(admissionCode);
+  }
+  if (wsErr.code === "entry_not_found") return new QueueEntryNotFoundError();
+  if (wsErr.code === "edit_conflict" || wsErr.code === "queue_conflict") {
+    return new QueueEditConflictError();
+  }
+  if (wsErr.code === "merge_reference_overflow") return new MergeReferenceOverflowError();
+  if (wsErr.code && QUEUE_SEND_NOW_ERROR_CODES.has(wsErr.code as QueueSendNowErrorCode)) {
+    return new QueueSendNowError(wsErr.code as QueueSendNowErrorCode, wsErr.message);
+  }
+  return undefined;
 }
 
-export function rethrowQueueError(err: unknown): never {
+export function rethrowQueueError(err: unknown, context: QueueErrorContext = "operation"): never {
   const wsErr = asWSError(err);
   if (wsErr) {
-    const known = knownQueueError(wsErr);
+    const known = knownQueueError(wsErr, context);
     if (known) throw known;
+    if (err instanceof WebSocketRequestError) throw err;
     if (wsErr.message) throw new Error(wsErr.message);
   }
   throw err instanceof Error ? err : new Error(String(err));
@@ -189,6 +227,7 @@ function isUncertainQueueTransportError(error: unknown): boolean {
 
 function hasQueueAdmissionMetadata(metadata: Message["metadata"], clientQueueId: string): boolean {
   if (metadata?.client_queue_id === clientQueueId) return true;
+  if (metadata?.queue_admission_ids?.includes(clientQueueId)) return true;
   const sources = metadata?.send_now_sources;
   if (!Array.isArray(sources)) return false;
   return sources.some((source) => {
@@ -205,6 +244,7 @@ function hasQueueAdmissionMetadata(metadata: Message["metadata"], clientQueueId:
 async function findAcceptedQueueAdmission(
   client: NonNullable<ReturnType<typeof getWebSocketClient>>,
   params: QueueMessageParams & { client_queue_id: string },
+  scanOlderTranscriptPages: boolean,
 ): Promise<QueuedMessage | undefined> {
   try {
     const status = await client.request<QueueStatus>("message.queue.get", {
@@ -252,7 +292,9 @@ async function findAcceptedQueueAdmission(
         };
       }
       const cursor = response.cursor;
-      if (!response.has_more || !cursor || seenCursors.has(cursor)) return undefined;
+      if (!scanOlderTranscriptPages || !response.has_more || !cursor || seenCursors.has(cursor)) {
+        return undefined;
+      }
       seenCursors.add(cursor);
       before = cursor;
     } while (before);
@@ -277,17 +319,34 @@ async function reconcileUncertainQueueAdmission(
   client: NonNullable<ReturnType<typeof getWebSocketClient>>,
   params: QueueMessageParams & { client_queue_id: string },
   originalError: unknown,
+  request: () => Promise<QueuedMessage>,
 ) {
-  const accepted = await findAcceptedQueueAdmission(client, params);
+  const scanOlderTranscriptPages = Boolean(params.plan_comment_refs?.length);
+  const accepted = await findAcceptedQueueAdmission(client, params, scanOlderTranscriptPages);
   if (accepted) return accepted;
   if (!(await waitForQueueConnection(client))) throw originalError;
   try {
-    return await client.request<QueuedMessage>("message.queue.add", params);
+    return await request();
   } catch (retryError) {
-    const acceptedAfterRetry = await findAcceptedQueueAdmission(client, params);
+    const acceptedAfterRetry = await findAcceptedQueueAdmission(
+      client,
+      params,
+      scanOlderTranscriptPages,
+    );
     if (acceptedAfterRetry) return acceptedAfterRetry;
     throw retryError;
   }
+}
+
+function requestQueueAdmission(
+  client: NonNullable<ReturnType<typeof getWebSocketClient>>,
+  params: QueueMessageParams,
+) {
+  if (!params.client_queue_id) {
+    return client.request<QueuedMessage>("message.queue.add", params);
+  }
+  const timeout = params.attachments?.length ? 30000 : 10000;
+  return client.request<QueuedMessage>("message.queue.add", params, timeout);
 }
 
 /** Append a new entry to the session's FIFO queue. Throws QueueFullError on overflow. */
@@ -296,8 +355,9 @@ export async function queueMessage(params: QueueMessageParams): Promise<QueuedMe
   if (!client) {
     throw new Error(WS_CLIENT_UNAVAILABLE);
   }
+  const request = () => requestQueueAdmission(client, params);
   try {
-    return await client.request<QueuedMessage>("message.queue.add", params);
+    return await request();
   } catch (err) {
     if (params.client_queue_id && isUncertainQueueTransportError(err)) {
       try {
@@ -305,12 +365,13 @@ export async function queueMessage(params: QueueMessageParams): Promise<QueuedMe
           client,
           params as QueueMessageParams & { client_queue_id: string },
           err,
+          request,
         );
       } catch (reconcileError) {
-        rethrowQueueError(reconcileError);
+        rethrowQueueError(reconcileError, "admission");
       }
     }
-    rethrowQueueError(err);
+    rethrowQueueError(err, "admission");
   }
 }
 
