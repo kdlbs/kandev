@@ -55,7 +55,7 @@ function ModelProbeWarning({ note }: { note: string }) {
   const trigger = (
     <button
       type="button"
-      className="inline-flex min-h-11 min-w-8 shrink-0 cursor-help items-center justify-center rounded-sm border-0 bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className="inline-flex min-h-0 min-w-8 shrink-0 cursor-help items-center justify-center rounded-sm border-0 bg-transparent p-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:min-w-11"
       aria-label={note}
       aria-expanded={usesTouchDrawer ? drawerOpen : undefined}
       aria-haspopup={usesTouchDrawer ? "dialog" : undefined}

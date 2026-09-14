@@ -225,8 +225,8 @@ func (m *Manager) prepareRestartedKubernetesAgentctl(
 		modelID = runtimeModel
 	}
 	if modelID != "" {
-		if !cacheFreshSessionModelState(execution) {
-			waitForFreshSessionModelState(ctx, m.logger, execution)
+		if !cacheSessionModelStateFromClient(execution, client) {
+			waitForFreshSessionModelStateFromClient(ctx, m.logger, execution, client)
 		}
 		if err := m.reapplySessionModelAfterResetWithClient(ctx, execution, client, result.SessionID, modelID); err != nil {
 			return "", fmt.Errorf("apply start model after Kubernetes restart: %w", err)
