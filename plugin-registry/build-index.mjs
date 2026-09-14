@@ -52,7 +52,7 @@ const OUTPUT_JSON =
   process.env.PLUGIN_REGISTRY_OUTPUT || path.join(HERE, "index.json");
 const RAW_BASE =
   process.env.PLUGIN_REGISTRY_RAW_BASE || "https://raw.githubusercontent.com";
-const MAX_PACKAGE_DOWNLOAD_SIZE = 200 << 20;
+export const MAX_PACKAGE_DOWNLOAD_SIZE = 100 << 20;
 const SAFE_PLUGIN_ID = /^[a-z0-9][a-z0-9-]*$/;
 const SAFE_VERSION = /^[0-9A-Za-z][0-9A-Za-z.+-]*$/;
 const execFileAsync = promisify(execFile);
@@ -586,10 +586,27 @@ async function verifyReleasePackage({
   }
 }
 
-async function fetchBytes(url, maxBytes) {
-  const response = await fetchWithTimeout(url);
-  if (!response.ok) throw new Error(`GET ${url} -> ${response.status}`);
-  return readResponseBytes(response, maxBytes);
+export async function fetchBytes(url, maxBytes, timeoutMs = 30000, options = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    if (!response.ok) throw new Error(`GET ${url} -> ${response.status}`);
+    return await readResponseBytes(response, maxBytes);
+  } catch (error) {
+    try {
+      await response?.body?.cancel();
+    } catch {
+      // The reader may still own the body after a read rejection.
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function inspectCanvasAsset(assetURL, pluginId) {

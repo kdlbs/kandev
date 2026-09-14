@@ -8,6 +8,8 @@ import {
   buildEntry,
   buildIndex,
   compareVersions,
+  fetchBytes,
+  MAX_PACKAGE_DOWNLOAD_SIZE,
   parseManifestFields,
   parsePluginsYaml,
   readPriorDocument,
@@ -155,6 +157,85 @@ test("readResponseBytes stops a chunked package at the download limit", async ()
     readResponseBytes(response, 5),
     /download exceeds 5 bytes/,
   );
+});
+
+test("readResponseBytes accepts a response exactly at the download limit", async () => {
+  const response = new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1, 2, 3, 4, 5]));
+        controller.close();
+      },
+    }),
+  );
+
+  const result = await readResponseBytes(response, 5);
+  assert.deepEqual([...result], [1, 2, 3, 4, 5]);
+});
+
+test("fetchBytes keeps its deadline active while consuming a slow body", async () => {
+  const originalFetch = globalThis.fetch;
+  let aborted = false;
+  const bodyDelayMs = 50;
+  globalThis.fetch = async (_url, { signal }) => ({
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array([1]));
+        const closeTimer = setTimeout(() => controller.close(), bodyDelayMs);
+        signal.addEventListener(
+          "abort",
+          () => {
+            aborted = true;
+            clearTimeout(closeTimer);
+            controller.error(new DOMException("The operation was aborted", "AbortError"));
+          },
+          { once: true },
+        );
+      },
+    }),
+  });
+
+  try {
+    await assert.rejects(fetchBytes("https://dl/slow", 10, 10), /aborted/i);
+    assert.equal(aborted, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("fetchBytes cancels a response body when body consumption rejects", async () => {
+  const originalFetch = globalThis.fetch;
+  let canceled = false;
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    headers: { get: () => null },
+    body: {
+      getReader: () => ({
+        read: async () => {
+          throw new Error("body failed");
+        },
+        releaseLock: () => {},
+      }),
+      cancel: async () => {
+        canceled = true;
+      },
+    },
+  });
+
+  try {
+    await assert.rejects(fetchBytes("https://dl/rejected", 10), /body failed/);
+    assert.equal(canceled, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("registry package downloads use the host URL installer size limit", () => {
+  assert.equal(MAX_PACKAGE_DOWNLOAD_SIZE, 100 << 20);
 });
 
 test("buildEntry rejects an unsafe curated ID before any network request", async () => {
