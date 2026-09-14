@@ -37,6 +37,7 @@ import {
 import { matchPromptMention, type PromptMentionMatch } from "@/lib/prompts/prompt-mention-parser";
 import type { EntityReference } from "@/lib/types/entity-reference";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { buildEntityReferenceMarkdownComponents } from "./entity-reference-chip";
 
 type PromptMentionMarkdownTag =
@@ -72,6 +73,12 @@ type MarkdownChildrenProps<T extends PromptMentionMarkdownTag> = ComponentPropsW
 
 export const PROMPT_MENTION_CHIP_CLASS =
   "inline rounded-md border border-emerald-300/35 bg-emerald-400/20 px-1.5 py-0.5 font-mono text-[0.88em] font-semibold text-emerald-950 box-decoration-clone break-all dark:text-emerald-100";
+
+const PROMPT_MENTION_EDITABLE_TEXT_CLASS =
+  "inline-flex max-w-full min-w-0 items-center font-mono text-xs font-semibold text-emerald-950 dark:text-emerald-100";
+const PROMPT_MENTION_EDITABLE_LABEL_CLASS = "min-w-0 max-w-full flex-1 truncate";
+const PROMPT_MENTION_EDITABLE_FOCUS_CLASS =
+  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-emerald-500/80";
 
 export function useStablePromptMentionNames(promptNames: string[]) {
   const canonicalNames = buildPromptMentionNames(promptNames);
@@ -649,17 +656,182 @@ export function PromptMentionText({
   );
 }
 
+type PromptMentionPresentation = "default" | "editable";
+
+type PromptMentionChipProps = {
+  name: string;
+  value: string;
+  focusable?: boolean;
+  interactive?: boolean;
+  presentation?: PromptMentionPresentation;
+};
+
+type PromptMentionPreviewProps = {
+  name: string;
+  value: string;
+  label: string;
+  content: string;
+  focusable: boolean;
+  className: string;
+  labelClassName?: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onToggle: () => void;
+};
+
+type PromptMentionClassNames = {
+  text: string;
+  trigger: string;
+  labelClassName?: string;
+};
+
+function getPromptMentionClassNames(
+  presentation: PromptMentionPresentation,
+  usesTouchDrawer: boolean,
+  usesTouchTarget: boolean,
+): PromptMentionClassNames {
+  if (presentation === "default") {
+    return {
+      text: PROMPT_MENTION_CHIP_CLASS,
+      trigger: cn(PROMPT_MENTION_CHIP_CLASS, usesTouchDrawer && "h-11 min-w-11", "cursor-pointer"),
+    };
+  }
+
+  return {
+    text: PROMPT_MENTION_EDITABLE_TEXT_CLASS,
+    labelClassName: PROMPT_MENTION_EDITABLE_LABEL_CLASS,
+    trigger: cn(
+      PROMPT_MENTION_EDITABLE_TEXT_CLASS,
+      PROMPT_MENTION_EDITABLE_FOCUS_CLASS,
+      usesTouchTarget ? "h-11 min-w-11" : "min-w-0",
+      "cursor-pointer",
+    ),
+  };
+}
+
+function PromptMentionLabel({ value, className }: { value: string; className?: string }) {
+  if (!className) return value;
+  return (
+    <span data-testid="custom-prompt-mention-label" className={className}>
+      {value}
+    </span>
+  );
+}
+
+function PromptMentionFallback({
+  name,
+  value,
+  className,
+  labelClassName,
+}: Pick<PromptMentionPreviewProps, "name" | "value" | "className" | "labelClassName">) {
+  const { t } = useTranslation();
+  return (
+    <span
+      data-testid="custom-prompt-mention"
+      data-prompt-name={name}
+      title={t("task:customPromptNamed", { name })}
+      className={className}
+    >
+      <PromptMentionLabel value={value} className={labelClassName} />
+    </span>
+  );
+}
+
+function PromptMentionTouchPreview({
+  name,
+  value,
+  label,
+  content,
+  className,
+  labelClassName,
+  open,
+  onOpenChange,
+}: PromptMentionPreviewProps) {
+  return (
+    <Drawer open={open} onOpenChange={onOpenChange}>
+      <DrawerTrigger asChild>
+        <button
+          type="button"
+          data-testid="custom-prompt-mention"
+          data-prompt-name={name}
+          aria-haspopup="dialog"
+          aria-expanded={open}
+          aria-label={label}
+          title={labelClassName ? label : undefined}
+          className={className}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <PromptMentionLabel value={value} className={labelClassName} />
+        </button>
+      </DrawerTrigger>
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>{label}</DrawerTitle>
+          <DrawerDescription className="sr-only">{label}</DrawerDescription>
+        </DrawerHeader>
+        <div className="max-h-[70dvh] overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <PromptPreview content={content} />
+        </div>
+      </DrawerContent>
+    </Drawer>
+  );
+}
+
+function PromptMentionHoverPreview({
+  name,
+  value,
+  label,
+  content,
+  focusable,
+  className,
+  labelClassName,
+  open,
+  onOpenChange,
+  onToggle,
+}: PromptMentionPreviewProps) {
+  const handleClick = (event: MouseEvent) => {
+    event.stopPropagation();
+    onToggle();
+  };
+  const handleKeyDown = (event: KeyboardEvent) => {
+    if (!focusable || (event.key !== "Enter" && event.key !== " ")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onToggle();
+  };
+
+  return (
+    <HoverCard open={open} onOpenChange={onOpenChange} openDelay={300} closeDelay={0}>
+      <HoverCardTrigger asChild>
+        <span
+          data-testid="custom-prompt-mention"
+          data-prompt-name={name}
+          tabIndex={focusable ? 0 : undefined}
+          role={focusable ? "button" : undefined}
+          aria-expanded={focusable ? open : undefined}
+          aria-label={focusable ? label : undefined}
+          title={labelClassName ? label : undefined}
+          className={className}
+          onClick={handleClick}
+          onKeyDown={handleKeyDown}
+        >
+          <PromptMentionLabel value={value} className={labelClassName} />
+        </span>
+      </HoverCardTrigger>
+      <HoverCardContent side="top" align="start" className="w-80 max-h-80 overflow-y-auto">
+        <PromptPreview content={content} />
+      </HoverCardContent>
+    </HoverCard>
+  );
+}
+
 export function PromptMentionChip({
   name,
   value,
   focusable = true,
   interactive = true,
-}: {
-  name: string;
-  value: string;
-  focusable?: boolean;
-  interactive?: boolean;
-}) {
+  presentation = "default",
+}: PromptMentionChipProps) {
   const { t } = useTranslation();
   const content = useAppStore(
     useCallback(
@@ -669,83 +841,38 @@ export function PromptMentionChip({
   );
   const [open, setOpen] = useState(false);
   const usesTouchDrawer = useTouchDrawer();
+  const { isMobile } = useResponsiveBreakpoint();
+  const usesTouchTarget = isMobile || usesTouchDrawer;
+  const classNames = getPromptMentionClassNames(presentation, usesTouchDrawer, usesTouchTarget);
 
   if (!content || !interactive) {
     return (
-      <span
-        data-testid="custom-prompt-mention"
-        data-prompt-name={name}
-        title={t("task:customPromptNamed", { name })}
-        className={PROMPT_MENTION_CHIP_CLASS}
-      >
-        {value}
-      </span>
+      <PromptMentionFallback
+        name={name}
+        value={value}
+        className={classNames.text}
+        labelClassName={classNames.labelClassName}
+      />
     );
   }
 
   const label = t("task:customPromptNamed", { name });
-  const handleToggle = () => setOpen((isOpen) => !isOpen);
-  const handleClick = (event: MouseEvent) => {
-    event.stopPropagation();
-    handleToggle();
-  };
-  const handleKeyDown = (event: KeyboardEvent) => {
-    if (!focusable || (event.key !== "Enter" && event.key !== " ")) return;
-    event.preventDefault();
-    event.stopPropagation();
-    handleToggle();
+  const previewProps: PromptMentionPreviewProps = {
+    name,
+    value,
+    label,
+    content,
+    focusable,
+    className: classNames.trigger,
+    labelClassName: classNames.labelClassName,
+    open,
+    onOpenChange: setOpen,
+    onToggle: () => setOpen((isOpen) => !isOpen),
   };
 
   if (usesTouchDrawer) {
-    return (
-      <Drawer open={open} onOpenChange={setOpen}>
-        <DrawerTrigger asChild>
-          <button
-            type="button"
-            data-testid="custom-prompt-mention"
-            data-prompt-name={name}
-            aria-haspopup="dialog"
-            aria-expanded={open}
-            aria-label={label}
-            className={cn(PROMPT_MENTION_CHIP_CLASS, "h-11 min-w-11 cursor-pointer")}
-            onClick={(event) => event.stopPropagation()}
-          >
-            {value}
-          </button>
-        </DrawerTrigger>
-        <DrawerContent>
-          <DrawerHeader>
-            <DrawerTitle>{label}</DrawerTitle>
-            <DrawerDescription className="sr-only">{label}</DrawerDescription>
-          </DrawerHeader>
-          <div className="max-h-[70dvh] overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-            <PromptPreview content={content} />
-          </div>
-        </DrawerContent>
-      </Drawer>
-    );
+    return <PromptMentionTouchPreview {...previewProps} />;
   }
 
-  return (
-    <HoverCard open={open} onOpenChange={setOpen} openDelay={300} closeDelay={0}>
-      <HoverCardTrigger asChild>
-        <span
-          data-testid="custom-prompt-mention"
-          data-prompt-name={name}
-          tabIndex={focusable ? 0 : undefined}
-          role={focusable ? "button" : undefined}
-          aria-expanded={focusable ? open : undefined}
-          aria-label={focusable ? label : undefined}
-          className={cn(PROMPT_MENTION_CHIP_CLASS, "cursor-pointer")}
-          onClick={handleClick}
-          onKeyDown={handleKeyDown}
-        >
-          {value}
-        </span>
-      </HoverCardTrigger>
-      <HoverCardContent side="top" align="start" className="w-80 max-h-80 overflow-y-auto">
-        <PromptPreview content={content} />
-      </HoverCardContent>
-    </HoverCard>
-  );
+  return <PromptMentionHoverPreview {...previewProps} />;
 }
