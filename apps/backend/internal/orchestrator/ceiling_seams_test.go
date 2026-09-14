@@ -174,3 +174,50 @@ func TestSeam1ReservationConsumeSurvivesRebind(t *testing.T) {
 		t.Fatalf("population = %d, want 1 (a consumed reservation must survive the deferred release)", population)
 	}
 }
+
+// TestSeam1ReservationRebindCollisionReleasesTheLoserNotTheWinner pins RV3-A:
+// two independently-admitted seam 1 reservations can converge on the same
+// session id (Office identity-owned sessions: EnsureSessionForAgentWithCreation
+// converges concurrent callers for the same task/agent onto one session row).
+// The second rebind to arrive must not silently overwrite the first
+// reservation's map slot — its own later cleanup must be a no-op, not a
+// deletion of the still-in-flight winner's reservation.
+func TestSeam1ReservationRebindCollisionReleasesTheLoserNotTheWinner(t *testing.T) {
+	controller := newSessionCeilingController(2, nil, nil)
+	decisionA := controller.admit(context.Background(), admissionRequest{taskID: "task-a", origin: launchOriginAutomatic, seam: "startTask"})
+	decisionB := controller.admit(context.Background(), admissionRequest{taskID: "task-b", origin: launchOriginAutomatic, seam: "startTask"})
+	if !decisionA.admitted || !decisionB.admitted {
+		t.Fatal("expected both launches to be admitted under a ceiling of 2")
+	}
+
+	winner := &seam1Reservation{controller: controller, key: decisionA.reservationKey}
+	loser := &seam1Reservation{controller: controller, key: decisionB.reservationKey}
+
+	// Both launches converge on the same session, exactly as two concurrent
+	// startTask calls do via EnsureSessionForAgentWithCreation.
+	winner.rebindToSession("session-shared")
+	loser.rebindToSession("session-shared")
+
+	// The loser's launch fails before the winner's ever resolves.
+	loser.releaseIfNotConsumed()
+
+	population, err := controller.population(context.Background())
+	if err != nil {
+		t.Fatalf("population: %v", err)
+	}
+	if population != 1 {
+		t.Fatalf("population = %d, want 1 (the winner's still in-flight reservation must survive "+
+			"the loser's collision cleanup)", population)
+	}
+
+	// The winner's own eventual failure must still free its slot: the fix must
+	// not leave it stranded forever.
+	winner.releaseIfNotConsumed()
+	population, err = controller.population(context.Background())
+	if err != nil {
+		t.Fatalf("population: %v", err)
+	}
+	if population != 0 {
+		t.Fatalf("population = %d, want 0 (the winner's own release must still free its slot)", population)
+	}
+}

@@ -315,7 +315,15 @@ func (c *sessionCeilingController) release(key string) {
 // rebind moves a launch-scoped reservation onto the session id that launch just
 // created, as one operation rather than a release followed by an acquire, so the
 // population never momentarily drops and no concurrent admission can take the
-// freed unit.
+// freed unit. Where a reservation already occupies that session id — two
+// launches racing to the same session, such as an Office identity-owned
+// session two concurrent starts converge onto via
+// EnsureSessionForAgentWithCreation — the launch-scoped reservation is
+// released instead of overwriting the winner's slot: this is still one
+// launch, mirroring rekey's own collision handling. Returning false leaves the
+// caller's key pointing at the now-deleted launch-scoped entry, so its own
+// later release is a harmless no-op rather than deleting the winner's still
+// in-flight reservation.
 func (c *sessionCeilingController) rebind(launchKey, sessionID string) bool {
 	if launchKey == "" || sessionID == "" {
 		return false
@@ -327,6 +335,9 @@ func (c *sessionCeilingController) rebind(launchKey, sessionID string) bool {
 		return false
 	}
 	delete(c.reservations, launchKey)
+	if _, collision := c.reservations[sessionID]; collision {
+		return false
+	}
 	reservation.sessionID = sessionID
 	c.reservations[sessionID] = reservation
 	return true
