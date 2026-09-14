@@ -433,7 +433,7 @@ the verified workspace context and this bounded body. Browser descriptor fields
 are not forwarded:
 
 ```json
-{"url":"https://code.example.com/owner/repository"}
+{ "url": "https://code.example.com/owner/repository" }
 ```
 
 Return the preferred nested response:
@@ -768,7 +768,8 @@ interface PluginRegistry {
 
   // Named slot injection. Host renders all components registered for a slot via
   // <PluginSlot name="..." slotProps={...}/>. Initial slots: "task-sidebar",
-  // "settings-nav", "chat-input-actions", "task-create-input-actions",
+  // "settings-nav", "chat-input-actions", "chat-submit-decoration",
+  // "task-create-input-actions",
   // "new-session-input-actions", "chat-top-bar",
   // "main-top-bar", "app-status-bar-left", "app-status-bar-right",
   // "plugin-settings", "task-card-indicators", "task-card-tags",
@@ -792,6 +793,26 @@ interface PluginRegistry {
   // "new-session-input-actions" render composer actions for task/Quick Chat,
   // task creation, and new-session creation. Each forwards the typed
   // `PluginComposerSlotProps`, including native insert/focus/submit capabilities.
+  // "chat-submit-decoration" renders *over* the chat composer's send button
+  // rather than beside it — for adornments that belong on the send affordance
+  // itself (a progress ring, a state dot), which a sibling slot cannot draw.
+  // The host owns the geometry: the layer is absolutely positioned to the send
+  // button's 28px circular box, so a decoration sizes itself against `inset-0`
+  // without measuring the DOM and stays on the button's rim; a negative inset
+  // can be clipped by the collapsed desktop toolbar. The plugin component is
+  // rendered inside the layer, not beside the button. The layer is
+  // `pointer-events-none` so a decoration can never swallow a click meant for
+  // send. For hover or focus disclosure, keep the decoration inert and observe
+  // the host button from an effect, removing listeners on unmount. Use
+  // `pointer-events-auto` only as a last resort for a separate hit target that
+  // does not obstruct send; prefer "chat-input-actions" when the plugin needs
+  // its own action. The slot forwards
+  // `ChatSubmitDecorationSlotProps`: `{ taskId, taskTitle, activeSessionId,
+  // sessionIds, presentation, isSending, isAgentBusy, disabled,
+  // planModeEnabled }`, so a decoration can react to the button's live state.
+  // The slot renders only while the send button does: when the agent is
+  // mid-turn with an empty composer the button is replaced by Cancel, and the
+  // decoration goes with it.
   // "chat-top-bar" renders status in the session top bar (beside the
   // document/editor/debug controls) and forwards
   // `{ taskId, taskTitle, workspaceId, activeSessionId, sessionIds }`. Both
@@ -800,10 +821,10 @@ interface PluginRegistry {
   // Home / Kanban / Tasks views (beside the CPU/DB metrics and the view/display
   // controls) and forwards `{ workspaceId, workspaceLabel, currentPage,
   // presentation }`, where presentation is "desktop" or "mobile". On a phone,
-  // contributions join the horizontally scrollable middle action strip between
-  // the fixed Kandev link and menu button. Documented host ui.Button icon
-  // contributions are normalized to a 32px box with a 16px SVG icon on phones;
-  // desktop contribution sizing is unchanged. It is the app-wide,
+  // listing contributions live inside the topbar menu with 44px touch targets
+  // and 16px SVG icons. Slots own their controls and disclosure state; the host
+  // does not dismiss the menu on arbitrary plugin interactions. Desktop
+  // contribution sizing is unchanged. It is the app-wide,
   // task-agnostic counterpart to "chat-top-bar", so it carries no task/session
   // ids.
   // "sidebar-workspace-actions" renders icon buttons after the built-in Quick
@@ -878,8 +899,8 @@ interface PluginRegistry {
   registerTaskPanel(registration: TaskPanelRegistration): void;
 
   // Contributes an item to the kanban card's Edit submenu (group "edit") or
-  // a flat, top-level card menu item between "Move to"/"Send to workflow"
-  // and "Link" (group "primary"). See "Kanban card contributions" below.
+  // a flat, top-level card menu item after "Move to"/"Send to workflow"
+  // and before "Archive"/"Delete" (group "primary"). See "Kanban card contributions" below.
   registerTaskMenuAction(registration: TaskMenuActionRegistration): void;
 
   // Contributes a client-side filter section to the kanban board's display
@@ -933,7 +954,7 @@ interface RepositoryProviderRegistration {
     repository: RepositoryInspection;
     signal: AbortSignal;
   }): Promise<RepositoryProviderBranch[]>;
-// Browser picker callback. Its result is not authoritative for a native task write.
+  // Browser picker callback. Its result is not authoritative for a native task write.
   inspectURL(context: {
     workspaceId: string;
     url: string;
@@ -1163,8 +1184,8 @@ interface TaskMenuActionRegistration {
   label: string;
   icon?: React.ReactNode;
   // "edit" nests the item in the card's Edit submenu; "primary" renders it
-  // as a flat, top-level item between the "Move to"/"Send to workflow"
-  // submenus and the "Link" submenu.
+  // as a flat, top-level item after the "Move to"/"Send to workflow"
+  // submenus and before the "Archive"/"Delete" items.
   group: "edit" | "primary";
   visible?(context: PluginTaskMenuContext): boolean; // default: always visible
   run(context: PluginTaskMenuContext): void | Promise<void>; // a rejection is caught and logged
@@ -1279,10 +1300,11 @@ console, and the menu still closes either way (Radix's own close-on-select,
 independent of the async result).
 
 Group `"primary"` renders each visible action as its own flat, top-level menu
-item instead of nesting it under `Edit`. It appears on cards and on the shared
-desktop/mobile task-row menu. Group `"edit"` remains card-only. Visibility
-filtering, registration order, and `run()`/error handling are identical; the
-two groups are independent lists (an action only ever belongs to one).
+item instead of nesting it under `Edit`. It appears after the movement items
+and before the Archive/Delete items on cards and on the shared desktop/mobile
+task-row menu. Group `"edit"` remains card-only. Visibility filtering,
+registration order, and `run()`/error handling are identical; the two groups
+are independent lists (an action only ever belongs to one).
 
 `"task-card-indicators"` (documented above with the other slots) is the
 matching read-only surface: a small icon/badge rendered beside the PR status

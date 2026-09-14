@@ -11,6 +11,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 )
 
 // Store persists workspace-scoped workflow sync configuration.
@@ -50,7 +51,7 @@ const createTablesSQL = `
 `
 
 func (s *Store) initSchema() error {
-	if _, err := s.db.Exec(createTablesSQL); err != nil {
+	if _, err := s.db.Exec(schemaSQLForDriver(createTablesSQL, s.db.DriverName())); err != nil {
 		return err
 	}
 	if err := s.addPollEnabledColumn(); err != nil {
@@ -156,7 +157,7 @@ func (s *Store) GetConfigForWorkspace(ctx context.Context, workspaceID string) (
 
 // ListConfigs returns every stored config, for the background poller.
 func (s *Store) ListConfigs(ctx context.Context) ([]*Config, error) {
-	rows, err := s.ro.QueryContext(ctx, `SELECT `+configSelectColumns+` FROM workflow_sync_configs ORDER BY workspace_id`)
+	rows, err := s.ro.QueryContext(ctx, s.ro.Rebind(`SELECT `+configSelectColumns+` FROM workflow_sync_configs ORDER BY workspace_id`))
 	if err != nil {
 		return nil, err
 	}
@@ -236,4 +237,8 @@ func boolToInt(b bool) int {
 		return 1
 	}
 	return 0
+}
+
+func schemaSQLForDriver(schema, driver string) string {
+	return dialect.MustRenderSchema(driver, schema)
 }

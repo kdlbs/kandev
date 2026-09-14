@@ -1,6 +1,7 @@
 "use client";
 
 import { memo } from "react";
+import type { AgentCompatState } from "@/components/task-create-dialog-types";
 import {
   IconLoader2,
   IconFileInvoice,
@@ -38,7 +39,7 @@ function UpdateButton({
     <Button
       type="button"
       variant="default"
-      className="w-full h-11 cursor-pointer sm:w-auto sm:h-7 gap-1.5"
+      className="w-full cursor-pointer sm:w-auto gap-1.5"
       disabled={isCreatingTask || !hasTitle || editDependenciesReady === false}
       onClick={onUpdate}
     >
@@ -76,11 +77,11 @@ function StartTaskSplitButton({
 
   return (
     <div className="flex flex-col w-full sm:w-auto gap-2 sm:gap-0">
-      <div className="flex w-full sm:inline-flex sm:w-auto sm:h-7 h-11">
+      <div className="flex w-full sm:inline-flex sm:w-auto">
         <Button
           type="submit"
           variant="default"
-          className="h-full flex-1 cursor-pointer gap-1.5 sm:rounded-r-none sm:border-r-0"
+          className="flex-1 cursor-pointer gap-1.5 sm:rounded-r-none sm:border-r-0"
           disabled={disabled}
           data-testid="submit-start-agent"
         >
@@ -130,7 +131,7 @@ function StartTaskSplitButton({
         <Button
           type="button"
           variant="outline"
-          className="w-full h-11 cursor-pointer gap-1.5 sm:hidden"
+          className="w-full cursor-pointer gap-1.5 sm:hidden"
           disabled={altDisabled}
           onClick={onPlanModeAction}
           data-testid="mobile-plan-mode"
@@ -142,7 +143,7 @@ function StartTaskSplitButton({
       <Button
         type="button"
         variant="outline"
-        className="w-full h-11 cursor-pointer gap-1.5 sm:hidden"
+        className="w-full cursor-pointer gap-1.5 sm:hidden"
         disabled={altDisabled}
         onClick={onAltAction}
       >
@@ -182,7 +183,7 @@ function DefaultSubmitButton({
     <Button
       type="submit"
       variant="default"
-      className={`w-full h-11 cursor-pointer sm:w-auto sm:h-7 gap-1.5 ${planModeStyle}`}
+      className={`w-full cursor-pointer sm:w-auto gap-1.5 ${planModeStyle}`}
       disabled={
         disabled || isCreatingSession || isCreatingTask || (isSessionMode ? !hasDescription : false)
       }
@@ -233,6 +234,8 @@ export type TaskCreateDialogFooterProps = {
   effectiveWorkflowId: string | null;
   executorHint: string | null;
   noCompatibleAgent: boolean;
+  agentCompatState: AgentCompatState;
+  selectedAgentProfileName: string | null;
   executorProfileName: string | null;
   onCancel: () => void;
   onUpdateWithoutAgent: () => void;
@@ -290,6 +293,8 @@ export const REASON_WORKFLOW = "task:reasonSelectWorkflow";
 export const REASON_AGENT = "task:reasonSelectAgent";
 export const REASON_DESCRIPTION = "task:reasonAddSessionDescription";
 export const REASON_NO_COMPATIBLE_AGENT = "task:noCompatibleAgentProfileFor";
+export const REASON_SELECTED_AGENT_INCOMPATIBLE = "task:selectedAgentNotConfiguredFor";
+export const REASON_SELECTED_AGENT_UNAVAILABLE = "task:selectedAgentProfileUnavailable";
 export const REASON_LOADING_DEPENDENCIES = "task:loadingDependencies";
 
 /**
@@ -301,12 +306,26 @@ export function resolveDisabledReason(
   t: (key: string, options?: Record<string, unknown>) => string,
   reason: string | null | undefined,
   executorProfileName: string | null,
+  agentProfileName: string | null = null,
 ): string | undefined {
   if (!reason) return undefined;
   if (!reason.startsWith("task:")) return reason;
   return t(reason, {
     target: executorProfileName ? `“${executorProfileName}”` : t("task:thisExecutor"),
+    agent: agentProfileName ?? t("task:selectedAgentProfileFallback"),
   });
+}
+
+/** The compatibility reason must name what the agent column shows. */
+function compatReason(props: TaskCreateDialogFooterProps): string | null {
+  if (props.agentCompatState === "selected-incompatible") {
+    return REASON_SELECTED_AGENT_INCOMPATIBLE;
+  }
+  if (props.agentCompatState === "selected-unavailable") {
+    return REASON_SELECTED_AGENT_UNAVAILABLE;
+  }
+  if (props.noCompatibleAgent) return REASON_NO_COMPATIBLE_AGENT;
+  return null;
 }
 
 function baseReason(props: TaskCreateDialogFooterProps): string | null {
@@ -316,7 +335,8 @@ function baseReason(props: TaskCreateDialogFooterProps): string | null {
   if (!props.hasAllBranches) return REASON_BRANCH;
   if (props.isCreateMode && !props.workspaceId) return REASON_WORKSPACE;
   if (props.isCreateMode && !props.effectiveWorkflowId) return REASON_WORKFLOW;
-  if (props.noCompatibleAgent) return REASON_NO_COMPATIBLE_AGENT;
+  const compat = compatReason(props);
+  if (compat) return compat;
   if (props.isEditMode && props.editDependenciesReady === false) {
     return REASON_LOADING_DEPENDENCIES;
   }
@@ -324,7 +344,8 @@ function baseReason(props: TaskCreateDialogFooterProps): string | null {
 }
 
 function sessionDefaultReason(props: TaskCreateDialogFooterProps): string | null {
-  if (props.noCompatibleAgent) return REASON_NO_COMPATIBLE_AGENT;
+  const compat = compatReason(props);
+  if (compat) return compat;
   if (!props.agentProfileId) return REASON_AGENT;
   if (!props.hasDescription) return REASON_DESCRIPTION;
   return null;
@@ -422,14 +443,20 @@ export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
           variant="outline"
           onClick={onCancel}
           disabled={isCreatingSession || isCreatingTask}
-          className="w-full h-11 border-0 cursor-pointer sm:w-auto sm:h-7 sm:border"
+          className="w-full border-0 cursor-pointer sm:w-auto sm:border"
+          data-testid="submit-cancel"
         >
           {t("common:cancel")}
         </Button>
       </DialogClose>
       <KeyboardShortcutTooltip
         shortcut={SHORTCUTS.SUBMIT}
-        description={resolveDisabledReason(t, disabledReason, props.executorProfileName)}
+        description={resolveDisabledReason(
+          t,
+          disabledReason,
+          props.executorProfileName,
+          props.selectedAgentProfileName,
+        )}
       >
         <span className="inline-flex w-full sm:w-auto" data-testid="submit-start-agent-wrapper">
           {(() => {

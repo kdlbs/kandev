@@ -9,10 +9,13 @@ export const defaultFeatureFlags = {
   // overwrites this with the backend's effective values after startup.
   office: false,
   auth: false,
+  canvases: false,
+  multiTenancy: false,
   dynamicAgentRouting: false,
   claudeBackgroundPromptHandoff: false,
   claudeMidTurnSteering: false,
   officeSessionIdentity: false,
+  agentSurvival: false,
 } as const;
 
 export type FeatureName = keyof typeof defaultFeatureFlags;

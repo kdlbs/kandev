@@ -19,12 +19,15 @@ import { useToast } from "@/components/toast-provider";
 import { AgentProfileDeleteConfirmation } from "@/components/settings/agent-profile-delete-dialog";
 import { deleteAgentProfileAction } from "@/app/actions/agents";
 import { useProfileDuplicate } from "@/hooks/domains/settings/use-profile-duplicate";
+import { useIsAdmin } from "@/hooks/domains/auth/use-is-admin";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import { useConfirmationBoundary } from "@/components/confirmation/mobile-action-confirmation";
 import { useRouter } from "@/lib/routing/client-router";
 import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import type { Agent, AgentProfile } from "@/lib/types/http";
 import { RecordDot } from "@/components/settings/record-dot";
 import { DisabledBadge } from "@/components/settings/record-badges";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 function profileHref(agentName: string, profileId: string): string {
   return `/settings/agents/${encodeURIComponent(agentName)}/profiles/${encodeURIComponent(profileId)}`;
@@ -76,21 +79,31 @@ function ProfileRowActions({
   onConfirmDelete: () => void;
 }) {
   const { t } = useTranslation();
+  const { isMobile } = useResponsiveBreakpoint();
+  const pendingDelete = useRef(false);
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button
           ref={deleteAnchorRef}
           variant="ghost"
-          size="sm"
-          className="cursor-pointer min-h-11 min-w-11"
+          size="icon"
+          className={settingsActionClassName("cursor-pointer")}
           aria-label={t("agents:profileActions")}
           data-testid={`profile-actions-menu-${profile.id}`}
         >
           <IconDotsVertical className="h-4 w-4" />
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
+      <DropdownMenuContent
+        align="end"
+        onCloseAutoFocus={(event) => {
+          if (!pendingDelete.current) return;
+          pendingDelete.current = false;
+          event.preventDefault();
+          onConfirmDelete();
+        }}
+      >
         {profile.kind !== "dynamic" && (
           <DropdownMenuItem
             className="cursor-pointer"
@@ -104,7 +117,10 @@ function ProfileRowActions({
         <DropdownMenuItem
           className="cursor-pointer text-destructive focus:text-destructive"
           data-testid={`delete-profile-${profile.id}`}
-          onSelect={onConfirmDelete}
+          onSelect={() => {
+            if (isMobile) pendingDelete.current = true;
+            else onConfirmDelete();
+          }}
         >
           <IconTrash className="h-4 w-4 mr-2" />
           {t("agents:delete")}
@@ -166,6 +182,8 @@ function ProfileRowInlineActions({
 }
 
 type ProfileRowDeleteConfirmationProps = {
+  profileId: string;
+  profileName: string;
   open: boolean;
   isFinePointer: boolean;
   anchorRef: RefObject<HTMLButtonElement | null>;
@@ -177,6 +195,8 @@ type ProfileRowDeleteConfirmationProps = {
 type ProfileRowDeleteConfirmationBaseProps = Omit<ProfileRowDeleteConfirmationProps, "placement">;
 
 function ProfileRowDeleteConfirmation({
+  profileId,
+  profileName,
   open,
   isFinePointer,
   anchorRef,
@@ -185,11 +205,14 @@ function ProfileRowDeleteConfirmation({
   onConfirm,
   placement,
 }: ProfileRowDeleteConfirmationProps) {
-  if (placement === "inline" && (isFinePointer || !open)) return null;
-  if (placement === "popover" && !isFinePointer) return null;
+  const { isMobile } = useResponsiveBreakpoint();
+  if (placement === "inline" && (isMobile || isFinePointer || !open)) return null;
+  if (placement === "popover" && !isMobile && !isFinePointer) return null;
 
   const confirmation = (
     <AgentProfileDeleteConfirmation
+      profileId={profileId}
+      profileName={profileName}
       open={open}
       isFinePointer={isFinePointer}
       anchorRef={anchorRef}
@@ -208,6 +231,7 @@ function ProfileRowDeleteConfirmation({
 type ProfileRowCardProps = {
   profile: AgentProfile;
   href: string;
+  canManage: boolean;
   confirmOpen: boolean;
   isFinePointer: boolean;
   isFullDesktop: boolean;
@@ -220,6 +244,7 @@ type ProfileRowCardProps = {
 function ProfileRowCard({
   profile,
   href,
+  canManage,
   confirmOpen,
   isFinePointer,
   isFullDesktop,
@@ -228,6 +253,7 @@ function ProfileRowCard({
   onConfirmDelete,
   confirmationProps,
 }: ProfileRowCardProps) {
+  const { isMobile } = useResponsiveBreakpoint();
   return (
     <Card
       // Same surface treatment as the workspace section tiles.
@@ -256,7 +282,8 @@ function ProfileRowCard({
           )}
         </div>
         <div className="relative z-10 flex shrink-0 items-center gap-1">
-          {!(confirmOpen && !isFinePointer) &&
+          {canManage &&
+            (isMobile || !(confirmOpen && !isFinePointer)) &&
             (isFullDesktop ? (
               <ProfileRowInlineActions
                 profile={profile}
@@ -282,12 +309,14 @@ function ProfileRowCard({
 
 /** One saved profile as a fully clickable row — shared by the Agents index and the agent page. */
 export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentProfile }) {
+  const canManage = useIsAdmin();
   const { t } = useTranslation();
   const { toast } = useToast();
   const router = useRouter();
   const { isFinePointer, isFullDesktop } = useResponsiveBreakpoint();
   const handleDuplicate = useProfileDuplicate();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  useConfirmationBoundary(confirmOpen, profile.id, setConfirmOpen);
   const deleteAnchorRef = useRef<HTMLButtonElement>(null);
   const store = useAppStoreApi();
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
@@ -337,6 +366,8 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
     closeDeleteConfirmation();
   };
   const confirmationProps = {
+    profileId: profile.id,
+    profileName: profile.name,
     open: confirmOpen,
     isFinePointer,
     anchorRef: deleteAnchorRef,
@@ -348,6 +379,7 @@ export function ProfileRow({ agent, profile }: { agent: Agent; profile: AgentPro
     <ProfileRowCard
       profile={profile}
       href={href}
+      canManage={canManage}
       confirmOpen={confirmOpen}
       isFinePointer={isFinePointer}
       isFullDesktop={isFullDesktop}

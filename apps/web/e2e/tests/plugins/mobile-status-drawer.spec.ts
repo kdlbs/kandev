@@ -91,7 +91,11 @@ test.describe("Mobile Status drawer", () => {
       await statusRows.evaluateAll((rows) => rows.map((row) => row.dataset.statusItemId)),
     ).toEqual([rightOrderingId, "builtin:metrics", "builtin:connection", leftOrderingId]);
     for (const row of await statusRows.all()) {
-      expect((await row.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      const rowHeight = (await row.boundingBox())?.height;
+      expect(rowHeight).not.toBeNull();
+      // Chromium can expose the computed 44px minimum as 43.9999... after
+      // the drawer's fractional mobile layout has been applied.
+      expect(Math.round(rowHeight!)).toBeGreaterThanOrEqual(44);
     }
     let orderPatchCount = 0;
     testPage.on("request", (request) => {

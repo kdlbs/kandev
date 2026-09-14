@@ -23,6 +23,7 @@ var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
 // ErrTaskPlanNotFound is returned by Repository task-plan methods when no row
 // matches the supplied task id.
 var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
+var ErrTaskPlanCommentsChanged = repoerrors.ErrTaskPlanCommentsChanged
 
 // ErrTaskEnvironmentNotFound is returned when no task environment row matches
 // the supplied id. Callers should classify it with errors.Is.

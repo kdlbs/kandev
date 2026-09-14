@@ -14,6 +14,7 @@ import {
 } from "./user-settings";
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
 import { workspaceId as toWorkspaceId } from "@/lib/types/ids";
+import type { SidebarTaskColorAutomation } from "@/lib/types/http-user-settings";
 
 const UPDATED_AT = "2026-01-01T00:00:00Z";
 const DEFAULT_USER_ID = "default-user";
@@ -54,9 +55,19 @@ describe("user settings revision ordering", () => {
 
 describe("startup page user settings", () => {
   it("normalizes startup page preferences", () => {
+    expect(parseStartupPage("threads")).toBe("threads");
     expect(parseStartupPage("last_task")).toBe("last_task");
     expect(parseStartupPage(undefined)).toBe("task_overview");
     expect(parseStartupPage("future_value")).toBe("task_overview");
+  });
+
+  // @covers AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-003.3
+  it("maps Threads and preserves it when a later settings patch omits startup page", () => {
+    const current = mapUserSettingsData({ startup_page: "threads" });
+    expect(current.startupPage).toBe("threads");
+    expect(mapUserSettingsData({ tasks_list_show_details: true }, current).startupPage).toBe(
+      "threads",
+    );
   });
 
   it("defaults startup page and maps the last-task choice", () => {
@@ -86,6 +97,8 @@ describe("Threads saved-view hydration", () => {
       taskScope: { mode: "all", taskIds: [] },
       sort: { key: "attention", direction: "asc" },
       maxColumns: 5,
+      layout: "columns",
+      autoHideComposer: false,
     });
     expect(settings.threadActiveViewId).toBe("view-all-threads");
   });
@@ -103,6 +116,8 @@ describe("Threads saved-view hydration", () => {
             filters: [],
             sort: { key: "priority", direction: "desc" },
             max_columns: 3,
+            layout: "grid",
+            auto_hide_composer: true,
           },
         ],
       },
@@ -113,8 +128,11 @@ describe("Threads saved-view hydration", () => {
       taskScope: { mode: "selected", taskIds: ["task-a"] },
       sort: { key: "priority", direction: "desc" },
       maxColumns: 3,
+      layout: "grid",
+      autoHideComposer: true,
     });
     expect(result.threadActiveViewId).toBe("current");
+    expect(buildCoreFields({}, { ...current, ...result }).threadViews).toEqual(result.threadViews);
   });
 });
 
@@ -413,6 +431,34 @@ describe("Azure DevOps browse preference mapping", () => {
     });
 
     expect(result.azureDevOpsBrowsePreferences).toEqual(preferences);
+  });
+});
+
+describe("automatic task-color hydration", () => {
+  it("maps the portable automatic task-color rules", () => {
+    const automation: SidebarTaskColorAutomation = {
+      enabled: true,
+      rules: [
+        {
+          id: "blocked",
+          enabled: true,
+          condition: { dimension: "task_state", value: "BLOCKED", label: "Blocked" },
+          output: { kind: "fixed", color: "red" },
+        },
+      ],
+    };
+
+    const result = mapUserSettingsResponse({
+      settings: {
+        user_id: DEFAULT_USER_ID,
+        workspace_id: toWorkspaceId(""),
+        repository_ids: [],
+        sidebar_task_color_automation: automation,
+        updated_at: UPDATED_AT,
+      },
+    });
+
+    expect(result.sidebarTaskColorAutomation).toEqual(automation);
   });
 });
 

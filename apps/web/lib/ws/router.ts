@@ -25,6 +25,7 @@ import { registerKanbanHandlers } from "@/lib/ws/handlers/kanban";
 import { registerSystemEventsHandlers } from "@/lib/ws/handlers/system-events";
 import { registerTasksHandlers } from "@/lib/ws/handlers/tasks";
 import { registerTaskPlansHandlers } from "@/lib/ws/handlers/task-plans";
+import { registerTaskPlanCommentsHandlers } from "@/lib/ws/handlers/task-plan-comments";
 import { registerWalkthroughsHandlers } from "@/lib/ws/handlers/walkthroughs";
 import { registerReviewHandlers } from "@/lib/ws/handlers/review";
 import { registerTerminalsHandlers } from "@/lib/ws/handlers/terminals";
@@ -39,6 +40,7 @@ import { registerGitHubHandlers } from "@/lib/ws/handlers/github";
 import { registerGitLabHandlers } from "@/lib/ws/handlers/gitlab";
 import { registerOfficeHandlers } from "@/lib/ws/handlers/office";
 import { registerRunHandlers } from "@/lib/ws/handlers/run";
+import { registerCanvasesHandlers } from "@/lib/ws/handlers/canvases";
 
 export function registerWsHandlers(store: StoreApi<AppState>) {
   const messages = createMessagesHandlerRegistration(store);
@@ -46,6 +48,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerKanbanHandlers(store),
     ...registerTasksHandlers(store),
     ...registerTaskPlansHandlers(store),
+    ...registerTaskPlanCommentsHandlers(store),
     ...registerWalkthroughsHandlers(store),
     ...registerReviewHandlers(store),
     ...registerWorkflowsHandlers(store),
@@ -82,6 +85,7 @@ export function registerWsHandlers(store: StoreApi<AppState>) {
     ...registerGitLabHandlers(store),
     ...registerOfficeHandlers(store),
     ...registerRunHandlers(),
+    ...registerCanvasesHandlers(store),
   };
   return { handlers, dispose: messages.dispose };
 }

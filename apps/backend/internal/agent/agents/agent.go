@@ -460,6 +460,17 @@ type RemoteAuth struct {
 	Methods []RemoteAuthMethod `json:"methods"`
 }
 
+// RemoteAuthFileConflictPolicy defines how a credential transfer handles an existing target.
+type RemoteAuthFileConflictPolicy string
+
+// RemoteAuthFileConflictPolicyMergeJSONObject preserves target-only keys and replaces collisions with source values.
+const RemoteAuthFileConflictPolicyMergeJSONObject RemoteAuthFileConflictPolicy = "merge_json_object"
+
+const (
+	remoteAuthMethodTypeFiles = "files"
+	remoteAuthLabelCopyFiles  = "Copy auth files"
+)
+
 // RemoteAuthMethod describes one way an agent can authenticate in a remote environment.
 type RemoteAuthMethod struct {
 	// Type is "env" (set env var via secret) or "files" (copy local files to remote).
@@ -475,6 +486,9 @@ type RemoteAuthMethod struct {
 	TargetRelDir string `json:"target_rel_dir,omitempty"`
 	// Label is a UI label for the file copy option (for type="files").
 	Label string `json:"label,omitempty"`
+	// FileConflictPolicy controls how an existing target file is handled. It is
+	// an internal transfer contract and is not part of the remote-auth API.
+	FileConflictPolicy RemoteAuthFileConflictPolicy `json:"-"`
 	// SetupScript is an optional shell script that runs on the remote after the
 	// env var is resolved. Used to bootstrap credential files from env vars.
 	// Only meaningful for type="env". Can reference the env var by name.

@@ -1,4 +1,4 @@
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 const taskChangesPanel = vi.hoisted(() => ({
@@ -10,6 +10,12 @@ vi.mock("./task-changes-panel", () => ({
     taskChangesPanel.props = props;
     return <div data-testid="task-changes-panel" />;
   },
+}));
+
+vi.mock("@/components/settings/canvas-host-route", () => ({
+  CanvasHostRoute: ({ canvasId }: { canvasId: string }) => (
+    <div data-testid="canvas-host-route-mock">{canvasId}</div>
+  ),
 }));
 
 vi.mock("@/hooks/use-file-editors", () => ({
@@ -31,6 +37,7 @@ vi.mock("@/components/state-provider", () => ({
       tasks: { activeSessionId: null, activeTaskId: null },
       taskSessions: { items: {} },
       agentProfiles: { items: [] },
+      features: { canvases: true },
       kanban: { tasks: [] },
       kanbanMulti: { snapshots: {} },
     }),
@@ -88,5 +95,17 @@ describe("dockview diff panel content", () => {
       sourceFilter: "pr",
       prKey: "acme/widgets/42",
     });
+  });
+});
+
+describe("dockview canvas panel content", () => {
+  it("gives the portaled canvas host a full-height flex boundary", async () => {
+    const { renderPanel } = await import("./dockview-panel-content");
+    render(<>{renderPanel("canvas:canvas-1", "canvas", { canvasId: "canvas-1" })}</>);
+
+    const host = screen.getByTestId("canvas-host-route-mock");
+    expect(host.parentElement?.className).toContain("h-full");
+    expect(host.parentElement?.className).toContain("min-h-0");
+    expect(host.parentElement?.className).toContain("flex");
   });
 });

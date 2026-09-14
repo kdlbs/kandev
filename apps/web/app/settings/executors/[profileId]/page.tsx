@@ -70,6 +70,7 @@ import type { Executor, ExecutorProfile } from "@/lib/types/http";
 import type { NetworkPolicyRule } from "@/lib/api/domains/settings-api";
 import { executorProfileDiscoveryTarget } from "@/lib/settings-discovery/dynamic-targets";
 import { buildSaveConfig } from "@/components/settings/profile-edit/serialize-executor-config";
+import { useUserNamespacesFormState } from "@/components/settings/profile-edit/use-user-namespaces-form-state";
 import { useProfileRuntimeFormState } from "@/components/settings/profile-edit/use-profile-runtime-form-state";
 import { KubernetesProfileSections } from "@/components/settings/kubernetes-profile-sections";
 import { KubernetesReadOnlyNotice } from "@/components/settings/kubernetes-read-only-notice";
@@ -291,6 +292,7 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
   const [prepareScript, setPrepareScript] = useState(profile.prepare_script ?? "");
   const [cleanupScript, setCleanupScript] = useState(profile.cleanup_script ?? "");
   const runtime = useProfileRuntimeFormState(executor, profile);
+  const userNamespaces = useUserNamespacesFormState(profile.config);
   const { envVarRows, addEnvVar, removeEnvVar, updateEnvVar, resetEnvVars } = useEnvVarRows(
     profile.env_vars,
   );
@@ -323,11 +325,12 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
     setPrepareScript(profile.prepare_script ?? "");
     setCleanupScript(profile.cleanup_script ?? "");
     runtime.resetRuntime();
+    userNamespaces.resetUserNamespaces();
     resetEnvVars(profile.env_vars);
     setSpritesSecretId(deriveSpritesSecretId(profile.env_vars));
     remoteAuth.reset();
     gitIdentity.reset();
-  }, [gitIdentity, profile, remoteAuth, resetEnvVars, runtime]);
+  }, [gitIdentity, profile, remoteAuth, resetEnvVars, runtime, userNamespaces]);
 
   return {
     ...runtime,
@@ -339,6 +342,10 @@ export function useProfileFormState(executor: Executor, profile: ExecutorProfile
     setPrepareScript,
     cleanupScript,
     setCleanupScript,
+    allowUserNamespaces: userNamespaces.allowUserNamespaces,
+    setAllowUserNamespaces: userNamespaces.setAllowUserNamespaces,
+    resetUserNamespaces: userNamespaces.resetUserNamespaces,
+    isLocalDocker: executor.type === "local_docker",
     envVarRows,
     addEnvVar,
     removeEnvVar,
@@ -412,6 +419,9 @@ function ExecutorSpecificSections({ executor, profile, form, secrets }: ProfileE
           onDockerfileChange={form.setDockerfile}
           imageTag={form.imageTag}
           onImageTagChange={form.setImageTag}
+          allowsUserNamespaces={form.isLocalDocker}
+          allowUserNamespaces={form.allowUserNamespaces}
+          onAllowUserNamespacesChange={form.setAllowUserNamespaces}
         />
       )}
       {form.isKubernetes && (

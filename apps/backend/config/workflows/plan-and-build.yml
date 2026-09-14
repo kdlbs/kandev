@@ -117,4 +117,5 @@ steps:
     name: Done
     position: 3
     color: bg-green-500
+    complete_task_on_enter: true
     allow_manual_move: true

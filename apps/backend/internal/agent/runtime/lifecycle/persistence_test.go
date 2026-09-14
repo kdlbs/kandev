@@ -80,6 +80,19 @@ func TestBuildRunningFromExecutionPersistsFreshExecutorIdentity(t *testing.T) {
 	}
 }
 
+func TestBuildRunningFromExecutionPersistsOfficeAgentIdentity(t *testing.T) {
+	running := buildRunningFromExecution(&AgentExecution{
+		ID:                   "exec-1",
+		TaskID:               "task-1",
+		SessionID:            "session-1",
+		OfficeAgentProfileID: "reviewer",
+	}, nil)
+
+	if got := getMetadataString(running.Metadata, MetadataKeyOfficeAgentProfileID); got != "reviewer" {
+		t.Fatalf("persisted OfficeAgentProfileID = %q, want reviewer", got)
+	}
+}
+
 func TestBuildRunningFromExecutionPreservesPriorExecutorIdentity(t *testing.T) {
 	running := buildRunningFromExecution(&AgentExecution{
 		ID: "exec-2", TaskID: "task-1", SessionID: "session-1",
@@ -88,6 +101,27 @@ func TestBuildRunningFromExecutionPreservesPriorExecutorIdentity(t *testing.T) {
 
 	if running.ExecutorID != "recorded-executor" {
 		t.Fatalf("ExecutorID = %q, want recorded-executor", running.ExecutorID)
+	}
+}
+
+func TestBuildRunningFromExecutionPersistsOfficeAgentProfileID(t *testing.T) {
+	running := buildRunningFromExecution(&AgentExecution{
+		ID: "exec-1", TaskID: "task-1", SessionID: "session-1",
+		OfficeAgentProfileID: "office-profile-9",
+	}, nil)
+
+	if got := running.Metadata[MetadataKeyOfficeAgentProfileID]; got != "office-profile-9" {
+		t.Fatalf("Metadata[%q] = %v, want office-profile-9", MetadataKeyOfficeAgentProfileID, got)
+	}
+}
+
+func TestBuildRunningFromExecutionOmitsOfficeAgentProfileIDForNonOfficeLaunch(t *testing.T) {
+	running := buildRunningFromExecution(&AgentExecution{
+		ID: "exec-1", TaskID: "task-1", SessionID: "session-1",
+	}, nil)
+
+	if _, ok := running.Metadata[MetadataKeyOfficeAgentProfileID]; ok {
+		t.Fatal("Metadata should not carry an office_agent_profile_id key for a non-Office launch")
 	}
 }
 

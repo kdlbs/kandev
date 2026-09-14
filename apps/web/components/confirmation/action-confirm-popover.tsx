@@ -29,6 +29,7 @@ export type ActionConfirmPopoverProps = {
   anchorRef: RefObject<HTMLElement | null>;
   focusReturnRef?: RefObject<HTMLElement | null>;
   focusBoundaryRef?: RefObject<HTMLElement | null>;
+  restoreFocusOnConfirm?: boolean;
   title: ReactNode;
   description?: ReactNode;
   cancelLabel: ReactNode;
@@ -42,6 +43,10 @@ export type ActionConfirmPopoverProps = {
   onCancel?: () => void;
   onConfirm: () => void | Promise<void>;
 };
+
+export function isActionConfirmationTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest("[data-confirmation-boundary]") !== null;
+}
 
 /**
  * A non-modal confirmation surface for one anchored action.
@@ -57,6 +62,7 @@ export function ActionConfirmPopover({
   anchorRef,
   focusReturnRef,
   focusBoundaryRef,
+  restoreFocusOnConfirm = false,
   title,
   description,
   cancelLabel,
@@ -133,6 +139,7 @@ export function ActionConfirmPopover({
         cancelRef={cancelRef}
         focusReturnRef={focusReturnRef}
         focusBoundaryRef={focusBoundaryRef}
+        restoreFocusOnConfirm={restoreFocusOnConfirm}
         confirmedRef={confirmedRef}
         anchorRef={anchorRef}
         onCancel={handleCancel}
@@ -159,6 +166,7 @@ type ActionConfirmPopoverContentProps = {
   cancelRef: RefObject<HTMLButtonElement | null>;
   focusReturnRef?: RefObject<HTMLElement | null>;
   focusBoundaryRef?: RefObject<HTMLElement | null>;
+  restoreFocusOnConfirm: boolean;
   confirmedRef: { current: boolean };
   anchorRef: RefObject<HTMLElement | null>;
   onCancel: () => void;
@@ -182,6 +190,7 @@ const ActionConfirmPopoverContent = memo(function ActionConfirmPopoverContent({
   cancelRef,
   focusReturnRef,
   focusBoundaryRef,
+  restoreFocusOnConfirm,
   confirmedRef,
   anchorRef,
   onCancel,
@@ -223,7 +232,7 @@ const ActionConfirmPopoverContent = memo(function ActionConfirmPopoverContent({
       }}
       onCloseAutoFocus={(event) => {
         event.preventDefault();
-        if (!confirmedRef.current) {
+        if (!confirmedRef.current || restoreFocusOnConfirm) {
           const focusReturnTarget = focusReturnRef?.current ?? null;
           if (isConnected(focusReturnTarget)) focusReturnTarget.focus();
           else if (isConnected(anchorRef.current)) anchorRef.current.focus();

@@ -128,6 +128,69 @@ func TestWorkflowAutoStartNonEmptyPrompt(t *testing.T) {
 	}
 }
 
+// Regression: a queued move-task handoff must survive a non-empty step prompt on a CREATED session.
+// @covers AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003.8
+func TestWorkflowAutoStartCreatedNonEmptyPromptPreservesQueuedHandoff(t *testing.T) {
+	fixture := newInitialPromptDedupFixture(t, false, false)
+	fixture.step.Prompt = "Continue with validation."
+	fixture.session.State = models.TaskSessionStateCreated
+	fixture.session.AgentProfileID = "profile-initial-prompt-dedup"
+	if err := fixture.repo.UpdateTaskSession(context.Background(), fixture.session); err != nil {
+		t.Fatalf("update created session: %v", err)
+	}
+	fixture.svc.scheduler = scheduler.NewScheduler(
+		queue.NewTaskQueue(10), fixture.svc.executor, fixture.svc.taskRepo,
+		testLogger(), scheduler.SchedulerConfig{},
+	)
+	fixture.svc.activeTurns.Store(fixture.sessionID, "turn-initial-prompt-dedup")
+	fixture.svc.messageCreator = &repositoryBackedMessageCreator{
+		mockMessageCreator: fixture.messages,
+		repo:               fixture.repo,
+	}
+
+	const handoff = "You were moved to this step with the following message: PROBE-3409"
+	if _, err := fixture.svc.messageQueue.QueueMessage(
+		context.Background(), fixture.sessionID, fixture.taskID, handoff, "",
+		messagequeue.QueuedByMoveTask, false, nil,
+	); err != nil {
+		t.Fatalf("queue handoff: %v", err)
+	}
+
+	if err := fixture.svc.autoStartStepPrompt(
+		context.Background(), fixture.taskID, fixture.session, fixture.step,
+		fixture.step.Prompt, false, true, nil,
+	); err != nil {
+		t.Fatalf("autoStartStepPrompt returned error: %v", err)
+	}
+
+	wantVisible := fixture.step.Prompt + "\n\n" + handoff
+	persisted, err := fixture.repo.ListMessages(context.Background(), fixture.sessionID)
+	if err != nil {
+		t.Fatalf("list persisted handoff: %v", err)
+	}
+	if len(persisted) != 1 {
+		t.Fatalf("persisted messages = %d, want 1", len(persisted))
+	}
+	if got := sysprompt.StripSystemContent(persisted[0].Content); got != wantVisible {
+		t.Fatalf("stored visible prompt = %q, want %q", got, wantVisible)
+	}
+
+	descriptions := capturedExecutionDescriptionsForExecution(
+		fixture.agent, "exec-initial-prompt-dedup",
+	)
+	if len(descriptions) != 1 {
+		t.Fatalf("execution descriptions = %d, want 1", len(descriptions))
+	}
+	if got := sysprompt.StripSystemContent(descriptions[0]); got != wantVisible {
+		t.Fatalf("dispatched visible prompt = %q, want %q", got, wantVisible)
+	}
+	if status := fixture.svc.messageQueue.GetStatus(
+		context.Background(), fixture.sessionID,
+	); status.Count != 0 {
+		t.Fatalf("queued messages = %d, want 0", status.Count)
+	}
+}
+
 func TestWorkflowAutoStartPlanModeOnlyPrompt(t *testing.T) {
 	fixture := newInitialPromptDedupFixture(t, true, false)
 	fixture.step.Events.OnEnter = []wfmodels.OnEnterAction{
@@ -165,7 +228,7 @@ func TestWorkflowAutoStartPlanModeOnlyPromptForCreatedSession(t *testing.T) {
 	}
 
 	if err := fixture.svc.autoStartStepPrompt(
-		context.Background(), fixture.taskID, fixture.session, fixture.step, "", true, true,
+		context.Background(), fixture.taskID, fixture.session, fixture.step, "", true, true, nil,
 	); err != nil {
 		t.Fatalf("autoStartStepPrompt returned error: %v", err)
 	}
@@ -175,6 +238,39 @@ func TestWorkflowAutoStartPlanModeOnlyPromptForCreatedSession(t *testing.T) {
 	}
 	if strings.Count(launchPrompt, sysprompt.PlanMode()) != 1 {
 		t.Fatalf("created launch prompt = %q, want one plan-mode instruction block", launchPrompt)
+	}
+}
+
+func TestWorkflowAutoStartEmptyPromptForCreatedSessionStartsAgent(t *testing.T) {
+	fixture := newInitialPromptDedupFixture(t, true, false)
+	fixture.session.State = models.TaskSessionStateCreated
+	fixture.session.AgentProfileID = "profile-initial-prompt-dedup"
+	if err := fixture.repo.UpdateTaskSession(context.Background(), fixture.session); err != nil {
+		t.Fatalf("update created session: %v", err)
+	}
+	fixture.svc.scheduler = scheduler.NewScheduler(
+		queue.NewTaskQueue(10), fixture.svc.executor, fixture.svc.taskRepo,
+		testLogger(), scheduler.SchedulerConfig{},
+	)
+	fixture.svc.activeTurns.Store(fixture.sessionID, "turn-initial-prompt-dedup")
+	startCalled := make(chan struct{})
+	fixture.agent.startAgentProcessFunc = func(_ context.Context, _ string) error {
+		close(startCalled)
+		return nil
+	}
+
+	if err := fixture.svc.autoStartStepPrompt(
+		context.Background(), fixture.taskID, fixture.session, fixture.step, "", false, true, nil,
+	); err != nil {
+		t.Fatalf("autoStartStepPrompt returned error: %v", err)
+	}
+	select {
+	case <-startCalled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("empty auto-start prompt did not launch the created session")
+	}
+	if got := len(fixture.messages.userMessages); got != 0 {
+		t.Fatalf("recorded user messages = %d, want 0", got)
 	}
 }
 
@@ -235,7 +331,7 @@ func TestWorkflowAutoStartAttachmentOnlyHandoffIsRecorded(t *testing.T) {
 
 			if err := fixture.svc.autoStartStepPrompt(
 				context.Background(), fixture.taskID, fixture.session, fixture.step,
-				"", false, true,
+				"", false, true, nil,
 			); err != nil {
 				t.Fatalf("autoStartStepPrompt returned error: %v", err)
 			}
@@ -354,6 +450,30 @@ func (m *repositoryBackedMessageCreator) CreateUserMessage(
 		return err
 	}
 	return m.repo.CreateMessage(ctx, &models.Message{
+		TaskID:        taskID,
+		TaskSessionID: sessionID,
+		TurnID:        turnID,
+		AuthorType:    models.MessageAuthorUser,
+		Content:       content,
+		Metadata:      metadata,
+	})
+}
+
+func (m *repositoryBackedMessageCreator) CreateUserMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, sessionID, turnID string,
+	metadata map[string]interface{},
+) error {
+	if _, err := m.repo.GetMessageWithPromptIndex(ctx, messageID); err == nil {
+		return nil
+	}
+	if err := m.mockMessageCreator.CreateUserMessageIdempotent(
+		ctx, messageID, taskID, content, sessionID, turnID, metadata,
+	); err != nil {
+		return err
+	}
+	return m.repo.CreateMessage(ctx, &models.Message{
+		ID:            messageID,
 		TaskID:        taskID,
 		TaskSessionID: sessionID,
 		TurnID:        turnID,

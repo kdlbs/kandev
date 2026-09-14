@@ -133,6 +133,30 @@ describe("useWorkflowStepMove", () => {
     consoleErrorSpy.mockRestore();
   });
 
+  it("retains an accepted destination until the task projection reaches it", async () => {
+    vi.mocked(moveTask).mockResolvedValue({} as Awaited<ReturnType<typeof moveTask>>);
+    const { result, rerender } = renderHook(
+      ({ currentStepId }: { currentStepId: string }) =>
+        useWorkflowStepMove({
+          taskId: TASK_ID,
+          workflowId: WORKFLOW_ID,
+          currentStepId,
+          presentationToken: 0,
+        }),
+      { initialProps: { currentStepId: "step-a" } },
+    );
+
+    await act(async () => {
+      await result.current.handleMove("step-b");
+    });
+
+    expect(result.current.movingToStepId).toBeNull();
+    expect(result.current.progressingToStepId).toBe("step-b");
+
+    rerender({ currentStepId: "step-b" });
+    expect(result.current.progressingToStepId).toBeNull();
+  });
+
   it("returns false without calling the API when taskId or workflowId is missing", async () => {
     const { result } = renderHook(() =>
       useWorkflowStepMove({ taskId: null, workflowId: WORKFLOW_ID, presentationToken: 0 }),
@@ -142,6 +166,112 @@ describe("useWorkflowStepMove", () => {
 
     expect(moved).toBe(false);
     expect(moveTask).not.toHaveBeenCalled();
+  });
+});
+
+describe("useWorkflowStepMove deferred progress cleanup", () => {
+  it("clears a deferred move when the task advances directly past its target", async () => {
+    let resolveMove!: () => void;
+    vi.mocked(moveTask).mockReturnValueOnce(
+      new Promise<Awaited<ReturnType<typeof moveTask>>>((resolve) => {
+        resolveMove = () => resolve({} as Awaited<ReturnType<typeof moveTask>>);
+      }),
+    );
+    const { result, rerender } = renderHook(
+      ({ currentStepId, taskState }: { currentStepId: string; taskState: string }) =>
+        useWorkflowStepMove({
+          taskId: TASK_ID,
+          workflowId: WORKFLOW_ID,
+          currentStepId,
+          taskState,
+          presentationToken: 0,
+        }),
+      { initialProps: { currentStepId: "step-a", taskState: "IN_PROGRESS" } },
+    );
+
+    let movePromise!: Promise<boolean>;
+    act(() => {
+      movePromise = result.current.handleMove("step-b");
+    });
+    expect(result.current.movingToStepId).toBe("step-b");
+
+    // The authoritative task projection jumps from A to C before the held
+    // response resolves. B is superseded and must lose both pending markers.
+    rerender({ currentStepId: "step-c", taskState: "IN_PROGRESS" });
+    expect(result.current.movingToStepId).toBeNull();
+    expect(result.current.progressingToStepId).toBeNull();
+
+    await act(async () => {
+      resolveMove();
+      await movePromise;
+    });
+    expect(result.current.movingToStepId).toBeNull();
+    expect(result.current.progressingToStepId).toBeNull();
+  });
+
+  it("clears a deferred move when the task becomes terminal before its target is observed", async () => {
+    let resolveMove!: () => void;
+    vi.mocked(moveTask).mockReturnValueOnce(
+      new Promise<Awaited<ReturnType<typeof moveTask>>>((resolve) => {
+        resolveMove = () => resolve({} as Awaited<ReturnType<typeof moveTask>>);
+      }),
+    );
+    const { result, rerender } = renderHook(
+      ({ currentStepId, taskState }: { currentStepId: string; taskState: string }) =>
+        useWorkflowStepMove({
+          taskId: TASK_ID,
+          workflowId: WORKFLOW_ID,
+          currentStepId,
+          taskState,
+          presentationToken: 0,
+        }),
+      { initialProps: { currentStepId: "step-a", taskState: "IN_PROGRESS" } },
+    );
+
+    let movePromise!: Promise<boolean>;
+    act(() => {
+      movePromise = result.current.handleMove("step-b");
+    });
+
+    rerender({ currentStepId: "step-a", taskState: "COMPLETED" });
+    expect(result.current.movingToStepId).toBeNull();
+    expect(result.current.progressingToStepId).toBeNull();
+
+    await act(async () => {
+      resolveMove();
+      await movePromise;
+    });
+    expect(result.current.progressingToStepId).toBeNull();
+  });
+
+  it("keeps the latest destination while the projection reports an older accepted target", async () => {
+    vi.mocked(moveTask).mockResolvedValue({} as Awaited<ReturnType<typeof moveTask>>);
+    const { result, rerender } = renderHook(
+      ({ currentStepId }: { currentStepId: string }) =>
+        useWorkflowStepMove({
+          taskId: TASK_ID,
+          workflowId: WORKFLOW_ID,
+          currentStepId,
+          presentationToken: 0,
+        }),
+      { initialProps: { currentStepId: "step-a" } },
+    );
+
+    await act(async () => {
+      await result.current.handleMove("step-b");
+    });
+
+    await act(async () => {
+      await result.current.handleMove("step-c");
+    });
+
+    // B is evidence for the earlier accepted request, not supersession of the
+    // newer A-to-C request. Keep C visible until its own projection arrives.
+    rerender({ currentStepId: "step-b" });
+    expect(result.current.progressingToStepId).toBe("step-c");
+
+    rerender({ currentStepId: "step-c" });
+    expect(result.current.progressingToStepId).toBeNull();
   });
 });
 

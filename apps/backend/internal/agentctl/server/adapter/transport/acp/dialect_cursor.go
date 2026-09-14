@@ -8,9 +8,10 @@ import (
 )
 
 const (
-	cursorRetriableStreamResetPrefix  = "Error: RetriableError:"
-	cursorRetriableStreamResetMessage = "Error: RetriableError: HTTP/2 stream closed with error code CANCEL (0x8)"
-	cursorRetriableStreamResetMaxTail = 256
+	cursorRetriableStreamResetPrefix                 = "Error: RetriableError:"
+	cursorRetriableStreamResetMessage                = "Error: RetriableError: HTTP/2 stream closed with error code CANCEL (0x8)"
+	cursorRetriableStreamResetLeadingCanceledMessage = "Error: RetriableError: [canceled] HTTP/2 stream closed with error code CANCEL (0x8)"
+	cursorRetriableStreamResetMaxTail                = 256
 )
 
 // isCursorRetriableStreamReset recognizes Cursor's complete transport control
@@ -27,6 +28,7 @@ func isCursorRetriableStreamReset(text string) bool {
 		return false
 	}
 	return strings.EqualFold(trimmed, cursorRetriableStreamResetMessage) ||
+		strings.EqualFold(trimmed, cursorRetriableStreamResetLeadingCanceledMessage) ||
 		strings.EqualFold(trimmed, cursorRetriableStreamResetMessage+" [canceled]")
 }
 

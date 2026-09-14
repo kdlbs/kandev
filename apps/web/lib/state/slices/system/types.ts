@@ -11,6 +11,7 @@ import type {
   StorageOverviewResponse,
   StoragePolicyResponse,
   StorageQuarantineEntry,
+  RetentionStatus,
 } from "@/lib/types/system";
 
 export type SystemBackupsState = {
@@ -25,6 +26,7 @@ export type SystemSliceState = {
     info: SystemInfo | null;
     diskUsage: DiskUsageResponse | null;
     database: DatabaseStats | null;
+    retention: RetentionStatus | null;
     backups: SystemBackupsState;
     updates: UpdatesResponse | null;
     jobs: SystemJobsMap;
@@ -32,6 +34,7 @@ export type SystemSliceState = {
     storage: {
       policy: StoragePolicyResponse | null;
       overview: StorageOverviewResponse | null;
+      analysisRevision: number;
       disk: StorageDiskCapacityResponse | null;
       runs: StorageMaintenanceRun[];
       quarantine: StorageQuarantineEntry[];
@@ -43,6 +46,7 @@ export type SystemSliceActions = {
   setSystemInfo: (info: SystemInfo) => void;
   setSystemDiskUsage: (usage: DiskUsageResponse) => void;
   setSystemDatabase: (stats: DatabaseStats) => void;
+  setSystemRetention: (status: RetentionStatus) => void;
   setSystemBackups: (items: SnapshotInfo[]) => void;
   setSystemUpdates: (updates: UpdatesResponse) => void;
   upsertSystemJob: (job: SystemJob) => void;
@@ -50,6 +54,7 @@ export type SystemSliceActions = {
   setSystemMetricsSnapshot: (snapshot: SystemMetricsSnapshot) => void;
   setSystemStoragePolicy: (policy: StoragePolicyResponse) => void;
   setSystemStorageOverview: (overview: StorageOverviewResponse) => void;
+  bumpSystemStorageAnalysisRevision: () => void;
   setSystemStorageDisk: (disk: StorageDiskCapacityResponse) => void;
   setSystemStorageRuns: (runs: StorageMaintenanceRun[]) => void;
   setSystemStorageQuarantine: (entries: StorageQuarantineEntry[]) => void;

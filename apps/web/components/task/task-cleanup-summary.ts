@@ -53,6 +53,10 @@ function normalize(executorType: string | null | undefined): KnownExecutor | nul
   return null;
 }
 
+export function hasWorktreeExecutor(executorType: string | null | undefined): boolean {
+  return normalize(executorType) === "worktree";
+}
+
 function resolveCopy(copy: CleanupCopy, options?: { count: number }): CleanupSummary {
   const effects = copy.effectKey ? [t(copy.effectKey, options)] : [];
   effects.push(t(GENERIC_EFFECT_KEY));

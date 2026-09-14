@@ -6,8 +6,18 @@ import { cn } from "@/lib/utils";
 import { computeRowIndent, resolveRowDepth } from "@/lib/sidebar/row-indent";
 import { TaskItemStatsRow } from "./task-item-stats-row";
 import { useTaskColor } from "@/hooks/use-task-color";
-import { TASK_COLOR_BAR_CLASS, type TaskColor } from "@/lib/task-colors";
-import type { ForegroundActivity, TaskState, TaskSessionState } from "@/lib/types/http";
+import {
+  manualTaskColorPresentation,
+  resolveTaskItemColor,
+  type TaskMarkerPresentation,
+} from "@/lib/task-color-presentation";
+import type { TaskColor } from "@/lib/task-colors";
+import type {
+  ForegroundActivity,
+  TaskPriority,
+  TaskState,
+  TaskSessionState,
+} from "@/lib/types/http";
 import { RemoteCloudTooltip } from "./remote-cloud-tooltip";
 import { TaskRowMetadata } from "./task-row-plugin-slots";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
@@ -19,17 +29,13 @@ import {
   resolveTaskRowPresentation,
   type ResolvedTaskRowPresentation,
 } from "./task-row-presentation";
-import { TaskItemTrailing } from "./task-item-trailing";
+import { TaskItemTrailing, type DiffStats } from "./task-item-trailing";
 import { TaskStateIcon } from "./task-state-icon";
-
-type DiffStats = {
-  additions: number;
-  deletions: number;
-};
 
 type TaskItemProps = {
   title: string;
   autopilot?: boolean;
+  priority?: TaskPriority;
   state?: TaskState;
   sessionState?: TaskSessionState;
   /**
@@ -39,6 +45,14 @@ type TaskItemProps = {
    * single session's substate.
    */
   foregroundActivity?: ForegroundActivity | null;
+  /**
+   * True when the task is waiting on the operator to notice, not on the
+   * operator to act — a settled session with a positively-sampled background
+   * process still live (spec: docs/specs/disambiguate-waiting/spec.md).
+   * Outranked by pending-input (permission/clarification) and by an active
+   * foregroundActivity.
+   */
+  parkedOnBackgroundWork?: boolean;
   isArchived?: boolean;
   isSelected?: boolean;
   /** Whether this row is part of an active multi-selection (distinct from the active-task highlight). */
@@ -106,6 +120,7 @@ type TaskItemProps = {
   issueInfo?: { url: string; number: number };
   isPinned?: boolean;
   agentErrorMessage?: string | null;
+  automaticColor?: TaskMarkerPresentation;
   taskRowPresentation?: import("@/lib/state/slices/ui/sidebar-task-row-presentation").SidebarTaskRowPresentation;
 };
 
@@ -168,30 +183,10 @@ function TaskItemTitle({ title }: { title: string }) {
   return <ScrollOnOverflow className="min-w-0">{title}</ScrollOnOverflow>;
 }
 
-function TaskItemContent({
-  title,
-  autopilot,
-  taskId,
-  workflowStepId,
-  isRemoteExecutor,
-  remoteExecutorId,
-  remoteExecutorType,
-  remoteExecutorName,
-  primarySessionId,
-  isArchived,
-  isPinned,
-  repositoryPath,
-  prInfo,
-  queuedCount,
-  wipQueue,
-  issueInfo,
-  agentErrorMessage,
-  comparisonUnavailable,
-  resolvedTaskRow,
-  relativeTime,
-}: {
+type TaskItemContentProps = {
   title: string;
   autopilot?: boolean;
+  priority?: TaskPriority;
   taskId?: string;
   workflowStepId?: string | null;
   isRemoteExecutor?: boolean;
@@ -210,7 +205,31 @@ function TaskItemContent({
   comparisonUnavailable?: boolean;
   resolvedTaskRow: ResolvedTaskRowPresentation;
   relativeTime?: string;
-}) {
+};
+
+function TaskItemContent({
+  title,
+  autopilot,
+  priority,
+  taskId,
+  workflowStepId,
+  isRemoteExecutor,
+  remoteExecutorId,
+  remoteExecutorType,
+  remoteExecutorName,
+  primarySessionId,
+  isArchived,
+  isPinned,
+  repositoryPath,
+  prInfo,
+  queuedCount,
+  wipQueue,
+  issueInfo,
+  agentErrorMessage,
+  comparisonUnavailable,
+  resolvedTaskRow,
+  relativeTime,
+}: TaskItemContentProps) {
   const { t } = useTranslation();
   return (
     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -218,6 +237,7 @@ function TaskItemContent({
         <TaskItemTitle title={title} />
         <TaskItemLeadingBadges
           autopilot={autopilot}
+          priority={priority}
           isPinned={isPinned}
           taskId={taskId}
           prInfo={prInfo}
@@ -308,9 +328,11 @@ function TaskItemActions({
 export const TaskItem = memo(function TaskItem({
   title,
   autopilot,
+  priority,
   state,
   sessionState,
   foregroundActivity,
+  parkedOnBackgroundWork,
   isArchived,
   isSelected = false,
   isMultiSelected = false,
@@ -347,6 +369,7 @@ export const TaskItem = memo(function TaskItem({
   issueInfo,
   isPinned,
   agentErrorMessage,
+  automaticColor,
   isOnLastWorkflowStep = false,
   taskRowPresentation,
 }: TaskItemProps) {
@@ -354,6 +377,7 @@ export const TaskItem = memo(function TaskItem({
   const resolvedTaskRow = resolveTaskRowPresentation(taskRowPresentation, { showRepository });
   const relativeTime = showActivityTime ? (lastActivityAt ?? updatedAt) : updatedAt;
   const taskColor = useTaskColor(taskId);
+  const manualColor = manualTaskColorPresentation(taskColor);
   const indent = computeRowIndent(resolveRowDepth(depth, isSubTask));
 
   return (
@@ -376,12 +400,16 @@ export const TaskItem = memo(function TaskItem({
         archiveConfirmation && "flex-wrap",
       )}
     >
-      <SelectionBar isSelected={isSelected} color={taskColor} />
+      <SelectionBar
+        isSelected={isSelected}
+        color={resolveTaskItemColor(automaticColor, manualColor)}
+      />
       <RowConnector depth={indent.depth} leftPx={indent.connectorLeftPx} />
       <TaskStateIcon
         sessionState={sessionState}
         state={state}
         foregroundActivity={foregroundActivity}
+        parkedOnBackgroundWork={parkedOnBackgroundWork}
         hasPendingClarification={hasPendingClarification}
         hasPendingPermission={hasPendingPermission}
         interrupted={interrupted}
@@ -391,6 +419,7 @@ export const TaskItem = memo(function TaskItem({
       <TaskItemContent
         title={title}
         autopilot={autopilot}
+        priority={priority}
         taskId={taskId}
         workflowStepId={workflowStepId}
         isRemoteExecutor={isRemoteExecutor}
@@ -445,16 +474,25 @@ function RowConnector({ depth, leftPx }: { depth: number; leftPx: number }) {
   );
 }
 
-function SelectionBar({ isSelected, color }: { isSelected: boolean; color: TaskColor | null }) {
+function SelectionBar({
+  isSelected,
+  color,
+}: {
+  isSelected: boolean;
+  color: (TaskMarkerPresentation | { token: TaskColor; className: string }) | null;
+}) {
   if (!color) return null;
 
   return (
     <div
+      data-testid="task-item-color-marker"
+      data-color-token={color.token}
       className={cn(
         "absolute left-0 top-0 bottom-0 w-[3px] transition-opacity",
-        TASK_COLOR_BAR_CLASS[color],
+        color.token === "custom" ? undefined : color.className,
         isSelected ? "opacity-100" : "opacity-60",
       )}
+      style={color.token === "custom" ? color.style : undefined}
     />
   );
 }

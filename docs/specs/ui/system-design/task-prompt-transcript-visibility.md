@@ -85,6 +85,12 @@ are true:
 A tool-only newest window with `has_more: true` does not satisfy this contract.
 It renders only the stored rows in that window until the user navigates upward.
 
+The fallback row is frontend-synthesized content, not a persisted message, so
+its timestamp is empty. The message action renderer must validate timestamps
+before creating the timestamp element. An empty or malformed timestamp omits
+the timestamp affordance, including its absolute-time disclosure, instead of
+passing an invalid `Date` to browser formatting APIs.
+
 ## Opening boundary
 
 The session message fetch requests only the newest bounded window when a task
@@ -229,7 +235,8 @@ anchor behavior as desktop.
 
 - Processed-message tests cover an uninitialized window, a tool-only window
   with older history, exhausted legacy history, an empty description, and a
-  loaded stored prompt.
+  loaded stored prompt. Message-action tests cover the no-timestamp fallback
+  path without an invalid-date placeholder.
 - Session-state tests cover initialization through boot hydration, newest
   fetch, purge, and refetch without inferring exhaustion from defaults.
 - Sentinel tests cover committed in-region continuation, out-of-region stop,

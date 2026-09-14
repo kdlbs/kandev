@@ -101,15 +101,30 @@ Review the selected bundles before saving the profile.
 ### Model selection in remote executors
 
 The host model probe helps edit a profile, but it is not the launch authority.
-At launch, the selected executor's advertised ACP catalog decides whether
-Kandev sends the saved model. If the executor does not advertise that model,
-Kandev sends no request for it. It uses an advertised fallback only when one
-exists; otherwise the agent uses its current or default model.
+At launch, the selected executor's advertised ACP catalog decides the model.
+For profiles without automatic fallback, Kandev applies this deterministic
+order:
 
-Kandev writes one warning to task chat when this happens. The warning can list
-the requested model, effective model, agent, executor, and executor profile.
-It also tells you to check executor credentials, copied agent configuration,
-and the agent version. Kandev does not rewrite the saved profile model.
+1. An exact advertised model ID.
+2. An advertised explicit fallback.
+3. One unique advertised bracketed variation of the saved model.
+4. The agent's current or default model.
+
+For profiles with automatic fallback enabled, an absent saved model keeps the
+legacy behavior: Kandev ignores the explicit fallback and does not infer a
+variation. It uses the agent's current or default model instead.
+
+For example, a saved `opus` model uses `opus[1m]` when that is the only
+advertised variation. With both `opus[270k]` and `opus[1m, fast]`, Kandev
+does not infer a choice and uses the agent's current or default model instead.
+It treats model IDs as case-sensitive and variation text as opaque.
+
+Kandev writes one warning to task chat when the effective model differs from
+the saved model. The warning can list the requested model, effective model,
+agent, executor, and executor profile. It also tells you to check executor
+credentials, copied agent configuration, and the agent version. Kandev does
+not rewrite the saved profile model, including after applying a unique
+variation.
 Portable configuration can improve parity, but it does not guarantee equal
 host and executor model catalogs.
 
@@ -272,9 +287,15 @@ Kandev passes each agent definition's CPU and memory limits to Docker. These are
 
 </details>
 
+### User namespace support
+
+Profiles can enable **User namespace support** under the Dockerfile build card. When enabled, the container is launched with a tailored seccomp profile that relaxes namespace-related syscall restrictions, plus `apparmor=unconfined`. This allows agent runtimes that sandbox file edits via user namespaces (e.g., Codex's `apply_patch` → bwrap) to work inside the container.
+
+The setting is **off by default**, only available on Docker profiles, and affects **newly created containers only**. Existing task environments must be reset for the change to take effect. See the [security ADR](../decisions/2026-08-18-executor-userns-security-options.md) for details on the exact syscall changes and security model.
+
 ### Credentials and security
 
-> **Trust boundary:** A container is useful but not a hostile-code sandbox. The daemon has host-level power, bind mounts expose sources, agents can use injected secrets, and the default image has outbound network access. Kandev does not mount the Docker socket automatically.
+> **Trust boundary:** A container is useful but not a hostile-code sandbox. The daemon has host-level power, bind mounts expose sources, agents can use injected secrets, and the default image has outbound network access. Kandev does not mount the Docker socket automatically. The User namespace support option relaxes container isolation. See the [security ADR](../decisions/2026-08-18-executor-userns-security-options.md).
 
 <details>
 <summary>Docker credential and security details</summary>
@@ -315,11 +336,26 @@ Each executor fixes one namespace and connection configuration. Each profile sup
 
 The starter template uses `ghcr.io/kdlbs/kandev:latest`, which is a moving tag. Pin a released `ghcr.io/kdlbs/kandev:X.Y.Z` tag or immutable digest for controlled environments. A custom main-container image must match the selected Linux architecture and provide `sh`, `sleep`, `git`, Node.js, npm, the selected agent CLI or its installation prerequisites, CA trust, and any repository build tools. It must also allow the runtime user to write `/opt/kandev`, `/run/kandev/home`, and `/workspace`; set a compatible user/group or Pod `fsGroup` when the storage driver requires it.
 
+The repository also provides copyable `minimal`, `node-pnpm`, and `python`
+worker recipes in [`k8s/worker-images`](../../k8s/worker-images/README.md) plus
+strict [`k8s/presets`](../../k8s/presets/) examples. Build and smoke-test a
+selected target with the pinned base image, then replace its image marker with
+an immutable registry digest. The current Kind evidence covers Linux `amd64`
+only. These files are profile inputs, not standalone Pod manifests; Kandev
+continues to own bootstrap, credentials, runtime mounts, and the workspace.
+
 Ordinary Stop, agent restart, main-container restart, and backend restart preserve the Pod and workspace. Resume verifies the recorded name, UID, and complete ownership-label identity, creates a new local port-forward, and reconnects. Every managed create also carries a fresh 256-bit request nonce so an ambiguous API response cannot make Kandev adopt or delete a copied-label object. Archive/delete terminal cleanup or an explicit force cleanup deletes only the exact recorded Pod and, for managed storage, the exact Kandev-created PVC. A same-name object with another UID, ownership identity, or create nonce is left untouched and cleanup fails closed.
 
 Saved executor connection settings are different from the recorded workload snapshot. Current kubeconfig/in-cluster credentials, context, and timeout are used to reach an existing session; changing them can restore or break reconnect and cleanup. Existing sessions continue to target their recorded namespace even if the saved namespace changes, and the saved namespace affects new sessions only. Current Pod template, image, platform, main container, and storage settings also affect new sessions only. If Kandev must replace a missing Pod, it uses the recorded namespace and workload snapshot rather than the edited profile.
 
 An executor cannot be deleted or changed into or out of Kubernetes while runtime inventory still references it. Clear the sessions through normal terminal cleanup first; deleting a profile does not mutate or destroy a retained workload.
+
+The profile's **Active sessions** card also shows retained rows after Stop.
+Separate session and Pod states explain whether the recorded session is active,
+retained, terminating, terminal, missing, or unknown. Main-container CPU and
+memory values are requests from the verified Pod spec, not actual usage or
+cost. Stop preserves a resumable Kandev-managed workspace; Archive or Delete
+can remove it. Kandev does not delete an operator-owned existing claim.
 
 See [Kubernetes](k8s.md#configure-the-kubernetes-executor) for kubeconfig and in-cluster setup, the opt-in namespaced RBAC manifest, exact ownership labels, diagnostics, template rules, and recovery guidance.
 
@@ -382,7 +418,11 @@ Run **Test Connection**, independently verify the observed SHA256 host fingerpri
 
 The profile editor exposes remote shell and agent-readiness checks. Backend/API configuration also recognizes `ssh_workdir_root` (default `~/.kandev`) and `ssh_shell`; the current profile UI exposes `ssh_shell` but not a workdir-root field.
 
-The remote-auth card is built from the currently enabled agents. Depending on an agent's declared methods, it can copy selected local credential files, resolve a stored secret into that agent's authentication environment variable, or run an agent-specific setup script on the remote host. GitHub can use an explicitly selected `GITHUB_TOKEN` secret as an unmanaged profile override; Kandev does not copy the host-active `gh` token. These transfers write sensitive material under the remote user's home and are best-effort, verify authentication on the remote after saving. Although the profile editor also stores Git name/email controls for SSH, the current SSH runtime does not apply them; configure Git identity on the remote host yourself.
+The remote-auth card is built from the currently enabled agents. Depending on an agent's declared methods, it can copy selected local credential files, resolve a stored secret into that agent's authentication environment variable, or run an agent-specific setup script on the remote host. GitHub can use an explicitly selected `GITHUB_TOKEN` secret as an unmanaged profile override; Kandev does not copy the host-active `gh` token.
+
+OpenCode credential copies merge top-level provider entries with the existing remote `auth.json`. Remote-only providers remain, and the selected host entry replaces the same provider on the remote. If either file is unreadable or is not a JSON object, Kandev leaves the remote file unchanged and reports the credential-copy error.
+
+These transfers write sensitive material under the remote user's home and are best-effort. Verify authentication on the remote after saving. Although the profile editor also stores Git name/email controls for SSH, the current SSH runtime does not apply them; configure Git identity on the remote host yourself.
 
 </details>
 

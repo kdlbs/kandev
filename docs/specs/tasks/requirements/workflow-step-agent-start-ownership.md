@@ -2,7 +2,7 @@
 status: draft
 system: tasks
 created: 2026-08-05
-updated: 2026-09-03
+updated: 2026-09-05
 owners:
   - Kandev
 ---
@@ -66,6 +66,12 @@ sessions shall use the same task-description fallback rule.
 - **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003.7:** If prompt-history
 inspection fails, the system shall stop the automatic prompt and expose the
 existing workflow-start error behavior.
+- **AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-003.8:** When a workflow move
+includes a textual handoff, the new session shall receive the handoff once in
+its first agent message. When the target automatic-start step has a non-empty
+prompt, the same message shall also contain the evaluated step prompt. The
+stored user message and the dispatched message shall retain the same visible
+content.
 
 ### REQ-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004: Immediate-launch placement
 

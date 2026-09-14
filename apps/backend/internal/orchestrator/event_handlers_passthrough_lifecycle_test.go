@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -110,6 +111,120 @@ func TestHandleAgentReady_PassthroughLifecycleReservationBlocksConcurrentDrain(t
 	}
 	if got := len(agentMgr.passthroughStdinCalls); got != 1 {
 		t.Fatalf("PTY lifecycle prompts after next ready = %d, want 1", got)
+	}
+}
+
+func TestHandleAgentReady_PassthroughOrdinaryReservationRejectsRecreatedSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+
+	agentMgr := &mockAgentManager{
+		isPassthrough:          true,
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	if _, err := svc.messageQueue.QueueMessage(
+		ctx, "s1", "t1", "must not reach replacement", "", messagequeue.QueuedByAgent, false, nil,
+	); err != nil {
+		t.Fatalf("queue ordinary prompt: %v", err)
+	}
+	svc.afterReadyLifecycleReservation = func() {
+		if _, err := repo.DB().ExecContext(
+			ctx,
+			`UPDATE task_sessions SET queue_incarnation_id = ? WHERE id = ?`,
+			"replacement-incarnation",
+			"s1",
+		); err != nil {
+			t.Fatalf("replace session incarnation: %v", err)
+		}
+	}
+
+	svc.handleAgentReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+
+	if got := len(agentMgr.passthroughStdinCalls); got != 0 {
+		t.Fatalf("replacement session PTY prompts = %d, want 0", got)
+	}
+}
+
+func TestHandleAgentReady_PassthroughOrdinaryDispatchDoesNotHoldQueueLockDuringPTYWrite(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+
+	var queueWriteBlocked atomic.Bool
+	agentMgr := &mockAgentManager{
+		isPassthrough:          true,
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	identity, err := svc.messageQueue.ResolveSessionIdentity(ctx, "t1", "s1")
+	if err != nil {
+		t.Fatalf("resolve session identity: %v", err)
+	}
+	agentMgr.passthroughStdinFunc = func(writeCtx context.Context, _, _ string) error {
+		writeDone := make(chan error, 1)
+		go func() {
+			_, queueErr := svc.messageQueue.QueueMessageWithMetadataForSession(
+				writeCtx, identity, "concurrent prompt", "", messagequeue.QueuedByAgent, false, nil, nil,
+			)
+			writeDone <- queueErr
+		}()
+		select {
+		case queueErr := <-writeDone:
+			return queueErr
+		case <-time.After(100 * time.Millisecond):
+			queueWriteBlocked.Store(true)
+			return nil
+		}
+	}
+	if _, err := svc.messageQueue.QueueMessage(
+		ctx, "s1", "t1", "ordinary prompt", "", messagequeue.QueuedByAgent, false, nil,
+	); err != nil {
+		t.Fatalf("queue ordinary prompt: %v", err)
+	}
+
+	svc.handleAgentReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+
+	if queueWriteBlocked.Load() {
+		t.Fatal("PTY write ran while the queue session lock was held")
+	}
+}
+
+func TestHandleAgentReady_PassthroughOrdinaryReservationRejectsArchivedTask(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	seedExecutorRunning(t, repo, "s1", "t1", "exec-1")
+
+	agentMgr := &mockAgentManager{
+		isPassthrough:          true,
+		isAgentRunning:         true,
+		repoForExecutionLookup: repo,
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	if _, err := svc.messageQueue.QueueMessage(
+		ctx, "s1", "t1", "must not reach archived task", "", messagequeue.QueuedByAgent, false, nil,
+	); err != nil {
+		t.Fatalf("queue ordinary prompt: %v", err)
+	}
+	svc.afterReadyLifecycleReservation = func() {
+		if err := repo.ArchiveTask(ctx, "t1"); err != nil {
+			t.Fatalf("archive task after reservation: %v", err)
+		}
+	}
+
+	svc.handleAgentReady(ctx, watcher.AgentEventData{TaskID: "t1", SessionID: "s1"})
+
+	if got := len(agentMgr.passthroughStdinCalls); got != 0 {
+		t.Fatalf("archived task PTY prompts = %d, want 0", got)
 	}
 }
 

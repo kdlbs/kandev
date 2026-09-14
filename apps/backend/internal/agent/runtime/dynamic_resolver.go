@@ -21,6 +21,8 @@ import (
 
 var ErrDynamicRoutingDisabled = errors.New("dynamic agent routing is disabled")
 
+const dynamicRouteStatusRetrying = "retrying"
+
 // ProfileExecution is the caller-facing result of resolving a logical
 // profile. Concrete callers receive the same ID for both fields. Dynamic
 // callers retain their logical ID while the resolver records the concrete
@@ -359,11 +361,26 @@ func (r *ProfileExecutionResolver) resolveRetryRouteAction(
 		return ProfileExecution{}, dynamic.ErrStaleGeneration
 	}
 	if exists {
+		if state.Status == dynamicRouteStatusRetrying {
+			// A retry can survive a process restart without its in-memory owner.
+			// Reclaim it only when this process does not own the launch.
+			if r.engine.OwnsRetryClaim(sessionID, expectedGeneration) {
+				return ProfileExecution{}, dynamic.ErrRecoveryPending
+			}
+			reclaimed, reclaimErr := r.engine.ReclaimRetrying(ctx, sessionID, expectedGeneration)
+			if reclaimErr != nil {
+				return ProfileExecution{}, reclaimErr
+			}
+			if reclaimed {
+				return r.resolve(ctx, sessionID, profileID, expectedGeneration, "", currentExecutionProfileID)
+			}
+			return ProfileExecution{}, dynamic.ErrRecoveryPending
+		}
 		decision, resumeErr := r.engine.ResumePendingNow(ctx, sessionID, expectedGeneration)
 		if resumeErr == nil {
-			return r.executionFromDecision(ctx, profileID, sessionID, decision)
+			return r.executionFromDecisionWithRecovery(ctx, profileID, sessionID, decision)
 		}
-		if !errors.Is(resumeErr, dynamic.ErrRecoveryPending) && !errors.Is(resumeErr, dynamic.ErrRouteStateNotFound) {
+		if !errors.Is(resumeErr, dynamic.ErrRouteStateNotFound) {
 			return ProfileExecution{}, resumeErr
 		}
 	}
@@ -375,6 +392,20 @@ func (r *ProfileExecutionResolver) resolveSkipRouteAction(
 	sessionID, profileID, currentExecutionProfileID string,
 	expectedGeneration int64,
 ) (ProfileExecution, error) {
+	if state, exists, err := r.engine.LoadState(ctx, sessionID); err != nil {
+		return ProfileExecution{}, err
+	} else if exists && state.Generation == expectedGeneration && state.Status == dynamicRouteStatusRetrying {
+		if r.engine.OwnsRetryClaim(sessionID, expectedGeneration) {
+			return ProfileExecution{}, dynamic.ErrRecoveryPending
+		}
+		reclaimed, reclaimErr := r.engine.ReclaimRetrying(ctx, sessionID, expectedGeneration)
+		if reclaimErr != nil {
+			return ProfileExecution{}, reclaimErr
+		}
+		if !reclaimed {
+			return ProfileExecution{}, dynamic.ErrRecoveryPending
+		}
+	}
 	profileConfig, err := r.loadDynamicProfile(ctx, profileID)
 	if err != nil {
 		return ProfileExecution{}, err
@@ -406,6 +437,22 @@ func (r *ProfileExecutionResolver) resolveCancelRouteAction(
 	reason := "manual_cancel_wait"
 	if action == "stop" {
 		reason = "manual_stop"
+	}
+	state, exists, err := r.engine.LoadState(ctx, sessionID)
+	if err != nil {
+		return ProfileExecution{}, err
+	}
+	if exists && state.Generation == expectedGeneration && state.Status == dynamicRouteStatusRetrying {
+		if r.engine.OwnsRetryClaim(sessionID, expectedGeneration) {
+			return ProfileExecution{}, dynamic.ErrRecoveryPending
+		}
+		reclaimed, reclaimErr := r.engine.ReclaimRetrying(ctx, sessionID, expectedGeneration)
+		if reclaimErr != nil {
+			return ProfileExecution{}, reclaimErr
+		}
+		if !reclaimed {
+			return ProfileExecution{}, dynamic.ErrRecoveryPending
+		}
 	}
 	decision, err := r.engine.CancelPending(ctx, sessionID, expectedGeneration, reason)
 	if err != nil {
@@ -439,7 +486,35 @@ func (r *ProfileExecutionResolver) ResumePendingRoute(
 	if err != nil {
 		return ProfileExecution{}, err
 	}
-	return r.executionFromDecision(ctx, state.LogicalProfileID, sessionID, decision)
+	return r.executionFromDecisionWithRecovery(ctx, state.LogicalProfileID, sessionID, decision)
+}
+
+// MarkRouteRecoveryActionRequired returns a claimed "retrying" route to
+// manual recovery after its resumed launch failed.
+func (r *ProfileExecutionResolver) MarkRouteRecoveryActionRequired(
+	ctx context.Context,
+	sessionID string,
+	expectedGeneration int64,
+) error {
+	if r.engine == nil {
+		return nil
+	}
+	return r.engine.MarkRecoveryActionRequired(ctx, sessionID, expectedGeneration)
+}
+
+func (r *ProfileExecutionResolver) executionFromDecisionWithRecovery(
+	ctx context.Context,
+	profileID, sessionID string,
+	decision dynamic.RouteDecision,
+) (ProfileExecution, error) {
+	execution, err := r.executionFromDecision(ctx, profileID, sessionID, decision)
+	if err == nil || decision.Status != dynamicRouteStatusRetrying {
+		return execution, err
+	}
+	if recoveryErr := r.MarkRouteRecoveryActionRequired(ctx, sessionID, decision.Generation); recoveryErr != nil {
+		return ProfileExecution{}, fmt.Errorf("%w; restore route recovery: %v", err, recoveryErr)
+	}
+	return ProfileExecution{}, fmt.Errorf("%w: %v", dynamic.ErrRecoveryPending, err)
 }
 
 func (r *ProfileExecutionResolver) resolve(

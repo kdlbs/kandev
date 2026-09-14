@@ -172,8 +172,8 @@ func TestInitialPromptFailureMarksExecutionFailedAndReleasesActivity(t *testing.
 	if execution.Status != v1.AgentStatusFailed {
 		t.Fatalf("execution status = %q, want %q", execution.Status, v1.AgentStatusFailed)
 	}
-	if execution.ErrorMessage != "initial prompt delivery failed" {
-		t.Fatalf("execution error = %q, want safe prompt failure", execution.ErrorMessage)
+	if execution.ErrorMessage != "attachment materialization failed" {
+		t.Fatalf("execution error = %q, want original prompt failure", execution.ErrorMessage)
 	}
 	maintenance, _, err := coordinator.TryAcquireMaintenance(context.Background(), 0)
 	if maintenance != nil {

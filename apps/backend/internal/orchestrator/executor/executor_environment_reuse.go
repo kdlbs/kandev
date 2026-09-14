@@ -58,7 +58,7 @@ func (e *Executor) validateReuseEnvironmentInventory(ctx context.Context, req *L
 		return nil
 	}
 	for _, spec := range specs {
-		if canonicalInventoryMatches(spec, rows, req.UseWorktree) != 1 {
+		if got := canonicalInventoryMatches(spec, rows, req.UseWorktree); got != 1 {
 			return fmt.Errorf("%w: canonical workspace repository inventory has no matching entry for repository %q branch %q",
 				models.ErrWorkspaceReuseUnsafe, spec.RepositoryID, launchRepoBranchIdentitySlug(spec))
 		}
@@ -66,13 +66,64 @@ func (e *Executor) validateReuseEnvironmentInventory(ctx context.Context, req *L
 	return nil
 }
 
+// claimSharedTaskEnvironmentTaskDirName records the first stable task-root
+// identity supplied by an inherited worktree launch. The claim must happen
+// before lifecycle materialization so the physical root and durable projection
+// cannot diverge. A losing concurrent claimant may continue only when it asked
+// for the same canonical identity.
+func (e *Executor) claimSharedTaskEnvironmentTaskDirName(
+	ctx context.Context,
+	env *models.TaskEnvironment,
+	req *LaunchAgentRequest,
+) error {
+	if env == nil || req == nil || env.TaskID == "" || env.TaskID == req.TaskID || env.TaskDirName != "" || !req.UseWorktree || req.TaskDirName == "" {
+		return nil
+	}
+	stamper, ok := e.repo.(taskEnvironmentTaskDirNameStamper)
+	if !ok {
+		return nil
+	}
+	claimed, err := stamper.SetTaskEnvironmentTaskDirNameIfEmpty(ctx, env.ID, req.TaskDirName)
+	if err != nil {
+		return fmt.Errorf("claim shared task directory name: %w", err)
+	}
+	if claimed {
+		env.TaskDirName = req.TaskDirName
+		return nil
+	}
+	current, err := e.repo.GetTaskEnvironment(ctx, env.ID)
+	if err != nil {
+		return fmt.Errorf("read shared task directory name after claim: %w", err)
+	}
+	if current == nil || current.TaskDirName == "" || current.TaskDirName != req.TaskDirName {
+		return fmt.Errorf("%w: shared task environment was claimed for task directory %q, requested %q", models.ErrWorkspaceReuseUnsafe, currentTaskDirName(current), req.TaskDirName)
+	}
+	env.TaskDirName = current.TaskDirName
+	return nil
+}
+
+func currentTaskDirName(env *models.TaskEnvironment) string {
+	if env == nil {
+		return ""
+	}
+	return env.TaskDirName
+}
+
 func canonicalInventoryMatches(spec RepoSpec, rows []*models.TaskEnvironmentRepo, useWorktree bool) int {
 	matches := 0
 	expectedBranchSlug := launchRepoBranchIdentitySlug(spec)
-	allowLegacyEmptyBranch := expectedBranchSlug != "" && !hasBranchScopedEnvironmentRepoRows(rows)
+	// A non-worktree launch with no expected branch slug is not "legacy data
+	// with unknown branch" — it is a local/local_pc resume, where
+	// applyResumeRepoConfig deliberately never stamps req.BaseBranch because
+	// LocalPreparer keeps whatever branch is already checked out on disk.
+	// Branch identity is not tracked for this launch at all, so it cannot be
+	// compared against a branch-scoped canonical row; match on repository
+	// identity alone, same as the untracked-inventory case below.
+	branchIdentityUntracked := !useWorktree && expectedBranchSlug == ""
+	allowLegacyEmptyBranch := !branchIdentityUntracked && expectedBranchSlug != "" && !repositoryHasBranchScopedRepoRow(rows, spec.RepositoryID)
 	for _, row := range rows {
 		branchMatches := worktree.SanitizeBranchSlug(row.BranchSlug) == expectedBranchSlug
-		if allowLegacyEmptyBranch && row.BranchSlug == "" {
+		if branchIdentityUntracked || (allowLegacyEmptyBranch && row.BranchSlug == "") {
 			branchMatches = true
 		}
 		if row.RepositoryID != spec.RepositoryID || !branchMatches {
@@ -415,6 +466,18 @@ func hasBranchScopedEnvironmentWorktrees(env *models.TaskEnvironment) bool {
 func hasBranchScopedEnvironmentRepoRows(repos []*models.TaskEnvironmentRepo) bool {
 	for _, repo := range repos {
 		if repo.RepositoryID != "" && repo.WorktreeID != "" && worktree.SanitizeBranchSlug(repo.BranchSlug) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// repositoryHasBranchScopedRepoRow reports whether repos contains a row for
+// repositoryID with a non-empty sanitized branch slug. WorktreeID is not
+// required because local executor rows can be branch-scoped without a worktree.
+func repositoryHasBranchScopedRepoRow(repos []*models.TaskEnvironmentRepo, repositoryID string) bool {
+	for _, repo := range repos {
+		if repo.RepositoryID == repositoryID && worktree.SanitizeBranchSlug(repo.BranchSlug) != "" {
 			return true
 		}
 	}

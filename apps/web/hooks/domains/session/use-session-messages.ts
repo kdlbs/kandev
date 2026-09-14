@@ -1,5 +1,12 @@
-import { useEffect, useRef, type MutableRefObject } from "react";
+/* eslint-disable max-lines -- session hydration and lifecycle hooks share one transcript contract. */
+
+import { useCallback, useEffect, useLayoutEffect, useRef, type MutableRefObject } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
+import {
+  isWebSocketRequestTimeoutError,
+  SESSION_ENTRY_REQUEST_TIMEOUT_MS,
+  SESSION_ENTRY_RETRY_DELAY_MS,
+} from "@/lib/ws/client";
 import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import type { TaskSessionState, Message } from "@/lib/types/http";
@@ -9,8 +16,14 @@ import {
   useUnknownSessionSubscriptionRetry,
   useUnknownSessionSubscriptionRetryEffect,
 } from "./use-session-subscription-retry";
-import { doFetchMessages } from "./use-session-message-fetch";
+import {
+  doFetchMessages,
+  getHydratedMessagesForGeneration,
+  recordHydratedGeneration,
+  type SessionHydrationRef,
+} from "./use-session-message-fetch";
 import { useMessageFetchState } from "./use-message-fetch-state";
+import type { MessageHistoryStatus } from "./use-message-fetch-state";
 import { reconcileLatestMessageWindow } from "./message-window-reconciliation";
 import { t } from "@/lib/i18n";
 
@@ -21,6 +34,7 @@ export { ensureSessionTurnsLoaded } from "./use-session-turns-hydration";
 const INITIAL_FETCH_LIMIT = 100;
 const RUNNING_BACKFILL_INITIAL_DELAY_MS = 1200;
 const RUNNING_BACKFILL_INTERVAL_MS = 5000;
+const MAX_HISTORY_FETCH_ATTEMPTS = 2;
 
 // Monotonic guard against stale concurrent fetches. Each fetch claims an
 // increasing sequence number before awaiting; a completion only merges if no
@@ -136,6 +150,9 @@ interface UseSessionMessagesReturn {
   historyInitialized: boolean;
   hasMore: boolean;
   oldestCursor: string | null;
+  historyStatus: MessageHistoryStatus;
+  historyError: unknown;
+  retryHistory: () => void;
 }
 
 type MessageListResponse = { messages: Message[]; has_more?: boolean; cursor?: string };
@@ -211,7 +228,11 @@ export function requestSessionMessages(
     limit: INITIAL_FETCH_LIMIT,
     sort: "desc" as const,
   };
-  const promise = client.request<MessageListResponse>("message.list", requestParams, 10000);
+  const promise = client.request<MessageListResponse>(
+    "message.list",
+    requestParams,
+    SESSION_ENTRY_REQUEST_TIMEOUT_MS,
+  );
   const entry = { readiness, promise, cachedAtRequest: [...cachedAtRequest], settled: false };
   inFlightMessageRequests.set(requestKey, entry);
   const markSettled = () => {
@@ -227,10 +248,12 @@ export function requestSessionMessages(
 }
 
 /** Fetch latest messages via WS and merge with any that arrived via live notifications. */
-async function fetchAndStoreMessages(
+async function fetchAndStoreMessagesAttempt(
   sessionId: string,
   store: ReturnType<typeof useAppStoreApi>,
   isActive?: () => boolean,
+  hydrationRef?: SessionHydrationRef,
+  hydrationKey?: string,
 ): Promise<Message[]> {
   const client = getWebSocketClient();
   if (!client) {
@@ -243,6 +266,14 @@ async function fetchAndStoreMessages(
   const readiness = client.getSessionSubscriptionReadiness(sessionId);
   await readiness;
   if (isActive && !isActive()) return [];
+  const hydratedMessages = getHydratedMessagesForGeneration(
+    hydrationRef,
+    sessionId,
+    readiness,
+    hydrationKey,
+    store,
+  );
+  if (hydratedMessages !== undefined) return hydratedMessages;
   // The messages fetch is the session-entry chokepoint: any path that opens a
   // session's transcript must also make its turns resolvable. Start it only
   // after subscription acknowledgement so the REST snapshot cannot race the
@@ -278,9 +309,54 @@ async function fetchAndStoreMessages(
     hasMore: response.has_more ?? false,
     oldestCursor,
   });
+  recordHydratedGeneration(hydrationRef, sessionId, readiness, hydrationKey);
   // The store now holds the identity-reconciled array; callers only read length
   // and message content from the return, so `merged` is equivalent.
   return merged;
+}
+
+function waitForHistoryRetry(isActive?: () => boolean): Promise<boolean> {
+  return new Promise((resolve) => {
+    const timer = window.setTimeout(
+      () => resolve(!isActive || isActive()),
+      SESSION_ENTRY_RETRY_DELAY_MS,
+    );
+    if (isActive && !isActive()) {
+      window.clearTimeout(timer);
+      resolve(false);
+    }
+  });
+}
+
+/** Fetch history with one bounded retry for a timed-out message.list request. */
+// eslint-disable-next-line max-params -- session hydration needs its active and generation guards.
+async function fetchAndStoreMessages(
+  sessionId: string,
+  store: ReturnType<typeof useAppStoreApi>,
+  isActive?: () => boolean,
+  hydrationRef?: SessionHydrationRef,
+  hydrationKey?: string,
+  onRetry?: () => void,
+): Promise<Message[]> {
+  for (let attempt = 0; attempt < MAX_HISTORY_FETCH_ATTEMPTS; attempt += 1) {
+    try {
+      return await fetchAndStoreMessagesAttempt(
+        sessionId,
+        store,
+        isActive,
+        hydrationRef,
+        hydrationKey,
+      );
+    } catch (error) {
+      const retryable =
+        isWebSocketRequestTimeoutError(error) &&
+        error.action === "message.list" &&
+        attempt + 1 < MAX_HISTORY_FETCH_ATTEMPTS;
+      if (!retryable || !(await waitForHistoryRetry(isActive))) throw error;
+      if (!isActive || isActive()) onRetry?.();
+    }
+  }
+  return [];
 }
 /**
  * When the initial fetch window contains no user/agent message rows (common
@@ -295,10 +371,13 @@ function useTerminalStateFetch(
   taskSessionId: string | null,
   taskSessionState: TaskSessionState | null,
   hasAgentMessage: boolean,
+  sessionFetchGenerationRef: MutableRefObject<number>,
   refs: {
     store: ReturnType<typeof useAppStoreApi>;
     setIsLoading: (v: boolean) => void;
     setIsWaitingForInitialMessages: (v: boolean) => void;
+    setHistoryStatus: (v: MessageHistoryStatus) => void;
+    setHistoryError: (v: unknown) => void;
     initialFetchStartRef: MutableRefObject<number | null>;
     lastFetchedSessionIdRef: MutableRefObject<string | null>;
   },
@@ -306,20 +385,36 @@ function useTerminalStateFetch(
   const lastFetchStateKeyRef = useRef<string | null>(null);
   const connectionStatus = useAppStore((state) => state.connection.status);
   useEffect(() => {
-    if (!taskSessionId || connectionStatus !== "connected") return;
-    if (!taskSessionState || hasAgentMessage) return;
+    let active = true;
+    const generation = sessionFetchGenerationRef.current;
+    const isActive = () => active && sessionFetchGenerationRef.current === generation;
+    const deactivate = () => {
+      active = false;
+    };
+    if (!taskSessionId || connectionStatus !== "connected") return deactivate;
+    if (!taskSessionState || hasAgentMessage) return deactivate;
     const terminalStates = new Set<TaskSessionState>(["WAITING_FOR_INPUT", "COMPLETED", "FAILED"]);
-    if (!terminalStates.has(taskSessionState)) return;
+    if (!terminalStates.has(taskSessionState)) return deactivate;
     const key = `${taskSessionId}:${taskSessionState}`;
-    if (lastFetchStateKeyRef.current === key) return;
+    if (lastFetchStateKeyRef.current === key) return deactivate;
     lastFetchStateKeyRef.current = key;
     void doFetchMessages({
       taskSessionId,
       ...refs,
       fetchAndStoreMessages,
+      isActive,
+      canFinalizeLoading: isActive,
       onError: (error) => console.error("Failed to fetch messages after state change:", error),
     });
-  }, [taskSessionId, taskSessionState, hasAgentMessage, connectionStatus, refs]);
+    return deactivate;
+  }, [
+    taskSessionId,
+    taskSessionState,
+    hasAgentMessage,
+    connectionStatus,
+    refs,
+    sessionFetchGenerationRef,
+  ]);
 }
 
 // Silent WS disconnects (NAT timeout, laptop sleep, suspended tab) leave
@@ -329,10 +424,14 @@ function useTerminalStateFetch(
 export function useVisibilityBackfill(
   taskSessionId: string | null,
   store: ReturnType<typeof useAppStoreApi>,
+  sessionFetchGenerationRef?: MutableRefObject<number>,
 ) {
   useForegroundRefresh(
     () => {
       if (!taskSessionId) return;
+      const generation = sessionFetchGenerationRef?.current;
+      const isActive = () =>
+        generation === undefined || sessionFetchGenerationRef?.current === generation;
       const visibilityState = document.visibilityState;
       const state = store.getState();
       const existingCount = state.messages.bySession[taskSessionId]?.length ?? 0;
@@ -345,7 +444,7 @@ export function useVisibilityBackfill(
         existingCount,
         newestBefore,
       });
-      fetchAndStoreMessages(taskSessionId, store)
+      fetchAndStoreMessages(taskSessionId, store, isActive)
         .then(() => {
           const afterCount = store.getState().messages.bySession[taskSessionId]?.length ?? 0;
           const newestAfter =
@@ -366,12 +465,26 @@ export function useVisibilityBackfill(
   );
 }
 
-function useSessionSubscription(
-  taskSessionId: string | null,
-  connectionStatus: string,
-  isSessionStartingOrUnknown: boolean,
-  store: ReturnType<typeof useAppStoreApi>,
-) {
+type SessionSubscriptionParams = {
+  taskSessionId: string | null;
+  connectionStatus: string;
+  store: ReturnType<typeof useAppStoreApi>;
+  fetchRefs: ReturnType<typeof useMessageFetchState>["refs"];
+  hydrationRef: SessionHydrationRef;
+  hydrationKey: string;
+  sessionFetchGenerationRef: MutableRefObject<number>;
+};
+
+function useSessionSubscription({
+  taskSessionId,
+  connectionStatus,
+  isSessionStartingOrUnknown,
+  store,
+  fetchRefs,
+  hydrationRef,
+  hydrationKey,
+  sessionFetchGenerationRef,
+}: SessionSubscriptionParams & { isSessionStartingOrUnknown: boolean }) {
   useEffect(() => {
     debug("subscription: effect ran", {
       sessionId: taskSessionId,
@@ -393,6 +506,7 @@ function useSessionSubscription(
     debug("subscription: subscribing", { sessionId: taskSessionId });
     const subscription = client.subscribeSessionWithReady(taskSessionId);
     let active = true;
+    const generation = sessionFetchGenerationRef.current;
 
     // Re-fetch messages after the server acknowledges the subscription to
     // close the gap between SSR (which may have run before the agent
@@ -400,7 +514,17 @@ function useSessionSubscription(
     void subscription.ready
       .then(() => {
         if (!active) return;
-        return fetchAndStoreMessages(taskSessionId, store, () => active);
+        const isCurrentGeneration = () =>
+          active && sessionFetchGenerationRef.current === generation;
+        return doFetchMessages({
+          taskSessionId,
+          ...fetchRefs,
+          fetchAndStoreMessages,
+          isActive: isCurrentGeneration,
+          canFinalizeLoading: isCurrentGeneration,
+          hydrationRef,
+          hydrationKey,
+        });
       })
       .catch(() => {});
 
@@ -409,7 +533,16 @@ function useSessionSubscription(
       debug("subscription: unsubscribing", { sessionId: taskSessionId });
       subscription.unsubscribe();
     };
-  }, [taskSessionId, connectionStatus, store, isSessionStartingOrUnknown]);
+  }, [
+    taskSessionId,
+    connectionStatus,
+    store,
+    fetchRefs,
+    isSessionStartingOrUnknown,
+    hydrationRef,
+    hydrationKey,
+    sessionFetchGenerationRef,
+  ]);
 }
 
 /**
@@ -426,6 +559,7 @@ function useResyncOnTurnSettle(
   taskSessionState: TaskSessionState | null,
   connectionStatus: string,
   store: ReturnType<typeof useAppStoreApi>,
+  sessionFetchGenerationRef: MutableRefObject<number>,
 ) {
   const prevRef = useRef<{ sessionId: string | null; state: TaskSessionState | null }>({
     sessionId: null,
@@ -442,24 +576,35 @@ function useResyncOnTurnSettle(
       prev: prevState,
       next: taskSessionState,
     });
-    fetchAndStoreMessages(taskSessionId, store).catch(() => {});
-  }, [taskSessionId, taskSessionState, connectionStatus, store]);
+    const generation = sessionFetchGenerationRef.current;
+    fetchAndStoreMessages(
+      taskSessionId,
+      store,
+      () => sessionFetchGenerationRef.current === generation,
+    ).catch(() => {});
+  }, [taskSessionId, taskSessionState, connectionStatus, store, sessionFetchGenerationRef]);
 }
 
 function useRunningMessageBackfill(
   taskSessionId: string | null,
   shouldBackfill: boolean,
   store: ReturnType<typeof useAppStoreApi>,
+  sessionFetchGenerationRef: MutableRefObject<number>,
 ) {
   useEffect(() => {
     if (!taskSessionId || !shouldBackfill) return;
 
+    const generation = sessionFetchGenerationRef.current;
     let inFlight = false;
     const sync = () => {
       if (inFlight) return;
       inFlight = true;
       debug("running backfill", { sessionId: taskSessionId });
-      fetchAndStoreMessages(taskSessionId, store)
+      fetchAndStoreMessages(
+        taskSessionId,
+        store,
+        () => sessionFetchGenerationRef.current === generation,
+      )
         .catch((err) => {
           debug("running backfill failed", { sessionId: taskSessionId, err });
         })
@@ -473,7 +618,7 @@ function useRunningMessageBackfill(
       window.clearTimeout(initial);
       window.clearInterval(interval);
     };
-  }, [taskSessionId, shouldBackfill, store]);
+  }, [taskSessionId, shouldBackfill, store, sessionFetchGenerationRef]);
 }
 
 function useSessionMessageInputs(taskSessionId: string | null) {
@@ -492,16 +637,25 @@ function useSessionMessageInputs(taskSessionId: string | null) {
   const connectionStatus = useAppStore((state) => state.connection.status);
   return { messages, messagesMeta, taskSessionState, activeTurnId, connectionStatus };
 }
-function useSessionLifecycleSubscriptions(params: {
-  taskSessionId: string | null;
-  taskSessionState: TaskSessionState | null;
-  connectionStatus: string;
-  activeTurnId: string | null;
-  messages: Message[];
-  store: ReturnType<typeof useAppStoreApi>;
-}) {
-  const { taskSessionId, taskSessionState, connectionStatus, activeTurnId, messages, store } =
-    params;
+function useSessionLifecycleSubscriptions(
+  params: SessionSubscriptionParams & {
+    taskSessionState: TaskSessionState | null;
+    activeTurnId: string | null;
+    messages: Message[];
+  },
+) {
+  const {
+    taskSessionId,
+    taskSessionState,
+    connectionStatus,
+    activeTurnId,
+    messages,
+    store,
+    fetchRefs,
+    hydrationRef,
+    hydrationKey,
+    sessionFetchGenerationRef,
+  } = params;
   // Bool flips exactly once when a freshly-adopted session leaves STARTING,
   // so the subscription effect re-runs then (covering the backend race where
   // session.subscribe arrives before the session is fully constructed) without
@@ -512,13 +666,28 @@ function useSessionLifecycleSubscriptions(params: {
     taskSessionState,
     connectionStatus,
   });
-  useSessionSubscription(taskSessionId, connectionStatus, isSessionStartingOrUnknown, store);
+  useSessionSubscription({
+    taskSessionId,
+    connectionStatus,
+    isSessionStartingOrUnknown,
+    store,
+    fetchRefs,
+    hydrationRef,
+    hydrationKey,
+    sessionFetchGenerationRef,
+  });
   useUnknownSessionSubscriptionRetryEffect({
     taskSessionId,
     connectionStatus,
     retryToken: unknownSessionRetryToken,
   });
-  useResyncOnTurnSettle(taskSessionId, taskSessionState, connectionStatus, store);
+  useResyncOnTurnSettle(
+    taskSessionId,
+    taskSessionState,
+    connectionStatus,
+    store,
+    sessionFetchGenerationRef,
+  );
   useRunningMessageBackfill(
     taskSessionId,
     shouldRunMessageBackfill({
@@ -528,23 +697,30 @@ function useSessionLifecycleSubscriptions(params: {
       messages,
     }),
     store,
+    sessionFetchGenerationRef,
   );
 }
 type SessionEntryFetchParams = {
   taskSessionId: string | null;
   connectionStatus: string;
   messagesLength: number;
+  historyInitialized: boolean;
   store: ReturnType<typeof useAppStoreApi>;
   prevSessionIdRef: MutableRefObject<string | null>;
   fetchState: ReturnType<typeof useMessageFetchState>;
+  hydrationRef: SessionHydrationRef;
+  hydrationKey: string;
+  sessionFetchGenerationRef: MutableRefObject<number>;
 };
 function useInitialMessagesWait(params: SessionEntryFetchParams): void {
-  const { taskSessionId, messagesLength, fetchState } = params;
+  const { taskSessionId, messagesLength, historyInitialized, fetchState } = params;
   const {
     initialFetchStartRef,
     lastFetchedSessionIdRef,
     setIsWaitingForInitialMessages,
     setIsCachedHistoryRefreshPending,
+    setHistoryStatus,
+    setHistoryError,
   } = fetchState;
   useEffect(() => {
     if (!taskSessionId) {
@@ -552,10 +728,16 @@ function useInitialMessagesWait(params: SessionEntryFetchParams): void {
       lastFetchedSessionIdRef.current = null;
       setIsWaitingForInitialMessages(false);
       setIsCachedHistoryRefreshPending(false);
+      setHistoryStatus("ready");
+      setHistoryError(null);
       return;
     }
     if (messagesLength > 0) {
       setIsWaitingForInitialMessages(false);
+      if (historyInitialized) {
+        setHistoryStatus("ready");
+        setHistoryError(null);
+      }
       return;
     }
     if (initialFetchStartRef.current === null) {
@@ -569,11 +751,24 @@ function useInitialMessagesWait(params: SessionEntryFetchParams): void {
     lastFetchedSessionIdRef,
     setIsWaitingForInitialMessages,
     setIsCachedHistoryRefreshPending,
+    setHistoryStatus,
+    setHistoryError,
+    historyInitialized,
   ]);
 }
 function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
-  const { taskSessionId, connectionStatus, messagesLength, store, prevSessionIdRef, fetchState } =
-    params;
+  const {
+    taskSessionId,
+    connectionStatus,
+    messagesLength,
+    historyInitialized,
+    store,
+    prevSessionIdRef,
+    fetchState,
+    hydrationRef,
+    hydrationKey,
+    sessionFetchGenerationRef,
+  } = params;
   const {
     lastFetchedSessionIdRef,
     setIsWaitingForInitialMessages,
@@ -583,6 +778,9 @@ function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
   } = fetchState;
   useEffect(() => {
     let active = true;
+    const generation = sessionFetchGenerationRef.current;
+    const isCurrentGeneration = () => sessionFetchGenerationRef.current === generation;
+    const isActive = () => active && isCurrentGeneration();
     const deactivate = () => {
       active = false;
     };
@@ -599,6 +797,7 @@ function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
     if (messagesLength > 0 && !sessionChanged && !isFreshMount) {
       lastFetchedSessionIdRef.current = taskSessionId;
       setIsWaitingForInitialMessages(false);
+      if (historyInitialized) fetchRefs.setHistoryStatus("ready");
       return deactivate;
     }
     if (isFreshMount && messagesLength > 0) {
@@ -606,10 +805,19 @@ function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
       setIsWaitingForInitialMessages(false);
       setIsCachedHistoryRefreshPending(true);
       const refreshGeneration = ++cachedRefreshGenerationRef.current;
-      void fetchAndStoreMessages(taskSessionId, store, () => active)
+      void doFetchMessages({
+        taskSessionId,
+        ...fetchRefs,
+        setIsWaitingForInitialMessages: () => {},
+        fetchAndStoreMessages,
+        isActive: isCurrentGeneration,
+        canFinalizeLoading: isCurrentGeneration,
+        hydrationRef,
+        hydrationKey,
+      })
         .catch(() => {})
         .finally(() => {
-          if (cachedRefreshGenerationRef.current === refreshGeneration) {
+          if (isCurrentGeneration() && cachedRefreshGenerationRef.current === refreshGeneration) {
             setIsCachedHistoryRefreshPending(false);
           }
         });
@@ -620,26 +828,126 @@ function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
       taskSessionId,
       ...fetchRefs,
       fetchAndStoreMessages,
-      isActive: () => active,
+      isActive,
+      canFinalizeLoading: isActive,
+      hydrationRef,
+      hydrationKey,
     });
     return deactivate;
   }, [
     taskSessionId,
     connectionStatus,
     messagesLength,
+    historyInitialized,
     store,
     prevSessionIdRef,
     lastFetchedSessionIdRef,
     setIsWaitingForInitialMessages,
     setIsCachedHistoryRefreshPending,
     fetchRefs,
+    hydrationRef,
+    hydrationKey,
+    sessionFetchGenerationRef,
   ]);
 }
+
+function useSessionHistoryRecoveryState({
+  taskSessionId,
+  connectionStatus,
+  messages,
+  messagesLoading,
+  isWaitingForInitialMessages,
+  messagesMetaLoading,
+  fetchState,
+  hydrationRef,
+  hydrationKey,
+}: {
+  taskSessionId: string | null;
+  connectionStatus: string;
+  messages: Message[];
+  messagesLoading: boolean;
+  isWaitingForInitialMessages: boolean;
+  messagesMetaLoading: boolean;
+  fetchState: ReturnType<typeof useMessageFetchState>;
+  hydrationRef: SessionHydrationRef;
+  hydrationKey: string;
+}) {
+  const activeSessionIdRef = useRef(taskSessionId);
+  const historySessionIdRef = useRef(taskSessionId);
+  const previousConnectionStatusRef = useRef(connectionStatus);
+  const sessionFetchGenerationRef = useRef(0);
+  const { refs: fetchRefs } = fetchState;
+
+  useLayoutEffect(() => {
+    sessionFetchGenerationRef.current += 1;
+    activeSessionIdRef.current = taskSessionId;
+    const sessionChanged = historySessionIdRef.current !== taskSessionId;
+    const connectionChanged = previousConnectionStatusRef.current !== connectionStatus;
+    previousConnectionStatusRef.current = connectionStatus;
+    if (sessionChanged || connectionChanged) fetchRefs.setIsLoading(false);
+    if (sessionChanged) {
+      historySessionIdRef.current = taskSessionId;
+      fetchRefs.setHistoryStatus(taskSessionId ? "loading" : "ready");
+      fetchRefs.setHistoryError(null);
+    }
+    return () => {
+      sessionFetchGenerationRef.current += 1;
+    };
+  }, [connectionStatus, fetchRefs, taskSessionId]);
+
+  const retryHistory = useCallback(() => {
+    const retrySessionId = taskSessionId;
+    if (
+      !retrySessionId ||
+      connectionStatus !== "connected" ||
+      messagesLoading ||
+      isWaitingForInitialMessages ||
+      messagesMetaLoading
+    ) {
+      return;
+    }
+    const generation = sessionFetchGenerationRef.current;
+    fetchState.lastFetchedSessionIdRef.current = null;
+    fetchState.cachedRefreshGenerationRef.current += 1;
+    hydrationRef.current = null;
+    const isCurrentGeneration = () =>
+      activeSessionIdRef.current === retrySessionId &&
+      sessionFetchGenerationRef.current === generation;
+    void doFetchMessages({
+      taskSessionId: retrySessionId,
+      ...fetchRefs,
+      setIsWaitingForInitialMessages:
+        messages.length > 0 ? () => {} : fetchRefs.setIsWaitingForInitialMessages,
+      fetchAndStoreMessages,
+      isActive: isCurrentGeneration,
+      canFinalizeLoading: isCurrentGeneration,
+      hydrationRef,
+      hydrationKey,
+    });
+  }, [
+    connectionStatus,
+    fetchRefs,
+    hydrationKey,
+    hydrationRef,
+    isWaitingForInitialMessages,
+    messages.length,
+    messagesLoading,
+    messagesMetaLoading,
+    taskSessionId,
+  ]);
+
+  return { retryHistory, sessionFetchGenerationRef };
+}
+
 export function useSessionMessages(taskSessionId: string | null): UseSessionMessagesReturn {
   const store = useAppStoreApi();
   const { messages, messagesMeta, taskSessionState, activeTurnId, connectionStatus } =
     useSessionMessageInputs(taskSessionId);
   const prevSessionIdRef = useRef<string | null>(null);
+  const hydrationRef = useRef<SessionHydrationRef["current"]>(null);
+  const hydrationKey = `${taskSessionId ?? "none"}:${
+    taskSessionState === null || taskSessionState === "STARTING" ? "starting" : "settled"
+  }`;
   const isSessionEntryRefreshPending =
     taskSessionId !== null &&
     connectionStatus === "connected" &&
@@ -650,8 +958,21 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     isLoading,
     isWaitingForInitialMessages,
     isCachedHistoryRefreshPending,
+    historyStatus,
+    historyError,
     refs: fetchRefs,
   } = fetchState;
+  const { retryHistory, sessionFetchGenerationRef } = useSessionHistoryRecoveryState({
+    taskSessionId,
+    connectionStatus,
+    messages,
+    messagesLoading: isLoading,
+    isWaitingForInitialMessages,
+    messagesMetaLoading: messagesMeta.isLoading,
+    fetchState,
+    hydrationRef,
+    hydrationKey,
+  });
   useSessionLifecycleSubscriptions({
     taskSessionId,
     taskSessionState,
@@ -659,19 +980,33 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     activeTurnId,
     messages,
     store,
+    fetchRefs,
+    hydrationRef,
+    hydrationKey,
+    sessionFetchGenerationRef,
   });
   const entryFetchParams = {
     taskSessionId,
     connectionStatus,
     messagesLength: messages.length,
+    historyInitialized: messagesMeta.historyInitialized,
     store,
     prevSessionIdRef,
     fetchState,
+    hydrationRef,
+    hydrationKey,
+    sessionFetchGenerationRef,
   };
   useInitialMessagesWait(entryFetchParams);
   useSessionEntryMessageFetch(entryFetchParams);
-  useVisibilityBackfill(taskSessionId, store);
-  useTerminalStateFetch(taskSessionId, taskSessionState, hasAgentMessage, fetchRefs);
+  useVisibilityBackfill(taskSessionId, store, sessionFetchGenerationRef);
+  useTerminalStateFetch(
+    taskSessionId,
+    taskSessionState,
+    hasAgentMessage,
+    sessionFetchGenerationRef,
+    fetchRefs,
+  );
 
   return {
     isLoading: isLoading || isWaitingForInitialMessages || messagesMeta.isLoading,
@@ -686,5 +1021,8 @@ export function useSessionMessages(taskSessionId: string | null): UseSessionMess
     historyInitialized: messagesMeta.historyInitialized,
     hasMore: messagesMeta.hasMore,
     oldestCursor: messagesMeta.oldestCursor,
+    historyStatus,
+    historyError,
+    retryHistory,
   };
 }

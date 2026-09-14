@@ -1,10 +1,12 @@
 import type React from "react";
+import type { RefObject } from "react";
 import type {
   LocalRepository,
   Repository,
   RepositorySet,
   Executor,
   Task,
+  TaskPriority,
   CreateTaskResponse,
 } from "@/lib/types/http";
 import type { createTask } from "@/lib/api";
@@ -29,10 +31,30 @@ import type {
   useExecutorProfileOptions,
 } from "@/components/task-create-dialog-options";
 import type { useToast } from "@/components/toast-provider";
+import type { TaskCreateLaunchPreview } from "@/components/task-create-dialog-launch-preview";
 
 export type TaskCreateSubmit = (
   payload: Parameters<typeof createTask>[0],
 ) => Promise<CreateTaskResponse>;
+
+/**
+ * Shape of the task being edited that both `TaskCreateDialogProps.editingTask`
+ * and `SubmitHandlersDeps.editingTask` need. `runnerEditable`/
+ * `runnerIneligibleReason` gate the executor-profile selector independently
+ * of `state`.
+ */
+export type TaskEditTarget = {
+  id: string;
+  title: string;
+  description?: string;
+  workflowStepId: string;
+  state?: Task["state"];
+  repositoryId?: string;
+  repositories?: TaskRepositorySnapshot[];
+  primaryExecutorProfileId?: string;
+  runnerEditable?: boolean;
+  runnerIneligibleReason?: string;
+};
 
 export interface TaskCreateDialogProps {
   open: boolean;
@@ -49,15 +71,7 @@ export interface TaskCreateDialogProps {
       on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
     };
   }>;
-  editingTask?: {
-    id: string;
-    title: string;
-    description?: string;
-    workflowStepId: string;
-    state?: Task["state"];
-    repositoryId?: string;
-    repositories?: TaskRepositorySnapshot[];
-  } | null;
+  editingTask?: TaskEditTarget | null;
   onSuccess?: (
     task: Task,
     mode: "create" | "edit",
@@ -83,6 +97,10 @@ export interface TaskCreateDialogProps {
   extraFormSlot?: React.ReactNode;
   bottomSlot?: React.ReactNode;
   submitBlockedReason?: string | null;
+  /** Element to return keyboard focus to on close, confirmed or cancelled.
+   * Omitted callers keep Radix's default restore-to-previously-focused-element
+   * behavior. */
+  focusReturnRef?: RefObject<HTMLElement | null>;
 }
 
 export type DialogPromptEnhance = {
@@ -112,6 +130,8 @@ export type TaskRepoRow = {
   /** On-machine repo path, when the user picked from discovered repos. */
   localPath?: string;
   branch: string;
+  /** Explicit effective base copied from a repository set or chosen in the form. */
+  baseBranch?: string;
   /** Saved repository policy selected for this row. */
   branchPolicyId?: string;
 };
@@ -166,6 +186,7 @@ export type StepType = {
   workflowId?: string;
   position?: number;
   is_start_step?: boolean;
+  prompt?: string;
   events?: {
     on_enter?: Array<{ type: string; config?: Record<string, unknown> }>;
     on_turn_complete?: Array<{ type: string; config?: Record<string, unknown> }>;
@@ -175,6 +196,10 @@ export type StepType = {
 export type TaskCreateDialogInitialValues = {
   title: string;
   description?: string;
+  /** Create-mode source preset: start without a repository in a scratch workspace. */
+  noRepository?: boolean;
+  /** Create-mode launch hint; the dialog resolves a capable local profile by type. */
+  preferLocalExecutor?: boolean;
   /** Existing task repository rows, including immutable policy snapshots. */
   repositories?: TaskRepositorySnapshot[];
   repositoryId?: string;
@@ -223,6 +248,25 @@ export type StoreSelections = {
   effectiveWorkflowId?: string | null;
 };
 
+/**
+ * Agent-profile compatibility with the selected executor profile.
+ *   compatible:            no executor selected, nothing selected yet, or the
+ *                          selection passes the executor's credential check.
+ *   selected-incompatible: a compatible profile exists but the selected one
+ *                          fails the executor credential check (e.g. executor
+ *                          switched after the agent was chosen, or a workflow
+ *                          pins it).
+ *   selected-unavailable: a compatible profile exists, but the current
+ *                         selection is disabled or unavailable because dynamic
+ *                         routing is off.
+ *   none-compatible:       an executor is selected and no profile passes.
+ */
+export type AgentCompatState =
+  | "compatible"
+  | "selected-incompatible"
+  | "selected-unavailable"
+  | "none-compatible";
+
 export type DialogComputedValues = {
   isPassthroughProfile: boolean;
   effectiveWorkflowId: string | null;
@@ -245,8 +289,12 @@ export type DialogComputedValues = {
   effectiveAgentProfileId: string;
   /** Display name of the currently selected executor profile (null if none). */
   selectedExecutorProfileName: string | null;
-  /** True when an executor profile is selected and no agent profile is compatible with it. */
+  /** True whenever `agentCompatState` is not `compatible`; gates submission. */
   noCompatibleAgent: boolean;
+  /** Compatibility state of the effective agent profile with the selected executor profile. */
+  agentCompatState: AgentCompatState;
+  /** Label of the effective agent profile (null when none is selected or it is unknown). */
+  selectedAgentProfileName: string | null;
   /** Subset of agent profiles that pass the executor's auth-credential check. See `StoreSelections.compatibleAgentProfiles`. */
   compatibleAgentProfiles: AgentProfileOption[];
   /** True once the remote-auth catalog has been fetched. See `StoreSelections.authLoaded`. */
@@ -320,6 +368,12 @@ export type TaskCreateEffectsArgs = {
    * clobbered by the executor's async settle on mount.
    */
   preserveBranch?: string;
+  /**
+   * The task's own stored executor profile, when editing a task that has one.
+   * Seeds the picker directly instead of the create-mode "resolve a default"
+   * autopick.
+   */
+  editingTaskExecutorProfileId?: string | null;
 };
 
 import type { FileAttachment } from "@/components/task/chat/file-attachment";
@@ -390,6 +444,21 @@ export type DialogFormState = {
   setExecutorId: (v: string) => void;
   executorProfileId: string;
   setExecutorProfileId: (v: string) => void;
+  /**
+   * Writes executorProfileId from an autopick/stored-profile seed effect
+   * only, never from the user's own picker. This is the sole writer
+   * seededExecutorProfileId tracks, so a user selection can never be
+   * mistaken for a seed regardless of which write lands first.
+   */
+  setExecutorProfileIdFromSeed: (v: string) => void;
+  /**
+   * The executor profile id the dialog seeded for this open cycle (stored
+   * value in edit mode, resolved default in create mode) — never a value the
+   * user chose. Null until a value has been seeded. Submit flows compare the
+   * final selection against this to decide whether the user actually changed
+   * the runner.
+   */
+  seededExecutorProfileId: string | null;
   discoveredRepositories: LocalRepository[];
   setDiscoveredRepositories: (v: LocalRepository[]) => void;
   discoverReposLoading: boolean;
@@ -426,12 +495,18 @@ export type DialogFormState = {
   /** No-repo mode: when true the task is created with no repositories. */
   noRepository: boolean;
   setNoRepository: (v: boolean) => void;
+  /** Launch-only hint for choosing a capable direct local executor profile. */
+  preferLocalExecutor: boolean;
+  setPreferLocalExecutor: (v: boolean) => void;
   /** Optional host folder for repo-less tasks; empty means scratch workspace. */
   workspacePath: string;
   setWorkspacePath: (v: string) => void;
   /** Create-mode opt-in. Autopilot is immutable after task creation. */
   autopilot: boolean;
   setAutopilot: (v: boolean) => void;
+  /** Priority to submit with the created task. Defaults to `medium`. */
+  priority: TaskPriority;
+  setPriority: (v: TaskPriority) => void;
 };
 
 export type SubmitHandlersDeps = {
@@ -467,15 +542,9 @@ export type SubmitHandlersDeps = {
   agentProfileId: string;
   executorId: string;
   executorProfileId: string;
-  editingTask?: {
-    id: string;
-    title: string;
-    description?: string;
-    workflowStepId: string;
-    state?: Task["state"];
-    repositoryId?: string;
-    repositories?: TaskRepositorySnapshot[];
-  } | null;
+  /** See {@link DialogFormState.seededExecutorProfileId}. */
+  seededExecutorProfileId: string | null;
+  editingTask?: TaskEditTarget | null;
   onSuccess?: (
     task: Task,
     mode: "create" | "edit",
@@ -522,6 +591,8 @@ export type SubmitHandlersDeps = {
   editDependencies?: Pick<TaskEditDialogDependenciesState, "isDirty" | "ready" | "save">;
   /** Optional host folder for repo-less tasks; empty means kandev creates a scratch workspace. */
   workspacePath: string;
+  /** Priority to submit with the created task. Defaults to `medium`. */
+  priority: TaskPriority;
   /**
    * Optional async transform applied to the trimmed description before the
    * API payload is built. Used by feature wrappers (e.g. Improve Kandev) to
@@ -566,6 +637,7 @@ export type DialogFormBodyProps = {
   workflows: WorkflowsState["items"];
   snapshots: KanbanMultiState["snapshots"];
   effectiveWorkflowId: string | null;
+  launchPreview: TaskCreateLaunchPreview | null;
   fs: DialogFormState;
   editDependencies: TaskEditDialogDependenciesState;
   handleKeyDown: ReturnType<typeof useKeyboardShortcutHandler>;
@@ -592,6 +664,9 @@ export type DialogFormBodyProps = {
     save?: {
       workspaceId: string;
       rows: TaskRepoRow[];
+      repositories: Repository[];
+      isLocalExecutor: boolean;
+      freshBranchEnabled: boolean;
       open: boolean;
       setOpen: (open: boolean) => void;
     } | null;
@@ -618,7 +693,11 @@ export type DialogFormBodyProps = {
    * branch for local execution; fresh-branch mode unlocks it).
    */
   isLocalExecutor: boolean;
-  noCompatibleAgent: boolean;
+  agentCompatState: AgentCompatState;
+  /** Label of the effective agent profile, for the incompatible-agent note. */
+  selectedAgentProfileName: string | null;
+  /** Name of the effective workflow, for the workflow-locked incompatible note. */
+  effectiveWorkflowName: string | null;
   executorProfileName: string | null;
   /** Optional render slot above the description editor. */
   aboveDescriptionSlot?: React.ReactNode;
@@ -637,4 +716,8 @@ export type DialogFormBodyProps = {
    * hands-free.
    */
   onComposerSubmit?: () => boolean | Promise<boolean>;
+  /** From computeRunnerEditable: gates the executor-profile selector independently of isTaskStarted. */
+  runnerEditable: boolean;
+  /** From computeRunnerIneligibleReason: presented when runnerEditable is false. */
+  runnerIneligibleReason: string;
 };

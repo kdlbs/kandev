@@ -5,6 +5,7 @@ import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 // Matches the ghost-style action buttons in the chat status bar (same row as
 // Share) so both transcript-navigation entry points sit flush together.
@@ -27,6 +28,7 @@ function TranscriptScrollButton({
   Icon,
   className,
 }: TranscriptScrollButtonProps) {
+  const { isFinePointer } = useResponsiveBreakpoint();
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -37,7 +39,7 @@ function TranscriptScrollButton({
           onClick={onClick}
           aria-label={label}
           data-testid={testId}
-          className={cn(DEFAULT_CLASS, className)}
+          className={cn(DEFAULT_CLASS, isFinePointer ? "h-6 w-6" : "h-11 w-11", className)}
         >
           <Icon className="h-3.5 w-3.5" />
         </Button>

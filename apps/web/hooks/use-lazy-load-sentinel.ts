@@ -25,6 +25,9 @@ export type LazyLoadSentinelOptions = {
   /** Fire (and join) even while an older-page request is in flight. Never
    * bypasses `blocked`. Defaults to false. */
   joinInFlightWhileLoading?: boolean;
+  /** Recreates observation when the owning data generation changes without
+   * changing the session or sentinel DOM node. */
+  lifecycleKey?: string | number | null;
   /** After a positive load, if the user is pinned at the bottom of the scroll
    * container, scroll it back to the new bottom so the re-armed sentinel stays
    * in view and the next page keeps loading without a scroll-away/scroll-back.
@@ -89,15 +92,18 @@ type SentinelMutableRefs = {
 function useSentinelObserver(opts: {
   scrollRef: React.RefObject<HTMLDivElement | null>;
   rootMargin: string;
+  lifecycleKey: string | number | null;
   fireLoad: () => void;
   refs: SentinelMutableRefs;
 }) {
   const fireLoadRef = useRef(opts.fireLoad);
   fireLoadRef.current = opts.fireLoad;
+  const requestedLifecycleKeyRef = useRef(opts.lifecycleKey);
+  requestedLifecycleKeyRef.current = opts.lifecycleKey;
   const observerRootRef = useRef<Element | Document | null>(null);
   const observerRootMarginRef = useRef<string | null>(null);
   const observerFireLoadRef = useRef<(() => void) | null>(null);
-
+  const observerLifecycleKeyRef = useRef<string | number | null>(null);
   useEffect(() => {
     const root = opts.scrollRef.current;
     const currentObserver = opts.refs.observerRef.current;
@@ -105,20 +111,32 @@ function useSentinelObserver(opts: {
       currentObserver &&
       observerRootRef.current === root &&
       observerRootMarginRef.current === opts.rootMargin &&
+      observerLifecycleKeyRef.current === opts.lifecycleKey &&
       observerFireLoadRef.current === opts.fireLoad
     ) {
       return;
     }
     currentObserver?.disconnect();
-    opts.refs.observerRef.current = null;
+    if (currentObserver) {
+      opts.refs.intersectingRef.current = false;
+      opts.refs.disarmedRef.current = false;
+    }
     observerRootRef.current = root;
     observerRootMarginRef.current = opts.rootMargin;
+    observerLifecycleKeyRef.current = opts.lifecycleKey;
     observerFireLoadRef.current = opts.fireLoad;
     if (!root) return;
     const observer = new IntersectionObserver(
-      (entries) => {
+      (entries, callbackObserver) => {
         const entry = entries[0];
-        if (!entry) return;
+        if (
+          !entry ||
+          callbackObserver !== opts.refs.observerRef.current ||
+          entry.target !== opts.refs.sentinelNodeRef.current ||
+          observerLifecycleKeyRef.current !== requestedLifecycleKeyRef.current
+        ) {
+          return;
+        }
         opts.refs.intersectingRef.current = entry.isIntersecting;
         if (opts.refs.disarmedRef.current) {
           // Ignore the current intersection; arm only after an observed exit.
@@ -131,7 +149,8 @@ function useSentinelObserver(opts: {
           !entry.isIntersecting ||
           !hasMore ||
           blocked ||
-          (isLoadingMore && !joinInFlightWhileLoading)
+          (isLoadingMore && !joinInFlightWhileLoading) ||
+          !isCurrentSentinelGeometryEligible(opts.refs)
         ) {
           return;
         }
@@ -321,6 +340,21 @@ function useScrollPinnedToBottom(scrollRef: React.RefObject<HTMLDivElement | nul
 }
 
 /** Retries an eligible, still-visible sentinel after a firing guard clears. */
+function isCurrentSentinelGeometryEligible(refs: SentinelMutableRefs): boolean {
+  return refs.optionsRef.current.isCurrentGeometryEligible?.() ?? true;
+}
+
+function sentinelBecameEligible(
+  previous: { hasMore: boolean; blocked: boolean; isLoadingMore: boolean },
+  current: { hasMore: boolean; blocked: boolean; isLoadingMore: boolean },
+): boolean {
+  return (
+    (!previous.hasMore && current.hasMore) ||
+    (previous.blocked && !current.blocked) ||
+    (previous.isLoadingMore && !current.isLoadingMore)
+  );
+}
+
 function shouldRetrySentinel(
   previous: { hasMore: boolean; blocked: boolean; isLoadingMore: boolean },
   current: { hasMore: boolean; blocked: boolean; isLoadingMore: boolean },
@@ -329,12 +363,10 @@ function shouldRetrySentinel(
   const { optionsRef, intersectingRef, disarmedRef } = refs;
   if (!optionsRef.current.rearmWhileIntersecting) return false;
   if (!intersectingRef.current || disarmedRef.current) return false;
-  const becameEligible =
-    (!previous.hasMore && current.hasMore) ||
-    (previous.blocked && !current.blocked) ||
-    (previous.isLoadingMore && !current.isLoadingMore);
-  if (!becameEligible || !current.hasMore || current.blocked) return false;
+  if (!sentinelBecameEligible(previous, current) || !current.hasMore || current.blocked)
+    return false;
   if (current.isLoadingMore && !optionsRef.current.joinInFlightWhileLoading) return false;
+  if (!isCurrentSentinelGeometryEligible(refs)) return false;
   return !refs.loadInFlightRef.current && !refs.continuationScheduledRef.current;
 }
 
@@ -383,7 +415,8 @@ function shouldReplayCurrentIntersection(
     !refs.continuationScheduledRef.current &&
     hasMore &&
     !blocked &&
-    (!isLoadingMore || joinInFlightWhileLoading),
+    (!isLoadingMore || joinInFlightWhileLoading) &&
+    isCurrentSentinelGeometryEligible(refs),
   );
 }
 
@@ -430,6 +463,7 @@ export function useLazyLoadSentinel(
 } {
   const {
     rootMargin = "200px 0px 0px 0px",
+    lifecycleKey = null,
     rearmWhileIntersecting = false,
     joinInFlightWhileLoading = false,
     stickToBottomWhileLoading = false,
@@ -440,9 +474,7 @@ export function useLazyLoadSentinel(
   } = options ?? {};
 
   const stateRef = useRef({ hasMore, blocked, isLoadingMore });
-  useEffect(() => {
-    stateRef.current = { hasMore, blocked, isLoadingMore };
-  }, [hasMore, blocked, isLoadingMore]);
+  stateRef.current = { hasMore, blocked, isLoadingMore };
   const optionsRef = useRef({
     rearmWhileIntersecting,
     joinInFlightWhileLoading,
@@ -452,17 +484,7 @@ export function useLazyLoadSentinel(
     onLoadSettled,
     isRequestCurrent,
   });
-  useEffect(() => {
-    optionsRef.current = {
-      rearmWhileIntersecting,
-      joinInFlightWhileLoading,
-      stickToBottomWhileLoading,
-      shouldContinueWhileIntersecting,
-      isCurrentGeometryEligible,
-      onLoadSettled,
-      isRequestCurrent,
-    };
-  }, [
+  optionsRef.current = {
     rearmWhileIntersecting,
     joinInFlightWhileLoading,
     stickToBottomWhileLoading,
@@ -470,7 +492,7 @@ export function useLazyLoadSentinel(
     isCurrentGeometryEligible,
     onLoadSettled,
     isRequestCurrent,
-  ]);
+  };
 
   const observerRef = useRef<IntersectionObserver | null>(null);
   const sentinelNodeRef = useRef<HTMLDivElement | null>(null);
@@ -557,7 +579,7 @@ export function useLazyLoadSentinel(
   }, [loadMore, refreshPinned, settleLoad]);
   fireLoadRef.current = fireLoad;
 
-  useSentinelObserver({ scrollRef, rootMargin, fireLoad, refs });
+  useSentinelObserver({ scrollRef, rootMargin, lifecycleKey, fireLoad, refs });
   useRetryWhenSentinelBecomesEligible({
     hasMore,
     blocked,
@@ -574,6 +596,9 @@ export function useLazyLoadSentinel(
     const previous = sentinelNodeRef.current;
     sentinelNodeRef.current = node;
     const observer = observerRef.current;
+    if (previous !== node) {
+      intersectingRef.current = false;
+    }
     if (!observer) return;
     if (previous && previous !== node) {
       observer.unobserve(previous);

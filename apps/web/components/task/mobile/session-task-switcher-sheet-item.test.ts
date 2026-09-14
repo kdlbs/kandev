@@ -48,6 +48,12 @@ describe("toSheetItem repository projection", () => {
     expect(item.repositories).toEqual(["owner/repo-a", "owner/repo-b"]);
     expect(item.repositoryLinks).toHaveLength(3);
   });
+
+  it("carries task priority into the phone task drawer row", () => {
+    const item = toSheetItem(task({ priority: "critical" }), emptyCtx());
+
+    expect(item.priority).toBe("critical");
+  });
 });
 
 describe("toSheetItem remote executor projection", () => {

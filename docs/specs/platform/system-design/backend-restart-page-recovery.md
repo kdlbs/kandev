@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-BACKEND-RESTART-PAGE-RECOVERY-001
 created: 2026-09-03
-updated: 2026-09-03
+updated: 2026-09-05
 owners:
   - kandev
 ---
@@ -167,9 +167,15 @@ not expose the token.
 ## Observability
 
 The coordinator sends one frontend diagnostic report when a document first
-enters reload-required state. The report includes the signal source and no
-token value. Valid sources are `boot_id_changed` and
-`settings_interlock_rejected`.
+enters reload-required state. The report uses the `backend-reload` report
+source. Its title is `boot_id_changed` or `settings_interlock_rejected`.
+
+The report includes browser context and no token value. It does not include a
+synthetic error-toast stack or error object. The backend records the report at
+info level with the fixed message `frontend backend reload required`.
+
+Actual error-toast reports keep their error severity and fixed message. The
+client cannot supply a log level or message template.
 
 Backend logs keep the current HTTP request and restart evidence. This design
 does not add a metric or durable event.

@@ -4,11 +4,22 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
+import { waitForSessionDone } from "../../helpers/session";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
 import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
+import { expectSendNowWorkflowRunning } from "./message-queue-workflow-helpers";
 
 registerSeparateQueueRows(test);
+
+test("mobile Send Now keeps a workflow transition running", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await expectSendNowWorkflowRunning(testPage, apiClient, seedData, true);
+});
 
 async function expectTouchTarget(locator: Locator): Promise<void> {
   await expect(locator).toBeVisible();
@@ -82,6 +93,170 @@ async function seedBusyQueueTask(
   if (!loadedTask.primary_session_id) throw new Error("task did not have a primary session");
   return { session, taskId: task.id, sessionId: loadedTask.primary_session_id };
 }
+test("mobile edit queued message saves with touch-safe controls", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  const { session } = await seedFullQueueTask(
+    testPage,
+    apiClient,
+    seedData,
+    "Mobile queue editing",
+  );
+  const chat = session.activeChat();
+  const panel = chat.getByTestId("queued-ghost-list");
+  await chat.getByTestId("queue-chip").tap();
+  await expect(panel.getByTestId("queue-entry")).toHaveCount(10);
+
+  const row = panel.getByTestId("queue-entry").filter({ hasText: "Queued item 10" });
+  await row.getByTestId("queue-entry-edit").tap();
+  await expectTouchTarget(panel.getByRole("button", { name: "Save", exact: true }));
+  await expectTouchTarget(panel.getByRole("button", { name: "Cancel", exact: true }));
+
+  const editedText = "Queued item 10 edited";
+  await panel.getByTestId("queue-edit-textarea").fill(editedText);
+  await panel.getByRole("button", { name: "Save", exact: true }).tap();
+  await expect(panel.getByTestId("queue-entry-text").last()).toContainText(editedText);
+  await assertNoDocumentHorizontalOverflow(testPage);
+});
+test("mobile edit queued message retains target while earlier backlog drains", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(120_000);
+  const { session, taskId, sessionId } = await seedBusyQueueTask(testPage, apiClient, seedData);
+  const queueIdentity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
+  await apiClient.queueMessage(queueIdentity, scriptedQueueMessage("mobile first queued"));
+  await apiClient.queueMessage(queueIdentity, scriptedQueueMessage("mobile second queued"));
+
+  const chat = session.activeChat();
+  const panel = chat.getByTestId("queued-ghost-list");
+  await chat.getByTestId("queue-chip").tap();
+  const rows = panel.getByTestId("queue-entry");
+  await expect(rows).toHaveCount(2);
+  await rows.nth(1).getByTestId("queue-entry-edit").tap();
+  await panel.getByTestId("queue-edit-textarea").fill(scriptedQueueMessage("mobile second edited"));
+
+  // The edit lease holds the later entry while the earlier FIFO turn drains.
+  await expect(
+    chat.locator("[data-agent-message-body][data-message-id]").filter({
+      hasText: "mobile first queued",
+    }),
+  ).toHaveCount(1, { timeout: 60_000 });
+  await expect(panel.getByTestId("queue-edit-textarea")).toBeVisible();
+
+  await panel.getByRole("button", { name: "Save", exact: true }).tap();
+
+  await expect(
+    chat.locator("[data-agent-message-body][data-message-id]").filter({
+      hasText: "mobile second edited",
+    }),
+  ).toHaveCount(1, { timeout: 45_000 });
+  await expect(panel.getByTestId("queue-entry")).toHaveCount(0, { timeout: 15_000 });
+  await assertNoDocumentHorizontalOverflow(testPage);
+});
+
+test("mobile saving the held head after its turn completes resumes Auto-run", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(120_000);
+  const { session, taskId, sessionId } = await seedBusyQueueTask(testPage, apiClient, seedData);
+  const queueIdentity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
+  await apiClient.queueMessage(queueIdentity, scriptedQueueMessage("mobile edited head"));
+
+  const chat = session.activeChat();
+  const panel = chat.getByTestId("queued-ghost-list");
+  await chat.getByTestId("queue-chip").tap();
+  const row = panel.getByTestId("queue-entry").first();
+  await row.getByTestId("queue-entry-edit").tap();
+  await panel
+    .getByTestId("queue-edit-textarea")
+    .fill(scriptedQueueMessage("mobile edited head after save"));
+
+  await expect(chat.getByText("Slow response complete", { exact: false })).toBeVisible({
+    timeout: 60_000,
+  });
+  // The edited row remains mounted as an editor while its lease is held.
+  await expect(panel.getByTestId("queue-edit-textarea")).toBeVisible();
+
+  await panel.getByRole("button", { name: "Save", exact: true }).tap();
+  await expect(
+    chat.locator("[data-agent-message-body][data-message-id]").filter({
+      hasText: "mobile edited head after save",
+    }),
+  ).toHaveCount(1, { timeout: 45_000 });
+  await expect(panel.getByTestId("queue-entry")).toHaveCount(0, { timeout: 15_000 });
+  await assertNoDocumentHorizontalOverflow(testPage);
+});
+
+test("mobile edit queued message reconciles after a session switch", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  test.setTimeout(120_000);
+
+  const replacementTask = await apiClient.createTaskWithAgent(
+    seedData.workspaceId,
+    "Mobile queue replacement B",
+    seedData.agentProfileId,
+    {
+      description: "/e2e:simple-message",
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+    },
+  );
+  if (!replacementTask.session_id) {
+    throw new Error("replacement task did not have a primary session");
+  }
+  await waitForSessionDone(
+    apiClient,
+    replacementTask.id,
+    replacementTask.session_id,
+    "mobile replacement task should finish its seed turn",
+  );
+
+  const { session, taskId, sessionId } = await seedBusyQueueTask(testPage, apiClient, seedData);
+  const queueIdentity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
+  await apiClient.queueMessage(queueIdentity, scriptedQueueMessage("switch first"));
+  await apiClient.queueMessage(queueIdentity, scriptedQueueMessage("switch second"));
+
+  const chat = session.activeChat();
+  const panel = chat.getByTestId("queued-ghost-list");
+  await chat.getByTestId("queue-chip").tap();
+  const rows = panel.getByTestId("queue-entry");
+  await expect(rows).toHaveCount(2);
+  await rows.nth(1).getByTestId("queue-entry-edit").tap();
+  await expect(panel.getByTestId("queue-edit-textarea")).toBeVisible();
+
+  await testPage.goto(`/t/${replacementTask.id}`);
+  await expect(testPage).toHaveURL(new RegExp(`/t/${replacementTask.id}$`), {
+    timeout: 15_000,
+  });
+  await session.waitForLoad();
+  await session.waitForChatIdle({ timeout: 30_000 });
+
+  await testPage.goto(`/t/${taskId}`);
+  await expect(testPage).toHaveURL(new RegExp(`/t/${taskId}$`), { timeout: 15_000 });
+  await session.waitForLoad();
+  const remountedChat = session.activeChat();
+  const remountedPanel = remountedChat.getByTestId("queued-ghost-list");
+  await remountedChat.getByTestId("queue-chip").tap();
+  const remountedRows = remountedPanel.getByTestId("queue-entry");
+  await expect(remountedRows).toHaveCount(2);
+  await remountedRows.nth(1).getByTestId("queue-entry-edit").tap();
+  await remountedPanel.getByTestId("queue-edit-textarea").fill("switch second edited");
+  await remountedPanel.getByRole("button", { name: "Save", exact: true }).tap();
+  await expect(remountedPanel.getByTestId("queue-entry-text").last()).toContainText(
+    "switch second edited",
+  );
+  await assertNoDocumentHorizontalOverflow(testPage);
+});
 
 test("mobile full queue stays usable while removing and clearing messages", async ({
   testPage,
@@ -140,12 +315,13 @@ test("mobile Send Now resumes Auto-run in targeted order without overflow", asyn
   const markerA = "mobile targeted A response";
   const markerB = "mobile targeted B response";
   const markerC = "mobile targeted C response";
+  const queueIdentity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
   for (const message of [
     scriptedQueueMessage(markerA),
     scriptedQueueMessage(markerB, 1_000),
     scriptedQueueMessage(markerC),
   ]) {
-    await apiClient.queueMessage(taskId, sessionId, message);
+    await apiClient.queueMessage(queueIdentity, message);
   }
 
   await chat.getByTestId("queue-chip").tap();
@@ -153,11 +329,23 @@ test("mobile Send Now resumes Auto-run in targeted order without overflow", asyn
   await expect(panel.getByTestId("queue-entry-text")).toHaveCount(3);
   const rowSendNow = panel.getByTestId("queue-entry-send-now").nth(1);
   const autoRun = panel.getByTestId("queue-auto-run");
+  const autoMerge = panel.getByTestId("queue-auto-merge");
   await expectTouchTarget(rowSendNow);
   await expectEffectiveTouchTarget(autoRun);
+  await expectEffectiveTouchTarget(autoMerge);
   await expect(autoRun).toHaveAttribute("data-state", "checked");
   await autoRun.tap();
   await expect(autoRun).toHaveAttribute("data-state", "unchecked");
+  await expect(autoMerge).toHaveAttribute("data-state", "unchecked");
+  await expect(autoMerge).toBeEnabled();
+  await autoMerge.tap();
+  await expect
+    .poll(async () => (await apiClient.getQueueStatus(queueIdentity)).auto_merge_enabled)
+    .toBe(true);
+  await expect(autoMerge).toHaveAttribute("data-state", "checked");
+  await expect(autoMerge).toBeEnabled();
+  await autoMerge.tap();
+  await expect(autoMerge).toHaveAttribute("data-state", "unchecked");
 
   await assertNoDocumentHorizontalOverflow(testPage);
 
@@ -197,6 +385,172 @@ test("mobile queue panel hides the desktop-only pin and keeps its controls", asy
   // queue panel, while the other header controls stay touch-sized.
   await expect(panel.getByTestId("queue-pin")).toHaveCount(0);
   await expectEffectiveTouchTarget(panel.getByTestId("queue-auto-run"));
+  await expectEffectiveTouchTarget(panel.getByTestId("queue-auto-merge"));
   await expectTouchTarget(panel.getByTestId("queue-clear-all"));
   await expectTouchTarget(panel.getByTestId("queue-close"));
+});
+
+test.describe("Mobile queued row controls", () => {
+  test.describe.configure({ timeout: 120_000 });
+
+  // @covers AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.9
+  // @covers AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.10
+  test("keeps queued row controls ordered and touchable", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    const fixture = "mobile-overflow-probe ".repeat(24).trim();
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Mobile queued row controls",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!task.session_id) throw new Error("createTaskWithAgent did not return a session_id");
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await session.sendMessageViaButton("/sleep 60");
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    await waitForActiveSessionForegroundActivity(testPage, "generating");
+    const identity = await apiClient.getQueueSessionIdentity(task.id, task.session_id);
+    const autoRunResponse = await apiClient.setQueueAutoRun(identity, false);
+    expect(autoRunResponse).toMatchObject({
+      session_id: task.session_id,
+      auto_run: false,
+    });
+    await waitForComposerQueueMode(testPage);
+    await apiClient.queueMessage(identity, fixture);
+    await expect
+      .poll(() => apiClient.getQueueStatus(identity))
+      .toMatchObject({ count: 1, auto_run: false });
+
+    const chat = session.activeChat();
+    await chat.getByTestId("queue-chip").tap();
+    const panel = chat.getByTestId("queued-ghost-list");
+    const scrollRegion = panel.getByTestId("queue-scroll-region");
+    const row = scrollRegion.getByTestId("queue-entry").filter({ hasText: fixture });
+    const preview = row.getByTestId("queue-entry-text");
+    const actions = row.getByTestId("queue-entry-actions");
+    const expand = row.getByTestId("queue-entry-expand");
+    const remove = row.getByTestId("queue-entry-remove");
+    await expect(row).toBeVisible();
+
+    const previewMetrics = await preview.evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      clientWidth: element.clientWidth,
+      scrollHeight: element.scrollHeight,
+      scrollWidth: element.scrollWidth,
+    }));
+    expect(previewMetrics.scrollHeight).toBeGreaterThan(previewMetrics.clientHeight);
+    await expect(expand).toBeVisible();
+    await expect(actions).toHaveCSS("opacity", "1");
+    expect(await testPage.evaluate(() => matchMedia("(pointer: coarse)").matches)).toBe(true);
+    expect(await testPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(false);
+    await expect(remove).toHaveAttribute("title", "Remove queued message");
+    await expect(
+      row.getByRole("button", { name: "Remove queued message", exact: true }),
+    ).toHaveCount(1);
+    await expect(remove.locator("svg")).toHaveClass(/tabler-icon-trash/);
+    const order = await actions.evaluate((container) => {
+      const direct = [...container.children] as HTMLElement[];
+      const disclosure = direct.find((element) => element.dataset.testid === "queue-entry-expand");
+      const terminal = direct.at(-1);
+      return {
+        adjacent: disclosure?.nextElementSibling === terminal,
+        terminalTestId: (terminal as HTMLElement | undefined)?.dataset.testid,
+      };
+    });
+    expect(order).toEqual({ adjacent: true, terminalTestId: "queue-entry-remove" });
+
+    const mutedColor = await remove.evaluate((button) => {
+      const muted = document.createElement("span");
+      muted.className = "text-muted-foreground";
+      button.parentElement?.append(muted);
+      const color = getComputedStyle(muted).color;
+      muted.remove();
+      return color;
+    });
+    await expect(remove).toHaveCSS("color", mutedColor);
+
+    const documentWidths = await testPage.evaluate(() => ({
+      clientWidth: document.documentElement.clientWidth,
+      scrollWidth: document.documentElement.scrollWidth,
+    }));
+    expect(documentWidths.scrollWidth).toBe(documentWidths.clientWidth);
+    await expect(scrollRegion).toHaveCSS("overflow-y", "auto");
+    const verticalScrollOwners = await panel.evaluate((element) =>
+      [element, ...element.querySelectorAll("*")]
+        .filter((candidate) => {
+          const overflowY = getComputedStyle(candidate).overflowY;
+          return overflowY === "auto" || overflowY === "scroll";
+        })
+        .map((candidate) => (candidate as HTMLElement).dataset.testid ?? null),
+    );
+    expect(verticalScrollOwners).toEqual(["queue-scroll-region"]);
+
+    const [panelBox, scrollBox, rowBox, previewBox, actionsBox, expandBox, removeBox] =
+      await Promise.all([
+        panel.boundingBox(),
+        scrollRegion.boundingBox(),
+        row.boundingBox(),
+        preview.boundingBox(),
+        actions.boundingBox(),
+        expand.boundingBox(),
+        remove.boundingBox(),
+      ]);
+    expect(panelBox).not.toBeNull();
+    expect(scrollBox).not.toBeNull();
+    expect(rowBox).not.toBeNull();
+    expect(previewBox).not.toBeNull();
+    expect(actionsBox).not.toBeNull();
+    expect(expandBox).not.toBeNull();
+    expect(removeBox).not.toBeNull();
+    const viewportWidth = testPage.viewportSize()!.width;
+    const EPSILON = 1;
+    expect(panelBox!.x).toBeGreaterThanOrEqual(-EPSILON);
+    expect(panelBox!.x + panelBox!.width).toBeLessThanOrEqual(viewportWidth + EPSILON);
+    expect(scrollBox!.x).toBeGreaterThanOrEqual(panelBox!.x - EPSILON);
+    expect(scrollBox!.x + scrollBox!.width).toBeLessThanOrEqual(
+      panelBox!.x + panelBox!.width + EPSILON,
+    );
+    expect(rowBox!.x).toBeGreaterThanOrEqual(scrollBox!.x - EPSILON);
+    expect(rowBox!.x + rowBox!.width).toBeLessThanOrEqual(
+      scrollBox!.x + scrollBox!.width + EPSILON,
+    );
+    expect(previewBox!.x).toBeGreaterThanOrEqual(rowBox!.x - EPSILON);
+    expect(previewBox!.x + previewBox!.width).toBeLessThanOrEqual(
+      rowBox!.x + rowBox!.width + EPSILON,
+    );
+    expect(actionsBox!.x).toBeGreaterThanOrEqual(rowBox!.x - EPSILON);
+    expect(actionsBox!.x + actionsBox!.width).toBeLessThanOrEqual(
+      rowBox!.x + rowBox!.width + EPSILON,
+    );
+    expect(expandBox!.x).toBeGreaterThanOrEqual(actionsBox!.x - EPSILON);
+    expect(expandBox!.x + expandBox!.width).toBeLessThanOrEqual(
+      actionsBox!.x + actionsBox!.width + EPSILON,
+    );
+    expect(removeBox!.x).toBeGreaterThanOrEqual(actionsBox!.x - EPSILON);
+    expect(removeBox!.x + removeBox!.width).toBeLessThanOrEqual(
+      actionsBox!.x + actionsBox!.width + EPSILON,
+    );
+    expect(previewMetrics.scrollWidth).toBeLessThanOrEqual(previewMetrics.clientWidth + EPSILON);
+    await expectEffectiveTouchTarget(expand);
+    await expectEffectiveTouchTarget(remove);
+
+    await prCapture.screenshot("queued-row-controls-pixel-5", {
+      caption:
+        "Pixel 5 queued row with adaptive disclosure immediately before the touch-sized Remove action",
+    });
+    await remove.tap();
+    await expect(row).toHaveCount(0);
+  });
 });

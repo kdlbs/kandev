@@ -2,7 +2,8 @@
 status: active
 system: ui
 created: 2026-08-05
-amended: 2026-09-02
+amended: 2026-09-14
+updated: 2026-09-10
 owners:
   - kandev
 ---
@@ -29,7 +30,9 @@ session-removal action.
 - **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.3:** The X is shown only when more than one agent-session panel is visible. It is unavailable for the last visible agent panel, regardless of the total backend session count or lifecycle state.
 - **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.4:** Close Others affects only sibling visible agent-session panels in its Dockview group; it does not remove backend sessions or non-session panels.
 - **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.5:** Ordinary synchronization does not recreate a panel explicitly hidden during the mounted layout; newly created sessions and explicit reopen targets still open.
-- **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.6:** Desktop context-menu Delete and mobile Sessions-picker Delete retain their existing confirmation and permanent deletion behavior.
+- **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.6:** Desktop context-menu Delete keeps that menu mounted and opens a compact, non-modal confirmation popover anchored to the Delete item. Cancelling or dismissing the popover leaves the session unchanged.
+- **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.7:** On phone, choosing Delete from a Sessions picker row opens a focused confirmation step in the same picker, retaining the row's geometry. Cancel restores the picker; external context change or closing it clears the unsubmitted confirmation without deleting. Presentation follows [mobile action confirmations](mobile-action-confirmations.md).
+- **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.8:** Desktop and phone confirmation surfaces share the same conversation-deletion, workspace-retention, primary-session, and only-session warnings. Confirming permanently removes the session with the existing feedback; deletion failure keeps the session, its panel, and one error toast.
 
 ## Migrated source detail
 
@@ -61,10 +64,17 @@ hides the session context the user is acting on.
   recreate the hidden agent panels.
 - A newly added backend session still opens automatically. Synchronization tracks only explicit Hide
   actions as hidden; Dockview drag, restore, and reconciliation do not imply hidden intent.
-- Deletion from the session context menu continues to open the existing confirmation dialog, then
-  permanently removes the session and uses the existing toast feedback.
-- Deletion from the mobile Sessions picker remains available and keeps its existing confirmation
-  and feedback behavior.
+- Choosing Delete from a desktop session context menu keeps that menu mounted and opens a compact,
+  non-modal confirmation popover anchored to the Delete item. Cancelling or dismissing the popover
+  leaves the session unchanged.
+- On phone, choosing Delete opens a confirmation step in the existing Sessions
+  picker with full-width actions. Cancel restores the picker. External context
+  changes or closing the picker invalidate the unsubmitted request.
+- Desktop and phone confirmation surfaces share the same conversation-deletion,
+  workspace-retention, primary-session, and only-session warnings.
+- Confirming Delete permanently removes the session and its panel with the existing feedback.
+  If deletion fails, the session and its panel remain, and one error toast
+  explains the failure so the user can retry.
 - Promoting a non-primary agent session to primary updates the primary marker without a progress or
   success toast. If the promotion fails, one error toast explains the failure.
 
@@ -95,17 +105,23 @@ hides the session context the user is acting on.
   success toast.
 - **GIVEN** a primary-session promotion request fails, **WHEN** the request settles, **THEN** the
   current primary session remains unchanged and one error toast is shown.
-- **GIVEN** the user cancels an explicit delete confirmation, **WHEN** the dialog closes, **THEN**
-  the session and its panel remain unchanged.
-- **GIVEN** a phone viewport, **WHEN** the user deletes a session from the Sessions picker, **THEN**
-  the mobile flow remains reachable and removes the selected session without relying on a desktop
-  tab X.
+- **GIVEN** the user cancels a desktop context-menu delete confirmation, **WHEN** the popover
+  closes, **THEN** the session and its panel remain unchanged. The menu stays usable without
+  starting deletion.
+- **GIVEN** a phone viewport, **WHEN** the user chooses Delete from a Sessions picker row, **THEN**
+  the existing picker shows a dedicated confirmation step without a second modal.
+- **GIVEN** a phone picker has pending delete confirmation, **WHEN** the user closes the Sessions
+  picker externally, **THEN** the pending confirmation is cleared and reopening the picker shows
+  the normal row actions without dispatching deletion.
+- **GIVEN** a phone viewport, **WHEN** the user confirms deletion from the picker confirmation step,
+  **THEN** the selected session is removed and the remaining session stays reachable without
+  relying on a desktop tab X.
 
 ## Out of scope
 
-- Removing or redesigning the explicit delete confirmation dialog.
+- Removing or redesigning the explicit delete confirmation popover or picker confirmation step.
 - Changing backend session-deletion semantics or active-session selection.
-- Changing the mobile session picker layout or controls; its shared primary-session action follows
-  the same no-success-toast feedback rule.
+- Changing Sessions picker hierarchy or non-delete row actions beyond hosting the shared
+  confirmation step.
 - Replacing feedback for context-menu, mobile, stop, or resume actions.
 - Persisting the set of hidden session panels across a full layout remount or browser restart.

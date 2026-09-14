@@ -8,9 +8,12 @@ import (
 
 // planTruncationWarning renders the agent-facing warning appended to a plan
 // write's tool result when the plan service reports TruncationDetected. It
-// states plainly that the write replaced the entire document —
-// update_task_plan_kandev and create_task_plan_kandev have no partial-update
-// mode — and names the prior revision number when it is known.
+// states plainly that the write replaced the entire document, names
+// update_task_plan_kandev's mode="append" as the way to add a section
+// without resubmitting the whole document, and names the prior revision
+// number when it is known. This detector never runs on an append write
+// (see plan_service.go), so every write it can flag was necessarily a
+// replace.
 //
 // replacedRunes/newRunes are rune counts (not byte lengths): a script change
 // (e.g. an ASCII plan rewritten in CJK) can retain a small fraction of the
@@ -44,22 +47,26 @@ func planTruncationWarning(replacedRunes, newRunes, priorRevisionNumber int) str
 	if priorRevisionNumber <= 0 {
 		return fmt.Sprintf(
 			"WARNING: this write replaced %d chars with %d (dropped %d chars, %.0f%%). "+
-				"Plan writes REPLACE THE ENTIRE DOCUMENT — there is no partial update or append "+
-				"mode. Kandev could not verify which prior revision contains the pre-write content. "+
-				"The MCP plan tools cannot fetch past revisions. If this drop was not intentional, "+
-				"stop and inspect the task's revision history in the Kandev UI rather than rewriting "+
-				"the plan from memory.",
+				"This replace-mode write overwrote the entire document; use "+
+				"update_task_plan_kandev with mode=\"append\" to add a section without "+
+				"resubmitting the whole document next time. Kandev could not verify which "+
+				"prior revision contains the pre-write content. The MCP plan tools cannot "+
+				"fetch past revisions. If this drop was not intentional, stop and inspect "+
+				"the task's revision history in the Kandev UI rather than rewriting the "+
+				"plan from memory.",
 			replacedRunes, newRunes, dropped, droppedPct,
 		)
 	}
 
 	return fmt.Sprintf(
 		"WARNING: this write replaced %d chars with %d (dropped %d chars, %.0f%%). "+
-			"Plan writes REPLACE THE ENTIRE DOCUMENT — there is no partial update or append "+
-			"mode. The pre-write content is preserved in %s — recoverable from the Kandev UI, "+
-			"but NOT fetchable through the MCP plan tools (get_task_plan_kandev returns the "+
-			"current, now-truncated, content, not that revision). If this drop was not "+
-			"intentional, stop and surface the loss rather than rewriting the plan from memory.",
+			"This replace-mode write overwrote the entire document; use "+
+			"update_task_plan_kandev with mode=\"append\" to add a section without "+
+			"resubmitting the whole document next time. The pre-write content is "+
+			"preserved in %s — recoverable from the Kandev UI, but NOT fetchable through "+
+			"the MCP plan tools (get_task_plan_kandev returns the current, now-truncated, "+
+			"content, not that revision). If this drop was not intentional, stop and "+
+			"surface the loss rather than rewriting the plan from memory.",
 		replacedRunes, newRunes, dropped, droppedPct,
 		fmt.Sprintf("plan revision %d, in the task's plan revision history", priorRevisionNumber),
 	)

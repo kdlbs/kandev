@@ -75,7 +75,7 @@ func TestSQLiteRepository_TaskSessionCRUD(t *testing.T) {
 	}
 
 	// Delete agent session
-	if err := repo.DeleteTaskSession(ctx, session.ID); err != nil {
+	if err := repo.DeleteTaskSession(ctx, retrieved); err != nil {
 		t.Fatalf("failed to delete agent session: %v", err)
 	}
 	_, err = repo.GetTaskSession(ctx, session.ID)
@@ -99,7 +99,9 @@ func TestSQLiteRepository_TaskSessionNotFound(t *testing.T) {
 		t.Error("expected error for updating nonexistent agent session")
 	}
 
-	err = repo.DeleteTaskSession(ctx, "nonexistent")
+	err = repo.DeleteTaskSession(ctx, &models.TaskSession{
+		ID: "nonexistent", TaskID: "task-123", QueueIncarnationID: "missing",
+	})
 	if err == nil {
 		t.Error("expected error for deleting nonexistent agent session")
 	}
@@ -603,7 +605,7 @@ func TestGetPrimarySessionInfoByTaskIDs_PopulatesExecutorJoinFields(t *testing.T
 		t.Fatalf("CreateTask: %v", err)
 	}
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID: "sess-join", TaskID: "task-join", ExecutorID: exec.ID,
+		ID: "sess-join", TaskID: "task-join", ExecutorID: exec.ID, ExecutorProfileID: "profile-join",
 		State: models.TaskSessionStateRunning,
 	}); err != nil {
 		t.Fatalf("CreateTaskSession: %v", err)
@@ -628,6 +630,9 @@ func TestGetPrimarySessionInfoByTaskIDs_PopulatesExecutorJoinFields(t *testing.T
 	}
 	if v, _ := got.ExecutorSnapshot["executor_name"].(string); v != "my-docker" {
 		t.Errorf("expected executor_name 'my-docker' from JOIN, got %q (JOIN to executors removed?)", v)
+	}
+	if got.ExecutorProfileID != "profile-join" {
+		t.Errorf("expected executor_profile_id 'profile-join', got %q", got.ExecutorProfileID)
 	}
 }
 

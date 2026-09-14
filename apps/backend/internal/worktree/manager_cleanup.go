@@ -193,7 +193,7 @@ func (m *Manager) RemoveByID(ctx context.Context, worktreeID string, removeBranc
 		return err
 	}
 	m.enrichCleanupWorktreeFromCache(wt)
-	return m.removeWorktree(ctx, wt, removeBranch)
+	return m.removeWorktree(ctx, wt, removeBranch, WorktreeCleanupOptions{})
 }
 
 func (m *Manager) enrichCleanupWorktreeFromCache(wt *Worktree) {
@@ -220,7 +220,7 @@ func (m *Manager) enrichCleanupWorktreeFromCache(wt *Worktree) {
 	if wt.BaseBranch == "" {
 		wt.BaseBranch = cached.BaseBranch
 	}
-	if wt.CleanupHeadOID == "" {
+	if wt.CleanupHeadOID == "" && !wt.CleanupHeadOIDUnavailable {
 		wt.CleanupHeadOID = cached.CleanupHeadOID
 	}
 }
@@ -242,28 +242,45 @@ func (m *Manager) CaptureCleanupHeadOIDs(ctx context.Context, worktrees []*Workt
 			// fail closed instead of rejecting the task mutation itself.
 			continue
 		}
-		identityPath := wt.Path
-		info, statErr := os.Stat(wt.Path)
-		if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-			return nil, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, statErr)
-		}
-		if statErr != nil || !info.IsDir() {
-			if wt.Branch == "" {
-				continue
-			}
-			identityPath = wt.RepositoryPath
-		}
-		args := []string{"rev-parse", "--verify", "HEAD^{commit}"}
-		if identityPath == wt.RepositoryPath {
-			args = []string{"rev-parse", "--verify", "refs/heads/" + wt.Branch + "^{commit}"}
-		}
-		output, err := m.runBoundedGitInspect(ctx, identityPath, args...)
+		pathPresent, err := cleanupPathPresent(wt.Path)
 		if err != nil {
 			return nil, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, err)
 		}
-		oid := strings.TrimSpace(output)
-		if oid == "" {
-			return nil, fmt.Errorf("capture cleanup identity for %s returned an empty commit", wt.ID)
+		if !pathPresent {
+			branch := strings.TrimSpace(wt.Branch)
+			if branch == "" {
+				m.logger.Warn("cleanup worktree path is absent and branch is unknown",
+					zap.String("task_id", wt.TaskID),
+					zap.String("worktree_id", wt.ID),
+					zap.String("repository_path", wt.RepositoryPath),
+					zap.String("reason", "empty branch on environment row"))
+				continue
+			}
+			branchRef := "refs/heads/" + branch
+			oid, found, err := m.captureCleanupBranchOID(ctx, wt.RepositoryPath, branchRef)
+			if err != nil {
+				return nil, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, err)
+			}
+			if !found {
+				m.logger.Warn("cleanup worktree path and branch are absent",
+					zap.String("task_id", wt.TaskID),
+					zap.String("worktree_id", wt.ID),
+					zap.String("repository_path", wt.RepositoryPath),
+					zap.String("branch", branch),
+					zap.String("reason", "local branch ref not found"))
+				continue
+			}
+			identities[wt.ID] = oid
+			continue
+		}
+
+		output, err := m.runBoundedGitInspect(ctx, wt.Path, "rev-parse", "--verify", "HEAD^{commit}")
+		if err != nil {
+			return nil, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, err)
+		}
+		oid, err := parseCleanupCommitOID(output)
+		if err != nil {
+			return nil, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, err)
 		}
 		identities[wt.ID] = oid
 	}
@@ -271,7 +288,12 @@ func (m *Manager) CaptureCleanupHeadOIDs(ctx context.Context, worktrees []*Workt
 }
 
 // removeWorktree performs the actual removal of a worktree.
-func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch bool) error {
+func (m *Manager) removeWorktree(
+	ctx context.Context,
+	wt *Worktree,
+	removeBranch bool,
+	options WorktreeCleanupOptions,
+) error {
 	if wt == nil {
 		return errors.New("worktree cleanup requires a worktree")
 	}
@@ -320,7 +342,7 @@ func (m *Manager) removeWorktree(ctx context.Context, wt *Worktree, removeBranch
 		return nil
 	}
 
-	audit, err := m.auditWorktreeCleanup(ctx, wt, removeBranch)
+	audit, err := m.auditWorktreeCleanup(ctx, wt, removeBranch, options)
 	if err != nil {
 		return fmt.Errorf("audit worktree cleanup %s: %w", wt.ID, err)
 	}
@@ -506,21 +528,37 @@ func (m *Manager) managedScriptEnvironment(ctx context.Context) map[string]strin
 
 // CleanupWorktrees removes provided worktrees without re-fetching from the store.
 func (m *Manager) CleanupWorktrees(ctx context.Context, worktrees []*Worktree) error {
-	return m.cleanupWorktrees(ctx, worktrees, true)
+	return m.cleanupWorktrees(ctx, worktrees, true, WorktreeCleanupOptions{})
+}
+
+// CleanupWorktreesWithOptions removes worktrees while retaining all cleanup
+// identity and branch-safety audits. Discard consent only changes the clean
+// checkout gate.
+func (m *Manager) CleanupWorktreesWithOptions(
+	ctx context.Context,
+	worktrees []*Worktree,
+	options WorktreeCleanupOptions,
+) error {
+	return m.cleanupWorktrees(ctx, worktrees, true, options)
 }
 
 // CleanupWorktreesPreservingBranches removes provided worktrees while retaining
 // their local branch refs for later archive recovery.
 func (m *Manager) CleanupWorktreesPreservingBranches(ctx context.Context, worktrees []*Worktree) error {
-	return m.cleanupWorktrees(ctx, worktrees, false)
+	return m.cleanupWorktrees(ctx, worktrees, false, WorktreeCleanupOptions{})
 }
 
-func (m *Manager) cleanupWorktrees(ctx context.Context, worktrees []*Worktree, removeBranch bool) error {
+func (m *Manager) cleanupWorktrees(
+	ctx context.Context,
+	worktrees []*Worktree,
+	removeBranch bool,
+	options WorktreeCleanupOptions,
+) error {
 	if len(worktrees) == 0 {
 		return nil
 	}
 
-	var lastErr error
+	var errs []error
 	for _, wt := range worktrees {
 		if wt == nil {
 			continue
@@ -532,16 +570,16 @@ func (m *Manager) cleanupWorktrees(ctx context.Context, worktrees []*Worktree, r
 			continue
 		}
 		m.enrichCleanupWorktreeFromCache(wt)
-		if err := m.removeWorktree(ctx, wt, removeBranch); err != nil {
+		if err := m.removeWorktree(ctx, wt, removeBranch, options); err != nil {
 			m.logger.Warn("failed to remove worktree during batch cleanup",
 				zap.String("task_id", wt.TaskID),
 				zap.String("worktree_id", wt.ID),
 				zap.Error(err))
-			lastErr = err
+			errs = append(errs, fmt.Errorf("cleanup worktree %s: %w", wt.ID, err))
 		}
 	}
 
-	return lastErr
+	return errors.Join(errs...)
 }
 
 // OnTaskDeleted cleans up all worktrees for a task when it is deleted.

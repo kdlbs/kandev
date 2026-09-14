@@ -29,6 +29,8 @@ Today the only ways to run an agent are: (1) locally on the user's own machine (
 - **AC-EXECUTORS-SSH-EXECUTOR-001.8:** One SSH connection per `(host, user, identity-source)`, opened lazily and reused across all the executor's sessions on that host. Each session adds:
 - **AC-EXECUTORS-SSH-EXECUTOR-001.9:** When a resumable SSH session's prior remote controller is confirmed absent, the system shall start a fresh controller in the preserved task workspace and load the preserved provider conversation.
 - **AC-EXECUTORS-SSH-EXECUTOR-001.10:** When the system cannot determine whether a prior remote controller is alive because the SSH probe fails, resume shall fail without starting a replacement controller.
+- **AC-EXECUTORS-SSH-EXECUTOR-001.11:** When Kandev copies OpenCode `auth.json` to an SSH host, it shall preserve target-only providers and copy source providers. The source entry shall replace the target entry when both files contain the same provider.
+- **AC-EXECUTORS-SSH-EXECUTOR-001.12:** When the source or existing target is unreadable or is not a JSON object, Kandev shall leave the target unchanged. Kandev shall report the credential-copy error.
 
 ## System design
 

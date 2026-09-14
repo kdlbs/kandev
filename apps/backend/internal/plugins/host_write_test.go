@@ -82,7 +82,7 @@ func TestPluginHost_Tasks_WriteOnlyCannotRead(t *testing.T) {
 
 func TestPluginHost_Tasks_CreateSucceedsAndStampsSource(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
-	d.taskWriter.created = &taskmodels.Task{ID: "task-9", WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Investigate"}
+	d.taskWriter.created = &taskmodels.Task{ID: "task-9", WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Investigate", Priority: "high"}
 
 	task, err := d.host.Tasks().Create(context.Background(), pluginsdk.CreateTaskInput{
 		WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "Investigate", Description: "details",
@@ -92,6 +92,9 @@ func TestPluginHost_Tasks_CreateSucceedsAndStampsSource(t *testing.T) {
 	}
 	if task == nil || task.ID != "task-9" {
 		t.Fatalf("Create() = %+v, want task-9", task)
+	}
+	if task.Priority != "high" {
+		t.Fatalf("Create() priority = %q, want high", task.Priority)
 	}
 	if d.taskWriter.createCalls != 1 {
 		t.Fatalf("task writer create calls = %d, want 1", d.taskWriter.createCalls)
@@ -450,11 +453,12 @@ func TestPluginHost_Tasks_CreateAmbiguousWorkspaceIsInvalidArgument(t *testing.T
 
 func TestPluginHost_Tasks_UpdateSucceedsWithMask(t *testing.T) {
 	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
-	d.taskWriter.updated = &taskmodels.Task{ID: "task-1", Title: "Renamed"}
+	d.taskWriter.updated = &taskmodels.Task{ID: "task-1", Title: "Renamed", Priority: "high"}
 
 	title := "Renamed"
 	state := "IN_PROGRESS"
-	_, err := d.host.Tasks().Update(context.Background(), pluginsdk.UpdateTaskInput{ID: "task-1", Title: &title, State: &state})
+	priority := "high"
+	task, err := d.host.Tasks().Update(context.Background(), pluginsdk.UpdateTaskInput{ID: "task-1", Title: &title, State: &state, Priority: &priority})
 	if err != nil {
 		t.Fatalf("Update() unexpected error: %v", err)
 	}
@@ -466,6 +470,52 @@ func TestPluginHost_Tasks_UpdateSucceedsWithMask(t *testing.T) {
 	}
 	if d.taskWriter.lastUpdate.Description != nil {
 		t.Fatalf("unset description must stay nil, got %v", d.taskWriter.lastUpdate.Description)
+	}
+	if d.taskWriter.lastUpdate.Priority == nil || *d.taskWriter.lastUpdate.Priority != "high" {
+		t.Fatalf("priority = %v, want high", d.taskWriter.lastUpdate.Priority)
+	}
+	if task.Priority != "high" {
+		t.Fatalf("Update() priority = %q, want high", task.Priority)
+	}
+}
+
+func TestPluginHost_Tasks_RejectsInvalidPriority(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+	bad := "urgent"
+
+	_, err := d.host.Tasks().Create(context.Background(), pluginsdk.CreateTaskInput{WorkspaceID: "ws-1", WorkflowID: "wf-1", Title: "x", Priority: bad})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("Create() invalid priority error = %v, want InvalidArgument", err)
+	}
+	_, err = d.host.Tasks().Update(context.Background(), pluginsdk.UpdateTaskInput{ID: "task-1", Priority: &bad})
+	if status.Code(err) != codes.InvalidArgument {
+		t.Fatalf("Update() invalid priority error = %v, want InvalidArgument", err)
+	}
+	if d.taskWriter.createCalls != 0 || d.taskWriter.updateCalls != 0 {
+		t.Fatal("task writer called with an invalid priority")
+	}
+}
+
+func TestPluginHost_Tasks_UpdateRejectsWorkflowStepIDBeforeInvalidPriority(t *testing.T) {
+	d := newTestDataHost(manifest.Capabilities{APIWrite: []string{"tasks"}})
+	step := "step-2"
+	badPriority := "urgent"
+
+	_, err := d.host.Tasks().Update(context.Background(), pluginsdk.UpdateTaskInput{
+		ID:             "task-1",
+		WorkflowStepID: &step,
+		Priority:       &badPriority,
+	})
+
+	if got := status.Code(err); got != codes.InvalidArgument {
+		t.Fatalf("Update() error code = %v, want InvalidArgument", got)
+	}
+	const wantMessage = "workflow_step_id cannot be set via UpdateTask: use MoveTask to transition a task between workflow steps"
+	if got := status.Convert(err).Message(); got != wantMessage {
+		t.Fatalf("Update() error message = %q, want %q", got, wantMessage)
+	}
+	if d.taskWriter.updateCalls != 0 {
+		t.Fatalf("task writer called %d times for a rejected move", d.taskWriter.updateCalls)
 	}
 }
 

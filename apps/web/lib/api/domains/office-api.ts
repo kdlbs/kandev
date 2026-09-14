@@ -4,7 +4,6 @@ import type {
   AgentProfile,
   Project,
   CostSummary,
-  BudgetPolicy,
   Routine,
   RoutineTrigger,
   RoutineRun,
@@ -64,6 +63,7 @@ export {
   gitPull,
   gitPush,
 } from "./office-extended-api";
+export { listBudgets, createBudget, updateBudget, deleteBudget } from "./office-budget-api";
 export type {
   ImportDiff,
   ImportPreview,
@@ -254,6 +254,26 @@ export function updateAgentProfile(
   }).then((res) => normalizeAgent(res.agent));
 }
 
+// Dedicated status transition endpoint: validates the transition table and
+// clears pause_reason as a side effect. The general agent update endpoint
+// above accepts a status field too but writes it unchecked, so callers that
+// need transition validation (e.g. agent recovery) must use this instead.
+// `expectedStatus` selects the guarded recovery form, which refuses to
+// overwrite a status that is no longer paused or stopped.
+export function updateAgentStatus(
+  id: string,
+  status: AgentStatus,
+  options?: ApiRequestOptions & { expectedStatus?: AgentStatus },
+) {
+  const { expectedStatus, ...requestOptions } = options ?? {};
+  const body: { status: AgentStatus; expected_status?: AgentStatus } = { status };
+  if (expectedStatus) body.expected_status = expectedStatus;
+  return fetchJson<AgentResponse>(`${BASE}/agents/${id}/status`, {
+    ...requestOptions,
+    init: { method: "PATCH", body: JSON.stringify(body), ...requestOptions.init },
+  }).then((res) => normalizeAgent(res.agent));
+}
+
 export function deleteAgentProfile(id: string, options?: ApiRequestOptions) {
   return fetchJson<void>(`${BASE}/agents/${id}`, {
     ...options,
@@ -403,37 +423,32 @@ type CostBreakdownItemRaw = {
   total_subcents: number;
 };
 
-// --- Budget Policies ---
+// --- Built-in default spend ceiling (AC-OFFICE-BUDGET-003.5) ---
 
-export function listBudgets(workspaceId: string, options?: ApiRequestOptions) {
-  return fetchJson<{ budgets: BudgetPolicy[] }>(
-    `${BASE}/workspaces/${workspaceId}/budgets`,
-    options,
-  );
+// DefaultCeilingRaw is the wire shape of GET/PUT .../budgets/default
+// (internal/office/costs/dto.go's DefaultCeilingResponse /
+// SetDefaultCeilingRequest, both `{"limit_subcents": ...}`). Named "Raw"
+// and read as snake_case directly by the caller, matching this file's
+// existing CostBreakdownItemRaw convention, rather than assuming a
+// camelCase field the backend does not send.
+type DefaultCeilingRaw = { limit_subcents: number };
+
+export function getDefaultCeiling(workspaceId: string, options?: ApiRequestOptions) {
+  return fetchJson<DefaultCeilingRaw>(`${BASE}/workspaces/${workspaceId}/budgets/default`, options);
 }
 
-export function createBudget(
+export function setDefaultCeiling(
   workspaceId: string,
-  data: Partial<BudgetPolicy>,
+  limitSubcents: number,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<BudgetPolicy>(`${BASE}/workspaces/${workspaceId}/budgets`, {
+  return fetchJson<DefaultCeilingRaw>(`${BASE}/workspaces/${workspaceId}/budgets/default`, {
     ...options,
-    init: { method: "POST", body: JSON.stringify(data), ...options?.init },
-  });
-}
-
-export function updateBudget(id: string, data: Partial<BudgetPolicy>, options?: ApiRequestOptions) {
-  return fetchJson<BudgetPolicy>(`${BASE}/budgets/${id}`, {
-    ...options,
-    init: { method: "PATCH", body: JSON.stringify(data), ...options?.init },
-  });
-}
-
-export function deleteBudget(id: string, options?: ApiRequestOptions) {
-  return fetchJson<void>(`${BASE}/budgets/${id}`, {
-    ...options,
-    init: { method: "DELETE", ...options?.init },
+    init: {
+      method: "PUT",
+      body: JSON.stringify({ limit_subcents: limitSubcents }),
+      ...options?.init,
+    },
   });
 }
 

@@ -70,6 +70,26 @@ func TestHandleCreateAgentProfile_PersistsAutoApprove(t *testing.T) {
 	require.True(t, stored.AutoApprove)
 }
 
+func TestHandleCreateAgentProfile_RejectsUnknownSettings(t *testing.T) {
+	h, repo, _ := newAgentSettingsHandlers(t)
+	ctx := context.Background()
+	agent := &settingsmodels.Agent{Name: "codex-acp"}
+	require.NoError(t, repo.CreateAgent(ctx, agent))
+
+	msg := makeWSMessage(t, ws.ActionMCPCreateAgentProfile, map[string]interface{}{
+		"agent_id": agent.ID,
+		"name":     "Unknown setting",
+		"settings": map[string]interface{}{"typo_model": "gpt-5"},
+	})
+	resp, err := h.handleCreateAgentProfile(ctx, msg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeBadRequest)
+
+	profiles, err := repo.ListAgentProfiles(ctx, agent.ID)
+	require.NoError(t, err)
+	require.Empty(t, profiles)
+}
+
 func TestHandleUpdateAgentProfile_AppliesExplicitAutoApprove(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -7,18 +7,21 @@ import { listAutomations } from "@/lib/api/domains/automation-api";
 import { listWorkflows } from "@/lib/api/domains/kanban-api";
 import { listRepositories } from "@/lib/api/domains/workspace-api";
 import { listSecrets } from "@/lib/api/domains/secrets-api";
+import { listWorkspaceCanvases } from "@/lib/api/domains/canvas-api";
 import { getAzureDevOpsConfig } from "@/lib/api/domains/azure-devops-api";
 import { fetchGitHubStatus } from "@/lib/api/domains/github-auth-api";
 import { getGitLabConfig } from "@/lib/api/domains/gitlab-api";
 import { getJiraConfig } from "@/lib/api/domains/jira-api";
 import { getLinearConfig } from "@/lib/api/domains/linear-api";
 import { listSentryInstances } from "@/lib/api/domains/sentry-api";
+import { useFeature } from "@/hooks/domains/features/use-feature";
 import Link from "@/components/routing/app-link";
 import {
+  getWorkspaceSettingsTabs,
   workspaceSettingsHref,
-  workspaceSettingsTabSpec,
   type WorkspaceSettingsTab,
-} from "./workspace-settings-shell";
+  workspaceSettingsTabSpec,
+} from "@/lib/settings/workspace-settings-tabs";
 import { cn } from "@kandev/ui/lib/utils";
 
 export type SectionCounts = {
@@ -27,6 +30,7 @@ export type SectionCounts = {
   integrations?: number;
   automations?: number;
   secrets?: number;
+  canvases?: number;
 };
 
 // One probe per integration service; counts the ones configured/connected for
@@ -59,6 +63,7 @@ export function useWorkspaceSectionCounts(workspaceId: string): {
 } {
   const [counts, setCounts] = useState<SectionCounts>({});
   const [settled, setSettled] = useState(false);
+  const canvasesEnabled = useFeature("canvases");
 
   useEffect(() => {
     let cancelled = false;
@@ -84,6 +89,20 @@ export function useWorkspaceSectionCounts(workspaceId: string): {
       listSecrets({ scope: "workspace", workspaceId })
         .then((secrets) => apply({ secrets: (secrets ?? []).length }))
         .catch(() => undefined),
+      ...(canvasesEnabled
+        ? [
+            listWorkspaceCanvases(workspaceId)
+              .then((response) =>
+                apply({
+                  canvases: (response.canvases ?? []).filter(
+                    (canvas) =>
+                      canvas.status === "active" && canvas.active_release_status === "valid",
+                  ).length,
+                }),
+              )
+              .catch(() => undefined),
+          ]
+        : []),
     ];
     void Promise.allSettled(probes).then(() => {
       if (!cancelled) setSettled(true);
@@ -91,7 +110,7 @@ export function useWorkspaceSectionCounts(workspaceId: string): {
     return () => {
       cancelled = true;
     };
-  }, [workspaceId]);
+  }, [canvasesEnabled, workspaceId]);
 
   return { counts, settled };
 }
@@ -103,13 +122,11 @@ type SectionStat = {
 
 // Name and mark come from the tab table, so a tile and the tab it opens cannot
 // end up labelled or marked differently.
-const SECTION_STATS: SectionStat[] = [
-  { key: "repositories", tab: "repositories" },
-  { key: "workflows", tab: "workflows" },
-  { key: "integrations", tab: "integrations" },
-  { key: "automations", tab: "automations" },
-  { key: "secrets", tab: "secrets" },
-];
+function workspaceSectionStats(canvasesEnabled: boolean): SectionStat[] {
+  return getWorkspaceSettingsTabs(canvasesEnabled)
+    .filter(({ tab }) => tab !== "overview")
+    .map(({ tab }) => ({ key: tab as keyof SectionCounts, tab }));
+}
 
 /**
  * A workspace's sections as count tiles: big count, chevron, label. Rendered
@@ -126,24 +143,29 @@ export function WorkspaceSectionStats({
   className?: string;
 }) {
   const { t } = useTranslation();
+  const canvasesEnabled = useFeature("canvases");
+  const stats = workspaceSectionStats(canvasesEnabled);
 
   return (
     <div
       className={cn(
         // Desktop columns cap at 175px per tile instead of stretching full width.
-        "grid flex-1 grid-cols-3 gap-2 lg:grid-cols-[repeat(5,minmax(0,175px))]",
+        "grid flex-1 grid-cols-3 gap-2 lg:grid-cols-[repeat(5,minmax(0,175px))] 2xl:grid-cols-[repeat(6,minmax(0,150px))]",
         className,
       )}
       data-testid="workspace-section-stats"
     >
-      {SECTION_STATS.map(({ key, tab }) => {
+      {stats.map(({ key, tab }) => {
         const count = counts[key];
         const { labelKey, icon: Icon } = workspaceSettingsTabSpec(tab);
         return (
           <Link
             key={key}
             href={workspaceSettingsHref(workspaceId, tab)}
-            className="relative z-10 flex flex-col gap-1 rounded-lg border border-border/70 bg-background/50 p-2.5 transition-colors hover:border-foreground/30 hover:bg-muted/50"
+            className={cn(
+              "relative z-10 flex flex-col gap-1 rounded-lg border border-border/70 bg-background/50 p-2.5 transition-colors hover:border-foreground/30 hover:bg-muted/50",
+              tab === "canvases" && "hidden 2xl:flex",
+            )}
           >
             <div className="flex items-start justify-between gap-1">
               <span

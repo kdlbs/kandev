@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/orgunit"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -50,6 +51,28 @@ func (c *recordingTaskClarificationCanceller) ExpireSessionAndNotify(
 	c.hasDeadline = append(c.hasDeadline, hasDeadline)
 	c.contextErrs = append(c.contextErrs, ctx.Err())
 	return 1, c.err
+}
+
+type parkedProjectionCancelCall struct {
+	taskID      string
+	sessionID   string
+	newState    models.TaskSessionState
+	hasDeadline bool
+}
+
+type recordingParkedProjectionCanceller struct {
+	calls []parkedProjectionCancelCall
+}
+
+func (c *recordingParkedProjectionCanceller) ClearParkedProjectionOnSessionTerminated(
+	ctx context.Context,
+	taskID, sessionID string,
+	newState models.TaskSessionState,
+) {
+	_, hasDeadline := ctx.Deadline()
+	c.calls = append(c.calls, parkedProjectionCancelCall{
+		taskID: taskID, sessionID: sessionID, newState: newState, hasDeadline: hasDeadline,
+	})
 }
 
 func NewMockEventBus() *MockEventBus {
@@ -149,6 +172,9 @@ func (*testWorkflowStepGetter) GetNextStepByPosition(context.Context, string, in
 // caller substitute the Sessions repository (e.g. to wrap it with a test-only
 // hook) while reusing the same DB setup, migrations, and cleanup-worker
 // wiring for every other field.
+// testUnits exposes each test's unit service so a seed can build a tree.
+var testUnits = map[string]*orgunit.Service{}
+
 func createTestServiceWithSessionsRepo(
 	t *testing.T,
 	wrapSessions func(*sqliterepo.Repository) repository.SessionRepository,
@@ -209,6 +235,18 @@ func createTestServiceWithSessionsRepo(
 		Usage:             repo,
 	}, eventBus, log, RepositoryDiscoveryConfig{})
 	svc.SetWorkspaceBootstrapper(repo)
+	// Reach comes from the unit tree, so the service tests wire the real one
+	// rather than a stub: a resolver the wiring never calls protects nothing.
+	unitStore, unitErr := orgunit.NewStore(db.NewPool(sqlxDB, sqlxDB))
+	if unitErr != nil {
+		t.Fatalf("failed to init unit store: %v", unitErr)
+	}
+	unitSvc := orgunit.NewService(unitStore, nil)
+	unitSvc.SetWorkspaceCounter(repo)
+	svc.SetUnitPlacer(unitSvc)
+	svc.SetUnitReach(unitSvc)
+	testUnits[t.Name()] = unitSvc
+	t.Cleanup(func() { delete(testUnits, t.Name()) })
 	svc.SetWorkflowStepGetter(&testWorkflowStepGetter{repo: repo})
 	if err := svc.StartTaskResourceCleanupWorker(context.Background()); err != nil {
 		t.Fatalf("failed to start task resource cleanup worker: %v", err)
@@ -635,6 +673,38 @@ func TestService_CreateTask_DefaultsPriorityWhenEmpty(t *testing.T) {
 	}
 	if task.Priority != "medium" {
 		t.Errorf("expected default priority 'medium', got %q", task.Priority)
+	}
+}
+
+func TestService_TaskPriorityRejectsUnknownValues(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-priority", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-priority", WorkspaceID: "ws-priority", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if _, err := svc.CreateTask(ctx, &CreateTaskRequest{WorkspaceID: "ws-priority", WorkflowID: "wf-priority", Title: "Bad priority", Priority: "urgent"}); err == nil {
+		t.Fatal("CreateTask accepted an unknown priority")
+	}
+	if err := repo.CreateTask(ctx, &models.Task{ID: "task-priority", WorkspaceID: "ws-priority", WorkflowID: "wf-priority", Title: "Priority", Priority: "medium"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	priority := "urgent"
+	if _, err := svc.UpdateTask(ctx, "task-priority", &UpdateTaskRequest{Priority: &priority}); err == nil {
+		t.Fatal("UpdateTask accepted an unknown priority")
+	}
+}
+
+func TestValidateTaskPriority(t *testing.T) {
+	for _, priority := range []string{"critical", "high", "medium", "low"} {
+		if err := ValidateTaskPriority(priority); err != nil {
+			t.Errorf("ValidateTaskPriority(%q) = %v, want nil", priority, err)
+		}
+	}
+	if err := ValidateTaskPriority("urgent"); err == nil {
+		t.Error("ValidateTaskPriority(urgent) = nil, want error")
 	}
 }
 
@@ -2043,6 +2113,57 @@ func TestService_ArchiveTaskPublishesSessionStateChangedForActiveSessions(t *tes
 	}
 	if len(clarifications.contextErrs) != 1 || clarifications.contextErrs[0] != nil {
 		t.Fatalf("clarification expiry context errors = %v, want active context", clarifications.contextErrs)
+	}
+}
+
+// TestService_ArchiveTaskClearsParkedProjectionForCancelledSessions is the
+// regression test for the archive-side parked-projection leak: ArchiveTask
+// cancels active sessions through a bulk repository update that never passes
+// through the orchestrator's per-session state-transition chokepoint, so
+// nothing stopped that session's parked sampling loop or cleared its
+// tracking. Without a wired ParkedProjectionCanceller, an archived task whose
+// session was parked would keep publishing parked_on_background_work forever.
+func TestService_ArchiveTaskClearsParkedProjectionForCancelledSessions(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-1", WorkspaceID: "ws-1", Name: "Workflow"}); err != nil {
+		t.Fatalf("CreateWorkflow: %v", err)
+	}
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-1", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1",
+		Title: "Test", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "session-parked", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput,
+		AgentProfileID: "agent-1", IsPrimary: true,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	parked := &recordingParkedProjectionCanceller{}
+	svc.SetParkedProjectionCanceller(parked)
+	if err := svc.ArchiveTask(ctx, "task-1"); err != nil {
+		t.Fatalf("ArchiveTask: %v", err)
+	}
+
+	if len(parked.calls) != 1 {
+		t.Fatalf("parked projection cancel calls = %v, want exactly one", parked.calls)
+	}
+	call := parked.calls[0]
+	if call.taskID != "task-1" || call.sessionID != "session-parked" {
+		t.Errorf("call = %+v, want task-1/session-parked", call)
+	}
+	if call.newState != models.TaskSessionStateCancelled {
+		t.Errorf("newState = %q, want CANCELLED", call.newState)
+	}
+	if !call.hasDeadline {
+		t.Error("expected a bounded context for the parked-projection cancel call")
 	}
 }
 

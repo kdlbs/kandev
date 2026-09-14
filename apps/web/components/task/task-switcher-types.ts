@@ -1,13 +1,23 @@
-import type { ForegroundActivity, TaskSessionState, TaskState } from "@/lib/types/http";
+import type {
+  ForegroundActivity,
+  TaskOrigin,
+  TaskPriority,
+  TaskSessionState,
+  TaskState,
+} from "@/lib/types/http";
 import type { GroupedSidebarList } from "@/lib/sidebar/apply-view";
 import type { TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
 import type { WipQueueStatus } from "@/lib/kanban/wip-queue";
 import type { SidebarTaskRowPresentation } from "@/lib/state/slices/ui/sidebar-task-row-presentation";
+import type { TaskMarkerPresentation } from "@/lib/task-color-presentation";
+import type { AutomaticTaskColorSource } from "@/lib/sidebar/task-color-rules";
+import type { TaskRepositoryRuleIdentity } from "@/lib/sidebar/repository-rule-identity";
 
 export type StepDef = {
   id: string;
   title: string;
   color?: string;
+  agent_profile_id?: string | null;
   events?: { on_enter?: Array<{ type: string; config?: Record<string, unknown> }> };
 };
 
@@ -17,19 +27,29 @@ export type TaskSwitcherItem = {
   id: string;
   title: string;
   autopilot?: boolean;
+  priority?: TaskPriority;
   state?: TaskState;
   sessionState?: TaskSessionState;
   /** Task-level most-active-wins busy aggregate (ADR-0049) from the task record. */
   foregroundActivity?: ForegroundActivity | null;
   /** True when the task's session was mid-turn when the backend died. */
   interrupted?: boolean;
+  /** True when parked on background work (spec docs/specs/disambiguate-waiting). */
+  parkedOnBackgroundWork?: boolean;
   description?: string;
   workflowId?: string;
   workflowName?: string;
   workflowStepId?: string;
   workflowStepTitle?: string;
+  workspaceId?: string;
+  origin?: TaskOrigin | string;
+  primaryExecutorProfileId?: string;
+  workflowStepColor?: string;
   repositoryPath?: string;
   repositories?: string[];
+  repositoryRuleIdentities?: readonly TaskRepositoryRuleIdentity[];
+  automaticColor?: TaskMarkerPresentation;
+  automaticColorSource?: AutomaticTaskColorSource;
   /** Persisted task-to-repository links used by host-owned plugin task actions. */
   repositoryLinks?: Array<{ repository_id: string; position?: number }>;
   diffStats?: { additions: number; deletions: number };
@@ -83,6 +103,8 @@ export type TaskSwitcherProps = {
   onLinkLinearIssue?: TaskLinkHandler;
   onLinkSentryIssue?: TaskLinkHandler;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
+  onRequestMoveOptions?: (taskId: string, workflowId: string, targetStepId: string) => void;
+  onBeforeMoveOptionsOpen?: () => void;
   onTogglePin?: (taskId: string) => void;
   onReorderGroup?: (groupTaskIds: string[]) => void;
   onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;

@@ -170,18 +170,30 @@ func errorFromMap(now time.Time, sessionID string, data map[string]interface{}) 
 		occurredAt = now.UTC()
 	}
 	preview := truncateString(message, MaxActiveErrorPreviewBytes)
+	causes := models.NormalizeAgentErrorCauses(agentErrorCausesValue(data["causes"]))
+	details := models.NormalizeAgentErrorDetails(stringField(data, "details"), causes)
 	stamp := stringField(data, "stamp")
 	if stamp == "" {
 		stamp = occurredAt.UTC().Format(time.RFC3339Nano) + ":" + preview
 	}
+	category := truncateString(firstString(data, "category", "code"), maxActiveErrorCategoryBytes)
+	phase := stringField(data, "phase")
+	if phase != models.LaunchErrorPhaseBootstrap {
+		phase = ""
+	}
 	return &ActiveErrorSummary{
 		SessionID:        truncateString(sessionID, maxSessionIDBytes),
 		TaskRepositoryID: truncateString(stringField(data, "task_repository_id"), maxTaskRepositoryIDBytes),
+		ExecutionID:      truncateString(firstString(data, "execution_id", "agent_execution_id"), maxSessionIDBytes),
+		AttemptID:        truncateString(stringField(data, "attempt_id"), maxSessionIDBytes),
+		Phase:            phase,
 		Stamp:            truncateString(stamp, maxActiveErrorStampBytes),
 		OccurredAt:       occurredAt.UTC(),
 		Preview:          preview,
-		Category:         truncateString(firstString(data, "category", "code"), maxActiveErrorCategoryBytes),
-		RecoveryActions:  normalizeRecoveryActions(recoveryActionsValue(data["recovery_actions"])),
+		Details:          details,
+		Category:         category,
+		RecoveryActions:  normalizeRecoveryActionsForCategory(category, recoveryActionsValue(data["recovery_actions"])),
+		Causes:           causes,
 	}, true
 }
 
@@ -190,13 +202,18 @@ func errorEqual(a, b *ActiveErrorSummary) bool {
 		return a == b
 	}
 	return a.SessionID == b.SessionID && a.TaskRepositoryID == b.TaskRepositoryID &&
+		a.ExecutionID == b.ExecutionID && a.AttemptID == b.AttemptID && a.Phase == b.Phase &&
 		a.Stamp == b.Stamp && a.OccurredAt.Equal(b.OccurredAt) &&
-		a.Preview == b.Preview && a.Category == b.Category &&
-		slices.Equal(a.RecoveryActions, b.RecoveryActions)
+		a.Preview == b.Preview && a.Details == b.Details && a.Category == b.Category &&
+		slices.Equal(a.RecoveryActions, b.RecoveryActions) && slices.Equal(a.Causes, b.Causes)
 }
 
 func normalizeRecoveryActions(actions []string) []string {
 	return models.NormalizeRecoveryActions(actions)
+}
+
+func normalizeRecoveryActionsForCategory(category string, actions []string) []string {
+	return models.NormalizeRecoveryActionsForCategory(category, actions)
 }
 
 func recoveryActionsValue(value interface{}) []string {
@@ -214,6 +231,32 @@ func recoveryActionsValue(value interface{}) []string {
 	default:
 		return nil
 	}
+}
+
+func agentErrorCausesValue(value interface{}) []models.AgentErrorCause {
+	if value == nil {
+		return nil
+	}
+	if causes, ok := value.([]models.AgentErrorCause); ok {
+		return append([]models.AgentErrorCause(nil), causes...)
+	}
+	items, ok := value.([]interface{})
+	if !ok {
+		return nil
+	}
+	causes := make([]models.AgentErrorCause, 0, len(items))
+	for _, item := range items {
+		data, err := json.Marshal(item)
+		if err != nil {
+			continue
+		}
+		var cause models.AgentErrorCause
+		if err := json.Unmarshal(data, &cause); err != nil {
+			continue
+		}
+		causes = append(causes, cause)
+	}
+	return causes
 }
 
 func eventDataMap(data interface{}) (map[string]interface{}, error) {

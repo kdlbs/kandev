@@ -10,7 +10,6 @@ import {
   type SetStateAction,
 } from "react";
 import {
-  IconArrowRight,
   IconMessageCircle,
   IconMessageDots,
   IconSend,
@@ -41,7 +40,10 @@ import type { KeyboardShortcut } from "@/lib/keyboard/constants";
 import type { DiffComment } from "@/lib/diff/types";
 import { PassthroughTerminal } from "./passthrough-terminal";
 import { PassthroughComposerPanel, useSendPassthroughMessage } from "./passthrough-chat-composer";
+import { hasPendingClarification, shouldShowProceed } from "./chat/types";
 import { Trans, useTranslation } from "react-i18next";
+import { WorkflowMoveProceedButton } from "@/components/task/workflow-move-proceed-button";
+import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
 
 function isEditableElement(element: Element | null) {
   if (element instanceof HTMLElement && element.closest(".xterm")) return false;
@@ -74,6 +76,25 @@ function usePassthroughComposerShortcut({
   );
 }
 
+function usePassthroughSendHandler(
+  sendPassthroughMessage: ReturnType<typeof useSendPassthroughMessage>,
+) {
+  const [isSending, setIsSending] = useState(false);
+  const handleSendMessage = useCallback(
+    async (...args: Parameters<typeof sendPassthroughMessage>) => {
+      if (isSending) return;
+      setIsSending(true);
+      try {
+        await sendPassthroughMessage(...args);
+      } finally {
+        setIsSending(false);
+      }
+    },
+    [isSending, sendPassthroughMessage],
+  );
+  return { isSending, handleSendMessage };
+}
+
 /**
  * PassthroughToolbar wraps the PTY terminal with the kandev surface that the
  * full ACP `ChatStatusBar` + `ChatInputArea` provide for chat mode: PR status,
@@ -96,7 +117,6 @@ export function PassthroughToolbar({
 }) {
   const [composerOpen, setComposerOpen] = useState(false);
   const [commentsOpenState, setCommentsOpen] = useState(false);
-  const [isSending, setIsSending] = useState(false);
   const chatInputRef = useRef<ChatInputContainerHandle | null>(null);
 
   const sessionState = useAppStore((state) =>
@@ -107,7 +127,8 @@ export function PassthroughToolbar({
   const isAgentBusy = sessionState === "RUNNING" || sessionState === "STARTING";
 
   const { pendingComments, pendingCount } = usePendingPassthroughComments(sessionId);
-  const { isFinePointer: finePointer } = useResponsiveBreakpoint();
+  const { isMobile, isTablet, isFinePointer: finePointer } = useResponsiveBreakpoint();
+  const isTouch = isMobile || isTablet;
   const { openFile } = useFileEditors();
   const panelState = useChatPanelState({ sessionId: sessionId ?? null, onOpenFile: openFile });
   const planActions = usePlanActions({
@@ -117,7 +138,15 @@ export function PassthroughToolbar({
     handlePlanModeChange: panelState.handlePlanModeChange,
     chatInputRef,
   });
-  const showProceed = !!planActions.proceedStepName && !isAgentBusy;
+  const clarificationPending = hasPendingClarification(
+    Boolean(panelState.pendingClarification),
+    panelState.session?.pending_action,
+  );
+  const showProceed = shouldShowProceed(
+    planActions.proceedStepName,
+    isAgentBusy,
+    clarificationPending,
+  );
   const implementPlanHandler =
     isAgentBusy || !panelState.planModeEnabled ? undefined : planActions.implementPlanHandler;
 
@@ -134,18 +163,7 @@ export function PassthroughToolbar({
       setCommentsOpen(false);
     },
   });
-  const handleSendMessage = useCallback(
-    async (...args: Parameters<typeof sendPassthroughMessage>) => {
-      if (isSending) return;
-      setIsSending(true);
-      try {
-        await sendPassthroughMessage(...args);
-      } finally {
-        setIsSending(false);
-      }
-    },
-    [isSending, sendPassthroughMessage],
-  );
+  const { isSending, handleSendMessage } = usePassthroughSendHandler(sendPassthroughMessage);
 
   useEffect(() => {
     if (!composerOpen) return;
@@ -165,6 +183,7 @@ export function PassthroughToolbar({
           comments={pendingComments}
           openFile={openFile}
           onSend={() => handleSendMessage({ message: "" })}
+          isTouch={isTouch}
         />
       )}
 
@@ -194,6 +213,7 @@ export function PassthroughToolbar({
         commentsOpen={commentsOpen}
         onToggleComments={() => setCommentsOpen((open) => !open)}
         pendingCommentsCount={pendingCount}
+        isTouch={isTouch}
       />
     </div>
   );
@@ -214,14 +234,22 @@ function usePendingPassthroughComments(sessionId: string | null | undefined) {
   return { pendingComments, pendingCount: pendingComments.length };
 }
 
+const PASSTHROUGH_STATUS_CONTROL_BASE_CLASS = "gap-1 px-2.5 text-xs cursor-pointer";
+
+function passthroughStatusControlClass(isTouch: boolean): string {
+  return `${isTouch ? "min-h-11 min-w-11" : "h-6"} ${PASSTHROUGH_STATUS_CONTROL_BASE_CLASS}`;
+}
+
 function ChatToggleButton({
   composerOpen,
   focusShortcut,
   onToggle,
+  isTouch,
 }: {
   composerOpen: boolean;
   focusShortcut: KeyboardShortcut;
   onToggle: () => void;
+  isTouch: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -231,7 +259,7 @@ function ChatToggleButton({
           type="button"
           variant={composerOpen ? "default" : "outline"}
           size="sm"
-          className="h-6 gap-1 px-2.5 text-xs cursor-pointer"
+          className={passthroughStatusControlClass(isTouch)}
           onClick={onToggle}
           data-testid="passthrough-toggle-composer"
           aria-pressed={composerOpen}
@@ -286,22 +314,24 @@ function PassthroughChatShortcutHint({ shortcut }: { shortcut: KeyboardShortcut 
   );
 }
 
-function commentsToggleClassName(count: number, commentsOpen: boolean): string {
+function commentsToggleClassName(count: number, commentsOpen: boolean, isTouch: boolean): string {
   // Vivid amber when there are pending comments so the user sees "something
   // to do" — washes back to plain outline once they're cleared / sent.
-  if (count === 0) return "h-6 gap-1 px-2.5 text-xs cursor-pointer";
-  if (commentsOpen) return "h-6 gap-1 px-2.5 text-xs cursor-pointer";
-  return "h-6 gap-1 px-2.5 text-xs cursor-pointer border-amber-500/60 bg-amber-500/15 text-amber-700 hover:bg-amber-500/25 hover:text-amber-700 dark:text-amber-300 dark:hover:text-amber-200";
+  if (count === 0) return passthroughStatusControlClass(isTouch);
+  if (commentsOpen) return passthroughStatusControlClass(isTouch);
+  return `${passthroughStatusControlClass(isTouch)} border-amber-500/60 bg-amber-500/15 text-amber-700 hover:bg-amber-500/25 hover:text-amber-700 dark:text-amber-300 dark:hover:text-amber-200`;
 }
 
 function CommentsToggleButton({
   commentsOpen,
   onToggle,
   pendingCommentsCount,
+  isTouch,
 }: {
   commentsOpen: boolean;
   onToggle: () => void;
   pendingCommentsCount: number;
+  isTouch: boolean;
 }) {
   const { t } = useTranslation();
   const disabled = pendingCommentsCount === 0;
@@ -312,7 +342,7 @@ function CommentsToggleButton({
           type="button"
           variant={commentsOpen ? "default" : "outline"}
           size="sm"
-          className={commentsToggleClassName(pendingCommentsCount, commentsOpen)}
+          className={commentsToggleClassName(pendingCommentsCount, commentsOpen, isTouch)}
           onClick={onToggle}
           disabled={disabled}
           data-testid="passthrough-toggle-comments"
@@ -371,10 +401,12 @@ function CommentsPanel({
   comments,
   openFile,
   onSend,
+  isTouch,
 }: {
   comments: DiffComment[];
   openFile: (path: string) => void;
   onSend: () => Promise<void> | void;
+  isTouch: boolean;
 }) {
   const { t } = useTranslation();
   const [isSending, setIsSending] = useState(false);
@@ -408,7 +440,7 @@ function CommentsPanel({
               variant="default"
               onClick={handleSend}
               disabled={isSending}
-              className="h-6 gap-1 px-2.5 text-xs cursor-pointer"
+              className={`${isTouch ? "min-h-11 min-w-11" : "h-6"} gap-1 px-2.5 text-xs cursor-pointer`}
               data-testid="passthrough-send-comments"
             >
               <IconSend className="h-3.5 w-3.5" />
@@ -497,7 +529,7 @@ type StatusRowProps = {
   taskId: string | null;
   sessionId?: string | null;
   nextStepName: string | null;
-  onProceed: () => void;
+  onProceed: (options?: WorkflowMoveEntryOptions) => boolean | void | Promise<boolean | void>;
   isMoving: boolean;
   showProceed: boolean;
   composerOpen: boolean;
@@ -506,6 +538,7 @@ type StatusRowProps = {
   commentsOpen: boolean;
   onToggleComments: () => void;
   pendingCommentsCount: number;
+  isTouch: boolean;
 };
 
 function PassthroughStatusRow({
@@ -521,8 +554,8 @@ function PassthroughStatusRow({
   commentsOpen,
   onToggleComments,
   pendingCommentsCount,
+  isTouch,
 }: StatusRowProps) {
-  const { t } = useTranslation();
   return (
     <div
       data-testid="passthrough-status-row"
@@ -532,11 +565,13 @@ function PassthroughStatusRow({
         composerOpen={composerOpen}
         focusShortcut={focusShortcut}
         onToggle={onToggleComposer}
+        isTouch={isTouch}
       />
       <CommentsToggleButton
         commentsOpen={commentsOpen}
         onToggle={onToggleComments}
         pendingCommentsCount={pendingCommentsCount}
+        isTouch={isTouch}
       />
 
       <div className="ml-auto flex min-w-0 max-w-full flex-wrap items-center justify-end gap-1.5">
@@ -547,23 +582,13 @@ function PassthroughStatusRow({
         <RegisteredChangeRequestStatus taskId={taskId} sessionId={sessionId} surface="composer" />
         {taskId && <PRMergedBanner key={taskId} taskId={taskId} />}
         {showProceed && nextStepName && (
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-6 shrink-0 gap-1 px-2.5 text-xs cursor-pointer text-primary"
-                onClick={onProceed}
-                disabled={isMoving}
-                data-testid="passthrough-proceed-next-step"
-              >
-                {nextStepName}
-                <IconArrowRight className="h-3.5 w-3.5" />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>{t("task:moveTaskToTheNextWorkflow")}</TooltipContent>
-          </Tooltip>
+          <WorkflowMoveProceedButton
+            nextStepName={nextStepName}
+            onProceed={onProceed}
+            isMoving={isMoving}
+            className={`${isTouch ? "min-h-11 min-w-11" : "h-6"} shrink-0`}
+            testId="passthrough-proceed-next-step"
+          />
         )}
       </div>
     </div>

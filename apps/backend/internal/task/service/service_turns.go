@@ -591,6 +591,21 @@ func (s *Service) getOrStartTurn(ctx context.Context, sessionID string) (*models
 	return s.StartTurn(ctx, sessionID)
 }
 
+// PublishTurnStarted is publishTurnEvent(events.TurnStarted, ...)'s exported
+// form, for callers outside this package that insert a turn directly
+// (bypassing StartTurn/ReserveTurn) but still need the frontend's
+// turns.bySession to learn about it. The e2e test harness
+// (internal/office/testharness) is the only current caller: it seeds turns
+// with caller-controlled timestamps to construct D1 turn-ordering scenarios,
+// which StartTurn's always-now stamping cannot produce. Without this, a
+// message attached to a harness-seeded turn the frontend has never observed
+// via turn.started is silently excluded by D1's turn-scoped
+// clarification/permission detection.
+func (s *Service) PublishTurnStarted(ctx context.Context, turn *models.Turn) error {
+	// had_output is only meaningful on turn.completed; omit it here too.
+	return s.publishTurnEvent(events.TurnStarted, turn, nil)
+}
+
 // publishTurnEvent publishes a turn event to the event bus. hadOutput reports
 // whether the turn produced any agent output; it is only meaningful for
 // turn.completed events (the frontend uses it to surface an "empty turn"
@@ -667,6 +682,7 @@ func turnHadAgentOutput(msgs []*models.Message, turnID string) bool {
 		}
 		switch m.Type {
 		case models.MessageTypeToolCall, models.MessageTypeToolEdit, models.MessageTypeToolRead,
+			models.MessageTypeToolSearch,
 			models.MessageTypeToolExecute, models.MessageTypeAgentPlan, models.MessageTypeTodo,
 			models.MessageTypePermissionRequest, models.MessageTypeClarificationRequest:
 			return true
@@ -883,12 +899,24 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		applyTaskEnvironmentToWorkspaceInfo(info, taskEnv)
 		info.ValidatedTaskEnvironmentID = taskEnv.ID
 		info.ValidatedExecutorType = taskEnv.ExecutorType
+		info.ValidatedTaskEnvironmentGeneration = taskEnv.OwnershipGeneration
 		if info.ExecutorType == "" {
 			info.ExecutorType = taskEnv.ExecutorType
 		}
 		info.TaskDirName = taskEnv.TaskDirName
+		if taskEnv.TaskID != "" && taskEnv.TaskID != taskID {
+			owner, ownerErr := s.tasks.GetTask(ctx, taskEnv.TaskID)
+			if ownerErr != nil {
+				return nil, fmt.Errorf("get workspace owner task: %w", ownerErr)
+			}
+			info.WorkspaceOwnerArchived = owner != nil && owner.ArchivedAt != nil
+		}
 	}
-	if err := s.populateWorkspaceRepositorySpecs(ctx, taskID, session.Worktrees, info); err != nil {
+	workspaceInventory := session.Worktrees
+	if taskEnv != nil {
+		workspaceInventory = taskEnv.Repos
+	}
+	if err := s.populateWorkspaceRepositorySpecs(ctx, taskID, workspaceInventory, info); err != nil {
 		return nil, err
 	}
 
@@ -906,6 +934,9 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		info.RuntimeName = running.Runtime
 		info.AgentExecutionID = running.AgentExecutionID
 		mergePersistentWorkspaceMetadata(info, running.Metadata)
+		if officeProfileID, ok := running.Metadata[lifecycle.MetadataKeyOfficeAgentProfileID].(string); ok && strings.TrimSpace(officeProfileID) != "" {
+			info.AgentProfileID = officeProfileID
+		}
 		if running.ContainerID != "" {
 			ensureWorkspaceMetadata(info)[lifecycle.MetadataKeyContainerID] = running.ContainerID
 		}
@@ -985,6 +1016,7 @@ func (s *Service) populateWorkspaceRepositorySpecs(ctx context.Context, taskID s
 		return fmt.Errorf("get workspace task: %w", err)
 	} else if task != nil {
 		info.WorkspaceID = task.WorkspaceID
+		info.TaskArchived = task.ArchivedAt != nil
 	}
 	worktreesByIdentity := make(map[workspaceWorktreeKey]*models.TaskEnvironmentRepo, len(sessionWorktrees))
 	for _, worktree := range sessionWorktrees {
@@ -1154,6 +1186,8 @@ func applyTaskEnvironmentToWorkspaceInfo(info *lifecycle.WorkspaceInfo, env *mod
 	// while the ID still pointed at the stale row — a mismatch downstream
 	// reconcilers and progress events would key off the wrong env.
 	info.TaskEnvironmentID = env.ID
+	info.EnvironmentOwnerTaskID = env.TaskID
+	info.OwnershipGeneration = env.OwnershipGeneration
 	if info.ExecutorProfileID == "" {
 		info.ExecutorProfileID = env.ExecutorProfileID
 	}

@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -33,7 +34,7 @@ func TestBuildWorkflowExport(t *testing.T) {
 
 		export := BuildWorkflowExport([]*taskmodels.Workflow{wf}, stepMap, nil)
 
-		require.Equal(t, ExportVersion, export.Version)
+		require.Equal(t, LegacyExportVersion, export.Version)
 		require.Equal(t, ExportType, export.Type)
 		require.Len(t, export.Workflows, 1)
 
@@ -99,6 +100,24 @@ func TestBuildWorkflowExport(t *testing.T) {
 		require.NotNil(t, export.Workflows[0].Steps[1].PullFromStepPosition)
 		assert.Equal(t, 0, *export.Workflows[0].Steps[1].PullFromStepPosition)
 	})
+
+	t.Run("exports explicit target as version two portable position", func(t *testing.T) {
+		wf := &taskmodels.Workflow{ID: "wf-1", Name: "Targeted Workflow"}
+		steps := []*WorkflowStep{
+			{ID: "source", Name: "Source", Position: 0, AgentProfileID: "profile-a"},
+			{ID: "target", Name: "Target", Position: 1, SessionTarget: &WorkflowSessionTarget{Kind: WorkflowSessionTargetStep, StepID: "source"}},
+		}
+
+		export := BuildWorkflowExport([]*taskmodels.Workflow{wf}, map[string][]*WorkflowStep{"wf-1": steps}, func(profileID string) *AgentProfilePortable {
+			return &AgentProfilePortable{AgentName: profileID}
+		})
+		require.Equal(t, ExportVersion, export.Version)
+		require.NotNil(t, export.Workflows[0].Steps[1].SessionTarget)
+		assert.Equal(t, WorkflowSessionTargetStep, export.Workflows[0].Steps[1].SessionTarget.Kind)
+		require.NotNil(t, export.Workflows[0].Steps[1].SessionTarget.StepPosition)
+		assert.Equal(t, 0, *export.Workflows[0].Steps[1].SessionTarget.StepPosition)
+		require.NoError(t, export.Validate())
+	})
 }
 
 func TestValidate(t *testing.T) {
@@ -120,6 +139,19 @@ func TestValidate(t *testing.T) {
 
 	t.Run("valid export passes", func(t *testing.T) {
 		assert.NoError(t, validExport().Validate())
+	})
+
+	t.Run("version two export passes", func(t *testing.T) {
+		e := validExport()
+		e.Version = 2
+		assert.NoError(t, e.Validate())
+	})
+
+	t.Run("legacy version rejects explicit targets", func(t *testing.T) {
+		e := validExport()
+		e.Version = LegacyExportVersion
+		e.Workflows[0].Steps[1].SessionTarget = &WorkflowSessionTargetPortable{Kind: WorkflowSessionTargetInitial}
+		require.ErrorContains(t, e.Validate(), "requires export version")
 	})
 
 	t.Run("wrong version fails", func(t *testing.T) {
@@ -637,6 +669,76 @@ func TestCancelTriggersTurnCompleteYAMLExportIncludesFalse(t *testing.T) {
 	if got := string(encoded); !strings.Contains(got, "cancel_triggers_turn_complete: false") {
 		t.Fatalf("YAML export omitted false cancellation policy:\n%s", got)
 	}
+}
+
+func TestCompletionPolicyPortableContract(t *testing.T) {
+	wf := &taskmodels.Workflow{ID: "wf-completion", Name: "Completion"}
+	export := BuildWorkflowExport([]*taskmodels.Workflow{wf}, map[string][]*WorkflowStep{"wf-completion": {
+		{ID: "work", Name: "Work", Position: 0},
+		{ID: "done", Name: "Done", Position: 1, CompleteTaskOnEnter: true},
+	}}, nil)
+	require.Equal(t, ExportVersion, export.Version)
+	payload, err := json.Marshal(export)
+	require.NoError(t, err)
+	var fields map[string]any
+	require.NoError(t, json.Unmarshal(payload, &fields))
+	steps := fields["workflows"].([]any)[0].(map[string]any)["steps"].([]any)
+	for i, raw := range steps {
+		if _, ok := raw.(map[string]any)["complete_task_on_enter"]; !ok {
+			t.Fatalf("exported step %d omitted complete_task_on_enter", i)
+		}
+	}
+
+	var decoded WorkflowExport
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"version": 1,
+		"type": "kandev_workflow",
+		"workflows": [{"name":"Legacy","steps":[
+			{"name":"Work","position":0,"color":"blue"},
+			{"name":"  dOnE  ","position":1,"color":"green"}
+		]}]
+	}`), &decoded))
+	require.NoError(t, decoded.Validate())
+	assert.False(t, decoded.Workflows[0].Steps[0].CompleteTaskOnEnter)
+	assert.True(t, decoded.Workflows[0].Steps[1].CompleteTaskOnEnter)
+
+	var missing WorkflowExport
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"version": 2,
+		"type": "kandev_workflow",
+		"workflows": [{"name":"Current","steps":[{"name":"Work","position":0,"color":"blue"}]}]
+	}`), &missing))
+	assert.ErrorContains(t, missing.Validate(), "must be explicitly set")
+}
+
+func TestCompletionPolicyPortableContractRejectsNull(t *testing.T) {
+	t.Run("json", func(t *testing.T) {
+		var decoded WorkflowExport
+		err := json.Unmarshal([]byte(`{
+			"version": 2,
+			"type": "kandev_workflow",
+			"workflows": [{"name":"Current","steps":[
+				{"name":"Work","position":0,"color":"blue","complete_task_on_enter":null}
+			]}]
+		}`), &decoded)
+		assert.ErrorContains(t, err, "complete_task_on_enter")
+	})
+
+	t.Run("yaml", func(t *testing.T) {
+		var decoded WorkflowExport
+		err := yaml.Unmarshal([]byte(`
+version: 2
+type: kandev_workflow
+workflows:
+  - name: Current
+    steps:
+      - name: Work
+        position: 0
+        color: blue
+        complete_task_on_enter: null
+`), &decoded)
+		assert.ErrorContains(t, err, "complete_task_on_enter")
+	})
 }
 
 func TestPullFromStepPositionToID(t *testing.T) {

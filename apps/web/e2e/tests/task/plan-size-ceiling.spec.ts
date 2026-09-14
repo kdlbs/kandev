@@ -24,10 +24,11 @@ const CEILING_BYTES = 262_144; // planinjection ceiling; kept in sync with plan_
 const MARKER = "PLAN-SIZE-CEILING-MARKER";
 const SUBMITTED_BYTES = 300_000;
 
-/** ASCII filler so content.length (UTF-16 code units) equals UTF-8 byte length exactly. */
+/** UTF-8 filler keeps the oversized payload compact enough for browser E2E. */
 function contentOfByteLength(totalBytes: number): string {
-  const filler = "A".repeat(totalBytes - MARKER.length);
-  return `${MARKER}${filler}`;
+  const markerBytes = new TextEncoder().encode(MARKER).byteLength;
+  const fillerBytes = totalBytes - markerBytes;
+  return `${MARKER}${"€".repeat(Math.ceil(fillerBytes / 3))}`;
 }
 
 /** Dispatch a synthetic plain-text paste into the ProseMirror plan editor.

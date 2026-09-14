@@ -63,14 +63,14 @@ func (m *reclaimTrackingAgentManager) callsSnapshot() []string {
 	return append([]string(nil), m.calls...)
 }
 
-// TestSubtaskTerminalCollapse_ReclaimsProviderRuntime is the canonical
+// TestSubtaskTerminalSettle_ReclaimsProviderRuntime is the canonical
 // end-to-end wiring test: a child task whose last agent message did not
-// request input collapses to COMPLETED inside
+// request input remains WAITING_FOR_INPUT inside
 // setSessionWaitingForInputIfRequested. With no live agent process and no
 // active turn, reclaimIdleSession must fire on this synchronous settle
 // point, the executor row must flip to status=stopped with LocalPID=0,
 // and the resume_token/worktree_path must remain intact.
-func TestSubtaskTerminalCollapse_ReclaimsProviderRuntime(t *testing.T) {
+func TestSubtaskTerminalSettle_ReclaimsProviderRuntime(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	now := time.Now().UTC()
@@ -116,13 +116,13 @@ func TestSubtaskTerminalCollapse_ReclaimsProviderRuntime(t *testing.T) {
 	svc.handleAgentCompleted(ctx, watcherAgentCompletedData("child-task", "s-child", "exec-child"))
 	waitForStopCall(t, inner)
 
-	// 1. Session collapsed to COMPLETED (existing guard behavior).
+	// 1. Session remains promptable after a successful child completion.
 	updated, err := repo.GetTaskSession(ctx, "s-child")
 	if err != nil {
 		t.Fatalf("load session: %v", err)
 	}
-	if updated.State != models.TaskSessionStateCompleted {
-		t.Fatalf("subtask terminal must collapse to COMPLETED, got %q", updated.State)
+	if updated.State != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("successful subtask must remain WAITING_FOR_INPUT, got %q", updated.State)
 	}
 
 	// 2. reclaim fired exactly once for this session.

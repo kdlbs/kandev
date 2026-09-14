@@ -266,6 +266,88 @@ test.describe("Sidebar layout — subtasks", () => {
 });
 
 test.describe("Sidebar layout — context menu", () => {
+  test("shows priority after the title and changes it from the context menu", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const title = "Sidebar priority with PR";
+    const task = await apiClient.createTask(seedData.workspaceId, title, {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+      priority: "high",
+    });
+    const mediumTask = await apiClient.createTask(seedData.workspaceId, "Sidebar medium priority", {
+      workflow_id: seedData.workflowId,
+      workflow_step_id: seedData.startStepId,
+      repository_ids: [seedData.repositoryId],
+      priority: "medium",
+    });
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: task.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 903,
+      pr_url: "https://github.com/testorg/testrepo/pull/903",
+      pr_title: "Sidebar priority ordering",
+      head_branch: "feature/sidebar-priority-ordering",
+      base_branch: "main",
+      author_login: "e2e",
+      state: "open",
+      checks_state: "success",
+      mergeable_state: "clean",
+    });
+
+    await testPage.goto(`/t/${mediumTask.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    const row = session.sidebar.getByTestId("sidebar-task-item").filter({ hasText: title });
+    const mediumRow = session.sidebar
+      .getByTestId("sidebar-task-item")
+      .filter({ hasText: "Sidebar medium priority" });
+    const priority = row.getByTestId("sidebar-task-priority-indicator");
+    const pr = row.getByTestId(`pr-task-icon-${task.id}`);
+
+    await expect(priority).toHaveAttribute("aria-label", "Priority High");
+    await expect(pr).toBeVisible();
+    await expect(mediumRow.getByTestId("sidebar-task-priority-indicator")).toHaveCount(0);
+    const order = await row.evaluate((element, titleText) => {
+      const titleElement = [...element.querySelectorAll("span")].find(
+        (candidate) =>
+          candidate.classList.contains("whitespace-nowrap") && candidate.textContent === titleText,
+      );
+      const priorityElement = element.querySelector(
+        '[data-testid="sidebar-task-priority-indicator"]',
+      );
+      const prElement = element.querySelector('[data-testid^="pr-task-icon-"]');
+      if (!titleElement || !priorityElement || !prElement) return [];
+      return [
+        titleElement.getBoundingClientRect().left,
+        priorityElement.getBoundingClientRect().left,
+        prElement.getBoundingClientRect().left,
+      ];
+    }, title);
+    expect(order).toHaveLength(3);
+    expect(order[0]).toBeLessThan(order[1]);
+    expect(order[1]).toBeLessThan(order[2]);
+    const mediumTitleBox = await mediumRow
+      .getByText("Sidebar medium priority", { exact: true })
+      .boundingBox();
+    expect(mediumTitleBox).not.toBeNull();
+    expect(Math.abs(order[0] - mediumTitleBox!.x)).toBeLessThan(1);
+
+    await row.click({ button: "right" });
+    const priorityMenu = testPage.getByTestId("task-context-priority");
+    await expect(priorityMenu.locator(".tabler-icon-flag")).toBeVisible();
+    await priorityMenu.hover();
+    await expect(testPage.getByTestId("task-context-priority-current-high")).toBeVisible();
+    await testPage.getByTestId("task-context-priority-low").click();
+
+    await expect(priority).toHaveAttribute("aria-label", "Priority Low");
+    await expect.poll(async () => (await apiClient.getTask(task.id)).priority).toBe("low");
+  });
+
   test("right-clicking a task shows Rename, Archive, and Delete options", async ({
     testPage,
     apiClient,

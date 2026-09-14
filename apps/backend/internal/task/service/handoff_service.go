@@ -118,6 +118,13 @@ type RunCanceller interface {
 	CancelTaskExecution(ctx context.Context, taskID, reason string, force bool) error
 }
 
+// SynchronousRunCanceller is an optional archive/delete cascade extension.
+// Unlike the interactive cancellation contract, it waits for runtime teardown
+// before the lifecycle mutation can be undone by an unarchive.
+type SynchronousRunCanceller interface {
+	CancelTaskExecutionSynchronously(ctx context.Context, taskID, reason string, force bool) error
+}
+
 // activeTaskSessionCanceller finalizes active task sessions independently of
 // runtime teardown. The sqlite task repository implements this surface; it is
 // intentionally optional so handoff tests and legacy wiring do not need the
@@ -351,6 +358,21 @@ type taskResourceCleanupCoordinator interface {
 	PrepareTaskResourceCleanup(ctx context.Context, taskID string, trigger models.TaskResourceCleanupTrigger, operationID string, deleteEnvironmentRow bool) error
 	StartPreparedTaskResourceCleanup(ctx context.Context, operationID string) error
 	CancelPreparedTaskResourceCleanup(ctx context.Context, operationID string) error
+}
+
+type taskResourceCleanupCoordinatorWithOptions interface {
+	PrepareTaskResourceCleanupWithOptions(
+		ctx context.Context,
+		taskID string,
+		trigger models.TaskResourceCleanupTrigger,
+		operationID string,
+		deleteEnvironmentRow bool,
+		discardWorktreeChanges bool,
+	) error
+}
+
+type taskDeleteWorktreeAdmissionChecker interface {
+	ValidateTaskDeleteWorktrees(ctx context.Context, taskIDs []string, discardWorktreeChanges bool) error
 }
 
 // SetTaskResourceCleaner wires the resource teardown surface invoked by

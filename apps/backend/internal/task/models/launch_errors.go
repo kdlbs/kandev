@@ -20,6 +20,7 @@ const (
 	LaunchErrorCategoryBaseBranchMissing       = "base_branch_missing"
 	LaunchErrorCategoryPRAlreadyClosed         = "pr_already_closed"
 	LaunchErrorCategoryDefaultBranchUnresolved = "default_branch_unresolved"
+	LaunchErrorCategoryWorkspaceCheckoutFailed = "workspace_checkout_failed"
 	LaunchErrorCategoryGenericLaunchFailure    = "generic_launch_failure"
 )
 
@@ -28,6 +29,7 @@ const (
 	RecoveryActionRetryDefault   = "retry_default"
 	RecoveryActionPickBaseBranch = "pick_base_branch"
 	RecoveryActionMarkReviewDone = "mark_review_done"
+	RecoveryActionRetryLaunch    = "retry_launch"
 )
 
 const (
@@ -37,7 +39,98 @@ const (
 	maxLaunchErrorCategoryBytes   = 64
 	maxLaunchErrorDetailsBytes    = 4096
 	maxTaskRepositoryIDBytes      = 256
+	maxLaunchErrorIDBytes         = 256
+	maxAgentErrorCauseDetailBytes = 1024
+	maxAgentErrorCauses           = 2
 )
+
+const (
+	LaunchErrorPhaseBootstrap = "bootstrap"
+
+	AgentErrorCauseOperationResume           = "resume"
+	AgentErrorCauseOperationRestoreWorkspace = "restore_workspace"
+
+	AgentErrorCauseCodeAuthenticationRequired = "authentication_required"
+	AgentErrorCauseCodePermissionDenied       = "permission_denied"
+	AgentErrorCauseCodeDestinationInvalid     = "destination_invalid"
+	AgentErrorCauseCodeSourceBranchMissing    = "source_branch_missing"
+	AgentErrorCauseCodeTransportUnavailable   = "transport_unavailable"
+	AgentErrorCauseCodeTimeout                = "timeout"
+	AgentErrorCauseCodeUnknown                = "unknown"
+)
+
+// AgentErrorCause keeps the bounded, operation-specific explanation for one
+// recovery attempt. It is intentionally smaller than LastAgentError so a
+// resume failure and a workspace fallback can remain distinct without
+// persisting provider transport payloads.
+type AgentErrorCause struct {
+	Operation string `json:"operation"`
+	Code      string `json:"code"`
+	Detail    string `json:"detail,omitempty"`
+}
+
+// NormalizeAgentErrorCauses removes malformed, duplicate, and excess causes
+// before a session error crosses a persistence or transport boundary.
+func NormalizeAgentErrorCauses(causes []AgentErrorCause) []AgentErrorCause {
+	result := make([]AgentErrorCause, 0, min(len(causes), maxAgentErrorCauses))
+	seen := make(map[string]struct{}, len(causes))
+	for _, cause := range causes {
+		cause.Operation = strings.TrimSpace(cause.Operation)
+		cause.Code = strings.TrimSpace(cause.Code)
+		if !isKnownAgentErrorCauseOperation(cause.Operation) || !isKnownAgentErrorCauseCode(cause.Code) {
+			continue
+		}
+		cause.Detail = truncateUTF8Bytes(cause.Detail, maxAgentErrorCauseDetailBytes)
+		identity := cause.Operation + "\x00" + cause.Code + "\x00" + cause.Detail
+		if _, exists := seen[identity]; exists {
+			continue
+		}
+		seen[identity] = struct{}{}
+		result = append(result, cause)
+		if len(result) == maxAgentErrorCauses {
+			break
+		}
+	}
+	return result
+}
+
+// NormalizeAgentErrorDetails keeps the legacy details and cause details in
+// the one existing details budget. Cause details are retained first because
+// they are the structured recovery fields used to explain separate attempts.
+func NormalizeAgentErrorDetails(details string, causes []AgentErrorCause) string {
+	causes = NormalizeAgentErrorCauses(causes)
+	remaining := maxLaunchErrorDetailsBytes
+	for _, cause := range causes {
+		remaining -= len(cause.Detail)
+	}
+	if remaining < 0 {
+		remaining = 0
+	}
+	return truncateUTF8Bytes(details, remaining)
+}
+
+func isKnownAgentErrorCauseOperation(operation string) bool {
+	return operation == AgentErrorCauseOperationResume || operation == AgentErrorCauseOperationRestoreWorkspace
+}
+
+func isKnownAgentErrorCauseCode(code string) bool {
+	switch code {
+	case AgentErrorCauseCodeAuthenticationRequired,
+		AgentErrorCauseCodePermissionDenied,
+		AgentErrorCauseCodeDestinationInvalid,
+		AgentErrorCauseCodeSourceBranchMissing,
+		AgentErrorCauseCodeTransportUnavailable,
+		AgentErrorCauseCodeTimeout,
+		AgentErrorCauseCodeUnknown,
+		LaunchErrorCategoryBaseBranchMissing,
+		LaunchErrorCategoryDefaultBranchUnresolved,
+		LaunchErrorCategoryWorkspaceCheckoutFailed,
+		LaunchErrorCategoryGenericLaunchFailure:
+		return true
+	default:
+		return false
+	}
+}
 
 // TaskLaunchError is persisted under Task.Metadata[MetaKeyLastLaunchError].
 // It is intentionally bounded because task metadata is returned in boot and
@@ -74,9 +167,42 @@ func NormalizeRecoveryActions(actions []string) []string {
 	return result
 }
 
+// NormalizeRecoveryActionsForCategory retains only the actions that are
+// meaningful for a typed launch-failure category. Unknown categories keep the
+// legacy generic normalization so unrelated runtime errors remain compatible.
+func NormalizeRecoveryActionsForCategory(category string, actions []string) []string {
+	normalized := NormalizeRecoveryActions(actions)
+	var allowed map[string]struct{}
+	switch category {
+	case LaunchErrorCategoryBaseBranchMissing:
+		allowed = map[string]struct{}{
+			RecoveryActionRetryDefault: {}, RecoveryActionPickBaseBranch: {},
+		}
+	case LaunchErrorCategoryDefaultBranchUnresolved:
+		allowed = map[string]struct{}{RecoveryActionPickBaseBranch: {}}
+	case LaunchErrorCategoryWorkspaceCheckoutFailed, LaunchErrorCategoryGenericLaunchFailure:
+		if len(normalized) == 0 {
+			return nil
+		}
+		return []string{RecoveryActionRetryLaunch}
+	case LaunchErrorCategoryPRAlreadyClosed:
+		allowed = map[string]struct{}{RecoveryActionMarkReviewDone: {}}
+	default:
+		return normalized
+	}
+
+	result := make([]string, 0, len(normalized))
+	for _, action := range normalized {
+		if _, ok := allowed[action]; ok {
+			result = append(result, action)
+		}
+	}
+	return result
+}
+
 func isKnownRecoveryAction(action string) bool {
 	switch action {
-	case RecoveryActionRetryDefault, RecoveryActionPickBaseBranch, RecoveryActionMarkReviewDone:
+	case RecoveryActionRetryDefault, RecoveryActionPickBaseBranch, RecoveryActionMarkReviewDone, RecoveryActionRetryLaunch:
 		return true
 	default:
 		return false
@@ -85,19 +211,33 @@ func isKnownRecoveryAction(action string) bool {
 
 func normalizeLastAgentError(value LastAgentError) LastAgentError {
 	value.Message = truncateUTF8Bytes(value.Message, maxLaunchErrorMessageBytes)
-	value.RecoveryActions = NormalizeRecoveryActions(value.RecoveryActions)
+	value.Code = truncateUTF8Bytes(value.Code, maxLaunchErrorCategoryBytes)
+	value.RecoveryActions = NormalizeRecoveryActionsForCategory(value.Code, value.RecoveryActions)
 	value.TaskRepositoryID = truncateUTF8Bytes(value.TaskRepositoryID, maxTaskRepositoryIDBytes)
+	value.AgentExecutionID = truncateUTF8Bytes(value.AgentExecutionID, maxLaunchErrorIDBytes)
+	value.ExecutionID = truncateUTF8Bytes(value.ExecutionID, maxLaunchErrorIDBytes)
+	if value.ExecutionID == "" {
+		value.ExecutionID = value.AgentExecutionID
+	}
+	if value.AgentExecutionID == "" {
+		value.AgentExecutionID = value.ExecutionID
+	}
+	if value.Phase != LaunchErrorPhaseBootstrap {
+		value.Phase = ""
+	}
+	value.AttemptID = truncateUTF8Bytes(value.AttemptID, maxLaunchErrorIDBytes)
 	value.StampValue = boundedLaunchErrorStamp(value.StampValue)
-	value.Details = truncateUTF8Bytes(value.Details, maxLaunchErrorDetailsBytes)
+	value.Causes = NormalizeAgentErrorCauses(value.Causes)
+	value.Details = NormalizeAgentErrorDetails(value.Details, value.Causes)
 	return value
 }
 
 func normalizeTaskLaunchError(value TaskLaunchError) TaskLaunchError {
 	value.Message = truncateUTF8Bytes(value.Message, maxLaunchErrorMessageBytes)
-	value.RecoveryActions = NormalizeRecoveryActions(value.RecoveryActions)
+	value.Code = truncateUTF8Bytes(value.Code, maxLaunchErrorCategoryBytes)
+	value.RecoveryActions = NormalizeRecoveryActionsForCategory(value.Code, value.RecoveryActions)
 	value.TaskRepositoryID = truncateUTF8Bytes(value.TaskRepositoryID, maxTaskRepositoryIDBytes)
 	value.StampValue = boundedLaunchErrorStamp(value.StampValue)
-	value.Code = truncateUTF8Bytes(value.Code, maxLaunchErrorCategoryBytes)
 	value.Details = truncateUTF8Bytes(value.Details, maxLaunchErrorDetailsBytes)
 	return value
 }

@@ -33,7 +33,7 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
 }));
 
 const storeState = {
-  features: { office: false },
+  features: { office: false, canvases: false },
   workspaces: {
     items: [
       { id: "w1", name: "Default Workspace", office_workflow_id: "" },
@@ -57,6 +57,7 @@ describe("WorkspaceSettingsShell — workspace switcher", () => {
   beforeEach(() => {
     navigationMock.push = vi.fn();
     storeState.features.office = false;
+    storeState.features.canvases = false;
     storeState.workspaces.activeId = "w1";
     storeState.setActiveWorkspace = vi.fn();
   });
@@ -169,5 +170,40 @@ describe("WorkspaceSettingsShell — workspace switcher", () => {
     fireEvent.click(screen.getByText("New office workspace"));
 
     expect(navigationMock.push).toHaveBeenCalledWith("/office/setup?mode=new");
+  });
+});
+
+describe("WorkspaceSettingsShell canvas navigation", () => {
+  beforeEach(() => {
+    navigationMock.push = vi.fn();
+    storeState.features.office = false;
+    storeState.features.canvases = false;
+    storeState.workspaces.activeId = "w1";
+    storeState.setActiveWorkspace = vi.fn();
+  });
+
+  afterEach(cleanup);
+
+  it("shows the Canvases tab only while the canvas feature is enabled", () => {
+    storeState.features.canvases = true;
+    const { unmount } = render(
+      <WorkspaceSettingsShell workspaceId="w1" activeTab="canvases">
+        <div />
+      </WorkspaceSettingsShell>,
+    );
+
+    expect(screen.getByRole("link", { name: "Canvases" }).getAttribute("href")).toBe(
+      "/settings/workspaces/w1/canvases",
+    );
+    unmount();
+
+    storeState.features.canvases = false;
+    render(
+      <WorkspaceSettingsShell workspaceId="w1" activeTab="overview">
+        <div />
+      </WorkspaceSettingsShell>,
+    );
+
+    expect(screen.queryByRole("link", { name: "Canvases" })).toBeNull();
   });
 });

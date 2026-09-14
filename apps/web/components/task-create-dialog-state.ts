@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useMemo, useCallback } from "react";
-import type { LocalRepository } from "@/lib/types/http";
+import type { LocalRepository, TaskPriority } from "@/lib/types/http";
 import type {
   TaskFormInputsHandle,
   TaskRemoteRepoRow,
@@ -202,10 +202,6 @@ function resetDiscoveryState(resetters: FormResetters, iv?: TaskCreateDialogInit
   resetters.setGitHubUrlError(null);
   resetters.setFreshBranchEnabled(false);
   resetters.setCurrentLocalBranch("");
-  // Source-mode toggle resets — without these, opening the dialog in "None"
-  // mode and reopening for a different task would land in None mode again.
-  resetters.setNoRepository(false);
-  resetters.setWorkspacePath("");
   // The dialog stays mounted between opens, so without this the previous
   // create's predecessor selection reappears on the next one.
   resetters.setBlockedBy([]);
@@ -326,8 +322,10 @@ function useFormStateValues(workflowId: string | null) {
   // optional workspacePath points the agent at an existing host folder; empty
   // means kandev creates a scratch workspace.
   const [noRepository, setNoRepository] = useState(false);
+  const [preferLocalExecutor, setPreferLocalExecutor] = useState(false);
   const [workspacePath, setWorkspacePath] = useState("");
   const [autopilot, setAutopilot] = useState(false);
+  const [priority, setPriority] = useState<TaskPriority>("medium");
   return {
     taskName,
     setTaskName,
@@ -361,10 +359,14 @@ function useFormStateValues(workflowId: string | null) {
     prevOpenRef,
     noRepository,
     setNoRepository,
+    preferLocalExecutor,
+    setPreferLocalExecutor,
     workspacePath,
     setWorkspacePath,
     autopilot,
     setAutopilot,
+    priority,
+    setPriority,
   };
 }
 
@@ -435,8 +437,10 @@ export function useDialogFormState(
       setFreshBranchEnabled: freshBranch.setFreshBranchEnabled,
       setCurrentLocalBranch: freshBranch.setCurrentLocalBranch,
       setNoRepository: form.setNoRepository,
+      setPreferLocalExecutor: form.setPreferLocalExecutor,
       setWorkspacePath: form.setWorkspacePath,
       setAutopilot: form.setAutopilot,
+      setPriority: form.setPriority,
     },
   });
 
@@ -463,6 +467,11 @@ export function useDialogFormState(
     form.descriptionInputRef,
   );
 
+  const { seededExecutorProfileId, setExecutorProfileIdFromSeed } = useSeededExecutorProfileId(
+    open,
+    form.setExecutorProfileId,
+  );
+
   return {
     ...form,
     ...discovery,
@@ -475,7 +484,46 @@ export function useDialogFormState(
     branchesByUrl,
     prInfoByUrl,
     clearDraft,
+    seededExecutorProfileId,
+    setExecutorProfileIdFromSeed,
   };
+}
+
+/**
+ * Tracks the executorProfileId value written through
+ * setExecutorProfileIdFromSeed each open cycle, whether it arrives via the
+ * create-mode autopick or the edit-mode stored-profile seed effect. Resets
+ * on each open rising edge. This is "what the dialog put there", independent
+ * of any later or earlier user selection: only a write through the
+ * returned setExecutorProfileIdFromSeed counts, never the plain
+ * setExecutorProfileId a user's own picker uses.
+ *
+ * The reset is keyed on `open`'s own rising edge via an effect, not on
+ * comparing openCycle during render: openCycle bumps via its own effect on
+ * the same rising edge, and a seed write triggered by that same edge can
+ * land in the same subsequent render as the bump. A render-phase comparison
+ * can't distinguish "openCycle just changed because the dialog opened" from
+ * "openCycle changed and this cycle's seed already arrived", so it would
+ * wipe a same-transition seed the instant it was written.
+ */
+function useSeededExecutorProfileId(open: boolean, setExecutorProfileId: (v: string) => void) {
+  const seededRef = useRef<string | null>(null);
+  const prevOpenRef = useRef(false);
+  useEffect(() => {
+    const wasOpen = prevOpenRef.current;
+    prevOpenRef.current = open;
+    if (open && !wasOpen) {
+      seededRef.current = null;
+    }
+  }, [open]);
+  const setExecutorProfileIdFromSeed = useCallback(
+    (value: string) => {
+      seededRef.current = value;
+      setExecutorProfileId(value);
+    },
+    [setExecutorProfileId],
+  );
+  return { seededExecutorProfileId: seededRef.current, setExecutorProfileIdFromSeed };
 }
 
 /**

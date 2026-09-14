@@ -20,6 +20,7 @@ func TestSkillReaderAdapterMapsInventoryFiles(t *testing.T) {
 		Slug:          "office-admin",
 		Content:       "# Office Admin\n",
 		FileInventory: `[{"path":"references/tasks.md","content":"# Tasks\n"},{"path":"empty.md"}]`,
+		IsSystem:      true,
 	}})
 
 	got, err := adapter.GetSkillFromConfig(context.Background(), "office-admin")
@@ -34,5 +35,8 @@ func TestSkillReaderAdapterMapsInventoryFiles(t *testing.T) {
 	}
 	if got.Files[0].Path != "references/tasks.md" || got.Files[0].Content != "# Tasks\n" {
 		t.Errorf("file = %+v", got.Files[0])
+	}
+	if !got.IsSystem {
+		t.Error("IsSystem = false, want true")
 	}
 }

@@ -1,8 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { markSessionRead } from "@/lib/api/domains/session-api";
+import { createDebugLogger } from "@/lib/debug/log";
+
+const readTrackingDebug = createDebugLogger("messages:read-tracking");
 
 type Anchor = { sessionId: string; messageId: string | null };
 type Visit = {
@@ -10,6 +13,27 @@ type Visit = {
   priorCursor: string | null;
   initialMessagesReady: boolean;
 };
+
+let nextMarkReadGeneration = 0;
+// Freshness is session-scoped: another task's request cannot invalidate an
+// in-flight response, and settled latest requests remove their map entry.
+const latestMarkReadGenerationBySession = new Map<string, number>();
+
+function beginMarkReadRequest(sessionId: string): number {
+  const generation = ++nextMarkReadGeneration;
+  latestMarkReadGenerationBySession.set(sessionId, generation);
+  return generation;
+}
+
+function isLatestMarkReadRequest(sessionId: string, generation: number): boolean {
+  return latestMarkReadGenerationBySession.get(sessionId) === generation;
+}
+
+function finishMarkReadRequest(sessionId: string, generation: number): void {
+  if (isLatestMarkReadRequest(sessionId, generation)) {
+    latestMarkReadGenerationBySession.delete(sessionId);
+  }
+}
 
 function visitAnchor(
   sessionId: string,
@@ -29,6 +53,98 @@ function visibleAnchor(
 ): string | null {
   if (!unreadDividerEnabled || !isVisible || anchor?.sessionId !== sessionId) return null;
   return anchor.messageId;
+}
+
+function useReadTrackingEffects(params: {
+  sessionId: string | null;
+  isVisible: boolean;
+  latestMessageId: string | null;
+  unreadDividerEnabled: boolean;
+  visit: Visit | null;
+  store: ReturnType<typeof useAppStoreApi>;
+  updateSessionReadCursor: (sessionId: string, messageId: string) => void;
+}): void {
+  const {
+    sessionId,
+    isVisible,
+    latestMessageId,
+    unreadDividerEnabled,
+    visit,
+    store,
+    updateSessionReadCursor,
+  } = params;
+
+  useEffect(() => {
+    if (visit === null) return;
+    readTrackingDebug("visit captured", {
+      sessionId: visit.sessionId,
+      priorCursor: visit.priorCursor,
+      initialMessagesReady: visit.initialMessagesReady,
+    });
+  }, [visit]);
+
+  useEffect(() => {
+    if (
+      !unreadDividerEnabled ||
+      !sessionId ||
+      !isVisible ||
+      !latestMessageId ||
+      visit?.sessionId !== sessionId ||
+      !visit.initialMessagesReady
+    )
+      return;
+    const currentCursor = store.getState().taskSessions.items[sessionId]?.last_read_message_id;
+    if (currentCursor === latestMessageId) return;
+    const generation = beginMarkReadRequest(sessionId);
+    readTrackingDebug("request dispatched", { sessionId, generation, messageId: latestMessageId });
+    void markSessionRead(sessionId, latestMessageId)
+      .then((response) => {
+        if (!isLatestMarkReadRequest(sessionId, generation)) {
+          readTrackingDebug("response discarded", {
+            sessionId,
+            generation,
+            reason: "superseded",
+          });
+          return;
+        }
+        const cachedCursor = store.getState().taskSessions.items[sessionId]?.last_read_message_id;
+        if (cachedCursor !== currentCursor) {
+          finishMarkReadRequest(sessionId, generation);
+          readTrackingDebug("response discarded", {
+            sessionId,
+            generation,
+            reason: "cached-cursor-changed",
+            priorCursor: currentCursor,
+            cachedCursor,
+          });
+          return;
+        }
+        finishMarkReadRequest(sessionId, generation);
+        updateSessionReadCursor(response.session_id, response.last_read_message_id);
+        readTrackingDebug("response applied", {
+          sessionId,
+          generation,
+          messageId: response.last_read_message_id,
+        });
+      })
+      .catch((err: unknown) => {
+        finishMarkReadRequest(sessionId, generation);
+        readTrackingDebug("request failed", {
+          sessionId,
+          generation,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        console.error("Failed to mark session read", err);
+      });
+  }, [
+    sessionId,
+    isVisible,
+    visit,
+    latestMessageId,
+    store,
+    unreadDividerEnabled,
+    updateSessionReadCursor,
+  ]);
 }
 
 /**
@@ -106,64 +222,25 @@ export function useSessionReadTracking(
     if (!unreadDividerEnabled) {
       setVisit(null);
       setAnchor(null);
-      latestDispatchRef.current = null;
       return;
     }
     if (isVisible) return;
     const timer = setTimeout(() => {
       setVisit(null);
       setAnchor(null);
-      latestDispatchRef.current = null;
     }, 300);
     return () => clearTimeout(timer);
   }, [isVisible, unreadDividerEnabled, visit]);
 
-  // Tracks the (sessionId, messageId) of the most recently *dispatched*
-  // mark-read request. The backend's cursor write is atomically monotonic
-  // (see UpdateTaskSessionLastReadMessageID), but that only protects the
-  // persisted row — not an in-flight HTTP response, which is a snapshot
-  // frozen at the moment its own GetTaskSession ran. Two overlapping
-  // requests (an older m2, then a newer m3) can still have their responses
-  // arrive in either order; if m2's (now-stale) response resolves after
-  // m3's, applying it verbatim would regress the local store back to m2
-  // even though the database is correctly at m3. Comparing against this
-  // ref when a response resolves discards any response that's no longer
-  // the latest dispatched request for this session.
-  const latestDispatchRef = useRef<{ sessionId: string; messageId: string } | null>(null);
-
-  useEffect(() => {
-    if (
-      !unreadDividerEnabled ||
-      !sessionId ||
-      !isVisible ||
-      !latestMessageId ||
-      visit?.sessionId !== sessionId ||
-      !visit.initialMessagesReady
-    )
-      return;
-    const currentCursor = store.getState().taskSessions.items[sessionId]?.last_read_message_id;
-    if (currentCursor === latestMessageId) return;
-    latestDispatchRef.current = { sessionId, messageId: latestMessageId };
-    void markSessionRead(sessionId, latestMessageId)
-      .then((response) => {
-        const dispatch = latestDispatchRef.current;
-        const isStale =
-          !dispatch || dispatch.sessionId !== sessionId || dispatch.messageId !== latestMessageId;
-        if (isStale) return;
-        updateSessionReadCursor(response.session_id, response.last_read_message_id);
-      })
-      .catch((err: unknown) => {
-        console.error("Failed to mark session read", err);
-      });
-  }, [
+  useReadTrackingEffects({
     sessionId,
     isVisible,
-    visit,
     latestMessageId,
-    store,
     unreadDividerEnabled,
+    visit,
+    store,
     updateSessionReadCursor,
-  ]);
+  });
 
   return visibleAnchor(unreadDividerEnabled, isVisible, anchor, sessionId);
 }

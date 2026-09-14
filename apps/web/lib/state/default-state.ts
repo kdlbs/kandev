@@ -31,7 +31,9 @@ export const defaultState = {
   sidebarArchivedTasks: defaultKanbanState.sidebarArchivedTasks,
   workflows: defaultKanbanState.workflows,
   workspaceContextGeneration: defaultKanbanState.workspaceContextGeneration,
+  workspaceContextRead: defaultKanbanState.workspaceContextRead,
   tasks: defaultKanbanState.tasks,
+  taskRemoval: defaultKanbanState.taskRemoval,
   workspaces: defaultWorkspaceState.workspaces,
   repositories: defaultWorkspaceState.repositories,
   repositorySets: defaultWorkspaceState.repositorySets,
@@ -72,6 +74,7 @@ export const defaultState = {
   gitStatus: defaultSessionRuntimeState.gitStatus,
   environmentIdBySessionId: defaultSessionRuntimeState.environmentIdBySessionId,
   sessionCommits: defaultSessionRuntimeState.sessionCommits,
+  gitCheckoutGeneration: defaultSessionRuntimeState.gitCheckoutGeneration,
   contextWindow: defaultSessionRuntimeState.contextWindow,
   agents: defaultSessionRuntimeState.agents,
   availableCommands: defaultSessionRuntimeState.availableCommands,
@@ -85,6 +88,7 @@ export const defaultState = {
   promptUsage: defaultSessionRuntimeState.promptUsage,
   sessionPollMode: defaultSessionRuntimeState.sessionPollMode,
   embeddedVscodeSupport: defaultSessionRuntimeState.embeddedVscodeSupport,
+  workspaceRestoration: defaultSessionRuntimeState.workspaceRestoration,
   githubStatus: defaultGitHubState.githubStatus,
   githubAppRegistrations: defaultGitHubState.githubAppRegistrations,
   taskPRs: defaultGitHubState.taskPRs,
@@ -291,6 +295,10 @@ function mergePromptHistoryState(initialState: HydrationState) {
       ...defaultState.messagePrompts.generationBySession,
       ...initialState.messagePrompts?.generationBySession,
     },
+    refreshGenerationBySession: {
+      ...defaultState.messagePrompts.refreshGenerationBySession,
+      ...initialState.messagePrompts?.refreshGenerationBySession,
+    },
   };
 }
 
@@ -389,12 +397,34 @@ function mergeTaskSessionState(initialState: HydrationState) {
 // eslint-disable-next-line max-lines-per-function -- merges every hydrated state slice in one place.
 export function mergeInitialState(initialState?: HydrationState): DefaultState {
   if (!initialState) return defaultState;
+  const hydration = { ...initialState };
+  delete hydration.taskRemoval;
   return {
     ...defaultState,
-    ...initialState,
+    ...hydration,
     kanban: { ...defaultState.kanban, ...initialState.kanban },
     kanbanMulti: { ...defaultState.kanbanMulti, ...initialState.kanbanMulti },
     workflows: { ...defaultState.workflows, ...initialState.workflows },
+    workspaceContextRead: {
+      ...defaultState.workspaceContextRead,
+      ...initialState.workspaceContextRead,
+      pending: {
+        ...defaultState.workspaceContextRead.pending,
+        ...initialState.workspaceContextRead?.pending,
+      },
+      errors: {
+        ...defaultState.workspaceContextRead.errors,
+        ...initialState.workspaceContextRead?.errors,
+      },
+      retryAfterMs: {
+        ...defaultState.workspaceContextRead.retryAfterMs,
+        ...initialState.workspaceContextRead?.retryAfterMs,
+      },
+      requestIds: {
+        ...defaultState.workspaceContextRead.requestIds,
+        ...initialState.workspaceContextRead?.requestIds,
+      },
+    },
     workspaceContextGeneration: mergeWorkspaceContextGeneration(initialState),
     tasks: { ...defaultState.tasks, ...initialState.tasks },
     workspaces: { ...defaultState.workspaces, ...initialState.workspaces },
@@ -441,6 +471,10 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     processes: { ...defaultState.processes, ...initialState.processes },
     gitStatus: { ...defaultState.gitStatus, ...initialState.gitStatus },
     sessionCommits: { ...defaultState.sessionCommits, ...initialState.sessionCommits },
+    gitCheckoutGeneration: {
+      ...defaultState.gitCheckoutGeneration,
+      ...initialState.gitCheckoutGeneration,
+    },
     contextWindow: { ...defaultState.contextWindow, ...initialState.contextWindow },
     agents: { ...defaultState.agents, ...initialState.agents },
     sessionMode: { ...defaultState.sessionMode, ...initialState.sessionMode },

@@ -85,6 +85,15 @@ describe("agent profile recent-use websocket sync", () => {
 });
 
 describe("startup page websocket sync", () => {
+  it("retains Threads through live updates that omit the startup choice", () => {
+    const store = makeStore();
+    const handler = registerUsersHandlers(store)["user.settings.updated"];
+    handler?.(userSettingsMessage({ startup_page: "threads" }));
+    expect(store.getState().userSettings.startupPage).toBe("threads");
+    handler?.(userSettingsMessage({ tasks_list_show_details: true }));
+    expect(store.getState().userSettings.startupPage).toBe("threads");
+  });
+
   it("applies startup page preferences and normalizes unknown values", () => {
     const store = makeStore();
 
@@ -180,6 +189,26 @@ describe("session hostname resolution websocket sync", () => {
   });
 });
 
+describe("manual task-color websocket sync", () => {
+  it("applies the normalized server map, including clear tombstones", () => {
+    const store = makeStore();
+    registerUsersHandlers(store)["user.settings.updated"]?.(
+      userSettingsMessage({
+        revision: 1,
+        sidebar_task_colors: {
+          "task-red": "red",
+          "task-cleared": null,
+        },
+      }),
+    );
+
+    expect(store.getState().userSettings.sidebarTaskColors).toEqual({
+      "task-red": "red",
+      "task-cleared": null,
+    });
+  });
+});
+
 describe("last seen display websocket sync", () => {
   it("applies a relative value and normalizes unknown values", () => {
     const store = makeStore();
@@ -242,6 +271,8 @@ describe("user settings websocket handler", () => {
             filters: [],
             sort: { key: "attention", direction: "asc" },
             max_columns: 3,
+            layout: "grid",
+            auto_hide_composer: true,
           },
         ],
         thread_active_view_id: "thread-view",
@@ -251,8 +282,17 @@ describe("user settings websocket handler", () => {
 
     expect(store.getState().threadViews.activeViewId).toBe("thread-view");
     expect(store.getState().threadViews.views).toHaveLength(1);
+    expect(store.getState().threadViews.views[0]).toMatchObject({
+      layout: "grid",
+      autoHideComposer: true,
+    });
     expect(store.getState().threadViews.draft).toBeNull();
     expect(store.getState().sidebarViews.activeViewId).toBe("view-all-tasks");
+    registerUsersHandlers(store)["user.settings.updated"]?.(userSettingsMessage({}));
+    expect(store.getState().threadViews.views[0]).toMatchObject({
+      layout: "grid",
+      autoHideComposer: true,
+    });
   });
 
   it("does not replace optimistic Threads views while a local write is pending", () => {
@@ -263,6 +303,8 @@ describe("user settings websocket handler", () => {
       filters: [],
       sort: { key: "attention" as const, direction: "asc" as const },
       maxColumns: 1,
+      layout: "columns" as const,
+      autoHideComposer: false,
     };
     store.setState((state) => ({
       ...state,
@@ -276,6 +318,8 @@ describe("user settings websocket handler", () => {
             filters: [],
             sort: { key: "attention", direction: "asc" },
             maxColumns: null,
+            layout: "columns",
+            autoHideComposer: false,
           },
         ],
         activeViewId: LOCAL_VIEW_ID,

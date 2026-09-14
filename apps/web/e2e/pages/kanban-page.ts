@@ -84,6 +84,39 @@ export class KanbanPage {
     return this.page.getByTestId(`task-context-step-autostart-${stepId}`);
   }
 
+  contextPriority(): Locator {
+    return this.page.getByTestId("task-context-priority");
+  }
+
+  contextPriorityOption(priority: string): Locator {
+    return this.page.getByTestId(`task-context-priority-${priority}`);
+  }
+
+  contextPriorityCurrent(priority: string): Locator {
+    return this.page.getByTestId(`task-context-priority-current-${priority}`);
+  }
+
+  /** Opens the Priority submenu on whichever card menu is currently open, without selecting anything. */
+  async openPrioritySubmenu() {
+    await this.openSubmenu(this.contextPriority(), this.contextPriorityOption("medium"));
+  }
+
+  async setPriorityFromContextMenu(taskId: string, priority: string) {
+    await this.selectFromTaskContextMenu(taskId, async () => {
+      const option = this.contextPriorityOption(priority);
+      await this.openSubmenu(this.contextPriority(), option);
+      await this.selectMenuItem(option);
+    });
+  }
+
+  async setPriorityFromActionsMenu(taskId: string, priority: string) {
+    await this.selectFromTaskActionsMenu(taskId, async () => {
+      const option = this.contextPriorityOption(priority);
+      await this.openSubmenu(this.contextPriority(), option);
+      await this.selectMenuItem(option);
+    });
+  }
+
   async openTaskContextMenu(taskId: string) {
     const card = this.taskCard(taskId);
     await card.waitFor({ state: "visible" });
@@ -228,11 +261,35 @@ export class KanbanPage {
   }
 
   pipelineTaskRepoName(taskId: string): Locator {
-    return this.page.getByTestId(`pipeline-task-repo-${taskId}`);
+    return this.pipelineTask(taskId).getByTestId("task-repo-chip");
   }
 
-  pipelineTaskActionsTrigger(taskId: string): Locator {
-    return this.page.getByTestId(`pipeline-task-actions-trigger-${taskId}`);
+  pipelineTaskTitle(taskId: string): Locator {
+    return this.pipelineTask(taskId).getByTestId("pipeline-row-title");
+  }
+
+  pipelineTaskInfo(taskId: string): Locator {
+    return this.pipelineTask(taskId).getByTestId("pipeline-row-info");
+  }
+
+  pipelineOverflowRegion(taskId: string): Locator {
+    return this.pipelineTask(taskId).getByTestId("pipeline-row-overflow-region");
+  }
+
+  pipelineStatusStrip(taskId: string): Locator {
+    return this.pipelineTask(taskId).getByTestId("pipeline-row-status-strip");
+  }
+
+  pipelineStepRunScroll(taskId: string): Locator {
+    return this.pipelineTask(taskId).getByTestId("pipeline-step-run-scroll");
+  }
+
+  pipelinePositionSummary(taskId: string): Locator {
+    return this.pipelineTask(taskId).getByTestId("pipeline-row-position-summary");
+  }
+
+  pipelineTaskMenuTrigger(taskId: string): Locator {
+    return this.pipelineTask(taskId).getByLabel("More options");
   }
 
   async switchToPipelineView() {
@@ -246,5 +303,15 @@ export class KanbanPage {
     await row.waitFor({ state: "visible" });
     await this.enableMultiSelect();
     await this.taskSelectCheckbox(taskId).click();
+  }
+
+  async openPipelineTaskContextMenu(taskId: string) {
+    const row = this.pipelineTask(taskId);
+    await row.waitFor({ state: "visible" });
+    await row.click({ button: "right" });
+  }
+
+  async openPipelineTaskActionsMenu(taskId: string) {
+    await this.pipelineTaskMenuTrigger(taskId).click();
   }
 }

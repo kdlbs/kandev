@@ -389,10 +389,22 @@ func (h *Handler) updateAgentStatus(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	agent, err := h.svc.UpdateAgentStatus(
-		c.Request.Context(), c.Param("id"),
-		models.AgentStatus(req.Status), req.PauseReason)
+	var agent *models.AgentInstance
+	var err error
+	if req.ExpectedStatus != nil {
+		agent, err = h.svc.UpdateAgentStatusIfCurrent(
+			c.Request.Context(), c.Param("id"), *req.ExpectedStatus,
+			models.AgentStatus(req.Status), req.PauseReason)
+	} else {
+		agent, err = h.svc.UpdateAgentStatus(
+			c.Request.Context(), c.Param("id"),
+			models.AgentStatus(req.Status), req.PauseReason)
+	}
 	if err != nil {
+		if errors.Is(err, ErrAgentStatusStale) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}

@@ -20,6 +20,9 @@ const (
 	RoleAdmin Role = "admin"
 	// RoleMember is a regular authenticated user.
 	RoleMember Role = "member"
+	// RoleGuest holds no org scopes and reaches only workspaces it is an
+	// explicit member of, including none of the org-visible ones.
+	RoleGuest Role = "guest"
 )
 
 // GinContextKey is the gin-context key holding the request Identity.
@@ -41,6 +44,16 @@ type Identity struct {
 	SessionID string
 	// TokenID is set when the identity came from a personal access token.
 	TokenID string
+	// OrgID is the caller's tenant. It comes from the user record and from
+	// nowhere else: no route, payload, header or WS frame may name an org, so
+	// the tenant is a total function of the authenticated identity and no
+	// request can move a caller between tenants.
+	OrgID string
+	// Instance marks the operator tier, which manages organizations, feature
+	// toggles and instance-wide configuration. An operator holds NO org scopes
+	// and reaches no org's workspaces: it is an administration tier, not a
+	// visibility one.
+	Instance bool
 }
 
 // IsAdmin reports whether the identity carries the admin role.

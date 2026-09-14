@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -71,6 +72,14 @@ type Manager struct {
 	// racing cancellation against tracker startup and accepting whichever
 	// outcome it happens to get.
 	afterTrackerStart func()
+
+	// turnIDSeq allocates the turn identifiers retained terminal outcomes
+	// are keyed by (AC-EXECUTORS-SURVIVAL-004.1). It is shared across every
+	// instance this Manager supervises and lives for this process's whole
+	// lifetime, matching the AC's "unique across every turn of every
+	// instance the control server supervises for as long as that control
+	// server runs" -- deliberately NOT reset per instance.
+	turnIDSeq atomic.Int64
 }
 
 // NewManager creates a new instance manager.
@@ -203,6 +212,13 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 
 	// Create process manager
 	procMgr := process.NewManager(instanceCfg, m.logger)
+	// Wire retained-outcome recording (AC-EXECUTORS-SURVIVAL-004) before
+	// anything that could reach Start(): this manager satisfies
+	// process.TurnOutcomeRecorder via RetainTurnOutcome above, and nothing
+	// outside this function can start the process manager until
+	// CreateInstance returns, so setting it here happens-before any
+	// terminal event the instance could ever produce.
+	procMgr.SetTurnOutcomeRecorder(id, m)
 	// Materialize provider-qualified comparison targets before any tracker
 	// polling starts. Failures remain explicit unavailable tracker state.
 	procMgr.PrepareComparisonTargets(ctx)
@@ -243,6 +259,8 @@ func (m *Manager) CreateInstance(ctx context.Context, req *CreateRequest) (*Crea
 		AgentCommand:  agentCmd,
 		Env:           req.Env,
 		CreatedAt:     time.Now(),
+		SessionID:     req.SessionID,
+		TaskID:        req.TaskID,
 		manager:       procMgr,
 	}
 	inst.MarkActivity()

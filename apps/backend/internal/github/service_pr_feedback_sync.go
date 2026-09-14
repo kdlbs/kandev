@@ -45,7 +45,7 @@ func (s *Service) persistPRFeedbackState(ctx context.Context, workspaceID string
 	if len(rows) == 0 {
 		return
 	}
-	status := newPRStatus(pr, feedback.Reviews, feedback.Checks)
+	status := newPRStatusWithWorkflow(pr, feedback.Reviews, feedback.Checks, feedback.WorkflowAttention)
 	// Several tasks in a workspace can link the same PR; each owns its own row.
 	// SyncTaskPR re-narrows by (task, owner, repo, number) internally.
 	seen := make(map[string]struct{}, len(rows))

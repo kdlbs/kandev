@@ -601,7 +601,7 @@ func TestDispatchTaskMRAgentPrompt_ReadySessionDrainsAndAcknowledges(t *testing.
 	agent := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo, promptDone: make(chan struct{})}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), agent)
 	acknowledgingRepo := &lifecycleAcknowledgingRepository{
-		Repository:   messagequeue.NewMemoryRepository(),
+		Repository:   newAuthoritativeMemoryRepository(repo),
 		acknowledged: make(chan struct{}),
 	}
 	svc.messageQueue = messagequeue.NewService(acknowledgingRepo, messagequeue.DefaultMaxPerSession, testLogger())

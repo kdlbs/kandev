@@ -285,7 +285,11 @@ func (s *Store) UpsertUserConnection(ctx context.Context, connection *UserConnec
 		INSERT INTO github_user_connection_versions (workspace_id, user_id, credential_generation, updated_at)
 		VALUES (?, ?, ?, ?)
 		ON CONFLICT(workspace_id, user_id) DO UPDATE SET
-			credential_generation = MAX(github_user_connection_versions.credential_generation, excluded.credential_generation),
+			credential_generation = CASE
+				WHEN github_user_connection_versions.credential_generation > excluded.credential_generation
+				THEN github_user_connection_versions.credential_generation
+				ELSE excluded.credential_generation
+			END,
 			updated_at = excluded.updated_at`),
 		connection.WorkspaceID, connection.UserID, connection.CredentialGeneration, connection.UpdatedAt); err != nil {
 		return err
@@ -305,10 +309,11 @@ func (s *Store) DeleteUserConnection(ctx context.Context, workspaceID, userID st
 		VALUES (?, ?, COALESCE((SELECT credential_generation + 1 FROM github_user_connections
 			WHERE workspace_id = ? AND user_id = ?), 1), ?)
 		ON CONFLICT(workspace_id, user_id) DO UPDATE SET
-			credential_generation = MAX(
-				github_user_connection_versions.credential_generation + 1,
-				excluded.credential_generation
-			), updated_at = excluded.updated_at`),
+			credential_generation = CASE
+				WHEN github_user_connection_versions.credential_generation + 1 > excluded.credential_generation
+				THEN github_user_connection_versions.credential_generation + 1
+				ELSE excluded.credential_generation
+			END, updated_at = excluded.updated_at`),
 		workspaceID, userID, workspaceID, userID, time.Now().UTC()); err != nil {
 		return err
 	}
@@ -331,10 +336,11 @@ func (s *Store) DeleteUserConnectionsByWorkspace(ctx context.Context, workspaceI
 		SELECT workspace_id, user_id, credential_generation + 1, ?
 		FROM github_user_connections WHERE workspace_id = ?
 		ON CONFLICT(workspace_id, user_id) DO UPDATE SET
-			credential_generation = MAX(
-				github_user_connection_versions.credential_generation + 1,
-				excluded.credential_generation
-			), updated_at = excluded.updated_at`), time.Now().UTC(), workspaceID); err != nil {
+			credential_generation = CASE
+				WHEN github_user_connection_versions.credential_generation + 1 > excluded.credential_generation
+				THEN github_user_connection_versions.credential_generation + 1
+				ELSE excluded.credential_generation
+			END, updated_at = excluded.updated_at`), time.Now().UTC(), workspaceID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, tx.Rebind(

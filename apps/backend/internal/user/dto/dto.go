@@ -55,6 +55,8 @@ type UserSettingsDTO struct {
 	ThreadActiveViewID                string                              `json:"thread_active_view_id"`
 	ThreadViewDraft                   *models.ThreadViewDraft             `json:"thread_view_draft"`
 	SidebarTaskPrefs                  models.SidebarTaskPrefs             `json:"sidebar_task_prefs"`
+	SidebarTaskColorAutomation        models.SidebarTaskColorAutomation   `json:"sidebar_task_color_automation"`
+	SidebarTaskColors                 map[string]*string                  `json:"sidebar_task_colors"`
 	TaskCreateLastUsed                models.TaskCreateLastUsed           `json:"task_create_last_used"`
 	JiraSavedViews                    json.RawMessage                     `json:"jira_saved_views,omitempty"`
 	JiraTaskPresets                   json.RawMessage                     `json:"jira_task_presets,omitempty"`
@@ -78,6 +80,8 @@ type UserSettingsDTO struct {
 	QuickChatTabOrderByWorkspace      map[string][]string                 `json:"quick_chat_tab_order_by_workspace"`
 	KanbanHiddenStepIDs               map[string][]string                 `json:"kanban_hidden_step_ids"`
 	WorkflowIDsWithAutoHideEmptySteps []string                            `json:"workflow_ids_with_auto_hide_empty_steps"`
+	KanbanSort                        string                              `json:"kanban_sort"`
+	KanbanPriorityFilterTokens        []string                            `json:"kanban_priority_filter_tokens"`
 	Revision                          int64                               `json:"revision"`
 	UpdatedAt                         string                              `json:"updated_at"`
 }
@@ -162,6 +166,8 @@ type UpdateUserSettingsRequest struct {
 	ThreadActiveViewID                *string                            `json:"thread_active_view_id,omitempty"`
 	ThreadViewDraft                   NullableThreadViewDraft            `json:"thread_view_draft,omitempty"`
 	SidebarTaskPrefs                  *models.SidebarTaskPrefs           `json:"sidebar_task_prefs,omitempty"`
+	SidebarTaskColorAutomation        *models.SidebarTaskColorAutomation `json:"sidebar_task_color_automation,omitempty"`
+	SidebarTaskColorPatch             *models.SidebarTaskColorPatch      `json:"sidebar_task_color_patch,omitempty"`
 	TaskCreateLastUsed                *models.TaskCreateLastUsed         `json:"task_create_last_used,omitempty"`
 	JiraSavedViews                    NullableRawMessage                 `json:"jira_saved_views,omitempty"`
 	JiraTaskPresets                   NullableRawMessage                 `json:"jira_task_presets,omitempty"`
@@ -185,6 +191,8 @@ type UpdateUserSettingsRequest struct {
 	QuickChatTabOrderByWorkspace      *map[string][]string               `json:"quick_chat_tab_order_by_workspace,omitempty"`
 	KanbanHiddenStepIDs               *map[string][]string               `json:"kanban_hidden_step_ids,omitempty"`
 	WorkflowIDsWithAutoHideEmptySteps *[]string                          `json:"workflow_ids_with_auto_hide_empty_steps,omitempty"`
+	KanbanSort                        *string                            `json:"kanban_sort,omitempty"`
+	KanbanPriorityFilterTokens        *[]string                          `json:"kanban_priority_filter_tokens,omitempty"`
 }
 
 type SystemMetricsDisplaySettingsPatch struct {
@@ -308,6 +316,10 @@ func FromUser(user *models.User) UserDTO {
 // FromUserSettings maps a settings model to its API DTO, normalizing enum
 // fields (startup page, MCP default, LSP location) to canonical values.
 func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
+	automaticColors := settings.SidebarTaskColorAutomation
+	if automaticColors.Rules == nil {
+		automaticColors.Rules = []models.SidebarTaskColorRule{}
+	}
 	return UserSettingsDTO{
 		UserID:                            settings.UserID,
 		WorkspaceID:                       settings.WorkspaceID,
@@ -349,6 +361,8 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		ThreadActiveViewID:                settings.ThreadActiveViewID,
 		ThreadViewDraft:                   settings.ThreadViewDraft,
 		SidebarTaskPrefs:                  settings.SidebarTaskPrefs,
+		SidebarTaskColorAutomation:        automaticColors,
+		SidebarTaskColors:                 models.CloneSidebarTaskColors(settings.SidebarTaskColors),
 		TaskCreateLastUsed:                settings.TaskCreateLastUsed,
 		JiraSavedViews:                    settings.JiraSavedViews,
 		JiraTaskPresets:                   settings.JiraTaskPresets,
@@ -372,6 +386,8 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		QuickChatTabOrderByWorkspace:      settings.QuickChatTabOrderByWorkspace,
 		KanbanHiddenStepIDs:               settings.KanbanHiddenStepIDs,
 		WorkflowIDsWithAutoHideEmptySteps: append([]string{}, settings.WorkflowIDsWithAutoHideEmptySteps...),
+		KanbanSort:                        settings.KanbanSort,
+		KanbanPriorityFilterTokens:        append([]string{}, settings.KanbanPriorityFilterTokens...),
 		Revision:                          settings.Revision,
 		UpdatedAt:                         settings.UpdatedAt.Format(time.RFC3339),
 	}

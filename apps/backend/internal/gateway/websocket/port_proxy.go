@@ -138,7 +138,7 @@ func (h *PortProxyHandler) HandlePortProxy(c *gin.Context) {
 
 	// Per-user scoping (opt-in auth): authorize session ownership before the
 	// bare execution lookup / per-session proxy cache (see vscode_proxy.go).
-	if err := h.lifecycleMgr.CheckSessionAccess(c.Request.Context(), sessionID); err != nil {
+	if err := h.lifecycleMgr.CheckSessionExecAccess(c.Request.Context(), sessionID); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "session not found"})
 		return
 	}

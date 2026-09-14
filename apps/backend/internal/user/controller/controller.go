@@ -123,6 +123,8 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		ThreadActiveViewID:                req.ThreadActiveViewID,
 		ThreadViewDraft:                   req.ThreadViewDraft.ServiceValue(),
 		SidebarTaskPrefs:                  req.SidebarTaskPrefs,
+		SidebarTaskColorAutomation:        req.SidebarTaskColorAutomation,
+		SidebarTaskColorPatch:             req.SidebarTaskColorPatch,
 		TaskCreateLastUsed:                req.TaskCreateLastUsed,
 		JiraSavedViews:                    req.JiraSavedViews.ServiceValue(),
 		JiraTaskPresets:                   req.JiraTaskPresets.ServiceValue(),
@@ -146,6 +148,8 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		QuickChatTabOrderByWorkspace:      req.QuickChatTabOrderByWorkspace,
 		KanbanHiddenStepIDs:               req.KanbanHiddenStepIDs,
 		WorkflowIDsWithAutoHideEmptySteps: req.WorkflowIDsWithAutoHideEmptySteps,
+		KanbanSort:                        req.KanbanSort,
+		KanbanPriorityFilterTokens:        req.KanbanPriorityFilterTokens,
 	})
 	if err != nil {
 		return dto.UserSettingsResponse{}, err

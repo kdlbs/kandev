@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildSubmitMessage } from "./chat-input-area";
 import { resolveStatusRowTaskId, shouldRenderChatStatusBar } from "./chat-status-bar";
+import { hasPendingClarification, shouldShowProceed } from "./types";
 import type { AgentMessageComment } from "@/lib/state/slices/comments";
 
 const messageComment: AgentMessageComment = {
@@ -37,6 +38,31 @@ describe("buildSubmitMessage agent message comments", () => {
   });
 });
 
+describe("buildSubmitMessage plan comment ownership", () => {
+  it("leaves task-owned plan comments out of client-formatted Markdown", () => {
+    const result = buildSubmitMessage({
+      message: "Please continue.",
+      pendingPRFeedback: [],
+      planComments: [
+        {
+          id: "plan-comment-1",
+          sessionId: "",
+          taskId: "task-1",
+          planId: "plan-1",
+          version: 2,
+          source: "plan",
+          text: "Split this step.",
+          selectedText: "Large step",
+          createdAt: "2026-09-02T00:00:00Z",
+          status: "pending",
+        },
+      ],
+    });
+
+    expect(result).toBe("Please continue.");
+  });
+});
+
 describe("shouldRenderChatStatusBar", () => {
   it("removes empty taskless status chrome when its auto-scroll control is hidden", () => {
     expect(
@@ -48,6 +74,30 @@ describe("shouldRenderChatStatusBar", () => {
         showProceed: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe("shouldShowProceed", () => {
+  it.each([
+    ["not busy without a clarification", false, false, true],
+    ["busy without a clarification", true, false, false],
+    ["waiting for input with a pending clarification", false, true, false],
+  ])("%s", (_state, isAgentBusy, hasPendingClarification, expected) => {
+    expect(shouldShowProceed("Review", isAgentBusy, hasPendingClarification)).toBe(expected);
+  });
+});
+
+describe("hasPendingClarification", () => {
+  it("retains the message-derived fallback", () => {
+    expect(hasPendingClarification(true, null)).toBe(true);
+  });
+
+  it("uses the durable session projection while messages hydrate", () => {
+    expect(hasPendingClarification(false, "clarification")).toBe(true);
+  });
+
+  it("does not treat a durable permission request as a clarification", () => {
+    expect(hasPendingClarification(false, "permission")).toBe(false);
   });
 });
 

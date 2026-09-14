@@ -58,7 +58,7 @@ func (r *Repository) hideBuiltinWorkflows() error {
 	if err != nil {
 		return fmt.Errorf("build hidden workflow reconciliation: %w", err)
 	}
-	if _, err := r.db.Exec(r.db.Rebind(query), args...); err != nil {
+	if _, err := r.db.ExecContext(r.migrationContext(), r.db.Rebind(query), args...); err != nil {
 		return fmt.Errorf("hide builtin workflows: %w", err)
 	}
 	return nil
@@ -79,7 +79,7 @@ func (r *Repository) healBuiltinWorkflowStepFlags() error {
 	for _, tmpl := range templates {
 		for _, step := range tmpl.Steps {
 			want := dialect.BoolToInt(step.AutoAdvanceRequiresSignal)
-			if _, err := r.db.Exec(r.db.Rebind(`
+			if _, err := r.db.ExecContext(r.migrationContext(), r.db.Rebind(`
 				UPDATE workflow_steps SET auto_advance_requires_signal = ?, updated_at = ?
 				WHERE name = ? AND auto_advance_requires_signal != ?
 				  AND workflow_id IN (SELECT id FROM workflows WHERE is_system = 1 AND workflow_template_id = ?)
@@ -93,7 +93,7 @@ func (r *Repository) healBuiltinWorkflowStepFlags() error {
 
 // ensureDefaultWorkspace creates a default workspace if none exists
 func (r *Repository) ensureDefaultWorkspace() error {
-	ctx := context.Background()
+	ctx := r.migrationContext()
 
 	var count int
 	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(1) FROM workspaces").Scan(&count); err != nil {
@@ -215,7 +215,7 @@ func (r *Repository) stampWorkspaceOfficeWorkflow(ctx context.Context, workspace
 
 // ensureDefaultExecutorsAndEnvironments creates default executors and environments if none exist
 func (r *Repository) ensureDefaultExecutorsAndEnvironments() error {
-	ctx := context.Background()
+	ctx := r.migrationContext()
 	if err := r.ensureDefaultExecutors(ctx); err != nil {
 		return err
 	}
@@ -467,20 +467,24 @@ func (r *Repository) insertTemplateStep(
 	if stage == "" {
 		stage = wfmodels.StageTypeCustom
 	}
+	sessionTargetJSON, err := json.Marshal(wfmodels.RemapWorkflowSessionTarget(def.SessionTarget, idMap))
+	if err != nil {
+		return fmt.Errorf("marshal session target for step %s: %w", def.Name, err)
+	}
 	_, err = r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO workflow_steps (
 			id, workflow_id, name, position, color, prompt, events,
 			allow_manual_move, is_start_step, show_in_command_panel,
-				auto_archive_after_hours, agent_profile_id, profile_session_start_policy, profile_session_end_policy, stage_type,
+			auto_archive_after_hours, agent_profile_id, profile_session_start_policy, profile_session_end_policy, stage_type, session_target,
 			auto_advance_requires_signal, cancel_triggers_turn_complete,
-			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			complete_task_on_enter, created_at, updated_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		idMap[def.ID], workflowID, def.Name, def.Position, def.Color, def.Prompt,
 		string(eventsJSON), dialect.BoolToInt(def.AllowManualMove),
 		dialect.BoolToInt(def.IsStartStep), dialect.BoolToInt(def.ShowInCommandPanel),
-		def.AutoArchiveAfterHours, def.AgentProfileID, models.NormalizeWorkflowProfileSessionStartPolicy(string(def.ProfileSessionStartPolicy)), models.NormalizeWorkflowProfileSessionEndPolicy(string(def.ProfileSessionEndPolicy)), string(stage),
-		dialect.BoolToInt(def.AutoAdvanceRequiresSignal), dialect.BoolToInt(def.CancelTriggersTurnComplete),
+		def.AutoArchiveAfterHours, def.AgentProfileID, models.NormalizeWorkflowProfileSessionStartPolicy(string(def.ProfileSessionStartPolicy)), models.NormalizeWorkflowProfileSessionEndPolicy(string(def.ProfileSessionEndPolicy)), string(stage), string(sessionTargetJSON),
+		dialect.BoolToInt(def.AutoAdvanceRequiresSignal), dialect.BoolToInt(def.CancelTriggersTurnComplete), dialect.BoolToInt(def.CompleteTaskOnEnter),
 		now, now,
 	)
 	if err != nil {

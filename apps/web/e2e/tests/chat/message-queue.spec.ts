@@ -4,14 +4,22 @@ import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
+import { seedRunningGeneratingSession } from "../../helpers/generating-session";
+import { waitForAgentMessage, waitForSessionDone } from "../../helpers/session";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
 import { waitForQuickChatComposerReady } from "./quick-chat-helpers";
+import { expectSendNowWorkflowRunning } from "./message-queue-workflow-helpers";
 import {
   registerSeparateQueueRows,
   requestMessageQueueSettings,
 } from "../../helpers/message-queue-settings";
+import { watchWs } from "../../helpers/causal-waits";
 
 registerSeparateQueueRows(test);
+
+test("Send Now keeps a workflow transition running", async ({ testPage, apiClient, seedData }) => {
+  await expectSendNowWorkflowRunning(testPage, apiClient, seedData, false);
+});
 
 // ---------------------------------------------------------------------------
 // Quick Chat queue tests
@@ -161,13 +169,18 @@ test.describe("Quick chat queue", () => {
 // Task session queue tests
 // ---------------------------------------------------------------------------
 
+type SeededSessionPage = SessionPage & {
+  taskId: string;
+  sessionId: string;
+};
+
 async function seedTaskAndWaitForIdle(
   testPage: Page,
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
   description = "/e2e:simple-message",
-): Promise<SessionPage> {
+): Promise<SeededSessionPage> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     title,
@@ -185,8 +198,11 @@ async function seedTaskAndWaitForIdle(
   const session = new SessionPage(testPage);
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
+  if (!task.session_id) {
+    throw new Error("task did not have a primary session");
+  }
 
-  return session;
+  return Object.assign(session, { taskId: task.id, sessionId: task.session_id });
 }
 
 async function queueMessages(
@@ -195,8 +211,9 @@ async function queueMessages(
   sessionId: string,
   messages: string[],
 ): Promise<void> {
+  const identity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
   for (const message of messages) {
-    await apiClient.queueMessage(taskId, sessionId, message);
+    await apiClient.queueMessage(identity, message);
   }
 }
 
@@ -256,10 +273,11 @@ test.describe("Task session queue", () => {
       state: "RUNNING",
       agentProfileId: seedData.agentProfileId,
     });
+    const queueIdentity = await apiClient.getQueueSessionIdentity(task.id, sessionId);
     await requestMessageQueueSettings(apiClient, "PATCH", { auto_merge_enabled: true });
 
-    await apiClient.queueMessage(task.id, sessionId, "automatic first");
-    await apiClient.queueMessage(task.id, sessionId, "automatic second");
+    await apiClient.queueMessage(queueIdentity, "automatic first");
+    await apiClient.queueMessage(queueIdentity, "automatic second");
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -267,12 +285,19 @@ test.describe("Task session queue", () => {
     const panel = session.activeChat().getByTestId("queued-ghost-list");
     const entries = panel.getByTestId("queue-entry-text");
     await expect(entries).toHaveCount(1);
+    const autoMerge = panel.getByTestId("queue-auto-merge");
+    await expect(autoMerge).toHaveAttribute("data-state", "checked");
+    await autoMerge.click();
+    await expect(autoMerge).toHaveAttribute("data-state", "unchecked");
+
     await expect(entries.first()).toContainText("automatic first");
     await expect(entries.first()).toContainText("automatic second");
 
     await requestMessageQueueSettings(apiClient, "PATCH", { auto_merge_enabled: false });
-    await apiClient.queueMessage(task.id, sessionId, "separate third");
-    await apiClient.queueMessage(task.id, sessionId, "separate fourth");
+    await requestMessageQueueSettings(apiClient, "PATCH", { auto_merge_enabled: true });
+    await expect(autoMerge).toHaveAttribute("data-state", "unchecked");
+    await apiClient.queueMessage(queueIdentity, "separate third");
+    await apiClient.queueMessage(queueIdentity, "separate fourth");
     await expect(entries).toHaveCount(3, { timeout: 10_000 });
     await expect(entries.nth(1)).toHaveText("separate third");
     await expect(entries.nth(2)).toHaveText("separate fourth");
@@ -294,7 +319,8 @@ test.describe("Task session queue", () => {
     // isolation). Enabling automatic merge must fold the next compatible
     // message into the tail instead of rejecting it as "queue full".
     await requestMessageQueueSettings(apiClient, "PATCH", { auto_merge_enabled: true });
-    await apiClient.queueMessage(taskId, sessionId, "folded while full");
+    const queueIdentity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
+    await apiClient.queueMessage(queueIdentity, "folded while full");
 
     const chat = session.activeChat();
     const chip = chat.getByTestId("queue-chip");
@@ -544,6 +570,170 @@ test.describe("Task session queue", () => {
       .toEqual({ scrollable: true, maxHeight: "200px", overflowY: "auto" });
   });
 
+  test("editing a later queued entry does not pause earlier FIFO delivery", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(90_000);
+    const gateway = watchWs(testPage);
+
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Queue edit lease ordering test",
+    );
+    await session.sendMessage("/slow 10s");
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    await waitForComposerQueueMode(testPage);
+    const queueIdentity = await apiClient.getQueueSessionIdentity(
+      session.taskId,
+      session.sessionId,
+    );
+
+    await queueMessages(apiClient, session.taskId, session.sessionId, [
+      scriptedQueueMessage("first queued"),
+      scriptedQueueMessage("second queued"),
+    ]);
+    await openQueuePanel(testPage);
+
+    const rows = testPage.getByTestId("queue-entry");
+    await expect(rows).toHaveCount(2, { timeout: 10_000 });
+    await rows.nth(1).getByTestId("queue-entry-edit").click();
+
+    const textarea = testPage.getByTestId("queue-edit-textarea");
+    await expect(textarea).toBeVisible({ timeout: 5_000 });
+    await textarea.fill(scriptedQueueMessage("second edited"));
+
+    // The later entry stays leased while the earlier FIFO turn drains.
+    await waitForAgentMessage(apiClient, session.sessionId, "first queued");
+    await expect.poll(async () => (await apiClient.getQueueStatus(queueIdentity)).count).toBe(1);
+
+    const saveResponse = gateway.waitForResponse("message.queue.update");
+    await testPage.getByRole("button", { name: "Save", exact: true }).click();
+    await saveResponse;
+
+    // Saving releases the lease and resumes Auto-run for the edited entry.
+    await waitForAgentMessage(apiClient, session.sessionId, "second edited");
+    await expect.poll(async () => (await apiClient.getQueueStatus(queueIdentity)).count).toBe(0);
+    await expect(rows).toHaveCount(0);
+  });
+
+  test("saving the held head after its turn completes resumes Auto-run", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const gateway = watchWs(testPage);
+    test.setTimeout(120_000);
+
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Queue edit save dispatch test",
+    );
+    await session.sendMessage("/slow 10s");
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    await waitForComposerQueueMode(testPage);
+    const queueIdentity = await apiClient.getQueueSessionIdentity(
+      session.taskId,
+      session.sessionId,
+    );
+    await queueMessages(apiClient, session.taskId, session.sessionId, [
+      scriptedQueueMessage("edited head dispatched"),
+    ]);
+
+    await openQueuePanel(testPage);
+    const row = testPage.getByTestId("queue-entry").first();
+    await row.getByTestId("queue-entry-edit").click();
+    await testPage
+      .getByTestId("queue-edit-textarea")
+      .fill(scriptedQueueMessage("edited head dispatched after save"));
+
+    await waitForAgentMessage(apiClient, session.sessionId, "Slow response complete");
+    await expect.poll(async () => (await apiClient.getQueueStatus(queueIdentity)).count).toBe(1);
+
+    const saveResponse = gateway.waitForResponse("message.queue.update");
+    await testPage.getByRole("button", { name: "Save", exact: true }).click();
+    await saveResponse;
+    await waitForAgentMessage(apiClient, session.sessionId, "edited head dispatched after save");
+    await expect.poll(async () => (await apiClient.getQueueStatus(queueIdentity)).count).toBe(0);
+    await expect(testPage.getByTestId("queue-entry")).toHaveCount(0);
+  });
+
+  test("queue editor reconciles after switching sessions", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const replacementTask = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Queue editor replacement B",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    if (!replacementTask.session_id) {
+      throw new Error("replacement task did not have a primary session");
+    }
+    await waitForSessionDone(
+      apiClient,
+      replacementTask.id,
+      replacementTask.session_id,
+      "replacement task should finish its seed turn",
+    );
+
+    const session = await seedTaskAndWaitForIdle(
+      testPage,
+      apiClient,
+      seedData,
+      "Queue editor replacement A",
+    );
+    await session.sendMessage("/slow 30s");
+    await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
+    await waitForComposerQueueMode(testPage);
+    await queueMessages(apiClient, session.taskId, session.sessionId, [
+      scriptedQueueMessage("replacement first"),
+      scriptedQueueMessage("replacement second"),
+    ]);
+
+    await openQueuePanel(testPage);
+    const rows = testPage.getByTestId("queue-entry");
+    await expect(rows).toHaveCount(2, { timeout: 10_000 });
+    await rows.nth(1).getByTestId("queue-entry-edit").click();
+    await expect(testPage.getByTestId("queue-edit-textarea")).toBeVisible();
+
+    await session.clickTaskInSidebar("Queue editor replacement B");
+    await expect(testPage).toHaveURL(new RegExp(`/t/${replacementTask.id}$`), {
+      timeout: 15_000,
+    });
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+
+    await session.clickTaskInSidebar("Queue editor replacement A");
+    await expect(testPage).toHaveURL(new RegExp(`/t/${session.taskId}$`), {
+      timeout: 15_000,
+    });
+    await session.waitForLoad();
+    await openQueuePanel(testPage);
+    const remountedRows = testPage.getByTestId("queue-entry");
+    await expect(remountedRows).toHaveCount(2, { timeout: 10_000 });
+    await remountedRows.nth(1).getByTestId("queue-entry-edit").click();
+    await testPage.getByTestId("queue-edit-textarea").fill("replacement second edited");
+    await testPage.getByRole("button", { name: "Save", exact: true }).click();
+    await expect(testPage.getByTestId("queue-entry-text").last()).toContainText(
+      "replacement second edited",
+    );
+  });
+
   test("merges a queued message into the message above it", async ({
     testPage,
     apiClient,
@@ -737,5 +927,141 @@ test.describe("Queue affordance", () => {
     // Panel and chip both disappear once the queue is empty.
     await expect(testPage.getByTestId("queued-ghost-list")).not.toBeVisible({ timeout: 5_000 });
     await expect(testPage.getByTestId("queue-chip")).not.toBeVisible({ timeout: 5_000 });
+  });
+});
+
+async function readQueuePreviewMetricsWithoutDisclosure(
+  preview: Locator,
+): Promise<{ clientHeight: number; scrollHeight: number }> {
+  return preview.evaluate((element) => {
+    const disclosure = element
+      .closest('[data-testid="queue-entry"]')
+      ?.querySelector<HTMLElement>('[data-testid="queue-entry-expand"]');
+    const previousDisplay = disclosure?.style.display;
+    try {
+      if (disclosure) disclosure.style.display = "none";
+      return {
+        clientHeight: element.clientHeight,
+        scrollHeight: element.scrollHeight,
+      };
+    } finally {
+      if (disclosure) disclosure.style.display = previousDisplay ?? "";
+    }
+  });
+}
+
+test.describe("Queued row controls", () => {
+  test.describe.configure({ timeout: 120_000 });
+
+  // @covers AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.9
+  // @covers AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.10
+  test("adapts queued row controls to rendered overflow", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const fixture = "adaptive-width-probe ".repeat(12).trim();
+    await testPage.setViewportSize({ width: 1280, height: 900 });
+    const { session, taskId, sessionId } = await seedRunningGeneratingSession(
+      testPage,
+      apiClient,
+      seedData,
+      "Adaptive queued row controls",
+      { sleepSeconds: 60 },
+    );
+    await testPage.getByRole("button", { name: "Collapse sidebar" }).click();
+    await expect(testPage.getByTestId("app-sidebar")).toHaveAttribute("data-collapsed", "true");
+    const chatMaximize = testPage
+      .locator(
+        '.dv-groupview:has([data-testid^="session-tab-"]) .dv-tabs-and-actions-container [data-testid="dockview-maximize-btn"]',
+      )
+      .first();
+    await expect(chatMaximize).toBeVisible();
+    await chatMaximize.click();
+    const identity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
+    const autoRunResponse = await apiClient.setQueueAutoRun(identity, false);
+    expect(autoRunResponse).toMatchObject({ session_id: sessionId, auto_run: false });
+    await waitForComposerQueueMode(testPage);
+    await apiClient.queueMessage(identity, fixture);
+    await expect
+      .poll(() => apiClient.getQueueStatus(identity))
+      .toMatchObject({ count: 1, auto_run: false });
+
+    const chat = session.activeChat();
+    await chat.getByTestId("queue-chip").click();
+    const panel = chat.getByTestId("queued-ghost-list");
+    const row = panel.getByTestId("queue-entry").filter({ hasText: fixture });
+    const preview = row.getByTestId("queue-entry-text");
+    const actions = row.getByTestId("queue-entry-actions");
+    const remove = row.getByTestId("queue-entry-remove");
+    await expect(row).toBeVisible();
+    await expect
+      .poll(async () => {
+        const metrics = await readQueuePreviewMetricsWithoutDisclosure(preview);
+        return metrics.scrollHeight === metrics.clientHeight;
+      })
+      .toBe(true);
+    await expect(row.getByTestId("queue-entry-expand")).toHaveCount(0);
+
+    await testPage.setViewportSize({ width: 800, height: 900 });
+    await expect
+      .poll(async () => {
+        const metrics = await readQueuePreviewMetricsWithoutDisclosure(preview);
+        return metrics.scrollHeight > metrics.clientHeight;
+      })
+      .toBe(true);
+    const expand = row.getByTestId("queue-entry-expand");
+    await expect(expand).toBeVisible();
+
+    await testPage.mouse.move(0, 0);
+    await expect(actions).toHaveCSS("opacity", "0");
+    await row.hover();
+    await expect(actions).toHaveCSS("opacity", "1");
+    expect(await testPage.evaluate(() => matchMedia("(pointer: fine)").matches)).toBe(true);
+    await expect(remove).toHaveAttribute("title", "Remove queued message");
+    await expect(
+      row.getByRole("button", { name: "Remove queued message", exact: true }),
+    ).toHaveCount(1);
+    await expect(remove.locator("svg")).toHaveClass(/tabler-icon-trash/);
+    const order = await actions.evaluate((container) => {
+      const direct = [...container.children] as HTMLElement[];
+      const disclosure = direct.find((element) => element.dataset.testid === "queue-entry-expand");
+      const terminal = direct.at(-1);
+      return {
+        adjacent: disclosure?.nextElementSibling === terminal,
+        terminalTestId: (terminal as HTMLElement | undefined)?.dataset.testid,
+      };
+    });
+    expect(order).toEqual({ adjacent: true, terminalTestId: "queue-entry-remove" });
+
+    const colors = await remove.evaluate((button) => {
+      const muted = document.createElement("span");
+      muted.className = "text-muted-foreground";
+      const destructive = document.createElement("span");
+      destructive.className = "text-destructive";
+      button.parentElement?.append(muted, destructive);
+      const values = {
+        muted: getComputedStyle(muted).color,
+        destructive: getComputedStyle(destructive).color,
+      };
+      muted.remove();
+      destructive.remove();
+      return values;
+    });
+    await expect(remove).toHaveCSS("color", colors.muted);
+    await remove.hover();
+    await expect(remove).toHaveCSS("color", colors.destructive);
+
+    await testPage.setViewportSize({ width: 1280, height: 900 });
+    await expect
+      .poll(async () => {
+        const metrics = await readQueuePreviewMetricsWithoutDisclosure(preview);
+        return metrics.scrollHeight === metrics.clientHeight;
+      })
+      .toBe(true);
+    await expect(row.getByTestId("queue-entry-expand")).toHaveCount(0);
+
+    await remove.click();
+    await expect(row).toHaveCount(0);
   });
 });

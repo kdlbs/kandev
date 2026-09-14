@@ -90,6 +90,9 @@ type HandleInput struct {
 	Trigger      Trigger
 	OperationID  string
 	EvaluateOnly bool // when true, skip ApplyTransition and PersistData; caller handles persistence
+	// DeferOperationMark leaves OperationID unmarked. The caller must mark it
+	// after completing any side effect outside the engine.
+	DeferOperationMark bool
 
 	// PreloadedState, when set, skips the LoadState call in the engine.
 	// Use this to avoid redundant DB reads when the caller already loaded the session and task.
@@ -125,6 +128,13 @@ type HandleResult struct {
 	// abandoning is an expected outcome of concurrent re-evaluation, not a
 	// failure.
 	TransitionAbandoned bool
+
+	// OperationMarkDeferred is true when the engine deliberately skipped
+	// marking HandleInput.OperationID applied because EvaluateOnly deferred
+	// this transition's commit to the caller. The caller then owns the
+	// marker and must invoke TransitionStore.MarkOperationApplied itself,
+	// once and only once its own commit succeeds.
+	OperationMarkDeferred bool
 }
 
 // Option configures an Engine at construction time. Use With* helpers below.
@@ -181,6 +191,14 @@ func WithAgentProfileResolver(resolver AgentProfileResolver) Option {
 	return func(e *Engine) { e.agentProfiles = resolver }
 }
 
+// WithMarkerBearingStepEntryExecutor wires DispatchStepEntry's marker-bearing
+// action hook (AC-OFFICE-STEP-ENTRY-DISPATCH-002.3). Without it, a
+// marker-bearing on_enter action executes directly and unprotected — the
+// pre-convergence behaviour, safe only for deployments that never wire it.
+func WithMarkerBearingStepEntryExecutor(executor MarkerBearingStepEntryExecutor) Option {
+	return func(e *Engine) { e.markerExecutor = executor }
+}
+
 // Engine evaluates step actions and applies transitions.
 type Engine struct {
 	store     TransitionStore
@@ -199,6 +217,10 @@ type Engine struct {
 	// logger is nil-safe (AC-24): *logger.Logger methods are not nil-safe
 	// themselves, so every use is guarded by an explicit nil check.
 	logger *logger.Logger
+	// markerExecutor is DispatchStepEntry's optional marker-bearing action
+	// hook (AC-OFFICE-STEP-ENTRY-DISPATCH-002.3) — nil-safe like every other
+	// Phase 2/8 dependency.
+	markerExecutor MarkerBearingStepEntryExecutor
 }
 
 // TaskCreatorAdapter exposes the wired TaskCreator (or nil if unset).
@@ -263,8 +285,13 @@ func (e *Engine) handleTrigger(ctx context.Context, in HandleInput, filter func(
 	}
 
 	actions := step.Events[in.Trigger]
+	if in.OperationID != "" {
+		if err := e.validateActionCallbacks(actions, filter); err != nil {
+			return HandleResult{}, err
+		}
+	}
 	if len(actions) == 0 {
-		return HandleResult{}, e.markOperationApplied(ctx, in.OperationID)
+		return HandleResult{}, e.markOperationAppliedForInput(ctx, in)
 	}
 
 	result, err := e.processActions(ctx, in, state, step, actions, filter)
@@ -272,7 +299,35 @@ func (e *Engine) handleTrigger(ctx context.Context, in HandleInput, filter func(
 		return HandleResult{}, err
 	}
 
-	return result, e.markOperationApplied(ctx, in.OperationID)
+	// A deferred transition is work this call evaluated but did not commit
+	// (processActions skips ApplyTransition under EvaluateOnly). Marking the
+	// operation applied here would claim a commit the caller still owes, so
+	// ownership of the marker passes to the caller instead.
+	if in.EvaluateOnly && result.Transitioned {
+		result.OperationMarkDeferred = in.OperationID != ""
+		return result, nil
+	}
+
+	return result, e.markOperationAppliedForInput(ctx, in)
+}
+
+// validateActionCallbacks rejects operation-bearing triggers that include an
+// action without a registered callback. Without this preflight, the legacy
+// no-op behavior could mark the operation applied before a late-wired callback
+// became available, preventing the trigger from ever being retried.
+func (e *Engine) validateActionCallbacks(actions []Action, filter func(ActionKind) bool) error {
+	for _, action := range actions {
+		if filter != nil && !filter(action.Kind) {
+			continue
+		}
+		if isTransitionAction(action.Kind) {
+			continue
+		}
+		if _, ok := e.callbacks.Get(action.Kind); !ok {
+			return fmt.Errorf("%w: action %s has no registered callback", ErrActionNotYetWired, action.Kind)
+		}
+	}
+	return nil
 }
 
 // processActions evaluates actions, persists data, and applies transitions.
@@ -322,6 +377,13 @@ func (e *Engine) markOperationApplied(ctx context.Context, operationID string) e
 		return nil
 	}
 	return e.store.MarkOperationApplied(ctx, operationID)
+}
+
+func (e *Engine) markOperationAppliedForInput(ctx context.Context, in HandleInput) error {
+	if in.DeferOperationMark {
+		return nil
+	}
+	return e.markOperationApplied(ctx, in.OperationID)
 }
 
 func (e *Engine) loadExecutionContext(ctx context.Context, in HandleInput) (MachineState, StepSpec, error) {
