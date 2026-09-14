@@ -582,7 +582,7 @@ function applyLayoutAndSet(
   // `pane-resize-sidebar.spec.ts:41` flake mode: cap=301 from a 601px stale
   // measurement clamps the 430px sidebar override down to 301).
   const measured = preMeasured ?? measureDockviewContainer(api);
-  const previousLayout = api.toJSON();
+  const previousLayout = typeof api.toJSON === "function" ? api.toJSON() : undefined;
   try {
     const ids = applyLayout(api, state, pinnedWidths, measured.width, measured.height);
     set(ids);
@@ -591,7 +591,9 @@ function applyLayoutAndSet(
     // Dockview can clear its grid before reporting a deserialization error. Roll back once so
     // every programmatic layout transition either commits completely or leaves the live grid intact.
     try {
-      api.fromJSON(previousLayout);
+      if (previousLayout) {
+        api.fromJSON(previousLayout);
+      }
     } catch {
       // A failed rollback cannot be repaired by retrying without risking another partial mutation.
     }

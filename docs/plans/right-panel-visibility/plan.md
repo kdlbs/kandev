@@ -194,6 +194,23 @@ The current remediation checks are:
   local focused runs pass, and current CI output will be reviewed after the fixup push.
 - `git diff --check` passed.
 
+## PR fixup verification (2026-09-14)
+
+The first current-head PR run for `2bcaa1faf28f55fc2cfbdac122e791cdced628f0` reached 44 passed, 9 failed,
+and 0 pending checks before the repository PR helper's 45-minute deadline. The failed E2E shards were unrelated
+to this change: shard 2 reported two narrow-tab-strip assertions, shard 6 reported one fork pull-request
+comparison assertion, and shard 14 reported one Plan table pixel-tolerance assertion plus flaky Agent restart
+and mobile file-viewer cases. The E2E and frontend aggregate failures depended on those leaf results.
+
+The frontend leaf job also exposed one compatibility failure caused by the new transactional wrapper: an existing
+`dockview-store.test.ts` mock omitted `api.toJSON()`. The wrapper now guards reduced test doubles while retaining
+production rollback behavior. The targeted follow-up suite passed 11 files and 157 tests, and targeted ESLint and
+typecheck passed.
+
+The PR documentation coverage job exited without evaluator output. Replaying the evaluator locally against the
+current PR event and against its trusted validator revision returned `covered`, so the status requires a fresh
+workflow result after the fixup push. Aggregate checks will be re-evaluated from the new head.
+
 ## Historical Task 01 verification
 
 The previous standard-sidebar implementation was completed before the 2026-09-14 behavior correction. The new control is shared by desktop and tablet adapters, the tablet right column is conditional, compact desktop can reopen it, and phone navigation keeps its existing full-screen composition.
