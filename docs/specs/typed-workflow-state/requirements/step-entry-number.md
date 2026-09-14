@@ -8,27 +8,27 @@ owners:
 
 # Step-entry number requirements
 
-Part 1 of the typed workflow review state system: a server-computed step-entry
-number substituted into workflow prompt templates, so the agent never counts its
-own prose. System-wide terminology, non-functional constraints and exclusions are
+The one capability this system ships: a server-computed step-entry number
+substituted into workflow prompt templates, so the agent never counts its own
+prose. System-wide terminology, non-functional constraints and exclusions are
 in [../README.md](../README.md).
 
 ## Why
 
 A board workflow keeps three things in the task plan as prose that have typed
-homes: the review round count, the findings ledger, and the verdicts.
+homes: the review round count, the findings ledger, and the verdicts. This system
+addresses the first of the three; the findings ledger is named in README Out of
+scope 7 and the verdicts are untouched.
 
 The round cap is enforced today by instructing the agent to count plan lines
 beginning with `## SPEC REVIEW VERDICT:` — a string that appears in no Go, TS or
 Markdown file here. The agent counts its own prose. Measured against the live
 database (2026-09-01) that count is already wrong: task `e6177a00` carries **12
 verdict headings** against **5 real transitions into its Spec Review step**, so a
-5-round cap would have fired more than twice too early, and three further tasks carry 6 to 8 headings against **zero** ledger rows. Part 1 is therefore a **correctness fix, not a token optimisation** — expect
-no measurable token change from it.
-
-Part 2 closes a round trip: a review step can publish structured findings today,
-and the step it bounces back to has no MCP path to read them. That gap is why the
-findings ledger lives in plan prose.
+5-round cap would have fired more than twice too early, and three further tasks
+carry 6 to 8 headings against **zero** ledger rows. This is therefore a
+**correctness fix, not a token optimisation** — expect no measurable token change
+from it.
 
 
 ## Requirements

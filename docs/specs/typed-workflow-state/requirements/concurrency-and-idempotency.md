@@ -8,12 +8,16 @@ owners:
 
 # Concurrency and idempotency requirements
 
-This document defines the concurrency and idempotency contract for both parts of
-the typed workflow review state system. Its acceptance criteria state **accepted**
+This document defines the concurrency and idempotency contract for the typed
+workflow review state system. Its acceptance criteria state **accepted**
 behaviour: they are satisfied by adding no lock, no retry and no reconciliation,
 and are verifiable by inspection rather than by a race test. System-wide
 terminology, non-functional constraints and exclusions are in
 [../README.md](../README.md).
+
+`AC-TWS-005.3` through `AC-TWS-005.5` covered the withdrawn review-finding read and
+resolve tools and were removed with them (README Out of scope 7). The numbering gap
+is deliberate and the identifiers are not reused.
 
 ## Requirements
 
@@ -37,22 +41,3 @@ terminology, non-functional constraints and exclusions are in
   disagree if a transition commits between them. Neither is authoritative over the
   other and no reconciliation shall be added: a transition mid-build means the task
   has left the step and the prompt being assembled is already stale.
-- **AC-TWS-005.3:** Two callers resolving the same finding to **different**
-  statuses shall both succeed. The stored status is that of the write that
-  committed last, and each caller's response reflects the row as read back after
-  its own write, which may therefore differ from the status it submitted. No
-  locking or conflict error is introduced.
-- **AC-TWS-005.4:** A finding published concurrently with a list call shall
-  either appear in full or not appear. A partially populated finding shall never
-  be returned; publication is already all-or-nothing per batch. `total_matched`
-  and the returned page need not come from one snapshot: a publish committing
-  between them may leave the total inconsistent with the page. The total is
-  advisory and this is accepted, not defended against.
-- **AC-TWS-005.5:** AC-TWS-004.6's comparison is a plain read followed by a
-  conditional write, with no lock and no enclosing transaction. If another writer
-  changes the status between that read and the decision, the caller may skip its
-  own write and return a row whose status differs from what it submitted. This is
-  accepted, on the same grounds as AC-TWS-005.2 and .3: a lock or conflict error for
-  a two-agent race on one advisory finding costs more than the race does. No retry
-  shall be added.
-

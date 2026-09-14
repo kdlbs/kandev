@@ -4,8 +4,6 @@ system: typed-workflow-state
 requirements:
   - REQ-TWS-001
   - REQ-TWS-002
-  - REQ-TWS-003
-  - REQ-TWS-004
   - REQ-TWS-005
 ---
 
@@ -36,17 +34,19 @@ the vault-relative page `concepts/artifact-write-api.md`
 (`lifecycle: draft`, `base_confidence: 0.85`). It independently reproduces the
 12-versus-5 measurement above and takes three positions this spec follows rather
 than re-derives. **"Control flow parsing the artifact"** is a named anti-pattern —
-*"the routing is already returning wrong answers"* — and Part 1 is its prescribed
-remedy, the ledger already carrying a build-failing writer pin so *"the true count
-is one `COUNT(*)` away."* **"A text-derived state machine ... returns wrong answers
-silently, and no test can catch it because there is no code"** is why Part 1 is
-scoped as a correctness fix, and why the zero-row and boundary cases below are
+*"the routing is already returning wrong answers"* — and REQ-TWS-001 is its
+prescribed remedy, the ledger already carrying a build-failing writer pin so *"the
+true count is one `COUNT(*)` away."* **"A text-derived state machine ... returns wrong answers
+silently, and no test can catch it because there is no code"** is why this system
+is scoped as a correctness fix, and why the zero-row and boundary cases below are
 mandatory: once the count is in Go, tests *can* catch it. **"Append without
-curation"** settles whether resolution needs its own tool — **it does**, since a
-ledger an agent can write and read but never close is not an improvement over
-prose, so `resolve_review_finding_kandev` is in scope (REQ-TWS-004), not deferred.
-The page frames both parts as **ladder inversion**: *"using a model to judge
-something a query could decide."*
+curation"** bears on whether a findings ledger needs a close path — it does, since
+a ledger an agent can write and read but never close is no improvement over prose.
+That position stands, but this system no longer acts on it: the read and resolve
+tools it justified were withdrawn on upstream review and the whole capability moved
+to a successor contract (README Out of scope 7). The page frames the round count as
+**ladder inversion** — *"using a model to judge something a query could decide"* —
+which is precisely REQ-TWS-001's argument and is unaffected by that withdrawal.
 
 **Departure.** The page's headline concern is the plan write API itself
 (replace-only, no base fingerprint). This card deliberately does **not** touch it;
@@ -63,12 +63,15 @@ does, not evidence it works.
 
 - **OpenHands `StuckDetector`** (`sdk_guides_agent-stuck-detector.md`) computes the
   loop-bound **host-side from the event history**; the agent never asserts its own
-  iteration count. Same position as Part 1: the host owns the counter because it owns
-  the log.
-- **Devin Review** (`work-with-devin_devin-review.md`) types findings server-side and
-  makes **resolution a first-class state transition** — corroborating Leg 1 that a
-  findings store needs a close path. It caps repeated passes with a per-PR spend
-  limit enforced by the platform, not the agent.
+  iteration count. Same position as REQ-TWS-001: the host owns the counter because
+  it owns the log.
+- **Devin Review** (`work-with-devin_devin-review.md`) caps repeated passes with a
+  per-PR spend limit **enforced by the platform, not the agent** — the same division
+  of labour REQ-TWS-001 assumes, and the one the upstream review asked for when it
+  said the workflow engine should own the retry limit (README Out of scope 4). It
+  also types findings server-side and makes resolution a first-class state
+  transition, corroborating Leg 1's close-path position; that half informs the
+  successor contract rather than this system.
 
 **What we are doing differently.** Both vendors bound the loop by *behaviour*
 (repetition detected, spend exhausted). We bound it by *structure* — committed
@@ -91,7 +94,7 @@ rather than to whatever `main` holds when the doc is read. Resolve one with
 `git show e6f98d996:apps/backend/<path>` — the `apps/backend/` prefix is required,
 since a repo-root-relative path does not exist in the tree.
 
-### Part 1 inputs
+### Step-entry number inputs
 
 `sysprompt.InterpolatePlaceholders(template, taskID string) string`
 (`internal/sysprompt/sysprompt.go:501`) is four lines and does one
@@ -159,60 +162,12 @@ interpolation, one line below the step-prompt call site
 (`buildWorkflowPromptWithTrustedContext`, `task_operations.go:1971`), so damaging it
 would silently drop the base prompt.
 
-### Part 2 inputs
-
-`publish_review_findings_kandev` is registered in the `review` group, kanban
-surface only (`internal/mcp/server/server.go:1007`, `:1812`). `registerReviewTools`
-registers **exactly one** tool; no `list_` or `get_` counterpart exists anywhere.
-`registerReviewHandlers` (`internal/mcp/handlers/review.go:39`) registers five WS
-actions and returns a hardcoded count.
-
-`task_review_findings` rows are `models.TaskReviewFinding`
-(`internal/task/models/models.go:2315-2336`);
-AC-TWS-003.4 names the subset the tools return, and `AnchorText`/`FileDiffHash`/
-`RepositoryID`/`TaskID`/`UpdatedAt` are deliberately not among them.
-`ReviewFindingStatus` has **three** values: `open`, `resolved`, `dismissed`
-(`internal/task/models/models.go:2258-2260`).
-`Repository.ListTaskReviewFindings`
-(`internal/task/repository/sqlite/task_review.go:266`) is task-scoped and orders
-by `repository_name, file_path, start_line, id`.
-
-`review.NormalizeFindingInput` (`internal/review/parse.go:162`) trims and lower-cases
-the publisher's `severity` before `models.ValidReviewSeverity` rejects it, and
-defaults an omitted `line_end` to `line`.
-
-**Authorisation is the load-bearing detail.** `ReviewService.authorizeTask` is an
-opt-in per-user check wired by `SetTaskAuthorizer`, and `s.authorize` is called in
-exactly **one** place: `PublishFindings`, at
-`internal/task/service/review_service.go:320`.
-`GetTaskReview` (`:505`) and `UpdateFindingStatus` (`:472`) do **not** authorise —
-they are reached today only from browser WS actions, so reusing either from MCP
-unchanged would bypass the publisher's reach rule. `UpdateFindingStatus` takes a
-`findingID`, not a `taskID`, so a resolve path must resolve the finding to its owning
-task before it can authorise. It also stamps `resolved_at` unconditionally
-(AC-TWS-004.10).
-
-Existing WS actions: `task.review.get`, `task.review.finding.update` (UI) and
-`mcp.publish_review_findings` (MCP). MCP tools use `mcp.`-prefixed actions by
-convention, and those are refused on the raw browser WebSocket
-(`internal/gateway/websocket/client.go:175`).
-
-Live data: **6 findings total, all `open`**, across 2 tasks — consistent with a store
-nothing reads.
-
-
 ## E2E decision input
 
-**User-visible surfaces touched: none. Recommendation: no new E2E specs.** Part 1
-changes prompt text only and no live template contains the new token. Part 2 adds
-MCP tools; the Review panel reads findings over `task.review.get`, unmodified here,
-and no frontend file is touched (Out of scope 9).
-
-Two nuances, stated not glossed. AC-TWS-004.9 makes resolve a new producer
-of an existing event (`TaskReviewFindingUpdated`) — the same event on the same
-channel the panel's own control already emits, so no new rendering path. AC-TWS-004.10
-changes that panel's repeated-resolve behaviour (the timestamp stops moving): a
-service-layer change, observable in the panel, with no frontend edit.
+**User-visible surfaces touched: none. Recommendation: no new E2E specs.** This
+system changes prompt text only, and no live template contains the new token, so
+there is no rendered surface an assertion could reach. No frontend file is touched
+(README Out of scope 6) and no existing event gains a new producer.
 
 No existing E2E spec should change; if one does, that is evidence of unintended
 scope.
