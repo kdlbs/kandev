@@ -222,6 +222,10 @@ expiry remains responsible for its existing prompt-cleanup policy.
   row disappears while task lane, session, tags, and queue state remain
   unchanged. It must occur only after review, merge, and deployment.
 
+## Related plan
+
+- [docs/plans/pending-move-exact-cancellation/plan.md](../../../plans/pending-move-exact-cancellation/plan.md)
+
 ## Related decisions
 
 - [Bind administrative pending-move cancellation to an exact row generation](../../../decisions/2026-08-30-exact-pending-move-cancellation.md)
