@@ -18,14 +18,19 @@ func cloneTaskMetadata(metadata map[string]interface{}) map[string]interface{} {
 }
 
 // protectedTaskMetadataUpdate applies a generic metadata replacement while
-// keeping the deferred launch intent owned by the server. The HTTP PATCH
-// surface may replace ordinary metadata, but it cannot create, replace, or
-// remove the launch record that carries deferred-start ownership.
+// keeping the deferred launch intent and the task-boundary causation
+// carrier (AC-OFFICE-RUN-CAUSATION-001.17/.18) owned by the server. The
+// HTTP PATCH surface may replace ordinary metadata, but it cannot create,
+// replace, or remove the launch record that carries deferred-start
+// ownership, and it can never set, reset, or lower the causation carrier —
+// no update path writes that carrier, so any office_carrier_* key in the
+// request is always stripped rather than preserved from existing.
 func protectedTaskMetadataUpdate(existing, requested map[string]interface{}) map[string]interface{} {
 	updated := cloneTaskMetadata(requested)
 	if updated == nil {
 		updated = make(map[string]interface{})
 	}
+	models.StripOfficeCarrierMetadata(updated)
 	if deferred, ok := existing[models.MetaKeyDeferredLaunch]; ok {
 		updated[models.MetaKeyDeferredLaunch] = deferred
 	} else {

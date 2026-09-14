@@ -105,19 +105,21 @@ func newRunsEngineAdapterActorTestHarness(t *testing.T) (
 	return adapter, taskSvc, officeRepo
 }
 
-func seedTaskWithCarrier(t *testing.T, taskSvc *taskservice.Service, metadata map[string]interface{}) string {
+func seedTaskWithCarrier(t *testing.T, taskSvc *taskservice.Service, carrierMetadata map[string]interface{}) string {
 	t.Helper()
 	ctx := context.Background()
 	workflows, err := taskSvc.ListWorkflows(ctx, "ws-1", true)
 	if err != nil || len(workflows) == 0 {
 		t.Fatalf("ListWorkflows: %v (len=%d)", err, len(workflows))
 	}
+	// OfficeCarrierMetadata, not Metadata: only the server-trusted field
+	// survives create-time carrier stripping (AC-OFFICE-RUN-CAUSATION-001.17).
 	result, err := taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{ //nolint:exhaustruct
-		WorkspaceID: "ws-1",
-		WorkflowID:  workflows[0].ID,
-		Title:       "Carrier task",
-		Metadata:    metadata,
-		Origin:      models.TaskOriginOnboarding,
+		WorkspaceID:           "ws-1",
+		WorkflowID:            workflows[0].ID,
+		Title:                 "Carrier task",
+		OfficeCarrierMetadata: carrierMetadata,
+		Origin:                models.TaskOriginOnboarding,
 	})
 	if err != nil {
 		t.Fatalf("CreateTask: %v", err)

@@ -166,14 +166,19 @@ func (a *taskCreatorAdapter) CreateOfficeTask(ctx context.Context, workspaceID, 
 
 func (a *taskCreatorAdapter) CreateOfficeTaskAsAgent(
 	ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description string,
-	metadata map[string]interface{},
+	carrierMetadata map[string]interface{},
 ) (string, error) {
-	return a.createOfficeTask(ctx, workspaceID, projectID, assigneeAgentID, title, description, models.TaskOriginAgentCreated, metadata)
+	return a.createOfficeTask(ctx, workspaceID, projectID, assigneeAgentID, title, description, models.TaskOriginAgentCreated, carrierMetadata)
 }
 
+// createOfficeTask persists carrierMetadata (already resolved server-side
+// from the causing run's record, or nil) through the trusted
+// OfficeCarrierMetadata field rather than the ordinary Metadata field, so
+// it survives create-time stripping the same way a request-body-forged
+// carrier does not (AC-OFFICE-RUN-CAUSATION-001.17).
 func (a *taskCreatorAdapter) createOfficeTask(
 	ctx context.Context, workspaceID, projectID, assigneeAgentID, title, description, origin string,
-	metadata map[string]interface{},
+	carrierMetadata map[string]interface{},
 ) (string, error) {
 	result, err := a.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{ //nolint:exhaustruct
 		WorkspaceID:            workspaceID,
@@ -182,7 +187,7 @@ func (a *taskCreatorAdapter) createOfficeTask(
 		ProjectID:              projectID,
 		AssigneeAgentProfileID: assigneeAgentID,
 		Origin:                 origin,
-		Metadata:               metadata,
+		OfficeCarrierMetadata:  carrierMetadata,
 	})
 	if err != nil {
 		return "", err
@@ -212,19 +217,6 @@ func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 		// otherwise evaluate on_enter for it. This opts the task into
 		// handleTaskCreated's create-time on_enter evaluation.
 		models.MetaKeyAutoStartOnCreate: true,
-
-		// The full carrier set is written explicitly, including the
-		// empty/zero root values, so the read side's carrierPresent can
-		// tell this task apart from one that never carried a carrier at
-		// all — an omitted key reads as a defect (AC-OFFICE-RUN-CAUSATION-001.10
-		// "absent"), not as this deliberate root.
-		models.MetaKeyOfficeCarrierCausationID:    "",
-		models.MetaKeyOfficeCarrierCausationDepth: 0,
-		models.MetaKeyOfficeCarrierCreatingRunID:  "",
-		models.MetaKeyOfficeCarrierHumanRooted:    false,
-		models.MetaKeyOfficeCarrierRoutineID:      routineID,
-		models.MetaKeyOfficeCarrierActorKind:      string(officemodels.ActorKindSystem),
-		models.MetaKeyOfficeCarrierActorID:        "",
 	}
 	if assigneeAgentID != "" {
 		// The Routine workflow's start step pins no agent (routine.yml), so
@@ -232,6 +224,22 @@ func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 		// task.Metadata[MetaKeyAgentProfileID] is what lets a materialized
 		// heavy-routine task actually launch with the routine's assignee.
 		metadata[models.MetaKeyAgentProfileID] = assigneeAgentID
+	}
+	// The full carrier set is written explicitly, including the
+	// empty/zero root values, so the read side's carrierPresent can tell
+	// this task apart from one that never carried a carrier at all — an
+	// omitted key reads as a defect (AC-OFFICE-RUN-CAUSATION-001.10
+	// "absent"), not as this deliberate root. Carried through the trusted
+	// OfficeCarrierMetadata field (AC-OFFICE-RUN-CAUSATION-001.17), not
+	// Metadata, so it survives create-time stripping.
+	carrierMetadata := map[string]interface{}{
+		models.MetaKeyOfficeCarrierCausationID:    "",
+		models.MetaKeyOfficeCarrierCausationDepth: 0,
+		models.MetaKeyOfficeCarrierCreatingRunID:  "",
+		models.MetaKeyOfficeCarrierHumanRooted:    false,
+		models.MetaKeyOfficeCarrierRoutineID:      routineID,
+		models.MetaKeyOfficeCarrierActorKind:      string(officemodels.ActorKindSystem),
+		models.MetaKeyOfficeCarrierActorID:        "",
 	}
 	result, err := a.taskSvc.CreateTask(ctx, &taskservice.CreateTaskRequest{ //nolint:exhaustruct
 		WorkspaceID:            workspaceID,
@@ -241,6 +249,7 @@ func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 		ProjectID:              projectID,
 		AssigneeAgentProfileID: assigneeAgentID,
 		Metadata:               metadata,
+		OfficeCarrierMetadata:  carrierMetadata,
 		Origin:                 models.TaskOriginOnboarding,
 	})
 	if err != nil {
@@ -249,20 +258,25 @@ func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 	return result.Task.ID, nil
 }
 
+// CreateOfficeSubtask receives carrierMetadata already resolved server-side
+// from the causing run's record (or nil), and forwards it through the
+// trusted ChildTaskSpec.OfficeCarrierMetadata field so it survives
+// create-time stripping the same way a request-body-forged carrier does
+// not (AC-OFFICE-RUN-CAUSATION-001.17).
 func (a *taskCreatorAdapter) CreateOfficeSubtask(
 	ctx context.Context,
 	parentTaskID, assigneeAgentID, title, description string,
-	metadata map[string]interface{},
+	carrierMetadata map[string]interface{},
 ) (string, error) {
 	parent, err := a.taskSvc.GetTask(ctx, parentTaskID)
 	if err != nil {
 		return "", err
 	}
 	return a.taskSvc.CreateChildTask(ctx, parent, taskservice.ChildTaskSpec{
-		Title:          title,
-		Description:    description,
-		AgentProfileID: assigneeAgentID,
-		Metadata:       metadata,
+		Title:                 title,
+		Description:           description,
+		AgentProfileID:        assigneeAgentID,
+		OfficeCarrierMetadata: carrierMetadata,
 	})
 }
 

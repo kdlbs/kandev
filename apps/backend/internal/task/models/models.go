@@ -231,6 +231,30 @@ const (
 	MetaKeyOfficeCarrierActorID        = "office_carrier_actor_id"
 )
 
+// officeCarrierMetadataKeys is every MetaKeyOfficeCarrier* key above, kept
+// next to that block so a new carrier key can't be added to one without
+// the other.
+var officeCarrierMetadataKeys = []string{
+	MetaKeyOfficeCarrierCausationID,
+	MetaKeyOfficeCarrierCausationDepth,
+	MetaKeyOfficeCarrierCreatingRunID,
+	MetaKeyOfficeCarrierHumanRooted,
+	MetaKeyOfficeCarrierRoutineID,
+	MetaKeyOfficeCarrierActorKind,
+	MetaKeyOfficeCarrierActorID,
+}
+
+// StripOfficeCarrierMetadata deletes every task-boundary causation carrier
+// key from metadata in place (safe to call with a nil map). The carrier
+// (AC-OFFICE-RUN-CAUSATION-001.18) may only be derived server-side from a
+// run's own record (AC-OFFICE-RUN-CAUSATION-001.17), so no metadata
+// originating from a request body may carry it.
+func StripOfficeCarrierMetadata(metadata map[string]interface{}) {
+	for _, key := range officeCarrierMetadataKeys {
+		delete(metadata, key)
+	}
+}
+
 // IsAgentTitlePending reports whether task metadata contains the durable
 // pending title marker. JSON rehydration produces bool values, while a
 // few in-process callers may provide typed metadata, so only an explicit true
