@@ -38,7 +38,7 @@ func absentCanonicalEnvironmentGroup(
 	}
 }
 
-// AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.6: a positively absent canonical
+// AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.7: a positively absent canonical
 // environment carries no ownership, so there is nothing to transfer and the
 // archive completes.
 func TestArchiveTaskTree_SucceedsWhenCanonicalEnvironmentAbsent(t *testing.T) {
@@ -76,7 +76,7 @@ func TestArchiveTaskTree_SucceedsWhenCanonicalEnvironmentAbsent(t *testing.T) {
 	}
 }
 
-// AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.7: an uncertain signal is not
+// AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.8: an uncertain signal is not
 // absence. A generic lookup failure must still fail the archive rather than be
 // read as "nothing to transfer".
 func TestArchiveTaskTree_FailsWhenEnvironmentLookupErrors(t *testing.T) {
@@ -106,7 +106,7 @@ func TestArchiveTaskTree_FailsWhenEnvironmentLookupErrors(t *testing.T) {
 
 // DeleteTaskTree shares transferWorkspaceGroupEnvironmentOwnership with
 // ArchiveTaskTree, but the absent-environment tolerance is scoped to archive
-// only (AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.6/.7 cover archive; delete
+// only (AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.7/.8 cover archive; delete
 // is a destructive path this plan never evaluated). A positively absent
 // environment must still fail delete, the same as before the archive fix.
 func TestDeleteTaskTree_FailsWhenCanonicalEnvironmentAbsent(t *testing.T) {
@@ -146,6 +146,10 @@ type recordingAbsentEnvironmentWorkspaceCleaner struct {
 	singleRepoWorktrees []string
 	multiRepoRoots      []string
 	remoteEnvironments  []string
+}
+
+func (c *recordingAbsentEnvironmentWorkspaceCleaner) ValidateManagedRoot(string) error {
+	return nil
 }
 
 func (c *recordingAbsentEnvironmentWorkspaceCleaner) CleanupPlainFolder(_ context.Context, path string) error {

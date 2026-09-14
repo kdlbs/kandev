@@ -315,6 +315,22 @@ prompt than the user reviewed.
 
 ## Plan lifecycle
 
+### Open comment editor during background reads
+
+For `AC-TASKS-PLAN-COMMENTS-001.9` through `.11`, `TaskPlanPanel` shows its
+full-panel loading placeholder only without a current plan. Revalidation keeps
+the content and comment Popover/Drawer mounted. Tiptap becomes read-only and
+hides formatting, slash, and drag controls until settlement, preventing plan
+edits that an incoming revision could overwrite. Comment input stays editable.
+No draft storage, backend writes, or loader semantics change. Same-plan refresh
+must not reset comment text. Task/plan identity changes still clear selection.
+
+Tests assert input identity and text across pending, successful, and failed
+reads, initial loading and owner changes, plus desktop/phone Add/Update and
+plan read-only transitions.
+
+### Persisted comment lifecycle
+
 Plan content updates and revision reverts keep the same current plan row and
 therefore keep pending comments. On projection, the editor first tries saved
 positions and then the existing selected-text fallback. If an untagged user
@@ -564,6 +580,8 @@ correctness boundary.
 - [Keep Saved-Prompt Expansion Server-Owned](../../../decisions/2026-09-01-server-owned-saved-prompt-expansion.md)
 
 ## Implementation plans
+
+- [Plan comment foreground preservation](../../../plans/plan-comment-foreground-preservation/plan.md)
 
 - [Task-owned plan comments](../../../plans/task-owned-plan-comments/plan.md)
 - [Plan comment recovery](../../../plans/plan-comment-recovery/plan.md)

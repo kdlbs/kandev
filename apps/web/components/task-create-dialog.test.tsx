@@ -28,6 +28,7 @@ type CloseAutoFocusEvent = { preventDefault: () => void };
 let allowProgrammaticSet = true;
 let mockFs: DialogFormState;
 let dialogEscapeHandler: ((event: EscapeEvent) => void) | undefined;
+let autoFocusNewTasks = true;
 let dialogCloseAutoFocusHandler: ((event: CloseAutoFocusEvent) => void) | undefined;
 
 vi.mock("@kandev/ui/dialog", () => ({
@@ -128,7 +129,7 @@ vi.mock("@/components/state-provider", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   useAppStore: (selector: (state: any) => unknown) =>
     selector({
-      userSettings: { taskCreateLastUsed: null },
+      userSettings: { taskCreateLastUsed: null, autoFocusNewTasks },
       repositorySets: {
         itemsByWorkspaceId: {},
         loadingByWorkspaceId: {},
@@ -395,6 +396,7 @@ beforeEach(() => {
   setHasDescriptionMock.mockReset();
   dialogEscapeHandler = undefined;
   dialogCloseAutoFocusHandler = undefined;
+  autoFocusNewTasks = true;
   mockFs = buildMockFs();
 });
 
@@ -553,4 +555,21 @@ describe("TaskCreateDialog prompt enhancement", () => {
     expect(setHasDescriptionMock).not.toHaveBeenCalled();
     expect(screen.getByTestId(PROMPT_RESULT_RECOVERY_TEST_ID)).toBeTruthy();
   });
+});
+
+it("returns to the opening control after background task creation", () => {
+  autoFocusNewTasks = false;
+  const target = document.createElement("button");
+  document.body.appendChild(target);
+  try {
+    target.focus();
+    renderDialog();
+    target.blur();
+    const event = { preventDefault: vi.fn() };
+    dialogCloseAutoFocusHandler?.(event);
+    expect(event.preventDefault).toHaveBeenCalled();
+    expect(document.activeElement).toBe(target);
+  } finally {
+    target.remove();
+  }
 });

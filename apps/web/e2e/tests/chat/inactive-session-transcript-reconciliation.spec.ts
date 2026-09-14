@@ -190,11 +190,14 @@ test.describe("inactive session transcript reconciliation", () => {
     await expect(chat.getByText(RECENT_RECEIVER_MARKER, { exact: true })).toBeVisible({
       timeout: 15_000,
     });
+    await expect(chat.getByTestId("conversation-loading-state")).toHaveCount(0, {
+      timeout: 30_000,
+    });
 
     await scrollToOldestLoadedEdge(list, RECENT_RECEIVER_MARKER);
 
     const peerRow = chat.locator("[id^='msg-']").filter({ hasText: PEER_PROMPT_MARKER });
-    await expect(peerRow).toHaveCount(1);
+    await expect(peerRow).toHaveCount(1, { timeout: 15_000 });
     await expect(peerRow.getByText(PEER_PROMPT_MARKER, { exact: true })).toBeVisible({
       timeout: 15_000,
     });

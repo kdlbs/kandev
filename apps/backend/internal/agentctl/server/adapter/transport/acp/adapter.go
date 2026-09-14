@@ -281,6 +281,8 @@ type Adapter struct {
 	// Session transitions use a separate mutex because a reset must keep the
 	// adapter transitionally consistent from session/new through session/close.
 	sessionTransitionMu sync.Mutex
+	sessionCleanupDone  chan struct{}
+	sessionCleanupWg    sync.WaitGroup
 	configChangeMu      sync.Mutex
 	configGeneration    uint64
 	contextSamples      map[string]contextWindowSample
@@ -734,6 +736,7 @@ func (a *Adapter) Close() error {
 	a.mu.Lock()
 	if a.closed {
 		a.mu.Unlock()
+		a.waitForSessionCleanup()
 		return nil
 	}
 	a.closed = true
@@ -755,6 +758,12 @@ func (a *Adapter) Close() error {
 	if a.lifetimeCancel != nil {
 		a.lifetimeCancel()
 	}
+
+	// A successful reset returns before its best-effort session/close request,
+	// but adapter shutdown owns that worker and must drain it before returning.
+	// Synchronizing with the transition mutex first ensures a reset that is just
+	// committing its cleanup has registered the wait-group entry.
+	a.waitForSessionCleanup()
 
 	// Wait for the update worker to exit before closing updatesCh.
 	// handleACPUpdate may call sendUpdate, so updatesCh must remain open
