@@ -330,6 +330,19 @@ func TestDispatchRetriesOccurrenceAfterCancelledDelivery(t *testing.T) {
 	}
 }
 
+func TestIsManagedConversationTaskHonorsEphemeralMetadata(t *testing.T) {
+	task := &models.Task{
+		Metadata: map[string]interface{}{
+			metaKeyPluginID:  "plugin-coordinator",
+			metaKeyEphemeral: true,
+		},
+	}
+
+	if !IsManagedConversationTask(task) {
+		t.Fatal("managed conversation metadata should preserve exclusion when the projected field is stale")
+	}
+}
+
 func TestDispatchOccurrenceKeysAreScopedPerConversation(t *testing.T) {
 	svc, deps := newACTestService()
 

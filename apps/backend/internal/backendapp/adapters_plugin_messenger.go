@@ -138,16 +138,15 @@ func (a pluginsTaskMessengerAdapter) startOrPromptSession(ctx context.Context, t
 // interface): it starts a never-launched session or prompts/resumes an idle
 // one, exactly like startOrPromptSession, but records the user message with
 // a caller-supplied idempotencyID via CreateMessageIdempotent instead of
-// always minting a new one. A retried occurrence (same idempotencyID —
-// derived by the caller from stable scheduler coordinates) replays the
-// already-committed message row and returns its outcome without dispatching
-// to the orchestrator a second time, so a scheduled wake can never fire
-// the agent twice for one occurrence. The caller (AgentConversationService)
-// has already confirmed the session is not RUNNING/STARTING before calling
-// this — session is passed in rather than re-resolved.
+// always minting a new one. When the message row already exists, the method
+// returns a non-dispatching status inferred from the session's current state;
+// it does not attempt to reproduce the original response status, and it never
+// dispatches the runtime twice. The caller (AgentConversationService) has
+// already confirmed the session is not RUNNING/STARTING before calling this —
+// session is passed in rather than re-resolved.
 func (a pluginsTaskMessengerAdapter) StartOrPromptIdempotent(ctx context.Context, taskID string, session *taskmodels.TaskSession, text, source, idempotencyID string) (string, error) {
-	// A committed row for this id means another caller already delivered this
-	// occurrence: replay its outcome without re-dispatching the runtime.
+	// A committed row for this id means another caller already recorded this
+	// occurrence. Return without re-dispatching the runtime.
 	existing, err := a.tasks.GetMessageWithPromptIndex(ctx, idempotencyID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", fmt.Errorf("check existing dispatch message: %w", err)
