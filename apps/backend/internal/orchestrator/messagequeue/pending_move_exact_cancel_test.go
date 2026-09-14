@@ -715,6 +715,11 @@ func TestSQLiteRepository_ExactCancelPendingMoveRollsBackOnAuditOrDeleteFailure(
 			BEFORE DELETE ON pending_moves
 			BEGIN SELECT RAISE(ABORT, 'delete unavailable'); END;
 		`},
+		{name: "fence", trigger: `
+			CREATE TRIGGER fail_pending_move_cancel_fence
+			BEFORE INSERT ON pending_move_cancellation_fences
+			BEGIN SELECT RAISE(ABORT, 'fence unavailable'); END;
+		`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fixture := newExactCancelFixture(t)
@@ -725,15 +730,18 @@ func TestSQLiteRepository_ExactCancelPendingMoveRollsBackOnAuditOrDeleteFailure(
 			if result != nil || !errors.Is(err, ErrPendingMoveCancelFailed) {
 				t.Fatalf("result=%#v err=%v, want sanitized cancellation failure", result, err)
 			}
-			var pendingCount, auditCount int
+			var pendingCount, auditCount, fenceCount int
 			if err := fixture.sql.Get(&pendingCount, `SELECT COUNT(*) FROM pending_moves WHERE id = ?`, fixture.match.PendingMoveID); err != nil {
 				t.Fatalf("count pending row: %v", err)
 			}
 			if err := fixture.sql.Get(&auditCount, `SELECT COUNT(*) FROM pending_move_cancellation_audit WHERE correlation_id = ?`, "correlation-failure"); err != nil {
 				t.Fatalf("count audit rows: %v", err)
 			}
-			if pendingCount != 1 || auditCount != 0 {
-				t.Fatalf("failure was not atomic: pending=%d audit=%d", pendingCount, auditCount)
+			if err := fixture.sql.Get(&fenceCount, `SELECT COUNT(*) FROM pending_move_cancellation_fences WHERE pending_move_id = ?`, fixture.match.PendingMoveID); err != nil {
+				t.Fatalf("count cancellation fences: %v", err)
+			}
+			if pendingCount != 1 || auditCount != 0 || fenceCount != 0 {
+				t.Fatalf("failure was not atomic: pending=%d audit=%d fence=%d", pendingCount, auditCount, fenceCount)
 			}
 		})
 	}
