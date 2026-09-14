@@ -42,9 +42,8 @@ import type {
   TaskPR,
   TaskPRDeletedEvent,
 } from "@/lib/types/github";
-import type { TaskMR } from "@/lib/types/gitlab";
+import type { TaskMR, TaskMRDeletedEvent, TaskMRAutomationOptions } from "@/lib/types/gitlab";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
-import type { TaskMRAutomationOptions } from "@/lib/types/gitlab";
 import type { AgentProfileRecentUseApiRecord } from "@/lib/types/http-agent-profile-recent-use";
 import type { SystemMetricsSnapshot, StorageAnalysisUpdatedPayload } from "./system";
 import type { AgentRuntimeAvailability } from "./agent-runtime";
@@ -583,6 +582,7 @@ export type BackendMessageMap = SessionBackendMessageMap &
       "gitlab.task_mr.updated",
       TaskMR & { workspace_id: string }
     >;
+    "gitlab.task_mr.deleted": BackendMessage<"gitlab.task_mr.deleted", TaskMRDeletedEvent>;
     "gitlab.task_mr_options.updated": BackendMessage<
       "gitlab.task_mr_options.updated",
       TaskMRAutomationOptions

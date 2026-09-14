@@ -50,6 +50,7 @@
   "maxViews_one": "{{count}} max",
   "maxViews_other": "{{count}} max",
   "morePluginItems": "More plugin items",
+  "needsYouInbox": "Needs you",
   "nestUnder": "Nest under {{title}}",
   "newKanbanWorkspace": "New kanban workspace",
   "newOfficeWorkspace": "New office workspace",

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
@@ -18,7 +18,11 @@ type DialogProps = {
     preferLocalExecutor?: boolean;
   };
   lockedFields?: { workflow?: boolean; repository?: boolean };
-  onSuccess?: (task: { id: string }, mode: "create" | "edit") => void;
+  onSuccess?: (
+    task: { id: string },
+    mode: "create" | "edit",
+    meta?: { autoFocus?: boolean },
+  ) => void;
 };
 
 const CREATE_CANVAS_LABEL = "Create canvas";
@@ -192,4 +196,12 @@ describe("CanvasTaskCreateLauncher", () => {
     expect(screen.queryByRole("button", { name: CREATE_CANVAS_LABEL })).toBeNull();
     expect(mocks.dialogProps).toBeNull();
   });
+});
+
+it("closes canvas creation without navigating when auto-focus is disabled", () => {
+  render(<CanvasTaskCreateLauncher workspaceId="workspace-1" presentation="sidebar" />);
+  fireEvent.click(screen.getByRole("button", { name: SET_UP_CANVAS_LABEL }));
+  act(() => mocks.dialogProps?.onSuccess?.({ id: "task-1" }, "create", { autoFocus: false }));
+  expect(mocks.push).not.toHaveBeenCalled();
+  expect(screen.queryByTestId("canvas-dialog-submit")).toBeNull();
 });

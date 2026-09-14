@@ -126,10 +126,19 @@ type Canvas struct {
 }
 
 // ReleaseMetadata deliberately omits manifest and artifact contents. The host
-// receives only the review-safe declaration, provenance, and current grant
+// receives only the review-safe package identity, provenance, and current grant
 // diff needed to choose recovery actions.
 type ReleaseMetadata struct {
 	ID                 string             `json:"id"`
+	PackageID          string             `json:"package_id,omitempty"`
+	Version            string             `json:"version,omitempty"`
+	DisplayName        string             `json:"display_name,omitempty"`
+	Description        string             `json:"description,omitempty"`
+	Author             string             `json:"author,omitempty"`
+	License            string             `json:"license,omitempty"`
+	SourceMode         string             `json:"source_mode,omitempty"`
+	MinKandevVersion   string             `json:"min_kandev_version,omitempty"`
+	RepoURL            string             `json:"repo_url,omitempty"`
 	PackageDigest      string             `json:"package_digest"`
 	ValidationStatus   string             `json:"validation_status"`
 	ValidationError    string             `json:"validation_error,omitempty"`

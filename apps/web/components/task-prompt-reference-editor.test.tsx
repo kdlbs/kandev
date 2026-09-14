@@ -16,8 +16,19 @@ const PROMPT = {
   updated_at: "2026-09-12T00:00:00Z",
 };
 const PROMPT_REFERENCE_REMOVE_TEST_ID = "task-prompt-reference-remove";
+const PROMPT_REFERENCE_TEST_ID = "task-prompt-reference";
+const PROMPT_MENTION_TEST_ID = "custom-prompt-mention";
+const PROMPT_REFERENCE_SELECTOR = '[data-testid="task-prompt-reference"]';
+const touchState = vi.hoisted(() => ({ enabled: false }));
 
-afterEach(cleanup);
+vi.mock("@/hooks/use-compact-task-chrome", () => ({
+  useTouchDrawer: () => touchState.enabled,
+}));
+
+afterEach(() => {
+  cleanup();
+  touchState.enabled = false;
+});
 
 function PromptStoreCapture({ storeRef }: { storeRef: { current: StoreApi<AppState> | null } }) {
   const store = useAppStoreApi();
@@ -60,7 +71,7 @@ describe("TaskPromptReferenceEditor basic behavior", () => {
     ).toBe("true");
     expect(screen.getByRole("textbox", { name: "Describe the task" })).toBeTruthy();
     await waitFor(() =>
-      expect(screen.getByTestId("custom-prompt-mention").textContent).toBe(`@${PROMPT.name}`),
+      expect(screen.getByTestId(PROMPT_MENTION_TEST_ID).textContent).toBe(`@${PROMPT.name}`),
     );
     expect(screen.getByTestId(PROMPT_REFERENCE_REMOVE_TEST_ID)).toBeTruthy();
     expect(ref.current?.getValue()).toBe(`Before @${PROMPT.name}`);
@@ -88,7 +99,72 @@ describe("TaskPromptReferenceEditor basic behavior", () => {
     await waitFor(() => {
       expect(ref.current?.getValue()).toBe(` and @${PROMPT.name}`);
       expect(onChange).toHaveBeenCalledWith(` and @${PROMPT.name}`);
+      expect(screen.queryByText(PROMPT.content)).toBeNull();
     });
+  });
+
+  it("renders editable references as a compact shell with contained controls", async () => {
+    renderEditor(`Before @${PROMPT.name}`);
+
+    await waitFor(() => expect(screen.getByTestId(PROMPT_REFERENCE_REMOVE_TEST_ID)).toBeTruthy());
+
+    const shell = screen.getByTestId(PROMPT_REFERENCE_TEST_ID);
+    const mention = screen.getByTestId(PROMPT_MENTION_TEST_ID);
+    const label = screen.getByTestId("custom-prompt-mention-label");
+    const remove = screen.getByTestId(PROMPT_REFERENCE_REMOVE_TEST_ID);
+    const borderedElements = [
+      shell,
+      ...Array.from(shell.querySelectorAll<HTMLElement>("[class]")),
+    ].filter((element) => element.className.includes("border-emerald-300/35"));
+
+    expect(shell.className).toContain("h-6");
+    expect(shell.className).toContain("min-w-0");
+    expect(shell.className).toContain("box-border");
+    expect(borderedElements).toHaveLength(1);
+    expect(mention.className).toContain("text-xs");
+    expect(mention.className).toContain("min-w-0");
+    expect(label.className).toContain("min-w-0");
+    expect(label.className).toContain("truncate");
+    expect(remove.className).toContain("h-5");
+    expect(remove.className).toContain("focus-visible");
+    expect(mention.closest(PROMPT_REFERENCE_SELECTOR)).toBe(shell);
+    expect(remove.closest(PROMPT_REFERENCE_SELECTOR)).toBe(shell);
+  });
+
+  it("keeps a long reference label accessible while reserving removal space", async () => {
+    const longName = "a-very-long-prompt-name-that-must-stay-inside-the-editor";
+    const longPrompt = { ...PROMPT, name: longName };
+    renderEditor(`@${longName}`, createRef<RichTextInputHandle>(), [longPrompt]);
+
+    await waitFor(() => expect(screen.getByTestId(PROMPT_MENTION_TEST_ID)).toBeTruthy());
+
+    const mention = screen.getByTestId(PROMPT_MENTION_TEST_ID);
+    const label = screen.getByTestId("custom-prompt-mention-label");
+    expect(mention.getAttribute("aria-label")).toBe(`Custom prompt: ${longName}`);
+    expect(label.className).toContain("truncate");
+    expect(label.className).toContain("min-w-0");
+    expect(screen.getByTestId(PROMPT_REFERENCE_REMOVE_TEST_ID)).toBeTruthy();
+  });
+
+  it("keeps preview and removal as separate touch-sized targets inside the shell", async () => {
+    touchState.enabled = true;
+    renderEditor(`@${PROMPT.name}`);
+
+    await waitFor(() => expect(screen.getByTestId(PROMPT_REFERENCE_REMOVE_TEST_ID)).toBeTruthy());
+
+    const shell = screen.getByTestId(PROMPT_REFERENCE_TEST_ID);
+    const mention = screen.getByTestId(PROMPT_MENTION_TEST_ID);
+    const remove = screen.getByTestId(PROMPT_REFERENCE_REMOVE_TEST_ID);
+
+    expect(shell.className).toContain("min-h-11");
+    expect(shell.className).toContain("box-border");
+    expect(shell.className).not.toContain("box-content");
+    expect(mention.className).toContain("h-11");
+    expect(mention.className).toContain("min-w-11");
+    expect(remove.className).toContain("h-11");
+    expect(remove.className).toContain("min-w-11");
+    expect(mention.closest(PROMPT_REFERENCE_SELECTOR)).toBe(shell);
+    expect(remove.closest(PROMPT_REFERENCE_SELECTOR)).toBe(shell);
   });
 });
 

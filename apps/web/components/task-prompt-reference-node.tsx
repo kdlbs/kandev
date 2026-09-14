@@ -6,6 +6,7 @@ import { IconX } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
 import { PromptMentionChip } from "@/components/task/chat/messages/prompt-mention-components";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { cn } from "@/lib/utils";
 
 export type TaskPromptReferenceAttrs = {
@@ -51,6 +52,8 @@ export const TaskPromptReference = Node.create({
 function TaskPromptReferenceView({ node, deleteNode }: ReactNodeViewProps) {
   const { t } = useTranslation();
   const usesTouchDrawer = useTouchDrawer();
+  const { isMobile } = useResponsiveBreakpoint();
+  const usesTouchTarget = isMobile || usesTouchDrawer;
   const attrs = node.attrs as TaskPromptReferenceAttrs;
   const removeLabel = t("task:removeLabeled", { label: attrs.value });
 
@@ -59,9 +62,12 @@ function TaskPromptReferenceView({ node, deleteNode }: ReactNodeViewProps) {
       as="span"
       data-testid="task-prompt-reference"
       data-prompt-name={attrs.name}
-      className="inline-flex max-w-full items-center align-baseline"
+      className={cn(
+        "inline-flex max-w-full min-w-0 box-border items-center gap-0.5 rounded-md border border-emerald-300/35 bg-emerald-400/20 px-1 align-baseline",
+        usesTouchTarget ? "min-h-11" : "h-6",
+      )}
     >
-      <PromptMentionChip name={attrs.name} value={attrs.value} />
+      <PromptMentionChip name={attrs.name} value={attrs.value} presentation="editable" />
       <button
         type="button"
         data-testid="task-prompt-reference-remove"
@@ -69,8 +75,8 @@ function TaskPromptReferenceView({ node, deleteNode }: ReactNodeViewProps) {
         title={removeLabel}
         contentEditable={false}
         className={cn(
-          "inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted/50 hover:text-foreground",
-          usesTouchDrawer && "h-11 min-w-11",
+          "inline-flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-emerald-500/15 hover:text-foreground focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-emerald-500/80",
+          usesTouchTarget && "h-11 min-h-11 min-w-11 w-11",
         )}
         onMouseDown={(event) => {
           event.preventDefault();

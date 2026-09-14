@@ -6,6 +6,10 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/constants"
 )
 
@@ -55,4 +59,27 @@ func TestPreparationContextRetainsItsIndependentBudget(t *testing.T) {
 			t.Fatalf("preparation budget = %s, want %s", got, constants.SetupScriptTimeout)
 		}
 	})
+}
+
+func TestFinishContextResetReturnsEventsBufferedDuringFinalization(t *testing.T) {
+	execution := &AgentExecution{}
+	require.NoError(t, execution.beginContextReset())
+
+	buffered := agentctl.AgentEvent{
+		Type:      streams.EventTypeSessionModels,
+		SessionID: "new-session",
+	}
+	stale := agentctl.AgentEvent{
+		Type:      streams.EventTypeSessionStatus,
+		SessionID: "old-session",
+	}
+	require.True(t, execution.bufferOrDropContextResetEvent(buffered))
+	require.True(t, execution.bufferOrDropContextResetEvent(stale))
+
+	final := execution.finishContextReset("new-session")
+	require.Equal(t, []agentctl.AgentEvent{buffered}, final)
+	require.False(t, execution.bufferOrDropContextResetEvent(agentctl.AgentEvent{
+		Type:      streams.EventTypeSessionStatus,
+		SessionID: "new-session",
+	}))
 }

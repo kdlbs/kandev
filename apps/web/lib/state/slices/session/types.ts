@@ -173,6 +173,7 @@ export type WalkthroughsState = {
 
 export type QueuedMessageMetadata = Record<string, unknown> & {
   entity_references?: EntityReference[];
+  queue_admission_ids?: string[];
   workflow_message?: boolean;
   workflow_auto_start?: boolean;
   workflow_step_id?: string;

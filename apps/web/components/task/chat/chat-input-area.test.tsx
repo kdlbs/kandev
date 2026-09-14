@@ -2,10 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { planCommentRecovery } from "@/lib/plan-comment-recovery";
+import { QueueAdmissionError, QueueFullError } from "@/lib/api/domains/queue-api";
 
 const toastMock = vi.fn();
 const handleSendMessageMock = vi.fn();
 const useKeyboardShortcutMock = vi.hoisted(() => vi.fn());
+const MESSAGE_NOT_SENT_TITLE = "Message not sent";
 let mockProceedStepName: string | null = null;
 let mockQueuePopulated = false;
 
@@ -439,7 +441,7 @@ describe("useSubmitHandler task plan comments", () => {
 
       expect(handleSendMessageMock).not.toHaveBeenCalled();
       expect(toastMock).toHaveBeenCalledWith({
-        title: "Message not sent",
+        title: MESSAGE_NOT_SENT_TITLE,
         description: "Saved plan comments are still being restored. Your message is kept.",
         variant: "error",
       });
@@ -499,8 +501,42 @@ describe("useSubmitHandler deterministic failures", () => {
     });
 
     expect(toastMock).toHaveBeenCalledWith({
-      title: "Message not sent",
+      title: MESSAGE_NOT_SENT_TITLE,
       description: message,
+      variant: "error",
+    });
+  });
+});
+
+describe("useSubmitHandler queue admission failures", () => {
+  it("shows localized capacity feedback for a rejected queue admission", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    handleSendMessageMock.mockRejectedValueOnce(new QueueFullError(10, 10));
+    const { result } = renderHook(() => useSubmitHandler(panelState()));
+
+    await act(async () => {
+      await result.current.handleSubmit({ message: "keep this draft" });
+    });
+
+    expect(toastMock).toHaveBeenCalledWith({
+      title: MESSAGE_NOT_SENT_TITLE,
+      description: "The message queue is full. Wait for the next turn to drain.",
+      variant: "error",
+    });
+  });
+
+  it("shows localized identity feedback without exposing the server diagnostic", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    handleSendMessageMock.mockRejectedValueOnce(new QueueAdmissionError("identity-conflict"));
+    const { result } = renderHook(() => useSubmitHandler(panelState()));
+
+    await act(async () => {
+      await result.current.handleSubmit({ message: "keep this draft" });
+    });
+
+    expect(toastMock).toHaveBeenCalledWith({
+      title: MESSAGE_NOT_SENT_TITLE,
+      description: "This draft was already submitted with different content.",
       variant: "error",
     });
   });
