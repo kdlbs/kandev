@@ -61,14 +61,35 @@ func scanGoFile(t *testing.T, path string) []string {
 	if err != nil {
 		t.Fatalf("parse %s: %v", path, err)
 	}
+	return scanParsedGoFile(fileSet, path, file)
+}
+
+func scanGoSource(t *testing.T, filename, source string) []string {
+	t.Helper()
+	fileSet := token.NewFileSet()
+	file, err := parser.ParseFile(fileSet, filename, source, 0)
+	if err != nil {
+		t.Fatalf("parse %s: %v", filename, err)
+	}
+	return scanParsedGoFile(fileSet, filename, file)
+}
+
+func scanParsedGoFile(fileSet *token.FileSet, path string, file *ast.File) []string {
 	var violations []string
+	gitCommands := make(map[string]bool)
 	ast.Inspect(file, func(node ast.Node) bool {
+		markGitCommandVariables(node, gitCommands)
 		call, ok := node.(*ast.CallExpr)
-		if !ok || len(call.Args) == 0 {
+		if !ok {
 			return true
 		}
 		selector, ok := call.Fun.(*ast.SelectorExpr)
 		if !ok {
+			return true
+		}
+		if command, ok := execPkgForGitCommand(selector, gitCommands); ok {
+			position := fileSet.Position(call.Pos())
+			violations = append(violations, fmt.Sprintf("%s:%d: direct Git lifecycle %s", filepath.ToSlash(path), position.Line, command))
 			return true
 		}
 		execPkg, ok := selector.X.(*ast.Ident)
@@ -111,6 +132,98 @@ func scanGoFile(t *testing.T, path string) []string {
 		return true
 	})
 	return violations
+}
+
+func markGitCommandVariables(node ast.Node, gitCommands map[string]bool) {
+	switch statement := node.(type) {
+	case *ast.FuncDecl:
+		clear(gitCommands)
+	case *ast.FuncLit:
+		clear(gitCommands)
+	case *ast.AssignStmt:
+		for index, rhs := range statement.Rhs {
+			if index >= len(statement.Lhs) {
+				continue
+			}
+			identifier, ok := statement.Lhs[index].(*ast.Ident)
+			if !ok {
+				continue
+			}
+			gitCommands[identifier.Name] = isGitCommandConstructor(rhs)
+		}
+	case *ast.ValueSpec:
+		for index, value := range statement.Values {
+			if index >= len(statement.Names) {
+				continue
+			}
+			gitCommands[statement.Names[index].Name] = isGitCommandConstructor(value)
+		}
+	}
+}
+
+func isGitCommandConstructor(expr ast.Expr) bool {
+	call, ok := expr.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	switch function := call.Fun.(type) {
+	case *ast.Ident:
+		return function.Name == "newGitCommand" || function.Name == "newNonInteractiveGitCmd"
+	case *ast.SelectorExpr:
+		return function.Sel.Name == "NewGitCommand" || function.Sel.Name == "newNonInteractiveGitCmd"
+	default:
+		return false
+	}
+}
+
+func execPkgForGitCommand(selector *ast.SelectorExpr, gitCommands map[string]bool) (string, bool) {
+	if selector.Sel.Name != "Start" && selector.Sel.Name != "Wait" &&
+		selector.Sel.Name != "Run" && selector.Sel.Name != "Output" &&
+		selector.Sel.Name != "CombinedOutput" && selector.Sel.Name != "StdoutPipe" &&
+		selector.Sel.Name != "StderrPipe" {
+		return "", false
+	}
+	identifier, ok := selector.X.(*ast.Ident)
+	if !ok || !gitCommands[identifier.Name] {
+		return "", false
+	}
+	return selector.Sel.Name, true
+}
+
+func TestScanGoSourceRejectsDirectGitLifecycle(t *testing.T) {
+	violations := scanGoSource(t, "fixture.go", `package fixture
+
+import (
+	"context"
+	"github.com/kandev/kandev/internal/common/subproc"
+)
+
+func run() {
+	cmd := subproc.NewGitCommand(context.Background(), "status")
+	_ = cmd.Start()
+}
+`)
+	if len(violations) != 1 || !strings.Contains(violations[0], "direct Git lifecycle Start") {
+		t.Fatalf("direct Git lifecycle violations = %v", violations)
+	}
+}
+
+func TestScanGoSourceAllowsClassifiedGitLifecycle(t *testing.T) {
+	violations := scanGoSource(t, "fixture.go", `package fixture
+
+import (
+	"context"
+	"github.com/kandev/kandev/internal/common/subproc"
+)
+
+func run() error {
+	cmd := subproc.NewGitCommand(context.Background(), "status")
+	return subproc.RunGitClass(context.Background(), subproc.GitLifecycle, cmd)
+}
+`)
+	if len(violations) != 0 {
+		t.Fatalf("classified Git lifecycle violations = %v", violations)
+	}
 }
 
 func isGitString(expr ast.Expr) bool {

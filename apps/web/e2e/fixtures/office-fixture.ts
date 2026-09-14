@@ -1,6 +1,7 @@
 import { type Page } from "@playwright/test";
 import { test as base } from "./test-base";
 import { OfficeApiClient } from "../helpers/office-api-client";
+import { ApiClient } from "../helpers/api-client";
 
 type OfficeFixtures = {
   officeApi: OfficeApiClient;
@@ -83,5 +84,20 @@ export const test = base.extend<{ testPage: Page }, OfficeFixtures>({
 test.beforeEach(async ({ officeApi, officeSeed }) => {
   await officeApi.updateAgentStatus(officeSeed.agentId, "idle");
 });
+
+// Office's approval gate (apps/backend/internal/office/dashboard/service_tasks.go
+// applyApprovalGate) redirects a "done" write to in_review unless the task is
+// on its workflow's terminal step (last by position). Tests that drive a task
+// all the way to "done" need it parked there first; this resolves the
+// highest-position step for the workflow and moves the task onto it.
+export async function moveTaskToTerminalStep(
+  apiClient: ApiClient,
+  workflowId: string,
+  taskId: string,
+): Promise<void> {
+  const { steps } = await apiClient.listWorkflowSteps(workflowId);
+  const terminalStep = steps.reduce((max, step) => (step.position > max.position ? step : max));
+  await apiClient.moveTask(taskId, workflowId, terminalStep.id);
+}
 
 export { expect } from "@playwright/test";

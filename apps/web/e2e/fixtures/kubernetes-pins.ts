@@ -17,7 +17,7 @@ export type KubernetesFixtureVersion = keyof typeof KUBERNETES_FIXTURE_PINS;
 export const KUBERNETES_VERSION: KubernetesFixtureVersion = "v1.36.1";
 export const KIND_NODE_IMAGE = KUBERNETES_FIXTURE_PINS[KUBERNETES_VERSION].nodeImage;
 export const KUBERNETES_E2E_BASE_IMAGE =
-  "ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517";
+  "ghcr.io/kdlbs/kandev-ci:runtime-sha-6f288a23c526@sha256:b9636e1c20adb0fcce1c65858a767fb1b0fe48a15ac5688b9c623163575efb8d";
 export const KIND_SHA256_AMD64 = "50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54";
 export const KUBECTL_SHA256_AMD64 = KUBERNETES_FIXTURE_PINS[KUBERNETES_VERSION].kubectlSha256Amd64;
 

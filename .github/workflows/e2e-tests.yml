@@ -38,6 +38,11 @@ permissions:
   # pull the kandev-ci image from GHCR via GITHUB_TOKEN.
   packages: read
 
+env:
+  # Container jobs may override HOME. Keep Corepack pointed at the pnpm cache
+  # prepared in the CI image so setup does not require an npm registry request.
+  COREPACK_HOME: /root/.cache/node/corepack
+
 jobs:
   runner_plan:
     name: Plan external runner allocation
@@ -597,6 +602,25 @@ jobs:
 
       - name: Verify Docker is available
         run: docker info
+
+      # Pull the immutable application-image base before the Playwright test.
+      # The fixture image only copies this run's artifacts, so package mirrors
+      # are not on the critical path of every PR's compatibility test.
+      - name: Pull pinned Kubernetes fixture base image
+        env:
+          KUBERNETES_E2E_BASE_IMAGE: ghcr.io/kdlbs/kandev-ci:runtime-sha-6f288a23c526@sha256:b9636e1c20adb0fcce1c65858a767fb1b0fe48a15ac5688b9c623163575efb8d
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if timeout --kill-after=10s 180s docker pull "$KUBERNETES_E2E_BASE_IMAGE"; then
+              exit 0
+            fi
+            if (( attempt < 3 )); then
+              sleep "$((attempt * 5))"
+            fi
+          done
+          echo "Failed to pull $KUBERNETES_E2E_BASE_IMAGE after 3 attempts." >&2
+          exit 1
 
       - name: Set up pnpm
         uses: pnpm/action-setup@a8198c4bff370c8506180b035930dea56dbd5288 # v5

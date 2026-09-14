@@ -4,6 +4,10 @@ import type { RefObject } from "react";
 import { useTranslation } from "react-i18next";
 
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
+import {
+  MobileActionConfirmation,
+  useConfirmationBoundary,
+} from "@/components/confirmation/mobile-action-confirmation";
 import type { SavedLayout } from "@/lib/types/http";
 
 type SavedLayoutDeleteConfirmationProps = {
@@ -24,6 +28,8 @@ export function SavedLayoutDeleteConfirmation({
   onConfirm,
 }: SavedLayoutDeleteConfirmationProps) {
   const { t } = useTranslation();
+  const { changed } = useConfirmationBoundary(open, layout?.id ?? "", onOpenChange);
+  if (changed) return null;
   if (!layout) return null;
 
   const title = t("task:deleteLayoutConfirm", { name: layout.name });
@@ -31,21 +37,31 @@ export function SavedLayoutDeleteConfirmation({
     ? t("task:theBuiltInDefaultLayoutWill")
     : t("task:thisSavedLayoutWillBePermanently");
 
+  const actions = {
+    open,
+    title,
+    description,
+    cancelLabel: t("common:cancel"),
+    confirmLabel: t("task:delete"),
+    confirmAriaLabel: t("task:delete2", { name: layout.name }),
+    confirmTestId: "layout-saved-delete-confirm",
+    onOpenChange,
+    onConfirm: () => onConfirm(layout.id),
+  };
   return (
-    <ActionConfirmPopover
-      open={open}
-      anchorRef={anchorRef}
-      focusBoundaryRef={focusBoundaryRef}
-      title={title}
-      description={description}
-      cancelLabel={t("common:cancel")}
-      confirmLabel={t("task:delete")}
-      confirmAriaLabel={t("task:delete2", { name: layout.name })}
-      confirmTestId="layout-saved-delete-confirm"
-      testId="layout-saved-delete-confirm-popover"
-      confirmationBoundary
-      onOpenChange={onOpenChange}
-      onConfirm={() => onConfirm(layout.id)}
+    <MobileActionConfirmation
+      {...actions}
+      targetKey={layout.id}
+      focusReturnRef={anchorRef}
+      fallback={
+        <ActionConfirmPopover
+          {...actions}
+          anchorRef={anchorRef}
+          focusBoundaryRef={focusBoundaryRef}
+          testId="layout-saved-delete-confirm-popover"
+          confirmationBoundary
+        />
+      }
     />
   );
 }

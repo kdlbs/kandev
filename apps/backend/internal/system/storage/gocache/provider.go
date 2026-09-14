@@ -167,6 +167,22 @@ func (p *Provider) AnalyzeWithProgress(
 	return copy.Analyze(ctx)
 }
 
+// MeasurementRoots returns every filesystem root included by Analyze for the
+// supplied settings. Callers use these roots to avoid attributing one file to
+// multiple storage categories.
+func (p *Provider) MeasurementRoots(settings storage.StorageMaintenanceSettings) ([]string, error) {
+	cachePath, _, err := p.cachePath(settings)
+	if err != nil {
+		return nil, err
+	}
+	roots := []string{cachePath}
+	unmanagedPath, hasUnmanagedPath := defaultGoCachePath()
+	if hasUnmanagedPath && unmanagedPath != cachePath {
+		roots = append(roots, unmanagedPath)
+	}
+	return roots, nil
+}
+
 func defaultGoCachePath() (string, bool) {
 	if configured := os.Getenv("GOCACHE"); configured != "" {
 		if configured == "off" || !filepath.IsAbs(configured) {

@@ -16,7 +16,10 @@ import (
 	"go.uber.org/zap"
 )
 
-const gitCmdTimeout = 30 * time.Second
+const (
+	gitCmdTimeout     = 30 * time.Second
+	gitNetworkTimeout = 5 * time.Minute
+)
 
 // GitStatus holds the git status for a workspace directory.
 type GitStatus struct {
@@ -262,7 +265,7 @@ func isAllowedRepoURL(u string) bool {
 // runGit executes a git command and returns combined stdout. If dir is empty,
 // the command runs in the current directory.
 func (g *GitManager) runGit(ctx context.Context, dir string, args ...string) (string, error) {
-	output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(ctx, subproc.GitLifecycle, gitCmdTimeout, func(execCtx context.Context) *exec.Cmd {
+	output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(ctx, subproc.GitLifecycle, gitOperationTimeout(args), func(execCtx context.Context) *exec.Cmd {
 		cmd := subproc.NewGitCommand(execCtx, args...)
 		if dir != "" {
 			cmd.Dir = dir
@@ -276,4 +279,14 @@ func (g *GitManager) runGit(ctx context.Context, dir string, args ...string) (st
 		return "", fmt.Errorf("%s: %s", runErr, strings.TrimSpace(string(output)))
 	}
 	return string(output), nil
+}
+
+func gitOperationTimeout(args []string) time.Duration {
+	if len(args) > 0 {
+		switch args[0] {
+		case "clone", "push", "submodule":
+			return gitNetworkTimeout
+		}
+	}
+	return gitCmdTimeout
 }

@@ -79,6 +79,7 @@ beforeEach(() => {
 
 afterEach(cleanup);
 
+// eslint-disable-next-line max-lines-per-function -- input draft and attachment cases share one state contract.
 describe("useChatInputState", () => {
   it("keeps the draft when async submit reports failure", async () => {
     const onSubmit = vi
@@ -99,6 +100,32 @@ describe("useChatInputState", () => {
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith({ message: "hello" }));
     expect(result.current.value).toBe("hello");
+    expect(clear).not.toHaveBeenCalled();
+  });
+
+  it("keeps staged attachments when async submit reports failure", async () => {
+    const onSubmit = vi
+      .fn<(...args: Parameters<SubmitHandler>) => ReturnType<SubmitHandler>>()
+      .mockResolvedValue(false);
+    const clear = vi.fn();
+    const { result } = renderInputState(onSubmit);
+
+    await act(async () => {
+      await result.current.addFiles([
+        new File(["attachment"], "notes.txt", { type: "text/plain" }),
+      ]);
+    });
+    await waitFor(() => expect(result.current.attachments).toHaveLength(1));
+
+    act(() => {
+      result.current.handleChange("keep this with the file");
+      attachInputHandle(result.current.inputRef, clear);
+      result.current.handleSubmit(vi.fn());
+    });
+
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(result.current.value).toBe("keep this with the file");
+    expect(result.current.attachments).toHaveLength(1);
     expect(clear).not.toHaveBeenCalled();
   });
 

@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
+	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -66,6 +68,13 @@ func setupMCPTestServer(t *testing.T) (*TestServer, string, string, string, stri
 	var taskPayload map[string]interface{}
 	require.NoError(t, taskResp.ParsePayload(&taskPayload))
 	parentTaskID := taskPayload["id"].(string)
+	callerSessionID := "mcp-parent-session"
+	require.NoError(t, ts.TaskRepo.CreateTaskSession(context.Background(), &models.TaskSession{
+		ID: callerSessionID, TaskID: parentTaskID, IsPrimary: true,
+		State: models.TaskSessionStateWaitingForInput,
+	}))
+	ts.mcpCallerTaskID = parentTaskID
+	ts.mcpCallerSessionID = callerSessionID
 
 	return ts, parentTaskID, workspaceID, workflowID, workflowStepID
 }
@@ -84,7 +93,15 @@ func dispatchTrustedMCP(
 	if err != nil {
 		return nil, err
 	}
-	return ts.Gateway.Dispatcher.Dispatch(context.Background(), request)
+	ctx := context.Background()
+	if ts.mcpCallerTaskID != "" && ts.mcpCallerSessionID != "" {
+		resolver := mcpscope.NewResolver(ts.TaskRepo, nil, func() bool { return false }, ts.Logger)
+		ctx, err = resolver.ScopePrincipal(ctx, ts.mcpCallerTaskID, ts.mcpCallerSessionID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return ts.Gateway.Dispatcher.Dispatch(ctx, request)
 }
 
 func TestMCPCreateTask_SubtaskInheritsFromParent(t *testing.T) {
@@ -250,10 +267,11 @@ func TestMCPCreateTask_SourceTaskID_TopLevel_Succeeds(t *testing.T) {
 	// source_task_id is set by agentctl to the current task; verify the path succeeds
 	// and the task is created (even though parentTaskID has no repositories).
 	resp, err := dispatchTrustedMCP(t, ts, "top-source", ws.ActionMCPCreateTask, map[string]interface{}{
-		"workspace_id":   workspaceID,
-		"workflow_id":    workflowID,
-		"title":          "Top Level with Source Task",
-		"source_task_id": parentTaskID,
+		"workspace_id":      workspaceID,
+		"workflow_id":       workflowID,
+		"title":             "Top Level with Source Task",
+		"source_task_id":    parentTaskID,
+		"source_session_id": "mcp-parent-session",
 	})
 	require.NoError(t, err)
 	assert.Equal(t, ws.MessageTypeResponse, resp.Type, "valid source_task_id should not cause failure")
@@ -263,13 +281,15 @@ func TestMCPCreateTask_SourceTaskID_TopLevel_Succeeds(t *testing.T) {
 	assert.NotEmpty(t, payload["id"])
 }
 
-func TestMCPCreateTask_SourceTaskID_NotFound_StillCreatesTask(t *testing.T) {
+func TestMCPCreateTask_SourceTaskID_NotFound_IsRejected(t *testing.T) {
 	ts, _, workspaceID, workflowID, _ := setupMCPTestServer(t)
 	defer ts.Close()
 
-	// Non-existent source_task_id must silently fall through (Warn log only),
-	// not cause a validation error. This covers the error-swallow branch at
-	// resolveTaskRepositories:422.
+	// A session cannot replace its server-derived source task with a missing
+	// or foreign task ID. Admission rejects it before repository resolution or
+	// task creation.
+	before, err := ts.TaskSvc.ListTasks(context.Background(), workflowID)
+	require.NoError(t, err)
 	resp, err := dispatchTrustedMCP(t, ts, "top-notfound", ws.ActionMCPCreateTask, map[string]interface{}{
 		"workspace_id":   workspaceID,
 		"workflow_id":    workflowID,
@@ -277,9 +297,8 @@ func TestMCPCreateTask_SourceTaskID_NotFound_StillCreatesTask(t *testing.T) {
 		"source_task_id": "nonexistent-task-id-xyz",
 	})
 	require.NoError(t, err)
-	assert.Equal(t, ws.MessageTypeResponse, resp.Type, "missing source_task_id should silently succeed, not fail")
-
-	var payload map[string]interface{}
-	require.NoError(t, resp.ParsePayload(&payload))
-	assert.NotEmpty(t, payload["id"])
+	assert.Equal(t, ws.MessageTypeError, resp.Type)
+	after, err := ts.TaskSvc.ListTasks(context.Background(), workflowID)
+	require.NoError(t, err)
+	assert.Len(t, after, len(before))
 }

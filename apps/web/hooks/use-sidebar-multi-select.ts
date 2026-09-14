@@ -6,12 +6,8 @@ import {
   multiSelectReducer,
   useTaskMultiSelectStore,
 } from "./use-task-multi-select";
-import {
-  useTaskActions,
-  useArchiveAndSwitchTask,
-  type TaskActionOptions,
-} from "./use-task-actions";
-import { useTaskRemoval } from "./use-task-removal";
+import { useTaskActions, type TaskActionOptions } from "./use-task-actions";
+import { useTaskRemoval, useTaskRemovalSuccessNotifier } from "./use-task-removal";
 import { useTaskWorkflowMove } from "./use-task-workflow-move";
 import { useToast } from "@/components/toast-provider";
 import { useAppStoreApi } from "@/components/state-provider";
@@ -19,20 +15,32 @@ import { useTranslation } from "react-i18next";
 
 type BulkOpts = TaskActionOptions;
 
+type BulkRemovalParams = {
+  ids: string[];
+  action: "archive" | "delete";
+  per: (id: string, opts?: BulkOpts) => Promise<void>;
+  setBusy: (value: boolean) => void;
+  failureKey: string;
+  opts?: BulkOpts;
+};
+
 /**
  * Bulk archive/delete/move that act on an explicit id list. Archive and delete
- * share one flow: remove each task, routing the currently-open task through the
- * switch-aware path last so the view doesn't strand on removed content; keep any
- * failed ids selected for retry and surface the failure via toast.
+ * share one flow: the coordinator moves away from an active task before the
+ * mutations complete; keep any failed ids selected for retry and surface the
+ * failure via toast.
  */
 function useSidebarBulkActions(
   dispatch: Dispatch<{ type: "set_selected"; ids: Set<string> }>,
   clearSelection: () => void,
 ) {
-  const store = useAppStoreApi();
   const { archiveTaskById, deleteTaskById } = useTaskActions();
-  const archiveAndSwitch = useArchiveAndSwitchTask({ useLayoutSwitch: true });
-  const { removeTaskFromBoard } = useTaskRemoval({ store, useLayoutSwitch: true });
+  const notifySuccess = useTaskRemovalSuccessNotifier();
+  const { runTaskRemovalBatch } = useTaskRemoval({
+    store: useAppStoreApi(),
+    useLayoutSwitch: true,
+    notifySuccess,
+  });
   const { getWorkflowIdForTask, removeTasksFromStore } = useTaskMultiSelectStore();
   const moveTasks = useTaskWorkflowMove();
   const { toast } = useToast();
@@ -41,29 +49,19 @@ function useSidebarBulkActions(
   const [isDeleting, setIsDeleting] = useState(false);
 
   const runBulkRemoval = useCallback(
-    async (
-      ids: string[],
-      per: (id: string) => Promise<void>,
-      handleActive: (id: string) => Promise<void>,
-      setBusy: (v: boolean) => void,
-      failureKey: string,
-    ) => {
+    async ({ ids, action, per, setBusy, failureKey, opts }: BulkRemovalParams) => {
       if (ids.length === 0) return;
-      const activeId = store.getState().tasks.activeTaskId;
-      const activeInSet = activeId != null && ids.includes(activeId);
-      const restIds = activeInSet ? ids.filter((id) => id !== activeId) : ids;
       setBusy(true);
       try {
-        const results = await Promise.allSettled(restIds.map((id) => per(id)));
-        const failed = restIds.filter((_, i) => results[i].status === "rejected");
-        const succeeded = restIds.filter((_, i) => results[i].status === "fulfilled");
-        if (succeeded.length > 0) removeTasksFromStore(new Set(succeeded));
-        if (activeInSet) {
-          try {
-            await handleActive(activeId!);
-          } catch {
-            failed.push(activeId!);
-          }
+        const result = await runTaskRemovalBatch(
+          action,
+          ids.map((id) => ({ taskId: id, mutate: () => per(id, opts) })),
+          { cascade: opts?.cascade },
+        );
+        if (result.skipped) return;
+        const failed = result.failedTaskIds;
+        if (result.succeededTaskIds.length > 0) {
+          removeTasksFromStore(new Set(result.succeededTaskIds));
         }
         if (failed.length > 0) {
           // Keep the failed ids selected so the user can retry, and surface it.
@@ -79,38 +77,33 @@ function useSidebarBulkActions(
         setBusy(false);
       }
     },
-    [store, removeTasksFromStore, dispatch, toast, clearSelection, t],
+    [runTaskRemovalBatch, removeTasksFromStore, dispatch, toast, clearSelection, t],
   );
 
   const bulkArchive = useCallback(
     (ids: string[], opts?: BulkOpts) =>
-      runBulkRemoval(
+      runBulkRemoval({
         ids,
-        (id) => archiveTaskById(id, opts),
-        (id) => archiveAndSwitch(id, opts),
-        setIsArchiving,
-        "sidebar:bulkArchiveFailed",
-      ),
-    [runBulkRemoval, archiveTaskById, archiveAndSwitch],
+        action: "archive",
+        per: (id) => archiveTaskById(id, opts),
+        setBusy: setIsArchiving,
+        failureKey: "sidebar:bulkArchiveFailed",
+        opts,
+      }),
+    [runBulkRemoval, archiveTaskById],
   );
 
   const bulkDelete = useCallback(
     (ids: string[], opts?: BulkOpts) =>
-      runBulkRemoval(
+      runBulkRemoval({
         ids,
-        (id) => deleteTaskById(id, opts),
-        async (id) => {
-          const { activeTaskId, activeSessionId } = store.getState().tasks;
-          await deleteTaskById(id, opts);
-          await removeTaskFromBoard(id, {
-            wasActiveTaskId: activeTaskId,
-            wasActiveSessionId: activeSessionId,
-          });
-        },
-        setIsDeleting,
-        "sidebar:bulkDeleteFailed",
-      ),
-    [runBulkRemoval, deleteTaskById, removeTaskFromBoard, store],
+        action: "delete",
+        per: (id) => deleteTaskById(id, opts),
+        setBusy: setIsDeleting,
+        failureKey: "sidebar:bulkDeleteFailed",
+        opts,
+      }),
+    [runBulkRemoval, deleteTaskById],
   );
 
   const bulkMove = useCallback(

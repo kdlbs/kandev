@@ -117,6 +117,14 @@ func mustCreateOrderedTaskWithCreatedAt(t *testing.T, ctx context.Context, repo 
 	if _, err := repo.db.Exec(repo.db.Rebind(`UPDATE tasks SET created_at = ? WHERE id = ?`), createdAt, id); err != nil {
 		t.Fatalf("backdate created_at(%s): %v", id, err)
 	}
+	// CreateTask now assigns its own arrival position
+	// (REQ-TASKS-KANBAN-TASK-REORDERING-001.28), overwriting the caller's
+	// literal. This ladder test deliberately puts several tasks at the same
+	// position to exercise the tiebreakers below it, so restore the fixture's
+	// intended value the same way created_at is backdated above.
+	if _, err := repo.db.Exec(repo.db.Rebind(`UPDATE tasks SET position = ? WHERE id = ?`), position, id); err != nil {
+		t.Fatalf("restore position(%s): %v", id, err)
+	}
 }
 
 // setQueuedAt marks a task as queued for destinationStepID with an explicit

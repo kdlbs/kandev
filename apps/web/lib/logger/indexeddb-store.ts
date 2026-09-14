@@ -8,6 +8,10 @@ const RETENTION_METADATA_KEY = "retention";
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 const MAX_ENTRIES = 10_000;
 const MAX_BYTES = 20 * 1024 * 1024;
+// i18n-exempt: internal IndexedDB diagnostic, never rendered to a user.
+const INDEXEDDB_CURSOR_ERROR = "IndexedDB cursor failed";
+// i18n-exempt: internal IndexedDB diagnostic, never rendered to a user.
+const INDEXEDDB_BOUNDARY_ERROR = "IndexedDB capture boundary unavailable";
 
 type PersistedEntry = {
   id?: number;
@@ -21,12 +25,21 @@ type RetentionTotals = { count: number; bytes: number };
 
 type RetentionMetadata = RetentionTotals & { key: string };
 
+export type LogPageCursor = { timestamp_ms: number; primary_key: number };
+
+export type LogPage = {
+  entries: PreparedLogEntry[];
+  nextCursor: LogPageCursor | null;
+  done: boolean;
+};
+
 const EMPTY_TOTALS: RetentionTotals = { count: 0, bytes: 0 };
 
 export class IndexedDBLogStore {
   private database: Promise<IDBDatabase> | null = null;
+  private databaseHandle: IDBDatabase | null = null;
 
-  async append(entries: readonly PreparedLogEntry[]): Promise<void> {
+  async append(entries: readonly PreparedLogEntry[]): Promise<number[]> {
     const persistedEntries = entries.flatMap(({ entry, bytes }) => {
       const identity = entry.identity_scope;
       if (!identity) return [];
@@ -41,12 +54,13 @@ export class IndexedDBLogStore {
         } satisfies PersistedEntry,
       ];
     });
-    if (persistedEntries.length === 0) return;
+    if (persistedEntries.length === 0) return [];
 
     const database = await this.open();
     const transaction = database.transaction([STORE_NAME, METADATA_STORE_NAME], "readwrite");
     const store = transaction.objectStore(STORE_NAME);
     const metadataStore = transaction.objectStore(METADATA_STORE_NAME);
+    const primaryKeys: number[] = [];
     const storedMetadata = await requestResult<RetentionMetadata | undefined>(
       metadataStore.get(RETENTION_METADATA_KEY),
     );
@@ -55,7 +69,11 @@ export class IndexedDBLogStore {
       : await scanTotals(store);
 
     for (const entry of persistedEntries) {
-      store.add(entry);
+      const request = store.add(entry);
+      request.onsuccess = () => {
+        const primaryKey = Number(request.result);
+        if (Number.isSafeInteger(primaryKey)) primaryKeys.push(primaryKey);
+      };
       totals.count += 1;
       totals.bytes += entry.bytes;
     }
@@ -65,21 +83,123 @@ export class IndexedDBLogStore {
     await deleteOldestUntilWithinBounds(store.index("timestamp_ms"), totals);
     metadataStore.put({ key: RETENTION_METADATA_KEY, ...totals } satisfies RetentionMetadata);
     await transactionDone(transaction);
+    return primaryKeys;
   }
 
   async snapshot(identityScope: string): Promise<LogEntry[]> {
+    const entries: LogEntry[] = [];
+    let cursor: LogPageCursor | null = null;
+    let done = false;
+    while (!done) {
+      const page = await this.readPage(identityScope, MAX_BYTES, cursor);
+      entries.push(...page.entries.map(({ entry }) => entry));
+      cursor = page.nextCursor;
+      done = page.done;
+    }
+    return entries;
+  }
+
+  beginCaptureBoundary(): Promise<number | null> {
+    const database = this.databaseHandle;
+    if (!database) return Promise.reject(new Error(INDEXEDDB_BOUNDARY_ERROR));
+
+    let transaction: IDBTransaction;
+    try {
+      transaction = database.transaction(STORE_NAME, "readwrite");
+    } catch (error) {
+      return Promise.reject(error);
+    }
+    const store = transaction.objectStore(STORE_NAME);
+    let highWatermark: number | null = null;
+
+    return new Promise<number | null>((resolve, reject) => {
+      const request = store.openCursor(null, "prev");
+      request.onerror = () => reject(request.error ?? new Error(INDEXEDDB_CURSOR_ERROR));
+      request.onsuccess = () => {
+        const cursor = request.result;
+        highWatermark = cursor ? Number(cursor.primaryKey) : null;
+      };
+      transaction.oncomplete = () => resolve(highWatermark);
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error("IndexedDB transaction failed"));
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error("IndexedDB transaction aborted"));
+    });
+  }
+
+  async readPage(
+    identityScope: string,
+    maxBytes: number,
+    after: LogPageCursor | null = null,
+    maxPrimaryKey?: number | null,
+    additionalPrimaryKeys?: ReadonlySet<number>,
+  ): Promise<LogPage> {
+    if (maxPrimaryKey === null && (!additionalPrimaryKeys || additionalPrimaryKeys.size === 0)) {
+      return { entries: [], nextCursor: null, done: true };
+    }
+
     const database = await this.open();
     const transaction = database.transaction(STORE_NAME, "readonly");
-    const index = transaction.objectStore(STORE_NAME).index("identity_scope");
-    const records = await requestResult<PersistedEntry[]>(
-      index.getAll(IDBKeyRange.only(identityScope)),
-    );
-    await transactionDone(transaction);
+    const index = transaction.objectStore(STORE_NAME).index("timestamp_ms");
     const cutoff = Date.now() - THREE_DAYS_MS;
-    return records
-      .filter((record) => record.timestamp_ms >= cutoff)
-      .sort((left, right) => left.timestamp_ms - right.timestamp_ms)
-      .map((record) => record.entry);
+    const startTimestamp = Math.max(cutoff, after?.timestamp_ms ?? cutoff);
+    const pageLimit = Number.isFinite(maxBytes) && maxBytes > 0 ? maxBytes : MAX_BYTES;
+    const page: LogPage = { entries: [], nextCursor: null, done: false };
+    let pageBytes = 0;
+    let afterApplied = after === null || startTimestamp > after.timestamp_ms;
+
+    return new Promise<LogPage>((resolve, reject) => {
+      const request = index.openCursor(IDBKeyRange.lowerBound(startTimestamp));
+      request.onerror = () => reject(request.error ?? new Error(INDEXEDDB_CURSOR_ERROR));
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) {
+          page.done = true;
+          return;
+        }
+        const primaryKey = Number(cursor.primaryKey);
+        if (!afterApplied) {
+          afterApplied = true;
+          if (
+            after &&
+            Number(cursor.key) === after.timestamp_ms &&
+            primaryKey <= after.primary_key
+          ) {
+            if (primaryKey === after.primary_key) {
+              cursor.continue();
+            } else {
+              cursor.continuePrimaryKey(after.timestamp_ms, after.primary_key + 1);
+            }
+            return;
+          }
+        }
+        const record = cursor.value as PersistedEntry;
+        if (
+          maxPrimaryKey !== undefined &&
+          maxPrimaryKey !== null &&
+          primaryKey > maxPrimaryKey &&
+          !additionalPrimaryKeys?.has(primaryKey)
+        ) {
+          cursor.continue();
+          return;
+        }
+        if (record.identity_scope !== identityScope) {
+          cursor.continue();
+          return;
+        }
+        if (page.entries.length > 0 && pageBytes + record.bytes > pageLimit) return;
+
+        page.entries.push({ entry: record.entry, bytes: record.bytes });
+        pageBytes += record.bytes;
+        page.nextCursor = { timestamp_ms: record.timestamp_ms, primary_key: primaryKey };
+        cursor.continue();
+      };
+      transaction.oncomplete = () => resolve(page);
+      transaction.onerror = () =>
+        reject(transaction.error ?? new Error("IndexedDB transaction failed"));
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error("IndexedDB transaction aborted"));
+    });
   }
 
   async clear(): Promise<void> {
@@ -129,7 +249,12 @@ export class IndexedDBLogStore {
           database.close();
           return;
         }
-        database.onversionchange = () => database.close();
+        database.onversionchange = () => {
+          if (this.databaseHandle === database) this.databaseHandle = null;
+          if (this.database === databasePromise) this.database = null;
+          database.close();
+        };
+        this.databaseHandle = database;
         resolve(database);
       };
       request.onerror = () => fail(request.error ?? new Error("IndexedDB open failed"));
@@ -180,7 +305,7 @@ function scanTotals(store: IDBObjectStore): Promise<RetentionTotals> {
   return new Promise((resolve, reject) => {
     const totals = { ...EMPTY_TOTALS };
     const request = store.openCursor();
-    request.onerror = () => reject(request.error ?? new Error("IndexedDB cursor failed"));
+    request.onerror = () => reject(request.error ?? new Error(INDEXEDDB_CURSOR_ERROR));
     request.onsuccess = () => {
       const cursor = request.result;
       if (!cursor) {
@@ -202,7 +327,7 @@ function deleteExpiredPrefix(
 ): Promise<void> {
   return new Promise((resolve, reject) => {
     const request = index.openCursor(IDBKeyRange.upperBound(cutoff, true));
-    request.onerror = () => reject(request.error ?? new Error("IndexedDB cursor failed"));
+    request.onerror = () => reject(request.error ?? new Error(INDEXEDDB_CURSOR_ERROR));
     request.onsuccess = () => {
       const cursor = request.result;
       if (!cursor) {
@@ -222,7 +347,7 @@ function deleteOldestUntilWithinBounds(index: IDBIndex, totals: RetentionTotals)
   if (totals.count <= MAX_ENTRIES && totals.bytes <= MAX_BYTES) return Promise.resolve();
   return new Promise((resolve, reject) => {
     const request = index.openCursor();
-    request.onerror = () => reject(request.error ?? new Error("IndexedDB cursor failed"));
+    request.onerror = () => reject(request.error ?? new Error(INDEXEDDB_CURSOR_ERROR));
     request.onsuccess = () => {
       const cursor = request.result;
       if (!cursor || (totals.count <= MAX_ENTRIES && totals.bytes <= MAX_BYTES)) {

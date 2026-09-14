@@ -89,7 +89,9 @@ export const CONCURRENCY_POLICY_LABEL_KEYS: Record<string, string> = {
  * identifier.
  */
 export const BUDGET_PERIOD_LABEL_KEYS: Record<string, string> = {
+  daily: "office:budgetPeriodDaily",
   monthly: "office:budgetPeriodMonthly",
+  yearly: "office:budgetPeriodYearly",
   total: "office:budgetPeriodTotal",
 };
 

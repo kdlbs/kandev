@@ -1,8 +1,10 @@
 // GitHub integration types
 
 import type { GitHubAppRegistration } from "./github-app";
+import type { GitHubPRDiscoveryHealth } from "./github-pr-discovery";
 
 export * from "./github-app";
+export * from "./github-pr-discovery";
 
 export type GitHubAuthMethod =
   | "gh_cli"
@@ -89,6 +91,7 @@ export type GitHubStatus = {
   required_scopes: string[];
   diagnostics?: AuthDiagnostics;
   rate_limit?: GitHubRateLimitInfo;
+  pr_discovery_health?: GitHubPRDiscoveryHealth;
 };
 
 export type GitHubRateLimitResource = "core" | "graphql" | "search";
@@ -180,23 +183,44 @@ export type CheckRun = {
   completed_at: string | null;
 };
 
+export type WorkflowAttentionState = "unknown" | "none" | "approval_required" | "action_required";
+
+export type WorkflowAttentionRun = {
+  run_id: number;
+  run_attempt: number;
+  workflow_id: number;
+  name: string;
+  url: string;
+  reason: string;
+};
+
+export type WorkflowAttention = {
+  state: WorkflowAttentionState;
+  head_sha: string;
+  observed_at: string;
+  stale: boolean;
+  runs: WorkflowAttentionRun[];
+};
+
 export type PRFeedback = {
   pr: GitHubPR;
   reviews: PRReview[];
   comments: PRComment[];
   checks: CheckRun[];
   has_issues: boolean;
+  workflow_attention?: WorkflowAttention | null;
 };
 
 export type GitHubPRStatus = {
   pr: GitHubPR;
   review_state: "approved" | "changes_requested" | "pending" | "";
-  checks_state: "success" | "failure" | "pending" | "";
+  checks_state: "success" | "failure" | "pending" | "unstable" | "";
   mergeable_state: MergeableState;
   review_count: number;
   pending_review_count: number;
   checks_total: number;
   checks_passing: number;
+  workflow_attention?: WorkflowAttention | null;
 };
 
 export type MergeMethod = "merge" | "squash" | "rebase";
@@ -245,7 +269,7 @@ export type TaskPR = {
   author_login: string;
   state: "open" | "closed" | "merged";
   review_state: "approved" | "changes_requested" | "pending" | "";
-  checks_state: "success" | "failure" | "pending" | "";
+  checks_state: "success" | "failure" | "pending" | "unstable" | "";
   mergeable_state: MergeableState;
   review_count: number;
   pending_review_count: number;
@@ -268,6 +292,8 @@ export type TaskPR = {
   updated_at: string;
   /** Current pull-request head used to explain safe queue recovery. */
   head_sha?: string;
+  /** Head-scoped GitHub Actions evidence that needs human attention. */
+  workflow_attention?: WorkflowAttention | null;
   /** Empty when GitHub did not return an active merge-queue entry. */
   merge_queue_state?: MergeQueueState;
   merge_queue_entry_id?: string;

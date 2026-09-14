@@ -16,7 +16,7 @@ import (
 func TestGitOperatorPushPublishesEmptyRemoteBaseBeforeTaskBranch(t *testing.T) {
 	repoDir, originDir, operator := setupEmptyRemoteTaskRepo(t)
 
-	result, err := operator.Push(context.Background(), false, false)
+	result, err := operator.Push(context.Background(), PushOptions{})
 	if err != nil {
 		t.Fatalf("Push() error = %v", err)
 	}
@@ -43,7 +43,7 @@ func TestGitOperatorPushPublishesEmptyRemoteBaseBeforeTaskBranch(t *testing.T) {
 func TestGitOperatorPushPublishesAnotherTaskBranchAfterBaseInitialization(t *testing.T) {
 	repoDir, originDir, operator := setupEmptyRemoteTaskRepo(t)
 
-	first, err := operator.Push(context.Background(), false, false)
+	first, err := operator.Push(context.Background(), PushOptions{})
 	if err != nil {
 		t.Fatalf("first Push() error = %v", err)
 	}
@@ -58,7 +58,7 @@ func TestGitOperatorPushPublishesAnotherTaskBranchAfterBaseInitialization(t *tes
 	runGit(t, repoDir, "add", "second.txt")
 	runGit(t, repoDir, "commit", "-m", "second task change")
 
-	second, err := operator.Push(context.Background(), false, false)
+	second, err := operator.Push(context.Background(), PushOptions{})
 	if err != nil {
 		t.Fatalf("second Push() error = %v", err)
 	}
@@ -83,7 +83,7 @@ func TestGitOperatorPushAcceptsMarkedBaseWithUnrelatedRemoteRefs(t *testing.T) {
 	runGit(t, repoDir, "push", "origin", "external")
 	runGit(t, repoDir, "checkout", "feature/empty")
 
-	result, err := operator.Push(context.Background(), false, false)
+	result, err := operator.Push(context.Background(), PushOptions{})
 	if err != nil {
 		t.Fatalf("Push() error = %v", err)
 	}
@@ -116,7 +116,7 @@ func TestGitOperatorPushStopsWhenEmptyRemoteGainsHistory(t *testing.T) {
 	runGit(t, seedDir, "commit", "-m", "external history")
 	runGit(t, seedDir, "push", "origin", "external")
 
-	result, err := operator.Push(context.Background(), false, false)
+	result, err := operator.Push(context.Background(), PushOptions{})
 	if err != nil {
 		t.Fatalf("Push() error = %v", err)
 	}
@@ -135,7 +135,7 @@ func TestGitOperatorPushReportsEmptyRemoteBasePublicationFailure(t *testing.T) {
 	_, originDir, operator := setupEmptyRemoteTaskRepo(t)
 	writeExecutable(t, filepath.Join(originDir, "hooks", "pre-receive"), "#!/bin/sh\necho reject >&2\nexit 1\n")
 
-	result, err := operator.Push(context.Background(), false, false)
+	result, err := operator.Push(context.Background(), PushOptions{})
 	if err != nil {
 		t.Fatalf("Push() error = %v", err)
 	}
@@ -152,7 +152,7 @@ func TestGitOperatorPushReportsTaskBranchFailureAfterBasePublication(t *testing.
 	hook := "#!/bin/sh\nwhile read old new ref; do\n  case \"$ref\" in\n    refs/heads/main) exit 0 ;;\n    refs/heads/feature/empty) echo reject >&2; exit 1 ;;\n  esac\ndone\nexit 0\n"
 	writeExecutable(t, filepath.Join(originDir, "hooks", "pre-receive"), hook)
 
-	result, err := operator.Push(context.Background(), false, false)
+	result, err := operator.Push(context.Background(), PushOptions{})
 	if err != nil {
 		t.Fatalf("Push() error = %v", err)
 	}
@@ -184,7 +184,7 @@ func TestGitOperatorPushRetainsMarkerWhenUnrelatedRefAppearsDuringBasePublicatio
 		"exit 0\n"
 	writeExecutable(t, filepath.Join(originDir, "hooks", "pre-receive"), hook)
 
-	result, err := operator.Push(context.Background(), false, false)
+	result, err := operator.Push(context.Background(), PushOptions{})
 	if err != nil {
 		t.Fatalf("Push() error = %v", err)
 	}
@@ -229,7 +229,7 @@ func TestGitOperatorPushPublishesValidatedBaselineCommit(t *testing.T) {
 	writeExecutable(t, filepath.Join(scriptDir, "git"), shim)
 	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	result, err := operator.Push(context.Background(), false, false)
+	result, err := operator.Push(context.Background(), PushOptions{})
 	if err != nil {
 		t.Fatalf("Push() error = %v", err)
 	}
@@ -321,7 +321,7 @@ func TestGitOperatorPushRedactsEmptyRemoteProbeFailure(t *testing.T) {
 	writeExecutable(t, filepath.Join(scriptDir, "git"), fmt.Sprintf("#!/bin/sh\nif [ \"$1\" = \"ls-remote\" ]; then\n  printf 'fatal: unable to access https://user:%s@example.com/empty.git: denied\\n' >&2\n  exit 1\nfi\nexec %q \"$@\"\n", secret, realGit))
 	t.Setenv("PATH", scriptDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
-	result, err := operator.Push(context.Background(), false, false)
+	result, err := operator.Push(context.Background(), PushOptions{})
 	if err != nil {
 		t.Fatalf("Push() error = %v", err)
 	}

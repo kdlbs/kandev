@@ -41,6 +41,7 @@ func BuildContentSecurityPolicy(networkOrigins, frameAncestors []string) (string
 	if err != nil {
 		return "", err
 	}
+	frames = append([]string{"'self'"}, frames...)
 	connect := append([]string{"'self'"}, network...)
 	images := append([]string{"'self'", "data:"}, network...)
 	fonts := append([]string{"'self'", "data:"}, network...)

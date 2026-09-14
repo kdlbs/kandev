@@ -42,25 +42,32 @@ func TestIsTerminalStep(t *testing.T) {
 		}
 	})
 
-	t.Run("matching final step", func(t *testing.T) {
-		step := &WorkflowStep{Name: "Done"}
+	t.Run("checked final step", func(t *testing.T) {
+		step := &WorkflowStep{Name: "Release", CompleteTaskOnEnter: true}
 		if !IsTerminalStep(step, nil) {
-			t.Fatalf("final Done step was not terminal")
+			t.Fatalf("checked final step was not terminal")
 		}
 	})
 
-	t.Run("matching non-final step", func(t *testing.T) {
+	t.Run("unchecked final step", func(t *testing.T) {
 		step := &WorkflowStep{Name: "Done"}
+		if IsTerminalStep(step, nil) {
+			t.Fatalf("unchecked final step reported terminal")
+		}
+	})
+
+	t.Run("checked non-final step", func(t *testing.T) {
+		step := &WorkflowStep{Name: "Release", CompleteTaskOnEnter: true}
 		nextStep := &WorkflowStep{Name: "Archive"}
 		if IsTerminalStep(step, nextStep) {
-			t.Fatalf("non-final Done step reported terminal")
+			t.Fatalf("checked non-final step reported terminal")
 		}
 	})
 
-	t.Run("non-matching final step", func(t *testing.T) {
-		step := &WorkflowStep{Name: "Work"}
-		if IsTerminalStep(step, nil) {
-			t.Fatalf("final Work step reported terminal")
+	t.Run("checked arbitrary final step", func(t *testing.T) {
+		step := &WorkflowStep{Name: "Ready for launch", CompleteTaskOnEnter: true}
+		if !IsTerminalStep(step, nil) {
+			t.Fatalf("checked arbitrary final step reported non-terminal")
 		}
 	})
 }

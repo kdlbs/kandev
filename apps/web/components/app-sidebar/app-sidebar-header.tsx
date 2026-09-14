@@ -21,6 +21,7 @@ const COLLAPSE_BUTTON_CLASS = "h-7 w-7 shrink-0 cursor-pointer";
 export function AppSidebarHeader({ collapsed, onToggleCollapse }: AppSidebarHeaderProps) {
   const { t } = useTranslation();
   const workspaces = useAppStore((s) => s.workspaces);
+  const startupPage = useAppStore((s) => s.userSettings.startupPage);
   // The global WORKSPACE_PICKER shortcut opens this instance (and only this
   // one) through the store; the mobile sheet keeps its own local open state.
   const pickerOpen = useAppStore((s) => s.appSidebar.workspacePickerOpen);
@@ -30,7 +31,7 @@ export function AppSidebarHeader({ collapsed, onToggleCollapse }: AppSidebarHead
     (workspace) => workspace.id === workspaces.activeId,
   );
   const homeDisabled = mode === "unknown";
-  const homeHref = homeDisabled ? "#" : workspaceHomeHref(activeWorkspace);
+  const homeHref = homeDisabled ? "#" : workspaceHomeHref(activeWorkspace, startupPage);
 
   if (collapsed) {
     // Minimal rail: brand home + expand. The workspace switcher lives only in

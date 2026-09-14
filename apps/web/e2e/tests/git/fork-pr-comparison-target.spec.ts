@@ -9,8 +9,8 @@ import {
 test.describe("Fork pull-request comparison target", () => {
   test.describe.configure({ timeout: 120_000 });
 
-  test.afterEach(async ({ seedData, backend }) => {
-    resetForkPRComparisonRepository(seedData, backend);
+  test.afterEach(async ({ seedData, backend, apiClient }) => {
+    await resetForkPRComparisonRepository(seedData, backend, apiClient);
   });
 
   test("uses the upstream target for one fork commit and three files", async ({
@@ -59,9 +59,15 @@ test.describe("Fork pull-request comparison target", () => {
     seedData,
     backend,
   }) => {
-    const { task } = await seedForkPRComparisonTask(apiClient, seedData, backend, {
-      comparisonTargetAvailable: false,
-    });
+    const { task, comparisonTargetFixture } = await seedForkPRComparisonTask(
+      apiClient,
+      seedData,
+      backend,
+      {
+        comparisonTargetAvailable: false,
+        localUncommittedFile: "local-auth-recovery.txt",
+      },
+    );
 
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
@@ -72,5 +78,23 @@ test.describe("Fork pull-request comparison target", () => {
     await expect(testPage.getByTestId("comparison-target-notice")).toContainText(
       "upstream/widget:main",
     );
+    await expect
+      .poll(() => comparisonTargetFixture?.unauthorizedRequestCount() ?? 0, {
+        timeout: 15_000,
+        message: "the comparison fixture should observe the failed HTTP authentication request",
+      })
+      .toBeGreaterThan(0);
+    await expect(
+      session.changes.locator('[data-changes-file="local-auth-recovery.txt"]'),
+    ).toBeVisible();
+
+    comparisonTargetFixture?.setAvailable(true);
+    await session.clickSessionChatTab();
+    await session.clickTab("Changes");
+    await expect(testPage.getByTestId("comparison-target-notice")).toHaveCount(0, {
+      timeout: 30_000,
+    });
+    await session.expandCommitsSection();
+    await expect(session.commitsSection().locator('[data-testid^="commit-row-"]')).toHaveCount(1);
   });
 });

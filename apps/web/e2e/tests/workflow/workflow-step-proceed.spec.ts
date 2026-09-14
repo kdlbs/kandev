@@ -3,6 +3,52 @@ import { routeMainWebSocketWithPromptDrop } from "../../helpers/ws-drop";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Manual proceed to next workflow step", () => {
+  test("shows next step action for an idle signal-gated transition", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Signal Gated Proceed Workflow",
+    );
+    const signalStep = await apiClient.createWorkflowStep(workflow.id, "Signal Gate", 0);
+    const reviewStep = await apiClient.createWorkflowStep(workflow.id, "Review", 1);
+
+    await apiClient.updateWorkflowStep(signalStep.id, {
+      prompt: 'e2e:message("signal-gated turn complete")\n{{task_prompt}}',
+      events: {
+        on_enter: [{ type: "auto_start_agent" }],
+        on_turn_complete: [{ type: "move_to_next" }],
+      },
+      auto_advance_requires_signal: true,
+    });
+
+    const task = await apiClient.createTask(seedData.workspaceId, "Signal Gated Proceed Task", {
+      workflow_id: workflow.id,
+      workflow_step_id: signalStep.id,
+      agent_profile_id: seedData.agentProfileId,
+      repository_ids: [seedData.repositoryId],
+    });
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 30_000 });
+
+    await expect(session.stepperStep("Signal Gate")).toHaveAttribute("aria-current", "step");
+    await expect(session.proceedNextStepButton()).toBeVisible();
+
+    await session.proceedNextStepButton().click();
+
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id, {
+        timeout: 15_000,
+      })
+      .toBe(reviewStep.id);
+    await expect(session.stepperStep("Review")).toHaveAttribute("aria-current", "step");
+  });
+
   /**
    * Regression test: moving a task out of a plan-mode step must disable plan mode
    * and show the next step's auto-start prompt in chat.

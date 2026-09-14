@@ -1,15 +1,12 @@
-import type { TaskPriority } from "@/lib/types/http";
+import { compareStepOrder, type StepOrderTask } from "./task-order";
 
-export type WipQueueTask = {
-  id: string;
+export type WipQueueTask = StepOrderTask & {
   workflowStepId: string;
   queuedForStepId?: string | null;
   wipAdmitted?: boolean | null;
-  position?: number | null;
-  priority?: TaskPriority | null;
-  queuedAt?: string | null;
-  createdAt?: string | null;
 };
+
+export type WipQueueComparator = (left: WipQueueTask, right: WipQueueTask) => number;
 
 export type WipQueueEntry<T extends WipQueueTask = WipQueueTask> = {
   task: T;
@@ -23,47 +20,11 @@ export type WipQueueStatus = {
   destinationTitle: string;
 };
 
-function priorityRank(priority: WipQueueTask["priority"]): number {
-  switch (priority) {
-    case "critical":
-      return 0;
-    case "high":
-      return 1;
-    case "medium":
-      return 2;
-    case "low":
-      return 3;
-    default:
-      return 4;
-  }
-}
-
-function timestamp(value: string | null | undefined): number {
-  if (!value) return Number.POSITIVE_INFINITY;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
-}
-
-function compareNumbers(left: number, right: number): number {
-  if (left < right) return -1;
-  if (left > right) return 1;
-  return 0;
-}
-
+// Delegates to task-order.ts's AC.1 total ordering key so the overflow queue
+// and every other board/promotion comparator (REQ-TASKS-KANBAN-TASK-REORDERING-001.36)
+// cannot drift apart.
 export function compareWipQueueTasks(left: WipQueueTask, right: WipQueueTask): number {
-  const position = (left.position ?? 0) - (right.position ?? 0);
-  if (position !== 0) return position;
-
-  const priority = priorityRank(left.priority) - priorityRank(right.priority);
-  if (priority !== 0) return priority;
-
-  const queuedAt = compareNumbers(timestamp(left.queuedAt), timestamp(right.queuedAt));
-  if (queuedAt !== 0) return queuedAt;
-
-  const createdAt = compareNumbers(timestamp(left.createdAt), timestamp(right.createdAt));
-  if (createdAt !== 0) return createdAt;
-
-  return left.id.localeCompare(right.id);
+  return compareStepOrder(left, right);
 }
 
 function isDestinationQueued(task: WipQueueTask, destinationStepId: string): boolean {
@@ -77,20 +38,24 @@ function isDestinationQueued(task: WipQueueTask, destinationStepId: string): boo
 export function getDestinationQueue<T extends WipQueueTask>(
   tasks: T[],
   destinationStepId: string,
+  compareTasks: WipQueueComparator = compareWipQueueTasks,
 ): WipQueueEntry<T>[] {
   const queued = tasks.filter((task) => isDestinationQueued(task, destinationStepId));
-  queued.sort(compareWipQueueTasks);
+  queued.sort(compareTasks);
   return queued.map((task, index) => ({ task, position: index + 1, total: queued.length }));
 }
 
 export function partitionWipTasks<T extends WipQueueTask>(
   tasks: T[],
   destinationStepId: string,
+  compareTasks: WipQueueComparator = compareWipQueueTasks,
 ): { admitted: T[]; queued: T[] } {
-  const queuedEntries = getDestinationQueue(tasks, destinationStepId);
+  const queuedEntries = getDestinationQueue(tasks, destinationStepId, compareTasks);
   const queuedIds = new Set(queuedEntries.map(({ task }) => task.id));
+  const admitted = tasks.filter((task) => !queuedIds.has(task.id));
+  admitted.sort(compareTasks);
   return {
-    admitted: tasks.filter((task) => !queuedIds.has(task.id)),
+    admitted,
     queued: queuedEntries.map(({ task }) => task),
   };
 }
