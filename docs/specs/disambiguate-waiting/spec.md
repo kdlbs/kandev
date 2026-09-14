@@ -1506,5 +1506,4 @@ Two questions earlier revisions carried are now closed by evidence rather than a
 - No new i18n surface: the affordance reuses `task-state-background-running` and
   `task:backgroundWorkIsRunning`, both of which already ship (AC-82). Moving
   `BackgroundWorkTaskIcon` between files does not change either.
-- `docs/specs/INDEX.md` carries a row for this spec, one for the elicitation spec, and one for the
-  deferral spec.
+- The catalog command discovers these specs from their paths and frontmatter.

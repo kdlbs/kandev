@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-RUNTIME-CLEANUP-001
 created: 2026-06-22
-updated: 2026-09-05
+updated: 2026-09-09
 owners:
   - cfl
 ---
@@ -144,12 +144,11 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
 
 Direct and cascade archive stop runtimes, remove the worktree, mark its row
 deleted, and retain environment and recovery metadata. Duplicate snapshots do
-not change that disposition.
-Unarchive reuses a retained branch or its exact compacted head. Before deletion,
-compaction creates an opaque identity-derived recovery ref, preserving the
-commit through integration-ref rewrites or pruning. Recovery requires any
-same-named ref to equal the recorded head, then clears the marker and recovery
-ref after the restored branch protects it. Delete remains separate.
+not change that disposition. Unarchive reuses a retained branch or its exact
+compacted head: compaction first creates an opaque identity-derived recovery
+ref, recovery requires a same-named ref to equal the recorded head, and the
+marker and recovery ref are cleared once the restored branch protects it.
+Delete remains separate.
 
 Archive first attempts compaction; storage maintenance later selects at most 100
 managed, deleted rows for archived tasks without scanning names. The manager
@@ -157,6 +156,9 @@ rechecks state before exact `git update-ref` deletion. Interrupted rows retry;
 a live race restores the exact ref by zero-OID compare-and-set.
 
 ## Data Model
+
+Preparation with absent resources follows
+[Cleanup preparation](runtime-cleanup-preparation.md).
 
 ### `executors_running`
 

@@ -93,7 +93,7 @@ test.describe("Marketplace source dialog on mobile", () => {
     expect(finalSwitchBox!.y + finalSwitchBox!.height).toBeLessThanOrEqual(
       finalSourceBox!.y + finalSourceBox!.height,
     );
-    await expect(finalRemove).toHaveCSS("min-height", "44px");
+    expect(finalRemoveBox!.height, "remove action height").toBeGreaterThanOrEqual(44);
     expect(finalRemoveBox!.y).toBeGreaterThanOrEqual(finalSourceBox!.y);
     expect(finalRemoveBox!.y + finalRemoveBox!.height).toBeLessThanOrEqual(
       finalSourceBox!.y + finalSourceBox!.height,

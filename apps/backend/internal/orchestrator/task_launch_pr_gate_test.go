@@ -130,13 +130,14 @@ func TestTaskPRLaunchErrorStampIsStableAndIncludesState(t *testing.T) {
 func TestWorkflowHasValidTerminalFinalStep(t *testing.T) {
 	getter := newMockStepGetter()
 	getter.steps["review"] = &wfmodels.WorkflowStep{ID: "review", WorkflowID: "workflow", Position: 1, Name: "Review"}
-	getter.steps["done"] = &wfmodels.WorkflowStep{ID: "done", WorkflowID: "workflow", Position: 2, Name: "Done"}
+	getter.steps["done"] = &wfmodels.WorkflowStep{ID: "done", WorkflowID: "workflow", Position: 2, Name: "Done", CompleteTaskOnEnter: true}
 
 	if !workflowHasValidTerminalFinalStep(t.Context(), getter, "review") {
 		t.Fatal("final Done step should enable mark_review_done")
 	}
 
 	getter.steps["done"].Name = "Archive"
+	getter.steps["done"].CompleteTaskOnEnter = false
 	if workflowHasValidTerminalFinalStep(t.Context(), getter, "review") {
 		t.Fatal("non-terminal final step should not enable mark_review_done")
 	}
@@ -159,7 +160,7 @@ func TestShouldSkipTerminalPRAutoStartPersistsAndClearsStampedError(t *testing.T
 	}
 	steps := newMockStepGetter()
 	steps.steps["review"] = &wfmodels.WorkflowStep{ID: "review", WorkflowID: "wf1", Position: 1, Name: "Review"}
-	steps.steps["done"] = &wfmodels.WorkflowStep{ID: "done", WorkflowID: "wf1", Position: 2, Name: "Done"}
+	steps.steps["done"] = &wfmodels.WorkflowStep{ID: "done", WorkflowID: "wf1", Position: 2, Name: "Done", CompleteTaskOnEnter: true}
 	svc := createTestService(repo, steps, newMockTaskRepo())
 	svc.SetGitHubService(&mockGitHubService{taskPRs: []*github.TaskPR{
 		{TaskID: "task-pr-gate", RepositoryID: "repo-1", PRNumber: 42, State: githubPRStateMerged},

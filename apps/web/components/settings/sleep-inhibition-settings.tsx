@@ -24,6 +24,7 @@ import { useSettingsSaveContributor } from "./settings-save-provider";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import { useSleepInhibitionSettings } from "@/hooks/domains/settings/use-sleep-inhibition-settings";
 import type { SleepInhibitionResponse } from "@/lib/types/system";
+import { settingsActionClassName } from "./settings-control";
 
 const MACOS_COMMAND = "/usr/bin/caffeinate -i -w <kandev-pid>";
 // i18n-exempt: Win32 API signature shown verbatim as code.
@@ -132,7 +133,7 @@ function SleepInhibitionLoadError({ onRetry }: { onRetry: () => void }) {
           <IconAlertCircle className="size-4" />
           <AlertDescription>{t("settings:sleepInhibitionLoadFailed")}</AlertDescription>
         </Alert>
-        <Button variant="outline" className="mt-3 h-11" onClick={onRetry}>
+        <Button variant="outline" className={settingsActionClassName("mt-3")} onClick={onRetry}>
           {t("settings:sleepInhibitionRetry")}
         </Button>
       </CardContent>
@@ -195,7 +196,7 @@ function SleepInhibitionInfoTooltip() {
       aria-haspopup={usesTouchDrawer ? "dialog" : undefined}
       aria-expanded={usesTouchDrawer ? open : undefined}
       data-testid="sleep-inhibition-info"
-      className="absolute right-0 top-1/2 h-11 w-11 -translate-y-1/2 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground sm:static sm:h-7 sm:w-7 sm:translate-y-0"
+      className="absolute right-0 top-1/2 -translate-y-1/2 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground sm:static sm:translate-y-0"
     >
       <IconInfoCircle className="size-4" aria-hidden="true" />
     </Button>

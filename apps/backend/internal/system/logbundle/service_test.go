@@ -563,14 +563,17 @@ func TestFrontendCreateNotifiesOnlyThroughIdentityNotifier(t *testing.T) {
 		t.Fatalf("notification = %#v", notifier.message)
 	}
 	var payload struct {
-		BundleID           string `json:"bundle_id"`
-		MaxChunkBytes      int    `json:"max_chunk_bytes"`
-		MaxBrowserProfiles int    `json:"max_browser_profiles"`
+		BundleID           string    `json:"bundle_id"`
+		CaptureDeadline    time.Time `json:"capture_deadline"`
+		CaptureTimeoutMS   int64     `json:"capture_timeout_ms"`
+		MaxChunkBytes      int       `json:"max_chunk_bytes"`
+		MaxBrowserProfiles int       `json:"max_browser_profiles"`
 	}
 	if err := json.Unmarshal(notifier.message.Payload, &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.BundleID != job.ID || payload.MaxChunkBytes != 1024*1024 ||
+	if payload.BundleID != job.ID || !payload.CaptureDeadline.Equal(*job.CaptureDeadline) ||
+		payload.CaptureTimeoutMS != 15_000 || payload.MaxChunkBytes != 1024*1024 ||
 		payload.MaxBrowserProfiles != maxBrowserProfiles {
 		t.Fatalf("capture payload = %#v", payload)
 	}

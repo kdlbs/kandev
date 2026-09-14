@@ -24,6 +24,21 @@ func (r *fastPathTaskReadRetryRepo) GetTask(ctx context.Context, taskID string) 
 	return r.Repository.GetTask(ctx, taskID)
 }
 
+func TestQueueUserPromptRejectsTerminalSession(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateCompleted)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	err := svc.QueueUserPrompt(ctx, "t1", "s1", "late prompt", "", false, nil, nil, true)
+	if !errors.Is(err, ErrSessionNotPromptable) {
+		t.Fatalf("QueueUserPrompt error = %v, want ErrSessionNotPromptable", err)
+	}
+	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 0 {
+		t.Fatalf("terminal session queue count = %d, want 0", got)
+	}
+}
+
 // TestQueueUserPrompt_T2FastPathDrainsPromptableSession pins the
 // T2 contract: a user message admitted via QueueUserPrompt triggers
 // a synchronous fast-path drain when the session is ready for input,
@@ -139,6 +154,27 @@ func TestQueueUserPrompt_T2SkipsFastPathWhenInFlight(t *testing.T) {
 	// T2 must NOT drain — the drain would race the in-flight dispatch.
 	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 1 {
 		t.Fatalf("post-enqueue queue count = %d, want 1 (T2 must not race in-flight dispatch)", got)
+	}
+}
+
+// TestQueueUserPrompt_T2DefersInitialTaskBriefContender pins the first-prompt
+// ordering contract: a candidate that lost atomic admission remains queued
+// while the admitted candidate launches, even if the session is otherwise
+// promptable. The ready/boot-ready lifecycle drain delivers it afterward.
+func TestQueueUserPrompt_T2DefersInitialTaskBriefContender(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	if err := svc.QueueUserPrompt(
+		ctx, "t1", "s1", "later first-message contender", "", false, nil,
+		map[string]interface{}{MetaKeyInitialTaskBriefDispatchPending: true}, true,
+	); err != nil {
+		t.Fatalf("QueueUserPrompt: %v", err)
+	}
+	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 1 {
+		t.Fatalf("post-enqueue queue count = %d, want 1 (initial contender must wait for admitted launch)", got)
 	}
 }
 

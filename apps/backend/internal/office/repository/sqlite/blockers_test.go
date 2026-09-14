@@ -225,6 +225,83 @@ func TestListChildStates(t *testing.T) {
 	}
 }
 
+func TestListWaveMembers(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	insertTask(t, repo, ctx, "parent-1", "ws-1", "Parent Task", "", "")
+	insertTask(t, repo, ctx, "child-ordinary", "ws-1", "Ordinary", "", "")
+	insertTask(t, repo, ctx, "child-archived", "ws-1", "Archived", "", "")
+	insertTask(t, repo, ctx, "child-ephemeral", "ws-1", "Ephemeral", "", "")
+	insertTask(t, repo, ctx, "child-automation", "ws-1", "Automation", "", "")
+	if _, err := repo.ExecRaw(ctx, `
+		UPDATE tasks SET parent_id = 'parent-1', state = 'COMPLETED'
+		WHERE id IN ('child-ordinary', 'child-archived', 'child-ephemeral', 'child-automation')
+	`); err != nil {
+		t.Fatalf("set parent: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx, `
+		UPDATE tasks SET archived_at = datetime('now') WHERE id = 'child-archived'
+	`); err != nil {
+		t.Fatalf("archive child: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx, `
+		UPDATE tasks SET is_ephemeral = 1 WHERE id = 'child-ephemeral'
+	`); err != nil {
+		t.Fatalf("mark ephemeral: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx, `
+		UPDATE tasks SET origin = 'automation_run' WHERE id = 'child-automation'
+	`); err != nil {
+		t.Fatalf("mark automation origin: %v", err)
+	}
+
+	members, err := repo.ListWaveMembers(ctx, "parent-1")
+	if err != nil {
+		t.Fatalf("ListWaveMembers: %v", err)
+	}
+	if len(members) != 1 || members[0].TaskID != "child-ordinary" {
+		t.Fatalf("ListWaveMembers = %+v, want only child-ordinary", members)
+	}
+	if members[0].State != "COMPLETED" {
+		t.Errorf("state = %q, want COMPLETED", members[0].State)
+	}
+
+	empty, err := repo.ListWaveMembers(ctx, "missing-parent")
+	if err != nil {
+		t.Fatalf("ListWaveMembers empty: %v", err)
+	}
+	if empty == nil {
+		t.Fatal("empty wave-member result is nil")
+	}
+	if len(empty) != 0 {
+		t.Fatalf("empty wave-member count = %d, want 0", len(empty))
+	}
+}
+
+func TestListWaveMembers_OrdersAscendingByID(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	insertTask(t, repo, ctx, "parent-1", "ws-1", "Parent Task", "", "")
+	insertTask(t, repo, ctx, "child-z", "ws-1", "Child Z", "", "")
+	insertTask(t, repo, ctx, "child-a", "ws-1", "Child A", "", "")
+	if _, err := repo.ExecRaw(ctx, `
+		UPDATE tasks SET parent_id = 'parent-1', state = 'COMPLETED'
+		WHERE id IN ('child-z', 'child-a')
+	`); err != nil {
+		t.Fatalf("set parent: %v", err)
+	}
+
+	members, err := repo.ListWaveMembers(ctx, "parent-1")
+	if err != nil {
+		t.Fatalf("ListWaveMembers: %v", err)
+	}
+	if len(members) != 2 || members[0].TaskID != "child-a" || members[1].TaskID != "child-z" {
+		t.Fatalf("ListWaveMembers = %+v, want [child-a child-z]", members)
+	}
+}
+
 func TestListBlockersForTasks(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()

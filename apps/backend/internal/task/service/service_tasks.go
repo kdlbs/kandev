@@ -440,7 +440,11 @@ func (s *Service) finalizeCreatedTask(ctx context.Context, prepared *preparedTas
 		task.Repositories = repos
 	}
 
-	s.publishTaskEvent(ctx, events.TaskCreated, task, nil)
+	s.publishTaskEventWithExtra(ctx, events.TaskCreated, task, nil,
+		map[string]interface{}{
+			"assignee_agent_profile_id": task.AssigneeAgentProfileID,
+			"assignment_generation":     assignmentGenerationForCreate(task),
+		})
 	s.pullTasksFromNewFeederWork(ctx, task.WorkflowID, task.WorkflowStepID)
 	if refreshed, err := s.tasks.GetTask(ctx, task.ID); err != nil {
 		s.logger.Warn("failed to refresh task after feeder pull", zap.String("task_id", task.ID), zap.Error(err))
@@ -451,6 +455,17 @@ func (s *Service) finalizeCreatedTask(ctx context.Context, prepared *preparedTas
 	s.logger.Info("task created", zap.String("task_id", task.ID), zap.String("title", task.Title))
 
 	return CreateTaskResult{Task: task, Outcome: CreateTaskOutcomeCreated}, nil
+}
+
+// assignmentGenerationForCreate mirrors insertTaskTx's runner-row guard in
+// memory rather than re-reading the row it just wrote: a task created
+// already assigned starts at generation 1 (matching the value insertTaskTx
+// committed), everything else starts at 0 (never assigned).
+func assignmentGenerationForCreate(task *models.Task) int64 {
+	if task.AssigneeAgentProfileID != "" && task.WorkflowStepID != "" {
+		return 1
+	}
+	return 0
 }
 
 func (s *Service) prepareWorkspacePolicyForCreation(ctx context.Context, req *CreateTaskRequest) error {
@@ -2005,9 +2020,15 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 			Trigger: steptelemetry.TriggerTaskUpdate, ActorKind: actorKind, ActorID: actorID,
 		})
 	}
-	if err := s.tasks.UpdateTask(updateCtx, task); err != nil {
-		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(err))
-		return nil, err
+	var updateErr error
+	if req.Position != nil {
+		updateErr = s.tasks.UpdateTaskWithExplicitPosition(updateCtx, task)
+	} else {
+		updateErr = s.tasks.UpdateTask(updateCtx, task)
+	}
+	if updateErr != nil {
+		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(updateErr))
+		return nil, updateErr
 	}
 	// UpdateTask may have applied a conditional title/metadata patch because
 	// this snapshot was stale. Publish and return the row that actually won so
@@ -2492,11 +2513,22 @@ func (s *Service) markOrphanedInheritParentChild(ctx context.Context, archived, 
 	}
 
 	workspace, _ := child.Metadata["workspace"].(map[string]interface{})
+	guard := models.ObservedWorkspaceGuard(workspace)
+	guard.RequireParentArchivedID = archived.ID
+	guard.RequireParentID = archived.ID
+	guard.RequireNoOwnEnvironment = true
+	guard.RequireTaskNotArchived = true
 	stampOrphanedWorkspaceMetadata(workspace, archived.ID)
 
-	if err := s.updateTaskWorkspaceMetadata(ctx, child); err != nil {
+	landed, err := s.updateTaskWorkspaceMetadata(ctx, child, guard)
+	if err != nil {
 		s.logger.Warn("mark orphaned inherit_parent child failed",
 			zap.String("task_id", child.ID), zap.String("parent_task_id", archived.ID), zap.Error(err))
+		return
+	}
+	if !landed {
+		s.logger.Debug("mark orphaned inherit_parent child lost its guard",
+			zap.String("task_id", child.ID), zap.String("parent_task_id", archived.ID))
 		return
 	}
 	s.publishTaskEvent(ctx, events.TaskUpdated, child, nil)
@@ -2504,15 +2536,22 @@ func (s *Service) markOrphanedInheritParentChild(ctx context.Context, archived, 
 		zap.String("task_id", child.ID), zap.String("parent_task_id", archived.ID))
 }
 
-func (s *Service) updateTaskWorkspaceMetadata(ctx context.Context, task *models.Task) error {
+// updateTaskWorkspaceMetadata writes the whole workspace sub-map guarded by
+// cas, reporting whether the write landed. A wiring without the CAS
+// capability (never true in production) skips the write and logs Warn
+// rather than falling back to an unguarded whole-row UpdateTask.
+func (s *Service) updateTaskWorkspaceMetadata(ctx context.Context, task *models.Task, guard models.OrphanWriteGuard) (bool, error) {
 	if task == nil {
-		return nil
+		return false, nil
 	}
 	workspace, _ := task.Metadata["workspace"].(map[string]interface{})
-	if setter, ok := s.tasks.(taskMetadataKeySetter); ok {
-		return setter.SetTaskMetadataKey(ctx, task.ID, "workspace", workspace)
+	setter, ok := s.tasks.(taskWorkspaceMetadataCASSetter)
+	if !ok {
+		s.logger.Warn("task repository does not support guarded workspace metadata writes",
+			zap.String("task_id", task.ID))
+		return false, nil
 	}
-	return s.tasks.UpdateTask(ctx, task)
+	return setter.SetTaskWorkspaceMetadataIfUnchanged(ctx, task.ID, guard, workspace)
 }
 
 // finalizeCancelledSessions finalizes an archived task's active sessions in
@@ -3626,7 +3665,11 @@ func (s *Service) cleanupDestructiveTaskResources(
 		return append(errs, cause)
 	}
 	if len(preserveExecutorRows) == 0 && !skipOwnedEnvironment {
-		errs = append(errs, s.cleanupTaskEnvironment(ctx, taskID, envCleanup)...)
+		environmentCleanup := envCleanup
+		if s.canBatchCleanupTaskWorktrees(envCleanup) {
+			environmentCleanup.env = taskEnvironmentWithoutSnapshotWorktrees(envCleanup.env, worktrees)
+		}
+		errs = append(errs, s.cleanupTaskEnvironment(ctx, taskID, environmentCleanup)...)
 		if cause := context.Cause(ctx); cause != nil {
 			return append(errs, cause)
 		}
@@ -3674,6 +3717,53 @@ func (s *Service) cleanupDestructiveTaskResources(
 		errs = append(errs, fmt.Errorf("cleanup worktrees: %w", cleanupErr))
 	}
 	return errs
+}
+
+func (s *Service) canBatchCleanupTaskWorktrees(cleanup taskEnvironmentCleanup) bool {
+	if s.worktreeCleanup == nil {
+		return false
+	}
+	if cleanup.preserveBranches {
+		_, ok := s.worktreeCleanup.(WorktreeArchiveBatchCleaner)
+		return ok
+	}
+	if cleanup.discardWorktreeChanges {
+		_, ok := s.worktreeCleanup.(WorktreeBatchCleanerWithOptions)
+		return ok
+	}
+	_, ok := s.worktreeCleanup.(WorktreeBatchCleaner)
+	return ok
+}
+
+func taskEnvironmentWithoutSnapshotWorktrees(
+	env *models.TaskEnvironment, worktrees []*worktree.Worktree,
+) *models.TaskEnvironment {
+	if env == nil || len(worktrees) == 0 {
+		return env
+	}
+	worktreeIDs := make(map[string]struct{}, len(worktrees))
+	for _, wt := range worktrees {
+		if wt != nil && wt.ID != "" {
+			worktreeIDs[wt.ID] = struct{}{}
+		}
+	}
+	if len(worktreeIDs) == 0 {
+		return env
+	}
+
+	clone := *env
+	clone.Repos = make([]*models.TaskEnvironmentRepo, len(env.Repos))
+	for i, repo := range env.Repos {
+		if repo == nil {
+			continue
+		}
+		repoClone := *repo
+		if _, ok := worktreeIDs[repo.WorktreeID]; ok {
+			repoClone.WorktreeID = ""
+		}
+		clone.Repos[i] = &repoClone
+	}
+	return &clone
 }
 
 func (s *Service) filterSharedWorktreesForTaskCleanup(

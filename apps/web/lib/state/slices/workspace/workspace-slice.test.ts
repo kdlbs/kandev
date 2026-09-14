@@ -4,6 +4,7 @@ import { immer } from "zustand/middleware/immer";
 import { createWorkspaceSlice } from "./workspace-slice";
 import type { WorkspaceSlice } from "./types";
 import type { Branch, Repository } from "@/lib/types/http";
+import { createAppStore } from "@/lib/state/store";
 
 function makeStore() {
   return create<WorkspaceSlice>()(
@@ -48,6 +49,46 @@ describe("upsertRepository", () => {
       "repo-concurrent",
       CREATED_REPOSITORY,
     ]);
+  });
+});
+
+describe("setActiveWorkspace", () => {
+  it("resets kanban context before switching to another workspace", () => {
+    const store = createAppStore({
+      workspaces: { items: [], activeId: "ws-a" },
+      workspaceContextGeneration: 4,
+      workspaceContextRead: {
+        workspaceId: "ws-a",
+        generation: 4,
+        pending: { workflows: true, repositories: true, steps: true },
+        errors: { workflows: "transient", repositories: null, steps: null },
+        retryAfterMs: { workflows: 1_000, repositories: null, steps: null },
+        requestIds: { workflows: "request-a", repositories: "request-b", steps: "request-c" },
+        snapshotPending: true,
+        snapshotError: "transient",
+        snapshotRetryAfterMs: 1_000,
+        snapshotRequestId: "snapshot-a",
+        retryVersion: 2,
+        retryCycle: 1,
+      },
+      kanban: {
+        workflowId: "workflow-a",
+        steps: [],
+        tasks: [],
+      },
+    } as never);
+
+    store.getState().setActiveWorkspace("ws-b");
+
+    expect(store.getState().workspaces.activeId).toBe("ws-b");
+    expect(store.getState().workspaceContextGeneration).toBe(5);
+    expect(store.getState().workspaceContextRead).toMatchObject({
+      workspaceId: null,
+      pending: { workflows: false, repositories: false, steps: false },
+      snapshotPending: false,
+      snapshotError: null,
+    });
+    expect(store.getState().kanban).toMatchObject({ workflowId: null, steps: [], tasks: [] });
   });
 });
 

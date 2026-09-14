@@ -4,13 +4,16 @@ import type { DefaultState } from "./default-state";
 // after all slice spreads so that caller-supplied initialState wins over slice defaults.
 // Note: collapsedSubtaskParents is intentionally omitted — createUISlice hydrates it
 // from sessionStorage and we want that to win.
+// eslint-disable-next-line max-lines-per-function -- this explicit projection documents the state merge boundary
 export function buildStateOverrides(m: DefaultState) {
   return {
     kanban: m.kanban,
     kanbanMulti: m.kanbanMulti,
     workflows: m.workflows,
     workspaceContextGeneration: m.workspaceContextGeneration,
+    workspaceContextRead: m.workspaceContextRead,
     tasks: m.tasks,
+    taskRemoval: m.taskRemoval,
     workspaces: m.workspaces,
     repositories: m.repositories,
     repositoryBranches: m.repositoryBranches,

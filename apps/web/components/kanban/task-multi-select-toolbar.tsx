@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { IconTrash, IconArchive, IconChevronRight, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { TaskDeleteConfirmDialog } from "@/components/task/task-delete-confirm-dialog";
@@ -16,6 +16,12 @@ import {
 import { cn } from "@/lib/utils";
 import type { WorkflowStep } from "@/components/kanban-column";
 import { useTranslation } from "react-i18next";
+import type { BulkTaskActionSelection } from "@/hooks/use-task-multi-select";
+
+type BulkTaskActionOptions = {
+  cascade?: boolean;
+  discardWorktreeChanges?: boolean;
+};
 
 interface TaskMultiSelectToolbarProps {
   selectedIds: Set<string>;
@@ -23,8 +29,15 @@ interface TaskMultiSelectToolbarProps {
   isProcessing: boolean;
   canMove?: boolean;
   onClearSelection: () => void;
-  onBulkDelete: (opts?: { cascade?: boolean; discardWorktreeChanges?: boolean }) => Promise<void>;
-  onBulkArchive: (opts?: { cascade?: boolean; discardWorktreeChanges?: boolean }) => Promise<void>;
+  getEligibleSelectedIds: (ids: string[]) => string[];
+  onBulkDelete: (
+    opts?: BulkTaskActionOptions,
+    selection?: BulkTaskActionSelection,
+  ) => Promise<void>;
+  onBulkArchive: (
+    opts?: BulkTaskActionOptions,
+    selection?: BulkTaskActionSelection,
+  ) => Promise<void>;
   onBulkMove: (targetStepId: string) => Promise<void>;
 }
 
@@ -40,21 +53,54 @@ function useBulkExecutorTypes(taskIds: string[]): Array<string | null | undefine
   );
 }
 
+function captureBulkSelection(
+  taskIds: string[],
+  getEligibleSelectedIds: (ids: string[]) => string[],
+): BulkTaskActionSelection | null {
+  const allIds = [...taskIds];
+  const eligibleIds = getEligibleSelectedIds(allIds);
+  return eligibleIds.length > 0 ? { allIds, eligibleIds } : null;
+}
+
+function useBulkConfirmationSelection(
+  taskIds: string[],
+  getEligibleSelectedIds: (ids: string[]) => string[],
+) {
+  const [open, setOpen] = useState(false);
+  const [selection, setSelection] = useState<BulkTaskActionSelection | null>(null);
+  const openConfirmation = useCallback(() => {
+    const nextSelection = captureBulkSelection(taskIds, getEligibleSelectedIds);
+    if (!nextSelection) return;
+    setSelection(nextSelection);
+    setOpen(true);
+  }, [getEligibleSelectedIds, taskIds]);
+  const handleOpenChange = useCallback((next: boolean) => {
+    setOpen(next);
+    if (!next) setSelection(null);
+  }, []);
+  return { open, selection, openConfirmation, handleOpenChange };
+}
+
 function BulkArchiveDialog({
   count,
   taskIds,
-  executorTypes,
+  getEligibleSelectedIds,
   isProcessing,
   onConfirm,
 }: {
   count: number;
   taskIds: string[];
-  executorTypes: Array<string | null | undefined>;
+  getEligibleSelectedIds: (ids: string[]) => string[];
   isProcessing: boolean;
-  onConfirm: (opts: { cascade: boolean }) => void;
+  onConfirm: (opts: { cascade: boolean }, selection: BulkTaskActionSelection) => void;
 }) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
+  const { open, selection, openConfirmation, handleOpenChange } = useBulkConfirmationSelection(
+    taskIds,
+    getEligibleSelectedIds,
+  );
+  const eligibleTaskIds = selection?.eligibleIds ?? [];
+  const executorTypes = useBulkExecutorTypes(eligibleTaskIds);
 
   return (
     <>
@@ -63,7 +109,7 @@ function BulkArchiveDialog({
         variant="outline"
         className="cursor-pointer gap-1.5"
         disabled={isProcessing}
-        onClick={() => setOpen(true)}
+        onClick={openConfirmation}
         data-testid="bulk-archive-button"
       >
         <IconArchive className="h-4 w-4" />
@@ -71,13 +117,15 @@ function BulkArchiveDialog({
       </Button>
       <TaskArchiveConfirmDialog
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={handleOpenChange}
         isBulkOperation
-        count={count}
-        taskIds={taskIds}
+        count={eligibleTaskIds.length}
+        taskIds={eligibleTaskIds}
         executorTypes={executorTypes}
         isArchiving={isProcessing}
-        onConfirm={onConfirm}
+        onConfirm={(opts) => {
+          if (selection) onConfirm(opts, selection);
+        }}
         confirmTestId="bulk-archive-confirm"
       />
     </>
@@ -87,18 +135,26 @@ function BulkArchiveDialog({
 function BulkDeleteDialog({
   count,
   taskIds,
-  executorTypes,
+  getEligibleSelectedIds,
   isProcessing,
   onConfirm,
 }: {
   count: number;
   taskIds: string[];
-  executorTypes: Array<string | null | undefined>;
+  getEligibleSelectedIds: (ids: string[]) => string[];
   isProcessing: boolean;
-  onConfirm: (opts: { cascade: boolean; discardWorktreeChanges: boolean }) => void;
+  onConfirm: (
+    opts: { cascade: boolean; discardWorktreeChanges: boolean },
+    selection: BulkTaskActionSelection,
+  ) => void;
 }) {
   const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
+  const { open, selection, openConfirmation, handleOpenChange } = useBulkConfirmationSelection(
+    taskIds,
+    getEligibleSelectedIds,
+  );
+  const eligibleTaskIds = selection?.eligibleIds ?? [];
+  const executorTypes = useBulkExecutorTypes(eligibleTaskIds);
 
   return (
     <>
@@ -107,7 +163,7 @@ function BulkDeleteDialog({
         variant="destructive"
         className="cursor-pointer gap-1.5"
         disabled={isProcessing}
-        onClick={() => setOpen(true)}
+        onClick={openConfirmation}
         data-testid="bulk-delete-button"
       >
         <IconTrash className="h-4 w-4" />
@@ -115,13 +171,15 @@ function BulkDeleteDialog({
       </Button>
       <TaskDeleteConfirmDialog
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={handleOpenChange}
         isBulkOperation
-        count={count}
-        taskIds={taskIds}
+        count={eligibleTaskIds.length}
+        taskIds={eligibleTaskIds}
         executorTypes={executorTypes}
         isDeleting={isProcessing}
-        onConfirm={onConfirm}
+        onConfirm={(opts) => {
+          if (selection) onConfirm(opts, selection);
+        }}
         confirmTestId="bulk-delete-confirm"
       />
     </>
@@ -133,6 +191,7 @@ export function TaskMultiSelectToolbar({
   steps,
   isProcessing,
   canMove = true,
+  getEligibleSelectedIds,
   onClearSelection,
   onBulkDelete,
   onBulkArchive,
@@ -140,7 +199,6 @@ export function TaskMultiSelectToolbar({
 }: TaskMultiSelectToolbarProps) {
   const { t } = useTranslation();
   const taskIds = useMemo(() => [...selectedIds], [selectedIds]);
-  const executorTypes = useBulkExecutorTypes(taskIds);
 
   if (selectedIds.size === 0) return null;
 
@@ -191,18 +249,18 @@ export function TaskMultiSelectToolbar({
       <BulkArchiveDialog
         count={count}
         taskIds={taskIds}
-        executorTypes={executorTypes}
+        getEligibleSelectedIds={getEligibleSelectedIds}
         isProcessing={isProcessing}
-        onConfirm={({ cascade }) => onBulkArchive({ cascade })}
+        onConfirm={({ cascade }, selection) => onBulkArchive({ cascade }, selection)}
       />
 
       <BulkDeleteDialog
         count={count}
         taskIds={taskIds}
-        executorTypes={executorTypes}
+        getEligibleSelectedIds={getEligibleSelectedIds}
         isProcessing={isProcessing}
-        onConfirm={({ cascade, discardWorktreeChanges }) =>
-          onBulkDelete({ cascade, discardWorktreeChanges })
+        onConfirm={({ cascade, discardWorktreeChanges }, selection) =>
+          onBulkDelete({ cascade, discardWorktreeChanges }, selection)
         }
       />
 

@@ -552,6 +552,60 @@ func TestPersistTaskEnvironmentTransitionClearsCompactionMetadataOnPhysicalRepla
 	}
 }
 
+func TestPersistTaskEnvironmentTransitionUntrackedBranchResumeUpdatesSoleRowInPlace(t *testing.T) {
+	repo := newRepoForEntityTests(t)
+	ctx := context.Background()
+	workspaceID := "workspace-untracked-resume"
+	taskID := "task-untracked-resume"
+	repositoryID := "repo-untracked-resume"
+	seedWorkspace(t, repo, workspaceID)
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, WorkspaceID: workspaceID, Title: "untracked-resume"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{ID: repositoryID, WorkspaceID: workspaceID, Name: "repository"}); err != nil {
+		t.Fatalf("CreateRepository: %v", err)
+	}
+	if err := repo.CreateTaskRepository(ctx, &models.TaskRepository{TaskID: taskID, RepositoryID: repositoryID, BaseBranch: "main"}); err != nil {
+		t.Fatalf("CreateTaskRepository: %v", err)
+	}
+	env := &models.TaskEnvironment{
+		ID:            "env-untracked-resume",
+		TaskID:        taskID,
+		ExecutorType:  string(models.ExecutorTypeLocal),
+		Status:        models.TaskEnvironmentStatusReady,
+		WorkspacePath: "/workspace/untracked-resume",
+		Repos: []*models.TaskEnvironmentRepo{{
+			ID:           "canonical",
+			RepositoryID: repositoryID,
+			BranchSlug:   "main",
+			Position:     0,
+		}},
+	}
+	if err := repo.CreateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+
+	for resume := 0; resume < 2; resume++ {
+		if err := repo.PersistTaskEnvironmentTransition(ctx, env, []*models.TaskEnvironmentRepo{{
+			RepositoryID: repositoryID,
+			Position:     0,
+		}}, false); err != nil {
+			t.Fatalf("PersistTaskEnvironmentTransition resume %d: %v", resume+1, err)
+		}
+		persisted, err := repo.GetTaskEnvironment(ctx, env.ID)
+		if err != nil {
+			t.Fatalf("GetTaskEnvironment resume %d: %v", resume+1, err)
+		}
+		if len(persisted.Repos) != 1 {
+			t.Fatalf("resume %d repos = %#v, want a single canonical row, not a duplicate", resume+1, persisted.Repos)
+		}
+		row := persisted.Repos[0]
+		if row.ID != "canonical" || row.RepositoryID != repositoryID || row.BranchSlug != "main" || row.Status != worktreeRepoStatusActive || row.DeletedAt != nil {
+			t.Fatalf("resume %d row = %#v, want the active canonical row with branch preserved", resume+1, row)
+		}
+	}
+}
+
 func TestCreateTaskSessionWithWorkspaceBindingElectsAndAttaches(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	ctx := context.Background()

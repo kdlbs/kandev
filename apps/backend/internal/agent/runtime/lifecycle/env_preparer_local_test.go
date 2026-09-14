@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/worktree"
@@ -511,6 +512,29 @@ esac
 		if strings.Contains(result.ErrorMessage, secret) || strings.Contains(err.Error(), secret) {
 			t.Fatalf("checkout failure leaked %q\nresult: %s\nerror: %v", secret, result.ErrorMessage, err)
 		}
+	}
+}
+
+func TestLocalCheckoutFetchDeadline(t *testing.T) {
+	binDir := t.TempDir()
+	fakeGit := filepath.Join(binDir, "git")
+	if err := os.WriteFile(fakeGit, []byte("#!/bin/sh\nsleep 10\n"), 0o755); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err := runLocalGit(ctx, t.TempDir(), "fetch", "origin", "main")
+	if err == nil {
+		t.Fatal("runLocalGit() error = nil, want deadline failure")
+	}
+	if ctx.Err() == nil {
+		t.Fatal("runLocalGit() returned before the caller context expired")
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("runLocalGit() took %s after cancellation", elapsed)
 	}
 }
 

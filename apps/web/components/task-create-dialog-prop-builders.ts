@@ -15,6 +15,10 @@ import {
   resolveTaskCreateLaunchPreview,
   type TaskCreateLaunchPreview,
 } from "@/components/task-create-dialog-launch-preview";
+import {
+  computeRunnerEditable,
+  computeRunnerIneligibleReason,
+} from "@/components/task-create-dialog-helpers";
 
 export function computeHasAllBranches(fs: DialogFormState): boolean {
   if (fs.noRepository) return true;
@@ -22,7 +26,9 @@ export function computeHasAllBranches(fs: DialogFormState): boolean {
     const rows = fs.remoteRepos.filter((r) => r.url.trim() !== "");
     return rows.length > 0 && rows.every((r) => !!r.branch);
   }
-  return fs.repositories.length > 0 && fs.repositories.every((r) => !!r.branch);
+  return (
+    fs.repositories.length > 0 && fs.repositories.every((r) => Boolean(r.baseBranch || r.branch))
+  );
 }
 
 export function localRepositoryCreationEnabled(isCreateMode: boolean, repoLocked: boolean) {
@@ -120,6 +126,8 @@ export function buildDialogFormBodyProps(
     bottomSlot: props.bottomSlot,
     descriptionPlaceholder: props.descriptionPlaceholder,
     workflowLocked: props.lockedFields?.workflow,
+    runnerEditable: computeRunnerEditable(setup.isEditMode, props.editingTask),
+    runnerIneligibleReason: computeRunnerIneligibleReason(props.editingTask),
   };
 }
 
@@ -162,7 +170,10 @@ export function buildDialogFooterProps(
     onUpdateWithoutAgent: submitHandlers.handleUpdateWithoutAgent,
     onCreateWithoutAgent: submitHandlers.handleCreateWithoutAgent,
     onCreateWithPlanMode: submitHandlers.handleCreateWithPlanMode,
-    submitBlockedReason: props.submitBlockedReason ?? pendingAttachmentUploadReason,
+    submitBlockedReason:
+      props.submitBlockedReason ??
+      pendingAttachmentUploadReason ??
+      setup.savedBaseSubmitBlockedReason,
     editDependenciesReady: setup.isEditMode ? setup.editDependencies.ready : undefined,
   };
 }

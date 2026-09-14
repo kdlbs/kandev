@@ -332,6 +332,114 @@ func TestViewerCannotReachWriteOnlyMutators(t *testing.T) {
 	}
 }
 
+func TestViewerCannotCreateOrReplayCallerOwnedMessage(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedTeamWorkspace(t, repo, true)
+	seedUnitViewer(t, "user-carla")
+	if err := repo.CreateTaskSession(context.Background(), &models.TaskSession{
+		ID: "session-team-message", TaskID: "task-team", State: models.TaskSessionStateCreated,
+	}); err != nil {
+		t.Fatalf("create task session: %v", err)
+	}
+	request := &CreateMessageRequest{
+		TaskSessionID: "session-team-message", TaskID: "task-team", Content: "private prompt",
+	}
+	if _, err := svc.CreateMessageIdempotent(
+		context.Background(), "caller-owned-message", request,
+	); err != nil {
+		t.Fatalf("seed caller-owned message: %v", err)
+	}
+
+	viewer := ctxAsRole("user-carla", authn.RoleMember)
+	if _, err := svc.CreateMessageIdempotent(
+		viewer, "caller-owned-message", request,
+	); !IsForbidden(err) {
+		t.Fatalf("viewer replay = %v, want ErrForbidden", err)
+	}
+	if _, err := svc.CreateMessageIdempotent(
+		viewer, "new-caller-owned-message", request,
+	); !IsForbidden(err) {
+		t.Fatalf("viewer create = %v, want ErrForbidden", err)
+	}
+}
+
+func TestCallerOwnedMessageReplayCannotCrossWorkspaceScope(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedTeamWorkspace(t, repo, false)
+	if err := repo.CreateTaskSession(context.Background(), &models.TaskSession{
+		ID: "session-private-message", TaskID: "task-team", State: models.TaskSessionStateCreated,
+	}); err != nil {
+		t.Fatalf("create private task session: %v", err)
+	}
+	privateRequest := &CreateMessageRequest{
+		TaskSessionID: "session-private-message", TaskID: "task-team", Content: "private prompt",
+	}
+	if _, err := svc.CreateMessageIdempotent(
+		context.Background(), "private-caller-owned-message", privateRequest,
+	); err != nil {
+		t.Fatalf("seed private caller-owned message: %v", err)
+	}
+
+	if err := repo.CreateWorkspace(context.Background(), &models.Workspace{
+		ID: "ws-bruno", Name: "Bruno", OwnerID: "user-bruno",
+	}); err != nil {
+		t.Fatalf("create caller workspace: %v", err)
+	}
+	if err := repo.CreateWorkflow(context.Background(), &models.Workflow{
+		ID: "wf-bruno", WorkspaceID: "ws-bruno", Name: "Bruno board",
+	}); err != nil {
+		t.Fatalf("create caller workflow: %v", err)
+	}
+	if err := repo.CreateTask(context.Background(), &models.Task{
+		ID: "task-bruno", WorkspaceID: "ws-bruno", WorkflowID: "wf-bruno",
+		WorkflowStepID: "step-1", Title: "Bruno task", State: v1.TaskStateCreated,
+		Priority: "medium",
+	}); err != nil {
+		t.Fatalf("create caller task: %v", err)
+	}
+	if err := repo.CreateTaskSession(context.Background(), &models.TaskSession{
+		ID: "session-bruno-message", TaskID: "task-bruno", State: models.TaskSessionStateCreated,
+	}); err != nil {
+		t.Fatalf("create caller task session: %v", err)
+	}
+
+	_, err := svc.CreateMessageIdempotent(
+		ctxAsRole("user-bruno", authn.RoleMember),
+		"private-caller-owned-message",
+		&CreateMessageRequest{
+			TaskSessionID: "session-bruno-message", TaskID: "task-bruno", Content: "my prompt",
+		},
+	)
+	if !errors.Is(err, repoerrors.ErrTaskNotFound) {
+		t.Fatalf("cross-workspace replay error = %v, want task not found", err)
+	}
+}
+
+func TestCallerOwnedMessageUsesAuthenticatedAuthor(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedTeamWorkspace(t, repo, false)
+	if err := repo.CreateTaskSession(context.Background(), &models.TaskSession{
+		ID: "session-authenticated-author", TaskID: "task-team", State: models.TaskSessionStateCreated,
+	}); err != nil {
+		t.Fatalf("create task session: %v", err)
+	}
+
+	message, err := svc.CreateMessageIdempotent(
+		ctxAsRole("user-ana", authn.RoleMember),
+		"authenticated-author-message",
+		&CreateMessageRequest{
+			TaskSessionID: "session-authenticated-author", TaskID: "task-team",
+			Content: "prompt", AuthorID: "spoofed-user",
+		},
+	)
+	if err != nil {
+		t.Fatalf("create caller-owned message: %v", err)
+	}
+	if message.AuthorID != "user-ana" {
+		t.Fatalf("message author = %q, want authenticated caller", message.AuthorID)
+	}
+}
+
 // A lookup failure must never read as "granted".
 func TestAuthorizationFailsClosedOnLookupError(t *testing.T) {
 	svc, _, repo := createTestService(t)

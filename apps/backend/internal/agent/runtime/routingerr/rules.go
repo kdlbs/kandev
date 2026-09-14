@@ -13,6 +13,12 @@ var providerRules = map[string][]rule{
 	"claude-acp": {
 		mustRule("claude.stderr.quota.v1", `(?i)anthropic_quota_exceeded|credit balance|insufficient credits`, CodeQuotaLimited, ConfHigh),
 		mustRule("claude.stderr.rate.v1", `(?i)rate.?limit`, CodeRateLimited, ConfHigh),
+		// A proxy can reject every account credential before it sends a request
+		// upstream. This is a hard credential condition; a retry or a switch
+		// back to the same proxy cannot repair it. Require proxy_error plus the
+		// proxy's explicit credential/entitlement wording to avoid treating
+		// ordinary Anthropic auth messages as proxy failures.
+		mustRule("claude.proxy.credentials_refused.v1", `(?i)\bproxy_error\b[^\n]{0,512}\b(?:credentials?\s+(?:were\s+)?refused|oauth\s+entitlement)\b`, CodeMissingCredentials, ConfHigh),
 		mustRule("claude.stderr.auth.v1", `(?i)not authenticated|please log in|run `+"`"+`claude`+"`"+` to authenticate`, CodeAuthRequired, ConfHigh),
 		mustRule("claude.stderr.subscription.v1", `(?i)subscription`, CodeSubscriptionRequired, ConfMedium),
 		mustRule("claude.stderr.model.v1", `(?i)model.*not found|unknown model`, CodeModelUnavailable, ConfHigh),

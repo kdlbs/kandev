@@ -27,7 +27,10 @@ const (
 	StorageSourceGoCache            = "go_cache"
 	StorageSourceQuarantine         = "quarantine"
 	StorageSourceTemporaryArtifacts = "temporary_artifacts"
+	StorageSourceSystemTemporary    = "system_temporary"
 	StorageSourceDocker             = "docker"
+	StorageSourceDatabase           = "database"
+	StorageSourceDatabaseBackups    = "database_backups"
 )
 
 var storageAnalysisSources = [...]string{
@@ -35,7 +38,10 @@ var storageAnalysisSources = [...]string{
 	StorageSourceGoCache,
 	StorageSourceQuarantine,
 	StorageSourceTemporaryArtifacts,
+	StorageSourceSystemTemporary,
 	StorageSourceDocker,
+	StorageSourceDatabase,
+	StorageSourceDatabaseBackups,
 }
 
 type StorageSourceProgress struct {

@@ -1,4 +1,10 @@
 /* eslint-disable max-lines */
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import ReactMarkdown from "react-markdown";
+import remarkBreaks from "remark-breaks";
+import remarkGemoji from "remark-gemoji";
+import remarkGfm from "remark-gfm";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   __MAX_CACHE_ENTRIES,
@@ -15,6 +21,96 @@ const INTRO_TEXT = "Intro:";
 const INNER_PROMPT_TEXT = "nested prompt";
 const AFTER_NESTED_PROMPT = "After nested prompt.";
 const SAMPLE_PROSE_TEXT = "some explanation";
+const INTRO_AND_RULE_TEXT = "Intro and rule";
+const SELF_CONTAINED_TEXT = "That is self-contained.";
+const FIRST_FUNCTION_TEXT = "func first() {}";
+const SECOND_FUNCTION_TEXT = "func second() {}";
+const BARE_WRAPPED_DOCUMENT = [
+  INTRO_AND_RULE_TEXT,
+  "",
+  "---",
+  "",
+  "```",
+  "Open a pull request.",
+  "## Why",
+  "```go",
+  FIRST_FUNCTION_TEXT,
+  "```",
+  "More prose.",
+  "```go",
+  SECOND_FUNCTION_TEXT,
+  "```",
+  "Final prose.",
+  "```",
+  "",
+  "---",
+  "",
+  SELF_CONTAINED_TEXT,
+].join("\n");
+const BARE_WRAPPED_OUTER_OPEN_INDEX = 4;
+const BARE_WRAPPED_FIRST_NESTED_OPEN_INDEX = 7;
+const BARE_WRAPPED_FIRST_NESTED_CLOSE_INDEX = 9;
+const BARE_WRAPPED_SECOND_NESTED_OPEN_INDEX = 11;
+const BARE_WRAPPED_SECOND_NESTED_CLOSE_INDEX = 13;
+const BARE_WRAPPED_FINAL_PROSE_INDEX = 14;
+const BARE_WRAPPED_OUTER_CLOSE_INDEX = 15;
+const BARE_WRAPPED_INDENTED_LINE_INDEXES = [
+  2,
+  BARE_WRAPPED_OUTER_OPEN_INDEX,
+  BARE_WRAPPED_OUTER_CLOSE_INDEX,
+  17,
+];
+const INDEPENDENT_TAGGED_BLOCKS = [
+  "```go",
+  FIRST_FUNCTION_TEXT,
+  "```",
+  "This paragraph separates two examples.",
+  "```go",
+  SECOND_FUNCTION_TEXT,
+  "```",
+].join("\n");
+const RULE_DELIMITED_BARE_BLOCK_WITHOUT_NESTED_FENCES = [
+  INTRO_AND_RULE_TEXT,
+  "",
+  "---",
+  "",
+  "```",
+  "plain content",
+  "```",
+  "",
+  "---",
+  "",
+  SELF_CONTAINED_TEXT,
+].join("\n");
+const RULE_BOUNDED_INDEPENDENT_BARE_BLOCKS = [
+  "---",
+  "```",
+  "## Fence syntax",
+  "```go",
+  FIRST_FUNCTION_TEXT,
+  "```",
+  "This paragraph separates two examples.",
+  "```",
+  SECOND_FUNCTION_TEXT,
+  "```",
+  "---",
+].join("\n");
+const FIVE_BACKTICK_LITERAL_DOCUMENT = ["`````text", BARE_WRAPPED_DOCUMENT, "`````"].join("\n");
+const TWO_BARE_WRAPPED_DOCUMENTS = [BARE_WRAPPED_DOCUMENT, BARE_WRAPPED_DOCUMENT].join("\n\n");
+
+function renderNormalizedMarkdown(input: string): string {
+  return renderToStaticMarkup(
+    createElement(
+      ReactMarkdown,
+      { remarkPlugins: [remarkGfm, remarkBreaks, remarkGemoji] },
+      normalizeMarkdown(input),
+    ),
+  );
+}
+
+function countOccurrences(input: string, value: string): number {
+  return input.split(value).length - 1;
+}
 
 describe("normalizeMarkdown", () => {
   it("leaves a markdown wrapper without nested fences unchanged", () => {
@@ -48,6 +144,127 @@ describe("normalizeMarkdown", () => {
     ].join("\n");
 
     expect(normalizeMarkdown(input)).toBe(expected);
+  });
+
+  it("leaves an ambiguous bare document between rules unchanged", () => {
+    expect(normalizeMarkdown(BARE_WRAPPED_DOCUMENT)).toBe(BARE_WRAPPED_DOCUMENT);
+  });
+
+  it("renders an ambiguous bare document according to Markdown boundaries", () => {
+    const rendered = renderNormalizedMarkdown(BARE_WRAPPED_DOCUMENT);
+
+    expect(countOccurrences(rendered, "<pre>")).toBe(3);
+    expect(countOccurrences(rendered, "<code")).toBe(3);
+    expect(rendered).toContain("func first() {}");
+    expect(rendered).toContain("func second() {}");
+    expect(rendered).toContain("## Why");
+    expect(rendered).toContain("```go");
+    expect(rendered).toContain("Intro and rule");
+    expect(rendered).toContain("That is self-contained.");
+  });
+});
+
+describe("normalizeMarkdown bare-wrapper contract", () => {
+  it("preserves independent tagged blocks without rule boundaries", () => {
+    expect(normalizeMarkdown(INDEPENDENT_TAGGED_BLOCKS)).toBe(INDEPENDENT_TAGGED_BLOCKS);
+  });
+
+  it("renders independent tagged blocks as two code blocks", () => {
+    const rendered = renderNormalizedMarkdown(INDEPENDENT_TAGGED_BLOCKS);
+
+    expect(countOccurrences(rendered, "<pre>")).toBe(2);
+    expect(rendered).toContain("This paragraph separates two examples.");
+  });
+
+  it("preserves independent bare blocks inside rule boundaries", () => {
+    expect(normalizeMarkdown(RULE_BOUNDED_INDEPENDENT_BARE_BLOCKS)).toBe(
+      RULE_BOUNDED_INDEPENDENT_BARE_BLOCKS,
+    );
+  });
+
+  it("preserves a valid five-backtick code block containing bare wrapper syntax", () => {
+    expect(normalizeMarkdown(FIVE_BACKTICK_LITERAL_DOCUMENT)).toBe(FIVE_BACKTICK_LITERAL_DOCUMENT);
+  });
+
+  it("renders a valid five-backtick code block as literal text", () => {
+    const rendered = renderNormalizedMarkdown(FIVE_BACKTICK_LITERAL_DOCUMENT);
+
+    expect(countOccurrences(rendered, "<pre>")).toBe(1);
+    expect(countOccurrences(rendered, "<code")).toBe(1);
+    expect(rendered).toContain("## Why");
+    expect(rendered).toContain("```go");
+    expect(rendered).toContain("---");
+  });
+
+  it("preserves and remains idempotent for two rule-delimited bare regions", () => {
+    const normalized = normalizeMarkdown(TWO_BARE_WRAPPED_DOCUMENTS);
+
+    expect(normalized).toBe(TWO_BARE_WRAPPED_DOCUMENTS);
+    expect(normalizeMarkdown(normalized)).toBe(TWO_BARE_WRAPPED_DOCUMENTS);
+  });
+
+  it("leaves a rule-delimited bare block without nested fences unchanged", () => {
+    expect(normalizeMarkdown(RULE_DELIMITED_BARE_BLOCK_WITHOUT_NESTED_FENCES)).toBe(
+      RULE_DELIMITED_BARE_BLOCK_WITHOUT_NESTED_FENCES,
+    );
+  });
+
+  it("preserves CRLF line endings in an unchanged bare wrapper", () => {
+    const input = BARE_WRAPPED_DOCUMENT.replaceAll("\n", "\r\n");
+
+    expect(normalizeMarkdown(input)).toBe(input);
+  });
+
+  it("preserves an ambiguous glued outer close while retaining CRLF line endings", () => {
+    const inputLines = BARE_WRAPPED_DOCUMENT.replaceAll("\n", "\r\n").split("\n");
+    inputLines.splice(BARE_WRAPPED_FINAL_PROSE_INDEX, 2, "Final prose.```\r");
+    const input = inputLines.join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(input);
+  });
+
+  it("preserves leading and trailing blank lines", () => {
+    const input = `\n\n${BARE_WRAPPED_DOCUMENT}\n\n`;
+
+    expect(normalizeMarkdown(input)).toBe(input);
+  });
+
+  it("preserves three-space indentation on an unchanged bare wrapper", () => {
+    const input = BARE_WRAPPED_DOCUMENT.split("\n")
+      .map((line, index) =>
+        BARE_WRAPPED_INDENTED_LINE_INDEXES.includes(index) ? `   ${line}` : line,
+      )
+      .join("\n");
+
+    expect(normalizeMarkdown(input)).toBe(input);
+  });
+
+  it("preserves longer nested fences in an unchanged bare wrapper", () => {
+    const input = BARE_WRAPPED_DOCUMENT.split("\n");
+    input[BARE_WRAPPED_FIRST_NESTED_OPEN_INDEX] = "````go";
+    input[BARE_WRAPPED_FIRST_NESTED_CLOSE_INDEX] = "````";
+    input[BARE_WRAPPED_SECOND_NESTED_OPEN_INDEX] = "````go";
+    input[BARE_WRAPPED_SECOND_NESTED_CLOSE_INDEX] = "````";
+
+    expect(normalizeMarkdown(input.join("\n"))).toBe(input.join("\n"));
+  });
+
+  it("leaves a rule-delimited wrapper with no outer close unchanged", () => {
+    const input = BARE_WRAPPED_DOCUMENT.split("\n");
+    input.splice(BARE_WRAPPED_OUTER_CLOSE_INDEX, 1);
+
+    expect(normalizeMarkdown(input.join("\n"))).toBe(input.join("\n"));
+  });
+
+  it("is idempotent for preserved bare-wrapper inputs", () => {
+    for (const input of [
+      BARE_WRAPPED_DOCUMENT,
+      INDEPENDENT_TAGGED_BLOCKS,
+      RULE_DELIMITED_BARE_BLOCK_WITHOUT_NESTED_FENCES,
+    ]) {
+      const normalized = normalizeMarkdown(input);
+      expect(normalizeMarkdown(normalized)).toBe(normalized);
+    }
   });
 });
 

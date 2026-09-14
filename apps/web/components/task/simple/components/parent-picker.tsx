@@ -190,6 +190,7 @@ export function ParentPicker({ task }: ParentPickerProps) {
         testId="parent-picker-trigger"
       />
       <TaskDetachConfirmationSurface
+        taskId={task.id}
         open={detachConfirmation.open}
         anchorRef={detachAnchorRef}
         taskTitle={task.title}

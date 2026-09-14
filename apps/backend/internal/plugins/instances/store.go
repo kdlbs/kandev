@@ -1651,6 +1651,35 @@ func (s *Store) AddGrant(ctx context.Context, grant Grant) error {
 	return tx.Commit()
 }
 
+// AddInitialGrantsTx inserts the exact grants delegated by a trusted local
+// canvas creation. It does not advance grant_generation because SetPluginIDTx
+// increments it before the public ActivateReleaseTx call in the same
+// activation transaction. The empty-grant case is valid.
+func (s *Store) AddInitialGrantsTx(ctx context.Context, tx *sqlx.Tx, instanceID, approvedBy string, grants []Grant) error {
+	if strings.TrimSpace(instanceID) == "" || strings.TrimSpace(approvedBy) == "" {
+		return ErrInvalidScope
+	}
+	var exists int
+	if err := tx.GetContext(ctx, &exists, tx.Rebind(
+		`SELECT COUNT(*) FROM plugin_instances WHERE id = ? AND status <> ?`,
+	), instanceID, StatusRemoved); err != nil {
+		return err
+	}
+	if exists == 0 {
+		return ErrNotFound
+	}
+	var existing int
+	if err := tx.GetContext(ctx, &existing, tx.Rebind(
+		`SELECT COUNT(*) FROM plugin_instance_grants WHERE plugin_instance_id = ?`,
+	), instanceID); err != nil {
+		return err
+	}
+	if existing != 0 {
+		return ErrStaleCanvasPublish
+	}
+	return insertInstanceGrantsTx(ctx, tx, instanceID, approvedBy, grants)
+}
+
 func (s *Store) ListGrants(ctx context.Context, instanceID string) ([]Grant, error) {
 	rows, err := s.ro.QueryxContext(ctx, s.ro.Rebind(`SELECT plugin_instance_id, permission_kind, resource, network_origin, scope_ceiling, approved_by, approved_at FROM plugin_instance_grants WHERE plugin_instance_id = ? ORDER BY permission_kind, resource, network_origin`), instanceID)
 	if err != nil {

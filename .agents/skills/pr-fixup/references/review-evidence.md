@@ -82,7 +82,9 @@ unknown, do not call review clean/blocked; retry once, then use
 is nonzero while visible threads are empty, fetch the authoritative thread list
 and full bodies with `scripts/pr-resolve show <PR> <THREAD_ID>`; use
 `scripts/pr-state --comment <comment_id>` only when a flat comment view is all
-that is available.
+that is available. The numeric ID may identify either a review comment or a
+top-level issue comment; the helper falls back between both endpoints and emits
+`comment_type`, but it does not resolve a review thread.
 
 If `branch:"unknown"` or PR-view resolution is transient, retry the explicit
 PR-number command once before using direct targeted GitHub fallback. Do not
@@ -118,19 +120,8 @@ body with `scripts/pr-resolve show <PR> <THREAD_ID>`; use the flat comment comma
 only for a comment without thread context. A listed thread that is already
 resolved is stale summary state: re-poll and do not reply again.
 
-Poll at 30-second cadence with a 20-minute cap using bounded one-shot commands;
-avoid long inline loops and `gh pr checks --watch`. In default monitoring,
-stop early on a required failure. For an explicit fixed-duration request, use
-strict-deadline mode: accumulate failures and comments until the absolute
-deadline, stopping early only if the PR is merged/closed or access is revoked.
-Queued/in-progress jobs are pending, not speculative-fix triggers. On an
-explicit wait-through-CI request without a fixed deadline, use the same
-20-minute absolute cap: repeat bounded checks until failures, pending checks,
-and unresolved-thread count are all empty/zero, or stop at the deadline and
-report remaining pending checks or unresolved threads. A nonzero unresolved
-count is a blocker even when every remaining thread is informational, optional,
-or invalid. Preserve early stopping
-for failures and merged/closed or access-revoked conditions.
+For wait modes, deadlines, exit codes, and interrupted waiters, load
+[waiting.md](waiting.md). It owns the monitoring procedure.
 
 For E2E-only pending work, summarize a saved snapshot before printing shards:
 
@@ -140,5 +131,4 @@ jq '{failed_checks, pending_count:(.pending_checks|length), unresolved_review_th
 jq -r '.pending_checks[] | "\(.status) | \(.name)"' /tmp/prstate-<PR>.json
 ```
 
-If a manual poll is interrupted, terminate only polling processes you started.
 Use raw `scripts/pr-state <PR>` only for an odd-state diagnostic.

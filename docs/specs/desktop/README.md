@@ -26,23 +26,11 @@ desktop-specific behavior that is not part of the web UI contract.
 - Responsive web behavior belongs to the [UI system](../ui/README.md).
 - Release publication belongs to the [release system](../release/README.md).
 
-## Specification map
-
-### Requirements
-
-
-
-- [Tauri Desktop App](requirements/desktop-tauri-app.md)
-
-### System design
-
-
-
-- [Tauri Desktop App](system-design/desktop-tauri-app.md)
-
 ## Migration record
 
-All legacy sources assigned to this system are now represented by the canonical requirement and system-design documents above. Source detail is retained in those documents or in their linked design parts.
+All legacy sources assigned to this system are now represented by the canonical
+requirement and system-design documents. Source detail is retained in those
+documents or in their linked design parts.
 
 ## Related systems
 

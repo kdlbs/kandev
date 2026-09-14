@@ -8,9 +8,13 @@
 // writer — most dangerously autoPauseAgent (office/service/failure.go),
 // which pauses an agent after consecutive failures on the very same code
 // path that clears "working". A CAS makes each write a no-op unless the
-// agent is still in the exact state the caller observed, so the reset can
-// be called redundantly from any terminal path without resurrecting a
-// paused, stopped, or pending-approval agent back to idle.
+// agent is still in a state the caller is entitled to transition from, so
+// the reset can be called redundantly from any terminal path without
+// resurrecting a paused, stopped, or pending-approval agent back to idle.
+// MarkAgentWorking's CAS additionally allows one extra state: a launching
+// run may take ownership from a same-agent predecessor that is still
+// recorded "working" but whose run is no longer in-flight — see its own
+// doc comment for why.
 
 package sqlite
 
@@ -20,21 +24,37 @@ import (
 	"time"
 )
 
-// MarkAgentWorking transitions an agent from "idle" to "working" and records
-// runID as the run that owns the transition. Returns true when this call
-// performed the transition.
+// MarkAgentWorking transitions an agent to "working" and records runID as
+// the run that owns the transition. Returns true when this call performed
+// the transition.
 //
-// Scoped to status = 'idle' so it cannot overwrite a status a concurrent
-// writer set between the scheduler's isAgentActive check and the launch
-// (a user pausing the agent, a budget pause, an approval gate). A false
-// return therefore means "the agent was not idle" and is not an error: the
-// run still launches, exactly as it did before this status existed.
+// Takes the transition from either "idle", or from "working" when the
+// recorded owner (working_run_id) is a different run that is no longer
+// in-flight (not 'claimed'). The launching run then owns the status, so the
+// predecessor's later run-scoped clear becomes a no-op. It never takes
+// ownership from a still-claimed owner, so an in-flight run is not stolen.
+//
+// Scoped to status IN ('idle', 'working') so it can never overwrite a
+// status a concurrent writer set between the scheduler's isAgentActive
+// check and the launch (a user pausing the agent, a budget pause, an
+// approval gate) — a paused, stopped, or pending-approval agent is never
+// resurrected. A false return means the agent was not idle and had no
+// abandoned owner to take over from; it is not an error, and the run still
+// launches exactly as it did before this status existed.
 func (r *Repository) MarkAgentWorking(ctx context.Context, id, runID string) (bool, error) {
 	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE agent_profiles
 		SET status = 'working', working_run_id = ?, updated_at = ?
-		WHERE id = ? AND status = 'idle' AND `+agentInstanceFilter+`
-	`), runID, time.Now().UTC(), id)
+		WHERE id = ? AND `+agentInstanceFilter+` AND (
+			status = 'idle'
+			OR (status = 'working' AND working_run_id <> ?
+				AND NOT EXISTS (
+					SELECT 1 FROM runs
+					WHERE runs.id = agent_profiles.working_run_id
+					  AND runs.status = 'claimed'
+				))
+		)
+	`), runID, time.Now().UTC(), id, runID)
 	if err != nil {
 		return false, err
 	}

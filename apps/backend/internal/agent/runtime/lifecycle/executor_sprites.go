@@ -50,7 +50,7 @@ func (u *spriteFileUploader) ReadFile(ctx context.Context, path string) ([]byte,
 		return data, err
 	}
 	if isSpritesNotFound(err) {
-		return nil, &fs.PathError{Op: "read", Path: path, Err: fs.ErrNotExist}
+		return nil, &fs.PathError{Op: fileReadOperation, Path: path, Err: fs.ErrNotExist}
 	}
 	return data, err
 }
@@ -577,17 +577,17 @@ func (r *SpritesExecutor) buildInstanceResult(
 			agentctl.WithSessionID(req.SessionID)),
 		WorkspacePath: spritesWorkspacePath,
 		Metadata: map[string]interface{}{
-			MetadataKeySpriteName:      spriteName,
-			MetadataKeySpriteState:     strings.TrimSpace(sprite.Status),
-			MetadataKeySpriteCreatedAt: sprite.CreatedAt,
-			MetadataKeyLocalPort:       localPort,
-			"reuse_existing_process":   reusingExisting,
-			MetadataKeyIsRemote:        true,
+			MetadataKeySpriteName:           spriteName,
+			MetadataKeySpriteState:          strings.TrimSpace(sprite.Status),
+			MetadataKeySpriteCreatedAt:      sprite.CreatedAt,
+			MetadataKeyLocalPort:            localPort,
+			MetadataKeyReuseExistingProcess: reusingExisting,
+			MetadataKeyIsRemote:             true,
 		},
 	}
 }
 
-func (r *SpritesExecutor) RecoverInstances(_ context.Context) ([]*ExecutorInstance, error) {
+func (r *SpritesExecutor) RecoverInstances(_ context.Context, _ []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
 	return nil, nil
 }
 

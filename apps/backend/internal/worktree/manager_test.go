@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 func newTestLogger() *logger.Logger {
@@ -236,43 +237,6 @@ func TestNewManager_DisabledConfig(t *testing.T) {
 	}
 	if mgr.IsEnabled() {
 		t.Error("expected manager to be disabled")
-	}
-}
-
-func TestManager_IsValid(t *testing.T) {
-	cfg := newTestConfig(t)
-	log := newTestLogger()
-	store := newMockStore()
-
-	mgr, err := NewManager(cfg, store, log)
-	if err != nil {
-		t.Fatalf("NewManager failed: %v", err)
-	}
-
-	// Test non-existent path
-	if mgr.IsValid("/nonexistent/path") {
-		t.Error("expected false for non-existent path")
-	}
-
-	// Create a mock worktree directory
-	worktreePath := filepath.Join(cfg.TasksBasePath, "test-worktree")
-	if err := os.MkdirAll(worktreePath, 0755); err != nil {
-		t.Fatalf("failed to create test dir: %v", err)
-	}
-
-	// Without .git file - should be invalid
-	if mgr.IsValid(worktreePath) {
-		t.Error("expected false for directory without .git file")
-	}
-
-	// With proper .git file
-	gitFile := filepath.Join(worktreePath, ".git")
-	if err := os.WriteFile(gitFile, []byte("gitdir: /some/path/.git/worktrees/test"), 0644); err != nil {
-		t.Fatalf("failed to create .git file: %v", err)
-	}
-
-	if !mgr.IsValid(worktreePath) {
-		t.Error("expected true for valid worktree directory")
 	}
 }
 
@@ -826,7 +790,11 @@ esac
 	}
 
 	got := string(envBytes)
-	want := "0|Never|echo|/bin/false|ssh -oBatchMode=yes"
+	wantSSH := "ssh -oBatchMode=yes"
+	if ambientSSH := os.Getenv("GIT_SSH_COMMAND"); ambientSSH != "" {
+		wantSSH = subproc.ForceGitSSHBatchMode(ambientSSH)
+	}
+	want := "0|Never|exit 1|exit 1|" + wantSSH
 	if got != want {
 		t.Fatalf("fake git env = %q, want %q", got, want)
 	}

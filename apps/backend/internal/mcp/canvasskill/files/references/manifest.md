@@ -50,18 +50,27 @@ contain `ui/index.html`, `ui/app.js`, and `ui/app.css`; references such as
 symlinks, or a path below `_kandev`.
 
 `network_origins` contains exact HTTPS origins only. Do not add a path,
-wildcard, credentials, query, or fragment. Each origin also needs an approved
-grant before the release can run. Network requests go directly from the
-sandboxed browser to the approved origin. If a release, grant, archive, or
+wildcard, credentials, query, or fragment. A new owner-created task canvas can
+receive its declared exact origins in its first release through the initial
+permission policy. Imported packages and later permission increases need an
+approved grant before the release can run. Network requests go directly from
+the sandboxed browser to the approved origin. If a release, grant, archive, or
 canvas authority changes, the host immediately tears down the old iframe, so
 the old direct requests cannot continue under the old binding.
 
 Capabilities are declarations, not grants. Use `api_read` for `tasks` and
 `workflows`, `api_write` for `tasks` and `messages`, `events` for event
-subscriptions, and `state: true` for instance state. The operator reviews the
-declaration before the first release or any release that needs new grants.
-Request only the capabilities used by the application.
+subscriptions, and `state: true` for instance state. The owner-authorized
+first release can receive only these supported task-scoped grants. The
+operator reviews a later permission increase, an imported package, or a
+workspace promotion. Request only the capabilities used by the application.
 
 The package must include the declared entry document and every local asset it
 references. Bundle executable dependencies. A build tool, package manager, or
 network build step is not available when the canvas runs.
+
+The host injects a reserved startup bootstrap into the entry document before
+authored scripts. It checks document startup and relative context access. Keep
+the entry valid HTML so the host can insert the bootstrap without changing the
+stored package. The host waits up to 15 seconds for the startup acknowledgement
+and exposes retry controls outside the frame when startup fails.

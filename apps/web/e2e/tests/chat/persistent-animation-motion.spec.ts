@@ -1,5 +1,8 @@
 import { test, expect } from "../../fixtures/test-base";
-import { expectCompositorPulse } from "../../helpers/animation-assertions";
+import {
+  expectCompositorMotionPaused,
+  expectCompositorPulse,
+} from "../../helpers/animation-assertions";
 import { SessionPage } from "../../pages/session-page";
 
 test("keeps the busy task composer glow animated until the turn settles", async ({
@@ -27,6 +30,31 @@ test("keeps the busy task composer glow animated until the turn settles", async 
   await session.sendMessage("/slow 8s");
   const glow = session.activeChat().getByTestId("chat-input-glow");
   await expectCompositorPulse(glow);
+
+  await glow.evaluate((element) => {
+    (element as HTMLElement).style.display = "none";
+  });
+  await expectCompositorMotionPaused(glow);
+  await glow.evaluate((element) => {
+    (element as HTMLElement).style.removeProperty("display");
+  });
+  await expectCompositorPulse(glow);
+
+  await glow.evaluate((element) => {
+    (element as HTMLElement).style.transform = "translateY(200vh)";
+  });
+  await expectCompositorMotionPaused(glow);
+  await glow.evaluate((element) => {
+    element.scrollIntoView({ block: "center", inline: "nearest" });
+  });
+  await expectCompositorPulse(glow);
+  await glow.evaluate((element) => {
+    (element as HTMLElement).style.removeProperty("transform");
+  });
+
+  await glow.evaluate((element) => {
+    (element as HTMLElement).style.display = "none";
+  });
 
   await session.waitForChatIdle({ timeout: 30_000 });
   await expect(glow).toHaveCount(0);

@@ -20,6 +20,7 @@ import {
   parseSSHExecutorConfig,
 } from "@/app/settings/executors/new/[type]/ssh-config";
 import type { Executor } from "@/lib/types/http";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 const EXECUTORS_ROUTE = "/settings/executors";
 
@@ -159,9 +160,8 @@ function SSHExecutorHeader({ executorName }: { executorName: string }) {
         </div>
         <Button
           variant="outline"
-          size="sm"
           onClick={() => router.push(EXECUTORS_ROUTE)}
-          className="min-h-11 w-full cursor-pointer text-sm md:min-h-7 md:w-auto md:text-xs"
+          className={settingsActionClassName("w-full cursor-pointer text-sm md:w-auto md:text-xs")}
         >
           {t("executors:backToExecutors")}
         </Button>
