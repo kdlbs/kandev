@@ -14,7 +14,14 @@ type Lifetime = {
   reading: Promise<void> | null;
   generation: number;
 };
+type AcceptedOperation = { id: string; kind: "analysis" | "cleanup" };
 type Updates = { pending: (value: boolean) => void; error: (cause: unknown) => void };
+
+function operationObserved(status: ToolPayloadRetentionStatus, accepted: AcceptedOperation) {
+  if (status.operation?.id === accepted.id) return true;
+  const latest = accepted.kind === "analysis" ? status.last_analysis : status.last_run;
+  return latest != null;
+}
 
 function loadStatus(
   owner: Lifetime,
@@ -87,11 +94,31 @@ function useStatusPolling(reload: () => Promise<void>, active: boolean, preparin
     };
   }, [interval, reload]);
 }
+function useAcceptedOperationRefresh(acceptedId: string | null, reload: () => Promise<void>) {
+  useEffect(() => {
+    if (!acceptedId) return;
+    const timer = setTimeout(() => void reload(), 0);
+    return () => clearTimeout(timer);
+  }, [acceptedId, reload]);
+}
+function useRetentionLifetime(owner: { current: Lifetime }, reload: () => Promise<void>) {
+  useEffect(() => {
+    const lifetime = owner.current;
+    lifetime.mounted = true;
+    void reload();
+    return () => {
+      lifetime.mounted = false;
+      lifetime.epoch++;
+      lifetime.reading = null;
+    };
+  }, [owner, reload]);
+}
 export function useToolPayloadRetention() {
   const [status, setStatus] = useState<ToolPayloadRetentionStatus | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [pending, setPending] = useState(false);
   const [acceptedId, setAcceptedId] = useState<string | null>(null);
+  const acceptedOperation = useRef<AcceptedOperation | null>(null);
   const owner = useRef<Lifetime>({
     epoch: 0,
     mounted: false,
@@ -105,9 +132,11 @@ export function useToolPayloadRetention() {
         owner.current,
         (next) => {
           setStatus(next);
-          // A post-command read is authoritative even if another administrator
-          // has already replaced the completed operation in bounded history.
-          setAcceptedId(null);
+          const accepted = acceptedOperation.current;
+          if (!accepted || operationObserved(next, accepted)) {
+            acceptedOperation.current = null;
+            setAcceptedId(null);
+          }
         },
         setError,
       ),
@@ -117,16 +146,8 @@ export function useToolPayloadRetention() {
     setError(null);
     return reload();
   }, [reload]);
-  useEffect(() => {
-    const lifetime = owner.current;
-    lifetime.mounted = true;
-    void reload();
-    return () => {
-      lifetime.mounted = false;
-      lifetime.epoch++;
-      lifetime.reading = null;
-    };
-  }, [reload]);
+  useAcceptedOperationRefresh(acceptedId, reload);
+  useRetentionLifetime(owner, reload);
   const preparing =
     status?.preparation.state === "pending" || status?.preparation.state === "running";
   const active = Boolean(acceptedId || preparing || status?.operation?.state === "running");
@@ -137,11 +158,15 @@ export function useToolPayloadRetention() {
     [],
   );
   const acceptStatus = useCallback((next: ToolPayloadRetentionStatus) => {
+    acceptedOperation.current = null;
     setStatus(next);
     setAcceptedId(null);
   }, []);
   const acceptOperation = useCallback(
-    (result: { operation_id: string }) => setAcceptedId(result.operation_id),
+    (result: { operation_id: string }, kind: AcceptedOperation["kind"]) => {
+      acceptedOperation.current = { id: result.operation_id, kind };
+      setAcceptedId(result.operation_id);
+    },
     [],
   );
   const save = useCallback(
@@ -150,11 +175,19 @@ export function useToolPayloadRetention() {
     [perform, acceptStatus],
   );
   const analyze = useCallback(
-    (age: ToolPayloadAge) => perform(() => api.analyzeToolPayloadRetention(age), acceptOperation),
+    (age: ToolPayloadAge) =>
+      perform(
+        () => api.analyzeToolPayloadRetention(age),
+        (result) => acceptOperation(result, "analysis"),
+      ),
     [perform, acceptOperation],
   );
   const run = useCallback(
-    (revision: number) => perform(() => api.runToolPayloadRetention(revision), acceptOperation),
+    (revision: number) =>
+      perform(
+        () => api.runToolPayloadRetention(revision),
+        (result) => acceptOperation(result, "cleanup"),
+      ),
     [perform, acceptOperation],
   );
   const cancel = useCallback(

@@ -2,7 +2,10 @@ import { act, renderHook, waitFor, cleanup } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as api from "@/lib/api/domains/tool-payload-retention-api";
 import { useToolPayloadRetention } from "./use-tool-payload-retention";
-import type { ToolPayloadRetentionStatus } from "@/lib/types/tool-payload-retention";
+import type {
+  ToolPayloadOperation,
+  ToolPayloadRetentionStatus,
+} from "@/lib/types/tool-payload-retention";
 vi.mock("@/lib/api/domains/tool-payload-retention-api");
 const status: ToolPayloadRetentionStatus = {
   supported: true,
@@ -111,11 +114,37 @@ it("polls an accepted command and clears pending even when bounded history repla
       await Promise.resolve();
       await Promise.resolve();
     });
+    const operation: ToolPayloadOperation = {
+      id: "already-finished",
+      kind: "analysis",
+      state: "running",
+      age: status.policy.age,
+      scanned: 0,
+      eligible_tasks: 0,
+      eligible_messages: 0,
+      removed_messages: 0,
+      payload_bytes: 0,
+      skipped: {},
+      cutoff: "2026-01-01T00:00:00.000Z",
+      started_at: "2026-01-01T00:00:00.000Z",
+    };
+    const replacement: ToolPayloadOperation = {
+      ...operation,
+      id: "replacement",
+      state: "succeeded",
+      finished_at: "2026-01-01T00:01:00.000Z",
+    };
+    vi.mocked(api.fetchToolPayloadRetention)
+      .mockResolvedValueOnce({ ...status, operation })
+      .mockResolvedValue({ ...status, last_analysis: replacement });
     vi.mocked(api.analyzeToolPayloadRetention).mockResolvedValue({
       operation_id: "already-finished",
     });
     await act(async () => {
       await result.current.analyze(status.policy.age);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
     });
     expect(result.current.active).toBe(true);
     await act(async () => {
