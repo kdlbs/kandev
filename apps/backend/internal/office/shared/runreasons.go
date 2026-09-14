@@ -40,6 +40,42 @@ const (
 	// single source of truth and cannot drift apart the way
 	// RunReasonHeartbeat did.
 	RoutineSourceCron = "cron"
+
+	// The remaining wake-reason values below are canonical here per
+	// AC-OFFICE-BACKPRESSURE-001.8: this package is the single place a
+	// wake-reason constant is declared. Consumers alias these (e.g.
+	// RunReasonTaskAssigned = shared.RunReasonTaskAssigned) rather than
+	// re-declaring the string, so a reason cannot silently exist under two
+	// unlinked declarations and drop out of WakeReasonRegistry unnoticed.
+	// TestWakeReasonRegistry_DeclaresEveryReasonOnlyInSharedPackage fails
+	// on a new raw-literal declaration outside this package.
+	RunReasonTaskAssigned             = "task_assigned"
+	RunReasonTaskComment              = "task_comment"
+	RunReasonTaskBlockersResolved     = "task_blockers_resolved"
+	RunReasonTaskChildrenCompleted    = "task_children_completed"
+	RunReasonApprovalResolved         = "approval_resolved"
+	RunReasonTaskReviewRequested      = "task_review_requested"
+	RunReasonTaskChangesRequested     = "task_changes_requested"
+	RunReasonRoutineTrigger           = "routine_trigger"
+	RunReasonBudgetAlert              = "budget_alert"
+	RunReasonAgentError               = "agent_error"
+	RunReasonManualResumeAfterFailure = "manual_resume_after_failure"
+
+	// Reactivity-pipeline reasons (office/scheduler's reactivity.go).
+	RunReasonTaskUnblocked         = "task_unblocked"
+	RunReasonTaskReopened          = "task_reopened"
+	RunReasonTaskReopenedComment   = "task_reopened_via_comment"
+	RunReasonTaskMentioned         = "task_mentioned"
+	RunReasonStagePending          = "stage_pending"
+	RunReasonStageChangesRequested = "stage_changes_requested"
+	RunReasonTaskReadyToClose      = "task_ready_to_close"
+
+	// Historical-row-only literals, retained so an old persisted run row
+	// still resolves through an explicit rule rather than the fallback.
+	RunReasonLegacyBlockersResolved  = "blockers_resolved"
+	RunReasonLegacyChildrenCompleted = "children_completed"
+	RunReasonLegacyReviewStarted     = "review_started"
+	RunReasonLegacyApprovalStarted   = "approval_started"
 )
 
 // IsPeriodicTasklessWake reports whether reason represents a periodic,

@@ -17,32 +17,30 @@ import (
 	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
-// Run reason constants.
+// Run reason constants. Aliases of shared's canonical declarations
+// (AC-OFFICE-BACKPRESSURE-001.8) — see shared/runreasons.go.
 const (
-	RunReasonTaskAssigned          = "task_assigned"
-	RunReasonTaskComment           = "task_comment"
-	RunReasonTaskBlockersResolved  = "task_blockers_resolved"
-	RunReasonTaskChildrenCompleted = "task_children_completed"
-	RunReasonApprovalResolved      = "approval_resolved"
-	RunReasonTaskReviewRequested   = "task_review_requested"
-	RunReasonTaskChangesRequested  = "task_changes_requested"
-	RunReasonRoutineTrigger        = "routine_trigger"
-	// RunReasonHeartbeat aliases shared.RunReasonHeartbeat so this package's
-	// local constant and the shared idle-skip classifier cannot drift apart
-	// the way the un-aliased pair did before WO-46 (Review round 1, S2).
-	RunReasonHeartbeat   = shared.RunReasonHeartbeat
-	RunReasonBudgetAlert = "budget_alert"
-	RunReasonAgentError  = "agent_error"
+	RunReasonTaskAssigned          = shared.RunReasonTaskAssigned
+	RunReasonTaskComment           = shared.RunReasonTaskComment
+	RunReasonTaskBlockersResolved  = shared.RunReasonTaskBlockersResolved
+	RunReasonTaskChildrenCompleted = shared.RunReasonTaskChildrenCompleted
+	RunReasonApprovalResolved      = shared.RunReasonApprovalResolved
+	RunReasonTaskReviewRequested   = shared.RunReasonTaskReviewRequested
+	RunReasonTaskChangesRequested  = shared.RunReasonTaskChangesRequested
+	RunReasonRoutineTrigger        = shared.RunReasonRoutineTrigger
+	RunReasonHeartbeat             = shared.RunReasonHeartbeat
+	RunReasonBudgetAlert           = shared.RunReasonBudgetAlert
+	RunReasonAgentError            = shared.RunReasonAgentError
 )
 
 // These reasons were persisted by earlier workflow templates. Keep them
 // readable so existing materialized workflows continue to wake the correct
 // prompt after the built-in template changes.
 const (
-	legacyRunReasonBlockersResolved  = "blockers_resolved"
-	legacyRunReasonChildrenCompleted = "children_completed"
-	legacyRunReasonReviewStarted     = "review_started"
-	legacyRunReasonApprovalStarted   = "approval_started"
+	legacyRunReasonBlockersResolved  = shared.RunReasonLegacyBlockersResolved
+	legacyRunReasonChildrenCompleted = shared.RunReasonLegacyChildrenCompleted
+	legacyRunReasonReviewStarted     = shared.RunReasonLegacyReviewStarted
+	legacyRunReasonApprovalStarted   = shared.RunReasonLegacyApprovalStarted
 )
 
 // Run status constants.

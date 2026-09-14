@@ -55,33 +55,31 @@ type RouteOverride struct {
 // See service.LaunchContext for field semantics.
 type LaunchContext = service.LaunchContext
 
-// Run reason constants.
+// Run reason constants. Aliases of shared's canonical declarations
+// (AC-OFFICE-BACKPRESSURE-001.8) — see shared/runreasons.go.
 const (
-	RunReasonTaskAssigned          = "task_assigned"
-	RunReasonTaskComment           = "task_comment"
-	RunReasonTaskBlockersResolved  = "task_blockers_resolved"
-	RunReasonTaskChildrenCompleted = "task_children_completed"
-	RunReasonApprovalResolved      = "approval_resolved"
-	RunReasonRoutineTrigger        = "routine_trigger"
-	// RunReasonHeartbeat aliases shared.RunReasonHeartbeat so this package's
-	// local constant and the shared idle-skip classifier cannot drift apart
-	// the way the un-aliased pair did before WO-46 (Review round 1, S2).
-	RunReasonHeartbeat   = shared.RunReasonHeartbeat
-	RunReasonBudgetAlert = "budget_alert"
-	RunReasonAgentError  = "agent_error"
+	RunReasonTaskAssigned          = shared.RunReasonTaskAssigned
+	RunReasonTaskComment           = shared.RunReasonTaskComment
+	RunReasonTaskBlockersResolved  = shared.RunReasonTaskBlockersResolved
+	RunReasonTaskChildrenCompleted = shared.RunReasonTaskChildrenCompleted
+	RunReasonApprovalResolved      = shared.RunReasonApprovalResolved
+	RunReasonRoutineTrigger        = shared.RunReasonRoutineTrigger
+	RunReasonHeartbeat             = shared.RunReasonHeartbeat
+	RunReasonBudgetAlert           = shared.RunReasonBudgetAlert
+	RunReasonAgentError            = shared.RunReasonAgentError
 
 	// Reactivity-pipeline reasons.
-	RunReasonTaskUnblocked         = "task_unblocked"            // status: blocked → not blocked
-	RunReasonTaskReopened          = "task_reopened"             // silent reopen (status only)
-	RunReasonTaskReopenedComment   = "task_reopened_via_comment" // user comment on closed task or resume:true
-	RunReasonTaskMentioned         = "task_mentioned"            // @mention in comment, additive to assignee wake
-	RunReasonStagePending          = "stage_pending"             // execution policy advanced to a new stage
-	RunReasonStageChangesRequested = "stage_changes_requested"   // reviewer asked for rework
+	RunReasonTaskUnblocked         = shared.RunReasonTaskUnblocked         // status: blocked → not blocked
+	RunReasonTaskReopened          = shared.RunReasonTaskReopened          // silent reopen (status only)
+	RunReasonTaskReopenedComment   = shared.RunReasonTaskReopenedComment   // user comment on closed task or resume:true
+	RunReasonTaskMentioned         = shared.RunReasonTaskMentioned         // @mention in comment, additive to assignee wake
+	RunReasonStagePending          = shared.RunReasonStagePending          // execution policy advanced to a new stage
+	RunReasonStageChangesRequested = shared.RunReasonStageChangesRequested // reviewer asked for rework
 
 	// Approval-flow reactivity reasons (B5).
-	RunReasonTaskReviewRequested  = "task_review_requested"  // task entered in_review; ping reviewers/approvers
-	RunReasonTaskChangesRequested = "task_changes_requested" // a reviewer/approver asked for changes
-	RunReasonTaskReadyToClose     = "task_ready_to_close"    // all approvers have approved; assignee may close
+	RunReasonTaskReviewRequested  = shared.RunReasonTaskReviewRequested  // task entered in_review; ping reviewers/approvers
+	RunReasonTaskChangesRequested = shared.RunReasonTaskChangesRequested // a reviewer/approver asked for changes
+	RunReasonTaskReadyToClose     = shared.RunReasonTaskReadyToClose     // all approvers have approved; assignee may close
 )
 
 // RunContext is the structured payload attached to every run the
