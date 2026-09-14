@@ -1,3 +1,21 @@
+---
+id: "07-docs"
+title: "Public docs: coordinator grants operator guide"
+status: done
+wave: 7
+depends_on:
+  - "05-operator-api"
+plan: "plan.md"
+requirements:
+  - REQ-TASKS-COORDINATOR-AUTHORITY-001
+  - REQ-TASKS-COORDINATOR-AUTHORITY-002
+acceptance_criteria:
+  - AC-TASKS-COORDINATOR-AUTHORITY-001.3
+  - AC-TASKS-COORDINATOR-AUTHORITY-002.2
+system_design:
+  - ../../specs/tasks/system-design/coordinator-task-authority.md
+---
+
 # Task 07 — Public Docs: Coordinator Grants Operator Guide
 
 ## Owner

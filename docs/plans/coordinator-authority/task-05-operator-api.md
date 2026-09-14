@@ -1,3 +1,23 @@
+---
+id: "05-operator-api"
+title: "Operator API: coordinator grant handlers"
+status: done
+wave: 5
+depends_on:
+  - "01-persistence"
+  - "02-authority"
+plan: "plan.md"
+requirements:
+  - REQ-TASKS-COORDINATOR-AUTHORITY-001
+acceptance_criteria:
+  - AC-TASKS-COORDINATOR-AUTHORITY-001.1
+  - AC-TASKS-COORDINATOR-AUTHORITY-001.2
+  - AC-TASKS-COORDINATOR-AUTHORITY-001.3
+  - AC-TASKS-COORDINATOR-AUTHORITY-001.4
+system_design:
+  - ../../specs/tasks/system-design/coordinator-task-authority.md
+---
+
 # Task 05 — Operator API: Coordinator Grant Handlers
 
 ## Owner

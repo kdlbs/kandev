@@ -1,3 +1,22 @@
+---
+id: "06-operator-ui"
+title: "Operator UI: workspace settings coordinators tab"
+status: done
+wave: 6
+depends_on:
+  - "05-operator-api"
+plan: "plan.md"
+requirements:
+  - REQ-TASKS-COORDINATOR-AUTHORITY-001
+  - REQ-TASKS-COORDINATOR-AUTHORITY-002
+acceptance_criteria:
+  - AC-TASKS-COORDINATOR-AUTHORITY-001.1
+  - AC-TASKS-COORDINATOR-AUTHORITY-001.3
+  - AC-TASKS-COORDINATOR-AUTHORITY-002.2
+system_design:
+  - ../../specs/tasks/system-design/coordinator-task-authority.md
+---
+
 # Task 06 — Operator UI: Workspace Settings Coordinators Tab
 
 ## Owner
