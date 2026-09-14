@@ -245,13 +245,25 @@ func (r *Repository) logDeferral(gate string, run *models.Run) {
 }
 
 // commitClaim marks candidate claimed and appends its launch-ledger
-// row, then commits the transaction the caller began.
+// row, then commits the transaction the caller began. The UPDATE is a
+// compare-and-swap on status='queued': on READ COMMITTED isolation, a
+// concurrent cancel can commit between the candidate scan's SELECT and
+// this UPDATE, so a blind write would silently resurrect a cancelled
+// run as claimed. Zero rows affected means the row was in fact no
+// longer eligible; the caller gets sql.ErrNoRows and the scan moves on
+// rather than reporting a claim that didn't happen.
 func (r *Repository) commitClaim(ctx context.Context, tx *sqlx.Tx, candidate *models.Run) (*models.Run, error) {
 	claimedAt := time.Now().UTC()
-	if _, err := tx.ExecContext(ctx, tx.Rebind(
-		`UPDATE runs SET status = 'claimed', claimed_at = ? WHERE id = ?`,
-	), claimedAt, candidate.ID); err != nil {
+	res, err := tx.ExecContext(ctx, tx.Rebind(
+		`UPDATE runs SET status = 'claimed', claimed_at = ? WHERE id = ? AND status = 'queued'`,
+	), claimedAt, candidate.ID)
+	if err != nil {
 		return nil, err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return nil, err
+	} else if n == 0 {
+		return nil, sql.ErrNoRows
 	}
 	ledgerID := uuid.New().String()
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`
