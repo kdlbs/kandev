@@ -2,10 +2,8 @@ package lifecycle
 
 import "testing"
 
-// Regression: the Docker executor's fresh-launch create-instance request forwarded
-// SessionID but dropped TaskID, so the MCP server built inside every new container
-// ran with an empty task binding and task-bound tools (step_complete_kandev,
-// set_task_title_kandev, ...) failed with "requires a bound task".
+// TestBuildContainerCreateInstanceRequestForwardsTaskAndSession verifies that a
+// fresh Docker request preserves the identity required by task-bound MCP tools.
 func TestBuildContainerCreateInstanceRequestForwardsTaskAndSession(t *testing.T) {
 	config := ContainerConfig{TaskID: "task-123", SessionID: "session-456"}
 
