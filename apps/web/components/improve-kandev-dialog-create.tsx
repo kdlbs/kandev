@@ -86,7 +86,7 @@ type CreateModeViewProps = {
   captureLogs: boolean;
   setCaptureLogs: (v: boolean) => void;
   transformDescription: (description: string) => Promise<string>;
-  onTaskCreated: (task: Task) => void;
+  onTaskCreated: (task: Task, mode?: "create" | "edit", meta?: { autoFocus?: boolean }) => void;
   externalBlockedReason?: string | null;
 };
 

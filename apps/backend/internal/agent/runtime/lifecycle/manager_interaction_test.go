@@ -47,19 +47,23 @@ type restartMockAgentctlServer struct {
 	setModeIDs         []string
 	setOptions         []restartConfigOption
 
-	failStop           bool
-	failSessionNew     bool
-	failSessionReset   bool
-	failCacheRepair    bool
-	failMode           bool
-	failModel          bool
-	failConfigOptionID string
-	stderrLines        []string
-	modelState         *streams.SessionModelState
-	newModelState      *streams.SessionModelState
-	onReset            func()
-	onSessionNew       func()
-	onCacheRepair      func()
+	failStop                     bool
+	failSessionNew               bool
+	failSessionReset             bool
+	failCacheRepair              bool
+	failMode                     bool
+	failModel                    bool
+	failConfigOptionID           string
+	stderrLines                  []string
+	modelState                   *streams.SessionModelState
+	newModelState                *streams.SessionModelState
+	suppressSessionResetResponse bool
+	resetResponseDelay           time.Duration
+	resetLateEvent               *agentctl.AgentEvent
+	resetLateEventSent           chan struct{}
+	onReset                      func()
+	onSessionNew                 func()
+	onCacheRepair                func()
 }
 
 type restartConfigOption struct {
@@ -259,6 +263,21 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 			case "agent.session.reset":
 				if m.onReset != nil {
 					m.onReset()
+				}
+				if m.suppressSessionResetResponse {
+					continue
+				}
+				if m.resetResponseDelay > 0 {
+					time.Sleep(m.resetResponseDelay)
+				}
+				if m.resetLateEvent != nil {
+					eventData, _ := json.Marshal(m.resetLateEvent)
+					if err := conn.WriteMessage(websocket.TextMessage, eventData); err != nil {
+						return
+					}
+					if m.resetLateEventSent != nil {
+						close(m.resetLateEventSent)
+					}
 				}
 				if m.failSessionReset {
 					resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{

@@ -75,6 +75,44 @@ func newHTTPTaskHandlers(t *testing.T, repo *httpTaskRepo) *TaskHandlers {
 	return &TaskHandlers{service: svc, logger: log}
 }
 
+type httpArchiveOutcomeRepo struct {
+	mockRepository
+	task         *models.Task
+	archived     bool
+	failRead     bool
+	sawCancelled bool
+}
+
+func (r *httpArchiveOutcomeRepo) GetTask(_ context.Context, _ string) (*models.Task, error) {
+	if r.archived && r.failRead {
+		return nil, errors.New("post-archive task read failed")
+	}
+	return r.task, nil
+}
+
+func (r *httpArchiveOutcomeRepo) ArchiveTask(_ context.Context, _ string) error {
+	r.archived = true
+	return nil
+}
+
+func (r *httpArchiveOutcomeRepo) ArchiveTaskIfActive(ctx context.Context, _ string, _ string) (bool, error) {
+	r.sawCancelled = ctx.Err() != nil
+	if r.archived {
+		return false, nil
+	}
+	r.archived = true
+	return true, nil
+}
+
+func (r *httpArchiveOutcomeRepo) ArchiveTaskIfActiveWithVacatedStep(
+	ctx context.Context,
+	id string,
+	cascadeID string,
+) (string, bool, error) {
+	changed, err := r.ArchiveTaskIfActive(ctx, id, cascadeID)
+	return "", changed, err
+}
+
 // taskRequestAs builds a request for a task route carrying userID's identity.
 // An empty userID leaves the context identity-free (an internal caller).
 func taskRequestAs(t *testing.T, userID, method, target, id string) (*gin.Context, *httptest.ResponseRecorder) {
@@ -244,6 +282,64 @@ func TestHTTPGetStepTaskCountSurfacesFailure(t *testing.T) {
 
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
 	require.JSONEq(t, `{"error":"failed to count tasks"}`, rec.Body.String())
+}
+
+func TestHTTPArchiveTaskSurvivesCancelledRequestContext(t *testing.T) {
+	repo := &httpArchiveOutcomeRepo{task: &models.Task{ID: "task-1", WorkspaceID: "ws-1"}}
+	h := &TaskHandlers{
+		handoffSvc: service.NewHandoffService(repo, nil, nil, nil, nil, nil),
+		logger:     newTestLogger(t),
+	}
+	c, rec := taskRequestAs(t, "", http.MethodDelete, "/api/v1/tasks/task-1", "task-1")
+	requestCtx, cancel := context.WithCancel(c.Request.Context())
+	cancel()
+	c.Request = c.Request.WithContext(requestCtx)
+
+	h.httpArchiveTask(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.JSONEq(t, `{"success":true}`, rec.Body.String())
+	require.True(t, repo.archived, "archive mutation must complete after request cancellation")
+	require.False(t, repo.sawCancelled, "archive must receive a detached context")
+}
+
+func TestHTTPArchiveFallbackReportsCommittedProjectionFailureAsPending(t *testing.T) {
+	repo := &httpArchiveOutcomeRepo{
+		task:     &models.Task{ID: "task-1", WorkspaceID: "ws-1"},
+		failRead: true,
+	}
+	log := newTestLogger(t)
+	svc := service.NewService(service.Repos{
+		Workspaces: repo, Tasks: repo, TaskRepos: repo,
+		Workflows: repo, Messages: repo, Turns: repo,
+		Sessions: repo, GitSnapshots: repo, RepoEntities: repo,
+		Executors: repo, Environments: repo, TaskEnvironments: repo,
+		Reviews: repo,
+	}, nil, log, service.RepositoryDiscoveryConfig{})
+	h := &TaskHandlers{service: svc, logger: log}
+	c, rec := taskRequestAs(t, "", http.MethodDelete, "/api/v1/tasks/task-1", "task-1")
+
+	h.httpArchiveTask(c)
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code)
+	require.JSONEq(t, `{"pending":true,"success":false,"task_id":"task-1"}`, rec.Body.String())
+	require.True(t, repo.archived, "archive mutation must remain committed")
+}
+func TestHTTPArchiveTaskReportsAlreadyArchivedOutcome(t *testing.T) {
+	repo := &httpArchiveOutcomeRepo{
+		task:     &models.Task{ID: "task-1", WorkspaceID: "ws-1"},
+		archived: true,
+	}
+	h := &TaskHandlers{
+		handoffSvc: service.NewHandoffService(repo, nil, nil, nil, nil, nil),
+		logger:     newTestLogger(t),
+	}
+	c, rec := taskRequestAs(t, "", http.MethodDelete, "/api/v1/tasks/task-1", "task-1")
+
+	h.httpArchiveTask(c)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.JSONEq(t, `{"already_archived":true,"success":true}`, rec.Body.String())
 }
 
 // TestHTTPArchiveTaskDeniesForeignTask is the highest-value denial on this

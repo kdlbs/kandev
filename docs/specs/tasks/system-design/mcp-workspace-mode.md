@@ -1,10 +1,11 @@
 ---
-status: draft
+status: current
 system: tasks
 requirements:
   - REQ-TASKS-MCP-WORKSPACE-MODE-001
   - REQ-TASKS-MCP-WORKSPACE-MODE-002
   - REQ-TASKS-MCP-WORKSPACE-MODE-003
+  - REQ-TASKS-MCP-WORKSPACE-MODE-004
 ---
 
 # MCP task workspace mode design
@@ -35,6 +36,7 @@ them.
 | REQ-TASKS-MCP-WORKSPACE-MODE-001 | Trusted admission; Destination resolution |
 | REQ-TASKS-MCP-WORKSPACE-MODE-002 | Surface contract |
 | REQ-TASKS-MCP-WORKSPACE-MODE-003 | External compatibility; Errors |
+| REQ-TASKS-MCP-WORKSPACE-MODE-004 | Materialization schema discoverability |
 
 ## Surface contract
 
@@ -139,6 +141,63 @@ or credentials.
 No migration, mode column, historical rewrite, new endpoint, or UI is planned.
 Update public reference documentation when the gate is implemented.
 The earlier proposal for a separate Office MCP creation tool is withdrawn.
+
+## Materialization schema discoverability
+
+The task system owns this addition because the field is a task-creation
+contract. Workspace lifecycle, transport discovery guidance, and Office
+admission remain with their existing owners.
+
+In `internal/mcp/server/server.go`, `registerCreateTaskTool` adds
+`mcp.Enum("inherit_parent", "new_workspace")` to the existing
+`mcp.WithString("workspace_mode", ...)` in `registerCreateTaskTool`.
+The pinned `mcp-go` v1.0.0-beta.1 supports this property option; existing
+`delivery_mode` and profile-session-policy fields use it. Do not add
+`mcp.Required()` or a default. Both `ModeTask` (through `registerKanbanTools`)
+and `ModeExternal` use this registration.
+
+Field description: "Optional materialized-workspace mode. Omit for
+subtasks to inherit the parent's workspace/worktree. inherit_parent requires
+parent_id and reuses the parent's materialized workspace/worktree;
+new_workspace requests a separate workspace/worktree."
+
+Keep `resolveMCPWorkspacePolicy` in `internal/mcp/handlers/handlers.go`
+unchanged. It trims input, defaults blank with a parent to `inherit_parent`,
+leaves blank root policy unspecified, rejects explicit inheritance without a
+parent, and accepts only the two explicit modes. Do not advertise the broader
+service's `shared_group` or an invented `shared` alias.
+
+### Compatibility and schema propagation
+
+`compileToolArgumentSchema` marshals the registered schema and only adds root
+`additionalProperties: false`; it preserves enum metadata. Validation runs
+before dispatch. `normalizeToolArguments` only handles the legacy prompt alias,
+so the enum rejects empty, whitespace-only, and padded strings that
+previously reached the trimming handler. This is a real MCP input narrowing,
+not merely a description improvement. Callers should omit the key to request
+defaulting, or send an exact enum value. Do not introduce normalization or alter
+the backend to conceal this effect. This follows the existing
+[schema validation decision](../../../decisions/2026-08-01-validate-mcp-tool-arguments.md).
+
+`mcpToolInputSchema` preserves raw schemas or marshals structured schemas for
+attachment evidence. `cloneValidMCPInputSchema` in
+`internal/agentctl/types/streams/mcp_attachment.go` copies valid JSON unchanged;
+size limits can drop a whole schema with a truncation marker, not individual
+enum keywords. No enum-stripping transform was found in the inspected MCP
+registration, validator, or attachment paths. Regression tests verify serialized
+catalog and attachment schemas; this does not prove behavior of arbitrary
+external clients.
+
+Schema and wrapped-call tests in `server/create_task_workspace_mode_test.go`
+cover task/external registration, exact enum order, optionality, absent default,
+description semantics, both accepted values, omission, and rejected
+blank/unsupported inputs without dispatch. The direct policy matrix in
+`handlers/workspace_policy_test.go` and existing handler tests preserve root,
+parent, trimming, and rejection behavior. The public MCP reference and
+coordination guide document omission and blank-input compatibility.
+No rendered UI changes or browser test are needed.
+
+- [Enum implementation plan](../../../plans/mcp-workspace-mode-enum/plan.md)
 
 ## Related contracts
 

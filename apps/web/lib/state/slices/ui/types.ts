@@ -118,6 +118,20 @@ export type SystemHealthState = {
 
 export type QuickChatSessionKind = "chat" | "config";
 
+export type QuickChatSelection = Partial<Record<QuickChatSessionKind, string>>;
+
+export type QuickChatSelectionByWorkspace = Record<string, QuickChatSelection>;
+
+export type QuickChatSelectionOrder = string[];
+
+export type QuickChatPendingOpen = {
+  workspaceId: string;
+  kind: QuickChatSessionKind;
+  selectionRevision: number;
+  /** Effective order captured by the launcher while the authoritative list is pending. */
+  tabOrder?: QuickChatSelectionOrder;
+};
+
 export type QuickTerminalStatus = "connecting" | "running" | "exited" | "error";
 
 export type QuickTerminalTab = {
@@ -178,6 +192,18 @@ export type QuickChatState = {
   tabOrderByWorkspace: Record<string, string[]>;
   tabOrderSyncErrorByWorkspace: Record<string, string | null>;
   tabOrderSyncPendingByWorkspace: Record<string, boolean>;
+  /** Browser-local last explicit conversation selection by workspace and kind. */
+  rememberedSelectionByWorkspace: QuickChatSelectionByWorkspace;
+  /** Most recently touched workspace first, for bounded browser storage. */
+  rememberedSelectionOrder: QuickChatSelectionOrder;
+  /** Null means the current authenticated identity cannot use browser storage. */
+  selectionStorageIdentity: string | null;
+  /** A workspace is ready only after an accepted boot or list snapshot. */
+  selectionReadyByWorkspace: Record<string, boolean>;
+  /** Monotonic revisions invalidate pending generic opens after user actions. */
+  selectionRevisionByWorkspace: Record<string, number>;
+  /** Generic launcher request waiting for an authoritative workspace list. */
+  pendingOpen: QuickChatPendingOpen | null;
 };
 
 export type SessionFailureNotification = {
@@ -397,6 +423,14 @@ export type UISliceActions = {
     state: { pending: boolean; error: string | null },
   ) => void;
   setQuickChatInitialPrompt: (sessionId: string, prompt?: string) => void;
+  /** Opens Quick Chat after the requested workspace list becomes authoritative. */
+  requestQuickChatOpen: (
+    workspaceId: string,
+    kind?: QuickChatSessionKind,
+    tabOrder?: QuickChatSelectionOrder,
+  ) => void;
+  /** Loads the browser-local selection map for a new authentication identity. */
+  setQuickChatSelectionIdentity: (identity: string | null) => void;
   setSessionFailureNotification: (n: SessionFailureNotification | null) => void;
   setTaskDeletedNotification: (n: TaskDeletedNotification | null) => void;
   setUpdateAvailableNotification: (n: UpdateAvailableNotification | null) => void;

@@ -1,3 +1,4 @@
+import type { RefObject } from "react";
 import { NewSubtaskDialog } from "../new-subtask-dialog";
 import { TaskArchiveConfirmDialog } from "../task-archive-confirm-dialog";
 import { TaskDeleteConfirmDialog } from "../task-delete-confirm-dialog";
@@ -30,6 +31,7 @@ export function MobileSubtaskDialog({
 }
 
 export function TaskSwitcherDialogs({
+  focusReturnRef,
   dialogOpen,
   onDialogOpenChange,
   workspaceId,
@@ -42,6 +44,7 @@ export function TaskSwitcherDialogs({
   subtaskTarget,
   onSubtaskTargetChange,
 }: {
+  focusReturnRef?: RefObject<HTMLElement | null>;
   dialogOpen: boolean;
   onDialogOpenChange: (open: boolean) => void;
   workspaceId: string | null;
@@ -57,6 +60,7 @@ export function TaskSwitcherDialogs({
   return (
     <>
       <TaskCreateDialog
+        focusReturnRef={focusReturnRef}
         open={dialogOpen}
         onOpenChange={onDialogOpenChange}
         mode="create"

@@ -74,6 +74,30 @@ func TestDeleteWorkspaceStopsTasksDeletesDataAndConfig(t *testing.T) {
 	}
 }
 
+func TestDeleteWorkspaceUsesTaskLifecycleDeleter(t *testing.T) {
+	ctx := context.Background()
+	taskSvc := &fakeWorkspaceTaskService{
+		workspace: &taskmodels.Workspace{ID: "ws-delete", Name: "default"},
+		tasks:     []*taskmodels.Task{{ID: "task-1", WorkspaceID: "ws-delete"}},
+	}
+	svc := newTestService(t, service.ServiceOptions{TaskWorkspace: taskSvc})
+	var deleted []string
+	svc.SetTaskTreeDeleter(func(_ context.Context, taskID string) error {
+		deleted = append(deleted, taskID)
+		return nil
+	})
+
+	if err := svc.DeleteWorkspace(ctx, "ws-delete"); err != nil {
+		t.Fatalf("DeleteWorkspace: %v", err)
+	}
+	if len(deleted) != 1 || deleted[0] != "task-1" {
+		t.Fatalf("lifecycle-deleted tasks = %#v, want task-1", deleted)
+	}
+	if len(taskSvc.deletedTasks) != 0 {
+		t.Fatalf("legacy task deletes = %#v, want none", taskSvc.deletedTasks)
+	}
+}
+
 func TestDeleteWorkspaceUsesFreshDataDeletionTimeoutAfterGroupCleanup(t *testing.T) {
 	ctx := context.Background()
 	taskSvc := &fakeWorkspaceTaskService{

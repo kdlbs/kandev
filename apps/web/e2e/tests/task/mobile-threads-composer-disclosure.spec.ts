@@ -3,11 +3,71 @@ import { assertNoHorizontalOverflow } from "../../helpers/session-stream-overloa
 import { seedSecondaryClarificationTask } from "../../helpers/clarification";
 import { waitForFiniteAnimations } from "../../helpers/animations";
 import {
+  answerLongThreadQuestion,
+  expectThreadQuestionSubmitted,
+  seedLongThreadQuestion,
+  threadDeckGeometry,
+} from "./threads-clarification-helpers";
+import {
   captureThreadSettings,
   capturePresentation,
   seedThreadPresentation,
   startPresentationThread,
 } from "./threads-presentation-helpers";
+
+for (const short of [false, true]) {
+  // @covers AC-UI-THREADS-DECK-004.6, AC-UI-THREADS-DECK-004.7, AC-UI-THREADS-DECK-005.5, AC-UI-THREADS-DECK-005.7, AC-UI-THREADS-DECK-005.8
+  test(`scrolls and submits a long required question by touch (${short ? "short phone" : "Pixel 5"})`, async ({
+    testPage,
+    apiClient,
+    seedData,
+  }, testInfo) => {
+    test.setTimeout(180_000);
+    const original = await captureThreadSettings(apiClient);
+    try {
+      if (short) await testPage.setViewportSize({ width: 393, height: 500 });
+      const { task } = await seedLongThreadQuestion(apiClient, seedData);
+      await seedThreadPresentation(apiClient, { layout: "grid", autoHideComposer: true });
+      await testPage.goto(`/threads?taskId=${task.id}`);
+      const board = testPage.getByTestId("threads-board");
+      const tile = testPage.getByTestId(`thread-column-${task.id}`);
+      await expect(board).toHaveAttribute("data-layout", "columns");
+      await expect(board.getByTestId("session-chat")).toHaveCount(1);
+      await expect(tile.getByTestId("clarification-option")).toHaveCount(3);
+      await expect(tile.getByTestId("chat-input-editor")).toBeVisible();
+      await expect(board.getByTestId("collapse-composer")).toHaveCount(0);
+      expect(
+        (await tile.locator(".chat-message-list").boundingBox())!.height,
+      ).toBeGreaterThanOrEqual(79);
+      const baseline = await threadDeckGeometry(testPage);
+      await capturePresentation(testPage, testInfo, "phone-long-question-before");
+      await answerLongThreadQuestion(testPage, tile, "touch", testInfo);
+      await expectThreadQuestionSubmitted(apiClient, task.session_id!, tile);
+      expect(await threadDeckGeometry(testPage)).toEqual(baseline);
+      await expect(board.getByTestId("session-chat")).toHaveCount(1);
+      await expect(tile.getByTestId("chat-input-editor")).toBeVisible();
+      const tileBox = (await tile.boundingBox())!;
+      expect(tileBox.y + tileBox.height).toBeLessThanOrEqual(testPage.viewportSize()!.height);
+      await assertNoHorizontalOverflow(testPage, "phone long question submitted");
+      await capturePresentation(testPage, testInfo, "phone-long-question-submitted");
+
+      await testPage.setViewportSize({ width: 767, height: 1100 });
+      await expect(board).toHaveAttribute("data-layout", "columns");
+      await expect(board.getByTestId("session-chat")).toHaveCount(1);
+      await testPage.setViewportSize({ width: 768, height: 1100 });
+      await expect(board).toHaveAttribute("data-layout", "grid");
+      await expect(board.getByTestId("session-chat")).toHaveCount(2);
+      await expect(board.getByTestId("collapse-composer")).toHaveCount(0);
+      expect((await captureThreadSettings(apiClient)).thread_views[0]).toMatchObject({
+        layout: "grid",
+        auto_hide_composer: true,
+      });
+      await assertNoHorizontalOverflow(testPage, "phone to tablet boundary");
+    } finally {
+      await apiClient.saveUserSettings(original);
+    }
+  });
+}
 
 // @covers AC-UI-THREADS-DECK-004.6, AC-UI-THREADS-DECK-005.7, AC-UI-THREADS-DECK-005.8, AC-UI-THREADS-DECK-005.10
 test("keeps the touch composer visible and restores drafts through single-chat navigation", async ({
