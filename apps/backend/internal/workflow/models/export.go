@@ -1,16 +1,20 @@
 package models
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"math"
 
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	"gopkg.in/yaml.v3"
 )
 
 const (
-	ExportVersion = 1
-	ExportType    = "kandev_workflow"
+	LegacyExportVersion = 1
+	ExportVersion       = 2
+	ExportType          = "kandev_workflow"
 )
 
 // WorkflowExport is the portable format for sharing workflows.
@@ -38,6 +42,13 @@ type AgentProfileResolver func(profileID string) *AgentProfilePortable
 // existing bindings (docs/specs/agents/requirements/profile-disable.md).
 type AgentProfileMatcher func(agentName, model, mode, currentID string) string
 
+// WorkflowSessionTargetPortable stores a target with a position instead of a
+// workflow-local step ID so an export can be imported into another workflow.
+type WorkflowSessionTargetPortable struct {
+	Kind         WorkflowSessionTargetKind `json:"kind" yaml:"kind"`
+	StepPosition *int                      `json:"step_position,omitempty" yaml:"step_position,omitempty"`
+}
+
 // WorkflowPortable is a workflow without instance-specific fields (IDs, timestamps).
 type WorkflowPortable struct {
 	Name         string                `json:"name" yaml:"name"`
@@ -49,41 +60,135 @@ type WorkflowPortable struct {
 
 // StepPortable is a workflow step without instance-specific fields.
 type StepPortable struct {
-	Name                       string                                       `json:"name" yaml:"name"`
-	Position                   int                                          `json:"position" yaml:"position"`
-	Color                      string                                       `json:"color" yaml:"color"`
-	Prompt                     string                                       `json:"prompt,omitempty" yaml:"prompt,omitempty"`
-	Events                     StepEvents                                   `json:"events" yaml:"events"`
-	IsStartStep                bool                                         `json:"is_start_step" yaml:"is_start_step"`
-	ShowInCommandPanel         bool                                         `json:"show_in_command_panel" yaml:"show_in_command_panel"`
-	AllowManualMove            bool                                         `json:"allow_manual_move" yaml:"allow_manual_move"`
-	AutoArchiveAfterHours      int                                          `json:"auto_archive_after_hours,omitempty" yaml:"auto_archive_after_hours,omitempty"`
-	AgentProfile               *AgentProfilePortable                        `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
-	ProfileSessionStartPolicy  taskmodels.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy,omitempty" yaml:"profile_session_start_policy,omitempty"`
-	ProfileSessionEndPolicy    taskmodels.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy,omitempty" yaml:"profile_session_end_policy,omitempty"`
-	AutoAdvanceRequiresSignal  bool                                         `json:"auto_advance_requires_signal" yaml:"auto_advance_requires_signal"`
-	CancelTriggersTurnComplete bool                                         `json:"cancel_triggers_turn_complete" yaml:"cancel_triggers_turn_complete"`
-	WIPLimit                   int                                          `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
-	PullFromStepPosition       *int                                         `json:"pull_from_step_position,omitempty" yaml:"pull_from_step_position,omitempty"`
+	Name                         string                                       `json:"name" yaml:"name"`
+	Position                     int                                          `json:"position" yaml:"position"`
+	Color                        string                                       `json:"color" yaml:"color"`
+	Prompt                       string                                       `json:"prompt,omitempty" yaml:"prompt,omitempty"`
+	Events                       StepEvents                                   `json:"events" yaml:"events"`
+	IsStartStep                  bool                                         `json:"is_start_step" yaml:"is_start_step"`
+	ShowInCommandPanel           bool                                         `json:"show_in_command_panel" yaml:"show_in_command_panel"`
+	AllowManualMove              bool                                         `json:"allow_manual_move" yaml:"allow_manual_move"`
+	AutoArchiveAfterHours        int                                          `json:"auto_archive_after_hours,omitempty" yaml:"auto_archive_after_hours,omitempty"`
+	AgentProfile                 *AgentProfilePortable                        `json:"agent_profile,omitempty" yaml:"agent_profile,omitempty"`
+	ProfileSessionStartPolicy    taskmodels.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy,omitempty" yaml:"profile_session_start_policy,omitempty"`
+	ProfileSessionEndPolicy      taskmodels.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy,omitempty" yaml:"profile_session_end_policy,omitempty"`
+	AutoAdvanceRequiresSignal    bool                                         `json:"auto_advance_requires_signal" yaml:"auto_advance_requires_signal"`
+	CancelTriggersTurnComplete   bool                                         `json:"cancel_triggers_turn_complete" yaml:"cancel_triggers_turn_complete"`
+	CompleteTaskOnEnter          bool                                         `json:"complete_task_on_enter" yaml:"complete_task_on_enter"`
+	WIPLimit                     int                                          `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
+	PullFromStepPosition         *int                                         `json:"pull_from_step_position,omitempty" yaml:"pull_from_step_position,omitempty"`
+	completionTaskOnEnterDecoded bool                                         `json:"-" yaml:"-"`
+	completionTaskOnEnterPresent bool                                         `json:"-" yaml:"-"`
+	SessionTarget                *WorkflowSessionTargetPortable               `json:"session_target,omitempty" yaml:"session_target,omitempty"`
+}
+
+// UnmarshalJSON records whether a decoded document explicitly supplied the
+// version-2 completion field. The domain field remains a bool so callers that
+// build exports in Go keep the same ergonomic API.
+func (s *StepPortable) UnmarshalJSON(data []byte) error {
+	type plainStepPortable StepPortable
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return err
+	}
+	if raw, ok := fields["complete_task_on_enter"]; ok && bytes.Equal(bytes.TrimSpace(raw), []byte("null")) {
+		return fmt.Errorf("complete_task_on_enter must be a boolean, not null")
+	}
+	var decoded plainStepPortable
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	*s = StepPortable(decoded)
+	_, s.completionTaskOnEnterPresent = fields["complete_task_on_enter"]
+	s.completionTaskOnEnterDecoded = true
+	return nil
+}
+
+// UnmarshalYAML records whether a decoded document explicitly supplied the
+// version-2 completion field.
+func (s *StepPortable) UnmarshalYAML(node *yaml.Node) error {
+	type plainStepPortable StepPortable
+	if node.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			if node.Content[i].Value != "complete_task_on_enter" {
+				continue
+			}
+			valueNode := node.Content[i+1]
+			if valueNode.Tag == "!!null" || valueNode.ShortTag() == "!!null" {
+				return fmt.Errorf("complete_task_on_enter must be a boolean, not null")
+			}
+		}
+	}
+	var decoded plainStepPortable
+	if err := node.Decode(&decoded); err != nil {
+		return err
+	}
+	*s = StepPortable(decoded)
+	present := false
+	if node.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			if node.Content[i].Value == "complete_task_on_enter" {
+				present = true
+				break
+			}
+		}
+	}
+	s.completionTaskOnEnterPresent = present
+	s.completionTaskOnEnterDecoded = true
+	return nil
+}
+
+func (s StepPortable) completionTaskOnEnterIsExplicit() bool {
+	if !s.completionTaskOnEnterDecoded {
+		return true
+	}
+	return s.completionTaskOnEnterPresent
+}
+
+func (s *StepPortable) markCompletionTaskOnEnterExplicit() {
+	s.completionTaskOnEnterPresent = true
 }
 
 // BuildWorkflowExport builds a portable WorkflowExport from domain models.
 // stepsByWorkflow maps workflow ID → its steps (ordered by position).
 // resolveProfile converts agent profile IDs to portable form (may be nil).
+// Invalid target references return nil for compatibility with older callers;
+// service callers should use BuildWorkflowExportWithError to surface the
+// configuration error to the user.
 func BuildWorkflowExport(workflows []*taskmodels.Workflow, stepsByWorkflow map[string][]*WorkflowStep, resolveProfile AgentProfileResolver) *WorkflowExport {
-	portable := make([]WorkflowPortable, 0, len(workflows))
-	for _, wf := range workflows {
-		steps := stepsByWorkflow[wf.ID]
-		portable = append(portable, buildWorkflowPortable(wf, steps, resolveProfile))
+	export, err := BuildWorkflowExportWithError(workflows, stepsByWorkflow, resolveProfile)
+	if err != nil {
+		return nil
 	}
-	return &WorkflowExport{
-		Version:   ExportVersion,
-		Type:      ExportType,
-		Workflows: portable,
-	}
+	return export
 }
 
-func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resolveProfile AgentProfileResolver) WorkflowPortable {
+// BuildWorkflowExportWithError builds a portable export and rejects unresolved
+// step targets before they can produce an import-invalid document.
+func BuildWorkflowExportWithError(workflows []*taskmodels.Workflow, stepsByWorkflow map[string][]*WorkflowStep, resolveProfile AgentProfileResolver) (*WorkflowExport, error) {
+	portable := make([]WorkflowPortable, 0, len(workflows))
+	version := LegacyExportVersion
+	for _, wf := range workflows {
+		steps := stepsByWorkflow[wf.ID]
+		for _, step := range steps {
+			if step != nil && (step.SessionTarget != nil || step.CompleteTaskOnEnter) {
+				version = ExportVersion
+			}
+		}
+		workflow, err := buildWorkflowPortable(wf, steps, resolveProfile)
+		if err != nil {
+			return nil, err
+		}
+		portable = append(portable, workflow)
+	}
+	return &WorkflowExport{
+		Version:   version,
+		Type:      ExportType,
+		Workflows: portable,
+	}, nil
+}
+
+func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resolveProfile AgentProfileResolver) (WorkflowPortable, error) {
 	portableSteps := make([]StepPortable, 0, len(steps))
 	// Build step ID → position map for converting move_to_step references.
 	idToPos := make(map[string]int, len(steps))
@@ -91,6 +196,10 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 		idToPos[s.ID] = s.Position
 	}
 	for _, s := range steps {
+		sessionTarget, err := buildPortableSessionTarget(s.SessionTarget, idToPos)
+		if err != nil {
+			return WorkflowPortable{}, fmt.Errorf("workflow %q step %q: %w", wf.Name, s.Name, err)
+		}
 		sp := StepPortable{
 			Name:                       s.Name,
 			Position:                   s.Position,
@@ -103,8 +212,10 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 			AutoArchiveAfterHours:      s.AutoArchiveAfterHours,
 			ProfileSessionStartPolicy:  taskmodels.NormalizeWorkflowProfileSessionStartPolicy(string(s.ProfileSessionStartPolicy)),
 			ProfileSessionEndPolicy:    taskmodels.NormalizeWorkflowProfileSessionEndPolicy(string(s.ProfileSessionEndPolicy)),
+			SessionTarget:              sessionTarget,
 			AutoAdvanceRequiresSignal:  s.AutoAdvanceRequiresSignal,
 			CancelTriggersTurnComplete: s.CancelTriggersTurnComplete,
+			CompleteTaskOnEnter:        s.CompleteTaskOnEnter,
 			WIPLimit:                   s.WIPLimit,
 		}
 		if pos, ok := idToPos[s.PullFromStepID]; ok {
@@ -125,16 +236,37 @@ func buildWorkflowPortable(wf *taskmodels.Workflow, steps []*WorkflowStep, resol
 	if resolveProfile != nil && wf.AgentProfileID != "" {
 		wp.AgentProfile = resolveProfile(wf.AgentProfileID)
 	}
-	return wp
+	return wp, nil
+}
+
+func buildPortableSessionTarget(target *WorkflowSessionTarget, idToPos map[string]int) (*WorkflowSessionTargetPortable, error) {
+	if target == nil {
+		return nil, nil
+	}
+	if err := ValidateWorkflowSessionTarget(target); err != nil {
+		return nil, err
+	}
+	portable := &WorkflowSessionTargetPortable{Kind: target.Kind}
+	if target.Kind == WorkflowSessionTargetStep {
+		if position, ok := idToPos[target.StepID]; ok {
+			portable.StepPosition = &position
+		} else {
+			return nil, fmt.Errorf("session target source step %q was not found", target.StepID)
+		}
+	}
+	return portable, nil
 }
 
 // Validate checks that the export data is well-formed.
 func (e *WorkflowExport) Validate() error {
-	if e.Version != ExportVersion {
-		return fmt.Errorf("unsupported export version: %d (expected %d)", e.Version, ExportVersion)
+	if e.Version != LegacyExportVersion && e.Version != ExportVersion {
+		return fmt.Errorf("unsupported export version: %d (expected %d or %d)", e.Version, LegacyExportVersion, ExportVersion)
 	}
 	if e.Type != ExportType {
 		return fmt.Errorf("unsupported export type: %q (expected %q)", e.Type, ExportType)
+	}
+	if err := e.NormalizeCompletionPolicy(); err != nil {
+		return err
 	}
 	if len(e.Workflows) == 0 {
 		return fmt.Errorf("export contains no workflows")
@@ -152,11 +284,19 @@ func (e *WorkflowExport) Validate() error {
 				return fmt.Errorf("workflow %d: duplicate step position %d", i, step.Position)
 			}
 			positions[step.Position] = true
+			if e.Version == ExportVersion && !step.completionTaskOnEnterIsExplicit() {
+				return fmt.Errorf("workflow %d step %d: complete_task_on_enter must be explicitly set", i, j)
+			}
 			if err := validateOnEnterActions(step); err != nil {
 				return fmt.Errorf("workflow %d step %d: %w", i, j, err)
 			}
 			if step.WIPLimit < 0 {
 				return fmt.Errorf("workflow %d step %d: wip_limit must be non-negative", i, j)
+			}
+		}
+		for j, step := range wf.Steps {
+			if err := validatePortableSessionTarget(e.Version, step, positions); err != nil {
+				return fmt.Errorf("workflow %d step %d: %w", i, j, err)
 			}
 		}
 		// Validate that move_to_step references point to valid positions.
@@ -165,6 +305,92 @@ func (e *WorkflowExport) Validate() error {
 		}
 		if err := validatePullSourceRefs(wf.Steps, positions); err != nil {
 			return fmt.Errorf("workflow %d: %w", i, err)
+		}
+		if err := validatePortableSessionTargets(wf.Steps); err != nil {
+			return fmt.Errorf("workflow %d: %w", i, err)
+		}
+	}
+	return nil
+}
+
+func validatePortableSessionTarget(version int, step StepPortable, validPositions map[int]bool) error {
+	if step.SessionTarget == nil {
+		return nil
+	}
+	if version == LegacyExportVersion {
+		return fmt.Errorf("session_target requires export version %d", ExportVersion)
+	}
+	switch step.SessionTarget.Kind {
+	case WorkflowSessionTargetInitial:
+		if step.SessionTarget.StepPosition != nil {
+			return fmt.Errorf("initial session target must not include step_position")
+		}
+	case WorkflowSessionTargetStep:
+		if step.SessionTarget.StepPosition == nil {
+			return fmt.Errorf("step session target requires step_position")
+		}
+		position := *step.SessionTarget.StepPosition
+		if !validPositions[position] {
+			return fmt.Errorf("session target step_position %d does not match any step", position)
+		}
+		if position >= step.Position {
+			return fmt.Errorf("session target step_position %d must reference an earlier step", position)
+		}
+		if step.AgentProfile != nil {
+			return fmt.Errorf("session_target cannot be combined with an agent_profile")
+		}
+	default:
+		return fmt.Errorf("unknown session target kind %q", step.SessionTarget.Kind)
+	}
+	return nil
+}
+
+func validatePortableSessionTargets(steps []StepPortable) error {
+	byPosition := make(map[int]StepPortable, len(steps))
+	for _, step := range steps {
+		byPosition[step.Position] = step
+	}
+	for _, step := range steps {
+		if step.SessionTarget == nil || step.SessionTarget.Kind != WorkflowSessionTargetStep {
+			continue
+		}
+		if step.SessionTarget.StepPosition == nil {
+			return fmt.Errorf("step %q session target requires step_position", step.Name)
+		}
+		target := byPosition[*step.SessionTarget.StepPosition]
+		if target.AgentProfile == nil || target.SessionTarget != nil {
+			return fmt.Errorf("step %q session target must reference a direct-profile step", step.Name)
+		}
+	}
+	return nil
+}
+
+// NormalizeCompletionPolicy converts version-1 exports at the import/sync
+// boundary. Version 1 had no explicit completion field, so only its final
+// step inherits the legacy terminal-name convention. Version-2 values are
+// never inferred or changed.
+func (e *WorkflowExport) NormalizeCompletionPolicy() error {
+	if e.Version != LegacyExportVersion {
+		return nil
+	}
+	for workflowIndex := range e.Workflows {
+		workflow := &e.Workflows[workflowIndex]
+		if len(workflow.Steps) == 0 {
+			continue
+		}
+		maxPosition := workflow.Steps[0].Position
+		for _, step := range workflow.Steps[1:] {
+			if step.Position > maxPosition {
+				maxPosition = step.Position
+			}
+		}
+		for stepIndex := range workflow.Steps {
+			step := &workflow.Steps[stepIndex]
+			if step.completionTaskOnEnterDecoded && step.completionTaskOnEnterPresent {
+				continue
+			}
+			step.CompleteTaskOnEnter = step.Position == maxPosition && IsTerminalStepName(step.Name)
+			step.markCompletionTaskOnEnterExplicit()
 		}
 	}
 	return nil
@@ -237,10 +463,22 @@ func (s StepPortable) PullFromStepID(posToID map[int]string) string {
 // an import would "succeed" with an inert action. See issue #1183. This mirrors
 // the embedded-YAML loader's allow-list check.
 func validateOnEnterActions(step StepPortable) error {
-	if err := ValidateStepEvents(step.Events, step.AgentProfile != nil); err != nil {
+	if err := ValidateStepEventsWithRouting(step.Events, step.AgentProfile != nil, step.SessionTarget != nil); err != nil {
 		return fmt.Errorf("step %q on_enter: %w", step.Name, err)
 	}
 	return nil
+}
+
+// WorkflowSessionTarget maps the portable position to a workflow-local step ID.
+func (s StepPortable) WorkflowSessionTarget(posToID map[int]string) *WorkflowSessionTarget {
+	if s.SessionTarget == nil {
+		return nil
+	}
+	target := &WorkflowSessionTarget{Kind: s.SessionTarget.Kind}
+	if s.SessionTarget.StepPosition != nil {
+		target.StepID = posToID[*s.SessionTarget.StepPosition]
+	}
+	return target
 }
 
 func validateStepPositionRefs(steps []StepPortable, validPositions map[int]bool) error {

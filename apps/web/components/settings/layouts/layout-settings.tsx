@@ -16,6 +16,10 @@ import { LayoutProfileDeleteConfirmation } from "./layout-profile-delete-confirm
 import { useLayoutSettings } from "./use-layout-settings";
 import { useTranslation } from "react-i18next";
 import { SettingsTarget } from "@/components/settings/settings-target";
+import {
+  settingsActionClassName,
+  settingsControlClassName,
+} from "@/components/settings/settings-control";
 import { GENERAL_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/preferences";
 
 type Controller = ReturnType<typeof useLayoutSettings>;
@@ -52,9 +56,8 @@ function ResetBuiltInButton({ onClick }: { onClick: () => void }) {
       <TooltipTrigger asChild>
         <Button
           type="button"
-          size="sm"
           variant="outline"
-          className="min-h-11 cursor-pointer sm:min-h-8"
+          className={settingsActionClassName("cursor-pointer")}
           aria-label={t("settings:resetBuiltInLayout")}
           onClick={onClick}
         >
@@ -82,7 +85,7 @@ function SelectedLayoutHeader({
             aria-label={t("settings:layoutProfileName")}
             value={controller.selectedCustom.name}
             onChange={(event) => controller.updateSelected({ name: event.target.value })}
-            className="min-h-11 max-w-md sm:min-h-9"
+            className={settingsControlClassName("max-w-md")}
           />
         ) : (
           <div className="flex flex-wrap items-center gap-2">
@@ -100,9 +103,8 @@ function SelectedLayoutHeader({
             <span tabIndex={controller.defaultActionDisabled ? 0 : -1} className="inline-flex">
               <Button
                 type="button"
-                size="sm"
                 variant="outline"
-                className="min-h-11 cursor-pointer sm:min-h-8"
+                className={settingsActionClassName("cursor-pointer")}
                 disabled={controller.defaultActionDisabled}
                 onClick={controller.setDefault}
               >

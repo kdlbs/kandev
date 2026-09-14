@@ -225,8 +225,12 @@ func TestMarkRunFailed_StampsMessageAndPreservesFinishedAt(t *testing.T) {
 		"2026-01-02 09:00:00", "2026-01-02 10:00:00", "2026-01-02 11:00:00", "{}")
 	seedSummaryRun(t, repo, "mr-other", "agent-a", "queued", "2026-01-03 09:00:00", "", "", "{}")
 
-	if err := repo.MarkRunFailed(ctx, "mr-open", "provider exploded"); err != nil {
+	wrote, err := repo.MarkRunFailed(ctx, "mr-open", "provider exploded")
+	if err != nil {
 		t.Fatalf("MarkRunFailed: %v", err)
+	}
+	if !wrote {
+		t.Error("wrote = false, want true (mr-open was claimed)")
 	}
 	run, err := repo.GetRun(ctx, "mr-open")
 	if err != nil {
@@ -242,9 +246,20 @@ func TestMarkRunFailed_StampsMessageAndPreservesFinishedAt(t *testing.T) {
 		t.Error("FinishedAt is nil, want it stamped")
 	}
 
-	// Re-marking is idempotent and must not move an existing finished_at.
-	if err := repo.MarkRunFailed(ctx, "mr-done", "later failure"); err != nil {
+	// Review round 3, R3-1: MarkRunFailed is guarded to status = 'claimed',
+	// so a run already in a different terminal state (here, 'finished') is
+	// left untouched — a guarded no-op, not a re-stamp. This is a
+	// deliberate change from the pre-guard "idempotent re-mark" contract:
+	// unconditionally re-marking an already-terminal run is exactly the
+	// TOCTOU bug this guard exists to close (a concurrent cancel/finish
+	// must never have its real terminal state overwritten by a stale
+	// failure write).
+	wrote, err = repo.MarkRunFailed(ctx, "mr-done", "later failure")
+	if err != nil {
 		t.Fatalf("MarkRunFailed (already finished): %v", err)
+	}
+	if wrote {
+		t.Error("wrote = true, want false (mr-done was already finished, not claimed)")
 	}
 	run, err = repo.GetRun(ctx, "mr-done")
 	if err != nil {
@@ -253,8 +268,11 @@ func TestMarkRunFailed_StampsMessageAndPreservesFinishedAt(t *testing.T) {
 	if run.FinishedAt == nil || run.FinishedAt.Format("2006-01-02 15:04:05") != "2026-01-02 11:00:00" {
 		t.Errorf("FinishedAt = %v, want the original 2026-01-02 11:00:00", run.FinishedAt)
 	}
-	if run.ErrorMessage != "later failure" {
-		t.Errorf("ErrorMessage = %q, want it overwritten", run.ErrorMessage)
+	if run.ErrorMessage != "" {
+		t.Errorf("ErrorMessage = %q, want it left untouched (guarded no-op)", run.ErrorMessage)
+	}
+	if run.Status != "finished" {
+		t.Errorf("Status = %q, want finished (unchanged)", run.Status)
 	}
 
 	// An untouched run keeps its status.
@@ -266,8 +284,12 @@ func TestMarkRunFailed_StampsMessageAndPreservesFinishedAt(t *testing.T) {
 	}
 
 	// Marking a missing run is a silent no-op, not an error.
-	if err := repo.MarkRunFailed(ctx, "no-such-run", "x"); err != nil {
+	wrote, err = repo.MarkRunFailed(ctx, "no-such-run", "x")
+	if err != nil {
 		t.Errorf("MarkRunFailed(missing) = %v, want nil", err)
+	}
+	if wrote {
+		t.Error("wrote = true, want false (no such run)")
 	}
 }
 

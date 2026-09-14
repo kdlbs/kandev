@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"sort"
@@ -12,12 +13,13 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/runtime/activity"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/common/appctx"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-const defaultRemoteContributionPreflightTimeout = 30 * time.Second
+const defaultRemoteContributionPreflightTimeout = 2 * time.Minute
 
 func (m *Manager) contributionPreflightTimeout() time.Duration {
 	if m.remoteContributionPreflightTimeout > 0 {
@@ -102,6 +104,12 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+	defer func() {
+		retErr = wrapBootstrapFailure(execution, retErr)
+	}()
+	if err := m.ensureLaunchSessionStillActive(ctx, execution.SessionID, executionAdmissionAgent); err != nil {
+		return err
+	}
 	activityClaim, err := m.ensureExecutionActivity(ctx, executionID, activity.KindExecutionPreparing)
 	if err != nil {
 		return err
@@ -136,7 +144,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	if isPassthrough {
 		return m.startPassthroughExecution(operationCtx, execution, profileInfo)
 	}
-	execution.beginStartupAttempt()
+	execution.beginStartupAttemptWithID(ResumeAttemptIDFromContext(operationCtx))
 	client, releaseClient := execution.AcquireAgentCtlClient()
 	releaseClient()
 	if client == nil {
@@ -146,7 +154,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	// Check if we're reconnecting to an existing running agent process.
 	// When the existing process is still alive inside a remote executor (e.g., Sprites),
 	// we skip subprocess launch and go directly to ACP session initialization.
-	reuseExisting := execution.metadataBool("reuse_existing_process")
+	reuseExisting := execution.metadataBool(MetadataKeyReuseExistingProcess)
 
 	if !reuseExisting && execution.AgentCommand == "" {
 		return fmt.Errorf("execution %q has no agent command configured", executionID)
@@ -163,9 +171,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 		m.updateExecutionError(executionID, "agentctl not ready: "+err.Error())
 		return fmt.Errorf("agentctl not ready: %w", err)
 	}
-	preflightCtx, cancelPreflight := context.WithTimeout(operationCtx, m.contributionPreflightTimeout())
-	err = m.preflightRemoteContributionPushes(preflightCtx, execution)
-	cancelPreflight()
+	err = m.preflightRemoteContributionPushes(operationCtx, execution)
 	if err != nil {
 		m.updateExecutionError(executionID, "contribution push preflight failed: "+err.Error())
 		return err
@@ -174,6 +180,11 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	taskDescription := getTaskDescriptionFromMetadata(execution)
 	approvalPolicy, agentDisplayName := m.resolveApprovalPolicyAndDisplayName(operationCtx, execution)
 
+	execution.remoteInstanceLifecycleMu.Lock()
+	if err := m.ensureLaunchSessionStillActive(operationCtx, execution.SessionID, executionAdmissionAgent); err != nil {
+		execution.remoteInstanceLifecycleMu.Unlock()
+		return err
+	}
 	var bootCommand string
 	if reuseExisting {
 		// Agent subprocess is already running inside the remote executor.
@@ -193,6 +204,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 		var err error
 		bootCommand, err = m.configureAndStartAgent(operationCtx, execution, approvalPolicy)
 		if err != nil {
+			execution.remoteInstanceLifecycleMu.Unlock()
 			return err
 		}
 
@@ -201,11 +213,15 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 			zap.String("task_id", execution.TaskID),
 			zap.String("command", bootCommand))
 	}
+	execution.remoteInstanceLifecycleMu.Unlock()
 
 	return m.initializeAgentSession(operationCtx, execution, bootCommand, agentDisplayName, taskDescription, approvalPolicy)
 }
 
 func (m *Manager) preflightRemoteContributionPushes(ctx context.Context, execution *AgentExecution) error {
+	preflightCtx, cancel := context.WithTimeout(ctx, m.contributionPreflightTimeout())
+	defer cancel()
+
 	if execution == nil {
 		return nil
 	}
@@ -227,19 +243,71 @@ func (m *Manager) preflightRemoteContributionPushes(ctx context.Context, executi
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		result, err := client.GitPushPreflight(ctx, key)
+		result, err := client.GitPushPreflight(preflightCtx, key, agentctl.PushOptions{})
 		if err != nil {
-			return fmt.Errorf("repository %q: %w", key, err)
+			return &BootstrapFailure{
+				Operation: bootstrapOperation(execution),
+				Code:      classifyBootstrapCause(err),
+				Detail:    bootstrapFailureDetail(classifyBootstrapCause(err)),
+				Cause:     fmt.Errorf("repository %q: %w", contributionPreflightDisplayLabel(key), err),
+			}
 		}
 		if result == nil || !result.Success {
+			if execution.isResumedSession && result != nil &&
+				result.PreflightReason == agentctl.GitPushPreflightHistoryUpdateRequired {
+				continue
+			}
 			message := "remote contribution push is not writable"
+			code := models.AgentErrorCauseCodeUnknown
 			if result != nil && result.Error != "" {
 				message = result.Error
+				code = classifyBootstrapCauseCode(result.ErrorCode)
 			}
-			return fmt.Errorf("repository %q: %s", key, message)
+			return &BootstrapFailure{
+				Operation: bootstrapOperation(execution),
+				Code:      code,
+				Detail:    bootstrapFailureDetail(code),
+				Cause:     fmt.Errorf("repository %q: %s", contributionPreflightDisplayLabel(key), message),
+			}
 		}
 	}
 	return nil
+}
+
+func classifyBootstrapCauseCode(code string) string {
+	if isKnownBootstrapCauseCode(code) {
+		return code
+	}
+	return models.AgentErrorCauseCodeUnknown
+}
+
+func classifyBootstrapCause(err error) string {
+	if err == nil {
+		return models.AgentErrorCauseCodeUnknown
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return models.AgentErrorCauseCodeTimeout
+	}
+	normalized := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(normalized, "authentication"), strings.Contains(normalized, "login"):
+		return models.AgentErrorCauseCodeAuthenticationRequired
+	case strings.Contains(normalized, "permission denied"), strings.Contains(normalized, "access denied"):
+		return models.AgentErrorCauseCodePermissionDenied
+	case strings.Contains(normalized, "destination"), strings.Contains(normalized, "push url"):
+		return models.AgentErrorCauseCodeDestinationInvalid
+	case strings.Contains(normalized, "could not resolve host"), strings.Contains(normalized, "unable to access"), strings.Contains(normalized, "connection refused"):
+		return models.AgentErrorCauseCodeTransportUnavailable
+	default:
+		return models.AgentErrorCauseCodeUnknown
+	}
+}
+
+func contributionPreflightDisplayLabel(key string) string {
+	if strings.TrimSpace(key) == "" {
+		return "default repository"
+	}
+	return key
 }
 
 // pollAgentStderr polls the agent's stderr buffer every 2 seconds and updates the boot message.

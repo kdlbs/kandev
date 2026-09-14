@@ -34,6 +34,11 @@ import type { SelectedDiff } from "./task-layout";
 import { useIsTaskArchived, ArchivedPanelPlaceholder } from "./task-archived-context";
 import { useTranslation } from "react-i18next";
 import type { GitChangeLayer } from "@/lib/state/slices/session-runtime/types";
+import {
+  useWorkspaceRestoration,
+  type WorkspaceRestorationResult,
+} from "@/hooks/domains/session/use-workspace-restoration";
+import { WorkspaceUnavailable } from "./workspace-unavailable";
 
 type TaskChangesPanelProps = {
   mode?: "all" | "file";
@@ -188,12 +193,16 @@ function persistAutoMarkSetting(checked: boolean) {
   updateUserSettings(payload, { cache: "no-store" }).catch(() => {});
 }
 
-function useWalkthroughRequest(activeSessionId: string | null | undefined, allFiles: ReviewFile[]) {
+function useWalkthroughRequest(
+  activeSessionId: string | null | undefined,
+  allFiles: ReviewFile[],
+  workspaceBlocked = false,
+) {
   const activeTaskId = useAppStore((s) => s.tasks.activeTaskId);
   return useRequestChangesWalkthrough({
     taskId: activeTaskId,
     sessionId: activeSessionId,
-    ready: allFiles.length > 0,
+    ready: allFiles.length > 0 && !workspaceBlocked,
   });
 }
 
@@ -222,20 +231,56 @@ function useChangesPRPresentation(opts: {
   return { selectedFileKey, blockChangesForPR };
 }
 
+function useFixCommentsRequest(
+  activeSessionId: string | null | undefined,
+  workspaceBlocked: boolean,
+) {
+  const { t } = useTranslation();
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  const getPendingComments = useCommentsStore((s) => s.getPendingComments);
+  const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
+  const { toast } = useToast();
+
+  return useCallback(() => {
+    if (workspaceBlocked || !activeSessionId || !activeTaskId) return;
+    const comments = getPendingComments().filter(isDiffComment);
+    if (comments.length === 0) return;
+    const markdown = formatReviewCommentsAsMarkdown(comments);
+    if (!markdown) return;
+    const client = getWebSocketClient();
+    if (client)
+      client
+        .request("message.add", {
+          task_id: activeTaskId,
+          session_id: activeSessionId,
+          client_message_id: generateUUID(),
+          content: markdown,
+        })
+        .catch(() => toast({ title: t("task:failedToSendComments"), variant: "error" }));
+    markCommentsSent(comments.map((c) => c.id));
+  }, [
+    activeSessionId,
+    activeTaskId,
+    getPendingComments,
+    markCommentsSent,
+    t,
+    toast,
+    workspaceBlocked,
+  ]);
+}
+
 function useChangesActions(
   activeSessionId: string | null | undefined,
   allFiles: ReviewFile[],
   defaultWordWrap = DEFAULT_DIFF_WORD_WRAP,
+  workspaceBlocked = false,
 ) {
   const { t } = useTranslation();
-  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const autoMarkOnScroll = useAppStore((s) => s.userSettings.reviewAutoMarkOnScroll);
   const setUserSettings = useAppStore((state) => state.setUserSettings);
   const userSettings = useAppStore((state) => state.userSettings);
   const { discard } = useGitOperations(activeSessionId ?? null);
   const { markReviewed, markUnreviewed } = useSessionFileReviews(activeSessionId ?? null);
-  const getPendingComments = useCommentsStore((s) => s.getPendingComments);
-  const markCommentsSent = useCommentsStore((s) => s.markCommentsSent);
   const { toast } = useToast();
 
   const [splitView, setSplitView] = useState(
@@ -263,6 +308,7 @@ function useChangesActions(
 
   const handleDiscard = useCallback(
     async (key: string) => {
+      if (workspaceBlocked) return;
       const { repositoryName, path } = discardTargetFromReviewFileKey(key);
       try {
         const result = await discard([path], repositoryName || undefined);
@@ -283,7 +329,7 @@ function useChangesActions(
         });
       }
     },
-    [discard, toast],
+    [discard, toast, workspaceBlocked],
   );
 
   const handleToggleAutoMark = useCallback(
@@ -295,25 +341,7 @@ function useChangesActions(
     [setUserSettings, userSettings],
   );
 
-  const handleFixComments = useCallback(() => {
-    if (!activeSessionId || !activeTaskId) return;
-    const allPending = getPendingComments();
-    const comments = allPending.filter(isDiffComment);
-    if (comments.length === 0) return;
-    const markdown = formatReviewCommentsAsMarkdown(comments);
-    if (!markdown) return;
-    const client = getWebSocketClient();
-    if (client)
-      client
-        .request("message.add", {
-          task_id: activeTaskId,
-          session_id: activeSessionId,
-          client_message_id: generateUUID(),
-          content: markdown,
-        })
-        .catch(() => toast({ title: t("task:failedToSendComments"), variant: "error" }));
-    markCommentsSent(comments.map((c) => c.id));
-  }, [activeSessionId, activeTaskId, getPendingComments, markCommentsSent, toast]);
+  const handleFixComments = useFixCommentsRequest(activeSessionId, workspaceBlocked);
 
   return {
     splitView,
@@ -326,6 +354,70 @@ function useChangesActions(
     handleToggleAutoMark,
     handleFixComments,
   };
+}
+
+function useTaskChangesWorkspaceRestoration(
+  activeSessionId: string | null | undefined,
+): WorkspaceRestorationResult {
+  const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
+  return useWorkspaceRestoration(activeTaskId, activeSessionId);
+}
+
+function useTaskChangesPanelActions(
+  view: ReturnType<typeof useChangesView>,
+  wordWrap: boolean,
+  workspaceRestoration: WorkspaceRestorationResult,
+) {
+  const workspaceBlocked =
+    workspaceRestoration.status !== null && workspaceRestoration.status !== "ready";
+  const actions = useChangesActions(
+    view.activeSessionId,
+    view.allFiles,
+    wordWrap,
+    workspaceBlocked,
+  );
+  const handleRequestWalkthrough = useWalkthroughRequest(
+    view.activeSessionId,
+    view.allFiles,
+    workspaceBlocked,
+  );
+  return { actions, handleRequestWalkthrough };
+}
+
+function ChangesPanelHeader({
+  mode,
+  view,
+  actions,
+  visible,
+  onRequestWalkthrough,
+}: {
+  mode: "all" | "file";
+  view: ReturnType<typeof useChangesView>;
+  actions: ReturnType<typeof useChangesActions>;
+  visible: ReturnType<typeof useVisibleDiffState>;
+  onRequestWalkthrough: ReturnType<typeof useWalkthroughRequest>;
+}) {
+  return (
+    <ChangesTopBar
+      autoMarkOnScroll={actions.autoMarkOnScroll}
+      splitView={actions.splitView}
+      wordWrap={actions.wordWrap}
+      totalCommentCount={view.totalCommentCount}
+      reviewedCount={visible.reviewedCount}
+      totalCount={visible.totalCount}
+      progressPercent={visible.progressPercent}
+      setWordWrap={actions.setWordWrap}
+      handleToggleSplitView={actions.handleToggleSplitView}
+      handleToggleAutoMark={actions.handleToggleAutoMark}
+      handleFixComments={actions.handleFixComments}
+      handleRequestWalkthrough={onRequestWalkthrough}
+      requestWalkthroughDisabled={view.allFiles.length === 0}
+      prs={mode === "all" ? view.prs : []}
+      selectedPR={mode === "all" ? view.selectedPR : null}
+      prDiffLoading={view.prDiffLoading}
+      onSelectPR={view.selectPR}
+    />
+  );
 }
 
 const TaskChangesPanel = memo(function TaskChangesPanel({
@@ -346,10 +438,14 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
   const handleOpenFile = onOpenFileProp ?? panelOpenFile;
 
   const view = useChangesView(selectedDiff, onClearSelected, sourceFilter, prKey);
+  const workspaceRestoration = useTaskChangesWorkspaceRestoration(view.activeSessionId);
+  const { actions, handleRequestWalkthrough } = useTaskChangesPanelActions(
+    view,
+    wordWrapProp,
+    workspaceRestoration,
+  );
   const usesPRDiff = sourceFilter === "all" || sourceFilter === "pr";
   const relevantPRLoading = usesPRDiff && view.prDiffLoading;
-  const actions = useChangesActions(view.activeSessionId, view.allFiles, wordWrapProp);
-  const handleRequestWalkthrough = useWalkthroughRequest(view.activeSessionId, view.allFiles);
   const fileTarget = { filePath, fileRepositoryName, prKey, changeLayer };
   const visible = useVisibleDiffState({
     allFiles: view.allFiles,
@@ -384,24 +480,12 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
 
   return (
     <PanelRoot>
-      <ChangesTopBar
-        autoMarkOnScroll={actions.autoMarkOnScroll}
-        splitView={actions.splitView}
-        wordWrap={actions.wordWrap}
-        totalCommentCount={view.totalCommentCount}
-        reviewedCount={visible.reviewedCount}
-        totalCount={visible.totalCount}
-        progressPercent={visible.progressPercent}
-        setWordWrap={actions.setWordWrap}
-        handleToggleSplitView={actions.handleToggleSplitView}
-        handleToggleAutoMark={actions.handleToggleAutoMark}
-        handleFixComments={actions.handleFixComments}
-        handleRequestWalkthrough={handleRequestWalkthrough}
-        requestWalkthroughDisabled={view.allFiles.length === 0}
-        prs={mode === "all" ? view.prs : []}
-        selectedPR={mode === "all" ? view.selectedPR : null}
-        prDiffLoading={view.prDiffLoading}
-        onSelectPR={view.selectPR}
+      <ChangesPanelHeader
+        mode={mode}
+        view={view}
+        actions={actions}
+        visible={visible}
+        onRequestWalkthrough={handleRequestWalkthrough}
       />
       <PanelBody padding={false} scroll={false} className="overflow-hidden">
         <TruncatedFilesBanner count={view.truncatedFilesCount} />
@@ -425,6 +509,7 @@ const TaskChangesPanel = memo(function TaskChangesPanel({
             onOpenFile={handleOpenFile}
             onPreviewMarkdown={openFileInMarkdownPreview}
             fileRefs={visible.visibleFileRefs}
+            workspaceRestoration={workspaceRestoration}
           />
         </ReviewPRDiffBoundary>
       </PanelBody>
@@ -446,6 +531,7 @@ function ChangesPanelContent({
   onOpenFile,
   onPreviewMarkdown,
   fileRefs,
+  workspaceRestoration,
 }: {
   isLoading: boolean;
   files: ReviewFile[];
@@ -460,8 +546,19 @@ function ChangesPanelContent({
   onOpenFile: (path: string, repo?: string) => void;
   onPreviewMarkdown?: (path: string, repo?: string) => void;
   fileRefs: Map<string, React.RefObject<HTMLDivElement | null>>;
+  workspaceRestoration: WorkspaceRestorationResult;
 }) {
   const { t } = useTranslation();
+  const workspaceBlocked = workspaceRestoration.status && workspaceRestoration.status !== "ready";
+  if (workspaceBlocked && files.length === 0) {
+    return (
+      <WorkspaceUnavailable
+        restoration={workspaceRestoration.attempt}
+        onRetry={() => void workspaceRestoration.restore()}
+        retryDisabled={workspaceRestoration.status === "pending"}
+      />
+    );
+  }
   if (isLoading && files.length === 0) {
     return (
       <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
@@ -478,21 +575,31 @@ function ChangesPanelContent({
   }
   if (!activeSessionId) return null;
   return (
-    <ReviewDiffList
-      files={files}
-      reviewedFiles={reviewedFiles}
-      staleFiles={staleFiles}
-      sessionId={activeSessionId}
-      autoMarkOnScroll={autoMarkOnScroll}
-      wordWrap={wordWrap}
-      enableWalkthroughAnnotations
-      selectedFile={selectedFile}
-      onToggleReviewed={onToggleReviewed}
-      onDiscard={onDiscard}
-      onOpenFile={onOpenFile}
-      onPreviewMarkdown={onPreviewMarkdown}
-      fileRefs={fileRefs}
-    />
+    <>
+      {workspaceBlocked && (
+        <WorkspaceUnavailable
+          restoration={workspaceRestoration.attempt}
+          onRetry={() => void workspaceRestoration.restore()}
+          retryDisabled={workspaceRestoration.status === "pending"}
+          compact
+        />
+      )}
+      <ReviewDiffList
+        files={files}
+        reviewedFiles={reviewedFiles}
+        staleFiles={staleFiles}
+        sessionId={activeSessionId}
+        autoMarkOnScroll={autoMarkOnScroll}
+        wordWrap={wordWrap}
+        enableWalkthroughAnnotations
+        selectedFile={selectedFile}
+        onToggleReviewed={onToggleReviewed}
+        onDiscard={onDiscard}
+        onOpenFile={onOpenFile}
+        onPreviewMarkdown={onPreviewMarkdown}
+        fileRefs={fileRefs}
+      />
+    </>
   );
 }
 

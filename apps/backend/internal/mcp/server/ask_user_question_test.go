@@ -469,3 +469,14 @@ func TestAskUserQuestion_StreamsKeepAliveDuringWait(t *testing.T) {
 	assert.GreaterOrEqual(t, progressSeen, 1, "expected at least one keepalive progress notification")
 	assert.True(t, finalSeen, "expected the final tool result to be delivered")
 }
+
+// TestAskUserQuestion_KeepAliveIntervalBelowClientIdleDeadline protects the
+// managed-default safety margin described in the timeout design record. The
+// <= 60s bound targets the managed 300s watchdog, not every accepted
+// MCP_TOOL_TIMEOUT override. An override below this interval remains a
+// documented configuration edge. TestAskUserQuestion_StreamsKeepAliveDuringWait
+// cannot catch a default-value regression because it overrides the interval.
+func TestAskUserQuestion_KeepAliveIntervalBelowClientIdleDeadline(t *testing.T) {
+	assert.Greater(t, askQuestionKeepAliveInterval, time.Duration(0), "a non-positive interval disables emitKeepAlivePings entirely")
+	assert.LessOrEqual(t, askQuestionKeepAliveInterval, 60*time.Second)
+}

@@ -120,6 +120,11 @@ type AgentEvent struct {
 	// values.
 	Type string `json:"type"`
 
+	// AttemptID identifies the recovery attempt that owns this callback. It is
+	// assigned by lifecycle at the startup stream boundary and is immutable for
+	// the lifetime of the callback.
+	AttemptID string `json:"attempt_id,omitempty"`
+
 	// SessionID is the current session identifier.
 	SessionID string `json:"session_id,omitempty"`
 
@@ -138,10 +143,26 @@ type AgentEvent struct {
 	// ownership from cross-subject event ordering.
 	TurnID string `json:"turn_id,omitempty"`
 
+	// ControlTurnID is the control-server-assigned turn identifier
+	// (AC-EXECUTORS-SURVIVAL-004.1), stamped onto a terminal event at the
+	// same point the control server retains it as that instance's turn
+	// outcome (internal/agentctl/server/process.recordTerminalOutcome). Zero
+	// means "not retained" -- the sequence that assigns it starts at 1
+	// (instance.Manager.turnIDSeq). AC-EXECUTORS-SURVIVAL-004.4 requires the
+	// dedup decision between a retrieved outcome and a live-delivered event
+	// for the same turn to be made on this identifier, since it -- unlike
+	// PromptGeneration -- travels on both observations and survives a
+	// restart that resets the backend's own in-memory generation counter.
+	ControlTurnID int64 `json:"control_turn_id,omitempty"`
+
 	// --- Message fields (for "message_chunk" type) ---
 
 	// Text contains streaming text content from the agent.
 	Text string `json:"text,omitempty"`
+	// ProviderDiagnosticCandidate marks a high-confidence ACP provider
+	// diagnostic that remains visible but is not ordinary model progress until
+	// the terminal prompt error is correlated.
+	ProviderDiagnosticCandidate bool `json:"provider_diagnostic_candidate,omitempty"`
 
 	// ProtocolMessageID identifies the source-protocol message this chunk belongs to.
 	// It is distinct from the Kandev message record ID used by downstream streaming.

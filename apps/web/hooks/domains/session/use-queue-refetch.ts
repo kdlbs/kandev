@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { getQueueStatus } from "@/lib/api/domains/queue-api";
 import type { QueueSessionIdentity } from "@/lib/api/domains/queue-api";
 import type {
@@ -55,13 +55,20 @@ export function useQueueRefetch(
   beginQueueOperation: BeginQueueOperation,
   finishQueueOperation: FinishQueueOperation,
 ) {
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const refetchVersion = useRef<Record<string, number>>({});
   const invalidate = useCallback((sessionId: string) => {
     refetchVersion.current[sessionId] = (refetchVersion.current[sessionId] ?? 0) + 1;
   }, []);
   const refetch = useCallback<QueueRefetch>(
     async (sessionId, callerToken) => {
-      if (!identity || identity.session_id !== sessionId) return;
+      if (!mountedRef.current || !identity || identity.session_id !== sessionId) return;
       const token =
         callerToken ?? beginQueueOperation(identity.session_id, identity.session_incarnation_id);
       if (!token) return;

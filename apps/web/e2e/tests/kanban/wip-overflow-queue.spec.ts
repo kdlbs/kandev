@@ -51,7 +51,6 @@ test("dragging into a feeder wakes an open pull target without reload", async ({
     () =>
       new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
   );
-
   // Dragging can temporarily move destinations before the anchored source
   // column, so scroll them back into the viewport before dropping.
   let feederBox = await feederColumn.boundingBox();

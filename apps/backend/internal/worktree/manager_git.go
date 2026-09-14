@@ -45,27 +45,16 @@ func (m *Manager) isGitRepo(path string) bool {
 //     "missing branch" from a "could not tell" and avoid surfacing a
 //     misleading ErrInvalidBaseBranch.
 func (m *Manager) branchExists(ctx context.Context, repoPath, branch string) (bool, error) {
-	// Acquire the throttle slot FIRST, then start the inspectTimeout
-	// timer. Building inspectCtx before Acquire (as we did originally)
-	// let throttle queue time eat through the 10s budget under load,
-	// producing 70s-lock-held / signal:killed cascades under git-pool
-	// contention. With this ordering the 10s timer starts the moment
-	// git is about to run, so we get an accurate "could not tell" only
-	// when the inspect itself is the slow part.
-	release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
-	if err != nil {
-		m.logger.Warn("branchExists bounded by context",
-			zap.String("repository_path", repoPath),
-			zap.String("branch", branch),
-			zap.Error(err))
-		return false, fmt.Errorf("branch check timed out for %q before throttle acquire: %w", branch, err)
-	}
-	defer release()
-	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
-	defer cancel()
-	cmd := m.newNonInteractiveGitCmd(inspectCtx, repoPath, "rev-parse", "--verify", branch)
-	if err := cmd.Run(); err != nil {
-		if ctxErr := inspectCtx.Err(); ctxErr != nil {
+	runErr, execCtxErr := subproc.RunGitAfterAcquire(
+		ctx,
+		subproc.GitLifecycle,
+		m.inspectTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			return m.newNonInteractiveGitCmd(execCtx, repoPath, "rev-parse", "--verify", branch)
+		},
+	)
+	if runErr != nil {
+		if ctxErr := firstContextError(execCtxErr, runErr); ctxErr != nil {
 			m.logger.Warn("branchExists bounded by context",
 				zap.String("repository_path", repoPath),
 				zap.String("branch", branch),
@@ -124,17 +113,15 @@ func normalizeOriginBranchName(branch string) string {
 // acquiring the lifecycle throttle. The timeout starts after admission so
 // queue wait does not consume the command's inspection budget.
 func (m *Manager) runBoundedGitInspect(ctx context.Context, repoPath string, args ...string) (string, error) {
-	release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
-	if err != nil {
-		return "", err
-	}
-	defer release()
-
-	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
-	defer cancel()
-	cmd := m.newNonInteractiveGitCmd(inspectCtx, repoPath, args...)
-	output, runErr := cmd.CombinedOutput()
-	if ctxErr := inspectCtx.Err(); ctxErr != nil {
+	output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
+		ctx,
+		subproc.GitLifecycle,
+		m.inspectTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			return m.newNonInteractiveGitCmd(execCtx, repoPath, args...)
+		},
+	)
+	if ctxErr := firstContextError(execCtxErr, runErr); ctxErr != nil {
 		return string(output), fmt.Errorf("git inspection timed out: %w", ctxErr)
 	}
 	return string(output), runErr
@@ -251,13 +238,18 @@ func (m *Manager) prepareBranchFromRefreshedOrigin(
 		return "", fmt.Errorf("required fetched remote ref %q is missing", remoteRef)
 	}
 	if !localExists {
-		release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
-		if err != nil {
-			return "", err
-		}
-		defer release()
-		cmd := m.newNonInteractiveGitCmd(ctx, repoPath, "branch", "--track", localBranch, remoteRef)
-		if output, runErr := cmd.CombinedOutput(); runErr != nil {
+		output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
+			ctx,
+			subproc.GitLifecycle,
+			m.inspectTimeout,
+			func(execCtx context.Context) *exec.Cmd {
+				return m.newNonInteractiveGitCmd(execCtx, repoPath, "branch", "--track", localBranch, remoteRef)
+			},
+		)
+		if runErr != nil {
+			if ctxErr := firstContextError(execCtxErr, runErr); ctxErr != nil {
+				return "", ctxErr
+			}
 			return "", fmt.Errorf("create local branch %q from refreshed origin: %s: %w",
 				localBranch, strings.TrimSpace(string(output)), runErr)
 		}
@@ -299,22 +291,15 @@ func (m *Manager) BranchRecoveryStatus(ctx context.Context, repoPath, branch str
 // A non-zero ancestry result is distinct from a failed probe: the former is a
 // proven negative, while the latter must stop required refresh preparation.
 func (m *Manager) refContains(ctx context.Context, repoPath, container, contained string) (bool, error) {
-	// Same Acquire-then-build-execCtx ordering as branchExists.
-	release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
-	if err != nil {
-		m.logger.Warn("refContains bounded by context before throttle acquire",
-			zap.String("repository_path", repoPath),
-			zap.String("container", container),
-			zap.String("contained", contained),
-			zap.Error(err))
-		return false, fmt.Errorf("acquire Git ancestry check: %w", err)
-	}
-	defer release()
-	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
-	defer cancel()
-	cmd := m.newNonInteractiveGitCmd(inspectCtx, repoPath, "merge-base", "--is-ancestor", contained, container)
-	runErr := cmd.Run()
-	if ctxErr := inspectCtx.Err(); ctxErr != nil {
+	runErr, execCtxErr := subproc.RunGitAfterAcquire(
+		ctx,
+		subproc.GitLifecycle,
+		m.inspectTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			return m.newNonInteractiveGitCmd(execCtx, repoPath, "merge-base", "--is-ancestor", contained, container)
+		},
+	)
+	if ctxErr := firstContextError(execCtxErr, runErr); ctxErr != nil {
 		return false, fmt.Errorf("git ancestry check timed out: %w", ctxErr)
 	}
 	if runErr == nil {
@@ -328,18 +313,16 @@ func (m *Manager) refContains(ctx context.Context, repoPath, container, containe
 }
 
 func (m *Manager) currentBranch(ctx context.Context, repoPath string) string {
-	// Same Acquire-then-build-execCtx ordering as branchExists.
-	release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
-	if err != nil {
-		return ""
-	}
-	defer release()
-	inspectCtx, cancel := context.WithTimeout(ctx, m.inspectTimeout)
-	defer cancel()
-	cmd := m.newNonInteractiveGitCmd(inspectCtx, repoPath, "rev-parse", "--abbrev-ref", "HEAD")
-	output, runErr := cmd.Output()
+	output, runErr, execCtxErr := subproc.RunGitOutputAfterAcquire(
+		ctx,
+		subproc.GitLifecycle,
+		m.inspectTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			return m.newNonInteractiveGitCmd(execCtx, repoPath, "rev-parse", "--abbrev-ref", "HEAD")
+		},
+	)
 	if runErr != nil {
-		if ctxErr := inspectCtx.Err(); ctxErr != nil {
+		if ctxErr := firstContextError(execCtxErr, runErr); ctxErr != nil {
 			m.logger.Warn("currentBranch bounded by context",
 				zap.String("repository_path", repoPath),
 				zap.Error(ctxErr))
@@ -352,13 +335,7 @@ func (m *Manager) currentBranch(ctx context.Context, repoPath string) string {
 func (m *Manager) newNonInteractiveGitCmd(ctx context.Context, repoPath string, args ...string) *exec.Cmd {
 	cmd := newGitCommand(ctx, args...)
 	cmd.Dir = repoPath
-	cmd.Env = append(os.Environ(),
-		"GIT_TERMINAL_PROMPT=0",
-		"GCM_INTERACTIVE=Never",
-		"GIT_ASKPASS=echo",
-		"SSH_ASKPASS=/bin/false",
-		"GIT_SSH_COMMAND=ssh -oBatchMode=yes",
-	)
+	cmd.Env = subproc.PrepareGitEnvironment(os.Environ())
 	// After the context cancels and the process is killed, child processes
 	// (e.g. credential helpers) may still hold stdout/stderr pipes open.
 	// WaitDelay bounds how long CombinedOutput waits for those pipes to close.
@@ -740,14 +717,17 @@ func syncFailureCause(reason string, _ error, contextErr error) error {
 func (m *Manager) runGitCombinedAfterAcquire(
 	ctx context.Context, execTimeout time.Duration, repoPath string, args ...string,
 ) ([]byte, error, error) {
-	release, err := subproc.AcquireGit(ctx, subproc.GitLifecycle)
-	if err != nil {
-		return nil, err, ctx.Err()
+	return subproc.RunGitCombinedAfterAcquire(ctx, subproc.GitLifecycle, execTimeout, func(execCtx context.Context) *exec.Cmd {
+		return m.newNonInteractiveGitCmd(execCtx, repoPath, args...)
+	})
+}
+
+func firstContextError(execCtxErr, runErr error) error {
+	if execCtxErr != nil {
+		return execCtxErr
 	}
-	defer release()
-	execCtx, cancel := context.WithTimeout(ctx, execTimeout)
-	defer cancel()
-	cmd := m.newNonInteractiveGitCmd(execCtx, repoPath, args...)
-	out, runErr := cmd.CombinedOutput()
-	return out, runErr, execCtx.Err()
+	if errors.Is(runErr, context.Canceled) || errors.Is(runErr, context.DeadlineExceeded) {
+		return runErr
+	}
+	return nil
 }

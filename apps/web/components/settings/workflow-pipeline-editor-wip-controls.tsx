@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import type { WorkflowStep } from "@/lib/types/http";
 import { HelpTip } from "./workflow-pipeline-editor-helpers";
 import { isWorkflowStepValueDirty } from "./workflow-dirty-state";
+import { settingsControlClassName } from "./settings-control";
 
 type StepWipControlsProps = {
   step: WorkflowStep;
@@ -62,7 +63,7 @@ export function StepWipControls({
             onUpdate({ wip_limit: parseWipLimit(e.target.value) });
           }}
           disabled={readOnly}
-          className="h-8"
+          className={settingsControlClassName()}
           data-settings-dirty={isWorkflowStepValueDirty(
             step,
             savedStep,
@@ -95,7 +96,7 @@ export function StepWipControls({
         >
           <SelectTrigger
             id={pullFromSelectID}
-            className="h-8"
+            className={settingsControlClassName()}
             data-testid={`${step.id}-pull-from-step-select`}
             data-settings-dirty={isWorkflowStepValueDirty(
               step,

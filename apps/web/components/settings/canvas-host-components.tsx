@@ -10,6 +10,7 @@ import {
   IconSparkles,
 } from "@tabler/icons-react";
 import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { Button } from "@kandev/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { MobilePickerSheet } from "@/components/task/mobile/mobile-picker-sheet";
@@ -161,6 +162,7 @@ export function CanvasHostBody({
   runtimeUrl,
   error,
   onOpenActions,
+  onRuntimeReady,
   onRuntimeError,
   onRetry,
 }: {
@@ -172,6 +174,7 @@ export function CanvasHostBody({
   runtimeUrl: string | null;
   error: string | null;
   onOpenActions: () => void;
+  onRuntimeReady: () => void;
   onRuntimeError: () => void;
   onRetry: () => void;
 }) {
@@ -188,11 +191,12 @@ export function CanvasHostBody({
         onOpenActions={onOpenActions}
       />
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-        {state === "ready" && runtimeUrl ? (
+        {(state === "loading_runtime" || state === "ready") && runtimeUrl ? (
           <CanvasPage
             key={`${canvasId}:${runtimeUrl}`}
             runtimeUrl={runtimeUrl}
             title={title}
+            onLoad={onRuntimeReady}
             onError={onRuntimeError}
           />
         ) : (
@@ -337,7 +341,7 @@ export function CanvasHostStatePanel({
         {state !== "loading_metadata" && state !== "loading_runtime" && (
           <Button
             variant="outline"
-            className="min-h-11 cursor-pointer md:min-h-7"
+            className={controlSizingClassName("standard", "cursor-pointer")}
             onClick={onRetry}
           >
             {t("canvases:retry")}

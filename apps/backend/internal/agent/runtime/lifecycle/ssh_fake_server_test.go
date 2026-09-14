@@ -6,8 +6,10 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/pkg/sftp"
@@ -55,6 +57,9 @@ type fakeSSHServer struct {
 	calls   []sshExecCall
 	handler sshExecHandler
 
+	reverseMu       sync.Mutex
+	reverseForwards map[string]net.Listener
+
 	// sftpEnabled serves the "sftp" subsystem against the real filesystem, so
 	// tests point remote paths at a t.TempDir() and assert on real bytes.
 	sftpEnabled bool
@@ -62,7 +67,21 @@ type fakeSSHServer struct {
 	// tcpTarget maps a requested direct-tcpip port onto a real local address.
 	// Returning "" rejects the channel.
 	tcpTarget func(port uint32) string
+
+	// silent, when set, makes the server accept a global request or a new
+	// channel open and answer neither — so SendRequest and Client.NewSession
+	// both block, as on a wedged link. Toggled live so a test can run a
+	// session healthy, then flip the server silent mid-test.
+	silent atomic.Bool
 }
+
+// setSilent switches the server's silent mode on or off. While silent, every
+// global request (including keepalive@openssh.com) and every new channel
+// open (including a session for a remote command) goes unanswered, so the
+// requester's SendRequest or Client.NewSession blocks exactly as it would on
+// a transport that has stopped carrying traffic. Existing, already-open
+// channels are unaffected.
+func (s *fakeSSHServer) setSilent(v bool) { s.silent.Store(v) }
 
 // newFakeSSHServer starts a listener on 127.0.0.1 and serves SSH until the
 // test finishes. handler may be nil, in which case every command succeeds with
@@ -81,7 +100,10 @@ func newFakeSSHServer(t *testing.T, handler sshExecHandler) *fakeSSHServer {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	s := &fakeSSHServer{t: t, listener: listener, signer: signer, handler: handler}
+	s := &fakeSSHServer{
+		t: t, listener: listener, signer: signer, handler: handler,
+		reverseForwards: make(map[string]net.Listener),
+	}
 	t.Cleanup(s.Close)
 	s.wg.Add(1)
 	go s.acceptLoop()
@@ -140,6 +162,12 @@ func (s *fakeSSHServer) lastCommandContaining(substr string) (sshExecCall, bool)
 func (s *fakeSSHServer) Close() {
 	s.closeOnce.Do(func() {
 		_ = s.listener.Close()
+		s.reverseMu.Lock()
+		for key, listener := range s.reverseForwards {
+			_ = listener.Close()
+			delete(s.reverseForwards, key)
+		}
+		s.reverseMu.Unlock()
 	})
 	s.wg.Wait()
 }
@@ -184,12 +212,16 @@ func (s *fakeSSHServer) serveConn(conn net.Conn) {
 	defer func() { _ = serverConn.Close() }()
 
 	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		ssh.DiscardRequests(reqs)
-	}()
+	go s.serveGlobalRequests(serverConn, reqs)
 
 	for newChan := range chans {
+		if s.silent.Load() {
+			// Stall the channel open: neither Accept nor Reject, so the
+			// client's OpenChannel blocks until the connection itself tears
+			// down. No goroutine needed — the pending request resolves on
+			// its own when the mux beneath it closes.
+			continue
+		}
 		switch newChan.ChannelType() {
 		case "session":
 			s.wg.Add(1)
@@ -201,6 +233,141 @@ func (s *fakeSSHServer) serveConn(conn net.Conn) {
 			_ = newChan.Reject(ssh.UnknownChannelType, newChan.ChannelType())
 		}
 	}
+}
+
+// serveGlobalRequests answers every global request (replying false to one
+// that wants a reply, mirroring ssh.DiscardRequests) unless the server is
+// silent, in which case it drains the request without replying — so a
+// wantReply sender's SendRequest blocks until the connection tears down.
+func (s *fakeSSHServer) serveGlobalRequests(conn *ssh.ServerConn, requests <-chan *ssh.Request) {
+	defer s.wg.Done()
+	for req := range requests {
+		if s.silent.Load() {
+			continue
+		}
+		switch req.Type {
+		case "tcpip-forward":
+			s.handleTCPIPForward(conn, req)
+		case "cancel-tcpip-forward":
+			s.handleCancelTCPIPForward(req)
+		default:
+			if req.WantReply {
+				_ = req.Reply(false, nil)
+			}
+		}
+	}
+}
+
+func (s *fakeSSHServer) handleTCPIPForward(conn *ssh.ServerConn, req *ssh.Request) {
+	var payload struct {
+		Addr string
+		Port uint32
+	}
+	if err := ssh.Unmarshal(req.Payload, &payload); err != nil {
+		_ = req.Reply(false, nil)
+		return
+	}
+	address := net.JoinHostPort(payload.Addr, strconv.FormatUint(uint64(payload.Port), 10))
+	listener, err := net.Listen("tcp", address)
+	if err != nil {
+		_ = req.Reply(false, nil)
+		return
+	}
+	actualPort := uint32(listener.Addr().(*net.TCPAddr).Port)
+	key := net.JoinHostPort(payload.Addr, strconv.FormatUint(uint64(actualPort), 10))
+	s.reverseMu.Lock()
+	s.reverseForwards[key] = listener
+	s.reverseMu.Unlock()
+	if payload.Port == 0 {
+		_ = req.Reply(true, ssh.Marshal(struct{ Port uint32 }{Port: actualPort}))
+	} else {
+		_ = req.Reply(true, nil)
+	}
+	s.wg.Add(1)
+	go s.serveReverseForward(conn, key, listener)
+}
+
+func (s *fakeSSHServer) handleCancelTCPIPForward(req *ssh.Request) {
+	var payload struct {
+		Addr string
+		Port uint32
+	}
+	if err := ssh.Unmarshal(req.Payload, &payload); err != nil {
+		_ = req.Reply(false, nil)
+		return
+	}
+	key := net.JoinHostPort(payload.Addr, strconv.FormatUint(uint64(payload.Port), 10))
+	s.reverseMu.Lock()
+	listener, ok := s.reverseForwards[key]
+	if ok {
+		delete(s.reverseForwards, key)
+	}
+	s.reverseMu.Unlock()
+	if ok {
+		_ = listener.Close()
+	}
+	_ = req.Reply(true, nil)
+}
+
+func (s *fakeSSHServer) serveReverseForward(conn *ssh.ServerConn, key string, listener net.Listener) {
+	defer s.wg.Done()
+	defer func() {
+		s.reverseMu.Lock()
+		delete(s.reverseForwards, key)
+		s.reverseMu.Unlock()
+	}()
+	for {
+		incoming, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		s.serveReverseForwardConnection(conn, incoming)
+	}
+}
+
+func (s *fakeSSHServer) serveReverseForwardConnection(conn *ssh.ServerConn, incoming net.Conn) {
+	defer func() { _ = incoming.Close() }()
+	originAddr, originPort := tcpOrigin(incoming.RemoteAddr())
+	channel, requests, err := conn.OpenChannel("forwarded-tcpip", ssh.Marshal(struct {
+		Addr       string
+		Port       uint32
+		OriginAddr string
+		OriginPort uint32
+	}{
+		Addr:       "127.0.0.1",
+		Port:       uint32(incoming.LocalAddr().(*net.TCPAddr).Port),
+		OriginAddr: originAddr,
+		OriginPort: originPort,
+	}))
+	if err != nil {
+		return
+	}
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		ssh.DiscardRequests(requests)
+	}()
+
+	var copies sync.WaitGroup
+	copies.Add(2)
+	go func() {
+		defer copies.Done()
+		_, _ = io.Copy(channel, incoming)
+	}()
+	go func() {
+		defer copies.Done()
+		_, _ = io.Copy(incoming, channel)
+	}()
+	copies.Wait()
+	_ = channel.Close()
+}
+
+func tcpOrigin(addr net.Addr) (string, uint32) {
+	tcpAddr, ok := addr.(*net.TCPAddr)
+	if !ok {
+		return "", 0
+	}
+	return tcpAddr.IP.String(), uint32(tcpAddr.Port)
 }
 
 func (s *fakeSSHServer) serveSession(newChan ssh.NewChannel) {

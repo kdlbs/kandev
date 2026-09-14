@@ -6,7 +6,10 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/office/models"
+	officeruntime "github.com/kandev/kandev/internal/office/runtime"
 )
+
+const decisionSkillSlug = "kandev-step-decision"
 
 // SkillManifest holds the resolved skills and instructions for an agent session.
 // It is a pure data structure built before executor selection, so the delivery
@@ -40,6 +43,7 @@ type ManifestInstruction struct {
 // returning a manifest that can be delivered to any executor type.
 func (si *SchedulerIntegration) buildSkillManifest(
 	ctx context.Context, agent *models.AgentInstance, workspaceSlug string,
+	availableActions ...string,
 ) *SkillManifest {
 	// Wave G: AgentInstance.ID == agent_profiles.id under the unified model.
 	agentTypeID := si.svc.resolveAgentType(agent.ID)
@@ -50,22 +54,18 @@ func (si *SchedulerIntegration) buildSkillManifest(
 		ProjectSkillDir: si.svc.resolveProjectSkillDir(agentTypeID),
 	}
 
+	decisionAvailable := hasDecisionAction(availableActions)
+
 	// Load desired skills.
 	slugs := ParseDesiredSlugs(agent.DesiredSkills)
 	for _, slug := range slugs {
-		skill, err := si.svc.GetSkillFromConfig(ctx, slug)
-		if err != nil {
-			si.logger.Debug("skip skill in manifest",
-				zap.String("slug", slug), zap.Error(err))
+		if slug == decisionSkillSlug && !decisionAvailable {
 			continue
 		}
-		manifest.Skills = append(manifest.Skills, ManifestSkill{
-			ID:          skill.ID,
-			Slug:        skill.Slug,
-			Content:     skill.Content,
-			Version:     skill.Version,
-			ContentHash: skill.ContentHash,
-		})
+		si.appendConfiguredSkill(ctx, manifest, slug)
+	}
+	if decisionAvailable && !manifestHasSkill(manifest, decisionSkillSlug) {
+		si.appendConfiguredSkill(ctx, manifest, decisionSkillSlug)
 	}
 
 	// Load instruction files from DB.
@@ -84,4 +84,47 @@ func (si *SchedulerIntegration) buildSkillManifest(
 	}
 
 	return manifest
+}
+
+func (si *SchedulerIntegration) appendConfiguredSkill(
+	ctx context.Context, manifest *SkillManifest, slug string,
+) {
+	skill, err := si.svc.GetSkillFromConfig(ctx, slug)
+	if err != nil {
+		si.logger.Debug("skip skill in manifest",
+			zap.String("slug", slug), zap.Error(err))
+		return
+	}
+	manifest.Skills = append(manifest.Skills, ManifestSkill{
+		ID:          skill.ID,
+		Slug:        skill.Slug,
+		Content:     skill.Content,
+		Version:     skill.Version,
+		ContentHash: skill.ContentHash,
+	})
+}
+
+func manifestHasSkill(manifest *SkillManifest, slug string) bool {
+	for _, skill := range manifest.Skills {
+		if skill.Slug == slug {
+			return true
+		}
+	}
+	return false
+}
+
+func hasDecisionAction(actions []string) bool {
+	for _, action := range actions {
+		if action == officeruntime.AvailableActionRecordStepDecision {
+			return true
+		}
+	}
+	return false
+}
+
+func decisionSkillSlugs(actions []string) []string {
+	if !hasDecisionAction(actions) {
+		return nil
+	}
+	return []string{decisionSkillSlug}
 }

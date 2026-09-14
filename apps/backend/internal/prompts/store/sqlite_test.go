@@ -168,8 +168,8 @@ func TestSQLiteRepository_CRUD(t *testing.T) {
 			t.Fatalf("expected custom prompt to be deleted, but it still exists")
 		}
 	}
-	if builtinCount != 6 {
-		t.Fatalf("expected 6 built-in prompts, got %d", builtinCount)
+	if builtinCount != 7 {
+		t.Fatalf("expected 7 built-in prompts, got %d", builtinCount)
 	}
 }
 
@@ -184,13 +184,17 @@ func TestSQLiteRepository_BuiltinPrompts(t *testing.T) {
 		t.Fatalf("list prompts: %v", err)
 	}
 
-	// Should include the CI auto-fix and changes walkthrough built-in prompts.
+	// Should include the canvas, CI auto-fix, and changes walkthrough built-in prompts.
 	builtinCount := 0
+	var createCanvasContent string
 	var ciAutoFixContent string
 	var changesWalkthroughContent string
 	for _, p := range list {
 		if p.Builtin {
 			builtinCount++
+		}
+		if p.ID == "builtin-create-canvas" && p.Name == "create-canvas" && p.Content != "" {
+			createCanvasContent = p.Content
 		}
 		if p.ID == "builtin-ci-auto-fix" && p.Name == "ci-auto-fix" && p.Content != "" {
 			ciAutoFixContent = p.Content
@@ -200,8 +204,11 @@ func TestSQLiteRepository_BuiltinPrompts(t *testing.T) {
 		}
 	}
 
-	if builtinCount != 6 {
-		t.Fatalf("expected 6 built-in prompts, got %d", builtinCount)
+	if builtinCount != 7 {
+		t.Fatalf("expected 7 built-in prompts, got %d", builtinCount)
+	}
+	if createCanvasContent == "" {
+		t.Fatalf("expected create-canvas built-in prompt")
 	}
 	if ciAutoFixContent == "" {
 		t.Fatalf("expected ci-auto-fix built-in prompt")

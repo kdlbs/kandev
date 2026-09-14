@@ -36,6 +36,36 @@ describe("useHoverPopover", () => {
     expect(result.current.open).toBe(false);
   });
 
+  it("stays open while the trigger remains focused after pointer leave", () => {
+    const { result } = setup();
+    act(() => result.current.onTriggerEnter({ type: "pointerenter" }));
+    act(() => vi.advanceTimersByTime(OPEN));
+    act(() => result.current.onTriggerEnter({ type: "focus" }));
+    act(() => result.current.onTriggerLeave({ type: "pointerleave" }));
+    act(() => vi.advanceTimersByTime(CLOSE));
+
+    expect(result.current.open).toBe(true);
+
+    act(() => result.current.onTriggerLeave({ type: "blur" }));
+    act(() => vi.advanceTimersByTime(CLOSE));
+    expect(result.current.open).toBe(false);
+  });
+
+  it("stays open while the pointer remains after trigger blur", () => {
+    const { result } = setup();
+    act(() => result.current.onTriggerEnter({ type: "pointerenter" }));
+    act(() => vi.advanceTimersByTime(OPEN));
+    act(() => result.current.onTriggerEnter({ type: "focus" }));
+    act(() => result.current.onTriggerLeave({ type: "blur" }));
+    act(() => vi.advanceTimersByTime(CLOSE));
+
+    expect(result.current.open).toBe(true);
+
+    act(() => result.current.onTriggerLeave({ type: "pointerleave" }));
+    act(() => vi.advanceTimersByTime(CLOSE));
+    expect(result.current.open).toBe(false);
+  });
+
   it("stays open when the cursor bridges trigger -> content (leave then enter)", () => {
     const { result } = setup();
     act(() => result.current.onTriggerEnter());

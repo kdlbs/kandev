@@ -13,6 +13,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -22,6 +23,15 @@ import (
 
 	"github.com/kandev/kandev/internal/office/models"
 )
+
+// ErrAgentNotFound is wrapped (%w) into GetAgentInstance's not-found error
+// alongside sql.ErrNoRows itself, so a caller can distinguish "no such
+// agent" from any other read failure via either errors.Is(err,
+// ErrAgentNotFound) (the wakeup dispatcher's F41 sentinel check) or
+// errors.Is(err, sql.ErrNoRows) (GetAgentFromConfig's
+// AC-OFFICE-BUDGET-001.13 check, which calls GetAgentInstance directly)
+// without a second lookup.
+var ErrAgentNotFound = errors.New("agent instance not found")
 
 // agentInstanceColumns is the SELECT projection that maps agent_profiles
 // columns onto the AgentInstance struct shape. Used by every read in this
@@ -187,7 +197,13 @@ func (r *Repository) GetAgentInstance(ctx context.Context, id string) (*models.A
 	query := `SELECT ` + agentInstanceColumns + ` FROM agent_profiles WHERE id = ? AND ` + agentInstanceFilter
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(query), id).StructScan(&agent)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("agent instance not found: %s", id)
+		// Wraps both ErrAgentNotFound and sql.ErrNoRows directly (Go 1.20+
+		// multi-%w) so callers can use either errors.Is(err, ErrAgentNotFound)
+		// (the wakeup dispatcher's F41 sentinel check) or errors.Is(err,
+		// sql.ErrNoRows) (AC-OFFICE-BUDGET-001.13's two dispositions) without a
+		// second lookup, and without repeating "agent instance not found"
+		// twice in the message.
+		return nil, fmt.Errorf("%w: %s: %w", ErrAgentNotFound, id, sql.ErrNoRows)
 	}
 	return &agent, err
 }
@@ -478,7 +494,9 @@ func (r *Repository) GetAgentInstanceByNameAny(
 	query := `SELECT ` + agentInstanceColumns + ` FROM agent_profiles WHERE name = ? AND ` + agentInstanceFilter + ` LIMIT 1`
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(query), name).StructScan(&agent)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("agent instance not found: %s", name)
+		// See GetAgentInstance above: wrapped so GetAgentFromConfig can
+		// distinguish "not found" from a transient error via errors.Is.
+		return nil, fmt.Errorf("agent instance not found: %s: %w", name, sql.ErrNoRows)
 	}
 	return &agent, err
 }

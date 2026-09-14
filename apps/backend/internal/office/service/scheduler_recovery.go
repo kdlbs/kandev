@@ -7,6 +7,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
 // maxRecoveryPerTick caps the number of unstarted tasks recovered in one tick.
@@ -69,7 +70,8 @@ func (si *SchedulerIntegration) recoverUnstartedTasks(ctx context.Context, log *
 			zap.String("agent_profile_id", t.AssigneeAgentProfileID))
 
 		payload := mustJSON(map[string]string{"task_id": t.ID})
-		if err := si.svc.QueueRun(ctx, t.AssigneeAgentProfileID,
+		runsservice.ReportKeylessEnqueue(RunReasonTaskAssigned, runsservice.KeylessCauseByDesign, "")
+		if _, err := si.svc.QueueRun(ctx, t.AssigneeAgentProfileID,
 			RunReasonTaskAssigned, payload, ""); err != nil {
 			if ctx.Err() != nil {
 				return

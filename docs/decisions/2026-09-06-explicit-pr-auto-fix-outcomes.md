@@ -94,4 +94,3 @@ hash and the `created_at == updated_at` guard. User-edited rows remain intact.
    of the permanent suppression failure.
 5. **Reuse `step_complete_kandev`.** Rejected because workflow-step completion
    and one PR feedback attempt have different identity, lifecycle, and effects.
-

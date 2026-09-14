@@ -15,6 +15,8 @@ import type { TaskStatus } from "@/app/office/tasks/[id]/types";
 
 export type PendingApprover = { agent_profile_id?: string; name?: string };
 
+type ApprovalGateReason = "approvals" | "workflow_step";
+
 // Builds the message the user sees when the approver gate rejects the move.
 // Names render in the order the backend echoed them.
 export function formatPendingApproversMessage(pending: PendingApprover[]): string {
@@ -41,6 +43,14 @@ function extractRedirectedStatus(err: unknown): (OfficeTaskStatus | TaskStatus) 
   return typeof status === "string" && status.length > 0
     ? (status as OfficeTaskStatus | TaskStatus)
     : null;
+}
+
+function extractGateReason(err: unknown): ApprovalGateReason | null {
+  if (!(err instanceof ApiError)) return null;
+  const body = err.body;
+  if (!body || typeof body !== "object") return null;
+  const reason = (body as { reason?: unknown }).reason;
+  return reason === "approvals" || reason === "workflow_step" ? reason : null;
 }
 
 // Thrown instead of a plain Error when the approver gate fires. The backend
@@ -70,6 +80,13 @@ export async function updateTaskStatusOrTranslateGate(
   try {
     await updateTask(taskId, { status });
   } catch (err) {
+    if (extractGateReason(err) === "workflow_step") {
+      const redirectedStatus = extractRedirectedStatus(err) ?? "in_review";
+      throw new ApprovalGateError(
+        t("task:cannotMarkDoneBeforeFinalWorkflowStep"),
+        redirectedStatus,
+      );
+    }
     const pending = extractPendingApprovers(err);
     if (pending) {
       // The gate always redirects to in_review today (see applyApprovalGate
