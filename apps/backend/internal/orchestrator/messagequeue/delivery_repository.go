@@ -96,6 +96,20 @@ func (r *sqliteRepository) AcknowledgeQueueEntryAndDeliveryForSession(
 	return r.acknowledgeQueueEntryAndDelivery(ctx, &identity, identity.SessionID, queueEntryID, deliveredAt)
 }
 
+// settleQueueEntryDispatchClaimTx settles any durable ordinary-dispatch claim
+// for an acknowledged entry in the same transaction, mirroring
+// deletePendingQueueDispatchTx: an accepted prompt that leaves its claim
+// behind would be re-dispatched by startup recovery. A missing claim commits
+// cleanly; the entry was never claimed.
+func settleQueueEntryDispatchClaimTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, queueEntryID, sessionID string) error {
+	if _, err := tx.ExecContext(ctx, db.Rebind(`
+		DELETE FROM queue_dispatch_claims WHERE entry_id = ? AND session_id = ?
+	`), queueEntryID, sessionID); err != nil && !internaldb.IsMissingTableError(err) {
+		return fmt.Errorf("acknowledge queue dispatch claim: %w", err)
+	}
+	return nil
+}
+
 func (r *sqliteRepository) acknowledgeQueueEntryAndDelivery(
 	ctx context.Context, identity *QueueSessionIdentity, sessionID, queueEntryID string, deliveredAt time.Time,
 ) error {
@@ -145,14 +159,8 @@ func (r *sqliteRepository) acknowledgeQueueEntryAndDelivery(
 	if affected != 1 {
 		return ErrEntryNotFound
 	}
-	// Settle any durable ordinary-dispatch claim for the same entry in the
-	// same transaction, mirroring deletePendingQueueDispatchTx: an accepted
-	// prompt that leaves its claim behind would be re-dispatched by startup
-	// recovery. A missing claim commits cleanly; the entry was never claimed.
-	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
-		DELETE FROM queue_dispatch_claims WHERE entry_id = ? AND session_id = ?
-	`), queueEntryID, sessionID); err != nil && !internaldb.IsMissingTableError(err) {
-		return fmt.Errorf("acknowledge queue dispatch claim: %w", err)
+	if err := settleQueueEntryDispatchClaimTx(ctx, tx, r.db, queueEntryID, sessionID); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit delivery queue acknowledgement: %w", err)

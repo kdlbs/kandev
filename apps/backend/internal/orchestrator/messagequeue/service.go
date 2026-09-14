@@ -2166,13 +2166,6 @@ func (s *Service) MarkDeliveryAttemptedForSession(
 	})
 }
 
-func (s *Service) acknowledgeQueuedDurably(
-	ctx context.Context, acknowledger deliveryQueueAcknowledger, sessionID, entryID string,
-) error {
-	err := acknowledger.AcknowledgeQueueEntryAndDelivery(ctx, sessionID, entryID, time.Now().UTC())
-	return s.handleDurableAcknowledgementFailure(ctx, sessionID, entryID, err)
-}
-
 func (s *Service) acknowledgeQueuedForSessionDurably(
 	ctx context.Context, acknowledger deliveryQueueIdentityAcknowledger, identity QueueSessionIdentity, entryID string,
 ) error {

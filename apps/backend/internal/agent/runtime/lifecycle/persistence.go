@@ -55,6 +55,21 @@ func (m *Manager) SetExecutorRunningWriter(w ExecutorRunningWriter) {
 	m.runningWriter = w
 }
 
+// withOfficeAgentProfileIDMetadata copies the Office profile identity onto a
+// snapshot's metadata map so the persisted running row keeps it across
+// persistence round trips. Ordinary launches with no Office identity pass
+// through unchanged.
+func withOfficeAgentProfileIDMetadata(execution *AgentExecution, metadata map[string]interface{}) map[string]interface{} {
+	if execution.OfficeAgentProfileID == "" {
+		return metadata
+	}
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	metadata[MetadataKeyOfficeAgentProfileID] = execution.OfficeAgentProfileID
+	return metadata
+}
+
 // buildRunningFromExecution maps an in-memory execution into the persistence
 // shape. Used at every executionStore.Add success site so the DB row is always
 // derived from the same source of truth as the store.
@@ -82,12 +97,7 @@ func buildRunningFromExecutionWithPromptGeneration(
 	}
 
 	metadata := execution.MetadataSnapshot()
-	if execution.OfficeAgentProfileID != "" {
-		if metadata == nil {
-			metadata = make(map[string]interface{})
-		}
-		metadata[MetadataKeyOfficeAgentProfileID] = execution.OfficeAgentProfileID
-	}
+	metadata = withOfficeAgentProfileIDMetadata(execution, metadata)
 	persistentMetadata := FilterPersistentMetadata(metadata)
 	if promptGeneration > 0 {
 		if persistentMetadata == nil {
