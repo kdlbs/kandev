@@ -26,10 +26,10 @@ func carrierMetadataFromRun(run *models.Run) map[string]interface{} {
 // carrierMetadataFromCarrier converts a resolved TaskBoundaryCarrier back
 // into the map[string]interface{} shape carrierMetadataFromRun produces,
 // so a carrier already read off one task's metadata can be forwarded
-// verbatim onto another task created from it — a workflow step's
-// create_child_task action has no live causing run to read (only the
-// trigger's task id), so it carries the parent task's own already-resolved
-// carrier forward instead.
+// verbatim onto another task created from it. This does not advance
+// depth, so it is only correct for a genuinely sessionless trigger with
+// no live causing run at all — see TaskBoundaryCarrierMetadata's live-run
+// preference.
 func carrierMetadataFromCarrier(c TaskBoundaryCarrier) map[string]interface{} {
 	return map[string]interface{}{
 		taskmodels.MetaKeyOfficeCarrierCausationID:    c.CausationID,

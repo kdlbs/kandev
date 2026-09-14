@@ -215,14 +215,24 @@ func (s *Service) TaskBoundaryCarrier(ctx context.Context, taskID string) TaskBo
 	return carrierFromTaskMetadata(metadata)
 }
 
-// TaskBoundaryCarrierMetadata resolves taskID's task-boundary carrier and
-// returns it in the map shape CreateTaskRequest/ChildTaskSpec's
-// OfficeCarrierMetadata field expects, so a child task created from taskID
-// (e.g. the workflow engine's create_child_task action, which has no live
-// causing run to read — only the trigger's task id) can carry forward the
-// same causation lineage instead of silently rooting at depth 0
-// (AC-OFFICE-RUN-CAUSATION-001.24).
+// TaskBoundaryCarrierMetadata resolves the causation carrier a task
+// created from taskID (e.g. the workflow engine's create_child_task
+// action) should carry, in the map shape CreateTaskRequest/ChildTaskSpec's
+// OfficeCarrierMetadata field expects.
+//
+// taskID is the action's own task, not a fixed "root" — create_child_task
+// can chain, so the carrier must advance one hop deeper each time or the
+// depth ceiling never engages. The run currently claimed against taskID
+// (the run executing this action's turn) is that hop: its own lineage is
+// carried forward directly via carrierMetadataFromRun, the same way
+// CreateOfficeSubtaskAsAgent resolves a live causing run. Only when no run
+// is claimed against taskID — a genuinely sessionless trigger — does this
+// fall back to forwarding taskID's own already-resolved carrier verbatim,
+// which cannot advance depth on its own.
 func (s *Service) TaskBoundaryCarrierMetadata(ctx context.Context, taskID string) map[string]interface{} {
+	if run, err := s.repo.GetClaimedRunByTaskID(ctx, taskID); err == nil && run != nil {
+		return carrierMetadataFromRun(run)
+	}
 	return carrierMetadataFromCarrier(s.TaskBoundaryCarrier(ctx, taskID))
 }
 

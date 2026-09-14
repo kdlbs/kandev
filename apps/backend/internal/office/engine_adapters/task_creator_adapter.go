@@ -47,10 +47,10 @@ type ChildTaskCreateSpec struct {
 // (AC-OFFICE-RUN-CAUSATION-001.5/.18) for a task id, so a child task
 // created from it (the create_child_task workflow step action) can carry
 // the same causation lineage forward instead of silently rooting at
-// depth 0. The engine's create_child_task action has no live causing run
-// to read — only the trigger's task id — so this resolves the *parent
-// task's own* already-resolved carrier and forwards it unchanged, the
-// same pattern QueueRunFromTaskBoundary uses at the run-enqueue boundary.
+// depth 0. The implementation prefers the run currently claimed against
+// the task id (the run executing this action) so depth advances one hop
+// per create_child_task call; it falls back to the task's own
+// already-resolved carrier only when no run is claimed against it.
 // Implemented in production by *office/service.Service. Optional: nil
 // means create_child_task never carries a carrier (pre-existing
 // behaviour).
