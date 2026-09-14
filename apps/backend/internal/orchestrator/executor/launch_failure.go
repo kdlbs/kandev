@@ -103,6 +103,7 @@ func (e *Executor) buildLastAgentError(
 		Message:    classification.message,
 		OccurredAt: occurredAt,
 		Scope:      models.ErrorScopeSession,
+		Phase:      models.LaunchErrorPhaseBootstrap,
 		Code:       classification.code,
 		Details:    details,
 		RecoveryActions: func() []string {

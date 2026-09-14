@@ -170,6 +170,9 @@ func TestBuildLastAgentErrorSanitizesRepositoryPreparationDetails(t *testing.T) 
 	if !strings.Contains(errorValue.Details, "repo-back") || !strings.Contains(errorValue.Details, "backend") {
 		t.Fatalf("launch details = %q, want repository identity", errorValue.Details)
 	}
+	if errorValue.Phase != models.LaunchErrorPhaseBootstrap {
+		t.Fatalf("launch phase = %q, want bootstrap", errorValue.Phase)
+	}
 	if strings.Contains(errorValue.Details, "ghp_abcdefghijklmnopqrstuvwxyz1234567890AB") ||
 		strings.Contains(errorValue.Details, "user:") {
 		t.Fatalf("launch details exposed credential-bearing URL: %q", errorValue.Details)
