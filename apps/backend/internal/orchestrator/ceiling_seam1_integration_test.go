@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
@@ -84,4 +85,36 @@ func TestStartTask_ManualLaunchOverCeilingIsAdmitted(t *testing.T) {
 
 	record := deferredLaunchOf(t, svc, "seam1-it-manual-second")
 	require.Nil(t, record, "a manual override must never write a ceiling_deferred record")
+}
+
+// TestStartTask_FailedLaunchAfterSessionCreationReleasesTheReservation pins
+// the reservation-leak fix: seam1's reservation is rebound onto the new
+// session partway through StartTask, well before the launch attempt that can
+// still fail. A failure at that point must still release the reservation
+// through the real StartTask entry point, not just at the seam1Reservation
+// unit level — otherwise the ceiling's only slot stays phantom-held until the
+// stale-reservation sweep eventually reclaims it.
+func TestStartTask_FailedLaunchAfterSessionCreationReleasesTheReservation(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "seam1-it-leak", "seam1-it-leak-session", models.TaskSessionStateCompleted)
+
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "seam1-it-leak", v1.TaskStateInProgress)
+	launchErr := errors.New("workspace launch failed")
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, _ *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			return nil, launchErr
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
+
+	_, err := svc.StartTask(ctx, "seam1-it-leak", "profile-1", "", "", "", "go", "", false, true, nil)
+	require.Error(t, err, "the forced launch failure must still surface")
+
+	population, popErr := svc.sessionCeiling.population(ctx)
+	require.NoError(t, popErr)
+	require.Equal(t, 0, population,
+		"a launch failure after session creation must release the seam1 reservation, not leak it")
 }

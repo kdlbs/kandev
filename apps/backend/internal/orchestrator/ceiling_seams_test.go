@@ -123,10 +123,14 @@ func TestAdmitOrDeferSeam1ReportsWriteFailure(t *testing.T) {
 	}
 }
 
-// TestSeam1ReservationRebindReleasesNothing pins the rebind/release contract:
-// once rebound, releaseIfNotRebound is a no-op, and the population still
-// reflects the launch under its new session id.
-func TestSeam1ReservationRebindReleasesNothing(t *testing.T) {
+// TestSeam1ReservationReleasesAfterRebindIfNeverConsumed pins the corrected
+// rebind/release contract: rebinding moves the reservation onto the session's
+// id, but does not by itself protect it from release. A launch that fails
+// after the session was created (so rebindToSession already ran) but before
+// it ever reached STARTING must still free the slot via the deferred
+// releaseIfNotConsumed — otherwise the reservation would leak under the
+// session id until the stale-reservation sweep eventually reclaims it.
+func TestSeam1ReservationReleasesAfterRebindIfNeverConsumed(t *testing.T) {
 	controller := newSessionCeilingController(5, nil, nil)
 	decision := controller.admit(context.Background(), admissionRequest{taskID: "t", origin: launchOriginAutomatic, seam: "startTask"})
 	if !decision.admitted {
@@ -134,13 +138,39 @@ func TestSeam1ReservationRebindReleasesNothing(t *testing.T) {
 	}
 	reservation := &seam1Reservation{controller: controller, key: decision.reservationKey}
 	reservation.rebindToSession("session-1")
-	reservation.releaseIfNotRebound()
+	// Simulate a launch failure between rebind and STARTING: the reservation
+	// was never consumed, so the deferred cleanup must still release it.
+	reservation.releaseIfNotConsumed()
+
+	population, err := controller.population(context.Background())
+	if err != nil {
+		t.Fatalf("population: %v", err)
+	}
+	if population != 0 {
+		t.Fatalf("population = %d, want 0 (a rebound-but-unconsumed reservation must still release)", population)
+	}
+}
+
+// TestSeam1ReservationConsumeSurvivesRebind covers the success path: once the
+// launch actually succeeds and the reservation is consumed, the deferred
+// releaseIfNotConsumed becomes a no-op and the population keeps counting the
+// session under its rebound key.
+func TestSeam1ReservationConsumeSurvivesRebind(t *testing.T) {
+	controller := newSessionCeilingController(5, nil, nil)
+	decision := controller.admit(context.Background(), admissionRequest{taskID: "t", origin: launchOriginAutomatic, seam: "startTask"})
+	if !decision.admitted {
+		t.Fatal("expected admission")
+	}
+	reservation := &seam1Reservation{controller: controller, key: decision.reservationKey}
+	reservation.rebindToSession("session-1")
+	reservation.consume()
+	reservation.releaseIfNotConsumed()
 
 	population, err := controller.population(context.Background())
 	if err != nil {
 		t.Fatalf("population: %v", err)
 	}
 	if population != 1 {
-		t.Fatalf("population = %d, want 1 (the rebound reservation should still be held)", population)
+		t.Fatalf("population = %d, want 1 (a consumed reservation must survive the deferred release)", population)
 	}
 }

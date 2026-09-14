@@ -1311,7 +1311,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	if deferred {
 		return nil, nil
 	}
-	defer seam1Res.releaseIfNotRebound()
+	defer seam1Res.releaseIfNotConsumed()
 
 	// Reserve any pending "start it later" intent for the whole of this start,
 	// taken before the session is prepared rather than just before the launch:
@@ -1661,6 +1661,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 
 	// The agent is running, so the reservation becomes a consumption.
 	launchClaim.consume(ctx)
+	seam1Res.consume()
 
 	// Note: Task stays in SCHEDULING state until the agent is fully initialized.
 	// The executor will transition to IN_PROGRESS after StartAgentProcess() succeeds.

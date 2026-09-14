@@ -21,13 +21,18 @@ func originFromAutoStart(autoStart bool) launchOrigin {
 }
 
 // seam1Reservation tracks the launch-scoped admission reservation seam 1 takes
-// before a session exists (AC-6a). Every return path releases it, by deferring
-// releaseIfNotRebound at the point of admission, unless it has since been
-// rebound onto the session that was actually created.
+// before a session exists (AC-6a). Every return path releases it, by
+// deferring releaseIfNotConsumed at the point of admission, until the launch
+// this reservation guards actually succeeds. rebindToSession moves the
+// reservation onto the created session's id partway through, but rebinding
+// alone does not protect it from release — a launch that fails after the
+// session exists but before it ever reaches STARTING must still free the
+// slot, so release is gated on consumed, not on rebound.
 type seam1Reservation struct {
 	controller *sessionCeilingController
 	key        string
 	rebound    bool
+	consumed   bool
 
 	// manualOverride, population, populationKnown and ceiling are the
 	// admission decision's own reading, carried forward so AC-14/AC-53's
@@ -40,20 +45,34 @@ type seam1Reservation struct {
 }
 
 // rebindToSession moves the reservation onto the created session's id, as one
-// operation rather than a release followed by an acquire (AC-6a).
+// operation rather than a release followed by an acquire (AC-6a). The local
+// key is updated to match, so a later release (if the launch never reaches
+// consume) still targets the reservation the controller is actually holding.
 func (r *seam1Reservation) rebindToSession(sessionID string) {
 	if r == nil || r.controller == nil || r.rebound || sessionID == "" {
 		return
 	}
 	if r.controller.rebind(r.key, sessionID) {
 		r.rebound = true
+		r.key = sessionID
 	}
 }
 
-// releaseIfNotRebound is the deferred cleanup for every failure path between
-// admission and session creation.
-func (r *seam1Reservation) releaseIfNotRebound() {
-	if r == nil || r.controller == nil || r.rebound {
+// consume marks the reservation as belonging to a launch that actually
+// succeeded, so releaseIfNotConsumed becomes a no-op.
+func (r *seam1Reservation) consume() {
+	if r == nil {
+		return
+	}
+	r.consumed = true
+}
+
+// releaseIfNotConsumed is the deferred cleanup for every return path between
+// admission and the launch actually succeeding, including failures that
+// happen after rebindToSession has already moved the reservation onto the
+// created session's id.
+func (r *seam1Reservation) releaseIfNotConsumed() {
+	if r == nil || r.controller == nil || r.consumed {
 		return
 	}
 	r.controller.release(r.key)
@@ -99,8 +118,9 @@ func seam1StartPayload(
 // session, materializing a workspace, or claiming the launch intent it holds.
 //
 // The returned reservation is non-nil only when the launch is admitted. The
-// caller is responsible for deferring reservation.releaseIfNotRebound and for
-// calling reservation.rebindToSession once the session exists.
+// caller is responsible for deferring reservation.releaseIfNotConsumed,
+// calling reservation.rebindToSession once the session exists, and calling
+// reservation.consume once the launch actually succeeds.
 func (s *Service) admitOrDeferSeam1(
 	ctx context.Context, taskID string, origin launchOrigin, startPayload map[string]interface{},
 ) (reservation *seam1Reservation, deferred bool, err error) {
