@@ -177,3 +177,7 @@ Validation passed:
 - Real bootstrap admission, Office failure production, stale retirement fencing, and reload-retained history regressions passed.
 - Chromium and Mobile Chrome launch-recovery suites passed with 4 and 3 tests respectively.
 - The bootstrap repair regression and the profile-specific session ownership regression passed in the full orchestrator suite.
+
+Review follow-up validation:
+
+- Legacy FAILED Office sessions without `last_agent_error` metadata remain in the timeline with their existing recovery actions. The focused chat, recovery, and simple-chat suites passed 54 tests.

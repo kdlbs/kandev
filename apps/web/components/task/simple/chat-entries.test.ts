@@ -64,7 +64,10 @@ describe("buildRunErrorsFromSessions", () => {
   });
 
   it("omits the URL when metadata or the field is absent", () => {
-    expect(buildRunErrorsFromSessions([session({ errorMessage: "boom" })])).toHaveLength(0);
+    const legacyError = buildRunErrorsFromSessions([session({ errorMessage: "boom" })]);
+    expect(legacyError).toHaveLength(1);
+    expect(legacyError[0].remediationUrl).toBeUndefined();
+    expect(legacyError[0].isActive).toBe(true);
     for (const s of [
       session({ metadata: { last_agent_error: { message: "boom" } } }),
       session({ metadata: { last_agent_error: { message: "boom", remediation_url: "" } } }),

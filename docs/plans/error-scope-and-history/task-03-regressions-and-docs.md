@@ -179,3 +179,9 @@ Validation passed:
 - `git diff --check`: passed.
 - Review regression suites and the complete selected backend package run: passed.
 - The composed task panel assertion counts persisted and provisional recovery representations together and passed with the affected frontend suite.
+
+Review follow-up validation:
+
+- The desktop PR watcher missing-branch E2E now opens the task-shell error details and passed with one test.
+- The mobile PR watcher missing-branch E2E uses the same shared surface with touch interaction and passed with one test.
+- Full frontend lint and typecheck, plus the focused recovery suites, passed after the compatibility fixes.

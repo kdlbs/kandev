@@ -61,28 +61,40 @@ export function buildLaterAgentReplyMap(comments: TaskComment[]): Map<string, bo
 export function buildRunErrorsFromSessions(sessions: TaskSession[]): RunError[] {
   const errors: RunError[] = [];
   for (const s of sessions) {
-    const parsedLastError = readLastAgentErrorIncludingDismissed(s.metadata);
-    if (!parsedLastError) continue;
-    const activeLastError = readLastAgentError(s.metadata);
-    const failedAt =
-      parsedLastError.occurredAt ?? s.completedAt ?? s.updatedAt ?? s.startedAt ?? "";
-    errors.push({
-      id: `re-${s.id}`,
-      sessionId: s.id,
-      agentProfileId: s.agentProfileId,
-      rawPayload: s.errorMessage ?? "",
-      failedAt,
-      failureCode: parsedLastError.code,
-      failureDetails: parsedLastError.details,
-      message: parsedLastError.message,
-      recoveryActions: activeLastError?.recoveryActions,
-      taskRepositoryId: parsedLastError.taskRepositoryId,
-      errorStamp: lastAgentErrorStamp(parsedLastError),
-      remediationUrl: normalizeRemediationUrl(parsedLastError.remediationUrl) ?? undefined,
-      isActive: activeLastError !== null,
-    });
+    const error = buildRunErrorFromSession(s);
+    if (error) errors.push(error);
   }
   return errors;
+}
+
+function buildRunErrorFromSession(s: TaskSession): RunError | null {
+  const parsedLastError = readLastAgentErrorIncludingDismissed(s.metadata);
+  const isLegacy = parsedLastError === null;
+  // Older Office sessions only stored error_message on the session row. Keep
+  // those FAILED rows in the chronological timeline while using metadata as
+  // the richer identity for resumed and dismissed failures.
+  if (isLegacy && s.state !== "FAILED") return null;
+
+  const activeLastError = readLastAgentError(s.metadata);
+  const error: RunError = {
+    id: `re-${s.id}`,
+    sessionId: s.id,
+    agentProfileId: s.agentProfileId,
+    rawPayload: s.errorMessage ?? "",
+    failedAt: parsedLastError?.occurredAt ?? s.completedAt ?? s.updatedAt ?? s.startedAt ?? "",
+    recoveryActions: activeLastError?.recoveryActions,
+    isActive: activeLastError !== null || isLegacy,
+  };
+  if (isLegacy) return error;
+
+  error.failureCode = parsedLastError.code;
+  error.failureDetails = parsedLastError.details;
+  error.message = parsedLastError.message;
+  error.taskRepositoryId = parsedLastError.taskRepositoryId;
+  error.errorStamp = lastAgentErrorStamp(parsedLastError);
+  const remediationUrl = normalizeRemediationUrl(parsedLastError.remediationUrl);
+  if (remediationUrl) error.remediationUrl = remediationUrl;
+  return error;
 }
 
 export function hasMatchingSessionLaunchError(

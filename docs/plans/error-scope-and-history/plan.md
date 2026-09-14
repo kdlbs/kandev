@@ -173,6 +173,8 @@ Review-fixup verification on September 14:
 - The five affected frontend suites: 65 tests passed.
 - Frontend typecheck and lint: passed.
 - Frontend localization checks and Vite build: passed.
+- Legacy FAILED Office rows without structured metadata retain their chronological entry and recovery actions; the focused recovery suites pass with 54 tests.
+- Desktop and mobile PR watcher failures now exercise the task-shell error strip and both focused E2E specs pass.
 
 The implementation changed production and permanent test files as required by the work orders. The provider timeout diagnosis and repair remain outside this package.
 
