@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -383,6 +384,56 @@ func TestClaimNextEligibleRun_AppendsLedgerRowOnClaim(t *testing.T) {
 	}
 	if !gotHumanRooted {
 		t.Error("ledger human_rooted = false, want true")
+	}
+}
+
+// TestClaimNextEligibleRun_DoesNotStarveBehindMoreThanOnePageOfBlockedRuns
+// is the Review round 1 finding 2 regression test: the claim scan used to
+// fetch only the top claimCandidateBatchSize=20 queued rows and give up
+// if none of those cleared every gate. A single saturated agent with
+// more than 20 queued rows ranked ahead of everything else permanently
+// occupied the whole candidate window, starving every other workspace's
+// claim attempts indefinitely — the opposite of what age-based promotion
+// (REQ-OFFICE-BACKPRESSURE-002) exists to prevent. This seeds 25 blocked
+// rows for one already-at-ceiling agent, ranked ahead of one fully
+// claimable run for a different, unrelated agent, and asserts the
+// claimable run is still found.
+func TestClaimNextEligibleRun_DoesNotStarveBehindMoreThanOnePageOfBlockedRuns(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+
+	seedClaimAgent(t, repo, "saturated")
+	setAgentCap(t, repo, "saturated", 1)
+
+	// Fill the saturated agent's ceiling (cap=1) with an already-claimed
+	// run, so every further run it queues is permanently blocked by
+	// evalAgentCeilingGate.
+	already := queueRunAt(t, repo, "already-claimed", "saturated", base.Add(-time.Hour))
+	primed, err := repo.ClaimNextEligibleRun(ctx)
+	if err != nil {
+		t.Fatalf("prime claim: %v", err)
+	}
+	if primed.ID != already.ID {
+		t.Fatalf("prime claim = %q, want %q", primed.ID, already.ID)
+	}
+
+	// More than one candidate page's worth of blocked rows, all ranked
+	// ahead of the free agent's run below.
+	for i := 0; i < 25; i++ {
+		queueRunAt(t, repo, fmt.Sprintf("blocked-%02d", i), "saturated", base.Add(time.Duration(i+1)*time.Minute))
+	}
+
+	seedClaimAgent(t, repo, "free")
+	freeRun := queueRunAt(t, repo, "free-run", "free", base.Add(time.Hour))
+
+	got, err := repo.ClaimNextEligibleRun(ctx)
+	if err != nil {
+		t.Fatalf("claim: %v (a claimable run exists but was not found)", err)
+	}
+	if got.ID != freeRun.ID {
+		t.Errorf("claimed = %q, want %q — an unrelated agent's backlog must not starve a claimable run",
+			got.ID, freeRun.ID)
 	}
 }
 

@@ -16,13 +16,38 @@ import (
 	"github.com/kandev/kandev/internal/office/shared"
 )
 
-// claimCandidateBatchSize bounds how many queued rows one
-// ClaimNextEligibleRun call inspects before giving up. The claim
-// statement can no longer select its answer in one predicate once the
-// ceilings and budgets are per-agent/per-workspace/per-routine instead
-// of a single "count = 0" lock, so candidates are read in claim order
-// and evaluated one at a time until one clears every gate.
-const claimCandidateBatchSize = 20
+// claimCandidatePageSize is how many queued rows one page of the
+// candidate scan fetches at a time. The claim statement can no longer
+// select its answer in one predicate once the ceilings and budgets are
+// per-agent/per-workspace/per-routine instead of a single "count = 0"
+// lock, so candidates are read in claim order, a page at a time, and
+// evaluated one at a time until one clears every gate.
+//
+// A single fixed-size page is fetched once, not looped: an earlier
+// version stopped after the first claimCandidateBatchSize=20 rows and
+// returned sql.ErrNoRows if none of those cleared every gate, even when
+// row 21 was fully claimable. That let one saturated agent or workspace
+// with >=20 queued rows ranked ahead of everything else starve every
+// other workspace's claim attempts indefinitely, once its own queued
+// rows permanently occupied the whole candidate window — the opposite of
+// what REQ-OFFICE-BACKPRESSURE-002's age promotion exists to prevent.
+// ClaimNextEligibleRun now pages through claimCandidateScanCap rows
+// total (in claimCandidatePageSize chunks, within the same transaction)
+// before giving up, so a lower-priority-but-claimable row is only missed
+// once the scan's generous worst-case bound is exhausted, not after 20
+// rows.
+const claimCandidatePageSize = 20
+
+// claimCandidateScanCap bounds the total number of queued rows one
+// ClaimNextEligibleRun call will inspect across every page before
+// deferring. This is a circuit breaker against a pathological backlog
+// (hundreds of thousands of queued rows) making a single claim attempt
+// scan unboundedly, not a correctness boundary: hitting it is recorded
+// via shared.LaunchClaimScanCapHitTotal so it is visible to operators,
+// and the attempt defers (returns sql.ErrNoRows) exactly like "no
+// candidate cleared every gate" — it never admits a row it didn't
+// actually evaluate.
+const claimCandidateScanCap = 2000
 
 // Deferral gate names, in the precedence
 // docs/specs/office/system-design/unattended-launch-safety-02.md
@@ -92,48 +117,26 @@ func (r *Repository) ClaimNextEligibleRun(ctx context.Context) (*models.Run, err
 		  AND (w.scheduled_retry_at IS NULL OR w.scheduled_retry_at <= ?)
 		  AND w.routing_blocked_status IS NULL
 		ORDER BY %s ASC, w.requested_at ASC, w.id ASC
-		LIMIT %d
-	`, promotedClass, claimCandidateBatchSize)
+		LIMIT ? OFFSET ?
+	`, promotedClass)
 
-	// Positional placeholder order follows the assembled query text, not
-	// the order these values are computed above: the WHERE clause's
-	// `scheduled_retry_at <= ?` appears before the ORDER BY CASE's
-	// `requested_at < ?`, so `now` binds first and `promotionCutoff` second.
-	var candidates []models.Run
-	if err := tx.SelectContext(ctx, &candidates, tx.Rebind(query), now, promotionCutoff); err != nil {
+	claimed, scan, err := r.scanCandidatePages(ctx, tx, query, now, promotionCutoff, limits, budgetWindowStart)
+	if err != nil {
 		return nil, err
 	}
-
-	// attributedGate is set from the first (highest-priority under the
-	// effective claim order) candidate's blocking gate, and reported at
-	// most once for the whole attempt: AC-OFFICE-BACKPRESSURE-003.6/.7
-	// attribute a no-row claim attempt to the gate blocking the
-	// highest-priority eligible run, counted per attempt rather than
-	// per blocked candidate. candidates is already in that exact order
-	// (the SELECT above), so candidates[0]'s gate is the one to report;
-	// later candidates are still evaluated (to find one that clears
-	// every gate) but their blocks are not separately counted.
-	var attributedGate string
-	var attributedRun *models.Run
-
-	for i := range candidates {
-		candidate := &candidates[i]
-		if blocked, gate := r.claimGateBlocks(ctx, tx, candidate, limits, budgetWindowStart); blocked {
-			if attributedGate == "" {
-				attributedGate = gate
-				attributedRun = candidate
-			}
-			continue
-		}
-		claimed, err := r.commitClaim(ctx, tx, candidate)
-		if err != nil {
-			return nil, err
-		}
+	if claimed != nil {
 		return claimed, nil
 	}
-	if attributedGate != "" {
-		shared.LaunchDeferredTotal.Add(shared.LaunchSafetyLabel("gate", attributedGate), 1)
-		r.logDeferral(attributedGate, attributedRun)
+	if scan.capHit {
+		shared.LaunchClaimScanCapHitTotal.Add(1)
+		if r.log != nil {
+			r.log.Warn("claim candidate scan cap reached without exhausting the queued set",
+				zap.Int("scan_cap", claimCandidateScanCap))
+		}
+	}
+	if scan.attributedGate != "" {
+		shared.LaunchDeferredTotal.Add(shared.LaunchSafetyLabel("gate", scan.attributedGate), 1)
+		r.logDeferral(scan.attributedGate, scan.attributedRun)
 	}
 	// No candidate cleared every gate: no run row changes, but every
 	// gate evaluated above wrote its outcome to office_gate_failure_state
@@ -147,6 +150,80 @@ func (r *Repository) ClaimNextEligibleRun(ctx context.Context) (*models.Run, err
 		return nil, err
 	}
 	return nil, sql.ErrNoRows
+}
+
+// candidateScanResult carries scanCandidatePages's no-claim findings back
+// to its caller: the gate attributed to the highest-priority blocked
+// candidate seen (AC-OFFICE-BACKPRESSURE-003.6/.7), and whether the scan
+// stopped because it hit claimCandidateScanCap rather than exhausting the
+// queued set.
+type candidateScanResult struct {
+	attributedGate string
+	attributedRun  *models.Run
+	capHit         bool
+}
+
+// scanCandidatePages pages through query in claimCandidatePageSize chunks,
+// up to claimCandidateScanCap rows total, evaluating each candidate's gates
+// in claim order and committing+returning the first one that clears every
+// gate. Returns a nil *models.Run (with the scan's findings) when no
+// candidate within the scan cap was claimable.
+func (r *Repository) scanCandidatePages(
+	ctx context.Context, tx *sqlx.Tx, query string, now, promotionCutoff time.Time,
+	limits ClaimSafetyLimits, budgetWindowStart time.Time,
+) (*models.Run, candidateScanResult, error) {
+	result := candidateScanResult{capHit: true}
+	for offset := 0; offset < claimCandidateScanCap; offset += claimCandidatePageSize {
+		var page []models.Run
+		// Positional placeholder order follows the assembled query text:
+		// `scheduled_retry_at <= ?` (WHERE) binds first, then
+		// `requested_at < ?` (the promotion CASE in ORDER BY), then the
+		// LIMIT/OFFSET pair.
+		if err := tx.SelectContext(ctx, &page, tx.Rebind(query), now, promotionCutoff, claimCandidatePageSize, offset); err != nil {
+			return nil, result, err
+		}
+		if len(page) == 0 {
+			result.capHit = false
+			break
+		}
+		claimed, err := r.claimFirstEligible(ctx, tx, page, limits, budgetWindowStart, &result)
+		if err != nil {
+			return nil, result, err
+		}
+		if claimed != nil {
+			return claimed, result, nil
+		}
+		if len(page) < claimCandidatePageSize {
+			// Reached the end of the queued set on this page: no need to
+			// issue another (empty) page fetch.
+			result.capHit = false
+			break
+		}
+	}
+	return nil, result, nil
+}
+
+// claimFirstEligible evaluates page in order, claiming and returning the
+// first candidate that clears every gate. Every blocked candidate's gate
+// is recorded into result.attributedGate/attributedRun, but only the
+// first one seen (across every call for one scan) is kept, per
+// candidateScanResult's attribution rule.
+func (r *Repository) claimFirstEligible(
+	ctx context.Context, tx *sqlx.Tx, page []models.Run, limits ClaimSafetyLimits,
+	budgetWindowStart time.Time, result *candidateScanResult,
+) (*models.Run, error) {
+	for i := range page {
+		candidate := &page[i]
+		if blocked, gate := r.claimGateBlocks(ctx, tx, candidate, limits, budgetWindowStart); blocked {
+			if result.attributedGate == "" {
+				result.attributedGate = gate
+				result.attributedRun = candidate
+			}
+			continue
+		}
+		return r.commitClaim(ctx, tx, candidate)
+	}
+	return nil, nil
 }
 
 // logDeferral emits AC-OFFICE-BACKPRESSURE-003.7's structured log entry

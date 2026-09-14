@@ -49,6 +49,14 @@ var (
 	// never affect the admission decision, so it is only ever counted, not
 	// propagated as an error the caller acts on.
 	GateOutcomeRecordFailedTotal = expvar.NewMap("office_gate_outcome_record_failed_total")
+
+	// LaunchClaimScanCapHitTotal counts a ClaimNextEligibleRun attempt
+	// that exhausted its candidate-scan safety valve (claimCandidateScanCap
+	// in internal/runs/repository/sqlite/claim.go) without finding a
+	// claimable row or reaching the end of the queued set. Unlabelled: a
+	// single scalar counter is enough to make an otherwise-invisible
+	// pathological backlog observable.
+	LaunchClaimScanCapHitTotal = expvar.NewInt("office_launch_claim_scan_cap_hit_total")
 )
 
 // LaunchSafetyLabel builds a "k1=v1;k2=v2;..." expvar map key, the same
