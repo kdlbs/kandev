@@ -432,6 +432,13 @@ func (r *Repository) agentCeiling(
 		}
 		return 0, err
 	}
+	// A missing row (above) is deferred as unbounded-looking input; a
+	// stored value of zero or negative is a configuration mistake, not
+	// an intentional "no capacity" signal, so it floors to 1 rather than
+	// blocking the agent's queue forever.
+	if maxSessions < 1 {
+		maxSessions = 1
+	}
 	return minInt(maxSessions, minInt(limits.MaxConcurrentWorkspace, limits.MaxConcurrentInstance)), nil
 }
 

@@ -86,6 +86,34 @@ func TestClaimNextEligibleRun_MissingAgentProfileDefers(t *testing.T) {
 	}
 }
 
+// TestClaimNextEligibleRun_NonPositiveAgentCapFloorsToOne pins the floor
+// on a stored max_concurrent_sessions of zero or negative: unlike a
+// missing agent_profiles row (unbounded-looking input, deferred), an
+// explicit non-positive value is a configuration mistake reachable
+// through the agent-facing modify-agent action and must still let the
+// agent's queue drain at a cap of 1, not defer forever.
+func TestClaimNextEligibleRun_NonPositiveAgentCapFloorsToOne(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	base := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
+	seedClaimAgent(t, repo, "a1")
+	setAgentCap(t, repo, "a1", 0)
+
+	first := queueRunAt(t, repo, "first", "a1", base)
+	queueRunAt(t, repo, "second", "a1", base.Add(time.Minute))
+
+	claimed, err := repo.ClaimNextEligibleRun(ctx)
+	if err != nil {
+		t.Fatalf("first claim: %v (want cap=0 floored to 1, not treated as unbounded-deferred)", err)
+	}
+	if claimed.ID != first.ID {
+		t.Errorf("first claim = %q, want %q", claimed.ID, first.ID)
+	}
+	if _, err := repo.ClaimNextEligibleRun(ctx); !errors.Is(err, sql.ErrNoRows) {
+		t.Errorf("second claim err = %v, want sql.ErrNoRows (floored cap=1 already used)", err)
+	}
+}
+
 // TestClaimNextEligibleRun_WorkspaceCeilingDefersAcrossAgents pins the
 // workspace-wide ceiling: two different agents sharing a workspace must
 // still be capped by MaxConcurrentWorkspace even though neither agent is
