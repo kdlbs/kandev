@@ -53,6 +53,7 @@ export function InlineFileInput({ depth, onSubmit, onCancel }: InlineFileInputPr
       <Input
         ref={inputRef}
         type="text"
+        controlSize="none"
         className="h-5 text-xs px-1 py-0 border-muted-foreground/30"
         placeholder={t("task:filename")}
         onKeyDown={handleKeyDown}

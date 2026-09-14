@@ -5,6 +5,7 @@ import { useHomeAffordance } from "./use-home-affordance";
 const state = {
   workspaces: { activeId: "ws-1" as string | null },
   appSidebar: { settingsMode: false, collapsed: false },
+  userSettings: { startupPage: "task_overview" },
 };
 
 let inOffice = false;
@@ -29,6 +30,7 @@ describe("useHomeAffordance", () => {
     state.appSidebar.collapsed = false;
     inOffice = false;
     modeUnknown = false;
+    state.userSettings.startupPage = "task_overview";
   });
 
   it("defaults to a phone-only crumb pointing at the workspace overview", () => {
@@ -36,6 +38,15 @@ describe("useHomeAffordance", () => {
 
     expect(result.current.mode).toBe("phone");
     expect(result.current.href).toBe("/?home=overview&workspaceId=ws-1");
+  });
+
+  it("uses saved Threads for both phone and settings Home", () => {
+    state.userSettings.startupPage = "threads";
+    const { result, rerender } = renderHook(() => useHomeAffordance());
+    expect(result.current).toMatchObject({ mode: "phone", href: "/threads?workspace=ws-1" });
+    state.appSidebar.settingsMode = true;
+    rerender();
+    expect(result.current).toMatchObject({ mode: "always", href: "/threads?workspace=ws-1" });
   });
 
   it("drops the workspace param when no workspace is active", () => {

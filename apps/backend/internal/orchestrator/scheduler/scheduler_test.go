@@ -12,6 +12,7 @@ import (
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/db"
@@ -152,6 +153,9 @@ func (m *mockAgentManager) EnsureWorkspaceExecutionForSession(ctx context.Contex
 }
 func (m *mockAgentManager) GetExecutionIDForSession(_ context.Context, _ string) (string, error) {
 	return "", fmt.Errorf("no execution found")
+}
+func (m *mockAgentManager) ListExecutionsForTask(_ string) []lifecycle.ExecutionReference {
+	return nil
 }
 
 func (m *mockAgentManager) CancelAgent(ctx context.Context, sessionID string) error {

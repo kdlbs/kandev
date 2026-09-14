@@ -232,6 +232,7 @@ type workflowDynamicCandidate struct {
 	executionProfileID string
 	enabled            bool
 	rulesJSON          string
+	cliPassthrough     bool
 }
 
 func newWorkflowDynamicProfileResolverWithCandidates(
@@ -266,7 +267,7 @@ func newWorkflowDynamicProfileResolverWithCandidates(
 	for _, candidate := range candidates {
 		profiles = append(profiles, &agentsettingsmodels.AgentProfile{
 			ID: candidate.executionProfileID, AgentID: "concrete-agent",
-			Name: candidate.executionProfileID, Enabled: true,
+			Name: candidate.executionProfileID, Enabled: true, CLIPassthrough: candidate.cliPassthrough,
 		})
 	}
 	for _, profile := range profiles {

@@ -2,13 +2,30 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+// waitForStopAgentCall blocks until ch delivers the detached
+// stopNeverStartedExecution goroutine's StopAgentWithReason call, or fails
+// the test after a bounded wait. Never poll or sleep for this: the call is
+// intentionally off handleAgentStalled's own goroutine.
+func waitForStopAgentCall(t *testing.T, ch <-chan stopAgentCall) stopAgentCall {
+	t.Helper()
+	select {
+	case call := <-ch:
+		return call
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the detached StopAgentWithReason call")
+		return stopAgentCall{}
+	}
+}
 
 func TestHandleAgentStalled_PersistsNeutralRunningNotice(t *testing.T) {
 	ctx := context.Background()
@@ -216,6 +233,348 @@ func TestHandleAgentStalled_RejectsSettledOrStalePrompt(t *testing.T) {
 	svc.handleAgentStalled(ctx, payload)
 	if len(messages.sessionMessages) != 0 {
 		t.Fatalf("stale generation messages = %d, want 0", len(messages.sessionMessages))
+	}
+}
+
+// TestHandleAgentStalled_NeverStartedStopsExecution covers
+// @covers AC-AGENTS-AGENT-STALL-RECOVERY-001.10: after the never-started
+// branch records the session and task FAILED, it must also tear down the
+// execution named by the payload, forced, exactly once.
+func TestHandleAgentStalled_NeverStartedStopsExecution(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	stopCalls := make(chan stopAgentCall, 1)
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup:   repo,
+		currentPromptExecutionID: "execution-1",
+		stopAgentWithReasonFunc: func(_ context.Context, executionID, reason string, force bool) error {
+			stopCalls <- stopAgentCall{ExecutionID: executionID, Reason: reason, Force: force}
+			return nil
+		},
+	}
+	agentMgr.currentPromptGeneration.Store(7)
+	agentMgr.currentPromptActivityEpoch.Store(1)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task-1", v1.TaskStateInProgress)
+	svc := createTestServiceWithScheduler(
+		repo,
+		newMockStepGetter(),
+		taskRepo,
+		agentMgr,
+	)
+	svc.turnService = &repoTurnService{repo: repo}
+	if _, err := svc.turnService.StartTurn(ctx, "session-1"); err != nil {
+		t.Fatalf("start active turn: %v", err)
+	}
+	svc.messageCreator = &mockMessageCreator{}
+
+	svc.handleAgentStalled(ctx, lifecycle.AgentStalledPayload{
+		AgentExecutionID: "execution-1",
+		TaskID:           "task-1",
+		SessionID:        "session-1",
+		PromptGeneration: 7,
+		ActivityEpoch:    1,
+		NeverStarted:     true,
+	})
+
+	call := waitForStopAgentCall(t, stopCalls)
+	if call.ExecutionID != "execution-1" {
+		t.Fatalf("stopped execution = %q, want execution-1", call.ExecutionID)
+	}
+	if !call.Force {
+		t.Fatal("teardown stop was not forced")
+	}
+
+	agentMgr.mu.Lock()
+	callCount := len(agentMgr.stopAgentWithReasonArgs)
+	agentMgr.mu.Unlock()
+	if callCount != 1 {
+		t.Fatalf("StopAgentWithReason calls = %d, want 1", callCount)
+	}
+
+	after, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("get session after handling stall: %v", err)
+	}
+	if after.State != models.TaskSessionStateFailed {
+		t.Fatalf("session state = %q, want FAILED", after.State)
+	}
+}
+
+// TestHandleAgentStalled_NeverStartedStopRunsDetachedFromGuard covers R3-F1:
+// stopNeverStartedExecution must not block handleAgentStalled's return on the
+// runtime teardown. handleAgentStalled holds the per-session cancelInFlight
+// guard for its own duration (released via defer on return), and that guard
+// also serializes the user's own Stop/Cancel/Delete for this session - so if
+// the teardown ran inline here, an unresponsive runtime backend would hold
+// that guard, the synchronous event bus's dispatch lock, and the
+// waitForPromptDone goroutine for as long as the backend stayed hung.
+func TestHandleAgentStalled_NeverStartedStopRunsDetachedFromGuard(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	stopStarted := make(chan struct{})
+	stopRelease := make(chan struct{})
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup:   repo,
+		currentPromptExecutionID: "execution-1",
+		stopAgentWithReasonFunc: func(context.Context, string, string, bool) error {
+			close(stopStarted)
+			<-stopRelease
+			return nil
+		},
+	}
+	agentMgr.currentPromptGeneration.Store(7)
+	agentMgr.currentPromptActivityEpoch.Store(1)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task-1", v1.TaskStateInProgress)
+	svc := createTestServiceWithScheduler(
+		repo,
+		newMockStepGetter(),
+		taskRepo,
+		agentMgr,
+	)
+	svc.turnService = &repoTurnService{repo: repo}
+	if _, err := svc.turnService.StartTurn(ctx, "session-1"); err != nil {
+		t.Fatalf("start active turn: %v", err)
+	}
+	svc.messageCreator = &mockMessageCreator{}
+
+	handlerDone := make(chan struct{})
+	go func() {
+		svc.handleAgentStalled(ctx, lifecycle.AgentStalledPayload{
+			AgentExecutionID: "execution-1",
+			TaskID:           "task-1",
+			SessionID:        "session-1",
+			PromptGeneration: 7,
+			ActivityEpoch:    1,
+			NeverStarted:     true,
+		})
+		close(handlerDone)
+	}()
+
+	select {
+	case <-handlerDone:
+	case <-time.After(2 * time.Second):
+		close(stopRelease)
+		t.Fatal("handleAgentStalled blocked on runtime teardown instead of returning once it was scheduled")
+	}
+
+	select {
+	case <-stopStarted:
+	case <-time.After(2 * time.Second):
+		close(stopRelease)
+		t.Fatal("StopAgentWithReason was never invoked")
+	}
+	close(stopRelease)
+}
+
+// TestHandleAgentStalled_NeverStartedClaimsTeardownOwnershipBeforeStop covers
+// Review round 2 Finding 2: stopNeverStartedExecution must claim execution
+// teardown ownership before stopping the agent, so the synchronously
+// published agent.stopped event is recognized by handleAgentStopped's
+// hasExecutionTeardownOwner check as already-owned instead of running that
+// handler's full state-decision path.
+func TestHandleAgentStalled_NeverStartedClaimsTeardownOwnershipBeforeStop(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup:   repo,
+		currentPromptExecutionID: "execution-1",
+	}
+	agentMgr.currentPromptGeneration.Store(7)
+	agentMgr.currentPromptActivityEpoch.Store(1)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task-1", v1.TaskStateInProgress)
+	svc := createTestServiceWithScheduler(
+		repo,
+		newMockStepGetter(),
+		taskRepo,
+		agentMgr,
+	)
+	svc.turnService = &repoTurnService{repo: repo}
+	if _, err := svc.turnService.StartTurn(ctx, "session-1"); err != nil {
+		t.Fatalf("start active turn: %v", err)
+	}
+	svc.messageCreator = &mockMessageCreator{}
+
+	if svc.hasExecutionTeardownOwner("session-1", "execution-1") {
+		t.Fatal("teardown ownership claimed before the stall was handled")
+	}
+
+	svc.handleAgentStalled(ctx, lifecycle.AgentStalledPayload{
+		AgentExecutionID: "execution-1",
+		TaskID:           "task-1",
+		SessionID:        "session-1",
+		PromptGeneration: 7,
+		ActivityEpoch:    1,
+		NeverStarted:     true,
+	})
+
+	if !svc.hasExecutionTeardownOwner("session-1", "execution-1") {
+		t.Fatal("stopNeverStartedExecution did not claim teardown ownership before stopping")
+	}
+}
+
+// TestHandleAgentStalled_NeverStartedKeepsFailedStateWhenStopFails covers
+// @covers AC-AGENTS-AGENT-STALL-RECOVERY-001.11: a teardown failure must not
+// overwrite the recorded FAILED state or its launch-failure message.
+func TestHandleAgentStalled_NeverStartedKeepsFailedStateWhenStopFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	stopAttempted := make(chan struct{})
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup:   repo,
+		currentPromptExecutionID: "execution-1",
+		stopAgentWithReasonFunc: func(context.Context, string, string, bool) error {
+			defer close(stopAttempted)
+			return errors.New("agentctl unreachable")
+		},
+	}
+	agentMgr.currentPromptGeneration.Store(7)
+	agentMgr.currentPromptActivityEpoch.Store(1)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task-1", v1.TaskStateInProgress)
+	svc := createTestServiceWithScheduler(
+		repo,
+		newMockStepGetter(),
+		taskRepo,
+		agentMgr,
+	)
+	svc.turnService = &repoTurnService{repo: repo}
+	if _, err := svc.turnService.StartTurn(ctx, "session-1"); err != nil {
+		t.Fatalf("start active turn: %v", err)
+	}
+	svc.messageCreator = &mockMessageCreator{}
+
+	svc.handleAgentStalled(ctx, lifecycle.AgentStalledPayload{
+		AgentExecutionID: "execution-1",
+		TaskID:           "task-1",
+		SessionID:        "session-1",
+		PromptGeneration: 7,
+		ActivityEpoch:    1,
+		NeverStarted:     true,
+	})
+
+	select {
+	case <-stopAttempted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the detached teardown attempt")
+	}
+
+	after, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("get session after handling stall: %v", err)
+	}
+	if after.State != models.TaskSessionStateFailed {
+		t.Fatalf("session state = %q, want FAILED despite teardown failure", after.State)
+	}
+	if after.ErrorMessage != errAgentNeverStarted.Error() {
+		t.Fatalf("session error message = %q, want %q", after.ErrorMessage, errAgentNeverStarted.Error())
+	}
+}
+
+// TestHandleAgentStalled_AdvisoryStallStopsNothing covers
+// @covers AC-AGENTS-AGENT-STALL-RECOVERY-001.7: an advisory stall (agent
+// produced output before stalling) must not tear down the execution.
+func TestHandleAgentStalled_AdvisoryStallStopsNothing(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup:   repo,
+		currentPromptExecutionID: "execution-1",
+	}
+	agentMgr.currentPromptGeneration.Store(7)
+	agentMgr.currentPromptActivityEpoch.Store(1)
+	svc := createTestServiceWithScheduler(
+		repo,
+		newMockStepGetter(),
+		newMockTaskRepo(),
+		agentMgr,
+	)
+	svc.turnService = &repoTurnService{repo: repo}
+	if _, err := svc.turnService.StartTurn(ctx, "session-1"); err != nil {
+		t.Fatalf("start active turn: %v", err)
+	}
+	svc.messageCreator = &mockMessageCreator{}
+
+	svc.handleAgentStalled(ctx, lifecycle.AgentStalledPayload{
+		AgentExecutionID: "execution-1",
+		TaskID:           "task-1",
+		SessionID:        "session-1",
+		PromptGeneration: 7,
+		ActivityEpoch:    1,
+		ToolName:         "shell",
+		ToolTitle:        "Start dev server",
+	})
+
+	agentMgr.mu.Lock()
+	stopCalls := len(agentMgr.stopAgentWithReasonArgs)
+	agentMgr.mu.Unlock()
+	if stopCalls != 0 {
+		t.Fatalf("StopAgentWithReason calls = %d, want 0 for an advisory stall", stopCalls)
+	}
+}
+
+// TestHandleAgentStalled_NeverStartedSkipsTeardownWhenFailedNotPersisted covers
+// the review finding that a rejected/failed FAILED-transition CAS must not be
+// followed by a forced process kill: killing the process without a durable
+// FAILED record would leave the session claiming RUNNING with no process and
+// no way for handleAgentStopped to reconcile it (stopNeverStartedExecution
+// claims teardown ownership first, so the resulting agent.stopped event is
+// ignored as already-owned).
+func TestHandleAgentStalled_NeverStartedSkipsTeardownWhenFailedNotPersisted(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-1", "session-1", "step-1")
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup:   repo,
+		currentPromptExecutionID: "execution-1",
+	}
+	agentMgr.currentPromptGeneration.Store(7)
+	agentMgr.currentPromptActivityEpoch.Store(1)
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "task-1", v1.TaskStateInProgress)
+	svc := createTestServiceWithScheduler(
+		repo,
+		newMockStepGetter(),
+		taskRepo,
+		agentMgr,
+	)
+	writeFailure := errors.New("database is read-only")
+	svc.repo = failSessionStateUpdateRepo{repoStore: repo, err: writeFailure}
+	svc.turnService = &repoTurnService{repo: repo}
+	if _, err := svc.turnService.StartTurn(ctx, "session-1"); err != nil {
+		t.Fatalf("start active turn: %v", err)
+	}
+	svc.messageCreator = &mockMessageCreator{}
+
+	svc.handleAgentStalled(ctx, lifecycle.AgentStalledPayload{
+		AgentExecutionID: "execution-1",
+		TaskID:           "task-1",
+		SessionID:        "session-1",
+		PromptGeneration: 7,
+		ActivityEpoch:    1,
+		NeverStarted:     true,
+	})
+
+	agentMgr.mu.Lock()
+	stopCalls := len(agentMgr.stopAgentWithReasonArgs)
+	agentMgr.mu.Unlock()
+	if stopCalls != 0 {
+		t.Fatalf("StopAgentWithReason calls = %d, want 0 when the FAILED transition did not persist", stopCalls)
+	}
+
+	after, err := repo.GetTaskSession(ctx, "session-1")
+	if err != nil {
+		t.Fatalf("get session after handling stall: %v", err)
+	}
+	if after.State != models.TaskSessionStateRunning {
+		t.Fatalf("session state = %q, want RUNNING (unchanged) since the FAILED write never persisted", after.State)
 	}
 }
 

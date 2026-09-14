@@ -1,12 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import type { ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/react";
 import { StateProvider } from "@/components/state-provider";
 
 const mockGetSubtaskCount = vi.fn();
+const mockGetTaskDeletePreflight = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   getSubtaskCount: (...args: unknown[]) => mockGetSubtaskCount(...args),
+  getTaskDeletePreflight: (...args: unknown[]) => mockGetTaskDeletePreflight(...args),
 }));
 
 import { TaskDeleteConfirmDialog } from "./task-delete-confirm-dialog";
@@ -42,12 +44,58 @@ function renderDialog(ui: ReactNode, tasks: SeedTask[] = []) {
 
 const WARNING_TESTID = "still-working-warning";
 const DISCARD_CHECKBOX_TESTID = "delete-discard-worktree-checkbox";
+const CASCADE_CHECKBOX_TESTID = "delete-cascade-checkbox";
+const TASK_ID = "task-1";
 
 beforeEach(() => {
   mockGetSubtaskCount.mockReset();
+  mockGetTaskDeletePreflight.mockReset();
+  mockGetTaskDeletePreflight.mockResolvedValue({ requires_discard_consent: false });
 });
 
 afterEach(cleanup);
+
+function FocusReturnHarness({ custom }: { custom: boolean }) {
+  const [open, setOpen] = useState(true);
+  const fallback = useRef<HTMLButtonElement>(null);
+  const customTarget = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <button ref={fallback}>Fallback trigger</button>
+      <button ref={customTarget}>Surviving thread</button>
+      <TaskDeleteConfirmDialog
+        open={open}
+        onOpenChange={setOpen}
+        taskId="task-1"
+        executorType="local"
+        onConfirm={() => {}}
+        focusReturnRef={fallback}
+        onCloseAutoFocus={
+          custom
+            ? (event) => {
+                event.preventDefault();
+                customTarget.current?.focus();
+              }
+            : undefined
+        }
+      />
+    </>
+  );
+}
+
+it.each([false, true])(
+  "preserves dialog focus return with a custom override (%s)",
+  async (custom) => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    renderDialog(<FocusReturnHarness custom={custom} />);
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: custom ? "Surviving thread" : "Fallback trigger" }),
+      ),
+    );
+  },
+);
 
 describe("TaskDeleteConfirmDialog", () => {
   it("contains long confirmation content in a scrolling body with touch-safe actions", () => {
@@ -57,7 +105,7 @@ describe("TaskDeleteConfirmDialog", () => {
         open
         onOpenChange={() => {}}
         taskTitle="A task with a title that needs to wrap inside a phone confirmation surface"
-        taskId="task-1"
+        taskId={TASK_ID}
         executorType="sprites"
         isInFlight
         confirmTestId="confirm"
@@ -85,17 +133,16 @@ describe("TaskDeleteConfirmDialog", () => {
         open
         onOpenChange={() => {}}
         taskTitle="My task"
-        taskId="task-1"
+        taskId={TASK_ID}
         onConfirm={onConfirm}
         confirmTestId="confirm"
       />,
     );
-    await waitFor(() => expect(mockGetSubtaskCount).toHaveBeenCalledWith("task-1"));
-    expect(screen.queryByTestId("delete-cascade-checkbox")).toBeNull();
+    await waitFor(() => expect(mockGetSubtaskCount).toHaveBeenCalledWith(TASK_ID));
+    expect(screen.queryByTestId(CASCADE_CHECKBOX_TESTID)).toBeNull();
 
-    fireEvent.click(screen.getByTestId(DISCARD_CHECKBOX_TESTID));
     fireEvent.click(screen.getByTestId("confirm"));
-    expect(onConfirm).toHaveBeenCalledWith({ cascade: false, discardWorktreeChanges: true });
+    expect(onConfirm).toHaveBeenCalledWith({ cascade: false, discardWorktreeChanges: false });
   });
 
   it("shows the cascade checkbox when the task has subtasks; defaults to unchecked", async () => {
@@ -106,17 +153,16 @@ describe("TaskDeleteConfirmDialog", () => {
         open
         onOpenChange={() => {}}
         taskTitle="My task"
-        taskId="task-1"
+        taskId={TASK_ID}
         onConfirm={onConfirm}
         confirmTestId="confirm"
       />,
     );
-    await screen.findByTestId("delete-cascade-checkbox");
+    await screen.findByTestId(CASCADE_CHECKBOX_TESTID);
     expect(screen.getByText(/Also delete 3 subtasks/i)).toBeTruthy();
 
-    fireEvent.click(screen.getByTestId(DISCARD_CHECKBOX_TESTID));
     fireEvent.click(screen.getByTestId("confirm"));
-    expect(onConfirm).toHaveBeenCalledWith({ cascade: false, discardWorktreeChanges: true });
+    expect(onConfirm).toHaveBeenCalledWith({ cascade: false, discardWorktreeChanges: false });
   });
 
   it("propagates cascade=true when the user ticks the checkbox", async () => {
@@ -127,16 +173,16 @@ describe("TaskDeleteConfirmDialog", () => {
         open
         onOpenChange={() => {}}
         taskTitle="My task"
-        taskId="task-1"
+        taskId={TASK_ID}
         onConfirm={onConfirm}
         confirmTestId="confirm"
       />,
     );
-    const checkbox = await screen.findByTestId("delete-cascade-checkbox");
-    fireEvent.click(screen.getByTestId(DISCARD_CHECKBOX_TESTID));
+    const checkbox = await screen.findByTestId(CASCADE_CHECKBOX_TESTID);
     fireEvent.click(checkbox);
+    await waitFor(() => expect(mockGetTaskDeletePreflight).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByTestId("confirm"));
-    expect(onConfirm).toHaveBeenCalledWith({ cascade: true, discardWorktreeChanges: true });
+    expect(onConfirm).toHaveBeenCalledWith({ cascade: true, discardWorktreeChanges: false });
   });
 
   it("sums subtask counts across taskIds for bulk delete", async () => {
@@ -158,15 +204,38 @@ describe("TaskDeleteConfirmDialog", () => {
 });
 
 describe("TaskDeleteConfirmDialog discard consent", () => {
-  it("requires explicit discard consent for worktree cleanup", async () => {
+  it("hides discard consent for a clean worktree and confirms without consent", async () => {
     mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    mockGetTaskDeletePreflight.mockResolvedValue({ requires_discard_consent: false });
     const onConfirm = vi.fn();
     renderDialog(
       <TaskDeleteConfirmDialog
         open
         onOpenChange={() => {}}
         taskTitle="My task"
-        taskId="task-1"
+        taskId={TASK_ID}
+        executorType="worktree"
+        onConfirm={onConfirm}
+        confirmTestId="confirm"
+      />,
+    );
+
+    await waitFor(() => expect(mockGetTaskDeletePreflight).toHaveBeenCalledWith([TASK_ID], false));
+    expect(screen.queryByTestId(DISCARD_CHECKBOX_TESTID)).toBeNull();
+    fireEvent.click(screen.getByTestId("confirm"));
+    expect(onConfirm).toHaveBeenCalledWith({ cascade: false, discardWorktreeChanges: false });
+  });
+
+  it("requires explicit discard consent for worktree cleanup", async () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    mockGetTaskDeletePreflight.mockResolvedValue({ requires_discard_consent: true });
+    const onConfirm = vi.fn();
+    renderDialog(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId={TASK_ID}
         executorType="worktree"
         onConfirm={onConfirm}
         confirmTestId="confirm"
@@ -187,18 +256,104 @@ describe("TaskDeleteConfirmDialog discard consent", () => {
 
   it("shows discard consent when a cascade can include child worktrees", async () => {
     mockGetSubtaskCount.mockResolvedValue({ count: 1 });
+    mockGetTaskDeletePreflight.mockResolvedValue({ requires_discard_consent: true });
     renderDialog(
       <TaskDeleteConfirmDialog
         open
         onOpenChange={() => {}}
         taskTitle="Parent task"
-        taskId="task-1"
+        taskId={TASK_ID}
         executorType="local"
         onConfirm={() => {}}
       />,
     );
 
     expect(await screen.findByTestId(DISCARD_CHECKBOX_TESTID)).toBeTruthy();
+  });
+});
+
+describe("TaskDeleteConfirmDialog discard consent state", () => {
+  it("hides the discard option and disables Delete while inspection is pending", async () => {
+    let resolvePreflight: (value: { requires_discard_consent: boolean }) => void = () => {};
+    mockGetTaskDeletePreflight.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolvePreflight = resolve;
+        }),
+    );
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    renderDialog(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId={TASK_ID}
+        executorType="worktree"
+        onConfirm={() => {}}
+        confirmTestId="confirm"
+      />,
+    );
+
+    expect(await screen.findByTestId("delete-preflight-loading")).toBeTruthy();
+    expect(screen.queryByTestId(DISCARD_CHECKBOX_TESTID)).toBeNull();
+    expect((screen.getByTestId("confirm") as HTMLButtonElement).disabled).toBe(true);
+    resolvePreflight({ requires_discard_consent: false });
+    await waitFor(() =>
+      expect((screen.getByTestId("confirm") as HTMLButtonElement).disabled).toBe(false),
+    );
+  });
+
+  it("shows a retry action and keeps Delete disabled after inspection errors", async () => {
+    mockGetTaskDeletePreflight.mockRejectedValueOnce(new Error("inspection failed"));
+    mockGetTaskDeletePreflight.mockResolvedValueOnce({ requires_discard_consent: true });
+    mockGetSubtaskCount.mockResolvedValue({ count: 0 });
+    renderDialog(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="My task"
+        taskId={TASK_ID}
+        executorType="worktree"
+        onConfirm={() => {}}
+        confirmTestId="confirm"
+      />,
+    );
+
+    const error = await screen.findByTestId("delete-preflight-error");
+    expect(error).toBeTruthy();
+    expect(screen.queryByTestId(DISCARD_CHECKBOX_TESTID)).toBeNull();
+    expect((screen.getByTestId("confirm") as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(await screen.findByTestId(DISCARD_CHECKBOX_TESTID)).toBeTruthy();
+    expect((screen.getByTestId("confirm") as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("invalidates checked consent when the delete scope changes", async () => {
+    mockGetSubtaskCount.mockResolvedValue({ count: 1 });
+    mockGetTaskDeletePreflight.mockImplementation((_ids: string[], cascade: boolean) =>
+      Promise.resolve({ requires_discard_consent: !cascade }),
+    );
+    renderDialog(
+      <TaskDeleteConfirmDialog
+        open
+        onOpenChange={() => {}}
+        taskTitle="Parent task"
+        taskId={TASK_ID}
+        executorType="worktree"
+        onConfirm={() => {}}
+        confirmTestId="confirm"
+      />,
+    );
+
+    const discard = await screen.findByTestId(DISCARD_CHECKBOX_TESTID);
+    fireEvent.click(discard);
+    expect(discard.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByTestId(CASCADE_CHECKBOX_TESTID));
+    await waitFor(() => expect(mockGetTaskDeletePreflight).toHaveBeenCalledTimes(2));
+    expect(screen.queryByTestId(DISCARD_CHECKBOX_TESTID)).toBeNull();
+    fireEvent.click(screen.getByTestId(CASCADE_CHECKBOX_TESTID));
+    const freshDiscard = await screen.findByTestId(DISCARD_CHECKBOX_TESTID);
+    expect(freshDiscard.getAttribute("aria-checked")).toBe("false");
   });
 });
 
@@ -210,7 +365,7 @@ describe("TaskDeleteConfirmDialog executor cleanup copy", () => {
         open
         onOpenChange={() => {}}
         taskTitle="My task"
-        taskId="task-1"
+        taskId={TASK_ID}
         executorType="worktree"
         onConfirm={() => {}}
       />,
@@ -232,7 +387,7 @@ describe("TaskDeleteConfirmDialog executor cleanup copy", () => {
         open
         onOpenChange={() => {}}
         taskTitle="My task"
-        taskId="task-1"
+        taskId={TASK_ID}
         executorType="local"
         onConfirm={() => {}}
       />,
@@ -248,7 +403,7 @@ describe("TaskDeleteConfirmDialog executor cleanup copy", () => {
         open
         onOpenChange={() => {}}
         taskTitle="My task"
-        taskId="task-1"
+        taskId={TASK_ID}
         executorType="worktree"
         onConfirm={() => {}}
       />,
@@ -280,12 +435,12 @@ describe("TaskDeleteConfirmDialog executor cleanup copy", () => {
         open
         onOpenChange={() => {}}
         taskTitle="My task"
-        taskId="task-1"
+        taskId={TASK_ID}
         onConfirm={() => {}}
       />,
     );
     expect(screen.getByText(/Any running agent sessions will be stopped/i)).toBeTruthy();
-    expect(screen.getByTestId(DISCARD_CHECKBOX_TESTID)).toBeTruthy();
+    expect(screen.queryByTestId(DISCARD_CHECKBOX_TESTID)).toBeNull();
   });
 });
 
@@ -297,11 +452,11 @@ describe("TaskDeleteConfirmDialog still-working guard", () => {
         open
         onOpenChange={() => {}}
         taskTitle="My task"
-        taskId="task-1"
+        taskId={TASK_ID}
         executorType="worktree"
         onConfirm={() => {}}
       />,
-      [{ id: "task-1", foregroundActivity: "generating" }],
+      [{ id: TASK_ID, foregroundActivity: "generating" }],
     );
 
     expectCompactWarning(screen.getByTestId(WARNING_TESTID));
@@ -314,11 +469,11 @@ describe("TaskDeleteConfirmDialog still-working guard", () => {
         open
         onOpenChange={() => {}}
         taskTitle="My task"
-        taskId="task-1"
+        taskId={TASK_ID}
         executorType="worktree"
         onConfirm={() => {}}
       />,
-      [{ id: "task-1", foregroundActivity: "generating" }],
+      [{ id: TASK_ID, foregroundActivity: "generating" }],
     );
     expect(screen.getByTestId(WARNING_TESTID)).toBeTruthy();
     expect(screen.getByTestId(WARNING_TESTID).textContent).toMatch(/still working/i);
@@ -331,11 +486,11 @@ describe("TaskDeleteConfirmDialog still-working guard", () => {
         open
         onOpenChange={() => {}}
         taskTitle="My task"
-        taskId="task-1"
+        taskId={TASK_ID}
         executorType="worktree"
         onConfirm={() => {}}
       />,
-      [{ id: "task-1", foregroundActivity: "background" }],
+      [{ id: TASK_ID, foregroundActivity: "background" }],
     );
     expect(screen.getByTestId(WARNING_TESTID)).toBeTruthy();
   });
@@ -347,11 +502,11 @@ describe("TaskDeleteConfirmDialog still-working guard", () => {
         open
         onOpenChange={() => {}}
         taskTitle="My task"
-        taskId="task-1"
+        taskId={TASK_ID}
         executorType="worktree"
         onConfirm={() => {}}
       />,
-      [{ id: "task-1", foregroundActivity: null }],
+      [{ id: TASK_ID, foregroundActivity: null }],
     );
     expect(screen.getByRole("alertdialog")).toBeTruthy();
     expect(screen.queryByTestId(WARNING_TESTID)).toBeNull();

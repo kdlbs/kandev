@@ -189,7 +189,7 @@ func seedAgentFailureHandler(
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
 		}
-		if err := repo.MarkRunFailed(ctx, run.ID, req.ErrorMessage); err != nil {
+		if _, err := repo.MarkRunFailed(ctx, run.ID, req.ErrorMessage); err != nil {
 			log.Error("test harness: mark run failed", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return

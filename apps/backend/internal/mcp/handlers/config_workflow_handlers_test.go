@@ -216,6 +216,23 @@ func TestHandleCreateWorkflowStep_PersistsCancelTriggersTurnComplete(t *testing.
 	assert.True(t, steps[0].CancelTriggersTurnComplete)
 }
 
+func TestHandleCreateWorkflowStep_RejectsNullCompletionPolicy(t *testing.T) {
+	h, _, repo := setupImportHandlers(t)
+	ctx := context.Background()
+	h.workflowCtrl = workflowctrl.NewController(h.workflowSvc)
+
+	resp, err := h.handleCreateWorkflowStep(ctx, makeWSMessage(t, ws.ActionMCPCreateWorkflowStep, map[string]interface{}{
+		"workflow_id":            "wf-test",
+		"name":                   "Null completion",
+		"complete_task_on_enter": nil,
+	}))
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeBadRequest)
+	steps, err := repo.ListStepsByWorkflow(ctx, "wf-test")
+	require.NoError(t, err)
+	require.Empty(t, steps)
+}
+
 func TestHandleUpdateWorkflowStep_PublishesDemotedStartStep(t *testing.T) {
 	h, _, repo := setupImportHandlers(t)
 	ctx := context.Background()
@@ -314,6 +331,29 @@ func TestHandleUpdateWorkflowStep_PersistsCancelTriggersTurnCompleteFalse(t *tes
 	step, err := repo.GetStep(ctx, "cancel-gated")
 	require.NoError(t, err)
 	assert.False(t, step.CancelTriggersTurnComplete)
+}
+
+func TestHandleUpdateWorkflowStep_RejectsNullCompletionPolicyWithoutMutation(t *testing.T) {
+	h, _, repo := setupImportHandlers(t)
+	ctx := context.Background()
+	h.workflowCtrl = workflowctrl.NewController(h.workflowSvc)
+	require.NoError(t, repo.CreateStep(ctx, &wfmodels.WorkflowStep{
+		ID:                  "completed-step",
+		WorkflowID:          "wf-test",
+		Name:                "Done",
+		Position:            0,
+		CompleteTaskOnEnter: true,
+	}))
+
+	resp, err := h.handleUpdateWorkflowStep(ctx, makeWSMessage(t, ws.ActionMCPUpdateWorkflowStep, map[string]interface{}{
+		"step_id":                "completed-step",
+		"complete_task_on_enter": nil,
+	}))
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeBadRequest)
+	step, err := repo.GetStep(ctx, "completed-step")
+	require.NoError(t, err)
+	require.True(t, step.CompleteTaskOnEnter)
 }
 
 func TestHandleListWorkflowSteps_IncludesAutoAdvanceRequiresSignal(t *testing.T) {
@@ -457,7 +497,7 @@ func TestHandleExportWorkflow_ReturnsPortableWorkflow(t *testing.T) {
 
 	var exported wfmodels.WorkflowExport
 	require.NoError(t, json.Unmarshal(resp.Payload, &exported))
-	assert.Equal(t, wfmodels.ExportVersion, exported.Version)
+	assert.Equal(t, wfmodels.LegacyExportVersion, exported.Version)
 	assert.Equal(t, wfmodels.ExportType, exported.Type)
 	require.Len(t, exported.Workflows, 1)
 	assert.Equal(t, "Portable Board", exported.Workflows[0].Name)

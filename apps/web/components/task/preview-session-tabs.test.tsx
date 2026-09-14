@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- preview lifecycle and Plan-tab contracts share one store harness. */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
 import {
   act,
   cleanup,
@@ -15,12 +16,10 @@ import { useStore } from "zustand";
 import { sessionId as toSessionId, taskId as toTaskId, type TaskSession } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { TaskPlan } from "@/lib/types/http-agents";
-import type { ChatSubmitPayload } from "./chat/chat-input-container";
-import type { EntityReference } from "@/lib/types/entity-reference";
 
 const mocks = vi.hoisted(() => ({
-  getWebSocketClient: vi.fn(),
-  onSend: null as null | ((payload: ChatSubmitPayload) => Promise<void>),
+  taskChatPanelProps: null as null | Record<string, unknown>,
+  taskLaunchErrorProviderValue: null as null | Record<string, unknown>,
   sessions: [] as TaskSession[],
   agentProfiles: [] as AgentProfileOption[],
   primarySessionId: null as string | null,
@@ -38,19 +37,46 @@ const mocks = vi.hoisted(() => ({
   taskSessionItems: {} as Record<string, TaskSession>,
   useTaskSessions: vi.fn(),
   useSessionResumption: vi.fn(),
+  taskStatusSummary: undefined as unknown,
   markTaskPlanSeen: vi.fn(),
   setTaskPlan: vi.fn(),
   setTaskPlanLoading: vi.fn(),
   getTaskPlan: vi.fn(),
 }));
 
-vi.mock("@/lib/ws/connection", () => ({
-  getWebSocketClient: mocks.getWebSocketClient,
-}));
 vi.mock("./task-chat-panel", () => ({
-  TaskChatPanel: ({ onSend }: { onSend: (payload: ChatSubmitPayload) => Promise<void> }) => {
-    mocks.onSend = onSend;
+  TaskChatPanel: (props: Record<string, unknown>) => {
+    mocks.taskChatPanelProps = props;
     return <div data-testid="preview-chat" />;
+  },
+}));
+vi.mock("./passthrough-toolbar", () => ({
+  PassthroughToolbar: () => <div data-testid="preview-passthrough-toolbar" />,
+}));
+vi.mock("@/components/task/chat/session-bootstrap-recovery-card", () => ({
+  SessionBootstrapRecoveryCard: ({
+    error,
+    automaticRecovery,
+  }: {
+    error: { stamp: string };
+    automaticRecovery?: { recoveryFailure: { outcome: string } | null };
+  }) => (
+    <div data-testid="preview-bootstrap-recovery-card">
+      {error.stamp}
+      {automaticRecovery?.recoveryFailure?.outcome ?? ""}
+    </div>
+  ),
+}));
+vi.mock("./task-launch-error-context", () => ({
+  TaskLaunchErrorProvider: ({
+    value,
+    children,
+  }: {
+    value: Record<string, unknown>;
+    children: ReactNode;
+  }) => {
+    mocks.taskLaunchErrorProviderValue = value;
+    return <>{children}</>;
   },
 }));
 vi.mock("@/hooks/use-task-sessions", () => ({
@@ -58,6 +84,9 @@ vi.mock("@/hooks/use-task-sessions", () => ({
 }));
 vi.mock("@/hooks/domains/session/use-session-resumption", () => ({
   useSessionResumption: mocks.useSessionResumption,
+}));
+vi.mock("@/hooks/domains/task/use-task-status-summary", () => ({
+  useTaskStatusSummary: () => mocks.taskStatusSummary,
 }));
 vi.mock("@/lib/api/domains/plan-api", () => ({
   getTaskPlan: mocks.getTaskPlan,
@@ -283,8 +312,8 @@ const session: TaskSession = {
 
 afterEach(() => {
   cleanup();
-  mocks.getWebSocketClient.mockReset();
-  mocks.onSend = null;
+  mocks.taskChatPanelProps = null;
+  mocks.taskLaunchErrorProviderValue = null;
   mocks.sessions = [];
   mocks.agentProfiles = [];
   mocks.primarySessionId = null;
@@ -306,65 +335,85 @@ afterEach(() => {
     notice: null,
     resumeSession: vi.fn(),
   }));
+  mocks.taskStatusSummary = undefined;
   mocks.getTaskPlan.mockReset();
   mocks.getTaskPlan.mockResolvedValue(null);
   fakeStore.setState({ taskPlans: emptyTaskPlans(), connection: { status: "connected" } });
 });
 
-describe("PreviewSessionBody send failures", () => {
-  it("rejects when the WebSocket client is unavailable", async () => {
-    mocks.getWebSocketClient.mockReturnValue(null);
+describe("PreviewSessionBody delivery", () => {
+  it("uses TaskChatPanel's queue-aware shared delivery path", () => {
     render(<PreviewSessionBody session={session} taskId={TASK_ID} />);
 
-    await expect(mocks.onSend?.({ message: "hello" })).rejects.toMatchObject({
-      name: "MessageSendError",
-      code: "connection-unavailable",
-      message: "Connection unavailable. Reconnect and try again.",
+    expect(mocks.taskChatPanelProps).toMatchObject({
+      sessionId: "session-1",
+      taskId: TASK_ID,
+      hideSessionsDropdown: true,
     });
+    expect(mocks.taskChatPanelProps).not.toHaveProperty("onSend");
   });
 
-  it("rethrows message.add failures to the chat input", async () => {
-    const error = new Error("message.add failed");
-    mocks.getWebSocketClient.mockReturnValue({ request: vi.fn().mockRejectedValue(error) });
-    render(<PreviewSessionBody session={session} taskId={TASK_ID} />);
-
-    await expect(mocks.onSend?.({ message: "hello" })).rejects.toBe(error);
-  });
-
-  it("forwards attachments and entity references through preview direct send", async () => {
-    const request = vi.fn().mockResolvedValue(undefined);
-    mocks.getWebSocketClient.mockReturnValue({ request });
-    const reference: EntityReference = {
-      version: 1,
-      ref: "mention:v1:github:issue:acme%2Frepo:42",
-      provider: "github",
-      kind: "issue",
-      id: "42",
-      key: "acme/repo#42",
-      title: "Fix composer references",
-      url: "https://github.com/acme/repo/issues/42",
-      scope: "acme/repo",
-    };
-    render(<PreviewSessionBody session={session} taskId={TASK_ID} />);
-
-    await mocks.onSend?.({
-      message: "reference",
-      attachments: [{ type: "image", data: "base64", mime_type: "image/png" }],
-      entityReferences: [reference],
-    });
-
-    expect(request).toHaveBeenCalledWith(
-      "message.add",
-      {
-        task_id: TASK_ID,
-        session_id: "session-1",
-        client_message_id: expect.any(String),
-        content: "reference",
-        attachments: [{ type: "image", data: "base64", mime_type: "image/png" }],
-        entity_references: [reference],
+  it("passes automatic recovery results to the session-owned preview provider", () => {
+    const recovery = {
+      resumptionState: "error" as const,
+      error: "Session recovery failed",
+      notice: null,
+      recoveryFailure: {
+        outcome: "recovery_failed" as const,
+        resumeError: "raw resume failure",
+        restoreError: "raw restore failure",
       },
-      30000,
+      resumeSession: vi.fn(),
+    };
+
+    render(<PreviewSessionBody session={session} taskId={TASK_ID} resumption={recovery} />);
+
+    expect(mocks.taskLaunchErrorProviderValue?.automaticRecovery).toBe(recovery);
+  });
+
+  it("keeps the bootstrap recovery card and automatic outcome in passthrough preview", () => {
+    mocks.sessions = [
+      makeSession("session-1", {
+        is_passthrough: true,
+        metadata: {
+          last_agent_error: {
+            message: "The agent could not start.",
+            occurred_at: TIMESTAMP,
+            stamp: "preview-bootstrap-1",
+            phase: "bootstrap",
+          },
+        },
+      }),
+    ];
+    mocks.useTaskSessions.mockReturnValue({ sessions: mocks.sessions, isLoaded: true });
+    mocks.taskStatusSummary = {
+      active_error: {
+        session_id: "session-1",
+        stamp: "preview-bootstrap-1",
+        occurred_at: TIMESTAMP,
+        preview: "The agent could not start.",
+        phase: "bootstrap",
+      },
+    };
+    const recovery = {
+      resumptionState: "error" as const,
+      error: "Session recovery failed",
+      notice: null,
+      recoveryFailure: {
+        outcome: "recovery_failed" as const,
+        resumeError: "raw resume failure",
+        restoreError: "raw restore failure",
+      },
+      resumeSession: vi.fn(),
+    };
+    mocks.useSessionResumption.mockReturnValue(recovery);
+
+    render(<PreviewSessionTabs taskId={TASK_ID} sessionId="session-1" />);
+
+    expect(screen.getByTestId("preview-bootstrap-recovery-card").textContent).toContain(
+      "recovery_failed",
     );
+    expect(screen.getByTestId("preview-passthrough-toolbar")).toBeTruthy();
   });
 });
 
@@ -374,6 +423,13 @@ describe("PreviewSessionTabs tab label", () => {
     render(<PreviewSessionTabs taskId={TASK_ID} sessionId="session-a" />);
 
     expect(screen.getByTestId(SESSION_A_TAB_TESTID).textContent).toContain("My renamed agent");
+  });
+
+  it("passes the owning task archive state to session recovery", () => {
+    mocks.sessions = [makeSession("session-a", { state: "COMPLETED" })];
+    render(<PreviewSessionTabs taskId={TASK_ID} sessionId="session-a" isArchived />);
+
+    expect(mocks.useSessionResumption).toHaveBeenCalledWith(TASK_ID, "session-a", true);
   });
 });
 

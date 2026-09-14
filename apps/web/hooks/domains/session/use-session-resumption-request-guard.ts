@@ -51,5 +51,24 @@ export function buildGuardedSetters(
     setResumeSkipped: (sid, skipped) => {
       if (guard()) setters.setResumeSkipped?.(sid, skipped);
     },
+    setRecoveryFailure: (failure) => {
+      if (guard()) setters.setRecoveryFailure?.(failure);
+    },
+    workspaceRestoration: setters.workspaceRestoration
+      ? {
+          begin: (taskId, sessionId) =>
+            guard() ? (setters.workspaceRestoration?.begin(taskId, sessionId) ?? null) : null,
+          complete: (attempt) =>
+            guard() ? (setters.workspaceRestoration?.complete(attempt) ?? false) : false,
+          fail: (attempt, error) =>
+            guard() ? (setters.workspaceRestoration?.fail(attempt, error) ?? false) : false,
+          // clearWorkspaceRestoration validates the attempt identity itself.
+          // Allow stale request cleanup to remove only its own matching row.
+          clear: (attempt) => setters.workspaceRestoration?.clear(attempt) ?? false,
+        }
+      : undefined,
+    onTaskArchiveConflict: () => {
+      if (guard()) setters.onTaskArchiveConflict?.();
+    },
   };
 }

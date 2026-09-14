@@ -7,8 +7,8 @@
  * string that was never routed through `t()`. This is the completeness oracle
  * for the i18n sweep (see docs/i18n.md).
  *
- * `{{interpolation}}` placeholders and <0>tag</0> markers are preserved
- * verbatim — transforming them would break interpolation and Trans nesting.
+ * `{{interpolation}}` placeholders, <0>tag</0> markers, and Markdown code spans
+ * are preserved verbatim. Code spans can contain callable names or commands.
  *
  * Covers the Go catalog too (apps/backend/internal/i18n/locales). The backend
  * renders its own user-facing copy — error pages and the shared-task page — so
@@ -88,10 +88,10 @@ const MAP = {
   Z: "Ź",
 };
 
-/** Accent letters outside {{...}} placeholders and <n>…</n> tag markers. */
+/** Accent letters outside placeholders, tags, and Markdown code spans. */
 function pseudolocalize(text) {
-  // Split on placeholders/tags so their contents survive untouched.
-  const parts = text.split(/(\{\{[^}]*\}\}|<\/?\d+>)/g);
+  // Split on placeholders/tags/code spans so their contents survive untouched.
+  const parts = text.split(/(`[^`]*`|\{\{[^}]*\}\}|<\/?\d+>)/g);
   return parts
     .map((part, i) => (i % 2 === 1 ? part : part.replace(/[A-Za-z]/g, (c) => MAP[c] ?? c)))
     .join("");

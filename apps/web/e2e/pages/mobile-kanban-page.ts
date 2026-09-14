@@ -55,6 +55,7 @@ export class MobileKanbanPage {
   }
 
   async openSearch() {
+    await this.mobileMenuButton.click();
     await this.mobileSearchToggle.click();
     await this.mobileSearchBar.waitFor({ state: "visible" });
   }

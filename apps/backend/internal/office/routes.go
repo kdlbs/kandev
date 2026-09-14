@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/office/labels"
 	"github.com/kandev/kandev/internal/office/onboarding"
+	"github.com/kandev/kandev/internal/office/pause"
 	"github.com/kandev/kandev/internal/office/projects"
 	"github.com/kandev/kandev/internal/office/routines"
 	officeruntime "github.com/kandev/kandev/internal/office/runtime"
@@ -42,6 +43,8 @@ func RegisterAllRoutes(router *gin.RouterGroup, svcs *Services, handoff *taskser
 		}),
 		svcs.Skills,
 		svcs.Workspaces,
+		newRuntimeDecisionRecorder(svcs.Dashboard),
+		log,
 	))
 
 	skillsHandler := skills.NewHandler(svcs.Skills)
@@ -94,4 +97,6 @@ func RegisterAllRoutes(router *gin.RouterGroup, svcs *Services, handoff *taskser
 
 	tree_controls.RegisterRoutes(router, tree_controls.NewHandler(svcs.TreeControls))
 	workspaces.RegisterRoutes(router, workspaces.NewHandler(svcs.Workspaces))
+
+	pause.RegisterRoutes(router, pause.NewHandler(svcs.Pause))
 }

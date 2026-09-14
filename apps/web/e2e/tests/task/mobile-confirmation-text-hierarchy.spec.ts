@@ -228,13 +228,13 @@ test.describe("Mobile confirmation text hierarchy", () => {
 
   // @covers AC-UI-SURFACE-TEXT-HIERARCHY-001.1, AC-UI-SURFACE-TEXT-HIERARCHY-001.3
   // @covers AC-UI-TASK-CLEANUP-CONFIRMATION-001.4, AC-UI-TASK-CLEANUP-CONFIRMATION-001.5
-  test("keeps the phone Drawer and inline archive confirmation touch-safe", async ({
+  test("keeps the phone Drawer confirmation step touch-safe", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
     await testPage.setViewportSize({ width: 393, height: 640 });
-    const title = "Mobile inline archive confirmation target";
+    const title = "Mobile archive confirmation target";
     const task = await apiClient.seedTask(seedData.workspaceId, title, {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
@@ -258,18 +258,20 @@ test.describe("Mobile confirmation text hierarchy", () => {
     const menu = testPage.locator('[data-slot="context-menu-content"]:visible').last();
     await menu.getByRole("menuitem", { name: "Archive", exact: true }).tap();
 
-    const confirmation = taskRow.getByTestId("task-archive-inline-confirmation");
+    const confirmation = drawer.getByTestId("mobile-action-confirmation");
     await expect(confirmation).toBeVisible();
     await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
     await expect(confirmation).toContainText(title);
-    await assertNoDocumentHorizontalOverflow(testPage, "phone inline archive confirmation");
+    await expect(testPage.locator('[data-slot="drawer-content"]')).toHaveCount(1);
+    await expect(taskRow).toBeHidden();
+    await assertNoDocumentHorizontalOverflow(testPage, "phone archive confirmation step");
 
     for (const button of [
       confirmation.getByRole("button", { name: "Cancel", exact: true }),
       confirmation.getByTestId("archive-task-confirm"),
     ]) {
       const box = await button.boundingBox();
-      if (!box) throw new Error("phone inline archive action has no rendered hitbox");
+      if (!box) throw new Error("phone archive action has no rendered hitbox");
       expect(Math.round(box.width)).toBeGreaterThanOrEqual(44);
       expect(Math.round(box.height)).toBeGreaterThanOrEqual(44);
       await expect(button).toBeInViewport();
@@ -277,6 +279,7 @@ test.describe("Mobile confirmation text hierarchy", () => {
 
     await confirmation.getByRole("button", { name: "Cancel", exact: true }).tap();
     await expect(confirmation).toBeHidden();
+    await expect(taskRow).toBeVisible();
     expect((await apiClient.getTask(task.task_id)).id).toBe(task.task_id);
   });
 

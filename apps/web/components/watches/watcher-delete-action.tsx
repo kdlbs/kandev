@@ -7,8 +7,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
 import { InlineConfirmActions } from "@/components/confirmation/inline-confirm-actions";
+import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
 
 type WatcherDeleteActionProps = {
+  targetKey: string;
+  subject: ReactNode;
   title: ReactNode;
   cancelLabel: ReactNode;
   confirmLabel: ReactNode;
@@ -24,10 +27,11 @@ type WatcherDeleteActionProps = {
  * Local delete confirmation used by watcher rows/cards.
  *
  * Fine pointers keep the initiating delete button as the popover anchor.
- * Coarse pointers replace the action region with one inline cancel/delete
- * group so a phone never stacks a second overlay on top of its row.
+ * Phones use a named sheet; wider coarse pointers keep their inline actions.
  */
 export function WatcherDeleteAction({
+  targetKey,
+  subject,
   title,
   cancelLabel,
   confirmLabel,
@@ -38,25 +42,36 @@ export function WatcherDeleteAction({
   testId = "watcher-delete-confirmation",
   onConfirm,
 }: WatcherDeleteActionProps) {
-  const { isFinePointer } = useResponsiveBreakpoint();
+  const { isFinePointer, isMobile } = useResponsiveBreakpoint();
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLButtonElement>(null);
 
-  if (!isFinePointer && open) {
-    return (
-      <InlineConfirmActions
-        density="touch"
-        testId={testId}
-        ariaLabel={ariaLabel}
-        cancelLabel={cancelLabel}
-        confirmLabel={confirmLabel}
-        confirmTestId={confirmTestId}
-        onCancel={() => setOpen(false)}
-        onClose={() => setOpen(false)}
-        onConfirm={onConfirm}
-      />
-    );
-  }
+  const fallback = !isFinePointer ? (
+    <InlineConfirmActions
+      density="touch"
+      testId={testId}
+      ariaLabel={ariaLabel}
+      cancelLabel={cancelLabel}
+      confirmLabel={confirmLabel}
+      confirmTestId={confirmTestId}
+      onCancel={() => setOpen(false)}
+      onClose={() => setOpen(false)}
+      onConfirm={onConfirm}
+    />
+  ) : (
+    <ActionConfirmPopover
+      open={open}
+      anchorRef={anchorRef}
+      title={title}
+      cancelLabel={cancelLabel}
+      confirmLabel={confirmLabel}
+      confirmTestId={confirmTestId}
+      testId={testId}
+      onOpenChange={setOpen}
+      onCancel={() => setOpen(false)}
+      onConfirm={onConfirm}
+    />
+  );
 
   const trigger = (
     <Button
@@ -64,7 +79,7 @@ export function WatcherDeleteAction({
       variant="ghost"
       size="sm"
       className={`p-0 text-red-500 hover:text-red-600 cursor-pointer ${
-        isFinePointer ? "h-7 w-7" : "h-11 w-11"
+        !isMobile && isFinePointer ? "h-7 w-7" : "h-11 w-11"
       }`}
       aria-label={ariaLabel}
       data-testid={triggerTestId}
@@ -79,28 +94,29 @@ export function WatcherDeleteAction({
 
   return (
     <>
-      {isFinePointer && tooltipLabel ? (
-        <Tooltip>
-          <TooltipTrigger asChild>{trigger}</TooltipTrigger>
-          <TooltipContent>{tooltipLabel}</TooltipContent>
-        </Tooltip>
-      ) : (
-        trigger
-      )}
-      {isFinePointer ? (
-        <ActionConfirmPopover
-          open={open}
-          anchorRef={anchorRef}
-          title={title}
-          cancelLabel={cancelLabel}
-          confirmLabel={confirmLabel}
-          confirmTestId={confirmTestId}
-          testId={testId}
-          onOpenChange={setOpen}
-          onCancel={() => setOpen(false)}
-          onConfirm={onConfirm}
-        />
-      ) : null}
+      {(isMobile || isFinePointer || !open) &&
+        (!isMobile && isFinePointer && tooltipLabel ? (
+          <Tooltip>
+            <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+            <TooltipContent>{tooltipLabel}</TooltipContent>
+          </Tooltip>
+        ) : (
+          trigger
+        ))}
+      <MobileActionConfirmation
+        open={open}
+        targetKey={targetKey}
+        title={title}
+        subject={subject}
+        cancelLabel={cancelLabel}
+        confirmLabel={confirmLabel}
+        confirmTestId={confirmTestId}
+        testId={testId}
+        onOpenChange={setOpen}
+        focusReturnRef={anchorRef}
+        onConfirm={onConfirm}
+        fallback={fallback}
+      />
     </>
   );
 }

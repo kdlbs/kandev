@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -343,24 +344,20 @@ func carryForwardFileDiff(fi types.FileInfo, filePath string, update *types.GitS
 // pipe-based reads. Slot is acquired before Start; if Start fails we
 // release immediately, else release runs after Wait.
 func capDiffOutput(ctx context.Context, workDir string, args ...string) (string, bool) {
-	release, err := subproc.AcquireGit(ctx, gitWorkClass(ctx))
-	if err != nil {
+	stream, runErr, execCtxErr := subproc.StartGitStreamAfterAcquire(
+		ctx,
+		gitWorkClass(ctx),
+		gitCommandTimeout,
+		func(execCtx context.Context) *exec.Cmd {
+			cmd := subproc.NewGitCommand(execCtx, args...)
+			cmd.Dir = workDir
+			return cmd
+		},
+	)
+	if runErr != nil || execCtxErr != nil {
 		return "", false
 	}
-	defer release()
-	execCtx, cancel := context.WithTimeout(ctx, gitCommandTimeout)
-	defer cancel()
-	cmd := subproc.NewGitCommand(execCtx, args...)
-	cmd.Dir = workDir
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return "", false
-	}
-	if err := cmd.Start(); err != nil {
-		_ = stdout.Close()
-		return "", false
-	}
+	stdout := stream.Stdout()
 
 	limited := io.LimitReader(stdout, maxDiffOutputSize+1)
 	data, _ := io.ReadAll(limited)
@@ -371,7 +368,7 @@ func capDiffOutput(ctx context.Context, workDir string, args ...string) (string,
 
 	// Drain remaining stdout so the process doesn't hang on a full pipe.
 	_, _ = io.Copy(io.Discard, stdout)
-	_ = cmd.Wait()
+	_, _ = stream.Wait()
 
 	return string(data), truncated
 }

@@ -6,6 +6,8 @@ import type {
   CopyMoveSecretRequest,
   RevealSecretResponse,
   SecretScope,
+  SecretReference,
+  SecretReferencesResponse,
 } from "@/lib/types/http-secrets";
 
 /** Options for listing secrets: optional scope, workspace, and include-global filter. */
@@ -71,6 +73,18 @@ export async function deleteSecret(id: string, options?: SecretScopedOptions): P
     ...options,
     init: { method: "DELETE", ...(options?.init ?? {}) },
   });
+}
+
+/** Lists configuration references without mutating the secret. */
+export async function listSecretReferences(
+  id: string,
+  options?: SecretScopedOptions,
+): Promise<SecretReference[]> {
+  const response = await fetchJson<SecretReferencesResponse>(
+    withSecretQuery(`/api/v1/secrets/${id}/references`, options),
+    options,
+  );
+  return response.references ?? [];
 }
 
 /** Reveals the value of the secret with the given id. */

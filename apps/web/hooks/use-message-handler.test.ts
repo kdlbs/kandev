@@ -12,6 +12,7 @@ import type { TaskMentionData } from "./use-inline-mention";
 import type { EntityReference } from "@/lib/types/entity-reference";
 
 const getWebSocketClientMock = vi.hoisted(() => vi.fn());
+const listTaskSessionsMock = vi.hoisted(() => vi.fn());
 const queueMock = vi.hoisted(() => vi.fn());
 const addMessageMock = vi.hoisted(() => vi.fn());
 const TASK_ID = "task-1";
@@ -23,12 +24,17 @@ const CONTEXT_DIRECTORY_PATH = "src/components";
 const storeState = vi.hoisted(() => ({
   current: {
     taskSessions: { items: {} as Record<string, unknown> },
+    queue: { metaBySessionId: {} as Record<string, { count: number }> },
     addMessage: addMessageMock,
   },
 }));
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: getWebSocketClientMock,
+}));
+
+vi.mock("@/lib/api/domains/session-api", () => ({
+  listTaskSessions: listTaskSessionsMock,
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -40,6 +46,11 @@ vi.mock("./domains/session/use-queue", () => ({
 }));
 const IMPROVE_HARNESS_PROMPT = "improve-harness";
 const IMPROVE_HARNESS_CONTENT = "Review this session for durable harness improvements.";
+
+beforeEach(() => {
+  queueMock.mockResolvedValue(true);
+  listTaskSessionsMock.mockResolvedValue({ sessions: [{ id: SESSION_ID }], total: 1 });
+});
 
 function makeState(overrides: Partial<AppState> = {}): AppState {
   const base = {
@@ -468,6 +479,7 @@ function submit(message: string) {
   return { message };
 }
 
+// eslint-disable-next-line max-lines-per-function -- routing cases share one message submission harness.
 describe("useMessageHandler input routing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -544,6 +556,15 @@ describe("useMessageHandler input routing", () => {
 
     expect(queueMock).toHaveBeenCalled();
     expect(getWebSocketClientMock().request).not.toHaveBeenCalled();
+  });
+
+  it("returns an unsuccessful result when queue admission cannot start", async () => {
+    selectedSession("STARTING");
+    queueMock.mockResolvedValueOnce(false);
+    const { result } = renderMessageHandler();
+
+    await expect(result.current.handleSendMessage(submit("keep this draft"))).resolves.toBe(false);
+    expect(addMessageMock).not.toHaveBeenCalled();
   });
 
   it("rejects a terminal selected session with the actionable ended-session copy", async () => {

@@ -41,8 +41,13 @@ async function sendCommand(page: Page, command: string, marker: string) {
 async function closeSurvivingQuickTerminals(page: Page) {
   const dialog = page.getByRole("dialog", { name: "Quick Chat" });
   if (!(await dialog.isVisible().catch(() => false))) {
-    const launcher = page.getByTestId("mobile-quick-terminal-button");
-    if (await launcher.isVisible().catch(() => false)) await launcher.tap();
+    const launcher = page.getByTestId("mobile-quick-chat-button");
+    const menu = page.getByTestId("mobile-topbar-menu");
+    if (!(await menu.isVisible())) return;
+    if ((await menu.getAttribute("aria-expanded")) !== "true") await menu.tap();
+    await expect(menu).toHaveAttribute("aria-expanded", "true");
+    await page.getByRole("dialog", { name: "Menu", exact: true }).waitFor();
+    await launcher.tap({ timeout: 10_000 });
   }
   if (!(await dialog.isVisible().catch(() => false))) return;
 
@@ -65,18 +70,20 @@ test.describe("mobile quick terminal tabs", () => {
       const terminalButton = testPage.getByTestId("mobile-quick-terminal-button");
       const quickChatButton = testPage.getByTestId("mobile-quick-chat-button");
       const menuButton = testPage.getByTestId("mobile-topbar-menu");
-      await expect(terminalButton).toBeVisible();
-      await expect(quickChatButton).toBeVisible();
       await expect(menuButton).toBeVisible();
       const headerMenuBox = await menuButton.boundingBox();
       expect(headerMenuBox).not.toBeNull();
       if (!headerMenuBox) throw new Error("mobile menu geometry unavailable");
+      await menuButton.tap();
+      await expect(terminalButton).toBeVisible();
+      await expect(quickChatButton).toBeVisible();
       for (const button of [terminalButton, quickChatButton]) {
         const buttonBox = await button.boundingBox();
         expect(buttonBox).not.toBeNull();
         if (!buttonBox) throw new Error("mobile launcher geometry unavailable");
-        expect(buttonBox.width).toBeCloseTo(headerMenuBox.width, 1);
-        expect(buttonBox.height).toBeCloseTo(headerMenuBox.height, 1);
+        expect(buttonBox.width).toBeGreaterThanOrEqual(44);
+        expect(buttonBox.height).toBeGreaterThanOrEqual(44);
+        expect(buttonBox.x + buttonBox.width).toBeLessThanOrEqual(testPage.viewportSize()!.width);
       }
 
       await terminalButton.tap();
@@ -112,6 +119,7 @@ test.describe("mobile quick terminal tabs", () => {
       // A mobile reload restores the durable descriptor and reattaches the
       // detached PTY before the user creates any additional terminal.
       await testPage.reload();
+      await menuButton.tap();
       await expect(terminalButton).toBeVisible();
       await terminalButton.tap();
       await expect(dialog).toBeVisible();
@@ -194,9 +202,10 @@ test.describe("mobile quick terminal tabs", () => {
 
       await dialog.getByTestId("quick-chat-close").tap();
       await expect(dialog).toBeHidden();
-      await expect(terminalButton).toBeFocused();
+      await expect(menuButton).toBeFocused();
 
       // Reopening through the mobile launcher selects the same terminal tab.
+      await menuButton.tap();
       await terminalButton.tap();
       await expect(dialog).toBeVisible();
       await expect(terminalTabs).toHaveCount(1);
@@ -205,6 +214,7 @@ test.describe("mobile quick terminal tabs", () => {
         .toContain(normalizeTerminalText("MOBILE_TERMINAL_ONE"));
       await dialog.getByTestId("quick-chat-close").tap();
       await expect(dialog).toBeHidden();
+      await expect(menuButton).toBeFocused();
     } finally {
       await closeSurvivingQuickTerminals(testPage);
     }

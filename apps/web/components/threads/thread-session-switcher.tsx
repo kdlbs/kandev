@@ -243,6 +243,7 @@ function MobileSessionPicker({
         label={selected?.label ?? t("threads:selectSession")}
         count={`${selectedIndex + 1}/${views.length}`}
         compact={false}
+        fullWidth
         isOpen={open}
         onClick={() => setOpen(true)}
         data-testid="thread-session-picker-trigger"
@@ -305,7 +306,10 @@ export function ThreadSessionSwitcher({
   if (views.length <= 1) return null;
 
   return isMobile ? (
-    <div className="min-w-0 shrink-0" data-testid="thread-session-switcher">
+    <div
+      className="min-w-0 max-w-[55%] shrink [&>button]:min-h-11"
+      data-testid="thread-session-switcher"
+    >
       <MobileSessionPicker
         views={views}
         selectedSessionId={selectedSessionId}

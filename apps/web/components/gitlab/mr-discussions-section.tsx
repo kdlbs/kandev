@@ -8,6 +8,7 @@ import { Textarea } from "@kandev/ui/textarea";
 import type { GitLabMRDiscussion } from "@/lib/types/gitlab";
 import { CollapsibleSection, formatTimeAgo, PRMarkdownBody } from "@/components/github/pr-shared";
 import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 function discussionLocation(discussion: GitLabMRDiscussion): string {
   if (!discussion.path) return "";
@@ -78,9 +79,9 @@ function Discussion({
           </Badge>
         )}
         <Button
-          size="icon-sm"
+          size="icon"
           variant="ghost"
-          className="ml-auto h-9 w-9 shrink-0 cursor-pointer sm:h-7 sm:w-7"
+          className={controlSizingClassName("icon", "ml-auto shrink-0 cursor-pointer")}
           aria-label={t("gitlab:addDiscussionToTaskContext")}
           onClick={() => onAddContext(buildDiscussionContext(discussion, mrUrl))}
         >
@@ -111,9 +112,8 @@ function Discussion({
         <div className="flex gap-2">
           {discussion.resolvable && !discussion.resolved && (
             <Button
-              size="sm"
               variant="outline"
-              className="h-11 flex-1 cursor-pointer gap-1 sm:h-9"
+              className={controlSizingClassName("standard", "flex-1 cursor-pointer gap-1")}
               disabled={busy}
               onClick={() => void onResolve(discussion.id)}
             >
@@ -121,8 +121,7 @@ function Discussion({
             </Button>
           )}
           <Button
-            size="sm"
-            className="h-11 flex-1 cursor-pointer gap-1 sm:h-9"
+            className={controlSizingClassName("standard", "flex-1 cursor-pointer gap-1")}
             disabled={busy || !reply.trim()}
             onClick={() => void submitReply()}
           >

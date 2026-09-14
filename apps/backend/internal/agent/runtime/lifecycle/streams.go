@@ -15,8 +15,9 @@ import (
 type StreamCallbacks struct {
 	OnAgentEvent       func(execution *AgentExecution, event agentctl.AgentEvent)
 	OnStreamDisconnect func(execution *AgentExecution, err error, promptGeneration uint64)
-	// Generation-aware callbacks are used for startup replacement streams.
-	// The legacy callbacks remain available to isolated callers and tests.
+	// Generation-aware callbacks are used for startup replacement streams. The
+	// lifecycle manager owns the completion signal and callback lease for this
+	// path; the legacy callbacks remain available to isolated callers and tests.
 	OnAgentEventWithGeneration       func(execution *AgentExecution, event agentctl.AgentEvent, startupGeneration uint64)
 	OnStreamDisconnectWithGeneration func(execution *AgentExecution, err error, promptGeneration, startupGeneration uint64)
 	OnGitStatus                      func(execution *AgentExecution, update *agentctl.GitStatusUpdate)
@@ -341,6 +342,14 @@ func (sm *StreamManager) handleUpdatesDisconnectWithGeneration(
 	startupGeneration uint64,
 ) {
 	promptGeneration := execution.promptGenerationSnapshot()
+	if sm.callbacks.OnStreamDisconnectWithGeneration != nil {
+		// The lifecycle callback holds the startup lease across both the signal
+		// and disconnect mutation. Signalling here first would leave a window in
+		// which replacement startup could advance the generation before the old
+		// callback reached its validation guard.
+		sm.callbacks.OnStreamDisconnectWithGeneration(execution, disconnectErr, promptGeneration, startupGeneration)
+		return
+	}
 	if !execution.signalPromptCompletionForStartupGeneration(
 		startupGeneration,
 		PromptCompletionSignal{
@@ -355,9 +364,7 @@ func (sm *StreamManager) handleUpdatesDisconnectWithGeneration(
 			zap.Uint64("current_startup_generation", execution.startupAttemptSnapshot()))
 		return
 	}
-	if sm.callbacks.OnStreamDisconnectWithGeneration != nil {
-		sm.callbacks.OnStreamDisconnectWithGeneration(execution, disconnectErr, promptGeneration, startupGeneration)
-	} else if sm.callbacks.OnStreamDisconnect != nil {
+	if sm.callbacks.OnStreamDisconnect != nil {
 		sm.callbacks.OnStreamDisconnect(execution, disconnectErr, promptGeneration)
 	}
 }

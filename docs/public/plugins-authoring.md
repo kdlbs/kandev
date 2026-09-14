@@ -121,6 +121,12 @@ does not need a Go backend or an injected Kandev JavaScript API.
    the app needs.
 5. Package the manifest and static files as a gzip-compressed tar archive.
 
+For a new owner-created task canvas, the first valid release can receive the
+declared supported task-scoped permissions through its initial permission
+policy. Imported packages and later permission increases need human approval.
+Keep `network_origins` as exact HTTPS origins. Do not use wildcards, paths,
+credentials, query strings, or fragments.
+
 For example, a page can read task data with the browser Fetch API:
 
 ```js
@@ -134,6 +140,15 @@ const tasks = await response.json();
 Use `./_kandev/v1/events` for the event stream. Keep all protocol paths
 relative so the same package works in task and workspace scope. Do not copy a
 capability URL from the host into the app.
+
+Kandev injects a reserved startup bootstrap into the packaged entry document.
+It runs before authored scripts, reports an initial document error when one is
+observed, and checks `./_kandev/v1/context` after the document loads. The host
+reveals the frame only after it receives a versioned acknowledgement for the
+current startup attempt. A missing acknowledgement or context failure makes
+the canvas recoverable after 15 seconds. Keep the entry document and its
+relative assets valid HTML, and make the app render its own loading and error
+states after startup.
 
 The frame has an opaque browser origin. Do not use `localStorage`,
 `sessionStorage`, IndexedDB, or service workers. Use the state protocol for

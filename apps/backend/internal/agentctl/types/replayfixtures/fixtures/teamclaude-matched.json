@@ -1,0 +1,25 @@
+{
+  "gateway": "teamclaude",
+  "agentId": "claude-acp",
+  "classifying": true,
+  "case": "matched",
+  "capture": "reconstructed",
+  "source": "internal/agent/runtime/routingerr/gateway_server_failure_test.go",
+  "identity": {
+    "sessionId": "teamclaude-matched",
+    "executionId": "exec-teamclaude-matched",
+    "promptGeneration": 7
+  },
+  "frames": [
+    {"kind": "message_chunk", "role": "assistant", "text": "API Error: 500 Internal server error."},
+    {"kind": "model_settled", "modelId": "claude-sonnet-5"},
+    {"kind": "prompt_error", "code": -32603, "message": "Internal error: API Error: 500 Internal server error. This is a server-side issue, usually temporary - try again in a moment.", "data": {"errorKind": "server_error"}}
+  ],
+  "expect": {
+    "events": ["message_chunk:diagnostic", "error"],
+    "providerError": {"source": "acp_prompt", "rpcCode": -32603, "errorKind": "server_error", "providerId": "claude-acp", "modelId": "claude-sonnet-5"},
+    "diagnosticCode": "provider_unavailable",
+    "preResultSafe": true,
+    "recordedDiagnosticCode": "provider_unavailable"
+  }
+}
