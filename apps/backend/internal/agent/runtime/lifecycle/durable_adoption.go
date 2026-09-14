@@ -59,6 +59,10 @@ type agentDeliverySubmissionLister interface {
 	ListAgentDeliverySubmissions(context.Context, string) ([]*models.AgentDeliverySubmission, error)
 }
 
+type agentDeliveryPeerSubmissionReader interface {
+	GetDeliverySubmission(context.Context, string) (*journal.Submission, error)
+}
+
 func (m *Manager) restoreRecoveredDelivery(
 	ctx context.Context,
 	execution *AgentExecution,
@@ -102,7 +106,7 @@ func (m *Manager) restoreRecoveredDelivery(
 
 	applyRecoveredDeliveryIdentity(execution, status, generation, cursor)
 
-	return m.restoreRecoveredSubmission(ctx, execution, status, delivery)
+	return m.restoreRecoveredSubmission(ctx, execution, status, delivery, ri.Client)
 }
 
 func validateRecoveredDeliveryStatus(execution *AgentExecution, status *agentctl.DeliveryStatus) error {
@@ -222,11 +226,12 @@ func (m *Manager) restoreRecoveredSubmission(
 	execution *AgentExecution,
 	status *agentctl.DeliveryStatus,
 	delivery AgentDeliveryRepository,
+	peerReader agentDeliveryPeerSubmissionReader,
 ) error {
 	if status.SubmissionsTruncated {
 		return fmt.Errorf("%w: retained submission evidence is truncated", ErrDurableAdoptionBlocked)
 	}
-	activePeer, err := activePeerSubmissions(execution, status)
+	activePeer, terminalPeer, err := peerSubmissionsForRecovery(execution, status)
 	if err != nil {
 		return err
 	}
@@ -234,23 +239,106 @@ func (m *Manager) restoreRecoveredSubmission(
 	if err != nil {
 		return err
 	}
-	if len(activePeer) == 1 && len(activeBackend) == 0 && isInitialPromptSubmission(execution, activePeer[0]) {
-		if _, ok := delivery.(agentDeliverySubmissionLister); ok {
-			// The lifecycle bootstrap prompt is dispatched before the orchestrator
-			// has an interactive submission row. Its deterministic identity still
-			// gives Stop and replay one exact peer-owned target; arbitrary peer
-			// submissions without SQL evidence remain blocked below.
-			execution.setDeliverySubmissionID(activePeer[0].ID)
-			return nil
-		}
-	}
-	if err := compareActiveSubmissions(activePeer, activeBackend); err != nil {
+	if restored, err := restoreInitialPromptSubmission(execution, activePeer, activeBackend, delivery); restored || err != nil {
 		return err
 	}
-	if len(activePeer) == 0 {
+	return m.restoreRecoveredBackendSubmission(ctx, execution, status, delivery, peerReader, activePeer, terminalPeer, activeBackend)
+}
+
+func restoreInitialPromptSubmission(
+	execution *AgentExecution,
+	activePeer []journal.SubmissionSummary,
+	activeBackend []*models.AgentDeliverySubmission,
+	delivery AgentDeliveryRepository,
+) (bool, error) {
+	if len(activePeer) != 1 || len(activeBackend) != 0 || !isInitialPromptSubmission(execution, activePeer[0]) {
+		return false, nil
+	}
+	if _, ok := delivery.(agentDeliverySubmissionLister); !ok {
+		return false, nil
+	}
+	// The lifecycle bootstrap prompt is dispatched before the orchestrator
+	// has an interactive submission row. Its deterministic identity still
+	// gives Stop and replay one exact peer-owned target; arbitrary peer
+	// submissions without SQL evidence remain blocked below.
+	execution.setDeliverySubmissionID(activePeer[0].ID)
+	return true, nil
+}
+
+func (m *Manager) restoreRecoveredBackendSubmission(
+	ctx context.Context,
+	execution *AgentExecution,
+	status *agentctl.DeliveryStatus,
+	delivery AgentDeliveryRepository,
+	peerReader agentDeliveryPeerSubmissionReader,
+	activePeer, terminalPeer []journal.SubmissionSummary,
+	activeBackend []*models.AgentDeliverySubmission,
+) error {
+	if len(activeBackend) > 1 {
+		return fmt.Errorf("%w: peer and SQL active submission evidence disagree", ErrDurableAdoptionBlocked)
+	}
+	if len(activeBackend) == 0 {
+		if err := compareActiveSubmissions(activePeer, activeBackend); err != nil {
+			return err
+		}
 		return nil
 	}
-	return m.restoreActiveSubmission(ctx, execution, status, delivery, activePeer[0])
+	if len(activePeer) == 1 {
+		if activeBackend[0].ID != activePeer[0].ID {
+			return fmt.Errorf("%w: peer and SQL identify different active submissions", ErrDurableAdoptionBlocked)
+		}
+		return m.restoreActiveSubmission(ctx, execution, status, delivery, activePeer[0])
+	}
+	return m.restoreTerminalSubmissionOrLookup(ctx, execution, status, delivery, peerReader, terminalPeer, activeBackend[0])
+}
+
+func (m *Manager) restoreTerminalSubmissionOrLookup(
+	ctx context.Context,
+	execution *AgentExecution,
+	status *agentctl.DeliveryStatus,
+	delivery AgentDeliveryRepository,
+	peerReader agentDeliveryPeerSubmissionReader,
+	terminalPeer []journal.SubmissionSummary,
+	backend *models.AgentDeliverySubmission,
+) error {
+	for _, peer := range terminalPeer {
+		if peer.ID == backend.ID {
+			return m.restoreRetainedTerminalSubmission(ctx, execution, status, delivery, peer)
+		}
+	}
+	if peerReader != nil {
+		peer, err := peerReader.GetDeliverySubmission(ctx, backend.ID)
+		if err != nil {
+			return fmt.Errorf("%w: %w: load peer submission %q: %v", ErrDurableAdoptionBlocked, ErrDurableAdoptionEvidenceUnavailable, backend.ID, err)
+		}
+		if !peerSubmissionBelongsToRecovery(peer, execution, status, backend.ID) {
+			return fmt.Errorf("%w: %w: peer submission %q has a foreign owner", ErrDurableAdoptionBlocked, ErrDurableAdoptionIdentityMismatch, backend.ID)
+		}
+		summary := peerSubmissionSummary(peer)
+		if retainedPeerTerminal(status, summary) {
+			return m.restoreRetainedTerminalSubmission(ctx, execution, status, delivery, summary)
+		}
+	}
+	return fmt.Errorf("%w: peer and SQL active submission evidence disagree", ErrDurableAdoptionBlocked)
+}
+
+func peerSubmissionBelongsToRecovery(
+	peer *journal.Submission,
+	execution *AgentExecution,
+	status *agentctl.DeliveryStatus,
+	backendID string,
+) bool {
+	return peer != nil && peer.ID == backendID && peer.SessionID == execution.SessionID &&
+		peer.IncarnationID == status.IncarnationID && peer.HarnessGeneration == status.HarnessGeneration
+}
+
+func peerSubmissionSummary(peer *journal.Submission) journal.SubmissionSummary {
+	return journal.SubmissionSummary{
+		ID: peer.ID, SessionID: peer.SessionID, IncarnationID: peer.IncarnationID,
+		HarnessGeneration: peer.HarnessGeneration, Hash: peer.Hash, State: peer.State,
+		TerminalEventRetained: peer.TerminalEventRetained, TerminalSequence: peer.TerminalSequence,
+		CreatedAt: peer.CreatedAt, UpdatedAt: peer.UpdatedAt,
+	}
 }
 
 func isInitialPromptSubmission(execution *AgentExecution, submission journal.SubmissionSummary) bool {
@@ -261,21 +349,35 @@ func isInitialPromptSubmission(execution *AgentExecution, submission journal.Sub
 		submission.HarnessGeneration == execution.DeliveryHarnessGeneration
 }
 
-func activePeerSubmissions(execution *AgentExecution, status *agentctl.DeliveryStatus) ([]journal.SubmissionSummary, error) {
+func peerSubmissionsForRecovery(
+	execution *AgentExecution,
+	status *agentctl.DeliveryStatus,
+) (active []journal.SubmissionSummary, terminal []journal.SubmissionSummary, err error) {
 	var activePeer []journal.SubmissionSummary
 	for _, submission := range status.Submissions {
 		if submission.SessionID != execution.SessionID ||
 			submission.IncarnationID != status.IncarnationID {
-			return nil, fmt.Errorf("%w: %w: submission %q has a foreign owner", ErrDurableAdoptionBlocked, ErrDurableAdoptionIdentityMismatch, submission.ID)
+			return nil, nil, fmt.Errorf("%w: %w: submission %q has a foreign owner", ErrDurableAdoptionBlocked, ErrDurableAdoptionIdentityMismatch, submission.ID)
 		}
 		if deliverySubmissionNeedsRecovery(models.DeliverySubmissionState(submission.State)) {
 			activePeer = append(activePeer, submission)
+			continue
+		}
+		if retainedPeerTerminal(status, submission) {
+			terminal = append(terminal, submission)
 		}
 	}
 	if len(activePeer) > 1 {
-		return nil, fmt.Errorf("%w: multiple active peer submissions are possible", ErrDurableAdoptionBlocked)
+		return nil, nil, fmt.Errorf("%w: multiple active peer submissions are possible", ErrDurableAdoptionBlocked)
 	}
-	return activePeer, nil
+	return activePeer, terminal, nil
+}
+
+func retainedPeerTerminal(status *agentctl.DeliveryStatus, submission journal.SubmissionSummary) bool {
+	if submission.State != journal.SubmissionCompleted || !submission.TerminalEventRetained || submission.TerminalSequence == 0 {
+		return false
+	}
+	return status.Stream == nil || submission.TerminalSequence > status.Stream.Acknowledged
 }
 
 func activeBackendSubmissions(
@@ -320,20 +422,45 @@ func (m *Manager) restoreActiveSubmission(
 	delivery AgentDeliveryRepository,
 	peer journal.SubmissionSummary,
 ) error {
+	return m.restoreRecoveredSubmissionRecord(ctx, execution, status, delivery, peer, false)
+}
+
+func (m *Manager) restoreRetainedTerminalSubmission(
+	ctx context.Context,
+	execution *AgentExecution,
+	status *agentctl.DeliveryStatus,
+	delivery AgentDeliveryRepository,
+	peer journal.SubmissionSummary,
+) error {
+	return m.restoreRecoveredSubmissionRecord(ctx, execution, status, delivery, peer, true)
+}
+
+func (m *Manager) restoreRecoveredSubmissionRecord(
+	ctx context.Context,
+	execution *AgentExecution,
+	status *agentctl.DeliveryStatus,
+	delivery AgentDeliveryRepository,
+	peer journal.SubmissionSummary,
+	terminal bool,
+) error {
 	reader, ok := delivery.(agentDeliverySubmissionReader)
 	if !ok {
 		return fmt.Errorf("%w: %w: SQL submission reader is not configured", ErrDurableAdoptionBlocked, ErrDurableAdoptionEvidenceUnavailable)
 	}
 	submission, err := reader.GetAgentDeliverySubmission(ctx, peer.ID)
 	if err != nil {
-		return fmt.Errorf("%w: %w: load active submission %q: %v", ErrDurableAdoptionBlocked, ErrDurableAdoptionEvidenceUnavailable, peer.ID, err)
+		return fmt.Errorf("%w: %w: load recovered submission %q: %v", ErrDurableAdoptionBlocked, ErrDurableAdoptionEvidenceUnavailable, peer.ID, err)
 	}
 	if submission == nil || submission.ID != peer.ID ||
 		submission.SessionID != execution.SessionID ||
 		submission.IncarnationID != status.IncarnationID ||
 		submission.HarnessGeneration != int64(status.HarnessGeneration) ||
+		(peer.Hash != "" && submission.PayloadHash != peer.Hash) ||
 		!deliverySubmissionNeedsRecovery(submission.State) {
-		return fmt.Errorf("%w: %w: active submission %q does not match SQL", ErrDurableAdoptionBlocked, ErrDurableAdoptionIdentityMismatch, peer.ID)
+		return fmt.Errorf("%w: %w: recovered submission %q does not match SQL", ErrDurableAdoptionBlocked, ErrDurableAdoptionIdentityMismatch, peer.ID)
+	}
+	if terminal && !retainedPeerTerminal(status, peer) {
+		return fmt.Errorf("%w: retained terminal submission %q is not replayable", ErrDurableAdoptionBlocked, peer.ID)
 	}
 	execution.setDeliverySubmissionID(submission.ID)
 	return nil

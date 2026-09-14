@@ -109,6 +109,150 @@ func TestJournalRecoveryDescriptorIsBoundedAndOmitsPayload(t *testing.T) {
 	}
 }
 
+func TestJournalRecoveryDescriptorOmitsAcknowledgedCompletedHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "delivery.bbolt")
+	j, err := Open(Config{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = j.Close() })
+	ctx := context.Background()
+
+	const completedHistory = MaxRecoverySubmissionSummaries + 2
+	for i := 0; i < completedHistory; i++ {
+		id := fmt.Sprintf("completed-%02d", i)
+		if _, err := j.PutSubmission(ctx, Submission{
+			ID: id, SessionID: "session-1", IncarnationID: "incarnation-1", HarnessGeneration: 2,
+			Hash: id, Payload: []byte("private prompt payload"),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		for _, state := range []SubmissionState{SubmissionAccepted, SubmissionDispatching} {
+			if _, err := j.TransitionSubmission(ctx, id, state, time.Time{}); err != nil {
+				t.Fatalf("transition %s to %s: %v", id, state, err)
+			}
+		}
+		if _, err := j.Append(ctx, Event{
+			SessionID: "session-1", IncarnationID: "incarnation-1", HarnessGeneration: 2,
+			StreamID: "stream-1", SubmissionID: id, Type: "complete", Terminal: true,
+			Payload: []byte("done"),
+		}); err != nil {
+			t.Fatalf("append %s: %v", id, err)
+		}
+		if _, err := j.TransitionSubmission(ctx, id, SubmissionCompleted, time.Time{}); err != nil {
+			t.Fatalf("complete %s: %v", id, err)
+		}
+	}
+	if err := j.Acknowledge(ctx, "stream-1", completedHistory); err != nil {
+		t.Fatalf("acknowledge completed history: %v", err)
+	}
+
+	descriptor, err := j.RecoveryDescriptor(ctx, "session-1", "incarnation-1", 2, "stream-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if descriptor.Unresolved || descriptor.SubmissionCount != 0 || len(descriptor.Submissions) != 0 || descriptor.SubmissionsTruncated {
+		t.Fatalf("completed history remained recovery evidence: unresolved=%t count=%d summaries=%d truncated=%t", descriptor.Unresolved, descriptor.SubmissionCount, len(descriptor.Submissions), descriptor.SubmissionsTruncated)
+	}
+}
+
+func TestJournalRecoveryDescriptorKeepsActiveSubmissionAlongsideCompletedHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "delivery.bbolt")
+	j, err := Open(Config{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = j.Close() })
+	ctx := context.Background()
+
+	const completedHistory = MaxRecoverySubmissionSummaries + 2
+	for i := 0; i < completedHistory; i++ {
+		id := fmt.Sprintf("completed-%02d", i)
+		if _, err := j.PutSubmission(ctx, Submission{
+			ID: id, SessionID: "session-1", IncarnationID: "incarnation-1", HarnessGeneration: 2,
+			Hash: id, Payload: []byte("done"),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		for _, state := range []SubmissionState{SubmissionAccepted, SubmissionDispatching} {
+			if _, err := j.TransitionSubmission(ctx, id, state, time.Time{}); err != nil {
+				t.Fatalf("transition %s to %s: %v", id, state, err)
+			}
+		}
+		if _, err := j.Append(ctx, Event{
+			SessionID: "session-1", IncarnationID: "incarnation-1", HarnessGeneration: 2,
+			StreamID: "stream-1", SubmissionID: id, Type: "complete", Terminal: true,
+			Payload: []byte("done"),
+		}); err != nil {
+			t.Fatalf("append %s: %v", id, err)
+		}
+		if _, err := j.TransitionSubmission(ctx, id, SubmissionCompleted, time.Time{}); err != nil {
+			t.Fatalf("complete %s: %v", id, err)
+		}
+	}
+	if err := j.Acknowledge(ctx, "stream-1", completedHistory); err != nil {
+		t.Fatalf("acknowledge completed history: %v", err)
+	}
+	if _, err := j.PutSubmission(ctx, Submission{
+		ID: "active", SessionID: "session-1", IncarnationID: "incarnation-1", HarnessGeneration: 2,
+		Hash: "active", Payload: []byte("active"), State: SubmissionDispatching,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	descriptor, err := j.RecoveryDescriptor(ctx, "session-1", "incarnation-1", 2, "stream-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !descriptor.Unresolved || descriptor.SubmissionCount != 1 || len(descriptor.Submissions) != 1 || descriptor.Submissions[0].ID != "active" || descriptor.SubmissionsTruncated {
+		t.Fatalf("active evidence was not isolated from history: unresolved=%t count=%d summaries=%+v truncated=%t", descriptor.Unresolved, descriptor.SubmissionCount, descriptor.Submissions, descriptor.SubmissionsTruncated)
+	}
+}
+
+func TestJournalRecoveryDescriptorDoesNotBoundCompletedTerminalHistory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "delivery.bbolt")
+	j, err := Open(Config{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = j.Close() })
+	ctx := context.Background()
+
+	const completedHistory = MaxRecoverySubmissionSummaries + 2
+	for i := 0; i < completedHistory; i++ {
+		id := fmt.Sprintf("completed-%02d", i)
+		if _, err := j.PutSubmission(ctx, Submission{
+			ID: id, SessionID: "session-1", IncarnationID: "incarnation-1", HarnessGeneration: 2,
+			Hash: id, Payload: []byte("done"),
+		}); err != nil {
+			t.Fatal(err)
+		}
+		for _, state := range []SubmissionState{SubmissionAccepted, SubmissionDispatching} {
+			if _, err := j.TransitionSubmission(ctx, id, state, time.Time{}); err != nil {
+				t.Fatalf("transition %s to %s: %v", id, state, err)
+			}
+		}
+		if _, err := j.Append(ctx, Event{
+			SessionID: "session-1", IncarnationID: "incarnation-1", HarnessGeneration: 2,
+			StreamID: "stream-1", SubmissionID: id, Type: "complete", Terminal: true,
+			Payload: []byte("done"),
+		}); err != nil {
+			t.Fatalf("append %s: %v", id, err)
+		}
+		if _, err := j.TransitionSubmission(ctx, id, SubmissionCompleted, time.Time{}); err != nil {
+			t.Fatalf("complete %s: %v", id, err)
+		}
+	}
+
+	descriptor, err := j.RecoveryDescriptor(ctx, "session-1", "incarnation-1", 2, "stream-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !descriptor.Unresolved || descriptor.SubmissionCount != 0 || len(descriptor.Submissions) != 0 || descriptor.SubmissionsTruncated {
+		t.Fatalf("completed terminal history was treated as ambiguous submissions: unresolved=%t count=%d summaries=%d truncated=%t", descriptor.Unresolved, descriptor.SubmissionCount, len(descriptor.Submissions), descriptor.SubmissionsTruncated)
+	}
+}
+
 func TestJournalStorageFailuresFailClosed(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "delivery.bbolt")
 	j, err := Open(Config{

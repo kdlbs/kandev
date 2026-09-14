@@ -13,14 +13,18 @@ import (
 
 type durableDeliveryTestAgentManager struct {
 	*mockAgentManager
-	capability agentruntime.DurableDeliveryCapability
-	advertised bool
+	capability   agentruntime.DurableDeliveryCapability
+	advertised   bool
+	capabilityFn func(context.Context, string) (agentruntime.DurableDeliveryCapability, bool)
 }
 
 func (m *durableDeliveryTestAgentManager) DurableDeliveryCapabilityForExecution(
-	context.Context,
-	string,
+	ctx context.Context,
+	executionID string,
 ) (agentruntime.DurableDeliveryCapability, bool) {
+	if m.capabilityFn != nil {
+		return m.capabilityFn(ctx, executionID)
+	}
 	return m.capability, m.advertised
 }
 
@@ -115,6 +119,102 @@ func TestPrepareAgentDeliverySubmissionBlocksUnresolvedPeer(t *testing.T) {
 	}
 	if block == nil || block.Reason != durableDeliveryUnresolvedReason {
 		t.Fatalf("recovery block = %#v, want %s", block, durableDeliveryUnresolvedReason)
+	}
+}
+
+func TestPrepareAgentDeliverySubmissionRefreshesRecoveryBeforeAdmittingNextPrompt(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-delivery-refresh", "session-delivery-refresh", "step-1")
+	session, err := repo.GetTaskSession(ctx, "session-delivery-refresh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	capability := agentruntime.DurableDeliveryCapability{
+		Version:    journal.CurrentVersion,
+		Durable:    true,
+		Unresolved: true,
+		Reason:     durableDeliveryUnresolvedReason,
+	}
+	agentManager := &durableDeliveryTestAgentManager{
+		mockAgentManager: &mockAgentManager{},
+		capabilityFn: func(context.Context, string) (agentruntime.DurableDeliveryCapability, bool) {
+			return capability, true
+		},
+	}
+	service := createTestServiceWithAgent(
+		repo, newMockStepGetter(), newMockTaskRepo(), agentManager,
+	)
+
+	_, err = service.prepareAgentDeliverySubmission(
+		ctx, session, "execution-1", "blocked", nil,
+		promptTaskOptions{
+			deliveryProtocol:     messagequeue.DeliveryProtocolPending,
+			deliverySubmissionID: "queue:blocked",
+		},
+	)
+	if !errors.Is(err, ErrSessionRecoveryRequired) {
+		t.Fatalf("unresolved admission error = %v, want session recovery required", err)
+	}
+	if _, err := repo.GetAgentDeliverySubmission(ctx, "prompt:queue:blocked"); err == nil {
+		t.Fatal("unresolved prompt unexpectedly created a durable submission")
+	}
+
+	capability.Unresolved = false
+	capability.Reason = ""
+	runtime, err := service.prepareAgentDeliverySubmission(
+		ctx, session, "execution-1", "first", nil,
+		promptTaskOptions{
+			deliveryProtocol:     messagequeue.DeliveryProtocolPending,
+			deliverySubmissionID: "queue:first",
+		},
+	)
+	if err != nil {
+		t.Fatalf("refreshed admission error = %v", err)
+	}
+	if runtime == nil {
+		t.Fatal("refreshed admission returned no durable runtime")
+	}
+	if err := runtime.markCompleted(ctx); err != nil {
+		t.Fatalf("mark first prompt completed: %v", err)
+	}
+	first, err := repo.GetAgentDeliverySubmission(ctx, "prompt:queue:first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.State != models.DeliverySubmissionCompleted {
+		t.Fatalf("first prompt state = %q, want completed", first.State)
+	}
+
+	next, err := service.prepareAgentDeliverySubmission(
+		ctx, session, "execution-1", "next", nil,
+		promptTaskOptions{
+			deliveryProtocol:     messagequeue.DeliveryProtocolPending,
+			deliverySubmissionID: "queue:next",
+		},
+	)
+	if err != nil {
+		t.Fatalf("next admission error = %v", err)
+	}
+	if next == nil || next.id != "prompt:queue:next" {
+		t.Fatalf("next runtime = %#v, want prompt:queue:next", next)
+	}
+	storedNext, err := repo.GetAgentDeliverySubmission(ctx, next.id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if storedNext.State != models.DeliverySubmissionDispatching {
+		t.Fatalf("next prompt state = %q, want dispatching", storedNext.State)
+	}
+
+	if _, err := service.prepareAgentDeliverySubmission(
+		ctx, session, "execution-1", "next", nil,
+		promptTaskOptions{
+			deliveryProtocol:     messagequeue.DeliveryProtocolPending,
+			deliverySubmissionID: "queue:next",
+		},
+	); !errors.Is(err, ErrSessionRecoveryRequired) {
+		t.Fatalf("duplicate next admission error = %v, want session recovery required", err)
 	}
 }
 

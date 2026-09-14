@@ -53,6 +53,27 @@ func TestDeliveryClientStatusCachesAdoptionDescriptor(t *testing.T) {
 	}
 }
 
+func TestDeliveryClientStatusDoesNotOverwriteStableCapability(t *testing.T) {
+	c := NewClient("127.0.0.1", 1, newTestLogger())
+	c.setDurableDelivery(&DurableDeliveryInfo{
+		Version: journal.CurrentVersion,
+		Durable: true,
+	})
+	c.setDeliveryStatus(&DeliveryStatus{
+		StorageCapability: journal.StorageCapability{
+			Version:    journal.CurrentVersion,
+			Durable:    true,
+			Unresolved: true,
+			Reason:     "unresolved_durable_work",
+		},
+	})
+
+	capability, advertised := c.DurableDeliveryCapability()
+	if !advertised || !capability.Durable || capability.Unresolved || capability.Reason != "" {
+		t.Fatalf("capability = %#v, advertised = %t; transient status must not replace stable capability", capability, advertised)
+	}
+}
+
 func TestDeliveryClientStatusPreservesHTTPStatus(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusUnauthorized)
