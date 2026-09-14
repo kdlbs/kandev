@@ -43,7 +43,7 @@ func assertPostgresIndexExists(t *testing.T, conn interface {
 	t.Helper()
 	var count int
 	if err := conn.Get(&count,
-		`SELECT COUNT(*) FROM pg_indexes WHERE indexname = $1`, name,
+		`SELECT COUNT(*) FROM pg_indexes WHERE schemaname = current_schema() AND indexname = $1`, name,
 	); err != nil {
 		t.Fatalf("query pg_indexes for %s: %v", name, err)
 	}

@@ -393,12 +393,48 @@ func (r *Repository) RestoreWorkspaceGroupMemberByCascade(ctx context.Context, t
 	if taskID == "" || cascadeID == "" {
 		return errors.New("restore membership: taskID and cascadeID required")
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	var released int
+	if err := r.ro.GetContext(ctx, &released, r.ro.Rebind(`
+		SELECT COUNT(*) FROM task_workspace_group_members
+		WHERE task_id = ? AND released_by_cascade_id = ?
+	`), taskID, cascadeID); err != nil {
+		return err
+	}
+	if released == 0 {
+		return nil
+	}
+	var pending int
+	if err := r.ro.GetContext(ctx, &pending, r.ro.Rebind(`
+		SELECT COUNT(*) FROM task_workspace_group_members m
+		JOIN task_workspace_groups g ON g.id = m.workspace_group_id
+		WHERE m.task_id = ? AND m.released_by_cascade_id = ?
+		  AND g.cleanup_status = ?
+	`), taskID, cascadeID, models.WorkspaceCleanupStatusPending); err != nil {
+		return err
+	}
+	if pending > 0 {
+		return fmt.Errorf("workspace group cleanup is in progress for task %s", taskID)
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_workspace_group_members
 		SET released_at = NULL, release_reason = '', released_by_cascade_id = ''
 		WHERE task_id = ? AND released_by_cascade_id = ?
-	`), taskID, cascadeID)
-	return err
+		  AND NOT EXISTS (
+			SELECT 1 FROM task_workspace_groups
+			WHERE id = workspace_group_id AND cleanup_status = ?
+		  )
+	`), taskID, cascadeID, models.WorkspaceCleanupStatusPending)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != int64(released) {
+		return fmt.Errorf("workspace group membership restore incomplete for task %s: restored %d of %d", taskID, rows, released)
+	}
+	return nil
 }
 
 // ListWorkspaceGroupMembers returns every membership row for the group,

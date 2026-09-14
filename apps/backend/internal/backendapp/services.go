@@ -1506,6 +1506,11 @@ func (a pluginsTaskWriterAdapter) CreateTask(ctx context.Context, in plugins.Tas
 }
 
 func (a pluginsTaskWriterAdapter) DeleteTask(ctx context.Context, id string) error {
+	if lifecycle, ok := a.svc.(interface {
+		DeleteTaskWithLifecycle(context.Context, string) error
+	}); ok {
+		return lifecycle.DeleteTaskWithLifecycle(ctx, id)
+	}
 	return a.svc.DeleteTask(ctx, id)
 }
 

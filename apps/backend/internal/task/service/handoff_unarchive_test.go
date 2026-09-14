@@ -2,7 +2,10 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // Manual/legacy archives (empty cascade id — WS handler, MCP tool, or rows
@@ -38,6 +41,25 @@ func TestUnarchiveTaskTree_ManualArchiveRestoresRootOnly(t *testing.T) {
 	defer pub.mu.Unlock()
 	if len(pub.updated) != 1 || pub.updated[0] != "root" {
 		t.Errorf("PublishTaskUpdated calls = %v, want [root]", pub.updated)
+	}
+}
+
+func TestUnarchiveTaskTree_DoesNotInferUnrelatedDescendantCascade(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addArchivedTask("root", "", "ws-1", "")
+	tasks.addArchivedTask("c1", "root", "ws-1", "unrelated-cascade")
+	svc := newCascadeService(t, tasks, newCascadeWSGroupRepo())
+
+	if _, err := svc.UnarchiveTaskTree(context.Background(), "root"); err != nil {
+		t.Fatalf("unarchive: %v", err)
+	}
+	root, _ := tasks.GetTask(context.Background(), "root")
+	if root.ArchivedAt != nil {
+		t.Fatal("root should be unarchived")
+	}
+	child, _ := tasks.GetTask(context.Background(), "c1")
+	if child.ArchivedAt == nil {
+		t.Fatal("descendant from an unrelated cascade must remain archived")
 	}
 }
 
@@ -88,5 +110,73 @@ func TestUnarchiveTaskTree_CascadePublishesTaskUpdatedPerTask(t *testing.T) {
 	}
 	if len(want) > 0 {
 		t.Errorf("missing PublishTaskUpdated for: %v", want)
+	}
+}
+
+type unarchivePublicationFailureRepo struct {
+	*fakeCascadeRepo
+	failEnabled bool
+	failTaskID  string
+	failed      bool
+}
+
+func (r *unarchivePublicationFailureRepo) GetTask(
+	ctx context.Context,
+	id string,
+) (*models.Task, error) {
+	r.base.mu.Lock()
+	task := r.base.tasks[id]
+	shouldFail := r.failEnabled && id == r.failTaskID && task != nil && task.ArchivedAt == nil && !r.failed
+	if shouldFail {
+		r.failed = true
+	}
+	r.base.mu.Unlock()
+	if shouldFail {
+		return nil, errors.New("transient task projection failure")
+	}
+	return r.fakeCascadeRepo.GetTask(ctx, id)
+}
+
+func TestUnarchiveTaskTreeContinuesAfterProjectionPublicationFailure(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("c1", "root", "ws-1")
+	repo := &unarchivePublicationFailureRepo{
+		fakeCascadeRepo: newCascadeRepo(tasks), failTaskID: "c1",
+	}
+	svc := NewHandoffService(repo, nil, nil, nil, newCascadeWSGroupRepo(), nil)
+	svc.SetTaskEventPublisher(&fakeEventPublisher{})
+	if _, err := svc.ArchiveTaskTree(context.Background(), "root", true); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	repo.failEnabled = true
+
+	if _, err := svc.UnarchiveTaskTree(context.Background(), "root"); err == nil {
+		t.Fatal("unarchive succeeded despite projection publication failure")
+	}
+	for _, id := range []string{"root", "c1"} {
+		task, _ := tasks.GetTask(context.Background(), id)
+		if task.ArchivedAt != nil {
+			t.Errorf("%s remained archived after publication failure: %v", id, task.ArchivedAt)
+		}
+	}
+}
+
+func TestUnarchiveManualRootContinuesAfterProjectionPublicationFailure(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addArchivedTask("root", "", "ws-1", "")
+	repo := &unarchivePublicationFailureRepo{
+		fakeCascadeRepo: newCascadeRepo(tasks), failTaskID: "root",
+	}
+	svc := NewHandoffService(repo, nil, nil, nil, newCascadeWSGroupRepo(), nil)
+	svc.SetTaskEventPublisher(&fakeEventPublisher{})
+	repo.failEnabled = true
+
+	if _, err := svc.UnarchiveTaskTree(context.Background(), "root"); err == nil {
+		t.Fatal("manual unarchive succeeded despite projection publication failure")
+	}
+	root, _ := tasks.GetTask(context.Background(), "root")
+	if root.ArchivedAt != nil {
+		t.Fatal("manual unarchive left root archived after publication failure")
 	}
 }

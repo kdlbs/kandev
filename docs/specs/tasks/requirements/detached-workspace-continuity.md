@@ -53,6 +53,11 @@ former parent is archived, deleted, retried, or recovered after restart.
 - **AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.5:** When the backend restarts
   after detachment, the detached task shall recover the same workspace binding,
   current steward, and ownership generation.
+- **AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.6:** When a task's workspace
+  mode, active membership, owner, or ownership generation is inconsistent,
+  detachment shall return a typed conflict without changing hierarchy or
+  ownership. `shared_group` and `new_workspace` detachment shall preserve their
+  mode, membership, owner, and generation.
 
 ### REQ-TASKS-DETACHED-WORKSPACE-CONTINUITY-002: Canonical subtask workspace attachment
 
