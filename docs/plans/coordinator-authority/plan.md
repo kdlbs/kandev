@@ -43,10 +43,10 @@ parent/child topology. Default-off, flag-gated, audited, and fail-closed.
 | Item | Evidence |
 |------|----------|
 | **PR** | https://github.com/kdlbs/kandev/pull/3048 (Draft, no merge) |
-| **Head** | `68a178c25c105af24062c96077db0ab168309f65` pushed to `yattdev:feature/grant-coordinator-ma-nnw` |
-| **CI** | All checks green (33 successes, 13 skipped, 0 failures). E2E shards 2-14 still in_progress (unrelated). |
+| **Head** | `6965745b3bcfde720f14bcba5705f0dab8878b32` on `yattdev:feature/grant-coordinator-ma-nnw`, including the upstream-main reconciliation merge (conflicts resolved: repository error aliases kept from both sides, translation catalogs unioned, decisions index converted to the catalog-command format) |
+| **CI** | Backend Tests 1/2 + 2/2, Backend Static/Postgres/Postgres 18/Windows/ambient, Frontend tests/lint/build, Desktop smoke green at this head |
 | **Threads** | 0 unresolved |
-| **Mergeable** | MERGEABLE |
+| **Mergeable** | MERGEABLE against current `main` |
 | **QA image** | `kandev-qa-auth:77fb39625` (based on exact build of commits through 77fb39625) |
 | **QA container** | `kandev-qa-auth-77fb39625` on `http://192.168.50.131:8084`, restart=unless-stopped, auth-enabled |
 | **Auth accounts** | Admin: `admin@test.local`, Member: `member@test.local` (secrets set via `/api/v1/auth/setup` and `/api/v1/users`) |
