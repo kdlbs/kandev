@@ -15,7 +15,7 @@ import {
   type PendingClarificationScope,
 } from "@/lib/utils/pending-clarification";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
-import type { LastAgentError } from "@/lib/session-last-agent-error";
+import { lastAgentErrorStamp, type LastAgentError } from "@/lib/session-last-agent-error";
 import {
   buildChildrenByParentToolCallId,
   buildPermissionsByToolCallId,
@@ -364,6 +364,7 @@ function buildGroupedItemsForHook(args: {
     }),
     args.resolvedSessionId,
     args.lastAgentError,
+    args.allSessionMessages,
   );
 }
 
@@ -394,8 +395,17 @@ export function insertLastAgentErrorItem(
   items: RenderItem[],
   resolvedSessionId: string | null,
   error?: LastAgentError | null,
+  persistedMessages: Message[] = [],
 ): RenderItem[] {
   if (!resolvedSessionId || !error) return items;
+  const stamp = lastAgentErrorStamp(error);
+  if (
+    persistedMessages.some((message) =>
+      isPersistedRecoveryForSession(message, resolvedSessionId, stamp),
+    )
+  ) {
+    return items;
+  }
   const notice: AgentErrorNoticeItem = {
     type: "agent_error_notice",
     id: `last-agent-error-${resolvedSessionId}-${error.occurredAt ?? "unknown"}`,
@@ -404,6 +414,18 @@ export function insertLastAgentErrorItem(
   };
   const insertAt = insertionIndexForAgentError(items, error.occurredAt);
   return [...items.slice(0, insertAt), notice, ...items.slice(insertAt)];
+}
+
+function isPersistedRecoveryForSession(
+  message: Message,
+  sessionId: string,
+  stamp: string,
+): boolean {
+  if (message.session_id !== sessionId) return false;
+  const metadata = message.metadata as Record<string, unknown> | undefined;
+  if (metadata?.recovery_actions !== true) return false;
+  const messageStamp = metadata.error_stamp ?? metadata.recovery_stamp ?? metadata.failure_stamp;
+  return typeof messageStamp === "string" && messageStamp !== "" && messageStamp === stamp;
 }
 
 /** Builds the todo checklist from the latest persisted `todo`-type message,

@@ -1373,7 +1373,13 @@ func (s *Service) transitionBootstrapFailure(
 
 	committer, ok := s.repo.(bootstrapFailureCommitter)
 	if !ok {
-		return s.transitionTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateFailed, errorValue.Message, nil)
+		changed, finalState, err := s.transitionTaskSessionState(
+			ctx, taskID, sessionID, models.TaskSessionStateFailed, errorValue.Message, nil,
+		)
+		if changed && finalState == models.TaskSessionStateFailed {
+			s.persistBootstrapFailureMessage(ctx, taskID, sessionID, agentExecutionID, errorValue)
+		}
+		return changed, finalState, err
 	}
 	changed, updatedAt, err := committer.CommitBootstrapFailureIfCurrentExecution(
 		ctx,
@@ -1394,6 +1400,7 @@ func (s *Service) transitionBootstrapFailure(
 	if refreshed == nil {
 		return false, models.TaskSessionStateFailed, fmt.Errorf("get session after bootstrap failure commit: session %q is nil", sessionID)
 	}
+	s.persistBootstrapFailureMessage(ctx, taskID, sessionID, agentExecutionID, errorValue)
 	authoritativeUpdatedAt := updatedAt.UTC()
 	s.publishAcceptedTaskSessionState(
 		ctx,
@@ -1406,6 +1413,31 @@ func (s *Service) transitionBootstrapFailure(
 		refreshed,
 	)
 	return true, models.TaskSessionStateFailed, nil
+}
+
+// persistBootstrapFailureMessage records the accepted bootstrap failure as a
+// chronological session entry. Its stable message identity makes a retry
+// after the state commit idempotent.
+func (s *Service) persistBootstrapFailureMessage(
+	ctx context.Context,
+	taskID, sessionID, agentExecutionID string,
+	errorValue models.LastAgentError,
+) {
+	if s.messageCreator == nil {
+		return
+	}
+	s.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+		TaskID:           taskID,
+		SessionID:        sessionID,
+		AgentExecutionID: agentExecutionID,
+		ErrorMessage:     errorValue.Message,
+		FailureCode:      errorValue.Code,
+		FailureDetails:   errorValue.Details,
+		Phase:            errorValue.Phase,
+		AttemptID:        errorValue.AttemptID,
+		ErrorStamp:       errorValue.Stamp(),
+		Causes:           errorValue.Causes,
+	})
 }
 
 func (s *Service) publishAcceptedTaskSessionState(

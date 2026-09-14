@@ -102,6 +102,7 @@ func (e *Executor) buildLastAgentError(
 	return models.LastAgentError{
 		Message:    classification.message,
 		OccurredAt: occurredAt,
+		Scope:      models.ErrorScopeSession,
 		Code:       classification.code,
 		Details:    details,
 		RecoveryActions: func() []string {
@@ -167,6 +168,7 @@ func (e *Executor) buildBootstrapLastAgentError(
 	return models.LastAgentError{
 		Message:          classification.message,
 		OccurredAt:       occurredAt,
+		Scope:            models.ErrorScopeSession,
 		AgentExecutionID: agentExecutionID,
 		ExecutionID:      agentExecutionID,
 		Phase:            models.LaunchErrorPhaseBootstrap,

@@ -12,7 +12,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
-	"github.com/kandev/kandev/internal/task/statussummary"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -65,7 +64,14 @@ type taskLaunchRecoveryRepository interface {
 	UpdateRepositoryDefaultBranch(context.Context, string, string, string) error
 	SetSessionMetadataKeyIfStamp(context.Context, string, string, string, interface{}) (bool, error)
 	SetTaskMetadataKeyIfStamp(context.Context, string, string, string, interface{}) (bool, error)
-	RemoveSessionMetadataKeyIfStamp(context.Context, string, string, string) (bool, error)
+}
+
+type taskLaunchRecoveryEnvironmentReader interface {
+	GetTaskEnvironmentByTaskID(context.Context, string) (*models.TaskEnvironment, error)
+}
+
+type taskLaunchRecoveryEnvironmentResetter interface {
+	ResetTaskEnvironment(context.Context, string, taskservice.ResetOptions) error
 }
 
 type taskLaunchRecoverySource struct {
@@ -216,70 +222,33 @@ func (s *Service) verifyCurrentTaskLaunchRecoverySource(
 	ctx context.Context,
 	source *taskLaunchRecoverySource,
 ) error {
-	current, err := s.loadAuthoritativeTaskLaunchRecoveryError(ctx, source.task.ID)
+	if source.sessionOwned {
+		currentSession, err := s.repo.GetTaskSession(ctx, source.session.ID)
+		if err != nil {
+			return err
+		}
+		if currentSession == nil {
+			return ErrTaskLaunchRecoveryStale
+		}
+		current, found := models.LoadLastAgentError(currentSession.Metadata)
+		if !found || current.IsDismissed() || !current.MatchesStamp(source.errorStamp) {
+			return ErrTaskLaunchRecoveryStale
+		}
+		return nil
+	}
+
+	currentTask, err := s.repo.GetTask(ctx, source.task.ID)
 	if err != nil {
 		return err
 	}
-	if current == nil || current.SessionID != source.sessionID() || current.Stamp != source.errorStamp {
+	if currentTask == nil {
+		return ErrTaskLaunchRecoveryStale
+	}
+	current, found := models.LoadTaskLaunchError(currentTask.Metadata)
+	if !found || !current.MatchesStamp(source.errorStamp) {
 		return ErrTaskLaunchRecoveryStale
 	}
 	return nil
-}
-
-func (s *Service) loadAuthoritativeTaskLaunchRecoveryError(
-	ctx context.Context,
-	taskID string,
-) (*statussummary.ActiveErrorSummary, error) {
-	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil {
-		return nil, err
-	}
-	if task == nil {
-		return nil, fmt.Errorf("task %q was not found", taskID)
-	}
-	sessions, err := s.repo.ListTaskSessions(ctx, taskID)
-	if err != nil {
-		return nil, err
-	}
-	input := statussummary.RebuildInput{Now: time.Now().UTC()}
-	for _, session := range sessions {
-		if session == nil {
-			continue
-		}
-		lastError, found := models.LoadLastAgentError(session.Metadata)
-		if !found || lastError.IsDismissed() {
-			continue
-		}
-		input.Sessions = append(input.Sessions, statussummary.RebuildSession{
-			ID: session.ID,
-			ActiveError: &statussummary.ActiveErrorSummary{
-				SessionID:        session.ID,
-				TaskRepositoryID: lastError.TaskRepositoryID,
-				ExecutionID:      lastError.ExecutionID,
-				AttemptID:        lastError.AttemptID,
-				Phase:            lastError.Phase,
-				Stamp:            lastError.Stamp(),
-				OccurredAt:       lastError.OccurredAt,
-				Preview:          lastError.Message,
-				Details:          lastError.Details,
-				Category:         lastError.Code,
-				RecoveryActions:  lastError.RecoveryActions,
-				Causes:           lastError.Causes,
-			},
-		})
-	}
-	if launchError, found := models.LoadTaskLaunchError(task.Metadata); found {
-		input.TaskError = &statussummary.ActiveErrorSummary{
-			TaskRepositoryID: launchError.TaskRepositoryID,
-			Stamp:            launchError.Stamp(),
-			OccurredAt:       launchError.OccurredAt,
-			Preview:          launchError.Message,
-			Details:          launchError.Details,
-			Category:         launchError.Code,
-			RecoveryActions:  launchError.RecoveryActions,
-		}
-	}
-	return statussummary.BuildFromAuthoritative(input).ActiveError, nil
 }
 
 func (s *Service) loadSessionTaskLaunchRecoverySource(
@@ -298,7 +267,7 @@ func (s *Service) loadSessionTaskLaunchRecoverySource(
 		return nil, fmt.Errorf("session does not belong to task")
 	}
 	lastError, found := models.LoadLastAgentError(session.Metadata)
-	if !found {
+	if !found || lastError.IsDismissed() {
 		return nil, fmt.Errorf("session has no active launch error")
 	}
 	if !lastError.MatchesStamp(req.ErrorStamp) {
@@ -352,13 +321,6 @@ func (source *taskLaunchRecoverySource) taskRepositoryID() string {
 		return source.sessionError.TaskRepositoryID
 	}
 	return source.taskError.TaskRepositoryID
-}
-
-func (source *taskLaunchRecoverySource) sessionID() string {
-	if source.sessionOwned && source.session != nil {
-		return source.session.ID
-	}
-	return ""
 }
 
 func (source *taskLaunchRecoverySource) recoveryActions() []string {
@@ -492,6 +454,7 @@ func (s *Service) recordSessionUnresolvedDefault(
 	value := models.LastAgentError{
 		Message:          message,
 		OccurredAt:       time.Now().UTC(),
+		Scope:            models.ErrorScopeSession,
 		Code:             models.LaunchErrorCategoryDefaultBranchUnresolved,
 		Details:          details,
 		RecoveryActions:  []string{models.RecoveryActionPickBaseBranch},
@@ -530,6 +493,7 @@ func (s *Service) recordTaskUnresolvedDefault(
 	value := models.TaskLaunchError{
 		Message:          message,
 		OccurredAt:       time.Now().UTC(),
+		Scope:            models.ErrorScopeTask,
 		Code:             models.LaunchErrorCategoryDefaultBranchUnresolved,
 		Details:          details,
 		RecoveryActions:  []string{models.RecoveryActionPickBaseBranch},
@@ -564,8 +528,13 @@ func (s *Service) relaunchRecoveredTask(ctx context.Context, req *TaskLaunchReco
 		}
 		return response.SessionID, nil
 	}
+	if err := s.resetFailedTaskEnvironmentForRecovery(ctx, req.TaskID); err != nil {
+		return "", err
+	}
+	agentProfileID, _ := s.resolveTaskAgentProfile(ctx, source.task)
 	response, err := s.LaunchSession(ctx, &LaunchSessionRequest{
 		TaskID:         req.TaskID,
+		AgentProfileID: agentProfileID,
 		Intent:         IntentStart,
 		WorkflowStepID: source.task.WorkflowStepID,
 	})
@@ -576,6 +545,29 @@ func (s *Service) relaunchRecoveredTask(ctx context.Context, req *TaskLaunchReco
 		return "", nil
 	}
 	return response.SessionID, nil
+}
+
+// resetFailedTaskEnvironmentForRecovery removes the unusable environment left
+// by a failed first materialization. Ready environments remain attached so a
+// task-scoped launch error from a later session does not destroy a usable
+// workspace before retrying.
+func (s *Service) resetFailedTaskEnvironmentForRecovery(ctx context.Context, taskID string) error {
+	reader, canRead := s.taskLaunchRecoveryTasks.(taskLaunchRecoveryEnvironmentReader)
+	resetter, canReset := s.taskLaunchRecoveryTasks.(taskLaunchRecoveryEnvironmentResetter)
+	if !canRead || !canReset {
+		return nil
+	}
+	environment, err := reader.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load failed task environment before recovery: %w", err)
+	}
+	if environment == nil || environment.Status != models.TaskEnvironmentStatusFailed {
+		return nil
+	}
+	if err := resetter.ResetTaskEnvironment(ctx, taskID, taskservice.ResetOptions{}); err != nil {
+		return fmt.Errorf("reset failed task environment before recovery: %w", err)
+	}
+	return nil
 }
 
 func (s *Service) markTaskLaunchReviewDone(ctx context.Context, req *TaskLaunchRecoveryRequest, source *taskLaunchRecoverySource) error {
@@ -634,8 +626,28 @@ func (s *Service) clearTaskLaunchRecoverySource(ctx context.Context, source *tas
 		if s.taskLaunchRecoveryRepo == nil {
 			return fmt.Errorf("session launch-error compare-and-clear is unavailable")
 		}
-		_, err := s.taskLaunchRecoveryRepo.RemoveSessionMetadataKeyIfStamp(ctx, source.session.ID, models.SessionMetaKeyLastAgentError, source.errorStamp)
-		return err
+		retired := source.sessionError
+		dismissedAt := time.Now().UTC()
+		retired.DismissedAt = &dismissedAt
+		stored, err := s.taskLaunchRecoveryRepo.SetSessionMetadataKeyIfStamp(
+			ctx,
+			source.session.ID,
+			models.SessionMetaKeyLastAgentError,
+			source.errorStamp,
+			retired,
+		)
+		if err != nil {
+			return err
+		}
+		if !stored {
+			return ErrTaskLaunchRecoveryStale
+		}
+		if s.eventBus != nil {
+			if err := s.publishTaskSessionErrorEvent(ctx, source.task.ID, source.session.ID, false, &retired); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	s.clearTaskLaunchErrorIfStamp(ctx, source.task.ID, source.errorStamp)
 	return nil

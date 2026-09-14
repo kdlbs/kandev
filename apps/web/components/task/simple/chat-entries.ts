@@ -1,8 +1,11 @@
 import type { CommentTurnContext } from "./turn-context";
 import { groupSortKey, type SessionGroup } from "./session-groups";
 import { normalizeRemediationUrl } from "@/lib/remediation-url";
-import { lastAgentErrorStamp, readLastAgentError } from "@/lib/session-last-agent-error";
-import { isTypedTaskLaunchError } from "./components/task-launch-error-entry";
+import {
+  lastAgentErrorStamp,
+  readLastAgentError,
+  readLastAgentErrorIncludingDismissed,
+} from "@/lib/session-last-agent-error";
 import { isMatchingTaskLaunchError } from "@/components/task/chat/types";
 import type {
   RunError,
@@ -11,7 +14,6 @@ import type {
   TaskSession,
   TimelineEvent,
 } from "@/app/office/tasks/[id]/types";
-import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
 
 /**
  * Discriminated union of every row that can appear in the task chat
@@ -50,33 +52,34 @@ export function buildLaterAgentReplyMap(comments: TaskComment[]): Map<string, bo
 }
 
 /**
- * Pull RunError entries out of failed sessions. One entry per office
- * session in FAILED state — the session row's error_message becomes
- * the rawPayload for the chat entry's Show details. The remediation URL is
- * copied from the persisted last_agent_error metadata and passed through the
- * browser-edge allowlist, so RunError never carries an unvalidated string.
+ * Pull retained session failures into the Office chat timeline. The session
+ * metadata remains the source of the chronological breadcrumb after recovery;
+ * only an undismissed record carries recovery actions. The remediation URL is
+ * copied from the persisted metadata and passed through the browser-edge
+ * allowlist, so RunError never carries an unvalidated string.
  */
 export function buildRunErrorsFromSessions(sessions: TaskSession[]): RunError[] {
   const errors: RunError[] = [];
   for (const s of sessions) {
-    if (s.state !== "FAILED") continue;
-    const failedAt = s.completedAt ?? s.updatedAt ?? s.startedAt ?? "";
-    const lastError = lastAgentErrorFromSessionMetadata(s.metadata);
-    const parsedLastError = readLastAgentError(s.metadata);
+    const parsedLastError = readLastAgentErrorIncludingDismissed(s.metadata);
+    if (!parsedLastError) continue;
+    const activeLastError = readLastAgentError(s.metadata);
+    const failedAt =
+      parsedLastError.occurredAt ?? s.completedAt ?? s.updatedAt ?? s.startedAt ?? "";
     errors.push({
       id: `re-${s.id}`,
       sessionId: s.id,
       agentProfileId: s.agentProfileId,
       rawPayload: s.errorMessage ?? "",
       failedAt,
-      failureCode: lastError?.code,
-      failureDetails: lastError?.details,
-      message: parsedLastError?.message,
-      recoveryActions: parsedLastError?.recoveryActions,
-      taskRepositoryId: parsedLastError?.taskRepositoryId,
-      errorStamp: parsedLastError ? lastAgentErrorStamp(parsedLastError) : undefined,
-      remediationUrl:
-        normalizeRemediationUrl(remediationUrlFromSessionMetadata(s.metadata)) ?? undefined,
+      failureCode: parsedLastError.code,
+      failureDetails: parsedLastError.details,
+      message: parsedLastError.message,
+      recoveryActions: activeLastError?.recoveryActions,
+      taskRepositoryId: parsedLastError.taskRepositoryId,
+      errorStamp: lastAgentErrorStamp(parsedLastError),
+      remediationUrl: normalizeRemediationUrl(parsedLastError.remediationUrl) ?? undefined,
+      isActive: activeLastError !== null,
     });
   }
   return errors;
@@ -93,20 +96,6 @@ export function hasMatchingSessionLaunchError(
       { session_id: summarySessionId, stamp: summaryStamp ?? "" },
       { sessionId: error.sessionId, errorStamp: error.errorStamp },
     ),
-  );
-}
-
-export function filterVisibleRunErrors(
-  runErrors: RunError[],
-  activeError: TaskStatusSummary["active_error"],
-): RunError[] {
-  if (!isTypedTaskLaunchError(activeError)) return runErrors;
-  return runErrors.filter(
-    (error) =>
-      !isMatchingTaskLaunchError(activeError, {
-        sessionId: error.sessionId,
-        errorStamp: error.errorStamp,
-      }),
   );
 }
 
@@ -136,29 +125,6 @@ export function liveSessionMetadataFromStore(
     return undefined;
   }
   return row.metadata;
-}
-
-function remediationUrlFromSessionMetadata(metadata: Record<string, unknown> | null | undefined) {
-  const lastError = metadata?.last_agent_error;
-  if (!lastError || typeof lastError !== "object") return undefined;
-  const record = lastError as Record<string, unknown>;
-  const raw = record.remediation_url ?? record.remediationUrl;
-  return typeof raw === "string" && raw !== "" ? raw : undefined;
-}
-
-function lastAgentErrorFromSessionMetadata(
-  metadata: Record<string, unknown> | null | undefined,
-): { code?: string; details?: string } | undefined {
-  const lastError = metadata?.last_agent_error;
-  if (!lastError || typeof lastError !== "object") return undefined;
-  const record = lastError as Record<string, unknown>;
-  const code = record.code ?? record.failure_code ?? record.failureCode;
-  const details =
-    record.details ?? record.failure_details ?? record.failureDetails ?? record.error_output;
-  return {
-    code: typeof code === "string" && code !== "" ? code : undefined,
-    details: typeof details === "string" && details !== "" ? details : undefined,
-  };
 }
 
 export type MergeChatEntriesArgs = {

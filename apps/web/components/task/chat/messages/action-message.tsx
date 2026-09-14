@@ -13,9 +13,49 @@ import { parseRetryAt, retryCountdownLabel } from "./transient-retry";
 import { hasSessionRecoveryResolutionAfter } from "@/hooks/processed-message-filtering";
 import { ActionButtons } from "./action-message-actions";
 import { SessionRecoveryActionButtons, sessionRecoveryAction } from "./action-message-recovery";
+import { lastAgentErrorStamp, readLastAgentError } from "@/lib/session-last-agent-error";
 
 function isSessionActive(state?: TaskSessionState) {
   return state === "RUNNING" || state === "STARTING" || state === "COMPLETED";
+}
+
+function currentSessionRecoveryStamp(sessionMetadata: Record<string, unknown> | null) {
+  if (!sessionMetadata) return null;
+  const current = readLastAgentError(sessionMetadata);
+  return current ? lastAgentErrorStamp(current) : null;
+}
+
+function isCurrentRecoveryMessage(
+  isRecoveryMessage: boolean,
+  messageRecoveryStamp: string | undefined,
+  currentRecoveryStamp: string | null,
+) {
+  if (!isRecoveryMessage) return true;
+  if (messageRecoveryStamp) return currentRecoveryStamp === messageRecoveryStamp;
+  return currentRecoveryStamp === null;
+}
+
+function shouldShowRecoveryActions({
+  isRecoveryMessage,
+  isCurrentRecovery,
+  recoveryResolvedDurably,
+  agentRebooted,
+  recoveryRequested,
+  recoveryFailedAgain,
+  sessionState,
+}: {
+  isRecoveryMessage: boolean;
+  isCurrentRecovery: boolean;
+  recoveryResolvedDurably: boolean;
+  agentRebooted: boolean;
+  recoveryRequested: boolean;
+  recoveryFailedAgain: boolean;
+  sessionState?: TaskSessionState;
+}) {
+  if (!isRecoveryMessage) return true;
+  if (!isCurrentRecovery || recoveryResolvedDurably || agentRebooted) return false;
+  if (recoveryRequested && !recoveryFailedAgain) return false;
+  return !isSessionActive(sessionState);
 }
 
 export const ActionMessage = memo(function ActionMessage({ comment }: { comment: Message }) {
@@ -51,6 +91,22 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
   // that came back failed — a failed boot row, or a session driven to FAILED —
   // must surface its card again, buttons included, or the retry is unreachable.
   const recoveryFailedAgain = agentBootFailed || sessionState === "FAILED";
+  const currentRecoveryStamp = currentSessionRecoveryStamp(sessionMetadata ?? null);
+  const messageRecoveryStamp = metadata?.recovery_stamp ?? metadata?.error_stamp;
+  const isCurrentRecovery = isCurrentRecoveryMessage(
+    isRecoveryMessage,
+    messageRecoveryStamp,
+    currentRecoveryStamp,
+  );
+  const recoveryActionsVisible = shouldShowRecoveryActions({
+    isRecoveryMessage,
+    isCurrentRecovery,
+    recoveryResolvedDurably,
+    agentRebooted,
+    recoveryRequested,
+    recoveryFailedAgain,
+    sessionState,
+  });
 
   if (metadata?.action_visibility === "running") {
     if (sessionState === "RUNNING" && comment.turn_id && activeTurnId === comment.turn_id) {
@@ -77,9 +133,7 @@ export const ActionMessage = memo(function ActionMessage({ comment }: { comment:
       sessionState={sessionState}
       taskId={comment.task_id}
       sessionId={comment.session_id}
-      recoveryResolved={
-        recoveryResolvedDurably || agentRebooted || (recoveryRequested && !recoveryFailedAgain)
-      }
+      recoveryActionsVisible={recoveryActionsVisible}
       onRecoveryRequested={() => setRecoveryRequested(true)}
     />
   );
@@ -92,7 +146,7 @@ function SettledActionMessage({
   sessionState,
   taskId,
   sessionId,
-  recoveryResolved,
+  recoveryActionsVisible,
   onRecoveryRequested,
 }: {
   metadata: ActionMeta | undefined;
@@ -101,12 +155,12 @@ function SettledActionMessage({
   sessionState?: TaskSessionState;
   taskId?: string;
   sessionId?: string;
-  recoveryResolved: boolean;
+  recoveryActionsVisible: boolean;
   onRecoveryRequested: () => void;
 }) {
   // A retry card is persisted against the failed turn, so hide it while the
   // replacement turn is starting or running to avoid showing stale progress.
-  if (isSessionActive(sessionState)) return null;
+  if (isSessionActive(sessionState) && metadata?.recovery_actions !== true) return null;
 
   if (metadata?.retrying) {
     return <TransientRetryNotice metadata={metadata} taskId={taskId} />;
@@ -117,10 +171,9 @@ function SettledActionMessage({
       metadata={metadata}
       message={message}
       sessionError={sessionError}
-      sessionState={sessionState}
       taskId={taskId}
       sessionId={sessionId}
-      recoveryResolved={recoveryResolved}
+      recoveryActionsVisible={recoveryActionsVisible}
       onRecoveryRequested={onRecoveryRequested}
     />
   );
@@ -130,32 +183,23 @@ function SettledFailureMessage({
   metadata,
   message,
   sessionError,
-  sessionState,
   taskId,
   sessionId,
-  recoveryResolved,
+  recoveryActionsVisible,
   onRecoveryRequested,
 }: {
   metadata: ActionMeta | undefined;
   message: string;
   sessionError?: string;
-  sessionState?: TaskSessionState;
   taskId?: string;
   sessionId?: string;
-  recoveryResolved: boolean;
+  recoveryActionsVisible: boolean;
   onRecoveryRequested: () => void;
 }) {
-  // A waiting session can still need recovery, so only hide this persisted card
-  // once its own recovery resolved: either the Resume click was acknowledged or
-  // the transcript shows the agent booted again after this failure. A resumed
-  // agent settles at WAITING_FOR_INPUT, which isSessionActive deliberately
-  // excludes, so without that second signal the card outlives the failure it
-  // describes.
-  if (isSessionActive(sessionState) || (metadata?.recovery_actions && recoveryResolved))
-    return null;
+  const renderedMetadata = recoveryActionsVisible ? metadata : withoutRecoveryActions(metadata);
 
   const specialRecovery = renderSpecialRecovery({
-    metadata,
+    metadata: renderedMetadata,
     message,
     sessionError,
     taskId,
@@ -176,9 +220,9 @@ function SettledFailureMessage({
         </div>
         <div className="flex-1 min-w-0 pt-0.5">
           <div className={cn("text-xs break-words", textClass)}>{message}</div>
-          <ActionMessageDetails metadata={metadata} />
+          <ActionMessageDetails metadata={renderedMetadata} />
           {renderSettledActionButtons({
-            actions: metadata?.actions,
+            actions: renderedMetadata?.actions,
             taskId,
             sessionId,
             isRecoveryMessage: metadata?.recovery_actions === true,
@@ -188,6 +232,11 @@ function SettledFailureMessage({
       </div>
     </div>
   );
+}
+
+function withoutRecoveryActions(metadata: ActionMeta | undefined): ActionMeta | undefined {
+  if (!metadata) return undefined;
+  return { ...metadata, actions: undefined };
 }
 
 function renderSettledActionButtons({

@@ -33,6 +33,7 @@ function sessionMetadataRecoveryError(
   if (!lastError || lastError.phase !== "bootstrap") return null;
 
   const error: TaskStatusSummaryActiveError = {
+    scope: "session",
     session_id: sessionId,
     stamp: lastAgentErrorStamp(lastError),
     occurred_at: lastError.occurredAt ?? "",
@@ -61,6 +62,7 @@ export function selectSessionRecoveryError(
   const persistedError = sessionMetadataRecoveryError(sessionId, sessionMetadata);
   if (persistedError) return persistedError;
   if (!isBootstrapSessionRecoveryError(activeError) || !activeError) return null;
+  if (activeError.scope === "task") return null;
   return activeError.session_id === sessionId ? activeError : null;
 }
 

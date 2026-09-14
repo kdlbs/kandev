@@ -24,6 +24,9 @@ type taskLaunchRecoveryServiceFake struct {
 	moved       []taskservice.MoveTaskOptions
 	moveErr     error
 	moveTaskIDs []string
+	environment *models.TaskEnvironment
+	resetErr    error
+	resetCalls  int
 }
 
 func (f *taskLaunchRecoveryServiceFake) UpdateRepositoryBaseBranch(_ context.Context, req taskservice.UpdateRepositoryBaseBranchRequest) (*models.TaskRepository, error) {
@@ -42,6 +45,46 @@ func (f *taskLaunchRecoveryServiceFake) MoveTaskWithOptions(_ context.Context, t
 		return nil, f.moveErr
 	}
 	return &taskservice.MoveTaskResult{Task: &models.Task{ID: taskID, WorkflowID: workflowID, WorkflowStepID: workflowStepID, Position: position}}, nil
+}
+
+func (f *taskLaunchRecoveryServiceFake) GetTaskEnvironmentByTaskID(context.Context, string) (*models.TaskEnvironment, error) {
+	return f.environment, nil
+}
+
+func (f *taskLaunchRecoveryServiceFake) ResetTaskEnvironment(context.Context, string, taskservice.ResetOptions) error {
+	f.resetCalls++
+	return f.resetErr
+}
+
+func TestResetFailedTaskEnvironmentForRecoveryOnlyResetsFailedEnvironment(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		status     models.TaskEnvironmentStatus
+		wantCalls  int
+		wantErr    bool
+		resetError error
+	}{
+		{name: "no environment", wantCalls: 0},
+		{name: "ready environment", status: models.TaskEnvironmentStatusReady, wantCalls: 0},
+		{name: "failed environment", status: models.TaskEnvironmentStatusFailed, wantCalls: 1},
+		{name: "reset failure", status: models.TaskEnvironmentStatusFailed, wantCalls: 1, wantErr: true, resetError: errors.New("reset failed")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := &taskLaunchRecoveryServiceFake{resetErr: tc.resetError}
+			if tc.status != "" {
+				fake.environment = &models.TaskEnvironment{ID: "env-1", Status: tc.status}
+			}
+			svc := &Service{taskLaunchRecoveryTasks: fake}
+
+			err := svc.resetFailedTaskEnvironmentForRecovery(context.Background(), "task-1")
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("resetFailedTaskEnvironmentForRecovery error = %v, want error = %t", err, tc.wantErr)
+			}
+			if fake.resetCalls != tc.wantCalls {
+				t.Fatalf("reset calls = %d, want %d", fake.resetCalls, tc.wantCalls)
+			}
+		})
+	}
 }
 
 type taskLaunchRecoveryWorktreeFake struct {
@@ -132,6 +175,52 @@ func recoveryFixtureService(t *testing.T, repo *sqliterepo.Repository, fake *tas
 	return svc
 }
 
+func TestHandleLaunchFailedProjectsTaskErrorAndRetiresSessionMarker(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "task-launch-failure", "session-launch-failure", "step1")
+	now := time.Now().UTC()
+	lastError := models.LastAgentError{
+		Message:          "The selected base branch is not available.",
+		OccurredAt:       now,
+		Scope:            models.ErrorScopeSession,
+		Code:             models.LaunchErrorCategoryBaseBranchMissing,
+		Details:          "base branch is missing",
+		RecoveryActions:  []string{models.RecoveryActionRetryDefault, models.RecoveryActionPickBaseBranch},
+		TaskRepositoryID: "task-repository-launch-failure",
+		StampValue:       "launch-failure-stamp",
+	}
+	if err := repo.SetSessionMetadataKey(context.Background(), "session-launch-failure", models.SessionMetaKeyLastAgentError, lastError); err != nil {
+		t.Fatalf("SetSessionMetadataKey: %v", err)
+	}
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.handleLaunchFailed(context.Background(), "task-launch-failure", "session-launch-failure", "repo-1", errors.New("workspace preparation failed"))
+
+	task, err := repo.GetTask(context.Background(), "task-launch-failure")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	taskError, ok := models.LoadTaskLaunchError(task.Metadata)
+	if !ok {
+		t.Fatal("task launch error was not persisted")
+	}
+	if taskError.Scope != models.ErrorScopeTask || taskError.SessionID != "session-launch-failure" {
+		t.Fatalf("task launch error ownership = %#v, want task scope with source session", taskError)
+	}
+	if taskError.Stamp() != lastError.Stamp() {
+		t.Fatalf("task launch error stamp = %q, want %q", taskError.Stamp(), lastError.Stamp())
+	}
+
+	session, err := repo.GetTaskSession(context.Background(), "session-launch-failure")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	retired, ok := models.LoadLastAgentError(session.Metadata)
+	if !ok || !retired.IsDismissed() {
+		t.Fatalf("session launch error = %#v, want a dismissed correlation marker", retired)
+	}
+}
+
 func TestRecoverTaskLaunchRejectsStaleStampBeforeMutation(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedTaskLaunchRecoveryFixture(t, repo, "task-stale", "task-repo-stale", models.RecoveryActionPickBaseBranch)
@@ -150,7 +239,7 @@ func TestRecoverTaskLaunchRejectsStaleStampBeforeMutation(t *testing.T) {
 	}
 }
 
-func TestRecoverTaskLaunchRejectsOlderSessionErrorWhenTaskErrorIsNewer(t *testing.T) {
+func TestRecoverTaskLaunchValidatesSessionErrorIndependentlyOfTaskError(t *testing.T) {
 	repo := setupTestRepo(t)
 	const taskID = "task-newer-task-error"
 	const taskRepositoryID = "task-repo-newer-task-error"
@@ -169,6 +258,7 @@ func TestRecoverTaskLaunchRejectsOlderSessionErrorWhenTaskErrorIsNewer(t *testin
 	if err := repo.SetSessionMetadataKey(context.Background(), "session-older-error", models.SessionMetaKeyLastAgentError, models.LastAgentError{
 		Message:          "older session launch error",
 		OccurredAt:       now.Add(-time.Hour),
+		Scope:            models.ErrorScopeSession,
 		Code:             models.LaunchErrorCategoryBaseBranchMissing,
 		RecoveryActions:  []string{models.RecoveryActionPickBaseBranch},
 		TaskRepositoryID: taskRepositoryID,
@@ -179,15 +269,26 @@ func TestRecoverTaskLaunchRejectsOlderSessionErrorWhenTaskErrorIsNewer(t *testin
 
 	fake := &taskLaunchRecoveryServiceFake{branches: []taskservice.Branch{{Name: "main", Type: "remote"}}}
 	svc := recoveryFixtureService(t, repo, fake)
-	_, err := svc.RecoverTaskLaunch(context.Background(), &TaskLaunchRecoveryRequest{
+	req := &TaskLaunchRecoveryRequest{
 		TaskID: taskID, SessionID: "session-older-error", TaskRepositoryID: taskRepositoryID,
 		Action: models.RecoveryActionPickBaseBranch, BaseBranch: "main", ErrorStamp: "older-session-stamp",
-	})
-	if !errors.Is(err, ErrTaskLaunchRecoveryStale) {
-		t.Fatalf("RecoverTaskLaunch error = %v, want stale error", err)
+	}
+	source, err := svc.loadTaskLaunchRecoverySource(context.Background(), req)
+	if err != nil {
+		t.Fatalf("loadTaskLaunchRecoverySource: %v", err)
+	}
+	if err := svc.verifyCurrentTaskLaunchRecoverySource(context.Background(), source); err != nil {
+		t.Fatalf("verifyCurrentTaskLaunchRecoverySource: %v", err)
 	}
 	if len(fake.updated) != 0 {
-		t.Fatalf("older session recovery updated repositories: %#v", fake.updated)
+		t.Fatalf("validation updated repositories: %#v", fake.updated)
+	}
+	task, err := repo.GetTask(context.Background(), taskID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if taskError, ok := models.LoadTaskLaunchError(task.Metadata); !ok || taskError.Stamp() != "recovery-stamp" {
+		t.Fatalf("task error = %#v, want independent task error", taskError)
 	}
 }
 

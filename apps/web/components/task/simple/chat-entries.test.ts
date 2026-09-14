@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   buildRunErrorsFromSessions,
-  filterVisibleRunErrors,
   hasMatchingSessionLaunchError,
   liveSessionMetadataFromStore,
   mergeLiveSessionMetadata,
@@ -9,6 +8,7 @@ import {
 import type { TaskSession } from "@/app/office/tasks/[id]/types";
 
 const URL = "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go";
+const SESSION_STARTED_AT = "2026-08-02T15:00:00Z";
 
 function session(overrides: Partial<TaskSession>): TaskSession {
   return {
@@ -17,7 +17,7 @@ function session(overrides: Partial<TaskSession>): TaskSession {
     agentRole: "agent",
     state: "FAILED",
     isPrimary: false,
-    startedAt: "2026-08-02T15:00:00Z",
+    startedAt: SESSION_STARTED_AT,
     errorMessage: "usage limit reached",
     ...overrides,
   };
@@ -64,12 +64,13 @@ describe("buildRunErrorsFromSessions", () => {
   });
 
   it("omits the URL when metadata or the field is absent", () => {
+    expect(buildRunErrorsFromSessions([session({ errorMessage: "boom" })])).toHaveLength(0);
     for (const s of [
-      session({ errorMessage: "boom" }),
       session({ metadata: { last_agent_error: { message: "boom" } } }),
       session({ metadata: { last_agent_error: { message: "boom", remediation_url: "" } } }),
     ]) {
       const errors = buildRunErrorsFromSessions([s]);
+      expect(errors).toHaveLength(1);
       expect(errors[0].remediationUrl).toBeUndefined();
     }
   });
@@ -88,11 +89,38 @@ describe("buildRunErrorsFromSessions", () => {
     expect(errors[0].remediationUrl).toBeUndefined();
   });
 
-  it("skips non-FAILED sessions", () => {
+  it("preserves an active error on a non-FAILED session", () => {
     const errors = buildRunErrorsFromSessions([
-      session({ state: "RUNNING", metadata: { last_agent_error: { remediation_url: URL } } }),
+      session({
+        state: "RUNNING",
+        metadata: { last_agent_error: { message: "still starting", stamp: "failure-1" } },
+      }),
     ]);
-    expect(errors).toHaveLength(0);
+    expect(errors).toHaveLength(1);
+    expect(errors[0].isActive).toBe(true);
+  });
+
+  it("preserves a dismissed error as history after the session resumes", () => {
+    const errors = buildRunErrorsFromSessions([
+      session({
+        state: "IDLE",
+        metadata: {
+          last_agent_error: {
+            message: "The agent could not start.",
+            occurred_at: SESSION_STARTED_AT,
+            dismissed_at: "2026-08-02T15:05:00Z",
+            stamp: "failure-1",
+            recovery_actions: ["retry_default"],
+          },
+        },
+      }),
+    ]);
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0].failedAt).toBe(SESSION_STARTED_AT);
+    expect(errors[0].errorStamp).toBe("failure-1");
+    expect(errors[0].isActive).toBe(false);
+    expect(errors[0].recoveryActions).toBeUndefined();
   });
 });
 
@@ -118,7 +146,7 @@ describe("hasMatchingSessionLaunchError", () => {
   it("does not match an unstamped run error to a stamped summary", () => {
     expect(
       hasMatchingSessionLaunchError("s1", "new-stamp", [
-        { id: "e1", sessionId: "s1", rawPayload: "boom", failedAt: "2026-08-02T15:00:00Z" },
+        { id: "e1", sessionId: "s1", rawPayload: "boom", failedAt: SESSION_STARTED_AT },
       ]),
     ).toBe(false);
   });
@@ -130,37 +158,11 @@ describe("hasMatchingSessionLaunchError", () => {
           id: "e1",
           sessionId: "s1",
           rawPayload: "boom",
-          failedAt: "2026-08-02T15:00:00Z",
+          failedAt: SESSION_STARTED_AT,
           errorStamp: "new-stamp",
         },
       ]),
     ).toBe(true);
-  });
-});
-
-describe("filterVisibleRunErrors", () => {
-  it("keeps ordinary provider errors when the active summary is not a launch error", () => {
-    const errors = buildRunErrorsFromSessions([
-      session({
-        metadata: {
-          last_agent_error: {
-            message: "The provider rejected the request.",
-            code: "provider_auth_required",
-            stamp: "provider-stamp-1",
-          },
-        },
-      }),
-    ]);
-
-    expect(
-      filterVisibleRunErrors(errors, {
-        session_id: "s1",
-        stamp: "provider-stamp-1",
-        occurred_at: "2026-08-02T15:00:01Z",
-        preview: "The provider rejected the request.",
-        category: "provider_auth_required",
-      }),
-    ).toEqual(errors);
   });
 });
 

@@ -8,6 +8,7 @@ import (
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // thinkingBlocks400 is the resume-corrupted signature surfaced by the
@@ -84,11 +85,21 @@ func TestCreateRecoveryStatusMessage_ManagedRuntimeNpmUsesOneRetryAction(t *test
 		FailureCode:    "managed_runtime_npm_resolution",
 		FailureDetails: "npm error code ETARGET\nnpm error notarget No matching version found",
 	})
+	svc.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+		TaskID:         "t-npm",
+		SessionID:      "s-npm",
+		ErrorMessage:   "managed npm runtime failed to prepare",
+		FailureCode:    "managed_runtime_npm_resolution",
+		FailureDetails: "npm error code ETARGET\nnpm error notarget No matching version found",
+	})
 
 	if len(mc.sessionMessages) != 1 {
 		t.Fatalf("expected one recovery message, got %d", len(mc.sessionMessages))
 	}
 	meta := mc.sessionMessages[0].metadata
+	if meta["scope"] != models.ErrorScopeSession || meta["error_stamp"] == "" {
+		t.Fatalf("recovery identity = %#v", meta)
+	}
 	if meta["failure_kind"] != "managed_runtime_npm_resolution" {
 		t.Fatalf("failure_kind = %#v", meta["failure_kind"])
 	}
@@ -292,6 +303,7 @@ func TestProviderRemediationURLRejectsInvalidDiagnostics(t *testing.T) {
 				t.Fatalf("remediation_url = %#v, want absent", url)
 			}
 			mc.sessionMessages = nil
+			mc.idempotentSessionMessages = nil
 		})
 	}
 }

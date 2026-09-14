@@ -213,7 +213,7 @@ export function MobilePanelArea({
       style={{
         paddingTop: `calc(${topNavHeight} + env(safe-area-inset-top, 0px))`,
         paddingBottom: `calc(${bottomNavHeight} + env(safe-area-inset-bottom, 0px))`,
-        height: "100dvh",
+        height: "100%",
       }}
     >
       {currentMobilePanel === "chat" && (
@@ -662,7 +662,7 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     }
   }, [currentMobilePanel, effectiveMobilePanel]);
   return (
-    <div className="h-dvh relative bg-background" data-testid="mobile-task-layout">
+    <div className="relative h-full min-h-0 bg-background" data-testid="mobile-task-layout">
       <MobileTopBarSticky
         {...props}
         activeTaskId={activeTaskId}

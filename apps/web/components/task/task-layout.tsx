@@ -9,9 +9,6 @@ import { SessionMobileLayout, SessionTabletLayout } from "./mobile";
 import type { Repository, RepositoryScript } from "@/lib/types/http";
 import type { Terminal } from "@/hooks/domains/session/use-terminals";
 import type { Layout } from "react-resizable-panels";
-import { isTypedTaskLaunchError } from "./simple/components/task-launch-error-entry";
-import { TaskChatLaunchError } from "./simple/components/task-chat-launch-error";
-import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 import { useTaskCanvasLifecycleActivation } from "./dockview-canvas-activation";
 
 // Re-export for backwards compatibility
@@ -82,25 +79,6 @@ export const TaskLayout = memo(function TaskLayout({
     (canvasId: string) => router.push(canvasHref(canvasId)),
     [router],
   );
-  const launchErrorContext = useTaskLaunchErrorContext();
-  const activeLaunchError = launchErrorContext?.statusSummary?.active_error;
-
-  if (launchErrorContext && !sessionId && isTypedTaskLaunchError(activeLaunchError)) {
-    return (
-      <div
-        className="flex h-full min-h-0 min-w-0 flex-col overflow-auto px-4"
-        data-testid="session-chat"
-      >
-        <TaskChatLaunchError
-          taskId={launchErrorContext.taskId}
-          workspaceId={launchErrorContext.workspaceId}
-          statusSummary={launchErrorContext.statusSummary}
-          repositories={launchErrorContext.repositories}
-        />
-      </div>
-    );
-  }
-
   // Mobile layout
   if (isMobile) {
     return (
