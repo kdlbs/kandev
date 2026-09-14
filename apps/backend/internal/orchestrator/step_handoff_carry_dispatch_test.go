@@ -1,0 +1,751 @@
+package orchestrator
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/kandev/kandev/internal/orchestrator/executor"
+	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
+	"github.com/kandev/kandev/internal/orchestrator/queue"
+	"github.com/kandev/kandev/internal/orchestrator/scheduler"
+	"github.com/kandev/kandev/internal/sysprompt"
+	"github.com/kandev/kandev/internal/task/models"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
+	"github.com/stretchr/testify/require"
+)
+
+func seedHandoffCarryToken(t *testing.T, repo interface {
+	SetTaskMetadataKey(ctx context.Context, taskID, key string, value interface{}) error
+}, taskID, stepID, handoff, stamp string) {
+	t.Helper()
+	err := repo.SetTaskMetadataKey(context.Background(), taskID, models.MetaKeyStepHandoffCarry, models.StepHandoffCarryToken{
+		Handoff: handoff, StepID: stepID, Stamp: stamp,
+	})
+	if err != nil {
+		t.Fatalf("seed carry token: %v", err)
+	}
+}
+
+// TestAutoStartStepPrompt_DeliversHandoffLastAfterQueuedHandoff covers
+// AC-001.6 and AC-001.6a on the ACP dispatch branch: an AutoRun-enabled
+// queued hand-off message merges first, then the completion handoff carry
+// token is claimed and appended last, under the fixed heading.
+func TestAutoStartStepPrompt_DeliversHandoffLastAfterQueuedHandoff(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-handoff-order"
+		sessionID = "session-handoff-order"
+		stepID    = "step-next"
+		queued    = "please also check the migration"
+		autoStart = "Run the next workflow step"
+		carried   = "watch out for the flaky test"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	seedHandoffCarryToken(t, repo, taskID, stepID, carried, "stamp-order")
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedExecutorRunning(t, repo, sessionID, taskID, "exec-handoff-order")
+
+	_, err := svc.messageQueue.QueueMessage(ctx, sessionID, taskID, queued, "", "user", false, nil)
+	require.NoError(t, err)
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+
+	err = svc.autoStartStepPrompt(
+		ctx, taskID, session, &wfmodels.WorkflowStep{ID: stepID, WorkflowID: "wf1", Name: "Next"},
+		autoStart, false, false, newStepHandoffOnce(),
+	)
+	require.NoError(t, err)
+	require.Len(t, agentMgr.capturedPrompts, 1)
+	prompt := agentMgr.capturedPrompts[0]
+
+	autoStartIdx := strings.Index(prompt, autoStart)
+	queuedIdx := strings.Index(prompt, queued)
+	headingIdx := strings.Index(prompt, stepHandoffPromptHeading)
+	carriedIdx := strings.Index(prompt, carried)
+	require.NotEqual(t, -1, autoStartIdx, "prompt = %q", prompt)
+	require.NotEqual(t, -1, queuedIdx, "prompt = %q", prompt)
+	require.NotEqual(t, -1, headingIdx, "prompt = %q", prompt)
+	require.NotEqual(t, -1, carriedIdx, "prompt = %q", prompt)
+	require.True(t, autoStartIdx < queuedIdx, "auto-start content must precede the queued hand-off")
+	require.True(t, queuedIdx < headingIdx, "the completion handoff must land after the queued hand-off")
+	require.True(t, headingIdx < carriedIdx)
+
+	if _, present := carryToken(t, repo, taskID); present {
+		t.Fatal("the claimed carry token must be removed")
+	}
+}
+
+// TestAutoStartStepPrompt_NoTokenNoHeading covers the plain case: with no
+// carry token, the prompt is unchanged and no heading is injected.
+func TestAutoStartStepPrompt_NoTokenNoHeading(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-no-handoff"
+		sessionID = "session-no-handoff"
+		autoStart = "Run the next workflow step"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedExecutorRunning(t, repo, sessionID, taskID, "exec-no-handoff")
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+
+	err = svc.autoStartStepPrompt(
+		ctx, taskID, session, &wfmodels.WorkflowStep{ID: "step-next", WorkflowID: "wf1", Name: "Next"},
+		autoStart, false, false, newStepHandoffOnce(),
+	)
+	require.NoError(t, err)
+	require.Len(t, agentMgr.capturedPrompts, 1)
+	require.False(t, strings.Contains(agentMgr.capturedPrompts[0], stepHandoffPromptHeading))
+}
+
+// TestAutoStartStepPrompt_ReplacementLaunchReusesClaimedHandoff covers
+// AC-001.8: a replacement launch within the same step entry, sharing the same
+// stepHandoffOnce, receives the same handoff text even though the DB-level
+// claim can only succeed once.
+func TestAutoStartStepPrompt_ReplacementLaunchReusesClaimedHandoff(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-replacement-handoff"
+		sessionID = "session-replacement-handoff"
+		stepID    = "step-next"
+		autoStart = "Run the next workflow step"
+		carried   = "carried across the replacement"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	seedHandoffCarryToken(t, repo, taskID, stepID, carried, "stamp-replacement")
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedExecutorRunning(t, repo, sessionID, taskID, "exec-replacement-handoff")
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+	step := &wfmodels.WorkflowStep{ID: stepID, WorkflowID: "wf1", Name: "Next"}
+	once := newStepHandoffOnce()
+
+	// First attempt: claims and delivers the token, removing it from the DB.
+	err = svc.autoStartStepPrompt(ctx, taskID, session, step, autoStart, false, false, once)
+	require.NoError(t, err)
+	require.Len(t, agentMgr.capturedPrompts, 1)
+	require.Contains(t, agentMgr.capturedPrompts[0], carried)
+	if _, present := carryToken(t, repo, taskID); present {
+		t.Fatal("the token must be removed after the first claim")
+	}
+
+	// A replacement launch in the SAME step entry reuses the shared once — the
+	// DB has nothing left to claim, but the memoized text must still appear.
+	// Reset the session back to promptable, standing in for a real replacement
+	// launch (created after the first session terminalized).
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""))
+	seedExecutorRunning(t, repo, sessionID, taskID, "exec-replacement-handoff-2")
+	session, err = repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+	err = svc.autoStartStepPrompt(ctx, taskID, session, step, autoStart, false, false, once)
+	require.NoError(t, err)
+	require.Len(t, agentMgr.capturedPrompts, 2)
+	require.Contains(t, agentMgr.capturedPrompts[1], carried, "the replacement launch must reuse the already-claimed handoff text")
+}
+
+// TestLaunchAfterOnEnterDispatch_PassthroughEmptyPromptDeliversViaDrain covers
+// AC-001.6c: the passthrough branch that finds its composed prompt empty
+// still dispatches a drained queued message, and that dispatch carries the
+// completion handoff.
+func TestLaunchAfterOnEnterDispatch_PassthroughEmptyPromptDeliversViaDrain(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-passthrough-drain"
+		sessionID = "session-passthrough-drain"
+		stepID    = "step1"
+		queued    = "drain me please"
+		carried   = "passthrough carried text"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	seedHandoffCarryToken(t, repo, taskID, stepID, carried, "stamp-passthrough")
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo, isPassthrough: true}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedExecutorRunning(t, repo, sessionID, taskID, "exec-passthrough-drain")
+
+	_, err := svc.messageQueue.QueueMessage(ctx, sessionID, taskID, queued, "", "user", false, nil)
+	require.NoError(t, err)
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+	// Pre-consume the one-time initial-prompt fallback claim so buildWorkflowEntryPrompt
+	// treats taskDescription as ineligible and composes an empty prompt below — the
+	// actual case this test targets. Without this, the first claim on a fresh session
+	// wins and taskDescription becomes the composed prompt, silently exercising the
+	// unrelated autoStartPassthroughPrompt branch instead of the drain-only one.
+	_, err = repo.ClaimInitialPromptFallback(ctx, sessionID)
+	require.NoError(t, err)
+
+	done := make(chan struct{}, 1)
+	agentMgr.passthroughStdinFunc = func(context.Context, string, string) error {
+		done <- struct{}{}
+		return nil
+	}
+
+	step := &wfmodels.WorkflowStep{ID: stepID, WorkflowID: "wf1", Name: "Step 1", Prompt: ""}
+	svc.launchAfterOnEnterDispatch(ctx, taskID, session, step, "task description", false, true, false)
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the drained queue message to dispatch")
+	}
+
+	// The claim happens synchronously inside the guarded reserve, before the
+	// dispatch's async execution.
+	if _, present := carryToken(t, repo, taskID); present {
+		t.Fatal("the drain-only passthrough branch must claim the token when it dispatches")
+	}
+	require.Len(t, agentMgr.passthroughStdinCalls, 1)
+	written := agentMgr.passthroughStdinCalls[0].Data
+	require.Contains(t, written, queued)
+	require.Contains(t, written, carried, "the passthrough drain must deliver the claimed handoff text")
+}
+
+// TestProcessOnEnter_NoOnEnterActionsDrainDeliversHandoff covers F22's first
+// gap: processOnEnter's own early return (no on_enter actions, no profile
+// switch) never reaches launchAfterOnEnterDispatch, yet still drains a queued
+// message and must still carry the handoff.
+func TestProcessOnEnter_NoOnEnterActionsDrainDeliversHandoff(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-no-onenter-drain"
+		sessionID = "session-no-onenter-drain"
+		stepID    = "step1"
+		queued    = "drain me too"
+		carried   = "no on_enter carried text"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	seedHandoffCarryToken(t, repo, taskID, stepID, carried, "stamp-no-onenter")
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedExecutorRunning(t, repo, sessionID, taskID, "exec-no-onenter-drain")
+
+	_, err := svc.messageQueue.QueueMessage(ctx, sessionID, taskID, queued, "", "user", false, nil)
+	require.NoError(t, err)
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+
+	done := make(chan struct{})
+	svc.onQueuedMessageExecutionComplete = func() { close(done) }
+
+	step := &wfmodels.WorkflowStep{ID: stepID, WorkflowID: "wf1", Name: "Step 1"}
+	svc.processOnEnter(ctx, taskID, session, step, "task description", 0, nil)
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the drained queue message to dispatch")
+	}
+
+	if _, present := carryToken(t, repo, taskID); present {
+		t.Fatal("processOnEnter's own drain-only early return must claim the token when it dispatches")
+	}
+	require.Len(t, agentMgr.capturedPrompts, 1)
+	prompt := agentMgr.capturedPrompts[0]
+	require.Contains(t, prompt, queued)
+	require.Contains(t, prompt, carried, "processOnEnter's drain-only early return must deliver the claimed handoff text")
+}
+
+// TestLaunchAfterOnEnterDispatch_EmptyEntrySendsNothingClaimsNothing covers
+// AC-001.6a: when a step entry decides — over content excluding the handoff
+// text — that it will send the agent nothing, the handoff must never be
+// claimed. Modeled on TestWorkflowAutoStartEmptyPrompt's "prompted session
+// suppresses task description" case, which reaches autoStartStepPrompt's own
+// early return with no queued hand-off to fall back to.
+func TestLaunchAfterOnEnterDispatch_EmptyEntrySendsNothingClaimsNothing(t *testing.T) {
+	fixture := newInitialPromptDedupFixture(t, true, false)
+	seedHandoffCarryToken(t, fixture.repo, fixture.taskID, fixture.step.ID, "must not be claimed", "stamp-unsent")
+
+	fixture.svc.launchAfterOnEnterDispatch(
+		context.Background(), fixture.taskID, fixture.session, fixture.step,
+		fixture.taskDescription, false, true, false,
+	)
+
+	if len(fixture.agent.capturedPrompts) != 0 {
+		t.Fatalf("captured prompts = %#v, want none", fixture.agent.capturedPrompts)
+	}
+	token, present := carryToken(t, fixture.repo, fixture.taskID)
+	if !present || token.Handoff != "must not be claimed" {
+		t.Fatalf("a dispatch that sends nothing must not claim the token, got present=%v token=%+v", present, token)
+	}
+}
+
+// TestAutoStartPassthroughPrompt_ClaimedTokenNotRestoredOnDispatchFailure
+// covers AC-001.9: a claimed token is never restored, even when the entry
+// that claimed it then fails to dispatch — and a later entry into that same
+// step gets no handoff either, since REQ-005 accepts the handoff as lost
+// rather than risk a double-delivery on retry.
+func TestAutoStartPassthroughPrompt_ClaimedTokenNotRestoredOnDispatchFailure(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-unrestored-handoff"
+		sessionID = "session-unrestored-handoff"
+		stepID    = "step-next"
+		carried   = "lost on dispatch failure"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	seedHandoffCarryToken(t, repo, taskID, stepID, carried, "stamp-unrestored")
+	agentMgr := &mockAgentManager{
+		isAgentRunning: true, repoForExecutionLookup: repo, isPassthrough: true,
+		passthroughStdinErr: errors.New("simulated stdin write failure"),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedExecutorRunning(t, repo, sessionID, taskID, "exec-unrestored-handoff")
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+
+	step := &wfmodels.WorkflowStep{ID: stepID, WorkflowID: "wf1", Name: "Next", Prompt: "go"}
+	svc.launchAfterOnEnterDispatch(ctx, taskID, session, step, "task description", false, true, false)
+
+	if _, present := carryToken(t, repo, taskID); present {
+		t.Fatal("the token must be claimed (removed) even though dispatch failed")
+	}
+	text, claimed := svc.claimStepHandoffCarryText(ctx, taskID, stepID)
+	if claimed || text != "" {
+		t.Fatalf("a later entry into the same step must get nothing back, got claimed=%v text=%q", claimed, text)
+	}
+}
+
+// TestStartSessionForWorkflowStep_DeliversHandoff covers AC-001.11: the queue
+// promotion / manual auto-start dispatch path also claims and appends the
+// completion handoff.
+func TestStartSessionForWorkflowStep_DeliversHandoff(t *testing.T) {
+	fixture := newInitialPromptDedupFixture(t, true, false)
+	fixture.step.Prompt = "Continue with validation."
+	seedHandoffCarryToken(t, fixture.repo, fixture.taskID, fixture.step.ID, "queue promotion carried text", "stamp-queue-promo")
+
+	if err := fixture.svc.StartSessionForWorkflowStep(
+		context.Background(), fixture.taskID, fixture.sessionID, fixture.step.ID,
+	); err != nil {
+		t.Fatalf("StartSessionForWorkflowStep returned error: %v", err)
+	}
+
+	got := fixture.agent.capturedPrompts
+	if len(got) != 1 || !strings.Contains(got[0], fixture.step.Prompt) || !strings.Contains(got[0], "queue promotion carried text") {
+		t.Fatalf("captured prompts = %#v, want step prompt plus carried handoff", got)
+	}
+	if _, present := carryToken(t, fixture.repo, fixture.taskID); present {
+		t.Fatal("the claimed token must be removed")
+	}
+}
+
+// TestStartSessionForWorkflowStep_ComposedHandoffSurvivesLazyResumeFallback
+// covers the same ErrExecutionNotFound-after-lazy-resume race
+// autoStartStepPrompt and promptTask's own internal recovery were already
+// fixed for, at the one remaining composed-prompt caller: StartSessionForWorkflowStep
+// appends a claimed handoff to effectivePrompt before dispatch, but used to
+// call the public PromptTask (promptAlreadyComposed defaults to false), so a
+// missing-execution race hitting promptTask's internal recovery would
+// recompose the prompt from the destination step's own template and silently
+// drop the handoff.
+func TestStartSessionForWorkflowStep_ComposedHandoffSurvivesLazyResumeFallback(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-workflow-step-lazy-resume"
+		sessionID = "session-workflow-step-lazy-resume"
+		stepID    = "step-workflow-step-lazy-resume"
+		handoff   = "watch out for the flaky test"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+	session.AgentExecutionID = "exec-before-restart"
+	session.AgentProfileID = "profile-lazy-resume"
+	require.NoError(t, repo.UpdateTaskSession(ctx, session))
+	seedExecutorRunning(t, repo, sessionID, taskID, "exec-before-restart")
+	seedHandoffCarryToken(t, repo, taskID, stepID, handoff, "stamp-lazy-resume")
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps[stepID] = &wfmodels.WorkflowStep{
+		ID: stepID, WorkflowID: "wf1", Name: "Next",
+		Prompt: "Recomposed step instructions.",
+		Events: wfmodels.StepEvents{OnEnter: []wfmodels.OnEnterAction{{Type: wfmodels.OnEnterEnablePlanMode}}},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks[taskID] = &v1.Task{ID: taskID, Title: "Test Task", State: v1.TaskStateInProgress}
+
+	// IsAgentRunningForSession reports "running" for every call except the
+	// second: StartSessionForWorkflowStep's own ensureSessionRunning (call 1)
+	// sees the session as already running and skips resuming it, then
+	// promptTask's internal hadExecutionBeforeEnsure check (call 2) hits a
+	// momentary "not running" blip — the exact lazy-resume race
+	// promptTask's own internal ErrExecutionNotFound recovery exists for —
+	// before promptTask's own ensureSessionRunning call (call 3) sees it
+	// running again and does not attempt a second resume. No cold-resume
+	// launch is needed to reach this state; the only launch in this test is
+	// the fresh-launch fallback after PromptAgent reports ErrExecutionNotFound.
+	var runningChecks atomic.Int32
+	var launchCalls atomic.Int32
+	launchPrompts := make(chan string, 1)
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		promptErr:              executor.ErrExecutionNotFound,
+		isAgentRunningFn: func(_ context.Context, _ string) bool {
+			return runningChecks.Add(1) != 2
+		},
+		isAgentReadyFn: func(_ context.Context, _ string) bool { return true },
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			call := launchCalls.Add(1)
+			launchPrompts <- req.TaskDescription
+			return &executor.LaunchAgentResponse{AgentExecutionID: fmt.Sprintf("exec-fresh-%d", call)}, nil
+		},
+	}
+	svc := createTestServiceWithAgent(repo, stepGetter, taskRepo, agentMgr)
+	exec := executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.executor = exec
+	svc.scheduler = scheduler.NewScheduler(queue.NewTaskQueue(100), exec, taskRepo, testLogger(), scheduler.DefaultSchedulerConfig())
+	svc.messageCreator = &mockMessageCreator{}
+
+	err = svc.StartSessionForWorkflowStep(ctx, taskID, sessionID, stepID)
+	require.NoError(t, err)
+
+	require.Equal(t, int32(1), launchCalls.Load(), "expected exactly the fresh-launch fallback, no cold-resume launch")
+	freshPrompt := <-launchPrompts
+	require.Contains(t, freshPrompt, handoff,
+		"the already-composed prompt (with the claimed handoff) must survive the fresh-launch fallback")
+	require.Contains(t, freshPrompt, sysprompt.PlanMode(),
+		"the fresh-launch fallback must retain the destination step's plan-mode instructions")
+	require.NotEqual(t, "Recomposed step instructions.", strings.TrimSpace(freshPrompt),
+		"promptAlreadyComposed must skip StartCreatedSession's own step-template recomposition")
+}
+
+// TestAutoStartStepPrompt_QueueFallbackWhenRunningCarriesHandoffMetadata covers
+// AC-001.6/AC-001.8's queue-fallback half: when autoStartStepPrompt's
+// shouldQueueIfBusy branch queues instead of dispatching directly (the
+// session is already RUNNING), the handoff already claimed for this step
+// entry must ride along as queue metadata — not the raw pre-handoff prompt —
+// so a later drain (through the ordinary, non-handoff-aware drain path every
+// other queued message uses) still appends it, last, after entity-reference
+// expansion.
+func TestAutoStartStepPrompt_QueueFallbackWhenRunningCarriesHandoffMetadata(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-queue-fallback-running"
+		sessionID = "session-queue-fallback-running"
+		stepID    = "step-next"
+		autoStart = "Run the next workflow step"
+		carried   = "carried through queue fallback"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	seedHandoffCarryToken(t, repo, taskID, stepID, carried, "stamp-queue-fallback")
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedExecutorRunning(t, repo, sessionID, taskID, "exec-queue-fallback-running")
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+
+	step := &wfmodels.WorkflowStep{ID: stepID, WorkflowID: "wf1", Name: "Next"}
+	err = svc.autoStartStepPrompt(ctx, taskID, session, step, autoStart, false, true, newStepHandoffOnce())
+	require.NoError(t, err)
+	require.Empty(t, agentMgr.capturedPrompts, "a queued-because-running fallback must not dispatch directly")
+
+	if _, present := carryToken(t, repo, taskID); present {
+		t.Fatal("the queue-fallback path must still claim the token up front, before deciding to queue")
+	}
+
+	entries, _, err := svc.messageQueue.SnapshotSession(ctx, sessionID)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, carried, stepHandoffFromQueuedMetadata(entries[0].Metadata),
+		"the queued message metadata must carry the already-claimed handoff, not silently drop it")
+
+	// Drain through the ordinary, non-handoff-aware path every other queued
+	// message goes through in production. If the fix instead spliced the
+	// handoff onto raw Content at queue time, this would double as an
+	// ordering bug; carrying it as metadata means the generic drain path
+	// (which knows nothing about step handoffs) still appends it correctly.
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""))
+	done := make(chan struct{})
+	svc.onQueuedMessageExecutionComplete = func() { close(done) }
+	require.True(t, svc.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID))
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the drained queue message to dispatch")
+	}
+
+	require.Len(t, agentMgr.capturedPrompts, 1)
+	prompt := agentMgr.capturedPrompts[0]
+	autoStartIdx := strings.Index(prompt, autoStart)
+	headingIdx := strings.Index(prompt, stepHandoffPromptHeading)
+	carriedIdx := strings.Index(prompt, carried)
+	require.NotEqual(t, -1, autoStartIdx, "prompt = %q", prompt)
+	require.NotEqual(t, -1, headingIdx, "prompt = %q", prompt)
+	require.NotEqual(t, -1, carriedIdx, "prompt = %q", prompt)
+	require.True(t, autoStartIdx < headingIdx && headingIdx < carriedIdx,
+		"the handoff must land last in the drained prompt")
+}
+
+// TestAutoStartStepPrompt_QueueFallbackPreservesEntityReferenceOrderingBeforeHandoff
+// covers the MAJOR ordering finding directly: a queue-fallback re-queues a
+// message carrying entity references (taken from an existing queued hand-off)
+// alongside the claimed step handoff. AppendEntityReferenceContext only runs
+// at actual dispatch/drain time, so the drained prompt must still show the
+// reference block before the handoff heading — proving the fix appends the
+// handoff after reference expansion rather than baking it into raw Content at
+// queue time, which would let expansion land after it.
+func TestAutoStartStepPrompt_QueueFallbackPreservesEntityReferenceOrderingBeforeHandoff(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-queue-fallback-refs"
+		sessionID = "session-queue-fallback-refs"
+		stepID    = "step-next"
+		autoStart = "Run the next workflow step"
+		queued    = "please also check the migration"
+		carried   = "watch out for the flaky test"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateRunning)
+	seedHandoffCarryToken(t, repo, taskID, stepID, carried, "stamp-queue-fallback-refs")
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedExecutorRunning(t, repo, sessionID, taskID, "exec-queue-fallback-refs")
+
+	reference := queuedReferenceFixture()
+	_, err := svc.messageQueue.QueueMessageWithMetadata(
+		ctx, sessionID, taskID, queued, "", messagequeue.QueuedByUser, false, nil,
+		map[string]interface{}{messagequeue.MetadataEntityReferences: []v1.EntityReference{reference}},
+	)
+	require.NoError(t, err)
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+
+	step := &wfmodels.WorkflowStep{ID: stepID, WorkflowID: "wf1", Name: "Next"}
+	err = svc.autoStartStepPrompt(ctx, taskID, session, step, autoStart, false, true, newStepHandoffOnce())
+	require.NoError(t, err)
+	require.Empty(t, agentMgr.capturedPrompts)
+
+	require.NoError(t, repo.UpdateTaskSessionState(ctx, sessionID, models.TaskSessionStateWaitingForInput, ""))
+	done := make(chan struct{})
+	svc.onQueuedMessageExecutionComplete = func() { close(done) }
+	require.True(t, svc.drainQueuedMessageForPromptableSessionLocked(ctx, sessionID))
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the drained queue message to dispatch")
+	}
+
+	require.Len(t, agentMgr.capturedPrompts, 1)
+	prompt := agentMgr.capturedPrompts[0]
+	queuedIdx := strings.Index(prompt, queued)
+	referenceIdx := strings.Index(prompt, "Validated work-item reference snapshots")
+	headingIdx := strings.Index(prompt, stepHandoffPromptHeading)
+	carriedIdx := strings.Index(prompt, carried)
+	require.NotEqual(t, -1, queuedIdx, "prompt = %q", prompt)
+	require.NotEqual(t, -1, referenceIdx, "prompt = %q", prompt)
+	require.NotEqual(t, -1, headingIdx, "prompt = %q", prompt)
+	require.NotEqual(t, -1, carriedIdx, "prompt = %q", prompt)
+	require.True(t, queuedIdx < referenceIdx && referenceIdx < headingIdx && headingIdx < carriedIdx,
+		"entity-reference expansion must land before the handoff, which must land last; prompt = %q", prompt)
+}
+
+func TestAutoStartStepPrompt_MergesQueuedStepHandoff(t *testing.T) {
+	ctx := context.Background()
+	fixture := newInitialPromptDedupFixture(t, true, false)
+	const queuedHandoff = "handoff already claimed by the queued entry"
+
+	_, err := fixture.svc.messageQueue.QueueMessageWithMetadata(
+		ctx,
+		fixture.sessionID,
+		fixture.taskID,
+		"queued workflow message",
+		"",
+		messagequeue.QueuedByWorkflow,
+		false,
+		nil,
+		map[string]interface{}{messagequeue.MetadataStepHandoff: queuedHandoff},
+	)
+	require.NoError(t, err)
+
+	err = fixture.svc.autoStartStepPrompt(
+		ctx, fixture.taskID, fixture.session, fixture.step,
+		"start the next step", false, true, newStepHandoffOnce(),
+	)
+	require.NoError(t, err)
+	require.Len(t, fixture.agent.capturedPrompts, 1)
+	require.Contains(t, fixture.agent.capturedPrompts[0], queuedHandoff,
+		"a queued entry's previously claimed handoff must survive auto-start merging")
+}
+
+// failOnceHandoffClaimRepo wraps a real repo's TakeTaskMetadataKeyIfDestinationStep
+// so its first invocation fails, standing in for a transient claim error. Per
+// AC-005.2, a failed claim must not spend the step entry's one-claim budget, so
+// a later attempt within the same entry (e.g. a replacement launch) must retry
+// and succeed against the still-present token.
+type failOnceHandoffClaimRepo struct {
+	sessionExecutorStore
+	failed bool
+}
+
+func (r *failOnceHandoffClaimRepo) TakeTaskMetadataKeyIfDestinationStep(
+	ctx context.Context, taskID, key, expectedStepID, expectedStamp string,
+) (json.RawMessage, bool, error) {
+	if !r.failed {
+		r.failed = true
+		return nil, false, errors.New("simulated transient claim failure")
+	}
+	taker, ok := r.sessionExecutorStore.(taskMetadataCarryTaker)
+	if !ok {
+		return nil, false, errors.New("handoff claim capability is unavailable")
+	}
+	return taker.TakeTaskMetadataKeyIfDestinationStep(ctx, taskID, key, expectedStepID, expectedStamp)
+}
+
+// TestClaimStepHandoffCarryText_FailedClaimDoesNotSpendBudget covers AC-005.2:
+// a failed claim attempt must not memoize an empty result, so a later attempt
+// in the same step entry (sharing the same stepHandoffOnce) retries and can
+// still succeed.
+func TestClaimStepHandoffCarryText_FailedClaimDoesNotSpendBudget(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID  = "task-failed-claim-retry"
+		stepID  = "step2"
+		carried = "carried after retry"
+	)
+	repo := setupTestRepo(t)
+	seedSession(t, repo, taskID, "session-failed-claim-retry", "step1")
+	seedHandoffCarryToken(t, repo, taskID, stepID, carried, "stamp-retry")
+	svc := createTestService(repo, twoStepGetter(), newMockTaskRepo())
+	wrapped := &failOnceHandoffClaimRepo{sessionExecutorStore: svc.repo}
+	svc.repo = wrapped
+
+	once := newStepHandoffOnce()
+	text := svc.resolveStepHandoffText(ctx, once, taskID, stepID, true)
+	require.Empty(t, text, "the first, failing attempt must not deliver a handoff")
+	require.True(t, wrapped.failed, "expected the wrapped claim to have been invoked")
+
+	text = svc.resolveStepHandoffText(ctx, once, taskID, stepID, true)
+	require.Equal(t, carried, text, "a retried attempt must claim the still-present token")
+}
+
+// TestLaunchAfterOnEnterDispatch_FallbackDrainDeliversHandoff covers F22's
+// fourth gap: the final fallback drain for a step with no auto_start_agent and
+// no profile switch (e.g. a Review-shaped step) still carries the handoff.
+func TestLaunchAfterOnEnterDispatch_FallbackDrainDeliversHandoff(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-fallback-drain"
+		sessionID = "session-fallback-drain"
+		stepID    = "step-review"
+		queued    = "drain via fallback"
+		carried   = "fallback carried text"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	seedHandoffCarryToken(t, repo, taskID, stepID, carried, "stamp-fallback")
+	agentMgr := &mockAgentManager{isAgentRunning: true, repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedExecutorRunning(t, repo, sessionID, taskID, "exec-fallback-drain")
+
+	_, err := svc.messageQueue.QueueMessage(ctx, sessionID, taskID, queued, "", "user", false, nil)
+	require.NoError(t, err)
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+
+	// hasAutoStart=false, sessionSwitched=false: neither the ACP branch nor the
+	// implicit profile-switch branch applies, landing on the final fallback
+	// drain — the shape a step without auto_start_agent (e.g. Review) takes.
+	done := make(chan struct{})
+	svc.onQueuedMessageExecutionComplete = func() { close(done) }
+
+	step := &wfmodels.WorkflowStep{ID: stepID, WorkflowID: "wf1", Name: "Review"}
+	svc.launchAfterOnEnterDispatch(ctx, taskID, session, step, "task description", false, false, false)
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the drained queue message to dispatch")
+	}
+
+	if _, present := carryToken(t, repo, taskID); present {
+		t.Fatal("the final fallback drain must claim the token when it dispatches")
+	}
+	require.Len(t, agentMgr.capturedPrompts, 1)
+	prompt := agentMgr.capturedPrompts[0]
+	require.Contains(t, prompt, queued)
+	require.Contains(t, prompt, carried, "the final fallback drain must deliver the claimed handoff text")
+}
+
+// TestLaunchAfterOnEnterDispatch_AsyncProfileSwitchFailureDrainDeliversHandoff
+// covers F22's third gap: when the implicit profile-switch async launch fails
+// to dispatch, the failure drain reuses the already-claimed handoff text (the
+// shared stepHandoffOnce, not a fresh claim) and delivers it via the drained
+// queued message.
+func TestLaunchAfterOnEnterDispatch_AsyncProfileSwitchFailureDrainDeliversHandoff(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-profile-switch-drain"
+		sessionID = "session-profile-switch-drain"
+		stepID    = "step-next"
+		queued    = "queued after failed switch"
+		carried   = "profile switch carried text"
+	)
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, taskID, sessionID, models.TaskSessionStateWaitingForInput)
+	seedHandoffCarryToken(t, repo, taskID, stepID, carried, "stamp-profile-switch")
+	agentMgr := &mockAgentManager{
+		isAgentRunning: true, repoForExecutionLookup: repo,
+		promptErr: errors.New("simulated fatal profile switch prompt error"),
+	}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	seedExecutorRunning(t, repo, sessionID, taskID, "exec-profile-switch-drain")
+
+	_, err := svc.messageQueue.QueueMessage(ctx, sessionID, taskID, queued, "", "user", false, nil)
+	require.NoError(t, err)
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	require.NoError(t, err)
+
+	done := make(chan struct{})
+	svc.onQueuedMessageExecutionComplete = func() { close(done) }
+
+	// sessionSwitched=true with a non-empty step.Prompt and hasAutoStart=false
+	// selects the implicit profile-switch async goroutine (the design's
+	// AC-005-adjacent "profile switch failure" branch): the launch fails, then
+	// the failure drain must deliver the queued message with the handoff the
+	// launch attempt already claimed.
+	step := &wfmodels.WorkflowStep{ID: stepID, WorkflowID: "wf1", Name: "Next", Prompt: "please continue"}
+	svc.launchAfterOnEnterDispatch(ctx, taskID, session, step, "task description", false, false, true)
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for the queued message to execute after the failed profile-switch dispatch")
+	}
+
+	require.GreaterOrEqual(t, len(agentMgr.capturedPrompts), 2,
+		"expected the failed profile-switch attempt plus the drained queued dispatch")
+	last := agentMgr.capturedPrompts[len(agentMgr.capturedPrompts)-1]
+	require.Contains(t, last, queued)
+	require.Contains(t, last, carried, "the drain must reuse the already-claimed handoff text")
+	if _, present := carryToken(t, repo, taskID); present {
+		t.Fatal("the token must have been claimed by the failed attempt")
+	}
+}

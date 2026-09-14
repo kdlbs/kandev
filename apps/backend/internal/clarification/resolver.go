@@ -23,6 +23,18 @@ import (
 // distinguishing the cause.
 var ErrBundleNotFound = errors.New("clarification bundle not found")
 
+// ErrPreClaimTimeout identifies exhaustion of the resolver's internal
+// pre-claim budget. It is deliberately distinct from caller cancellation so
+// HTTP and MCP callers can retry without treating a disconnected request as
+// a server overload signal.
+var ErrPreClaimTimeout = errors.New("clarification response is temporarily unavailable")
+
+// IsPreClaimTimeoutError reports whether err exhausted the internal response
+// budget before durable ownership was claimed.
+func IsPreClaimTimeoutError(err error) bool {
+	return errors.Is(err, ErrPreClaimTimeout)
+}
+
 // errClarificationNotActive is R2's no-winner branch: the claim was lost and
 // the re-read found no answered/rejected message either, so the bundle is
 // simply not active (superseded turn, terminal session, expired, cancelled,
@@ -189,20 +201,47 @@ func (r *Resolver) resolveBundleTaskID(ctx context.Context, msgs []*taskmodels.M
 // SHALL NOT be submitted here (A9): cancel is authorized via
 // AuthorizeBundleAccess alone and never claims.
 func (r *Resolver) ResolveBundle(ctx context.Context, pendingID string, outcome Outcome) (*Resolution, bool, error) {
-	msgs, sessionID, taskID, err := r.resolveIdentity(ctx, pendingID)
+	preClaimCtx, cancelPreClaim := clarificationPreClaimContext(ctx)
+	defer cancelPreClaim()
+
+	identityStarted := time.Now()
+	msgs, sessionID, taskID, err := r.resolveIdentity(preClaimCtx, pendingID)
 	if err != nil {
+		err = classifyPreClaimError(ctx, preClaimCtx, clarificationResponsePhaseIdentity, err)
+		r.logResponsePhase(pendingID, clarificationResponsePhaseIdentity, identityStarted, responsePhaseOutcome(err))
 		return nil, false, err
 	}
-	if err := r.authorizer.AuthorizeTaskAccess(ctx, taskID); err != nil {
+	if err := classifyPreClaimError(ctx, preClaimCtx, clarificationResponsePhaseIdentity, nil); err != nil {
+		r.logResponsePhase(pendingID, clarificationResponsePhaseIdentity, identityStarted, responsePhaseOutcome(err))
+		return nil, false, err
+	}
+	if err := r.authorizer.AuthorizeTaskAccess(preClaimCtx, taskID); err != nil {
+		if timeoutErr := classifyPreClaimError(ctx, preClaimCtx, clarificationResponsePhaseIdentity, err); IsPreClaimTimeoutError(timeoutErr) {
+			r.logResponsePhase(pendingID, clarificationResponsePhaseIdentity, identityStarted, responsePhaseOutcome(timeoutErr))
+			return nil, false, timeoutErr
+		}
+		r.logResponsePhase(pendingID, clarificationResponsePhaseIdentity, identityStarted, "not_found")
 		return nil, false, ErrBundleNotFound // A3
 	}
+	r.logResponsePhase(pendingID, clarificationResponsePhaseIdentity, identityStarted, "success")
 
+	validationStarted := time.Now()
 	questions := bundleQuestions(msgs)
 	if err := validateOutcome(questions, outcome); err != nil {
+		if timeoutErr := classifyPreClaimError(ctx, preClaimCtx, clarificationResponsePhaseValidation, err); IsPreClaimTimeoutError(timeoutErr) {
+			r.logResponsePhase(pendingID, clarificationResponsePhaseValidation, validationStarted, responsePhaseOutcome(timeoutErr))
+			return nil, false, timeoutErr
+		}
+		r.logResponsePhase(pendingID, clarificationResponsePhaseValidation, validationStarted, "invalid")
 		return nil, false, err // N8c, R2c: validation runs before the claim
 	}
+	if err := classifyPreClaimError(ctx, preClaimCtx, clarificationResponsePhaseValidation, nil); err != nil {
+		r.logResponsePhase(pendingID, clarificationResponsePhaseValidation, validationStarted, responsePhaseOutcome(err))
+		return nil, false, err
+	}
+	r.logResponsePhase(pendingID, clarificationResponsePhaseValidation, validationStarted, "success")
 
-	return r.claimAndDeliver(ctx, pendingID, sessionID, taskID, questions, outcome)
+	return r.claimAndDeliver(preClaimCtx, pendingID, sessionID, taskID, questions, outcome)
 }
 
 // claimAndDeliver is steps 4 and 5. R4: the durable claim commits before any
@@ -217,6 +256,7 @@ func (r *Resolver) claimAndDeliver(
 
 	claimCtx, cancel := clarificationClaimContext(ctx)
 	defer cancel()
+	claimStarted := time.Now()
 	completedMessages, claimed, claimErr := r.messages.CompleteActiveClarificationBundle(
 		claimCtx,
 		pendingID,
@@ -224,17 +264,38 @@ func (r *Resolver) claimAndDeliver(
 		responsesFromAnswers(response.Answers),
 	)
 	if claimErr != nil {
+		responseErr := fmt.Errorf("failed to update clarification state: %w", claimErr)
+		if isClarificationPreClaimContext(ctx) {
+			classifiedErr := classifyPreClaimError(
+				clarificationPreClaimCaller(ctx),
+				ctx,
+				clarificationResponsePhaseClaim,
+				claimErr,
+			)
+			if IsPreClaimTimeoutError(classifiedErr) {
+				responseErr = classifiedErr
+			}
+		}
+		r.logResponsePhase(pendingID, clarificationResponsePhaseClaim, claimStarted, responsePhaseOutcome(responseErr))
 		r.logger.Error("failed to claim clarification response",
 			zap.String("pending_id", pendingID), zap.Error(claimErr))
-		return nil, false, fmt.Errorf("failed to update clarification state: %w", claimErr) // R4a
+		return nil, false, responseErr // R4a
+	}
+	if claimed {
+		r.logResponsePhase(pendingID, clarificationResponsePhaseClaim, claimStarted, "claimed")
+	} else {
+		r.logResponsePhase(pendingID, clarificationResponsePhaseClaim, claimStarted, "already_claimed")
 	}
 	if !claimed {
 		return r.reconstructLoser(ctx, pendingID, sessionID, taskID) // R2
 	}
 
+	deliveryStarted := time.Now()
 	if err := r.deliverClaimedResolution(ctx, pendingID, status, response, completedMessages); err != nil {
+		r.logResponsePhase(pendingID, clarificationResponsePhaseDelivery, deliveryStarted, responsePhaseOutcome(err))
 		return nil, true, err
 	}
+	r.logResponsePhase(pendingID, clarificationResponsePhaseDelivery, deliveryStarted, "success")
 
 	return &Resolution{
 		PendingID: pendingID,
@@ -243,6 +304,29 @@ func (r *Resolver) claimAndDeliver(
 		Status:    status,
 		Response:  response,
 	}, true, nil
+}
+
+func classifyPreClaimError(callerCtx, preClaimCtx context.Context, phase string, err error) error {
+	if !errors.Is(preClaimCtx.Err(), context.DeadlineExceeded) || callerCtx == nil || callerCtx.Err() != nil {
+		return err
+	}
+	recordClarificationResponseTimeout(phase)
+	if err == nil {
+		return fmt.Errorf("%w during %s", ErrPreClaimTimeout, phase)
+	}
+	return fmt.Errorf("%w during %s: %v", ErrPreClaimTimeout, phase, err)
+}
+
+func (r *Resolver) logResponsePhase(pendingID, phase string, started time.Time, outcome string) {
+	if r.logger == nil {
+		return
+	}
+	r.logger.Info("clarification.response.phase",
+		zap.String("pending_id", pendingID),
+		zap.String("phase", phase),
+		zap.Int64("duration_ms", time.Since(started).Milliseconds()),
+		zap.String("outcome", outcome),
+	)
 }
 
 // responsesFromAnswers builds the map CompleteActiveClarificationBundle

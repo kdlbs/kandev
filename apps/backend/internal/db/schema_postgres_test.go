@@ -1,8 +1,9 @@
-package db
+package db_test
 
 import (
 	"testing"
 
+	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/testutil"
 )
 
@@ -15,7 +16,7 @@ func TestTableColumnsAndExistsPostgres(t *testing.T) {
 		t.Fatalf("create table: %v", err)
 	}
 
-	exists, err := TableExists(database, "sample_schema")
+	exists, err := db.TableExists(database, "sample_schema")
 	if err != nil {
 		t.Fatalf("table exists: %v", err)
 	}
@@ -23,7 +24,7 @@ func TestTableColumnsAndExistsPostgres(t *testing.T) {
 		t.Fatal("TableExists = false, want true")
 	}
 
-	columns, err := TableColumns(database, "sample_schema")
+	columns, err := db.TableColumns(database, "sample_schema")
 	if err != nil {
 		t.Fatalf("table columns: %v", err)
 	}
@@ -31,7 +32,7 @@ func TestTableColumnsAndExistsPostgres(t *testing.T) {
 		t.Fatalf("columns = %#v, want created_at and not missing", columns)
 	}
 
-	got, err := ColumnExists(database, "sample_schema", "missing")
+	got, err := db.ColumnExists(database, "sample_schema", "missing")
 	if err != nil {
 		t.Fatalf("missing column exists: %v", err)
 	}
@@ -39,7 +40,7 @@ func TestTableColumnsAndExistsPostgres(t *testing.T) {
 		t.Fatal("ColumnExists for missing column = true, want false")
 	}
 
-	missingTable, err := TableExists(database, "missing_schema")
+	missingTable, err := db.TableExists(database, "missing_schema")
 	if err != nil {
 		t.Fatalf("missing table exists: %v", err)
 	}
@@ -47,7 +48,7 @@ func TestTableColumnsAndExistsPostgres(t *testing.T) {
 		t.Fatal("TableExists for missing table = true, want false")
 	}
 
-	missingColumns, err := TableColumns(database, "missing_schema")
+	missingColumns, err := db.TableColumns(database, "missing_schema")
 	if err != nil {
 		t.Fatalf("missing table columns: %v", err)
 	}

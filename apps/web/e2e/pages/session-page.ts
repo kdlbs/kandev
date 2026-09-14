@@ -654,9 +654,12 @@ export class SessionPage {
     return this.page.getByTestId("reset-context-confirm");
   }
 
-  /** "Resume session" button shown after agent crash. */
+  /** Observe the first visible recovery action, including while it is already resuming. */
   recoveryResumeButton(): Locator {
-    return this.page.getByTestId("recovery-resume-button");
+    return this.activeChat()
+      .getByTestId("recovery-resume-button")
+      .filter({ visible: true })
+      .first();
   }
 
   /** Error returned by a manual session recovery action. */
@@ -699,6 +702,11 @@ export class SessionPage {
     return this.completedSessionBanner().getByTestId("completed-session-new-agent-button");
   }
 
+  /** "Resume" action shown for an explicitly completed conversation. */
+  completedSessionResumeButton(): Locator {
+    return this.completedSessionBanner().getByTestId("recovery-resume-button");
+  }
+
   /** "Cancel" button shown on the yellow transient-retry (529 Overloaded) card. */
   recoveryCancelRetryButton(): Locator {
     return this.page.getByTestId("recovery-cancel-retry-button");
@@ -719,12 +727,29 @@ export class SessionPage {
    * Hovers to reveal the menu trigger, opens it, clicks "Delete",
    * and confirms the delete dialog.
    */
-  async deleteTaskInSidebar(title: string): Promise<void> {
+  async deleteTaskInSidebar(
+    title: string,
+    options: { discardWorktreeChanges?: boolean; waitForCompletion?: boolean } = {},
+  ): Promise<void> {
     await this.openSidebarMenuAndClick(title, "Delete");
-    const confirmButton = this.page
-      .getByRole("alertdialog")
-      .getByRole("button", { name: "Delete" });
+    const dialog = this.page.getByRole("alertdialog");
+    const confirmButton = dialog.getByRole("button", { name: "Delete" });
+    const discardCheckbox = dialog.getByTestId("delete-discard-worktree-checkbox");
+    if (options.discardWorktreeChanges) {
+      await expect(discardCheckbox).toBeVisible();
+      await discardCheckbox.click();
+      await expect(discardCheckbox).toBeChecked();
+    } else {
+      await expect(confirmButton).toBeEnabled();
+      await expect(discardCheckbox).toHaveCount(0);
+    }
+    await expect(confirmButton).toBeEnabled();
     await confirmButton.click();
+    if (options.waitForCompletion !== false) {
+      await expect(
+        this.page.getByTestId("toast-message").filter({ hasText: "Deleted 1 task." }),
+      ).toBeVisible({ timeout: 15_000 });
+    }
   }
 
   /**
@@ -1309,7 +1334,7 @@ export class SessionPage {
    * than a real bug.
    */
   async togglePlanMode() {
-    const btn = this.page.getByTestId("plan-mode-toggle-button");
+    const btn = this.activeChat().getByTestId("plan-mode-toggle-button");
     await expect(btn).toBeVisible({ timeout: 10_000 });
     await expect(btn).toHaveAttribute("data-plan-available", "true", { timeout: 10_000 });
     await btn.click();
@@ -1711,6 +1736,16 @@ export class SessionPage {
   /** Find a tree node by its data-path attribute. */
   fileTreeNode(nodePath: string): Locator {
     return this.fileTree.fileTreeNode(nodePath);
+  }
+
+  /** The existing Files viewport that owns tree scrolling. */
+  fileTreeScrollViewport(): Locator {
+    return this.fileTree.fileTreeScrollViewport();
+  }
+
+  /** Visible tree rows, including only rows currently mounted by the tree. */
+  visibleFileTreeNodes(): Locator {
+    return this.fileTree.visibleFileTreeNodes();
   }
 
   /** Visible search button in the Files panel. */

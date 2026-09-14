@@ -10,6 +10,8 @@ import type {
   Task,
   TaskPriority,
   MoveTaskResponse,
+  ReorderBand,
+  ReorderStepTasksResponse,
 } from "@/lib/types/http";
 
 // Workflow operations
@@ -215,27 +217,124 @@ export async function updateTaskRepositoryBaseBranch(
   });
 }
 
-export async function deleteTask(
-  taskId: string,
-  params?: { cascade?: boolean },
+export type DeleteTaskParams = {
+  cascade?: boolean;
+  discardWorktreeChanges?: boolean;
+};
+
+export type TaskDeletePreflightResponse = {
+  requires_discard_consent: boolean;
+};
+
+export async function getTaskDeletePreflight(
+  taskIds: string[],
+  cascade: boolean,
   options?: ApiRequestOptions,
 ) {
-  const query = params?.cascade ? "?cascade=true" : "";
+  return fetchJson<TaskDeletePreflightResponse>("/api/v1/tasks/delete-preflight", {
+    ...options,
+    cache: "no-store",
+    init: {
+      method: "POST",
+      body: JSON.stringify({ task_ids: taskIds, cascade }),
+      ...(options?.init ?? {}),
+    },
+  });
+}
+
+export async function deleteTask(
+  taskId: string,
+  params?: DeleteTaskParams,
+  options?: ApiRequestOptions,
+) {
+  const queryParams = new URLSearchParams();
+  if (params?.cascade) queryParams.set("cascade", "true");
+  if (params?.discardWorktreeChanges) {
+    queryParams.set("discard_worktree_changes", "true");
+  }
+  const query = queryParams.toString() ? `?${queryParams.toString()}` : "";
   return fetchJson<void>(`/api/v1/tasks/${taskId}${query}`, {
     ...options,
     init: { method: "DELETE", ...(options?.init ?? {}) },
   });
 }
 
+/** One-shot values applied when a task enters the destination workflow step. */
+export type WorkflowMoveEntryOptions = {
+  reset_context?: boolean;
+  instructions?: string;
+  skip_step_prompt?: boolean;
+};
+
+export type MoveTaskPayload = {
+  workflow_id: string;
+  workflow_step_id: string;
+  /** @deprecated Server computes arrival position per AC.28; this field is transmitted but ignored. */
+  position?: number;
+  entry_options?: WorkflowMoveEntryOptions | null;
+};
+
+/** Move response fields added by the one-shot entry-options transport. */
+export type WorkflowMoveResponse = MoveTaskResponse & {
+  entry_options?: WorkflowMoveEntryOptions;
+};
+
+/**
+ * Converts form values into the wire contract. Blank text has no one-shot
+ * effect, and an absent/empty object keeps the legacy destination-only body.
+ */
+export function normalizeWorkflowMoveEntryOptions(
+  options: WorkflowMoveEntryOptions | null | undefined,
+): WorkflowMoveEntryOptions | undefined {
+  if (!options) return undefined;
+
+  const normalized: WorkflowMoveEntryOptions = {};
+  if (options.reset_context === true) normalized.reset_context = true;
+  if (options.skip_step_prompt === true) normalized.skip_step_prompt = true;
+
+  const instructions = options.instructions?.trim();
+  if (instructions) normalized.instructions = instructions;
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
 export async function moveTask(
   taskId: string,
-  payload: { workflow_id: string; workflow_step_id: string; position: number },
+  payload: MoveTaskPayload,
+  options?: ApiRequestOptions,
+): Promise<WorkflowMoveResponse> {
+  const { entry_options, ...destination } = payload;
+  const normalizedEntryOptions = normalizeWorkflowMoveEntryOptions(entry_options);
+  const requestPayload = normalizedEntryOptions
+    ? { ...destination, entry_options: normalizedEntryOptions }
+    : destination;
+
+  return fetchJson<WorkflowMoveResponse>(`/api/v1/tasks/${taskId}/move`, {
+    ...options,
+    init: { method: "POST", body: JSON.stringify(requestPayload), ...(options?.init ?? {}) },
+  });
+}
+
+/**
+ * Reorders one workflow step's band. The only request surface for a reorder
+ * (REQ-TASKS-KANBAN-TASK-REORDERING-001) — a WebSocket action was cut in the
+ * design. On a 409 `step_changed` conflict the thrown ApiError's `body`
+ * carries this same ReorderStepTasksResponse shape (the authoritative order
+ * to reconcile to silently); on a 400 `invalid_reorder` it carries only
+ * `{code}`.
+ */
+export async function reorderStepTasks(
+  workflowStepId: string,
+  payload: { band: ReorderBand; ordered_task_ids: string[] },
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<MoveTaskResponse>(`/api/v1/tasks/${taskId}/move`, {
-    ...options,
-    init: { method: "POST", body: JSON.stringify(payload), ...(options?.init ?? {}) },
-  });
+  return fetchJson<ReorderStepTasksResponse>(
+    `/api/v1/workflow-steps/${workflowStepId}/tasks/reorder`,
+    {
+      ...options,
+      init: { method: "PUT", body: JSON.stringify(payload), ...(options?.init ?? {}) },
+    },
+  );
 }
 
 export async function bulkMoveSelectedTasks(

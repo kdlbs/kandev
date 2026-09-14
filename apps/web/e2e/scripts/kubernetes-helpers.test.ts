@@ -61,6 +61,22 @@ describe("Kubernetes E2E causal helpers", () => {
     ).toBe(true);
   });
 
+  it("retries a transient Kubernetes API read before accepting the ready state", async () => {
+    let reads = 0;
+    const cluster = {
+      namespace: "kandev-e2e-workloads",
+      json: () => {
+        if (reads++ === 0) throw new Error("kubectl unavailable");
+        return { items: [podSnapshot(true, true)] };
+      },
+    } as unknown as KubernetesCluster;
+
+    const pod = await waitForKubernetesPod(cluster, "task-1", "session-1", 2_000);
+
+    expect(reads).toBe(2);
+    expect(pod.metadata.uid).toBe("pod-uid-1");
+  });
+
   it("observes the newest archive-family cleanup retry with its durable aggregate error", async () => {
     const backendTmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-cleanup-helper-"));
     tempRoots.push(backendTmpDir);

@@ -152,7 +152,7 @@ export type FileEditorState = {
   hasRemoteUpdate?: boolean;
   remoteContent?: string;
   remoteOriginalHash?: string;
-  markdownPreview?: boolean;
+  renderedPreview?: boolean;
 };
 
 /** Direction relative to a reference panel or group. */

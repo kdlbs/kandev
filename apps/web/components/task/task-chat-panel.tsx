@@ -13,6 +13,7 @@ import {
   type RefObject,
 } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
+import { ComposerFooterAllocation } from "./chat/composer-disclosure";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import {
   type ChatInputContainerHandle,
@@ -52,9 +53,15 @@ import { useTranslation } from "react-i18next";
 
 import { loadMessageWindowAround } from "@/hooks/domains/session/load-message-window";
 import { TaskChatLaunchError } from "./simple/components/task-chat-launch-error";
+import { isTypedTaskLaunchError } from "./simple/components/task-launch-error-entry";
 import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
+import {
+  isTaskLaunchErrorOwnedBySession,
+  isTaskLaunchErrorVisibleForSession,
+} from "@/components/task/chat/types";
 import { TaskMarkdownFileLinkProvider } from "@/components/shared/task-markdown-file-link-provider";
+import { selectSessionRecoveryError } from "@/lib/session-recovery-presentation";
 
 /** Returns a `clarificationKey` that increments each time a pending
  * clarification is resolved, letting the composer reset its input state for
@@ -1015,6 +1022,9 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     messagesLoading,
     historyRefreshPending,
     isInitialMessagesLoading,
+    historyStatus,
+    historyError,
+    retryHistory,
     groupedItems,
     allMessages,
     footerActionMessages,
@@ -1024,6 +1034,22 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     pendingClarification,
     pendingClarificationGroup,
   } = panelState;
+  const activeLaunchError = launchStatusSummary?.active_error;
+  const selectedSessionRecoveryError = selectSessionRecoveryError(
+    activeLaunchError,
+    resolvedSessionId,
+    session?.metadata,
+  );
+  const visibleRecoveryError =
+    selectedSessionRecoveryError ??
+    (isTypedTaskLaunchError(activeLaunchError) &&
+    isTaskLaunchErrorVisibleForSession(activeLaunchError, resolvedSessionId)
+      ? activeLaunchError
+      : null);
+  const launchErrorOwned = Boolean(
+    isTypedTaskLaunchError(activeLaunchError) &&
+    isTaskLaunchErrorOwnedBySession(activeLaunchError, resolvedSessionId),
+  );
   const showAgentStartHint = useComposerAgentStartHint(
     resolvedSessionId,
     session?.state,
@@ -1087,10 +1113,10 @@ export const TaskChatPanel = memo(function TaskChatPanel({
   const showAnchoredPromptBar = useAppStore((state) => state.userSettings.showAnchoredPromptBar);
   const showScrollToLastPrompt = useAppStore((state) => state.userSettings.showScrollToLastPrompt);
   const showScrollToStart = useAppStore((state) => state.userSettings.showScrollToStart);
-  const { isMobile } = useResponsiveBreakpoint();
-  // The anchored bar is a desktop-only, opt-in affordance; mobile always
-  // falls back to the scroll button.
-  const showAnchoredBar = !isMobile && showAnchoredPromptBar;
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  // The anchored bar is a desktop-only, fine-pointer affordance; coarse
+  // pointers use the compact scroll control instead.
+  const showAnchoredBar = isFinePointer && !isMobile && showAnchoredPromptBar;
   const [anchoredBarHeight, setAnchoredBarHeight] = useState(0);
   const { anchoredBarVisible, scrollButtonEligible, scrollDirection } =
     resolveLastPromptControls(lastPromptEdge);
@@ -1148,6 +1174,19 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     (e: React.MouseEvent<HTMLDivElement>) => routePanelMouseDown(e, panelRef),
     [],
   );
+  const launchErrorContent = launchErrorContext ? (
+    <TaskChatLaunchError
+      taskId={launchErrorContext.taskId}
+      workspaceId={launchErrorContext.workspaceId}
+      statusSummary={launchStatusSummary}
+      sessionId={resolvedSessionId}
+      sessionMetadata={session?.metadata}
+      repositories={launchErrorContext.repositories}
+    />
+  ) : null;
+  const recoveryRevealKey = visibleRecoveryError
+    ? `${resolvedSessionId ?? ""}:${visibleRecoveryError.stamp || visibleRecoveryError.occurred_at}`
+    : null;
 
   return (
     <PanelRoot
@@ -1159,16 +1198,7 @@ export const TaskChatPanel = memo(function TaskChatPanel({
       onMouseDown={handlePanelMouseDown}
       className="outline-none"
     >
-      <PanelBody padding={false} className="relative">
-        {launchErrorContext && (
-          <TaskChatLaunchError
-            taskId={launchErrorContext.taskId}
-            workspaceId={launchErrorContext.workspaceId}
-            statusSummary={launchStatusSummary}
-            runErrors={[]}
-            repositories={launchErrorContext.repositories}
-          />
-        )}
+      <PanelBody padding={false} scroll={false} className="relative overflow-hidden">
         <TaskMarkdownFileLinkProvider
           taskId={taskId}
           sessionId={resolvedSessionId}
@@ -1186,6 +1216,9 @@ export const TaskChatPanel = memo(function TaskChatPanel({
             sessionId={resolvedSessionId}
             messagesLoading={messagesLoading}
             historyRefreshPending={historyRefreshPending}
+            historyStatus={historyStatus}
+            historyError={historyError}
+            onRetryHistory={retryHistory}
             isWorking={isWorking}
             sessionState={session?.state}
             worktreePath={getSessionWorkspacePath(session)}
@@ -1197,6 +1230,11 @@ export const TaskChatPanel = memo(function TaskChatPanel({
             onFirstMessageHiddenChange={setIsFirstMessageHidden}
             anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
             isVisible={transcriptIsVisible}
+            launchErrorOwned={launchErrorOwned}
+            launchErrorStamp={launchErrorOwned ? activeLaunchError?.stamp : undefined}
+            launchErrorOccurredAt={launchErrorOwned ? activeLaunchError?.occurred_at : undefined}
+            prependContent={launchErrorContent}
+            recoveryRevealKey={recoveryRevealKey}
             stickyPromptBar={
               showAnchoredBar && lastPromptMessage ? (
                 <AnchoredLastPromptBar
@@ -1222,36 +1260,39 @@ export const TaskChatPanel = memo(function TaskChatPanel({
         )}
         <SessionSearchOverlay search={search} agentLabel={agentLabel} agentName={agentName} />
       </PanelBody>
-      {!isArchived && (
-        <ClarificationPanelSection
-          pending={Boolean(pendingClarification)}
-          messages={pendingClarificationGroup}
-          onResolved={handleClarificationResolved}
-          shortcutScopeRef={panelRef}
-          maxHeightVh={50}
+      <ComposerFooterAllocation>
+        {!isArchived && (
+          <ClarificationPanelSection
+            pending={Boolean(pendingClarification)}
+            messages={pendingClarificationGroup}
+            onResolved={handleClarificationResolved}
+            shortcutScopeRef={panelRef}
+            maxHeightVh={50}
+          />
+        )}
+        <ChatFooter
+          isArchived={isArchived}
+          chatInputRef={chatInputRef}
+          clarificationKey={clarificationKey}
+          onClarificationResolved={handleClarificationResolved}
+          handleSubmit={handleSubmit}
+          handleCancelTurn={handleCancelTurn}
+          showRequestChangesTooltip={showRequestChangesTooltip}
+          onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
+          panelState={panelState}
+          isSending={isSending}
+          hideSessionsDropdown={hideSessionsDropdown}
+          hidePlanMode={embedded}
+          showScrollToLastPrompt={showScrollButton}
+          onScrollToLastPrompt={scrollToLastPrompt}
+          lastPromptScrollDirection={scrollDirection}
+          showScrollToStart={showScrollToStartButton}
+          onScrollToStart={scrollToStart}
+          statusTaskId={statusTaskId ?? taskIdHint}
+          showAgentStartHint={showAgentStartHint}
+          launchErrorOwned={launchErrorOwned}
         />
-      )}
-      <ChatFooter
-        isArchived={isArchived}
-        chatInputRef={chatInputRef}
-        clarificationKey={clarificationKey}
-        onClarificationResolved={handleClarificationResolved}
-        handleSubmit={handleSubmit}
-        handleCancelTurn={handleCancelTurn}
-        showRequestChangesTooltip={showRequestChangesTooltip}
-        onRequestChangesTooltipDismiss={onRequestChangesTooltipDismiss}
-        panelState={panelState}
-        isSending={isSending}
-        hideSessionsDropdown={hideSessionsDropdown}
-        hidePlanMode={embedded}
-        showScrollToLastPrompt={showScrollButton}
-        onScrollToLastPrompt={scrollToLastPrompt}
-        lastPromptScrollDirection={scrollDirection}
-        showScrollToStart={showScrollToStartButton}
-        onScrollToStart={scrollToStart}
-        statusTaskId={statusTaskId ?? taskIdHint}
-        showAgentStartHint={showAgentStartHint}
-      />
+      </ComposerFooterAllocation>
     </PanelRoot>
   );
 });
@@ -1279,6 +1320,7 @@ type ChatFooterProps = {
   statusTaskId: string | null;
   /** Recovered-idle sessions render the composer hint (see ChatInputArea). */
   showAgentStartHint: boolean;
+  launchErrorOwned: boolean;
 };
 
 /**
@@ -1306,6 +1348,7 @@ function ChatFooter({
   onScrollToStart,
   statusTaskId,
   showAgentStartHint,
+  launchErrorOwned,
 }: ChatFooterProps) {
   const { t } = useTranslation();
   if (isArchived) {
@@ -1335,6 +1378,7 @@ function ChatFooter({
       onScrollToStart={onScrollToStart}
       statusTaskId={statusTaskId}
       showAgentStartHint={showAgentStartHint}
+      launchErrorOwned={launchErrorOwned}
     />
   );
 }

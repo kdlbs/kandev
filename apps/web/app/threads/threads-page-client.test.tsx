@@ -1,5 +1,6 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createTaskRemovalState } from "@/lib/state/task-removal";
 
 const bootstrapMock = vi.hoisted(() => vi.fn());
 const searchMock = vi.hoisted(() => ({ value: "" }));
@@ -29,7 +30,10 @@ vi.mock("@/hooks/use-task-listing-view", () => ({
 }));
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
-    selector({ kanbanMulti: { snapshots: {}, isLoading: false } }),
+    selector({
+      kanbanMulti: { snapshots: {}, isLoading: false },
+      taskRemoval: createTaskRemovalState(),
+    }),
 }));
 
 import { scopeSnapshotsToWorkspace, ThreadsPageClient } from "./threads-page-client";

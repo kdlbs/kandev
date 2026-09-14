@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 const (
@@ -155,5 +156,60 @@ func TestSyncWorkspaceWatchesBatched_ForkFallsBackToParent(t *testing.T) {
 	}
 	if updated.Owner != parentOwner || updated.Repo != parentRepo || updated.PRNumber != forkPRNumber {
 		t.Fatalf("watch = %#v, want parent repository and PR #%d", updated, forkPRNumber)
+	}
+}
+
+func TestSyncWorkspaceWatchesBatched_ForkRetryReleasesOriginalHealthTarget(t *testing.T) {
+	_, service, client, store := setupBatchedPollerTest(t)
+	ctx := context.Background()
+	seedTask(t, store, "task-fork-health", false)
+	seedForkNetwork(client.MockClient)
+	client.AddPR(forkNetworkPR())
+
+	fixedNow := time.Date(2026, 9, 11, 12, 0, 0, 0, time.UTC)
+	service.prDiscoveryHealth.setNow(func() time.Time { return fixedNow })
+	scope := testAutomationScope(t, service, testWorkspaceID)
+	client.branchResponses = []string{
+		`{"errors":[{"type":"GRAPHQL_VALIDATION_FAILED","message":"Field 'cloneUrl' doesn't exist on type 'Repository'"}]}`,
+		`{"data":{"b0":{"pullRequests":{"nodes":[]}}}}`,
+	}
+	watch := &PRWatch{
+		WorkspaceID: testWorkspaceID, SessionID: "session-fork-health", TaskID: "task-fork-health",
+		RepositoryID: "repo-fork", Owner: forkOwner, Repo: forkRepo, Branch: forkPRBranch,
+	}
+	if err := store.CreatePRWatch(ctx, watch); err != nil {
+		t.Fatalf("create fork health watch: %v", err)
+	}
+
+	if _, err := service.SyncWorkspaceWatchesBatched(ctx, testWorkspaceID, []*PRWatch{watch}); err != nil {
+		t.Fatalf("initial failed fork discovery: %v", err)
+	}
+	failed := service.prDiscoveryHealth.snapshot(testWorkspaceID, scope, 0)
+	if failed.State != PRDiscoveryHealthDegraded || failed.FailedTargetCount != 1 {
+		t.Fatalf("failed fork health = %+v, want one degraded fork target", failed)
+	}
+
+	fixedNow = fixedNow.Add(PRDiscoveryRetryBase)
+	if _, err := service.SyncWorkspaceWatchesBatched(ctx, testWorkspaceID, []*PRWatch{watch}); err != nil {
+		t.Fatalf("successful fork retry: %v", err)
+	}
+	updated, err := store.GetPRWatch(ctx, watch.ID)
+	if err != nil || updated == nil {
+		t.Fatalf("reload fork watch: %v, %#v", err, updated)
+	}
+	if updated.Owner != parentOwner || updated.Repo != parentRepo || updated.PRNumber != forkPRNumber {
+		t.Fatalf("fork watch = %#v, want parent repository and PR #%d", updated, forkPRNumber)
+	}
+	recovered := service.prDiscoveryHealth.snapshot(testWorkspaceID, scope, 0)
+	if recovered.State != PRDiscoveryHealthHealthy || recovered.FailedTargetCount != 0 {
+		t.Fatalf("fork health after retry = %+v, want healthy with original target released", recovered)
+	}
+
+	originalTarget := prDiscoveryHealthTarget{Owner: forkOwner, Repo: forkRepo, Branch: forkPRBranch}
+	service.prDiscoveryHealth.mu.Lock()
+	originalState := service.prDiscoveryHealth.scopes[prDiscoveryScopeKey(testWorkspaceID, scope)].targets[originalTarget.key()]
+	service.prDiscoveryHealth.mu.Unlock()
+	if originalState != nil {
+		t.Fatalf("original fork target state = %#v, want released after rebind", originalState)
 	}
 }

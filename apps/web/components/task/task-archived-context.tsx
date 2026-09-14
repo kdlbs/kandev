@@ -3,9 +3,11 @@
 import { createContext, useContext, memo } from "react";
 import { PanelRoot, PanelBody } from "./panel-primitives";
 import { useTranslation } from "react-i18next";
+import type { Task } from "@/lib/types/http";
 
 type TaskArchivedState = {
   isArchived: boolean;
+  archivedTask?: Task;
   archivedTaskId?: string;
   archivedTaskTitle?: string;
   /**

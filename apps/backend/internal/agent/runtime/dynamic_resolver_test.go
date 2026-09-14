@@ -59,6 +59,52 @@ func TestMarkRouteActionRequiredUnblocksRetryAndSkipAfterFailedLaunch(t *testing
 	}
 }
 
+func TestResolveRouteActionReclaimsRetryingRouteAfterRestart(t *testing.T) {
+	ctx := context.Background()
+	_, firstEngine, generation := newRetryingRouteActionResolver(t)
+	persisted, ok := firstEngine.State("session-retry")
+	if !ok || persisted.Status != "retrying" {
+		t.Fatalf("precondition route state = %#v, ok=%v", persisted, ok)
+	}
+
+	restartedEngine := dynamic.NewEngine(dynamic.WithStateLoader(&singleRouteStateLoader{state: persisted}))
+	profiles := &dynamicResolverTestProfiles{
+		logical:  &agentsettingsmodels.AgentProfile{ID: "dynamic-profile", AgentID: agents.DynamicAgentID, Enabled: true},
+		concrete: &agentsettingsmodels.AgentProfile{ID: "concrete-profile", AgentID: "concrete", Enabled: true},
+		dynamic:  &agentsettingsmodels.DynamicAgentProfile{ProfileID: "dynamic-profile", Version: 1},
+		routes: []agentsettingsmodels.DynamicAgentRoute{{
+			DynamicProfileID: "dynamic-profile", ExecutionProfileID: "concrete-profile", Enabled: true,
+		}},
+	}
+	restartedResolver := NewProfileExecutionResolver(profiles, restartedEngine, true)
+
+	result, err := restartedResolver.ResolveRouteAction(
+		ctx, "session-retry", "dynamic-profile", "concrete-profile", generation, "retry",
+	)
+	if err != nil {
+		t.Fatalf("ResolveRouteAction after restart: %v", err)
+	}
+	if result.Generation != generation+1 || result.ExecutionProfileID != "concrete-profile" || result.Decision.Status != "starting" {
+		t.Fatalf("result = %+v, want new generation %d on same candidate", result, generation+1)
+	}
+	state, ok := restartedEngine.State("session-retry")
+	if !ok || state.Generation != generation+1 || state.Status != "starting" {
+		t.Fatalf("restarted route state = %#v, ok=%v, want fenced successor", state, ok)
+	}
+}
+
+type singleRouteStateLoader struct {
+	state dynamic.RouteState
+}
+
+func (l *singleRouteStateLoader) LoadRouteState(_ context.Context, sessionID string) (*dynamic.RouteState, error) {
+	if sessionID != l.state.SessionID {
+		return nil, nil
+	}
+	state := l.state
+	return &state, nil
+}
+
 func newRetryingRouteActionResolver(t *testing.T) (*ProfileExecutionResolver, *dynamic.Engine, int64) {
 	t.Helper()
 	ctx := context.Background()

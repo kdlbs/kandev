@@ -14,6 +14,9 @@ import type { Page, Locator } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
 import { dwell } from "../../helpers/causal-waits";
 import { SessionPage } from "../../pages/session-page";
+import { waitForFiniteAnimations } from "../../helpers/animations";
+import { requireBox } from "../../helpers/layout-assertions";
+import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
 import {
   repositoryName,
   seedSidebarCombinationRepository,
@@ -173,6 +176,7 @@ test.describe("Mobile sidebar — view system", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const sheet = await seedAndOpenSheet(testPage, apiClient, seedData, ["Mobile New View Task"]);
     const newView = sheet.getByTestId("sidebar-new-view");
@@ -235,6 +239,73 @@ test.describe("Mobile sidebar — view system", () => {
         .getByTestId("sidebar-view-chip")
         .filter({ hasText: "New view" }),
     ).toHaveAttribute("data-active", "true");
+
+    await reloadedSheet.getByTestId("sidebar-filter-gear").tap();
+    const deleteDrawer = testPage.getByTestId("sidebar-filter-drawer");
+    const deleteEditor = deleteDrawer.getByTestId("sidebar-filter-popover");
+    const deleteButton = deleteEditor.getByTestId("view-delete-button");
+    await deleteButton.scrollIntoViewIfNeeded();
+    await waitForFiniteAnimations(deleteDrawer);
+    const originalHeight = (await requireBox(deleteDrawer, "view editor")).height;
+    const originalScroll = await deleteEditor.evaluate((element) => element.scrollTop);
+    const deleteButtonBox = await deleteButton.boundingBox();
+    expect(deleteButtonBox).not.toBeNull();
+    expect(deleteButtonBox!.height).toBeGreaterThanOrEqual(44);
+    expect(
+      await deleteButton.evaluate((element) => {
+        const bounds = element.getBoundingClientRect();
+        const hit = document.elementFromPoint(
+          bounds.left + bounds.width / 2,
+          bounds.top + bounds.height / 2,
+        );
+        return hit === element || (hit !== null && element.contains(hit));
+      }),
+    ).toBe(true);
+    await deleteButton.tap();
+    const confirmation = deleteDrawer.getByTestId("saved-task-view-delete-confirmation");
+    await expect(confirmation).toHaveAccessibleName("Delete New view?");
+    const compactBox = await expectContentSizedBottomConfirmation(deleteDrawer, confirmation);
+    expect(compactBox.height).toBeLessThan(originalHeight);
+    await expect(testPage.locator('[role="dialog"]:visible')).toHaveCount(2);
+    for (const action of await confirmation.getByRole("button").all()) {
+      const box = await action.boundingBox();
+      expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+    }
+    await prCapture.screenshot("saved-task-view-delete-mobile", {
+      caption: "Mobile confirmation becomes a focused step in the existing task-filter drawer.",
+    });
+    await confirmation.getByRole("button", { name: "Cancel" }).tap();
+    await expect(deleteDrawer).toBeVisible();
+    await waitForFiniteAnimations(deleteDrawer);
+    expect((await requireBox(deleteDrawer, "restored view editor")).height).toBeCloseTo(
+      originalHeight,
+      0,
+    );
+    expect(await deleteEditor.evaluate((element) => element.scrollTop)).toBe(originalScroll);
+    await expect(deleteEditor.getByTestId("sidebar-filter-active-view-name")).toContainText(
+      "New view",
+    );
+
+    await deleteEditor.getByTestId("view-delete-button").tap();
+    const settingsWrite = testPage.waitForResponse(
+      (response) =>
+        response.url().includes("/api/v1/user/settings") &&
+        response.request().method() === "PATCH" &&
+        response.ok(),
+    );
+    await deleteDrawer
+      .getByTestId("saved-task-view-delete-confirmation")
+      .getByRole("button", { name: "Delete New view" })
+      .tap();
+    await settingsWrite;
+    await expect(deleteEditor.getByTestId("sidebar-filter-active-view-name")).toContainText(
+      "All tasks",
+    );
+    expect(
+      await testPage.evaluate(
+        () => document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      ),
+    ).toBe(true);
   });
 
   test("editing filters in the mobile sheet narrows the task list live", async ({
@@ -382,6 +453,7 @@ test.describe("Mobile sidebar — view system", () => {
     await gear.tap();
     const popover = testPage.getByTestId("sidebar-filter-popover");
     await expect(popover).toBeVisible();
+    await popover.getByTestId("sidebar-sort-settings-toggle").tap();
     await popover.getByTestId("sort-key-select").tap();
     await expect(testPage.getByRole("option", { name: "Updated", exact: true })).toContainText(
       "Last task summary refresh. Background events can change it.",
@@ -530,6 +602,7 @@ test.describe("Mobile sidebar — view system", () => {
     const popover = testPage.getByTestId("sidebar-filter-popover");
     await expect(drawer).toBeVisible();
     await expect(popover).toBeVisible();
+    await popover.getByTestId("sidebar-group-settings-toggle").tap();
     await popover.getByTestId("group-key-select").tap();
     for (const { label, description } of [
       { label: "None", description: "Keep all tasks in one list." },
@@ -621,7 +694,7 @@ test.describe("Mobile sidebar — view system", () => {
     const trailingTime = row.getByTestId("sidebar-task-trailing-time");
     await expect(trailingTime).toBeVisible();
     await expect(row.getByTestId("sidebar-task-time")).toHaveCount(0);
-    await expect(trailingTime).not.toContainText(/ago|yesterday/i);
+    await expect(trailingTime.locator('[aria-hidden="true"]')).not.toContainText(/ago|yesterday/i);
     await expect(trailingTime.locator(".sr-only")).toHaveText(/\S/);
     const mobileTimeBox = await trailingTime.boundingBox();
     expect(mobileTimeBox).not.toBeNull();

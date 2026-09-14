@@ -70,6 +70,7 @@ describe("useWorkflowStepsEffect", () => {
           name: "Backlog",
           position: 0,
           is_start_step: false,
+          prompt: "Backlog prompt",
         },
         {
           id: "visible-start",
@@ -97,6 +98,7 @@ describe("useWorkflowStepsEffect", () => {
           title: "Backlog",
           position: 0,
           is_start_step: false,
+          prompt: "Backlog prompt",
           events: undefined,
           workflowId: "visible",
         },

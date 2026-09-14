@@ -2,9 +2,9 @@ name: Update managed runtime pins
 
 on:
   schedule:
-    # Refresh the reviewed runtime pins every Monday at 06:17 UTC, then open
+    # Refresh the reviewed runtime pins every Friday at 09:00 UTC, then open
     # or refresh the single grouped updater PR when a stable version changes.
-    - cron: "17 6 * * 1"
+    - cron: "0 9 * * 5"
   workflow_dispatch:
 
 # The job uses the repository-scoped workflow token for the branch, PR, and

@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-07-30
-updated: 2026-09-04
+updated: 2026-09-07
 owners:
   - cfl
 ---
@@ -72,6 +72,11 @@ hand-off it is designed to protect.
   newest cached message and a disabled transcript shows its saved reader
   position as soon as the panel is measurable, without first exposing the
   browser's default top position.
+- **AC-UI-TRANSCRIPT-AUTO-SCROLL-001.15:** **GIVEN** a desktop transcript is the
+  selected tab in its Dockview group while another visible group owns global
+  focus, **WHEN** a task switch restores that layout, **THEN** the transcript
+  is treated as visible and completes its enabled or disabled initial
+  placement.
 
 ## Migrated source detail
 
@@ -127,6 +132,9 @@ the asynchronous hand-off it is designed to protect.
   **WHEN** the user switches between them and returns, **THEN** the incoming
   enabled transcript shows the newest cached message immediately and remains
   at the newest message after its history refresh.
+- **GIVEN** the Changes panel owns Dockview focus while Chat remains the
+  selected center tab, **WHEN** the user returns to that task, **THEN** Chat
+  completes initial transcript placement without requiring an agent update.
 - **GIVEN** the incoming transcript has auto-scroll disabled, **WHEN** that
   environment-switch placement runs, **THEN** it restores the incoming
   session's saved position rather than the outgoing transcript's position.

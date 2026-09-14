@@ -568,6 +568,44 @@ test.describe("Task creation from Remote tab (chip picker)", () => {
     );
   });
 
+  test("unconfigured provider stays silent in the remote picker", async ({
+    testPage,
+    apiClient,
+    seedData,
+    prCapture,
+  }) => {
+    await apiClient.mockGitHubSetWorkspaceConnection(seedData.workspaceId, {
+      source: "legacy_shared",
+      status: "active",
+    });
+    await seedAccessibleRepos(apiClient);
+    let gitLabProjectRequests = 0;
+    await testPage.route("**/api/v1/gitlab/projects?*", async (route) => {
+      gitLabProjectRequests += 1;
+      await route.continue();
+    });
+
+    const kanban = new KanbanPage(testPage);
+    await openCreateDialog(testPage, kanban);
+    await clickRemoteMode(testPage);
+    await testPage.getByTestId("remote-repo-chip-trigger").first().click();
+
+    await expect(
+      testPage.getByTestId("remote-repo-option").filter({ hasText: "mock-user/alpha" }),
+    ).toBeVisible({ timeout: 10_000 });
+    await expect(testPage.getByTestId("remote-repo-provider-tabs")).toHaveCount(0);
+    await expect(testPage.getByText(/Could not load repositories/i)).toHaveCount(0);
+    expect(gitLabProjectRequests).toBe(0);
+    await prCapture.screenshot("remote-repository-picker-desktop", {
+      caption: "Desktop remote picker with an unconfigured provider hidden",
+    });
+
+    await testPage.getByTestId("remote-repo-option").filter({ hasText: "mock-user/alpha" }).click();
+    await expect(testPage.getByTestId("remote-repo-chip-trigger").first()).toContainText(
+      "mock-user/alpha",
+    );
+  });
+
   test("switches between configured repository providers with bottom tabs", async ({
     testPage,
     apiClient,

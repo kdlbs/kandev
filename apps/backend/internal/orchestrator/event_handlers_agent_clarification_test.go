@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	"github.com/stretchr/testify/require"
 )
 
 type repoBackedTurnService struct {
@@ -301,21 +302,15 @@ func TestHandleAgentCompleted_BlocksOnTurnCompleteWhileClarificationPending(t *t
 			AgentExecutionID: "exec-1",
 		})
 
-		task, err = repo.GetTask(ctx, "t1")
-		if err != nil {
-			t.Fatalf("get task: %v", err)
-		}
-		if task.WorkflowStepID != "step1" {
-			t.Fatalf("expected workflow step to remain step1, got %q", task.WorkflowStepID)
-		}
-
-		session, err = repo.GetTaskSession(ctx, "s1")
-		if err != nil {
-			t.Fatalf("get session: %v", err)
-		}
-		if session.State != models.TaskSessionStateWaitingForInput {
-			t.Fatalf("expected session %q, got %q", models.TaskSessionStateWaitingForInput, session.State)
-		}
+		require.Eventually(t, func() bool {
+			storedTask, taskErr := repo.GetTask(ctx, "t1")
+			storedSession, sessionErr := repo.GetTaskSession(ctx, "s1")
+			return taskErr == nil &&
+				sessionErr == nil &&
+				storedTask.WorkflowStepID == "step1" &&
+				storedSession.State == models.TaskSessionStateWaitingForInput
+		}, 2*time.Second, 10*time.Millisecond,
+			"pending clarification should keep the task at step1 and settle the session waiting for input")
 		turn, err := svc.turnService.GetActiveTurn(ctx, "s1")
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			t.Fatalf("get active turn: %v", err)

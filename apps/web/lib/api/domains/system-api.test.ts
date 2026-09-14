@@ -43,6 +43,8 @@ import {
   restoreStorageQuarantine,
   runStorageMaintenance,
   saveStorageSettings,
+  fetchRetentionStatus,
+  saveRetentionSettings,
 } from "./system-api";
 
 const BASE = "http://api.test/api/v1/system";
@@ -526,5 +528,49 @@ describe("storage policy", () => {
     expect(lastCall().init?.cache).toBe("no-store");
     expect(response.settings).toEqual(storageSettings);
     expect(response.capabilities.docker_available).toBe(true);
+  });
+});
+
+describe("office run history retention", () => {
+  const retentionSettings = {
+    enabled: true,
+    sweep_interval_hours: 6,
+    batch_limit: 5000,
+    routine_runs: { window_days: 30, floor_per_owner: 50, warn_rows: 25000 },
+    runs: { window_days: 30, floor_per_owner: 50, warn_rows: 25000 },
+    run_events: { warn_rows: 250000 },
+  };
+
+  it("loads retention status without caching", async () => {
+    fetchSpy.mockResolvedValueOnce(
+      jsonResponse({
+        settings: retentionSettings,
+        last_sweep: null,
+        skip_count: 0,
+        retained_counts: {
+          office_routine_runs: { state: "not_computed", retained_count: 0, as_of: "" },
+          runs: { state: "not_computed", retained_count: 0, as_of: "" },
+          run_events: { state: "not_computed", retained_count: 0, as_of: "" },
+        },
+      }),
+    );
+
+    const response = await fetchRetentionStatus();
+
+    expect(lastCall().url).toBe(`${BASE}/retention`);
+    expect(lastCall().init?.cache).toBe("no-store");
+    expect(response.settings).toEqual(retentionSettings);
+    expect(response.last_sweep).toBeNull();
+  });
+
+  it("PUTs the full settings document to save", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse(retentionSettings));
+
+    const response = await saveRetentionSettings(retentionSettings);
+
+    expect(lastCall().url).toBe(`${BASE}/retention`);
+    expect(method()).toBe("PUT");
+    expect(JSON.parse(String(lastCall().init?.body))).toEqual(retentionSettings);
+    expect(response).toEqual(retentionSettings);
   });
 });

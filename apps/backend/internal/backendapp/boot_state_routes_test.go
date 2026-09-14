@@ -42,6 +42,31 @@ func TestMapKanbanStepStateIncludesProfileSessionPolicies(t *testing.T) {
 	}
 }
 
+func TestMapKanbanStepStateIncludesAutoAdvanceRequiresSignal(t *testing.T) {
+	step := mapKanbanStepState(taskdto.WorkflowStepDTO{
+		ID:                        "step-signal-gated",
+		AutoAdvanceRequiresSignal: true,
+	})
+	if step["auto_advance_requires_signal"] != true {
+		t.Fatalf("auto_advance_requires_signal = %#v, want true", step["auto_advance_requires_signal"])
+	}
+}
+
+// TestMapKanbanStepStateIncludesOrderRevision covers the Build-phase fix for
+// missing order_revision on HTTP hydration: without this field in the boot
+// payload, the frontend has no way to seed kanbanMulti.orderRevisionByStepId
+// before the first task.reordered WS event arrives, so that event's revision
+// gate accepts whatever arrives first — even a stale reorder.
+func TestMapKanbanStepStateIncludesOrderRevision(t *testing.T) {
+	step := mapKanbanStepState(taskdto.WorkflowStepDTO{
+		ID:            "step-revisioned",
+		OrderRevision: 7,
+	})
+	if step["order_revision"] != int64(7) {
+		t.Fatalf("order_revision = %#v, want 7", step["order_revision"])
+	}
+}
+
 // TestMapKanbanTaskStateIncludesAutoStartFailed regression-tests Review round
 // 2's MAJOR finding: mapKanbanTaskState is a camelCase whitelist that omitted
 // auto_start_failed, so a task whose auto-start already failed rendered with
@@ -67,6 +92,40 @@ func TestMapKanbanTaskStateIncludesAutoStartFailed(t *testing.T) {
 	}
 }
 
+// TestMapKanbanTaskStateIncludesParkedProjection regression-tests the same
+// whitelist-omission shape as TestMapKanbanTaskStateIncludesAutoStartFailed
+// above, this time for parked_on_background_work/parked_revision/parked_epoch:
+// EnrichTaskParkedProjection stamps these onto the TaskDTO before this mapper
+// runs, but the mapper dropped them, so a task already parked at the moment a
+// browser loaded /t/:id rendered with no affordance until the next live
+// task.updated WS event.
+func TestMapKanbanTaskStateIncludesParkedProjection(t *testing.T) {
+	task := mapKanbanTaskState(taskdto.TaskDTO{
+		ID:                     "task-parked",
+		WorkflowStepID:         "step-review",
+		ParkedOnBackgroundWork: true,
+		ParkedRevision:         3,
+		ParkedEpoch:            99,
+	})
+	if task["parkedOnBackgroundWork"] != true {
+		t.Fatalf("kanban task parkedOnBackgroundWork = %#v, want true", task["parkedOnBackgroundWork"])
+	}
+	if task["parkedRevision"] != uint64(3) {
+		t.Fatalf("kanban task parkedRevision = %#v, want 3", task["parkedRevision"])
+	}
+	if task["parkedEpoch"] != uint64(99) {
+		t.Fatalf("kanban task parkedEpoch = %#v, want 99", task["parkedEpoch"])
+	}
+
+	unparked := mapKanbanTaskState(taskdto.TaskDTO{
+		ID:             "task-unparked",
+		WorkflowStepID: "step-review",
+	})
+	if unparked["parkedOnBackgroundWork"] != false {
+		t.Fatalf("kanban task parkedOnBackgroundWork = %#v, want false for an unparked task", unparked["parkedOnBackgroundWork"])
+	}
+}
+
 // TestMapKanbanTaskStateIncludesPriority regression-tests that
 // mapKanbanTaskState is a camelCase whitelist: a DTO field with no entry here
 // is invisible on the board's first paint, before any WS event arrives.
@@ -78,6 +137,28 @@ func TestMapKanbanTaskStateIncludesPriority(t *testing.T) {
 	})
 	if task["priority"] != "critical" {
 		t.Fatalf("kanban task priority = %#v, want critical", task["priority"])
+	}
+}
+
+func TestMapKanbanTaskStateIncludesRunnerMutability(t *testing.T) {
+	editable := mapKanbanTaskState(taskdto.TaskDTO{
+		ID:                     "task-eligible",
+		WorkflowStepID:         "step-review",
+		RunnerEditable:         true,
+		RunnerIneligibleReason: "eligible",
+	})
+	if editable["runnerEditable"] != true || editable["runnerIneligibleReason"] != "eligible" {
+		t.Fatalf("kanban task runner fields = %#v, want editable/eligible", editable)
+	}
+
+	ineligible := mapKanbanTaskState(taskdto.TaskDTO{
+		ID:                     "task-ineligible",
+		WorkflowStepID:         "step-review",
+		RunnerEditable:         false,
+		RunnerIneligibleReason: "session_exists",
+	})
+	if ineligible["runnerEditable"] != false || ineligible["runnerIneligibleReason"] != "session_exists" {
+		t.Fatalf("kanban task runner fields = %#v, want non-editable/session_exists", ineligible)
 	}
 }
 

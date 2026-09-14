@@ -14,7 +14,37 @@ import (
 
 	"github.com/kandev/kandev/internal/db"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 )
+
+type e2eResetTaskDeleterStub struct {
+	taskID  string
+	options taskservice.DeleteTaskOptions
+}
+
+func (s *e2eResetTaskDeleterStub) DeleteTaskWithOptions(
+	_ context.Context,
+	taskID string,
+	options taskservice.DeleteTaskOptions,
+) error {
+	s.taskID = taskID
+	s.options = options
+	return nil
+}
+
+func TestDeleteTaskForE2EResetDiscardsWorktreeChanges(t *testing.T) {
+	deleter := &e2eResetTaskDeleterStub{}
+
+	if err := deleteTaskForE2EReset(context.Background(), deleter, "task-1"); err != nil {
+		t.Fatalf("deleteTaskForE2EReset: %v", err)
+	}
+	if deleter.taskID != "task-1" {
+		t.Fatalf("deleted task ID = %q, want task-1", deleter.taskID)
+	}
+	if !deleter.options.DiscardWorktreeChanges {
+		t.Fatal("E2E reset must discard disposable worktree changes")
+	}
+}
 
 func TestE2EResetDeletesWorkspaceGitHubAuthentication(t *testing.T) {
 	raw, err := db.OpenSQLite(filepath.Join(t.TempDir(), "e2e-reset.db"))

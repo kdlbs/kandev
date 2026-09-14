@@ -64,6 +64,7 @@ type BuildMobileDisplayOptionsInput = Omit<
   | "showPreviewPanel"
   | "tasksListOptions"
   | "columnsSection"
+  | "showBoardControls"
 > & {
   currentPage: TaskListingPage;
   isMobile: boolean;
@@ -87,6 +88,7 @@ function buildMobileDisplayOptions({
     showPreviewPanel: currentPage !== "threads",
     tasksListOptions: isMobile && currentPage === "tasks" ? tasksListOptions : undefined,
     columnsSection,
+    showBoardControls: currentPage === "kanban",
   };
 }
 
@@ -164,6 +166,10 @@ export function useMobileMenuSheetState({
     onToggleStepVisibility,
     workflowIdsWithAutoHideEmptySteps,
     onToggleAutoHideEmpty,
+    boardSort,
+    priorityFilterTokens,
+    onBoardSortChange,
+    onPriorityFilterChange,
   } = useKanbanDisplaySettings();
   const focusedWorkflowId = useAppStore((state) => state.mobileKanban.focusedWorkflowId);
   const columnsSection = buildColumnsSection({
@@ -204,6 +210,10 @@ export function useMobileMenuSheetState({
     isMobile,
     columnsSection,
     tasksListOptions,
+    boardSort,
+    priorityFilterTokens,
+    onBoardSortChange,
+    onPriorityFilterChange,
   });
   const focusMenu = (event: Event) => {
     event.preventDefault();

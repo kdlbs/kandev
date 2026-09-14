@@ -16,6 +16,7 @@ const mockState = {
     },
   },
 };
+const originalSessions = mockState.taskSessionsByTask.itemsByTaskId.t1;
 
 vi.mock("@/components/state-provider", () => ({
   useOptionalAppStore: (selector: (s: typeof mockState) => unknown) => selector(mockState),
@@ -25,6 +26,7 @@ describe("TaskTopBarPluginActions", () => {
   afterEach(() => {
     cleanup();
     pluginRegistry.unregisterPlugin("plugin-a");
+    mockState.taskSessionsByTask.itemsByTaskId.t1 = originalSessions;
   });
 
   it("renders nothing when no plugin registered a chat-top-bar component", () => {
@@ -81,5 +83,26 @@ describe("TaskTopBarPluginActions", () => {
     render(<TaskTopBarPluginActions sessionId="s9" taskId={null} workspaceId={null} />);
 
     expect(screen.getByTestId("plugin-topbar").textContent).toBe("null|s9|s9");
+  });
+
+  it("does not rerender the contribution for equal session ids", () => {
+    const pluginRender = vi.fn();
+    pluginRegistry.forPlugin("plugin-a").registerComponent(SLOT, () => {
+      pluginRender();
+      return null;
+    });
+
+    const { rerender } = render(
+      <TaskTopBarPluginActions sessionId="s2" taskId="t1" taskTitle="Demo" workspaceId="w1" />,
+    );
+    mockState.taskSessionsByTask.itemsByTaskId.t1 = originalSessions.map((session) => ({
+      ...session,
+      state: "finished",
+    }));
+    rerender(
+      <TaskTopBarPluginActions sessionId="s2" taskId="t1" taskTitle="Demo" workspaceId="w1" />,
+    );
+
+    expect(pluginRender).toHaveBeenCalledTimes(1);
   });
 });

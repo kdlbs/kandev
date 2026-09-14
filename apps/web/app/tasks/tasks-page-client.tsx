@@ -10,11 +10,10 @@ import {
   unarchiveTask,
   updateUserSettings,
 } from "@/lib/api";
+import type { DeleteTaskParams } from "@/lib/api/domains/kanban-api";
 import type { Task, Workspace, Workflow, Repository } from "@/lib/types/http";
 import { useToast } from "@/components/toast-provider";
-// Module-level `t`: every use below is inside a callback or a plain helper
-// (`errorDescription`), so it resolves at invocation rather than at import —
-// the case `apps/web/CLAUDE.md` sanctions. None of it renders as JSX.
+// Module-level `t` is only used at invocation time in callbacks and helpers.
 import { t } from "@/lib/i18n";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
@@ -29,6 +28,7 @@ import { useTaskListFacets } from "@/hooks/use-task-list-facets";
 import { useTaskListFacetSelection } from "@/hooks/use-task-list-facet-selection";
 import { linkToTask } from "@/lib/links";
 import { unarchiveToastPayload } from "@/lib/tasks/unarchive-feedback";
+import { isTaskDeleteDirtyWorktreeError } from "@/lib/api/task-delete-errors";
 import { shouldSkipInitialTasksFetch } from "./tasks-page-fetch-policy";
 import { TasksPageContent } from "./tasks-page-content";
 import { type MobileTaskStep } from "./mobile-tasks-create-dialog";
@@ -205,15 +205,19 @@ function useTaskMutations(fetchTasks: () => void) {
   );
 
   const handleDelete = useCallback(
-    async (taskId: string, opts?: { cascade?: boolean }) => {
+    async (taskId: string, opts?: DeleteTaskParams) => {
       setDeletingTaskId(taskId);
       try {
         await deleteTask(taskId, opts);
         fetchTasks();
       } catch (err) {
         toast({
-          title: t("tasks:failedToDeleteTask"),
-          description: errorDescription(err),
+          title: isTaskDeleteDirtyWorktreeError(err)
+            ? t("task:deleteDirtyWorktreeTitle")
+            : t("tasks:failedToDeleteTask"),
+          description: isTaskDeleteDirtyWorktreeError(err)
+            ? t("task:deleteDirtyWorktreeDescription")
+            : errorDescription(err),
           variant: "error",
         });
       } finally {
@@ -506,6 +510,23 @@ function useTasksListPreferenceSync({
   return { handleSortChange, handleGroupChange };
 }
 
+function useTasksPageClientEffects({
+  setMobileSearchOpen,
+  setView,
+}: {
+  setMobileSearchOpen: (open: boolean) => void;
+  setView: (view: "list") => void;
+}) {
+  useEffect(() => {
+    setMobileSearchOpen(false);
+    return () => setMobileSearchOpen(false);
+  }, [setMobileSearchOpen]);
+
+  useEffect(() => {
+    setView("list");
+  }, [setView]);
+}
+
 export function TasksPageClient(props: TasksPageClientProps) {
   const s = useTasksPageSetup(props);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -523,8 +544,6 @@ export function TasksPageClient(props: TasksPageClientProps) {
     state.kanban.workflowId === s.activeWorkflowId ? state.kanban.steps : EMPTY_WORKFLOW_STEPS,
   );
   useWorkflowSnapshot(s.activeWorkflowId);
-  // Task-title previews render PR/MR glyphs independently of the list-details
-  // preference, so both workspace caches must be hydrated here.
   useWorkspacePRs(s.activeWorkspaceId);
   useWorkspaceMRs(s.activeWorkspaceId);
   useForegroundRefresh(() => s.fetchTasks(true), Boolean(s.activeWorkspaceId), s.activeWorkspaceId);
@@ -546,14 +565,7 @@ export function TasksPageClient(props: TasksPageClientProps) {
     onCoreGroupChange: handleGroupChange,
   });
 
-  useEffect(() => {
-    setMobileSearchOpen(false);
-    return () => setMobileSearchOpen(false);
-  }, [setMobileSearchOpen]);
-
-  useEffect(() => {
-    setView("list");
-  }, [setView]);
+  useTasksPageClientEffects({ setMobileSearchOpen, setView });
 
   return (
     <TasksPageContent
@@ -598,45 +610,18 @@ export function TasksPageClient(props: TasksPageClientProps) {
       onUnarchive={s.handleUnarchive}
       onDelete={s.handleDelete}
       onRefresh={() => s.fetchTasks()}
-      mobileActions={mobileTaskActions({
-        isMobile,
-        workspaceId: s.activeWorkspaceId,
-        workflowId: s.activeWorkflowId,
-        steps: activeSteps,
-        open: isCreateOpen,
-        onOpenChange: setIsCreateOpen,
-        onCreated: () => s.fetchTasks(true),
-      })}
-    />
-  );
-}
-
-function mobileTaskActions({
-  isMobile,
-  workspaceId,
-  workflowId,
-  steps,
-  open,
-  onOpenChange,
-  onCreated,
-}: {
-  isMobile: boolean;
-  workspaceId: string | null;
-  workflowId: string | null;
-  steps: MobileTaskStep[];
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onCreated: () => Promise<void>;
-}) {
-  if (!isMobile || !workspaceId) return null;
-  return (
-    <MobileTasksActions
-      workspaceId={workspaceId}
-      workflowId={workflowId}
-      steps={steps}
-      open={open}
-      onOpenChange={onOpenChange}
-      onCreated={onCreated}
+      mobileActions={
+        isMobile && s.activeWorkspaceId ? (
+          <MobileTasksActions
+            workspaceId={s.activeWorkspaceId}
+            workflowId={s.activeWorkflowId}
+            steps={activeSteps}
+            open={isCreateOpen}
+            onOpenChange={setIsCreateOpen}
+            onCreated={() => s.fetchTasks(true)}
+          />
+        ) : null
+      }
     />
   );
 }

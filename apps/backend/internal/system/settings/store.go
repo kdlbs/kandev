@@ -18,6 +18,13 @@ type Store struct {
 	ro *sqlx.DB
 }
 
+// Entry is a setting value together with the timestamp persisted by Save.
+type Entry struct {
+	Key       string
+	Value     []byte
+	UpdatedAt time.Time
+}
+
 func NewStore(pool *db.Pool) (*Store, error) {
 	store := &Store{db: pool.Writer(), ro: pool.Reader()}
 	if err := store.initSchema(); err != nil {
@@ -70,6 +77,69 @@ func (s *Store) Get(ctx context.Context, key string) ([]byte, bool, error) {
 		return nil, false, err
 	}
 	return []byte(raw), true, nil
+}
+
+func (s *Store) GetConsistent(ctx context.Context, key string) ([]byte, bool, error) {
+	var raw string
+	err := s.db.QueryRowContext(ctx, s.db.Rebind(`SELECT value FROM settings WHERE key = ?`), key).Scan(&raw)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, false, nil
+		}
+		return nil, false, err
+	}
+	return []byte(raw), true, nil
+}
+
+func (s *Store) CompareAndSwap(
+	ctx context.Context,
+	key string,
+	expected, value []byte,
+) (bool, error) {
+	now := time.Now().UTC()
+	var (
+		result sql.Result
+		err    error
+	)
+	if expected == nil {
+		result, err = s.db.ExecContext(ctx, s.db.Rebind(`
+			INSERT INTO settings (key, value, updated_at)
+			VALUES (?, ?, ?)
+			ON CONFLICT(key) DO NOTHING
+		`), key, string(value), now)
+	} else {
+		result, err = s.db.ExecContext(ctx, s.db.Rebind(`
+			UPDATE settings SET value = ?, updated_at = ?
+			WHERE key = ? AND value = ?
+		`), string(value), now, key, string(expected))
+	}
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
+// GetEntry reads one setting row, including its persisted update timestamp.
+func (s *Store) GetEntry(ctx context.Context, key string) (Entry, bool, error) {
+	var row struct {
+		Key       string    `db:"key"`
+		Value     string    `db:"value"`
+		UpdatedAt time.Time `db:"updated_at"`
+	}
+	err := s.ro.GetContext(ctx, &row, s.ro.Rebind(`
+		SELECT key, value, updated_at FROM settings WHERE key = ?
+	`), key)
+	if err == sql.ErrNoRows {
+		return Entry{}, false, nil
+	}
+	if err != nil {
+		return Entry{}, false, err
+	}
+	return Entry{Key: row.Key, Value: []byte(row.Value), UpdatedAt: row.UpdatedAt}, true, nil
 }
 
 func (s *Store) Save(ctx context.Context, key string, value []byte) error {

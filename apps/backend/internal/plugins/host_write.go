@@ -7,10 +7,9 @@
 // Every write routes through the same first-party layer the REST/MCP API uses,
 // never a repository — that is how task.* events fire and how a message reaches
 // the agent through the orchestrator's real delivery path (queue when the
-// session is running, resume/start it otherwise). The service types can't be
-// referenced here without an import cycle (see SetDataSources' doc), so task
-// writes go through a narrow taskWriter interface and message delivery through a
-// narrow taskMessenger interface, both satisfied by backendapp adapters.
+// session is running, resume/start it otherwise). Task writes and message
+// delivery go through narrow taskWriter and taskMessenger interfaces,
+// satisfied by backendapp adapters.
 package plugins
 
 import (
@@ -49,6 +48,7 @@ type TaskCreateInput struct {
 	Launch         TaskLaunchInput
 	Metadata       map[string]any
 	PlanMode       bool
+	Priority       string
 	// StartAgent reports that the caller will launch an agent for this task
 	// right after creation. The adapter maps it onto CreateTaskRequest so step
 	// resolution sends the task to the first step that runs agents rather than
@@ -75,6 +75,7 @@ type TaskUpdateInput struct {
 	Description    *string
 	State          *string
 	WorkflowStepID *string
+	Priority       *string
 }
 
 // TaskMoveInput is the plugins-local task-move request a taskWriter adapter
@@ -177,6 +178,9 @@ func (r taskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput) (*
 	if in.Title == "" {
 		return nil, invalidArgument("title is required")
 	}
+	if in.Priority != "" && taskmodels.ValidateTaskPriority(in.Priority) != nil {
+		return nil, invalidArgument(fmt.Sprintf("invalid task priority %q", in.Priority))
+	}
 	metadata, err := r.host.pluginTaskMetadata(in.Metadata)
 	if err != nil {
 		return nil, err
@@ -209,6 +213,7 @@ func (r taskReader) Create(ctx context.Context, in pluginsdk.CreateTaskInput) (*
 		Launch:         launch,
 		Metadata:       metadata,
 		PlanMode:       launch.PlanMode,
+		Priority:       in.Priority,
 		StartAgent:     in.StartAgent,
 	})
 	if err != nil {
@@ -231,12 +236,21 @@ func (r taskReader) Update(ctx context.Context, in pluginsdk.UpdateTaskInput) (*
 	if in.ID == "" {
 		return nil, invalidArgument("id is required")
 	}
+	if in.WorkflowStepID != nil {
+		return nil, invalidArgument(
+			"workflow_step_id cannot be set via UpdateTask: use MoveTask to transition a task between workflow steps",
+		)
+	}
+	if in.Priority != nil && taskmodels.ValidateTaskPriority(*in.Priority) != nil {
+		return nil, invalidArgument(fmt.Sprintf("invalid task priority %q", *in.Priority))
+	}
 	updated, err := r.host.taskWriter.UpdateTask(ctx, TaskUpdateInput{
 		ID:             in.ID,
 		Title:          in.Title,
 		Description:    in.Description,
 		State:          in.State,
 		WorkflowStepID: in.WorkflowStepID,
+		Priority:       in.Priority,
 	})
 	if err != nil {
 		if errors.Is(err, repoerrors.ErrTaskNotFound) {

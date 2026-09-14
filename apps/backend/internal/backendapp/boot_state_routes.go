@@ -666,6 +666,8 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"threadActiveViewId":                nullString(settings.ThreadActiveViewID),
 		"threadViewDraft":                   mapThreadViewDraft(settings.ThreadViewDraft),
 		"sidebarTaskPrefs":                  mapSidebarTaskPrefs(settings.SidebarTaskPrefs),
+		"sidebarTaskColorAutomation":        settings.SidebarTaskColorAutomation,
+		"sidebarTaskColors":                 settings.SidebarTaskColors,
 		"taskCreateLastUsed":                mapTaskCreateLastUsed(settings.TaskCreateLastUsed),
 		"defaultUtilityAgentId":             nullString(settings.DefaultUtilityAgentID),
 		"defaultUtilityAgentProfileId":      nullString(settings.DefaultUtilityAgentProfileID),
@@ -686,6 +688,8 @@ func mapUserSettingsState(response userdto.UserSettingsResponse, workspaceID str
 		"quickChatTabOrderByWorkspace":      settings.QuickChatTabOrderByWorkspace,
 		"hiddenWorkflowStepIds":             stringSliceMap(settings.KanbanHiddenStepIDs),
 		"workflowIdsWithAutoHideEmptySteps": stringSlice(settings.WorkflowIDsWithAutoHideEmptySteps),
+		"kanbanSort":                        usermodels.NormalizeKanbanSort(settings.KanbanSort),
+		"kanbanPriorityFilterTokens":        stringSlice(settings.KanbanPriorityFilterTokens),
 		"loaded":                            true,
 	}
 }
@@ -741,15 +745,18 @@ func mapKanbanStepState(step taskdto.WorkflowStepDTO) map[string]any {
 		"position":                     step.Position,
 		"events":                       step.Events,
 		"allow_manual_move":            step.AllowManualMove,
+		"auto_advance_requires_signal": step.AutoAdvanceRequiresSignal,
 		"prompt":                       step.Prompt,
 		"is_start_step":                step.IsStartStep,
 		"show_in_command_panel":        step.ShowInCommandPanel,
 		"agent_profile_id":             nullString(step.AgentProfileID),
 		"profile_session_start_policy": string(step.ProfileSessionStartPolicy),
 		"profile_session_end_policy":   string(step.ProfileSessionEndPolicy),
+		"session_target":               step.SessionTarget,
 		"stage_type":                   nullString(step.StageType),
 		"wip_limit":                    step.WIPLimit,
 		"pull_from_step_id":            nullString(step.PullFromStepID),
+		"order_revision":               step.OrderRevision,
 	}
 }
 
@@ -787,6 +794,7 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"queuedAt":                    task.QueuedAt,
 		"interrupted":                 task.Interrupted,
 		"autoStartFailed":             task.AutoStartFailed,
+		"workspaceOrphaned":           task.WorkspaceOrphaned,
 		"statusSummary":               task.StatusSummary,
 		"sessionCount":                task.SessionCount,
 		"reviewStatus":                nullString(string(task.ReviewStatus)),
@@ -803,6 +811,17 @@ func mapKanbanTaskState(task taskdto.TaskDTO) map[string]any {
 		"dependsOn":          dependencyRefStates(task.DependsOn),
 		"blocks":             dependencyRefStates(task.Blocks),
 		"startWhenUnblocked": task.StartWhenUnblocked,
+		// Parked-on-background-work projection, stamped by
+		// EnrichTaskParkedProjection before this mapper runs — omitting it here
+		// leaves a task that is already parked at page-load time with no
+		// affordance until the next live task.updated WS event.
+		"parkedOnBackgroundWork": task.ParkedOnBackgroundWork,
+		"parkedRevision":         task.ParkedRevision,
+		"parkedEpoch":            task.ParkedEpoch,
+		// Runner-mutability projection: this is a camelCase whitelist, so an
+		// evaluated verdict is invisible on first paint until it is listed here.
+		"runnerEditable":         task.RunnerEditable,
+		"runnerIneligibleReason": task.RunnerIneligibleReason,
 	}
 }
 

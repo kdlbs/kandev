@@ -114,7 +114,7 @@ afterEach(() => {
 });
 
 describe("CanvasHostRoute runtime recovery", () => {
-  it("renews the capability URL for the same active release after a frame failure", async () => {
+  it("exposes retry after a frame failure and renews the capability URL", async () => {
     render(<CanvasHostRoute canvasId="canvas-1" />);
 
     await waitFor(() =>
@@ -124,6 +124,11 @@ describe("CanvasHostRoute runtime recovery", () => {
     );
 
     fireEvent.click(screen.getByTestId(FRAME_TEST_ID));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("canvas-host-state").textContent).toContain("unavailable"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
 
     await waitFor(() => {
       expect(mockGetCanvasRuntime).toHaveBeenCalledTimes(2);

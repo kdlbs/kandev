@@ -99,7 +99,7 @@ func TestApplyGuardedTransitionLifecycle_OfficeRejectLeg_DoesNotPromptDeciderSes
 	svc := &Service{
 		logger: log, repo: repo, workflowStepGetter: stepGetter, taskRepo: taskRepo, agentManager: agentMgr,
 		messageQueue: messagequeue.NewServiceMemory(log), executor: exec,
-		workflowStore: newWorkflowStore(repo, stepGetter, agentMgr, noopPublisher, log),
+		workflowStore: newWorkflowStore(repo, stepGetter, agentMgr, noopPublisher, log, &operationLedger{}),
 	}
 	onEnterDone := make(chan struct{}, 1)
 	svc.onProcessOnEnterComplete = func() {

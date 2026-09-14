@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { IconInbox } from "@tabler/icons-react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -8,13 +8,21 @@ import {
 } from "./presets-scope-bar-base";
 
 let lastMenuItemSelectEvent: Event | null = null;
+let closeMenuFocus: (() => void) | undefined;
 
 vi.mock("@kandev/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   DropdownMenuTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DropdownMenuContent: ({ children }: { children: React.ReactNode }) => (
-    <div role="menu">{children}</div>
-  ),
+  DropdownMenuContent: ({
+    children,
+    onCloseAutoFocus,
+  }: {
+    children: React.ReactNode;
+    onCloseAutoFocus?: () => void;
+  }) => {
+    closeMenuFocus = onCloseAutoFocus;
+    return <div role="menu">{children}</div>;
+  },
   DropdownMenuItem: ({
     children,
     disabled,
@@ -75,6 +83,7 @@ vi.mock("@kandev/ui/dropdown-menu", () => ({
 afterEach(() => {
   cleanup();
   lastMenuItemSelectEvent = null;
+  closeMenuFocus = undefined;
 });
 
 type Kind = "pr" | "issue";
@@ -207,6 +216,37 @@ describe("IntegrationScopeBar saved defaults", () => {
         .getAttribute(ARIA_DISABLED_ATTRIBUTE),
     ).toBe("true");
   });
+});
+
+describe("IntegrationScopeBar saved-query actions", () => {
+  it("opens Save only after the menu has restored focus", async () => {
+    const onSaveCurrent = vi.fn();
+    renderBar({ canSaveCurrent: true, onSaveCurrent });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Save current query" }));
+    expect(onSaveCurrent).not.toHaveBeenCalled();
+    closeMenuFocus?.();
+    screen.getByTestId("saved-menu").focus();
+    await waitFor(() => expect(onSaveCurrent).toHaveBeenCalledOnce());
+    expect(document.activeElement).toBe(screen.getByTestId("saved-menu"));
+  });
+
+  it("cancels a deferred Save when the scope bar unmounts", async () => {
+    const onSaveCurrent = vi.fn();
+    const { unmount } = renderBar({ canSaveCurrent: true, onSaveCurrent });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Save current query" }));
+    closeMenuFocus?.();
+    unmount();
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    expect(onSaveCurrent).not.toHaveBeenCalled();
+  });
+
+  it.each(["status", "alert"])("retains cached saved queries alongside a %s", (role) => {
+    const { onSelect } = renderBar({ savedStatus: <div role={role}>Saved-query recovery</div> });
+    expect(screen.getByRole(role).textContent).toBe("Saved-query recovery");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Current default" }));
+    expect(onSelect).toHaveBeenCalledWith({ kind: "pr", source: "saved", id: "saved-a" });
+    expect(screen.queryByText("No saved queries yet.")).toBeNull();
+  });
 
   it("renders no default actions when an integration omits the optional contract", () => {
     renderBar({ onToggleSavedDefault: undefined });
@@ -227,13 +267,22 @@ describe("IntegrationScopeBar saved defaults", () => {
     );
   });
 
-  it("prevents the menu from closing when a saved query is deleted", () => {
+  it("keeps the menu open and waits for named confirmation before deletion", async () => {
     const { onDeleteSaved } = renderBar();
 
     fireEvent.click(screen.getByRole("menuitem", { name: FUTURE_DELETE_LABEL }));
 
-    expect(onDeleteSaved).toHaveBeenCalledWith("saved-b");
+    expect(onDeleteSaved).not.toHaveBeenCalled();
     expect(lastMenuItemSelectEvent?.defaultPrevented).toBe(true);
+    const confirmation = await screen.findByRole("dialog", { name: "Delete Future default?" });
+    fireEvent.click(within(confirmation).getByRole("button", { name: "Cancel" }));
+    expect(onDeleteSaved).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: FUTURE_DELETE_LABEL }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete Future default" }));
+
+    await waitFor(() => expect(onDeleteSaved).toHaveBeenCalledWith("saved-b"));
+    expect(onDeleteSaved).toHaveBeenCalledOnce();
   });
 
   it("uses a host icon when a plugin preset does not provide one", () => {

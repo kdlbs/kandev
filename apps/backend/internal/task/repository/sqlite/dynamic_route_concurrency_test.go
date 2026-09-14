@@ -39,6 +39,12 @@ func TestConcurrentResumePendingClaimsExactlyOneGeneration(t *testing.T) {
 		t.Fatalf("SaveRouteState: %v", err)
 	}
 
+	// Each caller gets its own Engine, cache-warmed independently via
+	// LoadState below, so neither caller's in-memory cache reflects the
+	// other's claim. Both are therefore guaranteed to reach the durable
+	// ClaimRouteStateFrom call regardless of goroutine scheduling, making the
+	// SQL CAS predicate the sole discriminator without needing a rendezvous
+	// barrier here.
 	const callers = 2
 	engines := make([]*dynamicruntime.Engine, callers)
 	for i := range engines {

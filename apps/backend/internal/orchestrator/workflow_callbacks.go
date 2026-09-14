@@ -25,10 +25,9 @@ type ReviewRunner interface {
 //
 // Phase 2 (ADR-0004) callbacks — queue_run, clear_decisions,
 // queue_run_for_each_participant — are registered conditionally based on
-// the orchestrator's wired adapters. If adapters are missing the action
-// kinds simply have no callback; the engine treats unknown kinds as no-ops
-// (see engine.executeCallback). This keeps kanban-only deployments
-// untouched.
+// the orchestrator's wired adapters. If adapters are missing, triggers
+// without an operation id retain the legacy no-op behavior. Operation-bearing
+// triggers fail before execution so late wiring can retry them safely.
 func buildWorkflowCallbacks(svc *Service) engine.MapRegistry {
 	r := engine.MapRegistry{
 		engine.ActionEnablePlanMode:    &enablePlanModeCallback{svc: svc},

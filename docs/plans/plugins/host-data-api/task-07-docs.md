@@ -18,7 +18,8 @@ Document the Host data API for plugin authors: which resources are readable, the
 - **Wire reference (`docs/plans/plugins/GRPC-CONTRACT.md`):** add the Host data
   RPCs to the `service Host` block (§3) and note capability gating uses
   `api_read:<resource>` / `api_write:<resource>` (§5), replacing the "reserved"
-  language. Note write RPCs are deferred (`Unimplemented`).
+  language. Document the implemented task and message writes, including the
+  `UpdateTask` field mask and `MoveTask` workflow-transition path.
 - **SDK reference (`docs/plans/plugins/GRPC-CONTRACT.md` §4 and/or
   `PLUGIN-API.md`):** document the author accessors (`host.Tasks().List(...)`,
   `host.Sessions().List(...)`, `host.Sessions().CodeStats(...)`, etc.) and that
@@ -36,9 +37,9 @@ Document the Host data API for plugin authors: which resources are readable, the
 ## Acceptance
 - `GRPC-CONTRACT.md` lists the Host data RPCs and the per-resource capability
   gating; the "reserved / not implemented" wording for `api_read`/`api_write` is
-  removed or scoped to the deferred write RPCs.
-- The manifest capability vocabulary is documented with the readable-resource
-  list and an example.
+  removed or scoped to capabilities that are not yet implemented.
+- The manifest capability vocabulary is documented with the readable and
+  writable-resource list and an example.
 
 ## Verification
 - Markdown-only; no build. `cd apps && pnpm --filter @kandev/web lint` only if a
@@ -65,9 +66,9 @@ Summary, files changed, and status update here + in `plan.md`.
 reference and reconciled the spec section against the shipped code.
 
 **Files changed:**
-- `docs/plans/plugins/GRPC-CONTRACT.md` — added the 9 read RPCs + 3 deferred
-  write RPCs to the `service Host` block (§3); added a new "§3a. Host data API
-  (ADR 0043)" subsection covering the resource/capability table, deferred
+- `docs/plans/plugins/GRPC-CONTRACT.md` — added the Host data read and
+  implemented write RPCs to the `service Host` block (§3); added a new "§3a.
+  Host data API (ADR 0043)" subsection covering the resource/capability table,
   writes, service-layer/DTO conventions, pagination/timestamp/nullable/scoping
   conventions; added the `Host` interface's 6 data accessors plus the 6 reader
   interfaces (`TaskReader`, `SessionReader`, `WorkspaceReader`,
@@ -75,7 +76,7 @@ reference and reconciled the spec section against the shipped code.
   signatures, and an authoring example (manifest snippet + `Sessions().CodeStats`
   call) to §4; rewrote the §5 "Capability gating" bullet to remove the stale
   "api_read/api_write reserved" wording and describe the real per-RPC gating
-  plus the write RPCs' current `Unimplemented` behavior.
+  plus the write RPCs' current behavior.
 - `docs/specs/plugins/requirements/plugins.md` — fixed capability-vocabulary drift against code
   (see below) and added a "Declaring data access" note under the manifest
   capabilities section; reworded the interceptor description to match the
@@ -97,8 +98,8 @@ truth, left unchanged):**
 - The spec described `api_read`/`api_write` as "reserved for future Host RPCs"
   in the manifest example comments and said the capability-gating interceptor
   covers "state, secrets; api_read/api_write reserved" — both predate this
-  ADR shipping; `api_read` is live now (write RPCs remain deferred/
-  `Unimplemented`). Reworded both.
+  ADR shipping; `api_read` and the implemented write capabilities are live now.
+  Reworded both.
 - The spec attributed capability gating to "a unary server interceptor on
   Host"; there is no `grpc.UnaryServerInterceptor` in `internal/plugins` or
   `pkg/pluginsdk` — each Host/Host-data method checks its own capability

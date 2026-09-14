@@ -45,6 +45,20 @@ func seedOfficeTaskAndSessions(t *testing.T, repo officeSeedRepo) {
 	}
 }
 
+func deleteOfficeTestSession(t *testing.T, repo interface {
+	GetTaskSession(context.Context, string) (*models.TaskSession, error)
+	DeleteTaskSession(context.Context, *models.TaskSession) error
+}, ctx context.Context, id string) {
+	t.Helper()
+	session, err := repo.GetTaskSession(ctx, id)
+	if err != nil {
+		t.Fatalf("GetTaskSession %s: %v", id, err)
+	}
+	if err := repo.DeleteTaskSession(ctx, session); err != nil {
+		t.Fatalf("DeleteTaskSession %s: %v", id, err)
+	}
+}
+
 func TestFindExistingSession_OfficeTaskResolvesToAssignee(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedOfficeTaskAndSessions(t, repo)
@@ -82,9 +96,7 @@ func TestFindExistingSession_OfficeTaskWithViewerAgent(t *testing.T) {
 func TestFindExistingSession_OfficeTaskWithOnlyOtherAgentSessionReturnsNil(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedOfficeTaskAndSessions(t, repo)
-	if err := repo.DeleteTaskSession(context.Background(), "s-assignee"); err != nil {
-		t.Fatalf("delete assignee session: %v", err)
-	}
+	deleteOfficeTestSession(t, repo, context.Background(), "s-assignee")
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
 
 	if got := svc.findExistingSession(context.Background(), "t-office"); got != nil {
@@ -96,9 +108,7 @@ func TestFindExistingSession_OfficeTaskUsesResolvedMetadataProfile(t *testing.T)
 	repo := setupTestRepo(t)
 	ctx := context.Background()
 	seedOfficeTaskAndSessions(t, repo)
-	if err := repo.DeleteTaskSession(ctx, "s-assignee"); err != nil {
-		t.Fatalf("delete assignee session: %v", err)
-	}
+	deleteOfficeTestSession(t, repo, ctx, "s-assignee")
 	task, err := repo.GetTask(ctx, "t-office")
 	if err != nil {
 		t.Fatalf("get task: %v", err)
@@ -123,12 +133,8 @@ func TestPrepareTaskSession_OfficeFlagUsesAssigneeForSessionIdentity(t *testing.
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedOfficeTaskAndSessions(t, repo)
-	if err := repo.DeleteTaskSession(ctx, "s-assignee"); err != nil {
-		t.Fatalf("delete assignee session: %v", err)
-	}
-	if err := repo.DeleteTaskSession(ctx, "s-reviewer"); err != nil {
-		t.Fatalf("delete reviewer session: %v", err)
-	}
+	deleteOfficeTestSession(t, repo, ctx, "s-assignee")
+	deleteOfficeTestSession(t, repo, ctx, "s-reviewer")
 
 	taskRepo := newMockTaskRepo()
 	taskRepo.tasks["t-office"] = &v1.Task{

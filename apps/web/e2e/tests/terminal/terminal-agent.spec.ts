@@ -232,8 +232,8 @@ test.describe("Terminal agent (TUI passthrough)", () => {
     await waitForSessionState(apiClient, {
       taskId: task.id,
       sessionId: task.session_id,
-      expectedState: "COMPLETED",
-      message: "the TUI source session did not complete after profile routing",
+      expectedState: "WAITING_FOR_INPUT",
+      message: "the TUI source session was not parked after profile routing",
       timeout: 60_000,
     });
 

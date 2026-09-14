@@ -26,6 +26,7 @@ import {
   type PRTaskIconDisclosureProps,
 } from "./pr-task-icon-disclosure";
 import { getTaskPRAutomationSummary, type TaskPRInfo } from "./pr-task-automation";
+import { getTaskPRWorkflowAttention } from "./pr-workflow-attention";
 
 export type { TaskPRInfo } from "./pr-task-automation";
 export { getTaskPRAutomationSummary } from "./pr-task-automation";
@@ -39,6 +40,7 @@ const SKY_400 = CHANGE_REQUEST_STATUS_COLORS.review;
 const EMERALD_400 = CHANGE_REQUEST_STATUS_COLORS.ready;
 const QUEUED = CHANGE_REQUEST_STATUS_COLORS.queued;
 const GREEN_500 = CHANGE_REQUEST_STATUS_COLORS.passing;
+const EMPTY_PRS: TaskPR[] = [];
 
 /** Maps the task-level PR projection to the same visual language as live PRs. */
 export function getPRAggregateStatusColor(state: string | null | undefined): string {
@@ -78,6 +80,7 @@ export function hasPRChecksPassedWithoutReviewWaitForDisplay(pr: TaskPR): boolea
 // syncs that do not populate check details.
 export function isPRReadyToMerge(pr: TaskPR): boolean {
   if (pr.state !== "open") return false;
+  if (getTaskPRWorkflowAttention(pr)) return false;
   if (!hasExplicitPRChecksPassed(pr)) return false;
   if (pr.mergeable_state !== "clean") return false;
   // Guard against stale mergeable_state: enforce required_reviews to match GitHub's gate.
@@ -156,14 +159,15 @@ export function getPRStatusColor(pr: TaskPR): string {
   // membership must remain visible while provider checks or mergeability
   // fields hydrate, even when those fields still describe an earlier state.
   if (isPRQueued(pr)) return QUEUED;
-  if (pr.review_state === "changes_requested" || pr.checks_state === "failure") {
-    return RED_500;
-  }
   if (isPRDraft(pr)) {
     return MUTED_FOREGROUND;
   }
+  if (pr.review_state === "changes_requested" || pr.checks_state === "failure") {
+    return RED_500;
+  }
   const blockerColor = openMergeBlockerColor(pr);
   if (blockerColor) return blockerColor;
+  if (getTaskPRWorkflowAttention(pr)) return YELLOW_500;
   if (isPRReadyToMerge(pr)) {
     return EMERALD_400;
   }
@@ -253,7 +257,7 @@ export function pickDefaultPR(prs: TaskPR[]): TaskPR | null {
 export function PRTaskIcon({ taskId, prInfo }: { taskId: string; prInfo?: TaskPRInfo }) {
   const prs = useAppStore((state) => getTaskPRsForCurrentWorkspace(state, taskId));
   const hydration = useTaskPRTooltipHydration(taskId, { includeAutomation: true });
-  const fullPRs = Array.isArray(prs) && prs.length > 0 ? prs : [];
+  const fullPRs = normalizeTaskPRs(prs);
 
   // Defensive: an upstream payload may briefly seed byTaskId[taskId] with a
   // non-array value (e.g. an empty object from a partial hydration). Bail
@@ -269,6 +273,10 @@ export function PRTaskIcon({ taskId, prInfo }: { taskId: string; prInfo?: TaskPR
       automationOptions={hydration.automationOptions}
     />
   );
+}
+
+export function normalizeTaskPRs(prs: unknown): TaskPR[] {
+  return Array.isArray(prs) && prs.length > 0 ? prs : EMPTY_PRS;
 }
 
 type TaskPRIconPresentation = {

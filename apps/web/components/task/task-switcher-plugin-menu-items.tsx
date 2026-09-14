@@ -1,6 +1,9 @@
 "use client";
 
-import { KanbanCardContextMenuItems } from "@/components/kanban-card-menu-items";
+import {
+  KanbanCardContextMenuItems,
+  type KanbanCardMenuEntry,
+} from "@/components/kanban-card-menu-items";
 import { buildPrimaryPluginEntries } from "@/components/plugins/task-menu-actions";
 import { useAppStore } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
@@ -15,10 +18,18 @@ export function TaskPluginPrimaryMenuItems({
   task: TaskSwitcherItem;
   disabled?: boolean;
 }) {
+  const entries = useTaskPluginPrimaryMenuEntries(task, disabled);
+  return <KanbanCardContextMenuItems entries={entries} />;
+}
+
+export function useTaskPluginPrimaryMenuEntries(
+  task: TaskSwitcherItem,
+  disabled?: boolean,
+): KanbanCardMenuEntry[] {
   usePluginRegistry();
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
   const { isMobile } = useResponsiveBreakpoint();
-  if (!workspaceId) return null;
+  if (!workspaceId) return [];
 
   const context: PluginTaskMenuContext = {
     workspaceId,
@@ -27,5 +38,5 @@ export function TaskPluginPrimaryMenuItems({
     workflowStepId: task.workflowStepId ?? null,
     presentation: isMobile ? "mobile" : "desktop",
   };
-  return <KanbanCardContextMenuItems entries={buildPrimaryPluginEntries({ disabled, context })} />;
+  return buildPrimaryPluginEntries({ disabled, context });
 }

@@ -129,6 +129,12 @@ func handleE2EReset(
 			`DELETE FROM runs WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
 			`DELETE FROM office_provider_health WHERE workspace_id = ?`,
 			`DELETE FROM office_workspace_routing WHERE workspace_id = ?`,
+			// office_workspace_pauses has no FK/cascade (workspace deletion
+			// cleans it via workspace_deletion.go, but the reused E2E
+			// workspace never hits that path), so a spec that pauses and
+			// fails before resuming would otherwise leave later specs
+			// paused too.
+			`DELETE FROM office_workspace_pauses WHERE workspace_id = ?`,
 		} {
 			if _, err := repo.DB().ExecContext(ctx, q, workspaceID); err != nil {
 				// Best-effort: log + continue. Some routing tables may
@@ -284,7 +290,7 @@ func handleE2EReset(
 			deletedTaskIDSet[taskID] = struct{}{}
 		}
 		for _, t := range tasks {
-			if err := taskSvc.DeleteTask(ctx, t.ID); err != nil {
+			if err := deleteTaskForE2EReset(ctx, taskSvc, t.ID); err != nil {
 				// Abort: leaving an undeleted task with its workflow gone
 				// would create orphan rows visible to subsequent tests.
 				log.Error("e2e reset: failed to delete task",
@@ -327,6 +333,22 @@ func handleE2EReset(
 			"deleted_gitlab_issue_watches":  gitLabReset.IssueWatches,
 		})
 	}
+}
+
+type e2eResetTaskDeleter interface {
+	DeleteTaskWithOptions(context.Context, string, taskservice.DeleteTaskOptions) error
+}
+
+func deleteTaskForE2EReset(
+	ctx context.Context,
+	taskDeleter e2eResetTaskDeleter,
+	taskID string,
+) error {
+	return taskDeleter.DeleteTaskWithOptions(ctx, taskID, taskservice.DeleteTaskOptions{
+		// E2E reset is an explicit test cleanup boundary. It must remove
+		// disposable local changes left by the test that created the task.
+		DiscardWorktreeChanges: true,
+	})
 }
 
 func waitForE2ETaskCleanup(ctx context.Context, database *sql.DB, taskIDs []string) error {

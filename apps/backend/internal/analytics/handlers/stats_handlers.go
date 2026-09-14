@@ -252,6 +252,18 @@ func (h *StatsHandlers) authorize(c *gin.Context, workspaceID string) bool {
 }
 
 func (h *StatsHandlers) fail(c *gin.Context, workspaceID, section string, err error) {
+	if repository.IsAnalyticsBusy(err) {
+		h.logger.Warn("analytics stats request exceeded its bounded read budget",
+			zap.String("workspace_id", workspaceID),
+			zap.String("section", section),
+		)
+		c.Header("Retry-After", "2")
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"error_code": "analytics_busy",
+			"error":      "statistics are temporarily busy",
+		})
+		return
+	}
 	h.logger.Error("failed to get "+section, zap.String("workspace_id", workspaceID), zap.Error(err))
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get " + section})
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
 
@@ -143,6 +144,47 @@ func runMetadataNoActiveSessionContract(t *testing.T, repo *Repository) {
 	}
 }
 
+func runManualMoveLifecycleMarkerContract(t *testing.T, repo *Repository) {
+	t.Helper()
+	ctx := context.Background()
+	task, err := repo.GetTask(ctx, casTaskID)
+	if err != nil {
+		t.Fatalf("load task generation: %v", err)
+	}
+
+	cleared, err := repo.ClearManualMoveLifecycleMarkersIfCompleted(ctx, casTaskID, task.UpdatedAt)
+	if err != nil {
+		t.Fatalf("clear manual move markers: %v", err)
+	}
+	if !cleared {
+		t.Fatal("completed manual move markers were not cleared")
+	}
+	if _, present := metadataValue(t, repo, models.MetaKeyManualMoveLifecyclePending); present {
+		t.Fatal("manual move pending marker remained after atomic clear")
+	}
+	if _, present := metadataValue(t, repo, models.MetaKeyManualMoveLifecycleCompleted); present {
+		t.Fatal("manual move completed marker remained after atomic clear")
+	}
+	if _, preserved := metadataValue(t, repo, "other_key"); !preserved {
+		t.Fatal("atomic clear removed unrelated task metadata")
+	}
+
+	if err := repo.SetTaskMetadataKey(ctx, casTaskID, models.MetaKeyManualMoveLifecyclePending,
+		map[string]interface{}{"from_step_id": "new-source"}); err != nil {
+		t.Fatalf("seed pending-only marker: %v", err)
+	}
+	cleared, err = repo.ClearManualMoveLifecycleMarkersIfCompleted(ctx, casTaskID, time.Now().UTC())
+	if err != nil {
+		t.Fatalf("clear pending-only markers: %v", err)
+	}
+	if cleared {
+		t.Fatal("pending-only marker was cleared without a completed marker")
+	}
+	if _, present := metadataValue(t, repo, models.MetaKeyManualMoveLifecyclePending); !present {
+		t.Fatal("pending-only marker disappeared")
+	}
+}
+
 func newRepoForMetadataCASTests(t *testing.T) *Repository {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "metadata-cas-test.db"))
@@ -161,11 +203,14 @@ func newRepoForMetadataCASTests(t *testing.T) *Repository {
 func TestSetTaskMetadataKeyIfPresentSQLite(t *testing.T) {
 	repo := newRepoForMetadataCASTests(t)
 	seedMetadataCASTask(t, repo, map[string]interface{}{
-		"deferred_launch": map[string]interface{}{"prompt": "stale"},
-		"other_key":       "keep me",
+		"deferred_launch":                          map[string]interface{}{"prompt": "stale"},
+		models.MetaKeyManualMoveLifecyclePending:   map[string]interface{}{"from_step_id": "source"},
+		models.MetaKeyManualMoveLifecycleCompleted: true,
+		"other_key": "keep me",
 	})
 	runMetadataCASContract(t, repo)
 	runMetadataNoActiveSessionContract(t, repo)
+	runManualMoveLifecycleMarkerContract(t, repo)
 }
 
 // The JSON patch and its presence predicate are written per dialect, so SQLite
@@ -175,11 +220,14 @@ func TestPostgresSetTaskMetadataKeyIfPresent(t *testing.T) {
 	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
 	repo := newPostgresMetadataCASRepo(t, db)
 	seedMetadataCASTask(t, repo, map[string]interface{}{
-		"deferred_launch": map[string]interface{}{"prompt": "stale"},
-		"other_key":       "keep me",
+		"deferred_launch":                          map[string]interface{}{"prompt": "stale"},
+		models.MetaKeyManualMoveLifecyclePending:   map[string]interface{}{"from_step_id": "source"},
+		models.MetaKeyManualMoveLifecycleCompleted: true,
+		"other_key": "keep me",
 	})
 	runMetadataCASContract(t, repo)
 	runMetadataNoActiveSessionContract(t, repo)
+	runManualMoveLifecycleMarkerContract(t, repo)
 }
 
 func newPostgresMetadataCASRepo(t *testing.T, db *sqlx.DB) *Repository {

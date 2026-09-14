@@ -85,6 +85,20 @@ const JOB: SystemJob = {
   started_at: TS,
 };
 
+const ANALYSIS = {
+  generation: 1,
+  state: "ready",
+  started_at: TS,
+  completed_at: TS,
+  duration_ms: 10,
+  cache_ttl_seconds: 900,
+  refresh_due_at: "2026-05-18T00:15:00Z",
+  stale: false,
+  error: null,
+  progress: { completed_sources: 8, total_sources: 8, sources: {} },
+  partial_summary: null,
+} as const;
+
 describe("system storage slice", () => {
   it("stores storage overview, runs, and quarantine state", () => {
     const store = makeStore();
@@ -131,6 +145,7 @@ describe("system storage slice", () => {
           managed_container_bytes: 0,
         },
       },
+      analysis: ANALYSIS,
       analyzed_at: "2026-07-23T12:00:00Z",
       last_run: null,
     } satisfies StorageOverviewResponse;
@@ -142,6 +157,7 @@ describe("system storage slice", () => {
     expect(store.getState().system.storage).toEqual({
       policy,
       overview,
+      analysisRevision: 0,
       disk: null,
       runs: [],
       quarantine: [],
@@ -182,6 +198,30 @@ describe("system slice", () => {
     const store = makeStore();
     store.getState().setSystemDatabase(DB_STATS);
     expect(store.getState().system.database).toEqual(DB_STATS);
+  });
+
+  it("setSystemRetention stores the status", () => {
+    const store = makeStore();
+    expect(store.getState().system.retention).toBeNull();
+    const status = {
+      settings: {
+        enabled: true,
+        sweep_interval_hours: 6,
+        batch_limit: 5000,
+        routine_runs: { window_days: 30, floor_per_owner: 50, warn_rows: 25000 },
+        runs: { window_days: 30, floor_per_owner: 50, warn_rows: 25000 },
+        run_events: { warn_rows: 250000 },
+      },
+      last_sweep: null,
+      skip_count: 0,
+      retained_counts: {
+        office_routine_runs: { state: "not_computed" as const, retained_count: 0, as_of: "" },
+        runs: { state: "not_computed" as const, retained_count: 0, as_of: "" },
+        run_events: { state: "not_computed" as const, retained_count: 0, as_of: "" },
+      },
+    };
+    store.getState().setSystemRetention(status);
+    expect(store.getState().system.retention).toEqual(status);
   });
 
   it("setSystemBackups marks the list as loaded", () => {
@@ -225,5 +265,13 @@ describe("system slice", () => {
     const store = makeStore();
     store.getState().clearSystemJob("does-not-exist");
     expect(store.getState().system.jobs).toEqual({});
+  });
+
+  it("advances the storage analysis revision for live updates", () => {
+    const store = makeStore();
+    expect(store.getState().system.storage.analysisRevision).toBe(0);
+    store.getState().bumpSystemStorageAnalysisRevision();
+    store.getState().bumpSystemStorageAnalysisRevision();
+    expect(store.getState().system.storage.analysisRevision).toBe(2);
   });
 });

@@ -40,6 +40,10 @@ const SORT_OPTIONS: Array<{ key: SortKey; labelKey: string; descriptionKey: stri
   },
 ];
 
+export function sortKeyLabelKey(key: SortKey): string {
+  return SORT_OPTIONS.find((option) => option.key === key)?.labelKey ?? "task:sortStatus";
+}
+
 type Props = {
   value: SortSpec;
   onChange: (next: SortSpec) => void;

@@ -34,12 +34,12 @@ func NormalizeLspStatusLocation(value string) string {
 const (
 	StartupPageTaskOverview = "task_overview"
 	StartupPageLastTask     = "last_task"
+	StartupPageThreads      = "threads"
 )
 
-// NormalizeStartupPage returns the canonical startup page: last_task is
-// accepted as-is, anything else is coerced to task_overview.
+// NormalizeStartupPage preserves supported choices and defaults to task_overview.
 func NormalizeStartupPage(value string) string {
-	if value == StartupPageLastTask {
+	if value == StartupPageLastTask || value == StartupPageThreads {
 		return value
 	}
 	return StartupPageTaskOverview
@@ -149,6 +149,8 @@ type UserSettings struct {
 	ThreadActiveViewID                string                            `json:"thread_active_view_id"`
 	ThreadViewDraft                   *ThreadViewDraft                  `json:"thread_view_draft"`
 	SidebarTaskPrefs                  SidebarTaskPrefs                  `json:"sidebar_task_prefs"`
+	SidebarTaskColorAutomation        SidebarTaskColorAutomation        `json:"sidebar_task_color_automation"`
+	SidebarTaskColors                 map[string]*string                `json:"sidebar_task_colors"`
 	TaskCreateLastUsed                TaskCreateLastUsed                `json:"task_create_last_used"`
 	JiraSavedViews                    json.RawMessage                   `json:"jira_saved_views"`
 	JiraTaskPresets                   json.RawMessage                   `json:"jira_task_presets"`
@@ -172,6 +174,8 @@ type UserSettings struct {
 	QuickChatTabOrderByWorkspace      map[string][]string               `json:"quick_chat_tab_order_by_workspace"`
 	KanbanHiddenStepIDs               map[string][]string               `json:"kanban_hidden_step_ids"`
 	WorkflowIDsWithAutoHideEmptySteps []string                          `json:"workflow_ids_with_auto_hide_empty_steps"`
+	KanbanSort                        string                            `json:"kanban_sort"`
+	KanbanPriorityFilterTokens        []string                          `json:"kanban_priority_filter_tokens"`
 	Revision                          int64                             `json:"revision"`
 	CreatedAt                         time.Time                         `json:"created_at"`
 	UpdatedAt                         time.Time                         `json:"updated_at"`

@@ -236,6 +236,27 @@ describe("toKanbanTask — autopilot", () => {
   });
 });
 
+describe("toKanbanTask — parked-on-background-work parity", () => {
+  it("maps parked-on-background-work + revision + epoch from HTTP and WS shapes", () => {
+    const parked = {
+      parked_on_background_work: true,
+      parked_revision: 4,
+      parked_epoch: 1723000000000,
+    } as Partial<TaskLike>;
+    const http = toKanbanTask(httpDTO(parked));
+    const ws = toKanbanTask(wsPayload(parked));
+
+    expect(http).toEqual(ws);
+    expect(http.parkedOnBackgroundWork).toBe(true);
+    expect(http.parkedRevision).toBe(4);
+    expect(http.parkedEpoch).toBe(1723000000000);
+    // Absent fields map to undefined so a partial update can never synthesize
+    // a parked reading.
+    expect(toKanbanTask(httpDTO()).parkedOnBackgroundWork).toBeUndefined();
+    expect(toKanbanTask(wsPayload()).parkedOnBackgroundWork).toBeUndefined();
+  });
+});
+
 describe("toKanbanTask — state normalization", () => {
   it("maps the task-wide active subagent count for future status surfaces", () => {
     const mapped = toKanbanTask(
@@ -317,6 +338,34 @@ describe("toKanbanTask priority", () => {
   it("preserves the canonical priority from HTTP and WebSocket payloads", () => {
     expect(toKanbanTask(httpDTO()).priority).toBe("critical");
     expect(toKanbanTask(wsPayload()).priority).toBe("critical");
+  });
+});
+
+describe("toKanbanTask runner mutability", () => {
+  it("carries an explicit true/false and reason through both task shapes", () => {
+    const http = toKanbanTask(
+      httpDTO({ runner_editable: true, runner_ineligible_reason: "eligible" }),
+    );
+    expect(http.runnerEditable).toBe(true);
+    expect(http.runnerIneligibleReason).toBe("eligible");
+
+    const ws = toKanbanTask(
+      wsPayload({ runner_editable: false, runner_ineligible_reason: "session_exists" }),
+    );
+    expect(ws.runnerEditable).toBe(false);
+    expect(ws.runnerIneligibleReason).toBe("session_exists");
+  });
+
+  // AC-TASKS-RUNNER-SWITCH-001.9: an omitted projection must fail closed, never
+  // read as the last-known value — unlike executor identity, this is not
+  // gap-filled from a cached task on merge (see mergeTaskUpdate in
+  // lib/ws/handlers/tasks.ts, which has no preserve entry for these fields).
+  it("fails closed to editable=false when the source omits the projection", () => {
+    const task = toKanbanTask(
+      httpDTO({ runner_editable: undefined, runner_ineligible_reason: undefined }),
+    );
+    expect(task.runnerEditable).toBe(false);
+    expect(task.runnerIneligibleReason).toBe("evaluation_unavailable");
   });
 });
 

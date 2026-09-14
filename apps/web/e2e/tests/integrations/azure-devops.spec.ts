@@ -195,6 +195,24 @@ test("connects and browses Azure work items, PRs, and feedback", async ({
     "Connected as Ada Reviewer",
   );
   await testPage.getByTestId("azure-devops-save-button").click();
+  const savedViewsSeed = await testPage.request.put(
+    `/api/v1/azure-devops/views?workspace_id=${encodeURIComponent(seedData.workspaceId)}`,
+    {
+      data: {
+        views: [
+          {
+            id: "security-queue",
+            kind: "work_item",
+            label: "Security queue",
+            projectId: "project-1",
+            wiql: "SELECT [System.Id] FROM WorkItems",
+            createdAt: "2026-09-07T00:00:00Z",
+          },
+        ],
+      },
+    },
+  );
+  expect(savedViewsSeed.ok()).toBe(true);
   const defaultQueries = testPage
     .getByRole("heading", { name: "Default queries" })
     .locator("xpath=ancestor::section");
@@ -204,6 +222,30 @@ test("connects and browses Azure work items, PRs, and feedback", async ({
 
   await testPage.goto("/azure-devops");
   await expect(testPage.getByTestId("azure-devops-presets-scope-bar")).toContainText("Team queue");
+  const savedViewsMenu = testPage.getByTestId("azure-devops-saved-views-menu");
+  await savedViewsMenu.click();
+  const deleteSavedView = testPage.getByRole("menuitem", {
+    name: "Delete Security queue saved query",
+  });
+  await deleteSavedView.click();
+  const deleteConfirmation = testPage.getByTestId("saved-task-view-delete-confirmation");
+  await expect(deleteConfirmation).toHaveAccessibleName("Delete Security queue?");
+  await expect(testPage.getByRole("menu")).toBeVisible();
+  await deleteConfirmation.getByRole("button", { name: "Cancel" }).click();
+  await expect(deleteSavedView).toBeVisible();
+
+  await deleteSavedView.click();
+  const deleteSavedViewResponse = testPage.waitForResponse(
+    (response) =>
+      response.ok() &&
+      response.request().method() === "PUT" &&
+      response.url().includes("/api/v1/azure-devops/views"),
+  );
+  await deleteConfirmation.getByRole("button", { name: "Delete Security queue" }).click();
+  await deleteSavedViewResponse;
+  await expect(deleteSavedView).toHaveCount(0);
+  await testPage.keyboard.press("Escape");
+  await expect(testPage.getByRole("menu")).toBeHidden();
   await expect(testPage.getByTestId("azure-devops-board")).toBeVisible();
   await expect(testPage.getByText("Handle token rotation")).toBeVisible();
   await testPage.getByTestId("azure-board-select").click();

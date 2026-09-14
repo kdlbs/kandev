@@ -99,17 +99,45 @@ type WorktreeFileAction = "worktree.stage" | "worktree.unstage";
 type PausedWorktreeFileAction = {
   action: WorktreeFileAction;
   frame: string;
+  requestId: string;
   server: WebSocketRoute;
 };
 
-function isWorktreeFileActionFrame(part: string, action: WorktreeFileAction): boolean {
-  if (!part.trim()) return false;
+type AwaitedWorktreeFileState = {
+  action: WorktreeFileAction;
+  requestId: string;
+  path: string;
+  staged: boolean;
+  response: { success: boolean; error?: string } | null;
+  fileStateObserved: boolean;
+};
+
+type WorktreeFrame = {
+  id?: unknown;
+  type?: unknown;
+  action?: unknown;
+  payload?: {
+    success?: unknown;
+    error?: unknown;
+    type?: unknown;
+    status?: { files?: Record<string, { staged?: unknown }> };
+  };
+};
+
+function parseWorktreeFrame(part: string): WorktreeFrame | null {
+  if (!part.trim()) return null;
   try {
-    const frame = JSON.parse(part) as { type?: unknown; action?: unknown };
-    return frame.type === "request" && frame.action === action;
+    return JSON.parse(part) as WorktreeFrame;
   } catch {
-    return false;
+    return null;
   }
+}
+
+function worktreeFileActionRequestId(part: string, action: WorktreeFileAction): string | null {
+  const frame = parseWorktreeFrame(part);
+  return frame?.type === "request" && frame.action === action && typeof frame.id === "string"
+    ? frame.id
+    : null;
 }
 
 function partitionWorktreeFileAction(
@@ -118,7 +146,9 @@ function partitionWorktreeFileAction(
 ): { frame: string; passthrough: string | null } | null {
   if (typeof message !== "string") return null;
   const frames = message.split("\n");
-  const actionIndex = frames.findIndex((part) => isWorktreeFileActionFrame(part, action));
+  const actionIndex = frames.findIndex(
+    (part) => worktreeFileActionRequestId(part, action) !== null,
+  );
   if (actionIndex === -1) return null;
   const passthrough = frames.filter((_, index) => index !== actionIndex).join("\n");
   return {
@@ -127,23 +157,63 @@ function partitionWorktreeFileAction(
   };
 }
 
+function observeWorktreeResponse(frame: WorktreeFrame, awaited: AwaitedWorktreeFileState) {
+  if (
+    frame.type !== "response" ||
+    frame.action !== awaited.action ||
+    frame.id !== awaited.requestId
+  ) {
+    return;
+  }
+  awaited.response = {
+    success: frame.payload?.success === true,
+    ...(typeof frame.payload?.error === "string" ? { error: frame.payload.error } : {}),
+  };
+}
+
+function observeWorktreeFileState(frame: WorktreeFrame, awaited: AwaitedWorktreeFileState) {
+  if (
+    frame.action === "session.git.event" &&
+    frame.payload?.type === "status_update" &&
+    frame.payload.status?.files?.[awaited.path]?.staged === awaited.staged
+  ) {
+    awaited.fileStateObserved = true;
+  }
+}
+
+function observeWorktreeFileAction(message: string | Buffer, awaited: AwaitedWorktreeFileState) {
+  const parts = (typeof message === "string" ? message : message.toString("utf8")).split("\n");
+  for (const part of parts) {
+    const frame = parseWorktreeFrame(part);
+    if (!frame) continue;
+    observeWorktreeResponse(frame, awaited);
+    observeWorktreeFileState(frame, awaited);
+  }
+}
+
 async function pauseNextWorktreeFileAction(page: Page) {
   let armedAction: WorktreeFileAction | null = null;
   let paused: PausedWorktreeFileAction | null = null;
+  let awaitedState: AwaitedWorktreeFileState | null = null;
 
-  await page.routeWebSocket(/\/ws$/, (socket) => {
+  await page.context().routeWebSocket(/\/ws$/, (socket) => {
     const server = socket.connectToServer();
     socket.onMessage((message) => {
       const partition = armedAction ? partitionWorktreeFileAction(message, armedAction) : null;
       if (partition && armedAction) {
-        paused = { action: armedAction, frame: partition.frame, server };
+        const requestId = worktreeFileActionRequestId(partition.frame, armedAction);
+        if (!requestId) throw new Error(`Paused ${armedAction} request has no ID`);
+        paused = { action: armedAction, frame: partition.frame, requestId, server };
         armedAction = null;
         if (partition.passthrough) server.send(partition.passthrough);
         return;
       }
       server.send(message);
     });
-    server.onMessage((message) => socket.send(message));
+    server.onMessage((message) => {
+      if (awaitedState) observeWorktreeFileAction(message, awaitedState);
+      socket.send(message);
+    });
   });
 
   return {
@@ -158,10 +228,33 @@ async function pauseNextWorktreeFileAction(page: Page) {
         })
         .toBe(action);
     },
-    release(action: WorktreeFileAction) {
+    async releaseAndWaitForFileState(action: WorktreeFileAction, path: string, staged: boolean) {
       if (paused?.action !== action) throw new Error(`No paused ${action} request`);
-      paused.server.send(paused.frame);
+      const request = paused;
+      awaitedState = {
+        action,
+        requestId: request.requestId,
+        path,
+        staged,
+        response: null,
+        fileStateObserved: false,
+      };
       paused = null;
+      request.server.send(request.frame);
+      await expect
+        .poll(() => awaitedState?.response ?? null, {
+          message: `${action} should return a response`,
+        })
+        .not.toBeNull();
+      if (!awaitedState?.response?.success) {
+        throw new Error(awaitedState?.response?.error ?? `${action} failed`);
+      }
+      await expect
+        .poll(() => awaitedState?.fileStateObserved ?? false, {
+          message: `${action} should publish ${path} with staged=${staged}`,
+        })
+        .toBe(true);
+      awaitedState = null;
     },
   };
 }
@@ -349,7 +442,7 @@ test.describe("Git Changes Panel", () => {
     await expect(pendingStageSlot.locator("svg.animate-spin")).toBeVisible();
     await expect(siblingRow.locator("svg.animate-spin")).toHaveCount(0);
 
-    pausedAction.release("worktree.stage");
+    await pausedAction.releaseAndWaitForFileState("worktree.stage", "pending-action.txt", true);
     await session.expandChangesSection("staged-files-section");
     const stagedSection = testPage.getByTestId("staged-files-section");
     const stagedRow = stagedSection.getByTestId("file-row-pending-action.txt");
@@ -377,7 +470,7 @@ test.describe("Git Changes Panel", () => {
     );
     await expect(pendingUnstageSlot.locator("svg.animate-spin")).toBeVisible();
 
-    pausedAction.release("worktree.unstage");
+    await pausedAction.releaseAndWaitForFileState("worktree.unstage", "pending-action.txt", false);
     await expect(unstagedSection.getByTestId("file-row-pending-action.txt")).toBeVisible();
     await expect(stagedRow).toHaveCount(0);
   });

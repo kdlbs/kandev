@@ -77,7 +77,7 @@ function renderSection(pending: boolean, messages: Message[], maxHeightVh = 50) 
 beforeEach(() => {
   fetchMock.mockReset();
   mockUpdateMessage.mockReset();
-  fetchMock.mockResolvedValue(new Response(null, { status: 200 }));
+  fetchMock.mockResolvedValue(new Response(JSON.stringify({ success: true }), { status: 200 }));
   globalThis.fetch = fetchMock as unknown as typeof globalThis.fetch;
 });
 
@@ -212,7 +212,7 @@ describe("ClarificationPanelSection — submitting feedback", () => {
       expect((skip as HTMLButtonElement).disabled).toBe(true);
 
       releaseResponse(
-        new Response("{}", {
+        new Response(JSON.stringify({ success: true }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
@@ -220,7 +220,7 @@ describe("ClarificationPanelSection — submitting feedback", () => {
       await vi.waitFor(() => expect(screen.queryByTestId(SUBMITTING_STATUS_TESTID)).toBeNull());
     } finally {
       releaseResponse(
-        new Response("{}", {
+        new Response(JSON.stringify({ success: true }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),

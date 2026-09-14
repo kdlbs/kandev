@@ -48,7 +48,7 @@ An executor decides where the agent process runs. It does not reduce permissions
 |---|---|---|
 | Worktree | A separate Git checkout | Isolates file state, not the host account, credentials, processes, ports, or network |
 | Local | The selected folder and Kandev host account | The agent can affect the same host resources its process can reach |
-| Local Docker | A container plus explicitly mounted paths and credentials | A Docker socket or daemon API can grant host-level control; mounts remain readable in the container |
+| Local Docker | A container plus explicitly mounted paths and credentials | A Docker socket or daemon API can grant host-level control; mounts remain readable in the container. User namespace support (per-profile opt-in) relaxes seccomp and AppArmor. See [executor ADR](../decisions/2026-08-18-executor-userns-security-options.md) for the exact boundary |
 | Kubernetes | A namespaced Pod plus cluster admission, workload identity, network, and storage policy | The Kandev API identity can create/exec/forward/delete Pods, while the administrator-authored Pod template can request privileged or host-integrated access |
 | SSH | The configured remote account and host | Remote directories and credentials require manual lifecycle review |
 | Sprites | A remote sandbox and its injected credentials | Destroying the sandbox can remove unpushed work; network and token scope still matter |
@@ -200,14 +200,30 @@ The isolated web-app boundary has these rules:
   the Kandev data, events, state, and actions that the host grants.
 - Kandev calculates effective access from the package declaration, instance
   grant, trusted task or workspace scope, and current caller authorization.
+- A new owner-created task canvas can use a recorded, single-use creation
+  authority for its first valid release. The authority can add only supported
+  task-scoped data, event, state, and exact HTTPS-origin grants. Imported
+  packages, later permission increases, and consumed or revoked authority use
+  normal human review.
 - External network access uses exact HTTPS origins approved by a user. A
   wildcard, origin path, query string, credential, or remote script is not
   accepted.
 - Forms cannot submit to an external origin. The runtime policy sets
   `form-action 'none'`.
 - Kandev applies a response Content Security Policy to the entry and asset
-  routes. It also applies `no-store`, `nosniff`, `no-referrer`, and
-  cross-origin resource protections.
+  routes. The policy allows the response's exact same origin to frame the
+  runtime. This supports a custom Kandev DNS name, IP address, port, or HTTPS
+  deployment without a hostname allowlist. Unrelated and nested foreign
+  ancestors remain blocked. Local launcher and Tauri origins are exact
+  exceptions. Kandev does not trust `Host` or forwarded host headers when it
+  builds this policy. The response also applies `no-store`, `nosniff`,
+  `no-referrer`, and cross-origin resource protections.
+- The entry response includes a reserved host bootstrap before packaged scripts.
+  It captures early document errors, checks context access after document load,
+  and sends only a versioned ready or safe failure result to the exact parent
+  frame window. The host uses a fresh nonce and 15-second deadline for each
+  mount, ignores stale or sibling-frame messages, and exposes retry controls
+  outside the failed frame.
 - Runtime requests use a short-lived capability token. The host binds the
   token to the user, instance, release, app key, placement, scope, and grant
   generation, then checks those values on every request.
@@ -229,6 +245,10 @@ The host renders canvas controls outside the iframe. Keep the backend and its
 HTTP, WebSocket, and MCP routes behind the deployment boundary described at
 the top of this page. See [Agent-authored Canvases](canvases.md) for creation,
 promotion, Quick Chat editing, release review, and recovery.
+
+Release review uses authorized task and session lookups for readable source
+labels. If those records are deleted or inaccessible, the UI shows an
+unavailable label and never substitutes the internal identifier.
 
 ## Operational checklist
 

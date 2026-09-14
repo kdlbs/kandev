@@ -69,9 +69,15 @@ func (s *Store) initSchema() error {
 	// An invite mints a member of exactly one organization, so it carries the
 	// minting admin's org. CREATE TABLE IF NOT EXISTS is a no-op on an
 	// existing database, so the column also needs an ADD COLUMN (ADR 0027).
-	db.NewMigrateLogger(s.db, nil).Apply(
+	migrate := db.NewRequiredMigrateLogger(s.db, nil)
+	if err := migrate.Apply(
 		"auth_invites.org_id",
 		`ALTER TABLE auth_invites ADD COLUMN org_id TEXT NOT NULL DEFAULT ''`,
-	)
+	); err != nil {
+		return fmt.Errorf("auth schema migration: %w", err)
+	}
+	if err := migrate.Err(); err != nil {
+		return fmt.Errorf("auth schema migration: %w", err)
+	}
 	return nil
 }

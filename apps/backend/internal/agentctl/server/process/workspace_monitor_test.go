@@ -66,6 +66,10 @@ func TestWorkspaceTracker_MonitorExitsWhenNoGitRepo(t *testing.T) {
 	// The fix should make monitorLoop exit immediately (well under 500ms).
 	wt.filePollInterval = 500 * time.Millisecond
 	wt.gitPollInterval = 500 * time.Millisecond
+	// This test waits for the polling goroutines directly. Disable the
+	// lifecycle-owned startup-grace goroutine so that the wait isolates the
+	// no-git monitor behavior it is checking.
+	wt.pollModeGrace = 0
 
 	if wt.gitIndexPath != "" {
 		t.Fatalf("expected empty gitIndexPath for non-git directory, got %q", wt.gitIndexPath)
