@@ -182,7 +182,7 @@ func (r *Repository) commitClaim(ctx context.Context, tx *sqlx.Tx, candidate *mo
 			id, run_id, workspace_id, causation_id, routine_id, human_rooted, claimed_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?)
 	`), ledgerID, candidate.ID, candidate.WorkspaceID, candidate.CausationID,
-		candidate.RoutineID, candidate.HumanRooted, claimedAt); err != nil {
+		candidate.RoutineID, dialect.BoolToInt(candidate.HumanRooted), claimedAt); err != nil {
 		return nil, fmt.Errorf("append launch ledger: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

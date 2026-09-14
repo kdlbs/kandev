@@ -52,7 +52,7 @@ func (r *Repository) CreateRunTx(ctx context.Context, tx *sqlx.Tx, req *models.R
 		req.SessionID, req.RetryCount, req.ScheduledRetryAt, req.RequestedAt,
 		req.ErrorMessage, req.CancelReason, req.ContinuationScope,
 		req.CausationID, req.ParentRunID, req.CausationDepth, req.PriorityClass,
-		req.HumanRooted, req.RoutineID, string(req.ActorKind), req.ActorID, req.WorkspaceID)
+		dialect.BoolToInt(req.HumanRooted), req.RoutineID, string(req.ActorKind), req.ActorID, req.WorkspaceID)
 	return err
 }
 

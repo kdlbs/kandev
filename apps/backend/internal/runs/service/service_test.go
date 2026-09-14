@@ -24,18 +24,29 @@ import (
 // every agent id these tests use without each test declaring its own.
 const testWorkspaceID = "ws-test"
 
-// seedAgentProfile inserts a minimal agent_profiles row so
+// seedAgentProfile inserts a minimal agent_profiles row (and its parent
+// agents row, shared across every call since agent_profiles.agent_id is a
+// foreign key PostgreSQL enforces but SQLite does not) so
 // resolveCausation's workspace lookup (AC-OFFICE-RUN-CAUSATION-001.20)
 // succeeds for hand-picked test agent ids that were never created through
-// the office agent CRUD API.
+// the office agent CRUD API. Rebinds its placeholders so the same helper
+// works against both the SQLite and PostgreSQL twin tests in this package.
 func seedAgentProfile(t *testing.T, db *sqlx.DB, id string) {
 	t.Helper()
 	now := time.Now().UTC()
-	_, err := db.Exec(`
+	_, err := db.Exec(db.Rebind(`
+		INSERT INTO agents (id, name, created_at, updated_at)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT (id) DO NOTHING
+	`), "test-agent", "test-agent", now, now)
+	if err != nil {
+		t.Fatalf("seed agent for profile %s: %v", id, err)
+	}
+	_, err = db.Exec(db.Rebind(`
 		INSERT INTO agent_profiles (
 			id, agent_id, name, agent_display_name, created_at, updated_at, workspace_id
 		) VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, id, "test-agent", id, id, now, now, testWorkspaceID)
+	`), id, "test-agent", id, id, now, now, testWorkspaceID)
 	if err != nil {
 		t.Fatalf("seed agent profile %s: %v", id, err)
 	}
