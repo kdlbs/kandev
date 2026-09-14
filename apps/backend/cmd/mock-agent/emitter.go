@@ -73,6 +73,20 @@ func (e *emitter) plan(entries []acp.PlanEntry) {
 	})
 }
 
+// sessionInfo sends the ACP session metadata extension used by goal-aware
+// providers. The caller supplies only the provider metadata under _meta.
+func (e *emitter) sessionInfo(meta map[string]any) {
+	_ = e.conn.SessionUpdate(e.ctx, acp.SessionNotification{
+		SessionId: e.sid,
+		Update: acp.SessionUpdate{
+			SessionInfoUpdate: &acp.SessionSessionInfoUpdate{
+				SessionUpdate: "session_info_update",
+				Meta:          meta,
+			},
+		},
+	})
+}
+
 // monitorClaudeMeta builds the `_meta.claudeCode.toolName=Monitor` payload
 // claude-agent-acp tags Monitor tool_call notifications with. Used by
 // e2e:monitor_* directives to reproduce the wire format exactly so the

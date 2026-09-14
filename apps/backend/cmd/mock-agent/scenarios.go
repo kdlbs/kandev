@@ -54,6 +54,10 @@ var scenarioRegistry = map[string]func(e *emitter){
 	"steer-fold-setup":        scenarioSteerFoldSetup,
 	"steer-defer-setup":       scenarioSteerDeferSetup,
 	"saved-prompt-delivery":   scenarioSavedPromptDelivery,
+	"goal-active":             scenarioGoalActive,
+	"goal-complete":           scenarioGoalComplete,
+	"goal-clear":              scenarioGoalClear,
+	"goal-long":               scenarioGoalLong,
 }
 
 // steerSetupHoldMillis is how long steer-fold-setup and steer-defer-setup

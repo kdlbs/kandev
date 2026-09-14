@@ -407,6 +407,48 @@ test('multi-design work orders validate each requirement against its owning desi
   assert.deepEqual(result.errors, []);
 });
 
+// @covers AC-CI-PR-DOCS-001.4
+test('coverage loading searches only requirements declared by each design', async () => {
+  const contents = multiDesignFixtureContents();
+  const changed = runtimeAndWorkOrderDiff();
+  const searches = [];
+  const client = {
+    async getPullRequest() {
+      return pullRequest(42, SHA_B, [], changed.length);
+    },
+    async listFiles() {
+      return changed;
+    },
+    async getFile(pathname, ref) {
+      assert.equal(ref, SHA_B);
+      if (!Object.hasOwn(contents, pathname)) {
+        throw new Error('GitHub API request failed with HTTP 404: Not Found');
+      }
+      return contents[pathname];
+    },
+    async searchCode(requirementId, directory) {
+      searches.push({ requirementId, directory });
+      return [directory.includes('/platform/')
+        ? 'docs/specs/platform/requirements/diagnostic-logging.md'
+        : 'docs/specs/web/requirements/browser-retention.md'];
+    },
+  };
+
+  const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+
+  assert.equal(result.status, 'covered', result.errors.join('; '));
+  assert.deepEqual(searches, [
+    {
+      requirementId: 'REQ-PLATFORM-DIAGNOSTIC-LOGGING-001',
+      directory: 'docs/specs/platform/requirements',
+    },
+    {
+      requirementId: 'REQ-WEB-BROWSER-RETENTION-001',
+      directory: 'docs/specs/web/requirements',
+    },
+  ]);
+});
+
 test('multi-design work orders fail when a requirement has no owning design', () => {
   const contents = multiDesignFixtureContents();
   contents['docs/specs/web/system-design/retention.md'] = contents[

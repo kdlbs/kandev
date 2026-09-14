@@ -23,6 +23,7 @@ import {
   MobileCanvasActions,
   type CanvasHostState,
 } from "./canvas-host-components";
+import { CanvasShareDialog } from "./canvas-share-dialog";
 
 function stateForCanvas(canvas: Canvas): CanvasHostState {
   if (canvas.status === "archived") return "archived";
@@ -363,6 +364,34 @@ function useCanvasHost(canvasId: string) {
   };
 }
 
+type CanvasHostEditOptions = {
+  canvas: Canvas | null;
+  router: ReturnType<typeof useRouter>;
+  setEditing: (editing: boolean) => void;
+  setMenuOpen: (open: boolean) => void;
+  onError: (reason: unknown) => void;
+};
+
+async function editCanvasFromHost(options: CanvasHostEditOptions): Promise<void> {
+  const { canvas, router, setEditing, setMenuOpen, onError } = options;
+  if (!canvas) return;
+  setEditing(true);
+  try {
+    const response = await startCanvasEdit(canvas.id);
+    if (response.task_id) {
+      const query = response.session_id
+        ? `?sessionId=${encodeURIComponent(response.session_id)}`
+        : "";
+      router.push(`/t/${encodeURIComponent(response.task_id)}${query}`);
+    }
+  } catch (reason: unknown) {
+    onError(reason);
+  } finally {
+    setEditing(false);
+    setMenuOpen(false);
+  }
+}
+
 export function CanvasHostRoute({ canvasId }: { canvasId: string }) {
   const { t } = useTranslation();
   const router = useRouter();
@@ -381,26 +410,17 @@ export function CanvasHostRoute({ canvasId }: { canvasId: string }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [promotionOpen, setPromotionOpen] = useState(false);
   const [releasesOpen, setReleasesOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [editing, setEditing] = useState(false);
 
-  const edit = async () => {
-    if (!canvas) return;
-    setEditing(true);
-    try {
-      const response = await startCanvasEdit(canvas.id);
-      if (response.task_id) {
-        const query = response.session_id
-          ? `?sessionId=${encodeURIComponent(response.session_id)}`
-          : "";
-        router.push(`/t/${encodeURIComponent(response.task_id)}${query}`);
-      }
-    } catch (reason: unknown) {
-      setHostError(canvasErrorMessage(reason, t, "canvases:actionFailed"));
-    } finally {
-      setEditing(false);
-      setMenuOpen(false);
-    }
-  };
+  const edit = () =>
+    editCanvasFromHost({
+      canvas,
+      router,
+      setEditing,
+      setMenuOpen,
+      onError: (reason) => setHostError(canvasErrorMessage(reason, t, "canvases:actionFailed")),
+    });
 
   const selectCanvas = useCallback(
     (nextCanvas: Canvas) => {
@@ -418,6 +438,7 @@ export function CanvasHostRoute({ canvasId }: { canvasId: string }) {
       onEdit={() => void edit()}
       onPromote={() => setPromotionOpen(true)}
       onReleases={() => setReleasesOpen(true)}
+      onShare={() => setShareOpen(true)}
     />
   ) : null;
 
@@ -451,6 +472,7 @@ export function CanvasHostRoute({ canvasId }: { canvasId: string }) {
         onEdit={() => void edit()}
         onPromote={() => setPromotionOpen(true)}
         onReleases={() => setReleasesOpen(true)}
+        onShare={() => setShareOpen(true)}
         editing={editing}
         canvases={hostCanvases}
         onSelectCanvas={selectCanvas}
@@ -464,6 +486,7 @@ export function CanvasHostRoute({ canvasId }: { canvasId: string }) {
         onPromotionCompleted={() => router.push(canvas ? canvasHref(canvas.id) : "/")}
         onChanged={load}
       />
+      <CanvasShareDialog canvas={canvas} open={shareOpen} onOpenChange={setShareOpen} />
     </PageShell>
   );
 }
