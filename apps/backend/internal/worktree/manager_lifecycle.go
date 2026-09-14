@@ -2076,10 +2076,8 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 		if resolveErr != nil || !strings.EqualFold(currentHead, existing.RecoveryHeadSHA) {
 			return nil, fmt.Errorf("existing worktree branch %q does not match its recovery head", existing.Branch)
 		}
-		if existing.BranchCompactedAt != nil {
-			if restoreErr := m.finalizeRestoredManagedBranch(ctx, existing, currentHead); restoreErr != nil {
-				return nil, fmt.Errorf("persist restored compacted worktree branch %q: %w", existing.Branch, restoreErr)
-			}
+		if restoreErr := m.finalizeRestoredManagedBranch(ctx, existing, currentHead); restoreErr != nil {
+			return nil, fmt.Errorf("persist restored compacted worktree branch %q: %w", existing.Branch, restoreErr)
 		}
 	}
 	// Recovery metadata is authoritative once the local ref is confirmed

@@ -153,6 +153,73 @@ func TestMaintainArchivedBranches_RearchivesRestoredBranchWithoutSessionLaunch(t
 	}
 }
 
+func TestRecoverBranchStatus_FinalizesInterruptedPreDeleteRecovery(t *testing.T) {
+	mgr, store, wt, wantHead := archivedIntegratedBranchForMaintenance(t, "recover-before-delete")
+	ctx := context.Background()
+	if persisted, err := store.PersistArchivedBranchRecoveryHead(ctx, wt.ID, "", wantHead); err != nil || !persisted {
+		t.Fatalf("persist recovery head: persisted=%v err=%v", persisted, err)
+	}
+	if reason := mgr.createRecoveryRef(ctx, wt, wantHead); reason != "" {
+		t.Fatalf("create recovery ref: %s", reason)
+	}
+	if _, err := store.db.ExecContext(ctx, `UPDATE tasks SET archived_at = NULL WHERE id = ?`, wt.TaskID); err != nil {
+		t.Fatalf("unarchive task: %v", err)
+	}
+	persisted, err := store.GetWorktreeByID(ctx, wt.ID)
+	if err != nil {
+		t.Fatalf("load interrupted recovery: %v", err)
+	}
+	if persisted.BranchCompactedAt != nil {
+		t.Fatalf("interrupted recovery has compaction marker: %v", persisted.BranchCompactedAt)
+	}
+
+	if status := mgr.RecoverBranchStatus(ctx, persisted); status != BranchStatusLocal {
+		t.Fatalf("recovery status = %q, want local", status)
+	}
+	restored, err := store.GetWorktreeByID(ctx, wt.ID)
+	if err != nil {
+		t.Fatalf("load finalized recovery: %v", err)
+	}
+	if restored.RecoveryHeadSHA != "" || restored.BranchCompactedAt != nil {
+		t.Fatalf("finalized recovery metadata = head %q compacted %v, want cleared",
+			restored.RecoveryHeadSHA, restored.BranchCompactedAt)
+	}
+	if exists, err := mgr.localBranchRefExists(ctx, wt.RepositoryPath, recoveryRefName(wt.ID)); err != nil || exists {
+		t.Fatalf("recovery ref after finalization: exists=%v err=%v, want absent", exists, err)
+	}
+}
+
+func TestRecoverBranchStatus_RetainsMetadataWhenRecoveryRefDeleteFails(t *testing.T) {
+	mgr, store, wt, wantHead := archivedIntegratedBranchForMaintenance(t, "recover-delete-failure")
+	ctx := context.Background()
+	receipt, err := mgr.MaintainArchivedBranches(ctx, 1)
+	if err != nil || receipt.Deleted != 1 {
+		t.Fatalf("compact archived branch: receipt=%+v err=%v", receipt, err)
+	}
+	persisted, err := store.GetWorktreeByID(ctx, wt.ID)
+	if err != nil {
+		t.Fatalf("load compacted branch: %v", err)
+	}
+	zeroOID := strings.Repeat("0", len(wantHead))
+	runGit(t, wt.RepositoryPath, "update-ref", "refs/heads/"+wt.Branch, wantHead, zeroOID)
+	rejectRecoveryRefDelete(t, wt)
+
+	if status := mgr.RecoverBranchStatus(ctx, persisted); status != BranchStatusMissing {
+		t.Fatalf("recovery status = %q, want missing when cleanup is incomplete", status)
+	}
+	retained, err := store.GetWorktreeByID(ctx, wt.ID)
+	if err != nil {
+		t.Fatalf("load retained recovery metadata: %v", err)
+	}
+	if retained.RecoveryHeadSHA != wantHead || retained.BranchCompactedAt == nil {
+		t.Fatalf("retained recovery metadata = head %q compacted %v, want head %q and marker",
+			retained.RecoveryHeadSHA, retained.BranchCompactedAt, wantHead)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.RepositoryPath, "rev-parse", recoveryRefName(wt.ID))); got != wantHead {
+		t.Fatalf("recovery ref head = %q, want %q", got, wantHead)
+	}
+}
+
 // Reviewer-requested contract coverage: production already reconciles an
 // absent ref whose recovery SHA persisted before its completion marker.
 func TestMaintainArchivedBranches_FinalizesAbsentRefAfterCompletionPersistFailure(t *testing.T) {
@@ -267,6 +334,26 @@ func rejectBranchDeleteDuringRetry(t *testing.T, wt *Worktree) {
 	script := "#!/bin/sh\n" +
 		"case \" $* \" in\n" +
 		"  *\" update-ref -d " + branchRef + " \"*) exit 97 ;;\n" +
+		"esac\n" +
+		"exec \"" + realGit + "\" \"$@\"\n"
+	if err := os.WriteFile(wrapper, []byte(script), 0o755); err != nil {
+		t.Fatalf("write git wrapper: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func rejectRecoveryRefDelete(t *testing.T, wt *Worktree) {
+	t.Helper()
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Fatalf("find git: %v", err)
+	}
+	binDir := t.TempDir()
+	wrapper := filepath.Join(binDir, "git")
+	recoveryRef := recoveryRefName(wt.ID)
+	script := "#!/bin/sh\n" +
+		"case \" $* \" in\n" +
+		"  *\" update-ref -d " + recoveryRef + " \"*) exit 97 ;;\n" +
 		"esac\n" +
 		"exec \"" + realGit + "\" \"$@\"\n"
 	if err := os.WriteFile(wrapper, []byte(script), 0o755); err != nil {

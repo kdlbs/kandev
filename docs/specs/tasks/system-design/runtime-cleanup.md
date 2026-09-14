@@ -142,13 +142,11 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
 
 ## Archive cleanup disposition
 
-Direct and cascade archive stop runtimes, remove the worktree, mark its row
-deleted, and retain environment and recovery metadata. Duplicate snapshots do
-not change that disposition. Unarchive reuses a retained branch or its exact
-compacted head: compaction first creates an opaque identity-derived recovery
-ref, recovery requires a same-named ref to equal the recorded head, and the
-marker and recovery ref are cleared once the restored branch protects it.
-Delete remains separate.
+Direct and cascade archive stop runtimes, remove worktrees, mark rows deleted,
+and retain environment and recovery metadata. Duplicate snapshots keep that
+disposition. Unarchive uses the retained branch or recreates its exact compacted
+head. Any same-named local ref must match; the marker and recovery ref clear only
+after the branch protects the commit. Delete remains separate.
 
 Archive first attempts compaction; storage maintenance later selects at most 100
 managed, deleted rows for archived tasks without scanning names. The manager
@@ -549,3 +547,4 @@ The durable cleanup job wraps that resource lifecycle:
 - [Backend failure containment](../../../plans/backend-failure-containment/plan.md)
 - [Worktree resume after unarchive](../../../plans/worktree-resume-after-unarchive/plan.md)
 - [Archive resume identity](../../../plans/archive-resume-identity/plan.md)
+- [Compact integrated managed branches](../../../plans/compact-integrated-managed-branches/plan.md)

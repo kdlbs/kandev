@@ -528,13 +528,19 @@ func TestRecreate_RecoveryHeadWinsOverRefreshedRemoteWhenSyncHandled(t *testing.
 		t.Fatalf("create worktree placeholder: %v", err)
 	}
 
-	mgr := newRecreateTestManager(t)
-	wt, err := mgr.recreate(context.Background(), &Worktree{
+	store := newMockStore()
+	mgr, err := NewManager(newTestConfig(t), store, newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager failed: %v", err)
+	}
+	existing := &Worktree{
 		ID: "wt-recovery-precedence", SessionID: "session-recovery-precedence",
 		TaskID: "task-recovery-precedence", RepositoryID: "repo-1", RepositoryPath: repoPath,
 		Path: worktreePath, Branch: "feature/pr-branch", BranchOwner: BranchOwnerManaged,
 		RecoveryHeadSHA: recoverySHA, Status: StatusDeleted,
-	}, CreateRequest{
+	}
+	store.worktrees[existing.ID] = existing
+	wt, err := mgr.recreate(context.Background(), existing, CreateRequest{
 		SessionID: "session-recovery-precedence", TaskID: "task-recovery-precedence", RepositoryID: "repo-1",
 		RepositoryPath: repoPath, CheckoutBranch: "feature/pr-branch", RemoteSyncHandled: true,
 	})

@@ -151,7 +151,7 @@ func (s *mockStore) PersistBranchCompactionComplete(
 
 func (s *mockStore) PersistBranchRecoveryRestored(_ context.Context, worktreeID, expectedRecoveryHead string) (bool, error) {
 	wt := s.worktrees[worktreeID]
-	if wt == nil || wt.RecoveryHeadSHA != expectedRecoveryHead || wt.BranchCompactedAt == nil {
+	if wt == nil || wt.RecoveryHeadSHA != expectedRecoveryHead {
 		return false, nil
 	}
 	wt.RecoveryHeadSHA = ""

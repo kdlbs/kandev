@@ -316,7 +316,7 @@ func (m *Manager) existingRecoveredBranchStatus(ctx context.Context, wt *Worktre
 	if err != nil || !strings.EqualFold(current, wt.RecoveryHeadSHA) {
 		return BranchStatusMissing
 	}
-	if wt.BranchCompactedAt != nil && m.finalizeRestoredManagedBranch(ctx, wt, current) != nil {
+	if m.finalizeRestoredManagedBranch(ctx, wt, current) != nil {
 		return BranchStatusMissing
 	}
 	return BranchStatusLocal
@@ -345,25 +345,22 @@ func (m *Manager) restoreManagedBranchFromRecoveryHeadLocked(ctx context.Context
 }
 
 func (m *Manager) finalizeRestoredManagedBranch(ctx context.Context, wt *Worktree, resolved string) error {
-	if wt.BranchCompactedAt != nil {
-		metadataStore, ok := m.store.(BranchMetadataStore)
-		if !ok {
-			return fmt.Errorf("persist restored compacted branch: metadata store is unavailable")
-		}
-		persisted, persistErr := metadataStore.PersistBranchRecoveryRestored(ctx, wt.ID, resolved)
-		if persistErr != nil || !persisted {
-			return fmt.Errorf("persist restored compacted branch: %w", persistErr)
-		}
-		if !m.deleteRecoveryRef(ctx, wt, resolved) {
-			return fmt.Errorf("remove managed branch recovery ref")
-		}
-		wt.RecoveryHeadSHA = ""
-		wt.BranchCompactedAt = nil
-		return nil
+	if wt.RecoveryHeadSHA == "" || !strings.EqualFold(wt.RecoveryHeadSHA, resolved) {
+		return fmt.Errorf("restored managed branch does not match its recovery head")
 	}
-	if wt.RecoveryHeadSHA != "" && !m.deleteRecoveryRef(ctx, wt, resolved) {
+	metadataStore, ok := m.store.(BranchMetadataStore)
+	if !ok {
+		return fmt.Errorf("persist restored compacted branch: metadata store is unavailable")
+	}
+	if !m.deleteRecoveryRef(ctx, wt, resolved) {
 		return fmt.Errorf("remove managed branch recovery ref")
 	}
+	persisted, persistErr := metadataStore.PersistBranchRecoveryRestored(ctx, wt.ID, resolved)
+	if persistErr != nil || !persisted {
+		return fmt.Errorf("persist restored compacted branch: %w", persistErr)
+	}
+	wt.RecoveryHeadSHA = ""
+	wt.BranchCompactedAt = nil
 	return nil
 }
 
