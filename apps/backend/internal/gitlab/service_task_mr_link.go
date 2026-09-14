@@ -315,6 +315,14 @@ func (s *Service) UnlinkTaskMR(ctx context.Context, workspaceID, associationID s
 	if err := store.DeleteTaskMRForWorkspace(ctx, workspaceID, associationID); err != nil {
 		return err
 	}
+	if s.eventBus != nil && association != nil {
+		event := bus.NewEvent(events.GitLabTaskMRDeleted, eventSource, &TaskMRDeletedEvent{
+			WorkspaceID: workspaceID, TaskID: association.TaskID, AssociationID: association.ID,
+		})
+		if err := s.eventBus.Publish(ctx, events.GitLabTaskMRDeleted, event); err != nil {
+			s.logger.Debug("failed to publish GitLab task MR deletion event", zap.Error(err))
+		}
+	}
 	return nil
 }
 
@@ -362,6 +370,18 @@ func (e *TaskMRUpdatedEvent) GetWorkspaceID() string {
 	}
 	return e.WorkspaceID
 }
+
+// TaskMRDeletedEvent identifies one task-MR association removed from active
+// task surfaces. The upstream merge request remains unchanged.
+type TaskMRDeletedEvent struct {
+	WorkspaceID   string `json:"workspace_id"`
+	TaskID        string `json:"task_id"`
+	AssociationID string `json:"association_id"`
+}
+
+// GetWorkspaceID lets the websocket broadcaster route the deletion to the
+// owning workspace.
+func (e TaskMRDeletedEvent) GetWorkspaceID() string { return e.WorkspaceID }
 
 // publishTaskMRLifecycleSyncEvent publishes a TaskMRUpdatedEvent after the
 // poller's lifecycle sync pass refreshes a linked MR (AC22). Unlike

@@ -592,6 +592,7 @@ const (
 // GitLab integration notifications
 const (
 	ActionGitLabTaskMRUpdated           = "gitlab.task_mr.updated"         // Notification
+	ActionGitLabTaskMRDeleted           = "gitlab.task_mr.deleted"         // Notification
 	ActionGitLabTaskMRAutomationUpdated = "gitlab.task_mr_options.updated" // Notification
 )
 

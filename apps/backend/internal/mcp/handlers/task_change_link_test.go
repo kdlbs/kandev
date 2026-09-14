@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -39,6 +40,9 @@ func TestTaskChangeLinkRequestRejectsCrossWorkspaceCaller(t *testing.T) {
 	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "task-caller", WorkspaceID: "ws-caller", Title: "Caller", State: v1.TaskStateTODO, CreatedAt: now, UpdatedAt: now}))
 
 	h := &Handlers{taskSvc: svc}
+	ctx = scope.WithPrincipal(ctx, scope.Principal{
+		WorkspaceID: "ws-caller", CallerTaskID: "task-caller", CallerSessionID: "session-caller",
+	})
 	msg := makeWSMessage(t, ws.ActionMCPLinkTaskPR, map[string]any{
 		"task_id": "task-target", "caller_task_id": "task-caller",
 		"provider": "github", "repository_id": "repo-1", "number": 1,
@@ -76,6 +80,9 @@ func TestTaskChangeLinkRequestParsesReplacementIdentity(t *testing.T) {
 	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "task-caller", WorkspaceID: "ws-1", Title: "Caller", State: v1.TaskStateTODO, CreatedAt: now, UpdatedAt: now}))
 
 	h := &Handlers{taskSvc: svc}
+	ctx = scope.WithPrincipal(ctx, scope.Principal{
+		WorkspaceID: "ws-1", CallerTaskID: "task-caller", CallerSessionID: "session-caller",
+	})
 	msg := makeWSMessage(t, ws.ActionMCPReplaceTaskPR, map[string]any{
 		"task_id": "task-target", "caller_task_id": "task-caller",
 		"provider": "gitlab", "repository_id": "repo-new", "number": 42,
@@ -99,6 +106,9 @@ func TestTaskChangeLinkRequestRejectsInvalidReplacementIdentity(t *testing.T) {
 	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: "task-caller", WorkspaceID: "ws-1", Title: "Caller", State: v1.TaskStateTODO, CreatedAt: now, UpdatedAt: now}))
 
 	h := &Handlers{taskSvc: svc}
+	ctx = scope.WithPrincipal(ctx, scope.Principal{
+		WorkspaceID: "ws-1", CallerTaskID: "task-caller", CallerSessionID: "session-caller",
+	})
 	msg := makeWSMessage(t, ws.ActionMCPReplaceTaskPR, map[string]any{
 		"task_id": "task-target", "caller_task_id": "task-caller",
 		"provider": "gitlab", "repository_id": "repo-new", "number": 42,
@@ -107,4 +117,52 @@ func TestTaskChangeLinkRequestRejectsInvalidReplacementIdentity(t *testing.T) {
 	_, resp, err := h.taskChangeLinkRequest(ctx, msg, true)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
+}
+
+func TestTaskChangeLinkRequestRejectsPayloadCallerMismatch(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace", CreatedAt: now, UpdatedAt: now}))
+	for _, task := range []*models.Task{
+		{ID: "task-target", WorkspaceID: "ws-1", Title: "Target", State: v1.TaskStateTODO, CreatedAt: now, UpdatedAt: now},
+		{ID: "task-caller", WorkspaceID: "ws-1", Title: "Caller", State: v1.TaskStateTODO, CreatedAt: now, UpdatedAt: now},
+		{ID: "task-other", WorkspaceID: "ws-1", Title: "Other", State: v1.TaskStateTODO, CreatedAt: now, UpdatedAt: now},
+	} {
+		require.NoError(t, repo.CreateTask(ctx, task))
+	}
+	ctx = scope.WithPrincipal(ctx, scope.Principal{
+		WorkspaceID: "ws-1", CallerTaskID: "task-caller", CallerSessionID: "session-caller",
+	})
+	h := &Handlers{taskSvc: svc}
+	msg := makeWSMessage(t, ws.ActionMCPLinkTaskPR, map[string]any{
+		"task_id": "task-target", "caller_task_id": "task-other",
+		"provider": "github", "repository_id": "repo-1", "number": 1,
+	})
+
+	_, resp, err := h.taskChangeLinkRequest(ctx, msg, false)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeForbidden)
+}
+
+func TestTaskChangeLinkRequestRequiresTrustedPrincipal(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace", CreatedAt: now, UpdatedAt: now}))
+	for _, task := range []*models.Task{
+		{ID: "task-target", WorkspaceID: "ws-1", Title: "Target", State: v1.TaskStateTODO, CreatedAt: now, UpdatedAt: now},
+		{ID: "task-caller", WorkspaceID: "ws-1", Title: "Caller", State: v1.TaskStateTODO, CreatedAt: now, UpdatedAt: now},
+	} {
+		require.NoError(t, repo.CreateTask(ctx, task))
+	}
+	h := &Handlers{taskSvc: svc}
+	msg := makeWSMessage(t, ws.ActionMCPLinkTaskPR, map[string]any{
+		"task_id": "task-target", "caller_task_id": "task-caller",
+		"provider": "github", "repository_id": "repo-1", "number": 1,
+	})
+
+	_, resp, err := h.taskChangeLinkRequest(ctx, msg, false)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeForbidden)
 }

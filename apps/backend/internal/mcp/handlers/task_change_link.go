@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
 
@@ -111,8 +112,12 @@ func (h *Handlers) taskChangeLinkRequest(ctx context.Context, msg *ws.Message, r
 		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "caller_task_id is required", nil)
 		return TaskChangeLinkRequest{}, response, responseErr
 	}
-	caller, callerErr := h.taskSvc.GetTask(ctx, payload.CallerTaskID)
-	if callerErr != nil || caller == nil || caller.WorkspaceID != target.WorkspaceID {
+	principal, hasPrincipal := mcpscope.PrincipalFromContext(ctx)
+	if !hasPrincipal || strings.TrimSpace(principal.WorkspaceID) == "" {
+		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "trusted MCP caller identity is required", nil)
+		return TaskChangeLinkRequest{}, response, responseErr
+	}
+	if payload.CallerTaskID != principal.CallerTaskID || target.WorkspaceID != principal.WorkspaceID {
 		response, responseErr := ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "task is outside the caller workspace", nil)
 		return TaskChangeLinkRequest{}, response, responseErr
 	}

@@ -2,9 +2,12 @@ package backendapp
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
 	mcp "github.com/kandev/kandev/internal/mcp/handlers"
@@ -27,7 +30,7 @@ const (
 )
 
 type githubChangeLinkProvider interface {
-	AssociateExistingPRByURL(context.Context, string, string, string) (*github.TaskPR, error)
+	AssociateExistingPRByURLForWorkspace(context.Context, string, string, string, string, string) (*github.TaskPR, error)
 	DetachTaskPR(context.Context, string, string) (*github.TaskPR, error)
 	ListTaskPRs(context.Context, []string) (map[string][]*github.TaskPR, error)
 }
@@ -75,12 +78,27 @@ func (c taskChangeLinkCoordinator) ReplaceTaskChange(ctx context.Context, req mc
 		return nil, err
 	}
 	if err := c.unlink(ctx, req.TaskID, *req.Old); err != nil {
-		if !newAlreadyLinked {
-			_ = c.unlink(ctx, req.TaskID, req.Link)
+		if newAlreadyLinked {
+			return nil, err
 		}
-		return nil, err
+		return c.rollbackReplacement(ctx, req.TaskID, req.Link, err)
 	}
 	return c.list(ctx, req.TaskID)
+}
+
+func (c taskChangeLinkCoordinator) rollbackReplacement(
+	ctx context.Context, taskID string, newLink mcp.TaskChangeLink, originalErr error,
+) ([]mcp.TaskChangeLink, error) {
+	rollbackErr := c.unlink(ctx, taskID, newLink)
+	if rollbackErr == nil {
+		return nil, originalErr
+	}
+	activeLinks, stateErr := c.list(ctx, taskID)
+	state := fmt.Errorf("active task change links after failed replacement: %v", activeLinks)
+	if stateErr != nil {
+		state = fmt.Errorf("active task change links unavailable after failed replacement: %w", stateErr)
+	}
+	return activeLinks, errors.Join(originalErr, fmt.Errorf("rollback new task change link: %w", rollbackErr), state)
 }
 
 func taskChangeLinksContain(links []mcp.TaskChangeLink, target mcp.TaskChangeLink) bool {
@@ -106,7 +124,11 @@ func (c taskChangeLinkCoordinator) link(ctx context.Context, taskID string, link
 		if err != nil {
 			return err
 		}
-		_, err = c.github.AssociateExistingPRByURL(ctx, task.ID, repo.ID, url)
+		identity, ok := authn.IdentityFromContext(ctx)
+		if !ok || strings.TrimSpace(identity.UserID) == "" {
+			return fmt.Errorf("authenticated user identity is required for GitHub PR links")
+		}
+		_, err = c.github.AssociateExistingPRByURLForWorkspace(ctx, task.WorkspaceID, identity.UserID, task.ID, repo.ID, url)
 		return err
 	case taskChangeProviderGitLab:
 		if c.gitlab == nil {
@@ -124,7 +146,7 @@ func (c taskChangeLinkCoordinator) link(ctx context.Context, taskID string, link
 }
 
 func (c taskChangeLinkCoordinator) unlink(ctx context.Context, taskID string, link mcp.TaskChangeLink) error {
-	task, _, err := c.taskRepository(ctx, taskID, link.RepositoryID)
+	task, _, err := c.taskRepository(ctx, taskID, "")
 	if err != nil {
 		return err
 	}
@@ -222,16 +244,38 @@ func (c taskChangeLinkCoordinator) taskRepository(ctx context.Context, taskID, r
 }
 
 func githubChangeURL(host, owner, name string, number int) (string, error) {
-	normalizedHost := strings.TrimRight(strings.TrimSpace(strings.ToLower(host)), "/")
-	normalizedHost = strings.TrimPrefix(normalizedHost, "https://")
-	normalizedHost = strings.TrimPrefix(normalizedHost, "http://")
-	if normalizedHost != "" && normalizedHost != "github.com" && !strings.HasSuffix(normalizedHost, ".github.com") {
-		return "", fmt.Errorf("repository is not a GitHub repository")
+	normalizedHost, err := normalizedGitHubHost(host)
+	if err != nil {
+		return "", err
 	}
-	if strings.TrimSpace(owner) == "" || strings.TrimSpace(name) == "" {
+	owner = strings.TrimSpace(owner)
+	name = strings.TrimSpace(name)
+	if owner == "" || name == "" {
 		return "", fmt.Errorf("repository has no canonical GitHub identity")
 	}
-	return fmt.Sprintf("https://github.com/%s/%s/pull/%d", owner, name, number), nil
+	return fmt.Sprintf("https://%s/%s/%s/pull/%d", normalizedHost, owner, name, number), nil
+}
+
+func normalizedGitHubHost(host string) (string, error) {
+	rawHost := strings.TrimSpace(host)
+	if rawHost == "" {
+		return "", fmt.Errorf("repository has no canonical GitHub host")
+	}
+	if !strings.Contains(rawHost, "://") {
+		rawHost = "https://" + rawHost
+	}
+	parsed, err := url.Parse(rawHost)
+	if err != nil || parsed.User != nil || parsed.Host == "" || parsed.Path != "" && parsed.Path != "/" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("repository has invalid GitHub host")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" || parsed.Port() != "" {
+		return "", fmt.Errorf("repository has invalid GitHub host")
+	}
+	normalizedHost := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
+	if normalizedHost != "github.com" && !strings.HasSuffix(normalizedHost, ".github.com") {
+		return "", fmt.Errorf("repository is not a GitHub repository")
+	}
+	return normalizedHost, nil
 }
 
 func gitlabChangeURL(host, owner, name string, number int) (string, error) {

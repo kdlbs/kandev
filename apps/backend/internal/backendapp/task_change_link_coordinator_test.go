@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
@@ -30,13 +32,17 @@ type fakeGitLabChangeLinks struct {
 }
 
 type fakeGitHubChangeLinks struct {
-	prs       []*github.TaskPR
-	linkedURL string
-	unlinked  []string
+	prs               []*github.TaskPR
+	linkedURL         string
+	linkedWorkspaceID string
+	linkedUserID      string
+	unlinked          []string
 }
 
-func (f *fakeGitHubChangeLinks) AssociateExistingPRByURL(_ context.Context, taskID, repositoryID, prURL string) (*github.TaskPR, error) {
+func (f *fakeGitHubChangeLinks) AssociateExistingPRByURLForWorkspace(_ context.Context, workspaceID, userID, taskID, repositoryID, prURL string) (*github.TaskPR, error) {
 	f.linkedURL = prURL
+	f.linkedWorkspaceID = workspaceID
+	f.linkedUserID = userID
 	pr := &github.TaskPR{ID: "linked-github", TaskID: taskID, RepositoryID: repositoryID, PRNumber: 42, PRURL: prURL}
 	f.prs = append(f.prs, pr)
 	return pr, nil
@@ -189,6 +195,38 @@ func TestGitHubChangeURLRejectsSubstringHostSpoofing(t *testing.T) {
 			t.Fatalf("githubChangeURL accepted spoofed host %q", host)
 		}
 	}
+	if _, err := githubChangeURL("", "acme", "api", 7); err == nil {
+		t.Fatal("githubChangeURL accepted an unknown empty host")
+	}
+	url, err := githubChangeURL("https://enterprise.github.com", "acme", "api", 7)
+	if err != nil || url != "https://enterprise.github.com/acme/api/pull/7" {
+		t.Fatalf("githubChangeURL alternate origin = %q, %v", url, err)
+	}
+}
+
+func TestTaskChangeCoordinatorDispatchesGitHubLinkWithWorkspaceIdentity(t *testing.T) {
+	taskSvc, repos := newTaskChangeCoordinatorHarness(t)
+	seedTaskChangeCoordinatorTask(t, repos, "ws-1", "task-1", "repo-1", "https://github.com", "acme", "api")
+	githubLinks := &fakeGitHubChangeLinks{}
+	coordinator := taskChangeLinkCoordinator{tasks: taskSvc, github: githubLinks}
+	ctx := authn.WithIdentity(context.Background(), authn.Identity{UserID: "user-1"})
+
+	links, err := coordinator.LinkTaskChange(ctx, mcphandlers.TaskChangeLinkRequest{
+		TaskID: "task-1",
+		Link:   mcphandlers.TaskChangeLink{Provider: "github", RepositoryID: "repo-1", Number: 42},
+	})
+	if err != nil {
+		t.Fatalf("LinkTaskChange: %v", err)
+	}
+	if githubLinks.linkedWorkspaceID != "ws-1" || githubLinks.linkedUserID != "user-1" {
+		t.Fatalf("GitHub identity = workspace %q user %q", githubLinks.linkedWorkspaceID, githubLinks.linkedUserID)
+	}
+	if githubLinks.linkedURL != "https://github.com/acme/api/pull/42" {
+		t.Fatalf("linked URL = %q", githubLinks.linkedURL)
+	}
+	if len(links) != 1 || links[0].Provider != "github" {
+		t.Fatalf("links = %#v, want one GitHub link", links)
+	}
 }
 
 func TestTaskChangeCoordinatorDispatchesGitLabLinkAndReturnsLinkedSet(t *testing.T) {
@@ -305,6 +343,56 @@ func TestTaskChangeCoordinatorReplaceRollsBackNewLinkWhenOldUnlinkFails(t *testi
 	}
 	if len(gitlabLinks.unlinked) != 2 || gitlabLinks.unlinked[0] != "old" || gitlabLinks.unlinked[1] != "linked-new" {
 		t.Fatalf("unlink order = %#v, want old then rollback of new", gitlabLinks.unlinked)
+	}
+}
+
+func TestTaskChangeCoordinatorReportsRollbackFailure(t *testing.T) {
+	taskSvc, repos := newTaskChangeCoordinatorHarness(t)
+	seedTaskChangeCoordinatorTask(t, repos, "ws-1", "task-1", "repo-1", "https://gitlab.example.test", "group", "project")
+	gitlabLinks := &fakeGitLabChangeLinks{
+		mrs: []*gitlab.TaskMR{{
+			ID: "old", TaskID: "task-1", RepositoryID: "repo-1", MRIID: 7,
+			MRURL: "https://gitlab.example.test/group/project/-/merge_requests/7",
+		}},
+		unlinkErr: map[string]error{
+			"old":        errors.New("delete failed"),
+			"linked-new": errors.New("rollback failed"),
+		},
+	}
+	coordinator := taskChangeLinkCoordinator{tasks: taskSvc, gitlab: gitlabLinks}
+
+	_, err := coordinator.ReplaceTaskChange(context.Background(), mcphandlers.TaskChangeLinkRequest{
+		TaskID: "task-1",
+		Link:   mcphandlers.TaskChangeLink{Provider: "gitlab", RepositoryID: "repo-1", Number: 42},
+		Old:    &mcphandlers.TaskChangeLink{Provider: "gitlab", RepositoryID: "repo-1", Number: 7},
+	})
+	if err == nil || !strings.Contains(err.Error(), "delete failed") || !strings.Contains(err.Error(), "rollback failed") ||
+		!strings.Contains(err.Error(), "active task change links") || !strings.Contains(err.Error(), "42") {
+		t.Fatalf("ReplaceTaskChange error = %v, want both failures and active links", err)
+	}
+}
+
+func TestTaskChangeCoordinatorUnlinksStaleAssociationWithoutCurrentRepository(t *testing.T) {
+	taskSvc, repos := newTaskChangeCoordinatorHarness(t)
+	seedTaskChangeCoordinatorTask(t, repos, "ws-1", "task-1", "repo-1", "https://gitlab.example.test", "group", "project")
+	requireErr := repos.DeleteTaskRepository(context.Background(), "tr-task-1-repo-1")
+	if requireErr != nil {
+		t.Fatalf("remove current task repository: %v", requireErr)
+	}
+	gitlabLinks := &fakeGitLabChangeLinks{mrs: []*gitlab.TaskMR{{
+		ID: "stale", TaskID: "task-1", RepositoryID: "repo-1", MRIID: 42,
+	}}}
+	coordinator := taskChangeLinkCoordinator{tasks: taskSvc, gitlab: gitlabLinks}
+
+	links, err := coordinator.UnlinkTaskChange(context.Background(), mcphandlers.TaskChangeLinkRequest{
+		TaskID: "task-1",
+		Link:   mcphandlers.TaskChangeLink{Provider: "gitlab", RepositoryID: "repo-1", Number: 42},
+	})
+	if err != nil {
+		t.Fatalf("UnlinkTaskChange stale association: %v", err)
+	}
+	if len(links) != 0 || len(gitlabLinks.unlinked) != 1 || gitlabLinks.unlinked[0] != "stale" {
+		t.Fatalf("stale unlink result links=%#v unlinked=%#v", links, gitlabLinks.unlinked)
 	}
 }
 
