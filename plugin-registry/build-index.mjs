@@ -240,8 +240,11 @@ export function isSafeVersion(version) {
   return SAFE_VERSION.test(String(version || ""));
 }
 
-function parseVersion(version) {
-  if (!isSafeVersion(version)) return null;
+const COMPARABLE_VERSION_PATTERN =
+  /^[0-9]+(?:\.[0-9]+)*(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+
+function parseComparableVersion(version) {
+  if (!COMPARABLE_VERSION_PATTERN.test(version)) return undefined;
   const [withoutBuild] = version.split("+", 1);
   const prereleaseSeparator = withoutBuild.indexOf("-");
   const corePart =
@@ -254,56 +257,72 @@ function parseVersion(version) {
       : withoutBuild.slice(prereleaseSeparator + 1);
   return {
     core: corePart.split("."),
-    prerelease: prereleasePart?.split(".") || [],
+    prerelease: prereleasePart ? prereleasePart.split(".") : [],
   };
 }
 
-function compareVersionPart(left, right) {
-  const leftNumeric = /^\d+$/.test(left);
-  const rightNumeric = /^\d+$/.test(right);
+function versionPart(parts, index, fallback) {
+  return index < parts.length ? parts[index] : fallback;
+}
+
+function isNumericIdentifier(value) {
+  return /^\d+$/.test(value);
+}
+
+/** Numeric or SemVer-identifier ordering, mirroring the Go host comparator. */
+function compareIdentifier(left, right) {
+  const leftNumeric = isNumericIdentifier(left);
+  const rightNumeric = isNumericIdentifier(right);
   if (leftNumeric && rightNumeric) {
     const leftTrimmed = left.replace(/^0+(?=\d)/, "");
     const rightTrimmed = right.replace(/^0+(?=\d)/, "");
     if (leftTrimmed.length !== rightTrimmed.length)
       return leftTrimmed.length > rightTrimmed.length ? 1 : -1;
-    return leftTrimmed === rightTrimmed
-      ? 0
-      : leftTrimmed > rightTrimmed
-        ? 1
-        : -1;
+    return leftTrimmed > rightTrimmed ? 1 : leftTrimmed < rightTrimmed ? -1 : 0;
   }
   if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
+  return left > right ? 1 : left < right ? -1 : 0;
+}
+
+function byteWiseCompare(left, right) {
   return left === right ? 0 : left > right ? 1 : -1;
 }
 
-/** Compare the same safe version format accepted by buildEntry. */
+/**
+ * Compare versions exactly like the Go host comparator
+ * (apps/backend/internal/plugins/manifest/semver.go CompareVersions):
+ * SemVer ordering only for numeric-core versions, byte-wise fallback
+ * otherwise; build metadata never affects precedence.
+ */
 export function compareVersions(left, right) {
-  const a = parseVersion(left);
-  const b = parseVersion(right);
-  if (!a) return -1;
-  if (!b) return 1;
+  if (left === right) return 0;
+  const a = COMPARABLE_VERSION_PATTERN.test(left)
+    ? parseComparableVersion(left)
+    : undefined;
+  const b = COMPARABLE_VERSION_PATTERN.test(right)
+    ? parseComparableVersion(right)
+    : undefined;
+  if (!a || !b) return byteWiseCompare(left, right);
   const coreCount = Math.max(a.core.length, b.core.length);
   for (let index = 0; index < coreCount; index += 1) {
-    const order = compareVersionPart(
-      a.core[index] || "0",
-      b.core[index] || "0",
+    const order = compareIdentifier(
+      versionPart(a.core, index, "0"),
+      versionPart(b.core, index, "0"),
     );
     if (order !== 0) return order;
   }
   if (a.prerelease.length === 0 || b.prerelease.length === 0) {
-    return a.prerelease.length === b.prerelease.length
-      ? 0
-      : a.prerelease.length === 0
-        ? 1
-        : -1;
+    if (a.prerelease.length === b.prerelease.length) return 0;
+    return a.prerelease.length === 0 ? 1 : -1;
   }
   const prereleaseCount = Math.max(a.prerelease.length, b.prerelease.length);
   for (let index = 0; index < prereleaseCount; index += 1) {
-    const leftPart = a.prerelease[index];
-    const rightPart = b.prerelease[index];
-    if (leftPart === undefined || rightPart === undefined)
-      return leftPart === undefined ? -1 : 1;
-    const order = compareVersionPart(leftPart, rightPart);
+    if (index >= a.prerelease.length) return -1;
+    if (index >= b.prerelease.length) return 1;
+    const order = compareIdentifier(
+      a.prerelease[index],
+      b.prerelease[index],
+    );
     if (order !== 0) return order;
   }
   return 0;

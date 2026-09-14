@@ -110,6 +110,26 @@ test("detectReleaseChanges accepts the builder's safe two-component versions", a
   assert.deepEqual(result.errors, []);
 });
 
+test("detectReleaseChanges detects newer opaque build-metadata versions", async () => {
+  const current = indexWith([
+    {
+      id: "alpha",
+      repo: "acme/alpha",
+      version: "release+1",
+    },
+  ]);
+  const opaqueRelease = release("alpha", "release+2");
+  opaqueRelease.tag_name = "release+2";
+
+  const result = await detectReleaseChanges([specs[0]], current, {
+    fetchLatestRelease: async () => opaqueRelease,
+  });
+
+  assert.equal(result.rebuild, true);
+  assert.deepEqual(result.candidates, ["alpha@release+2"]);
+  assert.deepEqual(result.errors, []);
+});
+
 test("detectReleaseChanges queries only allowlisted repositories", async () => {
   const requested = [];
   const current = indexWith([

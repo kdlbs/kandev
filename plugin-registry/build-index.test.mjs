@@ -6,6 +6,7 @@ import test, { afterEach } from "node:test";
 import {
   buildEntry,
   buildIndex,
+  compareVersions,
   parseManifestFields,
   parsePluginsYaml,
   readPriorDocument,
@@ -149,6 +150,26 @@ test("readPriorDocument treats malformed retention data as absent", async () => 
   } finally {
     await fs.rm(directory, { recursive: true, force: true });
   }
+});
+
+test("compareVersions mirrors the Go host comparator", () => {
+  const cases = [
+    ["1.0.0", "1.0.0", 0],
+    ["1.0.0", "1.0.1", -1],
+    ["1.0.1", "1.0.0", 1],
+    ["9.0.0", "10.0.0", -1],
+    ["10.0.0", "9.0.0", 1],
+    ["1.0", "1.0.1", -1],
+    ["1.0", "1.0.0", 0],
+    ["1.0.0-beta", "1.0.0", -1],
+    ["1.0.0-alpha.10", "1.0.0-alpha.2", 1],
+    ["1.0.0+build.1", "1.0.0+build.2", 0],
+    ["release+1", "release+2", -1],
+    ["release+2", "release+1", 1],
+    ["1.0.0-", "1.0.0", 1],
+  ];
+  for (const [a, b, want] of cases)
+    assert.equal(compareVersions(a, b), want, `${a} vs ${b}`);
 });
 
 test("buildEntry resolves release, manifest, icon_url and stars", async () => {
