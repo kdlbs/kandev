@@ -64,6 +64,21 @@ func seedTaskAndSession(t *testing.T, repo *sqliterepo.Repository, taskID, sessi
 		State:     sessionState,
 		StartedAt: now,
 		UpdatedAt: now,
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyMCPAttachmentState: streams.MCPAttachmentHistory{
+				Version: streams.MCPAttachmentSchemaVersion,
+				Current: streams.MCPAttachmentAttempt{
+					AttemptID: "test-attachment-" + sessionID,
+					Servers: []streams.MCPServerAttachment{{
+						Name:   "kandev",
+						Source: streams.MCPServerSourceKandev,
+						Tools: []streams.MCPToolSummary{{
+							Name: "report_change_request_auto_fix_outcome_kandev",
+						}},
+					}},
+				},
+			},
+		},
 	}
 	if err := repo.CreateTaskSession(ctx, session); err != nil {
 		t.Fatalf("failed to create session: %v", err)

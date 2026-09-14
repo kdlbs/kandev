@@ -19,6 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
+	"github.com/kandev/kandev/internal/sysprompt"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -1148,6 +1149,71 @@ func queuedMessagePromptContent(queuedMsg *messagequeue.QueuedMessage) string {
 	return appendStepHandoffToPrompt(content, stepHandoffFromQueuedMetadata(queuedMsg.Metadata))
 }
 
+// prepareQueuedCIAutoFixOutcomeProtocol selects the protocol name from the
+// current session execution. It rewrites only the server-owned protocol block;
+// task prompt text and historical transcript content remain untouched.
+func (s *Service) prepareQueuedCIAutoFixOutcomeProtocol(
+	ctx context.Context, queuedMsg *messagequeue.QueuedMessage,
+) error {
+	if queuedMsg == nil || !isCIAutoFixMetadata(queuedMsg.Metadata) {
+		return nil
+	}
+	session, err := s.repo.GetTaskSession(ctx, queuedMsg.SessionID)
+	if err != nil {
+		return err
+	}
+	currentTool, ok := ciAutomationOutcomeToolForSession(session)
+	if !ok {
+		return errCIAutoFixMCPToolCatalogUnavailable
+	}
+	storedTool, _ := queuedMsg.Metadata[ciAutomationOutcomeToolMetadata].(string)
+	if storedTool == "" {
+		switch {
+		case strings.Contains(queuedMsg.Content, ciAutomationLegacyOutcomeTool):
+			storedTool = ciAutomationLegacyOutcomeTool
+		case strings.Contains(queuedMsg.Content, ciAutomationNeutralOutcomeTool):
+			storedTool = ciAutomationNeutralOutcomeTool
+		default:
+			return nil
+		}
+	}
+	if storedTool == currentTool {
+		return nil
+	}
+	updated, changed := replaceCIAutoFixOutcomeProtocol(queuedMsg.Content, storedTool, currentTool)
+	if !changed {
+		return fmt.Errorf("CI auto-fix outcome protocol is not recognized for queued delivery")
+	}
+	queuedMsg.Content = updated
+	queuedMsg.Metadata[ciAutomationOutcomeToolMetadata] = currentTool
+	return nil
+}
+
+func replaceCIAutoFixOutcomeProtocol(content, fromTool, toTool string) (string, bool) {
+	if strings.TrimSpace(fromTool) == "" || strings.TrimSpace(toTool) == "" || fromTool == toTool {
+		return content, fromTool == toTool
+	}
+	toProtocol := fmt.Sprintf(ciAutomationOutcomeProtocolTemplate, toTool)
+	fromProtocols := []string{fmt.Sprintf(ciAutomationOutcomeProtocolTemplate, fromTool)}
+	if fromTool == ciAutomationLegacyOutcomeTool {
+		fromProtocols = append(fromProtocols, ciAutomationLegacyOutcomeProtocol)
+	}
+	for _, fromProtocol := range fromProtocols {
+		for _, wrapped := range []bool{true, false} {
+			fromBlock := fromProtocol
+			toBlock := toProtocol
+			if wrapped {
+				fromBlock = sysprompt.Wrap(fromProtocol)
+				toBlock = sysprompt.Wrap(toProtocol)
+			}
+			if strings.Contains(content, fromBlock) {
+				return strings.Replace(content, fromBlock, toBlock, 1), true
+			}
+		}
+	}
+	return content, false
+}
+
 func (s *Service) recordQueuedUserMessage(
 	ctx context.Context,
 	queuedMsg *messagequeue.QueuedMessage,
@@ -1257,6 +1323,9 @@ func (s *Service) finishQueuedPassthroughExecution(
 	reservation *queuedDispatchReservation,
 	state *queuedPassthroughExecutionState,
 ) {
+	if state.dispatchErr != nil {
+		s.reconcileQueuedCIAutoFixDispatchFailure(ctx, queuedMsg)
+	}
 	s.finishQueuedMessageExecution(
 		ctx, identity.SessionID, identity.SessionID, queuedMsg, reservation,
 		isLifecycleAutomationMessage(queuedMsg),
@@ -1317,6 +1386,9 @@ func (s *Service) deliverQueuedPassthroughPrompt(
 	queuedMsg *messagequeue.QueuedMessage,
 	state *queuedPassthroughExecutionState,
 ) {
+	if state.dispatchErr = s.prepareQueuedCIAutoFixOutcomeProtocol(ctx, queuedMsg); state.dispatchErr != nil {
+		return
+	}
 	attachments := queuedMessageAttachmentsToV1(queuedMsg.Attachments)
 	promptContent := queuedMessagePromptContent(queuedMsg)
 	if state.dispatchErr = s.recordQueuedUserMessage(ctx, queuedMsg, attachments); state.dispatchErr != nil {
@@ -1433,6 +1505,14 @@ func (s *Service) executeQueuedMessageWithReservation(
 	}
 
 	attachments := queuedMessageAttachmentsToV1(queuedMsg.Attachments)
+	if err := s.prepareQueuedCIAutoFixOutcomeProtocol(promptCtx, queuedMsg); err != nil {
+		s.reconcileQueuedCIAutoFixDispatchFailure(promptCtx, queuedMsg)
+		s.finishQueuedMessageExecution(
+			promptCtx, callerSessionID, reservedSessionID, queuedMsg, reservation,
+			lifecyclePrompt, false, false, err,
+		)
+		return
+	}
 	promptContent := queuedMessagePromptContent(queuedMsg)
 	userMessageRecorded := false
 	deliveryAttempted := false

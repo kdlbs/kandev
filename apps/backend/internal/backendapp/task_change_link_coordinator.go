@@ -24,6 +24,39 @@ type taskChangeLinkCoordinator struct {
 	gitlab gitlabChangeLinkProvider
 }
 
+func (c taskChangeLinkCoordinator) ManageTaskChangeRequest(
+	ctx context.Context, req mcp.TaskChangeLinkRequest,
+) (mcp.TaskChangeLinkMutationResult, error) {
+	switch req.Operation {
+	case "", "link":
+		return c.simpleMutation(ctx, req, c.LinkTaskChange)
+	case "unlink":
+		return c.simpleMutation(ctx, req, c.UnlinkTaskChange)
+	case "replace":
+		return c.replaceTaskChangeResult(ctx, req)
+	default:
+		return taskChangeMutationFailure(req.TaskID, fmt.Errorf("unsupported task change operation %q", req.Operation))
+	}
+}
+
+func (c taskChangeLinkCoordinator) simpleMutation(
+	ctx context.Context,
+	req mcp.TaskChangeLinkRequest,
+	apply func(context.Context, mcp.TaskChangeLinkRequest) ([]mcp.TaskChangeLink, error),
+) (mcp.TaskChangeLinkMutationResult, error) {
+	links, err := apply(ctx, req)
+	if err != nil {
+		return taskChangeMutationFailure(req.TaskID, err)
+	}
+	return mcp.TaskChangeLinkMutationResult{TaskID: req.TaskID, Links: links, StateKnown: true}, nil
+}
+
+func taskChangeMutationFailure(taskID string, err error) (mcp.TaskChangeLinkMutationResult, error) {
+	return mcp.TaskChangeLinkMutationResult{
+		TaskID: taskID, OperationError: err.Error(), StateKnown: false,
+	}, err
+}
+
 const (
 	taskChangeProviderGitHub = "github"
 	taskChangeProviderGitLab = "gitlab"
@@ -56,49 +89,108 @@ func (c taskChangeLinkCoordinator) UnlinkTaskChange(ctx context.Context, req mcp
 }
 
 func (c taskChangeLinkCoordinator) ReplaceTaskChange(ctx context.Context, req mcp.TaskChangeLinkRequest) ([]mcp.TaskChangeLink, error) {
+	result, err := c.replaceTaskChangeResult(ctx, req)
+	return result.Links, err
+}
+
+func (c taskChangeLinkCoordinator) replaceTaskChangeResult(
+	ctx context.Context, req mcp.TaskChangeLinkRequest,
+) (mcp.TaskChangeLinkMutationResult, error) {
+	result := mcp.TaskChangeLinkMutationResult{TaskID: req.TaskID}
 	if req.Old == nil {
-		return nil, fmt.Errorf("current task change identity is required")
+		return taskChangeMutationFailure(req.TaskID, fmt.Errorf("current task change identity is required"))
 	}
 	// Replacing an association with the exact same identity is already the
 	// requested final state. Do not detach it after the idempotent link.
 	if req.Link == *req.Old {
-		return c.list(ctx, req.TaskID)
+		links, err := c.list(ctx, req.TaskID)
+		if err != nil {
+			return taskChangeMutationFailure(req.TaskID, err)
+		}
+		result.Links, result.StateKnown = links, true
+		return result, nil
 	}
 	if req.Link.Provider != req.Old.Provider {
-		return nil, fmt.Errorf("cross-provider task change replacement is not supported")
+		return taskChangeMutationFailure(req.TaskID, fmt.Errorf("cross-provider task change replacement is not supported"))
 	}
 	before, err := c.list(ctx, req.TaskID)
 	if err != nil {
-		return nil, err
+		return taskChangeMutationFailure(req.TaskID, err)
 	}
+	result.Links, result.StateKnown = before, true
 	newAlreadyLinked := taskChangeLinksContain(before, req.Link)
 	// Resolve and persist the incoming association first. A failed provider
 	// fetch therefore leaves the current association untouched.
 	if err := c.link(ctx, req.TaskID, req.Link); err != nil {
-		return nil, err
+		result.OperationError = err.Error()
+		return result, err
 	}
 	if err := c.unlink(ctx, req.TaskID, *req.Old); err != nil {
 		if newAlreadyLinked {
-			return nil, err
+			return c.readReplacementFailureState(ctx, result, err)
 		}
-		return c.rollbackReplacement(ctx, req.TaskID, req.Link, err)
+		return c.rollbackReplacementResult(ctx, req, result, err)
 	}
-	return c.list(ctx, req.TaskID)
+	links, listErr := c.list(ctx, req.TaskID)
+	if listErr != nil {
+		result.OperationError = fmt.Sprintf("replacement committed but active task change links are unavailable: %v", listErr)
+		result.StateKnown = false
+		result.Links = nil
+		return result, listErr
+	}
+	result.Links, result.StateKnown = links, true
+	return result, nil
 }
 
-func (c taskChangeLinkCoordinator) rollbackReplacement(
-	ctx context.Context, taskID string, newLink mcp.TaskChangeLink, originalErr error,
-) ([]mcp.TaskChangeLink, error) {
-	rollbackErr := c.unlink(ctx, taskID, newLink)
-	if rollbackErr == nil {
-		return nil, originalErr
-	}
-	activeLinks, stateErr := c.list(ctx, taskID)
-	state := fmt.Errorf("active task change links after failed replacement: %v", activeLinks)
+func (c taskChangeLinkCoordinator) readReplacementFailureState(
+	ctx context.Context, result mcp.TaskChangeLinkMutationResult, operationErr error,
+) (mcp.TaskChangeLinkMutationResult, error) {
+	links, stateErr := c.list(ctx, result.TaskID)
+	result.OperationError = operationErr.Error()
 	if stateErr != nil {
-		state = fmt.Errorf("active task change links unavailable after failed replacement: %w", stateErr)
+		result.StateKnown = false
+		result.Links = nil
+		return result, errors.Join(operationErr, fmt.Errorf("active task change links unavailable after failed replacement: %w", stateErr))
 	}
-	return activeLinks, errors.Join(originalErr, fmt.Errorf("rollback new task change link: %w", rollbackErr), state)
+	result.Links, result.StateKnown = links, true
+	return result, operationErr
+}
+
+func (c taskChangeLinkCoordinator) rollbackReplacementResult(
+	ctx context.Context,
+	req mcp.TaskChangeLinkRequest,
+	result mcp.TaskChangeLinkMutationResult,
+	operationErr error,
+) (mcp.TaskChangeLinkMutationResult, error) {
+	rollbackErr := c.unlink(ctx, req.TaskID, req.Link)
+	result.OperationError = operationErr.Error()
+	if rollbackErr == nil {
+		links, stateErr := c.list(ctx, req.TaskID)
+		if stateErr != nil {
+			result.StateKnown = false
+			result.Links = nil
+			return result, errors.Join(operationErr, fmt.Errorf("active task change links unavailable after rollback: %w", stateErr))
+		}
+		result.Links, result.StateKnown = links, true
+		return result, operationErr
+	}
+	result.RollbackError = rollbackErr.Error()
+	activeLinks, stateErr := c.list(ctx, req.TaskID)
+	if stateErr != nil {
+		result.StateKnown = false
+		result.Links = nil
+		return result, errors.Join(
+			operationErr,
+			fmt.Errorf("rollback new task change link: %w", rollbackErr),
+			fmt.Errorf("active task change links unavailable after failed replacement: %w", stateErr),
+		)
+	}
+	result.Links, result.StateKnown = activeLinks, true
+	return result, errors.Join(
+		operationErr,
+		fmt.Errorf("rollback new task change link: %w", rollbackErr),
+		fmt.Errorf("active task change links after failed replacement: %v", activeLinks),
+	)
 }
 
 func taskChangeLinksContain(links []mcp.TaskChangeLink, target mcp.TaskChangeLink) bool {
@@ -174,8 +266,22 @@ func (c taskChangeLinkCoordinator) unlink(ctx context.Context, taskID string, li
 		if err != nil {
 			return err
 		}
+		identityResolver := gitlabTaskChangeRequestAdapter{tasks: c.tasks}
 		for _, mr := range mrs {
-			if mr.RepositoryID == link.RepositoryID && mr.MRIID == link.Number {
+			if mr == nil || mr.MRIID != link.Number {
+				continue
+			}
+			repositoryID, identityStatus := identityResolver.resolveGitLabRepositoryIdentity(ctx, task, mr)
+			if identityStatus == mcp.TaskChangeRequestIdentityAmbiguous {
+				candidates := identityResolver.gitLabRepositoryCandidates(ctx, task, mr)
+				if _, matchesTarget := candidates[link.RepositoryID]; matchesTarget {
+					return fmt.Errorf("GitLab MR identity is ambiguous")
+				}
+			}
+			if strings.TrimSpace(mr.RepositoryID) == "" && identityStatus == mcp.TaskChangeRequestIdentityUnresolved {
+				return fmt.Errorf("GitLab MR identity is unresolved")
+			}
+			if identityStatus == mcp.TaskChangeRequestIdentityResolved && repositoryID == link.RepositoryID {
 				return c.gitlab.UnlinkTaskMR(ctx, task.WorkspaceID, mr.ID)
 			}
 		}
@@ -186,7 +292,8 @@ func (c taskChangeLinkCoordinator) unlink(ctx context.Context, taskID string, li
 }
 
 func (c taskChangeLinkCoordinator) list(ctx context.Context, taskID string) ([]mcp.TaskChangeLink, error) {
-	if _, _, err := c.taskRepository(ctx, taskID, ""); err != nil {
+	task, _, err := c.taskRepository(ctx, taskID, "")
+	if err != nil {
 		return nil, err
 	}
 	links := []mcp.TaskChangeLink{}
@@ -204,8 +311,20 @@ func (c taskChangeLinkCoordinator) list(ctx context.Context, taskID string) ([]m
 		if err != nil {
 			return nil, err
 		}
+		identityResolver := gitlabTaskChangeRequestAdapter{tasks: c.tasks}
 		for _, mr := range mrs {
-			links = append(links, mcp.TaskChangeLink{Provider: taskChangeProviderGitLab, RepositoryID: mr.RepositoryID, Number: mr.MRIID})
+			if mr == nil {
+				continue
+			}
+			repositoryID := strings.TrimSpace(mr.RepositoryID)
+			if repositoryID == "" {
+				resolvedID, identityStatus := identityResolver.resolveGitLabRepositoryIdentity(ctx, task, mr)
+				if identityStatus != mcp.TaskChangeRequestIdentityResolved {
+					return nil, fmt.Errorf("GitLab MR identity is unresolved or ambiguous")
+				}
+				repositoryID = resolvedID
+			}
+			links = append(links, mcp.TaskChangeLink{Provider: taskChangeProviderGitLab, RepositoryID: repositoryID, Number: mr.MRIID})
 		}
 	}
 	return links, nil

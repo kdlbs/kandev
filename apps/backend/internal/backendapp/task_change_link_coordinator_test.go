@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -16,12 +17,17 @@ import (
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
+	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
+	ws "github.com/kandev/kandev/pkg/websocket"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 type fakeGitLabChangeLinks struct {
@@ -151,9 +157,13 @@ func seedTaskChangeCoordinatorTask(
 	if err := repos.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: workspaceID, CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
+	provider := "gitlab"
+	if strings.Contains(host, "github.com") {
+		provider = "github"
+	}
 	if err := repos.CreateRepository(ctx, &models.Repository{
 		ID: repositoryID, WorkspaceID: workspaceID, Name: name, ProviderHost: host,
-		ProviderOwner: owner, ProviderName: name, CreatedAt: now, UpdatedAt: now,
+		Provider: provider, ProviderOwner: owner, ProviderName: name, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create repository: %v", err)
 	}
@@ -394,6 +404,130 @@ func TestTaskChangeCoordinatorUnlinksStaleAssociationWithoutCurrentRepository(t 
 	if len(links) != 0 || len(gitlabLinks.unlinked) != 1 || gitlabLinks.unlinked[0] != "stale" {
 		t.Fatalf("stale unlink result links=%#v unlinked=%#v", links, gitlabLinks.unlinked)
 	}
+}
+
+func TestTaskChangeCoordinatorUnlinksReadResolvedLegacyGitLabAssociation(t *testing.T) {
+	taskSvc, repos := newTaskChangeCoordinatorHarness(t)
+	seedTaskChangeCoordinatorTask(t, repos, "ws-1", "task-1", "repo-1", "https://gitlab.example.test", "group", "project")
+	gitlabLinks := &fakeGitLabChangeLinks{mrs: []*gitlab.TaskMR{{
+		ID: "legacy", TaskID: "task-1", RepositoryID: "", Host: "https://gitlab.example.test",
+		ProjectPath: "group/project", MRIID: 7,
+	}}}
+	adapter := gitlabTaskChangeRequestAdapter{tasks: taskSvc}
+	task, err := taskSvc.GetTask(context.Background(), "task-1")
+	require.NoError(t, err)
+	readChange := adapter.gitLabTaskChangeRequest(context.Background(), task, gitlabLinks.mrs[0])
+	require.NotNil(t, readChange.RepositoryID)
+	assert.Equal(t, "repo-1", *readChange.RepositoryID)
+
+	coordinator := taskChangeLinkCoordinator{tasks: taskSvc, gitlab: gitlabLinks}
+	links, err := coordinator.UnlinkTaskChange(context.Background(), mcphandlers.TaskChangeLinkRequest{
+		TaskID: "task-1",
+		Link:   mcphandlers.TaskChangeLink{Provider: "gitlab", RepositoryID: *readChange.RepositoryID, Number: readChange.Number},
+	})
+	require.NoError(t, err)
+	assert.Empty(t, links)
+	assert.Equal(t, []string{"legacy"}, gitlabLinks.unlinked)
+	assert.Empty(t, gitlabLinks.mrs)
+}
+
+func TestTaskChangeCoordinatorReplacesReadResolvedLegacyGitLabAssociation(t *testing.T) {
+	taskSvc, repos := newTaskChangeCoordinatorHarness(t)
+	seedTaskChangeCoordinatorTask(t, repos, "ws-1", "task-1", "repo-1", "https://gitlab.example.test", "group", "project")
+	gitlabLinks := &fakeGitLabChangeLinks{mrs: []*gitlab.TaskMR{{
+		ID: "legacy", TaskID: "task-1", RepositoryID: "", Host: "https://gitlab.example.test",
+		ProjectPath: "group/project", MRIID: 7,
+	}}}
+	adapter := gitlabTaskChangeRequestAdapter{tasks: taskSvc}
+	task, err := taskSvc.GetTask(context.Background(), "task-1")
+	require.NoError(t, err)
+	readChange := adapter.gitLabTaskChangeRequest(context.Background(), task, gitlabLinks.mrs[0])
+	require.NotNil(t, readChange.RepositoryID)
+
+	coordinator := taskChangeLinkCoordinator{tasks: taskSvc, gitlab: gitlabLinks}
+	result, err := coordinator.ManageTaskChangeRequest(context.Background(), mcphandlers.TaskChangeLinkRequest{
+		Operation: "replace",
+		TaskID:    "task-1",
+		Link:      mcphandlers.TaskChangeLink{Provider: "gitlab", RepositoryID: *readChange.RepositoryID, Number: 42},
+		Old:       &mcphandlers.TaskChangeLink{Provider: "gitlab", RepositoryID: *readChange.RepositoryID, Number: readChange.Number},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"legacy"}, gitlabLinks.unlinked)
+	assert.True(t, result.StateKnown)
+	assert.Equal(t, []mcphandlers.TaskChangeLink{{Provider: "gitlab", RepositoryID: "repo-1", Number: 42}}, result.Links)
+}
+
+func TestTaskChangeManagementDispatchesThroughHandlerAndCoordinator(t *testing.T) {
+	taskSvc, repos := newTaskChangeCoordinatorHarness(t)
+	seedTaskChangeCoordinatorTask(t, repos, "ws-1", "task-1", "repo-1", "https://gitlab.example.test", "group", "project")
+	gitlabLinks := &fakeGitLabChangeLinks{mrs: []*gitlab.TaskMR{{
+		ID: "legacy", TaskID: "task-1", RepositoryID: "", Host: "https://gitlab.example.test",
+		ProjectPath: "group/project", MRIID: 7,
+	}}}
+	response := dispatchTaskChangeManagement(t, taskSvc, repos, taskChangeLinkCoordinator{tasks: taskSvc, gitlab: gitlabLinks}, map[string]interface{}{
+		"operation": "replace", "task_id": "task-1", "caller_task_id": "task-caller",
+		"provider": "gitlab", "repository_id": "repo-1", "number": 42,
+		"old_provider": "gitlab", "old_repository_id": "repo-1", "old_number": 7,
+	})
+
+	require.Equal(t, ws.MessageTypeResponse, response.Type)
+	assert.Equal(t, []string{"legacy"}, gitlabLinks.unlinked)
+	assert.Len(t, gitlabLinks.mrs, 1)
+	assert.Equal(t, "linked-new", gitlabLinks.mrs[0].ID)
+	var result mcphandlers.TaskChangeLinkMutationResult
+	require.NoError(t, json.Unmarshal(response.Payload, &result))
+	assert.Equal(t, []mcphandlers.TaskChangeLink{{Provider: "gitlab", RepositoryID: "repo-1", Number: 42}}, result.Links)
+	assert.True(t, result.StateKnown)
+}
+
+func TestTaskChangeManagementDispatchesFailureCompensationStateThroughHandler(t *testing.T) {
+	taskSvc, repos := newTaskChangeCoordinatorHarness(t)
+	seedTaskChangeCoordinatorTask(t, repos, "ws-1", "task-1", "repo-1", "https://gitlab.example.test", "group", "project")
+	gitlabLinks := &fakeGitLabChangeLinks{
+		mrs: []*gitlab.TaskMR{{
+			ID: "legacy", TaskID: "task-1", RepositoryID: "", Host: "https://gitlab.example.test",
+			ProjectPath: "group/project", MRIID: 7,
+		}},
+		unlinkErr: map[string]error{"legacy": errors.New("old unlink failed"), "linked-new": errors.New("rollback failed")},
+	}
+	response := dispatchTaskChangeManagement(t, taskSvc, repos, taskChangeLinkCoordinator{tasks: taskSvc, gitlab: gitlabLinks}, map[string]interface{}{
+		"operation": "replace", "task_id": "task-1", "caller_task_id": "task-caller",
+		"provider": "gitlab", "repository_id": "repo-1", "number": 42,
+		"old_provider": "gitlab", "old_repository_id": "repo-1", "old_number": 7,
+	})
+
+	require.Equal(t, ws.MessageTypeError, response.Type)
+	var errorPayload ws.ErrorPayload
+	require.NoError(t, json.Unmarshal(response.Payload, &errorPayload))
+	assert.Equal(t, "old unlink failed", errorPayload.Details["operation_error"])
+	assert.Equal(t, "rollback failed", errorPayload.Details["rollback_error"])
+	assert.Equal(t, true, errorPayload.Details["state_known"])
+	assert.Len(t, errorPayload.Details["links"], 2)
+}
+
+func dispatchTaskChangeManagement(
+	t *testing.T,
+	taskSvc *taskservice.Service,
+	taskRepo *sqliterepo.Repository,
+	coordinator mcphandlers.TaskChangeLinkService,
+	payload map[string]interface{},
+) *ws.Message {
+	t.Helper()
+	log := newTestLogger()
+	h := mcphandlers.NewHandlers(taskSvc, nil, nil, nil, nil, taskRepo, taskRepo, nil, nil, nil, nil, nil, log)
+	h.SetTaskChangeLinkService(coordinator)
+	dispatcher := ws.NewDispatcher()
+	h.RegisterHandlers(dispatcher)
+	ctx := mcpscope.WithPrincipal(context.Background(), mcpscope.Principal{
+		WorkspaceID: "ws-1", CallerTaskID: "task-caller", CallerSessionID: "session-1",
+		Surface: mcpprofile.SurfaceKanbanTask,
+	})
+	msg, err := ws.NewRequest("management-test", ws.ActionMCPManageTaskChangeRequest, payload)
+	require.NoError(t, err)
+	response, err := dispatcher.Dispatch(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, response)
+	return response
 }
 
 func TestTaskChangeCoordinatorRejectsTaskRepositoryFromAnotherWorkspace(t *testing.T) {

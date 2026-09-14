@@ -260,15 +260,15 @@ func TestCIAutomationProviderGenerationIncludesHeadAndCheckExecution(t *testing.
 
 func TestCIAutomationOutcomeProtocolVisibility(t *testing.T) {
 	structured := ciAutomationAppendOutcomeProtocol("repair the PR", false)
-	if !strings.Contains(structured, "report_pr_auto_fix_outcome_kandev") {
+	if !strings.Contains(structured, "report_change_request_auto_fix_outcome_kandev") {
 		t.Fatal("structured prompt omitted the outcome tool instructions")
 	}
-	if visible := sysprompt.StripSystemContent(structured); strings.Contains(visible, "report_pr_auto_fix_outcome_kandev") {
+	if visible := sysprompt.StripSystemContent(structured); strings.Contains(visible, "report_change_request_auto_fix_outcome_kandev") {
 		t.Fatalf("structured outcome instructions leaked into visible chat: %s", visible)
 	}
 
 	passthrough := ciAutomationAppendOutcomeProtocol("repair the PR", true)
-	if !strings.Contains(passthrough, "report_pr_auto_fix_outcome_kandev") {
+	if !strings.Contains(passthrough, "report_change_request_auto_fix_outcome_kandev") {
 		t.Fatal("passthrough prompt omitted the outcome tool instructions")
 	}
 }

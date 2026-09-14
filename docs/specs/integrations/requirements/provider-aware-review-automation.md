@@ -2,7 +2,7 @@
 status: active
 system: integrations
 created: 2026-08-03
-updated: 2026-08-03
+updated: 2026-09-14
 owners:
   - kandev
 ---
@@ -21,10 +21,10 @@ Task agents currently discover both GitHub pull-request automation tools and Git
 #### Acceptance criteria
 
 - **AC-INTEGRATIONS-PROVIDER-AWARE-REVIEW-AUTOMATION-001.1:** The backend derives a normalized set of review-automation providers from all repositories attached to the task. The primary repository has no special precedence.
-- **AC-INTEGRATIONS-PROVIDER-AWARE-REVIEW-AUTOMATION-001.2:** A GitHub-only task exposes `get_task_pr_automation_kandev` and `update_task_pr_automation_kandev`, but not the corresponding MR tools.
-- **AC-INTEGRATIONS-PROVIDER-AWARE-REVIEW-AUTOMATION-001.3:** A GitLab-only task exposes `get_task_mr_automation_kandev` and `update_task_mr_automation_kandev`, but not the corresponding PR tools.
-- **AC-INTEGRATIONS-PROVIDER-AWARE-REVIEW-AUTOMATION-001.4:** A mixed GitHub/GitLab task exposes both pairs.
-- **AC-INTEGRATIONS-PROVIDER-AWARE-REVIEW-AUTOMATION-001.5:** A task with only local, empty, unknown, or currently unsupported providers exposes neither pair. Provider names are normalized and matched against an explicit allowlist; unknown values fail closed.
+- **AC-INTEGRATIONS-PROVIDER-AWARE-REVIEW-AUTOMATION-001.2:** **Superseded at the 2026-09-14 cutover by AC-INTEGRATIONS-TASK-CHANGE-LINK-MCP-002.2.** A GitHub-only task exposes `get_task_pr_automation_kandev` and `update_task_pr_automation_kandev`, but not the corresponding MR tools.
+- **AC-INTEGRATIONS-PROVIDER-AWARE-REVIEW-AUTOMATION-001.3:** **Superseded at the 2026-09-14 cutover by AC-INTEGRATIONS-TASK-CHANGE-LINK-MCP-002.2.** A GitLab-only task exposes `get_task_mr_automation_kandev` and `update_task_mr_automation_kandev`, but not the corresponding PR tools.
+- **AC-INTEGRATIONS-PROVIDER-AWARE-REVIEW-AUTOMATION-001.4:** **Superseded at the 2026-09-14 cutover by AC-INTEGRATIONS-TASK-CHANGE-LINK-MCP-002.2.** A mixed GitHub/GitLab task exposes both pairs.
+- **AC-INTEGRATIONS-PROVIDER-AWARE-REVIEW-AUTOMATION-001.5:** **Superseded at the 2026-09-14 cutover by AC-INTEGRATIONS-TASK-CHANGE-LINK-MCP-002.2.** A task with only local, empty, unknown, or currently unsupported providers exposes neither pair. Provider names are normalized and matched against an explicit allowlist; unknown values fail closed.
 - **AC-INTEGRATIONS-PROVIDER-AWARE-REVIEW-AUTOMATION-001.6:** All provider-neutral task tools remain available according to the existing MCP mode.
 - **AC-INTEGRATIONS-PROVIDER-AWARE-REVIEW-AUTOMATION-001.7:** Tool visibility is capability discovery, not authorization. Backend handlers remain registered and enforce task, workspace, provider, and credential rules for direct or stale calls.
 - **AC-INTEGRATIONS-PROVIDER-AWARE-REVIEW-AUTOMATION-001.8:** Initial launch and resume carry the normalized provider set from the orchestrator through lifecycle into agentctl. Agentctl enforces the supplied set and does not infer provider identity from filesystem remotes.
@@ -53,22 +53,16 @@ different GitHub and GitLab feature sets.
 
 ### Provider-scoped MCP discovery
 
-- The backend derives a normalized set of review-automation providers from all
-  repositories attached to the task. The primary repository has no special
-  precedence.
-- A GitHub-only task exposes `get_task_pr_automation_kandev` and
-  `update_task_pr_automation_kandev`, but not the corresponding MR tools.
-- A GitLab-only task exposes `get_task_mr_automation_kandev` and
-  `update_task_mr_automation_kandev`, but not the corresponding PR tools.
-- A mixed GitHub/GitLab task exposes both pairs.
-- A task with only local, empty, unknown, or currently unsupported providers
-  exposes neither pair. Provider names are normalized and matched against an
-  explicit allowlist; unknown values fail closed.
-- All provider-neutral task tools remain available according to the existing MCP
-  mode.
-- Tool visibility is capability discovery, not authorization. Backend handlers
-  remain registered and enforce task, workspace, provider, and credential rules
-  for direct or stale calls.
+The provider-neutral change-request contract supersedes the old provider-specific
+tool-name discovery criteria at cutover. See the [task change request MCP system
+design](../system-design/task-change-link-mcp.md) for the four released tools,
+provider capability rules, and the old-runtime transport transition.
+
+The backend still derives a normalized provider union from every repository
+attached to the task. The primary repository has no special precedence. All
+provider-neutral task tools remain subject to the existing MCP mode, and tool
+visibility remains discovery rather than authorization. Backend handlers enforce
+task, workspace, provider, and credential rules for direct or stale calls.
 
 ### Runtime propagation and refresh
 
@@ -262,3 +256,11 @@ releases the per-MR singleflight for later work.
 - Concurrent GitLab poller fan-out.
 - Live provider refresh after repository removal.
 - Persisting reviewer snapshots or changing public automation data models.
+
+## Proposed contract transition
+
+The [task change request MCP draft](task-change-link-mcp.md) proposes replacing
+the provider-specific tool-name criteria at cutover. Current runtime propagation,
+provider union, authorization, and lifecycle behavior remain the baseline.
+The [successor plan](../../../plans/provider-neutral-change-request-mcp/plan.md)
+owns implementation and reconciliation of the discovery criteria and duplicate prose.
