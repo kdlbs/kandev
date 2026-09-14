@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
@@ -29,9 +30,26 @@ func TestCompletedTaskFollowUpAdmissionIsConversationalOnly(t *testing.T) {
 
 			agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
 			svc := createEngineService(t, repo, steps, agentMgr)
+			// The Done step's on_enter dispatch runs on a background goroutine
+			// (launchProcessOnEnter) and tags the reused session as a workflow
+			// switch, which clears the conversational follow-up marker. Phase B
+			// writes that marker, so it must observe the on_enter settle first —
+			// otherwise the marker read races the goroutine and flakes.
+			onEnterDone := make(chan struct{})
+			svc.onProcessOnEnterComplete = func() {
+				select {
+				case onEnterDone <- struct{}{}:
+				default:
+				}
+			}
 			session, err := repo.GetTaskSession(ctx, "session")
 			require.NoError(t, err)
 			require.True(t, svc.processOnTurnCompleteViaEngine(ctx, "task", session))
+			select {
+			case <-onEnterDone:
+			case <-time.After(5 * time.Second):
+				t.Fatal("terminal on_enter dispatch did not settle before the follow-up reopen")
+			}
 
 			task, err := repo.GetTask(ctx, "task")
 			require.NoError(t, err)
