@@ -70,6 +70,24 @@ func TestDefinitionsNeedsYouInboxLabelIsInbox(t *testing.T) {
 	if def.Label != "Inbox" {
 		t.Fatalf("Label = %q, want %q", def.Label, "Inbox")
 	}
+	if def.EnvVar != "KANDEV_FEATURES_NEEDS_YOU_INBOX" {
+		t.Fatalf("EnvVar = %q, want KANDEV_FEATURES_NEEDS_YOU_INBOX", def.EnvVar)
+	}
+	if def.Stability != StabilityExperimental {
+		t.Fatalf("Stability = %q, want %q", def.Stability, StabilityExperimental)
+	}
+	if def.RiskLevel != RiskLow {
+		t.Fatalf("RiskLevel = %q, want %q", def.RiskLevel, RiskLow)
+	}
+	if def.RiskDescription == "" {
+		t.Fatal("RiskDescription empty")
+	}
+	if !def.RestartRequired {
+		t.Fatal("RestartRequired = false, want true")
+	}
+	if !def.Mutable {
+		t.Fatal("Mutable = false, want true")
+	}
 }
 
 func TestDefinitionsIncludeCanvasMetadata(t *testing.T) {
