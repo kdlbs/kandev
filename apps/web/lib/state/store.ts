@@ -26,6 +26,7 @@ import {
   createPluginsSlice,
   createReviewSlice,
   createNeedsYouInboxSlice,
+  createFailedInboxSlice,
 } from "./slices";
 
 // Re-export all types from slices for backwards compatibility.
@@ -83,6 +84,7 @@ export function createAppStore(initialState?: HydrationState) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createReviewSlice(set as any),
       ...createNeedsYouInboxSlice(set),
+      ...createFailedInboxSlice(set),
       // Re-assert merged initial state so caller-supplied values win over slice defaults.
       ...buildStateOverrides(merged),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

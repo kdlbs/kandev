@@ -45,6 +45,7 @@ import {
   defaultPluginsState,
   defaultReviewState,
   defaultNeedsYouInboxState,
+  defaultFailedInboxState,
 } from "./slices";
 import type {
   WorkspaceState,
@@ -219,6 +220,10 @@ export type AppState = KanbanSlice & {
   // Needs-you Inbox slice (actions merged via NeedsYouInboxSliceActions
   // intersection on AppState)
   needsYouInbox: (typeof defaultNeedsYouInboxState)["needsYouInbox"];
+
+  // Failed Inbox slice (actions merged via FailedInboxSliceActions
+  // intersection on AppState)
+  failedInbox: (typeof defaultFailedInboxState)["failedInbox"];
 
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
