@@ -63,6 +63,7 @@ Run from repository root; each Go command has its own working directory:
 (cd apps/backend && GOCACHE=/tmp/kandev-workspace-enum-go-cache go test ./internal/mcp/server -run 'TestCreateTaskWorkspaceMode|TestCreateTask_ToolSchema_HasParentID|TestToolArgumentValidation|TestMCPAttachmentObserverPublishesStructuredInputSchema' -count=1)
 (cd apps/backend && GOCACHE=/tmp/kandev-workspace-enum-go-cache go test ./internal/mcp/handlers -run 'TestResolveMCPWorkspacePolicyCompatibility|TestHandleCreateTask_Subtask(DefaultsToParentWorkspaceAndWorkflow|CanRequestNewWorkspaceMode)$' -count=1)
 (cd apps/backend && GOCACHE=/tmp/kandev-workspace-enum-go-cache go test ./internal/mcp/server -run 'TestServerMode(Config|Office)_RegistersCorrectTools|TestServerSurfaceAutomationHasFixedCoordinatorCatalog' -count=1)
+(cd apps/backend && GOCACHE=/tmp/kandev-workspace-enum-go-cache go test ./internal/backendapp -run TestExternalMCPTaskModesReachPersistenceAndManagement -count=1)
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
 python3 scripts/list-docs.py validate
@@ -139,3 +140,17 @@ transient session status from this work order and its plan. Revalidated with
 `python3 scripts/lint-spec-files.py --all`, and `git diff --check`; all passed.
 This correction changes documentation only; the implementation and test
 commands above remain unchanged.
+
+Claude review follow-up adds a real external MCP HTTP composition case in
+`backendapp/mcp_workspace_mode_test.go`: an exact `inherit_parent` value
+without `parent_id` passes schema validation, returns the backend parent
+requirement error, and leaves persisted tasks unchanged. Direct policy trim
+cases now explain the backend-versus-MCP boundary without implying that raw
+WebSocket clients can invoke MCP actions. This is test-only coverage of
+existing behavior, so no production implementation changed.
+
+Follow-up validation: the external MCP composition test and direct resolver
+test passed, as did documentation catalog validation, specification lint, and
+`git diff --check`. The HTTP test required local socket permission; its first
+sandboxed attempt failed to bind a listener, and the socket-enabled retry
+passed. The new case covers existing behavior and required no production fix.

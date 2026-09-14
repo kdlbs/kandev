@@ -54,6 +54,9 @@ records this small field-level compatibility consequence.
   `TestHandleCreateTask_SubtaskCanRequestNewWorkspaceMode`; proposed
   `TestResolveMCPWorkspacePolicyCompatibility` in a dedicated handler test file
   covers unchanged direct policy semantics.
+- AC 004.3: `backendapp.TestExternalMCPTaskModesReachPersistenceAndManagement`
+  sends inheritance without a parent over real MCP HTTP, checks the backend
+  error rather than an enum failure, and verifies no task was created.
 
 AC suffixes refer to `AC-TASKS-MCP-WORKSPACE-MODE-`.
 Go protocol/dispatch coverage is the end-to-end evidence for this MCP-only

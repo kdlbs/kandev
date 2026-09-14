@@ -21,6 +21,8 @@ func TestResolveMCPWorkspacePolicyCompatibility(t *testing.T) {
 		{name: "inherit needs parent", mode: "inherit_parent", wantError: "requires parent_id"},
 		{name: "new root", mode: "new_workspace", want: "new_workspace"},
 		{name: "new child", parent: "parent", mode: "new_workspace", want: "new_workspace"},
+		// Direct backend policy handling retains trimming; MCP schema validation
+		// rejects padded input before it reaches this resolver.
 		{name: "trim inheritance", parent: "parent", mode: " inherit_parent ", want: "inherit_parent"},
 		{name: "trim new", mode: " new_workspace ", want: "new_workspace"},
 		{name: "shared", mode: "shared", wantError: "invalid workspace_mode"},
