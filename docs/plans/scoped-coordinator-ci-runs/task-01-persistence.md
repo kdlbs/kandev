@@ -5,7 +5,14 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/integrations/scoped-coordinator-ci-runs.md"
+requirements:
+  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-004
+  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-006
+acceptance_criteria:
+  - AC-INTEGRATIONS-SCOPED-CI-RUNS-004.1
+  - AC-INTEGRATIONS-SCOPED-CI-RUNS-006.2
+system_design:
+  - ../../specs/integrations/system-design/scoped-coordinator-ci-runs.md
 ---
 
 # Task 01: Persist scoped grants and idempotent CI requests

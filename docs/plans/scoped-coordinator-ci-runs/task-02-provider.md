@@ -5,7 +5,15 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/integrations/scoped-coordinator-ci-runs.md"
+requirements:
+  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-002
+  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-003
+acceptance_criteria:
+  - AC-INTEGRATIONS-SCOPED-CI-RUNS-002.1
+  - AC-INTEGRATIONS-SCOPED-CI-RUNS-002.3
+  - AC-INTEGRATIONS-SCOPED-CI-RUNS-003.1
+system_design:
+  - ../../specs/integrations/system-design/scoped-coordinator-ci-runs.md
 ---
 
 # Task 02: Add server-owned GitHub Actions operations

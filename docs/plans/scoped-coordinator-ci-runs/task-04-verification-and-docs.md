@@ -5,7 +5,15 @@ status: done
 wave: 3
 depends_on: ["03-policy-and-mcp"]
 plan: "plan.md"
-spec: "../../specs/integrations/scoped-coordinator-ci-runs.md"
+requirements:
+  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-003
+  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-005
+acceptance_criteria:
+  - AC-INTEGRATIONS-SCOPED-CI-RUNS-003.2
+  - AC-INTEGRATIONS-SCOPED-CI-RUNS-003.5
+  - AC-INTEGRATIONS-SCOPED-CI-RUNS-005.1
+system_design:
+  - ../../specs/integrations/system-design/scoped-coordinator-ci-runs.md
 ---
 
 # Task 04: Verify fixture policy and document rollout

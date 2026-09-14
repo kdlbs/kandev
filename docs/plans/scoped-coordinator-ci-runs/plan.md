@@ -1,16 +1,35 @@
 ---
-title: Scoped coordinator CI runs implementation plan
-status: complete
-spec: ../../specs/integrations/scoped-coordinator-ci-runs.md
+created: 2026-08-30
+status: done
+requirements:
+  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-001
+  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-002
+  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-003
+  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-004
+  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-005
+  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-006
+system_design:
+  - ../../specs/integrations/system-design/scoped-coordinator-ci-runs.md
+legacy_specs: []
 ---
 
 # Scoped coordinator CI runs implementation plan
 
 ## Goal
 
-Implement the server-owned trust boundary in four independently verifiable
-layers: durable authority/idempotency, GitHub App Actions transport, policy
-service, and MCP composition/documentation.
+Implement the server-owned trust boundary in independently verifiable layers:
+durable authority/idempotency, GitHub App Actions transport, policy service,
+and MCP composition/documentation. The delivery package implements the
+[scoped coordinator CI run requirements](../../specs/integrations/requirements/scoped-coordinator-ci-runs.md)
+per the [system design](../../specs/integrations/system-design/scoped-coordinator-ci-runs.md).
+
+## Work orders
+
+1. [Task 01: Persist scoped grants and idempotent CI requests](task-01-persistence.md)
+2. [Task 02: Add server-owned GitHub Actions operations](task-02-provider.md)
+3. [Task 03: Enforce policy and expose the closed MCP request](task-03-policy-and-mcp.md)
+4. [Task 04: Verify fixture policy and document rollout](task-04-verification-and-docs.md)
+5. [Task 05: Close scoped CI review findings](task-05-review-remediation.md)
 
 ## Sequence
 

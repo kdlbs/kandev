@@ -5,7 +5,17 @@ status: done
 wave: 4
 depends_on: ["04-verification-and-docs"]
 plan: "plan.md"
-spec: "../../specs/integrations/scoped-coordinator-ci-runs.md"
+requirements:
+  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-004
+  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-005
+  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-006
+acceptance_criteria:
+  - AC-INTEGRATIONS-SCOPED-CI-RUNS-004.2
+  - AC-INTEGRATIONS-SCOPED-CI-RUNS-005.3
+  - AC-INTEGRATIONS-SCOPED-CI-RUNS-005.4
+  - AC-INTEGRATIONS-SCOPED-CI-RUNS-006.2
+system_design:
+  - ../../specs/integrations/system-design/scoped-coordinator-ci-runs.md
 ---
 
 # Task 05: Close scoped CI review findings
