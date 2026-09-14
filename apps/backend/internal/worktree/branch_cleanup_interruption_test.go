@@ -24,6 +24,11 @@ type failOnceArchivedCompactionCompleteStore struct {
 	failed bool
 }
 
+type failOnceBranchRecoveryRestoredStore struct {
+	*SQLiteStore
+	failed bool
+}
+
 type panicArchivedCandidateStore struct {
 	*SQLiteStore
 }
@@ -40,6 +45,16 @@ func (s *failOnceArchivedCompactionCompleteStore) PersistArchivedBranchCompactio
 		return false, errors.New("injected compaction completion failure")
 	}
 	return s.SQLiteStore.PersistArchivedBranchCompactionComplete(ctx, worktreeID, expectedRecoveryHead)
+}
+
+func (s *failOnceBranchRecoveryRestoredStore) PersistBranchRecoveryRestored(
+	ctx context.Context, worktreeID, expectedRecoveryHead string,
+) (bool, error) {
+	if !s.failed {
+		s.failed = true
+		return false, errors.New("injected recovery finalization failure")
+	}
+	return s.SQLiteStore.PersistBranchRecoveryRestored(ctx, worktreeID, expectedRecoveryHead)
 }
 
 func (s *cancelAfterArchivedRecoveryStore) PersistArchivedBranchRecoveryHead(
@@ -217,6 +232,53 @@ func TestRecoverBranchStatus_RetainsMetadataWhenRecoveryRefDeleteFails(t *testin
 	}
 	if got := strings.TrimSpace(runGit(t, wt.RepositoryPath, "rev-parse", recoveryRefName(wt.ID))); got != wantHead {
 		t.Fatalf("recovery ref head = %q, want %q", got, wantHead)
+	}
+}
+
+// Reviewer-requested contract coverage: a failure after the recovery ref is
+// removed must leave the local branch and durable metadata retryable.
+func TestRecoverBranchStatus_RetriesAfterRecoveryMetadataClearFails(t *testing.T) {
+	mgr, store, wt, wantHead := archivedIntegratedBranchForMaintenance(t, "recover-finalize-failure")
+	ctx := context.Background()
+	receipt, err := mgr.MaintainArchivedBranches(ctx, 1)
+	if err != nil || receipt.Deleted != 1 {
+		t.Fatalf("compact archived branch: receipt=%+v err=%v", receipt, err)
+	}
+	persisted, err := store.GetWorktreeByID(ctx, wt.ID)
+	if err != nil {
+		t.Fatalf("load compacted branch: %v", err)
+	}
+
+	mgr.store = &failOnceBranchRecoveryRestoredStore{SQLiteStore: store}
+	if status := mgr.RecoverBranchStatus(ctx, persisted); status != BranchStatusLocal {
+		t.Fatalf("recovery status after metadata failure = %q, want local", status)
+	}
+	interrupted, err := store.GetWorktreeByID(ctx, wt.ID)
+	if err != nil {
+		t.Fatalf("load interrupted recovery: %v", err)
+	}
+	if interrupted.RecoveryHeadSHA != wantHead || interrupted.BranchCompactedAt == nil {
+		t.Fatalf("interrupted recovery metadata = head %q compacted %v, want head %q and marker",
+			interrupted.RecoveryHeadSHA, interrupted.BranchCompactedAt, wantHead)
+	}
+	if got := strings.TrimSpace(runGit(t, wt.RepositoryPath, "rev-parse", "refs/heads/"+wt.Branch)); got != wantHead {
+		t.Fatalf("restored branch head = %q, want %q", got, wantHead)
+	}
+	if exists, err := mgr.localBranchRefExists(ctx, wt.RepositoryPath, recoveryRefName(wt.ID)); err != nil || exists {
+		t.Fatalf("recovery ref after interrupted finalization: exists=%v err=%v, want absent", exists, err)
+	}
+
+	mgr.store = store
+	if status := mgr.RecoverBranchStatus(ctx, interrupted); status != BranchStatusLocal {
+		t.Fatalf("recovery status after retry = %q, want local", status)
+	}
+	finalized, err := store.GetWorktreeByID(ctx, wt.ID)
+	if err != nil {
+		t.Fatalf("load finalized recovery: %v", err)
+	}
+	if finalized.RecoveryHeadSHA != "" || finalized.BranchCompactedAt != nil {
+		t.Fatalf("finalized recovery metadata = head %q compacted %v, want cleared",
+			finalized.RecoveryHeadSHA, finalized.BranchCompactedAt)
 	}
 }
 
