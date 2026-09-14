@@ -252,6 +252,7 @@ func (a *taskCreatorAdapter) CreateOfficeTaskInWorkflow(
 func (a *taskCreatorAdapter) CreateOfficeSubtask(
 	ctx context.Context,
 	parentTaskID, assigneeAgentID, title, description string,
+	metadata map[string]interface{},
 ) (string, error) {
 	parent, err := a.taskSvc.GetTask(ctx, parentTaskID)
 	if err != nil {
@@ -261,6 +262,7 @@ func (a *taskCreatorAdapter) CreateOfficeSubtask(
 		Title:          title,
 		Description:    description,
 		AgentProfileID: assigneeAgentID,
+		Metadata:       metadata,
 	})
 }
 

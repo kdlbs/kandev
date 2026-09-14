@@ -125,6 +125,7 @@ func (r *handlerTaskCreator) CreateOfficeSubtaskAsAgent(
 	assigneeAgentID string,
 	_ string,
 	_ string,
+	_ string,
 ) (string, error) {
 	r.calls++
 	r.assignees = append(r.assignees, assigneeAgentID)

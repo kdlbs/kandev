@@ -18,6 +18,11 @@ type ChildTaskSpec struct {
 	WorkflowID     string
 	StepID         string
 	AgentProfileID string
+	// Metadata is copied verbatim onto the new task's metadata column.
+	// Office uses it to persist the task-boundary causation carrier
+	// (AC-OFFICE-RUN-CAUSATION-001.5/.18) when the caller resolved one;
+	// nil for callers with nothing to carry.
+	Metadata map[string]interface{}
 }
 
 // CreateChildTask creates a new task whose parent_id is parent.ID. The
@@ -60,6 +65,7 @@ func (s *Service) CreateChildTask(
 		Origin:                 models.TaskOriginAgentCreated,
 		ProjectID:              parent.ProjectID,
 		WorkspacePolicy:        &WorkspacePolicy{Mode: workspaceModeInheritParent},
+		Metadata:               spec.Metadata,
 	}
 	result, err := s.CreateTask(ctx, req)
 	if err != nil {

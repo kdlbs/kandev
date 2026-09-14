@@ -130,6 +130,7 @@ func TestActionsCreateSubtaskPreservesCallerIdentity(t *testing.T) {
 		AgentID:     "agent-1",
 		WorkspaceID: "ws-1",
 		TaskID:      "task-parent",
+		RunID:       "run-1",
 		Capabilities: Capabilities{
 			CanCreateSubtasks: true,
 		},
@@ -155,6 +156,12 @@ func TestActionsCreateSubtaskPreservesCallerIdentity(t *testing.T) {
 	}
 	if call.ParentTaskID != "task-parent" || call.AssigneeAgentID != "agent-2" {
 		t.Fatalf("unexpected task routing: %+v", call)
+	}
+	// AC-OFFICE-RUN-CAUSATION-001.5: a subtask creation is an Office
+	// trigger exactly like a root task creation, so the invoking run must
+	// reach the task creator as the causing run.
+	if call.CausingRunID != "run-1" {
+		t.Errorf("causingRunID = %q, want run-1 (the invoking run)", call.CausingRunID)
 	}
 }
 
@@ -241,7 +248,7 @@ func TestActionsCreateTaskWithParentUsesScopedSubtaskCapability(t *testing.T) {
 	}}
 	actions := NewActions(ActionDependencies{Tasks: creator})
 	runCtx := RunContext{
-		AgentID: "agent-1", WorkspaceID: "ws-1", TaskID: "task-1",
+		AgentID: "agent-1", WorkspaceID: "ws-1", TaskID: "task-1", RunID: "run-1",
 		Capabilities: Capabilities{
 			CanCreateSubtasks: true,
 			AllowedTaskIDs:    []string{"parent-1"},
@@ -256,6 +263,12 @@ func TestActionsCreateTaskWithParentUsesScopedSubtaskCapability(t *testing.T) {
 	}
 	if taskID != "child-1" || len(creator.calls) != 1 || creator.calls[0].ParentTaskID != "parent-1" {
 		t.Fatalf("task id/calls = %q/%#v", taskID, creator.calls)
+	}
+	// AC-OFFICE-RUN-CAUSATION-001.5: CreateTask's parent-task branch is the
+	// same Office trigger as CreateSubtask; it must thread the invoking run
+	// through identically.
+	if creator.calls[0].CausingRunID != "run-1" {
+		t.Errorf("causingRunID = %q, want run-1 (the invoking run)", creator.calls[0].CausingRunID)
 	}
 }
 
@@ -1198,6 +1211,7 @@ func (c *recordingTaskCreator) CreateOfficeSubtaskAsAgent(
 	assigneeAgentID string,
 	title string,
 	description string,
+	causingRunID string,
 ) (string, error) {
 	c.calls = append(c.calls, createTaskCall{
 		CallerAgentID:   callerAgentID,
@@ -1205,6 +1219,7 @@ func (c *recordingTaskCreator) CreateOfficeSubtaskAsAgent(
 		AssigneeAgentID: assigneeAgentID,
 		Title:           title,
 		Description:     description,
+		CausingRunID:    causingRunID,
 	})
 	if c.taskID != "" {
 		return c.taskID, nil

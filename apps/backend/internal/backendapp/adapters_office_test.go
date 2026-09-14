@@ -275,6 +275,64 @@ func assertRoutineFireCarrier(t *testing.T, metadata map[string]interface{}, wan
 	}
 }
 
+// TestTaskCreatorAdapterCreateOfficeSubtaskPassesMetadataThrough covers the
+// AC-OFFICE-RUN-CAUSATION-001.5/.18 carrier-writing fix: the adapter must
+// forward CreateOfficeSubtask's metadata parameter into ChildTaskSpec so the
+// task-boundary causation carrier a caller resolved actually lands on the
+// created child task's persisted metadata, exactly as CreateOfficeTaskAsAgent
+// already does for a root task.
+func TestTaskCreatorAdapterCreateOfficeSubtaskPassesMetadataThrough(t *testing.T) {
+	adapter, taskSvc := newOfficeTaskAdapterHarness(t)
+	ctx := context.Background()
+
+	parentTaskID, err := adapter.CreateOfficeTaskAsAgent(
+		ctx, "ws-1", "project-1", "agent-worker", "Parent task", "Parent", nil,
+	)
+	if err != nil {
+		t.Fatalf("create parent task: %v", err)
+	}
+
+	carrier := map[string]interface{}{
+		models.MetaKeyOfficeCarrierCausationID:    "causation-1",
+		models.MetaKeyOfficeCarrierCausationDepth: 1,
+		models.MetaKeyOfficeCarrierCreatingRunID:  "run-1",
+		models.MetaKeyOfficeCarrierHumanRooted:    false,
+		models.MetaKeyOfficeCarrierRoutineID:      "",
+		models.MetaKeyOfficeCarrierActorKind:      string(officemodels.ActorKindAgent),
+		models.MetaKeyOfficeCarrierActorID:        "agent-worker",
+	}
+	// Metadata round-trips through a JSON column: numbers come back as
+	// float64 regardless of the concrete numeric type written.
+	wantMetadata := map[string]interface{}{}
+	for k, v := range carrier {
+		wantMetadata[k] = v
+	}
+	wantMetadata[models.MetaKeyOfficeCarrierCausationDepth] = float64(1)
+
+	childTaskID, err := adapter.CreateOfficeSubtask(
+		ctx, parentTaskID, "agent-assignee", "Child task", "A subtask", carrier,
+	)
+	if err != nil {
+		t.Fatalf("CreateOfficeSubtask: %v", err)
+	}
+	if childTaskID == "" {
+		t.Fatal("expected non-empty child task ID")
+	}
+
+	childTask, err := taskSvc.GetTask(ctx, childTaskID)
+	if err != nil {
+		t.Fatalf("GetTask(child): %v", err)
+	}
+	if childTask.ParentID != parentTaskID {
+		t.Errorf("child task parent_id = %q, want %q", childTask.ParentID, parentTaskID)
+	}
+	for key, want := range wantMetadata {
+		if got := childTask.Metadata[key]; got != want {
+			t.Errorf("child task metadata[%q] = %v, want %v", key, got, want)
+		}
+	}
+}
+
 func newOfficeTaskAdapterHarness(t *testing.T) (*taskCreatorAdapter, *taskservice.Service) {
 	t.Helper()
 	dbConn, err := db.OpenSQLite(filepath.Join(t.TempDir(), "office-adapter.db"))
@@ -291,7 +349,8 @@ func newOfficeTaskAdapterHarness(t *testing.T) (*taskCreatorAdapter, *taskservic
 	if _, err := worktree.NewSQLiteStore(database, database); err != nil {
 		t.Fatalf("worktree store: %v", err)
 	}
-	if _, err := officesqlite.NewWithDB(database, database, nil); err != nil {
+	officeRepo, err := officesqlite.NewWithDB(database, database, nil)
+	if err != nil {
 		t.Fatalf("office migrations: %v", err)
 	}
 	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json", OutputPath: "stdout"})
@@ -314,6 +373,10 @@ func newOfficeTaskAdapterHarness(t *testing.T) (*taskCreatorAdapter, *taskservic
 		Reviews:          repo,
 		ResourceCleanups: repo,
 	}, bus.NewMemoryEventBus(log), log, taskservice.RepositoryDiscoveryConfig{})
+	// Mirrors production wiring (registerRoutes in helpers.go): CreateChildTask
+	// requires a WorkspacePolicyAttacher to attach the child's workspace-group
+	// membership before returning.
+	taskSvc.SetWorkspacePolicyAttacher(taskservice.NewHandoffService(repo, repo, nil, officeRepo, officeRepo, nil))
 
 	ctx := context.Background()
 	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-1", Name: "Workspace"}); err != nil {

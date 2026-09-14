@@ -32,6 +32,9 @@ type TaskCreator interface {
 		description string,
 		causingRunID string,
 	) (string, error)
+	// CreateOfficeSubtaskAsAgent's causingRunID is the run this subtask
+	// creation happened inside (AC-OFFICE-RUN-CAUSATION-001.5), empty when
+	// there is none.
 	CreateOfficeSubtaskAsAgent(
 		ctx context.Context,
 		callerAgentID string,
@@ -39,6 +42,7 @@ type TaskCreator interface {
 		assigneeAgentID string,
 		title string,
 		description string,
+		causingRunID string,
 	) (string, error)
 	GetTaskWorkspaceID(ctx context.Context, taskID string) (string, error)
 	GetTaskProjectID(ctx context.Context, taskID string) (string, error)
@@ -82,10 +86,9 @@ func (i CreateTaskInput) unsupportedField() string {
 }
 
 // CreateTask creates a root Office task or a child of the requested parent.
-// A root task creation is an Office trigger (AC-OFFICE-RUN-CAUSATION-001.5):
-// runCtx.RunID is threaded through as the causing run, so the task-boundary
-// causation carrier gets persisted on it. Subtask creation does not carry
-// one yet (task/service.ChildTaskSpec has no metadata field to receive it).
+// Both are an Office trigger (AC-OFFICE-RUN-CAUSATION-001.5): runCtx.RunID
+// is threaded through as the causing run, so the task-boundary causation
+// carrier gets persisted on the new task either way.
 func (a *Actions) CreateTask(ctx context.Context, runCtx RunContext, input CreateTaskInput) (string, error) {
 	if input.ParentTaskID != "" {
 		if !runCtx.Capabilities.Allows(CapabilityCreateSubtask) {
@@ -119,6 +122,7 @@ func (a *Actions) CreateTask(ctx context.Context, runCtx RunContext, input Creat
 	if input.ParentTaskID != "" {
 		return a.deps.Tasks.CreateOfficeSubtaskAsAgent(
 			ctx, runCtx.AgentID, input.ParentTaskID, input.AssigneeAgentID, input.Title, input.Description,
+			runCtx.RunID,
 		)
 	}
 	return a.deps.Tasks.CreateOfficeTaskAsAgent(
@@ -476,6 +480,7 @@ func (a *Actions) CreateSubtask(
 		input.AssigneeAgentID,
 		input.Title,
 		input.Description,
+		runCtx.RunID,
 	)
 }
 
