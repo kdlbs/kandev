@@ -3127,6 +3127,11 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 			meta["error_output"] = details
 		}
 	}
+	if data.Phase == models.LaunchErrorPhaseBootstrap {
+		if details := routingerr.Sanitize(data.FailureDetails); details != "" {
+			meta["error_output"] = details
+		}
+	}
 	// The validated remediation URL is carried independently of quota
 	// classification so the generic recoverable card can still show the link.
 	if remediationURL := providerRemediationURL(data); remediationURL != "" {

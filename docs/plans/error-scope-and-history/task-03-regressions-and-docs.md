@@ -185,3 +185,4 @@ Review follow-up validation:
 - The desktop PR watcher missing-branch E2E now opens the task-shell error details and passed with one test.
 - The mobile PR watcher missing-branch E2E uses the same shared surface with touch interaction and passed with one test.
 - Full frontend lint and typecheck, plus the focused recovery suites, passed after the compatibility fixes.
+- The remaining recovery selectors now follow their owning scope: the GitHub URL launch case uses the shared task surface, Kubernetes failures use retained session entries with technical details, and failed mobile resume uses the persisted recovery entry. The focused follow-up runs passed: Chromium 1 test, Mobile Chrome 1 test, and Kubernetes containers 3 tests with 1 fixture-gated skip.

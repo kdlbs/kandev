@@ -3014,6 +3014,7 @@ func TestTransitionBootstrapFailurePersistsSessionHistory(t *testing.T) {
 	require.Equal(t, models.MessageTypeStatus, messages[0].Type)
 	require.Equal(t, "bootstrap-failure-1", messages[0].Metadata["error_stamp"])
 	require.Equal(t, true, messages[0].Metadata["recovery_actions"])
+	require.Equal(t, failure.Details, messages[0].Metadata["error_output"])
 	require.Equal(t, "Agent startup failed: The agent could not start.", messages[0].Content)
 
 	reloaded, err := repo.GetTaskSession(ctx, "bootstrap-history-session")
