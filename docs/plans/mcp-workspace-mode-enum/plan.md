@@ -90,8 +90,9 @@ default cache is read-only in this workspace. Production changes are limited
 to the optional enum and its description; backend validation/defaulting remain
 unchanged. Requirements are active and the paired design is current.
 
-Files are uncommitted. The parent's only session remains cancelled, preventing
-delivery of the completion message.
+Review remediation on 2026-09-14 removed transient checkout/session status
+from the delivery records. Documentation catalog validation, specification
+lint, and `git diff --check` passed after that documentation-only correction.
 
 ## Risks
 

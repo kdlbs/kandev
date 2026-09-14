@@ -131,6 +131,11 @@ Both public pages now explain exact values and omission instead of blank
 strings. The handler production code is unchanged. Empty, whitespace-only,
 and padded inputs now fail MCP validation as documented in the design.
 No observed registration, validator, or attachment transform strips enum
-metadata. No live-instance changes, delegation, commit, push, or PR merge.
-The parent's only session is cancelled, so a completion message cannot be
-delivered; completion evidence remains in these artifacts.
+metadata.
+
+Review remediation on 2026-09-14 removed stale uncommitted-state claims and
+transient session status from this work order and its plan. Revalidated with
+`python3 scripts/list-docs.py validate`,
+`python3 scripts/lint-spec-files.py --all`, and `git diff --check`; all passed.
+This correction changes documentation only; the implementation and test
+commands above remain unchanged.
