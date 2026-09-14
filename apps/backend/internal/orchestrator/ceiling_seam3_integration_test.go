@@ -80,6 +80,37 @@ func TestPromptTask_ManualOverCeilingIsAdmitted(t *testing.T) {
 	}
 }
 
+// TestPromptTask_ManualOverCeilingIsAuditedEvenWhenTheResumeFails pins
+// AC-14/AC-53's unconditional audit contract at seam 3's own gate
+// (ensureSessionRunning's admitSeam3): the record must be written once the
+// reservation is admitted, not only once the subsequent resume attempt has
+// also succeeded. A resume failure right after admission (no executors_running
+// row for the session) must not erase the only evidence a ceiling override
+// happened.
+func TestPromptTask_ManualOverCeilingIsAuditedEvenWhenTheResumeFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "seam3-fail-task", "seam3-fail-session", models.TaskSessionStateWaitingForInput)
+
+	agentMgr := &mockAgentManager{isAgentRunning: false}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
+	svc.sessionCeiling.admit(ctx, admissionRequest{taskID: "filler", sessionID: "filler-session", origin: launchOriginAutomatic, seam: "filler"})
+
+	// PromptTask's public wrapper hardcodes manual origin (AC-14), so this
+	// resume is admitted over the ceiling's only slot. No executors_running row
+	// exists for the session, so attemptColdResume fails synchronously and
+	// deterministically before seam3Res.consume() is ever reached.
+	_, err := svc.PromptTask(ctx, "seam3-fail-task", "seam3-fail-session", "hello", "", false, nil, false)
+	require.Error(t, err, "the resume must still fail: no executors_running row exists for the session")
+
+	session, getErr := repo.GetTaskSession(ctx, "seam3-fail-session")
+	require.NoError(t, getErr)
+	require.NotNil(t, session.Metadata[ceilingManualOverrideMetadataKey],
+		"a manual override must be audited even when the resume subsequently fails")
+}
+
 // TestStartSessionForWorkflowStep_PreConsultationRefusalOverCeiling pins
 // AC-47f/AC-47f1: the pre-consultation admission runs before
 // advanceTaskWorkflowStep mutates the task, so a refusal must leave the

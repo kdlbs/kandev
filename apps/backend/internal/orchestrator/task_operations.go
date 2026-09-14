@@ -3146,6 +3146,7 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 		return errSeam3WorkflowStepEnsureDeferred
 	}
 	defer preConsultRes.releaseIfNotConsumed()
+	s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, preConsultRes.manualOverride, preConsultRes.population, preConsultRes.populationKnown, preConsultRes.ceiling)
 
 	s.advanceTaskWorkflowStep(ctx, dbTask, workflowStepID, session)
 
@@ -3160,7 +3161,6 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 		return err
 	}
 	preConsultRes.consume()
-	s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, preConsultRes.manualOverride, preConsultRes.population, preConsultRes.populationKnown, preConsultRes.ceiling)
 
 	// Apply conditional session settings after a manual resume and before the
 	// step prompt. The helper reloads the session so a resume-created runtime
@@ -3409,6 +3409,7 @@ func (s *Service) coldResumeSession(
 		return nil, refusal
 	}
 	defer seam3Res.releaseIfNotConsumed()
+	s.recordManualOverrideIfAdmitted(ctx, session.TaskID, sessionID, seam3Res.manualOverride, seam3Res.population, seam3Res.populationKnown, seam3Res.ceiling)
 
 	// Bounded to two attempts: a fresh cold resume, and — if the launched
 	// agent never reports prompt-ready — one reap-and-retry, mirroring the
@@ -3425,7 +3426,6 @@ func (s *Service) coldResumeSession(
 		retryable, err := s.attemptColdResume(ctx, sessionID, session, isOfficeTask, startupAttempt)
 		if err == nil {
 			seam3Res.consume()
-			s.recordManualOverrideIfAdmitted(ctx, session.TaskID, sessionID, seam3Res.manualOverride, seam3Res.population, seam3Res.populationKnown, seam3Res.ceiling)
 			if validationErr := s.validateResumeAttempt(startupAttempt); validationErr != nil {
 				s.cleanupCancelledResumeAttempt(startupAttempt)
 				return startupAttempt, validationErr
