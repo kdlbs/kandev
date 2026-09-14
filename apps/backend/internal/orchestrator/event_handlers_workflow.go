@@ -3565,6 +3565,8 @@ func (s *Service) prepareWorkflowReplacementSession(
 					zap.String("task_id", taskID),
 					zap.String("session_id", sessionID),
 					zap.Error(terminalErr))
+			} else {
+				s.releaseCeilingReservation(sessionID)
 			}
 		}
 		return nil, resolutionErr
@@ -3635,6 +3637,8 @@ func (s *Service) rollbackNewWorkflowProfileSwitch(
 				ctx, destination.ID, models.TaskSessionStateFailed, cleanupErr.Error(),
 			); terminalErr != nil {
 				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("terminalize failed workflow destination: %w", terminalErr))
+			} else {
+				s.releaseCeilingReservation(destination.ID)
 			}
 			return errors.Join(cause, cleanupErr)
 		}
@@ -3645,6 +3649,8 @@ func (s *Service) rollbackNewWorkflowProfileSwitch(
 			ctx, destination.ID, models.TaskSessionStateFailed, deleteErr.Error(),
 		); terminalErr != nil {
 			deleteErr = errors.Join(deleteErr, fmt.Errorf("terminalize failed workflow destination: %w", terminalErr))
+		} else {
+			s.releaseCeilingReservation(destination.ID)
 		}
 		return errors.Join(cause, deleteErr)
 	}
@@ -3693,6 +3699,7 @@ func (s *Service) retainFailedWorkflowDestination(
 	); err != nil {
 		return fmt.Errorf("terminalize retained workflow destination: %w", err)
 	}
+	s.releaseCeilingReservation(destination.ID)
 	s.logger.Warn("retained failed workflow destination for durable recovery",
 		zap.String("task_id", taskID),
 		zap.String("session_id", destination.ID),

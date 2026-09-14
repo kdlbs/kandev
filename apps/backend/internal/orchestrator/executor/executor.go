@@ -895,6 +895,14 @@ type AgentProcessStartFailedFunc func(ctx context.Context, taskID, sessionID, ag
 // creating repository-scoped user-facing status messages tied to launch errors.
 type LaunchFailedFunc func(ctx context.Context, taskID, sessionID, repositoryID string, err error)
 
+// CeilingReservationReleaseFunc releases the orchestrator's session-ceiling
+// reservation for a session this package just moved out of the counted
+// population through a write that bypasses onSessionStateChange /
+// onSessionStateTransition (MarkCompletedBySession, the resume-failure
+// rollback). Releasing a session that held no reservation is a defined
+// no-op, so this can be called unconditionally on a successful write.
+type CeilingReservationReleaseFunc func(sessionID string)
+
 // LaunchFailureReviewEligibilityFunc reports whether a failed launch can offer
 // the mark-review-done recovery action. The resolver owns workflow and PR
 // lookups; an error omits the action without blocking failure persistence.
@@ -1018,6 +1026,11 @@ type Executor struct {
 	// Callback for session launch failures (pre-start). Allows orchestrator
 	// to emit user-friendly guidance for known failure patterns.
 	onLaunchFailed LaunchFailedFunc
+
+	// Callback releasing the session-ceiling reservation for writes this
+	// package makes directly against the repository, bypassing
+	// onSessionStateChange / onSessionStateTransition (AC-51a).
+	onCeilingReservationRelease CeilingReservationReleaseFunc
 	// Optional resolver for the mark-review-done recovery action.
 	launchFailureReviewEligibility LaunchFailureReviewEligibilityFunc
 	// Optional compatibility gate for legacy adapters.
@@ -1365,6 +1378,15 @@ func (e *Executor) SetOnAgentProcessStarted(fn AgentProcessStartedFunc) {
 // process startup fails and the normal failure handler has run.
 func (e *Executor) SetOnAgentProcessStartFailed(fn AgentProcessStartFailedFunc) {
 	e.onAgentProcessStartFailed = fn
+}
+
+// SetOnCeilingReservationRelease sets the callback used by writes this
+// package makes directly against the repository, bypassing
+// onSessionStateChange / onSessionStateTransition, to release the
+// session-ceiling reservation for a session that just left the counted
+// population (AC-51a).
+func (e *Executor) SetOnCeilingReservationRelease(fn CeilingReservationReleaseFunc) {
+	e.onCeilingReservationRelease = fn
 }
 
 // SetOnPrimarySessionSet sets a callback for when the first session for a task

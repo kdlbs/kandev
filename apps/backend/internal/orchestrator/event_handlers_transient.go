@@ -49,6 +49,10 @@ const (
 // yellow (non-alarming) styling, as opposed to the red "error" variant.
 const metaVariantWarning = "warning"
 
+// metaVariantCeiling is the status-message variant AC-49 requires for every
+// session-ceiling card note, including AC-17c's drop note.
+const metaVariantCeiling = "ceiling"
+
 // transientRetryBackoff is the per-attempt delay before re-driving a turn that
 // failed transiently. Index is attempt-1 (5s → 10s → 20s → 40s → 60s).
 var transientRetryBackoff = []time.Duration{

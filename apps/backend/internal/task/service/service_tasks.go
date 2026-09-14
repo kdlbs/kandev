@@ -2685,6 +2685,19 @@ func (s *Service) finalizeCancelledSessions(
 			cancelParked()
 		}
 	}
+	// CancelActiveTaskSessionsByTaskID is a bulk writer: RETURNING reports every
+	// row's post-update CANCELLED state, not which were in an AC-1 state before
+	// the update, so every returned id is released unconditionally rather than
+	// branched on state (AC-51e). Releasing an id that held no reservation is a
+	// defined no-op.
+	if s.sessionCeilingReleaser != nil {
+		for _, session := range cancelledSessions {
+			if session == nil || session.ID == "" {
+				continue
+			}
+			s.sessionCeilingReleaser.ReleaseCeilingReservation(session.ID)
+		}
+	}
 	s.publishSessionsCancelled(detachedCtx, taskID, activeSessions, cancelledSessions, models.SessionArchiveCancelReason)
 }
 

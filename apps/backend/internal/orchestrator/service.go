@@ -1081,6 +1081,12 @@ type Service struct {
 	// and is constant for the lifetime of the process.
 	sessionCeiling *sessionCeilingController
 
+	// ceilingSweeper is the single background goroutine that expires stale
+	// reservations (AC-7) and retries deferred launches (AC-15, AC-17a).
+	// Nil-safe like idleReaper: callers that don't need it leave it nil and
+	// startCeilingSweeper / stopCeilingSweeper no-op. See ceiling_sweep.go.
+	ceilingSweeper *ceilingSweeper
+
 	// lifecycleSweepCancel / lifecycleSweepWorkers own the one-shot
 	// background goroutine that runs reconcileTaskLifecycleTokens and
 	// reconcileDependencyLaunchesOnStartup after the watcher and scheduler
@@ -1651,6 +1657,7 @@ func NewService(
 		dynamicSuccessorCtx:          dynamicSuccessorCtx,
 		dynamicSuccessorCancel:       dynamicSuccessorCancel,
 		idleReaper:                   newIdleSessionReaper(),
+		ceilingSweeper:               newCeilingSweeper(),
 		sessionCeiling:               newSessionCeilingForRepo(repo, svcLogger.Zap()),
 		backgroundProbeConfig:        LoadBackgroundProbeConfig(svcLogger),
 		parkedStates:                 make(map[string]*parkedSessionState),
@@ -1755,6 +1762,7 @@ func NewService(
 	exec.SetOnAgentStartFailed(s.handleAgentStartFailed)
 	exec.SetOnAgentProcessStarted(s.handleAgentProcessStarted)
 	exec.SetOnAgentProcessStartFailed(s.handleAgentProcessStartFailed)
+	exec.SetOnCeilingReservationRelease(s.releaseCeilingReservation)
 	if caps, ok := agentManager.(executor.ExecutorTypeCapabilities); ok {
 		exec.SetCapabilities(caps)
 	}
@@ -3181,6 +3189,7 @@ func (s *Service) Start(ctx context.Context) error {
 	// background goroutine owns the reclaim tick; Service.Stop joins it
 	// before tearing down repo / agentManager.
 	s.startIdleSessionReaper(ctx)
+	s.startCeilingSweeper(ctx)
 
 	s.logger.Info("orchestrator service started successfully")
 	return nil
@@ -3231,6 +3240,7 @@ func (s *Service) Stop() error {
 	// Stop components in reverse order
 	var errs []error
 	s.stopIdleSessionReaper()
+	s.stopCeilingSweeper()
 	s.stopReservedPromptCallbacks()
 
 	if err := s.scheduler.Stop(); err != nil {

@@ -1081,6 +1081,14 @@ func (e *Executor) rollbackResumeStateAfterFailure(
 	resumeErr error,
 	credentialSnapshot *resumeCredentialSnapshotBackup,
 ) {
+	// This rollback always leaves STARTING (successfully, or a no-op if the
+	// session had already left it), so the ceiling reservation is released
+	// unconditionally (AC-51a). Safe even when onSessionStateTransition
+	// already routes the write through the orchestrator's own funnel, since
+	// releasing a session that holds no reservation is a defined no-op.
+	if e.onCeilingReservationRelease != nil {
+		defer e.onCeilingReservationRelease(sessionID)
+	}
 	e.restoreResumeCredentialSnapshotIfStarting(ctx, sessionID, credentialSnapshot)
 	if e.onSessionStateTransition != nil {
 		current, err := e.repo.GetTaskSession(ctx, sessionID)

@@ -1307,6 +1307,18 @@ func (s *HandoffService) finalizeActiveSessions(
 	if publisher, ok := s.eventPublisher.(taskSessionCancellationPublisher); ok {
 		publisher.PublishTaskSessionsCancelled(finalizeCtx, taskID, cancelled, reason)
 	}
+	// Bulk writer: every returned row is released unconditionally rather than
+	// branched on state, since RETURNING reports post-update CANCELLED for all
+	// of them (AC-51e). Releasing an id that held no reservation is a defined
+	// no-op.
+	if s.sessionCeilingReleaser != nil {
+		for _, session := range cancelled {
+			if session == nil || session.ID == "" {
+				continue
+			}
+			s.sessionCeilingReleaser.ReleaseCeilingReservation(session.ID)
+		}
+	}
 	return nil
 }
 

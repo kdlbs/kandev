@@ -752,6 +752,7 @@ func registerRoutes(p routeParams) {
 	// clear that session's parked-projection tracking (spec:
 	// docs/specs/disambiguate-waiting).
 	p.taskSvc.SetParkedProjectionCanceller(p.orchestratorSvc)
+	p.taskSvc.SetSessionCeilingReleaser(p.orchestratorSvc)
 	// Single resolver instance shared by the REST clarification routes and the
 	// external answer_question_kandev/list_pending_questions_kandev MCP tools
 	// (R3: both entry points must race through the same claim).
@@ -796,6 +797,7 @@ func registerRoutes(p routeParams) {
 	}
 	handoffSvc.SetRunCanceller(p.orchestratorSvc)
 	handoffSvc.SetGitArchiveCapture(p.orchestratorSvc)
+	handoffSvc.SetSessionCeilingReleaser(p.orchestratorSvc)
 	// Cascade archive/delete must re-publish task.updated / task.deleted
 	// events; HandoffService walks the repo directly and bypasses the
 	// Service wrappers that normally publish these. Without this wiring
@@ -1986,6 +1988,7 @@ func registerMCPAndDebugRoutes(
 		))
 	}
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
+	mcpHandlers.SetSessionCeilingReleaser(p.orchestratorSvc)
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
 	mcpHandlers.SetPromptReader(p.services.Prompts)
 	mcpHandlers.SetTaskStopper(p.orchestratorSvc)

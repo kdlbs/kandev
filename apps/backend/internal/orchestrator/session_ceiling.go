@@ -34,6 +34,16 @@ const (
 	ceilingReasonUnknownPopulation = "ceiling_unknown_population"
 	ceilingReasonSuperseded        = "ceiling_superseded"
 	ceilingReasonDeferWriteFailed  = "ceiling_defer_write_failed"
+	// ceilingReasonDroppedTaskIneligible covers AC-17b(a)-(d): the task is
+	// archived, cancelled, names a session that no longer exists, or moved
+	// to a step that no longer auto-starts.
+	ceilingReasonDroppedTaskIneligible = "ceiling_dropped_task_ineligible"
+	// ceilingReasonDroppedLaunchGateDeclined is AC-17b(e): the launch's own
+	// precondition (today, the terminal-PR guard) declined it at replay time.
+	ceilingReasonDroppedLaunchGateDeclined = "ceiling_dropped_launch_gate_declined"
+	// ceilingReasonDroppedUnreplayableRecord is AC-17b(f): the record's own
+	// ceiling_launch_kind is absent or outside the closed set.
+	ceilingReasonDroppedUnreplayableRecord = "ceiling_dropped_unreplayable_record"
 )
 
 // admittedSessionLister supplies the persisted half of the population. It returns

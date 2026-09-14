@@ -299,6 +299,11 @@ func (s *Service) handleAgentProcessStarted(
 	ctx context.Context,
 	_, sessionID, agentExecutionID string,
 ) {
+	// AC-52's acceptance edge, composed first and unconditionally on
+	// sessionID alone (AC-56a): profileExecutionResolver is a dynamic-routing
+	// precondition, not a launch one, so an instance without it configured
+	// must still confirm the reservation on every ordinary launch.
+	s.confirmCeilingReservation(sessionID)
 	if s.profileExecutionResolver == nil || sessionID == "" {
 		return
 	}
@@ -329,6 +334,9 @@ func (s *Service) handleAgentProcessStartFailed(
 	_, sessionID, agentExecutionID string,
 	_ error,
 ) {
+	// AC-52's failure edge, composed first and unconditionally on sessionID
+	// alone (AC-56a) — see handleAgentProcessStarted's acceptance edge.
+	s.releaseCeilingReservation(sessionID)
 	if s.profileExecutionResolver == nil || sessionID == "" {
 		return
 	}

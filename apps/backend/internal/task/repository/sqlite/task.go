@@ -3215,6 +3215,38 @@ func (r *Repository) ListTasksWithMetadataKey(ctx context.Context, key string) (
 	return r.scanTasks(rows)
 }
 
+// ListTasksWithCeilingDeferred returns every task carrying a ceiling_deferred
+// record — archived, ephemeral and automation-origin tasks included, because
+// AC-17b requires the sweep to find and drop archived/cancelled records and
+// AC-2/AC-2a require ephemeral and automation-origin tasks to participate on
+// the same terms as any other. It deliberately does not reuse
+// ListTasksWithMetadataKey, whose WHERE excludes exactly those tasks.
+// Ordered by id ascending alone (AC-50b, AC-50c) — no timestamp term, so an
+// unrelated write to a deferred task cannot move it in the drain order
+// between ticks, unlike ListTasksWithMetadataKey's three-column sort.
+func (r *Repository) ListTasksWithCeilingDeferred(ctx context.Context) ([]*models.Task, error) {
+	var predicate string
+	var args []interface{}
+	if dialect.IsPostgres(r.ro.DriverName()) {
+		predicate = "jsonb_extract_path(CASE WHEN t.metadata IS NULL OR t.metadata = 'null' OR t.metadata = '' THEN '{}'::jsonb ELSE t.metadata::jsonb END, ?, ?) IS NOT NULL"
+		args = []interface{}{models.MetaKeyDeferredLaunch, models.CeilingDeferredKey}
+	} else {
+		predicate = "json_type(CASE WHEN t.metadata IS NULL OR t.metadata = 'null' OR t.metadata = '' THEN '{}' ELSE t.metadata END, ?) IS NOT NULL"
+		args = []interface{}{jsonPath(models.MetaKeyDeferredLaunch + "." + models.CeilingDeferredKey)}
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT `+taskSelectColumns("t")+`
+		FROM tasks t
+		WHERE `+predicate+`
+		ORDER BY t.id ASC
+	`), args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanTasks(rows)
+}
+
 // ListTasksByWorkspace returns paginated tasks for a workspace with total count
 // If query is non-empty, filters by task title, description, repository name, or repository path
 // If includeArchived is false, archived tasks are excluded. If onlyArchived
