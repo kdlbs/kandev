@@ -3,11 +3,6 @@ status: current
 system: integrations
 requirements:
   - REQ-INTEGRATIONS-SCOPED-CI-RUNS-001
-  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-002
-  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-003
-  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-004
-  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-005
-  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-006
 created: 2026-08-30
 owners:
   - kandev
@@ -17,14 +12,17 @@ owners:
 
 ## Ownership and mapping
 
-`REQ-INTEGRATIONS-SCOPED-CI-RUNS-001` maps to grant admission and durable
-identity resolution. `REQ-INTEGRATIONS-SCOPED-CI-RUNS-002` maps to credential
-resolution. `REQ-INTEGRATIONS-SCOPED-CI-RUNS-003` maps to evidence policy and
-the provider operations. `REQ-INTEGRATIONS-SCOPED-CI-RUNS-004` maps to the
-request state machine. `REQ-INTEGRATIONS-SCOPED-CI-RUNS-005` maps to receipts
-and audit. `REQ-INTEGRATIONS-SCOPED-CI-RUNS-006` maps to the grant management
-controller. Integration services own all six outcomes. Task, workflow, and MCP
-systems consume them.
+`REQ-INTEGRATIONS-SCOPED-CI-RUNS-001` maps its acceptance criteria as follows:
+grant admission and closed-request identity resolution (AC-001.1 through
+AC-001.4) map to the admission flow; App-installation credential policy
+(AC-001.5 through AC-001.7) maps to credential resolution; rerun-first and
+typed evidence policy (AC-001.8 through AC-001.12) map to the evidence and
+provider operations; durable claims and reconciliation (AC-001.13 and
+AC-001.14) map to the request state machine; receipt and audit guarantees
+(AC-001.15 and AC-001.16) map to receipt and audit assembly; and the
+administrator grant lifecycle (AC-001.17) maps to the grant management
+controller. Integration services own the whole capability. Task, workflow, and
+MCP systems consume it.
 
 ## Components and responsibilities
 

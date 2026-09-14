@@ -6,12 +6,11 @@ wave: 1
 depends_on: []
 plan: "plan.md"
 requirements:
-  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-002
-  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-003
+  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-001
 acceptance_criteria:
-  - AC-INTEGRATIONS-SCOPED-CI-RUNS-002.1
-  - AC-INTEGRATIONS-SCOPED-CI-RUNS-002.3
-  - AC-INTEGRATIONS-SCOPED-CI-RUNS-003.1
+  - AC-INTEGRATIONS-SCOPED-CI-RUNS-001.5
+  - AC-INTEGRATIONS-SCOPED-CI-RUNS-001.7
+  - AC-INTEGRATIONS-SCOPED-CI-RUNS-001.8
 system_design:
   - ../../specs/integrations/system-design/scoped-coordinator-ci-runs.md
 ---

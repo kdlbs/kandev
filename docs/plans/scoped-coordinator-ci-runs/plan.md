@@ -3,11 +3,6 @@ created: 2026-08-30
 status: done
 requirements:
   - REQ-INTEGRATIONS-SCOPED-CI-RUNS-001
-  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-002
-  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-003
-  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-004
-  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-005
-  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-006
 system_design:
   - ../../specs/integrations/system-design/scoped-coordinator-ci-runs.md
 legacy_specs: []

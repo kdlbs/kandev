@@ -7,11 +7,10 @@ depends_on: ["01-persistence", "02-provider"]
 plan: "plan.md"
 requirements:
   - REQ-INTEGRATIONS-SCOPED-CI-RUNS-001
-  - REQ-INTEGRATIONS-SCOPED-CI-RUNS-006
 acceptance_criteria:
   - AC-INTEGRATIONS-SCOPED-CI-RUNS-001.1
   - AC-INTEGRATIONS-SCOPED-CI-RUNS-001.3
-  - AC-INTEGRATIONS-SCOPED-CI-RUNS-006.3
+  - AC-INTEGRATIONS-SCOPED-CI-RUNS-001.17
 system_design:
   - ../../specs/integrations/system-design/scoped-coordinator-ci-runs.md
 ---
