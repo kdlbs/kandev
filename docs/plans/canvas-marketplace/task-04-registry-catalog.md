@@ -7,16 +7,11 @@ depends_on:
   - "03-reviewed-installation"
 plan: "plan.md"
 requirements:
-  - REQ-PLUGINS-MARKETPLACE-002
   - REQ-CANVASES-MARKETPLACE-002
   - REQ-CANVASES-MARKETPLACE-004
   - REQ-CANVASES-MARKETPLACE-005
   - REQ-CANVASES-MARKETPLACE-006
 acceptance_criteria:
-  - AC-PLUGINS-MARKETPLACE-002.1
-  - AC-PLUGINS-MARKETPLACE-002.2
-  - AC-PLUGINS-MARKETPLACE-002.3
-  - AC-PLUGINS-MARKETPLACE-002.4
   - AC-CANVASES-MARKETPLACE-002.1
   - AC-CANVASES-MARKETPLACE-002.2
   - AC-CANVASES-MARKETPLACE-002.3
@@ -28,7 +23,6 @@ acceptance_criteria:
   - AC-CANVASES-MARKETPLACE-005.4
   - AC-CANVASES-MARKETPLACE-006.4
 system_design:
-  - ../../specs/plugins/system-design/marketplace.md
   - ../../specs/canvases/system-design/marketplace-sharing.md
 ---
 
@@ -37,15 +31,15 @@ system_design:
 ## Summary
 
 Extend the existing repository registry and catalog with validated canvas entries
-and registry-owned preview URLs for canvases and plugins. Wire registry selection into the same reviewed
+and registry-owned preview URLs. Wire registry selection into the same reviewed
 installation service.
 
 ## In scope
 
 - Optional pointer kind, exact release asset selection, production inspector,
   matching package/repository/version and required hash/source.
-- Shared `previews: [{url, alt}]` on official/custom entries, required for
-  canvases and optional for plugins; preserve URL order into the generated index.
+- Shared `previews: [{url, alt}]` on official/custom canvas entries; preserve URL
+  order into the generated index.
 - Additive catalog descriptor, kind filter, safe degraded-source behavior.
 - No package screenshot extraction, image fetching, or Pages media staging.
 - Per-workspace instance annotations after authorization and source-cache lookup.
@@ -121,13 +115,11 @@ processing contributor pointers. Media/index deployment must stay coherent.
 
 Implemented canvas registry entries, ordered shared previews, exact release
 asset inspection, archive digest enforcement, kind-aware catalog projection,
-degraded-source handling, and catalog installation resolution. Native plugin
-entries remain compatible and may omit previews.
+degraded-source handling, and catalog installation resolution.
 
 Verification: the registry build-index suite passed 11 tests, the proposed
 schema parsed successfully, the relevant marketplace/backend suite passed, and
-desktop/mobile marketplace E2E passed 2 tests total. The existing plugin
-marketplace regression passed 16 tests.
+desktop/mobile marketplace E2E passed 2 tests total.
 
 Review remediation: canvas catalog presentation now comes from the inspected
 archive descriptor, repository identity is checked against the registry

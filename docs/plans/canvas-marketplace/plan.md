@@ -8,10 +8,8 @@ requirements:
   - REQ-CANVASES-MARKETPLACE-004
   - REQ-CANVASES-MARKETPLACE-005
   - REQ-CANVASES-MARKETPLACE-006
-  - REQ-PLUGINS-MARKETPLACE-002
 system_design:
   - ../../specs/canvases/system-design/marketplace-sharing.md
-  - ../../specs/plugins/system-design/marketplace.md
 legacy_specs: []
 ---
 
@@ -31,7 +29,8 @@ canvas identity, source lineage, workspace instances, and discovery.
 
 Implementation is complete across the seven sequential work orders: portable
 package contract, export preparation, reviewed installation, registry
-enrichment, marketplace UI, sharing UI, and public instructions. No native
+enrichment, marketplace UI, sharing UI, and public instructions. The optional
+native-plugin preview extension is tracked in the companion plugin plan. No native
 implementation subagents were authorized by this plan. Each work order's
 Results section records its implementation and validation evidence.
 
@@ -42,7 +41,7 @@ Results section records its implementation and validation evidence.
 - One existing marketplace with a dedicated Canvases tab in Plugins settings.
 - `.tar.gz` upload, direct HTTPS bundle link, and catalog installation.
 - Required registry cover URL and up to seven additional previews for canvases.
-- Optional registry screenshot URLs and the same details gallery for plugins.
+- Registry cover and preview URLs for canvas entries.
 - Screenshot-free bundle creation, source downloads, and upload/link installs.
 - Package metadata, source mode, license, compatibility, and permission review.
 - Download bundle and source ZIP from the same prepared release snapshot.
@@ -106,7 +105,7 @@ uses bounded, public-destination-only transport. Tests inject a local transport.
 Add optional `kind: canvas` to the existing pointer schema. The builder fetches
 the exact versioned bundle, inspects it, and requires its archive digest.
 Preview URLs come from the registry and pass unchanged into the generated index.
-Use the proposed [registry schema](registry-entry.schema.json) for both kinds;
+Use the proposed [registry schema](registry-entry.schema.json) for canvas entries;
 there is no image extraction, mirroring, or Pages media staging. Use additive catalog
 fields and kind filtering. Instance annotations are workspace-authorized and
 must not enter the shared source cache. Old native entries keep their behavior.
@@ -116,9 +115,7 @@ must not enter the shared source cache. Old native entries keep their behavior.
 `PluginsSettings` adds Canvases alongside Installed and Browse. Add domain hooks
 and a typed canvas-distribution API client; reuse existing gallery/dialog,
 permission summary, upload, and settings primitives where they fit. Details
-and review derive from one shared model across viewports. The preview gallery
-also serves native plugin listings with images; their direct install path stays
-available. Share is host-owned,
+and review derive from one shared model across viewports. Share is host-owned,
 available from the task/workspace canvas and workspace rows. All copy uses the
 five real locales and generated Traditional Chinese/pseudo catalogs.
 
@@ -171,21 +168,9 @@ Empty: explain no matching canvases, retain search and Install canvas. Failed
 source: inline source warning plus Retry; healthy results remain visible.
 Loading: skeleton covers with a status announcement. Gate-off: no Canvases tab.
 
-Existing Browse plugin rows may optionally expose the shared gallery:
-
-```text
-Plugin with previews: [icon] Plugin name [View details] [Install]
-Plugin without:       [icon] Plugin name                [Install]
-Details:              [Back] [Cover] [Previous] 1/3 [Next]
-                      Description / author / version / [Install]
-```
-
-This applies on desktop and phone; phone details use UI-02's focused surface.
-It covers AC-PLUGINS-MARKETPLACE-002.2-002.3 without changing native installation.
-
 ### UI-02: Canvas details and install review
 
-Use "Preview images" as the gallery label for both canvases and plugins.
+Use "Preview images" as the gallery label for canvas details.
 
 Entry: catalog card or inspected upload/link. Maps to
 AC-CANVASES-MARKETPLACE-002.3, 004.2-004.6, 005.3, and 006.1-006.3.
@@ -318,8 +303,7 @@ Keep instruction steps in a bounded scroll body; fixed title/dismiss and bottom
 safe-area padding. Closing returns focus to How to share and preserves UI-03.
 The copy action copies text only. No remote creation action is offered.
 Registry instructions include the required canvas screenshot URLs and alt text,
-cover ordering, and the same fields for custom marketplace registries. Explain
-that plugin listings can also supply optional screenshots.
+cover ordering, and the same fields for custom marketplace registries.
 
 ## Tests
 
@@ -331,7 +315,7 @@ in this table. Use nearby `@covers` annotations when method names are insufficie
 | --- | --- |
 | 001.1, 001.2, 001.4 | `webapp/distribution_test.go`: `TestDistributionPackageRoundTrip`, `TestDistributionSourceModes`, `TestDistributionRejectsNonCanvas`; `backendapp/canvas_distribution_source_test.go`: `TestCanvasProjectSourceSurvivesEditAndExecutorCleanup` |
 | 001.3, 003.1, 003.2, 003.4 | `canvas/distribution_export_test.go`: `TestCanvasExportSnapshot`, `TestCanvasExportExclusions`, `TestCanvasExportStaleRelease`, `TestCanvasExportNoLifecycleMutation` |
-| 002.1, 002.2, 002.4 | `plugin-registry/canvas-index.test.mjs`: registry URL/list shape, cover order, optional plugin previews; export/install tests prove screenshots are not required |
+| 002.1, 002.2, 002.4 | `plugin-registry/canvas-index.test.mjs`: registry URL/list shape and cover order; export/install tests prove screenshots are not required |
 | 002.3, 004.2 | `canvas-marketplace-detail.test.tsx`: gallery ordering, one-image mode, broken image, permission groups; `backendapp/canvas_distribution_routes_test.go`: `TestCanvasInstallReviewUsesPackagePermissions` |
 | 004.1, 004.3, 004.4 | `canvas/distribution_install_test.go`: `TestCanvasInstallSources`, `TestCanvasInstallDigestReview`, `TestCanvasInstallAtomicFailure`, `TestCanvasInstallRestart` |
 | 004.5, 004.6 | `canvas/distribution_install_test.go`: `TestCanvasInstallConcurrentRetry`, `TestCanvasInstallIndependentCopy`; `backendapp/canvas_distribution_routes_test.go`: `TestCanvasDistributionWorkspaceAuthorization` |
@@ -367,12 +351,6 @@ the install response into a fake success. Preview details must not issue a
 runtime URL request. Capture downloads and inspect archive contents. Use causal
 HTTP/WS waits, no arbitrary sleeps, and no display server or real provider account.
 
-Native-plugin preview coverage: add cases to existing `tests/plugins/plugins.spec.ts`
-and `tests/plugins/mobile-plugin-settings-row.spec.ts` for optional screenshots,
-ordered gallery, failed-image fallback, and unchanged native Install behavior.
-These cover AC-PLUGINS-MARKETPLACE-002.1 through 002.4. Registry Node tests and
-shared-gallery unit tests cover the same contract; no second canvas schema is used.
-
 ## Work orders
 
 - [ ] [Task 01: Define portable canvas packages](task-01-portable-packages.md)
@@ -385,6 +363,9 @@ shared-gallery unit tests cover the same contract; no second canvas schema is us
 
 Dependencies: 01 -> 02 -> 03 -> 04 -> 05 -> 06 -> 07. This deliberately uses
 sequential delivery because schema, shared UI/API models, and fixtures overlap.
+
+The optional native-plugin preview extension is delivered by the companion
+[plugin marketplace previews plan](../canvas-marketplace-plugin/plan.md).
 
 ## Verification commands
 

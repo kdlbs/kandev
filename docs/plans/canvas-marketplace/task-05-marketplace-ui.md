@@ -7,16 +7,11 @@ depends_on:
   - "04-registry-catalog"
 plan: "plan.md"
 requirements:
-  - REQ-PLUGINS-MARKETPLACE-002
   - REQ-CANVASES-MARKETPLACE-002
   - REQ-CANVASES-MARKETPLACE-004
   - REQ-CANVASES-MARKETPLACE-005
   - REQ-CANVASES-MARKETPLACE-006
 acceptance_criteria:
-  - AC-PLUGINS-MARKETPLACE-002.1
-  - AC-PLUGINS-MARKETPLACE-002.2
-  - AC-PLUGINS-MARKETPLACE-002.3
-  - AC-PLUGINS-MARKETPLACE-002.4
   - AC-CANVASES-MARKETPLACE-002.3
   - AC-CANVASES-MARKETPLACE-004.1
   - AC-CANVASES-MARKETPLACE-004.2
@@ -32,7 +27,6 @@ acceptance_criteria:
   - AC-CANVASES-MARKETPLACE-006.3
   - AC-CANVASES-MARKETPLACE-006.4
 system_design:
-  - ../../specs/plugins/system-design/marketplace.md
   - ../../specs/canvases/system-design/marketplace-sharing.md
 ---
 
@@ -47,18 +41,18 @@ Plugins settings. Use one review model across desktop and focused phone views.
 
 - Workspace selection, catalog cards with required registry cover, search/sort, instance
   actions, and Browse shared canvases from workspace settings.
-- Shared plugin/canvas gallery with explicit controls, descriptions, one-image mode, image errors,
+- Shared canvas gallery with explicit controls, descriptions, one-image mode, image errors,
   enlargement within details, and keyboard/focus handling.
 - Upload and direct-link forms, authoritative package/permission review,
   confirmation, progress/errors, retry, and installed Open canvas action.
 - Typed API client and domain hooks with stale-response invalidation.
 - Workspace-owner actions independent of native-plugin administrator gating.
-- Localized labels/statuses across all catalogs; desktop/mobile E2E.
+- Localized labels/statuses across the canvas catalog; desktop/mobile E2E.
 
 ## Out of scope
 
-Share/export author forms, canvas updates, and provider UI. Native plugin
-listings only gain an optional gallery/details action; their direct install remains.
+Share/export author forms, canvas updates, and provider UI. Native plugin preview
+extension is covered by Task 08.
 
 ## Acceptance
 
@@ -112,17 +106,6 @@ illustrative, action hierarchy and containment are required.
 
 ## Verification
 
-Optional plugin gallery excerpt of UI-01, covering
-AC-PLUGINS-MARKETPLACE-002.2-002.3:
-
-```text
-Browse:  [icon] Plugin name [View details] [Install]
-Details: [Back] [Image] [Previous] 1/3 [Next] [Install]
-```
-
-On phones, reuse the focused UI-02 detail surface; plugins without previews keep
-their existing row. Native installation does not acquire a new review step.
-
 Install dependencies once from `apps/` if not already installed. E2E fixtures
 must not skip on missing canvas readiness. Record screenshots/geometry results
 from the managed test artifacts and compare with UI-01/UI-02.
@@ -150,7 +133,7 @@ affected by shared entry controls; do not manufacture unrelated tests.
 - `apps/web/components/settings/plugins/canvas-marketplace.tsx`, `canvas-marketplace-detail.tsx` (new)
 - `apps/web/components/settings/plugins/canvas-install-dialog.tsx` (new)
 - Shared `marketplace-preview-gallery.tsx` (new), its focused unit tests, and
-  existing plugin row/details components and tests that expose optional previews
+  canvas detail components
 - `apps/web/components/settings/workspace-canvases-page.tsx`
 - `apps/web/lib/api/domains/canvas-distribution-api.ts` and tests (new)
 - `apps/web/lib/api/domains/marketplace-api.ts` and tests
@@ -180,19 +163,20 @@ workspace responses must not overwrite the review the user is confirming.
 - Design: UI composition, Mobile contract, Catalog projection, Authorization.
 - Existing `PluginsSettings`, `InstallPluginDialog`, `MarketplaceBrowser`.
 - Existing canvas lifecycle review, `canvas-host-route.tsx`, `useResponsiveBreakpoint`.
-- Plugin registry preview contract and current native-plugin install controls.
+- Canvas registry preview contract and current canvas installation controls.
 - `apps/web/AGENTS.md`, /mobile-parity, /e2e, and existing canvas fixture tests.
 
 ## Results
 
 Implemented the Canvases marketplace tab, workspace selection, search/category/
-sort controls, registry cover cards, shared preview gallery, detail/review
+sort controls, registry cover cards, canvas preview gallery, detail/review
 surfaces, upload/direct-link/catalog installation entry points, and localized
-desktop/phone layouts with touch-sized controls.
+desktop/phone layouts with touch-sized controls. The optional native-plugin
+preview extension is recorded in Task 08.
 
 Verification: 8 focused Vitest files passed 21 tests; web typecheck, full lint,
 i18n checks, and the new-code ratchet passed; desktop and mobile marketplace E2E
-passed; and the existing plugin marketplace regression passed 16 tests.
+passed.
 
 Review remediation: every responsive install-dialog dismissal now cancels the
 staged review, including drawer and dialog outside-click or Escape handling.
