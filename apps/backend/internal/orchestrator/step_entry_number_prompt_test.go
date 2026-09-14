@@ -13,6 +13,9 @@ import (
 	"testing"
 	"time"
 
+	"go.uber.org/zap/zapcore"
+	"go.uber.org/zap/zaptest/observer"
+
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -115,12 +118,35 @@ func TestBuildWorkflowPrompt_StepEntryNumber_QueryErrorLeavesTokenLiteral(t *tes
 	repo := &stepEntryErrorRepo{Repository: setupTestRepo(t), err: errors.New("db unavailable")}
 	svc := createTestService(repo.Repository, newMockStepGetter(), newMockTaskRepo())
 	svc.repo = repo
-	step := &wfmodels.WorkflowStep{ID: "step-a", Prompt: "Entry {step_entry_number} of the review."}
+	log, logs := observingTestLogger(t)
+	svc.logger = log
+	step := &wfmodels.WorkflowStep{
+		ID:     "step-a",
+		Prompt: "Please review the diff.\n\nEntry {step_entry_number} of the review.\n\nRemember to check the tests.",
+	}
 
 	got := svc.buildWorkflowPrompt(context.Background(), "base", step, "task-sen-3", "session-1", false)
 
-	if got != "Entry {step_entry_number} of the review." {
-		t.Fatalf("buildWorkflowPrompt() on query error = %q, want token left literal", got)
+	want := "Please review the diff.\n\nEntry {step_entry_number} of the review.\n\nRemember to check the tests."
+	if got != want {
+		t.Fatalf("buildWorkflowPrompt() on query error = %q, want %q (token literal, rest of prompt unchanged)", got, want)
+	}
+
+	var warnings []observer.LoggedEntry
+	for _, e := range logs.All() {
+		if e.Level == zapcore.WarnLevel {
+			warnings = append(warnings, e)
+		}
+	}
+	if len(warnings) != 1 {
+		t.Fatalf("got %d warn entries, want exactly 1 (all entries: %+v)", len(warnings), logs.All())
+	}
+	fields := warnings[0].ContextMap()
+	if fields["task_id"] != "task-sen-3" {
+		t.Errorf("warning task_id = %v, want %q", fields["task_id"], "task-sen-3")
+	}
+	if fields["step_id"] != "step-a" {
+		t.Errorf("warning step_id = %v, want %q", fields["step_id"], "step-a")
 	}
 }
 
@@ -275,5 +301,36 @@ func TestBuildWorkflowPrompt_StepEntryNumber_BothCallSitesSubstituteOneQueryEach
 	}
 	if calls := atomic.LoadInt32(&repo.calls); calls != 2 {
 		t.Fatalf("CountStepEntries calls = %d, want 2 (one per token-bearing template, NFR-1)", calls)
+	}
+}
+
+func TestBuildWorkflowPrompt_StepEntryNumber_UnknownTokenSurvivesUnchanged(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedStepEntryTask(t, repo, "task-sen-12", "wf-sen-12", "step-a")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	step := &wfmodels.WorkflowStep{ID: "step-a", Prompt: "Entry {step_entry_number}, see {unknown_token} for detail."}
+
+	got := svc.buildWorkflowPrompt(context.Background(), "base", step, "task-sen-12", "session-1", false)
+
+	want := "Entry 1, see {unknown_token} for detail."
+	if got != want {
+		t.Fatalf("buildWorkflowPrompt() = %q, want %q ({unknown_token} left literal)", got, want)
+	}
+}
+
+func TestBuildWorkflowPrompt_StepEntryNumber_LiteralTokenInBasePromptNeverSubstituted(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedStepEntryTask(t, repo, "task-sen-13", "wf-sen-13", "step-a")
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	step := &wfmodels.WorkflowStep{ID: "step-a", Prompt: "Entry {step_entry_number}: {{task_prompt}}"}
+	basePrompt := "The task description literally says {step_entry_number} here."
+
+	got := svc.buildWorkflowPrompt(context.Background(), basePrompt, step, "task-sen-13", "session-1", false)
+
+	want := "Entry 1: The task description literally says {step_entry_number} here."
+	if got != want {
+		t.Fatalf("buildWorkflowPrompt() = %q, want %q (step's token substituted, basePrompt's literal token untouched)", got, want)
 	}
 }
