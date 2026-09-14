@@ -107,7 +107,12 @@ func (sm *StreamManager) replayRecoveredDeliveryPage(
 	streamID string,
 	after, target, startupGeneration uint64,
 ) (uint64, error) {
-	page, stream, err := client.ReplayDelivery(ctx, streamID, after, durableDeliveryReplayPageSize)
+	remaining := target - after
+	limit := durableDeliveryReplayPageSize
+	if remaining < uint64(limit) {
+		limit = int(remaining)
+	}
+	page, stream, err := client.ReplayDelivery(ctx, streamID, after, limit)
 	if err != nil {
 		return after, fmt.Errorf("replay durable delivery after sequence %d: %w", after, err)
 	}
@@ -119,7 +124,10 @@ func (sm *StreamManager) replayRecoveredDeliveryPage(
 	}
 	start := after
 	for _, committed := range page {
-		if committed.Sequence != after+1 || committed.Sequence > target {
+		if committed.Sequence > target {
+			break
+		}
+		if committed.Sequence != after+1 {
 			return after, fmt.Errorf("durable replay expected sequence %d, received %d", after+1, committed.Sequence)
 		}
 		if err := sm.processRecoveredDeliveryEvent(ctx, execution, client, delivery, committed, startupGeneration); err != nil {

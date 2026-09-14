@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -152,6 +153,95 @@ func TestDurableAdoptionRestoresQuietSubmission(t *testing.T) {
 	}
 	if got := execution.deliverySubmissionIDSnapshot(); got != "submission-1" {
 		t.Fatalf("submission identity = %q, want submission-1", got)
+	}
+}
+
+func TestDurableAdoptionMatchesRetainedPeerTerminalToActiveBackendSubmission(t *testing.T) {
+	repository := durableAdoptionRepository()
+	repository.submissions["submission-terminal"] = &models.AgentDeliverySubmission{
+		ID:                "submission-terminal",
+		SessionID:         "session-1",
+		IncarnationID:     "incarnation-1",
+		HarnessGeneration: 2,
+		PayloadHash:       "hash-terminal",
+		State:             models.DeliverySubmissionDispatching,
+	}
+	status := durableAdoptionStatus()
+	status.Stream.HighWater = 3
+	status.Stream.Acknowledged = 2
+	status.Stream.FirstRetained = 3
+	status.Submissions = []journal.SubmissionSummary{{
+		ID:                    "submission-terminal",
+		SessionID:             "session-1",
+		IncarnationID:         "incarnation-1",
+		HarnessGeneration:     2,
+		Hash:                  "hash-terminal",
+		State:                 journal.SubmissionCompleted,
+		TerminalEventRetained: true,
+		TerminalSequence:      3,
+	}}
+	manager := newAdoptionManager(repository)
+	execution := &AgentExecution{SessionID: "session-1"}
+
+	if err := manager.restoreRecoveredDelivery(context.Background(), execution, &ExecutorInstance{DeliveryStatus: status}); err != nil {
+		t.Fatalf("restoreRecoveredDelivery: %v", err)
+	}
+	if got := execution.deliverySubmissionIDSnapshot(); got != "submission-terminal" {
+		t.Fatalf("submission identity = %q, want submission-terminal", got)
+	}
+}
+
+func TestDurableAdoptionLooksUpRetainedPeerTerminalOmittedFromSummary(t *testing.T) {
+	repository := durableAdoptionRepository()
+	repository.submissions["submission-terminal"] = &models.AgentDeliverySubmission{
+		ID:                "submission-terminal",
+		SessionID:         "session-1",
+		IncarnationID:     "incarnation-1",
+		HarnessGeneration: 2,
+		PayloadHash:       "hash-terminal",
+		State:             models.DeliverySubmissionDispatching,
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/v1/agent/submissions/submission-terminal" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(journal.Submission{
+			ID:                    "submission-terminal",
+			SessionID:             "session-1",
+			IncarnationID:         "incarnation-1",
+			HarnessGeneration:     2,
+			Hash:                  "hash-terminal",
+			State:                 journal.SubmissionCompleted,
+			TerminalEventRetained: true,
+			TerminalSequence:      3,
+		})
+	}))
+	t.Cleanup(server.Close)
+	parsed, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	port, err := strconv.Atoi(parsed.Port())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	status := durableAdoptionStatus()
+	status.Stream.HighWater = 3
+	status.Stream.Acknowledged = 2
+	status.Stream.FirstRetained = 3
+	manager := newAdoptionManager(repository)
+	execution := &AgentExecution{SessionID: "session-1"}
+	client := agentctl.NewClient(parsed.Hostname(), port, newTestLogger())
+
+	if err := manager.restoreRecoveredDelivery(context.Background(), execution, &ExecutorInstance{
+		DeliveryStatus: status,
+		Client:         client,
+	}); err != nil {
+		t.Fatalf("restoreRecoveredDelivery: %v", err)
+	}
+	if got := execution.deliverySubmissionIDSnapshot(); got != "submission-terminal" {
+		t.Fatalf("submission identity = %q, want submission-terminal", got)
 	}
 }
 

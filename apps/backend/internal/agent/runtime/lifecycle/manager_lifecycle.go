@@ -344,7 +344,9 @@ func (m *Manager) Start(ctx context.Context) error {
 				}
 				durableExecutionAdded = true
 				m.setRuntimeInterest(execution.SessionID, true)
-				m.publishRecoveredExecutionRunning(recoveryCtx, execution)
+				if durableRecoveryHasPendingWork(execution) {
+					m.publishRecoveredExecutionRunning(recoveryCtx, execution)
+				}
 				if err := m.streamManager.ReplayRecoveredDelivery(recoveryCtx, execution); err != nil {
 					m.logger.Error("refusing to re-track recovered execution: durable delivery replay could not be reconciled",
 						zap.String("instance_id", execution.ID),
@@ -442,6 +444,9 @@ func (m *Manager) Start(ctx context.Context) error {
 			case execution.DeliveryMode == DurableDeliveryV1:
 				// The durable branch published running before its bounded replay.
 				// Replay callbacks have already applied any terminal outcome.
+				if !durableRecoveryHasPendingWork(execution) && execution.Status != v1.AgentStatusReady {
+					m.publishRecoveredExecutionReady(recoveryCtx, execution)
+				}
 			case turnOutcomeResult == recoveredTurnOutcomeApplied:
 				m.applyRecoveredTurnOutcome(recoveryCtx, execution, ri, turnOutcome)
 			default:

@@ -9,9 +9,9 @@ import (
 	bolt "go.etcd.io/bbolt"
 )
 
-// MaxRecoverySubmissionSummaries bounds the submission evidence returned by
-// the authenticated recovery descriptor. Submission payloads never cross
-// this boundary.
+// MaxRecoverySubmissionSummaries bounds the recovery-relevant submission
+// evidence returned by the authenticated recovery descriptor. Submission
+// payloads never cross this boundary.
 const MaxRecoverySubmissionSummaries = 16
 
 // SubmissionSummary is the non-secret portion of a retained prompt
@@ -127,8 +127,10 @@ func recoverySubmissionSummaries(tx *bolt.Tx, sessionID string) ([]SubmissionSum
 		if sessionID != "" && submission.SessionID != sessionID {
 			return nil
 		}
-		summaries = append(summaries, submissionSummary(submission))
 		unresolved = unresolved || submissionNeedsRecovery(submission)
+		if submissionNeedsRecovery(submission) {
+			summaries = append(summaries, submissionSummary(submission))
+		}
 		return nil
 	})
 	if err != nil {

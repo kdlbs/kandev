@@ -1672,7 +1672,7 @@ func (m *Manager) GetExecution(executionID string) (*AgentExecution, bool) {
 // the active agentctl peer. The boolean preserves the distinction between a
 // legacy peer and a peer that explicitly reported a storage problem.
 func (m *Manager) DurableDeliveryCapabilityForExecution(
-	_ context.Context,
+	ctx context.Context,
 	executionID string,
 ) (DurableDeliveryCapability, bool) {
 	execution, exists := m.executionStore.Get(executionID)
@@ -1684,9 +1684,22 @@ func (m *Manager) DurableDeliveryCapabilityForExecution(
 	if client == nil {
 		return DurableDeliveryCapability{}, false
 	}
+	if status, err := client.GetDeliveryStatus(ctx, execution.DeliveryStreamID); err == nil && status != nil {
+		capability := status.StorageCapability
+		return DurableDeliveryCapability{
+			Version: capability.Version, Durable: capability.Durable,
+			Unresolved: capability.Unresolved, Reason: capability.Reason,
+		}, true
+	}
 	capability, advertised := client.DurableDeliveryCapability()
 	if !advertised {
 		return DurableDeliveryCapability{}, false
+	}
+	if capability.Durable {
+		capability.Unresolved = true
+		if capability.Reason == "" {
+			capability.Reason = "delivery_status_unavailable"
+		}
 	}
 	return DurableDeliveryCapability{
 		Version: capability.Version, Durable: capability.Durable,

@@ -67,12 +67,6 @@ func (c *Client) setDeliveryStatus(status *DeliveryStatus) {
 	}
 	copy.Submissions = append([]journal.SubmissionSummary(nil), status.Submissions...)
 	c.deliveryStatus = &copy
-	c.durableDelivery = &DurableDeliveryInfo{
-		Version:    status.Version,
-		Durable:    status.Durable,
-		Unresolved: status.Unresolved,
-		Reason:     status.Reason,
-	}
 }
 
 // DurableDeliveryCapability returns the initialize-time capability and whether
