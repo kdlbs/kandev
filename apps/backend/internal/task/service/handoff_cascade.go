@@ -964,35 +964,9 @@ func (s *HandoffService) resolveDeleteSet(ctx context.Context, rootID string, ca
 	if err != nil {
 		return nil, fmt.Errorf("list direct children of %s: %w", rootID, err)
 	}
-	// Normalize inherited workspace modes before changing parent_id. If this
-	// targeted metadata write fails, the parent row is still present and the
-	// caller can retry without leaving a child half-detached. The guard is
-	// captured from the map as read, before either mutation below, per
-	// models.ObservedWorkspaceGuard's contract. Unlike the marker writers, a
-	// lost guard here aborts rather than no-opping: this write is a
-	// precondition for reparenting the child while it is still
-	// inherit_parent, not an advisory marker (AC-005.5 vs. site 4's stricter
-	// rule).
-	for _, c := range children {
-		if taskWorkspaceMode(c.Metadata) == workspaceModeInheritParent {
-			workspace, _ := c.Metadata["workspace"].(map[string]interface{})
-			if workspace != nil {
-				guard := models.ObservedWorkspaceGuard(workspace)
-				workspace["mode"] = workspaceModeSharedGroup
-				// AC-005.6: the child's marker would otherwise survive
-				// naming a parent about to be deleted, which no recovery
-				// path (the repair's clearing JOIN needs a present,
-				// unarchived parent) can ever retract.
-				clearOrphanedWorkspaceMetadata(workspace)
-				landed, err := s.updateWorkspaceMetadata(ctx, c, guard)
-				if err != nil {
-					return nil, fmt.Errorf("normalize workspace mode for child %s before delete: %w", c.ID, err)
-				}
-				if !landed {
-					return nil, fmt.Errorf("normalize workspace mode for child %s before delete: %w", c.ID, errWorkspaceMetadataChangedConcurrently)
-				}
-			}
-		}
+	// Normalize inherited workspace modes before changing parent_id.
+	if err := s.normalizeInheritedWorkspaceChildren(ctx, children); err != nil {
+		return nil, err
 	}
 	// Reparent MUST succeed before we touch the parent row — continuing past a
 	// reparent error would leave children pointing at a row we're about to
@@ -1004,6 +978,43 @@ func (s *HandoffService) resolveDeleteSet(ctx context.Context, rootID string, ca
 		s.publishUpdatedTask(ctx, c.ID)
 	}
 	return []string{rootID}, nil
+}
+
+// normalizeInheritedWorkspaceChildren converts inherited workspace metadata
+// before a non-cascade delete reparents the child. A failed guarded write
+// leaves the parent row present so the caller can retry without leaving a
+// child half-detached.
+func (s *HandoffService) normalizeInheritedWorkspaceChildren(ctx context.Context, children []*models.Task) error {
+	for _, child := range children {
+		if err := s.normalizeInheritedWorkspaceChild(ctx, child); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *HandoffService) normalizeInheritedWorkspaceChild(ctx context.Context, child *models.Task) error {
+	if taskWorkspaceMode(child.Metadata) != workspaceModeInheritParent {
+		return nil
+	}
+	workspace, _ := child.Metadata["workspace"].(map[string]interface{})
+	if workspace == nil {
+		return nil
+	}
+
+	guard := models.ObservedWorkspaceGuard(workspace)
+	workspace["mode"] = workspaceModeSharedGroup
+	// Clear the child's orphan marker before deleting its parent. No recovery
+	// path can retract a marker that names a parent row that no longer exists.
+	clearOrphanedWorkspaceMetadata(workspace)
+	landed, err := s.updateWorkspaceMetadata(ctx, child, guard)
+	if err != nil {
+		return fmt.Errorf("normalize workspace mode for child %s before delete: %w", child.ID, err)
+	}
+	if !landed {
+		return fmt.Errorf("normalize workspace mode for child %s before delete: %w", child.ID, errWorkspaceMetadataChangedConcurrently)
+	}
+	return nil
 }
 
 // collectTaskTree returns rootID followed by every NON-ARCHIVED
