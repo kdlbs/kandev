@@ -98,3 +98,40 @@ func TestArchiveTaskTree_FailsWhenEnvironmentLookupErrors(t *testing.T) {
 		t.Fatalf("group owner = %q, want unchanged", owner)
 	}
 }
+
+// DeleteTaskTree shares transferWorkspaceGroupEnvironmentOwnership with
+// ArchiveTaskTree, but the absent-environment tolerance is scoped to archive
+// only (AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.6/.7 cover archive; delete
+// is a destructive path this plan never evaluated). A positively absent
+// environment must still fail delete, the same as before the archive fix.
+func TestDeleteTaskTree_FailsWhenCanonicalEnvironmentAbsent(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		lookupErr error
+	}{
+		{"typed sentinel", fmt.Errorf("%w: %s", repository.ErrTaskEnvironmentNotFound, "env-gone")},
+		{"nil row, nil error", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tasks := newFakeTaskRepo()
+			tasks.addTask("root", "", "ws-1")
+			tasks.addTask("child", "root", "ws-1")
+			if tc.lookupErr != nil {
+				tasks.taskEnvironmentErrs["env-gone"] = tc.lookupErr
+			}
+			groups := newCascadeWSGroupRepo()
+			absentCanonicalEnvironmentGroup(groups, "g1", "env-gone", "")
+			svc := newCascadeService(t, tasks, groups)
+
+			if _, err := svc.DeleteTaskTree(context.Background(), "root", false); err == nil {
+				t.Fatal("delete should fail closed on an absent canonical environment")
+			}
+			if got, _ := tasks.GetTask(context.Background(), "root"); got == nil {
+				t.Fatal("root must not be deleted when ownership cannot be resolved")
+			}
+			if owner := groups.groups["g1"].OwnerTaskID; owner != "root" {
+				t.Fatalf("group owner = %q, want unchanged", owner)
+			}
+		})
+	}
+}

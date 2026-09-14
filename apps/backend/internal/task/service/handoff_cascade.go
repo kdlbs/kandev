@@ -215,8 +215,11 @@ func (s *HandoffService) ArchiveTaskTree(ctx context.Context, rootID string, cas
 	}
 	// Archive cleanup must not tear down a shared workspace while an active
 	// group member remains. Transfer ownership before taking the cleanup
-	// snapshot, using the same ownership handoff as delete cascades.
-	ownershipTransfers, err := s.transferSharedWorkspaceEnvironmentOwnership(ctx, all)
+	// snapshot, using the same ownership handoff as delete cascades. Archive
+	// tolerates a positively absent canonical environment (AC-TASKS-DETACHED-
+	// WORKSPACE-CONTINUITY-001.6/.7); delete does not, since that destructive
+	// path was never evaluated against this exception.
+	ownershipTransfers, err := s.transferSharedWorkspaceEnvironmentOwnership(ctx, all, true)
 	if err != nil {
 		return out, err
 	}
@@ -392,7 +395,10 @@ func (s *HandoffService) prepareDeleteTaskTree(
 			return nil, nil, nil, err
 		}
 	}
-	ownershipTransfers, err := s.transferSharedWorkspaceEnvironmentOwnership(ctx, all)
+	// Delete is destructive, so an absent canonical environment stays an
+	// uncertain signal here rather than "nothing to transfer": that tolerance
+	// is scoped to archive only (see ArchiveTaskTree).
+	ownershipTransfers, err := s.transferSharedWorkspaceEnvironmentOwnership(ctx, all, false)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -512,6 +518,7 @@ func (s *HandoffService) pullTasksForVacatedSteps(ctx context.Context, stepIDs m
 func (s *HandoffService) transferSharedWorkspaceEnvironmentOwnership(
 	ctx context.Context,
 	taskIDs []string,
+	tolerateAbsentEnvironment bool,
 ) ([]workspaceEnvironmentOwnershipTransfer, error) {
 	if s.wsGroups == nil || len(taskIDs) == 0 {
 		return nil, nil
@@ -535,7 +542,7 @@ func (s *HandoffService) transferSharedWorkspaceEnvironmentOwnership(
 			continue
 		}
 		seenGroups[group.ID] = struct{}{}
-		transfer, err := s.transferWorkspaceGroupEnvironmentOwnership(ctx, group, departing)
+		transfer, err := s.transferWorkspaceGroupEnvironmentOwnership(ctx, group, departing, tolerateAbsentEnvironment)
 		if err != nil {
 			return nil, s.rollbackWorkspaceEnvironmentOwnershipAfterFailure(ctx, transfers, err)
 		}
@@ -550,6 +557,7 @@ func (s *HandoffService) transferWorkspaceGroupEnvironmentOwnership(
 	ctx context.Context,
 	group *orchmodels.WorkspaceGroup,
 	departing map[string]struct{},
+	tolerateAbsentEnvironment bool,
 ) (*workspaceEnvironmentOwnershipTransfer, error) {
 	mu := s.workspaceGroupLock.lockFor(group.ID)
 	mu.Lock()
@@ -560,20 +568,29 @@ func (s *HandoffService) transferWorkspaceGroupEnvironmentOwnership(
 	}
 	env, err := environments.GetTaskEnvironment(ctx, group.MaterializedEnvironmentID)
 	// A positively absent environment carries no ownership, so there is nothing
-	// to transfer and the caller may proceed. Absence must come from the typed
-	// sentinel or a nil row returned with a nil error: any other failure is an
-	// uncertain signal and stays fatal, so ownership is never abandoned on a
-	// transient error. Skipping the transfer is not evidence that the group's
-	// physical resources are gone and never authorizes teardown.
+	// to transfer and an archive caller may proceed. Absence must come from the
+	// typed sentinel or a nil row returned with a nil error: any other failure
+	// is an uncertain signal and stays fatal, so ownership is never abandoned on
+	// a transient error. Skipping the transfer is not evidence that the group's
+	// physical resources are gone and never authorizes teardown, so a caller
+	// about to delete does not get this tolerance.
 	if errors.Is(err, repository.ErrTaskEnvironmentNotFound) {
-		return nil, nil
+		if tolerateAbsentEnvironment {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("load materialized environment %s for workspace group %s: %w",
+			group.MaterializedEnvironmentID, group.ID, err)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("load materialized environment %s for workspace group %s: %w",
 			group.MaterializedEnvironmentID, group.ID, err)
 	}
 	if env == nil {
-		return nil, nil
+		if tolerateAbsentEnvironment {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("materialized environment %s for workspace group %s not found",
+			group.MaterializedEnvironmentID, group.ID)
 	}
 	if _, leaving := departing[env.TaskID]; !leaving {
 		return nil, nil

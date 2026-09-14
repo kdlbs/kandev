@@ -1,7 +1,7 @@
 ---
 spec: docs/specs/tasks/requirements/detached-workspace-continuity.md
 created: 2026-09-14
-status: pending
+status: completed
 ---
 
 # Implementation Plan: Archive with an absent canonical environment

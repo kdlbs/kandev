@@ -1,7 +1,7 @@
 ---
 id: "01-absent-canonical-environment"
 title: "Tolerate an absent canonical environment on archive"
-status: in_progress
+status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -75,4 +75,49 @@ control before attributing any failure to this change.
 
 ## Completion report
 
-Pending.
+Implemented as scoped, with one adjustment surfaced during PR review: the
+absent-environment tolerance is threaded through as an explicit
+`tolerateAbsentEnvironment bool` parameter on
+`transferSharedWorkspaceEnvironmentOwnership` /
+`transferWorkspaceGroupEnvironmentOwnership`, rather than applying
+unconditionally. `ArchiveTaskTree` passes `true`; `DeleteTaskTree` (via
+`prepareDeleteTaskTree`) passes `false` and keeps the pre-fix fail-closed
+behavior, because delete is destructive and this plan only evaluated archive.
+Without this, the same code change that unblocks archive would have silently
+also unblocked deleting a task whose group names an absent environment — never
+evaluated against ADR-0009's fail-closed requirement for destructive paths.
+
+Files touched:
+- `apps/backend/internal/task/service/handoff_cascade.go` — the fix described
+  above, plus threading the new parameter through both call sites.
+- `apps/backend/internal/task/service/handoff_cascade_absent_environment_test.go`
+  (new file; `handoff_cascade_test.go` is already at the 800-line revive
+  limit) — `TestArchiveTaskTree_SucceedsWhenCanonicalEnvironmentAbsent`
+  (table-driven: typed sentinel with no worktrees, typed sentinel with a
+  recorded `materialized_path`, nil row with nil error),
+  `TestArchiveTaskTree_FailsWhenEnvironmentLookupErrors` (a generic lookup
+  error, e.g. `database is locked`, must still fail closed), and
+  `TestDeleteTaskTree_FailsWhenCanonicalEnvironmentAbsent` (delete must still
+  fail closed on the same two absence shapes archive now tolerates).
+- `apps/backend/internal/task/service/handoff_workspace_test.go` — shared
+  fixture support (`taskEnvironmentErrs`) for injecting environment lookup
+  results.
+
+Verification (apps/backend, 2026-09-14):
+
+```
+go test ./internal/task/service/... -run 'ArchiveTaskTree|DeleteTaskTree' -count=1
+ok  	github.com/kandev/kandev/internal/task/service	0.817s
+```
+
+```
+golangci-lint run ./internal/task/service/... --new-from-rev="e5987421107e46237f74a58a1e2fa8bad0d7e773" --timeout=5m
+0 issues.
+```
+
+A full `go test ./internal/task/service/...` run shows 11 pre-existing
+failures on this macOS host (worktree/discovery-root clusters, e.g.
+`TestTaskLifecycleCleanup_MissingWorktree`,
+`TestArchiveTaskCleanupPreservesTaskEnvironmentIdentity`,
+`TestDesktopDiscoveryRootPersistsAcrossServiceRestart`), unrelated to this
+change and reproducing identically against the base commit.
