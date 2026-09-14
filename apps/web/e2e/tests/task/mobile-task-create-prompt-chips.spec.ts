@@ -127,22 +127,8 @@ test("edits saved-prompt chips and submits their aliases on mobile", async ({
     expect(referenceBox!.height).toBeGreaterThanOrEqual(44);
     expect(chipBox!.width).toBeGreaterThanOrEqual(44);
     expect(chipBox!.height).toBeGreaterThanOrEqual(44);
-    expect(removeBox!.x).toBeGreaterThanOrEqual(referenceBox!.x - 1);
-    expect(removeBox!.x + removeBox!.width).toBeLessThanOrEqual(
-      referenceBox!.x + referenceBox!.width + 1,
-    );
-    expect(removeBox!.y).toBeGreaterThanOrEqual(referenceBox!.y - 1);
-    expect(removeBox!.y + removeBox!.height).toBeLessThanOrEqual(
-      referenceBox!.y + referenceBox!.height + 1,
-    );
-    expect(chipBox!.x).toBeGreaterThanOrEqual(referenceBox!.x - 1);
-    expect(chipBox!.x + chipBox!.width).toBeLessThanOrEqual(
-      referenceBox!.x + referenceBox!.width + 1,
-    );
-    expect(chipBox!.y).toBeGreaterThanOrEqual(referenceBox!.y - 1);
-    expect(chipBox!.y + chipBox!.height).toBeLessThanOrEqual(
-      referenceBox!.y + referenceBox!.height + 1,
-    );
+    expectContained(referenceBox!, chipBox!, "preview target");
+    expectContained(referenceBox!, removeBox!, "removal target");
     expect(removeBox!.height).toBeGreaterThanOrEqual(44);
     expect(removeBox!.width).toBeGreaterThanOrEqual(44);
     const editorContentMetrics = await readEditorContentMetrics(editor);
@@ -155,6 +141,7 @@ test("edits saved-prompt chips and submits their aliases on mobile", async ({
     await chip.tap();
     const drawer = testPage.locator('[data-slot="drawer-content"]:visible').last();
     await expect(drawer).toBeVisible();
+    await expect(drawer.locator('[data-slot="drawer-description"]')).toHaveText("Prompt");
     await expect(drawer).toContainText(PROMPT_CONTENT.slice(0, 45));
     const previewScroll = drawer.locator("div.overflow-y-auto").first();
     await expect(previewScroll).toBeVisible();

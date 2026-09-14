@@ -181,7 +181,9 @@ The drawer fits this temporary inspection task without adding a navigation step.
 Chips wrap, and very long names stay within editor bounds with accessible full names.
 Touch preview/removal actions meet the 44px hit-area minimum without enlarging
 desktop controls. Use `useResponsiveBreakpoint` for layout and `useTouchDrawer`
-for disclosure, including coarse-pointer tablets.
+for disclosure, including coarse-pointer tablets. The touch drawer exposes a
+distinct localized description for assistive technology instead of repeating
+its title.
 
 The form body retains outer scrolling and its existing reachable footer.
 The editor retains bounded internal scrolling for long drafts, with the caret visible.

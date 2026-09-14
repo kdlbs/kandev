@@ -176,3 +176,14 @@ Review remediation on 2026-09-14:
 - Focused Vitest regressions passed 3 files and 35 tests after the corrections.
 - Typecheck, targeted ESLint, i18n checks and ratchet, E2E sleep ratchet, and `git diff --check` passed after the corrections.
 - Fresh managed desktop and mobile capture suites passed 16 and 2 tests; their compact, preview, and long-name screenshots were inspected after the corrections.
+
+PR fixup remediation on 2026-09-14:
+
+- Merged the current `main` base before the fixup so the PR does not remove
+  delivery artifacts added after the original branch point.
+- Split touch and hover preview prop contracts, used the existing localized
+  `task:prompt` description for the touch drawer, and made mobile containment
+  assertions cover both axes for both actionable children.
+- Focused Vitest regressions passed 3 files and 35 tests; typecheck and the
+  targeted ESLint command passed.
+- The mobile managed E2E suite passed 2 tests after the fixup changes.

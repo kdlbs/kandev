@@ -666,16 +666,23 @@ type PromptMentionChipProps = {
   presentation?: PromptMentionPresentation;
 };
 
-type PromptMentionPreviewProps = {
+type PromptMentionPreviewBaseProps = {
   name: string;
   value: string;
   label: string;
   content: string;
-  focusable: boolean;
   className: string;
   labelClassName?: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+};
+
+type PromptMentionTouchPreviewProps = PromptMentionPreviewBaseProps & {
+  description: string;
+};
+
+type PromptMentionHoverPreviewProps = PromptMentionPreviewBaseProps & {
+  focusable: boolean;
   onToggle: () => void;
 };
 
@@ -723,7 +730,7 @@ function PromptMentionFallback({
   value,
   className,
   labelClassName,
-}: Pick<PromptMentionPreviewProps, "name" | "value" | "className" | "labelClassName">) {
+}: Pick<PromptMentionPreviewBaseProps, "name" | "value" | "className" | "labelClassName">) {
   const { t } = useTranslation();
   return (
     <span
@@ -744,9 +751,10 @@ function PromptMentionTouchPreview({
   content,
   className,
   labelClassName,
+  description,
   open,
   onOpenChange,
-}: PromptMentionPreviewProps) {
+}: PromptMentionTouchPreviewProps) {
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerTrigger asChild>
@@ -767,7 +775,7 @@ function PromptMentionTouchPreview({
       <DrawerContent>
         <DrawerHeader>
           <DrawerTitle>{label}</DrawerTitle>
-          <DrawerDescription className="sr-only">{label}</DrawerDescription>
+          <DrawerDescription className="sr-only">{description}</DrawerDescription>
         </DrawerHeader>
         <div className="max-h-[70dvh] overflow-y-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
           <PromptPreview content={content} />
@@ -788,7 +796,7 @@ function PromptMentionHoverPreview({
   open,
   onOpenChange,
   onToggle,
-}: PromptMentionPreviewProps) {
+}: PromptMentionHoverPreviewProps) {
   const handleClick = (event: MouseEvent) => {
     event.stopPropagation();
     onToggle();
@@ -857,22 +865,26 @@ export function PromptMentionChip({
   }
 
   const label = t("task:customPromptNamed", { name });
-  const previewProps: PromptMentionPreviewProps = {
+  const previewProps: PromptMentionPreviewBaseProps = {
     name,
     value,
     label,
     content,
-    focusable,
     className: classNames.trigger,
     labelClassName: classNames.labelClassName,
     open,
     onOpenChange: setOpen,
-    onToggle: () => setOpen((isOpen) => !isOpen),
   };
 
   if (usesTouchDrawer) {
-    return <PromptMentionTouchPreview {...previewProps} />;
+    return <PromptMentionTouchPreview {...previewProps} description={t("task:prompt")} />;
   }
 
-  return <PromptMentionHoverPreview {...previewProps} />;
+  return (
+    <PromptMentionHoverPreview
+      {...previewProps}
+      focusable={focusable}
+      onToggle={() => setOpen((isOpen) => !isOpen)}
+    />
+  );
 }
