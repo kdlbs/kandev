@@ -4,6 +4,15 @@ import { dwell } from "../../helpers/causal-waits";
 import { seedSecondaryClarificationTask } from "../../helpers/clarification";
 import { waitForLatestSessionDone } from "../../helpers/session";
 import {
+  answerLongThreadQuestion,
+  attachQuestionRecord,
+  expectThreadQuestionSubmitted,
+  questionTargetGeometry,
+  seedLongThreadQuestion,
+  threadDeckGeometry,
+  withNativeThreadZoom,
+} from "./threads-clarification-helpers";
+import {
   captureThreadSettings,
   capturePresentation,
   seedThreadPresentation,
@@ -12,6 +21,123 @@ import {
 } from "./threads-presentation-helpers";
 
 let original: ThreadPresentationSettings;
+
+for (const zoom of [1, 0.9]) {
+  for (const autoHideComposer of [false, true]) {
+    // @covers AC-UI-THREADS-DECK-005.5, AC-UI-THREADS-DECK-005.6, AC-UI-THREADS-DECK-004.1
+    test(`scrolls long required questions through the Grid footer (zoom ${zoom}, auto-hide ${autoHideComposer})`, async ({
+      apiClient,
+      seedData,
+      backend,
+    }, testInfo) => {
+      test.setTimeout(180_000);
+      const { task } = await seedLongThreadQuestion(apiClient, seedData);
+      await apiClient.seedAgentMessages(task.session_id!, 35, "Question history");
+      await seedThreadPresentation(apiClient, { layout: "grid", autoHideComposer });
+      await withNativeThreadZoom(backend.frontendUrl, zoom, testInfo, async (page) => {
+        await page.goto(`/threads?taskId=${task.id}`);
+        const board = page.getByTestId("threads-board");
+        const tile = page.getByTestId(`thread-column-${task.id}`);
+        await expect(board).toHaveAttribute("data-layout", "grid");
+        await expect(tile.getByTestId("clarification-option")).toHaveCount(3);
+        await expect(tile.getByTestId("chat-input-editor")).toBeVisible();
+        const list = tile.locator(".chat-message-list");
+        await expect(list.getByText("Question history 35", { exact: true })).toHaveCount(1);
+        expect((await list.boundingBox())!.height).toBeGreaterThanOrEqual(79);
+        await expect
+          .poll(() => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight))
+          .toBeLessThan(3);
+        if (autoHideComposer) {
+          const freeze = tile.getByTestId("auto-scroll-toggle-button");
+          await freeze.click();
+          await expect(freeze).toHaveAttribute("aria-pressed", "false");
+          // Return from the composer control to the question's original allocation.
+          const footer = tile.getByTestId("thread-footer-allocation");
+          const box = (await footer.boundingBox())!;
+          await page.mouse.move(box.x + 2, box.y + box.height - 10);
+          await page.mouse.wheel(0, -3000);
+          await expect.poll(() => footer.evaluate((el) => el.scrollTop)).toBe(0);
+        }
+        // Frozen positions only adopt real reader gestures, never synthetic scrollTop writes.
+        await list.evaluate((el) => {
+          el.setAttribute("data-history-scrolling", "true");
+          el.addEventListener("scrollend", () => el.removeAttribute("data-history-scrolling"), {
+            once: true,
+          });
+        });
+        const listBox = (await list.boundingBox())!;
+        await page.mouse.move(listBox.x + listBox.width / 2, listBox.y + listBox.height / 2);
+        await page.mouse.wheel(0, -600);
+        await expect(list).not.toHaveAttribute("data-history-scrolling", "true");
+        const anchor = await list.evaluate((el) => {
+          const top = el.getBoundingClientRect().top;
+          const paragraph = Array.from(el.querySelectorAll("p")).find(
+            (p) =>
+              p.textContent?.startsWith("Question history") &&
+              p.getBoundingClientRect().top > top + 5,
+          )!;
+          return {
+            text: paragraph.textContent!,
+            y: paragraph.getBoundingClientRect().y,
+            scrollTop: el.scrollTop,
+          };
+        });
+        const baseline = await threadDeckGeometry(page);
+        await attachQuestionRecord(testInfo, "question-before-wheel", {
+          ...(await questionTargetGeometry(tile.getByTestId("clarification-option").last())),
+          tile: await tile.boundingBox(),
+          footer: await tile.getByTestId("thread-footer-allocation").boundingBox(),
+        });
+        await answerLongThreadQuestion(page, tile, "wheel", testInfo, async () => {
+          expect((await list.getByText(anchor.text, { exact: true }).boundingBox())!.y).toBeCloseTo(
+            anchor.y,
+            0,
+          );
+          expect(await threadDeckGeometry(page)).toEqual(baseline);
+        });
+        await expectThreadQuestionSubmitted(apiClient, task.session_id!, tile);
+        expect(await threadDeckGeometry(page)).toEqual(baseline);
+        if (autoHideComposer) {
+          expect(await list.evaluate((el) => el.scrollTop)).toBeCloseTo(anchor.scrollTop, 0);
+        } else {
+          // Resuming agent work follows the bottom when auto-scroll is enabled.
+          await expect
+            .poll(() => list.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight))
+            .toBeLessThan(3);
+        }
+      });
+    });
+  }
+}
+
+for (const scenario of [
+  {
+    name: "answers a long required question with keyboard navigation",
+    layout: "grid",
+    input: "keyboard",
+  },
+  { name: "keeps long required answers usable in Columns", layout: "columns", input: "wheel" },
+] as const) {
+  // @covers AC-UI-THREADS-DECK-005.5, AC-UI-THREADS-DECK-005.6, AC-UI-THREADS-DECK-005.9
+  test(scenario.name, async ({ testPage, apiClient, seedData }, testInfo) => {
+    test.setTimeout(180_000);
+    await testPage.setViewportSize({ width: 1366, height: 768 });
+    const { task } = await seedLongThreadQuestion(apiClient, seedData);
+    await seedThreadPresentation(apiClient, { layout: scenario.layout, autoHideComposer: true });
+    await testPage.goto(`/threads?taskId=${task.id}`);
+    const tile = testPage.getByTestId(`thread-column-${task.id}`);
+    await expect(testPage.getByTestId("threads-board")).toHaveAttribute(
+      "data-layout",
+      scenario.layout,
+    );
+    await expect(tile.getByTestId("clarification-option")).toHaveCount(3);
+    const baseline = await threadDeckGeometry(testPage);
+    await answerLongThreadQuestion(testPage, tile, scenario.input, testInfo);
+    await expectThreadQuestionSubmitted(apiClient, task.session_id!, tile);
+    expect(await threadDeckGeometry(testPage)).toEqual(baseline);
+    await capturePresentation(testPage, testInfo, `question-${scenario.input}-${scenario.layout}`);
+  });
+}
 
 async function observeDisclosureMotion(tile: Locator) {
   await tile.evaluate((root) => {

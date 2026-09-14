@@ -1,6 +1,7 @@
 import { test, expect } from "../../fixtures/test-base";
 import { KanbanPage } from "../../pages/kanban-page";
 import type { Page } from "@playwright/test";
+import { expandDisplaySettingsGroup } from "../../helpers/display-settings";
 
 const TASK_VISIBLE_TIMEOUT = 10_000;
 const ALPHA_TASK = "Alpha task";
@@ -21,13 +22,19 @@ async function closeDisplayDropdown(page: Page): Promise<void> {
     await trigger.click({ force: true });
   }
   await expect(trigger).not.toHaveAttribute("data-state", "open");
-  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(page.getByTestId("display-settings-content")).toHaveCount(0);
 }
 
 async function selectWorkflowFilter(page: Page, optionLabel: string): Promise<void> {
   await page.getByTestId("display-button").click();
+  await expandDisplaySettingsGroup(page, "filters");
   await page.getByTestId("display-workflow-filter").click();
   await pickListboxOption(page, optionLabel);
+  await expect(page.getByTestId("display-settings-content")).toBeVisible();
+  await expect(page.getByTestId("display-settings-filters-toggle")).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
   await closeDisplayDropdown(page);
 }
 
@@ -87,11 +94,13 @@ test.describe("Kanban workflow filter", () => {
     await kanban.goto();
     await selectWorkflowFilter(testPage, "All Workflows");
     await testPage.getByTestId("display-button").click();
+    await expandDisplaySettingsGroup(testPage, "filters");
     await expect(testPage.getByTestId("display-workflow-filter")).toContainText("All Workflows");
     await closeDisplayDropdown(testPage);
 
     await testPage.reload();
     await testPage.getByTestId("display-button").click();
+    await expandDisplaySettingsGroup(testPage, "filters");
     await expect(testPage.getByTestId("display-workflow-filter")).toContainText("All Workflows");
   });
 

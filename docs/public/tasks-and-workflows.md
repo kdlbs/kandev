@@ -21,6 +21,17 @@ A task is the work to deliver. A workflow is the sequence of steps it follows. U
 
 The task carries the outcome through the workflow. The repository and session provide the working context, while review remains an explicit human gate.
 
+## Keep your view when creating tasks
+
+In **Settings > Task Behavior**, turn off **Auto-focus new tasks**
+and select **Save changes** to create tasks without leaving your current view.
+The setting is on by default and is saved with your user preferences across
+reloads. It works on desktop and mobile.
+
+Tasks and agents still start as requested. You can open the new task manually
+from the task list. This setting controls opening newly created tasks; it does
+not change the separate preference for preventing agent auto-start on open.
+
 ## Understand the model
 
 | Concept         | What it controls                                                                                                       |
@@ -460,7 +471,7 @@ The **TASKS** list in the left sidebar has two time-based sort choices. These ch
 Choose **Last activity** when you want to review tasks by the least recent user or agent interaction.
 
 - Search matches tasks without changing their state.
-- The display menu filters by **Workflow** and **Repository** and can enable **Open preview on click**. In Kanban/Pipeline, each workflow lane has a **Columns** menu to hide individual steps. Unticking a step hides its column and tasks on that board, scoped to its own workflow, until you re-tick it. The optional **Auto-hide empty columns** setting collapses unoccupied steps without changing those manual choices; auto-hidden empty steps return as move destinations while a task is being moved, while manually hidden steps remain unavailable for pointer and bulk moves. On phones, open the menu drawer to change columns for the focused workflow.
+- The display menu groups its controls into collapsible **Filters**, **Sort**, **Preview panel**, and, in **List**, **List rows** sections. Each section shows its current values while collapsed. Filters cover **Workflow**, **Repository**, and, in Kanban, **Priority**; registered plugin filters appear there when available. In Kanban/Pipeline, each workflow lane has a **Columns** menu outside these groups to hide individual steps. Unticking a step hides its column and tasks on that board, scoped to its own workflow, until you re-tick it. The optional **Auto-hide empty columns** setting collapses unoccupied steps without changing those manual choices; auto-hidden empty steps return as move destinations while a task is being moved, while manually hidden steps remain unavailable for pointer and bulk moves. On phones, open the existing menu drawer to expand the same display groups and change columns for the focused workflow.
 - In **List**, the display menu can enable **Show task details** to include available repository, description, pull-request, session, parent, review, and archive context in each row. This option is off by default and follows the user across devices.
 - **List** can group by **State**, **Workflow**, **Repository**, or **None**.
 - **List** can sort by updated time, created time, or title in either direction.
@@ -545,8 +556,13 @@ end behavior.
 When **Reset agent context** creates a fresh ACP session, Kandev preserves the
 selected ACP model, permission mode, and provider options. It restores these
 settings before the next automatic prompt. If the provider rejects a setting,
-the restoration fails and Kandev does not send the destination step's automatic
-prompt.
+the reset fails, or the provider does not answer the reset request, Kandev
+leaves the session waiting for input. It does not send the destination step's
+automatic prompt. The conversation keeps a visible previous-agent-error notice
+with the reset cause. To recover, delete the affected conversation from its
+session actions, then create a new session for the task. The task workspace and
+files remain available to the new session. See [Sessions and review](sessions-and-review.md)
+for the session actions and mobile session picker.
 
 The WIP check also applies when a task is created. It runs for an explicit
 `workflow_step_id` and for the workflow's resolved start step, and the

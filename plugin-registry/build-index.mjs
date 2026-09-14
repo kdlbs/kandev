@@ -14,16 +14,22 @@
 // focused parser reads it without pulling a YAML library into CI.
 //
 // Robustness: one bad entry (missing release, deleted asset, API hiccup) never
-// fails the whole build — its error is logged to stderr and it is skipped. A
-// repo whose star lookup fails is emitted with `stars: null`, never `0`, so a
-// transient outage can't corrupt the catalog's ranking.
+// fails a scheduled build — its error is logged to stderr and it is skipped. A
+// pull request fails when it introduces an invalid canvas entry, so registry
+// validation cannot silently omit a reviewed canvas. A repo whose star lookup
+// fails is emitted with `stars: null`, never `0`, so a transient outage can't
+// corrupt the catalog's ranking.
 //
 // Auth: GitHub API calls use GITHUB_TOKEN when present (in CI, secrets.GITHUB_TOKEN).
 // That works for the public repos here; at larger scale a PAT with `public_repo`
 // scope set as GITHUB_TOKEN gives higher, more predictable rate limits.
 
 import fs from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { execFile as execFileCallback } from "node:child_process";
+import os from "node:os";
 import path from "node:path";
+import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
 const GITHUB_API = "https://api.github.com";
@@ -40,6 +46,9 @@ const SOURCE_URL = "";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PLUGINS_YAML = path.join(HERE, "plugins.yaml");
 const OUTPUT_JSON = path.join(HERE, "index.json");
+const execFile = promisify(execFileCallback);
+const MAX_CANVAS_PACKAGE_BYTES = 10 * 1024 * 1024;
+const CANVAS_INSPECTOR_TIMEOUT_MS = 30_000;
 
 // --- Minimal plugins.yaml parser --------------------------------------------
 
@@ -56,6 +65,9 @@ export function parsePluginsYaml(text) {
   const specs = [];
   let current = null;
   let inPlugins = false;
+  let inPreviews = false;
+  let currentPreview = null;
+  let previewItemIndent = 0;
 
   for (const rawLine of text.split("\n")) {
     const line = stripComment(rawLine);
@@ -66,14 +78,42 @@ export function parsePluginsYaml(text) {
       continue;
     }
 
-    const item = line.match(/^\s*-\s*(.*)$/);
+    const item = line.match(/^(\s*)-\s*(.*)$/);
     if (item) {
+      if (inPreviews && current && item[1].length > 2) {
+        currentPreview = {};
+        current.previews ??= [];
+        current.previews.push(currentPreview);
+        previewItemIndent = item[1].length;
+        assignField(currentPreview, item[2]);
+        continue;
+      }
+      inPreviews = false;
+      currentPreview = null;
+      previewItemIndent = 0;
       current = {};
       specs.push(current);
-      assignField(current, item[1]);
+      assignField(current, item[2]);
       continue;
     }
-    if (current && /^\s+\S/.test(line)) assignField(current, line.trim());
+    if (current && /^\s+\S/.test(line)) {
+      const value = line.trim();
+      if (value === "previews:") {
+        current.previews = [];
+        inPreviews = true;
+        currentPreview = null;
+        previewItemIndent = 0;
+        continue;
+      }
+      if (inPreviews && currentPreview && line.search(/\S/) > previewItemIndent) {
+        assignField(currentPreview, value);
+        continue;
+      }
+      inPreviews = false;
+      currentPreview = null;
+      previewItemIndent = 0;
+      assignField(current, value);
+    }
   }
   return specs;
 }
@@ -213,6 +253,37 @@ function pickPackageAsset(assets, pluginId, version) {
   return { asset: exact || tarballs[0] };
 }
 
+function pickCanvasPackageAsset(assets, pluginId, version) {
+  const exactName = `${pluginId}-${version}.tar.gz`;
+  const exact = assets.find((asset) => asset.name === exactName);
+  return exact ? { asset: exact } : { error: `release has no exact ${exactName} asset` };
+}
+
+function validatePreviews(previews, required) {
+  if (required && (!Array.isArray(previews) || previews.length === 0)) {
+    return "canvas entries require at least one preview image";
+  }
+  if (previews === undefined) return undefined;
+  if (!Array.isArray(previews) || previews.length > 8) return "preview image count must be between 1 and 8";
+  for (const preview of previews) {
+    if (!preview || typeof preview.url !== "string" || typeof preview.alt !== "string") {
+      return "preview images require url and alt";
+    }
+    const alt = preview.alt.trim();
+    let parsed;
+    try {
+      parsed = new URL(preview.url);
+    } catch {
+      return "preview URLs must be absolute HTTPS URLs";
+    }
+    if (parsed.protocol !== "https:" || !parsed.hostname || parsed.username || parsed.password || parsed.hash || preview.url.length > 2048) {
+      return "preview URLs must be HTTPS without credentials or fragments";
+    }
+    if (alt.length < 1 || alt.length > 300) return "preview alt text must be 1 to 300 characters";
+  }
+  return undefined;
+}
+
 /** "agent-stats" -> "Agent Stats", the fallback when no manifest name is known. */
 function humanize(pluginId) {
   return pluginId
@@ -230,6 +301,10 @@ export async function buildEntry(spec) {
   const pluginId = spec.id;
   const repo = spec.repo;
   if (!pluginId || !repo) return { error: `entry missing id/repo: ${JSON.stringify(spec)}` };
+  const kind = spec.kind || "plugin";
+  const previewError = validatePreviews(spec.previews, kind === "canvas");
+  if (previewError) return { error: `${pluginId}: ${previewError}` };
+  if (kind !== "plugin" && kind !== "canvas") return { error: `${pluginId}: unsupported kind ${kind}` };
 
   let release;
   try {
@@ -240,32 +315,136 @@ export async function buildEntry(spec) {
 
   const tag = release.tag_name || "";
   const version = normalizeVersion(tag);
-  const { asset, error: assetError } = pickPackageAsset(release.assets || [], pluginId, version);
+  const picker = kind === "canvas" ? pickCanvasPackageAsset : pickPackageAsset;
+  const { asset, error: assetError } = picker(release.assets || [], pluginId, version);
   if (assetError) return { error: `${pluginId}: ${assetError}` };
 
   const manifest = tag ? await fetchManifest(repo, tag) : {};
   const iconUrl = manifest.icon && tag ? rawUrl(repo, tag, manifest.icon) : null;
   const meta = await fetchRepoMeta(repo, pluginId);
 
+  let packageSHA256 = null;
+  let inspectedDescriptor = null;
+  if (kind === "canvas") {
+    const inspected = await inspectCanvasAsset(asset.browser_download_url, pluginId);
+    if (inspected.error) return { error: `${pluginId}: ${inspected.error}` };
+    if (inspected.descriptor.id !== pluginId || inspected.descriptor.version !== version || inspected.descriptor.kind !== "canvas") {
+      return { error: `${pluginId}: inspected package identity does not match the registry entry` };
+    }
+    inspectedDescriptor = inspected.descriptor;
+    packageSHA256 = inspected.digest;
+  }
+
+  const canonicalRepoURL = `https://github.com/${repo}`;
+  if (kind === "canvas" && inspectedDescriptor.repo_url) {
+    if (canonicalizeRepoURL(inspectedDescriptor.repo_url) !== canonicalizeRepoURL(canonicalRepoURL)) {
+      return { error: `${pluginId}: inspected package repository does not match the registry entry` };
+    }
+  }
+  const presentation = kind === "canvas" ? { ...manifest, ...inspectedDescriptor } : manifest;
   const record = {
     id: pluginId,
-    // Presentation prefers the plugin's manifest, then id-derived / release /
-    // plugins.yaml fallbacks, so the contract shape is stable even on a miss.
-    name: manifest.display_name || humanize(pluginId),
-    description: manifest.description || release.name || "",
-    author: manifest.author || meta.author,
+    kind,
+    // Canvas presentation comes from the inspected archive. Plugins retain
+    // the existing manifest-first projection and fallback behavior.
+    name: presentation.display_name || humanize(pluginId),
+    description: presentation.description || release.name || "",
+    author: presentation.author || meta.author,
     categories: manifest.categories || spec.categories || [],
     icon_url: iconUrl,
-    repo_url: `https://github.com/${repo}`,
+    repo_url: presentation.repo_url || canonicalRepoURL,
     version: version || null,
-    min_kandev_version: manifest.min_kandev_version ?? null,
+    min_kandev_version: presentation.min_kandev_version ?? null,
+    ...(kind === "canvas" ? { license: inspectedDescriptor.license } : {}),
     package_url: asset.browser_download_url,
-    // Advisory provenance digest; null is a valid, documented value.
-    package_sha256: null,
+    package_sha256: packageSHA256,
+    ...(kind === "canvas"
+      ? {
+          permissions: {
+            reads: inspectedDescriptor.api_read || [],
+            writes: inspectedDescriptor.api_write || [],
+            events: inspectedDescriptor.events || [],
+            shared_state: Boolean(inspectedDescriptor.state),
+            external_origins: inspectedDescriptor.network_origins || [],
+          },
+        }
+      : {}),
+    ...(spec.previews ? { previews: spec.previews } : {}),
     stars: meta.stars,
     updated_at: meta.updatedAt || release.published_at || null,
   };
   return { record };
+}
+
+async function inspectCanvasAsset(assetURL, pluginId) {
+  const inspector = process.env.KANDEV_CANVAS_PACKAGE_INSPECTOR;
+  if (!inspector) return { error: "canvas package inspector is not configured" };
+  let response;
+  try {
+    response = await fetchWithTimeout(assetURL, { headers: { Accept: "application/gzip", "User-Agent": USER_AGENT } });
+  } catch (error) {
+    return { error: `canvas package download failed (${error.message})` };
+  }
+  if (!response.ok) return { error: `canvas package download returned ${response.status}` };
+  let body;
+  try {
+    body = await readBoundedResponse(response, MAX_CANVAS_PACKAGE_BYTES);
+  } catch {
+    return { error: "canvas package exceeds the package size limit" };
+  }
+  const digest = createHash("sha256").update(body).digest("hex");
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "kandev-canvas-registry-"));
+  const packagePath = path.join(directory, `${pluginId}.tar.gz`);
+  try {
+    await fs.writeFile(packagePath, body, { mode: 0o600 });
+    const result = await execFile(inspector, ["--file", packagePath], {
+      maxBuffer: 1024 * 1024,
+      timeout: CANVAS_INSPECTOR_TIMEOUT_MS,
+    });
+    let descriptor;
+    try {
+      descriptor = JSON.parse(result.stdout);
+    } catch {
+      return { error: "canvas package inspector returned invalid JSON" };
+    }
+    return { descriptor, digest };
+  } catch {
+    return { error: "canvas package inspection failed" };
+  } finally {
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+}
+
+async function readBoundedResponse(response, limit) {
+  if (!response.body?.getReader) throw new Error("response body stream unavailable");
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) return Buffer.concat(chunks);
+      const chunk = Buffer.from(value);
+      total += chunk.length;
+      if (total > limit) {
+        await reader.cancel();
+        throw new Error("response exceeds limit");
+      }
+      chunks.push(chunk);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function canonicalizeRepoURL(value) {
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "https:" || parsed.hostname !== "github.com" || parsed.username || parsed.password || parsed.search || parsed.hash) return "";
+    return `${parsed.origin}${parsed.pathname.replace(/\/+$/, "")}`;
+  } catch {
+    return "";
+  }
 }
 
 /** Repo metadata → stars (null on failure, never 0), last-push time, owner. */
@@ -288,10 +467,12 @@ async function fetchRepoMeta(repo, pluginId) {
 export async function buildIndex(specs) {
   const records = [];
   const errors = [];
+  const canvasErrors = [];
   for (const spec of specs) {
     const { record, error } = await buildEntry(spec);
     if (error) {
       errors.push(error);
+      if ((spec.kind || "plugin") === "canvas") canvasErrors.push(error);
       console.error(`skip: ${error}`);
       continue;
     }
@@ -303,7 +484,7 @@ export async function buildIndex(specs) {
     source: { name: SOURCE_NAME, url: SOURCE_URL },
     plugins: records,
   };
-  return { document, errors };
+  return { document, errors, canvasErrors };
 }
 
 async function main() {
@@ -312,7 +493,7 @@ async function main() {
   // An empty list is expected at launch (no plugin repos yet) — it produces a
   // valid, empty index.json and is NOT an error. Only a non-empty list that
   // resolves to zero entries (below) indicates a real failure.
-  const { document, errors } = await buildIndex(specs);
+  const { document, errors, canvasErrors } = await buildIndex(specs);
   await fs.writeFile(OUTPUT_JSON, `${JSON.stringify(document, null, 2)}\n`, "utf8");
 
   console.error(
@@ -323,6 +504,10 @@ async function main() {
   // or total outage — fail so CI never publishes an empty catalog over a good one.
   if (specs.length > 0 && document.plugins.length === 0) {
     console.error("error: no entries could be built; refusing to publish empty index");
+    process.exitCode = 1;
+  }
+  if (process.env.GITHUB_EVENT_NAME === "pull_request" && canvasErrors.length > 0) {
+    console.error("error: pull-request validation found invalid canvas entries");
     process.exitCode = 1;
   }
 }

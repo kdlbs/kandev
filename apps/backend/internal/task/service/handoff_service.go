@@ -220,16 +220,17 @@ func (p WorkspacePolicy) NeedsAttachment() bool {
 // graph itself is the bound: only parent/children/siblings/blockers are ever
 // projected, so descriptions never leak from unrelated tasks.
 type RelatedTask struct {
-	ID            string             `json:"id"`
-	Identifier    string             `json:"identifier,omitempty"`
-	Title         string             `json:"title"`
-	Description   string             `json:"description,omitempty"`
-	State         string             `json:"state"`
-	WorkspaceID   string             `json:"workspace_id"`
-	ParentID      string             `json:"parent_id,omitempty"`
-	AssigneeLabel string             `json:"assignee_label,omitempty"`
-	DocumentKeys  []string           `json:"document_keys,omitempty"`
-	PRs           []v1.TaskPRSummary `json:"prs,omitempty"`
+	ID             string                        `json:"id"`
+	Identifier     string                        `json:"identifier,omitempty"`
+	Title          string                        `json:"title"`
+	Description    string                        `json:"description,omitempty"`
+	State          string                        `json:"state"`
+	WorkspaceID    string                        `json:"workspace_id"`
+	ParentID       string                        `json:"parent_id,omitempty"`
+	AssigneeLabel  string                        `json:"assignee_label,omitempty"`
+	DocumentKeys   []string                      `json:"document_keys,omitempty"`
+	PRs            []v1.TaskPRSummary            `json:"prs,omitempty"`
+	ChangeRequests []v1.TaskChangeRequestSummary `json:"change_requests,omitempty"`
 }
 
 // RelatedTasks bundles every relation surface for a single task.

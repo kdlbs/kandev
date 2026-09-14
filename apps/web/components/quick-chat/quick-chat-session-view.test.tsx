@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -16,6 +17,7 @@ const sessionRows = vi.hoisted(
 const quickChatSessions = vi.hoisted(
   () => [] as Array<{ sessionId: string; taskId?: string; agentProfileId?: string }>,
 );
+const quickChatContentProps = vi.hoisted(() => [] as Array<{ recoveryRevealKey?: string | null }>);
 const useEnsureTaskSession = vi.hoisted(() => vi.fn());
 const useTask = vi.hoisted(() => vi.fn());
 const useSessionResumption = vi.hoisted(() =>
@@ -25,6 +27,7 @@ const useSessionResumption = vi.hoisted(() =>
     error: null,
     notice: null,
     recoveryFailure: null,
+    recoveryAttemptId: 0,
     taskSessionState: null,
     worktreePath: null,
     worktreeBranch: null,
@@ -50,7 +53,16 @@ vi.mock("@/components/task/passthrough-terminal", () => ({
   PassthroughTerminal: () => <div data-testid="passthrough-terminal" />,
 }));
 vi.mock("./quick-chat-content", () => ({
-  QuickChatContent: () => <div data-testid="quick-chat-content" />,
+  QuickChatContent: ({
+    recoveryContent,
+    recoveryRevealKey,
+  }: {
+    recoveryContent?: ReactNode;
+    recoveryRevealKey?: string | null;
+  }) => {
+    quickChatContentProps.push({ recoveryRevealKey });
+    return <div data-testid="quick-chat-content">{recoveryContent}</div>;
+  },
 }));
 vi.mock("@/components/task/chat/session-bootstrap-recovery-card", () => ({
   SessionBootstrapRecoveryCard: ({
@@ -95,6 +107,7 @@ afterEach(() => {
   cleanup();
   delete sessionRows[session.sessionId];
   quickChatSessions.length = 0;
+  quickChatContentProps.length = 0;
   vi.clearAllMocks();
   useTask.mockReset();
   useTask.mockReturnValue(null);
@@ -259,6 +272,70 @@ describe("QuickChatSessionView session resumption", () => {
     render(<QuickChatSessionView session={session} />);
 
     expect(screen.getByTestId(RECOVERY_CARD_TEST_ID).textContent).toContain("recovery_failed");
+  });
+
+  it("keys unstamped recovery feedback by attempt and outcome while preserving duplicate state", () => {
+    const firstFailure = {
+      outcome: "recovery_failed" as const,
+      resumeError: "first resume failure",
+      restoreError: "first restore failure",
+    };
+    const firstAttempt = {
+      resumptionState: "error" as const,
+      sessionStatus: null,
+      error: "first translated failure",
+      notice: null,
+      recoveryFailure: firstFailure,
+      recoveryAttemptId: 4,
+      taskSessionState: "FAILED" as const,
+      worktreePath: null,
+      worktreeBranch: null,
+      resumeSession: vi.fn(),
+    };
+    useSessionResumption.mockReturnValue(firstAttempt as never);
+
+    const view = render(<QuickChatSessionView session={session} />);
+    const firstKey = quickChatContentProps.at(-1)?.recoveryRevealKey;
+    expect(firstKey).toBe("session-1:recovery:4:recovery_failed");
+
+    useSessionResumption.mockReturnValue({
+      ...firstAttempt,
+      error: "same attempt, different translated failure",
+    } as never);
+    view.rerender(<QuickChatSessionView session={session} />);
+    expect(quickChatContentProps.at(-1)?.recoveryRevealKey).toBe(firstKey);
+
+    useSessionResumption.mockReturnValue({
+      ...firstAttempt,
+      recoveryFailure: {
+        outcome: "status_unavailable" as const,
+        kind: "timeout" as const,
+        statusError: "status request failed",
+      },
+    } as never);
+    view.rerender(<QuickChatSessionView session={session} />);
+    expect(quickChatContentProps.at(-1)?.recoveryRevealKey).toBe(
+      "session-1:recovery:4:status_unavailable",
+    );
+
+    useSessionResumption.mockReturnValue({
+      ...firstAttempt,
+      error: null,
+      recoveryFailure: null,
+      recoveryAttemptId: 4,
+    } as never);
+    view.rerender(<QuickChatSessionView session={session} />);
+    expect(quickChatContentProps.at(-1)?.recoveryRevealKey).toBeNull();
+
+    useSessionResumption.mockReturnValue({
+      ...firstAttempt,
+      error: "second translated failure",
+      recoveryAttemptId: 5,
+    } as never);
+    view.rerender(<QuickChatSessionView session={session} />);
+    expect(quickChatContentProps.at(-1)?.recoveryRevealKey).toBe(
+      "session-1:recovery:5:recovery_failed",
+    );
   });
 
   it("keeps the bootstrap recovery card and automatic outcome in passthrough Quick Chat", () => {

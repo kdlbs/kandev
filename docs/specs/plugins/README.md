@@ -36,4 +36,7 @@ canonical requirement and system-design documents. Use the catalog command to fi
 - [UI](../ui/README.md): renders plugin contributions.
 - [Canvases](../canvases/README.md): binds isolated web applications to task
   and workspace canvas lifecycles.
+- [Canvas distribution](../canvases/system-design/marketplace-sharing.md): owns
+  canvas export/import and the canvas-specific marketplace flow; reuses plugin
+  manifests, static validation, catalog sources, and runtime isolation.
 - [Integrations](../integrations/README.md): supplies external connections.

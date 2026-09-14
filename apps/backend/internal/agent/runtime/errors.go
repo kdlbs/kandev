@@ -9,3 +9,7 @@ type BootstrapFailure = lifecycle.BootstrapFailure
 // RepositoryPreparationError identifies the repository whose preparation
 // prevented a multi-repository launch.
 type RepositoryPreparationError = lifecycle.RepositoryPreparationError
+
+// ErrCancelEscalated reports that cancellation released local admission after
+// the provider failed to acknowledge the cancellation within its bound.
+var ErrCancelEscalated = lifecycle.ErrCancelEscalated

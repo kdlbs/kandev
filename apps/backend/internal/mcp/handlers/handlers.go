@@ -293,6 +293,7 @@ type Handlers struct {
 	// Optional PR lister (set via SetTaskPRLister) used to enrich
 	// task-listing responses with associated pull requests.
 	taskPRLister TaskPRLister
+	taskMRLister TaskMRLister
 	// Native code review (optional, set via SetReviewService /
 	// SetReviewRunner). Without them the review actions are simply not
 	// registered — see registerReviewHandlers.
@@ -303,6 +304,7 @@ type Handlers struct {
 
 	// Optional task-bound GitHub PR automation controls.
 	taskPRAutomation       TaskPRAutomationService
+	taskChangeLinks        TaskChangeLinkService
 	taskPRAutoFixOutcome   TaskPRAutoFixOutcomeService
 	remoteContributionSvc  RemoteContributionService
 	diagnosticBundles      DiagnosticBundleProvider
@@ -329,6 +331,11 @@ func (h *Handlers) releaseWorkspacePolicyAfterCreateRollback(ctx context.Context
 		h.logger.Warn("rollback workspace membership cleanup failed",
 			zap.String("task_id", taskID), zap.Error(err))
 	}
+}
+
+// SetTaskChangeLinkService wires provider-neutral PR/MR association changes.
+func (h *Handlers) SetTaskChangeLinkService(links TaskChangeLinkService) {
+	h.taskChangeLinks = links
 }
 
 // NewHandlers creates new MCP handlers.
@@ -488,6 +495,13 @@ func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPCreateTask, h.handleCreateTask)
 	d.RegisterFunc(ws.ActionMCPUpdateTask, h.handleUpdateTask)
 	d.RegisterFunc(ws.ActionMCPSetTaskTitle, h.handleSetTaskTitle)
+	d.RegisterFunc(ws.ActionMCPGetTaskPRAutomation, h.handleGetTaskPRAutomation)
+	d.RegisterFunc(ws.ActionMCPUpdateTaskPRAutomation, h.handleUpdateTaskPRAutomation)
+	d.RegisterFunc(ws.ActionMCPGetTaskMRAutomation, h.handleGetTaskMRAutomation)
+	d.RegisterFunc(ws.ActionMCPUpdateTaskMRAutomation, h.handleUpdateTaskMRAutomation)
+	d.RegisterFunc(ws.ActionMCPLinkTaskPR, h.handleLinkTaskPR)
+	d.RegisterFunc(ws.ActionMCPUnlinkTaskPR, h.handleUnlinkTaskPR)
+	d.RegisterFunc(ws.ActionMCPReplaceTaskPR, h.handleReplaceTaskPR)
 	d.RegisterFunc(ws.ActionMCPAddTaskDependency, h.handleAddTaskDependency)
 	d.RegisterFunc(ws.ActionMCPRemoveTaskDependency, h.handleRemoveTaskDependency)
 	d.RegisterFunc(ws.ActionMCPAddBranchToTask, h.handleAddBranchToTask)

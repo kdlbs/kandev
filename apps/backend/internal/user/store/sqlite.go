@@ -629,6 +629,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"prevent_auto_start_agent_on_open":         settings.PreventAutoStartAgentOnOpen,
 		"unread_divider":                           settings.UnreadDivider,
 		"agent_generated_task_titles":              settings.AgentGeneratedTaskTitles,
+		"auto_focus_new_tasks":                     settings.AutoFocusNewTasks,
 		"mcp_task_agent_profile_default":           models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"show_anchored_prompt_bar":                 settings.ShowAnchoredPromptBar,
 		"show_scroll_to_last_prompt":               settings.ShowScrollToLastPrompt,
@@ -732,6 +733,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		ConfirmTaskArchive:                true,
 		UnreadDivider:                     false,
 		AgentGeneratedTaskTitles:          true,
+		AutoFocusNewTasks:                 true,
 		MCPTaskAgentProfileDefault:        models.MCPTaskAgentProfileDefaultCurrentTask,
 		ShowAnchoredPromptBar:             false,
 		ShowScrollToLastPrompt:            true,
@@ -811,6 +813,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		PreventAutoStartAgentOnOpen       *bool                               `json:"prevent_auto_start_agent_on_open"`
 		UnreadDivider                     *bool                               `json:"unread_divider"`
 		AgentGeneratedTaskTitles          *bool                               `json:"agent_generated_task_titles"`
+		AutoFocusNewTasks                 *bool                               `json:"auto_focus_new_tasks"`
 		MCPTaskAgentProfileDefault        string                              `json:"mcp_task_agent_profile_default"`
 		ShowAnchoredPromptBar             *bool                               `json:"show_anchored_prompt_bar"`
 		ShowScrollToLastPrompt            *bool                               `json:"show_scroll_to_last_prompt"`
@@ -895,6 +898,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	if payload.AgentGeneratedTaskTitles != nil {
 		settings.AgentGeneratedTaskTitles = *payload.AgentGeneratedTaskTitles
+	}
+	if payload.AutoFocusNewTasks != nil {
+		settings.AutoFocusNewTasks = *payload.AutoFocusNewTasks
 	}
 	settings.MCPTaskAgentProfileDefault = models.NormalizeMCPTaskAgentProfileDefault(payload.MCPTaskAgentProfileDefault)
 	if payload.ShowAnchoredPromptBar != nil {

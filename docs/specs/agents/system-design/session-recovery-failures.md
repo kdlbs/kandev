@@ -97,6 +97,25 @@ Use 28-pixel fine-pointer buttons and at least 44-pixel phone/coarse-pointer
 targets. The semantic disclosure supports Enter/Space and expanded state.
 
 
+### Proposed recovery scroll ownership
+
+The [startup recovery fix package](../../../plans/startup-recovery-scroll-timeout/plan.md) implements criterion 006.7.
+Place the recovery card inside the existing transcript viewport, before the message content.
+Disable outer `PanelBody` scrolling for the mounted chat.
+Preserve the fixed composer and existing dynamic viewport and safe-area layout.
+Expanded recovery details remain in the transcript scroll area.
+Do not add a card scroller, duplicate banner, or permanent fixed recovery panel.
+
+Reveal the active card once per session and failure stamp when the chat becomes visible.
+Use the existing transcript scroll controller to coordinate this reveal with initial bottom positioning.
+A repeated event with the same stamp must not pull the user away from older messages.
+Scope reveal state to session identity and defer hidden-panel scrolling until visibility returns.
+Preserve normal bottom-follow behavior when no active recovery card exists.
+
+Task detail and preview share the chat panel. Audit Quick Chat for the same nested-scroll condition.
+The dedicated phone Chat surface retains stacked touch actions and one-dimensional navigation.
+The recovery card remains the sole explanation and action owner.
+
 ## Persistence and compatibility
 
 Use the existing error records and optional fields specified by the

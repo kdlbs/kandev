@@ -10,7 +10,7 @@
  * indicators, so nothing here participates in composing or sending a message.
  */
 
-import type { ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { WorkflowMoveProceedButton } from "@/components/task/workflow-move-proceed-button";
 import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
@@ -27,7 +27,9 @@ import { TodoIndicator } from "./todo-indicator";
 import { AutoScrollToggleButton } from "./auto-scroll-toggle-button";
 import { PRMergedBanner, PRClosedBanner } from "./pr-archive-banners";
 import { AutopilotChatChip, useTaskAutopilot } from "./task-autopilot-chat-chip";
+import { AgentGoalChip } from "./agent-goal-chip";
 import { shouldShowProceed } from "./types";
+import { getAgentGoal } from "@/lib/agent-goal";
 import { useComposerDisclosureContext } from "./composer-disclosure";
 import { cn } from "@/lib/utils";
 
@@ -60,14 +62,22 @@ export function shouldRenderChatStatusBar({
   hasQueueChip,
   showRightControls,
   showProceed,
+  hasGoal,
 }: {
   hasTask: boolean;
   hasTodos: boolean;
   hasQueueChip: boolean;
   showRightControls: boolean;
   showProceed: boolean;
+  hasGoal?: boolean;
 }): boolean {
-  return hasTask || hasTodos || hasQueueChip || showRightControls || showProceed;
+  return hasTask || hasTodos || hasQueueChip || showRightControls || showProceed || !!hasGoal;
+}
+
+function readACPMetadata(metadata: Record<string, unknown> | null | undefined): unknown {
+  const acp = metadata?.acp;
+  if (!acp || typeof acp !== "object" || Array.isArray(acp)) return undefined;
+  return (acp as Record<string, unknown>).meta;
 }
 
 function getRightControlVisibility({
@@ -168,6 +178,13 @@ export function ChatStatusBar({
   // Asked here rather than inside the button so the cluster still renders when
   // the Threads jump is the only right-hand control this session qualifies for.
   const showThreadsLink = useIsDeckThread(taskId, sessionId);
+  const activeGoalMetadata = useAppStore((state) =>
+    sessionId ? readACPMetadata(state.taskSessions.items[sessionId]?.metadata) : undefined,
+  );
+  const activeGoal = useMemo(() => {
+    const goal = getAgentGoal(activeGoalMetadata);
+    return goal?.status === "active" ? goal : null;
+  }, [activeGoalMetadata]);
   const { canShare, showRightControls } = getRightControlVisibility({
     taskId,
     sessionId,
@@ -184,6 +201,7 @@ export function ChatStatusBar({
       hasQueueChip: !!queueChip,
       showRightControls,
       showProceed,
+      hasGoal: !!activeGoal,
     })
   ) {
     return null;
@@ -198,6 +216,7 @@ export function ChatStatusBar({
       {autopilot && <AutopilotChatChip />}
       <TaskDependencyChip taskId={taskId} />
       {!separateCI && <ComposerCIStatus taskId={taskId} sessionId={sessionId} />}
+      {activeGoal && <AgentGoalChip key={sessionId ?? "none"} goal={activeGoal} />}
       {queueChip}
       {/* Distinct per-banner keys: the key remounts the banner on task switch
           so its dismissed state re-initialises, and keeping the two suffixes

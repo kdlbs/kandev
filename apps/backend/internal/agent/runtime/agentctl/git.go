@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"time"
 )
 
 const GitPushPreflightHistoryUpdateRequired = "history_update_required"
+
+const gitPushPreflightTimeout = 2 * time.Minute
 
 // GitOperationResult represents the result of a git operation.
 // This matches the server-side process.GitOperationResult.
@@ -42,6 +45,21 @@ type PushOptions struct {
 	SetUpstream    bool
 	Remote         string
 	ExpectedBranch string
+}
+
+// ContributionHistoryExplanationResult mirrors the bounded, read-only Git
+// observation returned by the agentctl server.
+type ContributionHistoryExplanationResult struct {
+	Repo                 string `json:"repo,omitempty"`
+	Branch               string `json:"branch"`
+	ExpectedLocalHead    string `json:"expected_local_head"`
+	ExpectedRemoteHead   string `json:"expected_remote_head"`
+	Kind                 string `json:"kind"`
+	Reason               string `json:"reason"`
+	OntoHead             string `json:"onto_head,omitempty"`
+	TaskCommitCount      *int   `json:"task_commit_count,omitempty"`
+	PublishedCommitCount *int   `json:"published_commit_count,omitempty"`
+	NewBaseCommitCount   *int   `json:"new_base_commit_count,omitempty"`
 }
 
 // PRCreateResult represents the result of a PR creation operation.
@@ -105,7 +123,13 @@ func (c *Client) GitPushPreflight(ctx context.Context, repo string, opts PushOpt
 		Remote:         opts.Remote,
 		ExpectedBranch: opts.ExpectedBranch,
 	}
-	return c.gitOperation(ctx, "/api/v1/git/push-preflight", payload)
+	return c.gitOperationWithClient(ctx, "/api/v1/git/push-preflight", payload, c.gitPushPreflightClient())
+}
+
+func (c *Client) gitPushPreflightClient() *http.Client {
+	client := *c.httpClient
+	client.Timeout = gitPushPreflightTimeout
+	return &client
 }
 
 // GitReplaceRemoteContribution replaces the bound contribution branch when
@@ -132,6 +156,52 @@ func (c *Client) GitUseRemoteContribution(ctx context.Context, expectedRemoteHea
 		Repo:               repo,
 	}
 	return c.gitOperation(ctx, "/api/v1/git/contribution/use", payload)
+}
+
+// GitContributionHistoryExplanation observes the selected branch and heads
+// without fetching, rewriting, or publishing any Git refs.
+func (c *Client) GitContributionHistoryExplanation(
+	ctx context.Context, branch, expectedLocalHead, expectedRemoteHead, repo string,
+) (*ContributionHistoryExplanationResult, error) {
+	payload := struct {
+		Branch             string `json:"branch"`
+		ExpectedLocalHead  string `json:"expected_local_head"`
+		ExpectedRemoteHead string `json:"expected_remote_head"`
+		Repo               string `json:"repo,omitempty"`
+	}{
+		Branch:             branch,
+		ExpectedLocalHead:  expectedLocalHead,
+		ExpectedRemoteHead: expectedRemoteHead,
+		Repo:               repo,
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal request: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
+		c.baseURL+"/api/v1/git/contribution/history-explanation", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute request: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	responseBody, err := readResponseBody(resp)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	var result ContributionHistoryExplanationResult
+	if err := json.Unmarshal(responseBody, &result); err != nil {
+		return nil, fmt.Errorf("failed to parse response (status %d, body: %s): %w",
+			resp.StatusCode, truncateBody(responseBody), err)
+	}
+	if resp.StatusCode >= 400 {
+		return &result, fmt.Errorf("git contribution history explanation failed with status %d", resp.StatusCode)
+	}
+	return &result, nil
 }
 
 // GitRebase rebases the worktree branch onto the specified base branch.
@@ -335,6 +405,15 @@ func (c *Client) GitCreatePR(ctx context.Context, title, body, baseBranch string
 
 // gitOperation is a helper that performs a git operation via HTTP POST.
 func (c *Client) gitOperation(ctx context.Context, path string, payload interface{}) (*GitOperationResult, error) {
+	return c.gitOperationWithClient(ctx, path, payload, c.httpClient)
+}
+
+func (c *Client) gitOperationWithClient(
+	ctx context.Context,
+	path string,
+	payload interface{},
+	httpClient *http.Client,
+) (*GitOperationResult, error) {
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal request: %w", err)
@@ -346,7 +425,7 @@ func (c *Client) gitOperation(ctx context.Context, path string, payload interfac
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute request: %w", err)
 	}

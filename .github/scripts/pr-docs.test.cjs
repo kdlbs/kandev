@@ -39,6 +39,25 @@ test('recognized documentation-only paths are exempt', () => {
   assert.equal(result.exemptPaths.length, 9);
 });
 
+// @covers AC-CI-PR-DOCS-001.2
+test('recognized harness configuration paths are exempt', () => {
+  const result = validator.classifyChangedFiles([
+    { filename: '.codex/agents/pr-poller.toml', status: 'modified' },
+    { filename: '.codex/config.toml', status: 'modified' },
+    { filename: '.claude/settings.json', status: 'modified' },
+    { filename: '.cursor/rules/kandev-harness.mdc', status: 'modified' },
+  ]);
+
+  assert.equal(result.requiresCoverage, false);
+  assert.deepEqual(result.triggeringPaths, []);
+  assert.deepEqual(result.exemptPaths, [
+    '.codex/agents/pr-poller.toml',
+    '.codex/config.toml',
+    '.claude/settings.json',
+    '.cursor/rules/kandev-harness.mdc',
+  ]);
+});
+
 // @covers AC-CI-PR-DOCS-001.3
 test('shipped files and unsupported test-like paths require coverage', () => {
   const result = validator.classifyChangedFiles([
@@ -386,6 +405,48 @@ test('multi-design work orders validate each requirement against its owning desi
 
   assert.equal(result.ok, true, result.errors.join('; '));
   assert.deepEqual(result.errors, []);
+});
+
+// @covers AC-CI-PR-DOCS-001.4
+test('coverage loading searches only requirements declared by each design', async () => {
+  const contents = multiDesignFixtureContents();
+  const changed = runtimeAndWorkOrderDiff();
+  const searches = [];
+  const client = {
+    async getPullRequest() {
+      return pullRequest(42, SHA_B, [], changed.length);
+    },
+    async listFiles() {
+      return changed;
+    },
+    async getFile(pathname, ref) {
+      assert.equal(ref, SHA_B);
+      if (!Object.hasOwn(contents, pathname)) {
+        throw new Error('GitHub API request failed with HTTP 404: Not Found');
+      }
+      return contents[pathname];
+    },
+    async searchCode(requirementId, directory) {
+      searches.push({ requirementId, directory });
+      return [directory.includes('/platform/')
+        ? 'docs/specs/platform/requirements/diagnostic-logging.md'
+        : 'docs/specs/web/requirements/browser-retention.md'];
+    },
+  };
+
+  const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+
+  assert.equal(result.status, 'covered', result.errors.join('; '));
+  assert.deepEqual(searches, [
+    {
+      requirementId: 'REQ-PLATFORM-DIAGNOSTIC-LOGGING-001',
+      directory: 'docs/specs/platform/requirements',
+    },
+    {
+      requirementId: 'REQ-WEB-BROWSER-RETENTION-001',
+      directory: 'docs/specs/web/requirements',
+    },
+  ]);
 });
 
 test('multi-design work orders fail when a requirement has no owning design', () => {

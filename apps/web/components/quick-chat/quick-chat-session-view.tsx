@@ -13,6 +13,9 @@ import type { QuickChatSession } from "@/lib/state/slices/ui/types";
 import { QuickChatContent } from "./quick-chat-content";
 import { useTranslation } from "react-i18next";
 
+// i18n-exempt: internal recovery identity token, not user-facing copy.
+const GENERIC_RECOVERY_OUTCOME = "feedback";
+
 function useIsQuickChatPassthrough(sessionId: string) {
   return useAppStore((state) => {
     const session = state.taskSessions.items[sessionId];
@@ -40,6 +43,33 @@ function resolveTaskArchiveState(
   // Ephemeral Quick Chat tasks are intentionally absent from the kanban task
   // cache. Their hydrated tab is the authoritative live-task source.
   return quickChatTaskId === taskId ? false : null;
+}
+
+function resolveRecoveryRevealKey(
+  sessionId: string,
+  bootstrapRecoveryError: { stamp: string; occurred_at: string } | null,
+  hasRecoveryFeedback: boolean,
+  recoveryAttemptId: number | undefined,
+  recoveryOutcome: string | null,
+): string | null {
+  if (bootstrapRecoveryError) {
+    return `${sessionId}:${bootstrapRecoveryError.stamp || bootstrapRecoveryError.occurred_at}`;
+  }
+  if (!hasRecoveryFeedback) return null;
+  return `${sessionId}:recovery:${recoveryAttemptId ?? 0}:${recoveryOutcome ?? GENERIC_RECOVERY_OUTCOME}`;
+}
+
+function hasRecoveryFeedback(state: {
+  error: string | null;
+  notice: string | null;
+  recoveryFailure: unknown;
+}): boolean {
+  return Boolean(state.error) || Boolean(state.notice) || state.recoveryFailure !== null;
+}
+
+function recoveryOutcome(failure: { outcome: string } | null): string | null {
+  if (!failure) return null;
+  return failure.outcome;
 }
 
 export function QuickChatSessionView({
@@ -90,6 +120,13 @@ export function QuickChatSessionView({
   ) : (
     recoveryFeedback
   );
+  const recoveryRevealKey = resolveRecoveryRevealKey(
+    session.sessionId,
+    bootstrapRecoveryError,
+    hasRecoveryFeedback(resumption),
+    resumption.recoveryAttemptId,
+    recoveryOutcome(resumption.recoveryFailure),
+  );
   if (isPassthrough) {
     return (
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -103,7 +140,6 @@ export function QuickChatSessionView({
   const isConfig = session.kind === "config";
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {recoverySurface}
       <div className="flex min-h-0 flex-1 flex-col">
         <QuickChatContent
           sessionId={session.sessionId}
@@ -111,6 +147,8 @@ export function QuickChatSessionView({
           placeholderOverride={isConfig ? t("chat:configChatPlaceholder") : undefined}
           initialPrompt={session.initialPrompt}
           onInitialPromptAttempted={onInitialPromptAttempted}
+          recoveryContent={recoverySurface}
+          recoveryRevealKey={recoveryRevealKey}
         />
       </div>
     </div>

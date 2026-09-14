@@ -64,6 +64,10 @@ export type MessageListProps = {
    * top — the desktop-only, opt-in anchored last-prompt bar. `null`/`undefined`
    * when the setting is off or on mobile. */
   stickyPromptBar?: ReactNode;
+  /** Rendered above transcript status and messages inside the native viewport. */
+  prependContent?: ReactNode;
+  /** Identity of the active recovery content for one-time initial reveal. */
+  recoveryRevealKey?: string | null;
   /** Current rendered height (px) of the anchored last-prompt bar's pinned
    * overlay, or 0/undefined when it isn't showing. Lets a target scrolled
    * to the top of the transcript (e.g. the unread "New" divider) reserve
@@ -434,6 +438,14 @@ export function LastAgentErrorNotice({
           <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-destructive/85">
             {error.message}
           </pre>
+          {error.details && (
+            <details className="mt-2 min-w-0 text-[11px]" data-testid="last-agent-error-details">
+              <summary className="cursor-pointer font-medium">{t("task:technicalDetails")}</summary>
+              <pre className="mt-1 max-h-40 overflow-y-auto whitespace-pre-wrap break-words leading-relaxed text-destructive/85">
+                {error.details}
+              </pre>
+            </details>
+          )}
           {error.remediationUrl && (
             <div className="mt-1">
               <RemediationLink url={error.remediationUrl} className="text-destructive/85" />
@@ -442,7 +454,7 @@ export function LastAgentErrorNotice({
         </div>
         <button
           type="button"
-          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded hover:bg-destructive/10 cursor-pointer"
+          className="inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded hover:bg-destructive/10 [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
           aria-label={t("task:hidePreviousAgentError")}
           onClick={dismiss}
         >

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agentctl/server/config"
+	"github.com/kandev/kandev/internal/common/subproc"
 )
 
 func TestManagerTrackerGitEnvironmentUsesInstanceEnvironment(t *testing.T) {
@@ -45,8 +46,10 @@ func TestManagerTrackerGitEnvironmentUsesInstanceEnvironment(t *testing.T) {
 		"GIT_CONFIG_VALUE_0":             "Authorization: Bearer instance-token",
 		"GIT_TERMINAL_PROMPT":            "0",
 		"GCM_INTERACTIVE":                "Never",
-		"GIT_ASKPASS":                    "echo",
-		"SSH_ASKPASS":                    "/bin/false",
+		"GCM_GUI_PROMPT":                 "0",
+		"GIT_ASKPASS":                    "exit 1",
+		"SSH_ASKPASS":                    "exit 1",
+		"SSH_ASKPASS_REQUIRE":            "never",
 		"GIT_SSH_COMMAND":                "ssh -oBatchMode=yes",
 	}
 	for key, wantValue := range want {
@@ -134,14 +137,14 @@ func TestForceGitSSHBatchModeSupportsDirectOpenSSHOnly(t *testing.T) {
 	tests := map[string]string{
 		"ssh -i /instance/key -oBatchMode=no": "ssh -oBatchMode=yes -i /instance/key -oBatchMode=no",
 		`'path with spaces/ssh' -i key`:       `'path with spaces/ssh' -oBatchMode=yes -i key`,
-		`env FOO=bar ssh -i key`:              defaultGitSSHCommand,
-		`FOO=bar ssh -i key`:                  defaultGitSSHCommand,
-		`exec ssh -i key`:                     defaultGitSSHCommand,
-		`plink -i key`:                        defaultGitSSHCommand,
+		`env FOO=bar ssh -i key`:              "ssh -oBatchMode=yes",
+		`FOO=bar ssh -i key`:                  "ssh -oBatchMode=yes",
+		`exec ssh -i key`:                     "ssh -oBatchMode=yes",
+		`plink -i key`:                        "ssh -oBatchMode=yes",
 	}
 	for command, want := range tests {
-		if got := forceGitSSHBatchMode(command); got != want {
-			t.Errorf("forceGitSSHBatchMode(%q) = %q, want %q", command, got, want)
+		if got := subproc.ForceGitSSHBatchMode(command); got != want {
+			t.Errorf("ForceGitSSHBatchMode(%q) = %q, want %q", command, got, want)
 		}
 	}
 }

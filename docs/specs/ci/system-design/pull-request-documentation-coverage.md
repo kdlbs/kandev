@@ -41,6 +41,7 @@ Initial exemptions:
 - Go `*_test.go`; JS/TS `*.test.*` and `*.spec.*` restricted to JS/TS source extensions; `apps/web/e2e/**`.
 - `apps/web/src/locales/<locale>/<namespace>.json`.
 - Exact lock basenames `pnpm-lock.yaml`, `package-lock.json`, `yarn.lock`, `go.sum`, and `Cargo.lock`.
+- Recognized non-Markdown harness files: `.codex/agents/*.toml`, `.codex/config.toml`, `.claude/settings.json`, and `.cursor/rules/*.mdc`.
 
 Do not exempt all JSON, YAML, assets, scripts, package manifests, Rust files, workflows, generated directories, or files containing the word `test`.
 These can change shipped behavior or repository contracts. Add exemptions later only with concrete fixtures.

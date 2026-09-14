@@ -23,7 +23,7 @@ Contributors can write the artifacts manually; use of the repository harness is 
 #### Acceptance criteria
 
 - **AC-CI-PR-DOCS-001.1:** Every open pull request shall receive a documentation coverage result, including drafts and forks.
-- **AC-CI-PR-DOCS-001.2:** A pull request containing only recognized documentation, tests, translation catalogs, or dependency lock changes shall pass without a delivery package.
+- **AC-CI-PR-DOCS-001.2:** A pull request containing only recognized documentation, tests, translation catalogs, dependency lock, or harness changes shall pass without a delivery package.
 - **AC-CI-PR-DOCS-001.3:** Other changes shall require an added or modified work order, its plan, and linked requirements and system designs. Changing the title to `fix`, `chore`, or `refactor` shall not exempt the change.
 - **AC-CI-PR-DOCS-001.4:** Existing plans and specifications shall qualify when the work order references them and they exist in the proposed revision. Contributors shall update contracts when behavior changes, but shall not need meaningless edits to unchanged contracts.
 - **AC-CI-PR-DOCS-001.5:** A deleted artifact, empty file, unresolved reference, unrelated unlinked document, or work order without requirement and acceptance references shall not satisfy coverage.

@@ -884,7 +884,7 @@ func (s *Service) runSilentCancellationOwned(ctx context.Context, taskID, sessio
 		return ErrSendNowTurnChanged
 	}
 	s.setCancellationIdentity(sessionID, operation, identity)
-	if err := s.cancelAgentWhileUnlocked(ctx, sessionID, guard.unlock, guard.relock); err != nil {
+	if err := s.cancelAgentWhileUnlocked(ctx, sessionID, operation, guard.unlock, guard.relock); err != nil {
 		return err
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
@@ -1032,24 +1032,25 @@ func (s *Service) cancelAgentSilentWithGuardActionKindExclusiveConflict(
 	kind cancellationKind,
 	expectedTurnID string,
 	conflictErr error,
-) (bool, error) {
+) (*cancelOperation, bool, error) {
 	operation, registered, err := s.startExclusiveSilentCancellation(
 		ctx, taskID, sessionID, action, kind, expectedTurnID, conflictErr,
 	)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	if unlockGuard != nil {
 		unlockGuard()
 		defer relockGuard()
 	}
 	if err := operation.wait(ctx); err != nil {
-		return false, err
+		return operation, false, err
 	}
 	if registered == nil {
-		return false, nil
+		return operation, false, nil
 	}
-	return registered.wait(ctx)
+	dispatched, err := registered.wait(ctx)
+	return operation, dispatched, err
 }
 
 func (s *Service) logSilentCancelReconciled(taskID, sessionID string, err error) {
