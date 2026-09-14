@@ -506,6 +506,12 @@ type FeaturesConfig struct {
 	// decision re-evaluation when disabled.
 	OfficeSessionIdentity bool `mapstructure:"office_session_identity" json:"officeSessionIdentity"`
 
+	// NeedsYouInbox gates the Needs-you Inbox: a workspace-scoped sidebar
+	// destination, independent of Office, listing exactly the answerable
+	// clarification bundles for the active workspace. Off in prod until the
+	// feature is user-ready.
+	NeedsYouInbox bool `mapstructure:"needs_you_inbox" json:"needsYouInbox"`
+
 	// AgentSurvival lets a worktree or local-executor agent session survive a
 	// backend restart by adopting its still-running standalone control server
 	// instead of killing it. Off in every embedded profile, and unavailable on

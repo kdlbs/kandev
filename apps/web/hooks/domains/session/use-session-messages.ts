@@ -381,7 +381,8 @@ function useTerminalStateFetch(
   useEffect(() => {
     let active = true;
     const generation = sessionFetchGenerationRef.current;
-    const isActive = () => active && sessionFetchGenerationRef.current === generation;
+    const isCurrentGeneration = () => sessionFetchGenerationRef.current === generation;
+    const isActive = () => active && isCurrentGeneration();
     const deactivate = () => {
       active = false;
     };
@@ -397,7 +398,7 @@ function useTerminalStateFetch(
       ...refs,
       fetchAndStoreMessages,
       isActive,
-      canFinalizeLoading: isActive,
+      canFinalizeLoading: isCurrentGeneration,
       onError: (error) => console.error("Failed to fetch messages after state change:", error),
     });
     return deactivate;
@@ -508,13 +509,13 @@ function useSessionSubscription({
     void subscription.ready
       .then(() => {
         if (!active) return;
-        const isCurrentGeneration = () =>
-          active && sessionFetchGenerationRef.current === generation;
+        const isCurrentGeneration = () => sessionFetchGenerationRef.current === generation;
+        const isActive = () => active && isCurrentGeneration();
         return doFetchMessages({
           taskSessionId,
           ...fetchRefs,
           fetchAndStoreMessages,
-          isActive: isCurrentGeneration,
+          isActive,
           canFinalizeLoading: isCurrentGeneration,
           hydrationRef,
           hydrationKey,
@@ -771,14 +772,9 @@ function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
     refs: fetchRefs,
   } = fetchState;
   useEffect(() => {
-    let active = true;
     const generation = sessionFetchGenerationRef.current;
     const isCurrentGeneration = () => sessionFetchGenerationRef.current === generation;
-    const isActive = () => active && isCurrentGeneration();
-    const deactivate = () => {
-      active = false;
-    };
-    if (!taskSessionId || connectionStatus !== "connected") return deactivate;
+    if (!taskSessionId || connectionStatus !== "connected") return;
     const isFreshMount = prevSessionIdRef.current === null;
     const sessionChanged =
       prevSessionIdRef.current !== null && prevSessionIdRef.current !== taskSessionId;
@@ -792,7 +788,7 @@ function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
       lastFetchedSessionIdRef.current = taskSessionId;
       setIsWaitingForInitialMessages(false);
       if (historyInitialized) fetchRefs.setHistoryStatus("ready");
-      return deactivate;
+      return;
     }
     if (isFreshMount && messagesLength > 0) {
       lastFetchedSessionIdRef.current = taskSessionId;
@@ -815,19 +811,18 @@ function useSessionEntryMessageFetch(params: SessionEntryFetchParams): void {
             setIsCachedHistoryRefreshPending(false);
           }
         });
-      return deactivate;
+      return;
     }
-    if (lastFetchedSessionIdRef.current === taskSessionId) return deactivate;
+    if (lastFetchedSessionIdRef.current === taskSessionId) return;
     void doFetchMessages({
       taskSessionId,
       ...fetchRefs,
       fetchAndStoreMessages,
-      isActive,
-      canFinalizeLoading: isActive,
+      isActive: isCurrentGeneration,
+      canFinalizeLoading: isCurrentGeneration,
       hydrationRef,
       hydrationKey,
     });
-    return deactivate;
   }, [
     taskSessionId,
     connectionStatus,

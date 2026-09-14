@@ -55,6 +55,10 @@ test helpers for create-mode contenteditable semantics without changing session 
 
 ## ASCII UI preview
 
+Historical preview from the completed implementation. The
+[compact-chip follow-up](../compact-task-prompt-chips/plan.md) now proposes
+one enclosing border and revised sizing; it owns new geometry verification.
+
 ### UI-01: Desktop create dialog, recognized preset
 
 Current input: plain goal followed by literal `@create-canvas`.

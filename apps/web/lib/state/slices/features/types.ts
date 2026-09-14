@@ -16,6 +16,7 @@ export const defaultFeatureFlags = {
   claudeMidTurnSteering: false,
   coordinatorTaskAuthority: false,
   officeSessionIdentity: false,
+  needsYouInbox: false,
   agentSurvival: false,
 } as const;
 

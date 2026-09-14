@@ -789,5 +789,7 @@
   "unitAddMember": "Add",
   "unitRemoveMember": "Remove member",
   "unitPickPerson": "Pick someone",
-  "unitActionFailed": "That did not work."
+  "unitActionFailed": "That did not work.",
+  "autoFocusNewTasks": "Auto-focus new tasks",
+  "autoFocusNewTasksHelp": "Open newly created tasks automatically. Turn this off to stay on your current view. Tasks and agents still start as requested."
 }

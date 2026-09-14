@@ -2,7 +2,7 @@
 status: active
 system: ui
 created: 2026-08-03
-updated: 2026-08-28
+updated: 2026-09-13
 owners:
   - kandev
 ---
@@ -56,6 +56,44 @@ Quick Chat and Quick Terminal are both short-lived utilities reached from the sa
 - **AC-UI-QUICK-TERMINAL-002.7:** Rename mode visibly distinguishes the tab with an edit-state background and border, shows a focused bordered input with selected text, and omits inline **Save** and **Cancel** actions. Enter commits a trimmed name, Escape restores the previous name, and blur commits without a duplicate rename.
 - **AC-UI-QUICK-TERMINAL-002.8:** On phone and tablet viewports, the tab strip contains its own horizontal overflow. The selected content remains the dialog scroll owner, and the feature does not cause document horizontal overflow.
 
+### REQ-UI-QUICK-TERMINAL-003: Remembered conversation selection
+
+**Intent:** Returning to Quick Chat restores the conversation the user was reading.
+This presentation preference does not control task or agent lifecycle.
+
+#### Acceptance criteria
+
+- **AC-UI-QUICK-TERMINAL-003.1:** Reopening ordinary Quick Chat shall select
+  the last selected ordinary conversation in that workspace, when it remains available.
+  Visiting another workspace, a configuration conversation, or a terminal shall not replace that choice.
+- **AC-UI-QUICK-TERMINAL-003.2:** The remembered conversation shall survive
+  dialog dismissal, route navigation, page reload, and browser restart for the same user and browser.
+  Configuration launchers shall retain a separate remembered configuration conversation.
+- **AC-UI-QUICK-TERMINAL-003.3:** Explicit conversation opens and tab selections
+  shall take precedence over restoration. Background activity, list refreshes, and title changes
+  shall not replace a valid remembered choice or interrupt the visible conversation.
+- **AC-UI-QUICK-TERMINAL-003.4:** When the remembered conversation is unavailable,
+  reopening shall select the first available conversation of the requested kind in displayed tab order.
+  Without a matching conversation, it shall open the existing setup surface.
+  Restoration shall not recreate deleted conversations or select another workspace or kind.
+- **AC-UI-QUICK-TERMINAL-003.5:** An incomplete or failed chat-list load shall
+  not invalidate a remembered choice. Loading shall not briefly activate a different persisted conversation.
+  A later response shall not override a newer user selection or another workspace's visible surface.
+- **AC-UI-QUICK-TERMINAL-003.6:** Different signed-in users shall have separate
+  remembered choices. Another open client shall not change the currently visible conversation.
+  Without usable browser storage, close and reopen shall still preserve the in-memory choice.
+- **AC-UI-QUICK-TERMINAL-003.7:** Desktop and phone launchers shall restore the
+  same conversation under these rules. Existing dismissal, focus-return, and touch controls shall remain available.
+
+#### Compatibility
+
+The kind-specific launcher contract in `AC-UI-QUICK-TERMINAL-001.2` remains authoritative.
+Quick Terminal retains its existing reuse-or-create policy. Temporary setup tabs remain usable
+during the current page lifetime but do not become persisted conversation preferences.
+Cross-device selection synchronization and transcript scroll-position restoration are excluded.
+
 ## System design
+
+Remembered selection follows the [selection design](../system-design/quick-chat-selection.md).
 
 The migrated technical source is split into [part 1](../system-design/quick-terminal.md).

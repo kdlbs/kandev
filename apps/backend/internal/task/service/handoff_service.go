@@ -39,6 +39,8 @@ type WorkspaceGroupRepo interface {
 	AddWorkspaceGroupMember(ctx context.Context, groupID, taskID, role string) error
 	// Phase 6 surface — cascade release / restore + cleanup status updates.
 	ReleaseWorkspaceGroupMember(ctx context.Context, groupID, taskID, reason, cascadeID string) error
+	// Restore is idempotent and CAS-guarded by cascadeID; repeated restores
+	// for the same task and cascade must not create duplicate active members.
 	RestoreWorkspaceGroupMemberByCascade(ctx context.Context, taskID, cascadeID string) error
 	ListActiveWorkspaceGroupMembers(ctx context.Context, groupID string) ([]orchmodels.WorkspaceGroupMember, error)
 	// ListWorkspaceGroupMembers returns ALL members (including
@@ -103,11 +105,9 @@ type SessionWorktreeReader interface {
 	ListTaskSessionWorktrees(ctx context.Context, sessionID string) ([]*models.TaskEnvironmentRepo, error)
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	// HasExecutorRunningRow tells cleanup whether a session still has
-	// an executors_running row — i.e. an agent is (or recently was)
-	// bound to the workspace. Cleanup MUST refuse to delete a
-	// materialized workspace while any of the group's member sessions
-	// is still active, otherwise the agent's writes get destroyed
-	// out from under it (post-review #5).
+	// an executors_running row. Cleanup must refuse to delete a
+	// materialized workspace while any member session remains active,
+	// otherwise the agent's writes could be destroyed.
 	HasExecutorRunningRow(ctx context.Context, sessionID string) (bool, error)
 }
 
@@ -132,6 +132,17 @@ type SynchronousRunCanceller interface {
 // full session repository.
 type activeTaskSessionCanceller interface {
 	CancelActiveTaskSessionsByTaskID(ctx context.Context, taskID, reason string) ([]*models.TaskSession, error)
+}
+
+// activeTaskSessionReader lists sessions that still own live runtime state.
+// The concrete task repository implements this optional surface.
+type activeTaskSessionReader interface {
+	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+}
+
+// SetGitArchiveCapture wires the repository snapshotter used by ArchiveTaskTree.
+func (s *HandoffService) SetGitArchiveCapture(capture GitArchiveCapture) {
+	s.gitArchiveCapture = capture
 }
 
 // SetRunCanceller wires the run-canceller used by ArchiveTaskTree /
@@ -221,16 +232,17 @@ func (p WorkspacePolicy) NeedsAttachment() bool {
 // graph itself is the bound: only parent/children/siblings/blockers are ever
 // projected, so descriptions never leak from unrelated tasks.
 type RelatedTask struct {
-	ID            string             `json:"id"`
-	Identifier    string             `json:"identifier,omitempty"`
-	Title         string             `json:"title"`
-	Description   string             `json:"description,omitempty"`
-	State         string             `json:"state"`
-	WorkspaceID   string             `json:"workspace_id"`
-	ParentID      string             `json:"parent_id,omitempty"`
-	AssigneeLabel string             `json:"assignee_label,omitempty"`
-	DocumentKeys  []string           `json:"document_keys,omitempty"`
-	PRs           []v1.TaskPRSummary `json:"prs,omitempty"`
+	ID             string                        `json:"id"`
+	Identifier     string                        `json:"identifier,omitempty"`
+	Title          string                        `json:"title"`
+	Description    string                        `json:"description,omitempty"`
+	State          string                        `json:"state"`
+	WorkspaceID    string                        `json:"workspace_id"`
+	ParentID       string                        `json:"parent_id,omitempty"`
+	AssigneeLabel  string                        `json:"assignee_label,omitempty"`
+	DocumentKeys   []string                      `json:"document_keys,omitempty"`
+	PRs            []v1.TaskPRSummary            `json:"prs,omitempty"`
+	ChangeRequests []v1.TaskChangeRequestSummary `json:"change_requests,omitempty"`
 }
 
 // RelatedTasks bundles every relation surface for a single task.
@@ -257,14 +269,18 @@ type HandoffService struct {
 	sessions             SessionWorktreeReader
 	cleaner              WorkspaceCleaner
 	runCanceller         RunCanceller
+	coordinatorAuthority *coordinator.Authority
+	gitArchiveCapture    GitArchiveCapture
 	eventPublisher       TaskEventPublisher
 	vacancyReconciler    VacatedStepReconciler
 	resourceCleaner      TaskResourceCleaner
 	taskAccessCheck      func(ctx context.Context, taskID string) error
-	coordinatorAuthority *coordinator.Authority
 	comments             CommentReader
 	logger               *logger.Logger
 	parentLock           parentMutex
+	archiveCascadeLock   parentMutex
+	partialArchiveMu     sync.Mutex
+	partialArchiveIDs    map[string]string
 	workspaceGroupLock   parentMutex
 }
 
@@ -282,6 +298,13 @@ type HandoffService struct {
 type TaskEventPublisher interface {
 	PublishTaskUpdated(ctx context.Context, task *models.Task, oldWorkflowIDs ...string)
 	PublishTaskDeleted(ctx context.Context, task *models.Task)
+}
+type dependencyChangePublisher interface {
+	PublishDependencyChange(context.Context, ...string)
+}
+
+type TaskDeletedEventPublisherWithExtra interface {
+	PublishTaskDeletedWithExtra(ctx context.Context, task *models.Task, extra map[string]interface{})
 }
 
 // VacatedStepReconciler backfills capacity in a workflow step after admitted
@@ -362,6 +385,10 @@ type taskResourceCleanupCoordinator interface {
 	CancelPreparedTaskResourceCleanup(ctx context.Context, operationID string) error
 }
 
+type taskResourceCleanupRestorer interface {
+	RestoreCancelledTaskResourceCleanup(ctx context.Context, operationID string) error
+}
+
 type taskResourceCleanupCoordinatorWithOptions interface {
 	PrepareTaskResourceCleanupWithOptions(
 		ctx context.Context,
@@ -436,10 +463,11 @@ func NewHandoffService(
 		docsRepo: docsRepo,
 		blockers: blockers,
 		wsGroups: wsGroups,
-		logger:   log,
 		parentLock: parentMutex{
 			locks: make(map[string]*sync.Mutex),
 		},
+		archiveCascadeLock: parentMutex{locks: make(map[string]*sync.Mutex)},
+		partialArchiveIDs:  make(map[string]string),
 		workspaceGroupLock: parentMutex{locks: make(map[string]*sync.Mutex)},
 	}
 }

@@ -3,13 +3,14 @@
 import { useRef } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
+import { usePluginTaskFilters } from "@/hooks/use-plugin-task-filters";
 import { useAppStore } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 import type {
   MobileColumnsSection,
   MobileDisplayOptionsProps,
-  MobileMenuSheetProps,
-} from "@/components/kanban/mobile-menu-sheet";
+} from "@/components/kanban/mobile-display-options";
+import type { MobileMenuSheetProps } from "@/components/kanban/mobile-menu-sheet";
 import type { TasksListDisplayOptions } from "@/components/kanban/mobile-menu-task-list-options";
 import {
   resolveTaskListingNavigation,
@@ -171,6 +172,11 @@ export function useMobileMenuSheetState({
     onBoardSortChange,
     onPriorityFilterChange,
   } = useKanbanDisplaySettings();
+  const {
+    filters: pluginFilters,
+    selections: pluginFilterSelections,
+    setFilterSelection: onPluginFilterChange,
+  } = usePluginTaskFilters();
   const focusedWorkflowId = useAppStore((state) => state.mobileKanban.focusedWorkflowId);
   const columnsSection = buildColumnsSection({
     isMobile,
@@ -214,6 +220,9 @@ export function useMobileMenuSheetState({
     priorityFilterTokens,
     onBoardSortChange,
     onPriorityFilterChange,
+    pluginFilters: currentPage === "threads" ? [] : pluginFilters,
+    pluginFilterSelections,
+    onPluginFilterChange,
   });
   const focusMenu = (event: Event) => {
     event.preventDefault();
