@@ -5,18 +5,18 @@ package service
 // causation depth, creating run id, human-rooted flag, routine
 // attribution, actor kind, actor identifier) that must survive a task
 // creation boundary intact. carrierKeys (used by carrierPresent to detect
-// whether a task carries a carrier at all), taskBoundaryCarrier (the
+// whether a task carries a carrier at all), TaskBoundaryCarrier (the
 // read-side decode target), and carrierMetadataFromRun (the write side)
 // are three independent, hand-maintained representations of that same
 // set — nothing in the Go type system keeps them in sync. This test
 // fails the day one of the three drifts from the other two, e.g. a
-// carrier value added to taskBoundaryCarrier without a matching entry in
+// carrier value added to TaskBoundaryCarrier without a matching entry in
 // carrierKeys, or a write-side key carrierFromTaskMetadata never learns
 // to decode.
 //
 // The remaining half of AC.18 — that every enqueue path (QueueRunFromTaskBoundary
 // -> runs/service.QueueRunRequest -> applyCausationLineage) actually
-// threads each taskBoundaryCarrier field through rather than dropping it
+// threads each TaskBoundaryCarrier field through rather than dropping it
 // silently — is exercised end-to-end by
 // run_causation_from_task_test.go's real-repo tests, not by this file.
 
@@ -30,9 +30,9 @@ import (
 )
 
 func TestCarrierSetCompleteness_KeysMatchStructFieldCount(t *testing.T) {
-	numFields := reflect.TypeOf(taskBoundaryCarrier{}).NumField()
+	numFields := reflect.TypeOf(TaskBoundaryCarrier{}).NumField()
 	if len(carrierKeys) != numFields {
-		t.Fatalf("carrierKeys has %d entries, but taskBoundaryCarrier has %d fields — "+
+		t.Fatalf("carrierKeys has %d entries, but TaskBoundaryCarrier has %d fields — "+
 			"a carrier value was added to one without the other", len(carrierKeys), numFields)
 	}
 }
@@ -92,7 +92,7 @@ func TestCarrierSetCompleteness_ReadSideDecodesEveryWrittenKey(t *testing.T) {
 	written[taskmodels.MetaKeyOfficeCarrierCausationDepth] = float64(run.CausationDepth)
 
 	decoded := carrierFromTaskMetadata(written)
-	want := taskBoundaryCarrier{
+	want := TaskBoundaryCarrier{
 		CausationID:    run.CausationID,
 		CausationDepth: run.CausationDepth,
 		CreatingRunID:  run.ID,
@@ -103,7 +103,7 @@ func TestCarrierSetCompleteness_ReadSideDecodesEveryWrittenKey(t *testing.T) {
 	}
 	if decoded != want {
 		t.Fatalf("carrierFromTaskMetadata(carrierMetadataFromRun(run)) = %+v, want %+v — "+
-			"a value carrierMetadataFromRun writes is not reaching taskBoundaryCarrier intact",
+			"a value carrierMetadataFromRun writes is not reaching TaskBoundaryCarrier intact",
 			decoded, want)
 	}
 }

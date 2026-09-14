@@ -23,15 +23,15 @@ func carrierMetadataFromRun(run *models.Run) map[string]interface{} {
 	}
 }
 
-// taskBoundaryCarrier is the validated result of reading the carrier set
+// TaskBoundaryCarrier is the validated result of reading the carrier set
 // (AC-OFFICE-RUN-CAUSATION-001.18) off a task's metadata, ready to attach
 // to a runs/service.QueueRunRequest for a run queued because of that
 // task. Every field's Go zero value is that value's most restrictive
 // reading, so a caller that never resolved a carrier at all (the common
 // case: this task never went through carrier-writing) can hand over a
-// zero-value taskBoundaryCarrier and get root/system/empty behavior for
+// zero-value TaskBoundaryCarrier and get root/system/empty behavior for
 // free.
-type taskBoundaryCarrier struct {
+type TaskBoundaryCarrier struct {
 	CausationID    string
 	CausationDepth int
 	CreatingRunID  string
@@ -82,11 +82,11 @@ func carrierPresent(metadata map[string]interface{}) bool {
 // carrier, increments office_launch_causation_invalid_total labelled by
 // the value name and reason, and resolves to that value's most
 // restrictive reading, without discarding the other keys.
-func carrierFromTaskMetadata(metadata map[string]interface{}) taskBoundaryCarrier {
+func carrierFromTaskMetadata(metadata map[string]interface{}) TaskBoundaryCarrier {
 	if !carrierPresent(metadata) {
-		return taskBoundaryCarrier{}
+		return TaskBoundaryCarrier{}
 	}
-	c := taskBoundaryCarrier{
+	c := TaskBoundaryCarrier{
 		HumanRooted: carrierBoolValue(metadata, taskmodels.MetaKeyOfficeCarrierHumanRooted),
 		RoutineID:   carrierStringValue(metadata, taskmodels.MetaKeyOfficeCarrierRoutineID),
 		ActorKind:   carrierActorKindValue(metadata, taskmodels.MetaKeyOfficeCarrierActorKind),

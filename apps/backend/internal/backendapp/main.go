@@ -1739,7 +1739,7 @@ func wireWorkflowEngineForOffice(
 	// Wire each dependency via its dedicated setter so the orchestrator
 	// captures it both for engine.With* options and for the Phase 2 / 8
 	// callback registry.
-	orchestratorSvc.SetEngineRunQueue(&runsServiceEngineAdapter{svc: runsSvc})
+	orchestratorSvc.SetEngineRunQueue(&runsServiceEngineAdapter{svc: runsSvc, officeSvc: officeSvc})
 	orchestratorSvc.SetEngineParticipantStore(participants)
 	orchestratorSvc.SetEngineDecisionStore(decisions)
 	orchestratorSvc.SetEngineCEOResolver(ceo)
@@ -1847,6 +1847,14 @@ func (a *engineStepEntryDispatcherAdapter) DispatchStepEntry(ctx context.Context
 // other — so this adapter is a field-by-field copy.
 type runsServiceEngineAdapter struct {
 	svc *runsservice.Service
+	// officeSvc sources the actor for every request, per
+	// AC-OFFICE-RUN-CAUSATION-001.23's declared source for "a wake queued
+	// because of a task": req.TaskID is always populated (the engine
+	// resolves it before calling QueueRun), so this path reads the
+	// task-boundary carrier the same way office/service.QueueRunFromTaskBoundary
+	// does, rather than reaching the queue with no actor at all. Nil only
+	// in tests that construct this adapter directly.
+	officeSvc *officeservice.Service
 }
 
 // QueueRun enqueues a run, translating the engine's QueueRunRequest into the
@@ -1854,13 +1862,25 @@ type runsServiceEngineAdapter struct {
 func (a *runsServiceEngineAdapter) QueueRun(
 	ctx context.Context, req workflowengine.QueueRunRequest,
 ) (workflowengine.QueueOutcome, error) {
+	var carrier officeservice.TaskBoundaryCarrier
+	if a.officeSvc != nil && req.TaskID != "" {
+		carrier = a.officeSvc.TaskBoundaryCarrier(ctx, req.TaskID)
+	}
+	humanRooted := carrier.HumanRooted
 	outcome, err := a.svc.QueueRun(ctx, runsservice.QueueRunRequest{
-		AgentProfileID: req.AgentProfileID,
-		TaskID:         req.TaskID,
-		WorkflowStepID: req.WorkflowStepID,
-		Reason:         req.Reason,
-		IdempotencyKey: req.IdempotencyKey,
-		Payload:        req.Payload,
+		AgentProfileID:        req.AgentProfileID,
+		TaskID:                req.TaskID,
+		WorkflowStepID:        req.WorkflowStepID,
+		Reason:                req.Reason,
+		IdempotencyKey:        req.IdempotencyKey,
+		Payload:               req.Payload,
+		ActorKind:             carrier.ActorKind,
+		ActorID:               carrier.ActorID,
+		RoutineID:             carrier.RoutineID,
+		CarrierHumanRooted:    &humanRooted,
+		CarrierCreatingRunID:  carrier.CreatingRunID,
+		CarrierCausationID:    carrier.CausationID,
+		CarrierCausationDepth: carrier.CausationDepth,
 	})
 	return workflowengine.QueueOutcome(outcome), err
 }

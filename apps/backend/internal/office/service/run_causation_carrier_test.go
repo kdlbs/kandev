@@ -31,7 +31,7 @@ func fullCarrierMetadata() map[string]interface{} {
 
 func TestCarrierFromTaskMetadata_NilMetadataResolvesToZeroCarrier(t *testing.T) {
 	c := carrierFromTaskMetadata(nil)
-	if c != (taskBoundaryCarrier{}) {
+	if c != (TaskBoundaryCarrier{}) {
 		t.Fatalf("carrier = %+v, want zero value for nil metadata", c)
 	}
 }
@@ -43,14 +43,14 @@ func TestCarrierFromTaskMetadata_MetadataWithNoCarrierKeysResolvesToZeroCarrier(
 		"auto_start_on_create": true,
 		"agent_profile_id":     "some-agent",
 	})
-	if c != (taskBoundaryCarrier{}) {
+	if c != (TaskBoundaryCarrier{}) {
 		t.Fatalf("carrier = %+v, want zero value for a task with no carrier keys", c)
 	}
 }
 
 func TestCarrierFromTaskMetadata_FullCarrierDecodesExactly(t *testing.T) {
 	c := carrierFromTaskMetadata(fullCarrierMetadata())
-	want := taskBoundaryCarrier{
+	want := TaskBoundaryCarrier{
 		CausationID:    "causation-1",
 		CausationDepth: 2,
 		CreatingRunID:  "run-1",

@@ -139,7 +139,7 @@ func (s *Service) QueueRunFromTaskBoundary(
 	}
 
 	if s.runsService != nil {
-		carrier := s.taskBoundaryCarrier(ctx, taskID)
+		carrier := s.TaskBoundaryCarrier(ctx, taskID)
 		humanRooted := carrier.HumanRooted
 		_, err := s.runsService.QueueRun(ctx, runsservice.QueueRunRequest{
 			Reason:                reason,
@@ -158,14 +158,14 @@ func (s *Service) QueueRunFromTaskBoundary(
 	return s.queueRunInline(ctx, agentInstanceID, reason, payload, idempotencyKey)
 }
 
-// taskBoundaryCarrier reads and validates the causation carrier off
+// TaskBoundaryCarrier reads and validates the causation carrier off
 // taskID's metadata. A metadata read failure (task not found, transient
 // error) is treated the same as "no carrier": this lookup must never
 // block the enqueue it's attached to.
-func (s *Service) taskBoundaryCarrier(ctx context.Context, taskID string) taskBoundaryCarrier {
+func (s *Service) TaskBoundaryCarrier(ctx context.Context, taskID string) TaskBoundaryCarrier {
 	metadata, err := s.repo.GetTaskMetadata(ctx, taskID)
 	if err != nil {
-		return taskBoundaryCarrier{}
+		return TaskBoundaryCarrier{}
 	}
 	return carrierFromTaskMetadata(metadata)
 }
