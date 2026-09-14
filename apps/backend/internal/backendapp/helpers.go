@@ -46,6 +46,7 @@ import (
 	editorhandlers "github.com/kandev/kandev/internal/editors/handlers"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/failedinbox"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/gitlab"
@@ -1424,6 +1425,9 @@ func registerSecondaryRoutes(
 		p.features.NeedsYouInbox,
 	)
 	p.log.Debug("Registered Clarification handlers (HTTP)")
+
+	failedinbox.RegisterRoutes(p.router, p.taskSvc, p.taskRepo, p.log, p.features.NeedsYouInbox)
+	p.log.Debug("Registered Failed Inbox handlers (HTTP)")
 
 	// Wire the plugin Host interaction write path (ADR 0052) onto the same
 	// orchestrator permission resolution and the same clarification resolver
