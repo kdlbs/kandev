@@ -10,6 +10,7 @@ const EMPTY_WORKSPACE_STATE: FailedInboxWorkspaceState = {
   truncated: false,
   status: "idle",
   appliedGeneration: 0,
+  readAtWorkspaceRevision: 0,
 };
 
 function selectActiveWorkspaceState(state: AppState): FailedInboxWorkspaceState {

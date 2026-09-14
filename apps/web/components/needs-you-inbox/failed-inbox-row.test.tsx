@@ -29,9 +29,17 @@ describe("FailedInboxRow", () => {
     expect(link.getAttribute("href")).toBe("/t/t1");
   });
 
-  it("renders the task-state failed marker from the shared state-icon module (AC .18a)", () => {
+  it("renders the task-state failed marker, not the session-state one, from the shared state-icon module (AC .18a)", () => {
+    // TASK_STATE_ICONS.FAILED (IconX) and SESSION_STATE_ICONS.FAILED
+    // (IconAlertTriangle) share the same wrapper testid and red styling, so
+    // asserting only that a status icon exists cannot catch a regression to
+    // the forbidden session-state pairing -- the rendered glyph itself has
+    // to be checked.
     const { container } = render(<FailedInboxRow row={row()} />);
-    expect(container.querySelector('[data-testid="failed-inbox-status-icon"]')).not.toBeNull();
+    const icon = container.querySelector('[data-testid="failed-inbox-status-icon"]');
+    expect(icon).not.toBeNull();
+    expect(icon!.querySelector(".tabler-icon-x")).not.toBeNull();
+    expect(icon!.querySelector(".tabler-icon-alert-triangle")).toBeNull();
   });
 
   it("presents the shared thread-status vocabulary's failed status (AC .20/.20a)", () => {

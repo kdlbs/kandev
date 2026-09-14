@@ -35,7 +35,14 @@ test.describe("Inbox Failed tab on mobile", () => {
     const failedBadge = testPage.getByTestId("inbox-tab-failed-badge");
     await expect(failedBadge).toHaveText("1", { timeout: 30_000 });
 
-    await testPage.getByRole("tab", { name: /Failed/ }).click();
+    // The tab strip itself (not just the row's open-task control) is a
+    // coarse-pointer surface an operator must tap to reach this tab.
+    const failedTab = testPage.getByRole("tab", { name: /Failed/ });
+    const failedTabBox = await failedTab.boundingBox();
+    expect(failedTabBox, "Failed tab trigger should have a box").not.toBeNull();
+    expect(failedTabBox!.height).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET_PX);
+
+    await failedTab.click();
 
     const row = testPage.getByTestId("failed-inbox-row").filter({ hasText: title });
     await expect(row).toBeVisible({ timeout: 15_000 });
@@ -46,14 +53,17 @@ test.describe("Inbox Failed tab on mobile", () => {
     expect(openTaskBox, "open-task control should have a box").not.toBeNull();
     expect(openTaskBox!.height).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET_PX);
 
-    await openTask.click();
-    await expect(testPage).toHaveURL(new RegExp(`/t/${taskId}$`));
-
-    // The document itself must not scroll horizontally on a phone viewport.
+    // The Inbox/Failed-tab page itself must not scroll horizontally on a
+    // phone viewport -- checked here, before navigating away, so this
+    // measures the page the test is actually about rather than the
+    // task-detail page the next step opens.
     const overflow = await testPage.evaluate(() => ({
       scrollWidth: document.documentElement.scrollWidth,
       clientWidth: document.documentElement.clientWidth,
     }));
     expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth);
+
+    await openTask.click();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${taskId}$`));
   });
 });

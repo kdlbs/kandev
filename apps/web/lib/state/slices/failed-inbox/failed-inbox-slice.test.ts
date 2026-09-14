@@ -4,17 +4,33 @@ import { immer } from "zustand/middleware/immer";
 import type { FailedInboxRow } from "@/lib/types/failed-inbox";
 import { createFailedInboxSlice } from "./failed-inbox-slice";
 import type { FailedInboxSlice } from "./types";
+import { createWorkspaceSlice } from "../workspace/workspace-slice";
+import type { WorkspaceSlice } from "../workspace/types";
+
+type TestStore = FailedInboxSlice & WorkspaceSlice;
 
 function newStore() {
-  // `createFailedInboxSlice` types `set` against the full `AppState` (the
-  // zustand slices pattern, so composing it in store.ts needs no cast); this
-  // isolated test store only has `FailedInboxSlice`, so the two `set` shapes
-  // need a cast here, in test-only code the store.ts architecture rule does
-  // not cover.
-  return create<FailedInboxSlice>()(
-    immer((set) =>
-      createFailedInboxSlice(set as unknown as Parameters<typeof createFailedInboxSlice>[0]),
-    ),
+  // `createFailedInboxSlice` and `createWorkspaceSlice` both type `set`/`get`
+  // against the full `AppState` (the zustand slices pattern, so composing
+  // them in store.ts needs no cast); this isolated test store only composes
+  // these two slices, so the shapes need a cast here, in test-only code the
+  // store.ts architecture rule does not cover. `createWorkspaceSlice` is
+  // real, not a stub: `beginFailedInboxRead` now reads
+  // `workspaces.activeIdRevision`, the app-wide signal a genuine workspace
+  // switch bumps regardless of whether the Inbox is mounted to see it, so a
+  // test proving that has to drive a real `setActiveWorkspace`.
+  return create<TestStore>()(
+    immer((set, get, api) => ({
+      ...createWorkspaceSlice(
+        set as unknown as Parameters<typeof createWorkspaceSlice>[0],
+        get as unknown as Parameters<typeof createWorkspaceSlice>[1],
+        api as unknown as Parameters<typeof createWorkspaceSlice>[2],
+      ),
+      ...createFailedInboxSlice(
+        set as unknown as Parameters<typeof createFailedInboxSlice>[0],
+        get as unknown as Parameters<typeof createFailedInboxSlice>[1],
+      ),
+    })),
   );
 }
 
@@ -156,9 +172,13 @@ describe("failed-inbox slice: workspace-change status transitions (AC .16)", () 
 
   // "Changing the active workspace shall clear it until a response for the
   // new one is applied" -- returning to a workspace visited earlier in the
-  // same session must not show its stale cache.
+  // same session must not show its stale cache. Drives `setActiveWorkspace`
+  // (the real signal a switch produces) rather than inferring a switch from
+  // the `beginFailedInboxRead` call sequence, since the guard now keys off
+  // `workspaces.activeIdRevision`, not a copy local to this slice.
   it("clears a workspace's stale ready state when the operator switches back to it", () => {
     const store = newStore();
+    store.getState().setActiveWorkspace("w1");
     const w1Generation = store.getState().beginFailedInboxRead("w1");
     store.getState().setFailedInboxPage("w1", w1Generation, {
       rows: [row()],
@@ -167,8 +187,44 @@ describe("failed-inbox slice: workspace-change status transitions (AC .16)", () 
     });
     expect(store.getState().failedInbox.byWorkspaceId.w1.status).toBe("ready");
 
-    // Switch away to w2, then back to w1, before w1's new read resolves.
+    // Switch away to w2 (Inbox stays mounted and reads it too), then back to
+    // w1, before w1's new read resolves.
+    store.getState().setActiveWorkspace("w2");
     store.getState().beginFailedInboxRead("w2");
+    store.getState().setActiveWorkspace("w1");
+    store.getState().beginFailedInboxRead("w1");
+
+    const state = store.getState().failedInbox.byWorkspaceId.w1;
+    expect(state.status).not.toBe("ready");
+    expect(state.rows).toHaveLength(0);
+    expect(state.count).toBe(0);
+  });
+
+  // Regression coverage for the gap the switch-back fix above did not close:
+  // `beginFailedInboxRead` is only ever called while the Inbox is mounted, so
+  // a workspace switch that happens while it is closed must still be caught
+  // the next time this workspace is read -- it must not depend on the Inbox
+  // having been open (and reading) for every intermediate workspace.
+  it("clears a workspace's stale ready state when the switch away and back happens with no read in between", () => {
+    const store = newStore();
+    store.getState().setActiveWorkspace("w1");
+    const w1Generation = store.getState().beginFailedInboxRead("w1");
+    store.getState().setFailedInboxPage("w1", w1Generation, {
+      rows: [row()],
+      count: 1,
+      truncated: false,
+    });
+    expect(store.getState().failedInbox.byWorkspaceId.w1.status).toBe("ready");
+
+    // The active workspace changes twice (e.g. via the sidebar switcher on
+    // another page) with the Inbox closed throughout -- nothing here calls
+    // `beginFailedInboxRead` for w2 at all.
+    store.getState().setActiveWorkspace("w2");
+    store.getState().setActiveWorkspace("w1");
+
+    // The Inbox reopens on w1 and its mount effect reads it.
+    const state0 = store.getState().failedInbox.byWorkspaceId.w1;
+    expect(state0.status).toBe("ready"); // still the stale cache, pre-read
     store.getState().beginFailedInboxRead("w1");
 
     const state = store.getState().failedInbox.byWorkspaceId.w1;

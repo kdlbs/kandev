@@ -10,6 +10,11 @@ export type FailedInboxWorkspaceState = {
   // The generation of the last response actually applied to this workspace's
   // rows, for the stale-response guard (AC-UI-INBOX-FAILED-001.26).
   appliedGeneration: number;
+  // `workspaces.activeIdRevision` as of the read that produced this entry's
+  // current status. Compared against the live revision (not a locally-shadowed
+  // copy) so a workspace switch that happens while nothing here is mounted to
+  // observe it is still detected the next time this workspace is read.
+  readAtWorkspaceRevision: number;
 };
 
 export type FailedInboxSliceState = {
@@ -21,12 +26,6 @@ export type FailedInboxSliceState = {
     // Keyed on workspace only, deliberately never on the selected tab
     // (design-01#Control-flow).
     generationByWorkspaceId: Record<string, number>;
-    // The workspace `beginFailedInboxRead` was last called for -- lets it
-    // tell a genuine workspace switch, which must clear any cached data
-    // until the new workspace's response applies, apart from a
-    // same-workspace refresh trigger, which must leave already-loaded data
-    // alone.
-    activeWorkspaceId: string | null;
   };
 };
 

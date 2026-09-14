@@ -6,50 +6,60 @@ export const defaultFailedInboxState: FailedInboxSliceState = {
   failedInbox: {
     byWorkspaceId: {},
     generationByWorkspaceId: {},
-    activeWorkspaceId: null,
   },
 };
 
-const emptyWorkspaceState = (): FailedInboxWorkspaceState => ({
+const emptyWorkspaceState = (readAtWorkspaceRevision = 0): FailedInboxWorkspaceState => ({
   rows: [],
   count: 0,
   truncated: false,
   status: "idle",
   appliedGeneration: 0,
+  readAtWorkspaceRevision,
 });
 
 // Typed against the full `AppState` (the zustand slices-pattern shape), not
-// this slice's own narrower type -- that keeps `set` structurally identical
-// to the root store's `set`, so composing this slice in store.ts needs no
-// `as any` escape (ARCH-FRONTEND-ROOT-STATE-CAST).
+// this slice's own narrower type -- that keeps `set`/`get` structurally
+// identical to the root store's, so composing this slice in store.ts needs
+// no `as any` escape (ARCH-FRONTEND-ROOT-STATE-CAST).
 type ImmerSet = Parameters<
   StateCreator<AppState, [["zustand/immer", never]], [], FailedInboxSlice>
 >[0];
+type ImmerGet = Parameters<
+  StateCreator<AppState, [["zustand/immer", never]], [], FailedInboxSlice>
+>[1];
 
 /**
- * Typed as a plain factory over `set` (mirrors the needs-you-inbox slice):
- * every action here only needs to write, never read prior state through
- * `get`.
+ * Takes `get` (unlike the needs-you-inbox slice) so a genuine workspace
+ * switch can be detected even when it happened while nothing in this slice
+ * was called to observe it -- see `beginFailedInboxRead`.
  */
-export const createFailedInboxSlice = (set: ImmerSet): FailedInboxSlice => ({
+export const createFailedInboxSlice = (set: ImmerSet, get: ImmerGet): FailedInboxSlice => ({
   ...defaultFailedInboxState,
 
   beginFailedInboxRead: (workspaceId) => {
+    // Read from `workspaces.activeIdRevision`, the app-wide source of truth
+    // bumped on every actual workspace switch, rather than a copy local to
+    // this slice: this slice's own actions only ever run while the Inbox
+    // page is mounted, so a locally-shadowed "last workspace seen" value
+    // cannot detect a switch that happened while the Inbox was closed.
+    const currentRevision = get().workspaces.activeIdRevision ?? 0;
     let generation = 0;
     set((draft) => {
       const next = (draft.failedInbox.generationByWorkspaceId[workspaceId] ?? 0) + 1;
       draft.failedInbox.generationByWorkspaceId[workspaceId] = next;
-      const isWorkspaceChange = draft.failedInbox.activeWorkspaceId !== workspaceId;
-      draft.failedInbox.activeWorkspaceId = workspaceId;
       const existing = draft.failedInbox.byWorkspaceId[workspaceId] ?? emptyWorkspaceState();
+      const isStaleWorkspaceRevision = existing.readAtWorkspaceRevision !== currentRevision;
       // A same-workspace refresh trigger (periodic tick, tab change,
       // foreground return) leaves already-`ready` data alone, so it cannot
-      // hide the badge behind rows it is still showing. A genuine workspace
-      // switch always resets to `loading` and clears any cache from an
-      // earlier visit in this session, even if that visit ended `ready`.
-      if (isWorkspaceChange || existing.status !== "ready") {
+      // hide the badge behind rows it is still showing. Any read whose
+      // workspace revision has moved on always resets to `loading` and
+      // clears any cache from an earlier visit, even if that visit ended
+      // `ready` -- whether the switch happened while this workspace's tab
+      // was open or while the Inbox was closed entirely.
+      if (isStaleWorkspaceRevision || existing.status !== "ready") {
         draft.failedInbox.byWorkspaceId[workspaceId] = {
-          ...emptyWorkspaceState(),
+          ...emptyWorkspaceState(currentRevision),
           status: "loading",
         };
       }
@@ -67,6 +77,8 @@ export const createFailedInboxSlice = (set: ImmerSet): FailedInboxSlice => ({
         truncated: page.truncated,
         status: "ready",
         appliedGeneration: generation,
+        readAtWorkspaceRevision:
+          draft.failedInbox.byWorkspaceId[workspaceId]?.readAtWorkspaceRevision ?? 0,
       };
     }),
 
@@ -77,7 +89,9 @@ export const createFailedInboxSlice = (set: ImmerSet): FailedInboxSlice => ({
       // (design-01#Failure-and-recovery) -- stale rows over an absent count
       // is a disagreement the count and the list must never show.
       draft.failedInbox.byWorkspaceId[workspaceId] = {
-        ...emptyWorkspaceState(),
+        ...emptyWorkspaceState(
+          draft.failedInbox.byWorkspaceId[workspaceId]?.readAtWorkspaceRevision ?? 0,
+        ),
         status: "error",
         appliedGeneration: generation,
       };
