@@ -393,7 +393,7 @@ func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata ma
 	}
 	task.UpdatedAt = time.Now().UTC()
 
-	if err := s.tasks.UpdateTask(ctx, task); err != nil {
+	if err := s.tasks.UpdateTaskPreservingDeferredLaunch(ctx, task); err != nil {
 		s.logger.Error("failed to update task metadata", zap.String("task_id", id), zap.Error(err))
 		return nil, err
 	}
@@ -1316,7 +1316,7 @@ func (s *Service) updateMovedTaskSameStep(ctx context.Context, task *models.Task
 		}
 		return task.WIPAdmitted, nil
 	}
-	if err := s.tasks.UpdateTask(ctx, task); err != nil {
+	if err := s.tasks.UpdateTaskPreservingDeferredLaunch(ctx, task); err != nil {
 		return false, err
 	}
 	return task.WIPAdmitted, nil
