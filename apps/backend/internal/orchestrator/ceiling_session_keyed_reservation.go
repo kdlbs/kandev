@@ -1,6 +1,12 @@
 package orchestrator
 
-import "context"
+import (
+	"context"
+
+	"go.uber.org/zap"
+
+	"github.com/kandev/kandev/internal/task/models"
+)
 
 // sessionKeyedCeilingReservation tracks an admission reservation taken for a
 // session that already exists, shared by seam 2 (AC-4d/AC-4e) and seam 4
@@ -11,6 +17,15 @@ type sessionKeyedCeilingReservation struct {
 	controller *sessionCeilingController
 	key        string
 	consumed   bool
+
+	// manualOverride, population, populationKnown and ceiling are the
+	// admission decision's own reading, carried forward so AC-14/AC-53's
+	// audit write and card warning can be performed once this reservation is
+	// consumed by a session that already exists.
+	manualOverride  bool
+	population      int
+	populationKnown bool
+	ceiling         int
 }
 
 // rekeyToSession moves the reservation from the session it was gated under
@@ -43,4 +58,36 @@ func (r *sessionKeyedCeilingReservation) releaseIfNotConsumed() {
 		return
 	}
 	r.controller.release(r.key)
+}
+
+// admitOrDeferSessionKeyedLaunch is the shared admission/defer sequence for
+// every seam whose session already exists at admission time (seams 2 and 4):
+// consult the ceiling for the caller's session id, and on refusal persist a
+// ceiling_deferred record of the given kind from the caller's own payload.
+// failureContext names the launch kind in the error log ("the resume could
+// not be admitted or recorded" vs. "the launch could not be admitted or
+// recorded") so the two seams keep their own wording.
+func (s *Service) admitOrDeferSessionKeyedLaunch(
+	ctx context.Context, taskID, sessionID string, origin launchOrigin, seam string,
+	kind models.CeilingLaunchKind, payload map[string]interface{}, failureContext string,
+) (*sessionKeyedCeilingReservation, bool, error) {
+	decision := s.sessionCeiling.admit(ctx, admissionRequest{
+		taskID: taskID, sessionID: sessionID, origin: origin, seam: seam,
+	})
+	if decision.admitted {
+		return &sessionKeyedCeilingReservation{
+			controller: s.sessionCeiling, key: decision.reservationKey,
+			manualOverride: decision.manualOverride, population: decision.population,
+			populationKnown: decision.populationKnown, ceiling: decision.ceiling,
+		}, false, nil
+	}
+
+	if err := s.deferCeilingRefusal(ctx, taskID, sessionID, kind, payload, decision.reasonCode,
+		decision.population, decision.populationKnown, decision.ceiling); err != nil {
+		s.logger.Zap().Error("could not persist a ceiling deferral; "+failureContext,
+			zap.String("task_id", taskID), zap.String("session_id", sessionID),
+			zap.String(ceilingFieldReasonCode, ceilingReasonDeferWriteFailed), zap.Error(err))
+		return nil, false, err
+	}
+	return nil, true, nil
 }

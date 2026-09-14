@@ -95,7 +95,9 @@ func (s *Service) retryOneDeferredCeilingLaunch(ctx context.Context, task *model
 	case ceilingReplayStillDeferred:
 		// Left exactly as stored: the replay's own admission gate already
 		// re-persisted this same record via deferCeilingRefusal's
-		// equivalence check (AC-32/AC-55a).
+		// equivalence check (AC-32/AC-55a). AC-49g: retry the card note if
+		// an earlier attempt to write it failed.
+		s.attemptCeilingSurfaceWrite(ctx, task.ID)
 	}
 }
 
@@ -158,15 +160,15 @@ func (s *Service) dropCeilingDeferral(
 	s.logger.Zap().Warn("dropping a ceiling-deferred launch",
 		zap.String("task_id", task.ID),
 		zap.String("kind", string(deferral.Kind)),
-		zap.String("reason_code", reasonCode),
+		zap.String(ceilingFieldReasonCode, reasonCode),
 		zap.String("detail", detail))
 
-	if sessionID != "" {
+	if sessionID != "" && s.messageCreator != nil {
 		if err := s.messageCreator.CreateSessionMessage(
 			ctx, task.ID,
 			fmt.Sprintf("The queued launch for this session was dropped: %s.", detail),
 			sessionID, string(v1.MessageTypeStatus), "",
-			map[string]interface{}{metaKeyVariant: metaVariantCeiling, "reason_code": reasonCode},
+			map[string]interface{}{metaKeyVariant: metaVariantCeiling, ceilingFieldReasonCode: reasonCode},
 			false,
 		); err != nil {
 			s.logger.Zap().Warn("could not write the ceiling drop card note",

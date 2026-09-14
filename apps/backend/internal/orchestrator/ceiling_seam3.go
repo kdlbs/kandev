@@ -19,6 +19,12 @@ import (
 // decides admit/refuse and reports the refusal for its caller to record.
 type seam3Refusal struct {
 	reasonCode string
+	// population, populationKnown and ceiling are the admission decision's own
+	// reading, carried so a caller-side disposition can pass them on to
+	// deferCeilingRefusal for the AC-49 card carrier's content.
+	population      int
+	populationKnown bool
+	ceiling         int
 	// deferred is set by the caller-side disposition once a ceiling_deferred
 	// record has actually been written for this refusal (AC-47c2): a caller
 	// with two possible dispositions (promptTask's prompt_ensure vs AC-47c1's
@@ -70,9 +76,16 @@ func (s *Service) admitSeam3(
 		taskID: taskID, sessionID: sessionID, origin: origin, seam: "ensureSessionRunning",
 	})
 	if decision.admitted {
-		return &sessionKeyedCeilingReservation{controller: s.sessionCeiling, key: decision.reservationKey}, nil
+		return &sessionKeyedCeilingReservation{
+			controller: s.sessionCeiling, key: decision.reservationKey,
+			manualOverride: decision.manualOverride, population: decision.population,
+			populationKnown: decision.populationKnown, ceiling: decision.ceiling,
+		}, nil
 	}
-	return nil, &seam3Refusal{reasonCode: decision.reasonCode}
+	return nil, &seam3Refusal{
+		reasonCode: decision.reasonCode, population: decision.population,
+		populationKnown: decision.populationKnown, ceiling: decision.ceiling,
+	}
 }
 
 // admitOrDeferWorkflowStepEnsure is StartSessionForWorkflowStep's AC-47f/AC-47f1
@@ -89,13 +102,18 @@ func (s *Service) admitOrDeferWorkflowStepEnsure(
 		taskID: taskID, sessionID: sessionID, origin: launchOriginAutomatic, seam: "startSessionForWorkflowStepPreConsult",
 	})
 	if decision.admitted {
-		return &sessionKeyedCeilingReservation{controller: s.sessionCeiling, key: decision.reservationKey}, false, nil
+		return &sessionKeyedCeilingReservation{
+			controller: s.sessionCeiling, key: decision.reservationKey,
+			manualOverride: decision.manualOverride, population: decision.population,
+			populationKnown: decision.populationKnown, ceiling: decision.ceiling,
+		}, false, nil
 	}
 	payload := map[string]interface{}{
 		metaKeySessionID:      sessionID,
 		metaKeyWorkflowStepID: workflowStepID,
 	}
-	if err := s.deferCeilingRefusal(ctx, taskID, models.CeilingLaunchWorkflowStepEnsure, payload, decision.reasonCode); err != nil {
+	if err := s.deferCeilingRefusal(ctx, taskID, sessionID, models.CeilingLaunchWorkflowStepEnsure, payload, decision.reasonCode,
+		decision.population, decision.populationKnown, decision.ceiling); err != nil {
 		s.logger.Zap().Error("could not persist a ceiling deferral; the workflow step launch could not be admitted or recorded",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID),
 			zap.String("workflow_step_id", workflowStepID), zap.Error(err))
@@ -109,12 +127,13 @@ func (s *Service) admitOrDeferWorkflowStepEnsure(
 // already durable in the message queue, so the record needs only the
 // session id and the queued message's own id (AC-47d1's already-drained
 // check at retry time is undecidable without it).
-func (s *Service) deferSeam3QueueDrainRefusal(ctx context.Context, taskID, sessionID, queuedMessageID, reasonCode string) {
+func (s *Service) deferSeam3QueueDrainRefusal(ctx context.Context, taskID, sessionID, queuedMessageID string, refusal *seam3Refusal) {
 	payload := map[string]interface{}{
 		metaKeySessionID:    sessionID,
 		"queued_message_id": queuedMessageID,
 	}
-	if err := s.deferCeilingRefusal(ctx, taskID, models.CeilingLaunchQueueDrainEnsure, payload, reasonCode); err != nil {
+	if err := s.deferCeilingRefusal(ctx, taskID, sessionID, models.CeilingLaunchQueueDrainEnsure, payload, refusal.reasonCode,
+		refusal.population, refusal.populationKnown, refusal.ceiling); err != nil {
 		s.logger.Zap().Error("could not persist a ceiling deferral; the workflow queue drain could not be recorded",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID),
 			zap.String("queued_message_id", queuedMessageID), zap.Error(err))
@@ -178,7 +197,8 @@ func (s *Service) disposeSeam3PromptEnsureRefusal(
 		return nil
 	}
 	payload := seam3PromptEnsurePayload(sessionID, prompt, model, planMode, attachments, dispatchOnly, options)
-	if err := s.deferCeilingRefusal(ctx, taskID, models.CeilingLaunchPromptEnsure, payload, refusal.reasonCode); err != nil {
+	if err := s.deferCeilingRefusal(ctx, taskID, sessionID, models.CeilingLaunchPromptEnsure, payload, refusal.reasonCode,
+		refusal.population, refusal.populationKnown, refusal.ceiling); err != nil {
 		s.logger.Zap().Error("could not persist a ceiling deferral; the prompt could not be admitted or recorded",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
 		return err

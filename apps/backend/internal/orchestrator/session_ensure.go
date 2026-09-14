@@ -280,12 +280,12 @@ func (s *Service) tryEnsureExecution(
 		case seam3CallShapeViewing:
 			return
 		case seam3CallShapeQueueDrain:
-			s.deferSeam3QueueDrainRefusal(ctx, session.TaskID, sessionID, queuedMessageID, refusal.reasonCode)
+			s.deferSeam3QueueDrainRefusal(ctx, session.TaskID, sessionID, queuedMessageID, refusal)
 			return
 		default:
 			s.logger.Zap().Warn("tryEnsureExecution saw an unrecognized seam-3 call shape; defaulting to deferring",
 				zap.String("session_id", sessionID), zap.String("call_shape", string(callShape)))
-			s.deferSeam3QueueDrainRefusal(ctx, session.TaskID, sessionID, queuedMessageID, refusal.reasonCode)
+			s.deferSeam3QueueDrainRefusal(ctx, session.TaskID, sessionID, queuedMessageID, refusal)
 			return
 		}
 	}

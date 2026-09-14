@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -57,6 +58,15 @@ type CeilingDeferral struct {
 	Origin     string
 	ReasonCode string
 	QueuedAt   time.Time
+
+	// Population, PopulationKnown and Ceiling are the admission controller's
+	// reading at the moment of this refusal (or of the most recent reason-code
+	// change). They are not part of the launch being replayed, so they are not
+	// part of CeilingDeferralsEquivalent's comparison — only the AC-49 card
+	// carrier reads them.
+	Population      int
+	PopulationKnown bool
+	Ceiling         int
 }
 
 // CeilingRecordKeys builds the ceiling keys for a deferral. It returns only the
@@ -64,15 +74,19 @@ type CeilingDeferral struct {
 // holds rather than replacing it.
 func CeilingRecordKeys(deferral CeilingDeferral) map[string]interface{} {
 	keys := map[string]interface{}{
-		CeilingDeferredKey:      true,
-		CeilingLaunchKindKey:    string(deferral.Kind),
-		CeilingLaunchOriginKey:  deferral.Origin,
-		CeilingReasonCodeKey:    deferral.ReasonCode,
-		CeilingQueuedAtKey:      deferral.QueuedAt.UTC().Format(time.RFC3339),
-		CeilingLaunchPayloadKey: deferral.Payload,
+		CeilingDeferredKey:       true,
+		CeilingLaunchKindKey:     string(deferral.Kind),
+		CeilingLaunchOriginKey:   deferral.Origin,
+		CeilingReasonCodeKey:     deferral.ReasonCode,
+		CeilingQueuedAtKey:       deferral.QueuedAt.UTC().Format(time.RFC3339),
+		CeilingLaunchPayloadKey:  deferral.Payload,
+		CeilingValueAtRefusalKey: deferral.Ceiling,
 	}
 	if deferral.Payload == nil {
 		keys[CeilingLaunchPayloadKey] = map[string]interface{}{}
+	}
+	if deferral.PopulationKnown {
+		keys[CeilingPopulationAtRefusalKey] = deferral.Population
 	}
 	return keys
 }
@@ -142,7 +156,31 @@ func ReadCeilingDeferral(record map[string]interface{}) (CeilingDeferral, error)
 			deferral.QueuedAt = parsed.UTC()
 		}
 	}
+	deferral.Ceiling = CeilingRecordInt(record[CeilingValueAtRefusalKey])
+	if population, ok := record[CeilingPopulationAtRefusalKey]; ok {
+		deferral.Population = CeilingRecordInt(population)
+		deferral.PopulationKnown = true
+	}
 	return deferral, nil
+}
+
+// CeilingRecordInt reads a number stored on a deferred_launch record
+// regardless of which numeric representation decoded it: json.Number for a
+// caller using UseNumber (the repository's own read path), float64 for
+// encoding/json's ordinary interface{} decoding (test fixtures and any other
+// caller).
+func CeilingRecordInt(value interface{}) int {
+	switch v := value.(type) {
+	case json.Number:
+		n, _ := v.Int64()
+		return int(n)
+	case float64:
+		return int(v)
+	case int:
+		return v
+	default:
+		return 0
+	}
 }
 
 // UnreplayableCeilingRecordError reports a record whose launch kind is absent or

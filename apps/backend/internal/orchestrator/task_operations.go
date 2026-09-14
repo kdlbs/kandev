@@ -897,6 +897,7 @@ func (s *Service) startCreatedSession(
 	// The agent is running, so the reservation becomes a consumption.
 	launchClaim.consume(ctx)
 	seam2Res.consume()
+	s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, seam2Res.manualOverride, seam2Res.population, seam2Res.populationKnown, seam2Res.ceiling)
 
 	// Ensure a PR watch exists so the poller can detect PRs created by the agent.
 	// PrepareTaskSession may have already created one, but if that goroutine failed
@@ -1488,6 +1489,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		}
 	}
 	seam1Res.rebindToSession(sessionID)
+	s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, seam1Res.manualOverride, seam1Res.population, seam1Res.populationKnown, seam1Res.ceiling)
 
 	// Seed a matching conditional session configuration before lifecycle
 	// startup. The ACP manager applies this durable runtime layer after the
@@ -2954,6 +2956,7 @@ func (s *Service) resumeTaskSessionWithContinuation(
 	}
 	execution.SessionState = v1.TaskSessionState(readySession.State)
 	seam4Res.consume()
+	s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, seam4Res.manualOverride, seam4Res.population, seam4Res.populationKnown, seam4Res.ceiling)
 	persistBranchRecovery()
 
 	// Backfill the initial user message when a prior failed launch never got
@@ -3157,6 +3160,7 @@ func (s *Service) StartSessionForWorkflowStep(ctx context.Context, taskID, sessi
 		return err
 	}
 	preConsultRes.consume()
+	s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, preConsultRes.manualOverride, preConsultRes.population, preConsultRes.populationKnown, preConsultRes.ceiling)
 
 	// Apply conditional session settings after a manual resume and before the
 	// step prompt. The helper reloads the session so a resume-created runtime
@@ -3421,6 +3425,7 @@ func (s *Service) coldResumeSession(
 		retryable, err := s.attemptColdResume(ctx, sessionID, session, isOfficeTask, startupAttempt)
 		if err == nil {
 			seam3Res.consume()
+			s.recordManualOverrideIfAdmitted(ctx, session.TaskID, sessionID, seam3Res.manualOverride, seam3Res.population, seam3Res.populationKnown, seam3Res.ceiling)
 			if validationErr := s.validateResumeAttempt(startupAttempt); validationErr != nil {
 				s.cleanupCancelledResumeAttempt(startupAttempt)
 				return startupAttempt, validationErr

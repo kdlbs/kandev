@@ -3,8 +3,6 @@ package orchestrator
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -31,22 +29,7 @@ func seam4ResumePayload(sessionID string, options executor.ResumeOptions) map[st
 // calling reservation.consume once the resume succeeds.
 func (s *Service) admitOrDeferSeam4(
 	ctx context.Context, taskID, sessionID string, origin launchOrigin, startPayload map[string]interface{},
-) (reservation *sessionKeyedCeilingReservation, deferred bool, err error) {
-	decision := s.sessionCeiling.admit(ctx, admissionRequest{
-		taskID:    taskID,
-		sessionID: sessionID,
-		origin:    origin,
-		seam:      "resumeTaskSession",
-	})
-	if decision.admitted {
-		return &sessionKeyedCeilingReservation{controller: s.sessionCeiling, key: decision.reservationKey}, false, nil
-	}
-
-	if err := s.deferCeilingRefusal(ctx, taskID, models.CeilingLaunchResume, startPayload, decision.reasonCode); err != nil {
-		s.logger.Zap().Error("could not persist a ceiling deferral; the resume could not be admitted or recorded",
-			zap.String("task_id", taskID), zap.String("session_id", sessionID),
-			zap.String("reason_code", ceilingReasonDeferWriteFailed), zap.Error(err))
-		return nil, false, err
-	}
-	return nil, true, nil
+) (*sessionKeyedCeilingReservation, bool, error) {
+	return s.admitOrDeferSessionKeyedLaunch(ctx, taskID, sessionID, origin, "resumeTaskSession",
+		models.CeilingLaunchResume, startPayload, "the resume could not be admitted or recorded")
 }

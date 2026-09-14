@@ -27,6 +27,15 @@ const (
 	launchOriginManual    launchOrigin = "manual"
 )
 
+// ceilingFieldReasonCode and ceilingFieldCeiling name the log field and card
+// metadata key shared across every ceiling log line, message row and audit
+// record, so the reason code and the ceiling value are always found under
+// the same name regardless of which call site wrote them.
+const (
+	ceilingFieldReasonCode = "reason_code"
+	ceilingFieldCeiling    = "ceiling"
+)
+
 // Reason codes carried verbatim by the admission log line and the card surface.
 const (
 	ceilingReasonRefused           = "ceiling"
@@ -44,6 +53,9 @@ const (
 	// ceilingReasonDroppedUnreplayableRecord is AC-17b(f): the record's own
 	// ceiling_launch_kind is absent or outside the closed set.
 	ceilingReasonDroppedUnreplayableRecord = "ceiling_dropped_unreplayable_record"
+	// ceilingReasonSurfaceWriteFailed is AC-49g: the deferral itself persisted
+	// successfully, but the card note describing it could not be written.
+	ceilingReasonSurfaceWriteFailed = "ceiling_surface_write_failed"
 )
 
 // admittedSessionLister supplies the persisted half of the population. It returns
@@ -277,14 +289,14 @@ func (c *sessionCeilingController) logDecision(req admissionRequest, origin laun
 		zap.String("task_id", req.taskID),
 		zap.String("session_id", req.sessionID),
 		zap.String("origin", string(origin)),
-		zap.Int("ceiling", decision.ceiling),
+		zap.Int(ceilingFieldCeiling, decision.ceiling),
 		zap.Bool("admitted", decision.admitted),
 	}
 	if decision.populationKnown {
 		fields = append(fields, zap.Int("population", decision.population))
 	}
 	if decision.reasonCode != "" {
-		fields = append(fields, zap.String("reason_code", decision.reasonCode))
+		fields = append(fields, zap.String(ceilingFieldReasonCode, decision.reasonCode))
 	}
 	c.logger.Info("session ceiling admission decision", fields...)
 }

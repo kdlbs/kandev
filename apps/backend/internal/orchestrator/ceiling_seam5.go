@@ -45,13 +45,18 @@ func (s *Service) admitOrDeferSeam5(
 		seam:      "relaunchDynamicTaskAfterFailure",
 	})
 	if decision.admitted {
-		return &sessionKeyedCeilingReservation{controller: s.sessionCeiling, key: decision.reservationKey}, false, nil
+		return &sessionKeyedCeilingReservation{
+			controller: s.sessionCeiling, key: decision.reservationKey,
+			manualOverride: decision.manualOverride, population: decision.population,
+			populationKnown: decision.populationKnown, ceiling: decision.ceiling,
+		}, false, nil
 	}
 
-	if err := s.deferCeilingRefusal(ctx, taskID, models.CeilingLaunchDynamicRelaunch, relaunchPayload, decision.reasonCode); err != nil {
+	if err := s.deferCeilingRefusal(ctx, taskID, sessionID, models.CeilingLaunchDynamicRelaunch, relaunchPayload, decision.reasonCode,
+		decision.population, decision.populationKnown, decision.ceiling); err != nil {
 		s.logger.Zap().Error("could not persist a ceiling deferral; the dynamic relaunch could not be admitted or recorded",
 			zap.String("task_id", taskID), zap.String("session_id", sessionID),
-			zap.String("reason_code", ceilingReasonDeferWriteFailed), zap.Error(err))
+			zap.String(ceilingFieldReasonCode, ceilingReasonDeferWriteFailed), zap.Error(err))
 		return nil, false, err
 	}
 	return nil, true, nil

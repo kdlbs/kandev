@@ -1133,6 +1133,7 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 		)
 		if err == nil {
 			seam5Res.consume()
+			s.recordManualOverrideIfAdmitted(ctx, data.TaskID, data.SessionID, seam5Res.manualOverride, seam5Res.population, seam5Res.populationKnown, seam5Res.ceiling)
 		}
 		return err == nil
 	}
@@ -1146,6 +1147,7 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 	})
 	if err == nil {
 		seam5Res.consume()
+		s.recordManualOverrideIfAdmitted(ctx, data.TaskID, data.SessionID, seam5Res.manualOverride, seam5Res.population, seam5Res.populationKnown, seam5Res.ceiling)
 	}
 	return err == nil
 }

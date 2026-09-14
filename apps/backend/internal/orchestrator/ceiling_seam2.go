@@ -3,8 +3,6 @@ package orchestrator
 import (
 	"context"
 
-	"go.uber.org/zap"
-
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -50,22 +48,7 @@ func seam2StartCreatedPayload(
 // sessions, and for calling reservation.consume once the launch succeeds.
 func (s *Service) admitOrDeferSeam2(
 	ctx context.Context, taskID, sessionID string, origin launchOrigin, startPayload map[string]interface{},
-) (reservation *sessionKeyedCeilingReservation, deferred bool, err error) {
-	decision := s.sessionCeiling.admit(ctx, admissionRequest{
-		taskID:    taskID,
-		sessionID: sessionID,
-		origin:    origin,
-		seam:      "startCreatedSession",
-	})
-	if decision.admitted {
-		return &sessionKeyedCeilingReservation{controller: s.sessionCeiling, key: decision.reservationKey}, false, nil
-	}
-
-	if err := s.deferCeilingRefusal(ctx, taskID, models.CeilingLaunchStartCreated, startPayload, decision.reasonCode); err != nil {
-		s.logger.Zap().Error("could not persist a ceiling deferral; the launch could not be admitted or recorded",
-			zap.String("task_id", taskID), zap.String("session_id", sessionID),
-			zap.String("reason_code", ceilingReasonDeferWriteFailed), zap.Error(err))
-		return nil, false, err
-	}
-	return nil, true, nil
+) (*sessionKeyedCeilingReservation, bool, error) {
+	return s.admitOrDeferSessionKeyedLaunch(ctx, taskID, sessionID, origin, "startCreatedSession",
+		models.CeilingLaunchStartCreated, startPayload, "the launch could not be admitted or recorded")
 }

@@ -174,7 +174,7 @@ func TestDeferSeam3QueueDrainRefusalRecordsQueuedMessageID(t *testing.T) {
 		t.Fatalf("CreateTask: %v", err)
 	}
 
-	svc.deferSeam3QueueDrainRefusal(ctx, "seam3-qd", "seam3-qd-session", "queued-msg-1", ceilingReasonRefused)
+	svc.deferSeam3QueueDrainRefusal(ctx, "seam3-qd", "seam3-qd-session", "queued-msg-1", &seam3Refusal{reasonCode: ceilingReasonRefused})
 
 	record := deferredLaunchOf(t, svc, "seam3-qd")
 	if record == nil || record[models.CeilingDeferredKey] != true {

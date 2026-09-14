@@ -45,6 +45,17 @@ const (
 	// rather than in process memory so a restart cannot reset the bound.
 	CeilingSurfaceAttemptCountKey = "ceiling_surface_attempt_count"
 
+	// CeilingPopulationAtRefusalKey records the population the admission
+	// controller saw at refusal time, so a later retry's card note (AC-49g)
+	// reproduces the same content rather than a freshly re-queried number. It
+	// is absent, never zero, when the population was unknown at refusal
+	// (AC-33a): an absent key is the "unknown" signal, not a rendered word.
+	CeilingPopulationAtRefusalKey = "ceiling_population_at_refusal"
+
+	// CeilingValueAtRefusalKey records the ceiling itself at refusal time. It
+	// is always known, unlike the population.
+	CeilingValueAtRefusalKey = "ceiling_value_at_refusal"
+
 	ceilingRecordKeyPrefix = "ceiling_"
 )
 

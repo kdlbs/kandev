@@ -28,6 +28,15 @@ type seam1Reservation struct {
 	controller *sessionCeilingController
 	key        string
 	rebound    bool
+
+	// manualOverride, population, populationKnown and ceiling are the
+	// admission decision's own reading, carried forward so AC-14/AC-53's
+	// audit write and card warning can be performed once the session this
+	// launch creates actually exists (AC-53, AC-14b).
+	manualOverride  bool
+	population      int
+	populationKnown bool
+	ceiling         int
 }
 
 // rebindToSession moves the reservation onto the created session's id, as one
@@ -101,12 +110,17 @@ func (s *Service) admitOrDeferSeam1(
 		seam:   "startTask",
 	})
 	if decision.admitted {
-		return &seam1Reservation{controller: s.sessionCeiling, key: decision.reservationKey}, false, nil
+		return &seam1Reservation{
+			controller: s.sessionCeiling, key: decision.reservationKey,
+			manualOverride: decision.manualOverride, population: decision.population,
+			populationKnown: decision.populationKnown, ceiling: decision.ceiling,
+		}, false, nil
 	}
 
-	if err := s.deferCeilingRefusal(ctx, taskID, models.CeilingLaunchStart, startPayload, decision.reasonCode); err != nil {
+	if err := s.deferCeilingRefusal(ctx, taskID, "", models.CeilingLaunchStart, startPayload, decision.reasonCode,
+		decision.population, decision.populationKnown, decision.ceiling); err != nil {
 		s.logger.Zap().Error("could not persist a ceiling deferral; the launch could not be admitted or recorded",
-			zap.String("task_id", taskID), zap.String("reason_code", ceilingReasonDeferWriteFailed), zap.Error(err))
+			zap.String("task_id", taskID), zap.String(ceilingFieldReasonCode, ceilingReasonDeferWriteFailed), zap.Error(err))
 		return nil, false, err
 	}
 	return nil, true, nil

@@ -17,7 +17,7 @@ func TestDeferCeilingRefusalCreatesRecordFromAbsent(t *testing.T) {
 	}
 
 	payload := map[string]interface{}{"prompt": "hello"}
-	if err := svc.deferCeilingRefusal(ctx, "defer-absent", models.CeilingLaunchStart, payload, ceilingReasonRefused); err != nil {
+	if err := svc.deferCeilingRefusal(ctx, "defer-absent", "", models.CeilingLaunchStart, payload, ceilingReasonRefused, 0, false, 0); err != nil {
 		t.Fatalf("deferCeilingRefusal: %v", err)
 	}
 
@@ -55,7 +55,7 @@ func TestDeferCeilingRefusalMergesOntoExistingWIPIntent(t *testing.T) {
 		t.Fatalf("CreateTask: %v", err)
 	}
 
-	if err := svc.deferCeilingRefusal(ctx, "defer-merge", models.CeilingLaunchStart, map[string]interface{}{"prompt": "p"}, ceilingReasonRefused); err != nil {
+	if err := svc.deferCeilingRefusal(ctx, "defer-merge", "", models.CeilingLaunchStart, map[string]interface{}{"prompt": "p"}, ceilingReasonRefused, 0, false, 0); err != nil {
 		t.Fatalf("deferCeilingRefusal: %v", err)
 	}
 
@@ -81,13 +81,13 @@ func TestDeferCeilingRefusalIsANoOpOnByteIdenticalDuplicate(t *testing.T) {
 		t.Fatalf("CreateTask: %v", err)
 	}
 	payload := map[string]interface{}{"prompt": "same"}
-	if err := svc.deferCeilingRefusal(ctx, "defer-dup", models.CeilingLaunchStart, payload, ceilingReasonRefused); err != nil {
+	if err := svc.deferCeilingRefusal(ctx, "defer-dup", "", models.CeilingLaunchStart, payload, ceilingReasonRefused, 0, false, 0); err != nil {
 		t.Fatalf("deferCeilingRefusal (1): %v", err)
 	}
 	first := deferredLaunchOf(t, svc, "defer-dup")
 	firstQueuedAt := first[models.CeilingQueuedAtKey]
 
-	if err := svc.deferCeilingRefusal(ctx, "defer-dup", models.CeilingLaunchStart, map[string]interface{}{"prompt": "same"}, ceilingReasonRefused); err != nil {
+	if err := svc.deferCeilingRefusal(ctx, "defer-dup", "", models.CeilingLaunchStart, map[string]interface{}{"prompt": "same"}, ceilingReasonRefused, 0, false, 0); err != nil {
 		t.Fatalf("deferCeilingRefusal (2): %v", err)
 	}
 	second := deferredLaunchOf(t, svc, "defer-dup")
@@ -105,10 +105,10 @@ func TestDeferCeilingRefusalRetainsEarlierRecordOnDifferingDuplicate(t *testing.
 	if err := repo.CreateTask(ctx, &models.Task{ID: "defer-collide", Title: "T"}); err != nil {
 		t.Fatalf("CreateTask: %v", err)
 	}
-	if err := svc.deferCeilingRefusal(ctx, "defer-collide", models.CeilingLaunchStart, map[string]interface{}{"prompt": "first"}, ceilingReasonRefused); err != nil {
+	if err := svc.deferCeilingRefusal(ctx, "defer-collide", "", models.CeilingLaunchStart, map[string]interface{}{"prompt": "first"}, ceilingReasonRefused, 0, false, 0); err != nil {
 		t.Fatalf("deferCeilingRefusal (1): %v", err)
 	}
-	if err := svc.deferCeilingRefusal(ctx, "defer-collide", models.CeilingLaunchStart, map[string]interface{}{"prompt": "second"}, ceilingReasonRefused); err != nil {
+	if err := svc.deferCeilingRefusal(ctx, "defer-collide", "", models.CeilingLaunchStart, map[string]interface{}{"prompt": "second"}, ceilingReasonRefused, 0, false, 0); err != nil {
 		t.Fatalf("deferCeilingRefusal (2): %v", err)
 	}
 
@@ -131,7 +131,7 @@ func TestDeferCeilingRefusalReplacesNonObjectValue(t *testing.T) {
 		t.Fatalf("CreateTask: %v", err)
 	}
 
-	if err := svc.deferCeilingRefusal(ctx, "defer-nonobject", models.CeilingLaunchStart, map[string]interface{}{"prompt": "p"}, ceilingReasonRefused); err != nil {
+	if err := svc.deferCeilingRefusal(ctx, "defer-nonobject", "", models.CeilingLaunchStart, map[string]interface{}{"prompt": "p"}, ceilingReasonRefused, 0, false, 0); err != nil {
 		t.Fatalf("deferCeilingRefusal: %v", err)
 	}
 
