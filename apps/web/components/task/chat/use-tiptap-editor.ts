@@ -338,6 +338,46 @@ type SyncEditorOptions = {
   onChangeRef: React.RefObject<(value: string) => void>;
 };
 
+/** Editor methods required to synchronize the disabled state. */
+type DisabledStateEditor = {
+  view: { hasFocus: () => boolean };
+  setEditable: (editable: boolean) => void;
+  commands: { focus: () => void };
+};
+
+/** Bound focus restoration while browser focus settles after re-enabling. */
+const FOCUS_RESTORE_MAX_ATTEMPTS = 5;
+
+/** Preserve editor focus across temporary disabled states without stealing focus. */
+export function useSyncDisabledState(editor: DisabledStateEditor | null, disabled: boolean) {
+  const hadFocusBeforeDisableRef = useRef(false);
+  useEffect(() => {
+    if (!editor) return;
+    if (disabled) {
+      hadFocusBeforeDisableRef.current = editor.view.hasFocus();
+      editor.setEditable(false);
+      return;
+    }
+    editor.setEditable(true);
+    const hadFocus = hadFocusBeforeDisableRef.current;
+    hadFocusBeforeDisableRef.current = false;
+    if (!hadFocus) return;
+
+    let frame = 0;
+    let attempts = 0;
+    const tick = () => {
+      attempts += 1;
+      if (!editor.view.hasFocus()) {
+        if (!shouldRestoreFocusOnEnable(hadFocus)) return;
+        editor.commands.focus();
+      }
+      if (attempts < FOCUS_RESTORE_MAX_ATTEMPTS) frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [editor, disabled]);
+}
+
 function useSyncEditor({
   editor,
   disabled,
@@ -348,10 +388,7 @@ function useSyncEditor({
   initialSyncDoneRef,
   onChangeRef,
 }: SyncEditorOptions) {
-  // Sync disabled state
-  useEffect(() => {
-    if (editor) editor.setEditable(!disabled);
-  }, [editor, disabled]);
+  useSyncDisabledState(editor, disabled);
 
   // Sync placeholder via editor.storage. The DynamicPlaceholder extension reads
   // from editor.storage.dynamicPlaceholder.text at decoration time.
@@ -428,6 +465,15 @@ function syncEditorValue({
   editor.commands.setContent(textToHtml(value));
   isSyncingRef.current = false;
   initialSyncDoneRef.current = true;
+}
+
+// ── Focus-restore decision ───────────────────────────────────────────
+
+/** Return true only when the editor had focus and no other control owns focus. */
+export function shouldRestoreFocusOnEnable(hadFocusBeforeDisable: boolean): boolean {
+  if (!hadFocusBeforeDisable) return false;
+  const active = document.activeElement;
+  return active === null || active === document.body;
 }
 
 // ── Submit shortcut decision ────────────────────────────────────────

@@ -437,8 +437,11 @@ func TestCancelDisplacedParticipantRun_CancelsOnlyTheFanOutRunForThatAgentStep(t
 	if err != nil {
 		t.Fatalf("CancelDisplacedParticipantRun: %v", err)
 	}
-	if cancelled != 1 {
-		t.Fatalf("cancelled = %d, want 1", cancelled)
+	if len(cancelled) != 1 {
+		t.Fatalf("cancelled = %d, want 1", len(cancelled))
+	}
+	if cancelled[0].ID != "run-target" {
+		t.Fatalf("cancelled[0].ID = %q, want run-target", cancelled[0].ID)
 	}
 
 	assertRunStatus(t, repo, "run-target", "cancelled")
@@ -460,8 +463,8 @@ func TestCancelDisplacedParticipantRun_NoMatchIsNotAFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CancelDisplacedParticipantRun: %v", err)
 	}
-	if cancelled != 0 {
-		t.Errorf("cancelled = %d, want 0", cancelled)
+	if len(cancelled) != 0 {
+		t.Errorf("cancelled = %d, want 0", len(cancelled))
 	}
 }
 

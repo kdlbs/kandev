@@ -164,7 +164,7 @@ func gitText(ctx context.Context, directory string, args ...string) (string, err
 
 func gitBytes(ctx context.Context, directory string, args ...string) ([]byte, error) {
 	cmd := newGitCommand(ctx, append([]string{"-C", directory}, args...)...)
-	output, err := cmd.Output()
+	output, err := runGitCmdOutput(ctx, cmd)
 	if err != nil {
 		return nil, fmt.Errorf("%w: git inspection failed", ErrPreservedCheckoutUnproven)
 	}

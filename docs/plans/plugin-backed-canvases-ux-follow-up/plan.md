@@ -17,6 +17,13 @@ legacy_specs:
 
 # Implementation Plan: Plugin-backed canvases UX follow-up
 
+## Subsequent design
+
+The [direct canvas creation package](../canvas-direct-creation/plan.md) replaces
+Task 02's sidebar settings redirect with direct task-dialog launch. Completed
+results below remain historical. The new package owns replacement navigation
+and prompt tests; Task 07's outstanding external ACP evaluation is unchanged.
+
 ## Overview
 
 Correct the canvas discovery, creation, host, appearance, and authoring issues
@@ -179,6 +186,14 @@ counts by default. E2E runs use one worker per shard and at most three local
 shards, with lower limits on low-memory hosts. Higher parallelism requires an
 explicit opt-in environment variable, and the E2E skill documents the safe
 defaults for future sessions.
+
+## Follow-up repair
+
+The [canvas runtime and permission repair](../canvas-runtime-permission-fixes/plan.md)
+adds startup acknowledgement before appearance reveal and replaces the release
+review layout. Its work orders 03-04 own those changes and desktop/mobile tests.
+The external ACP evaluation remains pending here; this repair neither completes
+that evaluation nor replaces this package's historical results.
 
 ## Risks
 

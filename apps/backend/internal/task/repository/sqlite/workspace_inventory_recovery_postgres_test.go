@@ -76,8 +76,8 @@ func TestPostgresWorkspaceInventoryNegativeAttestationIsMonotonic(t *testing.T) 
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.7
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.7
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9
 //
 // TestPostgresRepairWorkspaceInventoryConcurrentSameKeyRetryConvergesToOneRepairAndOneDeduplicated
 // pins the ordering fix directly on PostgreSQL, where lockTaskRowInTx takes

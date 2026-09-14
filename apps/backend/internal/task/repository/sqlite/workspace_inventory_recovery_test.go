@@ -11,7 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.4
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.4
 func TestWorkspaceInventoryRecoveryReceiptSchemaExists(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 
@@ -85,7 +85,7 @@ func seedWorkspaceInventoryRecovery(t *testing.T, repo *Repository) (*models.Tas
 	return reloadedEnv, reloadedTaskRepo
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.2
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.2
 func TestRepairWorkspaceInventoryInsertsMissingRowAndReceipt(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	env, taskRepo := seedWorkspaceInventoryRecovery(t, repo)
@@ -176,7 +176,7 @@ func TestWorkspaceInventoryRecoveryReceiptSurvivesSessionAndEnvironmentDeletion(
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.3
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.3
 func TestRepairWorkspaceInventoryCorrectsOnlyTheProvenStaleSlot(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	env, taskRepo := seedWorkspaceInventoryRecovery(t, repo)
@@ -223,7 +223,7 @@ func TestRepairWorkspaceInventoryCorrectsOnlyTheProvenStaleSlot(t *testing.T) {
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.4
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.4
 func TestRepairWorkspaceInventoryRollsBackReceiptWhenMetadataWriteFails(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	env, taskRepo := seedWorkspaceInventoryRecovery(t, repo)
@@ -264,7 +264,7 @@ func TestWorkspaceInventoryRecoveryRepositoryExposesAtomicRepair(t *testing.T) {
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9
 func TestGetWorkspaceInventoryRepairReceiptReturnsCommittedReceipt(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	env, taskRepo := seedWorkspaceInventoryRecovery(t, repo)
@@ -313,7 +313,7 @@ func TestGetWorkspaceInventoryRepairReceiptReturnsCommittedReceipt(t *testing.T)
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.10
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.10
 func TestRecordWorkspaceInventoryPostRepairAttestationPersistsBeforeAndAfterEvidence(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	env, taskRepo := seedWorkspaceInventoryRecovery(t, repo)
@@ -389,8 +389,8 @@ func TestRecordWorkspaceInventoryPostRepairAttestationPersistsBeforeAndAfterEvid
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.6
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.10
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.6
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.10
 func TestRecordWorkspaceInventoryPostRepairAttestationCannotReplaceDivergenceWithMatch(t *testing.T) {
 	repo := newRepoForEntityTests(t)
 	env, taskRepo := seedWorkspaceInventoryRecovery(t, repo)
@@ -454,7 +454,7 @@ func TestRecordWorkspaceInventoryPostRepairAttestationCannotReplaceDivergenceWit
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.2
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.2
 //
 // TestRepairWorkspaceInventoryReceiptPersistsSourceRecordRevisions proves the
 // durable receipt carries forward the exact source-record revisions
@@ -513,8 +513,8 @@ func TestRepairWorkspaceInventoryReceiptPersistsSourceRecordRevisions(t *testing
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.3
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.3
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9
 //
 // TestRepairWorkspaceInventoryConcurrentRetryConvergesToOneRepairAndOneDeduplicated
 // races two RepairWorkspaceInventory calls for the SAME task-scoped
@@ -612,7 +612,7 @@ func TestRepairWorkspaceInventoryConcurrentRetryConvergesToOneRepairAndOneDedupl
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.5
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.5
 //
 // TestRepairWorkspaceInventoryRejectsCrossScopeAndTerminalStates proves each
 // non-reciprocal or terminal server-owned record state is refused with the

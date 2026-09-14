@@ -199,6 +199,7 @@ type StepDefinition struct {
 	AgentProfileID            string                                       `json:"agent_profile_id,omitempty" yaml:"agent_profile_id,omitempty"`
 	ProfileSessionStartPolicy taskmodels.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy,omitempty" yaml:"profile_session_start_policy,omitempty"`
 	ProfileSessionEndPolicy   taskmodels.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy,omitempty" yaml:"profile_session_end_policy,omitempty"`
+	SessionTarget             *WorkflowSessionTarget                       `json:"session_target,omitempty" yaml:"session_target,omitempty"`
 	WIPLimit                  int                                          `json:"wip_limit,omitempty" yaml:"wip_limit,omitempty"`
 	PullFromStepID            string                                       `json:"pull_from_step_id,omitempty" yaml:"pull_from_step_id,omitempty"`
 	// StageType mirrors WorkflowStep.StageType for templates so the office
@@ -211,6 +212,8 @@ type StepDefinition struct {
 	// CancelTriggersTurnComplete allows an explicit user cancellation to run
 	// this step's ordinary on_turn_complete actions.
 	CancelTriggersTurnComplete bool `json:"cancel_triggers_turn_complete,omitempty" yaml:"cancel_triggers_turn_complete,omitempty"`
+	// CompleteTaskOnEnter marks the final step as completing its task on entry.
+	CompleteTaskOnEnter bool `json:"complete_task_on_enter" yaml:"complete_task_on_enter"`
 }
 
 // WorkflowStep represents a step in a workflow
@@ -229,6 +232,7 @@ type WorkflowStep struct {
 	AgentProfileID            string                                       `json:"agent_profile_id,omitempty"`
 	ProfileSessionStartPolicy taskmodels.WorkflowProfileSessionStartPolicy `json:"profile_session_start_policy,omitempty"`
 	ProfileSessionEndPolicy   taskmodels.WorkflowProfileSessionEndPolicy   `json:"profile_session_end_policy,omitempty"`
+	SessionTarget             *WorkflowSessionTarget                       `json:"session_target,omitempty"`
 	WIPLimit                  int                                          `json:"wip_limit,omitempty"`
 	PullFromStepID            string                                       `json:"pull_from_step_id,omitempty"`
 	// StageType is a Phase 2 (ADR-0004) semantic hint for the frontend
@@ -244,9 +248,16 @@ type WorkflowStep struct {
 	AutoAdvanceRequiresSignal bool `json:"auto_advance_requires_signal"`
 	// CancelTriggersTurnComplete allows an explicit user cancellation to run
 	// this step's ordinary on_turn_complete actions.
-	CancelTriggersTurnComplete bool      `json:"cancel_triggers_turn_complete"`
-	CreatedAt                  time.Time `json:"created_at"`
-	UpdatedAt                  time.Time `json:"updated_at"`
+	CancelTriggersTurnComplete bool `json:"cancel_triggers_turn_complete"`
+	// CompleteTaskOnEnter marks the final step as completing its task on entry.
+	CompleteTaskOnEnter bool `json:"complete_task_on_enter"`
+	// OrderRevision is bumped by ReorderStepTasks (AC-TASKS-KANBAN-TASK-
+	// REORDERING-001.25/.37) each time this step's task order changes. A
+	// consumer that records the value it last saw can reject a WS event
+	// carrying a revision no greater than that.
+	OrderRevision int64     `json:"order_revision"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // HasOnEnterAction checks if the step has a specific on_enter action type.

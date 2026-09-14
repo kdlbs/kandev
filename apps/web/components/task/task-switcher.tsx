@@ -39,6 +39,8 @@ const TASK_ROW_HANDLER_KEYS = [
   "onLinkLinearIssue",
   "onLinkSentryIssue",
   "onMoveToStep",
+  "onRequestMoveOptions",
+  "onBeforeMoveOptionsOpen",
   "onTogglePin",
   "onToggleSelectTask",
   "onSelectTaskRange",
@@ -109,6 +111,8 @@ function buildTaskRowProps(
     onLinkLinearIssue: optionalHandler(props, handlers, "onLinkLinearIssue"),
     onLinkSentryIssue: optionalHandler(props, handlers, "onLinkSentryIssue"),
     onMoveToStep: optionalHandler(props, handlers, "onMoveToStep"),
+    onRequestMoveOptions: optionalHandler(props, handlers, "onRequestMoveOptions"),
+    onBeforeMoveOptionsOpen: optionalHandler(props, handlers, "onBeforeMoveOptionsOpen"),
     onTogglePin: optionalHandler(props, handlers, "onTogglePin"),
     pinnedTaskIds: props.pinnedTaskIds,
     deletingTaskId: props.deletingTaskId,
@@ -185,12 +189,18 @@ function LoadErrorNotice({
   if (!error) return null;
   return (
     <div
+      role="status"
+      aria-live="polite"
       className="flex items-center gap-2 px-3 py-2 text-xs text-destructive"
       data-testid="sidebar-task-load-error"
     >
       <span className="min-w-0 flex-1">{error}</span>
       {onRetry && retryLabel && (
-        <button type="button" className="shrink-0 underline underline-offset-2" onClick={onRetry}>
+        <button
+          type="button"
+          className="h-11 min-h-11 shrink-0 cursor-pointer underline underline-offset-2 [@media(pointer:fine)]:h-7 [@media(pointer:fine)]:min-h-7"
+          onClick={onRetry}
+        >
           {retryLabel}
         </button>
       )}
@@ -220,12 +230,14 @@ export const TaskSwitcher = memo(function TaskSwitcher(props: TaskSwitcherProps)
     return (
       <>
         {loadErrorNotice}
-        <div
-          data-slot="task-switcher-empty-state"
-          className="px-3 py-3 text-xs text-muted-foreground"
-        >
-          {t("sidebar:noTasksYet")}
-        </div>
+        {!loadError && (
+          <div
+            data-slot="task-switcher-empty-state"
+            className="px-3 py-3 text-xs text-muted-foreground"
+          >
+            {t("sidebar:noTasksYet")}
+          </div>
+        )}
       </>
     );
   }

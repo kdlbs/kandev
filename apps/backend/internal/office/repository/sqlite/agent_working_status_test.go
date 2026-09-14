@@ -226,7 +226,7 @@ func TestMarkAgentWorking_SuccessorTakeover(t *testing.T) {
 
 	// Run A leaves 'claimed' (finishes) but its own clearAgentWorking has not
 	// run yet — the un-transacted window handleAgentCompleted leaves open.
-	if err := repo.FinishRun(ctx, claimedA.ID, string(models.RunStatusFinished), nil); err != nil {
+	if _, err := repo.FinishRun(ctx, claimedA.ID, string(models.RunStatusFinished), nil); err != nil {
 		t.Fatalf("finish run A: %v", err)
 	}
 

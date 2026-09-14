@@ -2,7 +2,7 @@
 status: current
 system: agents
 requirements:
-  - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004
+  - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008
 ---
 
 # Preserved workspace inventory repair system design

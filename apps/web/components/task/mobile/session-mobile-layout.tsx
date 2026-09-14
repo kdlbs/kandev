@@ -91,6 +91,7 @@ type SessionMobileLayoutProps = {
   remoteCheckedAt?: string | null;
   remoteStatusError?: string | null;
   isArchived?: boolean;
+  onTaskUnarchived?: (taskId: string) => void;
   taskCanvases?: Canvas[];
   onOpenCanvas?: (canvasId: string) => void;
 };
@@ -389,6 +390,7 @@ type MobileTopBarStickyProps = {
   remoteCheckedAt?: string | null;
   remoteStatusError?: string | null;
   isArchived?: boolean;
+  onTaskUnarchived?: (taskId: string) => void;
 };
 
 function MobileTopBarSticky(props: MobileTopBarStickyProps) {
@@ -416,6 +418,7 @@ function MobileTopBarSticky(props: MobileTopBarStickyProps) {
         remoteCheckedAt={props.remoteCheckedAt}
         remoteStatusError={props.remoteStatusError}
         isArchived={props.isArchived}
+        onTaskUnarchived={props.onTaskUnarchived}
       />
     </div>
   );

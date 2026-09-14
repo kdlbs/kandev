@@ -4,7 +4,7 @@ system: ui
 requirements:
   - REQ-UI-CI-PR-AUTOMATION-001
 created: 2026-06-18
-updated: 2026-09-06
+updated: 2026-09-11
 owners:
   - tbd
 ---
@@ -144,7 +144,44 @@ Auto-merge cycle for one task/PR:
 4. If the PR is ready and the readiness signature is new, Kandev calls the existing PR merge operation using the backend default merge-method selection.
 5. Kandev records the merge attempt and refreshes PR state after a successful merge when practical.
 
-## Permissions
+## Outcome reporting scope
+
+This clarification maps to `AC-UI-CI-PR-AUTOMATION-001.10`,
+`AC-UI-CI-PR-AUTOMATION-001.16`, and `AC-UI-CI-PR-AUTOMATION-001.17`.
+Its delivery record is the [scope repair plan](../../../plans/pr-auto-fix-outcome-scope/plan.md).
+
+`registerPRAutomationTools` exposes the reporting tool through the GitHub task
+catalog. Catalog membership describes capability, not an active auto-fix attempt.
+The catalog remains stable across ordinary and automatic turns in one session.
+
+The tool description must require a current Kandev auto-fix prompt with the
+server-owned outcome protocol. It must explicitly exclude manual PR fixup and
+sibling review work. A setting, a quoted marker, or an earlier turn's protocol
+does not prove that the current turn owns an attempt.
+
+`ciAutomationOutcomeProtocol` must state that its reporting instruction applies
+only to the turn receiving that dispatch. Structured and passthrough sessions
+retain their existing transport behavior. Custom prompts cannot remove this scope.
+
+`Service.ReportTaskPRAutoFixOutcome` continues to resolve the active turn.
+`Store.ReportTaskCIAutoFixOutcome` remains the authoritative conditional write.
+The exact task, session, turn, running state, and empty outcome must match.
+No caller-supplied identity, new attempt, or success fallback is introduced.
+
+`handleReportTaskPRAutoFixOutcome` must map
+`ErrTaskCIAutoFixAttemptNotFound` to a specific scope explanation while retaining
+`VALIDATION_ERROR`. The explanation covers missing, stale, and completed attempts
+without claiming that auto-fix is disabled. It directs the agent to finish ordinary
+work without another report or a settings change. Other validation and internal
+errors retain their existing classification.
+
+Regression coverage must exercise missing settings, explicit disabled settings,
+an enabled PR without an attempt, and a valid bound attempt. A mixed-PR case must
+prove that an attempt on another session or turn cannot authorize this call.
+No UI composition, persistence schema, retry policy, or provider catalog changes
+are required.
+
+## Access permissions
 
 - Any user who can view and interact with the task chat can read and update the task CI automation options for that task.
 - Any user who can edit prompts in Settings > Prompts can edit the default `ci-auto-fix` prompt.

@@ -10,8 +10,8 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.7
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.7
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9
 //
 // TestBuildResumeRequestRetryAfterUnattestedCommitBlocksBeforeLaunch proves
 // the orchestrator-facing resume path does not skip durable attestation once
@@ -93,7 +93,7 @@ func TestBuildResumeRequestRetryAfterUnattestedCommitBlocksBeforeLaunch(t *testi
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9
 //
 // TestLaunchPreparedSessionAutoRepairsRecoverableInventoryMismatchAndLaunchesOnce
 // proves guarded repair is wired into fresh/additional-session launch (not
@@ -151,8 +151,8 @@ func TestLaunchPreparedSessionAutoRepairsRecoverableInventoryMismatchAndLaunches
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.1
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.1
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9
 func TestLaunchPreparedSessionRepairsInventoryBeforePreparedWorkspaceFastPath(t *testing.T) {
 	repositoryPath, worktreePath := createExecutorPreservationFixture(t)
 	repo := newMockRepository()
@@ -217,8 +217,8 @@ func TestLaunchPreparedSessionRepairsInventoryBeforePreparedWorkspaceFastPath(t 
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.7
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.7
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9
 func TestLaunchPreparedSessionPreparedWorkspaceFastPathBlocksUnattestedRepair(t *testing.T) {
 	repositoryPath, worktreePath := createExecutorPreservationFixture(t)
 	repo := newMockRepository()
@@ -290,8 +290,8 @@ func TestLaunchPreparedSessionPreparedWorkspaceFastPathBlocksUnattestedRepair(t 
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.7
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.7
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9
 //
 // TestLaunchPreparedSessionRetryAfterUnattestedCommitDoesNotLaunch proves
 // fresh/additional-session launch applies the same durable-attestation gate
@@ -433,8 +433,8 @@ func TestLaunchPreparedSessionAutoRepairsExactStagingPy3IncidentAndLaunchesOnce(
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.2
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.2
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9
 //
 // TestResumeSessionWithOptionsAutoRepairsExactDevIncidentAndLaunchesOnce
 // reproduces the separate logged incident for task
@@ -508,8 +508,8 @@ func TestResumeSessionWithOptionsAutoRepairsExactDevIncidentAndLaunchesOnce(t *t
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.7
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.7
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9
 //
 // TestLaunchPreparedSessionCrossSessionRetryCompletesUnattestedCommitBeforeLaunch
 // proves the fresh/additional-session launch path (executor_execute.go) gates
@@ -621,8 +621,8 @@ func TestLaunchPreparedSessionCrossSessionRetryCompletesUnattestedCommitBeforeLa
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.7
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.7
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9
 //
 // TestResumeCrossSessionRetryCompletesUnattestedLaunchCommitBeforeLaunch proves
 // the resume path (executor_resume.go) is gated by the same cross-session
@@ -726,8 +726,8 @@ func TestResumeCrossSessionRetryCompletesUnattestedLaunchCommitBeforeLaunch(t *t
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.7
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.7
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9
 //
 // TestNormalResumeCrossSessionUnattestedLaunchCommitBlocksBeforeLaunch proves
 // the ordinary resume path, not just the explicit repair action, gates an

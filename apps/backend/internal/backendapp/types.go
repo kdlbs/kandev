@@ -25,6 +25,7 @@ import (
 	notificationstore "github.com/kandev/kandev/internal/notifications/store"
 	office "github.com/kandev/kandev/internal/office"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	"github.com/kandev/kandev/internal/office/retention"
 	officeservice "github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/org"
 	"github.com/kandev/kandev/internal/orgunit"
@@ -112,6 +113,12 @@ type Services struct {
 	// WorktreeMgr is the worktree manager. Exposed here so the install-wide
 	// storage-maintenance composition can reach it for workspace cleanup.
 	WorktreeMgr *worktree.Manager
+	// Retention owns the office_routine_runs/runs history sweep scheduler,
+	// its HTTP surface, and its health checker. Kept regardless of the
+	// Office feature flag, matching every other required-schema owner: rows
+	// written while Office was enabled still need bounding after it is
+	// turned off.
+	Retention *retention.Runtime
 	// Terminal is the first-class user-terminal service (rename, park, etc.).
 	// Wired into the gateway once lifecycle.Manager is up so the PTY backend
 	// is available.

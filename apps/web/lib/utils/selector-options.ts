@@ -34,8 +34,11 @@ export function selectorOptionClassName(
   disabled = false,
   touchTarget = false,
 ): string {
+  const heightClass = touchTarget
+    ? "min-h-7 max-md:min-h-12 [@media(pointer:coarse)]:min-h-12"
+    : "min-h-7 max-md:min-h-11 [@media(pointer:coarse)]:min-h-11";
   return [
-    `relative ${touchTarget ? "min-h-12 sm:min-h-12" : "min-h-11 sm:min-h-7"} border border-transparent pr-7`,
+    `relative ${heightClass} border border-transparent pr-7`,
     selected &&
       "border-primary/50 bg-card font-medium data-[selected=true]:ring-2 data-[selected=true]:ring-primary/40",
     disabled && "opacity-40 cursor-not-allowed",

@@ -16,7 +16,15 @@ export function useTask(taskId: string | null) {
     if (!taskId) return null;
     const fromActive = state.kanban.tasks.find((item: Task) => item.id === taskId);
     if (fromActive) return fromActive;
-    return findTaskInSnapshots(taskId, state.kanbanMulti.snapshots);
+    const fromSnapshot = findTaskInSnapshots(taskId, state.kanbanMulti.snapshots);
+    if (fromSnapshot) return fromSnapshot;
+    // Archived tasks leave active workflow collections but remain available in
+    // the sidebar cache while their history is open in Quick Chat.
+    return (
+      Object.values(state.sidebarArchivedTasks.itemsByWorkspaceId)
+        .flat()
+        .find((item: Task) => item.id === taskId) ?? null
+    );
   });
 
   useEffect(() => {

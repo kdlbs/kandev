@@ -12,7 +12,8 @@ async function queueWithTerminalRefetch(
   params: QueueMessageParams,
   refetch: QueueRefetch,
   token: QueueOperationToken,
-): Promise<void> {
+  tolerateCommittedRefetchFailure: boolean,
+): Promise<true> {
   let mutationError: unknown;
   try {
     await queueMessage(params);
@@ -23,9 +24,11 @@ async function queueWithTerminalRefetch(
     await refetch(params.session_id, token);
   } catch (reconcileError) {
     if (mutationError) throw mutationError;
+    if (tolerateCommittedRefetchFailure) return true;
     throw reconcileError;
   }
   if (mutationError) throw mutationError;
+  return true;
 }
 
 export function useQueueAdmissionAction(
@@ -43,13 +46,16 @@ export function useQueueAdmissionAction(
       attachments,
       entityReferences,
       contextFilesMeta,
+      clientQueueId,
+      planCommentRefs,
+      requirePrimarySession,
     }: QueueMessageInput) => {
-      if (!identity || identity.task_id !== taskId) return;
+      if (!identity || identity.task_id !== taskId) return false;
       const { session_id: sessionId, session_incarnation_id: incarnationId } = identity;
       const token = beginQueueOperation(sessionId, incarnationId);
-      if (!token) return;
+      if (!token) return false;
       try {
-        await queueWithTerminalRefetch(
+        return await queueWithTerminalRefetch(
           {
             session_id: sessionId,
             session_incarnation_id: incarnationId,
@@ -59,10 +65,14 @@ export function useQueueAdmissionAction(
             plan_mode: planMode,
             attachments,
             entity_references: entityReferences,
+            ...(clientQueueId ? { client_queue_id: clientQueueId } : {}),
+            ...(planCommentRefs?.length ? { plan_comment_refs: planCommentRefs } : {}),
+            ...(requirePrimarySession ? { require_primary_session: true } : {}),
             ...(contextFilesMeta ? { context_files: contextFilesMeta } : {}),
           },
           refetch,
           token,
+          Boolean(clientQueueId),
         );
       } finally {
         finishQueueOperation(sessionId, token);

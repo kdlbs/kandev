@@ -2,7 +2,7 @@
 status: draft
 system: cli
 created: 2026-05-16
-updated: 2026-08-16
+updated: 2026-09-09
 owners:
   - cfl
 ---
@@ -26,7 +26,7 @@ Anthropic has announced that **agent-SDK / `claude -p` usage will draw from a pa
 - **AC-CLI-CLI-MODE-PARITY-001.4:** AND Kandev does not launch `pi-acp` or `npx` as the passthrough process
 - **AC-CLI-CLI-MODE-PARITY-001.5:** GIVEN a Pi profile with `cli_passthrough: false`
 - **AC-CLI-CLI-MODE-PARITY-001.6:** WHEN Kandev starts structured chat or one-shot inference
-- **AC-CLI-CLI-MODE-PARITY-001.7:** THEN the command remains `npx -y pi-acp`
+- **AC-CLI-CLI-MODE-PARITY-001.7:** THEN the command uses `npx --yes --prefer-offline pi-acp@<effective-version>`
 - **AC-CLI-CLI-MODE-PARITY-001.8:** GIVEN Pi is unavailable on the Kandev host
 
 ## Migrated source detail
@@ -53,9 +53,11 @@ the ACP adapter. CLI passthrough launches the interactive CLI directly under
 the PTY; managed ACP runtime resolution does not replace that passthrough
 command.
 
-For Pi, structured chat and inference use `npx -y pi-acp`, while CLI
-passthrough launches the globally installed `pi` executable. Kandev's Pi
-install action runs
+For Pi, structured chat and inference use
+`npx --yes --prefer-offline pi-acp@<effective-version>`, while CLI passthrough
+launches the globally installed `pi` executable. The effective version comes
+from the operator selection or the reviewed Kandev default, `0.0.33`. Kandev's
+Pi install action runs
 `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`, and agent
 discovery treats a `pi` executable on the Kandev process `PATH` that passes its
 non-interactive `--version` check as the installation signal.
@@ -106,7 +108,7 @@ Users can still press Ctrl-C directly inside the xterm terminal. A dedicated too
 ### Pi keeps its ACP adapter for structured execution
 - GIVEN a Pi profile with `cli_passthrough: false`
 - WHEN Kandev starts structured chat or one-shot inference
-- THEN the command remains `npx -y pi-acp`
+- THEN the command uses `npx --yes --prefer-offline pi-acp@<effective-version>`
 
 ### Pi installation provisions the passthrough executable
 - GIVEN Pi is unavailable on the Kandev host
@@ -218,7 +220,6 @@ Pressing Ctrl-C inside the passthrough terminal writes `\x03` to PTY stdin. A fu
 - Parsing PTY output into `task_messages` (transcriber). The terminal panel shows live output; the chat transcript only shows user-sent text in CLI mode.
 - Billing-type / subscription-quota badge or DTO surface. That belongs to `subscription-usage.md`.
 - Adding passthrough support to agents that don't have it (`Supported: false`).
-- Adding `pi-acp` to the managed runtime update catalogue.
 - Migrating away from the current ACP bridge.
 - Headless `-p` mode for Claude (drains API credit; we deliberately do not use it).
 

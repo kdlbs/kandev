@@ -6,7 +6,11 @@ export type Graph2ConnectorProps = {
 
 export function Graph2Connector({ type }: Graph2ConnectorProps) {
   return (
-    <div className="flex items-center shrink-0">
+    <div
+      className="flex items-center shrink-0"
+      data-testid="graph2-connector"
+      data-connector-type={type}
+    >
       <div
         className={cn(
           "w-5 h-px",

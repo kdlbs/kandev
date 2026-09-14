@@ -10,8 +10,8 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.2
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.2
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9
 func TestLaunchPreparedSessionAutoRepairsZeroInventoryFromPriorEnvironmentRuntime(t *testing.T) {
 	repositoryPath, worktreePath := createExecutorPreservationFixture(t)
 	repo := newMockRepository()

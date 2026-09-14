@@ -42,13 +42,13 @@ export function GitHubPATForm({
             placeholder="ghp_xxxxxxxxxxxx"
             autoComplete="off"
             disabled={disabled}
-            className={settingsCredentialClassName("h-11 pr-11")}
+            className={settingsCredentialClassName("pr-11")}
           />
           <Button
             type="button"
             variant="ghost"
             size="icon"
-            className="absolute right-0 top-0 h-11 w-11 cursor-pointer"
+            className="absolute right-0 top-0 cursor-pointer"
             onClick={() => setVisible((current) => !current)}
             disabled={disabled}
             aria-label={visible ? t("github:hideToken") : t("github:showToken")}

@@ -14,7 +14,7 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.5
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.5
 func TestSelectWorkspaceInventoryRepairTargetRequiresExactlyOneCanonicalMismatch(t *testing.T) {
 	infoA := &repoInfo{TaskRepositoryID: "task-repo-a", RepositoryID: "repo-a", Position: 0}
 	infoB := &repoInfo{TaskRepositoryID: "task-repo-b", RepositoryID: "repo-b", Position: 1}
@@ -33,7 +33,7 @@ func TestSelectWorkspaceInventoryRepairTargetRequiresExactlyOneCanonicalMismatch
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.2
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.2
 func TestWorkspaceInventoryRepairSessionUsesOnlyMatchingServerRuntimeIdentity(t *testing.T) {
 	mockRepo := &mockRepository{executorsRunning: map[string]*models.ExecutorRunning{
 		"session": {
@@ -83,8 +83,8 @@ func TestWorkspaceInventoryRepairSessionUsesOnlyMatchingServerRuntimeIdentity(t 
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.2
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.3
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.2
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.3
 func TestRepairReuseEnvironmentInventoryPreservesDirtyCheckout(t *testing.T) {
 	repositoryPath, worktreePath := createExecutorPreservationFixture(t)
 	if err := os.WriteFile(filepath.Join(worktreePath, "README.md"), []byte("dirty\n"), 0o644); err != nil {
@@ -206,7 +206,7 @@ func mustReadFile(t *testing.T, path string) []byte {
 	return contents
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.3
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.3
 func TestSelectWorkspaceInventoryRepairTargetKeepsOtherRepositoryCanonical(t *testing.T) {
 	infoA := &repoInfo{TaskRepositoryID: "task-repo-a", RepositoryID: "repo-a", Position: 0}
 	infoB := &repoInfo{TaskRepositoryID: "task-repo-b", RepositoryID: "repo-b", Position: 1}
@@ -228,7 +228,7 @@ func TestSelectWorkspaceInventoryRepairTargetKeepsOtherRepositoryCanonical(t *te
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9
 func TestRepairReuseEnvironmentInventoryRetryAfterCommitReturnsStoredReceipt(t *testing.T) {
 	repositoryPath, worktreePath := createExecutorPreservationFixture(t)
 	now := time.Now().UTC().Truncate(time.Second)
@@ -283,8 +283,8 @@ func TestRepairReuseEnvironmentInventoryRetryAfterCommitReturnsStoredReceipt(t *
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.7
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.7
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9
 //
 // TestRepairReuseEnvironmentInventoryRetryAfterUnattestedCommitSafelyCompletesAttestation
 // proves the unsafe retry boundary is closed: a repair transaction can
@@ -381,8 +381,8 @@ func TestRepairReuseEnvironmentInventoryRetryAfterUnattestedCommitSafelyComplete
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.7
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.7
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9
 //
 // TestRepairReuseEnvironmentInventoryRetryWithStoredNegativeAttestationConflicts
 // proves a receipt already carrying a negative/divergent post-repair
@@ -446,8 +446,8 @@ func TestRepairReuseEnvironmentInventoryRetryWithStoredNegativeAttestationConfli
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.7
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.7
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9
 //
 // TestAttestedWorkspaceInventoryRowsReceiptCompletesCrossSessionAttestation
 // proves the launch-admission gate used for an ALREADY-valid canonical row
@@ -552,8 +552,8 @@ func TestAttestedWorkspaceInventoryRowsReceiptCompletesCrossSessionAttestation(t
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.7
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.7
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9
 //
 // TestAttestedWorkspaceInventoryRowsReceiptBlocksDivergentCrossSessionAttestation
 // proves the converse of the completion case: if the row-scoped receipt
@@ -615,7 +615,7 @@ func TestAttestedWorkspaceInventoryRowsReceiptBlocksDivergentCrossSessionAttesta
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.2
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.2
 //
 // TestRepairReuseEnvironmentInventoryPreservationRecordsExecutorRuntimeEvidence
 // proves the durable preservation evidence captures the authoritative
@@ -669,7 +669,7 @@ func TestRepairReuseEnvironmentInventoryPreservationRecordsExecutorRuntimeEviden
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.6
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.6
 //
 // TestRepairPathIsTaskScopedRejectsParentDirectorySymlinkEscape proves
 // canonical task-root ownership resolves parent-directory symlinks rather
@@ -709,7 +709,7 @@ func TestRepairPathIsTaskScopedRejectsParentDirectorySymlinkEscape(t *testing.T)
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.6
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.6
 //
 // TestRepairPathIsTaskScopedAcceptsSingleRepositoryWorkspacePath proves the
 // normal single-repository launch shape is accepted: applyRepositoryConfig
@@ -727,7 +727,7 @@ func TestRepairPathIsTaskScopedAcceptsSingleRepositoryWorkspacePath(t *testing.T
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9
 //
 // TestRejectCompetingWorkspaceWritersBlocksLiveExecutorFromFailedSession
 // proves a failed/cancelled session's executors_running row still blocks
@@ -749,7 +749,7 @@ func TestRejectCompetingWorkspaceWritersBlocksLiveExecutorFromFailedSession(t *t
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9
 //
 // TestRejectCompetingWorkspaceWritersAllowsTerminalExecutorStatus proves the
 // converse: an executors_running row left behind by a session that actually
@@ -773,7 +773,7 @@ func TestRejectCompetingWorkspaceWritersAllowsTerminalExecutorStatus(t *testing.
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9
 func TestRepairReuseEnvironmentInventoryRetryFromDifferentSessionConflicts(t *testing.T) {
 	repositoryPath, worktreePath := createExecutorPreservationFixture(t)
 	now := time.Now().UTC().Truncate(time.Second)
@@ -813,7 +813,7 @@ func TestRepairReuseEnvironmentInventoryRetryFromDifferentSessionConflicts(t *te
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9
 func TestRepairReuseEnvironmentInventoryRetryWithChangedBranchIdentityConflicts(t *testing.T) {
 	repositoryPath, worktreePath := createExecutorPreservationFixture(t)
 	now := time.Now().UTC().Truncate(time.Second)
@@ -854,7 +854,7 @@ func TestRepairReuseEnvironmentInventoryRetryWithChangedBranchIdentityConflicts(
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.9
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.9
 //
 // TestBuildResumeRequestRetryAfterCommittedRepairSucceeds proves the
 // orchestrator-facing resume entry point (not just the low-level repair

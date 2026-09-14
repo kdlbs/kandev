@@ -15,7 +15,13 @@ import {
   reconcileActiveTurnAfterHydrationDraft,
   seedSettledSessionBoundaries,
 } from "@/lib/state/slices/session/turn-actions";
+import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
+import {
+  readMcpAttachmentHistory,
+  shouldReplaceMcpAttachmentHistory,
+} from "@/lib/state/slices/session-runtime/mcp-attachment-reconciliation";
 import { preserveOmittedExecutorFields } from "@/lib/kanban/map-task";
+import { mergeStepOrderRevisions } from "@/lib/kanban/workflow-step-order";
 import { deepMerge, mergeSessionMap, mergeLoadingState } from "./merge-strategies";
 
 /**
@@ -106,6 +112,24 @@ function backfillServerDerivedFields(
   }
 }
 
+/**
+ * Seeds `kanbanMulti.orderRevisionByStepId` from a batch of freshly-hydrated
+ * steps (REQ-TASKS-KANBAN-TASK-REORDERING-001.25/.37) so a `task.reordered`
+ * WS event received right after this hydration is compared against the
+ * step's real last-known revision instead of the "no revision recorded yet"
+ * fallback, which would otherwise accept a stale event as the first order
+ * this client has ever seen.
+ */
+function seedOrderRevisionsFromSteps(
+  draft: Draft<AppState>,
+  steps: KanbanState["steps"] | undefined,
+): void {
+  draft.kanbanMulti.orderRevisionByStepId = mergeStepOrderRevisions(
+    draft.kanbanMulti.orderRevisionByStepId,
+    steps,
+  );
+}
+
 /** Hydrate kanban and workspace slices. */
 function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: HydrationState): void {
   if (state.kanban) {
@@ -113,9 +137,16 @@ function hydrateKanbanAndWorkspace(draft: Draft<AppState>, state: HydrationState
     const { tasks, ...kanbanRest } = state.kanban;
     if (Object.keys(kanbanRest).length > 0) deepMerge(draft.kanban, kanbanRest);
     mergeKanbanTasks(draft.kanban, tasks);
+    seedOrderRevisionsFromSteps(draft, state.kanban.steps);
   }
-  if (state.kanbanMulti) deepMerge(draft.kanbanMulti, state.kanbanMulti);
+  if (state.kanbanMulti) {
+    deepMerge(draft.kanbanMulti, state.kanbanMulti);
+    for (const snapshot of Object.values(state.kanbanMulti.snapshots ?? {})) {
+      seedOrderRevisionsFromSteps(draft, snapshot?.steps);
+    }
+  }
   if (state.workflows) deepMerge(draft.workflows, state.workflows);
+  if (state.workspaceContextRead) deepMerge(draft.workspaceContextRead, state.workspaceContextRead);
   if (state.tasks) deepMerge(draft.tasks, state.tasks);
   if (state.workspaces) deepMerge(draft.workspaces, state.workspaces);
   if (state.repositories) deepMerge(draft.repositories, state.repositories);
@@ -453,6 +484,28 @@ function hydrateSessionRuntime(
     mergeSessionMap(target.bySessionId, source.bySessionId, activeSessionId, forceMergeSessionId);
   };
 
+  /** Hydrate MCP history without allowing a stale forced route snapshot to regress live evidence. */
+  const mergeHydratedMcpStatus = (source: Record<string, unknown> | undefined): void => {
+    if (!source) return;
+    const target = draft.sessionMcpStatus.bySessionId as unknown as Record<
+      string,
+      MCPAttachmentHistory
+    >;
+    for (const [sessionId, rawHistory] of Object.entries(source)) {
+      const shouldForceMerge = forceMergeSessionId === sessionId;
+      if (!shouldForceMerge && sessionId === activeSessionId) continue;
+
+      const incoming = readMcpAttachmentHistory(rawHistory);
+      if (!incoming) continue;
+
+      const existing = target[sessionId];
+      if (!shouldForceMerge && existing) continue;
+      if (shouldReplaceMcpAttachmentHistory(existing, incoming)) {
+        target[sessionId] = incoming;
+      }
+    }
+  };
+
   if (state.terminal) deepMerge(draft.terminal, state.terminal);
   if (state.shell) {
     mergeSessionMap(
@@ -482,7 +535,9 @@ function hydrateSessionRuntime(
     Object.assign(draft.environmentIdBySessionId, state.environmentIdBySessionId);
   }
   mergeBySession("sessionModels");
-  mergeBySession("sessionMcpStatus");
+  mergeHydratedMcpStatus(
+    state.sessionMcpStatus?.bySessionId as Record<string, unknown> | undefined,
+  );
   if (state.agents) deepMerge(draft.agents, state.agents);
   mergeBySession("prepareProgress");
 }

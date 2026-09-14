@@ -38,6 +38,9 @@ import { useCanvasLifecycleRevision } from "@/lib/canvas-lifecycle";
 import { CanvasTaskCreateLauncher } from "@/components/canvas/canvas-task-create-launcher";
 import { SettingsErrorText, SettingsPageHeader } from "./settings-typography";
 import { CanvasReleaseDialog } from "./canvas-lifecycle-dialogs";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
+
+const canvasActionClassName = controlSizingClassName("standard", "cursor-pointer");
 
 function canvasStatusLabel(status: string, t: (key: string) => string): string {
   const labels: Record<string, string> = {
@@ -190,7 +193,7 @@ export function WorkspaceCanvasesPage({ workspaceId }: { workspaceId: string }) 
             <CanvasTaskCreateLauncher workspaceId={workspaceId} />
             <Button
               variant="outline"
-              className="min-h-11 w-full cursor-pointer md:min-h-7 md:w-auto"
+              className={controlSizingClassName("standard", "w-full cursor-pointer md:w-auto")}
               onClick={reload}
               disabled={loading}
             >
@@ -313,11 +316,11 @@ function CanvasRemoveDialog({
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel className="min-h-11 cursor-pointer md:min-h-7">
+          <AlertDialogCancel className={canvasActionClassName}>
             {t("common:cancel")}
           </AlertDialogCancel>
           <AlertDialogAction
-            className="min-h-11 cursor-pointer md:min-h-7"
+            className={canvasActionClassName}
             disabled={busy}
             onClick={(event) => {
               event.preventDefault();
@@ -362,18 +365,12 @@ function CanvasRow({
           </p>
         </div>
         <div className="flex flex-wrap gap-2 md:justify-end">
-          <Button
-            variant="outline"
-            size="sm"
-            className="min-h-11 cursor-pointer md:min-h-7"
-            asChild
-          >
+          <Button variant="outline" className={canvasActionClassName} asChild>
             <Link href={canvasHref(canvas.id)}>{t("canvases:openCanvas")}</Link>
           </Button>
           <Button
             variant="outline"
-            size="sm"
-            className="min-h-11 cursor-pointer md:min-h-7"
+            className={canvasActionClassName}
             disabled={
               busyId === canvas.id || canvas.status === "archived" || canvas.status === "disabled"
             }
@@ -384,8 +381,7 @@ function CanvasRow({
           </Button>
           <Button
             variant="outline"
-            size="sm"
-            className="min-h-11 cursor-pointer md:min-h-7"
+            className={canvasActionClassName}
             onClick={() => onReleases(canvas)}
           >
             <IconKey className="mr-1.5 h-3.5 w-3.5" />
@@ -400,8 +396,7 @@ function CanvasRow({
           />
           <Button
             variant="destructive"
-            size="sm"
-            className="min-h-11 cursor-pointer md:min-h-7"
+            className={canvasActionClassName}
             disabled={busyId === canvas.id}
             onClick={() => onRemove(canvas)}
           >
@@ -431,8 +426,7 @@ function CanvasStatusAction({
   return archived ? (
     <Button
       variant="outline"
-      size="sm"
-      className="min-h-11 cursor-pointer md:min-h-7"
+      className={canvasActionClassName}
       disabled={busy}
       onClick={() => onRestore(canvas)}
     >
@@ -442,8 +436,7 @@ function CanvasStatusAction({
   ) : (
     <Button
       variant="outline"
-      size="sm"
-      className="min-h-11 cursor-pointer md:min-h-7"
+      className={canvasActionClassName}
       disabled={busy}
       onClick={() => onArchive(canvas)}
     >

@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.3
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.3
 func TestInspectPreservedCheckoutHashesDirtyAndUntrackedState(t *testing.T) {
 	repositoryPath := initGitRepoForWorktreeTest(t)
 	worktreePath := filepath.Join(t.TempDir(), "preserved")
@@ -41,7 +41,7 @@ func TestInspectPreservedCheckoutHashesDirtyAndUntrackedState(t *testing.T) {
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.3
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.3
 func TestInspectPreservedCheckoutHashesTrackedDeletion(t *testing.T) {
 	repositoryPath := initGitRepoForWorktreeTest(t)
 	worktreePath := filepath.Join(t.TempDir(), "preserved")
@@ -81,7 +81,7 @@ func TestInspectPreservedCheckoutHashesTrackedDeletion(t *testing.T) {
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.3
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.3
 func TestInspectPreservedCheckoutHashesIgnoredState(t *testing.T) {
 	repositoryPath := initGitRepoForWorktreeTest(t)
 	if err := os.WriteFile(filepath.Join(repositoryPath, ".gitignore"), []byte("ignored.txt\n"), 0o644); err != nil {
@@ -122,7 +122,7 @@ func TestInspectPreservedCheckoutHashesIgnoredState(t *testing.T) {
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.3
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.3
 func TestInspectPreservedCheckoutDistinguishesRegularFileFromSymlink(t *testing.T) {
 	repositoryPath := initGitRepoForWorktreeTest(t)
 	worktreePath := filepath.Join(t.TempDir(), "preserved")
@@ -165,7 +165,7 @@ func TestInspectPreservedCheckoutDistinguishesRegularFileFromSymlink(t *testing.
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.3
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.3
 func TestInspectPreservedCheckoutLengthFramesAdjacentEntries(t *testing.T) {
 	repositoryPath := initGitRepoForWorktreeTest(t)
 	worktreePath := filepath.Join(t.TempDir(), "preserved")
@@ -212,7 +212,7 @@ func TestInspectPreservedCheckoutLengthFramesAdjacentEntries(t *testing.T) {
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.6
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.6
 // TestInspectPreservedCheckoutDoesNotMutateIndex proves the read-only
 // inspection required by the preservation contract: a status-only probe
 // must never write to .git/index, even incidentally via Git's normal
@@ -253,7 +253,7 @@ func TestInspectPreservedCheckoutDoesNotMutateIndex(t *testing.T) {
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.6
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.6
 // TestInspectPreservedCheckoutDetectsStagedIndexOnlyDivergence proves the
 // blind spot ContentHash alone has: ContentHash only ever reads
 // working-tree bytes (via `git ls-files -co` plus os.ReadFile), so a change
@@ -314,7 +314,7 @@ func runGitWithStdin(t *testing.T, repoPath, stdin string, args ...string) strin
 	return string(output)
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.5
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.5
 func TestInspectPreservedCheckoutRejectsWrongBranchAndSymlink(t *testing.T) {
 	repositoryPath := initGitRepoForWorktreeTest(t)
 	worktreePath := filepath.Join(t.TempDir(), "preserved")

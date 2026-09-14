@@ -5,6 +5,12 @@
 **Updated:** 2026-08-30
 **Area:** backend, frontend, protocol, plugins, security
 
+The initial-grant rule is amended by
+[owner-authorized canvas creation](2026-09-10-canvas-creation-authority.md).
+The bounded startup acknowledgement is specified in the
+[runtime design](../specs/plugins/system-design/isolated-web-app-contributions.md#runtime-startup-protocol);
+it adds no privileged host API.
+
 ## Context
 
 The first canvas design used server-owned Markdown and structured blocks. That

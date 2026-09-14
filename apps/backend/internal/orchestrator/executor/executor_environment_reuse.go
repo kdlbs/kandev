@@ -43,7 +43,7 @@ func (e *Executor) validateReuseEnvironmentInventory(ctx context.Context, req *L
 	// and keeping cancellation attached to the caller's context.
 	env.Repos = rows
 	for _, spec := range specs {
-		if canonicalInventoryMatches(spec, rows, req.UseWorktree) != 1 {
+		if got := canonicalInventoryMatches(spec, rows, req.UseWorktree); got != 1 {
 			return fmt.Errorf("%w: canonical workspace repository inventory has no matching entry for repository %q branch %q",
 				models.ErrWorkspaceReuseUnsafe, spec.RepositoryID, launchRepoBranchIdentitySlug(spec))
 		}
@@ -106,10 +106,18 @@ func canonicalInventoryMatches(spec RepoSpec, rows []*models.TaskEnvironmentRepo
 func matchingCanonicalEnvironmentRepoRows(spec RepoSpec, rows []*models.TaskEnvironmentRepo, useWorktree bool) []*models.TaskEnvironmentRepo {
 	var matched []*models.TaskEnvironmentRepo
 	expectedBranchSlug := launchRepoBranchIdentitySlug(spec)
-	allowLegacyEmptyBranch := expectedBranchSlug != "" && !hasBranchScopedEnvironmentRepoRows(rows)
+	// A non-worktree launch with no expected branch slug is not "legacy data
+	// with unknown branch" — it is a local/local_pc resume, where
+	// applyResumeRepoConfig deliberately never stamps req.BaseBranch because
+	// LocalPreparer keeps whatever branch is already checked out on disk.
+	// Branch identity is not tracked for this launch at all, so it cannot be
+	// compared against a branch-scoped canonical row; match on repository
+	// identity alone, same as the untracked-inventory case below.
+	branchIdentityUntracked := !useWorktree && expectedBranchSlug == ""
+	allowLegacyEmptyBranch := !branchIdentityUntracked && expectedBranchSlug != "" && !repositoryHasBranchScopedRepoRow(rows, spec.RepositoryID)
 	for _, row := range rows {
 		branchMatches := worktree.SanitizeBranchSlug(row.BranchSlug) == expectedBranchSlug
-		if allowLegacyEmptyBranch && row.BranchSlug == "" {
+		if branchIdentityUntracked || (allowLegacyEmptyBranch && row.BranchSlug == "") {
 			branchMatches = true
 		}
 		if row.RepositoryID != spec.RepositoryID || !branchMatches {
@@ -452,6 +460,18 @@ func hasBranchScopedEnvironmentWorktrees(env *models.TaskEnvironment) bool {
 func hasBranchScopedEnvironmentRepoRows(repos []*models.TaskEnvironmentRepo) bool {
 	for _, repo := range repos {
 		if repo.RepositoryID != "" && repo.WorktreeID != "" && worktree.SanitizeBranchSlug(repo.BranchSlug) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// repositoryHasBranchScopedRepoRow reports whether repos contains a row for
+// repositoryID with a non-empty sanitized branch slug. WorktreeID is not
+// required because local executor rows can be branch-scoped without a worktree.
+func repositoryHasBranchScopedRepoRow(repos []*models.TaskEnvironmentRepo, repositoryID string) bool {
+	for _, repo := range repos {
+		if repo.RepositoryID == repositoryID && worktree.SanitizeBranchSlug(repo.BranchSlug) != "" {
 			return true
 		}
 	}

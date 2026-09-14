@@ -16,7 +16,7 @@ import (
 
 const agentDecisionReasonRequiredErr = "reason is required"
 
-// RecordAgentDecisionInput bundles the agent decision tool's caller-supplied
+// RecordAgentDecisionInput bundles the runtime decision endpoint's caller-supplied
 // fields. Per the tool contract, task/step/role are never caller-supplied —
 // they are resolved server-side from the calling session and the AC-50
 // slate.
@@ -28,9 +28,9 @@ type RecordAgentDecisionInput struct {
 	// SessionID, when features.officeSessionIdentity is on, names the
 	// decider's own calling session so RecordDecision re-evaluates against
 	// it instead of the task's most-recently-started ("active") session.
-	// Populated unconditionally by the MCP handler; gated here because the
-	// flag decision belongs with the rest of this service's behavior, not
-	// the transport layer.
+	// The runtime handler derives it from the signed RunContext and passes it
+	// unconditionally; gated here because the flag decision belongs with the
+	// rest of this service's behavior, not the transport layer.
 	SessionID string
 }
 
@@ -57,7 +57,7 @@ func (e *AgentDecisionValidationError) Unwrap() error {
 }
 
 // IsAgentDecisionValidationError reports whether err is safe to expose as a
-// validation response at the MCP boundary.
+// validation response at the runtime boundary.
 func IsAgentDecisionValidationError(err error) bool {
 	var target *AgentDecisionValidationError
 	return errors.As(err, &target)
@@ -67,7 +67,7 @@ func agentDecisionValidation(err error) error {
 	return &AgentDecisionValidationError{Err: err}
 }
 
-// RecordAgentDecisionResult is the AC-64 tool-contract return shape.
+// RecordAgentDecisionResult is the AC-64 runtime contract return shape.
 type RecordAgentDecisionResult struct {
 	Decision          string
 	Role              string
@@ -92,8 +92,8 @@ type quorumEvaluatingDispatcher interface {
 	EvaluateStepQuorum(ctx context.Context, taskID string) (engine.QuorumSnapshot, error)
 }
 
-// RecordAgentDecision is the agent/MCP counterpart to ApproveTask /
-// RequestTaskChanges (`record_step_decision_kandev`). Unlike the human
+// RecordAgentDecision is the agent-runtime counterpart to ApproveTask /
+// RequestTaskChanges. Unlike the human
 // path — whose resolveDeciderRole/resolveParticipantID stay unchanged and
 // step-scoped per AC-57b — this path resolves role and seat over the
 // AC-50 population via the engine's ResolveParticipantRole (AC-4a): a new

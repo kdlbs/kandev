@@ -204,6 +204,27 @@ Creation and immediate launch are not one rollback boundary. If the task is crea
 
 Task states on the wire are `TODO`, `CREATED`, `SCHEDULING`, `IN_PROGRESS`, `REVIEW`, `BLOCKED`, `WAITING_FOR_INPUT`, `COMPLETED`, `FAILED`, and `CANCELLED`. Use `task.move` to change the workflow step and `task.state` to change runtime state; these are separate operations.
 
+`task.move` accepts an optional one-shot `entry_options` object. Its normalized fields are `reset_context`, `instructions`, and `skip_step_prompt`; empty optional strings are omitted. Reset is additive, and instructions are appended after the destination step's normal prompt. When `skip_step_prompt` is set, the destination step's prompt and its task-description fallback are suppressed for this entry: with instructions the agent starts a turn carrying only those instructions, and without instructions no turn starts and the task lands idle. The values do not mutate workflow defaults. A successful response includes, when supplied, the normalized `entry_options`, plus a `move_id` correlating options retained for a deferred move. The same options are accepted by `move_task_kandev`; its legacy top-level `prompt` is an alias for `entry_options.instructions`, and conflicting non-empty values are rejected. Moves requested by an active agent use the deferred MCP path and persist the complete options through turn completion, WIP promotion, and backend restart before the retained move is applied.
+
+```json
+{
+  "id": "move-1",
+  "type": "request",
+  "action": "task.move",
+  "payload": {
+    "id": "task-uuid",
+    "workflow_id": "workflow-uuid",
+    "workflow_step_id": "qa-step-uuid",
+    "position": 0,
+    "entry_options": {
+      "reset_context": true,
+      "instructions": "Run the checkout regression first.",
+      "skip_step_prompt": true
+    }
+  }
+}
+```
+
 ### Launch a session
 
 `session.launch` always requires `task_id`. Explicit `intent` values are `prepare`, `start`, `start_created`, `resume`, `workflow_step`, and `restore_workspace`. Other fields are `session_id`, `agent_profile_id`, `executor_id`, `executor_profile_id`, `prompt`, `plan_mode`, `workflow_step_id`, `priority`, `launch_workspace`, `skip_message_record`, `auto_start`, and `attachments`.
@@ -540,6 +561,17 @@ automation.webhook.reveal_secret
 
 These are trusted local-administration operations. In particular, `secrets.reveal` and `automation.webhook.reveal_secret` make the lack of WebSocket authentication security-critical.
 
+`secrets.delete` accepts `{ "id": "<secret-id>", "workspace_id": "<optional-workspace-id>", "force": false }`.
+A Workspace secret requires its `workspace_id`. A referenced secret returns `CONFLICT` with `details.code: "secret_in_use"` and `details.references`.
+References contain `kind` (`agent_profile`, `executor_profile`, or `repository`), `id`, `name`, and `key`.
+An inaccessible workspace-scoped profile or repository exposes only its `kind`. Secret values and secret IDs never appear in conflict details.
+The HTTP equivalent, `DELETE /api/v1/secrets/:id`, returns `409` with `code` and `references` at the top level.
+`GET /api/v1/secrets/:id/references` performs the same authorized reference lookup without changing the secret and returns `{ "references": [...] }`. Add `?workspace_id=<workspace-id>` for a Workspace secret. Settings uses this endpoint before it enables deletion; the later `DELETE` still repeats the check.
+
+With `force: true`, deletion preserves the broken bindings. Future launches fail until users repair those bindings.
+The HTTP override is `?force=true`, combined with `workspace_id` for Workspace secrets.
+Force does not bypass authorization. Reference lookup failures return `INTERNAL_ERROR` (HTTP `500`) and leave the secret intact.
+
 `automation.run.stop` requires `automation_id` and `run_id`. It cancels the
 selected open run's exact task/session/turn binding and returns `{run_id,
 status}`. A stale or terminal binding returns not found; it never stops another
@@ -699,6 +731,7 @@ workflow.step.updated
 workflow.step.deleted
 agent.profile.created
 agent.profile.updated
+agent.profile.mcp_config.updated
 agent.profile.deleted
 task.created
 task.updated

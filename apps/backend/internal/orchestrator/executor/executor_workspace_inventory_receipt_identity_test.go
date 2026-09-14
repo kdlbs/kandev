@@ -13,7 +13,7 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.5
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.5
 //
 // A row-scoped receipt is only valid for the workspace identity captured by
 // that repair. Reusing the same environment-row ID after the task's workspace
@@ -29,7 +29,7 @@ func TestAttestedWorkspaceInventoryRowsReceiptRejectsReceiptFromDifferentWorkspa
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.5
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.5
 func TestAttestedWorkspaceInventoryRowsReceiptRejectsReceiptIdentityDrift(t *testing.T) {
 	tests := map[string]func(*models.WorkspaceInventoryRecoveryReceipt){
 		"environment": func(receipt *models.WorkspaceInventoryRecoveryReceipt) { receipt.TaskEnvironmentID = "environment-old" },
@@ -66,7 +66,7 @@ func TestAttestedWorkspaceInventoryRowsReceiptRejectsReceiptIdentityDrift(t *tes
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.5
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.5
 func TestAttestedWorkspaceInventoryRowsReceiptRejectsRepointedCheckoutPath(t *testing.T) {
 	row, env, receipt := positiveWorkspaceInventoryReceiptFixture(t)
 	originalPath := t.TempDir()
@@ -87,7 +87,7 @@ func TestAttestedWorkspaceInventoryRowsReceiptRejectsRepointedCheckoutPath(t *te
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.10
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.10
 func TestAttestedWorkspaceInventoryRowsReceiptRejectsIncompletePositiveAttestation(t *testing.T) {
 	tests := map[string]func(*models.WorkspaceInventoryRecoveryReceipt){
 		"missing post-repair evidence": func(receipt *models.WorkspaceInventoryRecoveryReceipt) {
@@ -124,7 +124,7 @@ func TestAttestedWorkspaceInventoryRowsReceiptAcceptsMatchingPositiveReceipt(t *
 	}
 }
 
-// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004.2
+// @covers AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-008.2
 func TestRepairReuseEnvironmentInventoryFailsClosedWhenRuntimeEvidenceLookupFails(t *testing.T) {
 	repositoryPath, worktreePath := createExecutorPreservationFixture(t)
 	now := time.Now().UTC().Truncate(time.Second)

@@ -15,6 +15,7 @@
 import { expect, test } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
 import { PLUGIN_ID, installFixturePlugin } from "../../helpers/plugin-fixture";
+import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
 
 test("mobile plugin row: whole card opens settings, controls still act", async ({
   testPage,
@@ -47,20 +48,24 @@ test("mobile plugin row: whole card opens settings, controls still act", async (
     expect(linkBox.width).toBeGreaterThanOrEqual(rowBox.width - 2);
     expect(linkBox.height).toBeGreaterThanOrEqual(rowBox.height - 2);
 
-    // Uninstall keeps its confirmation inside the row on a coarse pointer.
-    // Cancel first so the same fixture can cover the existing disable action
-    // and the detail-surface confirmation below.
+    // Cancel the phone sheet before exercising the row controls and detail page.
     const rowUninstall = pluginRow.getByRole("button", { name: "Uninstall" });
     expect((await rowUninstall.boundingBox())?.height).toBeGreaterThanOrEqual(44);
     await rowUninstall.tap();
-    const rowConfirmation = pluginRow.getByTestId("plugin-uninstall-inline-confirmation");
+    const rowConfirmation = testPage.getByRole("dialog", { name: "Uninstall plugin", exact: true });
     await expect(rowConfirmation).toBeVisible();
-    await expect(testPage.locator('[data-slot="dialog-overlay"]')).toHaveCount(0);
+    await expect(rowConfirmation).toHaveAttribute("data-slot", "drawer-content");
+    await expect(testPage.getByTestId("plugin-uninstall-inline-confirmation")).toHaveCount(0);
+    await expectContentSizedBottomConfirmation(
+      rowConfirmation,
+      rowConfirmation.getByTestId("mobile-action-confirmation"),
+    );
     expect(
       (await rowConfirmation.getByTestId("plugin-uninstall-confirm").boundingBox())?.height,
-    ).toBeGreaterThanOrEqual(44);
+    ).toBeGreaterThanOrEqual(48);
     await rowConfirmation.getByRole("button", { name: "Cancel" }).tap();
     await expect(rowConfirmation).toHaveCount(0);
+    await expect(rowUninstall).toBeFocused();
 
     // Every control sits above the overlay. If one slipped below it the tap would
     // navigate instead of acting, and on a phone there is no hover state to
@@ -123,17 +128,23 @@ test("mobile plugin row: whole card opens settings, controls still act", async (
       await testPage.evaluate(() => document.documentElement.clientWidth),
     );
 
-    // The detail danger zone uses the same phone-native inline confirmation and
-    // keeps both actions at the 44px touch target minimum.
+    // The detail danger zone uses the same phone sheet and 48px action minimum.
     const detailUninstall = detail.getByRole("button", { name: "Uninstall" });
     expect((await detailUninstall.boundingBox())?.height).toBeGreaterThanOrEqual(44);
     await detailUninstall.tap();
-    const detailConfirmation = testPage.getByTestId("plugin-uninstall-inline-confirmation");
+    const detailConfirmation = testPage.getByRole("dialog", {
+      name: "Uninstall plugin",
+      exact: true,
+    });
     await expect(detailConfirmation).toBeVisible();
-    await expect(testPage.locator('[data-slot="dialog-overlay"]')).toHaveCount(0);
+    await expect(detailConfirmation).toHaveAttribute("data-slot", "drawer-content");
+    await expectContentSizedBottomConfirmation(
+      detailConfirmation,
+      detailConfirmation.getByTestId("mobile-action-confirmation"),
+    );
     expect(
       (await detailConfirmation.getByTestId("plugin-uninstall-confirm").boundingBox())?.height,
-    ).toBeGreaterThanOrEqual(44);
+    ).toBeGreaterThanOrEqual(48);
     await detailConfirmation.getByTestId("plugin-uninstall-confirm").tap();
     await expect(testPage).toHaveURL(/\/settings\/plugins$/);
     await expect(testPage.getByTestId(`plugin-row-${PLUGIN_ID}`)).toHaveCount(0);

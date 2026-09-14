@@ -37,6 +37,7 @@ func (h *Handler) registerHTTP(router *gin.Engine) {
 	api.POST("/secrets", h.httpCreateSecret)
 	api.GET("/secrets", h.httpListSecrets)
 	api.GET("/secrets/:id", h.httpGetSecret)
+	api.GET("/secrets/:id/references", h.httpListSecretReferences)
 	api.PUT("/secrets/:id", h.httpUpdateSecret)
 	api.DELETE("/secrets/:id", h.httpDeleteSecret)
 	api.POST("/secrets/:id/reveal", h.httpRevealSecret)
@@ -104,6 +105,31 @@ func (h *Handler) httpGetSecret(c *gin.Context) {
 	c.JSON(http.StatusOK, secret)
 }
 
+// httpListSecretReferences handles GET /api/v1/secrets/:id/references.
+func (h *Handler) httpListSecretReferences(c *gin.Context) {
+	id := c.Param("id")
+	var refs []Reference
+	var err error
+	if workspaceID := c.Query("workspace_id"); workspaceID != "" {
+		refs, err = h.service.WorkspaceSecretReferences(c.Request.Context(), id, workspaceID)
+	} else {
+		refs, err = h.service.References(c.Request.Context(), id)
+	}
+	if err != nil {
+		if errors.Is(err, ErrNotFound) || errors.Is(err, ErrWorkspaceAccessDenied) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "secret not found"})
+			return
+		}
+		h.logger.Error("failed to list secret references", zap.String("id", id), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list secret references"})
+		return
+	}
+	if refs == nil {
+		refs = []Reference{}
+	}
+	c.JSON(http.StatusOK, gin.H{"references": refs})
+}
+
 // httpUpdateSecret handles PUT /api/v1/secrets/:id.
 func (h *Handler) httpUpdateSecret(c *gin.Context) {
 	id := c.Param("id")
@@ -126,7 +152,12 @@ func (h *Handler) httpUpdateSecret(c *gin.Context) {
 func (h *Handler) httpDeleteSecret(c *gin.Context) {
 	id := c.Param("id")
 	if err := h.deleteSecret(c, id); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		status, _, message, details := classifyDeleteError(err)
+		if status == http.StatusInternalServerError {
+			h.logger.Error("failed to delete secret", zap.String("id", id), zap.Error(err))
+		}
+		details["error"] = message
+		c.JSON(status, details)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -204,13 +235,15 @@ func (h *Handler) wsDelete(ctx context.Context, msg *ws.Message) (*ws.Message, e
 	var payload struct {
 		ID          string `json:"id"`
 		WorkspaceID string `json:"workspace_id"`
+		Force       bool   `json:"force"`
 	}
 	if err := msg.ParsePayload(&payload); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "invalid payload: "+err.Error(), nil)
 	}
 
-	if err := h.deleteSecretForWorkspace(ctx, payload.ID, payload.WorkspaceID); err != nil {
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, err.Error(), nil)
+	if err := h.deleteSecretForWorkspace(ctx, payload.ID, payload.WorkspaceID, payload.Force); err != nil {
+		_, code, message, details := classifyDeleteError(err)
+		return ws.NewError(msg.ID, msg.Action, code, message, details)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]bool{"success": true})
 }
@@ -262,19 +295,16 @@ func (h *Handler) updateSecretForWorkspace(ctx context.Context, id, workspaceID 
 // deleteSecret deletes a secret, resolving workspace-scoped access from the
 // request's workspace_id query parameter.
 func (h *Handler) deleteSecret(c *gin.Context, id string) error {
-	if workspaceID := c.Query("workspace_id"); workspaceID != "" {
-		return h.service.DeleteWorkspaceSecret(c.Request.Context(), id, workspaceID)
-	}
-	return h.service.Delete(c.Request.Context(), id)
+	return h.deleteSecretForWorkspace(c.Request.Context(), id, c.Query("workspace_id"), c.Query("force") == "true")
 }
 
 // deleteSecretForWorkspace deletes a secret, targeting the workspace when
 // workspaceID is non-empty and falling back to the global scope otherwise.
-func (h *Handler) deleteSecretForWorkspace(ctx context.Context, id, workspaceID string) error {
+func (h *Handler) deleteSecretForWorkspace(ctx context.Context, id, workspaceID string, force bool) error {
 	if workspaceID != "" {
-		return h.service.DeleteWorkspaceSecret(ctx, id, workspaceID)
+		return h.service.DeleteWorkspaceSecret(ctx, id, workspaceID, force)
 	}
-	return h.service.Delete(ctx, id)
+	return h.service.Delete(ctx, id, force)
 }
 
 // revealSecret returns a secret's value, resolving workspace-scoped access

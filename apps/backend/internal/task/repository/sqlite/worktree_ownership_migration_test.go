@@ -105,6 +105,9 @@ func rewindToLegacySchema(t *testing.T, db *sqlx.DB) {
 	if _, err := db.Exec(`DROP TABLE workspace_inventory_recovery_receipts`); err != nil {
 		t.Fatalf("drop final workspace inventory receipts: %v", err)
 	}
+	if _, err := db.Exec(`DROP TABLE task_environment_recovery_claims`); err != nil {
+		t.Fatalf("drop recovery claims: %v", err)
+	}
 	if _, err := db.Exec(`DROP TABLE task_environment_repos`); err != nil {
 		t.Fatalf("drop final env repos: %v", err)
 	}
