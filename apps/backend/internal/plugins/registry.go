@@ -1,6 +1,7 @@
 package plugins
 
 import (
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -40,20 +41,24 @@ func (r *Registry) Load(s store.Store) error {
 	}
 
 	byID := make(map[string]*store.Record, len(records))
+	var migrationErrs []error
 	for _, rec := range records {
 		if rec.InstallationID == "" {
-			rec.InstallationID = uuid.NewString()
-			if err := s.Save(rec); err != nil {
-				return fmt.Errorf("migrate plugin installation id for %s: %w", rec.ID, err)
+			migrated := cloneRecord(rec)
+			migrated.InstallationID = uuid.NewString()
+			if err := s.Save(migrated); err != nil {
+				migrationErrs = append(migrationErrs, fmt.Errorf("migrate plugin installation id for %s: %w", rec.ID, err))
+			} else {
+				rec = migrated
 			}
 		}
 		byID[rec.ID] = cloneRecord(rec)
 	}
 
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.byID = byID
-	return nil
+	r.mu.Unlock()
+	return errors.Join(migrationErrs...)
 }
 
 // Get returns a copy of the record for id, and whether it was found.

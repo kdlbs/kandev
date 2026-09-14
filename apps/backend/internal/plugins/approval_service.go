@@ -289,7 +289,8 @@ func safeReceiptIdentifier(value string) string {
 }
 
 func safeReceiptCapabilityID(value string) string {
-	if !isExactHostV2Capability(value) && !isHumanReservedCapability(value) {
+	if len(value) > maxCapabilityIDLength || strings.ContainsRune(value, '\x00') ||
+		(!isExactHostV2Capability(value) && !isHumanReservedCapability(value)) {
 		return ""
 	}
 	return value

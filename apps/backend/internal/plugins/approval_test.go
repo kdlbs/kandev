@@ -208,3 +208,17 @@ func TestAuthorizePluginCapabilityBoundsAndDigestsReceiptInputs(t *testing.T) {
 		t.Fatalf("receipt leaked malformed installation input: %#v", malformed.Receipt)
 	}
 }
+
+func TestAuthorizePluginCapabilityBoundsReservedCapabilityReceipt(t *testing.T) {
+	svc := &Service{}
+	svc.SetPluginsDir(t.TempDir())
+	tooLong := strings.Repeat("a", maxCapabilityIDLength) + ":merge"
+	for _, capabilityID := range []string{tooLong, "host.v2.read\x00:merge"} {
+		t.Run(capabilityID, func(t *testing.T) {
+			decision := svc.authorizePluginCapability("inst-1", "ws-1", capabilityID, 1, "request", "method")
+			if decision.Receipt.CapabilityID != "" {
+				t.Fatalf("receipt capability id = %q, want empty for unsafe input", decision.Receipt.CapabilityID)
+			}
+		})
+	}
+}

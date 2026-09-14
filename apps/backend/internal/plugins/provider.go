@@ -99,7 +99,7 @@ func ProvideWithStoreErrors(cfg *config.Config, dbPool *db.Pool, secrets SecretV
 
 	registry := NewRegistry()
 	if err := registry.Load(pluginStore); err != nil {
-		warnProvider(log, "Plugins registry load failed; starting with an empty registry", err)
+		warnProvider(log, "Plugins registry migration reported an error; continuing with loaded records", err)
 	}
 
 	svc := NewService(pluginStore, registry, eventBus, log)

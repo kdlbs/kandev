@@ -160,12 +160,7 @@ func (l *approvalLedger) save(file *approvalLedgerFile) error {
 	if err := os.Rename(tmpPath, l.path()); err != nil {
 		return err
 	}
-	dir, err := os.Open(l.dir)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = dir.Close() }()
-	return dir.Sync()
+	return syncApprovalLedgerDirectory(l.dir)
 }
 
 func approvalKey(installationID, workspaceID string) string {
