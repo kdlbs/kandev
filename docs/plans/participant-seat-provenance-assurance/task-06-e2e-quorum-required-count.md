@@ -5,7 +5,12 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/office/requirements/participant-seat-provenance-assurance.md"
+requirements:
+  - REQ-OFFICE-SEAT-ASSURANCE-002
+acceptance_criteria:
+  - AC-OFFICE-SEAT-ASSURANCE-002.6
+system_design:
+  - ../../specs/office/system-design/participant-seat-provenance-assurance-01.md
 ---
 
 # Task 06: E2E quorum case asserts exactly one decision is required

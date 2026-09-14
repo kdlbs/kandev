@@ -5,7 +5,18 @@ status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/office/requirements/participant-seat-provenance-assurance.md"
+requirements:
+  - REQ-OFFICE-SEAT-ASSURANCE-001
+acceptance_criteria:
+  - AC-OFFICE-SEAT-ASSURANCE-001.1
+  - AC-OFFICE-SEAT-ASSURANCE-001.2
+  - AC-OFFICE-SEAT-ASSURANCE-001.3
+  - AC-OFFICE-SEAT-ASSURANCE-001.4
+  - AC-OFFICE-SEAT-ASSURANCE-001.5
+  - AC-OFFICE-SEAT-ASSURANCE-001.6
+  - AC-OFFICE-SEAT-ASSURANCE-001.7
+system_design:
+  - ../../specs/office/system-design/participant-seat-provenance-assurance-01.md
 ---
 
 # Task 01: Seat store refuses a registration naming no agent

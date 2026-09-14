@@ -6,7 +6,12 @@ wave: 3
 depends_on:
   - "03-surface-refusals-and-claim-activity"
 plan: "plan.md"
-spec: "../../specs/office/requirements/participant-seat-provenance-assurance.md"
+requirements:
+  - REQ-OFFICE-SEAT-ASSURANCE-002
+acceptance_criteria:
+  - AC-OFFICE-SEAT-ASSURANCE-002.7
+system_design:
+  - ../../specs/office/system-design/participant-seat-provenance-assurance-01.md
 ---
 
 # Task 04: A claim whose displaced-run cancellation fails still succeeds

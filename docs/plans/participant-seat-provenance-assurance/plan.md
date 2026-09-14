@@ -1,7 +1,11 @@
 ---
-spec: docs/specs/office/requirements/participant-seat-provenance-assurance.md
 created: 2026-09-09
 status: done
+requirements:
+  - REQ-OFFICE-SEAT-ASSURANCE-001
+  - REQ-OFFICE-SEAT-ASSURANCE-002
+system_design:
+  - ../../specs/office/system-design/participant-seat-provenance-assurance-01.md
 ---
 
 # Implementation Plan: Participant Seat Provenance Assurance

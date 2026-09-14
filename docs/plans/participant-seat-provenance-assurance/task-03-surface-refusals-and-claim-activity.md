@@ -5,7 +5,14 @@ status: done
 wave: 2
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/office/requirements/participant-seat-provenance-assurance.md"
+requirements:
+  - REQ-OFFICE-SEAT-ASSURANCE-002
+acceptance_criteria:
+  - AC-OFFICE-SEAT-ASSURANCE-002.4
+  - AC-OFFICE-SEAT-ASSURANCE-002.5
+  - AC-OFFICE-SEAT-ASSURANCE-002.8
+system_design:
+  - ../../specs/office/system-design/participant-seat-provenance-assurance-01.md
 ---
 
 # Task 03: Surface refusals and claim activity payload
