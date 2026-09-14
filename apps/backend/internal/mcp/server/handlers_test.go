@@ -900,28 +900,32 @@ func TestStopTask_BackendErrorReturnsToolError(t *testing.T) {
 }
 
 func TestMessageQueueCensusToolsBindCurrentTaskAndSession(t *testing.T) {
-	backend := &testBackend{response: map[string]interface{}{
-		"task_id": "task-current", "session_id": "test-session",
-		"entries": []interface{}{}, "before_count": 0.0,
-	}}
-	s := newTaskModeServer(t, backend, "task-current")
+	for _, session := range []string{"fresh-primary-session", "preserved-nonterminal-predecessor"} {
+		t.Run(session, func(t *testing.T) {
+			backend := &testBackend{response: map[string]interface{}{
+				"task_id": "task-current", "session_id": session,
+				"entries": []interface{}{}, "before_count": 0.0,
+			}}
+			s := New(backend, session, "task-current", 10005, newTestLogger(t), "", false, ModeTask, []string{"github"})
 
-	result := callTool(t, s, "get_message_queue_census_kandev", map[string]interface{}{})
-	assert.False(t, result.IsError)
-	assert.Equal(t, ws.ActionMCPGetMessageQueueCensus, backend.lastAction)
-	payload, ok := backend.lastPayload.(map[string]interface{})
-	require.True(t, ok)
-	assert.Equal(t, map[string]interface{}{"task_id": "task-current", "session_id": "test-session"}, payload)
+			result := callTool(t, s, "get_message_queue_census_kandev", map[string]interface{}{})
+			assert.False(t, result.IsError)
+			assert.Equal(t, ws.ActionMCPGetMessageQueueCensus, backend.lastAction)
+			payload, ok := backend.lastPayload.(map[string]interface{})
+			require.True(t, ok)
+			assert.Equal(t, map[string]interface{}{"task_id": "task-current", "session_id": session}, payload)
 
-	entries := []interface{}{map[string]interface{}{"id": "entry-1", "claim": "claim-1"}}
-	result = callTool(t, s, "dispose_message_queue_entries_kandev", map[string]interface{}{"entries": entries})
-	assert.False(t, result.IsError)
-	assert.Equal(t, ws.ActionMCPDisposeMessageQueueEntries, backend.lastAction)
-	payload, ok = backend.lastPayload.(map[string]interface{})
-	require.True(t, ok)
-	assert.Equal(t, "task-current", payload["task_id"])
-	assert.Equal(t, "test-session", payload["session_id"])
-	assert.Equal(t, entries, payload["entries"])
+			entries := []interface{}{map[string]interface{}{"id": "entry-1", "claim": "claim-1"}}
+			result = callTool(t, s, "dispose_message_queue_entries_kandev", map[string]interface{}{"entries": entries})
+			assert.False(t, result.IsError)
+			assert.Equal(t, ws.ActionMCPDisposeMessageQueueEntries, backend.lastAction)
+			payload, ok = backend.lastPayload.(map[string]interface{})
+			require.True(t, ok)
+			assert.Equal(t, "task-current", payload["task_id"])
+			assert.Equal(t, session, payload["session_id"])
+			assert.Equal(t, entries, payload["entries"])
+		})
+	}
 }
 
 func TestMessageQueueCensusToolSchemasExposeNoScopeOrMessageBodyControls(t *testing.T) {
