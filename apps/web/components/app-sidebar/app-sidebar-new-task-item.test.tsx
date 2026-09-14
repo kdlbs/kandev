@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   openQuickTerminal: vi.fn(),
   dialogTaskSessionId: null as string | null,
   dialogWillNavigate: false,
+  dialogAutoFocus: true,
 }));
 
 function renderItem(collapsed: boolean) {
@@ -106,7 +107,7 @@ vi.mock("@/components/task-create-dialog", () => ({
     onSuccess?: (
       task: { id: string },
       mode: "create" | "edit",
-      meta?: { taskSessionId?: string | null; willNavigate?: boolean },
+      meta?: { taskSessionId?: string | null; willNavigate?: boolean; autoFocus?: boolean },
     ) => void;
   }) => (
     <button
@@ -117,6 +118,7 @@ vi.mock("@/components/task-create-dialog", () => ({
         onSuccess?.({ id: "t-new" }, "create", {
           taskSessionId: mocks.dialogTaskSessionId,
           willNavigate: mocks.dialogWillNavigate,
+          autoFocus: mocks.dialogAutoFocus,
         })
       }
     >
@@ -158,6 +160,7 @@ function resetTestState() {
   mocks.openQuickTerminal.mockClear();
   mocks.dialogTaskSessionId = null;
   mocks.dialogWillNavigate = false;
+  mocks.dialogAutoFocus = true;
   officeEnabled = false;
   pathname = "/";
   workspaceActionsRegistrations = [];
@@ -472,4 +475,14 @@ describe("AppSidebarNewTaskItem creation success", () => {
     expect(mocks.setActiveTask).not.toHaveBeenCalled();
     expect(mocks.routerPush).not.toHaveBeenCalled();
   });
+});
+
+it("retains the current task after background sidebar creation", () => {
+  mocks.dialogAutoFocus = false;
+  mocks.dialogTaskSessionId = "s-new";
+  renderItem(false);
+  screen.getByTestId(REGULAR_DIALOG_TESTID).click();
+  expect(mocks.setActiveTask).not.toHaveBeenCalled();
+  expect(mocks.setActiveSession).not.toHaveBeenCalled();
+  expect(mocks.routerPush).not.toHaveBeenCalled();
 });

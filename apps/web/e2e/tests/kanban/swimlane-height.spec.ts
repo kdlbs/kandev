@@ -129,10 +129,13 @@ test("dense and sparse workflows size independently and keep the final task reac
   await testPage.setViewportSize({ width: 1440, height: 900 });
   await withHeightWorkflows(apiClient, seedData, async (second) => {
     const denseTaskCount = 439;
-    await seedLargeColumnTasks(apiClient, seedData, "Dense height", denseTaskCount);
-    const { tasks } = await apiClient.listTasks(seedData.workspaceId);
-    const finalTask = tasks.find((task) => task.title === `Dense height ${denseTaskCount}`);
-    if (!finalTask) throw new Error("final dense task was not created");
+    await seedLargeColumnTasks(apiClient, seedData, "Dense height", denseTaskCount - 1);
+    // Create the tail after concurrent seeding so its assigned position is last.
+    const finalTask = await apiClient.createTask(
+      seedData.workspaceId,
+      `Dense height ${denseTaskCount}`,
+      { workflow_id: seedData.workflowId, workflow_step_id: seedData.startStepId },
+    );
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
     const dense = kanban.columnByStepId(seedData.startStepId);

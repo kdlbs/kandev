@@ -5,6 +5,7 @@ import { IconChevronDown, IconChevronUp, IconMessageQuestion } from "@tabler/ico
 import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
 import { ClarificationInputOverlay } from "./clarification-input-overlay";
+import { useComposerDisclosureContext } from "./composer-disclosure";
 import { ResizeHandle } from "./resize-handle";
 import { useResizableClarificationOverlay } from "@/hooks/use-resizable-clarification-overlay";
 import type { ClarificationRequestMetadata, Message } from "@/lib/types/http";
@@ -64,6 +65,7 @@ export function ClarificationPanelSection({
   onOutcome,
 }: ClarificationPanelSectionProps) {
   const { t } = useTranslation();
+  const disclosure = useComposerDisclosureContext();
   const pendingId = pendingIdFromMessages(messages);
   const [collapsed, setCollapsed] = useCollapsedForBundle(pendingId);
   const contentId = useId();
@@ -101,7 +103,12 @@ export function ClarificationPanelSection({
         style={
           compact
             ? undefined
-            : { maxHeight: `${maxHeightVh}vh`, ...(height !== null ? { height } : {}) }
+            : {
+                maxHeight: `${maxHeightVh}vh`,
+                // Threads owns the outer vertical scroll boundary in its bounded footer.
+                overscrollBehaviorY: disclosure ? "auto" : undefined,
+                ...(height !== null ? { height } : {}),
+              }
         }
       >
         {compact && (

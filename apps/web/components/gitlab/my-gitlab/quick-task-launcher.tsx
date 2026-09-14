@@ -119,7 +119,11 @@ export function QuickTaskLauncher({
   const firstStep = workflowSteps[0];
   if (!workspaceId || !workflow || !firstStep || !payload || !initialValues) return null;
 
-  const handleSuccess = async (task: Task) => {
+  const handleSuccess = async (
+    task: Task,
+    _mode?: "create" | "edit",
+    meta?: { autoFocus?: boolean },
+  ) => {
     if (payload.kind === "mr") {
       const repositoryID = linkedRepositoryID(task, initialValues.repositoryId);
       try {
@@ -144,7 +148,7 @@ export function QuickTaskLauncher({
       }
     }
     onClose();
-    router.push(linkToTask(task.id));
+    if (meta?.autoFocus !== false) router.push(linkToTask(task.id));
   };
 
   return (
