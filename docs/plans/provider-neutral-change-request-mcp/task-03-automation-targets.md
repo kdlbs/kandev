@@ -105,3 +105,5 @@ Validation passed:
 - Task-scope preflight now verifies that each selected provider is attached to
   the bound task before any provider write; the regression covers a prompt-only
   update for a provider absent from the task.
+- The MCP schema rejects association-scoped prompt overrides before backend
+  dispatch, matching the handler validation contract.

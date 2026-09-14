@@ -1436,7 +1436,25 @@ func taskChangeRequestAutomationToolSchema() json.RawMessage {
       }
     }
   },
-  "required": ["target", "patch"]
+  "required": ["target", "patch"],
+  "allOf": [{
+    "if": {
+      "properties": {
+        "target": {
+          "properties": {"scope": {"const": "association"}},
+          "required": ["scope"]
+        }
+      },
+      "required": ["target"]
+    },
+    "then": {
+      "properties": {
+        "patch": {
+          "not": {"required": ["auto_fix_prompt_override"]}
+        }
+      }
+    }
+  }]
 }`)
 }
 

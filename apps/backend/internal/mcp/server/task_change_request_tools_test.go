@@ -182,3 +182,16 @@ func TestChangeRequestAutomationToolSchemaAndDispatch(t *testing.T) {
 	assert.NotContains(t, payload, "task_id")
 	assert.Equal(t, false, payload["patch"].(map[string]interface{})["auto_fix_enabled"])
 }
+
+func TestChangeRequestAutomationToolSchemaRejectsAssociationPrompt(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "update_task_change_request_automation_kandev", map[string]interface{}{
+		"target": map[string]interface{}{"scope": "association", "provider": "github", "repository_id": "repo-gh", "number": 8},
+		"patch":  map[string]interface{}{"auto_fix_prompt_override": "association prompt"},
+	})
+
+	assert.True(t, result.IsError)
+	assert.Empty(t, backend.lastAction)
+}
