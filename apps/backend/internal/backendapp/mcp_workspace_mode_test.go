@@ -87,6 +87,31 @@ func TestExternalMCPTaskModesReachPersistenceAndManagement(t *testing.T) {
 	httpServer := httptest.NewServer(router)
 	t.Cleanup(httpServer.Close)
 
+	// @covers AC-TASKS-MCP-WORKSPACE-MODE-004.3
+	t.Run("inheritance requires parent through MCP", func(t *testing.T) {
+		before, err := harness.taskSvc.ListTasks(ctx, kanbanWorkflows[0].ID)
+		require.NoError(t, err)
+		response := postExternalWorkspaceModeMCPRequest(t, httpServer.URL+"/mcp", 50, "create_task_kandev", map[string]any{
+			"title":            "Invalid root inheritance",
+			"workspace_id":     kanbanWorkspace.ID,
+			"workflow_id":      kanbanWorkflows[0].ID,
+			"workspace_mode":   "inherit_parent",
+			"agent_profile_id": "profile-1",
+			"start_agent":      false,
+		})
+		require.Equal(t, http.StatusOK, response.StatusCode)
+		message := decodeExternalMCPResponse(t, response.Body)
+		require.NotContains(t, message, "error")
+		result, ok := message["result"].(map[string]any)
+		require.True(t, ok)
+		require.Equal(t, true, result["isError"])
+		require.Contains(t, response.Body, "workspace_mode=inherit_parent requires parent_id")
+		require.NotContains(t, response.Body, "keyword: enum")
+		after, err := harness.taskSvc.ListTasks(ctx, kanbanWorkflows[0].ID)
+		require.NoError(t, err)
+		require.Equal(t, before, after)
+	})
+
 	created := make(map[string]string, 2)
 	for _, tc := range []struct {
 		name, workspaceID, workflowID, title, externalID string
