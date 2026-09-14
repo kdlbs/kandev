@@ -71,8 +71,10 @@ type LaunchSessionRequest struct {
 	// server-side coordination flag set by the deferred-start handlers, so it is
 	// kept off the wire protocol (`json:"-"`) — a client must not be able to
 	// suppress the upgrade and strand a passthrough session without a PTY.
-	DeferredStart bool                   `json:"-"`
-	Attachments   []v1.MessageAttachment `json:"attachments,omitempty"`
+	DeferredStart bool `json:"-"`
+	// InitialPromptPreview is supplied only by task creation after attachment claim.
+	InitialPromptPreview *models.InitialPromptPreview `json:"-"`
+	Attachments          []v1.MessageAttachment       `json:"attachments,omitempty"`
 	// SpawnOrigin identifies the agent session that requested this launch via
 	// spawn_session_kandev, so the new session's first turn can carry spawner
 	// attribution and reply instructions. Like DeferredStart it is kept off the
@@ -83,6 +85,11 @@ type LaunchSessionRequest struct {
 	// AllowBranchReplacement is set only by RecoverSession for the explicit
 	// resume_new_branch action. Clients cannot grant this permission directly.
 	AllowBranchReplacement bool `json:"-"`
+	// AllowCompletedSessionResume is set only by explicit recovery or a pinned
+	// follow-up dispatcher. It is intentionally not part of the wire request:
+	// ordinary launch, ensure, and startup recovery paths must keep completed
+	// sessions terminal.
+	AllowCompletedSessionResume bool `json:"-"`
 }
 
 // SpawnOrigin describes the agent session that spawned a new sibling session.
@@ -198,11 +205,18 @@ func IsBenignLaunchTeardownErr(err error) bool {
 
 // LaunchSession is the unified entry point for all session operations.
 func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+	req.Prompt = strings.TrimSpace(req.Prompt)
+	intent := ResolveIntent(req)
 	// Every intent funnels through here. SessionID is empty when creating, so
 	// that case is carried by the task check alone.
 	// Launching a session starts an agent turn: session.prompt.
-	if err := s.authorizeTaskPrompt(ctx, req.TaskID); err != nil {
-		return nil, err
+	// Workspace restoration only opens retained infrastructure. It must not
+	// require permission to start or resume an agent; lifecycle applies the
+	// session.exec check at the execution boundary.
+	if intent != IntentRestoreWorkspace {
+		if err := s.authorizeTaskPrompt(ctx, req.TaskID); err != nil {
+			return nil, err
+		}
 	}
 	// Existing-session launches must also prove that the supplied session and
 	// task belong together; independent reach checks do not establish that
@@ -213,9 +227,6 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 	if err := s.claimLaunchAttachments(ctx, req); err != nil {
 		return nil, fmt.Errorf("claim launch attachments: %w", err)
 	}
-	intent := ResolveIntent(req)
-	req.Prompt = strings.TrimSpace(req.Prompt)
-
 	switch intent {
 	case IntentPrepare:
 		return s.launchPrepare(ctx, req)
@@ -271,11 +282,12 @@ func (s *Service) claimLaunchAttachments(ctx context.Context, req *LaunchSession
 // the prompt — eagerly launching here would spawn a promptless PTY and the
 // later start would be rejected against the now-running session.
 func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+	prepareCtx := withInitialPromptPreview(ctx, req.InitialPromptPreview)
 	if s.shouldUpgradePassthroughPrepare(ctx, req) {
-		return s.launchStart(ctx, req)
+		return s.launchStart(prepareCtx, req)
 	}
 	sessionID, err := s.PrepareTaskSession(
-		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
+		prepareCtx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.WorkflowStepID, req.LaunchWorkspace,
 	)
 	if err != nil {
@@ -315,14 +327,26 @@ func (s *Service) isPassthroughProfile(ctx context.Context, profileID string) bo
 	return info.CLIPassthrough
 }
 
+// blocksAutoStartLaunch reports whether an auto-start request must be
+// downgraded to a prepare, either because the task's current step does not
+// allow it or because it has an unresolved dependency. The dependency gate's
+// launch-token restore concern does not apply here: this path owns no
+// lifecycle token to restore.
+func (s *Service) blocksAutoStartLaunch(ctx context.Context, req *LaunchSessionRequest) bool {
+	if s.shouldBlockAutoStart(ctx, req) {
+		return true
+	}
+	blocked, _ := s.dependencyBlocksAutoStart(ctx, req.TaskID, "session.launch")
+	return blocked
+}
+
 // launchStart creates a new session and launches the agent.
 // If the request is an auto-start and the task's current workflow step does not
 // have auto_start_agent, or the task has unresolved dependencies, the request
 // is downgraded to a prepare (workspace-only, no agent) to prevent unwanted
 // auto-starts from the frontend's useAutoStartSession hook.
 func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
-	if req.AutoStart && (s.shouldBlockAutoStart(ctx, req) ||
-		s.dependencyBlocksAutoStart(ctx, req.TaskID, "session.launch")) {
+	if req.AutoStart && s.blocksAutoStartLaunch(ctx, req) {
 		req.LaunchWorkspace = true
 		return s.launchPrepare(ctx, req)
 	}
@@ -394,7 +418,8 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 // launchResume resumes a stopped session.
 func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
 	execution, err := s.ResumeTaskSessionWithOptions(ctx, req.TaskID, req.SessionID, executor.ResumeOptions{
-		AllowBranchReplacement: req.AllowBranchReplacement,
+		AllowBranchReplacement:      req.AllowBranchReplacement,
+		AllowCompletedSessionResume: req.AllowCompletedSessionResume,
 	})
 	if err != nil {
 		return nil, err
@@ -437,12 +462,14 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 	if err := s.agentManager.EnsureWorkspaceExecutionForSession(ctx, req.TaskID, req.SessionID); err != nil {
 		return nil, fmt.Errorf("failed to restore workspace: %w", err)
 	}
+	agentExecutionID, _ := s.agentManager.GetExecutionIDForSession(ctx, req.SessionID)
 
 	resp := &LaunchSessionResponse{
-		Success:   true,
-		TaskID:    req.TaskID,
-		SessionID: req.SessionID,
-		State:     string(session.State),
+		Success:          true,
+		TaskID:           req.TaskID,
+		SessionID:        req.SessionID,
+		AgentExecutionID: agentExecutionID,
+		State:            string(session.State),
 	}
 	if len(session.Worktrees) > 0 {
 		wt := session.Worktrees[0]
@@ -495,10 +522,11 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 	}
 
 	resp, err := s.LaunchSession(ctx, &LaunchSessionRequest{
-		TaskID:                 taskID,
-		SessionID:              sessionID,
-		Intent:                 IntentResume,
-		AllowBranchReplacement: action == "resume_new_branch",
+		TaskID:                      taskID,
+		SessionID:                   sessionID,
+		Intent:                      IntentResume,
+		AllowBranchReplacement:      action == "resume_new_branch",
+		AllowCompletedSessionResume: action == "resume",
 	})
 	if err != nil {
 		return nil, normalizeRecoverSessionError(err)

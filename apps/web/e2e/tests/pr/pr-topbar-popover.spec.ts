@@ -352,6 +352,9 @@ test.describe("PR top-bar CI popover", () => {
     const session = await openTaskAndWait(testPage, seed, title);
 
     await session.hoverPRTopbar();
+    // The hover helper focuses the trigger to make the synthetic hover
+    // reliable. Blur it here so this assertion exercises pointer-only close.
+    await session.prTopbarButton().blur();
     // Move the cursor far away from the popover; close timer fires and the
     // popover unmounts.
     await testPage.mouse.move(0, 0);

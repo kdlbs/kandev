@@ -2,7 +2,7 @@ import type { Window as HappyDOMWindow } from "happy-dom";
 import * as React from "react";
 import { afterEach, beforeEach } from "vitest";
 
-import { initI18nForTests, loadAllLocalesForTests } from "./lib/i18n";
+import { initI18nForTests } from "./lib/i18n";
 import { NoopWebSocket } from "./lib/test-support/noop-websocket";
 
 // Guards against `react` production build or duplicate copy — both make `act` unavailable;
@@ -29,15 +29,11 @@ if (typeof React.act !== "function") {
  * The real `en` catalog is loaded, so assertions on English copy pass exactly as
  * they did before the migration.
  *
- * Only `en` is bundled in the browser; the rest are lazy chunks. Suites drive
- * the shared instance with a bare `i18n.changeLanguage("pseudo")` and assert on
- * the next line, so the non-English catalogs are awaited here — top-level await
- * in a setup file runs before any suite. That keeps unit tests in the
- * "everything in memory" world they were written for without putting the other
- * locales back into the bundle.
+ * Only `en` is loaded for the default browser project. Suites that change
+ * locale are assigned to the browser-locales project, whose second setup file
+ * awaits every catalog before test execution.
  */
 initI18nForTests();
-await loadAllLocalesForTests();
 
 const noNetworkWebSocket = NoopWebSocket as unknown as typeof WebSocket;
 

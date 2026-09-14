@@ -627,6 +627,15 @@ func (a *Adapter) GetSessionModelState() *streams.SessionModelState {
 	}
 }
 
+// ProviderErrorContext implements adapter.ProviderErrorContextProvider.
+// modelID is empty until the adapter has settled a model for the session: a
+// non-empty currentModelFromConfig(availableConfigOptions) value at read time.
+func (a *Adapter) ProviderErrorContext() (providerID, modelID string) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.agentID, currentModelFromConfig(a.availableConfigOptions)
+}
+
 func cloneSessionModels(models []streams.SessionModelInfo) []streams.SessionModelInfo {
 	if len(models) == 0 {
 		return nil

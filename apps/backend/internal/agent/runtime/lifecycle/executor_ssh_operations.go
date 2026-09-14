@@ -688,7 +688,7 @@ func buildSSHCreateInstanceRequest(
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,
 		ComparisonTargets:          req.ComparisonTargets,
-		Env:                        sshRemoteContributionEnv(req, agentctlBin),
+		Env:                        selectedCheckoutAgentEnv(sshRemoteContributionEnv(req, agentctlBin), req.Metadata),
 	}
 }
 
@@ -1055,21 +1055,224 @@ func stopRemoteAgentctl(ctx context.Context, client *ssh.Client, sessionDir stri
 	return err
 }
 
+//nolint:dupword // shell branches contain repeated `fi` tokens.
 func remoteAgentctlStopCommand(sessionDir string, pid int) string {
-	removeSessionDir := "rm -rf " + shellQuote(sessionDir)
+	removeSessionDir := removeRemoteDirCommand(sessionDir)
 	if pid <= 0 {
 		return removeSessionDir
 	}
-	return fmt.Sprintf(`kill %[1]d 2>/dev/null || true
-attempt=0
-while kill -0 %[1]d 2>/dev/null && [ "$attempt" -lt %[2]d ]; do
-  sleep 0.1
-  attempt=$((attempt + 1))
-done
+	return fmt.Sprintf(`if kill %[1]d 2>/dev/null; then
+  attempt=0
+  while kill -0 %[1]d 2>/dev/null && [ "$attempt" -lt %[2]d ]; do
+    sleep 0.1
+    attempt=$((attempt + 1))
+  done
+  if kill -0 %[1]d 2>/dev/null; then
+    if ! kill -9 %[1]d 2>/dev/null && kill -0 %[1]d 2>/dev/null; then
+      echo "failed to terminate remote agentctl pid %[1]d" >&2
+      exit 1
+    fi
+  fi
+else
+  if kill -0 %[1]d 2>/dev/null; then
+    echo "failed to signal remote agentctl pid %[1]d" >&2
+    exit 1
+  fi
+fi
 if kill -0 %[1]d 2>/dev/null; then
-  kill -9 %[1]d 2>/dev/null || true
+  echo "remote agentctl pid %[1]d is still running" >&2
+  exit 1
 fi
 %[3]s`, pid, sshAgentctlStopPollAttempts, removeSessionDir)
+}
+
+// removeRemoteDirCommand builds the shell command that reclaims a remote
+// session directory on its own, independent of whether a process is stopped.
+func removeRemoteDirCommand(dir string) string {
+	return "rm -rf " + shellQuote(dir)
+}
+
+// verifyRemoteAgentctlIdentity confirms that a pid recovered from persisted
+// executors_running metadata still belongs to the agentctl this row
+// describes, before that pid is signalled. A persisted row can outlive a
+// remote host reboot, at which point the pid is guaranteed stale, and PID
+// reuse by an unrelated process owned by the same SSH user is a real risk on
+// a shared runner — probeRemoteAgentctlLiveness alone only proves *some*
+// process holds the pid, not that it is ours.
+//
+// There are exactly two proven outcomes; everything else is an error.
+//
+//   - (false, nil) — proven abandoned: the pid is gone, or it is held by
+//     something that is not an agentctl under this row's taskDir. Nothing to
+//     signal, and this row's session directory is the caller's to reclaim.
+//   - (true, nil) — proven ours: the remote command line names agentctl with
+//     this row's taskDir as its --workdir, and the session directory's own
+//     pidfile names the same pid. Safe to signal.
+//
+// An error means identity is unproven: an SSH-level fault, a `ps` that failed
+// for any reason other than the pid being absent, or a pidfile that could not
+// be read or disagreed. Unproven is not abandoned — it is equally consistent
+// with "our live agentctl whose directory we cannot read" and with "a
+// directory that now belongs to a newer launch". The caller must therefore
+// signal nothing, remove nothing, and preserve the row, exactly as it would
+// for a failed stop.
+//
+// Note the limit of the pidfile leg: it bounds divergence between the row and
+// its session directory, but it cannot detect PID reuse where the recycled
+// pid equals this row's own persisted pid, because the pidfile and the
+// persisted pid are both written from the same launch.
+func verifyRemoteAgentctlIdentity(ctx context.Context, client *ssh.Client, pid int, sessionDir, taskDir string) (bool, error) {
+	if pid <= 0 {
+		return false, nil
+	}
+	stdout, stderr, err := runSSHCommand(ctx, client, remoteProcessCommandLineCommand(pid))
+	if err != nil {
+		var exitErr *ssh.ExitError
+		if !errors.As(err, &exitErr) {
+			return false, remoteProcessProbeError("ps -p", pid, err, stderr)
+		}
+		if !remotePsProbeConfirmsAbsence(stdout, stderr) {
+			return false, remoteProcessProbeError("ps -p", pid, err, stderr)
+		}
+		return verifyAbandonedRemoteAgentctlDirectory(ctx, client, pid, sessionDir)
+	}
+	if !remoteAgentctlCommandLineMatches(stdout, taskDir) {
+		return verifyAbandonedRemoteAgentctlDirectory(ctx, client, pid, sessionDir)
+	}
+	if err := remoteAgentctlPidFileConfirms(ctx, client, sessionDir, pid); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func verifyAbandonedRemoteAgentctlDirectory(ctx context.Context, client *ssh.Client, pid int, sessionDir string) (bool, error) {
+	filePID, present, err := readRemoteAgentctlPidFile(ctx, client, sessionDir)
+	if err != nil {
+		return false, err
+	}
+	if !present {
+		return false, nil
+	}
+	if filePID != pid {
+		return false, fmt.Errorf("remote pidfile %s/agentctl.pid names pid %d, not %d", sessionDir, filePID, pid)
+	}
+	return false, nil
+}
+
+func remoteProcessCommandLineCommand(pid int) string {
+	// BusyBox ps (used by Alpine-based SSH targets) does not support the
+	// procps/macOS `-p` selector. Prefer the precise selector when available,
+	// then read Linux's per-process argv as a portable fallback. Keep an absent
+	// PID as an empty, non-zero result so remotePsProbeConfirmsAbsence can still
+	// distinguish it from a probe error. If neither mechanism is available,
+	// return stderr and fail closed rather than treating the process as absent.
+	return fmt.Sprintf(`ps -p %[1]d -o command= 2>/dev/null || {
+  if [ ! -d /proc ]; then
+    echo "process identity probe unavailable: ps does not support -p and /proc is absent" >&2
+    exit 2
+  fi
+  if [ -e /proc/%[1]d/cmdline ]; then
+    tr '\000' ' ' < /proc/%[1]d/cmdline
+  else
+    exit 1
+  fi
+}`, pid)
+}
+
+func remoteAgentctlCommandLineMatches(commandLine, taskDir string) bool {
+	line := strings.TrimSpace(commandLine)
+	if line == "" || taskDir == "" || !strings.Contains(line, "agentctl") {
+		return false
+	}
+	return commandLineHasFlagValue(line, "--workdir", taskDir)
+}
+
+// commandLineHasFlagValue reports whether a `ps` command line passes value as
+// the whole value of flag. The value must end at a word boundary: a plain
+// substring test would also accept a sibling directory that merely starts
+// with this row's taskDir, and signalling on that evidence would kill another
+// task's agentctl.
+func commandLineHasFlagValue(line, flag, value string) bool {
+	for _, needle := range []string{flag + " " + value, flag + "=" + value} {
+		for offset := 0; ; {
+			index := strings.Index(line[offset:], needle)
+			if index < 0 {
+				break
+			}
+			end := offset + index + len(needle)
+			if end == len(line) || line[end] == ' ' || line[end] == '\t' {
+				return true
+			}
+			offset = end
+		}
+	}
+	return false
+}
+
+// remoteAgentctlPidFileConfirms requires the session directory's own pidfile,
+// written by the launch wrapper at <sessionDir>/agentctl.pid (see
+// startRemoteAgentctlOnPort), to name the pid that is about to be signalled.
+// Only a confirmed match returns nil. A pidfile that cannot be read, does not
+// parse, or names a different pid is an error and never a mismatch verdict,
+// because the caller reclaims the session directory on a mismatch and that
+// directory may belong to a live process.
+func remoteAgentctlPidFileConfirms(ctx context.Context, client *ssh.Client, sessionDir string, pid int) error {
+	filePID, present, err := readRemoteAgentctlPidFile(ctx, client, sessionDir)
+	if err != nil {
+		return err
+	}
+	if !present {
+		return fmt.Errorf("remote agentctl session directory %s disappeared before pidfile verification", sessionDir)
+	}
+	if filePID != pid {
+		return fmt.Errorf("remote pidfile %s/agentctl.pid names pid %d, not %d", sessionDir, filePID, pid)
+	}
+	return nil
+}
+
+func readRemoteAgentctlPidFile(ctx context.Context, client *ssh.Client, sessionDir string) (int, bool, error) {
+	if strings.TrimSpace(sessionDir) == "" {
+		return 0, false, errors.New("remote agentctl pidfile check: no session directory")
+	}
+	path := sessionDir + "/agentctl.pid"
+	stdout, stderr, err := runSSHCommand(ctx, client, "cat -- "+shellQuote(path))
+	if err != nil {
+		exists, existsErr := remoteSessionDirExists(ctx, client, sessionDir)
+		if existsErr != nil {
+			return 0, false, existsErr
+		}
+		if !exists {
+			return 0, false, nil
+		}
+		if detail := strings.TrimSpace(stderr); detail != "" {
+			return 0, false, fmt.Errorf("remote cat %s failed: %w (stderr: %s)", path, err, detail)
+		}
+		return 0, false, fmt.Errorf("remote cat %s failed: %w", path, err)
+	}
+	content := strings.TrimSpace(stdout)
+	filePID, err := strconv.Atoi(content)
+	if err != nil {
+		return 0, false, fmt.Errorf("remote pidfile %s does not name a pid: %q", path, content)
+	}
+	if filePID <= 0 {
+		return 0, false, fmt.Errorf("remote pidfile %s contains non-positive pid %d", path, filePID)
+	}
+	return filePID, true, nil
+}
+
+func remoteSessionDirExists(ctx context.Context, client *ssh.Client, sessionDir string) (bool, error) {
+	_, stderr, err := runSSHCommand(ctx, client, "test -d "+shellQuote(sessionDir))
+	if err == nil {
+		return true, nil
+	}
+	var exitErr *ssh.ExitError
+	if errors.As(err, &exitErr) && strings.TrimSpace(stderr) == "" {
+		return false, nil
+	}
+	if detail := strings.TrimSpace(stderr); detail != "" {
+		return false, fmt.Errorf("remote test -d %s failed: %w (stderr: %s)", sessionDir, err, detail)
+	}
+	return false, fmt.Errorf("remote test -d %s failed: %w", sessionDir, err)
 }
 
 // probeRemoteAgentctlLiveness distinguishes a completed remote process probe
@@ -1087,7 +1290,7 @@ func probeRemoteAgentctlLiveness(ctx context.Context, client *ssh.Client, pid in
 		if remoteProcessProbeConfirmsAbsence(stderr) {
 			return false, nil
 		}
-		return false, remoteProcessProbeError(pid, err, stderr)
+		return false, remoteProcessProbeError("kill -0", pid, err, stderr)
 	}
 	return false, err
 }
@@ -1099,12 +1302,27 @@ func remoteProcessProbeConfirmsAbsence(stderr string) bool {
 		strings.Contains(message, "esrch")
 }
 
-func remoteProcessProbeError(pid int, err error, stderr string) error {
+// remotePsProbeConfirmsAbsence distinguishes a `ps -p <pid>` selection miss
+// from a genuine probe fault. Unlike `kill -0`, `ps -p <absent-pid> -o
+// command=` never writes a "no such process" style message — on every
+// observed platform (macOS, procps/Linux) it exits non-zero with both
+// stdout and stderr empty. Treating that shape as confirmed absence keeps
+// this fail-closed: any real stderr content (a busybox/unsupported flag, a
+// permission fault, an SSH-level error) still falls through to an error
+// instead of being read as "process gone".
+func remotePsProbeConfirmsAbsence(stdout, stderr string) bool {
+	if remoteProcessProbeConfirmsAbsence(stderr) {
+		return true
+	}
+	return strings.TrimSpace(stdout) == "" && strings.TrimSpace(stderr) == ""
+}
+
+func remoteProcessProbeError(command string, pid int, err error, stderr string) error {
 	detail := strings.TrimSpace(stderr)
 	if detail == "" {
-		return fmt.Errorf("remote kill -0 %d failed: %w", pid, err)
+		return fmt.Errorf("remote %s %d failed: %w", command, pid, err)
 	}
-	return fmt.Errorf("remote kill -0 %d failed: %w (stderr: %s)", pid, err, detail)
+	return fmt.Errorf("remote %s %d failed: %w (stderr: %s)", command, pid, err, detail)
 }
 
 // isRemoteAgentctlAlive is the best-effort boolean form used by status and

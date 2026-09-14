@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/adminmetrics"
+	internaldb "github.com/kandev/kandev/internal/db"
 )
 
 // DeliveryLedger persists sender-independent cross-task delivery work. Queue
@@ -143,6 +144,15 @@ func (r *sqliteRepository) acknowledgeQueueEntryAndDelivery(
 	}
 	if affected != 1 {
 		return ErrEntryNotFound
+	}
+	// Settle any durable ordinary-dispatch claim for the same entry in the
+	// same transaction, mirroring deletePendingQueueDispatchTx: an accepted
+	// prompt that leaves its claim behind would be re-dispatched by startup
+	// recovery. A missing claim commits cleanly; the entry was never claimed.
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM queue_dispatch_claims WHERE entry_id = ? AND session_id = ?
+	`), queueEntryID, sessionID); err != nil && !internaldb.IsMissingTableError(err) {
+		return fmt.Errorf("acknowledge queue dispatch claim: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit delivery queue acknowledgement: %w", err)

@@ -169,7 +169,11 @@ func (s *Service) acknowledgeDeliveryQueueAdmission(ctx context.Context, ledger 
 	if _, err := ledger.MarkDeliveryQueued(ctx, delivery.ID, workerID, queueEntryID); err != nil {
 		s.logger.Error("delivery queue admission acknowledgement failed",
 			zap.String("delivery_id", delivery.ID), zap.String("queue_entry_id", queueEntryID), zap.Error(err))
-		if deleteErr := s.repo.AcknowledgeByID(ctx, delivery.TargetSessionID, queueEntryID); deleteErr != nil && !errors.Is(deleteErr, ErrEntryNotFound) {
+		// The lease was lost, so this worker no longer owns the receipt and its
+		// admission row must not stay dispatchable. DeleteByID removes the row
+		// unconditionally: AcknowledgeByID only settles a server-reserved row,
+		// which a just-admitted entry never is.
+		if deleteErr := s.repo.DeleteByID(ctx, delivery.TargetSessionID, queueEntryID); deleteErr != nil && !errors.Is(deleteErr, ErrEntryNotFound) {
 			s.logger.Error("failed to remove unacknowledged delivery queue entry",
 				zap.String("delivery_id", delivery.ID), zap.String("queue_entry_id", queueEntryID), zap.Error(deleteErr))
 		}

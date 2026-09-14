@@ -28,7 +28,7 @@ func (r *Repository) migrateGitSnapshotOwnership() error {
 		return nil
 	}
 
-	tx, err := r.db.Beginx()
+	tx, err := r.db.BeginTxx(r.migrationContext(), nil)
 	if err != nil {
 		return fmt.Errorf("git snapshot cutover: begin tx: %w", err)
 	}
@@ -70,10 +70,10 @@ func (r *Repository) replayGitSnapshotFinalShape(tx *sqlx.Tx) error {
 }
 
 func (r *Repository) prepareGitSnapshotCutover(tx *sqlx.Tx) error {
-	if _, err := tx.Exec("DROP TABLE IF EXISTS " + gitSnapshotCutoverShadowTable); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), "DROP TABLE IF EXISTS "+gitSnapshotCutoverShadowTable); err != nil {
 		return fmt.Errorf("git snapshot cutover: remove stale shadow: %w", err)
 	}
-	if _, err := tx.Exec(finalGitSnapshotDDL(gitSnapshotCutoverShadowTable)); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), finalGitSnapshotDDL(gitSnapshotCutoverShadowTable)); err != nil {
 		return fmt.Errorf("git snapshot cutover: create shadow: %w", err)
 	}
 	if err := r.maybeFailGitSnapshotCutover("create_shadow"); err != nil {
@@ -99,10 +99,10 @@ func (r *Repository) prepareGitSnapshotCutover(tx *sqlx.Tx) error {
 }
 
 func (r *Repository) swapGitSnapshotCutover(tx *sqlx.Tx) error {
-	if _, err := tx.Exec("DROP TABLE task_session_git_snapshots"); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), "DROP TABLE task_session_git_snapshots"); err != nil {
 		return fmt.Errorf("git snapshot cutover: drop legacy table: %w", err)
 	}
-	if _, err := tx.Exec("ALTER TABLE " + gitSnapshotCutoverShadowTable + " RENAME TO task_session_git_snapshots"); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), "ALTER TABLE "+gitSnapshotCutoverShadowTable+" RENAME TO task_session_git_snapshots"); err != nil {
 		return fmt.Errorf("git snapshot cutover: rename shadow: %w", err)
 	}
 	if err := r.maybeFailGitSnapshotCutover("swap"); err != nil {
@@ -143,13 +143,13 @@ func (r *Repository) acquireGitSnapshotCutoverLocks(tx *sqlx.Tx) error {
 	if !dialect.IsPostgres(r.db.DriverName()) {
 		return nil
 	}
-	if _, err := tx.Exec("SET LOCAL lock_timeout = '30s'"); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), "SET LOCAL lock_timeout = '30s'"); err != nil {
 		return fmt.Errorf("git snapshot cutover: set lock timeout: %w", err)
 	}
-	if _, err := tx.Exec("SELECT pg_advisory_xact_lock($1)", gitSnapshotCutoverLockID); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), "SELECT pg_advisory_xact_lock($1)", gitSnapshotCutoverLockID); err != nil {
 		return fmt.Errorf("git snapshot cutover: acquire migration advisory lock: %w", err)
 	}
-	if _, err := tx.Exec(`
+	if _, err := tx.ExecContext(r.migrationContext(), `
 		LOCK TABLE task_session_git_snapshots, task_sessions, task_environments
 		IN ACCESS EXCLUSIVE MODE`); err != nil {
 		return fmt.Errorf("git snapshot cutover: lock ownership tables: %w", err)
@@ -195,7 +195,7 @@ func (r *Repository) copyGitSnapshotWinners(tx *sqlx.Tx) error {
 		) ranked
 		WHERE row_number = 1
 	`
-	if _, err := tx.Exec(r.db.Rebind(query)); err != nil {
+	if _, err := tx.ExecContext(r.migrationContext(), r.db.Rebind(query)); err != nil {
 		return fmt.Errorf("git snapshot cutover: copy current winners: %w", err)
 	}
 	return nil
@@ -221,7 +221,7 @@ func (r *Repository) ensureGitSnapshotIndexes(tx *sqlx.Tx) error {
 		`CREATE INDEX IF NOT EXISTS idx_git_snapshots_session ON task_session_git_snapshots(session_id, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_git_snapshots_type ON task_session_git_snapshots(session_id, snapshot_type)`,
 	} {
-		if _, err := tx.Exec(query); err != nil {
+		if _, err := tx.ExecContext(r.migrationContext(), query); err != nil {
 			return fmt.Errorf("git snapshot cutover: create index: %w", err)
 		}
 	}

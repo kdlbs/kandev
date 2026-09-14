@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type RefObject } from "react";
 import { Button } from "@kandev/ui/button";
 import {
   Dialog,
@@ -14,6 +14,7 @@ import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
 import { useToast } from "@/components/toast-provider";
 import { linkTaskIssue, unlinkTaskIssue } from "@/lib/api/domains/github-api";
+import { createFocusReturnHandler } from "@/lib/dialog-focus-return";
 import type { Repository } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
 
@@ -40,6 +41,9 @@ type TaskGitHubIssueDialogProps = {
   onOpenChange: (open: boolean) => void;
   task: TaskIssue;
   repositories: Repository[];
+  /** Element to return keyboard focus to on close (AC-TASKS-TASK-ACTIONS-MENU-001.12).
+   * Omitted callers keep Radix's default restore-to-previously-focused-element behavior. */
+  focusReturnRef?: RefObject<HTMLElement | null>;
 };
 
 type DialogFieldsProps = {
@@ -163,6 +167,7 @@ export function TaskGitHubIssueDialog({
   onOpenChange,
   task,
   repositories,
+  focusReturnRef,
 }: TaskGitHubIssueDialogProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -219,7 +224,10 @@ export function TaskGitHubIssueDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-lg">
+      <DialogContent
+        className="w-[calc(100vw-2rem)] sm:max-w-lg"
+        onCloseAutoFocus={createFocusReturnHandler(focusReturnRef)}
+      >
         <DialogHeader>
           <DialogTitle>
             {currentLabel ? t("task:changeGithubIssue") : t("task:linkGithubIssue")}

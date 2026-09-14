@@ -564,7 +564,7 @@ func TestQueuePromotionOfBlockedWIPOverflowDoesNotLaunch(t *testing.T) {
 	// resume the still-pending promotion lifecycle rather than leave the token
 	// stranded after launching directly.
 	dependencies.blocked = false
-	svc.autoStartTaskForStep(ctx, deferredChainTaskID, "step-limited", "task.dependencies_resolved", 0)
+	svc.autoStartTaskForStep(ctx, deferredChainTaskID, "step-limited", "task.dependencies_resolved", 0, false)
 	require.True(t, counter.awaitLaunch(0), "resolved dependency did not launch the promoted task")
 	awaitLaunchedSession(t, repo, deferredChainTaskID)
 	started, err := repo.GetTask(ctx, deferredChainTaskID)

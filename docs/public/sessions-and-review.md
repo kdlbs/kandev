@@ -40,7 +40,7 @@ The profile picker shows only profiles compatible with the task executor. If non
 | **Copy initial prompt** | Copies the first user message from the currently active session into the editable prompt field | A parallel approach; it is not guaranteed to be the task's original description, so inspect and edit it before launch |
 | **Summarize a session** | Inserts a utility-agent summary of the selected conversation into the editable prompt field    | Continue or branch from work already discussed                                                                        |
 
-**Handoff** from an existing session opens the same dialog and selects a summary of that session. Summarization requires a working `summarize-session` utility agent. Review generated summaries: they can omit constraints or decisions.
+**Handoff** from an existing session opens the same dialog with Blank context and an empty prompt. Select a session summary when you need earlier discussion. Summarization requires a working `summarize-session` utility agent. Review generated summaries: they can omit constraints or decisions.
 
 Prompts support pasted, dropped, or selected attachments. A prompt can contain at most 10 files, with a limit of 10 MiB per file and 20 MiB in total. The prompt itself is required.
 
@@ -56,16 +56,24 @@ Right-click an agent tab on desktop to manage it. Available actions depend on it
 | **Resume**         | Attempts to continue a completed, failed, or cancelled session                                                                                                             |
 | **Delete**         | Permanently removes the conversation; if it was primary, another session is promoted when possible. The task workspace and its files are kept; a later session reuses them |
 | **Share**          | Opens the publishing preview for an eligible session                                                                                                                       |
-| **Handoff**        | Starts another session with a generated summary of this conversation                                                                                                       |
+| **Handoff**        | Opens the launch dialog with Blank context. Select a summary when you want to include this conversation                                                                 |
 | **Close Others**   | Closes other visible agent panels without deleting their sessions                                                                                                          |
 
-Stopping is not deletion. Resume succeeds only while the executor still has the session record needed to continue. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can force a fresh session instead. The failure banner offers **Start fresh** when continuation is unavailable.
+Stopping is not deletion. Resume succeeds only while the executor still has the session record needed to continue. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can force a fresh session instead. When startup or resume fails, Kandev shows one recovery card in the selected session's chat. It labels the safe cause, keeps technical details collapsed, and offers **Resume**, **Restore read-only workspace**, or **Start fresh session** when each action is valid.
+
+**Restore read-only workspace** makes the existing files available for inspection without claiming that the agent resumed. A successful restore keeps the recovery card visible until a later resume succeeds. Kandev keeps the card in the chat scroll area and uses stacked touch-sized actions on phones. A failure in another session or an unrelated provider error remains on its own existing surface.
 
 Stopping a turn does not itself run the next queued message. If pending rows remain, Kandev sets their session's **Auto-run** switch to OFF. Expand the queue and turn Auto-run ON when you want FIFO processing to continue.
 
 The expanded queue also lets you pause or discard stale work. Its compact header places the **Auto-run** and **Auto-merge** pills beside the queue count. **Remove** is available for every visible pending row, including messages from users, peer agents, workflows, and server actions; **Clear all** removes all visible pending rows in that session. Only user-origin rows remain editable. A message already reserved for delivery is hidden from the queue and cannot be cancelled with these controls.
 
 Use **Auto-run** for normal queue motion. ON runs one eligible row per turn in FIFO order; OFF lets the current response finish and holds later rows. The setting belongs to the session and survives an empty queue, reload, and backend restart. A pending clarification or another lifecycle guard can leave the queue waiting while the switch remains ON. **Auto-merge** controls automatic folding of later compatible admissions. It initially follows the install-wide value and follows later global changes until you change the pill. That first change creates a session override that remains independent for the session's lifetime.
+
+### Send while a session resumes
+
+You can write and send the next prompt while an existing session is starting or resuming when its queue identity is ready. Kandev stores the prompt in the session queue, clears the composer after admission, and shows the normal queued-message indicator. The prompt runs when the session becomes ready and Auto-run is ON.
+
+If Auto-run is OFF, the prompt remains pending until you turn Auto-run ON in the queue controls. If resume fails, the accepted prompt stays in the queue with the session and is available after a later successful recovery. Environment preparation without a usable session queue does not enable Send.
 
 Every row has **Send Now** for targeted priority. It sends that row directly when the session is promptable or replaces the captured active turn after backend cancellation acknowledgement. A successful Send Now turns Auto-run ON, runs the selected row first, then continues the remaining rows as separate FIFO turns without ordinary Cancel side effects. **Clear all** discards the visible queue. The chat toolbar's **Cancel** immediately stops the active turn, sends no queued prompt, parks any pending backlog by turning Auto-run OFF, and can complete the workflow step or move the task to review.
 
@@ -75,11 +83,85 @@ A CLI-passthrough profile displays the agent's native terminal interface in a PT
 
 Use **Threads** to read active task conversations side by side without opening each task. Open it from the workspace view control or navigation, or go to **`/threads`**.
 
-Threads shows one column for each task with an active primary agent session. The column header shows the task status, workflow context, and any explicit permission or question that needs your attention. A normal waiting state does not mean that the agent asked a question.
+Threads shows one conversation tile for each task with an active primary agent session. The tile header shows the task status, workflow context, and any explicit permission or question that needs your attention. A normal waiting state does not mean that the agent asked a question.
 
-On desktop, use the session tabs in a column to switch between any existing session for that task. On a phone, tap the session control and choose a session from the bottom sheet. The selected conversation keeps its normal reply controls, so you can answer the agent without leaving Threads.
+On desktop, use the session tabs in a tile to switch between any existing session for that task. On a phone, tap the session control and choose a session from the bottom sheet. You can reply in the selected conversation without leaving Threads.
 
-Select **Open task** in a column when you need the complete task workbench. To link directly to a task and session, use a Threads URL with `taskId` and `sessionId` query parameters.
+### Choose a layout and composer visibility
+
+1. Open **View settings** beside the saved view name. On a phone or touch
+   tablet, tap the view name first, then **View settings**.
+2. Under **Display**, choose **Columns** for full-height chats or **Grid** for
+   two rows. Layout choices are kept inside View settings.
+3. Optionally enable **Auto-hide composer** and adjust **Maximum chats**.
+4. Changes preview immediately. Use **Save** to update the view, **Save as**
+   to create another view, or **Discard** to restore its saved settings.
+
+Save or discard changes in **View settings** before switching saved views.
+The view picker keeps your draft intact until you choose one of those actions.
+
+Defaults are Columns, auto-hide off, and five total chats. Grid uses that same
+chat limit across both rows; increase Maximum chats if you want more chats.
+Each conversation scrolls independently, and the deck scrolls sideways when
+needed. Short windows temporarily show Columns with an explanation in Display; Grid
+returns when there is enough height, without changing the saved choice.
+
+With auto-hide enabled on a mouse or trackpad, the whole composer and its
+controls hide when idle. Only the existing CI popover remains, when available.
+Hover over a chat or focus its tile with the keyboard to reveal the composer.
+The composer slides and fades in or out; reduced-motion settings make the
+change immediate. CI stays available throughout.
+The normal **Cancel** control remains available in the composer while an agent runs.
+
+Typing, attachments, focused menus, and pending send/upload/cancellation
+operations keep the composer open. Questions, permissions, and recovery
+actions remain visible without hovering. **Hide composer** preserves an
+unsent draft and returns focus to the tile; press **Enter** or move the pointer
+out and back in to reopen it. Hiding does not cancel plugin operations.
+
+### Navigate on a phone
+
+Phones show one conversation at a time, even when Grid is saved. On phones
+and touch tablets, the composer stays visible; the saved auto-hide preference
+still applies when you return to a mouse or trackpad layout.
+
+On a phone, each conversation fills the screen width. The topbar shows your
+position beside the view name; small decks also show page dots. Position follows
+your swipe, even while the next conversation is loading. Swipe sideways,
+or tap the task title to choose a thread
+from a bottom sheet. The picker also shows task status, workflow, and step.
+Tap the view name below **Threads** at the top to change views. Use the separate
+topbar menu button for Quick Chat, Quick Terminal, and system status.
+
+If a warning appears beside the view name on a phone, open the view picker to
+retry the failed saved-view update or dismiss the warning.
+
+### Open or manage a task
+
+Select **Open task** in a tile when you need the complete task workbench. To link directly to a task and session, use a Threads URL with `taskId` and `sessionId` query parameters.
+
+To manage the task without leaving Threads, select **Task actions** (the three
+dots beside **Open task**). On desktop, you can also right-click the task
+header; conversation text and editors keep their normal context menus.
+The menu offers **Priority**, **Move to**, **Send to workflow**, supported
+**Link** choices, **Archive**, and **Delete**, according to availability.
+
+On a phone, the choices open in an inset bottom sheet. Choose a workflow and
+then a step in the same sheet; **Back** returns to the previous choices.
+Actions apply to the task whose menu you opened, even if its selected session
+changes. Canceling a confirmation leaves the task unchanged. See
+[archive and deletion behavior](tasks-and-workflows.md#archive-unarchive-and-delete)
+for confirmation preferences and cleanup consequences.
+
+Once you confirm **Archive**, its conversation disappears immediately while
+cleanup continues. With archive confirmation disabled, choosing **Archive** is
+enough. If the request fails, the task returns when your current filters and
+chat limit allow, without taking focus from the thread you are using.
+
+If an action or view filter removes your current thread, Threads selects the
+next remaining thread, otherwise the previous one. If neither survives from
+the previous view, it selects the first thread in the new view. The empty view
+appears only when no threads remain. Your workspace and view settings stay in place.
 
 <details>
 <summary>Let agents coordinate sessions</summary>

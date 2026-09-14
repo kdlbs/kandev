@@ -52,6 +52,29 @@ func TestIndexedGitConfigMergeCollapsesOnlyExactBoundaryOverlap(t *testing.T) {
 	}
 }
 
+func TestIndexedGitConfigMergeRecognizesAlreadyForwardedSnapshot(t *testing.T) {
+	base := environmentWithEntries(
+		Entry{Key: "notes.augment.mergeStrategy", Value: "union"},
+		Entry{Key: "core.hooksPath", Value: "/user/hooks"},
+	)
+	forwarded := environmentWithEntries(
+		Entry{Key: "notes.augment.mergeStrategy", Value: "union"},
+		Entry{Key: "core.hooksPath", Value: "/user/hooks"},
+		Entry{Key: "credential.https://github.com.helper", Value: "!kandev host helper"},
+	)
+	merged, err := Merge(base, forwarded)
+	if err != nil {
+		t.Fatalf("Merge() error = %v", err)
+	}
+
+	if got := merged["GIT_CONFIG_COUNT"]; got != "3" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 3", got)
+	}
+	if got := merged["GIT_CONFIG_KEY_2"]; got != "credential.https://github.com.helper" {
+		t.Fatalf("GIT_CONFIG_KEY_2 = %q, want forwarded helper", got)
+	}
+}
+
 func TestIndexedGitConfigMergeRetainsMeaningfulRepeatedEntries(t *testing.T) {
 	merged, err := Merge(environmentWithEntries(
 		Entry{Key: "url.https://github.com/.insteadOf", Value: "git@github.com:"},
@@ -74,6 +97,20 @@ func TestIndexedGitConfigMergeRejectsMalformedBlock(t *testing.T) {
 	}, nil)
 	if err == nil {
 		t.Fatal("Merge() error = nil, want malformed Git config error")
+	}
+}
+
+func TestIndexedGitConfigMergeRejectsCombinedEntryLimit(t *testing.T) {
+	baseEntries := make([]Entry, maxEntries)
+	for index := range baseEntries {
+		baseEntries[index] = Entry{Key: "test.key", Value: "value"}
+	}
+
+	_, err := Merge(environmentWithEntries(baseEntries...), environmentWithEntries(
+		Entry{Key: "credential.https://github.com.helper", Value: "!gh auth git-credential"},
+	))
+	if err == nil {
+		t.Fatal("Merge() error = nil, want combined entry limit error")
 	}
 }
 

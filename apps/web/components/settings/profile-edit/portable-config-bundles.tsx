@@ -16,6 +16,7 @@ import {
 } from "@kandev/ui/drawer";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import type { AgentConfigBundle } from "@/lib/api/domains/agent-config-api";
 
 type AgentConfigOptionsProps = {
@@ -138,7 +139,7 @@ function PortableConfigInfo({ isSSH, testId }: { isSSH: boolean; testId: string 
       aria-haspopup={usesTouchDrawer ? "dialog" : undefined}
       aria-expanded={usesTouchDrawer ? open : undefined}
       data-testid={testId}
-      className={usesTouchDrawer ? "h-11 w-11 shrink-0" : "h-7 w-7 shrink-0"}
+      className={`${controlSizingClassName("icon")} shrink-0`}
     >
       <IconAlertTriangle className="size-4 text-amber-500" aria-hidden="true" />
     </Button>

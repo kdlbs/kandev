@@ -66,6 +66,30 @@ func TestCanonicalInventoryMatches_AcceptsLegacyUnscopedRowWhenNoScopedRowsExist
 	}
 }
 
+func TestCanonicalInventoryMatches_ScopedLocalBranchSuppressesLegacyFallback(t *testing.T) {
+	spec := RepoSpec{RepositoryID: "repo-1", BranchIdentitySlug: "main"}
+	rows := []*models.TaskEnvironmentRepo{
+		{RepositoryID: "repo-1", BranchSlug: "main", WorktreeID: ""},
+		{RepositoryID: "repo-1", BranchSlug: "", WorktreeID: "worktree-legacy"},
+	}
+
+	if got := canonicalInventoryMatches(spec, rows, false); got != 1 {
+		t.Fatalf("canonicalInventoryMatches() = %d, want 1 (scoped row must suppress legacy fallback)", got)
+	}
+}
+
+func TestCanonicalInventoryMatches_ScopedRowOnOtherRepoDoesNotSuppressFallbackForThisRepo(t *testing.T) {
+	spec := RepoSpec{RepositoryID: "repo-1", BranchIdentitySlug: "main"}
+	rows := []*models.TaskEnvironmentRepo{
+		{RepositoryID: "repo-1", BranchSlug: "", WorktreeID: "worktree-legacy"},
+		{RepositoryID: "repo-2", BranchSlug: "main", WorktreeID: "worktree-scoped"},
+	}
+
+	if got := canonicalInventoryMatches(spec, rows, true); got != 1 {
+		t.Fatalf("canonicalInventoryMatches() = %d, want 1 (other repo's scoped row must not suppress repo-1 fallback)", got)
+	}
+}
+
 func TestReuseExistingEnvironment_WorktreeReuseKeepsTaskDirName(t *testing.T) {
 	repo := newMockRepository()
 	e := newTestExecutor(t, &mockAgentManager{}, repo)

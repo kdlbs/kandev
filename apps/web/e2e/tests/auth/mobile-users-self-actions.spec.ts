@@ -136,16 +136,20 @@ test.describe.serial("users self-actions guard (mobile)", () => {
       ),
     ).toBe(true);
 
-    // Phone action remains in target row. Confirmation morphs only action
-    // region, leaving identity and current state visible.
+    // A named sheet leaves the original card and its controls mounted.
     const rolePatch = waitForHttp(page, "PATCH", new RegExp(`/api/v1/users/${memberId}$`));
     const roleRefresh = waitForHttp(page, "GET", /^\/api\/v1\/users$/);
-    await memberRow.getByTestId("users-table-toggle-role").tap();
-    const roleConfirmation = memberRow.getByTestId("users-table-inline-confirmation");
+    const roleTrigger = memberRow.getByTestId("users-table-toggle-role");
+    await roleTrigger.tap();
+    const roleConfirmation = page.getByRole("dialog");
     await expect(roleConfirmation).toBeVisible();
     await expect(memberRow.getByTestId("users-table-email")).toBeVisible();
     await expect(memberRow.getByTestId("users-table-role")).toContainText("member");
     await expect(roleConfirmation).toContainText(`Change ${MEMBER.email} to admin?`);
+    await roleConfirmation.getByRole("button", { name: "Cancel" }).tap();
+    await expect(roleTrigger).toBeFocused();
+    await expect(memberRow.getByTestId("users-table-role")).toContainText("member");
+    await roleTrigger.tap();
     const roleConfirmButton = roleConfirmation.getByTestId("users-table-confirm");
     await expect(roleConfirmButton).toBeVisible();
     const roleConfirmBox = await roleConfirmButton.boundingBox();
@@ -159,7 +163,7 @@ test.describe.serial("users self-actions guard (mobile)", () => {
     const statusPatch = waitForHttp(page, "PATCH", new RegExp(`/api/v1/users/${disabledAdminId}$`));
     const statusRefresh = waitForHttp(page, "GET", /^\/api\/v1\/users$/);
     await disabledAdminRow.getByTestId("users-table-toggle-status").tap();
-    const statusConfirmation = disabledAdminRow.getByTestId("users-table-inline-confirmation");
+    const statusConfirmation = page.getByRole("dialog");
     await expect(statusConfirmation).toBeVisible();
     await expect(statusConfirmation).toContainText(`Re-enable ${DISABLED_ADMIN.email}?`);
     const statusConfirmButton = statusConfirmation.getByTestId("users-table-confirm");

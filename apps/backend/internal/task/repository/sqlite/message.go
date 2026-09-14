@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/admission"
 )
 
 // Message operations
@@ -61,6 +62,49 @@ func (r *Repository) CreateMessage(ctx context.Context, message *models.Message)
 		message.UpdatedAt = message.CreatedAt
 	}
 	return r.insertMessageWithSessionLock(ctx, message, requestsInput, messageType, metadataJSON)
+}
+
+// CreateMessageWithInitialTaskBrief persists a user message while atomically
+// deciding whether the supplied prepared-session candidate owns the session's
+// first prompt slot.
+func (r *Repository) CreateMessageWithInitialTaskBrief(
+	ctx context.Context,
+	message *models.Message,
+	candidate *admission.InitialTaskBriefCandidate,
+) error {
+	if candidate == nil {
+		return r.CreateMessage(ctx, message)
+	}
+	if message.ID == "" {
+		message.ID = uuid.New().String()
+	}
+	if message.AuthorType == "" {
+		message.AuthorType = models.MessageAuthorUser
+	}
+	if message.AuthorType != models.MessageAuthorUser {
+		return fmt.Errorf("initial task brief requires a user message")
+	}
+
+	requestsInput := 0
+	if message.RequestsInput {
+		requestsInput = 1
+	}
+	messageType := string(message.Type)
+	if messageType == "" {
+		messageType = string(models.MessageTypeMessage)
+	}
+	metadataJSON := "{}"
+	if message.Metadata != nil {
+		metadataBytes, err := json.Marshal(message.Metadata)
+		if err != nil {
+			return fmt.Errorf("failed to serialize message metadata: %w", err)
+		}
+		metadataJSON = string(metadataBytes)
+	}
+
+	return r.createUserMessageWithBoundaryAndInitialTaskBrief(
+		ctx, message, requestsInput, messageType, metadataJSON, candidate,
+	)
 }
 
 func (r *Repository) insertMessageRow(

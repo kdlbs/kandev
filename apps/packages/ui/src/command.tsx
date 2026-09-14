@@ -40,6 +40,7 @@ function CommandDialog({
   className,
   showCloseButton = false,
   overlayClassName,
+  contentProps,
   ...props
 }: React.ComponentProps<typeof Dialog> & {
   title?: string;
@@ -47,15 +48,21 @@ function CommandDialog({
   className?: string;
   showCloseButton?: boolean;
   overlayClassName?: string;
+  /** Optional overrides for the owning dialog, such as an application-local confirmation step. */
+  contentProps?: React.ComponentProps<typeof DialogContent>;
 }) {
   return (
     <Dialog {...props}>
       <DialogContent
+        {...contentProps}
         className={cn("rounded-xl! p-0 overflow-hidden", className)}
         showCloseButton={showCloseButton}
         overlayClassName={overlayClassName}
       >
-        <DialogHeader className="sr-only">
+        <DialogHeader
+          className="sr-only"
+          aria-hidden={contentProps?.["aria-labelledby"] ? true : undefined}
+        >
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
@@ -71,7 +78,7 @@ function CommandInput({
 }: React.ComponentProps<typeof CommandPrimitive.Input>) {
   return (
     <div data-slot="command-input-wrapper" className="p-1 pb-0">
-      <InputGroup className="bg-input/20 dark:bg-input/30 h-8! border-0">
+      <InputGroup className="bg-input/20 dark:bg-input/30 border-0">
         <CommandPrimitive.Input
           data-slot="command-input"
           className={cn(

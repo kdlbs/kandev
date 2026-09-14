@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -85,28 +86,46 @@ func (e *Executor) EnsureSessionForAgentWithCreation(
 
 // maxOfficeSessionCreateAttempts bounds EnsureSessionForAgentWithCreation's
 // create-then-recover loop (AC-003.3): one initial attempt plus one retry
-// after losing a create race and finding no live winner to reuse yet.
+// after losing a create race or observing a stale task-derived runner.
 // Unbounded retry would spin forever if the guard and the recovery lookup
 // disagree in a way that never resolves.
 const maxOfficeSessionCreateAttempts = 2
 
 // createOfficeSessionWithBoundedRecovery attempts to create a fresh office
-// session, and on losing the race to a concurrent creator (
-// taskrepo.ErrOfficeSessionRaceConflict) re-reads the pair and reuses the
-// winner instead of surfacing the conflict. A non-conflict create failure,
-// or a failure while re-reading after a conflict, is returned as itself —
-// never laundered into the sentinel and never as a nil session with a nil
-// error.
+// session. It reloads a task-derived runner once when the persistence guard
+// rejects a stale snapshot, and on losing the race to a concurrent creator
+// (taskrepo.ErrOfficeSessionRaceConflict) it re-reads the pair and reuses the
+// winner instead of surfacing the conflict. A non-conflict create failure, or
+// a failure while re-reading after a conflict, is returned as itself — never
+// laundered into the sentinel and never as a nil session with a nil error.
 func (e *Executor) createOfficeSessionWithBoundedRecovery(
 	ctx context.Context, task *v1.Task, agentInstanceID, agentProfileID, executorID, executorProfileID string,
 ) (*models.TaskSession, bool, error) {
 	var lastErr error
+	runnerProfileExplicit := taskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != "")
 	for attempt := 0; attempt < maxOfficeSessionCreateAttempts; attempt++ {
 		created, err := e.createOfficeSession(ctx, task, agentInstanceID, agentProfileID, executorID, executorProfileID)
 		if err == nil {
 			return created, true, nil
 		}
 		lastErr = err
+		if errors.Is(err, models.ErrTaskRunnerChanged) && !runnerProfileExplicit && attempt == 0 {
+			refreshed, refreshedExecutorProfileID, refreshErr := e.reloadTaskForRunnerRetry(ctx, task.ID)
+			if refreshErr != nil {
+				return nil, false, fmt.Errorf("reload task after runner change: %w", refreshErr)
+			}
+			if refreshed == nil {
+				return nil, false, fmt.Errorf("reload task after runner change: task %s not found", task.ID)
+			}
+			task = refreshed
+			executorProfileID = refreshedExecutorProfileID
+			if err := e.PreflightManagedGitCredentials(
+				ctx, task.WorkspaceID, task.ID, executorID, executorProfileID,
+			); err != nil {
+				return nil, false, err
+			}
+			continue
+		}
 		if !errors.Is(err, taskrepo.ErrOfficeSessionRaceConflict) {
 			return nil, false, err
 		}
@@ -284,6 +303,9 @@ func (e *Executor) createOfficeSession(
 	ctx context.Context, task *v1.Task, agentInstanceID, agentProfileID, executorID, executorProfileID string,
 ) (*models.TaskSession, error) {
 	metadata := cloneMetadata(task.Metadata)
+	runnerResolvedFromTask, taskRunnerProfileID := taskRunnerResolution(
+		task, executorProfileID, taskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != ""),
+	)
 
 	primaryTaskRepo, err := e.repo.GetPrimaryTaskRepository(ctx, task.ID)
 	if err != nil {
@@ -305,18 +327,20 @@ func (e *Executor) createOfficeSession(
 		sessionAgentProfileID = agentProfileID
 	}
 	session := &models.TaskSession{
-		ID:                   uuid.New().String(),
-		TaskID:               task.ID,
-		AgentProfileID:       sessionAgentProfileID,
-		ExecutionProfileID:   agentProfileID,
-		RepositoryID:         repositoryID,
-		BaseBranch:           baseBranch,
-		State:                models.TaskSessionStateCreated,
-		StartedAt:            now,
-		UpdatedAt:            now,
-		AgentProfileSnapshot: agentProfileSnapshot,
-		IsPassthrough:        isPassthrough,
-		Metadata:             metadata,
+		ID:                            uuid.New().String(),
+		TaskID:                        task.ID,
+		AgentProfileID:                sessionAgentProfileID,
+		ExecutionProfileID:            agentProfileID,
+		RepositoryID:                  repositoryID,
+		BaseBranch:                    baseBranch,
+		State:                         models.TaskSessionStateCreated,
+		StartedAt:                     now,
+		UpdatedAt:                     now,
+		AgentProfileSnapshot:          agentProfileSnapshot,
+		IsPassthrough:                 isPassthrough,
+		Metadata:                      metadata,
+		TaskRunnerResolvedFromTask:    runnerResolvedFromTask,
+		TaskRunnerProfileAtResolution: taskRunnerProfileID,
 	}
 	if executorProfileID != "" {
 		session.ExecutorProfileID = executorProfileID

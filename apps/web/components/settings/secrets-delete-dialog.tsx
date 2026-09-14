@@ -16,7 +16,9 @@ import {
 } from "@kandev/ui/alert-dialog";
 
 import { ActionConfirmPopover } from "@/components/confirmation/action-confirm-popover";
+import { MobileActionConfirmation } from "@/components/confirmation/mobile-action-confirmation";
 import type { SecretListItem, SecretReference } from "@/lib/types/http-secrets";
+import { settingsActionClassName } from "./settings-control";
 import { secretReferenceLabel } from "./secret-delete-error";
 
 type SecretDeleteConfirmationProps = {
@@ -41,31 +43,41 @@ export function SecretDeleteConfirmation({
 }: SecretDeleteConfirmationProps) {
   const { t } = useTranslation();
 
+  const description = loading ? (
+    t("settings:checkingSecretReferences")
+  ) : (
+    <Trans i18nKey="settings:thisWillPermanentlyRemoveSecret" values={{ name: secret.name }}>
+      This will permanently remove{" "}
+      <span className="font-medium text-foreground">{secret.name}</span>. This action cannot be
+      undone.
+    </Trans>
+  );
+  const actions = {
+    open,
+    description,
+    cancelLabel: t("settings:cancel"),
+    confirmLabel: t("settings:deleteSecret"),
+    confirmAriaLabel: t("settings:deleteSecretNamed", { name: secret.name }),
+    confirmTestId: "secret-delete-confirm",
+    confirmDisabled: loading,
+    onOpenChange,
+    onConfirm,
+  };
   return (
-    <ActionConfirmPopover
-      open={open}
-      anchorRef={anchorRef}
-      title={t("settings:deleteSecret")}
-      description={
-        loading ? (
-          t("settings:checkingSecretReferences")
-        ) : (
-          <Trans i18nKey="settings:thisWillPermanentlyRemoveSecret" values={{ name: secret.name }}>
-            This will permanently remove{" "}
-            <span className="font-medium text-foreground">{secret.name}</span>. This action cannot
-            be undone.
-          </Trans>
-        )
+    <MobileActionConfirmation
+      {...actions}
+      targetKey={secret.id}
+      title={t("settings:deleteSecretNamed", { name: secret.name })}
+      focusReturnRef={anchorRef}
+      fallback={
+        <ActionConfirmPopover
+          {...actions}
+          anchorRef={anchorRef}
+          title={t("settings:deleteSecret")}
+          testId="secret-delete-confirm-popover"
+          onCancel={onCancel}
+        />
       }
-      cancelLabel={t("settings:cancel")}
-      confirmLabel={t("settings:deleteSecret")}
-      confirmAriaLabel={t("settings:deleteSecretNamed", { name: secret.name })}
-      confirmTestId="secret-delete-confirm"
-      confirmDisabled={loading}
-      testId="secret-delete-confirm-popover"
-      onOpenChange={onOpenChange}
-      onCancel={onCancel}
-      onConfirm={onConfirm}
     />
   );
 }
@@ -115,7 +127,7 @@ export function SecretDeleteConflictDialog({
           </div>
         </AlertDialogDescription>
         <AlertDialogFooter className="border-t bg-muted/20 px-5 py-4 sm:px-6">
-          <AlertDialogCancel className="min-h-12 w-full cursor-pointer sm:min-h-9 sm:w-auto">
+          <AlertDialogCancel className={settingsActionClassName("w-full cursor-pointer sm:w-auto")}>
             {t("common:close")}
           </AlertDialogCancel>
         </AlertDialogFooter>

@@ -3,39 +3,29 @@ package engine
 import (
 	"context"
 	"strings"
+
+	"github.com/kandev/kandev/internal/workflow/stepentry"
 )
 
-// sessionShapedActionKinds are the step-entry action kinds a route with a
-// live arriving session already executes today — through the orchestrator's
-// own inline entry handler on most routes, and through
-// HandleTriggerSessionShapedOnly on the workflow-switch route. DispatchStepEntry
-// never runs these: running them a second time would launch or prompt an
-// agent twice (AC-OFFICE-STEP-ENTRY-001.3, .5).
-var sessionShapedActionKinds = map[ActionKind]bool{
-	ActionEnablePlanMode:    true,
-	ActionAutoStartAgent:    true,
-	ActionResetAgentContext: true,
-	ActionSetSessionMode:    true,
-}
-
-// sessionIndependentActionKinds are the step-entry action kinds
-// DispatchStepEntry executes. None of them reads or mutates the arriving
-// session, so every one is safe to run for an arrival with no live session
-// (AC-OFFICE-STEP-ENTRY-001.1).
-var sessionIndependentActionKinds = map[ActionKind]bool{
-	ActionClearDecisions:             true,
-	ActionQueueRunForEachParticipant: true,
-	ActionQueueRun:                   true,
-	ActionRunCodeReview:              true,
-	ActionEnsureParticipantSeat:      true,
-}
-
+// isSessionShapedActionKind reports whether kind is one of the step-entry
+// action kinds a route with a live arriving session already executes today —
+// through the orchestrator's own inline entry handler on most routes, and
+// through HandleTriggerSessionShapedOnly on the workflow-switch route.
+// DispatchStepEntry never runs these: running them a second time would
+// launch or prompt an agent twice (AC-OFFICE-STEP-ENTRY-001.3, .5). Reads
+// the single ownership declaration (AC-OFFICE-STEP-ENTRY-DISPATCH-002.1)
+// instead of keeping a private list.
 func isSessionShapedActionKind(kind ActionKind) bool {
-	return sessionShapedActionKinds[kind]
+	return stepentry.OwnedByMarker(string(kind))
 }
 
+// isSessionIndependentActionKind reports whether kind is one of the
+// step-entry action kinds DispatchStepEntry executes. None of them reads or
+// mutates the arriving session, so every one is safe to run for an arrival
+// with no live session (AC-OFFICE-STEP-ENTRY-001.1). Reads the single
+// ownership declaration instead of keeping a private list.
 func isSessionIndependentActionKind(kind ActionKind) bool {
-	return sessionIndependentActionKinds[kind]
+	return stepentry.OwnedByLedger(string(kind))
 }
 
 // StepEntryActionResult records the outcome of one action DispatchStepEntry
@@ -62,7 +52,19 @@ type StepEntryActionResult struct {
 // (AC-OFFICE-STEP-ENTRY-001.10) — see
 // docs/specs/office/system-design/step-entry-sequence-execution.md
 // ("Where 'this entry already ran' is recorded").
-func (e *Engine) DispatchStepEntry(ctx context.Context, taskID, workflowID, stepID, entryID string) []StepEntryActionResult {
+//
+// markerEntryID is the workflow_step_entries row allocated for this arrival
+// (0 when none was allocated). A marker-bearing action (clear_decisions,
+// queue_run_for_each_participant — stepentry.MarkerBearing) is routed through
+// markerExecutor when both it and markerEntryID are set, claiming its marker
+// before executing so a redelivered arrival is a safe no-op
+// (AC-OFFICE-STEP-ENTRY-DISPATCH-002.3/.4). Per AC-002.10, a marker-bearing
+// action that fails or loses its claim abandons the remainder of this
+// entry's sequence — later positions must not run against state an earlier,
+// unfinished marker-bearing action never actually produced (e.g. the fan-out
+// after a clear_decisions that never committed). Every other ledger-owned
+// kind keeps the pre-convergence record-and-continue behaviour.
+func (e *Engine) DispatchStepEntry(ctx context.Context, taskID, workflowID, stepID, entryID string, markerEntryID int64) []StepEntryActionResult {
 	step, err := e.store.LoadStep(ctx, workflowID, stepID)
 	if err != nil {
 		return []StepEntryActionResult{{Err: err}}
@@ -90,6 +92,17 @@ func (e *Engine) DispatchStepEntry(ctx context.Context, taskID, workflowID, step
 			// re-count an outcome (e.g. already_seated, or a second
 			// malformed-role warning) that AC-004.7 requires collapsed to
 			// one per role per entry.
+			continue
+		}
+		if e.markerExecutor != nil && markerEntryID != 0 && stepentry.MarkerBearing(string(action.Kind)) {
+			abandon, execErr := e.markerExecutor.ExecuteMarkerBearingStepEntryAction(ctx, taskID, step, action, action.DeclaredPosition, markerEntryID)
+			if abandon {
+				break
+			}
+			results = append(results, StepEntryActionResult{Kind: action.Kind, Err: execErr})
+			if execErr != nil {
+				break
+			}
 			continue
 		}
 		results = append(results, StepEntryActionResult{

@@ -24,6 +24,7 @@ import type { WorkflowSnapshotData } from "@/lib/state/slices/kanban/types";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import { AgentLogo } from "@/components/agent-logo";
 import type { TaskCreateLaunchPreview } from "@/components/task-create-dialog-launch-preview";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 type StepItem = {
   id: string;
@@ -121,7 +122,7 @@ function WorkflowSelectorTrigger({
       <Button
         type="button"
         variant="ghost"
-        className="min-h-11 w-auto min-w-0 max-w-full justify-between cursor-pointer md:min-h-7"
+        className={`${controlSizingClassName("standard")} w-auto min-w-0 max-w-full justify-between cursor-pointer`}
         data-testid="workflow-selector-trigger"
       >
         <IconLogicBuffer className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -145,7 +146,7 @@ function LaunchDestinationInfo() {
       type="button"
       variant="ghost"
       size="icon"
-      className="h-6 w-6 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground [@media(pointer:coarse)]:h-11 [@media(pointer:coarse)]:w-11"
+      className="shrink-0 cursor-pointer text-muted-foreground hover:text-foreground"
       aria-label={label}
       aria-haspopup={usesTouchDrawer ? "dialog" : undefined}
       aria-expanded={usesTouchDrawer ? drawerOpen : undefined}

@@ -296,12 +296,12 @@ func TestLauncherProcessTreeHelper(t *testing.T) {
 		t.Fatalf("write descendant pid file: %v", err)
 	}
 	waitForFile(t, descendantReadyFile)
-	if err := os.WriteFile(rootReadyFile, []byte("ready"), 0o600); err != nil {
-		t.Fatalf("write root ready file: %v", err)
-	}
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGTERM, syscall.SIGUSR1)
 	defer signal.Stop(signals)
+	if err := os.WriteFile(rootReadyFile, []byte("ready"), 0o600); err != nil {
+		t.Fatalf("write root ready file: %v", err)
+	}
 	if got := <-signals; got != syscall.SIGTERM {
 		t.Fatalf("root received signal %v, want SIGTERM", got)
 	}
@@ -327,12 +327,12 @@ func TestLauncherProcessTreeDescendantHelper(t *testing.T) {
 	}
 	readyFile := os.Getenv("KANDEV_LAUNCHER_PROCESS_TREE_DESCENDANT_READY_FILE")
 	termFile := os.Getenv("KANDEV_LAUNCHER_PROCESS_TREE_DESCENDANT_TERM_FILE")
-	if err := os.WriteFile(readyFile, []byte("ready"), 0o600); err != nil {
-		t.Fatalf("write descendant ready file: %v", err)
-	}
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, syscall.SIGTERM)
 	defer signal.Stop(signals)
+	if err := os.WriteFile(readyFile, []byte("ready"), 0o600); err != nil {
+		t.Fatalf("write descendant ready file: %v", err)
+	}
 	for got := range signals {
 		if got == syscall.SIGTERM {
 			if err := os.WriteFile(termFile, []byte("term"), 0o600); err != nil {

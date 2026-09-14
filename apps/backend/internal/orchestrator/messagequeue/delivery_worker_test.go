@@ -106,7 +106,7 @@ func TestProcessDueDeliveriesRetainsFullQueueReceiptAndPromotesItOnce(t *testing
 	reserved, ok := service.ReserveQueued(ctx, "target-session")
 	require.True(t, ok)
 	require.Equal(t, stored.QueueEntryID, reserved.ID)
-	require.NoError(t, service.AcknowledgeQueued(ctx, "target-session", reserved.ID))
+	require.NoError(t, service.AcknowledgeQueued(ctx, reserved))
 	stored, err = ledger.GetDelivery(ctx, delivery.ID)
 	require.NoError(t, err)
 	assert.Equal(t, DeliveryDelivered, stored.State)
@@ -185,7 +185,7 @@ func TestAcceptedQueuedDeliveryDoesNotReplayAfterRestart(t *testing.T) {
 	// This is the synchronous accepted-prompt callback's transaction. A crash
 	// after it commits but before the caller returns must not resurrect either
 	// the FIFO row or its receipt on a restarted worker.
-	require.NoError(t, service.AcknowledgeQueued(ctx, "target-session", reserved.ID))
+	require.NoError(t, service.AcknowledgeQueued(ctx, reserved))
 	restarted := NewService(repo, 1, logger.Default())
 	processed, err = restarted.ProcessDueDeliveries(ctx, now.Add(time.Hour), "worker-restarted")
 	require.NoError(t, err)
@@ -269,7 +269,7 @@ func TestAcknowledgeQueuedDeliveryFailureRetainsAmbiguousReceiptWithoutReplay(t 
 	require.NoError(t, err)
 	reserved, ok := service.ReserveQueued(ctx, "target-session")
 	require.True(t, ok)
-	require.Error(t, service.AcknowledgeQueued(ctx, "target-session", reserved.ID))
+	require.Error(t, service.AcknowledgeQueued(ctx, reserved))
 
 	// The delivery is marked ambiguous in the ledger so an operator can inspect
 	// it, but the queue entry is removed to prevent a permanent FIFO blockage.
@@ -314,7 +314,7 @@ func TestAcknowledgeQueuedDeliveryFinalizesDirectInterruptReceiptFromEntryMetada
 	// QueueAndInterrupt can accept this entry before its caller returns to
 	// attach queue_entry_id. The callback must still terminalize this exact
 	// reserved direct receipt from the trusted FIFO metadata.
-	require.NoError(t, service.AcknowledgeQueued(ctx, "target-session", reserved.ID))
+	require.NoError(t, service.AcknowledgeQueued(ctx, reserved))
 	stored, err := ledger.GetDelivery(ctx, delivery.ID)
 	require.NoError(t, err)
 	assert.Equal(t, DeliveryDelivered, stored.State)
@@ -350,7 +350,7 @@ func TestDeliveryRecoveryLifecycleProcessesStartupScanAndStops(t *testing.T) {
 	service.StopDeliveryRecovery()
 	reserved, ok := service.ReserveQueued(context.Background(), "target-session")
 	require.True(t, ok)
-	require.NoError(t, service.AcknowledgeQueued(context.Background(), "target-session", reserved.ID))
+	require.NoError(t, service.AcknowledgeQueued(context.Background(), reserved))
 	second, _, err := ledger.CreateOrGetDelivery(context.Background(), Delivery{
 		SenderTaskID:    "source-task",
 		SenderSessionID: "source-session",

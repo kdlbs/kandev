@@ -33,6 +33,7 @@ import {
   syncActiveTaskSession,
 } from "@/components/task/task-page-content-helpers";
 import { TaskPageInner } from "@/components/task/task-page-inner";
+import { TaskRemovalBoundary } from "@/components/task/task-removal-boundary";
 import { GridSpinner } from "@/components/grid-spinner";
 
 type TaskPageContentProps = {
@@ -331,7 +332,7 @@ function useTaskPageData(
   };
 }
 
-export function TaskPageContent({
+function TaskPageContentLive({
   task: initialTask,
   taskId: initialTaskId = null,
   sessionId = null,
@@ -415,5 +416,15 @@ export function TaskPageContent({
       onTaskUnarchived={onTaskUnarchived}
       taskCanvases={taskCanvases}
     />
+  );
+}
+
+export function TaskPageContent(props: TaskPageContentProps) {
+  const taskId = props.taskId ?? props.task?.id ?? null;
+
+  return (
+    <TaskRemovalBoundary taskId={taskId}>
+      <TaskPageContentLive {...props} />
+    </TaskRemovalBoundary>
   );
 }

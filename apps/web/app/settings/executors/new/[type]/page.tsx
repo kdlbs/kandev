@@ -19,6 +19,7 @@ import {
 import type { ScriptPlaceholder } from "@/lib/api/domains/settings-api";
 import { EXECUTOR_ICON_MAP, getExecutorLabel } from "@/lib/executor-icons";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 import { serializeSettingsRevision } from "@/components/settings/settings-save-revision";
 import { ProfileDetailsCard } from "@/components/settings/profile-edit/profile-details-card";
 import {
@@ -113,9 +114,8 @@ function CreateProfileHeader({ type, typeInfo }: { type: string; typeInfo: Execu
         </div>
         <Button
           variant="outline"
-          size="sm"
           onClick={() => router.push(EXECUTORS_ROUTE)}
-          className="min-h-11 w-full cursor-pointer text-sm md:min-h-7 md:w-auto md:text-xs"
+          className={settingsActionClassName("w-full cursor-pointer text-sm md:w-auto md:text-xs")}
         >
           {t("executors:backToExecutors")}
         </Button>

@@ -1,6 +1,10 @@
 import { type Page, test as base } from "@playwright/test";
 import { backendFixture, type BackendContext } from "./backend";
 import { hasDocker } from "./docker-probe";
+import {
+  buildKubernetesWorkerImages,
+  type KubernetesWorkerImages,
+} from "./kubernetes-worker-images";
 import { type KubernetesCluster, provisionKubernetesCluster } from "./kubernetes-tools";
 import { ApiClient } from "../helpers/api-client";
 import type { WorkflowStep } from "../../lib/types/http";
@@ -98,7 +102,12 @@ export async function seedKubernetesBackend(
 
 export const kubernetesTest = backendFixture.extend<
   { testPage: Page; kubernetesCleanup: void },
-  { apiClient: ApiClient; cluster: KubernetesCluster; seedData: KubernetesSeedData }
+  {
+    apiClient: ApiClient;
+    cluster: KubernetesCluster;
+    seedData: KubernetesSeedData;
+    workerImages: KubernetesWorkerImages;
+  }
 >({
   apiClient: [
     async ({ backend }, use) => {
@@ -129,6 +138,18 @@ export const kubernetesTest = backendFixture.extend<
       }
     },
     { scope: "worker", timeout: 600_000 },
+  ],
+
+  workerImages: [
+    async ({ cluster }, use) => {
+      const images = await buildKubernetesWorkerImages(cluster);
+      try {
+        await use(images);
+      } finally {
+        await images.dispose();
+      }
+    },
+    { scope: "worker", timeout: 900_000 },
   ],
 
   seedData: [

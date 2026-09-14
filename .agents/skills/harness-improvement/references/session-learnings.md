@@ -8,9 +8,20 @@ For each learning, extract:
 
 - **Trigger:** when future agents should apply it.
 - **Failure mode:** what went wrong or wasted time.
+- **Evidence:** the observed command, assertion, log, or source that supports
+  the lesson. Keep source task/PR links in the collection record.
+- **Applicability:** the conditions where the lesson holds and known exceptions.
 - **Correct action:** exact behavior, command, fallback, or interpretation.
 - **Verification:** how an agent knows the workaround succeeded.
 - **Home:** skill, agent, script, AGENTS.md, or command.
+- **Existing guidance:** the rule this lesson replaces or strengthens.
+
+Keep unverified explanations in the collection record as hypotheses.
+Before promotion, verify the explanation against current code or authoritative
+documentation. One verified incident can justify a narrowly scoped rule.
+Do not turn its workaround into a universal requirement without supporting evidence.
+Keep session history in the collection record and reusable instructions in the
+owning skill or scoped guidance. Encode deterministic checks in scripts and tests.
 
 Prefer this shape inside skills:
 
@@ -31,11 +42,11 @@ only on explicit user request or to remediate a PR/CI finding.
 
 ## Placement Rules
 
-- PR/CI/review-thread behavior belongs in `.agents/skills/pr-fixup/SKILL.md`.
+- PR/CI/review-thread behavior belongs in `.agents/skills/pr-fixup/`.
 - PR creation/body/push behavior belongs in `.agents/skills/pr/SKILL.md` or `.agents/skills/push/SKILL.md`.
 - Full repo verification belongs in `.agents/skills/verify/SKILL.md`.
 - TDD/test-level guidance belongs in `.agents/skills/tdd/SKILL.md`.
-- E2E commands and flake triage belong in `.agents/skills/e2e/SKILL.md`.
+- E2E commands and flake triage belong in `.agents/skills/e2e/`.
 - Runtime debugging belongs in `.agents/skills/debug/`.
 - Backend/frontend conventions belong in the closest scoped `AGENTS.md`.
 - Repeated fragile commands should become or update a `scripts/` helper, with syntax and mocked behavior checks.
