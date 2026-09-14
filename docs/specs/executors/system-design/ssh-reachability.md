@@ -405,9 +405,9 @@ retry against a host that just refused a connection adds cost, not information.
 
 ## Security
 
-The probe uses the pinned fingerprint on every dial, so a host-key change is a
-detected `host_key` failure and never a silent re-pin; the stored fingerprint is
-read-only to this path. `host_key` reports `unreachable` on its first occurrence
+The probe uses the pinned fingerprint on the dial to the **target**, so a
+host-key change there is a detected `host_key` failure and never a silent
+re-pin; the stored fingerprint is read-only to this path. `host_key` reports `unreachable` on its first occurrence
 rather than waiting out the threshold: a mismatch is possible interception, and
 delaying it a full interval is a security cost with no accuracy benefit.
 Credentials are unchanged: the probe reuses the executor's configured identity
@@ -421,6 +421,25 @@ place key material or agent socket contents into `message`.
 The probe opens no remote shell and runs no remote command, so it grants nothing
 beyond what the manual test already exercises, and adds no new trust boundary.
 
+**`ProxyJump` is a second hop with a weaker trust model, and the reason set must
+not paper over it.** An executor pins one fingerprint, and it belongs to the
+target. `dialViaJump` verifies the bastion against `~/.ssh/known_hosts` instead,
+accepting an absent host with a logged warning — OpenSSH's
+`StrictHostKeyChecking=accept-new`. Two consequences the probe inherits:
+
+- A bastion key *mismatch* is rejected, but it surfaces as `ssh: bastion dial:
+  …`, not as `errHostKeyMismatch`, so `ClassifyDialError` would call it
+  `network` or `unknown`. The interception signal that
+  `AC-EXECUTORS-SSH-REACHABILITY-001.7` requires to flip `unreachable` on the
+  first occurrence would instead wait out `failureThreshold` under the wrong
+  reason. The classifier must map a bastion host-key rejection to `host_key`
+  too; the reason describes what failed, not which hop failed.
+- Every bastion-path error is about the *bastion*, while the record's `host` is
+  the target. A bastion that is down reports the target unreachable and sends an
+  operator to a machine that is fine — the same misattribution as the firewall
+  message of 2026-09-06, from a different cause. The record must name the host
+  actually dialled, or say the failure was on the jump hop.
+
 ## Observability
 
 Structured `zap` logs plus `expvar` counters under `/debug/vars`, following the
@@ -433,6 +452,11 @@ Structured `zap` logs plus `expvar` counters under `/debug/vars`, following the
   a pass is still running: the interval is shorter than a pass.
 - `executor_ssh_reachability_write_refused_total`, when a guard drops a write. A
   rising value means configuration churn, not a fault.
+- `executor_ssh_reachability_probe_discarded_total`, when a probe is dropped
+  because `Stop` cancelled it. `probe_total` is labelled by outcome, and a
+  cancelled probe has no outcome, so without this the shutdown discard above is
+  the one drop in the package with no counter behind it — the same reason
+  `write_refused_total` exists.
 - `executor_ssh_reachability_probe_duration_ms`, the last pass's aggregate
   probe duration.
 

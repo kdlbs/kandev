@@ -77,6 +77,9 @@ the probe from task 01 and the store from task 02.
   `0` falls below it and the kill switch becomes a 60-second cadence. Requires a matching entry in
   `auditedStartupEnvironmentInventory()` in `catalog_test.go`, a new
   `ExecutorsConfig` section on `config.Config`, and its `SetDefault`.
+- `executor_ssh_reachability_probe_discarded_total`, incremented when `Stop`
+  cancels a probe and its result is dropped: a cancelled probe has no outcome,
+  so `probe_total` cannot represent it.
 - `expvar` counters `executor_ssh_reachability_probe_total` (by outcome),
   `…_state_transitions_total` (by destination state), `…_pass_skipped_total`,
   `…_probe_duration_ms`, each also a structured `zap` log. Transitions log at

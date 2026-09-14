@@ -52,6 +52,12 @@ as an authentication failure. Nothing calls this yet.
   and delegate the handler to it. A missing host or a missing
   `ssh_host_fingerprint` fails resolution and classifies as `config` without a
   dial.
+- A bastion (`ProxyJump`) host-key rejection classifies as `host_key`, not
+  `network`. It arrives as `ssh: bastion dial: …` rather than
+  `errHostKeyMismatch`, because only the target hop is fingerprint-pinned; the
+  reason names what failed, not which hop. Without this an interception on the
+  jump path waits out `failureThreshold` under the wrong reason. See the engine
+  design's *Security* section.
 - The stored message is the dial error text only. Key material and agent-socket
   contents must not reach it.
 
