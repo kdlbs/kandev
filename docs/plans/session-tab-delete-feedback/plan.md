@@ -1,21 +1,34 @@
 ---
-spec: docs/specs/ui/requirements/session-tab-delete-feedback.md
 created: 2026-08-05
-amended: 2026-08-22
+updated: 2026-09-14
 status: shipped
+requirements:
+  - REQ-UI-SESSION-TAB-DELETE-FEEDBACK-001
+system_design:
+  - ../../specs/ui/system-design/session-tab-close-and-delete.md
 ---
 
 # Implementation Plan: Session tab delete feedback
 
 ## Overview
 
-Give the desktop Dockview session-tab close flow local pending feedback while preserving the shared
-session lifecycle behavior used by context menus and mobile. First make the shared delete action
-selectively suppress progress/success toasts, then replace Dockview's opaque close icon with a
-small repository-owned action that can render an X or spinner. Finish with focused desktop and
-mobile Playwright coverage. A later localized-confirmation refinement keeps the tab-X dialog,
-anchors context-menu confirmation to its Delete item, and morphs the phone picker row into inline
-touch actions.
+Separate desktop Agent-tab panel visibility from session lifecycle. Closing a tab,
+hiding it from the context menu, or using **Close Others** removes only Dockview
+panels and keeps every conversation recoverable from **+ > Agents** across reload.
+Permanent deletion stays an explicit, confirmed Delete action on the desktop
+context menu and the phone Sessions picker, with confirmation surfaces that stay
+beside the initiating action.
+
+The original waves gave the tab close flow local pending feedback and localized
+confirmations. The current wave makes the panel-only close contract durable: the
+per-environment hide record persists through reload, every restore path respects
+it, and pruning waits for authoritative session hydration so a reload into an
+initially empty store cannot erase it.
+
+## Task index
+
+- [x] [Task 01: Non-destructive session tab closing](task-01-inline-delete-feedback.md) (done)
+- [x] [Task 02: Session deletion E2E](task-02-session-deletion-e2e.md) (done)
 
 ## Frontend
 
@@ -32,18 +45,24 @@ behind the success result. Existing active-session handoff and `onDeleted` order
 Add `apps/web/components/task/session-tab-close-action.tsx` as the repository-owned close action.
 It preserves Dockview's `dv-default-tab-action` class and the existing
 `session-tab-close-<sessionId>` test ID, prevents the close target from becoming tab-activation
-intent, and renders either `IconX` or `GridSpinner`. While pending it is disabled, carries
+intent, and renders the close affordance. While a delete is pending it is disabled, carries
 `aria-busy`, and retains a localized accessible name.
 
-Update `apps/web/components/task/session-tab.tsx` to render `DockviewDefaultTab` without its opaque
-close control and place the new action in the same tab chrome. Track whether the open confirmation
-came from the X or the context menu. Only confirmed X-originated deletion uses error-only feedback
-and drives the close spinner; context-menu deletion retains the default toast mode. Cancelling the
-dialog clears the origin without entering the pending state.
+Update `apps/web/components/task/session-tab.tsx` so the X closes only the Dockview panel: it is
+shown only while more than one agent-session panel is visible, and closing removes the panel without
+a confirmation dialog or session request. Track whether an open delete confirmation came from the
+context menu; only confirmed menu-originated deletion runs the shared delete action.
 
-Add the close action's accessible label to `apps/web/src/locales/en/common.json` and
-`apps/web/src/locales/zh-cn/common.json`, then regenerate
-`apps/web/src/locales/pseudo/common.json` with `pnpm run i18n:pseudo`.
+### Persisted hide record
+
+Add `apps/web/lib/env-hidden-sessions.ts` persisting the per-environment hidden set in session
+storage beside the env layout. `apps/web/components/task/dockview-session-tabs.ts` rehydrates the
+set when a fresh Dockview API binds the environment, gates the auto session-tab effect, sibling
+materialization, and the chat safety net on it, and prunes it only after the store's task sessions
+are authoritatively hydrated. `apps/web/lib/state/dockview-env-switch.ts`,
+`apps/web/lib/state/dockview-store.ts`, and
+`apps/web/components/task/dockview-layout-restore.ts` filter every restore path through the hidden
+set. Explicit reopen from **+ > Agents** and explicit delete both clear the record.
 
 ### Mobile design contract
 

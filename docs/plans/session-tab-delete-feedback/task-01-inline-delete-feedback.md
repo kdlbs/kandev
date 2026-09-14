@@ -1,19 +1,33 @@
 ---
 id: "01-inline-delete-feedback"
-title: "Inline session delete feedback"
+title: "Non-destructive session tab closing"
 status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/ui/requirements/session-tab-delete-feedback.md"
+requirements:
+  - REQ-UI-SESSION-TAB-DELETE-FEEDBACK-001
+acceptance_criteria:
+  - AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.1
+  - AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.2
+  - AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.3
+  - AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.4
+  - AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.5
+  - AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.6
+  - AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.7
+  - AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.8
+system_design:
+  - ../../specs/ui/system-design/session-tab-close-and-delete.md
 ---
 
-# Task 01: Inline session delete feedback
+# Task 01: Non-destructive session tab closing
 
 ## Intent
 
-Move X-initiated agent-session deletion feedback into the tab close control without changing the
-confirmation, context-menu feedback, mobile feedback, or successful session cleanup behavior.
+Make the desktop Agent tab's X, Hide, and Close Others remove only Dockview panels, keep every
+conversation recoverable from **+ > Agents**, keep deletion an explicit confirmed action, and keep
+the per-environment hide record durable across reload without changing session lifecycle
+semantics or the mobile Sessions picker.
 
 ## Acceptance
 
@@ -26,14 +40,18 @@ confirmation, context-menu feedback, mobile feedback, or successful session clea
 
 ## Files likely touched
 
-- `apps/web/hooks/domains/session/use-session-actions.ts`
-- `apps/web/hooks/domains/session/use-session-actions.test.ts`
 - `apps/web/components/task/session-tab.tsx`
 - `apps/web/components/task/session-tab-close-action.tsx`
-- `apps/web/components/task/session-tab-close-action.test.tsx`
-- `apps/web/src/locales/en/common.json`
-- `apps/web/src/locales/zh-cn/common.json`
-- `apps/web/src/locales/pseudo/common.json`
+- `apps/web/components/task/dockview-session-tabs.ts`
+- `apps/web/components/task/dockview-layout-restore.ts`
+- `apps/web/components/task/session-reopen-menu.tsx`
+- `apps/web/hooks/domains/session/use-session-messages.ts`
+- `apps/web/lib/env-hidden-sessions.ts`
+- `apps/web/lib/state/dockview-env-switch.ts`
+- `apps/web/lib/state/dockview-store.ts`
+- `apps/web/e2e/tests/session/session-tab-management.spec.ts`
+- `apps/web/e2e/tests/session/session-tab-close-guard.spec.ts`
+- `apps/web/src/locales/en/task.json` and translations
 
 ## Dependencies
 
@@ -77,29 +95,26 @@ feedback.
 
 ## Results
 
-- Added the optional `remove({ feedback })` contract. Default callers retain loading/success/error
-  toasts; the tab-X mode suppresses progress/success and emits one error toast on failure while
-  preserving success-only store/panel cleanup.
-- Replaced Dockview's opaque session close icon with a localized repository-owned X/spinner action
-  that preserves the close test ID and activation guard. Confirmation origin tracking limits the
-  inline behavior to tab-X deletes; context-menu and mobile callers remain on toast feedback.
-- Added deterministic idle/pending close-action coverage, including disabled state, `aria-busy`, and
-  blocked repeat activation.
-- `rtk pnpm --filter @kandev/web test -- components/task/session-tab-close-action.test.tsx hooks/domains/session/use-session-actions.test.ts` — 2 files, 15 tests passed.
-- `rtk pnpm run typecheck` — passed.
-- `rtk pnpm run i18n:check` — passed with pseudo locale in sync (the existing 670 zh-cn parity
-  notices are advisory).
-- `rtk pnpm run i18n:ratchet` — passed.
-- `rtk pnpm exec eslint components/task/session-tab.tsx components/task/session-tab-close-action.tsx hooks/domains/session/use-session-actions.ts hooks/domains/session/use-session-actions.test.ts components/task/session-tab-close-action.test.tsx e2e/tests/session/session-tab-management.spec.ts e2e/tests/session/mobile-session-deletion.spec.ts` — passed.
-- `rtk git diff --check` — passed.
-
-Generated artifact: `apps/web/src/locales/pseudo/common.json`. No external side effects beyond local
-WebSocket test mocks.
+- The tab X now closes only its Dockview panel: no confirmation, no session request, and no
+  lifecycle change. The sole visible agent panel keeps no X regardless of session count or state.
+- The context menu offers **Hide**; **Close Others** closes only sibling agent panels in its
+  Dockview group; desktop context-menu Delete keeps its anchored popover and the phone picker keeps
+  its confirmation step with unchanged deletion behavior.
+- The per-environment hide record persists in session storage beside the env layout. A fresh
+  Dockview API rehydrates it after reload, every restore path (fast env switch, saved-layout
+  fromJSON, sibling materialization, maximize restore, custom-layout reuse) filters through it, and
+  pruning waits for authoritative task-session hydration so an initially empty store cannot erase
+  it. Explicit reopen clears the record and restores the same conversation.
+- Regressions cover: hidden siblings stay absent through synchronization; reload keeps the hidden
+  panel absent until reopened from the + menu; empty-initial-sessions pruning is deferred until
+  hydration; the last-panel guard; Close Others scoping; unchanged delete flows.
+- Focused suites all green: components/task session-tab tests, lib/state, layout-restore,
+  session hooks, `pnpm run typecheck`, `pnpm run i18n:check`, and repo lint.
 
 ## Localized-confirmation follow-up
 
-The later shipped refinement preserves this task's tab-X dialog and feedback-mode contract while
-moving desktop context-menu confirmation into an anchored popover and phone confirmation into its
-Sessions picker row. Shared warning copy now lives in the purpose-neutral
+The shipped localization refinement kept this task's contract and moved desktop context-menu
+confirmation into an anchored popover and phone confirmation into its Sessions picker step.
+Shared warning copy lives in the purpose-neutral
 `components/task/session-delete-description.tsx`; the context-menu event and `preventDefault()`
 contracts are documented beside their public callback and Radix handler.
