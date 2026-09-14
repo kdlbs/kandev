@@ -18,14 +18,14 @@ func validateStartupSettings(cfg *Config) error {
 	errs = append(errs, configuredValidation(cfg, "agentctl.notificationQueueCapacity", cfg.Agentctl.NotificationQueueCapacity < 1024 || cfg.Agentctl.NotificationQueueCapacity > 131072, "agentctl.notificationQueueCapacity must be between 1024 and 131072")...)
 	errs = append(errs, configuredValidation(cfg, "planning.coalesceWindowMs", cfg.Planning.CoalesceWindowMs < 0, "planning.coalesceWindowMs must be zero or greater")...)
 	errs = append(errs, configuredValidation(cfg, "office.schedulerTickMs", cfg.Office.SchedulerTickMs <= 0, "office.schedulerTickMs must be positive")...)
-	errs = append(errs, configuredValidation(cfg, "office.maxConcurrentInstance", cfg.Office.MaxConcurrentInstance <= 0, "office.maxConcurrentInstance must be positive")...)
-	errs = append(errs, configuredValidation(cfg, "office.maxConcurrentWorkspace", cfg.Office.MaxConcurrentWorkspace <= 0, "office.maxConcurrentWorkspace must be positive")...)
-	errs = append(errs, configuredValidation(cfg, "office.workspaceBudgetPerHour", cfg.Office.WorkspaceBudgetPerHour <= 0, "office.workspaceBudgetPerHour must be positive")...)
-	errs = append(errs, configuredValidation(cfg, "office.routineBudgetPerHour", cfg.Office.RoutineBudgetPerHour <= 0, "office.routineBudgetPerHour must be positive")...)
-	errs = append(errs, configuredValidation(cfg, "office.promotionAgeMinutes", cfg.Office.PromotionAgeMinutes <= 0, "office.promotionAgeMinutes must be positive")...)
-	errs = append(errs, configuredValidation(cfg, "office.maxCausationDepth", cfg.Office.MaxCausationDepth <= 0, "office.maxCausationDepth must be positive")...)
-	errs = append(errs, configuredValidation(cfg, "office.selfTriggerAllowance", cfg.Office.SelfTriggerAllowance <= 0, "office.selfTriggerAllowance must be positive")...)
-	errs = append(errs, configuredValidation(cfg, "office.gateFailureThreshold", cfg.Office.GateFailureThreshold <= 0, "office.gateFailureThreshold must be positive")...)
+	// The 8 REQ-OFFICE-LAUNCH-SAFETY/REQ-OFFICE-BACKPRESSURE launch-safety
+	// keys (maxConcurrentInstance, maxConcurrentWorkspace,
+	// workspaceBudgetPerHour, routineBudgetPerHour, promotionAgeMinutes,
+	// maxCausationDepth, selfTriggerAllowance, gateFailureThreshold) are
+	// deliberately absent here: the spec requires a below-minimum value to
+	// clamp to its documented default and log a warning, not fail startup.
+	// See clampOfficeLaunchSafetyConfig, which runs earlier in Load and
+	// mutates cfg before this function ever sees these fields.
 	errs = append(errs, configuredValidation(cfg, "launcher.webPort", cfg.Launcher.WebPort < 1 || cfg.Launcher.WebPort > 65535, "launcher.webPort must be between 1 and 65535")...)
 	errs = append(errs, configuredValidation(cfg, "launcher.healthTimeoutMs", cfg.Launcher.HealthTimeoutMs <= 0, "launcher.healthTimeoutMs must be positive")...)
 	if len(errs) > 0 {

@@ -77,14 +77,14 @@ var yamlOnlyStartupKeys = map[string]struct{}{
 	"agentctl.notificationQueueCapacity": {},
 	"planning.coalesceWindowMs":          {},
 	"office.schedulerTickMs":             {},
-	"office.maxConcurrentInstance":       {},
-	"office.maxConcurrentWorkspace":      {},
-	"office.workspaceBudgetPerHour":      {},
-	"office.routineBudgetPerHour":        {},
-	"office.promotionAgeMinutes":         {},
-	"office.maxCausationDepth":           {},
-	"office.selfTriggerAllowance":        {},
-	"office.gateFailureThreshold":        {},
+	officeMaxConcurrentInstanceKey:       {},
+	officeMaxConcurrentWorkspaceKey:      {},
+	officeWorkspaceBudgetPerHourKey:      {},
+	officeRoutineBudgetPerHourKey:        {},
+	officePromotionAgeMinutesKey:         {},
+	officeMaxCausationDepthKey:           {},
+	officeSelfTriggerAllowanceKey:        {},
+	officeGateFailureThresholdKey:        {},
 	"observability.otlpEndpoint":         {},
 	"launcher.webPort":                   {},
 	"launcher.healthTimeoutMs":           {},
@@ -346,6 +346,44 @@ func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources
 	applyBoolEnv("launcher.noBrowser", &cfg.Launcher.NoBrowser, false, envSnapshot, sources)
 }
 
+// clampOfficeLaunchSafetyConfig clamps a below-minimum office.*
+// launch-safety value to its documented default and returns a warning
+// naming the key and the rejected value, per
+// AC-OFFICE-LAUNCH-SAFETY-001.5/003.1/004.3/005.1 and
+// AC-OFFICE-BACKPRESSURE-002.1/003.5: these values must degrade to their
+// default and let boot proceed, not fail startup. Defaults here must stay
+// in sync with applyStartupDefaults's and applyStartupEnvironment's
+// literals for the same keys. Only a YAML-sourced value can still be
+// invalid by the point this runs: applyStartupEnvironment's env path and
+// applyStartupDefaults's default path already resolve to a value >= 1.
+func clampOfficeLaunchSafetyConfig(cfg *Config) []string {
+	entries := []struct {
+		key   string
+		value *int
+		def   int
+	}{
+		{officeMaxConcurrentInstanceKey, &cfg.Office.MaxConcurrentInstance, 8},
+		{officeMaxConcurrentWorkspaceKey, &cfg.Office.MaxConcurrentWorkspace, 4},
+		{officeWorkspaceBudgetPerHourKey, &cfg.Office.WorkspaceBudgetPerHour, 120},
+		{officeRoutineBudgetPerHourKey, &cfg.Office.RoutineBudgetPerHour, 20},
+		{officePromotionAgeMinutesKey, &cfg.Office.PromotionAgeMinutes, 15},
+		{officeMaxCausationDepthKey, &cfg.Office.MaxCausationDepth, 8},
+		{officeSelfTriggerAllowanceKey, &cfg.Office.SelfTriggerAllowance, 3},
+		{officeGateFailureThresholdKey, &cfg.Office.GateFailureThreshold, 3},
+	}
+	var warnings []string
+	for _, e := range entries {
+		if *e.value >= 1 {
+			continue
+		}
+		warning := fmt.Sprintf("%s is configured as %d, which is below the minimum of 1; using the default %d instead", e.key, *e.value, e.def)
+		log.Print(warning)
+		warnings = append(warnings, warning)
+		*e.value = e.def
+	}
+	return warnings
+}
+
 func launcherHealthTimeoutDefault() int {
 	if profiles.DetectEnvironment() == profiles.EnvDev || profiles.DetectEnvironment() == profiles.EnvE2E {
 		return 600000
@@ -451,6 +489,7 @@ func applyBoundedIntEnv(key string, target *int, fallback, minimum, maximum int,
 	}
 	parsed, err := strconv.Atoi(strings.TrimSpace(raw))
 	if err != nil || parsed < minimum || parsed > maximum {
+		log.Printf("environment override for %s (%q) is out of range [%d,%d]; using default %d", key, raw, minimum, maximum, fallback)
 		*target = fallback
 		sources[key] = SourceDefault
 		return

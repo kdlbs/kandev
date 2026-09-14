@@ -803,6 +803,7 @@ func loadWithPath(configPath, homeDir string) (*Config, error) {
 	}
 	sources := applyStartupDefaultsAndEnvironment(&cfg, yamlKeys, profileDefaults, envSnapshot)
 	warnings := inspectSecretPermissions(selection, v)
+	warnings = append(warnings, clampOfficeLaunchSafetyConfig(&cfg)...)
 	cfg.Source = buildConfigSource(selection, v, sources, warnings)
 
 	if err := validateStartupSettings(&cfg); err != nil {
