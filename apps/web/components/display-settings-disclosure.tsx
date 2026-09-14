@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { IconChevronDown } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { cn } from "@/lib/utils";
@@ -34,8 +34,6 @@ export function DisplaySettingsDisclosure({
   touchTargets = false,
   summaryClassName,
 }: DisplaySettingsDisclosureProps) {
-  const generatedId = useId();
-  const contentId = `${testId}-content-${generatedId.replace(/:/g, "")}`;
   const [uncontrolledExpanded, setUncontrolledExpanded] = useState(defaultExpanded);
   const expanded = controlledExpanded ?? uncontrolledExpanded;
   const setExpanded = (next: boolean) => {
@@ -53,7 +51,6 @@ export function DisplaySettingsDisclosure({
           touchTargets && "min-h-11",
         )}
         aria-expanded={expanded}
-        aria-controls={contentId}
         data-testid={`${testId}-toggle`}
         onClick={() => setExpanded(!expanded)}
       >
@@ -80,11 +77,7 @@ export function DisplaySettingsDisclosure({
           aria-hidden="true"
         />
       </Button>
-      {expanded && (
-        <div id={contentId} className={contentClassName}>
-          {children}
-        </div>
-      )}
+      {expanded && <div className={contentClassName}>{children}</div>}
     </section>
   );
 }

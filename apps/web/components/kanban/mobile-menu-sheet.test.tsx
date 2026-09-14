@@ -190,6 +190,7 @@ describe("MobileMenuSheet — grouped display settings", () => {
     cleanup();
     renderSheet({ currentPage: "tasks" });
     expect(mobileGroupToggle("list-rows").getAttribute(ARIA_EXPANDED_ATTRIBUTE)).toBe("false");
+    expect(mobileGroupToggle("preview").getAttribute(ARIA_EXPANDED_ATTRIBUTE)).toBe("false");
     expect(screen.queryByTestId("mobile-display-preview-toggle")).toBeNull();
     expandGroup("list-rows");
     expect(screen.getByTestId("mobile-display-task-details-toggle")).not.toBeNull();

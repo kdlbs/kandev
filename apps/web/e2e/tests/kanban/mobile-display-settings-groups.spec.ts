@@ -82,6 +82,19 @@ test.describe("Mobile display settings groups", () => {
     await expect(reopened.getByTestId("mobile-board-sort")).toHaveCount(0);
   });
 
+  test("names the mobile workflow and repository filter controls", async ({ testPage }) => {
+    await testPage.goto("/tasks");
+    const card = await openMobileMenu(testPage);
+    await expandDisplaySettingsGroup(testPage, "filters", "mobile");
+
+    await expect(card.getByTestId("mobile-display-workflow-filter")).toHaveAccessibleName(
+      "Workflow",
+    );
+    await expect(card.getByTestId("mobile-display-repository-filter")).toHaveAccessibleName(
+      "Repository",
+    );
+  });
+
   test("keeps persisted board values visible after closing and reopening the drawer", async ({
     apiClient,
     seedData,

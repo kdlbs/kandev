@@ -104,4 +104,18 @@ test.describe("Display settings groups", () => {
     await testPage.keyboard.press("Escape");
     await expect(trigger).toBeFocused();
   });
+
+  test("keeps the workflow filter reachable on desktop Threads", async ({ testPage }) => {
+    await testPage.goto("/threads");
+
+    const trigger = testPage.getByTestId("display-button");
+    await expect(trigger).toBeVisible();
+    await trigger.click();
+    await expect(testPage.getByTestId("display-settings-content")).toBeVisible();
+    await expect(testPage.getByTestId("display-settings-sort-toggle")).toHaveCount(0);
+    await expect(testPage.getByTestId("display-settings-preview-toggle")).toHaveCount(0);
+
+    await expandDisplaySettingsGroup(testPage, "filters");
+    await expect(testPage.getByTestId("display-workflow-filter")).toBeVisible();
+  });
 });

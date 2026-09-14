@@ -96,6 +96,7 @@ function MobileDisplaySelects({ settings }: { settings: MobileDisplayOptionsProp
           >
             <SelectTrigger
               data-testid="mobile-display-workflow-filter"
+              aria-label={t("kanban:workflow")}
               className={mobileDisplayControlClass}
             >
               <SelectValue placeholder={t("kanban:allWorkflows")} />
@@ -122,6 +123,7 @@ function MobileDisplaySelects({ settings }: { settings: MobileDisplayOptionsProp
           >
             <SelectTrigger
               data-testid="mobile-display-repository-filter"
+              aria-label={t("kanban:repository")}
               className={mobileDisplayControlClass}
             >
               <SelectValue

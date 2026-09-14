@@ -98,5 +98,6 @@ describe("display settings summaries", () => {
     expect(buildDisplaySortSummary(t, "priority_desc")).toBe("Priority");
     expect(buildDisplayBooleanSummary(t, true)).toBe("On");
     expect(buildDisplayBooleanSummary(t, false)).toBe("Off");
+    expect(buildDisplayBooleanSummary(t, undefined)).toBe("Off");
   });
 });

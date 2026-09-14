@@ -30,6 +30,11 @@ async function selectWorkflowFilter(page: Page, optionLabel: string): Promise<vo
   await expandDisplaySettingsGroup(page, "filters");
   await page.getByTestId("display-workflow-filter").click();
   await pickListboxOption(page, optionLabel);
+  await expect(page.getByTestId("display-settings-content")).toBeVisible();
+  await expect(page.getByTestId("display-settings-filters-toggle")).toHaveAttribute(
+    "aria-expanded",
+    "true",
+  );
   await closeDisplayDropdown(page);
 }
 

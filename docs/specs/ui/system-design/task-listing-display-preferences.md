@@ -291,8 +291,11 @@ own portable preferences, while disclosure state is transient React state.
 `apps/web/components/kanban-display-dropdown.tsx` retain their current caller
 props and `useKanbanDisplaySettings` actions. Wrap existing field sections in
 Filters, Sort, Preview panel, and conditional List rows disclosures. Keep
-`currentPage === "kanban"` and Threads exclusions intact. Pipeline follows its
-existing caller/page semantics; do not infer eligibility from the visible label.
+`currentPage === "kanban"` board-only eligibility and Threads field exclusions
+intact. Desktop Threads renders the Filters surface so its workflow filter
+remains reachable; repository, board-only controls, plugins, and Preview remain
+omitted there. Pipeline follows its existing caller/page semantics; do not infer
+eligibility from the visible label.
 Registered plugin filters remain in Filters with their existing namespaced
 `pluginTaskFilterRegistrationKey` keys and callbacks.
 

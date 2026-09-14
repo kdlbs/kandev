@@ -66,7 +66,11 @@ function WorkflowSection({
         value={activeWorkflowId ?? "all"}
         onValueChange={(value) => onWorkflowChange(value === "all" ? null : value)}
       >
-        <SelectTrigger data-testid="display-workflow-filter" className="w-full border-border">
+        <SelectTrigger
+          data-testid="display-workflow-filter"
+          aria-label={t("kanban:workflow")}
+          className="w-full border-border"
+        >
           <SelectValue placeholder={t("kanban:selectWorkflow")} />
         </SelectTrigger>
         <SelectContent>
@@ -104,7 +108,11 @@ function RepositorySection({
         onValueChange={(value) => onRepositoryChange(value as string | "all")}
         disabled={repositories.length === 0}
       >
-        <SelectTrigger data-testid="display-repository-filter" className="w-full border-border">
+        <SelectTrigger
+          data-testid="display-repository-filter"
+          aria-label={t("kanban:repository")}
+          className="w-full border-border"
+        >
           <SelectValue
             placeholder={t(
               getRepositoryPlaceholderKey(repositoriesLoading, repositories.length === 0),
@@ -493,7 +501,7 @@ export function KanbanDisplayDropdown({
           const target = e.target as HTMLElement;
           if (
             triggerRef.current?.contains(target) ||
-            target.closest("[data-radix-select-content]")
+            target.closest('[data-slot="select-content"]')
           ) {
             e.preventDefault();
           }
