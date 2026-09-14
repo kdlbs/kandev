@@ -1,5 +1,5 @@
 ---
-status: current
+status: superseded
 system: plugins
 requirements:
   - REQ-PLUGINS-DIRECT-PROFILE-INVOCATION-001
@@ -8,6 +8,9 @@ owners:
   - kandev
 ---
 # Plugin Direct Agent Profile Invocation System Design
+
+> Superseded by [explicit invocation design](plugin-explicit-utility-invocation.md).
+> Retained as historical context for PR #2870.
 
 ## Purpose and boundaries
 

@@ -1,11 +1,14 @@
 ---
-status: active
+status: deprecated
 system: plugins
 created: 2026-09-14
 owners:
   - kandev
 ---
 # Plugin Direct Agent Profile Invocation Requirements
+
+> Superseded by [explicit invocation requirements](plugin-explicit-utility-invocation.md).
+> This document records the previous contract; do not implement its implicit routing.
 
 ## Overview
 

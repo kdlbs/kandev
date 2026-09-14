@@ -21,6 +21,10 @@ system_design:
 
 # Task 01: Direct Profile Invocation and Settings Rendering
 
+> Historical delivery record. [The replacement plan](../plugin-explicit-utility-invocation/plan.md) supersedes implicit host selection.
+> Previous completed checks do not verify the replacement API.
+
+
 ## Summary
 
 Add the direct `agent-profile` config format to Settings > Plugins, render

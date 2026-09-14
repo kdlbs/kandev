@@ -1043,13 +1043,12 @@ func startGatewayAndServe(
 	agentSettingsController.SetHostUtility(hostUtilityMgr)
 	profileReconciler := agentsettingscontroller.NewProfileReconciler(hostUtilityMgr, agentRegistry, repos.AgentSettings, log)
 
-	// Wire Host.InvokeUtilityAgent (ADR 0048): plugins delegate one-shot LLM
-	// calls to the utility agent selected in each plugin's configuration and
-	// runs them through the sessionless host-utility tier, at the first point
-	// where hostUtilityMgr is live.
-	if services.Plugins != nil && services.Utility != nil {
+	// Wire Host.InvokeUtilityAgent at the first point where the sessionless
+	// host-utility tier is live. The host reads the platform default from user
+	// settings; plugins provide any per-call override explicitly.
+	if services.Plugins != nil && services.User != nil {
 		services.Plugins.SetUtilityAgent(
-			pluginsUtilityAgentAdapter{svc: services.Utility, userSvc: services.User},
+			pluginsDefaultUtilityProfileAdapter{source: services.User},
 			pluginsAgentProfileAdapter{resolver: pluginProfileResolver},
 			pluginsHostUtilityAdapter{mgr: hostUtilityMgr},
 		)

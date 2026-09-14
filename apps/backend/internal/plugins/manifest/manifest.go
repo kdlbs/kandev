@@ -128,8 +128,8 @@ type Capabilities struct {
 	APIWrite []string `yaml:"api_write,omitempty" json:"api_write,omitempty"`
 	State    bool     `yaml:"state,omitempty" json:"state,omitempty"`
 	Secrets  bool     `yaml:"secrets,omitempty" json:"secrets,omitempty"`
-	// AgentInvoke gates Host.InvokeUtilityAgent (ADR 0048): a one-shot,
-	// non-interactive completion run by the operator-configured utility agent.
+	// AgentInvoke gates Host.InvokeUtilityAgent: a one-shot, non-interactive
+	// completion run by the platform default or an explicitly selected profile.
 	AgentInvoke bool `yaml:"agent_invoke,omitempty" json:"agent_invoke,omitempty"`
 	// Auth gates a plugin's ability to establish an authenticated kandev
 	// browser session for an external identity it has validated against an

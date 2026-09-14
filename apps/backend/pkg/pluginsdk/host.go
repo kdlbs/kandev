@@ -111,15 +111,19 @@ type Host interface {
 	// prompt to a task session.
 	Messages() MessageReader
 
-	// InvokeUtilityAgent runs a one-shot, non-interactive completion using the
-	// plugin's configured `agent_profile` (format `agent-profile`) or legacy
-	// `utility_agent` (format `utility-agent`) selection and returns its text.
-	// A non-empty `agent_profile` takes precedence when both are declared; an
-	// unset direct selection falls back only to a declared `utility_agent`.
-	// Requires the
-	// `agent_invoke` capability and returns gRPC FailedPrecondition for a
-	// missing, disabled, CLI-passthrough, or workspace-scoped selection.
-	InvokeUtilityAgent(ctx context.Context, prompt string) (string, error)
+	// InvokeUtilityAgent runs a one-shot, non-interactive completion. With no
+	// options, or an empty ProfileID, it uses the platform default utility
+	// profile. A non-empty ProfileID selects that profile for this call only.
+	// Requires the `agent_invoke` capability and returns gRPC FailedPrecondition
+	// for a missing or ineligible profile.
+	InvokeUtilityAgent(ctx context.Context, prompt string, options ...UtilityAgentOptions) (string, error)
+}
+
+// UtilityAgentOptions contains per-call utility completion options. ProfileID
+// is an agent-profile ID, not a utility-agent record ID. An empty value uses
+// the platform default.
+type UtilityAgentOptions struct {
+	ProfileID string
 }
 
 // TaskReader is the accessor behind Host.Tasks(), mirroring the Host data
@@ -384,8 +388,15 @@ func (h *grpcHostClient) Repositories() RepositoryReader {
 
 func (h *grpcHostClient) Messages() MessageReader { return grpcMessageReader{client: h.client} }
 
-func (h *grpcHostClient) InvokeUtilityAgent(ctx context.Context, prompt string) (string, error) {
-	resp, err := h.client.InvokeUtilityAgent(ctx, &pluginv1.InvokeUtilityAgentRequest{Prompt: prompt})
+func (h *grpcHostClient) InvokeUtilityAgent(ctx context.Context, prompt string, options ...UtilityAgentOptions) (string, error) {
+	if len(options) > 1 {
+		return "", status.Error(codes.InvalidArgument, "InvokeUtilityAgent accepts at most one options value")
+	}
+	req := &pluginv1.InvokeUtilityAgentWithOptionsRequest{Prompt: prompt}
+	if len(options) == 1 {
+		req.ProfileId = options[0].ProfileID
+	}
+	resp, err := h.client.InvokeUtilityAgentWithOptions(ctx, req)
 	if err != nil {
 		return "", err
 	}
@@ -718,7 +729,15 @@ func (s *grpcHostServer) EmitEvent(ctx context.Context, req *pluginv1.EmitEventR
 }
 
 func (s *grpcHostServer) InvokeUtilityAgent(ctx context.Context, req *pluginv1.InvokeUtilityAgentRequest) (*pluginv1.InvokeUtilityAgentResponse, error) {
-	text, err := s.impl.InvokeUtilityAgent(ctx, req.GetPrompt())
+	return s.invokeUtilityAgent(ctx, req.GetPrompt())
+}
+
+func (s *grpcHostServer) InvokeUtilityAgentWithOptions(ctx context.Context, req *pluginv1.InvokeUtilityAgentWithOptionsRequest) (*pluginv1.InvokeUtilityAgentResponse, error) {
+	return s.invokeUtilityAgent(ctx, req.GetPrompt(), UtilityAgentOptions{ProfileID: req.GetProfileId()})
+}
+
+func (s *grpcHostServer) invokeUtilityAgent(ctx context.Context, prompt string, options ...UtilityAgentOptions) (*pluginv1.InvokeUtilityAgentResponse, error) {
+	text, err := s.impl.InvokeUtilityAgent(ctx, prompt, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -998,7 +1017,7 @@ func (UnimplementedHostData) PluginOwnedTaskTrees() PluginOwnedTaskTreeManager {
 // "unimplemented Host extensions" embed both real Host implementations use —
 // so a Host that hasn't wired a utility agent (e.g. a test double) still
 // satisfies the interface, returning gRPC Unimplemented until overridden.
-func (UnimplementedHostData) InvokeUtilityAgent(context.Context, string) (string, error) {
+func (UnimplementedHostData) InvokeUtilityAgent(context.Context, string, ...UtilityAgentOptions) (string, error) {
 	return "", errUnimplementedHostData("utility_agent")
 }
 

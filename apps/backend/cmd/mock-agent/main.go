@@ -368,11 +368,22 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 		return resp, err
 	}
 	e := &emitter{ctx: promptCtx, conn: a.conn, sid: req.SessionId}
-	handlePrompt(e, prompt, a.model)
+	handlePrompt(e, prompt, a.sessionModel(req.SessionId))
 	if promptCtx.Err() != nil {
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
 	}
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+}
+
+func (a *mockAgent) sessionModel(sessionID acp.SessionId) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, option := range a.sessionConfig[sessionID] {
+		if option.Select != nil && option.Select.Id == "model" && option.Select.CurrentValue != "" {
+			return string(option.Select.CurrentValue)
+		}
+	}
+	return a.model
 }
 
 // Cancel handles session cancellation.

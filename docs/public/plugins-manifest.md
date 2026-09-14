@@ -100,14 +100,14 @@ config_schema:
     default_channel:
       { type: string, description: "Default channel for notifications" }
     notify_on_task_created: { type: boolean, default: true }
-    utility_agent:
+    agent_profile:
       {
         type: string,
-        format: utility-agent,
-        title: "Utility Agent",
-        description: "Agent used for plugin LLM calls",
+        format: agent-profile,
+        title: "Utility agent profile",
+        description: "Optional profile used for plugin LLM calls",
       }
-  required: ["bot_token", "default_channel", "utility_agent"]
+  required: ["bot_token", "default_channel"]
 
 agent_tools:
   - name: add_tag
@@ -206,7 +206,7 @@ for a complete authoring path.
 | `capabilities.api_write`           | no                                   | string[]                              | Gates Host writes independently of `api_read`. `tasks` permits `Host.Tasks().Create` and `.Update`; `messages` permits `Host.Messages().Send`. Undeclared writes return gRPC `PermissionDenied`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `capabilities.state`               | no                                   | bool                                  | Gates `Host.GetState`/`SetState`/`DeleteState`/`ListState`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | `capabilities.secrets`             | no                                   | bool                                  | Gates `Host.RevealSecret`/`GetSecret`/`SetSecret`/`DeleteSecret`. Calling any of them without this set to `true` returns gRPC `PermissionDenied`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| `capabilities.agent_invoke`        | no                                   | bool                                  | Gates `Host.InvokeUtilityAgent`: a one-shot completion for this plugin. Declare either `agent_profile` with `type: string` and `format: agent-profile`, or the legacy `utility_agent` format. The direct picker stores a stable global, enabled, non-CLI profile ID whose agent supports sessionless inference; a non-empty declared `agent_profile` takes precedence. When it is unset, the host accepts an active manifest-declared legacy `utility_agent`, or a retained legacy value only when a verified manifest transition recorded `LegacyUtilityAgentFallback`; arbitrary undeclared submitted `utility_agent` values are ignored. Calling without this capability returns gRPC `PermissionDenied`; a missing, deleted, disabled, CLI-passthrough, workspace-scoped, or non-inference non-empty direct selection returns gRPC `FailedPrecondition`. See ADR 0048. |
+| `capabilities.agent_invoke`        | no                                   | bool                                  | Gates `Host.InvokeUtilityAgent`, a one-shot completion. No options, or an empty `UtilityAgentOptions.ProfileID`, uses the current default profile from Settings > Utility Agents. A non-empty profile ID selects that exact eligible global, enabled, non-CLI profile whose agent supports sessionless inference. The host does not read plugin configuration or utility-agent records for selection. Calling without this capability returns gRPC `PermissionDenied`; a missing, deleted, disabled, CLI-passthrough, workspace-scoped, or non-inference explicit profile returns gRPC `FailedPrecondition` without fallback. See [explicit plugin utility selection](../decisions/2026-09-14-explicit-plugin-utility-selection.md). |
 | `capabilities.auth`                | no                                   | bool                                  | Lets the plugin log a visitor in against an external IdP (OIDC/SAML). Its webhook validates the token, then asserts the identity to Kandev via the `X-Kandev-Auth-Login` response header (`{provider, subject, email, display_name}`); Kandev mints the session and sets the cookie, so the plugin never sees the token. Requires authentication enabled; new users are provisioned as members, and Kandev never creates an admin nor auto-links to an existing admin account. **You MUST only assert an email the IdP verified as owned by the subject; a spoofed email claim is account takeover.** Highest-privilege capability; grant only to trusted plugins. See ADR 0050. |
 | `capabilities.user_state`          | no                                   | bool                                  | Gates `host.storage` (`get`/`set`/`delete`/`list`/`subscribe`), the authenticated per-user browser storage surface at `/api/plugins/{id}/user-state/...`. Unlike `capabilities.state` (the gRPC `Host.SetState` family, written by the plugin's own backend), this is reachable directly from the plugin's frontend bundle with no Go backend required; every read/write is scoped to the calling user. Calling the route without this capability returns `403`. See [Authoring a plugin](plugins-authoring.md) and the per-user-plugin-storage decision record.                                                                                                                 |
 | `webhooks[].key`                   | yes                                  | string                                | Must be unique within the manifest. Used in the relay path `POST /api/plugins/{id}/webhooks/{key}`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -336,13 +336,13 @@ persisting:
   but persists the selected agent's stable ID. Add the property to `required`
   when the plugin must always have a selection; optional fields include a
   **Not set** choice.
-- A string property named `agent_profile` with `format: agent-profile` is
-  rendered as a picker of enabled, global, non-CLI agent profiles whose agent
-  supports sessionless inference. The UI
-  stores the stable profile ID and keeps a stale saved value visible but
-  unavailable. It is the direct selection used by `Host.InvokeUtilityAgent`;
-  when both selectors are declared, a non-empty direct value wins and an unset
-  value falls back to the legacy selector.
+- A string property with `format: agent-profile` is rendered as a picker of
+  enabled, global, non-CLI agent profiles whose agent supports sessionless
+  inference. The UI stores the stable profile ID and keeps a stale saved value
+  visible but unavailable. The property is ordinary plugin configuration. The
+  plugin must pass a selected value through `UtilityAgentOptions.ProfileID`; an
+  empty value delegates to the platform default. The host does not infer
+  execution from the property's name or from any `utility-agent` property.
 - A property with `secret: true`, or `format: "password"`, is treated as a
   **secret field** and must be `type: string` (or untyped); a non-string
   secret is rejected. Secret values are moved into kandev's encrypted vault;

@@ -53,7 +53,6 @@ import (
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/share"
 	userservice "github.com/kandev/kandev/internal/user/service"
-	utilitymodels "github.com/kandev/kandev/internal/utility/models"
 	"github.com/kandev/kandev/internal/utility/profilebinding"
 	utilityservice "github.com/kandev/kandev/internal/utility/service"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
@@ -1417,9 +1416,16 @@ func (a pluginsHostUtilityAdapter) ExecuteProfilePrompt(ctx context.Context, pro
 	return res.Response, nil
 }
 
-type pluginsUtilityAgentAdapter struct {
-	svc     *utilityservice.Service
-	userSvc *userservice.Service
+type pluginsDefaultUtilityProfileSource interface {
+	GetDefaultUtilityAgentProfileID(ctx context.Context) (string, error)
+}
+
+type pluginsDefaultUtilityProfileAdapter struct {
+	source pluginsDefaultUtilityProfileSource
+}
+
+func (a pluginsDefaultUtilityProfileAdapter) GetDefaultUtilityAgentProfileID(ctx context.Context) (string, error) {
+	return a.source.GetDefaultUtilityAgentProfileID(ctx)
 }
 
 type pluginAgentProfileResolver interface {
@@ -1453,28 +1459,6 @@ func (a pluginsAgentProfileAdapter) GetProfileByID(ctx context.Context, id strin
 		WorkspaceID:      profile.WorkspaceID,
 		InferenceCapable: true,
 	}, nil
-}
-
-func (a pluginsUtilityAgentAdapter) GetAgentByID(ctx context.Context, id string) (*plugins.UtilityAgent, error) {
-	agent, err := a.svc.GetAgentByID(ctx, id)
-	if err != nil {
-		if errors.Is(err, utilityservice.ErrAgentNotFound) {
-			return nil, plugins.ErrUtilityAgentNotFound
-		}
-		return nil, err
-	}
-	profileID := agent.AgentProfileID
-	bindingState := agent.ProfileBindingState
-	if utilitymodels.UsesDefaultProfile(agent) && a.userSvc != nil {
-		profileID, err = a.userSvc.GetDefaultUtilityAgentProfileID(ctx)
-		if err != nil {
-			return nil, err
-		}
-		if profileID != "" {
-			bindingState = utilitymodels.ProfileBindingExplicit
-		}
-	}
-	return &plugins.UtilityAgent{Name: agent.Name, AgentID: agent.AgentID, Model: agent.Model, AgentProfileID: profileID, ProfileBindingState: bindingState, Enabled: agent.Enabled}, nil
 }
 
 // pluginsTaskWriterAdapter adapts the task service to the plugins package's

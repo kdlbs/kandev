@@ -1,6 +1,6 @@
 // host_utility.go implements pluginHost.InvokeUtilityAgent — the agent_invoke
-// Host capability (ADR 0048). Plugins delegate one-shot, non-interactive LLM
-// steps to the utility agent selected in their own configuration.
+// Host capability. Plugins can use the platform default or provide a profile
+// override for one invocation.
 package plugins
 
 import (
@@ -8,49 +8,29 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/kandev/kandev/pkg/pluginsdk"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
 
-const (
-	capabilityAgentInvoke = "agent_invoke"
-	// utilityAgentConfigKey is the manifest config_schema field plugins with
-	// agent_invoke declare. Its value is the selected utility agent's ID.
-	utilityAgentConfigKey = "utility_agent"
-	// agentProfileConfigKey is the manifest config_schema field that selects a
-	// profile directly for plugins that do not need a utility-agent record.
-	agentProfileConfigKey = "agent_profile"
-)
+const capabilityAgentInvoke = "agent_invoke"
 
-// ErrUtilityAgentNotFound lets backend adapters identify the one lookup error
-// that plugin calls should translate into a configuration failure.
-var ErrUtilityAgentNotFound = errors.New("utility agent not found")
-
-// ErrAgentProfileNotFound lets backend adapters identify a deleted direct
-// profile and translate it into the configured-plugin failure contract.
+// ErrAgentProfileNotFound identifies a deleted profile during host selection
+// or final runner validation.
 var ErrAgentProfileNotFound = errors.New("agent profile not found")
 
-// ErrAgentProfileIneligible lets backend adapters return the same typed
-// eligibility result used by the sessionless host-utility profile resolver.
+// ErrAgentProfileIneligible identifies a profile that cannot run a utility
+// completion during host selection or final runner validation.
 var ErrAgentProfileIneligible = errors.New("agent profile is not eligible for utility execution")
 
-// UtilityAgent is the execution-relevant portion of a configured utility
-// agent. backendapp adapts internal/utility/service.Service to this shape.
-type UtilityAgent struct {
-	Name                string
-	AgentID             string
-	Model               string
-	AgentProfileID      string
-	ProfileBindingState string
-	Enabled             bool
+// utilityDefaultProfileSource reads the platform default selected in user
+// settings. It is deliberately narrower than the utility-agent service.
+type utilityDefaultProfileSource interface {
+	GetDefaultUtilityAgentProfileID(ctx context.Context) (string, error)
 }
 
-type utilityAgentSource interface {
-	GetAgentByID(ctx context.Context, id string) (*UtilityAgent, error)
-}
-
-// AgentProfile is the execution-relevant portion of a direct profile
-// selection. backendapp adapts the agent-settings repository to this shape.
+// AgentProfile is the execution-relevant portion of a profile selection.
+// backendapp adapts the agent-settings resolver to this shape.
 type AgentProfile struct {
 	Enabled          bool
 	CLIPassthrough   bool
@@ -62,83 +42,58 @@ type agentProfileSource interface {
 	GetProfileByID(ctx context.Context, id string) (*AgentProfile, error)
 }
 
-// utilityRunner runs a one-shot completion for an agent type + model and
-// returns the response text.
+// utilityRunner runs a one-shot completion for a profile and returns the
+// response text.
 type utilityRunner interface {
 	ExecuteProfilePrompt(ctx context.Context, profileID, prompt string) (string, error)
 }
 
-// InvokeUtilityAgent runs the named utility agent selected in this plugin's
-// configuration. Missing, stale, and disabled selections are FailedPrecondition
-// so plugins cannot silently fall back to an unrelated model.
-func (h *pluginHost) InvokeUtilityAgent(ctx context.Context, prompt string) (string, error) {
+// InvokeUtilityAgent runs a one-shot, non-interactive completion. An empty
+// profile override resolves the current platform default for this call.
+func (h *pluginHost) InvokeUtilityAgent(
+	ctx context.Context,
+	prompt string,
+	options ...pluginsdk.UtilityAgentOptions,
+) (string, error) {
 	if !h.capabilities.AgentInvoke {
 		return "", permissionDenied(capabilityAgentInvoke)
 	}
-	var agents utilityAgentSource
+	if len(options) > 1 {
+		return "", status.Error(codes.InvalidArgument, "InvokeUtilityAgent accepts at most one options value")
+	}
+
+	var defaultProfile utilityDefaultProfileSource
 	var profiles agentProfileSource
 	var runner utilityRunner
 	if h.utilityDeps != nil {
-		agents, profiles, runner = h.utilityDeps()
+		defaultProfile, profiles, runner = h.utilityDeps()
 	}
-	if h.configs == nil {
-		return h.UnimplementedHostData.InvokeUtilityAgent(ctx, prompt)
+
+	profileID := ""
+	if len(options) == 1 {
+		profileID = options[0].ProfileID
 	}
-	config, err := h.configs.GetConfig(h.pluginID)
-	if err != nil {
-		return "", fmt.Errorf("plugins: read plugin config: %w", err)
-	}
-	if hasAgentProfileConfig(h.configSchema) {
-		profileID, _ := config[agentProfileConfigKey].(string)
-		if profileID != "" {
-			return h.invokeConfiguredAgentProfile(ctx, profileID, profiles, runner, prompt)
+	if profileID == "" {
+		if defaultProfile == nil || profiles == nil || runner == nil {
+			return h.UnimplementedHostData.InvokeUtilityAgent(ctx, prompt, options...)
+		}
+		var err error
+		profileID, err = defaultProfile.GetDefaultUtilityAgentProfileID(ctx)
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return "", status.FromContextError(err).Err()
+		}
+		if err != nil {
+			return "", fmt.Errorf("plugins: load default agent profile: %w", err)
+		}
+		if profileID == "" {
+			return "", status.Error(codes.FailedPrecondition, "no default agent profile configured")
 		}
 	}
-	// A verified manifest upgrade can retain its legacy selector even though the
-	// replacement schema no longer renders it. Do not treat arbitrary
-	// undeclared config as an agent selector.
-	if hasUtilityAgentConfig(h.configSchema) || h.legacyUtilityAgentFallback {
-		agentID, _ := config[utilityAgentConfigKey].(string)
-		if agentID != "" {
-			return h.invokeConfiguredUtilityAgent(ctx, agentID, agents, runner, prompt)
-		}
-	}
-	if hasAgentProfileConfig(h.configSchema) {
-		return "", errNoAgentProfile()
-	}
-	return "", errNoUtilityAgent()
+
+	return h.invokeAgentProfile(ctx, profileID, profiles, runner, prompt)
 }
 
-func (h *pluginHost) invokeConfiguredUtilityAgent(
-	ctx context.Context,
-	agentID string,
-	agents utilityAgentSource,
-	runner utilityRunner,
-	prompt string,
-) (string, error) {
-	if agents == nil || runner == nil {
-		return h.UnimplementedHostData.InvokeUtilityAgent(ctx, prompt)
-	}
-	agent, err := agents.GetAgentByID(ctx, agentID)
-	if errors.Is(err, ErrUtilityAgentNotFound) {
-		return "", status.Errorf(codes.FailedPrecondition, "configured utility agent %q not found", agentID)
-	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-		return "", status.FromContextError(err).Err()
-	}
-	if err != nil {
-		return "", fmt.Errorf("plugins: load configured utility agent %q: %w", agentID, err)
-	}
-	if !agent.Enabled {
-		return "", status.Errorf(codes.FailedPrecondition, "configured utility agent %q is disabled", agentID)
-	}
-	if agent.ProfileBindingState == "unconfigured" || agent.AgentProfileID == "" {
-		return "", status.Errorf(codes.FailedPrecondition, "configured utility agent %q has no usable agent profile", agentID)
-	}
-	return runner.ExecuteProfilePrompt(ctx, agent.AgentProfileID, prompt)
-}
-
-func (h *pluginHost) invokeConfiguredAgentProfile(
+func (h *pluginHost) invokeAgentProfile(
 	ctx context.Context,
 	profileID string,
 	profiles agentProfileSource,
@@ -150,57 +105,30 @@ func (h *pluginHost) invokeConfiguredAgentProfile(
 	}
 	profile, err := profiles.GetProfileByID(ctx, profileID)
 	if errors.Is(err, ErrAgentProfileNotFound) {
-		return "", status.Errorf(codes.FailedPrecondition, "configured agent profile %q not found", profileID)
+		return "", status.Errorf(codes.FailedPrecondition, "agent profile %q not found", profileID)
 	}
 	if errors.Is(err, ErrAgentProfileIneligible) {
-		return "", status.Errorf(codes.FailedPrecondition, "configured agent profile %q is not eligible for utility execution", profileID)
+		return "", status.Errorf(codes.FailedPrecondition, "agent profile %q is not eligible for utility execution", profileID)
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return "", status.FromContextError(err).Err()
 	}
 	if err != nil {
-		return "", fmt.Errorf("plugins: load configured agent profile %q: %w", profileID, err)
+		return "", fmt.Errorf("plugins: load agent profile %q: %w", profileID, err)
 	}
-	// Current adapters translate a deleted profile into ErrAgentProfileNotFound,
-	// but keep this guard so future implementations cannot silently treat a
-	// nil success result as an eligible profile.
 	if profile == nil {
-		return "", status.Errorf(codes.FailedPrecondition, "configured agent profile %q not found", profileID)
+		return "", status.Errorf(codes.FailedPrecondition, "agent profile %q not found", profileID)
 	}
 	if !profile.Enabled || profile.CLIPassthrough || profile.WorkspaceID != "" || !profile.InferenceCapable {
-		return "", status.Errorf(codes.FailedPrecondition, "configured agent profile %q is not eligible for utility execution", profileID)
+		return "", status.Errorf(codes.FailedPrecondition, "agent profile %q is not eligible for utility execution", profileID)
 	}
+
 	response, err := runner.ExecuteProfilePrompt(ctx, profileID, prompt)
 	if errors.Is(err, ErrAgentProfileNotFound) {
-		return "", status.Errorf(codes.FailedPrecondition, "configured agent profile %q not found", profileID)
+		return "", status.Errorf(codes.FailedPrecondition, "agent profile %q not found", profileID)
 	}
 	if errors.Is(err, ErrAgentProfileIneligible) {
-		return "", status.Errorf(codes.FailedPrecondition, "configured agent profile %q is not eligible for utility execution", profileID)
+		return "", status.Errorf(codes.FailedPrecondition, "agent profile %q is not eligible for utility execution", profileID)
 	}
 	return response, err
-}
-
-func hasAgentProfileConfig(schema map[string]any) bool {
-	return hasConfigField(schema, agentProfileConfigKey, "agent-profile")
-}
-
-func hasUtilityAgentConfig(schema map[string]any) bool {
-	return hasConfigField(schema, utilityAgentConfigKey, "utility-agent")
-}
-
-func hasConfigField(schema map[string]any, key, format string) bool {
-	properties, ok := schema["properties"].(map[string]any)
-	if !ok {
-		return false
-	}
-	property, ok := properties[key].(map[string]any)
-	return ok && property["format"] == format
-}
-
-func errNoUtilityAgent() error {
-	return status.Error(codes.FailedPrecondition, "no utility agent configured for this plugin")
-}
-
-func errNoAgentProfile() error {
-	return status.Error(codes.FailedPrecondition, "no agent profile configured for this plugin")
 }

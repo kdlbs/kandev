@@ -10,6 +10,10 @@ legacy_specs: []
 
 # Implementation Plan: Plugin Direct Agent Profile Invocation
 
+> Historical delivery record. [The replacement plan](../plugin-explicit-utility-invocation/plan.md) supersedes implicit host selection.
+> Previous completed checks do not verify the replacement API.
+
+
 ## Overview
 
 Plugins that delegate a one-shot LLM step currently select execution identity

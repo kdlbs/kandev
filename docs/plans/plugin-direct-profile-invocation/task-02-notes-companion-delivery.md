@@ -19,6 +19,10 @@ system_design:
 
 # Task 02: Notes Companion Manifest, Errors, and Evidence
 
+> Historical delivery record. [The replacement plan](../plugin-explicit-utility-invocation/plan.md) supersedes implicit host selection.
+> Previous completed checks do not verify the replacement API.
+
+
 ## Summary
 
 Update the Notes plugin (yattdev/kandev-plugin-notes at

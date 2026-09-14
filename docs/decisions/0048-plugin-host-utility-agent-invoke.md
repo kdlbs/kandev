@@ -1,6 +1,6 @@
 # 0048 — Plugins invoke a selected direct profile or utility agent
 
-- Status: accepted
+- Status: superseded by [explicit plugin utility selection](2026-09-14-explicit-plugin-utility-selection.md)
 - Date: 2026-07-21
 - Area: backend, frontend, protocol
 - Related: [0043 — Plugin host data API](0043-plugin-host-data-api.md),
