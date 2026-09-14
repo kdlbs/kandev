@@ -153,7 +153,7 @@ func (h *RepositorySetHandlers) httpListRepositorySets(c *gin.Context) {
 func (h *RepositorySetHandlers) httpCreateRepositorySet(c *gin.Context) {
 	var body repositorySetCreateBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
 		return
 	}
 	workspaceID := c.Param("id")
@@ -185,7 +185,7 @@ func (h *RepositorySetHandlers) httpGetRepositorySet(c *gin.Context) {
 func (h *RepositorySetHandlers) httpUpdateRepositorySet(c *gin.Context) {
 	var body repositorySetUpdateBody
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
 		return
 	}
 	set, err := h.service.GetRepositorySet(c.Request.Context(), c.Param("id"))

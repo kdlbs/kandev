@@ -8,8 +8,17 @@ import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scrol
 import { registerSeparateQueueRows } from "../../helpers/message-queue-settings";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
+import { expectSendNowWorkflowRunning } from "./message-queue-workflow-helpers";
 
 registerSeparateQueueRows(test);
+
+test("mobile Send Now keeps a workflow transition running", async ({
+  testPage,
+  apiClient,
+  seedData,
+}) => {
+  await expectSendNowWorkflowRunning(testPage, apiClient, seedData, true);
+});
 
 async function expectTouchTarget(locator: Locator): Promise<void> {
   await expect(locator).toBeVisible();

@@ -32,9 +32,11 @@ An Office participant can submit a validated verdict with a reason, and the resu
 
 - **AC-TASKS-QUORUM-RECORDING-001.1:** WHEN an Office agent session is attached to the task's current step
   with role `reviewer` or `approver` and `decision_required = 1`, THE SYSTEM
-  SHALL expose an MCP tool that records a decision, accepting a verdict of
-  `approved` or `rejected` and a required non-empty reason.
-- **AC-TASKS-QUORUM-RECORDING-001.2:** WHEN that tool is called with a valid verdict, THE SYSTEM SHALL write
+  SHALL inject a Kandev skill and stage prompt that require the task-bound
+  `$KANDEV_CLI kandev task decision` command as the agent's final action. The
+  command SHALL accept a verdict of `approved` or `rejected` and a required
+  non-empty reason.
+- **AC-TASKS-QUORUM-RECORDING-001.2:** WHEN that command is called with a valid verdict, THE SYSTEM SHALL write
   one row to `workflow_step_decisions` with `task_id` = the calling session's
   task, `step_id` = that task's current `workflow_step_id`, `role` = the
   caller's resolved role, `decider_type` = `agent`, `decider_id` = the caller's
@@ -71,16 +73,18 @@ An Office participant can submit a validated verdict with a reason, and the resu
   an approver attached at an earlier step is currently unresolvable at the step
   where the approval is due; role resolution and slate membership SHALL NOT
   disagree about who participates.
-- **AC-TASKS-QUORUM-RECORDING-001.6:** WHEN the verdict is any value other than `approved` or `rejected`,
+- **AC-TASKS-QUORUM-RECORDING-001.6:** WHEN the command or its Office API receives a verdict other than `approved` or `rejected`,
   THE SYSTEM SHALL reject the call with a validation error and write no row.
-- **AC-TASKS-QUORUM-RECORDING-001.7:** WHEN the reason is empty or whitespace-only, THE SYSTEM SHALL reject
+- **AC-TASKS-QUORUM-RECORDING-001.7:** WHEN the command or its Office API receives an empty or whitespace-only reason, THE SYSTEM SHALL reject
   the call with a validation error and write no row.
 - **AC-TASKS-QUORUM-RECORDING-001.8:** WHEN the task has no `workflow_step_id` bound, THE SYSTEM SHALL
   reject the call with an error naming the unbound step and write no row.
-- **AC-TASKS-QUORUM-RECORDING-001.9:** THE SYSTEM SHALL NOT expose the decision tool to sessions whose
-  profile does not enable `SurfaceOfficeTask`.
+- **AC-TASKS-QUORUM-RECORDING-001.9:** THE SYSTEM SHALL NOT expose decision MCP
+  metadata, the Office decision skill, or Office decision instructions to a
+  normal Kanban session. The task-bound command SHALL be available only inside
+  a scheduler-prepared, signed Office run context.
 
-- **AC-TASKS-QUORUM-RECORDING-001.10:** THE SYSTEM SHALL validate the decision tool's preconditions in this
+- **AC-TASKS-QUORUM-RECORDING-001.10:** THE SYSTEM SHALL validate the Office decision API's preconditions in this
   order: (1) the task has a bound `workflow_step_id` (AC-TASKS-QUORUM-RECORDING-001.8), (2) the caller
   resolves to a participant with `decision_required = 1` for `reviewer` or
   `approver` (AC-TASKS-QUORUM-RECORDING-001.3), (3) the verdict is `approved` or `rejected` (AC-TASKS-QUORUM-RECORDING-001.6), (4) the
@@ -93,8 +97,8 @@ An Office participant can submit a validated verdict with a reason, and the resu
   both preconditions are false at once in that case and the two errors differ in
   diagnostic value.
 
-- **AC-TASKS-QUORUM-RECORDING-001.11:** WHEN the decision tool returns successfully, THE SYSTEM SHALL return
-  the seven fields enumerated in `## Tool contract` — `decision`, `role`,
+- **AC-TASKS-QUORUM-RECORDING-001.11:** WHEN the decision command returns successfully, THE SYSTEM SHALL return
+  the seven fields enumerated in the system design's agent command contract: `decision`, `role`,
   `step_id`, `decision_id`, `decided_at`, `transition_applied` and `guards` —
   and SHALL NOT return a scalar `required_count` or `received_count`.
   `guards` SHALL equal the AC-TASKS-QUORUM-REEVALUATION-001.14 snapshot's `Guards` for the validated step,
@@ -110,6 +114,11 @@ An Office participant can submit a validated verdict with a reason, and the resu
   This AC exists because without it only two of the returned fields — `step_id`
   and `transition_applied`, via AC-TASKS-QUORUM-BINDING-001.2 and AC-TASKS-QUORUM-CONCURRENCY-001.4 — were observable by any
   acceptance criterion, so a wrong `role` or a wrong count could ship untested.
+
+- **AC-TASKS-QUORUM-RECORDING-001.12:** WHEN an Office session lists its MCP
+  tools after the CLI migration, THE SYSTEM SHALL NOT include
+  `record_step_decision_kandev` or its JSON schema. Normal Kanban MCP profiles
+  SHALL remain unchanged by this migration.
 
 ## Out of scope
 

@@ -448,7 +448,7 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 }
 
 // warnIfReviewDecisionMissing flags a review or approval run that finished
-// without the agent ever calling record_step_decision_kandev. A reviewer can
+// without the agent ever recording a workflow decision. A reviewer can
 // post a full critique and reject the work in a comment, but if that comment
 // never becomes a recorded decision the workflow engine has nothing to act
 // on and the task strands in its current step forever. This does not fix

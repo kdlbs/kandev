@@ -153,6 +153,7 @@ signals, and task-scoped scheduling contracts.
 - [Task plan append-mode write](system-design/plan-write-append-mode.md)
 - [Task plan append-mode agent text](system-design/plan-write-append-mode-agent-text.md)
 - [Task Runtime Cleanup](system-design/runtime-cleanup.md)
+- [Task Cleanup Preparation](system-design/runtime-cleanup-preparation.md)
 - [Task Terminal Persistence](system-design/task-terminal-persistence.md)
 - [Runtime Task-State Publication Order](system-design/runtime-state-publication-order.md)
 - [Queued Run Scheduling](system-design/run-scheduling.md)

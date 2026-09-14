@@ -220,7 +220,7 @@ func (m *Manager) enrichCleanupWorktreeFromCache(wt *Worktree) {
 	if wt.BaseBranch == "" {
 		wt.BaseBranch = cached.BaseBranch
 	}
-	if wt.CleanupHeadOID == "" {
+	if wt.CleanupHeadOID == "" && !wt.CleanupHeadOIDUnavailable {
 		wt.CleanupHeadOID = cached.CleanupHeadOID
 	}
 }
@@ -242,28 +242,45 @@ func (m *Manager) CaptureCleanupHeadOIDs(ctx context.Context, worktrees []*Workt
 			// fail closed instead of rejecting the task mutation itself.
 			continue
 		}
-		identityPath := wt.Path
-		info, statErr := os.Stat(wt.Path)
-		if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-			return nil, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, statErr)
-		}
-		if statErr != nil || !info.IsDir() {
-			if wt.Branch == "" {
-				continue
-			}
-			identityPath = wt.RepositoryPath
-		}
-		args := []string{"rev-parse", "--verify", "HEAD^{commit}"}
-		if identityPath == wt.RepositoryPath {
-			args = []string{"rev-parse", "--verify", "refs/heads/" + wt.Branch + "^{commit}"}
-		}
-		output, err := m.runBoundedGitInspect(ctx, identityPath, args...)
+		pathPresent, err := cleanupPathPresent(wt.Path)
 		if err != nil {
 			return nil, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, err)
 		}
-		oid := strings.TrimSpace(output)
-		if oid == "" {
-			return nil, fmt.Errorf("capture cleanup identity for %s returned an empty commit", wt.ID)
+		if !pathPresent {
+			branch := strings.TrimSpace(wt.Branch)
+			if branch == "" {
+				m.logger.Warn("cleanup worktree path is absent and branch is unknown",
+					zap.String("task_id", wt.TaskID),
+					zap.String("worktree_id", wt.ID),
+					zap.String("repository_path", wt.RepositoryPath),
+					zap.String("reason", "empty branch on environment row"))
+				continue
+			}
+			branchRef := "refs/heads/" + branch
+			oid, found, err := m.captureCleanupBranchOID(ctx, wt.RepositoryPath, branchRef)
+			if err != nil {
+				return nil, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, err)
+			}
+			if !found {
+				m.logger.Warn("cleanup worktree path and branch are absent",
+					zap.String("task_id", wt.TaskID),
+					zap.String("worktree_id", wt.ID),
+					zap.String("repository_path", wt.RepositoryPath),
+					zap.String("branch", branch),
+					zap.String("reason", "local branch ref not found"))
+				continue
+			}
+			identities[wt.ID] = oid
+			continue
+		}
+
+		output, err := m.runBoundedGitInspect(ctx, wt.Path, "rev-parse", "--verify", "HEAD^{commit}")
+		if err != nil {
+			return nil, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, err)
+		}
+		oid, err := parseCleanupCommitOID(output)
+		if err != nil {
+			return nil, fmt.Errorf("capture cleanup identity for %s: %w", wt.ID, err)
 		}
 		identities[wt.ID] = oid
 	}

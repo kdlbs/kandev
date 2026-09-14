@@ -773,9 +773,16 @@ func (s *HandoffService) cancelCascadeResourceCleanup(ctx context.Context, opera
 // mutation commits, because finalizing them here could leave a task active in
 // the database when the caller's lifecycle mutation is cancelled.
 func (s *HandoffService) cancelActiveRuns(ctx context.Context, taskIDs []string, reason string) {
+	synchronous, hasSynchronousStop := s.runCanceller.(SynchronousRunCanceller)
 	for _, id := range taskIDs {
 		if s.runCanceller != nil {
-			if err := s.runCanceller.CancelTaskExecution(ctx, id, reason, false); err != nil {
+			var err error
+			if hasSynchronousStop {
+				err = synchronous.CancelTaskExecutionSynchronously(ctx, id, reason, false)
+			} else {
+				err = s.runCanceller.CancelTaskExecution(ctx, id, reason, false)
+			}
+			if err != nil {
 				s.logf().Warn("cascade: cancel task execution failed",
 					zap.String("task_id", id), zap.Error(err))
 			}

@@ -49,6 +49,7 @@ Git state.
 
 ### System design
 
+- [Secret reference protection](system-design/repository-secrets.md)
 - [Empty Remote Repositories](system-design/empty-remote-repositories.md)
 - [Improve Kandev](system-design/improve-kandev.md)
 - [Copy and Move Secrets Between Scopes](system-design/secret-scope-transfer.md)

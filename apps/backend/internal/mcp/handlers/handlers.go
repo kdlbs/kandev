@@ -26,7 +26,6 @@ import (
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
-	"github.com/kandev/kandev/internal/office/dashboard"
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
@@ -335,10 +334,6 @@ type Handlers struct {
 	// MCP tools introduced in office task handoffs phase 2.
 	handoffSvc *service.HandoffService
 
-	// Office dashboard service (optional, set via SetDashboardService).
-	// Wires the record_step_decision_kandev MCP tool.
-	dashboardSvc *dashboard.DashboardService
-
 	// Optional PR lister (set via SetTaskPRLister) used to enrich
 	// task-listing responses with associated pull requests.
 	taskPRLister TaskPRLister
@@ -545,7 +540,10 @@ func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPUpdateRepositoryBaseBranch, h.handleUpdateRepositoryBaseBranch)
 	d.RegisterFunc(ws.ActionMCPStepComplete, h.handleStepComplete)
 	d.RegisterFunc(ws.ActionMCPMessageTask, h.handleMessageTask)
+	d.RegisterFunc(ws.ActionMCPGetMessageDelivery, h.handleGetMessageDelivery)
+	d.RegisterFunc(ws.ActionMCPRetryMessageDelivery, h.handleRetryMessageDelivery)
 	d.RegisterFunc(ws.ActionMCPStopTask, h.handleStopTask)
+	d.RegisterFunc(ws.ActionMCPSettleStaleSession, h.handleSettleStaleSession)
 	d.RegisterFunc(ws.ActionMCPSpawnSession, h.handleSpawnSession)
 }
 
@@ -601,9 +599,6 @@ func (h *Handlers) registerConfigModeHandlers(d *guardedMCPDispatcher) {
 		d.RegisterFunc(ws.ActionMCPListTaskDocuments, h.handleListTaskDocuments)
 		d.RegisterFunc(ws.ActionMCPGetTaskDocument, h.handleGetTaskDocument)
 		d.RegisterFunc(ws.ActionMCPWriteTaskDocument, h.handleWriteTaskDocument)
-	}
-	if h.dashboardSvc != nil {
-		d.RegisterFunc(ws.ActionMCPRecordStepDecision, h.handleRecordStepDecision)
 	}
 	if h.taskSvc != nil {
 		h.registerTaskConfigMutationHandlers(d)
@@ -2829,26 +2824,10 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, err.Error(), nil)
 	}
 	if delivery != nil && directLeaseOwner != "" {
-		if dispatch := directDeliveryDispatchFromContext(dispatchCtx); dispatch != nil && (dispatch.snapshot().accepted || dispatch.snapshot().pending) {
-			delivery, err = h.sessionLauncher.GetMessageQueue().GetDeliveryReceipt(ctx, delivery.ID)
-		} else if result.status == taskMessageStatusQueued {
-			queueEntryID := result.queuedEntryID
-			if queueEntryID == "" {
-				var found bool
-				queueEntryID, found, err = h.sessionLauncher.GetMessageQueue().FindQueueEntryForDelivery(ctx, result.sessionID, delivery.ID)
-				if err != nil {
-					return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to find queued message delivery: "+err.Error(), nil)
-				}
-				if !found {
-					return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "queued message delivery entry not found", nil)
-				}
-			}
-			delivery, err = h.sessionLauncher.GetMessageQueue().MarkDeliveryQueued(ctx, delivery.ID, directLeaseOwner, queueEntryID)
-		} else {
-			delivery, err = h.confirmAcceptedDirectTaskMessageDelivery(ctx, delivery.ID, directLeaseOwner)
-		}
-		if err != nil {
-			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to finalize message delivery receipt: "+err.Error(), nil)
+		var finalizeErr error
+		delivery, finalizeErr = h.finalizeDirectTaskMessageDelivery(ctx, dispatchCtx, delivery, directLeaseOwner, result)
+		if finalizeErr != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "failed to finalize message delivery receipt: "+finalizeErr.Error(), nil)
 		}
 	}
 	response := map[string]interface{}{
@@ -2862,6 +2841,42 @@ func (h *Handlers) handleMessageTask(ctx context.Context, msg *ws.Message) (*ws.
 		response["idempotency_key"] = delivery.IdempotencyKey
 	}
 	return ws.NewResponse(msg.ID, msg.Action, response)
+}
+
+// finalizeDirectTaskMessageDelivery settles the durable receipt for a direct
+// (lease-claimed) delivery after dispatch, according to how dispatch ended:
+// acceptance keeps the stored receipt state, queueing attaches the queue entry
+// ID, and any other outcome falls back to the explicit acknowledgement path.
+func (h *Handlers) finalizeDirectTaskMessageDelivery(ctx, dispatchCtx context.Context, delivery *messagequeue.Delivery, leaseOwner string, result taskMessageDispatchResult) (*messagequeue.Delivery, error) {
+	queue := h.sessionLauncher.GetMessageQueue()
+	if dispatch := directDeliveryDispatchFromContext(dispatchCtx); dispatch != nil && (dispatch.snapshot().accepted || dispatch.snapshot().pending) {
+		return queue.GetDeliveryReceipt(ctx, delivery.ID)
+	}
+	if result.status == taskMessageStatusQueued {
+		queueEntryID, err := h.resolveDirectQueuedEntryID(ctx, queue, result, delivery)
+		if err != nil {
+			return nil, err
+		}
+		return queue.MarkDeliveryQueued(ctx, delivery.ID, leaseOwner, queueEntryID)
+	}
+	return h.confirmAcceptedDirectTaskMessageDelivery(ctx, delivery.ID, leaseOwner)
+}
+
+// resolveDirectQueuedEntryID finds the queue entry admitted for a direct
+// delivery that ended queued; the dispatch result usually names it, falling
+// back to a queue lookup when the entry was created out-of-band.
+func (h *Handlers) resolveDirectQueuedEntryID(ctx context.Context, queue *messagequeue.Service, result taskMessageDispatchResult, delivery *messagequeue.Delivery) (string, error) {
+	if result.queuedEntryID != "" {
+		return result.queuedEntryID, nil
+	}
+	queueEntryID, found, err := queue.FindQueueEntryForDelivery(ctx, result.sessionID, delivery.ID)
+	if err != nil {
+		return "", fmt.Errorf("failed to find queued message delivery: %w", err)
+	}
+	if !found {
+		return "", errors.New("queued message delivery entry not found")
+	}
+	return queueEntryID, nil
 }
 
 func (h *Handlers) confirmAcceptedDirectTaskMessageDelivery(ctx context.Context, deliveryID, leaseOwner string) (*messagequeue.Delivery, error) {
@@ -2902,6 +2917,69 @@ func (h *Handlers) admitTaskMessageDelivery(ctx context.Context, targetTaskID st
 	if !ok && req.ReplyToQuestionID == "" {
 		return nil, false, "", nil
 	}
+	turn, err := resolveSenderTurnForDelivery(ctx, reader, ok, req)
+	if turn == nil {
+		return nil, false, "", nil
+	}
+	if err != nil {
+		return nil, false, "", fmt.Errorf("load source turn: %w", err)
+	}
+	delivery, created, err := createTaskMessageDeliveryReceipt(queue, ctx, targetTaskID, targetSession, prompt, metadata, req, turn)
+	if err != nil {
+		return nil, false, "", err
+	}
+	if deliveryEligibleForDirectDispatch(targetSession, req, created) {
+		return h.reserveDirectDeliveryLease(ctx, queue, delivery)
+	}
+	return delivery, true, "", nil
+}
+
+// createTaskMessageDeliveryReceipt persists the durable receipt for an
+// admitted delivery, deriving the idempotency key when the caller did not
+// supply one.
+func createTaskMessageDeliveryReceipt(queue *messagequeue.Service, ctx context.Context, targetTaskID string, targetSession *models.TaskSession, prompt string, metadata map[string]interface{}, req messageTaskRequest, turn *models.Turn) (*messagequeue.Delivery, bool, error) {
+	mode := req.DeliveryMode
+	if mode == "" {
+		mode = deliveryModeQueued
+	}
+	key := req.IdempotencyKey
+	if key == "" {
+		sum := sha256.Sum256([]byte(strings.Join([]string{req.SenderSessionID, turn.ID, targetTaskID, targetSession.ID, mode, req.ReplyToQuestionID, req.Prompt}, "\x00")))
+		key = fmt.Sprintf("derived:%x", sum[:])
+	}
+	return queue.CreateOrGetDeliveryReceipt(ctx, messagequeue.Delivery{SenderTaskID: req.SenderTaskID, SenderSessionID: req.SenderSessionID, SourceTurnID: turn.ID, IdempotencyKey: key, TargetTaskID: targetTaskID, TargetSessionID: targetSession.ID, DeliveryMode: mode, Content: prompt, Metadata: metadata, State: messagequeue.DeliveryPendingCapacity})
+}
+
+// deliveryEligibleForDirectDispatch reports whether a freshly admitted
+// receipt should proceed to a direct dispatch lease: a busy (running or
+// starting) target without an explicit interrupt request stays queued, and
+// a receipt that already existed is left to its original lifecycle.
+func deliveryEligibleForDirectDispatch(targetSession *models.TaskSession, req messageTaskRequest, created bool) bool {
+	busy := targetSession.State == models.TaskSessionStateRunning || targetSession.State == models.TaskSessionStateStarting
+	if busy && req.DeliveryMode != deliveryModeInterrupt && req.ReplyToQuestionID == "" {
+		return false
+	}
+	return created
+}
+
+// reserveDirectDeliveryLease claims the admitted receipt for direct dispatch
+// under a fresh lease owner. When the claim loses a race, the delivery is
+// reported as handled without a lease so the caller responds queued.
+func (h *Handlers) reserveDirectDeliveryLease(ctx context.Context, queue *messagequeue.Service, delivery *messagequeue.Delivery) (*messagequeue.Delivery, bool, string, error) {
+	leaseOwner := "mcp-direct-" + uuid.NewString()
+	delivery, claimed, err := queue.ReserveDeliveryForDirectDispatch(ctx, delivery.ID, leaseOwner)
+	if err != nil || !claimed {
+		return delivery, !claimed, "", err
+	}
+	return delivery, false, leaseOwner, nil
+}
+
+// resolveSenderTurnForDelivery finds the sender's active turn for a durable
+// delivery receipt. A parent-question reply has no executing turn, so it is
+// attributed to the synthetic question turn; every other delivery requires the
+// sender session's real active turn. A nil turn means admission should be
+// skipped (no durable receipt), while a non-nil error is a real load failure.
+func resolveSenderTurnForDelivery(ctx context.Context, reader taskMessageActiveTurnReader, ok bool, req messageTaskRequest) (*models.Turn, error) {
 	turn := &models.Turn{ID: "parent-question:" + req.ReplyToQuestionID, TaskID: req.SenderTaskID}
 	var err error
 	if ok && req.ReplyToQuestionID == "" {
@@ -2912,37 +2990,9 @@ func (h *Handlers) admitTaskMessageDelivery(ctx context.Context, targetTaskID st
 		err = nil
 	}
 	if errors.Is(err, sql.ErrNoRows) || turn == nil || turn.TaskID != req.SenderTaskID {
-		return nil, false, "", nil
+		return nil, nil
 	}
-	if err != nil {
-		return nil, false, "", fmt.Errorf("load source turn: %w", err)
-	}
-	mode := req.DeliveryMode
-	if mode == "" {
-		mode = deliveryModeQueued
-	}
-	key := req.IdempotencyKey
-	if key == "" {
-		sum := sha256.Sum256([]byte(strings.Join([]string{req.SenderSessionID, turn.ID, targetTaskID, targetSession.ID, mode, req.ReplyToQuestionID, req.Prompt}, "\x00")))
-		key = fmt.Sprintf("derived:%x", sum[:])
-	}
-	delivery, created, err := queue.CreateOrGetDeliveryReceipt(ctx, messagequeue.Delivery{SenderTaskID: req.SenderTaskID, SenderSessionID: req.SenderSessionID, SourceTurnID: turn.ID, IdempotencyKey: key, TargetTaskID: targetTaskID, TargetSessionID: targetSession.ID, DeliveryMode: mode, Content: prompt, Metadata: metadata, State: messagequeue.DeliveryPendingCapacity})
-	if err != nil {
-		return nil, false, "", err
-	}
-	busy := targetSession.State == models.TaskSessionStateRunning || targetSession.State == models.TaskSessionStateStarting
-	if busy && req.DeliveryMode != deliveryModeInterrupt && req.ReplyToQuestionID == "" {
-		return delivery, true, "", nil
-	}
-	if !created {
-		return delivery, true, "", nil
-	}
-	leaseOwner := "mcp-direct-" + uuid.NewString()
-	delivery, claimed, err := queue.ReserveDeliveryForDirectDispatch(ctx, delivery.ID, leaseOwner)
-	if err != nil || !claimed {
-		return delivery, !claimed, "", err
-	}
-	return delivery, false, leaseOwner, nil
+	return turn, err
 }
 
 func (h *Handlers) lookupSenderSessionName(ctx context.Context, senderTaskID, senderSessionID string) string {

@@ -249,6 +249,9 @@ func TestBuildSSHCreateInstanceRequestMapsEveryField(t *testing.T) {
 	if got.Env[envKeyOpenAIAPIKey] != "sk-1" {
 		t.Fatalf("Env = %+v, want the allowlisted key", got.Env)
 	}
+	if got.Env[envKeyKandevCLI] != "/remote/agentctl" {
+		t.Fatalf("KANDEV_CLI = %q, want the remote agentctl path", got.Env[envKeyKandevCLI])
+	}
 	if _, leaked := got.Env["UNRELATED"]; leaked {
 		t.Fatalf("Env leaked a non-allowlisted key: %+v", got.Env)
 	}
@@ -297,6 +300,23 @@ func TestSSHRemoteAgentEnvForwardsOnlyScopedCredentials(t *testing.T) {
 		}
 		if _, ok := env["PROFILE_ONLY"]; ok {
 			t.Fatal("unapproved profile key must not be forwarded to the remote agent")
+		}
+	})
+
+	t.Run("signed runtime contract is forwarded", func(t *testing.T) {
+		env := sshRemoteAgentEnv(&ExecutorCreateRequest{Env: map[string]string{
+			envKeyKandevAPIURL:      "http://127.0.0.1:38429/api/v1",
+			envKeyKandevAPIKey:      "signed-key",
+			envKeyKandevRunToken:    "signed-token",
+			envKeyKandevAgentID:     "agent-1",
+			envKeyKandevWorkspaceID: "workspace-1",
+			envKeyKandevRunID:       "run-1",
+			envKeyKandevTaskID:      "task-1",
+			envKeyKandevCLI:         "/host/agentctl",
+		}})
+		if env[envKeyKandevAPIURL] == "" || env[envKeyKandevAPIKey] != "signed-key" ||
+			env[envKeyKandevRunToken] != "signed-token" || env[envKeyKandevTaskID] != "task-1" {
+			t.Fatalf("runtime contract = %+v", env)
 		}
 	})
 

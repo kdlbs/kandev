@@ -290,7 +290,9 @@ func buildReviewStagePrompt(pc *PromptContext) string {
 	}
 	b.WriteString("\nReview the implementation carefully. Check for correctness, edge cases, and code quality.\n")
 	b.WriteString("Submit your verdict: approve if the work is satisfactory, or reject with specific feedback on what needs to change.")
-	writeDecisionContract(&b)
+	if hasDecisionAction(pc.AllowedActions) {
+		writeDecisionContract(&b)
+	}
 	return b.String()
 }
 
@@ -305,19 +307,19 @@ func buildApprovalStagePrompt(pc *PromptContext) string {
 	}
 	b.WriteString("\nConfirm that the approval requirements are met for this workflow.\n")
 	b.WriteString("Submit your verdict: approve if the requirements are met, or reject with specific feedback on what needs to change.")
-	writeDecisionContract(&b)
+	if hasDecisionAction(pc.AllowedActions) {
+		writeDecisionContract(&b)
+	}
 	return b.String()
 }
 
-// writeDecisionContract appends the explicit record_step_decision_kandev contract shared by the
-// review and approval stage prompts: a verdict must be recorded via the tool call, which the agent
-// must treat as its final action for the turn, since posting a comment alone is not a decision and
-// leaves the task stranded in review. The tool call itself does not halt the agent mid-turn (it
-// returns an ordinary result), so the prompt must not claim otherwise — it instructs the agent to
-// stop on its own after calling it.
+// writeDecisionContract appends the task-bound CLI contract shared by the
+// review and approval stage prompts. The command must be the final action for
+// the turn because a comment alone does not advance the workflow.
 func writeDecisionContract(b *strings.Builder) {
-	b.WriteString("\n\nYou must call the record_step_decision_kandev tool with decision (\"approved\" or \"rejected\") and reason to record your verdict. Make this your final tool call for the turn, then stop.")
-	b.WriteString(" Posting a comment alone is not a decision and will not advance the task.")
+	b.WriteString("\n\nUse this command as your final action for the turn:\n")
+	b.WriteString(`$KANDEV_CLI kandev task decision --decision approved --reason "..."`)
+	b.WriteString("\nUse `approved` as shown, or replace it with `rejected` when rejecting. Both require a non-empty reason, then stop. Posting a comment or using an approval-inbox command alone does not count as a workflow step decision.")
 }
 
 func buildShipStagePrompt(pc *PromptContext) string {

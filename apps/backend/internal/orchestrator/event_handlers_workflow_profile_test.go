@@ -277,6 +277,7 @@ func TestAutoStartStepPrompt_ResetContextInjectsCompletionContractForReusedSessi
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
 	messages := &mockMessageCreator{}
 	svc := createTestServiceWithScheduler(repo, stepGetter, newMockTaskRepo(), agentMgr)
+	svc.SetCanvasesEnabled(true)
 	svc.messageCreator = messages
 	err = svc.autoStartStepPrompt(ctx, "task-reused", session, step, "Review the change", false, false, nil)
 	if err != nil {
@@ -287,6 +288,17 @@ func TestAutoStartStepPrompt_ResetContextInjectsCompletionContractForReusedSessi
 	}
 	if len(agentMgr.capturedPromptCalls) != 1 || !strings.Contains(agentMgr.capturedPromptCalls[0].Prompt, "step_complete_kandev") {
 		t.Fatalf("executor prompt lacks completion contract: %#v", agentMgr.capturedPromptCalls)
+	}
+	for _, prompt := range []string{messages.userMessages[0].content, agentMgr.capturedPromptCalls[0].Prompt} {
+		for _, tool := range []string{
+			"create_canvas_kandev",
+			"read_canvas_authoring_skill_kandev",
+			"publish_canvas_kandev",
+		} {
+			if !strings.Contains(prompt, tool) {
+				t.Fatalf("reset-context prompt lacks %s: %s", tool, prompt)
+			}
+		}
 	}
 	if !strings.Contains(messages.userMessages[0].content, "ask_parent_question_kandev") || strings.Contains(messages.userMessages[0].content, "ask_user_question_kandev") {
 		t.Fatalf("reused autopilot prompt has the wrong question contract: %s", messages.userMessages[0].content)
@@ -329,6 +341,9 @@ func TestAutoStartStepPrompt_ResetContextPreservesOfficeModeForReusedSession(t *
 	}
 	if !strings.Contains(messages.userMessages[0].content, "KANDEV OFFICE MCP TOOLS") || strings.Contains(messages.userMessages[0].content, "list_workspaces_kandev") {
 		t.Fatalf("reused Office prompt has the wrong tool contract: %s", messages.userMessages[0].content)
+	}
+	if strings.Contains(messages.userMessages[0].content, "create_canvas_kandev") {
+		t.Fatalf("reused Office prompt must not advertise canvas authoring: %s", messages.userMessages[0].content)
 	}
 }
 func TestResolveStepAgentProfile(t *testing.T) {

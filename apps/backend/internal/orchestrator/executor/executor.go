@@ -434,6 +434,8 @@ type LaunchAgentRequest struct {
 	Priority                string
 	Metadata                map[string]interface{}
 	Env                     map[string]string
+	// AdditionalSkillSlugs are launch-scoped skills selected by Office.
+	AdditionalSkillSlugs []string
 	// ApprovedSecretEnvKeys contains repository binding keys that SSH may
 	// forward in addition to its managed credential allowlist. Values are
 	// still taken only from Env; the key list is the explicit repository grant.
@@ -600,6 +602,9 @@ type LaunchOptions struct {
 	// OnInitialPromptAccepted runs only after agentctl accepts the first
 	// prompt. Launch completion is intentionally not treated as acceptance.
 	OnInitialPromptAccepted func()
+	// AdditionalSkillSlugs are materialized for this launch in addition to the
+	// durable profile selection.
+	AdditionalSkillSlugs []string
 	// RouteOverride carries a provider-routing override resolved by the
 	// office scheduler. When nil, launch behavior is identical to today.
 	RouteOverride *RouteOverride
@@ -623,14 +628,15 @@ type RouteOverride struct {
 // preserve the Office-built prompt and configuration that the legacy
 // path receives via StartTaskWithEnv.
 type LaunchContext struct {
-	ExecutorID        string
-	ExecutorProfileID string
-	Priority          string
-	Prompt            string
-	WorkflowStepID    string
-	PlanMode          bool
-	Attachments       []v1.MessageAttachment
-	Env               map[string]string
+	ExecutorID           string
+	ExecutorProfileID    string
+	Priority             string
+	Prompt               string
+	WorkflowStepID       string
+	PlanMode             bool
+	Attachments          []v1.MessageAttachment
+	Env                  map[string]string
+	AdditionalSkillSlugs []string
 }
 
 // LaunchAgentResponse contains the result of launching an agent

@@ -5,6 +5,7 @@ requirements:
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003
+  - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004
 ---
 
 # Agent resume and runtime recovery system design
@@ -30,6 +31,63 @@ that environment and does not acquire its own worktree lifecycle.
 | `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001` | [Session identity](#session-identity), [Resume preparation lifecycle](#resume-preparation-lifecycle) |
 | `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002` | [Visible recovery errors](#visible-recovery-errors) |
 | `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003` | [Explicit branch replacement](#explicit-branch-replacement), [Warning persistence](#warning-persistence) |
+| `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004` | [Archive transition eligibility](#archive-transition-eligibility) |
+
+## Archive transition eligibility
+
+`GetTaskSessionStatus` resolves the owning task after session authorization and
+task/session binding validation. Before runtime probing, state healing, or
+resume eligibility evaluation, an archived task returns its persisted session
+state with `is_resumable`, `needs_resume`, and `needs_workspace_restore` false.
+Use the existing `resume_reason` field with `task_archived` to identify this
+state. Task lookup failures remain errors; they do not imply an active task.
+
+This guard precedes both token-based and fresh-start archive-cancelled branches.
+An archive cancellation reason is evidence of a recoverable past stop, not
+evidence that the task has since been unarchived. Normal eligibility evaluation
+continues only for an active task.
+
+Keep the executor's archived-task rejection under the existing resume lock.
+Guard `launchRestoreWorkspace` before `EnsureWorkspaceExecutionForSession` so
+a direct restore request cannot bypass archive state. Reuse
+`executor.ErrTaskArchived`; do not weaken runtime terminal-state or task cleanup
+barriers. A status read is not authorization for a later launch.
+
+The `session.launch` handler maps this sentinel to the existing WebSocket
+conflict envelope with `details.kind = task_archived`. It returns a short
+message directing the user to unarchive. Expected archive rejections use a
+bounded diagnostic without an internal-error stack trace. Authorization and
+task/session binding checks still precede this classification.
+
+The web resumption hook receives the owning task's resolved archive state from
+each caller. Unknown task hydration defers automatic recovery. Task detail,
+preview, and Quick Chat use their own task identity; they must not consult an
+unrelated globally active task. The task detail hook lives above
+`TaskArchivedProvider`, so reading that context inside it is insufficient.
+
+Extend the existing task/session request generation to include archive-state
+transitions. Commit-phase invalidation occurs before asynchronous results can
+apply. Archived state clears local recovery feedback and prevents automatic
+and manual launches. Guard continuations before launching, before fallback,
+and before status refresh, as well as guarding state setters. A stale attempt
+must not start another operation merely because its final setters are ignored.
+
+On successful unarchive, the existing task-detail callback and task update
+events supply active state. Reset the attempt marker and perform one new
+eligibility check for that generation. Repeated renders do not duplicate the
+attempt. Preserve `preventAutoStartAgentOnOpen`; unarchive does not introduce
+an implicit override. Failed unarchive never advances the generation to active.
+A typed archive rejection also ends fallback and refreshes task state through
+the existing task data layer, covering archive changes missed by the client.
+
+The existing unarchive handler retains branch and quarantine recovery. Resume
+then uses task-environment preparation to reactivate or recreate recoverable
+worktrees, as specified by
+[task runtime cleanup](../../tasks/requirements/runtime-cleanup.md).
+This change introduces no schema migration, environment reconstruction, or
+alternative workspace owner. Missing or ambiguous ownership remains a failure.
+It must not be inferred from an old path or a task title. Existing branch-loss
+and provider-identity rules still govern subsequent recovery choices.
 
 ## Current failure path
 
@@ -210,7 +268,7 @@ the typed WebSocket error. `SessionStoppedBanner` and `RunErrorEntry` retain the
 last error in component state and render the existing destructive alert
 pattern. The busy state ends after the request, but the error stays visible.
 
-The alert shows the backend message and these applicable actions:
+The alert retains the backend message and these applicable actions:
 
 - **Retry resume** for a normal recoverable failure.
 - **Restore read-only workspace** when workspace restoration remains useful.
@@ -226,6 +284,26 @@ Automatic page-load resume can keep its current read-only fallback. If restore
 succeeds, the hook returns a nonblocking notice with the resume cause and the
 read-only state. If restore also fails, it returns both causes. Task, preview,
 and Quick Chat consumers render this state instead of ignoring it.
+
+For automatic recovery feedback, keep a small structured value with outcome
+(`resume_failed`, `workspace_read_only`, or `resume_and_restore_failed`) and
+separate resume and restore errors. Retain typed error details; do not split a
+translated concatenated string to recover causes. Existing callers that need
+the legacy error string can derive it during migration.
+
+`SessionRecoveryFeedback` selects a short localized title and summary from the
+outcome. Both underlying causes remain in an initially collapsed, labeled
+details region. Each cause has its operation label. Unknown errors retain their
+original message in details, rather than claiming a specific cause. Successful
+read-only fallback retains its nonblocking severity and states that the agent
+did not resume. Successful resume clears both causes. The generic
+`EnsureSessionErrorBanner` used for initial session creation keeps its current
+behavior; recovery presentation must not mislabel creation failures.
+
+Archived task views suppress recovery controls and use their existing archive
+chrome and Unarchive action. Do not add a duplicate Unarchive action or treat
+archive as a destructive error. Active task retry uses the request's busy state
+to disable all equivalent controls until completion.
 
 The recovery result uses separate error and notice fields. Manual resume and
 read-only restore retain separate causes, so a second failure does not hide the
@@ -268,10 +346,22 @@ Recovery remains inside the existing chat and stopped-session surfaces. This
 change adds no navigation, modal, drawer, or mobile-only workflow.
 
 On wide screens, related actions can share a row and wrap. On narrow screens,
-actions use the existing stacked layout. Each action keeps a minimum 44-pixel
-touch target. The alert stays in the chat scroll owner and does not create
+actions use the existing stacked layout. Coarse-pointer actions keep a minimum
+44-pixel touch target; fine-pointer actions retain the surrounding compact
+button size. The alert stays in the chat scroll owner and does not create
 horizontal page overflow. Error text and button labels remain available to
 assistive technology and keyboard navigation.
+
+Automatic feedback remains inline in task detail, preview, and Quick Chat.
+`task-layout.tsx` supplies the shipped mobile composition; the existing
+`SessionRecoveryFeedback` is the nearest inline feedback exemplar. The task's
+existing mobile archive chrome provides Unarchive. This short status and
+occasional detail lookup does not need another drawer or navigation destination.
+The collapsed hierarchy is summary, applicable action, then details disclosure.
+Use a semantic disclosure with expanded state and keyboard activation. Wrap
+long identifiers inside the details region without adding a second vertical
+scroll owner. Keep the containing task layout's dynamic viewport and safe-area
+behavior. Test expansion, retry, and unarchive on the configured mobile device.
 
 ## Internationalization
 

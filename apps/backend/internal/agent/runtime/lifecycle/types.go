@@ -936,6 +936,9 @@ type LaunchRequest struct {
 	Attachments             []MessageAttachment // Attachments (images/files) for the initial prompt
 	OnInitialPromptAccepted func()
 	Env                     map[string]string // Additional env vars
+	// AdditionalSkillSlugs are materialized for this launch in addition to the
+	// durable profile selection.
+	AdditionalSkillSlugs []string
 	// ApprovedSecretEnvKeys contains repository binding keys that SSH may
 	// forward in addition to its managed credential allowlist.
 	ApprovedSecretEnvKeys []string

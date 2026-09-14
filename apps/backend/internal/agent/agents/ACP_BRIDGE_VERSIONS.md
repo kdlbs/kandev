@@ -14,6 +14,7 @@ resets it during startup.
 | OpenCode | `opencode-ai` | `1.18.29` | `acp --print-logs --log-level ERROR` |
 | Copilot | `@github/copilot` | `1.0.83` | `--acp` |
 | Gemini | `@google/gemini-cli` | `0.58.0` | `--acp` |
+| Pi | `pi-acp` | `0.0.33` | none |
 
 Normal capability probes, sessions, container commands, and one-shot inference
 use `npx --yes --prefer-offline package@effective-version` with the ACP

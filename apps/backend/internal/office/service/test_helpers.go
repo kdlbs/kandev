@@ -193,8 +193,9 @@ func BuildSkillManifestForTest(
 	ctx context.Context,
 	agent *models.AgentInstance,
 	workspaceSlug string,
+	availableActions ...string,
 ) *SkillManifest {
-	return si.buildSkillManifest(ctx, agent, workspaceSlug)
+	return si.buildSkillManifest(ctx, agent, workspaceSlug, availableActions...)
 }
 
 // Skill delivery test helpers were removed in ADR 0005 Wave E along

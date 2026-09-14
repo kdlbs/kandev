@@ -115,22 +115,8 @@ func (r *sqliteRepository) acknowledgeQueueEntryAndDelivery(
 		return err
 	}
 	if identity != nil {
-		var metadataJSON string
-		err := tx.GetContext(ctx, &metadataJSON, r.db.Rebind(`
-			SELECT metadata_json FROM queued_messages WHERE id = ? AND session_id = ?
-		`), queueEntryID, sessionID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return ErrEntryNotFound
-		}
-		if err != nil {
-			return fmt.Errorf("read identity-bound delivery acknowledgement: %w", err)
-		}
-		reservationIncarnation, reserved, err := lifecycleReservationFromMetadataJSON(metadataJSON)
-		if err != nil {
+		if err := r.assertQueueEntryReservationIncarnationTx(ctx, tx, identity, sessionID, queueEntryID); err != nil {
 			return err
-		}
-		if !reserved || reservationIncarnation != identity.SessionIncarnationID {
-			return ErrEntryNotFound
 		}
 	}
 
@@ -163,6 +149,32 @@ func (r *sqliteRepository) acknowledgeQueueEntryAndDelivery(
 	}
 	if deliveryID != "" {
 		adminmetrics.RecordMessageDeliveryOutcome(string(DeliveryDelivered), 1)
+	}
+	return nil
+}
+
+// assertQueueEntryReservationIncarnationTx confirms the retained queue row
+// still belongs to the supplied session incarnation: the lifecycle
+// reservation recorded in its metadata must name that incarnation.
+func (r *sqliteRepository) assertQueueEntryReservationIncarnationTx(
+	ctx context.Context, tx *sqlx.Tx, identity *QueueSessionIdentity, sessionID, queueEntryID string,
+) error {
+	var metadataJSON string
+	err := tx.GetContext(ctx, &metadataJSON, r.db.Rebind(`
+			SELECT metadata_json FROM queued_messages WHERE id = ? AND session_id = ?
+		`), queueEntryID, sessionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrEntryNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("read identity-bound delivery acknowledgement: %w", err)
+	}
+	reservationIncarnation, reserved, err := lifecycleReservationFromMetadataJSON(metadataJSON)
+	if err != nil {
+		return err
+	}
+	if !reserved || reservationIncarnation != identity.SessionIncarnationID {
+		return ErrEntryNotFound
 	}
 	return nil
 }

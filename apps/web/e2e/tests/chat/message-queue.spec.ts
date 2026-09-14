@@ -7,12 +7,17 @@ import { SessionPage } from "../../pages/session-page";
 import { seedRunningGeneratingSession } from "../../helpers/generating-session";
 import { expectFullQueueScrolls, seedFullQueueTask } from "./message-queue-scroll-helpers";
 import { waitForQuickChatComposerReady } from "./quick-chat-helpers";
+import { expectSendNowWorkflowRunning } from "./message-queue-workflow-helpers";
 import {
   registerSeparateQueueRows,
   requestMessageQueueSettings,
 } from "../../helpers/message-queue-settings";
 
 registerSeparateQueueRows(test);
+
+test("Send Now keeps a workflow transition running", async ({ testPage, apiClient, seedData }) => {
+  await expectSendNowWorkflowRunning(testPage, apiClient, seedData, false);
+});
 
 // ---------------------------------------------------------------------------
 // Quick Chat queue tests

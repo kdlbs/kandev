@@ -50,7 +50,8 @@ surface shared by task and Office consumers.
 - [Agent MCP Timeout Budgets](requirements/mcp-timeout-budgets.md)
 - [Mock-agent slow command duration syntax](requirements/mock-agent-slow-duration.md)
 - [Native Code Review](requirements/native-code-review.md)
-- [No Silent Model Fallback](requirements/no-silent-model-fallback.md)
+- [No Silent Model Fallback](requirements/no-silent-model-fallback.md), including
+  profile-selector warning placement and executor-authoritative task warnings.
 - [Copy agent configuration to isolated executors](requirements/portable-agent-configuration.md)
 - [Disable an Agent Profile](requirements/profile-disable.md)
 - [Agent Profile Recent Use](requirements/profile-recent-use.md)
@@ -60,6 +61,7 @@ surface shared by task and Office consumers.
 - [Managed Agent Runtime Versions and Updates](requirements/runtime-updates.md)
 - [MCP Bridge Reliability](requirements/mcp-bridge-reliability.md)
 - [MCP Protocol Compatibility](requirements/mcp-protocol-compatibility.md)
+- [MCP tool discovery guidance](requirements/mcp-tool-discovery-guidance.md)
 - [Simplify the agent settings profile layout](requirements/settings-profile-layout.md)
 - [Spawn Session Effective Agent Profile](requirements/spawn-session-effective-profile.md)
 - [Subagent context persistence](requirements/subagent-context-persistence.md)
@@ -84,6 +86,7 @@ surface shared by task and Office consumers.
 - [MCP Bridge Reliability](system-design/mcp-bridge-reliability.md)
 - [Agent MCP Timeout Budgets](system-design/mcp-timeout-budgets.md)
 - [MCP Protocol Compatibility](system-design/mcp-protocol-compatibility.md)
+- [MCP tool discovery guidance](system-design/mcp-tool-discovery-guidance.md)
 - [Subagent context persistence System Design Part 1](system-design/subagent-context-persistence-01.md)
 - [Subagent context persistence System Design Part 2](system-design/subagent-context-persistence-02.md)
 - [Subagent context persistence System Design Part 3](system-design/subagent-context-persistence-03.md)

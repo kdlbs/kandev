@@ -1545,23 +1545,30 @@ func PurgeTaskInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskI
 		return 0, fmt.Errorf("cancel delivery receipts for purged task: %w", err)
 	}
 	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var entryID string
-			if err := rows.Scan(&entryID); err != nil {
-				return 0, err
-			}
-			if entryID != "" {
-				if _, err := tx.ExecContext(ctx, db.Rebind(`DELETE FROM queued_messages WHERE id = ?`), entryID); err != nil {
-					return 0, err
-				}
-			}
-		}
-		if err := rows.Err(); err != nil {
+		if err := deletePurgedDeliveryQueueEntries(ctx, tx, db, rows); err != nil {
 			return 0, err
 		}
 	}
 	return int(removed), nil
+}
+
+// deletePurgedDeliveryQueueEntries removes the queue entries owned by the
+// deliveries cancelled by PurgeTaskInTransaction, so a cancelled prompt is not
+// delivered after its source task disappears.
+func deletePurgedDeliveryQueueEntries(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, rows *sql.Rows) error {
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var entryID string
+		if err := rows.Scan(&entryID); err != nil {
+			return err
+		}
+		if entryID != "" {
+			if _, err := tx.ExecContext(ctx, db.Rebind(`DELETE FROM queued_messages WHERE id = ?`), entryID); err != nil {
+				return err
+			}
+		}
+	}
+	return rows.Err()
 }
 
 // replaceCoalesced overwrites the existing coalesced row with msg inside the transaction.

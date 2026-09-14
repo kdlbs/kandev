@@ -1,5 +1,7 @@
 import { expect, test } from "../../fixtures/test-base";
+import { waitForHttp } from "../../helpers/causal-waits";
 import { resizeColumnViaSplitview } from "../../helpers/dockview-resize";
+import { SessionPage } from "../../pages/session-page";
 import {
   enableCanvasFeature,
   expectCanvasFrameFillsHost,
@@ -8,6 +10,85 @@ import {
 } from "./canvas-fixture";
 
 test.describe("Plugin-backed canvases in the desktop task workbench", () => {
+  test("shows the canvas creation prompt and retains the edited description on desktop", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    test.setTimeout(150_000);
+
+    const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
+    let taskId: string | undefined;
+    try {
+      const { executors } = await apiClient.listExecutors();
+      const localExecutor = executors.find((executor) =>
+        ["local", "local_pc"].includes(executor.type),
+      );
+      const localProfile = localExecutor?.profiles?.[0];
+      expect(
+        localProfile,
+        "a direct local executor profile is required by the fixture",
+      ).toBeDefined();
+
+      await testPage.goto(
+        `/settings/workspaces/${encodeURIComponent(seedData.workspaceId)}/canvases`,
+      );
+      await expect(testPage.getByTestId("workspace-canvases-page")).toBeVisible();
+      await testPage.getByTestId("settings-create-canvas").click();
+
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await expect(dialog.getByTestId("source-mode-scratch")).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+      await expect(dialog.getByTestId("executor-profile-selector")).toContainText(
+        localProfile!.name,
+      );
+
+      const defaultPrompt = await dialog.getByTestId("task-description-input").inputValue();
+      for (const tool of [
+        "create_canvas_kandev",
+        "read_canvas_authoring_skill_kandev",
+        "publish_canvas_kandev",
+      ]) {
+        expect(defaultPrompt, `desktop preset is missing ${tool}`).toContain(tool);
+      }
+      expect(defaultPrompt).not.toContain("e2e:mcp:");
+
+      const editedDescription = "desktop canvas prompt override";
+      await dialog.getByTestId("task-title-input").fill("E2E Desktop Canvas Task");
+      await dialog.getByTestId("task-description-input").fill(editedDescription);
+
+      const startAgent = dialog.getByTestId("submit-start-agent");
+      await expect(startAgent).toBeEnabled();
+      const responsePromise = waitForHttp(testPage, "POST", /\/api\/v1\/tasks$/);
+      await startAgent.click();
+      const response = await responsePromise;
+      const responseBody = await response.text();
+      expect(response.status(), responseBody).toBe(200);
+      const created = JSON.parse(responseBody) as { id: string };
+      taskId = created.id;
+      expect(taskId).toBeTruthy();
+
+      await expect(testPage).toHaveURL(new RegExp(`/t/${taskId}(?:[?]|$)`));
+      const session = new SessionPage(testPage);
+      await session.waitForLoad();
+      await expect
+        .poll(async () => (await apiClient.getTask(taskId!)).description)
+        .toBe(editedDescription);
+      await expect
+        .poll(() =>
+          testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+        )
+        .toBe(true);
+    } finally {
+      if (taskId) await apiClient.deleteTask(taskId).catch(() => undefined);
+      await releaseFeature();
+    }
+  });
+
   test("discovers, reviews, and operates the first task canvas from the workbench", async ({
     testPage,
     apiClient,

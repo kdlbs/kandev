@@ -147,6 +147,7 @@ function buildTaskLayoutProps(params: {
   merged: ReturnType<typeof useMergedAgentState>;
   remote: ReturnType<typeof resolveRemoteExecutor>;
   initialLayout?: string | null;
+  onTaskUnarchived: (taskId: string) => void;
   taskCanvases?: Canvas[];
 }) {
   const { taskProps, repository, effectiveSessionId, initialScripts, initialTerminals } = params;
@@ -173,6 +174,7 @@ function buildTaskLayoutProps(params: {
     remoteCheckedAt: params.remote.remoteCheckedAt,
     remoteStatusError: params.remote.remoteStatusError,
     isArchived: taskProps.isArchived,
+    onTaskUnarchived: params.onTaskUnarchived,
   };
 }
 
@@ -279,6 +281,7 @@ function useTaskPageDerivedProps({
     merged,
     remote,
     initialLayout,
+    onTaskUnarchived,
     taskCanvases,
   });
 
@@ -343,7 +346,12 @@ export function TaskPageInner(props: TaskPageInnerProps) {
             <SessionRecoveryFeedback
               error={props.resumption.error}
               notice={props.resumption.notice}
+              recoveryFailure={props.resumption.recoveryFailure}
               onRetry={() => void props.resumption.resumeSession()}
+              retryDisabled={
+                props.resumption.resumptionState === "checking" ||
+                props.resumption.resumptionState === "resuming"
+              }
               workspaceId={task?.workspace_id ?? null}
             />
             <TaskArchivedProvider value={archivedValue}>

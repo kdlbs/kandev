@@ -69,9 +69,13 @@ export class RingBuffer {
   }
 
   snapshot(identityScope?: string): LogEntry[] {
+    return this.snapshotPrepared(identityScope).map(({ entry }) => entry);
+  }
+
+  snapshotPrepared(identityScope?: string): PreparedLogEntry[] {
     return this.entries
       .filter(({ entry }) => identityScope === undefined || entry.identity_scope === identityScope)
-      .map(({ entry }) => cloneEntry(entry));
+      .map(({ entry, bytes }) => ({ entry: cloneEntry(entry), bytes }));
   }
 
   clear(): void {
@@ -109,6 +113,10 @@ export function getLogBuffer(): RingBuffer {
 
 export function snapshotLogs(identityScope?: string): LogEntry[] {
   return getLogBuffer().snapshot(identityScope);
+}
+
+export function snapshotPreparedLogs(identityScope?: string): PreparedLogEntry[] {
+  return getLogBuffer().snapshotPrepared(identityScope);
 }
 
 export function clearLogs(): void {

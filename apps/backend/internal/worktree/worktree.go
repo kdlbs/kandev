@@ -78,6 +78,11 @@ type Worktree struct {
 	// closed if the recorded path or branch advanced before teardown.
 	CleanupHeadOID string `json:"-"`
 
+	// CleanupHeadOIDUnavailable indicates that the current durable cleanup
+	// snapshot intentionally omitted this worktree's commit identity. It is
+	// internal provenance, so it is rebuilt when a snapshot is loaded.
+	CleanupHeadOIDUnavailable bool `json:"-"`
+
 	// BaseBranch is the branch this worktree was created from.
 	BaseBranch string `json:"base_branch"`
 

@@ -30,6 +30,7 @@ type handlerHarness struct {
 	projects   *recordingProjectManager
 	tasks      *handlerTaskCreator
 	runEvents  *recordingRunEvents
+	decisions  *recordingDecisionRecorder
 	agentSvc   *agents.AgentService
 	repository *sqlite.Repository
 }
@@ -808,6 +809,7 @@ func newRuntimeHandlerHarnessWithProjectManager(
 		projectManager = projectManagerFactory(repo)
 	}
 	runEvents := &recordingRunEvents{}
+	decisions := &recordingDecisionRecorder{}
 	router := gin.New()
 	RegisterRoutes(router.Group(""), NewHandler(
 		agentSvc,
@@ -821,6 +823,8 @@ func newRuntimeHandlerHarnessWithProjectManager(
 		}),
 		nil,
 		runEvents,
+		decisions,
+		logger.Default(),
 	))
 	return &handlerHarness{
 		router:     router,
@@ -830,6 +834,7 @@ func newRuntimeHandlerHarnessWithProjectManager(
 		projects:   projects,
 		tasks:      tasks,
 		runEvents:  runEvents,
+		decisions:  decisions,
 		agentSvc:   agentSvc,
 		repository: repo,
 	}
