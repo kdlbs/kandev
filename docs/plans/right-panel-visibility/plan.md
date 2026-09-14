@@ -1,6 +1,6 @@
 ---
 created: 2026-09-13
-status: draft
+status: implemented
 requirements:
   - REQ-UI-RIGHT-PANEL-VISIBILITY-001
 system_design:
@@ -14,11 +14,11 @@ legacy_specs: []
 
 Add a persistent right-panel toggle to the task header on desktop and tablet.
 Deliver one sequential vertical work order, including both layout adapters and browser coverage.
-This package is ready for review. Production implementation remains pending.
+The package is implemented and its verification is recorded below.
 
 ## Evidence and root cause
 
-Source revision: `bc38ea1ec7`. Investigation date: 2026-09-13.
+Source revision: `bc38ea1ec7`; package commit: `f05aaee8f0`. Investigation date: 2026-09-13.
 Source: [issue 3657](https://github.com/kdlbs/kandev/issues/3657), its body image, and the maintainer comment image.
 Both images were inspected. GitHub authenticated user: `carlosflorencio`; issue assigned to that user.
 
@@ -128,12 +128,13 @@ UI-01 maps to AC-UI-RIGHT-PANEL-VISIBILITY-001.1 through .5 and .7; UI-02 maps t
 
 ## Tests
 
-| Criteria | Test file and proposed case |
+| Criteria | Test file and coverage |
 | --- | --- |
-| .1, .4, .7 | `components/task/task-right-panels-toggle.test.tsx`: label follows visibility; keyboard retains focus; unavailable layout disables action |
-| .1, .3, .5, .7 | `hooks/use-task-right-panels-toggle.test.ts`: routes desktop and tablet actions; rejects empty session; phone does not mutate layout; restored state updates label |
-| .2, .3 | `lib/state/dockview-preset-persistence.test.ts`: compact hidden layout can show; mixed center keeps Agent and PR Details when hiding |
-| .2, .3, .5 | `components/task/mobile/session-tablet-layout.test.tsx`: stored hidden right column releases width; toggling preserves center identity and saved two-panel geometry |
+| .1, .4, .7 | `components/task/task-right-panels-toggle.test.tsx`: localized next-action labels, focus retention after activation, and an explanatory disabled maximized state |
+| .1, .3, .5, .7 | `hooks/use-task-right-panels-toggle.test.ts` and `lib/state/dockview-env-switch-action.test.ts`: desktop/tablet routing, empty-session and phone guards, A/B visibility round trips, and saved-maximize restoration |
+| .2, .3, .5 | `lib/state/layout-manager/serializer.test.ts` and `lib/state/dockview-right-panel-visibility.test.ts`: production-shaped compact and mixed capture, right-column ownership, compact reopening, center preservation, and globally unique panel IDs on Show |
+| .2, .3, .5 | `components/task/mobile/session-tablet-layout.test.tsx`: stored hidden right column is not rendered and the center surface remains mounted; browser coverage owns persistence assertions |
+| .1, .2, .5, .7 | `lib/state/dockview-right-panel-visibility.test.ts`: maximize blocks mutation, exit restores the authoritative visibility, and regular layout persistence resumes |
 
 Criteria refer to `AC-UI-RIGHT-PANEL-VISIBILITY-001`.
 First behavioral RED: `stored hidden right column is not rendered` against the current tablet component.
@@ -141,45 +142,54 @@ A second behavioral RED covers compact reopening. Missing selectors alone do not
 
 ## E2E tests
 
-New `apps/web/e2e/tests/layout/right-panel-visibility.spec.ts`, project `chromium`:
+The executed `apps/web/e2e/tests/layout/right-panel-visibility.spec.ts` coverage uses the `chromium` project for desktop, compact desktop, and the 900-pixel coarse-pointer tablet fallback. It asserts desktop hide/show, center-width recovery, hidden and visible desktop reloads, compact reopening, tablet hide/show persistence, and keyboard activation with focus retention.
 
-- Desktop Default: hide/show, released width, all four left/right visibility combinations, focus, and no duplicate panels (.1, .2, .4).
-- Touch tablet at 1280x900 and 900x900: use `tabletTestPage`; assert pointer mode, 44px targets, and both adapters (.1-.4).
-- Fine pointer at 900x800: compact default, explicit Show, Hide, and Show again (.3).
-- Hidden reload and visible reload; tablet split restoration; switch tasks and return (.5).
-- Resize across 1024 and 768 boundaries; retain each layout's state without copying it to another store (.5, .6).
-- Header with a long title and linked review; no overflow, control remains reachable (.4, .6).
-- Archived task with mounted workbench; initialization and repeated activation during restoration (.1, .7).
-- Mixed center Agent/Files/PR Details and separate right column: preserve unrelated center panels (.2).
+The executed `apps/web/e2e/tests/layout/mobile-right-panel-visibility.spec.ts` coverage uses the `mobile-chrome` project to assert the existing full-screen Chat, Files, and Terminal navigation and the absence of the wider-layout toggle on phones.
 
-New `apps/web/e2e/tests/layout/mobile-right-panel-visibility.spec.ts`, project `mobile-chrome`:
+The following browser scenarios remain the planned regression matrix. They are retained here because the current implementation run does not assert every case:
 
-- Open Files and Terminal from existing navigation, return to Chat, inspect phone composition and overflow (.6).
-- Cross into a wider view and back; phone navigation leaves wider-layout visibility intact (.5, .6).
+- Desktop Default: all four left/right visibility combinations, no duplicate panels, and header reachability with a long title and linked review.
+- Touch tablet at both 1280x900 and 900x900: pointer mode, 44-pixel targets, and both desktop and tablet adapters.
+- Fine pointer at 900x800: compact default, explicit Show, Hide, and Show again.
+- Cross-task and cross-viewport handoffs: resize across 1024 and 768 boundaries without copying state between stores.
+- Archived tasks and repeated activation during restoration.
+- Mixed center Agent/Files/PR Details plus a separate right column through a browser fixture; the production-shaped capture and store cases cover the logic below the browser layer.
+- Phone navigation after crossing into a wider view and back while preserving wider-layout visibility.
 
-Reuse `pane-persistence-tablet.spec.ts`, `compact-desktop-responsive.spec.ts`, and their fixtures.
-Capture rendered desktop and phone views during these checks and compare them with UI-01/UI-02.
-Use causal waits and owned fixtures, not arbitrary sleeps or the user's running instance.
+Reuse `pane-persistence-tablet.spec.ts` and `compact-desktop-responsive.spec.ts` for the retained tablet split and compact geometry cases. All executed browser checks use causal waits and owned fixtures.
 
 ## Work orders
 
-- [ ] [Task 01: Persistent toggle](task-01-persistent-toggle.md)
+  - [x] [Task 01: Persistent toggle](task-01-persistent-toggle.md) (done)
 
 ## Verification results
 
-Investigation: existing store suite passed, 23 tests.
+Implementation is complete. The new control is shared by desktop and tablet adapters, the tablet right column is conditional, compact desktop can reopen it, and phone navigation keeps its existing full-screen composition.
 
-Package checks passed:
+Checks passed:
 
+- `pnpm install --frozen-lockfile` from `apps`.
+- Review-focused unit tests: 9 files, 109 tests.
+- Full web unit suite: 2,058 files, 17,788 passed and 4 skipped tests.
+- `pnpm run typecheck` and `pnpm run lint` from `apps/web`.
+- Targeted ESLint for changed source and browser files.
+- Prettier check for changed TypeScript, TSX, and JSON files.
+- `pnpm run i18n:check` and `pnpm run i18n:ratchet` from `apps/web`.
+- `pnpm --filter @kandev/web build:vite` from `apps`.
+- Managed Chromium E2E: the executed desktop, compact, tablet, reload, and keyboard cases passed.
+- Managed mobile-chrome E2E: 1 test passed.
+- `node --test scripts/validate-public-docs.test.mjs`: 62 tests passed.
+- `node scripts/validate-public-docs.mjs`: 46 published documents validated.
 - `python3 scripts/list-docs.py validate`: 267 decisions and 896 specifications.
-- `python3 scripts/lint-spec-files.test.py`: 36 tests.
 - `python3 scripts/lint-spec-files.py --all`: all specification files passed.
-- `git diff --check -- docs/specs docs/plans/right-panel-visibility`: passed.
-- Catalog discovery includes both new specification files.
-- GitHub issue assignee readback: `carlosflorencio`.
+- `git diff --check`: passed.
+
+The implementation adds localized labels in all five supported catalogs and updates the public task-workspace instructions.
+
+The assertions above cover the review regressions. The retained browser matrix is broader than this run. The tablet component test uses mocked panel primitives and persistence callbacks, so it proves conditional composition and center identity only; the browser test proves the stored hide/show round trip. The component test proves focus retention after a click, while the browser test proves native Enter and Space activation. Resize handoffs, archived-task restoration, the 1280-pixel coarse-pointer case, all four sidebar combinations, and the wider-to-phone handoff remain planned coverage.
 
 New files were inspected explicitly; work-order references resolve to the new requirement and design.
-Implementation commands and browser results: pending.
+Implementation commands and browser results are recorded above and in the completed work order.
 
 ## Risks
 
@@ -191,6 +201,5 @@ Implementation commands and browser results: pending.
 
 ## Public documentation
 
-With implementation, add a short task-workspace how-to to `docs/public/tasks-and-workflows.md`.
-Explain Hide/Show, independent sidebars, tablet support, and existing phone navigation.
-Do not publish future behavior during this design-only change.
+Added a short task-workspace how-to to `docs/public/tasks-and-workflows.md`.
+It explains Hide/Show, independent sidebars, tablet support, and existing phone navigation.

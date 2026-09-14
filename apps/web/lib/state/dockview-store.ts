@@ -29,6 +29,7 @@ import {
   getRootSplitview,
   LAYOUT_PINNED_MIN_PX,
   fromDockviewApi,
+  isRightColumn as isLayoutRightColumn,
   filterEphemeral,
   defaultLayout,
   mergeCurrentPanelsIntoPreset,
@@ -369,10 +370,9 @@ function applyDeferredPanelActions(api: DockviewApi, actions: DeferredPanelActio
  * Build the pinnedWidths updates for a width sync, tracking only the VISIBLE
  * default right column.
  *
- * In plan/preview/vscode layouts the side column inherits merged files/changes
- * panels and `fromDockviewApi` mislabels it "right"; storing its width as the
- * right override would then leak into the default layout when toggling back
- * (e.g. plan-mode off snapping the right column to the plan column's width).
+ * In plan/preview/vscode layouts a side column can inherit merged files or
+ * changes panels. The serializer preserves the center/right ownership before
+ * this sync runs, so only the canonical right column receives the override.
  *
  * Sidebar is intentionally excluded: its persisted width is a global pref
  * written only by explicit sash drag, and syncing live layout-change widths
@@ -579,26 +579,30 @@ function applyLayoutAndSet(
   return ids;
 }
 
-/** True when the column is the default right column or hosts a right-side group. */
-function isRightColumn(column: LayoutState["columns"][number]): boolean {
-  return (
-    column.id === "right" ||
-    column.groups.some((group) => group.id === RIGHT_TOP_GROUP || group.id === RIGHT_BOTTOM_GROUP)
-  );
+/** True when the column belongs to the right-side workbench surface. */
+export const isRightColumn = isLayoutRightColumn;
+
+export function hasRightColumn(state: LayoutState): boolean {
+  return state.columns.some(isRightColumn);
 }
 
-/**
- * True when the column holds at least one right-owned panel (changes, files,
- * terminal — or pr-detail when the column is a right column).
- */
+function resolveRightPanelsVisible(
+  restoredLayout: LayoutState,
+  fallbackLayout: LayoutState | undefined,
+  fallbackVisibility: boolean,
+): boolean {
+  if (restoredLayout.columns.length > 0) return hasRightColumn(restoredLayout);
+  if (fallbackLayout?.columns) return hasRightColumn(fallbackLayout);
+  return fallbackVisibility;
+}
+
+function readRightPanelsVisible(api: DockviewApi, fallbackVisibility: boolean): boolean {
+  return resolveRightPanelsVisible(fromDockviewApi(api), undefined, fallbackVisibility);
+}
+
+/** A right-owned column is removed as a unit, including custom panels in it. */
 function columnHasRightPanel(column: LayoutState["columns"][number]): boolean {
-  const includesLayoutOwnedPRDetails = isRightColumn(column);
-  return column.groups.some((group) =>
-    group.panels.some(
-      (panel) =>
-        RIGHT_PANEL_IDS.has(panel.id) || (includesLayoutOwnedPRDetails && panel.id === "pr-detail"),
-    ),
-  );
+  return isRightColumn(column);
 }
 
 /**
@@ -607,16 +611,34 @@ function columnHasRightPanel(column: LayoutState["columns"][number]): boolean {
  * columns left empty are dropped, and `activePanel` falls back to the first
  * remaining panel.
  */
-function removeRightPanelTabs(state: LayoutState): LayoutState {
+/**
+ * The compact built-in preset places the standard right panels in the center
+ * group as tabs. When the user asks to show a separate right column, those
+ * preset-owned tabs must move with it so Dockview never receives duplicate
+ * panel IDs. A custom mixed center layout keeps its center-owned files,
+ * changes, or review tabs intact.
+ */
+function isCompactDefaultLayout(state: LayoutState, profile: LayoutProfileIdentity): boolean {
+  if (profile.kind !== "built-in" || profile.id !== "compact") return false;
+  if (state.columns.length !== 1) return false;
+  const [column] = state.columns;
+  if (column.id !== "center" || column.groups.length !== 1) return false;
+  const [group] = column.groups;
+  if (group.id !== CENTER_GROUP || group.panels.length === 0) return false;
+  return group.panels.every(
+    (panel) =>
+      panel.id === "chat" || panel.id.startsWith("session:") || RIGHT_PANEL_IDS.has(panel.id),
+  );
+}
+
+function removeRightPanelTabs(state: LayoutState, includeCompactCenter = false): LayoutState {
   const columns = state.columns
     .map((col) => {
-      const includesLayoutOwnedPRDetails = isRightColumn(col);
+      if (!isRightColumn(col) && !(includeCompactCenter && col.id === "center")) return col;
       const groups = col.groups
         .map((group) => {
           const panels = group.panels.filter(
-            (panel) =>
-              !RIGHT_PANEL_IDS.has(panel.id) &&
-              !(includesLayoutOwnedPRDetails && panel.id === "pr-detail"),
+            (panel) => !RIGHT_PANEL_IDS.has(panel.id) && panel.id !== "pr-detail",
           );
           if (panels.length === group.panels.length) return group;
           const activePanel = panels.some((panel) => panel.id === group.activePanel)
@@ -629,6 +651,45 @@ function removeRightPanelTabs(state: LayoutState): LayoutState {
     })
     .filter((col) => col.groups.length > 0);
   return { columns };
+}
+
+function collectPanelIds(state: LayoutState): Set<string> {
+  return new Set(
+    state.columns.flatMap((column) =>
+      column.groups.flatMap((group) => group.panels.map((panel) => panel.id)),
+    ),
+  );
+}
+
+/** Add the standard right column without serializing one panel ID twice. */
+function appendRightColumnWithoutDuplicates(
+  state: LayoutState,
+  rightColumn: LayoutState["columns"][number],
+): LayoutState {
+  const usedPanelIds = collectPanelIds(state);
+  const groups = rightColumn.groups
+    .map((group) => {
+      const panels = group.panels.filter((panel) => {
+        if (usedPanelIds.has(panel.id)) return false;
+        usedPanelIds.add(panel.id);
+        return true;
+      });
+      if (panels.length === group.panels.length) return group;
+      return {
+        ...group,
+        panels,
+        activePanel: panels.some((panel) => panel.id === group.activePanel)
+          ? group.activePanel
+          : panels[0]?.id,
+      };
+    })
+    .filter((group) => group.panels.length > 0);
+  if (groups.length === 0) return state;
+
+  // The built-in right column is flat today. If a custom default ever carries
+  // a nested tree, filtered groups must be serialized from the reconciled list.
+  const { tree: _tree, ...columnWithoutTree } = rightColumn;
+  return { columns: [...state.columns, { ...columnWithoutTree, groups }] };
 }
 
 /**
@@ -646,9 +707,9 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
       /* moved to UI slice: toggleAppSidebar */
     },
     toggleRightPanels: () => {
-      const { api, rightPanelsVisible, defaultPreset } = get();
-      if (!api) return;
-      if (!rightPanelsVisible && defaultPreset === "compact") return;
+      const { api, rightPanelsVisible, preMaximizeLayout } = get();
+      if (!api || preMaximizeLayout) return;
+      const targetEnvId = get().currentLayoutEnvId;
       const liveWidths = captureLiveWidths(api, set);
       preserveChatScrollDuringLayout();
       const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
@@ -664,22 +725,32 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
           enforceFromStore(api, get);
           syncPinnedWidthsFromApi(api, set);
           set({ isRestoringLayout: false });
+          const { currentLayoutEnvId, preMaximizeLayout } = get();
+          if (currentLayoutEnvId === targetEnvId) {
+            persistEnvLayoutNow(api, targetEnvId, preMaximizeLayout);
+          }
         });
       } else {
         const defLayout = defaultLayout();
         const rightCol = defLayout.columns.find((c) => c.id === "right");
         if (!rightCol) return;
-        const current = removeRightPanelTabs(fromDockviewApi(api));
-        const withRight: LayoutState = {
-          columns: [...current.columns, rightCol],
-        };
-        set({ isRestoringLayout: true, rightPanelsVisible: true });
+        const captured = fromDockviewApi(api);
+        const current = removeRightPanelTabs(
+          captured,
+          isCompactDefaultLayout(captured, get().activeLayoutProfile),
+        );
+        const withRight = appendRightColumnWithoutDuplicates(current, rightCol);
+        set({ isRestoringLayout: true, rightPanelsVisible: hasRightColumn(withRight) });
         applyLayoutAndSet(api, withRight, liveWidths, set);
         requestAnimationFrame(() => {
           api.layout(safeWidth, safeHeight);
           enforceFromStore(api, get);
           syncPinnedWidthsFromApi(api, set);
           set({ isRestoringLayout: false });
+          const { currentLayoutEnvId, preMaximizeLayout } = get();
+          if (currentLayoutEnvId === targetEnvId) {
+            persistEnvLayoutNow(api, targetEnvId, preMaximizeLayout);
+          }
         });
       }
     },
@@ -775,9 +846,12 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
         set,
       });
       const hasSidebar = !!api.getPanel("sidebar");
-      const colCount = appliedState?.columns?.length ?? api.groups.length;
-      const sidebarCols = hasSidebar ? 1 : 0;
-      const hasRight = colCount > sidebarCols + 1;
+      const restoredLayout = fromDockviewApi(api);
+      const hasRight = resolveRightPanelsVisible(
+        restoredLayout,
+        appliedState,
+        get().rightPanelsVisible,
+      );
       set({ sidebarVisible: hasSidebar, rightPanelsVisible: hasRight });
       const targetEnvId = get().currentLayoutEnvId;
       requestAnimationFrame(() => {
@@ -886,7 +960,12 @@ function restoreMaximizeFromStorage(
     // `centerGroupId`. Tracking it keeps the store consistent with what
     // `maximizeGroup` would have set (so toggle/exit logic doesn't operate on
     // a half-restored maximize).
-    set({ ...ids, preMaximizeLayout: preMax, maximizedGroupId: ids.centerGroupId });
+    set({
+      ...ids,
+      preMaximizeLayout: preMax,
+      maximizedGroupId: ids.centerGroupId,
+      rightPanelsVisible: hasRightColumn(preMax),
+    });
   } catch {
     // Drop the bad blob so the next switch/reload doesn't keep reattempting
     // the same failing fromJSON before falling back. Self-healing.
@@ -1113,8 +1192,10 @@ function buildEnvSwitchAction(set: StoreSet, get: StoreGet) {
         },
         initialLayout,
       });
+      const restoredRightPanelsVisible = readRightPanelsVisible(api, get().rightPanelsVisible);
       set({
         ...ids,
+        rightPanelsVisible: restoredRightPanelsVisible,
         activeLayoutProfile: resolveEnvSwitchProfile({
           hasFirstAdoptionRouteLayout,
           savedEnvLayout,
@@ -1178,7 +1259,12 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
         groups: [{ panels: targetGroup.panels, activePanel: targetGroup.activePanel }],
       });
       const maximizedLayout: LayoutState = { columns };
-      set({ isRestoringLayout: true, preMaximizeLayout: current, maximizedGroupId: groupId });
+      set({
+        isRestoringLayout: true,
+        preMaximizeLayout: current,
+        maximizedGroupId: groupId,
+        rightPanelsVisible: hasRightColumn(current),
+      });
       const { width: safeWidth, height: safeHeight } = measureDockviewContainer(api);
       applyLayoutAndSet(api, maximizedLayout, liveWidths, set);
       requestAnimationFrame(() => {
@@ -1200,7 +1286,13 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
       const safeWidth = measured.width;
       const safeHeight = measured.height;
       const liveWidths = get().pinnedWidths;
-      set({ isRestoringLayout: true, preMaximizeLayout: null, maximizedGroupId: null });
+      const restoredRightPanelsVisible = hasRightColumn(preMaximizeLayout);
+      set({
+        isRestoringLayout: true,
+        preMaximizeLayout: null,
+        maximizedGroupId: null,
+        rightPanelsVisible: restoredRightPanelsVisible,
+      });
       if (currentLayoutEnvId) {
         removeEnvMaximizeState(currentLayoutEnvId);
       }
@@ -1210,6 +1302,7 @@ function buildMaximizeActions(set: StoreSet, get: StoreGet) {
         enforceFromStore(api, get);
         syncPinnedWidthsFromApi(api, set);
         set({ isRestoringLayout: false });
+        persistEnvLayoutNow(api, currentLayoutEnvId, null);
       });
     },
   };
@@ -1280,7 +1373,7 @@ function performBuildDefault(
 
   const ids = applyLayout(api, state, pinnedWidths, safeWidth, safeHeight);
   const hasSidebar = state.columns.some((c) => c.id === "sidebar");
-  const hasRight = state.columns.length > (hasSidebar ? 2 : 1);
+  const hasRight = hasRightColumn(state);
   set({ ...ids, sidebarVisible: hasSidebar, rightPanelsVisible: hasRight });
 
   const pending = get().deferredPanelActions;

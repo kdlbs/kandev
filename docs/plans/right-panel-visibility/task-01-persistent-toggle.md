@@ -1,7 +1,7 @@
 ---
 id: "01-persistent-toggle"
 title: "Add a persistent right-panel toggle"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -42,7 +42,7 @@ No backend, release flag, new storage, breakpoint change, custom-panel snapshots
 
 - UI-01 follows the active layout, survives hiding, preserves center content, and keeps touch/keyboard access.
 - UI-02 retains existing phone navigation and wider-layout preferences.
-- All listed regression checks pass, and the plan records actual results and rendered comparisons.
+- Covered regression checks pass, and the plan records asserted behavior separately from the retained browser matrix.
 
 ## ASCII UI preview
 
@@ -114,24 +114,29 @@ See the [full package preview and scenario matrix](plan.md#ascii-ui-preview).
 
 ## TDD sequence
 
-1. Add the tablet `right: false` regression and run it against current rendering.
-2. Add the compact reopen and mixed-center store regressions; record behavioral failures before changes.
-3. Implement the adapter, control, and layout fixes with their component tests.
-4. Add browser coverage, inspect rendered views, and run the exact checks below.
-5. Update public instructions, work-order results, and plan status.
+1. Added the tablet `right: false` regression and observed the expected failure against current rendering.
+2. Added the compact reopen and mixed-center store regressions and observed the expected behavioral failures before production changes.
+3. Implemented the adapter, control, and layout fixes with their component and store tests.
+4. Added browser coverage, inspected the rendered compositions through browser assertions, and ran the checks below.
+5. Fixed the review findings with production-shaped serializer coverage, A/B environment restore coverage, duplicate-ID reconciliation, and maximize/exit coverage.
+6. Updated public instructions, work-order results, and plan status while retaining unexecuted matrix cases.
 
 ## Verification
 
 ```bash
 # From the repository root. Install once if this worktree lacks dependencies.
 (cd apps && pnpm install --frozen-lockfile)
-(cd apps/web && pnpm exec vitest run hooks/use-task-right-panels-toggle.test.ts components/task/task-right-panels-toggle.test.tsx components/task/mobile/session-tablet-layout.test.tsx lib/state/dockview-preset-persistence.test.ts)
+(cd apps/web && pnpm exec vitest run hooks/use-task-right-panels-toggle.test.ts components/task/task-right-panels-toggle.test.tsx components/task/mobile/session-tablet-layout.test.tsx lib/state/dockview-preset-persistence.test.ts lib/state/dockview-right-panel-visibility.test.ts lib/state/dockview-env-switch-action.test.ts lib/state/layout-manager/serializer.test.ts components/task/task-top-bar.test.tsx components/task/dockview-layout-restore.test.ts)
+(cd apps/web && pnpm exec vitest run lib/state/dockview-store.test.ts components/task/dockview-desktop-layout.test.ts components/task/dockview-layout-restore.test.ts)
 (cd apps/web && pnpm run typecheck)
+(cd apps/web && pnpm run lint)
 (cd apps/web && pnpm exec eslint hooks/use-task-right-panels-toggle.ts hooks/use-task-right-panels-toggle.test.ts components/task/task-right-panels-toggle.tsx components/task/task-right-panels-toggle.test.tsx components/task/task-top-bar.tsx components/task/dockview-header-actions.tsx components/task/document/document-controls.tsx components/task/mobile/session-tablet-layout.tsx components/task/mobile/session-tablet-layout.test.tsx lib/state/dockview-store.ts lib/state/dockview-preset-persistence.test.ts e2e/tests/layout/right-panel-visibility.spec.ts e2e/tests/layout/mobile-right-panel-visibility.spec.ts --max-warnings 0)
+(cd apps/web && pnpm exec prettier --check components/task/dockview-desktop-layout.tsx components/task/dockview-header-actions.tsx components/task/document/document-controls.tsx components/task/mobile/session-tablet-layout.tsx components/task/mobile/session-tablet-layout.test.tsx components/task/task-right-panels-toggle.test.tsx components/task/task-right-panels-toggle.tsx components/task/task-top-bar.tsx hooks/use-task-right-panels-toggle.test.ts hooks/use-task-right-panels-toggle.ts lib/state/dockview-preset-persistence.test.ts lib/state/dockview-right-panel-visibility.test.ts lib/state/dockview-store.ts e2e/tests/layout/mobile-right-panel-visibility.spec.ts e2e/tests/layout/right-panel-visibility.spec.ts src/locales/en/task.json src/locales/pseudo/task.json src/locales/pt-pt/task.json src/locales/zh-cn/task.json src/locales/zh-hk/task.json src/locales/zh-tw/task.json)
 (cd apps/web && pnpm run i18n:check)
 (cd apps/web && pnpm run i18n:ratchet)
-(cd apps/web && pnpm e2e:run --project chromium tests/layout/right-panel-visibility.spec.ts tests/layout/pane-persistence-tablet.spec.ts tests/layout/compact-desktop-responsive.spec.ts)
-(cd apps/web && pnpm e2e:run --project mobile-chrome tests/layout/mobile-right-panel-visibility.spec.ts)
+(cd apps/web && pnpm e2e:run --host --project chromium tests/layout/right-panel-visibility.spec.ts tests/layout/pane-persistence-tablet.spec.ts tests/layout/compact-desktop-responsive.spec.ts)
+(cd apps/web && pnpm e2e:run --host --project mobile-chrome tests/layout/mobile-right-panel-visibility.spec.ts)
+(cd apps && pnpm --filter @kandev/web build:vite)
 node --test scripts/validate-public-docs.test.mjs
 node scripts/validate-public-docs.mjs
 python3 scripts/list-docs.py validate
@@ -186,4 +191,33 @@ See the [plan risks](plan.md#risks). Do not replace the layout stores or bypass 
 
 ## Results
 
-Pending. No production or permanent test changes were made during package creation.
+Implementation is complete. The shared localized header control selects the
+Dockview or tablet layout adapter, remains available after hiding the right
+column, and is omitted on phones. Tablet rendering now follows stored right
+column visibility, compact desktop can explicitly reopen the right column, and
+mixed center panels remain intact.
+
+The TDD sequence recorded the expected RED regressions before the production
+changes, followed by GREEN review coverage: the focused set passed 9 files and
+109 tests. The full web unit suite passed 2,058 files with 17,788 passing and
+4 skipped tests. The review coverage includes production-shaped compact and mixed captures, A/B
+environment round trips, duplicate-ID reconciliation, and maximize/exit state
+and persistence assertions.
+
+The managed Chromium E2E run passed the executed desktop, compact, tablet,
+reload, and keyboard cases. The final managed mobile-chrome run passed 1 phone
+navigation test. Typecheck, full lint, targeted ESLint, Prettier, i18n checks
+and ratchet, production Vite build, public-doc validation, specification
+validation, and `git diff --check` all passed.
+
+The tablet component test uses mocked panel primitives and persistence callbacks;
+it asserts conditional rendering and center identity. The browser test asserts
+the stored tablet hide/show round trip. The component test covers focus after a
+click, and the browser test covers native Enter and Space activation. The
+retained matrix in `plan.md` still contains resize handoffs, the 1280-pixel
+coarse-pointer case, all four sidebar combinations, archived-task restoration,
+and the wider-to-phone handoff, which are not claimed by these results.
+
+Localized labels were added to all supported catalogs, and
+`docs/public/tasks-and-workflows.md` now documents the wider-layout toggle and
+phone navigation behavior.

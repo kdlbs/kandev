@@ -13,6 +13,7 @@ import {
   resolveRestoredLayoutProfile,
   useDockviewStore,
   performLayoutSwitch,
+  hasRightColumn,
 } from "@/lib/state/dockview-store";
 import { restoreEnvLayout } from "./dockview-layout-restore";
 import {
@@ -65,7 +66,7 @@ import {
   resolveEffectiveDefaultLayout,
   type LayoutProfileIdentity,
 } from "@/lib/layout/layout-profiles";
-import type { LayoutState } from "@/lib/state/layout-manager";
+import { fromDockviewApi, type LayoutState } from "@/lib/state/layout-manager";
 import { registerDockviewRoot, unregisterDockviewRoot } from "@/lib/state/dockview-measure";
 
 // ---------------------------------------------------------------------------
@@ -354,8 +355,11 @@ function setupReadyDockview({ api, appStore, layout, refs }: ReadyDockviewSetup)
       layout.initialLayout ?? (layout.compact ? "compact" : undefined),
     );
   } else {
+    const restoredLayout = fromDockviewApi(api);
+    const preMaximizeLayout = useDockviewStore.getState().preMaximizeLayout;
     useDockviewStore.setState({
       activeLayoutProfile: resolveRestoredLayoutProfile(api, currentEnvId),
+      rightPanelsVisible: hasRightColumn(preMaximizeLayout ?? restoredLayout),
     });
   }
 

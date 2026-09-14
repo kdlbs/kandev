@@ -1,6 +1,6 @@
 import type { DockviewReadyEvent, SerializedDockview } from "dockview-react";
 import type { StoreApi } from "zustand";
-import { useDockviewStore } from "@/lib/state/dockview-store";
+import { hasRightColumn, useDockviewStore } from "@/lib/state/dockview-store";
 import { applyLayoutFixups } from "@/lib/state/dockview-layout-builders";
 import { isLayoutShapeHealthy } from "@/lib/state/dockview-layout-health";
 import { measureDockviewContainer } from "@/lib/state/dockview-measure";
@@ -167,6 +167,7 @@ function applySavedMaximize(
   const { width, height } = measureDockviewContainer(api);
   api.layout(width, height);
   const ids = applyLayoutFixups(api, undefined, manualRightWidth);
+  const preMaximizeLayout = savedMax.preMaximizeLayout as unknown as LayoutState;
   // The maximize JSON is 2-column — captureRightTarget skips it (sv.length < 3).
   // Seed the right target directly so enforcePinnedTargets can snap the column
   // back to the saved width when the user exits maximize mode.
@@ -175,8 +176,9 @@ function applySavedMaximize(
   }
   useDockviewStore.setState({
     ...ids,
-    preMaximizeLayout: savedMax.preMaximizeLayout as unknown as LayoutState,
+    preMaximizeLayout,
     maximizedGroupId: ids.centerGroupId,
+    rightPanelsVisible: hasRightColumn(preMaximizeLayout),
   });
 }
 

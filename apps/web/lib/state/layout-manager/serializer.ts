@@ -8,6 +8,9 @@ import {
   STRUCTURAL_COMPONENTS,
   TERMINAL_DEFAULT_ID,
   canonicalPanelTitle,
+  CENTER_GROUP,
+  RIGHT_TOP_GROUP,
+  RIGHT_BOTTOM_GROUP,
 } from "./constants";
 import { panelTitle } from "./panel-title";
 
@@ -248,8 +251,35 @@ function captureNode(
   return { type: "leaf", group, size };
 }
 
-/** Panel IDs that indicate the "right" column. */
+/** Panel IDs that indicate the "right" column when no structural identity exists. */
 const RIGHT_PANEL_IDS = new Set(["files", "changes"]);
+
+/** True when the column contains the Agent surface or the canonical center group. */
+export function isCenterColumn(column: Pick<LayoutColumn, "id" | "groups">): boolean {
+  return (
+    column.id === "center" ||
+    column.groups.some(
+      (group) =>
+        group.id === CENTER_GROUP ||
+        group.panels.some(
+          (panel) =>
+            panel.component === "chat" || panel.id === "chat" || panel.id.startsWith("session:"),
+        ),
+    )
+  );
+}
+
+/** True when the column owns the standard right-side groups or column ID. */
+export function isRightColumn(column: Pick<LayoutColumn, "id" | "groups">): boolean {
+  if (isCenterColumn(column)) return false;
+  return (
+    column.id === "right" ||
+    column.groups.some(
+      (group) => group.id === RIGHT_TOP_GROUP || group.id === RIGHT_BOTTOM_GROUP,
+    ) ||
+    column.groups.some((group) => group.panels.some((panel) => RIGHT_PANEL_IDS.has(panel.id)))
+  );
+}
 
 /** Determine column ID and pinned status from its groups. */
 function inferColumnMeta(
@@ -258,15 +288,14 @@ function inferColumnMeta(
 ): { columnId: string; isPinned: boolean } {
   if (groups.length === 0) return { columnId: `col-${index}`, isPinned: false };
 
-  const allPanelIds = new Set(groups.flatMap((g) => g.panels.map((p) => p.id)));
+  const column = { id: `col-${index}`, groups };
 
-  if (allPanelIds.has("sidebar")) return { columnId: "sidebar", isPinned: true };
-  if (allPanelIds.has("chat")) return { columnId: "center", isPinned: false };
-
-  // Column containing files/changes panels is the "right" column
-  for (const id of allPanelIds) {
-    if (RIGHT_PANEL_IDS.has(id)) return { columnId: "right", isPinned: true };
+  if (groups.some((group) => group.panels.some((panel) => panel.id === "sidebar"))) {
+    return { columnId: "sidebar", isPinned: true };
   }
+  if (isCenterColumn(column)) return { columnId: "center", isPinned: false };
+
+  if (isRightColumn(column)) return { columnId: "right", isPinned: true };
 
   const firstPanelId = groups[0].panels[0]?.id;
   if (firstPanelId) return { columnId: firstPanelId, isPinned: false };

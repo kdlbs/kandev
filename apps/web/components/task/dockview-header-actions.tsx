@@ -2,14 +2,8 @@
 
 import { useCallback, useState } from "react";
 import { type IDockviewHeaderActionsProps } from "dockview-react";
-import {
-  IconPlus,
-  IconTerminal2,
-  IconPlayerPlay,
-  IconLayoutSidebarRightCollapse,
-} from "@tabler/icons-react";
+import { IconPlus, IconTerminal2, IconPlayerPlay } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,8 +33,6 @@ import { useOptionalPortForwardingVisibility } from "./port-forwarding-visibilit
 
 const HEADER_ACTION_BUTTON_CLASS =
   "h-6 w-6 p-0 cursor-pointer text-muted-foreground hover:bg-muted/70 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring";
-const RAW_HEADER_ACTION_BUTTON_CLASS =
-  "inline-flex h-6 w-6 items-center justify-center rounded-[5px] text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring cursor-pointer";
 const HEADER_ICON_CLASS = "h-3.5 w-3.5";
 
 function useLeftHeaderState(
@@ -261,20 +253,17 @@ export function RightHeaderActions(props: IDockviewHeaderActionsProps) {
   const { group } = props;
   const centerGroupId = useDockviewStore((s) => s.centerGroupId);
   const sidebarGroupId = useDockviewStore((s) => s.sidebarGroupId);
-  const rightTopGroupId = useDockviewStore((s) => s.rightTopGroupId);
   const rightBottomGroupId = useDockviewStore((s) => s.rightBottomGroupId);
 
   const isSidebarGroup = group.id === sidebarGroupId;
   if (isSidebarGroup) return <SidebarRightActions />;
 
   const isCenterGroup = group.id === centerGroupId;
-  const isRightTopGroup = group.id === rightTopGroupId;
   const isTerminalGroup = group.id === rightBottomGroupId;
 
   return (
     <div className="flex items-center gap-0.5 pr-0.5">
       {isCenterGroup && <CenterRightActions />}
-      {isRightTopGroup && <RightTopGroupActions />}
       {isTerminalGroup && <TerminalGroupRightActions />}
       <GroupSplitCloseActions {...props} />
     </div>
@@ -345,26 +334,6 @@ function SidebarRightActions() {
         onTaskCreated={handleTaskCreated}
       />
     </div>
-  );
-}
-
-function RightTopGroupActions() {
-  const { t } = useTranslation();
-  const toggleRightPanels = useDockviewStore((s) => s.toggleRightPanels);
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          className={RAW_HEADER_ACTION_BUTTON_CLASS}
-          onClick={toggleRightPanels}
-          aria-label={t("task:hideRightPanels")}
-        >
-          <IconLayoutSidebarRightCollapse className={HEADER_ICON_CLASS} />
-        </button>
-      </TooltipTrigger>
-      <TooltipContent>{t("task:hideRightPanels")}</TooltipContent>
-    </Tooltip>
   );
 }
 

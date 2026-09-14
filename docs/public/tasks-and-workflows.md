@@ -691,6 +691,18 @@ it can be run.
 
 Agents use `create_task_plan_kandev`, `get_task_plan_kandev`, `update_task_plan_kandev`, and `delete_task_plan_kandev`. Human edits are therefore visible to the next agent that reads the plan. A plan records intent; verify that code and review still match it.
 
+## Arrange task panels
+
+On desktop and tablet, use the right-panel button in the task header to hide or
+restore **Files**, **Changes**, and **Terminal**. The button stays beside
+**Layouts**, and the conversation keeps the released width while those panels
+are hidden. Kandev remembers the choice in the current task layout on the
+current device, so reloading the task keeps the selected visibility.
+
+On phones, use the bottom navigation to open **Chat**, **Files**, or
+**Terminal** as a full-screen surface. Phone navigation keeps its existing
+layout and does not change the wider task-panel choice.
+
 Revision history is not an immutable record of every autosave. Consecutive writes from the same author name and author kind coalesce into the latest revision for five minutes by default. Operators can set `KANDEV_PLAN_COALESCE_WINDOW_MS`; `0` disables coalescing, while an invalid or negative value falls back to five minutes.
 
 ## Office documents, labels, and blockers

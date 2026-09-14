@@ -59,7 +59,13 @@ export type { BuiltInPreset } from "./presets";
 export { computeColumnWidths, computeGroupHeights, getPinnedWidth } from "./sizing";
 
 // Serializer
-export { toSerializedDockview, fromDockviewApi, filterEphemeral } from "./serializer";
+export {
+  toSerializedDockview,
+  fromDockviewApi,
+  filterEphemeral,
+  isCenterColumn,
+  isRightColumn,
+} from "./serializer";
 
 // Session panel normalization for reusable saved layouts
 export {
