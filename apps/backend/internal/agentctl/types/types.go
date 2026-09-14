@@ -166,6 +166,19 @@ type McpServer struct {
 	Type    string            `json:"type,omitempty"`    // "stdio", "sse", "http", or "streamable_http"
 	Env     map[string]string `json:"env,omitempty"`     // Environment variables (stdio transport)
 	Headers map[string]string `json:"headers,omitempty"` // HTTP headers (SSE/HTTP transport)
+	// The following fields are backend-only evidence metadata. They are
+	// intentionally omitted from protocol JSON sent to agentctl and providers.
+	DefinitionID       string            `json:"-"`
+	DefinitionRevision int64             `json:"-"`
+	Origins            []McpServerOrigin `json:"-"`
+}
+
+// McpServerOrigin is backend-owned scope metadata carried alongside an MCP
+// server until attachment evidence is created. It never enters protocol JSON.
+type McpServerOrigin struct {
+	Scope       string
+	WorkspaceID string
+	OwnerID     string
 }
 
 const (

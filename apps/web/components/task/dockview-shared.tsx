@@ -43,10 +43,10 @@ import { PluginPanelTab } from "./plugin-panel-tab";
 import { PromptHistoryContent } from "./prompt-history-panel-host";
 import { TodosContent } from "./todos-panel-content";
 
-import { setPanelTitle, panelPortalManager } from "@/lib/layout/panel-portal-manager";
-import { getWebSocketClient } from "@/lib/ws/connection";
+import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { usePortalSlot } from "@/lib/layout/panel-portal-host";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "@/lib/state/dockview-env-scoped-components";
+import { useResyncGitStatusOnTabActivate } from "@/hooks/use-resync-git-status-on-tab-activate";
 import { useTranslation } from "react-i18next";
 
 // ---------------------------------------------------------------------------
@@ -232,47 +232,6 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
       panelId={panelId}
     />
   );
-}
-
-/**
- * Force a fresh git-status push whenever the diff panel becomes the active
- * dockview tab.
- *
- * Background: the diff panel's content is derived from `gitStatus` (the
- * per-file `.diff` string), which only refreshes when a `session.git.event`
- * status_update arrives from agentctl's workspace poll loop. That loop runs at
- * 3s (fast) only while the workspace is in fast poll mode; if the focus→fast
- * upgrade lost a race with agentctl startup the loop can sit in slow mode (30s)
- * and the open diff shows stale content until the next slow tick.
- *
- * This is the diff-side analog of `useResyncOnTabActivate` in
- * file-editor-panel.tsx (which force-syncs editor content on activation). Tab
- * activation is a deterministic, user-driven "I'm about to look at this diff"
- * signal, so we ask the backend for a fresh git-status snapshot via the
- * explicit `session.git.refresh` request. Focus itself remains an ACK-only
- * control signal, avoiding replay on ordinary task switching. No-op when the
- * session isn't focused.
- */
-function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | null) {
-  useEffect(() => {
-    if (!sessionId) return;
-    const entry = panelPortalManager.get(panelId);
-    if (!entry?.api) return;
-    /** Ask the WebSocket client for a fresh git-status snapshot for the
-     *  session. */
-    const refreshNow = () => {
-      const client = getWebSocketClient();
-      client?.refreshSessionData(sessionId);
-    };
-    // If the panel is already active when this effect first runs,
-    // onDidActiveChange won't fire (no transition) — refresh immediately so the
-    // initial open benefits from the same WS-event-miss recovery.
-    if (entry.api.isActive) refreshNow();
-    const disposable = entry.api.onDidActiveChange((event) => {
-      if (event.isActive) refreshNow();
-    });
-    return () => disposable.dispose();
-  }, [panelId, sessionId]);
 }
 
 /** Render the changes/diff viewer for the panel's params (`kind` "all" or

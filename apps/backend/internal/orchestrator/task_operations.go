@@ -1138,6 +1138,9 @@ type startTaskOptions struct {
 	// WorkflowEntryID pins source bindings and explicit route retries to the
 	// immutable step-entry ledger row that initiated an automatic launch.
 	WorkflowEntryID int64
+	// MCPServerIDs replaces the selections for the task session. Nil means the
+	// caller did not request a session-scoped change.
+	MCPServerIDs []string
 }
 
 // StartTaskWithRoute launches a stable Office identity through a complete
@@ -1443,6 +1446,9 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		if !promoted {
 			return nil, fmt.Errorf("explicit workflow start session became terminal before promotion")
 		}
+	}
+	if err := s.applyMCPServerSelectionsForTask(ctx, task, sessionID, opts.MCPServerIDs); err != nil {
+		return nil, err
 	}
 	// Seed a matching conditional session configuration before lifecycle
 	// startup. The ACP manager applies this durable runtime layer after the

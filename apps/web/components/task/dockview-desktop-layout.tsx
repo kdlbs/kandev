@@ -404,6 +404,7 @@ function DockviewMainArea({ effectiveSessionId, hasDevScript, onReady }: Dockvie
 }
 
 export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
+  workspaceId,
   sessionId,
   repository,
   initialLayout,
@@ -509,7 +510,11 @@ export const DockviewDesktopLayout = memo(function DockviewDesktopLayout({
         onReady={onReady}
       />
       <BottomTerminalPanel />
-      <PanelPortalHost renderPanel={renderPanel} />
+      <PanelPortalHost
+        renderPanel={(panelId, component, params) =>
+          renderPanel(panelId, component, params, workspaceId)
+        }
+      />
       <TaskReviewDialogMount taskId={activeTaskId} sessionId={effectiveSessionId} />
     </div>
   );

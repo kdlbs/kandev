@@ -11,6 +11,7 @@ import type { ReviewSource } from "@/hooks/domains/session/use-review-sources";
 import { useEnvironmentSessionId } from "@/hooks/use-environment-session-id";
 import { useFileEditors } from "@/hooks/use-file-editors";
 import { usePanelActive } from "@/hooks/use-panel-active";
+import { useResyncGitStatusOnTabActivate } from "@/hooks/use-resync-git-status-on-tab-activate";
 import { t } from "@/lib/i18n";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { useDockviewStore } from "@/lib/state/dockview-store";
@@ -68,7 +69,15 @@ function useChatSessionTitle(panelId: string, sessionId: string | null) {
 
 /** Render the chat panel for the session from `params` or the active session,
  *  or a passthrough toolbar for passthrough sessions. */
-function ChatContent({ panelId, params }: { panelId: string; params: Record<string, unknown> }) {
+function ChatContent({
+  panelId,
+  params,
+  workspaceId,
+}: {
+  panelId: string;
+  params: Record<string, unknown>;
+  workspaceId?: string | null;
+}) {
   const paramSessionId = params?.sessionId as string | undefined;
   const storeSessionId = useAppStore((state) => state.tasks.activeSessionId);
   const sessionId = paramSessionId ?? storeSessionId;
@@ -93,6 +102,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
     <TaskChatPanel
       sessionId={sessionId}
       taskId={sessionId ? taskId : null}
+      workspaceId={workspaceId}
       statusTaskId={taskId}
       onOpenFile={openFile}
       onOpenFileAtLine={openFile}
@@ -115,6 +125,7 @@ function DiffViewerContent({
   const selectedDiff = useDockviewStore((s) => s.selectedDiff);
   const setSelectedDiff = useDockviewStore((s) => s.setSelectedDiff);
   const { openFile } = useFileEditors();
+  const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const panelKind = (params?.kind as string) ?? "all";
   const selectedPath = panelKind === "file" ? (params?.path as string) : undefined;
   const selectedRepositoryName =
@@ -124,6 +135,7 @@ function DiffViewerContent({
     panelKind === "file" ? (params?.changeLayer as OpenDiffOptions["changeLayer"]) : undefined;
   const sourceFilter = ((params?.source as string) || "all") as "all" | ReviewSource;
   const panelSelectedDiff = panelKind === "all" ? selectedDiff : null;
+  useResyncGitStatusOnTabActivate(panelId, activeSessionId);
   const handleClosePanel = useCallback(() => {
     const dockApi = useDockviewStore.getState().api;
     const panel = dockApi?.getPanel(panelId);
@@ -158,6 +170,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
   // Dynamic title with file count - use environment-stable sessionId so the
   // tab title doesn't re-fetch on same-environment session tab switches.
   const activeSessionId = useEnvironmentSessionId();
+  useResyncGitStatusOnTabActivate(panelId, activeSessionId);
   const totalCount = useSessionChangesCount(activeSessionId);
 
   useEffect(() => {
@@ -245,11 +258,17 @@ function resolveComponent(component: string): string {
  * switch, so adding a panel type (like "plugin-panel") never trips the
  * function-complexity lint ceiling (R3, docs/plans/plugins).
  */
-type PanelRenderer = (panelId: string, params: Record<string, unknown>) => React.ReactNode;
+type PanelRenderer = (
+  panelId: string,
+  params: Record<string, unknown>,
+  workspaceId?: string | null,
+) => React.ReactNode;
 
 const PANEL_RENDERERS: Record<string, PanelRenderer> = {
   sidebar: () => null,
-  chat: (panelId, params) => <ChatContent panelId={panelId} params={params} />,
+  chat: (panelId, params, workspaceId) => (
+    <ChatContent panelId={panelId} params={params} workspaceId={workspaceId} />
+  ),
   "diff-viewer": (panelId, params) => <DiffViewerContent panelId={panelId} params={params} />,
   "file-editor": (panelId, params) => <FileEditorPanel panelId={panelId} params={params} />,
   "commit-detail": (panelId, params) => <CommitDetailPanel panelId={panelId} params={params} />,
@@ -290,8 +309,9 @@ export function renderPanel(
   panelId: string,
   component: string,
   params: Record<string, unknown>,
+  workspaceId?: string | null,
 ): React.ReactNode {
   const renderer = PANEL_RENDERERS[resolveComponent(component)];
-  if (renderer) return renderer(panelId, params);
+  if (renderer) return renderer(panelId, params, workspaceId);
   return <div className="p-4 text-muted-foreground">{t("common:unknownPanel", { component })}</div>;
 }

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -22,6 +23,13 @@ func (r *fastPathTaskReadRetryRepo) GetTask(ctx context.Context, taskID string) 
 		return nil, errors.New("transient task read failure")
 	}
 	return r.Repository.GetTask(ctx, taskID)
+}
+
+func createFastPathDispatchTestService(repo *sqliterepo.Repository) *Service {
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	return svc
 }
 
 func TestQueueUserPromptRejectsTerminalSession(t *testing.T) {
@@ -54,7 +62,7 @@ func TestQueueUserPrompt_T2FastPathDrainsPromptableSession(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
-	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc := createFastPathDispatchTestService(repo)
 
 	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 0 {
 		t.Fatalf("pre-condition: queue count = %d, want 0", got)
@@ -106,7 +114,7 @@ func TestQueueUserPrompt_T2DrainsAfterClarificationDetachedWithEmptyQueue(t *tes
 	if err := repo.UpdateMessage(ctx, message); err != nil {
 		t.Fatalf("mark clarification detached: %v", err)
 	}
-	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc := createFastPathDispatchTestService(repo)
 
 	if err := svc.QueueUserPrompt(ctx, "t1", "s1", "after-detach", "", false, nil, map[string]interface{}{}, true); err != nil {
 		t.Fatalf("QueueUserPrompt: %v", err)
@@ -120,7 +128,7 @@ func TestQueueUserPrompt_T2RetriesTaskAdmissionReadAfterPromotion(t *testing.T) 
 	ctx := context.Background()
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
-	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc := createFastPathDispatchTestService(repo)
 	retryRepo := &fastPathTaskReadRetryRepo{Repository: repo}
 	retryRepo.failNext.Store(true)
 	svc.repo = retryRepo
@@ -244,7 +252,7 @@ func TestQueueUserPrompt_T2DrainsWhenTaskAdmitted(t *testing.T) {
 	if err := repo.UpdateTask(ctx, task); err != nil {
 		t.Fatalf("update task: %v", err)
 	}
-	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc := createFastPathDispatchTestService(repo)
 
 	if err := svc.QueueUserPrompt(ctx, "t1", "s1", "admitted-task", "", false, nil, map[string]interface{}{}, true); err != nil {
 		t.Fatalf("QueueUserPrompt: %v", err)

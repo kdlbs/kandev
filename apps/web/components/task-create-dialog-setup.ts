@@ -32,6 +32,8 @@ import { useResolvedTaskCreateWorkflowContext } from "@/components/task-create-d
 import { truncateRemoteTaskTitle } from "@/lib/task-title";
 import { t } from "@/lib/i18n";
 import { listRepositoryBranchPolicies } from "@/lib/api";
+import { useTaskCreateDialogMCPSetup } from "@/components/task-create-dialog-mcp";
+import { useMCPSelectionEditor } from "@/hooks/domains/workspace/use-mcp-selection-editor";
 import { useTaskEditDialogDependencies } from "@/hooks/domains/task/use-task-edit-dialog-dependencies";
 
 // Catalog key: module scope, so it is resolved at the call site.
@@ -115,16 +117,11 @@ function useLinearImportHandler(
   );
 }
 
-function useEditDialogDependencies(
-  open: boolean,
-  isEditMode: boolean,
-  workspaceId: string | null | undefined,
-  taskId: string | null | undefined,
-) {
+function useEditDialogDependencies(props: TaskCreateDialogProps, isEditMode: boolean) {
   return useTaskEditDialogDependencies({
-    open: open && isEditMode,
-    workspaceId,
-    taskId,
+    open: props.open && isEditMode,
+    workspaceId: props.workspaceId,
+    taskId: props.taskId ?? props.editingTask?.id ?? null,
   });
 }
 
@@ -140,6 +137,7 @@ type SubmitWiringArgs = {
   editDependencies: ReturnType<typeof useTaskEditDialogDependencies>;
   refreshBranchPolicies: () => Promise<void>;
   preserveQueuedLastUsedOnClose: () => void;
+  mcpSelectionEditor: ReturnType<typeof useMCPSelectionEditor>;
 };
 
 function useSubmitHandlersWiring({
@@ -154,6 +152,7 @@ function useSubmitHandlersWiring({
   editDependencies,
   refreshBranchPolicies,
   preserveQueuedLastUsedOnClose,
+  mcpSelectionEditor,
 }: SubmitWiringArgs) {
   const {
     workspaceId,
@@ -165,7 +164,7 @@ function useSubmitHandlersWiring({
     createTask,
   } = props;
   const { parentTaskId } = props;
-  const taskId = props.taskId ?? null;
+  const taskId = props.taskId ?? editingTask?.id ?? null;
   return useTaskSubmitHandlers({
     isSessionMode,
     isEditMode,
@@ -206,6 +205,8 @@ function useSubmitHandlersWiring({
     setRemoteRepos: fs.setRemoteRepos,
     setAgentProfileId: fs.setAgentProfileId,
     setExecutorId: fs.setExecutorId,
+    setMcpServerIds: fs.setMcpServerIds,
+    setMcpServerIdsDirty: fs.setMcpServerIdsDirty,
     setSelectedWorkflowId: fs.setSelectedWorkflowId,
     setFetchedSteps: fs.setFetchedSteps,
     clearDraft: fs.clearDraft,
@@ -217,6 +218,12 @@ function useSubmitHandlersWiring({
     priority: fs.priority,
     blockedBy: fs.blockedBy,
     editDependencies,
+    mcpServerIds: fs.mcpServerIds,
+    mcpServerIdsDirty: fs.mcpServerIdsDirty,
+    saveTaskMCPSelections:
+      !isSessionMode && taskId && workspaceId
+        ? (definitionIds: string[]) => mcpSelectionEditor.save(definitionIds)
+        : undefined,
   });
 }
 
@@ -395,6 +402,36 @@ function useDialogSetupData(
   };
 }
 
+function useMCPSetupForDialog(
+  props: TaskCreateDialogProps,
+  fs: DialogFormState,
+  isSessionMode: boolean,
+  effectiveAgentProfileId: string,
+) {
+  return useTaskCreateDialogMCPSetup({
+    open: props.open,
+    workspaceId: props.workspaceId,
+    openCycle: fs.openCycle,
+    isSessionMode,
+    taskId: props.taskId ?? props.editingTask?.id ?? null,
+    effectiveAgentProfileId,
+    repositories: fs.repositories,
+    mcpServerIdsDirty: fs.mcpServerIdsDirty,
+    setMcpServerIds: fs.setMcpServerIds,
+    setMcpServerIdsDirty: fs.setMcpServerIdsDirty,
+  });
+}
+
+function useRepositorySetsForSetup(
+  props: TaskCreateDialogProps,
+  fs: DialogFormState,
+  repositories: Repository[],
+  computed: ReturnType<typeof useTaskCreateDialogData>["computed"],
+  userSettingsLoaded: boolean,
+) {
+  return useDialogRepositorySets(props, fs, repositories, computed, userSettingsLoaded);
+}
+
 export function useTaskCreateDialogSetup(
   props: TaskCreateDialogProps,
   options: { preserveQueuedLastUsedOnClose?: () => void } = {},
@@ -420,12 +457,7 @@ export function useTaskCreateDialogSetup(
     initialValues,
     resolvedProps.lockedFields?.workflow === true,
   );
-  const editDependencies = useEditDialogDependencies(
-    open,
-    isEditMode,
-    workspaceId,
-    editingTask?.id ?? null,
-  );
+  const editDependencies = useEditDialogDependencies(resolvedProps, isEditMode);
   const sessionRepoName = useSessionRepoName(isSessionMode);
   const data = useDialogSetupData(resolvedProps, fs);
   const {
@@ -436,6 +468,12 @@ export function useTaskCreateDialogSetup(
     refreshBranchPolicies,
     savedBaseSubmitBlockedReason,
   } = data;
+  const mcp = useMCPSetupForDialog(
+    resolvedProps,
+    fs,
+    isSessionMode,
+    computed.effectiveAgentProfileId,
+  );
   const submitHandlers = useSubmitHandlersWiring({
     props: resolvedProps,
     fs,
@@ -448,6 +486,7 @@ export function useTaskCreateDialogSetup(
     editDependencies,
     refreshBranchPolicies,
     preserveQueuedLastUsedOnClose: options.preserveQueuedLastUsedOnClose ?? (() => undefined),
+    mcpSelectionEditor: mcp.editor,
   });
   const guardedHandleSubmit = useGuardedSubmit(
     submitHandlers.handleSubmit,
@@ -461,7 +500,7 @@ export function useTaskCreateDialogSetup(
   const handleJiraImport = useJiraImportHandler(fs, data.handlers.handleTaskNameChange);
   const handleLinearImport = useLinearImportHandler(fs, data.handlers.handleTaskNameChange);
   const freshBranchAvailable = canUseFreshBranch(fs, computed.isLocalExecutor);
-  const repositorySets = useDialogRepositorySets(
+  const repositorySets = useRepositorySetsForSetup(
     resolvedProps,
     fs,
     repositories,
@@ -488,6 +527,9 @@ export function useTaskCreateDialogSetup(
     handleLinearImport,
     editDependencies,
     savedBaseSubmitBlockedReason,
+    mcpDefinitions: mcp.definitions,
+    mcpDefinitionsLoading: mcp.definitionsLoading,
+    mcpInheritedSelections: mcp.inheritedSelections,
   };
 }
 

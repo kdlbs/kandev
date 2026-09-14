@@ -31,6 +31,8 @@ export type FormResetters = {
   setFreshBranchEnabled: (value: boolean) => void;
   setCurrentLocalBranch: (value: string) => void;
   setBlockedBy: (value: string[]) => void;
+  setMcpServerIds: (value: string[]) => void;
+  setMcpServerIdsDirty: (value: boolean) => void;
 };
 
 export function resetTaskForm(
@@ -75,4 +77,6 @@ export function resetTaskForm(
   resetters.setWorkspacePath("");
   resetters.setAutopilot(false);
   resetters.setPriority("medium");
+  resetters.setMcpServerIds([]);
+  resetters.setMcpServerIdsDirty(false);
 }

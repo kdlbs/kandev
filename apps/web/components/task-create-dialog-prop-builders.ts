@@ -128,6 +128,9 @@ export function buildDialogFormBodyProps(
     workflowLocked: props.lockedFields?.workflow,
     runnerEditable: computeRunnerEditable(setup.isEditMode, props.editingTask),
     runnerIneligibleReason: computeRunnerIneligibleReason(props.editingTask),
+    mcpDefinitions: setup.mcpDefinitions,
+    mcpDefinitionsLoading: setup.mcpDefinitionsLoading,
+    mcpInheritedSelections: setup.mcpInheritedSelections,
   };
 }
 

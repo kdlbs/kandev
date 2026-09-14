@@ -607,10 +607,12 @@ func startAgentInfrastructure(
 	// AGENT MANAGER
 	// ============================================
 	lifecycleMgr, err := provideLifecycleManager(
+		ctx,
 		cfg,
 		log,
 		eventBus,
 		repos.AgentSettings,
+		services.Task,
 		agentRegistry,
 		repos.Secrets,
 		services.Task.TaskBaseBranches,

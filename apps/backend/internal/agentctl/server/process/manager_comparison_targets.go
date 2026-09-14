@@ -291,6 +291,7 @@ func (m *Manager) publishComparisonTargetReady(
 		return false
 	}
 	operation.tracker.SetComparisonTargetReady(&operation.target, ref)
+	delete(m.comparisonTargetOps, repositoryName)
 	return true
 }
 
@@ -308,6 +309,7 @@ func (m *Manager) publishComparisonTargetUnavailable(
 		return false
 	}
 	operation.tracker.SetComparisonTargetUnavailable(&operation.target, code)
+	delete(m.comparisonTargetOps, repositoryName)
 	return true
 }
 

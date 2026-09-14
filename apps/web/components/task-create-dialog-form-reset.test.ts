@@ -27,6 +27,8 @@ function makeResetters(): FormResetters {
     setFreshBranchEnabled: vi.fn(),
     setCurrentLocalBranch: vi.fn(),
     setBlockedBy: vi.fn(),
+    setMcpServerIds: vi.fn(),
+    setMcpServerIdsDirty: vi.fn(),
   };
 }
 
