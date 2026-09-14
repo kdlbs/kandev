@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { expandDisplaySettingsGroup } from "../../helpers/display-settings";
 import { KanbanPage } from "../../pages/kanban-page";
 
 const RICH_TASK_TITLE = "Portable rich task";
@@ -67,6 +68,7 @@ test.describe("Task listing display preferences", () => {
     await expect(row).not.toContainText(RICH_TASK_DESCRIPTION);
 
     await testPage.getByTestId("display-button").click();
+    await expandDisplaySettingsGroup(testPage, "list-rows");
     await testPage.getByText("Show task details", { exact: true }).click();
     await expect(row).toContainText(SEEDED_REPOSITORY_LABEL);
     await expect(row).toContainText(RICH_TASK_DESCRIPTION);

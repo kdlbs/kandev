@@ -17,6 +17,9 @@ const COPY: Record<string, string> = {
   "canvases:archivedCanvasActionHelp":
     "This canvas is archived. Restore it from workspace settings before changing it.",
   "canvases:disabledCanvasActionHelp": "This canvas is disabled. Enable it before changing it.",
+  "canvases:shareCanvas": "Share canvas",
+  "canvases:shareCanvasDescription":
+    "Prepare a verified bundle or source archive for review and sharing.",
 };
 
 vi.mock("react-i18next", () => ({
@@ -64,6 +67,7 @@ describe("canvas host action guidance", () => {
         onEdit={vi.fn()}
         onPromote={vi.fn()}
         onReleases={vi.fn()}
+        onShare={vi.fn()}
       />,
     );
 
@@ -89,6 +93,7 @@ describe("canvas host action guidance", () => {
         onEdit={vi.fn()}
         onPromote={vi.fn()}
         onReleases={vi.fn()}
+        onShare={vi.fn()}
         onSelectCanvas={vi.fn()}
         editing={false}
       />,

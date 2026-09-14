@@ -422,6 +422,31 @@ func TestExecuteQueuedMessage_StoresAttachmentsInUserMessageMetadata(t *testing.
 	}
 }
 
+func TestRecordQueuedUserMessagePreservesOrdinaryAdmissionProvenance(t *testing.T) {
+	ctx := context.Background()
+	svc := createTestService(setupTestRepo(t), newMockStepGetter(), newMockTaskRepo())
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+	queued := &messagequeue.QueuedMessage{
+		ID: "ordinary-queue-row", SessionID: "s1", TaskID: "t1", Content: "queued prompt",
+		QueuedBy: messagequeue.QueuedByUser,
+		Metadata: map[string]interface{}{
+			messagequeue.MetadataQueueAdmissionIDs: []string{"client-first", "client-second"},
+		},
+	}
+
+	if err := svc.recordQueuedUserMessage(ctx, queued, nil); err != nil {
+		t.Fatalf("record ordinary transcript: %v", err)
+	}
+	if len(messages.userMessages) != 1 {
+		t.Fatalf("recorded messages = %d, want 1", len(messages.userMessages))
+	}
+	ids, ok := messages.userMessages[0].metadata[messagequeue.MetadataQueueAdmissionIDs].([]string)
+	if !ok || !reflect.DeepEqual(ids, []string{"client-first", "client-second"}) {
+		t.Fatalf("ordinary admission provenance = %v, valid=%v", ids, ok)
+	}
+}
+
 func TestExecuteQueuedMessageTransientRetryDoesNotDuplicateRecordedUserMessage(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

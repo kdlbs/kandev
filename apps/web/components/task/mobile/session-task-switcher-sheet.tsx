@@ -45,6 +45,20 @@ type SessionTaskSwitcherSheetProps = {
   navigate?: (taskId: string) => void;
   onCloseAutoFocus?: (event: Event) => void;
 };
+function useTaskSheetOpener(open: boolean) {
+  const [opener, setOpener] = useState({ open: false, current: null as HTMLElement | null });
+  if (opener.open !== open) {
+    setOpener({
+      open,
+      current:
+        open && document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : opener.current,
+    });
+  }
+  return opener;
+}
+
 export function useTaskSheetSelectionController() {
   const [selectionController] = useState(createTaskSheetSelectionController);
   useEffect(
@@ -445,6 +459,8 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   onCloseAutoFocus,
 }: SessionTaskSwitcherSheetProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const opener = useTaskSheetOpener(open);
+  const autoFocusNewTasks = useAppStore((state) => state.userSettings.autoFocusNewTasks) !== false;
   const [subtaskTarget, setSubtaskTarget] = useState<{ id: string; title: string } | null>(null);
   const data = useSheetData(workspaceId);
   const selectionController = useTaskSheetSelectionController();
@@ -515,6 +531,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
     <>
       {surface}
       <TaskSwitcherDialogs
+        focusReturnRef={presentation === "drawer" && !autoFocusNewTasks ? opener : undefined}
         dialogOpen={dialogOpen}
         onDialogOpenChange={setDialogOpen}
         workspaceId={workspaceId}

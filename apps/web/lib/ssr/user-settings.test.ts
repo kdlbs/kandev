@@ -758,3 +758,17 @@ describe("prevent auto-start on open preference", () => {
     ).toBe(false);
   });
 });
+
+// @covers AC-TASKS-CREATION-AUTO-FOCUS-001.1, AC-TASKS-CREATION-AUTO-FOCUS-001.4
+describe("task creation auto-focus preference", () => {
+  it("defaults on and preserves explicit false across partial hydration", () => {
+    expect(createDefaultUserSettings()).toHaveProperty("autoFocusNewTasks", true);
+    expect(buildCoreFields({ auto_focus_new_tasks: false })).toHaveProperty(
+      "autoFocusNewTasks",
+      false,
+    );
+    expect(
+      buildCoreFields({}, { ...createDefaultUserSettings(), autoFocusNewTasks: false }),
+    ).toHaveProperty("autoFocusNewTasks", false);
+  });
+});

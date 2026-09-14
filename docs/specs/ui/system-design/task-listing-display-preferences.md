@@ -5,6 +5,7 @@ requirements:
   - REQ-UI-TASK-LISTING-DISPLAY-PREFERENCES-001
   - REQ-UI-TASK-LISTING-DISPLAY-PREFERENCES-002
   - REQ-UI-TASK-LISTING-DISPLAY-PREFERENCES-003
+  - REQ-UI-TASK-LISTING-DISPLAY-PREFERENCES-004
 ---
 
 # Task Listing Display Preferences System Design
@@ -273,3 +274,80 @@ Use isolated test fixtures. Phone proof uses actual taps, checks the labelled
 row hit area, verifies reachable Save, and checks no horizontal overflow.
 The [implementation plan](../../../plans/threads-home-default/plan.md)
 maps acceptance criteria to exact tests and commands.
+
+## Grouped display settings
+
+Requirement `REQ-UI-TASK-LISTING-DISPLAY-PREFERENCES-004` maps to this section:
+004.1 to disclosure state; 004.2/004.3 to composition and summaries;
+004.4 to existing state ownership; 004.5/004.6 to accessibility and mobile.
+This extension is implemented; preceding shipped contracts remain unchanged.
+The [implementation package](../../../plans/homepage-view-settings/plan.md)
+owns delivery and verification. No new ADR is needed: ADR 0041 continues to
+own portable preferences, while disclosure state is transient React state.
+
+### Composition and summaries
+
+`KanbanDisplayDropdown` and `DropdownSections` in
+`apps/web/components/kanban-display-dropdown.tsx` retain their current caller
+props and `useKanbanDisplaySettings` actions. Wrap existing field sections in
+Filters, Sort, Preview panel, and conditional List rows disclosures. Keep
+`currentPage === "kanban"` board-only eligibility and Threads field exclusions
+intact. Desktop Threads renders the Filters surface so its workflow filter
+remains reachable; repository, board-only controls, plugins, and Preview remain
+omitted there. Pipeline follows its existing caller/page semantics; do not infer
+eligibility from the visible label.
+Registered plugin filters remain in Filters with their existing namespaced
+`pluginTaskFilterRegistrationKey` keys and callbacks.
+
+Reuse the header/summary anatomy of `SidebarSettingsDisclosure` in
+`components/task/sidebar-filter/sidebar-settings-disclosure.tsx`. Extract its
+presentation into `components/display-settings-disclosure.tsx` with a thin
+sidebar compatibility wrapper if needed. Preserve the sidebar's controlled API,
+existing test IDs and behavior; avoid importing sidebar domain code into Home.
+Render the desktop groups inside the Popover primitive. A DropdownMenu content
+surface reserves Tab and arrow navigation for registered menu items, which would
+exclude the disclosure headers and nested controls. Popover focus handling keeps
+the headers and revealed controls in the browser's normal tab order while
+retaining Escape dismissal and trigger focus return. Scope 44px hit areas to
+touch; keep fine-pointer controls at normal density. Multi-line headers can grow
+to fit their summaries. Reuse chevrons and muted labels.
+
+Derive summaries from current hook props during render. Reuse
+`KANBAN_SORT_LABEL_KEYS`, `TASK_PRIORITY_LABEL_KEYS`, workflow/repository names,
+and `getRepositoryPlaceholderKey` for existing empty/loading semantics. Empty
+priority selection means All priorities; four selected tokens must show their
+labels, since unranked tasks remain excluded. Summarize active plugin filters
+with their label and selected count, using i18next count forms. Unknown non-All
+IDs get a localized unavailable fallback and do not trigger writes. Summaries
+wrap without clipping the chevron; full values remain readable when expanded.
+Add host copy in en, pt-pt, zh-cn, and generated zh-hk/zh-tw, plus pseudo through
+repository scripts. Plugin-supplied labels retain plugin ownership.
+
+### Disclosure state and persistence
+
+Keep independent expansion state local to the surface, reset when it closes.
+Multiple groups can stay open; setting rerenders do not reset expansion.
+Unmount hidden field content so it cannot receive focus. Do not duplicate
+filter state, add browser storage, change setting actions, or add backend APIs.
+Nested Select interactions must not dismiss the parent disclosure/surface.
+Bound the desktop Popover by available viewport height with one scroll owner.
+
+### Mobile and accessibility
+
+`MobileDisplayOptions` in `components/kanban/mobile-display-options.tsx`, rendered
+by `components/kanban/mobile-menu-sheet.tsx`, applies the same group anatomy
+inside its current `ResponsiveMenuSurface`. Retain
+`buildMobileDisplayOptions` visibility flags from
+`hooks/use-mobile-menu-sheet-state.ts`: phone Board workflow is selected outside
+the drawer, repository remains available, and preview settings retain their
+existing visibility. Keep Columns and `MobileTasksListOptions` outside the
+new groups. This is a temporary settings flow, so the existing inset Drawer is
+the nearest shipped exemplar and the appropriate surface, with wider Sheet
+behavior unchanged. Keep its fixed header, dynamic viewport bound, safe-area
+clearance and single internal scrolling body; groups add no nested scrollers.
+
+Share presentation and summary derivation across viewports, not new business
+logic. Use full-row semantic buttons, `aria-expanded`, `aria-controls`, stable
+content IDs, visible focus, and Enter/Space activation. Preserve Escape/back,
+focus return and nested Select behavior. Test phone geometry at the configured
+Pixel 5 size and immediately below/above the 768px phone boundary.

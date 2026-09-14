@@ -1,6 +1,7 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
+import { expandDisplaySettingsGroup } from "../../helpers/display-settings";
 
 export async function withHeightWorkflows(
   api: ApiClient,
@@ -58,6 +59,7 @@ export async function expectCompactColumn(column: Locator) {
 
 export async function selectHeightWorkflow(page: Page, name: string) {
   await page.getByTestId("display-button").click();
+  await expandDisplaySettingsGroup(page, "filters");
   await page.getByTestId("display-workflow-filter").click();
   await page.getByRole("listbox").getByRole("option", { name, exact: true }).click();
   await page.keyboard.press("Escape");

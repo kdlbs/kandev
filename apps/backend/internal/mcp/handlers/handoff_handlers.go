@@ -24,6 +24,12 @@ func (h *Handlers) SetHandoffService(svc *service.HandoffService) {
 			h.taskSvc.SetWorkspacePolicyAttacher(svc)
 		}
 	}
+	if svc != nil && h.taskSvc != nil {
+		svc.SetTaskAccessChecker(h.taskSvc.AuthorizeTaskAccess)
+	} else if svc != nil {
+		svc.SetTaskAccessChecker(nil)
+	}
+
 }
 
 type relatedReadPayload struct {

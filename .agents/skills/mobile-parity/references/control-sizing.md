@@ -34,6 +34,13 @@ Apply larger hit areas through a phone or coarse-pointer condition.
 Use the canonical 768px phone boundary for new shared sizing rules.
 Preserve existing overlay boundaries unless the task changes their composition.
 
+Feature callers must not use a desktop repair class such as
+`min-h-11 md:min-h-9`: it produces a 36px desktop control and bypasses the
+28px standard. Leave Button, Input, and SelectTrigger defaults in place when
+only layout or width needs changing, or use the shared sizing helper. If a
+caller needs a custom touch target, scope it to the phone or coarse-pointer
+condition instead of overriding the desktop base.
+
 Do not add a global CSS rule that assigns one height to every HTML button.
 Do not change existing compact or large variant meanings to repair individual callers.
 Use the standard variant at ordinary action call sites.

@@ -789,5 +789,7 @@
   "unitAddMember": "Àďď",
   "unitRemoveMember": "Ŕēḿōvē ḿēḿƀēŕ",
   "unitPickPerson": "Ƥĩćķ śōḿēōńē",
-  "unitActionFailed": "Ţĥàţ ďĩď ńōţ ŵōŕķ."
+  "unitActionFailed": "Ţĥàţ ďĩď ńōţ ŵōŕķ.",
+  "autoFocusNewTasks": "Àũţō-ƒōćũś ńēŵ ţàśķś",
+  "autoFocusNewTasksHelp": "Ōƥēń ńēŵĺŷ ćŕēàţēď ţàśķś àũţōḿàţĩćàĺĺŷ. Ţũŕń ţĥĩś ōƒƒ ţō śţàŷ ōń ŷōũŕ ćũŕŕēńţ vĩēŵ. Ţàśķś àńď àĝēńţś śţĩĺĺ śţàŕţ àś ŕēqũēśţēď."
 }

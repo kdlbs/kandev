@@ -70,6 +70,7 @@ function makeUnloadedSettings(): UserSettingsState {
     preventAutoStartAgentOnOpen: false,
     unreadDivider: true,
     agentGeneratedTaskTitles: false,
+    autoFocusNewTasks: true,
     mcpTaskAgentProfileDefault: "current_task",
     showAnchoredPromptBar: false,
     showScrollToLastPrompt: true,
