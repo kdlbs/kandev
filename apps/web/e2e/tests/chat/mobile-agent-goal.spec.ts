@@ -1,7 +1,11 @@
 import { type Locator, type Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
-import { startQuickChatFromSetup, sendQuickChatMessage } from "./quick-chat-helpers";
+import {
+  startQuickChatFromSetup,
+  sendQuickChatMessage,
+  waitForQuickChatDirectInput,
+} from "./quick-chat-helpers";
 
 async function openMobileQuickChat(page: Page): Promise<Locator> {
   await page.goto("/");
@@ -49,12 +53,14 @@ test.describe("mobile agent goal visibility", () => {
     await close.tap();
     await expect(drawer).toBeHidden();
 
+    await waitForQuickChatDirectInput(dialog);
     await sendQuickChatMessage(dialog, testPage, "/e2e:goal-complete");
     await expect(dialog.getByText("The provider goal is complete.", { exact: false })).toBeVisible({
       timeout: 30_000,
     });
     await expect(dialog.getByTestId("agent-goal-chip")).toBeHidden({ timeout: 15_000 });
 
+    await waitForQuickChatDirectInput(dialog);
     await sendQuickChatMessage(dialog, testPage, "/e2e:goal-active");
     await expect(dialog.getByTestId("agent-goal-chip")).toBeVisible({ timeout: 30_000 });
     await expect(
@@ -63,6 +69,7 @@ test.describe("mobile agent goal visibility", () => {
       }),
     ).toBeVisible({ timeout: 30_000 });
 
+    await waitForQuickChatDirectInput(dialog);
     await sendQuickChatMessage(dialog, testPage, "/e2e:goal-clear");
     await expect(dialog.getByText("The provider goal was cleared.", { exact: false })).toBeVisible({
       timeout: 30_000,

@@ -122,6 +122,22 @@ export async function waitForQuickChatComposerReady(dialog: Locator): Promise<Lo
   return editor;
 }
 
+/**
+ * Wait for Quick Chat to accept a direct prompt instead of queueing it behind
+ * the active turn. The composer remains editable while the agent is running,
+ * so checking editability alone can submit a message too early.
+ */
+export async function waitForQuickChatDirectInput(dialog: Locator): Promise<void> {
+  const idlePlaceholder = dialog
+    .locator(
+      '[data-placeholder="Continue working on the task..."]:visible, [data-placeholder="Continue working on the plan..."]:visible, [data-placeholder="Continue working on the file..."]:visible',
+    )
+    .first();
+  const editor = dialog.locator('.tiptap.ProseMirror[contenteditable="true"]:visible').first();
+  await expect(idlePlaceholder).toBeVisible({ timeout: 15_000 });
+  await expect(editor).toBeEditable({ timeout: 15_000 });
+}
+
 export async function startQuickChatFromSetup(dialog: Locator, page: Page) {
   await selectAgentIfNeeded(dialog, page);
   await expect(dialog.getByTestId("quick-chat-start")).toBeEnabled({ timeout: 10_000 });
