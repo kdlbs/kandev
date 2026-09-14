@@ -1734,6 +1734,10 @@ func wireWorkflowEngineForOffice(
 	// Phase 8 delegation adapters: task creator + workflow switcher.
 	taskCreator := officeengineadapters.NewTaskCreatorAdapter(
 		repos.Task, &childTaskCreatorAdapter{taskSvc: taskSvc})
+	// AC-OFFICE-RUN-CAUSATION-001.24: a child task created by a workflow
+	// step's create_child_task action must carry its parent's causation
+	// lineage forward instead of silently rooting at depth 0.
+	taskCreator.SetCarrierResolver(officeSvc)
 	workflowSwitcher := officeengineadapters.NewWorkflowSwitcherAdapter(
 		&startStepResolverAdapter{svc: workflowSvc}, repos.Task)
 	// Wire each dependency via its dedicated setter so the orchestrator

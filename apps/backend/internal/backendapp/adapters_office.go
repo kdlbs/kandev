@@ -147,11 +147,12 @@ func (a *childTaskCreatorAdapter) CreateChildTask(
 	ctx context.Context, parent *models.Task, spec officeengineadapters.ChildTaskCreateSpec,
 ) (string, error) {
 	return a.taskSvc.CreateChildTask(ctx, parent, taskservice.ChildTaskSpec{
-		Title:          spec.Title,
-		Description:    spec.Description,
-		WorkflowID:     spec.WorkflowID,
-		StepID:         spec.StepID,
-		AgentProfileID: spec.AgentProfileID,
+		Title:                 spec.Title,
+		Description:           spec.Description,
+		WorkflowID:            spec.WorkflowID,
+		StepID:                spec.StepID,
+		AgentProfileID:        spec.AgentProfileID,
+		OfficeCarrierMetadata: spec.OfficeCarrierMetadata,
 	})
 }
 

@@ -215,6 +215,17 @@ func (s *Service) TaskBoundaryCarrier(ctx context.Context, taskID string) TaskBo
 	return carrierFromTaskMetadata(metadata)
 }
 
+// TaskBoundaryCarrierMetadata resolves taskID's task-boundary carrier and
+// returns it in the map shape CreateTaskRequest/ChildTaskSpec's
+// OfficeCarrierMetadata field expects, so a child task created from taskID
+// (e.g. the workflow engine's create_child_task action, which has no live
+// causing run to read — only the trigger's task id) can carry forward the
+// same causation lineage instead of silently rooting at depth 0
+// (AC-OFFICE-RUN-CAUSATION-001.24).
+func (s *Service) TaskBoundaryCarrierMetadata(ctx context.Context, taskID string) map[string]interface{} {
+	return carrierMetadataFromCarrier(s.TaskBoundaryCarrier(ctx, taskID))
+}
+
 // queueRunInline performs the legacy in-office insert path used when
 // no runs service is wired (older tests, transitional deployments).
 // Behaviour matches the pre-Phase-3 implementation.

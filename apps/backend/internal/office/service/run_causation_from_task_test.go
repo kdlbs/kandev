@@ -133,6 +133,61 @@ func runCausationTestAgent(name string, role models.AgentRole) *models.AgentInst
 	}
 }
 
+// TestTaskBoundaryCarrierMetadata_RoundTripsThroughRealCarrier is the
+// Review round 1 finding 3 supporting test: TaskBoundaryCarrierMetadata
+// is what engine_adapters.TaskCreatorAdapter calls (via the
+// CarrierResolver interface) to forward a parent task's causation
+// lineage onto a create_child_task-created child. Proves the resolve ->
+// map round trip against a real carrier written on a real task, not a
+// hand-built struct.
+func TestTaskBoundaryCarrierMetadata_RoundTripsThroughRealCarrier(t *testing.T) {
+	svc, repo := newRunCausationFromTaskTestService(t)
+	seedOfficeTaskWithMetadata(t, repo, "parent-task", map[string]interface{}{
+		"office_carrier_causation_id":    "causation-1",
+		"office_carrier_causation_depth": 2,
+		"office_carrier_creating_run_id": "run-1",
+		"office_carrier_human_rooted":    false,
+		"office_carrier_routine_id":      "routine-1",
+		"office_carrier_actor_kind":      "agent",
+		"office_carrier_actor_id":        "agent-1",
+	})
+
+	got := svc.TaskBoundaryCarrierMetadata(context.Background(), "parent-task")
+	want := map[string]interface{}{
+		"office_carrier_causation_id":    "causation-1",
+		"office_carrier_causation_depth": 2,
+		"office_carrier_creating_run_id": "run-1",
+		"office_carrier_human_rooted":    false,
+		"office_carrier_routine_id":      "routine-1",
+		"office_carrier_actor_kind":      "agent",
+		"office_carrier_actor_id":        "agent-1",
+	}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("carrier[%q] = %v, want %v (full carrier: %+v)", k, got[k], v, got)
+		}
+	}
+}
+
+// TestTaskBoundaryCarrierMetadata_NoCarrierResolvesToRootValues covers a
+// parent task with ordinary (non-carrier) metadata: the child still gets
+// a full, explicit carrier map, but every field reads its zero/root
+// value rather than the child inheriting nothing at all.
+func TestTaskBoundaryCarrierMetadata_NoCarrierResolvesToRootValues(t *testing.T) {
+	svc, repo := newRunCausationFromTaskTestService(t)
+	seedOfficeTaskWithMetadata(t, repo, "plain-task", map[string]interface{}{
+		"unrelated_key": "value",
+	})
+
+	got := svc.TaskBoundaryCarrierMetadata(context.Background(), "plain-task")
+	if got["office_carrier_creating_run_id"] != "" {
+		t.Errorf("creating_run_id = %v, want empty (root)", got["office_carrier_creating_run_id"])
+	}
+	if got["office_carrier_human_rooted"] != false {
+		t.Errorf("human_rooted = %v, want false", got["office_carrier_human_rooted"])
+	}
+}
+
 // TestQueueTaskAssignedRun_InheritsCarrierFromTaskMetadata pins
 // AC-OFFICE-RUN-CAUSATION-001.5: a run queued for a task carrying the
 // causation carrier inherits that carrier's lineage, actor, and routine

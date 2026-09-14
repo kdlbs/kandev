@@ -23,6 +23,25 @@ func carrierMetadataFromRun(run *models.Run) map[string]interface{} {
 	}
 }
 
+// carrierMetadataFromCarrier converts a resolved TaskBoundaryCarrier back
+// into the map[string]interface{} shape carrierMetadataFromRun produces,
+// so a carrier already read off one task's metadata can be forwarded
+// verbatim onto another task created from it — a workflow step's
+// create_child_task action has no live causing run to read (only the
+// trigger's task id), so it carries the parent task's own already-resolved
+// carrier forward instead.
+func carrierMetadataFromCarrier(c TaskBoundaryCarrier) map[string]interface{} {
+	return map[string]interface{}{
+		taskmodels.MetaKeyOfficeCarrierCausationID:    c.CausationID,
+		taskmodels.MetaKeyOfficeCarrierCausationDepth: c.CausationDepth,
+		taskmodels.MetaKeyOfficeCarrierCreatingRunID:  c.CreatingRunID,
+		taskmodels.MetaKeyOfficeCarrierHumanRooted:    c.HumanRooted,
+		taskmodels.MetaKeyOfficeCarrierRoutineID:      c.RoutineID,
+		taskmodels.MetaKeyOfficeCarrierActorKind:      string(c.ActorKind),
+		taskmodels.MetaKeyOfficeCarrierActorID:        c.ActorID,
+	}
+}
+
 // TaskBoundaryCarrier is the validated result of reading the carrier set
 // (AC-OFFICE-RUN-CAUSATION-001.18) off a task's metadata, ready to attach
 // to a runs/service.QueueRunRequest for a run queued because of that
