@@ -62,6 +62,16 @@ func TestDefinitionsIncludeDynamicAgentRoutingMetadata(t *testing.T) {
 	}
 }
 
+func TestDefinitionsNeedsYouInboxLabelIsInbox(t *testing.T) {
+	def, ok := DefinitionByKey("features.needsYouInbox")
+	if !ok {
+		t.Fatal("features.needsYouInbox definition missing")
+	}
+	if def.Label != "Inbox" {
+		t.Fatalf("Label = %q, want %q", def.Label, "Inbox")
+	}
+}
+
 func TestDefinitionsIncludeCanvasMetadata(t *testing.T) {
 	def, ok := DefinitionByKey("features.canvases")
 	if !ok {
