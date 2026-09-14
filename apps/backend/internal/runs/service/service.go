@@ -126,6 +126,24 @@ type QueueRunRequest struct {
 	CarrierCreatingRunID  string
 	CarrierCausationID    string
 	CarrierCausationDepth int
+
+	// ContextSnapshot is stored on the run's context_snapshot column
+	// verbatim, distinct from Payload (the routing envelope: task id,
+	// workflow step id, agent profile id). Used by taskless
+	// wakeup-originated runs to carry the wakeup's own JSON context
+	// (including routine_id, which models.ContinuationScopeForRun reads
+	// back out) without mixing it into the envelope. Empty for every
+	// other caller, which leaves the column at its default.
+	ContextSnapshot string
+
+	// SkipCoalesce bypasses this call's own coalescing window
+	// (shouldCoalesceRun/CoalesceRunTx) for a caller that already ran its
+	// own, independent in-flight-merge decision before calling QueueRun
+	// (AC-OFFICE-ENQUEUE-CONSOLIDATION-001.5): running both mechanisms on
+	// the same request risks the two disagreeing about which existing row
+	// (if any) this request should merge into. Idempotency, causation
+	// resolution, and the insert still run normally.
+	SkipCoalesce bool
 }
 
 // CoalesceWindowSeconds is the default coalescing window. When two
@@ -258,26 +276,36 @@ func (s *Service) SubscribeSignal() <-chan struct{} { return s.signalCh }
 // a deduplicated or coalesced request instead of treating any nil error as
 // "a run was queued".
 func (s *Service) QueueRun(ctx context.Context, req QueueRunRequest) (QueueOutcome, error) {
+	outcome, _, err := s.QueueRunAndReturn(ctx, req)
+	return outcome, err
+}
+
+// QueueRunAndReturn is QueueRun, additionally returning the inserted row
+// on a QueueOutcomeQueued outcome (nil for QueueOutcomeDeduped/Coalesced,
+// which insert nothing). Exposed for callers that need the new run's id
+// — e.g. the wakeup dispatcher, which must mark its own wakeup-request
+// row claimed against it.
+func (s *Service) QueueRunAndReturn(ctx context.Context, req QueueRunRequest) (QueueOutcome, *models.Run, error) {
 	agentInstanceID, err := s.resolveAgentInstance(ctx, req)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if agentInstanceID == "" {
-		return "", fmt.Errorf("queue run: agent_profile_id is required")
+		return "", nil, fmt.Errorf("queue run: agent_profile_id is required")
 	}
 
 	payloadMap := runPayload(req, agentInstanceID)
 	payload, err := encodePayload(payloadMap)
 	if err != nil {
-		return "", fmt.Errorf("encode payload: %w", err)
+		return "", nil, fmt.Errorf("encode payload: %w", err)
 	}
 
 	outcome, row, err := s.enqueueLocked(ctx, agentInstanceID, req, payload)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if outcome != QueueOutcomeQueued {
-		return outcome, nil
+		return outcome, nil, nil
 	}
 
 	s.log.Info("run queued",
@@ -287,7 +315,7 @@ func (s *Service) QueueRun(ctx context.Context, req QueueRunRequest) (QueueOutco
 
 	s.publishRunQueued(ctx, row, req.IdempotencyKey)
 	s.signal()
-	return QueueOutcomeQueued, nil
+	return QueueOutcomeQueued, row, nil
 }
 
 // enqueueLocked performs the idempotency check, the coalescing check,
@@ -392,22 +420,23 @@ func (s *Service) insertRun(
 		idemKeyPtr = &k
 	}
 	row := &models.Run{
-		ID:             uuid.New().String(),
-		AgentProfileID: agentInstanceID,
-		Reason:         req.Reason,
-		Payload:        payload,
-		Status:         "queued",
-		CoalescedCount: 1,
-		IdempotencyKey: idemKeyPtr,
-		RequestedAt:    time.Now().UTC(),
-		ParentRunID:    causation.ParentRunID,
-		CausationDepth: causation.CausationDepth,
-		PriorityClass:  causation.PriorityClass,
-		HumanRooted:    causation.HumanRooted,
-		RoutineID:      causation.RoutineID,
-		ActorKind:      causation.ActorKind,
-		ActorID:        causation.ActorID,
-		WorkspaceID:    causation.WorkspaceID,
+		ID:              uuid.New().String(),
+		AgentProfileID:  agentInstanceID,
+		Reason:          req.Reason,
+		Payload:         payload,
+		Status:          "queued",
+		CoalescedCount:  1,
+		IdempotencyKey:  idemKeyPtr,
+		RequestedAt:     time.Now().UTC(),
+		ContextSnapshot: req.ContextSnapshot,
+		ParentRunID:     causation.ParentRunID,
+		CausationDepth:  causation.CausationDepth,
+		PriorityClass:   causation.PriorityClass,
+		HumanRooted:     causation.HumanRooted,
+		RoutineID:       causation.RoutineID,
+		ActorKind:       causation.ActorKind,
+		ActorID:         causation.ActorID,
+		WorkspaceID:     causation.WorkspaceID,
 	}
 	if causation.CausationID != "" {
 		row.CausationID = causation.CausationID
@@ -466,7 +495,7 @@ func runPayload(req QueueRunRequest, agentInstanceID string) map[string]any {
 }
 
 func shouldCoalesceRun(req QueueRunRequest) bool {
-	return !commentkeys.HasTaskCommentPrefix(req.IdempotencyKey)
+	return !req.SkipCoalesce && !commentkeys.HasTaskCommentPrefix(req.IdempotencyKey)
 }
 
 // publishRunQueued emits the OfficeRunQueued bus event so the WS

@@ -11,7 +11,9 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	officemodels "github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
+	officeservice "github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/office/shared"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
 // TestCoalesceIntoInflightRun_ClaimedBetweenReadAndPromote pins the
@@ -96,7 +98,11 @@ func TestCoalesceIntoInflightRun_ClaimedBetweenReadAndPromote(t *testing.T) {
 		t.Fatalf("claim: got %q, want %q", claimed.ID, run.ID)
 	}
 
-	d := NewDispatcher(repo, repo, logger.Default())
+	log := logger.Default()
+	svc := officeservice.NewService(officeservice.ServiceOptions{Repo: repo, Logger: log})
+	svc.SetRunsService(runsservice.New(repo.RunsRepository(), nil, log, nil))
+	d := NewDispatcher(repo, repo, log)
+	d.SetRunQueuer(svc)
 	if err := d.coalesceIntoInflightRun(context.Background(), req, inflight); err != nil {
 		t.Fatalf("coalesceIntoInflightRun: %v", err)
 	}

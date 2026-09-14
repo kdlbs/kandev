@@ -2172,6 +2172,12 @@ func buildOfficeFeatureServices(
 	// real task in the routine system workflow.
 	routineWakeupDispatcher := officewakeup.NewDispatcher(repo, repo, log)
 	routineWakeupDispatcher.SetRoutineLookup(repo)
+	// services.Office is already assigned (by initOfficeServices, before this
+	// function runs) but its runs service is wired later in
+	// startSchedulingRuntime — safe because QueueRunFromWakeup only reads
+	// that field when Dispatch is actually called, well after startup
+	// completes (AC-OFFICE-ENQUEUE-CONSOLIDATION-001.2).
+	routineWakeupDispatcher.SetRunQueuer(services.Office)
 	routineSvc.SetWakeupEnqueuer(&routineWakeupAdapter{
 		repo:       repo,
 		dispatcher: routineWakeupDispatcher,

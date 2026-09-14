@@ -14,7 +14,9 @@ import (
 	officemodels "github.com/kandev/kandev/internal/office/models"
 	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routines"
+	officeservice "github.com/kandev/kandev/internal/office/service"
 	"github.com/kandev/kandev/internal/office/wakeup"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 )
 
 // TestRoutine_EndToEnd_CoordinatorHeartbeatFire exercises the full
@@ -38,8 +40,12 @@ import (
 func TestRoutine_EndToEnd_CoordinatorHeartbeatFire(t *testing.T) {
 	ctx := context.Background()
 	repo, agentID := seedCoordinator(t)
-	wakeupDispatcher := wakeup.NewDispatcher(repo, repo, logger.Default())
+	log := logger.Default()
+	wakeupDispatcher := wakeup.NewDispatcher(repo, repo, log)
 	wakeupDispatcher.SetRoutineLookup(repo)
+	officeSvc := officeservice.NewService(officeservice.ServiceOptions{Repo: repo, Logger: log})
+	officeSvc.SetRunsService(runsservice.New(repo.RunsRepository(), nil, log, nil))
+	wakeupDispatcher.SetRunQueuer(officeSvc)
 
 	routineSvc := routines.NewRoutineService(repo, logger.Default(), &routineE2ENoopActivity{})
 	routineSvc.SetWakeupEnqueuer(&routineE2EWakeupAdapter{

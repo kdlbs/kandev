@@ -158,6 +158,51 @@ func (s *Service) QueueRunFromTaskBoundary(
 	return s.queueRunInline(ctx, agentInstanceID, reason, payload, idempotencyKey)
 }
 
+// QueueRunFromWakeup enqueues a taskless run on behalf of the wakeup
+// dispatcher (AC-OFFICE-ENQUEUE-CONSOLIDATION-001.2): the dispatcher's own
+// three-layer coalesce model (source-level dedup, claim-time merge into an
+// in-flight run, concurrency-policy gating) already decided a fresh run is
+// needed before calling this, so QueueRun's own independent coalescing
+// window is skipped (AC-OFFICE-ENQUEUE-CONSOLIDATION-001.5) — running both
+// could pick a different in-flight run to merge into than the one the
+// dispatcher already checked against. Idempotency, causation resolution
+// (priority class, actor, workspace, depth/self-trigger gates), and the
+// insert all still run through the one authoritative seam, unlike the
+// direct repository insert this replaced.
+//
+// Every wakeup-sourced run is system-actuated (routine fire, heartbeat, or
+// any other wakeup source) per the design's actor-source table, so
+// ActorKind is always models.ActorKindSystem here.
+//
+// Returns the created run's id so the caller can mark its own
+// wakeup-request row claimed against it. Requires a wired runs service —
+// there is no inline fallback insert here (AC-OFFICE-ENQUEUE-CONSOLIDATION-001.6):
+// a caller with no runs service must fail its enqueue rather than bypass
+// the seam it exists to protect.
+func (s *Service) QueueRunFromWakeup(ctx context.Context, agentProfileID, reason, routineID, contextSnapshot string) (string, error) {
+	if err := s.guardAgentStatus(ctx, agentProfileID); err != nil {
+		return "", err
+	}
+	if s.runsService == nil {
+		return "", fmt.Errorf("queue run from wakeup: runs service not configured")
+	}
+	_, row, err := s.runsService.QueueRunAndReturn(ctx, runsservice.QueueRunRequest{
+		Reason:          reason,
+		Payload:         PayloadWithAgent("{}", agentProfileID),
+		ActorKind:       models.ActorKindSystem,
+		RoutineID:       routineID,
+		ContextSnapshot: contextSnapshot,
+		SkipCoalesce:    true,
+	})
+	if err != nil {
+		return "", err
+	}
+	if row == nil {
+		return "", fmt.Errorf("queue run from wakeup: no row returned for agent %s", agentProfileID)
+	}
+	return row.ID, nil
+}
+
 // TaskBoundaryCarrier reads and validates the causation carrier off
 // taskID's metadata. A metadata read failure (task not found, transient
 // error) is treated the same as "no carrier": this lookup must never
