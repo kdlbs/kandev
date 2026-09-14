@@ -238,6 +238,40 @@ func TestListInboxHistoryBundlesPermissionSameTurnSupersession(t *testing.T) {
 	}
 }
 
+// TestListInboxHistoryBundlesPendingIDReuseAcrossTurns pins the message.go /
+// service_messages.go / event_handlers_streaming.go documented behavior that
+// a provider may reuse a permission's pending_id for a later, unrelated
+// request once the original resolves. The reused id must not let an old,
+// already-resolved permission (a different turn, a different request) merge
+// with a live, currently-answerable one on the session's current turn: the
+// live request must stay unlisted rather than being reported superseded.
+func TestListInboxHistoryBundlesPendingIDReuseAcrossTurns(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	base := time.Date(2026, time.September, 1, 15, 0, 0, 0, time.UTC)
+
+	seedInboxHistorySession(t, repo, "task-reused-pending", "session-reused-pending", "ws-1", models.TaskSessionStateWaitingForInput, false)
+	createPendingActionTurn(t, repo, "task-reused-pending", "session-reused-pending", "turn-a-old", base, base)
+	createInteractionMessage(t, repo, "perm-reused-old", "task-reused-pending", "session-reused-pending", "turn-a-old",
+		models.MessageTypePermissionRequest,
+		map[string]interface{}{"pending_id": "pending-reused", "request_id": "req-old", "status": "approved"},
+		base)
+
+	createPendingActionTurn(t, repo, "task-reused-pending", "session-reused-pending", "turn-b-new", base.Add(time.Minute), base.Add(time.Minute))
+	createInteractionMessage(t, repo, "perm-reused-new", "task-reused-pending", "session-reused-pending", "turn-b-new",
+		models.MessageTypePermissionRequest,
+		map[string]interface{}{"pending_id": "pending-reused", "request_id": "req-new"},
+		base.Add(time.Minute))
+
+	page, err := repo.ListInboxHistoryBundles(ctx, unscopedHistoryOpts("ws-1", 50))
+	if err != nil {
+		t.Fatalf("ListInboxHistoryBundles: %v", err)
+	}
+	if bundle, found := findHistoryBundle(page.Bundles, "pending-reused"); found {
+		t.Fatalf("a live current-turn permission must not be merged with a resolved reused-pending_id request into a superseded bundle: %+v", bundle)
+	}
+}
+
 // TestListInboxHistoryBundlesExcludesArchivedAndParentQuestion pins AC .4
 // (archived task) and AC .2's parent_question eligibility clause.
 func TestListInboxHistoryBundlesExcludesArchivedAndParentQuestion(t *testing.T) {

@@ -96,9 +96,11 @@ const inboxHistorySelectColumns = `r.pending_id, r.session_id, r.task_id, r.crea
 // queries: `bundles` groups messages into per-pending_id aggregates exactly
 // like clarificationBundleTableExpr's inner subquery, but across BOTH
 // clarification_request and permission_request (AC .2 is evaluated per
-// bundle regardless of kind); `reasoned` resolves the three raw exclusion
-// signals once per bundle so the outer WHERE and SELECT never recompute the
-// current-turn correlated subquery more than once.
+// bundle regardless of kind), additionally split by request_id for a
+// permission_request row so a reused pending_id never merges two distinct
+// requests; `reasoned` resolves the three raw exclusion signals once per
+// bundle so the outer WHERE and SELECT never recompute the current-turn
+// correlated subquery more than once.
 func inboxHistoryQueryBase(drv string) string {
 	pendingIDExpr := dialect.JSONExtract(drv, "m.metadata", "pending_id")
 	statusExpr := dialect.JSONExtract(drv, "m.metadata", "status")
@@ -111,6 +113,19 @@ func inboxHistoryQueryBase(drv string) string {
 	permissionOrder := pendingActionMessageOrder(drv, "m2")
 	currentTurnIDExpr := turnAuthorityCurrentTurnIDExpr(drv, "bundles.session_id")
 	terminalStates := terminalSessionStatesExpr("s.state")
+	// A provider may reuse a permission's pending_id for a later, unrelated
+	// request once the original resolves (message.go's
+	// GetPermissionMessageByIdentity, service_messages.go's
+	// UpdatePermissionMessage, event_handlers_streaming.go's
+	// handlePermissionCancelledEvent). Grouping permission rows by pending_id
+	// alone would merge that later request with the resolved original into
+	// one bundle. request_id disambiguates them the same way those three
+	// sites do; message id is the fallback for a row with no request_id.
+	requestIDExpr := dialect.JSONExtract(drv, "m.metadata", "request_id")
+	permissionGroupKeyExpr := fmt.Sprintf(
+		"CASE WHEN m.type = 'permission_request' THEN COALESCE(NULLIF(%s, ''), m.id) ELSE '' END",
+		requestIDExpr,
+	)
 
 	return fmt.Sprintf(`WITH bundles AS (
     SELECT
@@ -136,7 +151,7 @@ func inboxHistoryQueryBase(drv string) string {
     ) pr ON pr.message_id = m.id
     WHERE m.type IN ('clarification_request', 'permission_request')
       AND %[4]s
-    GROUP BY %[1]s, m.task_session_id
+    GROUP BY %[1]s, m.task_session_id, %[8]s
 ),
 reasoned AS (
     SELECT
@@ -148,7 +163,7 @@ reasoned AS (
     FROM bundles
     JOIN task_sessions s ON s.id = bundles.session_id
 )
-`, pendingIDExpr, statusExpr, questionIDExpr, notParentQuestion, currentTurnIDExpr, permissionOrder, terminalStates)
+`, pendingIDExpr, statusExpr, questionIDExpr, notParentQuestion, currentTurnIDExpr, permissionOrder, terminalStates, permissionGroupKeyExpr)
 }
 
 // turnAuthorityCurrentTurnIDExpr resolves the session's current turn by

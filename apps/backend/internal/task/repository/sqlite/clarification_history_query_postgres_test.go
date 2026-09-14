@@ -193,6 +193,37 @@ func TestListInboxHistoryBundlesPermissionSameTurnSupersessionPostgres(t *testin
 	}
 }
 
+// TestListInboxHistoryBundlesPendingIDReuseAcrossTurnsPostgres is the
+// Postgres counterpart of the SQLite test of the same name (minus the
+// suffix): the GROUP BY that keys a permission bundle's identity is
+// dialect-sensitive SQL exercised for the first time here.
+func TestListInboxHistoryBundlesPendingIDReuseAcrossTurnsPostgres(t *testing.T) {
+	repo := newInboxHistoryPostgresRepo(t)
+	ctx := context.Background()
+	base := time.Date(2026, time.September, 1, 15, 0, 0, 0, time.UTC)
+
+	seedInboxHistorySession(t, repo, "task-reused-pending-pg", "session-reused-pending-pg", "ws-1", models.TaskSessionStateWaitingForInput, false)
+	createPendingActionTurn(t, repo, "task-reused-pending-pg", "session-reused-pending-pg", "turn-a-old-pg", base, base)
+	createInteractionMessage(t, repo, "perm-reused-old-pg", "task-reused-pending-pg", "session-reused-pending-pg", "turn-a-old-pg",
+		models.MessageTypePermissionRequest,
+		map[string]interface{}{"pending_id": "pending-reused-pg", "request_id": "req-old-pg", "status": "approved"},
+		base)
+
+	createPendingActionTurn(t, repo, "task-reused-pending-pg", "session-reused-pending-pg", "turn-b-new-pg", base.Add(time.Minute), base.Add(time.Minute))
+	createInteractionMessage(t, repo, "perm-reused-new-pg", "task-reused-pending-pg", "session-reused-pending-pg", "turn-b-new-pg",
+		models.MessageTypePermissionRequest,
+		map[string]interface{}{"pending_id": "pending-reused-pg", "request_id": "req-new-pg"},
+		base.Add(time.Minute))
+
+	page, err := repo.ListInboxHistoryBundles(ctx, unscopedHistoryOpts("ws-1", 50))
+	if err != nil {
+		t.Fatalf("ListInboxHistoryBundles: %v", err)
+	}
+	if bundle, found := findHistoryBundle(page.Bundles, "pending-reused-pg"); found {
+		t.Fatalf("a live current-turn permission must not be merged with a resolved reused-pending_id request into a superseded bundle: %+v", bundle)
+	}
+}
+
 // TestCountInboxHistoryBundlesIsWorkspaceWideTotalPostgres pins AC .20's
 // total on Postgres: independent of page size, same as the SQLite test of
 // the same name (minus the suffix).
