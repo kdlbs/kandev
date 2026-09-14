@@ -76,6 +76,13 @@ function makeAutoSessionAppStore(taskId: string | null, sessionIds: string[]) {
   return {
     getState: () => ({
       tasks: { activeTaskId: taskId },
+      taskSessions: {
+        items: Object.fromEntries(
+          Object.values(itemsByTaskId)
+            .flat()
+            .map((session) => [session.id, { ...session, task_id: taskId }]),
+        ),
+      },
       taskSessionsByTask: {
         itemsByTaskId,
         loadedByTaskId: taskId ? { [taskId]: true } : {},

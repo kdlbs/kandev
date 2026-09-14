@@ -15,7 +15,7 @@ import { IconStar } from "@tabler/icons-react";
 import { AgentLogo } from "@/components/agent-logo";
 import { GridSpinner } from "@/components/grid-spinner";
 import { ContextMenu, ContextMenuTrigger } from "@kandev/ui/context-menu";
-import { useAppStore } from "@/components/state-provider";
+import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useSessionActions } from "@/hooks/domains/session/use-session-actions";
 import { shareableSessionStateClient } from "@/components/task/share/share-button";
 import type { HandoffPreset } from "@/components/task/new-session-dialog";
@@ -133,6 +133,7 @@ function useSessionTabActions(
   api: IDockviewPanelHeaderProps["api"],
   containerApi: IDockviewPanelHeaderProps["containerApi"],
 ) {
+  const appStore = useAppStoreApi();
   const taskSessionIds = useAppStore(
     useShallow((state) =>
       taskId ? (state.taskSessionsByTask.itemsByTaskId[taskId] ?? []).map((s) => s.id) : [],
@@ -195,16 +196,18 @@ function useSessionTabActions(
     },
   });
   const hideCurrentSessionPanel = useCallback(() => {
-    if (sessionId) hideSessionPanel(containerApi, sessionId);
-  }, [containerApi, sessionId]);
+    if (sessionId) hideSessionPanel(containerApi, sessionId, taskId ?? undefined);
+  }, [containerApi, sessionId, taskId]);
   const handleCloseOthers = useCallback(() => {
     const toClose = api.group.panels.filter(
       (panel) => panel.id !== api.id && panel.id.startsWith("session:"),
     );
+    const sessionItems = appStore.getState().taskSessions.items;
     for (const panel of toClose) {
-      hideSessionPanel(containerApi, panel.id.slice("session:".length));
+      const siblingSessionId = panel.id.slice("session:".length);
+      hideSessionPanel(containerApi, siblingSessionId, sessionItems[siblingSessionId]?.task_id);
     }
-  }, [api.id, containerApi]);
+  }, [api.id, containerApi, appStore]);
   return {
     handleSetPrimary,
     handleStop,

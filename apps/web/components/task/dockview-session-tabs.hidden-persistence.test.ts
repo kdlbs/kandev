@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { getEnvHiddenSessions } from "@/lib/env-hidden-sessions";
 import { useDockviewStore } from "@/lib/state/dockview-store";
 import {
   clearHiddenSessionPanel,
@@ -10,19 +11,65 @@ import { makeReorderingAutoSessionApi } from "./dockview-session-tabs.test-utils
 const TASK_ID = "task-A";
 const ACTIVE_SESSION_ID = "session-active";
 const HIDDEN_SESSION_ID = "session-hidden";
+const ENV_KEY_PREFIX = "kandev.dockview.env-hidden-sessions-v1.";
+const ENV_CROSS_TASK = "env-cross-task";
 
-function makeAppStore() {
+/** The env id encoded in one of this suite's sessionStorage keys. */
+function envIdFor(storageKey: string): string {
+  return storageKey.slice(ENV_KEY_PREFIX.length) || "null-env";
+}
+
+/** Build an app-store stub whose active task owns `sessionIds` (`loaded`
+ *  marks the task's session list authoritative). */
+function makeTaskStore(taskId: string, sessionIds: string[], loaded = true) {
+  const items = sessionIds.map((sessionId) => ({ id: sessionId, task_id: taskId }));
   return {
     getState: () => ({
-      tasks: { activeTaskId: TASK_ID },
+      tasks: { activeTaskId: taskId },
+      taskSessions: {
+        items: Object.fromEntries(items.map((session) => [session.id, session])),
+      },
       taskSessionsByTask: {
-        itemsByTaskId: {
-          [TASK_ID]: [{ id: ACTIVE_SESSION_ID }, { id: HIDDEN_SESSION_ID }],
-        },
-        loadedByTaskId: { [TASK_ID]: true },
+        itemsByTaskId: { [taskId]: items },
+        loadedByTaskId: { [taskId]: loaded },
       },
     }),
   };
+}
+
+/**
+ * Merge several task stores into one shared-environment state whose active
+ * task switches. Hydration bookkeeping of every task stays visible to the
+ * effect regardless of which task is active.
+ */
+function makeSharedEnvStore(taskStores: Array<ReturnType<typeof makeTaskStore>>) {
+  let activeTaskId = taskStores[0]?.getState().tasks.activeTaskId ?? TASK_ID;
+  return {
+    setActiveTask: (taskId: string) => {
+      activeTaskId = taskId;
+    },
+    getState: () => {
+      const states = taskStores.map((store) => store.getState());
+      return {
+        tasks: { activeTaskId },
+        taskSessions: { items: Object.assign({}, ...states.map((s) => s.taskSessions.items)) },
+        taskSessionsByTask: {
+          itemsByTaskId: Object.assign(
+            {},
+            ...states.map((s) => s.taskSessionsByTask.itemsByTaskId),
+          ),
+          loadedByTaskId: Object.assign(
+            {},
+            ...states.map((s) => s.taskSessionsByTask.loadedByTaskId),
+          ),
+        },
+      };
+    },
+  };
+}
+
+function makeAppStore() {
+  return makeTaskStore(TASK_ID, [ACTIVE_SESSION_ID, HIDDEN_SESSION_ID]);
 }
 
 function makeRefs() {
@@ -62,7 +109,7 @@ describe("hidden session tab state", () => {
 
     runInEnvironment(api, "env-cache-a", () => {
       runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
-      hideSessionPanel(api, HIDDEN_SESSION_ID);
+      hideSessionPanel(api, HIDDEN_SESSION_ID, TASK_ID);
     });
     runInEnvironment(api, "env-cache-b", () => {
       runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
@@ -90,7 +137,7 @@ describe("hidden session tab state", () => {
     try {
       runInEnvironment(firstLoad.api, "env-reload", () => {
         runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
-        hideSessionPanel(firstLoad.api, HIDDEN_SESSION_ID);
+        hideSessionPanel(firstLoad.api, HIDDEN_SESSION_ID, TASK_ID);
       });
 
       const reloaded = makeReorderingAutoSessionApi();
@@ -114,7 +161,7 @@ describe("hidden session tab state", () => {
 
     runInEnvironment(api, "env-layout", () => {
       runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
-      hideSessionPanel(api, HIDDEN_SESSION_ID);
+      hideSessionPanel(api, HIDDEN_SESSION_ID, TASK_ID);
       runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
     });
 
@@ -123,27 +170,18 @@ describe("hidden session tab state", () => {
 
   it("preserves hidden markers when switching tasks in one environment", () => {
     const { api } = makeReorderingAutoSessionApi();
-    let activeTaskId = "task-A";
-    const appStore = {
-      getState: () => ({
-        tasks: { activeTaskId },
-        taskSessionsByTask: {
-          itemsByTaskId: {
-            "task-A": [{ id: ACTIVE_SESSION_ID }, { id: HIDDEN_SESSION_ID }],
-            "task-B": [{ id: "session-task-b" }],
-          },
-          loadedByTaskId: { "task-A": true, "task-B": true },
-        },
-      }),
-    };
+    const appStore = makeSharedEnvStore([
+      makeTaskStore("task-A", [ACTIVE_SESSION_ID, HIDDEN_SESSION_ID]),
+      makeTaskStore("task-B", ["session-task-b"]),
+    ]);
     const refs = makeRefs();
 
     runInEnvironment(api, "env-shared", () => {
       runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
-      hideSessionPanel(api, HIDDEN_SESSION_ID);
-      activeTaskId = "task-B";
+      hideSessionPanel(api, HIDDEN_SESSION_ID, TASK_ID);
+      appStore.setActiveTask("task-B");
       runAutoSessionTabEffect("session-task-b", appStore as never, refs as never);
-      activeTaskId = "task-A";
+      appStore.setActiveTask("task-A");
       runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
     });
 
@@ -182,11 +220,9 @@ describe("hidden session tab persistence record", () => {
 
       runInEnvironment(firstLoad.api, "env-reload-record", () => {
         runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, makeRefs() as never);
-        hideSessionPanel(firstLoad.api, HIDDEN_SESSION_ID);
+        hideSessionPanel(firstLoad.api, HIDDEN_SESSION_ID, TASK_ID);
       });
-      expect(JSON.parse(window.sessionStorage.getItem(storageKey) ?? "[]")).toEqual([
-        HIDDEN_SESSION_ID,
-      ]);
+      expect(getEnvHiddenSessions(envIdFor(storageKey))).toEqual([HIDDEN_SESSION_ID]);
 
       const afterReload = makeReorderingAutoSessionApi();
       runInEnvironment(afterReload.api, "env-reload-record", () => {
@@ -210,17 +246,15 @@ describe("hidden session tab persistence record", () => {
 
       runInEnvironment(api, "env-reopen", () => {
         runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, makeRefs() as never);
-        hideSessionPanel(api, HIDDEN_SESSION_ID);
-        expect(JSON.parse(window.sessionStorage.getItem(storageKey) ?? "[]")).toEqual([
-          HIDDEN_SESSION_ID,
-        ]);
+        hideSessionPanel(api, HIDDEN_SESSION_ID, TASK_ID);
+        expect(getEnvHiddenSessions(envIdFor(storageKey))).toEqual([HIDDEN_SESSION_ID]);
 
         // The reopen menu clears the hide intent before adding the panel.
         clearHiddenSessionPanel(api, HIDDEN_SESSION_ID);
         runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, makeRefs() as never);
       });
 
-      expect(JSON.parse(window.sessionStorage.getItem(storageKey) ?? "[]")).toEqual([]);
+      expect(getEnvHiddenSessions(envIdFor(storageKey))).toEqual([]);
     } finally {
       window.sessionStorage.removeItem(storageKey);
     }
@@ -241,32 +275,20 @@ describe("hidden session tab pruning after hydration", () => {
 
       runInEnvironment(beforeReload.api, "env-hydrate", () => {
         runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, makeRefs() as never);
-        hideSessionPanel(beforeReload.api, HIDDEN_SESSION_ID);
+        hideSessionPanel(beforeReload.api, HIDDEN_SESSION_ID, TASK_ID);
       });
-      expect(JSON.parse(window.sessionStorage.getItem(storageKey) ?? "[]")).toEqual([
-        HIDDEN_SESSION_ID,
-      ]);
+      expect(getEnvHiddenSessions(envIdFor(storageKey))).toEqual([HIDDEN_SESSION_ID]);
 
       // Fresh API after reload; the store has no sessions and does not yet
       // mark the task's list as loaded.
       const afterReload = makeReorderingAutoSessionApi();
-      const emptyStore = {
-        getState: () => ({
-          tasks: { activeTaskId: TASK_ID },
-          taskSessionsByTask: {
-            itemsByTaskId: {},
-            loadedByTaskId: {},
-          },
-        }),
-      };
+      const emptyStore = makeTaskStore(TASK_ID, [], false);
       runInEnvironment(afterReload.api, "env-hydrate", () => {
         runAutoSessionTabEffect(ACTIVE_SESSION_ID, emptyStore as never, makeRefs() as never);
       });
 
       // The record survives the pre-hydration pass.
-      expect(JSON.parse(window.sessionStorage.getItem(storageKey) ?? "[]")).toEqual([
-        HIDDEN_SESSION_ID,
-      ]);
+      expect(getEnvHiddenSessions(envIdFor(storageKey))).toEqual([HIDDEN_SESSION_ID]);
 
       // Hydration completes: the list loads and the effect reconciles; the
       // hidden session exists, so the record keeps it and the panel stays
@@ -276,9 +298,7 @@ describe("hidden session tab pruning after hydration", () => {
       });
       expect(afterReload.api.getPanel(`session:${ACTIVE_SESSION_ID}`)).not.toBeNull();
       expect(afterReload.api.getPanel(`session:${HIDDEN_SESSION_ID}`)).toBeNull();
-      expect(JSON.parse(window.sessionStorage.getItem(storageKey) ?? "[]")).toEqual([
-        HIDDEN_SESSION_ID,
-      ]);
+      expect(getEnvHiddenSessions(envIdFor(storageKey))).toEqual([HIDDEN_SESSION_ID]);
     } finally {
       window.sessionStorage.removeItem(storageKey);
     }
@@ -294,44 +314,85 @@ describe("hidden session tab pruning after hydration", () => {
 
       runInEnvironment(api, "env-prune", () => {
         runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, makeRefs() as never);
-        hideSessionPanel(api, HIDDEN_SESSION_ID);
+        hideSessionPanel(api, HIDDEN_SESSION_ID, TASK_ID);
       });
-      expect(JSON.parse(window.sessionStorage.getItem(storageKey) ?? "[]")).toEqual([
-        HIDDEN_SESSION_ID,
-      ]);
+      expect(getEnvHiddenSessions(envIdFor(storageKey))).toEqual([HIDDEN_SESSION_ID]);
 
       // The session disappears from the store but the list has not reloaded,
       // so the record must survive until the refreshed list confirms it.
-      const staleListStore = {
-        getState: () => ({
-          tasks: { activeTaskId: TASK_ID },
-          taskSessionsByTask: {
-            itemsByTaskId: { [TASK_ID]: [{ id: ACTIVE_SESSION_ID }] },
-            loadedByTaskId: { [TASK_ID]: false },
-          },
-        }),
-      };
+      const staleListStore = makeTaskStore(TASK_ID, [ACTIVE_SESSION_ID], false);
       runInEnvironment(api, "env-prune", () => {
         runAutoSessionTabEffect(ACTIVE_SESSION_ID, staleListStore as never, makeRefs() as never);
       });
-      expect(JSON.parse(window.sessionStorage.getItem(storageKey) ?? "[]")).toEqual([
-        HIDDEN_SESSION_ID,
-      ]);
+      expect(getEnvHiddenSessions(envIdFor(storageKey))).toEqual([HIDDEN_SESSION_ID]);
 
       // The refreshed list loads without the hidden session; pruning removes it.
-      const refreshedStore = {
-        getState: () => ({
-          tasks: { activeTaskId: TASK_ID },
-          taskSessionsByTask: {
-            itemsByTaskId: { [TASK_ID]: [{ id: ACTIVE_SESSION_ID }] },
-            loadedByTaskId: { [TASK_ID]: true },
-          },
-        }),
-      };
+      const refreshedStore = makeTaskStore(TASK_ID, [ACTIVE_SESSION_ID]);
       runInEnvironment(api, "env-prune", () => {
         runAutoSessionTabEffect(ACTIVE_SESSION_ID, refreshedStore as never, makeRefs() as never);
       });
-      expect(JSON.parse(window.sessionStorage.getItem(storageKey) ?? "[]")).toEqual([]);
+      expect(getEnvHiddenSessions(envIdFor(storageKey))).toEqual([]);
+    } finally {
+      window.sessionStorage.removeItem(storageKey);
+    }
+  });
+});
+
+describe("hidden session tab pruning across tasks", () => {
+  it("keeps another task's hidden record while only the active task is hydrated", () => {
+    // Regression: a shared environment spans tasks. The earlier gate trusted the
+    // active task's loaded list, so reloading into task A and hydrating A
+    // pruned task B's persisted hidden record; switching to B resurrected B's
+    // panel. Each record is retired only by its owning task's list.
+    const storageKey = "kandev.dockview.env-hidden-sessions-v1.env-cross-task";
+    window.sessionStorage.removeItem(storageKey);
+    const taskB = "task-B";
+    const taskBSessionId = "session-task-b";
+    const taskBHiddenSessionId = "session-task-b-hidden";
+
+    try {
+      // Before the reload, task B had two sessions and one was hidden.
+      const beforeReload = makeReorderingAutoSessionApi();
+      const taskBStore = makeTaskStore(taskB, [taskBSessionId, taskBHiddenSessionId]);
+      runInEnvironment(beforeReload.api, ENV_CROSS_TASK, () => {
+        runAutoSessionTabEffect(taskBSessionId, taskBStore as never, makeRefs() as never);
+        hideSessionPanel(beforeReload.api, taskBHiddenSessionId, taskB);
+      });
+      expect(getEnvHiddenSessions(envIdFor(storageKey))).toEqual([taskBHiddenSessionId]);
+
+      // Reload lands on task A; its store knows nothing about task B.
+      const afterReload = makeReorderingAutoSessionApi();
+      const taskAOnlyStore = makeTaskStore(TASK_ID, [ACTIVE_SESSION_ID]);
+      runInEnvironment(afterReload.api, ENV_CROSS_TASK, () => {
+        runAutoSessionTabEffect(ACTIVE_SESSION_ID, taskAOnlyStore as never, makeRefs() as never);
+      });
+
+      // Task A is fully authoritative, but it does not own B's record: the
+      // record survives and A's reconciliation does not recreate B's panel.
+      expect(getEnvHiddenSessions(envIdFor(storageKey))).toEqual([taskBHiddenSessionId]);
+      expect(afterReload.api.getPanel(`session:${taskBHiddenSessionId}`)).toBeNull();
+
+      // Switching to B with its list still unloaded must not prune it either.
+      const taskBUnloadedStore = makeSharedEnvStore([
+        makeTaskStore(TASK_ID, [ACTIVE_SESSION_ID]),
+        makeTaskStore(taskB, [taskBSessionId], false),
+      ]);
+      taskBUnloadedStore.setActiveTask(taskB);
+      runInEnvironment(afterReload.api, ENV_CROSS_TASK, () => {
+        runAutoSessionTabEffect(taskBSessionId, taskBUnloadedStore as never, makeRefs() as never);
+      });
+      expect(getEnvHiddenSessions(envIdFor(storageKey))).toEqual([taskBHiddenSessionId]);
+      expect(afterReload.api.getPanel(`session:${taskBHiddenSessionId}`)).toBeNull();
+
+      // Task B hydrates with the session present: the record keeps the panel
+      // hidden and the visible sibling renders.
+      const taskBHydratedStore = makeTaskStore(taskB, [taskBSessionId, taskBHiddenSessionId]);
+      runInEnvironment(afterReload.api, ENV_CROSS_TASK, () => {
+        runAutoSessionTabEffect(taskBSessionId, taskBHydratedStore as never, makeRefs() as never);
+      });
+      expect(getEnvHiddenSessions(envIdFor(storageKey))).toEqual([taskBHiddenSessionId]);
+      expect(afterReload.api.getPanel(`session:${taskBSessionId}`)).not.toBeNull();
+      expect(afterReload.api.getPanel(`session:${taskBHiddenSessionId}`)).toBeNull();
     } finally {
       window.sessionStorage.removeItem(storageKey);
     }

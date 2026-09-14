@@ -11,8 +11,13 @@ import {
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { sessionId as toSessionId } from "@/lib/types/ids";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
-import { getEnvHiddenSessions, setEnvHiddenSessions } from "@/lib/env-hidden-sessions";
 import type { TaskSession } from "@/lib/types/http";
+import {
+  clearHiddenSessionPanel,
+  hiddenSessionIdsFor,
+  hideSessionPanel,
+  pruneHiddenSessionIds,
+} from "./dockview-hidden-session-panels";
 import {
   activateChatReplacement,
   isChatPlaceholderSelected,
@@ -21,57 +26,11 @@ import {
   shouldPreserveActivePanel,
 } from "./dockview-session-tab-activation";
 import { anchorIncomingSessionPanel, ensureSessionPanel } from "./dockview-session-handoff";
+
+export { clearHiddenSessionPanel, hideSessionPanel };
 import { t } from "@/lib/i18n";
 
 const debug = createDebugLogger("dockview:session-tabs");
-
-const hiddenSessionIdsByApi = new WeakMap<DockviewApi, Map<string | null, Set<string>>>();
-
-/**
- * Persist the env's hidden set so a reload restores the user's explicit close
- * choices. The saved Dockview layout cannot express them: reusable layouts
- * collapse session panels into a chat placeholder, and restore paths add every
- * current session back as sibling panels.
- */
-function persistHiddenSessionIds(envId: string | null, hiddenSessionIds: Set<string>): void {
-  if (envId !== null) setEnvHiddenSessions(envId, [...hiddenSessionIds]);
-}
-
-function hiddenSessionIdsFor(api: DockviewApi): Set<string> {
-  const envId = useDockviewStore.getState().currentLayoutEnvId;
-  let hiddenSessionIdsByEnv = hiddenSessionIdsByApi.get(api);
-  if (!hiddenSessionIdsByEnv) {
-    hiddenSessionIdsByEnv = new Map();
-    hiddenSessionIdsByApi.set(api, hiddenSessionIdsByEnv);
-  }
-  const existing = hiddenSessionIdsByEnv.get(envId);
-  if (existing) return existing;
-  // Seed from the persisted record so a fresh Dockview API after reload keeps
-  // honoring panels the user closed before the reload.
-  const hiddenSessionIds = new Set(envId === null ? [] : getEnvHiddenSessions(envId));
-  hiddenSessionIdsByEnv.set(envId, hiddenSessionIds);
-  return hiddenSessionIds;
-}
-
-function allKnownSessionIds(appStore: ReturnType<typeof useAppStoreApi>): Set<string> {
-  const sessionsByTask = appStore.getState().taskSessionsByTask.itemsByTaskId;
-  return new Set(Object.values(sessionsByTask).flatMap((sessions) => sessions.map((s) => s.id)));
-}
-
-/**
- * True only when the store marks the active task's session list as loaded.
- * Before that the list may be partial (WS events seed single sessions into a
- * not-yet-loaded list) or empty (pre-hydration reload), and pruning persisted
- * hidden IDs against it would erase the reload record before the full session
- * list arrives.
- */
-function isTaskSessionListAuthoritative(
-  appStore: ReturnType<typeof useAppStoreApi>,
-  tid: string | null,
-): boolean {
-  if (!tid) return false;
-  return appStore.getState().taskSessionsByTask.loadedByTaskId[tid] === true;
-}
 
 function shouldSkipHiddenEffectiveSession(
   effectiveSessionId: string,
@@ -84,39 +43,6 @@ function shouldSkipHiddenEffectiveSession(
     });
   }
   return true;
-}
-
-function pruneHiddenSessionIds(
-  envId: string | null,
-  hiddenSessionIds: Set<string>,
-  knownSessionIds: Set<string>,
-): void {
-  let pruned = false;
-  for (const hiddenSessionId of hiddenSessionIds) {
-    if (!knownSessionIds.has(hiddenSessionId)) {
-      hiddenSessionIds.delete(hiddenSessionId);
-      pruned = true;
-    }
-  }
-  if (pruned) persistHiddenSessionIds(envId, hiddenSessionIds);
-}
-
-/** Hide a session tab without changing its persisted session lifecycle. */
-export function hideSessionPanel(api: DockviewApi, sessionId: string): void {
-  const envId = useDockviewStore.getState().currentLayoutEnvId;
-  const hiddenSessionIds = hiddenSessionIdsFor(api);
-  hiddenSessionIds.add(sessionId);
-  persistHiddenSessionIds(envId, hiddenSessionIds);
-  const panel = api.getPanel(`session:${sessionId}`);
-  if (panel) api.removePanel(panel);
-}
-
-/** Forget a prior hide when a session is reopened or deleted. */
-export function clearHiddenSessionPanel(api: DockviewApi, sessionId: string): void {
-  const envId = useDockviewStore.getState().currentLayoutEnvId;
-  const hiddenSessionIds = hiddenSessionIdsFor(api);
-  hiddenSessionIds.delete(sessionId);
-  persistHiddenSessionIds(envId, hiddenSessionIds);
 }
 
 /**
@@ -649,18 +575,11 @@ export function runAutoSessionTabEffect(
   );
 
   // Keep hide intent for sessions belonging to inactive tasks that share this
-  // environment. Prune only sessions that are gone from the whole store, not
-  // merely absent from the currently selected task, and only after the active
-  // task's session list is authoritatively loaded: an empty or partial list
-  // before hydration would erase the persisted hide record and resurrect the
-  // closed panels once the reload finishes.
-  if (isTaskSessionListAuthoritative(appStore, tid)) {
-    pruneHiddenSessionIds(
-      currentEnvId,
-      refs.hiddenSessionIdsRef.current,
-      allKnownSessionIds(appStore),
-    );
-  }
+  // environment. A hidden record is retired only when its owning task's
+  // authoritative session list no longer contains the session; any single
+  // task's list says nothing about another task's records, and an unloaded
+  // owner cannot be judged yet.
+  pruneHiddenSessionIds(currentEnvId, refs.hiddenSessionIdsRef.current, appStore.getState);
 
   if (!effectiveSessionId) {
     if (isDebug()) debug("useAutoSessionTab: no effectiveSessionId, returning");
