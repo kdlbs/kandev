@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/kandev/kandev/internal/auth/authn"
@@ -300,6 +301,77 @@ func (r *racingSessionRepo) ListTaskSessions(ctx context.Context, taskID string)
 		return nil, removeErr
 	}
 	return sessions, nil
+}
+
+// racingDeferredLaunchCASRepo injects a concurrent, successful
+// SetTaskDeferredLaunchIfUnchanged write between the first
+// GetTaskDeferredLaunch read UpdateDeferredLaunchPrompt performs and its own
+// compare-and-set write — modelling the session ceiling's own CAS writers
+// (for example the replay sweeper) mutating the record while the prompt
+// edit is mid-flight. Deterministic: the interleaving is the seam, not a
+// sleep.
+type racingDeferredLaunchCASRepo struct {
+	repository.TaskRepository
+	taskID string
+	fired  bool
+}
+
+func (r *racingDeferredLaunchCASRepo) GetTaskDeferredLaunch(
+	ctx context.Context, taskID string,
+) (map[string]interface{}, interface{}, error) {
+	launch, prior, err := r.TaskRepository.GetTaskDeferredLaunch(ctx, taskID)
+	if err != nil || r.fired || taskID != r.taskID {
+		return launch, prior, err
+	}
+	r.fired = true
+	concurrent := make(map[string]interface{}, len(launch)+1)
+	for k, v := range launch {
+		concurrent[k] = v
+	}
+	concurrent["ceiling_deferred"] = true
+	if _, lostCompare, casErr := r.SetTaskDeferredLaunchIfUnchanged(
+		ctx, taskID, prior, concurrent); casErr != nil || lostCompare {
+		return nil, nil, fmt.Errorf(
+			"failed to inject concurrent deferred launch write: lostCompare=%v err=%v", lostCompare, casErr)
+	}
+	// Return the pre-race snapshot: this call models the read a caller already
+	// performed before the concurrent write landed.
+	return launch, prior, nil
+}
+
+// The ceiling-CAS-bypass race F2 exists to fix: a concurrent, legitimate
+// write to deferred_launch (the session ceiling's own CAS writers) landing
+// between UpdateDeferredLaunchPrompt's read and its write must not be
+// silently clobbered by a stale read-modify-write. Before the fix, the write
+// went through SetTaskMetadataKeyIfPresent — a presence-only predicate that
+// only checks the key still exists, not that its value is unchanged — so it
+// happily overwrote the concurrent writer's change with a stale copy plus
+// just the new prompt.
+func TestUpdateDeferredLaunchPromptSurvivesAConcurrentCeilingWrite(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedDeferredLaunchTask(t, repo)
+
+	racing := &racingDeferredLaunchCASRepo{TaskRepository: repo, taskID: deferredLaunchTaskID}
+	svc.tasks = racing
+
+	if _, err := svc.UpdateDeferredLaunchPrompt(
+		context.Background(), deferredLaunchTaskID, "what we actually learned"); err != nil {
+		t.Fatalf("UpdateDeferredLaunchPrompt: %v", err)
+	}
+	if !racing.fired {
+		t.Fatal("the fixture never injected the concurrent ceiling write; the test proved nothing")
+	}
+
+	launch := storedLaunch(t, repo)
+	if launch["prompt"] != "what we actually learned" {
+		t.Fatalf("prompt = %v, want the replacement", launch["prompt"])
+	}
+	if launch["agent_profile_id"] != "profile-1" {
+		t.Fatalf("agent_profile_id = %v, want the original record preserved", launch["agent_profile_id"])
+	}
+	if launch["ceiling_deferred"] != true {
+		t.Fatal("the concurrent ceiling write must survive; a stale read-modify-write clobbered it")
+	}
 }
 
 // The resurrection race, reported independently by three reviewers on #2660.

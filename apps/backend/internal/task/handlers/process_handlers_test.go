@@ -95,6 +95,14 @@ func (m *mockRepository) UpdateTaskWithExplicitPosition(ctx context.Context, tas
 func (m *mockRepository) UpdateTaskPreservingDeferredLaunch(ctx context.Context, task *models.Task) error {
 	return nil
 }
+func (m *mockRepository) GetTaskDeferredLaunch(ctx context.Context, taskID string) (map[string]interface{}, interface{}, error) {
+	return nil, nil, nil
+}
+func (m *mockRepository) SetTaskDeferredLaunchIfUnchanged(
+	ctx context.Context, taskID string, prior interface{}, value map[string]interface{},
+) (bool, bool, error) {
+	return false, false, nil
+}
 func (m *mockRepository) DeleteTask(ctx context.Context, id string) error {
 	return nil
 }
