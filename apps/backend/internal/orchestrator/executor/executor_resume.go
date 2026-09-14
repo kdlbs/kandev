@@ -816,6 +816,9 @@ func (e *Executor) ResumeSessionWithOptions(
 	startAgent bool,
 	options ResumeOptions,
 ) (*TaskExecution, error) {
+	if session != nil {
+		e.auditCeilingBypass(ctx, "ResumeSessionWithOptions", session.ID, false)
+	}
 	return e.resumeSession(ctx, session, startAgent, options)
 }
 

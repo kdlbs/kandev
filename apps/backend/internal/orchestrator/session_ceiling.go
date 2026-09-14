@@ -400,6 +400,30 @@ func (c *sessionCeilingController) handOffOrAdmit(ctx context.Context, req admis
 	return decision
 }
 
+// isSessionCeilingBacked implements AC-41: whether a session_id is currently
+// backed by an in-flight reservation or a counted AC-1 population row. A nil
+// controller (a Service built without one resolved, e.g. narrow test
+// fixtures) reports every session as backed, the same "no ceiling in effect"
+// posture admit/handOffOrAdmit already take. This method is consulted only
+// by Executor's observation-only bypass detector (AC-41a) and never gates,
+// delays or fails a launch itself.
+func (c *sessionCeilingController) isSessionCeilingBacked(ctx context.Context, sessionID string) (bool, error) {
+	if c == nil || sessionID == "" {
+		return true, nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if _, reserved := c.reservations[sessionID]; reserved {
+		return true, nil
+	}
+	counted, err := c.countedRowsLocked(ctx)
+	if err != nil {
+		return false, err
+	}
+	_, ok := counted[sessionID]
+	return ok, nil
+}
+
 // expireStaleReservations releases reservations whose launch neither reached a
 // counted state nor reported failure inside the launch budget. It is the backstop,
 // not the primary release edge.

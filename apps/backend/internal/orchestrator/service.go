@@ -1763,6 +1763,7 @@ func NewService(
 	exec.SetOnAgentProcessStarted(s.handleAgentProcessStarted)
 	exec.SetOnAgentProcessStartFailed(s.handleAgentProcessStartFailed)
 	exec.SetOnCeilingReservationRelease(s.releaseCeilingReservation)
+	exec.SetCeilingBackingChecker(s)
 	if caps, ok := agentManager.(executor.ExecutorTypeCapabilities); ok {
 		exec.SetCapabilities(caps)
 	}

@@ -1,6 +1,10 @@
 package orchestrator
 
-import "github.com/kandev/kandev/internal/task/models"
+import (
+	"context"
+
+	"github.com/kandev/kandev/internal/task/models"
+)
 
 // isAC1SessionState reports whether state counts toward the session ceiling's
 // population: task_sessions in STARTING or RUNNING (AC-1).
@@ -51,4 +55,13 @@ func (s *Service) releaseCeilingIfLeftPopulation(sessionID string, priorState, n
 		return
 	}
 	s.releaseCeilingReservation(sessionID)
+}
+
+// IsSessionCeilingBacked implements executor.CeilingBackingChecker (AC-41):
+// the single permitted route by which Executor's observation-only bypass
+// detector (AC-41a) reads whether a session is backed by a reservation or a
+// counted AC-1 row. It is consulted for logging only and never gates a
+// launch.
+func (s *Service) IsSessionCeilingBacked(ctx context.Context, sessionID string) (bool, error) {
+	return s.sessionCeiling.isSessionCeilingBacked(ctx, sessionID)
 }

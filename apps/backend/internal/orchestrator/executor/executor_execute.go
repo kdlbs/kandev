@@ -151,6 +151,7 @@ func executorNeedsResolvedCredentials(executorType string) bool {
 // WithCancellableResumeContext retain cancellation so an explicit stop can
 // interrupt a startup that is still waiting for ACP readiness.
 func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, agentExecutionID string, onSuccess func(context.Context), escalateTaskOnFailure, fromResume bool) {
+	e.auditCeilingBypass(ctx, "runAgentProcessAsync", sessionID, true, zap.String("agent_execution_id", agentExecutionID))
 	go func() {
 		startParent := context.WithoutCancel(ctx)
 		updateCtx := startParent
@@ -1391,6 +1392,11 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	executorID := opts.ExecutorID
 	prompt := opts.Prompt
 	startAgent := opts.StartAgent
+	if startAgent {
+		// AC-4c: StartAgent false prepares a workspace and starts no process,
+		// so it is out of AC-4b's scope and must not be instrumented.
+		e.auditCeilingBypass(ctx, "LaunchPreparedSession", sessionID, false)
+	}
 	// Serialise concurrent launches for the same session. Two callers reach
 	// this path on every task: PrepareTaskSession spawns a background launch
 	// (workspace only) the moment a session is created, and StartCreatedSession

@@ -1031,6 +1031,9 @@ type Executor struct {
 	// package makes directly against the repository, bypassing
 	// onSessionStateChange / onSessionStateTransition (AC-51a).
 	onCeilingReservationRelease CeilingReservationReleaseFunc
+	// Optional observation-only bypass detector for the three entry points
+	// that start an agent process (AC-41/AC-41a).
+	ceilingBackingChecker CeilingBackingChecker
 	// Optional resolver for the mark-review-done recovery action.
 	launchFailureReviewEligibility LaunchFailureReviewEligibilityFunc
 	// Optional compatibility gate for legacy adapters.
@@ -1387,6 +1390,14 @@ func (e *Executor) SetOnAgentProcessStartFailed(fn AgentProcessStartFailedFunc) 
 // population (AC-51a).
 func (e *Executor) SetOnCeilingReservationRelease(fn CeilingReservationReleaseFunc) {
 	e.onCeilingReservationRelease = fn
+}
+
+// SetCeilingBackingChecker wires the AC-41 dependency-inverted bypass
+// detector. Leaving it unset (every existing construction site) is AC-41a's
+// contract: the three instrumented entry points behave exactly as they do
+// without this card at all.
+func (e *Executor) SetCeilingBackingChecker(checker CeilingBackingChecker) {
+	e.ceilingBackingChecker = checker
 }
 
 // SetOnPrimarySessionSet sets a callback for when the first session for a task
