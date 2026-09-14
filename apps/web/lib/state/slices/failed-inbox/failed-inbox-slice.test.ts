@@ -112,6 +112,26 @@ describe("failed-inbox slice", () => {
     expect(state.count).toBe(1);
   });
 
+  // AC-UI-INBOX-FAILED-001.16: the count "shall remain rendered" across a
+  // background refresh -- only a never-read or previously-errored workspace
+  // should show as not-yet-known while a request is in flight.
+  it("keeps a workspace's status ready while a background refresh of already-loaded data is in flight", () => {
+    const store = newStore();
+    const firstGeneration = store.getState().beginFailedInboxRead("w1");
+    store.getState().setFailedInboxPage("w1", firstGeneration, {
+      rows: [row()],
+      count: 1,
+      truncated: false,
+    });
+
+    store.getState().beginFailedInboxRead("w1");
+
+    const state = store.getState().failedInbox.byWorkspaceId.w1;
+    expect(state.status).toBe("ready");
+    expect(state.rows).toHaveLength(1);
+    expect(state.count).toBe(1);
+  });
+
   it("keys generations independently per workspace", () => {
     const store = newStore();
     const genW1 = store.getState().beginFailedInboxRead("w1");

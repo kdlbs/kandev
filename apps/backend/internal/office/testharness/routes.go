@@ -381,6 +381,7 @@ func updateSeededSession(
 	}
 	existing.State = session.State
 	existing.CompletedAt = session.CompletedAt
+	existing.ErrorMessage = session.ErrorMessage
 	existing.UpdatedAt = time.Now().UTC()
 	if existing.Metadata == nil {
 		existing.Metadata = map[string]interface{}{}

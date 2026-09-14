@@ -39,7 +39,14 @@ export const createFailedInboxSlice = (set: ImmerSet): FailedInboxSlice => ({
       const next = (draft.failedInbox.generationByWorkspaceId[workspaceId] ?? 0) + 1;
       draft.failedInbox.generationByWorkspaceId[workspaceId] = next;
       const workspace = draft.failedInbox.byWorkspaceId[workspaceId] ?? emptyWorkspaceState();
-      workspace.status = "loading";
+      // A background refresh of already-`ready` data leaves status alone
+      // (AC-UI-INBOX-FAILED-001.16's count "shall remain rendered"): only a
+      // never-read or previously-errored workspace moves to `loading`, so a
+      // periodic tick, tab change, or foreground-return refresh cannot hide
+      // the badge behind rows it is still showing.
+      if (workspace.status !== "ready") {
+        workspace.status = "loading";
+      }
       draft.failedInbox.byWorkspaceId[workspaceId] = workspace;
       generation = next;
     });

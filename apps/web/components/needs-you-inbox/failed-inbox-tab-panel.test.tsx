@@ -52,6 +52,15 @@ describe("FailedInboxTabPanel", () => {
     expect(screen.getByRole("status")).not.toBeNull();
   });
 
+  it("shows a loading indicator, not the empty state, before the first read ever completes", () => {
+    // No entry under w1 yet -- the slice's idle default, not a successful
+    // empty read. A false "nothing has failed" would misrepresent an unread
+    // workspace as a confirmed-empty one.
+    render(<FailedInboxTabPanel />);
+    expect(screen.getByRole("status")).not.toBeNull();
+    expect(screen.queryByTestId("failed-inbox-empty")).toBeNull();
+  });
+
   it("renders the error state, not the empty state, when the read failed (AC .22)", () => {
     mockState.failedInbox.byWorkspaceId.w1 = {
       rows: [],

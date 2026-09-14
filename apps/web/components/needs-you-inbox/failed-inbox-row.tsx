@@ -5,6 +5,7 @@ import { Button } from "@kandev/ui/button";
 import Link from "@/components/routing/app-link";
 import { formatRelativeTime } from "@/lib/i18n/formats";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
+import { FAILED_TASK_STATUS } from "@/lib/threads/thread-session-status";
 import {
   failedInboxOriginMarkerKey,
   hasResolvableFailedInboxReason,
@@ -30,6 +31,8 @@ export function FailedInboxRow({ row }: { row: FailedInboxRowData }) {
       <span
         className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted"
         data-testid="failed-inbox-status-icon"
+        role="img"
+        aria-label={t(FAILED_TASK_STATUS.labelKey)}
       >
         {getTaskStateIcon("FAILED")}
       </span>

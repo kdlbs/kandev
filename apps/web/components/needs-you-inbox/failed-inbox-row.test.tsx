@@ -34,6 +34,11 @@ describe("FailedInboxRow", () => {
     expect(container.querySelector('[data-testid="failed-inbox-status-icon"]')).not.toBeNull();
   });
 
+  it("presents the shared thread-status vocabulary's failed status (AC .20/.20a)", () => {
+    render(<FailedInboxRow row={row()} />);
+    expect(screen.getByRole("img", { name: "Failed" })).not.toBeNull();
+  });
+
   it("falls back to stated copy when the reason is empty (AC .19)", () => {
     render(<FailedInboxRow row={row({ reason: "" })} />);
     expect(screen.getByTestId("failed-inbox-reason-fallback")).not.toBeNull();

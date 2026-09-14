@@ -15,7 +15,7 @@ type ViewMode = "error" | "loading" | "empty" | "list";
 
 function resolveViewMode(status: string, rowCount: number): ViewMode {
   if (status === "error") return "error";
-  if (status === "loading" && rowCount === 0) return "loading";
+  if ((status === "loading" || status === "idle") && rowCount === 0) return "loading";
   if (rowCount === 0) return "empty";
   return "list";
 }
