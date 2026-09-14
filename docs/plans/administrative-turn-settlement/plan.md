@@ -20,6 +20,10 @@ the session, worktree, history, queues, and sibling sessions intact, and
 while keeping successor workflow delivery correct across a superseded
 intent.
 
+Work orders:
+
+- [Task 01: Settle one exact stale administrative turn](task-01-durable-turn-settlement.md)
+
 The task system owns the package because it owns the durable turn,
 completion-intent, queue-admission, and audit records that prove the exact
 finished identity and its successor.
