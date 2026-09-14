@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import {
+  activatePlanMode,
   autoSelectBranch,
   buildCreateTaskPayload,
   buildRepositoriesPayload,
@@ -9,6 +10,8 @@ import {
   shouldShowTaskTitleField,
   validateCreateInputs,
 } from "./task-create-dialog-helpers";
+import { createAppStore } from "@/lib/state/store";
+import { useContextFilesStore } from "@/lib/state/context-files-store";
 import type { TaskRemoteRepoRow } from "./task-create-dialog-types";
 const STORAGE_KEYS = { LAST_BRANCH: "kandev.dialog.lastBranch" } as const;
 
@@ -26,6 +29,8 @@ const AGENT_PAYLOAD_DEFAULTS = {
 
 beforeEach(() => {
   localStorage.clear();
+  sessionStorage.clear();
+  useContextFilesStore.setState({ filesBySessionId: {} });
 });
 
 describe("autoSelectBranch", () => {
@@ -330,4 +335,50 @@ describe("buildCreateTaskPayload priority", () => {
   it("defaults to medium when no priority is selected", () => {
     expect(buildCreateTaskPayload(base).priority).toBe("medium");
   });
+});
+
+it("initializes a planning session without navigating when auto-focus is off", () => {
+  const currentSessionId = "current-session";
+  const backgroundSessionId = "session-plan";
+  const store = createAppStore();
+  const { setActiveDocument, setPlanMode, setActiveSession } = store.getState();
+  setActiveSession("current-task", currentSessionId);
+  setActiveDocument(currentSessionId, { type: "plan", taskId: "current-task" });
+  setPlanMode(currentSessionId, false);
+  useContextFilesStore.getState().addFile(currentSessionId, { path: "notes.md", name: "notes.md" });
+  const currentTasks = store.getState().tasks;
+  const currentDocument =
+    store.getState().documentPanel.activeDocumentBySessionId[currentSessionId];
+  const currentContext = useContextFilesStore.getState().filesBySessionId[currentSessionId];
+  const router = {
+    push: vi.fn(),
+    replace: vi.fn(),
+    back: vi.fn(),
+    forward: vi.fn(),
+    refresh: vi.fn(),
+    prefetch: vi.fn(),
+  };
+  activatePlanMode({
+    taskId: "task-plan",
+    sessionId: backgroundSessionId,
+    autoFocus: false,
+    setActiveDocument,
+    setPlanMode,
+    router,
+  });
+  expect(store.getState().chatInput.planModeBySessionId[backgroundSessionId]).toBe(true);
+  expect(store.getState().documentPanel.activeDocumentBySessionId[backgroundSessionId]).toEqual({
+    type: "plan",
+    taskId: "task-plan",
+  });
+  expect(useContextFilesStore.getState().filesBySessionId[backgroundSessionId]).toEqual([
+    { path: "plan:context", name: "Plan" },
+  ]);
+  expect(store.getState().tasks).toBe(currentTasks);
+  expect(store.getState().documentPanel.activeDocumentBySessionId[currentSessionId]).toBe(
+    currentDocument,
+  );
+  expect(store.getState().chatInput.planModeBySessionId[currentSessionId]).toBe(false);
+  expect(useContextFilesStore.getState().filesBySessionId[currentSessionId]).toBe(currentContext);
+  expect(router.push).not.toHaveBeenCalled();
 });

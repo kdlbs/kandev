@@ -365,15 +365,13 @@ function DesktopHeader({
           <TooltipProvider>
             <ViewToggleGroup toggleValue={toggleValue} onValueChange={handleViewChange} size="lg" />
           </TooltipProvider>
-          {currentPage !== "threads" && (
-            <KanbanDisplayDropdown
-              triggerSize="icon-lg"
-              currentPage={currentPage}
-              pluginFilters={pluginTaskFilters.filters}
-              pluginFilterSelections={pluginTaskFilters.selections}
-              onPluginFilterChange={pluginTaskFilters.setFilterSelection}
-            />
-          )}
+          <KanbanDisplayDropdown
+            triggerSize="icon-lg"
+            currentPage={currentPage}
+            pluginFilters={pluginTaskFilters.filters}
+            pluginFilterSelections={pluginTaskFilters.selections}
+            onPluginFilterChange={pluginTaskFilters.setFilterSelection}
+          />
           <HealthIndicatorButton
             hasIssues={showHealthIndicator}
             onClick={onOpenHealthDialog}

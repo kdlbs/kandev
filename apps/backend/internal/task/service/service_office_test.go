@@ -362,6 +362,16 @@ func (m *mockBlockerRepo) DeleteTaskBlocker(_ context.Context, taskID, blockerTa
 	}
 	return nil
 }
+func (m *mockBlockerRepo) DeleteTaskBlockersForTask(_ context.Context, taskID string) error {
+	filtered := m.blockers[:0]
+	for _, b := range m.blockers {
+		if b.TaskID != taskID && b.BlockerTaskID != taskID {
+			filtered = append(filtered, b)
+		}
+	}
+	m.blockers = filtered
+	return nil
+}
 
 func (m *mockBlockerRepo) ListTasksBlockedBy(_ context.Context, blockerTaskID string) ([]string, error) {
 	var ids []string

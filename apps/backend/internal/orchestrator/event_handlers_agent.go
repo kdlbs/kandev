@@ -1999,7 +1999,8 @@ func queuedMessageAttachmentsToV1(attachments []messagequeue.MessageAttachment) 
 // entity references are re-added via WithEntityReferences, and a carried
 // completion handoff (messagequeue.MetadataStepHandoff) is already folded
 // into the recorded content by the caller, so neither belongs in the row's
-// own stored metadata.
+// own stored metadata. Admission provenance remains so clients can reconcile
+// an accepted message after its queue row has been dispatched.
 func metadataWithoutQueueOnlyKeys(metadata map[string]interface{}) map[string]interface{} {
 	if len(metadata) == 0 {
 		return nil
@@ -2794,7 +2795,7 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 	}
 }
 
-func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentEventData) {
+func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentEventData) error {
 	errMsg := data.ErrorMessage
 	if errMsg == "" {
 		errMsg = defaultAgentFailedMessage
@@ -2821,7 +2822,7 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.Error(err))
-		return
+		return err
 	}
 	if s.eventBus != nil {
 		eventData := map[string]interface{}{
@@ -2861,8 +2862,10 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 				zap.String("task_id", data.TaskID),
 				zap.String("session_id", data.SessionID),
 				zap.Error(err))
+			return err
 		}
 	}
+	return nil
 }
 
 // clearRecoveredAgentError drops a session's stored agent failure once the agent

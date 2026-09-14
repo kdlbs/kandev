@@ -1,3 +1,4 @@
+import { assertCommentSurvivesForeground } from "./plan-comment-foreground-helpers";
 // Filename starts with "mobile-" so this runs under the mobile-chrome project.
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
@@ -230,3 +231,24 @@ test.describe("mobile: task-owned plan comments", () => {
     ).toBe(false);
   });
 });
+
+// @covers AC-TASKS-PLAN-COMMENTS-001.9, AC-TASKS-PLAN-COMMENTS-001.10
+for (const editing of [false, true]) {
+  for (const failedRead of [false, true]) {
+    test(`foreground refresh preserves ${editing ? "edited" : "new"} comment on ${failedRead ? "failure" : "success"}`, async ({
+      testPage,
+      apiClient,
+      seedData,
+    }) => {
+      test.setTimeout(120_000);
+      await assertCommentSurvivesForeground({
+        testPage,
+        apiClient,
+        seedData,
+        mobile: true,
+        editing,
+        failedRead,
+      });
+    });
+  }
+}

@@ -138,7 +138,53 @@ describe("hydrateUI — typed quick chat sessions", () => {
   });
 });
 
+// eslint-disable-next-line max-lines-per-function -- This covers the full hydration-to-launcher sequence in one fixture.
 describe("hydrateUI — quick chat lifecycle", () => {
+  it("restores the remembered tab before a passive hydrated active session", () => {
+    const result = produce(makeDraft(), (draft: Draft<AppState>) => {
+      draft.quickChat.sessions = [{ sessionId: "chat-first", workspaceId: "ws-1", kind: "chat" }];
+      draft.quickChat.activeSessionId = "chat-first";
+      draft.quickChat.rememberedSelectionByWorkspace = {
+        "ws-1": { chat: "chat-remembered" },
+      };
+      draft.quickChat.rememberedSelectionOrder = ["ws-1"];
+      hydrateUI(draft, {
+        quickChat: {
+          isOpen: false,
+          activeSessionId: null,
+          sessions: [
+            { sessionId: "chat-first", workspaceId: "ws-1", kind: "chat" },
+            { sessionId: "chat-remembered", workspaceId: "ws-1", kind: "chat" },
+          ],
+        },
+      });
+    });
+
+    expect(result.quickChat.activeSessionId).toBe("chat-remembered");
+  });
+
+  it("resolves an empty boot snapshot for the active workspace", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.workspaces.activeId = "ws-1";
+      draft.quickChat.pendingOpen = {
+        workspaceId: "ws-1",
+        kind: "chat",
+        selectionRevision: 0,
+      };
+      hydrateUI(draft, {
+        quickChat: {
+          isOpen: true,
+          activeSessionId: null,
+          sessions: [],
+        },
+      });
+    });
+
+    expect(result.quickChat.selectionReadyByWorkspace).toMatchObject({ "ws-1": true });
+    expect(result.quickChat.pendingOpen).toBeNull();
+    expect(result.quickChat.activeSessionId).toBe("quick-chat-setup:ws-1:chat");
+  });
+
   it("restores server-owned terminal tabs during a fresh hydration", () => {
     const result = produce(makeDraft(), (draft: Draft<AppState>) => {
       hydrateUI(draft, {

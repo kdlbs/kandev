@@ -107,7 +107,7 @@ type RoutedNewTaskDialogProps = {
   onRegularTaskCreated: (
     task: Task,
     mode: "create" | "edit",
-    meta?: { taskSessionId?: string | null; willNavigate?: boolean },
+    meta?: { taskSessionId?: string | null; willNavigate?: boolean; autoFocus?: boolean },
   ) => void;
 };
 
@@ -194,9 +194,10 @@ export function AppSidebarNewTaskItem({ collapsed }: AppSidebarNewTaskItemProps)
     (
       task: Task,
       _mode: "create" | "edit",
-      meta?: { taskSessionId?: string | null; willNavigate?: boolean },
+      meta?: { taskSessionId?: string | null; willNavigate?: boolean; autoFocus?: boolean },
     ) => {
       setOpen(false);
+      if (meta?.autoFocus === false) return;
       if (meta?.taskSessionId) {
         setActiveSession(task.id, meta.taskSessionId);
       } else {

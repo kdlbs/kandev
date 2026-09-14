@@ -142,6 +142,43 @@ func TestCleanupMultiRepoRoot_RejectsPathOutsideManagedRoot(t *testing.T) {
 		t.Error("multi-repo root outside managed root must be rejected")
 	}
 }
+func TestCleanupMultiRepoRoot_RequiresWorktreeManager(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	c := NewHandoffCleaner(nil, log, t.TempDir())
+	if err := c.CleanupMultiRepoRoot(context.Background(), t.TempDir(), nil); err == nil {
+		t.Fatal("multi-repo cleanup must reject a missing worktree manager")
+	}
+}
+func TestCleanupMultiRepoRoot_RequiresWorktreeInventory(t *testing.T) {
+	tasksRoot := t.TempDir()
+	root := filepath.Join(tasksRoot, "task-empty-inventory")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatalf("mkdir root: %v", err)
+	}
+	c := newCleanerWithTasksRoot(t, tasksRoot)
+
+	err := c.CleanupMultiRepoRoot(context.Background(), root, nil)
+	if err == nil {
+		t.Fatal("multi-repo cleanup accepted an empty worktree inventory")
+	}
+	if _, statErr := os.Stat(root); statErr != nil {
+		t.Fatalf("multi-repo root was removed after invalid inventory: %v", statErr)
+	}
+}
+
+func TestCleanupRemoteEnvironmentRejectsUnimplementedDeletion(t *testing.T) {
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatalf("logger: %v", err)
+	}
+	c := NewHandoffCleaner(nil, log)
+	if err := c.CleanupRemoteEnvironment(context.Background(), "sprites", "env-1"); err == nil {
+		t.Fatal("remote cleanup must not report success without provider deletion")
+	}
+}
 
 func TestIsDescendant_HappyAndUnhappyPaths(t *testing.T) {
 	cases := []struct {

@@ -30,6 +30,7 @@ var validCategories = map[string]bool{
 	"automation": true,
 	"tools":      true,
 	"analytics":  true,
+	"canvas":     true,
 }
 
 // validUISurfaces are the allowed values for UIPage.Surface.
@@ -144,6 +145,7 @@ func (m *Manifest) Validate() error {
 	errs = append(errs, m.validateRepositoryProviders()...)
 	errs = append(errs, m.validateReferenceSources()...)
 	errs = append(errs, m.validateAgentTools()...)
+	errs = append(errs, m.validateDistribution()...)
 	return errors.Join(errs...)
 }
 

@@ -310,7 +310,7 @@ func (s *Service) reclaimStuckSignalSessionOwned(
 	// (ErrNoExecutionForSession, ErrCancelEscalated) means the execution
 	// could not be confirmed settled; fail closed and skip this tick rather
 	// than force-closing the turn anyway.
-	if err := s.cancelAgentWhileUnlockedForPrompt(ctx, session.ID, identity, guard.unlock, guard.relock); err != nil {
+	if err := s.cancelAgentWhileUnlockedForPrompt(ctx, session.ID, identity, operation, guard.unlock, guard.relock); err != nil {
 		s.logger.Warn("stuck-signal watchdog: failed to settle stuck execution before reclaim; skipping this tick",
 			zap.String("task_id", task.ID),
 			zap.String("session_id", session.ID),
@@ -663,10 +663,11 @@ func (s *Service) cancelAgentWhileUnlockedForPrompt(
 	ctx context.Context,
 	sessionID string,
 	identity cancellationIdentity,
+	operation *cancelOperation,
 	unlockGuard, relockGuard func(),
 ) error {
 	if identity.executionID == "" {
-		return s.cancelAgentWhileUnlocked(ctx, sessionID, unlockGuard, relockGuard)
+		return s.cancelAgentWhileUnlocked(ctx, sessionID, operation, unlockGuard, relockGuard)
 	}
 	canceller, ok := s.agentManager.(promptActivityCanceller)
 	if !ok {
@@ -684,6 +685,7 @@ func (s *Service) cancelAgentWhileUnlockedForPrompt(
 		identity.activityEpoch,
 	)
 	relockGuard()
+	s.setCancellationProviderOutcome(sessionID, operation, cancelErr)
 	return s.normalizeCancelAgentError(cancelErr)
 }
 

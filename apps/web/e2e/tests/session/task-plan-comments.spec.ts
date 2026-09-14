@@ -1,3 +1,4 @@
+import { assertCommentSurvivesForeground } from "./plan-comment-foreground-helpers";
 import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import { planScript } from "../../helpers/seed-session-messages";
@@ -191,3 +192,24 @@ test.describe("task-owned plan comments", () => {
     });
   });
 });
+
+// @covers AC-TASKS-PLAN-COMMENTS-001.9, AC-TASKS-PLAN-COMMENTS-001.10
+for (const editing of [false, true]) {
+  for (const failedRead of [false, true]) {
+    test(`foreground refresh preserves ${editing ? "edited" : "new"} comment on ${failedRead ? "failure" : "success"}`, async ({
+      testPage,
+      apiClient,
+      seedData,
+    }) => {
+      test.setTimeout(120_000);
+      await assertCommentSurvivesForeground({
+        testPage,
+        apiClient,
+        seedData,
+        mobile: false,
+        editing,
+        failedRead,
+      });
+    });
+  }
+}

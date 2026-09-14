@@ -1085,6 +1085,10 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		// Dependency edges are manageable wherever a task can be created.
 		{name: "task-dependencies", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || external(ctx) }, register: func(s *Server) { s.registerTaskDependencyTools() }},
 		{name: "kanban-task", enabled: kanban, register: func(s *Server) { s.registerKanbanTools() }},
+		{name: "task-pr-links", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool {
+			return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) ||
+				mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab)
+		}), register: func(s *Server) { s.registerTaskPRLinkTools() }},
 		{name: "github-pr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) }), register: func(s *Server) { s.registerPRAutomationTools() }},
 		{name: "gitlab-mr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab) }), register: func(s *Server) { s.registerMRAutomationTools() }},
 		{name: "user-question", enabled: capabilityEnabled(mcpprofile.CapabilityUserQuestion), register: func(s *Server) { s.registerInteractionTools() }},
@@ -1410,6 +1414,40 @@ func (s *Server) registerPRAutomationTools() {
 	)
 }
 
+func (s *Server) registerTaskPRLinkTools() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("link_task_pr_kandev", taskPRLinkToolOptions(false)...),
+		s.wrapHandler("link_task_pr_kandev", s.taskPRLinkHandler("link_task_pr_kandev")),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("unlink_task_pr_kandev", taskPRLinkToolOptions(false)...),
+		s.wrapHandler("unlink_task_pr_kandev", s.taskPRLinkHandler("unlink_task_pr_kandev")),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("replace_task_pr_kandev", taskPRLinkToolOptions(true)...),
+		s.wrapHandler("replace_task_pr_kandev", s.taskPRLinkHandler("replace_task_pr_kandev")),
+	)
+}
+
+func taskPRLinkToolOptions(replace bool) []mcp.ToolOption {
+	options := []mcp.ToolOption{
+		mcp.WithDescription("Manage an explicit GitHub PR or GitLab MR association. Provide task_id, provider, canonical repository_id, and pull-request or merge-request number."),
+		mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("Target task identifier")),
+		mcp.WithString("provider", mcp.Required(), mcp.Description("Provider identity: github or gitlab")),
+		mcp.WithString("repository_id", mcp.Required(), mcp.Description("Canonical task repository identity")),
+		mcp.WithNumber("number", mcp.Required(), mcp.Description("Pull request or merge request number")),
+	}
+	if replace {
+		options[0] = mcp.WithDescription("Replace an explicit GitHub PR or GitLab MR association. Provide task_id, provider, canonical repository_id, and pull-request or merge-request number. The old and new associations must use the same provider.")
+		options = append(options,
+			mcp.WithString("old_provider", mcp.Required(), mcp.Description("Current association provider identity: github or gitlab")),
+			mcp.WithString("old_repository_id", mcp.Required(), mcp.Description("Current association canonical repository identity")),
+			mcp.WithNumber("old_number", mcp.Required(), mcp.Description("Current pull request or merge request number")),
+		)
+	}
+	return options
+}
+
 func (s *Server) registerMRAutomationTools() {
 	s.mcpServer.AddTool(
 		mcp.NewToolWithRawSchema("get_task_mr_automation_kandev",
@@ -1461,7 +1499,7 @@ func (s *Server) registerCreateTaskTool() {
 			mcp.WithString("workspace_id", mcp.Description("The workspace ID. Auto-resolved if only one workspace exists. Defaulted from parent for subtasks when omitted.")),
 			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Auto-resolved if the workspace has only one workflow. Defaulted from parent for subtasks when workspace_id is also omitted; if supplied, it must belong to the effective workspace_id.")),
 			mcp.WithString("workflow_step_id", mcp.Description("The workflow step ID (optional, auto-resolved if omitted; for subtasks, pass only with an explicit workflow_id)")),
-			mcp.WithString("workspace_mode", mcp.Description("Subtask materialized-workspace mode: inherit_parent reuses the parent's worktree/materialized workspace (default for subtasks); new_workspace launches the subtask in its own workspace/worktree.")),
+			mcp.WithString("workspace_mode", mcp.Enum("inherit_parent", "new_workspace"), mcp.Description("Optional materialized-workspace mode. Omit for subtasks to inherit the parent's workspace/worktree. inherit_parent requires parent_id and reuses the parent's materialized workspace/worktree; new_workspace requests a separate workspace/worktree.")),
 			mcp.WithString("title", mcp.Required(), mcp.MaxLength(service.TaskTitleMaxLength), mcp.Description("A concise, few-word task title (maximum 60 characters).")),
 			mcp.WithString("prompt", mcp.Description("The initial prompt for the task agent. This is the ONLY context the agent receives when it starts — treat it as the agent's first user message. For auto-started subtasks, provide a specific and detailed prompt; omitting it starts the task agent without task-specific context.")),
 			mcp.WithBoolean("autopilot", mcp.Description("Start this task in autopilot mode. Default: false. The value is fixed at creation and is not inherited by subtasks. The agent does not ask the user directly; it asks its direct parent only for critical decisions.")),

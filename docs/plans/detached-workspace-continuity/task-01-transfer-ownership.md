@@ -55,15 +55,17 @@ before launch.
 - Parent archive/delete and delayed cleanup cannot stop, delete, reuse, or
   change a detached child's current-generation workspace.
 - Every supported child creation route attaches the canonical workspace policy
-  before publishing or returning a launchable task, with rollback on failure.
+  through a typed CreationPlan step before publishing or returning a launchable
+  task; failure uses eligible handle-bound Abort or durable Runtime recovery,
+  never direct deletion.
 
 ## Verification
 
 ```bash
-cd apps/backend && go test ./internal/task/repository/sqlite ./internal/office/repository/sqlite -run 'Test.*(DetachedWorkspaceContinuity|OwnershipGeneration|WorkspaceGroupGeneration|SchemaReplay)' -count=1
+cd apps/backend && go test ./internal/task/archivecascade -run 'Test.*(SetTaskParent|DetachTask|OwnershipGeneration|WorkspaceGroupGeneration|SchemaReplay|WriterRegistry|PublisherCutover)' -count=1
 cd apps/backend && go test ./internal/task/service -run 'Test.*(Detach|DetachedWorkspace|Stale.*Cleanup|CreateChildTask.*Workspace)' -count=1
+KANDEV_TEST_POSTGRES_DSN="$KANDEV_TEST_POSTGRES_DSN" go test ./internal/task/archivecascade -run 'TestPostgres(DetachmentDSNGate|SetTaskParentModeBranch|SetTaskParentCrashRollback|SetTaskParentPublicationReplay|SetTaskParentRace|DetachTaskModeBranch|DetachTaskCrashRollback|DetachTaskPublicationReplay|DetachTaskCleanupRace|DetachTaskSiblingLockOrder|DetachTaskAdjacentLockInversion)' -count=1
 cd apps/backend && go test ./internal/task/handlers ./internal/mcp/handlers ./internal/plugins ./internal/backendapp -run 'Test.*CreateTask.*Workspace' -count=1
-KANDEV_TEST_POSTGRES_DSN='<isolated test DSN>' go test ./internal/task/repository/sqlite ./internal/office/repository/sqlite -run 'Test.*(DetachedWorkspaceContinuity|OwnershipGeneration|WorkspaceGroupGeneration|SchemaReplay).*Postgres' -count=1
 ```
 
 ## Files likely touched
@@ -121,15 +123,18 @@ Implemented generation-fenced workspace ownership end to end:
 
 - Added replayable ownership generations to workspace groups and task
   environments, including fresh schema and worktree cutover paths.
-- Made detachment transactionally update hierarchy, workspace mode, group
-  steward, membership roles, environment owner, and both generations.
+- Made `archivecascade.Store.DetachTask` transactionally update hierarchy and,
+  only for `inherit_parent` with parent-owned materialization, workspace mode,
+  group steward, membership roles, environment owner, and generations. Other
+  modes preserve their existing ownership and membership.
 - Added cleanup-barrier-aware, expected-owner and expected-generation
   environment transfers; removed the unguarded transfer API.
 - Added generation claims for workspace-group cleanup and stale-snapshot guards
   for the complete environment and worktree cleanup pipeline.
 - Moved workspace-policy attachment into `Service.CreateTask`, wired all
-  production entry points through it, and retained rollback on attachment
-  failure.
+  production entry points through it, and made attachment a typed creation step.
+  Failure uses eligible handle-bound Abort or durable Runtime recovery, never
+  direct rollback deletion.
 - Added focused tests for atomic rollback, idempotency, ownership roles,
   generation advancement, stale retry rejection, cleanup fencing, and internal
   child creation.

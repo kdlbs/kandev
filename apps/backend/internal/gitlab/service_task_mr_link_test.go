@@ -8,6 +8,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 )
 
 func seedTaskMRLinkFixture(t *testing.T, store *Store, workspaceID, taskID, repositoryID string) {
@@ -211,6 +214,45 @@ func TestAssociateExistingMRByURLCreatesIdempotentWorkspaceScopedLink(t *testing
 	rows, err := store.ListTaskMRsByTask(context.Background(), "task-1")
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("stored rows = %d, err = %v; want one", len(rows), err)
+	}
+}
+
+func TestUnlinkTaskMRPublishesWorkspaceScopedDeletedEvent(t *testing.T) {
+	const host = "https://gitlab.acme.test"
+	svc, store, _ := newTaskMRLinkService(t, host)
+	seedTaskMRLinkFixture(t, store, "ws-1", "task-1", "repo-1")
+	association := &TaskMR{
+		ID: "mr-1", TaskID: "task-1", RepositoryID: "repo-1", Host: host,
+		ProjectPath: "group/project", MRIID: 17,
+		MRURL: host + "/group/project/-/merge_requests/17",
+	}
+	if err := store.UpsertTaskMR(context.Background(), association); err != nil {
+		t.Fatalf("seed task MR: %v", err)
+	}
+	eventBus := bus.NewMemoryEventBus(newTestLogger(t))
+	svc.SetEventBus(eventBus)
+	received := make(chan *bus.Event, 1)
+	if _, err := eventBus.Subscribe(events.GitLabTaskMRDeleted, func(_ context.Context, event *bus.Event) error {
+		received <- event
+		return nil
+	}); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+
+	if err := svc.UnlinkTaskMR(context.Background(), "ws-1", association.ID); err != nil {
+		t.Fatalf("UnlinkTaskMR: %v", err)
+	}
+	select {
+	case event := <-received:
+		payload, ok := event.Data.(*TaskMRDeletedEvent)
+		if !ok {
+			t.Fatalf("deleted event payload = %T, want *TaskMRDeletedEvent", event.Data)
+		}
+		if payload.WorkspaceID != "ws-1" || payload.TaskID != "task-1" || payload.AssociationID != association.ID {
+			t.Fatalf("deleted event payload = %+v", payload)
+		}
+	default:
+		t.Fatal("expected gitlab.task_mr.deleted event")
 	}
 }
 

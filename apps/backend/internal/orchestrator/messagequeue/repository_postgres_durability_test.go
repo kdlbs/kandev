@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/kandev/kandev/internal/common/logger"
 )
 
 func TestPostgresRepository_DurableQueueRecoveryTables(t *testing.T) {
@@ -162,6 +164,32 @@ func TestPostgresRepository_DurableQueueRecoveryTables(t *testing.T) {
 			t.Fatalf("dispatch claims after replacement = %#v", dispatches)
 		}
 	})
+}
+
+// @covers AC-TASKS-QUEUE-ADMISSION-001.2
+func TestPostgresQueueAdmissionReceiptSurvivesRowRemoval(t *testing.T) {
+	ctx := context.Background()
+	repo := newTestPostgresRepo(t)
+	identity := QueueSessionIdentity{
+		TaskID: "admission-task", SessionID: "admission-session", SessionIncarnationID: "admission-incarnation",
+	}
+	seedQueueSessionIdentity(t, repo, identity)
+	service := NewService(repo, 10, logger.Default())
+	first, replay, err := service.QueueMessageWithMetadataForSessionWithClientQueueID(
+		ctx, identity, "client-postgres", "prompt", "", QueuedByUser, false, nil, nil, nil,
+	)
+	if err != nil || replay {
+		t.Fatalf("first admission: message=%+v replay=%t err=%v", first, replay, err)
+	}
+	if _, err := repo.DeleteByIDForSession(ctx, identity, first.ID); err != nil {
+		t.Fatalf("remove queue row: %v", err)
+	}
+	replayed, replay, err := service.QueueMessageWithMetadataForSessionWithClientQueueID(
+		ctx, identity, "client-postgres", "prompt", "", QueuedByUser, false, nil, nil, nil,
+	)
+	if err != nil || !replay || replayed.ID != first.ID {
+		t.Fatalf("replay: message=%+v replay=%t err=%v", replayed, replay, err)
+	}
 }
 
 func TestPostgresAttachmentCleanupMigratesAndTransfersCurrentSession(t *testing.T) {

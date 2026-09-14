@@ -899,6 +899,13 @@ func TestCreateAutomationTask_DoesNotLaunchWhenTheRunCannotBeRecorded(t *testing
 // from every board and list by its origin, so one left behind with no run
 // pointing at it is invisible, unfinalizable, and holds a concurrency slot
 // nobody can see or clear.
+
+type taskLifecycleDeleterFunc func(context.Context, string) error
+
+func (f taskLifecycleDeleterFunc) DeleteTaskWithLifecycle(ctx context.Context, id string) error {
+	return f(ctx, id)
+}
+
 func TestCreateAutomationTask_DeletesTheTaskWhenTheRunCannotBeRecorded(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)
@@ -914,6 +921,9 @@ func TestCreateAutomationTask_DeletesTheTaskWhenTheRunCannotBeRecorded(t *testin
 		recordRunErr: errors.New("disk full"),
 	}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), newMockTaskRepo(), &mockAgentManager{})
+	svc.SetTaskLifecycleDeleter(taskLifecycleDeleterFunc(func(ctx context.Context, id string) error {
+		return repo.DeleteTask(ctx, id)
+	}))
 	svc.SetAutomationService(autoSvc)
 	svc.reviewTaskCreator = creator
 

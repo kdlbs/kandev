@@ -134,6 +134,19 @@ export interface PluginSettings {
  */
 export type MarketplaceInstallState = "available" | "installed" | "update_available";
 
+export interface MarketplacePreview {
+  url: string;
+  alt: string;
+}
+
+export interface MarketplacePermissions {
+  reads?: string[];
+  writes?: string[];
+  events?: string[];
+  shared_state?: boolean;
+  external_origins?: string[];
+}
+
 /**
  * One plugin in the marketplace catalog: the published index entry annotated
  * with the source it came from and its install state. Mirrors
@@ -141,6 +154,7 @@ export type MarketplaceInstallState = "available" | "installed" | "update_availa
  */
 export interface MarketplaceEntry {
   id: string;
+  kind?: "plugin" | "canvas";
   name: string;
   description: string;
   author: string;
@@ -150,8 +164,11 @@ export interface MarketplaceEntry {
   repo_url: string;
   version: string;
   min_kandev_version: string;
+  license?: string;
   package_url: string;
   package_sha256: string;
+  previews?: MarketplacePreview[];
+  permissions?: MarketplacePermissions;
   /** Null when the registry couldn't read the repo's star count. */
   stars: number | null;
   updated_at: string;
@@ -182,6 +199,7 @@ export interface MarketplaceSource {
 /** The merged, deduped catalog across all enabled sources. */
 export interface MarketplaceCatalog {
   plugins: MarketplaceEntry[];
+  canvases?: MarketplaceEntry[];
   sources: MarketplaceSource[];
 }
 
