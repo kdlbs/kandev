@@ -2,9 +2,9 @@ package gitlab
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
+
+	dbutil "github.com/kandev/kandev/internal/db"
 )
 
 var gitlabTaskOwnedTables = []string{
@@ -17,7 +17,7 @@ var gitlabTaskOwnedTables = []string{
 // DeleteTaskMRsByTaskID removes every contribution association owned by a
 // hard-deleted task. It is safe to replay after a missed event.
 func (s *Store) DeleteTaskMRsByTaskID(ctx context.Context, taskID string) (int64, error) {
-	result, err := s.db.ExecContext(ctx, `DELETE FROM gitlab_task_mrs WHERE task_id = ?`, taskID)
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM gitlab_task_mrs WHERE task_id = ?`), taskID)
 	if err != nil {
 		return 0, err
 	}
@@ -35,7 +35,7 @@ func (s *Store) DeleteTaskOwnedStateByTaskID(ctx context.Context, taskID string)
 
 	var deleted int64
 	for _, table := range gitlabTaskOwnedTables {
-		result, err := tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE task_id = ?`, taskID)
+		result, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM `+table+` WHERE task_id = ?`), taskID)
 		if err != nil {
 			return 0, fmt.Errorf("delete task-owned rows from %s: %w", table, err)
 		}
@@ -52,13 +52,12 @@ func (s *Store) DeleteTaskOwnedStateByTaskID(ctx context.Context, taskID string)
 }
 
 func (s *Store) healTaskOwnedOrphans() error {
-	var exists int
-	err := s.db.Get(&exists, `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'tasks'`)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil // tasks table not yet created — skip sweep
-	}
+	exists, err := dbutil.TableExists(s.db, "tasks")
 	if err != nil {
 		return err
+	}
+	if !exists {
+		return nil // tasks table not yet created — skip sweep
 	}
 	tx, err := s.db.Beginx()
 	if err != nil {

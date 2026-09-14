@@ -4,6 +4,7 @@ import (
 	"context"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/office/models"
 )
@@ -224,6 +225,83 @@ func TestListChildStates(t *testing.T) {
 	}
 }
 
+func TestListWaveMembers(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	insertTask(t, repo, ctx, "parent-1", "ws-1", "Parent Task", "", "")
+	insertTask(t, repo, ctx, "child-ordinary", "ws-1", "Ordinary", "", "")
+	insertTask(t, repo, ctx, "child-archived", "ws-1", "Archived", "", "")
+	insertTask(t, repo, ctx, "child-ephemeral", "ws-1", "Ephemeral", "", "")
+	insertTask(t, repo, ctx, "child-automation", "ws-1", "Automation", "", "")
+	if _, err := repo.ExecRaw(ctx, `
+		UPDATE tasks SET parent_id = 'parent-1', state = 'COMPLETED'
+		WHERE id IN ('child-ordinary', 'child-archived', 'child-ephemeral', 'child-automation')
+	`); err != nil {
+		t.Fatalf("set parent: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx, `
+		UPDATE tasks SET archived_at = datetime('now') WHERE id = 'child-archived'
+	`); err != nil {
+		t.Fatalf("archive child: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx, `
+		UPDATE tasks SET is_ephemeral = 1 WHERE id = 'child-ephemeral'
+	`); err != nil {
+		t.Fatalf("mark ephemeral: %v", err)
+	}
+	if _, err := repo.ExecRaw(ctx, `
+		UPDATE tasks SET origin = 'automation_run' WHERE id = 'child-automation'
+	`); err != nil {
+		t.Fatalf("mark automation origin: %v", err)
+	}
+
+	members, err := repo.ListWaveMembers(ctx, "parent-1")
+	if err != nil {
+		t.Fatalf("ListWaveMembers: %v", err)
+	}
+	if len(members) != 1 || members[0].TaskID != "child-ordinary" {
+		t.Fatalf("ListWaveMembers = %+v, want only child-ordinary", members)
+	}
+	if members[0].State != "COMPLETED" {
+		t.Errorf("state = %q, want COMPLETED", members[0].State)
+	}
+
+	empty, err := repo.ListWaveMembers(ctx, "missing-parent")
+	if err != nil {
+		t.Fatalf("ListWaveMembers empty: %v", err)
+	}
+	if empty == nil {
+		t.Fatal("empty wave-member result is nil")
+	}
+	if len(empty) != 0 {
+		t.Fatalf("empty wave-member count = %d, want 0", len(empty))
+	}
+}
+
+func TestListWaveMembers_OrdersAscendingByID(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	ctx := context.Background()
+
+	insertTask(t, repo, ctx, "parent-1", "ws-1", "Parent Task", "", "")
+	insertTask(t, repo, ctx, "child-z", "ws-1", "Child Z", "", "")
+	insertTask(t, repo, ctx, "child-a", "ws-1", "Child A", "", "")
+	if _, err := repo.ExecRaw(ctx, `
+		UPDATE tasks SET parent_id = 'parent-1', state = 'COMPLETED'
+		WHERE id IN ('child-z', 'child-a')
+	`); err != nil {
+		t.Fatalf("set parent: %v", err)
+	}
+
+	members, err := repo.ListWaveMembers(ctx, "parent-1")
+	if err != nil {
+		t.Fatalf("ListWaveMembers: %v", err)
+	}
+	if len(members) != 2 || members[0].TaskID != "child-a" || members[1].TaskID != "child-z" {
+		t.Fatalf("ListWaveMembers = %+v, want [child-a child-z]", members)
+	}
+}
+
 func TestListBlockersForTasks(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()
@@ -325,5 +403,90 @@ func TestTaskBlocker_SelfReferenceBlocked(t *testing.T) {
 	}
 	if err := repo.CreateTaskBlocker(ctx, blocker); err == nil {
 		t.Fatal("expected CHECK constraint error for self-reference")
+	}
+}
+
+func TestReplaceTaskBlockers_ReplacesSetAndPreservesExistingEdges(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	for _, blocker := range []*models.TaskBlocker{
+		{TaskID: "task-1", BlockerTaskID: "task-2"},
+		{TaskID: "task-1", BlockerTaskID: "task-4"},
+	} {
+		if err := repo.CreateTaskBlocker(ctx, blocker); err != nil {
+			t.Fatalf("create blocker: %v", err)
+		}
+	}
+	before, err := repo.ListTaskBlockers(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list before replacement: %v", err)
+	}
+	if len(before) != 2 {
+		t.Fatalf("before replacement count = %d, want 2", len(before))
+	}
+	var preservedCreatedAt = before[0].CreatedAt
+	for _, blocker := range before {
+		if blocker.BlockerTaskID == "task-2" {
+			preservedCreatedAt = blocker.CreatedAt
+		}
+	}
+
+	if err := repo.ReplaceTaskBlockers(ctx, "task-1", []string{"task-2", "task-3"}); err != nil {
+		t.Fatalf("replace blockers: %v", err)
+	}
+
+	after, err := repo.ListTaskBlockers(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list after replacement: %v", err)
+	}
+	if len(after) != 2 {
+		t.Fatalf("after replacement count = %d, want 2", len(after))
+	}
+	got := make(map[string]time.Time, len(after))
+	for _, blocker := range after {
+		got[blocker.BlockerTaskID] = blocker.CreatedAt
+	}
+	if _, ok := got["task-4"]; ok {
+		t.Error("omitted blocker task-4 remains after replacement")
+	}
+	if got["task-2"] != preservedCreatedAt {
+		t.Errorf("preserved task-2 timestamp changed from %v to %v", preservedCreatedAt, got["task-2"])
+	}
+	if got["task-3"].IsZero() {
+		t.Error("new task-3 blocker has no created timestamp")
+	}
+
+	if err := repo.ReplaceTaskBlockers(ctx, "task-1", nil); err != nil {
+		t.Fatalf("clear blockers: %v", err)
+	}
+	cleared, err := repo.ListTaskBlockers(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list after clear: %v", err)
+	}
+	if len(cleared) != 0 {
+		t.Fatalf("after clear count = %d, want 0", len(cleared))
+	}
+}
+
+func TestReplaceTaskBlockers_RollsBackPartialDiffOnWriteError(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	if err := repo.CreateTaskBlocker(ctx, &models.TaskBlocker{
+		TaskID: "task-1", BlockerTaskID: "task-2",
+	}); err != nil {
+		t.Fatalf("create blocker: %v", err)
+	}
+
+	if err := repo.ReplaceTaskBlockers(ctx, "task-1", []string{"task-3", "task-1"}); err == nil {
+		t.Fatal("expected self-reference write to fail")
+	}
+
+	blockers, err := repo.ListTaskBlockers(ctx, "task-1")
+	if err != nil {
+		t.Fatalf("list after failed replacement: %v", err)
+	}
+	if len(blockers) != 1 || blockers[0].BlockerTaskID != "task-2" {
+		t.Fatalf("failed replacement changed the set: %+v", blockers)
 	}
 }

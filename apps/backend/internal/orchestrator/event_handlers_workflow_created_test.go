@@ -324,3 +324,302 @@ func TestHandleTaskCreated(t *testing.T) {
 		svc.handleTaskCreated(ctx, watcher.TaskEventData{TaskID: "nonexistent"})
 	})
 }
+
+// TestReconcileTaskLifecycleTokensRecoversAutoStartOnCreate covers the
+// greptile-flagged gap on PR #2967 (review thread PRRT_kwDOQ2-eWs6bh_fo,
+// comment r3839544092): when handleTaskCreated's GetTask call fails
+// transiently, it returns before ever reaching claimTaskEventMetadata, so
+// MetaKeyAutoStartOnCreate is never claimed. task.created is a one-shot
+// watcher event with no redelivery, so without this recovery path the task
+// would carry the opt-in forever with no session and no way to retry.
+//
+// This test never calls handleTaskCreated directly — that IS the simulated
+// lost delivery. It seeds a task carrying the opt-in exactly as
+// CreateOfficeTaskInWorkflow would leave it if the live handler never ran,
+// then drives recovery entirely through reconcileTaskLifecycleTokens, the
+// startup sweep.
+func TestReconcileTaskLifecycleTokensRecoversAutoStartOnCreate(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+	requireNoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}))
+	requireNoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}))
+
+	metadata := map[string]interface{}{
+		models.MetaKeyAutoStartOnCreate: true,
+		models.MetaKeyAgentProfileID:    "routine-assignee",
+	}
+	requireNoError(t, repo.CreateTask(ctx, &models.Task{
+		ID:             "t-lost-delivery",
+		WorkspaceID:    "ws1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: "step1",
+		Title:          "Routine run",
+		Description:    "prompt",
+		State:          v1.TaskStateCreated,
+		Metadata:       metadata,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}))
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Routine Start", Position: 0,
+		Events: wfmodels.StepEvents{
+			OnEnter: []wfmodels.OnEnterAction{
+				{Type: wfmodels.OnEnterAutoStartAgent},
+			},
+		},
+	}
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t-lost-delivery"] = &v1.Task{
+		ID:          "t-lost-delivery",
+		WorkspaceID: "ws1",
+		WorkflowID:  "wf1",
+		Description: "prompt",
+		State:       v1.TaskStateCreated,
+		Metadata:    metadata,
+	}
+	launched := make(chan string, 1)
+	agentMgr := &mockAgentManager{
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			agentProfileID, _ := req.Metadata[models.MetaKeyAgentProfileID].(string)
+			launched <- agentProfileID
+			return &executor.LaunchAgentResponse{AgentExecutionID: "exec-1"}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, agentMgr)
+
+	svc.reconcileTaskLifecycleTokens(ctx)
+
+	select {
+	case got := <-launched:
+		if got != "routine-assignee" {
+			t.Fatalf("AgentProfileID = %q, want routine-assignee", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the startup sweep to recover the lost task.created delivery")
+	}
+
+	reloaded, err := repo.GetTask(ctx, "t-lost-delivery")
+	requireNoError(t, err)
+	if models.HasAutoStartOnCreateIntent(reloaded.Metadata) {
+		t.Fatal("MetaKeyAutoStartOnCreate still present after recovery; the next startup sweep would re-launch the same task")
+	}
+}
+
+// TestReconcileTaskLifecycleTokensSkipsAutoStartWhenSessionExists covers the
+// review finding that the create-time opt-in is NOT proof that no launch
+// happened. MetaKeyAutoStartOnCreate is claimed by exactly one function,
+// handleTaskCreated. Every other launch path — a manual StartTask, task.moved
+// auto-start, handleTaskQueuePromoted — starts a task without touching the
+// key. So once a task.created delivery is lost (the very failure this sweep
+// exists to repair), an operator starting the task by hand leaves the token in
+// place, and the next startup would replay it against a task that is already
+// running or already finished. Neither autoStartTaskForStep nor startTask has
+// an existing-session guard, so that second launch goes all the way through to
+// a real agent that can write, commit, and open a PR.
+//
+// seedSession creates the task WITH a session, which is the state the operator
+// workaround leaves behind. Asserting on GetStepCalls() (see this file's
+// header) is the race-free way to prove autoStartTaskForStep was never entered.
+func TestReconcileTaskLifecycleTokensSkipsAutoStartWhenSessionExists(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t-already-started", "s-existing", "step1")
+
+	metadata := map[string]interface{}{
+		models.MetaKeyAutoStartOnCreate: true,
+		models.MetaKeyAgentProfileID:    "routine-assignee",
+	}
+	task, err := repo.GetTask(ctx, "t-already-started")
+	requireNoError(t, err)
+	task.Metadata = metadata
+	task.WorkflowStepID = "step1"
+	requireNoError(t, repo.UpdateTask(ctx, task))
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Routine Start", Position: 0,
+		Events: wfmodels.StepEvents{
+			OnEnter: []wfmodels.OnEnterAction{
+				{Type: wfmodels.OnEnterAutoStartAgent},
+			},
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t-already-started"] = &v1.Task{
+		ID:          "t-already-started",
+		WorkspaceID: "ws1",
+		WorkflowID:  "wf1",
+		Description: "Test",
+		State:       v1.TaskStateInProgress,
+		Metadata:    metadata,
+	}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, &mockAgentManager{})
+
+	svc.reconcileTaskLifecycleTokens(ctx)
+
+	if calls := stepGetter.GetStepCalls(); calls != 0 {
+		t.Fatalf("GetStepCalls() = %d, want 0 (the sweep must not replay the opt-in on a task that already has a session)", calls)
+	}
+	reloaded, err := repo.GetTask(ctx, "t-already-started")
+	requireNoError(t, err)
+	if _, present := reloaded.Metadata[models.MetaKeyAutoStartOnCreate]; present {
+		t.Fatal("MetaKeyAutoStartOnCreate survived the sweep; the token is spent once the task has a session, so leaving it makes every future startup re-scan this row forever")
+	}
+}
+
+// TestRecoverTaskLifecycleAttemptDoesNotRetryUnactionableAutoStart covers the
+// review finding that the sweep's notion of "pending" was broader than
+// handleTaskCreated's notion of "actionable". The sweep lists by metadata-key
+// EXISTENCE, but handleTaskCreated requires a positive bool AND a non-office
+// task, and it returns BEFORE claiming the key in both of those cases.
+//
+// A row the handler refuses therefore kept its key forever, and
+// recoverTaskLifecycleAttempt reported "still pending, retry" on every pass:
+// the full attempt budget was burned on every startup, and the row was listed
+// again on the next one, indefinitely. Every other key in this sweep is
+// cleared by its handler, so this was the first token class that could never
+// drain — the exact failure mode
+// docs/specs/startup-listener-before-recovery/spec.md attributes a
+// non-converging boot loop to.
+//
+// A false return means "do not retry". The key is deliberately left in place:
+// the sweep declines to act on it, but discarding another subsystem's durable
+// metadata is not this recovery path's call to make.
+func TestRecoverTaskLifecycleAttemptDoesNotRetryUnactionableAutoStart(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+	requireNoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}))
+	requireNoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}))
+
+	cases := []struct {
+		name      string
+		taskID    string
+		projectID string
+		value     interface{}
+	}{
+		// IsFromOffice is a read-time projection that is true whenever
+		// project_id is non-empty, and CreateOfficeTaskInWorkflow — the only
+		// production setter of this key — writes a caller-supplied projectID
+		// straight onto the task. Today's single caller passes "", so the
+		// non-office property holds by convention, not by construction.
+		{name: "office task", taskID: "t-office", projectID: "proj-1", value: true},
+		// HasAutoStartOnCreateIntent requires an explicit true; a false value
+		// is a row the handler will never act on.
+		{name: "non-positive opt-in", taskID: "t-false", projectID: "", value: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			metadata := map[string]interface{}{
+				models.MetaKeyAutoStartOnCreate: tc.value,
+				models.MetaKeyAgentProfileID:    "routine-assignee",
+			}
+			requireNoError(t, repo.CreateTask(ctx, &models.Task{
+				ID:             tc.taskID,
+				WorkspaceID:    "ws1",
+				WorkflowID:     "wf1",
+				WorkflowStepID: "step1",
+				ProjectID:      tc.projectID,
+				Title:          "Routine run",
+				Description:    "prompt",
+				State:          v1.TaskStateCreated,
+				Metadata:       metadata,
+				CreatedAt:      now,
+				UpdatedAt:      now,
+			}))
+
+			stepGetter := newMockStepGetter()
+			stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+				ID: "step1", WorkflowID: "wf1", Name: "Routine Start", Position: 0,
+				Events: wfmodels.StepEvents{
+					OnEnter: []wfmodels.OnEnterAction{
+						{Type: wfmodels.OnEnterAutoStartAgent},
+					},
+				},
+			}
+			taskRepo := newMockTaskRepo()
+			taskRepo.tasks[tc.taskID] = &v1.Task{
+				ID: tc.taskID, WorkspaceID: "ws1", WorkflowID: "wf1",
+				Description: "prompt", State: v1.TaskStateCreated, Metadata: metadata,
+			}
+			svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, &mockAgentManager{})
+
+			if svc.recoverTaskLifecycleAttempt(ctx, tc.taskID) {
+				t.Fatal("recoverTaskLifecycleAttempt reported retry for a task handleTaskCreated will never act on; the token can never be cleared, so this burns the attempt budget on every startup and the row is re-listed on the next one, forever")
+			}
+			if calls := stepGetter.GetStepCalls(); calls != 0 {
+				t.Fatalf("GetStepCalls() = %d, want 0 (recovery must not enter autoStartTaskForStep for an unactionable row)", calls)
+			}
+			reloaded, err := repo.GetTask(ctx, tc.taskID)
+			requireNoError(t, err)
+			if _, present := reloaded.Metadata[models.MetaKeyAutoStartOnCreate]; !present {
+				t.Fatal("recovery discarded the opt-in; declining to act on a row must not silently delete another subsystem's durable metadata")
+			}
+		})
+	}
+}
+
+// TestRecoverAutoStartOnCreatePreservesTokenOnSessionListError covers the
+// ListTaskSessions error branch in recoverAutoStartOnCreate: a transient
+// repo failure there must leave MetaKeyAutoStartOnCreate in place and report
+// "retry" rather than either discarding the token (which would silently
+// abandon the recovery) or falling through to handleTaskCreated (which could
+// launch a second agent onto a task the failed lookup couldn't rule out as
+// already running).
+func TestRecoverAutoStartOnCreatePreservesTokenOnSessionListError(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+	requireNoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws1", Name: "Test", CreatedAt: now, UpdatedAt: now}))
+	requireNoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf1", WorkspaceID: "ws1", Name: "WF", CreatedAt: now, UpdatedAt: now}))
+
+	metadata := map[string]interface{}{
+		models.MetaKeyAutoStartOnCreate: true,
+		models.MetaKeyAgentProfileID:    "routine-assignee",
+	}
+	requireNoError(t, repo.CreateTask(ctx, &models.Task{
+		ID:             "t-list-error",
+		WorkspaceID:    "ws1",
+		WorkflowID:     "wf1",
+		WorkflowStepID: "step1",
+		Title:          "Routine run",
+		Description:    "prompt",
+		State:          v1.TaskStateCreated,
+		Metadata:       metadata,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}))
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step1"] = &wfmodels.WorkflowStep{
+		ID: "step1", WorkflowID: "wf1", Name: "Routine Start", Position: 0,
+		Events: wfmodels.StepEvents{
+			OnEnter: []wfmodels.OnEnterAction{
+				{Type: wfmodels.OnEnterAutoStartAgent},
+			},
+		},
+	}
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t-list-error"] = &v1.Task{
+		ID: "t-list-error", WorkspaceID: "ws1", WorkflowID: "wf1",
+		Description: "prompt", State: v1.TaskStateCreated, Metadata: metadata,
+	}
+	svc := createTestServiceWithScheduler(repo, stepGetter, taskRepo, &mockAgentManager{})
+	svc.repo = listTaskSessionsErrorRepo{sessionExecutorStore: svc.repo}
+
+	if !svc.recoverTaskLifecycleAttempt(ctx, "t-list-error") {
+		t.Fatal("recoverTaskLifecycleAttempt reported no retry after a ListTaskSessions error; a transient lookup failure must stay retryable, not be treated as resolved")
+	}
+	if calls := stepGetter.GetStepCalls(); calls != 0 {
+		t.Fatalf("GetStepCalls() = %d, want 0 (a failed session lookup must not fall through to a launch attempt)", calls)
+	}
+	reloaded, err := repo.GetTask(ctx, "t-list-error")
+	requireNoError(t, err)
+	if _, present := reloaded.Metadata[models.MetaKeyAutoStartOnCreate]; !present {
+		t.Fatal("MetaKeyAutoStartOnCreate was discarded despite the session lookup failing; a token that could not be verified as spent must survive for the next attempt")
+	}
+}

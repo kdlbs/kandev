@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, renderHook } from "@testing-library/react";
+import {
+  beginTaskRemoval,
+  createTaskRemovalState,
+  type TaskRemovalState,
+} from "@/lib/state/task-removal";
 
 const mockEnsureTaskSession = vi.fn();
 const mockLoadSessions = vi.fn().mockResolvedValue(undefined);
@@ -26,10 +31,12 @@ let mockStoreState: {
       { steps: Array<{ id: string; position: number }>; isPlaceholder?: boolean }
     >;
   };
+  taskRemoval?: TaskRemovalState;
 } = {
   userSettings: { preventAutoStartAgentOnOpen: false },
   kanban: { workflowId: "wf-active", steps: [], isLoading: false },
   kanbanMulti: { snapshots: {} },
+  taskRemoval: undefined,
 };
 
 vi.mock("@/lib/services/session-launch-service", () => ({
@@ -64,6 +71,7 @@ function resetEnsureTaskSessionMocks() {
     userSettings: { preventAutoStartAgentOnOpen: false },
     kanban: { workflowId: "wf-active", steps: [], isLoading: false },
     kanbanMulti: { snapshots: {} },
+    taskRemoval: undefined,
   };
   mockEnsureTaskSession.mockResolvedValue({
     success: true,
@@ -117,6 +125,21 @@ describe("useEnsureTaskSession", () => {
     expect(mockEnsureTaskSession).not.toHaveBeenCalled();
   });
 
+  it("does not dispatch ensure while the task is pending removal", () => {
+    mockStoreState.taskRemoval = beginTaskRemoval(createTaskRemovalState(), {
+      token: "removal-1",
+      action: "delete",
+      workspaceId: "workspace-1",
+      taskIds: ["task-1"],
+      requestIds: ["task-1"],
+      departure: null,
+    })!;
+
+    renderHook(() => useEnsureTaskSession(TASK));
+
+    expect(mockEnsureTaskSession).not.toHaveBeenCalled();
+  });
+
   it("no-ops when task id is missing", () => {
     renderHook(() => useEnsureTaskSession(null));
     expect(mockEnsureTaskSession).not.toHaveBeenCalled();
@@ -150,6 +173,60 @@ describe("useEnsureTaskSession", () => {
     expect(mockEnsureTaskSession).toHaveBeenCalledTimes(2);
     await flushMicrotasks();
     expect(result.current.status).toBe("idle");
+  });
+
+  // @covers AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001.7
+  // @covers AC-TASKS-TASK-LAUNCH-FAILURE-RECOVERY-001.8
+  it("keeps a failed ensure latched until the user retries", async () => {
+    mockEnsureTaskSession.mockRejectedValue(new Error("workspace is not attachable"));
+    const { result, rerender } = renderHook(() => useEnsureTaskSession(TASK));
+
+    await flushMicrotasks();
+    expect(mockEnsureTaskSession).toHaveBeenCalledTimes(1);
+
+    mockSessionsResult = {
+      ...mockSessionsResult,
+      loadSessions: vi.fn().mockResolvedValue(undefined),
+    };
+    rerender();
+    await flushMicrotasks();
+    expect(mockEnsureTaskSession).toHaveBeenCalledTimes(1);
+
+    act(() => result.current.retry());
+    expect(mockEnsureTaskSession).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("useEnsureTaskSession failed gate changes", () => {
+  beforeEach(resetEnsureTaskSessionMocks);
+
+  it("keeps a failed ensure latched when the final-step gate changes", async () => {
+    mockStoreState = {
+      userSettings: { preventAutoStartAgentOnOpen: true },
+      kanban: {
+        workflowId: "wf-active",
+        steps: [
+          { id: "step-1", position: 0 },
+          { id: "step-done", position: 1 },
+        ],
+        isLoading: false,
+      },
+      kanbanMulti: { snapshots: {} },
+    };
+    mockEnsureTaskSession.mockRejectedValue(new Error("workspace is not attachable"));
+    const { rerender } = renderHook(() =>
+      useEnsureTaskSession({ id: "task-1", workflowStepId: "step-1", workflowId: "wf-active" }),
+    );
+
+    await flushMicrotasks();
+    expect(mockEnsureTaskSession).toHaveBeenCalledTimes(1);
+    expect(mockEnsureTaskSession).toHaveBeenCalledWith("task-1", undefined);
+
+    mockStoreState.kanban.steps = [{ id: "step-1", position: 0 }];
+    rerender();
+    await flushMicrotasks();
+
+    expect(mockEnsureTaskSession).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ensureTaskSession } from "@/lib/services/session-launch-service";
 import { useTaskSessions } from "@/hooks/use-task-sessions";
 import { useAppStore } from "@/components/state-provider";
+import { taskRemovalCoversTask } from "@/lib/state/task-removal";
 
 /** Minimal task shape consumed by useEnsureTaskSession. */
 export type EnsureTaskInput = {
@@ -154,6 +155,9 @@ export function useEnsureTaskSession(
   const kanbanSteps = useAppStore((state) => state.kanban.steps);
   const kanbanLoading = useAppStore((state) => state.kanban.isLoading === true);
   const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
+  const isRemovalPending = useAppStore((state) =>
+    taskId && state.taskRemoval ? taskRemovalCoversTask(state.taskRemoval, taskId) : false,
+  );
 
   const { isFinalStep, stepsKnown } = useMemo(
     () =>
@@ -163,7 +167,7 @@ export function useEnsureTaskSession(
     [preventAutoStart, task, kanbanWorkflowId, kanbanSteps, kanbanLoading, snapshots],
   );
 
-  // Latch keyed by `${taskId}:${retryToken}` so a re-mount on the same task
+  // Latch keyed by `${taskId}:${retryToken}` so a re-render on the same task
   // doesn't refire, but switching tasks or calling retry() does.
   const launchedKeyRef = useRef<string | null>(null);
   const previousTaskIdRef = useRef<string | null>(taskId);
@@ -180,13 +184,13 @@ export function useEnsureTaskSession(
 
   /* eslint-disable react-hooks/set-state-in-effect -- ensuring a session is a side effect; status mirrors that external work */
   useEffect(() => {
-    if (!enabled || !taskId || !isLoaded) return;
+    if (!enabled || !taskId || !isLoaded || isRemovalPending) return;
     if (sessions.length > 0) return;
     // Wait for the workflow steps to resolve before deciding the gate. This
     // branch does NOT latch, so a later steps hydration re-runs the effect
     // with the correct isFinalStep value (fixes late-hydration auto-start).
     if (preventAutoStart && !stepsKnown) return;
-    const key = `${taskId}:${retryToken}:${isFinalStep ? "gated" : "plain"}`;
+    const key = `${taskId}:${retryToken}`;
     if (launchedKeyRef.current === key) return;
     launchedKeyRef.current = key;
 
@@ -209,7 +213,7 @@ export function useEnsureTaskSession(
         if (cancelled || launchedKeyRef.current !== key) return;
         setStatus("error");
         setError(err instanceof Error ? err : new Error(String(err)));
-        launchedKeyRef.current = null;
+        // Keep the key latched. The retry token or a task change owns the next attempt.
       });
 
     return () => {
@@ -225,6 +229,7 @@ export function useEnsureTaskSession(
     preventAutoStart,
     stepsKnown,
     isFinalStep,
+    isRemovalPending,
   ]);
   /* eslint-enable react-hooks/set-state-in-effect */
 

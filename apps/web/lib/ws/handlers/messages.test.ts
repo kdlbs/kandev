@@ -297,6 +297,7 @@ describe("session message pending-action projection", () => {
       SESSION_ID,
       "clarification",
       pendingRevision(1),
+      "task-1",
     );
 
     registration.handlers["session.message.updated"]!({
@@ -314,6 +315,7 @@ describe("session message pending-action projection", () => {
       SESSION_ID,
       null,
       pendingRevision(2),
+      "task-1",
     );
     registration.dispose();
   });
@@ -344,6 +346,7 @@ describe("session message pending-action projection", () => {
       SESSION_ID,
       "permission",
       pendingRevision(3),
+      "task-1",
     );
     registration.dispose();
   });
@@ -368,7 +371,12 @@ describe("session message deleted pending-action projection", () => {
     });
 
     expect(removeMessage).toHaveBeenCalledWith(SESSION_ID, QUESTION_ID);
-    expect(setTaskSessionPendingAction).toHaveBeenCalledWith(SESSION_ID, null, pendingRevision(4));
+    expect(setTaskSessionPendingAction).toHaveBeenCalledWith(
+      SESSION_ID,
+      null,
+      pendingRevision(4),
+      "task-1",
+    );
     registration.dispose();
   });
 });

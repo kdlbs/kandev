@@ -5,7 +5,7 @@ import type { DockviewPanelApi } from "dockview-react";
 import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 
 /**
- * Tracks whether the dockview panel identified by panelId is the active tab
+ * Tracks whether the dockview panel identified by panelId is the visible tab
  * in its dockview group. Portal-hosted panel content (see
  * `lib/layout/panel-portal-manager.ts`) stays mounted while its tab is
  * inactive — e.g. the Chat tab keeps running behind an active Files/Changes
@@ -19,8 +19,10 @@ import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
  * renders, so the entry is virtually always present by the time this runs.
  * Subscribes to both the manager's own add/remove notifications (a panel
  * acquired after this hook's first mount, or released while it stays
- * mounted) and the panel's own `onDidActiveChange` (tab switches within an
- * existing group).
+ * mounted) and the panel's own `onDidVisibilityChange` (tab switches within
+ * an existing group). Dockview's `isActive` also requires the panel's group
+ * to own global focus, so it is not a valid proxy for whether the panel is
+ * rendered on screen beside another focused group.
  *
  * Only for dockview-hosted panels — pass the panel's real id. Defaults to
  * `false` until a portal entry/api is actually registered for it, rather
@@ -34,7 +36,7 @@ import { panelPortalManager } from "@/lib/layout/panel-portal-manager";
 export function usePanelActive(panelId: string): boolean {
   const subscribe = useCallback(
     (onStoreChange: () => void) => {
-      // Tracks which api our onDidActiveChange listener is currently bound
+      // Tracks which api our onDidVisibilityChange listener is currently bound
       // to, so a manager notification (panel acquired/released/remounted
       // anywhere) can detect when *this* panelId's api was replaced —
       // Dockview does this during a layout restore/switch — and rebind
@@ -47,7 +49,7 @@ export function usePanelActive(panelId: string): boolean {
         if (api === boundApi) return;
         disposable?.dispose();
         boundApi = api;
-        disposable = api?.onDidActiveChange(onStoreChange) ?? null;
+        disposable = api?.onDidVisibilityChange(onStoreChange) ?? null;
       };
 
       rebindIfApiChanged();
@@ -63,7 +65,7 @@ export function usePanelActive(panelId: string): boolean {
     [panelId],
   );
   const getSnapshot = useCallback(
-    () => panelPortalManager.get(panelId)?.api?.isActive ?? false,
+    () => panelPortalManager.get(panelId)?.api?.isVisible ?? false,
     [panelId],
   );
   return useSyncExternalStore(subscribe, getSnapshot, () => false);

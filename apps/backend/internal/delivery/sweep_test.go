@@ -131,6 +131,50 @@ func TestSelectDuePairs_InputMovementReselects(t *testing.T) {
 	}
 }
 
+func TestSelectDuePairs_SeesSnapshotWithoutCaptureSessions(t *testing.T) {
+	repo, db := newTestRepo(t)
+	seedWorkspace(t, db, "ws-1")
+	seedRepository(t, db, "repo-1", "ws-1")
+	seedTask(t, db, "task-1", "ws-1")
+	now := time.Now().UTC()
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_environments (id, task_id, status, workspace_path, created_at, updated_at)
+		VALUES ('env-sweep-without-sessions', 'task-1', 'ready', '/workspace/sweep-without-sessions', ?, ?)
+	`), now, now); err != nil {
+		t.Fatalf("seed task environment: %v", err)
+	}
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_environment_repos (id, task_environment_id, repository_id, status, created_at, updated_at)
+		VALUES ('env-repo-sweep-without-sessions', 'env-sweep-without-sessions', 'repo-1', 'active', ?, ?)
+	`), now, now); err != nil {
+		t.Fatalf("seed environment repository: %v", err)
+	}
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_session_git_snapshots (
+			id, task_environment_id, session_id, snapshot_type, branch, head_commit, metadata, created_at
+		) VALUES ('snap-sweep-without-session', 'env-sweep-without-sessions', NULL, 'test', 'feature', 'abcd', ?, ?)
+	`), `{"repository_name":"repo-1"}`, now); err != nil {
+		t.Fatalf("seed environment snapshot: %v", err)
+	}
+	old := now.Add(-time.Hour)
+	backdateRepoAndTask(t, db, "repo-1", "task-1", old.Add(-time.Hour))
+	if _, err := repo.Upsert(context.Background(), delivery.UpsertInput{
+		TaskID: "task-1", RepositoryID: "repo-1", WorkspaceID: "ws-1",
+		Classification: delivery.Classification{
+			Outcome: delivery.OutcomeUnknown, Basis: delivery.BasisNoObservations, Rank: 2,
+		},
+		EvaluatedAt: old,
+	}); err != nil {
+		t.Fatalf("upsert: %v", err)
+	}
+
+	due, _, _ := repo.SelectDuePairs(context.Background(),
+		[]delivery.CandidatePair{{TaskID: "task-1", RepositoryID: "repo-1"}}, now)
+	if len(due) != 1 {
+		t.Fatalf("due = %+v, want the environment snapshot to move the pair", due)
+	}
+}
+
 func TestSelectDuePairs_StaleRefreshWhileReachedDefaultIsNull(t *testing.T) {
 	repo, db := newTestRepo(t)
 	seedWorkspace(t, db, "ws-1")

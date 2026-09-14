@@ -1,13 +1,14 @@
 ---
 title: "Authentication & Users"
 description: "Enable opt-in authentication, manage users and invites, and use personal access tokens on a shared Kandev server."
+status: experimental
 ---
 
 # Authentication & Users
 
 Kandev ships as a single-user local tool with authentication **disabled**: nothing changes for laptop installs. When several people share one Kandev server, enable authentication to give each person their own account and their own private workspaces.
 
-Authentication is a **runtime feature toggle**: the same system as the other feature flags, so there is no separate "Authentication" configuration page.
+Authentication is an **experimental runtime feature toggle** and is disabled in every shipped profile. It uses the same system as the other feature flags, so there is no separate "Authentication" configuration page.
 
 ## Quick checklist
 
@@ -20,10 +21,14 @@ Authentication is a **runtime feature toggle**: the same system as the other fea
 ## What changes when authentication is on
 
 - Everyone signs in with email + password. Browser sessions last 30 days (sliding) and can be revoked from `Settings > Account`. The signed-in user is shown in the bottom-left of the sidebar, with a log-out menu.
-- **Workspaces become per-user.** You only see workspaces you own, including their tasks, sessions, repositories, terminals, previews, and live updates. Existing data is assigned to the admin created during setup.
+- **Workspaces become per-user by default.** You only see workspaces you own, including their tasks, sessions, repositories, terminals, previews, and live updates. Existing data is assigned to the admin created during setup. A workspace can then be shared with colleagues on purpose: see [Team Access](team-access.md).
 - Secrets are per-user. A **Global** secret is user-global across that user's workspaces; a **Workspace** secret belongs to one of their workspaces. With authentication disabled, Global is install-global. Executors and agent profiles remain shared across the instance, so they can reference Global secrets only; repositories may bind Global or same-workspace secrets.
-- Admins manage users and instance settings, but do **not** see other users' workspaces.
+- With Organizations off, admins manage users and instance settings but do **not** see other users' private workspaces. With Organizations on, org admins manage organization-scoped resources and the separate instance operator manages organizations; neither role grants workspace visibility. The experimental multi-org path still has tenant-boundary gaps in user and system administration; see [Limitations](#limitations).
 - Programmatic clients (external MCP, scripts) authenticate with personal access tokens.
+
+## Sharing work with a team
+
+Authentication makes each person's work private. To give a team a shared board without a shared login, see [Team Access](team-access.md): workspace visibility, member roles, and scoped permissions.
 
 ## Enabling authentication
 
@@ -43,15 +48,15 @@ A server that listens on non-loopback interfaces with authentication disabled lo
 
 ## Users and invites
 
-`Settings > System > Users` (admin only):
+`Settings > Access Control > Users` (admin only):
 
 - **Invite links**: mint a tokenized URL (`/invite?token=…`) and share it out of band. Optional pinned email, member or admin role, single use, 7-day default expiry. No email server needed.
 - **Direct creation**: create an account with a password yourself.
 - **Disable / role changes**: disabling a user immediately revokes their sessions and tokens. The last active admin cannot be demoted or disabled.
 
-Roles: `admin` (user management, authentication settings, destructive system operations, feature toggles) and `member` (everything else, scoped to their own workspaces).
+Roles are `admin`, `member`, and `guest`. With Organizations off, an admin manages users and system settings. With Organizations on, membership roles are associated with an organization and the instance operator tier is separate, but the current Users API does not consistently enforce the organization boundary; see [Limitations](#limitations). A guest reaches only explicitly shared workspaces. The current Users page changes accounts between admin and member; assign the API-only guest role as described in [Team Access](team-access.md#current-limits).
 
-Install-wide data in `Settings > System > Data & storage` follows the same split. Members can read the database stats, the backup listing, and the storage usage, policy, run history, and quarantine contents. Creating, downloading, restoring, and deleting a backup is admin only, because a backup is a copy of the whole database and downloading one would export every user's workspaces. Changing storage settings, adopting a Go cache, and running an analysis, cleanup, or quarantine restore/purge are admin only for the same reason database vacuum, optimize, and reset are: they act on the whole install.
+With Organizations off, install-wide data in `Settings > System > Data & Logs` and `Settings > System > Storage` follows the same admin/member split. Members can read the database stats, the backup listing, and the storage usage, policy, run history, and quarantine contents. Creating, downloading, restoring, and deleting a backup is admin only, because a backup is a copy of the whole database and downloading one would export every user's workspaces. Changing storage settings, adopting a Go cache, and running an analysis, cleanup, or quarantine restore/purge are admin only for the same reason database vacuum, optimize, and reset are: they act on the whole install. With Organizations enabled, org admins currently retain these install-wide capabilities; they are not yet restricted to the instance operator.
 
 ## Personal access tokens
 
@@ -81,13 +86,15 @@ A custom `auth.cookieName` (see [configuration](configuration.md#authentication-
 
 ## What is isolated
 
-When authentication is on, everything in a workspace is private to its owner and returns "not found" to anyone else, even if they know the ID: workspaces, tasks, workflows, sessions, plans, walkthroughs, terminals, VS Code, port previews, git snapshots, Workspace secrets, repository bindings, **and the workspace's third-party integration settings (GitHub/GitLab/Jira/Linear/Sentry/Azure) and automations**. A user's Global secrets are also private to that user. Admins manage users but do not see other users' workspaces or secrets.
+When authentication is on, guarded workspace reads and actions are available only to its owner and users who can reach it through [Team Access](team-access.md). Other users receive "not found" even if they know the ID. This covers workspaces, tasks, workflows, sessions, plans, walkthroughs, terminals, VS Code, port previews, git snapshots, Workspace secrets, repository bindings, **and the workspace's third-party integration settings (GitHub/GitLab/Jira/Linear/Sentry/Azure) and automations**. A user's Global secrets are also private to that user. Admin and operator management authority does not reveal workspaces or secrets they cannot otherwise reach.
 
 Shared across the instance (by design): executors, agent profiles, environments, editors, prompts, and system pages.
 
 ## Limitations
 
+- **Multi-org user administration is not fully tenant-scoped.** With Organizations enabled, the current Users API lists accounts across organizations and accepts role or status changes for accounts outside the caller's organization. Treat org-admin access to user management as install-wide until this gap is closed.
+- **Multi-org system administration is not operator-exclusive.** Backup, database, and storage mutations, along with runtime feature-toggle changes, currently require the org-admin settings scope, not the instance-operator tier. An org admin can therefore perform install-wide operations, including downloading backups that contain other organizations' data.
+- **WebSocket notification routing is not a strict access boundary.** Workspace-aware fan-out normally narrows recipients by reach, but the regular path falls back to global delivery if reach and owner resolution both fail. See [WebSocket API](websocket-api.md#emitted-notifications-and-recipients).
 - **Filesystem and agent credentials are not isolated.** Worktrees and repositories live under one `~/.kandev` tree owned by the OS user running the backend, and agent CLI logins (`gh auth`, `claude login`, provider API keys) authenticate as that OS user, so all app-users share the same on-disk agent credentials, and anyone with shell access to the server can read all files. Authentication isolates users' kandev *data* at the application layer, not the filesystem or per-user agent auth. For hard isolation of agent credentials, run a separate kandev instance per user (or use OS-level access control / sandboxed executors).
-- One owner per workspace, no sharing or team workspaces yet.
 - Local accounts only for now; the account model is ready for OIDC/SSO later.
 - Authentication does not replace TLS. Terminate HTTPS in front of Kandev (the session cookie is marked `Secure` when the request arrives over TLS or `X-Forwarded-Proto: https`).

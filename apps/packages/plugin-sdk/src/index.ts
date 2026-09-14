@@ -27,12 +27,44 @@ export type PluginIcon = string | Component<PluginIconProps>;
 /** Placement for a registered nav item; see `PluginRegistry.registerNavItem`. */
 export type PluginNavSection = "main" | "settings" | "integrations" | "sidebar-footer";
 
-/** Context passed to components registered for the `main-top-bar` slot. */
+/**
+ * Context for the `main-top-bar` slot. Phone listing contributions live in the
+ * menu with 44px touch targets; interactions retain the slot's local state.
+ */
 export interface MainTopBarSlotProps {
   workspaceId: string | null;
   workspaceLabel?: string;
   currentPage: "kanban" | "tasks";
   presentation: "desktop" | "mobile";
+}
+
+/**
+ * Context passed to components registered for the `chat-submit-decoration`
+ * slot, which renders *over* the chat composer's send button rather than
+ * beside it. The host positions the layer against the button's box and makes
+ * it `pointer-events-none`. Keep decorations inert when possible; hover or
+ * focus disclosure can observe the host button from an effect. A decoration
+ * renders inside the layer, not beside the button, and `pointer-events-auto`
+ * is a last resort for a separate hit target that does not obstruct send.
+ */
+export interface ChatSubmitDecorationSlotProps {
+  /** Task the composer belongs to, or null for task-less quick chat. */
+  taskId: string | null;
+  /** Display title of the task, when known. */
+  taskTitle?: string;
+  /** Session the composer is currently bound to, or null before one exists. */
+  activeSessionId: string | null;
+  /** Every kandev session id on the task (includes `activeSessionId`). */
+  sessionIds: string[];
+  presentation: "desktop" | "mobile";
+  /** True while the composer is dispatching the current message. */
+  isSending: boolean;
+  /** True when the agent is mid-turn, so the next send queues behind it. */
+  isAgentBusy: boolean;
+  /** True when the send button itself is disabled. */
+  disabled: boolean;
+  /** True when plan mode is on (the button sends a plan request). */
+  planModeEnabled: boolean;
 }
 
 export type StateUpdater<Value> = Value | ((previous: Value) => Value);

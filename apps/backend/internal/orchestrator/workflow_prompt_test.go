@@ -364,6 +364,7 @@ func TestApplyWorkflowAndPlanMode_KeepsWorkflowPromptVisibleWhenStepEnablesPlanM
 		false,
 		false, // isEphemeral
 		false, // isPassthrough
+		false, // skipStepPrompt
 	)
 
 	if !planModeActive {
@@ -377,6 +378,35 @@ func TestApplyWorkflowAndPlanMode_KeepsWorkflowPromptVisibleWhenStepEnablesPlanM
 	}
 	if strings.Contains(got, "<kandev-system>") {
 		t.Fatalf("expected workflow prompt to remain visible without hidden system wrapping, got %q", got)
+	}
+}
+
+func TestApplyWorkflowAndPlanMode_SkipStepPromptSuppressesStepAndBase(t *testing.T) {
+	repo := setupTestRepo(t)
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-1"] = &wfmodels.WorkflowStep{
+		ID:     "step-1",
+		Prompt: "Commit the changes, push and create a draft PR.",
+	}
+	svc := createTestService(repo, stepGetter, newMockTaskRepo())
+
+	got, _, _ := svc.applyWorkflowAndPlanMode(
+		context.Background(),
+		"Migrate Atlantis datasource.",
+		"task-1",
+		"session-1",
+		"step-1",
+		false,
+		false, // isEphemeral
+		false, // isPassthrough
+		true,  // skipStepPrompt
+	)
+
+	if strings.Contains(got, "Commit the changes") {
+		t.Fatalf("skip_step_prompt must drop the step prompt, got %q", got)
+	}
+	if strings.Contains(got, "Migrate Atlantis datasource.") {
+		t.Fatalf("skip_step_prompt must drop the task-description fallback, got %q", got)
 	}
 }
 
@@ -400,6 +430,7 @@ func TestApplyWorkflowAndPlanMode_PassthroughSkipsReferenceExpansion(t *testing.
 		false,
 		false, // isEphemeral
 		true,  // isPassthrough
+		false, // skipStepPrompt
 	)
 
 	want := "Use @my-prompt for context."
@@ -408,6 +439,42 @@ func TestApplyWorkflowAndPlanMode_PassthroughSkipsReferenceExpansion(t *testing.
 	}
 	if len(expander.calls) != 0 {
 		t.Fatalf("expected expander not to be invoked for a passthrough session, got %d calls", len(expander.calls))
+	}
+}
+
+func TestApplyWorkflowAndPlanMode_PreservesAcceptanceTimePromptContext(t *testing.T) {
+	repo := setupTestRepo(t)
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step-1"] = &wfmodels.WorkflowStep{
+		ID:     "step-1",
+		Prompt: "Implement this exactly:\n\n{{task_prompt}}",
+	}
+	svc := createTestService(repo, stepGetter, newMockTaskRepo())
+	expander := &fakePromptReferenceExpander{}
+	svc.promptExpander = expander
+
+	basePrompt := "Use @my-prompt.\n\n" + sysprompt.Wrap(fakeResolvedPromptReferenceContext)
+	got, _, trustedContext := svc.applyWorkflowAndPlanModeWithPromptContext(
+		context.Background(),
+		basePrompt,
+		"task-1",
+		"session-1",
+		"step-1",
+		false,
+		false, // isEphemeral
+		false, // isPassthrough
+		false, // skipStepPrompt
+		fakeResolvedPromptReferenceContext,
+	)
+
+	if trustedContext != fakeResolvedPromptReferenceContext {
+		t.Fatalf("trusted context = %q, want acceptance-time context %q", trustedContext, fakeResolvedPromptReferenceContext)
+	}
+	if strings.Count(got, sysprompt.Wrap(fakeResolvedPromptReferenceContext)) != 1 {
+		t.Fatalf("expected one acceptance-time expansion block, got %q", got)
+	}
+	if len(expander.calls) != 0 {
+		t.Fatalf("expected canonical direct prompt not to be re-expanded, got %d calls", len(expander.calls))
 	}
 }
 

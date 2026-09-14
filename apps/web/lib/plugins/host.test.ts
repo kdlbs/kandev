@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import type { Window as HappyDOMWindow } from "happy-dom";
 import { loadPlugins, unloadPlugin } from "./host";
 import { pluginModalManager } from "./modal-manager";
 import { pluginRegistry } from "./registry";
@@ -143,10 +142,6 @@ describe("loadPlugins — bundle lifecycle", () => {
   afterEach(cleanupBasePluginLoads);
 
   it("injects styleUrls as <link> elements before importing the bundle", async () => {
-    // happy-dom eagerly loads real <link rel="stylesheet"> hrefs over the network;
-    // disable that for this test so it doesn't attempt (and 404-log) a real fetch.
-    const happyDOMWindow = window as unknown as HappyDOMWindow;
-    happyDOMWindow.happyDOM.settings.disableCSSFileLoading = true;
     const importer = fakeImporterFor({
       [BUNDLE_JS_URL]: (win) =>
         (win as unknown as FakeWindow).registerKandevPlugin("plugin-style-a", {
@@ -168,7 +163,6 @@ describe("loadPlugins — bundle lifecycle", () => {
 
     const link = document.head.querySelector("link[href='/plugin-a.css']");
     expect(link).not.toBeNull();
-    happyDOMWindow.happyDOM.settings.disableCSSFileLoading = false;
   });
 
   it("isolates a throwing plugin: logs and does not stop other plugins from loading", async () => {
@@ -253,8 +247,6 @@ describe("loadPlugins — asset URL prefixing", () => {
 
   it("prefixes a root-relative bundleUrl and style href with the backend apiBaseUrl when set (split-origin dev, Tauri)", async () => {
     mockApiBaseUrl = "http://localhost:38429";
-    const happyDOMWindow = window as unknown as HappyDOMWindow;
-    happyDOMWindow.happyDOM.settings.disableCSSFileLoading = true;
     const importedUrls: string[] = [];
     const importer = async (url: string) => {
       importedUrls.push(url);
@@ -279,7 +271,6 @@ describe("loadPlugins — asset URL prefixing", () => {
       "link[href='http://localhost:38429/api/plugins/plugin-prefix-a/ui/style.css']",
     );
     expect(link).not.toBeNull();
-    happyDOMWindow.happyDOM.settings.disableCSSFileLoading = false;
   });
 
   it("leaves a root-relative bundleUrl unprefixed when apiBaseUrl is empty (same-origin production)", async () => {
@@ -368,8 +359,6 @@ describe("unloadPlugin", () => {
   });
 
   it("removes the plugin's injected <link> stylesheet tags so disable/enable cycles don't accumulate duplicates", async () => {
-    const happyDOMWindow = window as unknown as HappyDOMWindow;
-    happyDOMWindow.happyDOM.settings.disableCSSFileLoading = true;
     const importer = fakeImporterFor({
       [BUNDLE_JS_URL]: (win) =>
         (win as unknown as FakeWindow).registerKandevPlugin(PLUGIN_UNLOAD_STYLE_A_ID, {
@@ -392,7 +381,6 @@ describe("unloadPlugin", () => {
     unloadPlugin(PLUGIN_UNLOAD_STYLE_A_ID);
 
     expect(document.head.querySelector("link[href='/plugin-unload-style-a.css']")).toBeNull();
-    happyDOMWindow.happyDOM.settings.disableCSSFileLoading = false;
   });
 });
 

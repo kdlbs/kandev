@@ -189,6 +189,7 @@ func allowedSupervisorEnv(env []string) map[string]string {
 		"KANDEV_DATABASE_PATH":         true,
 		"KANDEV_SERVER_PORT":           true,
 		"KANDEV_DESKTOP_HEALTH_TOKEN":  true,
+		"KANDEV_DESKTOP_RUNTIME":       true,
 		"KANDEV_WEB_INTERNAL_URL":      true,
 		"KANDEV_AGENT_STANDALONE_PORT": true,
 		"KANDEV_LOG_LEVEL":             true,

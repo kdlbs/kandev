@@ -48,6 +48,9 @@ and updates the public Git guidance.
 - Preserve a local base that contains the fetched remote base.
 - Stop multi-repository launch before agent startup when one required refresh
   fails.
+- Reconcile a GitHub pull request's current base at launch and during polling.
+- Recover a proven deleted remote base through a separately refreshed default
+  base while retaining fail-closed behavior for all other fetch failures.
 - Project a credential-safe, repository-specific launch error through the
   existing task error surface.
 - Document SSH setup and the fail-closed behavior in the public Git guidance.
@@ -87,11 +90,12 @@ No database or WebSocket schema change is planned.
 - [completed] [Task 02: Reject Stale Worktree Fallbacks](task-02-reject-stale-fallbacks.md)
 - [completed] [Task 03: Project Refresh Launch Failures](task-03-project-refresh-launch-failures.md)
 - [completed] [Task 04: Document Required Repository Refresh](task-04-document-required-refresh.md)
+- [completed] [Task 05: Support Stacked PR Base Retargeting](task-05-support-stacked-pr-base-retargeting.md)
 
 ## Dependency order
 
 ```text
-Task 01 -> Task 02 -> Task 03 -> Task 04
+Task 01 -> Task 02 -> Task 03 -> Task 04 -> Task 05
 ```
 
 The package is sequential. Task 02 consumes the refresh-route contract from
@@ -147,6 +151,16 @@ verified behavior.
   affected mobile command passed 2/2 tests, and the complete Git Changes Panel
   file passed 21/21 tests. Prettier and `git diff --check` also passed.
 
+### Stacked PR base retargeting results
+
+- Added launch-time live GitHub base resolution and polling-time persistence
+  for PR-backed task repositories, with best-effort failure handling.
+- Added a verified default-base fallback only for missing remote base refs;
+  authentication, transport, timeout, and other refresh failures remain fatal.
+- The affected backend package tests, complete backend test suite, backend
+  lint, backend build, specification validators, and public-documentation
+  validators passed.
+
 ## Risks
 
 - A managed refresh that ignores task Git policy can replace an
@@ -160,6 +174,8 @@ verified behavior.
   route helper narrow and run fresh-launch and resume suites together.
 - Error wrapping can leak raw Git output. Use existing redaction and bounded
   launch-error helpers.
+- Live GitHub base resolution is best-effort. The polling projection and
+  refreshed default fallback must independently cover unavailable lookups.
 - A multi-repository preparation attempt can refresh earlier repositories
   before a later one fails. This is safe on-disk cache progress, but agent
   startup must remain atomic.

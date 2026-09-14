@@ -11,6 +11,7 @@ import { ChangesPanelHeader } from "../changes-panel-header";
 import { MobileDiffSheet } from "./mobile-diff-sheet";
 import { useReviewSources } from "@/hooks/domains/session/use-review-sources";
 import { useAppStore } from "@/components/state-provider";
+import { getWebSocketClient } from "@/lib/ws/connection";
 import { useRequestChangesWalkthrough } from "@/hooks/domains/session/use-request-changes-walkthrough";
 import type { SelectedDiff } from "../task-layout";
 import type { OpenDiffOptions, DiffSheetMode } from "../changes-diff-target";
@@ -31,6 +32,13 @@ function buildContributionHeaderProps(data: ReturnType<typeof useChangesPanelDat
   };
 }
 
+function useRefreshMobileSessionData(sessionId: string | null | undefined) {
+  useEffect(() => {
+    if (!sessionId) return;
+    getWebSocketClient()?.refreshSessionData(sessionId);
+  }, [sessionId]);
+}
+
 /**
  * Mobile Changes panel — renders the same timeline summary surface as desktop.
  * Reuses ChangesPanelBody + ChangesPanelHeader from desktop.
@@ -45,6 +53,9 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
   const activeSessionId = useAppStore((s) => s.tasks.activeSessionId);
   const { sourceCounts } = useReviewSources(activeSessionId);
   const [diffSheet, setDiffSheet] = useState<DiffSheetMode | null>(null);
+
+  useRefreshMobileSessionData(data.activeSessionId);
+
   const requestWalkthrough = useRequestChangesWalkthrough({
     taskId: data.activeTaskId,
     sessionId: data.activeSessionId,
@@ -86,6 +97,7 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
       sourceFilter: options?.source ?? "all",
       repositoryName: options?.repositoryName || undefined,
       prKey: options?.prKey,
+      changeLayer: options?.changeLayer,
     });
   }, []);
 

@@ -12,6 +12,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	dbutil "github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/db/dialect"
 )
 
 // Boundary values fixed by spec "Evaluation triggers and cadence §
@@ -372,13 +373,29 @@ func (r *Repository) allLedgerRows(ctx context.Context) (map[pairKey]dueLedgerIn
 // and repository rows themselves (passed in directly, since the caller
 // already has them). Tolerant of a missing provider table.
 var mostRecentInputObservationQueries = []string{
-	`SELECT MAX(g.created_at) FROM task_session_git_snapshots g ` +
-		`JOIN task_sessions s ON s.id = g.session_id WHERE s.task_id = ? AND s.repository_id = ?`,
 	`SELECT MAX(updated_at) FROM task_sessions WHERE task_id = ? AND repository_id = ?`,
 	`SELECT MAX(updated_at) FROM task_repositories WHERE task_id = ? AND repository_id = ?`,
 	`SELECT MAX(updated_at) FROM github_task_prs WHERE task_id = ? AND repository_id = ?`,
 	`SELECT MAX(updated_at) FROM gitlab_task_mrs WHERE task_id = ? AND repository_id = ?`,
 	`SELECT MAX(updated_at) FROM azure_devops_task_prs WHERE task_id = ? AND repository_id = ?`,
+}
+
+func mostRecentGitSnapshotObservationQuery(driver string) string {
+	repositoryNameExpr := "COALESCE(" + dialect.JSONExtract(driver, "g.metadata", "repository_name") + ", '')"
+	return `SELECT MAX(g.created_at) FROM task_session_git_snapshots g ` +
+		`JOIN task_environments e ON e.id = g.task_environment_id ` +
+		`JOIN task_environment_repos er ON er.task_environment_id = g.task_environment_id ` +
+		`JOIN repositories repository ON repository.id = er.repository_id ` +
+		`WHERE (e.task_id = ? OR EXISTS (SELECT 1 FROM task_sessions binding ` +
+		`WHERE binding.task_environment_id = g.task_environment_id AND binding.task_id = ?) ` +
+		`) AND er.repository_id = ? AND er.deleted_at IS NULL ` +
+		`AND (` + repositoryNameExpr + ` = repository.name ` +
+		`OR EXISTS (SELECT 1 FROM task_sessions provenance ` +
+		`WHERE provenance.id = g.session_id AND provenance.repository_id = er.repository_id) ` +
+		`OR (` + repositoryNameExpr + ` = '' AND NOT EXISTS (` +
+		`SELECT 1 FROM task_environment_repos other ` +
+		`WHERE other.task_environment_id = g.task_environment_id ` +
+		`AND other.repository_id <> er.repository_id AND other.deleted_at IS NULL)))`
 }
 
 func (r *Repository) mostRecentInputObservation(
@@ -388,9 +405,16 @@ func (r *Repository) mostRecentInputObservation(
 	if taskUpdatedAt.After(max) {
 		max = taskUpdatedAt
 	}
-	for _, q := range mostRecentInputObservationQueries {
+	queries := make([]string, 0, len(mostRecentInputObservationQueries)+1)
+	queries = append(queries, mostRecentGitSnapshotObservationQuery(r.ro.DriverName()))
+	queries = append(queries, mostRecentInputObservationQueries...)
+	for index, q := range queries {
 		var raw interface{}
-		err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(q), taskID, repositoryID).Scan(&raw)
+		args := []interface{}{taskID, repositoryID}
+		if index == 0 {
+			args = []interface{}{taskID, taskID, repositoryID}
+		}
+		err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(q), args...).Scan(&raw)
 		if err != nil {
 			if dbutil.IsMissingTableError(err) {
 				continue

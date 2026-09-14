@@ -287,7 +287,7 @@ func (s *Service) fetchIssues(ctx context.Context, watch *IssueWatch) ([]*Issue,
 			filter += "&labels=" + url.QueryEscape(strings.Join(watch.Labels, ","))
 		}
 	}
-	issues, err := client.ListIssues(ctx, filter, customQuery)
+	issues, err := client.ListIssues(ctx, filter, customQuery, "")
 	if err != nil {
 		return nil, fmt.Errorf("list issues: %w", err)
 	}

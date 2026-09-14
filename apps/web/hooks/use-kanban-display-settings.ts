@@ -5,9 +5,12 @@ import { useAppStore } from "@/components/state-provider";
 import { useUserDisplaySettings } from "@/hooks/use-user-display-settings";
 import { useTaskListingView } from "@/hooks/use-task-listing-view";
 import type { TaskListingView } from "@/lib/task-listing/view-preference";
-import { linkToTaskOverview } from "@/lib/links";
+import { listingHistoryHref } from "@/lib/task-listing/view-navigation";
 import type { WorkflowsState } from "@/lib/state/slices";
 import { selectWorkflowSwimlanes } from "@/lib/kanban/workflow-swimlanes";
+import type { KanbanSort } from "@/lib/kanban/kanban-sort";
+import { toggleKanbanPriorityFilterToken } from "@/lib/kanban/priority-filter-tokens";
+import type { TaskPriority } from "@/lib/types/http";
 
 type UserSettingsFields = {
   workspaceId: string | null;
@@ -15,6 +18,8 @@ type UserSettingsFields = {
   repositoryIds: string[];
   hiddenWorkflowStepIds?: Record<string, string[]>;
   workflowIdsWithAutoHideEmptySteps?: string[];
+  kanbanSort?: KanbanSort;
+  kanbanPriorityFilterTokens?: TaskPriority[];
 };
 
 type CommitSettingsFn = (
@@ -32,12 +37,15 @@ function baseSettingsPayload(settings: UserSettingsFields): UserSettingsFields {
     repositoryIds: settings.repositoryIds,
     hiddenWorkflowStepIds: settings.hiddenWorkflowStepIds,
     workflowIdsWithAutoHideEmptySteps: settings.workflowIdsWithAutoHideEmptySteps,
+    kanbanSort: settings.kanbanSort,
+    kanbanPriorityFilterTokens: settings.kanbanPriorityFilterTokens,
   };
 }
 
 function taskListingViewFor(mode: string): TaskListingView {
   if (mode === "graph2" || mode === "pipeline") return "pipeline";
   if (mode === "list") return "list";
+  if (mode === "threads") return "threads";
   return "kanban";
 }
 
@@ -50,8 +58,14 @@ function useViewModeChange() {
   return { effectiveView, onViewModeChange };
 }
 
+/**
+ * Reflects a scope change in the URL without routing. Route-aware because the
+ * board, the Tasks list and the Threads deck all share these handlers: pushing
+ * a task-overview URL from a routed view leaves that view rendered under Home.
+ */
 function replaceTaskOverviewHistory(workspaceId?: string, workflowId?: string) {
-  window.history.pushState({}, "", linkToTaskOverview({ workspaceId, workflowId }));
+  const href = listingHistoryHref(window.location.pathname, { workspaceId, workflowId });
+  window.history.pushState({}, "", href);
 }
 
 type WorkspaceWorkflowHandlersInput = {
@@ -203,6 +217,24 @@ export function useKanbanDisplaySettings() {
     },
     [commitSettings, userSettings],
   );
+  const onBoardSortChange = useCallback(
+    (sort: KanbanSort) => {
+      commitSettings({ ...baseSettingsPayload(userSettings), kanbanSort: sort });
+    },
+    [commitSettings, userSettings],
+  );
+  const onPriorityFilterChange = useCallback(
+    (token: TaskPriority) => {
+      commitSettings({
+        ...baseSettingsPayload(userSettings),
+        kanbanPriorityFilterTokens: toggleKanbanPriorityFilterToken(
+          userSettings.kanbanPriorityFilterTokens ?? [],
+          token,
+        ),
+      });
+    },
+    [commitSettings, userSettings],
+  );
 
   const { eligibleWorkflows, onToggleStepVisibility, onToggleAutoHideEmpty } =
     useStepVisibilityHandlers(workflows, snapshots, userSettings, commitSettings, activeWorkflowId);
@@ -225,6 +257,8 @@ export function useKanbanDisplaySettings() {
     snapshots,
     hiddenWorkflowStepIds: userSettings.hiddenWorkflowStepIds ?? {},
     workflowIdsWithAutoHideEmptySteps: userSettings.workflowIdsWithAutoHideEmptySteps ?? [],
+    boardSort: userSettings.kanbanSort,
+    priorityFilterTokens: userSettings.kanbanPriorityFilterTokens ?? [],
     onWorkspaceChange,
     onWorkflowChange,
     onRepositoryChange,
@@ -232,6 +266,8 @@ export function useKanbanDisplaySettings() {
     onToggleTasksListShowDetails,
     onToggleStepVisibility,
     onToggleAutoHideEmpty,
+    onBoardSortChange,
+    onPriorityFilterChange,
     onViewModeChange,
   };
 }

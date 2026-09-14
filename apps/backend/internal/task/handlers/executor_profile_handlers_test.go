@@ -486,6 +486,7 @@ func TestWSCreateProfileValidatesAndCreates(t *testing.T) {
 	resp, err := h.wsCreateProfile(context.Background(),
 		wsWorkflowRequest(t, ws.ActionExecutorProfileCreate, map[string]any{
 			"executor_id": "ex-local", "name": "Fresh", "cleanup_script": "echo bye",
+			"config": map[string]string{"allow_user_namespaces": "true"},
 		}))
 	require.NoError(t, err)
 	var created dto.ExecutorProfileDTO
@@ -494,6 +495,7 @@ func TestWSCreateProfileValidatesAndCreates(t *testing.T) {
 	require.Equal(t, "ex-local", created.ExecutorID)
 	require.Len(t, repo.createdProfile, 1)
 	require.Equal(t, "echo bye", repo.createdProfile[0].CleanupScript)
+	require.Equal(t, "true", repo.createdProfile[0].Config["allow_user_namespaces"])
 }
 
 func TestWSCreateProfileSurfacesUnknownExecutor(t *testing.T) {

@@ -41,6 +41,49 @@ func TestLoadWithStartupUsesExplicitManagedValues(t *testing.T) {
 	}
 }
 
+// TestLoadWithStartupPropagatesAgentSurvivalEnabled pins that
+// Config.AgentSurvivalEnabled is copied directly from the managed contract in
+// both directions -- unlike UnownedPeriod/DetachedEventLimit, false is not
+// "unresolved" here (a managed launch always sets Configured=true), so it
+// must not be treated as "keep agentctl's own default".
+func TestLoadWithStartupPropagatesAgentSurvivalEnabled(t *testing.T) {
+	base := commonconfig.AgentctlStartupConfig{
+		Configured:                true,
+		IdleReaperInterval:        time.Minute,
+		NotificationQueueCapacity: 4096,
+	}
+
+	enabled := base
+	enabled.AgentSurvivalEnabled = true
+	cfg, err := LoadWithStartup(enabled)
+	if err != nil {
+		t.Fatalf("LoadWithStartup: %v", err)
+	}
+	if !cfg.AgentSurvivalEnabled {
+		t.Fatal("AgentSurvivalEnabled = false, want true when the startup contract enables it")
+	}
+
+	disabled := base
+	disabled.AgentSurvivalEnabled = false
+	cfg, err = LoadWithStartup(disabled)
+	if err != nil {
+		t.Fatalf("LoadWithStartup: %v", err)
+	}
+	if cfg.AgentSurvivalEnabled {
+		t.Fatal("AgentSurvivalEnabled = true, want false when the startup contract disables it")
+	}
+}
+
+// TestLoadWithoutStartupLeavesAgentSurvivalDisabled pins that a legacy/direct
+// (unmanaged) launch -- Load(), no startup contract -- never engages the
+// capability, matching AC-EXECUTORS-SURVIVAL-005.2's "defaults disabled".
+func TestLoadWithoutStartupLeavesAgentSurvivalDisabled(t *testing.T) {
+	cfg := Load()
+	if cfg.AgentSurvivalEnabled {
+		t.Fatal("AgentSurvivalEnabled = true from Load() with no startup contract, want false")
+	}
+}
+
 func TestNewInstanceConfigNormalizesMcpProviders(t *testing.T) {
 	cfg := (&Config{}).NewInstanceConfig(0, &InstanceOverrides{
 		McpProviders: []string{" GITLAB ", "unsupported", "github", "github"},
@@ -49,6 +92,17 @@ func TestNewInstanceConfigNormalizesMcpProviders(t *testing.T) {
 	want := []string{"github", "gitlab"}
 	if !reflect.DeepEqual(cfg.McpProviders, want) {
 		t.Fatalf("McpProviders = %v, want %v", cfg.McpProviders, want)
+	}
+}
+
+// TestNewInstanceConfig_PropagatesMCPToolNamePresentationCapability covers
+// AC-TASKS-MCP-TOOL-NAMES-001.5 at the agentctl instance boundary.
+func TestNewInstanceConfig_PropagatesMCPToolNamePresentationCapability(t *testing.T) {
+	cfg := (&Config{}).NewInstanceConfig(0, &InstanceOverrides{
+		NamespacesMCPToolsByServer: true,
+	})
+	if !cfg.NamespacesMCPToolsByServer {
+		t.Fatal("InstanceConfig did not retain NamespacesMCPToolsByServer")
 	}
 }
 
@@ -313,6 +367,63 @@ func TestCollectAgentEnvPreservesParentIndexedGitConfig(t *testing.T) {
 	}
 }
 
+func TestCollectAgentEnvHostGHBridge(t *testing.T) {
+	clearParentIndexedGitConfig(t)
+	ghPath := filepath.Join(t.TempDir(), "host tools", "gh")
+	if err := os.MkdirAll(filepath.Dir(ghPath), 0o700); err != nil {
+		t.Fatalf("create fake gh directory: %v", err)
+	}
+	const ghScript = `#!/bin/sh
+if [ "$1" = "auth" ] && [ "$2" = "git-credential" ]; then
+  cat >/dev/null
+  printf 'username=x-access-token\npassword=%s\n' "$GH_TOKEN"
+  exit 0
+fi
+exit 2
+`
+	if err := os.WriteFile(ghPath, []byte(ghScript), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("GIT_CONFIG_COUNT", "2")
+	t.Setenv("GIT_CONFIG_KEY_0", "notes.augment.mergeStrategy")
+	t.Setenv("GIT_CONFIG_VALUE_0", "union")
+	t.Setenv("GIT_CONFIG_KEY_1", "core.hooksPath")
+	t.Setenv("GIT_CONFIG_VALUE_1", "/Users/cfl12/.locstat/git/hooks")
+
+	env, err := CollectAgentEnvWithError(map[string]string{
+		"GH_TOKEN":            "late-profile-token",
+		"HOME":                filepath.Join(t.TempDir(), "home"),
+		"PATH":                "/usr/bin:/bin",
+		"GIT_CONFIG_COUNT":    "1",
+		"GIT_CONFIG_KEY_0":    "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_0":  "!'" + ghPath + "' auth git-credential",
+		"GIT_CONFIG_NOSYSTEM": "1",
+	})
+	if err != nil {
+		t.Fatalf("CollectAgentEnvWithError() error = %v", err)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_COUNT"); got != "3" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 3", got)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_0"); got != "notes.augment.mergeStrategy" || envSliceValue(env, "GIT_CONFIG_VALUE_0") != "union" {
+		t.Fatalf("inherited Git config entry 0 = (%q, %q)", got, envSliceValue(env, "GIT_CONFIG_VALUE_0"))
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_1"); got != "core.hooksPath" || envSliceValue(env, "GIT_CONFIG_VALUE_1") != "/Users/cfl12/.locstat/git/hooks" {
+		t.Fatalf("inherited Git config entry 1 = (%q, %q)", got, envSliceValue(env, "GIT_CONFIG_VALUE_1"))
+	}
+
+	command := exec.Command("git", "credential", "fill")
+	command.Env = env
+	command.Stdin = strings.NewReader("protocol=https\nhost=github.com\npath=acme/widgets\n\n")
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git credential fill failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "password=late-profile-token") {
+		t.Fatalf("credential output = %q, want late profile token", output)
+	}
+}
+
 func TestCollectAgentEnvIgnoresParentIndexedGitConfigBeyondCount(t *testing.T) {
 	// Hosts inherit indexed entries from a parent that later lowered
 	// GIT_CONFIG_COUNT. Git ignores the leftovers, so instance creation must
@@ -504,6 +615,62 @@ func TestConsumeNonce(t *testing.T) {
 			t.Fatalf("expected empty when no nonce configured, got %q", token)
 		}
 	})
+}
+
+func TestBootstrapNonceDiagnosticsSurviveNonceBurn(t *testing.T) {
+	t.Setenv("AGENTCTL_BOOTSTRAP_NONCE", "nonce-abc123")
+
+	cfg, err := LoadWithStartup(commonconfig.AgentctlStartupConfig{
+		Configured:                true,
+		IdleTimeout:               time.Hour,
+		IdleReaperInterval:        time.Minute,
+		NotificationQueueCapacity: 4096,
+	})
+	if err != nil {
+		t.Fatalf("LoadWithStartup: %v", err)
+	}
+
+	if !cfg.BootstrapNonceConfigured() {
+		t.Fatal("BootstrapNonceConfigured() = false, want true when AGENTCTL_BOOTSTRAP_NONCE is set")
+	}
+	wantFingerprint := commonconfig.NonceFingerprint("nonce-abc123")
+	if got := cfg.BootstrapNonceFingerprint(); got != wantFingerprint {
+		t.Fatalf("BootstrapNonceFingerprint() = %q, want %q", got, wantFingerprint)
+	}
+
+	if token := cfg.ConsumeNonce("nonce-abc123"); token == "" {
+		t.Fatal("ConsumeNonce() with the correct nonce returned empty")
+	}
+
+	// The whole point of tracking these separately from BootstrapNonce: a
+	// rejected handshake after the nonce was burned must still be able to
+	// report that bootstrap mode was configured, and with which fingerprint.
+	if !cfg.BootstrapNonceConfigured() {
+		t.Fatal("BootstrapNonceConfigured() = false after nonce burn, want true (must survive burning)")
+	}
+	if got := cfg.BootstrapNonceFingerprint(); got != wantFingerprint {
+		t.Fatalf("BootstrapNonceFingerprint() after nonce burn = %q, want %q (must survive burning)", got, wantFingerprint)
+	}
+}
+
+func TestBootstrapNonceDiagnosticsUnconfigured(t *testing.T) {
+	t.Setenv("AGENTCTL_BOOTSTRAP_NONCE", "")
+	cfg, err := LoadWithStartup(commonconfig.AgentctlStartupConfig{
+		Configured:                true,
+		IdleTimeout:               time.Hour,
+		IdleReaperInterval:        time.Minute,
+		NotificationQueueCapacity: 4096,
+	})
+	if err != nil {
+		t.Fatalf("LoadWithStartup: %v", err)
+	}
+
+	if cfg.BootstrapNonceConfigured() {
+		t.Fatal("BootstrapNonceConfigured() = true, want false when AGENTCTL_BOOTSTRAP_NONCE is unset")
+	}
+	if got := cfg.BootstrapNonceFingerprint(); got != "" {
+		t.Fatalf("BootstrapNonceFingerprint() = %q, want empty when bootstrap nonce mode was never configured", got)
+	}
 }
 
 func TestGenerateSelfToken(t *testing.T) {

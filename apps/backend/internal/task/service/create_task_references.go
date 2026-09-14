@@ -119,6 +119,12 @@ func (s *Service) rollbackPartialTask(ctx context.Context, taskID string, cause 
 		s.logger.Error("rollback delete failed; task left in inconsistent state",
 			zap.String("task_id", taskID), zap.Error(err))
 	}
+	if releaser, ok := s.workspacePolicyAttacher.(WorkspacePolicyMembershipReleaser); ok {
+		if err := releaser.ReleaseWorkspacePolicy(rollbackCtx, taskID, "create_rollback"); err != nil {
+			s.logger.Warn("rollback workspace membership cleanup failed",
+				zap.String("task_id", taskID), zap.Error(err))
+		}
+	}
 	return cause
 }
 

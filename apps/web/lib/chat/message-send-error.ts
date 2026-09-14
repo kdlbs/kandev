@@ -1,7 +1,10 @@
 export type MessageSendErrorCode =
   | "connection-unavailable"
   | "no-active-session"
-  | "session-unavailable";
+  | "session-unavailable"
+  | "plan-comment-migration-pending"
+  | "plan-comments-changed"
+  | "primary-session-changed";
 
 export class MessageSendError extends Error {
   readonly code: MessageSendErrorCode;
@@ -19,6 +22,9 @@ export function isMessageSendError(error: unknown): error is MessageSendError {
   return (
     code === "connection-unavailable" ||
     code === "no-active-session" ||
-    code === "session-unavailable"
+    code === "session-unavailable" ||
+    code === "plan-comment-migration-pending" ||
+    code === "plan-comments-changed" ||
+    code === "primary-session-changed"
   );
 }

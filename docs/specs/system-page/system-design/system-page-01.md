@@ -11,6 +11,11 @@ owners:
 
 ## Purpose and boundaries
 
+> **Route allocation update (2026-09-03):**
+> [System Data and Storage Pages](system-data-storage-pages.md) supersedes the
+> Database, Backups, Logs, and Storage route allocation in this migrated source.
+> The backend and operational design in this document remains authoritative.
+
 This design preserves the technical source detail for `REQ-SYSTEM-PAGE-SYSTEM-PAGE-001` during migration.
 
 ## Requirement mapping

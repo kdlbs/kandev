@@ -2,6 +2,7 @@ package runtimeflags
 
 import (
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -43,6 +44,31 @@ func TestDefinitionsIncludeDynamicAgentRoutingMetadata(t *testing.T) {
 	}
 	if def.EnvVar != "KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING" {
 		t.Fatalf("EnvVar = %q, want KANDEV_FEATURES_DYNAMIC_AGENT_ROUTING", def.EnvVar)
+	}
+	if def.Stability != StabilityExperimental {
+		t.Fatalf("Stability = %q, want %q", def.Stability, StabilityExperimental)
+	}
+	if def.RiskLevel != RiskHigh {
+		t.Fatalf("RiskLevel = %q, want %q", def.RiskLevel, RiskHigh)
+	}
+	if def.RiskDescription == "" {
+		t.Fatal("RiskDescription empty")
+	}
+	if !def.RestartRequired {
+		t.Fatal("RestartRequired = false, want true")
+	}
+	if !def.Mutable {
+		t.Fatal("Mutable = false, want true")
+	}
+}
+
+func TestDefinitionsIncludeCanvasMetadata(t *testing.T) {
+	def, ok := DefinitionByKey("features.canvases")
+	if !ok {
+		t.Fatal("features.canvases definition missing")
+	}
+	if def.EnvVar != "KANDEV_FEATURES_CANVASES" {
+		t.Fatalf("EnvVar = %q, want KANDEV_FEATURES_CANVASES", def.EnvVar)
 	}
 	if def.Stability != StabilityExperimental {
 		t.Fatalf("Stability = %q, want %q", def.Stability, StabilityExperimental)
@@ -449,5 +475,66 @@ func TestDefinitionsIncludeClaudeMidTurnSteeringMetadata(t *testing.T) {
 	}
 	if !def.RestartRequired {
 		t.Fatal("RestartRequired = false, want true")
+	}
+}
+
+// TestDefinitionsIncludeAgentSurvivalMetadata pins the registration for
+// AC-EXECUTORS-SURVIVAL-005.2/5.4: off by default, restart-required, and
+// carrying a host-availability probe (checked separately below).
+func TestDefinitionsIncludeAgentSurvivalMetadata(t *testing.T) {
+	def, ok := DefinitionByKey("features.agentSurvival")
+	if !ok {
+		t.Fatal("features.agentSurvival definition missing")
+	}
+	if def.EnvVar != "KANDEV_FEATURES_AGENT_SURVIVAL" {
+		t.Fatalf("EnvVar = %q, want KANDEV_FEATURES_AGENT_SURVIVAL", def.EnvVar)
+	}
+	if def.Stability != StabilityExperimental {
+		t.Fatalf("Stability = %q, want experimental", def.Stability)
+	}
+	if def.RiskLevel != RiskHigh {
+		t.Fatalf("RiskLevel = %q, want high", def.RiskLevel)
+	}
+	if def.RiskDescription == "" {
+		t.Fatal("RiskDescription empty")
+	}
+	if !def.RestartRequired {
+		t.Fatal("RestartRequired = false, want true")
+	}
+	if !def.Mutable {
+		t.Fatal("Mutable = false, want true")
+	}
+	if def.Available == nil {
+		t.Fatal("Available probe missing; AC-EXECUTORS-SURVIVAL-005.4 requires the platform-unsupported state to be reportable")
+	}
+	defaults, err := profiles.FeatureFlagDefaults()
+	if err != nil {
+		t.Fatalf("profiles.FeatureFlagDefaults: %v", err)
+	}
+	if got := defaults["agent_survival"]; got != "false" {
+		t.Fatalf("profiles.yaml agent_survival default = %q, want %q (AC-EXECUTORS-SURVIVAL-005.2: off by default)", got, "false")
+	}
+}
+
+// TestAgentSurvivalAvailabilityMatchesPlatformScope pins the platform-scope
+// decision (macOS + Linux only) against whatever GOOS this test actually runs
+// on, so the Windows CI job exercises the unavailable branch for real instead
+// of every job only ever seeing "available".
+func TestAgentSurvivalAvailabilityMatchesPlatformScope(t *testing.T) {
+	available, reasonCode := agentSurvivalAvailability()
+	if runtime.GOOS == "windows" {
+		if available {
+			t.Fatal("agentSurvivalAvailability() = available, want unavailable on Windows")
+		}
+		if reasonCode != ReasonPlatformUnsupported {
+			t.Fatalf("reasonCode = %q, want %q", reasonCode, ReasonPlatformUnsupported)
+		}
+		return
+	}
+	if !available {
+		t.Fatalf("agentSurvivalAvailability() = unavailable (%q), want available on %s", reasonCode, runtime.GOOS)
+	}
+	if reasonCode != "" {
+		t.Fatalf("reasonCode = %q, want empty when available", reasonCode)
 	}
 }

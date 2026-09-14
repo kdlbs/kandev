@@ -4,11 +4,20 @@ package shared
 // and scheduler readers (internal/office/service) so the two cannot silently
 // drift out of sync with each other.
 const (
-	// RunReasonRoutineDispatch is set by RoutineService when it materializes
-	// a lightweight (taskless) routine wakeup triggered by its cron
-	// schedule — the only routine trigger that represents a periodic,
-	// unattended wake. See RoutineDispatchReason.
+	// RunReasonRoutineDispatch is the legacy literal written by every
+	// pre-cron-constant build for a lightweight routine dispatch,
+	// regardless of trigger (cron, manual, or webhook alike). Because
+	// the source cannot be recovered from an already-persisted run row,
+	// it is treated as non-skippable rather than guessed — see
+	// IsPeriodicTasklessWake. Still the value new code must recognize
+	// on any run row queued before an upgrade; do not delete.
 	RunReasonRoutineDispatch = "routine_dispatch"
+
+	// RunReasonRoutineDispatchCron is set by RoutineService when it
+	// materializes a lightweight (taskless) routine wakeup triggered by
+	// its cron schedule — the only routine trigger that represents a
+	// periodic, unattended wake. See RoutineDispatchReason.
+	RunReasonRoutineDispatchCron = "routine_dispatch_cron"
 
 	// RunReasonRoutineDispatchEvent is set by RoutineService when a
 	// lightweight routine fires from a manual "Fire now" or an inbound
@@ -35,10 +44,14 @@ const (
 
 // IsPeriodicTasklessWake reports whether reason represents a periodic,
 // taskless wake — the class of run the idle-skip gate is allowed to skip
-// when the agent has no actionable tasks assigned.
+// when the agent has no actionable tasks assigned. The legacy
+// RunReasonRoutineDispatch literal is deliberately excluded: it was
+// written for cron, manual, and webhook fires alike before
+// RunReasonRoutineDispatchCron existed, so its trigger cannot be
+// recovered from the run row and it defaults to non-skippable.
 func IsPeriodicTasklessWake(reason string) bool {
 	switch reason {
-	case RunReasonRoutineDispatch, RunReasonHeartbeat:
+	case RunReasonRoutineDispatchCron, RunReasonHeartbeat:
 		return true
 	default:
 		return false
@@ -52,7 +65,7 @@ func IsPeriodicTasklessWake(reason string) bool {
 // when the assignee has SkipIdleRuns set — see IsPeriodicTasklessWake.
 func RoutineDispatchReason(source string) string {
 	if source == RoutineSourceCron {
-		return RunReasonRoutineDispatch
+		return RunReasonRoutineDispatchCron
 	}
 	return RunReasonRoutineDispatchEvent
 }

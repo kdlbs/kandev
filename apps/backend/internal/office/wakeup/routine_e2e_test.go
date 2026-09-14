@@ -17,11 +17,16 @@ import (
 	"github.com/kandev/kandev/internal/office/wakeup"
 )
 
-// TestRoutine_EndToEnd_CoordinatorHeartbeatFire exercises the full
-// office-heartbeat-as-routine flow: install the default coordinator
-// routine, advance time past the cron tick, drive the routines tick,
-// and assert a fresh taskless run lands on the agent with the routine
-// scope captured.
+// TestRoutine_CronFire_CreatesTasklessRun_StopsBeforeSchedulerIntegration
+// covers the lightweight (taskless) office-heartbeat-as-routine flow only as
+// far as the runs row: install the default coordinator routine, advance time
+// past the cron tick, drive the routines tick, and assert a fresh taskless
+// run lands on the agent with the routine scope captured. It never
+// constructs a SchedulerIntegration or calls processRun, so it proves
+// nothing about whether an agent actually starts — see
+// TestRoutine_CronFire_HeavyRoutineReachesSession in
+// internal/backendapp/office_routine_cron_to_session_test.go for the test
+// that carries a cron fire through to a task_sessions row.
 //
 // Round-tripping the routines repo + wakeup dispatcher together
 // validates the seam where:
@@ -30,12 +35,12 @@ import (
 //  2. The routines service materialises the lightweight routine into
 //     an agent_wakeup_requests row with source=routine.
 //  3. The wakeup dispatcher claims the row and creates a fresh runs
-//     row (taskless) tagged reason="routine_dispatch" with the
+//     row (taskless) tagged reason="routine_dispatch_cron" with the
 //     routine_id mirrored into the run's context_snapshot.
 //  4. A second tick five minutes later produces a second fresh run
 //     and the (agent, "routine:<id>") summary upsert path is reachable
 //     from the run row alone.
-func TestRoutine_EndToEnd_CoordinatorHeartbeatFire(t *testing.T) {
+func TestRoutine_CronFire_CreatesTasklessRun_StopsBeforeSchedulerIntegration(t *testing.T) {
 	ctx := context.Background()
 	repo, agentID := seedCoordinator(t)
 	wakeupDispatcher := wakeup.NewDispatcher(repo, repo, logger.Default())
@@ -64,8 +69,8 @@ func TestRoutine_EndToEnd_CoordinatorHeartbeatFire(t *testing.T) {
 	}
 
 	run := requireInflightRun(t, repo, agentID)
-	if run.Reason != "routine_dispatch" {
-		t.Errorf("run.reason: got %q want routine_dispatch", run.Reason)
+	if run.Reason != "routine_dispatch_cron" {
+		t.Errorf("run.reason: got %q want routine_dispatch_cron", run.Reason)
 	}
 	if !strings.Contains(run.ContextSnapshot, `"routine_id":"`+routine.ID+`"`) {
 		t.Errorf("expected routine_id in context_snapshot, got %q", run.ContextSnapshot)
@@ -76,11 +81,13 @@ func TestRoutine_EndToEnd_CoordinatorHeartbeatFire(t *testing.T) {
 		t.Errorf("expected no task_id in run payload, got %q", run.Payload)
 	}
 
-	// A continuation-summary upsert under "routine:<routine.ID>" is
-	// the contract the office service uses for taskless completions.
-	// Round-trip the upsert here so the schema constraint (8 KB cap,
-	// upsert key) and the scope shape are both proven via the public
-	// repo API the service consumes.
+	// This round-trips the repo's continuation-summary upsert under a
+	// "routine:<routine.ID>" scope key, proving the upsert-key shape
+	// and scope-key readback via the public repo API. It does not
+	// exercise the 8 KB content limit.
+	// Nothing in production writes this key yet for a taskless
+	// completion — see card 49894d63 — so this is repo-API coverage,
+	// not a production contract round-trip.
 	scope := "routine:" + routine.ID
 	if err := repo.UpsertContinuationSummary(ctx, officesqlite.AgentContinuationSummary{
 		AgentProfileID: agentID,
@@ -241,4 +248,8 @@ func (a *routineE2EWakeupAdapter) CreateWakeupRequest(
 
 func (a *routineE2EWakeupAdapter) Dispatch(ctx context.Context, requestID string) error {
 	return a.dispatcher.Dispatch(ctx, requestID)
+}
+
+func (a *routineE2EWakeupAdapter) FailWakeupRequest(ctx context.Context, requestID, reason string) error {
+	return a.repo.MarkWakeupRequestFailed(ctx, requestID, reason)
 }

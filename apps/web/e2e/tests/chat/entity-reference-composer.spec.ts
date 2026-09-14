@@ -7,6 +7,7 @@ import type {
   EntityReference,
   EntityReferenceSearchResponse,
 } from "../../../lib/types/entity-reference";
+import { waitForQuickChatComposerReady } from "./quick-chat-helpers";
 
 const REFERENCE_QUERY = "E2E Reference";
 const LINEAR_SCOPE = "mock-org";
@@ -207,9 +208,7 @@ async function openQuickChatWithAgent(page: Page): Promise<{
   const payload = (await started).json() as Promise<{ session_id: string }>;
   const { session_id: sessionId } = await payload;
 
-  const editor = visibleEditor(dialog);
-  await expect(editor).toBeVisible({ timeout: 15_000 });
-  await expect(editor).toHaveAttribute("contenteditable", "true", { timeout: 30_000 });
+  await waitForQuickChatComposerReady(dialog);
   return { dialog, sessionId };
 }
 

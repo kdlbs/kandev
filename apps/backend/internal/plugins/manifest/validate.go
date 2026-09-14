@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"path"
 	"regexp"
 	"strings"
@@ -136,6 +137,7 @@ func (m *Manifest) Validate() error {
 	errs = append(errs, m.validateRepoURL()...)
 	errs = append(errs, m.validateUIPages()...)
 	errs = append(errs, m.validateUIBundle()...)
+	errs = append(errs, m.validateWebApps()...)
 	errs = append(errs, m.validateUIKeybindings()...)
 	errs = append(errs, m.validateWebhooks()...)
 	errs = append(errs, m.validateActions()...)
@@ -341,6 +343,11 @@ func validateRelativePackagePath(p string) error {
 
 // validateEndpoints checks base_url and the required endpoint paths.
 func (m *Manifest) validateEndpoints() []error {
+	// A static web-application-only package intentionally has no managed
+	// backend and therefore no legacy base_url or endpoint contract.
+	if m.HasWebApps() && m.BaseURL == "" && m.Endpoints == (Endpoints{}) {
+		return nil
+	}
 	var errs []error
 	if m.BaseURL == "" {
 		errs = append(errs, errors.New("base_url is required"))
@@ -355,6 +362,78 @@ func (m *Manifest) validateEndpoints() []error {
 		errs = append(errs, errors.New("endpoints.webhooks is required"))
 	}
 	return errs
+}
+
+var webAppKeyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
+
+func (m *Manifest) validateWebApps() []error {
+	if len(m.UI.WebApps) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(m.UI.WebApps))
+	var errs []error
+	for i, app := range m.UI.WebApps {
+		prefix := fmt.Sprintf("ui.web_apps[%d]", i)
+		if !webAppKeyPattern.MatchString(app.Key) {
+			errs = append(errs, fmt.Errorf("%s.key %q must match %s", prefix, app.Key, webAppKeyPattern.String()))
+		}
+		if _, ok := seen[app.Key]; ok {
+			errs = append(errs, fmt.Errorf("%s.key duplicates %q", prefix, app.Key))
+		}
+		seen[app.Key] = struct{}{}
+		if strings.TrimSpace(app.Title) == "" || len(app.Title) > 200 {
+			errs = append(errs, fmt.Errorf("%s.title must be 1-200 bytes", prefix))
+		}
+		if err := validateRelativePackagePath(app.Entry); err != nil {
+			errs = append(errs, fmt.Errorf("%s.entry: %w", prefix, err))
+		}
+		if len(app.Placements) == 0 {
+			errs = append(errs, fmt.Errorf("%s.placements must not be empty", prefix))
+		}
+		placementSeen := make(map[string]struct{}, len(app.Placements))
+		for _, placement := range app.Placements {
+			if placement != WebAppPlacementTask && placement != WebAppPlacementWorkspace {
+				errs = append(errs, fmt.Errorf("%s.placements contains unsupported placement %q", prefix, placement))
+			}
+			if _, ok := placementSeen[placement]; ok {
+				errs = append(errs, fmt.Errorf("%s.placements duplicates %q", prefix, placement))
+			}
+			placementSeen[placement] = struct{}{}
+		}
+		networkOrigins, originErrs := normalizeWebAppNetworkOrigins(prefix, app.NetworkOrigins)
+		errs = append(errs, originErrs...)
+		m.UI.WebApps[i].NetworkOrigins = networkOrigins
+	}
+	return errs
+}
+
+// normalizeWebAppNetworkOrigins validates the exact HTTPS origins that a
+// packaged web application may request from its sandbox. The host later uses
+// this canonical form for grants and CSP, so equivalent host casing cannot
+// create two permission entries.
+func normalizeWebAppNetworkOrigins(prefix string, origins []string) ([]string, []error) {
+	if len(origins) == 0 {
+		return nil, nil
+	}
+	result := make([]string, 0, len(origins))
+	seen := make(map[string]struct{}, len(origins))
+	var errs []error
+	for i, raw := range origins {
+		trimmed := strings.TrimSpace(raw)
+		parsed, err := url.Parse(trimmed)
+		if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || strings.ContainsAny(parsed.Host, " \t\r\n") || parsed.Hostname() == "" {
+			errs = append(errs, fmt.Errorf("%s.network_origins[%d] must be an exact HTTPS origin", prefix, i))
+			continue
+		}
+		origin := parsed.Scheme + "://" + strings.ToLower(parsed.Host)
+		if _, exists := seen[origin]; exists {
+			errs = append(errs, fmt.Errorf("%s.network_origins duplicates %q", prefix, origin))
+			continue
+		}
+		seen[origin] = struct{}{}
+		result = append(result, origin)
+	}
+	return result, errs
 }
 
 // validateCategories checks each category against the known enum.

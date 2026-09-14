@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { IconCheck } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { useAppStore } from "@/components/state-provider";
 import {
   ChangeRequestDetail,
@@ -19,10 +20,11 @@ import { useCommentsStore, isPRFeedbackComment } from "@/lib/state/slices/commen
 import type { PRFeedbackComment } from "@/lib/state/slices/comments";
 import { useToast } from "@/components/toast-provider";
 import { submitPRReview } from "@/lib/api/domains/github-pr-api";
-import type { TaskPR, PRFeedback } from "@/lib/types/github";
+import type { TaskPR, PRFeedback, MergeableState } from "@/lib/types/github";
 import { PRMergeButton } from "./pr-merge-button";
 import { PRMergeabilityNotice, buildConflictResolutionMessage } from "./pr-mergeability-notice";
 import { hasActiveMergeQueueEntry, PRMergeQueueStatus } from "./pr-merge-queue-status";
+import { PRWorkflowAttentionNotice } from "./pr-workflow-attention-notice";
 import { usePRScopedReviewRequest } from "./use-pr-scoped-review-request";
 
 // --- Dockview panel wrapper ---
@@ -230,8 +232,10 @@ function ApproveButton({
   return (
     <Button
       data-testid="pr-approve-button"
-      size="sm"
-      className="cursor-pointer gap-1.5 border-0 bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500"
+      className={controlSizingClassName(
+        "standard",
+        "cursor-pointer gap-1.5 border-0 bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-500",
+      )}
       onClick={handleApprove}
       disabled={submitting}
     >
@@ -254,7 +258,7 @@ function mapGitHubIdentity(taskPR: TaskPR, feedback: PRFeedback | null) {
   const live = feedback?.pr;
   return {
     title: live?.title ?? taskPR.pr_title,
-    url: live?.html_url || live?.url || taskPR.pr_url,
+    url: live?.html_url || taskPR.pr_url,
     state: live?.state ?? taskPR.state,
     draft: live?.draft,
     author: githubPerson(live?.author_login ?? taskPR.author_login),
@@ -323,16 +327,20 @@ function mapGitHubChecks(feedback: PRFeedback | null) {
   }));
 }
 
-function mapGitHubComments(feedback: PRFeedback | null) {
-  return (feedback?.comments ?? []).map((comment) => ({
-    id: String(comment.id),
-    parentId: comment.in_reply_to ? String(comment.in_reply_to) : undefined,
-    author: githubPerson(comment.author, comment.author_avatar, comment.author_is_bot),
-    body: comment.body,
-    createdAt: comment.created_at,
-    path: comment.path || undefined,
-    line: comment.line || undefined,
-  }));
+export function mapGitHubComments(feedback: PRFeedback | null) {
+  return (feedback?.comments ?? []).map((comment) => {
+    const url = comment.html_url?.trim();
+    return {
+      id: String(comment.id),
+      parentId: comment.in_reply_to ? String(comment.in_reply_to) : undefined,
+      author: githubPerson(comment.author, comment.author_avatar, comment.author_is_bot),
+      body: comment.body,
+      createdAt: comment.created_at,
+      ...(url ? { url } : {}),
+      path: comment.path || undefined,
+      line: comment.line || undefined,
+    };
+  });
 }
 
 function mapGitHubDetail(
@@ -377,6 +385,47 @@ function useConflictQueued(sessionId: string, prNumber: number): boolean {
         comment.prNumber === prNumber
       );
     }),
+  );
+}
+
+function PRDetailNotice({
+  displayPR,
+  attention,
+  mergeableState,
+  mergeable,
+  isDraft,
+  prState,
+  baseBranch,
+  onResolveConflicts,
+  resolveDisabled,
+}: {
+  displayPR: TaskPR;
+  attention?: PRFeedback["workflow_attention"];
+  mergeableState: MergeableState | undefined;
+  mergeable: boolean;
+  isDraft: boolean;
+  prState: TaskPR["state"];
+  baseBranch: string;
+  onResolveConflicts: () => void;
+  resolveDisabled: boolean;
+}) {
+  return (
+    <div className="space-y-2">
+      <PRWorkflowAttentionNotice pr={displayPR} attention={attention} />
+      {hasActiveMergeQueueEntry(displayPR) ? (
+        <PRMergeQueueStatus pr={displayPR} />
+      ) : (
+        <PRMergeabilityNotice
+          state={mergeableState}
+          mergeable={mergeable}
+          isDraft={isDraft}
+          prState={prState}
+          baseBranch={baseBranch}
+          onResolveConflicts={onResolveConflicts}
+          resolveDisabled={resolveDisabled}
+        />
+      )}
+    </div>
   );
 }
 
@@ -451,19 +500,17 @@ export function PRDetailContent({ taskPR, sessionId }: { taskPR: TaskPR; session
         </>
       }
       notice={
-        hasActiveMergeQueueEntry(displayPR) ? (
-          <PRMergeQueueStatus pr={displayPR} />
-        ) : (
-          <PRMergeabilityNotice
-            state={mergeableState}
-            mergeable={isMergeable}
-            isDraft={isDraft}
-            prState={liveState}
-            baseBranch={taskPR.base_branch}
-            onResolveConflicts={onResolveConflicts}
-            resolveDisabled={conflictQueued}
-          />
-        )
+        <PRDetailNotice
+          displayPR={displayPR}
+          attention={feedback?.workflow_attention}
+          mergeableState={mergeableState}
+          mergeable={isMergeable}
+          isDraft={isDraft}
+          prState={liveState}
+          baseBranch={taskPR.base_branch}
+          onResolveConflicts={onResolveConflicts}
+          resolveDisabled={conflictQueued}
+        />
       }
     />
   );

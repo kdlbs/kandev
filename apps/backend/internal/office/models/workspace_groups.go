@@ -11,6 +11,7 @@ type WorkspaceGroup struct {
 	ID                        string     `json:"id" db:"id"`
 	WorkspaceID               string     `json:"workspace_id" db:"workspace_id"`
 	OwnerTaskID               string     `json:"owner_task_id" db:"owner_task_id"`
+	OwnershipGeneration       int64      `json:"ownership_generation" db:"ownership_generation"`
 	MaterializedPath          string     `json:"materialized_path,omitempty" db:"materialized_path"`
 	MaterializedEnvironmentID string     `json:"materialized_environment_id,omitempty" db:"materialized_environment_id"`
 	MaterializedKind          string     `json:"materialized_kind" db:"materialized_kind"`

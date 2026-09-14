@@ -175,7 +175,7 @@ function selectableRepositories(
 }
 
 function isRemoteWorkspaceExecutor(executorType: string | null | undefined): boolean {
-  return ["local_docker", "remote_docker", "ssh", "sprites"].includes(executorType ?? "");
+  return ["local_docker", "remote_docker", "ssh", "sprites", "k8s"].includes(executorType ?? "");
 }
 
 type AddWorkspaceSourcesSurfaceProps = {

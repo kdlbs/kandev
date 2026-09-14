@@ -29,15 +29,15 @@ export function QuickChatDeleteDialog({
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>{t("chat:deleteQuickChat")}</AlertDialogTitle>
-          <AlertDialogDescription asChild>
+          <AlertDialogDescription asChild className="min-w-0 space-y-2 text-left">
             <div>
               <p>{t("chat:deleteQuickChatIntro")}</p>
-              <ul className="list-disc list-inside mt-2 space-y-1">
+              <ul className="list-disc list-inside space-y-1">
                 <li>{t("chat:allConversationHistory")}</li>
                 <li>{t("chat:theTaskAndItsData")}</li>
                 <li>{t("chat:theAssociatedWorktree")}</li>
               </ul>
-              <p className="mt-2">{t("chat:thisActionCannotBeUndone")}</p>
+              <p>{t("chat:thisActionCannotBeUndone")}</p>
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>

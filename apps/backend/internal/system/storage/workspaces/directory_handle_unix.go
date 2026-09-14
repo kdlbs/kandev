@@ -3,6 +3,7 @@
 package workspaces
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -18,6 +19,7 @@ type unixDirectoryHandle struct {
 	rootFD   int
 	parentFD int
 	targetFD int
+	target   string
 	once     sync.Once
 }
 
@@ -38,7 +40,10 @@ func OpenDirectoryNoFollow(root, target string) (DirectoryHandle, error) {
 		_ = unix.Close(rootFD)
 		return nil, err
 	}
-	return &unixDirectoryHandle{rootFD: rootFD, parentFD: parentFD, targetFD: targetFD}, nil
+	return &unixDirectoryHandle{
+		rootFD: rootFD, parentFD: parentFD, targetFD: targetFD,
+		target: filepath.Base(filepath.Clean(relative)),
+	}, nil
 }
 
 // CreateDirectoryNoFollow creates every missing component below root through
@@ -57,7 +62,10 @@ func CreateDirectoryNoFollow(root, target string, mode os.FileMode) (DirectoryHa
 		_ = unix.Close(rootFD)
 		return nil, err
 	}
-	return &unixDirectoryHandle{rootFD: rootFD, parentFD: parentFD, targetFD: targetFD}, nil
+	return &unixDirectoryHandle{
+		rootFD: rootFD, parentFD: parentFD, targetFD: targetFD,
+		target: filepath.Base(filepath.Clean(relative)),
+	}, nil
 }
 
 func (h *unixDirectoryHandle) Close() error {
@@ -113,6 +121,41 @@ func (h *unixDirectoryHandle) VerifyPath(path string) error {
 func (h *unixDirectoryHandle) IsValidWorktree() bool {
 	content, err := h.ReadFile(".git")
 	return err == nil && strings.HasPrefix(string(content), "gitdir:")
+}
+
+// RemoveDirectory removes the pinned directory through its open descriptors.
+// It never resolves the directory again from its lexical path, so a rename or
+// replacement cannot redirect deletion to a different workspace.
+func (h *unixDirectoryHandle) RemoveDirectory(ctx context.Context) error {
+	if h == nil || h.parentFD < 0 || h.targetFD < 0 || h.target == "" {
+		return errors.New("directory handle is closed")
+	}
+	if err := removeUnixDependencyContents(ctx, h.targetFD); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	var targetInfo unix.Stat_t
+	if err := unix.Fstat(h.targetFD, &targetInfo); err != nil {
+		return fmt.Errorf("stat pinned directory: %w", err)
+	}
+	var currentInfo unix.Stat_t
+	if err := unix.Fstatat(h.parentFD, h.target, &currentInfo, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		if errors.Is(err, unix.ENOENT) {
+			// The pinned directory was renamed. Its contents are safe to clear,
+			// but there is no longer a path entry that this handle can unlink.
+			return nil
+		}
+		return fmt.Errorf("inspect pinned directory entry: %w", err)
+	}
+	if targetInfo.Dev != currentInfo.Dev || targetInfo.Ino != currentInfo.Ino {
+		return errors.New("pinned directory path changed during cleanup")
+	}
+	if err := unix.Unlinkat(h.parentFD, h.target, unix.AT_REMOVEDIR); err != nil && !errors.Is(err, unix.ENOENT) {
+		return err
+	}
+	return nil
 }
 
 func (h *unixDirectoryHandle) ReadFile(name string) ([]byte, error) {

@@ -23,7 +23,7 @@ export const SETTINGS_DISCOVERY_DEFINITIONS = [
 // never rendered.
 const TO_APPEARANCE = "Redirects to the canonical Appearance page.";
 // i18n-exempt: maintainer-facing exclusion note; read by tests only.
-const TO_DATA_STORAGE = "Redirects to the canonical Data & storage page.";
+const TO_DATA_LOGS = "Redirects to the canonical Data & Logs page.";
 // i18n-exempt: maintainer-facing exclusion note; read by tests only.
 const TO_KEYBOARD_SHORTCUTS = "Redirects to the canonical Keyboard Shortcuts page.";
 // i18n-exempt: maintainer-facing exclusion note; read by tests only.
@@ -64,10 +64,9 @@ export const SETTINGS_DISCOVERY_ROUTE_EXCLUSIONS: Record<string, string> = {
   "/settings/integrations/slack": TO_WORKSPACE_INTEGRATIONS,
   "/settings/executor/new": "Transient executor creation flow, not a stable setting.",
   "/settings/system": "Redirects to the canonical System Status page.",
-  "/settings/system/database": TO_DATA_STORAGE,
-  "/settings/system/backups": TO_DATA_STORAGE,
-  "/settings/system/storage": TO_DATA_STORAGE,
-  "/settings/system/logs": TO_DATA_STORAGE,
+  "/settings/system/database": TO_DATA_LOGS,
+  "/settings/system/backups": TO_DATA_LOGS,
+  "/settings/system/logs": TO_DATA_LOGS,
   "/settings/system/licenses": "Redirects to the canonical About page.",
   "/settings/system/message-queue": TO_TASK_BEHAVIOR,
   "/settings/changelog": "Redirects to the canonical System Updates page.",

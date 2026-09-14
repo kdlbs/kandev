@@ -197,6 +197,12 @@ describe("convertMessage regional vocabulary", () => {
     assert.equal(convertMessage("点击“启动智能体”", "zh-tw"), "點選「啟動代理程式」");
     assert.equal(convertMessage("点击“启动智能体”", "zh-hk"), "點擊「啓動代理程式」");
   });
+
+  it("keeps the adverb in copy that means only", () => {
+    for (const locale of TARGET_LOCALES) {
+      assert.equal(convertMessage("这只会删除", locale), "這只會刪除");
+    }
+  });
 });
 
 describe("convertMessage idempotence", () => {

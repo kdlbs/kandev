@@ -162,6 +162,10 @@
   "profileNameRequiredDescription": "儲存前請輸入設定名稱。",
   "profileNameRequiredTitle": "設定名稱為必填項",
   "profileNotFound": "未找到設定。",
+  "profileExternalChangeTitle": "設定已在其他位置更改",
+  "profileExternalChangeDescription": "你編輯時此設定已發生更改。你的草稿已保留。請放棄草稿以載入最新儲存的值，然後再儲存。",
+  "profileExternalChangeDiscard": "載入最新設定",
+  "profileExternalChangeInvalidReason": "請先載入最新設定，然後再儲存。",
   "profileSettings": "代理程式設定檔",
   "promptTokenHint": "<0>{{token}}</0> 將替換為你的任務描述或後續訊息。",
   "ptyConnectionError": "連線錯誤",
@@ -295,5 +299,6 @@
   "dynamicRouteRetryDescription": "供應商發生錯誤後重試相同候選設定檔。適用於可能暫時恢復的故障。",
   "dynamicRouteTryNextDescription": "本次執行略過此候選設定檔，繼續使用下一個符合條件的設定檔。",
   "dynamicRouteStopDescription": "此候選設定檔失敗後停止路由。工作會等待手動恢復操作。",
-  "dynamicProfileSaved": "動態設定檔已儲存。"
+  "dynamicProfileSaved": "動態設定檔已儲存。",
+  "adminOnly": "只有管理員可以更改代理和代理設定檔。"
 }

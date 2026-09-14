@@ -4,6 +4,11 @@ import type { ApiClient } from "../../helpers/api-client";
 import { LayoutSettingsPage } from "../../pages/layout-settings-page";
 import { SessionPage } from "../../pages/session-page";
 import { dwell } from "../../helpers/causal-waits";
+import {
+  expectApproxWidth,
+  getDockviewContainerWidth,
+  getDockviewGroupWidth,
+} from "../../helpers/dockview-resize";
 
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
 const PR_NUMBER = 702;
@@ -21,6 +26,7 @@ function noTerminalLayout() {
     columns: [
       {
         id: "center",
+        width: 1050,
         groups: [
           {
             id: "group-center",
@@ -197,6 +203,9 @@ async function expectNoTerminalDefault(page: Page): Promise<void> {
     });
   const snapshot = await dockviewSnapshot(page);
   expect(snapshot.panelIds).not.toContain("terminal-default");
+  const containerWidth = await getDockviewContainerWidth(page);
+  const rightWidth = await getDockviewGroupWidth(page, "files");
+  expectApproxWidth(rightWidth, Math.round(containerWidth * 0.25), 12);
 }
 
 async function ordinaryShells(apiClient: ApiClient, taskId: string) {

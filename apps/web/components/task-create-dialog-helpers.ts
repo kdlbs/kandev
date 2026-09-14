@@ -1,5 +1,5 @@
 import type { useRouter } from "@/lib/routing/client-router";
-import type { Task, Branch, LocalRepository, Repository } from "@/lib/types/http";
+import type { Task, Branch, LocalRepository, Repository, TaskPriority } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { AppState } from "@/lib/state/store";
 import type {
@@ -10,6 +10,7 @@ import type {
 import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by-url";
 import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
 import { selectPreferredBranch } from "@/lib/utils";
+import { branchOptionValue } from "@/components/branch-picker-options";
 import { createDebugLogger } from "@/lib/debug/log";
 import { useContextFilesStore } from "@/lib/state/context-files-store";
 import { linkToTask } from "@/lib/links";
@@ -84,13 +85,7 @@ export function autoSelectBranch(
 }
 
 function isBranchSelectable(branchList: Branch[], value: string | null | undefined) {
-  return Boolean(value && branchList.some((branch) => branchDisplayName(branch) === value));
-}
-
-function branchDisplayName(branch: Branch) {
-  return branch.type === "remote" && branch.remote
-    ? `${branch.remote}/${branch.name}`
-    : branch.name;
+  return Boolean(value && branchList.some((branch) => branchOptionValue(branch) === value));
 }
 
 export function computePassthroughProfile(
@@ -121,6 +116,52 @@ export function computeIsTaskStarted(
   if (!isEditMode || !editingTask?.state) return false;
   return editingTask.state !== "TODO" && editingTask.state !== "CREATED";
 }
+
+/**
+ * Whether the executor-profile selector should be offered for editing.
+ * Create mode always offers it — there is no task yet for a mutability
+ * verdict to apply to. Edit mode defers entirely to the projected
+ * `runner_editable`, never to workflow state; an absent projection fails
+ * closed.
+ */
+export function computeRunnerEditable(
+  isEditMode: boolean,
+  editingTask?: { runnerEditable?: boolean } | null,
+): boolean {
+  if (!isEditMode) return true;
+  return editingTask?.runnerEditable ?? false;
+}
+
+/**
+ * Machine-readable reason to present when {@link computeRunnerEditable}
+ * returns false. Falls back to the same retriable class the backend uses
+ * when a projection could not be evaluated.
+ */
+export function computeRunnerIneligibleReason(
+  editingTask?: { runnerIneligibleReason?: string } | null,
+): string {
+  return editingTask?.runnerIneligibleReason ?? "evaluation_unavailable";
+}
+
+/**
+ * Maps a projected `runner_ineligible_reason`, or the matching
+ * `details.error_code` on a rejected `task.runner` switch, to the i18n key
+ * presented to the user. Closed vocabulary; a code this dialog doesn't
+ * recognize (a future reason it predates) falls back to the same retriable
+ * copy as an evaluation failure rather than an empty message or a raw code.
+ */
+export const RUNNER_INELIGIBLE_REASON_KEYS: Record<string, string> = {
+  task_archived: "task:runnerReasonTaskArchived",
+  no_repository: "task:runnerReasonNoRepository",
+  multiple_repositories: "task:runnerReasonMultipleRepositories",
+  session_exists: "task:runnerReasonSessionExists",
+  environment_exists: "task:runnerReasonEnvironmentExists",
+  executor_running: "task:runnerReasonExecutorRunning",
+  workspace_folder_attached: "task:runnerReasonWorkspaceFolderAttached",
+  workspace_path_set: "task:runnerReasonWorkspacePathSet",
+  workspace_group_member: "task:runnerReasonWorkspaceGroupMember",
+  workspace_binding_not_independent: "task:runnerReasonWorkspaceBindingNotIndependent",
+};
 
 export function shouldShowTaskTitleField(
   isCreateMode: boolean,
@@ -169,6 +210,7 @@ export type BuildCreatePayloadArgs = {
   autopilot?: boolean;
   /** Task IDs this task must wait for. */
   blockedBy?: string[];
+  priority?: TaskPriority;
 };
 
 export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTaskParams {
@@ -189,6 +231,7 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
     parent_id: args.parentId || undefined,
     workspace_path: args.workspacePath || undefined,
     autopilot: args.autopilot || undefined,
+    priority: args.priority ?? "medium",
     // Dependencies declared at creation time. With edges present the backend
     // records the requested agent start as a start-when-unblocked intent rather
     // than launching now, so a chain runs in order instead of all at once.
@@ -334,6 +377,10 @@ export function buildRepositoriesPayload(opts: {
       const branches = splitLocalExecutorBranches({
         rowBranch: row.branch,
         defaultBranch,
+        // Fresh-branch mode uses row.branch as the fork base. A saved set base
+        // is checkout metadata for the ordinary local-executor flow and must
+        // not override the branch the user picked to fork from.
+        baseBranch: opts.freshBranch ? undefined : row.baseBranch,
         isLocalExecutor,
       });
       if (row.repositoryId) {
@@ -490,6 +537,7 @@ function resolveRowDefaultBranch(
 function splitLocalExecutorBranches(args: {
   rowBranch?: string;
   defaultBranch?: string;
+  baseBranch?: string;
   isLocalExecutor: boolean;
 }): { base_branch: string | undefined; checkout_branch: string | undefined } {
   // Without a known default_branch we can't anchor base_branch to the
@@ -499,11 +547,19 @@ function splitLocalExecutorBranches(args: {
   // unset default_branch is no worse off than before, and the backend's
   // resolveRepoInput probe will populate it on the next CreateRepository
   // call. Wait for that probe rather than synthesizing a guess here.
-  if (!args.isLocalExecutor || !args.defaultBranch) {
-    return { base_branch: args.rowBranch || undefined, checkout_branch: undefined };
+  if (!args.isLocalExecutor) {
+    return {
+      base_branch: args.baseBranch || args.rowBranch || undefined,
+      checkout_branch: undefined,
+    };
   }
-  const base = args.defaultBranch;
-  const checkout =
-    args.rowBranch && args.rowBranch !== args.defaultBranch ? args.rowBranch : undefined;
-  return { base_branch: base, checkout_branch: checkout };
+  if (!args.defaultBranch) {
+    return {
+      base_branch: args.baseBranch || args.rowBranch || undefined,
+      checkout_branch: args.baseBranch ? args.rowBranch || undefined : undefined,
+    };
+  }
+  const base = args.baseBranch || args.defaultBranch;
+  const checkout = args.rowBranch && args.rowBranch !== base ? args.rowBranch : undefined;
+  return { base_branch: args.baseBranch || base, checkout_branch: checkout };
 }

@@ -11,10 +11,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
+	"github.com/kandev/kandev/internal/events"
+	eventbus "github.com/kandev/kandev/internal/events/bus"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -138,6 +141,48 @@ func TestStartPassthroughSessionSurfacesLaunchFailure(t *testing.T) {
 	require.NotEmpty(t, execution.ErrorMessage)
 }
 
+// @covers AC-TASKS-PASSTHROUGH-INITIAL-TURN-001.1
+func TestStartPassthroughSessionClaimsInitialPromptBeforeReadyPublication(t *testing.T) {
+	mgr, runner, execution := newPassthroughRunnerManager(t)
+	const agentID = "pending-prompt-test-agent"
+	require.NoError(t, mgr.registry.Register(&testAgent{
+		id:      agentID,
+		enabled: true,
+		StandardPassthrough: agents.StandardPassthrough{Cfg: agents.PassthroughConfig{
+			Supported:        true,
+			PassthroughCmd:   agents.NewCommand("sh", "-c", "sleep 30"),
+			IdleTimeout:      time.Second,
+			SubmitSequence:   "\r",
+			AutoInjectPrompt: true,
+		}},
+	}))
+	mgr.profileResolver = &mockPassthroughProfileResolver{
+		agentName:      agentID,
+		cliPassthrough: true,
+	}
+	execution.AgentID = agentID
+	execution.Status = v1.AgentStatusRunning
+	execution.setMetadataValue("task_description", "Ship the release")
+
+	var statusAtReadyPublication v1.AgentStatus
+	bus := mgr.eventBus.(*MockEventBus)
+	bus.OnPublish = func(subject string, _ *eventbus.Event) {
+		if subject != events.AgentctlReady {
+			return
+		}
+		mgr.handlePassthroughTurnComplete(execution.SessionID, execution.PassthroughProcessID)
+		statusAtReadyPublication = execution.Status
+	}
+
+	require.NoError(t, mgr.startPassthroughSession(context.Background(), execution, nil))
+	t.Cleanup(func() {
+		_ = runner.Stop(context.Background(), execution.PassthroughProcessID)
+	})
+
+	require.Equal(t, v1.AgentStatusRunning, statusAtReadyPublication,
+		"the launch must claim initial prompt delivery before later startup work can publish ready")
+}
+
 func TestResumePassthroughSessionSurfacesLaunchFailure(t *testing.T) {
 	mgr, _, execution := newPassthroughRunnerManager(t)
 	execution.WorkspacePath = missingWorkspace(t)
@@ -259,6 +304,45 @@ func TestAttemptResumeFallbackAnnouncesAndRelaunchesFresh(t *testing.T) {
 	require.Contains(t, banner, "Resume fallback failed: could not start fresh process",
 		"a fallback that cannot start must say so rather than leaving a silent dead terminal")
 	require.False(t, execution.passthroughLaunchUsedResume)
+}
+
+// @covers AC-TASKS-PASSTHROUGH-INITIAL-TURN-001.4
+func TestAttemptResumeFallbackClaimsFreshInitialPrompt(t *testing.T) {
+	mgr, runner, execution := newPassthroughRunnerManager(t)
+	const agentID = "fallback-pending-prompt-test-agent"
+	require.NoError(t, mgr.registry.Register(&testAgent{
+		id:      agentID,
+		enabled: true,
+		StandardPassthrough: agents.StandardPassthrough{Cfg: agents.PassthroughConfig{
+			Supported:        true,
+			PassthroughCmd:   agents.NewCommand("sh", "-c", "sleep 30"),
+			IdleTimeout:      time.Second,
+			SubmitSequence:   "\r",
+			AutoInjectPrompt: true,
+		}},
+	}))
+	mgr.profileResolver = &mockPassthroughProfileResolver{
+		agentName:      agentID,
+		cliPassthrough: true,
+	}
+	execution.AgentID = agentID
+	execution.Status = v1.AgentStatusRunning
+	execution.setMetadataValue("task_description", "Ship the release")
+	recorder := &terminalRecorder{}
+	runner.TrackSessionWebSocket(execution.SessionID, recorder)
+
+	mgr.attemptResumeFallback(execution, runner, execution.SessionID, 1, 400*time.Millisecond)
+
+	execution.passthroughLifecycleMu.Lock()
+	activeProcessID := execution.PassthroughProcessID
+	pendingProcessID := execution.passthroughInitialPromptProcessID
+	execution.passthroughLifecycleMu.Unlock()
+	t.Cleanup(func() {
+		_ = runner.Stop(context.Background(), activeProcessID)
+	})
+	require.NotEmpty(t, activeProcessID)
+	require.Equal(t, activeProcessID, pendingProcessID,
+		"a fresh fallback must own its initial prompt before the injection goroutine runs")
 }
 
 func TestAttemptResumeFallbackSkipsDuringShutdown(t *testing.T) {

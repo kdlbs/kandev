@@ -31,6 +31,7 @@ func TestOfficeDefaultWorkflow_FullCycleSmoke(t *testing.T) {
 	queue := &fakeRunQueue{}
 	parts := newSmokeParticipants(steps)
 	decisions := newFakeDecisionStore()
+	seatWriter := &fakeParticipantSeatWriter{hasSeat: true}
 
 	registry := MapRegistry{
 		ActionAutoStartAgent: noOpCallback{},
@@ -45,6 +46,10 @@ func TestOfficeDefaultWorkflow_FullCycleSmoke(t *testing.T) {
 			Participants: parts,
 		},
 		ActionClearDecisions: ClearDecisionsCallback{Decisions: decisions},
+		ActionEnsureParticipantSeat: EnsureParticipantSeatCallback{
+			Writer: seatWriter,
+			Caster: &fakeParticipantSeatCaster{},
+		},
 	}
 	eng := New(store, registry,
 		WithRunQueue(queue),
@@ -192,6 +197,72 @@ func TestOfficeDefaultWorkflow_RejectRoutesBackToWork(t *testing.T) {
 	}
 	if !res.Transitioned || res.ToStepID != steps["work"].ID {
 		t.Fatalf("expected reject to route to Work, got %#v", res)
+	}
+}
+
+// TestOfficeDefaultWorkflow_OnAgentErrorEscalatesFromEveryStep proves that a
+// reviewer or approver session failure now dispatches the same CEO
+// escalation as a worker failure, instead of silently no-opping because the
+// step's compiled on_agent_error action list was empty (ActionCount == 0,
+// which the dispatcher reads as "not handled").
+func TestOfficeDefaultWorkflow_OnAgentErrorEscalatesFromEveryStep(t *testing.T) {
+	ctx := context.Background()
+	tmpl := loadEmbeddedTemplate(t, "office-default")
+	steps := compileWorkflow(tmpl)
+
+	for _, stepName := range []string{"work", "review", "approval", "done"} {
+		t.Run(stepName, func(t *testing.T) {
+			store := newSmokeStore(steps)
+			queue := &fakeRunQueue{}
+			parts := newSmokeParticipants(steps)
+			decisions := newFakeDecisionStore()
+
+			registry := MapRegistry{
+				ActionQueueRun: QueueRunCallback{
+					Adapter:      queue,
+					Primary:      stubPrimary{id: "agent-primary"},
+					CEOResolver:  stubCEO{id: "agent-ceo"},
+					Participants: parts,
+				},
+			}
+			eng := New(store, registry,
+				WithRunQueue(queue),
+				WithParticipantStore(parts),
+				WithDecisionStore(decisions),
+			)
+
+			stepID := steps[stepName].ID
+			store.setCurrentStep(stepID)
+
+			res, err := eng.HandleTrigger(ctx, HandleInput{
+				TaskID: "task-1", SessionID: "sess-1",
+				Trigger:     TriggerOnAgentError,
+				OperationID: "op-agent-error-" + stepName,
+			})
+			if err != nil {
+				t.Fatalf("%s.on_agent_error: %v", stepName, err)
+			}
+			if res.ActionCount != 1 {
+				t.Fatalf("%s.on_agent_error ActionCount = %d, want 1", stepName, res.ActionCount)
+			}
+
+			var found *QueueRunRequest
+			for i := range queue.calls {
+				if queue.calls[i].WorkflowStepID == stepID {
+					found = &queue.calls[i]
+					break
+				}
+			}
+			if found == nil {
+				t.Fatalf("%s.on_agent_error: no QueueRunRequest recorded for step %s", stepName, stepID)
+			}
+			if found.AgentProfileID != "agent-ceo" {
+				t.Errorf("%s.on_agent_error queued AgentProfileID = %q, want %q", stepName, found.AgentProfileID, "agent-ceo")
+			}
+			if found.Reason != "agent_error" {
+				t.Errorf("%s.on_agent_error queued Reason = %q, want %q", stepName, found.Reason, "agent_error")
+			}
+		})
 	}
 }
 

@@ -1,7 +1,9 @@
 import { getBackendConfig } from "@/lib/config";
+import { signalBackendReloadRequired } from "@/lib/platform/backend-reload-coordinator";
 import { readInterimSettingsInterlockToken } from "@/src/boot-payload";
 
 const interimSettingsInterlockHeader = "X-Kandev-Interim-Settings-Interlock";
+export const INTERIM_SETTINGS_INTERLOCK_ERROR_CODE = "interim_settings_interlock_required";
 
 export type ApiRequestOptions = {
   baseUrl?: string;
@@ -19,6 +21,7 @@ export class ApiError extends Error {
   readonly body: unknown;
   readonly errorCode?: string;
   readonly retryAfterSeconds?: number;
+  handled = false;
   constructor(message: string, status: number, body: unknown, retryAfterSeconds?: number) {
     super(message);
     this.name = "ApiError";
@@ -70,12 +73,21 @@ async function throwFromResponse(response: Response): Promise<never> {
     if (typeof errVal === "string") message = errVal;
   }
   const retryAfter = Number(response.headers.get("Retry-After"));
-  throw new ApiError(
+  const error = new ApiError(
     message,
     response.status,
     body,
     Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter : undefined,
   );
+  if (error.errorCode === INTERIM_SETTINGS_INTERLOCK_ERROR_CODE) {
+    signalBackendReloadRequired("settings_interlock_rejected");
+    error.handled = true;
+  }
+  throw error;
+}
+
+export function isHandledApiError(error: unknown): error is ApiError & { handled: true } {
+  return error instanceof ApiError && error.handled;
 }
 
 export async function fetchJson<T>(pathOrUrl: string, options?: ApiRequestOptions): Promise<T> {

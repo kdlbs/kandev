@@ -6,6 +6,7 @@ import { activeSessionId, seedSecondaryClarificationTask } from "../../helpers/c
 import { makeGitEnv } from "../../helpers/git-helper";
 import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
+import { expectContentSizedBottomConfirmation } from "../../helpers/mobile-confirmations";
 import {
   expectActiveTaskRow,
   expectActiveTaskRowWithoutColor,
@@ -67,6 +68,7 @@ test.describe("Mobile sidebar task actions", () => {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
       repository_ids: [seedData.repositoryId],
+      priority: "critical",
     });
     await apiClient.mockGitHubAssociateTaskPR({
       task_id: task.id,
@@ -92,6 +94,8 @@ test.describe("Mobile sidebar task actions", () => {
     const row = drawer.getByTestId("sidebar-task-item").filter({ hasText: title });
     await expect(row).toBeVisible();
     const prIcon = row.getByTestId(`pr-task-icon-${task.id}`);
+    const priorityIcon = row.getByTestId("sidebar-task-priority-indicator");
+    await expect(priorityIcon).toHaveAttribute("aria-label", "Priority Critical");
     await expect(prIcon).toBeVisible({ timeout: 15_000 });
 
     const spacing = await row.evaluate((el, titleText) => {
@@ -99,21 +103,46 @@ test.describe("Mobile sidebar task actions", () => {
         (candidate) =>
           candidate.classList.contains("whitespace-nowrap") && candidate.textContent === titleText,
       );
+      const priority = el.querySelector('[data-testid="sidebar-task-priority-indicator"]');
       const pr = el.querySelector('[data-testid^="pr-task-icon-"]');
-      if (!titleElement || !pr) return { found: false, gap: -1, titleTop: -1, prTop: -1 };
+      if (!titleElement || !priority || !pr) {
+        return { found: false, titleRight: -1, priorityLeft: -1, priorityRight: -1, prLeft: -1 };
+      }
       const titleBox = titleElement.getBoundingClientRect();
+      const priorityBox = priority.getBoundingClientRect();
       const prBox = pr.getBoundingClientRect();
       return {
         found: true,
-        gap: prBox.left - titleBox.right,
-        titleTop: titleBox.top,
-        prTop: prBox.top,
+        titleRight: titleBox.right,
+        priorityLeft: priorityBox.left,
+        priorityRight: priorityBox.right,
+        prLeft: prBox.left,
       };
     }, title);
     expect(spacing.found).toBe(true);
-    expect(Math.abs(spacing.titleTop - spacing.prTop)).toBeLessThan(4);
-    expect(spacing.gap).toBeGreaterThanOrEqual(0);
-    expect(spacing.gap).toBeLessThan(32);
+    expect(spacing.titleRight).toBeLessThanOrEqual(spacing.priorityLeft);
+    expect(spacing.priorityRight).toBeLessThanOrEqual(spacing.prLeft);
+
+    await row.getByRole("button", { name: "Task actions" }).tap();
+    const priorityMenu = testPage.getByTestId("task-context-priority");
+    await expect(priorityMenu.locator(".tabler-icon-flag")).toBeVisible();
+    await priorityMenu.tap();
+    const lowOption = testPage.getByTestId("task-context-priority-low");
+    await expect(lowOption).toBeVisible();
+    const prioritySubmenu = lowOption.locator("xpath=ancestor::*[@role='menu'][1]");
+    await prioritySubmenu.evaluate((element) =>
+      Promise.all(
+        element
+          .getAnimations({ subtree: true })
+          .map((animation) => animation.finished.catch(() => undefined)),
+      ),
+    );
+    const optionBox = await lowOption.boundingBox();
+    expect(optionBox).not.toBeNull();
+    expect(Math.round(optionBox!.height)).toBeGreaterThanOrEqual(44);
+    await lowOption.tap();
+    await expect(priorityIcon).toHaveAttribute("aria-label", "Priority Low");
+    await expect.poll(async () => (await apiClient.getTask(task.id)).priority).toBe("low");
     await assertNoDocumentHorizontalOverflow(testPage, "mobile sidebar PR badge spacing");
   });
 
@@ -198,9 +227,12 @@ test.describe("Mobile sidebar task actions", () => {
       workflow_step_id: seedData.startStepId,
     });
 
-    await testPage.addInitScript((taskId) => {
-      window.localStorage.setItem("kandev.taskColors", JSON.stringify({ [taskId]: "red" }));
-    }, task.id);
+    await apiClient.saveUserSettings({
+      sidebar_task_color_patch: {
+        colors: { [task.id]: "red" },
+        if_missing: false,
+      },
+    });
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
@@ -277,12 +309,12 @@ test.describe("Mobile sidebar task actions", () => {
     expect(cardBox.y).toBeGreaterThan(0);
   });
 
-  test("keeps the inline archive confirmation readable on a phone", async ({
+  test("keeps the archive confirmation sheet readable on a phone", async ({
     testPage,
     apiClient,
     seedData,
   }) => {
-    const task = await apiClient.seedTask(seedData.workspaceId, "Mobile archive inline target", {
+    const task = await apiClient.seedTask(seedData.workspaceId, "Mobile archive sheet target", {
       workflow_id: seedData.workflowId,
       workflow_step_id: seedData.startStepId,
     });
@@ -293,25 +325,32 @@ test.describe("Mobile sidebar task actions", () => {
     await testPage.getByTestId("mobile-session-menu").tap();
 
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
+    const drawerId = await drawer.getAttribute("id");
     const taskRow = drawer
       .getByTestId("sidebar-task-item")
-      .filter({ hasText: "Mobile archive inline target" });
+      .filter({ hasText: "Mobile archive sheet target" });
     await taskRow.getByRole("button", { name: "Task actions" }).tap();
     await testPage.getByRole("menuitem", { name: "Archive", exact: true }).tap();
 
-    const confirmation = taskRow.getByTestId("task-archive-inline-confirmation");
+    const confirmation = testPage.getByRole("dialog", { name: "Archive task?", exact: true });
     await expect(confirmation).toBeVisible();
+    await expect(confirmation).toHaveAttribute("id", drawerId!);
     await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
-    await expect(confirmation).toContainText("Mobile archive inline target");
+    await expect(testPage.getByTestId("task-archive-inline-confirmation")).toHaveCount(0);
+    await expect(confirmation).toContainText("Mobile archive sheet target");
+    await expectContentSizedBottomConfirmation(
+      confirmation,
+      confirmation.getByTestId("mobile-action-confirmation"),
+    );
 
     for (const button of [
       confirmation.getByRole("button", { name: "Cancel" }),
       confirmation.getByTestId("archive-task-confirm"),
     ]) {
       const box = await button.boundingBox();
-      if (!box) throw new Error("inline archive action has no layout box");
+      if (!box) throw new Error("archive sheet action has no layout box");
       expect(box.width).toBeGreaterThanOrEqual(44);
-      expect(box.height).toBeGreaterThanOrEqual(44);
+      expect(box.height).toBeGreaterThanOrEqual(48);
       await expect(button).toBeInViewport();
     }
 
@@ -320,6 +359,8 @@ test.describe("Mobile sidebar task actions", () => {
       client: document.documentElement.clientWidth,
     }));
     expect(pageWidth.scroll).toBeLessThanOrEqual(pageWidth.client);
+    await confirmation.getByRole("button", { name: "Cancel", exact: true }).tap();
+    await expect(taskRow).toBeVisible();
   });
 
   test("keeps the in-flight warning compact and reachable on a phone", async ({
@@ -349,6 +390,8 @@ test.describe("Mobile sidebar task actions", () => {
     await testPage.getByTestId("mobile-session-menu").tap();
 
     const drawer = testPage.getByRole("dialog", { name: "Tasks" });
+    const drawerId = await drawer.getAttribute("id");
+    const drawerHeight = (await drawer.boundingBox())!.height;
     const taskRow = drawer.getByTestId("sidebar-task-item").filter({ hasText: title });
     const heightBefore = await taskRow.evaluate(
       (element) => element.getBoundingClientRect().height,
@@ -359,10 +402,17 @@ test.describe("Mobile sidebar task actions", () => {
     await taskRow.getByRole("button", { name: "Task actions" }).tap();
     await testPage.getByRole("menuitem", { name: "Archive", exact: true }).tap();
 
-    const confirmation = taskRow.getByTestId("task-archive-inline-confirmation");
+    const confirmation = testPage.getByRole("dialog", { name: "Archive task?", exact: true });
     const warning = confirmation.getByTestId("still-working-warning");
     await expect(confirmation).toBeVisible();
+    await expect(confirmation).toHaveAttribute("id", drawerId!);
+    await expect(testPage.locator('[data-slot="drawer-content"]')).toHaveCount(1);
+    await expect(taskRow).toBeHidden();
     await expect(warning).toBeVisible();
+    const confirmationBox = await expectContentSizedBottomConfirmation(
+      confirmation,
+      confirmation.getByTestId("mobile-action-confirmation"),
+    );
     await prCapture.screenshot("mobile-in-flight-archive-warning", {
       caption: "Compact in-flight warning in phone archive confirmation",
     });
@@ -373,17 +423,16 @@ test.describe("Mobile sidebar task actions", () => {
     });
     expect(warningMetrics).toEqual({ fontSize: "12px", lineHeight: "20px" });
     await expect(warning).toHaveClass(/text-pretty/);
-    const heightOpen = await taskRow.evaluate((element) => element.getBoundingClientRect().height);
-    expect(heightOpen).toBeGreaterThan(heightBefore);
+    expect(confirmationBox.height).toBeLessThan(drawerHeight);
 
     for (const button of [
       confirmation.getByRole("button", { name: "Cancel" }),
       confirmation.getByTestId("archive-task-confirm"),
     ]) {
       const box = await button.boundingBox();
-      if (!box) throw new Error("in-flight inline archive action has no layout box");
+      if (!box) throw new Error("in-flight archive sheet action has no layout box");
       expect(box.width).toBeGreaterThanOrEqual(44);
-      expect(box.height).toBeGreaterThanOrEqual(44);
+      expect(box.height).toBeGreaterThanOrEqual(48);
       await expect(button).toBeInViewport();
     }
 
@@ -394,6 +443,11 @@ test.describe("Mobile sidebar task actions", () => {
     expect(pageWidth.scroll).toBeLessThanOrEqual(pageWidth.client);
     await confirmation.getByRole("button", { name: "Cancel" }).tap();
     await expect(confirmation).toBeHidden();
+    await expect(taskRow).toBeVisible();
+    expect(await taskRow.evaluate((element) => element.getBoundingClientRect().height)).toBeCloseTo(
+      heightBefore,
+      0,
+    );
   });
 
   test("keeps the tablet task switcher as a left-side sheet", async ({
@@ -454,6 +508,7 @@ test.describe("Mobile sidebar task actions", () => {
     testPage,
     apiClient,
     seedData,
+    prCapture,
   }) => {
     const taskTitle = "Mobile task with diff stats";
     const task = await apiClient.createTaskWithAgent(
@@ -516,6 +571,9 @@ test.describe("Mobile sidebar task actions", () => {
           .map((animation) => animation.finished.catch(() => undefined)),
       ),
     );
+    await prCapture.screenshot("mobile-task-row-menu-grouping", {
+      caption: "Phone task-row actions grouped inside the scrolling menu",
+    });
     const [menuBox, itemBox] = await Promise.all([menu.boundingBox(), archiveItem.boundingBox()]);
     const viewport = testPage.viewportSize();
     if (!menuBox || !itemBox || !viewport) throw new Error("mobile action sheet has no layout box");
@@ -533,6 +591,37 @@ test.describe("Mobile sidebar task actions", () => {
       scrollHeight: element.scrollHeight,
     }));
     expect(menuOverflow.scrollHeight).toBeGreaterThan(menuOverflow.clientHeight);
+    const menuLabels = (await menu.locator(":scope > [role='menuitem']").allTextContents()).map(
+      (text) => text.replace(/\s+/g, " ").trim(),
+    );
+    const menuIndex = (label: string) => menuLabels.indexOf(label);
+    for (const label of [
+      "Pin",
+      "Color",
+      "Priority",
+      "Edit",
+      "Rename",
+      "Duplicate",
+      "Create Subtask",
+      "Nest under",
+      "Link",
+      "Move to",
+      "Archive",
+      "Delete",
+    ]) {
+      expect(menuIndex(label), `${label} should be in the task action menu`).toBeGreaterThanOrEqual(
+        0,
+      );
+    }
+    expect(menuIndex("Pin")).toBeLessThan(menuIndex("Color"));
+    expect(menuIndex("Color")).toBeLessThan(menuIndex("Priority"));
+    expect(menuIndex("Priority")).toBeLessThan(menuIndex("Edit"));
+    expect(menuIndex("Edit")).toBeLessThan(menuIndex("Create Subtask"));
+    expect(menuIndex("Create Subtask")).toBeLessThan(menuIndex("Link"));
+    expect(menuIndex("Link")).toBeLessThan(menuIndex("Move to"));
+    expect(menuIndex("Move to")).toBeLessThan(menuIndex("Archive"));
+    expect(menuIndex("Archive")).toBeLessThan(menuIndex("Delete"));
+    await expect(menu.locator(":scope > [data-slot='context-menu-separator']")).toHaveCount(4);
     for (const actionName of [
       "Pin",
       "Edit",

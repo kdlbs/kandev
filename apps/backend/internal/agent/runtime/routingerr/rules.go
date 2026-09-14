@@ -13,6 +13,12 @@ var providerRules = map[string][]rule{
 	"claude-acp": {
 		mustRule("claude.stderr.quota.v1", `(?i)anthropic_quota_exceeded|credit balance|insufficient credits`, CodeQuotaLimited, ConfHigh),
 		mustRule("claude.stderr.rate.v1", `(?i)rate.?limit`, CodeRateLimited, ConfHigh),
+		// A proxy can reject every account credential before it sends a request
+		// upstream. This is a hard credential condition; a retry or a switch
+		// back to the same proxy cannot repair it. Require proxy_error plus the
+		// proxy's explicit credential/entitlement wording to avoid treating
+		// ordinary Anthropic auth messages as proxy failures.
+		mustRule("claude.proxy.credentials_refused.v1", `(?i)\bproxy_error\b[^\n]{0,512}\b(?:credentials?\s+(?:were\s+)?refused|oauth\s+entitlement)\b`, CodeMissingCredentials, ConfHigh),
 		mustRule("claude.stderr.auth.v1", `(?i)not authenticated|please log in|run `+"`"+`claude`+"`"+` to authenticate`, CodeAuthRequired, ConfHigh),
 		mustRule("claude.stderr.subscription.v1", `(?i)subscription`, CodeSubscriptionRequired, ConfMedium),
 		mustRule("claude.stderr.model.v1", `(?i)model.*not found|unknown model`, CodeModelUnavailable, ConfHigh),
@@ -25,7 +31,7 @@ var providerRules = map[string][]rule{
 		mustRule("codex.stderr.model.v1", `(?i)model_not_found`, CodeModelUnavailable, ConfHigh),
 	},
 	"opencode-acp": {
-		mustRule("opencode.stderr.usage_limit.v1", `(?i)\b\d+[- ]hour(?:s)?\s+usage\s+limit\s+reached\b`, CodeQuotaLimited, ConfHigh),
+		mustRule("opencode.stderr.usage_limit.v1", `(?i)\b(?:\d+[- ]hour(?:s)?|daily|weekly|monthly)\s+usage\s+limit\s+reached\b`, CodeQuotaLimited, ConfHigh),
 		mustRule("opencode.stderr.quota.v1", `(?i)quota`, CodeQuotaLimited, ConfMedium),
 		mustRule("opencode.stderr.rate.v1", `(?i)rate.?limit`, CodeRateLimited, ConfHigh),
 		mustRule("opencode.stderr.auth.v1", `(?i)unauthorized|invalid token`, CodeAuthRequired, ConfHigh),
@@ -44,6 +50,15 @@ var providerRules = map[string][]rule{
 
 func mustRule(id, pat string, code Code, conf Confidence) rule {
 	return rule{id: id, pattern: regexp.MustCompile(pat), code: code, confidence: conf}
+}
+
+// HasProviderRules reports whether providerID is a rules catalogue key (an
+// agent ID such as "opencode-acp"). Diagnostics can carry a different
+// provider identity, e.g. OpenCode's model-provider ID "opencode-go", which
+// must not be used for rule lookup.
+func HasProviderRules(providerID string) bool {
+	_, ok := providerRules[providerID]
+	return ok
 }
 
 func matchProviderRules(providerID, text string) (*Error, bool) {

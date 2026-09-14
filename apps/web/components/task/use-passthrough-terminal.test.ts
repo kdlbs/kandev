@@ -4,6 +4,7 @@ import {
   computeCanConnect,
   computeTerminalPaneState,
   isEnvironmentEnded,
+  resolveTouchScrollEnabled,
   shouldGuardPassthroughEscape,
 } from "./passthrough-terminal";
 import { reconnectDelayMs, startReconnectLoop } from "./ws-reconnect";
@@ -57,6 +58,26 @@ describe("shouldGuardPassthroughEscape", () => {
 describe("computeCanConnect", () => {
   it("lets the backend wait for an agent passthrough session that is not cached as ready", () => {
     expect(computeCanConnect("agent", "session-1", "session-1")).toBe(true);
+  });
+});
+
+describe("resolveTouchScrollEnabled", () => {
+  it("enables shell terminals by default for a coarse pointer", () => {
+    expect(resolveTouchScrollEnabled("shell", false)).toBe(true);
+  });
+
+  it("keeps the custom handler disabled for a fine pointer", () => {
+    expect(resolveTouchScrollEnabled("shell", true, true)).toBe(false);
+    expect(resolveTouchScrollEnabled("agent", true, true)).toBe(false);
+  });
+
+  it("keeps an explicit coarse-pointer opt-out", () => {
+    expect(resolveTouchScrollEnabled("shell", false, false)).toBe(false);
+  });
+
+  it("does not opt agent terminals in unless their caller requests it", () => {
+    expect(resolveTouchScrollEnabled("agent", false)).toBe(false);
+    expect(resolveTouchScrollEnabled("agent", false, true)).toBe(true);
   });
 });
 
@@ -186,6 +207,10 @@ describe("computeCanConnect on ended sessions", () => {
     expect(computeCanConnect("shell", "env-1", "session-1", true)).toBe(false);
   });
 
+  it("connects a shell terminal after workspace restoration", () => {
+    expect(computeCanConnect("shell", "env-1", "session-1", true, true)).toBe(true);
+  });
+
   it("still connects a shell terminal for a live environment", () => {
     expect(computeCanConnect("shell", "env-1", "session-1", false)).toBe(true);
   });
@@ -255,6 +280,11 @@ describe("computeTerminalPaneState", () => {
 
   it("still reports ended when a socket happens to be open", () => {
     expect(computeTerminalPaneState("shell", true, true)).toBe("ended");
+  });
+
+  it("reports a restored shell as connected or connecting instead of ended", () => {
+    expect(computeTerminalPaneState("shell", true, false, true)).toBe("connecting");
+    expect(computeTerminalPaneState("shell", true, true, true)).toBe("connected");
   });
 
   it("reports connecting only while a live session is not yet attached", () => {

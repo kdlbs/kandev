@@ -1,5 +1,10 @@
 import { type Locator, type Page, expect } from "@playwright/test";
 
+type StepProfileSessionLifecycle = {
+  startPolicy: "reuse" | "new";
+  endPolicy: "complete" | "park";
+};
+
 export class WorkflowSettingsPage {
   readonly page: Page;
   readonly addWorkflowButton: Locator;
@@ -90,6 +95,35 @@ export class WorkflowSettingsPage {
     return card.locator(".group.relative").filter({ hasText: stepName });
   }
 
+  completeTaskOnEnterCheckbox(card: Locator, stepId: string): Locator {
+    return card.getByTestId(`${stepId}-complete-task-on-enter-checkbox`);
+  }
+
+  completeTaskOnEnterHelp(card: Locator, stepId: string): Locator {
+    return card.getByTestId(`${stepId}-complete-task-on-enter-help`);
+  }
+
+  async reorderStep(card: Locator, fromName: string, toName: string): Promise<void> {
+    const source = this.stepNodeByName(card, fromName).locator("button").first();
+    const target = this.stepNodeByName(card, toName);
+    const sourceBox = await source.boundingBox();
+    const targetBox = await target.boundingBox();
+    if (!sourceBox || !targetBox) throw new Error(`Cannot drag ${fromName} to ${toName}`);
+    const sourcePoint = {
+      x: sourceBox.x + sourceBox.width / 2,
+      y: sourceBox.y + sourceBox.height / 2,
+    };
+    const targetPoint = {
+      x: targetBox.x + targetBox.width / 2,
+      y: targetBox.y + targetBox.height / 2,
+    };
+    await this.page.mouse.move(sourcePoint.x, sourcePoint.y);
+    await this.page.mouse.down();
+    await this.page.mouse.move(sourcePoint.x + 12, sourcePoint.y, { steps: 2 });
+    await this.page.mouse.move(targetPoint.x, targetPoint.y, { steps: 8 });
+    await this.page.mouse.up();
+  }
+
   /** A replay-cycle diagnostic rendered inside a workflow card or guard dialog. */
   cycleDiagnostic(container: Locator, autoStartStepId: string): Locator {
     return container.getByTestId(`workflow-cycle-diagnostic-${autoStartStepId}`);
@@ -170,15 +204,11 @@ export class WorkflowSettingsPage {
   /** Save every dirty workflow contributor through the route-level action. */
   async saveChanges(touch = false): Promise<void> {
     await this.submitSaveChanges(touch);
-    await expect
-      .poll(
-        async () =>
-          (await this.floatingSave.isVisible())
-            ? await this.floatingSave.getAttribute("data-dirty-contributors")
-            : null,
-        { timeout: 15_000 },
-      )
-      .toBeNull();
+    // The coordinator reports `saved` only after every contributor's save
+    // promise has settled. Waiting for that state avoids treating the
+    // contributor-id diagnostic attribute as a completion signal while a
+    // slow save is still in flight.
+    await expect(this.floatingSave).toHaveAttribute("data-status", "saved", { timeout: 30_000 });
   }
 
   /** The delete workflow button within a card. */
@@ -248,9 +278,40 @@ export class WorkflowSettingsPage {
     return card.getByTestId("workflow-agent-profile-select");
   }
 
-  /** The step agent profile override select trigger in the step config panel within a workflow card. */
+  /** The step agent profile and session policy selector in a workflow card. */
   stepAgentProfileSelect(card: Locator): Locator {
     return card.getByTestId("step-agent-profile-select");
+  }
+
+  /** The nested session lifecycle entry in the selected step's profile selector. */
+  stepProfileSessionLifecycleSelect(): Locator {
+    // DrawerContent is portalled outside the workflow card on mobile. The
+    // settings page has one open step selector at a time, so the suffix is
+    // enough to address its nested navigation surface in either layout.
+    return this.page.locator('[data-testid$="-profile-session-lifecycle-select"]');
+  }
+
+  /** Set a step's independent session start and end behavior through its selector. */
+  async setStepProfileSessionLifecycle(
+    card: Locator,
+    stepName: string,
+    stepId: string,
+    lifecycle: StepProfileSessionLifecycle,
+    touch = false,
+  ) {
+    await this.selectStep(card, stepName, touch);
+    await this.activate(this.stepAgentProfileSelect(card), touch);
+    await this.activate(this.stepProfileSessionLifecycleSelect(), touch);
+    await this.activate(
+      this.page.getByTestId(`${stepId}-profile-session-start-${lifecycle.startPolicy}`),
+      touch,
+    );
+    await this.activate(
+      this.page.getByTestId(`${stepId}-profile-session-end-${lifecycle.endPolicy}`),
+      touch,
+    );
+    await this.page.keyboard.press("Escape");
+    await expect(this.stepAgentProfileSelect(card)).toHaveAttribute("aria-expanded", "false");
   }
 
   /** Hover over a step node to reveal the trash button, then click it. */

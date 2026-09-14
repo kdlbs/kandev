@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from "react";
 import { useAppStore } from "@/components/state-provider";
 import { prCommitsResource, type PRCommitsState } from "./pr-commits-resource";
 
@@ -13,6 +13,7 @@ export function resolvePRCommitsView(
   if (state.sourceKey === requestedKey) {
     return {
       commits: state.commits,
+      authoritativeCommits: state.authoritativeCommits,
       providerHead: state.providerHead,
       providerCommitsComplete: state.providerCommitsComplete,
       loading: state.loading,
@@ -21,6 +22,7 @@ export function resolvePRCommitsView(
   }
   return {
     commits: [],
+    authoritativeCommits: [],
     providerHead: null,
     providerCommitsComplete: false,
     loading: requestedKey !== "",
@@ -43,25 +45,38 @@ export function usePRCommits(
   const sourceKey = hasParams
     ? `${workspaceId}/${owner}/${repo}/${prNumber}/${refreshKey ?? ""}`
     : "";
-  const subscribe = useCallback(
-    (listener: () => void) => prCommitsResource.subscribe(sourceKey, listener),
-    [sourceKey],
+  const request = useMemo(
+    () =>
+      hasParams
+        ? {
+            workspaceId,
+            owner,
+            repo,
+            prNumber,
+            sourceKey,
+          }
+        : null,
+    [hasParams, workspaceId, owner, repo, prNumber, sourceKey],
   );
-  const getSnapshot = useCallback(() => prCommitsResource.getSnapshot(sourceKey), [sourceKey]);
+  const subscribe = useCallback(
+    (listener: () => void) => prCommitsResource.subscribe(request, listener),
+    [request],
+  );
+  const getSnapshot = useCallback(() => prCommitsResource.getSnapshot(request), [request]);
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const paramsKeyRef = useRef<string>("");
 
   const refresh = useCallback(async () => {
-    if (!workspaceId || !owner || !repo || !prNumber) return null;
-    return prCommitsResource.load({ workspaceId, owner, repo, prNumber, sourceKey }, true);
-  }, [workspaceId, owner, repo, prNumber, sourceKey]);
+    if (!request) return null;
+    return prCommitsResource.load(request, true);
+  }, [request]);
 
   useEffect(() => {
     if (sourceKey === paramsKeyRef.current) return;
     paramsKeyRef.current = sourceKey;
-    if (!workspaceId || !owner || !repo || !prNumber) return;
-    void prCommitsResource.load({ workspaceId, owner, repo, prNumber, sourceKey });
-  }, [workspaceId, owner, repo, prNumber, sourceKey]);
+    if (!request) return;
+    void prCommitsResource.load(request);
+  }, [request, sourceKey]);
 
   return { ...resolvePRCommitsView({ sourceKey, ...snapshot }, sourceKey), refresh };
 }

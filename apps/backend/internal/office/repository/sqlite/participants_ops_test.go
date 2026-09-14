@@ -18,6 +18,19 @@ func seedParticipantTask(t *testing.T, repo *sqlite.Repository, taskID, stepID s
 	}
 }
 
+// seedParticipantAgent inserts a minimal, live agent_profiles row so
+// AddTaskParticipant's existence check (AC-OFFICE-SEAT-PROVENANCE-005.8)
+// treats id as a real agent eligible to claim a cast seat.
+func seedParticipantAgent(t *testing.T, repo *sqlite.Repository, id string) {
+	t.Helper()
+	if _, err := repo.ExecRaw(context.Background(), `
+		INSERT INTO agent_profiles (id, agent_id, name, agent_display_name, workspace_id, role, created_at, updated_at)
+		VALUES (?, '', ?, ?, 'ws-1', '', datetime('now'), datetime('now'))
+	`, id, id, id); err != nil {
+		t.Fatalf("seed agent profile %s: %v", id, err)
+	}
+}
+
 func TestGetTaskWorkflowStepID(t *testing.T) {
 	repo := newSearchTestRepo(t)
 	ctx := context.Background()
@@ -53,7 +66,7 @@ func TestAddTaskParticipant_IsIdempotentPerNaturalKey(t *testing.T) {
 
 	seedParticipantTask(t, repo, "ap-1", "step-1")
 
-	if err := repo.AddTaskParticipant(ctx, "ap-1", "agent-r", "reviewer"); err != nil {
+	if _, err := repo.AddTaskParticipant(ctx, "ap-1", "agent-r", "reviewer"); err != nil {
 		t.Fatalf("AddTaskParticipant: %v", err)
 	}
 	got, err := repo.ListTaskParticipants(ctx, "ap-1", "reviewer")
@@ -69,7 +82,7 @@ func TestAddTaskParticipant_IsIdempotentPerNaturalKey(t *testing.T) {
 	}
 
 	// A second identical call adds no row.
-	if err := repo.AddTaskParticipant(ctx, "ap-1", "agent-r", "reviewer"); err != nil {
+	if _, err := repo.AddTaskParticipant(ctx, "ap-1", "agent-r", "reviewer"); err != nil {
 		t.Fatalf("AddTaskParticipant (repeat): %v", err)
 	}
 	if n := participantRowCount(t, repo, "ap-1"); n != 1 {
@@ -77,10 +90,10 @@ func TestAddTaskParticipant_IsIdempotentPerNaturalKey(t *testing.T) {
 	}
 
 	// A different role or agent is a distinct participant.
-	if err := repo.AddTaskParticipant(ctx, "ap-1", "agent-r", "approver"); err != nil {
+	if _, err := repo.AddTaskParticipant(ctx, "ap-1", "agent-r", "approver"); err != nil {
 		t.Fatalf("AddTaskParticipant (other role): %v", err)
 	}
-	if err := repo.AddTaskParticipant(ctx, "ap-1", "agent-s", "reviewer"); err != nil {
+	if _, err := repo.AddTaskParticipant(ctx, "ap-1", "agent-s", "reviewer"); err != nil {
 		t.Fatalf("AddTaskParticipant (other agent): %v", err)
 	}
 	if n := participantRowCount(t, repo, "ap-1"); n != 3 {
@@ -116,8 +129,9 @@ func TestAddTaskParticipant_ClaimsUndecidedAutoSeat(t *testing.T) {
 
 	seedParticipantTask(t, repo, "ap-claim", "step-1")
 	seedAutoSeat(t, repo, "auto-seat-1", "step-1", "ap-claim", "reviewer", "agent-auto")
+	seedParticipantAgent(t, repo, "agent-human")
 
-	if err := repo.AddTaskParticipant(ctx, "ap-claim", "agent-human", "reviewer"); err != nil {
+	if _, err := repo.AddTaskParticipant(ctx, "ap-claim", "agent-human", "reviewer"); err != nil {
 		t.Fatalf("AddTaskParticipant: %v", err)
 	}
 
@@ -152,6 +166,7 @@ func TestAddTaskParticipant_DoesNotClaimADecidedAutoSeat(t *testing.T) {
 
 	seedParticipantTask(t, repo, "ap-decided", "step-1")
 	seedAutoSeat(t, repo, "auto-seat-2", "step-1", "ap-decided", "reviewer", "agent-auto")
+	seedParticipantAgent(t, repo, "agent-human")
 	if _, err := repo.ExecRaw(ctx, `
 		INSERT INTO workflow_step_decisions (id, task_id, step_id, participant_id, decision, decided_at)
 		VALUES ('dec-1', 'ap-decided', 'step-1', 'auto-seat-2', 'approved', datetime('now'))
@@ -159,7 +174,7 @@ func TestAddTaskParticipant_DoesNotClaimADecidedAutoSeat(t *testing.T) {
 		t.Fatalf("seed decision: %v", err)
 	}
 
-	if err := repo.AddTaskParticipant(ctx, "ap-decided", "agent-human", "reviewer"); err != nil {
+	if _, err := repo.AddTaskParticipant(ctx, "ap-decided", "agent-human", "reviewer"); err != nil {
 		t.Fatalf("AddTaskParticipant: %v", err)
 	}
 
@@ -180,17 +195,23 @@ func TestAddTaskParticipant_DoesNotClaimADecidedAutoSeat(t *testing.T) {
 // legitimate multi-reviewer scenario TestAddTaskParticipant_IsIdempotentPerNaturalKey
 // already covers for distinct agents: two manually-added seats (both
 // provenance="manual") for the same role are never collapsed by the claim
-// logic, since neither carries provenance="auto".
+// logic, since neither carries provenance="auto". Both agents are seeded as
+// live agent_profiles rows so each registration actually reaches
+// findClaimableAutoSeat's claim search (and finds no "auto" seat to claim)
+// instead of short-circuiting at the unknown-agent check attemptClaim
+// applies first.
 func TestAddTaskParticipant_MultiReviewerManualSeatsUntouched(t *testing.T) {
 	repo := newSearchTestRepo(t)
 	ctx := context.Background()
 
 	seedParticipantTask(t, repo, "ap-multi", "step-1")
+	seedParticipantAgent(t, repo, "agent-one")
+	seedParticipantAgent(t, repo, "agent-two")
 
-	if err := repo.AddTaskParticipant(ctx, "ap-multi", "agent-one", "reviewer"); err != nil {
+	if _, err := repo.AddTaskParticipant(ctx, "ap-multi", "agent-one", "reviewer"); err != nil {
 		t.Fatalf("AddTaskParticipant (first): %v", err)
 	}
-	if err := repo.AddTaskParticipant(ctx, "ap-multi", "agent-two", "reviewer"); err != nil {
+	if _, err := repo.AddTaskParticipant(ctx, "ap-multi", "agent-two", "reviewer"); err != nil {
 		t.Fatalf("AddTaskParticipant (second): %v", err)
 	}
 
@@ -207,7 +228,7 @@ func TestAddTaskParticipant_SkipsTasksWithoutAStep(t *testing.T) {
 
 	seedParticipantTask(t, repo, "ap-nostep", "")
 
-	if err := repo.AddTaskParticipant(ctx, "ap-nostep", "agent-r", "reviewer"); err != nil {
+	if _, err := repo.AddTaskParticipant(ctx, "ap-nostep", "agent-r", "reviewer"); err != nil {
 		t.Fatalf("AddTaskParticipant = %v, want nil", err)
 	}
 	if n := participantRowCount(t, repo, "ap-nostep"); n != 0 {
@@ -215,7 +236,7 @@ func TestAddTaskParticipant_SkipsTasksWithoutAStep(t *testing.T) {
 	}
 
 	// Same for a task that does not exist at all.
-	if err := repo.AddTaskParticipant(ctx, "ap-ghost", "agent-r", "reviewer"); err != nil {
+	if _, err := repo.AddTaskParticipant(ctx, "ap-ghost", "agent-r", "reviewer"); err != nil {
 		t.Fatalf("AddTaskParticipant(missing task) = %v, want nil", err)
 	}
 	if n := participantRowCount(t, repo, "ap-ghost"); n != 0 {
@@ -233,7 +254,7 @@ func TestRemoveTaskParticipant(t *testing.T) {
 		{"agent-r", "approver"},
 		{"agent-s", "reviewer"},
 	} {
-		if err := repo.AddTaskParticipant(ctx, "rp-1", spec.agent, spec.role); err != nil {
+		if _, err := repo.AddTaskParticipant(ctx, "rp-1", spec.agent, spec.role); err != nil {
 			t.Fatalf("AddTaskParticipant(%v): %v", spec, err)
 		}
 	}

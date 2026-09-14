@@ -4,6 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-SESSION-DELETE-RESOURCE-CLEANUP-001
 created: 2026-08-08
+updated: 2026-08-30
 owners:
   - cfl
 ---
@@ -17,7 +18,7 @@ This design preserves the technical source detail for `REQ-TASKS-SESSION-DELETE-
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-TASKS-SESSION-DELETE-RESOURCE-CLEANUP-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-TASKS-SESSION-DELETE-RESOURCE-CLEANUP-001` | [Migrated source detail](#migrated-source-detail), [Frontend environment-handle continuity](#frontend-environment-handle-continuity) |
 
 ## Migrated source detail
 
@@ -65,6 +66,28 @@ task lifecycle operation takes responsibility for cleanup.
 - Session-delete confirmations describe the conversation deletion and explicitly
   say that the task workspace and files remain. They do not warn that
   uncommitted/unpushed workspace state will be removed.
+
+## Frontend environment-handle continuity
+
+Workspace-derived frontend state is keyed by `TaskEnvironment`, while several
+agentctl requests still require a live session ID as their lookup handle.
+Across ordinary tab switches, `useEnvironmentSessionId` can retain a session ID
+when both sessions resolve to the same environment. The retained handle is
+valid only while it is active or remains mapped to that environment.
+
+Session deletion first selects a surviving session. Then it purges the deleted
+session's runtime state. When the purge removes the retained mapping,
+`useEnvironmentSessionId` promotes the current active session as the lookup
+handle. The environment identity does not change. Environment-keyed caches for
+Git status, commits, cumulative diffs, and remote contributions remain intact.
+These caches continue to serve desktop and mobile Changes surfaces. File-review
+markers remain session-scoped and are intentionally outside this continuity
+guarantee.
+
+The selector does not treat a missing mapping as proof that an inactive cached
+session is usable. Thus, downstream hooks do not use a deleted session ID as a
+synthetic environment key. They also do not send agentctl requests for a
+session that no longer exists.
 
 ## Data Model
 
@@ -312,6 +335,10 @@ remain the authorization boundary for physical cleanup.
   retries after failure and backend restart using its persisted snapshot.
 - If another task/session still borrows the environment, cleanup preserves or
   transfers the resource rather than deleting it.
+- If the frontend removes the active session while another session shares its
+  environment, the environment cache remains authoritative and the surviving
+  session becomes the lookup handle. The Changes surface does not fall back to
+  an empty cache keyed by the deleted session ID.
 
 ## Persistence Guarantees
 
@@ -337,6 +364,10 @@ remain the authorization boundary for physical cleanup.
   **THEN** it reuses the task workspace and observes the marker.
 - **GIVEN** two sessions sharing a task workspace, **WHEN** one is deleted,
   **THEN** the other continues using the same directory without interruption.
+- **GIVEN** two sessions share a task environment and Changes shows workspace
+  commits or branch-matching remote contribution files, **WHEN** the active
+  session is deleted and the sibling becomes active, **THEN** desktop and mobile
+  Changes continue to show that environment's data without a reload.
 - **GIVEN** the final session was deleted and the backend restarted, **WHEN** the
   task is archived, **THEN** the task becomes archived and its canonical
   worktree is scheduled for asynchronous cleanup unless shared.

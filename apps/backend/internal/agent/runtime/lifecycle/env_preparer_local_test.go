@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/worktree"
@@ -42,6 +43,72 @@ func TestLocalPreparer_ReuseRequiredSkipsCheckoutAndSetup(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("reuse-required preparation ran setup script: stat error = %v", err)
+	}
+}
+
+func TestLocalPreparer_ReuseRequiredValidatesRepositoryIdentity(t *testing.T) {
+	workspacePath := initGitRepo(t)
+	otherRepository := initGitRepo(t)
+	preparer := NewLocalPreparer(newTestLocalLogger())
+
+	result, err := preparer.Prepare(context.Background(), &EnvPrepareRequest{
+		WorkspacePath:          workspacePath,
+		RepositoryPath:         otherRepository,
+		RepositoryID:           "repository-1",
+		WorkspaceReuseRequired: true,
+	}, nil)
+	if err == nil {
+		t.Fatal("Prepare() error = nil, want reuse identity rejection")
+	}
+	if result == nil || result.Success {
+		t.Fatalf("Prepare() result = %#v, want failed result", result)
+	}
+
+	result, err = preparer.Prepare(context.Background(), &EnvPrepareRequest{
+		WorkspacePath:          workspacePath,
+		RepositoryPath:         workspacePath,
+		RepositoryID:           "repository-1",
+		WorkspaceReuseRequired: true,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Prepare() matching reuse error = %v", err)
+	}
+	if result == nil || !result.Success {
+		t.Fatalf("Prepare() matching reuse result = %#v, want success", result)
+	}
+}
+
+func TestLocalPreparer_RejectsRepoBackedNonGitWorkspace(t *testing.T) {
+	workspacePath := t.TempDir()
+	preparer := NewLocalPreparer(newTestLocalLogger())
+
+	result, err := preparer.Prepare(context.Background(), &EnvPrepareRequest{
+		WorkspacePath:  workspacePath,
+		RepositoryPath: workspacePath,
+		RepositoryID:   "repository-1",
+	}, nil)
+	if err == nil {
+		t.Fatal("Prepare() error = nil, want non-Git workspace rejection")
+	}
+	if result == nil || result.Success {
+		t.Fatalf("Prepare() result = %#v, want failed result", result)
+	}
+}
+
+func TestLocalPreparer_AcceptsMatchingRepoBackedGitWorkspace(t *testing.T) {
+	workspacePath := initGitRepo(t)
+	preparer := NewLocalPreparer(newTestLocalLogger())
+
+	result, err := preparer.Prepare(context.Background(), &EnvPrepareRequest{
+		WorkspacePath:  workspacePath,
+		RepositoryPath: workspacePath,
+		RepositoryID:   "repository-1",
+	}, nil)
+	if err != nil {
+		t.Fatalf("Prepare() error = %v", err)
+	}
+	if result == nil || !result.Success {
+		t.Fatalf("Prepare() result = %#v, want success", result)
 	}
 }
 
@@ -407,6 +474,10 @@ func TestLocalPreparer_PreservesFetchFailureWhenCheckoutAlsoFails(t *testing.T) 
 	fakeGit := filepath.Join(fakeBin, "git")
 	script := `#!/bin/sh
 case "$1" in
+rev-parse)
+  pwd
+  exit 0
+  ;;
 fetch)
   echo "fatal: unable to access 'https://oauth2:github-token-that-must-not-leak@github.com/kdlbs/kandev.git/': Could not resolve host: github.com" >&2
   exit 128
@@ -441,6 +512,29 @@ esac
 		if strings.Contains(result.ErrorMessage, secret) || strings.Contains(err.Error(), secret) {
 			t.Fatalf("checkout failure leaked %q\nresult: %s\nerror: %v", secret, result.ErrorMessage, err)
 		}
+	}
+}
+
+func TestLocalCheckoutFetchDeadline(t *testing.T) {
+	binDir := t.TempDir()
+	fakeGit := filepath.Join(binDir, "git")
+	if err := os.WriteFile(fakeGit, []byte("#!/bin/sh\nsleep 10\n"), 0o755); err != nil {
+		t.Fatalf("write fake git: %v", err)
+	}
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	_, err := runLocalGit(ctx, t.TempDir(), "fetch", "origin", "main")
+	if err == nil {
+		t.Fatal("runLocalGit() error = nil, want deadline failure")
+	}
+	if ctx.Err() == nil {
+		t.Fatal("runLocalGit() returned before the caller context expired")
+	}
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("runLocalGit() took %s after cancellation", elapsed)
 	}
 }
 

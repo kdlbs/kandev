@@ -3,6 +3,7 @@ import path from "node:path";
 import type { Route } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
 import {
+  mockProgressiveStorageOverview,
   mockTemporaryArtifactOverview,
   seedManagedGoCache,
 } from "../../helpers/storage-maintenance";
@@ -35,7 +36,7 @@ test.describe("Mobile storage maintenance", () => {
       });
     });
 
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/storage");
     const trigger = testPage.getByTestId("storage-resource-temporary-artifacts-trigger");
     await trigger.tap();
     const cleanButton = testPage.getByTestId("storage-temporary-artifacts-clean");
@@ -86,7 +87,7 @@ test.describe("Mobile storage maintenance", () => {
       });
     });
 
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/storage");
     await testPage.getByTestId("storage-run-now").tap();
     await expect(testPage.getByTestId("storage-busy")).toContainText("A test command is running");
     await expect(testPage.getByTestId("storage-run-anyway")).toBeVisible();
@@ -119,7 +120,7 @@ test.describe("Mobile storage maintenance", () => {
     await mobile.mobileMenuButton.click();
     await testPage.getByRole("link", { name: "Settings" }).click();
     const index = testPage.getByTestId("settings-index");
-    await index.locator('a[href="/settings/system/data-storage"]').click();
+    await index.locator('a[href="/settings/system/storage"]').click();
 
     await expect(testPage.getByTestId("storage-settings-page")).toBeVisible();
     await expect(testPage.getByTestId("storage-disk-capacity-card")).toBeVisible();
@@ -215,7 +216,7 @@ test.describe("Mobile storage maintenance", () => {
 
     await testPage.route(overviewPattern, holdOverview);
     try {
-      await testPage.goto("/settings/system/data-storage");
+      await testPage.goto("/settings/system/storage");
       await overviewObserved;
 
       const spinner = testPage.getByTestId("storage-overview-spinner");
@@ -245,6 +246,36 @@ test.describe("Mobile storage maintenance", () => {
       if (overviewRequestStarted) await overviewSettled;
       await testPage.unroute(overviewPattern, holdOverview);
     }
+  });
+
+  test("opens progressive analysis timing by touch without overflow", async ({
+    testPage,
+    prCapture,
+  }) => {
+    const progressive = await mockProgressiveStorageOverview(testPage);
+    await testPage.goto("/settings/system/storage");
+
+    await expect(testPage.getByTestId("storage-analysis-total")).toContainText("Counted so far");
+    progressive.complete();
+    await expect(testPage.getByTestId("storage-analysis-total")).toContainText("Total counted");
+    const timingHelp = testPage.getByTestId("storage-analysis-timing-help");
+    const box = await timingHelp.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.width).toBeGreaterThanOrEqual(44);
+    expect(box!.height).toBeGreaterThanOrEqual(44);
+    if (prCapture.capturing) {
+      await timingHelp.evaluate((element) =>
+        element.scrollIntoView({ block: "center", inline: "nearest" }),
+      );
+    }
+    await timingHelp.tap();
+    await expect(testPage.getByRole("tooltip")).toContainText("Scan duration");
+    await prCapture.screenshot("progressive-analysis-timing", {
+      caption: "Mobile storage opens progressive scan timing by touch",
+    });
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
   });
 
   test("keeps both quarantine cleanup actions reachable on a phone", async ({
@@ -280,7 +311,7 @@ test.describe("Mobile storage maintenance", () => {
         body: JSON.stringify({ job_id: "mobile-force-purge" }),
       });
     });
-    await testPage.goto("/settings/system/data-storage");
+    await testPage.goto("/settings/system/storage");
     await expect(testPage.getByTestId("storage-quarantine-force-clear")).toBeVisible();
     await testPage.getByTestId("storage-quarantine-card").scrollIntoViewIfNeeded();
     await prCapture.screenshot("quarantine-actions", {

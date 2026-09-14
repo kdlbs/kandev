@@ -38,6 +38,12 @@ function changesTab(testPage: Page) {
   });
 }
 
+function vscodeTab(testPage: Page) {
+  return testPage.locator(".dv-tab:visible", {
+    has: testPage.locator(".dv-default-tab:visible").filter({ hasText: /^VS Code/ }),
+  });
+}
+
 async function changesCountForSession(testPage: Page, sessionId: string): Promise<number | null> {
   return testPage.evaluate((sid) => {
     type StoreWindow = Window & {
@@ -87,7 +93,7 @@ async function setGitStatusForSession(testPage: Page, sessionId: string, changed
               options?: { allowEmpty?: boolean },
             ) => void;
             setGitStatus: (
-              sessionId: string,
+              taskEnvironmentId: string,
               status: {
                 branch: string;
                 remote_branch: string | null;
@@ -107,14 +113,16 @@ async function setGitStatusForSession(testPage: Page, sessionId: string, changed
       };
       const store = (window as StoreWindow).__KANDEV_E2E_STORE__;
       if (!store) throw new Error("E2E store bridge missing");
-      store.getState().setSessionCommits(sid, [], { allowEmpty: true });
+      const state = store.getState();
+      const taskEnvironmentId = state.environmentIdBySessionId[sid] ?? sid;
+      state.setSessionCommits(sid, [], { allowEmpty: true });
       const fileMap = Object.fromEntries(
         files.map((path): [string, FileInfo] => [
           path,
           { path, status: "untracked", staged: false, additions: 1, deletions: 0 },
         ]),
       );
-      store.getState().setGitStatus(sid, {
+      state.setGitStatus(taskEnvironmentId, {
         branch: "main",
         remote_branch: null,
         modified: [],
@@ -130,26 +138,6 @@ async function setGitStatusForSession(testPage: Page, sessionId: string, changed
     },
     { sid: sessionId, files: changedFiles },
   );
-}
-
-async function moveChangesToTerminalGroupAndFocusTerminal(testPage: Page) {
-  await testPage.evaluate(() => {
-    type Group = { id: string };
-    type PanelApi = {
-      moveTo: (opts: { group: Group }) => void;
-      setActive: () => void;
-    };
-    type Panel = { id: string; api: PanelApi; group?: Group };
-    type Api = { getPanel: (id: string) => Panel | undefined };
-    const dockview = (window as unknown as { __dockviewApi__?: Api }).__dockviewApi__;
-    const changes = dockview?.getPanel("changes");
-    const terminal = dockview?.getPanel("terminal-default");
-    if (!changes || !terminal?.group) {
-      throw new Error("Dockview changes or terminal panel was not available");
-    }
-    changes.api.moveTo({ group: terminal.group });
-    terminal.api.setActive();
-  });
 }
 
 async function moveChangesToChatGroupAndFocusChat(testPage: Page) {
@@ -360,7 +348,7 @@ test.describe("Changes panel focus behavior", () => {
     await expect(session.chat).toBeVisible();
   });
 
-  test("new git updates focus the changes tab in its current non-agent group", async ({
+  test("new git updates do not steal focus from the VS Code group", async ({
     testPage,
     apiClient,
     seedData,
@@ -374,7 +362,7 @@ test.describe("Changes panel focus behavior", () => {
 
     const task = await apiClient.createTaskWithAgent(
       seedData.workspaceId,
-      "Moved changes panel focus test",
+      "VS Code group focus test",
       seedData.agentProfileId,
       {
         workflow_id: seedData.workflowId,
@@ -393,16 +381,29 @@ test.describe("Changes panel focus behavior", () => {
       testPage.locator(".dv-default-tab").filter({ hasText: /^Changes \(1\)$/ }),
     ).toBeVisible({ timeout: 15_000 });
 
-    await moveChangesToTerminalGroupAndFocusTerminal(testPage);
-    await expect(changesTab(testPage)).not.toHaveClass(/dv-active-tab/, { timeout: 5_000 });
+    const presetTrigger = testPage.getByTestId("layout-preset-trigger");
+    await presetTrigger.click();
+    await testPage.locator('[data-testid="layout-preset-item"][data-preset-id="vscode"]').click();
+
+    const activeVscodeTab = vscodeTab(testPage);
+    await expect(activeVscodeTab).toBeVisible({ timeout: 15_000 });
+    await activeVscodeTab.click();
+    await expect(activeVscodeTab).toHaveClass(/dv-active-tab/, { timeout: 5_000 });
 
     git.createFile("second-change.txt", "two");
     await expect(
       testPage.locator(".dv-default-tab").filter({ hasText: /^Changes \(2\)$/ }),
     ).toBeVisible({ timeout: 15_000 });
 
-    await expect(changesTab(testPage)).toHaveClass(/dv-active-tab/, { timeout: 5_000 });
-    await expect(session.changesFileRow("second-change.txt")).toBeVisible({ timeout: 10_000 });
+    await dwell(
+      testPage,
+      2_000,
+      "negative-assertion",
+      "the VS Code group must remain active; a forbidden Changes auto-focus publishes no completion event, so the bounded negative window gives it room to fire",
+    );
+
+    await expect(activeVscodeTab).toHaveClass(/dv-active-tab/, { timeout: 5_000 });
+    await expect(changesTab(testPage)).not.toHaveClass(/dv-active-tab/, { timeout: 5_000 });
   });
 
   test("new git updates focus changes after switching to an inactive task", async ({

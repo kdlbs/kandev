@@ -9,10 +9,55 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/plancomments"
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+type admissionOrderMessageRepository struct {
+	repository.MessageRepository
+	events []string
+}
+
+func (r *admissionOrderMessageRepository) AcquirePlanCommentAdmission(
+	ctx context.Context,
+	_ string,
+) (context.Context, func(), error) {
+	r.events = append(r.events, "acquire-plan")
+	return ctx, func() { r.events = append(r.events, "release-plan") }, nil
+}
+
+func (r *admissionOrderMessageRepository) AcquireMessageAdmission(
+	ctx context.Context,
+	_ string,
+) (context.Context, func(), error) {
+	r.events = append(r.events, "acquire-message")
+	return ctx, func() { r.events = append(r.events, "release-message") }, nil
+}
+
+func TestPlanCommentMessageAdmissionUsesStableLockOrder(t *testing.T) {
+	repo := &admissionOrderMessageRepository{}
+	svc := &Service{messages: repo}
+	_, release, err := svc.acquireMessageCreateAdmission(context.Background(), "message-1", &CreateMessageRequest{
+		TaskID:          "task-1",
+		PlanCommentRefs: []models.TaskPlanCommentRef{{ID: "comment-1", Version: 1}},
+	})
+	if err != nil {
+		t.Fatalf("acquire admission: %v", err)
+	}
+	release()
+	want := []string{"acquire-plan", "acquire-message", "release-message", "release-plan"}
+	if len(repo.events) != len(want) {
+		t.Fatalf("admission events = %v, want %v", repo.events, want)
+	}
+	for index := range want {
+		if repo.events[index] != want[index] {
+			t.Fatalf("admission events = %v, want %v", repo.events, want)
+		}
+	}
+}
 
 // newMessageTestService seeds one workspace/workflow/task/session so message
 // writes have a real session and task to hang off.
@@ -32,8 +77,14 @@ func newMessageTestService(t *testing.T) (*Service, *MockEventBus, *sqliterepo.R
 	}); err != nil {
 		t.Fatalf("create task: %v", err)
 	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-msg", TaskID: "task-msg", Status: models.TaskEnvironmentStatusReady,
+		WorkspacePath: "/workspace/messages",
+	}); err != nil {
+		t.Fatalf("create task environment: %v", err)
+	}
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
-		ID: "sess-msg", TaskID: "task-msg", State: models.TaskSessionStateCreated,
+		ID: "sess-msg", TaskID: "task-msg", TaskEnvironmentID: "env-msg", State: models.TaskSessionStateCreated,
 	}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -116,8 +167,8 @@ func TestCreateMessageAppliesDefaultsStartsTurnAndPublishes(t *testing.T) {
 	}
 
 	types := eventTypes(bus.GetPublishedEvents())
-	if len(types) == 0 || types[len(types)-1] != events.MessageAdded {
-		t.Fatalf("published %v, want a trailing %s", types, events.MessageAdded)
+	if countEvents(bus.GetPublishedEvents(), events.MessageAdded) != 1 {
+		t.Fatalf("published %v, want one %s", types, events.MessageAdded)
 	}
 }
 
@@ -234,6 +285,35 @@ func TestCreateMessageIdempotentReplaysExistingRow(t *testing.T) {
 	}
 }
 
+func TestCreateMessageIdempotentRejectsDifferentCallerFingerprint(t *testing.T) {
+	svc, _, _ := newMessageTestService(t)
+	ctx := context.Background()
+	firstRequest := &CreateMessageRequest{
+		TaskSessionID: "sess-msg",
+		Content:       "first",
+		Metadata: map[string]interface{}{
+			plancomments.MetadataClientMessageFingerprint: "fingerprint-one",
+		},
+	}
+	first, err := svc.CreateMessageIdempotent(ctx, "msg-fingerprint", firstRequest)
+	if err != nil {
+		t.Fatalf("first CreateMessageIdempotent: %v", err)
+	}
+
+	replayed, err := svc.CreateMessageIdempotent(ctx, first.ID, firstRequest)
+	if err != nil || replayed.ID != first.ID {
+		t.Fatalf("exact replay = %#v, %v; want message %s", replayed, err, first.ID)
+	}
+
+	different := *firstRequest
+	different.Metadata = map[string]interface{}{
+		plancomments.MetadataClientMessageFingerprint: "fingerprint-two",
+	}
+	if _, err := svc.CreateMessageIdempotent(ctx, first.ID, &different); !errors.Is(err, ErrMessageIDConflict) {
+		t.Fatalf("different fingerprint error = %v, want ErrMessageIDConflict", err)
+	}
+}
+
 func TestCreateMessageWithIDPersistsCallerID(t *testing.T) {
 	svc, bus, repo := newMessageTestService(t)
 	ctx := context.Background()
@@ -254,8 +334,8 @@ func TestCreateMessageWithIDPersistsCallerID(t *testing.T) {
 		t.Fatalf("persisted lookup: %v", err)
 	}
 	types := eventTypes(bus.GetPublishedEvents())
-	if len(types) == 0 || types[len(types)-1] != events.MessageAdded {
-		t.Fatalf("published %v, want a trailing %s", types, events.MessageAdded)
+	if countEvents(bus.GetPublishedEvents(), events.MessageAdded) != 1 {
+		t.Fatalf("published %v, want one %s", types, events.MessageAdded)
 	}
 }
 
@@ -341,8 +421,8 @@ func TestDeleteMessagePublishesDeletedEvent(t *testing.T) {
 	if err := svc.DeleteMessage(ctx, "msg-del"); err != nil {
 		t.Fatalf("DeleteMessage: %v", err)
 	}
-	if types := eventTypes(bus.GetPublishedEvents()); len(types) != 1 || types[0] != events.MessageDeleted {
-		t.Fatalf("published %v, want exactly one %s", types, events.MessageDeleted)
+	if types := eventTypes(bus.GetPublishedEvents()); countEvents(bus.GetPublishedEvents(), events.MessageDeleted) != 1 {
+		t.Fatalf("published %v, want one %s", types, events.MessageDeleted)
 	}
 	if _, err := repo.GetMessage(ctx, "msg-del"); err == nil {
 		t.Fatal("message row must be gone")
@@ -536,7 +616,7 @@ func TestUpdateToolCallMessageWithCreateFallsBackToCreation(t *testing.T) {
 	if created.Metadata["normalized"] == nil {
 		t.Fatal("normalized payload must be carried into the fallback message")
 	}
-	if types := eventTypes(bus.GetPublishedEvents()); len(types) == 0 || types[len(types)-1] != events.MessageAdded {
+	if types := eventTypes(bus.GetPublishedEvents()); countEvents(bus.GetPublishedEvents(), events.MessageAdded) != 1 {
 		t.Fatalf("published %v, want the fallback create to publish %s", types, events.MessageAdded)
 	}
 }
@@ -571,8 +651,8 @@ func TestUpdatePermissionMessageSetsStatus(t *testing.T) {
 	if stored.Metadata["status"] != string(models.PermissionStatusApproved) {
 		t.Fatalf("status = %v, want approved", stored.Metadata["status"])
 	}
-	if types := eventTypes(bus.GetPublishedEvents()); len(types) != 1 || types[0] != events.MessageUpdated {
-		t.Fatalf("published %v, want exactly one %s", types, events.MessageUpdated)
+	if types := eventTypes(bus.GetPublishedEvents()); countEvents(bus.GetPublishedEvents(), events.MessageUpdated) != 1 {
+		t.Fatalf("published %v, want one %s", types, events.MessageUpdated)
 	}
 
 	if err := svc.UpdatePermissionMessage(ctx, "task-msg", "sess-msg", "req-1", "pend-missing", models.PermissionStatusApproved); err == nil {

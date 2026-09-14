@@ -40,13 +40,22 @@ set of tasks.
   ability to choose multiple predecessor tasks by toggling task entries in the
   same selector.
 - With no predecessor selected, the trigger shows `No dependency` and the
-  dependency icon. With one predecessor selected, it shows that task's title.
-  With multiple predecessors selected, it shows a localized dependency count.
+  dependency icon. With one predecessor selected, it shows that task's title,
+  prefixed with a localized `#N ·` change-request label when the task has a
+  linked GitHub PR or GitLab MR number. With multiple predecessors selected,
+  it shows a localized dependency count.
 - The selector includes a `No dependency` entry that clears every selected
   predecessor. A selected task can be removed by toggling its entry off.
-- Every task entry in the selector displays a task icon. Archived tasks are not
-  offered as candidates, and the existing candidate sources from both Kanban
-  board slices remain available.
+- Every task entry in the selector displays a task icon. A task with a linked
+  GitHub PR or GitLab MR number also displays a localized `#N` change-request
+  badge for each linked number. Archived tasks are not offered as candidates,
+  and the existing candidate sources from both Kanban board slices remain
+  available.
+- Candidates are ordered most-recently-updated first, falling back to
+  most-recently-created and then title when timestamps are unavailable or
+  equal.
+- The selector's search field matches task title, task id, and any linked
+  change-request number in either `#N` or bare `N` form.
 - The selector's search row has an info control on its right side. Hovering or
   focusing the control explains that dependencies wait for all selected tasks
   to finish successfully and that starting an agent starts this task
@@ -56,8 +65,9 @@ set of tasks.
   unchanged. Selecting several predecessors keeps the existing AND semantics.
 - The dependency selector is disabled while the create flow is creating a
   session, matching the current dependency control behavior.
-- The selector is available only for an unstarted task in create mode. It does
-  not add an edge editor to task detail or edit mode.
+- This create-flow selector is available only for an unstarted task in create
+  mode. Edit-mode behavior is owned by
+  [`task-dependency-detail-editing.md`](task-dependency-detail-editing.md).
 - All new trigger labels, search copy, empty states, count labels, and help
   copy use the task translation namespace. No new user-facing literal is
   hardcoded in a component.
@@ -104,6 +114,13 @@ set of tasks.
   the current task selection, and Escape or outside interaction dismisses it.
 - **GIVEN** an archived board task, **WHEN** the user searches the dependency
   selector, **THEN** the archived task is not offered.
+- **GIVEN** a candidate task with a linked GitHub PR or GitLab MR number,
+  **WHEN** the user opens the selector, **THEN** that task's option shows a
+  `#N` change-request badge, and selecting it as the sole predecessor shows
+  the trigger as `#N · Title`.
+- **GIVEN** a candidate task with a linked change-request number, **WHEN** the
+  user types that number or `#number` into the search field, **THEN** the
+  matching task is offered.
 - **GIVEN** a Pixel 5-sized viewport, **WHEN** the user opens the create dialog
   and dependency selector, **THEN** the trigger and task rows remain reachable,
   the picker stays within the viewport, and the document has no horizontal
@@ -117,6 +134,6 @@ set of tasks.
 - Changing the dependency graph, auto-start semantics, or backend/API payload.
 - Limiting a task to one predecessor. Multiple predecessors and AND semantics
   remain supported.
-- Adding dependency editing to task detail, Kanban card menus, or MCP.
+- Adding dependency editing as part of this create-dialog refinement.
 - Adding a new mobile navigation surface or replacing the task-create dialog.
 - Changing workflow, agent, executor, repository, or branch selector behavior.

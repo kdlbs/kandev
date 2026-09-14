@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { readInitialPromptPreview, TASK_DESCRIPTION_SYNTHETIC_ID } from "./initial-prompt-preview";
 import {
   sessionId as toSessionId,
   taskId as toTaskId,
@@ -144,6 +145,8 @@ export type GroupedRenderOptions = {
 };
 
 export type ProcessedMessagesOptions = {
+  initialPromptPreview?: unknown;
+  historyInitialized?: boolean;
   hasOlderMessages?: boolean;
   lastAgentError?: LastAgentError | null;
   currentTurnId?: string | null;
@@ -479,27 +482,39 @@ function useVisibleMessages(
 export function shouldShowTaskDescriptionFallback(
   taskDescription: string | null,
   visibleMessages: Message[],
+  options: Pick<ProcessedMessagesOptions, "historyInitialized" | "hasOlderMessages"> = {},
+  hasInitialPreview = false,
 ): boolean {
   return (
-    Boolean(taskDescription) && !visibleMessages.some((message) => message.author_type === "user")
+    (Boolean(taskDescription) || hasInitialPreview) &&
+    options.historyInitialized === true &&
+    options.hasOlderMessages === false &&
+    !visibleMessages.some((message) => message.author_type === "user")
   );
 }
 
-export const TASK_DESCRIPTION_SYNTHETIC_ID = "task-description";
+export { TASK_DESCRIPTION_SYNTHETIC_ID } from "./initial-prompt-preview";
 
 function buildTaskDescriptionMessage(
-  showFallback: boolean,
+  visibleMessages: Message[],
   taskDescription: string | null,
   taskId: string | null,
   resolvedSessionId: string | null,
+  options: ProcessedMessagesOptions,
 ): Message | null {
-  if (!showFallback) return null;
+  const preview = readInitialPromptPreview(options.initialPromptPreview);
+  if (
+    !shouldShowTaskDescriptionFallback(taskDescription, visibleMessages, options, preview !== null)
+  ) {
+    return null;
+  }
   return {
     id: TASK_DESCRIPTION_SYNTHETIC_ID,
     task_id: toTaskId(taskId ?? ""),
     session_id: toSessionId(resolvedSessionId ?? ""),
     author_type: "user",
-    content: taskDescription ?? "",
+    content: preview?.content ?? taskDescription ?? "",
+    ...(preview ? { metadata: { attachments: preview.attachments } } : {}),
     type: "message",
     created_at: "",
   };
@@ -532,20 +547,23 @@ export function useProcessedMessages(
 
   const visibleMessages = useVisibleMessages(messages, toolCallIds, subagentChildIds, scope);
 
-  const showTaskDescriptionFallback = useMemo(
-    () => shouldShowTaskDescriptionFallback(taskDescription, visibleMessages),
-    [taskDescription, visibleMessages],
-  );
-  const taskDescriptionMessage: Message | null = useMemo(
-    () =>
-      buildTaskDescriptionMessage(
-        showTaskDescriptionFallback,
-        taskDescription,
-        taskId,
-        resolvedSessionId,
-      ),
-    [showTaskDescriptionFallback, taskDescription, taskId, resolvedSessionId],
-  );
+  const taskDescriptionMessage = useMemo(() => {
+    return buildTaskDescriptionMessage(
+      visibleMessages,
+      taskDescription,
+      taskId,
+      resolvedSessionId,
+      options,
+    );
+  }, [
+    taskId,
+    resolvedSessionId,
+    options.initialPromptPreview,
+    taskDescription,
+    visibleMessages,
+    options.historyInitialized,
+    options.hasOlderMessages,
+  ]);
 
   const allMessages = useMemo(() => {
     return taskDescriptionMessage ? [taskDescriptionMessage, ...visibleMessages] : visibleMessages;

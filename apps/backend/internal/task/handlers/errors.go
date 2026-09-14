@@ -10,6 +10,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -24,7 +25,13 @@ const (
 	moveConflictCodeDifferentWorkspace = "task_move_different_workspace"
 	moveConflictCodeWorkflowStep       = "task_move_workflow_step"
 	moveConflictCodeWIPLimit           = "task_move_wip_limit"
+	moveConflictCodePending            = "task_move_pending"
 )
+
+// errorDetailKeyErrorCode is the JSON key every machine-readable error detail
+// map keys its code under, so a client can branch on it without parsing the
+// human-readable message.
+const errorDetailKeyErrorCode = "error_code"
 
 func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback string) {
 	if isClientDisconnect(err) {
@@ -39,8 +46,25 @@ func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback stri
 		c.JSON(http.StatusNotFound, gin.H{"error": fallback})
 		return
 	}
+	// A scope denial is 403, not 404: workspace.read was already granted, so
+	// existence is known to the caller and there is nothing left to hide.
+	if service.IsForbidden(err) {
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		return
+	}
+	// A rejected assignee is the caller naming someone who cannot reach the
+	// workspace, not a server fault. Its message is written to be shown.
+	if errors.Is(err, service.ErrAssigneeCannotReachWorkspace) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 	if errors.Is(err, service.ErrWIPLimitExceeded) {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+		return
+	}
+	var dirtyWorktreeErr *service.TaskDeleteDirtyWorktreeError
+	if errors.As(err, &dirtyWorktreeErr) {
+		c.JSON(http.StatusConflict, taskErrorBody(err))
 		return
 	}
 	if isValidationError(err) {
@@ -62,10 +86,17 @@ func taskErrorBody(err error) gin.H {
 func taskErrorDetails(err error) map[string]interface{} {
 	var selectionErr *service.RepositorySelectionError
 	if errors.As(err, &selectionErr) {
-		return map[string]interface{}{"error_code": string(selectionErr.Code)}
+		return map[string]interface{}{errorDetailKeyErrorCode: string(selectionErr.Code)}
 	}
 	if errors.Is(err, service.ErrRepositoryBranchPolicyStale) {
-		return map[string]interface{}{"error_code": service.BranchPolicyStaleErrorCode}
+		return map[string]interface{}{errorDetailKeyErrorCode: service.BranchPolicyStaleErrorCode}
+	}
+	var dirtyWorktreeErr *service.TaskDeleteDirtyWorktreeError
+	if errors.As(err, &dirtyWorktreeErr) {
+		return map[string]interface{}{
+			errorDetailKeyErrorCode: service.TaskDeleteDirtyWorktreeErrorCode,
+			"dirty_worktrees":       dirtyWorktreeErr.DirtyWorktrees,
+		}
 	}
 	return nil
 }
@@ -161,9 +192,29 @@ func isMoveConflict(err error) bool {
 	return moveConflictCode(err) != ""
 }
 
+// moveEntryOptionsWSError classifies one-shot move-entry validation and
+// conflict failures for the WebSocket move handler, returning a stable
+// error code and the safe error message (which never carries option values).
+func moveEntryOptionsWSError(err error) (string, string, bool) {
+	switch {
+	case errors.Is(err, workflowmove.ErrMoveConflict):
+		return ws.ErrorCodeConflict, err.Error(), true
+	case errors.Is(err, workflowmove.ErrConflictingInstructions),
+		errors.Is(err, workflowmove.ErrEntryOptionsRequireStepChange),
+		errors.Is(err, workflowmove.ErrEntryOptionsUnsupported),
+		errors.Is(err, workflowmove.ErrEntryTargetUnavailable):
+		return ws.ErrorCodeValidation, err.Error(), true
+	default:
+		return "", "", false
+	}
+}
+
 func moveConflictCode(err error) string {
 	if err == nil {
 		return ""
+	}
+	if errors.Is(err, workflowmove.ErrMoveConflict) {
+		return moveConflictCodePending
 	}
 	msg := strings.ToLower(err.Error())
 	switch {
@@ -193,6 +244,12 @@ func isValidationError(err error) bool {
 		return true
 	}
 	if errors.Is(err, service.ErrExternalIDInvalid) {
+		return true
+	}
+	if errors.Is(err, workflowmove.ErrConflictingInstructions) ||
+		errors.Is(err, workflowmove.ErrEntryOptionsRequireStepChange) ||
+		errors.Is(err, workflowmove.ErrEntryOptionsUnsupported) ||
+		errors.Is(err, workflowmove.ErrEntryTargetUnavailable) {
 		return true
 	}
 	msg := strings.ToLower(err.Error())

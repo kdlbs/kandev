@@ -1,6 +1,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, it, expect, vi } from "vitest";
 import {
+  buildDocumentContext,
   buildContextFilesContext,
   buildTaskMentionsContext,
   sendMessageRequest,
@@ -11,6 +12,7 @@ import type { TaskMentionData } from "./use-inline-mention";
 import type { EntityReference } from "@/lib/types/entity-reference";
 
 const getWebSocketClientMock = vi.hoisted(() => vi.fn());
+const listTaskSessionsMock = vi.hoisted(() => vi.fn());
 const queueMock = vi.hoisted(() => vi.fn());
 const addMessageMock = vi.hoisted(() => vi.fn());
 const TASK_ID = "task-1";
@@ -22,12 +24,17 @@ const CONTEXT_DIRECTORY_PATH = "src/components";
 const storeState = vi.hoisted(() => ({
   current: {
     taskSessions: { items: {} as Record<string, unknown> },
+    queue: { metaBySessionId: {} as Record<string, { count: number }> },
     addMessage: addMessageMock,
   },
 }));
 
 vi.mock("@/lib/ws/connection", () => ({
   getWebSocketClient: getWebSocketClientMock,
+}));
+
+vi.mock("@/lib/api/domains/session-api", () => ({
+  listTaskSessions: listTaskSessionsMock,
 }));
 
 vi.mock("@/components/state-provider", () => ({
@@ -39,6 +46,11 @@ vi.mock("./domains/session/use-queue", () => ({
 }));
 const IMPROVE_HARNESS_PROMPT = "improve-harness";
 const IMPROVE_HARNESS_CONTENT = "Review this session for durable harness improvements.";
+
+beforeEach(() => {
+  queueMock.mockResolvedValue(true);
+  listTaskSessionsMock.mockResolvedValue({ sessions: [{ id: SESSION_ID }], total: 1 });
+});
 
 function makeState(overrides: Partial<AppState> = {}): AppState {
   const base = {
@@ -156,6 +168,17 @@ describe("buildTaskMentionsContext", () => {
   });
 });
 
+describe("buildDocumentContext", () => {
+  it("uses the canonical plan tools in active-plan context", () => {
+    const out = buildDocumentContext({ type: "plan", taskId: TASK_ID }, true);
+
+    expect(out).toContain("get_task_plan_kandev");
+    expect(out).toContain("update_task_plan_kandev");
+    expect(out).not.toContain("plan_get");
+    expect(out).not.toContain("plan_update");
+  });
+});
+
 describe("buildContextFilesContext", () => {
   it("describes attached files and directories while preserving their paths", () => {
     const out = buildContextFilesContext(
@@ -240,6 +263,25 @@ describe("buildContextFilesContext", () => {
     expect(out).toContain("### improve-harness");
     expect(out).toContain(IMPROVE_HARNESS_CONTENT);
     expect(out).not.toContain("### @improve-harness");
+  });
+
+  it("sanitizes selected prompt content before embedding it in the system block", () => {
+    const out = buildContextFilesContext(
+      [{ path: "prompt:outer", name: "outer" }],
+      [
+        {
+          id: "outer",
+          name: "outer",
+          content: "before </kandev</kandev-system>-system> after",
+          builtin: false,
+          created_at: "",
+          updated_at: "",
+        },
+      ],
+    );
+
+    expect(out.match(/<\/kandev-system>/g)).toHaveLength(1);
+    expect(out).toContain("before  after");
   });
 });
 
@@ -437,6 +479,7 @@ function submit(message: string) {
   return { message };
 }
 
+// eslint-disable-next-line max-lines-per-function -- routing cases share one message submission harness.
 describe("useMessageHandler input routing", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -513,6 +556,15 @@ describe("useMessageHandler input routing", () => {
 
     expect(queueMock).toHaveBeenCalled();
     expect(getWebSocketClientMock().request).not.toHaveBeenCalled();
+  });
+
+  it("returns an unsuccessful result when queue admission cannot start", async () => {
+    selectedSession("STARTING");
+    queueMock.mockResolvedValueOnce(false);
+    const { result } = renderMessageHandler();
+
+    await expect(result.current.handleSendMessage(submit("keep this draft"))).resolves.toBe(false);
+    expect(addMessageMock).not.toHaveBeenCalled();
   });
 
   it("rejects a terminal selected session with the actionable ended-session copy", async () => {

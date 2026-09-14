@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -49,8 +50,8 @@ func TestPermissionResolutionServicePublishesOnlySuccessfulWrites(t *testing.T) 
 	if err != nil || result.Outcome != models.PermissionClaimed {
 		t.Fatalf("claim = %+v, err=%v", result, err)
 	}
-	if got := len(eventBus.GetPublishedEvents()); got != 1 {
-		t.Fatalf("events after claim = %d, want 1", got)
+	if got := countEvents(eventBus.GetPublishedEvents(), events.MessageUpdated); got != 1 {
+		t.Fatalf("message updates after claim = %d, want 1", got)
 	}
 	competing := claim
 	competing.Audit.ClaimID = "claim-other"
@@ -58,8 +59,8 @@ func TestPermissionResolutionServicePublishesOnlySuccessfulWrites(t *testing.T) 
 	if err != nil || result.Outcome != models.PermissionClaimInProgress {
 		t.Fatalf("competing claim = %+v, err=%v", result, err)
 	}
-	if got := len(eventBus.GetPublishedEvents()); got != 1 {
-		t.Fatalf("events after no-op claim = %d, want 1", got)
+	if got := countEvents(eventBus.GetPublishedEvents(), events.MessageUpdated); got != 1 {
+		t.Fatalf("message updates after no-op claim = %d, want 1", got)
 	}
 
 	finalized, err := svc.FinalizePermissionResolution(ctx, models.PermissionResolutionFinalizeRequest{
@@ -75,7 +76,7 @@ func TestPermissionResolutionServicePublishesOnlySuccessfulWrites(t *testing.T) 
 	if err != nil || finalized.Outcome != models.PermissionFinalized {
 		t.Fatalf("finalize = %+v, err=%v", finalized, err)
 	}
-	if got := len(eventBus.GetPublishedEvents()); got != 2 {
-		t.Fatalf("events after finalization = %d, want 2", got)
+	if got := countEvents(eventBus.GetPublishedEvents(), events.MessageUpdated); got != 2 {
+		t.Fatalf("message updates after finalization = %d, want 2", got)
 	}
 }

@@ -16,6 +16,7 @@
     "allow-show-native-notification",
     "allow-get-native-notification-permission",
     "allow-request-native-notification-permission",
-    "allow-open-external-url"
+    "allow-open-external-url",
+    "allow-pick-directory"
   ]
 }

@@ -9,6 +9,8 @@ function makeStore() {
 }
 
 const SESSION = "sess-1";
+const MODIFIED_STATUS = "modified" as const;
+const NEWER_TIMESTAMP = "2026-05-28T00:01:00Z";
 
 function status(overrides: Partial<GitStatusEntry> = {}): GitStatusEntry {
   return {
@@ -22,7 +24,7 @@ function status(overrides: Partial<GitStatusEntry> = {}): GitStatusEntry {
     ahead: 0,
     behind: 0,
     files: {
-      "a.ts": { path: "a.ts", status: "modified", staged: false, diff: "-old\n+new" },
+      "a.ts": { path: "a.ts", status: MODIFIED_STATUS, staged: false, diff: "-old\n+new" },
     },
     timestamp: "2026-05-28T00:00:00Z",
     ...overrides,
@@ -39,16 +41,22 @@ describe("setGitStatus change reporting (single deep compare)", () => {
   it("returns true on the first status and false for an identical follow-up", () => {
     expect(store.getState().setGitStatus(SESSION, status())).toBe(true);
     // Same content, newer timestamp only — must not count as a change.
-    expect(
-      store.getState().setGitStatus(SESSION, status({ timestamp: "2026-05-28T00:01:00Z" })),
-    ).toBe(false);
+    expect(store.getState().setGitStatus(SESSION, status({ timestamp: NEWER_TIMESTAMP }))).toBe(
+      false,
+    );
   });
 
-  it("does not rewrite byEnvironmentId for a duplicate snapshot", () => {
+  it("advances the timestamp watermark for a duplicate snapshot", () => {
     store.getState().setGitStatus(SESSION, status());
-    const ref = store.getState().gitStatus.byEnvironmentId[SESSION];
-    store.getState().setGitStatus(SESSION, status({ timestamp: "2026-05-28T00:01:00Z" }));
-    expect(store.getState().gitStatus.byEnvironmentId[SESSION]).toBe(ref);
+    store.getState().setGitStatus(SESSION, status({ timestamp: NEWER_TIMESTAMP }));
+    expect(store.getState().gitStatus.byEnvironmentId[SESSION]).toMatchObject({
+      modified: ["a.ts"],
+      timestamp: NEWER_TIMESTAMP,
+    });
+    expect(store.getState().gitStatus.byEnvironmentRepo[SESSION][""]).toMatchObject({
+      modified: ["a.ts"],
+      timestamp: NEWER_TIMESTAMP,
+    });
   });
 
   it("returns true when a file's diff content changes", () => {
@@ -57,10 +65,39 @@ describe("setGitStatus change reporting (single deep compare)", () => {
       SESSION,
       status({
         files: {
-          "a.ts": { path: "a.ts", status: "modified", staged: false, diff: "-old\n+newer" },
+          "a.ts": { path: "a.ts", status: MODIFIED_STATUS, staged: false, diff: "-old\n+newer" },
         },
       }),
     );
+    expect(changed).toBe(true);
+  });
+
+  it("returns true when only a mixed-change facet changes", () => {
+    const first = status({
+      files: {
+        "a.ts": {
+          path: "a.ts",
+          status: MODIFIED_STATUS,
+          staged: false,
+          diff: "combined",
+          staged_change: { status: MODIFIED_STATUS, diff: "staged one" },
+          unstaged_change: { status: MODIFIED_STATUS, diff: "unstaged" },
+        } as never,
+      },
+    });
+    store.getState().setGitStatus(SESSION, first);
+
+    const changed = store.getState().setGitStatus(SESSION, {
+      ...first,
+      timestamp: NEWER_TIMESTAMP,
+      files: {
+        "a.ts": {
+          ...first.files["a.ts"],
+          staged_change: { status: MODIFIED_STATUS, diff: "staged two" },
+        } as never,
+      },
+    });
+
     expect(changed).toBe(true);
   });
 
@@ -75,7 +112,7 @@ describe("setGitStatus change reporting (single deep compare)", () => {
       SESSION,
       status({
         files: {
-          "frontend\u0000src/app.ts": { status: "modified", staged: false } as never,
+          "frontend\u0000src/app.ts": { status: MODIFIED_STATUS, staged: false } as never,
         },
       }),
     );
@@ -96,7 +133,16 @@ describe("setGitStatus change reporting (single deep compare)", () => {
     expect(
       store
         .getState()
-        .setGitStatus(SESSION, status({ is_submodule: true, timestamp: "2026-05-28T00:01:00Z" })),
+        .setGitStatus(SESSION, status({ is_submodule: true, timestamp: NEWER_TIMESTAMP })),
     ).toBe(false);
+  });
+
+  it("writes under the supplied environment without consulting the session map", () => {
+    store.getState().registerSessionEnvironment(SESSION, "mapped-env");
+
+    store.getState().setGitStatus("payload-env", status());
+
+    expect(store.getState().gitStatus.byEnvironmentRepo["payload-env"][""]).toBeDefined();
+    expect(store.getState().gitStatus.byEnvironmentRepo["mapped-env"]).toBeUndefined();
   });
 });

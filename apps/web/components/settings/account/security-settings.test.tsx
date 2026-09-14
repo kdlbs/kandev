@@ -52,6 +52,8 @@ const SESSION: AuthSession = {
   user_agent: "Chrome on macOS",
   ip: "203.0.113.7",
   current: true,
+  hostname: "",
+  hostname_resolved_at: null,
 };
 
 /** Returns default user settings merged with the given overrides. */
@@ -277,6 +279,66 @@ describe("Last seen display rendering", () => {
     // A transient sessions API failure must not hide the persisted preference.
     expect(screen.getByTestId(SELECT_TEST_ID)).toBeTruthy();
     expect(screen.queryByTestId("account-sessions-table")).toBeNull();
+  });
+});
+
+describe("Session hostname reconciliation", () => {
+  const older = "2026-08-18T12:00:00.000000001Z";
+  const newer = "2026-08-18T12:00:00.000000002Z";
+
+  it.each([
+    {
+      name: "keeps a newer HTTP result over an older event",
+      responseHostname: "http-new.example.test",
+      responseResolvedAt: newer,
+      streamedHostname: "event-old.example.test",
+      streamedResolvedAt: older,
+      expected: "http-new.example.test",
+    },
+    {
+      name: "keeps a newer event over an older HTTP result",
+      responseHostname: "http-old.example.test",
+      responseResolvedAt: older,
+      streamedHostname: "event-new.example.test",
+      streamedResolvedAt: newer,
+      expected: "event-new.example.test",
+    },
+    {
+      name: "keeps a durable HTTP result over a transient event",
+      responseHostname: "http-durable.example.test",
+      responseResolvedAt: newer,
+      streamedHostname: "",
+      streamedResolvedAt: null,
+      expected: "http-durable.example.test",
+    },
+    {
+      name: "uses the non-empty result when timestamps match",
+      responseHostname: "",
+      responseResolvedAt: newer,
+      streamedHostname: "event-named.example.test",
+      streamedResolvedAt: newer,
+      expected: "event-named.example.test",
+    },
+  ])("$name", async (scenario) => {
+    authApiMocks.listSessions.mockResolvedValue({
+      sessions: [
+        {
+          ...SESSION,
+          hostname: scenario.responseHostname,
+          hostname_resolved_at: scenario.responseResolvedAt,
+        },
+      ],
+    });
+    const holder: StoreHolder = { current: null };
+    await renderLoaded({ resolveSessionHostnames: true }, holder);
+
+    act(() => {
+      holder
+        .current!.getState()
+        .setSessionHostname(SESSION.ip, scenario.streamedHostname, scenario.streamedResolvedAt);
+    });
+
+    expect(screen.getByTestId("account-session-hostname").textContent).toBe(scenario.expected);
   });
 });
 

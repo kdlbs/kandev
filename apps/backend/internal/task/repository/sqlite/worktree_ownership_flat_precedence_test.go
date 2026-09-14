@@ -13,6 +13,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	dbutil "github.com/kandev/kandev/internal/db"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func TestCutover_CanonicalRepoSupersedesDivergentFlatOwner(t *testing.T) {
@@ -213,5 +214,143 @@ func TestCutover_DoesNotLogRolledBackFlatDemotion(t *testing.T) {
 	}
 	if entries := logs.FilterMessage("cutover: duplicate legacy worktrees demoted to history").All(); len(entries) != 0 {
 		t.Fatalf("rolled-back flat demotion logs = %d, want none", len(entries))
+	}
+}
+
+// TestCutover_SupersededHistoricalSessionWorktreeKeepsCanonicalSlot covers the
+// shape reported in issue #2505: a terminal session keeps an active legacy
+// worktree row on the empty branch slot while the surviving flat environment
+// and its canonical repository row own the same repository on a named slot.
+// The session row is superseded, so it must stay out of the normalized graph
+// instead of opening a second slot the worktree inventory check then rejects.
+func TestCutover_SupersededHistoricalSessionWorktreeKeepsCanonicalSlot(t *testing.T) {
+	db := openLegacyDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := legacySeed{
+		envID:     "env-superseded-slot",
+		taskID:    "task-superseded-slot",
+		repoID:    "repo-superseded-slot",
+		sessionID: "sess-superseded-slot",
+	}
+	seedLegacyTask(t, db, seed, now)
+	seedLegacyFlatEnv(t, db, seed, "wt-canonical-slot", "/tasks/canonical-slot", "feature/canonical", now)
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_environment_repos (
+			id, task_environment_id, repository_id, branch_slug,
+			worktree_id, worktree_path, worktree_branch, position,
+			error_message, created_at, updated_at
+		) VALUES (?, ?, ?, 'main', ?, ?, ?, 0, '', ?, ?)`),
+		"env-repo-superseded", seed.envID, seed.repoID,
+		"wt-canonical-slot", "/tasks/canonical-slot", "feature/canonical", now, now); err != nil {
+		t.Fatalf("seed canonical repository row: %v", err)
+	}
+	seedLegacySessionWorktree(t, db, seed.sessionID, "wt-superseded", seed.repoID, "",
+		"/tasks/superseded", "feature/superseded", "active", now)
+
+	core, logs := observer.New(zapcore.WarnLevel)
+	log, err := logger.NewFromZap(zap.New(core))
+	if err != nil {
+		t.Fatalf("create observer logger: %v", err)
+	}
+	repo, err := NewWithDB(db, db, log)
+	if err != nil {
+		t.Fatalf("cutover: %v", err)
+	}
+	env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
+	if err != nil {
+		t.Fatalf("get task environment: %v", err)
+	}
+	if len(env.Repos) != 1 {
+		t.Fatalf("normalized repos = %+v, want only the canonical slot", env.Repos)
+	}
+	if env.Repos[0].WorktreeID != "wt-canonical-slot" || env.Repos[0].BranchSlug != "main" {
+		t.Fatalf("normalized repo = %+v, want wt-canonical-slot on slot main", env.Repos[0])
+	}
+	entries := logs.FilterMessage("cutover: duplicate legacy worktrees demoted to history").All()
+	if len(entries) != 1 {
+		t.Fatalf("session demotion logs = %d, want one", len(entries))
+	}
+	logged := fmt.Sprint(entries[0].ContextMap()["worktrees"])
+	for _, want := range []string{"sess-superseded-slot", "wt-superseded", "/tasks/superseded", "feature/superseded", "wt-canonical-slot"} {
+		if !strings.Contains(logged, want) {
+			t.Fatalf("session demotion log %q must mention %q", logged, want)
+		}
+	}
+}
+
+func TestCutover_PreservesActiveSessionWhenFlatOwnerIsDeletedCanonical(t *testing.T) {
+	db := openLegacyDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := legacySeed{
+		envID:     "env-deleted-canonical",
+		taskID:    "task-deleted-canonical",
+		repoID:    "repo-deleted-canonical",
+		sessionID: "sess-deleted-canonical",
+	}
+	seedLegacyTask(t, db, seed, now)
+	seedLegacyFlatEnv(t, db, seed, "wt-deleted-canonical", "/tasks/deleted-canonical", "feature/deleted", now)
+	addLegacyRepoLifecycleColumns(t, db)
+	if _, err := db.Exec(db.Rebind(`
+		INSERT INTO task_environment_repos (
+			id, task_environment_id, repository_id, branch_slug,
+			worktree_id, worktree_path, worktree_branch, position,
+			error_message, status, created_at, updated_at, merged_at, deleted_at
+		) VALUES (?, ?, ?, 'main', ?, ?, ?, 0, '', 'deleted', ?, ?, NULL, ?)`),
+		"env-repo-deleted-canonical", seed.envID, seed.repoID,
+		"wt-deleted-canonical", "/tasks/deleted-canonical", "feature/deleted", now, now, now); err != nil {
+		t.Fatalf("seed deleted canonical repository row: %v", err)
+	}
+	seedLegacySessionWorktree(t, db, seed.sessionID, "wt-active-session", seed.repoID, "",
+		"/tasks/active-session", "feature/active", "active", now)
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("cutover: %v", err)
+	}
+	env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
+	if err != nil {
+		t.Fatalf("get task environment: %v", err)
+	}
+	slots := make(map[string]*models.TaskEnvironmentRepo, len(env.Repos))
+	for _, envRepo := range env.Repos {
+		slots[envRepo.RepositoryID+"\x00"+envRepo.BranchSlug] = envRepo
+	}
+	deleted := slots[seed.repoID+"\x00main"]
+	active := slots[seed.repoID+"\x00"]
+	if deleted == nil || deleted.WorktreeID != "wt-deleted-canonical" || deleted.Status != "deleted" {
+		t.Fatalf("deleted canonical repository = %+v", deleted)
+	}
+	if active == nil || active.WorktreeID != "wt-active-session" || active.Status == "deleted" {
+		t.Fatalf("active session repository = %+v, normalized repos = %+v", active, env.Repos)
+	}
+}
+
+func TestCutover_PreservesDeletedSessionWorktreeHistory(t *testing.T) {
+	db := openLegacyDB(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	seed := legacySeed{
+		envID:     "env-deleted-session-history",
+		taskID:    "task-deleted-session-history",
+		sessionID: "sess-deleted-session-history",
+	}
+	seedLegacyTask(t, db, seed, now)
+	seedLegacyFlatEnv(t, db, legacySeed{envID: seed.envID, taskID: seed.taskID}, "", "", "", now)
+	seedLegacySessionWorktree(t, db, seed.sessionID, "wt-deleted-session-history", "repo-deleted-session-history", "",
+		"/tasks/deleted-session-history", "feature/deleted", "deleted", now)
+
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("cutover: %v", err)
+	}
+	env, err := repo.GetTaskEnvironment(context.Background(), seed.envID)
+	if err != nil {
+		t.Fatalf("get task environment: %v", err)
+	}
+	if len(env.Repos) != 1 {
+		t.Fatalf("normalized repos = %+v, want deleted history", env.Repos)
+	}
+	deleted := env.Repos[0]
+	if deleted.WorktreeID != "wt-deleted-session-history" || deleted.Status != "deleted" || deleted.DeletedAt == nil {
+		t.Fatalf("deleted session worktree = %+v", deleted)
 	}
 }

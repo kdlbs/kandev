@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   toast: vi.fn(),
   prompts: [] as CustomPrompt[],
   finePointer: true,
+  isMobile: false,
   promptEditor: vi.fn(),
 }));
 
@@ -26,7 +27,7 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
-  useResponsiveBreakpoint: () => ({ isFinePointer: mocks.finePointer }),
+  useResponsiveBreakpoint: () => ({ isFinePointer: mocks.finePointer, isMobile: mocks.isMobile }),
 }));
 
 vi.mock("@/components/toast-provider", () => ({
@@ -69,6 +70,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.prompts = [];
   mocks.finePointer = true;
+  mocks.isMobile = false;
   mocks.setPrompts.mockImplementation((next: CustomPrompt[]) => {
     mocks.prompts = next;
   });
@@ -101,6 +103,29 @@ function renderPromptSettings() {
 }
 
 describe("PromptsSettings deletion confirmation", () => {
+  it("keeps the phone editor draft and delete trigger behind a confirmation sheet", async () => {
+    mocks.isMobile = true;
+    mocks.finePointer = false;
+    renderPromptSettings();
+    const row = screen.getByTestId(promptRowTestId);
+    fireEvent.click(within(row).getByTestId("prompt-edit-button"));
+    const editor = within(row).getByTestId(promptContentInputTestId) as HTMLTextAreaElement;
+    fireEvent.change(editor, { target: { value: "Keep the mobile draft" } });
+    const trigger = within(row).getByTestId(promptDeleteButtonTestId);
+    fireEvent.click(trigger);
+    const sheet = screen.getByRole("dialog", { name: "Delete prompt" });
+    expect(sheet.getAttribute("data-slot")).toBe("drawer-content");
+    expect(trigger.isConnected).toBe(true);
+    fireEvent.click(within(sheet).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(editor.value).toBe("Keep the mobile draft");
+    expect(mocks.deletePrompt).not.toHaveBeenCalled();
+    fireEvent.click(trigger);
+    fireEvent.click(screen.getByTestId(promptDeleteConfirmTestId));
+    await waitFor(() =>
+      expect(mocks.deletePrompt).toHaveBeenCalledExactlyOnceWith(promptId, { cache: "no-store" }),
+    );
+  });
   it("cancels an anchored delete without losing the prompt editor draft", async () => {
     renderPromptSettings();
 

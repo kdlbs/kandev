@@ -153,6 +153,10 @@
   "profileNameRequiredDescription": "Introduza um nome de perfil antes de guardar.",
   "profileNameRequiredTitle": "O nome do perfil é obrigatório",
   "profileNotFound": "Perfil não encontrado.",
+  "profileExternalChangeTitle": "O perfil foi alterado noutro local",
+  "profileExternalChangeDescription": "Este perfil foi alterado enquanto o editava. O seu rascunho foi preservado. Elimine-o para carregar os valores guardados mais recentes antes de guardar novamente.",
+  "profileExternalChangeDiscard": "Carregar o perfil mais recente",
+  "profileExternalChangeInvalidReason": "Carregue o perfil mais recente antes de guardar.",
   "profileSettings": "Definições do perfil",
   "promptTokenHint": "<0>{{token}}</0> será substituído pela descrição da sua tarefa ou pela mensagem de seguimento.",
   "ptyConnectionError": "Erro de ligação",
@@ -295,5 +299,6 @@
   "dynamicRouteRetryDescription": "Tenta novamente o mesmo candidato depois de um erro do fornecedor. Use esta opção quando a falha puder ser temporária.",
   "dynamicRouteTryNextDescription": "Ignora este candidato nesta execução e continua com o próximo perfil elegível.",
   "dynamicRouteStopDescription": "Para o encaminhamento quando este candidato falha. A tarefa aguarda uma ação manual de recuperação.",
-  "dynamicProfileSaved": "Perfil dinâmico guardado."
+  "dynamicProfileSaved": "Perfil dinâmico guardado.",
+  "adminOnly": "Só os administradores podem alterar agentes e perfis de agente."
 }

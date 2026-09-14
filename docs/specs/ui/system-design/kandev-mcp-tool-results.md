@@ -5,7 +5,7 @@ requirements:
   - REQ-UI-KANDEV-MCP-TOOL-RESULTS-001
 ---
 
-# Kandev MCP Tool Results System Design
+# MCP tool results
 
 ## Purpose and boundaries
 

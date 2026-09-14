@@ -77,6 +77,19 @@ func (s *Service) DeleteWorkspace(ctx context.Context, workspaceID string) error
 		}
 		cancelGroupCleanup()
 	}
+	if s.configSyncCleaner != nil {
+		configSyncCleanupCtx, cancelConfigSyncCleanup := workspaceDeletionPhaseContext(cleanupBaseCtx)
+		unlock, err := s.configSyncCleaner.PurgeForWorkspaceDeletion(configSyncCleanupCtx, workspaceID)
+		cancelConfigSyncCleanup()
+		if err != nil {
+			return fmt.Errorf("clean config sync data: %w", err)
+		}
+		// Held until every remaining teardown step below has run, so a config
+		// sync run queued behind this lock cannot write rows back in after
+		// DeleteWorkspaceData (which never touches config sync's own tables)
+		// has already deleted the workspace's other data.
+		defer unlock()
+	}
 	dataDeleteCtx, cancelDataDelete := workspaceDeletionPhaseContext(cleanupBaseCtx)
 	defer cancelDataDelete()
 	if err := s.repo.DeleteWorkspaceData(dataDeleteCtx, workspaceID); err != nil {

@@ -9,187 +9,211 @@ requirements:
 
 ## Purpose and boundaries
 
-The workspace system owns the repository checkout, remote state, and base ref
-used to create a worktree. This design makes `repositories.pull_before_worktree`
-an admission gate for new and recreated worktrees.
+The workspace system owns the repository checkout and the worktree base ref.
+This design keeps host worktrees local-first while remote materialization stays
+strict.
 
-The task system continues to own session launch state and error presentation.
-It consumes preparation errors through the existing launch-failure contract in
-[Task Launch Failure Recovery](../../tasks/system-design/task-launch-failure-recovery.md).
-The integration system continues to own provider credentials. The executor
-continues to own credentials and SSH configuration inherited from its runtime.
+The task system owns session launch state and error presentation. The
+integration system owns provider credentials. Executors own their Git transport
+and remote workspace preparation.
 
-This design does not refresh a worktree that Kandev can reuse without
-recreation. It also does not change Git commands that an agent runs after
-launch.
+This design does not refresh a valid worktree that Kandev reuses. It does not
+change Git commands that an agent runs after launch.
 
 ## Requirement mapping
 
-| Requirement | Design section |
+| Acceptance criterion | Design section |
 | --- | --- |
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.1` | [Refresh policy](#refresh-policy) |
-| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.2` | [Refresh routing](#refresh-routing) |
-| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.3` | [Failure and recovery](#failure-and-recovery) |
+| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.2` | [Refresh policy](#refresh-policy) |
+| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.3` | [Local fallback](#local-fallback) |
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.4` | [Base-ref selection](#base-ref-selection) |
 | `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.5` | [Base-ref selection](#base-ref-selection) |
-| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.6` | [Multi-repository launch](#multi-repository-launch) |
-| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.7` | [Launch-error projection](#launch-error-projection) |
+| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.6` | [Required materialization](#required-materialization) |
+| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.7` | [Multi-repository launch](#multi-repository-launch) |
+| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.8` | [Required materialization](#required-materialization) |
+| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.9` | [Empty remote](#empty-remote) |
+| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.10` | [Failure and recovery](#failure-and-recovery) |
+| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.11` | [Pull-request base reconciliation](#pull-request-base-reconciliation) |
+| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.12` | [Pull-request base reconciliation](#pull-request-base-reconciliation) |
+| `AC-WORKSPACES-WORKTREE-BASE-REFRESH-001.13` | [Missing-base fallback](#missing-base-fallback) |
 
 ## Components and responsibilities
 
-- `internal/orchestrator/executor` resolves every task repository and selects
-  the refresh route that matches its provider and task Git credential policy.
-  It passes `PullBeforeWorktree`, `RemoteSyncHandled`, and a provider-authenticated
-  refresh callback to the lifecycle layer. The callback is not invoked until a
-  worktree must be materialized or recreated.
-- `internal/repoclone.Cloner` performs a strict refresh for a Kandev-managed
-  provider checkout when provider credentials belong to the backend refresh
-  boundary. `RefreshWorkspaceRepositoryWithCredentialRequest` binds the fetch
-  to the exact workspace, task, session, and repository scope.
-- `internal/worktree.Manager` performs strict non-interactive fetch and base-ref
-  selection when the checkout uses the host or executor Git route. It creates
-  no worktree until the required sync and ancestry checks succeed.
-- `internal/agent/runtime/lifecycle` propagates repository preparation errors
-  without starting the agent runtime.
-- The task launch-failure projection stores and renders the resulting bounded,
-  credential-safe error. This design does not add a parallel workspace error
-  store.
+- `internal/orchestrator/executor` resolves repository paths, refresh routes,
+  credentials, and executor capabilities. It also resolves live GitHub pull-
+  request bases through an injected provider seam.
+- `internal/worktree.Manager` verifies local refs, attempts host refresh, and
+  selects the worktree base. Pull-request base refresh remains strict except
+  for the verified missing-remote-ref fallback.
+- `internal/repoclone.Cloner` materializes provider-managed repositories when
+  no user-owned local checkout supplies the branch.
+- `internal/github.Service` reconciles changed pull-request bases through
+  narrow injected interfaces. Provider lookup and task-repository propagation
+  are best-effort.
+- `internal/agent/runtime/lifecycle` stops launch only when no usable base
+  remains.
+- The task projection shows bounded warnings and required-materialization
+  errors.
 
 ## Data and contracts
 
-`repositories.pull_before_worktree` remains the persisted user policy. No
-schema change is required.
+`repositories.pull_before_worktree` remains a persisted user policy. No schema
+change is necessary.
 
-The existing worktree preparation fields have these contracts:
+The preparation fields have these contracts:
 
 | Field | Contract |
 | --- | --- |
-| `PullBeforeWorktree` | A required remote refresh remains to be completed before base-ref selection. |
-| `RemoteSyncHandled` | A strict provider-authenticated refresh completed for the exact checkout. The worktree manager must not run a second unauthenticated fetch. |
-| `RefreshRepository` | An optional exact-scope refresh callback. Lifecycle invokes it only when creating or recreating a worktree; valid reuse bypasses it. |
+| `PullBeforeWorktree` | Kandev attempts remote refresh before local worktree creation. |
+| `RemoteSyncHandled` | The configured remote route completed a refresh for this checkout. |
+| `RefreshRepository` | An optional provider refresh for worktree materialization. |
 
-`RemoteSyncHandled` is valid only after a successful strict refresh. A
-best-effort fetch or a failed refresh cannot set it.
+`PullBeforeWorktree` is not a universal admission gate. Local-ref availability
+determines whether a failed refresh is recoverable.
+
+The task repository's stored base remains the durable comparison target and
+offline launch fallback. The GitHub task-PR row tracks the provider observation;
+polling propagates a changed non-empty base to the matching task repository.
+
+## Pull-request base reconciliation
+
+The executor reads the pull-request number from task-repository metadata and
+the owner and repository name from the repository entity. For GitHub repository
+rows with a positive pull-request number, it asks an injected resolver for the
+current base before materialization. A successful non-empty result overrides
+the launch request only. A missing resolver, lookup error, or empty result keeps
+the stored base and does not stop launch.
+
+Once the pull-request task reaches Git refresh, its base remains strict for
+unproven failures. A proven missing remote base can use only the fallback
+described below.
+
+The GitHub polling service compares the previous `TaskPR.BaseBranch` with the
+incoming non-empty base. On change, it updates the task repository whose task
+and repository IDs match. When more than one association matches, the checkout
+branch must also match the pull-request head. Update failures are logged and do
+not fail the authoritative task-PR sync.
 
 ## Refresh policy
 
-When `PullBeforeWorktree` is false, base-ref resolution keeps its offline local
-behavior. This path does not claim that the checkout contains current remote
-state.
+If `PullBeforeWorktree` is false, Kandev uses the selected local base without a
+remote request.
 
-When `PullBeforeWorktree` is true, worktree materialization requires one
-successful refresh. A caller cannot convert a refresh error into a warning and
-local ref. The rule applies to initial launch and to resume whenever Kandev
-creates or recreates a worktree. A valid reusable worktree is returned before
-the callback is invoked.
+If `PullBeforeWorktree` is true, Kandev attempts the configured refresh before
+new or recreated host worktrees. A valid reusable worktree bypasses this
+attempt.
 
-## Refresh routing
+The refresh route still follows the task Git credential policy. A host checkout
+keeps its configured origin and transport. A provider-managed checkout keeps
+its exact credential scope.
 
-The executor resolves one of two refresh routes before lifecycle preparation:
+## Local fallback
 
-1. A Kandev-managed provider route supplies a callback that calls the strict
-   `repoclone` refresh with the exact credential request. The lifecycle layer
-   invokes it only when it must materialize or recreate a worktree. On success,
-   worktree creation clears `PullBeforeWorktree` and sets `RemoteSyncHandled`.
-2. A host or executor route leaves `PullBeforeWorktree` set. The worktree
-   manager uses the reconciled `origin` URL and the non-interactive host Git
-   environment. This includes an executor-inherited GitHub checkout whose
-   origin uses the protocol selected by the host `gh` configuration.
+Before refresh, the worktree manager verifies the selected local ref. If that
+ref exists, refresh is best effort.
 
-When a managed checkout carries a pull request number, the strict refresh also
-fetches `refs/pull/<N>/head` into a local `origin/pr/<N>` remote-tracking ref.
-Worktree creation uses that ref for the checkout branch, including fork pull
-requests, without a second unauthenticated fetch.
+Authentication, network, timeout, Git, and missing-remote-ref errors return the
+selected local ref. The manager emits a bounded warning and does not include
+raw credential output.
 
-Provider selection must follow the existing task Git credential policy. A
-managed GitHub workspace uses the backend-managed credential route. An
-executor-inherited GitHub workspace must not replace the reconciled SSH origin
-with a managed HTTPS origin.
+The fallback does not change local or remote refs. It does not push the local
+branch.
 
-The plugin-provider strict-refresh behavior remains the model for exact
-credential scope. GitLab and Azure DevOps keep their existing provider-specific
-credential resolution.
+Pull-request base refresh does not use this local fallback. It remains strict
+for unproven failures and uses only the verified missing-base fallback below.
 
 ## Base-ref selection
 
-After a successful fetch, the worktree manager compares the local base `L`
-with the fetched remote base `R`:
+After a successful fetch, the worktree manager compares local base `L` and
+remote base `R`:
 
-| Relationship | Start ref | Reason |
+| Relationship | Start ref | Result |
 | --- | --- | --- |
-| `R` contains `L` | `R` | Includes all local commits and current remote commits. |
-| `L` contains `R` | `L` | Preserves local-only commits and includes current remote commits. |
-| Neither contains the other | Error | The refs diverged and either choice would omit commits. |
-| Ancestry cannot be proven | Error | Kandev cannot prove that the start ref is safe. |
+| `R` contains `L` | `R` | The worktree includes current remote commits. |
+| `L` contains `R` | `L` | The worktree preserves local-only commits. |
+| Refs diverge | `L` | The worktree preserves the selected local history and shows a warning. |
+| Ancestry is unknown | `L` | The worktree preserves the selected local history and shows a warning. |
 
-A successful fast-forward pull normally produces the first or second state.
-If pull fails after fetch, the same table selects the safe ref. The manager does
-not reset, rebase, merge, or delete a branch.
+The manager never resets, rebases, merges, removes, or hides either ref during
+selection.
 
-`pullBaseBranch`, `resolveLocalBaseRef`, and
-`pullCurrentBranchOrFallback` return errors to their callers. The errors retain
-Git failure classification but exclude tokens, credential helper output, and
-secret-bearing URLs.
+## Required materialization
+
+Remote access is required when Kandev cannot verify a usable local base. This
+case includes an explicit remote-only ref and an executor that must clone the
+repository.
+
+If materialization fails, lifecycle stops launch. The task error identifies the
+repository and uses a bounded failure class.
+
+Provider selection still follows the existing Git credential policy. A managed
+HTTPS route must not replace an executor-owned SSH route.
+
+## Missing-base fallback
+
+A fetch error that explicitly reports a missing remote ref is the only failed
+fetch eligible for fallback. When the request carries a different non-empty
+fallback base, the manager fetches that branch through the same non-interactive
+route and applies the normal containing-ref checks. Success completes sync,
+uses the fallback ref, and records a warning naming the requested and fallback
+branches.
+
+If the fallback is absent or its refresh fails, preparation remains failed. A
+missing requested or fallback remote ref uses `missing_remote_ref`; auth,
+network, timeout, cancellation, and other Git failures keep their existing
+fail-closed classifications.
+
+## Empty remote
+
+An authenticated remote with zero refs uses the marked local baseline from the
+[Empty Remote Repository System Design](empty-remote-repositories.md).
+
+This path creates no remote ref during launch. Publication remains an explicit
+user action.
 
 ## Multi-repository launch
 
-The executor resolves and prepares repository specs before agent startup. If a
-required refresh fails for one spec, lifecycle preparation returns an error and
-does not start the runtime. The error carries stable repository identity and a
-safe display name so same-provider sibling repositories remain distinguishable.
+Each repository resolves its base independently before agent startup. A local
+fallback counts as a prepared repository.
 
-Preparation can leave an already refreshed checkout on disk. This state is
-safe and retryable. A later launch performs the required checks again. Kandev
-does not report a partial task launch because no agent process started.
-
-## Launch-error projection
-
-The executor returns required-refresh errors through its existing launch
-failure path. The task system stores the active error in the current typed
-summary and renders it on desktop and mobile after reload. The generic launch
-failure category is sufficient unless implementation evidence shows that a
-distinct category enables a safe recovery action.
-
-The bounded detail names the repository and failure class. It does not include
-credentials, tokens, raw authenticated URLs, or unrestricted Git output. Retry
-uses the normal task launch action after the user corrects network, SSH, or
-credential configuration.
+If one repository needs remote materialization and has no usable base, the
+whole task stops before agent startup. The error names that repository.
 
 ## Failure and recovery
 
-- Fetch authentication, network, timeout, cancellation, and Git command errors
-  stop required preparation.
-- A missing fetched remote base stops preparation. It cannot fall back to a
-  local ref when refresh is required.
-- A failed ancestry probe stops preparation.
-- A divergent base stops preparation and preserves both refs.
-- Disabling pull-before-worktree is the explicit offline opt-out. Kandev does
-  not disable it automatically after a failure.
-- Retrying task launch reruns remote refresh and base-ref selection.
+- A refresh error with a valid local base produces a warning and continues.
+- A missing local and remote base produces a launch error.
+- Caller cancellation stops preparation without a fallback worktree.
+- A retry repeats remote materialization only when the task still needs it.
+- A valid reused worktree does not refresh or materialize its base again.
+- A pull-request base refresh failure stops preparation unless the missing
+  remote ref has a separately refreshed configured fallback.
+- A pull-request fallback reports the requested and selected branches and uses
+  `missing_remote_ref` when no usable fallback exists.
 
 ## Security
 
-Managed refresh uses the provider credential boundary and exact task, session,
-and repository scope. Executor refresh uses only credentials available to the
-selected host or executor route. Neither route copies a provider token into an
-error, progress event, or log field.
+Git stays non-interactive. Host refresh uses the host credential route.
+Provider refresh uses exact task and repository scope.
 
-Git remains non-interactive. `GIT_TERMINAL_PROMPT=0`, batch-mode SSH, bounded
-command contexts, and Git subprocess admission prevent a hidden prompt from
-blocking task launch.
+Warnings contain a failure class, branch name, and repository identity. They do
+not contain tokens, credential-helper output, or secret URLs.
 
 ## Observability
 
 The existing sync progress callback reports a running event and then either a
 completed event or a failed event. A failed event contains the bounded failure
-class and repository identity, not a fallback-ref success message.
+class and repository identity. A successful missing-base fallback reports a
+completed event and records the branch substitution warning on the worktree.
+Local fallback reports completion with a warning, not a launch error.
 
-Structured logs record the repository ID, task ID, session ID, provider,
-configured transport, refresh route, and failure class. Logs do not record
-credential material or secret-bearing remote URLs.
+Structured logs record repository identity, refresh route, failure class, and
+selected fallback ref. Logs exclude credential material and raw remote URLs.
 
 ## Related decisions
 
+- [Local Worktree Refresh Is Best Effort](../../../decisions/2026-08-31-local-worktree-refresh-best-effort.md)
 - [Required Worktree Refresh Fails Closed](../../../decisions/2026-08-25-required-worktree-refresh-fails-closed.md)
 - [Separate GitHub Automation From Task Git Credential Policy](../../../decisions/2026-07-27-task-git-credential-policy.md)
 - [Provider-Neutral Git Credential Broker](../../../decisions/2026-07-31-provider-neutral-git-credential-broker.md)

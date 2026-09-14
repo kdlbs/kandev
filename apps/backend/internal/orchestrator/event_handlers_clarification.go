@@ -75,6 +75,7 @@ func (s *Service) handleClarificationStaleDismissed(ctx context.Context, event *
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	writeCtx = withWorkflowProfileSwitchGuardHeld(writeCtx, data.SessionID, "")
 	if s.isCancelInFlight(data.SessionID) {
 		s.logger.Debug("ignoring stale clarification dismissal while cancellation is in progress",
 			zap.String("task_id", data.TaskID),
@@ -583,14 +584,21 @@ func (s *Service) dispatchClarificationResumeLocked(ctx context.Context, data cl
 		// silently the way a bare false return did.
 		return fmt.Errorf("cannot resume clarification: message queue is not configured")
 	}
-	queued, err := s.messageQueue.QueueMessageWithMetadata(
-		ctx, data.SessionID, data.TaskID, prompt, "", messagequeue.QueuedByAgent, false, nil,
+	identity, err := s.messageQueue.ResolveSessionIdentity(ctx, data.TaskID, data.SessionID)
+	if err != nil {
+		return fmt.Errorf("resolve clarification resume session: %w", err)
+	}
+	queued, err := s.messageQueue.QueueMessageWithMetadataForSession(
+		ctx, identity, prompt, "", messagequeue.QueuedByAgent, false, nil,
 		map[string]interface{}{metaKeyUserMessageRecorded: true},
 	)
 	if err != nil {
 		return fmt.Errorf("queue clarification resume prompt: %w", err)
 	}
-	dispatched, err := s.takeAndDispatchEntryLocked(ctx, data.SessionID, queued.ID)
+	// Queue insertion is observable even when a concurrent drain prevents the
+	// targeted take, so publish before attempting dispatch.
+	s.publishQueueStatusEvent(ctx, data.SessionID)
+	dispatched, err := s.takeAndDispatchEntryLocked(ctx, identity, queued.ID)
 	if err != nil {
 		return fmt.Errorf("dispatch clarification resume prompt: %w", err)
 	}
@@ -775,9 +783,10 @@ func (s *Service) cancelAgentSilentActionWithKind(
 }
 
 // cancelAgentSilentActionWithKindExclusive is the non-joining cancellation
-// path used by Send Now. A second Send Now click or an explicit cancellation
-// that already owns the session is reported as a conflict instead of joining
-// and inheriting the first operation's reconciliation semantics.
+// path used by Send Now and workflow context reset. A second Send Now click or
+// another cancellation that already owns the session is reported as a conflict
+// instead of joining and inheriting the first operation's reconciliation
+// semantics.
 func (s *Service) cancelAgentSilentActionWithKindExclusive(
 	ctx context.Context,
 	taskID, sessionID string,
@@ -785,8 +794,47 @@ func (s *Service) cancelAgentSilentActionWithKindExclusive(
 	kind cancellationKind,
 	expectedTurnID string,
 ) (bool, error) {
+	return s.cancelAgentSilentActionWithKindExclusiveConflict(
+		ctx, taskID, sessionID, action, kind, expectedTurnID, ErrSendNowConflict,
+	)
+}
+
+func (s *Service) cancelAgentSilentActionWithKindExclusiveConflict(
+	ctx context.Context,
+	taskID, sessionID string,
+	action func(context.Context) (bool, error),
+	kind cancellationKind,
+	expectedTurnID string,
+	conflictErr error,
+) (bool, error) {
+	operation, registered, err := s.startExclusiveSilentCancellation(
+		ctx, taskID, sessionID, action, kind, expectedTurnID, conflictErr,
+	)
+	if err != nil {
+		return false, err
+	}
+	if err := operation.wait(ctx); err != nil {
+		return false, err
+	}
+	if registered == nil {
+		return false, nil
+	}
+	return registered.wait(ctx)
+}
+
+// startExclusiveSilentCancellation registers an exclusive cancellation before
+// the caller releases a session guard. Reset uses this hand-off to make its
+// reset marker and cancellation claim one admission boundary.
+func (s *Service) startExclusiveSilentCancellation(
+	ctx context.Context,
+	taskID, sessionID string,
+	action func(context.Context) (bool, error),
+	kind cancellationKind,
+	expectedTurnID string,
+	conflictErr error,
+) (*cancelOperation, *cancellationAction, error) {
 	if s.repo == nil {
-		return false, errors.New("cancel agent silently: repository is not configured")
+		return nil, nil, errors.New("cancel agent silently: repository is not configured")
 	}
 	var registeredAction func(context.Context, *cancelOperation) (bool, error)
 	if action != nil {
@@ -798,19 +846,13 @@ func (s *Service) cancelAgentSilentActionWithKindExclusive(
 		sessionID, kind, registeredAction,
 	)
 	if !accepted {
-		return false, ErrSendNowConflict
+		return nil, nil, conflictErr
 	}
 	if owner {
 		s.setCancellationExpectedTurn(sessionID, operation, expectedTurnID)
 		go s.runSilentCancellation(ctx, taskID, sessionID, operation)
 	}
-	if err := operation.wait(ctx); err != nil {
-		return false, err
-	}
-	if registered == nil {
-		return false, nil
-	}
-	return registered.wait(ctx)
+	return operation, registered, nil
 }
 
 func (s *Service) runSilentCancellation(requestCtx context.Context, taskID, sessionID string, operation *cancelOperation) {
@@ -974,6 +1016,40 @@ func (s *Service) cancelAgentSilentWithGuardActionKindExclusive(
 		defer relockGuard()
 	}
 	return s.cancelAgentSilentActionWithKindExclusive(ctx, taskID, sessionID, action, kind, expectedTurnID)
+}
+
+// cancelAgentSilentWithGuardActionKindExclusiveConflict claims cancellation
+// while the caller still owns the session guard, then releases that guard
+// while the lifecycle cancellation waits. This is the reset variant: a
+// prompt cannot enter between reset-marker publication and the exclusive
+// cancellation claim, and the cancellation owner can still reacquire the
+// guard for its lifecycle reconciliation.
+func (s *Service) cancelAgentSilentWithGuardActionKindExclusiveConflict(
+	ctx context.Context,
+	taskID, sessionID string,
+	unlockGuard, relockGuard func(),
+	action func(context.Context) (bool, error),
+	kind cancellationKind,
+	expectedTurnID string,
+	conflictErr error,
+) (bool, error) {
+	operation, registered, err := s.startExclusiveSilentCancellation(
+		ctx, taskID, sessionID, action, kind, expectedTurnID, conflictErr,
+	)
+	if err != nil {
+		return false, err
+	}
+	if unlockGuard != nil {
+		unlockGuard()
+		defer relockGuard()
+	}
+	if err := operation.wait(ctx); err != nil {
+		return false, err
+	}
+	if registered == nil {
+		return false, nil
+	}
+	return registered.wait(ctx)
 }
 
 func (s *Service) logSilentCancelReconciled(taskID, sessionID string, err error) {

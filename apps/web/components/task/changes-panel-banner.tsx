@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import { reviewFileKey } from "@/components/review/types";
+import type { GitChangeLayer } from "@/lib/state/slices/session-runtime/types";
 import { useTranslation } from "react-i18next";
 
 /** Composite key for the file currently selected in single-file mode. */
@@ -8,13 +9,18 @@ export function useSelectedFileKey(
   mode: "all" | "file",
   filePath: string | undefined,
   fileRepositoryName: string | undefined,
+  changeLayer?: GitChangeLayer,
 ): string | undefined {
   return useMemo(
     () =>
       mode === "file" && filePath
-        ? reviewFileKey({ path: filePath, repository_name: fileRepositoryName })
+        ? reviewFileKey({
+            path: filePath,
+            repository_name: fileRepositoryName,
+            change_layer: changeLayer,
+          })
         : undefined,
-    [mode, filePath, fileRepositoryName],
+    [mode, filePath, fileRepositoryName, changeLayer],
   );
 }
 

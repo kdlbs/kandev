@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -398,6 +399,9 @@ func (r *recordingMessageQueuer) QueueMessageWithMetadata(_ context.Context, ses
 		QueuedBy:  userID,
 		Metadata:  metadata,
 	}
+	if msg.ID == "" {
+		msg.ID = fmt.Sprintf("queued-%d", len(r.calls)+1)
+	}
 	r.calls = append(r.calls, msg)
 	return &msg, nil
 }
@@ -408,21 +412,131 @@ type pendingMoveRecordingQueuer struct {
 	pendingMoves     []messagequeue.PendingMove
 }
 
-func (r *pendingMoveRecordingQueuer) SetPendingMove(_ context.Context, sessionID string, move *messagequeue.PendingMove) {
+func (r *pendingMoveRecordingQueuer) SetPendingMove(_ context.Context, sessionID string, move *messagequeue.PendingMove) error {
 	r.pendingSessionID = sessionID
 	if move != nil {
 		r.pendingMoves = append(r.pendingMoves, *move)
 	}
+	return nil
 }
 
-func (r *recordingMessageQueuer) SetPendingMove(_ context.Context, _ string, _ *messagequeue.PendingMove) {
+func (r *recordingMessageQueuer) SetPendingMove(_ context.Context, _ string, _ *messagequeue.PendingMove) error {
+	return nil
 }
 
-// TakeQueued is a no-op stub — the unit tests below don't exercise rollback,
-// they just exercise QueueMessage. Returning (nil, false) is consistent with
-// "nothing to take", which is what the rollback path checks before logging.
-func (r *recordingMessageQueuer) TakeQueued(_ context.Context, _ string) (*messagequeue.QueuedMessage, bool) {
-	return nil, false
+func (r *recordingMessageQueuer) RemoveEntryForSession(
+	_ context.Context,
+	identity messagequeue.QueueSessionIdentity,
+	entryID string,
+) (*messagequeue.QueueRemovalResult, error) {
+	for index := range r.calls {
+		entry := r.calls[index]
+		if entry.ID == entryID && entry.SessionID == identity.SessionID && entry.TaskID == identity.TaskID {
+			r.calls = append(r.calls[:index], r.calls[index+1:]...)
+			return &messagequeue.QueueRemovalResult{Removed: []messagequeue.QueuedMessage{entry}}, nil
+		}
+	}
+	return nil, messagequeue.ErrEntryNotFound
+}
+
+func TestApplyMoveTaskImmediate_RollsBackExactHandoffAfterMoveFailure(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
+		ID: "ws-rollback", Name: "Rollback", CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{
+		ID: "wf-rollback", WorkspaceID: "ws-rollback", Name: "Board", CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID: "task-rollback", WorkspaceID: "ws-rollback", WorkflowID: "wf-rollback",
+		Title: "Rollback", State: v1.TaskStateTODO, CreatedAt: now, UpdatedAt: now,
+	}))
+	session := &models.TaskSession{
+		ID: "session-rollback", TaskID: "task-rollback", State: models.TaskSessionStateIdle,
+		IsPrimary: true, StartedAt: now, UpdatedAt: now,
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, session))
+
+	queue := &recordingMessageQueuer{}
+	queue.calls = append(queue.calls, messagequeue.QueuedMessage{
+		ID: "preexisting", SessionID: session.ID, TaskID: session.TaskID, Content: "keep me",
+	})
+	h := &Handlers{taskSvc: svc, messageQueue: queue, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPMoveTask, map[string]interface{}{})
+	response, err := h.applyMoveTaskImmediate(ctx, msg, moveTaskRequest{
+		TaskID: "task-rollback", WorkflowID: "missing-workflow",
+		WorkflowStepID: "missing-step", Prompt: "handoff",
+	}, session)
+	require.NoError(t, err)
+	assertWSError(t, response, ws.ErrorCodeInternalError)
+	require.Len(t, queue.calls, 1)
+	assert.Equal(t, "preexisting", queue.calls[0].ID)
+}
+
+type pendingMoveFailingQueuer struct {
+	recordingMessageQueuer
+	pendingErr error
+	removedIDs []string
+}
+
+func (r *pendingMoveFailingQueuer) SetPendingMove(
+	_ context.Context,
+	_ string,
+	_ *messagequeue.PendingMove,
+) error {
+	return r.pendingErr
+}
+
+func (r *pendingMoveFailingQueuer) RemoveEntryForSession(
+	_ context.Context,
+	_ messagequeue.QueueSessionIdentity,
+	entryID string,
+) (*messagequeue.QueueRemovalResult, error) {
+	r.removedIDs = append(r.removedIDs, entryID)
+	for index := range r.calls {
+		if r.calls[index].ID == entryID {
+			entry := r.calls[index]
+			r.calls = append(r.calls[:index], r.calls[index+1:]...)
+			return &messagequeue.QueueRemovalResult{Removed: []messagequeue.QueuedMessage{entry}}, nil
+		}
+	}
+	return nil, messagequeue.ErrEntryNotFound
+}
+
+// TestDeferMoveTask_PendingMovePersistenceFailureLeavesQueueUntouched verifies
+// the deferred move path surfaces an internal error when SetPendingMove fails
+// and does not mutate the session queue. One-shot instructions now ride the
+// PendingMove's EntryOptions rather than a pre-queued hand-off, so there is no
+// hand-off message to roll back: the pre-existing queue entry must survive and
+// nothing may be removed.
+func TestDeferMoveTask_PendingMovePersistenceFailureLeavesQueueUntouched(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	seedRunningTask(
+		t, repo,
+		"ws-pending-failure", "wf-pending-failure", "task-pending-failure",
+		"session-pending-failure", "step-current",
+	)
+	queue := &pendingMoveFailingQueuer{pendingErr: errors.New("persist pending move")}
+	queue.calls = append(queue.calls, messagequeue.QueuedMessage{
+		ID: "preexisting", SessionID: "session-pending-failure",
+		TaskID: "task-pending-failure", Content: "keep me",
+	})
+	h := &Handlers{taskSvc: svc, messageQueue: queue, logger: testLogger(t).WithFields()}
+	msg := makeWSMessage(t, ws.ActionMCPMoveTask, map[string]interface{}{
+		"task_id":          "task-pending-failure",
+		"workflow_id":      "wf-pending-failure",
+		"workflow_step_id": "step-target",
+		"prompt":           "handoff",
+	})
+
+	response, err := h.handleMoveTask(context.Background(), msg)
+	require.NoError(t, err)
+	assertWSError(t, response, ws.ErrorCodeInternalError)
+	require.Empty(t, queue.removedIDs)
+	require.Len(t, queue.calls, 1)
+	assert.Equal(t, "preexisting", queue.calls[0].ID)
 }
 
 // TestQueueMoveTaskPrompt_NilQueueReturnsError ensures the call is safe (no panic)
@@ -431,7 +545,9 @@ func (r *recordingMessageQueuer) TakeQueued(_ context.Context, _ string) (*messa
 func TestQueueMoveTaskPrompt_NilQueueReturnsError(t *testing.T) {
 	h := &Handlers{logger: testLogger(t).WithFields()}
 
-	err := h.queueMoveTaskPrompt(context.Background(), "task-1", "session-1", "fix issues")
+	_, err := h.queueMoveTaskPrompt(context.Background(), messagequeue.QueueSessionIdentity{
+		TaskID: "task-1", SessionID: "session-1", SessionIncarnationID: "inc-1",
+	}, "fix issues")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "message queue")
 }
@@ -446,7 +562,9 @@ func TestQueueMoveTaskPrompt_EmptySessionIDReturnsError(t *testing.T) {
 		logger:       testLogger(t).WithFields(),
 	}
 
-	err := h.queueMoveTaskPrompt(context.Background(), "task-1", "", "fix issues")
+	_, err := h.queueMoveTaskPrompt(context.Background(), messagequeue.QueueSessionIdentity{
+		TaskID: "task-1", SessionIncarnationID: "inc-1",
+	}, "fix issues")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "primary session")
 	assert.Empty(t, queue.calls, "queue must not be invoked without a session ID")
@@ -462,7 +580,9 @@ func TestQueueMoveTaskPrompt_QueuesWithExpectedFields(t *testing.T) {
 		logger:       testLogger(t).WithFields(),
 	}
 
-	err := h.queueMoveTaskPrompt(context.Background(), "task-1", "session-99", "Please fix the failing test in foo_test.go")
+	_, err := h.queueMoveTaskPrompt(context.Background(), messagequeue.QueueSessionIdentity{
+		TaskID: "task-1", SessionID: "session-99", SessionIncarnationID: "inc-99",
+	}, "Please fix the failing test in foo_test.go")
 	require.NoError(t, err)
 
 	require.Len(t, queue.calls, 1)
@@ -505,6 +625,32 @@ func TestHandleArchiveTask_MissingTaskID(t *testing.T) {
 	resp, err := h.handleArchiveTask(context.Background(), msg)
 	require.NoError(t, err)
 	assertWSError(t, resp, ws.ErrorCodeValidation)
+}
+
+func TestHandleArchiveTask_UsesHandoffCascadeWhenConfigured(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-handoff", Name: "Handoff"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-handoff", WorkspaceID: "ws-handoff", Name: "Board"}))
+	task := &models.Task{ID: "handoff-archive", WorkspaceID: "ws-handoff", WorkflowID: "wf-handoff", Title: "Archive", State: v1.TaskStateTODO}
+	require.NoError(t, repo.CreateTask(ctx, task))
+
+	h := &Handlers{
+		taskSvc:    svc,
+		handoffSvc: service.NewHandoffService(repo, repo, nil, nil, nil, testLogger(t)),
+		logger:     testLogger(t).WithFields(),
+	}
+	msg := makeWSMessage(t, ws.ActionMCPArchiveTask, map[string]string{"task_id": task.ID})
+	resp, err := h.handleArchiveTask(ctx, msg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+
+	var cascadeID string
+	require.NoError(t, repo.DB().QueryRowContext(ctx,
+		`SELECT COALESCE(archived_by_cascade_id, '') FROM tasks WHERE id = ?`, task.ID).Scan(&cascadeID))
+	if cascadeID == "" {
+		t.Fatal("MCP archive did not use HandoffService cascade path")
+	}
 }
 
 func TestHandleArchiveTask_InvalidPayload(t *testing.T) {
@@ -595,6 +741,74 @@ func TestHandleArchiveTask_MergedPRRunAcceptsBoundTarget(t *testing.T) {
 	archived, err := svc.GetTask(ctx, target.ID)
 	require.NoError(t, err)
 	assert.NotNil(t, archived.ArchivedAt)
+}
+
+// TestHandleArchiveTask_MergedPRRunAcceptsRefreshedTargetAfterResume is the
+// regression guard for the reuse_thread + github_pr_merged defect: once a
+// resumed continuation task's metadata is refreshed for a NEW firing (as
+// orchestrator.refreshAutomationContinuationMetadata now does), the guard
+// must bind to the refreshed target, not the stale one from the first
+// firing. It exercises the metadata mutation through repo.SetTaskMetadataKey
+// — the exact concurrent-key-safe primitive, on the exact same *sqliterepo.
+// Repository type, that orchestrator.refreshAutomationContinuationMetadata
+// calls in production (rather than the unrelated Service.UpdateTaskMetadata
+// full-row path) — so this proves the guard accepts a binding written the
+// same way production writes it, not just whatever happens to be in the DB.
+func TestHandleArchiveTask_MergedPRRunAcceptsRefreshedTargetAfterResume(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-resume", Name: "Resume"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-resume", WorkspaceID: "ws-resume", Name: "Board"}))
+
+	firstTarget := &models.Task{
+		ID: "first-target", WorkspaceID: "ws-resume", WorkflowID: "wf-resume",
+		Title: "First merge target", State: v1.TaskStateTODO,
+	}
+	require.NoError(t, repo.CreateTask(ctx, firstTarget))
+	secondTarget := &models.Task{
+		ID: "second-target", WorkspaceID: "ws-resume", WorkflowID: "wf-resume",
+		Title: "Second merge target", State: v1.TaskStateTODO,
+	}
+	require.NoError(t, repo.CreateTask(ctx, secondTarget))
+	caller := &models.Task{
+		ID: "automation-run", WorkspaceID: "ws-resume", WorkflowID: "wf-resume",
+		Title: "Automation run", State: v1.TaskStateTODO,
+		Origin: models.TaskOriginAutomationRun,
+		Metadata: map[string]interface{}{
+			"trigger_type":                       "github_pr_merged",
+			models.MetaKeyAutomationTargetTaskID: firstTarget.ID,
+		},
+	}
+	require.NoError(t, repo.CreateTask(ctx, caller))
+
+	h := &Handlers{taskSvc: svc, logger: testLogger(t).WithFields()}
+
+	// A second firing resumes the same continuation task and refreshes its
+	// binding — this is what orchestrator.refreshAutomationContinuationMetadata
+	// does on the reuse path, one key at a time via the same primitive.
+	require.NoError(t, repo.SetTaskMetadataKey(ctx, caller.ID, "trigger_type", "github_pr_merged"))
+	require.NoError(t, repo.SetTaskMetadataKey(ctx, caller.ID, models.MetaKeyAutomationTargetTaskID, secondTarget.ID))
+
+	// The second merge's target is now accepted...
+	secondMsg := makeWSMessage(t, ws.ActionMCPArchiveTask, map[string]string{
+		"task_id": secondTarget.ID, "caller_task_id": caller.ID,
+	})
+	resp, err := h.handleArchiveTask(ctx, secondMsg)
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeResponse, resp.Type)
+	archived, err := svc.GetTask(ctx, secondTarget.ID)
+	require.NoError(t, err)
+	assert.NotNil(t, archived.ArchivedAt, "the refreshed target must be archivable")
+
+	// ...and the stale first target is correctly refused against the now-current
+	// binding while it is still unarchived, so this assertion specifically tests
+	// the target guard rather than ordinary archive validation.
+	staleMsg := makeWSMessage(t, ws.ActionMCPArchiveTask, map[string]string{
+		"task_id": firstTarget.ID, "caller_task_id": caller.ID,
+	})
+	resp, err = h.handleArchiveTask(ctx, staleMsg)
+	require.NoError(t, err)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
 }
 
 func TestHandleArchiveTask_MergedPRRunRejectsMissingBinding(t *testing.T) {
@@ -1014,8 +1228,12 @@ func TestDeferMoveTask_AcceptsValidStep(t *testing.T) {
 	assert.Equal(t, "dst-step3", queue.pendingMoves[0].WorkflowStepID)
 	assert.Equal(t, "sess-caller3", queue.pendingMoves[0].SenderSessionID)
 	assert.NotEmpty(t, queue.pendingMoves[0].MoveID)
-	require.Len(t, queue.calls, 1)
-	assert.Equal(t, queue.pendingMoves[0].MoveID, queue.calls[0].Metadata[messagequeue.MetadataDeferredMoveID])
+	// The legacy prompt is folded into one-shot entry instructions carried on
+	// the PendingMove; no hand-off message is pre-queued at defer time —
+	// instructions ride the target-step entry overlay applied at turn-end.
+	require.NotNil(t, queue.pendingMoves[0].EntryOptions)
+	assert.Equal(t, "continue the work", queue.pendingMoves[0].EntryOptions.Instructions)
+	assert.Empty(t, queue.calls)
 }
 
 func TestMoveTaskErrorMessage_SanitizesClassifiedErrors(t *testing.T) {

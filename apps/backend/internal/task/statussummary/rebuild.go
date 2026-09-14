@@ -3,6 +3,8 @@ package statussummary
 import (
 	"strings"
 	"time"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // RebuildSession is the durable/session-backed portion of a task summary.
@@ -115,7 +117,7 @@ func BuildFromAuthoritative(input RebuildInput) TaskStatusSummary {
 	for _, git := range input.Git {
 		repository := strings.TrimSpace(git.Repository)
 		if repository == "" {
-			repository = "default"
+			repository = RootRepositoryKey
 		}
 		state.git[repository] = git.Summary
 	}
@@ -140,8 +142,15 @@ func normalizeRebuildError(input *ActiveErrorSummary, now time.Time) *ActiveErro
 	copy.Preview = truncateString(copy.Preview, MaxActiveErrorPreviewBytes)
 	copy.SessionID = truncateString(copy.SessionID, maxSessionIDBytes)
 	copy.TaskRepositoryID = truncateString(copy.TaskRepositoryID, maxTaskRepositoryIDBytes)
+	copy.ExecutionID = truncateString(copy.ExecutionID, maxSessionIDBytes)
+	copy.AttemptID = truncateString(copy.AttemptID, maxSessionIDBytes)
+	if copy.Phase != models.LaunchErrorPhaseBootstrap {
+		copy.Phase = ""
+	}
 	copy.Category = truncateString(copy.Category, maxActiveErrorCategoryBytes)
-	copy.RecoveryActions = normalizeRecoveryActions(copy.RecoveryActions)
+	copy.RecoveryActions = normalizeRecoveryActionsForCategory(copy.Category, copy.RecoveryActions)
+	copy.Causes = models.NormalizeAgentErrorCauses(copy.Causes)
+	copy.Details = models.NormalizeAgentErrorDetails(copy.Details, copy.Causes)
 	if copy.Stamp == "" {
 		copy.Stamp = copy.OccurredAt.UTC().Format(time.RFC3339Nano) + ":" + copy.Preview
 	}

@@ -3,6 +3,7 @@ package acp
 import (
 	"strings"
 
+	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/acp/backgroundlaunch"
 	"github.com/kandev/kandev/internal/agentctl/server/adapter/transport/shared"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/readselector"
@@ -302,7 +303,7 @@ func isEmptyGenericInputValue(v any) bool {
 }
 
 func stampBackgroundShellWork(agentID string, payload *streams.NormalizedPayload) {
-	if agentID == claudeAgentID && payload != nil && payload.ShellExec() != nil && payload.ShellExec().Background {
+	if backgroundlaunch.RecognizesDetachedLaunch(agentID, payload) {
 		payload.SetBackgroundWorkIdentity(streams.BackgroundWorkKindShell, "", true, false)
 	}
 }

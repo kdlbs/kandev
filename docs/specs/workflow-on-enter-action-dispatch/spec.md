@@ -1,7 +1,7 @@
 ---
 status: draft
 created: 2026-08-19
-updated: 2026-08-20
+updated: 2026-08-31
 owner: Kandev
 ---
 
@@ -24,7 +24,7 @@ depends on **how the task arrived at the step**. There are two implementations o
 |---|---|---|
 | Agent-turn auto-advance (`on_turn_complete` → transition) | `orchestrator.processOnEnter` | `reset_agent_context`, `configure_session`, `enable_plan_mode`, `set_session_mode`, `auto_start_agent` |
 | Manual move / WIP-queue promotion | `orchestrator.processOnEnter` | same five |
-| `switch_workflow` action | `engine.HandleTrigger(TriggerOnEnter)` | **eight of nine** — every type except `configure_session` |
+| `switch_workflow` action | `engine.HandleTrigger(TriggerOnEnter)` | **nine of ten** — every type except `configure_session` |
 
 The third row is not a typo, and it is the single most misread fact in this area.
 `switchWorkflowDispatcher` calls `engine.HandleTrigger(TriggerOnEnter)` with
@@ -32,7 +32,7 @@ The third row is not a typo, and it is the single most misread fact in this area
 the reduced one it might appear to be. `buildWorkflowCallbacks` registers
 `enable_plan_mode`, `disable_plan_mode`, `reset_agent_context`, `auto_start_agent`,
 `set_workflow_data` and `set_session_mode` **unconditionally** — unlike the Phase-2 kinds,
-which are nil-guarded on their adapters — and `compileOnEnter` compiles all eight
+which are nil-guarded on their adapters — and `compileOnEnter` compiles all nine
 non-`configure_session` types. So `switch_workflow` already executes the five
 session-lifecycle types through engine callbacks, *and* is the only path that honours
 `clear_decisions` and `queue_run_for_each_participant`.
@@ -41,17 +41,15 @@ Two consequences follow, and both are load-bearing:
 
 1. The ownership partition below is stated **per entry path**, not globally. A partition
    naming one owner per action type with no reference to arrival path would be false for
-   `switch_workflow` on five of nine types, and a builder enforcing it literally would
+   `switch_workflow` on five of ten types, and a builder enforcing it literally would
    delete four working callback registrations and silently regress that path.
 2. `configure_session` is the one type `switch_workflow` genuinely drops. That is a real
    AC-A2 gap; it is named and excluded (Out of scope) rather than left silent, and
    AC-A6 requires it to warn on that path.
 
-Actions the orchestrator path does not recognise are neither executed nor reported.
-`processOnEnter` handles `reset_agent_context` and `configure_session` at fixed
-positions, then iterates `step.Events.OnEnter` in a `switch` with three cases and no
-`default`; unrecognised action types fall off the end in silence — no error, no warning,
-no log line, no metric.
+On the ordinary path, `processOnEnter` handles session actions and classifies engine-owned
+actions. Before this fix, `ensure_participant_seat` lacked a no-op case and triggered a
+false warning.
 
 The `Office Default` workflow depends entirely on the actions that fall through. Its
 Review and Approval steps declare:
@@ -96,7 +94,7 @@ Three things make this expensive to diagnose, and the fix must remove all three:
 ## Ownership decision
 
 **On every entry path where `processOnEnter` runs, it is the single owner of the five
-session-lifecycle actions and the workflow engine is the single owner of the other four.
+session-lifecycle actions and the workflow engine is the single owner of the other five.
 On the one entry path where `processOnEnter` does not run at all (`switch_workflow`), the
 engine owns every type it compiles.** Each action type has exactly one owner *per entry
 path*, no action type is executed twice within one step entry, and the partition is stated
@@ -140,6 +138,7 @@ same fixed positions, same partition. Read every `E1`–`E3` below as `E1`–`E3
 | `queue_run_for_each_participant` | engine | engine | |
 | `queue_run` | engine | engine | |
 | `run_code_review` | engine | engine | |
+| `ensure_participant_seat` | engine | engine | |
 
 Two properties this table exists to guarantee, neither of which is "one global owner":
 
@@ -202,9 +201,10 @@ explicit list of step-field writes that do **not**, is in the Execution model's
   here rather than left implicit because they are the paths this spec's previous revision
   missed entirely
 
-The nine `on_enter` action types in scope are the seven the embedded-YAML allow-list
+The ten `on_enter` action types in scope are the eight the embedded-YAML allow-list
 accepts (`enable_plan_mode`, `auto_start_agent`, `reset_agent_context`,
-`set_session_mode`, `clear_decisions`, `queue_run_for_each_participant`, `queue_run`)
+`set_session_mode`, `clear_decisions`, `queue_run_for_each_participant`, `queue_run`,
+`ensure_participant_seat`)
 plus `run_code_review` and `configure_session`, which are declarable through the
 import/sync path though not through `validOnEnter`.
 
@@ -217,9 +217,10 @@ marker in the tree today (`workflowStore.IsOperationApplied` /
 restart, is read before execution and written only after every action succeeds, and so
 provides neither durability nor an atomic claim.
 
-**What this model covers, and what it deliberately does not.** It governs the four
+**What this model covers, and what it deliberately does not.** It governs the five
 **engine-owned** action types only — `clear_decisions`, `queue_run_for_each_participant`,
-`queue_run`, `run_code_review`. The five orchestrator-owned types are **outside** it
+`queue_run`, `run_code_review`, `ensure_participant_seat`. The five orchestrator-owned
+types are **outside** it
 (AC-B8). That boundary is a decision, not an omission, and it is what keeps the protocol
 below free of a lease and a reaper: `reset_agent_context` and `auto_start_agent` are not
 safe to re-execute after a crash, so admitting them would force a liveness mechanism this
@@ -760,8 +761,9 @@ git sync, and a transient read failure.
   **On `E4` this criterion does not apply**: the engine compiles and executes the declared
   list in order, with no hoisting and no deferral, and AC-A13 preserves that. AC-A2(ii) is
   the corresponding cross-path exemption.
-- **AC-A10** `clear_decisions`, `queue_run_for_each_participant`, `queue_run`, and
-  `run_code_review` do not depend on a live agent session. WHEN a task enters a step
+- **AC-A10** `clear_decisions`, `queue_run_for_each_participant`, `queue_run`,
+  `run_code_review`, and `ensure_participant_seat` do not depend on a live agent
+  session. WHEN a task enters a step
   declaring one of them and the task has no running session, the system shall still
   execute it. Session-scoped actions (`enable_plan_mode`, `set_session_mode`,
   `reset_agent_context`, `configure_session`, `auto_start_agent`) remain skipped in that

@@ -30,11 +30,15 @@ test("skill injection writes assigned skill to session worktree on launch", asyn
     slug,
     content,
   })) as { id: string; slug: string };
-  expect(skill.slug).toBe(slug);
+  // A caller-supplied slug is normalized to its canonical kandev-prefixed
+  // form on write (AC-001.12); the persisted identity downstream is this
+  // canonical slug, not the one the request supplied.
+  const canonicalSlug = `kandev-${slug}`;
+  expect(skill.slug).toBe(canonicalSlug);
 
   // 2. Assign the skill to the seed agent profile via the test harness.
   //    desired_skills is read from agent_profiles at launch time.
-  await apiClient.setProfileDesiredSkills(seedData.agentProfileId, [slug]);
+  await apiClient.setProfileDesiredSkills(seedData.agentProfileId, [canonicalSlug]);
 
   try {
     // 3. Launch a session via createTaskWithAgent (start_agent: true).
@@ -65,12 +69,14 @@ test("skill injection writes assigned skill to session worktree on launch", asyn
       .not.toBe("");
 
     // 5. Skill landed at the spec-defined location with the right content.
-    const skillFile = path.join(worktreePath, PROJECT_SKILL_DIR, `kandev-${slug}`, "SKILL.md");
+    const skillFile = path.join(worktreePath, PROJECT_SKILL_DIR, canonicalSlug, "SKILL.md");
     await expect
       .poll(() => fs.existsSync(skillFile), { timeout: 15_000, message: skillFile })
       .toBe(true);
     const skillFileContent = fs.readFileSync(skillFile, "utf8");
-    expect(skillFileContent).toContain(`---\nname: ${slug}\ndescription: ${slug}\n---\n`);
+    expect(skillFileContent).toContain(
+      `---\nname: ${canonicalSlug}\ndescription: ${canonicalSlug}\n---\n`,
+    );
     expect(skillFileContent).toContain(`Marker: ${slug}-content`);
 
     // 6. .git/info/exclude (resolved through .git file for linked worktrees)
@@ -88,11 +94,27 @@ function resolveGitExcludePath(worktreePath: string): string {
   const gitPath = path.join(worktreePath, ".git");
   const stat = fs.statSync(gitPath);
   if (stat.isFile()) {
-    // linked worktree: ".git" is a "gitdir: <abs>" pointer file
+    // linked worktree: ".git" is a "gitdir: <abs>" pointer file. That
+    // per-worktree gitdir has its own info/ dir, but git reads
+    // info/exclude from the shared common dir (found via the gitdir's
+    // "commondir" file), not from here — mirrors resolveCommonDir in
+    // internal/agent/runtime/lifecycle/skill/inject.go.
     const text = fs.readFileSync(gitPath, "utf8").trim();
     const match = text.match(/^gitdir:\s*(.+)$/m);
     if (!match) throw new Error(`unparseable .git file: ${text}`);
-    return path.join(match[1], "info", "exclude");
+    return path.join(resolveCommonDir(match[1]), "info", "exclude");
   }
   return path.join(gitPath, "info", "exclude");
+}
+
+function resolveCommonDir(gitDir: string): string {
+  const commonDirFile = path.join(gitDir, "commondir");
+  if (!fs.existsSync(commonDirFile)) {
+    return gitDir;
+  }
+  const commonDir = fs.readFileSync(commonDirFile, "utf8").trim();
+  if (!commonDir) {
+    return gitDir;
+  }
+  return path.isAbsolute(commonDir) ? commonDir : path.join(gitDir, commonDir);
 }

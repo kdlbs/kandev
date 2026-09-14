@@ -14,6 +14,7 @@ import (
 	"github.com/kandev/kandev/internal/auth/authn"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
+	taskrepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 )
@@ -183,19 +184,81 @@ func TestHTTPListMessagesRejectsConflictingAndInvalidParams(t *testing.T) {
 	require.Zero(t, repo.listCalls)
 }
 
-// TestHTTPListMessagesIgnoresAnUnparseableLimit documents the lenient parse:
-// a garbage limit leaves limit at 0 but still selects the paginated path,
-// because the parameter was present.
-func TestHTTPListMessagesIgnoresAnUnparseableLimit(t *testing.T) {
+func TestHTTPListMessagesRejectsInvalidLimits(t *testing.T) {
+	for name, query := range map[string]string{
+		"empty":     "?limit=",
+		"malformed": "?limit=many",
+		"zero":      "?limit=0",
+		"negative":  "?limit=-1",
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := &messageListRepo{}
+			h := newMessageListHandlers(t, repo)
+			c, rec := messageRequestAs(t, "", "/api/v1/task-sessions/sess-b/messages"+query, "sess-b")
+
+			h.httpListMessages(c)
+
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.JSONEq(t, `{"error":"limit must be a positive integer"}`, rec.Body.String())
+			require.Empty(t, repo.paginatedOptions)
+			require.Zero(t, repo.listCalls)
+		})
+	}
+}
+
+func TestHTTPListMessagesRejectsEmptyAroundAndUsesAroundSortError(t *testing.T) {
+	for name, query := range map[string]string{
+		"empty around":   "?around=",
+		"ascending sort": "?around=message&sort=asc",
+	} {
+		t.Run(name, func(t *testing.T) {
+			repo := &messageListRepo{}
+			h := newMessageListHandlers(t, repo)
+			c, rec := messageRequestAs(t, "", "/api/v1/task-sessions/sess-b/messages"+query, "sess-b")
+
+			h.httpListMessages(c)
+
+			require.Equal(t, http.StatusBadRequest, rec.Code)
+			require.Zero(t, repo.listCalls)
+			require.Empty(t, repo.paginatedOptions)
+			if name == "empty around" {
+				require.JSONEq(t, `{"error":"around must not be empty"}`, rec.Body.String())
+			} else {
+				require.JSONEq(t, `{"error":"sort must be desc with around"}`, rec.Body.String())
+			}
+		})
+	}
+}
+
+func TestHTTPListMessagesRejectsUnsupportedAuthorType(t *testing.T) {
 	repo := &messageListRepo{}
 	h := newMessageListHandlers(t, repo)
-	c, rec := messageRequestAs(t, "", "/api/v1/task-sessions/sess-b/messages?limit=many", "sess-b")
+	c, rec := messageRequestAs(t, "", "/api/v1/task-sessions/sess-b/messages?author_type=agent", "sess-b")
 
 	h.httpListMessages(c)
 
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.Len(t, repo.paginatedOptions, 1)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.JSONEq(t, `{"error":"author_type must be \"user\""}`, rec.Body.String())
+	require.Empty(t, repo.paginatedOptions)
 	require.Zero(t, repo.listCalls)
+}
+
+func TestHTTPListMessagesPassesAuthorFilterAndAround(t *testing.T) {
+	repo := &messageListRepo{hasMore: true}
+	h := newMessageListHandlers(t, repo)
+
+	c, rec := messageRequestAs(t, "", "/api/v1/task-sessions/sess-b/messages?author_type=user&limit=20", "sess-b")
+	h.httpListMessages(c)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "user", repo.paginatedOptions[0].AuthorType)
+
+	c, rec = messageRequestAs(t, "", "/api/v1/task-sessions/sess-b/messages?around=msg-2&limit=20&sort=desc", "sess-b")
+	h.httpListMessages(c)
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "msg-2", repo.paginatedOptions[1].Around)
+	var aroundResponse dto.ListMessagesResponse
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &aroundResponse))
+	require.False(t, aroundResponse.HasMore)
 }
 
 func TestHTTPListMessagesSurfacesRepositoryFailure(t *testing.T) {
@@ -207,6 +270,17 @@ func TestHTTPListMessagesSurfacesRepositoryFailure(t *testing.T) {
 
 	require.Equal(t, http.StatusInternalServerError, rec.Code)
 	require.JSONEq(t, `{"error":"failed to list messages"}`, rec.Body.String())
+}
+
+func TestHTTPListMessagesMapsMissingAroundTargetToNotFound(t *testing.T) {
+	repo := &messageListRepo{paginatedErr: taskrepo.ErrMessageNotFound}
+	h := newMessageListHandlers(t, repo)
+	c, rec := messageRequestAs(t, "", "/api/v1/task-sessions/sess-b/messages?around=gone&limit=20&sort=desc", "sess-b")
+
+	h.httpListMessages(c)
+
+	require.Equal(t, http.StatusNotFound, rec.Code)
+	require.JSONEq(t, `{"error":"message not found"}`, rec.Body.String())
 }
 
 // TestHTTPListMessagesDeniesForeignSession covers the transcript read, which

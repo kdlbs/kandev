@@ -6,6 +6,7 @@ import { IconCheck, IconChevronDown, IconLoader2 } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { prioritizeSelectedOption, selectorOptionClassName } from "@/lib/utils/selector-options";
 import { Button } from "@kandev/ui/button";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import {
   Command,
   CommandEmpty,
@@ -64,8 +65,14 @@ interface ComboboxProps {
   headerAction?: React.ReactNode;
   /** When true, swap the trigger chevron for a spinner to indicate loading. */
   loading?: boolean;
+  /** When true, keep option and trigger hit areas touch-sized. */
+  touchTarget?: boolean;
+  /** Optional id for associating a visible form label with the trigger. */
+  triggerId?: string;
   /** Ref for consumers that anchor a local confirmation to this trigger. */
   triggerRef?: Ref<HTMLButtonElement>;
+  /** Notifies consumers when the popover opens or closes. */
+  onOpenChange?: (open: boolean) => void;
 }
 
 function TriggerLabel({
@@ -90,10 +97,12 @@ function OptionsList({
   options,
   value,
   onSelect,
+  touchTarget,
 }: {
   options: ComboboxOption[];
   value: string;
   onSelect: (value: string) => void;
+  touchTarget: boolean;
 }) {
   const orderedOptions = prioritizeSelectedOption(options, value, (option) => option.value);
   const selected = orderedOptions.find((option) => option.value === value);
@@ -111,7 +120,7 @@ function OptionsList({
         keywords={option.keywords ?? [option.label, option.description ?? ""]}
         onSelect={() => !option.disabled && onSelect(option.value)}
         disabled={option.disabled}
-        className={selectorOptionClassName(option.value === value, option.disabled)}
+        className={selectorOptionClassName(option.value === value, option.disabled, touchTarget)}
       >
         <div className="flex min-w-0 flex-1 items-center">
           {option.renderLabel ? option.renderLabel() : option.label}
@@ -153,6 +162,114 @@ function OptionsList({
   );
 }
 
+function ComboboxTrigger({
+  options,
+  value,
+  ariaLabel,
+  open,
+  disabled,
+  touchTarget,
+  triggerClassName,
+  plainTrigger,
+  placeholder,
+  loading,
+  testId,
+  triggerId,
+  triggerRef,
+}: {
+  options: ComboboxOption[];
+  value: string;
+  ariaLabel?: string;
+  open: boolean;
+  disabled: boolean;
+  touchTarget: boolean;
+  triggerClassName?: string;
+  plainTrigger: boolean;
+  placeholder: string;
+  loading: boolean;
+  testId?: string;
+  triggerId?: string;
+  triggerRef?: Ref<HTMLButtonElement>;
+}) {
+  return (
+    <PopoverTrigger asChild>
+      <Button
+        ref={triggerRef}
+        id={triggerId}
+        variant="ghost"
+        role="combobox"
+        aria-label={ariaLabel}
+        aria-expanded={open}
+        className={cn(
+          controlSizingClassName("standard"),
+          "w-full justify-between",
+          !disabled && "cursor-pointer",
+          touchTarget && "max-md:min-h-12 [@media(pointer:coarse)]:min-h-12",
+          triggerClassName,
+        )}
+        disabled={disabled}
+        data-testid={testId}
+      >
+        <div className="flex min-w-0 flex-1 items-center">
+          <TriggerLabel
+            selectedOption={options.find((option) => option.value === value)}
+            plainTrigger={plainTrigger}
+            placeholder={placeholder}
+          />
+        </div>
+        {loading ? (
+          <IconLoader2 className="ml-2 h-4 w-4 shrink-0 animate-spin opacity-50" />
+        ) : (
+          <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        )}
+      </Button>
+    </PopoverTrigger>
+  );
+}
+function handleComboboxOpenChange(
+  next: boolean,
+  value: string,
+  setOpen: (open: boolean) => void,
+  setHighlighted: (value: string) => void,
+  onOpenChange?: (open: boolean) => void,
+) {
+  setOpen(next);
+  if (next) setHighlighted(value);
+  onOpenChange?.(next);
+}
+
+function selectComboboxOption({
+  selectedValue,
+  currentValue,
+  onValueChange,
+  setOpen,
+  onOpenChange,
+}: {
+  selectedValue: string;
+  currentValue: string;
+  onValueChange: (value: string) => void;
+  setOpen: (open: boolean) => void;
+  onOpenChange?: (open: boolean) => void;
+}) {
+  const nextValue = selectedValue === currentValue ? "" : selectedValue;
+  onValueChange(nextValue);
+  setOpen(false);
+  onOpenChange?.(false);
+}
+
+function ComboboxHeader({
+  dropdownLabel,
+  headerAction,
+}: Pick<ComboboxProps, "dropdownLabel" | "headerAction">) {
+  if (!dropdownLabel && !headerAction) return null;
+  return (
+    <div className="text-muted-foreground flex items-center justify-between gap-2 border-b px-2 py-1 text-xs">
+      <span>{dropdownLabel}</span>
+      {headerAction}
+    </div>
+  );
+}
+
 export const Combobox = memo(function Combobox({
   options,
   value,
@@ -175,7 +292,10 @@ export const Combobox = memo(function Combobox({
   filter,
   headerAction,
   loading = false,
+  touchTarget = false,
+  triggerId,
   triggerRef,
+  onOpenChange,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
   const portalContainer = useTaskCreateDialogPopoverContainer();
@@ -185,36 +305,25 @@ export const Combobox = memo(function Combobox({
   return (
     <Popover
       open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (next) setHighlighted(value);
-      }}
+      onOpenChange={(next) =>
+        handleComboboxOpenChange(next, value, setOpen, setHighlighted, onOpenChange)
+      }
     >
-      <PopoverTrigger asChild>
-        <Button
-          ref={triggerRef}
-          variant="ghost"
-          role="combobox"
-          aria-label={ariaLabel}
-          aria-expanded={open}
-          className={cn("w-full justify-between", !disabled && "cursor-pointer", triggerClassName)}
-          disabled={disabled}
-          data-testid={testId}
-        >
-          <div className="flex min-w-0 flex-1 items-center">
-            <TriggerLabel
-              selectedOption={options.find((option) => option.value === value)}
-              plainTrigger={plainTrigger}
-              placeholder={placeholder}
-            />
-          </div>
-          {loading ? (
-            <IconLoader2 className="ml-2 h-4 w-4 shrink-0 animate-spin opacity-50" />
-          ) : (
-            <IconChevronDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-          )}
-        </Button>
-      </PopoverTrigger>
+      <ComboboxTrigger
+        options={options}
+        value={value}
+        ariaLabel={ariaLabel}
+        open={open}
+        disabled={disabled}
+        touchTarget={touchTarget}
+        triggerClassName={triggerClassName}
+        plainTrigger={plainTrigger}
+        placeholder={placeholder}
+        loading={loading}
+        testId={testId}
+        triggerId={triggerId}
+        triggerRef={triggerRef}
+      />
       <PopoverContent
         className={cn(
           "w-[var(--radix-popover-trigger-width)] min-w-[min(300px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] p-0 max-h-[var(--radix-popover-content-available-height)] pointer-events-auto",
@@ -232,22 +341,28 @@ export const Combobox = memo(function Combobox({
           filter={filter}
           data-testid={dropdownTestId}
         >
-          {dropdownLabel || headerAction ? (
-            <div className="text-muted-foreground flex items-center justify-between gap-2 px-2 py-1 text-xs border-b">
-              <span>{dropdownLabel}</span>
-              {headerAction}
-            </div>
-          ) : null}
-          {showSearch && <CommandInput placeholder={searchPlaceholder} className="h-9" />}
+          <ComboboxHeader dropdownLabel={dropdownLabel} headerAction={headerAction} />
+          {showSearch && (
+            <CommandInput
+              placeholder={searchPlaceholder}
+              className={controlSizingClassName("standard")}
+            />
+          )}
           <CommandList>
             <CommandEmpty>{emptyMessage}</CommandEmpty>
             <OptionsList
               options={options}
               value={value}
-              onSelect={(v) => {
-                onValueChange(v === value ? "" : v);
-                setOpen(false);
-              }}
+              touchTarget={touchTarget}
+              onSelect={(v) =>
+                selectComboboxOption({
+                  selectedValue: v,
+                  currentValue: value,
+                  onValueChange,
+                  setOpen,
+                  onOpenChange,
+                })
+              }
             />
           </CommandList>
         </Command>

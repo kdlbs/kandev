@@ -31,7 +31,10 @@ type Props = {
   deletingTaskId: string | null;
   onArchive: (id: string, opts?: { cascade?: boolean }) => Promise<void>;
   onUnarchive: (id: string) => Promise<void>;
-  onDelete: (id: string, opts?: { cascade?: boolean }) => Promise<void>;
+  onDelete: (
+    id: string,
+    opts?: { cascade?: boolean; discardWorktreeChanges?: boolean },
+  ) => Promise<void>;
   onRefresh: () => Promise<void>;
   mobileActions: ReactNode;
 };

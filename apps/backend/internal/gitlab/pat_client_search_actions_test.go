@@ -54,7 +54,7 @@ func TestPATClientListIssuesUsesDefaultPagination(t *testing.T) {
 	}))
 	t.Cleanup(stop)
 
-	issues, err := NewPATClient(host, "tok").ListIssues(t.Context(), "open", "assignee_username=alice")
+	issues, err := NewPATClient(host, "tok").ListIssues(t.Context(), "open", "assignee_username=alice", "")
 	if err != nil {
 		t.Fatalf("ListIssues() error = %v", err)
 	}

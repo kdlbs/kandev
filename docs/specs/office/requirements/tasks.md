@@ -30,13 +30,18 @@ identity, inline editable properties, and the chat / activity views.
 #### Acceptance criteria
 
 - **AC-OFFICE-TASKS-001.1:** A task progresses through statuses `todo → in_progress → in_review → done`, with `blocked` and `cancelled` as branchable states. Status transitions are user- or agent-driven and feed the reactivity pipeline (section E).
-- **AC-OFFICE-TASKS-001.2:** Every office task has zero or more **task sessions**: one per `(task_id, agent_instance_id)` pair. A session represents one agent's persistent conversation thread on the task, not a single launch.
+- **AC-OFFICE-TASKS-001.2:** Every office task has zero or more **task sessions**: one per `(task_id, agent_profile_id)` pair. A session represents one agent's persistent conversation thread on the task, not a single launch.
 - **AC-OFFICE-TASKS-001.3:** Sessions cycle through `CREATED → STARTING → RUNNING → IDLE → RUNNING → IDLE → ...` for as many turns as the agent is woken. A session is terminal (`COMPLETED` / `FAILED` / `CANCELLED`) only when the agent leaves the task's participants list.
 - **AC-OFFICE-TASKS-001.4:** Wakeups (section E) drive transitions IDLE → RUNNING. Turn-complete events drive RUNNING → IDLE, tearing down the executor and agent process entirely; the conversation is preserved via the stored ACP session token.
 - **AC-OFFICE-TASKS-001.5:** Kanban / quick-chat sessions keep their per-launch model and `WAITING_FOR_INPUT` semantics - office's IDLE state is office-scoped.
 - **AC-OFFICE-TASKS-001.6:** Tasks form a tree via `parent_id`. Parent tasks act as the default home for shared specs, plans, and coordination documents.
 - **AC-OFFICE-TASKS-001.7:** Child tasks can read parent-owned documents and write parent-owned coordination documents by default. Document handoffs reuse the existing **blocker mechanism**: a consumer task is blocked-by the producer task and reads the resulting documents from its wakeup prompt context. There is no separate "required documents" data type.
 - **AC-OFFICE-TASKS-001.8:** Agents can list related tasks (parent, children, siblings, blockers, blocked) and can read/write allowed task documents via MCP or CLI tools.
+
+The current schema stores the agent identity in `task_sessions.agent_profile_id`.
+The schema does not yet enforce one live Office row per pair. A future migration
+must define an Office-only discriminator because Kanban rows also use this
+column.
 
 ## System design
 

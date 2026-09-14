@@ -49,18 +49,20 @@ func (f *fakeParticipantSeatWriter) EnsureRoleSeat(
 // fakeParticipantSeatCaster records CastParticipantSeat calls for
 // EnsureParticipantSeatCallback assertions.
 type fakeParticipantSeatCaster struct {
-	result     ParticipantSeatCastResult
-	err        error
-	calls      int
-	lastTaskID string
-	lastStepID string
-	lastRole   string
+	result         ParticipantSeatCastResult
+	err            error
+	calls          int
+	lastWorkflowID string
+	lastTaskID     string
+	lastStepID     string
+	lastRole       string
 }
 
 func (f *fakeParticipantSeatCaster) CastParticipantSeat(
-	_ context.Context, taskID, stepID, role string,
+	_ context.Context, workflowID, taskID, stepID, role string,
 ) (ParticipantSeatCastResult, error) {
 	f.calls++
+	f.lastWorkflowID = workflowID
 	f.lastTaskID = taskID
 	f.lastStepID = stepID
 	f.lastRole = role
@@ -149,9 +151,10 @@ func TestEnsureParticipantSeatCallback_SuccessfulCastWritesSeat(t *testing.T) {
 	if _, err := cb.Execute(context.Background(), newEnsureSeatInput("reviewer")); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if caster.calls != 1 || caster.lastTaskID != "task-1" || caster.lastStepID != "step-1" || caster.lastRole != "reviewer" {
-		t.Fatalf("expected caster invoked once for (task-1, step-1, reviewer), got calls=%d taskID=%q stepID=%q role=%q",
-			caster.calls, caster.lastTaskID, caster.lastStepID, caster.lastRole)
+	if caster.calls != 1 || caster.lastWorkflowID != "wf-1" || caster.lastTaskID != "task-1" ||
+		caster.lastStepID != "step-1" || caster.lastRole != "reviewer" {
+		t.Fatalf("expected caster invoked once for (wf-1, task-1, step-1, reviewer), got calls=%d workflowID=%q taskID=%q stepID=%q role=%q",
+			caster.calls, caster.lastWorkflowID, caster.lastTaskID, caster.lastStepID, caster.lastRole)
 	}
 	if len(writer.ensureCalls) != 1 {
 		t.Fatalf("expected exactly one seat write, got %+v", writer.ensureCalls)

@@ -25,12 +25,15 @@ import type { TaskSessionState } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
 import { SessionDeleteDescription } from "./session-delete-description";
 
-/** Lifecycle callbacks the context menu needs from the owning tab. */
+/** Lifecycle callbacks the context menu needs from the owning tab.
+ * `handleCloseOthers` is dockview-specific (closing sibling panels) and has
+ * no equivalent where tabs are a plain session switcher, so it's optional —
+ * omitting it hides the Close Others item entirely. */
 export type SessionTabMenuActions = {
   handleSetPrimary: () => void;
   handleStop: () => void;
   handleResume: () => void;
-  handleCloseOthers: () => void;
+  handleCloseOthers?: () => void;
 };
 
 export function DeleteSessionDialog({
@@ -53,8 +56,12 @@ export function DeleteSessionDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>{t("task:deleteSession")}</AlertDialogTitle>
           <AlertDialogDescription asChild>
-            <div>
-              <SessionDeleteDescription isPrimary={isPrimary} isOnlySession={sessionCount === 1} />
+            <div className="min-w-0 space-y-2 text-left">
+              <SessionDeleteDescription
+                isPrimary={isPrimary}
+                isOnlySession={sessionCount === 1}
+                structured
+              />
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -190,10 +197,14 @@ export function SessionContextMenuItems({
           <HandoffContextMenuSub taskId={taskId} onSelectProfile={onHandoffProfile} />
         </>
       )}
-      <ContextMenuSeparator />
-      <ContextMenuItem className="cursor-pointer" onSelect={actions.handleCloseOthers}>
-        {t("task:closeOthers")}
-      </ContextMenuItem>
+      {actions.handleCloseOthers && (
+        <>
+          <ContextMenuSeparator />
+          <ContextMenuItem className="cursor-pointer" onSelect={actions.handleCloseOthers}>
+            {t("task:closeOthers")}
+          </ContextMenuItem>
+        </>
+      )}
     </ContextMenuContent>
   );
 }

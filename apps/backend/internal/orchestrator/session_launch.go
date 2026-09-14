@@ -40,9 +40,10 @@ type LaunchSessionRequest struct {
 	Intent         SessionIntent `json:"intent,omitempty"`
 	SessionID      string        `json:"session_id,omitempty"`
 	AgentProfileID string        `json:"agent_profile_id,omitempty"`
-	// ProfileExplicit marks a non-empty profile selected by the manual New Agent
-	// picker. It bypasses workflow-step profile resolution for IntentStart only;
-	// IntentStartCreated keeps its existing profile resolution behavior.
+	// ProfileExplicit marks a non-empty profile selected through an explicit
+	// selector-backed choice. It bypasses workflow-step profile resolution for
+	// IntentStart only; IntentStartCreated keeps its existing profile resolution
+	// behavior.
 	ProfileExplicit   bool   `json:"profile_explicit,omitempty"`
 	ExecutorID        string `json:"executor_id,omitempty"`
 	ExecutorProfileID string `json:"executor_profile_id,omitempty"`
@@ -69,8 +70,10 @@ type LaunchSessionRequest struct {
 	// server-side coordination flag set by the deferred-start handlers, so it is
 	// kept off the wire protocol (`json:"-"`) — a client must not be able to
 	// suppress the upgrade and strand a passthrough session without a PTY.
-	DeferredStart bool                   `json:"-"`
-	Attachments   []v1.MessageAttachment `json:"attachments,omitempty"`
+	DeferredStart bool `json:"-"`
+	// InitialPromptPreview is supplied only by task creation after attachment claim.
+	InitialPromptPreview *models.InitialPromptPreview `json:"-"`
+	Attachments          []v1.MessageAttachment       `json:"attachments,omitempty"`
 	// SpawnOrigin identifies the agent session that requested this launch via
 	// spawn_session_kandev, so the new session's first turn can carry spawner
 	// attribution and reply instructions. Like DeferredStart it is kept off the
@@ -78,6 +81,14 @@ type LaunchSessionRequest struct {
 	// <kandev-system> block that survives first-turn canonicalization, so a WS
 	// client must not be able to forge one and fabricate server authority.
 	SpawnOrigin *SpawnOrigin `json:"-"`
+	// AllowBranchReplacement is set only by RecoverSession for the explicit
+	// resume_new_branch action. Clients cannot grant this permission directly.
+	AllowBranchReplacement bool `json:"-"`
+	// AllowCompletedSessionResume is set only by explicit recovery or a pinned
+	// follow-up dispatcher. It is intentionally not part of the wire request:
+	// ordinary launch, ensure, and startup recovery paths must keep completed
+	// sessions terminal.
+	AllowCompletedSessionResume bool `json:"-"`
 }
 
 // SpawnOrigin describes the agent session that spawned a new sibling session.
@@ -150,17 +161,28 @@ func IsBenignLaunchTeardownErr(err error) bool {
 
 // LaunchSession is the unified entry point for all session operations.
 func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+	req.Prompt = strings.TrimSpace(req.Prompt)
+	intent := ResolveIntent(req)
 	// Every intent funnels through here. SessionID is empty when creating, so
 	// that case is carried by the task check alone.
-	if err := s.authorizeTask(ctx, req.TaskID); err != nil {
+	// Launching a session starts an agent turn: session.prompt.
+	// Workspace restoration only opens retained infrastructure. It must not
+	// require permission to start or resume an agent; lifecycle applies the
+	// session.exec check at the execution boundary.
+	if intent != IntentRestoreWorkspace {
+		if err := s.authorizeTaskPrompt(ctx, req.TaskID); err != nil {
+			return nil, err
+		}
+	}
+	// Existing-session launches must also prove that the supplied session and
+	// task belong together; independent reach checks do not establish that
+	// binding when a caller can access more than one task.
+	if err := s.authorizeTaskSessionPair(ctx, req.TaskID, req.SessionID); err != nil {
 		return nil, err
 	}
-	if err := s.authorizeSession(ctx, req.SessionID); err != nil {
-		return nil, err
+	if err := s.claimLaunchAttachments(ctx, req); err != nil {
+		return nil, fmt.Errorf("claim launch attachments: %w", err)
 	}
-	intent := ResolveIntent(req)
-	req.Prompt = strings.TrimSpace(req.Prompt)
-
 	switch intent {
 	case IntentPrepare:
 		return s.launchPrepare(ctx, req)
@@ -179,6 +201,28 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 	}
 }
 
+func (s *Service) claimLaunchAttachments(ctx context.Context, req *LaunchSessionRequest) error {
+	hasDescriptor := false
+	for _, attachment := range req.Attachments {
+		if attachment.AttachmentID != "" {
+			hasDescriptor = true
+			break
+		}
+	}
+	if !hasDescriptor {
+		return nil
+	}
+	if s.launchAttachmentClaimer == nil {
+		return errors.New("launch attachment claimer is not configured")
+	}
+	return s.launchAttachmentClaimer.ClaimMessageAttachments(
+		ctx,
+		req.TaskID,
+		req.SessionID,
+		req.Attachments,
+	)
+}
+
 // launchPrepare creates a session entry without launching the agent.
 // Passthrough profiles can't be "prepared" without a running PTY — the terminal
 // has nothing to attach to until the agent process exists. Upgrade those calls
@@ -194,11 +238,12 @@ func (s *Service) LaunchSession(ctx context.Context, req *LaunchSessionRequest) 
 // the prompt — eagerly launching here would spawn a promptless PTY and the
 // later start would be rejected against the now-running session.
 func (s *Service) launchPrepare(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
+	prepareCtx := withInitialPromptPreview(ctx, req.InitialPromptPreview)
 	if s.shouldUpgradePassthroughPrepare(ctx, req) {
-		return s.launchStart(ctx, req)
+		return s.launchStart(prepareCtx, req)
 	}
 	sessionID, err := s.PrepareTaskSession(
-		ctx, req.TaskID, req.AgentProfileID, req.ExecutorID,
+		prepareCtx, req.TaskID, req.AgentProfileID, req.ExecutorID,
 		req.ExecutorProfileID, req.WorkflowStepID, req.LaunchWorkspace,
 	)
 	if err != nil {
@@ -238,14 +283,26 @@ func (s *Service) isPassthroughProfile(ctx context.Context, profileID string) bo
 	return info.CLIPassthrough
 }
 
+// blocksAutoStartLaunch reports whether an auto-start request must be
+// downgraded to a prepare, either because the task's current step does not
+// allow it or because it has an unresolved dependency. The dependency gate's
+// launch-token restore concern does not apply here: this path owns no
+// lifecycle token to restore.
+func (s *Service) blocksAutoStartLaunch(ctx context.Context, req *LaunchSessionRequest) bool {
+	if s.shouldBlockAutoStart(ctx, req) {
+		return true
+	}
+	blocked, _ := s.dependencyBlocksAutoStart(ctx, req.TaskID, "session.launch")
+	return blocked
+}
+
 // launchStart creates a new session and launches the agent.
 // If the request is an auto-start and the task's current workflow step does not
 // have auto_start_agent, or the task has unresolved dependencies, the request
 // is downgraded to a prepare (workspace-only, no agent) to prevent unwanted
 // auto-starts from the frontend's useAutoStartSession hook.
 func (s *Service) launchStart(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
-	if req.AutoStart && (s.shouldBlockAutoStart(ctx, req) ||
-		s.dependencyBlocksAutoStart(ctx, req.TaskID, "session.launch")) {
+	if req.AutoStart && s.blocksAutoStartLaunch(ctx, req) {
 		req.LaunchWorkspace = true
 		return s.launchPrepare(ctx, req)
 	}
@@ -316,7 +373,10 @@ func (s *Service) launchStartCreated(ctx context.Context, req *LaunchSessionRequ
 
 // launchResume resumes a stopped session.
 func (s *Service) launchResume(ctx context.Context, req *LaunchSessionRequest) (*LaunchSessionResponse, error) {
-	execution, err := s.ResumeTaskSession(ctx, req.TaskID, req.SessionID)
+	execution, err := s.ResumeTaskSessionWithOptions(ctx, req.TaskID, req.SessionID, executor.ResumeOptions{
+		AllowBranchReplacement:      req.AllowBranchReplacement,
+		AllowCompletedSessionResume: req.AllowCompletedSessionResume,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -351,16 +411,21 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 	if session.TaskID != req.TaskID {
 		return nil, fmt.Errorf("session does not belong to task")
 	}
+	if err := s.ensureTaskNotArchived(ctx, req.TaskID); err != nil {
+		return nil, err
+	}
 
 	if err := s.agentManager.EnsureWorkspaceExecutionForSession(ctx, req.TaskID, req.SessionID); err != nil {
 		return nil, fmt.Errorf("failed to restore workspace: %w", err)
 	}
+	agentExecutionID, _ := s.agentManager.GetExecutionIDForSession(ctx, req.SessionID)
 
 	resp := &LaunchSessionResponse{
-		Success:   true,
-		TaskID:    req.TaskID,
-		SessionID: req.SessionID,
-		State:     string(session.State),
+		Success:          true,
+		TaskID:           req.TaskID,
+		SessionID:        req.SessionID,
+		AgentExecutionID: agentExecutionID,
+		State:            string(session.State),
 	}
 	if len(session.Worktrees) > 0 {
 		wt := session.Worktrees[0]
@@ -375,14 +440,20 @@ func (s *Service) launchRestoreWorkspace(ctx context.Context, req *LaunchSession
 }
 
 // RecoverSession handles user-initiated recovery after an agent CLI failure.
-// action is "resume" (retry with existing ACP session) or "fresh_start" (clear token, start fresh).
+// action is "resume" (retry with existing ACP session), "resume_new_branch"
+// (retry after replacing a confirmed missing branch), or "fresh_start" (clear
+// token, start fresh).
 func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action string) (*LaunchSessionResponse, error) {
 	// Guard before the switch: "fresh_start" clears the resume token, so an
 	// unauthorized call would mutate the session even if the launch failed.
-	if err := s.authorizeSession(ctx, sessionID); err != nil {
+	// Recovering a session resumes an agent turn: session.prompt.
+	if err := s.authorizeSessionPrompt(ctx, sessionID); err != nil {
 		return nil, err
 	}
 	if err := s.authorizeTask(ctx, taskID); err != nil {
+		return nil, err
+	}
+	if err := s.ensureTaskNotArchived(ctx, taskID); err != nil {
 		return nil, err
 	}
 	if action == "runtime_retry" {
@@ -399,14 +470,19 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 		}
 	case "resume":
 		// no-op — relaunch with existing resume token
+	case "resume_new_branch":
+		// The launch carries the explicit permission. It is not persisted on the
+		// session and cannot be inferred from a previous failed attempt.
 	default:
 		return nil, fmt.Errorf("invalid recovery action: %s", action)
 	}
 
 	resp, err := s.LaunchSession(ctx, &LaunchSessionRequest{
-		TaskID:    taskID,
-		SessionID: sessionID,
-		Intent:    IntentResume,
+		TaskID:                      taskID,
+		SessionID:                   sessionID,
+		Intent:                      IntentResume,
+		AllowBranchReplacement:      action == "resume_new_branch",
+		AllowCompletedSessionResume: action == "resume",
 	})
 	if err != nil {
 		return nil, normalizeRecoverSessionError(err)

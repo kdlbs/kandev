@@ -28,6 +28,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/gitconfigenv"
+	"github.com/kandev/kandev/internal/githubauth"
 	tools "github.com/kandev/kandev/internal/tools/installer"
 	"go.uber.org/zap"
 )
@@ -43,6 +44,14 @@ const (
 	StatusStopping Status = "stopping"
 	StatusError    Status = "error"
 )
+
+// defaultUpdatesChannelCapacity is the updates channel buffer size used when
+// InstanceConfig.DetachedEventLimit is left at its Go zero value -- the
+// common case for tests and any other caller that builds a config.InstanceConfig
+// directly instead of going through Config.NewInstanceConfig. It matches the
+// agentctl.detachedEventLimit catalog tunable's own default
+// (AC-EXECUTORS-SURVIVAL-001.6).
+const defaultUpdatesChannelCapacity = 100
 
 // errorWrapper wraps an error so it can be stored in atomic.Value (which cannot store nil)
 type errorWrapper struct {
@@ -179,6 +188,20 @@ type Manager struct {
 	// from branch-only overrides. Updating one target must not race tracker
 	// creation or rewrite siblings' authoritative state.
 	comparisonTargetsMu sync.RWMutex
+	// trackerGitEnv is the process manager's detached snapshot of the instance
+	// environment used by workspace trackers. Each tracker receives its own
+	// copy so tracker-local changes cannot affect another tracker.
+	trackerGitEnv   []string
+	trackerGitEnvMu sync.RWMutex
+
+	// comparisonTargetOps tracks one cancellable materialization per
+	// repository scope. The wait group lets teardown observe all operations
+	// that were admitted before shutdown.
+	comparisonTargetOps          map[string]*comparisonTargetOperation
+	comparisonTargetOpsMu        sync.Mutex
+	comparisonTargetOpsWG        sync.WaitGroup
+	comparisonTargetOpsStopping  bool
+	comparisonTargetOpsPermanent bool
 
 	// streamSubscribers tracks every workspace-stream subscriber attached
 	// via SubscribeWorkspaceStream so RescanRepositories can wire new
@@ -191,6 +214,10 @@ type Manager struct {
 
 	// Script/process runner (dev server, setup, cleanup, custom)
 	processRunner *ProcessRunner
+
+	// workspacePreview owns ephemeral loopback static servers for current
+	// editor-buffer HTML previews. It is closed with the agentctl instance.
+	workspacePreview *WorkspacePreviewManager
 
 	// Embedded shell session (auto-created when agent starts)
 	shell *shell.Session
@@ -227,18 +254,38 @@ type Manager struct {
 	finalCommand string
 
 	// Synchronization
-	mu               sync.RWMutex
-	wg               sync.WaitGroup
-	stopCh           chan struct{}
-	doneCh           chan struct{}
-	startMu          sync.Mutex
-	admissionMu      sync.Mutex
-	admissionCount   int
-	admissionDrained chan struct{}
-	stopping         bool
-	lifetimeCtx      context.Context
-	lifetimeCancel   context.CancelFunc
-	mainReapPending  atomic.Bool
+	mu     sync.RWMutex
+	wg     sync.WaitGroup
+	stopCh chan struct{}
+	// stopChSnapshot mirrors stopCh for readers that must not take mu: Stop
+	// holds mu.Lock() for its entire teardown, including waiting for
+	// waitForExit to finish, so a stop-aware blocking send reached from that
+	// same goroutine (e.g. the exit-error send in waitForExit) would deadlock
+	// against Stop if it read stopCh under mu.RLock() instead. Start and
+	// startOneShot store the freshly created channel here in the same place
+	// they assign stopCh itself.
+	stopChSnapshot atomic.Value // chan struct{}
+	doneCh         chan struct{}
+	// attachedCount is the live count of backend event-stream connections
+	// (see attachment.go). Zero value correctly starts an instance detached.
+	attachedCount atomic.Int32
+	// turnOutcomeRecorder and turnOutcomeInstanceID back retained-outcome
+	// wiring (see turn_outcome.go). Both are guarded by mu: set once by
+	// SetTurnOutcomeRecorder before any goroutine that could read them is
+	// spawned (instance.Manager.CreateInstance calls it immediately after
+	// constructing this Manager, before Start can be reached), then read
+	// from forwardUpdates and sendUpdateBlocking's callers, neither of which
+	// otherwise holds mu.
+	turnOutcomeRecorder   TurnOutcomeRecorder
+	turnOutcomeInstanceID string
+	startMu               sync.Mutex
+	admissionMu           sync.Mutex
+	admissionCount        int
+	admissionDrained      chan struct{}
+	stopping              bool
+	lifetimeCtx           context.Context
+	lifetimeCancel        context.CancelFunc
+	mainReapPending       atomic.Bool
 	// stopChClosed guards close(stopCh), which is the only part of teardown
 	// that is not naturally idempotent. It is reset wherever stopCh itself is
 	// created so the flag always describes the current channel — a Start that
@@ -282,6 +329,14 @@ func (m *Manager) admitStart() (func(), error) {
 // CloseAdmission rejects new process owners without waiting for in-flight
 // handlers. Instance teardown calls it before shutting down HTTP.
 func (m *Manager) CloseAdmission() {
+	m.comparisonTargetOpsMu.Lock()
+	m.comparisonTargetOpsStopping = true
+	m.comparisonTargetOpsPermanent = true
+	for _, operation := range m.comparisonTargetOps {
+		operation.cancel()
+	}
+	m.comparisonTargetOpsMu.Unlock()
+
 	m.admissionMu.Lock()
 	m.stopping = true
 	lifetimeCancel := m.lifetimeCancel
@@ -344,15 +399,20 @@ func (m *Manager) BeginStop() {
 // NewManager creates a new process manager
 func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 	cfg.WorkDir = resolveExistingWorkDir(cfg.WorkDir, log.WithFields(zap.String("component", "process-manager")))
+	updatesChannelCapacity := cfg.DetachedEventLimit
+	if updatesChannelCapacity <= 0 {
+		updatesChannelCapacity = defaultUpdatesChannelCapacity
+	}
 	lifetimeCtx, lifetimeCancel := context.WithCancel(context.Background())
 	m := &Manager{
 		cfg:                  cfg,
 		logger:               log.WithFields(zap.String("component", "process-manager")),
-		updatesCh:            make(chan adapter.AgentEvent, 100),
+		updatesCh:            make(chan adapter.AgentEvent, updatesChannelCapacity),
 		pendingPermissions:   make(map[string]*PendingPermission),
 		lifetimeCtx:          lifetimeCtx,
 		lifetimeCancel:       lifetimeCancel,
 		workspaceSourceRoots: canonicalWorkspaceSourceRoots(cfg.WorkspaceSourceRoots),
+		trackerGitEnv:        append([]string(nil), cfg.AgentEnv...),
 	}
 	// Build the root plus any immediate sibling repositories and recursively
 	// declared initialized submodules. The root remains a real empty-named
@@ -366,6 +426,7 @@ func NewManager(cfg *config.InstanceConfig, log *logger.Logger) *Manager {
 		false,
 	)
 	m.processRunner = NewProcessRunner(m.workspaceTracker, log, cfg.ProcessBufferMaxBytes)
+	m.workspacePreview = NewWorkspacePreviewManager(log)
 	m.shellMgr = shell.NewManager(cfg.WorkDir, log)
 	m.status.Store(StatusStopped)
 	m.exitCode.Store(-1)
@@ -426,6 +487,15 @@ func (m *Manager) currentWorkspaceSourceRoots() []string {
 	m.repoTrackersMu.RLock()
 	defer m.repoTrackersMu.RUnlock()
 	return append([]string(nil), m.workspaceSourceRoots...)
+}
+
+// WorkspaceSourceRoots returns the live, current source-root allowlist
+// (AC-EXECUTORS-SURVIVAL-002.14's "workspace source roots" reconstruction
+// row: read back from the adopted instance, never pushed). A rescan or
+// rebind changes this in place, so callers always see the value this
+// instance is enforcing right now, not a snapshot from creation.
+func (m *Manager) WorkspaceSourceRoots() []string {
+	return m.currentWorkspaceSourceRoots()
 }
 
 // lookupBaseBranch reads the task's recorded base branch for a given
@@ -715,9 +785,9 @@ func (m *Manager) GetWorkspaceTrackerFor(subpath string) (*WorkspaceTracker, err
 	if t, ok := m.workspaceTrackersBySubpath[cleaned]; ok {
 		return t, nil
 	}
-	t := NewWorkspaceTracker(full, m.logger)
+	t := NewWorkspaceTrackerForRepo(full, cleaned, m.logger)
 	m.configureTracker(t, cleaned, m.currentWorkspaceSourceRoots())
-	m.prepareTrackerComparisonTarget(context.Background(), t)
+	m.prepareTrackerComparisonTarget(t)
 	m.workspaceTrackersBySubpath[cleaned] = t
 	return t, nil
 }
@@ -898,7 +968,9 @@ func (m *Manager) findRepositoryTracker(repositoryName string) *WorkspaceTracker
 // otherwise sit at its construction default and be demoted by the grace timer
 // 60s later, while the user is looking at it.
 func (m *Manager) newTrackerForRepo(path, repositoryName string) *WorkspaceTracker {
-	return NewWorkspaceTrackerForRepo(path, repositoryName, m.logger)
+	tracker := NewWorkspaceTrackerForRepo(path, repositoryName, m.logger)
+	tracker.SetGitEnvironment(m.trackerGitEnvironment())
+	return tracker
 }
 
 // applyWorkspacePollModeLocked gives newly built trackers the last mode the
@@ -984,6 +1056,20 @@ func (m *Manager) SetWorkspacePollMode(ctx context.Context, mode PollMode) {
 	}()
 }
 
+// RefreshWorkspace performs one file and Git scan across the root and all
+// repository trackers. Lifecycle uses this at turn completion; the manual
+// refresh surface uses it as an explicit access retry.
+func (m *Manager) RefreshWorkspace(ctx context.Context, trigger string) {
+	trigger = NormalizeWorkspaceTrigger(trigger)
+	root, trackers := m.snapshotTrackers()
+	if root != nil {
+		root.RefreshWorkspace(ctx, trigger)
+	}
+	for _, tracker := range trackers {
+		tracker.RefreshWorkspace(ctx, trigger)
+	}
+}
+
 // GitOperator returns the git operator for git operations against the
 // workspace root. Lazy-initialized.
 func (m *Manager) GitOperator() *GitOperator {
@@ -1049,6 +1135,27 @@ func (m *Manager) gitEnvironment() []string {
 	return append([]string(nil), m.cfg.AgentEnv...)
 }
 
+func (m *Manager) trackerGitEnvironment() []string {
+	m.trackerGitEnvMu.RLock()
+	defer m.trackerGitEnvMu.RUnlock()
+	return append([]string(nil), m.trackerGitEnv...)
+}
+
+func (m *Manager) setTrackerGitEnvironment(env []string) {
+	detached := append([]string(nil), env...)
+	m.trackerGitEnvMu.Lock()
+	m.trackerGitEnv = detached
+	m.trackerGitEnvMu.Unlock()
+
+	root, trackers := m.snapshotTrackers()
+	if root != nil {
+		root.SetGitEnvironment(detached)
+	}
+	for _, tracker := range trackers {
+		tracker.SetGitEnvironment(detached)
+	}
+}
+
 // resolveSubpath normalises and validates a repo subpath relative to
 // cfg.WorkDir. Returns ("", "", nil) for the root (empty/"."); otherwise
 // returns the cleaned relative path and the absolute full path.
@@ -1105,6 +1212,53 @@ func (m *Manager) WorkDir() string {
 func (m *Manager) ResolveRepoSubdir(subpath string) (string, error) {
 	_, full, err := m.resolveSubpath(subpath)
 	return full, err
+}
+
+// PublishWorkspacePreview publishes a current HTML editor buffer under the
+// selected workspace or repository root.
+func (m *Manager) PublishWorkspacePreview(req WorkspacePreviewRequest) (WorkspacePreviewResponse, error) {
+	if m.workspacePreview == nil {
+		return WorkspacePreviewResponse{}, ErrWorkspacePreviewUnavailable
+	}
+	root, err := m.resolveWorkspacePreviewRoot(req.Repo)
+	if err != nil {
+		return WorkspacePreviewResponse{}, err
+	}
+	return m.workspacePreview.Publish(root, req)
+}
+
+// CloseWorkspacePreview stops all ephemeral preview servers owned by this
+// agentctl process.
+func (m *Manager) CloseWorkspacePreview(ctx context.Context) error {
+	if m.workspacePreview == nil {
+		return nil
+	}
+	return m.workspacePreview.Close(ctx)
+}
+
+func (m *Manager) resolveWorkspacePreviewRoot(repo string) (string, error) {
+	_, root, err := m.resolveSubpath(repo)
+	if err != nil {
+		return "", err
+	}
+	canonicalRoot, err := canonicalPreviewDirectory(root)
+	if err != nil {
+		return "", fmt.Errorf("resolve preview root: %w", err)
+	}
+	canonicalWorkDir, err := canonicalPreviewDirectory(m.cfg.WorkDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve workspace root: %w", err)
+	}
+	if previewPathWithinRoot(canonicalWorkDir, canonicalRoot) {
+		return canonicalRoot, nil
+	}
+	for _, sourceRoot := range m.currentWorkspaceSourceRoots() {
+		canonicalSourceRoot, sourceErr := canonicalPreviewDirectory(sourceRoot)
+		if sourceErr == nil && previewPathWithinRoot(canonicalSourceRoot, canonicalRoot) {
+			return canonicalRoot, nil
+		}
+	}
+	return "", fmt.Errorf("%w: preview root escapes workspace", ErrWorkspacePreviewPathInvalid)
 }
 
 // JoinRepoPath validates a repo subpath and returns the workspace-relative
@@ -1199,6 +1353,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	m.processLifecycle = processLifecycle
 
 	m.stopCh = make(chan struct{})
+	m.stopChSnapshot.Store(m.stopCh)
 	m.doneCh = make(chan struct{})
 	m.stopChClosed.Store(false)
 
@@ -1254,6 +1409,7 @@ func (m *Manager) startOneShot() error {
 	}
 
 	m.stopCh = make(chan struct{})
+	m.stopChSnapshot.Store(m.stopCh)
 	m.doneCh = make(chan struct{})
 	m.stopChClosed.Store(false)
 
@@ -1294,7 +1450,6 @@ func (m *Manager) buildAdapterConfig() error {
 	m.adapterCfg = &adapter.Config{
 		WorkDir:                   m.cfg.WorkDir,
 		AutoApprove:               m.cfg.AutoApprovePermissions,
-		ApprovalPolicy:            m.cfg.ApprovalPolicy,
 		McpServers:                mcpServers,
 		AgentID:                   m.cfg.AgentType, // From registry (e.g., "auggie", "amp", "claude-code")
 		AssumeMcpSse:              m.cfg.AssumeMcpSse,
@@ -1350,6 +1505,7 @@ func (m *Manager) buildAdapterConfig() error {
 	if m.adapterCfg.OneShotConfig != nil {
 		m.adapterCfg.OneShotConfig.Env = m.cfg.AgentEnv
 	}
+	m.setTrackerGitEnvironment(m.cfg.AgentEnv)
 	return nil
 }
 
@@ -1375,7 +1531,7 @@ func (m *Manager) buildFinalCommand() error {
 	m.cmd.Dir = m.cfg.WorkDir
 	m.cmd.Env = m.cfg.AgentEnv
 	// Create a new process group so we can kill all child processes together.
-	// This is important for adapters like OpenCode that spawn child processes
+	// This is important for agents like OpenCode that spawn child processes
 	// (npx -> sh -> node -> opencode binary).
 	setAgentProcGroup(m.cmd)
 
@@ -1597,6 +1753,18 @@ func lookupEnvValue(env []string, key string) string {
 // This must be called before Start() if the instance was created without a command.
 // continueCommand is optional — when set, the adapter uses it for one-shot follow-up prompts.
 func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, approvalPolicy, continueCommand string, continueArgs []string, continueArgsPresent bool) error {
+	return m.configure(command, agentArgs, agentArgsPresent, env, approvalPolicy, continueCommand, continueArgs, continueArgsPresent, false)
+}
+
+// ConfigureWithEnvironment sets the agent command and replaces the complete
+// effective indexed Git configuration block supplied by env. Ordinary
+// instance variables that are absent from env remain available to the agent.
+// This must be called before Start() if the instance was created without a command.
+func (m *Manager) ConfigureWithEnvironment(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, approvalPolicy, continueCommand string, continueArgs []string, continueArgsPresent bool) error {
+	return m.configure(command, agentArgs, agentArgsPresent, env, approvalPolicy, continueCommand, continueArgs, continueArgsPresent, true)
+}
+
+func (m *Manager) configure(command string, agentArgs []string, agentArgsPresent bool, env map[string]string, approvalPolicy, continueCommand string, continueArgs []string, continueArgsPresent, replaceEnv bool) error {
 	m.startMu.Lock()
 	defer m.startMu.Unlock()
 
@@ -1622,10 +1790,17 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 		}
 	}
 
+	// Compose the environment before changing any other configuration so a
+	// malformed indexed Git block leaves the instance fully unchanged.
+	mergedEnv, err := composeConfiguredAgentEnvironment(m.cfg.AgentEnv, env, replaceEnv)
+	if err != nil {
+		return fmt.Errorf("compose configured agent environment: %w", err)
+	}
+
 	m.cfg.AgentCommand = command
 	m.cfg.AgentArgs = args
 
-	// Set approval policy if provided (for Codex)
+	// Set approval policy if provided
 	if approvalPolicy != "" {
 		m.cfg.ApprovalPolicy = approvalPolicy
 	}
@@ -1639,12 +1814,11 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 		m.cfg.ContinueArgs = continueArgs
 	}
 
-	// Merge additional env vars
-	if len(env) > 0 {
-		for k, v := range env {
-			m.cfg.AgentEnv = append(m.cfg.AgentEnv, fmt.Sprintf("%s=%s", k, v))
-		}
+	m.cfg.AgentEnv = mergedEnv
+	if m.adapterCfg != nil && m.adapterCfg.OneShotConfig != nil {
+		m.adapterCfg.OneShotConfig.Env = append([]string(nil), m.cfg.AgentEnv...)
 	}
+	m.setTrackerGitEnvironment(m.cfg.AgentEnv)
 
 	m.logger.Info("agent configured",
 		zap.String("command", command),
@@ -1654,6 +1828,76 @@ func (m *Manager) Configure(command string, agentArgs []string, agentArgsPresent
 		zap.Int("env_count", len(env)))
 
 	return nil
+}
+
+func composeConfiguredAgentEnvironment(current []string, overlay map[string]string, replaceIndexed bool) ([]string, error) {
+	base := environmentMapFromSlice(current)
+	removeObsoleteManagedCredentialEnvironment(base)
+	filtered, err := gitconfigenv.Filter(base, func(index int, entries []gitconfigenv.Entry) bool {
+		return !githubauth.IsHostGitHubCredentialHelperEntry(entries[index].Key, entries[index].Value)
+	})
+	if err != nil {
+		return nil, fmt.Errorf("remove generated host GitHub helper: %w", err)
+	}
+	if replaceIndexed {
+		// A complete environment owns the entire indexed block, including an
+		// empty block. Remove the previous block unconditionally so a logout or
+		// policy change cannot retain stale generated entries.
+		filtered, err = gitconfigenv.Filter(filtered, func(int, []gitconfigenv.Entry) bool { return false })
+		if err != nil {
+			return nil, fmt.Errorf("replace indexed Git configuration: %w", err)
+		}
+	}
+	if len(filtered) == 0 && len(overlay) == 0 {
+		return nil, nil
+	}
+	merged, err := gitconfigenv.Merge(filtered, overlay)
+	if err != nil {
+		return nil, err
+	}
+	keys := make([]string, 0, len(merged))
+	for key := range merged {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	result := make([]string, 0, len(keys))
+	for _, key := range keys {
+		result = append(result, key+"="+merged[key])
+	}
+	return result, nil
+}
+
+func removeObsoleteManagedCredentialEnvironment(env map[string]string) {
+	for _, key := range []string{
+		githubauth.CredentialBrokerURLEnv,
+		githubauth.CredentialHelperPathEnv,
+		githubauth.CredentialCLIShimDirEnv,
+		githubauth.CredentialCLIBashEnvEnv,
+		githubauth.CredentialParentBashEnv,
+		githubauth.CredentialLeaseEnv,
+		githubauth.CredentialReissueCapabilityEnv,
+		githubauth.CredentialTaskIDEnv,
+		githubauth.CredentialSessionIDEnv,
+		githubauth.CredentialRepositoryEnv,
+		githubauth.CredentialOwnerEnv,
+		githubauth.CredentialRepoEnv,
+		githubauth.CredentialHostEnv,
+		githubauth.CredentialScopesEnv,
+	} {
+		delete(env, key)
+	}
+}
+
+func environmentMapFromSlice(env []string) map[string]string {
+	result := make(map[string]string, len(env))
+	for _, entry := range env {
+		eq := strings.IndexByte(entry, '=')
+		if eq <= 0 {
+			continue
+		}
+		result[entry[:eq]] = entry[eq+1:]
+	}
+	return result
 }
 
 // createAdapter creates the appropriate protocol adapter based on configuration.
@@ -1671,7 +1915,7 @@ func (m *Manager) createAdapter() error {
 	}
 	m.adapter = adpt
 
-	// Set stderr provider for adapters that support it (Codex, StreamJSON)
+	// Set stderr provider if the adapter implements the optional StderrProviderSetter interface
 	if setter, ok := m.adapter.(adapter.StderrProviderSetter); ok {
 		setter.SetStderrProvider(m)
 	}
@@ -1703,6 +1947,7 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 			if !ok {
 				return
 			}
+			m.recordTerminalOutcome(&update)
 			select {
 			case m.updatesCh <- update:
 			case <-stopCh:
@@ -1728,21 +1973,21 @@ func (m *Manager) SendErrorEvent(errorMessage string, promptGeneration uint64) {
 // SendErrorEventWithProviderError sends an error event with optional safe
 // provider details. The details are already normalized by the adapter and are
 // never populated from the manager's raw stderr ring.
+//
+// This is a COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6): the agent ERROR
+// event must park on a full channel rather than being dropped, since it is
+// one of the events most likely to matter across a detached gap.
 func (m *Manager) SendErrorEventWithProviderError(
 	errorMessage string,
 	promptGeneration uint64,
 	providerError *streams.ProviderError,
 ) {
-	select {
-	case m.updatesCh <- adapter.AgentEvent{
+	m.sendUpdateBlocking(adapter.AgentEvent{
 		Type:             adapter.EventTypeError,
 		Error:            errorMessage,
 		PromptGeneration: promptGeneration,
 		ProviderError:    providerError,
-	}:
-	default:
-		m.logger.Warn("updates channel full, could not send error event")
-	}
+	})
 }
 
 // PublishMCPAttachment forwards safe MCP attachment evidence through the
@@ -1805,10 +2050,11 @@ func (m *Manager) Stop(ctx context.Context) error {
 // before stopping every process owned by the manager.
 func (m *Manager) StopForTeardown(ctx context.Context) error {
 	m.CloseAdmission()
+	previewErr := m.CloseWorkspacePreview(ctx)
 	if err := m.WaitForAdmission(ctx); err != nil {
-		return fmt.Errorf("wait for process admission to drain: %w", err)
+		return errors.Join(previewErr, fmt.Errorf("wait for process admission to drain: %w", err))
 	}
-	return m.stop(ctx)
+	return errors.Join(previewErr, m.stop(ctx))
 }
 
 func (m *Manager) stop(ctx context.Context) error {
@@ -1822,6 +2068,10 @@ func (m *Manager) stop(ctx context.Context) error {
 
 	// Stop trackers before the status guard: passthrough never calls Start() so the early return below would otherwise leak them.
 	m.stopWorkspaceTrackers()
+	comparisonStopErr, comparisonTargetsDrained := m.stopComparisonTargetOperations(ctx)
+	if comparisonTargetsDrained {
+		defer m.reopenComparisonTargetOperations()
+	}
 
 	status := m.Status()
 	if status == StatusStopped || status == StatusStopping {
@@ -1837,18 +2087,18 @@ func (m *Manager) stop(ctx context.Context) error {
 			// after a normal stop, in which case behaviour is unchanged.
 			tornDown := m.closeAdapterAndStdin()
 			if err := m.stopShellAndProcesses(ctx); err != nil {
-				return err
+				return errors.Join(comparisonStopErr, err)
 			}
 			switch {
 			case m.mainReapPending.Load():
 				if err := m.waitForProcessExit(ctx); err != nil {
-					return err
+					return errors.Join(comparisonStopErr, err)
 				}
 				m.mainReapPending.Store(false)
 			case tornDown:
 				m.drainAfterLateTeardown(ctx)
 			}
-			return nil
+			return comparisonStopErr
 		}
 		return nil
 	}
@@ -1861,7 +2111,7 @@ func (m *Manager) stop(ctx context.Context) error {
 		zap.String("protocol", m.agentProtocol()))
 	m.status.Store(StatusStopping)
 
-	auxiliaryStopErr := m.stopShellAndProcesses(ctx)
+	auxiliaryStopErr := errors.Join(comparisonStopErr, m.stopShellAndProcesses(ctx))
 	m.closeAdapterAndStdin()
 	m.killProcessGroupIfRequired()
 	mainStopErr := m.waitForProcessExit(ctx)
@@ -1881,6 +2131,14 @@ func (m *Manager) agentPID() int {
 		return 0
 	}
 	return m.cmd.Process.Pid
+}
+
+// AgentPID returns the running agent subprocess's PID, or 0 if no process is
+// running. Exposed for the background-workload liveness probe (spec
+// docs/specs/disambiguate-waiting/spec.md), which walks this PID's
+// transitive descendant set.
+func (m *Manager) AgentPID() int {
+	return m.agentPID()
 }
 
 func (m *Manager) agentProtocol() string {
@@ -2004,7 +2262,7 @@ func (m *Manager) drainAfterLateTeardown(ctx context.Context) {
 }
 
 // killProcessGroupIfRequired immediately kills the entire process group for
-// adapters (such as OpenCode) that are known not to exit when stdin is closed.
+// agents (such as OpenCode) that are known not to exit when stdin is closed.
 // Other adapters still get process-group cleanup in waitForProcessExit after
 // their graceful stdin-close path has had a chance to finish.
 func (m *Manager) killProcessGroupIfRequired() {
@@ -2421,23 +2679,26 @@ func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
 			zap.Int("exit_code", exitCode),
 			zap.Strings("recent_stderr", recentStderr))
 
-		// Send error event to the updates channel so UI can display it
+		// Send error event to the updates channel so UI can display it. This is
+		// a COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6) and the only report
+		// that the agent process died at all, so it must park on a full
+		// channel rather than being dropped. sendUpdateBlocking selects
+		// against the stop-channel snapshot rather than m.mu-guarded state
+		// deliberately: Stop holds m.mu for its entire teardown, including
+		// waiting on this same waitForExit goroutine to finish, so reading
+		// stopCh under m.mu here would deadlock against it.
 		errorMsg := fmt.Sprintf("Agent process exited with code %d", exitCode)
 		if len(recentStderr) > 0 {
 			errorMsg = fmt.Sprintf("%s: %s", errorMsg, strings.Join(recentStderr, "; "))
 		}
-		select {
-		case m.updatesCh <- adapter.AgentEvent{
+		m.sendUpdateBlocking(adapter.AgentEvent{
 			Type:  adapter.EventTypeError,
 			Error: errorMsg,
 			Data: map[string]any{
 				"exit_code":     exitCode,
 				"recent_stderr": recentStderr,
 			},
-		}:
-		default:
-			m.logger.Warn("updates channel full, could not send exit error event")
-		}
+		})
 	default:
 		m.exitCode.Store(0)
 		m.logger.Info("agent process exited successfully")
@@ -2605,8 +2866,17 @@ func (m *Manager) autoApprovePermission(req *adapter.PermissionRequest) (*adapte
 }
 
 // sendPermissionNotification sends a permission request notification through the updates channel.
-// Uses a blocking send with timeout to ensure delivery. If delivery fails within 5 seconds,
-// auto-cancels the permission so the agent doesn't hang waiting for a response.
+//
+// This is the eighth COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6) and the
+// only one of the eight that must branch on attached/detached state, rather
+// than always parking: while ATTACHED, a blocking send with a five-second
+// timeout is a deliberate safety valve against a stalled UI, and must
+// survive unchanged -- auto-cancelling the permission so the agent doesn't
+// hang waiting for a response. While DETACHED, that same auto-cancel would
+// silently deny every permission the agent asks for, five seconds apart, so
+// it must park instead: the wait ends either because a backend later
+// attaches (which starts draining the channel, satisfying the same select
+// sendUpdateBlocking already performs) or because the instance stops.
 func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
 	options := make([]streams.PermissionOption, len(pending.Snapshot.Options))
 	for i, option := range pending.Snapshot.Options {
@@ -2632,6 +2902,11 @@ func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
 		zap.String("pending_id", pending.ID),
 		zap.String("action_type", pending.Request.ActionType))
 
+	if !m.IsAttached() {
+		m.sendUpdateBlocking(event)
+		return
+	}
+
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
 	select {
@@ -2650,6 +2925,9 @@ func (m *Manager) sendPermissionNotification(pending *PendingPermission) {
 // sendPermissionCancelledNotification sends a notification that a permission request was cancelled.
 // This happens when the context is cancelled (e.g., agent completes or user stops the task)
 // before the user responds to the permission request.
+//
+// This is a COVERED site (AC-EXECUTORS-SURVIVAL-001.5/.6): it must park on a
+// full channel rather than being dropped.
 func (m *Manager) sendPermissionCancelledNotification(pending *PendingPermission) {
 	event := adapter.AgentEvent{
 		Type:      adapter.EventTypePermissionCancelled,
@@ -2662,13 +2940,7 @@ func (m *Manager) sendPermissionCancelledNotification(pending *PendingPermission
 		zap.String("pending_id", pending.ID),
 		zap.String("session_id", pending.Request.SessionID))
 
-	select {
-	case m.updatesCh <- event:
-		// Sent successfully
-	default:
-		m.logger.Warn("updates channel full, dropping permission cancelled notification",
-			zap.String("pending_id", pending.ID))
-	}
+	m.sendUpdateBlocking(event)
 }
 
 func (m *Manager) permissionSessionID(pending *PendingPermission) string {

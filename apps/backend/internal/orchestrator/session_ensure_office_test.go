@@ -45,6 +45,20 @@ func seedOfficeTaskAndSessions(t *testing.T, repo officeSeedRepo) {
 	}
 }
 
+func deleteOfficeTestSession(t *testing.T, repo interface {
+	GetTaskSession(context.Context, string) (*models.TaskSession, error)
+	DeleteTaskSession(context.Context, *models.TaskSession) error
+}, ctx context.Context, id string) {
+	t.Helper()
+	session, err := repo.GetTaskSession(ctx, id)
+	if err != nil {
+		t.Fatalf("GetTaskSession %s: %v", id, err)
+	}
+	if err := repo.DeleteTaskSession(ctx, session); err != nil {
+		t.Fatalf("DeleteTaskSession %s: %v", id, err)
+	}
+}
+
 func TestFindExistingSession_OfficeTaskResolvesToAssignee(t *testing.T) {
 	repo := setupTestRepo(t)
 	seedOfficeTaskAndSessions(t, repo)
@@ -76,6 +90,78 @@ func TestFindExistingSession_OfficeTaskWithViewerAgent(t *testing.T) {
 	}
 	if resp.SessionID != "s-reviewer" {
 		t.Errorf("session_id: got %q want s-reviewer", resp.SessionID)
+	}
+}
+
+func TestFindExistingSession_OfficeTaskWithOnlyOtherAgentSessionReturnsNil(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedOfficeTaskAndSessions(t, repo)
+	deleteOfficeTestSession(t, repo, context.Background(), "s-assignee")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	if got := svc.findExistingSession(context.Background(), "t-office"); got != nil {
+		t.Fatalf("expected no assignee session, got %q", got.SessionID)
+	}
+}
+
+func TestFindExistingSession_OfficeTaskUsesResolvedMetadataProfile(t *testing.T) {
+	repo := setupTestRepo(t)
+	ctx := context.Background()
+	seedOfficeTaskAndSessions(t, repo)
+	deleteOfficeTestSession(t, repo, ctx, "s-assignee")
+	task, err := repo.GetTask(ctx, "t-office")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	task.AssigneeAgentProfileID = ""
+	task.Metadata = map[string]interface{}{"agent_profile_id": "agent-reviewer"}
+	if err := repo.UpdateTask(ctx, task); err != nil {
+		t.Fatalf("update task: %v", err)
+	}
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	resp := svc.findExistingSession(ctx, "t-office")
+	if resp == nil {
+		t.Fatal("expected metadata-resolved session, got nil")
+	}
+	if resp.SessionID != "s-reviewer" {
+		t.Fatalf("session_id = %q, want s-reviewer", resp.SessionID)
+	}
+}
+
+func TestPrepareTaskSession_OfficeFlagUsesAssigneeForSessionIdentity(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedOfficeTaskAndSessions(t, repo)
+	deleteOfficeTestSession(t, repo, ctx, "s-assignee")
+	deleteOfficeTestSession(t, repo, ctx, "s-reviewer")
+
+	taskRepo := newMockTaskRepo()
+	taskRepo.tasks["t-office"] = &v1.Task{
+		ID:          "t-office",
+		WorkspaceID: "ws-r",
+		WorkflowID:  "wf-r",
+		Title:       "Office",
+		State:       v1.TaskStateInProgress,
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, &mockAgentManager{})
+	svc.config.OfficeSessionIdentity = true
+
+	sessionID, err := svc.PrepareTaskSession(
+		ctx, "t-office", "execution-profile", "", "", "", false,
+	)
+	if err != nil {
+		t.Fatalf("PrepareTaskSession: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("get prepared session: %v", err)
+	}
+	if session.AgentProfileID != "agent-assignee" {
+		t.Fatalf("session identity = %q, want agent-assignee", session.AgentProfileID)
+	}
+	if session.ExecutionProfileID != "execution-profile" {
+		t.Fatalf("execution profile = %q, want execution-profile", session.ExecutionProfileID)
 	}
 }
 

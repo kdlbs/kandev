@@ -96,7 +96,12 @@ describe("FileRow truncation (regression: path overlaps diff stats in narrow pan
       <TooltipProvider>
         <ul>
           <FileRow
-            file={{ ...baseFile, path: "README.md", repositoryName: "frontend" }}
+            file={{
+              ...baseFile,
+              path: "README.md",
+              repositoryName: "frontend",
+              changeLayer: "staged",
+            }}
             isPending={false}
             onSelect={noopSelect}
             onOpenDiff={onOpenDiff}
@@ -115,6 +120,7 @@ describe("FileRow truncation (regression: path overlaps diff stats in narrow pan
     expect(onOpenDiff).toHaveBeenCalledWith("README.md", {
       source: "uncommitted",
       repositoryName: "frontend",
+      changeLayer: "staged",
     });
   });
 
@@ -238,6 +244,31 @@ describe("FileRow hover swap (stats <-> actions occupy same cell)", () => {
     expect(statsLayer.className.split(/\s+/)).toContain("opacity-0");
     expect(actionsLayer.className.split(/\s+/)).toContain("opacity-100");
   });
+
+  it("keeps the pending spinner inside a touch-sized target for coarse pointers", () => {
+    responsive.isFinePointer = false;
+    const { container } = render(
+      <TooltipProvider>
+        <ul>
+          <FileRow
+            file={{ ...baseFile, path: "pending-mobile.go" }}
+            isPending
+            onSelect={noopSelect}
+            onOpenDiff={noop}
+            onStage={noop}
+            onUnstage={noop}
+            onDiscard={noop}
+            onEditFile={noop}
+          />
+        </ul>
+      </TooltipProvider>,
+    );
+
+    const spinner = container.querySelector("svg.animate-spin");
+    expect(spinner).not.toBeNull();
+    expect(spinner?.parentElement?.className).toContain("min-h-11");
+    expect(spinner?.parentElement?.className).toContain("min-w-11");
+  });
 });
 
 describe("FileRow tree-mode hover stage action", () => {
@@ -305,6 +336,36 @@ describe("FileRow tree-mode hover stage action", () => {
     const rightActions = row!.querySelector("[data-testid='file-row-hover-actions']");
     expect(rightActions).not.toBeNull();
     expect(rightActions!.querySelector("button[title='Unstage file']")).toBeNull();
+  });
+
+  it("keeps the tree-mode stage action visible and touch-sized for coarse pointers", () => {
+    responsive.isFinePointer = false;
+
+    const { container } = render(
+      <TooltipProvider>
+        <ul>
+          <FileRow
+            file={{ ...baseFile, path: "src/mobile.go", staged: true }}
+            isPending={false}
+            treeMode
+            onSelect={noopSelect}
+            onOpenDiff={noop}
+            onStage={noop}
+            onUnstage={noop}
+            onDiscard={noop}
+            onEditFile={noop}
+          />
+        </ul>
+      </TooltipProvider>,
+    );
+
+    const iconSlot = container.querySelector("[data-testid='file-row-icon-action-slot']");
+    const action = iconSlot?.querySelector("button[title='Unstage file']");
+
+    expect(iconSlot?.className).toContain("size-11");
+    expect(action?.className).toContain("min-h-11");
+    expect(action?.className).toContain("min-w-11");
+    expect(action?.parentElement?.className).not.toContain("opacity-0");
   });
 });
 

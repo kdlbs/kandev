@@ -150,6 +150,7 @@ export type Task = {
   labels: TaskLabelLocal[];
   assigneeAgentProfileId?: string;
   assigneeName?: string;
+  assigneeUserId?: string;
   projectId?: string;
   projectName?: string;
   projectColor?: string;

@@ -278,9 +278,12 @@ type Adapter struct {
 	// Session configuration changes are serialized across model and option
 	// RPCs. configGeneration is incremented when a change begins so an older
 	// completion cannot overwrite a newer selection.
-	configChangeMu   sync.Mutex
-	configGeneration uint64
-	contextSamples   map[string]contextWindowSample
+	// Session transitions use a separate mutex because a reset must keep the
+	// adapter transitionally consistent from session/new through session/close.
+	sessionTransitionMu sync.Mutex
+	configChangeMu      sync.Mutex
+	configGeneration    uint64
+	contextSamples      map[string]contextWindowSample
 
 	// Synchronization
 	mu     sync.RWMutex
@@ -312,6 +315,14 @@ type Adapter struct {
 	asyncTurnFinalizers map[string]*asyncTurnFinalizer
 	asyncTurnEpochs     map[string]uint64
 
+	// turnStartedAt records, per session, the time agentctl last dispatched
+	// session/prompt for it (human or synthetic). It is agentctl's own clock
+	// and never crosses the process boundary; the background-workload
+	// liveness probe compares descendant process start times against it.
+	// Guarded by asyncTurnMu and cleared on the same lifecycle as the
+	// asyncTurn maps above (new session, adapter close).
+	turnStartedAt map[string]time.Time
+
 	// lifetimeCtx is cancelled by Close. Background work that may outlive
 	// the call site (e.g. the synthetic wakeup prompt goroutine) derives its
 	// context from this one so it aborts when the adapter shuts down rather
@@ -322,19 +333,21 @@ type Adapter struct {
 
 // promptTurnState holds synchronization for one in-flight session/prompt RPC.
 type promptTurnState struct {
-	endTurn          context.CancelCauseFunc
-	rpcDone          chan struct{}
-	abortCh          chan struct{}
-	handoffCh        chan struct{}
-	providerErrorCh  chan openCodeStderrDiagnostic
-	promptGeneration uint64
-	evidenceMu       sync.Mutex
-	codexSystemError bool
-	codexCapacity    bool
-	allowHandoff     bool
-	handedOff        bool
-	gateOwned        bool
-	finishing        bool
+	endTurn           context.CancelCauseFunc
+	rpcDone           chan struct{}
+	abortCh           chan struct{}
+	handoffCh         chan struct{}
+	providerErrorCh   chan openCodeStderrDiagnostic
+	promptGeneration  uint64
+	evidenceMu        sync.Mutex
+	codexSystemError  bool
+	codexCapacity     bool
+	cursorRetriable   bool
+	cursorRetriableAt time.Time
+	allowHandoff      bool
+	handedOff         bool
+	gateOwned         bool
+	finishing         bool
 }
 
 func (t *promptTurnState) observeCodexEvidence(systemError, capacity bool) {
@@ -363,6 +376,42 @@ func (t *promptTurnState) hasCodexSystemError() bool {
 	t.evidenceMu.Lock()
 	defer t.evidenceMu.Unlock()
 	return t.codexSystemError
+}
+
+func (t *promptTurnState) setCursorRetriable() {
+	if t == nil {
+		return
+	}
+	t.evidenceMu.Lock()
+	if !t.cursorRetriable {
+		t.cursorRetriableAt = time.Now().UTC()
+	}
+	t.cursorRetriable = true
+	t.evidenceMu.Unlock()
+}
+
+func (t *promptTurnState) clearCursorRetriable() {
+	if t == nil {
+		return
+	}
+	t.evidenceMu.Lock()
+	t.cursorRetriable = false
+	t.cursorRetriableAt = time.Time{}
+	t.evidenceMu.Unlock()
+}
+
+func (t *promptTurnState) cursorRetriableFailure() bool {
+	failure, _ := t.cursorRetriableFailureAt()
+	return failure
+}
+
+func (t *promptTurnState) cursorRetriableFailureAt() (bool, time.Time) {
+	if t == nil {
+		return false, time.Time{}
+	}
+	t.evidenceMu.Lock()
+	defer t.evidenceMu.Unlock()
+	return t.cursorRetriable, t.cursorRetriableAt
 }
 
 type asyncTurnFinalizer struct {
@@ -401,6 +450,7 @@ func NewAdapter(cfg *shared.Config, log *logger.Logger) *Adapter {
 		promptGate:                make(chan struct{}, 1),
 		asyncTurnFinalizers:       make(map[string]*asyncTurnFinalizer),
 		asyncTurnEpochs:           make(map[string]uint64),
+		turnStartedAt:             make(map[string]time.Time),
 		lifetimeCtx:               ctx,
 		lifetimeCancel:            cancel,
 		closedCh:                  make(chan struct{}),
@@ -463,9 +513,13 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	// queue and is drained by our update worker. Requires a coder/acp-go-sdk
 	// fork with WithMaxQueuedNotifications; see go.mod replace directive.
 	notifQueueCap := acpNotifQueueCapacity(a.cfg.NotificationQueueCapacity)
-	a.acpConn = acp.NewClientSideConnection(a.acpClient, a.stdin, a.stdout,
-		acp.WithMaxQueuedNotifications(notifQueueCap))
-	a.acpConn.SetLogger(slog.Default().With("component", "acp-conn"))
+	a.acpConn = acpclient.NewClientSideConnectionWithLogger(
+		a.acpClient,
+		a.stdin,
+		a.stdout,
+		slog.Default().With("component", "acp-conn"),
+		acp.WithMaxQueuedNotifications(notifQueueCap),
+	)
 	a.logger.Debug("ACP connection notification queue sized",
 		zap.Int("capacity", notifQueueCap))
 
@@ -571,6 +625,15 @@ func (a *Adapter) GetSessionModelState() *streams.SessionModelState {
 		Models:         cloneSessionModels(convertSessionModels(a.availableModels)),
 		ConfigOptions:  cloneConfigOptions(a.availableConfigOptions),
 	}
+}
+
+// ProviderErrorContext implements adapter.ProviderErrorContextProvider.
+// modelID is empty until the adapter has settled a model for the session: a
+// non-empty currentModelFromConfig(availableConfigOptions) value at read time.
+func (a *Adapter) ProviderErrorContext() (providerID, modelID string) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.agentID, currentModelFromConfig(a.availableConfigOptions)
 }
 
 func cloneSessionModels(models []streams.SessionModelInfo) []streams.SessionModelInfo {

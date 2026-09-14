@@ -17,6 +17,7 @@ const (
 	RuntimeRemoteDocker Runtime = "remote_docker"
 	RuntimeSprites      Runtime = "sprites"
 	RuntimeSSH          Runtime = "ssh"
+	RuntimeKubernetes   Runtime = "k8s"
 )
 
 // IsContainerized reports whether the runtime hosts the agent
@@ -25,7 +26,7 @@ const (
 // decision gets reviewed; new constants default to host-mode.
 func (r Runtime) IsContainerized() bool {
 	switch r {
-	case RuntimeDocker, RuntimeRemoteDocker, RuntimeSprites:
+	case RuntimeDocker, RuntimeRemoteDocker, RuntimeSprites, RuntimeKubernetes:
 		return true
 	default:
 		return false

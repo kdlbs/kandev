@@ -8,8 +8,8 @@ import (
 // WildcardTaskScope grants task mutation access to any task in the run's workspace.
 const WildcardTaskScope = "*"
 
-// Runtime capability keys. These are the stable syscall vocabulary exposed to
-// run tokens, prompts, and runtime API handlers.
+// Runtime capability keys. These are the stable permission vocabulary exposed
+// to run tokens and runtime API handlers.
 const (
 	CapabilityPostComment      = "post_comment"
 	CapabilityUpdateTaskStatus = "update_task_status"
@@ -26,6 +26,11 @@ const (
 	CapabilityModifyAgents     = "modify_agents"
 	CapabilityDeleteSkills     = "delete_skills"
 )
+
+// AvailableActionRecordStepDecision identifies the advisory runtime decision
+// action that a run prompt may advertise when the agent holds the current
+// workflow seat.
+const AvailableActionRecordStepDecision = "record_step_decision"
 
 // Allows reports whether the named runtime capability is granted.
 func (c Capabilities) Allows(key string) bool {

@@ -39,7 +39,7 @@ test.describe("mobile: Plan table column resizing", () => {
     await session.waitForChatIdle({ timeout: 45_000 });
     await session.composerReady();
     await session.togglePlanMode();
-    await testPage.getByRole("button", { name: "Plan", exact: true }).tap();
+    await testPage.getByRole("navigation").getByRole("button", { name: "Plan", exact: true }).tap();
     await expect(session.planPanel).toBeVisible({ timeout: 10_000 });
 
     const editor = session.planEditor();

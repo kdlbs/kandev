@@ -21,22 +21,25 @@ func (s *Service) queueAndDrainLifecyclePrompt(
 	if s.messageQueue == nil {
 		return "", fmt.Errorf("message queue is not configured")
 	}
-	if _, _, accepted, err := s.messageQueue.QueueLifecycleMessageWithCoalesceKey(
-		ctx, session.ID, taskID, prompt, "", messagequeue.QueuedByWorkflow,
+	identity, err := s.resolveQueueIdentityForSession(ctx, session)
+	if err != nil || identity.TaskID != taskID {
+		if err != nil {
+			return "", err
+		}
+		return "", messagequeue.ErrSessionIdentityMismatch
+	}
+	if _, _, accepted, err := s.messageQueue.QueueLifecycleMessageWithCoalesceKeyForSession(
+		ctx, identity, prompt, "", messagequeue.QueuedByWorkflow,
 		false, nil, metadata, coalesceKey, true,
 	); err != nil {
 		return "", err
 	} else if !accepted {
 		return "", inactiveErr
 	}
-	s.publishQueueStatusEvent(ctx, session.ID)
+	s.publishQueueStatusEventForIdentity(ctx, identity)
 	// Always attempt the drain rather than gating it on this stale `session`
-	// snapshot's state: drainQueuedMessageForPromptableSession reloads the
-	// session and re-checks promptability itself, so it safely no-ops when
-	// not ready. Gating here on the pre-queue snapshot left a real race — a
-	// session that became promptable between snapshot and queueing would
-	// have its prompt stuck until some unrelated later event triggered a
-	// drain.
-	s.drainQueuedMessageForPromptableSession(ctx, session.ID)
+	// snapshot's state. The exact drain reloads promptability while preserving
+	// the incarnation captured by the lifecycle admission.
+	_, _ = s.drainQueuedMessageForPromptableSessionForIdentity(ctx, identity)
 	return session.ID, nil
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	authhttpmw "github.com/kandev/kandev/internal/auth/httpmw"
+	"github.com/kandev/kandev/internal/persistence/requiredstores"
 	"github.com/kandev/kandev/internal/system/info"
 )
 
@@ -111,6 +112,50 @@ func TestReadyHandlerBodyShapesByReadiness(t *testing.T) {
 		t.Fatalf("ready body keys = %#v, want exactly status/service/version", readyBody)
 	}
 }
+
+func TestReadyHandlerReportsPersistenceFailure(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	setReadyForTest(t, true)
+	tracker, err := requiredstores.NewTracker([]requiredstores.Descriptor{{
+		ID: "task", OwnerPackage: "internal/task", RequiredTables: []string{"tasks"},
+	}})
+	if err != nil {
+		t.Fatalf("NewTracker: %v", err)
+	}
+	if err := tracker.RecordSuccess("task"); err != nil {
+		t.Fatalf("RecordSuccess: %v", err)
+	}
+	if err := tracker.RecordProbe("task", errTestPersistence); err != nil {
+		t.Fatalf("RecordProbe: %v", err)
+	}
+
+	router := gin.New()
+	router.GET("/ready", readyHandler(routeParams{
+		version:           "1.2.3",
+		persistenceHealth: requiredstores.NewHealth(tracker, nil, nil),
+	}))
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("persistence status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+	var body map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode persistence body: %v", err)
+	}
+	if body["reason"] != "persistence" {
+		t.Fatalf("persistence reason = %v, want persistence", body["reason"])
+	}
+	if body["store_ids"].([]interface{})[0] != "task" {
+		t.Fatalf("persistence store_ids = %v, want task", body["store_ids"])
+	}
+}
+
+var errTestPersistence = persistenceTestError("probe failed")
+
+type persistenceTestError string
+
+func (e persistenceTestError) Error() string { return string(e) }
 
 // TestHealthHandlerDesktopTokenHeaderAlwaysSetReadyEndpointNever covers AC-21:
 // the desktop health-token header is a /health-only concern, unaffected by

@@ -14,11 +14,16 @@ import { useTranslation } from "react-i18next";
 import { SettingsCardHeader } from "@/components/settings/settings-card-header";
 import { SETTINGS_TYPOGRAPHY } from "@/components/settings/settings-typography";
 import { settingsActionClassName } from "@/components/settings/settings-control";
+import { executorProfileSettingsPath } from "@/lib/settings/executor-settings-routes";
 
 type ExecutorProfilesCardProps = {
   executorId: string;
   profiles: ExecutorProfile[];
 };
+
+const executorProfileDeleteActionClassName = settingsActionClassName(
+  "p-0 text-destructive hover:text-destructive cursor-pointer",
+);
 
 function ExecutorProfilesHeader({
   title,
@@ -56,6 +61,7 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
   const [dialogOpen, setDialogOpen] = useState(false);
   const executors = useAppStore((state) => state.executors.items);
   const setExecutors = useAppStore((state) => state.setExecutors);
+  const executorType = executors.find((executor) => executor.id === executorId)?.type;
 
   const refreshProfiles = useCallback(async () => {
     try {
@@ -75,9 +81,9 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
   const handleProfileCreated = useCallback(
     (profile: ExecutorProfile) => {
       refreshProfiles();
-      router.push(`/settings/executor/${executorId}/profile/${profile.id}`);
+      router.push(executorProfileSettingsPath({ id: executorId, type: executorType }, profile.id));
     },
-    [executorId, refreshProfiles, router],
+    [executorId, executorType, refreshProfiles, router],
   );
 
   const handleDelete = useCallback(
@@ -112,7 +118,12 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
                   key={profile.id}
                   className="flex items-center justify-between rounded-md border px-3 py-2 hover:bg-muted/50 cursor-pointer transition-colors"
                   onClick={() =>
-                    router.push(`/settings/executor/${executorId}/profile/${profile.id}`)
+                    router.push(
+                      executorProfileSettingsPath(
+                        { id: executorId, type: executorType },
+                        profile.id,
+                      ),
+                    )
                   }
                 >
                   <div className="flex items-center gap-2 min-w-0">
@@ -126,9 +137,11 @@ export function ExecutorProfilesCard({ executorId, profiles }: ExecutorProfilesC
                   <div className="flex items-center gap-1 flex-shrink-0">
                     <Button
                       variant="ghost"
-                      size="sm"
+                      size="icon"
                       onClick={(e) => handleDelete(e, profile.id)}
-                      className="h-11 w-11 p-0 text-destructive hover:text-destructive cursor-pointer md:h-7 md:w-7"
+                      aria-label={t("executors:deleteProfile")}
+                      data-testid="executor-profile-delete-button"
+                      className={executorProfileDeleteActionClassName}
                     >
                       <IconTrash className="h-3.5 w-3.5" />
                     </Button>

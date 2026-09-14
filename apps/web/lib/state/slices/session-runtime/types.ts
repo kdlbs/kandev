@@ -1,3 +1,8 @@
+import type {
+  WorkspaceRestorationAttempt,
+  WorkspaceRestorationState,
+} from "./workspace-restoration";
+
 export type TerminalState = {
   terminals: Array<{ id: string; output: string[] }>;
 };
@@ -40,6 +45,17 @@ export type ProcessState = {
   devProcessBySessionId: Record<string, string>;
 };
 
+export type GitChangeLayer = "staged" | "unstaged";
+
+export type FileChangeFacet = {
+  status: "modified" | "added" | "deleted" | "untracked" | "renamed";
+  additions?: number;
+  deletions?: number;
+  old_path?: string;
+  diff?: string;
+  diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+};
+
 export type FileInfo = {
   path: string;
   status: "modified" | "added" | "deleted" | "untracked" | "renamed";
@@ -49,6 +65,10 @@ export type FileInfo = {
   old_path?: string;
   diff?: string;
   diff_skip_reason?: "too_large" | "binary" | "truncated" | "budget_exceeded";
+  staged_change?: FileChangeFacet;
+  unstaged_change?: FileChangeFacet;
+  /** Frontend-only projection used when one raw path appears in both change sections. */
+  change_layer?: GitChangeLayer;
   /** Exact old-side ref for cumulative committed diffs. */
   base_ref?: string;
   /**
@@ -95,8 +115,7 @@ export type GitStatusEntry = {
 };
 
 export type GitStatusState = {
-  /** Git status keyed by environment ID (shared across sessions in the same environment).
-   *  Falls back to session ID when no environment exists.
+  /** Git status keyed by delivered environment ID (shared across sessions in the same environment).
    *  For multi-repo workspaces this holds the most recently received status
    *  (whichever repo emitted last); per-repo state lives in byEnvironmentRepo.
    */
@@ -162,6 +181,11 @@ export type SessionCommitsState = {
   // visible list, so the Changes panel doesn't flicker through its empty
   // state while the refetch is in flight.
   refetchTrigger: Record<string, number>;
+};
+
+/** Checkout generations keyed by environment and repository scope. */
+export type GitCheckoutGenerationState = {
+  byEnvironmentId: Record<string, Record<string, number>>;
 };
 
 export type ContextWindowEntry = {
@@ -427,6 +451,7 @@ export type SessionRuntimeSliceState = {
   /** Maps sessionId → environmentId for workspace state sharing. */
   environmentIdBySessionId: Record<string, string>;
   sessionCommits: SessionCommitsState;
+  gitCheckoutGeneration: GitCheckoutGenerationState;
   contextWindow: ContextWindowState;
   agents: AgentState;
   availableCommands: AvailableCommandsState;
@@ -441,6 +466,7 @@ export type SessionRuntimeSliceState = {
   sessionPollMode: SessionPollModeState;
   embeddedVscodeSupport: EmbeddedVscodeSupportState;
   workspaceFilesRefresh: { bySessionId: Record<string, number> };
+  workspaceRestoration: WorkspaceRestorationState;
 };
 
 export type SessionRuntimeSliceActions = {
@@ -457,7 +483,7 @@ export type SessionRuntimeSliceActions = {
   setActiveProcess: (sessionId: string, processId: string) => void;
   /** Returns true when the update meaningfully changed git state (so callers
    *  can invalidate derived caches without repeating the deep comparison). */
-  setGitStatus: (sessionId: string, gitStatus: GitStatusEntry) => boolean;
+  setGitStatus: (taskEnvironmentId: string, gitStatus: GitStatusEntry) => boolean;
   clearGitStatus: (sessionId: string) => void;
   bumpWorkspaceFilesRefresh: (sessionId: string) => void;
   /** Drops the pre-multi-repo (empty-repo-name) git-status entries so a
@@ -479,6 +505,8 @@ export type SessionRuntimeSliceActions = {
   // Signal a refetch without clearing the visible list — see
   // SessionCommitsState.refetchTrigger.
   bumpSessionCommitsRefetch: (sessionId: string) => void;
+  /** Bump only the affected repository's checkout generation. */
+  bumpSessionGitCheckoutGeneration: (sessionId: string, repositoryName?: string) => void;
   // Available commands actions
   setAvailableCommands: (sessionId: string, commands: AvailableCommand[]) => void;
   clearAvailableCommands: (sessionId: string) => void;
@@ -520,6 +548,14 @@ export type SessionRuntimeSliceActions = {
   ) => void;
   setSessionPollMode: (sessionId: string, mode: SessionPollMode) => void;
   setEmbeddedVscodeSupport: (sessionId: string, supported: boolean) => void;
+  beginWorkspaceRestoration: (
+    taskId: string,
+    sessionId: string,
+    environmentId: string,
+  ) => WorkspaceRestorationAttempt | null;
+  completeWorkspaceRestoration: (attempt: WorkspaceRestorationAttempt) => boolean;
+  failWorkspaceRestoration: (attempt: WorkspaceRestorationAttempt, details: string) => boolean;
+  clearWorkspaceRestoration: (attempt: WorkspaceRestorationAttempt) => boolean;
 };
 
 export type SessionRuntimeSlice = SessionRuntimeSliceState & SessionRuntimeSliceActions;

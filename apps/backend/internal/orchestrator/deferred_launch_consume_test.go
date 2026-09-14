@@ -525,7 +525,7 @@ func TestQueuePromotionOfBlockedWIPOverflowDoesNotLaunch(t *testing.T) {
 	// only the deferred agent launch must remain gated.
 	dependencies := &launchDependencyReader{blocked: true}
 	svc.SetTaskDependencyReader(dependencies)
-	store := newWorkflowStore(repo, steps, svc.agentManager, noopPublisher, testLogger(),
+	store := newWorkflowStore(repo, steps, svc.agentManager, noopPublisher, testLogger(), &operationLedger{},
 		func(eventCtx context.Context, task *models.Task) {
 			svc.handleTaskQueuePromoted(eventCtx, watcher.TaskEventData{TaskID: task.ID})
 		})
@@ -564,7 +564,7 @@ func TestQueuePromotionOfBlockedWIPOverflowDoesNotLaunch(t *testing.T) {
 	// resume the still-pending promotion lifecycle rather than leave the token
 	// stranded after launching directly.
 	dependencies.blocked = false
-	svc.autoStartTaskForStep(ctx, deferredChainTaskID, "step-limited", "task.dependencies_resolved", 0)
+	svc.autoStartTaskForStep(ctx, deferredChainTaskID, "step-limited", "task.dependencies_resolved", 0, false)
 	require.True(t, counter.awaitLaunch(0), "resolved dependency did not launch the promoted task")
 	awaitLaunchedSession(t, repo, deferredChainTaskID)
 	started, err := repo.GetTask(ctx, deferredChainTaskID)
@@ -585,7 +585,8 @@ func TestFailedPromotedDeferredLaunchRestoresTokenAndRetries(t *testing.T) {
 	baseRepo := setupTestRepo(t)
 	seedChainStepTask(t, baseRepo, deferredChainTaskID)
 	require.NoError(t, baseRepo.SetTaskMetadataKey(
-		ctx, deferredChainTaskID, models.MetaKeyQueuePromotionPending, true,
+		ctx, deferredChainTaskID, models.MetaKeyQueuePromotionPending,
+		map[string]interface{}{"from_step_id": "step-review"},
 	))
 	task, err := baseRepo.GetTask(ctx, deferredChainTaskID)
 	require.NoError(t, err)
@@ -632,8 +633,11 @@ func TestFailedPromotedDeferredLaunchRestoresTokenAndRetries(t *testing.T) {
 		stored, loadErr := baseRepo.GetTask(ctx, deferredChainTaskID)
 		require.NoError(t, loadErr)
 		_, deferredRestored := stored.Metadata[models.MetaKeyDeferredLaunch]
-		_, promotionRestored := stored.Metadata[models.MetaKeyQueuePromotionPending]
+		promotionToken, promotionRestored := stored.Metadata[models.MetaKeyQueuePromotionPending]
 		if deferredRestored && promotionRestored {
+			descriptor, ok := promotionToken.(map[string]interface{})
+			require.True(t, ok, "restored promotion token = %#v", promotionToken)
+			require.Equal(t, "step-review", descriptor["from_step_id"])
 			break
 		}
 		if time.Now().After(deadline) {

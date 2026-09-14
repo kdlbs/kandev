@@ -2,12 +2,14 @@ package lifecycle
 
 import (
 	"context"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -107,6 +109,96 @@ func TestLaunchResolveWorkspacePathDefersWorktreeCreation(t *testing.T) {
 	})
 
 	require.Empty(t, ws, "a first worktree launch has no ACP session and defers to the preparer")
+}
+
+func TestValidateLaunchWorkspaceAdmissionRejectsUnrelatedRepository(t *testing.T) {
+	source := initGitRepo(t)
+	other := initGitRepo(t)
+	req := &LaunchRequest{
+		ExecutorType:   string(models.ExecutorTypeLocal),
+		RepositoryID:   "repository-1",
+		RepositoryPath: source,
+		WorkspacePath:  other,
+	}
+
+	if err := validateLaunchWorkspaceAdmission(context.Background(), req, other); err == nil {
+		t.Fatal("validateLaunchWorkspaceAdmission() accepted an unrelated repository")
+	}
+}
+
+func TestValidateLaunchWorkspaceAdmissionDefersMissingWorktreeResume(t *testing.T) {
+	source := initGitRepo(t)
+	missing := filepath.Join(t.TempDir(), "removed-worktree")
+	req := &LaunchRequest{
+		ExecutorType:   string(models.ExecutorTypeWorktree),
+		RepositoryID:   "repository-1",
+		RepositoryPath: source,
+		ACPSessionID:   "acp-session-1",
+	}
+
+	if err := validateLaunchWorkspaceAdmission(context.Background(), req, missing); err != nil {
+		t.Fatalf("validateLaunchWorkspaceAdmission() rejected a missing worktree resume: %v", err)
+	}
+}
+
+// TestValidateLaunchWorkspaceAdmissionUsesSanitizedRepositoryDirectory pins the
+// multi-repo task root layout: launch specs carry the repository display name,
+// which the worktree manager sanitized into the directory segment it actually
+// created. Admission must look under that same segment.
+func TestValidateLaunchWorkspaceAdmissionUsesSanitizedRepositoryDirectory(t *testing.T) {
+	root := t.TempDir()
+	first := initGitRepo(t)
+	second := initGitRepo(t)
+	addLinkedWorktree(t, first, filepath.Join(root, worktree.SanitizeRepoDirName("kdlbs/kandev")))
+	addLinkedWorktree(t, second, filepath.Join(root, worktree.SanitizeRepoDirName("kdlbs/docs")))
+
+	req := &LaunchRequest{
+		ExecutorType: string(models.ExecutorTypeLocal),
+		Repositories: []RepoLaunchSpec{
+			{RepositoryID: "repository-1", RepositoryPath: first, RepoName: "kdlbs/kandev"},
+			{RepositoryID: "repository-2", RepositoryPath: second, RepoName: "kdlbs/docs"},
+		},
+	}
+
+	if err := validateLaunchWorkspaceAdmission(context.Background(), req, root); err != nil {
+		t.Fatalf("validateLaunchWorkspaceAdmission() rejected a sanitized repository directory: %v", err)
+	}
+}
+
+// TestValidateLaunchWorkspaceAdmissionRejectsUnrelatedSanitizedWorktreeOnResume
+// keeps the resume path fail-closed once the sanitized directory is the one
+// inspected: a checkout of a different repository must not be admitted just
+// because the raw display name resolves to nothing.
+func TestValidateLaunchWorkspaceAdmissionRejectsUnrelatedSanitizedWorktreeOnResume(t *testing.T) {
+	root := t.TempDir()
+	first := initGitRepo(t)
+	second := initGitRepo(t)
+	unrelated := initGitRepo(t)
+	addLinkedWorktree(t, first, filepath.Join(root, worktree.SanitizeRepoDirName("kdlbs/kandev")))
+	addLinkedWorktree(t, unrelated, filepath.Join(root, worktree.SanitizeRepoDirName("kdlbs/docs")))
+
+	req := &LaunchRequest{
+		ExecutorType: string(models.ExecutorTypeWorktree),
+		ACPSessionID: "acp-session-1",
+		Repositories: []RepoLaunchSpec{
+			{RepositoryID: "repository-1", RepositoryPath: first, RepoName: "kdlbs/kandev"},
+			{RepositoryID: "repository-2", RepositoryPath: second, RepoName: "kdlbs/docs"},
+		},
+	}
+
+	if err := validateLaunchWorkspaceAdmission(context.Background(), req, root); err == nil {
+		t.Fatal("validateLaunchWorkspaceAdmission() accepted an unrelated checkout at the sanitized directory")
+	}
+}
+
+func addLinkedWorktree(t *testing.T, source, destination string) {
+	t.Helper()
+	cmd := exec.Command("git", "worktree", "add", "--detach", destination)
+	cmd.Dir = source
+	cmd.Env = newIsolatedGitEnv()
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git worktree add %q: %v: %s", destination, err, output)
+	}
 }
 
 func TestTruncateID(t *testing.T) {

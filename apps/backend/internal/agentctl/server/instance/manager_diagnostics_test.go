@@ -46,3 +46,31 @@ func TestCreateInstance_RecordsCreateReadyMillis(t *testing.T) {
 		t.Errorf("CreateReadyMillis = %d, want > 0 after a completed creation", millis)
 	}
 }
+
+func TestCreateInstance_PropagatesMCPToolNamePresentationCapability(t *testing.T) {
+	log := newTestLogger(t)
+	mgr := NewManager(&config.Config{
+		Ports:    config.PortConfig{Base: 0, Max: 0},
+		Defaults: config.InstanceDefaults{Protocol: agent.ProtocolACP},
+	}, log)
+	t.Cleanup(func() { _ = mgr.Shutdown(context.Background()) })
+
+	var captured *config.InstanceConfig
+	mgr.SetServerFactory(func(cfg *config.InstanceConfig, procMgr *process.Manager, log *logger.Logger) http.Handler {
+		captured = cfg
+		return http.NotFoundHandler()
+	})
+
+	resp, err := mgr.CreateInstance(context.Background(), &CreateRequest{
+		WorkspacePath:              t.TempDir(),
+		NamespacesMCPToolsByServer: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	t.Cleanup(func() { _ = mgr.StopInstance(context.Background(), resp.ID) })
+
+	if captured == nil || !captured.NamespacesMCPToolsByServer {
+		t.Fatalf("captured instance config = %+v, want namespaced MCP tools", captured)
+	}
+}

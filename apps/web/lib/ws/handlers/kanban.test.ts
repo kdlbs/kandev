@@ -42,8 +42,8 @@ function makeUpdateMessage(workflowId: string, tasks: unknown[], steps: unknown[
   };
 }
 
-describe("kanban.update handler — primarySessionId preservation", () => {
-  it("preserves workflow step WIP fields", () => {
+describe("kanban.update handler — signal-gated workflow steps", () => {
+  it("preserves the signal-gated flag in live step updates", () => {
     const store = makeStore();
     const handler = registerKanbanHandlers(store)["kanban.update"]!;
 
@@ -57,6 +57,7 @@ describe("kanban.update handler — primarySessionId preservation", () => {
             title: "Review",
             position: 1,
             color: "bg-blue-500",
+            auto_advance_requires_signal: true,
             wip_limit: 2,
             pull_from_step_id: "step-0",
           },
@@ -67,9 +68,12 @@ describe("kanban.update handler — primarySessionId preservation", () => {
     expect(store.getState().kanban.steps[0]).toMatchObject({
       wip_limit: 2,
       pull_from_step_id: "step-0",
+      auto_advance_requires_signal: true,
     });
   });
+});
 
+describe("kanban.update handler — primarySessionId preservation", () => {
   it("preserves primarySessionId from existing tasks", () => {
     const store = makeStore({
       kanban: {
@@ -173,6 +177,9 @@ describe("kanban.update handler — foregroundActivity preservation", () => {
       },
       kanbanMulti: {
         isLoading: false,
+        orderRevisionByStepId: {},
+        pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
         snapshots: {
           [WORKFLOW_ID]: {
             workflowId: WORKFLOW_ID,
@@ -227,6 +234,9 @@ describe("kanban.update handler — foregroundActivity preservation", () => {
       },
       kanbanMulti: {
         isLoading: false,
+        orderRevisionByStepId: {},
+        pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
         snapshots: {
           [WORKFLOW_ID]: {
             workflowId: WORKFLOW_ID,
@@ -285,6 +295,9 @@ describe("kanban.update handler — taskPendingAction preservation", () => {
       },
       kanbanMulti: {
         isLoading: false,
+        orderRevisionByStepId: {},
+        pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
         snapshots: {
           [WORKFLOW_ID]: {
             workflowId: WORKFLOW_ID,
@@ -339,6 +352,9 @@ describe("kanban.update handler — taskPendingAction preservation", () => {
       },
       kanbanMulti: {
         isLoading: false,
+        orderRevisionByStepId: {},
+        pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
         snapshots: {
           [WORKFLOW_ID]: {
             workflowId: WORKFLOW_ID,
@@ -460,6 +476,9 @@ describe("kanban.update handler — repository switch", () => {
       },
       kanbanMulti: {
         isLoading: false,
+        orderRevisionByStepId: {},
+        pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
         snapshots: {
           [WORKFLOW_ID]: {
             workflowId: WORKFLOW_ID,
@@ -524,6 +543,9 @@ describe("kanban.update handler — explicit-null primary preservation", () => {
       },
       kanbanMulti: {
         isLoading: false,
+        orderRevisionByStepId: {},
+        pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
         snapshots: {
           wf1: {
             workflowId: "wf1",
@@ -561,6 +583,9 @@ describe("kanban.update handler — multi-snapshot primary lookup", () => {
       kanban: { workflowId: "wf1", steps: [], tasks: [] },
       kanbanMulti: {
         isLoading: false,
+        orderRevisionByStepId: {},
+        pendingReorderBandKeys: {},
+        withheldReorderByBandKey: {},
         snapshots: {
           wf1: {
             workflowId: "wf1",

@@ -187,7 +187,9 @@ The task mode is server-owned configuration, not an MCP argument. Hidden
 automation identity is derived only from a task whose origin and metadata bind
 it to the automation. Visible automation tasks are not accepted as hidden
 coordinator callers. Workspace authorization and exact run identity remain
-required for all automation mutations.
+required for all automation mutations. The one self-target exception is
+`archive_task_kandev` on the calling hidden run task as terminal completion;
+all other self-target mutations and foreign-workspace targets remain denied.
 
 ## Observability
 
@@ -201,4 +203,5 @@ visible task state.
 ## Related decisions
 
 - [User-configured automation continuity](../../../decisions/2026-08-22-user-configured-automation-continuity.md)
+- [Automation self-archive](../../../decisions/2026-09-02-automation-self-archive.md)
 - [Automation target modes](../../../decisions/2026-08-23-automation-target-modes.md)

@@ -68,13 +68,13 @@ func (s *Store) CreateWorkItemWatch(ctx context.Context, watch *WorkItemWatch) e
 		watch.CreatedAt = now
 	}
 	watch.UpdatedAt = now
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO azure_devops_work_item_watches
 		(id, workspace_id, workflow_id, workflow_step_id, project_id, wiql,
 		repository_id, base_branch, agent_profile_id, executor_profile_id, prompt,
 		enabled, poll_interval_seconds, cleanup_policy, max_inflight_tasks,
 		generation, deleting, last_error, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		watch.ID, watch.WorkspaceID, watch.WorkflowID, watch.WorkflowStepID,
 		watch.ProjectID, watch.WIQL, watch.RepositoryID, watch.BaseBranch,
 		watch.AgentProfileID, watch.ExecutorProfileID, watch.Prompt, watch.Enabled,
@@ -85,12 +85,12 @@ func (s *Store) CreateWorkItemWatch(ctx context.Context, watch *WorkItemWatch) e
 
 func (s *Store) GetWorkItemWatch(ctx context.Context, id string) (*WorkItemWatch, error) {
 	var watch WorkItemWatch
-	err := s.ro.GetContext(ctx, &watch, `SELECT id, workspace_id, workflow_id,
+	err := s.ro.GetContext(ctx, &watch, s.ro.Rebind(`SELECT id, workspace_id, workflow_id,
 		workflow_step_id, project_id, wiql, repository_id, base_branch,
 		agent_profile_id, executor_profile_id, prompt, enabled,
 		poll_interval_seconds, cleanup_policy, max_inflight_tasks, generation,
 		deleting, last_error, last_error_at, last_polled_at, created_at, updated_at
-		FROM azure_devops_work_item_watches WHERE id = ?`, id)
+		FROM azure_devops_work_item_watches WHERE id = ?`), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -102,25 +102,25 @@ func (s *Store) GetWorkItemWatch(ctx context.Context, id string) (*WorkItemWatch
 
 func (s *Store) ListWorkItemWatches(ctx context.Context, workspaceID string) ([]*WorkItemWatch, error) {
 	var watches []*WorkItemWatch
-	err := s.ro.SelectContext(ctx, &watches, `SELECT id, workspace_id, workflow_id,
+	err := s.ro.SelectContext(ctx, &watches, s.ro.Rebind(`SELECT id, workspace_id, workflow_id,
 		workflow_step_id, project_id, wiql, repository_id, base_branch,
 		agent_profile_id, executor_profile_id, prompt, enabled,
 		poll_interval_seconds, cleanup_policy, max_inflight_tasks, generation,
 		deleting, last_error, last_error_at, last_polled_at, created_at, updated_at
-		FROM azure_devops_work_item_watches WHERE workspace_id = ? AND deleting = 0
-		ORDER BY created_at, id`, workspaceID)
+		FROM azure_devops_work_item_watches WHERE workspace_id = ? AND deleting = FALSE
+		ORDER BY created_at, id`), workspaceID)
 	return watches, err
 }
 
 func (s *Store) ListEnabledWorkItemWatches(ctx context.Context) ([]*WorkItemWatch, error) {
 	var watches []*WorkItemWatch
-	err := s.ro.SelectContext(ctx, &watches, `SELECT id, workspace_id, workflow_id,
+	err := s.ro.SelectContext(ctx, &watches, s.ro.Rebind(`SELECT id, workspace_id, workflow_id,
 		workflow_step_id, project_id, wiql, repository_id, base_branch,
 		agent_profile_id, executor_profile_id, prompt, enabled,
 		poll_interval_seconds, cleanup_policy, max_inflight_tasks, generation,
 		deleting, last_error, last_error_at, last_polled_at, created_at, updated_at
-		FROM azure_devops_work_item_watches WHERE enabled = 1 AND deleting = 0
-		ORDER BY last_polled_at IS NOT NULL, last_polled_at, id`)
+		FROM azure_devops_work_item_watches WHERE enabled = TRUE AND deleting = FALSE
+		ORDER BY last_polled_at IS NOT NULL, last_polled_at, id`))
 	return watches, err
 }
 
@@ -129,12 +129,12 @@ func (s *Store) UpdateWorkItemWatch(ctx context.Context, watch *WorkItemWatch) e
 		return err
 	}
 	watch.UpdatedAt = time.Now().UTC()
-	result, err := s.db.ExecContext(ctx, `UPDATE azure_devops_work_item_watches SET
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(`UPDATE azure_devops_work_item_watches SET
 		workflow_id = ?, workflow_step_id = ?, project_id = ?, wiql = ?,
 		repository_id = ?, base_branch = ?, agent_profile_id = ?,
 		executor_profile_id = ?, prompt = ?, enabled = ?, poll_interval_seconds = ?,
 		cleanup_policy = ?, max_inflight_tasks = ?, updated_at = ?
-		WHERE id = ? AND deleting = 0`,
+		WHERE id = ? AND deleting = FALSE`),
 		watch.WorkflowID, watch.WorkflowStepID, watch.ProjectID, watch.WIQL,
 		watch.RepositoryID, watch.BaseBranch, watch.AgentProfileID,
 		watch.ExecutorProfileID, watch.Prompt, watch.Enabled, watch.PollIntervalSeconds,
@@ -162,14 +162,14 @@ func (s *Store) CreatePullRequestWatch(ctx context.Context, watch *PullRequestWa
 		watch.CreatedAt = now
 	}
 	watch.UpdatedAt = now
-	_, err := s.db.ExecContext(ctx, `
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO azure_devops_pull_request_watches
 		(id, workspace_id, workflow_id, workflow_step_id, project_id,
 		azure_repository_id, status, creator_id, reviewer_id, repository_id,
 		base_branch, agent_profile_id, executor_profile_id, prompt, enabled,
 		poll_interval_seconds, cleanup_policy, max_inflight_tasks, generation,
 		deleting, last_error, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 		watch.ID, watch.WorkspaceID, watch.WorkflowID, watch.WorkflowStepID,
 		watch.ProjectID, watch.AzureRepositoryID, watch.Status, watch.CreatorID,
 		watch.ReviewerID, watch.RepositoryID, watch.BaseBranch, watch.AgentProfileID,
@@ -181,13 +181,13 @@ func (s *Store) CreatePullRequestWatch(ctx context.Context, watch *PullRequestWa
 
 func (s *Store) GetPullRequestWatch(ctx context.Context, id string) (*PullRequestWatch, error) {
 	var watch PullRequestWatch
-	err := s.ro.GetContext(ctx, &watch, `SELECT id, workspace_id, workflow_id,
+	err := s.ro.GetContext(ctx, &watch, s.ro.Rebind(`SELECT id, workspace_id, workflow_id,
 		workflow_step_id, project_id, azure_repository_id, status, creator_id,
 		reviewer_id, repository_id, base_branch, agent_profile_id,
 		executor_profile_id, prompt, enabled, poll_interval_seconds, cleanup_policy,
 		max_inflight_tasks, generation, deleting, last_error, last_error_at,
 		last_polled_at, created_at, updated_at
-		FROM azure_devops_pull_request_watches WHERE id = ?`, id)
+		FROM azure_devops_pull_request_watches WHERE id = ?`), id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -199,27 +199,27 @@ func (s *Store) GetPullRequestWatch(ctx context.Context, id string) (*PullReques
 
 func (s *Store) ListPullRequestWatches(ctx context.Context, workspaceID string) ([]*PullRequestWatch, error) {
 	var watches []*PullRequestWatch
-	err := s.ro.SelectContext(ctx, &watches, `SELECT id, workspace_id, workflow_id,
+	err := s.ro.SelectContext(ctx, &watches, s.ro.Rebind(`SELECT id, workspace_id, workflow_id,
 		workflow_step_id, project_id, azure_repository_id, status, creator_id,
 		reviewer_id, repository_id, base_branch, agent_profile_id,
 		executor_profile_id, prompt, enabled, poll_interval_seconds, cleanup_policy,
 		max_inflight_tasks, generation, deleting, last_error, last_error_at,
 		last_polled_at, created_at, updated_at
-		FROM azure_devops_pull_request_watches WHERE workspace_id = ? AND deleting = 0
-		ORDER BY created_at, id`, workspaceID)
+		FROM azure_devops_pull_request_watches WHERE workspace_id = ? AND deleting = FALSE
+		ORDER BY created_at, id`), workspaceID)
 	return watches, err
 }
 
 func (s *Store) ListEnabledPullRequestWatches(ctx context.Context) ([]*PullRequestWatch, error) {
 	var watches []*PullRequestWatch
-	err := s.ro.SelectContext(ctx, &watches, `SELECT id, workspace_id, workflow_id,
+	err := s.ro.SelectContext(ctx, &watches, s.ro.Rebind(`SELECT id, workspace_id, workflow_id,
 		workflow_step_id, project_id, azure_repository_id, status, creator_id,
 		reviewer_id, repository_id, base_branch, agent_profile_id,
 		executor_profile_id, prompt, enabled, poll_interval_seconds, cleanup_policy,
 		max_inflight_tasks, generation, deleting, last_error, last_error_at,
 		last_polled_at, created_at, updated_at
-		FROM azure_devops_pull_request_watches WHERE enabled = 1 AND deleting = 0
-		ORDER BY last_polled_at IS NOT NULL, last_polled_at, id`)
+		FROM azure_devops_pull_request_watches WHERE enabled = TRUE AND deleting = FALSE
+		ORDER BY last_polled_at IS NOT NULL, last_polled_at, id`))
 	return watches, err
 }
 
@@ -228,12 +228,12 @@ func (s *Store) UpdatePullRequestWatch(ctx context.Context, watch *PullRequestWa
 		return err
 	}
 	watch.UpdatedAt = time.Now().UTC()
-	result, err := s.db.ExecContext(ctx, `UPDATE azure_devops_pull_request_watches SET
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(`UPDATE azure_devops_pull_request_watches SET
 		workflow_id = ?, workflow_step_id = ?, project_id = ?, azure_repository_id = ?,
 		status = ?, creator_id = ?, reviewer_id = ?, repository_id = ?, base_branch = ?,
 		agent_profile_id = ?, executor_profile_id = ?, prompt = ?, enabled = ?,
 		poll_interval_seconds = ?, cleanup_policy = ?, max_inflight_tasks = ?,
-		updated_at = ? WHERE id = ? AND deleting = 0`,
+		updated_at = ? WHERE id = ? AND deleting = FALSE`),
 		watch.WorkflowID, watch.WorkflowStepID, watch.ProjectID, watch.AzureRepositoryID,
 		watch.Status, watch.CreatorID, watch.ReviewerID, watch.RepositoryID,
 		watch.BaseBranch, watch.AgentProfileID, watch.ExecutorProfileID, watch.Prompt,
@@ -261,7 +261,7 @@ func (s *Store) SetPullRequestWatchError(ctx context.Context, id, message string
 }
 
 func (s *Store) setWatchError(ctx context.Context, table, id, message string, checkedAt time.Time) error {
-	_, err := s.db.ExecContext(ctx, fmt.Sprintf(`UPDATE %s SET last_error = ?, last_error_at = ?, last_polled_at = ?, updated_at = ? WHERE id = ? AND deleting = 0`, table), message, checkedAt, checkedAt, checkedAt, id)
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(fmt.Sprintf(`UPDATE %s SET last_error = ?, last_error_at = ?, last_polled_at = ?, updated_at = ? WHERE id = ? AND deleting = FALSE`, table)), message, checkedAt, checkedAt, checkedAt, id)
 	return err
 }
 
@@ -274,7 +274,7 @@ func (s *Store) ClearPullRequestWatchError(ctx context.Context, id string, polle
 }
 
 func (s *Store) clearWatchError(ctx context.Context, table, id string, polledAt time.Time) error {
-	_, err := s.db.ExecContext(ctx, fmt.Sprintf(`UPDATE %s SET last_error = '', last_error_at = NULL, last_polled_at = ?, updated_at = ? WHERE id = ? AND deleting = 0`, table), polledAt, polledAt, id)
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(fmt.Sprintf(`UPDATE %s SET last_error = '', last_error_at = NULL, last_polled_at = ?, updated_at = ? WHERE id = ? AND deleting = FALSE`, table)), polledAt, polledAt, id)
 	return err
 }
 
@@ -287,7 +287,7 @@ func (s *Store) DisablePullRequestWatchWithError(ctx context.Context, id, cause 
 }
 
 func (s *Store) disableWatchWithError(ctx context.Context, table, id, cause string) error {
-	result, err := s.db.ExecContext(ctx, fmt.Sprintf(`UPDATE %s SET enabled = 0, last_error = ?, last_error_at = ?, updated_at = ? WHERE id = ? AND deleting = 0`, table), cause, time.Now().UTC(), time.Now().UTC(), id)
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(fmt.Sprintf(`UPDATE %s SET enabled = FALSE, last_error = ?, last_error_at = ?, updated_at = ? WHERE id = ? AND deleting = FALSE`, table)), cause, time.Now().UTC(), time.Now().UTC(), id)
 	if err != nil {
 		return err
 	}
@@ -310,15 +310,15 @@ func (s *Store) DeletePullRequestWatch(ctx context.Context, id string) error {
 }
 
 func (s *Store) deleteWatch(ctx context.Context, watchTable, taskTable, id string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE watch_id = ?`, taskTable), id); err != nil {
+	if _, err := tx.ExecContext(ctx, tx.Rebind(fmt.Sprintf(`DELETE FROM %s WHERE watch_id = ?`, taskTable)), id); err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE id = ?`, watchTable), id)
+	result, err := tx.ExecContext(ctx, tx.Rebind(fmt.Sprintf(`DELETE FROM %s WHERE id = ?`, watchTable)), id)
 	if err != nil {
 		return err
 	}
@@ -333,17 +333,17 @@ func (s *Store) deleteWatch(ctx context.Context, watchTable, taskTable, id strin
 }
 
 func (s *Store) DeleteWorkItemWatchTasksByTask(ctx context.Context, taskID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM azure_devops_work_item_watch_tasks WHERE task_id = ?`, taskID)
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM azure_devops_work_item_watch_tasks WHERE task_id = ?`), taskID)
 	return err
 }
 
 func (s *Store) DeletePullRequestWatchTasksByTask(ctx context.Context, taskID string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM azure_devops_pull_request_watch_tasks WHERE task_id = ?`, taskID)
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM azure_devops_pull_request_watch_tasks WHERE task_id = ?`), taskID)
 	return err
 }
 
 func (s *Store) DeleteWatchesByWorkspace(ctx context.Context, workspaceID string) error {
-	tx, err := s.db.BeginTx(ctx, nil)
+	tx, err := s.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return err
 	}
@@ -357,7 +357,7 @@ func (s *Store) DeleteWatchesByWorkspace(ctx context.Context, workspaceID string
 		`DELETE FROM azure_devops_work_item_watches WHERE workspace_id = ?`,
 		`DELETE FROM azure_devops_pull_request_watches WHERE workspace_id = ?`,
 	} {
-		if _, err := tx.ExecContext(ctx, query, workspaceID); err != nil {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(query), workspaceID); err != nil {
 			return err
 		}
 	}
@@ -366,10 +366,10 @@ func (s *Store) DeleteWatchesByWorkspace(ctx context.Context, workspaceID string
 
 func (s *Store) ListWorkItemWatchTasks(ctx context.Context, watchID string, generation int64) ([]*WorkItemWatchTask, error) {
 	var rows []WorkItemWatchTask
-	err := s.ro.SelectContext(ctx, &rows, `SELECT id, watch_id, project_id, work_item_id,
+	err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(`SELECT id, watch_id, project_id, work_item_id,
 		work_item_url, task_id, generation, created_at
 		FROM azure_devops_work_item_watch_tasks
-		WHERE watch_id = ? AND generation = ? ORDER BY created_at`, watchID, generation)
+		WHERE watch_id = ? AND generation = ? ORDER BY created_at`), watchID, generation)
 	if err != nil {
 		return nil, err
 	}
@@ -382,10 +382,10 @@ func (s *Store) ListWorkItemWatchTasks(ctx context.Context, watchID string, gene
 
 func (s *Store) ListPullRequestWatchTasks(ctx context.Context, watchID string, generation int64) ([]*PullRequestWatchTask, error) {
 	var rows []PullRequestWatchTask
-	err := s.ro.SelectContext(ctx, &rows, `SELECT id, watch_id, project_id,
+	err := s.ro.SelectContext(ctx, &rows, s.ro.Rebind(`SELECT id, watch_id, project_id,
 		azure_repository_id, pull_request_id, pull_request_url, task_id, generation,
 		created_at FROM azure_devops_pull_request_watch_tasks
-		WHERE watch_id = ? AND generation = ? ORDER BY created_at`, watchID, generation)
+		WHERE watch_id = ? AND generation = ? ORDER BY created_at`), watchID, generation)
 	if err != nil {
 		return nil, err
 	}
@@ -397,12 +397,12 @@ func (s *Store) ListPullRequestWatchTasks(ctx context.Context, watchID string, g
 }
 
 func (s *Store) DeleteWorkItemWatchTask(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM azure_devops_work_item_watch_tasks WHERE id = ?`, id)
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM azure_devops_work_item_watch_tasks WHERE id = ?`), id)
 	return err
 }
 
 func (s *Store) DeletePullRequestWatchTask(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, `DELETE FROM azure_devops_pull_request_watch_tasks WHERE id = ?`, id)
+	_, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM azure_devops_pull_request_watch_tasks WHERE id = ?`), id)
 	return err
 }
 
@@ -411,7 +411,7 @@ func (s *Store) ReserveWorkItemWatchTask(ctx context.Context, watchID string, ge
 		INSERT INTO azure_devops_work_item_watch_tasks
 		(id, watch_id, project_id, work_item_id, work_item_url, task_id, generation, created_at)
 		SELECT ?, ?, ?, ?, ?, '', ?, ? WHERE EXISTS (
-		SELECT 1 FROM azure_devops_work_item_watches WHERE id = ? AND generation = ? AND enabled = 1 AND deleting = 0
+		SELECT 1 FROM azure_devops_work_item_watches WHERE id = ? AND generation = ? AND enabled = TRUE AND deleting = FALSE
 		) ON CONFLICT(watch_id, generation, project_id, work_item_id) DO NOTHING`,
 		[]any{uuid.NewString(), watchID, projectID, workItemID, workItemURL, generation, time.Now().UTC(), watchID, generation})
 }
@@ -429,7 +429,7 @@ func (s *Store) ReservePullRequestWatchTask(ctx context.Context, watchID string,
 		INSERT INTO azure_devops_pull_request_watch_tasks
 		(id, watch_id, project_id, azure_repository_id, pull_request_id, pull_request_url, task_id, generation, created_at)
 		SELECT ?, ?, ?, ?, ?, ?, '', ?, ? WHERE EXISTS (
-		SELECT 1 FROM azure_devops_pull_request_watches WHERE id = ? AND generation = ? AND enabled = 1 AND deleting = 0
+		SELECT 1 FROM azure_devops_pull_request_watches WHERE id = ? AND generation = ? AND enabled = TRUE AND deleting = FALSE
 		) ON CONFLICT(watch_id, generation, project_id, azure_repository_id, pull_request_id) DO NOTHING`,
 		[]any{uuid.NewString(), watchID, projectID, azureRepositoryID, pullRequestID, pullRequestURL, generation, time.Now().UTC(), watchID, generation})
 }
@@ -443,7 +443,7 @@ func (s *Store) ReleasePullRequestWatchTask(ctx context.Context, watchID string,
 }
 
 func (s *Store) reserveWatchTask(ctx context.Context, table, query string, args []any) (bool, error) {
-	result, err := s.db.ExecContext(ctx, query, args...)
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(query), args...)
 	if err != nil {
 		return false, err
 	}
@@ -454,7 +454,7 @@ func (s *Store) reserveWatchTask(ctx context.Context, table, query string, args 
 func (s *Store) assignWatchTaskID(ctx context.Context, table, watchID string, generation int64, taskID, identity string, identityArgs ...any) error {
 	args := []any{taskID, watchID, generation}
 	args = append(args, identityArgs...)
-	result, err := s.db.ExecContext(ctx, fmt.Sprintf(`UPDATE %s SET task_id = ? WHERE watch_id = ? AND generation = ? AND %s`, table, identity), args...)
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(fmt.Sprintf(`UPDATE %s SET task_id = ? WHERE watch_id = ? AND generation = ? AND %s`, table, identity)), args...)
 	if err != nil {
 		return err
 	}
@@ -475,7 +475,7 @@ func (s *Store) assignWatchTaskID(ctx context.Context, table, watchID string, ge
 func (s *Store) releaseWatchTask(ctx context.Context, table, watchID string, generation int64, identity string, identityArgs ...any) error {
 	args := []any{watchID, generation}
 	args = append(args, identityArgs...)
-	result, err := s.db.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE watch_id = ? AND generation = ? AND %s`, table, identity), args...)
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(fmt.Sprintf(`DELETE FROM %s WHERE watch_id = ? AND generation = ? AND %s`, table, identity)), args...)
 	if err != nil {
 		return err
 	}
@@ -502,7 +502,7 @@ func (s *Store) watchGeneration(ctx context.Context, watchID string) (*watchGene
 		`SELECT generation, deleting, enabled FROM azure_devops_pull_request_watches WHERE id = ?`,
 	}
 	for _, query := range queries {
-		err := s.ro.GetContext(ctx, &row, query, watchID)
+		err := s.ro.GetContext(ctx, &row, s.ro.Rebind(query), watchID)
 		if err == nil {
 			return &row, nil
 		}

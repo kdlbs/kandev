@@ -19,6 +19,7 @@ import {
   countRunes,
 } from "./clarification-overlay-parts";
 import { ClarificationHeaderActions } from "./clarification-overlay-header";
+import { ClarificationStatusBanner } from "./clarification-status-banner";
 import { ClarificationMarkdown } from "./clarification-markdown";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
@@ -65,6 +66,21 @@ function readSingleQuestionMeta(message: Message | null | undefined): SingleQues
 function resolveQuestionMessages(messages: readonly Message[] | null | undefined): Message[] {
   if (messages && messages.length > 0) return [...messages];
   return [];
+}
+
+function useResetOverlayStateOnBundleChange(
+  pendingId: string | null,
+  setCustomDrafts: (drafts: Record<string, string>) => void,
+  setActiveIndex: (index: number) => void,
+) {
+  useEffect(() => {
+    // The hook resets its answer and retry state when a new pending bundle
+    // replaces the current one. Drafts and carousel navigation are overlay-
+    // local state, so they need the same lifecycle fence as well. Question IDs
+    // can repeat across bundles, which makes an ID-only draft key unsafe.
+    setCustomDrafts({});
+    setActiveIndex(0);
+  }, [pendingId, setCustomDrafts, setActiveIndex]);
 }
 
 function sortMessagesByQuestionIndex(messages: Message[]): Message[] {
@@ -581,6 +597,7 @@ export function ClarificationInputOverlay({
   const isSubmitting = group.submitState === "submitting";
   const [customDrafts, setCustomDrafts] = useState<Record<string, string>>({});
   const [rawActiveIndex, setActiveIndex] = useState(0);
+  useResetOverlayStateOnBundleChange(group.pendingId, setCustomDrafts, setActiveIndex);
   // Clamp the active index to the current bundle size so late-arriving
   // messages or shrunk bundles never put us out of range.
   const total = sortedMessages.length;
@@ -648,6 +665,9 @@ export function ClarificationInputOverlay({
           collapseContentId={collapseContentId}
         />
       </div>
+      {(group.submitState === "error" || group.submitState === "expired") && (
+        <ClarificationStatusBanner state={group.submitState} onRetry={() => void group.retry()} />
+      )}
       {sharedContext && (
         <div
           data-testid="clarification-context"

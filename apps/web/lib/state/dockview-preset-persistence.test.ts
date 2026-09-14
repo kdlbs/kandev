@@ -4,6 +4,8 @@ import type { DockviewApi } from "dockview-react";
 vi.mock("@/lib/local-storage", () => ({
   setEnvLayout: vi.fn(),
   getEnvLayout: vi.fn(() => null),
+  getEnvLayoutProfile: vi.fn(() => null),
+  setEnvLayoutProfile: vi.fn(),
   getEnvMaximizeState: vi.fn(() => null),
   setEnvMaximizeState: vi.fn(),
   removeEnvMaximizeState: vi.fn(),
@@ -79,7 +81,13 @@ vi.mock("./layout-manager", async (importOriginal) => {
 
 import { removeEnvMaximizeState, setEnvLayout } from "@/lib/local-storage";
 import { persistEnvLayoutNow, useDockviewStore } from "./dockview-store";
-import { applyLayout, defaultLayout, fromDockviewApi } from "./layout-manager";
+import {
+  applyLayout,
+  defaultLayout,
+  fromDockviewApi,
+  getPresetLayout,
+  resolveNamedIntent,
+} from "./layout-manager";
 
 function makeApi(snapshot: object = { columns: [] }): DockviewApi {
   return {
@@ -177,6 +185,9 @@ function resetStoreForIntegration() {
     preMaximizeLayout: null,
     maximizedGroupId: null,
     isRestoringLayout: false,
+    pinnedWidths: new Map(),
+    userDefaultLayout: null,
+    userDefaultLayoutProfile: { kind: "built-in", id: "default" },
   });
 }
 
@@ -313,6 +324,37 @@ describe("applyBuiltInPreset — persistence at call site", () => {
 describe("resetLayout — effective default persistence", () => {
   beforeEach(resetStoreForIntegration);
 
+  // @covers AC-UI-TASK-LAYOUT-PROFILES-001.9 AC-UI-TASK-LAYOUT-PROFILES-001.10
+  it("uses scaled proportions from the effective custom default", () => {
+    const api = makeStoreApi();
+    const userDefaultLayout = {
+      columns: [
+        {
+          id: "center",
+          width: 700,
+          groups: [{ panels: [{ id: "chat", component: "chat", title: "Agent" }] }],
+        },
+        {
+          id: "right",
+          pinned: true,
+          width: 300,
+          groups: [{ panels: [{ id: "files", component: "files", title: "Files" }] }],
+        },
+      ],
+    };
+    useDockviewStore.setState({
+      api,
+      currentLayoutEnvId: "env-reset",
+      userDefaultLayout,
+    });
+
+    useDockviewStore.getState().resetLayout();
+
+    const appliedWidths = vi.mocked(applyLayout).mock.calls.at(-1)?.[2];
+    expect(appliedWidths).toEqual(new Map([["right", 240]]));
+    expect(useDockviewStore.getState().pinnedWidths).toBe(appliedWidths);
+  });
+
   it("applies the current user default and persists it for the active environment", async () => {
     const api = makeStoreApi();
     const userDefaultLayout = {
@@ -354,6 +396,69 @@ describe("resetLayout — effective default persistence", () => {
     expect(removeEnvMaximizeState).toHaveBeenCalledWith("env-reset");
     await flushRaf();
     expect(setEnvLayout).toHaveBeenCalledWith("env-reset", expect.any(Object));
+  });
+});
+
+describe("buildDefaultLayout — effective default widths", () => {
+  beforeEach(resetStoreForIntegration);
+
+  it("uses scaled proportions when building a custom default without an intent", () => {
+    const api = makeStoreApi();
+    useDockviewStore.setState({
+      api,
+      userDefaultLayout: {
+        columns: [
+          { id: "center", width: 700, groups: [] },
+          { id: "right", pinned: true, width: 300, groups: [] },
+        ],
+      },
+    });
+
+    useDockviewStore.getState().buildDefaultLayout(api);
+
+    expect(applyLayout).toHaveBeenLastCalledWith(
+      api,
+      expect.anything(),
+      new Map([["right", 240]]),
+      800,
+      600,
+    );
+    expect(useDockviewStore.getState().pinnedWidths).toEqual(new Map([["right", 240]]));
+  });
+
+  it("keeps named preset widths responsive", () => {
+    const api = makeStoreApi();
+    const planLayout = {
+      columns: [
+        {
+          id: "center",
+          width: 600,
+          groups: [{ panels: [{ id: "chat", component: "chat", title: "Agent" }] }],
+        },
+        {
+          id: "right",
+          pinned: true,
+          width: 200,
+          groups: [{ panels: [{ id: "plan", component: "plan", title: "Plan" }] }],
+        },
+      ],
+    };
+    vi.mocked(resolveNamedIntent).mockReturnValue({ preset: "plan" });
+    vi.mocked(getPresetLayout).mockReturnValue(planLayout);
+    useDockviewStore.setState({
+      api,
+      userDefaultLayout: {
+        columns: [
+          { id: "center", width: 700, groups: [] },
+          { id: "right", pinned: true, width: 300, groups: [] },
+        ],
+      },
+    });
+
+    useDockviewStore.getState().buildDefaultLayout(api, "plan");
+
+    expect(applyLayout).toHaveBeenLastCalledWith(api, planLayout, new Map(), 800, 600);
+    expect(useDockviewStore.getState().pinnedWidths).toEqual(new Map());
   });
 });
 

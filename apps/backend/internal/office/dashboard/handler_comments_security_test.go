@@ -168,7 +168,7 @@ func newCommentSecurityFixture(t *testing.T) *commentSecurityFixture {
 	r := gin.New()
 	r.Use(agents.AgentAuthMiddleware(agentsSvc))
 	group := r.Group("/api/v1/office")
-	dashboard.RegisterRoutes(group, svc, repo, nil, handoff, log)
+	dashboard.RegisterRoutes(group, svc, repo, nil, handoff, nil, log)
 
 	return &commentSecurityFixture{router: r, agentsSvc: agentsSvc, repo: repo, handoff: handoff}
 }

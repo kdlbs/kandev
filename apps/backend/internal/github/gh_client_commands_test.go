@@ -214,12 +214,14 @@ func TestGHClient_ListPRComments_MergesBothEndpointsInTimeOrder(t *testing.T) {
 			Prefix: "api repos/acme/widget/pulls/42/comments",
 			Stdout: `[{"id":20,"path":"main.go","line":7,"side":"RIGHT","body":"inline note",
 				"created_at":"2026-01-05T12:00:00Z","updated_at":"2026-01-05T12:30:00Z",
-				"in_reply_to_id":19,"user":{"login":"alice","avatar_url":"https://a","type":"User"}}]`,
+				"in_reply_to_id":19,"html_url":"https://github.com/acme/widget/pull/42#discussion_r20",
+				"user":{"login":"alice","avatar_url":"https://a","type":"User"}}]`,
 		},
 		ghResponse{
 			Prefix: "api repos/acme/widget/issues/42/comments",
 			Stdout: `[{"id":10,"body":"conversation note","created_at":"2026-01-05T09:00:00Z",
 				"updated_at":"2026-01-05T09:00:00Z",
+				"html_url":"https://github.com/acme/widget/pull/42#issuecomment-10",
 				"user":{"login":"dependabot","avatar_url":"https://d","type":"Bot"}}]`,
 		},
 	)
@@ -237,6 +239,7 @@ func TestGHClient_ListPRComments_MergesBothEndpointsInTimeOrder(t *testing.T) {
 	if comments[0].ID != 10 || comments[0].CommentType != commentTypeIssue || !comments[0].AuthorIsBot {
 		t.Errorf("comments[0] = %#v, want the older bot-authored issue comment first", comments[0])
 	}
+	assertPRCommentHTMLURL(t, comments[0], "https://github.com/acme/widget/pull/42#issuecomment-10")
 	second := comments[1]
 	if second.ID != 20 || second.CommentType != commentTypeReview || second.AuthorIsBot {
 		t.Errorf("comments[1] = %#v", second)
@@ -247,6 +250,7 @@ func TestGHClient_ListPRComments_MergesBothEndpointsInTimeOrder(t *testing.T) {
 	if second.InReplyTo == nil || *second.InReplyTo != 19 {
 		t.Errorf("in_reply_to = %v, want 19", second.InReplyTo)
 	}
+	assertPRCommentHTMLURL(t, second, "https://github.com/acme/widget/pull/42#discussion_r20")
 }
 
 func TestGHClient_ListPRComments_AppendsSinceToBothEndpoints(t *testing.T) {

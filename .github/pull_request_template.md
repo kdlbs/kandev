@@ -15,10 +15,10 @@ LANGUAGE
   Keep the surrounding explanation in English.
 
 ARCHITECTURE AND SCOPE
-  If the change is large or architectural, require a linked issue with maintainer discussion before opening the PR.
+  For contributors without repository write access, if the change is large or architectural, require a linked issue with maintainer discussion before opening the PR. Maintainers and collaborators with `push`, `maintain`, or `admin` permission may open the PR directly; verify the authenticated actor's repository permission before applying this gate.
   Large changes include new subsystems, public API or protocol changes, persistence changes, new execution boundaries,
   authentication or permission-model changes, and cross-cutting changes across subsystems.
-  If the issue or discussion is missing, stop and report the blocker. Do not open a PR to start the discussion.
+  If a non-write contributor is missing the issue or discussion, stop and report the blocker. Do not open a PR to start the discussion.
   Prefer one logical change and the smallest practical diff. Split unrelated cleanup, refactoring, and feature work.
 
 IMPORTANT CHANGES (optional)
@@ -34,6 +34,13 @@ DIAGRAM (optional)
 
 POSSIBLE IMPROVEMENTS (optional)
   One line: risk level + what could go wrong or be improved. Skip if negligible.
+
+DOCUMENTATION COVERAGE
+  The `PR documentation coverage` status uses a deterministic path and artifact
+  check. Runtime, workflow, configuration, and other non-exempt changes need a
+  changed work order linked to its plan, requirements, acceptance criteria, and
+  system design. The exact `no-docs-allow` label is a maintainer exception. The
+  check does not claim semantic completeness or require planning before coding.
 
 RELATED ISSUES
   Use "Closes #N" if this resolves an issue. Remove the line if there is no related issue.
@@ -65,7 +72,7 @@ RULES
 
 ## Checklist
 
-- [ ] If this is a large architectural change, I discussed the direction in a linked issue before opening this PR.
+- [ ] If I do not have repository write access and this is a large architectural change, I discussed the direction in a linked issue before opening this PR.
 - [ ] This PR contains one logical change; unrelated work is split into separate PRs.
 - [ ] I have performed a self-review of my code.
 - [ ] I have manually tested my changes and they work as expected.

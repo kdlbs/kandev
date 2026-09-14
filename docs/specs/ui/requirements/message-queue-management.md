@@ -5,6 +5,7 @@ created: 2026-08-03
 owners:
   - kandev
 ---
+
 # Manage Pending Message Queues Requirements
 
 ## Overview
@@ -27,6 +28,50 @@ Long-running tasks can receive messages faster than their active session can dra
 - **AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.6:** An entry already reserved for durable lifecycle delivery is not visible and cannot be removed by these controls. Task archive/delete retains its separate privileged purge behavior.
 - **AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.7:** **Settings > Task Behavior > Message Queue** exposes the maximum number of persisted messages allowed per session alongside independent manual and automatic merge switches.
 - **AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.8:** The default is `10`. A positive integer sets a cap; `0` means unlimited.
+- **AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.9:** When a queued-message preview fits within its collapsed rendered height, evaluated at the row width available while the optional disclosure control is omitted, the row shall omit the expand/collapse control. The control itself shall not change that fit decision. When viewport width or zoom changes whether the preview overflows, the control shall appear or disappear without a reload.
+- **AC-UI-MESSAGE-QUEUE-MANAGEMENT-001.10:** When a visible row offers removal, its expand/collapse control, when present, shall be immediately before the Remove control. Remove shall use the shared trash symbol and shall adopt the destructive color on hover while retaining its existing accessible name.
+
+### REQ-UI-MESSAGE-QUEUE-MANAGEMENT-002: Edit Pending User Messages Safely
+
+**Intent:** Users need to revise a pending message without automatic delivery
+or a concurrent queue mutation sending, replacing, or moving the row while the
+editor is open.
+
+#### Acceptance criteria
+
+- **AC-UI-MESSAGE-QUEUE-MANAGEMENT-002.1:** Opening an editor shall hold only
+  the selected pending user message. Automatic delivery shall continue for
+  other eligible rows, and opening, saving, or cancelling an edit shall not
+  change the session's Auto-run setting.
+- **AC-UI-MESSAGE-QUEUE-MANAGEMENT-002.2:** Only the live editor lease issued
+  for the selected session, row, and connection shall authorize saving,
+  renewing, or ending that edit. Expired, stale, cross-session, and
+  cross-connection requests shall fail without changing the queued row.
+- **AC-UI-MESSAGE-QUEUE-MANAGEMENT-002.3:** A save shall require the target
+  revision observed when editing began. Repeating an identical operation shall
+  return its original result without applying it twice, while reusing its
+  operation identity for different content, attachments, or references shall
+  be rejected.
+- **AC-UI-MESSAGE-QUEUE-MANAGEMENT-002.4:** A queue operation that would drain,
+  remove, merge, reorder, transfer, restore, or replace the selected row shall
+  either fail while its lease is live or invalidate that lease before changing
+  the row. It shall never deliver a row while that row is actively edited.
+- **AC-UI-MESSAGE-QUEUE-MANAGEMENT-002.5:** Saving content, attachments, and
+  entity references shall be atomic from the queue user's perspective. A
+  rejected save shall release only claims acquired by that request, while a
+  committed save shall retain replacement claims and eventually release
+  superseded claims without deleting claims still referenced by another
+  pending row.
+- **AC-UI-MESSAGE-QUEUE-MANAGEMENT-002.6:** After a save, conflict, lease loss,
+  disconnection, or session switch, every connected view shall reconcile to
+  the authoritative queue state without a stale response restoring an older
+  editor or row value.
+- **AC-UI-MESSAGE-QUEUE-MANAGEMENT-002.7:** Desktop and mobile queue editors shall provide the same lease-protected save and cancellation behavior while preserving their platform-appropriate controls.
+- **AC-UI-MESSAGE-QUEUE-MANAGEMENT-002.8:** **GIVEN** a user-owned queued message is being edited, Auto-run is enabled, and the active turn becomes promptable while the edit lease is held, **WHEN** the user successfully saves the message, **THEN** the lease is released and the saved entry is eligible for automatic FIFO delivery without another user action.
+- **AC-UI-MESSAGE-QUEUE-MANAGEMENT-002.9:** **GIVEN** Auto-run is disabled, the user cancels the edit, or the save fails or loses its lease, **WHEN** the edit operation completes, **THEN** the queued entry remains pending and no automatic delivery is initiated by the edit lifecycle.
+
+Editing non-user provenance rows and persisting edit leases across backend
+process restarts are excluded.
 
 ## Migrated source detail
 
@@ -73,9 +118,11 @@ remains full. Those same rows have no individual remove action.
   automatic merge switches.
 - The default is `10`. A positive integer sets a cap; `0` means unlimited.
 - A saved setting applies immediately to later admissions. Existing entries
-  are never trimmed. If a queue already exceeds a newly lowered limit, new
-  messages are rejected with `queue_full` until its persisted count is below
-  the limit.
+  are never trimmed. At or above a positive cap, an eligible direct automatic
+  fold into the pending tail may still succeed because it does not add a row.
+  Other admissions are rejected with `queue_full` until the persisted count is
+  below the limit. A staged-attachment admission cannot use the direct-fold
+  exception and is rejected before attachment claim or tail mutation.
 - Previously accepted work may be restored or retried after a delivery
   failure even when the new cap is lower. Capacity limits new work; it does not
   turn a failed delivery into message loss.

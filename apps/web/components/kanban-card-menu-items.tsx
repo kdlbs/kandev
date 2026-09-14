@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import {
   IconArchive,
   IconArrowRight,
+  IconFlag,
   IconLoader,
   IconLogicBuffer,
   IconTrash,
@@ -24,13 +25,17 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from "@kandev/ui/dropdown-menu";
-import { useAppStore } from "@/components/state-provider";
-import type { WorkflowStep } from "@/components/kanban-card";
 import {
   stepHasAutoStart,
   type TaskMoveStep,
   type TaskMoveWorkflow,
 } from "@/components/task/task-move-context-menu";
+import {
+  isTaskPriority,
+  TASK_PRIORITY_LABEL_KEYS,
+  TASK_PRIORITY_TOKENS,
+} from "@/lib/tasks/task-priority";
+import type { TaskPriority } from "@/lib/types/http";
 import { cn } from "@/lib/utils";
 import { buildLinkSubmenu } from "./kanban-card-link-submenu";
 import type { PluginIcon, PluginTaskMenuContext } from "@/lib/plugins/types";
@@ -38,6 +43,7 @@ import { buildEditMenuEntry } from "./kanban-card-edit-submenu";
 import { buildPrimaryPluginEntries } from "./plugins/task-menu-actions";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
+export { useKanbanCardMoveTargets } from "@/hooks/use-kanban-card-move-targets";
 
 type ItemEntry = {
   kind: "item";
@@ -67,6 +73,26 @@ type SubmenuEntry = {
 
 export type KanbanCardMenuEntry = ItemEntry | SeparatorEntry | SubmenuEntry;
 
+export type KanbanCardMenuEntryGroup = {
+  key: string;
+  entries: readonly KanbanCardMenuEntry[];
+};
+
+/** Inserts one separator between each nonempty top-level menu group. */
+export function buildGroupedMenuEntries(
+  groups: readonly KanbanCardMenuEntryGroup[],
+): KanbanCardMenuEntry[] {
+  return groups
+    .filter((group) => group.entries.length > 0)
+    .flatMap((group, index) => {
+      const separator: SeparatorEntry = {
+        kind: "separator",
+        key: `${group.key}-separator`,
+      };
+      return index === 0 ? [...group.entries] : [separator, ...group.entries];
+    });
+}
+
 export type KanbanCardMoveTargets = {
   currentWorkflowId: string | null;
   workflowItems: TaskMoveWorkflow[];
@@ -82,16 +108,21 @@ export type KanbanPluginLinkAction = {
   onSelect: () => void;
 };
 
-type BuildKanbanCardMenuEntriesArgs = {
+export type BuildKanbanCardMenuEntriesArgs = {
   currentWorkflowId?: string | null;
   currentStepId?: string | null;
   workflows: TaskMoveWorkflow[];
   stepsByWorkflowId: Record<string, TaskMoveStep[]>;
+  /** Disables only move and send-to-workflow entries while a row-local move runs. */
+  moveDisabled?: boolean;
   disabled?: boolean;
   isDeleting?: boolean;
   isArchiving?: boolean;
   isDetaching?: boolean;
   parentTaskId?: string | null;
+  /** The task's currently held priority; may be absent, empty or unrecognized. */
+  currentPriority?: string | null;
+  onSelectPriority?: (priority: TaskPriority) => void;
   onEdit?: () => void;
   onArchive?: () => void;
   onDelete?: () => void;
@@ -107,6 +138,12 @@ type BuildKanbanCardMenuEntriesArgs = {
   onSendToWorkflow?: (workflowId: string, stepId: string) => void;
   /** Defaults to an empty-id context (no visible plugin actions match it in practice). */
   pluginMenuContext?: PluginTaskMenuContext;
+  /**
+   * Forces the flat Edit item regardless of registered plugin `edit`-group
+   * actions. Group `edit` is a card-only plugin contract; surfaces outside
+   * the card set this so they never present the submenu form.
+   */
+  forceFlatEdit?: boolean;
 };
 
 const EMPTY_PLUGIN_MENU_CONTEXT: PluginTaskMenuContext = {
@@ -117,7 +154,7 @@ const EMPTY_PLUGIN_MENU_CONTEXT: PluginTaskMenuContext = {
   presentation: "desktop",
 };
 
-function resolvePluginMenuContext(context?: PluginTaskMenuContext): PluginTaskMenuContext {
+export function resolvePluginMenuContext(context?: PluginTaskMenuContext): PluginTaskMenuContext {
   return context ?? EMPTY_PLUGIN_MENU_CONTEXT;
 }
 
@@ -179,6 +216,58 @@ function buildMoveToCurrentWorkflowSubmenu({
     disabled,
     className: "w-48",
     children: steps.map((step) => buildStepEntry(step, currentStepId, onMoveToStep)),
+  };
+}
+
+/**
+ * Reselecting the task's current priority stays enabled and completes
+ * idempotently, unlike `buildStepEntry`, which disables the current step for
+ * a move action.
+ */
+function buildPriorityItemEntry(
+  priority: TaskPriority,
+  currentPriority: string | null | undefined,
+  onSelect: (priority: TaskPriority) => void,
+): KanbanCardMenuEntry {
+  const isCurrent = isTaskPriority(currentPriority) && currentPriority === priority;
+  return {
+    kind: "item",
+    key: `priority-${priority}`,
+    testId: `task-context-priority-${priority}`,
+    label: <span className="flex-1 truncate">{t(TASK_PRIORITY_LABEL_KEYS[priority])}</span>,
+    trailing: isCurrent ? (
+      <span
+        data-testid={`task-context-priority-current-${priority}`}
+        className="ml-auto text-[10px] text-muted-foreground"
+      >
+        {t("kanban:current")}
+      </span>
+    ) : undefined,
+    onSelect: () => onSelect(priority),
+  };
+}
+
+function buildPriorityMenuEntry({
+  currentPriority,
+  disabled,
+  onSelectPriority,
+}: {
+  currentPriority?: string | null;
+  disabled?: boolean;
+  onSelectPriority?: (priority: TaskPriority) => void;
+}): KanbanCardMenuEntry | null {
+  if (!onSelectPriority) return null;
+  return {
+    kind: "submenu",
+    key: "priority",
+    testId: "task-context-priority",
+    icon: <IconFlag className="mr-2 h-4 w-4" />,
+    label: t("kanban:priority"),
+    disabled,
+    className: "w-40",
+    children: TASK_PRIORITY_TOKENS.map((priority) =>
+      buildPriorityItemEntry(priority, currentPriority, onSelectPriority),
+    ),
   };
 }
 
@@ -260,11 +349,14 @@ export function buildKanbanCardMenuEntries({
   currentStepId,
   workflows,
   stepsByWorkflowId,
+  moveDisabled,
   disabled,
   isDeleting,
   isArchiving,
   isDetaching,
   parentTaskId,
+  currentPriority,
+  onSelectPriority,
   onEdit,
   onArchive,
   onDelete,
@@ -279,41 +371,35 @@ export function buildKanbanCardMenuEntries({
   onMoveToStep,
   onSendToWorkflow,
   pluginMenuContext,
+  forceFlatEdit,
 }: BuildKanbanCardMenuEntriesArgs): KanbanCardMenuEntry[] {
   const visibleWorkflows = workflows.filter((workflow) => !workflow.hidden);
   const currentSteps = currentWorkflowId ? (stepsByWorkflowId[currentWorkflowId] ?? []) : [];
   const isProcessing = Boolean(disabled || isDeleting || isArchiving || isDetaching);
-  const entries: KanbanCardMenuEntry[] = [
-    buildEditMenuEntry({
-      onEdit,
-      disabled: isProcessing,
-      context: resolvePluginMenuContext(pluginMenuContext),
-    }),
-  ];
+  const priorityEntry = buildPriorityMenuEntry({
+    currentPriority,
+    disabled: isProcessing,
+    onSelectPriority,
+  });
 
   const moveToEntry = buildMoveToCurrentWorkflowSubmenu({
     steps: currentSteps,
     currentStepId,
-    disabled: isProcessing,
+    disabled: moveDisabled || isProcessing,
     onMoveToStep,
   });
-  if (moveToEntry) entries.push(moveToEntry);
-
   const sendToEntry = buildSendToWorkflowSubmenu({
     currentWorkflowId,
     workflows: visibleWorkflows,
     stepsByWorkflowId,
-    disabled: isProcessing,
+    disabled: moveDisabled || isProcessing,
     onSendToWorkflow,
   });
-  if (sendToEntry) entries.push(sendToEntry);
 
-  entries.push(
-    ...buildPrimaryPluginEntries({
-      disabled: isProcessing,
-      context: resolvePluginMenuContext(pluginMenuContext),
-    }),
-  );
+  const pluginEntries = buildPrimaryPluginEntries({
+    disabled: isProcessing,
+    context: resolvePluginMenuContext(pluginMenuContext),
+  });
 
   const linkEntry = buildLinkSubmenu({
     disabled: isProcessing,
@@ -325,9 +411,55 @@ export function buildKanbanCardMenuEntries({
     onLinkSentryIssue,
     pluginLinkActions,
   });
-  if (linkEntry) entries.push(linkEntry);
 
-  entries.push({
+  const detachEntry = buildDetachEntry({ parentTaskId, onDetach, isDetaching, isProcessing });
+
+  return buildGroupedMenuEntries([
+    { key: "priority", entries: priorityEntry ? [priorityEntry] : [] },
+    {
+      key: "edit",
+      entries: [
+        buildEditMenuEntry({
+          onEdit,
+          disabled: isProcessing,
+          context: resolvePluginMenuContext(pluginMenuContext),
+          forceFlat: forceFlatEdit,
+        }),
+      ],
+    },
+    {
+      key: "relationships",
+      entries: [linkEntry, detachEntry].filter(
+        (entry): entry is KanbanCardMenuEntry => entry !== null,
+      ),
+    },
+    {
+      key: "move",
+      entries: [moveToEntry, sendToEntry].filter(
+        (entry): entry is KanbanCardMenuEntry => entry !== null,
+      ),
+    },
+    { key: "plugins", entries: pluginEntries },
+    {
+      key: "remove",
+      entries: [
+        buildArchiveEntry({ isArchiving, isProcessing, onArchive }),
+        buildDeleteEntry({ isDeleting, isProcessing, onDelete }),
+      ],
+    },
+  ]);
+}
+
+export function buildArchiveEntry({
+  isArchiving,
+  isProcessing,
+  onArchive,
+}: {
+  isArchiving?: boolean;
+  isProcessing: boolean;
+  onArchive?: () => void;
+}): KanbanCardMenuEntry {
+  return {
     kind: "item",
     key: "archive",
     icon: isArchiving ? (
@@ -338,13 +470,19 @@ export function buildKanbanCardMenuEntries({
     label: t("kanban:archive"),
     disabled: isProcessing || !onArchive,
     onSelect: onArchive,
-  });
+  };
+}
 
-  const detachEntry = buildDetachEntry({ parentTaskId, onDetach, isDetaching, isProcessing });
-  if (detachEntry) entries.push(detachEntry);
-
-  entries.push({ kind: "separator", key: "delete-separator" });
-  entries.push({
+export function buildDeleteEntry({
+  isDeleting,
+  isProcessing,
+  onDelete,
+}: {
+  isDeleting?: boolean;
+  isProcessing: boolean;
+  onDelete?: () => void;
+}): KanbanCardMenuEntry {
+  return {
     kind: "item",
     key: "delete",
     icon: isDeleting ? (
@@ -356,9 +494,7 @@ export function buildKanbanCardMenuEntries({
     destructive: true,
     disabled: isProcessing || !onDelete,
     onSelect: onDelete,
-  });
-
-  return entries;
+  };
 }
 
 function buildDetachEntry({
@@ -383,54 +519,6 @@ function buildDetachEntry({
     disabled: isProcessing,
     onSelect: onDetach,
   };
-}
-
-export function useKanbanCardMoveTargets(
-  taskId: string,
-  steps?: WorkflowStep[],
-): KanbanCardMoveTargets {
-  const workflows = useAppStore((state) => state.workflows.items);
-  const snapshots = useAppStore((state) => state.kanbanMulti.snapshots);
-
-  const currentWorkflowId = useMemo(() => {
-    for (const [workflowId, snapshot] of Object.entries(snapshots)) {
-      if (snapshot.tasks.some((task) => task.id === taskId)) return workflowId;
-    }
-    return null;
-  }, [snapshots, taskId]);
-
-  const workflowItems = useMemo<TaskMoveWorkflow[]>(() => {
-    const current = workflows.find((workflow) => workflow.id === currentWorkflowId);
-    return workflows
-      .filter((workflow) => workflow.workspaceId === current?.workspaceId && !workflow.hidden)
-      .map((workflow) => ({ id: workflow.id, name: workflow.name, hidden: workflow.hidden }));
-  }, [workflows, currentWorkflowId]);
-
-  const stepsByWorkflowId = useMemo<Record<string, TaskMoveStep[]>>(() => {
-    const result: Record<string, TaskMoveStep[]> = {};
-    for (const [workflowId, snapshot] of Object.entries(snapshots)) {
-      result[workflowId] = snapshot.steps
-        .slice()
-        .sort((a, b) => a.position - b.position)
-        .map((step) => ({
-          id: step.id,
-          title: step.title,
-          color: step.color,
-          events: step.events,
-        }));
-    }
-    if (currentWorkflowId && steps) {
-      result[currentWorkflowId] = steps.map((step) => ({
-        id: step.id,
-        title: step.title,
-        color: step.color,
-        events: step.events,
-      }));
-    }
-    return result;
-  }, [snapshots, currentWorkflowId, steps]);
-
-  return { currentWorkflowId, workflowItems, stepsByWorkflowId };
 }
 
 function ContextEntry({ entry }: { entry: KanbanCardMenuEntry }) {

@@ -77,7 +77,7 @@ func TestHandleMessageTask_CancelledPrimaryFallsBackToTheLiveSession(t *testing.
 	live := addSession(t, repo, target.ID, "sess-live", models.TaskSessionStateRunning, 1)
 	cancelSession(t, repo, primary.ID)
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask,
 		senderPayload(target.ID, "keep going", sender.ID))
 	resp, err := h.handleMessageTask(context.Background(), msg)
@@ -99,7 +99,7 @@ func TestHandleMessageTask_LivePrimaryKeepsPriorityOverNewerSessions(t *testing.
 	sender, target, primary := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
 	newer := addSession(t, repo, target.ID, "sess-newer", models.TaskSessionStateRunning, 1)
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask,
 		senderPayload(target.ID, "keep going", sender.ID))
 	resp, err := h.handleMessageTask(context.Background(), msg)
@@ -125,7 +125,7 @@ func TestHandleMessageTask_AllSessionsTerminalNamesTheRecoveryTool(t *testing.T)
 	sender, target, primary := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
 	cancelSession(t, repo, primary.ID)
 
-	h, _ := newMessageTaskHandler(t, svc)
+	h, _ := newMessageTaskHandler(t, svc, repo)
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask,
 		senderPayload(target.ID, "keep going", sender.ID))
 	resp, err := h.handleMessageTask(context.Background(), msg)
@@ -148,7 +148,7 @@ func TestHandleMessageTask_ExplicitTerminalSessionNamesTheRecoveryTool(t *testin
 	sender, target, primary := seedTaskWithSession(t, svc, repo, models.TaskSessionStateRunning)
 	cancelSession(t, repo, primary.ID)
 
-	h, _ := newMessageTaskHandler(t, svc)
+	h, _ := newMessageTaskHandler(t, svc, repo)
 	payload := senderPayload(target.ID, "restart please", sender.ID)
 	payload["session_id"] = primary.ID
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, payload)
@@ -169,7 +169,7 @@ func TestHandleMessageTask_ExplicitTerminalSessionIsNotRedirected(t *testing.T) 
 	live := addSession(t, repo, target.ID, "sess-live", models.TaskSessionStateRunning, 1)
 	cancelSession(t, repo, primary.ID)
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 	payload := senderPayload(target.ID, "restart please", sender.ID)
 	payload["session_id"] = primary.ID
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask, payload)
@@ -198,7 +198,7 @@ func TestHandleMessageTask_NoPrimarySessionUsesTheLiveSpawnedSession(t *testing.
 	require.NoError(t, err)
 	spawned := addSession(t, repo, targetResult.Task.ID, "sess-spawned", models.TaskSessionStateRunning, 1)
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask,
 		senderPayload(targetResult.Task.ID, "hello", senderResult.Task.ID))
 	resp, err := h.handleMessageTask(ctx, msg)
@@ -223,7 +223,7 @@ func TestHandleMessageTask_NoSessionAtAllNamesTheRecoveryTool(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	h, _ := newMessageTaskHandler(t, svc)
+	h, _ := newMessageTaskHandler(t, svc, repo)
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask,
 		senderPayload(targetResult.Task.ID, "hello", senderResult.Task.ID))
 	resp, err := h.handleMessageTask(ctx, msg)
@@ -251,7 +251,7 @@ func TestHandleMessageTask_IdleFallbackSessionIsNotReroutedToTheCancelledPrimary
 	}))
 	cancelSession(t, repo, primary.ID)
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask,
 		senderPayload(target.ID, "pick this up", sender.ID))
 	resp, err := h.handleMessageTask(ctx, msg)
@@ -291,7 +291,7 @@ func TestHandleMessageTask_CompletedSiblingDoesNotShadowTheLiveFallback(t *testi
 	require.Less(t, indexOfSession(t, sessions, retired.ID), indexOfSession(t, sessions, running.ID),
 		"fixture must present the completed session ahead of the running one")
 
-	h, orch := newMessageTaskHandler(t, svc)
+	h, orch := newMessageTaskHandler(t, svc, repo)
 	msg := makeWSMessage(t, ws.ActionMCPMessageTask,
 		senderPayload(target.ID, "keep going", sender.ID))
 	resp, err := h.handleMessageTask(context.Background(), msg)
@@ -304,6 +304,34 @@ func TestHandleMessageTask_CompletedSiblingDoesNotShadowTheLiveFallback(t *testi
 		"a retired completed session must not shadow the running one")
 	assert.Equal(t, 1, orch.queue.GetStatus(context.Background(), running.ID).Count)
 	assert.Equal(t, 0, orch.queue.GetStatus(context.Background(), retired.ID).Count)
+}
+
+// A task with no primary and no live session can still address its newest
+// completed conversation. The resolver pins that historical choice so the
+// dispatcher can perform explicit completed-session recovery on the same row.
+func TestResolveMessageTargetSession_NoPrimaryUsesNewestCompletedSession(t *testing.T) {
+	svc, repo := newTestTaskService(t)
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-completed-fallback", Name: "Test"}))
+	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-completed-fallback", WorkspaceID: "ws-completed-fallback", Name: "Board"}))
+	targetResult, err := svc.CreateTask(ctx, &service.CreateTaskRequest{
+		WorkspaceID: "ws-completed-fallback", WorkflowID: "wf-completed-fallback", Title: "Target",
+	})
+	require.NoError(t, err)
+	older := addSession(t, repo, targetResult.Task.ID, "sess-completed-older", models.TaskSessionStateCompleted, 1)
+	newer := addSession(t, repo, targetResult.Task.ID, "sess-completed-newer", models.TaskSessionStateCompleted, 2)
+	require.NotEqual(t, older.ID, newer.ID)
+
+	h, _ := newMessageTaskHandler(t, svc, repo)
+	msg := makeWSMessage(t, ws.ActionMCPMessageTask, map[string]interface{}{
+		"task_id": targetResult.Task.ID,
+		"prompt":  "continue the conversation",
+	})
+	session, pinned, errResp := h.resolveMessageTargetSession(ctx, msg, targetResult.Task.ID, "")
+	require.Nil(t, errResp)
+	require.NotNil(t, session)
+	assert.Equal(t, newer.ID, session.ID)
+	assert.True(t, pinned)
 }
 
 // indexOfSession reports where a session lands in the resolver's walk order.

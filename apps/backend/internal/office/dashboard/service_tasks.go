@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
+	"github.com/kandev/kandev/internal/common/taskdependencies"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/office/models"
@@ -40,12 +42,34 @@ func (s *DashboardService) UpdateTaskPriority(ctx context.Context, taskID, prior
 	return nil
 }
 
+// SetTaskAssigneeUser sets (or clears, on empty string) the human assignee.
+//
+// The human assignee is advisory and independent of the agent assignee: it
+// records who on the team owns the task, gates nothing, and setting it never
+// touches the runner participant. Taking a task over is this write plus a
+// prompt, not a lock.
+func (s *DashboardService) SetTaskAssigneeUser(ctx context.Context, taskID, userID string) error {
+	if s.assigneeWriter == nil {
+		return errors.New("human assignee is not available: no assignee writer configured")
+	}
+	// The task service authorizes the caller and validates the assignee, then
+	// persists. Office only mirrors the result onto its own event stream so the
+	// board and the open task detail refresh.
+	if err := s.assigneeWriter.SetHumanAssignee(ctx, taskID, userID); err != nil {
+		return err
+	}
+	s.publishTaskUpdated(ctx, taskID, []string{"assignee_user_id"})
+	return nil
+}
+
 // UpdateTaskProjectID sets the project_id field. Empty string clears the
 // project. When non-empty, validates that the project belongs to the same
 // workspace as the task.
 func (s *DashboardService) UpdateTaskProjectID(ctx context.Context, taskID, projectID string) error {
+	var taskWS string
 	if projectID != "" {
-		taskWS, err := s.repo.GetTaskWorkspaceID(ctx, taskID)
+		var err error
+		taskWS, err = s.repo.GetTaskWorkspaceID(ctx, taskID)
 		if err != nil {
 			return fmt.Errorf("resolve task workspace: %w", err)
 		}
@@ -57,8 +81,34 @@ func (s *DashboardService) UpdateTaskProjectID(ctx context.Context, taskID, proj
 			return fmt.Errorf("project %s belongs to a different workspace", projectID)
 		}
 	}
+	// Read the pre-write project so a no-op PATCH (destination == current)
+	// doesn't trigger a budget re-evaluation below: nothing crossed a
+	// threshold, so evaluatePolicy's unconditional alert/exceeded logging
+	// would otherwise write a fresh activity row on every retry. A read
+	// error is treated as "changed" (fail open to evaluating, the prior
+	// behavior) rather than silently skipping. Only read when a
+	// reassignment could actually trigger an evaluation.
+	needsChangeCheck := projectID != "" && s.projectBudget != nil
+	var prevProjectID string
+	var prevErr error
+	if needsChangeCheck {
+		prevProjectID, prevErr = s.repo.GetTaskProjectID(ctx, taskID)
+	}
+
 	if err := s.repo.UpdateTaskProjectID(ctx, taskID, projectID); err != nil {
 		return err
+	}
+	// Best-effort: the write above has already committed, so an evaluation
+	// error here is logged, not returned. Mirrors event_subscribers.go's
+	// post-cost-event budget check. Evaluate before publishing the task event
+	// so a client's refetch can observe any activity row created by the check.
+	if needsChangeCheck && (prevErr != nil || prevProjectID != projectID) {
+		if err := s.projectBudget.EvaluateProjectBudget(ctx, taskWS, projectID); err != nil {
+			s.logger.Warn("project budget evaluation failed on reassignment",
+				zap.String("task_id", taskID),
+				zap.String("project_id", projectID),
+				zap.Error(err))
+		}
 	}
 	s.publishTaskUpdated(ctx, taskID, []string{"project_id"})
 	return nil
@@ -106,6 +156,10 @@ func (s *DashboardService) UpdateTaskParentID(ctx context.Context, taskID, paren
 // constant per CLAUDE.md ≥3-occurrence rule.
 const fieldBlockers = "blockers"
 
+// roleLogKey is the "role" log-field / activity-detail key name, factored
+// out because it recurs across the participant claim/removal log lines.
+const roleLogKey = "role"
+
 // blockerCycleWalkLimit caps the BFS in detectBlockerCycle as a safety
 // bound. Real workspaces are nowhere near this; if we hit it we have
 // other problems.
@@ -145,11 +199,17 @@ func joinPath(path []string) string {
 // of any length. On cycle detection returns a *BlockerCycleError whose
 // Path lists the cycle for the caller to surface.
 func (s *DashboardService) AddTaskBlocker(ctx context.Context, taskID, blockerTaskID string) error {
-	if err := s.validateBlockerPair(ctx, taskID, blockerTaskID); err != nil {
-		return err
-	}
-	blocker := &models.TaskBlocker{TaskID: taskID, BlockerTaskID: blockerTaskID}
-	if err := s.repo.CreateTaskBlocker(ctx, blocker); err != nil {
+	var err error
+	func() {
+		unlock := taskdependencies.AcquireMutationLock()
+		defer unlock()
+		if err = s.validateBlockerPair(ctx, taskID, blockerTaskID); err != nil {
+			return
+		}
+		blocker := &models.TaskBlocker{TaskID: taskID, BlockerTaskID: blockerTaskID}
+		err = s.repo.CreateTaskBlocker(ctx, blocker)
+	}()
+	if err != nil {
 		return err
 	}
 	s.publishTaskUpdated(ctx, taskID, []string{fieldBlockers})
@@ -161,7 +221,13 @@ func (s *DashboardService) AddTaskBlocker(ctx context.Context, taskID, blockerTa
 // row is a no-op at the DB level; the event/activity entry are still
 // emitted so the UI re-fetches.
 func (s *DashboardService) RemoveTaskBlocker(ctx context.Context, taskID, blockerTaskID string) error {
-	if err := s.repo.DeleteTaskBlocker(ctx, taskID, blockerTaskID); err != nil {
+	var err error
+	func() {
+		unlock := taskdependencies.AcquireMutationLock()
+		defer unlock()
+		err = s.repo.DeleteTaskBlocker(ctx, taskID, blockerTaskID)
+	}()
+	if err != nil {
 		return err
 	}
 	s.publishTaskUpdated(ctx, taskID, []string{fieldBlockers})
@@ -337,8 +403,8 @@ func (s *DashboardService) RemoveTaskApprover(ctx context.Context, callerAgentID
 
 // addOrRemoveParticipant is the shared body of the four reviewer/approver
 // mutators. It enforces the can_approve permission gate (when a caller
-// agent is supplied), writes to the DB, and publishes the matching
-// OfficeTaskUpdated + activity entry.
+// agent is supplied), writes to the DB, and drives the matching
+// OfficeTaskUpdated + activity entry off what the write actually did.
 func (s *DashboardService) addOrRemoveParticipant(
 	ctx context.Context,
 	callerAgentID, taskID, agentID, role string,
@@ -351,32 +417,110 @@ func (s *DashboardService) addOrRemoveParticipant(
 	if !ok {
 		return fmt.Errorf("invalid participant role: %q", role)
 	}
-	var dbErr error
-	action := "task_participant_removed"
 	if add {
-		dbErr = s.repo.AddTaskParticipant(ctx, taskID, agentID, role)
-		action = "task_participant_added"
-	} else {
-		dbErr = s.repo.RemoveTaskParticipant(ctx, taskID, agentID, role)
-	}
-	if dbErr != nil {
-		return dbErr
-	}
-	// On removal, flip the participant's office session row to COMPLETED so
-	// it leaves the live indicators and the next add would create a fresh
-	// row (preserving historical conversation separation).
-	if !add && s.sessionTerm != nil {
-		if err := s.sessionTerm.TerminateOfficeSession(ctx, taskID, agentID, sessionTermReasonRoleRemoved); err != nil {
-			s.logger.Warn("terminate office session on participant removal failed",
-				zap.String("task_id", taskID),
-				zap.String("agent_profile_id", agentID),
-				zap.String("role", role),
-				zap.Error(err))
+		result, err := s.repo.AddTaskParticipant(ctx, taskID, agentID, role)
+		if err != nil {
+			return err
 		}
+		s.applyParticipantAddOutcome(ctx, taskID, agentID, role, field, result)
+		return nil
+	}
+
+	if err := s.repo.RemoveTaskParticipant(ctx, taskID, agentID, role); err != nil {
+		return err
+	}
+	// Flip the participant's office session row to COMPLETED so it leaves
+	// the live indicators and the next add would create a fresh row
+	// (preserving historical conversation separation). Skipped when the
+	// agent still holds another capacity on this task: the removed role was
+	// not the only thing addressing it here.
+	s.terminateSessionUnlessRetained(ctx, taskID, agentID, sessionTermReasonRoleRemoved,
+		zap.String(roleLogKey, role))
+	s.publishTaskUpdated(ctx, taskID, []string{field})
+	s.logParticipantActivity(ctx, taskID, agentID, role, "task_participant_removed")
+	return nil
+}
+
+// applyParticipantAddOutcome drives the post-commit side effects an add
+// outcome earns. Unchanged earns none — an identity-probe hit, promotion
+// included, raises no activity entry and publishes no notification.
+// Claimed additionally records the takeover,
+// ends the displaced agent's live session, and cancels the run already
+// queued for it. Inserted is the plain-registration path, unchanged from
+// before this write reported an outcome. No order among these effects is
+// contracted.
+func (s *DashboardService) applyParticipantAddOutcome(
+	ctx context.Context, taskID, agentID, role, field string, result sqlite.ParticipantWriteResult,
+) {
+	switch result.Outcome {
+	case sqlite.ParticipantWriteOutcomeUnchanged:
+		return
+	case sqlite.ParticipantWriteOutcomeClaimed:
+		s.logParticipantClaimActivity(ctx, taskID, result.StepID, role, result.DisplacedAgentProfileID, agentID)
+		// Detached from ctx: these run after the claim has already
+		// committed, so a caller (HTTP request, WS handler) that cancels
+		// after that point must not also cancel the cleanup it earned.
+		detachedCtx := context.WithoutCancel(ctx)
+		s.terminateDisplacedSession(detachedCtx, taskID, result.DisplacedAgentProfileID, role)
+		s.cancelDisplacedRun(detachedCtx, taskID, result.StepID, result.DisplacedAgentProfileID)
+	case sqlite.ParticipantWriteOutcomeInserted:
+		s.logParticipantActivity(ctx, taskID, agentID, role, "task_participant_added")
 	}
 	s.publishTaskUpdated(ctx, taskID, []string{field})
-	s.logParticipantActivity(ctx, taskID, agentID, role, action)
-	return nil
+}
+
+// terminateDisplacedSession ends the displaced agent's live office session
+// for the role a claim just took the seat away from. Best-effort,
+// mirroring the removal branch's own termination call: a failure is
+// logged, not surfaced. An agent that still runs the task, or is seated in
+// another role, keeps the session it is still using.
+func (s *DashboardService) terminateDisplacedSession(ctx context.Context, taskID, displacedAgentID, role string) {
+	s.terminateSessionUnlessRetained(ctx, taskID, displacedAgentID, sessionTermReasonSeatClaimed,
+		zap.String(roleLogKey, role))
+}
+
+// cancelDisplacedRun cancels the run the step-entry fan-out queued for the
+// displaced agent profile, which the claim's seat reassignment does not
+// itself redirect. Best-effort: logged and swallowed on failure — the
+// registration has already committed and must still return success,
+// leaving at most one run runnable for an agent no longer seated in the
+// role.
+func (s *DashboardService) cancelDisplacedRun(ctx context.Context, taskID, stepID, displacedAgentID string) {
+	if displacedAgentID == "" {
+		return
+	}
+	cancelled, err := s.repo.CancelDisplacedParticipantRun(ctx, taskID, stepID, displacedAgentID)
+	if err != nil {
+		s.logger.Warn("cancel displaced participant run failed",
+			zap.String("task_id", taskID),
+			zap.String("step_id", stepID),
+			zap.String("agent_profile_id", displacedAgentID),
+			zap.Error(err))
+		return
+	}
+	if s.terminalShapeRecorder != nil {
+		s.terminalShapeRecorder.RecordCancelledRunTerminalShapes(ctx, cancelled)
+	}
+}
+
+// logParticipantClaimActivity records a claim as an activity entry
+// distinct from a plain registration's, naming the task, step, role, the
+// displaced agent profile and the claiming agent profile. Best-effort.
+func (s *DashboardService) logParticipantClaimActivity(
+	ctx context.Context, taskID, stepID, role, displacedAgentID, claimingAgentID string,
+) {
+	if s.activity == nil {
+		return
+	}
+	wsID, _ := s.repo.GetTaskWorkspaceID(ctx, taskID)
+	details, _ := json.Marshal(map[string]string{
+		"task_id":                    taskID,
+		"step_id":                    stepID,
+		roleLogKey:                   role,
+		"displaced_agent_profile_id": displacedAgentID,
+		"claiming_agent_profile_id":  claimingAgentID,
+	})
+	s.activity.LogActivity(ctx, wsID, userSentinel, "", "task_participant_claimed", "task", taskID, string(details))
 }
 
 // requireApprovePermission returns ErrForbidden when the caller agent
@@ -437,6 +581,10 @@ type TaskStatusUpdateRequest struct {
 	// ResumeIntent=true is an explicit "pick this up again" with required
 	// follow-up comment. Forces task_reopened_via_comment.
 	ResumeIntent bool
+	// SuppressStatusActivity is used by the orchestrator when it will publish
+	// the canonical task.state_changed event that owns the activity row. Gate
+	// redirects still log here because they do not publish that event.
+	SuppressStatusActivity bool
 }
 
 // UpdateTaskStatus persists a new task status, optionally creates a comment,
@@ -448,12 +596,12 @@ type TaskStatusUpdateRequest struct {
 // (dependents unblocked, parent children-completed, reopen intent,
 // session interrupt for cancellation, etc.).
 //
-// Approval gate: when the requested status is "done" and the task has
-// approvers without a current approved decision, the persisted state
-// is redirected to in_review and the function returns a typed
-// *ApprovalsPendingError (the handler maps it to HTTP 409). The
-// req.NewStatus is updated in place so downstream side-effects see
-// the redirected status.
+// Approval gate: when the requested status is "done" and either the task
+// is not yet on a terminal workflow step, or it is and has approvers
+// without a current approved decision, the persisted state is redirected
+// to in_review and the function returns a typed *ApprovalsPendingError
+// (the handler maps it to HTTP 409). The req.NewStatus is updated in
+// place so downstream side-effects see the redirected status.
 //
 // Rework / reopen: transitions leaving in_review for todo|in_progress,
 // and transitions leaving done for any non-terminal state, supersede
@@ -469,15 +617,31 @@ func (s *DashboardService) UpdateTaskStatus(ctx context.Context, req TaskStatusU
 		preStatus = exec.State
 	}
 
-	gateErr := s.applyApprovalGate(ctx, req.TaskID, &dbState, &req.NewStatus)
+	expectedStepID := ""
+	gateErr := s.applyApprovalGate(ctx, req.TaskID, &dbState, &req.NewStatus, &expectedStepID)
+	var pendingErr *ApprovalsPendingError
+	if gateErr != nil && !errors.As(gateErr, &pendingErr) {
+		return gateErr
+	}
 
-	if err := s.repo.UpdateTaskState(ctx, req.TaskID, dbState); err != nil {
+	if dbState == stateCompleted {
+		updated, err := s.repo.UpdateTaskStateIfWorkflowStep(ctx, req.TaskID, expectedStepID, dbState)
+		if err != nil {
+			return fmt.Errorf("update task state: %w", err)
+		}
+		if !updated {
+			return &WorkflowStepChangedError{TaskID: req.TaskID}
+		}
+	} else if err := s.repo.UpdateTaskState(ctx, req.TaskID, dbState); err != nil {
 		return fmt.Errorf("update task state: %w", err)
 	}
 
 	commentID := s.maybeCreateStatusComment(ctx, req)
-	s.logTaskStatusChangeActivity(ctx, req)
+	if !req.SuppressStatusActivity || pendingErr != nil {
+		s.logTaskStatusChangeActivity(ctx, req)
+	}
 	s.publishTaskStatusChanged(ctx, req)
+	s.publishCanonicalTaskUpdated(ctx, req.TaskID)
 	s.runReactivityForStatus(ctx, req, commentID, preStatus)
 	s.maybeSupersedeOnRework(ctx, req.TaskID, preStatus, dbState)
 
@@ -530,15 +694,43 @@ func (s *DashboardService) logTaskStatusChangeActivity(ctx context.Context, req 
 		fmt.Sprintf(`{"new_status":%q}`, req.NewStatus), runID, "")
 }
 
-// applyApprovalGate redirects a "done" transition to in_review when
-// approvals are pending. Mutates dbState and apiStatus in place so the
-// rest of UpdateTaskStatus persists and emits the redirected status.
-// Returns a *ApprovalsPendingError when the gate fires; nil otherwise.
+// applyApprovalGate redirects a "done" transition to in_review when the
+// task is on a non-terminal workflow step, or when it is terminal (or has
+// no workflow step at all) but approvals are pending. Mutates dbState and
+// apiStatus in place so the rest of UpdateTaskStatus persists and emits
+// the redirected status. Returns a *ApprovalsPendingError when the gate
+// fires; nil otherwise.
+//
+// A task with no resolvable workflow step (e.g. a channel task, which is
+// never placed on a workflow) has nowhere to advance to, so it falls
+// through to the approver check exactly like a terminal-step task rather
+// than being redirected forever.
+//
+// The step-position check fails CLOSED, but a lookup error is not the same
+// as a confirmed non-terminal step: it aborts the whole update (a plain,
+// non-ApprovalsPendingError error, leaving dbState/apiStatus untouched) so
+// the caller persists nothing rather than writing a redirect it cannot
+// justify. Only a successful read reporting "not terminal" persists the
+// in_review redirect.
 func (s *DashboardService) applyApprovalGate(
-	ctx context.Context, taskID string, dbState, apiStatus *string,
+	ctx context.Context, taskID string, dbState, apiStatus, expectedStepID *string,
 ) error {
 	if *dbState != stateCompleted {
 		return nil
+	}
+	currentStepID, err := s.repo.GetTaskWorkflowStepID(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("approval gate: resolve task workflow step: %w", err)
+	}
+	*expectedStepID = currentStepID
+	terminal, hasStep, err := s.repo.IsTaskWorkflowStepTerminal(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("approval gate: resolve workflow step: %w", err)
+	}
+	if hasStep && !terminal {
+		*dbState = stateInReview
+		*apiStatus = statusInReviewLowercase
+		return &ApprovalsPendingError{Reason: ApprovalGateReasonWorkflowStep}
 	}
 	pending, err := s.pendingApprovers(ctx, taskID)
 	if err != nil || len(pending) == 0 {
@@ -546,7 +738,7 @@ func (s *DashboardService) applyApprovalGate(
 	}
 	*dbState = stateInReview
 	*apiStatus = statusInReviewLowercase
-	return &ApprovalsPendingError{Pending: pending}
+	return &ApprovalsPendingError{Pending: pending, Reason: ApprovalGateReasonApprovals}
 }
 
 // maybeCreateStatusComment creates the optional status-change comment
@@ -716,7 +908,8 @@ func (s *DashboardService) SetTaskAssigneeAsAgent(ctx context.Context, callerAge
 				zap.String("task_id", taskID), zap.Error(err))
 		}
 	}
-	if err := s.repo.UpdateTaskAssignee(ctx, taskID, assigneeID); err != nil {
+	generation, err := s.repo.UpdateTaskAssignee(ctx, taskID, assigneeID)
+	if err != nil {
 		return err
 	}
 
@@ -724,14 +917,16 @@ func (s *DashboardService) SetTaskAssigneeAsAgent(ctx context.Context, callerAge
 
 	// Reactivity pipeline — wakes the new assignee with task_assigned
 	// and hard-cancels the previous assignee's active session.
-	s.runReactivityForAssigneeChange(ctx, taskID, prevAssignee, assigneeID, callerAgentID)
+	s.runReactivityForAssigneeChange(ctx, taskID, prevAssignee, assigneeID, callerAgentID, generation)
 	return nil
 }
 
 // runReactivityForAssigneeChange invokes the reactivity pipeline for an
 // assignee change. Best-effort — failures are logged, never propagated.
+// generation is the value UpdateTaskAssignee's transaction just committed
+// and read back; it is carried onto the mutation rather than re-read.
 func (s *DashboardService) runReactivityForAssigneeChange(
-	ctx context.Context, taskID, prevAssigneeID, newAssigneeID, callerAgentID string,
+	ctx context.Context, taskID, prevAssigneeID, newAssigneeID, callerAgentID string, generation int64,
 ) {
 	if s.reactivity == nil {
 		return
@@ -741,10 +936,11 @@ func (s *DashboardService) runReactivityForAssigneeChange(
 		actorType = "agent"
 	}
 	change := TaskReactivityChange{
-		NewAssigneeID:  &newAssigneeID,
-		PrevAssigneeID: prevAssigneeID,
-		ActorID:        callerAgentID,
-		ActorType:      actorType,
+		NewAssigneeID:        &newAssigneeID,
+		AssignmentGeneration: &generation,
+		PrevAssigneeID:       prevAssigneeID,
+		ActorID:              callerAgentID,
+		ActorType:            actorType,
 	}
 	// preStatus="" — assignee changes don't depend on the prev status.
 	result, err := s.reactivity.ApplyTaskMutation(ctx, taskID, "", change)
@@ -758,20 +954,18 @@ func (s *DashboardService) runReactivityForAssigneeChange(
 	}
 	// Flip the prev assignee's office session row to COMPLETED so it leaves
 	// the active sessions list. The reactivity pipeline already hard-cancels
-	// the running execution above; this is the persistent-row counterpart.
-	if prevAssigneeID != "" && s.sessionTerm != nil {
-		if err := s.sessionTerm.TerminateOfficeSession(ctx, taskID, prevAssigneeID, sessionTermReasonReassigned); err != nil {
-			s.logger.Warn("terminate prev-assignee office session failed",
-				zap.String("task_id", taskID),
-				zap.String("agent_profile_id", prevAssigneeID),
-				zap.Error(err))
-		}
-	}
+	// the running execution above, unconditionally: an agent reassigned away
+	// but still seated as a reviewer stops the turn it no longer owns and
+	// keeps the row it still reviews through. Those are two different objects
+	// and only this one is guarded. A same-agent reassignment is not a
+	// handoff either — the guard's own capacity read observes the agent
+	// still holding the runner capacity and suppresses termination.
+	s.terminateSessionUnlessRetained(ctx, taskID, prevAssigneeID, sessionTermReasonReassigned)
 	// Auto-dismiss any inbox entry tied to the prior (task, agent) so
 	// the user isn't asked to triage a failure they already worked
 	// around by reassigning. Counter is intentionally not reset — the
 	// root cause may still be unfixed for the old agent.
-	if prevAssigneeID != "" && s.failureNotifier != nil {
+	if prevAssigneeID != "" && prevAssigneeID != newAssigneeID && s.failureNotifier != nil {
 		s.failureNotifier.OnAssigneeChanged(ctx, taskID, prevAssigneeID)
 	}
 }
@@ -782,7 +976,111 @@ const (
 	sessionTermReasonReassigned   = "task_reassigned"
 	sessionTermReasonRoleRemoved  = "participant_removed"
 	sessionTermReasonAgentDeleted = "agent_instance_deleted"
+	sessionTermReasonSeatClaimed  = "participant_seat_claimed"
 )
+
+// retainedCapacity names a standing that keeps an agent addressed on a task.
+// Two exist, and either one alone keeps the pair's office session live.
+type retainedCapacity string
+
+const (
+	capacityNone   retainedCapacity = ""
+	capacityRunner retainedCapacity = "runner"
+	capacitySeat   retainedCapacity = "seat"
+)
+
+// sessionCapacityReadHook is a test-only yield point invoked immediately
+// before the determination reads capacity, letting a test seed a capacity
+// change in the guarded path's own commit-to-read window
+// (AC-OFFICE-SESSION-TERM-002.12). Nil in production; set only through
+// SetSessionCapacityReadHook in export_test.go.
+var sessionCapacityReadHook func(taskID, agentProfileID string)
+
+// retainsTaskCapacity reports which capacity, if any, agentProfileID still
+// holds on taskID.
+//
+// The runner half reads the task's execution fields, whose assignee value is
+// the shared runner projection. Resolving the runner any other way — a direct
+// read of runner seats, say — answers a different question, because the
+// projection's last tier deliberately reads runner rows across every step.
+//
+// The seat half reads the effective slate at the task's current step, which
+// already merges template-level rows under per-task precedence and already
+// spans every role. The step scope is load-bearing: seats are keyed
+// (step, task, role, agent) and survive a step change, so an unscoped read
+// would find a seat naming a previous occupant and suppress every future
+// termination for the pair.
+//
+// Both reads run on the read pool and take no lock. The determination is not
+// atomic with the mutation that preceded it and does not need to be: each
+// guarded path reads strictly after its own commit, so two concurrent paths
+// removing different capacities end with the session terminated by whichever
+// reads second.
+func (s *DashboardService) retainsTaskCapacity(
+	ctx context.Context, taskID, agentProfileID string,
+) (retainedCapacity, error) {
+	exec, err := s.repo.GetTaskExecutionFields(ctx, taskID)
+	if err != nil {
+		return capacityNone, fmt.Errorf("read task runner: %w", err)
+	}
+	if exec != nil && exec.AssigneeAgentProfileID == agentProfileID {
+		return capacityRunner, nil
+	}
+	seats, err := s.repo.ListAllTaskParticipants(ctx, taskID)
+	if err != nil {
+		return capacityNone, fmt.Errorf("read task participant slate: %w", err)
+	}
+	for _, seat := range seats {
+		if seat.AgentProfileID == agentProfileID {
+			return capacitySeat, nil
+		}
+	}
+	return capacityNone, nil
+}
+
+// terminateSessionUnlessRetained is the single guarded termination step,
+// shared by the three paths that end a session on the loss of one capacity:
+// role removal, seat claim displacement, and reassignment. It ends the pair's
+// session only when the agent has lost its last capacity on the task.
+//
+// It fails closed. A capacity read that errors suppresses the termination,
+// because a session left live is recovered by the next guarded path that runs
+// on the pair, and a session wrongly ended is not.
+//
+// Suppression is not an error: every caller here already treats termination as
+// best-effort, and a suppressed termination is a normal outcome.
+func (s *DashboardService) terminateSessionUnlessRetained(
+	ctx context.Context, taskID, agentProfileID, reason string, extra ...zap.Field,
+) {
+	if s.sessionTerm == nil || taskID == "" || agentProfileID == "" {
+		return
+	}
+	fields := append([]zap.Field{
+		zap.String("task_id", taskID),
+		zap.String("agent_profile_id", agentProfileID),
+		zap.String("reason", reason),
+	}, extra...)
+
+	if sessionCapacityReadHook != nil {
+		sessionCapacityReadHook(taskID, agentProfileID)
+	}
+	capacity, err := s.retainsTaskCapacity(ctx, taskID, agentProfileID)
+	if err != nil {
+		recordSessionTermSuppressed(reason, sessionTermSuppressReadFailed)
+		s.logger.Warn("office session termination suppressed: capacity read failed",
+			append(fields, zap.Error(err))...)
+		return
+	}
+	if capacity != capacityNone {
+		recordSessionTermSuppressed(reason, string(capacity))
+		s.logger.Info("office session termination suppressed: agent retains a capacity",
+			append(fields, zap.String("retained_capacity", string(capacity)))...)
+		return
+	}
+	if err := s.sessionTerm.TerminateOfficeSession(ctx, taskID, agentProfileID, reason); err != nil {
+		s.logger.Warn("terminate office session failed", append(fields, zap.Error(err))...)
+	}
+}
 
 // publishTaskUpdated emits an OfficeTaskUpdated event listing the fields
 // that changed. Frontend subscribers re-fetch the task DTO. Silently
@@ -831,6 +1129,29 @@ func (s *DashboardService) publishTaskStatusChanged(ctx context.Context, req Tas
 		s.logger.Error("publish task status changed event failed",
 			zap.String("task_id", req.TaskID), zap.Error(err))
 	}
+}
+
+// canonicalTaskUpdatedPublishTimeout bounds the detached reload+publish in
+// publishCanonicalTaskUpdated so a caller-cancelled ctx can't hang it forever.
+const canonicalTaskUpdatedPublishTimeout = 10 * time.Second
+
+// publishCanonicalTaskUpdated publishes the canonical task.updated event for
+// a task row this function has just mutated via s.repo.UpdateTaskState.
+// office.task.status_changed above only reaches the Office board;
+// task.updated is what WS-driven UI outside Office (the All-Workflows
+// kanban view, task views, the task/statussummary projector) keys off.
+// Nil-safe: skipped when no publisher is wired. Runs on a context detached
+// from ctx's cancellation: the mutation has already committed, so a caller
+// that disconnects (HTTP) or a ctx that expires after the write must not
+// suppress the event other WS-driven views depend on. The task service owns
+// the reload and per-task publication queue.
+func (s *DashboardService) publishCanonicalTaskUpdated(ctx context.Context, taskID string) {
+	if s.taskLifecycle == nil {
+		return
+	}
+	pubCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), canonicalTaskUpdatedPublishTimeout)
+	defer cancel()
+	s.taskLifecycle.PublishTaskUpdatedByID(pubCtx, taskID)
 }
 
 // runReactivityForComment fires the pipeline for a standalone comment

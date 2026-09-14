@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
+import { memo, useCallback, useMemo, type Ref } from "react";
+import { useColumnNaturalHeight } from "@/hooks/domains/kanban/use-column-natural-height";
 import { useDroppable } from "@dnd-kit/core";
 import { Task, type KanbanPresentation } from "./kanban-card";
 import { Badge } from "@kandev/ui/badge";
@@ -10,8 +11,12 @@ import type { KanbanExternalLinkAvailability } from "./kanban-external-link-avai
 import type { Repository } from "@/lib/types/http";
 import { countAdmittedTasks, formatWipCount, isOverWipLimit } from "@/lib/kanban/wip-limit";
 import { partitionWipTasks } from "@/lib/kanban/wip-queue";
+import { pickKanbanColumnComparator } from "@/lib/kanban/task-order";
 import { useTranslation } from "react-i18next";
-import { VirtualizedColumnTaskList } from "./kanban/virtualized-column-task-list";
+import {
+  VirtualizedColumnTaskList,
+  type KeyboardReorderDraft,
+} from "./kanban/virtualized-column-task-list";
 
 export interface WorkflowStep {
   id: string;
@@ -26,6 +31,7 @@ export interface WorkflowStep {
 }
 
 interface KanbanColumnProps {
+  onNaturalHeightChange?: (stepId: string, height: number) => void;
   step: WorkflowStep;
   tasks: Task[];
   presentation?: KanbanPresentation;
@@ -46,9 +52,22 @@ interface KanbanColumnProps {
   onSelectRange?: (taskId: string, orderedIds: string[]) => void;
   isMultiSelectMode?: boolean;
   externalLinkAvailability: KanbanExternalLinkAvailability;
+  /** The task currently being dragged anywhere on the board, if any (AC.7's insertion indicator). */
+  activeTaskId?: string | null;
+  /** The card currently picked up via the keyboard, if any (AC.12). */
+  keyboardDraft?: KeyboardReorderDraft | null;
+  onCardKeyDown?: (event: React.KeyboardEvent, task: Task) => void;
 }
 
-function ColumnHeader({ step, tasks }: { step: WorkflowStep; tasks: Task[] }) {
+function ColumnHeader({
+  step,
+  tasks,
+  headerRef,
+}: {
+  step: WorkflowStep;
+  tasks: Task[];
+  headerRef: Ref<HTMLDivElement>;
+}) {
   const { t } = useTranslation();
   const admittedTaskCount = countAdmittedTasks(tasks);
   const overWipLimit = isOverWipLimit(admittedTaskCount, step.wip_limit);
@@ -56,7 +75,7 @@ function ColumnHeader({ step, tasks }: { step: WorkflowStep; tasks: Task[] }) {
   const queuedCount = partitionWipTasks(tasks, step.id).queued.length;
 
   return (
-    <div className="flex items-center justify-between pb-2 mb-3 px-1">
+    <div ref={headerRef} className="flex shrink-0 items-center justify-between pb-2 mb-3 px-1">
       <div className="flex items-center gap-2">
         <div className={cn("w-2 h-2 rounded-full", step.color)} />
         <h2 className="font-semibold text-sm">{step.title}</h2>
@@ -84,7 +103,67 @@ function ColumnHeader({ step, tasks }: { step: WorkflowStep; tasks: Task[] }) {
   );
 }
 
-export function KanbanColumn({
+function taskItemsEqual(previous: Task[], next: Task[]): boolean {
+  return previous.length === next.length && previous.every((task, index) => task === next[index]);
+}
+
+function externalLinkAvailabilityEqual(
+  previous: KanbanExternalLinkAvailability,
+  next: KanbanExternalLinkAvailability,
+): boolean {
+  return (
+    previous.gitlab === next.gitlab &&
+    previous.jira === next.jira &&
+    previous.linear === next.linear &&
+    previous.sentry === next.sentry
+  );
+}
+
+function columnCallbacksEqual(previous: KanbanColumnProps, next: KanbanColumnProps): boolean {
+  return (
+    previous.onNaturalHeightChange === next.onNaturalHeightChange &&
+    previous.onPreviewTask === next.onPreviewTask &&
+    previous.onOpenTask === next.onOpenTask &&
+    previous.onEditTask === next.onEditTask &&
+    previous.onDeleteTask === next.onDeleteTask &&
+    previous.onArchiveTask === next.onArchiveTask &&
+    previous.onMoveTask === next.onMoveTask &&
+    previous.onToggleSelect === next.onToggleSelect &&
+    previous.onSelectRange === next.onSelectRange &&
+    previous.onCardKeyDown === next.onCardKeyDown
+  );
+}
+
+function columnDisplayPropsEqual(previous: KanbanColumnProps, next: KanbanColumnProps): boolean {
+  return (
+    previous.presentation === next.presentation &&
+    previous.steps === next.steps &&
+    previous.showMaximizeButton === next.showMaximizeButton &&
+    previous.deletingTaskId === next.deletingTaskId &&
+    previous.archivingTaskId === next.archivingTaskId &&
+    previous.hideHeader === next.hideHeader &&
+    previous.selectedIds === next.selectedIds &&
+    previous.isMultiSelectMode === next.isMultiSelectMode
+  );
+}
+
+function kanbanColumnPropsEqual(previous: KanbanColumnProps, next: KanbanColumnProps): boolean {
+  return (
+    previous.step === next.step &&
+    taskItemsEqual(previous.tasks, next.tasks) &&
+    columnCallbacksEqual(previous, next) &&
+    columnDisplayPropsEqual(previous, next) &&
+    externalLinkAvailabilityEqual(
+      previous.externalLinkAvailability,
+      next.externalLinkAvailability,
+    ) &&
+    previous.activeTaskId === next.activeTaskId &&
+    previous.keyboardDraft === next.keyboardDraft
+  );
+}
+
+export const KanbanColumn = memo(function KanbanColumn({
+  onNaturalHeightChange,
   step,
   tasks,
   presentation = "desktop",
@@ -104,11 +183,27 @@ export function KanbanColumn({
   onSelectRange,
   isMultiSelectMode,
   externalLinkAvailability,
+  activeTaskId,
+  keyboardDraft,
+  onCardKeyDown,
 }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({
     id: step.id,
   });
+  const { columnRef, headerRef, onContentHeightChange } = useColumnNaturalHeight(
+    step.id,
+    onNaturalHeightChange,
+  );
+  const setColumnRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      columnRef.current = element;
+      setNodeRef(element);
+    },
+    [columnRef, setNodeRef],
+  );
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
+  const kanbanSort = useAppStore((state) => state.userSettings.kanbanSort);
+  const taskComparator = useMemo(() => pickKanbanColumnComparator(kanbanSort), [kanbanSort]);
 
   // Access repositories from store to pass repository names to cards
   const repositoriesByWorkspace = useAppStore((state) => state.repositories.itemsByWorkspaceId);
@@ -119,12 +214,15 @@ export function KanbanColumn({
 
   // Ordered ids of the cards rendered in this column — the source of truth for
   // shift-click range selection (matches exactly what the user sees).
-  const { admitted, queued } = useMemo(() => partitionWipTasks(tasks, step.id), [tasks, step.id]);
+  const { admitted, queued } = useMemo(
+    () => partitionWipTasks(tasks, step.id, taskComparator),
+    [tasks, step.id, taskComparator],
+  );
   const orderedTasks = useMemo(() => [...admitted, ...queued], [admitted, queued]);
 
   return (
     <div
-      ref={setNodeRef}
+      ref={setColumnRef}
       data-testid={`kanban-column-${step.id}`}
       className={cn(
         "flex flex-col flex-1 h-full min-w-0 px-3 py-2 sm:min-h-[200px]",
@@ -133,9 +231,10 @@ export function KanbanColumn({
       )}
     >
       {/* Column Header */}
-      {!hideHeader && <ColumnHeader step={step} tasks={tasks} />}
+      {!hideHeader && <ColumnHeader step={step} tasks={tasks} headerRef={headerRef} />}
 
       <VirtualizedColumnTaskList
+        onContentHeightChange={onContentHeightChange}
         orderedTasks={orderedTasks}
         queuedStartIndex={admitted.length}
         queuedCount={queued.length}
@@ -149,6 +248,9 @@ export function KanbanColumn({
         deletingTaskId={deletingTaskId}
         archivingTaskId={archivingTaskId}
         selectedIds={selectedIds}
+        activeTaskId={activeTaskId}
+        keyboardDraft={keyboardDraft}
+        onCardKeyDown={onCardKeyDown}
         onPreviewTask={onPreviewTask}
         onOpenTask={onOpenTask}
         onEditTask={onEditTask}
@@ -161,4 +263,4 @@ export function KanbanColumn({
       />
     </div>
   );
-}
+}, kanbanColumnPropsEqual);

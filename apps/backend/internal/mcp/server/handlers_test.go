@@ -100,6 +100,10 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.Contains(t, agentProfileDesc, "workspace_default")
 	assert.Contains(t, agentProfileDesc, "verified creating session")
 	assert.Contains(t, agentProfileDesc, "effective model, mode, and dynamic options")
+	assert.Contains(t, agentProfileDesc, "does not set an Office task's assignee")
+	assert.Contains(t, agentProfileDesc, "PATCH /api/v1/office/tasks/:id")
+	assert.Contains(t, agentProfileDesc, "assignee_agent_profile_id field in the request body")
+	assert.Contains(t, agentProfileDesc, "Agent callers need can_assign_tasks")
 
 	workflowProp, ok := props["workflow_id"].(map[string]interface{})
 	require.True(t, ok, "workflow_id schema should be an object")
@@ -375,6 +379,31 @@ func TestCreateTask_ForwardsBoundSourceSessionID(t *testing.T) {
 	assert.Equal(t, "my-task-123", payload["source_task_id"])
 	assert.Equal(t, "test-session", payload["source_session_id"])
 	assert.NotContains(t, toolInputProperties(t, s, "create_task_kandev"), "source_session_id")
+}
+
+func TestCreateTask_ExternalMode_AgentProfileDescNotesOfficeAssigneeLimitation(t *testing.T) {
+	backend := &testBackend{}
+	s := New(backend, "", "", 10005, newTestLogger(t), "", true, ModeExternal)
+
+	tool, ok := s.mcpServer.ListTools()["create_task_kandev"]
+	require.True(t, ok, "create_task tool not registered")
+
+	schema, err := json.Marshal(tool.Tool.InputSchema)
+	require.NoError(t, err)
+
+	var parsed map[string]interface{}
+	require.NoError(t, json.Unmarshal(schema, &parsed))
+	props, ok := parsed["properties"].(map[string]interface{})
+	require.True(t, ok, "schema should have properties")
+
+	agentProfileProp, ok := props["agent_profile_id"].(map[string]interface{})
+	require.True(t, ok, "agent_profile_id schema should be an object")
+	agentProfileDesc, ok := agentProfileProp["description"].(string)
+	require.True(t, ok, "agent_profile_id should have a description")
+	assert.Contains(t, agentProfileDesc, "does not set an Office task's assignee")
+	assert.Contains(t, agentProfileDesc, "PATCH /api/v1/office/tasks/:id")
+	assert.Contains(t, agentProfileDesc, "assignee_agent_profile_id field in the request body")
+	assert.Contains(t, agentProfileDesc, "Agent callers need can_assign_tasks")
 }
 
 func TestCreateTask_ExternalModeDoesNotInventSourceSessionID(t *testing.T) {
@@ -923,6 +952,41 @@ func TestTaskPRAutomationToolsBindCurrentTask(t *testing.T) {
 	assert.Equal(t, true, payload["auto_fix_enabled"])
 	assert.Equal(t, true, payload["prompt_on_review_requested"])
 	assert.Equal(t, false, payload["prompt_on_merged"])
+
+	result = callTool(t, s, "report_pr_auto_fix_outcome_kandev", map[string]interface{}{
+		"outcome": "action_taken",
+		"summary": "committed the failing test fix",
+	})
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPReportPRAutoFixOutcome, backend.lastAction)
+	payload, ok = backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task-current", payload["task_id"])
+	assert.Equal(t, "test-session", payload["session_id"])
+	assert.Equal(t, "action_taken", payload["outcome"])
+	assert.Equal(t, "committed the failing test fix", payload["summary"])
+}
+
+func TestReportPRAutoFixOutcomeToolRequiresDispositionAndSummary(t *testing.T) {
+	backend := &testBackend{}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "report_pr_auto_fix_outcome_kandev", map[string]interface{}{
+		"outcome": "not-a-disposition",
+		"summary": "reason",
+	})
+	assert.True(t, result.IsError)
+	assert.Empty(t, backend.lastAction)
+
+	result = callTool(t, s, "report_pr_auto_fix_outcome_kandev", map[string]interface{}{
+		"outcome": "blocked",
+	})
+	assert.True(t, result.IsError)
+	assert.Empty(t, backend.lastAction)
+
+	properties := toolInputProperties(t, s, "report_pr_auto_fix_outcome_kandev")
+	assert.NotContains(t, properties, "task_id")
+	assert.NotContains(t, properties, "session_id")
 }
 
 func TestTaskPRAutomationToolsDoNotExposeLifecyclePromptOverrides(t *testing.T) {

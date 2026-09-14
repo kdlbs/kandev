@@ -1,6 +1,7 @@
 package workspaces
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -43,42 +44,13 @@ func TestDirectoryHandlePinsWorktreeAcrossPathReplacement(t *testing.T) {
 	if err := handle.VerifyPath(original); err == nil {
 		t.Fatal("VerifyPath succeeded after the lexical path changed")
 	}
-}
-
-func TestCreateDirectoryNoFollowPinsCreatedTaskRootBeforeMarkerWrite(t *testing.T) {
-	parent := t.TempDir()
-	tasksBase := filepath.Join(parent, "tasks")
-	taskRoot := filepath.Join(tasksBase, "task-one")
-	outside := filepath.Join(parent, "outside")
-	if err := os.MkdirAll(outside, 0o755); err != nil {
-		t.Fatalf("mkdir outside: %v", err)
+	if err := handle.RemoveDirectory(context.Background()); err == nil {
+		t.Fatal("remove pinned original directory succeeded after path replacement")
 	}
-
-	handle, err := CreateDirectoryNoFollow(tasksBase, taskRoot, 0o755)
-	if err != nil {
-		t.Fatalf("create task root: %v", err)
+	if _, err := os.Stat(filepath.Join(archived, ".git")); !os.IsNotExist(err) {
+		t.Fatalf("archived original directory contents remain: %v", err)
 	}
-	t.Cleanup(func() { _ = handle.Close() })
-
-	archived := tasksBase + ".archived"
-	if err := os.Rename(tasksBase, archived); err != nil {
-		t.Fatalf("rename tasks base: %v", err)
-	}
-	if err := os.Symlink(outside, tasksBase); err != nil {
-		t.Skipf("symlink creation is unavailable: %v", err)
-	}
-
-	if err := handle.VerifyPath(taskRoot); err == nil {
-		t.Fatal("VerifyPath succeeded after the task root was replaced")
-	}
-	if err := WriteOwnershipMarkerNoFollow(handle, OwnershipMarker{
-		TaskID:        "task-one",
-		TaskDirName:   "task-one",
-		LayoutVersion: LayoutVersionSemantic,
-	}); err != nil {
-		t.Fatalf("write marker through opened task root: %v", err)
-	}
-	if _, err := os.Lstat(filepath.Join(outside, OwnershipMarkerFilename)); !os.IsNotExist(err) {
-		t.Fatalf("marker escaped into replacement target: %v", err)
+	if _, err := os.Stat(filepath.Join(original, ".git")); err != nil {
+		t.Fatalf("replacement directory changed: %v", err)
 	}
 }

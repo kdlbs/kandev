@@ -259,7 +259,7 @@ func TestCreateWorktree_ManagedRefreshRunsOnlyForMaterialization(t *testing.T) {
 
 func TestCreateWorktree_ManagedRefreshUsesRefreshedPRHead(t *testing.T) {
 	repoPath, wantSHA := initGitRepoWithPullRef(t, 974, "feature/fork-pr")
-	runGit(t, repoPath, "fetch", "origin", "pull/974/head:refs/remotes/origin/pr/974")
+	runGit(t, repoPath, "fetch", "origin", "pull/974/head:"+pullRequestSnapshotRef(974))
 	runGit(t, repoPath, "remote", "set-url", "origin", "https://127.0.0.1:1/never.git")
 
 	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
@@ -445,9 +445,9 @@ func advanceRemoteBranch(t *testing.T, repoPath, branch string) string {
 func initManagedPRCheckoutBranch(t *testing.T, prNumber int, branch string) (string, string) {
 	t.Helper()
 	repoPath, _ := initGitRepoWithPullRef(t, prNumber, branch)
-	prRef := fmt.Sprintf("pull/%d/head:refs/remotes/origin/pr/%d", prNumber, prNumber)
+	prRef := fmt.Sprintf("pull/%d/head:%s", prNumber, pullRequestSnapshotRef(prNumber))
 	runGit(t, repoPath, "fetch", "origin", prRef)
-	runGit(t, repoPath, "branch", branch, fmt.Sprintf("origin/pr/%d", prNumber))
+	runGit(t, repoPath, "branch", branch, pullRequestSnapshotRef(prNumber))
 	originURL := strings.TrimSpace(runGit(t, repoPath, "remote", "get-url", "origin"))
 	remoteClone := filepath.Join(t.TempDir(), "remote-pr-clone")
 	runGit(t, filepath.Dir(remoteClone), "clone", originURL, remoteClone)
@@ -455,7 +455,7 @@ func initManagedPRCheckoutBranch(t *testing.T, prNumber int, branch string) (str
 	runGit(t, remoteClone, "config", "user.name", "Remote User")
 	runGit(t, remoteClone, "config", "commit.gpgsign", "false")
 	runGit(t, remoteClone, "fetch", "origin", prRef)
-	runGit(t, remoteClone, "checkout", "-b", branch, fmt.Sprintf("origin/pr/%d", prNumber))
+	runGit(t, remoteClone, "checkout", "-b", branch, pullRequestSnapshotRef(prNumber))
 	writeRepoFile(t, remoteClone, "remote-pr-refresh.txt", "refreshed PR\n")
 	runGit(t, remoteClone, "add", "remote-pr-refresh.txt")
 	runGit(t, remoteClone, "commit", "-m", "refreshed PR commit")

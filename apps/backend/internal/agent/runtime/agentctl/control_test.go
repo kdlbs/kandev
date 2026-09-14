@@ -380,6 +380,27 @@ func TestCreateInstance_MarshalsFullRequestAndDecodesIDAndPort(t *testing.T) {
 	}
 }
 
+// TestCreateInstance_MarshalsMCPToolNamePresentationCapability covers the
+// wire portion of AC-TASKS-MCP-TOOL-NAMES-001.5.
+func TestCreateInstance_MarshalsMCPToolNamePresentationCapability(t *testing.T) {
+	srv, got := captureServer(t, jsonResponder(http.StatusCreated, `{"id":"inst-1","port":41234}`))
+	req := &CreateInstanceRequest{
+		WorkspacePath:              "/workspace/task-1",
+		NamespacesMCPToolsByServer: true,
+	}
+
+	if _, err := newTestControlClient(t, srv).CreateInstance(context.Background(), req); err != nil {
+		t.Fatalf("CreateInstance: %v", err)
+	}
+	var body map[string]interface{}
+	if err := json.Unmarshal(got.Body, &body); err != nil {
+		t.Fatalf("decode request: %v", err)
+	}
+	if got, ok := body["namespaces_mcp_tools_by_server"].(bool); !ok || !got {
+		t.Fatalf("serialized capability = %#v, want true", body["namespaces_mcp_tools_by_server"])
+	}
+}
+
 // 200 is accepted alongside 201 — agentctl returns 200 when it reuses an
 // existing instance for the same ID.
 func TestCreateInstance_AcceptsBoth200And201(t *testing.T) {
@@ -586,34 +607,11 @@ func TestGetInstance_FailureModes(t *testing.T) {
 	}
 }
 
-func TestListInstances_UnwrapsInstancesEnvelope(t *testing.T) {
-	srv, got := captureServer(t, jsonResponder(http.StatusOK, `{
-		"instances":[
-			{"id":"a","port":1,"status":"running","workspace_path":"/w/a","agent_command":"cmd-a"},
-			{"id":"b","port":2,"status":"stopped","workspace_path":"/w/b","agent_command":"cmd-b"}
-		]
-	}`))
-
-	instances, err := newTestControlClient(t, srv).ListInstances(context.Background())
-	if err != nil {
-		t.Fatalf("ListInstances: %v", err)
-	}
-
-	if got.Method != http.MethodGet || got.Path != "/api/v1/instances" {
-		t.Errorf("request = %s %s, want GET /api/v1/instances", got.Method, got.Path)
-	}
-	if len(instances) != 2 {
-		t.Fatalf("instances = %d, want 2", len(instances))
-	}
-	if instances[0].ID != "a" || instances[0].Port != 1 ||
-		instances[0].Status != "running" || instances[0].WorkspacePath != "/w/a" ||
-		instances[0].AgentCommand != "cmd-a" {
-		t.Errorf("instances[0] = %+v", instances[0])
-	}
-	if instances[1].ID != "b" || instances[1].Port != 2 || instances[1].Status != "stopped" {
-		t.Errorf("instances[1] = %+v", instances[1])
-	}
-}
+// The envelope-decode + request method/path contract this used to pin with a
+// hand-written response fixture is now covered end to end (real handler, real
+// client) by TestListInstancesReturnsEnvelopeWithSessionAndTaskID in
+// internal/agentctl/server/api — a fixture here could assert an envelope
+// shape the real handler had stopped producing without ever failing.
 
 func TestListInstances_FailureModes(t *testing.T) {
 	tests := []struct {
@@ -638,5 +636,54 @@ func TestListInstances_FailureModes(t *testing.T) {
 				t.Errorf("instances = %+v, want nil on failure", instances)
 			}
 		})
+	}
+}
+
+// TestClaimOwnership_UnauthorizedReturnsSupersededSentinel pins
+// AC-EXECUTORS-CONTROL-OWNERSHIP-002.3: a 401 response must be distinguished
+// from any other failure via ErrOwnershipCredentialSuperseded, so a caller
+// like OwnershipRenewer can tell "credential is no longer current" apart
+// from a transient failure it should retry.
+func TestClaimOwnership_UnauthorizedReturnsSupersededSentinel(t *testing.T) {
+	srv := httptest.NewServer(jsonResponder(http.StatusUnauthorized, `{"error":"invalid auth token"}`))
+	t.Cleanup(srv.Close)
+
+	err := newTestControlClient(t, srv).ClaimOwnership(context.Background())
+	if !errors.Is(err, ErrOwnershipCredentialSuperseded) {
+		t.Fatalf("error = %v, want errors.Is(err, ErrOwnershipCredentialSuperseded)", err)
+	}
+}
+
+func TestClaimOwnership_OtherFailureModesDoNotReturnSupersededSentinel(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  int
+		wantErr string
+	}{
+		{"internal server error", http.StatusInternalServerError, "failed to claim ownership: status 500"},
+		{"not found", http.StatusNotFound, "failed to claim ownership: status 404"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(jsonResponder(tc.status, `{}`))
+			t.Cleanup(srv.Close)
+
+			err := newTestControlClient(t, srv).ClaimOwnership(context.Background())
+			if errors.Is(err, ErrOwnershipCredentialSuperseded) {
+				t.Fatalf("error = %v, want NOT errors.Is(err, ErrOwnershipCredentialSuperseded)", err)
+			}
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestClaimOwnership_SuccessReturnsNilError(t *testing.T) {
+	srv := httptest.NewServer(jsonResponder(http.StatusOK, `{}`))
+	t.Cleanup(srv.Close)
+
+	if err := newTestControlClient(t, srv).ClaimOwnership(context.Background()); err != nil {
+		t.Fatalf("ClaimOwnership() error = %v, want nil", err)
 	}
 }

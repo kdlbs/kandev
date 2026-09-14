@@ -25,11 +25,15 @@ const workflowAutopickDebug = createDebugLogger("executor-compat:workflow-autopi
  * compatible. Every candidate is filtered against `compatibleAgentProfiles`
  * so a previously-used profile that's not wired for the chosen executor
  * isn't restored, then immediately fails the executor-compat gate.
+ *
+ * A pick carries `replaces` when it supersedes a selection that fell out of
+ * the compatible list (the executor changed after the agent was chosen). A
+ * workflow-locked selection is never replaced.
  */
 export type AutopickDecision =
   | { kind: "skip"; reason: string }
   | { kind: "defer"; reason: string }
-  | { kind: "pick"; source: "lastId" | "defId" | "first"; id: string };
+  | { kind: "pick"; source: "lastId" | "defId" | "first"; id: string; replaces?: string };
 
 export type AgentProfileAutopickInput = {
   open: boolean;
@@ -46,11 +50,25 @@ export type AgentProfileAutopickInput = {
   defaultAgentProfileId: string | null;
 };
 
+/**
+ * A set selection is re-evaluated only once the executor and the auth catalog
+ * are known and at least one compatible profile exists; an empty list during
+ * a profile refresh must not clear a valid selection.
+ */
+function selectionNeedsReplacement(input: AgentProfileAutopickInput): boolean {
+  if (!input.agentProfileId) return false;
+  if (!input.authLoaded || !input.executorProfileId) return false;
+  if (input.compatibleAgentProfiles.length === 0) return false;
+  return !input.compatibleAgentProfiles.some((p) => p.id === input.agentProfileId);
+}
+
 function getAgentAutopickGate(input: AgentProfileAutopickInput): AutopickDecision | null {
   if (!input.open) return { kind: "skip", reason: "closed" };
-  if (input.agentProfileId) return { kind: "skip", reason: "already-set" };
   if (input.workflowAgentProfileId) return { kind: "skip", reason: "workflow-locked" };
   if (input.workflowHasAgent) return { kind: "skip", reason: "workflow-has-agent" };
+  if (input.agentProfileId && !selectionNeedsReplacement(input)) {
+    return { kind: "skip", reason: "already-set" };
+  }
   if (input.agentProfiles.length === 0) return { kind: "skip", reason: "no-profiles" };
   if (!input.authLoaded) return { kind: "defer", reason: "auth-not-loaded" };
   // Defer until the executor profile is selected too - useExecutorProfileCompat
@@ -73,15 +91,18 @@ function getAgentAutopickGate(input: AgentProfileAutopickInput): AutopickDecisio
 export function decideAgentProfileAutopick(input: AgentProfileAutopickInput): AutopickDecision {
   const gate = getAgentAutopickGate(input);
   if (gate) return gate;
+  const replaces = input.agentProfileId || undefined;
+  const pick = (source: "lastId" | "defId" | "first", id: string): AutopickDecision =>
+    replaces ? { kind: "pick", source, id, replaces } : { kind: "pick", source, id };
   const lastId = input.lastAgentProfileId;
   if (lastId && input.compatibleAgentProfiles.some((p) => p.id === lastId)) {
-    return { kind: "pick", source: "lastId", id: lastId };
+    return pick("lastId", lastId);
   }
   const defId = input.defaultAgentProfileId;
   if (defId && input.compatibleAgentProfiles.some((p) => p.id === defId)) {
-    return { kind: "pick", source: "defId", id: defId };
+    return pick("defId", defId);
   }
-  return { kind: "pick", source: "first", id: input.compatibleAgentProfiles[0].id };
+  return pick("first", input.compatibleAgentProfiles[0].id);
 }
 
 function buildAgentAutopickDebugFields(input: {
@@ -101,6 +122,7 @@ function buildAgentAutopickDebugFields(input: {
   return {
     reason: input.decision.kind === "pick" ? input.decision.source : input.decision.reason,
     pick: input.decision.kind === "pick" ? input.decision.id : "-",
+    replaces: input.decision.kind === "pick" ? (input.decision.replaces ?? "-") : "-",
     current: input.agentProfileId || "-",
     workflow_id: input.selectedWorkflowId ?? "-",
     executor_profile_id: input.executorProfileId || "-",

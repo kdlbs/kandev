@@ -1,9 +1,11 @@
+/* eslint-disable max-lines -- the suite keeps all snapshot recovery barriers together */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 
 const mockClearKanbanMulti = vi.fn();
 const mockSetKanbanMultiLoading = vi.fn();
 const mockSetWorkflowSnapshot = vi.fn();
+const mockSetWorkspaceSnapshotRead = vi.fn();
 const mockFetchWorkflowSnapshot = vi.fn();
 
 type Workflow = { id: string; workspaceId: string; name: string };
@@ -16,6 +18,7 @@ type MockState = {
   clearKanbanMulti: typeof mockClearKanbanMulti;
   setKanbanMultiLoading: typeof mockSetKanbanMultiLoading;
   setWorkflowSnapshot: typeof mockSetWorkflowSnapshot;
+  setWorkspaceSnapshotRead: typeof mockSetWorkspaceSnapshotRead;
 };
 
 let mockState: MockState = {
@@ -27,6 +30,7 @@ let mockState: MockState = {
   clearKanbanMulti: mockClearKanbanMulti,
   setKanbanMultiLoading: mockSetKanbanMultiLoading,
   setWorkflowSnapshot: mockSetWorkflowSnapshot,
+  setWorkspaceSnapshotRead: mockSetWorkspaceSnapshotRead,
 };
 
 vi.mock("@/components/state-provider", () => ({
@@ -52,6 +56,7 @@ function resetMocks(workflows: Workflow[] = []) {
     clearKanbanMulti: mockClearKanbanMulti,
     setKanbanMultiLoading: mockSetKanbanMultiLoading,
     setWorkflowSnapshot: mockSetWorkflowSnapshot,
+    setWorkspaceSnapshotRead: mockSetWorkspaceSnapshotRead,
   };
 }
 
@@ -219,6 +224,73 @@ describe("useAllWorkflowSnapshots — fetch guards", () => {
 
     expect(mockSetWorkflowSnapshot).not.toHaveBeenCalled();
     expect(mockSetKanbanMultiLoading).not.toHaveBeenLastCalledWith(false);
+  });
+
+  it("retries a workflow whose previous snapshot request failed", async () => {
+    mockFetchWorkflowSnapshot.mockRejectedValueOnce(new Error("snapshot unavailable"));
+    const { rerender } = renderHook(
+      ({ workflows }: { workflows: Workflow[] }) => {
+        mockState.workflows = { items: workflows };
+        return useAllWorkflowSnapshots("ws-A");
+      },
+      { initialProps: { workflows: [{ id: "wf-A", workspaceId: "ws-A", name: "A" }] } },
+    );
+
+    await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(1));
+    expect(mockSetWorkflowSnapshot).not.toHaveBeenCalled();
+
+    mockFetchWorkflowSnapshot.mockResolvedValueOnce({ steps: [], tasks: [] });
+    rerender({
+      workflows: [{ id: "wf-A", workspaceId: "ws-A", name: "A" }],
+    });
+
+    await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(mockSetWorkflowSnapshot).toHaveBeenCalledWith("wf-A", expect.anything()),
+    );
+  });
+
+  it("publishes a failed snapshot as shared workspace recovery state", async () => {
+    mockFetchWorkflowSnapshot.mockRejectedValueOnce(new Error("snapshot unavailable"));
+
+    renderHook(() => useAllWorkflowSnapshots("ws-A"));
+
+    await waitFor(() =>
+      expect(mockSetWorkspaceSnapshotRead).toHaveBeenCalledWith(
+        "ws-A",
+        0,
+        "transient",
+        undefined,
+        expect.any(String),
+      ),
+    );
+  });
+});
+
+describe("useAllWorkflowSnapshots — cleanup", () => {
+  beforeEach(() => {
+    resetMocks([{ id: "wf-A", workspaceId: "ws-A", name: "A" }]);
+  });
+
+  it("settles a refresh promise when its request is superseded by effect cleanup", async () => {
+    let resolveFetch: (value: { steps: []; tasks: [] }) => void = () => {};
+    mockFetchWorkflowSnapshot.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+    const { result, unmount } = renderHook(() => useAllWorkflowSnapshots("ws-A"));
+
+    await waitFor(() => expect(mockFetchWorkflowSnapshot).toHaveBeenCalledTimes(1));
+    let refreshPromise!: Promise<void>;
+    act(() => {
+      refreshPromise = result.current.refresh();
+    });
+
+    await expect(refreshPromise).resolves.toBeUndefined();
+    resolveFetch({ steps: [], tasks: [] });
+    unmount();
   });
 });
 

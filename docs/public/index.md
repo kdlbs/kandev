@@ -24,6 +24,7 @@ Choose the guide that matches the job in front of you:
 - [Get started](use-kandev.md): install Kandev, add a local repository, configure an agent, and run a first task.
 - [Tasks and workflows](tasks-and-workflows.md): create tasks, use plans, configure workflow steps, and understand the Office-only document and label boundary.
 - [Sessions and review](sessions-and-review.md): work with named sessions, chat, files, terminal, changes, preview, pull requests, and walkthroughs.
+- [Agent-authored Canvases](canvases.md): create, review, promote, edit, and recover an experimental task or workspace canvas.
 - [Coordinate work](coordination.md): use parallel sessions, targeted messages, subtasks, dependencies, multiple repositories, and additional branches.
 - [Agent communication](agent-communication.md): send cross-task prompts, receive replies, and negotiate contracts with built-in Kandev MCP tools.
 - [Agents and profiles](agents-and-profiles.md): configure agent CLIs, models, modes, permissions, environment, passthrough, and credentials.

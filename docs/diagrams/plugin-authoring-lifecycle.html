@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Kandev plugin authoring lifecycle</title>
+  <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    :root {
+      --paper: #0d0d10;
+      --ink: #ffffff;
+      --muted: #a1a1a1;
+      --soft: #737373;
+      --sans: 'Figtree', 'Geist', system-ui, sans-serif;
+      --serif: 'Instrument Serif', serif;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 32px 24px 40px;
+      color: var(--ink);
+      background: var(--paper);
+      font-family: var(--sans);
+    }
+    .frame { width: min(100%, 1280px); margin: 0 auto; }
+    .eyebrow {
+      margin: 0 0 8px;
+      color: var(--soft);
+      font: 500 10px/1.4 'Geist Mono', monospace;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0 0 8px;
+      color: var(--ink);
+      font: 400 clamp(28px, 4vw, 36px)/1.1 var(--serif);
+      letter-spacing: -.02em;
+    }
+    .lede {
+      max-width: 70ch;
+      margin: 0 0 24px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    svg { display: block; width: 100%; height: auto; }
+  </style>
+</head>
+<body>
+  <main class="frame">
+    <p class="eyebrow">Flowchart · Kandev · doc-wide · balanced</p>
+    <h1>From package to initialized plugin</h1>
+    <p class="lede">Kandev validates and extracts a package, then keeps the supervised Go process and the optional browser bundle on separate runtime paths.</p>
+
+    <svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="plugin-authoring-lifecycle-title plugin-authoring-lifecycle-desc">
+      <title id="plugin-authoring-lifecycle-title">From package to initialized plugin</title>
+      <desc id="plugin-authoring-lifecycle-desc">Package install leads to manifest and package validation, safe extraction, and two runtime paths. The Go path starts a supervised plugin subprocess and connects it to its Go plugin backend over go-plugin gRPC. The frontend path loads the browser bundle and initializes registerKandevPlugin.</desc>
+      <defs>
+        <marker id="plugin-authoring-lifecycle-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#a1a1a1"/>
+        </marker>
+        <marker id="plugin-authoring-lifecycle-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#6468f0"/>
+        </marker>
+        <marker id="plugin-authoring-lifecycle-arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+          <polygon points="0 0, 8 3, 0 6" fill="#53eafd"/>
+        </marker>
+      </defs>
+
+      <rect x="0" y="0" width="1280" height="720" fill="#0d0d10"/>
+
+      <!-- Three zones keep package, process, and UI ownership distinct. -->
+      <rect x="40" y="64" width="800" height="144" rx="8" fill="#111114" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+      <rect x="384" y="256" width="320" height="256" rx="8" fill="#111114" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+      <rect x="832" y="256" width="384" height="416" rx="8" fill="#111114" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+      <text x="56" y="84" fill="#737373" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.12em">PACKAGE PIPELINE</text>
+      <text x="400" y="276" fill="#737373" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.12em">PLUGIN RUNTIME</text>
+      <text x="848" y="276" fill="#737373" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.12em">NATIVE UI BUNDLE</text>
+
+      <!-- Arrows first. The two vertical runtime paths use separate x positions. -->
+      <path d="M272 144 H320" fill="none" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#plugin-authoring-lifecycle-arrow)"/>
+      <path d="M560 144 H608" fill="none" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#plugin-authoring-lifecycle-arrow)"/>
+      <path d="M712 176 V232 H552 Q544 232 544 240 V288" fill="none" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#plugin-authoring-lifecycle-arrow)"/>
+      <path d="M816 144 H952 Q960 144 960 152 V288" fill="none" stroke="#53eafd" stroke-width="1.2" marker-end="url(#plugin-authoring-lifecycle-arrow-link)"/>
+      <path d="M520 352 V432" fill="none" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#plugin-authoring-lifecycle-arrow)"/>
+      <path d="M584 432 V352" fill="none" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#plugin-authoring-lifecycle-arrow)"/>
+      <path d="M968 352 V432" fill="none" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#plugin-authoring-lifecycle-arrow)"/>
+      <path d="M968 496 V576" fill="none" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#plugin-authoring-lifecycle-arrow)"/>
+
+      <!-- Labels sit on opaque paper masks with space around each route. -->
+      <rect x="632" y="372" width="240" height="20" rx="4" fill="#0d0d10"/>
+      <text x="752" y="386" text-anchor="middle" fill="#a1a1a1" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">HOST GRPC OVER GO-PLUGIN</text>
+      <rect x="944" y="204" width="192" height="20" rx="4" fill="#0d0d10"/>
+      <text x="1040" y="218" text-anchor="middle" fill="#53eafd" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">FRONTEND BUNDLE PATH</text>
+
+      <!-- Nodes. Validation is the single focal decision in the lifecycle. -->
+      <g role="group" aria-label="Package install">
+        <rect x="64" y="112" width="208" height="64" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="168" y="140" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Package install</text>
+        <text x="168" y="160" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">plugin archive</text>
+      </g>
+      <g role="group" aria-label="Manifest and package validation">
+        <rect x="320" y="112" width="240" height="64" rx="8" fill="rgba(100,104,240,0.16)" stroke="#6468f0" stroke-width="1.2"/>
+        <text x="440" y="140" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Manifest + package validation</text>
+        <text x="440" y="160" text-anchor="middle" fill="#a1a1a1" font-size="8" font-family="'Geist Mono', monospace">manifest + archive checks</text>
+      </g>
+      <g role="group" aria-label="Safe extraction">
+        <rect x="608" y="112" width="208" height="64" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="712" y="140" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Safe extraction</text>
+        <text x="712" y="160" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">trusted package contents</text>
+      </g>
+      <g role="group" aria-label="Runtime subprocess">
+        <rect x="448" y="288" width="208" height="64" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="552" y="316" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Runtime subprocess</text>
+        <text x="552" y="336" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">supervised process</text>
+      </g>
+      <g role="group" aria-label="Go plugin backend">
+        <rect x="448" y="432" width="208" height="64" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="552" y="460" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Go plugin backend</text>
+        <text x="552" y="480" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">Host gRPC service</text>
+      </g>
+      <g role="group" aria-label="Frontend bundle and styles">
+        <rect x="864" y="288" width="208" height="64" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="968" y="316" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Frontend bundle + styles</text>
+        <text x="968" y="336" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">native UI assets</text>
+      </g>
+      <g role="group" aria-label="Browser bundle loading">
+        <rect x="864" y="432" width="208" height="64" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="968" y="460" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">Browser bundle loading</text>
+        <text x="968" y="480" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">SPA runtime</text>
+      </g>
+      <g role="group" aria-label="registerKandevPlugin initialize">
+        <rect x="864" y="576" width="208" height="64" rx="8" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="968" y="604" text-anchor="middle" fill="#ffffff" font-size="12" font-weight="600" font-family="'Figtree', 'Geist', sans-serif">registerKandevPlugin</text>
+        <text x="968" y="624" text-anchor="middle" fill="#737373" font-size="8" font-family="'Geist Mono', monospace">initialize</text>
+      </g>
+
+      <!-- Compact legend. -->
+      <line x1="56" y1="688" x2="88" y2="688" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#plugin-authoring-lifecycle-arrow)"/>
+      <text x="104" y="692" fill="#a1a1a1" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">SUPERVISED RUNTIME</text>
+      <line x1="296" y1="688" x2="328" y2="688" stroke="#53eafd" stroke-width="1.2" marker-end="url(#plugin-authoring-lifecycle-arrow-link)"/>
+      <text x="344" y="692" fill="#53eafd" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">BROWSER BUNDLE</text>
+      <rect x="520" y="680" width="12" height="12" rx="2" fill="#6468f0"/>
+      <text x="548" y="692" fill="#a1a1a1" font-size="12" font-family="'Geist Mono', monospace" letter-spacing="0.06em">VALIDATION GATE</text>
+    </svg>
+  </main>
+</body>
+</html>

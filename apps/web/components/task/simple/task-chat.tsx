@@ -35,6 +35,7 @@ import type {
 import {
   buildLaterAgentReplyMap,
   buildRunErrorsFromSessions,
+  filterVisibleRunErrors,
   mergeChatEntries,
   type ChatEntry,
 } from "./chat-entries";
@@ -615,6 +616,10 @@ export function TaskChat({
   );
   const turnCtx = useMemo(() => buildCommentTurnContext(comments, sessions), [comments, sessions]);
   const runErrors = useMemo(() => buildRunErrorsFromSessions(sessions), [sessions]);
+  const visibleRunErrors = useMemo(
+    () => filterVisibleRunErrors(runErrors, statusSummary?.active_error),
+    [runErrors, statusSummary?.active_error],
+  );
   const laterAgentReplyMap = useMemo(() => buildLaterAgentReplyMap(comments), [comments]);
   const entries = useMemo(
     () =>
@@ -624,10 +629,10 @@ export function TaskChat({
         groups: renderedGroups,
         decisions,
         turnCtx,
-        runErrors,
+        runErrors: visibleRunErrors,
         laterAgentReplyMap,
       }),
-    [comments, timeline, renderedGroups, decisions, turnCtx, runErrors, laterAgentReplyMap],
+    [comments, timeline, renderedGroups, decisions, turnCtx, visibleRunErrors, laterAgentReplyMap],
   );
 
   useChatAutoScroll(scrollParent ?? null, sessions, taskId);
@@ -652,7 +657,6 @@ export function TaskChat({
         taskId={taskId}
         workspaceId={workspaceId}
         statusSummary={statusSummary}
-        runErrors={runErrors}
         repositories={repositories}
       />
       {isEmpty ? (

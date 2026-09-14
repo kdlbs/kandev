@@ -123,6 +123,8 @@ function WatchActions({
         <TooltipContent>{t("common:reset")}</TooltipContent>
       </Tooltip>
       <WatcherDeleteAction
+        targetKey={`${watch.workspaceId}:${watch.id}`}
+        subject={watch.jql}
         title={t("jira:deleteThisJiraWatcher")}
         cancelLabel={t("common:cancel")}
         confirmLabel={t("jira:delete")}

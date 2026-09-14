@@ -56,6 +56,15 @@ func (r *authzDeleteRepo) ArchiveTaskIfActive(_ context.Context, id, cascadeID s
 	return true, nil
 }
 
+func (r *authzDeleteRepo) ArchiveTaskIfActiveWithVacatedStep(
+	ctx context.Context,
+	id string,
+	cascadeID string,
+) (string, bool, error) {
+	changed, err := r.ArchiveTaskIfActive(ctx, id, cascadeID)
+	return "", changed, err
+}
+
 func (r *authzDeleteRepo) archives() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -68,6 +77,10 @@ func (r *authzDeleteRepo) DeleteTask(ctx context.Context, id string) error {
 	r.deleted = append(r.deleted, id)
 	r.deleteErr = append(r.deleteErr, ctx.Err())
 	return nil
+}
+
+func (r *authzDeleteRepo) DeleteTaskWithVacatedStep(ctx context.Context, id string) (string, error) {
+	return "", r.DeleteTask(ctx, id)
 }
 
 func (r *authzDeleteRepo) ListChildren(context.Context, string) ([]*models.Task, error) {

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { memo, type ReactNode } from "react";
 import type { StepDef, TaskLinkHandler, TaskSwitcherItem } from "./task-switcher-types";
 import { TaskItem } from "./task-item";
 import { TaskItemWithContextMenu } from "./task-switcher-context-menu";
@@ -41,6 +41,8 @@ export type TaskRowProps = {
   onLinkLinearIssue?: TaskLinkHandler;
   onLinkSentryIssue?: TaskLinkHandler;
   onMoveToStep?: (taskId: string, workflowId: string, targetStepId: string) => void;
+  onRequestMoveOptions?: (taskId: string, workflowId: string, targetStepId: string) => void;
+  onBeforeMoveOptionsOpen?: () => void;
   onTogglePin?: (taskId: string) => void;
   isPinned?: boolean;
   pinnedTaskIds?: string[];
@@ -77,6 +79,8 @@ function getContextMenuProps(props: TaskRowProps, isArchived: boolean) {
     onLinkLinearIssue: archiveAware(props.onLinkLinearIssue, isArchived),
     onLinkSentryIssue: archiveAware(props.onLinkSentryIssue, isArchived),
     onMoveToStep: archiveAware(props.onMoveToStep, isArchived),
+    onRequestMoveOptions: archiveAware(props.onRequestMoveOptions, isArchived),
+    onBeforeMoveOptionsOpen: props.onBeforeMoveOptionsOpen,
     onTogglePin: archiveAware(props.onTogglePin, isArchived),
     isPinned: isArchived ? false : props.isPinned,
     pinnedTaskIds: props.pinnedTaskIds,
@@ -155,19 +159,23 @@ function TaskRowItem({
       }
       title={task.title}
       autopilot={task.autopilot}
+      priority={task.priority}
       state={task.state}
       sessionState={task.sessionState}
       foregroundActivity={task.foregroundActivity}
       interrupted={task.interrupted}
+      parkedOnBackgroundWork={task.parkedOnBackgroundWork}
       isArchived={task.isArchived}
       isSelected={isSelected}
       diffStats={task.diffStats}
       comparisonUnavailable={task.comparisonUnavailable}
       isRemoteExecutor={task.isRemoteExecutor}
+      remoteExecutorId={task.remoteExecutorId}
       remoteExecutorType={task.remoteExecutorType}
       remoteExecutorName={task.remoteExecutorName}
       taskId={task.id}
       workflowStepId={task.workflowStepId}
+      automaticColor={task.automaticColor}
       primarySessionId={task.primarySessionId ?? null}
       hasPendingClarification={task.hasPendingClarification}
       hasPendingPermission={task.hasPendingPermission}
@@ -196,7 +204,7 @@ function TaskRowItem({
   );
 }
 
-export function TaskRow(props: TaskRowProps) {
+export const TaskRow = memo(function TaskRow(props: TaskRowProps) {
   const { task, isSubTask, depth, subtaskToggle, workflows, stepsByWorkflowId } = props;
   const isArchived = task.isArchived === true;
   return (
@@ -216,4 +224,4 @@ export function TaskRow(props: TaskRowProps) {
       />
     </TaskItemWithContextMenu>
   );
-}
+});

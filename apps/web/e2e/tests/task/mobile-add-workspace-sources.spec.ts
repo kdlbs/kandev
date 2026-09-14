@@ -290,9 +290,12 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
     .map((worktree) => worktree.worktree_path)
     .find((worktreePath) => worktreePath?.endsWith("mobile-local-repository-main"));
   expect(linkedRepoPath).toBeTruthy();
+  const activeFilePath = path.join(linkedRepoPath!, "mobile-repository.txt");
+  fs.writeFileSync(activeFilePath, "active mobile worktree source\n");
+  const registeredSourceFilePath = path.join(repositoryPath, "mobile-repository.txt");
   await apiClient.seedSessionMessage(activeSessionId!, {
     type: "message",
-    content: `[mobile source](${path.join(linkedRepoPath!, "mobile-repository.txt")})`,
+    content: `[mobile source](${registeredSourceFilePath}:1)`,
   });
 
   await testPage.reload();
@@ -304,7 +307,9 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   await chatLink.tap();
   const viewer = testPage.getByTestId("mobile-file-viewer-panel");
   await expect(viewer).toBeVisible({ timeout: 15_000 });
-  await expect(viewer.locator(".cm-line").filter({ hasText: "repository source" })).toBeVisible();
+  await expect(
+    viewer.locator(".cm-line").filter({ hasText: "active mobile worktree source" }),
+  ).toBeVisible();
   await expect(viewer.getByRole("button", { name: "Close" })).toBeVisible();
   await expect(
     viewer.getByText("mobile-local-repository-main/mobile-repository.txt"),
@@ -313,4 +318,7 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
     "scrollWidth",
     await testPage.evaluate(() => innerWidth),
   );
+  await prCapture.screenshot("registered-source-link-opened-mobile", {
+    caption: "Pixel 5 file viewer showing content opened from a registered source-path link",
+  });
 });

@@ -113,6 +113,19 @@ func TestWorkspaceScopingListAndGet(t *testing.T) {
 	}
 }
 
+func TestWorkspaceScopingDiscoveryRejectsForeignWorkspace(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedScopedWorkspaces(t, repo)
+	svc.discoveryConfig = RepositoryDiscoveryConfig{Roots: []string{t.TempDir()}, MaxDepth: 2}
+
+	if _, err := svc.GetLocalRepositoryDiscoveryForWorkspace(ctxAs("user-a"), "ws-b", ""); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+		t.Fatalf("get foreign discovery snapshot: %v", err)
+	}
+	if _, err := svc.RefreshLocalRepositoryDiscoveryForWorkspace(ctxAs("user-a"), "ws-b", ""); !errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
+		t.Fatalf("refresh foreign discovery snapshot: %v", err)
+	}
+}
+
 func TestWorkspaceScopingMutations(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	seedScopedWorkspaces(t, repo)
@@ -344,6 +357,12 @@ func TestPlanAndWalkthroughScoping(t *testing.T) {
 	// not an auth error).
 	if _, err := plan.GetPlan(ctxAs("user-b"), "task-b"); errors.Is(err, repoerrors.ErrTaskNotFound) {
 		t.Fatalf("owner plan get must pass the auth gate: %v", err)
+	}
+	if _, err := plan.GetLatestRevision(ctxAs("user-a"), "task-b"); !errors.Is(err, repoerrors.ErrTaskNotFound) {
+		t.Fatalf("foreign latest revision get: %v", err)
+	}
+	if _, err := plan.GetLatestRevision(ctxAs("user-b"), "task-b"); errors.Is(err, repoerrors.ErrTaskNotFound) {
+		t.Fatalf("owner latest revision get must pass the auth gate: %v", err)
 	}
 
 	wt := NewWalkthroughService(repo, nil, log)

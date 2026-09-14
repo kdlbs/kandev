@@ -472,9 +472,6 @@ func (r *Repository) claimActiveClarificationBundle(
 	tx *sqlx.Tx,
 	drv, pendingID string,
 ) (int64, error) {
-	pendingIDExpr := dialect.JSONExtract(drv, "task_session_messages.metadata", "pending_id")
-	statusExpr := dialect.JSONExtract(drv, "task_session_messages.metadata", "status")
-	bundlePendingIDExpr := dialect.JSONExtract(drv, "bundle.metadata", "pending_id")
 	// A pending ID spanning message types, sessions, or turns is malformed. The
 	// NOT EXISTS guard intentionally makes the whole bundle ineligible to claim.
 	// Detached rows are intentionally eligible: agent_disconnected means the
@@ -483,8 +480,28 @@ func (r *Repository) claimActiveClarificationBundle(
 	// it is replaced with the requested terminal status before this transaction
 	// commits or is rolled back with the transaction.
 	claimAt := r.nowUTC()
-	predicate, orderBy := currentTurnAuthority(drv, "turn_row")
-	claimQuery := fmt.Sprintf(`
+	claimQuery := clarificationClaimQuery(drv)
+	// pendingID is bound once for the outer bundle and once for the malformed-
+	// bundle NOT EXISTS guard.
+	result, err := tx.ExecContext(ctx, r.db.Rebind(claimQuery), claimAt, pendingID, pendingID)
+	if err != nil {
+		return 0, fmt.Errorf("claim active clarification bundle: %w", err)
+	}
+	claimedRows, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("count claimed clarification rows: %w", err)
+	}
+	return claimedRows, nil
+}
+
+// clarificationClaimQuery builds the shared claim statement for execution and
+// the query-plan regression test. Both paths must use the same predicates.
+func clarificationClaimQuery(driverName string) string {
+	pendingIDExpr := dialect.JSONExtract(driverName, "task_session_messages.metadata", "pending_id")
+	statusExpr := dialect.JSONExtract(driverName, "task_session_messages.metadata", "status")
+	bundlePendingIDExpr := dialect.JSONExtract(driverName, "bundle.metadata", "pending_id")
+	predicate, orderBy := currentTurnAuthority(driverName, "turn_row")
+	return fmt.Sprintf(`
 		UPDATE task_session_messages
 		SET metadata = %s, updated_at = ?
 		WHERE %s = ?
@@ -509,20 +526,9 @@ func (r *Repository) claimActiveClarificationBundle(
 				OR bundle.turn_id != task_session_messages.turn_id
 			  )
 		  )
-	`, dialect.JSONSet(drv, "metadata", "status", clarificationStatusResponding), pendingIDExpr, statusExpr,
+	`, dialect.JSONSet(driverName, "metadata", "status", clarificationStatusResponding), pendingIDExpr, statusExpr,
 		nonTerminalSessionPredicate("task_session_messages"),
 		predicate, orderBy, bundlePendingIDExpr)
-	// pendingID is bound once for the outer bundle and once for the malformed-
-	// bundle NOT EXISTS guard.
-	result, err := tx.ExecContext(ctx, r.db.Rebind(claimQuery), claimAt, pendingID, pendingID)
-	if err != nil {
-		return 0, fmt.Errorf("claim active clarification bundle: %w", err)
-	}
-	claimedRows, err := result.RowsAffected()
-	if err != nil {
-		return 0, fmt.Errorf("count claimed clarification rows: %w", err)
-	}
-	return claimedRows, nil
 }
 
 func (r *Repository) loadClaimedClarificationBundle(

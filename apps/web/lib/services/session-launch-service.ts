@@ -46,6 +46,7 @@ export type LaunchSessionResponse = {
   state: string;
   worktree_path?: string;
   worktree_branch?: string;
+  error?: string;
 };
 
 export async function launchSession(

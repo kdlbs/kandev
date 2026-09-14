@@ -16,8 +16,8 @@ export function ProfileEnabledHelp() {
         <Button
           type="button"
           variant="ghost"
-          size="icon-sm"
-          className="size-11 shrink-0 cursor-help text-muted-foreground sm:size-7"
+          size="icon"
+          className="shrink-0 cursor-help text-muted-foreground"
           aria-label={t("agents:enabledProfileInfo")}
           onClick={() => setOpen((current) => !current)}
           data-testid="profile-enabled-help"

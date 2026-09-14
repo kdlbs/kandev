@@ -150,6 +150,7 @@ func newAgentUpdateRouter(
 	ctrl := controller.NewController(nil, discoveryRegistry, reg, nil, log)
 	ctrl.SetRuntimeUpdater(updater)
 	router := gin.New()
+	useSyntheticSettingsIdentity(router)
 	broadcaster := newUpdateTerminalBroadcaster()
 	RegisterRoutes(router, ctrl, broadcaster, log, "test-interlock")
 	return router, ctrl, broadcaster.completed

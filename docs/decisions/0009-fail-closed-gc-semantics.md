@@ -1,15 +1,23 @@
 # 0009: Fail-closed GC semantics for filesystem and container cleanup
 
-**Status:** accepted
+**Status:** accepted (implementation superseded 2026-09-08)
 **Date:** 2026-05-16
 **Area:** backend
 
 **Amended:** 2026-08-08 by
 [ADR-2026-08-08-task-owned-worktree-lifetime](2026-08-08-task-owned-worktree-lifetime.md)
 
+**Implementation superseded:** 2026-09-08 by
+[0045: Install-wide storage maintenance](0045-install-wide-storage-maintenance.md), which
+records that `internal/system/storage` "replaces the periodic `office/infra` GC loop". The
+install-wide service removed the Office collector's production start path in PR #1699. The
+obsolete implementation and its tests remained in the repository until this cleanup. The
+decision below is unchanged. It still binds all cleanup paths, including the replacement
+storage-maintenance providers.
+
 ## Context
 
-Kandev's office service runs a background garbage collector that, every three hours, walks `~/.kandev/tasks/` and removes "orphaned" worktree directories. It also walks kandev-labeled Docker containers and removes ones whose tasks are gone or terminal. The intent was good — agents crash, leave state behind, and disks fill. The implementation was not.
+At the time of this decision, Kandev's Office service ran a background garbage collector every three hours. It walked `~/.kandev/tasks/` and removed "orphaned" worktree directories. It also inspected Kandev-labeled Docker containers and removed containers for missing or terminal tasks. The intent was good — agents crash, leave state behind, and disks fill. The implementation was not.
 
 The original `sweepWorktrees` passed each directory's on-disk name (a semantic slug like `locstat-github-actio_5gz`, produced by `worktree.SemanticWorktreeName(title, suffix)`) into `GetTaskBasicInfo`, which keys on `tasks.id` (a UUID). Every lookup missed. An error or missing row was treated as "orphan → delete." On the first sweep — which runs immediately at startup, not on a delay — `os.RemoveAll` ran against every directory under the base. A user checked out `feature/orchestrate` on a machine carrying a production DB and lost 307 active worktrees. Every in-progress task's working copy was gone before the user noticed.
 
@@ -38,7 +46,6 @@ Concretely:
 - The GC will sometimes leave true orphans alive when a DB read transiently fails. We accept this. The cost of holding onto a stale directory for one more 3-hour cycle is bounded; the cost of deleting a live one is not.
 - The container sweep's "no task row" path still removes the container, but only via the sentinel. Other callers of `GetTaskExecutionFields` are unaffected — the sentinel is a wrapped error, not a contract change.
 - New cleanup code — future scheduled GC, manual purge endpoints, retention policies — must follow this model. Reviewers should reject patterns where deletion fires on `err != nil`, missing rows, or "not found" inferred without a typed signal.
-- The worktree manager exposes `ListActiveWorktreePaths(ctx)` as a thin pass-through to the store. This is a cross-package dependency (`office/infra` imports a method satisfied by `worktree.Manager`), wired by the main process. The interface lives in `office/infra` so the dependency points outward from the consumer.
 
 ## Alternatives considered
 
@@ -48,5 +55,7 @@ Concretely:
 
 ## References
 
-- Implementation: `apps/backend/internal/office/infra/gc.go`, `apps/backend/internal/worktree/store.go`, `apps/backend/internal/office/repository/sqlite/tasks.go`
-- Regression tests: `apps/backend/internal/office/infra/gc_test.go`, `apps/backend/internal/worktree/store_test.go`
+- Current providers: `apps/backend/internal/system/storage/workspaces/provider.go`, `apps/backend/internal/system/storage/dockerstore/provider.go`
+- Production composition and inventory: `apps/backend/internal/backendapp/storage_maintenance.go`, `apps/backend/internal/backendapp/storage_inventory.go`
+- Regression tests: `apps/backend/internal/system/storage/workspaces/provider_test.go`, `apps/backend/internal/system/storage/dockerstore/provider_test.go`
+- Deleted 2026-09-08 after PR #1699 removed its production start path: `apps/backend/internal/office/infra/gc.go`, `apps/backend/internal/office/infra/gc_test.go`

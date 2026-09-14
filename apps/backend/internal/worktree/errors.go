@@ -7,6 +7,26 @@ import (
 	"strings"
 )
 
+// WorktreeRecoveryError reports an existing checkout that must be preserved
+// instead of passing through destructive recreation.
+type WorktreeRecoveryError struct {
+	TaskID           string
+	Checkout         string
+	PointerTarget    string
+	ExpectedBacklink string
+	ActualBacklink   string
+	State            string
+	Reason           string
+}
+
+func (e *WorktreeRecoveryError) Error() string {
+	return fmt.Sprintf("%s: task %q checkout %q: %s", ErrWorktreeCorrupted, e.TaskID, e.Checkout, e.Reason)
+}
+
+func (e *WorktreeRecoveryError) Unwrap() error {
+	return ErrWorktreeCorrupted
+}
+
 var (
 	// ErrWorktreeExists is returned when attempting to create a worktree that already exists.
 	ErrWorktreeExists = errors.New("worktree already exists for task")
@@ -25,6 +45,11 @@ var (
 
 	// ErrInvalidBaseBranch is returned when the base branch does not exist.
 	ErrInvalidBaseBranch = errors.New("base branch does not exist")
+
+	// ErrRemoteRefMissing is returned when Git confirms that the requested
+	// remote ref is unavailable. It is narrower than ErrInvalidBaseBranch so
+	// callers can distinguish a deleted branch from a failed fetch.
+	ErrRemoteRefMissing = errors.New("remote ref does not exist")
 
 	// ErrWorktreeCorrupted is returned when the worktree directory is corrupted or invalid.
 	ErrWorktreeCorrupted = errors.New("worktree directory is corrupted")
@@ -51,6 +76,10 @@ var (
 
 	// ErrNonFastForward is returned when a fetch/pull is rejected due to non-fast-forward updates.
 	ErrNonFastForward = errors.New("non-fast-forward update rejected")
+
+	// ErrWorkspaceCheckoutFailed is returned when a launch cannot materialize
+	// the requested checkout ref without risking an existing local branch.
+	ErrWorkspaceCheckoutFailed = errors.New("workspace checkout failed")
 
 	// ErrGitCryptFailed is returned when git-crypt unlock fails during worktree creation.
 	ErrGitCryptFailed = errors.New("git-crypt unlock failed")
@@ -101,6 +130,51 @@ var (
 	ErrWorktreePathOwnedByAnotherTask = errors.New("worktree path is owned by another task")
 )
 
+// BranchUnrecoverableError identifies the branch that could not be restored.
+// It wraps ErrBranchUnrecoverable so callers can preserve the existing
+// sentinel check while presenting a branch-specific recovery action.
+type BranchUnrecoverableError struct {
+	Branch string
+}
+
+type confirmedRemoteRefMissingError struct {
+	detail string
+}
+
+func (e *confirmedRemoteRefMissingError) Error() string {
+	if e == nil || e.detail == "" {
+		return ErrRemoteRefMissing.Error()
+	}
+	return fmt.Sprintf("%s: %s", ErrRemoteRefMissing, e.detail)
+}
+
+func (e *confirmedRemoteRefMissingError) Unwrap() []error {
+	return []error{ErrRemoteRefMissing, ErrInvalidBaseBranch}
+}
+
+func newConfirmedRemoteRefMissingError(detail string) error {
+	return &confirmedRemoteRefMissingError{detail: strings.TrimSpace(detail)}
+}
+
+func (e *BranchUnrecoverableError) Error() string {
+	if e == nil || e.Branch == "" {
+		return ErrBranchUnrecoverable.Error()
+	}
+	return fmt.Sprintf("%s: %q", ErrBranchUnrecoverable, e.Branch)
+}
+
+func (e *BranchUnrecoverableError) Unwrap() error {
+	return ErrBranchUnrecoverable
+}
+
+// BranchName returns the branch that was requested by the persisted worktree.
+func (e *BranchUnrecoverableError) BranchName() string {
+	if e == nil {
+		return ""
+	}
+	return e.Branch
+}
+
 // containsAuthFailure checks if git output indicates an authentication failure.
 func containsAuthFailure(lowerOutput string) bool {
 	return strings.Contains(lowerOutput, "authentication failed") ||
@@ -138,6 +212,7 @@ func isRemoteRefMissingError(err error) bool {
 	return strings.Contains(msg, "couldn't find remote ref") ||
 		strings.Contains(msg, "does not appear to be a git repository") ||
 		strings.Contains(msg, "no such remote") ||
+		strings.Contains(msg, "no remote configured") ||
 		strings.Contains(msg, "cannot determine remote head") ||
 		strings.Contains(msg, "remote head refers to nonexistent ref")
 }

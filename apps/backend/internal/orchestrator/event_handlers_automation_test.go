@@ -331,6 +331,24 @@ func (s *stubAutomationService) RunWorkspaceInUse(_ context.Context, taskID stri
 	return s.inUse[taskID], nil
 }
 
+// rejectingAutomationService models a run that is stopped after admission,
+// but before the service-owned dispatcher can acquire its lock. The
+// continuation task must not receive the firing's target in that case.
+type rejectingAutomationService struct {
+	*stubAutomationService
+	dispatchErr error
+}
+
+func (s *rejectingAutomationService) DispatchRun(
+	context.Context,
+	string,
+	automation.ThreadAction,
+	string,
+	func() (automation.RunDispatch, error),
+) error {
+	return s.dispatchErr
+}
+
 // seedAutomationTask writes a task exactly as the automation path now creates
 // one: ordinary and persistent, tagged only by its origin.
 func seedAutomationTask(t *testing.T, repo *sqliterepo.Repository, taskID, origin string, ephemeral bool) {
@@ -417,6 +435,184 @@ func TestCreateAutomationTask_BindsMergedPRTarget(t *testing.T) {
 
 	require.NotNil(t, creator.got)
 	require.Equal(t, "target-task-1", creator.got.Metadata[models.MetaKeyAutomationTargetTaskID])
+}
+
+// TestRefreshAutomationContinuationMetadataOnResume is the regression
+// guard for the reuse_thread + github_pr_merged defect: a resumed task keeps
+// whatever automation_target_task_id its FIRST firing stamped, so every merge
+// after the first is refused by validateAutomationArchiveTarget forever. The
+// per-firing metadata computed for the SECOND firing must be merged onto the
+// resumed task after dispatch admission (and persisted), not discarded at the
+// reuse early return. It also proves the write goes through the per-key
+// SetTaskMetadataKey primitive rather than a full-row UpdateTask (the persisted
+// deferred-launch value survives even though the firing's own metadata carries
+// a conflicting value for that key — the skip branch is exercised, not
+// vacuously true).
+func TestRefreshAutomationContinuationMetadataOnResume(t *testing.T) {
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
+		ID: "ws-1", Name: "Test", CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID:          "continuation-task",
+		WorkspaceID: "ws-1",
+		Origin:      models.TaskOriginAutomationRun,
+		Metadata: map[string]interface{}{
+			models.MetaKeyAutomationTaskMode:       string(automation.TaskModeAutomationRun),
+			models.MetaKeyAutomationRepositoryMode: string(automation.RepositoryModeNone),
+			models.MetaKeyAutomationTargetTaskID:   "target-task-1",
+			models.MetaKeyDeferredLaunch:           "must-survive",
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "continuation-session", TaskID: "continuation-task",
+		State: models.TaskSessionStateWaitingForInput, StartedAt: now, UpdatedAt: now,
+	}))
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	a := &automation.Automation{
+		ID: "a-merged", WorkspaceID: "ws-1", ContinuationTaskID: "continuation-task",
+		ContinuationPolicy: automation.ContinuationPolicyReuseThread,
+		TaskMode:           automation.TaskModeAutomationRun,
+		RepositoryMode:     automation.RepositoryModeNone,
+	}
+	evt := &automation.AutomationTriggeredEvent{
+		TriggerType: automation.TriggerTypeGitHubPRMerged,
+		TriggerData: json.RawMessage(`{"task_id":"target-task-2"}`),
+	}
+	metadata := map[string]interface{}{
+		"trigger_id":                         "trg-2",
+		"trigger_type":                       string(automation.TriggerTypeGitHubPRMerged),
+		models.MetaKeyAutomationTargetTaskID: "target-task-2",
+		// Deliberately present (with a different value than the task already
+		// carries) so the skip branch in refreshAutomationContinuationMetadata
+		// actually executes. Without this key in the input map, the assertion
+		// below would pass even with no skip at all — a merge trivially
+		// preserves a key the source map never mentions.
+		models.MetaKeyDeferredLaunch: "attacker-supplied-value",
+	}
+
+	task, session, action, reason, err := svc.prepareAutomationTask(ctx, a, evt, "title", "prompt", metadata)
+	require.NoError(t, err)
+	require.Equal(t, automation.ThreadActionResumed, action, "reason=%q", reason)
+	require.NotNil(t, session)
+	require.Equal(t, "target-task-1", task.Metadata[models.MetaKeyAutomationTargetTaskID],
+		"preparing a resumed task must not mutate the target before dispatch admission")
+	require.NoError(t, svc.refreshAutomationContinuationMetadata(ctx, task, metadata))
+	require.Equal(t, "target-task-2", task.Metadata[models.MetaKeyAutomationTargetTaskID],
+		"the admitted firing must carry the SECOND firing's target, not the first")
+
+	persisted, err := repo.GetTask(ctx, "continuation-task")
+	require.NoError(t, err)
+	require.Equal(t, "target-task-2", persisted.Metadata[models.MetaKeyAutomationTargetTaskID],
+		"the refreshed binding must be persisted, or the guard reads the stale value back out on the next lookup")
+	require.Equal(t, "must-survive", persisted.Metadata[models.MetaKeyDeferredLaunch],
+		"deferred launch ownership is server-managed and must not be clobbered by a metadata refresh, even when the firing's own metadata map carries a value for it")
+	require.Equal(t, "must-survive", task.Metadata[models.MetaKeyDeferredLaunch],
+		"the in-memory task must also keep the original value, not the firing's attempted overwrite")
+}
+
+func TestPrepareAutomationTask_DefersRefreshUntilDispatchAdmission(t *testing.T) {
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
+		ID: "ws-stop", Name: "Test", CreatedAt: now, UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{
+		ID:          "continuation-stop-task",
+		WorkspaceID: "ws-stop",
+		Origin:      models.TaskOriginAutomationRun,
+		Metadata: map[string]interface{}{
+			models.MetaKeyAutomationTaskMode:       string(automation.TaskModeAutomationRun),
+			models.MetaKeyAutomationRepositoryMode: string(automation.RepositoryModeNone),
+			models.MetaKeyAutomationTargetTaskID:   "target-before-stop",
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}))
+	require.NoError(t, repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID: "continuation-stop-session", TaskID: "continuation-stop-task",
+		State: models.TaskSessionStateWaitingForInput, StartedAt: now, UpdatedAt: now,
+	}))
+
+	autoSvc := &rejectingAutomationService{
+		stubAutomationService: &stubAutomationService{automation: &automation.Automation{
+			ID: "a-stop", WorkspaceID: "ws-stop", ContinuationTaskID: "continuation-stop-task",
+			ContinuationPolicy: automation.ContinuationPolicyReuseThread,
+			TaskMode:           automation.TaskModeAutomationRun,
+			RepositoryMode:     automation.RepositoryModeNone,
+		}},
+		dispatchErr: errors.New("run stopped before dispatch"),
+	}
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.SetAutomationService(autoSvc)
+	evt := &automation.AutomationTriggeredEvent{
+		RunID:       "run-stop",
+		TriggerType: automation.TriggerTypeGitHubPRMerged,
+		TriggerData: json.RawMessage(`{"task_id":"target-after-stop"}`),
+	}
+	metadata := map[string]interface{}{
+		"trigger_id":                         "trigger-stop",
+		"trigger_type":                       string(automation.TriggerTypeGitHubPRMerged),
+		models.MetaKeyAutomationTargetTaskID: "target-after-stop",
+	}
+
+	task, session, action, reason, err := svc.prepareAutomationTask(ctx, autoSvc.automation, evt, "title", "prompt", metadata)
+	require.NoError(t, err)
+	require.Equal(t, automation.ThreadActionResumed, action, "reason=%q", reason)
+	require.NotNil(t, session)
+	require.Equal(t, "target-before-stop", task.Metadata[models.MetaKeyAutomationTargetTaskID],
+		"preparing a resumed task must not authorize a run before dispatch admission")
+
+	svc.dispatchAutomationContinuation(ctx, autoSvc.automation, task, session, "prompt", metadata, evt.RunID, action, reason)
+	persisted, err := repo.GetTask(ctx, task.ID)
+	require.NoError(t, err)
+	require.Equal(t, "target-before-stop", persisted.Metadata[models.MetaKeyAutomationTargetTaskID],
+		"a run rejected before dispatch must not leave its target on the continuation task")
+}
+
+func TestRefreshAutomationContinuationMetadataPublishesTaskUpdated(t *testing.T) {
+	repo := setupTestRepo(t)
+	now := time.Now().UTC()
+	ctx := context.Background()
+	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{
+		ID: "ws-publish", Name: "Test", CreatedAt: now, UpdatedAt: now,
+	}))
+	task := &models.Task{
+		ID: "continuation-publish-task", WorkspaceID: "ws-publish",
+		Origin: models.TaskOriginAutomationRun,
+		Metadata: map[string]interface{}{
+			models.MetaKeyAutomationTargetTaskID: "target-before-publish",
+		},
+		CreatedAt: now, UpdatedAt: now,
+	}
+	require.NoError(t, repo.CreateTask(ctx, task))
+
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	publisher := &recordingTaskUpdatedPublisher{}
+	svc.SetTaskEventPublisher(publisher)
+	require.NoError(t, svc.refreshAutomationContinuationMetadata(ctx, task, map[string]interface{}{
+		models.MetaKeyAutomationTargetTaskID: "target-after-publish",
+	}))
+
+	require.Equal(t, []string{task.ID}, publisher.updatedTaskIDs,
+		"metadata changes must publish the refreshed task to live subscribers")
+}
+
+func TestOrderedAutomationContinuationMetadataKeysPutsTargetFirst(t *testing.T) {
+	keys := orderedAutomationContinuationMetadataKeys(map[string]interface{}{
+		"zeta":                               true,
+		models.MetaKeyDeferredLaunch:         "must-survive",
+		models.MetaKeyAutomationTargetTaskID: "target",
+		"alpha":                              true,
+	})
+
+	require.Equal(t, []string{models.MetaKeyAutomationTargetTaskID, "alpha", "zeta"}, keys)
 }
 
 func TestRecordFailedRun_MergedPRDoesNotConsumeDedupKey(t *testing.T) {

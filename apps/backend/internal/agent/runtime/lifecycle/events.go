@@ -31,7 +31,11 @@ func NewEventPublisher(eventBus bus.EventBus, log *logger.Logger) *EventPublishe
 
 // PublishAgentEvent publishes an agent lifecycle event (started, stopped, ready, completed, failed).
 func (p *EventPublisher) PublishAgentEvent(ctx context.Context, eventType string, execution *AgentExecution) {
-	p.publishAgentEventPayload(ctx, eventType, newAgentEventPayload(execution))
+	payload := newAgentEventPayload(execution)
+	if attemptID := ResumeAttemptIDFromContext(ctx); attemptID != "" {
+		payload.AttemptID = attemptID
+	}
+	p.publishAgentEventPayload(ctx, eventType, payload)
 }
 
 // publishAgentEventWithTurnID publishes a lifecycle event with a turn captured
@@ -40,7 +44,21 @@ func (p *EventPublisher) PublishAgentEvent(ctx context.Context, eventType string
 func (p *EventPublisher) publishAgentEventWithTurnID(
 	ctx context.Context, eventType string, execution *AgentExecution, turnID string,
 ) {
-	p.publishAgentEventPayload(ctx, eventType, newAgentEventPayloadWithTurnID(execution, turnID))
+	p.publishAgentEventWithTurnIDAndEvidence(ctx, eventType, execution, turnID, nil)
+}
+
+func (p *EventPublisher) publishAgentEventWithTurnIDAndEvidence(
+	ctx context.Context,
+	eventType string,
+	execution *AgentExecution,
+	turnID string,
+	evidence *PromptAttemptEvidence,
+) {
+	payload := newAgentEventPayloadWithTurnIDAndEvidence(execution, turnID, evidence)
+	if attemptID := ResumeAttemptIDFromContext(ctx); attemptID != "" {
+		payload.AttemptID = attemptID
+	}
+	p.publishAgentEventPayload(ctx, eventType, payload)
 }
 
 // PublishAgentStalled publishes one inactivity signal for a prompt.
@@ -108,11 +126,21 @@ func newAgentEventPayload(execution *AgentExecution) AgentEventPayload {
 }
 
 func newAgentEventPayloadWithTurnID(execution *AgentExecution, turnID string) AgentEventPayload {
-	return AgentEventPayload{
+	return newAgentEventPayloadWithTurnIDAndEvidence(execution, turnID, nil)
+}
+
+func newAgentEventPayloadWithTurnIDAndEvidence(
+	execution *AgentExecution,
+	turnID string,
+	evidence *PromptAttemptEvidence,
+) AgentEventPayload {
+	payload := AgentEventPayload{
 		AgentExecutionID:   execution.ID,
+		AttemptID:          execution.currentStartupAttemptID(),
 		RunID:              execution.RunID,
 		TaskID:             execution.TaskID,
 		SessionID:          execution.SessionID,
+		TaskEnvironmentID:  execution.TaskEnvironmentID,
 		TurnID:             turnID,
 		AgentID:            execution.AgentID,
 		AgentProfileID:     execution.officeProfileID(),
@@ -128,6 +156,14 @@ func newAgentEventPayloadWithTurnID(execution *AgentExecution, turnID string) Ag
 		ExitCode:           execution.ExitCode,
 		PromptGeneration:   execution.promptGeneration,
 	}
+	if evidence != nil {
+		payload.EvidenceKnown = evidence.EvidenceKnown
+		payload.OutputObserved = evidence.OutputObserved
+		payload.EffectObserved = evidence.EffectObserved
+		payload.ProviderDiagnosticCandidate = evidence.ProviderDiagnosticCandidate
+		payload.ProviderDiagnosticText = evidence.ProviderDiagnosticText
+	}
+	return payload
 }
 
 // PublishAgentctlEvent publishes an agentctl lifecycle event (starting, ready, error).
@@ -150,12 +186,16 @@ func (p *EventPublisher) PublishAgentctlEvent(ctx context.Context, eventType str
 		SessionID:         execution.SessionID,
 		TaskEnvironmentID: execution.TaskEnvironmentID,
 		AgentExecutionID:  execution.ID,
+		AttemptID:         execution.currentStartupAttemptID(),
 		ErrorMessage:      errMsg,
 		FailureCode:       execution.FailureCode,
 		FailureDetails:    execution.FailureDetails,
 		WorktreeID:        worktreeID,
 		WorktreePath:      execution.WorkspacePath,
 		WorktreeBranch:    worktreeBranch,
+	}
+	if attemptID := ResumeAttemptIDFromContext(ctx); attemptID != "" {
+		payload.AttemptID = attemptID
 	}
 
 	event := bus.NewEvent(eventType, "agent-manager", payload)
@@ -169,8 +209,19 @@ func (p *EventPublisher) PublishAgentctlEvent(ctx context.Context, eventType str
 
 // PublishACPSessionCreated publishes an event when an ACP session is created.
 func (p *EventPublisher) PublishACPSessionCreated(execution *AgentExecution, sessionID string) {
+	p.PublishACPSessionCreatedWithAttempt(execution, sessionID, "")
+}
+
+// PublishACPSessionCreatedWithAttempt publishes an ACP session-created event
+// with the startup invocation's identity. This context-aware variant keeps a
+// reused execution from relabelling a delayed callback with a replacement
+// attempt's mutable execution field.
+func (p *EventPublisher) PublishACPSessionCreatedWithAttempt(execution *AgentExecution, sessionID, attemptID string) {
 	if p.eventBus == nil || sessionID == "" {
 		return
+	}
+	if attemptID == "" {
+		attemptID = execution.currentStartupAttemptID()
 	}
 
 	payload := ACPSessionCreatedPayload{
@@ -178,6 +229,7 @@ func (p *EventPublisher) PublishACPSessionCreated(execution *AgentExecution, ses
 		SessionID:        execution.SessionID,
 		AgentProfileID:   execution.ID,
 		AgentExecutionID: execution.ID,
+		AttemptID:        attemptID,
 		ACPSessionID:     sessionID,
 	}
 
@@ -193,69 +245,40 @@ func (p *EventPublisher) PublishACPSessionCreated(execution *AgentExecution, ses
 // PublishAgentStreamEvent publishes an agent stream event to the event bus for WebSocket streaming.
 // This is different from PublishAgentEvent which publishes lifecycle events (started, stopped, etc.).
 func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, event agentctl.AgentEvent) {
+	p.publishAgentStreamEventWithAttempt(execution, event, event.AttemptID)
+}
+
+func (p *EventPublisher) publishAgentStreamEventWithAttempt(
+	execution *AgentExecution,
+	event agentctl.AgentEvent,
+	attemptID string,
+) {
 	if p.eventBus == nil {
 		return
 	}
-
-	// Build the nested event data
-	// event.SessionID is the ACP session ID (internal agent protocol session)
-	eventData := &AgentStreamEventData{
-		Type:                    event.Type,
-		ACPSessionID:            event.SessionID,
-		Text:                    event.Text,
-		ToolCallID:              event.ToolCallID,
-		ParentToolCallID:        event.ParentToolCallID,
-		PendingID:               event.PendingID,
-		RequestID:               event.RequestID,
-		ToolName:                event.ToolName,
-		ToolTitle:               event.ToolTitle,
-		ToolStatus:              event.ToolStatus,
-		Error:                   event.Error,
-		ProviderError:           event.ProviderError,
-		SessionStatus:           event.SessionStatus,
-		PromptGeneration:        event.PromptGeneration,
-		TurnID:                  event.TurnID,
-		Data:                    event.Data,
-		Normalized:              event.NormalizedPayload,
-		AvailableCommands:       event.AvailableCommands,
-		ToolCallContents:        event.ToolCallContents,
-		ContentBlocks:           event.ContentBlocks,
-		Role:                    event.Role,
-		CurrentModeID:           event.CurrentModeID,
-		AvailableModes:          event.AvailableModes,
-		SupportsImage:           event.SupportsImage,
-		SupportsAudio:           event.SupportsAudio,
-		SupportsEmbeddedContext: event.SupportsEmbeddedContext,
-		SupportsPromptQueueing:  event.SupportsPromptQueueing,
-		AuthMethods:             event.AuthMethods,
-		CurrentModelID:          event.CurrentModelID,
-		FallbackModel:           event.FallbackModel,
-		ModelSelectionWarning:   event.ModelSelectionWarning,
-		SessionModels:           event.SessionModels,
-		ConfigOptions:           event.ConfigOptions,
-		ConfigBaselineCandidate: event.ConfigBaselineCandidate,
-		OriginalConfigCandidate: event.OriginalConfigCandidate,
-		SessionTitle:            event.SessionTitle,
-		SessionUpdatedAt:        event.SessionUpdatedAt,
-		SessionMeta:             event.SessionMeta,
-		Usage:                   event.Usage,
-		PlanEntries:             event.PlanEntries,
-		PlanContent:             event.PlanContent,
-		MCPAttachment:           event.MCPAttachment,
-		MCPAttachmentAttempt:    event.MCPAttachmentAttempt,
+	if attemptID == "" {
+		attemptID = event.AttemptID
 	}
+	if attemptID == "" {
+		attemptID = execution.currentStartupAttemptID()
+	}
+
+	// event.SessionID is the ACP session ID (internal agent protocol session)
+	eventData := buildAgentStreamEventData(event)
 
 	// Build agent event message payload
 	// session_id is the task session ID (execution.SessionID)
 	// acp_session_id in eventData is the internal agent protocol session
 	payload := AgentStreamEventPayload{
-		Type:        "agent/event",
-		Timestamp:   time.Now().UTC().Format(time.RFC3339Nano),
-		AgentID:     execution.ID,
-		ExecutionID: execution.ID,
-		TaskID:      execution.TaskID,
-		SessionID:   execution.SessionID,
-		Data:        eventData,
+		Type:           "agent/event",
+		Timestamp:      time.Now().UTC().Format(time.RFC3339Nano),
+		AgentID:        execution.ID,
+		ExecutionID:    execution.ID,
+		AttemptID:      attemptID,
+		AgentProfileID: execution.officeProfileID(),
+		TaskID:         execution.TaskID,
+		SessionID:      execution.SessionID,
+		Data:           eventData,
 	}
 
 	busEvent := bus.NewEvent(events.AgentStream, "agent-manager", payload)
@@ -267,6 +290,55 @@ func (p *EventPublisher) PublishAgentStreamEvent(execution *AgentExecution, even
 			zap.String("task_id", execution.TaskID),
 			zap.String("session_id", execution.SessionID),
 			zap.Error(err))
+	}
+}
+
+func buildAgentStreamEventData(event agentctl.AgentEvent) *AgentStreamEventData {
+	return &AgentStreamEventData{
+		Type:                        event.Type,
+		ACPSessionID:                event.SessionID,
+		Text:                        event.Text,
+		ProviderDiagnosticCandidate: event.ProviderDiagnosticCandidate,
+		ToolCallID:                  event.ToolCallID,
+		ParentToolCallID:            event.ParentToolCallID,
+		PendingID:                   event.PendingID,
+		RequestID:                   event.RequestID,
+		ToolName:                    event.ToolName,
+		ToolTitle:                   event.ToolTitle,
+		ToolStatus:                  event.ToolStatus,
+		Error:                       event.Error,
+		ProviderError:               event.ProviderError,
+		SessionStatus:               event.SessionStatus,
+		PromptGeneration:            event.PromptGeneration,
+		TurnID:                      event.TurnID,
+		Data:                        event.Data,
+		Normalized:                  event.NormalizedPayload,
+		AvailableCommands:           event.AvailableCommands,
+		ToolCallContents:            event.ToolCallContents,
+		ContentBlocks:               event.ContentBlocks,
+		Role:                        event.Role,
+		CurrentModeID:               event.CurrentModeID,
+		AvailableModes:              event.AvailableModes,
+		SupportsImage:               event.SupportsImage,
+		SupportsAudio:               event.SupportsAudio,
+		SupportsEmbeddedContext:     event.SupportsEmbeddedContext,
+		SupportsPromptQueueing:      event.SupportsPromptQueueing,
+		AuthMethods:                 event.AuthMethods,
+		CurrentModelID:              event.CurrentModelID,
+		FallbackModel:               event.FallbackModel,
+		ModelSelectionWarning:       event.ModelSelectionWarning,
+		SessionModels:               event.SessionModels,
+		ConfigOptions:               event.ConfigOptions,
+		ConfigBaselineCandidate:     event.ConfigBaselineCandidate,
+		OriginalConfigCandidate:     event.OriginalConfigCandidate,
+		SessionTitle:                event.SessionTitle,
+		SessionUpdatedAt:            event.SessionUpdatedAt,
+		SessionMeta:                 event.SessionMeta,
+		Usage:                       event.Usage,
+		PlanEntries:                 event.PlanEntries,
+		PlanContent:                 event.PlanContent,
+		MCPAttachment:               event.MCPAttachment,
+		MCPAttachmentAttempt:        event.MCPAttachmentAttempt,
 	}
 }
 
@@ -312,11 +384,12 @@ func (p *EventPublisher) PublishGitEvent(payload *GitEventPayload) {
 // PublishGitStatus publishes a git status update event.
 func (p *EventPublisher) PublishGitStatus(execution *AgentExecution, update *agentctl.GitStatusUpdate) {
 	p.PublishGitEvent(&GitEventPayload{
-		Type:      GitEventTypeStatusUpdate,
-		TaskID:    execution.TaskID,
-		SessionID: execution.SessionID,
-		AgentID:   execution.ID,
-		Timestamp: update.Timestamp.Format(time.RFC3339Nano),
+		Type:              GitEventTypeStatusUpdate,
+		TaskID:            execution.TaskID,
+		SessionID:         execution.SessionID,
+		TaskEnvironmentID: execution.TaskEnvironmentID,
+		AgentID:           execution.ID,
+		Timestamp:         update.Timestamp.Format(time.RFC3339Nano),
 		Status: &GitStatusData{
 			Branch:              update.Branch,
 			RemoteBranch:        update.RemoteBranch,

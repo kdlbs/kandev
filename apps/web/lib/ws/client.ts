@@ -1,8 +1,21 @@
+/* eslint-disable max-lines -- the shared WebSocket client owns all transport lifecycle paths. */
+
 import type { BackendMessageMap, BackendMessageType } from "@/lib/types/backend";
 import type { ConnectionStatus } from "@/lib/types/connection";
 import { generateUUID } from "@/lib/utils";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import { dispatchToPluginWsHandlers } from "@/lib/ws/plugin-bridge";
+import {
+  isWebSocketRequestTimeoutError,
+  toWebSocketRequestError,
+  WebSocketRequestTimeoutError,
+} from "./request-error";
+export {
+  isWebSocketRequestTimeoutError,
+  WebSocketRequestError,
+  WebSocketRequestTimeoutError,
+  type WebSocketRequestErrorDetails,
+} from "./request-error";
 
 const debugDispatch = createDebugLogger("ws:dispatch");
 
@@ -41,7 +54,13 @@ type SessionSubscriptionReadiness = {
   reject: (reason: unknown) => void;
   requestStarted: boolean;
   settled: boolean;
+  attempt: number;
+  retryTimer: ReturnType<typeof setTimeout> | null;
 };
+
+export const SESSION_ENTRY_REQUEST_TIMEOUT_MS = 10000;
+export const SESSION_ENTRY_RETRY_DELAY_MS = 1000;
+const MAX_SESSION_SUBSCRIPTION_ATTEMPTS = 2;
 
 const DEFAULT_RECONNECT_OPTIONS: Required<ReconnectOptions> = {
   enabled: true,
@@ -101,16 +120,19 @@ export class WebSocketClient {
     this.intentionalClose = false;
     this.clearReconnectTimer();
     this.setStatus("connecting");
-    this.socket = new WebSocket(this.url);
+    const socket = new WebSocket(this.url);
+    this.socket = socket;
 
-    this.socket.onopen = () => {
+    socket.onopen = () => {
+      if (this.socket !== socket) return;
       this.reconnectAttempts = 0;
       this.setStatus("connected");
       this.resubscribe();
       this.flushQueue();
     };
 
-    this.socket.onmessage = (event) => {
+    socket.onmessage = (event) => {
+      if (this.socket !== socket) return;
       const parts = (event.data as string).split("\n");
       for (const part of parts) {
         const trimmed = part.trim();
@@ -124,11 +146,10 @@ export class WebSocketClient {
       }
     };
 
-    this.socket.onerror = () => {
-      this.setStatus("error");
-    };
+    socket.onerror = () => (this.socket === socket ? this.setStatus("error") : undefined);
 
-    this.socket.onclose = (event) => {
+    socket.onclose = (event) => {
+      if (this.socket !== socket) return;
       this.socket = null;
       this.handleDisconnect(event);
     };
@@ -174,7 +195,7 @@ export class WebSocketClient {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(id);
-        reject(new Error(`WebSocket request timed out: ${action}`));
+        reject(new WebSocketRequestTimeoutError(action));
       }, timeoutMs);
       this.pendingRequests.set(id, {
         resolve: resolve as (payload: unknown) => void,
@@ -494,11 +515,7 @@ export class WebSocketClient {
     if (!pending) return;
     clearTimeout(pending.timeout);
     this.pendingRequests.delete(msgId);
-    const errorMessage =
-      typeof payload === "object" && payload && "message" in payload
-        ? String((payload as { message?: string }).message)
-        : "WebSocket request failed";
-    pending.reject(new Error(errorMessage));
+    pending.reject(toWebSocketRequestError(payload));
   }
 
   private handleDisconnect(event: CloseEvent) {
@@ -587,6 +604,8 @@ export class WebSocketClient {
       reject,
       requestStarted: false,
       settled: false,
+      attempt: 0,
+      retryTimer: null,
     };
     // subscribeSession() consumers do not await readiness, so handle failures
     // while returning the original promise to readiness-aware consumers.
@@ -596,18 +615,37 @@ export class WebSocketClient {
   }
 
   private startSessionSubscription(sessionId: string, readiness: SessionSubscriptionReadiness) {
+    if (this.sessionSubscriptionReadiness.get(sessionId) !== readiness) return;
     if (readiness.requestStarted) return;
     readiness.requestStarted = true;
-    void this.request("session.subscribe", { session_id: sessionId }).then(
+    readiness.attempt += 1;
+    void this.request(
+      "session.subscribe",
+      { session_id: sessionId },
+      SESSION_ENTRY_REQUEST_TIMEOUT_MS,
+    ).then(
       () => {
         if (this.sessionSubscriptionReadiness.get(sessionId) !== readiness) return;
+        readiness.retryTimer = null;
         readiness.settled = true;
         readiness.resolve();
       },
       (error: unknown) => {
-        if (this.sessionSubscriptionReadiness.get(sessionId) === readiness) {
-          this.sessionSubscriptionReadiness.delete(sessionId);
+        if (this.sessionSubscriptionReadiness.get(sessionId) !== readiness) return;
+        readiness.requestStarted = false;
+        if (
+          isWebSocketRequestTimeoutError(error) &&
+          readiness.attempt < MAX_SESSION_SUBSCRIPTION_ATTEMPTS &&
+          this.status === "connected" &&
+          this.socket
+        ) {
+          readiness.retryTimer = setTimeout(() => {
+            readiness.retryTimer = null;
+            this.startSessionSubscription(sessionId, readiness);
+          }, SESSION_ENTRY_RETRY_DELAY_MS);
+          return;
         }
+        this.sessionSubscriptionReadiness.delete(sessionId);
         readiness.settled = true;
         readiness.reject(error);
       },
@@ -618,6 +656,10 @@ export class WebSocketClient {
     const readiness = this.sessionSubscriptionReadiness.get(sessionId);
     if (!readiness) return;
     this.sessionSubscriptionReadiness.delete(sessionId);
+    if (readiness.retryTimer) {
+      clearTimeout(readiness.retryTimer);
+      readiness.retryTimer = null;
+    }
     if (!readiness.settled) {
       readiness.settled = true;
       readiness.reject(new Error("Session subscription released"));
@@ -628,6 +670,10 @@ export class WebSocketClient {
     const readinessEntries = [...this.sessionSubscriptionReadiness.entries()];
     this.sessionSubscriptionReadiness.clear();
     for (const [, readiness] of readinessEntries) {
+      if (readiness.retryTimer) {
+        clearTimeout(readiness.retryTimer);
+        readiness.retryTimer = null;
+      }
       if (readiness.settled) continue;
       readiness.settled = true;
       readiness.reject(error);

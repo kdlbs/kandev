@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { MessageSendError } from "@/lib/chat/message-send-error";
 import { generateUUID } from "@/lib/utils";
@@ -10,46 +10,36 @@ import type {
 } from "@/components/task/chat/chat-input-container";
 import type { ActiveDocument } from "@/lib/state/slices/ui/types";
 import type { PlanComment } from "@/lib/state/slices/comments";
-import { toBlockquote } from "@/lib/state/slices/comments/format";
 import type { ContextFile } from "@/lib/state/context-files-store";
-import type { CustomPrompt, Message } from "@/lib/types/http";
+import type { CustomPrompt, Message, TaskPlanCommentRef } from "@/lib/types/http";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import type { AppState } from "@/lib/state/store";
 import type { EntityReference } from "@/lib/types/entity-reference";
+import { planCommentAdmissionConflict, toTaskPlanCommentRefs } from "@/lib/plan-comment-refs";
 import {
   collectPromptReferenceExpansions,
   formatPromptReferenceExpansions,
+  sanitizePromptReferenceSystemText,
 } from "@/lib/prompts/expand-prompt-references";
 import {
   deriveSessionInputMode,
   type SessionInputMode,
 } from "./domains/session/session-input-mode";
 import { t } from "@/lib/i18n";
+import { getTaskPlanComments } from "@/lib/api/domains/plan-comment-api";
+import { listTaskSessions } from "@/lib/api/domains/session-api";
 
-function buildDocumentContext(
+export function buildDocumentContext(
   activeDocument: ActiveDocument | null,
   planModeEnabled: boolean,
-  planComments?: PlanComment[],
 ): string {
   if (!activeDocument) return "";
 
   if (activeDocument.type === "plan") {
     if (!planModeEnabled) return "";
 
-    let context = `\n\n<kandev-system>\nACTIVE DOCUMENT: The user is editing the task plan side-by-side with this chat.\nRead the current plan using the plan_get MCP tool to understand the context before responding.\nAny plan modifications should use the plan_update MCP tool.`;
-
-    if (planComments && planComments.length > 0) {
-      context += `\n\nUser comments on the plan:\n`;
-      for (const c of planComments) {
-        if (c.selectedText) {
-          context += "```\n" + c.selectedText + "\n```\n";
-        }
-        context += toBlockquote(c.text) + "\n\n";
-      }
-    }
-
-    context += `\n</kandev-system>`;
-    return context;
+    // i18n-exempt: agent-facing prompt sent verbatim to the model, never rendered.
+    return `\n\n<kandev-system>\nACTIVE DOCUMENT: The user is editing the task plan side-by-side with this chat.\nRead the current plan using the get_task_plan_kandev MCP tool to understand the context before responding.\nAny plan modifications should use the update_task_plan_kandev MCP tool.\n</kandev-system>`;
   }
 
   // i18n-exempt: agent-facing prompt sent verbatim to the model, never rendered.
@@ -131,7 +121,7 @@ export function buildContextFilesContext(
             promptExpansions.set(expansion.name, expansion.content);
           }
         }
-        return `### ${prompt.name}\n${prompt.content}`;
+        return `### ${sanitizePromptReferenceSystemText(prompt.name)}\n${sanitizePromptReferenceSystemText(prompt.content)}`;
       })
       .filter(Boolean);
 
@@ -169,6 +159,8 @@ type SendMessagePayload = {
   attachments?: MessageAttachment[];
   contextFilesMeta?: Array<{ path: string; name: string; is_directory?: boolean }>;
   entityReferences?: EntityReference[];
+  planCommentRefs?: TaskPlanCommentRef[];
+  requirePrimarySession?: boolean;
 };
 
 type MessageListResponse = { messages?: Message[] };
@@ -183,17 +175,31 @@ function isUncertainMessageTransportError(error: unknown): boolean {
 
 async function findMessageByID(
   client: ReturnType<typeof getWebSocketClient>,
+  taskId: string,
   sessionId: string,
   messageId: string,
 ): Promise<Message | undefined> {
   if (!client) return undefined;
+  const sessionIds = [sessionId];
   try {
-    const response = await client.request<MessageListResponse>(
-      "message.list",
-      { session_id: sessionId, limit: 100, sort: "desc" },
-      5000,
-    );
-    return response.messages?.find((message) => message.id === messageId);
+    const response = await listTaskSessions(taskId);
+    for (const session of response.sessions ?? []) {
+      if (session.id && !sessionIds.includes(session.id)) sessionIds.push(session.id);
+    }
+  } catch {
+    // The submitted session remains a useful reconciliation fallback.
+  }
+  try {
+    for (const candidateSessionId of sessionIds) {
+      const response = await client.request<MessageListResponse>(
+        "message.list",
+        { session_id: candidateSessionId, limit: 100, sort: "desc" },
+        5000,
+      );
+      const found = response.messages?.find((message) => message.id === messageId);
+      if (found) return found;
+    }
+    return undefined;
   } catch {
     return undefined;
   }
@@ -210,21 +216,31 @@ async function waitForConnected(client: NonNullable<ReturnType<typeof getWebSock
   return false;
 }
 
-async function reconcileUncertainMessage(
-  client: NonNullable<ReturnType<typeof getWebSocketClient>>,
-  sessionId: string,
-  messageId: string,
-  request: () => Promise<Message | undefined>,
-  originalError: unknown,
-) {
-  const committed = await findMessageByID(client, sessionId, messageId);
+type MessageReconciliation = {
+  client: NonNullable<ReturnType<typeof getWebSocketClient>>;
+  taskId: string;
+  sessionId: string;
+  messageId: string;
+  request: () => Promise<Message | undefined>;
+  originalError: unknown;
+};
+
+async function reconcileUncertainMessage({
+  client,
+  taskId,
+  sessionId,
+  messageId,
+  request,
+  originalError,
+}: MessageReconciliation) {
+  const committed = await findMessageByID(client, taskId, sessionId, messageId);
   if (committed) return committed;
   if (!(await waitForConnected(client))) throw originalError;
 
   try {
     return await request();
   } catch (retryError) {
-    const retriedMessage = await findMessageByID(client, sessionId, messageId);
+    const retriedMessage = await findMessageByID(client, taskId, sessionId, messageId);
     if (retriedMessage) return retriedMessage;
     throw retryError;
   }
@@ -252,6 +268,8 @@ export async function sendMessageRequest(
     attachments,
     contextFilesMeta,
     entityReferences,
+    planCommentRefs,
+    requirePrimarySession,
   } = payload;
   const hasAttachments = attachments && attachments.length > 0;
   const stableMessageId = clientMessageId ?? generateUUID();
@@ -266,6 +284,8 @@ export async function sendMessageRequest(
     ...(hasAttachments && { attachments }),
     ...(contextFilesMeta && { context_files: contextFilesMeta }),
     ...(entityReferences && { entity_references: entityReferences }),
+    ...(planCommentRefs?.length && { plan_comment_refs: planCommentRefs }),
+    ...(requirePrimarySession && { require_primary_session: true }),
   };
 
   const request = () =>
@@ -279,7 +299,14 @@ export async function sendMessageRequest(
     return await request();
   } catch (error) {
     if (!isUncertainMessageTransportError(error)) throw error;
-    return reconcileUncertainMessage(client, resolvedSessionId, stableMessageId, request, error);
+    return reconcileUncertainMessage({
+      client,
+      taskId,
+      sessionId: resolvedSessionId,
+      messageId: stableMessageId,
+      request,
+      originalError: error,
+    });
   }
 }
 
@@ -287,7 +314,8 @@ const TERMINAL_SESSION_STATES = new Set(["FAILED", "CANCELLED", "COMPLETED"]);
 
 function requireSessionInputMode(state: AppState, selectedSessionId: string): SessionInputMode {
   const selectedSession = state.taskSessions.items[selectedSessionId] ?? null;
-  const inputMode = deriveSessionInputMode(selectedSession);
+  const queuedCount = state.queue.metaBySessionId[selectedSessionId]?.count ?? 0;
+  const inputMode = deriveSessionInputMode(selectedSession, queuedCount);
   if (inputMode === "unavailable") {
     // A terminal session row (agent process has exited) gets the backend's
     // actionable copy; a missing row keeps the generic message since there is
@@ -312,6 +340,179 @@ function buildQueueAttachments(attachments?: MessageAttachment[]) {
   }));
 }
 
+function normalizePlanCommentSendError(
+  error: unknown,
+  taskId: string,
+  storeApi: ReturnType<typeof useAppStoreApi>,
+): unknown {
+  const conflict = planCommentAdmissionConflict(error);
+  if (!conflict) return error;
+  if (conflict.snapshot) storeApi.getState().setTaskPlanComments(taskId, conflict.snapshot);
+  return conflict.code === "plan_comments_changed"
+    ? new MessageSendError("plan-comments-changed", t("task:planCommentsChangedRetry"))
+    : new MessageSendError("primary-session-changed", t("task:primarySessionChangedRetry"));
+}
+
+function buildContextFilesMetadata(contextFiles: ContextFile[]) {
+  const realFiles = contextFiles.filter(
+    (file) => !file.path.startsWith("prompt:") && file.path !== "plan:context",
+  );
+  if (realFiles.length === 0) return undefined;
+  return realFiles.map((file) => ({
+    path: file.path,
+    name: file.name,
+    ...(file.isDirectory !== undefined ? { is_directory: file.isDirectory } : {}),
+  }));
+}
+
+async function deliverComposedMessage({
+  payload,
+  taskId,
+  resolvedSessionId,
+  finalMessage,
+  modelToSend,
+  planModeEnabled,
+  hasPendingClarification,
+  planCommentRefs,
+  contextFilesMeta,
+  inputMode,
+  queue,
+  storeApi,
+  clientAdmissionId,
+}: {
+  payload: ChatSubmitPayload;
+  taskId: string;
+  resolvedSessionId: string;
+  finalMessage: string;
+  modelToSend: string | undefined;
+  planModeEnabled: boolean;
+  hasPendingClarification: boolean;
+  planCommentRefs: TaskPlanCommentRef[];
+  contextFilesMeta: ReturnType<typeof buildContextFilesMetadata>;
+  inputMode: SessionInputMode;
+  queue: ReturnType<typeof useQueue>["queue"];
+  storeApi: ReturnType<typeof useAppStoreApi>;
+  clientAdmissionId: string;
+}) {
+  try {
+    if (hasPendingClarification || inputMode === "queue") {
+      const accepted = await queue({
+        taskId,
+        content: finalMessage,
+        model: modelToSend,
+        planMode: planModeEnabled,
+        attachments: buildQueueAttachments(payload.attachments),
+        entityReferences: payload.entityReferences,
+        ...(planCommentRefs.length > 0
+          ? { clientQueueId: clientAdmissionId, planCommentRefs }
+          : {}),
+        ...(contextFilesMeta ? { contextFilesMeta } : {}),
+      });
+      if (!accepted) {
+        return false;
+      }
+      await refreshAcceptedPlanComments(taskId, planCommentRefs, storeApi);
+      return;
+    }
+
+    const created = await sendMessageRequest({
+      taskId,
+      resolvedSessionId,
+      clientMessageId: clientAdmissionId,
+      finalMessage,
+      modelToSend,
+      planMode: planModeEnabled,
+      hasReviewComments: !!payload.reviewComments?.length,
+      attachments: payload.attachments,
+      contextFilesMeta,
+      entityReferences: payload.entityReferences,
+      planCommentRefs,
+    });
+    if (created?.id && created.session_id) storeApi.getState().addMessage(created);
+    await refreshAcceptedPlanComments(taskId, planCommentRefs, storeApi);
+  } catch (error) {
+    throw normalizePlanCommentSendError(error, taskId, storeApi);
+  }
+}
+
+async function refreshAcceptedPlanComments(
+  taskId: string,
+  refs: TaskPlanCommentRef[],
+  storeApi: ReturnType<typeof useAppStoreApi>,
+) {
+  if (refs.length === 0) return;
+  try {
+    const snapshot = await getTaskPlanComments(taskId);
+    storeApi.getState().setTaskPlanComments(taskId, snapshot);
+  } catch (error) {
+    // i18n-exempt: accepted delivery remains successful; foreground recovery retries this refresh.
+    console.error("Failed to refresh task plan comments after delivery:", error);
+  }
+}
+
+type PendingMessageAdmission = { key: string; id: string };
+
+function messageAdmissionKey(parts: {
+  taskId: string;
+  resolvedSessionId: string;
+  finalMessage: string;
+  modelToSend?: string;
+  planModeEnabled: boolean;
+  hasReviewComments: boolean;
+  planCommentRefs: TaskPlanCommentRef[];
+  contextFilesMeta: ReturnType<typeof buildContextFilesMetadata>;
+  attachments: ChatSubmitPayload["attachments"];
+  entityReferences: ChatSubmitPayload["entityReferences"];
+}) {
+  return JSON.stringify(parts);
+}
+
+async function recoverPendingMessageAdmission(
+  admission: PendingMessageAdmission | null,
+  taskId: string,
+  sessionId: string,
+  refs: TaskPlanCommentRef[],
+  storeApi: ReturnType<typeof useAppStoreApi>,
+) {
+  if (!admission) return false;
+  const client = getWebSocketClient();
+  const committed = client
+    ? await findMessageByID(client, taskId, sessionId, admission.id)
+    : undefined;
+  if (!committed) return false;
+  storeApi.getState().addMessage(committed);
+  await refreshAcceptedPlanComments(taskId, refs, storeApi);
+  return true;
+}
+
+function buildFinalMessageForSubmit({
+  payload,
+  contextFiles,
+  activeDocument,
+  planModeEnabled,
+  prompts,
+  state,
+}: {
+  payload: ChatSubmitPayload;
+  contextFiles: ContextFile[];
+  activeDocument: ActiveDocument | null;
+  planModeEnabled: boolean;
+  prompts: CustomPrompt[];
+  state: AppState;
+}) {
+  const allContextFiles = [...contextFiles, ...(payload.inlineMentions || [])];
+  const documentContext = buildDocumentContext(activeDocument, planModeEnabled);
+  const contextFilesContext = buildContextFilesContext(allContextFiles, prompts);
+  const taskMentionsContext = payload.inlineTaskMentions?.length
+    ? buildTaskMentionsContext(payload.inlineTaskMentions, state)
+    : "";
+  return {
+    finalMessage:
+      payload.message.trim() + documentContext + contextFilesContext + taskMentionsContext,
+    allContextFiles,
+  };
+}
+
 export function useMessageHandler({
   resolvedSessionId,
   taskId,
@@ -326,22 +527,7 @@ export function useMessageHandler({
 }: UseMessageHandlerParams) {
   const { queue } = useQueue(resolvedSessionId);
   const storeApi = useAppStoreApi();
-
-  const buildFinalMessage = useCallback(
-    (message: string, inlineMentions?: ContextFile[], inlineTaskMentions?: TaskMentionData[]) => {
-      const allContextFiles = [...contextFiles, ...(inlineMentions || [])];
-      const documentContext = buildDocumentContext(activeDocument, planModeEnabled, planComments);
-      const contextFilesContext = buildContextFilesContext(allContextFiles, prompts);
-      const taskMentionsContext = inlineTaskMentions?.length
-        ? buildTaskMentionsContext(inlineTaskMentions, storeApi.getState())
-        : "";
-      return {
-        finalMessage: message.trim() + documentContext + contextFilesContext + taskMentionsContext,
-        allContextFiles,
-      };
-    },
-    [contextFiles, activeDocument, planModeEnabled, planComments, prompts, storeApi],
-  );
+  const pendingAdmissionRef = useRef<PendingMessageAdmission | null>(null);
 
   const handleSendMessage = useCallback(
     async (payload: ChatSubmitPayload) => {
@@ -354,57 +540,63 @@ export function useMessageHandler({
         throw error;
       }
 
-      const { finalMessage, allContextFiles } = buildFinalMessage(
-        payload.message,
-        payload.inlineMentions,
-        payload.inlineTaskMentions,
-      );
+      const { finalMessage, allContextFiles } = buildFinalMessageForSubmit({
+        payload,
+        contextFiles,
+        activeDocument,
+        planModeEnabled,
+        prompts,
+        state: storeApi.getState(),
+      });
       const modelToSend = activeModel && activeModel !== sessionModel ? activeModel : undefined;
-      const realFiles = allContextFiles.filter(
-        (f) => !f.path.startsWith("prompt:") && f.path !== "plan:context",
-      );
-      const contextFilesMeta =
-        realFiles.length > 0
-          ? realFiles.map((f) => ({
-              path: f.path,
-              name: f.name,
-              ...(f.isDirectory !== undefined ? { is_directory: f.isDirectory } : {}),
-            }))
-          : undefined;
-
+      const planCommentRefs = payload.planCommentRefs ?? toTaskPlanCommentRefs(planComments);
+      const contextFilesMeta = buildContextFilesMetadata(allContextFiles);
       const inputMode = requireSessionInputMode(storeApi.getState(), resolvedSessionId);
-      if (hasPendingClarification || inputMode === "queue") {
-        const queueAttachments = buildQueueAttachments(payload.attachments);
-        await queue({
-          taskId,
-          content: finalMessage,
-          model: modelToSend,
-          planMode: planModeEnabled,
-          attachments: queueAttachments,
-          entityReferences: payload.entityReferences,
-          ...(contextFilesMeta ? { contextFilesMeta } : {}),
-        });
-        return;
-      }
-
-      // Add the returned message to the store directly so the chat updates
-      // even if the session.message.added broadcast is missed (subscription
-      // gap, dropped frame, etc.). addMessage is idempotent on id.
-      const created = await sendMessageRequest({
+      const admissionKey = messageAdmissionKey({
         taskId,
         resolvedSessionId,
-        clientMessageId: generateUUID(),
         finalMessage,
         modelToSend,
-        planMode: planModeEnabled,
+        planModeEnabled,
         hasReviewComments: !!payload.reviewComments?.length,
-        attachments: payload.attachments,
+        planCommentRefs,
         contextFilesMeta,
+        attachments: payload.attachments,
         entityReferences: payload.entityReferences,
       });
-      if (created && created.id && created.session_id) {
-        storeApi.getState().addMessage(created);
+      const previousAdmission =
+        pendingAdmissionRef.current?.key === admissionKey ? pendingAdmissionRef.current : null;
+      const admission = previousAdmission ?? { key: admissionKey, id: generateUUID() };
+      pendingAdmissionRef.current = admission;
+      if (
+        await recoverPendingMessageAdmission(
+          previousAdmission,
+          taskId,
+          resolvedSessionId,
+          planCommentRefs,
+          storeApi,
+        )
+      ) {
+        if (pendingAdmissionRef.current === admission) pendingAdmissionRef.current = null;
+        return;
       }
+      const delivered = await deliverComposedMessage({
+        payload,
+        taskId,
+        resolvedSessionId,
+        finalMessage,
+        modelToSend,
+        planModeEnabled,
+        hasPendingClarification,
+        planCommentRefs,
+        contextFilesMeta,
+        inputMode,
+        queue,
+        storeApi,
+        clientAdmissionId: admission.id,
+      });
+      if (delivered === false) return false;
+      if (pendingAdmissionRef.current === admission) pendingAdmissionRef.current = null;
     },
     [
       resolvedSessionId,
@@ -414,8 +606,11 @@ export function useMessageHandler({
       planModeEnabled,
       hasPendingClarification,
       queue,
-      buildFinalMessage,
       storeApi,
+      planComments,
+      contextFiles,
+      activeDocument,
+      prompts,
     ],
   );
 

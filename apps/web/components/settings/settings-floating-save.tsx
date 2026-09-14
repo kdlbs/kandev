@@ -18,6 +18,7 @@ import { createPortal } from "react-dom";
 import { useConfigChatFloatingActionsHost } from "@/components/config-chat/config-chat-provider";
 import type { NavigationIntent } from "@/lib/routing/navigation-guard";
 import { cn } from "@/lib/utils";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 export type SettingsSaveStatus = "dirty" | "saving" | "saved" | "error";
 export type SettingsSaveErrorKind = "save" | "reset";
@@ -33,6 +34,7 @@ function standalonePositioningClass(placement: SettingsSavePlacement): string {
 type SettingsFloatingSaveProps = {
   status: SettingsSaveStatus;
   placement?: SettingsSavePlacement;
+  canSave?: boolean;
   errorKind?: SettingsSaveErrorKind | null;
   dirtyContributorIds?: string;
   invalidReason?: string;
@@ -44,9 +46,59 @@ type SettingsFloatingSaveProps = {
   onContinueEditing: () => void;
 };
 
+type SaveActionButtonsProps = {
+  isBusy: boolean;
+  isSaved: boolean;
+  isInvalid: boolean;
+  accessibleLabel: string;
+  labelKey: string;
+  status: SettingsSaveStatus;
+  primaryAction: () => Promise<unknown> | void;
+  onReset: () => Promise<unknown> | void;
+};
+
+function SaveActionButtons({
+  isBusy,
+  isSaved,
+  isInvalid,
+  accessibleLabel,
+  labelKey,
+  status,
+  primaryAction,
+  onReset,
+}: SaveActionButtonsProps) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex shrink-0 gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        className={settingsActionClassName("shrink-0 cursor-pointer px-3 text-sm")}
+        disabled={isBusy || isSaved}
+        onClick={() => void onReset()}
+      >
+        {t("settings:reset")}
+      </Button>
+      <Button
+        type="button"
+        className={settingsActionClassName(
+          "shrink-0 cursor-pointer bg-success px-3 text-sm text-success-foreground hover:bg-success/85 focus-visible:border-success focus-visible:ring-success/35",
+        )}
+        disabled={isBusy || isSaved || isInvalid}
+        aria-label={accessibleLabel}
+        onClick={() => void primaryAction()}
+      >
+        <SaveButtonIcon status={status} />
+        {t(labelKey)}
+      </Button>
+    </div>
+  );
+}
+
 export function SettingsFloatingSave({
   status,
   placement = "viewport",
+  canSave = true,
   errorKind,
   dirtyContributorIds,
   invalidReason,
@@ -60,7 +112,7 @@ export function SettingsFloatingSave({
   const { t } = useTranslation();
   const isSaving = status === "saving";
   const isSaved = status === "saved";
-  const isInvalid = Boolean(invalidReason);
+  const isInvalid = !canSave || Boolean(invalidReason);
   const isBusy = isSaving || isDiscarding;
   const { label: labelKey, accessible: accessibleKey } = saveButtonKeys(status, errorKind);
   const errorMessage = errorMessageKeys(errorKind);
@@ -80,7 +132,7 @@ export function SettingsFloatingSave({
       data-status={status}
     >
       <div
-        className="pointer-events-auto flex w-fit max-w-full items-center gap-1 rounded-lg border border-border/80 bg-card/95 px-1 shadow-md backdrop-blur-sm md:py-0.5"
+        className="pointer-events-auto flex w-fit max-w-full items-center gap-1 rounded-lg border border-border/80 bg-card/95 px-1 shadow-md backdrop-blur-sm md:py-1"
         data-testid="settings-floating-save-surface"
       >
         <div className="min-w-0 max-w-52 flex-1 space-y-0.5 px-1">
@@ -102,28 +154,16 @@ export function SettingsFloatingSave({
             </span>
           )}
         </div>
-        <div className="flex shrink-0 gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            className="h-11 min-h-11 shrink-0 cursor-pointer px-3 text-sm md:h-8 md:min-h-8"
-            disabled={isBusy || isSaved}
-            onClick={() => void onReset()}
-          >
-            {t("settings:reset")}
-          </Button>
-          <Button
-            type="button"
-            size="default"
-            className="h-11 min-h-11 shrink-0 cursor-pointer bg-success px-3 text-sm text-success-foreground hover:bg-success/85 focus-visible:border-success focus-visible:ring-success/35 md:h-8 md:min-h-8"
-            disabled={isBusy || isSaved || isInvalid}
-            aria-label={accessibleLabel}
-            onClick={() => void primaryAction()}
-          >
-            <SaveButtonIcon status={status} />
-            {t(labelKey)}
-          </Button>
-        </div>
+        <SaveActionButtons
+          isBusy={isBusy}
+          isSaved={isSaved}
+          isInvalid={isInvalid}
+          accessibleLabel={accessibleLabel}
+          labelKey={labelKey}
+          status={status}
+          primaryAction={primaryAction}
+          onReset={onReset}
+        />
       </div>
     </div>
   );

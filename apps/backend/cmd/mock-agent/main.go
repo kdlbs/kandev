@@ -24,6 +24,9 @@ const (
 	modelFast           = "mock-fast"
 	modelSmart          = "mock-smart"
 	modelSlow           = "mock-slow"
+	modelUnique         = "opus[1m]"
+	modelAmbiguousFirst = "opus[270k]"
+	modelAmbiguousLast  = "opus[1m, fast]"
 	reasoningEffortLow  = "low"
 	reasoningEffortMed  = "medium"
 	reasoningEffortHigh = "high"
@@ -110,7 +113,10 @@ func (a *mockAgent) Initialize(_ context.Context, _ acp.InitializeRequest) (acp.
 		AgentCapabilities: acp.AgentCapabilities{
 			LoadSession:     true,
 			McpCapabilities: acp.McpCapabilities{Sse: true},
-			Meta:            meta,
+			SessionCapabilities: acp.SessionCapabilities{
+				Close: &acp.SessionCloseCapabilities{},
+			},
+			Meta: meta,
 		},
 	}, nil
 }
@@ -204,22 +210,24 @@ func mockSessionConfigOptionsForModel(model string) []acp.SessionConfigOption {
 			{Value: "max", Name: "Max", Description: ptr("Use maximum reasoning")},
 		}
 	}
+	modelOptions := acp.SessionConfigSelectOptionsUngrouped{
+		{Value: modelFast, Name: "Mock Fast", Description: ptr("Fast mock model for testing")},
+		{Value: modelSmart, Name: "Mock Smart", Description: ptr("Smart mock model for testing")},
+		// E2E fixtures use "mock-slow" for the slow-response delay tier.
+		// It must be advertised so the no-silent-model-fallback strict
+		// policy (which fails session start when the profile model is
+		// absent from the advertised list) does not reject it.
+		{Value: modelSlow, Name: "Mock Slow", Description: ptr("Slow mock model for testing")},
+	}
+	modelOptions = append(modelOptions, mockModelVariationOptions()...)
 	return []acp.SessionConfigOption{
 		{Select: &acp.SessionConfigOptionSelect{
 			Category:     &modelCat,
 			CurrentValue: acp.SessionConfigValueId(model),
 			Id:           "model",
 			Name:         "Model",
-			Options: acp.SessionConfigSelectOptions{Ungrouped: &acp.SessionConfigSelectOptionsUngrouped{
-				{Value: modelFast, Name: "Mock Fast", Description: ptr("Fast mock model for testing")},
-				{Value: modelSmart, Name: "Mock Smart", Description: ptr("Smart mock model for testing")},
-				// E2E fixtures use "mock-slow" for the slow-response delay tier.
-				// It must be advertised so the no-silent-model-fallback strict
-				// policy (which fails session start when the profile model is
-				// absent from the advertised list) does not reject it.
-				{Value: modelSlow, Name: "Mock Slow", Description: ptr("Slow mock model for testing")},
-			}},
-			Type: "select",
+			Options:      acp.SessionConfigSelectOptions{Ungrouped: &modelOptions},
+			Type:         "select",
 		}},
 		{Select: &acp.SessionConfigOptionSelect{
 			Category:     &modeCat,
@@ -244,6 +252,22 @@ func mockSessionConfigOptionsForModel(model string) []acp.SessionConfigOption {
 	}
 }
 
+func mockModelVariationOptions() []acp.SessionConfigSelectOption {
+	catalog := strings.ToLower(strings.TrimSpace(os.Getenv("MOCK_AGENT_MODEL_CATALOG")))
+	if catalog == "ambiguous" {
+		return []acp.SessionConfigSelectOption{
+			{Value: modelAmbiguousFirst, Name: "Opus (270k)", Description: ptr("Ambiguous variation fixture")},
+			{Value: modelAmbiguousLast, Name: "Opus (1m, fast)", Description: ptr("Ambiguous variation fixture")},
+		}
+	}
+	if catalog == "unique" || (catalog == "" && strings.EqualFold(os.Getenv("KANDEV_E2E_MOCK"), "true")) {
+		return []acp.SessionConfigSelectOption{
+			{Value: modelUnique, Name: "Opus (1m)", Description: ptr("Unique variation fixture")},
+		}
+	}
+	return nil
+}
+
 func cloneSessionConfigOptions(options []acp.SessionConfigOption) []acp.SessionConfigOption {
 	cloned := make([]acp.SessionConfigOption, len(options))
 	copy(cloned, options)
@@ -264,19 +288,38 @@ func ptr(s string) *string {
 // LoadSession restores a previous session for resume.
 // When --fail-on-resume is set, exit before completing the load — LoadSession
 // is only reached on resume, so no resumed-guard is needed here (unlike TUI).
-func (a *mockAgent) LoadSession(_ context.Context, req acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
+func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest) (acp.LoadSessionResponse, error) {
 	if parseFailOnResumeFlag() {
 		_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: refusing resume for session %s (--fail-on-resume), exiting 1\n", os.Getpid(), req.SessionId)
 		os.Exit(1)
 	}
+	if delay := parseResumeDelayFlag(); delay > 0 {
+		_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: delaying resume for session %s by %s\n", os.Getpid(), req.SessionId, delay)
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			return acp.LoadSessionResponse{}, ctx.Err()
+		}
+	}
 	a.mu.Lock()
-	a.sessions[req.SessionId] = true
+	if a.sessions == nil {
+		a.sessions = make(map[acp.SessionId]bool)
+	}
 	if a.sessionConfig == nil {
 		a.sessionConfig = make(map[acp.SessionId][]acp.SessionConfigOption)
 	}
-	if _, ok := a.sessionConfig[req.SessionId]; !ok {
-		a.sessionConfig[req.SessionId] = mockSessionConfigOptions()
+	if a.commandsEmitted == nil {
+		a.commandsEmitted = make(map[acp.SessionId]bool)
 	}
+	a.sessions[req.SessionId] = true
+	configOptions, ok := a.sessionConfig[req.SessionId]
+	if !ok {
+		a.sessionConfig[req.SessionId] = mockSessionConfigOptions()
+		configOptions = a.sessionConfig[req.SessionId]
+	}
+	responseConfigOptions := cloneSessionConfigOptions(configOptions)
 	// Reset emit state so the resume re-advertises commands (matches real
 	// agents which re-emit on session/load).
 	delete(a.commandsEmitted, req.SessionId)
@@ -286,7 +329,10 @@ func (a *mockAgent) LoadSession(_ context.Context, req acp.LoadSessionRequest) (
 	// Re-emit available commands after the session/load response flushes.
 	go a.emitAvailableCommandsAfterDelay(req.SessionId)
 
-	return acp.LoadSessionResponse{}, nil
+	return acp.LoadSessionResponse{
+		ConfigOptions: responseConfigOptions,
+		Modes:         mockSessionModes(),
+	}, nil
 }
 
 // Prompt processes a user message and streams responses via SessionUpdate.
@@ -499,6 +545,7 @@ func mockAvailableCommands() []acp.AvailableCommand {
 		{Name: "slow", Description: "Run a slow response (default 5s)", Input: hint("duration (e.g. 10s)")},
 		{Name: "background", Description: "Spawn a subagent and stay foreground-idle (default 8s)", Input: hint("duration (e.g. 8s)")},
 		{Name: "detached-background", Description: "Launch work that outlives the foreground turn (default 8s)", Input: hint("duration (e.g. 8s)")},
+		{Name: "parked-fixture", Description: "e2e-only: delayed shell-kind detached launch, for scripting the probe before settle", Input: hint("settleDelay (e.g. 3s)")},
 		{Name: "async-subagent-lifecycle", Description: "Replay an async Agent lifecycle (default 20s)", Input: hint("duration (e.g. 20s)")},
 		{Name: "async-subagent-teardown", Description: "Replay async Agent work with a missing completion"},
 		{Name: toolKeyError, Description: "Simulate an error"},
@@ -589,6 +636,41 @@ func parseFailOnResumeFlag() bool {
 // parseFailOnResumeFromArgs reports whether --fail-on-resume is in args.
 func parseFailOnResumeFromArgs(args []string) bool {
 	return slices.Contains(args[1:], "--fail-on-resume")
+}
+
+// parseResumeDelayFlag returns the positive duration from --delay-resume. This
+// is a mock-agent-only readiness fixture used by E2E resume tests.
+func parseResumeDelayFlag() time.Duration {
+	if delay := parseResumeDelayFromArgs(os.Args); delay > 0 {
+		return delay
+	}
+	return parseResumeDelayFromValue(os.Getenv("E2E_MOCK_AGENT_RESUME_DELAY"))
+}
+
+func parseResumeDelayFromArgs(args []string) time.Duration {
+	for i, arg := range args[1:] {
+		var raw string
+		if arg == "--delay-resume" && i+1 < len(args)-1 {
+			raw = args[i+2]
+		} else if value, ok := strings.CutPrefix(arg, "--delay-resume="); ok {
+			raw = value
+		}
+		if raw == "" {
+			continue
+		}
+		if delay := parseResumeDelayFromValue(raw); delay > 0 {
+			return delay
+		}
+	}
+	return 0
+}
+
+func parseResumeDelayFromValue(raw string) time.Duration {
+	delay, err := time.ParseDuration(strings.TrimSpace(raw))
+	if err == nil && delay > 0 {
+		return delay
+	}
+	return 0
 }
 
 // mcpConfigPayload is the JSON structure for --mcp-config.

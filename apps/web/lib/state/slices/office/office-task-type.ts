@@ -16,6 +16,11 @@ export type OfficeTask = {
   parentId?: string;
   projectId?: string;
   assigneeAgentProfileId?: string;
+  /**
+   * The human assignee's user id. Independent of the agent assignee above:
+   * a task can carry both, and setting one never clears the other.
+   */
+  assigneeUserId?: string;
   labels?: TaskLabel[] | string[];
   blockedBy?: string[];
   children?: OfficeTask[];

@@ -18,6 +18,8 @@ func runDeploy(ctx context.Context, args []string) int {
 	repo := fs.String("repo", envOr("GITHUB_REPOSITORY", ""), "owner/repo")
 	port := fs.Int("port", ports.Backend, "kandev backend port exposed by the sprite")
 	skipWebInstall := fs.Bool("skip-web-install", false, "skip pnpm install (CI already ran it)")
+	skipDescription := fs.Bool("skip-description", false, "skip the PR description update")
+	artifact := fs.String("artifact", "", "prebuilt preview bundle to deploy")
 
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(os.Stderr, "preview deploy: %v\n", err)
@@ -31,6 +33,18 @@ func runDeploy(ctx context.Context, args []string) int {
 		fmt.Fprintln(os.Stderr, "preview deploy: --repo or GITHUB_REPOSITORY is required")
 		return 2
 	}
+	artifactProvided := *artifact != ""
+	if artifactProvided {
+		exists, err := previewArtifactExists(*artifact)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "preview deploy: %v\n", err)
+			return 2
+		}
+		if !exists {
+			fmt.Fprintf(os.Stderr, "preview deploy: prebuilt artifact %s does not exist\n", *artifact)
+			return 2
+		}
+	}
 
 	spritesToken := os.Getenv("SPRITES_API_TOKEN")
 	if spritesToken == "" {
@@ -38,7 +52,7 @@ func runDeploy(ctx context.Context, args []string) int {
 		return 2
 	}
 	ghToken := os.Getenv("GH_TOKEN")
-	if ghToken == "" {
+	if ghToken == "" && !*skipDescription {
 		fmt.Fprintln(os.Stderr, "preview deploy: GH_TOKEN is required")
 		return 2
 	}
@@ -52,16 +66,21 @@ func runDeploy(ctx context.Context, args []string) int {
 	}
 	defer func() { _ = os.RemoveAll(tmpDir) }()
 
-	binDir := filepath.Join(tmpDir, "bin")
-	tarPath := filepath.Join(tmpDir, "kandev-preview.tar.gz")
+	tarPath := *artifact
+	if tarPath == "" {
+		tarPath = filepath.Join(tmpDir, "kandev-preview.tar.gz")
+	}
 
-	previewURL, err := deployArtifacts(ctx, binDir, tarPath, spritesToken, spriteName, *port, *skipWebInstall)
+	previewURL, err := deployArtifacts(ctx, tarPath, spritesToken, spriteName, *port, *skipWebInstall, !artifactProvided)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "preview deploy: %v\n", err)
 		return 1
 	}
 
 	fmt.Printf("preview URL: %s\n", previewURL)
+	if *skipDescription {
+		return 0
+	}
 
 	section := buildDeploySection(previewURL, *sha)
 	if err := upsertDescriptionSection(ctx, ghToken, *repo, *pr, section); err != nil {
@@ -72,24 +91,89 @@ func runDeploy(ctx context.Context, args []string) int {
 	return 0
 }
 
-// deployArtifacts builds the bundle, deploys it to the sprite, and returns the public URL.
+// deployArtifacts deploys an archive or builds one when buildIfMissing is true.
 // Using a single client for the full flow avoids redundant auth round-trips.
-func deployArtifacts(ctx context.Context, binDir, tarPath, spritesToken, spriteName string, port int, skipWebInstall bool) (string, error) {
-	fmt.Fprintln(os.Stderr, "building linux/amd64 binaries...")
-	if err := buildLinuxBinaries(ctx, binDir); err != nil {
-		return "", fmt.Errorf("build binaries: %w", err)
+func deployArtifacts(ctx context.Context, tarPath, spritesToken, spriteName string, port int, skipWebInstall, buildIfMissing bool) (string, error) {
+	return deployArtifactsWithHooks(
+		ctx,
+		tarPath,
+		spritesToken,
+		spriteName,
+		port,
+		skipWebInstall,
+		buildIfMissing,
+		buildPreviewArtifact,
+		deployPreviewArtifact,
+	)
+}
+
+type previewArtifactBuilder func(context.Context, string, string, bool, bool) error
+type previewArtifactDeployer func(context.Context, string, string, string, int) (string, error)
+
+func deployArtifactsWithHooks(
+	ctx context.Context,
+	tarPath, spritesToken, spriteName string,
+	port int,
+	skipWebInstall, buildIfMissing bool,
+	build previewArtifactBuilder,
+	deploy previewArtifactDeployer,
+) (string, error) {
+	exists, err := previewArtifactExists(tarPath)
+	if err != nil {
+		return "", err
 	}
 
-	fmt.Fprintln(os.Stderr, "building web frontend...")
-	if err := buildWeb(ctx, skipWebInstall); err != nil {
-		return "", fmt.Errorf("build web: %w", err)
+	if !exists {
+		if !buildIfMissing {
+			return "", fmt.Errorf("prebuilt artifact %s does not exist", tarPath)
+		}
+		binDir := filepath.Join(filepath.Dir(tarPath), "bin")
+		if err := build(ctx, binDir, tarPath, skipWebInstall, false); err != nil {
+			return "", err
+		}
+	}
+
+	return deploy(ctx, tarPath, spritesToken, spriteName, port)
+}
+
+func previewArtifactExists(tarPath string) (bool, error) {
+	if tarPath == "" {
+		return false, fmt.Errorf("preview artifact path is required")
+	}
+	info, err := os.Stat(tarPath)
+	if os.IsNotExist(err) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("stat preview artifact %s: %w", tarPath, err)
+	}
+	if !info.Mode().IsRegular() {
+		return false, fmt.Errorf("preview artifact %s is not a regular file", tarPath)
+	}
+	return true, nil
+}
+
+func buildPreviewArtifact(ctx context.Context, binDir, tarPath string, skipWebInstall, skipWebBuild bool) error {
+	fmt.Fprintln(os.Stderr, "building linux/amd64 binaries...")
+	if err := buildLinuxBinaries(ctx, binDir); err != nil {
+		return fmt.Errorf("build binaries: %w", err)
+	}
+
+	if !skipWebBuild {
+		fmt.Fprintln(os.Stderr, "building web frontend...")
+		if err := buildWeb(ctx, skipWebInstall); err != nil {
+			return fmt.Errorf("build web: %w", err)
+		}
 	}
 
 	fmt.Fprintln(os.Stderr, "packaging bundle...")
 	if err := packageBundle(binDir, tarPath); err != nil {
-		return "", fmt.Errorf("package bundle: %w", err)
+		return fmt.Errorf("package bundle: %w", err)
 	}
+	return nil
+}
 
+func deployPreviewArtifact(ctx context.Context, tarPath, spritesToken, spriteName string, port int) (string, error) {
 	client := newSpriteClient(spritesToken)
 	defer func() { _ = client.Close() }()
 

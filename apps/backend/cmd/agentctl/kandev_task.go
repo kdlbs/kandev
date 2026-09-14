@@ -7,9 +7,14 @@ import (
 	"strings"
 )
 
+const (
+	decisionApproved = "approved"
+	decisionRejected = "rejected"
+)
+
 func runTaskCmd(args []string) int {
 	if len(args) == 0 {
-		cliError("usage: agentctl kandev task <get|update|create> [flags]")
+		cliError("usage: agentctl kandev task <get|update|create|decision> [flags]")
 		return 1
 	}
 	switch args[0] {
@@ -19,10 +24,49 @@ func runTaskCmd(args []string) int {
 		return taskUpdate(args[1:])
 	case subcmdCreate:
 		return taskCreate(args[1:])
+	case "decision":
+		return taskDecision(args[1:])
 	default:
 		cliError("unknown task subcommand: %s", args[0])
 		return 1
 	}
+}
+
+// taskDecision records the caller's workflow-step verdict through the signed
+// Office runtime API. The runtime derives every identity field from the token.
+func taskDecision(args []string) int {
+	fs := flag.NewFlagSet("task decision", flag.ContinueOnError)
+	decision := fs.String("decision", "", fmt.Sprintf("Verdict: %s or %s (required)", decisionApproved, decisionRejected))
+	reason := fs.String("reason", "", "Reason for the verdict (required)")
+	if err := fs.Parse(args); err != nil {
+		cliError("parse flags: %v", err)
+		return 1
+	}
+	if fs.NArg() > 0 {
+		cliError("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+		return 1
+	}
+	switch *decision {
+	case decisionApproved, decisionRejected:
+	default:
+		cliError("--decision must be %q or %q", decisionApproved, decisionRejected)
+		return 1
+	}
+	if strings.TrimSpace(*reason) == "" {
+		cliError("--reason is required")
+		return 1
+	}
+
+	client, err := newKandevClient()
+	if err != nil {
+		cliError("%v", err)
+		return 1
+	}
+	body, status, err := client.do(http.MethodPost, "/api/v1/office/runtime/task/decision", map[string]string{
+		"decision": *decision,
+		"reason":   *reason,
+	})
+	return handleResponse(body, status, err)
 }
 
 // taskGet fetches a task by ID. Defaults to $KANDEV_TASK_ID when --id is omitted.

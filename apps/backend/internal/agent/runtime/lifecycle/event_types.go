@@ -11,9 +11,11 @@ import (
 // AgentEventPayload is the payload for agent lifecycle events (started, stopped, ready, completed, failed).
 type AgentEventPayload struct {
 	AgentExecutionID   string                 `json:"agent_execution_id"`
+	AttemptID          string                 `json:"attempt_id,omitempty"`
 	RunID              string                 `json:"run_id,omitempty"`
 	TaskID             string                 `json:"task_id"`
 	SessionID          string                 `json:"session_id,omitempty"`
+	TaskEnvironmentID  string                 `json:"task_environment_id,omitempty"`
 	TurnID             string                 `json:"turn_id,omitempty"`
 	AgentID            string                 `json:"agent_id,omitempty"`
 	AgentProfileID     string                 `json:"agent_profile_id"`
@@ -28,6 +30,29 @@ type AgentEventPayload struct {
 	ProviderError      *streams.ProviderError `json:"provider_error,omitempty"`
 	ExitCode           *int                   `json:"exit_code,omitempty"`
 	PromptGeneration   uint64                 `json:"prompt_generation,omitempty"`
+	// Prompt replay evidence is populated on terminal failure events. It is
+	// captured by lifecycle before the terminal event is published so consumers
+	// do not have to infer output or effects from independently subscribed
+	// stream events.
+	EvidenceKnown  bool `json:"evidence_known,omitempty"`
+	OutputObserved bool `json:"output_observed,omitempty"`
+	EffectObserved bool `json:"effect_observed,omitempty"`
+	// ProviderDiagnosticCandidate carries the bounded text marker captured from
+	// a marked diagnostic stream event. It lets a terminal failure consumer
+	// correlate the diagnostic even when the stream subscription is delayed.
+	ProviderDiagnosticCandidate bool   `json:"provider_diagnostic_candidate,omitempty"`
+	ProviderDiagnosticText      string `json:"provider_diagnostic_text,omitempty"`
+}
+
+// PromptAttemptEvidence is the immutable lifecycle snapshot attached to a
+// terminal failure event. Lifecycle conservatively treats any genuine turn
+// content as both output and effect evidence, which fails replay closed.
+type PromptAttemptEvidence struct {
+	EvidenceKnown               bool
+	OutputObserved              bool
+	EffectObserved              bool
+	ProviderDiagnosticCandidate bool
+	ProviderDiagnosticText      string
 }
 
 // AgentStalledPayload describes a prompt that has stopped receiving agent events.
@@ -56,6 +81,7 @@ type AgentctlEventPayload struct {
 	SessionID         string `json:"session_id"`
 	TaskEnvironmentID string `json:"task_environment_id,omitempty"`
 	AgentExecutionID  string `json:"agent_execution_id"`
+	AttemptID         string `json:"attempt_id,omitempty"`
 	ErrorMessage      string `json:"error_message,omitempty"`
 	FailureCode       string `json:"failure_code,omitempty"`
 	FailureDetails    string `json:"failure_details,omitempty"`
@@ -81,6 +107,7 @@ type ACPSessionCreatedPayload struct {
 	SessionID        string `json:"session_id"`
 	AgentProfileID   string `json:"agent_profile_id"`
 	AgentExecutionID string `json:"agent_execution_id"`
+	AttemptID        string `json:"attempt_id,omitempty"`
 	ACPSessionID     string `json:"acp_session_id"`
 }
 
@@ -128,19 +155,20 @@ func (p PrepareCompletedEventPayload) GetSessionID() string {
 
 // AgentStreamEventData contains the nested event data within AgentStreamEventPayload.
 type AgentStreamEventData struct {
-	Type             string                 `json:"type"`
-	ACPSessionID     string                 `json:"acp_session_id,omitempty"`
-	Text             string                 `json:"text,omitempty"`
-	ToolCallID       string                 `json:"tool_call_id,omitempty"`
-	ToolName         string                 `json:"tool_name,omitempty"`
-	ToolTitle        string                 `json:"tool_title,omitempty"`
-	ToolStatus       string                 `json:"tool_status,omitempty"`
-	Error            string                 `json:"error,omitempty"`
-	ProviderError    *streams.ProviderError `json:"provider_error,omitempty"`
-	SessionStatus    string                 `json:"session_status,omitempty"` // "resumed" or "new" for session_status events
-	PromptGeneration uint64                 `json:"prompt_generation,omitempty"`
-	TurnID           string                 `json:"turn_id,omitempty"`
-	Data             interface{}            `json:"data,omitempty"`
+	Type                        string                 `json:"type"`
+	ACPSessionID                string                 `json:"acp_session_id,omitempty"`
+	Text                        string                 `json:"text,omitempty"`
+	ProviderDiagnosticCandidate bool                   `json:"provider_diagnostic_candidate,omitempty"`
+	ToolCallID                  string                 `json:"tool_call_id,omitempty"`
+	ToolName                    string                 `json:"tool_name,omitempty"`
+	ToolTitle                   string                 `json:"tool_title,omitempty"`
+	ToolStatus                  string                 `json:"tool_status,omitempty"`
+	Error                       string                 `json:"error,omitempty"`
+	ProviderError               *streams.ProviderError `json:"provider_error,omitempty"`
+	SessionStatus               string                 `json:"session_status,omitempty"` // "resumed" or "new" for session_status events
+	PromptGeneration            uint64                 `json:"prompt_generation,omitempty"`
+	TurnID                      string                 `json:"turn_id,omitempty"`
+	Data                        interface{}            `json:"data,omitempty"`
 
 	// ParentToolCallID identifies the parent Task tool call when this event
 	// comes from a subagent. Used for visual nesting in the UI.
@@ -247,13 +275,15 @@ type AgentStreamEventData struct {
 // for execution-scoped logic (e.g., resume-token CAS that must reject writes from
 // a defunct execution).
 type AgentStreamEventPayload struct {
-	Type        string                `json:"type"` // Always "agent/event"
-	Timestamp   string                `json:"timestamp"`
-	AgentID     string                `json:"agent_id"`     // Historical: execution.ID. Prefer ExecutionID.
-	ExecutionID string                `json:"execution_id"` // Lifecycle execution ID; stable across the payload's lifetime.
-	TaskID      string                `json:"task_id"`
-	SessionID   string                `json:"session_id"` // Task session ID
-	Data        *AgentStreamEventData `json:"data"`
+	Type           string                `json:"type"` // Always "agent/event"
+	Timestamp      string                `json:"timestamp"`
+	AgentID        string                `json:"agent_id"`                   // Historical: execution.ID. Prefer ExecutionID.
+	ExecutionID    string                `json:"execution_id"`               // Lifecycle execution ID; stable across the payload's lifetime.
+	AttemptID      string                `json:"attempt_id,omitempty"`       // Immutable recovery attempt that owns this callback.
+	AgentProfileID string                `json:"agent_profile_id,omitempty"` // Stable Office identity (execution.officeProfileID()); the agent that is actually running, not the task's assignee.
+	TaskID         string                `json:"task_id"`
+	SessionID      string                `json:"session_id"` // Task session ID
+	Data           *AgentStreamEventData `json:"data"`
 }
 
 // GitEventType discriminates the type of git event
@@ -270,11 +300,12 @@ const (
 // GitEventPayload is a unified payload for all git-related WebSocket events.
 // Uses discriminated union pattern with Type field.
 type GitEventPayload struct {
-	Type      GitEventType `json:"type"`
-	TaskID    string       `json:"task_id,omitempty"`
-	SessionID string       `json:"session_id"`
-	AgentID   string       `json:"agent_id,omitempty"`
-	Timestamp string       `json:"timestamp"`
+	Type              GitEventType `json:"type"`
+	TaskID            string       `json:"task_id,omitempty"`
+	SessionID         string       `json:"session_id"`
+	TaskEnvironmentID string       `json:"task_environment_id,omitempty"`
+	AgentID           string       `json:"agent_id,omitempty"`
+	Timestamp         string       `json:"timestamp"`
 
 	// For status_update
 	Status *GitStatusData `json:"status,omitempty"`

@@ -77,4 +77,53 @@ test.describe("Jira status filter", () => {
     await expect(testPage.getByText("CLIP-2")).toBeVisible();
     await expect(testPage.getByText("CLIP-1")).toHaveCount(0);
   });
+
+  test("confirms deletion of a custom view while preserving built-ins", async ({
+    testPage,
+    apiClient,
+  }) => {
+    const seedResponse = await apiClient.rawRequest("PATCH", "/api/v1/user/settings", {
+      jira_saved_views: [
+        {
+          id: "jira-sprint-bugs",
+          name: "Sprint bugs",
+          filters: {
+            projectKeys: [],
+            statuses: [],
+            assignee: "anyone",
+            searchText: "",
+            sort: "updated",
+          },
+        },
+      ],
+    });
+    expect(seedResponse.ok).toBe(true);
+    await testPage.goto("/jira");
+
+    await testPage.getByRole("button", { name: "Assigned to me" }).click();
+    await expect(testPage.getByRole("button", { name: "Delete Assigned to me" })).toHaveCount(0);
+    const deleteAction = testPage.getByRole("button", { name: "Delete Sprint bugs" });
+    await deleteAction.click();
+    const confirmation = testPage.getByTestId("saved-task-view-delete-confirmation");
+    await expect(confirmation).toHaveAccessibleName("Delete Sprint bugs?");
+    await expect(testPage.getByText("Sprint bugs", { exact: true })).toBeVisible();
+    await confirmation.getByRole("button", { name: "Cancel" }).click();
+    const settingsAfterCancel = await apiClient.getUserSettings();
+    expect(
+      (settingsAfterCancel.settings.jira_saved_views as Array<{ id?: string }> | undefined)?.some(
+        (view) => view.id === "jira-sprint-bugs",
+      ),
+    ).toBe(true);
+
+    await deleteAction.click();
+    const deleteResponse = testPage.waitForResponse(
+      (response) =>
+        response.ok() &&
+        response.request().method() === "PATCH" &&
+        response.url().includes("/api/v1/user/settings"),
+    );
+    await confirmation.getByRole("button", { name: "Delete Sprint bugs" }).click();
+    await deleteResponse;
+    await expect(deleteAction).toHaveCount(0);
+  });
 });

@@ -10,7 +10,11 @@ import { isDebugUI } from "@/lib/config";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { useAppStore } from "@/components/state-provider";
 import type { UseEnsureTaskSessionResult } from "@/hooks/domains/session/use-ensure-task-session";
-import { EnsureSessionErrorBanner } from "@/components/task/ensure-session-error";
+import {
+  EnsureSessionErrorBanner,
+  getSessionRecoveryRetry,
+  SessionRecoveryFeedback,
+} from "@/components/task/ensure-session-error";
 import { TaskMoveErrorBanner } from "@/components/task/task-move-error-banner";
 import type { Layout } from "react-resizable-panels";
 import { TaskArchivedProvider } from "./task-archived-context";
@@ -19,11 +23,17 @@ import { TaskPRShortcut } from "@/components/task/task-pr-shortcut";
 import { useEmbeddedVscodeSupport } from "@/components/task/task-page-editor-capability";
 import { VcsDialogsProvider } from "@/components/vcs/vcs-dialogs";
 import { PortForwardingVisibilityProvider } from "@/components/task/port-forwarding-visibility-provider";
-import { TaskLaunchErrorProvider } from "@/components/task/task-launch-error-context";
+import {
+  TaskLaunchErrorProvider,
+  useTaskLaunchErrorContext,
+} from "@/components/task/task-launch-error-context";
+import { SessionBootstrapRecoveryCard } from "@/components/task/chat/session-bootstrap-recovery-card";
+import { selectSessionRecoveryError } from "@/lib/session-recovery-presentation";
 import {
   buildDebugEntries,
   buildArchivedValue,
   resolveTaskProps,
+  useTaskActionsMenuBoardRow,
   selectWorkspaceRepositories,
 } from "@/components/task/task-page-content-helpers";
 import type { useSessionResumption } from "@/hooks/domains/session/use-session-resumption";
@@ -34,6 +44,7 @@ import type {
   useMergedAgentState,
 } from "./task-page-content";
 import { useTranslation } from "react-i18next";
+import type { Canvas } from "@/lib/api/domains/canvas-api";
 
 export type TaskPageInnerProps = {
   task: Task | null;
@@ -56,6 +67,7 @@ export type TaskPageInnerProps = {
   officeTaskHref?: string | null;
   ensureSession: UseEnsureTaskSessionResult;
   onTaskUnarchived: (taskId: string) => void;
+  taskCanvases?: Canvas[];
 };
 
 type RemoteExecutorStatus = {
@@ -98,7 +110,9 @@ function resolveCurrentStepId(
 }
 
 function buildTaskTopBarProps(params: {
+  task: Task | null;
   taskProps: ReturnType<typeof resolveTaskProps>;
+  actionsMenuBoardRow: ReturnType<typeof useTaskActionsMenuBoardRow>;
   workflowSteps: ReturnType<typeof useWorkflowStepsMapped>;
   showDebugOverlay: boolean;
   onToggleDebugOverlay: () => void;
@@ -120,6 +134,7 @@ function buildTaskTopBarProps(params: {
     workflowSteps,
     currentStepId: resolveCurrentStepId(params.sessionWorkflowStepId, taskProps.workflowStepId),
     workflowId: taskProps.workflowId,
+    taskState: params.task?.state ?? null,
     workspaceId: taskProps.workspaceId,
     projectId: taskProps.projectId,
     issueUrl: taskProps.issueUrl,
@@ -129,6 +144,13 @@ function buildTaskTopBarProps(params: {
     remoteExecutorType: params.remote.remoteExecutorType,
     officeTaskHref: params.officeTaskHref,
     onTaskUnarchived: params.onTaskUnarchived,
+    actionsMenuBoardRow: params.actionsMenuBoardRow,
+    // The subject's own last-known values, independent of `actionsMenuBoardRow`:
+    // the board excludes archived (and can lag/miss cross-workflow) tasks, so
+    // these stay available for the actions menu's plugin context and
+    // executor-aware confirmation copy even when the board row is unresolvable.
+    subjectWorkflowStepId: taskProps.workflowStepId,
+    subjectPrimaryExecutorType: taskProps.primaryExecutorType,
   };
 }
 
@@ -142,9 +164,12 @@ function buildTaskLayoutProps(params: {
   merged: ReturnType<typeof useMergedAgentState>;
   remote: ReturnType<typeof resolveRemoteExecutor>;
   initialLayout?: string | null;
+  onTaskUnarchived: (taskId: string) => void;
+  taskCanvases?: Canvas[];
 }) {
   const { taskProps, repository, effectiveSessionId, initialScripts, initialTerminals } = params;
   return {
+    taskId: taskProps.taskId,
     workspaceId: taskProps.workspaceId,
     workflowId: taskProps.workflowId,
     sessionId: effectiveSessionId,
@@ -153,6 +178,7 @@ function buildTaskLayoutProps(params: {
     initialTerminals,
     defaultLayouts: params.defaultLayouts,
     initialLayout: params.initialLayout,
+    taskCanvases: params.taskCanvases ?? [],
     taskTitle: taskProps.taskTitle,
     repositoryLabel: taskProps.repositoryLabel,
     baseBranch: taskProps.baseBranch,
@@ -165,6 +191,7 @@ function buildTaskLayoutProps(params: {
     remoteCheckedAt: params.remote.remoteCheckedAt,
     remoteStatusError: params.remote.remoteStatusError,
     isArchived: taskProps.isArchived,
+    onTaskUnarchived: params.onTaskUnarchived,
   };
 }
 
@@ -204,6 +231,56 @@ function TaskDebugOverlay({ entries }: { entries: ReturnType<typeof maybeBuildDe
   return <DebugOverlay title={t("task:taskDebug")} entries={entries} />;
 }
 
+function TaskPageRecoveryFeedback({
+  taskId,
+  sessionId,
+  resumption,
+  workspaceId,
+  isPassthrough,
+}: {
+  taskId: string;
+  sessionId: string | null;
+  resumption: TaskPageInnerProps["resumption"];
+  workspaceId: string | null;
+  isPassthrough: boolean;
+}) {
+  const launchErrorContext = useTaskLaunchErrorContext();
+  const sessionMetadata = useAppStore((state) =>
+    sessionId ? (state.taskSessions.items[sessionId]?.metadata ?? null) : null,
+  );
+  const bootstrapRecoveryError = selectSessionRecoveryError(
+    launchErrorContext?.statusSummary?.active_error,
+    sessionId,
+    sessionMetadata,
+  );
+  if (bootstrapRecoveryError && sessionId && isPassthrough) {
+    return (
+      <SessionBootstrapRecoveryCard
+        taskId={taskId}
+        sessionId={sessionId}
+        workspaceId={workspaceId}
+        error={bootstrapRecoveryError}
+        automaticRecovery={resumption}
+      />
+    );
+  }
+  if (bootstrapRecoveryError) {
+    return null;
+  }
+  return (
+    <SessionRecoveryFeedback
+      error={resumption.error}
+      notice={resumption.notice}
+      recoveryFailure={resumption.recoveryFailure}
+      onRetry={getSessionRecoveryRetry(resumption)}
+      retryDisabled={
+        resumption.resumptionState === "checking" || resumption.resumptionState === "resuming"
+      }
+      workspaceId={workspaceId}
+    />
+  );
+}
+
 /**
  * Derives everything the task page renders from its inputs: the resolved task
  * props plus the three prop bundles handed to the debug overlay, top bar, and
@@ -227,11 +304,13 @@ function useTaskPageDerivedProps({
   initialLayout,
   officeTaskHref,
   onTaskUnarchived,
+  taskCanvases,
 }: TaskPageInnerProps) {
   const workspaceRepositories = useAppStore((state) =>
     selectWorkspaceRepositories(state.repositories.itemsByWorkspaceId, task?.workspace_id),
   );
   const taskProps = resolveTaskProps(task, repository, workspaceRepositories);
+  const actionsMenuBoardRow = useTaskActionsMenuBoardRow(task);
   const remote = resolveRemoteExecutor(resumption.sessionStatus as RemoteExecutorStatus | null);
   const embeddedVscode = useEmbeddedVscodeSupport(effectiveSessionId, resumption.sessionStatus);
   const activeSessionMetadata = useAppStore((state) =>
@@ -249,7 +328,9 @@ function useTaskPageDerivedProps({
     agentctlStatus,
   });
   const topBarProps = buildTaskTopBarProps({
+    task,
     taskProps,
+    actionsMenuBoardRow,
     workflowSteps,
     showDebugOverlay,
     onToggleDebugOverlay,
@@ -270,6 +351,8 @@ function useTaskPageDerivedProps({
     merged,
     remote,
     initialLayout,
+    onTaskUnarchived,
+    taskCanvases,
   });
 
   return { taskProps, debugEntries, topBarProps, layoutProps };
@@ -337,8 +420,16 @@ export function TaskPageInner(props: TaskPageInnerProps) {
                   workspaceId: task.workspace_id,
                   statusSummary: task.status_summary,
                   repositories: task.repositories,
+                  automaticRecovery: props.resumption,
                 }}
               >
+                <TaskPageRecoveryFeedback
+                  taskId={task.id}
+                  sessionId={effectiveSessionId}
+                  resumption={props.resumption}
+                  workspaceId={task?.workspace_id ?? null}
+                  isPassthrough={sessionPanel.isSessionPassthrough}
+                />
                 <TaskLayout {...layoutProps} />
               </TaskLaunchErrorProvider>
             </TaskArchivedProvider>

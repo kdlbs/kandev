@@ -232,6 +232,16 @@ type stubStopper struct {
 	onStopSession      func()
 }
 
+type synchronousStubStopper struct {
+	stubStopper
+	synchronousSessionCalls int
+}
+
+func (s *synchronousStubStopper) StopSessionSynchronously(_ context.Context, _, _ string, _ bool) error {
+	s.synchronousSessionCalls++
+	return nil
+}
+
 func (s *stubStopper) StopTask(_ context.Context, _, _ string, _ bool) error { return nil }
 func (s *stubStopper) StopExecution(_ context.Context, _, _ string, _ bool) error {
 	s.stopExecutionCalls++
@@ -244,6 +254,31 @@ func (s *stubStopper) StopSession(_ context.Context, _, _ string, _ bool) error 
 		s.onStopSession()
 	}
 	return s.stopSessionErr
+}
+
+func TestStopTaskRuntimeSession_WaitsForSynchronousStopWhenAvailable(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	stopper := &synchronousStubStopper{}
+	svc.executionStopper = stopper
+
+	outcome := svc.stopTaskRuntimeTargetsWithTaskDeleted(
+		context.Background(),
+		"task-sync-stop",
+		[]taskStopTarget{{sessionID: "session-sync-stop"}},
+		"task deleted",
+		"stop failed",
+		true,
+		true,
+	)
+	if len(outcome.failed) != 0 {
+		t.Fatalf("synchronous session stop failed: %v", outcome.failed)
+	}
+	if stopper.synchronousSessionCalls != 1 {
+		t.Fatalf("synchronous stop calls = %d, want 1", stopper.synchronousSessionCalls)
+	}
+	if stopper.stopSessionCalls != 0 {
+		t.Fatalf("asynchronous StopSession calls = %d, want 0", stopper.stopSessionCalls)
+	}
 }
 
 type cancelAfterFirstStopper struct {
@@ -316,6 +351,30 @@ func TestStopTaskRuntimeTargets_TerminalStopFailureBlocksCleanup(t *testing.T) {
 				t.Fatalf("cleanup deleted executor rows after failed stop: %v", execs.deletedSessions)
 			}
 		})
+	}
+}
+
+func TestStopTaskRuntimeTargets_KubernetesTerminalCleanupFailurePreservesRow(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	executors := &stubExecutors{}
+	svc.executors = executors
+	svc.executionStopper = &stubStopper{stopExecutionErr: errors.New("exact Kubernetes cleanup failed")}
+	targets := []taskStopTarget{{
+		sessionID: "sess-k8s", executionID: "exec-k8s", terminal: true,
+		runtime: agentruntime.RuntimeKubernetes,
+	}}
+
+	outcome := svc.stopTaskRuntimeTargets(context.Background(), "task-k8s", targets, "delete", "stop failed")
+	svc.performTaskCleanup(
+		context.Background(), "task-k8s", nil, nil, targets, taskEnvironmentCleanup{},
+		taskCleanupPreserveRows(outcome),
+	)
+
+	if _, ok := outcome.failed["sess-k8s"]; !ok {
+		t.Fatalf("Kubernetes cleanup failure must remain retryable: %#v", outcome.failed)
+	}
+	if len(executors.deletedSessions) != 0 {
+		t.Fatalf("failed Kubernetes cleanup deleted authoritative row: %v", executors.deletedSessions)
 	}
 }
 

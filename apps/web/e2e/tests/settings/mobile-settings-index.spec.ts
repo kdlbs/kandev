@@ -4,7 +4,11 @@ import { test, expect } from "../../fixtures/test-base";
 // the same tree the nav sheet shows, rendered as a real route rather than an
 // overlay the app has to open for you.
 test.describe("Settings index on a phone", () => {
-  test("renders the settings tree as the page and navigates from it", async ({ testPage }) => {
+  // @covers AC-UI-SETTINGS-MENU-DEFAULT-001.1
+  test("renders accordion by default and navigates from the settings tree", async ({
+    testPage,
+    seedData,
+  }) => {
     await testPage.setViewportSize({ width: 390, height: 844 });
     await testPage.goto("/settings");
 
@@ -12,6 +16,12 @@ test.describe("Settings index on a phone", () => {
     await expect(index).toBeVisible();
     // Stays on /settings: no desktop-style handoff, and nothing to go Back past.
     await expect(testPage).toHaveURL(/\/settings$/);
+
+    // Accordion is the default on the phone Settings index too.
+    await index.getByRole("button", { name: /Expand Workspaces/ }).tap();
+    await expect(
+      index.locator(`a[href="/settings/workspaces/${seedData.workspaceId}"]`),
+    ).toBeVisible();
 
     await index.getByRole("link", { name: /Terminal & Editors/ }).click();
 

@@ -1,3 +1,5 @@
+/* eslint-disable max-lines -- session slice coverage shares one store harness. */
+
 import { describe, it, expect } from "vitest";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
@@ -29,6 +31,8 @@ function makeStore() {
 const TASK_ID = toTaskId("task-1");
 const SESSION_ID = toSessionId("session-1");
 const TS = "2026-04-20T00:00:00Z";
+const LATER_TS = "2026-04-20T00:01:00Z";
+const INCARNATION_ID = "incarnation-1";
 
 type SessionOverrides = Partial<Omit<TaskSession, "id" | "agent_profile_id" | "repository_id">> & {
   id?: string;
@@ -109,7 +113,7 @@ describe("upsertTaskSessionFromEvent", () => {
         TASK_ID,
         makeSession({ workspace_path: "/task-root", worktree_path: "/task-root/kandev" }),
       );
-    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession()]);
+    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession()], {});
 
     const session = store.getState().taskSessions.items[SESSION_ID];
     expect(session.workspace_path).toBe("/task-root");
@@ -138,7 +142,7 @@ describe("upsertTaskSessionFromEvent", () => {
   it("invalidates a loaded list when an event introduces a partial session", () => {
     const store = makeStore();
     const existing = makeSession({ id: "session-existing", repository_id: "repo-1" });
-    store.getState().setTaskSessionsForTask(TASK_ID, [existing]);
+    store.getState().setTaskSessionsForTask(TASK_ID, [existing], {});
 
     store.getState().upsertTaskSessionFromEvent(TASK_ID, makeSession());
 
@@ -151,12 +155,58 @@ describe("upsertTaskSessionFromEvent", () => {
 
   it("keeps a loaded list authoritative when an event updates a known session", () => {
     const store = makeStore();
-    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession({ repository_id: "repo-1" })]);
+    store
+      .getState()
+      .setTaskSessionsForTask(TASK_ID, [makeSession({ repository_id: "repo-1" })], {});
 
     store.getState().upsertTaskSessionFromEvent(TASK_ID, makeSession({ state: "COMPLETED" }));
 
     expect(store.getState().taskSessionsByTask.loadedByTaskId[TASK_ID]).toBe(true);
     expect(store.getState().taskSessions.items[SESSION_ID].repository_id).toBe("repo-1");
+  });
+});
+
+describe("resume projection ownership", () => {
+  it("revokes an optimistic resume projection when an authoritative event arrives", () => {
+    const store = makeStore();
+    store.getState().setTaskSession(
+      makeSession({
+        state: "IDLE",
+        queue_incarnation_id: INCARNATION_ID,
+      }),
+    );
+
+    const projectedSession = Object.assign(
+      makeSession({
+        state: "STARTING",
+        queue_incarnation_id: INCARNATION_ID,
+      }),
+      { resume_projection_id: "projection-1" },
+    );
+    store.getState().setTaskSession(projectedSession);
+    expect(
+      (
+        store.getState().taskSessions.items[SESSION_ID] as TaskSession & {
+          resume_projection_id?: string;
+        }
+      ).resume_projection_id,
+    ).toBe("projection-1");
+
+    store.getState().upsertTaskSessionFromEvent(
+      TASK_ID,
+      makeSession({
+        state: "STARTING",
+        queue_incarnation_id: INCARNATION_ID,
+        updated_at: LATER_TS,
+      }),
+    );
+
+    const session = store.getState().taskSessions.items[SESSION_ID];
+    expect(session.state).toBe("STARTING");
+    expect(session.updated_at).toBe(LATER_TS);
+    expect(
+      (session as TaskSession & { resume_projection_id?: string }).resume_projection_id,
+    ).toBeUndefined();
   });
 });
 
@@ -181,13 +231,100 @@ describe("cancellation revision ordering", () => {
     // not restore true after the newer live false event has settled.
     store
       .getState()
-      .setTaskSessionsForTask(TASK_ID, [
-        makeSession({ cancellation_pending: true, cancellation_revision: 1 }),
-      ]);
+      .setTaskSessionsForTask(
+        TASK_ID,
+        [makeSession({ cancellation_pending: true, cancellation_revision: 1 })],
+        {},
+      );
 
     const session = store.getState().taskSessions.items[SESSION_ID];
     expect(session.cancellation_pending).toBe(false);
     expect(session.cancellation_revision).toBe(2);
+  });
+});
+
+describe("parked-on-background-work revision ordering", () => {
+  it("rejects a stale snapshot with a lower revision in the same epoch", () => {
+    const store = makeStore();
+
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(
+        TASK_ID,
+        makeSession({ parked_on_background_work: true, revision: 2, parked_epoch: 100 }),
+      );
+    store
+      .getState()
+      .setTaskSessionsForTask(
+        TASK_ID,
+        [makeSession({ parked_on_background_work: false, revision: 1, parked_epoch: 100 })],
+        {},
+      );
+
+    const session = store.getState().taskSessions.items[SESSION_ID];
+    expect(session.parked_on_background_work).toBe(true);
+    expect(session.revision).toBe(2);
+  });
+
+  it("rejects a snapshot from an older process epoch even with a higher revision", () => {
+    const store = makeStore();
+
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(
+        TASK_ID,
+        makeSession({ parked_on_background_work: true, revision: 1, parked_epoch: 200 }),
+      );
+    store
+      .getState()
+      .setTaskSessionsForTask(
+        TASK_ID,
+        [makeSession({ parked_on_background_work: false, revision: 99, parked_epoch: 100 })],
+        {},
+      );
+
+    const session = store.getState().taskSessions.items[SESSION_ID];
+    expect(session.parked_on_background_work).toBe(true);
+    expect(session.parked_epoch).toBe(200);
+  });
+
+  it("accepts a newer epoch even with a lower revision", () => {
+    const store = makeStore();
+
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(
+        TASK_ID,
+        makeSession({ parked_on_background_work: true, revision: 50, parked_epoch: 100 }),
+      );
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(
+        TASK_ID,
+        makeSession({ parked_on_background_work: false, revision: 1, parked_epoch: 200 }),
+      );
+
+    const session = store.getState().taskSessions.items[SESSION_ID];
+    expect(session.parked_on_background_work).toBe(false);
+    expect(session.revision).toBe(1);
+    expect(session.parked_epoch).toBe(200);
+  });
+
+  it("preserves the parked projection across an update that omits it entirely", () => {
+    const store = makeStore();
+
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(
+        TASK_ID,
+        makeSession({ parked_on_background_work: true, revision: 1, parked_epoch: 100 }),
+      );
+    store.getState().upsertTaskSessionFromEvent(TASK_ID, makeSession({ state: "RUNNING" }));
+
+    const session = store.getState().taskSessions.items[SESSION_ID];
+    expect(session.parked_on_background_work).toBe(true);
+    expect(session.revision).toBe(1);
+    expect(session.parked_epoch).toBe(100);
   });
 });
 
@@ -204,7 +341,9 @@ describe("setTaskSessionsForTask preserves WS-seeded fields", () => {
       );
 
     // API hydration arrives next without task_environment_id (race window)
-    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession({ repository_id: "repo-1" })]);
+    store
+      .getState()
+      .setTaskSessionsForTask(TASK_ID, [makeSession({ repository_id: "repo-1" })], {});
 
     const session = store.getState().taskSessions.items[SESSION_ID];
     expect(session.task_environment_id).toBe("env-1");
@@ -216,11 +355,13 @@ describe("setTaskSessionsForTask preserves WS-seeded fields", () => {
   it("flips loadedByTaskId to true (unlike upsertTaskSessionFromEvent)", () => {
     const store = makeStore();
 
-    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession()]);
+    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession()], {});
 
     expect(store.getState().taskSessionsByTask.loadedByTaskId[TASK_ID]).toBe(true);
   });
+});
 
+describe("setTaskSessionsForTask reconciles active turns", () => {
   it("clears an orphaned active turn when an authoritative refresh reports WAITING_FOR_INPUT", () => {
     const store = makeStore();
     store.setState((draft) => {
@@ -229,9 +370,11 @@ describe("setTaskSessionsForTask preserves WS-seeded fields", () => {
 
     store
       .getState()
-      .setTaskSessionsForTask(TASK_ID, [
-        makeSession({ state: "WAITING_FOR_INPUT", updated_at: "2026-04-20T00:01:00Z" }),
-      ]);
+      .setTaskSessionsForTask(
+        TASK_ID,
+        [makeSession({ state: "WAITING_FOR_INPUT", updated_at: LATER_TS })],
+        {},
+      );
 
     expect(store.getState().turns.activeBySession[SESSION_ID]).toBeNull();
   });
@@ -253,7 +396,7 @@ describe("setTaskSessionsForTask preserves WS-seeded fields", () => {
       .getState()
       .upsertTaskSessionFromEvent(
         TASK_ID,
-        makeSession({ state: "WAITING_FOR_INPUT", updated_at: "2026-04-20T00:01:00Z" }),
+        makeSession({ state: "WAITING_FOR_INPUT", updated_at: LATER_TS }),
       );
 
     expect(store.getState().turns.activeBySession[SESSION_ID]).toBe("turn-new");
@@ -274,9 +417,11 @@ describe("setTaskSessionsForTask preserves WS-seeded fields", () => {
 
     store
       .getState()
-      .setTaskSessionsForTask(TASK_ID, [
-        makeSession({ state: "RUNNING", updated_at: "2026-04-20T00:03:00Z" }),
-      ]);
+      .setTaskSessionsForTask(
+        TASK_ID,
+        [makeSession({ state: "RUNNING", updated_at: "2026-04-20T00:03:00Z" })],
+        {},
+      );
 
     expect(store.getState().turns.activeBySession[SESSION_ID]).toBe("turn-running");
   });
@@ -312,26 +457,96 @@ describe("setTaskSessionsForTask preserves WS-seeded fields", () => {
   });
 });
 
-// ADR-0049 — a fresh page-load / second tab receives the
-// fine-grained busy substate on the boot payload (and now on the REST/WS session
-// endpoints). Hydration and any subsequent list refresh must not drop it, or the
-// coarse busy affordance would persist until the next WS flip — the exact gap
-// this batch closes.
-describe("setTaskSession preserves foreground_activity across merges", () => {
-  it("keeps a boot-seeded background substate when a later list update omits the field", () => {
+describe("session foreground activity reconciliation", () => {
+  // @covers AC-PLATFORM-BACKGROUND-WORK-LIVENESS-001.9
+  it("clears stale activity when an authoritative settled snapshot omits the field", () => {
     const store = makeStore();
 
-    // Boot payload seeds the RUNNING session as background-idle.
-    store.getState().setTaskSession(makeSession({ foreground_activity: "background" }));
+    store
+      .getState()
+      .setTaskSession(
+        makeSession({ state: "WAITING_FOR_INPUT", foreground_activity: "background" }),
+      );
     expect(store.getState().taskSessions.items[SESSION_ID].foreground_activity).toBe("background");
 
-    // A later list/get refresh that omits the field (older code path, or a race)
-    // must not clobber the boot value — mergeTaskSession spreads absent keys through.
-    store.getState().setTaskSessionsForTask(TASK_ID, [makeSession({ repository_id: "repo-1" })]);
+    store
+      .getState()
+      .setTaskSessionsForTask(
+        TASK_ID,
+        [makeSession({ state: "WAITING_FOR_INPUT", repository_id: "repo-1" })],
+        { [SESSION_ID]: 0 },
+      );
 
     const session = store.getState().taskSessions.items[SESSION_ID];
-    expect(session.foreground_activity).toBe("background");
+    expect(session.foreground_activity).toBeNull();
     expect(session.repository_id).toBe("repo-1");
+  });
+
+  it("preserves activity when a partial event omits the field", () => {
+    const store = makeStore();
+
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(TASK_ID, makeSession({ foreground_activity: "background" }));
+    store.getState().upsertTaskSessionFromEvent(TASK_ID, makeSession({ repository_id: "repo-1" }));
+
+    expect(store.getState().taskSessions.items[SESSION_ID].foreground_activity).toBe("background");
+  });
+
+  // @covers AC-PLATFORM-BACKGROUND-WORK-LIVENESS-001.7
+  // @covers AC-PLATFORM-BACKGROUND-WORK-LIVENESS-001.9
+  it("preserves a repeated activity event newer than an in-flight snapshot", () => {
+    const store = makeStore();
+
+    store.getState().upsertTaskSessionFromEvent(
+      TASK_ID,
+      makeSession({
+        foreground_activity: "background",
+        active_subagent_count: 1,
+        supports_steering: false,
+      }),
+    );
+    const activityEpochsAtRequestStart = { [SESSION_ID]: 1 };
+    store.getState().upsertTaskSessionFromEvent(
+      TASK_ID,
+      makeSession({
+        foreground_activity: "background",
+        active_subagent_count: 2,
+        supports_steering: true,
+      }),
+    );
+
+    store.getState().setTaskSessionsForTask(
+      TASK_ID,
+      [
+        makeSession({
+          foreground_activity: "generating",
+          active_subagent_count: 0,
+          supports_steering: false,
+          repository_id: "repo-1",
+        }),
+      ],
+      activityEpochsAtRequestStart,
+    );
+
+    expect(store.getState().taskSessions.items[SESSION_ID]).toMatchObject({
+      foreground_activity: "background",
+      active_subagent_count: 2,
+      supports_steering: true,
+      repository_id: "repo-1",
+    });
+  });
+
+  it("removes the activity epoch with the session", () => {
+    const store = makeStore();
+
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(TASK_ID, makeSession({ foreground_activity: "background" }));
+
+    expect(store.getState().taskSessions.activityEpochBySession?.[SESSION_ID]).toBe(1);
+    store.getState().removeTaskSession(TASK_ID, SESSION_ID);
+    expect(store.getState().taskSessions.activityEpochBySession?.[SESSION_ID]).toBeUndefined();
   });
 
   it("applies an explicit substate flip from an enriched update", () => {
@@ -390,8 +605,10 @@ describe("queue actions", () => {
       mergeEnabled: false,
       autoRun: false,
     });
-    expect(store.getState().queue.metaBySessionId[SESSION_ID]?.mergeEnabled).toBe(false);
-    expect(store.getState().queue.metaBySessionId[SESSION_ID]?.autoRun).toBe(false);
+    expect(store.getState().queue.metaBySessionId[SESSION_ID]).toMatchObject({
+      mergeEnabled: false,
+      autoRun: false,
+    });
   });
 
   it("removeQueueEntry drops a single entry by id and refreshes meta.count", () => {
@@ -407,14 +624,49 @@ describe("queue actions", () => {
     store.getState().removeQueueEntry(SESSION_ID, "e2");
 
     expect(store.getState().queue.bySessionId[SESSION_ID].map((e) => e.id)).toEqual(["e1", "e3"]);
-    expect(store.getState().queue.metaBySessionId[SESSION_ID].count).toBe(2);
-    expect(store.getState().queue.metaBySessionId[SESSION_ID].max).toBe(10);
+    expect(store.getState().queue.metaBySessionId[SESSION_ID]).toMatchObject({ count: 2, max: 10 });
   });
 
   it("removeQueueEntry is a no-op when the session has no entries", () => {
     const store = makeStore();
     store.getState().removeQueueEntry(SESSION_ID, "missing");
     expect(store.getState().queue.bySessionId[SESSION_ID]).toBeUndefined();
+  });
+});
+
+describe("queue snapshot actions", () => {
+  it("requires an authoritative snapshot to replace the accepted status epoch", () => {
+    const store = makeStore();
+    store.getState().setTaskSession(makeSession({ queue_incarnation_id: INCARNATION_ID }));
+    const currentEntries = [makeEntry({ id: "current" })];
+    store.getState().setQueueEntries(SESSION_ID, currentEntries, {
+      count: 1,
+      max: 10,
+      mergeEnabled: true,
+      autoRun: true,
+      taskId: TASK_ID,
+      sessionIncarnationId: INCARNATION_ID,
+      statusEpoch: "epoch-1",
+    });
+    const replacementEntries = [makeEntry({ id: "replacement" })];
+    const replacementMeta = {
+      count: 1,
+      max: 10,
+      mergeEnabled: false,
+      autoRun: false,
+      sessionIncarnationId: INCARNATION_ID,
+      statusEpoch: "epoch-2",
+    };
+
+    store.getState().setQueueEntries(SESSION_ID, replacementEntries, replacementMeta);
+    expect(store.getState().queue.bySessionId[SESSION_ID]).toEqual(currentEntries);
+    expect(store.getState().queue.metaBySessionId[SESSION_ID]?.statusEpoch).toBe("epoch-1");
+
+    store.getState().setQueueEntries(SESSION_ID, replacementEntries, replacementMeta, {
+      establishStatusEpoch: true,
+    });
+    expect(store.getState().queue.bySessionId[SESSION_ID]).toEqual(replacementEntries);
+    expect(store.getState().queue.metaBySessionId[SESSION_ID]?.statusEpoch).toBe("epoch-2");
   });
 
   it("clearQueueStatus removes both entries and meta", () => {
@@ -430,5 +682,90 @@ describe("queue actions", () => {
 
     expect(store.getState().queue.bySessionId[SESSION_ID]).toBeUndefined();
     expect(store.getState().queue.metaBySessionId[SESSION_ID]).toBeUndefined();
+  });
+
+  it("does not clear parked_on_background_work or foreground_activity as a side effect of queue actions", () => {
+    const store = makeStore();
+    store.getState().upsertTaskSessionFromEvent(
+      TASK_ID,
+      makeSession({
+        parked_on_background_work: true,
+        revision: 1,
+        parked_epoch: 100,
+        foreground_activity: null,
+      }),
+    );
+
+    store.getState().setQueueEntries(SESSION_ID, [makeEntry()], {
+      count: 1,
+      max: 10,
+      mergeEnabled: true,
+      autoRun: true,
+    });
+    store.getState().removeQueueEntry(SESSION_ID, "missing-entry");
+    store.getState().clearQueueStatus(SESSION_ID);
+
+    const session = store.getState().taskSessions.items[SESSION_ID];
+    expect(session.parked_on_background_work).toBe(true);
+    expect(session.revision).toBe(1);
+    expect(session.parked_epoch).toBe(100);
+  });
+});
+
+describe("queue state reincarnation", () => {
+  function seedOldIncarnation() {
+    const store = makeStore();
+    store.getState().setTaskSession(makeSession({ queue_incarnation_id: "old-incarnation" }));
+    store.getState().setQueueEntries(SESSION_ID, [makeEntry()], {
+      count: 1,
+      max: 10,
+      mergeEnabled: true,
+      autoRun: true,
+      taskId: TASK_ID,
+      sessionIncarnationId: "old-incarnation",
+    });
+    expect(store.getState().beginQueueOperation(SESSION_ID, "old-incarnation")).not.toBeNull();
+    return store;
+  }
+
+  function expectQueueStateCleared(store: ReturnType<typeof makeStore>) {
+    expect(store.getState().queue.bySessionId[SESSION_ID]).toBeUndefined();
+    expect(store.getState().queue.metaBySessionId[SESSION_ID]).toBeUndefined();
+    expect(store.getState().queue.activeOperationBySessionId[SESSION_ID]).toBeUndefined();
+  }
+
+  it("clears stale queue state on an event upsert", () => {
+    const store = seedOldIncarnation();
+
+    store
+      .getState()
+      .upsertTaskSessionFromEvent(
+        TASK_ID,
+        makeSession({ queue_incarnation_id: "new-incarnation" }),
+      );
+
+    expectQueueStateCleared(store);
+  });
+
+  it("clears stale queue state on a session snapshot", () => {
+    const store = seedOldIncarnation();
+
+    store
+      .getState()
+      .setTaskSessionsForTask(
+        TASK_ID,
+        [makeSession({ queue_incarnation_id: "new-incarnation" })],
+        {},
+      );
+
+    expectQueueStateCleared(store);
+  });
+
+  it("clears stale queue state on a direct session set", () => {
+    const store = seedOldIncarnation();
+
+    store.getState().setTaskSession(makeSession({ queue_incarnation_id: "new-incarnation" }));
+
+    expectQueueStateCleared(store);
   });
 });

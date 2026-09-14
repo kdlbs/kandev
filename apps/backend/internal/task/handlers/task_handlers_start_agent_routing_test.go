@@ -43,10 +43,15 @@ func TestHTTPCreateTask_StartAgentSelectsDestinationStep(t *testing.T) {
 
 	for name, tc := range map[string]struct {
 		startAgent bool
+		planMode   bool
 		wantStep   string
 	}{
 		"start_agent=true routes to the auto-start step": {startAgent: true, wantStep: "auto-start-step"},
 		"start_agent=false routes to the start step":     {startAgent: false, wantStep: "start-step"},
+		// @covers AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004.1
+		"start_agent=true with plan_mode routes to the auto-start step": {
+			startAgent: true, planMode: true, wantStep: "auto-start-step",
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			log := newTestLogger(t)
@@ -68,7 +73,8 @@ func TestHTTPCreateTask_StartAgentSelectsDestinationStep(t *testing.T) {
 				"title": "Routed by intent",
 				"description": "do the thing",
 				"agent_profile_id": "profile-1",
-				"start_agent": ` + boolLiteral(tc.startAgent) + `
+				"start_agent": ` + boolLiteral(tc.startAgent) + `,
+				"plan_mode": ` + boolLiteral(tc.planMode) + `
 			}`
 			rec := httptest.NewRecorder()
 			c, _ := gin.CreateTestContext(rec)
@@ -102,6 +108,14 @@ func TestWSCreateTask_StartAgentSelectsDestinationStep(t *testing.T) {
 				"agent_profile_id": "profile-1", "start_agent": false,
 			},
 			wantStep: "start-step",
+		},
+		// @covers AC-TASKS-WORKFLOW-STEP-AGENT-START-OWNERSHIP-004.1
+		"start_agent=true with plan_mode routes to the auto-start step": {
+			payload: map[string]any{
+				"workspace_id": "ws-b", "workflow_id": "wf-b", "title": "Routed by intent",
+				"agent_profile_id": "profile-1", "start_agent": true, "plan_mode": true,
+			},
+			wantStep: "auto-start-step",
 		},
 		"omitted start_agent routes to the start step": {
 			payload: map[string]any{

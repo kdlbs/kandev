@@ -62,6 +62,29 @@ describe("sessionStatusTooltip", () => {
       sessionStatusTooltip("COMPLETED", { permission: false, clarification: false }, "background"),
     ).toBe("Complete");
   });
+
+  it("labels a parked-on-background-work session as background running (AC-51/52)", () => {
+    expect(
+      sessionStatusTooltip(
+        "WAITING_FOR_INPUT",
+        { permission: false, clarification: false },
+        null,
+        true,
+      ),
+    ).toBe("Background running");
+  });
+
+  it("lets pending permission win over the parked reading", () => {
+    expect(
+      sessionStatusTooltip("RUNNING", { permission: true, clarification: false }, null, true),
+    ).toBe("Permission requested");
+  });
+
+  it("does not show background-running for a terminal session with a stale parked reading", () => {
+    expect(
+      sessionStatusTooltip("COMPLETED", { permission: false, clarification: false }, null, true),
+    ).toBe("Complete");
+  });
 });
 
 describe("useSessionLifecycleActions", () => {

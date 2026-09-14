@@ -52,11 +52,21 @@ func TestResolveTaskEnvWorkspacePath(t *testing.T) {
 		}
 	})
 
+	// @covers AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.3
 	t.Run("no worktree falls back to repository path", func(t *testing.T) {
 		req := &LaunchAgentRequest{RepositoryPath: "/repos/myrepo"}
 		resp := &LaunchAgentResponse{} // no WorktreePath
 		if got := computeWorkspacePath(req, resp); got != "/repos/myrepo" {
 			t.Fatalf("fallback: want /repos/myrepo, got %q", got)
+		}
+	})
+
+	// @covers AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.1
+	t.Run("recovered execution keeps lifecycle workspace", func(t *testing.T) {
+		req := &LaunchAgentRequest{RepositoryPath: "/source/kandev"}
+		resp := &LaunchAgentResponse{WorkspacePath: "/tasks/task-1/kandev"}
+		if got := computeWorkspacePath(req, resp); got != "/tasks/task-1/kandev" {
+			t.Fatalf("recovered workspace: want lifecycle workspace, got %q", got)
 		}
 	})
 

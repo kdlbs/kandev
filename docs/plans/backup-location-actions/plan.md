@@ -45,7 +45,7 @@ Return the absolute `backups` sibling path for SQLite, resolving the derived
 path with `filepath.Abs`, and an empty value for PostgreSQL.
 
 Add `backup_directory` to `DatabaseStats` in `apps/web/lib/types/system.ts`.
-Use the shared database state in `data-storage-settings.tsx` for the Backups description.
+Use the shared database state in `data-logs-settings.tsx` for the Backups description.
 
 Remove the static `BACKUP_DIR` value from `system-route-shell.tsx`.
 Keep `BACKUP_SQL_COMMAND` as a stable interpolated command value.

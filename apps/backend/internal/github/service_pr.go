@@ -275,6 +275,22 @@ func (s *Service) GetPRForWorkspace(
 	return resolved.Client.GetPR(ctx, owner, repo, number)
 }
 
+// GetPRForAutomation fetches pull-request details through the workspace-owned
+// automation credential. It is used by background launch paths that have a
+// repository workspace but no interactive user identity.
+func (s *Service) GetPRForAutomation(
+	ctx context.Context, workspaceID, owner, repo string, number int,
+) (*PR, error) {
+	if err := s.ensureRepositoryInWorkspaceScope(ctx, workspaceID, owner, repo); err != nil {
+		return nil, err
+	}
+	resolved, err := s.resolveAutomationClient(ctx, workspaceID, owner, repo)
+	if err != nil {
+		return nil, err
+	}
+	return resolved.Client.GetPR(ctx, owner, repo, number)
+}
+
 // GetIssue fetches basic issue details from GitHub. The create-task dialog is
 // currently the only caller and dedupes requests per URL on the frontend.
 func (s *Service) GetIssue(ctx context.Context, owner, repo string, number int) (*Issue, error) {

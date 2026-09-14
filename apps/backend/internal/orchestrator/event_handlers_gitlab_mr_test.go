@@ -20,8 +20,15 @@ type fakeGitLabMRLinkService struct {
 	// lastAutoLinkRepositoryID records the repositoryID argument of the most
 	// recent AutoLinkMRForBranch call, so multi-repo tests can assert scoping.
 	lastAutoLinkRepositoryID string
+	// lastAutoLinkTaskID records the taskID argument of the most recent
+	// AutoLinkMRForBranch call, so workspace-group redirect tests can assert
+	// which task the write actually landed under.
+	lastAutoLinkTaskID string
 
 	ensureWatchCalls int
+	// lastEnsureWatchTaskID records the taskID argument of the most recent
+	// EnsureMRWatch call, mirroring lastAutoLinkTaskID above.
+	lastEnsureWatchTaskID string
 
 	taskMRs map[string][]*gitlab.TaskMR
 
@@ -35,6 +42,7 @@ func (f *fakeGitLabMRLinkService) AutoLinkMRForBranch(
 	f.mu.Lock()
 	f.autoLinkCalls++
 	f.lastAutoLinkRepositoryID = repositoryID
+	f.lastAutoLinkTaskID = taskID
 	fn := f.autoLinkFunc
 	f.mu.Unlock()
 	if fn != nil {
@@ -44,10 +52,11 @@ func (f *fakeGitLabMRLinkService) AutoLinkMRForBranch(
 }
 
 func (f *fakeGitLabMRLinkService) EnsureMRWatch(
-	_ context.Context, _, _, _, _ string, _ int, _ string,
+	_ context.Context, _, taskID, _, _ string, _ int, _ string,
 ) (*gitlab.MRWatch, error) {
 	f.mu.Lock()
 	f.ensureWatchCalls++
+	f.lastEnsureWatchTaskID = taskID
 	f.mu.Unlock()
 	return &gitlab.MRWatch{}, nil
 }

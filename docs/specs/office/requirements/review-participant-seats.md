@@ -21,8 +21,8 @@ This capability makes those seats exist by default. When a task **enters** a
 step that declares it, the system resolves which Office agent should fill the
 step's participant role and writes a seat for that task at that step, before
 the step's own fan-out reads the slate. Casting is **derived**, not configured:
-the workspace CEO reviews, and the task's runner is the fallback when there is
-no CEO to seat.
+the reviewer pool uses `ceo` and `specialist`, while other roles use `ceo`.
+The runner is the fallback when the pool is empty.
 
 Seats are written for the step being **entered**, never for the step the task
 stands on when it is created; that distinction is the whole defect behind the
@@ -72,8 +72,10 @@ quorum primitives written into here, not the casting decision.
   row order; AC-OFFICE-REVIEW-SEATS-002.10 states why that distinction is a
   requirement rather than an implementation detail.
 - **Eligible agent** - an Office agent in the task's workspace whose Office
-  agent role is `ceo` and whose status is neither `stopped` nor
-  `pending_approval`.
+  agent role is in the participant role's pool (`ceo` and `specialist` for the
+  reviewer role; `ceo` alone for the approver role and for every other
+  participant role, per AC-OFFICE-REVIEW-SEATS-002.1) and whose status is
+  neither `stopped` nor `pending_approval`.
 - **Warning record** - the structured record accompanying each counter
   increment in REQ-OFFICE-REVIEW-SEATS-004, carrying the identifiers a counter
   label may not.
@@ -138,7 +140,9 @@ configured.
 #### Acceptance criteria
 
 - **AC-OFFICE-REVIEW-SEATS-002.1:** The system shall resolve the candidate list
-  for a participant role to the eligible agents of the task's workspace,
+  for a participant role to the task's workspace agents whose agent role is in
+  that participant role's pool — `ceo` and `specialist` for the reviewer role;
+  `ceo` alone for the approver role and for every other participant role —
   ordered by `created_at` ascending and then by agent profile identifier
   ascending.
 - **AC-OFFICE-REVIEW-SEATS-002.2:** The system shall exclude from the candidate
@@ -146,8 +150,11 @@ configured.
   and shall do so without changing the behavior of any other caller of the
   agent listing it uses.
 - **AC-OFFICE-REVIEW-SEATS-002.3:** When the candidate list holds more than one
-  eligible agent and its first member is the task's runner, the system shall
-  seat the next member instead.
+  eligible agent, the system shall seat the first member that is neither the
+  task's runner nor already seated in another participant role on the task.
+  This exclusion is best-effort and shall not leave the seat empty: when no
+  such member exists, the system shall fall back to seating the first member,
+  or the second member when the first is the task's runner.
 - **AC-OFFICE-REVIEW-SEATS-002.4:** When the candidate list holds exactly one
   eligible agent and that agent is the task's runner, the system shall seat
   that agent and shall record the self-review.
@@ -163,10 +170,14 @@ configured.
 - **AC-OFFICE-REVIEW-SEATS-002.8:** When resolution fails with an error rather
   than an empty result, the system shall write no seat, emit the unfillable
   signal, and not fail the step entry.
-- **AC-OFFICE-REVIEW-SEATS-002.9:** When the candidate list holds more than one
-  eligible agent and its first member is not the task's runner, the system
-  shall seat that first member and record the seating as coming from the
-  eligible pool rather than the fallback.
+- **AC-OFFICE-REVIEW-SEATS-002.9:** When the candidate list holds exactly one
+  eligible agent and that agent is not the task's runner, the system shall
+  seat that agent, record the seating as coming from the eligible pool rather
+  than the fallback, and record the self-review when that agent is already
+  seated in another participant role on the task. This criterion's domain
+  (exactly one non-runner candidate) is disjoint from
+  AC-OFFICE-REVIEW-SEATS-002.3's (more than one candidate); the two do not
+  compete over the same input.
 - **AC-OFFICE-REVIEW-SEATS-002.10:** Resolution of the task's runner shall
   produce the same result on every database engine the product supports, and
   its final precedence tier shall order candidate seats by a persisted column
@@ -312,11 +323,14 @@ Each exclusion below is a contract, not an omission.
   bringing an existing workspace's step *configuration* up to date is required
   by AC-OFFICE-REVIEW-SEATS-005.6 and is not a sweep, because it touches
   workflow rows once at startup and touches no task.
-- **Widening the eligible pool beyond the CEO role.** Office agent roles and
-  participant roles are disjoint vocabularies and no Office agent role names a
-  reviewer. The shipped `security` role's description does mention approving or
-  blocking at review gates, so this is a live choice rather than a vacuous one;
-  widening it belongs to the configurable-slate capability.
+- **Widening either pool beyond the roles AC-OFFICE-REVIEW-SEATS-002.1 names.**
+  The reviewer pool is `ceo` and `specialist`; the approver pool, and every
+  other participant role's pool, stays `ceo` alone — a per-role ruling, not a
+  general relaxation. Office agent roles and participant roles remain disjoint
+  vocabularies otherwise: the shipped `security` role's description does
+  mention approving or blocking at review gates, so admitting it is a live
+  choice rather than a vacuous one; widening either pool further belongs to
+  the configurable-slate capability.
 - **The `backlog` step declaring no events.** A task started there has no
   turn-complete and no children-completed handler and parks permanently. Real,
   and not fixed by seats.
