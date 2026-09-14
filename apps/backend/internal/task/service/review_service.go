@@ -50,7 +50,7 @@ type reviewRepo interface {
 	CreateTaskReviewFindings(ctx context.Context, findings []*models.TaskReviewFinding) error
 	ListTaskReviewFindings(ctx context.Context, taskID string) ([]*models.TaskReviewFinding, error)
 	GetTaskReviewFinding(ctx context.Context, findingID string) (*models.TaskReviewFinding, error)
-	UpdateTaskReviewFindingStatus(ctx context.Context, findingID string, status models.ReviewFindingStatus, resolvedAt *time.Time) error
+	TransitionTaskReviewFindingStatus(ctx context.Context, findingID string, status models.ReviewFindingStatus) (*models.TaskReviewFinding, error)
 	DeleteSupersededTaskReviewFindings(ctx context.Context, taskID, runID string, keys []models.ReviewFindingKey) ([]string, error)
 	DeleteTaskReviewByTask(ctx context.Context, taskID string) error
 }
@@ -478,23 +478,7 @@ func (s *ReviewService) UpdateFindingStatus(ctx context.Context, findingID strin
 	if !models.ValidReviewFindingStatus(status) {
 		return nil, fmt.Errorf("%w: unknown status %q", ErrInvalidReviewFinding, status)
 	}
-	existing, err := s.repo.GetTaskReviewFinding(ctx, findingID)
-	if err != nil {
-		return nil, err
-	}
-	resolvedAt := existing.ResolvedAt
-	if status != existing.Status {
-		if status == models.ReviewFindingResolved || status == models.ReviewFindingDismissed {
-			now := time.Now().UTC()
-			resolvedAt = &now
-		} else {
-			resolvedAt = nil
-		}
-	}
-	if err := s.repo.UpdateTaskReviewFindingStatus(ctx, findingID, status, resolvedAt); err != nil {
-		return nil, err
-	}
-	finding, err := s.repo.GetTaskReviewFinding(ctx, findingID)
+	finding, err := s.repo.TransitionTaskReviewFindingStatus(ctx, findingID, status)
 	if err != nil {
 		return nil, err
 	}
