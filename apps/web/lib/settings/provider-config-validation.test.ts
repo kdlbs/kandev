@@ -45,6 +45,16 @@ describe("providerConfigInvalidReasonKey", () => {
     ).toBe(BASE_URL_INVALID_KEY);
   });
 
+  it("blocks provider routing when CLI passthrough is enabled", () => {
+    expect(
+      providerConfigInvalidReasonKey({
+        providerKind: "openai_compatible",
+        providerBaseUrl: LOOPBACK_URL,
+        cliPassthrough: true,
+      }),
+    ).toBe("agents:providerPassthroughUnsupported");
+  });
+
   it("blocks an openai_compatible profile with a slash in the model", () => {
     expect(
       providerConfigInvalidReasonKey({

@@ -16,6 +16,7 @@ export type ProviderConfigDraft = {
   providerBaseUrl?: string;
   providerApiKeySecretId?: string;
   model?: string;
+  cliPassthrough?: boolean;
 };
 
 const LOOPBACK_HOSTNAMES = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
@@ -66,6 +67,9 @@ export function isValidProviderBaseUrl(raw: string): boolean {
  */
 export function providerConfigInvalidReasonKey(draft: ProviderConfigDraft): string | undefined {
   if (!isOpenAICompatibleProvider(draft.providerKind)) return undefined;
+  if (draft.cliPassthrough) {
+    return "agents:providerPassthroughUnsupported";
+  }
   const baseUrl = draft.providerBaseUrl ?? "";
   if (!isValidProviderBaseUrl(baseUrl)) {
     return "agents:providerBaseUrlInvalid";

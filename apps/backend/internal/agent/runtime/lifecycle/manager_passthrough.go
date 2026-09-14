@@ -18,6 +18,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/mcpconfig"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agent/settings/cliflags"
+	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/events"
@@ -269,6 +270,9 @@ func (m *Manager) resolvePassthroughAgent(ctx context.Context, execution *AgentE
 	if m.profileResolver != nil && execution.AgentProfileID != "" {
 		profileInfo, _ = m.profileResolver.ResolveProfile(ctx, execution.AgentProfileID)
 	}
+	if err := validatePassthroughProvider(profileInfo); err != nil {
+		return nil, err
+	}
 
 	return &resolvedPassthrough{
 		agentID:     agentConfig.ID(),
@@ -278,6 +282,13 @@ func (m *Manager) resolvePassthroughAgent(ctx context.Context, execution *AgentE
 		rt:          agentConfig.Runtime(),
 		profile:     profileInfo,
 	}, nil
+}
+
+func validatePassthroughProvider(profile *AgentProfileInfo) error {
+	if profile == nil || profile.ProviderKind != settingsmodels.ProviderKindOpenAICompatible {
+		return nil
+	}
+	return errors.New("CLI passthrough cannot use an OpenAI-compatible provider")
 }
 
 // promptForPassthroughCommand returns the prompt that should be passed to

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	"github.com/kandev/kandev/internal/agent/registry"
 	settingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -24,6 +25,34 @@ func TestResolveProviderGatewayAuth_NativeProfileReturnsNil(t *testing.T) {
 		&AgentProfileInfo{AgentName: "codex-acp"}, agents.NewCodexACP(), agentruntime.RuntimeStandalone)
 	if err != nil || auth != nil {
 		t.Fatalf("native profile: auth=%v err=%v", auth, err)
+	}
+}
+
+func TestManagerResolveProviderGatewayAuthUsesResolvedAgentName(t *testing.T) {
+	agent := newInferenceAgent("provider-agent", true, true)
+	agent.providerSpec = &agents.OpenAICompatibleProviderSpec{
+		AuthMethodID: "gateway", ProviderName: "Kandev", KeyEnvVar: "OPENAI_API_KEY",
+	}
+	reg := registry.NewRegistry(newTestLogger())
+	if err := reg.Register(agent); err != nil {
+		t.Fatalf("register provider agent: %v", err)
+	}
+	m := providerGatewayManager(t, newInMemorySecretStore())
+	m.registry = reg
+	m.profileResolver = &stubProfileResolver{profile: &AgentProfileInfo{
+		ProfileID:       "profile-1",
+		AgentID:         "database-agent-id",
+		AgentName:       "provider-agent",
+		ProviderKind:    settingsmodels.ProviderKindOpenAICompatible,
+		ProviderBaseURL: "http://localhost:20128/v1",
+	}}
+
+	auth, _, _, err := m.ResolveProviderGatewayAuth(context.Background(), "profile-1", "database-agent-id")
+	if err != nil {
+		t.Fatalf("resolve provider gateway auth: %v", err)
+	}
+	if auth == nil || auth.MethodID != "gateway" {
+		t.Fatalf("auth = %#v, want gateway auth", auth)
 	}
 }
 

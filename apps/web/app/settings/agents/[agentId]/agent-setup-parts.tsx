@@ -44,6 +44,7 @@ function profileFormData(
   return {
     name: profile.name,
     model: profile.model,
+    provider_kind: profile.providerKind ?? "",
     mode: profile.mode ?? "",
     config_options: profile.configOptions ?? {},
     auto_approve: permissions.auto_approve,

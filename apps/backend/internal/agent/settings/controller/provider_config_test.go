@@ -96,6 +96,7 @@ func TestCreateProfile_OpenAICompatibleProvider_Rejections(t *testing.T) {
 		{"slash in model", CreateProfileRequest{AgentID: codexID, Name: "a", Model: "openai/gpt-4o", ProviderKind: models.ProviderKindOpenAICompatible, ProviderBaseURL: "http://localhost:20128/v1"}},
 		{"agent unsupported", CreateProfileRequest{AgentID: claudeID, Name: "a", Model: "sonnet", ProviderKind: models.ProviderKindOpenAICompatible, ProviderBaseURL: "http://localhost:20128/v1"}},
 		{"cleartext http with API key", CreateProfileRequest{AgentID: codexID, Name: "a", Model: "code", ProviderKind: models.ProviderKindOpenAICompatible, ProviderBaseURL: "http://router.example/v1", ProviderAPIKeySecretID: "sec-1"}},
+		{"cli passthrough", CreateProfileRequest{AgentID: codexID, Name: "a", Model: "code", CLIPassthrough: true, ProviderKind: models.ProviderKindOpenAICompatible, ProviderBaseURL: "http://localhost:20128/v1"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -173,6 +174,22 @@ func TestUpdateProfile_SwitchToNativeClearsProviderFields(t *testing.T) {
 	}
 	if updated.ProviderBaseURL != "" || updated.ProviderKind != models.ProviderKindNative {
 		t.Errorf("switch to native did not clear provider fields: %+v", updated)
+	}
+}
+
+func TestUpdateProfile_RejectsEnablingCLIPassthroughOnProvider(t *testing.T) {
+	ctrl, _, ctx, codexID, _ := newProviderTestController(t)
+
+	created, err := ctrl.CreateProfile(ctx, CreateProfileRequest{
+		AgentID: codexID, Name: "9router", Model: "code",
+		ProviderKind: models.ProviderKindOpenAICompatible, ProviderBaseURL: "http://localhost:20128/v1",
+	})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	enabled := true
+	if _, err := ctrl.UpdateProfile(ctx, UpdateProfileRequest{ID: created.ID, CLIPassthrough: &enabled}); !errors.Is(err, ErrInvalidProviderConfig) {
+		t.Fatalf("err = %v, want ErrInvalidProviderConfig", err)
 	}
 }
 

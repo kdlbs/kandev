@@ -46,6 +46,7 @@ export function toAgentProfilePatch(patch: Partial<ProfileFormData>): Partial<Ag
   if (patch.cli_passthrough !== undefined) next.cliPassthrough = patch.cli_passthrough;
   if (patch.cli_flags !== undefined) next.cliFlags = patch.cli_flags;
   if (patch.command_prefix !== undefined) next.commandPrefix = patch.command_prefix;
+  if (patch.provider_kind !== undefined) next.providerKind = patch.provider_kind;
   return next;
 }
 
@@ -242,6 +243,7 @@ export async function saveNewAgent(draftAgent: DraftAgent, callbacks: SaveAgentC
       cli_passthrough: profile.cliPassthrough ?? false,
       cli_flags: profile.cliFlags ?? [],
       command_prefix: profile.commandPrefix ?? "",
+      ...providerPayloadFields(profile),
       env_vars: profile.envVars ?? [],
       dynamic: dynamicProfilePayload(profile),
     })),

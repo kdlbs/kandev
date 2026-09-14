@@ -984,6 +984,7 @@ func startGatewayAndServe(
 		_, ok := agentRegistry.GetInferenceAgent(agentID)
 		return ok
 	}))
+	hostUtilityMgr.SetProviderGatewayAuthResolver(lifecycleMgr.ResolveProviderGatewayAuth)
 	hostUtilityMgr.SetManagedRuntimeSelectionStore(services.ManagedRuntimeSelections)
 	// Wire the host utility manager into the settings controller so
 	// /api/v1/agent-models/:agentName reads live capability data.

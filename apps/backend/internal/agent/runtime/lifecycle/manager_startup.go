@@ -47,6 +47,9 @@ func (m *Manager) startPassthroughExecution(ctx context.Context, execution *Agen
 		}
 		profileInfo = resolved
 	}
+	if err := validatePassthroughProvider(profileInfo); err != nil {
+		return err
+	}
 	return m.startPassthroughSession(ctx, execution, profileInfo)
 }
 

@@ -17,6 +17,48 @@ import (
 // aborted rather than letting the agent fall back to its vendor endpoint.
 var ErrProviderMisconfigured = errors.New("PROVIDER_MISCONFIGURED")
 
+// ResolveProviderGatewayAuth resolves a profile for a standalone utility
+// call. Host utility prompts do not have a task execution from which to get a
+// runtime, so they use the host runtime while reusing the lifecycle-owned
+// profile and secret policy.
+func (m *Manager) ResolveProviderGatewayAuth(
+	ctx context.Context,
+	profileID, agentName string,
+) (*acpprovider.GatewayAuth, string, string, error) {
+	if m.profileResolver == nil {
+		return nil, "", "", errors.New("agent profile resolver is not configured")
+	}
+	profileInfo, err := m.profileResolver.ResolveProfile(ctx, profileID)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if profileInfo == nil {
+		return nil, "", "", fmt.Errorf("profile %q is not executable", profileID)
+	}
+	if profileInfo.ProviderKind != settingsmodels.ProviderKindOpenAICompatible {
+		return nil, "", "", nil
+	}
+	if m.registry == nil {
+		return nil, "", "", errors.New("agent registry is not configured")
+	}
+	resolvedAgentName := profileInfo.AgentName
+	if resolvedAgentName == "" {
+		resolvedAgentName = agentName
+	}
+	if resolvedAgentName == "" {
+		resolvedAgentName = profileInfo.AgentID
+	}
+	ia, ok := m.registry.GetInferenceAgent(resolvedAgentName)
+	if !ok {
+		return nil, "", "", fmt.Errorf("agent %q does not support inference", resolvedAgentName)
+	}
+	agentConfig, ok := ia.(agents.Agent)
+	if !ok {
+		return nil, "", "", fmt.Errorf("agent %q is not a full agent type", resolvedAgentName)
+	}
+	return m.resolveProviderGatewayAuth(ctx, profileInfo, agentConfig, agentruntime.RuntimeStandalone)
+}
+
 // resolveProviderGatewayAuth builds the ACP gateway authenticate params for a
 // profile whose ProviderKind is openai_compatible. It returns (nil, nil) for a
 // native profile or a nil profileInfo. The revealed API key, when present, is

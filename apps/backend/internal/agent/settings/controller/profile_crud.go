@@ -537,7 +537,9 @@ func (c *Controller) applyProviderConfigUpdate(
 	}
 	modelChangedOnProviderProfile := req.Model != nil &&
 		strings.TrimSpace(profile.ProviderKind) == models.ProviderKindOpenAICompatible
-	if !req.touchesProvider() && !modelChangedOnProviderProfile {
+	passthroughEnabledOnProviderProfile := req.CLIPassthrough != nil && *req.CLIPassthrough &&
+		strings.TrimSpace(profile.ProviderKind) == models.ProviderKindOpenAICompatible
+	if !req.touchesProvider() && !modelChangedOnProviderProfile && !passthroughEnabledOnProviderProfile {
 		return nil
 	}
 	agentName := ""
@@ -869,6 +871,9 @@ func (c *Controller) normalizeProviderConfig(ctx context.Context, p *models.Agen
 	p.ProviderKind = models.ProviderKindOpenAICompatible
 	if !c.providerSupported(agentName) {
 		return fmt.Errorf("%w: agent %q does not support an OpenAI-compatible provider", ErrInvalidProviderConfig, agentName)
+	}
+	if p.CLIPassthrough {
+		return fmt.Errorf("%w: CLI passthrough cannot use an OpenAI-compatible provider", ErrInvalidProviderConfig)
 	}
 	p.ProviderBaseURL = strings.TrimSpace(p.ProviderBaseURL)
 	p.ProviderAPIKeySecretID = strings.TrimSpace(p.ProviderAPIKeySecretID)

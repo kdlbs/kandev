@@ -104,6 +104,9 @@ func ProfileContractFields() []ProfileContractField {
 		{Path: "cli_flags", JSONType: "array", Support: "read_write", Description: "Complete replacement list of CLI flags.", Replacement: true},
 		{Path: "env_vars", JSONType: "array", Support: "read_write", Description: "Complete replacement list of environment variables.", Replacement: true, Sensitive: true},
 		{Path: "command_prefix", JSONType: "string", Support: "read_write", Description: "Optional launcher command prefix."},
+		{Path: "provider_kind", JSONType: "string", Support: "read_write", Description: "Provider routing kind."},
+		{Path: "provider_base_url", JSONType: "string", Support: "read_write", Description: "OpenAI-compatible provider base URL."},
+		{Path: "provider_api_key_secret_id", JSONType: "string", Support: "read_write", Description: "Global secret reference for the provider API key.", Sensitive: true},
 		{Path: "dynamic", JSONType: "object", Support: "read_write", Description: "Versioned dynamic routing document.", Replacement: true},
 	}
 }

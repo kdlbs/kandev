@@ -10,10 +10,7 @@ import type { DraftAgent } from "./agent-save-helpers";
  * First blocking provider-config i18n key across the agent's profiles, or
  * undefined. Only relevant when the agent advertises provider support.
  */
-function providerInvalidKey(
-  agent: DraftAgent,
-  providerSupported: boolean,
-): string | undefined {
+function providerInvalidKey(agent: DraftAgent, providerSupported: boolean): string | undefined {
   if (!providerSupported) return undefined;
   for (const profile of agent.profiles) {
     const key = providerConfigInvalidReasonKey({
@@ -21,6 +18,7 @@ function providerInvalidKey(
       providerBaseUrl: profile.providerBaseUrl,
       providerApiKeySecretId: profile.providerApiKeySecretId,
       model: profile.model,
+      cliPassthrough: profile.cliPassthrough,
     });
     if (key) return key;
   }

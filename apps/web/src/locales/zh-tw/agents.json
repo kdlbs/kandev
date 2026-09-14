@@ -296,7 +296,7 @@
   "noDynamicCandidatesFound": "未找到符合條件的代理設定。",
   "dynamicRouteAction": "提供者出錯時",
   "dynamicRouteActionInfo": "說明{{action}}路由行為",
-"dynamicRouteRetryDescription": "提供者出錯後重試同一候選設定。適用於可能暫時恢復的故障。",
+  "dynamicRouteRetryDescription": "提供者出錯後重試同一候選設定。適用於可能暫時恢復的故障。",
   "dynamicRouteTryNextDescription": "本次執行跳過此候選設定，繼續使用下一個符合條件的設定。",
   "dynamicRouteStopDescription": "此候選設定失敗後停止路由。任務會等待手動恢復操作。",
   "dynamicProfileSaved": "動態設定已儲存。",
@@ -312,5 +312,6 @@
   "providerBaseUrlInvalid": "請輸入絕對的 http 或 https URL。",
   "providerApiKeyLabel": "API 金鑰",
   "providerApiKeyHelp": "保存傳送給供應方的持有者權杖的 Kandev 密鑰。若路由器不需驗證，可不設定。",
-  "providerModelSlash": "請移除模型名稱中的斜線：OpenAI 相容供應方需要的是不含前綴的模型 ID。"
+  "providerModelSlash": "請移除模型名稱中的斜線：OpenAI 相容供應方需要的是不含前綴的模型 ID。",
+  "providerPassthroughUnsupported": "請停用 CLI 直通模式，才能使用 OpenAI 相容供應方。"
 }

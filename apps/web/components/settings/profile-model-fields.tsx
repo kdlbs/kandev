@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Input } from "@kandev/ui/input";
 import { Switch } from "@kandev/ui/switch";
 import { ModeCombobox } from "@/components/settings/mode-combobox";
 import {
@@ -41,7 +42,36 @@ export type ProfileFormData = {
   cli_passthrough: boolean;
   cli_flags: CLIFlag[];
   command_prefix?: string;
+  provider_kind?: string;
 } & Record<PermissionKey, boolean>;
+
+function CustomProviderModelInput({
+  profile,
+  onChange,
+  ariaLabel,
+  placeholder,
+  disabled,
+}: {
+  profile: ProfileFormData;
+  onChange: (patch: Partial<ProfileFormData>) => void;
+  ariaLabel: string;
+  placeholder?: string;
+  disabled?: boolean;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="space-y-1.5">
+      <Input
+        data-testid="profile-model-input"
+        value={profile.model}
+        onChange={(event) => onChange({ model: event.target.value })}
+        placeholder={placeholder ?? t("settings:selectAModel")}
+        aria-label={ariaLabel}
+        disabled={disabled}
+      />
+    </div>
+  );
+}
 
 export function ModelPicker({
   profile,
@@ -69,6 +99,17 @@ export function ModelPicker({
   keepOpenOnModelChange?: boolean;
 }) {
   const { t } = useTranslation();
+  if (profile.provider_kind === "openai_compatible") {
+    return (
+      <CustomProviderModelInput
+        profile={profile}
+        onChange={onChange}
+        ariaLabel={ariaLabel}
+        placeholder={placeholder}
+        disabled={disabled}
+      />
+    );
+  }
   const modelConfig = configOptions.find(isModelConfigOption);
   const modelOptions: ModelSelectorOption[] = modelConfig
     ? configOptionToModelOptions(modelConfig)

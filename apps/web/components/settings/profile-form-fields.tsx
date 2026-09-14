@@ -61,6 +61,7 @@ export type ProfileFormData = {
   cli_passthrough: boolean;
   cli_flags: CLIFlag[];
   command_prefix?: string;
+  provider_kind?: string;
 } & Record<PermissionKey, boolean>;
 
 export type ProfileFormFieldsProps = {
@@ -277,6 +278,10 @@ function CapabilitiesRow(props: CapabilitiesRowProps) {
   const { t } = useTranslation();
   const gapCls = props.isCompact ? "space-y-1.5" : "space-y-2";
 
+  if (props.profile.provider_kind === "openai_compatible") {
+    return <CapabilitiesRowContent {...props} status="ok" isLoading={false} />;
+  }
+
   if (props.isLoading && props.models.length === 0) {
     return (
       <div className={gapCls}>
@@ -475,7 +480,9 @@ export function ProfileFormFields({
     isConfigResolutionPending,
     refreshModelConfig,
     refresh,
-  } = useProfileModelCapabilities(agentName, profile, modelConfig, onChange);
+  } = useProfileModelCapabilities(agentName, profile, modelConfig, onChange, {
+    skipCapabilityProbe: profile.provider_kind === "openai_compatible",
+  });
   const configOptions = modelConfigOptions(
     resolvedConfigOptions ? { ...modelConfig, config_options: resolvedConfigOptions } : modelConfig,
   );

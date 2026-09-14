@@ -300,8 +300,8 @@
   "saveProfile": "Save profile",
   "createProfile": "Create profile",
   "creatingProfile": "Creating...",
-"adminOnly": "Only administrators can change agents and agent profiles.",
-"providerSectionTitle": "AI provider",
+  "adminOnly": "Only administrators can change agents and agent profiles.",
+  "providerSectionTitle": "AI provider",
   "providerSectionDescription": "Route this profile's model calls through a self-hosted OpenAI-compatible router instead of the agent's built-in provider.",
   "providerKindLabel": "Provider",
   "providerKindNative": "Native (agent default)",
@@ -312,5 +312,6 @@
   "providerBaseUrlInvalid": "Enter an absolute http or https URL.",
   "providerApiKeyLabel": "API key",
   "providerApiKeyHelp": "Kandev secret holding the bearer token sent to the provider. Leave unset for a router that needs no auth.",
-  "providerModelSlash": "Remove the slash from the model name: an OpenAI-compatible provider expects a bare model id."
+  "providerModelSlash": "Remove the slash from the model name: an OpenAI-compatible provider expects a bare model id.",
+  "providerPassthroughUnsupported": "Disable CLI passthrough to use an OpenAI-compatible provider."
 }

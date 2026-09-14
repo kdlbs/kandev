@@ -215,6 +215,28 @@ type ProfileSettingsCardProps = {
   onModelConfigResolutionPendingChange: (pending: boolean) => void;
 };
 
+type ProfileFormPermissions = ReturnType<typeof profilePermissionValues>;
+
+function profileFormData(
+  profile: AgentProfile,
+  permissions: ProfileFormPermissions,
+): ProfileFormData {
+  return {
+    name: profile.name,
+    model: profile.model,
+    fallback_model: profile.fallbackModel ?? "",
+    auto_fallback: profile.autoFallback ?? false,
+    mode: profile.mode ?? "",
+    config_options: profile.configOptions ?? {},
+    provider_kind: profile.providerKind ?? "",
+    auto_approve: permissions.auto_approve,
+    allow_indexing: permissions.allow_indexing,
+    cli_passthrough: profile.cliPassthrough,
+    cli_flags: profile.cliFlags ?? [],
+    command_prefix: profile.commandPrefix ?? "",
+  };
+}
+
 function ProfileSettingsCard({
   agent,
   draft,
@@ -246,32 +268,8 @@ function ProfileSettingsCard({
       </CardHeader>
       <CardContent className="space-y-4">
         <ProfileFormFields
-          profile={{
-            name: draft.name,
-            model: draft.model,
-            fallback_model: draft.fallbackModel ?? "",
-            auto_fallback: draft.autoFallback ?? false,
-            mode: draft.mode ?? "",
-            config_options: draft.configOptions ?? {},
-            auto_approve: permissionValues.auto_approve,
-            allow_indexing: permissionValues.allow_indexing,
-            cli_passthrough: draft.cliPassthrough,
-            cli_flags: draft.cliFlags ?? [],
-            command_prefix: draft.commandPrefix ?? "",
-          }}
-          baselineProfile={{
-            name: savedProfile.name,
-            model: savedProfile.model,
-            fallback_model: savedProfile.fallbackModel ?? "",
-            auto_fallback: savedProfile.autoFallback ?? false,
-            mode: savedProfile.mode ?? "",
-            config_options: savedProfile.configOptions ?? {},
-            auto_approve: savedPermissionValues.auto_approve,
-            allow_indexing: savedPermissionValues.allow_indexing,
-            cli_passthrough: savedProfile.cliPassthrough,
-            cli_flags: savedProfile.cliFlags ?? [],
-            command_prefix: savedProfile.commandPrefix ?? "",
-          }}
+          profile={profileFormData(draft, permissionValues)}
+          baselineProfile={profileFormData(savedProfile, savedPermissionValues)}
           onChange={handleFormChange}
           modelConfig={modelConfig}
           permissionSettings={permissionSettings}
@@ -457,6 +455,7 @@ function ProfileEditor({
     providerBaseUrl: draft.providerBaseUrl,
     providerApiKeySecretId: draft.providerApiKeySecretId,
     model: draft.model,
+    cliPassthrough: draft.cliPassthrough,
   });
   useSettingsSaveContributor({
     id: `agent-profile:${draft.id}`,

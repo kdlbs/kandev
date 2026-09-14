@@ -196,16 +196,16 @@ func (r *sqliteRepository) initSchema() error {
 	// recreates agent_profiles would otherwise lose columns added before it.
 	r.migrate.Apply("agent_profiles.fallback_model", `ALTER TABLE agent_profiles ADD COLUMN fallback_model TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("agent_profiles.auto_fallback", `ALTER TABLE agent_profiles ADD COLUMN auto_fallback INTEGER NOT NULL DEFAULT 0`)
-	if err := r.migrate.Err(); err != nil {
-		return fmt.Errorf("required agent settings migration: %w", err)
-	}
 
 	// OpenAI-compatible providers: added after the table-recreation block for
 	// the same reason as command_prefix / fallback_model — a legacy DB that
 	// recreates agent_profiles copies only pre-existing columns.
-	r.migrate.Apply("agent_profiles.provider_kind", `ALTER TABLE agent_profiles ADD COLUMN provider_kind TEXT NOT NULL DEFAULT ''`)
-	r.migrate.Apply("agent_profiles.provider_base_url", `ALTER TABLE agent_profiles ADD COLUMN provider_base_url TEXT NOT NULL DEFAULT ''`)
-	r.migrate.Apply("agent_profiles.provider_api_key_secret_id", `ALTER TABLE agent_profiles ADD COLUMN provider_api_key_secret_id TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("agent_profiles.provider_kind", `ALTER TABLE agent_profiles ADD COLUMN provider_kind TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("agent_profiles.provider_base_url", `ALTER TABLE agent_profiles ADD COLUMN provider_base_url TEXT NOT NULL DEFAULT ''`)
+	_ = r.migrate.Apply("agent_profiles.provider_api_key_secret_id", `ALTER TABLE agent_profiles ADD COLUMN provider_api_key_secret_id TEXT NOT NULL DEFAULT ''`)
+	if err := r.migrate.Err(); err != nil {
+		return fmt.Errorf("required agent settings migration: %w", err)
+	}
 
 	return nil
 }
