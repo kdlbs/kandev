@@ -51,6 +51,43 @@ func (m *Manager) PrepareComparisonTargets(_ context.Context) {
 	}
 }
 
+// RetryUnavailableComparisonTargets schedules one new materialization attempt
+// for each explicit target that is currently unavailable. This is called only
+// by an explicit fresh Git-status request; it does not create a timer or a
+// background retry loop. Invalid targets remain unavailable until their
+// configuration changes.
+func (m *Manager) RetryUnavailableComparisonTargets() {
+	root, trackers := m.snapshotTrackers()
+
+	m.workspaceTrackersMu.Lock()
+	lazyTrackers := make([]*WorkspaceTracker, 0, len(m.workspaceTrackersBySubpath))
+	for _, tracker := range m.workspaceTrackersBySubpath {
+		lazyTrackers = append(lazyTrackers, tracker)
+	}
+	m.workspaceTrackersMu.Unlock()
+
+	all := make([]*WorkspaceTracker, 0, 1+len(trackers)+len(lazyTrackers))
+	all = append(all, root)
+	all = append(all, trackers...)
+	all = append(all, lazyTrackers...)
+	seen := make(map[*WorkspaceTracker]struct{}, len(all))
+	for _, tracker := range all {
+		if tracker == nil {
+			continue
+		}
+		if _, ok := seen[tracker]; ok {
+			continue
+		}
+		seen[tracker] = struct{}{}
+		resolution := tracker.ComparisonResolution()
+		if !resolution.Explicit || resolution.Status != comparisonTargetStatusUnavailable ||
+			resolution.ErrorCode == comparisonTargetErrorInvalid {
+			continue
+		}
+		m.prepareTrackerComparisonTarget(tracker)
+	}
+}
+
 // UpdateComparisonTargets replaces the desired map and refreshes only trackers
 // whose target changed. Existing ready siblings keep their state and are not
 // refetched when another repository is updated. Target materialization runs in

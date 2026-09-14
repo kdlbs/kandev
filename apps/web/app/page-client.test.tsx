@@ -54,6 +54,58 @@ afterEach(() => {
 });
 
 describe("PageClient", () => {
+  // @covers AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-003.4, 003.5, 003.7
+  it.each(["kanban", "pipeline", "list", "threads"])(
+    "prefers fixed Threads over remembered %s",
+    async (view) => {
+      startupPageMock.value = "threads";
+      preferredViewMock.value = view;
+      render(<PageClient workspaceId="workspace-1" />);
+      await waitFor(() =>
+        expect(replaceMock).toHaveBeenCalledWith("/threads?workspace=workspace-1"),
+      );
+      expect(
+        replaceMock.mock.calls.every(([href]) => href === "/threads?workspace=workspace-1"),
+      ).toBe(true);
+    },
+  );
+
+  it("lets explicit overview use the remembered List despite fixed Threads", async () => {
+    startupPageMock.value = "threads";
+    searchMock.value = "home=overview";
+    render(<PageClient workspaceId="workspace-1" />);
+    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith("/tasks?workspace=workspace-1"));
+  });
+
+  it("keeps explicit task and session props with fixed Threads", () => {
+    startupPageMock.value = "threads";
+    searchMock.value = "";
+    const { rerender } = render(<PageClient workspaceId="workspace-1" initialTaskId="task-1" />);
+    expect(replaceMock).not.toHaveBeenCalled();
+    searchMock.value = "";
+    rerender(<PageClient workspaceId="workspace-1" initialSessionId="session-1" />);
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+
+  it.each(["workflowId=wf-1", "taskId=task-1", "sessionId=session-1"])(
+    "does not restore a listing over query %s",
+    (query) => {
+      startupPageMock.value = "threads";
+      searchMock.value = query;
+      render(<PageClient workspaceId="workspace-1" />);
+      expect(replaceMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps onboarding available without a resolved workspace", () => {
+    startupPageMock.value = "threads";
+    preferredViewMock.value = "kanban";
+    render(<PageClient />);
+    expect(replaceMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("PageClient existing startup choices", () => {
   it("restores List in the resolved workspace", async () => {
     render(<PageClient workspaceId="workspace-1" />);
 

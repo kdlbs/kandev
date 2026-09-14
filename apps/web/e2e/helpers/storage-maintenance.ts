@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
-import type { Page } from "@playwright/test";
+import type { Page, Route } from "@playwright/test";
 
 const ABOVE_DEFAULT_LIMIT_BYTES = 16 * 1024 * 1024 * 1024;
 
@@ -13,6 +13,62 @@ export function seedManagedGoCache(tmpDir: string): { artifact: string } {
   fs.closeSync(fs.openSync(artifact, "w"));
   fs.truncateSync(artifact, ABOVE_DEFAULT_LIMIT_BYTES);
   return { artifact };
+}
+
+export function seedSystemTemporaryFile(
+  tmpDir: string,
+  name = "fixture.txt",
+): {
+  root: string;
+  file: string;
+} {
+  const root = path.join(tmpDir, "system-temporary");
+  const file = path.join(root, name);
+  fs.mkdirSync(root, { recursive: true });
+  fs.writeFileSync(file, "system-temporary-fixture");
+  return { root, file };
+}
+
+export async function mockPartialSystemTemporaryOverview(page: Page, root: string): Promise<void> {
+  await page.route("**/api/v1/system/storage", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    const requestHeaders = route.request().headers();
+    const response = await fetch(route.request().url(), {
+      headers: {
+        ...(requestHeaders.accept ? { accept: requestHeaders.accept } : {}),
+        ...(requestHeaders.cookie ? { cookie: requestHeaders.cookie } : {}),
+      },
+    });
+    const body = JSON.parse(await response.text()) as {
+      summary: Record<string, unknown> | null;
+    };
+    body.summary ??= {};
+    body.summary.system_temporary = {
+      status: "partial",
+      size_bytes: 24,
+      included_in_total: false,
+      reason: "informational_overlap",
+      roots: [
+        {
+          requested_path: root,
+          path: root,
+          status: "partial",
+          size_bytes: 24,
+          skipped_count: 1,
+          warnings: ["fixture entry could not be measured"],
+        },
+      ],
+      warnings: ["One fixture entry was skipped."],
+    };
+    await route.fulfill({
+      status: response.status,
+      contentType: "application/json",
+      body: JSON.stringify(body),
+    });
+  });
 }
 
 export async function mockTemporaryArtifactOverview(page: Page): Promise<void> {
@@ -49,6 +105,148 @@ export async function mockTemporaryArtifactOverview(page: Page): Promise<void> {
       stale_bytes: 16 * 1024 * 1024,
       skipped_count: 0,
     };
+    await route.fulfill({
+      status: response.status,
+      contentType: "application/json",
+      body: JSON.stringify(body),
+    });
+  });
+}
+
+type DatabaseFootprintStatus = "measured" | "unavailable" | "not_applicable";
+
+type DatabaseStorageBody = {
+  analysis?: Record<string, unknown> | null;
+  analyzed_at?: string | null;
+  summary?: Record<string, unknown> | null;
+};
+
+async function readDatabaseStorageRoute(route: Route): Promise<{
+  response: Response;
+  body: DatabaseStorageBody;
+} | null> {
+  if (route.request().method() !== "GET") {
+    await route.continue();
+    return null;
+  }
+  const requestHeaders = route.request().headers();
+  const response = await fetch(route.request().url(), {
+    headers: {
+      ...(requestHeaders.accept ? { accept: requestHeaders.accept } : {}),
+      ...(requestHeaders.cookie ? { cookie: requestHeaders.cookie } : {}),
+    },
+  });
+  return {
+    response,
+    body: JSON.parse(await response.text()) as DatabaseStorageBody,
+  };
+}
+
+function databaseMeasurement(
+  status: DatabaseFootprintStatus,
+  sizeBytes: number,
+  resourcePath: string,
+): Record<string, unknown> {
+  if (status === "measured") {
+    return {
+      status,
+      size_bytes: sizeBytes,
+      path: resourcePath,
+      included_in_total: true,
+    };
+  }
+  return {
+    status,
+    included_in_total: false,
+    reason: status === "unavailable" ? "measurement_failed" : "unsupported_driver",
+  };
+}
+
+function updateDatabaseStorageBody(
+  body: DatabaseStorageBody,
+  options: {
+    databasePath?: string;
+    backupPath?: string;
+    databaseBytes?: number;
+    backupBytes?: number;
+    databaseStatus: DatabaseFootprintStatus;
+    backupStatus: DatabaseFootprintStatus;
+  },
+): void {
+  const databaseBytes = options.databaseBytes ?? 8 * 1024 ** 3;
+  const backupBytes = options.backupBytes ?? 3 * 1024 ** 3;
+  const analyzedAt = new Date().toISOString();
+  const summary = body.summary ?? {};
+  body.summary = {
+    ...summary,
+    database: databaseMeasurement(
+      options.databaseStatus,
+      databaseBytes,
+      options.databasePath ?? "/var/lib/kandev/kandev.db",
+    ),
+    database_backups: databaseMeasurement(
+      options.backupStatus,
+      backupBytes,
+      options.backupPath ?? "/var/lib/kandev/backups",
+    ),
+  };
+  const analysis = body.analysis ?? {};
+  const currentProgress = (analysis.progress ?? {}) as Record<string, unknown>;
+  const currentSources = (currentProgress.sources ?? {}) as Record<string, unknown>;
+  body.analysis = {
+    ...analysis,
+    state: "ready",
+    completed_at: analyzedAt,
+    duration_ms: 100,
+    cache_ttl_seconds: 900,
+    refresh_due_at: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+    stale: false,
+    error: null,
+    progress: {
+      ...currentProgress,
+      completed_sources: 8,
+      total_sources: 8,
+      sources: {
+        ...currentSources,
+        database: {
+          state: "ready",
+          completed_items: 1,
+          bytes_scanned: databaseBytes,
+        },
+        database_backups: {
+          state: "ready",
+          completed_items: 1,
+          bytes_scanned: backupBytes,
+        },
+      },
+    },
+    partial_summary: null,
+  };
+  body.analyzed_at = analyzedAt;
+}
+
+export async function mockDatabaseFootprintOverview(
+  page: Page,
+  options: {
+    databasePath?: string;
+    backupPath?: string;
+    databaseBytes?: number;
+    backupBytes?: number;
+    databaseStatus?: DatabaseFootprintStatus;
+    backupStatus?: DatabaseFootprintStatus;
+  } = {},
+): Promise<void> {
+  await page.route("**/api/v1/system/storage", async (route) => {
+    const routed = await readDatabaseStorageRoute(route);
+    if (!routed) return;
+    const { response, body } = routed;
+    const databaseStatus = options.databaseStatus ?? "measured";
+    const backupStatus = options.backupStatus ?? "measured";
+    updateDatabaseStorageBody(body, {
+      ...options,
+      databaseStatus,
+      backupStatus,
+    });
     await route.fulfill({
       status: response.status,
       contentType: "application/json",
@@ -103,6 +301,24 @@ export async function mockProgressiveStorageOverview(page: Page): Promise<{
         bytes_scanned: 1024,
       },
       docker: { state: "ready", completed_items: 1, total_items: 1, bytes_scanned: 1024 },
+      database: {
+        state: "ready",
+        completed_items: 1,
+        total_items: 1,
+        bytes_scanned: 5 * 1024 ** 3,
+      },
+      database_backups: {
+        state: "ready",
+        completed_items: 1,
+        total_items: 1,
+        bytes_scanned: 3 * 1024 ** 3,
+      },
+      system_temporary: {
+        state: "ready",
+        completed_items: 1,
+        total_items: 1,
+        bytes_scanned: 1024,
+      },
     };
     body.analysis = completed
       ? {
@@ -115,7 +331,7 @@ export async function mockProgressiveStorageOverview(page: Page): Promise<{
           refresh_due_at: refreshDueAt,
           stale: false,
           error: null,
-          progress: { completed_sources: 5, total_sources: 5, sources: sourceProgress },
+          progress: { completed_sources: 8, total_sources: 8, sources: sourceProgress },
           partial_summary: null,
         }
       : {
@@ -130,7 +346,7 @@ export async function mockProgressiveStorageOverview(page: Page): Promise<{
           error: null,
           progress: {
             completed_sources: 1,
-            total_sources: 5,
+            total_sources: 8,
             sources: {
               ...sourceProgress,
               go_cache: {
@@ -142,6 +358,9 @@ export async function mockProgressiveStorageOverview(page: Page): Promise<{
               quarantine: { state: "pending", completed_items: 0, bytes_scanned: 0 },
               temporary_artifacts: { state: "pending", completed_items: 0, bytes_scanned: 0 },
               docker: { state: "pending", completed_items: 0, bytes_scanned: 0 },
+              database: { state: "pending", completed_items: 0, bytes_scanned: 0 },
+              database_backups: { state: "pending", completed_items: 0, bytes_scanned: 0 },
+              system_temporary: { state: "pending", completed_items: 0, bytes_scanned: 0 },
             },
           },
           partial_summary: {
@@ -185,6 +404,32 @@ export async function mockProgressiveStorageOverview(page: Page): Promise<{
             unused_image_bytes: 0,
             managed_container_count: 0,
             managed_container_bytes: 0,
+          },
+          database: {
+            status: "measured",
+            size_bytes: 5 * 1024 ** 3,
+            path: "/data/kandev.db",
+            included_in_total: true,
+          },
+          database_backups: {
+            status: "measured",
+            size_bytes: 3 * 1024 ** 3,
+            path: "/data/backups",
+            included_in_total: true,
+          },
+          system_temporary: {
+            status: "measured",
+            size_bytes: 1024,
+            included_in_total: false,
+            reason: "informational_overlap",
+            roots: [
+              {
+                requested_path: "/data/tmp",
+                path: "/data/tmp",
+                status: "measured",
+                size_bytes: 1024,
+              },
+            ],
           },
         }
       : null;

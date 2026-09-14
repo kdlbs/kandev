@@ -146,6 +146,9 @@ func (s *Server) handleLSPStreamWS(c *gin.Context) {
 	}
 	conn.SetReadLimit(protocol.MaxMessageBytes)
 
+	releaseFencing := closeOnCredentialInvalidation(c, conn)
+	defer releaseFencing()
+
 	binaryPath, err := s.lspInstaller.BinaryPath(language)
 	if err != nil {
 		autoInstall := lspAutoInstallRequested(c)

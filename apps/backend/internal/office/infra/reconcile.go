@@ -1,5 +1,4 @@
-// Package infra provides infrastructure-level background jobs for the office
-// domain, currently config reconciliation.
+// Package infra provides infrastructure-level startup reconciliation for the office domain.
 package infra
 
 import (

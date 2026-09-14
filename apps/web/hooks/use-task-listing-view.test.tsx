@@ -65,8 +65,20 @@ describe("useTaskListingView", () => {
     expect(result.current.effectiveView).toBe("kanban");
     await waitFor(() => {
       expect(mocks.setUserSettings).toHaveBeenCalledWith(
-        expect.objectContaining({ kanbanViewMode: null, loaded: true }),
+        expect.objectContaining({ kanbanViewMode: null, loaded: false }),
       );
     });
+  });
+
+  it("keeps the portable Threads default and readiness when changing the device view", () => {
+    mocks.state!.userSettings.startupPage = "threads";
+    mocks.state!.userSettings.loaded = true;
+    const { result } = renderHook(() => useTaskListingView());
+    act(() => result.current.setView("pipeline"));
+    expect(result.current.preferredView).toBe("pipeline");
+    expect(mocks.setUserSettings).toHaveBeenLastCalledWith(
+      expect.objectContaining({ kanbanViewMode: "graph2", startupPage: "threads", loaded: true }),
+    );
+    expect(window.localStorage.getItem(TASK_LISTING_VIEW_STORAGE_KEY)).toBe('"pipeline"');
   });
 });

@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/agentruntime"
 	"github.com/kandev/kandev/internal/gitcredentials"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -82,6 +83,33 @@ func TestResumeSession_PropagatesTaskEnvironmentPersistenceFailure(t *testing.T)
 	_, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], false)
 	if !errors.Is(err, persistErr) {
 		t.Fatalf("ResumeSession error = %v, want %v", err, persistErr)
+	}
+}
+
+func TestResumeSession_BlocksWorktreeRecoveryBeforeStateChangeOrLaunch(t *testing.T) {
+	repo := newMockRepository()
+	setupLiveResumeTestFixture(repo)
+	agentManager := &mockAgentManager{}
+	exec := newTestExecutor(t, agentManager, repo)
+	recoveryErr := &worktree.WorktreeRecoveryError{
+		TaskID: "task-1", Checkout: "/tasks/task-1/repo", Reason: "recovery is required",
+	}
+	exec.SetWorktreeRecoveryAdmission(func(_ context.Context, taskID string) error {
+		if taskID != "task-1" {
+			t.Fatalf("admission task ID = %q, want task-1", taskID)
+		}
+		return recoveryErr
+	})
+
+	_, err := exec.ResumeSession(context.Background(), repo.sessions["sess-1"], true)
+	if !errors.Is(err, worktree.ErrWorktreeCorrupted) {
+		t.Fatalf("ResumeSession() error = %v, want worktree recovery error", err)
+	}
+	if state := repo.sessions["sess-1"].State; state != models.TaskSessionStateWaitingForInput {
+		t.Fatalf("session state = %s, want unchanged waiting state", state)
+	}
+	if agentManager.launchAgentCallCount != 0 {
+		t.Fatalf("LaunchAgent calls = %d, want 0", agentManager.launchAgentCallCount)
 	}
 }
 
@@ -980,6 +1008,45 @@ func TestResumeSession_ArchiveCancelledWithoutRunningRow_ClearsTaskDescription(t
 	if capturedReq.TaskDescription != "" {
 		t.Errorf("TaskDescription = %q, want empty — auto-resuming an archive-cancelled "+
 			"session without a running row must not replay the original prompt", capturedReq.TaskDescription)
+	}
+}
+
+func TestApplyRunningRecordToResumeRequest_FailedSessionKeepsTaskDescription(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{TaskDescription: "recover the failed task"}
+	task := &v1.Task{ID: "task-1"}
+	session := &models.TaskSession{
+		ID:                     "sess-1",
+		State:                  models.TaskSessionStateFailed,
+		DownstreamACPSessionID: "previous-conversation",
+	}
+
+	exec.applyRunningRecordToResumeRequest(req, task, session, true, nil)
+
+	if req.TaskDescription != "recover the failed task" {
+		t.Fatalf("failed-session TaskDescription = %q, want original prompt", req.TaskDescription)
+	}
+	if req.ACPSessionID != "" {
+		t.Fatalf("failed-session ACP session ID = %q, want empty", req.ACPSessionID)
+	}
+}
+
+func TestApplyRunningRecordToResumeRequest_CompletedTokenlessRunningRowClearsTaskDescription(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	req := &LaunchAgentRequest{TaskDescription: "recover the completed task"}
+	task := &v1.Task{ID: "task-1"}
+	session := &models.TaskSession{
+		ID:    "sess-1",
+		State: models.TaskSessionStateCompleted,
+	}
+	running := &models.ExecutorRunning{SessionID: "sess-1", TaskID: "task-1"}
+
+	exec.applyRunningRecordToResumeRequest(req, task, session, true, running)
+
+	if req.TaskDescription != "" {
+		t.Fatalf("completed-session TaskDescription = %q, want empty", req.TaskDescription)
 	}
 }
 

@@ -157,6 +157,27 @@ func TestQueueUserPrompt_T2SkipsFastPathWhenInFlight(t *testing.T) {
 	}
 }
 
+// TestQueueUserPrompt_T2DefersInitialTaskBriefContender pins the first-prompt
+// ordering contract: a candidate that lost atomic admission remains queued
+// while the admitted candidate launches, even if the session is otherwise
+// promptable. The ready/boot-ready lifecycle drain delivers it afterward.
+func TestQueueUserPrompt_T2DefersInitialTaskBriefContender(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "t1", "s1", models.TaskSessionStateWaitingForInput)
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	if err := svc.QueueUserPrompt(
+		ctx, "t1", "s1", "later first-message contender", "", false, nil,
+		map[string]interface{}{MetaKeyInitialTaskBriefDispatchPending: true}, true,
+	); err != nil {
+		t.Fatalf("QueueUserPrompt: %v", err)
+	}
+	if got := svc.messageQueue.GetStatus(ctx, "s1").Count; got != 1 {
+		t.Fatalf("post-enqueue queue count = %d, want 1 (initial contender must wait for admitted launch)", got)
+	}
+}
+
 // TestQueueUserPrompt_T2SkipsFastPathOnWIPWait pins the WIP admission
 // contract: a task that has not been WIP-admitted and is queued for
 // admission (QueuedForStepID != "") must NOT fast-path drain. The

@@ -256,9 +256,8 @@ function CommitDetailErrorState({
       <span>{error}</span>
       <Button
         type="button"
-        className="min-h-11 cursor-pointer"
+        className="cursor-pointer"
         variant="outline"
-        size="sm"
         onClick={() => void onRetry()}
       >
         <IconRefresh className="h-4 w-4" />

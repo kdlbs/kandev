@@ -41,6 +41,49 @@ func TestLoadWithStartupUsesExplicitManagedValues(t *testing.T) {
 	}
 }
 
+// TestLoadWithStartupPropagatesAgentSurvivalEnabled pins that
+// Config.AgentSurvivalEnabled is copied directly from the managed contract in
+// both directions -- unlike UnownedPeriod/DetachedEventLimit, false is not
+// "unresolved" here (a managed launch always sets Configured=true), so it
+// must not be treated as "keep agentctl's own default".
+func TestLoadWithStartupPropagatesAgentSurvivalEnabled(t *testing.T) {
+	base := commonconfig.AgentctlStartupConfig{
+		Configured:                true,
+		IdleReaperInterval:        time.Minute,
+		NotificationQueueCapacity: 4096,
+	}
+
+	enabled := base
+	enabled.AgentSurvivalEnabled = true
+	cfg, err := LoadWithStartup(enabled)
+	if err != nil {
+		t.Fatalf("LoadWithStartup: %v", err)
+	}
+	if !cfg.AgentSurvivalEnabled {
+		t.Fatal("AgentSurvivalEnabled = false, want true when the startup contract enables it")
+	}
+
+	disabled := base
+	disabled.AgentSurvivalEnabled = false
+	cfg, err = LoadWithStartup(disabled)
+	if err != nil {
+		t.Fatalf("LoadWithStartup: %v", err)
+	}
+	if cfg.AgentSurvivalEnabled {
+		t.Fatal("AgentSurvivalEnabled = true, want false when the startup contract disables it")
+	}
+}
+
+// TestLoadWithoutStartupLeavesAgentSurvivalDisabled pins that a legacy/direct
+// (unmanaged) launch -- Load(), no startup contract -- never engages the
+// capability, matching AC-EXECUTORS-SURVIVAL-005.2's "defaults disabled".
+func TestLoadWithoutStartupLeavesAgentSurvivalDisabled(t *testing.T) {
+	cfg := Load()
+	if cfg.AgentSurvivalEnabled {
+		t.Fatal("AgentSurvivalEnabled = true from Load() with no startup contract, want false")
+	}
+}
+
 func TestNewInstanceConfigNormalizesMcpProviders(t *testing.T) {
 	cfg := (&Config{}).NewInstanceConfig(0, &InstanceOverrides{
 		McpProviders: []string{" GITLAB ", "unsupported", "github", "github"},
@@ -321,6 +364,63 @@ func TestCollectAgentEnvPreservesParentIndexedGitConfig(t *testing.T) {
 	}
 	if got := envSliceValue(env, "GIT_CONFIG_KEY_2"); got != "credential.https://github.com.helper" {
 		t.Fatalf("GIT_CONFIG_KEY_2 = %q, want managed helper", got)
+	}
+}
+
+func TestCollectAgentEnvHostGHBridge(t *testing.T) {
+	clearParentIndexedGitConfig(t)
+	ghPath := filepath.Join(t.TempDir(), "host tools", "gh")
+	if err := os.MkdirAll(filepath.Dir(ghPath), 0o700); err != nil {
+		t.Fatalf("create fake gh directory: %v", err)
+	}
+	const ghScript = `#!/bin/sh
+if [ "$1" = "auth" ] && [ "$2" = "git-credential" ]; then
+  cat >/dev/null
+  printf 'username=x-access-token\npassword=%s\n' "$GH_TOKEN"
+  exit 0
+fi
+exit 2
+`
+	if err := os.WriteFile(ghPath, []byte(ghScript), 0o700); err != nil {
+		t.Fatalf("write fake gh: %v", err)
+	}
+	t.Setenv("GIT_CONFIG_COUNT", "2")
+	t.Setenv("GIT_CONFIG_KEY_0", "notes.augment.mergeStrategy")
+	t.Setenv("GIT_CONFIG_VALUE_0", "union")
+	t.Setenv("GIT_CONFIG_KEY_1", "core.hooksPath")
+	t.Setenv("GIT_CONFIG_VALUE_1", "/Users/cfl12/.locstat/git/hooks")
+
+	env, err := CollectAgentEnvWithError(map[string]string{
+		"GH_TOKEN":            "late-profile-token",
+		"HOME":                filepath.Join(t.TempDir(), "home"),
+		"PATH":                "/usr/bin:/bin",
+		"GIT_CONFIG_COUNT":    "1",
+		"GIT_CONFIG_KEY_0":    "credential.https://github.com.helper",
+		"GIT_CONFIG_VALUE_0":  "!'" + ghPath + "' auth git-credential",
+		"GIT_CONFIG_NOSYSTEM": "1",
+	})
+	if err != nil {
+		t.Fatalf("CollectAgentEnvWithError() error = %v", err)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_COUNT"); got != "3" {
+		t.Fatalf("GIT_CONFIG_COUNT = %q, want 3", got)
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_0"); got != "notes.augment.mergeStrategy" || envSliceValue(env, "GIT_CONFIG_VALUE_0") != "union" {
+		t.Fatalf("inherited Git config entry 0 = (%q, %q)", got, envSliceValue(env, "GIT_CONFIG_VALUE_0"))
+	}
+	if got := envSliceValue(env, "GIT_CONFIG_KEY_1"); got != "core.hooksPath" || envSliceValue(env, "GIT_CONFIG_VALUE_1") != "/Users/cfl12/.locstat/git/hooks" {
+		t.Fatalf("inherited Git config entry 1 = (%q, %q)", got, envSliceValue(env, "GIT_CONFIG_VALUE_1"))
+	}
+
+	command := exec.Command("git", "credential", "fill")
+	command.Env = env
+	command.Stdin = strings.NewReader("protocol=https\nhost=github.com\npath=acme/widgets\n\n")
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git credential fill failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output), "password=late-profile-token") {
+		t.Fatalf("credential output = %q, want late profile token", output)
 	}
 }
 

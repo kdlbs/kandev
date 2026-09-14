@@ -31,6 +31,7 @@ export type DynamicAgentProfileEditorState = {
   name: string;
   profileEnabled: boolean;
   standalone: boolean;
+  hasExternalConflict: boolean;
   routingEnabled: boolean;
   enabledLabel: string;
   concreteProfiles: AgentProfile[];
@@ -47,6 +48,7 @@ export type DynamicAgentProfileEditorState = {
     patch: Partial<DynamicErrorPolicy>,
   ) => void;
   candidates: DynamicAgentCandidate[];
+  discardDraft: () => void;
 };
 
 function dynamicProfilePayload(
@@ -110,13 +112,6 @@ export function useDynamicAgentProfileEditorState({
   const setSettingsAgents = useAppStore((state) => state.setSettingsAgents);
   const setAgentProfiles = useAppStore((state) => state.setAgentProfiles);
   const draft = useDynamicAgentProfileEditorDraft({ profile, onDraftChange });
-  const [savedRevision, setSavedRevision] = useState(
-    dynamicDraftRevision(
-      profile.name,
-      profile.dynamic?.candidates ?? [],
-      profile.enabled !== false,
-    ),
-  );
   const [saving, setSaving] = useState(false);
   const standalone = onDraftChange === undefined;
 
@@ -154,11 +149,14 @@ export function useDynamicAgentProfileEditorState({
       !routingEnabled ||
       !draft.name.trim() ||
       draft.candidates.length === 0 ||
-      !profile.dynamic
+      !profile.dynamic ||
+      draft.hasExternalConflict
     ) {
       return;
     }
     setSaving(true);
+    const submitted = draft.currentProfile;
+    draft.markProfileSubmitted(submitted);
     try {
       const draftPayload = {
         name: draft.name.trim(),
@@ -195,16 +193,10 @@ export function useDynamicAgentProfileEditorState({
           item.profiles.map((itemProfile) => toAgentProfileOption(item, itemProfile)),
         ),
       );
-      draft.applyProfile(updated);
-      setSavedRevision(
-        dynamicDraftRevision(
-          updated.name,
-          updated.dynamic?.candidates ?? draft.candidates,
-          updated.enabled !== false,
-        ),
-      );
+      draft.acceptProfileSaveResponse(updated, submitted);
       toast({ title: t("agents:dynamicProfileSaved") });
     } catch (error) {
+      draft.markProfileSubmitted(null);
       if (isHandledApiError(error)) return;
       toast({
         title: t("agents:failedToSaveProfile"),
@@ -217,6 +209,11 @@ export function useDynamicAgentProfileEditorState({
   };
 
   const draftRevision = dynamicDraftRevision(draft.name, draft.candidates, draft.profileEnabled);
+  const savedRevision = dynamicDraftRevision(
+    draft.savedProfile.name,
+    draft.savedProfile.dynamic?.candidates ?? [],
+    draft.savedProfile.enabled !== false,
+  );
   const policiesValid = draft.candidates.every(
     (candidate) =>
       isDynamicErrorPolicyValid(candidate.policies.transient) &&
@@ -225,6 +222,8 @@ export function useDynamicAgentProfileEditorState({
   let invalidReason = t("agents:dynamicPolicyValidation");
   if (!draft.name.trim()) invalidReason = t("agents:profileNameRequired");
   else if (draft.candidates.length === 0) invalidReason = t("agents:noDynamicCandidates");
+  else if (draft.hasExternalConflict)
+    invalidReason = t("agents:profileExternalChangeInvalidReason");
   useSettingsSaveContributor({
     id: `dynamic-profile:${profile.id}`,
     revision: draftRevision,
@@ -232,6 +231,7 @@ export function useDynamicAgentProfileEditorState({
     canSave:
       routingEnabled &&
       !saving &&
+      !draft.hasExternalConflict &&
       Boolean(draft.name.trim()) &&
       draft.candidates.length > 0 &&
       policiesValid,
@@ -240,13 +240,6 @@ export function useDynamicAgentProfileEditorState({
     discard: () => {
       if (!standalone) return;
       draft.reset();
-      setSavedRevision(
-        dynamicDraftRevision(
-          profile.name,
-          profile.dynamic?.candidates ?? [],
-          profile.enabled !== false,
-        ),
-      );
     },
   });
 
@@ -254,6 +247,7 @@ export function useDynamicAgentProfileEditorState({
     name: draft.name,
     profileEnabled: draft.profileEnabled,
     standalone,
+    hasExternalConflict: draft.hasExternalConflict,
     routingEnabled,
     enabledLabel,
     concreteProfiles,
@@ -266,5 +260,6 @@ export function useDynamicAgentProfileEditorState({
     updateCandidate: draft.updateCandidate,
     updateCandidatePolicy: draft.updateCandidatePolicy,
     candidates: draft.candidates,
+    discardDraft: draft.reset,
   };
 }

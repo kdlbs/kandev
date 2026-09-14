@@ -1,14 +1,23 @@
 "use client";
 
 import { useLayoutEffect, useMemo, useRef } from "react";
-import { useInlineMention } from "@/hooks/use-inline-mention";
+import { useInlineMention, type PromptInsertMode } from "@/hooks/use-inline-mention";
 import { measureCaretRect } from "@/lib/utils/caret-position";
 import type { RichTextInputHandle } from "@/components/task/chat/rich-text-input";
 
 type Params = {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  inputRef?: React.RefObject<RichTextInputHandle | null>;
   value: string;
   onChange: (newValue: string) => void;
+  promptInsertMode?: PromptInsertMode;
+};
+
+type InputParams = {
+  inputRef: React.RefObject<RichTextInputHandle | null>;
+  value: string;
+  onChange: (newValue: string) => void;
+  promptInsertMode: PromptInsertMode;
 };
 
 /**
@@ -17,7 +26,13 @@ type Params = {
  * custom prompts. Inlines the prompt's content text at the trigger position
  * (no context chips, no backend changes).
  */
-export function useTaskCreatePromptMention({ textareaRef, value, onChange }: Params) {
+export function useTaskCreatePromptMention({
+  textareaRef,
+  inputRef,
+  value,
+  onChange,
+  promptInsertMode = "inline",
+}: Params) {
   const adapter = useMemo<RichTextInputHandle>(
     () => ({
       focus: () => textareaRef.current?.focus(),
@@ -52,9 +67,23 @@ export function useTaskCreatePromptMention({ textareaRef, value, onChange }: Par
   }, [adapter]);
 
   return useInlineMention({
-    inputRef: adapterRef,
+    inputRef: inputRef ?? adapterRef,
     value,
     onChange,
-    promptInsertMode: "inline",
+    promptInsertMode,
   });
+}
+
+/**
+ * Wires prompt suggestions to a rich input that already exposes the shared
+ * imperative input contract. The create-only reference editor uses this path
+ * so selection offsets stay in plain-text coordinates.
+ */
+export function useTaskCreatePromptMentionForInput({
+  inputRef,
+  value,
+  onChange,
+  promptInsertMode,
+}: InputParams) {
+  return useInlineMention({ inputRef, value, onChange, promptInsertMode });
 }

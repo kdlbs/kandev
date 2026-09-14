@@ -179,6 +179,7 @@ func runManagedApp(ctx context.Context, cfg managedAppConfig) int {
 	shutdownDebugf("runManagedApp backend healthy, waiting for readiness")
 	if err := waitForReadyFn(ctx, cfg.Ports.BackendURL, backend); err != nil {
 		supervisor.shutdown("backend readiness failure")
+		dumpLogs()
 		fmt.Fprintln(os.Stderr, "[kandev] "+err.Error())
 		return 1
 	}

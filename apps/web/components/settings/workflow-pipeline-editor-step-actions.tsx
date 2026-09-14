@@ -21,6 +21,7 @@ import {
   hasDisablePlanMode,
 } from "./workflow-pipeline-editor-helpers";
 import { isWorkflowStepValueDirty } from "./workflow-dirty-state";
+import { settingsControlClassName } from "./settings-control";
 
 // --- useStepActions hook ---
 
@@ -112,6 +113,62 @@ type StepSelectProps = {
   readOnly: boolean;
 };
 
+type CompleteTaskOnEnterToggleProps = {
+  step: WorkflowStep;
+  savedStep?: WorkflowStep;
+  onUpdate: (updates: Partial<WorkflowStep>) => void;
+  readOnly: boolean;
+  isFinalStep: boolean;
+};
+
+export function CompleteTaskOnEnterToggle({
+  step,
+  savedStep,
+  onUpdate,
+  readOnly,
+  isFinalStep,
+}: CompleteTaskOnEnterToggleProps) {
+  const { t } = useTranslation();
+  if (!isFinalStep) return null;
+
+  const checkboxId = `${step.id}-complete-task-on-enter`;
+  return (
+    <div
+      className="flex flex-wrap items-center gap-2 pt-1"
+      data-testid={`${step.id}-complete-task-on-enter-row`}
+    >
+      <Checkbox
+        id={checkboxId}
+        data-testid={`${step.id}-complete-task-on-enter-checkbox`}
+        checked={step.complete_task_on_enter === true}
+        onCheckedChange={(checked) => {
+          if (readOnly) return;
+          onUpdate({ complete_task_on_enter: checked === true });
+        }}
+        disabled={readOnly}
+        data-settings-dirty={isWorkflowStepValueDirty(
+          step,
+          savedStep,
+          (item) => item.complete_task_on_enter ?? false,
+        )}
+      />
+      <Label
+        htmlFor={checkboxId}
+        data-testid={`${step.id}-complete-task-on-enter-label`}
+        className="flex min-h-11 min-w-0 cursor-pointer items-center text-sm md:min-h-0"
+      >
+        {t("workflows:completeTaskOnEnter")}
+      </Label>
+      <HelpTip
+        testId={`${step.id}-complete-task-on-enter-help`}
+        ariaLabel={t("workflows:completeTaskOnEnterHelpAria")}
+        text={t("workflows:completeTaskOnEnterHelp")}
+        mobileTouchTarget
+      />
+    </div>
+  );
+}
+
 export function TurnStartSelect({
   step,
   savedStep,
@@ -137,7 +194,7 @@ export function TurnStartSelect({
         disabled={readOnly}
       >
         <SelectTrigger
-          className="w-full h-8"
+          className={settingsControlClassName("w-full")}
           data-settings-dirty={isWorkflowStepValueDirty(
             step,
             savedStep,
@@ -170,7 +227,7 @@ export function TurnStartSelect({
           disabled={readOnly}
         >
           <SelectTrigger
-            className="w-full h-8"
+            className={settingsControlClassName("w-full")}
             data-settings-dirty={isWorkflowStepValueDirty(
               step,
               savedStep,
@@ -236,7 +293,7 @@ function TurnCompleteTargetSelect({
       disabled={readOnly}
     >
       <SelectTrigger
-        className="w-full h-8"
+        className={settingsControlClassName("w-full")}
         data-settings-dirty={isWorkflowStepValueDirty(step, savedStep, getTurnCompleteTargetStepId)}
       >
         <SelectValue placeholder={t("workflows:selectStep")} />
@@ -282,7 +339,7 @@ export function TurnCompleteSelect({
         disabled={readOnly}
       >
         <SelectTrigger
-          className="w-full h-8"
+          className={settingsControlClassName("w-full")}
           data-settings-dirty={isWorkflowStepValueDirty(step, savedStep, getTransitionType)}
         >
           <SelectValue placeholder={t("workflows:selectAction")} />
@@ -384,7 +441,7 @@ export function ChildrenCompletedSelect({
         disabled={readOnly}
       >
         <SelectTrigger
-          className="w-full h-8"
+          className={settingsControlClassName("w-full")}
           data-testid={`${step.id}-children-completed-transition-select`}
           data-settings-dirty={isWorkflowStepValueDirty(
             step,
@@ -419,7 +476,7 @@ export function ChildrenCompletedSelect({
           disabled={readOnly}
         >
           <SelectTrigger
-            className="w-full h-8"
+            className={settingsControlClassName("w-full")}
             data-testid={`${step.id}-children-completed-step-select`}
             data-settings-dirty={isWorkflowStepValueDirty(
               step,

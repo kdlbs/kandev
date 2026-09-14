@@ -5,7 +5,7 @@ description: "Install, start, and operate Kandev from the command line."
 
 # Kandev CLI
 
-The `kandev` command starts a local Kandev backend, which serves the web UI, HTTP API, WebSocket API, and MCP endpoint. Use it when you want a browser-based installation or a headless/service process. For a packaged system WebView and desktop updates, use the [desktop app](desktop-app.md) instead.
+The packaged `kandev` executable is a single native Go binary with the compiled web frontend embedded. It starts the backend and serves the web UI, HTTP API, WebSocket API, and MCP endpoint from one listener. Use it for a browser-based installation or a headless/service process. For a packaged system WebView and desktop updates, use the [desktop app](desktop-app.md) instead.
 
 ## Quick path
 
@@ -22,9 +22,19 @@ The `kandev` command starts a local Kandev backend, which serves the web UI, HTT
 | Linux | `arm64`, `x64` | Homebrew, npm/npx |
 | Windows | `x64` | Scoop, npm/npx |
 
-The npm package is a small Node.js shim. It selects an exact, same-version native runtime package for `process.platform` and `process.arch`, then starts its `kandev` binary. npm 7 or later is required because the native packages are platform-specific optional dependencies. There is no native Windows ARM64 npm package; running the x64 package under Windows emulation is OS-dependent and is not a tested release target.
+The `kandev` binary contains the backend and compiled web application. A
+release bundle also contains the host `agentctl` and Linux/macOS remote
+`agentctl` helpers for task environments. These helpers support agent
+execution in SSH and container environments. They do not serve the Kandev web
+application.
 
-Every runtime bundle contains the backend, `agentctl`, the embedded web application, and Linux/macOS `agentctl` helpers used by supported remote executors. Node.js is used only to select the npm runtime; the application itself is native.
+The npm package is a small Node.js shim. It selects an exact, same-version
+native runtime package for `process.platform` and `process.arch`, then starts
+its `kandev` binary. npm 7 or later is required because the native packages are
+platform-specific optional dependencies. Node.js is not needed to serve the
+Kandev web application. There is no native Windows ARM64 npm package. Running
+the x64 package under Windows emulation is OS-dependent and is not a tested
+release target.
 
 ## Install
 
@@ -132,6 +142,11 @@ On a normal start, the launcher:
 7. waits for `/ready` (the backend has finished startup recovery and can serve real requests); this wait is unbounded by design, since recovery can legitimately take much longer than 45 seconds; and
 8. opens the reachable access URL in the default browser.
 
+While `/ready` returns 503, it reports the current startup phase and elapsed
+time. The launcher prints phase changes and periodic status, so a long backup,
+migration, or recovery can be distinguished from an unreachable backend. These
+values describe elapsed work and do not estimate completion.
+
 The launcher remains in the foreground. Press `Ctrl+C` or terminate it to stop the backend and its managed children cleanly. A force-kill can leave worktree processes or containers running; inspect them before deleting data.
 
 Use headless mode for SSH sessions, containers, or an external reverse proxy:
@@ -189,7 +204,10 @@ The old `--web-port` spelling has been removed, not retained as an alias. The la
 
 ### `start` is for a source build
 
-`kandev start` makes the executable invoke its own embedded backend instead of resolving an installed bundle. It is a contributor/local-production-build path, not a second installation channel. From a checkout, use the Make targets so the correct binary and embedded web assets are built:
+`kandev start` uses the embedded web assets and backend in the executable. It is
+a contributor/local-production-build path, not a second installation channel.
+From a checkout, run the Make targets to build the correct binary and embedded
+web assets:
 
 ```bash
 make build

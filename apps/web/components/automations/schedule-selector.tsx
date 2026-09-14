@@ -309,7 +309,7 @@ function FrequencySelect({
 
   return (
     <Select value={value} onValueChange={(next) => onChange(next as ScheduleFrequency)}>
-      <SelectTrigger className="w-[170px] h-8" data-testid="schedule-frequency">
+      <SelectTrigger className="w-[170px]" data-testid="schedule-frequency">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
@@ -355,7 +355,7 @@ function FrequencyDetail({
         data-testid="schedule-custom-input"
         data-settings-dirty={isDirty}
         placeholder="0 9 * * 1-5"
-        className={`font-mono h-8 w-[170px] ${hasCustomError ? "border-destructive" : ""}`}
+        className={`font-mono w-[170px] ${hasCustomError ? "border-destructive" : ""}`}
       />
     );
   }
@@ -376,7 +376,7 @@ function FrequencyDetail({
           }}
           data-testid="schedule-minute"
           data-settings-dirty={isDirty}
-          className="w-[75px] h-8"
+          className="w-[75px]"
         />
       </>
     );
@@ -393,7 +393,7 @@ function FrequencyDetail({
             value={String(spec.weekday)}
             onValueChange={(value) => onSpecChange({ ...spec, weekday: Number(value) })}
           >
-            <SelectTrigger className="w-[125px] h-8" data-testid="schedule-weekday">
+            <SelectTrigger className="w-[125px]" data-testid="schedule-weekday">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -417,7 +417,7 @@ function FrequencyDetail({
         }}
         data-testid="schedule-time"
         data-settings-dirty={isDirty}
-        className="w-[110px] h-8"
+        className="w-[110px]"
       />
     </>
   );
@@ -486,9 +486,9 @@ function TimezoneField({ value, onChange }: { value: string; onChange: (zone: st
       <PopoverTrigger asChild>
         <Button
           variant="outline"
-          size="sm"
+          size="default"
           role="combobox"
-          className="h-8 cursor-pointer font-normal justify-between gap-1"
+          className="cursor-pointer font-normal justify-between gap-1"
           data-testid="schedule-timezone"
         >
           {value || "UTC"}

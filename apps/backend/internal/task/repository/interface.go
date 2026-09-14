@@ -17,11 +17,14 @@ var ErrWorkspaceNotFound = repoerrors.ErrWorkspaceNotFound
 var ErrTaskNotFound = repoerrors.ErrTaskNotFound
 var ErrTaskParentMismatch = repoerrors.ErrTaskParentMismatch
 var ErrTaskPlanNotFound = repoerrors.ErrTaskPlanNotFound
+var ErrTaskPlanCommentsChanged = repoerrors.ErrTaskPlanCommentsChanged
 var ErrRepositoryNotFound = repoerrors.ErrRepositoryNotFound
 var ErrTaskEnvironmentNotFound = repoerrors.ErrTaskEnvironmentNotFound
 var ErrTaskEnvironmentOwnershipChanged = repoerrors.ErrTaskEnvironmentOwnershipChanged
 var ErrWIPLimitExceeded = wfmodels.ErrWIPLimitExceeded
 var ErrExternalIDConflict = repoerrors.ErrExternalIDConflict
+var ErrStepChanged = repoerrors.ErrStepChanged
+var ErrInvalidReorder = repoerrors.ErrInvalidReorder
 
 // WorkspaceRepository handles workspace CRUD.
 type WorkspaceRepository interface {
@@ -54,7 +57,17 @@ type TaskRepository interface {
 	CreateTask(ctx context.Context, task *models.Task) error
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 	GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error)
+	// UpdateTask writes the full task row, preserving whatever position is
+	// currently persisted regardless of what task.Position holds — a
+	// pre-transaction read is not authoritative once a concurrent reorder or
+	// arrival may have moved the row (REQ-TASKS-KANBAN-TASK-REORDERING-001.28/
+	// .31). Use UpdateTaskWithExplicitPosition for the one caller that must
+	// write a literal position.
 	UpdateTask(ctx context.Context, task *models.Task) error
+	// UpdateTaskWithExplicitPosition is UpdateTask's counterpart that writes
+	// task.Position as given, for the generic task-update API's explicit
+	// position field (predates REQ-TASKS-KANBAN-TASK-REORDERING-001).
+	UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error
 	DeleteTask(ctx context.Context, id string) error
 	ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error)
 	ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error)
@@ -162,6 +175,22 @@ type TaskRepository interface {
 	// and bumps updated_at. Returns the task as it exists immediately after
 	// the update, or nil if no task held the identity.
 	ReleaseTaskExternalID(ctx context.Context, workspaceID, externalID string) (*models.Task, error)
+
+	// SwitchTaskRunner re-evaluates the ten ordered mutability conditions
+	// inside a single task-row-locked transaction, confirms the
+	// compatibility gate's pre-transaction repository snapshot
+	// (req.ResolvedRepositoryID / ResolvedRepositoryUpdatedAt) is still
+	// current, and — only when every check passes — writes
+	// req.ExecutorProfileID as the task's sole metadata change. It never
+	// evaluates the compatibility gate itself; that runs before this call,
+	// outside any transaction.
+	//
+	// Returns *repoerrors.ErrRunnerMutabilityConflict when the mutability
+	// gate fails, repoerrors.ErrRunnerCompatibilityConflict when the
+	// compatibility gate fails, and repoerrors.ErrRunnerEvaluationUnavailable
+	// for a failed read, a stale compatibility snapshot, a failed lock, a
+	// failed write, or a failed commit.
+	SwitchTaskRunner(ctx context.Context, req models.RunnerSwitchRequest) (*models.RunnerSwitchResult, error)
 }
 
 // TaskPriorityRepository updates a task's priority without replacing the
@@ -280,8 +309,17 @@ type AttachmentRepository interface {
 	ClaimMessageAttachments(ctx context.Context, ids []string, ownerID, workspaceID, taskID, sessionID string) error
 	DeleteClaimedMessageAttachments(ctx context.Context, ids []string, ownerID, taskID, sessionID string) ([]*models.TaskMessageAttachment, error)
 	DeleteMessageAttachmentsByTask(ctx context.Context, taskID string) ([]*models.TaskMessageAttachment, error)
+	DeleteMessageAttachmentsBySession(ctx context.Context, taskID, sessionID string) ([]*models.TaskMessageAttachment, error)
+	TransferMessageAttachments(ctx context.Context, taskID, oldSessionID, newSessionID string, attachmentIDs []string) error
 	DeleteMessageAttachment(ctx context.Context, id, ownerID string) error
 	MarkExpiredMessageAttachments(ctx context.Context, now time.Time) ([]*models.TaskMessageAttachment, error)
+}
+
+// QueueAttachmentAdmissionRepository scopes provisional attachment claims to
+// one caller-owned queue admission so rollback can restore only that attempt.
+type QueueAttachmentAdmissionRepository interface {
+	ClaimQueuedMessageAttachments(ctx context.Context, ids []string, ownerID, workspaceID, taskID, sessionID, queueID string) error
+	RestoreQueuedMessageAttachments(ctx context.Context, ids []string, ownerID, taskID, sessionID, queueID string) error
 }
 
 // TurnRepository handles conversation turn persistence.
@@ -355,6 +393,14 @@ type SessionRepository interface {
 	ListTaskSessions(ctx context.Context, taskID string) ([]*models.TaskSession, error)
 	ListActiveTaskSessions(ctx context.Context) ([]*models.TaskSession, error)
 	ListActiveTaskSessionsByTaskID(ctx context.Context, taskID string) ([]*models.TaskSession, error)
+	// ListLiveWorkspaceSessions returns every session across all tasks in one of
+	// the five live states (CREATED, STARTING, RUNNING, IDLE,
+	// WAITING_FOR_INPUT), each carrying its effective workspace_path. Unlike
+	// ListActiveTaskSessions it includes IDLE, because this method exists
+	// only for the orphan-reap workspace-ownership check, not for the
+	// several unrelated "active session" callers that must not change
+	// behavior by picking up IDLE sessions.
+	ListLiveWorkspaceSessions(ctx context.Context) ([]*models.TaskSession, error)
 	CancelActiveTaskSessionsByTaskID(ctx context.Context, taskID, reason string) ([]*models.TaskSession, error)
 	HasActiveTaskSessionsByAgentProfile(ctx context.Context, agentProfileID string) (bool, error)
 	GetActiveTaskInfoByAgentProfile(ctx context.Context, agentProfileID string) ([]agentdto.ActiveTaskInfo, error)
@@ -483,10 +529,10 @@ type RepositorySetRepository interface {
 	// ListRepositorySetIDsByRepository reports which sets hold a repository, so a
 	// caller can publish their new shape after a deletion prunes membership.
 	ListRepositorySetIDsByRepository(ctx context.Context, repositoryID string) ([]string, error)
-	// UpdateRepositorySet writes the set's fields and, when repositoryIDs is
+	// UpdateRepositorySet writes the set's fields and, when repositoryItems is
 	// non-nil, replaces its whole membership in the same transaction so the two
-	// cannot land apart. A nil repositoryIDs leaves membership untouched.
-	UpdateRepositorySet(ctx context.Context, set *models.RepositorySet, repositoryIDs *[]string) error
+	// cannot land apart. A nil repositoryItems leaves membership untouched.
+	UpdateRepositorySet(ctx context.Context, set *models.RepositorySet, repositoryItems *[]models.RepositorySetItem) error
 	DeleteRepositorySet(ctx context.Context, id string) (bool, error)
 }
 
@@ -544,6 +590,11 @@ type ExecutorRepository interface {
 	ListAllExecutorProfiles(ctx context.Context) ([]*models.ExecutorProfile, error)
 	ListExecutorsRunning(ctx context.Context) ([]*models.ExecutorRunning, error)
 	ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error)
+	// GetExecutorRunningExistenceByTaskIDs reports, for each of taskIDs,
+	// whether any executors_running row exists. Batched sibling of the
+	// single-task presence check the runner-mutability evaluator uses, for
+	// list/board projections that must not fan out into a per-task query.
+	GetExecutorRunningExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error)
 	UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error
 	GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error)
 	DeleteExecutorRunningBySessionID(ctx context.Context, sessionID string) error
@@ -584,6 +635,11 @@ type TaskEnvironmentRepository interface {
 	CreateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	GetTaskEnvironment(ctx context.Context, id string) (*models.TaskEnvironment, error)
 	GetTaskEnvironmentByTaskID(ctx context.Context, taskID string) (*models.TaskEnvironment, error)
+	// GetTaskEnvironmentExistenceByTaskIDs reports, for each of taskIDs,
+	// whether any task_environments row exists. Batched sibling of the
+	// single-task presence check the runner-mutability evaluator uses, for
+	// list/board projections that must not fan out into a per-task query.
+	GetTaskEnvironmentExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error)
 	UpdateTaskEnvironment(ctx context.Context, env *models.TaskEnvironment) error
 	DeleteTaskEnvironment(ctx context.Context, id string) error
 	DeleteTaskEnvironmentsByTask(ctx context.Context, taskID string) error
@@ -592,6 +648,15 @@ type TaskEnvironmentRepository interface {
 	UpdateTaskEnvironmentRepo(ctx context.Context, repo *models.TaskEnvironmentRepo) error
 	DeleteTaskEnvironmentRepo(ctx context.Context, id string) error
 	DeleteTaskEnvironmentReposByEnv(ctx context.Context, envID string) error
+}
+
+// TaskEnvironmentRecoveryRepository is the optional durable authority
+// capability required by automatic host worktree recovery. Keeping it
+// separate preserves lightweight repository adapters used by tests and by
+// non-worktree executors.
+type TaskEnvironmentRecoveryRepository interface {
+	AcquireTaskEnvironmentRecoveryClaim(context.Context, models.TaskEnvironmentRecoveryClaimRequest) (*models.TaskEnvironmentRecoveryClaim, error)
+	ReleaseTaskEnvironmentRecoveryClaim(context.Context, *models.TaskEnvironmentRecoveryClaim) error
 }
 
 // ReviewRepository handles session file review records.
@@ -629,6 +694,10 @@ type PlanRepository interface {
 	UpdateTaskPlan(ctx context.Context, plan *models.TaskPlan) error
 	MarkTaskPlanImplementationStarted(ctx context.Context, taskID, sessionID, actor string) (*models.TaskPlan, error)
 	DeleteTaskPlan(ctx context.Context, taskID string) error
+	ListTaskPlanComments(ctx context.Context, taskID string) (*models.TaskPlanCommentSnapshot, error)
+	CreateTaskPlanComment(ctx context.Context, comment *models.TaskPlanComment) (*models.TaskPlanCommentSnapshot, error)
+	UpdateTaskPlanComment(ctx context.Context, comment *models.TaskPlanComment, expectedVersion int64) (*models.TaskPlanCommentSnapshot, error)
+	DeleteTaskPlanComment(ctx context.Context, taskID, planID, commentID string, expectedVersion int64) (*models.TaskPlanCommentSnapshot, error)
 
 	// Revision history
 	InsertTaskPlanRevision(ctx context.Context, rev *models.TaskPlanRevision) error

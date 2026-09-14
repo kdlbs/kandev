@@ -61,13 +61,15 @@ func newExactCancelFixtureWithDB(t *testing.T, db *sqlx.DB) exactCancelFixture {
 			workflow_id TEXT NOT NULL,
 			workflow_step_id TEXT NOT NULL,
 			metadata TEXT NOT NULL DEFAULT '{}',
+			archived_at TIMESTAMP,
 			updated_at TIMESTAMP
 		);
 		CREATE TABLE task_sessions (
 			id TEXT PRIMARY KEY,
 			task_id TEXT NOT NULL,
 			state TEXT NOT NULL,
-			agent_execution_id TEXT NOT NULL DEFAULT ''
+			agent_execution_id TEXT NOT NULL DEFAULT '',
+			queue_incarnation_id TEXT NOT NULL DEFAULT ''
 		);
 		CREATE TABLE executors_running (
 			id TEXT PRIMARY KEY,

@@ -480,6 +480,7 @@ export function KanbanBoard({ onPreviewTask, onOpenTask, onBeforeEdit }: KanbanB
         steps={s.multiSelectSteps}
         isProcessing={s.multiSelect.isProcessing}
         canMove={!s.isMixedWorkflowSelection}
+        getEligibleSelectedIds={s.multiSelect.getEligibleSelectedIds}
         onClearSelection={s.multiSelect.clearSelection}
         onBulkDelete={s.multiSelect.bulkDelete}
         onBulkArchive={s.multiSelect.bulkArchive}
@@ -553,6 +554,9 @@ function KanbanBoardDialogs({
                 state: editingTask.state as BackendTask["state"],
                 repositoryId: editingTask.repositoryId,
                 repositories: editingTask.repositories,
+                primaryExecutorProfileId: editingTask.primaryExecutorProfileId ?? undefined,
+                runnerEditable: editingTask.runnerEditable,
+                runnerIneligibleReason: editingTask.runnerIneligibleReason,
               }
             : null
         }

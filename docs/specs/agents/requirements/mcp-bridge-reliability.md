@@ -56,8 +56,44 @@ client timeout without diagnostic evidence.
   action, request, and session for accepted requests and terminal bridge
   errors. These logs shall not contain tool arguments.
 
+### REQ-AGENTS-MCP-BRIDGE-RELIABILITY-002: Empty response payload reporting
+
+**Intent:** A backend client must report an empty response payload as a bridge
+error when a caller expects a result. It must not turn an empty payload into a
+successful result with an unset value.
+
+#### Acceptance criteria
+
+- **AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.1:** When a successful response has
+  zero payload bytes and the caller supplied a result sink, the backend client
+  shall return an error.
+- **AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.2:** The error shall identify the
+  empty-payload condition and include the action name. It shall not include the
+  request payload or any tool argument.
+- **AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.3:** When the caller supplied no
+  result sink, a zero-byte payload shall keep the existing successful behavior.
+- **AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.4:** An error response shall keep the
+  existing backend-error behavior, even when its payload has zero bytes.
+- **AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.5:** A valid empty object shall keep
+  decoding successfully. The task-plan tool shall keep its current no-plan
+  text for that object.
+- **AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.6:** A valid `null` payload shall keep
+  its current decoding behavior and shall not become an empty-payload error.
+- **AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.7:** A non-empty invalid or
+  unassignable payload shall keep returning its decoding error.
+- **AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.8:** The channel and dispatcher
+  backend clients shall use the same response classification rules.
+- **AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.9:** Each empty-payload error shall
+  create one warning with the request ID and action. The channel client shall
+  also include the session ID and duration. Warnings shall not include tool
+  arguments.
+- **AC-AGENTS-MCP-BRIDGE-RELIABILITY-002.10:** The error shall reach the caller
+  on its first occurrence. This behavior shall add no retry or backoff.
+
 ## Out of scope
 
 - Deadlines for task, integration, plugin, or agent-launch business operations.
 - A new user-interface alert for a stalled MCP request.
 - Traffic between an agent and a third-party MCP server.
+- Treating valid `null` payloads as transport errors.
+- Reproducing or assigning a root cause to a historical empty-result incident.

@@ -12,7 +12,7 @@ import { WorkflowExportDialog } from "@/components/settings/workflow-export-dial
 import type { WorkflowTemplate } from "@/lib/types/http";
 
 const YAML_PLACEHOLDER =
-  "version: 1\ntype: kandev_workflow\nworkflows:\n  - name: My Workflow\n    steps: [...]";
+  "version: 2\ntype: kandev_workflow\nworkflows:\n  - name: My Workflow\n    steps: [...]";
 
 type ImportWorkflowsDialogProps = {
   open: boolean;
