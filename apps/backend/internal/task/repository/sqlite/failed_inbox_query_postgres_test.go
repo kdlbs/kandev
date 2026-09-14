@@ -23,6 +23,9 @@ func TestPostgresListFailedInboxTasksScansDirectCompletedAtColumn(t *testing.T) 
 	}
 	ctx := context.Background()
 
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-pg", Name: "ws-pg"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
 	seedFailedInboxTask(t, repo, "task-pg-resolved", "ws-pg", v1.TaskStateFailed, "")
 	seedFailedInboxSession(t, repo, failedInboxSessionSeed{
 		ID: "sess-pg-resolved", TaskID: "task-pg-resolved", IsPrimary: true,
@@ -63,6 +66,9 @@ func TestPostgresListFailedInboxTasksTieBreaksByteOrdered(t *testing.T) {
 	}
 	ctx := context.Background()
 
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-pg-tie", Name: "ws-pg-tie"}); err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
 	seedFailedInboxTask(t, repo, "task-pg-b", "ws-pg-tie", v1.TaskStateFailed, "")
 	seedFailedInboxTask(t, repo, "task-pg-a", "ws-pg-tie", v1.TaskStateFailed, "")
 
