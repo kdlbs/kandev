@@ -14,6 +14,7 @@ import {
   getManualRightWidth,
   removeEnvMaximizeState,
 } from "@/lib/local-storage";
+import { getEnvHiddenSessions } from "@/lib/env-hidden-sessions";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 
 const debug = createDebugLogger("dockview:restore");
@@ -67,11 +68,12 @@ function shouldKeepSessionPanel(id: string, options: SanitizeLayoutOptions): boo
   if (options.stripSessionPanels) return false;
   if (!options.excludeSessionIds) return true;
 
-  // Per-env restore: drop session panels that we know belong to a
-  // different env (a phantom from a previously-deleted task). Sessions
-  // we have no mapping for are kept — they may be a still-loading WS
-  // arrival, and useAutoSessionTab's reconcile will clean them up if
-  // they turn out to be stale.
+  // Per-env restore: drop session panels that are known to be unwanted here —
+  // phantoms that belong to a different env (a previously-deleted task) and
+  // panels the user explicitly closed before the reload. Sessions we have no
+  // mapping for are kept — they may be a still-loading WS arrival, and
+  // useAutoSessionTab's reconcile will clean them up if they turn out to be
+  // stale.
   const sid = id.slice("session:".length);
   return !options.excludeSessionIds.has(sid);
 }
@@ -236,8 +238,10 @@ function tryRestoreEnvLayout(
       phantomSessionIds: phantomSessionIds ? Array.from(phantomSessionIds) : [],
     });
   }
+  const explicitlyHiddenSessionIds = getEnvHiddenSessions(envId);
+  const excludeSessionIds = new Set([...(phantomSessionIds ?? []), ...explicitlyHiddenSessionIds]);
   const sanitized = sanitizeLayout(envLayout, validComponents, {
-    excludeSessionIds: phantomSessionIds,
+    excludeSessionIds,
   });
   if (!sanitized) {
     debug("tryRestoreEnvLayout: sanitize returned null", { envId });

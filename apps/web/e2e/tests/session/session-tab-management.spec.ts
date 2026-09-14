@@ -203,6 +203,56 @@ test.describe("Session tab management — close behavior", () => {
     await expect(session.sessionTabBySessionId(session2Id)).toBeVisible({ timeout: 5_000 });
   });
 
+  test("a hidden session tab stays absent across a page reload until reopened", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(150_000);
+
+    const { task, session, session1Id, session2Id } = await createTaskWithTwoSessions(
+      testPage,
+      apiClient,
+      seedData,
+      "Hidden Tab Survives Reload",
+    );
+
+    await session.sessionTabBySessionId(session1Id).click({ button: "right" });
+    await session.contextMenuItem("Hide").click();
+    await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible({ timeout: 5_000 });
+    await expect(session.sessionTabBySessionId(session2Id)).toBeVisible();
+
+    // The persisted restore paths (saved env layout, sibling materialization,
+    // and the auto session tab effect) previously re-added every current
+    // session panel after reload, undoing the explicit hide.
+    await testPage.reload();
+    await session.waitForLoad();
+
+    await expect(session.sessionTabBySessionId(session2Id)).toBeVisible({ timeout: 15_000 });
+    await dwell(
+      testPage,
+      800,
+      "negative-assertion",
+      "the reload restore previously recreated the hidden sibling, which has no arrival event to wait on",
+    );
+    await expect(session.sessionTabBySessionId(session1Id)).not.toBeVisible();
+    await expect
+      .poll(async () => (await apiClient.listTaskSessions(task.id)).sessions.length, {
+        timeout: 10_000,
+        message: "Session count must stay at 2 after reload (hide must not delete)",
+      })
+      .toBe(2);
+
+    // The hidden conversation is still recoverable from the + menu, and
+    // reopening restores the same session, not a new one.
+    await session.addPanelButton().click();
+    await expect(session.sessionReopenItem(session1Id)).toBeVisible();
+    await session.sessionReopenItem(session1Id).click();
+    await expect(session.sessionTabBySessionId(session1Id)).toBeVisible({ timeout: 5_000 });
+    const { sessions } = await apiClient.listTaskSessions(task.id);
+    expect(sessions.map((s) => s.id).sort()).toEqual([session1Id, session2Id].sort());
+  });
+
   test("deleting a non-active session removes its tab and stays gone", async ({
     testPage,
     apiClient,

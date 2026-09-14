@@ -13,6 +13,7 @@ import {
   setGlobalSidebarWidth,
   getManualRightWidth,
 } from "@/lib/local-storage";
+import { getEnvHiddenSessions } from "@/lib/env-hidden-sessions";
 import { getLayoutProfileIdentity, type LayoutProfileIdentity } from "@/lib/layout/layout-profiles";
 import { setPinnedTarget, clearPinnedTarget } from "./layout-manager";
 import { applyLayoutFixups, focusOrAddPanel } from "./dockview-layout-builders";
@@ -821,13 +822,18 @@ function restoreCustomLayout({
   set,
 }: RestoreCustomLayoutParams): { appliedState: LayoutState; oldFormatRestoreFailed: boolean } {
   const state = layout.layout as unknown as LayoutState;
+  const envId = useDockviewStore.getState().currentLayoutEnvId;
+  const hiddenSessionIds = envId === null ? [] : getEnvHiddenSessions(envId);
   if (state?.columns) {
     // Normalize first so both old saved layouts with session-specific panels
     // and newer reusable layouts with chat placeholders apply through one path.
+    const visibleSessionIds = (opts?.sessionIds ?? []).filter(
+      (sessionId) => !hiddenSessionIds.includes(sessionId),
+    );
     const activeState = materializeReusableChatPanel(
       normalizeReusableSessionPanels(state),
       opts?.activeSessionId ?? null,
-      opts?.sessionIds ?? [],
+      visibleSessionIds,
     );
     const savedWidths = resolveCustomLayoutPinnedWidths(activeState.columns, safeWidth);
     set({
@@ -839,7 +845,12 @@ function restoreCustomLayout({
 
   try {
     api.fromJSON(layout.layout as unknown as SerializedDockview);
-    replaceStaleSessionPanels(api, opts?.activeSessionId ?? null, opts?.sessionIds ?? []);
+    replaceStaleSessionPanels(
+      api,
+      opts?.activeSessionId ?? null,
+      opts?.sessionIds ?? [],
+      hiddenSessionIds,
+    );
     set(applyLayoutFixups(api));
     return { appliedState: state, oldFormatRestoreFailed: false };
   } catch (e) {
@@ -872,7 +883,7 @@ function restoreMaximizeFromStorage(
   if (!saved) return false;
   try {
     api.fromJSON(saved.maximizedDockviewJson as SerializedDockview);
-    replaceStaleSessionPanels(api, activeSessionId, currentSessionIds);
+    replaceStaleSessionPanels(api, activeSessionId, currentSessionIds, getEnvHiddenSessions(envId));
     // After fromJSON, `api.width/height` reflect the JSON's recorded grid
     // dims, which may not match the live container. Always lay out against
     // the measured DOM size so a stale value can't pin the dockview at the

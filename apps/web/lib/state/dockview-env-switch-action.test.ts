@@ -16,6 +16,11 @@ vi.mock("@/lib/local-storage", () => ({
   clearGlobalSidebarWidth: vi.fn(),
 }));
 
+vi.mock("@/lib/env-hidden-sessions", () => ({
+  getEnvHiddenSessions: vi.fn(() => []),
+  setEnvHiddenSessions: vi.fn(),
+}));
+
 vi.mock("@/lib/layout/panel-portal-manager", () => ({
   panelPortalManager: {
     releaseByEnv: vi.fn(),

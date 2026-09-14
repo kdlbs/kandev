@@ -5,6 +5,7 @@ import {
   tryRestoreLayout,
 } from "./dockview-layout-restore";
 import * as localStorage from "@/lib/local-storage";
+import * as envHiddenSessions from "@/lib/env-hidden-sessions";
 
 const VALID_COMPONENTS = new Set<string>(["chat", "files", "shell", "git", "terminal"]);
 const PHANTOM_PANEL_ID = "session:phantom";
@@ -371,6 +372,35 @@ describe("tryRestoreLayout - env restore", () => {
     const restored = tryRestoreLayout(api, "env-X", VALID_COMPONENTS, new Set());
     expect(restored).toBe(true);
     expect(api.fromJSON).toHaveBeenCalledOnce();
+  });
+
+  it("strips a panel the user explicitly closed before the reload", () => {
+    // The hidden-session record outlives the Dockview API: without this strip
+    // a saved env-layout captured before the hide would restore the closed
+    // panel on reload.
+    const visibleId = "visible-1";
+    const hiddenId = "hidden-2";
+    const layout = buildLayout();
+    layout.grid.root.data[1].data.views = [`session:${visibleId}`, `session:${hiddenId}`];
+    layout.grid.root.data[1].data.activeView = `session:${visibleId}`;
+    Object.assign(layout.panels, {
+      [`session:${visibleId}`]: { id: `session:${visibleId}`, contentComponent: "chat" },
+      [`session:${hiddenId}`]: { id: `session:${hiddenId}`, contentComponent: "chat" },
+    });
+    vi.spyOn(localStorage, "getEnvLayout").mockReturnValue(layout);
+    vi.spyOn(localStorage, "getEnvMaximizeState").mockReturnValue(null);
+    const getHidden = vi
+      .spyOn(envHiddenSessions, "getEnvHiddenSessions")
+      .mockReturnValue([hiddenId]);
+
+    const api = makeFakeRestoreApi();
+    const restored = tryRestoreLayout(api, "env-hidden", VALID_COMPONENTS, new Set());
+    expect(restored).toBe(true);
+    expect(getHidden).toHaveBeenCalledWith("env-hidden");
+    expect(api.fromJSON).toHaveBeenCalledOnce();
+    const restoredLayout = (api.fromJSON as ReturnType<typeof vi.fn>).mock.calls[0][0];
+    expect(Object.keys(restoredLayout.panels)).toContain(`session:${visibleId}`);
+    expect(Object.keys(restoredLayout.panels)).not.toContain(`session:${hiddenId}`);
   });
 });
 

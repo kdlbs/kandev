@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { useDockviewStore } from "@/lib/state/dockview-store";
-import { hideSessionPanel, runAutoSessionTabEffect } from "./dockview-session-tabs";
+import {
+  clearHiddenSessionPanel,
+  hideSessionPanel,
+  runAutoSessionTabEffect,
+} from "./dockview-session-tabs";
 import { makeReorderingAutoSessionApi } from "./dockview-session-tabs.test-utils";
 
 const TASK_ID = "task-A";
@@ -79,18 +83,27 @@ describe("hidden session tab state", () => {
     const firstLoad = makeReorderingAutoSessionApi();
     const refs = makeRefs();
     const appStore = makeAppStore();
+    const storageKey = "kandev.dockview.env-hidden-sessions-v1.env-reload";
+    window.sessionStorage.removeItem(storageKey);
 
-    runInEnvironment(firstLoad.api, "env-reload", () => {
-      runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
-      hideSessionPanel(firstLoad.api, HIDDEN_SESSION_ID);
-    });
+    try {
+      runInEnvironment(firstLoad.api, "env-reload", () => {
+        runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
+        hideSessionPanel(firstLoad.api, HIDDEN_SESSION_ID);
+      });
 
-    const reloaded = makeReorderingAutoSessionApi();
-    runInEnvironment(reloaded.api, "env-reload", () => {
-      runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
-    });
+      const reloaded = makeReorderingAutoSessionApi();
+      runInEnvironment(reloaded.api, "env-reload", () => {
+        runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, refs as never);
+      });
 
-    expect(reloaded.api.getPanel(`session:${HIDDEN_SESSION_ID}`)).not.toBeNull();
+      // A fresh Dockview API after reload rehydrates the persisted hide
+      // record, so the explicitly closed panel stays absent until reopened.
+      expect(reloaded.api.getPanel(`session:${ACTIVE_SESSION_ID}`)).not.toBeNull();
+      expect(reloaded.api.getPanel(`session:${HIDDEN_SESSION_ID}`)).toBeNull();
+    } finally {
+      window.sessionStorage.removeItem(storageKey);
+    }
   });
 
   it("keeps a closed panel absent during layout-only reconciliation", () => {
@@ -153,5 +166,61 @@ describe("hidden session tab state", () => {
 
     expect(api.getPanel(`session:${HIDDEN_SESSION_ID}`)).toBeNull();
     expect(refs.hiddenSessionIdsRef.current.has(HIDDEN_SESSION_ID)).toBe(true);
+  });
+});
+
+describe("hidden session tab persistence record", () => {
+  it("persists the hide record so a fresh Dockview API after reload keeps the panel absent", () => {
+    const storageKey = "kandev.dockview.env-hidden-sessions-v1.env-reload-record";
+    window.sessionStorage.removeItem(storageKey);
+
+    try {
+      const firstLoad = makeReorderingAutoSessionApi();
+      const appStore = makeAppStore();
+
+      runInEnvironment(firstLoad.api, "env-reload-record", () => {
+        runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, makeRefs() as never);
+        hideSessionPanel(firstLoad.api, HIDDEN_SESSION_ID);
+      });
+      expect(JSON.parse(window.sessionStorage.getItem(storageKey) ?? "[]")).toEqual([
+        HIDDEN_SESSION_ID,
+      ]);
+
+      const afterReload = makeReorderingAutoSessionApi();
+      runInEnvironment(afterReload.api, "env-reload-record", () => {
+        runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, makeRefs() as never);
+      });
+
+      expect(afterReload.api.getPanel(`session:${ACTIVE_SESSION_ID}`)).not.toBeNull();
+      expect(afterReload.api.getPanel(`session:${HIDDEN_SESSION_ID}`)).toBeNull();
+    } finally {
+      window.sessionStorage.removeItem(storageKey);
+    }
+  });
+
+  it("clears the persisted hide record when the hidden session is reopened", () => {
+    const storageKey = "kandev.dockview.env-hidden-sessions-v1.env-reopen";
+    window.sessionStorage.removeItem(storageKey);
+
+    try {
+      const { api } = makeReorderingAutoSessionApi();
+      const appStore = makeAppStore();
+
+      runInEnvironment(api, "env-reopen", () => {
+        runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, makeRefs() as never);
+        hideSessionPanel(api, HIDDEN_SESSION_ID);
+        expect(JSON.parse(window.sessionStorage.getItem(storageKey) ?? "[]")).toEqual([
+          HIDDEN_SESSION_ID,
+        ]);
+
+        // The reopen menu clears the hide intent before adding the panel.
+        clearHiddenSessionPanel(api, HIDDEN_SESSION_ID);
+        runAutoSessionTabEffect(ACTIVE_SESSION_ID, appStore as never, makeRefs() as never);
+      });
+
+      expect(JSON.parse(window.sessionStorage.getItem(storageKey) ?? "[]")).toEqual([]);
+    } finally {
+      window.sessionStorage.removeItem(storageKey);
+    }
   });
 });

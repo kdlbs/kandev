@@ -12,6 +12,11 @@ vi.mock("@/lib/local-storage", () => ({
   getManualRightWidth: vi.fn(() => null),
 }));
 
+vi.mock("@/lib/env-hidden-sessions", () => ({
+  getEnvHiddenSessions: vi.fn(() => []),
+  setEnvHiddenSessions: vi.fn(),
+}));
+
 vi.mock("./dockview-layout-builders", () => ({
   applyLayoutFixups: vi.fn(() => ({
     sidebarGroupId: "g1",

@@ -3,7 +3,6 @@ import type { DockviewApi } from "dockview-react";
 import type { TaskSession } from "@/lib/types/http";
 import {
   ensureSessionTabPrecedesNonSessionTabs,
-  hideSessionPanel,
   reconcileRemovedSessionPanels,
   resolveInitialPosition,
   resolveSessionTabSyncTarget,
@@ -612,31 +611,6 @@ describe("runAutoSessionTabEffect sibling visibility", () => {
     });
 
     expect(api.getPanel(`session:${hiddenSessionId}`)).toBeNull();
-  });
-
-  it("does not carry hidden sibling state into a new Dockview API after reload", () => {
-    const activeSessionId = AUTO_ACTIVE_SESSION_ID;
-    const hiddenSessionId = "session-hidden";
-    const appStore = makeAutoSessionAppStore(AUTO_TASK_ID, [activeSessionId, hiddenSessionId]);
-    const firstLoad = makeReorderingAutoSessionApi();
-
-    withDockviewState(
-      { api: firstLoad.api, currentLayoutEnvId: "env-A", preMaximizeLayout: null },
-      () => {
-        runAutoSessionTabEffect(activeSessionId, appStore as never, makeAutoSessionRefs() as never);
-        hideSessionPanel(firstLoad.api, hiddenSessionId);
-      },
-    );
-
-    const afterReload = makeReorderingAutoSessionApi();
-    withDockviewState(
-      { api: afterReload.api, currentLayoutEnvId: "env-A", preMaximizeLayout: null },
-      () => {
-        runAutoSessionTabEffect(activeSessionId, appStore as never, makeAutoSessionRefs() as never);
-      },
-    );
-
-    expect(afterReload.api.getPanel(`session:${hiddenSessionId}`)).not.toBeNull();
   });
 
   it("reopens an explicitly hidden session when it becomes effective", () => {

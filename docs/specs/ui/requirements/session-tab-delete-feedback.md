@@ -7,6 +7,7 @@ updated: 2026-09-10
 owners:
   - kandev
 ---
+
 # Session tab delete feedback Requirements
 
 ## Overview
@@ -29,7 +30,7 @@ session-removal action.
 - **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.2:** The desktop context menu offers Hide, which removes only that panel without a confirmation or lifecycle change. A hidden session remains listed under **+ > Agents** and reopening restores the same existing conversation.
 - **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.3:** The X is shown only when more than one agent-session panel is visible. It is unavailable for the last visible agent panel, regardless of the total backend session count or lifecycle state.
 - **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.4:** Close Others affects only sibling visible agent-session panels in its Dockview group; it does not remove backend sessions or non-session panels.
-- **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.5:** Ordinary synchronization does not recreate a panel explicitly hidden during the mounted layout; newly created sessions and explicit reopen targets still open.
+- **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.5:** Ordinary synchronization does not recreate a panel explicitly hidden during the mounted layout; newly created sessions and explicit reopen targets still open. A page reload in the same browser tab also restores the env's hidden-session record: hidden panels stay absent until explicitly reopened from **+ > Agents**, while a full browser restart or a new tab restores every known session panel.
 - **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.6:** Desktop context-menu Delete keeps that menu mounted and opens a compact, non-modal confirmation popover anchored to the Delete item. Cancelling or dismissing the popover leaves the session unchanged.
 - **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.7:** On phone, choosing Delete from a Sessions picker row opens a focused confirmation step in the same picker, retaining the row's geometry. Cancel restores the picker; external context change or closing it clears the unsubmitted confirmation without deleting. Presentation follows [mobile action confirmations](mobile-action-confirmations.md).
 - **AC-UI-SESSION-TAB-DELETE-FEEDBACK-001.8:** Desktop and phone confirmation surfaces share the same conversation-deletion, workspace-retention, primary-session, and only-session warnings. Confirming permanently removes the session with the existing feedback; deletion failure keeps the session, its panel, and one error toast.
@@ -64,6 +65,9 @@ hides the session context the user is acting on.
   recreate the hidden agent panels.
 - A newly added backend session still opens automatically. Synchronization tracks only explicit Hide
   actions as hidden; Dockview drag, restore, and reconciliation do not imply hidden intent.
+- The hidden-session record persists per task environment in the browser tab's session storage, so
+  a reload keeps explicitly closed panels absent until reopened from **+ > Agents**, while a fresh
+  browser tab or restart starts with every known session panel restored.
 - Choosing Delete from a desktop session context menu keeps that menu mounted and opens a compact,
   non-modal confirmation popover anchored to the Delete item. Cancelling or dismissing the popover
   leaves the session unchanged.
@@ -98,6 +102,9 @@ hides the session context the user is acting on.
 - **GIVEN** two visible session tabs and neighboring non-session panels, **WHEN** the user chooses
   **Close Others** on one session tab, **THEN** only the other session tabs close and remain hidden
   through active-session synchronization.
+- **GIVEN** a session was explicitly hidden and the page reloads in the same browser tab, **WHEN**
+  the layout restores, **THEN** the hidden session's panel stays absent while its conversation
+  remains listed under **+ > Agents**, and reopening restores the same session.
 - **GIVEN** a session was explicitly deleted from the desktop context menu, **WHEN** deletion
   succeeds, **THEN** its backend session and panel are removed.
 - **GIVEN** a task with a non-primary agent session, **WHEN** the user chooses Set as Primary from
@@ -124,4 +131,5 @@ hides the session context the user is acting on.
 - Changing Sessions picker hierarchy or non-delete row actions beyond hosting the shared
   confirmation step.
 - Replacing feedback for context-menu, mobile, stop, or resume actions.
-- Persisting the set of hidden session panels across a full layout remount or browser restart.
+- Persisting the hidden-session record beyond the browser tab's session storage; a full
+  browser restart or a new tab starts with every known session panel restored.

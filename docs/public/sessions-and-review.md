@@ -58,12 +58,13 @@ Right-click an agent tab on desktop to manage it. Available actions depend on it
 | **Delete**         | Permanently removes the conversation; if it was primary, another session is promoted when possible. The task workspace and its files are kept; a later session reuses them |
 | **Share**          | Opens the publishing preview for an eligible session                                                                                                                       |
 | **Handoff**        | Opens the launch dialog with Blank context. Select a summary when you want to include this conversation                                                                    |
-| **Close Others**   | Closes other visible agent panels in that tab group without deleting their sessions                                                                                       |
+| **Close Others**   | Closes other visible agent panels in that tab group without deleting their sessions                                                                                        |
 
 On desktop, the X on an agent tab closes only the panel and keeps the conversation. Reopen a hidden
 conversation from **+ > Agents**. Use **Delete** in the tab context menu when you want to permanently
 remove the conversation after confirmation. The X is available when more than one agent panel is
-visible; the last visible agent panel remains open.
+visible; the last visible agent panel remains open. Closing panels survives a page reload in the
+same browser tab: hidden conversations stay listed under **+ > Agents** until you reopen them.
 
 Stopping is not deletion. Resume succeeds only while the executor still has the session record needed to continue. A removed worktree, expired remote environment, restarted executor, removed profile, or missing runtime record can force a fresh session instead. When startup or resume fails, Kandev shows one recovery card in the selected session's chat. It labels the safe cause, keeps technical details collapsed, and offers **Resume**, **Restore read-only workspace**, or **Start fresh session** when each action is valid.
 

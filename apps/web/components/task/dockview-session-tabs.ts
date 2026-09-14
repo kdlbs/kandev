@@ -11,6 +11,7 @@ import {
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { sessionId as toSessionId } from "@/lib/types/ids";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { getEnvHiddenSessions, setEnvHiddenSessions } from "@/lib/env-hidden-sessions";
 import type { TaskSession } from "@/lib/types/http";
 import {
   activateChatReplacement,
@@ -26,6 +27,16 @@ const debug = createDebugLogger("dockview:session-tabs");
 
 const hiddenSessionIdsByApi = new WeakMap<DockviewApi, Map<string | null, Set<string>>>();
 
+/**
+ * Persist the env's hidden set so a reload restores the user's explicit close
+ * choices. The saved Dockview layout cannot express them: reusable layouts
+ * collapse session panels into a chat placeholder, and restore paths add every
+ * current session back as sibling panels.
+ */
+function persistHiddenSessionIds(envId: string | null, hiddenSessionIds: Set<string>): void {
+  if (envId !== null) setEnvHiddenSessions(envId, [...hiddenSessionIds]);
+}
+
 function hiddenSessionIdsFor(api: DockviewApi): Set<string> {
   const envId = useDockviewStore.getState().currentLayoutEnvId;
   let hiddenSessionIdsByEnv = hiddenSessionIdsByApi.get(api);
@@ -35,7 +46,9 @@ function hiddenSessionIdsFor(api: DockviewApi): Set<string> {
   }
   const existing = hiddenSessionIdsByEnv.get(envId);
   if (existing) return existing;
-  const hiddenSessionIds = new Set<string>();
+  // Seed from the persisted record so a fresh Dockview API after reload keeps
+  // honoring panels the user closed before the reload.
+  const hiddenSessionIds = new Set(envId === null ? [] : getEnvHiddenSessions(envId));
   hiddenSessionIdsByEnv.set(envId, hiddenSessionIds);
   return hiddenSessionIds;
 }
@@ -58,24 +71,38 @@ function shouldSkipHiddenEffectiveSession(
   return true;
 }
 
-function pruneHiddenSessionIds(hiddenSessionIds: Set<string>, knownSessionIds: Set<string>): void {
+function pruneHiddenSessionIds(
+  api: DockviewApi,
+  envId: string | null,
+  hiddenSessionIds: Set<string>,
+  knownSessionIds: Set<string>,
+): void {
+  let pruned = false;
   for (const hiddenSessionId of hiddenSessionIds) {
-    if (!knownSessionIds.has(hiddenSessionId)) hiddenSessionIds.delete(hiddenSessionId);
+    if (!knownSessionIds.has(hiddenSessionId)) {
+      hiddenSessionIds.delete(hiddenSessionId);
+      pruned = true;
+    }
   }
+  if (pruned) persistHiddenSessionIds(envId, hiddenSessionIds);
 }
 
 /** Hide a session tab without changing its persisted session lifecycle. */
 export function hideSessionPanel(api: DockviewApi, sessionId: string): void {
+  const envId = useDockviewStore.getState().currentLayoutEnvId;
   const hiddenSessionIds = hiddenSessionIdsFor(api);
   hiddenSessionIds.add(sessionId);
+  persistHiddenSessionIds(envId, hiddenSessionIds);
   const panel = api.getPanel(`session:${sessionId}`);
   if (panel) api.removePanel(panel);
 }
 
 /** Forget a prior hide when a session is reopened or deleted. */
 export function clearHiddenSessionPanel(api: DockviewApi, sessionId: string): void {
+  const envId = useDockviewStore.getState().currentLayoutEnvId;
   const hiddenSessionIds = hiddenSessionIdsFor(api);
   hiddenSessionIds.delete(sessionId);
+  persistHiddenSessionIds(envId, hiddenSessionIds);
 }
 
 /**
@@ -579,8 +606,8 @@ export function runAutoSessionTabEffect(
 
   // Keep hidden tabs in memory for the mounted Dockview API and scope them by
   // environment so switching A -> B -> A restores each environment's choice.
-  // A fresh API after reload intentionally starts with no hidden-session state;
-  // saved Dockview layouts remain responsible for persisted panel geometry.
+  // A fresh API after reload rehydrates from the per-env persisted hide record
+  // so explicitly closed panels stay absent until reopened from the + menu.
   const currentEnvId = useDockviewStore.getState().currentLayoutEnvId;
   if (
     refs.hiddenSessionApiRef.current !== api ||
@@ -610,7 +637,12 @@ export function runAutoSessionTabEffect(
   // Keep hide intent for sessions belonging to inactive tasks that share this
   // environment. Prune only sessions that are gone from the whole store, not
   // merely absent from the currently selected task.
-  pruneHiddenSessionIds(refs.hiddenSessionIdsRef.current, allKnownSessionIds(appStore));
+  pruneHiddenSessionIds(
+    api,
+    currentEnvId,
+    refs.hiddenSessionIdsRef.current,
+    allKnownSessionIds(appStore),
+  );
 
   if (!effectiveSessionId) {
     if (isDebug()) debug("useAutoSessionTab: no effectiveSessionId, returning");
