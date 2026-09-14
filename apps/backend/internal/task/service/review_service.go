@@ -468,7 +468,9 @@ func buildReviewFinding(taskID, runID string, in ReviewFindingInput) (*models.Ta
 }
 
 // UpdateFindingStatus records the human's disposition of a finding. Moving to
-// resolved stamps resolved_at; returning to open clears it.
+// resolved or dismissed stamps resolved_at; returning to open clears it.
+// Resubmitting the finding's current status is idempotent and leaves
+// resolved_at unchanged rather than re-stamping it to now.
 func (s *ReviewService) UpdateFindingStatus(ctx context.Context, findingID string, status models.ReviewFindingStatus) (*models.TaskReviewFinding, error) {
 	if findingID == "" {
 		return nil, fmt.Errorf("%w: finding id is required", ErrReviewFindingNotFound)
@@ -476,10 +478,18 @@ func (s *ReviewService) UpdateFindingStatus(ctx context.Context, findingID strin
 	if !models.ValidReviewFindingStatus(status) {
 		return nil, fmt.Errorf("%w: unknown status %q", ErrInvalidReviewFinding, status)
 	}
-	var resolvedAt *time.Time
-	if status == models.ReviewFindingResolved || status == models.ReviewFindingDismissed {
-		now := time.Now().UTC()
-		resolvedAt = &now
+	existing, err := s.repo.GetTaskReviewFinding(ctx, findingID)
+	if err != nil {
+		return nil, err
+	}
+	resolvedAt := existing.ResolvedAt
+	if status != existing.Status {
+		if status == models.ReviewFindingResolved || status == models.ReviewFindingDismissed {
+			now := time.Now().UTC()
+			resolvedAt = &now
+		} else {
+			resolvedAt = nil
+		}
 	}
 	if err := s.repo.UpdateTaskReviewFindingStatus(ctx, findingID, status, resolvedAt); err != nil {
 		return nil, err
