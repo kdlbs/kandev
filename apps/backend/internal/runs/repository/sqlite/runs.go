@@ -204,8 +204,20 @@ func (r *Repository) FinishRun(ctx context.Context, id, status string, outcome *
 
 // GetRunByID returns the run row for a given ID. Returns sql.ErrNoRows when unknown.
 func (r *Repository) GetRunByID(ctx context.Context, id string) (*models.Run, error) {
+	return getRunByID(ctx, r.ro, id)
+}
+
+// GetRunByIDTx is GetRunByID run against a caller-owned transaction, so a
+// causing-run lookup participates in the single enqueue transaction
+// AC-OFFICE-LAUNCH-SAFETY-003.8 requires instead of racing it on a
+// separate reader connection.
+func (r *Repository) GetRunByIDTx(ctx context.Context, tx *sqlx.Tx, id string) (*models.Run, error) {
+	return getRunByID(ctx, tx, id)
+}
+
+func getRunByID(ctx context.Context, exec sqlExecutor, id string) (*models.Run, error) {
 	var run models.Run
-	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+	err := exec.QueryRowxContext(ctx, exec.Rebind(`
 		SELECT * FROM runs WHERE id = ?
 	`), id).StructScan(&run)
 	if err != nil {
@@ -439,9 +451,21 @@ func (r *Repository) GetClaimedRunByTaskAndAgent(
 
 // CheckIdempotencyKey returns true if the key already exists within the window.
 func (r *Repository) CheckIdempotencyKey(ctx context.Context, key string, windowHours int) (bool, error) {
+	return checkIdempotencyKey(ctx, r.ro, key, windowHours)
+}
+
+// CheckIdempotencyKeyTx is CheckIdempotencyKey run against a caller-owned
+// transaction, so it participates in the single enqueue transaction
+// AC-OFFICE-LAUNCH-SAFETY-003.8 requires instead of racing it on a
+// separate reader connection.
+func (r *Repository) CheckIdempotencyKeyTx(ctx context.Context, tx *sqlx.Tx, key string, windowHours int) (bool, error) {
+	return checkIdempotencyKey(ctx, tx, key, windowHours)
+}
+
+func checkIdempotencyKey(ctx context.Context, exec sqlExecutor, key string, windowHours int) (bool, error) {
 	cutoff := time.Now().UTC().Add(-time.Duration(windowHours) * time.Hour)
 	var count int
-	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+	err := exec.QueryRowxContext(ctx, exec.Rebind(`
 		SELECT COUNT(*) FROM runs
 		WHERE idempotency_key = ? AND requested_at > ?
 	`), key, cutoff).Scan(&count)
@@ -456,6 +480,25 @@ func (r *Repository) CheckIdempotencyKey(ctx context.Context, key string, window
 func (r *Repository) CoalesceRun(
 	ctx context.Context, agentInstanceID, reason string, windowSecs int, payload string,
 ) (bool, error) {
+	return coalesceRun(ctx, r.db, r.db.DriverName(), agentInstanceID, reason, windowSecs, payload)
+}
+
+// CoalesceRunTx is CoalesceRun run against a caller-owned transaction, so
+// a request that coalesces participates in the same enqueue transaction
+// as the idempotency check and causation resolution rather than racing
+// them on a separate statement.
+func (r *Repository) CoalesceRunTx(
+	ctx context.Context, tx *sqlx.Tx, agentInstanceID, reason string, windowSecs int, payload string,
+) (bool, error) {
+	return coalesceRun(ctx, tx, tx.DriverName(), agentInstanceID, reason, windowSecs, payload)
+}
+
+func coalesceRun(
+	ctx context.Context, exec interface {
+		ExecContext(ctx context.Context, query string, args ...interface{}) (sql.Result, error)
+		Rebind(query string) string
+	}, driverName, agentInstanceID, reason string, windowSecs int, payload string,
+) (bool, error) {
 	cutoff := time.Now().UTC().Add(-time.Duration(windowSecs) * time.Second)
 	taskID := taskIDFromPayload(payload)
 	taskPredicate := ""
@@ -465,7 +508,7 @@ func (r *Repository) CoalesceRun(
 	// launch. Other reasons, such as task comments, intentionally retain
 	// their existing cross-task coalescing behaviour.
 	if taskID != "" && reason == "task_assigned" {
-		taskPredicate = fmt.Sprintf(" AND %s = ?", dialect.JSONExtract(r.db.DriverName(), "payload", "task_id"))
+		taskPredicate = fmt.Sprintf(" AND %s = ?", dialect.JSONExtract(driverName, "payload", "task_id"))
 		args = append(args, taskID)
 	}
 	query := fmt.Sprintf(`
@@ -481,7 +524,7 @@ func (r *Repository) CoalesceRun(
 			LIMIT 1
 		)
 	`, taskPredicate)
-	res, err := r.db.ExecContext(ctx, r.db.Rebind(query), args...)
+	res, err := exec.ExecContext(ctx, exec.Rebind(query), args...)
 	if err != nil {
 		return false, err
 	}

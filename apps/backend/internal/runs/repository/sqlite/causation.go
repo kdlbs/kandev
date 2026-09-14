@@ -4,6 +4,8 @@ import (
 	"context"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+
 	"github.com/kandev/kandev/internal/office/models"
 )
 
@@ -12,8 +14,20 @@ import (
 // (AC-OFFICE-RUN-CAUSATION-001.20) before the row exists. Returns
 // sql.ErrNoRows when the profile is unknown.
 func (r *Repository) ResolveAgentProfileWorkspaceID(ctx context.Context, agentProfileID string) (string, error) {
+	return resolveAgentProfileWorkspaceID(ctx, r.ro, agentProfileID)
+}
+
+// ResolveAgentProfileWorkspaceIDTx is ResolveAgentProfileWorkspaceID run
+// against a caller-owned transaction, so it participates in the single
+// enqueue transaction AC-OFFICE-LAUNCH-SAFETY-003.8 requires instead of
+// racing it on a separate reader connection.
+func (r *Repository) ResolveAgentProfileWorkspaceIDTx(ctx context.Context, tx *sqlx.Tx, agentProfileID string) (string, error) {
+	return resolveAgentProfileWorkspaceID(ctx, tx, agentProfileID)
+}
+
+func resolveAgentProfileWorkspaceID(ctx context.Context, exec sqlExecutor, agentProfileID string) (string, error) {
 	var workspaceID string
-	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+	err := exec.QueryRowxContext(ctx, exec.Rebind(`
 		SELECT workspace_id FROM agent_profiles WHERE id = ?
 	`), agentProfileID).Scan(&workspaceID)
 	if err != nil {
@@ -33,8 +47,23 @@ func (r *Repository) ResolveAgentProfileWorkspaceID(ctx context.Context, agentPr
 func (r *Repository) CountSelfTriggeredRuns(
 	ctx context.Context, agentProfileID, reason string, since time.Time,
 ) (int, error) {
+	return countSelfTriggeredRuns(ctx, r.ro, agentProfileID, reason, since)
+}
+
+// CountSelfTriggeredRunsTx is CountSelfTriggeredRuns run against a
+// caller-owned transaction (AC-OFFICE-LAUNCH-SAFETY-003.8): the count and
+// the insert it gates must be serialized against every other concurrent
+// enqueue for the same agent profile, which a read against the separate
+// reader connection CountSelfTriggeredRuns uses cannot guarantee.
+func (r *Repository) CountSelfTriggeredRunsTx(
+	ctx context.Context, tx *sqlx.Tx, agentProfileID, reason string, since time.Time,
+) (int, error) {
+	return countSelfTriggeredRuns(ctx, tx, agentProfileID, reason, since)
+}
+
+func countSelfTriggeredRuns(ctx context.Context, exec sqlExecutor, agentProfileID, reason string, since time.Time) (int, error) {
 	var count int
-	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+	err := exec.QueryRowxContext(ctx, exec.Rebind(`
 		SELECT COUNT(*) FROM runs
 		WHERE agent_profile_id = ? AND reason = ?
 		  AND actor_kind = ? AND actor_id = ?

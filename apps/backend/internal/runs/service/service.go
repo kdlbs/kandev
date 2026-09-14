@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -247,11 +248,11 @@ func (s *Service) SubscribeSignal() <-chan struct{} { return s.signalCh }
 // QueueRun implements RunQueueAdapter. The flow is:
 //  1. Resolve agent_profile_id (from the request field, payload fallback,
 //     or a wired resolver).
-//  2. Recent idempotency check on req.IdempotencyKey if set.
-//  3. Coalescing (5s window for same agent + reason).
-//  4. Insert into runs table.
-//  5. Publish OfficeRunQueued.
-//  6. Signal the scheduler (B3.5 — event-driven claim).
+//  2. Idempotency check, coalescing, causation resolution (depth and
+//     self-trigger gates), and insert, all inside one transaction
+//     serialized per agent profile — see enqueueLocked.
+//  3. Publish OfficeRunQueued.
+//  4. Signal the scheduler (B3.5 — event-driven claim).
 //
 // The returned QueueOutcome lets the caller distinguish a fresh insert from
 // a deduplicated or coalesced request instead of treating any nil error as
@@ -265,54 +266,18 @@ func (s *Service) QueueRun(ctx context.Context, req QueueRunRequest) (QueueOutco
 		return "", fmt.Errorf("queue run: agent_profile_id is required")
 	}
 
-	if req.IdempotencyKey != "" {
-		dup, err := s.repo.CheckIdempotencyKey(ctx, req.IdempotencyKey, IdempotencyWindowHours)
-		if err != nil {
-			return "", fmt.Errorf("idempotency check: %w", err)
-		}
-		if dup {
-			s.log.Debug("run skipped (idempotent)",
-				zap.String("key", req.IdempotencyKey))
-			return QueueOutcomeDeduped, nil
-		}
-	}
-
 	payloadMap := runPayload(req, agentInstanceID)
 	payload, err := encodePayload(payloadMap)
 	if err != nil {
 		return "", fmt.Errorf("encode payload: %w", err)
 	}
 
-	if shouldCoalesceRun(req) {
-		coalesced, err := s.repo.CoalesceRun(ctx, agentInstanceID, req.Reason, CoalesceWindowSeconds, payload)
-		if err != nil {
-			return "", fmt.Errorf("coalesce check: %w", err)
-		}
-		if coalesced {
-			s.log.Debug("run coalesced",
-				zap.String("agent", agentInstanceID),
-				zap.String("reason", req.Reason))
-			// Coalesced rows are merged into an existing queued row, so
-			// no new signal is needed — the scheduler already saw the
-			// original insert.
-			return QueueOutcomeCoalesced, nil
-		}
-	}
-
-	row, err := s.insertRun(ctx, agentInstanceID, req, payload)
+	outcome, row, err := s.enqueueLocked(ctx, agentInstanceID, req, payload)
 	if err != nil {
-		// idx_run_idempotency has no time bound, so a conflict here can
-		// come from a row older than IdempotencyWindowHours, not just the
-		// windowed race CheckIdempotencyKey guards against above. Either
-		// way the existing row is definitionally the same operation this
-		// key identifies, so treat it as a no-op dedupe rather than a hard
-		// error (see errIdempotencyKeyConflict's doc comment).
-		if errors.Is(err, errIdempotencyKeyConflict) {
-			s.log.Debug("run skipped (idempotency index race)",
-				zap.String("key", req.IdempotencyKey))
-			return QueueOutcomeDeduped, nil
-		}
 		return "", err
+	}
+	if outcome != QueueOutcomeQueued {
+		return outcome, nil
 	}
 
 	s.log.Info("run queued",
@@ -325,14 +290,98 @@ func (s *Service) QueueRun(ctx context.Context, req QueueRunRequest) (QueueOutco
 	return QueueOutcomeQueued, nil
 }
 
+// enqueueLocked performs the idempotency check, the coalescing check,
+// causation resolution, and the insert inside one transaction serialized
+// per agent profile (AC-OFFICE-LAUNCH-SAFETY-003.8): the depth check,
+// the self-trigger window count, the idempotency check, and the insert
+// must be serialized against every other concurrent enqueue for the
+// same agent profile, on every supported database engine, so that two
+// concurrent enqueues can never both observe the same self-trigger
+// count or the same idempotency-key absence before either commits.
+func (s *Service) enqueueLocked(
+	ctx context.Context, agentInstanceID string, req QueueRunRequest, payload string,
+) (QueueOutcome, *models.Run, error) {
+	tx, err := s.repo.BeginEnqueueTx(ctx, agentInstanceID)
+	if err != nil {
+		return "", nil, fmt.Errorf("begin enqueue transaction: %w", err)
+	}
+	rec := &gateOutcomeRecorder{}
+	// Registered before the rollback defer below, so it runs after: Go
+	// defers execute in LIFO order, and flushGateOutcomes must not write
+	// until this transaction has actually committed or rolled back —
+	// see gateOutcomeRecorder's doc comment.
+	defer s.flushGateOutcomes(ctx, rec)
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if req.IdempotencyKey != "" {
+		dup, err := s.repo.CheckIdempotencyKeyTx(ctx, tx, req.IdempotencyKey, IdempotencyWindowHours)
+		if err != nil {
+			return "", nil, fmt.Errorf("idempotency check: %w", err)
+		}
+		if dup {
+			s.log.Debug("run skipped (idempotent)",
+				zap.String("key", req.IdempotencyKey))
+			return QueueOutcomeDeduped, nil, nil
+		}
+	}
+
+	if shouldCoalesceRun(req) {
+		coalesced, err := s.repo.CoalesceRunTx(ctx, tx, agentInstanceID, req.Reason, CoalesceWindowSeconds, payload)
+		if err != nil {
+			return "", nil, fmt.Errorf("coalesce check: %w", err)
+		}
+		if coalesced {
+			if err := tx.Commit(); err != nil {
+				return "", nil, fmt.Errorf("commit coalesce: %w", err)
+			}
+			committed = true
+			s.log.Debug("run coalesced",
+				zap.String("agent", agentInstanceID),
+				zap.String("reason", req.Reason))
+			// Coalesced rows are merged into an existing queued row, so
+			// no new signal is needed — the scheduler already saw the
+			// original insert.
+			return QueueOutcomeCoalesced, nil, nil
+		}
+	}
+
+	row, err := s.insertRun(ctx, tx, rec, agentInstanceID, req, payload)
+	if err != nil {
+		// idx_run_idempotency has no time bound, so a conflict here can
+		// come from a row older than IdempotencyWindowHours, not just the
+		// windowed race the idempotency check above guards against.
+		// Either way the existing row is definitionally the same
+		// operation this key identifies, so treat it as a no-op dedupe
+		// rather than a hard error (see errIdempotencyKeyConflict's doc
+		// comment).
+		if errors.Is(err, errIdempotencyKeyConflict) {
+			s.log.Debug("run skipped (idempotency index race)",
+				zap.String("key", req.IdempotencyKey))
+			return QueueOutcomeDeduped, nil, nil
+		}
+		return "", nil, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return "", nil, fmt.Errorf("commit enqueue: %w", err)
+	}
+	committed = true
+	return QueueOutcomeQueued, row, nil
+}
+
 // insertRun resolves causation (actor, workspace, depth, self-trigger,
 // priority class) and creates the runs row, returning it. A refusal from
 // resolveCausation is returned unchanged: no row is inserted and no
 // idempotency key is consumed, per AC-OFFICE-LAUNCH-SAFETY-003.4.
 func (s *Service) insertRun(
-	ctx context.Context, agentInstanceID string, req QueueRunRequest, payload string,
+	ctx context.Context, tx *sqlx.Tx, rec *gateOutcomeRecorder, agentInstanceID string, req QueueRunRequest, payload string,
 ) (*models.Run, error) {
-	causation, err := s.resolveCausation(ctx, agentInstanceID, req)
+	causation, err := s.resolveCausation(ctx, tx, rec, agentInstanceID, req)
 	if err != nil {
 		return nil, err
 	}
@@ -367,7 +416,7 @@ func (s *Service) insertRun(
 		// run id. Known only now that the row's ID has been minted.
 		row.CausationID = row.ID
 	}
-	if err := s.repo.CreateRun(ctx, row); err != nil {
+	if err := s.repo.CreateRunTx(ctx, tx, row); err != nil {
 		if runssqlite.IsIdempotencyKeyUniqueViolation(err) {
 			return nil, errIdempotencyKeyConflict
 		}

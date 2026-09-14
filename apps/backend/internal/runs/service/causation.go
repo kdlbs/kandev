@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/office/models"
@@ -47,6 +48,32 @@ func (e *RefusalError) Error() string {
 	return fmt.Sprintf("run enqueue refused (%s): %s", e.Gate, e.Reason)
 }
 
+// gateOutcomeRecorder accumulates gate-evaluation outcomes for
+// resolveCausation and its helpers to flush after the enqueue
+// transaction concludes, rather than writing them while that
+// transaction is still open. RecordGateOutcome opens its own
+// transaction on the same writer pool the enqueue transaction holds;
+// on SQLite (capped at one writer connection) calling it inline would
+// deadlock waiting for a connection the open enqueue transaction is
+// itself holding. Deferring the write also keeps the outcome durable
+// independent of whether the enqueue transaction that observed it
+// commits or rolls back, matching AC-OFFICE-BACKPRESSURE-003.4: this
+// diagnostic bookkeeping must never affect, or be undone by, the
+// admission decision.
+type gateOutcomeRecorder struct {
+	outcomes []gateOutcome
+}
+
+type gateOutcome struct {
+	workspaceID string
+	gate        RefusalGate
+	success     bool
+}
+
+func (r *gateOutcomeRecorder) record(workspaceID string, gate RefusalGate, success bool) {
+	r.outcomes = append(r.outcomes, gateOutcome{workspaceID: workspaceID, gate: gate, success: success})
+}
+
 // causationResolution is the resolved causation-chain identity for a
 // new run row, computed by resolveCausation before insertRun mints the
 // row's own id.
@@ -69,13 +96,18 @@ type causationResolution struct {
 // normalization, workspace resolution, causing-run resolution, depth and
 // self-trigger refusal gates, and priority-class stamping. Every gate
 // fails closed: an unreadable input refuses the enqueue rather than
-// silently rooting or defaulting it.
+// silently rooting or defaulting it. tx is the caller's enqueue
+// transaction (AC-OFFICE-LAUNCH-SAFETY-003.8): every read this function
+// and its helpers make runs against it, not the repository's separate
+// reader connection, so the depth check and the self-trigger window
+// count are serialized against the insert and against every other
+// concurrent enqueue for the same agent profile.
 func (s *Service) resolveCausation(
-	ctx context.Context, agentInstanceID string, req QueueRunRequest,
+	ctx context.Context, tx *sqlx.Tx, rec *gateOutcomeRecorder, agentInstanceID string, req QueueRunRequest,
 ) (causationResolution, error) {
 	actorKind, actorID := normalizeActor(req)
 
-	workspaceID, err := s.repo.ResolveAgentProfileWorkspaceID(ctx, agentInstanceID)
+	workspaceID, err := s.repo.ResolveAgentProfileWorkspaceIDTx(ctx, tx, agentInstanceID)
 	if err != nil || workspaceID == "" {
 		shared.LaunchRefusedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalWorkspaceMissing)), 1)
 		s.logRefusal(RefusalWorkspaceMissing, agentInstanceID, req, "")
@@ -97,7 +129,7 @@ func (s *Service) resolveCausation(
 		RoutineID:   req.RoutineID,
 	}
 
-	if err := s.applyCausationLineage(ctx, agentInstanceID, req, actorKind, &res); err != nil {
+	if err := s.applyCausationLineage(ctx, tx, rec, agentInstanceID, req, actorKind, &res); err != nil {
 		return causationResolution{}, err
 	}
 
@@ -116,7 +148,7 @@ func (s *Service) resolveCausation(
 		}
 	}
 
-	if err := s.checkSelfTriggerAllowance(ctx, agentInstanceID, req, actorKind, actorID, res.WorkspaceID, res.CausationID); err != nil {
+	if err := s.checkSelfTriggerAllowance(ctx, tx, rec, agentInstanceID, req, actorKind, actorID, res.WorkspaceID, res.CausationID); err != nil {
 		return causationResolution{}, err
 	}
 
@@ -130,7 +162,7 @@ func (s *Service) resolveCausation(
 // resolveCausation to keep that function's nesting under the repo's
 // complexity limit.
 func (s *Service) applyCausationLineage(
-	ctx context.Context, agentInstanceID string, req QueueRunRequest, actorKind models.ActorKind, res *causationResolution,
+	ctx context.Context, tx *sqlx.Tx, rec *gateOutcomeRecorder, agentInstanceID string, req QueueRunRequest, actorKind models.ActorKind, res *causationResolution,
 ) error {
 	if req.CausingRunID == "" {
 		// AC-OFFICE-RUN-CAUSATION-001.9/.13: a human actor always roots a
@@ -156,7 +188,7 @@ func (s *Service) applyCausationLineage(
 		return nil
 	}
 
-	causing, err := s.repo.GetRunByID(ctx, req.CausingRunID)
+	causing, err := s.repo.GetRunByIDTx(ctx, tx, req.CausingRunID)
 	if err != nil {
 		shared.LaunchRefusedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalCausingRunUnreadable)), 1)
 		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalCausingRunUnreadable)), 1)
@@ -165,13 +197,13 @@ func (s *Service) applyCausationLineage(
 		// which is exactly AC-OFFICE-BACKPRESSURE-003.3's "input cannot
 		// be read" case, so it counts toward the durable escalation
 		// record alongside the refusal.
-		s.recordGateOutcome(ctx, res.WorkspaceID, RefusalCausingRunUnreadable, false)
+		rec.record(res.WorkspaceID, RefusalCausingRunUnreadable, false)
 		return &RefusalError{
 			Gate:   RefusalCausingRunUnreadable,
 			Reason: fmt.Sprintf("causing run %s unreadable: %v", req.CausingRunID, err),
 		}
 	}
-	s.recordGateOutcome(ctx, res.WorkspaceID, RefusalCausingRunUnreadable, true)
+	rec.record(res.WorkspaceID, RefusalCausingRunUnreadable, true)
 	// AC-OFFICE-RUN-CAUSATION-001.9: an actor who is human always roots a
 	// new causation chain, even when nested inside a human-rooted run's
 	// own follow-on work.
@@ -220,9 +252,13 @@ func causingCausationID(causing *models.Run) string {
 // re-triggered itself with the same reason more than the effective
 // allowance within SelfTriggerWindow (AC-OFFICE-LAUNCH-SAFETY-004).
 // Only applies to an agent acting as itself: a system or human actor
-// cannot self-trigger by definition.
+// cannot self-trigger by definition. The count runs against the
+// caller's enqueue transaction (AC-OFFICE-LAUNCH-SAFETY-003.8) so it is
+// serialized against the insert and against every other concurrent
+// enqueue for the same agent profile — a count over rows the insert
+// alone does not lock.
 func (s *Service) checkSelfTriggerAllowance(
-	ctx context.Context, agentInstanceID string, req QueueRunRequest, actorKind models.ActorKind, actorID string,
+	ctx context.Context, tx *sqlx.Tx, rec *gateOutcomeRecorder, agentInstanceID string, req QueueRunRequest, actorKind models.ActorKind, actorID string,
 	workspaceID, causationID string,
 ) error {
 	if actorKind != models.ActorKindAgent || actorID != agentInstanceID {
@@ -233,17 +269,17 @@ func (s *Service) checkSelfTriggerAllowance(
 	}
 	reason := req.Reason
 	since := time.Now().UTC().Add(-SelfTriggerWindow)
-	count, err := s.repo.CountSelfTriggeredRuns(ctx, agentInstanceID, reason, since)
+	count, err := s.repo.CountSelfTriggeredRunsTx(ctx, tx, agentInstanceID, reason, since)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalSelfTrigger)), 1)
 		s.logRefusal(RefusalSelfTrigger, agentInstanceID, req, causationID)
-		s.recordGateOutcome(ctx, workspaceID, RefusalSelfTrigger, false)
+		rec.record(workspaceID, RefusalSelfTrigger, false)
 		return &RefusalError{
 			Gate:   RefusalSelfTrigger,
 			Reason: fmt.Sprintf("self-trigger count unreadable: %v", err),
 		}
 	}
-	s.recordGateOutcome(ctx, workspaceID, RefusalSelfTrigger, true)
+	rec.record(workspaceID, RefusalSelfTrigger, true)
 	if count >= s.effectiveSelfTriggerAllowance() {
 		shared.LaunchRefusedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalSelfTrigger)), 1)
 		s.logRefusal(RefusalSelfTrigger, agentInstanceID, req, causationID)
@@ -279,15 +315,18 @@ func (s *Service) logRefusal(gate RefusalGate, agentInstanceID string, req Queue
 	s.log.Info("run enqueue refused", fields...)
 }
 
-// recordGateOutcome persists a refusal gate's evaluation outcome for
-// workspaceID via the standalone RecordGateOutcome: unlike the
-// claim-time deferral gates in runs/repository/sqlite/claim.go, no
-// transaction is already open at an enqueue-refusal decision point.
-// Any persistence failure is counted rather than propagated, per
-// AC-OFFICE-BACKPRESSURE-003.4: this diagnostic bookkeeping must never
-// affect the admission decision.
-func (s *Service) recordGateOutcome(ctx context.Context, workspaceID string, gate RefusalGate, success bool) {
-	if err := s.repo.RecordGateOutcome(ctx, workspaceID, string(gate), success); err != nil {
-		shared.GateOutcomeRecordFailedTotal.Add(shared.LaunchSafetyLabel("gate", string(gate)), 1)
+// flushGateOutcomes persists every gate-evaluation outcome rec
+// accumulated, via the standalone RecordGateOutcome — each call opens
+// its own transaction on the repository's writer pool, deliberately
+// separate from (and run only after) the enqueue transaction that
+// observed these outcomes has already committed or rolled back; see
+// gateOutcomeRecorder's doc comment for why. Any persistence failure is
+// counted rather than propagated, per AC-OFFICE-BACKPRESSURE-003.4:
+// this diagnostic bookkeeping must never affect the admission decision.
+func (s *Service) flushGateOutcomes(ctx context.Context, rec *gateOutcomeRecorder) {
+	for _, o := range rec.outcomes {
+		if err := s.repo.RecordGateOutcome(ctx, o.workspaceID, string(o.gate), o.success); err != nil {
+			shared.GateOutcomeRecordFailedTotal.Add(shared.LaunchSafetyLabel("gate", string(o.gate)), 1)
+		}
 	}
 }
