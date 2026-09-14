@@ -66,6 +66,7 @@ This draft defines proposed behavior. It does not claim that the current impleme
 
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-004.1:** When a compatible backend reconnects with a valid cursor, agentctl must replay subsequent committed events in sequence before joining live delivery.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-004.2:** When a cursor is invalid, expired, or from another stream, agentctl must return a typed error. It must not skip history or create an unbounded queue.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-004.3:** When a backend adopts a surviving agent, recovery must preserve the original stream identity and replay position. Adoption must not replace the conversation.
 
 ### REQ-PLATFORM-DURABLE-AGENT-DELIVERY-005: Idempotent backend projection
 
@@ -77,6 +78,7 @@ This draft defines proposed behavior. It does not claim that the current impleme
 
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-005.1:** When the backend acknowledges an event, the event must already exist in its durable inbox. Duplicate delivery must produce one canonical message effect.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-005.2:** When projection restarts after a crash, turn transitions and workflow intents must remain idempotent. Stale owners must not change current session state.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-005.3:** When an adopted turn completes, preceding conversation output must be preserved before completion releases subsequent work. Repeated recovery must not repeat completion effects.
 
 ### REQ-PLATFORM-DURABLE-AGENT-DELIVERY-006: Disconnect reconciliation
 
@@ -88,6 +90,7 @@ This draft defines proposed behavior. It does not claim that the current impleme
 
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.1:** When the transport disconnects, Kandev must reconcile the original submission and stream before declaring a terminal outcome or starting another prompt.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.2:** When reconciliation cannot establish the outcome, Kandev must show an uncertain state, keep Stop available, and prevent automatic queue dispatch or tool replay.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-006.3:** When adoption cannot establish the active submission, Kandev must block new dispatch and replacement. Stop must remain available during reconciliation.
 
 ### REQ-PLATFORM-DURABLE-AGENT-DELIVERY-007: Compatible rollout
 
@@ -101,6 +104,7 @@ This draft defines proposed behavior. It does not claim that the current impleme
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-007.2:** Recovery must pass crash, replay, and desktop/mobile tests before release. Supported rollback must retain journal data and prevent unsafe active-stream downgrade.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-007.3:** When compatible peers use a supported retained environment, durable delivery must activate automatically. The functionality must not require a feature flag.
 - **AC-PLATFORM-DURABLE-AGENT-DELIVERY-007.4:** When a supported durable environment has a journal error, Kandev must block unsafe admission. It must not downgrade to legacy delivery.
+- **AC-PLATFORM-DURABLE-AGENT-DELIVERY-007.5:** When a backend adopts a surviving agent, it must establish delivery capability before accepting new work. An undiscovered capability must not imply legacy support.
 
 ## Out of scope
 

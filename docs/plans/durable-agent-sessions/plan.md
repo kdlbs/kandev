@@ -372,9 +372,15 @@ package links, frontmatter references, dependency order, and whitespace checks.
 - Autonomous recovery must not confuse a session block with agent pause, provider backoff, or budget cancellation.
 - A PostgreSQL, Docker, SSH, or Kind skip cannot count as executor or persistence acceptance.
 
+## Reconciliation after PR #3467
+
+The [reconciliation package](../durable-agent-session-reconciliation/plan.md) owns integration with merged agent survival.
+Its five work orders are complete. The original eighteen completed work orders retain their historical results.
+The combined tree now has adoption, replay, admission, and restart evidence. Durable delivery remains automatic for compatible retained agentctl instances, while the survival setting controls process lifetime.
+
 ## Handoff
 
-PR #3598 contains the implementation and review remediation and is ready for final review fixup. The
+PR #3598 contains the original implementation, review remediation, and merged survival reconciliation. The
 remaining environment-dependent checks are recorded above.
 Automatic context continuation and release publication remain outside this
 package.
