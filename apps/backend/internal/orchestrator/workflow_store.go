@@ -572,6 +572,32 @@ func (s *workflowStore) carryStepHandoffForTransition(
 	setStepHandoffCarryMetadata(task, toStepID, consumedSignal)
 }
 
+// carryStepHandoffForCASAdmission mirrors carryStepHandoffForTransition for
+// the CAS admission path the engine funnel's on_turn_complete commit uses.
+// Gating is the session's pending signal for the source step: a signal is only
+// present when an on_turn_complete transition is consuming it, so no separate
+// trigger check is needed.
+func (s *workflowStore) carryStepHandoffForCASAdmission(
+	ctx context.Context,
+	task *models.Task,
+	sessionID, fromStepID, toStepID string,
+) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		s.logger.Debug("failed to load session for step handoff carry",
+			zap.String("session_id", sessionID), zap.Error(err))
+		return
+	}
+	if session == nil {
+		return
+	}
+	var consumedSignal *models.PendingStepCompletionSignal
+	if signal, has := models.LoadPendingStepSignal(session.Metadata); has && signal.StepID == fromStepID {
+		consumedSignal = &signal
+	}
+	setStepHandoffCarryMetadata(task, toStepID, consumedSignal)
+}
+
 func transitionContext(
 	ctx context.Context,
 	sessionID string,
@@ -655,7 +681,7 @@ func (s *workflowStore) applyTransitionIfAtStepWithMoveID(ctx context.Context, t
 		attribution := steptelemetry.FromContext(transitionCtx)
 		transitionCtx = routing.WithOperation(transitionCtx, routing.Operation{ID: operationID, TaskID: taskID, Producer: producer, ExpectedStepID: expectedStepID, TargetStepID: toStepID, SessionID: sessionID, ActorKind: string(attribution.ActorKind), ActorID: attribution.ActorID})
 	}
-	task, oldWorkflowID, applied, err := s.applyTransitionIfAtStepRawOptions(transitionCtx, taskID, expectedStepID, toStepID, moveID, allowMissingTarget)
+	task, oldWorkflowID, applied, err := s.applyTransitionIfAtStepRawOptions(transitionCtx, taskID, expectedStepID, toStepID, moveID, allowMissingTarget, carryHandoffInput{sessionID: sessionID, trigger: trigger})
 	if err != nil || !applied {
 		return applied, err
 	}
@@ -683,7 +709,15 @@ func (s *workflowStore) applyTransitionIfAtStepRaw(
 	return s.applyTransitionIfAtStepRawOptions(ctx, taskID, expectedStepID, toStepID, moveID, false)
 }
 
-func (s *workflowStore) applyTransitionIfAtStepRawOptions(ctx context.Context, taskID, expectedStepID, toStepID, moveID string, allowMissingTarget bool) (*models.Task, string, bool, error) {
+// carryHandoffInput carries the funnel commit's session and trigger for the
+// admission-time handoff-carry write. Only on_turn_complete inputs write a
+// token; absent inputs leave any pre-existing token untouched.
+type carryHandoffInput struct {
+	sessionID string
+	trigger   engine.Trigger
+}
+
+func (s *workflowStore) applyTransitionIfAtStepRawOptions(ctx context.Context, taskID, expectedStepID, toStepID, moveID string, allowMissingTarget bool, carryInput ...carryHandoffInput) (*models.Task, string, bool, error) {
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil {
 		return nil, "", false, fmt.Errorf("load task for CAS transition: %w", err)
@@ -707,6 +741,17 @@ func (s *workflowStore) applyTransitionIfAtStepRawOptions(ctx context.Context, t
 		delete(task.Metadata, models.MetaKeyQueuedMoveExitPending)
 		delete(task.Metadata, models.MetaKeyQueuedMoveExitCompleted)
 		delete(task.Metadata, models.MetaKeyQueuePromotionPending)
+	}
+	// Publish the on_turn_complete signal's handoff on the same task snapshot
+	// as admission so a queued destination cannot promote in between. The
+	// funnel's CAS commit (applyEngineTransitionWithMode) reaches the write
+	// through this path, not through the deferred applyTransition variant.
+	// Only an on_turn_complete carry input may touch the token; the rebase
+	// below preserves whatever the task already carries otherwise.
+	for _, input := range carryInput {
+		if input.trigger == engine.TriggerOnTurnComplete {
+			s.carryStepHandoffForCASAdmission(ctx, task, input.sessionID, expectedStepID, toStepID)
+		}
 	}
 	task.UpdatedAt = time.Now().UTC()
 	if _, wantsAllocation := stepentry.ResultHolderFromContext(ctx); wantsAllocation {

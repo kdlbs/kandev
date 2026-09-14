@@ -192,6 +192,71 @@ func (r *sqliteRepository) guardOptionalActiveTaskTx(
 	return r.guardActiveTaskTx(ctx, tx, identity.TaskID)
 }
 
+// guardPendingMoveTaskTx establishes the task-row -> queue-session lock order
+// for deferred route admission and rejects a producer whose source generation
+// is already stale. Terminal task states are absorbing: once a terminal route
+// commits, no older producer may create a new deferred row behind it. A
+// missing tasks table (isolated queue-only tests) skips the guard.
+func (r *sqliteRepository) guardPendingMoveTaskTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	taskID, expectedWorkflowStepID string,
+) error {
+	if !r.tasksTablePresent {
+		return nil
+	}
+	query := `UPDATE tasks SET updated_at = updated_at WHERE id = ? AND archived_at IS NULL`
+	args := []interface{}{taskID}
+	if r.taskStateColumnPresent {
+		query += ` AND state NOT IN (?, ?, ?)`
+		args = append(args, v1.TaskStateCompleted, v1.TaskStateFailed, v1.TaskStateCancelled)
+	}
+	res, err := tx.ExecContext(ctx, r.db.Rebind(query), args...)
+	if err != nil {
+		return fmt.Errorf("guard pending move task generation: %w", err)
+	}
+	affected, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("guard pending move task rows affected: %w", err)
+	}
+	if affected == 0 {
+		// The task row is gone, archived, or terminal. Archived/missing rows
+		// report the inactive sentinel (archive/delete callers); a terminal
+		// state reports the generation conflict when the producer carried an
+		// expected step (it wrote against a generation that no longer
+		// matches) and the inactive sentinel when it did not, so plain
+		// admission checks on a completed task keep their sentinel.
+		var archivedAt sql.NullTime
+		var state string
+		if getErr := tx.QueryRowContext(ctx, r.db.Rebind(`SELECT archived_at, state FROM tasks WHERE id = ?`), taskID).Scan(&archivedAt, &state); getErr != nil {
+			return ErrTaskInactive
+		}
+		if archivedAt.Valid {
+			return ErrTaskInactive
+		}
+		if expectedWorkflowStepID != "" {
+			return ErrPendingMoveGenerationConflict
+		}
+		return ErrTaskInactive
+	}
+	if expectedWorkflowStepID != "" {
+		var currentWorkflowStepID *string
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT workflow_step_id FROM tasks WHERE id = ?
+		`), taskID).Scan(&currentWorkflowStepID); err != nil {
+			// Isolated queue-only tests declare a tasks table without the
+			// workflow columns; a missing column or row here cannot prove a
+			// generation mismatch, so the admission proceeds on the row guard
+			// above alone.
+			return nil
+		}
+		if currentWorkflowStepID != nil && *currentWorkflowStepID != expectedWorkflowStepID {
+			return ErrPendingMoveGenerationConflict
+		}
+	}
+	return nil
+}
+
 func (r *sqliteRepository) validateOptionalSessionIdentityTx(
 	ctx context.Context,
 	tx *sqlx.Tx,
@@ -4494,6 +4559,16 @@ func (r *sqliteRepository) replaceSession(ctx context.Context, identity *QueueSe
 	if err := r.guardOptionalActiveTaskTx(ctx, tx, identity); err != nil {
 		return err
 	}
+	// A snapshot may outlive terminal settlement, which removes the current
+	// pending row. Validate the pending move's owning task before the session
+	// lock so an old snapshot cannot recreate deferred routing behind an
+	// absorbing task. This also covers the identity-less ReplaceSession form,
+	// whose only task reference is the restored pending move itself.
+	if pendingMove != nil {
+		if err := r.guardActiveTaskTx(ctx, tx, pendingMove.TaskID); err != nil {
+			return err
+		}
+	}
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {
 		return err
 	}
@@ -4548,7 +4623,7 @@ func (r *sqliteRepository) SetPendingMove(ctx context.Context, sessionID string,
 		return fmt.Errorf("begin set pending move tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := r.guardActiveTaskTx(ctx, tx, move.TaskID); err != nil {
+	if err := r.guardPendingMoveTaskTx(ctx, tx, move.TaskID, move.ExpectedWorkflowStepID); err != nil {
 		return err
 	}
 	if err := r.lockSessionTx(ctx, tx, sessionID); err != nil {

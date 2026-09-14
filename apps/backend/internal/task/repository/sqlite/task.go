@@ -1009,6 +1009,11 @@ func (r *Repository) rebaseTaskForStepAdmissionCAS(
 			requestedRouteMetadata[key] = value
 		}
 	}
+	// The handoff carry token is set on the task snapshot before the CAS
+	// (carryStepHandoffForCASAdmission) so admission and carry publication are
+	// one write; the rebase must preserve it the same way it preserves the
+	// route-owned lifecycle keys, or the token set before the reload is lost.
+	requestedCarryToken, requestedCarryPresent := task.Metadata[models.MetaKeyStepHandoffCarry]
 	requestedAppliedMoves := map[string]interface{}{}
 	if appliedMoves, ok := task.Metadata[models.MetaKeyAppliedDeferredMoves].(map[string]interface{}); ok {
 		for moveID, value := range appliedMoves {
@@ -1056,6 +1061,11 @@ func (r *Repository) rebaseTaskForStepAdmissionCAS(
 		} else {
 			delete(task.Metadata, key)
 		}
+	}
+	if requestedCarryPresent {
+		task.Metadata[models.MetaKeyStepHandoffCarry] = requestedCarryToken
+	} else {
+		delete(task.Metadata, models.MetaKeyStepHandoffCarry)
 	}
 	if len(requestedAppliedMoves) > 0 {
 		currentAppliedMoves := map[string]interface{}{}
