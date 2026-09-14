@@ -43,7 +43,7 @@ import { PluginPanelTab } from "./plugin-panel-tab";
 import { PromptHistoryContent } from "./prompt-history-panel-host";
 import { TodosContent } from "./todos-panel-content";
 
-import { setPanelTitle, panelPortalManager } from "@/lib/layout/panel-portal-manager";
+import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { usePortalSlot } from "@/lib/layout/panel-portal-host";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "@/lib/state/dockview-env-scoped-components";
@@ -255,25 +255,12 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
  * global focus.
  */
 function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | null) {
+  const isVisible = usePanelActive(panelId);
+
   useEffect(() => {
-    if (!sessionId) return;
-    const entry = panelPortalManager.get(panelId);
-    if (!entry?.api) return;
-    /** Ask the WebSocket client for a fresh git-status snapshot for the
-     *  session. */
-    const refreshNow = () => {
-      const client = getWebSocketClient();
-      client?.refreshSessionData(sessionId);
-    };
-    // If the panel is already visible when this effect first runs,
-    // onDidVisibilityChange won't fire (no transition) — refresh immediately so the
-    // initial open benefits from the same WS-event-miss recovery.
-    if (entry.api.isVisible) refreshNow();
-    const disposable = entry.api.onDidVisibilityChange((event) => {
-      if (event.isVisible) refreshNow();
-    });
-    return () => disposable.dispose();
-  }, [panelId, sessionId]);
+    if (!sessionId || !isVisible) return;
+    getWebSocketClient()?.refreshSessionData(sessionId);
+  }, [isVisible, panelId, sessionId]);
 }
 
 /** Render the changes/diff viewer for the panel's params (`kind` "all" or
