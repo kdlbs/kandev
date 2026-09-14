@@ -598,7 +598,7 @@ func (s *Service) updateTransitionTaskWithCapacity(
 	targetStep *wfmodels.WorkflowStep,
 ) error {
 	if targetStep == nil {
-		return s.repo.UpdateTask(ctx, task)
+		return s.repo.UpdateTaskPreservingDeferredLaunch(ctx, task)
 	}
 	admissionRepo, ok := s.repo.(workflowMoveAdmissionRepository)
 	if !ok {
@@ -791,15 +791,7 @@ func (s *Service) workflowMovePendingOptions(task *models.Task) *workflowmove.En
 // has been dispatched. A missing marker is a no-op. The options are already
 // captured by the caller (overlaid step or threaded value) before this runs.
 func (s *Service) clearWorkflowMovePending(ctx context.Context, taskID string) {
-	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil || task == nil || task.Metadata == nil {
-		return
-	}
-	if _, ok := task.Metadata[models.MetaKeyWorkflowMovePending]; !ok {
-		return
-	}
-	delete(task.Metadata, models.MetaKeyWorkflowMovePending)
-	if err := s.repo.UpdateTask(ctx, task); err != nil {
+	if _, err := s.repo.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyWorkflowMovePending); err != nil {
 		s.logger.Warn("failed to clear workflow move pending marker",
 			zap.String("task_id", taskID), zap.Error(err))
 	}
@@ -1676,7 +1668,7 @@ func (s *Service) syncTaskStateForQueuePromotion(ctx context.Context, task *mode
 		return nil
 	}
 	task.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpdateTask(ctx, task); err != nil {
+	if err := s.repo.UpdateTaskPreservingDeferredLaunch(ctx, task); err != nil {
 		return fmt.Errorf("persist promoted task state: %w", err)
 	}
 	s.publishTaskUpdated(ctx, task)
@@ -4896,7 +4888,7 @@ func (s *Service) syncTaskStateForPendingMove(ctx context.Context, taskID, fromS
 	oldState := task.State
 	task.State = v1.TaskStateTODO
 	task.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpdateTask(ctx, task); err != nil {
+	if err := s.repo.UpdateTaskPreservingDeferredLaunch(ctx, task); err != nil {
 		s.taskRuntimeStateMu.Unlock()
 		s.logger.Warn("pending move state sync: failed to reopen completed task",
 			zap.String("task_id", taskID),

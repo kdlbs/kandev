@@ -437,6 +437,14 @@ type sessionExecutorStore interface {
 	// than an idempotent same-owner observation.
 	ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (owned bool, newlyClaimed bool, err error)
 	UpdateTask(ctx context.Context, task *models.Task) error
+	// UpdateTaskPreservingDeferredLaunch is UpdateTask for a caller holding a
+	// task snapshot old enough to have missed a concurrent write to
+	// deferred_launch (any read-modify-write over a task fetched earlier in the
+	// same handler). It performs the same write as UpdateTask, except
+	// deferred_launch in the payload is replaced by the row's own current
+	// value at write time, so the stale snapshot can never resurrect or
+	// clobber a concurrent ceiling CAS write.
+	UpdateTaskPreservingDeferredLaunch(ctx context.Context, task *models.Task) error
 	// SetTaskMetadataKey / RemoveTaskMetadataKey are concurrent-key-safe JSON
 	// patch helpers on tasks.metadata (implemented by the sqlite/Postgres
 	// repository). Used by startup reconciliation to mark interrupted tasks

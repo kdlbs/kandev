@@ -2167,7 +2167,7 @@ func (s *Service) moveTaskToWorkflowStep(ctx context.Context, taskID, workflowSt
 	}
 	dbTask.WorkflowStepID = workflowStepID
 	dbTask.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpdateTask(ctx, dbTask); err != nil {
+	if err := s.repo.UpdateTaskPreservingDeferredLaunch(ctx, dbTask); err != nil {
 		s.logger.Warn("failed to move task to workflow step",
 			zap.String("task_id", taskID),
 			zap.String("workflow_step_id", workflowStepID),
@@ -3219,7 +3219,7 @@ func (s *Service) advanceTaskWorkflowStep(ctx context.Context, task *models.Task
 	}
 	task.WorkflowStepID = workflowStepID
 	task.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpdateTask(ctx, task); err != nil {
+	if err := s.repo.UpdateTaskPreservingDeferredLaunch(ctx, task); err != nil {
 		s.logger.Warn("failed to update task workflow step",
 			zap.String("task_id", task.ID),
 			zap.String("workflow_step_id", workflowStepID),
