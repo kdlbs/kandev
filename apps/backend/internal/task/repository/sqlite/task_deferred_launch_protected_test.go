@@ -170,3 +170,50 @@ func TestUpdateTaskStillDeletesUnrelatedMetadataKeysByOmission(t *testing.T) {
 		t.Fatalf("metadata = %#v, want the untouched key preserved", current.Metadata)
 	}
 }
+
+// TestUpdateTaskPreservingDeferredLaunchWithNilMetadataStaysAnObject pins the
+// nil in-memory Task.Metadata edge case: stripProtectedTaskMetadata used to
+// return a literal nil map for a nil input, which json.Marshal encodes as the
+// JSON scalar `null` rather than `{}`. On the Postgres dialect the merge
+// expression's `?::jsonb || jsonb_strip_nulls(...)` concatenates a jsonb
+// scalar null with an object, producing a two-element JSON array
+// (`[null, {...}]`) instead of an object — corrupting the metadata column.
+// SQLite's json_patch tolerates a null target and was never actually broken,
+// but this pins the shared code path on the dialect that is exercised in
+// every environment, so a regression here is caught before the
+// Postgres-only counterpart even runs.
+func TestUpdateTaskPreservingDeferredLaunchWithNilMetadataStaysAnObject(t *testing.T) {
+	repo := newRepoForHealTests(t)
+	ctx := context.Background()
+	insertTask(t, repo.db, "task-nil-metadata")
+	if _, err := repo.db.ExecContext(ctx, `
+		UPDATE tasks SET metadata = ? WHERE id = ?
+	`, `{"deferred_launch":{"prompt":"original"}}`, "task-nil-metadata"); err != nil {
+		t.Fatalf("seed deferred launch: %v", err)
+	}
+
+	task, err := repo.GetTask(ctx, "task-nil-metadata")
+	if err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	task.Metadata = nil
+	task.Description = "updated with nil metadata"
+	if err := repo.UpdateTaskPreservingDeferredLaunch(ctx, task); err != nil {
+		t.Fatalf("UpdateTaskPreservingDeferredLaunch with nil metadata: %v", err)
+	}
+
+	current, err := repo.GetTask(ctx, "task-nil-metadata")
+	if err != nil {
+		t.Fatalf("reload task: %v", err)
+	}
+	if current.Description != "updated with nil metadata" {
+		t.Fatalf("description = %q, want the nil-metadata update to still apply", current.Description)
+	}
+	deferred, ok := current.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	if !ok {
+		t.Fatalf("deferred_launch missing or wrong shape after a nil-metadata update: %#v", current.Metadata)
+	}
+	if deferred["prompt"] != "original" {
+		t.Fatalf("deferred_launch = %#v, want the row's own value preserved", deferred)
+	}
+}

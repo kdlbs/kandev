@@ -2235,9 +2235,11 @@ func pendingTaskMetadataMergeExpression(driver string) string {
 // (event_handlers_workflow.go's step-transition handling), not only a CAS
 // primitive, so protecting it here would silently drop that write.
 func stripProtectedTaskMetadata(metadata map[string]interface{}) map[string]interface{} {
-	if metadata == nil {
-		return nil
-	}
+	// Always returns a non-nil map, even for nil input: json.Marshal of a nil
+	// map produces the JSON scalar `null`, and Postgres's jsonb `||` merge
+	// expression below concatenates a scalar with an object into a
+	// two-element array instead of merging, corrupting the metadata column.
+	// A nil range is a no-op, so this still yields "{}" for nil input.
 	cloned := make(map[string]interface{}, len(metadata))
 	for key, value := range metadata {
 		if key == models.MetaKeyDeferredLaunch {
