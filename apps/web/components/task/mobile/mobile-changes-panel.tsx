@@ -13,6 +13,11 @@ import { useReviewSources } from "@/hooks/domains/session/use-review-sources";
 import { useAppStore } from "@/components/state-provider";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { useRequestChangesWalkthrough } from "@/hooks/domains/session/use-request-changes-walkthrough";
+import {
+  consumeContributionComparisonRequest,
+  useContributionComparisonRequest,
+} from "../remote-contribution-comparison";
+import { contributionHistoryExplanationKey } from "@/hooks/domains/session/use-contribution-history-explanation";
 import type { SelectedDiff } from "../task-layout";
 import type { OpenDiffOptions, DiffSheetMode } from "../changes-diff-target";
 
@@ -25,6 +30,7 @@ type MobileChangesPanelProps = {
 function buildContributionHeaderProps(data: ReturnType<typeof useChangesPanelData>) {
   return {
     relation: data.relation,
+    contributionHistoryTarget: data.contributionHistoryTarget,
     resolution: data.resolution,
     resolutionTarget: data.resolutionTarget,
     remoteContributionUrl: data.selectedPR?.pr_url ?? data.existingPrUrl,
@@ -37,6 +43,59 @@ function useRefreshMobileSessionData(sessionId: string | null | undefined) {
     if (!sessionId) return;
     getWebSocketClient()?.refreshSessionData(sessionId);
   }, [sessionId]);
+}
+
+function useContributionComparisonRequestToken(
+  target: Parameters<typeof contributionHistoryExplanationKey>[0],
+): number | undefined {
+  const comparisonRequest = useContributionComparisonRequest();
+  const contributionKey = contributionHistoryExplanationKey(target);
+  const comparisonRequestToken =
+    comparisonRequest?.key === contributionKey ? comparisonRequest.token : undefined;
+
+  useEffect(() => {
+    if (comparisonRequestToken === undefined) return;
+    // Let the targeted disclosure schedule its focus before consuming the
+    // one-shot request. The second frame also lets the Drawer finish its
+    // focus bookkeeping on touch browsers.
+    let consumeFrame = 0;
+    const settleFrame = requestAnimationFrame(() => {
+      consumeFrame = requestAnimationFrame(() => {
+        consumeContributionComparisonRequest(comparisonRequestToken);
+      });
+    });
+    return () => {
+      cancelAnimationFrame(settleFrame);
+      if (consumeFrame) cancelAnimationFrame(consumeFrame);
+    };
+  }, [comparisonRequestToken]);
+
+  return comparisonRequestToken;
+}
+
+function useOpenSelectedDiff(
+  selectedDiff: SelectedDiff | null,
+  onClearSelected: () => void,
+  setDiffSheet: (mode: DiffSheetMode | null) => void,
+) {
+  const prevSelectedDiffRef = useRef<SelectedDiff | null>(null);
+
+  useEffect(() => {
+    if (!selectedDiff?.path) {
+      prevSelectedDiffRef.current = selectedDiff;
+      return;
+    }
+
+    const prevPath = prevSelectedDiffRef.current?.path;
+    prevSelectedDiffRef.current = selectedDiff;
+    if (prevPath === selectedDiff.path) return;
+
+    // queueMicrotask satisfies react-hooks/set-state-in-effect; executes before next paint.
+    queueMicrotask(() => {
+      setDiffSheet({ kind: "file", path: selectedDiff.path });
+      onClearSelected();
+    });
+  }, [selectedDiff, onClearSelected, setDiffSheet]);
 }
 
 /**
@@ -61,26 +120,10 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
     sessionId: data.activeSessionId,
     ready: data.walkthroughRequestReady,
   });
-
-  // Track the previous selectedDiff to detect changes
-  const prevSelectedDiffRef = useRef<SelectedDiff | null>(null);
-  useEffect(() => {
-    // Only open the sheet if selectedDiff changed from null/undefined to a new path
-    if (!selectedDiff?.path) {
-      prevSelectedDiffRef.current = selectedDiff;
-      return;
-    }
-
-    const prevPath = prevSelectedDiffRef.current?.path;
-    prevSelectedDiffRef.current = selectedDiff;
-    if (prevPath === selectedDiff.path) return;
-
-    // queueMicrotask satisfies react-hooks/set-state-in-effect; executes before next paint.
-    queueMicrotask(() => {
-      setDiffSheet({ kind: "file", path: selectedDiff.path });
-      onClearSelected();
-    });
-  }, [selectedDiff, onClearSelected]);
+  const comparisonRequestToken = useContributionComparisonRequestToken(
+    data.contributionHistoryTarget,
+  );
+  useOpenSelectedDiff(selectedDiff, onClearSelected, setDiffSheet);
 
   const handleOpenDiffAll = useCallback(() => {
     setDiffSheet({ kind: "all" });
@@ -145,7 +188,7 @@ export const MobileChangesPanel = memo(function MobileChangesPanel({
           comparisonTargets={data.git.comparisonTargets}
           {...buildContributionHeaderProps(data)}
         />
-        <ChangesPanelBody {...bodyProps} />
+        <ChangesPanelBody {...bodyProps} comparisonRequestToken={comparisonRequestToken} />
       </PanelRoot>
 
       <MobileDiffSheet

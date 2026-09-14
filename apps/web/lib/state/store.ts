@@ -25,6 +25,7 @@ import {
   createSystemSlice,
   createPluginsSlice,
   createReviewSlice,
+  createNeedsYouInboxSlice,
 } from "./slices";
 
 // Re-export all types from slices for backwards compatibility.
@@ -81,6 +82,7 @@ export function createAppStore(initialState?: HydrationState) {
       // arguments (CodeQL js/superfluous-trailing-arguments).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createReviewSlice(set as any),
+      ...createNeedsYouInboxSlice(set),
       // Re-assert merged initial state so caller-supplied values win over slice defaults.
       ...buildStateOverrides(merged),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

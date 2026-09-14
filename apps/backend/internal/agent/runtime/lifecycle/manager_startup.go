@@ -104,6 +104,9 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+	if err := execution.contextResetAdmissionError(); err != nil {
+		return err
+	}
 	defer func() {
 		retErr = wrapBootstrapFailure(execution, retErr)
 	}()
@@ -115,6 +118,12 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 		return err
 	}
 	operationCtx := activityClaim.Context(ctx)
+	operationRelease, err := execution.acquireContextResetOperation(operationCtx)
+	if err != nil {
+		activityClaim.Release()
+		return err
+	}
+	defer operationRelease()
 	defer func() {
 		if retErr != nil {
 			activityClaim.Release()

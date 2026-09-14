@@ -197,9 +197,16 @@ func runtimeFilePath(requestPath, entry string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if runtimePathInDistribution(entryName) {
+		return "", ErrUnsafePath
+	}
 	name := strings.TrimPrefix(strings.TrimSpace(requestPath), "/")
 	if name == "" {
 		return entryName, nil
+	}
+	name, err = url.PathUnescape(name)
+	if err != nil {
+		return "", ErrUnsafePath
 	}
 	if strings.HasPrefix(name, "_kandev/") || name == "_kandev" {
 		return "", ErrUnsafePath
@@ -216,7 +223,23 @@ func runtimeFilePath(requestPath, entry string) (string, error) {
 	if entryDir != "." && !strings.HasPrefix(name, entryDir+"/") {
 		name = path.Join(entryDir, name)
 	}
-	return normalizePackagePath(name, MaxPathBytes)
+	name, err = normalizePackagePath(name, MaxPathBytes)
+	if err != nil {
+		return "", err
+	}
+	if runtimePathInDistribution(name) {
+		return "", ErrUnsafePath
+	}
+	return name, nil
+}
+
+func runtimePathInDistribution(name string) bool {
+	for _, component := range strings.Split(name, "/") {
+		if component == "distribution" {
+			return true
+		}
+	}
+	return false
 }
 
 func runtimeProtocolPath(requestPath string) (string, bool) {

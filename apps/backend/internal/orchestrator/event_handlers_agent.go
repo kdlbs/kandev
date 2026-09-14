@@ -2794,7 +2794,7 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 	}
 }
 
-func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentEventData) {
+func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentEventData) error {
 	errMsg := data.ErrorMessage
 	if errMsg == "" {
 		errMsg = defaultAgentFailedMessage
@@ -2821,7 +2821,7 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.Error(err))
-		return
+		return err
 	}
 	if s.eventBus != nil {
 		eventData := map[string]interface{}{
@@ -2861,8 +2861,10 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 				zap.String("task_id", data.TaskID),
 				zap.String("session_id", data.SessionID),
 				zap.Error(err))
+			return err
 		}
 	}
+	return nil
 }
 
 // clearRecoveredAgentError drops a session's stored agent failure once the agent

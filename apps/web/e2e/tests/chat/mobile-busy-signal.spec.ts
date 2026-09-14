@@ -1,6 +1,6 @@
 import { test, expect } from "../../fixtures/test-base";
 import { waitForActiveSessionForegroundActivity } from "../../helpers/session-store";
-import { typeWhileBusy } from "../../helpers/type-while-busy";
+import { typeWhileBusy, waitForComposerQueueMode } from "../../helpers/type-while-busy";
 import { SessionPage } from "../../pages/session-page";
 
 test.describe("Mobile coarse RUNNING busy signal", () => {
@@ -39,7 +39,7 @@ test.describe("Mobile coarse RUNNING busy signal", () => {
 
     await waitForActiveSessionForegroundActivity(testPage, "generating");
     await expect(session.idleInput()).not.toBeVisible();
-    await expect(testPage.locator('[data-placeholder^="Queue"]')).toBeVisible();
+    await waitForComposerQueueMode(testPage);
 
     const editor = session.activeChat().locator(".tiptap.ProseMirror:visible");
     await typeWhileBusy(testPage, editor, "queue this mobile follow-up");
@@ -51,7 +51,7 @@ test.describe("Mobile coarse RUNNING busy signal", () => {
     await expect(session.agentStatus()).toBeVisible();
     await waitForActiveSessionForegroundActivity(testPage, "generating");
     await expect(session.idleInput()).not.toBeVisible();
-    await expect(testPage.locator('[data-placeholder^="Queue"]')).toBeVisible();
+    await waitForComposerQueueMode(testPage);
   });
 });
 

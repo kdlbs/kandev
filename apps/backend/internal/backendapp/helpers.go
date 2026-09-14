@@ -1404,6 +1404,9 @@ func registerSecondaryRoutes(
 		p.eventBus,
 		clarificationResolver,
 		p.log,
+		p.taskSvc,
+		p.taskRepo,
+		p.features.NeedsYouInbox,
 	)
 	p.log.Debug("Registered Clarification handlers (HTTP)")
 

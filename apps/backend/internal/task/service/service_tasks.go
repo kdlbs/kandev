@@ -1885,6 +1885,12 @@ func (s *Service) GetTask(ctx context.Context, id string) (*models.Task, error) 
 	return task, nil
 }
 
+// GetTasksByIDs fetches task rows in one repository query. Inbox callers use
+// this after a workspace-scoped bundle query has already authorized the rows.
+func (s *Service) GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error) {
+	return s.tasks.GetTasksByIDs(ctx, ids)
+}
+
 func (s *Service) tryUpdateTaskPriorityOnly(
 	ctx context.Context,
 	id string,

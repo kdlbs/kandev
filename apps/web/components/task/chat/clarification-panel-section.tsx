@@ -8,6 +8,7 @@ import { ClarificationInputOverlay } from "./clarification-input-overlay";
 import { ResizeHandle } from "./resize-handle";
 import { useResizableClarificationOverlay } from "@/hooks/use-resizable-clarification-overlay";
 import type { ClarificationRequestMetadata, Message } from "@/lib/types/http";
+import type { ClarificationOutcome } from "@/hooks/domains/session/use-clarification-group";
 
 type ClarificationPanelSectionProps = {
   pending: boolean;
@@ -21,6 +22,9 @@ type ClarificationPanelSectionProps = {
    * responding before its own visible ceiling.
    */
   maxHeightVh: number;
+  // Additive: forwarded straight through to ClarificationInputOverlay.
+  // Existing hosts (task chat, Quick Chat) leave this unset.
+  onOutcome?: (outcome: ClarificationOutcome) => void;
 };
 
 function pendingIdFromMessages(messages: readonly Message[] | null | undefined): string | null {
@@ -57,6 +61,7 @@ export function ClarificationPanelSection({
   onResolved,
   shortcutScopeRef,
   maxHeightVh,
+  onOutcome,
 }: ClarificationPanelSectionProps) {
   const { t } = useTranslation();
   const pendingId = pendingIdFromMessages(messages);
@@ -141,6 +146,7 @@ export function ClarificationPanelSection({
           <ClarificationInputOverlay
             messages={messages}
             onResolved={onResolved}
+            onOutcome={onOutcome}
             shortcutScopeRef={shortcutScopeRef}
             keyboardShortcutsEnabled={!collapsed}
             onDismiss={() => setCollapsed(true)}
