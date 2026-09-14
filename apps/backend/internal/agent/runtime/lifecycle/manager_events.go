@@ -40,7 +40,7 @@ func (m *Manager) handleMessageChunkEvent(execution *AgentExecution, event agent
 	}
 	m.appendAssistantHistoryChunk(execution, event.Text)
 	if event.CanonicalProjection {
-		m.publishCanonicalStreamingContentNow(
+		m.publishCanonicalStreamingContent(
 			execution,
 			"message_streaming",
 			event.CanonicalMessageID,
@@ -119,7 +119,7 @@ func (m *Manager) handleReasoningEvent(execution *AgentExecution, event agentctl
 		return
 	}
 	if event.CanonicalProjection {
-		m.publishCanonicalStreamingContentNow(
+		m.publishCanonicalStreamingContent(
 			execution,
 			thinkingStreamingEventType,
 			event.CanonicalMessageID,

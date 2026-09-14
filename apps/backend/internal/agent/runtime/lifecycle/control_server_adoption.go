@@ -244,6 +244,10 @@ type AdoptionOutcome struct {
 	// field at all (a legacy pre-upgrade server) -- callers apply their own
 	// floor in that case, never a locally-resolved value.
 	UnownedPeriod time.Duration
+	// Capabilities is the authenticated capability set of the adopted control
+	// server. It is carried to recovery so a new instance client can distinguish
+	// an old peer from a current peer whose durable status is unavailable.
+	Capabilities []string
 }
 
 // AttemptAdoptControlServer implements startup steps 4 through 6 of design
@@ -383,6 +387,7 @@ func finalizeControlServerAdoption(ctx context.Context, a finalizeAdoptionArgs) 
 		Credential:    a.rotated.Credential,
 		ContactedAt:   a.contactedAt,
 		UnownedPeriod: time.Duration(a.identity.UnownedPeriodMS) * time.Millisecond,
+		Capabilities:  append([]string(nil), a.identity.Capabilities...),
 	}
 }
 

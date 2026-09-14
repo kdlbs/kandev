@@ -2,7 +2,9 @@ package journal
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -49,6 +51,61 @@ func TestJournalCommittedRecordsSurviveKill(t *testing.T) {
 	}
 	if stream.HighWater != 1 || stream.FirstRetained != 1 {
 		t.Fatalf("stream = %#v", stream)
+	}
+}
+
+func TestJournalRecoveryDescriptorIsBoundedAndOmitsPayload(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "delivery.bbolt")
+	j, err := Open(Config{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = j.Close() })
+	ctx := context.Background()
+
+	for i := 0; i < MaxRecoverySubmissionSummaries+2; i++ {
+		if _, err := j.PutSubmission(ctx, Submission{
+			ID:                fmt.Sprintf("submission-%02d", i),
+			SessionID:         "session-1",
+			IncarnationID:     "incarnation-1",
+			HarnessGeneration: 2,
+			Hash:              fmt.Sprintf("hash-%02d", i),
+			Payload:           []byte("private prompt payload"),
+			State:             SubmissionAccepted,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := j.Append(ctx, Event{
+		SessionID:         "session-1",
+		IncarnationID:     "incarnation-1",
+		HarnessGeneration: 2,
+		StreamID:          "stream-1",
+		Type:              "message",
+		Payload:           []byte("event"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	descriptor, err := j.RecoveryDescriptor(ctx, "session-1", "incarnation-1", 2, "stream-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if descriptor.Stream == nil || descriptor.Stream.HighWater != 1 || descriptor.Stream.FirstRetained != 1 {
+		t.Fatalf("stream = %#v", descriptor.Stream)
+	}
+	if len(descriptor.Submissions) != MaxRecoverySubmissionSummaries {
+		t.Fatalf("submission summaries = %d, want %d", len(descriptor.Submissions), MaxRecoverySubmissionSummaries)
+	}
+	if descriptor.SubmissionCount != MaxRecoverySubmissionSummaries+2 || !descriptor.SubmissionsTruncated {
+		t.Fatalf("submission bounds = count %d truncated %v", descriptor.SubmissionCount, descriptor.SubmissionsTruncated)
+	}
+	encoded, err := json.Marshal(descriptor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "private prompt payload") {
+		t.Fatalf("descriptor exposed submission payload: %s", encoded)
 	}
 }
 

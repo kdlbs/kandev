@@ -12,11 +12,24 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/journal"
 )
 
-// DeliveryStatus is the agentctl delivery capability and, when requested,
-// the current stream watermark.
-type DeliveryStatus struct {
-	journal.StorageCapability
-	Stream *journal.Stream `json:"stream,omitempty"`
+// DeliveryStatus is the authenticated recovery descriptor returned by an
+// agentctl owner. It contains bounded identity and retained-work evidence but
+// never includes prompt payloads.
+type DeliveryStatus = journal.RecoveryDescriptor
+
+// DeliveryHTTPError preserves an HTTP status so recovery can distinguish an
+// explicitly unsupported old route from authentication, storage, and
+// transport failures.
+type DeliveryHTTPError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e *DeliveryHTTPError) Error() string {
+	if e == nil {
+		return "durable delivery request failed"
+	}
+	return fmt.Sprintf("durable delivery request failed with status %d: %s", e.StatusCode, e.Body)
 }
 
 // DurableDeliveryInfo is the initialize-time transport capability returned by
@@ -40,14 +53,39 @@ func (c *Client) setDurableDelivery(info *DurableDeliveryInfo) {
 	c.durableDelivery = &copy
 }
 
+func (c *Client) setDeliveryStatus(status *DeliveryStatus) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if status == nil {
+		c.deliveryStatus = nil
+		return
+	}
+	copy := *status
+	if status.Stream != nil {
+		stream := *status.Stream
+		copy.Stream = &stream
+	}
+	copy.Submissions = append([]journal.SubmissionSummary(nil), status.Submissions...)
+	c.deliveryStatus = &copy
+	c.durableDelivery = &DurableDeliveryInfo{
+		Version:    status.Version,
+		Durable:    status.Durable,
+		Unresolved: status.Unresolved,
+		Reason:     status.Reason,
+	}
+}
+
 // DurableDeliveryCapability returns the initialize-time capability and whether
 // the peer sent the field. The presence bit preserves compatibility with older
 // agentctl peers that have no durable-delivery protocol at all.
 func (c *Client) DurableDeliveryCapability() (journal.StorageCapability, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	if c.durableDelivery == nil {
+	if c.durableDelivery == nil && c.deliveryStatus == nil {
 		return journal.StorageCapability{}, false
+	}
+	if c.durableDelivery == nil {
+		return c.deliveryStatus.StorageCapability, true
 	}
 	return journal.StorageCapability{
 		Version:    c.durableDelivery.Version,
@@ -55,6 +93,23 @@ func (c *Client) DurableDeliveryCapability() (journal.StorageCapability, bool) {
 		Unresolved: c.durableDelivery.Unresolved,
 		Reason:     c.durableDelivery.Reason,
 	}, true
+}
+
+// DeliveryRecoveryDescriptor returns the last authenticated recovery
+// descriptor discovered for this client.
+func (c *Client) DeliveryRecoveryDescriptor() (*DeliveryStatus, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.deliveryStatus == nil {
+		return nil, false
+	}
+	copy := *c.deliveryStatus
+	if c.deliveryStatus.Stream != nil {
+		stream := *c.deliveryStatus.Stream
+		copy.Stream = &stream
+	}
+	copy.Submissions = append([]journal.SubmissionSummary(nil), c.deliveryStatus.Submissions...)
+	return &copy, true
 }
 
 func (c *Client) setLastDeliverySubmissionID(id string) {
@@ -84,6 +139,7 @@ func (c *Client) GetDeliveryStatus(ctx context.Context, streamID string) (*Deliv
 	if err := c.doDeliveryRequest(ctx, http.MethodGet, path, nil, &result); err != nil {
 		return nil, err
 	}
+	c.setDeliveryStatus(&result)
 	return &result, nil
 }
 
@@ -189,7 +245,7 @@ func (c *Client) doDeliveryRequest(ctx context.Context, method, path string, inp
 		return fmt.Errorf("read durable delivery response: %w", err)
 	}
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("durable delivery request failed with status %d: %s", resp.StatusCode, truncateBody(responseBody))
+		return &DeliveryHTTPError{StatusCode: resp.StatusCode, Body: truncateBody(responseBody)}
 	}
 	if output == nil || len(responseBody) == 0 {
 		return nil

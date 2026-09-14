@@ -85,6 +85,8 @@ For rebasing or finishing PRs written against the old Next.js runtime, follow [`
 
 **Hooks Pattern:** Hooks in `hooks/domains/` encapsulate WS subscriptions and store selection; the WS client deduplicates subscriptions. The bounded `useSystemInfo` TanStack Query pilot owns only the About view's `/api/v1/system/info` snapshot and request state, scoped by canonical full API base URL, page boot ID, and auth identity. The boot payload remains unchanged; other System resources stay in Zustand, while process-generation/restart/update probes remain independent no-store reads. See the [ownership decision](../../docs/decisions/2026-09-26-system-info-query-cache-ownership.md) and [system design](../../docs/specs/platform/system-design/system-info-query-cache.md). Shell/commit/diff reads share `lib/state/session-read-coordinator.ts` through `use-session-read.ts`; pass the owning store to invalidation and preserve scope, environment-mapping, and late-response guards. Inactive snapshots are bounded at 32 per resource. Files retains four trees/20,000 metadata nodes and restores up to four independent folders concurrently. See the [navigation design](../../docs/specs/ui/system-design/task-navigation-responsiveness.md), including phone session-to-environment binding.
 
+Session recovery keeps typed guard state, Stop, and continuation precedence across desktop/mobile; durable adoption completes before new work is admitted.
+
 ## WebSockets
 
 **Format:** `{id, type, action, payload, timestamp}`.
