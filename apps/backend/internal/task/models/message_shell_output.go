@@ -1,6 +1,9 @@
 package models
 
 import (
+	"encoding/json"
+	"strconv"
+
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/entityrefs"
 )
@@ -169,6 +172,9 @@ func intFromAny(raw any) (int, bool) {
 		return int(value), true
 	case float64:
 		return int(value), value == float64(int(value))
+	case json.Number:
+		parsed, err := strconv.ParseInt(string(value), 10, strconv.IntSize)
+		return int(parsed), err == nil
 	default:
 		return 0, false
 	}

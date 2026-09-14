@@ -2163,5 +2163,7 @@
   "primarySessionChangedRetry": "主工作階段已更改。請再次執行。",
   "planCommentMigrationFailed": "無法恢復部分已儲存的計劃評論。",
   "planCommentMigrationNeedsPlan": "請建立或恢復計劃，以恢復已儲存的評論。",
-  "planCommentMigrationPending": "仍在恢復已儲存的計劃評論。您的訊息會保留。"
+  "planCommentMigrationPending": "仍在恢復已儲存的計劃評論。您的訊息會保留。",
+  "toolPayloadRemovedAt": "工具詳細數據已於 {{date}} 刪除。",
+  "toolPayloadRemoved": "工具詳細數據已刪除。"
 }

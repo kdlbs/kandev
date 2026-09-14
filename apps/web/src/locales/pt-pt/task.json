@@ -2163,5 +2163,7 @@
   "primarySessionChangedRetry": "A sessão principal foi alterada. Tente executar novamente.",
   "planCommentMigrationFailed": "Não foi possível restaurar alguns comentários do plano guardados.",
   "planCommentMigrationNeedsPlan": "Crie ou restaure um plano para recuperar os comentários guardados.",
-  "planCommentMigrationPending": "Os comentários do plano guardados ainda estão a ser restaurados. A sua mensagem é mantida."
+  "planCommentMigrationPending": "Os comentários do plano guardados ainda estão a ser restaurados. A sua mensagem é mantida.",
+  "toolPayloadRemovedAt": "Detalhes da ferramenta removidos em {{date}}.",
+  "toolPayloadRemoved": "Detalhes da ferramenta removidos."
 }
