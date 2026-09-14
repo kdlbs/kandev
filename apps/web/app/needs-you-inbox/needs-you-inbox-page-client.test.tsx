@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sessionId as toSessionId, taskId as toTaskId } from "@/lib/types/http";
 import type { ClarificationInboxBundle } from "@/lib/types/clarification-inbox";
@@ -7,10 +7,12 @@ import type { FailedInboxRow as FailedInboxRowData } from "@/lib/types/failed-in
 const mocks = vi.hoisted(() => ({
   bumpRefreshTick: vi.fn(),
   useFailedInboxController: vi.fn(),
+  inboxHistoryRefresh: vi.fn(),
 }));
 
 const EMPTY_TESTID = "needs-you-inbox-empty";
 const ERROR_TESTID = "needs-you-inbox-error";
+const HISTORY_TAB_TESTID = "inbox-tab-history";
 
 let needsYouState: {
   status: "idle" | "loading" | "ready" | "error";
@@ -29,15 +31,45 @@ let failedState: {
   status: "idle" | "loading" | "ready" | "error";
 };
 
+let historyState: {
+  status: "idle" | "loading" | "ready" | "error";
+  bundles: unknown[];
+  total: number;
+  hasMore: boolean;
+};
+
 vi.mock("@/components/state-provider", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   useAppStore: (selector: (s: any) => unknown) =>
     selector({
       needsYouInbox: { byWorkspaceId: { w1: needsYouState } },
       failedInbox: { byWorkspaceId: { w1: failedState } },
+      inboxHistory: { byWorkspaceId: { w1: historyState } },
       workspaces: { activeId: workspacesActiveId, items: [{ id: "w1", name: "Kegmil V2" }] },
       bumpNeedsYouInboxRefreshTick: mocks.bumpRefreshTick,
     }),
+}));
+
+vi.mock("@/hooks/domains/inbox-history/use-inbox-history-controller", () => ({
+  useInboxHistoryController: () => mocks.inboxHistoryRefresh,
+}));
+
+vi.mock("@/components/inbox-history/inbox-history-list", () => ({
+  InboxHistoryList: ({ bundles }: { bundles: unknown[] }) => (
+    <div data-testid="stub-history-list">{bundles.length}</div>
+  ),
+}));
+
+vi.mock("@/components/inbox-history/inbox-history-empty-state", () => ({
+  InboxHistoryEmptyState: () => <div data-testid="inbox-history-empty" />,
+}));
+
+vi.mock("@/components/inbox-history/inbox-history-error-state", () => ({
+  InboxHistoryErrorState: ({ onRetry }: { onRetry: () => void }) => (
+    <button type="button" data-testid="inbox-history-error" onClick={onRetry}>
+      retry
+    </button>
+  ),
 }));
 
 // The shell is the app's own chrome (topbar, nav trigger, scroll container)
@@ -119,8 +151,10 @@ function setLocation(path: string) {
 beforeEach(() => {
   mocks.bumpRefreshTick.mockReset();
   mocks.useFailedInboxController.mockReset();
+  mocks.inboxHistoryRefresh.mockReset();
   needsYouState = { status: "idle", bundles: [], hiddenCount: 0, hasMore: false };
   failedState = { rows: [], count: 0, truncated: false, status: "idle" };
+  historyState = { status: "idle", bundles: [], total: 0, hasMore: false };
   workspacesActiveId = "w1";
   setLocation("/needs-you-inbox");
 });
@@ -367,5 +401,56 @@ describe("NeedsYouInboxPageClient — Failed tab (REQ-UI-INBOX-FAILED-001)", () 
     render(<NeedsYouInboxPageClient />);
 
     expect(mocks.useFailedInboxController).toHaveBeenCalledWith("failed");
+  });
+});
+
+// AC .1: a variant="line" tab strip, "Needs you" first and default-selected,
+// "History" second. AC .16: the History tab's own bundle count.
+describe("NeedsYouInboxPageClient — tab strip", () => {
+  it("selects Needs you by default, with its row set, count and behavior unchanged (AC .1)", () => {
+    needsYouState = { status: "ready", bundles: [bundle("p1")], hiddenCount: 0, hasMore: false };
+    render(<NeedsYouInboxPageClient />);
+
+    expect(screen.getAllByTestId("stub-row")).toHaveLength(1);
+    expect(screen.queryByTestId("stub-history-list")).toBeNull();
+  });
+
+  it("renders History as the second tab and switches content on selection", () => {
+    historyState = { status: "ready", bundles: [{ pending_id: "h1" }], total: 1, hasMore: false };
+    render(<NeedsYouInboxPageClient />);
+
+    // Radix TabsTrigger switches tabs on mousedown, not click.
+    fireEvent.mouseDown(screen.getByTestId(HISTORY_TAB_TESTID));
+
+    expect(screen.getByTestId("stub-history-list").textContent).toBe("1");
+  });
+
+  it("shows the History count badge in the Badge variant=secondary idiom, omitted at zero (AC .16)", () => {
+    historyState = { status: "ready", bundles: [], total: 0, hasMore: false };
+    const { rerender } = render(<NeedsYouInboxPageClient />);
+    expect(screen.getByTestId(HISTORY_TAB_TESTID).querySelector("[data-slot=badge]")).toBeNull();
+
+    historyState = { status: "ready", bundles: [], total: 3, hasMore: false };
+    rerender(<NeedsYouInboxPageClient />);
+    const badge = screen.getByTestId(HISTORY_TAB_TESTID).querySelector("[data-slot=badge]");
+    expect(badge).not.toBeNull();
+    expect(badge?.textContent).toBe("3");
+  });
+
+  it("renders the History error state, not the empty state, when the history read failed (AC .25)", () => {
+    historyState = { status: "error", bundles: [], total: 0, hasMore: false };
+    render(<NeedsYouInboxPageClient />);
+    fireEvent.mouseDown(screen.getByTestId(HISTORY_TAB_TESTID));
+
+    expect(screen.getByTestId("inbox-history-error")).not.toBeNull();
+    expect(screen.queryByTestId("inbox-history-empty")).toBeNull();
+  });
+
+  it("renders the History empty state naming the bucket when there is nothing to show (AC .24)", () => {
+    historyState = { status: "ready", bundles: [], total: 0, hasMore: false };
+    render(<NeedsYouInboxPageClient />);
+    fireEvent.mouseDown(screen.getByTestId(HISTORY_TAB_TESTID));
+
+    expect(screen.getByTestId("inbox-history-empty")).not.toBeNull();
   });
 });
