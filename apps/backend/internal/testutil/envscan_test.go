@@ -196,6 +196,22 @@ func genuineRead() string { return Getenv("REAL") }
 	}
 }
 
+// TestUncoveredEnvReadsIgnoresLocalPackageNamedOS ensures a package name does
+// not make a local Getenv function look like the standard os.Getenv function.
+func TestUncoveredEnvReadsIgnoresLocalPackageNamedOS(t *testing.T) {
+	fileSet, file := parseSnippet(t, `package os
+
+func Getenv(string) string { return "" }
+
+func read() string { return Getenv("BAR") }
+`)
+
+	messages := uncoveredEnvReads(fileSet, []*ast.File{file}, nil, nil)
+	if len(messages) != 0 {
+		t.Fatalf("local package Getenv should not be scanned, got %v", messages)
+	}
+}
+
 func TestUncoveredEnvReadsUnresolvableIdentifier(t *testing.T) {
 	fileSet, file := parseSnippet(t, `package example
 

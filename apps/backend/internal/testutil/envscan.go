@@ -299,18 +299,36 @@ func recordConstSpecs(constants packageConstants, specs []ast.Spec) {
 // failing a single test.
 func envReadCalls(fileSet *token.FileSet, file *ast.File, extraReaders map[string]bool) []*ast.CallExpr {
 	uses := typeUses(fileSet, file)
+	dotImportedOS := hasOSDotImport(file)
 	var calls []*ast.CallExpr
 	ast.Inspect(file, func(node ast.Node) bool {
 		call, ok := node.(*ast.CallExpr)
 		if !ok || len(call.Args) == 0 {
 			return true
 		}
-		if isEnvRead(call.Fun, uses, extraReaders) {
+		if isEnvRead(call.Fun, uses, dotImportedOS, extraReaders) {
 			calls = append(calls, call)
 		}
 		return true
 	})
 	return calls
+}
+
+// hasOSDotImport reports whether bare identifiers from the standard os package
+// can be used in this file. The type checker receives the file's package name
+// as its path, so a package named os would otherwise make local Getenv and
+// LookupEnv functions indistinguishable from the imported functions.
+func hasOSDotImport(file *ast.File) bool {
+	for _, importSpec := range file.Imports {
+		if importSpec.Name == nil || importSpec.Name.Name != "." {
+			continue
+		}
+		path, ok := literalString(importSpec.Path)
+		if ok && path == "os" {
+			return true
+		}
+	}
+	return false
 }
 
 // typeUses resolves identifier bindings within one file. A scanner only needs
@@ -330,7 +348,7 @@ func typeUses(fileSet *token.FileSet, file *ast.File) map[*ast.Ident]types.Objec
 // isEnvRead reports whether fun names os.Getenv, os.LookupEnv, or one of the
 // extraReaders. An extraReader matches on the trailing name alone, so both
 // receiver.environmentValue(x) and a bare environmentValue(x) count.
-func isEnvRead(fun ast.Expr, uses map[*ast.Ident]types.Object, extraReaders map[string]bool) bool {
+func isEnvRead(fun ast.Expr, uses map[*ast.Ident]types.Object, dotImportedOS bool, extraReaders map[string]bool) bool {
 	switch target := fun.(type) {
 	case *ast.SelectorExpr:
 		if extraReaders[target.Sel.Name] {
@@ -342,7 +360,7 @@ func isEnvRead(fun ast.Expr, uses map[*ast.Ident]types.Object, extraReaders map[
 		}
 		return target.Sel.Name == "Getenv" || target.Sel.Name == "LookupEnv"
 	case *ast.Ident:
-		return extraReaders[target.Name] || (isOSReader(uses[target]) && (target.Name == "Getenv" || target.Name == "LookupEnv"))
+		return extraReaders[target.Name] || (dotImportedOS && isOSReader(uses[target]) && (target.Name == "Getenv" || target.Name == "LookupEnv"))
 	default:
 		return false
 	}
