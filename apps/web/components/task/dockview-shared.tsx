@@ -235,8 +235,7 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
 }
 
 /**
- * Force a fresh git-status push whenever the diff panel becomes the active
- * dockview tab.
+ * Force a fresh git-status push whenever the diff panel becomes visible.
  *
  * Background: the diff panel's content is derived from `gitStatus` (the
  * per-file `.diff` string), which only refreshes when a `session.git.event`
@@ -251,7 +250,9 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
  * signal, so we ask the backend for a fresh git-status snapshot via the
  * explicit `session.git.refresh` request. Focus itself remains an ACK-only
  * control signal, avoiding replay on ordinary task switching. No-op when the
- * session isn't focused.
+ * session isn't focused. Visibility is used instead of active state because
+ * a right-column group can remain visible while another dockview group owns
+ * global focus.
  */
 function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | null) {
   useEffect(() => {
@@ -264,12 +265,12 @@ function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | nu
       const client = getWebSocketClient();
       client?.refreshSessionData(sessionId);
     };
-    // If the panel is already active when this effect first runs,
-    // onDidActiveChange won't fire (no transition) — refresh immediately so the
+    // If the panel is already visible when this effect first runs,
+    // onDidVisibilityChange won't fire (no transition) — refresh immediately so the
     // initial open benefits from the same WS-event-miss recovery.
-    if (entry.api.isActive) refreshNow();
-    const disposable = entry.api.onDidActiveChange((event) => {
-      if (event.isActive) refreshNow();
+    if (entry.api.isVisible) refreshNow();
+    const disposable = entry.api.onDidVisibilityChange((event) => {
+      if (event.isVisible) refreshNow();
     });
     return () => disposable.dispose();
   }, [panelId, sessionId]);
