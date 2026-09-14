@@ -239,6 +239,7 @@ func RegisterRoutes(
 		inbox := router.Group("/api/v1/clarification-inbox")
 		inbox.GET("", h.httpListInbox)
 		inbox.GET("/hidden", h.httpListInboxHidden)
+		inbox.GET("/history", h.httpListInboxHistory)
 		inbox.PUT("/sidecar/:pendingID", h.httpUpsertInboxSidecar)
 		inbox.DELETE("/sidecar/:pendingID", h.httpDeleteInboxSidecar)
 	}
