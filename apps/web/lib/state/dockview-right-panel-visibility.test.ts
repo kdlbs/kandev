@@ -1,5 +1,5 @@
 import { beforeEach, expect, it, vi } from "vitest";
-import type { DockviewApi } from "dockview-react";
+import type { DockviewApi, SerializedDockview } from "dockview-react";
 import { removeEnvMaximizeState, setEnvLayout } from "@/lib/local-storage";
 
 const CENTER_COLUMN_ID = "center";
@@ -167,6 +167,17 @@ it("hides the actual rightmost Plan region instead of rebuilding the default sid
 
 it("retains the hidden pane when applying a toggle layout fails", () => {
   const api = makeStoreApi();
+  const originalDockview = {
+    grid: { root: { type: "branch", data: ["agent", "plan"], size: 600 } },
+    panels: { [SESSION_PANEL_ID]: { id: SESSION_PANEL_ID, contentComponent: "chat" } },
+  } as unknown as SerializedDockview;
+  let liveDockview: SerializedDockview = originalDockview;
+  let fromJsonCalls = 0;
+  vi.mocked(api.toJSON).mockImplementation(() => liveDockview);
+  vi.mocked(api.fromJSON).mockImplementation((next) => {
+    liveDockview = next;
+    if (fromJsonCalls++ === 0) throw new Error("Dockview rejected the new layout");
+  });
   const fullLayout = {
     rootOrientation: "HORIZONTAL" as const,
     columns: [
@@ -187,7 +198,8 @@ it("retains the hidden pane when applying a toggle layout fails", () => {
   };
   const captured = captureRightPane(fullLayout)!;
   vi.mocked(fromDockviewApi).mockReturnValue(captured.layout);
-  vi.mocked(applyLayout).mockImplementationOnce(() => {
+  vi.mocked(applyLayout).mockImplementationOnce((dockviewApi) => {
+    dockviewApi.fromJSON({ grid: { root: { type: "branch", data: [] } }, panels: {} } as never);
     throw new Error("layout failed");
   });
   useDockviewStore.setState({
@@ -203,6 +215,10 @@ it("retains the hidden pane when applying a toggle layout fails", () => {
   expect(useDockviewStore.getState().rightPaneVisible).toBe(false);
   expect(useDockviewStore.getState().rightPaneAvailable).toBe(true);
   expect(useDockviewStore.getState().isRestoringLayout).toBe(false);
+  expect(api.fromJSON).toHaveBeenCalledTimes(2);
+  expect(api.fromJSON).toHaveBeenLastCalledWith(originalDockview);
+  expect(liveDockview).toBe(originalDockview);
+  expect(setEnvLayout).not.toHaveBeenCalled();
 });
 
 it("recognizes the right column from its stable column or group identity", () => {

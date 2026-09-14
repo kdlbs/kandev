@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LayoutColumn, LayoutState } from "./layout-manager/types";
+import { toSerializedDockview } from "./layout-manager/serializer";
 import {
   captureRightPane,
   getRightPaneToggleState,
@@ -126,82 +127,254 @@ describe("contextual right-pane selection and recovery", () => {
   });
 });
 
-describe("contextual right-pane recovery", () => {
-  it("deduplicates panels reopened in the remaining layout without losing the retained subtree", () => {
-    // @covers AC-UI-RIGHT-PANEL-VISIBILITY-001.10
-    const original = visibleLayout([
-      centerColumn(),
-      {
-        id: "right",
-        groups: [{ id: "right-group", panels: [panel("files"), panel("shared")] }],
+it("deduplicates panels reopened in the remaining layout without losing the retained subtree", () => {
+  // @covers AC-UI-RIGHT-PANEL-VISIBILITY-001.10
+  const original = visibleLayout([
+    centerColumn(),
+    {
+      id: "right",
+      groups: [{ id: "right-group", panels: [panel("files"), panel("shared")] }],
+    },
+  ]);
+  const captured = captureRightPane(original)!;
+  const current = visibleLayout([
+    {
+      ...centerColumn(),
+      groups: [
+        {
+          ...centerColumn().groups[0],
+          panels: [...centerColumn().groups[0].panels, panel("shared")],
+        },
+      ],
+    },
+  ]);
+
+  const restored = restoreRightPane(current, captured.hiddenRightPane);
+
+  expect(restored?.columns[1]?.groups[0]?.panels.map((item) => item.id)).toEqual(["files"]);
+  const ids = restored!.columns.flatMap((column) =>
+    column.groups.flatMap((group) => group.panels.map((item) => item.id)),
+  );
+  expect(new Set(ids).size).toBe(ids.length);
+});
+
+it("rejects recovery metadata that cannot produce a safe serialized layout", () => {
+  const captured = captureRightPane(visibleLayout([centerColumn(), nestedRightColumn()]))!;
+  const malformedGroupId = JSON.parse(JSON.stringify(captured.hiddenRightPane)) as {
+    column: { groups: Array<{ id?: unknown }> };
+  };
+  malformedGroupId.column.groups[0].id = 42;
+
+  const malformedTree = {
+    ...captured.hiddenRightPane,
+    column: {
+      ...captured.hiddenRightPane.column,
+      tree: {
+        ...captured.hiddenRightPane.column.tree!,
+        size: Number.NaN,
       },
-    ]);
-    const captured = captureRightPane(original)!;
-    const current = visibleLayout([
-      {
-        ...centerColumn(),
-        groups: [
+    },
+  };
+
+  expect(readHiddenRightPane({ kandevHiddenRightPane: malformedGroupId })).toBeNull();
+  expect(readHiddenRightPane({ kandevHiddenRightPane: malformedTree })).toBeNull();
+
+  const current = captured.layout;
+  expect(restoreRightPane(current, malformedTree)).toBeNull();
+  expect(current.columns.map((column) => column.id)).toEqual(["center"]);
+});
+
+it("keeps the split axis when deduplication removes a nested sibling", () => {
+  const browserGroup = { id: "browser-group", panels: [panel("browser")] };
+  const planGroup = { id: "plan-group", panels: [panel("plan")] };
+  const terminalGroup = {
+    id: "terminal-group",
+    activePanel: "terminal",
+    panels: [panel("terminal", "terminal")],
+  };
+  const original = visibleLayout([
+    {
+      ...centerColumn(),
+      groups: [
+        ...centerColumn().groups,
+        { id: "reopened-terminal", panels: [panel("terminal", "terminal")] },
+      ],
+    },
+    {
+      id: "browser-region",
+      width: 420,
+      groups: [browserGroup, planGroup, terminalGroup],
+      tree: {
+        type: "branch",
+        size: 420,
+        children: [
           {
-            ...centerColumn().groups[0],
-            panels: [...centerColumn().groups[0].panels, panel("shared")],
+            type: "branch",
+            size: 280,
+            children: [
+              { type: "leaf", size: 140, group: browserGroup },
+              { type: "leaf", size: 140, group: planGroup },
+            ],
           },
+          { type: "leaf", size: 140, group: terminalGroup },
         ],
       },
-    ]);
+    },
+  ]);
+  const captured = captureRightPane(original)!;
+  const restored = restoreRightPane(captured.layout, captured.hiddenRightPane);
 
-    const restored = restoreRightPane(current, captured.hiddenRightPane);
+  expect(restored?.columns[1]?.tree).toMatchObject({ type: "branch" });
+  const tree = restored?.columns[1]?.tree;
+  expect(tree?.type).toBe("branch");
+  if (!tree || tree.type !== "branch") return;
+  expect(tree.children).toHaveLength(1);
+  expect(tree.children[0]?.type).toBe("branch");
 
-    expect(restored?.columns[1]?.groups[0]?.panels.map((item) => item.id)).toEqual(["files"]);
-    const ids = restored!.columns.flatMap((column) =>
-      column.groups.flatMap((group) => group.panels.map((item) => item.id)),
-    );
-    expect(new Set(ids).size).toBe(ids.length);
+  const serialized = toSerializedDockview(restored!, 1200, 800, new Map());
+  const root = serialized as unknown as {
+    grid: {
+      root: {
+        data: Array<
+          { type: "leaf"; data: { views: string[] } } | { type: "branch"; data: unknown[] }
+        >;
+      };
+    };
+  };
+  const rightNode = root.grid.root.data[1];
+  expect(rightNode?.type).toBe("branch");
+  if (!rightNode || rightNode.type !== "branch") return;
+  expect(rightNode.data).toHaveLength(1);
+  const survivingSplit = rightNode.data[0] as {
+    type: "branch";
+    data: Array<{ type: "leaf"; data: { views: string[] } }>;
+  };
+  expect(survivingSplit.type).toBe("branch");
+  expect(survivingSplit.data.map((child) => child.data.views)).toEqual([["browser"], ["plan"]]);
+  expect(survivingSplit.data).not.toContainEqual({ type: "leaf", data: { views: [] } });
+});
+
+it("keeps generated group IDs distinct from live explicit IDs", () => {
+  const original = visibleLayout([
+    {
+      ...centerColumn(),
+      groups: [{ ...centerColumn().groups[0], id: "group-1" }],
+    },
+    { id: "plan", groups: [{ panels: [panel("plan")] }] },
+  ]);
+  const captured = captureRightPane(original)!;
+  const restored = restoreRightPane(captured.layout, captured.hiddenRightPane)!;
+  const serialized = toSerializedDockview(restored, 1200, 800, new Map()) as unknown as {
+    grid: {
+      root: {
+        data: Array<
+          | { type: "leaf"; data: { id: string } }
+          | { type: "branch"; data: Array<{ type: "leaf"; data: { id: string } }> }
+        >;
+      };
+    };
+  };
+  const ids = serialized.grid.root.data.flatMap((node) =>
+    node.type === "leaf" ? [node.data.id] : node.data.map((child) => child.data.id),
+  );
+
+  expect(ids).toEqual(["group-1", "group-2"]);
+  expect(new Set(ids).size).toBe(ids.length);
+});
+
+it("restores non-pinned pane width across repeated hide and show cycles", () => {
+  let current = visibleLayout([
+    { ...centerColumn(), width: 600 },
+    { id: "plan", width: 600, groups: [{ id: "plan-group", panels: [panel("plan")] }] },
+  ]);
+
+  for (let cycle = 0; cycle < 3; cycle++) {
+    const captured = captureRightPane(current)!;
+    current = restoreRightPane(captured.layout, captured.hiddenRightPane, {
+      totalWidth: 1200,
+      pinnedWidths: new Map(),
+    })!;
+    expect(current.columns.map((column) => column.width)).toEqual([600, 600]);
+
+    const serialized = toSerializedDockview(current, 1200, 800, new Map());
+    const root = serialized as unknown as {
+      grid: { root: { data: Array<{ size: number }> } };
+    };
+    expect(root.grid.root.data.map((node) => node.size)).toEqual([600, 600]);
+  }
+});
+
+it("clamps a retained non-pinned pane to viewport space while preserving live proportions", () => {
+  const original = visibleLayout([
+    { ...centerColumn(), width: 400 },
+    { id: "preview", width: 200, groups: [{ panels: [panel("preview")] }] },
+    { id: "plan", width: 600, groups: [{ panels: [panel("plan")] }] },
+  ]);
+  const captured = captureRightPane(original)!;
+  const edited = {
+    ...captured.layout,
+    columns: captured.layout.columns.map((column, index) => ({
+      ...column,
+      width: index === 0 ? 800 : 200,
+    })),
+  };
+
+  const narrow = restoreRightPane(edited, captured.hiddenRightPane, {
+    totalWidth: 900,
+    pinnedWidths: new Map(),
+  })!;
+  expect(narrow.columns.map((column) => column.width)).toEqual([288, 72, 540]);
+
+  const wide = restoreRightPane(edited, captured.hiddenRightPane, {
+    totalWidth: 1600,
+    pinnedWidths: new Map(),
+  })!;
+  expect(wide.columns.map((column) => column.width)).toEqual([800, 200, 600]);
+});
+
+it("keeps a retained pane authoritative until its layout context is invalid", () => {
+  // @covers AC-UI-RIGHT-PANEL-VISIBILITY-001.5
+  // @covers AC-UI-RIGHT-PANEL-VISIBILITY-001.10
+  const captured = captureRightPane(
+    visibleLayout([centerColumn(), { id: "plan", groups: [{ panels: [panel("plan")] }] }]),
+  )!;
+
+  expect(getRightPaneToggleState(captured.layout, captured.hiddenRightPane)).toEqual({
+    available: true,
+    visible: false,
+    hidden: true,
   });
-
-  it("keeps a retained pane authoritative until its layout context is invalid", () => {
-    // @covers AC-UI-RIGHT-PANEL-VISIBILITY-001.5
-    // @covers AC-UI-RIGHT-PANEL-VISIBILITY-001.10
-    const captured = captureRightPane(
-      visibleLayout([centerColumn(), { id: "plan", groups: [{ panels: [panel("plan")] }] }]),
-    )!;
-
-    expect(getRightPaneToggleState(captured.layout, captured.hiddenRightPane)).toEqual({
-      available: true,
-      visible: false,
-      hidden: true,
-    });
-    expect(
-      getRightPaneToggleState(
-        visibleLayout([{ id: "unrelated", groups: [{ panels: [panel("files")] }] }]),
-        captured.hiddenRightPane,
-      ),
-    ).toEqual({ available: false, visible: false, hidden: false });
-
-    const reopened = visibleLayout([
-      centerColumn(),
-      { id: "reopened", groups: [{ panels: [panel("plan")] }] },
-    ]);
-    expect(getRightPaneToggleState(reopened, captured.hiddenRightPane)).toEqual({
-      available: true,
-      visible: true,
-      hidden: false,
-    });
-  });
-
-  it("round-trips and strips environment recovery metadata", () => {
-    const captured = captureRightPane(
-      visibleLayout([centerColumn(), { id: "plan", groups: [{ panels: [panel("plan")] }] }]),
-    )!;
-    const serialized = withHiddenRightPaneMetadata(
-      { grid: { root: { type: "branch" } }, panels: {} },
+  expect(
+    getRightPaneToggleState(
+      visibleLayout([{ id: "unrelated", groups: [{ panels: [panel("files")] }] }]),
       captured.hiddenRightPane,
-    );
+    ),
+  ).toEqual({ available: false, visible: false, hidden: false });
 
-    expect(readHiddenRightPane(serialized)).toEqual(captured.hiddenRightPane);
-    expect(stripHiddenRightPaneMetadata(serialized)).toEqual({
-      grid: { root: { type: "branch" } },
-      panels: {},
-    });
-    expect(readHiddenRightPane({ kandevHiddenRightPane: { version: 99 } })).toBeNull();
+  const reopened = visibleLayout([
+    centerColumn(),
+    { id: "reopened", groups: [{ panels: [panel("plan")] }] },
+  ]);
+  expect(getRightPaneToggleState(reopened, captured.hiddenRightPane)).toEqual({
+    available: true,
+    visible: true,
+    hidden: false,
   });
+});
+
+it("round-trips and strips environment recovery metadata", () => {
+  const captured = captureRightPane(
+    visibleLayout([centerColumn(), { id: "plan", groups: [{ panels: [panel("plan")] }] }]),
+  )!;
+  const serialized = withHiddenRightPaneMetadata(
+    { grid: { root: { type: "branch" } }, panels: {} },
+    captured.hiddenRightPane,
+  );
+
+  expect(readHiddenRightPane(serialized)).toEqual(captured.hiddenRightPane);
+  expect(stripHiddenRightPaneMetadata(serialized)).toEqual({
+    grid: { root: { type: "branch" } },
+    panels: {},
+  });
+  expect(readHiddenRightPane({ kandevHiddenRightPane: { version: 99 } })).toBeNull();
 });

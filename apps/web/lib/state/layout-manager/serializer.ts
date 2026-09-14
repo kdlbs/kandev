@@ -46,10 +46,15 @@ type SerializedBranchNode = {
 
 type SerializedGridNode = SerializedLeafNode | SerializedBranchNode;
 
-type SerializationCtx = { counter: number };
+type SerializationCtx = { counter: number; usedGroupIds: Set<string> };
 
 function nextGroupId(ctx: SerializationCtx): string {
-  return `group-${++ctx.counter}`;
+  let groupId: string;
+  do {
+    groupId = `group-${++ctx.counter}`;
+  } while (ctx.usedGroupIds.has(groupId));
+  ctx.usedGroupIds.add(groupId);
+  return groupId;
 }
 
 // ─── Serialization: LayoutState → SerializedDockview ───────────────────────
@@ -61,6 +66,7 @@ function serializeGroup(
   ctx: SerializationCtx,
 ): SerializedLeafNode {
   const groupId = group.id ?? nextGroupId(ctx);
+  if (group.id) ctx.usedGroupIds.add(group.id);
   const views = group.panels.map((p) => p.id);
   const isSidebar = columnId === "sidebar";
   return {
@@ -183,7 +189,14 @@ export function toSerializedDockview(
   totalHeight: number,
   pinnedWidths: Map<string, number>,
 ): SerializedDockview {
-  const ctx: SerializationCtx = { counter: 0 };
+  const ctx: SerializationCtx = {
+    counter: 0,
+    usedGroupIds: new Set(
+      state.columns.flatMap((column) =>
+        column.groups.flatMap((group) => (group.id ? [group.id] : [])),
+      ),
+    ),
+  };
   const rootOrientation = state.rootOrientation ?? "HORIZONTAL";
   const widths = computeColumnWidths(state.columns, totalWidth, pinnedWidths);
 

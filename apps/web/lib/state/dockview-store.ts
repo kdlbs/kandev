@@ -582,9 +582,35 @@ function applyLayoutAndSet(
   // `pane-resize-sidebar.spec.ts:41` flake mode: cap=301 from a 601px stale
   // measurement clamps the 430px sidebar override down to 301).
   const measured = preMeasured ?? measureDockviewContainer(api);
-  const ids = applyLayout(api, state, pinnedWidths, measured.width, measured.height);
-  set(ids);
-  return ids;
+  const previousLayout = api.toJSON();
+  try {
+    const ids = applyLayout(api, state, pinnedWidths, measured.width, measured.height);
+    set(ids);
+    return ids;
+  } catch (error) {
+    // Dockview can clear its grid before reporting a deserialization error. Roll back once so
+    // every programmatic layout transition either commits completely or leaves the live grid intact.
+    try {
+      api.fromJSON(previousLayout);
+    } catch {
+      // A failed rollback cannot be repaired by retrying without risking another partial mutation.
+    }
+    throw error;
+  }
+}
+
+function restoreSerializedDockview(api: DockviewApi, next: SerializedDockview): void {
+  const previous = api.toJSON();
+  try {
+    api.fromJSON(next);
+  } catch (error) {
+    try {
+      api.fromJSON(previous);
+    } catch {
+      // A failed rollback cannot be repaired by retrying without risking another partial mutation.
+    }
+    throw error;
+  }
 }
 
 /** True when the column belongs to the right-side workbench surface. */
@@ -633,7 +659,10 @@ function buildVisibilityActions(set: StoreSet, get: StoreGet) {
       let nextLayout: LayoutState;
       let nextHiddenRightPane: HiddenRightPane | null;
       if (hiddenRightPane) {
-        const restored = restoreRightPane(current, hiddenRightPane);
+        const restored = restoreRightPane(current, hiddenRightPane, {
+          totalWidth: safeWidth,
+          pinnedWidths: liveWidths,
+        });
         if (!restored) {
           set({ hiddenRightPane: null, ...visibilityForLayout(current, null) });
           return;
@@ -728,7 +757,10 @@ function buildPresetActions(set: StoreSet, get: StoreGet) {
         safeWidth,
         resetWidths,
       );
-      const ids = applyLayout(api, state, cleanedWidths, safeWidth, safeHeight);
+      const ids = applyLayoutAndSet(api, state, cleanedWidths, set, {
+        width: safeWidth,
+        height: safeHeight,
+      });
       if (isDebug()) {
         const applied =
           [...cleanedWidths].map(([k, v]) => `${k}:${Math.round(v)}`).join(",") || "-";
@@ -837,15 +869,16 @@ function restoreCustomLayout({
       opts?.sessionIds ?? [],
     );
     const savedWidths = resolveCustomLayoutPinnedWidths(activeState.columns, safeWidth);
-    set({
-      ...applyLayout(api, activeState, savedWidths, safeWidth, safeHeight),
-      pinnedWidths: savedWidths,
+    const ids = applyLayoutAndSet(api, activeState, savedWidths, set, {
+      width: safeWidth,
+      height: safeHeight,
     });
+    set({ ...ids, pinnedWidths: savedWidths });
     return { appliedState: activeState, oldFormatRestoreFailed: false };
   }
 
   try {
-    api.fromJSON(layout.layout as unknown as SerializedDockview);
+    restoreSerializedDockview(api, layout.layout as unknown as SerializedDockview);
     replaceStaleSessionPanels(api, opts?.activeSessionId ?? null, opts?.sessionIds ?? []);
     set(applyLayoutFixups(api));
     return { appliedState: state, oldFormatRestoreFailed: false };
@@ -878,7 +911,7 @@ function restoreMaximizeFromStorage(
   const saved = getEnvMaximizeState(envId);
   if (!saved) return false;
   try {
-    api.fromJSON(saved.maximizedDockviewJson as SerializedDockview);
+    restoreSerializedDockview(api, saved.maximizedDockviewJson as SerializedDockview);
     replaceStaleSessionPanels(api, activeSessionId, currentSessionIds);
     // After fromJSON, `api.width/height` reflect the JSON's recorded grid
     // dims, which may not match the live container. Always lay out against
@@ -1320,7 +1353,10 @@ function performBuildDefault(
     hiddenRightPane: null,
   });
 
-  const ids = applyLayout(api, state, pinnedWidths, safeWidth, safeHeight);
+  const ids = applyLayoutAndSet(api, state, pinnedWidths, set, {
+    width: safeWidth,
+    height: safeHeight,
+  });
   const hasSidebar = state.columns.some((c) => c.id === "sidebar");
   set({ ...ids, sidebarVisible: hasSidebar, ...visibilityForLayout(state, null) });
 

@@ -243,3 +243,32 @@ Validation passed:
 The broader browser matrix still includes resize handoffs, the 1280-pixel coarse-pointer case, all four
 sidebar combinations, archived-task restoration, browser-level mixed-center fixtures, and the wider-to-phone
 handoff. Those are retained coverage boundaries and are not claimed as executed by this implementation step.
+
+## Review remediation and current verification (2026-09-14)
+
+The review of PR head `8b98810227f1aa5e3058d32461122eb747b86b00` identified three correctness gaps. They are
+fixed in the current worktree:
+
+- Recovery metadata now validates IDs, active selections, parameter values, finite geometry, tree/flat-group
+  consistency, and layout-wide panel, group, and column uniqueness before a restore can reach Dockview.
+- Programmatic layout applies retain the live serialized Dockview state and perform one bounded rollback when
+  an apply mutates the grid and then fails. The toggle keeps its recovery descriptor and flags, and does not
+  persist a partial result.
+- Restoring a non-pinned Plan, Browser, VS Code, or custom pane reserves its captured width, clamps it to
+  available space, and distributes the remaining width according to the current live proportions.
+- Duplicate-panel filtering retains one-child split wrappers, so nested alternating axes and split sizes survive
+  subtree pruning. Generated group IDs skip IDs already present in the live layout.
+
+Current checks for this remediation:
+
+- Exact work-order unit command: 10 files, 135 tests passed.
+- Additional affected unit suite: 8 files, 79 tests passed.
+- `pnpm run typecheck`, `pnpm run lint`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet` passed.
+- Managed Chromium command: 12 tests passed across right-pane visibility, tablet persistence, and compact
+  desktop scenarios.
+- Managed mobile-Chromium command: 1 phone navigation test passed.
+- E2E Vite builds passed with the existing chunk-size, deprecated-option, and ineffective-dynamic-import
+  warnings.
+- The previous PR snapshot's failed E2E shards 2/14 and 6/14 were not attributed to these findings. The focused
+  local runs above pass; any current CI failure will be handled from its current check output.
+- `git diff --check` passed after the remediation edits.

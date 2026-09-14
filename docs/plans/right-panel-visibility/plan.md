@@ -172,6 +172,28 @@ and phone behavior. The broader matrix still includes resize handoffs, the 1280-
 all four sidebar combinations, archived-task restoration, browser-level mixed-center fixtures, and the
 wider-to-phone handoff; those remain separate coverage beyond this implementation run.
 
+## Review remediation verification (2026-09-14)
+
+The review findings against PR head `8b98810227f1aa5e3058d32461122eb747b86b00` are resolved in the current
+worktree. Recovery metadata is rejected before mutation when IDs, active selections, parameters, geometry,
+tree/flat groups, or layout-wide identities are unsafe. Layout applies retain the live serialized Dockview
+state and roll back once after a mutating failure, while the contextual hidden descriptor and visibility flags
+remain recoverable without partial persistence. Non-pinned restored panes reserve their captured width within
+the current viewport and distribute the remaining live proportions. Duplicate-panel pruning retains split
+wrappers, preserving nested axes and sizes, and generated group IDs avoid explicit live IDs.
+
+The current remediation checks are:
+
+- Exact work-order unit command: 10 files, 135 tests passed.
+- Additional affected unit suite: 8 files, 79 tests passed.
+- `pnpm run typecheck`, `pnpm run lint`, `pnpm run i18n:check`, and `pnpm run i18n:ratchet` passed.
+- Managed Chromium E2E: 12 tests passed.
+- Managed mobile-Chromium E2E: 1 test passed.
+- E2E Vite builds passed with existing repository warnings only.
+- The earlier PR snapshot's failed E2E shards 2/14 and 6/14 were not attributed by this remediation. The current
+  local focused runs pass, and current CI output will be reviewed after the fixup push.
+- `git diff --check` passed.
+
 ## Historical Task 01 verification
 
 The previous standard-sidebar implementation was completed before the 2026-09-14 behavior correction. The new control is shared by desktop and tablet adapters, the tablet right column is conditional, compact desktop can reopen it, and phone navigation keeps its existing full-screen composition.
