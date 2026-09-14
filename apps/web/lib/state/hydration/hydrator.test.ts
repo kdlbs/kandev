@@ -451,6 +451,7 @@ describe("hydrateState — agent profile revisions", () => {
           version: 0,
           items: [],
         },
+        settingsData: { agentsLoaded: true },
       } as unknown as Partial<AppState>);
     });
 
@@ -459,6 +460,44 @@ describe("hydrateState — agent profile revisions", () => {
       items: [{ id: "live-profile" }],
     });
     expect(result.settingsAgents.items).toHaveLength(1);
+    expect(result.settingsData.agentsLoaded).toBe(false);
+  });
+
+  it("applies a fresh snapshot captured at the current generation", () => {
+    const result = produce(makeAppDraft(), (draft: Draft<AppState>) => {
+      draft.agentProfiles = {
+        version: 1,
+        items: [
+          {
+            id: "stale-profile",
+            label: "Stale profile",
+            agent_id: "agent-1",
+            agent_name: "Agent",
+            cli_passthrough: false,
+            inference_capable: true,
+          },
+        ],
+      };
+      draft.settingsAgents.items = [
+        {
+          id: "agent-1",
+          name: "Agent",
+          profiles: [{ id: "stale-profile" }],
+        } as never,
+      ];
+      hydrateState(draft, {
+        settingsAgents: { items: [] },
+        agentProfiles: {
+          version: 1,
+          items: [],
+        },
+        settingsData: { agentsLoaded: true },
+      } as unknown as Partial<AppState>);
+    });
+
+    expect(result.agentProfiles).toEqual({ version: 1, items: [] });
+    expect(result.settingsAgents.items).toEqual([]);
+    expect(result.settingsData.agentsLoaded).toBe(true);
   });
 });
 

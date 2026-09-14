@@ -166,9 +166,8 @@ function hydrateSettings(draft: Draft<AppState>, state: HydrationState): void {
     deepMerge(draft.settingsAgents, state.settingsAgents);
   }
   if (state.agentProfiles) {
-    // Route bootstrap snapshots start at version zero. Preserve a newer
-    // profile mutation delivered over WebSocket while that snapshot was in
-    // flight; otherwise the stale response can erase the live option.
+    // Preserve a newer profile mutation delivered over WebSocket while this
+    // snapshot was in flight; otherwise the stale response can erase it.
     if (!preserveLiveAgentProfiles) {
       deepMerge(draft.agentProfiles, state.agentProfiles);
     }
@@ -176,7 +175,14 @@ function hydrateSettings(draft: Draft<AppState>, state: HydrationState): void {
   mergeWithLoading(draft.editors, state.editors);
   mergeWithLoading(draft.prompts, state.prompts);
   mergeWithLoading(draft.notificationProviders, state.notificationProviders);
-  if (state.settingsData) deepMerge(draft.settingsData, state.settingsData);
+  if (state.settingsData) {
+    // A rejected agent snapshot is incomplete. Leave the loading marker false
+    // so the settings data hook can retry the complete list.
+    const settingsData = preserveLiveAgentProfiles
+      ? { ...state.settingsData, agentsLoaded: false }
+      : state.settingsData;
+    deepMerge(draft.settingsData, settingsData);
+  }
   if (state.sleepInhibition) deepMerge(draft.sleepInhibition, state.sleepInhibition);
   if (state.agentProfileRecentUse) {
     draft.agentProfileRecentUse = mergeAgentProfileRecentUseState(
