@@ -71,6 +71,10 @@ move without resuming its session or changing unrelated task state.
 - **AC-TASKS-PENDING-MOVE-CANCELLATION-001.5:** Cancellation shall remove only the
   named pending-move row; the target task's lane, session, tags, queued prompt,
   and other task or workflow state shall remain unchanged.
+- **AC-TASKS-PENDING-MOVE-CANCELLATION-001.6:** A snapshot captured before an exact
+  cancellation shall preserve the row generation ID but shall not restore that
+  cancelled generation. Restoration of any unfenced generation shall preserve
+  its captured ID.
 
 ### REQ-TASKS-PENDING-MOVE-CANCELLATION-002: Least-privilege authorization
 

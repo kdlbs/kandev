@@ -492,6 +492,12 @@ func (r *sqliteRepository) initSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_pending_move_cancellation_audit_correlation
 		ON pending_move_cancellation_audit(correlation_id);
 
+	-- A successful cancellation fences exactly one durable row generation from
+	-- later restoration by a snapshot captured before the cancellation commit.
+	CREATE TABLE IF NOT EXISTS pending_move_cancellation_fences (
+		pending_move_id TEXT PRIMARY KEY
+	);
+
 	-- Per-session cross-process mutex. Every queue mutation takes this row
 	-- inside its transaction, so a tail scan and a tail change (insert,
 	-- drain, reorder, transfer) cannot interleave between backend instances
@@ -2295,17 +2301,17 @@ func (r *sqliteRepository) nextStatusGenerationTx(
 
 func (r *sqliteRepository) getPendingMoveTx(ctx context.Context, tx *sqlx.Tx, sessionID string) (*PendingMove, error) {
 	var (
-		moveID, sessionIncarnationID, taskID, workflowID, workflowStepID string
-		position                                                         int
-		queuedAt                                                         time.Time
-		actor, senderSessionID, optionsJSON                              string
+		rowID, moveID, sessionIncarnationID, taskID, workflowID, workflowStepID string
+		position                                                                int
+		queuedAt                                                                time.Time
+		actor, senderSessionID, optionsJSON                                     string
 	)
 	err := tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT move_id, session_incarnation_id, task_id, workflow_id, workflow_step_id,
+		SELECT id, move_id, session_incarnation_id, task_id, workflow_id, workflow_step_id,
 		       step_position, queued_at, actor, sender_session_id, entry_options_json
 		FROM pending_moves WHERE session_id = ?
 	`), sessionID).Scan(
-		&moveID, &sessionIncarnationID, &taskID, &workflowID, &workflowStepID,
+		&rowID, &moveID, &sessionIncarnationID, &taskID, &workflowID, &workflowStepID,
 		&position, &queuedAt, &actor, &senderSessionID, &optionsJSON,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -2319,7 +2325,7 @@ func (r *sqliteRepository) getPendingMoveTx(ctx context.Context, tx *sqlx.Tx, se
 		return nil, fmt.Errorf("decode pending move entry options: %w", err)
 	}
 	return &PendingMove{
-		MoveID: moveID, SessionIncarnationID: sessionIncarnationID, TaskID: taskID,
+		ID: rowID, MoveID: moveID, SessionIncarnationID: sessionIncarnationID, TaskID: taskID,
 		WorkflowID: workflowID, WorkflowStepID: workflowStepID, Position: position,
 		QueuedAt: queuedAt, Actor: actor, SenderSessionID: senderSessionID,
 		EntryOptions: entryOptions,
@@ -6021,6 +6027,13 @@ func (r *sqliteRepository) restorePendingMoveTx(
 	if pendingMove == nil {
 		return nil
 	}
+	fenced, err := r.pendingMoveCancellationFencedTx(ctx, tx, pendingMove.ID)
+	if err != nil {
+		return err
+	}
+	if fenced {
+		return nil
+	}
 	queuedAt := pendingMove.QueuedAt
 	if queuedAt.IsZero() {
 		queuedAt = time.Now().UTC()
@@ -6040,6 +6053,25 @@ func (r *sqliteRepository) restorePendingMoveTx(
 		return fmt.Errorf("restore pending move: %w", err)
 	}
 	return nil
+}
+
+func (r *sqliteRepository) pendingMoveCancellationFencedTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	pendingMoveID string,
+) (bool, error) {
+	if pendingMoveID == "" {
+		return false, nil
+	}
+	var fenced bool
+	if err := tx.GetContext(ctx, &fenced, r.db.Rebind(`
+		SELECT EXISTS (
+			SELECT 1 FROM pending_move_cancellation_fences WHERE pending_move_id = ?
+		)
+	`), pendingMoveID); err != nil {
+		return false, fmt.Errorf("read pending move cancellation fence: %w", err)
+	}
+	return fenced, nil
 }
 
 func pendingMoveInsertID(move *PendingMove) string {

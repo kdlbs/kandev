@@ -1123,6 +1123,40 @@ func TestSQLiteRepository_SetPendingMoveRotatesRowIdentity(t *testing.T) {
 	}
 }
 
+// @covers AC-TASKS-PENDING-MOVE-CANCELLATION-001.7
+func TestSQLiteRepository_SnapshotRestorePreservesPendingMoveIdentity(t *testing.T) {
+	repo := newTestSQLiteRepo(t)
+	ctx := context.Background()
+	identity := QueueSessionIdentity{
+		TaskID:               "task-snapshot",
+		SessionID:            "session-snapshot",
+		SessionIncarnationID: "incarnation-snapshot",
+	}
+	seedQueueSessionIdentity(t, repo, identity)
+	move := &PendingMove{MoveID: "move-snapshot", TaskID: "task-snapshot", WorkflowStepID: "step-snapshot"}
+	if err := repo.SetPendingMove(ctx, "session-snapshot", move); err != nil {
+		t.Fatalf("set pending move: %v", err)
+	}
+
+	snapshot, err := repo.Snapshot(ctx, identity)
+	if err != nil {
+		t.Fatalf("snapshot session: %v", err)
+	}
+	if snapshot.PendingMove == nil || snapshot.PendingMove.ID != move.ID {
+		t.Fatalf("snapshot pending move = %#v, want row ID %q", snapshot.PendingMove, move.ID)
+	}
+	if err := repo.ReplaceSession(ctx, "session-snapshot", snapshot.Entries, snapshot.PendingMove); err != nil {
+		t.Fatalf("restore session: %v", err)
+	}
+	restored, err := repo.GetPendingMove(ctx, "session-snapshot")
+	if err != nil {
+		t.Fatalf("read restored pending move: %v", err)
+	}
+	if restored == nil || restored.ID != move.ID {
+		t.Fatalf("restored pending move = %#v, want row ID %q", restored, move.ID)
+	}
+}
+
 func TestSQLiteRepository_PendingMoveEntryOptions(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()

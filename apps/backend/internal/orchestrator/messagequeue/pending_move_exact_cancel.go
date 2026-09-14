@@ -71,6 +71,9 @@ func (r *sqliteRepository) ExactCancelPendingMove(
 		correlationID, PendingMoveCancellationOutcomeCancelled, true); err != nil {
 		return nil, ErrPendingMoveCancelFailed
 	}
+	if err := r.fenceCancelledPendingMove(ctx, tx, target.rowID); err != nil {
+		return nil, ErrPendingMoveCancelFailed
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, ErrPendingMoveCancelFailed
 	}
@@ -88,6 +91,17 @@ func (r *sqliteRepository) ExactCancelPendingMove(
 		PriorTargetWorkflowStepID:  target.targetStepID,
 		QueuedAt:                   target.queuedAt,
 	}, nil
+}
+
+func (r *sqliteRepository) fenceCancelledPendingMove(ctx context.Context, tx *sqlx.Tx, pendingMoveID string) error {
+	_, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO pending_move_cancellation_fences (pending_move_id) VALUES (?)
+		ON CONFLICT(pending_move_id) DO NOTHING
+	`), pendingMoveID)
+	if err != nil {
+		return fmt.Errorf("fence cancelled pending move: %w", err)
+	}
+	return nil
 }
 
 // lockExistingExactCancelSession takes the same durable row lock used by all

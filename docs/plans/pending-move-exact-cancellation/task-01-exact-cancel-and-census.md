@@ -16,6 +16,7 @@ acceptance_criteria:
   - AC-TASKS-PENDING-MOVE-CANCELLATION-001.3
   - AC-TASKS-PENDING-MOVE-CANCELLATION-001.4
   - AC-TASKS-PENDING-MOVE-CANCELLATION-001.5
+  - AC-TASKS-PENDING-MOVE-CANCELLATION-001.6
   - AC-TASKS-PENDING-MOVE-CANCELLATION-002.1
   - AC-TASKS-PENDING-MOVE-CANCELLATION-002.2
   - AC-TASKS-PENDING-MOVE-CANCELLATION-002.3
@@ -55,9 +56,9 @@ audit table and its idempotent migration.
 
 ## Acceptance criteria covered
 
-- AC-TASKS-PENDING-MOVE-CANCELLATION-001.1 through 001.5: seven canonical
-  predicates, race-safe single-row delete, rollback-safe, retry receives the
-  stable miss.
+- AC-TASKS-PENDING-MOVE-CANCELLATION-001.1 through 001.6: seven canonical
+  predicates, race-safe single-row delete, cancellation-fenced snapshot
+  restore, retry receives the stable miss.
 - AC-TASKS-PENDING-MOVE-CANCELLATION-002.1 through 002.6: designated
   Coordinator grants, live execution/rotation checks, non-leaking denial.
 - AC-TASKS-PENDING-MOVE-CANCELLATION-003.1 through 003.4: atomic audited

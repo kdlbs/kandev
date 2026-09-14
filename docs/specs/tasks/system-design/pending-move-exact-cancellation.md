@@ -62,6 +62,12 @@ always rotates it. Snapshot/restore and session transfer preserve it because
 they preserve the same deferred request. Existing `move_id` remains the logical
 move identity and is not sufficient on its own to identify a generation.
 
+`pending_move_cancellation_fences` retains only the IDs of generations removed
+by an exact cancellation. The cancellation transaction writes that fence with
+the audit and delete. A later queue snapshot restore skips a fenced generation;
+it preserves every unfenced captured ID. The fence changes recovery behavior,
+not the public retry result or authorization decision.
+
 The shared grant relation enforces designation integrity in the database.
 `workspace_id` is a non-empty primary key and cascading foreign key to
 `workspaces(id)`; `coordinator_task_id` is non-empty; `tasks(workspace_id, id)`
@@ -142,7 +148,8 @@ transaction. Within it, the repository:
 2. reads the pending row and current/target workflow state;
 3. compares all seven exact predicates;
 4. writes the structured outcome audit;
-5. on an exact authorized match, deletes with the row ID and complete tuple in
+5. on an exact authorized match, writes the row-generation cancellation fence,
+   then deletes with the row ID and complete tuple in
    the delete predicate and requires exactly one affected row;
 6. commits, then returns the immutable success readback.
 
@@ -173,9 +180,10 @@ the whole tool payload before logging for both `cancel_pending_move_kandev` and
 
 ## Persistence, migration, and rollback
 
-Initialization additively creates the audit table, indexes, coordinator-grant
-relation, and pending-row identity where needed. DDL is replay-safe for SQLite
-and PostgreSQL. Migration creates the unique task workspace/ID parent key before
+Initialization additively creates the audit table, cancellation-fence table,
+indexes, coordinator-grant relation, and pending-row identity where needed. DDL
+is replay-safe for SQLite and PostgreSQL. Migration creates the unique task
+workspace/ID parent key before
 the composite Coordinator-grant foreign key. Existing pending rows receive
 identities during the compatible pending-move migration owned with the
 TTL/reaper work. The audit table's `action` column is added the same additive,
@@ -183,8 +191,8 @@ duplicate-column-safe way; existing rows default to `cancel`, preserving their
 original meaning.
 
 Rollback disables/removes the MCP exposure and transaction call while retaining
-the additive row ID, grant relation, and audit evidence. No destructive schema
-rollback is required. The TTL/reaper can continue using the row identity for
+the additive row ID, cancellation fences, grant relation, and audit evidence.
+No destructive schema rollback is required. The TTL/reaper can continue using the row identity for
 its own compare-and-delete behavior. Removing only the read-only census leaves
 cancellation, its audit history, and the shared `action` column intact.
 
@@ -205,7 +213,8 @@ expiry remains responsible for its existing prompt-cleanup policy.
 ## Verification
 
 - Repository tests cover exact success, every predicate mismatch, broken
-  relations, replacement races, two callers, retry, and transaction rollback.
+  relations, replacement races, two callers, retry, transaction rollback, and
+  snapshot restore after cancellation without resurrecting the fenced row.
 - Repository tests also cover the read-only census: authorized found, an
   authorized zero-row proof, the same non-leaking denial cases as cancellation,
   out-of-tree targets, and that a row read this way remains cancellable

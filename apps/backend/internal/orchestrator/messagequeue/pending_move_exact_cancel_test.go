@@ -218,6 +218,45 @@ func TestSQLiteRepository_ExactCancelPendingMove(t *testing.T) {
 	}
 }
 
+// @covers AC-TASKS-PENDING-MOVE-CANCELLATION-001.7
+func TestSQLiteRepository_ExactCancelPendingMoveFencesSnapshotRestore(t *testing.T) {
+	fixture := newExactCancelFixture(t)
+	ctx := context.Background()
+	repo := fixture.repo.(*sqliteRepository)
+
+	var incarnationID string
+	if err := fixture.sql.GetContext(ctx, &incarnationID, `
+		SELECT queue_incarnation_id FROM task_sessions WHERE id = ?
+	`, exactTargetSessionID); err != nil {
+		t.Fatalf("read target session incarnation: %v", err)
+	}
+	identity := QueueSessionIdentity{
+		TaskID: exactTargetTaskID, SessionID: exactTargetSessionID, SessionIncarnationID: incarnationID,
+	}
+	snapshot, err := repo.Snapshot(ctx, identity)
+	if err != nil {
+		t.Fatalf("snapshot pending move before cancellation: %v", err)
+	}
+	if snapshot.PendingMove == nil {
+		t.Fatal("snapshot omitted pending move")
+	}
+
+	result, err := fixture.repo.ExactCancelPendingMove(ctx, fixture.actor, fixture.match, "correlation-snapshot-fence")
+	if err != nil || result == nil || !result.Cancelled {
+		t.Fatalf("cancel pending move result=%#v err=%v", result, err)
+	}
+	if err := repo.ReplaceSessionForIdentity(ctx, identity, snapshot.Entries, snapshot.PendingMove); err != nil {
+		t.Fatalf("restore snapshot after cancellation: %v", err)
+	}
+	move, err := fixture.repo.GetPendingMove(ctx, exactTargetSessionID)
+	if err != nil {
+		t.Fatalf("read pending move after restore: %v", err)
+	}
+	if move != nil {
+		t.Fatalf("restore resurrected cancelled pending move: %#v", move)
+	}
+}
+
 func TestSQLiteRepository_ExactPendingMoveAuthorizationUsesCurrentSessionSchema(t *testing.T) {
 	t.Run("exact cancellation", func(t *testing.T) {
 		fixture := newExactCancelFixture(t)

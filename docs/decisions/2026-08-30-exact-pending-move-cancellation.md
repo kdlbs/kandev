@@ -24,6 +24,12 @@ automation Coordinator surface exposes one administrative cancellation tool
 that requires the row ID and six relationship/state predicates: keyed session,
 task, move, workflow, current step, and target step.
 
+An exact cancellation also records a durable fence for that row ID in its
+delete transaction. Queue recovery skips only a fenced snapshot generation, so
+a failed operation that restores a pre-cancellation snapshot cannot re-arm a
+confirmed cancellation. The fence does not alter the public retry response,
+which remains the stable miss after the row is gone.
+
 Authorization, relation validation, exact comparison, audit, and deletion occur
 inside one repository transaction serialized with other pending-move operations
 for the keyed session. The delete repeats the complete tuple and must affect one
@@ -50,6 +56,7 @@ evidence, and audit failure returns the sanitized internal failure.
 
 - A reviewed row can be disarmed without messaging or resuming its session.
 - Concurrent replacement cannot cause deletion of a newly queued move.
+- A snapshot captured before cancellation cannot resurrect the cancelled move.
 - A client that loses a success response can retry safely; the retry receives
   the stable miss and makes no further mutation.
 - Coordinator grant management remains a dependency on the shared trust
