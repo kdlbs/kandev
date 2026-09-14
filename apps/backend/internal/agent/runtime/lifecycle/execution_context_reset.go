@@ -96,11 +96,26 @@ func (e *AgentExecution) drainContextResetEvents(newSessionID string) []agentctl
 	return accepted
 }
 
-func (e *AgentExecution) finishContextReset() {
+// finishContextReset closes the reset boundary and returns setup events that
+// arrived after the last explicit drain. The transition and snapshot are one
+// critical section: an event handler that observed the in-flight boundary is
+// either included in the returned batch or, after the transition, proceeds
+// through ordinary lifecycle handling. No buffered event is discarded at the
+// boundary.
+func (e *AgentExecution) finishContextReset(newSessionID string) []agentctl.AgentEvent {
 	e.contextResetMu.Lock()
+	buffered := e.contextResetEvents
 	e.contextResetEvents = nil
 	e.contextResetInFlight = false
 	e.contextResetMu.Unlock()
+
+	accepted := make([]agentctl.AgentEvent, 0, len(buffered))
+	for _, event := range buffered {
+		if event.SessionID == "" || event.SessionID == newSessionID {
+			accepted = append(accepted, event)
+		}
+	}
+	return accepted
 }
 
 func (e *AgentExecution) failContextReset(fence bool, reason string) {

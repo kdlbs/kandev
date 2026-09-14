@@ -992,7 +992,9 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 	// which would fire on_turn_complete against the current step — the original
 	// boot-vs-turn ambiguity bug).
 	m.eventPublisher.PublishAgentEvent(reconcileCtx, events.AgentBootReady, execution)
-	execution.finishContextReset()
+	for _, event := range execution.finishContextReset(newSessionID) {
+		m.handleAgentEventAfterContextReset(execution, event)
+	}
 	return nil
 }
 
