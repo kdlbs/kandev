@@ -389,7 +389,7 @@ func (r *Repository) ListCoordinatorAuditEvents(ctx context.Context, workspaceID
 	}
 	query += ` ORDER BY occurred_at DESC, id DESC`
 	if limit > 0 {
-		query += ` LIMIT ?`
+		query += sqlLimitClause
 		args = append(args, limit)
 	}
 	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(query), args...)
