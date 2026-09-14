@@ -49,7 +49,10 @@ function legacyRecoveryMessageMatchesError(comment: Message, currentError: LastA
   const contentMatches =
     content === message ||
     content === `Agent encountered an error: ${message}` ||
-    (content.startsWith("Agent encountered an error:") && content.endsWith(message));
+    content === `Agent startup failed: ${message}` ||
+    ((content.startsWith("Agent encountered an error:") ||
+      content.startsWith("Agent startup failed:")) &&
+      content.endsWith(message));
   if (!contentMatches) return false;
 
   // Metadata is written before the transcript row. Exclude an older legacy

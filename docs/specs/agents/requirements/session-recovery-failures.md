@@ -54,7 +54,7 @@ results, including the shared recovery owner and phone touch-target checks.
 ## Session error history amendment
 
 The September 14 amendment changes criteria 006.4 and 006.7 and adds 006.8 and 006.9.
-Implementation is pending in the [error scope package](../../../plans/error-scope-and-history/plan.md).
+Implementation is complete in the [error scope package](../../../plans/error-scope-and-history/plan.md).
 This supersedes the reveal-at-top behavior from the completed startup recovery scrolling package.
 The task system owns durable history and shared error scope through
 [task error ownership](../../tasks/requirements/task-launch-failure-recovery.md).

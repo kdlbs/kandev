@@ -75,7 +75,7 @@ regressions recorded in its verification results.
 
 **Intent:** Keep session failures in their conversation and shared failures visible across the affected task.
 
-This September 14 amendment is accepted product intent with implementation pending.
+This September 14 amendment is implemented in the [error scope package](../../../plans/error-scope-and-history/plan.md).
 It changes presentation and retention, not recovery permissions or provider resume behavior.
 
 #### Acceptance criteria

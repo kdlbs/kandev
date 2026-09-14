@@ -207,7 +207,7 @@ details remain in backend diagnostics and do not reach the durable projection.
 
 ## Error scope (September 14 amendment)
 
-Implementation is pending in the [error scope package](../../../plans/error-scope-and-history/plan.md).
+Implementation is complete in the [error scope package](../../../plans/error-scope-and-history/plan.md).
 This section supersedes the earlier Chat-only task error surface.
 Tasks own durable error records and task-shell projections. Agents own session recovery eligibility and entry presentation.
 Workspace services retain authority over resource validity. This change does not add a workspace-wide alert bus.

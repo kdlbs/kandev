@@ -3098,6 +3098,9 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	// session instead of dumping the raw 400.
 	classified := classifyKanbanFailure(data)
 	statusMsg := fmt.Sprintf("Agent encountered an error: %s", displayMsg)
+	if data.Phase == models.LaunchErrorPhaseBootstrap {
+		statusMsg = fmt.Sprintf("Agent startup failed: %s", displayMsg)
+	}
 	if resumeCorrupted {
 		statusMsg = "This agent session can't be resumed — its saved reasoning state is corrupted. Start a fresh session to continue."
 	} else if routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) == routingerr.DecisionShortRetry {

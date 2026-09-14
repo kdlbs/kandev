@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -27,6 +29,18 @@ type taskLaunchRecoveryServiceFake struct {
 	environment *models.TaskEnvironment
 	resetErr    error
 	resetCalls  int
+}
+
+type failingTaskSessionErrorBus struct {
+	bus.EventBus
+	err error
+}
+
+func (b failingTaskSessionErrorBus) Publish(ctx context.Context, subject string, event *bus.Event) error {
+	if subject == events.TaskSessionErrorChanged {
+		return b.err
+	}
+	return b.EventBus.Publish(ctx, subject, event)
 }
 
 func (f *taskLaunchRecoveryServiceFake) UpdateRepositoryBaseBranch(_ context.Context, req taskservice.UpdateRepositoryBaseBranchRequest) (*models.TaskRepository, error) {
@@ -281,6 +295,57 @@ func TestHandleLaunchFailedKeepsProfileSpecificFailureOnSession(t *testing.T) {
 	}
 	if messages.sessionMessages[0].metadata["scope"] != models.ErrorScopeSession {
 		t.Fatalf("recovery message scope = %#v, want session", messages.sessionMessages[0].metadata["scope"])
+	}
+}
+
+func TestClearTaskLaunchRecoverySourceSucceedsWhenRetirementPublishFails(t *testing.T) {
+	ctx := context.Background()
+	const (
+		taskID    = "task-session-error-publish"
+		sessionID = "session-error-publish"
+	)
+	repo := setupTestRepo(t)
+	seedSession(t, repo, taskID, sessionID, "step1")
+	lastError := models.LastAgentError{
+		Message:    "The agent could not start.",
+		OccurredAt: time.Date(2026, 9, 14, 11, 0, 0, 0, time.UTC),
+		Scope:      models.ErrorScopeSession,
+		StampValue: "session-error-publish-stamp",
+	}
+	if err := repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyLastAgentError, lastError); err != nil {
+		t.Fatalf("SetSessionMetadataKey: %v", err)
+	}
+	task, err := repo.GetTask(ctx, taskID)
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	session, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	baseBus := bus.NewMemoryEventBus(testLogger())
+	t.Cleanup(func() { baseBus.Close() })
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	svc.taskLaunchRecoveryRepo = repo
+	svc.eventBus = failingTaskSessionErrorBus{EventBus: baseBus, err: errors.New("event bus unavailable")}
+
+	err = svc.clearTaskLaunchRecoverySource(ctx, &taskLaunchRecoverySource{
+		task:         task,
+		session:      session,
+		sessionError: lastError,
+		sessionOwned: true,
+		errorStamp:   lastError.Stamp(),
+	})
+	if err != nil {
+		t.Fatalf("clearTaskLaunchRecoverySource: %v", err)
+	}
+	updated, err := repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		t.Fatalf("reload session: %v", err)
+	}
+	retired, found := models.LoadLastAgentError(updated.Metadata)
+	if !found || !retired.IsDismissed() {
+		t.Fatalf("retired session error = %#v, want dismissed metadata", retired)
 	}
 }
 

@@ -644,7 +644,10 @@ func (s *Service) clearTaskLaunchRecoverySource(ctx context.Context, source *tas
 		}
 		if s.eventBus != nil {
 			if err := s.publishTaskSessionErrorEvent(ctx, source.task.ID, source.session.ID, false, &retired); err != nil {
-				return err
+				s.logger.Warn("failed to publish retired task session error",
+					zap.String("task_id", source.task.ID),
+					zap.String("session_id", source.session.ID),
+					zap.Error(err))
 			}
 		}
 		return nil

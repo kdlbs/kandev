@@ -296,7 +296,7 @@ test.describe("mobile task launch failure recovery", () => {
     });
     await apiClient.seedSessionMessage(task.session_id, {
       type: "status",
-      content: "Agent encountered an error: The agent could not start.",
+      content: "Agent startup failed: The agent could not start.",
       createdAt: failureCreatedAt,
       metadata: {
         recovery_actions: true,
@@ -331,7 +331,7 @@ test.describe("mobile task launch failure recovery", () => {
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
     await session.waitForLoad();
-    const failureText = "Agent encountered an error: The agent could not start.";
+    const failureText = "Agent startup failed: The agent could not start.";
     const failureRows = testPage.locator("[id^='msg-']").filter({ hasText: failureText });
     await expect(failureRows).toHaveCount(1, { timeout: 30_000 });
     const failureRow = failureRows.first();
