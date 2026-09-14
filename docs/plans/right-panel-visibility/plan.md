@@ -211,6 +211,29 @@ The PR documentation coverage job exited without evaluator output. Replaying the
 current PR event and against its trusted validator revision returned `covered`, so the status requires a fresh
 workflow result after the fixup push. Aggregate checks will be re-evaluated from the new head.
 
+## Follow-up PR fixup verification (2026-09-14)
+
+After the reduced-test-double compatibility fix was pushed as `8e866cf518d07f8255ecbc927f90d33eb7be8edb`,
+`scripts/pr-await 3661 --deadline-min 60` waited 18 minutes and reached the terminal exact-head snapshot:
+47 passed, 6 failed, and 0 pending. The PR was `MERGEABLE / BLOCKED`, with no unresolved review threads.
+The base branch advanced during the run, so the result is not a current-base merge-readiness claim.
+
+The failed leaf E2E jobs were outside the contextual right-pane change:
+
+- Shard 2 failed both existing narrow-tab-strip assertions, one for equal row widths and one for zero overflow.
+- Shard 6 failed the existing fork pull-request comparison assertion because the unavailable-target notice remained.
+- Shard 14 failed the existing Plan table pixel assertion, receiving `59.15625` for an expected resize delta of `60`.
+  Its LSP capacity-release and mobile file-viewer failures were transient attempts of unrelated tests.
+- The E2E aggregate and report-merge failures followed the failed leaf shards.
+- The trusted PR documentation status job again exited without evaluator output. Local replay of the current and
+  trusted evaluators returned `covered`.
+
+The three relevant no-retry reproductions were run locally after the PR report: the Plan table test reproduced the
+existing `59.15625` pixel delta failure, while the LSP capacity-release test passed one test in 48.8 seconds and the
+mobile file-viewer test passed one test in 13.1 seconds. No additional source fix was justified by these unrelated
+failures. The contextual right-pane unit, browser, typecheck, lint, localization, documentation, specification,
+and diff checks remain passed as recorded above.
+
 ## Historical Task 01 verification
 
 The previous standard-sidebar implementation was completed before the 2026-09-14 behavior correction. The new control is shared by desktop and tablet adapters, the tablet right column is conditional, compact desktop can reopen it, and phone navigation keeps its existing full-screen composition.
