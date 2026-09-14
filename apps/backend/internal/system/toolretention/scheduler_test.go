@@ -2,6 +2,7 @@ package toolretention
 
 import (
 	"context"
+	"errors"
 	"github.com/jmoiron/sqlx"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
@@ -93,4 +94,22 @@ func TestWorkBudgetStartsWhenWorkArrivesAfterIdle(t *testing.T) {
 	now = now.Add(30 * time.Second)
 	require.Equal(t, time.Minute, s.nextDelay(ctx, nil, &burst))
 	require.True(t, burst.IsZero())
+}
+
+func TestMaintenanceAdmissionDoesNotCountAsSchedulerFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		previous int
+		err      error
+		want     int
+	}{
+		{name: "initial deferral", previous: 0, err: errMaintenanceBusy, want: 0},
+		{name: "preserves earlier failures", previous: 4, err: errMaintenanceBusy, want: 4},
+		{name: "ordinary failure", previous: 4, err: errors.New("scan failed"), want: 5},
+		{name: "success clears failures", previous: 4, err: nil, want: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.want, nextFailureCount(tc.previous, tc.err))
+		})
+	}
 }

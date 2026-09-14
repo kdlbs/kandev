@@ -6,6 +6,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 	"testing"
+	"time"
 )
 
 func TestUpdateMessagePreservesPayloadRemovalAfterStaleRead(t *testing.T) {
@@ -16,16 +17,20 @@ func TestUpdateMessagePreservesPayloadRemovalAfterStaleRead(t *testing.T) {
 	require.NoError(t, repo.CreateMessage(ctx, message))
 	stale, err := repo.GetMessage(ctx, message.ID)
 	require.NoError(t, err)
+	originalUpdatedAt := stale.UpdatedAt
 	_, err = repo.db.ExecContext(ctx, `UPDATE task_session_messages SET metadata = ? WHERE id = ?`, `{"tool_call_id":"tool-1","future":9007199254740993,"normalized":{"kind":"shell_exec","shell_exec":{"command":"ls","output":{"exit_code":1}}},"payload_retention":{"version":1,"removed_at":"2026-09-14T00:00:00Z"}}`, message.ID)
 	require.NoError(t, err)
 	stale.Metadata["result"] = "secret"
 	stale.Metadata["status"] = "complete"
 	stale.Type = models.MessageTypeToolCall
+	stale.UpdatedAt = originalUpdatedAt.Add(24 * time.Hour)
 	require.NoError(t, repo.UpdateMessage(ctx, stale))
 	current, err := repo.GetMessage(ctx, message.ID)
 	require.NoError(t, err)
 	require.True(t, models.ToolPayloadRemoved(current.Metadata))
 	require.Equal(t, models.MessageTypeToolExecute, current.Type)
+	require.Equal(t, originalUpdatedAt, current.UpdatedAt)
+	require.Equal(t, originalUpdatedAt, stale.UpdatedAt)
 	require.NotContains(t, current.Metadata, "result")
 	require.Equal(t, "complete", current.Metadata["status"])
 	require.True(t, models.ToolPayloadRemoved(stale.Metadata))

@@ -2,6 +2,7 @@ package toolretention
 
 import (
 	"context"
+	"errors"
 	"github.com/jmoiron/sqlx"
 	"time"
 )
@@ -61,17 +62,23 @@ func (s *Service) loop(ctx context.Context) {
 			first = false
 		}
 		err := s.tick(ctx)
-		if err != nil {
-			failures++
-		} else {
-			failures = 0
-		}
+		failures = nextFailureCount(failures, err)
 		if failures >= 5 {
 			s.failActive(ctx)
 			failures = 0
 		}
 		timer.Reset(s.nextDelay(ctx, err, &burst))
 	}
+}
+
+func nextFailureCount(previous int, err error) int {
+	if err == nil {
+		return 0
+	}
+	if errors.Is(err, errMaintenanceBusy) {
+		return previous
+	}
+	return previous + 1
 }
 
 func (s *Service) nextDelay(ctx context.Context, workErr error, burst *time.Time) time.Duration {

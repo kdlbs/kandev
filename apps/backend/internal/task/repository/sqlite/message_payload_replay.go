@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -31,7 +32,8 @@ func (r *Repository) updateMessageWithPayloadGuard(ctx context.Context, message 
 	}
 	var raw string
 	var storedType models.MessageType
-	if err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT metadata,type FROM task_session_messages WHERE id = ?`), message.ID).Scan(&raw, &storedType); err != nil {
+	var storedUpdatedAt time.Time
+	if err := tx.QueryRowContext(ctx, tx.Rebind(`SELECT metadata,type,updated_at FROM task_session_messages WHERE id = ?`), message.ID).Scan(&raw, &storedType, &storedUpdatedAt); err != nil {
 		return err
 	}
 	metadataJSON, sanitized, err := mergeRetainedMessageMetadata([]byte(raw), metadataJSON)
@@ -42,7 +44,11 @@ func (r *Repository) updateMessageWithPayloadGuard(ctx context.Context, message 
 	if sanitized != nil {
 		nextType = storedType
 	}
-	_, err = tx.ExecContext(ctx, tx.Rebind(`UPDATE task_session_messages SET content = ?, requests_input = ?, type = ?, metadata = ?, updated_at = ? WHERE id = ?`), message.Content, requestsInput, string(nextType), string(metadataJSON), message.UpdatedAt, message.ID)
+	updatedAt := message.UpdatedAt
+	if sanitized != nil {
+		updatedAt = storedUpdatedAt
+	}
+	_, err = tx.ExecContext(ctx, tx.Rebind(`UPDATE task_session_messages SET content = ?, requests_input = ?, type = ?, metadata = ?, updated_at = ? WHERE id = ?`), message.Content, requestsInput, string(nextType), string(metadataJSON), updatedAt, message.ID)
 	if err != nil {
 		return err
 	}
@@ -52,6 +58,7 @@ func (r *Repository) updateMessageWithPayloadGuard(ctx context.Context, message 
 	if sanitized != nil {
 		message.Metadata = sanitized
 		message.Type = nextType
+		message.UpdatedAt = storedUpdatedAt
 	}
 	return nil
 }

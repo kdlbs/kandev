@@ -119,7 +119,7 @@ it("polls an accepted command and clears pending even when bounded history repla
     });
     expect(result.current.active).toBe(true);
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(2000);
+      await vi.advanceTimersByTimeAsync(5000);
     });
     expect(result.current.active).toBe(false);
     expect(result.current.acceptedId).toBeNull();

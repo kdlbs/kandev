@@ -66,20 +66,26 @@ async function performMutation<T>(
     if (current()) updates.pending(false);
   }
 }
-function useStatusPolling(reload: () => Promise<void>, active: boolean) {
+function statusPollingInterval(active: boolean, preparing: boolean) {
+  if (preparing) return 2000;
+  if (active) return 5000;
+  return 30000;
+}
+function useStatusPolling(reload: () => Promise<void>, active: boolean, preparing: boolean) {
+  const interval = statusPollingInterval(active, preparing);
   useEffect(() => {
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     const poll = async () => {
       await reload();
-      if (!stopped) timer = setTimeout(poll, active ? 2000 : 30000);
+      if (!stopped) timer = setTimeout(poll, interval);
     };
-    timer = setTimeout(poll, active ? 2000 : 30000);
+    timer = setTimeout(poll, interval);
     return () => {
       stopped = true;
       clearTimeout(timer);
     };
-  }, [active, reload]);
+  }, [interval, reload]);
 }
 export function useToolPayloadRetention() {
   const [status, setStatus] = useState<ToolPayloadRetentionStatus | null>(null);
@@ -124,7 +130,7 @@ export function useToolPayloadRetention() {
   const preparing =
     status?.preparation.state === "pending" || status?.preparation.state === "running";
   const active = Boolean(acceptedId || preparing || status?.operation?.state === "running");
-  useStatusPolling(reload, active);
+  useStatusPolling(reload, active, preparing);
   const perform = useCallback(
     <T>(request: () => Promise<T>, accept: (value: T) => void) =>
       performMutation(owner.current, request, accept, { pending: setPending, error: setError }),

@@ -46,8 +46,7 @@ func ReduceToolPayload(messageType string, metadata []byte, removedAt time.Time)
 	}
 	var kind string
 	_ = json.Unmarshal(norm["kind"], &kind)
-	expected := map[string]string{"shell_exec": "tool_execute", "read_file": "tool_read", "modify_file": "tool_edit", "code_search": "tool_search", "generic": "tool_call", "http_request": "tool_call"}
-	if expected[kind] == "" || expected[kind] != messageType || protectedPayload(norm) {
+	if !supportedPayload(kind, messageType, norm) {
 		result.Reason = "unsupported"
 		return result, nil
 	}
@@ -60,7 +59,10 @@ func ReduceToolPayload(messageType string, metadata []byte, removedAt time.Time)
 		result.Reason = "unsupported"
 		return result, nil
 	}
-	paths, ok := removePayloadFields(kind, body)
+	paths, ok, err := removePayloadFields(kind, body)
+	if err != nil {
+		return result, err
+	}
 	if !ok {
 		result.Reason = payloadMalformed
 		return result, nil
@@ -73,9 +75,29 @@ func ReduceToolPayload(messageType string, metadata []byte, removedAt time.Time)
 		result.Reason = "no_payload"
 		return result, nil
 	}
-	norm[kind], _ = json.Marshal(body)
-	root["normalized"], _ = json.Marshal(norm)
+	if err := updateReducedPayload(root, norm, body, kind); err != nil {
+		return result, err
+	}
 	return encodePayloadRemoval(root, paths, metadata, removedAt)
+}
+
+func supportedPayload(kind, messageType string, norm rawPayloadObject) bool {
+	expected := map[string]string{"shell_exec": "tool_execute", "read_file": "tool_read", "modify_file": "tool_edit", "code_search": "tool_search", "generic": "tool_call", "http_request": "tool_call"}
+	return expected[kind] != "" && expected[kind] == messageType && !protectedPayload(norm)
+}
+
+func updateReducedPayload(root, norm, body rawPayloadObject, kind string) error {
+	encodedBody, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	norm[kind] = encodedBody
+	encodedNorm, err := json.Marshal(norm)
+	if err != nil {
+		return err
+	}
+	root["normalized"] = encodedNorm
+	return nil
 }
 
 func encodePayloadRemoval(root rawPayloadObject, paths []string, metadata []byte, removedAt time.Time) (PayloadReduction, error) {
@@ -83,15 +105,29 @@ func encodePayloadRemoval(root rawPayloadObject, paths []string, metadata []byte
 	// Fixed-width numeric notation keeps the receipt size independent of the
 	// positive byte count's decimal width, including power-of-ten boundaries.
 	marker["removed_bytes"] = json.Number(strconv.FormatFloat(0, 'e', 8, 64))
-	root[payloadRetentionKey], _ = json.Marshal(marker)
-	encoded, _ := json.Marshal(root)
+	markerJSON, err := json.Marshal(marker)
+	if err != nil {
+		return PayloadReduction{Metadata: metadata}, err
+	}
+	root[payloadRetentionKey] = markerJSON
+	encoded, err := json.Marshal(root)
+	if err != nil {
+		return PayloadReduction{Metadata: metadata}, err
+	}
 	delta := int64(len(metadata) - len(encoded))
 	if delta <= 0 {
 		return PayloadReduction{Metadata: metadata, Reason: "no_payload"}, nil
 	}
 	marker["removed_bytes"] = json.Number(strconv.FormatFloat(float64(delta), 'e', 8, 64))
-	root[payloadRetentionKey], _ = json.Marshal(marker)
-	encoded, _ = json.Marshal(root)
+	markerJSON, err = json.Marshal(marker)
+	if err != nil {
+		return PayloadReduction{Metadata: metadata}, err
+	}
+	root[payloadRetentionKey] = markerJSON
+	encoded, err = json.Marshal(root)
+	if err != nil {
+		return PayloadReduction{Metadata: metadata}, err
+	}
 	delta = int64(len(metadata) - len(encoded))
 	if delta <= 0 {
 		return PayloadReduction{Metadata: metadata, Reason: "no_payload"}, nil
@@ -144,13 +180,15 @@ func plainPayloadResult(raw json.RawMessage) bool {
 	}
 	return true
 }
-func removePayloadFields(kind string, body rawPayloadObject) ([]string, bool) {
+func removePayloadFields(kind string, body rawPayloadObject) ([]string, bool, error) {
 	prefix := "normalized." + kind + "."
 	switch kind {
 	case "generic":
-		return removePayloadKeys(body, prefix, "input", "output")
+		paths, ok := removePayloadKeys(body, prefix, "input", "output")
+		return paths, ok, nil
 	case "http_request":
-		return removePayloadKeys(body, prefix, "response")
+		paths, ok := removePayloadKeys(body, prefix, "response")
+		return paths, ok, nil
 	case "modify_file":
 		return removeMutationPayloads(body, prefix)
 	default:
@@ -180,44 +218,52 @@ func removePayloadKeys(obj rawPayloadObject, prefix string, keys ...string) ([]s
 	return paths, true
 }
 
-func removeMutationPayloads(body rawPayloadObject, prefix string) ([]string, bool) {
+func removeMutationPayloads(body rawPayloadObject, prefix string) ([]string, bool, error) {
 	raw, exists := body["mutations"]
 	if !exists {
-		return nil, true
+		return nil, true, nil
 	}
 	var mutations []rawPayloadObject
 	if json.Unmarshal(raw, &mutations) != nil {
-		return nil, false
+		return nil, false, nil
 	}
 	var paths []string
 	for _, mutation := range mutations {
 		if mutation == nil {
-			return nil, false
+			return nil, false, nil
 		}
 		removed, ok := removePayloadKeys(mutation, prefix+"mutations.*.", "content", "old_content", "new_content", "diff")
 		if !ok {
-			return nil, false
+			return nil, false, nil
 		}
 		paths = append(paths, removed...)
 	}
-	body["mutations"], _ = json.Marshal(mutations)
-	return paths, true
+	encoded, err := json.Marshal(mutations)
+	if err != nil {
+		return nil, false, err
+	}
+	body["mutations"] = encoded
+	return paths, true, nil
 }
 
-func removeOutputPayloads(kind string, body rawPayloadObject, prefix string) ([]string, bool) {
+func removeOutputPayloads(kind string, body rawPayloadObject, prefix string) ([]string, bool, error) {
 	raw, exists := body["output"]
 	if !exists || string(raw) == "null" {
-		return nil, true
+		return nil, true, nil
 	}
 	output, ok := payloadObject(raw)
 	if !ok {
-		return nil, false
+		return nil, false, nil
 	}
 	fields := map[string][]string{"shell_exec": {"stdout", "stderr"}, "read_file": {"content"}, "code_search": {"files"}}
 	paths, ok := removePayloadKeys(output, prefix+"output.", fields[kind]...)
 	if !ok {
-		return nil, false
+		return nil, false, nil
 	}
-	body["output"], _ = json.Marshal(output)
-	return paths, true
+	encoded, err := json.Marshal(output)
+	if err != nil {
+		return nil, false, err
+	}
+	body["output"] = encoded
+	return paths, true, nil
 }

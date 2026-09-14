@@ -9,10 +9,12 @@ import (
 	"time"
 )
 
+var errMaintenanceBusy = errors.New("maintenance_busy")
+
 func (s *Service) stepCleanup(ctx context.Context, id string) error {
 	release, ok := maintenance.ForPool(s.pool).TryAcquire()
 	if !ok {
-		return errors.New("maintenance_busy")
+		return errMaintenanceBusy
 	}
 	defer release()
 	before, err := readRecord(ctx, s.pool.Reader())
