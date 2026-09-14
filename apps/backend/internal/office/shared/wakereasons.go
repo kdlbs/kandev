@@ -40,6 +40,18 @@ var WakeReasonRegistry = map[string]models.PriorityClass{
 	"routine_dispatch":            models.PriorityClassEvent,
 	"manual_resume_after_failure": models.PriorityClassEvent,
 
+	// Reactivity-pipeline reasons (office/scheduler/run.go's
+	// RunReasonTaskUnblocked family). All are triggered by a task-state
+	// change (a human comment, a blocker resolving, a reviewer decision),
+	// never by an unattended schedule, so all classify as event.
+	"task_unblocked":            models.PriorityClassEvent,
+	"task_reopened":             models.PriorityClassEvent,
+	"task_reopened_via_comment": models.PriorityClassEvent,
+	"task_mentioned":            models.PriorityClassEvent,
+	"stage_pending":             models.PriorityClassEvent,
+	"stage_changes_requested":   models.PriorityClassEvent,
+	"task_ready_to_close":       models.PriorityClassEvent,
+
 	// Historical-row-only literals, retained so an old persisted run row
 	// still resolves through an explicit rule rather than the fallback.
 	"blockers_resolved":  models.PriorityClassEvent,
