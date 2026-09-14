@@ -73,7 +73,7 @@ func classifyGitHubResponse(resp *http.Response, endpoint string, body []byte, n
 		result.Snapshot = &snap
 	}
 
-	result.Kind = classifyFailureKind(resp.StatusCode, string(body), resp.Header.Get("X-RateLimit-Remaining"))
+	result.Kind = classifyFailureKind(resp.StatusCode, string(body), resp.Header.Get("X-RateLimit-Remaining"), resp.Header.Get("Retry-After"))
 	switch result.Kind {
 	case FailurePrimaryRateLimit:
 		result.Kind = FailurePrimaryRateLimit
@@ -87,16 +87,12 @@ func classifyGitHubResponse(resp *http.Response, endpoint string, body []byte, n
 	return result
 }
 
-func classifyFailureKind(status int, body, remainingHeader string) FailureKind {
+func classifyFailureKind(status int, body, remainingHeader, retryAfterHeader string) FailureKind {
 	lower := strings.ToLower(body)
-	rateSignal := status == http.StatusTooManyRequests || strings.Contains(lower, "rate limit") ||
-		strings.Contains(lower, "abuse detection") || strings.Contains(lower, "secondary rate") ||
-		strings.Contains(lower, "rate_limited")
 	if primaryRateLimitResponse(status, remainingHeader) {
 		return FailurePrimaryRateLimit
 	}
-	if rateSignal && (status == http.StatusForbidden || status == http.StatusTooManyRequests ||
-		strings.Contains(lower, "rate_limited")) {
+	if secondaryRateLimitResponse(status, lower, retryAfterHeader) {
 		return FailureSecondaryRateLimit
 	}
 	if invalidCredentialFailure(status, lower) {
@@ -109,6 +105,29 @@ func classifyFailureKind(status int, body, remainingHeader string) FailureKind {
 		return FailureTransient
 	}
 	return FailureUnknown
+}
+
+// secondaryRateLimitResponse reports whether a response points at secondary
+// throttling. Any 429 qualifies after primary exhaustion is ruled out by the
+// caller. An explicit rate/abuse signal in the body qualifies at any status
+// (GraphQL returns HTTP 200 with a rate-limited errors array), and a
+// Retry-After header qualifies on a 403 even when the body is a bare
+// "Forbidden" that would otherwise read as an access failure.
+func secondaryRateLimitResponse(status int, lowerBody, retryAfterHeader string) bool {
+	if status == http.StatusTooManyRequests {
+		return true
+	}
+	if strings.Contains(lowerBody, "rate_limited") {
+		return true
+	}
+	if status != http.StatusForbidden {
+		return false
+	}
+	if strings.Contains(lowerBody, "rate limit") || strings.Contains(lowerBody, "abuse detection") ||
+		strings.Contains(lowerBody, "secondary rate") {
+		return true
+	}
+	return strings.TrimSpace(retryAfterHeader) != ""
 }
 
 func primaryRateLimitResponse(status int, remainingHeader string) bool {

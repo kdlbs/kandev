@@ -134,3 +134,44 @@ func TestOperationRateLimitFromAdmissionError(t *testing.T) {
 		t.Fatalf("retry details = %+v", details)
 	}
 }
+
+// @covers AC-INTEGRATIONS-GITHUB-RATE-001.2
+// @covers AC-INTEGRATIONS-GITHUB-RATE-001.4
+func TestClassifyGitHubResponseGenericForbiddenWithRetryAfterIsSecondary(t *testing.T) {
+	now := time.Date(2026, 8, 29, 5, 18, 9, 0, time.UTC)
+	tests := []struct {
+		name        string
+		remaining   string
+		retryHeader string
+		otherBody   bool
+	}{
+		{
+			name:        "generic forbidden with retry-after and positive remaining",
+			remaining:   "5000",
+			retryHeader: "90",
+		},
+		{
+			name:        "generic forbidden with retry-after and unknown remaining",
+			retryHeader: "90",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			headers := http.Header{}
+			if tt.remaining != "" {
+				headers.Set("X-Ratelimit-Remaining", tt.remaining)
+			}
+			headers.Set("Retry-After", tt.retryHeader)
+			resp := &http.Response{StatusCode: http.StatusForbidden, Header: headers}
+			got := classifyGitHubResponse(resp, "/user", []byte(`{"message":"Forbidden"}`), now)
+			if got.Kind != FailureSecondaryRateLimit {
+				t.Fatalf("kind = %s, want %s", got.Kind, FailureSecondaryRateLimit)
+			}
+			if got.RetrySource != RetrySourceRetryAfter || !got.RetryAt.Equal(now.Add(90*time.Second)) {
+				t.Fatalf("retry boundary = (%s, %s), want (%s, %s)",
+					got.RetryAt.Format(time.RFC3339), got.RetrySource,
+					now.Add(90*time.Second).Format(time.RFC3339), RetrySourceRetryAfter)
+			}
+		})
+	}
+}

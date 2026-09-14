@@ -545,7 +545,8 @@ Task identity is injected for operations that require it. Workspace, parent/subt
 \`get_github_rate_limit_kandev\` is read-only and has no input fields. It uses the
 current task's workspace, so it cannot inspect another workspace. Its response
 reports cached Core and GraphQL quota state, any locally observed secondary
-throttle, and whether interactive or background work is currently admitted.
+throttle across Core, GraphQL, and Search, and whether interactive or background
+work is currently admitted.
 \`known: false\` means Kandev has not yet observed that primary bucket; the tool
 does not fetch GitHub to fill it. An active secondary throttle can coexist with
 healthy cached primary quota because GitHub does not expose secondary-limit

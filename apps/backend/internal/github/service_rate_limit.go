@@ -82,12 +82,21 @@ func (s *Service) GetWorkspaceRateLimitSnapshot(
 	now := time.Now().UTC()
 	coreDecision := admission.snapshot(ResourceCore, now)
 	graphqlDecision := admission.snapshot(ResourceGraphQL, now)
+	searchDecision := admission.snapshot(ResourceSearch, now)
 	interactiveAllowed, interactiveReason := combineRateAdmission(
 		coreDecision.interactiveAllowed, coreDecision.interactiveReason,
+		searchDecision.interactiveAllowed, searchDecision.interactiveReason,
+	)
+	interactiveAllowed, interactiveReason = combineRateAdmission(
+		interactiveAllowed, interactiveReason,
 		graphqlDecision.interactiveAllowed, graphqlDecision.interactiveReason,
 	)
 	backgroundAllowed, backgroundReason := combineRateAdmission(
 		coreDecision.backgroundAllowed, coreDecision.backgroundReason,
+		searchDecision.backgroundAllowed, searchDecision.backgroundReason,
+	)
+	backgroundAllowed, backgroundReason = combineRateAdmission(
+		backgroundAllowed, backgroundReason,
 		graphqlDecision.backgroundAllowed, graphqlDecision.backgroundReason,
 	)
 	blockingReason := interactiveReason
@@ -152,6 +161,7 @@ func observedSecondarySnapshot(tracker *RateTracker, now time.Time) ObservedSeco
 	states := []SecondaryRateLimitState{
 		tracker.Secondary(ResourceCore),
 		tracker.Secondary(ResourceGraphQL),
+		tracker.Secondary(ResourceSearch),
 	}
 	var selected SecondaryRateLimitState
 	for _, state := range states {

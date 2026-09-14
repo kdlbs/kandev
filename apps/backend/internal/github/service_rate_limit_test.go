@@ -140,3 +140,46 @@ func TestObservedSecondarySnapshotUsesOverallEnforcedRetryBoundary(t *testing.T)
 		t.Fatalf("secondary snapshot = %+v", snapshot)
 	}
 }
+
+// @covers AC-INTEGRATIONS-GITHUB-RATE-001.2
+func TestServiceGetWorkspaceRateLimitSnapshotIncludesSearchSecondary(t *testing.T) {
+	store := newTestStore(t)
+	seedConnectionWorkspaces(t, store, "workspace-1")
+	if err := store.UpsertWorkspaceConnection(context.Background(), &WorkspaceConnection{
+		WorkspaceID: "workspace-1", Source: ConnectionSourcePAT,
+		GitHubHost: defaultGitHubHost, Login: "yattdev", Status: ConnectionStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := NewService(nil, AuthMethodPAT, nil, store, nil, testLogger(t))
+	t.Cleanup(svc.Stop)
+	tracker, _ := svc.rateCoordinator.coordinate(defaultGitHubHost, AuthPrincipal{
+		Kind: AuthPrincipalHuman, Source: ConnectionSourcePAT,
+		Login: "yattdev", WorkspaceID: "workspace-1",
+	}, nil)
+	now := time.Now().UTC()
+	tracker.Record(RateSnapshot{
+		Resource: ResourceCore, Limit: 5000, Remaining: 5000,
+		ResetAt: now.Add(time.Hour), UpdatedAt: now,
+	})
+	tracker.ObserveSecondary(
+		ResourceSearch,
+		now.Add(30*time.Minute),
+		RetrySourceRetryAfter,
+		`{"message":"API rate limit exceeded for user ID 79718216"}`,
+	)
+
+	snapshot, err := svc.GetWorkspaceRateLimitSnapshot(context.Background(), "workspace-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snapshot.Secondary.Active || snapshot.Secondary.Resource != ResourceSearch {
+		t.Fatalf("secondary snapshot = %+v, want active search throttle", snapshot.Secondary)
+	}
+	if snapshot.InteractiveAllowed || snapshot.BackgroundAllowed {
+		t.Fatalf("search secondary throttle must block both classes, got %+v", snapshot)
+	}
+	if snapshot.BlockingReason != "observed_secondary_rate_limit" {
+		t.Fatalf("blocking reason = %q", snapshot.BlockingReason)
+	}
+}

@@ -14,7 +14,10 @@ Kandev coordinates GitHub provider traffic so background synchronization cannot
 starve interactive agents and operators. The integration records the provider
 signals it observes and distinguishes primary quota exhaustion from secondary
 throttling. Failed Kandev-managed operations return the rate context that
-affected the operation. The coordinator snapshot remains internal.
+affected the operation. Task surfaces expose a read-only, provider-free
+snapshot of the locally observed state through `get_github_rate_limit_kandev`;
+the underlying coordinator state and provider responses remain internal to the
+integration.
 
 ## Terminology
 
@@ -106,7 +109,9 @@ from a separate diagnostic request.
   resource, retry boundary, retry delay, and retry source.
 - **AC-INTEGRATIONS-GITHUB-RATE-004.2:** When GitHub rejects a managed operation,
   the returned rate kind shall match the failure that governed that operation.
-  Independent primary and secondary observations shall remain internal.
+  The failure response itself shall not leak unrelated primary and secondary
+  observations; the task-surface snapshot tool is the supported way to read
+  the aggregate local state.
 - **AC-INTEGRATIONS-GITHUB-RATE-004.3:** A successful operation shall not return
   quota or coordinator snapshot details.
 
