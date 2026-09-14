@@ -9,6 +9,7 @@ export type {
   LayoutBranchNode,
   LayoutIntent,
   LayoutIntentPanel,
+  LayoutOrientation,
 } from "./types";
 
 // Constants

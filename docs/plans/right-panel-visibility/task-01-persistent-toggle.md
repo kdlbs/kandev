@@ -21,6 +21,11 @@ system_design:
 
 # Task 01: Add a persistent right-panel toggle
 
+> Historical completed work order for commits `88241db53` and `03fe74e95`.
+> The 2026-09-14 user correction supersedes the standard-sidebar reconstruction, compact Show fallback, and custom-snapshot exclusion below.
+> Do not implement from these historical instructions. Follow [Task 02](task-02-contextual-right-pane.md) and the revised system design.
+> Historical results do not verify the new contextual target behavior.
+
 ## Summary
 
 Expose right-panel visibility through a persistent task-header control.
@@ -44,7 +49,7 @@ No backend, release flag, new storage, breakpoint change, custom-panel snapshots
 - UI-02 retains existing phone navigation and wider-layout preferences.
 - Covered regression checks pass, and the plan records asserted behavior separately from the retained browser matrix.
 
-## ASCII UI preview
+## Historical ASCII UI preview (superseded by UI-03)
 
 ### UI-01: Desktop and tablet task header
 

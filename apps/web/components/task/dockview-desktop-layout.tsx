@@ -67,6 +67,8 @@ import {
   type LayoutProfileIdentity,
 } from "@/lib/layout/layout-profiles";
 import { fromDockviewApi, type LayoutState } from "@/lib/state/layout-manager";
+import { getEnvLayout } from "@/lib/local-storage";
+import { getRightPaneToggleState, readHiddenRightPane } from "@/lib/state/dockview-right-pane";
 import { registerDockviewRoot, unregisterDockviewRoot } from "@/lib/state/dockview-measure";
 
 // ---------------------------------------------------------------------------
@@ -349,6 +351,9 @@ function setupReadyDockview({ api, appStore, layout, refs }: ReadyDockviewSetup)
   const restored =
     !layout.initialLayout &&
     restoreEnvLayout(api, currentEnvId, appStore, DESKTOP_VALID_COMPONENTS);
+  const hiddenRightPane =
+    restored && currentEnvId ? readHiddenRightPane(getEnvLayout(currentEnvId)) : null;
+  useDockviewStore.setState({ hiddenRightPane });
   if (!restored) {
     layout.buildDefaultLayout(
       api,
@@ -357,9 +362,12 @@ function setupReadyDockview({ api, appStore, layout, refs }: ReadyDockviewSetup)
   } else {
     const restoredLayout = fromDockviewApi(api);
     const preMaximizeLayout = useDockviewStore.getState().preMaximizeLayout;
+    const paneState = getRightPaneToggleState(preMaximizeLayout ?? restoredLayout, hiddenRightPane);
     useDockviewStore.setState({
       activeLayoutProfile: resolveRestoredLayoutProfile(api, currentEnvId),
       rightPanelsVisible: hasRightColumn(preMaximizeLayout ?? restoredLayout),
+      rightPaneVisible: paneState.visible,
+      rightPaneAvailable: paneState.available,
     });
   }
 

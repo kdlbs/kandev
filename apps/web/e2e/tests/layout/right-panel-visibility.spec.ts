@@ -13,17 +13,22 @@ async function createTask(apiClient: ApiClient, seedData: SeedData, title: strin
   });
 }
 
+type DesktopTaskOptions = {
+  viewport: { width: number; height: number };
+  layout?: string;
+};
+
 async function openDesktopTask(
   page: Page,
   apiClient: ApiClient,
   seedData: SeedData,
   title: string,
-  viewport: { width: number; height: number },
+  options: DesktopTaskOptions,
 ) {
-  await page.setViewportSize(viewport);
+  await page.setViewportSize(options.viewport);
   const task = await createTask(apiClient, seedData, title);
   if (!task.session_id) throw new Error(`${title} did not return a session_id`);
-  await page.goto(`/t/${task.id}`);
+  await page.goto(`/t/${task.id}${options.layout ? `?layout=${options.layout}` : ""}`);
   const session = new SessionPage(page);
   await session.waitForLoad();
   await session.waitForDockviewReady();
@@ -41,7 +46,7 @@ test.describe("right-panel visibility", () => {
       apiClient,
       seedData,
       "Desktop right-panel visibility",
-      { width: 1600, height: 900 },
+      { viewport: { width: 1600, height: 900 } },
     );
     const toggle = testPage.getByTestId("task-right-panels-toggle");
     await expect(toggle).toBeVisible();
@@ -99,7 +104,7 @@ test.describe("right-panel visibility", () => {
     await session.expectLayoutHealthy();
   });
 
-  test("compact desktop can explicitly reopen its initially hidden right column", async ({
+  test("compact desktop disables the action when it has one workbench region", async ({
     testPage,
     apiClient,
     seedData,
@@ -109,23 +114,92 @@ test.describe("right-panel visibility", () => {
       apiClient,
       seedData,
       "Compact desktop right-panel visibility",
-      { width: 900, height: 800 },
+      { viewport: { width: 900, height: 800 } },
     );
     await expect(testPage.getByTestId("tablet-task-layout")).toHaveCount(0);
     const toggle = testPage.getByTestId("task-right-panels-toggle");
     await expect(toggle).toBeVisible();
-    await expect(toggle).toBeEnabled();
+    await expect(toggle).toBeDisabled();
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(toggle).toHaveAttribute("title", "No separate right pane to hide");
+    await expect(toggle.locator("..")).toHaveAttribute(
+      "aria-label",
+      "No separate right pane to hide",
+    );
 
     await testPage.reload();
     await session.waitForLoad();
     await session.waitForDockviewReady();
     await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(toggle).toBeDisabled();
+    await expect(session.activeChat()).toBeVisible();
+  });
+
+  test("Plan and Preview layouts toggle their contextual right pane", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { session } = await openDesktopTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Plan contextual right pane",
+      { viewport: { width: 1600, height: 900 }, layout: "plan" },
+    );
+    const toggle = testPage.getByTestId("task-right-panels-toggle");
+    const plan = testPage.getByTestId("plan-panel");
+    await expect(toggle).toBeEnabled();
+    await expect(plan).toBeVisible();
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(plan).toHaveCount(0);
+    await expect(session.activeChat()).toBeVisible();
 
     await toggle.click();
     await expect(toggle).toHaveAttribute("aria-expanded", "true");
-    await expect(session.files).toBeVisible();
-    await expect(session.terminal).toBeVisible();
+    await expect(plan).toBeVisible();
+
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForDockviewReady();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(plan).toBeVisible();
+  });
+
+  test("Preview layout toggles Browser instead of a standard right stack", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const { session } = await openDesktopTask(
+      testPage,
+      apiClient,
+      seedData,
+      "Preview contextual right pane",
+      { viewport: { width: 1600, height: 900 } },
+    );
+    await testPage.getByTestId("layout-preset-trigger").click();
+    await testPage.locator('[data-testid="layout-preset-item"][data-preset-id="preview"]').click();
+    const toggle = testPage.getByTestId("task-right-panels-toggle");
+    const browser = testPage.getByTestId("browser-panel");
+    await expect(toggle).toBeEnabled();
+    await expect(browser).toBeVisible();
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await expect(browser).toHaveCount(0);
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(browser).toBeVisible();
+
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForDockviewReady();
+    await expect(toggle).toHaveAttribute("aria-expanded", "true");
+    await expect(browser).toBeVisible();
   });
 
   test("keeps the toggle disabled while maximized and restores visibility after exit and reload", async ({
@@ -138,7 +212,7 @@ test.describe("right-panel visibility", () => {
       apiClient,
       seedData,
       "Maximized right-panel visibility",
-      { width: 1600, height: 900 },
+      { viewport: { width: 1600, height: 900 } },
     );
     const toggle = testPage.getByTestId("task-right-panels-toggle");
     await expect(toggle).toBeEnabled();
@@ -151,11 +225,11 @@ test.describe("right-panel visibility", () => {
     await expect(toggle).toBeDisabled();
     await expect(toggle).toHaveAttribute(
       "title",
-      "Right panels are unavailable while a panel is maximized",
+      "Right pane is unavailable while a panel is maximized",
     );
     await expect(toggle.locator("..")).toHaveAttribute(
       "aria-label",
-      "Right panels are unavailable while a panel is maximized",
+      "Right pane is unavailable while a panel is maximized",
     );
 
     await session.clickMaximize();
@@ -178,8 +252,7 @@ test.describe("right-panel visibility", () => {
     seedData,
   }) => {
     await openDesktopTask(testPage, apiClient, seedData, "Keyboard right-panel visibility", {
-      width: 1600,
-      height: 900,
+      viewport: { width: 1600, height: 900 },
     });
     const toggle = testPage.getByTestId("task-right-panels-toggle");
     await expect(toggle).toBeEnabled();

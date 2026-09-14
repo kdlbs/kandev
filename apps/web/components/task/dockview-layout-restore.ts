@@ -15,6 +15,7 @@ import {
   removeEnvMaximizeState,
 } from "@/lib/local-storage";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
+import { stripHiddenRightPaneMetadata } from "@/lib/state/dockview-right-pane";
 
 const debug = createDebugLogger("dockview:restore");
 
@@ -238,7 +239,7 @@ function tryRestoreEnvLayout(
       phantomSessionIds: phantomSessionIds ? Array.from(phantomSessionIds) : [],
     });
   }
-  const sanitized = sanitizeLayout(envLayout, validComponents, {
+  const sanitized = sanitizeLayout(stripHiddenRightPaneMetadata(envLayout), validComponents, {
     excludeSessionIds: phantomSessionIds,
   });
   if (!sanitized) {

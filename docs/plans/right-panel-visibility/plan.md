@@ -8,163 +8,173 @@ system_design:
 legacy_specs: []
 ---
 
-# Implementation plan: Right panel visibility
+# Implementation plan: Contextual right-pane visibility
 
 ## Overview
 
-Add a persistent right-panel toggle to the task header on desktop and tablet.
-Deliver one sequential vertical work order, including both layout adapters and browser coverage.
-The package is implemented and its verification is recorded below.
+The toggle hides and restores the rightmost region in the current layout.
+Plan Mode targets Plan, Preview Mode targets Browser, VS Code targets its editor, and Default targets its complete right stack.
+The user requested this correction on 2026-09-14 and supplied screenshots showing the Plan and Preview layouts.
+Task 02 implements the correction. Historical Task 01 results remain context only and do not replace the
+contextual behavior evidence below.
 
-## Evidence and root cause
+## Baseline and ownership
 
-Source revision: `bc38ea1ec7`; package commit: `f05aaee8f0`. Investigation date: 2026-09-13.
-Source: [issue 3657](https://github.com/kdlbs/kandev/issues/3657), its body image, and the maintainer comment image.
-Both images were inspected. GitHub authenticated user: `carlosflorencio`; issue assigned to that user.
+Current baseline: `03fe74e955a869a30819e6d9b3f59c83bb1c3c45`.
+Earlier commits: `88241db53` implemented the persistent toggle; `03fe74e95` addressed review findings.
+UI continues to own the layout contract. Task, agent, terminal, and portable layout-profile ownership do not change.
 
-The read-only trace establishes four relevant facts:
-
-1. `RightTopGroupActions` lives in the top-right Dockview group and is the only caller of `toggleRightPanels` outside the store.
-2. Hiding removes that group, so its control disappears. `TopbarToolsGroup` has no corresponding restore button.
-3. `SessionTabletLayout` reads column state but always renders the right Panel.
-4. `buildVisibilityActions` blocks reopening when the responsive default preset is compact.
-
-Minimal reproduction: open a Default task workbench, activate Hide right panels, then look for the reverse header action.
-The hidden group takes its control with it. Restoring a preset is an indirect workaround, not a paired toggle.
-For the tablet fallback, a stored `right: false` still renders Files and Terminal.
-
-Existing evidence: `pnpm exec vitest run lib/state/dockview-preset-persistence.test.ts` passed all 23 tests.
-Those tests establish the existing store behavior; they do not prove the proposed UI.
-No live user instance was mutated. Browser reproduction and new regression tests belong to implementation.
+`toggleRightPanels` currently filters legacy right-owned columns and reconstructs `defaultLayout()` on Show.
+The new implementation selects from live geometry and retains the removed subtree for restoration.
+The user explicitly replaced the previous Files/Changes/Terminal-only behavior.
+This also supersedes compact-mode creation of a standard sidebar and the exclusion of custom-pane restoration.
 
 ## Scope
 
 ### In scope
 
-- Persistent localized header control and active-layout state adapter.
-- Desktop, compact desktop, large touch tablet, and narrow tablet fallback.
-- Independent left navigation; readiness and restoration handling.
-- Focused mixed-layout protection required by the newly exposed control.
-- Phone parity checks and public usage instructions with implementation.
+- Geometric target selection and exact pane restoration for built-in and custom Dockview arrangements.
+- Per-environment hidden-pane recovery with existing environment layout persistence.
+- Reset/preset invalidation, task switching, nested splits, active Agent protection, duplicate prevention, and maximize guards.
+- Existing header placement, localized state explanations, touch targets, and tablet/phone parity.
+- Focused regression coverage and public instructions updated during implementation.
 
 ### Out of scope
 
-- Backend changes, new persistence, release flags, new breakpoint rules, and arbitrary custom-panel snapshots.
-- Left-sidebar redesign, phone sidebars, Office-specific workbench changes, and terminal lifecycle changes.
+- Backend settings, new breakpoints, phone sidebars, arbitrary undo history, and terminal process lifecycle changes.
+- Changes outside the task workbench visibility contract, such as backend preferences, new breakpoints,
+  phone sidebars, undo history, or terminal lifecycle behavior.
 
 ## Technical approach
 
-Follow the [system design](../../specs/ui/system-design/right-panel-visibility.md).
-Reuse both existing layout stores through one active-layout adapter.
-Keep the existing Dockview reconstruction behavior and tablet split storage.
-The UI system owns this interaction independently of task business state and reusable layout-profile management.
-Existing task-layout-profile packages are related context; their accepted profile behavior is unchanged.
+Follow the revised [requirements](../../specs/ui/requirements/right-panel-visibility.md) and
+[system design](../../specs/ui/system-design/right-panel-visibility.md).
+Select the final child of the outer horizontal workbench split, retaining its full nested subtree.
+When a hidden descriptor exists, Show restores it before any further target selection.
+Persist recovery metadata atomically with the environment layout; never copy it into another environment or portable profile.
+Keep remaining live edits when restoring. Do not call `defaultLayout()` as a Show fallback.
+A single region without retained recovery data has no toggle target.
 
 ## ASCII UI preview
 
-### UI-01: Desktop and tablet task header
+### UI-03: Contextual right-pane toggle
 
-Entry: open a task. The task header stays fixed; panel bodies own scrolling.
-
-```text
-BEFORE: current Dockview
-+----------------------------------------------------------+
-| Task title                         [Layouts] [Editor]     |
-+---------------------------------+------------------------+
-| Chat                            | Files       [Hide >]   |
-|                                 | Terminal               |
-+---------------------------------+------------------------+
-After Hide: the right column AND its Hide button disappear.
-
-AFTER: right panels visible
-+----------------------------------------------------------+
-| Task title                    [R >] [Layouts] [Editor]    |
-+---------------------------------+------------------------+
-| Chat                            | Files / Changes        |
-|                                 +------------------------+
-|                                 | Terminal               |
-+---------------------------------+------------------------+
-[R >] = Hide right panels
-
-AFTER: right panels hidden
-+----------------------------------------------------------+
-| Task title                    [< R] [Layouts] [Editor]    |
-+----------------------------------------------------------+
-| Chat now uses the released width                         |
-|                                                          |
-+----------------------------------------------------------+
-[< R] = Show right panels; same position, one tap to restore.
-```
-
-The existing left-sidebar toggle remains independent, outside this cropped region.
-The coarse-pointer tablet fallback uses the same header control and hides Files plus Terminal.
-Its Chat/Plan/Changes tabs remain in the left content surface.
-Compact desktop starts with its existing single-group default; explicit Show adds a right column.
-During initialization or restoration, the same control is disabled and keeps its position.
-
-### UI-02: Phone task navigation
-
-Entry: task below 768 CSS pixels. Retain the shipped full-screen panel composition.
+Entry: a desktop workbench, including large tablets. Header stays fixed; pane content owns scrolling.
 
 ```text
-+------------------------------------+
-| Task context                       |
-+------------------------------------+
-| Chat OR Files OR Terminal          |
-| One active content surface         |
-|                                    |
-+------------------------------------+
-| Chat | Plan | Changes | Files | >_  |
-+------------------------------------+
+PLAN MODE: shown
++---------------------------------------------------+
+| Task             [Hide right pane] [Layouts v]     |
++--------------------------+------------------------+
+| Agent                    | Plan                   |
++--------------------------+------------------------+
+
+PLAN MODE: hidden
++---------------------------------------------------+
+| Task             [Show right pane] [Layouts v]     |
++---------------------------------------------------+
+| Agent fills the released width                    |
++---------------------------------------------------+
+Show restores Plan with its tabs and split state.
+
+PREVIEW MODE: shown
++---------------------------------------------------+
+| Task             [Hide right pane] [Layouts v]     |
++--------------------------+------------------------+
+| Agent                    | Browser                |
++--------------------------+------------------------+
+Hide -> Agent fills width. Show -> the same Browser.
+
+DEFAULT: shown                 VS CODE: shown
++---------------+-----------+  +---------------+-----------+
+| Agent         | Files     |  | Agent         | VS Code   |
+|               | Changes   |  |               |           |
+|               +-----------+  +---------------+-----------+
+|               | Terminal  |
++---------------+-----------+
+Default toggles the whole right stack. VS Code toggles VS Code.
+
+CUSTOM: three side-by-side regions
++---------------+-----------+---------------+
+| Agent         | Plan      | Browser       |
++---------------+-----------+---------------+
+Hide removes Browser only; the next click restores Browser.
+It does not continue removing Plan.
+
+SINGLE REGION: no retained hidden pane
++---------------------------------------------------+
+| Task       [right-pane icon disabled] [Layouts v]  |
++---------------------------------------------------+
+| Agent / Files / Changes tabs in one group          |
++---------------------------------------------------+
+Explanation: No separate right pane to hide.
 ```
 
-The bottom row is an excerpt of existing navigation; other existing destinations remain available.
-Select Files or Terminal, then Chat to return. There is no right-sidebar toggle on phones.
-Keep existing safe areas and content scrolling; do not overwrite wider-layout preferences.
+Button labels in this drawing stand for localized tooltips and accessible names; the actual header keeps its existing icon.
+The left navigation toggle remains independent. Spacing is illustrative; group identity and hide/show results are required.
+Initialization and maximize retain their existing disabled states. A hidden target always takes precedence over a new hide target.
 
-Required structure: persistent control order, independent sidebars, reclaimed width, and separate phone navigation.
-Spacing and ASCII glyphs are illustrative. Use existing tokens and localized labels.
-UI-01 maps to AC-UI-RIGHT-PANEL-VISIBILITY-001.1 through .5 and .7; UI-02 maps to .6.
+### UI-02: Phone and tablet fallback
 
-## Tests
+```text
+Phone: one active surface       Narrow tablet fallback
++-------------------------+     +----------------+-----------+
+| Chat / Files / Terminal |     | Chat/Plan/...  | Files     |
+|                         |     |                | Terminal  |
++-------------------------+     +----------------+-----------+
+| Existing bottom nav     |     Persistent header toggle hides
++-------------------------+     and restores this right stack.
+```
 
-| Criteria | Test file and coverage |
-| --- | --- |
-| .1, .4, .7 | `components/task/task-right-panels-toggle.test.tsx`: localized next-action labels, focus retention after activation, and an explanatory disabled maximized state |
-| .1, .3, .5, .7 | `hooks/use-task-right-panels-toggle.test.ts` and `lib/state/dockview-env-switch-action.test.ts`: desktop/tablet routing, empty-session and phone guards, A/B visibility round trips, and saved-maximize restoration |
-| .2, .3, .5 | `lib/state/layout-manager/serializer.test.ts` and `lib/state/dockview-right-panel-visibility.test.ts`: production-shaped compact and mixed capture, right-column ownership, compact reopening, center preservation, and globally unique panel IDs on Show |
-| .2, .3, .5 | `components/task/mobile/session-tablet-layout.test.tsx`: stored hidden right column is not rendered and the center surface remains mounted; browser coverage owns persistence assertions |
-| .1, .2, .5, .7 | `lib/state/dockview-right-panel-visibility.test.ts`: maximize blocks mutation, exit restores the authoritative visibility, and regular layout persistence resumes |
+Phone navigation, safe areas, and full-screen content remain unchanged. No phone toggle is added.
+UI-03 maps to AC-UI-RIGHT-PANEL-VISIBILITY-001.1-.5 and .7-.10; UI-02 maps to .3, .5, and .6.
 
-Criteria refer to `AC-UI-RIGHT-PANEL-VISIBILITY-001`.
-First behavioral RED: `stored hidden right column is not rendered` against the current tablet component.
-A second behavioral RED covers compact reopening. Missing selectors alone do not qualify as behavioral RED.
+## Tests and E2E matrix
 
-## E2E tests
+Task 02 owns these cases and exact commands. Use production-shaped Agent panels and real serializer output.
 
-The executed `apps/web/e2e/tests/layout/right-panel-visibility.spec.ts` coverage uses the `chromium` project for desktop, compact desktop, and the 900-pixel coarse-pointer tablet fallback. It asserts desktop hide/show, center-width recovery, hidden and visible desktop reloads, compact hidden-state reload and reopening, maximized disabled-state and exit/reload recovery, tablet hide/show persistence, and keyboard activation with focus retention.
-
-The executed `apps/web/e2e/tests/layout/mobile-right-panel-visibility.spec.ts` coverage uses the `mobile-chrome` project with Pixel 5 device settings to assert the existing full-screen Chat, Files, and Terminal navigation, coarse-pointer input, and the absence of the wider-layout toggle on phones.
-
-The following browser scenarios remain the planned regression matrix. They are retained here because the current implementation run does not assert every case:
-
-- Desktop Default: all four left/right visibility combinations, no duplicate panels, and header reachability with a long title and linked review.
-- Touch tablet at both 1280x900 and 900x900: pointer mode, 44-pixel targets, and both desktop and tablet adapters.
-- Fine pointer at 900x800: compact default, explicit Show, Hide, and Show again.
-- Cross-task and cross-viewport handoffs: resize across 1024 and 768 boundaries without copying state between stores.
-- Archived tasks and repeated activation during restoration.
-- Mixed center Agent/Files/PR Details plus a separate right column through a browser fixture; the production-shaped capture and store cases cover the logic below the browser layer.
-- Phone navigation after crossing into a wider view and back while preserving wider-layout visibility.
-
-Reuse `pane-persistence-tablet.spec.ts` and `compact-desktop-responsive.spec.ts` for the retained tablet split and compact geometry cases. All executed browser checks use causal waits and owned fixtures.
+| Scenario                                               | Required evidence                                                                         |
+| ------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| Plan, Preview, VS Code, Default                        | Hide releases width; Show restores the exact target, not a Files sidebar                  |
+| Custom three-column and nested target                  | Only outer right region toggles; tabs, parameters, selected tabs, tree, and width survive |
+| One group, vertical-only split, rightmost active Agent | Disabled explanation; no deletion or fabricated sidebar                                   |
+| Repeated hide/show                                     | Alternates the same target; unique panel IDs; remaining center content survives           |
+| Reopen a hidden panel elsewhere                        | Live instance wins; no duplicate or whole-layout reset                                    |
+| Hidden reload and A/B environment switch               | Correct label and correct per-environment target survive                                  |
+| Hidden Plan then select Preview or Reset               | Old target is discarded; only the new arrangement determines the next action              |
+| Legacy, malformed, or unavailable panel metadata       | Valid visible layout survives; no stale panel resurrection                                |
+| Maximize, rapid clicks, late callbacks                 | No overlay capture or cross-environment mutation                                          |
+| 1280px coarse, 900px fine/coarse, phone                | Touch geometry, keyboard focus, no overflow, and unchanged phone navigation               |
 
 ## Work orders
 
-  - [x] [Task 01: Persistent toggle](task-01-persistent-toggle.md) (done)
+- [x] [Task 01: Persistent toggle](task-01-persistent-toggle.md). Completed historical scope; superseded behavior is identified there.
+- [x] [Task 02: Contextual right-pane selection and restoration](task-02-contextual-right-pane.md). Done; depends on Task 01.
 
-## Verification results
+Execute Task 02 as one sequential vertical slice in the primary session.
 
-Implementation is complete. The new control is shared by desktop and tablet adapters, the tablet right column is conditional, compact desktop can reopen it, and phone navigation keeps its existing full-screen composition.
+## Current revision verification
+
+Task 02 implementation and validation completed on the current branch.
+
+- Focused unit suite: 10 files, 130 tests passed.
+- `pnpm run typecheck` and `pnpm run lint` from `apps/web` passed.
+- `pnpm run i18n:check` and `pnpm run i18n:ratchet` from `apps/web` passed.
+- Managed Chromium E2E matrix: 12 tests passed across right-pane, tablet-persistence, and compact-desktop scenarios.
+- Managed mobile-Chromium E2E: 1 phone test passed.
+- The managed E2E builds passed; Vite emitted only the repository's existing chunk-size and dynamic-import warnings.
+- `node --test scripts/validate-public-docs.test.mjs` and `node scripts/validate-public-docs.mjs` passed.
+- `python3 scripts/list-docs.py validate` and `python3 scripts/lint-spec-files.py --all` passed.
+- `git diff --check` passed.
+
+The browser runs cover Default, Plan, Preview, compact single-region, maximize/exit, keyboard focus, tablet,
+and phone behavior. The broader matrix still includes resize handoffs, the 1280-pixel coarse-pointer case,
+all four sidebar combinations, archived-task restoration, browser-level mixed-center fixtures, and the
+wider-to-phone handoff; those remain separate coverage beyond this implementation run.
+
+## Historical Task 01 verification
+
+The previous standard-sidebar implementation was completed before the 2026-09-14 behavior correction. The new control is shared by desktop and tablet adapters, the tablet right column is conditional, compact desktop can reopen it, and phone navigation keeps its existing full-screen composition.
 
 Checks passed:
 
@@ -193,13 +203,13 @@ Implementation commands and browser results are recorded above and in the comple
 
 ## Risks
 
-- Existing hide logic can remove mixed columns; protect center content before exposing the control globally.
-- Existing Show rebuilds the standard right column; custom right tabs are not an exact snapshot restore.
-- Conditional tablet panels can overwrite saved split geometry unless single-panel saves are excluded.
-- Header descendant sizing can override a touch button's hit area.
-- Device-local desktop and tablet restoration have different scopes; avoid cross-store writes during resize.
+- Column names can describe panel contents rather than physical placement; selection must use actual split geometry.
+- Tree-based serialization can reintroduce removed panels if flat groups and nested trees disagree.
+- A whole-layout restore can overwrite edits made while the pane was hidden; reinsert only the retained target.
+- Recovery metadata can be lost by a save path that only serializes Dockview JSON; cover every environment save and restore path.
+- Default-only width enforcement must not resize restored Plan, Browser, or custom panes incorrectly.
 
 ## Public documentation
 
-Added a short task-workspace how-to to `docs/public/tasks-and-workflows.md`.
-It explains Hide/Show, independent sidebars, tablet support, and existing phone navigation.
+Task 02 updates `docs/public/tasks-and-workflows.md` to describe the active layout target and single-region disabled state.
+Requirements, system design, plan, work order, implementation, tests, and public instructions now describe the same behavior.

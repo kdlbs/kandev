@@ -272,11 +272,13 @@ describe("switchEnvLayout — root fix for terminal/layout swapping", () => {
     await flushRaf();
     expect(useDockviewStore.getState().rightPanelsVisible).toBe(false);
 
-    // Showing A updates the same authoritative state in the opposite direction.
+    // A has one workbench region and no retained recovery metadata, so Show
+    // remains disabled instead of fabricating the standard sidebar.
     vi.mocked(fromDockviewApi).mockReturnValue(hiddenRightLayout);
     useDockviewStore.getState().toggleRightPanels();
     await flushRaf();
-    expect(useDockviewStore.getState().rightPanelsVisible).toBe(true);
+    expect(useDockviewStore.getState().rightPanelsVisible).toBe(false);
+    expect(useDockviewStore.getState().rightPaneAvailable).toBe(false);
   });
 
   it("ignores completion from a superseded env-switch placement", () => {

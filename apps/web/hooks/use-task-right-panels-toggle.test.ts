@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   dock: {
     api: null as object | null,
     rightPanelsVisible: true,
+    rightPaneVisible: true,
+    rightPaneAvailable: true,
     isRestoringLayout: false,
     preMaximizeLayout: null as object | null,
     toggleRightPanels: vi.fn(),
@@ -43,6 +45,8 @@ function setDesktop(overrides: Partial<typeof mocks.dock> = {}) {
   Object.assign(mocks.dock, {
     api: {},
     rightPanelsVisible: true,
+    rightPaneVisible: true,
+    rightPaneAvailable: true,
     isRestoringLayout: false,
     preMaximizeLayout: null,
     ...overrides,
@@ -58,6 +62,8 @@ beforeEach(() => {
   };
   mocks.dock.api = null;
   mocks.dock.rightPanelsVisible = true;
+  mocks.dock.rightPaneVisible = true;
+  mocks.dock.rightPaneAvailable = true;
   mocks.dock.isRestoringLayout = false;
   mocks.dock.preMaximizeLayout = null;
   mocks.layout.columnsBySessionId = {};
@@ -130,6 +136,17 @@ describe("useTaskRightPanelsToggle", () => {
     expect(result.current.isReady).toBe(false);
     act(() => result.current.toggleRightPanels());
     expect(mocks.layout.toggleRightPanel).not.toHaveBeenCalled();
+  });
+
+  it("disables the desktop toggle when the live layout has no separate right pane", () => {
+    setDesktop({ rightPaneAvailable: false });
+
+    const { result } = renderHook(() => useTaskRightPanelsToggle("session-1"));
+
+    expect(result.current.isAvailable).toBe(false);
+    expect(result.current.isReady).toBe(true);
+    act(() => result.current.toggleRightPanels());
+    expect(mocks.dock.toggleRightPanels).not.toHaveBeenCalled();
   });
 
   it("does not expose or mutate wider layouts on phones", () => {

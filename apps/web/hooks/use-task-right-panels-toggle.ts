@@ -9,6 +9,7 @@ export type TaskRightPanelsToggleState = {
   isSupported: boolean;
   isReady: boolean;
   isMaximized: boolean;
+  isAvailable: boolean;
   rightPanelsVisible: boolean;
   toggleRightPanels: () => void;
 };
@@ -25,7 +26,8 @@ export function useTaskRightPanelsToggle(
 ): TaskRightPanelsToggleState {
   const { isMobile, isTablet, usesDesktopWorkbench } = useResponsiveBreakpoint();
   const dockviewApi = useDockviewStore((state) => state.api);
-  const dockviewVisible = useDockviewStore((state) => state.rightPanelsVisible);
+  const dockviewVisible = useDockviewStore((state) => state.rightPaneVisible);
+  const dockviewAvailable = useDockviewStore((state) => state.rightPaneAvailable);
   const isRestoringLayout = useDockviewStore((state) => state.isRestoringLayout);
   const preMaximizeLayout = useDockviewStore((state) => state.preMaximizeLayout);
   const toggleDockviewRightPanels = useDockviewStore((state) => state.toggleRightPanels);
@@ -41,9 +43,10 @@ export function useTaskRightPanelsToggle(
   const isReady = isTablet
     ? Boolean(effectiveSessionId)
     : usesDesktopWorkbench && Boolean(dockviewApi) && !isRestoringLayout && !isMaximized;
+  const isAvailable = isTablet ? Boolean(effectiveSessionId) : dockviewAvailable;
 
   const toggleRightPanels = useCallback(() => {
-    if (!isSupported || !isReady) return;
+    if (!isSupported || !isReady || !isAvailable) return;
     if (isTablet) {
       if (effectiveSessionId) toggleTabletRightPanel(effectiveSessionId);
       return;
@@ -53,6 +56,7 @@ export function useTaskRightPanelsToggle(
     effectiveSessionId,
     isReady,
     isSupported,
+    isAvailable,
     isTablet,
     toggleDockviewRightPanels,
     toggleTabletRightPanel,
@@ -62,6 +66,7 @@ export function useTaskRightPanelsToggle(
     isSupported,
     isReady: isSupported && isReady,
     isMaximized,
+    isAvailable,
     rightPanelsVisible,
     toggleRightPanels,
   };

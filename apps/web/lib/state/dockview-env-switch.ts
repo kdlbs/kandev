@@ -30,6 +30,7 @@ import {
   restoreSavedActiveViews,
 } from "./dockview-env-switch-active-views";
 import { ENV_SCOPED_DOCKVIEW_COMPONENTS } from "./dockview-env-scoped-components";
+import { stripHiddenRightPaneMetadata } from "./dockview-right-pane";
 import { createDebugLogger, isDebug } from "@/lib/debug/log";
 import {
   snapshotColumnWidths,
@@ -68,7 +69,8 @@ const EPHEMERAL_COMPONENTS = ENV_SCOPED_DOCKVIEW_COMPONENTS;
 function getHealthyEnvLayout(envId: string): object | null {
   const saved = getEnvLayout(envId);
   if (!saved) return null;
-  return isLayoutShapeHealthy(saved) ? saved : null;
+  const dockviewLayout = stripHiddenRightPaneMetadata(saved);
+  return isLayoutShapeHealthy(dockviewLayout) ? dockviewLayout : null;
 }
 
 /** Check whether a serialized dockview layout contains ephemeral panels. */

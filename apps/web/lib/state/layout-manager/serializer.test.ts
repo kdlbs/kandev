@@ -4,6 +4,8 @@ import { filterEphemeral, fromDockviewApi, toSerializedDockview } from "./serial
 import { panel, PROMPT_HISTORY_PANEL_ID, RIGHT_BOTTOM_GROUP, RIGHT_TOP_GROUP } from "./constants";
 import type { LayoutPanel, LayoutState } from "./types";
 
+const SESSION_PANEL_ID = "session:session-a";
+
 /** Builds an ephemeral LayoutPanel whose title is its id. */
 function ephemeralPanel(id: string, component: string): LayoutPanel {
   return { id, component, title: id };
@@ -69,6 +71,24 @@ function makeCapturedApi(columns: CapturedGroup[][]): DockviewApi {
 }
 
 describe("fromDockviewApi — right-column ownership", () => {
+  it("preserves the production root split orientation", () => {
+    const api = makeCapturedApi([
+      [
+        {
+          id: "runtime-agent",
+          panels: [{ id: SESSION_PANEL_ID, component: "chat", title: "Agent" }],
+        },
+      ],
+    ]) as unknown as {
+      component: { gridview: { root: { splitview: { orientation: string } } } };
+    };
+    api.component.gridview.root.splitview.orientation = "VERTICAL";
+
+    const captured = fromDockviewApi(api as unknown as DockviewApi);
+
+    expect(captured.rootOrientation).toBe("VERTICAL");
+  });
+
   it("captures a live Agent session as the compact center column", () => {
     const captured = fromDockviewApi(
       makeCapturedApi([
@@ -76,7 +96,7 @@ describe("fromDockviewApi — right-column ownership", () => {
           {
             id: "runtime-center",
             panels: [
-              { id: "session:session-a", component: "chat", title: "Agent" },
+              { id: SESSION_PANEL_ID, component: "chat", title: "Agent" },
               { id: "files", component: "files", title: "Files" },
               { id: "changes", component: "changes", title: "Changes" },
               { id: "terminal-default", component: "terminal", title: "Terminal" },
@@ -102,7 +122,7 @@ describe("fromDockviewApi — right-column ownership", () => {
           {
             id: "runtime-agent",
             panels: [
-              { id: "session:session-a", component: "chat", title: "Agent" },
+              { id: SESSION_PANEL_ID, component: "chat", title: "Agent" },
               { id: "files", component: "files", title: "Files" },
               { id: "pr-detail", component: "pr-detail", title: "PR Details" },
             ],
@@ -123,7 +143,7 @@ describe("fromDockviewApi — right-column ownership", () => {
 
     expect(captured.columns.map((column) => column.id)).toEqual(["center", "right"]);
     expect(captured.columns[0]?.groups[0]?.panels.map((item) => item.id)).toEqual([
-      "session:session-a",
+      SESSION_PANEL_ID,
       "files",
       "pr-detail",
     ]);

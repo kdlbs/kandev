@@ -90,6 +90,7 @@ vi.mock("./layout-manager", async (importOriginal) => {
 });
 
 import { applyLayout, defaultLayout, fromDockviewApi } from "./layout-manager";
+import { captureRightPane } from "./dockview-right-pane";
 import { hasRightColumn, useDockviewStore } from "./dockview-store";
 
 function makeStoreApi(): DockviewApi {
@@ -127,10 +128,82 @@ function resetStore() {
     userDefaultLayoutProfile: { kind: "built-in", id: "default" },
     activeLayoutProfile: { kind: "built-in", id: "default" },
     defaultPreset: "default",
+    rightPanelsVisible: true,
+    rightPaneVisible: true,
+    rightPaneAvailable: false,
+    hiddenRightPane: null,
   });
 }
 
 beforeEach(resetStore);
+
+it("hides the actual rightmost Plan region instead of rebuilding the default sidebar", async () => {
+  const api = makeStoreApi();
+  vi.mocked(fromDockviewApi).mockReturnValue({
+    columns: [
+      {
+        id: CENTER_COLUMN_ID,
+        groups: [
+          {
+            id: CENTER_GROUP_ID,
+            panels: [{ id: SESSION_PANEL_ID, component: "chat", title: "Agent" }],
+          },
+        ],
+      },
+      {
+        id: "plan",
+        groups: [{ id: "group-plan", panels: [{ id: "plan", component: "plan", title: "Plan" }] }],
+      },
+    ],
+  });
+  useDockviewStore.setState({ api, rightPanelsVisible: true, defaultPreset: "plan" });
+
+  useDockviewStore.getState().toggleRightPanels();
+
+  const appliedState = vi.mocked(applyLayout).mock.calls.at(-1)?.[1];
+  expect(appliedState?.columns.map((column) => column.id)).toEqual([CENTER_COLUMN_ID]);
+  await flushRaf();
+});
+
+it("retains the hidden pane when applying a toggle layout fails", () => {
+  const api = makeStoreApi();
+  const fullLayout = {
+    rootOrientation: "HORIZONTAL" as const,
+    columns: [
+      {
+        id: CENTER_COLUMN_ID,
+        groups: [
+          {
+            id: CENTER_GROUP_ID,
+            panels: [{ id: SESSION_PANEL_ID, component: "chat", title: "Agent" }],
+          },
+        ],
+      },
+      {
+        id: "plan",
+        groups: [{ id: "group-plan", panels: [{ id: "plan", component: "plan", title: "Plan" }] }],
+      },
+    ],
+  };
+  const captured = captureRightPane(fullLayout)!;
+  vi.mocked(fromDockviewApi).mockReturnValue(captured.layout);
+  vi.mocked(applyLayout).mockImplementationOnce(() => {
+    throw new Error("layout failed");
+  });
+  useDockviewStore.setState({
+    api,
+    hiddenRightPane: captured.hiddenRightPane,
+    rightPaneVisible: false,
+    rightPaneAvailable: true,
+  });
+
+  useDockviewStore.getState().toggleRightPanels();
+
+  expect(useDockviewStore.getState().hiddenRightPane).toEqual(captured.hiddenRightPane);
+  expect(useDockviewStore.getState().rightPaneVisible).toBe(false);
+  expect(useDockviewStore.getState().rightPaneAvailable).toBe(true);
+  expect(useDockviewStore.getState().isRestoringLayout).toBe(false);
+});
 
 it("recognizes the right column from its stable column or group identity", () => {
   expect(
@@ -153,7 +226,7 @@ it("recognizes the right column from its stable column or group identity", () =>
   ).toBe(false);
 });
 
-it("shows the standard right column from a compact layout", async () => {
+it("does not fabricate a right column when the layout has one workbench region", async () => {
   const api = makeStoreApi();
   vi.mocked(defaultLayout).mockReturnValue({
     columns: [
@@ -209,21 +282,9 @@ it("shows the standard right column from a compact layout", async () => {
 
   useDockviewStore.getState().toggleRightPanels();
 
-  const appliedState = vi.mocked(applyLayout).mock.calls.at(-1)?.[1];
-  expect(appliedState?.columns.map((column) => column.id)).toEqual([
-    CENTER_COLUMN_ID,
-    RIGHT_COLUMN_ID,
-  ]);
-  expect(appliedState?.columns[0]?.groups[0]?.panels.map((panel) => panel.id)).toEqual([
-    SESSION_PANEL_ID,
-    "browser",
-    PR_DETAILS_PANEL_ID,
-  ]);
-  const panelIds = appliedState?.columns.flatMap((column) =>
-    column.groups.flatMap((group) => group.panels.map((panel) => panel.id)),
-  );
-  expect(new Set(panelIds).size).toBe(panelIds?.length);
-  expect(useDockviewStore.getState().rightPanelsVisible).toBe(true);
+  expect(applyLayout).not.toHaveBeenCalled();
+  expect(defaultLayout).not.toHaveBeenCalled();
+  expect(useDockviewStore.getState().rightPaneAvailable).toBe(false);
   await flushRaf();
 });
 
@@ -377,29 +438,8 @@ it("removes an identified right column even when it contains a custom panel", as
   await flushRaf();
 });
 
-it("preserves mixed center panels when restoring the right column", async () => {
+it("does not restore a fabricated right column when only the center remains", async () => {
   const api = makeStoreApi();
-  vi.mocked(defaultLayout).mockReturnValue({
-    columns: [
-      {
-        id: RIGHT_COLUMN_ID,
-        pinned: true,
-        groups: [
-          {
-            id: RIGHT_GROUP_ID,
-            panels: [
-              { id: "files", component: "files", title: "Files" },
-              { id: "changes", component: "changes", title: "Changes" },
-            ],
-          },
-          {
-            id: "group-right-bottom",
-            panels: [{ id: MOCK_TERMINAL.id, component: "terminal", title: "Terminal" }],
-          },
-        ],
-      },
-    ],
-  });
   vi.mocked(fromDockviewApi).mockReturnValue({
     columns: [
       {
@@ -420,19 +460,9 @@ it("preserves mixed center panels when restoring the right column", async () => 
 
   useDockviewStore.getState().toggleRightPanels();
 
-  const appliedState = vi.mocked(applyLayout).mock.calls.at(-1)?.[1];
-  expect(appliedState?.columns[0]?.groups[0]?.panels.map((panel) => panel.id)).toEqual([
-    SESSION_PANEL_ID,
-    "files",
-  ]);
-  expect(appliedState?.columns[1]?.groups[0]?.panels.map((panel) => panel.id)).toEqual(["changes"]);
-  expect(appliedState?.columns[1]?.groups[1]?.panels.map((panel) => panel.id)).toEqual([
-    MOCK_TERMINAL.id,
-  ]);
-  const panelIds = appliedState?.columns.flatMap((column) =>
-    column.groups.flatMap((group) => group.panels.map((panel) => panel.id)),
-  );
-  expect(new Set(panelIds).size).toBe(panelIds?.length);
+  expect(applyLayout).not.toHaveBeenCalled();
+  expect(defaultLayout).not.toHaveBeenCalled();
+  expect(useDockviewStore.getState().rightPaneAvailable).toBe(false);
   await flushRaf();
 });
 
@@ -478,7 +508,7 @@ it("keeps a center fallback PR Details tab when hiding right panels", async () =
   await flushRaf();
 });
 
-it("keeps a center fallback PR Details tab when showing right panels", async () => {
+it("does not show a default sidebar when showing from a single workbench region", async () => {
   const api = makeStoreApi();
   vi.mocked(fromDockviewApi).mockReturnValue({
     columns: [
@@ -500,26 +530,13 @@ it("keeps a center fallback PR Details tab when showing right panels", async () 
       },
     ],
   });
-  vi.mocked(defaultLayout).mockReturnValue({
-    columns: [
-      {
-        id: RIGHT_COLUMN_ID,
-        pinned: true,
-        groups: [
-          { id: RIGHT_GROUP_ID, panels: [{ id: "files", component: "files", title: "Files" }] },
-        ],
-      },
-    ],
-  });
   useDockviewStore.setState({ api, rightPanelsVisible: false, defaultPreset: "default" });
 
   useDockviewStore.getState().toggleRightPanels();
 
-  const appliedState = vi.mocked(applyLayout).mock.calls.at(-1)?.[1];
-  expect(appliedState?.columns[0]?.groups[0]?.panels.map((panel) => panel.id)).toEqual([
-    SESSION_PANEL_ID,
-    PR_DETAILS_PANEL_ID,
-  ]);
+  expect(applyLayout).not.toHaveBeenCalled();
+  expect(defaultLayout).not.toHaveBeenCalled();
+  expect(useDockviewStore.getState().rightPaneAvailable).toBe(false);
   await flushRaf();
 });
 

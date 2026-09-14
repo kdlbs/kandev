@@ -13,7 +13,7 @@ type TaskRightPanelsToggleProps = {
 
 export function TaskRightPanelsToggle({ sessionId = null }: TaskRightPanelsToggleProps) {
   const { t } = useTranslation();
-  const { isSupported, isReady, isMaximized, rightPanelsVisible, toggleRightPanels } =
+  const { isSupported, isReady, isMaximized, isAvailable, rightPanelsVisible, toggleRightPanels } =
     useTaskRightPanelsToggle(sessionId);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const restoreFocusRef = useRef(false);
@@ -31,19 +31,23 @@ export function TaskRightPanelsToggle({ sessionId = null }: TaskRightPanelsToggl
 
   let label: string;
   if (isMaximized) {
-    label = t("task:rightPanelsUnavailableWhileMaximized");
+    label = t("task:rightPaneUnavailableWhileMaximized");
+  } else if (!isAvailable) {
+    label = t("task:rightPaneUnavailable");
   } else if (rightPanelsVisible) {
-    label = t("task:hideRightPanels");
+    label = t("task:hideRightPane");
   } else {
-    label = t("task:showRightPanels");
+    label = t("task:showRightPane");
   }
+
+  const canActivate = isReady && isAvailable;
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <span
-          tabIndex={isReady ? -1 : 0}
-          aria-label={isReady ? undefined : label}
+          tabIndex={canActivate ? -1 : 0}
+          aria-label={canActivate ? undefined : label}
           className="inline-flex"
         >
           <Button
@@ -53,10 +57,10 @@ export function TaskRightPanelsToggle({ sessionId = null }: TaskRightPanelsToggl
             className="cursor-pointer text-muted-foreground hover:bg-muted/70 hover:text-foreground"
             data-testid="task-right-panels-toggle"
             ref={buttonRef}
-            aria-label={isReady ? label : undefined}
+            aria-label={canActivate ? label : undefined}
             aria-expanded={rightPanelsVisible}
             title={label}
-            disabled={!isReady}
+            disabled={!canActivate}
             onClick={() => {
               restoreFocusRef.current = document.activeElement === buttonRef.current;
               toggleRightPanels();

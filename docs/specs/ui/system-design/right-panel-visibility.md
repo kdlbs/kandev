@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: ui
 created: 2026-09-13
 requirements:
@@ -10,95 +10,115 @@ owners:
 
 # Right panel visibility system design
 
-## Purpose and boundaries
+## Purpose and current baseline
 
-Expose the existing visibility actions from task chrome that remains mounted when panels disappear.
-UI owns the layout contract. No backend contract changes.
-Reuse [layout profile restoration](task-layout-profiles.md) and the existing device-local exception in
+The persistent header control now toggles the actual rightmost region of the active workbench.
+The user clarified this behavior on 2026-09-14 with Plan Mode and Preview Mode examples.
+The prior implementation at `03fe74e955a869a30819e6d9b3f59c83bb1c3c45` still rebuilds `defaultLayout()` on Show.
+That reconstruction is superseded by exact hidden-pane restoration.
+
+UI owns this layout interaction. Reuse [layout profiles](task-layout-profiles.md) and the device-local layout exception in
 [ADR 0041](../../../decisions/0041-backend-owned-portable-user-settings.md).
-No new persistence boundary or ADR is needed.
+This is a local extension of that ownership boundary. The requirement and this design retain the rationale without another ADR.
 
 ## Requirement mapping
 
-| Criteria | Design section |
-| --- | --- |
-| AC-UI-RIGHT-PANEL-VISIBILITY-001.1, .4, .7 | Persistent control |
-| AC-UI-RIGHT-PANEL-VISIBILITY-001.2, .3 | Layout adapters |
-| AC-UI-RIGHT-PANEL-VISIBILITY-001.5 | Persistence and recovery |
-| AC-UI-RIGHT-PANEL-VISIBILITY-001.6 | Phone composition |
+| Criteria                                    | Design section               |
+| ------------------------------------------- | ---------------------------- |
+| AC-UI-RIGHT-PANEL-VISIBILITY-001.1, .4, .7  | Control and readiness        |
+| AC-UI-RIGHT-PANEL-VISIBILITY-001.2, .3, .8  | Geometric target selection   |
+| AC-UI-RIGHT-PANEL-VISIBILITY-001.5, .9, .10 | Hide, restore, and lifecycle |
+| AC-UI-RIGHT-PANEL-VISIBILITY-001.6          | Tablet and phone             |
 
-## Persistent control
+## Geometric target selection
 
-Add `TaskRightPanelsToggle` in `apps/web/components/task/task-right-panels-toggle.tsx`.
-Place it immediately before `LayoutPresetSelector` in `TopbarToolsGroup` within `task-top-bar.tsx`.
-Render it outside the archived-task editor-actions gate when a supported workbench exists.
-`task-page-inner.tsx` already excludes the desktop header on phones.
-Use `useResponsiveBreakpoint` to select the active layout. The shared icon
-button supplies the coarse-pointer hit area so the control does not need a
-second pointer-size branch.
+A pane is the outermost right side-by-side workbench region. It can contain a leaf group or an entire split subtree.
+Default therefore hides Files/Changes and Terminal together. Plan, Preview, and VS Code hide their current right-hand regions.
+For three side-by-side regions, hide only the rightmost region. Do not remove all regions with matching panel IDs.
+For nested layouts, preserve the selected region's complete tree, including its stacked and nested groups.
+Do not flatten a retained `LayoutColumn.tree` into `groups`; serialization gives the tree precedence.
 
-Use a shared Button and Tooltip with matching accessible next-action text:
-`Show right panels` or `Hide right panels`. Set `aria-expanded` from effective visibility.
-Use right-sidebar expand/collapse icons and `data-testid="task-right-panels-toggle"`.
-The icon stays in one position. ASCII labels represent tooltip/accessibility text rather than mandatory visible text.
-Remove the old `RightTopGroupActions` hide control from `dockview-header-actions.tsx` after the persistent control works.
-Remove only its obsolete imports and wiring.
-Avoid a duplicate right toggle in `DocumentControls` on these task pages; retain unrelated document controls.
+Use live grid ordering and structure, as represented by `fromDockviewApi`, rather than `isRightColumn`, preset names, or component IDs.
+The serializer capture must preserve the actual outer split direction. When the outer split is vertical, there is no separate right-hand region.
+Do not treat the last member of a vertically stacked layout as rightmost.
+Resolve the outer horizontal split from the live Dockview grid, then take its final child.
+The existing split tree and serializer are the starting point, not a new independent geometry model.
 
-`TopbarToolsGroup` currently forces descendant buttons to `h-7`.
-Scope that rule so the new coarse-pointer button retains a real 44-by-44-pixel hit area.
-Keep title truncation and existing overflow behavior. Do not place the toggle in a disappearing group or overflow menu.
+Eligibility requires another workbench region to remain. Exclude the application navigation sidebar from this count.
+Reject a target containing the active `session:<id>` Agent panel or the active `chat` placeholder.
+Do not select a region to its left as a substitute when the actual rightmost region is ineligible.
+A single compact group is ineligible until the user creates a separate region through normal layout actions.
 
-## Layout adapters
+## Control and readiness
 
-A small hook, `useTaskRightPanelsToggle` in `apps/web/hooks/use-task-right-panels-toggle.ts`, selects existing state and actions.
-It returns visibility, readiness, and the activation callback. It does not own another visibility boolean.
+Keep `TaskRightPanelsToggle` before `LayoutPresetSelector` in `task-top-bar.tsx`.
+`useTaskRightPanelsToggle` remains the responsive adapter. It must expose effective state from the selected owner.
+The desktop state has three cases: hideable visible target, retained hidden target, or unavailable target.
+A retained hidden target takes precedence over selecting another visible target.
 
-- Desktop workbench: read `useDockviewStore.rightPanelsVisible`; call `toggleRightPanels`.
-  Require the current Dockview API and a settled restoration for readiness.
-  Preserve `captureLiveWidths`, chat-scroll preservation, pinned-width enforcement, and the existing save path.
-- Compact desktop: remove the early return that blocks showing while `defaultPreset === "compact"`.
-  An explicit action can add the standard right column. Keep `useCompactDockviewDefault` and initial compact selection intact.
-- Tablet fallback: use `useLayoutStore.columnsBySessionId[effectiveSessionId].right`, defaulting to true.
-  Call `toggleRightPanel(effectiveSessionId)` only when that ID exists.
-  Derive the same effective session as `useSessionLayoutState`; never write under an empty session key.
-- Phone: return no supported desktop control. Do not mutate either wider-layout store.
+Use localized next-action labels such as `Hide right pane` and `Show right pane`, with `aria-expanded` matching effective visibility.
+For an unavailable target, retain a disabled control with an explanation such as `No separate right pane to hide`.
+Use the existing focusable disabled-tooltip wrapper and maximized-state explanation.
+Disable during initialization, restoration, and maximize. Preserve 28px fine-pointer and 44px coarse-pointer hit areas.
+The next user action must never create Files/Changes/Terminal merely because no hidden pane exists.
 
-`SessionTabletLayout` currently renders its right Panel unconditionally.
-Render that column only when `layoutState.right` is true, allowing the left content to fill the workbench.
-When hidden, do not persist a one-panel geometry over `task-layout-tablet-v1`.
-Keep the saved two-panel split for reopening. Preserve the center component identity across this change.
-Preview composition and inner Files/Terminal sizing retain their current contracts.
+## Hide, restore, and lifecycle
 
-The existing Dockview hide predicate removes entire columns containing any Files, Changes, or Terminal panel.
-A persistent control makes mixed custom layouts easier to reach.
-Constrain removal to actual right-column ownership, rather than incidental right-panel IDs inside the center column.
-Reuse the existing `isRightColumn` boundary. Preserve center Agent and PR Details panels in mixed-state regression tests.
-Showing retains `removeRightPanelTabs` and the existing standard right-column insertion without duplicate canonical panels.
-Do not introduce arbitrary custom-layout snapshots in this package.
+Add a focused helper module, proposed `lib/state/dockview-right-pane.ts`, for selection, snapshot validation, and reinsertion.
+Keep active environment state in `useDockviewStore`; avoid growing the visibility actions into another large layout subsystem.
+A hidden-pane descriptor contains the captured subtree, panel/group identities and parameters, selected tabs, width,
+its placement anchor, and enough layout identity to reject a stale descriptor. It contains no transcript or terminal output.
+The descriptor is one reversible operation, not an undo history or a saved profile.
 
-## Persistence and recovery
+On Hide, capture the eligible region and its insertion anchor before removing it.
+Preserve chat scroll and the remaining layout's group selections. Save the collapsed layout and descriptor together.
+Do not terminate agents or user shells when hiding their UI. Block stale callbacks using environment and operation identity before any mutation.
 
-Dockview restores device-local environment layouts and derives visibility from their shape.
-Tablet fallback already persists columns under `layout-columns-by-session` and panel geometry under `task-layout-tablet-v1`.
-The new control reads those owners; it adds no backend field or storage key.
-Do not synchronize these distinct layout stores on resize or orientation changes.
+On Show, merge the retained subtree into the current live arrangement at its anchored right-side position.
+Do not restore an old whole-workbench snapshot over edits made while the pane was hidden.
+Reconcile panel IDs already reopened elsewhere: keep their live instances, omit duplicates from the retained subtree,
+and remove empty leaves while preserving the remaining tree and its active-tab fallbacks.
+Use existing availability and session reconciliation for removed plugin panels, obsolete sessions, reviews, and ephemeral panels.
+When no eligible hidden panels remain, clear the descriptor without creating a fallback region.
+Clear recovery state only after successful application. Retain recoverable state after an application failure.
+Restore captured geometry within current safety limits; do not apply Default-only pinned widths to Plan or Browser merely because they are rightmost.
 
-Disable activation while the current API is absent or restoration is active.
-Do not use a stale desktop API while the tablet fallback is mounted.
-After restoration, read the current store value rather than retaining a click-time label.
-Keep task/session navigation and existing Reset Layout semantics intact.
+### Environment persistence
 
-## Phone composition
+Use the existing environment layout storage scope, which currently uses `sessionStorage` through `getEnvLayout` and `setEnvLayout`.
+Persist optional versioned `kandevHiddenRightPane` metadata with the existing serialized environment layout record.
+This keeps the collapsed layout and recovery descriptor in one write, without a second storage key or backend preference.
+The metadata field is proposed new code. Strip it before passing the Dockview payload to `api.fromJSON`.
+Legacy records without this field remain valid. Validate metadata separately from the existing grid health check.
+Invalid metadata must not discard an otherwise valid visible layout.
 
-Reuse `SessionMobileLayout` and `SessionMobileBottomNav`, the shipped task-domain exemplars.
-Files and Terminal are frequent destinations with dense content, so they retain full-screen panel navigation.
-Chat remains the route back to the conversation. No new drawer or sidebar is added.
-Preserve the current dynamic viewport, safe-area handling, and panel-owned scrolling.
+Centralize record composition so immediate toggle saves, debounced saves, outgoing-environment saves, and unload saves preserve current recovery state.
+Read it on initial mount and every environment restore path, including fast restores and maximize restoration.
+An A/B task switch saves and loads each environment's own descriptor rather than copying the current descriptor to the next environment.
+Do not put environment-specific recovery data in global fallback layouts or portable saved layout profiles.
+Ordinary Save current layout captures the visible arrangement only, without hidden metadata.
 
-## Validation
+Explicit preset application, custom layout application, and Reset Layout clear the current environment's descriptor before applying the new layout.
+This prevents a hidden Plan from reappearing after the user selects Preview Mode.
+Normal panel close does not populate this descriptor. Maximize does not capture its temporary overlay as a hidden right pane.
+Preserve metadata when saving an unchanged regular layout beneath a maximize overlay.
 
-Use component and hook tests for wiring, readiness, localization, and focus.
-Use store regression tests for compact reopening and mixed center/right columns.
-Use browser tests for real width recovery, repeated toggles, reload, pointer sizing, and responsive handoffs.
-The [work order](../../../plans/right-panel-visibility/task-01-persistent-toggle.md) owns exact commands and scenarios.
+## Tablet and phone
+
+The 768-1023px coarse-pointer fallback remains `SessionTabletLayout`, using its existing session-scoped right-column state.
+Its outer right region is Files/Terminal; preserve its saved two-panel sizing and active content on hide/show.
+Its left Chat/Plan/Changes tab surface is not a separate right pane.
+Larger tablets use Dockview, so Plan and Preview select their live geometric target exactly as on desktop.
+No breakpoint or cross-store synchronization is added.
+
+Phone composition remains `SessionMobileLayout` with `SessionMobileBottomNav`.
+Files and Terminal keep full-screen destinations with panel-owned scrolling and existing dynamic viewport/safe-area behavior.
+Do not add a right-pane toggle or let phone navigation write wider-layout recovery state.
+
+## Validation and delivery
+
+Use real capture/serialization round trips with `session:<id>` Agent identities, rather than mocked column labels alone.
+Cover exact pane identity, nested geometry, no fabricated sidebar, duplicate reconciliation, reload, environment switches,
+preset invalidation, malformed recovery metadata, maximize guards, and tablet/phone parity.
+The [new work order](../../../plans/right-panel-visibility/task-02-contextual-right-pane.md) owns exact checks.
+[Task 01](../../../plans/right-panel-visibility/task-01-persistent-toggle.md) is historical implementation evidence, not authority for superseded reconstruction.

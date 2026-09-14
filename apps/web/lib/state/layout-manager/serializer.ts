@@ -1,5 +1,12 @@
 import type { DockviewApi, SerializedDockview } from "dockview-react";
-import type { LayoutState, LayoutColumn, LayoutGroup, LayoutPanel, LayoutNode } from "./types";
+import type {
+  LayoutState,
+  LayoutColumn,
+  LayoutGroup,
+  LayoutPanel,
+  LayoutNode,
+  LayoutOrientation,
+} from "./types";
 import { computeColumnWidths, computeGroupHeights } from "./sizing";
 import {
   SIDEBAR_LOCK,
@@ -177,6 +184,7 @@ export function toSerializedDockview(
   pinnedWidths: Map<string, number>,
 ): SerializedDockview {
   const ctx: SerializationCtx = { counter: 0 };
+  const rootOrientation = state.rootOrientation ?? "HORIZONTAL";
   const widths = computeColumnWidths(state.columns, totalWidth, pinnedWidths);
 
   const root: SerializedBranchNode = {
@@ -190,7 +198,7 @@ export function toSerializedDockview(
       root,
       width: totalWidth,
       height: totalHeight,
-      orientation: "HORIZONTAL",
+      orientation: rootOrientation,
     },
     panels: serializePanels(state),
     activeGroup: undefined,
@@ -309,6 +317,15 @@ function inferColumnMeta(
   return { columnId: `col-${index}`, isPinned: false };
 }
 
+function readRootOrientation(
+  root: { orientation?: unknown } | null | undefined,
+  splitview: { orientation?: unknown } | null | undefined,
+): LayoutOrientation {
+  return root?.orientation === "VERTICAL" || splitview?.orientation === "VERTICAL"
+    ? "VERTICAL"
+    : "HORIZONTAL";
+}
+
 /**
  * Walk the dockview grid tree and map back to LayoutState.
  * Captures both the recursive tree structure (for faithful restoration)
@@ -316,9 +333,10 @@ function inferColumnMeta(
  */
 export function fromDockviewApi(api: DockviewApi): LayoutState {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const sv = (api as any).component?.gridview?.root?.splitview;
+  const root = (api as any).component?.gridview?.root;
+  const sv = root?.splitview;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const rootChildren = (api as any).component?.gridview?.root?.children;
+  const rootChildren = root?.children;
 
   if (!rootChildren || !sv) {
     console.warn("fromDockviewApi: no root splitview or children found");
@@ -343,7 +361,7 @@ export function fromDockviewApi(api: DockviewApi): LayoutState {
     });
   }
 
-  return { columns };
+  return { columns, rootOrientation: readRootOrientation(root, sv) };
 }
 
 // ─── Ephemeral Filtering ───────────────────────────────────────────────────
