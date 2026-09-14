@@ -3,7 +3,7 @@ id: "04-session-resume"
 title: "Resume completed conversations safely"
 status: done
 wave: 4
-depends_on:
+depends_on: 
   - 03-runtime-completion
 plan: "plan.md"
 requirements:

@@ -3,7 +3,7 @@ id: "05-workflow-editor"
 title: "Expose workflow completion settings"
 status: done
 wave: 5
-depends_on:
+depends_on: 
   - 04-session-resume
 plan: "plan.md"
 requirements:

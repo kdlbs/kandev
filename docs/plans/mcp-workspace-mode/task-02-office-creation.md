@@ -3,7 +3,7 @@ id: "02-office-creation"
 title: "Preserve Office CLI creation"
 status: done
 wave: 2
-depends_on:
+depends_on: 
   - "01-creation-admission"
 plan: "plan.md"
 requirements:

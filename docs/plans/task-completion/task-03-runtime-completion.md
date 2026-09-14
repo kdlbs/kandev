@@ -3,7 +3,7 @@ id: "03-runtime-completion"
 title: "Apply configured task completion"
 status: done
 wave: 3
-depends_on:
+depends_on: 
   - 02-portable-contracts
 plan: "plan.md"
 requirements:

@@ -49,3 +49,4 @@ retries task-derived preparation when a concurrent switch commits first. The
 SQLite session transaction rejects stale resolutions. Comparison-target writes
 use task-before-link locking and recheck ownership. The web dialog tracks the
 last confirmed runner so a failed later save can be retried in either direction.
+

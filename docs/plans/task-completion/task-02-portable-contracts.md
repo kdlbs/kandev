@@ -3,7 +3,7 @@ id: "02-portable-contracts"
 title: "Carry portable completion settings"
 status: done
 wave: 2
-depends_on:
+depends_on: 
   - 01-persistence
 plan: "plan.md"
 requirements:

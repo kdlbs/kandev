@@ -3,7 +3,7 @@ id: "03-external-management"
 title: "Preserve external task management across modes"
 status: done
 wave: 3
-depends_on:
+depends_on: 
   - "02-office-creation"
 plan: "plan.md"
 requirements:

@@ -1,12 +1,17 @@
 ---
-spec: docs/specs/tasks/requirements/atomic-terminal-routing.md
-related_specs:
-  - docs/specs/tasks/system-design/atomic-terminal-routing.md
 created: 2026-09-14
 status: in_progress
+requirements:
+  - REQ-TASKS-ATOMIC-TERMINAL-ROUTING-001
+  - REQ-TASKS-ATOMIC-TERMINAL-ROUTING-002
+  - REQ-TASKS-ATOMIC-TERMINAL-ROUTING-003
+system_design:
+  - ../../specs/tasks/system-design/atomic-terminal-routing.md
 ---
 
 # Implementation Plan: Atomic Terminal Routing
+
+Work order: [task-01-serialize-terminal-route-ownership.md](task-01-serialize-terminal-route-ownership.md)
 
 ## Objective
 

@@ -3,7 +3,7 @@ id: "06-chat-recovery"
 title: "Restore completed-chat interaction"
 status: done
 wave: 6
-depends_on:
+depends_on: 
   - 05-workflow-editor
 plan: "plan.md"
 requirements:
