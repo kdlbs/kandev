@@ -7,7 +7,12 @@ depends_on: [03-workflow-sync-backoff]
 plan: plan.md
 requirements:
   - REQ-INTEGRATIONS-GITHUB-RATE-004
-system_design: ../../specs/integrations/system-design/github-rate-limit-coordination.md
+acceptance_criteria:
+  - AC-INTEGRATIONS-GITHUB-RATE-004.1
+  - AC-INTEGRATIONS-GITHUB-RATE-004.2
+  - AC-INTEGRATIONS-GITHUB-RATE-004.3
+system_design:
+  - ../../specs/integrations/system-design/github-rate-limit-coordination.md
 ---
 
 # Task 04: Operation-Local Rate Errors

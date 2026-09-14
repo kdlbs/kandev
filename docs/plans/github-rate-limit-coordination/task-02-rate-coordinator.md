@@ -7,7 +7,12 @@ depends_on: [01-rate-classification]
 plan: plan.md
 requirements:
   - REQ-INTEGRATIONS-GITHUB-RATE-002
-system_design: ../../specs/integrations/system-design/github-rate-limit-coordination.md
+acceptance_criteria:
+  - AC-INTEGRATIONS-GITHUB-RATE-002.1
+  - AC-INTEGRATIONS-GITHUB-RATE-002.2
+  - AC-INTEGRATIONS-GITHUB-RATE-002.3
+system_design:
+  - ../../specs/integrations/system-design/github-rate-limit-coordination.md
 ---
 
 # Task 02: Principal-Wide Request Admission

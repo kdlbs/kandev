@@ -1,7 +1,14 @@
 ---
-spec: docs/specs/integrations/requirements/github-rate-limit-coordination.md
 created: 2026-08-29
 status: completed
+requirements:
+  - REQ-INTEGRATIONS-GITHUB-RATE-001
+  - REQ-INTEGRATIONS-GITHUB-RATE-002
+  - REQ-INTEGRATIONS-GITHUB-RATE-003
+  - REQ-INTEGRATIONS-GITHUB-RATE-004
+system_design:
+  - ../../specs/integrations/system-design/github-rate-limit-coordination.md
+legacy_specs: []
 ---
 
 # Implementation Plan: GitHub Rate-Limit Coordination

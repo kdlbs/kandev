@@ -7,7 +7,14 @@ depends_on: [02-rate-coordinator]
 plan: plan.md
 requirements:
   - REQ-INTEGRATIONS-GITHUB-RATE-003
-system_design: ../../specs/integrations/system-design/github-rate-limit-coordination.md
+acceptance_criteria:
+  - AC-INTEGRATIONS-GITHUB-RATE-003.1
+  - AC-INTEGRATIONS-GITHUB-RATE-003.2
+  - AC-INTEGRATIONS-GITHUB-RATE-003.3
+  - AC-INTEGRATIONS-GITHUB-RATE-003.4
+  - AC-INTEGRATIONS-GITHUB-RATE-003.5
+system_design:
+  - ../../specs/integrations/system-design/github-rate-limit-coordination.md
 ---
 
 # Task 03: Workflow Sync Retry Persistence

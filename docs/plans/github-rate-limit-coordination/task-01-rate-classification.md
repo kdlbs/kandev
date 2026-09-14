@@ -7,7 +7,14 @@ depends_on: []
 plan: plan.md
 requirements:
   - REQ-INTEGRATIONS-GITHUB-RATE-001
-system_design: ../../specs/integrations/system-design/github-rate-limit-coordination.md
+acceptance_criteria:
+  - AC-INTEGRATIONS-GITHUB-RATE-001.1
+  - AC-INTEGRATIONS-GITHUB-RATE-001.2
+  - AC-INTEGRATIONS-GITHUB-RATE-001.3
+  - AC-INTEGRATIONS-GITHUB-RATE-001.4
+  - AC-INTEGRATIONS-GITHUB-RATE-001.5
+system_design:
+  - ../../specs/integrations/system-design/github-rate-limit-coordination.md
 ---
 
 # Task 01: Typed Provider Failure Classification
