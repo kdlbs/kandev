@@ -783,6 +783,7 @@ func (s *Service) startCreatedSession(
 		sessionID = activeSession.ID
 		effectiveProfileID = activeSession.AgentProfileID
 	}
+	s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, seam2Res.manualOverride, seam2Res.population, seam2Res.populationKnown, seam2Res.ceiling)
 
 	if effectiveProfileID, err = s.resolveDynamicLaunchExecution(ctx, session, effectiveProfileID, true); err != nil {
 		return nil, err
@@ -897,7 +898,6 @@ func (s *Service) startCreatedSession(
 	// The agent is running, so the reservation becomes a consumption.
 	launchClaim.consume(ctx)
 	seam2Res.consume()
-	s.recordManualOverrideIfAdmitted(ctx, taskID, sessionID, seam2Res.manualOverride, seam2Res.population, seam2Res.populationKnown, seam2Res.ceiling)
 
 	// Ensure a PR watch exists so the poller can detect PRs created by the agent.
 	// PrepareTaskSession may have already created one, but if that goroutine failed

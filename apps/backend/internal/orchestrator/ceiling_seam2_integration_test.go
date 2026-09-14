@@ -2,8 +2,10 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"github.com/stretchr/testify/require"
@@ -81,4 +83,48 @@ func TestStartCreatedSession_ManualLaunchOverCeilingIsAdmitted(t *testing.T) {
 
 	record := deferredLaunchOf(t, svc, "seam2-it-manual-b")
 	require.Nil(t, record, "a manual override must never write a ceiling_deferred record")
+}
+
+// TestStartCreatedSession_ManualLaunchOverCeilingIsAuditedEvenWhenTheLaunchFails
+// pins AC-14/AC-53's unconditional audit contract: the record must be written
+// once the reservation is admitted onto a real session, not only once the
+// subsequent launch attempt has also succeeded. A launch failure between
+// admission and agent start must not erase the only evidence that a ceiling
+// override happened.
+func TestStartCreatedSession_ManualLaunchOverCeilingIsAuditedEvenWhenTheLaunchFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "seam2-it-fail-a", "seam2-it-fail-session-a", models.TaskSessionStateCreated)
+	seedTaskAndSession(t, repo, "seam2-it-fail-b", "seam2-it-fail-session-b", models.TaskSessionStateCreated)
+
+	taskRepo := newMockTaskRepo()
+	seedMockTaskState(taskRepo, "seam2-it-fail-a", v1.TaskStateInProgress)
+	seedMockTaskState(taskRepo, "seam2-it-fail-b", v1.TaskStateInProgress)
+	launchErr := errors.New("workspace launch failed")
+	agentMgr := &mockAgentManager{
+		repoForExecutionLookup: repo,
+		launchAgentFunc: func(_ context.Context, req *executor.LaunchAgentRequest) (*executor.LaunchAgentResponse, error) {
+			if req.SessionID == "seam2-it-fail-session-b" {
+				return nil, launchErr
+			}
+			return &executor.LaunchAgentResponse{AgentExecutionID: "mock-launch-" + req.SessionID}, nil
+		},
+	}
+	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
+	messages := &mockMessageCreator{}
+	svc.messageCreator = messages
+
+	_, err := svc.StartCreatedSession(ctx, "seam2-it-fail-a", "seam2-it-fail-session-a", "profile-1", "go", false, false, true, nil, nil)
+	require.NoError(t, err)
+
+	// autoStart=false: a manual start admitted over the ceiling whose launch
+	// then fails.
+	_, err = svc.StartCreatedSession(ctx, "seam2-it-fail-b", "seam2-it-fail-session-b", "profile-1", "go", false, false, false, nil, nil)
+	require.Error(t, err, "the forced launch failure must still surface")
+
+	session, err := repo.GetTaskSession(ctx, "seam2-it-fail-session-b")
+	require.NoError(t, err)
+	require.NotNil(t, session.Metadata[ceilingManualOverrideMetadataKey],
+		"a manual override must be audited even when its launch subsequently fails")
 }
