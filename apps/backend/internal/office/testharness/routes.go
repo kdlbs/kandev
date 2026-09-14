@@ -308,6 +308,7 @@ type seedTaskSessionRequest struct {
 	AgentProfileID string                 `json:"agent_profile_id,omitempty"`
 	StartedAt      *string                `json:"started_at,omitempty"`
 	CompletedAt    *string                `json:"completed_at,omitempty"`
+	ErrorMessage   string                 `json:"error_message,omitempty"`
 	CommandCount   int                    `json:"command_count,omitempty"`
 	Metadata       map[string]interface{} `json:"metadata,omitempty"`
 }
@@ -512,6 +513,7 @@ func buildSeededSession(req *seedTaskSessionRequest) (*models.TaskSession, error
 		RepositoryID:   req.RepositoryID,
 		AgentProfileID: req.AgentProfileID,
 		State:          models.TaskSessionState(req.State),
+		ErrorMessage:   req.ErrorMessage,
 		Metadata:       metadata,
 		StartedAt:      startedAt,
 		CompletedAt:    completedAt,
