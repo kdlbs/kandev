@@ -139,7 +139,8 @@ func TestAddTaskParticipant_ResolvesStepOnTheWritingHandle(t *testing.T) {
 		t.Errorf("reported step = %q, want step-writer (the writing handle's view)", result.StepID)
 	}
 
-	// Read through the writer: the repo's reader points at the other database.
+	// Read directly through the writer. ReaderDB intentionally points at the
+	// divergent database, so using it would verify the fixture instead.
 	var stepID string
 	if err := writer.Get(&stepID, `
 		SELECT step_id FROM workflow_step_participants

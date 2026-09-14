@@ -86,6 +86,25 @@ func TestAddTaskParticipant_EmptyAgentRejectionIsDeterministic(t *testing.T) {
 	}
 }
 
+// TestAddTaskParticipant_EmptyAgentGuardRunsBeforeTransaction covers
+// AC-OFFICE-SEAT-ASSURANCE-001.3. Closing the database makes any transaction
+// attempt fail, so the sentinel proves that the guard returns before the
+// store touches the database.
+func TestAddTaskParticipant_EmptyAgentGuardRunsBeforeTransaction(t *testing.T) {
+	repo := newSearchTestRepo(t)
+	if err := repo.ReaderDB().Close(); err != nil {
+		t.Fatalf("close database: %v", err)
+	}
+
+	result, err := repo.AddTaskParticipant(context.Background(), "guard-closed", "", "reviewer")
+	if !errors.Is(err, sqlite.ErrEmptyAgentProfileID) {
+		t.Fatalf("AddTaskParticipant error = %v, want ErrEmptyAgentProfileID", err)
+	}
+	if result != (sqlite.ParticipantWriteResult{}) {
+		t.Fatalf("result = %+v, want zero value", result)
+	}
+}
+
 // TestAddTaskParticipant_WhitespaceAgentIsNotRejectedByGuard covers
 // AC-OFFICE-SEAT-ASSURANCE-001.5. Only the empty identifier is this
 // guard's business. A whitespace identifier names no agent profile and
