@@ -47,7 +47,7 @@ func TestAdmitRun_MetricBlockedByLimit(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -78,7 +78,7 @@ func TestAdmitRun_MetricBlockedPricingDegraded(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -104,7 +104,7 @@ func TestAdmitRun_MetricDeferredEvaluatorFault(t *testing.T) {
 		t.Fatalf("create agent: %v", err)
 	}
 	insertTestTask(t, svc, "task-metric-deferred-fault", "ws-1")
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-metric-deferred-fault"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestAdmitRun_MetricBlockedAbsentEvaluator(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -156,7 +156,7 @@ func TestAdmitRun_MetricDeferredWorkspaceLookup(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 	run, err := svc.ClaimNextRun(ctx)
@@ -192,7 +192,7 @@ func TestProcessRun_AgentRowDeleted_Cancels(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 	run, err := svc.ClaimNextRun(ctx)
@@ -239,7 +239,7 @@ func TestAdmitRun_MetricCancelledNoWorkspace(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 	run, err := svc.ClaimNextRun(ctx)
@@ -271,7 +271,7 @@ func TestAdmitRun_MetricCancelledStaleDeferral(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 	run, err := svc.ClaimNextRun(ctx)
@@ -302,7 +302,7 @@ func TestAdmitRun_MetricAdmittedDefault(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -335,7 +335,7 @@ func TestAdmitRun_MetricAdmittedDegradedWindow_ViaDefault(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonRoutineTrigger, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -369,7 +369,7 @@ func TestAdmitRun_MetricAdmittedDegradedWindow_ViaStoredPolicyBypassingGate5(t *
 		t.Fatalf("create agent: %v", err)
 	}
 	insertTestTask(t, svc, "task-metric-degraded-attended", "ws-1")
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-metric-degraded-attended"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}

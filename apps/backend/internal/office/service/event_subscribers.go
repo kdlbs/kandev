@@ -21,6 +21,8 @@ import (
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
 	"github.com/kandev/kandev/internal/runs/commentkeys"
+	"github.com/kandev/kandev/internal/runs/dedupkeys"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
 )
 
@@ -107,12 +109,16 @@ type TaskMovedData struct {
 	SessionID              string `json:"session_id"`
 }
 
-// TaskUpdatedData represents the payload of a task.updated event.
+// TaskUpdatedData represents the payload of a task.created / task.updated
+// event. AssignmentGeneration is carried on the extra map by
+// publishTaskEventWithExtra's caller at task-creation time (never re-read);
+// nil means the publishing event predates this field or is not a creation.
 type TaskUpdatedData struct {
 	TaskID                 string `json:"task_id"`
 	WorkspaceID            string `json:"workspace_id"`
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id"`
 	Title                  string `json:"title"`
+	AssignmentGeneration   *int64 `json:"assignment_generation"`
 }
 
 // CommentPostedData represents a comment event payload.
@@ -421,14 +427,6 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 		}
 		return err
 	}
-	// Lifecycle: terminal "complete" event for the run detail Events log.
-	s.AppendRunEvent(ctx, run.ID, "complete", "info", map[string]interface{}{
-		"task_id":    data.TaskID,
-		"session_id": data.SessionID,
-	})
-	s.markRoutingSuccess(ctx, run)
-	s.recordRunOutputSummary(ctx, run, *data)
-	s.warnIfReviewDecisionMissing(ctx, run)
 	// resolveLifecycleRun prefers the immutable run ID from the event and
 	// falls back to task plus agent only for legacy events. Releasing here
 	// (rather than unconditionally inside transitionRunTerminal) is safe —
@@ -438,10 +436,35 @@ func (s *Service) handleAgentCompleted(ctx context.Context, event *bus.Event) er
 	// must stay held so ReapStaleCheckouts (not a same-agent race) is what
 	// eventually reclaims it, instead of releasing a lock for a run that
 	// never actually reached a terminal state.
-	if err := s.FinishRun(ctx, run.ID, RunOutcomeProcessed); err != nil {
+	wrote, err := s.FinishRun(ctx, run.ID, RunOutcomeProcessed)
+	if err != nil {
 		s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
 		return err
 	}
+	if !wrote {
+		// The run reached a terminal state through another writer (e.g. a
+		// concurrent cancel) between resolveLifecycleRun's read and this
+		// write — it never actually held the checkout from this call's
+		// point of view, so releasing it here would steal a live lock the
+		// same way an unconditional release would (Review round 3, R3-1).
+		// The agent may still be stuck "working" from the launch though.
+		// The completion side effects below (timeline event, routing
+		// health, output summary, review-decision warning) must not run
+		// either: this run did not actually complete from this call's
+		// point of view, so persisting them would attribute another
+		// writer's outcome (e.g. a cancel) with this one's evidence
+		// (CodeRabbit, PR fixup round 2).
+		s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
+		return nil
+	}
+	// Lifecycle: terminal "complete" event for the run detail Events log.
+	s.AppendRunEvent(ctx, run.ID, "complete", "info", map[string]interface{}{
+		"task_id":    data.TaskID,
+		"session_id": data.SessionID,
+	})
+	s.markRoutingSuccess(ctx, run)
+	s.recordRunOutputSummary(ctx, run, *data)
+	s.warnIfReviewDecisionMissing(ctx, run)
 	s.releaseTaskCheckoutForRun(ctx, run)
 	s.stampRunFinished(ctx, run)
 	return nil
@@ -507,6 +530,12 @@ func (s *Service) markRoutingSuccess(ctx context.Context, run *models.Run) {
 	rd.MarkRunSuccessHealth(ctx, run, agent)
 }
 
+// runEventFieldAgentID is the run-event payload key for an agent id.
+// Named to avoid a duplicate-literal lint failure — "agent_id" also
+// appears as a JSON struct tag elsewhere in this file, and those two
+// uses are otherwise unrelated to each other.
+const runEventFieldAgentID = "agent_id"
+
 // handleTasklessAgentCompleted attributes a taskless run completion,
 // finishes the run, and refreshes the per-agent, per-scope continuation
 // summary so the next fire has bridge context. The
@@ -540,12 +569,6 @@ func (s *Service) handleTasklessAgentCompleted(
 		}
 		return err
 	}
-	s.AppendRunEvent(ctx, run.ID, "complete", "info", map[string]interface{}{
-		"agent_id":   data.AgentID,
-		"session_id": data.SessionID,
-	})
-	s.refreshContinuationSummary(ctx, run, run.AgentProfileID)
-	s.recordRunOutputSummary(ctx, run, *data)
 	// run came from GetClaimedTasklessRunForAgent: it is the run that
 	// actually launched. Taskless runs typically carry no task_id, so this
 	// is a no-op in the common case, but call it for the same reason as
@@ -553,9 +576,26 @@ func (s *Service) handleTasklessAgentCompleted(
 	//
 	// Finish before releasing, same as handleAgentCompleted: a failed
 	// FinishRun must not still give up the checkout.
-	if err := s.FinishRun(ctx, run.ID, RunOutcomeProcessed); err != nil {
+	wrote, err := s.FinishRun(ctx, run.ID, RunOutcomeProcessed)
+	if err != nil {
 		return err
 	}
+	if !wrote {
+		// Already terminal via another writer — see handleAgentCompleted's
+		// matching branch (Review round 3, R3-1). The completion side
+		// effects below must not run either: this run did not actually
+		// complete from this call's point of view, so recording them
+		// (timeline event, continuation summary, output summary) would
+		// attribute another writer's outcome with this one's evidence
+		// (CodeRabbit, PR fixup round 2).
+		return nil
+	}
+	s.AppendRunEvent(ctx, run.ID, "complete", "info", map[string]interface{}{
+		runEventFieldAgentID: data.AgentID,
+		"session_id":         data.SessionID,
+	})
+	s.refreshContinuationSummary(ctx, run, run.AgentProfileID)
+	s.recordRunOutputSummary(ctx, run, *data)
 	s.releaseTaskCheckoutForRun(ctx, run)
 	s.stampRunFinished(ctx, run)
 	return nil
@@ -708,8 +748,15 @@ func (s *Service) handleAgentFailed(ctx context.Context, event *bus.Event) error
 	// rate-limit-retry callers; we deliberately do NOT call into it
 	// here. See docs/specs/office/requirements/runtime.md.
 	errMsg := enrichModelFailureMessage(run, data.ErrorMessage)
-	if err := s.HandleAgentFailure(ctx, run, errMsg); err != nil {
+	wrote, err := s.HandleAgentFailure(ctx, run, errMsg)
+	if err != nil {
 		return err
+	}
+	if !wrote {
+		// Already terminal via another writer — waking the CEO agent
+		// over a run that never actually failed would be a false alarm
+		// (Review round 3, R3-1).
+		return nil
 	}
 	s.dispatchAgentErrorTrigger(ctx, run, data.TaskID, data.SessionID, errMsg)
 	return nil
@@ -953,22 +1000,39 @@ func (s *Service) handleTaskCreated(ctx context.Context, event *bus.Event) error
 	if err != nil {
 		return nil
 	}
-	return s.queueTaskAssignedRun(ctx, data.TaskID, data.AssigneeAgentProfileID, true)
+	return s.queueTaskAssignedRun(ctx, data.TaskID, data.AssigneeAgentProfileID, data.AssignmentGeneration, true)
 }
 
-// handleTaskUpdated fires a task_assigned run when an agent is assigned.
+// handleTaskUpdated fires a task_assigned run when an agent is assigned. No
+// production update path can put a new agent into the runner seat (see
+// office/repository/sqlite/tasks.go's UpdateTaskAssignee vs the four inert
+// syncRunnerInTx writers), so this stays subscribed as a redelivery and
+// defensive path rather than a live assignment occurrence.
 func (s *Service) handleTaskUpdated(ctx context.Context, event *bus.Event) error {
 	data, err := decodeEventData[TaskUpdatedData](event)
 	if err != nil {
 		return nil
 	}
-	return s.queueTaskAssignedRun(ctx, data.TaskID, data.AssigneeAgentProfileID, false)
+	return s.queueTaskAssignedRun(ctx, data.TaskID, data.AssigneeAgentProfileID, data.AssignmentGeneration, false)
 }
 
+// queueTaskAssignedRun fires a task_assigned run for the given occurrence.
+//
+// When fallbackToStoredRunner is set and the event carried no assignee, the
+// agent is recovered through a fresh post-commit GetTaskExecutionFields read
+// (task.created's payload can omit it) while the generation, if any, still
+// describes the payload's own occurrence — not necessarily this freshly-read
+// agent's. Task event publication is asynchronous (a per-task FIFO drainer),
+// so a reassignment can commit between the event being built and this
+// handler running, and the two halves would then name different occurrences.
+// Forcing keyless whenever the fallback actually recovers an agent this way
+// avoids mis-keying at the cost of a possible duplicate wake, which
+// AC-003.2 already accepts.
 func (s *Service) queueTaskAssignedRun(
 	ctx context.Context,
 	taskID string,
 	agentProfileID string,
+	assignmentGeneration *int64,
 	fallbackToStoredRunner bool,
 ) error {
 	if taskID == "" {
@@ -984,15 +1048,23 @@ func (s *Service) queueTaskAssignedRun(
 	if fields == nil || !fields.IsFromOffice {
 		return nil
 	}
+	fellBackToStoredRunner := false
 	if agentProfileID == "" && fallbackToStoredRunner {
 		agentProfileID = fields.AssigneeAgentProfileID
+		fellBackToStoredRunner = agentProfileID != ""
 	}
 	if agentProfileID == "" {
 		return nil
 	}
 	payload := mustJSON(map[string]string{"task_id": taskID})
-	key := fmt.Sprintf("task_assigned:%s:%s", taskID, agentProfileID)
-	return s.QueueRun(ctx, agentProfileID, RunReasonTaskAssigned, payload, key)
+	var key string
+	if fellBackToStoredRunner || assignmentGeneration == nil {
+		runsservice.ReportKeylessEnqueue(RunReasonTaskAssigned, runsservice.KeylessCauseUnresolved, "event_missing_generation")
+	} else {
+		key = dedupkeys.AssignmentKey(taskID, agentProfileID, *assignmentGeneration)
+	}
+	_, err = s.QueueRun(ctx, agentProfileID, RunReasonTaskAssigned, payload, key)
+	return err
 }
 
 // handleTaskMoved keeps the legacy named-step activity fallback and queues
@@ -1079,7 +1151,9 @@ func (s *Service) resolveAndWakeIfUnblocked(ctx context.Context, blockedTaskID, 
 	if err != nil {
 		return err
 	}
+	blockerIDs := make([]string, 0, len(blockers))
 	for _, b := range blockers {
+		blockerIDs = append(blockerIDs, b.BlockerTaskID)
 		if b.BlockerTaskID == resolvedBlockerID {
 			continue
 		}
@@ -1088,7 +1162,10 @@ func (s *Service) resolveAndWakeIfUnblocked(ctx context.Context, blockedTaskID, 
 			return err // still blocked
 		}
 	}
-	key := fmt.Sprintf("blockers_resolved:%s", blockedTaskID)
+	if len(blockerIDs) == 0 {
+		return nil
+	}
+	key := fmt.Sprintf("blockers_resolved:%s:%s", blockedTaskID, dedupkeys.BlockerDigest(blockerIDs))
 	return s.dispatchEngineTrigger(ctx, blockedTaskID, engine.TriggerOnBlockerResolved,
 		engine.OnBlockerResolvedPayload{
 			ResolvedBlockerIDs: []string{resolvedBlockerID},
@@ -1143,6 +1220,11 @@ func (s *Service) queueChildrenCompletedRun(ctx context.Context, parentID string
 		return err
 	}
 
+	waveKey, waveString, ok := resolveWaveIdentity(ctx, s.repo, parentID, s.logger)
+	if !ok {
+		return nil
+	}
+
 	// Derived the same way as ParentWakeReconciler's recovery dispatch
 	// (wakeOperationID) so both producers land on the identical operation
 	// id for the same parent + child set + generation. That shared id is
@@ -1160,7 +1242,10 @@ func (s *Service) queueChildrenCompletedRun(ctx context.Context, parentID string
 	// would make the wake's content depend on which producer won the race.
 	key := wakeOperationID(parentID, childSetKey, generation)
 	return s.dispatchEngineTrigger(ctx, parentID, engine.TriggerOnChildrenCompleted,
-		engine.OnChildrenCompletedPayload{}, key)
+		engine.OnChildrenCompletedPayload{
+			WaveKey:    waveKey,
+			WaveString: waveString,
+		}, key)
 }
 
 // handleCommentCreated loads the comment and relays it to external channels.

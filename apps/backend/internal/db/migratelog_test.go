@@ -1,10 +1,14 @@
 package db
 
 import (
+	"context"
+	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/jmoiron/sqlx"
-	_ "github.com/mattn/go-sqlite3"
+	"github.com/mattn/go-sqlite3"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"go.uber.org/zap/zaptest/observer"
@@ -138,4 +142,70 @@ func TestMigrateLogger_Apply_NilLog(t *testing.T) {
 	m.Apply("t.col", `ALTER TABLE t ADD COLUMN col TEXT DEFAULT ''`)
 	m.Apply("t.col", `ALTER TABLE t ADD COLUMN col TEXT DEFAULT ''`) // idempotent
 	m.Apply("bad", `ALTER TABLE missing ADD COLUMN x TEXT`)
+}
+
+// TestRequiredMigrateLoggerContextCancelsActiveStatement proves cancellation
+// reaches a migration after the driver has started executing it. The custom
+// SQLite function gives the test a deterministic statement boundary instead
+// of relying on a scheduler sleep or a large-data timing guess.
+func TestRequiredMigrateLoggerContextCancelsActiveStatement(t *testing.T) {
+	db := memDB(t)
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`CREATE TABLE t (value INTEGER NOT NULL)`); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO t(value) VALUES (0)`); err != nil {
+		t.Fatalf("insert row: %v", err)
+	}
+
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var startedOnce sync.Once
+	conn, err := db.Conn(context.Background())
+	if err != nil {
+		t.Fatalf("reserve SQLite connection: %v", err)
+	}
+	if err := conn.Raw(func(driverConn any) error {
+		sqliteConn, ok := driverConn.(*sqlite3.SQLiteConn)
+		if !ok {
+			t.Fatalf("driver connection = %T, want *sqlite3.SQLiteConn", driverConn)
+		}
+		return sqliteConn.RegisterFunc("wait_for_release", func() int64 {
+			startedOnce.Do(func() { close(started) })
+			<-release
+			return 1
+		}, true)
+	}); err != nil {
+		_ = conn.Close()
+		t.Fatalf("register SQLite function: %v", err)
+	}
+	if err := conn.Close(); err != nil {
+		t.Fatalf("release SQLite connection: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		done <- NewRequiredMigrateLoggerContext(db, nil, ctx).ApplyContext(
+			ctx,
+			"active.statement",
+			`UPDATE t SET value = wait_for_release()`,
+		)
+	}()
+	select {
+	case <-started:
+	case <-time.After(2 * time.Second):
+		t.Fatal("migration statement did not enter the SQLite function")
+	}
+	cancel()
+	close(release)
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("active migration error = %v, want context.Canceled", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("active migration did not stop after cancellation")
+	}
 }

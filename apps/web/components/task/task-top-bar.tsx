@@ -41,6 +41,7 @@ type TaskTopBarProps = {
   workflowSteps?: WorkflowStepperStep[];
   currentStepId?: string | null;
   workflowId?: string | null;
+  taskState?: string | null;
   workspaceId?: string | null;
   projectId?: string | null;
   issueUrl?: string;
@@ -69,6 +70,7 @@ const TaskTopBar = memo(function TaskTopBar({
   workflowSteps,
   currentStepId,
   workflowId,
+  taskState,
   workspaceId,
   projectId,
   isArchived,
@@ -115,6 +117,7 @@ const TaskTopBar = memo(function TaskTopBar({
             currentStepId={currentStepId ?? null}
             taskId={taskId ?? null}
             workflowId={workflowId ?? null}
+            taskState={taskState}
             isArchived={isArchived}
             onMoveStart={onMoveStart}
             onMoveError={onMoveError}

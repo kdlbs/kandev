@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: ui
 created: 2026-08-31
 owners:
@@ -11,7 +11,7 @@ owners:
 ## Overview
 
 Threads can contain many live task conversations. Users need direct control of
-which task columns appear, their order, and the maximum number of columns.
+which task conversations appear, their order, and the maximum number of chats.
 
 Threads saved views provide this control without changing sidebar task views.
 The UI system owns the interaction and query presentation. The task system
@@ -20,13 +20,15 @@ continues to own task and workflow state.
 ## Terminology
 
 - **Threads view:** A named user setting that contains a task scope, filters,
-  sort rules, and an optional column limit.
+  sort rules, an optional chat limit, and presentation preferences.
+- **Chat limit:** The maximum admitted tasks, historically called the column
+  limit. Two grid rows do not multiply this limit.
 - **Task scope:** Either all eligible Threads tasks or an explicit set of task
   IDs.
 - **Eligible task:** A non-archived task in the active workspace that satisfies
   the existing Threads deck eligibility contract and has a primary session.
 - **Admitted task:** An eligible task that matches the active view and is inside
-  its current column limit.
+  its current chat limit.
 - **View draft:** Unsaved changes to the active Threads view.
 
 ## Requirements
@@ -48,10 +50,11 @@ Threads views, so that I can change focus with one action.
   system shall provide and select one canonical `All threads` view.
 - **AC-UI-THREADS-SAVED-VIEWS-001.3:** `All threads` shall use all eligible
   tasks, the existing attention-first order, and a default limit of five
-  columns.
+  chats.
 - **AC-UI-THREADS-SAVED-VIEWS-001.4:** A user shall be able to create, rename,
   delete, switch, overwrite, duplicate with `Save as`, and discard changes to
-  Threads views.
+  Threads views. Switching or reselecting a view shall not silently discard
+  an active draft; Save or Discard is required first on desktop and touch.
 - **AC-UI-THREADS-SAVED-VIEWS-001.5:** A user shall be able to save at most 50
   Threads views. The UI shall explain the limit before another create action.
 - **AC-UI-THREADS-SAVED-VIEWS-001.6:** Saved views, the active view, and the
@@ -104,10 +107,10 @@ bounded task data.
 - **AC-UI-THREADS-SAVED-VIEWS-002.13:** Filters shall support active errors,
   task labels, task origin, and tasks that have more than one agent session.
 
-### REQ-UI-THREADS-SAVED-VIEWS-003: Sort and column limit
+### REQ-UI-THREADS-SAVED-VIEWS-003: Sort and chat limit
 
 **Intent:** Give the user a predictable order and a hard bound on simultaneous
-task columns.
+chats.
 
 #### Acceptance criteria
 
@@ -117,9 +120,9 @@ task columns.
 - **AC-UI-THREADS-SAVED-VIEWS-003.2:** Every sort shall use task ID as its final
   deterministic tie-breaker.
 - **AC-UI-THREADS-SAVED-VIEWS-003.3:** A Threads view shall support no user
-  column limit or an integer limit from 1 through 30.
+  chat limit or an integer limit from 1 through 30.
 - **AC-UI-THREADS-SAVED-VIEWS-003.4:** The system shall apply task scope,
-  filters, sort, and then the column limit in that order.
+  filters, sort, and then the chat limit in that order.
 - **AC-UI-THREADS-SAVED-VIEWS-003.5:** When the limit is 3, the board shall
   mount at most three task-column shells for that view.
 - **AC-UI-THREADS-SAVED-VIEWS-003.6:** The view control shall show the admitted
@@ -132,13 +135,13 @@ task columns.
 - **AC-UI-THREADS-SAVED-VIEWS-003.9:** The user shall be able to reapply the
   active sort to the current matching set without changing the saved view.
 - **AC-UI-THREADS-SAVED-VIEWS-003.10:** A valid task deep link shall temporarily
-  admit and focus its task when the active view or column limit hides it.
+  admit and focus its task when the active view or chat limit hides it.
 - **AC-UI-THREADS-SAVED-VIEWS-003.11:** A temporary deep-link admission shall
-  count toward the column limit and shall not modify the saved task scope.
+  count toward the chat limit and shall not modify the saved task scope.
 - **AC-UI-THREADS-SAVED-VIEWS-003.12:** Each sort option shall include a
   visible description that explains the order that the option applies.
 - **AC-UI-THREADS-SAVED-VIEWS-003.13:** A new Threads view shall start with a
-  limit of five columns. The user can select another valid limit or no limit.
+  limit of five chats. The user can select another valid limit or no limit.
 
 ### REQ-UI-THREADS-SAVED-VIEWS-004: Responsive editor and recovery
 
@@ -176,6 +179,49 @@ touch screen.
   shall show the shared status color and pointer or touch disclosure.
 - **AC-UI-THREADS-SAVED-VIEWS-004.13:** The desktop editor popover shall use a
   visible border and elevation that separate it from the page background.
+
+### REQ-UI-THREADS-SAVED-VIEWS-005: Saved presentation preferences
+
+**Intent:** Let each saved view combine its task selection with an independent
+layout and composer preference, using the existing view lifecycle.
+
+#### Acceptance criteria
+
+- **AC-UI-THREADS-SAVED-VIEWS-005.1:** Each view and view draft shall have
+  independent Columns/Grid and Auto-hide composer settings. Existing views
+  without these settings and newly created views shall use Columns with
+  auto-hide disabled.
+- **AC-UI-THREADS-SAVED-VIEWS-005.2:** Presentation edits shall preview
+  immediately through the existing persisted draft. Save, Save as, Duplicate,
+  Discard, reload, and another client shall preserve or restore them with the
+  same semantics as other view fields. A failed write shall use the existing
+  rollback and retry surface.
+- **AC-UI-THREADS-SAVED-VIEWS-005.3:** A presentation-only edit, save,
+  discard, or live update shall not reapply task sorting, change admission,
+  clear the selected session, or change another listing surface's settings.
+- **AC-UI-THREADS-SAVED-VIEWS-005.4:** The existing view editor shall expose a
+  Display section with visible descriptions for Columns, Grid, and Auto-hide
+  composer. Layout selection shall appear only inside that configurator, not
+  as a separate top-bar selector. Edits shall retain the existing draft,
+  dirty indicator, and Save/Discard actions.
+- **AC-UI-THREADS-SAVED-VIEWS-005.5:** The existing phone/tablet view drawer
+  shall expose these settings. Phone copy shall explain that Grid applies
+  on larger screens and auto-hide applies to pointer-based layouts; phone and
+  coarse-pointer composers remain visible. A responsive fallback shall not
+  create a draft or write over either saved presentation preference.
+- **AC-UI-THREADS-SAVED-VIEWS-005.6:** The view editor shall label the existing
+  admission limit Maximum chats and explain that it counts tasks across both
+  rows. The default remains five, valid explicit limits remain 1 through 30,
+  and no limit retains its existing meaning. Switching to Grid shall not
+  silently increase the limit.
+- **AC-UI-THREADS-SAVED-VIEWS-005.7:** Missing or unrecognized stored
+  presentation values shall fall back independently to Columns and auto-hide
+  disabled without dropping valid task selection, filters, sort, or limits.
+  Invalid new presentation values shall be rejected without a partial save.
+
+The layout and disclosure interactions are owned by
+[Threads Conversation Deck](threads-conversation-deck.md),
+`REQ-UI-THREADS-DECK-004` and `REQ-UI-THREADS-DECK-005`.
 
 ## Out of scope
 

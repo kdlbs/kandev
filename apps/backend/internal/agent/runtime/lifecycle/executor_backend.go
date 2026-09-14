@@ -148,8 +148,11 @@ type ExecutorBackend interface {
 	StopInstance(ctx context.Context, instance *ExecutorInstance, force bool) error
 
 	// RecoverInstances discovers and recovers instances that were running before a restart.
+	// records is the live standalone recovery-inventory read at startup step 3
+	// (Manager.ListLiveStandaloneExecutorsRunning); only the standalone runtime
+	// acts on it today, every other implementation ignores it.
 	// Returns recovered instances that can be re-tracked by the manager.
-	RecoverInstances(ctx context.Context) ([]*ExecutorInstance, error)
+	RecoverInstances(ctx context.Context, records []*models.ExecutorRunning) ([]*ExecutorInstance, error)
 
 	// GetInteractiveRunner returns the interactive runner for passthrough mode.
 	// May return nil if the runtime doesn't support passthrough mode.
@@ -204,6 +207,7 @@ const (
 	MetadataKeySpriteState              = "sprite_state"
 	MetadataKeySpriteCreatedAt          = "sprite_created_at"
 	MetadataKeyLocalPort                = "local_port"
+	MetadataKeyReuseExistingProcess     = "reuse_existing_process"
 
 	// Kubernetes executor connection metadata. These names mirror the persisted
 	// executor config parsed by internal/agent/kubernetes.
@@ -256,7 +260,12 @@ const (
 	MetadataKeyModelOverride = "model_override"
 
 	// Office metadata keys
-	MetadataKeySkillManifestJSON    = "skill_manifest_json"
+	MetadataKeySkillManifestJSON = "skill_manifest_json"
+	// MetadataKeyOfficeAgentProfileID persists AgentExecution.OfficeAgentProfileID
+	// (AC-EXECUTORS-SURVIVAL-002.14's "Office profile identity" reconstruction
+	// row): a new key in the existing metadata column rather than a schema
+	// change. Empty for every non-Office launch, which is legitimate, not
+	// missing.
 	MetadataKeyOfficeAgentProfileID = "office_agent_profile_id"
 
 	// SSH runtime metadata keys (per-session, except SSHWorkdirRoot which is per-profile).
@@ -269,6 +278,7 @@ const (
 	MetadataKeySSHRemoteSessionDir     = "ssh_remote_session_dir"
 	MetadataKeySSHRemoteAgentctlPort   = "ssh_remote_agentctl_port"
 	MetadataKeySSHRemoteAgentctlPID    = "ssh_remote_agentctl_pid"
+	MetadataKeySSHAgentctlInstanceID   = "ssh_remote_agentctl_instance_id"
 	MetadataKeySSHLocalForwardPort     = "ssh_local_forward_port"
 	MetadataKeySSHRemoteAgentctlURL    = "ssh_remote_agentctl_url"
 	MetadataKeySSHRuntimeAPILocalURL   = "ssh_runtime_api_local_url"
@@ -320,6 +330,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeySSHRemoteSessionDir:     true,
 	MetadataKeySSHRemoteAgentctlPort:   true,
 	MetadataKeySSHRemoteAgentctlPID:    true,
+	MetadataKeySSHAgentctlInstanceID:   true,
 	MetadataKeySSHLocalForwardPort:     true,
 	MetadataKeySSHRemoteAgentctlURL:    true,
 	MetadataKeySSHRuntimeAPILocalURL:   true,
@@ -380,6 +391,8 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyAllowUserNamespaces:      true,
 	MetadataKeyContainerID:              true,
 	MetadataKeyWorktreeBranch:           true,
+	metadataCheckoutBranch:              true,
+	metadataCheckoutRef:                 true,
 	MetadataKeyRemoteContributions:      true,
 	MetadataKeyContributionDestinations: true,
 	MetadataKeyOfficeAgentProfileID:     true,
@@ -407,6 +420,7 @@ var sessionScopedMetadataKeys = map[string]bool{
 	MetadataKeySSHRemoteSessionDir:             true,
 	MetadataKeySSHRemoteAgentctlPort:           true,
 	MetadataKeySSHRemoteAgentctlPID:            true,
+	MetadataKeySSHAgentctlInstanceID:           true,
 	MetadataKeySSHLocalForwardPort:             true,
 	MetadataKeySSHRemoteAgentctlURL:            true,
 	MetadataKeySSHRuntimeAPILocalURL:           true,
@@ -659,6 +673,34 @@ type ExecutorInstance struct {
 	Metadata        map[string]interface{}
 	StopReason      string
 	AgentStopFailed bool
+
+	// Env is the adopted instance's own runtime environment, read back rather
+	// than pushed (AC-EXECUTORS-SURVIVAL-002.14's "runtime environment" row:
+	// deliberately memory-only, so it is only ever populated by a recovery
+	// path -- StandaloneExecutor.RecoverInstances -- reading it back from the
+	// live instance; a fresh launch's environment flows through
+	// ExecutorCreateRequest.Env instead, never through this field.
+	Env map[string]string
+
+	// WorkspaceSourceRoots is the adopted instance's own live source-root
+	// allowlist, read back rather than pushed (AC-EXECUTORS-SURVIVAL-002.14's
+	// "workspace source roots" row). Same recovery-only shape as Env above.
+	WorkspaceSourceRoots []string
+
+	// ProviderSessionID is the adopted instance's own live agent-CLI session
+	// identity, read back rather than pushed (AC-EXECUTORS-SURVIVAL-002.14's
+	// "provider session identity" row). Same recovery-only shape as Env above.
+	ProviderSessionID string
+
+	// AgentProfileID is a recovery-only carrier for
+	// AC-EXECUTORS-SURVIVAL-002.14's "agent profile identity" row: the
+	// recovery-inventory record's execution-profile column, read by
+	// StandaloneExecutor.buildRecoveredInstances so the recovery loop can set
+	// AgentExecution.AgentProfileID before re-deriving agent identity, without
+	// waiting on persistExecutorRunningResult's separate DB-backed self-heal.
+	// A fresh launch's profile flows through ExecutorCreateRequest.AgentProfileID
+	// instead, never through this field.
+	AgentProfileID string
 
 	// AuthToken is the agentctl auth token retrieved via handshake.
 	// Populated by authenticated container/remote executors for encrypted storage in SecretStore.

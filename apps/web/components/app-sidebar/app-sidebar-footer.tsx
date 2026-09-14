@@ -159,7 +159,7 @@ function SidebarFooterDialogs({
   improveOpen: boolean;
   onImproveOpenChange: (open: boolean) => void;
   workspaceId: string | null;
-  onTaskCreated: (task: { id: string }) => void;
+  onTaskCreated: (task: { id: string }, meta?: { autoFocus?: boolean }) => void;
   releaseNotes: ReturnType<typeof useReleaseNotes>;
 }) {
   return (
@@ -414,7 +414,9 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
         improveOpen={improveOpen}
         onImproveOpenChange={setImproveOpen}
         workspaceId={workspaceId ?? null}
-        onTaskCreated={(task) => router.push(linkToTask(task.id))}
+        onTaskCreated={(task, meta) => {
+          if (meta?.autoFocus !== false) router.push(linkToTask(task.id));
+        }}
         releaseNotes={releaseNotes}
       />
     </div>

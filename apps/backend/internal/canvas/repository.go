@@ -42,13 +42,114 @@ CREATE INDEX IF NOT EXISTS idx_canvas_lifecycle_workspace
   ON canvas_lifecycle_metadata(workspace_id, updated_at, id);
 CREATE INDEX IF NOT EXISTS idx_canvas_lifecycle_task
   ON canvas_lifecycle_metadata(task_id, updated_at, id);
+CREATE TABLE IF NOT EXISTS canvas_creation_authority (
+  canvas_id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
+  creating_session_id TEXT NOT NULL,
+  policy_version INTEGER NOT NULL,
+  consumed_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_canvas_creation_authority_owner
+  ON canvas_creation_authority(owner_user_id, consumed_at);
 CREATE TABLE IF NOT EXISTS canvas_lifecycle_admission (
   id INTEGER PRIMARY KEY,
   version INTEGER NOT NULL
 );
 INSERT INTO canvas_lifecycle_admission (id, version)
 VALUES (1, 1) ON CONFLICT (id) DO NOTHING;
+CREATE TABLE IF NOT EXISTS canvas_install_receipts (
+  preparation_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  canvas_id TEXT NOT NULL UNIQUE,
+  workspace_id TEXT NOT NULL,
+  package_id TEXT NOT NULL,
+  package_version TEXT NOT NULL,
+  package_digest TEXT NOT NULL,
+  source_id TEXT NOT NULL DEFAULT '',
+  repository_url TEXT NOT NULL DEFAULT '',
+  origin_kind TEXT NOT NULL,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_canvas_install_receipts_workspace
+  ON canvas_install_receipts(workspace_id, created_at, preparation_id);
 `
+
+func (r *Repository) GetInstallReceipt(ctx context.Context, preparationID, userID string) (InstallReceipt, error) {
+	if strings.TrimSpace(preparationID) == "" || strings.TrimSpace(userID) == "" {
+		return InstallReceipt{}, ErrInstallReceiptNotFound
+	}
+	var row struct {
+		PreparationID  string `db:"preparation_id"`
+		UserID         string `db:"user_id"`
+		CanvasID       string `db:"canvas_id"`
+		WorkspaceID    string `db:"workspace_id"`
+		PackageID      string `db:"package_id"`
+		PackageVersion string `db:"package_version"`
+		PackageDigest  string `db:"package_digest"`
+		SourceID       string `db:"source_id"`
+		RepositoryURL  string `db:"repository_url"`
+		OriginKind     string `db:"origin_kind"`
+		CreatedAt      string `db:"created_at"`
+	}
+	err := r.ro.GetContext(ctx, &row, r.ro.Rebind(`SELECT preparation_id, user_id, canvas_id, workspace_id, package_id, package_version, package_digest, source_id, repository_url, origin_kind, created_at FROM canvas_install_receipts WHERE preparation_id = ? AND user_id = ?`), preparationID, userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return InstallReceipt{}, ErrInstallReceiptNotFound
+	}
+	if err != nil {
+		return InstallReceipt{}, err
+	}
+	createdAt, err := time.Parse(time.RFC3339Nano, row.CreatedAt)
+	if err != nil {
+		return InstallReceipt{}, err
+	}
+	return InstallReceipt{PreparationID: row.PreparationID, UserID: row.UserID, CanvasID: row.CanvasID, WorkspaceID: row.WorkspaceID, PackageID: row.PackageID, Version: row.PackageVersion, Digest: row.PackageDigest, SourceID: row.SourceID, RepositoryURL: row.RepositoryURL, OriginKind: row.OriginKind, CreatedAt: createdAt}, nil
+}
+
+func (r *Repository) CreateInstallReceiptTx(ctx context.Context, tx *sqlx.Tx, receipt InstallReceipt) error {
+	if strings.TrimSpace(receipt.PreparationID) == "" || strings.TrimSpace(receipt.UserID) == "" || strings.TrimSpace(receipt.CanvasID) == "" || strings.TrimSpace(receipt.WorkspaceID) == "" || strings.TrimSpace(receipt.PackageID) == "" || strings.TrimSpace(receipt.Version) == "" || strings.TrimSpace(receipt.Digest) == "" || strings.TrimSpace(receipt.OriginKind) == "" {
+		return ErrInstallInvalid
+	}
+	createdAt := receipt.CreatedAt.UTC()
+	if createdAt.IsZero() {
+		createdAt = time.Now().UTC()
+	}
+	_, err := tx.ExecContext(ctx, tx.Rebind(`INSERT INTO canvas_install_receipts (preparation_id, user_id, canvas_id, workspace_id, package_id, package_version, package_digest, source_id, repository_url, origin_kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`), receipt.PreparationID, receipt.UserID, receipt.CanvasID, receipt.WorkspaceID, receipt.PackageID, receipt.Version, receipt.Digest, receipt.SourceID, receipt.RepositoryURL, receipt.OriginKind, createdAt.Format(time.RFC3339Nano))
+	return err
+}
+
+func (r *Repository) CreateInstallReceipt(ctx context.Context, receipt InstallReceipt) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.CreateInstallReceiptTx(ctx, tx, receipt); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) DeleteInstallReceiptTx(ctx context.Context, tx *sqlx.Tx, canvasID string) error {
+	if strings.TrimSpace(canvasID) == "" {
+		return ErrInvalidCanvas
+	}
+	_, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM canvas_install_receipts WHERE canvas_id = ?`), canvasID)
+	return err
+}
+
+// DeleteInstallReceipt removes the durable retry receipt for a canvas after
+// the canvas authority and plugin instance have been removed.
+func (r *Repository) DeleteInstallReceipt(ctx context.Context, canvasID string) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := r.DeleteInstallReceiptTx(ctx, tx, canvasID); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
 
 // NewRepository constructs the canvas metadata repository on an existing
 // application database pool. Plugin instance schema initialization remains
@@ -147,6 +248,85 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
 	)
 	if err != nil {
 		return err
+	}
+	if metadata.CreationOwnerUserID != "" {
+		if metadata.TaskID == "" || metadata.CreatedBySessionID == "" {
+			return ErrInvalidCanvas
+		}
+		if _, err := tx.ExecContext(ctx, tx.Rebind(
+			`INSERT INTO canvas_creation_authority (canvas_id, owner_user_id, creating_session_id, policy_version, consumed_at) VALUES (?, ?, ?, ?, '')`,
+		), metadata.ID, metadata.CreationOwnerUserID, metadata.CreatedBySessionID, CreationAuthorityPolicyVersion); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// GetCreationAuthority returns the recorded first-publication authority. A
+// missing row is expected for legacy drafts and imported instances.
+func (r *Repository) GetCreationAuthority(ctx context.Context, canvasID string) (CreationAuthority, error) {
+	var row struct {
+		CanvasID          string `db:"canvas_id"`
+		OwnerUserID       string `db:"owner_user_id"`
+		CreatingSessionID string `db:"creating_session_id"`
+		TaskID            string `db:"task_id"`
+		PolicyVersion     int    `db:"policy_version"`
+		ConsumedAt        string `db:"consumed_at"`
+	}
+	err := r.ro.GetContext(ctx, &row, r.ro.Rebind(
+		`SELECT a.canvas_id, a.owner_user_id, a.creating_session_id, m.task_id, a.policy_version, a.consumed_at
+FROM canvas_creation_authority a
+JOIN canvas_lifecycle_metadata m ON m.id = a.canvas_id
+WHERE a.canvas_id = ?`,
+	), canvasID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CreationAuthority{}, ErrCreationAuthorityNotFound
+	}
+	if err != nil {
+		return CreationAuthority{}, err
+	}
+	consumedAt, err := parseOptionalTime(row.ConsumedAt)
+	if err != nil {
+		return CreationAuthority{}, fmt.Errorf("canvas: parse creation authority consumed_at: %w", err)
+	}
+	result := CreationAuthority{
+		CanvasID: row.CanvasID, OwnerUserID: row.OwnerUserID,
+		CreatingSessionID: row.CreatingSessionID, TaskID: row.TaskID,
+		PolicyVersion: row.PolicyVersion,
+	}
+	if consumedAt != nil {
+		result.ConsumedAt = *consumedAt
+	}
+	return result, nil
+}
+
+// ConsumeCreationAuthorityTx atomically consumes the single-use authority
+// while rechecking its owner, session, task, policy, task scope, and current
+// workspace ownership.
+func (r *Repository) ConsumeCreationAuthorityTx(ctx context.Context, tx *sqlx.Tx, authority CreationAuthority, ownerUserID, sessionID, taskID string, allowUnownedWorkspace bool) error {
+	if authority.CanvasID == "" || ownerUserID == "" || sessionID == "" || taskID == "" {
+		return ErrStaleCanvasPublish
+	}
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	result, err := tx.ExecContext(ctx, tx.Rebind(
+		`UPDATE canvas_creation_authority
+SET consumed_at = ?
+WHERE canvas_creation_authority.canvas_id = ? AND owner_user_id = ? AND creating_session_id = ?
+  AND policy_version = ? AND consumed_at = ''
+	AND EXISTS (
+		SELECT 1
+		FROM canvas_lifecycle_metadata m
+		JOIN workspaces w ON w.id = m.workspace_id
+		WHERE m.id = canvas_creation_authority.canvas_id
+		  AND m.task_id = ?
+		  AND (w.owner_id = ? OR (? AND COALESCE(w.owner_id, '') = ''))
+	)`,
+	), now, authority.CanvasID, ownerUserID, sessionID, CreationAuthorityPolicyVersion, taskID, ownerUserID, allowUnownedWorkspace)
+	if err != nil {
+		return err
+	}
+	if affected, _ := result.RowsAffected(); affected == 0 {
+		return ErrStaleCanvasPublish
 	}
 	return nil
 }
@@ -256,6 +436,10 @@ func (r *Repository) Delete(ctx context.Context, id string) error {
 
 // DeleteTx removes metadata in an existing lifecycle transaction.
 func (r *Repository) DeleteTx(ctx context.Context, tx *sqlx.Tx, id string) error {
+	if _, err := tx.ExecContext(ctx, tx.Rebind(
+		`DELETE FROM canvas_creation_authority WHERE canvas_id = ?`), id); err != nil {
+		return err
+	}
 	result, err := tx.ExecContext(ctx, tx.Rebind(
 		`DELETE FROM canvas_lifecycle_metadata WHERE id = ?`), id)
 	if err != nil {

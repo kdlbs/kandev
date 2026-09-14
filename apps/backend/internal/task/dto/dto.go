@@ -8,6 +8,7 @@ import (
 	"github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/task/statussummary"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -104,6 +105,7 @@ type RepositorySetDTO struct {
 type RepositorySetItemDTO struct {
 	RepositoryID string `json:"repository_id"`
 	Position     int    `json:"position"`
+	BaseBranch   string `json:"base_branch"`
 }
 
 type RepositoryBranchPolicyDTO struct {
@@ -258,6 +260,17 @@ type TaskDTO struct {
 	// resolution. Read-only here; set through the create request or the picker.
 	StartWhenUnblocked bool `json:"start_when_unblocked,omitempty"`
 
+	// RunnerEditable and RunnerIneligibleReason are the runner-mutability
+	// verdict (models.EvaluateRunnerMutability), derived on every read and
+	// never persisted. Always serialized, never omitted: a stale cached
+	// `true` would offer an action the server refuses, while a missing key
+	// is indistinguishable from false, so both fields are always present.
+	// Stamped by EnrichTaskRunnerMutability.
+	RunnerEditable bool `json:"runner_editable"`
+	// RunnerIneligibleReason is always a member of the closed reason
+	// vocabulary (models.RunnerReason*), never empty.
+	RunnerIneligibleReason string `json:"runner_ineligible_reason"`
+
 	// Office extensions
 	AssigneeAgentProfileID string `json:"assignee_agent_profile_id,omitempty"`
 	// AssigneeUserID is the human assignee, independent of the agent one.
@@ -283,6 +296,9 @@ type TaskDTO struct {
 	// task-listing MCP tools so agents can reason about PR status (e.g. find
 	// tasks whose PRs are merged). Omitted when empty.
 	PRs []v1.TaskPRSummary `json:"prs,omitempty"`
+	// ChangeRequests lists the provider-neutral GitHub PR and GitLab MR
+	// associations for this task. Omitted when no associations exist.
+	ChangeRequests []v1.TaskChangeRequestSummary `json:"change_requests,omitempty"`
 
 	// StatusSummary is the bounded task-level projection consumed by task rows.
 	// It is loaded in batches and is absent when no projection exists yet; the
@@ -778,6 +794,7 @@ func FromRepositorySet(set *models.RepositorySet) RepositorySetDTO {
 		items = append(items, RepositorySetItemDTO{
 			RepositoryID: item.RepositoryID,
 			Position:     item.Position,
+			BaseBranch:   item.BaseBranch,
 		})
 	}
 	return RepositorySetDTO{
@@ -987,6 +1004,12 @@ func FromTaskWithSessionInfo(
 		Interrupted:                 task.Metadata[models.MetaKeyInterruptedAt] != nil,
 		AutoStartFailed:             task.Metadata[models.MetaKeyAutoStartFailed] != nil,
 		WorkspaceOrphaned:           models.WorkspaceOrphaned(task.Metadata),
+		// RunnerEditable/RunnerIneligibleReason default fail-closed: a caller
+		// that builds a DTO through this path without running
+		// EnrichTaskRunnerMutability never evaluated the verdict, and the
+		// empty string is outside the closed reason vocabulary.
+		RunnerEditable:         false,
+		RunnerIneligibleReason: models.RunnerReasonEvaluationUnavailable,
 		// Office extensions. AssigneeAgentProfileID is a read-time
 		// projection from workflow_step_participants (ADR 0005 Wave F);
 		// the repo's task SELECTs hydrate it via a correlated subquery.
@@ -1185,12 +1208,18 @@ type WorkflowStepDTO struct {
 	PullFromStepID            string                                   `json:"pull_from_step_id,omitempty"`
 	// StageType is a Phase 2 (ADR-0004) semantic hint for the frontend.
 	// Allowed values: "work" | "review" | "approval" | "custom".
-	StageType                  string    `json:"stage_type,omitempty"`
-	AutoAdvanceRequiresSignal  bool      `json:"auto_advance_requires_signal"`
-	CancelTriggersTurnComplete bool      `json:"cancel_triggers_turn_complete"`
-	CompleteTaskOnEnter        bool      `json:"complete_task_on_enter"`
-	CreatedAt                  time.Time `json:"created_at"`
-	UpdatedAt                  time.Time `json:"updated_at"`
+	StageType                  string `json:"stage_type,omitempty"`
+	AutoAdvanceRequiresSignal  bool   `json:"auto_advance_requires_signal"`
+	CancelTriggersTurnComplete bool   `json:"cancel_triggers_turn_complete"`
+	CompleteTaskOnEnter        bool   `json:"complete_task_on_enter"`
+	// OrderRevision lets a client seed its last-known revision for this step
+	// before accepting any task.reordered WS event, so a stale event received
+	// right after hydration cannot be mistaken for the first order this
+	// client has ever seen (see kanban-task-reordering system design,
+	// "Reorder contract").
+	OrderRevision int64     `json:"order_revision"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // StepEventsDTO represents step events for API responses
@@ -1216,8 +1245,17 @@ type StepActionDTO struct {
 
 // MoveTaskResponse includes the task and the target workflow step info
 type MoveTaskResponse struct {
-	Task         TaskDTO         `json:"task"`
-	WorkflowStep WorkflowStepDTO `json:"workflow_step"`
+	Task         TaskDTO                    `json:"task"`
+	WorkflowStep WorkflowStepDTO            `json:"workflow_step"`
+	MoveID       string                     `json:"move_id,omitempty"`
+	EntryOptions *workflowmove.EntryOptions `json:"entry_options,omitempty"`
+	// Disposition reports how an MCP move_task call was resolved: "applied" when
+	// the move committed immediately, or "deferred" when it was recorded to run
+	// at the source session's turn-end. It lets an agent distinguish deferred
+	// acceptance from an immediate move and correlate the retained one-shot
+	// EntryOptions (via MoveID) with the eventual step entry. The HTTP move path
+	// always applies immediately and leaves this empty.
+	Disposition string `json:"disposition,omitempty"`
 }
 
 // Session Workflow Review DTOs

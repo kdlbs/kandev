@@ -67,7 +67,17 @@ func ParseRateLimitResetTimeForTest(errMsg string, now time.Time) *time.Time {
 // This is exposed so integration tests in the _test package can verify prompt building.
 func BuildPromptContextForTest(svc *Service, ctx context.Context, reason, payload string) *PromptContext {
 	si := &SchedulerIntegration{svc: svc, logger: svc.logger}
-	return si.buildPromptContext(ctx, reason, payload)
+	return si.buildPromptContext(ctx, reason, payload, "")
+}
+
+// BuildPromptContextWithSnapshotForTest is BuildPromptContextForTest plus
+// contextSnapshot (run.ContextSnapshot), the run-reason-gated source for
+// the routine catch-up gap fields (AC-OFFICE-ROUTINE-CATCHUP-002.5). A
+// separate helper, rather than extending BuildPromptContextForTest's
+// signature, so its nine existing callers stay untouched.
+func BuildPromptContextWithSnapshotForTest(svc *Service, ctx context.Context, reason, payload, contextSnapshot string) *PromptContext {
+	si := &SchedulerIntegration{svc: svc, logger: svc.logger}
+	return si.buildPromptContext(ctx, reason, payload, contextSnapshot)
 }
 
 // CoalesceRoutineWakeupForTest creates a wakeup-request carrying the
@@ -203,6 +213,25 @@ func ResolveRunProjectForTest(svc *Service, ctx context.Context, payload string)
 func AdmitRunForTest(svc *Service, ctx context.Context, run *models.Run, agent *models.AgentInstance) bool {
 	si := &SchedulerIntegration{svc: svc, logger: svc.logger}
 	return si.admitRun(ctx, run, agent)
+}
+
+// DeferWorkspaceLookupFailureForTest exposes deferWorkspaceLookupFailure
+// directly for external test packages, so its MaxRetryCount-exhausted
+// lost-race path (another writer already made the run terminal before
+// this call's FailRun runs) can be driven without reproducing a transient
+// GetAgentFromConfig lookup error through the full scheduler pipeline.
+func DeferWorkspaceLookupFailureForTest(svc *Service, ctx context.Context, run *models.Run) {
+	si := &SchedulerIntegration{svc: svc, logger: svc.logger}
+	si.deferWorkspaceLookupFailure(ctx, run)
+}
+
+// FailTasklessRunForTest exposes failTasklessRun directly for external test
+// packages, so the lost-race path (another writer already made the run
+// terminal before this call runs) can be driven without the scheduler's
+// atomic claim+launch pipeline standing in the way.
+func FailTasklessRunForTest(svc *Service, ctx context.Context, run *models.Run, agent *models.AgentInstance, msg string) {
+	si := &SchedulerIntegration{svc: svc, logger: svc.logger}
+	si.failTasklessRun(ctx, run, agent, msg)
 }
 
 // LogPolicyObservabilityForTest exposes logPolicyObservability for external

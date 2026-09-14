@@ -58,9 +58,68 @@ recognize referenced prompts while reviewing any surface.
   desktop and phone Prompt history surfaces, while preserving the existing
   desktop-only visibility rule for the anchored last-prompt bar.
 
+### REQ-UI-PROMPT-ALIAS-002: Editable references in task creation
+
+**Intent:** Identify saved prompt references while users compose a new task.
+This extends the reusable alias presentation contract beyond transcript views.
+
+#### Acceptance criteria
+
+- **AC-UI-PROMPT-ALIAS-002.1:** In task creation, recognized references shall
+  appear as inline chips with the transcript's color and name treatment.
+  This includes presets, restored drafts, pasted text, and completed typed aliases.
+  Unknown names shall remain editable text. Recognition shall preserve existing
+  name boundaries and Markdown code and link-destination exclusions.
+- **AC-UI-PROMPT-ALIAS-002.2:** Selecting a saved prompt in task creation shall
+  insert its `@name` reference instead of its full definition.
+  Enter, Tab, pointer, and touch selection shall replace only the active query.
+  Selection shall retain editor focus and shall not submit the task.
+- **AC-UI-PROMPT-ALIAS-002.3:** Users shall edit text around chips, remove an
+  individual reference, and undo or redo these edits without losing adjacent text.
+  Copy, paste, draft storage, and task submission shall retain plain-text aliases,
+  whitespace, and line breaks. Chip markup shall not enter the saved description.
+- **AC-UI-PROMPT-ALIAS-002.4:** A chip shall expose the current saved definition
+  through pointer and keyboard activation on desktop and through a tap on touch devices.
+  Preview dismissal shall preserve the draft and return focus to the composer.
+  Users shall have a visible removal action that removes only the selected occurrence.
+- **AC-UI-PROMPT-ALIAS-002.5:** Prompt loading or lookup failure shall not block
+  editing or submission. Store updates shall refresh recognition and previews without
+  changing draft text or selection. Deleted or renamed references shall become ordinary text.
+- **AC-UI-PROMPT-ALIAS-002.6:** Phone creation shall retain its full-height form
+  and reachable footer. Chips shall wrap within the editor without document horizontal overflow.
+  Touch preview and removal controls shall have hit targets of at least 44px.
+  Long preview content shall scroll within its safe-area-aware drawer.
+- **AC-UI-PROMPT-ALIAS-002.7:** Attachments, enhancement, voice insertion, plugin
+  insertion, launch preview, cancellation, and retry shall preserve their existing task-creation behavior.
+  New Agent, task editing, and other prompt editors shall retain their existing insertion behavior.
+  Backend expansion authority and passthrough exclusions shall remain unchanged.
+
+
+- **AC-UI-PROMPT-ALIAS-002.8:** On fine-pointer desktop at the standard root font,
+  editable reference chips shall have a 24px outer height and a 12px label.
+  One green background and border shall enclose the label and always-visible
+  removal control. The control shall show hover and keyboard-focus feedback.
+  Chip layout shall add no separate row margin around the reference.
+- **AC-UI-PROMPT-ALIAS-002.9:** Long reference names shall truncate inside the
+  available editor width while the removal control remains fully visible.
+  The full name shall remain accessible. Multiple chips shall wrap as whole
+  units without horizontal document overflow or overlapping action targets.
+- **AC-UI-PROMPT-ALIAS-002.10:** On phones and coarse-pointer devices, preview
+  and removal targets shall each measure at least 44px in both dimensions.
+  Both controls shall stay inside the same chip border with distinct hit areas.
+  Activating removal shall not open a preview or submit the form.
+  Desktop transcript, pinned-prompt, and history chip sizing shall remain unchanged.
+
 ## Out of scope
 
 - Changing prompt alias parsing, matching, expansion depth, or agent delivery.
 - Changing saved prompt persistence, prompt CRUD, or message APIs.
 - Adding prompt numbers, navigation behavior, or new Markdown features.
 - Rendering aliases in passthrough, comments, plans, or unrelated editors.
+
+## Implementation plans
+
+- [Transcript alias rendering](../../../plans/prompt-alias-rendering/plan.md)
+- [Task-create reference chips](../../../plans/task-create-prompt-chips/plan.md)
+
+- [Compact task-create prompt chips](../../../plans/compact-task-prompt-chips/plan.md)

@@ -81,6 +81,7 @@ const (
 	ActionTaskMove              = "task.move"
 	ActionTaskState             = "task.state"
 	ActionTaskArchive           = "task.archive"
+	ActionTaskRunner            = "task.runner"
 	ActionTaskPlanCreate        = "task.plan.create"
 	ActionTaskPlanGet           = "task.plan.get"
 	ActionTaskPlanUpdate        = "task.plan.update"
@@ -199,6 +200,7 @@ const (
 	ActionACPHeartbeat                   = "acp.heartbeat"
 	ActionTaskCreated                    = "task.created"
 	ActionTaskUpdated                    = "task.updated"
+	ActionTaskReordered                  = "task.reordered"
 	ActionTaskDeleted                    = "task.deleted"
 	ActionTaskStateChanged               = "task.state_changed"
 	ActionSessionWorkspaceSourcesUpdated = "session.workspace_sources.updated"
@@ -366,21 +368,22 @@ const (
 	ActionSessionProcessStatus = "session.process.status"
 
 	// Git worktree actions
-	ActionWorktreePull                = "worktree.pull"                 // Pull from remote
-	ActionWorktreePush                = "worktree.push"                 // Push to remote
-	ActionWorktreeReplaceContribution = "worktree.replace_contribution" // Replace the bound contribution branch
-	ActionWorktreeUseContribution     = "worktree.use_contribution"     // Adopt the bound contribution version
-	ActionWorktreeRebase              = "worktree.rebase"               // Rebase onto base branch
-	ActionWorktreeMerge               = "worktree.merge"                // Merge base branch into worktree
-	ActionWorktreeAbort               = "worktree.abort"                // Abort in-progress merge or rebase
-	ActionWorktreeCommit              = "worktree.commit"               // Commit changes
-	ActionWorktreeStage               = "worktree.stage"                // Stage files for commit
-	ActionWorktreeUnstage             = "worktree.unstage"              // Unstage files from index
-	ActionWorktreeDiscard             = "worktree.discard"              // Discard changes to files
-	ActionWorktreeCreatePR            = "worktree.create_pr"            // Create a pull request
-	ActionWorktreeRevertCommit        = "worktree.revert_commit"        // Revert a commit (staged, no new commit)
-	ActionWorktreeRenameBranch        = "worktree.rename_branch"        // Rename the current branch
-	ActionWorktreeReset               = "worktree.reset"                // Reset HEAD to a commit (soft/hard)
+	ActionWorktreePull                           = "worktree.pull"                             // Pull from remote
+	ActionWorktreePush                           = "worktree.push"                             // Push to remote
+	ActionWorktreeReplaceContribution            = "worktree.replace_contribution"             // Replace the bound contribution branch
+	ActionWorktreeUseContribution                = "worktree.use_contribution"                 // Adopt the bound contribution version
+	ActionWorktreeContributionHistoryExplanation = "worktree.contribution_history_explanation" // Observe contribution history evidence
+	ActionWorktreeRebase                         = "worktree.rebase"                           // Rebase onto base branch
+	ActionWorktreeMerge                          = "worktree.merge"                            // Merge base branch into worktree
+	ActionWorktreeAbort                          = "worktree.abort"                            // Abort in-progress merge or rebase
+	ActionWorktreeCommit                         = "worktree.commit"                           // Commit changes
+	ActionWorktreeStage                          = "worktree.stage"                            // Stage files for commit
+	ActionWorktreeUnstage                        = "worktree.unstage"                          // Unstage files from index
+	ActionWorktreeDiscard                        = "worktree.discard"                          // Discard changes to files
+	ActionWorktreeCreatePR                       = "worktree.create_pr"                        // Create a pull request
+	ActionWorktreeRevertCommit                   = "worktree.revert_commit"                    // Revert a commit (staged, no new commit)
+	ActionWorktreeRenameBranch                   = "worktree.rename_branch"                    // Rename the current branch
+	ActionWorktreeReset                          = "worktree.reset"                            // Reset HEAD to a commit (soft/hard)
 
 	// User actions
 	ActionUserGet                          = "user.get"
@@ -444,6 +447,9 @@ const (
 	ActionMCPReportPRAutoFixOutcome     = "mcp.report_pr_auto_fix_outcome"
 	ActionMCPGetTaskMRAutomation        = "mcp.get_task_mr_automation"
 	ActionMCPUpdateTaskMRAutomation     = "mcp.update_task_mr_automation"
+	ActionMCPLinkTaskPR                 = "mcp.link_task_pr"
+	ActionMCPUnlinkTaskPR               = "mcp.unlink_task_pr"
+	ActionMCPReplaceTaskPR              = "mcp.replace_task_pr"
 	ActionMCPAddTaskDependency          = "mcp.add_task_dependency"
 	ActionMCPRemoveTaskDependency       = "mcp.remove_task_dependency"
 	ActionMCPAddBranchToTask            = "mcp.add_branch_to_task"
@@ -537,31 +543,32 @@ const (
 
 // GitHub integration actions
 const (
-	ActionGitHubStatus               = "github.status"
-	ActionGitHubTaskPRsList          = "github.task_prs.list"
-	ActionGitHubTaskPRGet            = "github.task_pr.get"
-	ActionGitHubPRFeedbackGet        = "github.pr_feedback.get"
-	ActionGitHubReviewWatchesList    = "github.review_watches.list"
-	ActionGitHubReviewWatchCreate    = "github.review_watches.create"
-	ActionGitHubReviewWatchUpdate    = "github.review_watches.update"
-	ActionGitHubReviewWatchDelete    = "github.review_watches.delete"
-	ActionGitHubReviewTrigger        = "github.review_watches.trigger"
-	ActionGitHubReviewTriggerAll     = "github.review_watches.trigger_all"
-	ActionGitHubPRWatchesList        = "github.pr_watches.list"
-	ActionGitHubPRWatchDelete        = "github.pr_watches.delete"
-	ActionGitHubPRFilesGet           = "github.pr_files.get"
-	ActionGitHubPRCommitsGet         = "github.pr_commits.get"
-	ActionGitHubPRCommitGet          = "github.pr_commit.get"
-	ActionGitHubTaskPRUpdated        = "github.task_pr.updated"         // Notification
-	ActionGitHubTaskPRDeleted        = "github.task_pr.deleted"         // Notification
-	ActionGitHubTaskCIOptionsUpdated = "github.task_ci_options.updated" // Notification
-	ActionGitHubRateLimitUpdated     = "github.rate_limit.updated"      // Notification
-	ActionGitHubPRFeedbackNotify     = "github.pr_feedback.notify"      // Notification
-	ActionGitHubNewReviewPRNotify    = "github.new_review_pr.notify"    // Notification
-	ActionGitHubTaskPRSync           = "github.task_pr.sync"
-	ActionGitHubStats                = "github.stats"
-	ActionGitHubCheckSessionPR       = "github.check_session_pr"
-	ActionGitLabCheckSessionMR       = "gitlab.check_session_mr"
+	ActionGitHubStatus                   = "github.status"
+	ActionGitHubTaskPRsList              = "github.task_prs.list"
+	ActionGitHubTaskPRGet                = "github.task_pr.get"
+	ActionGitHubPRFeedbackGet            = "github.pr_feedback.get"
+	ActionGitHubReviewWatchesList        = "github.review_watches.list"
+	ActionGitHubReviewWatchCreate        = "github.review_watches.create"
+	ActionGitHubReviewWatchUpdate        = "github.review_watches.update"
+	ActionGitHubReviewWatchDelete        = "github.review_watches.delete"
+	ActionGitHubReviewTrigger            = "github.review_watches.trigger"
+	ActionGitHubReviewTriggerAll         = "github.review_watches.trigger_all"
+	ActionGitHubPRWatchesList            = "github.pr_watches.list"
+	ActionGitHubPRWatchDelete            = "github.pr_watches.delete"
+	ActionGitHubPRFilesGet               = "github.pr_files.get"
+	ActionGitHubPRCommitsGet             = "github.pr_commits.get"
+	ActionGitHubPRCommitGet              = "github.pr_commit.get"
+	ActionGitHubTaskPRUpdated            = "github.task_pr.updated"             // Notification
+	ActionGitHubTaskPRDeleted            = "github.task_pr.deleted"             // Notification
+	ActionGitHubTaskCIOptionsUpdated     = "github.task_ci_options.updated"     // Notification
+	ActionGitHubRateLimitUpdated         = "github.rate_limit.updated"          // Notification
+	ActionGitHubPRDiscoveryHealthUpdated = "github.pr_discovery_health.updated" // Notification
+	ActionGitHubPRFeedbackNotify         = "github.pr_feedback.notify"          // Notification
+	ActionGitHubNewReviewPRNotify        = "github.new_review_pr.notify"        // Notification
+	ActionGitHubTaskPRSync               = "github.task_pr.sync"
+	ActionGitHubStats                    = "github.stats"
+	ActionGitHubCheckSessionPR           = "github.check_session_pr"
+	ActionGitLabCheckSessionMR           = "gitlab.check_session_mr"
 
 	// Issue watch actions
 	ActionGitHubIssueWatchesList = "github.issue_watches.list"
@@ -586,6 +593,7 @@ const (
 // GitLab integration notifications
 const (
 	ActionGitLabTaskMRUpdated           = "gitlab.task_mr.updated"         // Notification
+	ActionGitLabTaskMRDeleted           = "gitlab.task_mr.deleted"         // Notification
 	ActionGitLabTaskMRAutomationUpdated = "gitlab.task_mr_options.updated" // Notification
 )
 

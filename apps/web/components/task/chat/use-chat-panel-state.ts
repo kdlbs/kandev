@@ -454,6 +454,9 @@ function useSessionData(
     historyRefreshPending,
     historyInitialized,
     hasMore: hasOlderMessages,
+    historyStatus,
+    historyError,
+    retryHistory,
   } = useSessionMessages(resolvedSessionId);
   const turns = useAppStore((state) =>
     resolvedSessionId ? state.turns.bySession[resolvedSessionId] : undefined,
@@ -464,6 +467,7 @@ function useSessionData(
   );
   const lastAgentError = useMemo(() => readLastAgentError(session?.metadata), [session?.metadata]);
   const processed = useProcessedMessages(messages, taskId, resolvedSessionId, taskDescription, {
+    initialPromptPreview: session?.metadata?.initial_prompt_preview,
     historyInitialized,
     hasOlderMessages,
     lastAgentError,
@@ -489,6 +493,9 @@ function useSessionData(
     messagesLoading,
     isInitialMessagesLoading,
     historyRefreshPending,
+    historyStatus,
+    historyError,
+    retryHistory,
     ...processed,
     sessionModel,
     activeModel,

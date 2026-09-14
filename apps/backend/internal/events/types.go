@@ -3,12 +3,18 @@ package events
 
 // Event types for tasks
 const (
-	TaskCreated                    = "task.created"
-	TaskUpdated                    = "task.updated"
-	TaskStateChanged               = "task.state_changed"
-	TaskDeleted                    = "task.deleted"
-	TaskMoved                      = "task.moved" // Manual step change via MoveTask
-	TaskQueuePromoted              = "task.queue_promoted"
+	TaskCreated       = "task.created"
+	TaskUpdated       = "task.updated"
+	TaskStateChanged  = "task.state_changed"
+	TaskDeleted       = "task.deleted"
+	TaskMoved         = "task.moved" // Manual step change via MoveTask
+	TaskQueuePromoted = "task.queue_promoted"
+	// TaskReordered fires when a within-step band reorder commits
+	// (REQ-TASKS-KANBAN-TASK-REORDERING-001.16). Payload:
+	// {workflow_step_id, band, revision, tasks: [{id, position}]}, the whole
+	// step's non-hidden tasks in both bands. Deliberately not task.moved
+	// (.21) and not one task.updated per task.
+	TaskReordered                  = "task.reordered"
 	SessionWorkspaceSourcesUpdated = "session.workspace_sources.updated"
 	// TaskDependenciesResolved fires when a task's last unresolved dependency
 	// completes successfully. Payload: {task_id, resolved_by_task_id}.
@@ -327,17 +333,18 @@ const (
 
 // Event types for GitHub integration
 const (
-	GitHubPRFeedback           = "github.pr_feedback"             // PR has new feedback (UI notification only)
-	GitHubPRStateChanged       = "github.pr_state_changed"        // PR state changed (merged, closed, etc.)
-	GitHubNewReviewPR          = "github.new_pr_to_review"        // New PR found needing review
-	GitHubNewIssue             = "github.new_issue"               // New issue found matching issue watch
-	GitHubTaskPRUpdated        = "github.task_pr.updated"         // TaskPR record updated (for UI refresh)
-	GitHubTaskPRDeleted        = "github.task_pr.deleted"         // TaskPR association detached (for UI refresh)
-	GitHubTaskCIOptionsUpdated = "github.task_ci_options.updated" // Task CI automation options updated
-	GitHubWatchEvent           = "github.watch.event"             // Watch created/deleted
-	GitHubRateLimitUpdated     = "github.rate_limit.updated"      // GitHub API rate-limit snapshot changed
-	GitHubPushReceived         = "github.push_received"           // Push webhook verified + installation resolved to workspaces
-	GitHubCheckRunCompleted    = "github.check_run_completed"     // Completed check_run webhook resolved to workspaces
+	GitHubPRFeedback               = "github.pr_feedback"                 // PR has new feedback (UI notification only)
+	GitHubPRStateChanged           = "github.pr_state_changed"            // PR state changed (merged, closed, etc.)
+	GitHubNewReviewPR              = "github.new_pr_to_review"            // New PR found needing review
+	GitHubNewIssue                 = "github.new_issue"                   // New issue found matching issue watch
+	GitHubTaskPRUpdated            = "github.task_pr.updated"             // TaskPR record updated (for UI refresh)
+	GitHubTaskPRDeleted            = "github.task_pr.deleted"             // TaskPR association detached (for UI refresh)
+	GitHubTaskCIOptionsUpdated     = "github.task_ci_options.updated"     // Task CI automation options updated
+	GitHubWatchEvent               = "github.watch.event"                 // Watch created/deleted
+	GitHubRateLimitUpdated         = "github.rate_limit.updated"          // GitHub API rate-limit snapshot changed
+	GitHubPRDiscoveryHealthUpdated = "github.pr_discovery_health.updated" // Workspace PR discovery health changed
+	GitHubPushReceived             = "github.push_received"               // Push webhook verified + installation resolved to workspaces
+	GitHubCheckRunCompleted        = "github.check_run_completed"         // Completed check_run webhook resolved to workspaces
 )
 
 // Event types for GitLab integration
@@ -347,6 +354,7 @@ const (
 	GitLabNewReviewMR    = "gitlab.new_mr_to_review" // New MR found needing review
 	GitLabNewIssue       = "gitlab.new_issue"        // New issue found matching issue watch
 	GitLabTaskMRUpdated  = "gitlab.task_mr.updated"  // TaskMR record updated (for UI refresh)
+	GitLabTaskMRDeleted  = "gitlab.task_mr.deleted"  // TaskMR association detached (for UI refresh)
 	GitLabWatchEvent     = "gitlab.watch.event"      // Watch created/deleted
 
 	// GitLabTaskMROptionsUpdated fires after a task's MR lifecycle

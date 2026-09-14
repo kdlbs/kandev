@@ -17,6 +17,10 @@ type fakeStore struct {
 	applied        map[string]bool
 	transitionFrom string
 	transitionTo   string
+	// callLog records ApplyTransition and MarkOperationApplied invocations in
+	// order, so tests can assert both whether a call happened and, for
+	// AC-EO-3, that the commit precedes the mark.
+	callLog []string
 }
 
 func (s *fakeStore) LoadState(_ context.Context, _, _ string) (MachineState, error) {
@@ -50,6 +54,7 @@ func (s *fakeStore) LoadPreviousStep(_ context.Context, _ string, currentPositio
 func (s *fakeStore) ApplyTransition(_ context.Context, _, _, fromStepID, toStepID string, _ Trigger) error {
 	s.transitionFrom = fromStepID
 	s.transitionTo = toStepID
+	s.callLog = append(s.callLog, "ApplyTransition")
 	return nil
 }
 
@@ -71,6 +76,10 @@ func (s *fakeStore) PersistData(_ context.Context, _ string, data map[string]any
 }
 
 func (s *fakeStore) IsOperationApplied(_ context.Context, operationID string) (bool, error) {
+	// Logged unconditionally (even for an empty operationID) so the AC-EO-7
+	// "no store calls at all" tests actually prove this method was never
+	// reached, rather than passing vacuously because this method never logs.
+	s.callLog = append(s.callLog, "IsOperationApplied")
 	if operationID == "" {
 		return false, nil
 	}
@@ -82,7 +91,16 @@ func (s *fakeStore) MarkOperationApplied(_ context.Context, operationID string) 
 		return nil
 	}
 	s.applied[operationID] = true
+	s.callLog = append(s.callLog, "MarkOperationApplied")
 	return nil
+}
+
+// erroringCallback always fails, for AC-EO-5: a processActions error must
+// short-circuit HandleTrigger before the mark is ever attempted.
+type erroringCallback struct{}
+
+func (c *erroringCallback) Execute(_ context.Context, _ ActionInput) (ActionResult, error) {
+	return ActionResult{}, errors.New("callback failed")
 }
 
 type fakeCallback struct {

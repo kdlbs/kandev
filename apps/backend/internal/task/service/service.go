@@ -258,6 +258,13 @@ type WorkflowStepGetter interface {
 	GetNextStepByPosition(ctx context.Context, workflowID string, currentPosition int) (*wfmodels.WorkflowStep, error)
 }
 
+// WorkflowMovePreflight validates the destination lifecycle before a task
+// move is committed. The orchestrator owns the credential and session-target
+// checks, while the task service owns the move transaction.
+type WorkflowMovePreflight interface {
+	PreflightWorkflowStepMove(ctx context.Context, taskID string, currentSession *models.TaskSession, targetStep *wfmodels.WorkflowStep) error
+}
+
 // workflowStepLister is an optional extension used to find WIP steps that
 // pull work from a feeder when new work arrives in that feeder.
 type workflowStepLister interface {
@@ -394,6 +401,9 @@ type Service struct {
 	subagentContexts                repository.SubagentContextRepository
 	usage                           repository.UsageRepository
 	workspacePolicyAttacher         WorkspacePolicyAttacher
+	autoArchiveCoordinator          AutoArchiveCoordinator
+	workflowTaskArchiveCoordinator  WorkflowTaskArchiveCoordinator
+	taskLifecycleCoordinator        TaskLifecycleCoordinator
 	attachmentSvc                   *AttachmentService
 	statusSummaryPRs                TaskStatusSummaryPRReader
 	statusSummaryProjector          TaskStatusSummaryEventProjector
@@ -424,6 +434,7 @@ type Service struct {
 	workflowStepCreator             WorkflowStepCreator
 	workspaceBootstrapper           WorkspaceBootstrapper
 	workflowStepGetter              WorkflowStepGetter
+	workflowMovePreflight           WorkflowMovePreflight
 	startStepResolver               StartStepResolver
 	stepHistoryRecorder             StepHistoryRecorder
 	contributionDestinationPreparer ContributionDestinationPreparer
@@ -431,19 +442,28 @@ type Service struct {
 	quickChatDir                    string // Directory for quick-chat workspaces (e.g., ~/.kandev/quick-chat)
 	branchFetcher                   *branchFetcher
 	envDestroyer                    EnvironmentDestroyer
+	wsGroupMembership               WorkspaceGroupMembershipReader
+	executorCapabilityProber        ExecutorCapabilityProber
 	sshTaskDirReclaimer             SSHTaskDirReclaimer
-	sessionRunningChecker           SessionRunningChecker
-	remoteBranchLister              RemoteBranchLister
-	repositorySelectionResolver     RepositorySelectionResolver
-	repoCloneLocation               RepoCloneLocation
-	blockers                        BlockerRepository
-	comments                        CommentRepository
-	taskStateActivity               TaskStateActivityLogger
-	secretStore                     secrets.SecretStore
-	workspaceSecretDeleter          WorkspaceSecretDeleter
-	baseBranchPusher                AgentBaseBranchPusher
-	comparisonTargetPusher          AgentComparisonTargetPusher
-	runtimeOverridesMu              sync.Mutex
+	// orphanReapHostSnapshotter and orphanReapVerifier back the reap phase's
+	// host process detection. Nil selects the real platform implementation
+	// (resource_cleanup_orphan_reap_host_*.go); tests override them
+	// directly since they are unexported and this is a whitebox package.
+	orphanReapHostSnapshotter   orphanReapHostSnapshotter
+	orphanReapVerifier          orphanReapVerifier
+	orphanReapSignaler          orphanReapSignaler
+	sessionRunningChecker       SessionRunningChecker
+	remoteBranchLister          RemoteBranchLister
+	repositorySelectionResolver RepositorySelectionResolver
+	repoCloneLocation           RepoCloneLocation
+	blockers                    BlockerRepository
+	comments                    CommentRepository
+	taskStateActivity           TaskStateActivityLogger
+	secretStore                 secrets.SecretStore
+	workspaceSecretDeleter      WorkspaceSecretDeleter
+	baseBranchPusher            AgentBaseBranchPusher
+	comparisonTargetPusher      AgentComparisonTargetPusher
+	runtimeOverridesMu          sync.Mutex
 
 	workspaceSourceProviderRefresher WorkspaceSourceProviderRefresher
 
@@ -470,13 +490,32 @@ type Service struct {
 	taskPublicationMu sync.Mutex
 	taskPublications  map[string]*taskPublicationQueue
 	// cleanupDoneForTest lets unit tests wait for async cleanup; nil in production.
-	cleanupDoneForTest  chan struct{}
-	cleanupWorkerMu     sync.Mutex
-	cleanupWorkerCancel context.CancelFunc
-	cleanupWorkerWG     sync.WaitGroup
-	cleanupWorkerWake   chan struct{}
-	cleanupRunsMu       sync.Mutex
-	cleanupRuns         map[*taskResourceCleanupRun]struct{}
+	cleanupDoneForTest chan struct{}
+	// bulkMoveAfterTaskForTest is a test-only hook invoked synchronously after
+	// each task's MoveTask call inside BulkMoveSelectedTasks's and
+	// BulkMoveTasks's dispatch loops, while their arrival locks are still
+	// held. Lets a test prove the lock spans the whole loop by blocking a
+	// concurrent arrival attempt from inside this hook. Nil in production.
+	bulkMoveAfterTaskForTest func()
+	// bulkMoveAfterLockForTest is a test-only hook invoked synchronously
+	// after BulkMoveSelectedTasks/BulkMoveTasks acquire their step lock set,
+	// before the dispatch loop starts. Lets a test force a concurrent
+	// opposite-direction MoveTask into the acquisition window and prove the
+	// two do not deadlock. Nil in production.
+	bulkMoveAfterLockForTest func()
+	// bulkMoveBeforeLockForTest is a test-only hook invoked synchronously
+	// once, before BulkMoveSelectedTasks/BulkMoveTasks make their first
+	// LockStepArrivalsForBatch attempt. Lets a test move one of the batch's
+	// tasks to a different source step in that window and prove the lock
+	// acquisition re-reads and corrects for it instead of locking a step the
+	// task has already left. Nil in production.
+	bulkMoveBeforeLockForTest func()
+	cleanupWorkerMu           sync.Mutex
+	cleanupWorkerCancel       context.CancelFunc
+	cleanupWorkerWG           sync.WaitGroup
+	cleanupWorkerWake         chan struct{}
+	cleanupRunsMu             sync.Mutex
+	cleanupRuns               map[*taskResourceCleanupRun]struct{}
 	// repoResolveMu serializes the check-then-create sections of
 	// FindOrCreateRepository and FindOrCreateRepositoryByLocalPath so two
 	// resolvers racing to register the same not-yet-known repository (by
@@ -498,6 +537,29 @@ type Service struct {
 // required before a newly created child can be returned or launched.
 type WorkspacePolicyAttacher interface {
 	AttachWorkspacePolicy(ctx context.Context, taskID, parentID string, policy WorkspacePolicy) error
+}
+
+// AutoArchiveCoordinator owns the full lifecycle transition for automatic
+// archive candidates, including workspace-group membership release and
+// resource cleanup.
+type AutoArchiveCoordinator interface {
+	ArchiveAutoTask(ctx context.Context, candidate *models.Task) (*CascadeOutcome, error)
+}
+
+// WorkflowTaskArchiveCoordinator routes workflow deletion through the same
+// lifecycle path as user archive requests.
+type WorkflowTaskArchiveCoordinator interface {
+	ArchiveTaskTree(ctx context.Context, rootID string, cascade bool) (*CascadeOutcome, error)
+}
+
+// TaskLifecycleCoordinator owns destructive task lifecycle transitions that
+// must release workspace-group state before or alongside deleting the task.
+type TaskLifecycleCoordinator interface {
+	DeleteTaskTree(ctx context.Context, rootID string, cascade bool) (*CascadeOutcome, error)
+}
+
+type taskLifecycleCoordinatorWithReason interface {
+	DeleteTaskTreeWithReason(ctx context.Context, rootID string, cascade bool, reason string) (*CascadeOutcome, error)
 }
 
 // WorkspacePolicyMembershipReleaser removes a task's workspace-group
@@ -544,6 +606,55 @@ func (s *Service) SetWorkspaceSecretDeleter(deleter WorkspaceSecretDeleter) {
 // coordinator used by every CreateTask caller.
 func (s *Service) SetWorkspacePolicyAttacher(attacher WorkspacePolicyAttacher) {
 	s.workspacePolicyAttacher = attacher
+}
+
+// SetTaskLifecycleCoordinator installs the canonical destructive task
+// transition used by automatic cleanup callers.
+func (s *Service) SetTaskLifecycleCoordinator(coordinator TaskLifecycleCoordinator) {
+	s.taskLifecycleCoordinator = coordinator
+}
+
+// DeleteTaskWithLifecycle deletes a task through the canonical coordinator
+// when one is wired, preserving the legacy service path for isolated callers.
+func (s *Service) DeleteTaskWithLifecycle(ctx context.Context, id string) error {
+	if s.taskLifecycleCoordinator == nil {
+		return s.DeleteTask(ctx, id)
+	}
+	_, err := s.taskLifecycleCoordinator.DeleteTaskTree(ctx, id, false)
+	var postCommitErr *CascadePostCommitError
+	if errors.As(err, &postCommitErr) {
+		return nil
+	}
+	return err
+}
+
+// DeleteTaskWithLifecycleAndReason preserves deletion attribution when the
+// configured coordinator supports reason-aware task-deleted events.
+func (s *Service) DeleteTaskWithLifecycleAndReason(ctx context.Context, id, reason string) error {
+	if s.taskLifecycleCoordinator == nil {
+		return s.DeleteTaskWithReason(ctx, id, reason)
+	}
+	if coordinator, ok := s.taskLifecycleCoordinator.(taskLifecycleCoordinatorWithReason); ok {
+		_, err := coordinator.DeleteTaskTreeWithReason(ctx, id, false, reason)
+		var postCommitErr *CascadePostCommitError
+		if errors.As(err, &postCommitErr) {
+			return nil
+		}
+		return err
+	}
+	return s.DeleteTaskWithLifecycle(ctx, id)
+}
+
+// SetAutoArchiveCoordinator installs the lifecycle coordinator used by the
+// automatic archive loop.
+func (s *Service) SetAutoArchiveCoordinator(coordinator AutoArchiveCoordinator) {
+	s.autoArchiveCoordinator = coordinator
+}
+
+// SetWorkflowTaskArchiveCoordinator installs the shared archive lifecycle used
+// when deleting a workflow.
+func (s *Service) SetWorkflowTaskArchiveCoordinator(coordinator WorkflowTaskArchiveCoordinator) {
+	s.workflowTaskArchiveCoordinator = coordinator
 }
 
 // NewService creates a new task service
@@ -713,6 +824,13 @@ func (s *Service) SetWorkspaceDefaultsInitializer(initializer WorkspaceDefaultsI
 // SetWorkflowStepGetter wires the workflow step getter for MoveTask.
 func (s *Service) SetWorkflowStepGetter(getter WorkflowStepGetter) {
 	s.workflowStepGetter = getter
+}
+
+// SetWorkflowMovePreflight wires the orchestrator's synchronous destination
+// lifecycle validation for task moves. It is optional for standalone task
+// service users and tests.
+func (s *Service) SetWorkflowMovePreflight(preflight WorkflowMovePreflight) {
+	s.workflowMovePreflight = preflight
 }
 
 // SetStartStepResolver wires the start step resolver for CreateTask.

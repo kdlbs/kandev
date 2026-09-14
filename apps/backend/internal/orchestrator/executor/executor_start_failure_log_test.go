@@ -84,3 +84,54 @@ func TestHandleAgentProcessStartFailure_LogsErrorForStartupDeadline(t *testing.T
 		t.Fatalf("warn teardown entries = %d, want 0", warns)
 	}
 }
+
+func TestHandleAgentProcessStartFailure_RetriesTransientOwnershipRead(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-123"] = &models.TaskSession{
+		ID: "session-123", TaskID: "task-123", State: models.TaskSessionStateStarting,
+	}
+	lookupCalls := 0
+	repo.getTaskSessionFunc = func(_ context.Context, _ string) (*models.TaskSession, error) {
+		lookupCalls++
+		if lookupCalls == 2 {
+			return nil, errors.New("transient session lookup failure")
+		}
+		return cloneMockTaskSession(repo.sessions["session-123"]), nil
+	}
+	var stopCalls int
+	exec := newTestExecutor(t, &mockAgentManager{
+		stopAgentFunc: func(context.Context, string, bool) error {
+			stopCalls++
+			return nil
+		},
+	}, repo)
+	exec.SetOnSessionStateChange(func(
+		ctx context.Context,
+		_ string,
+		sessionID string,
+		state models.TaskSessionState,
+		errorMessage string,
+	) error {
+		return repo.UpdateTaskSessionState(ctx, sessionID, state, errorMessage)
+	})
+
+	exec.handleAgentProcessStartFailure(
+		context.Background(),
+		"task-123",
+		"session-123",
+		"exec-456",
+		errors.New("start failed"),
+		false,
+		false,
+	)
+
+	if lookupCalls < 4 {
+		t.Fatalf("session lookup calls = %d, want initial check, retry, and commit reads", lookupCalls)
+	}
+	if got := repo.sessions["session-123"].State; got != models.TaskSessionStateFailed {
+		t.Fatalf("session state = %s, want FAILED", got)
+	}
+	if stopCalls != 1 {
+		t.Fatalf("StopAgent calls = %d, want 1", stopCalls)
+	}
+}

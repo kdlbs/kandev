@@ -31,6 +31,12 @@ func newParticipantUUID() string { return uuid.New().String() }
 // The alias is the table alias of the tasks row (e.g. "t" or "tasks");
 // the resulting SQL fragment evaluates to "" when neither a runner row
 // nor a step primary exists.
+//
+// The third fallback orders by workflow_step_participants.created_at, a
+// persisted, dialect-portable column, with id as a named tiebreak — the
+// same ordering ResolveCurrentRunner uses for its identical tier, so both
+// resolvers agree and both database engines return the same runner for the
+// same data.
 func RunnerProjection(alias string) string {
 	if alias == "" {
 		alias = "tasks"
@@ -64,6 +70,30 @@ type Repository struct {
 	ro      *sqlx.DB // reader
 	log     *logger.Logger
 	migrate *db.MigrateLogger
+
+	// failBudgetPolicyUpdateErr is a test-only failpoint: when set,
+	// updateBudgetPolicyTx returns it after the claim discard has run but
+	// before the policy row update, so a test can prove the two are
+	// transactional without a fault-injecting driver.
+	failBudgetPolicyUpdateErr error
+
+	// failBudgetClaimsRecreateErr is a test-only failpoint: when set,
+	// recreateBudgetClaimsForRevision returns it instead of touching the
+	// database, so a test can prove initSchema surfaces the error rather
+	// than swallowing it.
+	failBudgetClaimsRecreateErr error
+
+	// failBudgetClaimsRecreateAfterDropErr is a test-only failpoint: when
+	// set, recreateBudgetClaimsForRevision returns it after DROP TABLE has
+	// run but before CREATE TABLE, inside the same transaction, so a test
+	// can prove the two are atomic rather than two independent statements.
+	failBudgetClaimsRecreateAfterDropErr error
+
+	// failBudgetExceededCompanionErr is a test-only failpoint: when set,
+	// ClaimExceeded returns it after the exceeded-level insert has run but
+	// before the companion alert-level insert, so a test can prove the
+	// pair rolls back together.
+	failBudgetExceededCompanionErr error
 }
 
 // NewWithDB creates a new office repository with existing database connections.
@@ -114,6 +144,12 @@ func (r *Repository) initSchema() error {
 	if err := r.createCoreTables(); err != nil {
 		return err
 	}
+	// Runs after createCoreTables (which creates office_budget_claims) so
+	// it probes the real table rather than racing its creation. Its error
+	// is returned, not swallowed: see recreateBudgetClaimsForRevision.
+	if err := r.recreateBudgetClaimsForRevision(); err != nil {
+		return fmt.Errorf("recreate office_budget_claims: %w", err)
+	}
 	if err := r.createExtensionTables(); err != nil {
 		return err
 	}
@@ -121,6 +157,7 @@ func (r *Repository) initSchema() error {
 		return fmt.Errorf("required office migration: %w", err)
 	}
 	r.activateRunOutcome()
+	r.activateLoopLiveness()
 	return nil
 }
 
@@ -151,6 +188,9 @@ func (r *Repository) createCoreTables() error {
 		return err
 	}
 	if err := r.createApprovalTables(); err != nil {
+		return err
+	}
+	if err := r.createWorkspacePauseTable(); err != nil {
 		return err
 	}
 	return nil
@@ -322,7 +362,8 @@ func (r *Repository) createCostTables() error {
 		alert_threshold_pct INTEGER DEFAULT 80,
 		action_on_exceed TEXT DEFAULT 'notify_only',
 		created_at TIMESTAMP NOT NULL,
-		updated_at TIMESTAMP NOT NULL
+		updated_at TIMESTAMP NOT NULL,
+		revision INTEGER NOT NULL DEFAULT 1
 	);
 
 	-- Built-in default spend ceiling (REQ-OFFICE-BUDGET-003): a stable
@@ -333,9 +374,34 @@ func (r *Repository) createCostTables() error {
 		limit_subcents INTEGER NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
-	`)
+	` + budgetClaimsDDL)
 	return err
 }
+
+// budgetClaimsDDL is the final office_budget_claims shape: one row per
+// (policy, evaluation period, level, policy revision) that has already
+// produced its budget.alert / budget.exceeded notification. revision is
+// part of the primary key, not just a fence input, so a claim written
+// against a revision a concurrent update has already superseded can never
+// match a later evaluation's fenced insert. Used both for fresh-database
+// creation here and for the recreate in recreateBudgetClaimsForRevision, so
+// a fresh database and a migrated one converge. office_budget_claims must
+// be created after office_budget_policies: its foreign key references that
+// table, and PostgreSQL rejects a forward reference at CREATE TABLE time
+// even though SQLite tolerates it. ON DELETE CASCADE removes a policy's
+// claims on every deletion path without a matching code change at any of
+// them.
+const budgetClaimsDDL = `
+	CREATE TABLE IF NOT EXISTS office_budget_claims (
+		policy_id TEXT NOT NULL,
+		period_key TEXT NOT NULL,
+		level TEXT NOT NULL,
+		revision INTEGER NOT NULL,
+		claimed_at TIMESTAMP NOT NULL,
+		PRIMARY KEY (policy_id, period_key, level, revision),
+		FOREIGN KEY (policy_id) REFERENCES office_budget_policies(id) ON DELETE CASCADE
+	);
+`
 
 func (r *Repository) createRunTables() error {
 	_, err := r.db.Exec(`
@@ -390,6 +456,16 @@ func (r *Repository) createRunTables() error {
 		-- re-deriving it against a context_snapshot a coalesced wakeup
 		-- may have since patched.
 		continuation_scope TEXT NOT NULL DEFAULT '',
+		-- Completion-wave identity (parent-wake-wave-identity): both
+		-- columns are set together, only for task_children_completed
+		-- runs, from one derivation per queued run. wake_wave_key is
+		-- the digest idx_run_wake_wave indexes; wake_wave_string is the
+		-- plain string the backstop's candidate query compares.
+		wake_wave_key TEXT NOT NULL DEFAULT '',
+		wake_wave_string TEXT NOT NULL DEFAULT '',
+		-- causation_id (office-loop-liveness): copied from the wakeup
+		-- request that created this run. '' means uncorrelated.
+		causation_id TEXT NOT NULL DEFAULT '',
 		requested_at TIMESTAMP NOT NULL,
 		claimed_at TIMESTAMP,
 		finished_at TIMESTAMP
@@ -431,7 +507,7 @@ func (r *Repository) createRoutineTables() error {
 		assignee_agent_profile_id TEXT DEFAULT '',
 		status TEXT NOT NULL DEFAULT 'active',
 		concurrency_policy TEXT DEFAULT 'skip_if_active',
-		catch_up_policy TEXT NOT NULL DEFAULT 'enqueue_missed_with_cap',
+		catch_up_policy TEXT NOT NULL DEFAULT 'summarize_missed',
 		catch_up_max INTEGER NOT NULL DEFAULT 25,
 		variables TEXT DEFAULT '{}',
 		last_run_at TIMESTAMP,
@@ -444,7 +520,7 @@ func (r *Repository) createRoutineTables() error {
 		routine_id TEXT NOT NULL,
 		kind TEXT NOT NULL,
 		cron_expression TEXT DEFAULT '',
-		timezone TEXT DEFAULT '',
+		timezone TEXT DEFAULT 'UTC',
 		public_id TEXT DEFAULT '',
 		signing_mode TEXT DEFAULT '',
 		secret TEXT DEFAULT '',
@@ -466,9 +542,15 @@ func (r *Repository) createRoutineTables() error {
 		linked_task_id TEXT DEFAULT '',
 		coalesced_into_run_id TEXT DEFAULT '',
 		dispatch_fingerprint TEXT DEFAULT '',
+		catch_up_missed_ticks INTEGER,
+		catch_up_first_missed_at TIMESTAMP,
+		catch_up_truncated INTEGER NOT NULL DEFAULT 0,
 		started_at TIMESTAMP,
 		completed_at TIMESTAMP,
 		created_at TIMESTAMP NOT NULL,
+		skip_reason TEXT NOT NULL DEFAULT '',
+		pause_id TEXT NOT NULL DEFAULT '',
+		causation_id TEXT NOT NULL DEFAULT '',
 		FOREIGN KEY (routine_id) REFERENCES office_routines(id) ON DELETE CASCADE
 	);
 	CREATE INDEX IF NOT EXISTS idx_office_routine_runs_active_fingerprint
@@ -710,7 +792,8 @@ func (r *Repository) createAgentWakeupRequestTable() error {
 		run_id                TEXT NOT NULL DEFAULT '',
 		requested_at          TIMESTAMP NOT NULL,
 		claimed_at            TIMESTAMP,
-		finished_at           TIMESTAMP
+		finished_at           TIMESTAMP,
+		causation_id          TEXT NOT NULL DEFAULT ''
 	);
 	CREATE INDEX IF NOT EXISTS idx_wakeup_agent_status ON agent_wakeup_requests(agent_profile_id, status);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_wakeup_idempotency ON agent_wakeup_requests(idempotency_key)

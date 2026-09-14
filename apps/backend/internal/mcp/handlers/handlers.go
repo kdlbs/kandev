@@ -293,6 +293,7 @@ type Handlers struct {
 	// Optional PR lister (set via SetTaskPRLister) used to enrich
 	// task-listing responses with associated pull requests.
 	taskPRLister TaskPRLister
+	taskMRLister TaskMRLister
 	// Native code review (optional, set via SetReviewService /
 	// SetReviewRunner). Without them the review actions are simply not
 	// registered — see registerReviewHandlers.
@@ -303,6 +304,7 @@ type Handlers struct {
 
 	// Optional task-bound GitHub PR automation controls.
 	taskPRAutomation       TaskPRAutomationService
+	taskChangeLinks        TaskChangeLinkService
 	taskPRAutoFixOutcome   TaskPRAutoFixOutcomeService
 	remoteContributionSvc  RemoteContributionService
 	diagnosticBundles      DiagnosticBundleProvider
@@ -329,6 +331,11 @@ func (h *Handlers) releaseWorkspacePolicyAfterCreateRollback(ctx context.Context
 		h.logger.Warn("rollback workspace membership cleanup failed",
 			zap.String("task_id", taskID), zap.Error(err))
 	}
+}
+
+// SetTaskChangeLinkService wires provider-neutral PR/MR association changes.
+func (h *Handlers) SetTaskChangeLinkService(links TaskChangeLinkService) {
+	h.taskChangeLinks = links
 }
 
 // NewHandlers creates new MCP handlers.
@@ -488,6 +495,13 @@ func (h *Handlers) registerTaskMutationHandlers(d *guardedMCPDispatcher) {
 	d.RegisterFunc(ws.ActionMCPCreateTask, h.handleCreateTask)
 	d.RegisterFunc(ws.ActionMCPUpdateTask, h.handleUpdateTask)
 	d.RegisterFunc(ws.ActionMCPSetTaskTitle, h.handleSetTaskTitle)
+	d.RegisterFunc(ws.ActionMCPGetTaskPRAutomation, h.handleGetTaskPRAutomation)
+	d.RegisterFunc(ws.ActionMCPUpdateTaskPRAutomation, h.handleUpdateTaskPRAutomation)
+	d.RegisterFunc(ws.ActionMCPGetTaskMRAutomation, h.handleGetTaskMRAutomation)
+	d.RegisterFunc(ws.ActionMCPUpdateTaskMRAutomation, h.handleUpdateTaskMRAutomation)
+	d.RegisterFunc(ws.ActionMCPLinkTaskPR, h.handleLinkTaskPR)
+	d.RegisterFunc(ws.ActionMCPUnlinkTaskPR, h.handleUnlinkTaskPR)
+	d.RegisterFunc(ws.ActionMCPReplaceTaskPR, h.handleReplaceTaskPR)
 	d.RegisterFunc(ws.ActionMCPAddTaskDependency, h.handleAddTaskDependency)
 	d.RegisterFunc(ws.ActionMCPRemoveTaskDependency, h.handleRemoveTaskDependency)
 	d.RegisterFunc(ws.ActionMCPAddBranchToTask, h.handleAddBranchToTask)
@@ -738,27 +752,7 @@ type mcpRepositoryInput struct {
 // handleCreateTask creates a new task and optionally auto-starts an agent session.
 func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
 	// Use local struct with JSON tags since dto.CreateTaskRequest lacks them
-	var req struct {
-		ParentID               string               `json:"parent_id"`
-		SourceTaskID           string               `json:"source_task_id"`
-		SourceSessionID        string               `json:"source_session_id"`
-		WorkspaceID            string               `json:"workspace_id"`
-		WorkflowID             string               `json:"workflow_id"`
-		WorkflowStepID         string               `json:"workflow_step_id"`
-		WorkspaceMode          string               `json:"workspace_mode"`
-		Title                  string               `json:"title"`
-		Description            string               `json:"description"`
-		Autopilot              bool                 `json:"autopilot"`
-		AgentProfileID         string               `json:"agent_profile_id"`
-		ExecutorProfileID      string               `json:"executor_profile_id"`
-		StartAgent             *bool                `json:"start_agent"`               // nil means default to true for backward compatibility
-		Repositories           []mcpRepositoryInput `json:"repositories"`              // explicit repositories for top-level tasks
-		BaseBranch             string               `json:"base_branch"`               // top-level fallback applied to every resolved repo only when no per-repo entries are supplied; explicit per-repo BaseBranch is authoritative when Repositories is set
-		BlockedBy              []string             `json:"blocked_by"`                // task IDs that must complete before this task
-		StartWhenUnblocked     *bool                `json:"start_when_unblocked"`      // nil = derive from start_agent when BlockedBy is set
-		AssigneeAgentProfileID string               `json:"assignee_agent_profile_id"` // agent instance to assign the task to
-		ExternalID             string               `json:"external_id"`               // caller-supplied create-idempotency key
-	}
+	var req mcpCreateTaskRequest
 	if err := json.Unmarshal(msg.Payload, &req); err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
 	}
@@ -771,18 +765,28 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 
 	// Default start_agent to true for backward compatibility
 	startAgent := req.StartAgent == nil || *req.StartAgent
+	explicitWorkspaceID := req.WorkspaceID != ""
+	explicitWorkflowID := req.WorkflowID != ""
 
 	// Only require description for subtasks if we're starting an agent
 	if req.ParentID != "" && req.Description == "" && startAgent {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "description is required for subtasks: it is the task agent's initial prompt and the only context it receives to start working", nil)
 	}
+	admission, err := h.admitMCPCreateTask(ctx, &req)
+	if err != nil {
+		code := mcpCreateTaskAdmissionErrorCode(err)
+		message := mcpCreateTaskAdmissionErrorMessage(err)
+		h.logMCPCreateAdmissionRejection(ctx, code, message)
+		return ws.NewError(msg.ID, msg.Action, code, message, nil)
+	}
 
 	// Resolve repositories and default workspace/workflow from parent if needed.
-	explicitWorkspaceID := req.WorkspaceID != ""
-	explicitWorkflowID := req.WorkflowID != ""
 	resolved, err := h.resolveTaskRepositories(ctx, req.ParentID, req.SourceTaskID, req.Repositories)
 	if err != nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, err.Error(), nil)
+	}
+	if admission.discardInheritedSourceRepositories {
+		resolved.Repos = nil
 	}
 	repos := resolved.Repos
 	// Top-level base_branch override: when the caller passes base_branch
@@ -888,8 +892,9 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	// row — resolveMCPLaunchMetadataWithSource already validated it belongs
 	// to req.SourceTaskID above (resolveMCPCreatorSession errors out
 	// otherwise, so CreateTask is never reached with an unverified session
-	// here). Conditional: SourceSessionID is optional, so a caller that
-	// omits it falls back to the existing auth/user seam default.
+	// here). Session-bound Kanban admission fills this field from the verified
+	// principal; external callers remain source-free and use the existing
+	// auth/user attribution fallback.
 	createCtx := ctx
 	if req.SourceSessionID != "" {
 		createCtx = steptelemetry.WithAttribution(ctx, steptelemetry.Attribution{
@@ -929,13 +934,20 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 	// The MCP skip is a data-loss guard, not just an optimization: the steps
 	// below resolve remote contributions from the REQUEST (resolveMCPRemote
 	// Contributions above) but index them against the RETURNED task's
-	// repositories, and every rollback path on a mismatch calls DeleteTask.
+	// repositories, and every rollback path on a mismatch uses the lifecycle
+	// coordinator when one is wired.
 	// A retry landing on a Found outcome — the existing task, whose
 	// repository list need not match this retry's payload — would then
 	// misindex, roll back, and delete the task the caller was trying to
 	// recover. Both Found outcomes have no side effects, so skip everything
 	// below and return the existing task as-is.
 	if result.Outcome != service.CreateTaskOutcomeCreated {
+		if err := h.validateMCPFoundCreateTask(ctx, &req, result.Task); err != nil {
+			code := mcpCreateTaskAdmissionErrorCode(err)
+			message := mcpCreateTaskAdmissionErrorMessage(err)
+			h.logMCPCreateAdmissionRejection(ctx, code, message)
+			return ws.NewError(msg.ID, msg.Action, code, message, nil)
+		}
 		return ws.NewResponse(msg.ID, msg.Action, mcpCreateTaskResult{
 			TaskDTO:          dto.FromTask(result.Task),
 			Deduplicated:     true,
@@ -949,7 +961,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 			continue
 		}
 		if index >= len(task.Repositories) || task.Repositories[index] == nil {
-			if delErr := h.taskSvc.DeleteTask(ctx, task.ID); delErr != nil {
+			if delErr := h.taskSvc.DeleteTaskWithLifecycle(ctx, task.ID); delErr != nil {
 				h.logger.Error("rollback delete failed after missing task repository",
 					zap.String("task_id", task.ID), zap.Error(delErr))
 			}
@@ -959,7 +971,7 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		if err := h.remoteContributionSvc.Associate(ctx, req.WorkspaceID, identity.UserID, task.ID, task.Repositories[index].RepositoryID, resolution); err != nil {
 			h.logger.Error("associate remote contribution; rolling back task creation",
 				zap.String("task_id", task.ID), zap.Error(err))
-			if delErr := h.taskSvc.DeleteTask(ctx, task.ID); delErr != nil {
+			if delErr := h.taskSvc.DeleteTaskWithLifecycle(ctx, task.ID); delErr != nil {
 				h.logger.Error("rollback delete failed after contribution association error",
 					zap.String("task_id", task.ID), zap.Error(delErr))
 			}
@@ -2945,6 +2957,8 @@ const (
 	keyCheckoutBranch   = "checkout_branch"
 	keyPosition         = "position"
 	keyAutoMergeEnabled = "auto_merge_enabled"
+	keySuccess          = "success"
+	keyPending          = "pending"
 )
 
 // taskMessageStatusSent is the taskMessageDispatchResult.status value used

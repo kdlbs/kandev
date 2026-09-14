@@ -1,8 +1,13 @@
+import { assertCommentSurvivesForeground } from "./plan-comment-foreground-helpers";
 // Filename starts with "mobile-" so this runs under the mobile-chrome project.
 import { test, expect } from "../../fixtures/test-base";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { planScript } from "../../helpers/seed-session-messages";
 import { SessionPage } from "../../pages/session-page";
+import {
+  assertPlainSendDuringRecovery,
+  assertLegacyRecoveryPreservesDraft,
+} from "./plan-comment-recovery-helpers";
 
 const PLAN_CONTENT = "## Mobile shared plan\n\nReview this mobile implementation step";
 const DONE_STATES = ["COMPLETED", "WAITING_FOR_INPUT"];
@@ -10,6 +15,29 @@ const LEGACY_PRIMARY_ID = "11111111-1111-4111-8111-111111111111";
 const LEGACY_SECONDARY_ID = "22222222-2222-4222-8222-222222222222";
 
 test.describe("mobile: task-owned plan comments", () => {
+  // @covers AC-TASKS-PLAN-COMMENTS-004.5, AC-TASKS-PLAN-COMMENTS-004.8
+  for (const withPlan of [false, true]) {
+    test(`plain Send survives failed comment reads ${withPlan ? "with" : "without"} a plan`, async ({
+      testPage,
+      apiClient,
+      seedData,
+    }) => {
+      test.setTimeout(120_000);
+      await assertPlainSendDuringRecovery(
+        { testPage, apiClient, seedData, mobile: true },
+        withPlan,
+      );
+    });
+  }
+  // @covers AC-TASKS-PLAN-COMMENTS-004.4, AC-TASKS-PLAN-COMMENTS-004.6, AC-TASKS-PLAN-COMMENTS-004.8
+  test("resumes feedback recovery and retains the mobile draft and focus", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    await assertLegacyRecoveryPreservesDraft({ testPage, apiClient, seedData, mobile: true });
+  });
   // @covers AC-TASKS-PLAN-COMMENTS-001.7
   // @covers AC-TASKS-PLAN-COMMENTS-003.2
   // @covers AC-TASKS-PLAN-COMMENTS-004.1
@@ -203,3 +231,24 @@ test.describe("mobile: task-owned plan comments", () => {
     ).toBe(false);
   });
 });
+
+// @covers AC-TASKS-PLAN-COMMENTS-001.9, AC-TASKS-PLAN-COMMENTS-001.10
+for (const editing of [false, true]) {
+  for (const failedRead of [false, true]) {
+    test(`foreground refresh preserves ${editing ? "edited" : "new"} comment on ${failedRead ? "failure" : "success"}`, async ({
+      testPage,
+      apiClient,
+      seedData,
+    }) => {
+      test.setTimeout(120_000);
+      await assertCommentSurvivesForeground({
+        testPage,
+        apiClient,
+        seedData,
+        mobile: true,
+        editing,
+        failedRead,
+      });
+    });
+  }
+}

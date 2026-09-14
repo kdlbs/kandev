@@ -100,6 +100,10 @@ func TestCreateTask_ToolSchema_HasParentID(t *testing.T) {
 	assert.Contains(t, agentProfileDesc, "workspace_default")
 	assert.Contains(t, agentProfileDesc, "verified creating session")
 	assert.Contains(t, agentProfileDesc, "effective model, mode, and dynamic options")
+	assert.Contains(t, agentProfileDesc, "does not set an Office task's assignee")
+	assert.Contains(t, agentProfileDesc, "PATCH /api/v1/office/tasks/:id")
+	assert.Contains(t, agentProfileDesc, "assignee_agent_profile_id field in the request body")
+	assert.Contains(t, agentProfileDesc, "Agent callers need can_assign_tasks")
 
 	workflowProp, ok := props["workflow_id"].(map[string]interface{})
 	require.True(t, ok, "workflow_id schema should be an object")
@@ -375,6 +379,31 @@ func TestCreateTask_ForwardsBoundSourceSessionID(t *testing.T) {
 	assert.Equal(t, "my-task-123", payload["source_task_id"])
 	assert.Equal(t, "test-session", payload["source_session_id"])
 	assert.NotContains(t, toolInputProperties(t, s, "create_task_kandev"), "source_session_id")
+}
+
+func TestCreateTask_ExternalMode_AgentProfileDescNotesOfficeAssigneeLimitation(t *testing.T) {
+	backend := &testBackend{}
+	s := New(backend, "", "", 10005, newTestLogger(t), "", true, ModeExternal)
+
+	tool, ok := s.mcpServer.ListTools()["create_task_kandev"]
+	require.True(t, ok, "create_task tool not registered")
+
+	schema, err := json.Marshal(tool.Tool.InputSchema)
+	require.NoError(t, err)
+
+	var parsed map[string]interface{}
+	require.NoError(t, json.Unmarshal(schema, &parsed))
+	props, ok := parsed["properties"].(map[string]interface{})
+	require.True(t, ok, "schema should have properties")
+
+	agentProfileProp, ok := props["agent_profile_id"].(map[string]interface{})
+	require.True(t, ok, "agent_profile_id schema should be an object")
+	agentProfileDesc, ok := agentProfileProp["description"].(string)
+	require.True(t, ok, "agent_profile_id should have a description")
+	assert.Contains(t, agentProfileDesc, "does not set an Office task's assignee")
+	assert.Contains(t, agentProfileDesc, "PATCH /api/v1/office/tasks/:id")
+	assert.Contains(t, agentProfileDesc, "assignee_agent_profile_id field in the request body")
+	assert.Contains(t, agentProfileDesc, "Agent callers need can_assign_tasks")
 }
 
 func TestCreateTask_ExternalModeDoesNotInventSourceSessionID(t *testing.T) {
@@ -1021,6 +1050,53 @@ func TestTaskMRAutomationToolsNoTaskIDArgument(t *testing.T) {
 
 	properties := toolInputProperties(t, s, "update_task_mr_automation_kandev")
 	assert.NotContains(t, properties, "task_id")
+}
+
+func TestTaskPRLinkToolsRequireTaskAndCanonicalIdentity(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"task_id": "task-current"}}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "link_task_pr_kandev", map[string]interface{}{
+		"task_id": "task-target", "provider": "gitlab", "repository_id": "repo-1", "number": 42,
+	})
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPLinkTaskPR, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task-target", payload["task_id"])
+	assert.Equal(t, "task-current", payload["caller_task_id"])
+	assert.Equal(t, "gitlab", payload["provider"])
+	assert.Equal(t, "repo-1", payload["repository_id"])
+	assert.Equal(t, float64(42), payload["number"])
+
+	properties := toolInputProperties(t, s, "link_task_pr_kandev")
+	assert.Contains(t, properties, "task_id")
+	assert.Contains(t, properties, "provider")
+	assert.Contains(t, properties, "repository_id")
+	assert.Contains(t, properties, "number")
+	assert.NotContains(t, properties, "caller_task_id")
+}
+
+func TestReplaceTaskPRToolRequiresOldCanonicalIdentity(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"task_id": "task-target"}}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "replace_task_pr_kandev", map[string]interface{}{
+		"task_id": "task-target", "provider": "gitlab", "repository_id": "repo-new", "number": 42,
+		"old_provider": "github", "old_repository_id": "repo-old", "old_number": 7,
+	})
+	assert.False(t, result.IsError)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "github", payload["old_provider"])
+	assert.Equal(t, "repo-old", payload["old_repository_id"])
+	assert.Equal(t, float64(7), payload["old_number"])
+
+	properties := toolInputProperties(t, s, "replace_task_pr_kandev")
+	assert.Contains(t, properties, "old_provider")
+	assert.Contains(t, properties, "old_repository_id")
+	assert.Contains(t, properties, "old_number")
+	assert.Contains(t, s.mcpServer.ListTools()["replace_task_pr_kandev"].Tool.Description, "same provider")
 }
 
 // TestUpdateTaskMRAutomationToolForwardsMRIdentityAndAutoFixFields covers

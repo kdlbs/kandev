@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/common/subproc"
+	"github.com/kandev/kandev/internal/gitconfigenv"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/orchestrator/sessionstate"
 	"github.com/kandev/kandev/internal/repoclone"
@@ -145,15 +146,33 @@ func executorNeedsResolvedCredentials(executorType string) bool {
 // background bootstrap error does not destructively overwrite the task's
 // existing state (e.g. REVIEW). fromResume is forwarded to onAgentStartFailed
 // so the orchestrator can suppress user-facing toasts on background recovery.
-// On success it calls onSuccess with a non-cancellable context derived from ctx.
-// ctx is used with WithoutCancel so trace spans are preserved without inheriting cancellation.
+// On success it calls onSuccess with a context derived from ctx. Ordinary
+// starts detach from request cancellation; resume starts marked by
+// WithCancellableResumeContext retain cancellation so an explicit stop can
+// interrupt a startup that is still waiting for ACP readiness.
 func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, agentExecutionID string, onSuccess func(context.Context), escalateTaskOnFailure, fromResume bool) {
 	go func() {
-		startCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Minute)
+		startParent := context.WithoutCancel(ctx)
+		updateCtx := startParent
+		if isCancellableResumeContext(ctx) {
+			startParent = ctx
+			updateCtx = ctx
+		}
+		startCtx, cancel := context.WithTimeout(startParent, 5*time.Minute)
 		defer cancel()
-		updateCtx := context.WithoutCancel(ctx)
 
 		if err := e.agentManager.StartAgentProcess(startCtx, agentExecutionID); err != nil {
+			if isCancellableResumeContext(ctx) && ctx.Err() != nil {
+				// A cancelled resume owns no failure projection. Use the exact
+				// execution ID for bounded cleanup, then let the orchestrator
+				// release any launch-side claim without publishing FAILED.
+				cleanupCtx := context.WithoutCancel(ctx)
+				e.stopFailedStartExecution(cleanupCtx, agentExecutionID, "cancelled resume startup")
+				if e.onAgentProcessStartFailed != nil {
+					e.onAgentProcessStartFailed(cleanupCtx, taskID, sessionID, agentExecutionID, err)
+				}
+				return
+			}
 			e.handleAgentProcessStartFailure(
 				updateCtx, taskID, sessionID, agentExecutionID, err,
 				escalateTaskOnFailure, fromResume,
@@ -169,6 +188,16 @@ func (e *Executor) runAgentProcessAsync(ctx context.Context, taskID, sessionID, 
 			agentExecutionID,
 			"terminal post-start race",
 		); terminal {
+			return
+		}
+		if isCancellableResumeContext(ctx) && ctx.Err() != nil {
+			// The provider ignored cancellation and reported success late. Do
+			// not run the resume success callback or restore task/session state.
+			// Teardown is exact-execution scoped so a retry cannot be stopped.
+			e.stopFailedStartExecution(context.WithoutCancel(ctx), agentExecutionID, "cancelled resume startup")
+			if e.onAgentProcessStartFailed != nil {
+				e.onAgentProcessStartFailed(context.WithoutCancel(ctx), taskID, sessionID, agentExecutionID, context.Canceled)
+			}
 			return
 		}
 
@@ -217,6 +246,25 @@ func (e *Executor) handleAgentProcessStartFailure(
 		return
 	}
 
+	owned, ownershipErr := e.bootstrapFailureOwnsSession(ctx, sessionID, agentExecutionID)
+	if ownershipErr != nil {
+		e.logger.Warn("failed to verify execution before bootstrap failure projection",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", agentExecutionID),
+			zap.Error(ownershipErr))
+		e.stopFailedStartExecution(ctx, agentExecutionID, "bootstrap ownership check")
+		return
+	}
+	if !owned {
+		e.logger.Info("ignoring bootstrap failure from superseded execution",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", agentExecutionID))
+		e.stopFailedStartExecution(ctx, agentExecutionID, "superseded bootstrap failure")
+		return
+	}
+
 	// Let the orchestrator handle auth errors as recoverable failures and
 	// (for resume) suppress the toast before the session is marked FAILED.
 	if e.onAgentStartFailed != nil && e.onAgentStartFailed(
@@ -225,14 +273,26 @@ func (e *Executor) handleAgentProcessStartFailure(
 		return
 	}
 
-	changed, finalState, updateErr := e.transitionSessionState(
-		ctx, taskID, sessionID, models.TaskSessionStateFailed, startErr.Error(),
+	errorValue := e.buildBootstrapLastAgentError(
+		ctx, taskID, sessionID, agentExecutionID, startErr, fromResume,
 	)
-	if updateErr != nil {
-		e.logger.Warn("failed to mark session as failed after start error",
+	changed, finalState, transitionErr := e.commitBootstrapFailure(
+		ctx, taskID, sessionID, agentExecutionID, errorValue,
+	)
+	if transitionErr != nil {
+		e.logger.Warn("failed to commit bootstrap failure projection",
+			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
-			zap.Error(updateErr))
+			zap.String("agent_execution_id", agentExecutionID),
+			zap.Error(transitionErr))
+	} else if !changed {
+		// An ownership or compare-and-set miss means a newer execution won the
+		// race. Do not
+		// transition the successor's session or replace its cleanup owner.
+		e.stopFailedStartExecution(ctx, agentExecutionID, "superseded bootstrap failure")
+		return
 	}
+
 	if changed && finalState == models.TaskSessionStateFailed && escalateTaskOnFailure {
 		if updateErr := e.writeTaskFailedForRuntime(ctx, taskID, sessionID); updateErr != nil {
 			e.logger.Warn("failed to mark task as failed after start error",
@@ -926,14 +986,57 @@ func workflowEnvironmentHasRepository(rows []*models.TaskEnvironmentRepo, reposi
 	return false
 }
 
-//nolint:cyclop,funlen // Session construction keeps its existing validation sequence in one transaction boundary.
+// prepareSession retries a task-derived runner selection when the persistence
+// transaction observes that a concurrent runner switch committed after the
+// caller loaded the task. Explicit runner selections keep their existing
+// caller-owned semantics and are not replaced by the task metadata.
 func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, bindWorkspace bool, taskEnvironmentID string, workflowRoute *models.WorkflowSessionRoute) (string, error) {
+	runnerProfileExplicit := taskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != "")
+	currentTask := task
+	currentExecutorProfileID := executorProfileID
+	for attempt := 0; attempt < 2; attempt++ {
+		sessionID, err := e.prepareSessionAttempt(
+			ctx,
+			currentTask,
+			agentProfileID,
+			executorID,
+			currentExecutorProfileID,
+			workflowStepID,
+			bindWorkspace,
+			taskEnvironmentID,
+			workflowRoute,
+		)
+		if err == nil || !errors.Is(err, models.ErrTaskRunnerChanged) || runnerProfileExplicit || attempt == 1 {
+			return sessionID, err
+		}
+
+		refreshed, refreshedExecutorProfileID, refreshErr := e.reloadTaskForRunnerRetry(ctx, task.ID)
+		if refreshErr != nil {
+			return "", fmt.Errorf("reload task after runner change: %w", refreshErr)
+		}
+		if refreshed == nil {
+			return "", fmt.Errorf("reload task after runner change: task %s not found", task.ID)
+		}
+		currentTask = refreshed
+		currentExecutorProfileID = refreshedExecutorProfileID
+	}
+	return "", models.ErrTaskRunnerChanged
+}
+
+//nolint:cyclop,funlen,gocognit // Session construction keeps its existing validation sequence in one transaction boundary.
+func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, bindWorkspace bool, taskEnvironmentID string, workflowRoute *models.WorkflowSessionRoute) (string, error) {
+	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
+		return "", err
+	}
 	if agentProfileID == "" {
 		e.logger.Error("task has no agent_profile_id configured", zap.String("task_id", task.ID))
 		return "", ErrNoAgentProfileID
 	}
 
 	metadata := cloneMetadata(task.Metadata)
+	runnerResolvedFromTask, taskRunnerProfileID := taskRunnerResolution(
+		task, executorProfileID, taskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != ""),
+	)
 	initialRuntimeConfig, hasInitialRuntimeConfig := models.LoadInitialSessionRuntimeConfig(task.Metadata)
 	delete(metadata, models.MetaKeyInitialSessionRuntimeConfig)
 	delete(metadata, models.MetaKeyInitialSessionRuntimeConfigProfileID)
@@ -994,19 +1097,21 @@ func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfi
 	sessionID := uuid.New().String()
 	now := time.Now().UTC()
 	session := &models.TaskSession{
-		ID:                   sessionID,
-		TaskID:               task.ID,
-		AgentProfileID:       agentProfileID,
-		RepositoryID:         repositoryID,
-		BaseBranch:           baseBranch,
-		WorkspacePath:        workspacePath,
-		State:                models.TaskSessionStateCreated,
-		StartedAt:            now,
-		UpdatedAt:            now,
-		AgentProfileSnapshot: agentProfileSnapshot,
-		IsPrimary:            isPrimarySession,
-		IsPassthrough:        isPassthrough,
-		Metadata:             metadata,
+		ID:                            sessionID,
+		TaskID:                        task.ID,
+		AgentProfileID:                agentProfileID,
+		RepositoryID:                  repositoryID,
+		BaseBranch:                    baseBranch,
+		WorkspacePath:                 workspacePath,
+		State:                         models.TaskSessionStateCreated,
+		StartedAt:                     now,
+		UpdatedAt:                     now,
+		AgentProfileSnapshot:          agentProfileSnapshot,
+		IsPrimary:                     isPrimarySession,
+		IsPassthrough:                 isPassthrough,
+		Metadata:                      metadata,
+		TaskRunnerResolvedFromTask:    runnerResolvedFromTask,
+		TaskRunnerProfileAtResolution: taskRunnerProfileID,
 	}
 	if taskEnvironmentID != "" {
 		session.TaskEnvironmentID = taskEnvironmentID
@@ -1027,7 +1132,6 @@ func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfi
 	if execConfig.ExecutorID != "" {
 		session.ExecutorID = execConfig.ExecutorID
 	}
-
 	// Validate every managed-credential repository binding before persisting
 	// the session row. Doing this after the row exists would leave a
 	// zero-message session behind once launch fails at credential issuance.
@@ -1038,7 +1142,30 @@ func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfi
 		return "", err
 	}
 
-	createErr := e.createPreparedSession(ctx, session, task.Metadata, bindWorkspace, execConfig, workflowRoute)
+	var recoveryAdmission *worktree.RecoveryAdmission
+	if e.selectedWorktreeRecoveryAdmission != nil {
+		selectedEnv, envErr := e.resolveEnvironmentForAdmission(ctx, task.ID, taskEnvironmentID)
+		if envErr != nil {
+			return "", envErr
+		}
+		recoveryAdmission, envErr = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, selectedEnv, execConfig.ExecutorType)
+		if envErr != nil {
+			return "", envErr
+		}
+	}
+
+	createCtx := ctx
+	if recoveryAdmission != nil {
+		createCtx = worktree.WithRecoveryClaim(ctx, recoveryAdmission.Claim())
+	}
+	createErr := e.createPreparedSession(createCtx, session, task.Metadata, bindWorkspace, execConfig, workflowRoute)
+	if releaseErr := releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission); releaseErr != nil {
+		if createErr == nil {
+			createErr = fmt.Errorf("release worktree recovery admission: %w", releaseErr)
+		} else {
+			createErr = errors.Join(createErr, fmt.Errorf("release worktree recovery admission: %w", releaseErr))
+		}
+	}
 	if createErr != nil {
 		e.logger.Error("failed to persist agent session",
 			zap.String("task_id", task.ID),
@@ -1066,7 +1193,6 @@ func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfi
 
 	return sessionID, nil
 }
-
 func (e *Executor) createPreparedSession(
 	ctx context.Context,
 	session *models.TaskSession,
@@ -1221,6 +1347,16 @@ func sharedWorkspaceGroupID(metadata map[string]interface{}) string {
 	return groupID
 }
 
+// admitWorktreeRecovery preserves the legacy task-scoped callback for adapters
+// that have not adopted selected-environment admission. Production wiring
+// uses admitSelectedWorktreeRecovery after executor selection.
+func (e *Executor) admitWorktreeRecovery(ctx context.Context, taskID string) error {
+	if e.selectedWorktreeRecoveryAdmission != nil || e.worktreeRecoveryAdmission == nil {
+		return nil
+	}
+	return e.worktreeRecoveryAdmission(ctx, taskID)
+}
+
 // resolveAgentProfileSnapshot resolves an agent profile ID to a snapshot map and passthrough flag.
 func (e *Executor) resolveAgentProfileSnapshot(ctx context.Context, agentProfileID string) (map[string]interface{}, bool) {
 	profileInfo, err := e.agentManager.ResolveAgentProfile(ctx, agentProfileID)
@@ -1282,6 +1418,15 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	if session.TaskID != task.ID {
 		return nil, fmt.Errorf("session does not belong to task")
 	}
+	if strings.TrimSpace(agentProfileID) == "" {
+		agentProfileID = strings.TrimSpace(session.ExecutionProfileID)
+		if agentProfileID == "" {
+			agentProfileID = strings.TrimSpace(session.AgentProfileID)
+		}
+	}
+	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(executorID) == "" {
 		// PrepareSession already persisted the selected executor. Launch calls
 		// that omit the option must retain that selection so the authoritative
@@ -1337,27 +1482,6 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 	existingEnv, err := e.resolveLaunchTaskEnvironment(ctx, task, session)
 	if err != nil {
 		return nil, err
-	}
-
-	// Fast path: workspace already launched (executors_running row exists).
-	// Only start the agent subprocess if requested; otherwise return early.
-	// If startAgentOnExistingWorkspace returns ErrStaleExecution, the in-memory
-	// execution was lost (e.g. backend restart). The full LaunchAgent path below
-	// will create a new execution and lifecycle.persistExecutorRunning will
-	// overwrite the stale row.
-	hasRunning, hasRunningErr := e.repo.HasExecutorRunningRow(ctx, sessionID)
-	if hasRunningErr != nil {
-		return nil, fmt.Errorf("check runtime inventory for session %q: %w", sessionID, hasRunningErr)
-	}
-	if hasRunning {
-		result, err := e.startAgentOnExistingWorkspace(ctx, task, session, prompt, startAgent, opts.McpMode, opts.Env, opts.TurnID)
-		if !errors.Is(err, ErrStaleExecution) && !errors.Is(err, ErrAgentCommandMissing) {
-			return result, err
-		}
-		e.logger.Info("falling through to full LaunchAgent for existing workspace",
-			zap.String("task_id", task.ID),
-			zap.String("session_id", sessionID),
-			zap.Error(err))
 	}
 
 	// Primary = first by Position. For repo-less tasks (e.g. quick chat), allRepos
@@ -1432,6 +1556,15 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 			mergeEnv(req, opts.RouteOverride.Env)
 		}
 	}
+	profileEnvVars, profileResolved := e.resolveHostGitHubBridgeProfileEnv(ctx, agentProfileID, execCfg.ProfileEnvVars)
+	if err := e.configureGitCredentialBrokerForRepositoriesWithProfileEnvAndBridge(
+		ctx, req, allRepos, profileEnvVars, profileResolved,
+	); err != nil {
+		return nil, err
+	}
+	if err := e.applyGitCredentialSnapshot(ctx, req, session); err != nil {
+		return nil, err
+	}
 
 	// Apply McpMode from options (takes precedence over session metadata check in buildLaunchAgentRequest)
 	if opts.McpMode != "" {
@@ -1478,8 +1611,19 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		req.Attachments = opts.Attachments
 	}
 
-	// Check for an existing task environment to reuse worktree, container, or sandbox
-	e.reuseExistingEnvironment(ctx, req, existingEnv)
+	var recoveryAdmission *worktree.RecoveryAdmission
+	recoveryAdmission, err = e.admitSelectedWorktreeRecovery(ctx, task.ID, session, existingEnv, req.ExecutorType)
+	if err != nil {
+		return nil, err
+	}
+	launchCtx := ctx
+	if recoveryAdmission != nil {
+		launchCtx = worktree.WithRecoveryClaim(ctx, recoveryAdmission.Claim())
+	}
+	defer func() { _ = releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission) }()
+
+	// Check for an existing task environment to reuse worktree, container, or sandbox.
+	e.reuseExistingEnvironment(launchCtx, req, existingEnv)
 
 	e.logger.Info("launching agent for prepared session",
 		zap.String("task_id", task.ID),
@@ -1488,12 +1632,33 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		zap.String("executor_type", req.ExecutorType),
 		zap.Bool("use_worktree", req.UseWorktree))
 
-	if err := e.resolveLaunchEnvironment(ctx, req, execCfg.ProfileEnvVars, allRepos); err != nil {
+	if err := e.resolveLaunchEnvironment(launchCtx, req, execCfg.ProfileEnvVars, allRepos); err != nil {
 		return nil, err
 	}
 
+	// Fast path: workspace already launched (executors_running row exists).
+	// The selected-environment recovery gate above must run first, including
+	// when this path only starts an agent process on an existing workspace.
+	hasRunning, hasRunningErr := e.repo.HasExecutorRunningRow(launchCtx, sessionID)
+	if hasRunningErr != nil {
+		return nil, fmt.Errorf("check runtime inventory for session %q: %w", sessionID, hasRunningErr)
+	}
+	if hasRunning {
+		result, existingErr := e.startAgentOnExistingWorkspaceWithRequest(launchCtx, task, session, prompt, startAgent, opts.McpMode, req, opts.TurnID)
+		if !errors.Is(existingErr, ErrStaleExecution) && !errors.Is(existingErr, ErrAgentCommandMissing) {
+			if releaseErr := releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission); releaseErr != nil {
+				return nil, errors.Join(existingErr, fmt.Errorf("release worktree recovery admission: %w", releaseErr))
+			}
+			return result, existingErr
+		}
+		e.logger.Info("falling through to full LaunchAgent for existing workspace",
+			zap.String("task_id", task.ID),
+			zap.String("session_id", sessionID),
+			zap.Error(existingErr))
+	}
+
 	// Call the AgentManager to launch the container
-	resp, err := e.agentManager.LaunchAgent(ctx, req)
+	resp, err := e.agentManager.LaunchAgent(launchCtx, req)
 	if err != nil || resp == nil {
 		if err == nil {
 			err = errors.New("agent launch returned no response")
@@ -1501,21 +1666,21 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		if existingEnv != nil && existingEnv.Status == models.TaskEnvironmentStatusCreating && existingEnv.MaterializationSessionID == session.ID {
 			existingEnv.Status = models.TaskEnvironmentStatusFailed
 			existingEnv.MaterializationSessionID = ""
-			if updateErr := e.repo.UpdateTaskEnvironment(ctx, existingEnv); updateErr != nil {
+			if updateErr := e.repo.UpdateTaskEnvironment(launchCtx, existingEnv); updateErr != nil {
 				e.logger.Warn("failed to mark workspace materialization failed",
 					zap.String("task_id", task.ID), zap.String("task_environment_id", existingEnv.ID), zap.Error(updateErr))
 			}
 		}
 		repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, err)
-		return nil, e.handleLaunchFailure(ctx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
+		return nil, e.handleLaunchFailure(launchCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
 	}
 
 	// Create or update the task environment with launch results
-	if err := e.persistTaskEnvironment(ctx, task.ID, session, existingEnv, req, resp, execCfg); err != nil {
-		e.cleanupUnstartedExecutionAfterPersistError(ctx, sessionID, resp.AgentExecutionID, err)
-		e.markTaskEnvironmentMaterializationFailed(ctx, existingEnv, session.ID)
+	if err := e.persistTaskEnvironment(launchCtx, task.ID, session, existingEnv, req, resp, execCfg); err != nil {
+		e.cleanupUnstartedExecutionAfterPersistError(launchCtx, sessionID, resp.AgentExecutionID, err)
+		e.markTaskEnvironmentMaterializationFailed(launchCtx, existingEnv, session.ID)
 		repositoryID, taskRepositoryID := failingLaunchRepositoryIdentity(req, err)
-		return nil, e.handleLaunchFailure(ctx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
+		return nil, e.handleLaunchFailure(launchCtx, task.ID, sessionID, repositoryID, taskRepositoryID, err)
 	}
 
 	// Capture the current HEAD commit as the base commit for this session asynchronously.
@@ -1528,7 +1693,15 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		e.captureBaseCommit(captureCtx, sid)
 	}(sessionID)
 
-	return e.finalizeLaunch(ctx, task, session, agentProfileID, sessionID, primaryRepo, resp, startAgent, execCfg)
+	execution, finalizeErr := e.finalizeLaunch(launchCtx, task, session, agentProfileID, sessionID, primaryRepo, resp, startAgent, execCfg)
+	if releaseErr := releaseSelectedWorktreeRecovery(ctx, &recoveryAdmission); releaseErr != nil {
+		if finalizeErr == nil {
+			finalizeErr = fmt.Errorf("release worktree recovery admission: %w", releaseErr)
+		} else {
+			finalizeErr = errors.Join(finalizeErr, fmt.Errorf("release worktree recovery admission: %w", releaseErr))
+		}
+	}
+	return execution, finalizeErr
 }
 
 func (e *Executor) waitForTaskEnvironmentReady(ctx context.Context, environmentID string) (*models.TaskEnvironment, error) {
@@ -1777,7 +1950,7 @@ func (e *Executor) finalizeLaunch(ctx context.Context, task *v1.Task, session *m
 	}
 
 	if startAgent {
-		e.startAgentProcessAsync(ctx, task.ID, sessionID, resp.AgentExecutionID)
+		e.startAgentProcessAsync(worktree.WithoutRecoveryClaim(ctx), task.ID, sessionID, resp.AgentExecutionID)
 	} else {
 		// Prepare-only launch: the workspace + agentctl are up but the agent
 		// process is intentionally not being started. The lifecycle manager
@@ -1904,13 +2077,6 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	if err != nil {
 		return nil, execConfig, err
 	}
-	if err := e.configureGitCredentialBrokerForRepositories(ctx, req, allRepos); err != nil {
-		return nil, execConfig, err
-	}
-	if err := e.applyGitCredentialSnapshot(ctx, req, session); err != nil {
-		return nil, execConfig, err
-	}
-
 	// Multi-repo: when more than one repository is associated with the task,
 	// populate req.Repositories so the lifecycle preparer creates one worktree
 	// per repo. The legacy single-repo top-level fields above stay populated
@@ -2166,6 +2332,25 @@ func dockerLocalCloneSource(repositoryPath string) string {
 // reconciled DB drift; that's now structurally impossible because executors_running
 // is owned by the lifecycle manager and writes are atomic with executionStore.Add.
 func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.Task, session *models.TaskSession, prompt string, startAgent bool, mcpMode string, env map[string]string, turnIDs ...string) (*TaskExecution, error) {
+	request := &LaunchAgentRequest{
+		TaskID:      task.ID,
+		WorkspaceID: task.WorkspaceID,
+		SessionID:   session.ID,
+		Env:         cloneStringMap(env),
+	}
+	return e.startAgentOnExistingWorkspaceWithRequest(ctx, task, session, prompt, startAgent, mcpMode, request, turnIDs...)
+}
+
+func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
+	ctx context.Context,
+	task *v1.Task,
+	session *models.TaskSession,
+	prompt string,
+	startAgent bool,
+	mcpMode string,
+	request *LaunchAgentRequest,
+	turnIDs ...string,
+) (*TaskExecution, error) {
 	executionID, err := e.agentManager.GetExecutionIDForSession(ctx, session.ID)
 	if err != nil || executionID == "" {
 		// No execution exists in memory (e.g. backend restarted since workspace was prepared).
@@ -2203,7 +2388,7 @@ func (e *Executor) startAgentOnExistingWorkspace(ctx context.Context, task *v1.T
 		}
 	}
 	e.bindPromptTurnID(ctx, session.ID, executionID, turnIDs)
-	if err := e.configureExistingWorkspace(ctx, task, session, executionID, mcpMode, env); err != nil {
+	if err := e.configureExistingWorkspace(ctx, task, session, executionID, mcpMode, request); err != nil {
 		return nil, err
 	}
 
@@ -2255,17 +2440,34 @@ func (e *Executor) configureExistingWorkspace(
 	task *v1.Task,
 	session *models.TaskSession,
 	executionID, mcpMode string,
-	env map[string]string,
+	request *LaunchAgentRequest,
 ) error {
-	credentialReq := &LaunchAgentRequest{WorkspaceID: task.WorkspaceID, Env: cloneStringMap(env)}
+	if request == nil {
+		return errors.New("existing workspace launch request is required")
+	}
+	credentialReq := &LaunchAgentRequest{
+		TaskID:            task.ID,
+		WorkspaceID:       task.WorkspaceID,
+		SessionID:         session.ID,
+		TaskEnvironmentID: request.TaskEnvironmentID,
+		ExecutorType:      request.ExecutorType,
+		Env:               cloneStringMap(request.Env),
+	}
 	e.injectGitLabWorkspaceCredentials(ctx, credentialReq)
-	if len(credentialReq.Env) > 0 {
-		if err := e.agentManager.SetExecutionEnv(ctx, executionID, credentialReq.Env); err != nil {
-			e.logger.Warn("failed to set execution env for existing workspace",
-				zap.String("session_id", session.ID),
-				zap.String("agent_execution_id", executionID),
-				zap.Error(err))
+	if provider, ok := e.agentManager.(executorProfileEnvironmentProvider); ok {
+		profileEnv, err := provider.ExecutorProfileEnvForSession(ctx, session.ID, credentialReq.TaskEnvironmentID)
+		if err != nil {
+			return fmt.Errorf("resolve executor profile environment for existing workspace: %w", err)
 		}
+		credentialReq.Env, err = mergeExistingWorkspaceProfileEnv(profileEnv, credentialReq.Env)
+		if err != nil {
+			return fmt.Errorf("compose executor profile environment for existing workspace: %w", err)
+		}
+	}
+	// A failed delivery leaves the running workspace on its previous credential
+	// snapshot, so do not continue to agent start and report refreshed state.
+	if err := e.agentManager.SetExecutionEnv(ctx, executionID, credentialReq.Env); err != nil {
+		return fmt.Errorf("set execution env for existing workspace: %w", err)
 	}
 
 	// If config MCP mode is needed, reconfigure the MCP server before starting the agent.
@@ -2286,6 +2488,21 @@ func (e *Executor) configureExistingWorkspace(
 		return fmt.Errorf("set MCP mode %q: %w", effectiveMcpMode, err)
 	}
 	return nil
+}
+
+type executorProfileEnvironmentProvider interface {
+	ExecutorProfileEnvForSession(context.Context, string, string) (map[string]string, error)
+}
+
+func mergeExistingWorkspaceProfileEnv(profileEnv, requestEnv map[string]string) (map[string]string, error) {
+	if len(profileEnv) == 0 {
+		return cloneStringMap(requestEnv), nil
+	}
+	merged, err := gitconfigenv.Merge(profileEnv, requestEnv)
+	if err != nil {
+		return nil, err
+	}
+	return merged, nil
 }
 
 func (e *Executor) bindPromptTurnID(ctx context.Context, sessionID, executionID string, turnIDs []string) {

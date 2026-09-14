@@ -25,6 +25,22 @@ type rowLivenessProber interface {
 	RowLiveness(row *models.ExecutorRunning) models.ProcessLiveness
 }
 
+// standaloneLivenessScoper is the optional capability the orchestrator uses to
+// take one adopted-server enumeration and reuse it across every row of a
+// single reconciliation pass (design 02 "Persistence": "it has two kinds of
+// caller, and only one of them is a pass"). Satisfied by the lifecycle
+// adapter alongside rowLivenessProber. A caller outside a pass (e.g. the idle
+// reclaim path) must keep using rowLivenessProber's context-free RowLiveness,
+// which always takes its own fresh enumeration.
+//
+// Kept as its own narrow optional interface rather than widening
+// rowLivenessProber's RowLiveness method, so the 17 existing test doubles
+// built around that single-row, context-free signature don't have to change.
+type standaloneLivenessScoper interface {
+	NewStandaloneLivenessScope(ctx context.Context) interface{}
+	RowLivenessScoped(row *models.ExecutorRunning, scope interface{}) models.ProcessLiveness
+}
+
 // agentRunningProber preserves runtime probe errors so reclaim can fail
 // closed. The legacy boolean method remains the fallback for test doubles and
 // adapters that do not expose the richer probe yet.
@@ -150,6 +166,32 @@ func (s *Service) rowLiveness(row *models.ExecutorRunning) models.ProcessLivenes
 		return models.ProcessLivenessUnknown
 	}
 	return prober.RowLiveness(row)
+}
+
+// newStandaloneLivenessScope takes one adopted-server enumeration for reuse
+// across every row of a single reconciliation pass, when s.agentManager
+// implements standaloneLivenessScoper. Returns nil otherwise (unit tests,
+// degraded startup, or a caller that doesn't support scoped enumeration);
+// rowLivenessScoped treats a nil scope as "fall back to the unscoped probe".
+func (s *Service) newStandaloneLivenessScope(ctx context.Context) interface{} {
+	scoper, ok := s.agentManager.(standaloneLivenessScoper)
+	if !ok || scoper == nil {
+		return nil
+	}
+	return scoper.NewStandaloneLivenessScope(ctx)
+}
+
+// rowLivenessScoped classifies row's liveness reusing scope (from
+// newStandaloneLivenessScope) when s.agentManager supports it, falling back
+// to the ordinary context-free rowLiveness otherwise -- so a caller can
+// unconditionally pass whatever newStandaloneLivenessScope returned, even a
+// nil one from a prober that doesn't implement the scoped capability.
+func (s *Service) rowLivenessScoped(row *models.ExecutorRunning, scope interface{}) models.ProcessLiveness {
+	scoper, ok := s.agentManager.(standaloneLivenessScoper)
+	if !ok || scoper == nil {
+		return s.rowLiveness(row)
+	}
+	return scoper.RowLivenessScoped(row, scope)
 }
 
 // pruneOrRepairExecutorRow enforces the resume-safety deletion invariant

@@ -7,6 +7,7 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository/admission"
 )
 
 // Request types
@@ -357,18 +358,19 @@ type UpdateRepositoryScriptRequest struct {
 
 // CreateMessageRequest contains the data for creating a new message
 type CreateMessageRequest struct {
-	TaskSessionID         string                             `json:"session_id"`
-	TaskID                string                             `json:"task_id,omitempty"`
-	TurnID                string                             `json:"turn_id"`
-	CompletedTurn         bool                               `json:"-"`
-	Content               string                             `json:"content"`
-	AuthorType            string                             `json:"author_type,omitempty"` // "user" or "agent", defaults to "user"
-	AuthorID              string                             `json:"author_id,omitempty"`
-	RequestsInput         bool                               `json:"requests_input,omitempty"`
-	Type                  string                             `json:"type,omitempty"`
-	Metadata              map[string]interface{}             `json:"metadata,omitempty"`
-	PlanCommentRefs       []models.TaskPlanCommentRef        `json:"plan_comment_refs,omitempty"`
-	RequirePrimarySession bool                               `json:"require_primary_session,omitempty"`
-	ExpectedSessionState  models.TaskSessionState            `json:"-"`
-	AttachmentClaim       *messagequeue.QueueAttachmentClaim `json:"-"`
+	TaskSessionID         string                               `json:"session_id"`
+	TaskID                string                               `json:"task_id,omitempty"`
+	TurnID                string                               `json:"turn_id"`
+	CompletedTurn         bool                                 `json:"-"`
+	Content               string                               `json:"content"`
+	AuthorType            string                               `json:"author_type,omitempty"` // "user" or "agent", defaults to "user"
+	AuthorID              string                               `json:"author_id,omitempty"`
+	RequestsInput         bool                                 `json:"requests_input,omitempty"`
+	Type                  string                               `json:"type,omitempty"`
+	Metadata              map[string]interface{}               `json:"metadata,omitempty"`
+	PlanCommentRefs       []models.TaskPlanCommentRef          `json:"plan_comment_refs,omitempty"`
+	RequirePrimarySession bool                                 `json:"require_primary_session,omitempty"`
+	ExpectedSessionState  models.TaskSessionState              `json:"-"`
+	AttachmentClaim       *messagequeue.QueueAttachmentClaim   `json:"-"`
+	InitialTaskBrief      *admission.InitialTaskBriefCandidate `json:"-"`
 }

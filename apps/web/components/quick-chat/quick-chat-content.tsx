@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { useSettingsData } from "@/hooks/domains/settings/use-settings-data";
 import { type ChatInputContainerHandle } from "@/components/task/chat/chat-input-container";
 import { MessageList } from "@/components/task/chat/message-list";
@@ -21,6 +21,8 @@ type QuickChatContentProps = {
   placeholderOverride?: string;
   initialPrompt?: string;
   onInitialPromptAttempted?: () => void;
+  recoveryContent?: ReactNode;
+  recoveryRevealKey?: string | null;
 };
 
 function useQuickChatState(sessionId: string) {
@@ -50,6 +52,8 @@ export const QuickChatContent = memo(function QuickChatContent({
   placeholderOverride,
   initialPrompt,
   onInitialPromptAttempted,
+  recoveryContent,
+  recoveryRevealKey,
 }: QuickChatContentProps) {
   const [clarificationKey, setClarificationKey] = useState(0);
   const shortcutScopeRef = useRef<HTMLDivElement>(null);
@@ -108,6 +112,8 @@ export const QuickChatContent = memo(function QuickChatContent({
           sessionState={panelState.session?.state}
           worktreePath={getSessionWorkspacePath(panelState.session)}
           onOpenFile={undefined}
+          prependContent={recoveryContent}
+          recoveryRevealKey={recoveryRevealKey}
         />
       </div>
       <ClarificationPanelSection

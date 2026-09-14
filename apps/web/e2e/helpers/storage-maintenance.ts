@@ -15,6 +15,62 @@ export function seedManagedGoCache(tmpDir: string): { artifact: string } {
   return { artifact };
 }
 
+export function seedSystemTemporaryFile(
+  tmpDir: string,
+  name = "fixture.txt",
+): {
+  root: string;
+  file: string;
+} {
+  const root = path.join(tmpDir, "system-temporary");
+  const file = path.join(root, name);
+  fs.mkdirSync(root, { recursive: true });
+  fs.writeFileSync(file, "system-temporary-fixture");
+  return { root, file };
+}
+
+export async function mockPartialSystemTemporaryOverview(page: Page, root: string): Promise<void> {
+  await page.route("**/api/v1/system/storage", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.continue();
+      return;
+    }
+    const requestHeaders = route.request().headers();
+    const response = await fetch(route.request().url(), {
+      headers: {
+        ...(requestHeaders.accept ? { accept: requestHeaders.accept } : {}),
+        ...(requestHeaders.cookie ? { cookie: requestHeaders.cookie } : {}),
+      },
+    });
+    const body = JSON.parse(await response.text()) as {
+      summary: Record<string, unknown> | null;
+    };
+    body.summary ??= {};
+    body.summary.system_temporary = {
+      status: "partial",
+      size_bytes: 24,
+      included_in_total: false,
+      reason: "informational_overlap",
+      roots: [
+        {
+          requested_path: root,
+          path: root,
+          status: "partial",
+          size_bytes: 24,
+          skipped_count: 1,
+          warnings: ["fixture entry could not be measured"],
+        },
+      ],
+      warnings: ["One fixture entry was skipped."],
+    };
+    await route.fulfill({
+      status: response.status,
+      contentType: "application/json",
+      body: JSON.stringify(body),
+    });
+  });
+}
+
 export async function mockTemporaryArtifactOverview(page: Page): Promise<void> {
   await page.route("**/api/v1/system/storage", async (route) => {
     if (route.request().method() !== "GET") {
@@ -148,8 +204,8 @@ function updateDatabaseStorageBody(
     error: null,
     progress: {
       ...currentProgress,
-      completed_sources: 7,
-      total_sources: 7,
+      completed_sources: 8,
+      total_sources: 8,
       sources: {
         ...currentSources,
         database: {
@@ -257,6 +313,12 @@ export async function mockProgressiveStorageOverview(page: Page): Promise<{
         total_items: 1,
         bytes_scanned: 3 * 1024 ** 3,
       },
+      system_temporary: {
+        state: "ready",
+        completed_items: 1,
+        total_items: 1,
+        bytes_scanned: 1024,
+      },
     };
     body.analysis = completed
       ? {
@@ -269,7 +331,7 @@ export async function mockProgressiveStorageOverview(page: Page): Promise<{
           refresh_due_at: refreshDueAt,
           stale: false,
           error: null,
-          progress: { completed_sources: 7, total_sources: 7, sources: sourceProgress },
+          progress: { completed_sources: 8, total_sources: 8, sources: sourceProgress },
           partial_summary: null,
         }
       : {
@@ -284,7 +346,7 @@ export async function mockProgressiveStorageOverview(page: Page): Promise<{
           error: null,
           progress: {
             completed_sources: 1,
-            total_sources: 7,
+            total_sources: 8,
             sources: {
               ...sourceProgress,
               go_cache: {
@@ -298,6 +360,7 @@ export async function mockProgressiveStorageOverview(page: Page): Promise<{
               docker: { state: "pending", completed_items: 0, bytes_scanned: 0 },
               database: { state: "pending", completed_items: 0, bytes_scanned: 0 },
               database_backups: { state: "pending", completed_items: 0, bytes_scanned: 0 },
+              system_temporary: { state: "pending", completed_items: 0, bytes_scanned: 0 },
             },
           },
           partial_summary: {
@@ -353,6 +416,20 @@ export async function mockProgressiveStorageOverview(page: Page): Promise<{
             size_bytes: 3 * 1024 ** 3,
             path: "/data/backups",
             included_in_total: true,
+          },
+          system_temporary: {
+            status: "measured",
+            size_bytes: 1024,
+            included_in_total: false,
+            reason: "informational_overlap",
+            roots: [
+              {
+                requested_path: "/data/tmp",
+                path: "/data/tmp",
+                status: "measured",
+                size_bytes: 1024,
+              },
+            ],
           },
         }
       : null;

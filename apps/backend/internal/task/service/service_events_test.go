@@ -684,6 +684,27 @@ func TestPublishTaskUpdated_FallbackRepositoryID(t *testing.T) {
 	}
 }
 
+func TestPublishTaskUpdatedByIDLoadsCanonicalTask(t *testing.T) {
+	svc, eventBus, repo := createTestService(t)
+	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{
+		ID: "task-by-id", WorkspaceID: "ws-1", WorkflowID: "wf-1", WorkflowStepID: "step-1", Title: "By ID", Priority: "medium",
+	}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	eventBus.ClearEvents()
+
+	svc.PublishTaskUpdatedByID(ctx, "task-by-id")
+
+	data := singlePublishedEventData(t, eventBus)
+	if got := data["task_id"]; got != "task-by-id" {
+		t.Fatalf("task_id = %v, want task-by-id", got)
+	}
+	if got := data["title"]; got != "By ID" {
+		t.Fatalf("title = %v, want By ID", got)
+	}
+}
+
 func TestPublishTaskUpdated_EmitsAutopilot(t *testing.T) {
 	svc, eventBus, _ := createTestService(t)
 	svc.PublishTaskUpdated(context.Background(), &models.Task{

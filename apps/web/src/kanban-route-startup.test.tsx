@@ -99,6 +99,7 @@ afterEach(() => {
 });
 
 // @covers AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-003.4, 003.6, 003.7
+// eslint-disable-next-line max-lines-per-function -- startup cases share the route and store fixture
 describe("Home startup bootstrap", () => {
   it("waits for authoritative settings before making one redirect, even without workflows", async () => {
     window.localStorage.setItem(TASK_LISTING_VIEW_STORAGE_KEY, '"list"');
@@ -156,6 +157,61 @@ describe("Home startup bootstrap", () => {
     expect(mocks.router.replace).toHaveBeenCalledTimes(1);
   });
 
+  it("ignores a late response from another workspace", async () => {
+    const oldWorkflows = deferred<{ workflows: Array<Record<string, unknown>> }>();
+    mocks.listWorkspaces.mockResolvedValue({
+      workspaces: [workspace("ws-1"), workspace("ws-2")],
+      total: 2,
+    });
+    mocks.listWorkflows.mockImplementation((workspaceId: string) =>
+      workspaceId === "ws-1"
+        ? oldWorkflows.promise
+        : Promise.resolve({
+            workflows: [
+              {
+                id: "wf-2",
+                workspace_id: "ws-2",
+                name: "Workspace 2",
+                description: null,
+                sort_order: 0,
+              },
+            ],
+          }),
+    );
+
+    const { rerender } = render(<Subject route={{ workspaceId: "ws-1" }} />);
+    await waitFor(() =>
+      expect(mocks.listWorkflows).toHaveBeenCalledWith("ws-1", expect.anything()),
+    );
+
+    rerender(<Subject route={{ workspaceId: "ws-2" }} />);
+    await waitFor(() => {
+      expect(store.getState().workspaces.activeId).toBe("ws-2");
+      expect(store.getState().workflows.items).toEqual([
+        expect.objectContaining({ id: "wf-2", workspaceId: "ws-2" }),
+      ]);
+    });
+
+    await act(async () => {
+      oldWorkflows.resolve({
+        workflows: [
+          {
+            id: "wf-1",
+            workspace_id: "ws-1",
+            name: "Workspace 1",
+            description: null,
+            sort_order: 0,
+          },
+        ],
+      });
+    });
+
+    expect(store.getState().workspaces.activeId).toBe("ws-2");
+    expect(store.getState().workflows.items).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "wf-1" })]),
+    );
+  });
+
   it("cancels a pending bootstrap when the route unmounts", async () => {
     const pending = deferred<ReturnType<typeof settings>>();
     mocks.fetchUserSettings.mockReturnValue(pending.promise);
@@ -167,6 +223,48 @@ describe("Home startup bootstrap", () => {
     expect(store.getState().workspaces.activeId).toBeNull();
     expect(store.getState().userSettings.loaded).toBe(false);
     expect(mocks.router.replace).not.toHaveBeenCalled();
+  });
+
+  it("settles route-owned reads on unmount and recovers a later transient failure", async () => {
+    const workflows = deferred<{ workflows: Array<Record<string, unknown>> }>();
+    const repositories = deferred<{ repositories: Array<Record<string, unknown>> }>();
+    mocks.listWorkflows.mockReturnValue(workflows.promise);
+    mocks.listRepositories.mockReturnValue(repositories.promise);
+
+    const { unmount } = render(<Subject route={{ workspaceId: "ws-1" }} />);
+    await waitFor(() => {
+      expect(store.getState().workspaceContextRead.pending).toMatchObject({
+        workflows: true,
+        repositories: true,
+      });
+    });
+
+    unmount();
+    expect(store.getState().workspaceContextRead.pending).toMatchObject({
+      workflows: false,
+      repositories: false,
+    });
+
+    await act(async () => {
+      workflows.resolve({ workflows: [] });
+      repositories.resolve({ repositories: [] });
+    });
+    expect(store.getState().workspaceContextRead.pending).toMatchObject({
+      workflows: false,
+      repositories: false,
+    });
+
+    mocks.listWorkflows.mockRejectedValueOnce(new Error("temporary workflow failure"));
+    mocks.listRepositories.mockResolvedValueOnce({ repositories: [] });
+    const second = render(<Subject route={{ workspaceId: "ws-1" }} />);
+    await waitFor(() =>
+      expect(store.getState().workspaceContextRead.errors.workflows).toBe("transient"),
+    );
+
+    mocks.listWorkflows.mockResolvedValueOnce({ workflows: [] });
+    act(() => store.getState().requestWorkspaceContextRefresh());
+    await waitFor(() => expect(store.getState().workspaceContextRead.errors.workflows).toBeNull());
+    second.unmount();
   });
 });
 

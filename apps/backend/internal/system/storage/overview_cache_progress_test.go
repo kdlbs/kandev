@@ -107,11 +107,11 @@ func TestNewAnalysisStateIncludesDatabaseSources(t *testing.T) {
 			t.Fatalf("source %q progress = %#v, want pending", source, progress)
 		}
 	}
-	if len(storageAnalysisSources) != 7 {
-		t.Fatalf("source list length = %d, want 7", len(storageAnalysisSources))
+	if len(storageAnalysisSources) != 8 {
+		t.Fatalf("source list length = %d, want 8", len(storageAnalysisSources))
 	}
 	if state.Progress.TotalSources != len(storageAnalysisSources) {
-		t.Fatalf("total sources = %d, want 7", state.Progress.TotalSources)
+		t.Fatalf("total sources = %d, want 8", state.Progress.TotalSources)
 	}
 }
 

@@ -4724,6 +4724,7 @@ type mockMessageCreator struct {
 	agentMessages          []mockAgentMessage
 	agentMessageWrites     int
 	agentStreamWrites      int
+	agentStreamTexts       []string
 	thinkingWrites         int
 	toolCallWrites         int
 	toolUpdateWrites       int
@@ -4849,13 +4850,15 @@ func (m *mockMessageCreator) GetPermissionResolutionAudit(ctx context.Context, t
 	return nil, nil
 }
 
-func (m *mockMessageCreator) CreateAgentMessageStreaming(context.Context, string, string, string, string, string) error {
+func (m *mockMessageCreator) CreateAgentMessageStreaming(_ context.Context, _, _, content, _, _ string) error {
 	m.agentStreamWrites++
+	m.agentStreamTexts = append(m.agentStreamTexts, content)
 	return nil
 }
 
-func (m *mockMessageCreator) AppendAgentMessage(context.Context, string, string) error {
+func (m *mockMessageCreator) AppendAgentMessage(_ context.Context, _, content string) error {
 	m.agentStreamWrites++
+	m.agentStreamTexts = append(m.agentStreamTexts, content)
 	return nil
 }
 
@@ -7540,6 +7543,35 @@ func TestGetTaskSessionStatus_NeedsWorkspaceRestore_TerminalWithoutWorktree(t *t
 	}
 	if resp.NeedsWorkspaceRestore {
 		t.Fatal("expected NeedsWorkspaceRestore=false for terminal session without worktree")
+	}
+}
+
+func TestGetTaskSessionStatus_NeedsWorkspaceRestore_RepositorylessEnvironment(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+
+	seedTaskAndSession(t, repo, "task1", "session1", models.TaskSessionStateCompleted)
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env1", TaskID: "task1", ExecutorType: "local",
+		WorkspacePath: "/tmp/task1", Status: models.TaskEnvironmentStatusReady,
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+
+	taskRepo := newMockTaskRepo()
+	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
+	svc := createTestServiceWithAgent(repo, newMockStepGetter(), taskRepo, agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+
+	resp, err := svc.GetTaskSessionStatus(ctx, "task1", "session1")
+	if err != nil {
+		t.Fatalf("GetTaskSessionStatus returned error: %v", err)
+	}
+	if !resp.NeedsWorkspaceRestore {
+		t.Fatal("expected NeedsWorkspaceRestore=true for a repository-less retained environment")
+	}
+	if resp.WorktreePath == nil || *resp.WorktreePath != "/tmp/task1" {
+		t.Fatalf("WorktreePath = %v, want canonical workspace path", resp.WorktreePath)
 	}
 }
 

@@ -43,6 +43,14 @@ type Repository interface {
 	) (models.SpendWindow, error)
 	GetWorkspaceBudgetDefault(ctx context.Context, workspaceID string) (limitSubcents int64, found bool, err error)
 	SetWorkspaceBudgetDefault(ctx context.Context, workspaceID string, limitSubcents int64) error
+	// Claim atomically records that (policyID, periodKey, level) may emit its
+	// budget notification, fenced to revision. See
+	// docs/specs/budget-claim-revision-fencing/spec.md.
+	Claim(ctx context.Context, policyID, periodKey, level string, revision int64) (bool, error)
+	// ClaimExceeded atomically records the exceeded-level claim and, only
+	// when this call wins it, the alert-level companion claim, both fenced
+	// to revision. See docs/specs/budget-claim-revision-fencing/spec.md.
+	ClaimExceeded(ctx context.Context, policyID, periodKey string, revision int64) (bool, error)
 }
 
 // CostService handles cost recording, summaries, and budget evaluation.

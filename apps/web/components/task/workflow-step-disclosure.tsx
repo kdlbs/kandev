@@ -3,14 +3,11 @@
 import {
   forwardRef,
   useEffect,
-  useRef,
   useState,
   type ComponentPropsWithoutRef,
-  type FocusEvent,
-  type RefObject,
+  type ReactNode,
 } from "react";
 import { cn } from "@kandev/ui/lib/utils";
-import { Button } from "@kandev/ui/button";
 import {
   Drawer,
   DrawerContent,
@@ -20,11 +17,31 @@ import {
   DrawerTrigger,
 } from "@kandev/ui/drawer";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
-import { IconArrowRight, IconChevronDown } from "@tabler/icons-react";
+import { IconChevronDown } from "@tabler/icons-react";
 import { StepCapabilityIcons } from "@/components/step-capability-icons";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { KanbanStepEvents } from "@/lib/state/slices/kanban/types";
+import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
+import { WorkflowMoveOptionsFields, useWorkflowMoveOptionsForm } from "./workflow-move-options";
+import {
+  useCompactWorkflowDisclosure,
+  type CompactWorkflowDisclosureControls,
+} from "./workflow-step-disclosure-controls";
+import type { WorkflowStepProgress } from "@/hooks/domains/kanban/use-workflow-step-progress";
+import {
+  StepProgressDetails,
+  workflowStepProgressTranslationKey,
+} from "./workflow-step-progress-details";
+import { StepCircleIndicator } from "./workflow-step-marker";
+import { StepDisclosureRowActions } from "./workflow-step-disclosure-actions";
 import { useTranslation } from "react-i18next";
+
+/** Move callback shared by every compact-disclosure surface. A revealed,
+ * filled options draft rides along as one-shot `entry_options`. */
+export type DisclosureMove = (
+  stepId: string,
+  entryOptions?: WorkflowMoveEntryOptions,
+) => Promise<boolean>;
 
 export type WorkflowStepperStep = {
   id: string;
@@ -47,10 +64,15 @@ type MinimalWorkflowStepperProps = {
   taskId?: string | null;
   workflowId?: string | null;
   movingToStepId: string | null;
-  onMove: (stepId: string) => Promise<boolean>;
+  onMove: DisclosureMove;
+  progressByStepId?: Readonly<Record<string, WorkflowStepProgress>>;
+  agentLabelsByProfileId?: Readonly<Record<string, string>>;
   /** Notified whenever the disclosure surface opens or closes. */
   onDisclosureOpenChange?: (open: boolean) => void;
 };
+
+const EMPTY_PROGRESS_BY_STEP_ID: Readonly<Record<string, WorkflowStepProgress>> = {};
+const EMPTY_AGENT_LABELS_BY_PROFILE_ID: Readonly<Record<string, string>> = {};
 
 export function MinimalWorkflowStepper({
   sortedSteps,
@@ -60,6 +82,8 @@ export function MinimalWorkflowStepper({
   workflowId,
   movingToStepId,
   onMove,
+  progressByStepId = EMPTY_PROGRESS_BY_STEP_ID,
+  agentLabelsByProfileId = EMPTY_AGENT_LABELS_BY_PROFILE_ID,
   onDisclosureOpenChange,
 }: MinimalWorkflowStepperProps) {
   const { t } = useTranslation();
@@ -84,6 +108,7 @@ export function MinimalWorkflowStepper({
         current={current}
         currentIndex={currentIndex}
         total={sortedSteps.length}
+        progress={progressByStepId[current.id]}
       />
     );
   }
@@ -98,171 +123,41 @@ export function MinimalWorkflowStepper({
       workflowId={workflowId}
       movingToStepId={movingToStepId}
       onMove={onMove}
+      progressByStepId={progressByStepId}
+      agentLabelsByProfileId={agentLabelsByProfileId}
       onDisclosureOpenChange={onDisclosureOpenChange}
     />
   );
-}
-
-type CompactWorkflowDisclosureControls = {
-  open: boolean;
-  setOpen: (open: boolean) => void;
-  triggerRef: RefObject<HTMLButtonElement | null>;
-  setTriggerRef: (node: HTMLButtonElement | null) => void;
-  contentRef: RefObject<HTMLDivElement | null>;
-  openDisclosure: () => void;
-  openDisclosureFromFocus: () => void;
-  scheduleClose: () => void;
-  cancelScheduledClose: () => void;
-  handleTriggerFocus: () => void;
-  handleTriggerBlur: (event: FocusEvent<HTMLButtonElement>) => void;
-  handleContentFocus: () => void;
-  handleContentBlur: (event: FocusEvent<HTMLDivElement>) => void;
-  handleOpenAutoFocus: (event: Event) => void;
-  handleCloseAutoFocus: (event: Event) => void;
-};
-
-function isElementWithin<T extends HTMLElement>(
-  target: EventTarget | null,
-  ref: RefObject<T | null>,
-): boolean {
-  return target instanceof Node && ref.current?.contains(target) === true;
-}
-
-function useCompactDisclosureCloseTimer(
-  triggerRef: RefObject<HTMLButtonElement | null>,
-  contentRef: RefObject<HTMLDivElement | null>,
-  setOpen: (open: boolean) => void,
-) {
-  const closeTimerRef = useRef<number | null>(null);
-  const cancelScheduledClose = () => {
-    if (closeTimerRef.current !== null) {
-      window.clearTimeout(closeTimerRef.current);
-      closeTimerRef.current = null;
-    }
-  };
-  const scheduleClose = () => {
-    cancelScheduledClose();
-    closeTimerRef.current = window.setTimeout(() => {
-      closeTimerRef.current = null;
-      const activeElement = document.activeElement;
-      const focusIsInsideDisclosure =
-        isElementWithin(activeElement, triggerRef) || isElementWithin(activeElement, contentRef);
-      if (!focusIsInsideDisclosure) setOpen(false);
-    }, 100);
-  };
-  useEffect(
-    () => () => {
-      if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
-    },
-    [],
-  );
-  return { cancelScheduledClose, scheduleClose };
-}
-
-function useCompactWorkflowDisclosure(): CompactWorkflowDisclosureControls {
-  const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const setTriggerRef = (node: HTMLButtonElement | null) => {
-    triggerRef.current = node;
-  };
-  const contentRef = useRef<HTMLDivElement>(null);
-  const suppressFocusOpenRef = useRef(false);
-  const openedFromFocusRef = useRef(false);
-  const contentHasFocusRef = useRef(false);
-  const { cancelScheduledClose, scheduleClose } = useCompactDisclosureCloseTimer(
-    triggerRef,
-    contentRef,
-    setOpen,
-  );
-  const openDisclosure = () => {
-    openedFromFocusRef.current = false;
-    cancelScheduledClose();
-    setOpen(true);
-  };
-  const openDisclosureFromFocus = () => {
-    openedFromFocusRef.current = !open;
-    cancelScheduledClose();
-    setOpen(true);
-  };
-  const handleTriggerFocus = () => {
-    if (suppressFocusOpenRef.current) {
-      suppressFocusOpenRef.current = false;
-      return;
-    }
-    openDisclosureFromFocus();
-  };
-  const handleTriggerBlur = (event: FocusEvent<HTMLButtonElement>) => {
-    suppressFocusOpenRef.current = false;
-    if (isElementWithin(event.relatedTarget, contentRef)) {
-      cancelScheduledClose();
-      return;
-    }
-    scheduleClose();
-  };
-  const handleContentBlur = (event: FocusEvent<HTMLDivElement>) => {
-    const relatedTarget = event.relatedTarget;
-    if (isElementWithin(relatedTarget, contentRef)) {
-      contentHasFocusRef.current = true;
-      cancelScheduledClose();
-      return;
-    }
-    contentHasFocusRef.current = false;
-    if (isElementWithin(relatedTarget, triggerRef)) {
-      cancelScheduledClose();
-      return;
-    }
-    scheduleClose();
-  };
-  const handleContentFocus = () => {
-    contentHasFocusRef.current = true;
-    cancelScheduledClose();
-  };
-  const handleCloseAutoFocus = (event: Event) => {
-    event.preventDefault();
-    if (contentHasFocusRef.current) {
-      contentHasFocusRef.current = false;
-      suppressFocusOpenRef.current = true;
-      triggerRef.current?.focus();
-    }
-  };
-  const handleOpenAutoFocus = (event: Event) => {
-    if (!openedFromFocusRef.current) event.preventDefault();
-    openedFromFocusRef.current = false;
-  };
-  return {
-    open,
-    setOpen,
-    triggerRef,
-    setTriggerRef,
-    contentRef,
-    openDisclosure,
-    openDisclosureFromFocus,
-    scheduleClose,
-    cancelScheduledClose,
-    handleTriggerFocus,
-    handleTriggerBlur,
-    handleContentFocus,
-    handleContentBlur,
-    handleOpenAutoFocus,
-    handleCloseAutoFocus,
-  };
 }
 
 type CompactWorkflowTriggerProps = ComponentPropsWithoutRef<"button"> & {
   current: Step;
   currentIndex: number;
   total: number;
+  progress?: WorkflowStepProgress;
   usesTouchDrawer: boolean;
   controls: CompactWorkflowDisclosureControls;
 };
 
 const CompactWorkflowTrigger = forwardRef<HTMLButtonElement, CompactWorkflowTriggerProps>(
   function CompactWorkflowTrigger(
-    { current, currentIndex, total, usesTouchDrawer, controls, className, ...buttonProps },
+    {
+      current,
+      currentIndex,
+      total,
+      progress,
+      usesTouchDrawer,
+      controls,
+      className,
+      ...buttonProps
+    },
     ref,
   ) {
     const { t } = useTranslation();
     const currentDisplayIndex = currentIndex >= 0 ? currentIndex : 0;
+    const progressLabel = progress
+      ? t(workflowStepProgressTranslationKey(progress.status))
+      : undefined;
     return (
       <button
         {...buttonProps}
@@ -275,10 +170,11 @@ const CompactWorkflowTrigger = forwardRef<HTMLButtonElement, CompactWorkflowTrig
         data-testid="workflow-stepper-minimal"
         aria-haspopup="dialog"
         aria-expanded={controls.open}
-        aria-label={t("task:stepOf", {
+        aria-label={t(progressLabel ? "task:stepOfWithStatus" : "task:stepOf", {
           stepNumber: currentDisplayIndex + 1,
           totalSteps: total,
           stepLabel: current.name,
+          status: progressLabel,
         })}
         onMouseEnter={controls.openDisclosure}
         onMouseLeave={controls.scheduleClose}
@@ -290,7 +186,12 @@ const CompactWorkflowTrigger = forwardRef<HTMLButtonElement, CompactWorkflowTrig
           className,
         )}
       >
-        <MinimalStepContents current={current} currentIndex={currentIndex} total={total} />
+        <MinimalStepContents
+          current={current}
+          currentIndex={currentIndex}
+          total={total}
+          progress={progress}
+        />
         {usesTouchDrawer && (
           <IconChevronDown
             data-testid="workflow-stepper-touch-disclosure-cue"
@@ -312,6 +213,8 @@ function CompactWorkflowStepDisclosure({
   workflowId,
   movingToStepId,
   onMove,
+  progressByStepId,
+  agentLabelsByProfileId,
   onDisclosureOpenChange,
 }: {
   sortedSteps: Step[];
@@ -321,10 +224,11 @@ function CompactWorkflowStepDisclosure({
   taskId: string;
   workflowId: string;
   movingToStepId: string | null;
-  onMove: (stepId: string) => Promise<boolean>;
+  onMove: DisclosureMove;
+  progressByStepId: Readonly<Record<string, WorkflowStepProgress>>;
+  agentLabelsByProfileId: Readonly<Record<string, string>>;
   onDisclosureOpenChange?: (open: boolean) => void;
 }) {
-  const { t } = useTranslation();
   const usesTouchDrawer = useTouchDrawer();
   const controls = useCompactWorkflowDisclosure();
   useEffect(() => {
@@ -341,12 +245,13 @@ function CompactWorkflowStepDisclosure({
       current={current}
       currentIndex={currentIndex}
       total={sortedSteps.length}
+      progress={progressByStepId[current.id]}
       usesTouchDrawer={usesTouchDrawer}
       controls={controls}
     />
   );
-  const handleDisclosureMove = async (stepId: string) => {
-    const moved = await onMove(stepId);
+  const handleDisclosureMove: DisclosureMove = async (stepId, entryOptions) => {
+    const moved = await onMove(stepId, entryOptions);
     if (moved) controls.setOpen(false);
     return moved;
   };
@@ -358,9 +263,38 @@ function CompactWorkflowStepDisclosure({
       taskId={taskId}
       workflowId={workflowId}
       movingToStepId={movingToStepId}
+      isTouchSurface={usesTouchDrawer}
+      progressByStepId={progressByStepId}
+      agentLabelsByProfileId={agentLabelsByProfileId}
       onMove={handleDisclosureMove}
     />
   );
+
+  return (
+    <CompactWorkflowDisclosureSurface
+      trigger={trigger}
+      content={content}
+      controls={controls}
+      usesTouchDrawer={usesTouchDrawer}
+      stepCount={sortedSteps.length}
+    />
+  );
+}
+
+function CompactWorkflowDisclosureSurface({
+  trigger,
+  content,
+  controls,
+  usesTouchDrawer,
+  stepCount,
+}: {
+  trigger: ReactNode;
+  content: ReactNode;
+  controls: CompactWorkflowDisclosureControls;
+  usesTouchDrawer: boolean;
+  stepCount: number;
+}) {
+  const { t } = useTranslation();
 
   if (usesTouchDrawer) {
     return (
@@ -369,9 +303,7 @@ function CompactWorkflowStepDisclosure({
         <DrawerContent className="max-h-[80dvh]">
           <DrawerHeader className="shrink-0 text-left">
             <DrawerTitle>{t("task:moveTo")}</DrawerTitle>
-            <DrawerDescription>
-              {t("task:stepCount", { count: sortedSteps.length })}
-            </DrawerDescription>
+            <DrawerDescription>{t("task:stepCount", { count: stepCount })}</DrawerDescription>
           </DrawerHeader>
           {content}
         </DrawerContent>
@@ -388,7 +320,7 @@ function CompactWorkflowStepDisclosure({
         aria-label={t("task:moveTo")}
         side="bottom"
         align="center"
-        className="w-72 max-w-[calc(100vw-1rem)] p-2"
+        className="w-[28rem] max-w-[calc(100vw-1rem)] p-2"
         onOpenAutoFocus={controls.handleOpenAutoFocus}
         onCloseAutoFocus={controls.handleCloseAutoFocus}
         onEscapeKeyDown={(event) => event.stopPropagation()}
@@ -407,17 +339,24 @@ function MinimalStepIndicator({
   current,
   currentIndex,
   total,
+  progress,
 }: {
   current: Step;
   currentIndex: number;
   total: number;
+  progress?: WorkflowStepProgress;
 }) {
   return (
     <div
       data-testid="workflow-stepper-minimal"
       className="flex min-w-0 items-center gap-1.5 rounded-md px-2 py-0.5"
     >
-      <MinimalStepContents current={current} currentIndex={currentIndex} total={total} />
+      <MinimalStepContents
+        current={current}
+        currentIndex={currentIndex}
+        total={total}
+        progress={progress}
+      />
     </div>
   );
 }
@@ -426,12 +365,18 @@ function MinimalStepContents({
   current,
   currentIndex,
   total,
+  progress,
 }: {
   current: Step;
   currentIndex: number;
   total: number;
+  progress?: WorkflowStepProgress;
 }) {
+  const { t } = useTranslation();
   const displayIndex = currentIndex >= 0 ? currentIndex : 0;
+  const pendingLabel = progress?.isPending
+    ? t(workflowStepProgressTranslationKey(progress.status))
+    : undefined;
   return (
     <>
       <div
@@ -439,7 +384,12 @@ function MinimalStepContents({
         aria-current={currentIndex >= 0 ? "step" : undefined}
         className="flex min-w-0 items-center gap-1.5 text-xs"
       >
-        <StepCircleIndicator isCurrent={currentIndex >= 0} isCompleted={false} />
+        <StepCircleIndicator
+          isCurrent={currentIndex >= 0}
+          isCompleted={false}
+          isPending={progress?.isPending}
+          pendingLabel={pendingLabel}
+        />
         <span className="min-w-0 truncate text-xs font-medium leading-none text-foreground">
           {current.name}
         </span>
@@ -460,6 +410,9 @@ function StepDisclosureBody({
   taskId,
   workflowId,
   movingToStepId,
+  isTouchSurface,
+  progressByStepId,
+  agentLabelsByProfileId,
   onMove,
 }: {
   sortedSteps: Step[];
@@ -468,9 +421,11 @@ function StepDisclosureBody({
   taskId: string;
   workflowId: string;
   movingToStepId: string | null;
-  onMove: (stepId: string) => Promise<boolean>;
+  isTouchSurface: boolean;
+  progressByStepId: Readonly<Record<string, WorkflowStepProgress>>;
+  agentLabelsByProfileId: Readonly<Record<string, string>>;
+  onMove: DisclosureMove;
 }) {
-  const { t } = useTranslation();
   return (
     <div
       data-testid="workflow-step-disclosure"
@@ -490,47 +445,127 @@ function StepDisclosureBody({
           allowManualMove: step.allow_manual_move,
         });
         return (
-          <div
+          <StepDisclosureRow
             key={step.id}
-            data-testid={`workflow-step-disclosure-row-${step.id}`}
-            aria-current={isCurrent ? "step" : undefined}
-            className="flex min-h-11 items-center gap-2 rounded-md px-2 py-1.5"
-          >
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <StepCircleIndicator isCurrent={isCurrent} isCompleted={isCompleted} />
-              <span
-                className={cn(
-                  "min-w-0 truncate text-xs",
-                  getStepLabelClass(isCurrent, isCompleted),
-                )}
-              >
-                {step.name}
-              </span>
-              <StepCapabilityIcons events={step.events} agentProfileId={step.agent_profile_id} />
-            </div>
-            {isCurrent ? (
-              <span className="shrink-0 text-[11px] text-muted-foreground">
-                {t("task:currentStep")}
-              </span>
-            ) : (
-              canMove && (
-                <Button
-                  type="button"
-                  data-testid={`workflow-step-disclosure-move-${step.id}`}
-                  size="default"
-                  variant="default"
-                  className="shrink-0 cursor-pointer rounded-sm px-2.5 text-xs"
-                  disabled={movingToStepId !== null}
-                  onClick={() => void onMove(step.id)}
-                >
-                  <IconArrowRight className="h-3 w-3" />
-                  {movingToStepId === step.id ? t("task:moving") : t("task:moveHere")}
-                </Button>
-              )
-            )}
-          </div>
+            step={step}
+            isCurrent={isCurrent}
+            isCompleted={isCompleted}
+            canMove={canMove}
+            isMoving={movingToStepId === step.id}
+            movePending={movingToStepId !== null}
+            isTouchSurface={isTouchSurface}
+            progress={progressByStepId[step.id]}
+            agentLabelsByProfileId={agentLabelsByProfileId}
+            onMove={onMove}
+          />
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * A single step choice in the compact disclosure. Non-current, movable steps
+ * carry the same opt-in one-time move options as the full stepper: the fields
+ * stay hidden until the user reveals them, so a quick tap keeps the zero-config
+ * move while a revealed, filled draft rides along as one-shot `entry_options`.
+ * A successful move unmounts the row (the disclosure closes); a failed move
+ * keeps the disclosure open so the draft the user typed is preserved.
+ */
+function StepDisclosureRow({
+  step,
+  isCurrent,
+  isCompleted,
+  canMove,
+  isMoving,
+  movePending,
+  isTouchSurface,
+  progress,
+  agentLabelsByProfileId,
+  onMove,
+}: {
+  step: Step;
+  isCurrent: boolean;
+  isCompleted: boolean;
+  canMove: boolean;
+  isMoving: boolean;
+  movePending: boolean;
+  isTouchSurface: boolean;
+  progress?: WorkflowStepProgress;
+  agentLabelsByProfileId: Readonly<Record<string, string>>;
+  onMove: DisclosureMove;
+}) {
+  const { t } = useTranslation();
+  const [showOptions, setShowOptions] = useState(false);
+  const { draft, patchDraft } = useWorkflowMoveOptionsForm();
+  const buttonSizeClass = isTouchSurface ? "h-11" : "h-7 [@media(pointer:coarse)]:h-11";
+
+  return (
+    <div
+      data-testid={`workflow-step-disclosure-row-${step.id}`}
+      aria-current={isCurrent ? "step" : undefined}
+      className="flex flex-col gap-1.5 rounded-md px-2 py-1.5"
+    >
+      <div className="flex min-h-11 items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <StepCircleIndicator
+            isCurrent={isCurrent}
+            isCompleted={isCompleted}
+            isPending={progress?.isPending}
+            pendingLabel={
+              progress?.isPending
+                ? t(workflowStepProgressTranslationKey(progress.status))
+                : undefined
+            }
+          />
+          <span
+            className={cn("min-w-0 truncate text-xs", getStepLabelClass(isCurrent, isCompleted))}
+          >
+            {step.name}
+          </span>
+          <StepCapabilityIcons events={step.events} agentProfileId={step.agent_profile_id} />
+        </div>
+        {isCurrent ? (
+          <span className="shrink-0 text-[11px] text-muted-foreground">
+            {t("task:currentStep")}
+          </span>
+        ) : (
+          canMove && (
+            <StepDisclosureRowActions
+              stepId={step.id}
+              isMoving={isMoving}
+              movePending={movePending}
+              showOptions={showOptions}
+              buttonSizeClass={buttonSizeClass}
+              draft={draft}
+              onToggleOptions={() => setShowOptions((value) => !value)}
+              onMove={onMove}
+            />
+          )
+        )}
+      </div>
+      {progress && (
+        <StepProgressDetails
+          progress={progress}
+          agentProfileId={step.agent_profile_id}
+          agentLabelsByProfileId={agentLabelsByProfileId}
+          testId={`workflow-step-progress-${step.id}`}
+        />
+      )}
+      {canMove && !isCurrent && showOptions && (
+        <div
+          className="pb-1 pl-4 pr-1"
+          onKeyDown={(event) => event.stopPropagation()}
+          data-testid={`workflow-step-disclosure-options-panel-${step.id}`}
+        >
+          <WorkflowMoveOptionsFields
+            draft={draft}
+            onDraftChange={patchDraft}
+            isTouchSurface={isTouchSurface}
+            instructionsRows={3}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -545,46 +580,6 @@ export function canMoveToStep(params: {
 }): boolean {
   if (params.isArchived || params.isCurrent || !params.taskId || !params.workflowId) return false;
   return params.isAdjacent || !!params.allowManualMove;
-}
-
-export type StepMarkerState = "current" | "completed" | "upcoming";
-
-export function StepCircleIndicator({
-  isCurrent,
-  isCompleted,
-}: {
-  isCurrent: boolean;
-  isCompleted: boolean;
-}) {
-  let state: StepMarkerState = "upcoming";
-  if (isCurrent) state = "current";
-  else if (isCompleted) state = "completed";
-  if (isCurrent) {
-    return (
-      <span
-        data-marker-state={state}
-        className="relative flex items-center justify-center shrink-0"
-      >
-        <span className="absolute h-3.5 w-3.5 rounded-full border-2 border-primary/40" />
-        <span className="h-2 w-2 rounded-full bg-primary" />
-      </span>
-    );
-  }
-  if (isCompleted) {
-    return (
-      <span
-        data-marker-state={state}
-        className="relative flex items-center justify-center shrink-0"
-      >
-        <span className="h-2 w-2 rounded-full bg-muted-foreground/60" />
-      </span>
-    );
-  }
-  return (
-    <span data-marker-state={state} className="relative flex items-center justify-center shrink-0">
-      <span className="h-2 w-2 rounded-full border border-muted-foreground/40" />
-    </span>
-  );
 }
 
 export function getStepLabelClass(isCurrent: boolean, isCompleted: boolean): string {

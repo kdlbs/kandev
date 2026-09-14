@@ -1,11 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render, renderHook, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { planCommentRecovery } from "@/lib/plan-comment-recovery";
+import { QueueAdmissionError, QueueFullError } from "@/lib/api/domains/queue-api";
 
 const toastMock = vi.fn();
 const handleSendMessageMock = vi.fn();
 const useKeyboardShortcutMock = vi.hoisted(() => vi.fn());
+const MESSAGE_NOT_SENT_TITLE = "Message not sent";
 let mockProceedStepName: string | null = null;
+let mockQueuePopulated = false;
 
 const mockState = {
   userSettings: { keyboardShortcuts: {}, chatSubmitKey: "enter" },
@@ -46,7 +50,7 @@ vi.mock("@/components/task/share/share-button", () => ({
 }));
 
 vi.mock("@/components/task/chat/chat-input-container", () => ({
-  ChatInputContainer: () => null,
+  ChatInputContainer: () => <textarea aria-label="Draft" />,
 }));
 
 vi.mock("@/components/task/chat/queued-ghost-list", () => ({
@@ -56,12 +60,20 @@ vi.mock("@/components/task/chat/queued-ghost-list", () => ({
   }: {
     children: ReactNode;
     renderStatusBar?: (queueChip: ReactNode) => ReactNode;
-  }) => (
-    <>
-      {renderStatusBar?.(null)}
-      {children}
-    </>
-  ),
+  }) =>
+    mockQueuePopulated ? (
+      <>
+        {renderStatusBar?.(null)}
+        <aside>Queued messages</aside>
+        {null}
+        {children}
+      </>
+    ) : (
+      <>
+        {renderStatusBar?.(null)}
+        {children}
+      </>
+    ),
 }));
 
 vi.mock("./composer-agent-start-hint", () => ({
@@ -73,6 +85,7 @@ vi.mock("./dynamic-route-recovery", () => ({
 }));
 
 vi.mock("./chat-status-bar", () => ({
+  ComposerCIStatus: () => null,
   ChatStatusBar: (props: {
     nextStepName: string | null;
     isAgentBusy: boolean;
@@ -139,6 +152,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   mockProceedStepName = null;
+  mockQueuePopulated = false;
   vi.restoreAllMocks();
   vi.clearAllMocks();
 });
@@ -164,7 +178,15 @@ function panelState(overrides = {}) {
     clearEphemeral: vi.fn(),
     addContextFile: vi.fn(),
     planModeEnabled: false,
-    planCommentMigration: { status: "complete", isReady: true, isBlocking: false, retry: vi.fn() },
+    planCommentMigration: {
+      status: "complete",
+      pendingCount: 0,
+      failure: null,
+      needsAttention: false,
+      isReady: true,
+      isBlocking: false,
+      retry: vi.fn(),
+    },
     ...overrides,
   } as never;
 }
@@ -198,9 +220,9 @@ function composerPanelState(overrides = {}) {
   } as never;
 }
 
-function renderComposer(panelStateOverride = {}) {
+function composerElement(panelStateOverride = {}) {
   mockProceedStepName = "Review";
-  return render(
+  return (
     <ChatInputArea
       chatInputRef={{ current: null }}
       clarificationKey={0}
@@ -210,9 +232,28 @@ function renderComposer(panelStateOverride = {}) {
       showRequestChangesTooltip={false}
       panelState={composerPanelState(panelStateOverride)}
       isSending={false}
-    />,
+    />
   );
 }
+
+function renderComposer(panelStateOverride = {}) {
+  return render(composerElement(panelStateOverride));
+}
+
+it("keeps the composer mounted and focused as the queue fills and drains", () => {
+  const view = renderComposer();
+  const editor = screen.getByRole("textbox", { name: "Draft" });
+  fireEvent.change(editor, { target: { value: "next draft" } });
+  act(() => editor.focus());
+
+  for (const populated of [true, false]) {
+    mockQueuePopulated = populated;
+    view.rerender(composerElement());
+    expect(screen.getByRole("textbox", { name: "Draft" })).toBe(editor);
+    expect((editor as HTMLTextAreaElement).value).toBe("next draft");
+    expect(document.activeElement).toBe(editor);
+  }
+});
 
 describe("resolveInputPlaceholder", () => {
   it("invites queueing while a clarification remains pending", () => {
@@ -351,31 +392,61 @@ describe("useSubmitHandler plan mode", () => {
 });
 
 describe("useSubmitHandler task plan comments", () => {
-  it("blocks delivery while legacy comments still need migration", async () => {
-    const { result } = renderHook(() =>
-      useSubmitHandler(
-        panelState({
-          planCommentMigration: {
-            status: "failed",
-            isReady: false,
-            isBlocking: true,
-            retry: vi.fn(),
-          },
-        }),
-      ),
-    );
+  it.each(["idle", "retrying", "failed"] as const)(
+    "accepts plain Send with no identified drafts during %s recovery",
+    async (status) => {
+      const { result } = renderHook(() =>
+        useSubmitHandler(
+          panelState({
+            planCommentMigration: {
+              ...planCommentRecovery({ status, pendingCount: 0, failure: "transient" }),
+              retry: vi.fn(),
+            },
+          }),
+        ),
+      );
+      await act(async () => {
+        await expect(result.current.handleSubmit({ message: "Send my message" })).resolves.toBe(
+          true,
+        );
+      });
+      expect(handleSendMessageMock).toHaveBeenCalledWith({ message: "Send my message" });
+      expect(toastMock).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["transient", "conflict", "rejected"] as const)(
+    "preserves blocked delivery without promising retries for %s recovery",
+    async (failure) => {
+      const { result } = renderHook(() =>
+        useSubmitHandler(
+          panelState({
+            planCommentMigration: {
+              status: "failed",
+              pendingCount: 1,
+              failure,
+              needsAttention: true,
+              isReady: false,
+              isBlocking: true,
+              retry: vi.fn(),
+            },
+          }),
+        ),
+      );
 
-    await act(async () => {
-      await expect(result.current.handleSubmit({ message: "Keep my draft" })).resolves.toBe(false);
-    });
+      await act(async () => {
+        await expect(result.current.handleSubmit({ message: "Keep my draft" })).resolves.toBe(
+          false,
+        );
+      });
 
-    expect(handleSendMessageMock).not.toHaveBeenCalled();
-    expect(toastMock).toHaveBeenCalledWith({
-      title: "Message not sent",
-      description: "Saved plan comments are still being restored. Retry before sending.",
-      variant: "error",
-    });
-  });
+      expect(handleSendMessageMock).not.toHaveBeenCalled();
+      expect(toastMock).toHaveBeenCalledWith({
+        title: MESSAGE_NOT_SENT_TITLE,
+        description: "Saved plan comments are still being restored. Your message is kept.",
+        variant: "error",
+      });
+    },
+  );
 
   it("submits displayed IDs and versions without clearing the shared snapshot locally", async () => {
     const clearSessionPlanComments = vi.fn();
@@ -388,7 +459,16 @@ describe("useSubmitHandler task plan comments", () => {
       selectedText: "Large step",
     };
     const { result } = renderHook(() =>
-      useSubmitHandler(panelState({ planComments: [comment], clearSessionPlanComments })),
+      useSubmitHandler(
+        panelState({
+          planComments: [comment],
+          clearSessionPlanComments,
+          planCommentMigration: {
+            ...planCommentRecovery({ status: "failed", pendingCount: 0, failure: "transient" }),
+            retry: vi.fn(),
+          },
+        }),
+      ),
     );
 
     await act(async () => {
@@ -421,8 +501,42 @@ describe("useSubmitHandler deterministic failures", () => {
     });
 
     expect(toastMock).toHaveBeenCalledWith({
-      title: "Message not sent",
+      title: MESSAGE_NOT_SENT_TITLE,
       description: message,
+      variant: "error",
+    });
+  });
+});
+
+describe("useSubmitHandler queue admission failures", () => {
+  it("shows localized capacity feedback for a rejected queue admission", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    handleSendMessageMock.mockRejectedValueOnce(new QueueFullError(10, 10));
+    const { result } = renderHook(() => useSubmitHandler(panelState()));
+
+    await act(async () => {
+      await result.current.handleSubmit({ message: "keep this draft" });
+    });
+
+    expect(toastMock).toHaveBeenCalledWith({
+      title: MESSAGE_NOT_SENT_TITLE,
+      description: "The message queue is full. Wait for the next turn to drain.",
+      variant: "error",
+    });
+  });
+
+  it("shows localized identity feedback without exposing the server diagnostic", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    handleSendMessageMock.mockRejectedValueOnce(new QueueAdmissionError("identity-conflict"));
+    const { result } = renderHook(() => useSubmitHandler(panelState()));
+
+    await act(async () => {
+      await result.current.handleSubmit({ message: "keep this draft" });
+    });
+
+    expect(toastMock).toHaveBeenCalledWith({
+      title: MESSAGE_NOT_SENT_TITLE,
+      description: "This draft was already submitted with different content.",
       variant: "error",
     });
   });

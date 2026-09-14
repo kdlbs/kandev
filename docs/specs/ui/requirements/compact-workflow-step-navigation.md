@@ -41,6 +41,8 @@ The UI system owns this responsive disclosure. The task system continues to own 
 - **AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.9:** When a phone does not show the task top bar, the mobile task drawer shall retain its existing **Move to** path.
 - **AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.10:** Fine-pointer movement controls shall retain compact desktop sizing. The 44px minimum shall apply only to coarse-pointer touch hit areas and mobile controls.
 
+- **AC-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001.11:** On a desktop with sufficient viewport space, the disclosure shall show Backlog and Implementation without truncation alongside capability icons, options, and move controls. Longer names may truncate when constrained by the viewport.
+
 ## Out of scope
 
 - Changes to workflow order, task-move permissions, or backend task transitions.

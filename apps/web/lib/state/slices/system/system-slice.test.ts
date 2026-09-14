@@ -95,7 +95,7 @@ const ANALYSIS = {
   refresh_due_at: "2026-05-18T00:15:00Z",
   stale: false,
   error: null,
-  progress: { completed_sources: 7, total_sources: 7, sources: {} },
+  progress: { completed_sources: 8, total_sources: 8, sources: {} },
   partial_summary: null,
 } as const;
 
@@ -198,6 +198,30 @@ describe("system slice", () => {
     const store = makeStore();
     store.getState().setSystemDatabase(DB_STATS);
     expect(store.getState().system.database).toEqual(DB_STATS);
+  });
+
+  it("setSystemRetention stores the status", () => {
+    const store = makeStore();
+    expect(store.getState().system.retention).toBeNull();
+    const status = {
+      settings: {
+        enabled: true,
+        sweep_interval_hours: 6,
+        batch_limit: 5000,
+        routine_runs: { window_days: 30, floor_per_owner: 50, warn_rows: 25000 },
+        runs: { window_days: 30, floor_per_owner: 50, warn_rows: 25000 },
+        run_events: { warn_rows: 250000 },
+      },
+      last_sweep: null,
+      skip_count: 0,
+      retained_counts: {
+        office_routine_runs: { state: "not_computed" as const, retained_count: 0, as_of: "" },
+        runs: { state: "not_computed" as const, retained_count: 0, as_of: "" },
+        run_events: { state: "not_computed" as const, retained_count: 0, as_of: "" },
+      },
+    };
+    store.getState().setSystemRetention(status);
+    expect(store.getState().system.retention).toEqual(status);
   });
 
   it("setSystemBackups marks the list as loaded", () => {

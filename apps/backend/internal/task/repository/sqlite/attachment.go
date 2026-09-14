@@ -96,6 +96,41 @@ func (r *Repository) ListMessageAttachments(ctx context.Context, ids []string) (
 	return out, nil
 }
 
+func (r *Repository) ListMessageAttachmentsByTask(ctx context.Context, taskID string) ([]*models.TaskMessageAttachment, error) {
+	return r.listMessageAttachmentsByScope(ctx, "task_id", "task", taskID)
+}
+
+func (r *Repository) ListMessageAttachmentsByWorkspace(ctx context.Context, workspaceID string) ([]*models.TaskMessageAttachment, error) {
+	return r.listMessageAttachmentsByScope(ctx, "workspace_id", "workspace", workspaceID)
+}
+
+func (r *Repository) listMessageAttachmentsByScope(
+	ctx context.Context, column, scope, value string,
+) ([]*models.TaskMessageAttachment, error) {
+	if value == "" {
+		return nil, nil
+	}
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(
+		`SELECT `+attachmentSelectColumns+` FROM task_message_attachments WHERE `+column+` = ?`,
+	), value)
+	if err != nil {
+		return nil, fmt.Errorf("list %s message attachments: %w", scope, err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []*models.TaskMessageAttachment
+	for rows.Next() {
+		attachment := &models.TaskMessageAttachment{}
+		if err := rows.StructScan(attachment); err != nil {
+			return nil, fmt.Errorf("scan %s message attachment: %w", scope, err)
+		}
+		out = append(out, attachment)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate %s message attachments: %w", scope, err)
+	}
+	return out, nil
+}
+
 func (r *Repository) ClaimMessageAttachments(ctx context.Context, ids []string, ownerID, workspaceID, taskID, sessionID string) error {
 	if len(ids) == 0 {
 		return nil
@@ -520,6 +555,56 @@ func (r *Repository) markAttachmentsClaimed(ctx context.Context, tx *sqlx.Tx, id
 	return nil
 }
 
+// PrepareMessageAttachmentsForTaskDelete fences claim admission before bytes
+// are removed. Rows remain expired until physical deletion succeeds.
+func (r *Repository) PrepareMessageAttachmentsForTaskDelete(
+	ctx context.Context, taskID string,
+) ([]*models.TaskMessageAttachment, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin task attachment delete preparation: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
+		SELECT `+attachmentSelectColumns+` FROM task_message_attachments
+		WHERE task_id = ?
+	`), taskID)
+	if err != nil {
+		return nil, fmt.Errorf("list task attachments for delete preparation: %w", err)
+	}
+	var attachments []*models.TaskMessageAttachment
+	for rows.Next() {
+		attachment := &models.TaskMessageAttachment{}
+		if err := rows.StructScan(attachment); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan task attachment for delete preparation: %w", err)
+		}
+		attachments = append(attachments, attachment)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, fmt.Errorf("iterate task attachments for delete preparation: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close task attachments for delete preparation: %w", err)
+	}
+	now := time.Now().UTC()
+	for _, attachment := range attachments {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`
+			UPDATE task_message_attachments SET state = ?, updated_at = ?
+			WHERE id = ?
+		`), models.AttachmentStateExpired, now, attachment.ID); err != nil {
+			return nil, fmt.Errorf("mark task attachment for delete: %w", err)
+		}
+		attachment.State = models.AttachmentStateExpired
+		attachment.UpdatedAt = now
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit task attachment delete preparation: %w", err)
+	}
+	return attachments, nil
+}
+
 func (r *Repository) DeleteMessageAttachment(ctx context.Context, id, ownerID string) error {
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM task_message_attachments WHERE id = ? AND owner_id = ?
@@ -532,6 +617,74 @@ func (r *Repository) DeleteMessageAttachment(ctx context.Context, id, ownerID st
 		return models.ErrAttachmentNotFound
 	}
 	return nil
+}
+
+// PrepareClaimedMessageAttachmentsForRelease retains attachment rows as
+// expired until their private bytes are removed, allowing maintenance retries.
+func (r *Repository) PrepareClaimedMessageAttachmentsForRelease(
+	ctx context.Context, ids []string, ownerID, taskID, sessionID string,
+) ([]*models.TaskMessageAttachment, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := []interface{}{ownerID, taskID, sessionID, models.AttachmentStateClaimed}
+	args = append(args, idsToInterfaces(ids)...)
+	queueTablePresent, err := r.tableExistsContext(ctx, "queued_messages")
+	if err != nil {
+		return nil, fmt.Errorf("probe queue attachment references: %w", err)
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin claimed attachment release preparation: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	referenced, err := referencedAttachmentIDsTx(ctx, r, tx, taskID, sessionID, queueTablePresent)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
+		SELECT `+attachmentSelectColumns+` FROM task_message_attachments
+		WHERE owner_id = ? AND task_id = ? AND session_id = ? AND state = ?
+		  AND id IN (`+placeholders+`)
+	`), args...)
+	if err != nil {
+		return nil, fmt.Errorf("list claimed attachments for release preparation: %w", err)
+	}
+	var released []*models.TaskMessageAttachment
+	for rows.Next() {
+		attachment := &models.TaskMessageAttachment{}
+		if err := rows.StructScan(attachment); err != nil {
+			_ = rows.Close()
+			return nil, fmt.Errorf("scan claimed attachment for release preparation: %w", err)
+		}
+		if _, keep := referenced[attachment.ID]; keep {
+			continue
+		}
+		released = append(released, attachment)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, fmt.Errorf("iterate claimed attachments for release preparation: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close claimed attachments for release preparation: %w", err)
+	}
+	for _, attachment := range released {
+		if _, err := tx.ExecContext(ctx, tx.Rebind(`
+			UPDATE task_message_attachments
+			SET state = ?, updated_at = ?
+			WHERE id = ? AND owner_id = ? AND task_id = ? AND session_id = ? AND state = ?
+		`), models.AttachmentStateExpired, time.Now().UTC(), attachment.ID,
+			ownerID, taskID, sessionID, models.AttachmentStateClaimed); err != nil {
+			return nil, fmt.Errorf("mark claimed attachment for release: %w", err)
+		}
+		attachment.State = models.AttachmentStateExpired
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit claimed attachment release preparation: %w", err)
+	}
+	return released, nil
 }
 
 func (r *Repository) DeleteClaimedMessageAttachments(
@@ -556,7 +709,7 @@ func (r *Repository) deleteClaimedMessageAttachments(
 	if len(ids) == 0 {
 		return nil, nil
 	}
-	queueTablePresent, err := r.tableExists("queued_messages")
+	queueTablePresent, err := r.tableExistsContext(ctx, "queued_messages")
 	if err != nil {
 		return nil, fmt.Errorf("probe queue attachment references: %w", err)
 	}
@@ -1229,8 +1382,8 @@ func (r *Repository) MarkExpiredMessageAttachments(ctx context.Context, now time
 	defer func() { _ = tx.Rollback() }()
 	rows, err := tx.QueryxContext(ctx, tx.Rebind(`
 		SELECT `+attachmentSelectColumns+` FROM task_message_attachments
-		WHERE state = ? AND expires_at <= ?
-	`), models.AttachmentStateStaged, now)
+		WHERE (state = ? AND expires_at <= ?) OR state = ?
+	`), models.AttachmentStateStaged, now, models.AttachmentStateExpired)
 	if err != nil {
 		return nil, fmt.Errorf("list expired attachments: %w", err)
 	}
@@ -1252,6 +1405,10 @@ func (r *Repository) MarkExpiredMessageAttachments(ctx context.Context, now time
 	}
 	transitioned := make([]*models.TaskMessageAttachment, 0, len(expired))
 	for _, attachment := range expired {
+		if attachment.State == models.AttachmentStateExpired {
+			transitioned = append(transitioned, attachment)
+			continue
+		}
 		result, err := tx.ExecContext(ctx, tx.Rebind(`
 			UPDATE task_message_attachments SET state = ?, updated_at = ?
 			WHERE id = ? AND state = ? AND expires_at <= ?

@@ -632,7 +632,7 @@ func userSettingsDomain() DomainDescriptor {
 		"tasks_list_group", "task grouping", "string", "tasks_list_show_details", "task details", "boolean", "initial_setup_complete", "setup complete", "boolean",
 		"preferred_shell", "preferred shell", "string", "default_editor_id", "default editor", "string", "enable_preview_on_click", "preview on click", "boolean",
 		"chat_submit_key", "chat submit key", "string", "review_auto_mark_on_scroll", "review auto mark", "boolean", "confirm_task_archive", "confirm task archive", "boolean",
-		"prevent_auto_start_agent_on_open", "prevent auto start", "boolean", "unread_divider", "unread divider", "boolean", "agent_generated_task_titles", "generated titles", "boolean",
+		"prevent_auto_start_agent_on_open", "prevent auto start", "boolean", "unread_divider", "unread divider", "boolean", "agent_generated_task_titles", "generated titles", "boolean", "auto_focus_new_tasks", "auto focus new tasks", "boolean",
 		"mcp_task_agent_profile_default", "MCP task profile", "string", "show_anchored_prompt_bar", "anchored prompt bar", "boolean", "show_scroll_to_last_prompt", "scroll to last prompt", "boolean",
 		"show_scroll_to_start", "scroll to start", "boolean", "show_transcript_auto_scroll_control", "transcript scroll control", "boolean", "show_todo_list_panel", "todo list panel", "boolean",
 		"show_todo_list_panel_only_when_not_empty", "todo list empty state", "boolean", "show_release_notification", "release notification", "boolean", "release_notes_last_seen_version", "release notes version", "string",
@@ -648,7 +648,7 @@ func userSettingsDomain() DomainDescriptor {
 		"terminal_font_size", "terminal font size", "integer", "changes_panel_layout", "changes panel layout", "string", "last_seen_display", "last seen display", "string",
 		"system_metrics_display", "system metrics display", "object", "app_status_bar_enabled", "status bar", "boolean", "resolve_session_hostnames", "resolve hostnames", "boolean",
 		"app_status_bar_order", "status bar order", "object", "quick_chat_tab_order_by_workspace", "quick chat tab order", "object", "kanban_hidden_step_ids", "hidden kanban steps", "object",
-		"workflow_ids_with_auto_hide_empty_steps", "auto-hide workflows", "array",
+		"workflow_ids_with_auto_hide_empty_steps", "auto-hide workflows", "array", "kanban_sort", "kanban board sort", "string", "kanban_priority_filter_tokens", "kanban priority filter", "array",
 	}
 	fields := make([]FieldDescriptor, 0, len(values)/3)
 	for index := 0; index+2 < len(values); index += 3 {

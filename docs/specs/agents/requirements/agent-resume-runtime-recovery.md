@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-07-27
-updated: 2026-09-08
+updated: 2026-09-11
 owners:
   - Kandev
 ---
@@ -45,6 +45,9 @@ Preserve the observable behavior documented for Agent Resume and Runtime Recover
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.7:** When task navigation changes the active task while an automatic session-status or recovery request is in flight, the task view ignores the result owned by the prior task-session identity. An error from the prior identity does not appear on the newly selected task. Each navigation cycle invalidates prior attempts even when the task-session pair later repeats.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.8:** When automatic recovery fails, the default view shall show a short localized summary and applicable recovery actions. An expandable details control shall retain each failure cause with its operation label. Technical identifiers and nested transport errors shall not appear in the collapsed summary.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002.9:** On desktop and mobile, users shall be able to expand recovery details, read both failure causes, and retry using keyboard or touch. Details shall wrap without horizontal page overflow. Retry shall remain disabled during the request.
+
+Additional workspace admission and single-card behavior are defined in
+[Session recovery failures](session-recovery-failures.md).
 
 ### REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004: Recovery across task archive transitions
 

@@ -39,6 +39,9 @@ type SimulatedAgentManagerClient struct {
 	shouldFail          bool
 	failAfter           int // Fail after N successful launches
 	launchCount         int32
+	promptCalls         atomic.Int32
+	restartProcessCalls atomic.Int32
+	resetContextCalls   atomic.Int32
 	acpMessageFn        func(taskID, executionID string) []protocol.Message // Custom ACP messages
 	stopCh              chan struct{}
 }
@@ -302,6 +305,7 @@ func (s *SimulatedAgentManagerClient) StopAgentWithReason(ctx context.Context, a
 // PromptAgent sends a follow-up prompt to a running agent
 // Note: attachments parameter is accepted but not used in simulation
 func (s *SimulatedAgentManagerClient) PromptAgent(ctx context.Context, agentExecutionID string, prompt string, _ []v1.MessageAttachment, _ bool) (*executor.PromptResult, error) {
+	s.promptCalls.Add(1)
 	s.mu.Lock()
 	execution, exists := s.instances[agentExecutionID]
 	s.mu.Unlock()
@@ -487,6 +491,12 @@ func (s *SimulatedAgentManagerClient) GetLaunchCount() int {
 	return int(atomic.LoadInt32(&s.launchCount))
 }
 
+// PromptCallCount returns the number of follow-up prompt dispatches. Launch
+// count alone cannot prove that an existing execution was not prompted.
+func (s *SimulatedAgentManagerClient) PromptCallCount() int {
+	return int(s.promptCalls.Load())
+}
+
 // Close stops all simulated agents
 func (s *SimulatedAgentManagerClient) Close() {
 	close(s.stopCh)
@@ -585,13 +595,23 @@ func (s *SimulatedAgentManagerClient) ResolveAgentProfile(ctx context.Context, p
 }
 
 func (s *SimulatedAgentManagerClient) RestartAgentProcess(ctx context.Context, agentExecutionID string) error {
+	s.restartProcessCalls.Add(1)
 	s.logger.Info("simulated: restarting agent process",
 		zap.String("agent_execution_id", agentExecutionID))
 	return nil
 }
 
 func (s *SimulatedAgentManagerClient) ResetAgentContext(ctx context.Context, agentExecutionID string) error {
+	s.resetContextCalls.Add(1)
 	return s.RestartAgentProcess(ctx, agentExecutionID)
+}
+
+func (s *SimulatedAgentManagerClient) ResetContextCallCount() int {
+	return int(s.resetContextCalls.Load())
+}
+
+func (s *SimulatedAgentManagerClient) RestartProcessCallCount() int {
+	return int(s.restartProcessCalls.Load())
 }
 
 func (s *SimulatedAgentManagerClient) SetSessionModelBySessionID(_ context.Context, _, _ string) error {
@@ -637,6 +657,19 @@ func (s *SimulatedAgentManagerClient) GetExecutionIDForSession(_ context.Context
 		}
 	}
 	return "", fmt.Errorf("no execution found for session %s", sessionID)
+}
+func (s *SimulatedAgentManagerClient) ListExecutionsForTask(taskID string) []lifecycle.ExecutionReference {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var references []lifecycle.ExecutionReference
+	for executionID, inst := range s.instances {
+		if inst.taskID == taskID && inst.sessionID != "" {
+			references = append(references, lifecycle.ExecutionReference{
+				SessionID: inst.sessionID, ExecutionID: executionID,
+			})
+		}
+	}
+	return references
 }
 func (s *SimulatedAgentManagerClient) GetGitLog(_ context.Context, _, _ string, _ int, _ string) (*client.GitLogResult, error) {
 	return nil, nil

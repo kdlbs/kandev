@@ -23,6 +23,7 @@ import (
 	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 )
@@ -108,6 +109,38 @@ type sessionMetadataKeyStateSetter interface {
 		value interface{},
 		expectedState models.TaskSessionState,
 	) (bool, error)
+}
+
+// sessionMetadataErrorCASWriter is the optional persistence seam for
+// execution-scoped bootstrap errors. Production repositories implement both
+// operations atomically; legacy test stores can fall back to the ordinary
+// metadata setter after the executor's current-execution fence.
+type sessionMetadataErrorCASWriter interface {
+	SetSessionMetadataKeyIfAbsent(
+		ctx context.Context,
+		sessionID, key string,
+		value interface{},
+	) (bool, error)
+	SetSessionMetadataKeyIfStamp(
+		ctx context.Context,
+		sessionID, key, expectedStamp string,
+		value interface{},
+	) (bool, error)
+}
+
+// bootstrapFailureCommitter is the atomic repository boundary for an
+// asynchronous process-start failure. The expected state and error stamp are
+// captured immediately before the commit; the repository must also require
+// the execution row to still carry agentExecutionID before changing either
+// metadata or session state.
+type bootstrapFailureCommitter interface {
+	CommitBootstrapFailureIfCurrentExecution(
+		ctx context.Context,
+		taskID, sessionID, agentExecutionID string,
+		expectedState models.TaskSessionState,
+		expectedStamp string,
+		errorValue models.LastAgentError,
+	) (changed bool, updatedAt time.Time, err error)
 }
 
 // officeTaskSessionCreator lets repositories make Office-session origin
@@ -209,6 +242,13 @@ var (
 	// must not start the process and must arbitrate exact-execution teardown
 	// ownership before deciding whether to force-stop the registered runtime.
 	ErrSessionStateSuperseded = errors.New("session state superseded by terminal transition")
+	// ErrOrphanRecoveryIncomplete means StopByTaskID stopped every session it
+	// found but could not load at least one registry-only orphan's row, so the
+	// task-scoped stop is not fully confirmed. Callers that already observed a
+	// successful stop should log this rather than treat it as a hard failure;
+	// it stays distinguishable from ErrExecutionNotFound so a retry keeps
+	// happening instead of being reported as a false all-clear.
+	ErrOrphanRecoveryIncomplete = errors.New("orphaned execution recovery incomplete")
 )
 
 // SessionStateSupersededError records the terminal state that rejected a
@@ -369,6 +409,13 @@ type AgentManagerClient interface {
 	// Used to detect stale AgentExecutionID values in the database after restart.
 	GetExecutionIDForSession(ctx context.Context, sessionID string) (string, error)
 
+	// ListExecutionsForTask returns a snapshot of the session and execution IDs
+	// registered in-memory for taskID, independent of persisted session state.
+	// StopByTaskID uses the paired IDs to recover a registered execution whose
+	// session row is already terminal in the database (for example, FAILED
+	// after a never-started stall whose teardown attempt failed).
+	ListExecutionsForTask(taskID string) []lifecycle.ExecutionReference
+
 	// GetGitLog retrieves the git log for a session from baseCommit to HEAD.
 	// If targetBranch is provided, uses dynamic merge-base calculation for accurate filtering.
 	// Used for archive snapshot capture. Returns nil, nil if no execution exists.
@@ -435,6 +482,10 @@ type AgentProfileInfo struct {
 	CLIPassthrough             bool
 	NativeSessionResume        bool // Agent supports ACP session/load for resume
 	SupportsMCP                bool
+	// EnvVars carries profile definitions, including only opaque SecretID
+	// references for secret-backed values. The executor uses credential-store
+	// selection variables before probing the optional host bridge.
+	EnvVars []models.ProfileEnvVar
 }
 
 // LaunchAgentRequest contains parameters for launching an agent
@@ -768,6 +819,18 @@ type SessionStateTransitionFunc func(
 	onChanged func(),
 ) (changed bool, finalState models.TaskSessionState, err error)
 
+// BootstrapFailureTransitionFunc atomically commits a bootstrap error and
+// its FAILED session transition, then publishes the accepted transition.
+// expectedState and expectedStamp come from the executor's final ownership
+// read and are checked again by the repository commit.
+type BootstrapFailureTransitionFunc func(
+	ctx context.Context,
+	taskID, sessionID, agentExecutionID string,
+	expectedState models.TaskSessionState,
+	expectedStamp string,
+	errorValue models.LastAgentError,
+) (changed bool, finalState models.TaskSessionState, err error)
+
 // SessionStartingFunc is called when the executor has prepared/resumed an
 // execution and needs to mark the session STARTING while preserving other
 // session-row updates such as metadata. expectedState is the state observed
@@ -837,6 +900,16 @@ type LaunchFailedFunc func(ctx context.Context, taskID, sessionID, repositoryID 
 // lookups; an error omits the action without blocking failure persistence.
 type LaunchFailureReviewEligibilityFunc func(ctx context.Context, taskID string) (bool, error)
 
+// WorktreeRecoveryAdmissionFunc is the legacy task-scoped recovery seam. It is
+// retained for lightweight adapters; production wiring uses the selected
+// environment callback below.
+type WorktreeRecoveryAdmissionFunc func(ctx context.Context, taskID string) error
+
+// SelectedWorktreeRecoveryAdmissionFunc decides whether the already-selected
+// task environment may launch. The returned admission remains held through the
+// external workspace-start boundary and is released by the executor.
+type SelectedWorktreeRecoveryAdmissionFunc func(context.Context, worktree.RecoveryAdmissionRequest) (*worktree.RecoveryAdmission, error)
+
 // PrimarySessionSetFunc is called when the first session for a task is marked
 // primary. This lets the orchestrator publish a task.updated event so the
 // frontend receives the primary_session_id.
@@ -881,6 +954,7 @@ type Executor struct {
 	gitCredentialBrokerURL         string
 	githubCredentialPolicyResolver TaskGitCredentialPolicyResolver
 	agentctlBinaryPath             string
+	hostGitHubCredentialProbe      hostGitHubCredentialProbe
 
 	// Configuration
 	retryLimit int
@@ -904,6 +978,11 @@ type Executor struct {
 	// Strict session-state callback used by operations that need to distinguish
 	// accepted writes from terminal/no-op races.
 	onSessionStateTransition SessionStateTransitionFunc
+
+	// Atomic bootstrap-failure callback used by the orchestrator to commit the
+	// typed error, FAILED state, and corresponding publication as one ownership
+	// decision.
+	onBootstrapFailureTransition BootstrapFailureTransitionFunc
 
 	// Callback for STARTING writes that carry full session-row changes. Set by
 	// the orchestrator so launch/resume/model-switch transitions serialize with
@@ -941,6 +1020,10 @@ type Executor struct {
 	onLaunchFailed LaunchFailedFunc
 	// Optional resolver for the mark-review-done recovery action.
 	launchFailureReviewEligibility LaunchFailureReviewEligibilityFunc
+	// Optional compatibility gate for legacy adapters.
+	worktreeRecoveryAdmission WorktreeRecoveryAdmissionFunc
+	// Selected environment gate used by production worktree recovery.
+	selectedWorktreeRecoveryAdmission SelectedWorktreeRecoveryAdmissionFunc
 
 	// Callback when the first session for a task is marked primary.
 	onPrimarySessionSet PrimarySessionSetFunc
@@ -1147,13 +1230,14 @@ type ShellPreferenceProvider interface {
 // NewExecutor creates a new executor
 func NewExecutor(agentManager AgentManagerClient, repo executorStore, log *logger.Logger, cfg ExecutorConfig) *Executor {
 	return &Executor{
-		agentManager: agentManager,
-		repo:         repo,
-		secretStore:  cfg.SecretStore,
-		shellPrefs:   cfg.ShellPrefs,
-		logger:       log.WithFields(zap.String("component", "executor")),
-		retryLimit:   3,
-		retryDelay:   5 * time.Second,
+		agentManager:              agentManager,
+		repo:                      repo,
+		secretStore:               cfg.SecretStore,
+		shellPrefs:                cfg.ShellPrefs,
+		logger:                    log.WithFields(zap.String("component", "executor")),
+		retryLimit:                3,
+		retryDelay:                5 * time.Second,
+		hostGitHubCredentialProbe: runHostGitHubCredentialProbe,
 	}
 }
 
@@ -1189,6 +1273,18 @@ func (e *Executor) SetOnEarlyLaunchTaskStateReconcile(fn TaskRuntimeStateReconci
 	e.onEarlyLaunchTaskStateReconcile = fn
 }
 
+// SetWorktreeRecoveryAdmission installs the task-scoped linked-worktree
+// admission gate. Nil disables the optional integration for legacy callers.
+func (e *Executor) SetWorktreeRecoveryAdmission(fn WorktreeRecoveryAdmissionFunc) {
+	e.worktreeRecoveryAdmission = fn
+}
+
+// SetSelectedWorktreeRecoveryAdmission installs the environment-scoped
+// recovery gate used after executor and workspace selection.
+func (e *Executor) SetSelectedWorktreeRecoveryAdmission(fn SelectedWorktreeRecoveryAdmissionFunc) {
+	e.selectedWorktreeRecoveryAdmission = fn
+}
+
 // SetOnSessionStateChange sets a callback for session state changes.
 // This allows the orchestrator to route state changes through updateTaskSessionState
 // which updates the DB and publishes WebSocket events to the frontend.
@@ -1200,6 +1296,12 @@ func (e *Executor) SetOnSessionStateChange(fn SessionStateChangeFunc) {
 // detailed lifecycle operations.
 func (e *Executor) SetOnSessionStateTransition(fn SessionStateTransitionFunc) {
 	e.onSessionStateTransition = fn
+}
+
+// SetOnBootstrapFailureTransition wires the atomic bootstrap-failure commit
+// used by asynchronous agent-process start failures.
+func (e *Executor) SetOnBootstrapFailureTransition(fn BootstrapFailureTransitionFunc) {
+	e.onBootstrapFailureTransition = fn
 }
 
 // SetOnSessionStarting sets a callback for full session-row STARTING updates.

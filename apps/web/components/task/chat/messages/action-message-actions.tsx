@@ -280,7 +280,6 @@ function DeleteActionButton({
       taskTitle={messageTask?.title}
       taskId={taskId ?? undefined}
       executorType={messageTask?.primaryExecutorType}
-      requireDiscardConsent={messageTask?.primaryExecutorType == null}
       isDeleting={state === "busy"}
       onConfirm={(opts) => void handleDeleteConfirm(opts)}
     />

@@ -71,6 +71,8 @@ interface ComboboxProps {
   triggerId?: string;
   /** Ref for consumers that anchor a local confirmation to this trigger. */
   triggerRef?: Ref<HTMLButtonElement>;
+  /** Notifies consumers when the popover opens or closes. */
+  onOpenChange?: (open: boolean) => void;
 }
 
 function TriggerLabel({
@@ -224,6 +226,49 @@ function ComboboxTrigger({
     </PopoverTrigger>
   );
 }
+function handleComboboxOpenChange(
+  next: boolean,
+  value: string,
+  setOpen: (open: boolean) => void,
+  setHighlighted: (value: string) => void,
+  onOpenChange?: (open: boolean) => void,
+) {
+  setOpen(next);
+  if (next) setHighlighted(value);
+  onOpenChange?.(next);
+}
+
+function selectComboboxOption({
+  selectedValue,
+  currentValue,
+  onValueChange,
+  setOpen,
+  onOpenChange,
+}: {
+  selectedValue: string;
+  currentValue: string;
+  onValueChange: (value: string) => void;
+  setOpen: (open: boolean) => void;
+  onOpenChange?: (open: boolean) => void;
+}) {
+  const nextValue = selectedValue === currentValue ? "" : selectedValue;
+  onValueChange(nextValue);
+  setOpen(false);
+  onOpenChange?.(false);
+}
+
+function ComboboxHeader({
+  dropdownLabel,
+  headerAction,
+}: Pick<ComboboxProps, "dropdownLabel" | "headerAction">) {
+  if (!dropdownLabel && !headerAction) return null;
+  return (
+    <div className="text-muted-foreground flex items-center justify-between gap-2 border-b px-2 py-1 text-xs">
+      <span>{dropdownLabel}</span>
+      {headerAction}
+    </div>
+  );
+}
 
 export const Combobox = memo(function Combobox({
   options,
@@ -250,6 +295,7 @@ export const Combobox = memo(function Combobox({
   touchTarget = false,
   triggerId,
   triggerRef,
+  onOpenChange,
 }: ComboboxProps) {
   const [open, setOpen] = useState(false);
   const portalContainer = useTaskCreateDialogPopoverContainer();
@@ -259,10 +305,9 @@ export const Combobox = memo(function Combobox({
   return (
     <Popover
       open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (next) setHighlighted(value);
-      }}
+      onOpenChange={(next) =>
+        handleComboboxOpenChange(next, value, setOpen, setHighlighted, onOpenChange)
+      }
     >
       <ComboboxTrigger
         options={options}
@@ -296,12 +341,7 @@ export const Combobox = memo(function Combobox({
           filter={filter}
           data-testid={dropdownTestId}
         >
-          {dropdownLabel || headerAction ? (
-            <div className="text-muted-foreground flex items-center justify-between gap-2 px-2 py-1 text-xs border-b">
-              <span>{dropdownLabel}</span>
-              {headerAction}
-            </div>
-          ) : null}
+          <ComboboxHeader dropdownLabel={dropdownLabel} headerAction={headerAction} />
           {showSearch && (
             <CommandInput
               placeholder={searchPlaceholder}
@@ -314,10 +354,15 @@ export const Combobox = memo(function Combobox({
               options={options}
               value={value}
               touchTarget={touchTarget}
-              onSelect={(v) => {
-                onValueChange(v === value ? "" : v);
-                setOpen(false);
-              }}
+              onSelect={(v) =>
+                selectComboboxOption({
+                  selectedValue: v,
+                  currentValue: value,
+                  onValueChange,
+                  setOpen,
+                  onOpenChange,
+                })
+              }
             />
           </CommandList>
         </Command>

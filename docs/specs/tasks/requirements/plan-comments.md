@@ -2,6 +2,7 @@
 status: active
 system: tasks
 created: 2026-09-02
+updated: 2026-09-13
 owners:
   - kandev
 ---
@@ -17,6 +18,9 @@ shows one shared pending set on the plan and at every session composer, then
 chooses a destination only when the user sends a message or selects **Run**.
 
 ## Terminology
+
+- **Open comment draft:** Text being entered before Add or Update succeeds;
+  it is not yet part of the persisted pending set.
 
 - **Pending plan comment:** An unsent comment anchored to selected text in the
   task's current plan.
@@ -66,6 +70,20 @@ unsent feedback.
   64 KiB and its selected text to 256 KiB, measured as UTF-8 bytes. A task plan
   shall hold at most 100 pending comments and 1 MiB of combined bodies and
   selected text. An over-limit mutation shall leave the previous snapshot intact.
+
+- **AC-TASKS-PLAN-COMMENTS-001.9:** While adding or editing a comment on the
+  same current plan, switching away from the browser and returning shall
+  preserve the open editor, entered text, and selected plan text. Background
+  refresh and reconnect shall preserve that draft during pending, successful,
+  and failed reads on desktop and phone. Plan content editing shall pause during
+  the read and resume on settlement; the open comment remains editable.
+- **AC-TASKS-PLAN-COMMENTS-001.10:** Preserving an open comment draft shall
+  not automatically persist or deliver it. Add, Update, and Run remain explicit
+  actions; failed mutations shall preserve the entered text for retry.
+- **AC-TASKS-PLAN-COMMENTS-001.11:** Initial plan loading shall not display
+  another task's plan or draft. A task change, confirmed plan deletion, or
+  replacement of the current plan shall clear the outgoing transient editor
+  so its draft cannot be applied to the new context.
 
 ### REQ-TASKS-PLAN-COMMENTS-002: Selected-session composer delivery
 
@@ -145,10 +163,11 @@ must move to task ownership without another comment-loss window.
 
 #### Acceptance criteria
 
-- **AC-TASKS-PLAN-COMMENTS-004.1:** When a browser contains session-scoped
-  pending plan comments for sessions belonging to the open task, Kandev shall
-  migrate those comments to the task's current plan before enabling a delivery
-  that could omit them.
+- **AC-TASKS-PLAN-COMMENTS-004.1:** When Kandev identifies session-scoped
+  pending plan comments belonging to the open task, it shall migrate those
+  comments to the task's current plan before accepting a composer Send that
+  would omit them. Discovering or recovering comments shall not itself deliver
+  a prompt or consume pending feedback.
 - **AC-TASKS-PLAN-COMMENTS-004.2:** Migration shall retain each comment's
   client-generated identifier. Retrying the same identifier and content shall
   be idempotent; distinct identifiers shall remain distinct even when their
@@ -157,11 +176,64 @@ must move to task ownership without another comment-loss window.
   record from browser storage only after backend persistence is acknowledged.
   Failed plan comments and every non-plan comment in the same session record
   shall remain unchanged.
-- **AC-TASKS-PLAN-COMMENTS-004.4:** A migration failure shall be visible and
-  retryable. It shall not silently discard a draft or send a message without
-  the legacy plan comments that the composer represented.
+- **AC-TASKS-PLAN-COMMENTS-004.4:** A recovery failure shall show comment-specific
+  feedback only when at least one identified legacy comment for the open task
+  still needs recovery and either automatic retries have been exhausted or
+  user action is required. The feedback shall offer retry where retry can help.
+  Background discovery and transient recovery attempts shall not display a
+  restoration warning. Failed recovery shall preserve both the saved comments
+  and any attempted composer message.
+- **AC-TASKS-PLAN-COMMENTS-004.5:** When no unresolved legacy comments have been
+  identified for the open task and a composer represents no pending plan
+  comments, ordinary Send shall remain available despite pending or failed
+  comment discovery, plan lookup, or comment refresh. This applies to tasks
+  with a plan, without a plan, and before the presence of a plan is known.
+  Comments belonging to another task shall not block that Send or produce a
+  restoration warning on the open task. Ordinary connection and session-input
+  constraints still apply.
+- **AC-TASKS-PLAN-COMMENTS-004.6:** Transient discovery and recovery failures
+  shall retry automatically with bounded request frequency while the task is
+  open and connectivity permits progress. Returning to the foreground or
+  reconnecting shall resume recovery without requiring a reload or Retry
+  action. Success shall clear obsolete recovery feedback and restrictions;
+  recovery shall never automatically submit a previously blocked message.
+- **AC-TASKS-PLAN-COMMENTS-004.7:** Ordinary Send shall remain blocked while at
+  least one identified legacy comment for its task would be omitted, including
+  a mixed set of recovered and unrecovered comments. Run of an already
+  persisted comment shall depend only on that selected comment and its eligible
+  primary destination; unrelated unrecovered comments shall remain pending.
+  A background read failure shall not remove visible persisted comments from
+  a submitted snapshot or bypass their acceptance checks.
+- **AC-TASKS-PLAN-COMMENTS-004.8:** Desktop, phone, structured chat, and
+  passthrough composers shall apply the same recovery and delivery rules.
+  Recovery feedback requiring action shall remain inline with the affected
+  comment context, preserve the composer draft and focus, and expose a
+  touch-accessible action on phones. Task or plan changes shall not apply a
+  previous context's failure, cleanup, or retry to the new context.
+
+## Recovery compatibility
+
+Discovery is background work, not an implicit comment selection. Before any
+legacy feedback is identified for the task, Send uses the visible persisted
+snapshot under `REQ-TASKS-PLAN-COMMENTS-002`. Discovery that finishes later
+preserves and exposes the recovered feedback for a subsequent explicit action;
+it does not amend or resend an earlier prompt. This narrows the former blanket
+migration gate without changing task ownership or backend acceptance semantics.
+
+## Implementation plans
+
+- [Plan comment foreground preservation](../../../plans/plan-comment-foreground-preservation/plan.md)
+
+- [Task-owned plan comments](../../../plans/task-owned-plan-comments/plan.md)
+  records the original delivery.
+- [Plan comment recovery](../../../plans/plan-comment-recovery/plan.md)
+  implements the recovery and delivery refinements in requirement 004.
 
 ## Out of scope
+
+- Restoring an open, unsubmitted comment editor after page reload, task
+  navigation, or explicit dismissal; synchronizing that transient draft to
+  another browser or device.
 
 - Changing the task-session ownership of diff, file, pull-request,
   walkthrough, or agent-message comments.

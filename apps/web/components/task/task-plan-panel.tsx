@@ -187,7 +187,7 @@ export const TaskPlanPanel = memo(function TaskPlanPanel({
     title: state.plan?.title,
   });
 
-  if (state.isLoading) {
+  if (state.isLoading && !state.plan) {
     return (
       <div className="flex h-full items-center justify-center text-muted-foreground">
         <IconLoader2 className="h-5 w-5 animate-spin mr-2" />
@@ -260,6 +260,7 @@ function PlanPanelContent({
           key={`${taskId}-${state.editorKey}`}
           taskId={taskId}
           value={state.draftContent}
+          readOnly={state.isLoading}
           onChange={state.setDraftContent}
           placeholder={t("task:startTypingYourPlan")}
           mobileBottomOffset={mobileBottomOffset}
@@ -309,10 +310,8 @@ function removeCommentMark(editor: Editor | null, commentId: string) {
 }
 
 function planCommentRunDisabledReason(
-  migrationReady: boolean,
   reason: ReturnType<typeof resolvePlanCommentRunAvailability>["reason"],
 ) {
-  if (!migrationReady) return t("task:planCommentMigrationPending");
   if (reason === "no-primary-session") return t("task:noPrimarySessionForPlanComment");
   if (reason === "primary-session-unavailable") {
     return t("task:primarySessionUnavailableForPlanComment");
@@ -434,10 +433,7 @@ function PlanSelectionPopoverWrapper({
   const runUnavailableReason = useAppStore(
     (state) => resolvePlanCommentRunAvailability(state, taskId).reason,
   );
-  const migrationReady = useAppStore((state) =>
-    taskId ? state.taskPlans.commentsMigrationStatusByTaskId[taskId] === "complete" : false,
-  );
-  const runDisabledReason = planCommentRunDisabledReason(migrationReady, runUnavailableReason);
+  const runDisabledReason = planCommentRunDisabledReason(runUnavailableReason);
   const { handleAdd, handleAddAndRun, runError } = usePlanSelectionCommentActions({
     textSelection,
     commentState,

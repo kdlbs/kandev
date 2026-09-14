@@ -22,6 +22,7 @@ import type {
   Agent,
   AvailableAgent,
   ForegroundActivity,
+  ReorderBand,
   TaskPendingAction,
   TaskPriority,
   TaskSessionState,
@@ -35,14 +36,14 @@ import type {
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { GitEventPayload } from "@/lib/types/git-events";
 import type {
+  GitHubPRDiscoveryHealthUpdate,
   GitHubRateLimitUpdate,
   TaskCIAutomationOptions,
   TaskPR,
   TaskPRDeletedEvent,
 } from "@/lib/types/github";
-import type { TaskMR } from "@/lib/types/gitlab";
+import type { TaskMR, TaskMRDeletedEvent, TaskMRAutomationOptions } from "@/lib/types/gitlab";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
-import type { TaskMRAutomationOptions } from "@/lib/types/gitlab";
 import type { AgentProfileRecentUseApiRecord } from "@/lib/types/http-agent-profile-recent-use";
 import type { SystemMetricsSnapshot, StorageAnalysisUpdatedPayload } from "./system";
 import type { AgentRuntimeAvailability } from "./agent-runtime";
@@ -78,6 +79,14 @@ export type KanbanUpdatePayload = {
     description?: string;
     state?: TaskState;
   }>;
+};
+
+export type TaskReorderedPayload = {
+  workspace_id?: string;
+  workflow_step_id: string;
+  band: ReorderBand;
+  revision: number;
+  tasks: Array<{ id: string; position: number }>;
 };
 
 export type TaskEventPayload = {
@@ -252,7 +261,7 @@ export type RepositorySetPayload = {
   workspace_id: string;
   name?: string;
   description?: string;
-  repositories?: Array<{ repository_id: string; position: number }>;
+  repositories?: Array<{ repository_id: string; position: number; base_branch?: string }>;
   created_at?: string;
   updated_at?: string;
 };
@@ -429,6 +438,7 @@ export type BackendMessageMap = SessionBackendMessageMap &
   import("@/lib/types/http").WalkthroughBackendMessageMap &
   import("@/lib/types/review").ReviewBackendMessageMap & {
     "kanban.update": BackendMessage<"kanban.update", KanbanUpdatePayload>;
+    "task.reordered": BackendMessage<"task.reordered", TaskReorderedPayload>;
     "task.created": BackendMessage<"task.created", TaskEventPayload>;
     "task.updated": BackendMessage<"task.updated", TaskEventPayload>;
     "task.deleted": BackendMessage<"task.deleted", TaskEventPayload>;
@@ -562,10 +572,15 @@ export type BackendMessageMap = SessionBackendMessageMap &
       TaskCIAutomationOptions
     >;
     "github.rate_limit.updated": BackendMessage<"github.rate_limit.updated", GitHubRateLimitUpdate>;
+    "github.pr_discovery_health.updated": BackendMessage<
+      "github.pr_discovery_health.updated",
+      GitHubPRDiscoveryHealthUpdate
+    >;
     "gitlab.task_mr.updated": BackendMessage<
       "gitlab.task_mr.updated",
       TaskMR & { workspace_id: string }
     >;
+    "gitlab.task_mr.deleted": BackendMessage<"gitlab.task_mr.deleted", TaskMRDeletedEvent>;
     "gitlab.task_mr_options.updated": BackendMessage<
       "gitlab.task_mr_options.updated",
       TaskMRAutomationOptions

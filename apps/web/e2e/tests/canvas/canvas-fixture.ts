@@ -4,6 +4,7 @@ import { expect, type Page } from "@playwright/test";
 import type { BackendContext } from "../../fixtures/backend";
 import type { SeedData } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
+import { waitForSessionDone } from "../../helpers/session";
 import { SessionPage } from "../../pages/session-page";
 
 export class CanvasFixtureUnavailable extends Error {
@@ -25,6 +26,17 @@ export type CanvasRecord = {
   pending_release?: {
     id: string;
     validation_status?: string;
+  };
+};
+
+export type CanvasReleaseRecord = {
+  id: string;
+  validation_status?: string;
+  permissions?: {
+    reads?: string[];
+    writes?: string[];
+    events?: string[];
+    shared_state?: boolean;
   };
 };
 
@@ -125,7 +137,22 @@ export async function getCanvas(
   return (await response.json()) as CanvasRecord;
 }
 
-async function waitForSessionWorkspace(
+export async function listCanvasReleases(
+  apiClient: ApiClient,
+  canvasId: string,
+): Promise<CanvasReleaseRecord[]> {
+  const response = await apiClient.rawRequest(
+    "GET",
+    `/api/v1/canvases/${encodeURIComponent(canvasId)}/releases`,
+  );
+  if (!response.ok) {
+    throw new Error(`Canvas release lookup failed (${response.status}).`);
+  }
+  const body = (await response.json()) as { releases?: CanvasReleaseRecord[] };
+  return body.releases ?? [];
+}
+
+export async function waitForSessionWorkspace(
   apiClient: ApiClient,
   taskId: string,
   sessionId: string,
@@ -149,24 +176,15 @@ async function waitForSessionWorkspace(
   return path.resolve(workspacePath);
 }
 
-function canvasManifest(canvas: CanvasRecord): string {
-  const compactId = canvas.id.replaceAll("-", "").slice(0, 12);
+export type CanvasSourceOptions = {
+  noPermissions?: boolean;
+  minimalPermissions?: boolean;
+};
+
+function canvasCapabilities(options?: CanvasSourceOptions): string[] {
+  if (options?.noPermissions) return [];
+  if (options?.minimalPermissions) return ["  api_read:", "    - tasks", "    - workflows"];
   return [
-    `id: "canvas-${compactId}"`,
-    "api_version: 2",
-    'version: "1.0.0"',
-    'display_name: "E2E Plugin Canvas"',
-    'description: "Canvas fixture for Playwright acceptance coverage."',
-    'author: "Kandev E2E"',
-    "ui:",
-    "  web_apps:",
-    "    - key: main",
-    '      title: "E2E Plugin Canvas"',
-    "      entry: index.html",
-    "      placements:",
-    "        - task-canvas",
-    "        - workspace-canvas",
-    "capabilities:",
     "  api_read:",
     "    - tasks",
     "    - workflows",
@@ -176,6 +194,35 @@ function canvasManifest(canvas: CanvasRecord): string {
     "  events:",
     "    - task.updated",
     "  state: true",
+  ];
+}
+
+function canvasManifest(canvas: CanvasRecord, options?: CanvasSourceOptions): string {
+  const compactId = canvas.id.replaceAll("-", "").slice(0, 12);
+  const capabilities = canvasCapabilities(options);
+  return [
+    `id: "canvas-${compactId}"`,
+    "api_version: 2",
+    'version: "1.0.0"',
+    'display_name: "E2E Plugin Canvas"',
+    'description: "Canvas fixture for Playwright acceptance coverage."',
+    'author: "Kandev E2E"',
+    'min_kandev_version: "0.94.0"',
+    "distribution:",
+    "  schema_version: 1",
+    '  kind: "canvas"',
+    '  license: "MIT"',
+    '  source_mode: "static"',
+    "ui:",
+    "  web_apps:",
+    "    - key: main",
+    '      title: "E2E Plugin Canvas"',
+    "      entry: index.html",
+    "      placements:",
+    "        - task-canvas",
+    "        - workspace-canvas",
+    "capabilities:",
+    ...capabilities,
     "",
   ].join("\n");
 }
@@ -370,10 +417,14 @@ function canvasFixtureScript(canvas: CanvasRecord): string {
 })();`;
 }
 
-export function writeCanvasSource(workspacePath: string, canvas: CanvasRecord): void {
+export function writeCanvasSource(
+  workspacePath: string,
+  canvas: CanvasRecord,
+  options?: CanvasSourceOptions,
+): void {
   const sourceDirectory = path.join(workspacePath, ".kandev", "canvases", canvas.id);
   fs.mkdirSync(sourceDirectory, { recursive: true });
-  fs.writeFileSync(path.join(sourceDirectory, "manifest.yaml"), canvasManifest(canvas));
+  fs.writeFileSync(path.join(sourceDirectory, "manifest.yaml"), canvasManifest(canvas, options));
   fs.writeFileSync(
     path.join(sourceDirectory, "index.html"),
     [
@@ -419,6 +470,7 @@ export async function seedTaskCanvas(
   apiClient: ApiClient,
   seedData: SeedData,
   useMobileSubmit = false,
+  sourceOptions?: CanvasSourceOptions,
 ): Promise<SeededCanvas> {
   const title = "E2E Plugin Canvas";
   const script = [
@@ -457,6 +509,7 @@ export async function seedTaskCanvas(
     session,
     canvas,
     useMobileSubmit,
+    sourceOptions,
   });
 
   return {
@@ -500,6 +553,7 @@ type PublishTaskCanvasOptions = {
   session: SessionPage;
   canvas: CanvasRecord;
   useMobileSubmit?: boolean;
+  sourceOptions?: CanvasSourceOptions;
 };
 
 export async function publishTaskCanvas({
@@ -509,9 +563,10 @@ export async function publishTaskCanvas({
   session,
   canvas,
   useMobileSubmit = false,
+  sourceOptions,
 }: PublishTaskCanvasOptions): Promise<CanvasRecord> {
   const workspacePath = await waitForSessionWorkspace(apiClient, taskId, taskSessionId);
-  writeCanvasSource(workspacePath, canvas);
+  writeCanvasSource(workspacePath, canvas, sourceOptions);
   const sourcePath = `.kandev/canvases/${canvas.id}`;
   const publishScript = `e2e:mcp:kandev:publish_canvas_kandev(${JSON.stringify({
     canvas_id: canvas.id,
@@ -540,6 +595,13 @@ export async function publishTaskCanvas({
     )
     .toBe(true);
   if (!publishedCanvas) throw new Error("The canvas publish response was empty.");
+  await waitForSessionDone(
+    apiClient,
+    taskId,
+    taskSessionId,
+    "The canvas publishing session did not finish before interaction coverage.",
+    45_000,
+  );
   return publishedCanvas;
 }
 

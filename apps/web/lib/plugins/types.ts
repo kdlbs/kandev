@@ -342,8 +342,8 @@ export type PluginTaskMenuContext = PluginSDK.PluginTaskMenuContext;
  * Registration accepted by `PluginRegistry.registerTaskMenuAction`:
  * contributes an item to the kanban card context/dropdown menu. Group
  * "edit" nests the item inside the card's `Edit` submenu; group "primary"
- * renders it as a flat, top-level menu item, positioned between the "Move
- * to"/"Send to workflow" submenus and the "Link" submenu.
+ * renders it as a flat, top-level menu item after the movement group and
+ * before the `Archive`/`Delete` removal group.
  */
 export type TaskMenuActionRegistration = PluginSDK.TaskMenuActionRegistration;
 

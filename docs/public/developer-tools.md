@@ -75,6 +75,19 @@ Closing a real chat tab permanently deletes its conversation, hidden backing tas
 
 If **Start chat** is disabled, select a profile and finish every repository/branch row. If a repository is missing, confirm that it belongs to the current workspace and refresh the repository configuration. Use a normal task when the result must remain visible on a board or become a reviewed PR.
 
+### Agent continuation goals
+
+Some ACP agents keep an explicit goal after a reply. When the selected task or Quick Chat session
+reports an active goal, Kandev shows a **Goal Active** chip above the composer. Select the chip, or
+focus it with the keyboard, to read the goal and its status. The details explain that the agent may
+continue automatically between replies. They do not provide a wakeup time or change the agent's
+goal.
+
+The chip remains visible while the provider reports the goal as active, including while the session
+is idle. Completion, clearing, pausing, blocking, or a usage limit removes it. On a phone, select
+the chip to open the details in a drawer. The drawer keeps long goal text inside its own scroll
+area.
+
 <details>
 <summary>Utility agents and configuration chat</summary>
 
@@ -119,12 +132,25 @@ Open **Settings > Prompts** (`/settings/prompts`) to add, edit, or delete reusab
 
 Type `@` in the task chat composer and select a prompt. The visible message keeps the `@name`; Kandev expands the prompt content into hidden system context for the agent. References are recognized only at the start of the text or after whitespace and must match the stored name. Prompt content can reference other saved prompts. Expansion stops at a depth of eight, skips cycles, and includes each prompt only once.
 
+In the new task form, the same completion inserts an editable `@name` chip.
+Select the chip to preview the saved prompt, or use its remove action to delete
+that occurrence. Task creation submits the visible alias text, so later prompt
+updates apply when the task launches. Unknown names and aliases in code spans or
+link destinations remain ordinary text.
+
+Kandev always seeds an editable built-in prompt named `create-canvas`. When
+canvases are enabled, the workspace canvas setup form references it as
+`@create-canvas`, so the task description stays short while the agent receives
+the canvas authoring workflow at launch. Editing the prompt changes later
+canvas tasks; a user prompt with the same name keeps its own content.
+
 Initial task and Quick Chat launches also expand known references when no workflow step is configured. The stored message and the prompt sent to the agent keep the same saved-prompt context.
 
 The Settings prompt editor also offers the same `@name` completion when you edit a saved prompt, a workflow prompt, a workflow step, an automation instruction, a quick action, or a provider watch. The prompt being edited is excluded from its own completion list, so selecting a reference cannot create a direct self-reference by accident. The same `@name` reference works in a workflow step's Prompt field and in a GitHub Review Watch's prompt; see [Saved prompt references in step prompts](workflow-tips.md#saved-prompt-references-in-step-prompts).
 
 Kandev seeds these built-ins:
 
+- `create-canvas`
 - `code-review`
 - `open-pr`
 - `merge-base`

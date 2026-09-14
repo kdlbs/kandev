@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { SessionPage } from "../../pages/session-page";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 import {
   createWorkflowAgentProfiles,
@@ -169,6 +170,93 @@ test.describe("Workflow session targeting", () => {
     expect(finalSessions.find((session) => session.id === lunaSessionId)?.state).toBe(
       "WAITING_FOR_INPUT",
     );
+  });
+
+  test("honors same-profile new sessions from the task topbar", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+    const { profileA } = await createWorkflowAgentProfiles(apiClient);
+    const workflow = await apiClient.createWorkflow(
+      seedData.workspaceId,
+      "Same Profile Topbar Session",
+    );
+    const source = await apiClient.createWorkflowStep(workflow.id, "Source", 0, {
+      agent_profile_id: profileA.id,
+      profile_session_end_policy: "park",
+    });
+    const destination = await apiClient.createWorkflowStep(workflow.id, "Destination", 1, {
+      agent_profile_id: profileA.id,
+      profile_session_start_policy: "new",
+      profile_session_end_policy: "park",
+    });
+    const marker = "same-profile-new-topbar";
+    await apiClient.updateWorkflowStep(destination.id, {
+      prompt: `e2e:message("${marker}")`,
+    });
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Same profile topbar session",
+      profileA.id,
+      {
+        workflow_id: workflow.id,
+        workflow_step_id: source.id,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    const sourceSessionId = await waitForWorkflowProfileSession(apiClient, task.id, profileA.id);
+
+    await testPage.goto(`/t/${task.id}`);
+    const session = new SessionPage(testPage);
+    await session.waitForLoad();
+    await session.moveToWorkflowStep({ id: destination.id, name: "Destination" });
+
+    let destinationSessionId = "";
+    await expect
+      .poll(
+        async () => {
+          const { sessions } = await apiClient.listTaskSessions(task.id);
+          const destinationSession = sessions.find(
+            (candidate) => candidate.id !== sourceSessionId && candidate.is_primary,
+          );
+          destinationSessionId = destinationSession?.id ?? "";
+          return destinationSessionId;
+        },
+        { timeout: 30_000, message: "same-profile topbar move did not create a primary session" },
+      )
+      .not.toBe("");
+
+    await expect
+      .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id, {
+        timeout: 15_000,
+      })
+      .toBe(destination.id);
+    await waitForAgentMarker(apiClient, destinationSessionId, marker);
+
+    const movedSessions = (await apiClient.listTaskSessions(task.id)).sessions;
+    expect(movedSessions).toHaveLength(2);
+    expect(movedSessions.find((candidate) => candidate.id === destinationSessionId)).toMatchObject({
+      agent_profile_id: profileA.id,
+      is_primary: true,
+    });
+    expect(movedSessions.find((candidate) => candidate.id === sourceSessionId)?.state).toBe(
+      "WAITING_FOR_INPUT",
+    );
+    await expect(session.activeChat()).toContainText(marker, { timeout: 15_000 });
+
+    await testPage.reload();
+    await session.waitForLoad();
+    const reloadedSessions = (await apiClient.listTaskSessions(task.id)).sessions;
+    expect(
+      reloadedSessions.find((candidate) => candidate.id === destinationSessionId),
+    ).toMatchObject({
+      agent_profile_id: profileA.id,
+      is_primary: true,
+    });
+    await expect(session.activeChat()).toContainText(marker, { timeout: 15_000 });
   });
 
   test("delivers a source-step target to its recorded conversation", async ({

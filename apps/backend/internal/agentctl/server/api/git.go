@@ -53,20 +53,38 @@ type GitPullRequest struct {
 }
 
 // GitPushRequest for POST /api/v1/git/push
+//
+// Remote and ExpectedBranch are optional. Remote is a configured remote name or
+// a remote URL that must resolve to one; ExpectedBranch is the branch the
+// caller believes it is publishing. Both are passed through untouched: this
+// surface performs no destination logic of its own.
 type GitPushRequest struct {
-	Force       bool   `json:"force"`
-	SetUpstream bool   `json:"set_upstream"`
-	Repo        string `json:"repo,omitempty"`
+	Force          bool   `json:"force"`
+	SetUpstream    bool   `json:"set_upstream"`
+	Repo           string `json:"repo,omitempty"`
+	Remote         string `json:"remote,omitempty"`
+	ExpectedBranch string `json:"expected_branch,omitempty"`
 }
 
 // GitPushPreflightRequest for POST /api/v1/git/push-preflight.
 type GitPushPreflightRequest struct {
-	Repo string `json:"repo,omitempty"`
+	Repo           string `json:"repo,omitempty"`
+	Remote         string `json:"remote,omitempty"`
+	ExpectedBranch string `json:"expected_branch,omitempty"`
 }
 
 // GitContributionRequest is shared by the managed contribution replacement
 // and provider-adoption endpoints.
 type GitContributionRequest struct {
+	ExpectedRemoteHead string `json:"expected_remote_head"`
+	Repo               string `json:"repo,omitempty"`
+}
+
+// GitContributionHistoryExplanationRequest describes the selected local and
+// published heads for a read-only history observation.
+type GitContributionHistoryExplanationRequest struct {
+	Branch             string `json:"branch"`
+	ExpectedLocalHead  string `json:"expected_local_head"`
 	ExpectedRemoteHead string `json:"expected_remote_head"`
 	Repo               string `json:"repo,omitempty"`
 }
@@ -220,7 +238,12 @@ func (s *Server) handleGitPush(c *gin.Context) {
 	if gitOp == nil {
 		return
 	}
-	result, err := gitOp.Push(c.Request.Context(), req.Force, req.SetUpstream)
+	result, err := gitOp.Push(c.Request.Context(), process.PushOptions{
+		Force:          req.Force,
+		SetUpstream:    req.SetUpstream,
+		Remote:         req.Remote,
+		ExpectedBranch: req.ExpectedBranch,
+	})
 	if err != nil {
 		s.handleGitError(c, "push", err)
 		return
@@ -241,7 +264,10 @@ func (s *Server) handleGitPushPreflight(c *gin.Context) {
 	if gitOp == nil {
 		return
 	}
-	result, err := gitOp.PushPreflight(c.Request.Context())
+	result, err := gitOp.PushPreflight(c.Request.Context(), process.PushOptions{
+		Remote:         req.Remote,
+		ExpectedBranch: req.ExpectedBranch,
+	})
 	if err != nil {
 		s.handleGitError(c, "push preflight", err)
 		return
@@ -259,6 +285,43 @@ func (s *Server) handleGitUseContribution(c *gin.Context) {
 	s.handleGitContribution(c, "use_remote_contribution", func(gitOp *process.GitOperator, expected string) (*process.GitOperationResult, error) {
 		return gitOp.UseRemoteContribution(c.Request.Context(), expected)
 	})
+}
+
+func (s *Server) handleGitContributionHistoryExplanation(c *gin.Context) {
+	var req GitContributionHistoryExplanationRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, process.GitOperationResult{
+			Success: false, Operation: "contribution_history_explanation", Error: "invalid request: " + err.Error(),
+		})
+		return
+	}
+	for _, required := range []struct {
+		name  string
+		value string
+	}{
+		{name: "branch", value: req.Branch},
+		{name: "expected_local_head", value: req.ExpectedLocalHead},
+		{name: "expected_remote_head", value: req.ExpectedRemoteHead},
+	} {
+		if required.value == "" {
+			c.JSON(http.StatusBadRequest, process.GitOperationResult{
+				Success: false, Operation: "contribution_history_explanation", Error: required.name + " is required",
+			})
+			return
+		}
+	}
+
+	gitOp := s.gitOpForRepo(c, "contribution_history_explanation", req.Repo)
+	if gitOp == nil {
+		return
+	}
+	result, err := gitOp.ExplainContributionHistory(
+		c.Request.Context(), req.Branch, req.ExpectedLocalHead, req.ExpectedRemoteHead)
+	if err != nil {
+		s.handleGitError(c, "contribution_history_explanation", err)
+		return
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 func (s *Server) handleGitContribution(c *gin.Context, operation string, action func(*process.GitOperator, string) (*process.GitOperationResult, error)) {
@@ -1460,6 +1523,9 @@ func (s *Server) handleGitStatusMulti(c *gin.Context) {
 		subpaths = []string{""}
 	}
 	fresh := c.Query("fresh") == queryParamTrue
+	if fresh {
+		s.procMgr.RetryUnavailableComparisonTargets()
+	}
 	// Parallel fan-out: fresh=true skips the cache, so serial scales linearly and would blow the 2s subscribe timeout for multi-repo workspaces.
 	result := MultiRepoGitStatusResult{Success: true, Repos: make([]PerRepoGitStatus, len(subpaths))}
 	ctx := c.Request.Context()
@@ -1553,7 +1619,11 @@ func (s *Server) handleGitStatus(c *gin.Context) {
 		return
 	}
 
-	status, err := wt.GetGitStatus(c.Request.Context(), c.Query("fresh") == queryParamTrue)
+	fresh := c.Query("fresh") == queryParamTrue
+	if fresh {
+		s.procMgr.RetryUnavailableComparisonTargets()
+	}
+	status, err := wt.GetGitStatus(c.Request.Context(), fresh)
 	if err != nil {
 		s.logger.Error("git status failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, GitStatusResult{

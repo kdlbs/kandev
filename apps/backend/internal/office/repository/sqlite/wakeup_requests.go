@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jmoiron/sqlx"
 )
 
 // Wakeup request status constants — kept in sync with the spec's
@@ -49,6 +52,11 @@ type WakeupRequest struct {
 	RequestedAt    time.Time      `db:"requested_at"`
 	ClaimedAt      sql.NullTime   `db:"claimed_at"`
 	FinishedAt     sql.NullTime   `db:"finished_at"`
+	// CausationID is copied from the routine fire that produced this
+	// wake, or minted here when the wake has no routine origin
+	// (REQ-OFFICE-LOOP-LIVENESS-002). "" for rows written before this
+	// feature or for a wake with no identifiable origin.
+	CausationID string `db:"causation_id"`
 }
 
 // CreateWakeupRequest inserts a new wakeup-request row. When
@@ -85,12 +93,12 @@ func (r *Repository) CreateWakeupRequest(ctx context.Context, req *WakeupRequest
 		INSERT INTO agent_wakeup_requests (
 			id, agent_profile_id, source, reason, payload, status,
 			coalesced_count, idempotency_key, run_id,
-			requested_at, claimed_at, finished_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			requested_at, claimed_at, finished_at, causation_id
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`),
 		req.ID, req.AgentProfileID, req.Source, req.Reason, req.Payload, req.Status,
 		req.CoalescedCount, req.IdempotencyKey, req.RunID,
-		req.RequestedAt, req.ClaimedAt, req.FinishedAt,
+		req.RequestedAt, req.ClaimedAt, req.FinishedAt, req.CausationID,
 	)
 	if err != nil && isUniqueConstraintErr(err) {
 		return fmt.Errorf("%w: %v", ErrWakeupIdempotencyConflict, err)
@@ -105,7 +113,7 @@ func (r *Repository) GetWakeupRequest(ctx context.Context, id string) (*WakeupRe
 	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
 		SELECT id, agent_profile_id, source, reason, payload, status,
 		       coalesced_count, idempotency_key, run_id,
-		       requested_at, claimed_at, finished_at
+		       requested_at, claimed_at, finished_at, causation_id
 		FROM agent_wakeup_requests
 		WHERE id = ?
 	`), id).StructScan(&row)
@@ -125,7 +133,7 @@ func (r *Repository) ListQueuedWakeupRequestsForAgent(
 	err := r.ro.SelectContext(ctx, &rows, r.ro.Rebind(`
 		SELECT id, agent_profile_id, source, reason, payload, status,
 		       coalesced_count, idempotency_key, run_id,
-		       requested_at, claimed_at, finished_at
+		       requested_at, claimed_at, finished_at, causation_id
 		FROM agent_wakeup_requests
 		WHERE agent_profile_id = ? AND status = ?
 		ORDER BY requested_at ASC
@@ -227,14 +235,7 @@ func (r *Repository) PromoteRunAndCoalesceWakeupIfQueued(
 	`), runID); err != nil {
 		return false, err
 	}
-	if _, err := tx.ExecContext(ctx, tx.Rebind(`
-		UPDATE runs
-		SET context_snapshot = json_patch(
-			COALESCE(NULLIF(context_snapshot, ''), '{}'),
-			(SELECT payload FROM agent_wakeup_requests WHERE id = ?)
-		)
-		WHERE id = ?
-	`), requestID, runID); err != nil {
+	if err := mergeWakeupPayloadIntoRunSnapshotWith(ctx, tx, requestID, runID); err != nil {
 		return false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -254,18 +255,46 @@ func (r *Repository) bumpRunCoalescedCount(ctx context.Context, runID string) er
 }
 
 // mergeWakeupPayloadIntoRunSnapshot merges the wakeup request's payload
-// into the target run's context_snapshot via SQLite's json_patch (top-
-// level merge: keys from the request payload overwrite same-named keys
-// already on the snapshot). When the snapshot is empty / NULL it
-// initialises to "{}" first so the patch lands on a valid object.
+// into the target run's context_snapshot. Delegates to
+// mergeWakeupPayloadIntoRunSnapshotWith on r.db — the non-transactional
+// merge site; PromoteRunAndCoalesceWakeupIfQueued calls the same helper on
+// its own tx instead of duplicating the SQL, so there is exactly one
+// json_patch call site for both merge entry points.
 func (r *Repository) mergeWakeupPayloadIntoRunSnapshot(
 	ctx context.Context, requestID, runID string,
 ) error {
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	return mergeWakeupPayloadIntoRunSnapshotWith(ctx, r.db, requestID, runID)
+}
+
+// mergeWakeupPayloadIntoRunSnapshotWith merges the wakeup request's
+// payload into the target run's context_snapshot via SQLite's json_patch
+// (top-level merge: keys from the request payload overwrite same-named
+// keys already on the snapshot). When the snapshot is empty / NULL it
+// initialises to "{}" first so the patch lands on a valid object.
+//
+// The three routine catch-up gap-summary keys are stripped from the
+// incoming payload before the patch via json_remove: a coalesced or
+// promoted wakeup request never adds, changes, or removes the gap
+// statement an existing run's agent already carries
+// (AC-OFFICE-ROUTINE-CATCHUP-002.10) — each run's gap belongs only to the
+// claim that created it. json_remove of an absent key is a no-op in
+// SQLite, so this is byte-for-byte safe for every non-routine wakeup
+// source, none of which writes these keys.
+//
+// exec is r.db for the non-transactional caller or a *sqlx.Tx for the
+// transactional one — sqlx.ExtContext (which both satisfy) already
+// includes Rebind via its embedded binder interface.
+func mergeWakeupPayloadIntoRunSnapshotWith(
+	ctx context.Context, exec sqlx.ExtContext, requestID, runID string,
+) error {
+	_, err := exec.ExecContext(ctx, exec.Rebind(`
 		UPDATE runs
 		SET context_snapshot = json_patch(
 			COALESCE(NULLIF(context_snapshot, ''), '{}'),
-			(SELECT payload FROM agent_wakeup_requests WHERE id = ?)
+			json_remove(
+				(SELECT payload FROM agent_wakeup_requests WHERE id = ?),
+				'$.missed_ticks', '$.missed_since', '$.missed_truncated'
+			)
 		)
 		WHERE id = ?
 	`), requestID, runID)
@@ -309,14 +338,20 @@ func (r *Repository) MarkWakeupRequestFailed(ctx context.Context, id, reason str
 	return err
 }
 
-// isUniqueConstraintErr returns true when err looks like a SQLite
-// UNIQUE constraint violation. Driver-specific error inspection would
-// be cleaner but the go-sqlite3 driver's typed error doesn't surface
-// outside the package; matching on the prefix is the documented work-
-// around used elsewhere in the codebase.
+// isUniqueConstraintErr returns true when err is a UNIQUE constraint
+// violation, on either supported dialect. This package's SQLite driver
+// doesn't surface a typed error outside the package, so that side still
+// matches on the documented message prefix; pgx exposes a typed SQLSTATE
+// 23505 error for PostgreSQL. See isSlugUniqueConstraintErr
+// (office/skills/system_sync.go) for the same pattern applied to a single
+// named constraint.
 func isUniqueConstraintErr(err error) bool {
 	if err == nil {
 		return false
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		return pgErr.Code == "23505"
 	}
 	msg := err.Error()
 	return strings.Contains(msg, "UNIQUE constraint failed") ||

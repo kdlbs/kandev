@@ -16,6 +16,7 @@ import (
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
@@ -515,6 +516,14 @@ func (s *Service) handleAgentBootReady(ctx context.Context, data watcher.AgentEv
 			zap.String("session_id", data.SessionID))
 		return
 	}
+	if !s.resumeAttemptAllowsExecution(data.SessionID, data.AgentExecutionID, data.AttemptID) {
+		s.logger.Debug("ignoring agent.boot_ready from a stale resume attempt",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID),
+			zap.String("attempt_id", data.AttemptID))
+		return
+	}
 
 	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
 	if err != nil {
@@ -725,6 +734,14 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 			lock.Unlock()
 		}
 	}()
+	if !s.resumeAttemptAllowsExecution(data.SessionID, data.AgentExecutionID, data.AttemptID) {
+		s.logger.Debug("ignoring agent.ready from a stale resume attempt",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID),
+			zap.String("attempt_id", data.AttemptID))
+		return
+	}
 	waitedForReservation := false
 	for {
 		for s.isCancelInFlight(data.SessionID) {
@@ -1982,7 +1999,8 @@ func queuedMessageAttachmentsToV1(attachments []messagequeue.MessageAttachment) 
 // entity references are re-added via WithEntityReferences, and a carried
 // completion handoff (messagequeue.MetadataStepHandoff) is already folded
 // into the recorded content by the caller, so neither belongs in the row's
-// own stored metadata.
+// own stored metadata. Admission provenance remains so clients can reconcile
+// an accepted message after its queue row has been dispatched.
 func metadataWithoutQueueOnlyKeys(metadata map[string]interface{}) map[string]interface{} {
 	if len(metadata) == 0 {
 		return nil
@@ -2281,6 +2299,19 @@ func (s *Service) handleAgentFailed(ctx context.Context, data watcher.AgentEvent
 			zap.String("agent_execution_id", data.AgentExecutionID))
 		lock.Unlock()
 		release()
+		return
+	}
+	if !s.resumeAttemptAllowsExecution(data.SessionID, data.AgentExecutionID, data.AttemptID) {
+		s.logger.Debug("ignoring agent.failed from a stale resume attempt",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID),
+			zap.String("attempt_id", data.AttemptID))
+		lock.Unlock()
+		release()
+		s.cleanupStaleResumeExecution(
+			data.AgentExecutionID, data.TaskID, data.SessionID, data.AttemptID,
+		)
 		return
 	}
 
@@ -2764,7 +2795,7 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 	}
 }
 
-func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentEventData) {
+func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentEventData) error {
 	errMsg := data.ErrorMessage
 	if errMsg == "" {
 		errMsg = defaultAgentFailedMessage
@@ -2777,16 +2808,21 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 		Message:          errMsg,
 		OccurredAt:       time.Now().UTC(),
 		AgentExecutionID: data.AgentExecutionID,
+		ExecutionID:      data.AgentExecutionID,
+		Phase:            data.Phase,
+		AttemptID:        data.AttemptID,
+		Causes:           models.NormalizeAgentErrorCauses(data.Causes),
 		RemediationURL:   providerRemediationURL(data),
 		Code:             data.FailureCode,
 		Details:          details,
+		StampValue:       data.ErrorStamp,
 	}
 	if err := s.repo.SetSessionMetadataKey(ctx, data.SessionID, models.SessionMetaKeyLastAgentError, lastErr); err != nil {
 		s.logger.Warn("failed to persist last agent error",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.Error(err))
-		return
+		return err
 	}
 	if s.eventBus != nil {
 		eventData := map[string]interface{}{
@@ -2797,6 +2833,16 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 			"occurred_at":        lastErr.OccurredAt.Format(time.RFC3339Nano),
 			"stamp":              lastErr.Stamp(),
 			"agent_execution_id": lastErr.AgentExecutionID,
+			"execution_id":       lastErr.ExecutionID,
+		}
+		if lastErr.Phase != "" {
+			eventData["phase"] = lastErr.Phase
+		}
+		if lastErr.AttemptID != "" {
+			eventData["attempt_id"] = lastErr.AttemptID
+		}
+		if len(lastErr.Causes) > 0 {
+			eventData["causes"] = append([]models.AgentErrorCause(nil), lastErr.Causes...)
 		}
 		if lastErr.RemediationURL != "" {
 			eventData["remediation_url"] = lastErr.RemediationURL
@@ -2816,8 +2862,10 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 				zap.String("task_id", data.TaskID),
 				zap.String("session_id", data.SessionID),
 				zap.Error(err))
+			return err
 		}
 	}
+	return nil
 }
 
 // clearRecoveredAgentError drops a session's stored agent failure once the agent
@@ -3057,6 +3105,34 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 		AgentExecutionID: agentExecutionID,
 		ErrorMessage:     err.Error(),
 	}
+	var bootstrapFailure *lifecycle.BootstrapFailure
+	if errors.As(err, &bootstrapFailure) && bootstrapFailure != nil {
+		failureData.ErrorMessage = bootstrapFailure.SafeDetail()
+		if failureData.ErrorMessage == "" {
+			failureData.ErrorMessage = "The agent could not start."
+		}
+		failureData.FailureCode = models.LaunchErrorCategoryGenericLaunchFailure
+		failureData.Phase = models.LaunchErrorPhaseBootstrap
+		failureData.AttemptID = agentExecutionID
+		if attemptID := executor.ResumeAttemptIDFromContext(ctx); attemptID != "" {
+			failureData.AttemptID = attemptID
+		}
+		failureData.ErrorStamp = models.StableLaunchErrorStamp(
+			taskID, sessionID, agentExecutionID, failureData.AttemptID, models.LaunchErrorPhaseBootstrap,
+		)
+		operation := bootstrapFailure.Operation
+		if operation == "" && fromResume {
+			operation = models.AgentErrorCauseOperationResume
+		}
+		if operation == models.AgentErrorCauseOperationResume ||
+			operation == models.AgentErrorCauseOperationRestoreWorkspace {
+			failureData.Causes = models.NormalizeAgentErrorCauses([]models.AgentErrorCause{{
+				Operation: operation,
+				Code:      bootstrapFailure.SafeCode(),
+				Detail:    bootstrapFailure.SafeDetail(),
+			}})
+		}
+	}
 	if classified := classifyManagedRuntimeNpmStartFailure(err); classified != nil {
 		failureData.ErrorMessage = "managed npm runtime failed to prepare"
 		failureData.FailureCode = string(routingerr.CodeManagedRuntimeNpmResolution)
@@ -3086,6 +3162,23 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 				zap.Error(err))
 			return true
 		}
+		failureData.AttemptID = executor.ResumeAttemptIDFromContext(ctx)
+		if failureData.AttemptID == "" {
+			failureData.AttemptID = agentExecutionID
+		}
+		if failureData.ErrorStamp == "" {
+			failureData.ErrorStamp = models.StableLaunchErrorStamp(
+				taskID, sessionID, agentExecutionID, failureData.AttemptID, failureData.FailureCode,
+			)
+		}
+		if !s.resumeAttemptAllowsExecution(sessionID, agentExecutionID, failureData.AttemptID) {
+			s.logger.Debug("ignoring agent process start failure from a stale resume attempt",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.String("agent_execution_id", agentExecutionID),
+				zap.String("attempt_id", failureData.AttemptID))
+			return true
+		}
 
 		if drop, terminalState := s.shouldDropSessionFailure(ctx, failureData, "agent process start", false); drop {
 			// A cancellation that landed after the executor's first terminal-state
@@ -3106,7 +3199,11 @@ func (s *Service) handleAgentStartFailed(ctx context.Context, taskID, sessionID,
 		return true
 	}
 
-	if !isAuthError(err.Error()) {
+	authFailure := isAuthError(err.Error())
+	if bootstrapFailure != nil && bootstrapFailure.SafeCode() == models.AgentErrorCauseCodeAuthenticationRequired {
+		authFailure = true
+	}
+	if !authFailure {
 		if fromResume {
 			s.logger.Info("suppressing toast for resume bootstrap failure",
 				zap.String("task_id", taskID),

@@ -158,10 +158,10 @@ in the same order, with the same labels, wherever the menu is opened.
   in-flight disabled state, which is per surface under
   AC-TASKS-TASK-ACTIONS-MENU-004.1b and so may differ from the card's for the
   duration of a request.
-- **AC-TASKS-TASK-ACTIONS-MENU-002.2:** The order named in
-  AC-TASKS-TASK-ACTIONS-MENU-002.1 is: Edit, Priority, Move to, Send to
-  workflow, plugin primary actions, Link, Archive, Detach from parent, a
-  separator, Delete. The system shall omit Priority when the card actions menu
+- **AC-TASKS-TASK-ACTIONS-MENU-002.2:** The order and dividers named in
+  AC-TASKS-TASK-ACTIONS-MENU-002.1 follow
+  [Task menu grouping](task-menu-grouping.md).
+  The system shall omit Priority when the card actions menu
   omits it. It shall omit any of Move to, Send to workflow, Link, and Detach
   from parent whose availability condition in the card actions menu is unmet,
   and shall not reorder the entries that remain.
@@ -243,7 +243,8 @@ in the same order, with the same labels, wherever the menu is opened.
 - **AC-TASKS-TASK-ACTIONS-MENU-002.9:** The system shall present no entry on
   these two surfaces that the card actions menu does not present for a single,
   unselected task, and shall present no bulk-selection variant of the menu.
-- **AC-TASKS-TASK-ACTIONS-MENU-002.10:** The system shall leave the card actions
+- **AC-TASKS-TASK-ACTIONS-MENU-002.10:** Except for the ordering and dividers
+  defined in [Task menu grouping](task-menu-grouping.md), the system shall leave the card actions
   menu, the card context menu, and the task switcher sidebar menu unchanged in
   entry membership, labels, top-level order, and behavior, with one named
   exception. Adopting `sortWorkflowStepsByPosition` inside the shared
@@ -274,9 +275,8 @@ actions. It lives in
 - **The mobile preview surface.** There is none: on mobile the board navigates
   straight to the task detail route and never renders the preview panel, so
   there is no surface to add a trigger to.
-- **Changing the card actions menu, the card context menu, or the task
-  switcher sidebar menu.** Their entry sets, ordering, and labels are frozen by
-  this requirement, not revised by it.
+- **Changing card or sidebar action membership and behavior.**
+  [Task menu grouping](task-menu-grouping.md) owns their revised ordering and dividers.
 - **Reconciling the card menu's entry set with the task switcher sidebar's
   divergent one.** The sidebar offers Pin, Rename, Create subtask, Duplicate,
   Color, and Nest, and omits several the card has. These surfaces standardise on

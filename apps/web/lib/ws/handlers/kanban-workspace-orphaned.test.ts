@@ -43,44 +43,53 @@ function makeUpdateMessage(workflowId: string, tasks: unknown[], steps: unknown[
   };
 }
 
-describe("kanban.update handler — workspaceOrphaned preservation", () => {
-  it("preserves workspaceOrphaned from existing tasks", () => {
-    const store = makeStore({
-      kanban: {
-        workflowId: WORKFLOW_ID,
-        steps: [],
-        tasks: [
-          {
-            id: TASK_ID,
-            workflowId: WORKFLOW_ID,
-            workflowStepId: STEP_ID,
-            title: TASK_TITLE,
-            position: 0,
-            workspaceOrphaned: true,
-          },
-        ],
-      },
-      kanbanMulti: {
-        isLoading: false,
-        snapshots: {
-          [WORKFLOW_ID]: {
-            workflowId: WORKFLOW_ID,
-            workflowName: "WF1",
-            steps: [],
-            tasks: [
-              {
-                id: TASK_ID,
-                workflowId: WORKFLOW_ID,
-                workflowStepId: STEP_ID,
-                title: TASK_TITLE,
-                position: 0,
-                workspaceOrphaned: true,
-              },
-            ],
-          },
+/** Builds a store whose kanban list and kanbanMulti snapshot each carry one
+ * task, with an independently-set workspaceOrphaned flag on each copy. */
+function makeOrphanedState(kanbanOrphaned: boolean, snapshotOrphaned: boolean) {
+  return makeStore({
+    kanban: {
+      workflowId: WORKFLOW_ID,
+      steps: [],
+      tasks: [
+        {
+          id: TASK_ID,
+          workflowId: WORKFLOW_ID,
+          workflowStepId: STEP_ID,
+          title: TASK_TITLE,
+          position: 0,
+          workspaceOrphaned: kanbanOrphaned,
+        },
+      ],
+    },
+    kanbanMulti: {
+      isLoading: false,
+      orderRevisionByStepId: {},
+      pendingReorderBandKeys: {},
+      withheldReorderByBandKey: {},
+      snapshots: {
+        [WORKFLOW_ID]: {
+          workflowId: WORKFLOW_ID,
+          workflowName: "WF1",
+          steps: [],
+          tasks: [
+            {
+              id: TASK_ID,
+              workflowId: WORKFLOW_ID,
+              workflowStepId: STEP_ID,
+              title: TASK_TITLE,
+              position: 0,
+              workspaceOrphaned: snapshotOrphaned,
+            },
+          ],
         },
       },
-    } as Partial<AppState>);
+    },
+  } as Partial<AppState>);
+}
+
+describe("kanban.update handler — workspaceOrphaned preservation", () => {
+  it("preserves workspaceOrphaned from existing tasks", () => {
+    const store = makeOrphanedState(true, true);
 
     const handler = registerKanbanHandlers(store)["kanban.update"]!;
     handler(
@@ -104,42 +113,7 @@ describe("kanban.update handler — workspaceOrphaned preservation", () => {
     // kanbanMulti merge only falls back to the snapshot's value when the
     // primary lookup is `undefined` (task absent), not when it resolves to an
     // explicit false.
-    const store = makeStore({
-      kanban: {
-        workflowId: WORKFLOW_ID,
-        steps: [],
-        tasks: [
-          {
-            id: TASK_ID,
-            workflowId: WORKFLOW_ID,
-            workflowStepId: STEP_ID,
-            title: TASK_TITLE,
-            position: 0,
-            workspaceOrphaned: false,
-          },
-        ],
-      },
-      kanbanMulti: {
-        isLoading: false,
-        snapshots: {
-          [WORKFLOW_ID]: {
-            workflowId: WORKFLOW_ID,
-            workflowName: "WF1",
-            steps: [],
-            tasks: [
-              {
-                id: TASK_ID,
-                workflowId: WORKFLOW_ID,
-                workflowStepId: STEP_ID,
-                title: TASK_TITLE,
-                position: 0,
-                workspaceOrphaned: true,
-              },
-            ],
-          },
-        },
-      },
-    } as Partial<AppState>);
+    const store = makeOrphanedState(false, true);
 
     const handler = registerKanbanHandlers(store)["kanban.update"]!;
     handler(

@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	runtimeapi "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/task/archivecascade"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
 
@@ -440,7 +441,11 @@ func (s *Service) finalizeCreatedTask(ctx context.Context, prepared *preparedTas
 		task.Repositories = repos
 	}
 
-	s.publishTaskEvent(ctx, events.TaskCreated, task, nil)
+	s.publishTaskEventWithExtra(ctx, events.TaskCreated, task, nil,
+		map[string]interface{}{
+			"assignee_agent_profile_id": task.AssigneeAgentProfileID,
+			"assignment_generation":     assignmentGenerationForCreate(task),
+		})
 	s.pullTasksFromNewFeederWork(ctx, task.WorkflowID, task.WorkflowStepID)
 	if refreshed, err := s.tasks.GetTask(ctx, task.ID); err != nil {
 		s.logger.Warn("failed to refresh task after feeder pull", zap.String("task_id", task.ID), zap.Error(err))
@@ -451,6 +456,17 @@ func (s *Service) finalizeCreatedTask(ctx context.Context, prepared *preparedTas
 	s.logger.Info("task created", zap.String("task_id", task.ID), zap.String("title", task.Title))
 
 	return CreateTaskResult{Task: task, Outcome: CreateTaskOutcomeCreated}, nil
+}
+
+// assignmentGenerationForCreate mirrors insertTaskTx's runner-row guard in
+// memory rather than re-reading the row it just wrote: a task created
+// already assigned starts at generation 1 (matching the value insertTaskTx
+// committed), everything else starts at 0 (never assigned).
+func assignmentGenerationForCreate(task *models.Task) int64 {
+	if task.AssigneeAgentProfileID != "" && task.WorkflowStepID != "" {
+		return 1
+	}
+	return 0
 }
 
 func (s *Service) prepareWorkspacePolicyForCreation(ctx context.Context, req *CreateTaskRequest) error {
@@ -1870,6 +1886,12 @@ func (s *Service) GetTask(ctx context.Context, id string) (*models.Task, error) 
 	return task, nil
 }
 
+// GetTasksByIDs fetches task rows in one repository query. Inbox callers use
+// this after a workspace-scoped bundle query has already authorized the rows.
+func (s *Service) GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Task, error) {
+	return s.tasks.GetTasksByIDs(ctx, ids)
+}
+
 func (s *Service) tryUpdateTaskPriorityOnly(
 	ctx context.Context,
 	id string,
@@ -2005,9 +2027,15 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 			Trigger: steptelemetry.TriggerTaskUpdate, ActorKind: actorKind, ActorID: actorID,
 		})
 	}
-	if err := s.tasks.UpdateTask(updateCtx, task); err != nil {
-		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(err))
-		return nil, err
+	var updateErr error
+	if req.Position != nil {
+		updateErr = s.tasks.UpdateTaskWithExplicitPosition(updateCtx, task)
+	} else {
+		updateErr = s.tasks.UpdateTask(updateCtx, task)
+	}
+	if updateErr != nil {
+		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(updateErr))
+		return nil, updateErr
 	}
 	// UpdateTask may have applied a conditional title/metadata patch because
 	// this snapshot was stale. Publish and return the row that actually won so
@@ -2306,13 +2334,15 @@ func (s *Service) RestoreTaskMessageRollback(
 // The task remains in the DB but is excluded from active board views.
 // Active agent sessions are stopped and worktrees cleaned up in background.
 func (s *Service) ArchiveTask(ctx context.Context, id string) error {
+	archiveDeadline := archivecascade.ArchiveDeadline(ctx)
+	archiveCtx, cancelArchive := context.WithDeadline(ctx, archiveDeadline)
+	defer cancelArchive()
 	start := time.Now()
-
-	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
+	if err := s.authorizeTaskScope(archiveCtx, id, authz.ScopeTaskWrite); err != nil {
 		return err
 	}
 	// 1. Get task and verify it exists
-	task, err := s.tasks.GetTask(ctx, id)
+	task, err := s.tasks.GetTask(archiveCtx, id)
 	if err != nil {
 		return err
 	}
@@ -2323,12 +2353,12 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 
 	// 2. Gather data needed for cleanup BEFORE archive
 	var stopTargets []taskStopTarget
-	activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, id)
+	activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(archiveCtx, id)
 	if err != nil {
 		return fmt.Errorf("list active task sessions for archive: %w", err)
 	}
 	if s.executionStopper != nil {
-		stopTargets, err = s.buildStopTargets(ctx, id, activeSessions)
+		stopTargets, err = s.buildStopTargets(archiveCtx, id, activeSessions)
 		if err != nil {
 			return fmt.Errorf("list runtime cleanup inventory: %w", err)
 		}
@@ -2341,7 +2371,7 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 			if sess == nil || sess.ID == "" {
 				continue
 			}
-			snapCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			snapCtx, cancel := context.WithTimeout(archiveCtx, 10*time.Second)
 			err := s.gitArchiveCapture.CaptureArchiveSnapshot(snapCtx, sess.ID)
 			cancel()
 			if err != nil {
@@ -2353,31 +2383,31 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 		}
 	}
 
-	sessions, err := s.sessions.ListTaskSessions(ctx, id)
+	sessions, err := s.sessions.ListTaskSessions(archiveCtx, id)
 	if err != nil {
 		return fmt.Errorf("list task sessions for archive: %w", err)
 	}
 
-	worktrees, err := s.gatherWorktreesForDelete(ctx, id)
+	worktrees, err := s.gatherWorktreesForDelete(archiveCtx, id)
 	if err != nil {
 		return fmt.Errorf("list worktrees for archive: %w", err)
 	}
-	taskEnv, err := s.gatherTaskEnvironmentForCleanup(ctx, id)
+	taskEnv, err := s.gatherTaskEnvironmentForCleanup(archiveCtx, id)
 	if err != nil {
 		return fmt.Errorf("lookup task environment for archive: %w", err)
 	}
 	envCleanup := taskEnvironmentCleanup{env: taskEnv, deleteRow: false, preserveBranches: true}
 	cleanupJob, err := s.persistTaskResourceCleanup(
-		ctx, id, models.TaskResourceCleanupTriggerArchive, "",
-		sessions, worktrees, stopTargets, envCleanup, true,
+		archiveCtx, id, models.TaskResourceCleanupTriggerArchive, "",
+		sessions, worktrees, stopTargets, nil, envCleanup, true, true, "",
 	)
 	if err != nil {
 		return err
 	}
 
 	// 3. Set archived_at in DB
-	if err := s.tasks.ArchiveTask(ctx, id); err != nil {
-		s.resolveTaskResourceCleanupAfterMutationError(ctx, cleanupJob)
+	if err := s.tasks.ArchiveTask(archiveCtx, id); err != nil {
+		s.resolveTaskResourceCleanupAfterMutationError(archiveCtx, cleanupJob)
 		return err
 	}
 
@@ -2393,20 +2423,30 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 	// above must not stop any of that from finishing and reaching
 	// event-driven clients that don't share the archiving caller's
 	// connection.
-	finalizeCtx := context.WithoutCancel(ctx)
+	finalizeCtx, cancelFinalize := archivecascade.ContinuationContextUntil(ctx, archiveDeadline)
+	defer cancelFinalize()
 
 	// 3b. Finalize active sessions in the DB and publish their cancellation
 	// events. See finalizeCancelledSessions for the detailed rationale.
-	s.finalizeCancelledSessions(finalizeCtx, id, activeSessions)
+	s.finalizeCancelledSessions(finalizeCtx, id, activeSessions, archiveDeadline)
+	var postCommitErr error
 
-	// 4. Re-read task for updated archived_at field
+	// 4. Re-read task for updated archived_at field. The archive row is
+	// already durable, so a projection read failure must not skip cleanup.
+	archivedTask := task
 	task, err = s.tasks.GetTask(finalizeCtx, id)
 	if err != nil {
-		return err
+		task = archivedTask
+		postCommitErr = &CascadePostCommitError{
+			Err: fmt.Errorf("reload archived task %s: %w", id, err),
+		}
+		s.logger.Warn("failed to reload committed archived task",
+			zap.String("task_id", id), zap.Error(err))
+	} else {
+		// 5. Publish task.updated event so frontend removes from board
+		s.publishTaskEvent(finalizeCtx, events.TaskUpdated, task, nil)
 	}
 
-	// 5. Publish task.updated event so frontend removes from board
-	s.publishTaskEvent(finalizeCtx, events.TaskUpdated, task, nil)
 	// 5b. Archive cleanup tears down this task's runtime resources (worktree,
 	// container/sandbox) but preserves its task_environments row
 	// (deleteRow: false above) — the row is deleted only by a DELETE cascade
@@ -2425,7 +2465,7 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 
 	// 6. Background: Stop agents and cleanup worktrees
 	if cleanupJob != nil {
-		if err := s.StartPreparedTaskResourceCleanup(finalizeCtx, cleanupJob.OperationID); err != nil {
+		if err := s.StartPreparedTaskResourceCleanup(context.WithoutCancel(finalizeCtx), cleanupJob.OperationID); err != nil {
 			s.logger.Warn("start committed archive resource cleanup",
 				zap.String("job_id", cleanupJob.ID), zap.String("task_id", id), zap.Error(err))
 		}
@@ -2434,6 +2474,9 @@ func (s *Service) ArchiveTask(ctx context.Context, id string) error {
 			"task archived", "failed to stop session on task archive", "task archive cleanup completed")
 	}
 
+	if postCommitErr != nil {
+		return postCommitErr
+	}
 	return nil
 }
 
@@ -2533,6 +2576,40 @@ func (s *Service) updateTaskWorkspaceMetadata(ctx context.Context, task *models.
 	return setter.SetTaskWorkspaceMetadataIfUnchanged(ctx, task.ID, guard, workspace)
 }
 
+func waitForCancellationRetry(ctx context.Context, delay time.Duration) bool {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+const maxCancelAttempts = 3
+
+func (s *Service) cancelActiveTaskSessionsWithRetry(
+	ctx context.Context, taskID string,
+) ([]*models.TaskSession, error) {
+	const cancelRetryBackoff = 250 * time.Millisecond
+
+	var cancelledSessions []*models.TaskSession
+	var cancelErr error
+	for attempt := 1; attempt <= maxCancelAttempts; attempt++ {
+		cancelledSessions, cancelErr = s.sessions.CancelActiveTaskSessionsByTaskID(
+			ctx, taskID, models.SessionArchiveCancelReason,
+		)
+		if cancelErr == nil {
+			return cancelledSessions, nil
+		}
+		if attempt < maxCancelAttempts && !waitForCancellationRetry(ctx, cancelRetryBackoff) {
+			return nil, ctx.Err()
+		}
+	}
+	return nil, cancelErr
+}
+
 // finalizeCancelledSessions finalizes an archived task's active sessions in
 // the DB and publishes a session.state_changed event for each one actually
 // cancelled. The async cleanup that follows tears down the agent processes;
@@ -2553,22 +2630,13 @@ func (s *Service) updateTaskWorkspaceMetadata(ctx context.Context, task *models.
 // window without making it unbounded. This is deliberately NOT a background
 // reconciliation/sweep system, just closing the immediate race; if every
 // attempt still fails, ArchiveTask has already committed archived_at, so
-// this remains best-effort cleanup and is not a reason to fail the archive.
-func (s *Service) finalizeCancelledSessions(ctx context.Context, taskID string, activeSessions []*models.TaskSession) {
-	const maxCancelAttempts = 3
-	const cancelRetryBackoff = 250 * time.Millisecond
-
-	var cancelledSessions []*models.TaskSession
-	var cancelErr error
-	for attempt := 1; attempt <= maxCancelAttempts; attempt++ {
-		cancelledSessions, cancelErr = s.sessions.CancelActiveTaskSessionsByTaskID(ctx, taskID, models.SessionArchiveCancelReason)
-		if cancelErr == nil {
-			break
-		}
-		if attempt < maxCancelAttempts {
-			time.Sleep(cancelRetryBackoff)
-		}
-	}
+func (s *Service) finalizeCancelledSessions(
+	ctx context.Context,
+	taskID string,
+	activeSessions []*models.TaskSession,
+	deadline time.Time,
+) {
+	cancelledSessions, cancelErr := s.cancelActiveTaskSessionsWithRetry(ctx, taskID)
 	if cancelErr != nil {
 		s.logger.Error("failed to reap active sessions on archive after retries",
 			zap.String("task_id", taskID),
@@ -2589,8 +2657,8 @@ func (s *Service) finalizeCancelledSessions(ctx context.Context, taskID string, 
 	// caller is still connected.
 	// Deliberately left unbounded at the batch level: clarification expiry and
 	// publishSessionsCancelled give each session their own independent timeout,
-	// so one slow write or synchronous subscriber cannot starve later sessions.
-	detachedCtx := context.WithoutCancel(ctx)
+	detachedCtx, cancelDetached := archivecascade.ContinuationContextUntil(ctx, deadline)
+	defer cancelDetached()
 	if s.clarificationCanceller != nil {
 		for _, session := range cancelledSessions {
 			if session == nil || session.ID == "" {
@@ -2663,10 +2731,13 @@ func (s *Service) deleteTaskWithReason(ctx context.Context, id, reason string) e
 func (s *Service) deleteTaskWithReasonAndOptions(
 	ctx context.Context, id, reason string, options DeleteTaskOptions,
 ) error {
-	if err := s.authorizeTaskScope(ctx, id, authz.ScopeTaskWrite); err != nil {
+	deadline := archivecascade.ArchiveDeadline(ctx)
+	operationCtx, cancelOperation := context.WithDeadline(ctx, deadline)
+	defer cancelOperation()
+	if err := s.authorizeTaskScope(operationCtx, id, authz.ScopeTaskWrite); err != nil {
 		return err
 	}
-	_, err := s.deleteTaskWithReasonAndDBDelete(ctx, id, reason, models.TaskResourceCleanupTriggerDelete, options, func(ctx context.Context, id string) (bool, error) {
+	_, err := s.deleteTaskWithReasonAndDBDelete(operationCtx, id, reason, models.TaskResourceCleanupTriggerDelete, options, func(ctx context.Context, id string) (bool, error) {
 		if err := s.tasks.DeleteTask(ctx, id); err != nil {
 			return false, err
 		}
@@ -2740,37 +2811,75 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 	deleteFromDB func(context.Context, string) (bool, error),
 ) (bool, error) {
 	start := time.Now()
+	archiveDeadline := archivecascade.ArchiveDeadline(ctx)
+	operationCtx, cancelOperation := context.WithDeadline(ctx, archiveDeadline)
+	defer cancelOperation()
 
 	// 1. Get task (sync, fast)
-	task, err := s.tasks.GetTask(ctx, id)
+	task, err := s.tasks.GetTask(operationCtx, id)
 	if err != nil {
 		return false, err
 	}
 
 	// 2. Gather data needed for cleanup BEFORE delete (sync, fast)
-	sessions, err := s.sessions.ListTaskSessions(ctx, id)
+	sessions, err := s.sessions.ListTaskSessions(operationCtx, id)
 	if err != nil {
 		return false, fmt.Errorf("list task sessions for delete: %w", err)
 	}
 
-	worktrees, err := s.gatherWorktreesForDelete(ctx, id)
+	worktrees, err := s.gatherWorktreesForDelete(operationCtx, id)
 	if err != nil {
 		return false, fmt.Errorf("list worktrees for delete: %w", err)
 	}
 	if trigger == models.TaskResourceCleanupTriggerDelete {
-		if err := s.validateTaskDeleteWorktreeInventory(ctx, worktrees, options.DiscardWorktreeChanges); err != nil {
+		if err := s.validateTaskDeleteWorktreeInventory(operationCtx, worktrees, options.DiscardWorktreeChanges); err != nil {
 			return false, err
 		}
 	}
-	taskEnv, err := s.gatherTaskEnvironmentForCleanup(ctx, id)
+	taskEnv, err := s.gatherTaskEnvironmentForCleanup(operationCtx, id)
 	if err != nil {
 		return false, fmt.Errorf("lookup task environment for delete: %w", err)
 	}
-	stopTargets, err := s.deleteTaskStopTargets(ctx, id)
+	var attachments []*models.TaskMessageAttachment
+	attachmentRepo := s.attachments
+	if attachmentRepo == nil && s.attachmentSvc != nil {
+		attachmentRepo = s.attachmentSvc.repo
+	}
+	var releaseAttachmentLifecycle func()
+	attachmentsLocked := false
+	if s.attachmentSvc != nil && task.WorkspaceID != "" {
+		releaseAttachmentLifecycle = s.attachmentSvc.beginWorkspaceDeletion(task.WorkspaceID)
+	}
+	defer func() {
+		if attachmentsLocked {
+			s.attachmentSvc.lifecycleMu.Unlock()
+		}
+		if releaseAttachmentLifecycle != nil {
+			releaseAttachmentLifecycle()
+		}
+	}()
+	if attachmentRepo != nil {
+		if s.attachmentSvc != nil {
+			s.attachmentSvc.lifecycleMu.Lock()
+			attachmentsLocked = true
+		}
+		attachments, err = attachmentRepo.ListMessageAttachmentsByTask(operationCtx, id)
+		if err != nil {
+			if attachmentsLocked {
+				s.attachmentSvc.lifecycleMu.Unlock()
+				attachmentsLocked = false
+			}
+			return false, fmt.Errorf("list attachments for delete: %w", err)
+		}
+	}
+	if err != nil {
+		return false, fmt.Errorf("list attachments for delete: %w", err)
+	}
+	stopTargets, err := s.deleteTaskStopTargets(operationCtx, id)
 	if err != nil {
 		return false, err
 	}
-	if preserved, err := s.preserveTaskEnvironmentForActiveBorrower(ctx, id, taskEnv); err != nil {
+	if preserved, err := s.preserveTaskEnvironmentForActiveBorrower(operationCtx, id, taskEnv); err != nil {
 		return false, err
 	} else if preserved {
 		s.logger.Info("transferred borrowed task environment before task delete",
@@ -2792,42 +2901,48 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 		env: taskEnv, deleteRow: false, discardWorktreeChanges: options.DiscardWorktreeChanges,
 	}
 	cleanupJob, err := s.persistTaskResourceCleanup(
-		ctx, id, trigger, "", sessions, worktrees, stopTargets, envCleanup, true,
+		operationCtx, id, trigger, "", sessions, worktrees, stopTargets, attachments, envCleanup, true, true, "",
 	)
 	if err != nil {
 		return false, err
 	}
 
 	// 4. Delete from DB (sync, fast)
-	deleted, err := deleteFromDB(ctx, id)
+	deleted, err := deleteFromDB(operationCtx, id)
 	if err != nil {
-		s.resolveTaskResourceCleanupAfterMutationError(ctx, cleanupJob)
+		s.resolveTaskResourceCleanupAfterMutationError(operationCtx, cleanupJob)
 		s.logger.Error("failed to delete task", zap.String("task_id", id), zap.Error(err))
 		return false, err
 	}
 	if !deleted {
-		s.resolveTaskResourceCleanupAfterMutationError(ctx, cleanupJob)
+		s.resolveTaskResourceCleanupAfterMutationError(operationCtx, cleanupJob)
 		return false, nil
 	}
 	if s.attachmentSvc != nil {
-		if err := s.attachmentSvc.DeleteByTask(context.WithoutCancel(ctx), id); err != nil {
+		attachmentErr := s.attachmentSvc.deleteByTask(operationCtx, id)
+		attachmentErr = errors.Join(attachmentErr, s.attachmentSvc.deleteDescriptors(operationCtx, attachments))
+		if attachmentErr != nil {
 			s.logger.Warn("failed to remove task attachment bytes",
-				zap.String("task_id", id), zap.Error(err))
+				zap.String("task_id", id), zap.Error(attachmentErr))
+		}
+		if attachmentsLocked {
+			s.attachmentSvc.lifecycleMu.Unlock()
+			attachmentsLocked = false
 		}
 	}
 	// Remove dependency edges in both directions. task_blockers predates the
 	// tasks foreign key so nothing cascades, and a left-over edge would keep a
 	// dependent blocked forever on a task that no longer exists. Dependents are
 	// refreshed but deliberately not started: deletion is not success.
-	s.deleteDependencyEdgesForTask(context.WithoutCancel(ctx), id)
+	s.deleteDependencyEdgesForTask(operationCtx, id)
 
 	// 5. Publish event (sync, fast) - frontend removes task immediately
 	var extra map[string]interface{}
 	if reason != "" {
 		extra = map[string]interface{}{"reason": reason}
 	}
-	s.publishTaskEventWithExtra(ctx, events.TaskDeleted, task, nil, extra)
-	s.pullNextTaskOnVacate(ctx, task.WorkflowStepID, task.ID)
+	s.publishTaskEventWithExtra(operationCtx, events.TaskDeleted, task, nil, extra)
+	s.pullNextTaskOnVacate(operationCtx, task.WorkflowStepID, task.ID)
 	s.forgetTaskActivity(id)
 	s.logger.Info("task deleted",
 		zap.String("task_id", id),
@@ -2839,7 +2954,7 @@ func (s *Service) deleteTaskWithReasonAndDBDelete(
 	//    cleanup running when only the env needs reclaiming).
 	hasCleanup := len(stopTargets) > 0 || s.worktreeCleanup != nil || len(sessions) > 0 || task.IsEphemeral || taskEnv != nil
 	if cleanupJob != nil {
-		if err := s.StartPreparedTaskResourceCleanup(ctx, cleanupJob.OperationID); err != nil {
+		if err := s.StartPreparedTaskResourceCleanup(context.WithoutCancel(operationCtx), cleanupJob.OperationID); err != nil {
 			s.logger.Warn("start committed delete resource cleanup",
 				zap.String("job_id", cleanupJob.ID), zap.String("task_id", id), zap.Error(err))
 		}
@@ -3504,11 +3619,14 @@ func (s *Service) performTaskCleanup(
 			return append(errs, cause)
 		}
 		if err := s.executors.DeleteExecutorRunningBySessionID(ctx, sessionID); err != nil {
-			s.logger.Debug("failed to delete executor runtime for session",
+			if errors.Is(err, models.ErrExecutorRunningNotFound) {
+				continue
+			}
+			s.logger.Warn("failed to delete executor runtime for session",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
 				zap.Error(err))
-			// Don't add to errs - this is a debug-level issue
+			errs = append(errs, fmt.Errorf("delete executor runtime for session %s: %w", sessionID, err))
 		}
 	}
 

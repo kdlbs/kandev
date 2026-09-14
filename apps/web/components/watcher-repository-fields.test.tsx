@@ -176,6 +176,6 @@ describe("WatcherRepositoryFields", () => {
     const optionClassName = screen.getByRole("option", { name: /^main local/ }).className;
     expect(optionClassName).toContain("max-md:min-h-12");
     expect(optionClassName).toContain("[@media(pointer:coarse)]:min-h-12");
-    expect(screen.getByTestId("branch-refresh-button").className).toContain("h-12 w-12");
+    expect(screen.getByTestId("branch-refresh-button").className).toContain("size-11");
   });
 });

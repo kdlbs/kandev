@@ -142,9 +142,6 @@ function makeStoreState(sessionState: string, planMode = false, foregroundActivi
     chatInput: {
       planModeBySessionId: { "sess-1": planMode },
     },
-    taskPlans: {
-      commentsMigrationStatusByTaskId: { "task-1": "complete" },
-    },
     queue: { metaBySessionId: {} as Record<string, { count: number }> },
     addMessage: mockAddMessage,
     setTaskPlanComments: mockSetTaskPlanComments,
@@ -487,19 +484,6 @@ describe("useRunComment — plan routing", () => {
     );
   });
 
-  it("rejects Run until legacy plan comments finish migrating", async () => {
-    const state = makeStoreState("WAITING_FOR_INPUT");
-    state.taskPlans.commentsMigrationStatusByTaskId["task-1"] = "failed";
-    mockStoreState = state;
-    const { result } = renderCommentHook();
-
-    await expect(result.current.runComment(makePlanComment())).rejects.toMatchObject({
-      code: "plan-comment-migration-pending",
-    });
-    expect(mockSendMessageRequest).not.toHaveBeenCalled();
-    expect(mockQueueMessage).not.toHaveBeenCalled();
-  });
-
   it("queues a busy primary as a distinct idempotent entry instead of appending", async () => {
     const state = makeStoreState("WAITING_FOR_INPUT");
     (state.taskSessions.items["primary-session"] as { state: string }).state = "RUNNING";
@@ -523,6 +507,21 @@ describe("useRunComment — plan routing", () => {
     });
     expect(mockAppendToQueue).not.toHaveBeenCalled();
     expect(mockMarkCommentsSent).not.toHaveBeenCalled();
+  });
+
+  it("keeps an accepted queued plan comment successful when comment refresh fails", async () => {
+    const state = makeStoreState("WAITING_FOR_INPUT");
+    (state.taskSessions.items["primary-session"] as { state: string }).state = "RUNNING";
+    (state.taskSessionsByTask.itemsByTaskId["task-1"][0] as { state: string }).state = "RUNNING";
+    mockStoreState = state;
+    mockGetTaskPlanComments.mockRejectedValueOnce(new Error("plan comment refresh failed"));
+    const { result } = renderCommentHook();
+
+    await expect(result.current.runComment(makePlanComment())).resolves.toEqual({ queued: true });
+    expect(mockQueueMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ client_queue_id: expect.any(String) }),
+    );
+    expect(mockSetTaskPlanComments).not.toHaveBeenCalled();
   });
 
   it("queues a steer-capable primary when earlier prompts are already queued", async () => {

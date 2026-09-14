@@ -83,7 +83,25 @@ It returns HTTP 200 as soon as the listener accepts connections, with:
 curl -fsS http://127.0.0.1:38429/ready
 ```
 
-It returns HTTP 503 with `status: "starting"` (plus the same `version`) until routes, the agent registry, and the listener are ready, then HTTP 200. The supplied Kubernetes liveness probe uses `/health`; the readiness probe uses `/ready`. Both are unauthenticated even when auth is enabled, so they're also a credential-free way for monitoring to read the running version; there is no need to authenticate to **System > About** just to check what build is deployed.
+It returns HTTP 503 with `status: "starting"` (plus the same `version`) until routes, the agent registry, and the listener are ready, then HTTP 200. During startup, the response also includes a bounded `startup` object:
+
+```json
+{
+  "phase": "backing_up_database",
+  "elapsed_ms": 42000,
+  "phase_elapsed_ms": 18000
+}
+```
+
+The phase is a label such as `opening_database`, `backing_up_database`,
+`applying_migrations`, `initializing_services`, or `recovering_sessions`.
+Elapsed values are status measurements, not progress estimates. The launcher
+prints phase changes and periodic elapsed status, and names the last phase if
+the backend exits before readiness. The supplied Kubernetes liveness probe uses
+`/health`; the readiness probe uses `/ready`. Both are unauthenticated even
+when auth is enabled, so they're also a credential-free way for monitoring to
+read the running version; there is no need to authenticate to **System > About**
+just to check what build is deployed.
 
 For application diagnostics, open **Settings > System > Status** or request:
 
@@ -111,6 +129,14 @@ WebSocket requests return HTTP 503 with the stable code
 diagnostics. A later successful probe restores readiness and stateful traffic
 without a process restart. `/health` remains a pure liveness check and stays
 HTTP 200 while the process is alive.
+
+Stats requests have a separate temporary pressure response. When the shared
+analytics limit is full for too long, a Stats endpoint returns HTTP 503 with
+`error_code: "analytics_busy"` and `Retry-After: 2`. This means the analytics
+work is queued or timed out while normal reads and persistence probes remain
+available. The Stats page retries failed sections and keeps successful sections
+visible. If `persistence_unavailable` appears instead, inspect the persistence
+diagnostic because a required store failed its health check.
 
 ![Settings > System > Status showing health checks, the running version, and disk usage.](../screenshots/system-status.png)
 
@@ -278,16 +304,27 @@ Do not enable those rules on a daemon shared with unrelated workloads.
 
 ![Settings > System > Storage showing Docker cleanup controls, cache retention, unused image cleanup, and quarantine safety.](../screenshots/system-docker-cleanup.png)
 
-The Storage page also reports **Kandev temporary artifacts** created by services that need a
-short-lived directory under the host temporary root. Each current artifact is registered in the
-Kandev database and carries an owner-only marker in its exact directory. Active artifacts and
-artifacts created within the last 24 hours are protected. **Clean stale artifacts** is a manual-only
-action: it moves eligible, registered artifacts into Kandev quarantine on the same filesystem so
-they can be restored during the configured retention period. It does not permanently delete them.
+The Storage page also reports **System temporary folders** as a read-only footprint. It measures the
+service's effective temporary folder and, on Unix, `/tmp` when it resolves to a distinct folder.
+Resolved roots, measured size, and partial or unavailable status are shown. This footprint is
+informational and can overlap counted categories, so it is excluded from **Total counted**. It has
+no cleanup action and does not claim ownership of any path.
+
+The page separately reports **Kandev temporary artifacts** created by services that need a short-lived
+directory under the host temporary root. Each current artifact is registered in the Kandev database
+and carries an owner-only marker in its exact directory. Active artifacts and artifacts created
+within the last 24 hours are protected. The **Clean stale Kandev temporary artifacts** policy is off
+by default. When enabled, scheduled maintenance and a full **Run now** may move eligible, registered
+artifacts into Kandev quarantine. Kandev uses a same-filesystem rename when possible. If the
+quarantine is on another filesystem, it stages and verifies a copy before publishing it and removes
+the original only after revalidating its identity. An explicit **Clean stale artifacts** action is
+available even when the policy is off. Quarantine entries can be restored during the configured
+retention period; this action does not permanently delete them or immediately free disk space.
 The action does not inspect or claim arbitrary `/tmp` entries, shared caches, Node or Playwright
-caches, preview/CI/dev-harness directories, or temporary data belonging to another Kandev
-installation. A missing registry or failed measurement is shown as unavailable rather than as
-zero usage. The inherited `TMPDIR`, `TMP`, and `TEMP` behavior below is unchanged.
+caches, preview/CI/dev-harness directories, temporary data belonging to another Kandev
+installation, or legacy `/tmp/kandev-agent/*` directories. A missing registry or failed measurement
+is shown as unavailable rather than as zero usage. The inherited `TMPDIR`, `TMP`, and `TEMP`
+behavior below is unchanged.
 
 Host-local agents inherit the Kandev service's `TMPDIR`, `TMP`, and `TEMP` values unchanged. If the
 service leaves them unset, agent tools use their normal operating-system defaults; if an operator
@@ -310,6 +347,34 @@ host-administrator procedure after confirming that no live process references th
 the Kandev service first provides the clearest maintenance boundary.
 
 </details>
+
+## Office run history retention
+
+Open **Settings > System > Data & Logs** to manage automatic deletion of old
+Office run history. Deletion is enabled by default. The first sweep starts five
+minutes after the backend starts or after you enable deletion.
+
+The first sweep for each history table is a preview. It reports the rows that
+would be deleted and removes no rows. A later sweep can delete eligible rows.
+Deletion is permanent. Back up the database before you enable deletion if you
+need to keep old history outside the configured window.
+
+The retention window controls the age of rows that can be deleted. The minimum
+kept per owner control keeps the newest rows for each routine or agent, even
+when those rows are older than the window. A floor of zero removes this extra
+protection. Run event, route attempt, and skill rows are deleted with their
+parent run.
+
+The page shows the current policy, retained row counts, preview results, the
+last sweep, and any backlog or errors. Counts continue to update when deletion
+is disabled, so you can monitor growth before you enable it again.
+
+To disable automatic deletion:
+
+1. Open **Settings > System > Data & Logs**.
+2. Clear **Delete eligible run history**.
+3. Select **Save changes**.
+4. Check the retention status. It must show that deletion is disabled.
 
 ## Database operation
 
@@ -422,7 +487,7 @@ The UI flow applies to the configured SQLite path:
 
 1. Stop or finish active agent sessions and preserve unpushed work.
 2. Open **Settings > System > Backups**, choose **Restore**, type `RESTORE`, and confirm.
-3. Kandev stops scheduling, active executions, and database-backed workers. It copies the selected snapshot to `<configured-database-path>.new`, validates the SQLite checkpoint result, and closes the pool. It then quarantines the configured database and its `-wal`/`-shm` sidecars before installing the staged file. If installation fails, Kandev restores the quarantined files.
+3. Kandev stops scheduling, active executions, and database-backed workers. It copies the selected snapshot to `<configured-database-path>.new`, validates the SQLite checkpoint result, and closes the pool. It then quarantines the configured database and its `-wal`/`-shm` sidecars before installing the staged file. If installation fails, Kandev restores the quarantined files. The restore job remains available long enough to report `restart_required` before process shutdown.
 4. Click **Restart Kandev** in the success dialog. If automatic restart is unavailable, quit and relaunch Kandev manually. The backend must restart before database-backed work resumes.
 5. Check `/ready`, **System > Status**, database schema version, secrets, and representative tasks.
 
@@ -591,6 +656,8 @@ drawer mirrors it as the saved left sequence followed by the saved right sequenc
 | `/health` cannot connect                                  | Process-manager and launcher output                                | Confirm port ownership, database reachability, writable Kandev home, and required executables; then restart once                                                                                                                                              |
 | `/ready` stays at 503 while `/health` is 200              | Backend startup logs                                               | Process is alive but still wiring routes, seeding the agent registry, or mounting test-harness routes; give it more time before restarting                                                                                                                    |
 | Status page says unhealthy while `/ready` is 200          | `/api/v1/system/health` issue IDs                                  | Fix Git, GitHub, agent discovery, or Linux inotify warning; readiness and application diagnostics have different meanings                                                                                                                                     |
+| Stats returns `analytics_busy`                             | Stats response code and `Retry-After` header                         | Wait for the bounded retry or select **Retry** in the failed section. If pressure continues, reduce concurrent Stats loads and inspect backend logs                                                                                                             |
+| Stateful reads return `persistence_unavailable`            | `/api/v1/system/diagnostics/persistence`                           | Check the affected store and database health. This is a required-store failure, so resolve it before treating the incident as temporary analytics pressure                                                                                                        |
 | Backups page reports a 15-second create timeout           | Reload the backup list and inspect the `backup-create` job/log     | Large `VACUUM INTO` jobs can still finish; avoid double-clicking and ensure free disk                                                                                                                                                                         |
 | Backup/maintenance fails on PostgreSQL                    | Active driver on Database page                                     | Use `pg_dump`, provider snapshots, and PostgreSQL maintenance; System backup/vacuum/reset is SQLite-only                                                                                                                                                      |
 | Restored data looks stale                                 | Whether the backend was restarted immediately                      | Quit/restart; do not keep using the old open database connections                                                                                                                                                                                             |

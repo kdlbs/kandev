@@ -43,6 +43,7 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.AgentProfileDeleted, ws.ActionAgentProfileDeleted)
 	b.subscribe(eventBus, events.TaskCreated, ws.ActionTaskCreated)
 	b.subscribe(eventBus, events.TaskUpdated, ws.ActionTaskUpdated)
+	b.subscribe(eventBus, events.TaskReordered, ws.ActionTaskReordered)
 	b.subscribe(eventBus, events.SessionWorkspaceSourcesUpdated, ws.ActionSessionWorkspaceSourcesUpdated)
 	b.subscribe(eventBus, events.TaskDeleted, ws.ActionTaskDeleted)
 	b.subscribeLifecycleStateEvents(eventBus)
@@ -99,7 +100,9 @@ func RegisterTaskNotifications(ctx context.Context, eventBus bus.EventBus, hub *
 	b.subscribe(eventBus, events.GitHubTaskPRDeleted, ws.ActionGitHubTaskPRDeleted)
 	b.subscribe(eventBus, events.GitHubTaskCIOptionsUpdated, ws.ActionGitHubTaskCIOptionsUpdated)
 	b.subscribe(eventBus, events.GitHubRateLimitUpdated, ws.ActionGitHubRateLimitUpdated)
+	b.subscribe(eventBus, events.GitHubPRDiscoveryHealthUpdated, ws.ActionGitHubPRDiscoveryHealthUpdated)
 	b.subscribe(eventBus, events.GitLabTaskMRUpdated, ws.ActionGitLabTaskMRUpdated)
+	b.subscribe(eventBus, events.GitLabTaskMRDeleted, ws.ActionGitLabTaskMRDeleted)
 	b.subscribe(eventBus, events.GitLabTaskMROptionsUpdated, ws.ActionGitLabTaskMRAutomationUpdated)
 
 	go func() {
@@ -311,7 +314,8 @@ func (b *TaskEventBroadcaster) routeBroadcast(
 		b.hub.BroadcastToWorkspace(workspaceID, msg)
 		return nil
 	case ws.ActionGitHubTaskPRUpdated, ws.ActionGitHubTaskPRDeleted,
-		ws.ActionGitHubTaskCIOptionsUpdated, ws.ActionGitLabTaskMRUpdated, ws.ActionGitLabTaskMRAutomationUpdated:
+		ws.ActionGitHubTaskCIOptionsUpdated, ws.ActionGitHubPRDiscoveryHealthUpdated,
+		ws.ActionGitLabTaskMRUpdated, ws.ActionGitLabTaskMRDeleted, ws.ActionGitLabTaskMRAutomationUpdated:
 		// These payloads carry per-task PR/MR automation and lifecycle state. Fail closed
 		// (drop, don't fall back to a global broadcast) when workspace
 		// resolution came back empty and auth is enforced — an unattributed

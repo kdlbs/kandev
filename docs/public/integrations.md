@@ -98,6 +98,17 @@ connection leaves compatibility mode permanently.
 
 The status panel identifies the selected source, verified actor, connection state, and any missing App capabilities. When GitHub has reported quota data, use **Show GitHub API limits** to inspect the remaining API requests, GraphQL query points, Search requests, and reset times for that workspace connection. The disclosure appears as a tooltip on desktop and a tap-accessible drawer on touch devices. A failed PAT or CLI validation leaves the previous connection intact. An unknown CLI login, revoked PAT, suspended/deleted installation, or missing App permission affects only the bound workspace and displays a reconnect or capability-specific error.
 
+#### Troubleshoot PR discovery
+
+The **PR discovery failed** warning is separate from the quota values:
+
+- A full quota report does not prove that PR discovery works. Check the warning's reason and last failure time.
+- **Invalid query** means Kandev rejected the provider request. The warning remains until a newer discovery attempt succeeds.
+- **Rate limited** means the provider delayed discovery. Kandev waits for the reported or calculated retry time instead of repeating the same request.
+- A warning for one workspace or repository does not mark another workspace healthy or unhealthy. Replacing the workspace connection starts a new credential-scoped health state.
+
+When discovery succeeds, the warning clears and the status revision advances. If the warning remains after a quota refresh, wait for the retry time or verify the selected connection and repository scope.
+
 ### Automation and personal identity
 
 PAT and CLI connections are human identities. They provide both workspace automation and the fallback identity for **My GitHub** views and user-triggered actions. Settings show this shared identity inside **Workspace GitHub access** instead of repeating it as a separate **My GitHub identity** section.
@@ -133,13 +144,33 @@ select **Save changes** once. GitHub App creation, import, and installation rema
 GitHub workflows. The help control beside **Task Git access** explains the effective credential
 path on desktop hover or focus and in a touch-accessible drawer on mobile.
 
-- **Managed workspace credentials** (an opt-in policy) uses the selected workspace PAT, named GitHub
-  CLI account, or GitHub App through Kandev's short-lived, task/repository-scoped broker. Kandev
-  configures `agentctl` as Git's credential helper so an attached repository can redeem its
-  matching lease on demand; the returned credential is not written to the repository or Git
-  configuration. A separate broker-aware shim handles `gh`. The task receives neither the stored
-  PAT nor an App private key. An executor-profile `GH_TOKEN` or `GITHUB_TOKEN` deliberately takes
-  precedence for that task.
+- Existing workspaces keep their saved task-access policy during upgrades. A historical workspace
+  may still use managed mode. New workspaces default to **Inherit executor Git credentials**.
+- Select **Change connection** when the workspace has an automation connection. Select **Connect
+  GitHub** when it does not. Both entry points show **Task Git access**.
+- **Managed workspace credentials** use the selected PAT, named GitHub CLI account, or GitHub App
+  through Kandev's task/repository-scoped broker. Kandev provides a short-lived Git helper and `gh`
+  shim; stored PATs and App private keys are not exposed to the task. An executor-profile
+  `GH_TOKEN` or `GITHUB_TOKEN` takes precedence.
+- **Inherit executor Git credentials** does not install Kandev's helper or `gh` shim. Local and
+  Worktree tasks use host Git credentials. For GitHub HTTPS remotes, Kandev checks the host
+  account's `gh` login for each attached GitHub host. When `gh auth token` succeeds, Kandev adds a
+  temporary HTTPS helper to the task environment. The helper uses the GitHub CLI configuration
+  visible to the Kandev backend service account. Run `gh auth login` as the OS account that runs
+  the backend; a login in another desktop terminal is not enough. The host bridge does not write
+  global Git configuration or persist helper or token state. An explicit `GH_TOKEN` or
+  `GITHUB_TOKEN` takes precedence over stored CLI credentials. For GitHub Enterprise hosts,
+  `GH_ENTERPRISE_TOKEN` and `GITHUB_ENTERPRISE_TOKEN` have the same effect. If `gh` is unavailable
+  or not authenticated for a host, the task keeps its other inherited Git and SSH credentials.
+  Docker, SSH, and cloud tasks use credentials configured in the executor. A CLI login authenticates
+  that account, but it does not grant repository permissions.
+- A disconnected workspace can select **Inherit executor Git credentials** and save only the
+  task-access setting. It does not need a PAT or GitHub App.
+- The policy applies to newly launched task processes. After a launch or resume, use **New
+  terminal** to create a fresh shell process. Reopening or reconnecting the same terminal does not
+  refresh its environment.
+- For Kandev-managed GitHub checkouts, Local and Worktree preparation follows the host's current
+  `gh` clone protocol. A user-managed checkout keeps its existing origin.
 
 For a managed **Improve Kandev** task, Kandev keeps the task attached to the canonical
 `kdlbs/kandev` repository. Before the first launch, the workspace automation connection resolves
@@ -149,15 +180,6 @@ exact fork. The canonical `origin` remains the pull, issue, and pull-request tar
 connection does not need a fork. An App connection without direct write access cannot own an
 automatic personal fork, so managed fork preparation fails closed; the Improve Kandev issue-only
 option remains available.
-
-- **Inherit executor Git credentials** is the default for newly created workspaces and does not
-  install Kandev's broker helper or `gh` shim. Local
-  and Worktree tasks use credentials already visible to the host Git process (including SSH).
-  Docker, SSH, and cloud tasks use only credentials intentionally configured in that executor.
-  For Kandev-managed GitHub checkouts, Local and Worktree preparation also updates `origin` to the
-  host's configured `gh` clone protocol. Selecting SSH therefore lets Git conditional includes that
-  match `remote.*.url` apply; switching back to managed credentials restores the canonical HTTPS
-  origin. Repositories you registered from an existing local checkout are never rewritten.
 
 If Git rejects a managed checkout with **detected dubious ownership**, the Kandev service account
 and the checkout owner do not match. Repository preparation stops and the session error identifies
@@ -282,23 +304,6 @@ deletes only the encrypted catalog credential bundle, and does not delete or uni
 GitHub. Remove the provider-side App separately only after confirming that no other deployment uses
 it.
 
-### Upgrade and recovery
-
-Workspaces that existed when workspace authentication was introduced receive a **Legacy shared** connection so upgrades do not immediately lose GitHub access. It preserves the previous installation-wide resolution behavior while the workspace is migrated. Existing workspaces and their saved task-access policies are not rewritten by the new-workspace defaults. After a legacy workspace selects a PAT, named CLI account, or App installation, it cannot return to legacy mode. Copying a workspace never copies authentication or App installation bindings.
-
-Legacy shared resolution checks an authenticated host `gh` CLI first, then backend `GITHUB_TOKEN`, backend `GH_TOKEN`, and finally the old stored `GITHUB_TOKEN`/`github_token` secret. Those ambient sources are migration compatibility only; configure an explicit workspace connection to make identity and access deterministic.
-
-For recovery:
-
-- Replace an invalid PAT or select the exact CLI account again; validation must succeed before Kandev swaps the connection.
-- Run `gh auth status --hostname github.com` as the Kandev service user when a selected CLI login disappears, then sign in that account again if necessary.
-- Reconnect **My GitHub identity** after authorization expiry/revocation. App automation remains available while the personal connection is invalid.
-- Ask an organization owner to unsuspend or reinstall an App, restore its repository selection, or grant a reported missing permission. Refresh the workspace status afterward.
-- Disconnect and repeat **Install GitHub App** when the workspace is bound to the wrong installation. Removing the binding does not uninstall the provider-side App.
-- To replace compromised App root credentials, disconnect every binding, delete the catalog
-  registration, rotate the credentials in GitHub, and add the App again. Kandev does not rotate App
-  private keys, OAuth client secrets, or webhook secrets automatically.
-
 </details>
 
 ### Configure and use the workspace
@@ -309,6 +314,14 @@ For recovery:
 Workspace GitHub settings control repository scope, default/saved searches, quick-action prompts, pull-request analytics, review watches, and issue watches. At `/github`, search or browse pull requests and issues, save queries, apply prompt presets, and launch a Kandev task. A saved query can default to one repository; choose **All repos** for no repository default, and change the repository filter without rewriting the saved query. An associated pull request also appears in task review surfaces for feedback, checks, reviews, and merge actions.
 
 In the **Saved** list, use the star beside a query to set or clear it as the default view. Pull requests and issues keep separate saved defaults. Kandev applies the relevant saved default, including its repository filter, the next time you enter `/github` or switch to that result type; setting or clearing the star does not replace the view currently on screen. Without a saved default, Kandev uses the first configured default query for that result type.
+
+On a phone, tap **Views** beside the current query name to open the query drawer. Switch between **Pull requests** and **Issues**, then select a built-in or saved query. The drawer stays open when you switch result types; select a query or tap **Done** to return to results. **Save current query** stays at the bottom while the query list scrolls. Saved-query loading failures offer **Retry**; a failed save keeps your name and repository selection in the save dialog.
+
+Long query names shorten to one line in the **Views** button; open the drawer to read the full name. The result count, last-updated time, and **Refresh** appear in a separate row below the search input.
+
+Result rows provide touch-sized task actions and show a linked task's workflow step without hovering. Tap the page chooser between the previous/next buttons to open a bottom drawer with the current page marked. Select a page to jump directly to it, up to GitHub's first 1,000 search results, or tap **Done** to keep the current page.
+
+To use saved **task** filters from this page, open the app navigation menu and choose **Task views**. This opens the same task-view picker and filter editor as the task sidebar, for the active Kanban workspace. These task views are separate from GitHub saved queries and Threads views. Open a task from this drawer and use browser Back to return to the GitHub dashboard.
 
 A **Review Watch** polls a GitHub search and creates review work. It requires a workflow, starting step, prompt, and workspace. The default query is `type:pr state:open review-requested:@me -is:draft`; add repository filters or replace the query as needed. An optional agent or executor profile overrides the selected step's defaults. The poll interval defaults to 300 seconds and accepts 60–3,600 seconds. The prompt field accepts `@name` references to saved prompts, resolved the same way as in a workflow step; see [Saved prompt references in step prompts](workflow-tips.md#saved-prompt-references-in-step-prompts).
 

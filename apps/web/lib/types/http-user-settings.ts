@@ -68,6 +68,8 @@ export type ThreadViewApi = {
   filters: ThreadViewClauseApi[];
   sort: ThreadViewSortApi;
   max_columns: number | null;
+  layout?: string;
+  auto_hide_composer?: boolean;
 };
 
 export type ThreadViewDraftApi = {
@@ -76,6 +78,8 @@ export type ThreadViewDraftApi = {
   filters: ThreadViewClauseApi[];
   sort: ThreadViewSortApi;
   max_columns: number | null;
+  layout?: string;
+  auto_hide_composer?: boolean;
 };
 export type SidebarTaskColorDimension =
   | "workflow_step"
@@ -174,6 +178,7 @@ export type UserSettings = {
   prevent_auto_start_agent_on_open?: boolean;
   unread_divider?: boolean;
   agent_generated_task_titles?: boolean;
+  auto_focus_new_tasks?: boolean;
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
   show_release_notification?: boolean;
   release_notes_last_seen_version?: string;
@@ -214,6 +219,8 @@ export type UserSettings = {
   quick_chat_tab_order_by_workspace?: Record<string, string[]>;
   kanban_hidden_step_ids?: Record<string, string[]>;
   workflow_ids_with_auto_hide_empty_steps?: string[];
+  kanban_sort?: string;
+  kanban_priority_filter_tokens?: string[];
   revision?: number;
   updated_at: string;
 };
@@ -247,6 +254,7 @@ export type UserSettingsUpdatePayload = {
   prevent_auto_start_agent_on_open?: boolean;
   unread_divider?: boolean;
   agent_generated_task_titles?: boolean;
+  auto_focus_new_tasks?: boolean;
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
   show_release_notification?: boolean;
   release_notes_last_seen_version?: string;
@@ -287,4 +295,6 @@ export type UserSettingsUpdatePayload = {
   quick_chat_tab_order_by_workspace?: Record<string, string[]>;
   kanban_hidden_step_ids?: Record<string, string[]>;
   workflow_ids_with_auto_hide_empty_steps?: string[];
+  kanban_sort?: string;
+  kanban_priority_filter_tokens?: string[];
 };

@@ -56,7 +56,7 @@ function buildDraft(routine: Routine, triggers: RoutineTrigger[]): DraftState {
     status: (routine.status as DraftState["status"]) ?? "active",
     assigneeAgentProfileId: routine.assigneeAgentProfileId ?? "",
     concurrencyPolicy: routine.concurrencyPolicy ?? "coalesce_if_active",
-    catchUpPolicy: routine.catchUpPolicy ?? "enqueue_missed_with_cap",
+    catchUpPolicy: routine.catchUpPolicy ?? "summarize_missed",
     catchUpMax: routine.catchUpMax ?? 25,
     triggerKind,
     cronExpression: cron?.cronExpression ?? "",
@@ -163,7 +163,7 @@ function DetailGeneralCard({
         <BasicGeneralFields draft={draft} update={update} />
         <StatusAndAssigneeFields draft={draft} update={update} agents={agents} />
         <PolicyFields draft={draft} update={update} />
-        {draft.catchUpPolicy === "enqueue_missed_with_cap" && (
+        {draft.catchUpPolicy === "summarize_missed" && (
           <Field label={t("office:catchUpMax")}>
             <Input
               type="number"
@@ -293,8 +293,8 @@ function PolicyFields({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="enqueue_missed_with_cap" className="cursor-pointer">
-              {t("office:enqueueMissedWithCap")}
+            <SelectItem value="summarize_missed" className="cursor-pointer">
+              {t("office:summarizeMissed")}
             </SelectItem>
             <SelectItem value="skip_missed" className="cursor-pointer">
               {t("office:skipMissed")}

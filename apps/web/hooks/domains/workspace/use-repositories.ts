@@ -5,6 +5,28 @@ import { listRepositories } from "@/lib/api";
 
 const EMPTY_REPOSITORIES: Repository[] = [];
 const REPOSITORY_LIST_RETRY_DELAYS_MS = [100, 250, 500, 1_000] as const;
+const activeRepositoryRequests = new Map<string, number>();
+
+function beginRepositoryRequest(
+  workspaceId: string,
+  setRepositoriesLoading: (workspaceId: string, loading: boolean) => void,
+): () => void {
+  activeRepositoryRequests.set(workspaceId, (activeRepositoryRequests.get(workspaceId) ?? 0) + 1);
+  setRepositoriesLoading(workspaceId, true);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    const remaining = (activeRepositoryRequests.get(workspaceId) ?? 1) - 1;
+    if (remaining > 0) {
+      activeRepositoryRequests.set(workspaceId, remaining);
+      setRepositoriesLoading(workspaceId, true);
+    } else {
+      activeRepositoryRequests.delete(workspaceId);
+      setRepositoriesLoading(workspaceId, false);
+    }
+  };
+}
 
 async function listRepositoriesUntilSettled(workspaceId: string) {
   for (const retryDelayMs of REPOSITORY_LIST_RETRY_DELAYS_MS) {
@@ -47,23 +69,16 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
 
   const refresh = useCallback(async () => {
     if (!enabled || !workspaceId) return;
-    setRepositoriesLoading(workspaceId, true);
+    const releaseRequest = beginRepositoryRequest(workspaceId, setRepositoriesLoading);
     try {
       const response = await listRepositoriesUntilSettled(workspaceId);
       setRepositories(workspaceId, response.repositories);
     } catch {
       // Keep the existing cached repositories when a manual refresh fails.
     } finally {
-      setRepositoriesLoading(workspaceId, false);
+      releaseRequest();
     }
   }, [enabled, setRepositories, setRepositoriesLoading, workspaceId]);
-
-  useEffect(() => {
-    if (!enabled || !workspaceId) return;
-    if (isLoaded && isLoading) {
-      setRepositoriesLoading(workspaceId, false);
-    }
-  }, [enabled, isLoaded, isLoading, setRepositoriesLoading, workspaceId]);
 
   // Force-refresh: pull a fresh list once per workspace, bypassing the
   // isLoaded cache. forcedRef is set only on success so a failed fetch retries.
@@ -71,7 +86,7 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
     if (!enabled || !workspaceId || !forceRefresh) return;
     if (forcedRef.current === workspaceId) return;
     let cancelled = false;
-    setRepositoriesLoading(workspaceId, true);
+    const releaseRequest = beginRepositoryRequest(workspaceId, setRepositoriesLoading);
     listRepositoriesUntilSettled(workspaceId)
       .then((response) => {
         if (cancelled) return;
@@ -81,12 +96,10 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
       .catch(() => {
         // Leave forcedRef unset so the next mount retries; keep cached repos.
       })
-      .finally(() => {
-        if (cancelled) return;
-        setRepositoriesLoading(workspaceId, false);
-      });
+      .finally(releaseRequest);
     return () => {
       cancelled = true;
+      releaseRequest();
     };
   }, [enabled, forceRefresh, workspaceId, setRepositories, setRepositoriesLoading]);
 
@@ -94,7 +107,7 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
     if (!enabled || !workspaceId || forceRefresh) return;
     if (isLoaded) return;
     let cancelled = false;
-    setRepositoriesLoading(workspaceId, true);
+    const releaseRequest = beginRepositoryRequest(workspaceId, setRepositoriesLoading);
     listRepositoriesUntilSettled(workspaceId)
       .then((response) => {
         if (cancelled) return;
@@ -104,12 +117,10 @@ export function useRepositories(workspaceId: string | null, enabled = true, forc
         // Keep the cache unloaded after a failed request. The next dialog
         // mount can retry instead of treating an empty fallback as real.
       })
-      .finally(() => {
-        if (cancelled) return;
-        setRepositoriesLoading(workspaceId, false);
-      });
+      .finally(releaseRequest);
     return () => {
       cancelled = true;
+      releaseRequest();
     };
   }, [enabled, forceRefresh, isLoaded, setRepositories, setRepositoriesLoading, workspaceId]);
 

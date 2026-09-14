@@ -20,6 +20,7 @@ import (
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 const (
@@ -612,7 +613,7 @@ func kubernetesProfileConfigFromMetadata(metadata map[string]interface{}) (kubee
 	return kubeexecutor.ParseProfileConfig(values)
 }
 
-func (r *KubernetesExecutor) RecoverInstances(context.Context) ([]*ExecutorInstance, error) {
+func (r *KubernetesExecutor) RecoverInstances(context.Context, []*models.ExecutorRunning) ([]*ExecutorInstance, error) {
 	return nil, nil
 }
 
@@ -816,6 +817,10 @@ set +a
 if [ ! -f /opt/kandev/prepared ]; then
   sh /opt/kandev/prepare.sh
   : > /opt/kandev/prepared
+fi
+if [ "${` + selectedCheckoutMarker + `:-}" = "1" ]; then
+  ` + selectedCheckoutCredentialScrubCommands + `
+  rm -f /run/kandev/auth.env 2>/dev/null || true
 fi
 exec /opt/kandev/agentctl`
 }

@@ -349,7 +349,12 @@ describe("MessageItem agent error notice", () => {
 
   const REMEDIATION_URL = "https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go";
 
-  function renderNotice(error: { message: string; occurredAt?: string; remediationUrl?: string }) {
+  function renderNotice(error: {
+    message: string;
+    occurredAt?: string;
+    remediationUrl?: string;
+    details?: string;
+  }) {
     render(
       <MessageItem
         item={{
@@ -376,6 +381,26 @@ describe("MessageItem agent error notice", () => {
     expect(screen.getByTestId("last-agent-error-notice").textContent).toContain(
       AGENT_ERROR_MESSAGE,
     );
+  });
+
+  it("uses a touch-sized dismiss target on coarse pointers", () => {
+    renderNotice({ message: AGENT_ERROR_MESSAGE });
+
+    expect(screen.getByRole("button").className).toContain("[@media(pointer:coarse)]:h-11");
+    expect(screen.getByRole("button").className).toContain("[@media(pointer:coarse)]:w-11");
+  });
+
+  it("reveals the sanitized failure cause in a collapsed technical-details disclosure", () => {
+    const details = 'workflow step "Review Step": provider context reset: provider reset timed out';
+    renderNotice({ message: "context reset failed", details });
+
+    const disclosure = screen.getByTestId("last-agent-error-details") as HTMLDetailsElement;
+    expect(disclosure.querySelector("summary")?.textContent).toBe("Technical details");
+    expect(disclosure.open).toBe(false);
+
+    fireEvent.click(screen.getByText("Technical details"));
+    expect(disclosure.open).toBe(true);
+    expect(disclosure.textContent).toContain(details);
   });
 
   it("renders a validated remediation link, and nothing for an invalid URL", () => {
@@ -824,6 +849,43 @@ describe("MessageListStatus", () => {
 
     expect(screen.queryByTestId("conversation-loading-state")).not.toBeNull();
     expect(screen.queryByText("Loading conversation...")).not.toBeNull();
+  });
+
+  it("does not show the empty invitation before history is ready", () => {
+    render(
+      <MessageListStatus
+        isLoadingMore={false}
+        hasMore={false}
+        showLoadingState
+        messagesLoading
+        isInitialLoading
+        messagesCount={0}
+        sessionId="sess-1"
+        historyStatus="loading"
+        onRetryHistory={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("No messages yet. Start the conversation!")).toBeNull();
+    expect(screen.getByTestId("session-history-loading")).toBeTruthy();
+  });
+
+  it("shows the empty invitation after a successful empty history snapshot", () => {
+    render(
+      <MessageListStatus
+        isLoadingMore={false}
+        hasMore={false}
+        showLoadingState={false}
+        messagesLoading={false}
+        isInitialLoading={false}
+        messagesCount={0}
+        sessionId="sess-1"
+        historyStatus="ready"
+        onRetryHistory={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("No messages yet. Start the conversation!")).toBeTruthy();
   });
 });
 

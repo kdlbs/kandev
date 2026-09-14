@@ -128,6 +128,7 @@ type UserSettings struct {
 	PreventAutoStartAgentOnOpen       bool                              `json:"prevent_auto_start_agent_on_open"`
 	UnreadDivider                     bool                              `json:"unread_divider"`
 	AgentGeneratedTaskTitles          bool                              `json:"agent_generated_task_titles"`
+	AutoFocusNewTasks                 bool                              `json:"auto_focus_new_tasks"`
 	MCPTaskAgentProfileDefault        string                            `json:"mcp_task_agent_profile_default"`
 	ShowAnchoredPromptBar             bool                              `json:"show_anchored_prompt_bar"` // desktop-only sticky last-prompt bar
 	ShowScrollToLastPrompt            bool                              `json:"show_scroll_to_last_prompt"`
@@ -174,6 +175,8 @@ type UserSettings struct {
 	QuickChatTabOrderByWorkspace      map[string][]string               `json:"quick_chat_tab_order_by_workspace"`
 	KanbanHiddenStepIDs               map[string][]string               `json:"kanban_hidden_step_ids"`
 	WorkflowIDsWithAutoHideEmptySteps []string                          `json:"workflow_ids_with_auto_hide_empty_steps"`
+	KanbanSort                        string                            `json:"kanban_sort"`
+	KanbanPriorityFilterTokens        []string                          `json:"kanban_priority_filter_tokens"`
 	Revision                          int64                             `json:"revision"`
 	CreatedAt                         time.Time                         `json:"created_at"`
 	UpdatedAt                         time.Time                         `json:"updated_at"`
