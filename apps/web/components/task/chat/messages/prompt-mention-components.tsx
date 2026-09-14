@@ -767,6 +767,10 @@ function PromptMentionTouchPreview({
           aria-label={label}
           title={labelClassName ? label : undefined}
           className={className}
+          onMouseDown={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+          }}
           onClick={(event) => event.stopPropagation()}
         >
           <PromptMentionLabel value={value} className={labelClassName} />

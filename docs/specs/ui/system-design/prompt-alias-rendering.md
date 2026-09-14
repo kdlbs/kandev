@@ -260,7 +260,9 @@ The existing form body and bounded editor retain their scroll responsibilities.
 The preview drawer retains its safe-area-aware scroll body. No navigation changes.
 
 Preserve the node's `deleteNode` path, event propagation guards, selection,
-plain-text serialization, and undo history. Preview dismissal returns to the
+plain-text serialization, and undo history. Preview triggers guard their pointer
+press so opening and dismissing a touch preview does not leave the atom selected
+for replacement by the next typed character. Preview dismissal returns to the
 composer without changing the draft. Removal never triggers preview or submission.
 No new store, backend, persistence, API, permissions, dependencies, or telemetry.
 

@@ -197,6 +197,8 @@ PR fixup remediation on 2026-09-14:
 - Split touch and hover preview prop contracts, used the existing localized
   `task:prompt` description for the touch drawer, and made mobile containment
   assertions cover both axes for both actionable children.
+- Guarded the touch preview trigger's pointer press so dismissing its drawer
+  does not leave the atom selected when the user continues typing.
 - Focused Vitest regressions passed 3 files and 35 tests; typecheck and the
   targeted ESLint command passed.
 - The mobile managed E2E suite passed 2 tests after the fixup changes.
