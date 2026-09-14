@@ -78,6 +78,15 @@ func (r *workflowRepo) ListWorkflows(_ context.Context, workspaceID string, incl
 	return r.byWorkspace[workspaceID], nil
 }
 
+func (r *workflowRepo) ListTasksForDeletion(
+	_ context.Context, workspaceID, workflowID string, page, pageSize int,
+) ([]*models.Task, int, error) {
+	if page != 1 || pageSize <= 0 {
+		return nil, 0, nil
+	}
+	return nil, 0, nil
+}
+
 func (r *workflowRepo) CreateWorkflow(_ context.Context, workflow *models.Workflow) error {
 	if r.createErr != nil {
 		return r.createErr

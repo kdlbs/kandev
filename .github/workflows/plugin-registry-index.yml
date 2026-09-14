@@ -78,6 +78,10 @@ jobs:
         working-directory: apps/backend
         run: go build -o "$RUNNER_TEMP/plugin-package-verify" ./cmd/plugin-package-verify
 
+      - name: Build canvas package inspector
+        working-directory: apps/backend
+        run: go build -o bin/canvas-package ./cmd/canvas-package
+
       - name: Fetch last known-good official index
         run: |
           if ! curl --fail --location --retry 3 --retry-all-errors \
@@ -96,6 +100,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PLUGIN_PACKAGE_VERIFIER: ${{ runner.temp }}/plugin-package-verify
           PLUGIN_REGISTRY_PRIOR_INDEX: ${{ runner.temp }}/prior-plugin-index.json
+          KANDEV_CANVAS_PACKAGE_INSPECTOR: apps/backend/bin/canvas-package
         run: node plugin-registry/build-index.mjs
 
       - name: Stage Pages site

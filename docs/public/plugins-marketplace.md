@@ -41,6 +41,12 @@ sidebar.
   Uninstall and an **Update** button when a newer version is available.
 - **Browse**: the merged catalog across all enabled sources.
 
+When canvases are enabled, a **Canvases** tab appears beside these tabs. It
+uses the same configured sources but keeps canvas installation separate from
+native plugin installation. Canvas installation is workspace-scoped and is
+available to an authorized workspace user. Native plugin management remains
+administrator-scoped.
+
 ### Browse and install
 
 Open **Settings > Plugins > Browse**. Each plugin shows as a card with its
@@ -69,6 +75,25 @@ checks. A card for a plugin you already have at the latest version shows
 Plugin-provided icons render on the cards. A plugin that ships an icon (via the
 manifest's `icon` field) shows it; otherwise the card falls back to a neutral
 letter tile.
+
+### Browse and install canvases
+
+Open **Settings > Plugins > Canvases** after the canvas feature is enabled.
+Choose the target workspace, then search, filter, and sort the catalog. The
+first registry preview is the cover. Open a card to review its ordered preview
+gallery, author, license, compatibility, repository, and declared permissions.
+Use **Review and install** to inspect the exact package before confirmation.
+
+The install dialog also accepts a local `.tar.gz` upload or an HTTPS direct
+link. These paths do not need a registry listing or preview images. All three
+paths inspect the package and show permissions before creating a new workspace
+canvas. A successful install shows **Open canvas**. A failed or expired review
+must be reviewed again and cannot silently install different bytes.
+
+Registry previews are remote listing metadata. Kandev does not execute an image
+or canvas application in the detail view, and preview URLs are not package
+permissions. A broken image has a placeholder and **Retry**; it does not block
+package inspection or installation.
 
 ### Keep plugins updated
 

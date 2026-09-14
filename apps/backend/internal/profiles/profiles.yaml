@@ -106,6 +106,15 @@ features:
     dev:  "true"
     e2e:  "true"
 
+  # Needs-you Inbox: a workspace-scoped sidebar destination listing exactly
+  # the answerable clarification bundles for the active workspace. Off in
+  # prod until the feature is user-ready; on in dev/e2e so contributors and
+  # tests exercise it.
+  KANDEV_FEATURES_NEEDS_YOU_INBOX:
+    prod: "false"
+    dev:  "true"
+    e2e:  "true"
+
   # Agent survival across a backend restart (worktree/local executors only).
   # Off in every profile: it replaces the standalone control server's
   # kill-on-restart safeguard with an adoption handshake, and is unavailable

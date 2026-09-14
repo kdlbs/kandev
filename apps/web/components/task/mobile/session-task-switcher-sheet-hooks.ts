@@ -451,7 +451,11 @@ function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
   );
 
   const handleTaskCreated = useCallback(
-    (task: Task, _mode: "create" | "edit", meta?: { taskSessionId?: string | null }) => {
+    (
+      task: Task,
+      _mode: "create" | "edit",
+      meta?: { taskSessionId?: string | null; autoFocus?: boolean },
+    ) => {
       store.setState((state) => {
         if (state.kanban.workflowId !== task.workflow_id) return state;
         const existing = state.kanban.tasks.find(
@@ -472,6 +476,10 @@ function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
           },
         };
       });
+      if (meta?.autoFocus === false) {
+        onOpenChange(false);
+        return;
+      }
       setActiveTask(task.id);
       if (meta?.taskSessionId) {
         setActiveSession(task.id, meta.taskSessionId);

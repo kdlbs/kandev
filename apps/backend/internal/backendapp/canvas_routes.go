@@ -30,10 +30,11 @@ import (
 // and host operations. Source transfer and publishing stay on the agent MCP
 // path; browsers receive only metadata and short-lived runtime capabilities.
 type canvasHTTPHandler struct {
-	canvases *canvasservice.Service
-	plugins  *plugins.Service
-	tasks    *taskservice.Service
-	editor   *canvasEditService
+	canvases     *canvasservice.Service
+	plugins      *plugins.Service
+	tasks        *taskservice.Service
+	editor       *canvasEditService
+	distribution *canvasservice.DistributionService
 }
 
 type canvasEditTaskStore interface {
@@ -337,9 +338,10 @@ func registerCanvasRoutes(p routeParams) {
 		return
 	}
 	h := &canvasHTTPHandler{
-		canvases: p.services.Canvas,
-		plugins:  p.services.Plugins,
-		tasks:    p.taskSvc,
+		canvases:     p.services.Canvas,
+		plugins:      p.services.Plugins,
+		tasks:        p.taskSvc,
+		distribution: p.services.CanvasDistribution,
 	}
 	if p.taskSvc != nil && p.taskRepo != nil && p.orchestratorSvc != nil && p.lifecycleMgr != nil {
 		instanceStore := p.services.Plugins.Instances()
@@ -361,6 +363,7 @@ func registerCanvasRoutes(p routeParams) {
 	p.router.GET("/api/v1/workspaces/:id/canvases", h.listWorkspace)
 	p.router.GET("/api/v1/canvases/workspace/:workspaceID", h.listWorkspace)
 	p.router.GET("/api/v1/canvases/workspaces/:workspaceID", h.listWorkspace)
+	registerCanvasDistributionRoutes(p.router, h)
 	p.router.GET("/api/v1/canvases/:canvasID", h.get)
 	p.router.GET("/api/v1/canvases/:canvasID/releases", h.releases)
 	p.router.GET("/api/v1/canvases/:canvasID/promotion-preview", h.promotionPreview)

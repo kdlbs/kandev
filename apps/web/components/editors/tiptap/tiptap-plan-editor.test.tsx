@@ -46,6 +46,7 @@ vi.mock("./plan-slash-menu", () => ({ PlanSlashMenu: () => null }));
 
 import { TipTapPlanEditor } from "./tiptap-plan-editor";
 
+const EDITOR_SELECTOR = ".ProseMirror";
 const TABLE_MARKDOWN = ["| Left | Right |", "| --- | --- |", "| One | Two |"].join("\n");
 
 function hasPluginKeyPrefix(editor: Editor, prefix: string): boolean {
@@ -226,7 +227,7 @@ describe("TipTapPlanEditor mobile formatting clearance", () => {
 
     act(() => planBubble.onMobileVisibilityChange?.(true, 300, true));
 
-    const editorContent = editorScrollContainer?.querySelector<HTMLElement>(".ProseMirror");
+    const editorContent = editorScrollContainer?.querySelector<HTMLElement>(EDITOR_SELECTOR);
     expect(editorContent?.style.getPropertyValue("--plan-toolbar-clearance")).toBe(
       "max(48px, calc(348px - 3.25rem - env(safe-area-inset-bottom, 0px)))",
     );
@@ -340,4 +341,29 @@ describe("TipTapPlanEditor comment projection", () => {
     });
     expect(onCommentDeleted).toHaveBeenCalledTimes(1);
   });
+});
+
+// @covers AC-TASKS-PLAN-COMMENTS-001.9
+it("toggles read-only without replacing the editor or publishing content", async () => {
+  const onChange = vi.fn();
+  const onReady = vi.fn();
+  const props = { taskId: "task-1", value: TABLE_MARKDOWN, onChange, onEditorReady: onReady };
+  const view = render(<TipTapPlanEditor {...props} />);
+  await waitFor(() => expect(onReady).toHaveBeenCalledTimes(1));
+  const editor = onReady.mock.calls[0][0] as Editor;
+  const input = view.container.querySelector(EDITOR_SELECTOR);
+  expect(editor.isEditable).toBe(true);
+
+  view.rerender(<TipTapPlanEditor {...props} readOnly />);
+  expect(editor.isEditable).toBe(false);
+  expect(view.container.querySelector(EDITOR_SELECTOR)).toBe(input);
+  expect(input?.getAttribute("contenteditable")).toBe("false");
+
+  view.rerender(<TipTapPlanEditor {...props} readOnly={false} />);
+  expect(editor.isEditable).toBe(true);
+  expect(view.container.querySelector(EDITOR_SELECTOR)).toBe(input);
+  expect(input?.getAttribute("contenteditable")).toBe("true");
+  expect(onReady).toHaveBeenCalledTimes(1);
+  expect(onChange).not.toHaveBeenCalled();
+  expect(getMarkdown(editor)).toContain("Left");
 });
