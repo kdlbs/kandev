@@ -1001,6 +1001,13 @@ func (s *Service) AddTrigger(ctx context.Context, req *AddTriggerRequest) (*Auto
 }
 
 // UpdateTrigger updates a trigger.
+func (s *Service) GetTrigger(ctx context.Context, id string) (*AutomationTrigger, error) {
+	if err := s.authorizeTrigger(ctx, id); err != nil {
+		return nil, err
+	}
+	return s.store.GetTrigger(ctx, id)
+}
+
 func (s *Service) UpdateTrigger(ctx context.Context, id string, req *UpdateTriggerRequest) error {
 	if err := s.authorizeTrigger(ctx, id); err != nil {
 		return err

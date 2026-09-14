@@ -9,6 +9,8 @@ import {
 } from "@/components/task/task-session-sidebar-aggregate";
 import type { TaskMoveWorkflow } from "@/components/task/task-move-context-menu";
 import type { KanbanState } from "@/lib/state/slices/kanban/types";
+import type { WorkspaceContextReadError } from "@/lib/state/slices/kanban/types";
+import type { AppState } from "@/lib/state/store";
 import { getDestinationQueue, type WipQueueStatus } from "@/lib/kanban/wip-queue";
 
 export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
@@ -17,7 +19,13 @@ export type WorkspaceSidebarTasksResult = AggregatedSidebarTasks & {
   isLoading: boolean;
   archivedError: string | null;
   retryArchivedTasks: () => void;
+  workspaceContextError: WorkspaceContextReadError | null;
+  workspaceContextPending: boolean;
+  workspaceContextAccessDenied: boolean;
+  retryWorkspaceContext: () => void;
 };
+
+const NOOP_REFRESH = () => {};
 
 type SidebarTask = AggregatedSidebarTasks["allTasks"][number];
 
@@ -106,6 +114,53 @@ function buildWipQueueByTaskId(
   return result;
 }
 
+function matchesWorkspaceContextRead(
+  read: AppState["workspaceContextRead"],
+  generation: number,
+  workspaceId: string | null,
+): boolean {
+  return read?.workspaceId === workspaceId && read?.generation === generation;
+}
+
+function workspaceContextErrors(
+  read: AppState["workspaceContextRead"],
+): WorkspaceContextReadError[] {
+  return [...Object.values(read?.errors ?? {}), read?.snapshotError ?? null].filter(
+    (error): error is WorkspaceContextReadError => error !== null,
+  );
+}
+
+function workspaceContextIsPending(read: AppState["workspaceContextRead"]): boolean {
+  const pendingCollection = Object.entries(read?.pending ?? {}).some(
+    ([collection, pending]) =>
+      pending &&
+      (read?.requestIds === undefined ||
+        read.requestIds[collection as keyof typeof read.requestIds] !== null),
+  );
+  const pendingSnapshot =
+    read?.snapshotPending === true &&
+    (read.snapshotRequestId === undefined || read.snapshotRequestId !== null);
+  return pendingCollection || pendingSnapshot;
+}
+
+function getWorkspaceContextStatus(
+  workspaceContextRead: AppState["workspaceContextRead"],
+  workspaceContextGeneration: number,
+  workspaceId: string | null,
+) {
+  const matches = matchesWorkspaceContextRead(
+    workspaceContextRead,
+    workspaceContextGeneration,
+    workspaceId,
+  );
+  const errors = matches ? workspaceContextErrors(workspaceContextRead) : [];
+  return {
+    error: errors.find((error) => error === "access_denied") ?? errors[0] ?? null,
+    accessDenied: errors.includes("access_denied"),
+    pending: matches && workspaceContextIsPending(workspaceContextRead),
+  };
+}
+
 export function mergeSidebarArchivedTasks(
   activeTasks: AggregatedSidebarTasks["allTasks"],
   archivedTasks: KanbanState["tasks"],
@@ -162,6 +217,11 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
   const activeKanbanWorkflowId = useAppStore((state) => state.kanban.workflowId);
   const activeKanbanTasks = useAppStore((state) => state.kanban.tasks);
   const activeKanbanSteps = useAppStore((state) => state.kanban.steps);
+  const workspaceContextGeneration = useAppStore((state) => state.workspaceContextGeneration ?? 0);
+  const workspaceContextRead = useAppStore((state) => state.workspaceContextRead);
+  const retryWorkspaceContext = useAppStore(
+    (state) => state.requestWorkspaceContextRefresh ?? NOOP_REFRESH,
+  );
 
   // While `workspaceId` is unresolved (initial SSR / pre-hydration), return an
   // empty scope rather than every workflow in the store — otherwise snapshots
@@ -224,6 +284,12 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
     [filteredWorkflows],
   );
 
+  const workspaceContextStatus = getWorkspaceContextStatus(
+    workspaceContextRead,
+    workspaceContextGeneration,
+    workspaceId,
+  );
+
   // Only flash a skeleton on the very first fetch (no snapshots yet); refreshes
   // shouldn't blow away the existing list.
   const isLoading =
@@ -239,5 +305,9 @@ export function useWorkspaceSidebarTasks(workspaceId: string | null): WorkspaceS
     isLoading,
     archivedError: archived.error,
     retryArchivedTasks: archived.refresh,
+    workspaceContextError: workspaceContextStatus.error,
+    workspaceContextPending: workspaceContextStatus.pending,
+    workspaceContextAccessDenied: workspaceContextStatus.accessDenied,
+    retryWorkspaceContext,
   };
 }

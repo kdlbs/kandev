@@ -75,6 +75,11 @@ var yamlOnlyStartupKeys = map[string]struct{}{
 	"agentctl.idleTimeout":               {},
 	"agentctl.idleReaperInterval":        {},
 	"agentctl.notificationQueueCapacity": {},
+	"agentctl.recoveryDeadline":          {},
+	"agentctl.recoveryReadTimeout":       {},
+	"agentctl.recoveryReadRetries":       {},
+	"agentctl.unownedPeriod":             {},
+	"agentctl.detachedEventLimit":        {},
 	"planning.coalesceWindowMs":          {},
 	"office.schedulerTickMs":             {},
 	"observability.otlpEndpoint":         {},
@@ -291,6 +296,11 @@ func applyStartupDefaults(cfg *Config, yamlKeys map[string]bool, profileDefaults
 	setDefaultDuration("agentctl.idleTimeout", &cfg.Agentctl.IdleTimeout, time.Hour)
 	setDefaultDuration("agentctl.idleReaperInterval", &cfg.Agentctl.IdleReaperInterval, time.Minute)
 	setDefaultInt("agentctl.notificationQueueCapacity", &cfg.Agentctl.NotificationQueueCapacity, 131072)
+	setDefaultDuration("agentctl.recoveryDeadline", &cfg.Agentctl.RecoveryDeadline, 30*time.Second)
+	setDefaultDuration("agentctl.recoveryReadTimeout", &cfg.Agentctl.RecoveryReadTimeout, 2*time.Second)
+	setDefaultInt("agentctl.recoveryReadRetries", &cfg.Agentctl.RecoveryReadRetries, 2)
+	setDefaultDuration("agentctl.unownedPeriod", &cfg.Agentctl.UnownedPeriod, 10*time.Minute)
+	setDefaultInt("agentctl.detachedEventLimit", &cfg.Agentctl.DetachedEventLimit, 100)
 	setDefaultInt("planning.coalesceWindowMs", &cfg.Planning.CoalesceWindowMs, 300000)
 	setDefaultInt("office.schedulerTickMs", &cfg.Office.SchedulerTickMs, 5000)
 	if !yamlKeys["observability.otlpEndpoint"] {
@@ -314,6 +324,16 @@ func applyStartupEnvironment(cfg *Config, envSnapshot map[string]string, sources
 	applyNonNegativeDurationEnv("agentctl.idleTimeout", &cfg.Agentctl.IdleTimeout, time.Hour, envSnapshot, sources)
 	applyDurationEnv("agentctl.idleReaperInterval", &cfg.Agentctl.IdleReaperInterval, time.Minute, envSnapshot, sources)
 	applyBoundedIntEnv("agentctl.notificationQueueCapacity", &cfg.Agentctl.NotificationQueueCapacity, 131072, 1024, 131072, envSnapshot, sources)
+	// UnownedPeriod's ordering-against-idle-timeout clamp and 1-minute floor
+	// are applied by agentctl itself at control-server start (it is the only
+	// place both values are simultaneously known); the backend only carries
+	// a sane positive duration through to the managed-child startup contract.
+	applyNonNegativeDurationEnv("agentctl.unownedPeriod", &cfg.Agentctl.UnownedPeriod, 10*time.Minute, envSnapshot, sources)
+	// agentctl.recoveryDeadline, agentctl.recoveryReadTimeout,
+	// agentctl.recoveryReadRetries and agentctl.detachedEventLimit are
+	// validated strictly (reject, never clamp) by applySurvivalRecoveryEnv,
+	// called separately by the caller so an out-of-range value fails startup
+	// instead of silently substituting the built-in default.
 	applyNonNegativeIntEnv("planning.coalesceWindowMs", &cfg.Planning.CoalesceWindowMs, 300000, envSnapshot, sources)
 	applyPositiveIntEnv("office.schedulerTickMs", &cfg.Office.SchedulerTickMs, 5000, envSnapshot, sources)
 	applyStringEnvAllowEmpty("observability.otlpEndpoint", &cfg.Observability.OTLPEndpoint, envSnapshot, sources)
@@ -433,6 +453,68 @@ func applyBoundedIntEnv(key string, target *int, fallback, minimum, maximum int,
 	}
 	*target = parsed
 	sources[key] = SourceEnvironment
+}
+
+// applySurvivalRecoveryEnv validates the four agent-survival tunables whose
+// contract requires rejecting an out-of-range value at startup rather than
+// silently substituting the built-in default (unlike every other env-sourced
+// setting in this file, which falls back to its default on a bad value).
+func applySurvivalRecoveryEnv(cfg *Config, env map[string]string, sources map[string]SettingSource) error {
+	if err := applyStrictDurationEnv("agentctl.recoveryDeadline", &cfg.Agentctl.RecoveryDeadline, time.Second, 5*time.Minute, env, sources); err != nil {
+		return err
+	}
+	if err := applyStrictDurationEnv("agentctl.recoveryReadTimeout", &cfg.Agentctl.RecoveryReadTimeout, 100*time.Millisecond, time.Hour, env, sources); err != nil {
+		return err
+	}
+	if err := applyStrictIntEnv("agentctl.recoveryReadRetries", &cfg.Agentctl.RecoveryReadRetries, 0, 10, env, sources); err != nil {
+		return err
+	}
+	if err := applyStrictIntEnv("agentctl.detachedEventLimit", &cfg.Agentctl.DetachedEventLimit, 1, 10000, env, sources); err != nil {
+		return err
+	}
+	return nil
+}
+
+func applyStrictDurationEnv(key string, target *time.Duration, minimum, maximum time.Duration, env map[string]string, sources map[string]SettingSource) error {
+	entry, ok := CatalogEntryForKey(key)
+	if !ok {
+		return nil
+	}
+	raw, found := nonEmptyEnv(env, entry.EnvVars...)
+	if !found {
+		return nil
+	}
+	parsed, err := time.ParseDuration(strings.TrimSpace(raw))
+	if err != nil {
+		return fmt.Errorf("%s: invalid duration %q from %s", key, raw, entry.EnvVars[0])
+	}
+	if parsed < minimum || parsed > maximum {
+		return fmt.Errorf("%s: %s is outside the accepted range [%s, %s]", key, parsed, minimum, maximum)
+	}
+	*target = parsed
+	sources[key] = SourceEnvironment
+	return nil
+}
+
+func applyStrictIntEnv(key string, target *int, minimum, maximum int, env map[string]string, sources map[string]SettingSource) error {
+	entry, ok := CatalogEntryForKey(key)
+	if !ok {
+		return nil
+	}
+	raw, found := nonEmptyEnv(env, entry.EnvVars...)
+	if !found {
+		return nil
+	}
+	parsed, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil {
+		return fmt.Errorf("%s: invalid integer %q from %s", key, raw, entry.EnvVars[0])
+	}
+	if parsed < minimum || parsed > maximum {
+		return fmt.Errorf("%s: %d is outside the accepted range [%d, %d]", key, parsed, minimum, maximum)
+	}
+	*target = parsed
+	sources[key] = SourceEnvironment
+	return nil
 }
 
 func applyBoolEnv(key string, target *bool, fallback bool, env map[string]string, sources map[string]SettingSource) {

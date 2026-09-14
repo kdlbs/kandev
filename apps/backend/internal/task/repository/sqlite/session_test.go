@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/jmoiron/sqlx"
-
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
@@ -102,6 +101,123 @@ func TestTaskSessionWorkspacePathUsesCurrentEnvironmentRoot(t *testing.T) {
 	}
 }
 
+// ListLiveWorkspaceSessions backs the orphan-reap ownership check's other-task
+// path resolution. It must report the same effective (environment-overridden)
+// workspace_path as GetTaskSession/ListTaskSessions above, never the stale
+// task_sessions column left behind after the linked environment's root moved -
+// a check built on the stale column would compare candidate cwds against a
+// path that is no longer actually owned by anyone, missing real ownership.
+func TestListLiveWorkspaceSessionsUsesCurrentEnvironmentRootNotStaleSessionColumn(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const (
+		taskID    = "task-live-workspace-root"
+		sessionID = "session-live-workspace-root"
+		envID     = "env-live-workspace-root"
+	)
+
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Live workspace root"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID:            envID,
+		TaskID:        taskID,
+		ExecutorType:  string(models.ExecutorTypeWorktree),
+		Status:        models.TaskEnvironmentStatusReady,
+		WorkspacePath: "/stale-root/kandev",
+	}); err != nil {
+		t.Fatalf("CreateTaskEnvironment: %v", err)
+	}
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+		ID:                sessionID,
+		TaskID:            taskID,
+		TaskEnvironmentID: envID,
+		WorkspacePath:     "/stale-root/kandev",
+		State:             models.TaskSessionStateRunning,
+	}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+
+	// The environment's root moves (e.g. a promoted multi-repo task), but
+	// nothing ever rewrites the session row's own workspace_path column -
+	// that staleness is the case ListLiveWorkspaceSessions must not surface.
+	env, err := repo.GetTaskEnvironment(ctx, envID)
+	if err != nil {
+		t.Fatalf("GetTaskEnvironment: %v", err)
+	}
+	env.WorkspacePath = "/current-root"
+	if err := repo.UpdateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("UpdateTaskEnvironment: %v", err)
+	}
+
+	live, err := repo.ListLiveWorkspaceSessions(ctx)
+	if err != nil {
+		t.Fatalf("ListLiveWorkspaceSessions: %v", err)
+	}
+	if len(live) != 1 {
+		t.Fatalf("expected exactly one live session, got %+v", live)
+	}
+	if live[0].WorkspacePath != "/current-root" {
+		t.Fatalf("ListLiveWorkspaceSessions WorkspacePath = %q, want the current environment root %q (not the stale session column)",
+			live[0].WorkspacePath, "/current-root")
+	}
+}
+
+// AC-TASKS-ORPHAN-REAP-003.2: ListLiveWorkspaceSessions is the ownership
+// check's authorization boundary, so the state list it filters on must be
+// exactly the five live states, no more and no fewer - a terminal-state
+// session must never block a reap root, and every live state must.
+func TestListLiveWorkspaceSessionsFiltersToExactlyTheLiveStates(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-live-state-filter"
+	if err := repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Live state filter"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+
+	liveStates := map[models.TaskSessionState]bool{
+		models.TaskSessionStateCreated:         true,
+		models.TaskSessionStateStarting:        true,
+		models.TaskSessionStateRunning:         true,
+		models.TaskSessionStateIdle:            true,
+		models.TaskSessionStateWaitingForInput: true,
+		models.TaskSessionStateCompleted:       false,
+		models.TaskSessionStateFailed:          false,
+		models.TaskSessionStateCancelled:       false,
+	}
+
+	for state := range liveStates {
+		sessionID := "session-" + strings.ToLower(string(state))
+		if err := repo.CreateTaskSession(ctx, &models.TaskSession{
+			ID:            sessionID,
+			TaskID:        taskID,
+			WorkspacePath: "/live-state-filter/" + strings.ToLower(string(state)),
+			State:         state,
+		}); err != nil {
+			t.Fatalf("CreateTaskSession(%s): %v", state, err)
+		}
+	}
+
+	live, err := repo.ListLiveWorkspaceSessions(ctx)
+	if err != nil {
+		t.Fatalf("ListLiveWorkspaceSessions: %v", err)
+	}
+
+	gotStates := make(map[models.TaskSessionState]bool, len(live))
+	for _, sess := range live {
+		gotStates[sess.State] = true
+	}
+	for state, wantLive := range liveStates {
+		if gotStates[state] != wantLive {
+			t.Fatalf("state %s: ListLiveWorkspaceSessions returned it = %v, want %v (full result: %+v)",
+				state, gotStates[state], wantLive, live)
+		}
+	}
+	if len(live) != 5 {
+		t.Fatalf("expected exactly the 5 live-state sessions, got %d: %+v", len(live), live)
+	}
+}
+
 func TestTaskSessionWorkspacePathFallsBackWithoutEnvironment(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -171,6 +287,49 @@ func TestCreateOfficeTaskSessionMarksOnlyTheFirstConcurrentSessionAsOrigin(t *te
 	}
 }
 
+func TestCreateTaskSessionPersistsImmutableWorkflowInitialSnapshot(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	const taskID = "task-workflow-initial-snapshot"
+	require.NoError(t, repo.CreateTask(ctx, &models.Task{ID: taskID, Title: "Initial snapshot"}))
+
+	first := &models.TaskSession{ID: "initial-snapshot-session", TaskID: taskID, AgentProfileID: "profile-original"}
+	require.NoError(t, repo.CreateTaskSession(ctx, first))
+
+	task, err := repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	snapshot, ok := models.LoadWorkflowInitialSessionSnapshot(task.Metadata)
+	require.True(t, ok)
+	require.Equal(t, models.WorkflowInitialSessionSnapshot{
+		SessionID:      first.ID,
+		AgentProfileID: first.AgentProfileID,
+	}, snapshot)
+
+	second := &models.TaskSession{
+		ID:             "later-snapshot-session",
+		TaskID:         taskID,
+		AgentProfileID: "profile-later",
+		Metadata: map[string]interface{}{
+			models.SessionMetaKeyOrigin: models.SessionOriginTaskInitial,
+		},
+	}
+	require.NoError(t, repo.CreateTaskSession(ctx, second))
+
+	task, err = repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	snapshot, ok = models.LoadWorkflowInitialSessionSnapshot(task.Metadata)
+	require.True(t, ok)
+	require.Equal(t, first.ID, snapshot.SessionID)
+	require.Equal(t, first.AgentProfileID, snapshot.AgentProfileID)
+
+	require.NoError(t, repo.DeleteTaskSession(ctx, first))
+	task, err = repo.GetTask(ctx, taskID)
+	require.NoError(t, err)
+	snapshot, ok = models.LoadWorkflowInitialSessionSnapshot(task.Metadata)
+	require.True(t, ok)
+	require.Equal(t, first.ID, snapshot.SessionID)
+}
+
 func TestCreateTaskSessionWithInitialRuntimeSeedConsumesOnceAcrossConcurrentAndReplacementSessions(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
@@ -232,7 +391,9 @@ func TestCreateTaskSessionWithInitialRuntimeSeedConsumesOnceAcrossConcurrentAndR
 		t.Fatalf("initial runtime seed profile remained in task metadata: %#v", task.Metadata)
 	}
 
-	require.NoError(t, repo.DeleteTaskSession(ctx, initialSessionID))
+	initialSession, err := repo.GetTaskSession(ctx, initialSessionID)
+	require.NoError(t, err)
+	require.NoError(t, repo.DeleteTaskSession(ctx, initialSession))
 	replacement := &models.TaskSession{
 		ID:             "initial-runtime-session-replacement",
 		TaskID:         taskID,
@@ -684,6 +845,54 @@ func TestClaimPromptableTaskSessionIfActive(t *testing.T) {
 	})
 }
 
+func TestPromptableSessionClaimAndRestoreRequireExactIdentity(t *testing.T) {
+	ctx := context.Background()
+	repo := newRepoForSessionTests(t)
+	seedForMsgTest(t, repo, "task-identity", "session-identity", "turn-identity")
+	_, err := repo.db.ExecContext(
+		ctx,
+		`UPDATE task_sessions SET queue_incarnation_id = ? WHERE id = ?`,
+		"current-incarnation",
+		"session-identity",
+	)
+	require.NoError(t, err)
+	require.NoError(t, repo.UpdateTaskSessionState(
+		ctx, "session-identity", models.TaskSessionStateWaitingForInput, "",
+	))
+	session, err := repo.GetTaskSession(ctx, "session-identity")
+	require.NoError(t, err)
+	require.NotEmpty(t, session.QueueIncarnationID)
+
+	stale, err := repo.ClaimPromptableTaskSessionIfActiveForIdentity(
+		ctx, session.TaskID, session.ID, "replaced-incarnation",
+	)
+	require.NoError(t, err)
+	require.Equal(t, models.PromptableTaskSessionInactive, stale.Status)
+	persisted, err := repo.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, persisted.State)
+
+	claim, err := repo.ClaimPromptableTaskSessionIfActiveForIdentity(
+		ctx, session.TaskID, session.ID, session.QueueIncarnationID,
+	)
+	require.NoError(t, err)
+	require.Equal(t, models.PromptableTaskSessionClaimed, claim.Status)
+	restored, _, err := repo.UpdateTaskSessionStateIfCurrentIdentity(
+		ctx,
+		session.TaskID,
+		session.ID,
+		"replaced-incarnation",
+		models.TaskSessionStateRunning,
+		models.TaskSessionStateWaitingForInput,
+		"",
+	)
+	require.NoError(t, err)
+	require.False(t, restored)
+	persisted, err = repo.GetTaskSession(ctx, session.ID)
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateRunning, persisted.State)
+}
+
 func TestClaimPromptableTaskSessionIfActive_ZeroRowAfterConcurrentBusyTransition(t *testing.T) {
 	ctx := context.Background()
 	repo := newRepoForSessionTests(t)
@@ -759,6 +968,45 @@ func TestSetSessionMetadataKeyIfAbsentSQLiteIsWriteOnce(t *testing.T) {
 	if !ok || baseline["effort"] != "high" {
 		t.Fatalf("baseline = %#v, want effort=high", session.Metadata["baseline"])
 	}
+}
+
+func TestSetSessionMetadataKeyIfStateGuardsTheSessionState(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-session-marker", "session-session-marker", "turn-session-marker")
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "session-session-marker", "keep", "value"))
+
+	changed, err := repo.SetSessionMetadataKeyIfState(
+		ctx,
+		"session-session-marker",
+		"completion_follow_up",
+		true,
+		models.TaskSessionStateCreated,
+	)
+	require.NoError(t, err)
+	require.True(t, changed)
+
+	require.NoError(t, repo.UpdateTaskSessionState(
+		ctx,
+		"session-session-marker",
+		models.TaskSessionStateCancelled,
+		"stopped",
+	))
+	changed, err = repo.SetSessionMetadataKeyIfState(
+		ctx,
+		"session-session-marker",
+		"completion_follow_up",
+		false,
+		models.TaskSessionStateCreated,
+	)
+	require.NoError(t, err)
+	require.False(t, changed)
+
+	stored, err := repo.GetTaskSession(ctx, "session-session-marker")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateCancelled, stored.State)
+	require.Equal(t, true, stored.Metadata["completion_follow_up"])
+	require.Equal(t, "value", stored.Metadata["keep"])
 }
 
 func TestSetSessionMetadataKeyIfAbsentOrDifferentStepSQLiteReplacesOnlyStaleStep(t *testing.T) {
@@ -1478,6 +1726,7 @@ func TestCancelActiveTaskSessionIsTerminalSafe(t *testing.T) {
 		t.Fatalf("seed running state: %v", err)
 	}
 	insertSession(t, repo, "session-completed", "task-cas", string(models.TaskSessionStateCompleted))
+	insertSession(t, repo, "session-idle", "task-cas", string(models.TaskSessionStateIdle))
 
 	changed, cancelledAt, err := repo.CancelActiveTaskSession(ctx, "session-running", "coordinator stop")
 	if err != nil {
@@ -1488,6 +1737,16 @@ func TestCancelActiveTaskSessionIsTerminalSafe(t *testing.T) {
 	}
 	if got := sessionState(t, repo, "session-running"); got != string(models.TaskSessionStateCancelled) {
 		t.Fatalf("running session state = %q, want CANCELLED", got)
+	}
+	changed, _, err = repo.CancelActiveTaskSession(ctx, "session-idle", "coordinator stop")
+	if err != nil {
+		t.Fatalf("cancel idle session: %v", err)
+	}
+	if !changed {
+		t.Fatal("idle session was not cancelled")
+	}
+	if got := sessionState(t, repo, "session-idle"); got != string(models.TaskSessionStateCancelled) {
+		t.Fatalf("idle session state = %q, want CANCELLED", got)
 	}
 	cancelled, err := repo.GetTaskSession(ctx, "session-running")
 	if err != nil {

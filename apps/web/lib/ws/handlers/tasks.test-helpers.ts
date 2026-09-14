@@ -22,6 +22,7 @@ export function makeStore(initial: Partial<AppState> = {}) {
       resumeSkippedSessionIds: {},
     },
     taskSessionsByTask: { itemsByTaskId: {}, loadedByTaskId: {}, loadingByTaskId: {} },
+    taskSessions: { items: {} },
     environmentIdBySessionId: {},
     setActiveSession: vi.fn((taskId: string, sessionId: string | null) => {
       state = {
@@ -51,6 +52,7 @@ export function makeStore(initial: Partial<AppState> = {}) {
     setTaskDeletedNotification: vi.fn(),
     upsertQuickChatSessionFromEvent: vi.fn(),
     removeQuickChatSessionsForTask: vi.fn(),
+    clearQueueStatus: vi.fn(),
     ...initial,
   } as unknown as AppState;
 
@@ -94,6 +96,15 @@ export function makeMessage(payload: Record<string, unknown>) {
     action: "task.updated" as const,
     payload,
   } as Parameters<NonNullable<ReturnType<typeof registerTasksHandlers>["task.updated"]>>[0];
+}
+
+export function makeStateChangedMessage(payload: Record<string, unknown>) {
+  return {
+    id: "msg-1",
+    type: "notification" as const,
+    action: "task.state_changed" as const,
+    payload,
+  } as Parameters<NonNullable<ReturnType<typeof registerTasksHandlers>["task.state_changed"]>>[0];
 }
 
 export function makeDeletedMessage(payload: Record<string, unknown>) {

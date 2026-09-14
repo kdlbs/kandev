@@ -209,6 +209,8 @@ type batchedPRResult struct {
 	HeadRefName     string                  `json:"headRefName"`
 	BaseRefName     string                  `json:"baseRefName"`
 	HeadRefOid      string                  `json:"headRefOid"`
+	HeadRepository  ghRepository            `json:"headRepository"`
+	HeadRepoOwner   ghRepositoryOwner       `json:"headRepositoryOwner"`
 	Additions       int                     `json:"additions"`
 	Deletions       int                     `json:"deletions"`
 	// ChangedFiles is a pointer for the same reason as IsDraft (AC-12a): 0 is
@@ -354,6 +356,31 @@ func graphQLErrorsToErr(errs []graphQLError) error {
 	return fmt.Errorf("graphql error: %s (and %d more)", errs[0].Message, len(errs)-1)
 }
 
+func laterRetryAt(current, candidate *time.Time) *time.Time {
+	if current == nil {
+		return copyTime(candidate)
+	}
+	if candidate != nil && candidate.After(*current) {
+		return copyTime(candidate)
+	}
+	return copyTime(current)
+}
+
+func graphQLRetryAtFromData(data map[string]json.RawMessage) *time.Time {
+	raw, ok := data["rateLimit"]
+	if !ok || len(raw) == 0 || string(raw) == jsonNullLiteral {
+		return nil
+	}
+	var rate graphQLRateLimit
+	if err := json.Unmarshal(raw, &rate); err != nil || rate.ResetAt.IsZero() {
+		return nil
+	}
+	if rate.Remaining > 0 {
+		return nil
+	}
+	return copyTime(&rate.ResetAt)
+}
+
 // classifyBatchedErrors splits the GraphQL errors[] array into "this
 // repo is permanently unresolvable" and "everything else", mapping each
 // resolution error's path-prefix alias back to the (owner, repo) it
@@ -455,7 +482,7 @@ func buildBatchedPRQuery(refs []graphQLPRRef) (string, map[string]any) {
 // the batched and single-PR paths returning the same data.
 func prFieldsBlock() string {
 	return `state title url isDraft mergeable mergeStateStatus ` +
-		`headRefName baseRefName headRefOid additions deletions changedFiles ` +
+		`headRefName baseRefName headRefOid headRepository { id name nameWithOwner url } headRepositoryOwner { login } additions deletions changedFiles ` +
 		`author { login } mergedBy { login } autoMergeRequest { enabledAt } ` +
 		`mergeQueueEntry { id state position estimatedTimeToMerge headCommit { oid } } ` +
 		`createdAt updatedAt mergedAt closedAt ` +
@@ -508,6 +535,10 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 		AuthorLogin:          raw.Author.Login,
 		RepoOwner:            owner,
 		RepoName:             repo,
+		HeadRepoNodeID:       raw.HeadRepository.ID,
+		HeadRepoOwner:        raw.HeadRepoOwner.Login,
+		HeadRepoName:         raw.HeadRepository.Name,
+		HeadRepoCloneURL:     httpsCloneURLFromRepositoryURL(raw.HeadRepository.URL),
 		Draft:                draft,
 		IsDraftObserved:      raw.IsDraft != nil,
 		Mergeable:            raw.Mergeable == ghMergeableState,
@@ -523,6 +554,7 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 		MergedAt:             parseTimePtr(raw.MergedAt),
 		ClosedAt:             parseTimePtr(raw.ClosedAt),
 	}
+	fillMissingHeadRepositoryIdentity(pr, raw.HeadRepository.NameWithOwner)
 
 	reviewState := summarizeReviewState(raw.Reviews.Nodes)
 	checksState := ""
@@ -562,6 +594,22 @@ func convertBatchedPRResult(raw *batchedPRResult, owner, repo string, number int
 		MergeQueueLastRemovalBeforeSHA:        removalBeforeSHA,
 		mergeQueuePopulated:                   true,
 		mergeQueueRecoveryPopulated:           true,
+	}
+}
+
+func fillMissingHeadRepositoryIdentity(pr *PR, nameWithOwner string) {
+	if pr.HeadRepoOwner != "" && pr.HeadRepoName != "" {
+		return
+	}
+	parts := strings.SplitN(nameWithOwner, "/", 2)
+	if len(parts) != 2 {
+		return
+	}
+	if pr.HeadRepoOwner == "" {
+		pr.HeadRepoOwner = parts[0]
+	}
+	if pr.HeadRepoName == "" {
+		pr.HeadRepoName = parts[1]
 	}
 }
 
@@ -799,6 +847,7 @@ func runBatchedPRQuery(ctx context.Context, exec GraphQLExecutor, refs []graphQL
 	// repos landed in the negative cache.
 	var allMissing []repoRef
 	var allResidual []graphQLError
+	var retryAt *time.Time
 	var continuations []reviewThreadContinuation
 	for _, chunk := range chunkedRefs(refs) {
 		query, vars := buildBatchedPRQuery(chunk)
@@ -809,6 +858,7 @@ func runBatchedPRQuery(ctx context.Context, exec GraphQLExecutor, refs []graphQL
 		if err := exec.ExecuteGraphQL(ctx, query, vars, &resp); err != nil {
 			return nil, err
 		}
+		retryAt = laterRetryAt(retryAt, graphQLRetryAtFromData(resp.Data))
 		// GitHub returns HTTP 200 with a top-level "errors" array for partial
 		// auth failures, schema mismatches, or per-alias errors. Split out
 		// "Could not resolve to a Repository" entries via classifyBatchedErrors
@@ -824,7 +874,7 @@ func runBatchedPRQuery(ctx context.Context, exec GraphQLExecutor, refs []graphQL
 		allMissing = append(allMissing, missing...)
 		allResidual = append(allResidual, residual...)
 	}
-	return finishBatchedQuery(ctx, exec, result, allMissing, allResidual, continuations)
+	return finishBatchedQuery(ctx, exec, result, allMissing, allResidual, continuations, retryAt)
 }
 
 func finishBatchedQuery(
@@ -834,8 +884,9 @@ func finishBatchedQuery(
 	missing []repoRef,
 	residual []graphQLError,
 	continuations []reviewThreadContinuation,
+	retryAt *time.Time,
 ) (map[string]*PRStatus, error) {
-	batchErr := wrapBatchedErrors(missing, residual)
+	batchErr := withPRDiscoveryRetryAt(wrapBatchedErrors(missing, residual), retryAt)
 	if batchErr != nil && (len(missing) == 0 || len(residual) > 0) {
 		return nil, batchErr
 	}
@@ -885,7 +936,7 @@ func completeReviewThreadContinuations(
 				return err
 			}
 			if err := graphQLErrorsToErr(resp.Errors); err != nil {
-				return err
+				return withPRDiscoveryRetryAt(err, graphQLRetryAtFromData(resp.Data))
 			}
 			chunkNext, err := applyReviewThreadPageChunk(chunk, resp.Data)
 			if err != nil {
@@ -1078,6 +1129,7 @@ func runBatchedBranchQuery(
 	// for the rationale (one dead-repo chunk must not drop later chunks).
 	var allMissing []repoRef
 	var allResidual []graphQLError
+	var retryAt *time.Time
 	for _, chunk := range chunkedRefs(refs) {
 		query, vars := buildBatchedBranchQuery(chunk)
 		var resp struct {
@@ -1087,6 +1139,7 @@ func runBatchedBranchQuery(
 		if err := exec.ExecuteGraphQL(ctx, query, vars, &resp); err != nil {
 			return branchBatchResult{}, err
 		}
+		retryAt = laterRetryAt(retryAt, graphQLRetryAtFromData(resp.Data))
 		missing, residual := classifyBatchedErrors(resp.Errors, aliasMapForBranchRefs(chunk))
 		if err := decodeBatchedBranchChunk(chunk, resp.Data, &out); err != nil {
 			return branchBatchResult{}, err
@@ -1094,7 +1147,7 @@ func runBatchedBranchQuery(
 		allMissing = append(allMissing, missing...)
 		allResidual = append(allResidual, residual...)
 	}
-	statuses, err := finishBatchedQuery(ctx, exec, out.Statuses, allMissing, allResidual, nil)
+	statuses, err := finishBatchedQuery(ctx, exec, out.Statuses, allMissing, allResidual, nil, retryAt)
 	if statuses == nil {
 		// finishBatchedQuery dropped the partial decode (residual errors, or a
 		// failed review-thread continuation). The negatives decoded alongside

@@ -21,6 +21,8 @@ import {
 } from "./use-inline-mention";
 import type { RichTextInputHandle } from "@/components/task/chat/rich-text-input";
 
+const BUG_TEMPLATE_NAME = "bug-template";
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -162,7 +164,7 @@ describe("useInlineMention Escape", () => {
 
 describe("makePromptItem — context mode (default chat behavior)", () => {
   it("deletes the @query text and calls onPromptSelect", () => {
-    const prompt = { id: "p1", name: "bug-template", content: "Reproduce, isolate, fix." };
+    const prompt = { id: "p1", name: BUG_TEMPLATE_NAME, content: "Reproduce, isolate, fix." };
     const onPromptSelect = vi.fn();
     const item = makePromptItem(prompt, "context", onPromptSelect);
 
@@ -175,7 +177,7 @@ describe("makePromptItem — context mode (default chat behavior)", () => {
     item.onSelect(input, value, triggerStart, onChange);
 
     expect(onChange).toHaveBeenCalledWith("Hello ");
-    expect(onPromptSelect).toHaveBeenCalledWith("p1", "bug-template");
+    expect(onPromptSelect).toHaveBeenCalledWith("p1", BUG_TEMPLATE_NAME);
   });
 
   it("exposes kind 'prompt' and label = prompt name", () => {
@@ -189,7 +191,7 @@ describe("makePromptItem — inline mode (task-create behavior)", () => {
   it("replaces the @query text with the prompt content", () => {
     const prompt = {
       id: "p1",
-      name: "bug-template",
+      name: BUG_TEMPLATE_NAME,
       content: "Reproduce, isolate, fix with a regression test.",
     };
     const onPromptSelect = vi.fn();
@@ -238,6 +240,23 @@ describe("makePromptItem — inline mode (task-create behavior)", () => {
     item.onSelect(input, value, triggerStart, onChange);
 
     expect(onChange).toHaveBeenCalledWith("before XYZ after");
+  });
+});
+
+describe("makePromptItem — reference mode", () => {
+  it("replaces the active query with the saved prompt alias", () => {
+    const prompt = { id: "p1", name: BUG_TEMPLATE_NAME, content: "Reproduce, isolate, fix." };
+    const onPromptSelect = vi.fn();
+    const item = makePromptItem(prompt, "reference", onPromptSelect);
+
+    const value = "Hello @bug after";
+    const input = makeFakeInput(value, "Hello @bug".length);
+    const onChange = vi.fn();
+
+    item.onSelect(input, value, 6, onChange);
+
+    expect(onChange).toHaveBeenCalledWith("Hello @bug-template after");
+    expect(onPromptSelect).not.toHaveBeenCalled();
   });
 });
 

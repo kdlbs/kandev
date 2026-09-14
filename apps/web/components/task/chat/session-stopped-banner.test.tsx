@@ -59,9 +59,12 @@ vi.mock("react-i18next", () => ({
 
 import { SessionStoppedBanner } from "./session-stopped-banner";
 
+const SESSION_RECOVER_ACTION = "session.recover";
+const TASK_ID = "task-1";
+const SESSION_ID = "session-1";
 const baseProps: Omit<SessionStoppedBannerProps, "mode" | "onShowDialog" | "showDialog"> = {
-  taskId: "task-1",
-  sessionId: "session-1",
+  taskId: TASK_ID,
+  sessionId: SESSION_ID,
   workspaceId: "workspace-1",
 };
 const RESUME_BUTTON_TEST_ID = "recovery-resume-button";
@@ -93,19 +96,27 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("SessionStoppedBanner basics", () => {
-  it("offers only New Agent for a completed session and opens the new-session dialog", async () => {
+  it("offers Resume and New Agent for a completed session", async () => {
     render(<BannerHarness mode="completed" />);
 
     expect(screen.getByTestId("completed-session-banner")).toBeTruthy();
     expect(screen.getByText("This session is complete.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "New Agent" })).toBeTruthy();
-    expect(screen.queryByTestId(RESUME_BUTTON_TEST_ID)).toBeNull();
+    expect(screen.getByTestId(RESUME_BUTTON_TEST_ID)).toBeTruthy();
     expect(screen.queryByTestId(FRESH_BUTTON_TEST_ID)).toBeNull();
+
+    fireEvent.click(screen.getByTestId(RESUME_BUTTON_TEST_ID));
+    await waitFor(() =>
+      expect(mocks.request).toHaveBeenCalledWith(
+        SESSION_RECOVER_ACTION,
+        { task_id: TASK_ID, session_id: SESSION_ID, action: "resume" },
+        30000,
+      ),
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "New Agent" }));
 
     expect(await screen.findByTestId("new-session-dialog")).toBeTruthy();
-    expect(mocks.request).not.toHaveBeenCalled();
   });
 
   it("disables New Agent when no task is available", () => {
@@ -136,8 +147,8 @@ describe("SessionStoppedBanner basics", () => {
     fireEvent.click(screen.getByTestId(RESUME_BUTTON_TEST_ID));
     await waitFor(() =>
       expect(mocks.request).toHaveBeenCalledWith(
-        "session.recover",
-        { task_id: "task-1", session_id: "session-1", action: "resume" },
+        SESSION_RECOVER_ACTION,
+        { task_id: TASK_ID, session_id: SESSION_ID, action: "resume" },
         30000,
       ),
     );
@@ -145,8 +156,8 @@ describe("SessionStoppedBanner basics", () => {
     fireEvent.click(screen.getByTestId(FRESH_BUTTON_TEST_ID));
     await waitFor(() =>
       expect(mocks.request).toHaveBeenCalledWith(
-        "session.recover",
-        { task_id: "task-1", session_id: "session-1", action: "fresh_start" },
+        SESSION_RECOVER_ACTION,
+        { task_id: TASK_ID, session_id: SESSION_ID, action: "fresh_start" },
         30000,
       ),
     );
@@ -206,8 +217,8 @@ describe("SessionStoppedBanner recovery failures", () => {
 
     await waitFor(() =>
       expect(mocks.request).toHaveBeenLastCalledWith(
-        "session.recover",
-        { task_id: "task-1", session_id: "session-1", action: "resume_new_branch" },
+        SESSION_RECOVER_ACTION,
+        { task_id: TASK_ID, session_id: SESSION_ID, action: "resume_new_branch" },
         30000,
       ),
     );

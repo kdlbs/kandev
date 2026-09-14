@@ -23,10 +23,12 @@ import { TaskUnarchiveButton } from "@/components/task/task-unarchive-button";
 import { TaskAssigneeControl } from "@/components/task/task-assignee-control";
 import { WorkflowStepper, type WorkflowStepperStep } from "@/components/task/workflow-stepper";
 import { TaskTopBarPluginActions } from "@/components/task/task-top-bar-plugin-actions";
+import { TaskTopBarActionsMenu } from "@/components/task/task-top-bar-actions-menu";
 import { TopbarMetrics } from "@/components/system-metrics/topbar-metrics";
 import { RegisteredChangeRequestStatus } from "@/components/integrations/registered-change-request-status";
 import { isDebugUI } from "@/lib/config";
 import { useTranslation } from "react-i18next";
+import type { TaskActionsMenuBoardRow } from "@/hooks/use-task-actions-menu";
 
 type TaskTopBarProps = {
   taskId?: string | null;
@@ -39,6 +41,7 @@ type TaskTopBarProps = {
   workflowSteps?: WorkflowStepperStep[];
   currentStepId?: string | null;
   workflowId?: string | null;
+  taskState?: string | null;
   workspaceId?: string | null;
   projectId?: string | null;
   issueUrl?: string;
@@ -50,6 +53,11 @@ type TaskTopBarProps = {
   onTaskUnarchived?: (taskId: string) => void;
   onMoveStart?: () => void;
   onMoveError?: (error: unknown) => void;
+  actionsMenuBoardRow?: TaskActionsMenuBoardRow | null;
+  /** The subject task's own values, independent of `actionsMenuBoardRow` (see
+   * `TaskTopBarActionsMenuProps` for why the board row cannot be relied on). */
+  subjectWorkflowStepId?: string | null;
+  subjectPrimaryExecutorType?: string | null;
 };
 
 const TaskTopBar = memo(function TaskTopBar({
@@ -62,6 +70,7 @@ const TaskTopBar = memo(function TaskTopBar({
   workflowSteps,
   currentStepId,
   workflowId,
+  taskState,
   workspaceId,
   projectId,
   isArchived,
@@ -73,6 +82,9 @@ const TaskTopBar = memo(function TaskTopBar({
   onTaskUnarchived,
   onMoveStart,
   onMoveError,
+  actionsMenuBoardRow,
+  subjectWorkflowStepId,
+  subjectPrimaryExecutorType,
 }: TaskTopBarProps) {
   const { t } = useTranslation();
   // Projects only exist for office-owned tasks, so kanban-mode tasks render no
@@ -105,6 +117,7 @@ const TaskTopBar = memo(function TaskTopBar({
             currentStepId={currentStepId ?? null}
             taskId={taskId ?? null}
             workflowId={workflowId ?? null}
+            taskState={taskState}
             isArchived={isArchived}
             onMoveStart={onMoveStart}
             onMoveError={onMoveError}
@@ -128,6 +141,9 @@ const TaskTopBar = memo(function TaskTopBar({
           issueNumber={issueNumber}
           officeTaskHref={officeTaskHref}
           onTaskUnarchived={onTaskUnarchived}
+          actionsMenuBoardRow={actionsMenuBoardRow}
+          subjectWorkflowStepId={subjectWorkflowStepId}
+          subjectPrimaryExecutorType={subjectPrimaryExecutorType}
         />
       }
     />
@@ -366,6 +382,9 @@ function TopBarRight({
   issueNumber,
   officeTaskHref,
   onTaskUnarchived,
+  actionsMenuBoardRow,
+  subjectWorkflowStepId,
+  subjectPrimaryExecutorType,
 }: {
   taskId?: string | null;
   activeSessionId?: string | null;
@@ -379,6 +398,9 @@ function TopBarRight({
   issueNumber?: number;
   officeTaskHref?: string | null;
   onTaskUnarchived?: (taskId: string) => void;
+  actionsMenuBoardRow?: TaskActionsMenuBoardRow | null;
+  subjectWorkflowStepId?: string | null;
+  subjectPrimaryExecutorType?: string | null;
 }) {
   const { t } = useTranslation();
   return (
@@ -407,7 +429,7 @@ function TopBarRight({
       )}
       {officeTaskHref && (
         <TopbarCluster label={t("task:openInOfficeView")} className="[&_a]:h-7 [&_a]:text-xs">
-          <Button asChild size="sm" variant="outline" className="h-7 cursor-pointer px-2">
+          <Button asChild size="sm" variant="outline" className="cursor-pointer px-2">
             <Link href={officeTaskHref}>{t("task:openInOfficeView")}</Link>
           </Button>
         </TopbarCluster>
@@ -430,6 +452,15 @@ function TopBarRight({
         onToggleDebugOverlay={onToggleDebugOverlay}
         isArchived={isArchived}
         embeddedVscodeSupported={embeddedVscodeSupported}
+      />
+      <TaskTopBarActionsMenu
+        taskId={taskId ?? null}
+        taskTitle={taskTitle ?? ""}
+        boardRow={actionsMenuBoardRow ?? null}
+        workspaceId={workspaceId ?? null}
+        isArchived={isArchived}
+        subjectWorkflowStepId={subjectWorkflowStepId}
+        subjectPrimaryExecutorType={subjectPrimaryExecutorType}
       />
     </div>
   );

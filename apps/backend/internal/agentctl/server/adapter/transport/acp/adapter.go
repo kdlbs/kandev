@@ -513,9 +513,13 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	// queue and is drained by our update worker. Requires a coder/acp-go-sdk
 	// fork with WithMaxQueuedNotifications; see go.mod replace directive.
 	notifQueueCap := acpNotifQueueCapacity(a.cfg.NotificationQueueCapacity)
-	a.acpConn = acp.NewClientSideConnection(a.acpClient, a.stdin, a.stdout,
-		acp.WithMaxQueuedNotifications(notifQueueCap))
-	a.acpConn.SetLogger(slog.Default().With("component", "acp-conn"))
+	a.acpConn = acpclient.NewClientSideConnectionWithLogger(
+		a.acpClient,
+		a.stdin,
+		a.stdout,
+		slog.Default().With("component", "acp-conn"),
+		acp.WithMaxQueuedNotifications(notifQueueCap),
+	)
 	a.logger.Debug("ACP connection notification queue sized",
 		zap.Int("capacity", notifQueueCap))
 
@@ -621,6 +625,15 @@ func (a *Adapter) GetSessionModelState() *streams.SessionModelState {
 		Models:         cloneSessionModels(convertSessionModels(a.availableModels)),
 		ConfigOptions:  cloneConfigOptions(a.availableConfigOptions),
 	}
+}
+
+// ProviderErrorContext implements adapter.ProviderErrorContextProvider.
+// modelID is empty until the adapter has settled a model for the session: a
+// non-empty currentModelFromConfig(availableConfigOptions) value at read time.
+func (a *Adapter) ProviderErrorContext() (providerID, modelID string) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.agentID, currentModelFromConfig(a.availableConfigOptions)
 }
 
 func cloneSessionModels(models []streams.SessionModelInfo) []streams.SessionModelInfo {

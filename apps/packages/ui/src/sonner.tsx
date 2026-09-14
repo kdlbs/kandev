@@ -21,6 +21,8 @@ const Toaster = ({ ...props }: ToasterProps) => {
   useEffect(() => {
     const observer = new MutationObserver(() => setTheme(readDocumentTheme()));
     observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+    // An ancestor can apply the theme between render and this subscription.
+    setTheme(readDocumentTheme());
     return () => observer.disconnect();
   }, []);
 

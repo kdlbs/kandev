@@ -78,4 +78,25 @@ describe("Combobox", () => {
     expect(renderedOptions[0].getAttribute("aria-disabled")).toBe("true");
     expect(renderedOptions[0].className).toContain("bg-card");
   });
+
+  it("notifies open-state listeners when an option selection closes the menu", () => {
+    const onOpenChange = vi.fn();
+    const onValueChange = vi.fn();
+    render(
+      <Combobox
+        options={options}
+        value=""
+        onValueChange={onValueChange}
+        onOpenChange={onOpenChange}
+        ariaLabel="Choose an agent"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Choose an agent" }));
+    expect(onOpenChange).toHaveBeenLastCalledWith(true);
+    fireEvent.click(screen.getByRole("option", { name: "First" }));
+
+    expect(onValueChange).toHaveBeenCalledWith("first");
+    expect(onOpenChange).toHaveBeenLastCalledWith(false);
+  });
 });

@@ -4,7 +4,7 @@ import "github.com/kandev/kandev/internal/workflow/engine"
 
 // GuardStateDTO is the direct JSON projection of a single AC-57d guard
 // entry (`engine.QuorumGuardState`), shared verbatim by the AC-24b HTTP
-// quorum endpoint and the AC-64 agent decision tool response so the two
+// quorum endpoint and the AC-64 runtime decision response so the two
 // surfaces can never report different arithmetic for the same step.
 type GuardStateDTO struct {
 	TargetStepID  string `json:"target_step_id"`

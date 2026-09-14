@@ -33,6 +33,7 @@ import type {
 } from "@/lib/types/github";
 import { useTranslation } from "react-i18next";
 import { t as translate } from "@/lib/i18n";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 function splitCSV(value: string): string[] {
   return value
@@ -86,7 +87,7 @@ function RepositoryScopeHelp() {
       type="button"
       variant="ghost"
       size="icon"
-      className="h-11 w-11 cursor-pointer text-muted-foreground sm:h-7 sm:w-7"
+      className={controlSizingClassName("icon", "cursor-pointer text-muted-foreground")}
       aria-haspopup="dialog"
       aria-expanded={open}
       aria-label={t("github:explainRepositoryScope")}

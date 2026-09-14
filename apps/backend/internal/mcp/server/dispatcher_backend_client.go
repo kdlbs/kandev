@@ -75,10 +75,17 @@ func (c *DispatcherBackendClient) RequestPayload(ctx context.Context, action str
 		}
 		return fmt.Errorf("backend error: %s", string(resp.Payload))
 	}
-	if result != nil && len(resp.Payload) > 0 {
-		if err := json.Unmarshal(resp.Payload, result); err != nil {
-			return fmt.Errorf("failed to unmarshal response for %s: %w", action, err)
-		}
+	if result == nil {
+		return nil
+	}
+	if len(resp.Payload) == 0 {
+		c.logger.Warn(ErrEmptyBackendPayload.Error(),
+			zap.String("request_id", id),
+			zap.String("action", action))
+		return fmt.Errorf("empty response payload for action %q: %w", action, ErrEmptyBackendPayload)
+	}
+	if err := json.Unmarshal(resp.Payload, result); err != nil {
+		return fmt.Errorf("failed to unmarshal response for %s: %w", action, err)
 	}
 	return nil
 }

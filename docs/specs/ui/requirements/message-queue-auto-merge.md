@@ -1,15 +1,18 @@
 ---
-status: active
+status: deprecated
 system: ui
 created: 2026-08-12
 owners:
   - kandev
 ---
+
 # Automatically Merge Consecutive Queued Messages Requirements
 
 ## Overview
 
 Users and coordinating agents often send several short follow-ups while a session is busy. Delivering every follow-up as a separate turn adds latency and queue noise even when the messages came from the same source and can safely be handled together.
+
+Deprecated by [Per-session Automatic Message Merge Override](message-queue-auto-merge-session-overrides.md), which preserves compatibility rules while adding inheritance, session overrides, and the direct-fold capacity exception.
 
 ## Requirements
 

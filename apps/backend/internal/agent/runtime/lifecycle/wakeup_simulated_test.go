@@ -215,6 +215,46 @@ func TestWakeup_LateTerminalToolUpdateDoesNotFlipToRunning(t *testing.T) {
 	}
 }
 
+// TestWakeup_MarkedProviderDiagnosticChunkDoesNotFlipToRunning pins the
+// AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.21 "shall not advance turn
+// progress" clause at recordActivity's wakeup Ready->Running flip. A marked
+// message_chunk arriving while Ready has the exact same shape as a genuine
+// wakeup turn's first content event (turnContentEventTypes membership, status
+// already Ready) but must not re-arm the execution as Running.
+func TestWakeup_MarkedProviderDiagnosticChunkDoesNotFlipToRunning(t *testing.T) {
+	mgr, eventBus := createTestManagerWithTracking()
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	_ = mgr.executionStore.Add(execution)
+
+	// Turn 1: normal user turn puts the execution back to Ready.
+	mgr.executionStore.UpdateStatus(execution.ID, v1.AgentStatusRunning)
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "message_chunk", Text: "ok\n"})
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{Type: "complete"})
+
+	if execution.Status != v1.AgentStatusReady {
+		t.Fatalf("setup: execution.Status = %q, want %q", execution.Status, v1.AgentStatusReady)
+	}
+
+	mgr.handleAgentEvent(execution, agentctl.AgentEvent{
+		Type:                        "message_chunk",
+		Text:                        "API Error: 500 Internal Server Error",
+		ProviderDiagnosticCandidate: true,
+	})
+
+	runningCount := 0
+	for _, te := range eventBus.PublishedEvents {
+		if te.Event != nil && te.Event.Type == events.AgentRunning {
+			runningCount++
+		}
+	}
+	if runningCount != 1 {
+		t.Errorf("expected exactly 1 agent.running event (turn 1's boot-time flip only), got %d — a marked provider-diagnostic chunk must not advance turn progress", runningCount)
+	}
+	if execution.Status != v1.AgentStatusReady {
+		t.Errorf("execution.Status = %q, want %q — marked diagnostic chunk must not flip Ready back to Running", execution.Status, v1.AgentStatusReady)
+	}
+}
+
 // TestWakeup_EmptyTurnStillPublishesAgentReady covers the narrow edge case
 // where a wakeup turn produces *only* a `complete` event (no preceding
 // message_chunk/tool_call/etc) — e.g. when the model returns an empty

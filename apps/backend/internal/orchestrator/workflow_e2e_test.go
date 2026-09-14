@@ -11,7 +11,6 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
-	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
 	"github.com/kandev/kandev/internal/workflow/engine"
@@ -133,7 +132,7 @@ var workflowTestCases = []workflowTestCase{
 				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 1},
 			// Agent starts at New Context → on_turn_start → back to In Progress
 			{Trigger: engine.TriggerOnTurnStart, SetRunning: true, ExpectStep: "In Progress",
-				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 1},
+				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 1, ExpectState: models.TaskSessionStateRunning},
 			// Agent finishes at In Progress → New Context again (same reset + auto_start path)
 			{Trigger: engine.TriggerOnTurnComplete, SetRunning: true, ExpectStep: "New Context",
 				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 2},
@@ -145,7 +144,7 @@ var workflowTestCases = []workflowTestCase{
 				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 3},
 			// User sends message at Done → on_turn_start → In Progress
 			{Trigger: engine.TriggerOnTurnStart, SetRunning: true, ExpectStep: "In Progress",
-				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 3},
+				ExpectTransitioned: true, ExpectQueued: false, ExpectResets: 3, ExpectState: models.TaskSessionStateRunning},
 		},
 	},
 	{
@@ -281,6 +280,9 @@ func buildWorkflowFromJSON(t *testing.T, jsonStr string) (*mockStepGetter, map[s
 	if err := json.Unmarshal([]byte(jsonStr), &export); err != nil {
 		t.Fatalf("failed to unmarshal workflow JSON: %v", err)
 	}
+	if err := export.NormalizeCompletionPolicy(); err != nil {
+		t.Fatalf("failed to normalize workflow completion policy: %v", err)
+	}
 	if len(export.Workflows) == 0 {
 		t.Fatal("workflow JSON contains no workflows")
 	}
@@ -298,7 +300,7 @@ func buildWorkflowFromJSON(t *testing.T, jsonStr string) (*mockStepGetter, map[s
 		events := wfmodels.ConvertPositionToStepID(sp.Events, posToID)
 		sg.steps[id] = &wfmodels.WorkflowStep{
 			ID: id, WorkflowID: "wf1", Name: sp.Name, Position: sp.Position,
-			Prompt: sp.Prompt, Events: events,
+			Prompt: sp.Prompt, Events: events, CompleteTaskOnEnter: sp.CompleteTaskOnEnter,
 		}
 		nameToID[sp.Name] = id
 	}
@@ -314,7 +316,7 @@ func createEngineService(t *testing.T, repo *sqliterepo.Repository, sg *mockStep
 		repo:         repo,
 		taskRepo:     newMockTaskRepo(),
 		agentManager: agentMgr,
-		messageQueue: messagequeue.NewServiceMemory(log),
+		messageQueue: newAuthoritativeMemoryQueue(repo, log),
 		executor:     executor.NewExecutor(agentMgr, repo, log, executor.ExecutorConfig{}),
 	}
 	svc.SetWorkflowStepGetter(sg)

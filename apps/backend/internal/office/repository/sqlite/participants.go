@@ -11,6 +11,7 @@ import (
 	"github.com/jmoiron/sqlx"
 
 	"github.com/kandev/kandev/internal/db/dialect"
+	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 	"github.com/kandev/kandev/internal/workflow/models"
 	workflowrepo "github.com/kandev/kandev/internal/workflow/repository"
 )
@@ -56,6 +57,28 @@ func (r *Repository) GetTaskWorkflowStepID(ctx context.Context, taskID string) (
 	return r.stepIDForTask(ctx, taskID)
 }
 
+// GetTaskWorkflowID returns the task's current workflow_id. Returns "" with
+// no error when the task has no workflow bound. Exposed so the cascade
+// producer can workflow-scope its fan-out seat resolution the same way the
+// engine's own ParticipantAdapter does for a same-task queue_run_for_each_
+// participant action (parent-wake-wave-identity payload parity).
+func (r *Repository) GetTaskWorkflowID(ctx context.Context, taskID string) (string, error) {
+	var workflowID sql.NullString
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT workflow_id FROM tasks WHERE id = ?`,
+	), taskID).Scan(&workflowID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !workflowID.Valid {
+		return "", nil
+	}
+	return workflowID.String, nil
+}
+
 // GetWorkflowStepStageType returns the persisted stage type for a workflow
 // step. It returns an empty string when the step does not exist so callers
 // can apply compatibility fallbacks for older run payloads.
@@ -82,6 +105,66 @@ func (r *Repository) GetWorkflowStepStageType(ctx context.Context, stepID string
 // ParticipantWriteOutcome identifies what AddTaskParticipant did to the
 // role slate.
 type ParticipantWriteOutcome string
+
+// IsTaskWorkflowStepTerminal reports whether a task's current workflow step
+// is the last step, by position, in its workflow, and whether the task has
+// a resolvable step at all. Unlike orchestrator.workflowStepIsTerminal,
+// terminal does not additionally require the step name to match
+// models.IsTerminalStepName: a workflow's final column is terminal
+// regardless of what its author named it, so this gate never locks a task
+// out of completion just because the last step isn't named
+// done/complete/completed/approved.
+// workflowStepIsTerminal keeps the name test because it decides whether a
+// step *move* should auto-complete — a different decision from "may this
+// task be marked done".
+// Returns (false, false, nil) when the task has no resolvable step — a
+// task with no workflow step at all is not the same fact as a task sitting
+// on a genuine non-terminal step, and callers must not conflate the two.
+//
+// A task can also carry a nonempty workflow_step_id that no longer resolves:
+// DeleteStep clears queued_for_step_id references but deliberately leaves
+// tasks.workflow_step_id alone for tasks that were actually sitting on the
+// deleted step, so that reference goes dangling. That is not the same fact
+// as "no step" either — treating it as hasStep=false would let a task whose
+// step vanished out from under it bypass the position gate entirely, so this
+// case returns an error instead and lets the caller fail closed.
+func (r *Repository) IsTaskWorkflowStepTerminal(ctx context.Context, taskID string) (terminal, hasStep bool, err error) {
+	var stepID sql.NullString
+	err = r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT workflow_step_id FROM tasks WHERE id = ?
+	`), taskID).Scan(&stepID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	if !stepID.Valid || stepID.String == "" {
+		return false, false, nil
+	}
+
+	var workflowID string
+	var position int
+	err = r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT workflow_id, position FROM workflow_steps WHERE id = ?
+	`), stepID.String).Scan(&workflowID, &position)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, false, fmt.Errorf(
+			"workflow step %q referenced by task %q no longer exists", stepID.String, taskID)
+	}
+	if err != nil {
+		return false, false, err
+	}
+
+	var hasNext bool
+	err = r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+		SELECT EXISTS(SELECT 1 FROM workflow_steps WHERE workflow_id = ? AND position > ?)
+	`), workflowID, position).Scan(&hasNext)
+	if err != nil {
+		return false, false, err
+	}
+	return !hasNext, true, nil
+}
 
 const (
 	// ParticipantWriteOutcomeClaimed means an existing unclaimed "auto"
@@ -166,11 +249,18 @@ func (r *Repository) AddTaskParticipant(ctx context.Context, taskID, agentID, ro
 	}
 	// No claim landed — either no claimable auto seat existed, or the
 	// selected one was removed, reprovenanced, or decided since
-	// findClaimableAutoSeat's read (claimAutoSeat's guard is a defensive
-	// backstop: recordStepDecisionTx now shares this transaction's
-	// ParticipantRoleSeatLockKey exclusion, so it cannot actually interleave
-	// here). Either way, fall through to inserting a fresh seat rather than
-	// completing having written nothing.
+	// findClaimableAutoSeat's read. Either way, fall through to inserting a
+	// fresh seat rather than completing having written nothing.
+	//
+	// Which of the two defenses covers the decided case depends on the
+	// decision: recordStepDecisionTx acquires this transaction's
+	// ParticipantRoleSeatLockKey exclusion only when the decision carries a
+	// role, so a role-carrying decision cannot commit between
+	// findClaimableAutoSeat and claimAutoSeat. A roleless decision takes
+	// neither that exclusion nor the seat validation, and for it claimAutoSeat's
+	// NOT EXISTS condition is the whole defense — see
+	// participant_claim_decision_guard_test.go, which drives that window
+	// through claimWindowHook.
 
 	inserted, err := r.insertManualParticipant(ctx, tx, stepID, taskID, role, agentID)
 	if err != nil {
@@ -229,6 +319,10 @@ func (r *Repository) attemptClaim(
 		return nil, nil
 	}
 
+	if claimWindowHook != nil {
+		claimWindowHook(ctx, tx, claim.id)
+	}
+
 	claimed, err := r.claimAutoSeat(ctx, tx, claim.id, agentID)
 	if err != nil {
 		return nil, err
@@ -255,9 +349,9 @@ func (r *Repository) insertManualParticipant(ctx context.Context, tx *sqlx.Tx, s
 	id := uuid.New().String()
 	if _, err := tx.ExecContext(ctx, tx.Rebind(`
 		INSERT INTO workflow_step_participants
-			(id, step_id, task_id, role, agent_profile_id, decision_required, position, provenance)
-		VALUES (?, ?, ?, ?, ?, 1, 0, ?)
-	`), id, stepID, taskID, role, agentID, string(models.ParticipantProvenanceManual)); err != nil {
+			(id, step_id, task_id, role, agent_profile_id, decision_required, position, created_at, provenance)
+		VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?)
+	`), id, stepID, taskID, role, agentID, time.Now().UTC(), string(models.ParticipantProvenanceManual)); err != nil {
 		if workflowrepo.IsParticipantsNaturalKeyViolation(err) {
 			return false, nil
 		}
@@ -422,6 +516,17 @@ func (r *Repository) findClaimableAutoSeat(
 	}
 	return &candidates[0], nil
 }
+
+// claimWindowHook is a yield point between the statement that selects a
+// claimable seat and the statement that reassigns it. It is nil in every build
+// that does not set it, nothing production reads it, and it carries no
+// behavior of its own.
+//
+// It exists because that window is the only place claimAutoSeat's decision
+// condition can add anything the selection did not already provide, and the
+// window cannot be reached by racing goroutines in a way a test can rely on.
+// Unexported, so only this package's tests can set it.
+var claimWindowHook func(ctx context.Context, tx *sqlx.Tx, seatID string)
 
 // claimAutoSeat reassigns the seat identified by seatID to agentID and
 // marks it "manual", conditional on the seat still carrying provenance
@@ -612,9 +717,11 @@ const displacedRunCancelReason = "participant_seat_claimed"
 // SQLite-flavoured and the server dialect needs dialect.JSONExtract, which
 // is why this selector lives here rather than in the shared runs writer
 // (mirrors CancelRunsForTasks in tree_holds.go).
-func (r *Repository) CancelDisplacedParticipantRun(ctx context.Context, taskID, stepID, agentProfileID string) (int64, error) {
+func (r *Repository) CancelDisplacedParticipantRun(
+	ctx context.Context, taskID, stepID, agentProfileID string,
+) ([]runssqlite.CancelledRun, error) {
 	if taskID == "" || stepID == "" || agentProfileID == "" {
-		return 0, nil
+		return nil, nil
 	}
 	driver := r.db.DriverName()
 	selector := fmt.Sprintf(

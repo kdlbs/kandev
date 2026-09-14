@@ -128,6 +128,13 @@ type HandleResult struct {
 	// abandoning is an expected outcome of concurrent re-evaluation, not a
 	// failure.
 	TransitionAbandoned bool
+
+	// OperationMarkDeferred is true when the engine deliberately skipped
+	// marking HandleInput.OperationID applied because EvaluateOnly deferred
+	// this transition's commit to the caller. The caller then owns the
+	// marker and must invoke TransitionStore.MarkOperationApplied itself,
+	// once and only once its own commit succeeds.
+	OperationMarkDeferred bool
 }
 
 // Option configures an Engine at construction time. Use With* helpers below.
@@ -184,6 +191,14 @@ func WithAgentProfileResolver(resolver AgentProfileResolver) Option {
 	return func(e *Engine) { e.agentProfiles = resolver }
 }
 
+// WithMarkerBearingStepEntryExecutor wires DispatchStepEntry's marker-bearing
+// action hook (AC-OFFICE-STEP-ENTRY-DISPATCH-002.3). Without it, a
+// marker-bearing on_enter action executes directly and unprotected — the
+// pre-convergence behaviour, safe only for deployments that never wire it.
+func WithMarkerBearingStepEntryExecutor(executor MarkerBearingStepEntryExecutor) Option {
+	return func(e *Engine) { e.markerExecutor = executor }
+}
+
 // Engine evaluates step actions and applies transitions.
 type Engine struct {
 	store     TransitionStore
@@ -202,6 +217,10 @@ type Engine struct {
 	// logger is nil-safe (AC-24): *logger.Logger methods are not nil-safe
 	// themselves, so every use is guarded by an explicit nil check.
 	logger *logger.Logger
+	// markerExecutor is DispatchStepEntry's optional marker-bearing action
+	// hook (AC-OFFICE-STEP-ENTRY-DISPATCH-002.3) — nil-safe like every other
+	// Phase 2/8 dependency.
+	markerExecutor MarkerBearingStepEntryExecutor
 }
 
 // TaskCreatorAdapter exposes the wired TaskCreator (or nil if unset).
@@ -278,6 +297,15 @@ func (e *Engine) handleTrigger(ctx context.Context, in HandleInput, filter func(
 	result, err := e.processActions(ctx, in, state, step, actions, filter)
 	if err != nil {
 		return HandleResult{}, err
+	}
+
+	// A deferred transition is work this call evaluated but did not commit
+	// (processActions skips ApplyTransition under EvaluateOnly). Marking the
+	// operation applied here would claim a commit the caller still owes, so
+	// ownership of the marker passes to the caller instead.
+	if in.EvaluateOnly && result.Transitioned {
+		result.OperationMarkDeferred = in.OperationID != ""
+		return result, nil
 	}
 
 	return result, e.markOperationAppliedForInput(ctx, in)

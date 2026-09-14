@@ -21,6 +21,7 @@ import { deleteExecutorProfile } from "@/lib/api/domains/settings-api";
 import { EXECUTOR_ICON_MAP, getExecutorLabel } from "@/lib/executor-icons";
 import type { Executor, ExecutorProfile } from "@/lib/types/http";
 import { KubernetesReadOnlyNotice } from "@/components/settings/kubernetes-read-only-notice";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 
 type ProfileWithExecutor = ExecutorProfile & {
   executor_type: string;
@@ -126,7 +127,9 @@ function ProfileCard({
         <Button
           variant="ghost"
           size="icon"
-          className="min-h-11 w-11 shrink-0 cursor-pointer md:h-8 md:min-h-8 md:w-8 md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100"
+          className={settingsActionClassName(
+            "shrink-0 cursor-pointer md:opacity-0 md:group-hover:opacity-100 md:focus-visible:opacity-100",
+          )}
           disabled={!canDelete}
           aria-label={t("executors:deleteProfile")}
           onClick={(e) => {
@@ -207,7 +210,7 @@ function DeleteProfileDialog({
           <Button
             variant="outline"
             onClick={() => onOpenChange(false)}
-            className="min-h-11 cursor-pointer md:min-h-9"
+            className={settingsActionClassName("cursor-pointer")}
           >
             {t("common:cancel")}
           </Button>
@@ -215,7 +218,7 @@ function DeleteProfileDialog({
             variant="destructive"
             onClick={onDelete}
             disabled={deleting}
-            className="min-h-11 cursor-pointer md:min-h-9"
+            className={settingsActionClassName("cursor-pointer")}
           >
             {deleting ? t("executors:deleting") : t("executors:delete")}
           </Button>

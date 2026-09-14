@@ -81,6 +81,7 @@ const (
 	ActionTaskMove              = "task.move"
 	ActionTaskState             = "task.state"
 	ActionTaskArchive           = "task.archive"
+	ActionTaskRunner            = "task.runner"
 	ActionTaskPlanCreate        = "task.plan.create"
 	ActionTaskPlanGet           = "task.plan.get"
 	ActionTaskPlanUpdate        = "task.plan.update"
@@ -88,6 +89,11 @@ const (
 	ActionTaskPlanRevisionsList = "task.plan.revisions.list"
 	ActionTaskPlanRevisionGet   = "task.plan.revision.get"
 	ActionTaskPlanRevert        = "task.plan.revert"
+	ActionTaskPlanImplement     = "task.plan.implementation_started"
+	ActionTaskPlanCommentsList  = "task.plan.comments.list"
+	ActionTaskPlanCommentCreate = "task.plan.comments.create"
+	ActionTaskPlanCommentUpdate = "task.plan.comments.update"
+	ActionTaskPlanCommentDelete = "task.plan.comments.delete"
 
 	// Plugin-backed canvas lifecycle notifications. These are owner-scoped
 	// workspace/task events and contain no application content or capabilities.
@@ -98,7 +104,6 @@ const (
 	ActionCanvasArchived                  = "canvas.archived"
 	ActionCanvasRestored                  = "canvas.restored"
 	ActionCanvasRemoved                   = "canvas.removed"
-	ActionTaskPlanImplement               = "task.plan.implementation_started"
 
 	ActionTaskSessionList   = "task.session.list"
 	ActionTaskSessionStatus = "task.session.status"
@@ -142,10 +147,14 @@ const (
 	ActionMessageQueueCancel        = "message.queue.cancel" // Clears the entire queue for a session
 	ActionMessageQueueGet           = "message.queue.get"
 	ActionMessageQueueUpdate        = "message.queue.update"
+	ActionMessageQueueEditBegin     = "message.queue.edit.begin"
+	ActionMessageQueueEditRenew     = "message.queue.edit.renew"
+	ActionMessageQueueEditEnd       = "message.queue.edit.end"
 	ActionMessageQueueAppend        = "message.queue.append"
 	ActionMessageQueueDrain         = "message.queue.drain"          // Dispatch one queued entry now when the session is promptable
 	ActionMessageQueueSendNow       = "message.queue.send_now"       // Interrupt and replace the active turn with an exact queue selection
 	ActionMessageQueueAutoRunSet    = "message.queue.auto_run.set"   // Persist automatic queue processing and optionally dispatch the head
+	ActionMessageQueueAutoMergeSet  = "message.queue.auto_merge.set" // Persist a per-session automatic-merge override
 	ActionMessageQueueRemove        = "message.queue.remove"         // Delete a single entry by id
 	ActionMessageQueueMerge         = "message.queue.merge"          // Fold an entry into the entry above it
 	ActionMessageQueueReorder       = "message.queue.reorder"        // Rewrite the visible pending order for a session
@@ -191,6 +200,7 @@ const (
 	ActionACPHeartbeat                   = "acp.heartbeat"
 	ActionTaskCreated                    = "task.created"
 	ActionTaskUpdated                    = "task.updated"
+	ActionTaskReordered                  = "task.reordered"
 	ActionTaskDeleted                    = "task.deleted"
 	ActionTaskStateChanged               = "task.state_changed"
 	ActionSessionWorkspaceSourcesUpdated = "session.workspace_sources.updated"
@@ -199,6 +209,7 @@ const (
 	ActionTaskPlanDeleted                = "task.plan.deleted"
 	ActionTaskPlanRevisionCreated        = "task.plan.revision.created"
 	ActionTaskPlanReverted               = "task.plan.reverted"
+	ActionTaskPlanCommentsChanged        = "task.plan.comments.changed"
 	ActionTaskWalkthroughGet             = "task.walkthrough.get"
 	ActionTaskWalkthroughDelete          = "task.walkthrough.delete"
 	ActionTaskWalkthroughCreated         = "task.walkthrough.created"
@@ -217,6 +228,7 @@ const (
 	ActionTaskReviewFindingUpdated      = "task.review.finding_updated"
 	ActionTaskReviewCleared             = "task.review.cleared"
 	ActionAgentUpdated                  = "agent.updated"
+	ActionAgentProfileMCPConfigUpdated  = "agent.profile.mcp_config.updated"
 	ActionAgentAvailableUpdated         = "agent.available.updated"
 	ActionAgentInstallStarted           = "agent.install.started"
 	ActionAgentInstallOutput            = "agent.install.output"
@@ -471,9 +483,6 @@ const (
 	ActionMCPGetCanvasState           = "mcp.get_canvas_state"
 	ActionMCPSetCanvasState           = "mcp.set_canvas_state"
 
-	// Office quorum decision recording.
-	ActionMCPRecordStepDecision = "mcp.record_step_decision"
-
 	// Config-mode MCP actions (agent-native configuration)
 	ActionMCPCreateWorkflow = "mcp.create_workflow"
 	ActionMCPUpdateWorkflow = "mcp.update_workflow"
@@ -489,14 +498,19 @@ const (
 	ActionMCPListAgents  = "mcp.list_agents"
 	ActionMCPUpdateAgent = "mcp.update_agent"
 
-	ActionMCPListAgentProfiles  = "mcp.list_agent_profiles"
-	ActionMCPCreateAgentProfile = "mcp.create_agent_profile"
-	ActionMCPUpdateAgentProfile = "mcp.update_agent_profile"
-	ActionMCPDeleteAgentProfile = "mcp.delete_agent_profile"
-	ActionMCPGetMcpConfig       = "mcp.get_mcp_config"
-	ActionMCPUpdateMcpConfig    = "mcp.update_mcp_config"
-	ActionMCPListSharedPrompts  = "mcp.list_shared_prompts"
-	ActionMCPGetSharedPrompt    = "mcp.get_shared_prompt"
+	ActionMCPListAgentProfiles     = "mcp.list_agent_profiles"
+	ActionMCPCreateAgentProfile    = "mcp.create_agent_profile"
+	ActionMCPUpdateAgentProfile    = "mcp.update_agent_profile"
+	ActionMCPDeleteAgentProfile    = "mcp.delete_agent_profile"
+	ActionMCPGetMcpConfig          = "mcp.get_mcp_config"
+	ActionMCPUpdateMcpConfig       = "mcp.update_mcp_config"
+	ActionMCPListSharedPrompts     = "mcp.list_shared_prompts"
+	ActionMCPGetSharedPrompt       = "mcp.get_shared_prompt"
+	ActionMCPSearchSettings        = "mcp.search_settings"
+	ActionMCPDescribeSetting       = "mcp.describe_setting"
+	ActionMCPGetSettings           = "mcp.get_settings"
+	ActionMCPUpdateSettings        = "mcp.update_settings"
+	ActionMCPListSettingsResources = "mcp.list_settings_resources"
 
 	ActionMCPListExecutors         = "mcp.list_executors"
 	ActionMCPListExecutorProfiles  = "mcp.list_executor_profiles"
@@ -525,31 +539,32 @@ const (
 
 // GitHub integration actions
 const (
-	ActionGitHubStatus               = "github.status"
-	ActionGitHubTaskPRsList          = "github.task_prs.list"
-	ActionGitHubTaskPRGet            = "github.task_pr.get"
-	ActionGitHubPRFeedbackGet        = "github.pr_feedback.get"
-	ActionGitHubReviewWatchesList    = "github.review_watches.list"
-	ActionGitHubReviewWatchCreate    = "github.review_watches.create"
-	ActionGitHubReviewWatchUpdate    = "github.review_watches.update"
-	ActionGitHubReviewWatchDelete    = "github.review_watches.delete"
-	ActionGitHubReviewTrigger        = "github.review_watches.trigger"
-	ActionGitHubReviewTriggerAll     = "github.review_watches.trigger_all"
-	ActionGitHubPRWatchesList        = "github.pr_watches.list"
-	ActionGitHubPRWatchDelete        = "github.pr_watches.delete"
-	ActionGitHubPRFilesGet           = "github.pr_files.get"
-	ActionGitHubPRCommitsGet         = "github.pr_commits.get"
-	ActionGitHubPRCommitGet          = "github.pr_commit.get"
-	ActionGitHubTaskPRUpdated        = "github.task_pr.updated"         // Notification
-	ActionGitHubTaskPRDeleted        = "github.task_pr.deleted"         // Notification
-	ActionGitHubTaskCIOptionsUpdated = "github.task_ci_options.updated" // Notification
-	ActionGitHubRateLimitUpdated     = "github.rate_limit.updated"      // Notification
-	ActionGitHubPRFeedbackNotify     = "github.pr_feedback.notify"      // Notification
-	ActionGitHubNewReviewPRNotify    = "github.new_review_pr.notify"    // Notification
-	ActionGitHubTaskPRSync           = "github.task_pr.sync"
-	ActionGitHubStats                = "github.stats"
-	ActionGitHubCheckSessionPR       = "github.check_session_pr"
-	ActionGitLabCheckSessionMR       = "gitlab.check_session_mr"
+	ActionGitHubStatus                   = "github.status"
+	ActionGitHubTaskPRsList              = "github.task_prs.list"
+	ActionGitHubTaskPRGet                = "github.task_pr.get"
+	ActionGitHubPRFeedbackGet            = "github.pr_feedback.get"
+	ActionGitHubReviewWatchesList        = "github.review_watches.list"
+	ActionGitHubReviewWatchCreate        = "github.review_watches.create"
+	ActionGitHubReviewWatchUpdate        = "github.review_watches.update"
+	ActionGitHubReviewWatchDelete        = "github.review_watches.delete"
+	ActionGitHubReviewTrigger            = "github.review_watches.trigger"
+	ActionGitHubReviewTriggerAll         = "github.review_watches.trigger_all"
+	ActionGitHubPRWatchesList            = "github.pr_watches.list"
+	ActionGitHubPRWatchDelete            = "github.pr_watches.delete"
+	ActionGitHubPRFilesGet               = "github.pr_files.get"
+	ActionGitHubPRCommitsGet             = "github.pr_commits.get"
+	ActionGitHubPRCommitGet              = "github.pr_commit.get"
+	ActionGitHubTaskPRUpdated            = "github.task_pr.updated"             // Notification
+	ActionGitHubTaskPRDeleted            = "github.task_pr.deleted"             // Notification
+	ActionGitHubTaskCIOptionsUpdated     = "github.task_ci_options.updated"     // Notification
+	ActionGitHubRateLimitUpdated         = "github.rate_limit.updated"          // Notification
+	ActionGitHubPRDiscoveryHealthUpdated = "github.pr_discovery_health.updated" // Notification
+	ActionGitHubPRFeedbackNotify         = "github.pr_feedback.notify"          // Notification
+	ActionGitHubNewReviewPRNotify        = "github.new_review_pr.notify"        // Notification
+	ActionGitHubTaskPRSync               = "github.task_pr.sync"
+	ActionGitHubStats                    = "github.stats"
+	ActionGitHubCheckSessionPR           = "github.check_session_pr"
+	ActionGitLabCheckSessionMR           = "gitlab.check_session_mr"
 
 	// Issue watch actions
 	ActionGitHubIssueWatchesList = "github.issue_watches.list"
@@ -659,13 +674,15 @@ const (
 
 // Error codes
 const (
-	ErrorCodeBadRequest    = "BAD_REQUEST"
-	ErrorCodeNotFound      = "NOT_FOUND"
-	ErrorCodeInternalError = "INTERNAL_ERROR"
-	ErrorCodeUnauthorized  = "UNAUTHORIZED"
-	ErrorCodeForbidden     = "FORBIDDEN"
-	ErrorCodeValidation    = "VALIDATION_ERROR"
-	ErrorCodeConflict      = "CONFLICT"
-	ErrorCodeUnavailable   = "UNAVAILABLE"
-	ErrorCodeUnknownAction = "UNKNOWN_ACTION"
+	ErrorCodeBadRequest            = "BAD_REQUEST"
+	ErrorCodeNotFound              = "NOT_FOUND"
+	ErrorCodeInternalError         = "INTERNAL_ERROR"
+	ErrorCodeUnauthorized          = "UNAUTHORIZED"
+	ErrorCodeForbidden             = "FORBIDDEN"
+	ErrorCodeValidation            = "VALIDATION_ERROR"
+	ErrorCodeConflict              = "CONFLICT"
+	ErrorCodeUnavailable           = "UNAVAILABLE"
+	ErrorCodeUnknownAction         = "UNKNOWN_ACTION"
+	ErrorCodePlanCommentsChanged   = "plan_comments_changed"
+	ErrorCodePrimarySessionChanged = "primary_session_changed"
 )

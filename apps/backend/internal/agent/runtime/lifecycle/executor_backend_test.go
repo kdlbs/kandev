@@ -80,6 +80,16 @@ func TestOfficeAgentIdentityMetadataIsSessionScoped(t *testing.T) {
 		"Office identity must not leak to a sibling session")
 }
 
+func TestSSHRuntimeAPIMetadataIsPersistentAndSessionScoped(t *testing.T) {
+	for _, key := range []string{
+		MetadataKeySSHRuntimeAPILocalURL,
+		MetadataKeySSHRuntimeAPIRemotePort,
+	} {
+		require.True(t, ShouldPersistMetadataKey(key), "%s must survive same-session restart", key)
+		require.True(t, IsSessionScopedMetadataKey(key), "%s must not leak to sibling sessions", key)
+	}
+}
+
 func TestFilterPersistentMetadata(t *testing.T) {
 	t.Run("nil input returns nil", func(t *testing.T) {
 		require.Nil(t, FilterPersistentMetadata(nil))

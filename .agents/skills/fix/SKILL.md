@@ -35,9 +35,18 @@ If the cause remains uncertain, stop and ask the user.
 
 ## Phase 1: Reconcile specifications
 
+Run the `/interview-me` assumption check for intended behavior and repair scope.
+Reuse active acceptance criteria for clear regressions. Ask only about material
+choices that evidence and prior instructions do not settle.
+
 Read `docs/specs/README.md`, the owning system index, and the relevant
 requirement and system-design documents. Use the legacy catalog only when the
 system has not migrated.
+Read the owning system `README.md` and use this command for discovery:
+
+    python3 scripts/list-docs.py specs --format paths
+
+Add `--kind legacy` when the system has not migrated.
 
 Search adjacent systems before you create or move an artifact. A UI symptom does
 not make the repair UI-owned. Update the system that owns the failed contract,
@@ -56,6 +65,12 @@ Classify the bug:
 
 Do not create a standalone repair specification. The requirement is the durable
 behavioral source. The plan and work orders record this repair.
+
+For predicates over collections or inventory, state the quantifier explicitly:
+distinguish existential conditions such as “at least one live row” from
+universal conditions such as “all rows.” When behavior depends on that
+distinction, require a mixed-state regression containing both live and failed or
+deleted rows.
 
 Do not create parallel feature and UI requirements for one repair. A separate UI
 requirement is valid only when the repair changes an independent reusable UI
@@ -77,6 +92,9 @@ The package must:
 - Name the regression test that fails before the correction.
 - Name exact files, dependencies, acceptance conditions, and commands.
 - Use dependency waves only when they clarify implementation order.
+- For rendered UI changes, include ASCII previews in the plan and relevant UI
+  work orders per `docs/specs/guide/plans-and-work-orders.md#ascii-ui-previews`.
+  Show before/after when it explains the defect and correction.
 
 Keep work orders sequential by default. A wave does not authorize delegation.
 
@@ -89,6 +107,8 @@ Before you change production or permanent test code, report:
 - Plan and work-order paths.
 - Dependency order and exact commands.
 - Risks and exclusions.
+- For UI changes, a compact inline ASCII preview of the correction, including
+  phone composition when different, and links to the full plan/work-order views.
 
 Then end the turn. Do not ask the user to approve the package or switch models.
 Wait for a later explicit implementation request.

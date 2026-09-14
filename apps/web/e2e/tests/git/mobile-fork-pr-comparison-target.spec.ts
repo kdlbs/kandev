@@ -1,7 +1,10 @@
 import { expect, type Locator } from "@playwright/test";
 import { test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
-import { seedForkPRComparisonTask } from "./fork-pr-comparison-target-helpers";
+import {
+  resetForkPRComparisonRepository,
+  seedForkPRComparisonTask,
+} from "./fork-pr-comparison-target-helpers";
 
 async function expandSection(toggle: Locator) {
   await expect
@@ -18,6 +21,10 @@ async function expandSection(toggle: Locator) {
 
 test.describe("Mobile fork pull-request comparison target", () => {
   test.describe.configure({ timeout: 120_000 });
+
+  test.afterEach(async ({ seedData, backend, apiClient }) => {
+    await resetForkPRComparisonRepository(seedData, backend, apiClient);
+  });
 
   test("shows the same upstream target in the touch branch drawer", async ({
     testPage,
@@ -66,9 +73,15 @@ test.describe("Mobile fork pull-request comparison target", () => {
     seedData,
     backend,
   }) => {
-    const { task } = await seedForkPRComparisonTask(apiClient, seedData, backend, {
-      comparisonTargetAvailable: false,
-    });
+    const { task, comparisonTargetFixture } = await seedForkPRComparisonTask(
+      apiClient,
+      seedData,
+      backend,
+      {
+        comparisonTargetAvailable: false,
+        localUncommittedFile: "mobile-local-auth-recovery.txt",
+      },
+    );
 
     await testPage.goto(`/t/${task.id}`);
     const session = new SessionPage(testPage);
@@ -84,5 +97,23 @@ test.describe("Mobile fork pull-request comparison target", () => {
     await expect(changes.getByTestId("comparison-target-notice")).toContainText(
       "upstream/widget:main",
     );
+    await expect
+      .poll(() => comparisonTargetFixture?.unauthorizedRequestCount() ?? 0, {
+        timeout: 15_000,
+        message: "the comparison fixture should observe the failed HTTP authentication request",
+      })
+      .toBeGreaterThan(0);
+    await expect(
+      changes.locator('[data-changes-file="mobile-local-auth-recovery.txt"]'),
+    ).toBeVisible();
+
+    comparisonTargetFixture?.setAvailable(true);
+    await testPage.getByRole("button", { name: "Chat" }).tap();
+    await testPage.getByRole("button", { name: "Changes" }).tap();
+    await expect(changes.getByTestId("comparison-target-notice")).toHaveCount(0, {
+      timeout: 30_000,
+    });
+    await expandSection(changes.getByTestId("commits-section-collapse-toggle"));
+    await expect(changes.locator('[data-testid^="commit-row-"]')).toHaveCount(1);
   });
 });

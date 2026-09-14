@@ -97,6 +97,41 @@ func TestComparisonTargetMaterializationPublishesBoundedFetchFailureNoTransportF
 	}
 }
 
+func TestRetryUnavailableComparisonTargetsRecoversOnFreshRequest(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+	target := comparisonTargetProcessTestTarget()
+	mgr, markers := newComparisonTargetTestManager(t, repoDir, target, map[string]string{
+		"KANDEV_TEST_FETCH_ERROR": "1",
+	})
+
+	mgr.PrepareComparisonTargets(context.Background())
+	waitForComparisonResolution(t, mgr.GetWorkspaceTracker(), comparisonTargetStatusUnavailable, comparisonTargetErrorFetch)
+
+	// The test shim reads this environment from the tracker command rather than
+	// the test process, so recovery exercises the same per-instance environment
+	// update used when a credential service becomes available again.
+	mgr.GetWorkspaceTracker().SetGitEnvironment([]string{
+		comparisonTargetGitShimModeEnv + "=comparison",
+		"KANDEV_TEST_GIT_LOG=" + markers.commandLog,
+		"KANDEV_TEST_FETCH_STARTED=" + markers.fetchStarted,
+		"KANDEV_TEST_STATUS_STARTED=" + markers.statusStarted,
+	})
+	mgr.RetryUnavailableComparisonTargets()
+
+	resolution := waitForComparisonResolution(t, mgr.GetWorkspaceTracker(), comparisonTargetStatusReady, "")
+	if resolution.Ref != target.ComparisonRef() {
+		t.Fatalf("recovered comparison ref = %q, want %q", resolution.Ref, target.ComparisonRef())
+	}
+	logBytes, err := os.ReadFile(markers.commandLog)
+	if err != nil {
+		t.Fatalf("read Git command log: %v", err)
+	}
+	if got := strings.Count(string(logBytes), "fetch --no-tags"); got != 2 {
+		t.Fatalf("comparison fetch count after recovery = %d, want two; commands:\n%s", got, logBytes)
+	}
+}
+
 func TestComparisonTargetPublicationRequiresActiveOperation(t *testing.T) {
 	repoDir, cleanup := setupTestRepo(t)
 	t.Cleanup(cleanup)
@@ -326,12 +361,13 @@ func runComparisonTargetGitShim() {
 	if len(args) < 2 {
 		os.Exit(0)
 	}
+	if args[0] == "config" && args[1] == "--get" && len(args) > 2 && strings.HasPrefix(args[2], "remote.") {
+		os.Exit(1)
+	}
 	if args[0] == "config" && strings.HasPrefix(args[1], "remote.") {
 		os.Exit(0)
 	}
 	switch args[0] + " " + args[1] {
-	case "remote get-url":
-		os.Exit(1)
 	case "remote add":
 		os.Exit(0)
 	case "fetch --no-tags":

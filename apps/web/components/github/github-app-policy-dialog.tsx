@@ -42,7 +42,7 @@ export function GitHubAppPolicyDialog({
   return (
     <Dialog>
       <DialogTrigger asChild>
-        <Button variant="outline" className="h-11 cursor-pointer">
+        <Button variant="outline" className="cursor-pointer">
           <IconShieldCheck className="mr-2 h-4 w-4" />
           {t("github:reviewPermissions")}
         </Button>

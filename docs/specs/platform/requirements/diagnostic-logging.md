@@ -2,7 +2,7 @@
 status: active
 system: platform
 created: 2026-07-30
-updated: 2026-08-27
+updated: 2026-09-09
 owners:
   - tbd
 ---
@@ -33,6 +33,13 @@ Users can see frontend failures that leave no backend evidence, and support cann
   that scans a growing application collection shall compute and emit at most
   one latest-state sample per 250 ms while that collection changes
   continuously.
+- **AC-PLATFORM-DIAGNOSTIC-LOGGING-001.10:** A connected frontend shall begin
+  uploading retained browser evidence without first materializing the complete
+  retained history.
+- **AC-PLATFORM-DIAGNOSTIC-LOGGING-001.11:** A frontend capture notification
+  shall include the absolute server deadline and a remaining duration of no more
+  than 15 seconds. A browser wall-clock offset shall not change this duration.
+  The backend shall remain authoritative for job expiry.
 
 ## System design
 
