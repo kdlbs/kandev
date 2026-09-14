@@ -34,8 +34,11 @@ export function InboxTabStrip({
 
   return (
     <Tabs value={selectedTab} onValueChange={(value) => onSelectTab(value as InboxTab)}>
-      <TabsList variant="line">
-        <TabsTrigger value="needs-you">
+      <TabsList variant="line" className="max-md:min-h-11 [@media(pointer:coarse)]:min-h-11">
+        <TabsTrigger
+          value="needs-you"
+          className="max-md:min-h-11 [@media(pointer:coarse)]:min-h-11"
+        >
           {t("needsYouInbox:tabLabel")}
           {needsYouBadge && (
             <Badge variant="secondary" data-testid="inbox-tab-needs-you-badge">
@@ -43,7 +46,7 @@ export function InboxTabStrip({
             </Badge>
           )}
         </TabsTrigger>
-        <TabsTrigger value="failed">
+        <TabsTrigger value="failed" className="max-md:min-h-11 [@media(pointer:coarse)]:min-h-11">
           {t("failedInbox:tabLabel")}
           {failedBadge && (
             <Badge variant="secondary" data-testid="inbox-tab-failed-badge">

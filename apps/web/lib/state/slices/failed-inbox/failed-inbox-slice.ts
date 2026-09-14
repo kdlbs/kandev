@@ -6,6 +6,7 @@ export const defaultFailedInboxState: FailedInboxSliceState = {
   failedInbox: {
     byWorkspaceId: {},
     generationByWorkspaceId: {},
+    activeWorkspaceId: null,
   },
 };
 
@@ -38,16 +39,20 @@ export const createFailedInboxSlice = (set: ImmerSet): FailedInboxSlice => ({
     set((draft) => {
       const next = (draft.failedInbox.generationByWorkspaceId[workspaceId] ?? 0) + 1;
       draft.failedInbox.generationByWorkspaceId[workspaceId] = next;
-      const workspace = draft.failedInbox.byWorkspaceId[workspaceId] ?? emptyWorkspaceState();
-      // A background refresh of already-`ready` data leaves status alone
-      // (AC-UI-INBOX-FAILED-001.16's count "shall remain rendered"): only a
-      // never-read or previously-errored workspace moves to `loading`, so a
-      // periodic tick, tab change, or foreground-return refresh cannot hide
-      // the badge behind rows it is still showing.
-      if (workspace.status !== "ready") {
-        workspace.status = "loading";
+      const isWorkspaceChange = draft.failedInbox.activeWorkspaceId !== workspaceId;
+      draft.failedInbox.activeWorkspaceId = workspaceId;
+      const existing = draft.failedInbox.byWorkspaceId[workspaceId] ?? emptyWorkspaceState();
+      // A same-workspace refresh trigger (periodic tick, tab change,
+      // foreground return) leaves already-`ready` data alone, so it cannot
+      // hide the badge behind rows it is still showing. A genuine workspace
+      // switch always resets to `loading` and clears any cache from an
+      // earlier visit in this session, even if that visit ended `ready`.
+      if (isWorkspaceChange || existing.status !== "ready") {
+        draft.failedInbox.byWorkspaceId[workspaceId] = {
+          ...emptyWorkspaceState(),
+          status: "loading",
+        };
       }
-      draft.failedInbox.byWorkspaceId[workspaceId] = workspace;
       generation = next;
     });
     return generation;

@@ -71,4 +71,11 @@ describe("InboxTabStrip", () => {
     renderStrip({ selectedTab: "failed", failedCount: 2 });
     expect(screen.getByTestId(FAILED_BADGE_TESTID)).not.toBeNull();
   });
+
+  it("carries a coarse-pointer/mobile 44px touch-target floor on every tab trigger", () => {
+    renderStrip();
+    for (const tab of screen.getAllByRole("tab")) {
+      expect(tab.className).toContain("min-h-11");
+    }
+  });
 });

@@ -112,26 +112,6 @@ describe("failed-inbox slice", () => {
     expect(state.count).toBe(1);
   });
 
-  // AC-UI-INBOX-FAILED-001.16: the count "shall remain rendered" across a
-  // background refresh -- only a never-read or previously-errored workspace
-  // should show as not-yet-known while a request is in flight.
-  it("keeps a workspace's status ready while a background refresh of already-loaded data is in flight", () => {
-    const store = newStore();
-    const firstGeneration = store.getState().beginFailedInboxRead("w1");
-    store.getState().setFailedInboxPage("w1", firstGeneration, {
-      rows: [row()],
-      count: 1,
-      truncated: false,
-    });
-
-    store.getState().beginFailedInboxRead("w1");
-
-    const state = store.getState().failedInbox.byWorkspaceId.w1;
-    expect(state.status).toBe("ready");
-    expect(state.rows).toHaveLength(1);
-    expect(state.count).toBe(1);
-  });
-
   it("keys generations independently per workspace", () => {
     const store = newStore();
     const genW1 = store.getState().beginFailedInboxRead("w1");
@@ -150,5 +130,50 @@ describe("failed-inbox slice", () => {
 
     expect(store.getState().failedInbox.byWorkspaceId.w1.status).toBe("ready");
     expect(store.getState().failedInbox.byWorkspaceId.w2.rows).toHaveLength(1);
+  });
+});
+
+describe("failed-inbox slice: workspace-change status transitions (AC .16)", () => {
+  // The count "shall remain rendered" across a background refresh -- only a
+  // never-read or previously-errored workspace should show as not-yet-known
+  // while a request is in flight.
+  it("keeps a workspace's status ready while a background refresh of already-loaded data is in flight", () => {
+    const store = newStore();
+    const firstGeneration = store.getState().beginFailedInboxRead("w1");
+    store.getState().setFailedInboxPage("w1", firstGeneration, {
+      rows: [row()],
+      count: 1,
+      truncated: false,
+    });
+
+    store.getState().beginFailedInboxRead("w1");
+
+    const state = store.getState().failedInbox.byWorkspaceId.w1;
+    expect(state.status).toBe("ready");
+    expect(state.rows).toHaveLength(1);
+    expect(state.count).toBe(1);
+  });
+
+  // "Changing the active workspace shall clear it until a response for the
+  // new one is applied" -- returning to a workspace visited earlier in the
+  // same session must not show its stale cache.
+  it("clears a workspace's stale ready state when the operator switches back to it", () => {
+    const store = newStore();
+    const w1Generation = store.getState().beginFailedInboxRead("w1");
+    store.getState().setFailedInboxPage("w1", w1Generation, {
+      rows: [row()],
+      count: 1,
+      truncated: false,
+    });
+    expect(store.getState().failedInbox.byWorkspaceId.w1.status).toBe("ready");
+
+    // Switch away to w2, then back to w1, before w1's new read resolves.
+    store.getState().beginFailedInboxRead("w2");
+    store.getState().beginFailedInboxRead("w1");
+
+    const state = store.getState().failedInbox.byWorkspaceId.w1;
+    expect(state.status).not.toBe("ready");
+    expect(state.rows).toHaveLength(0);
+    expect(state.count).toBe(0);
   });
 });

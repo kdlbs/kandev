@@ -21,6 +21,12 @@ export type FailedInboxSliceState = {
     // Keyed on workspace only, deliberately never on the selected tab
     // (design-01#Control-flow).
     generationByWorkspaceId: Record<string, number>;
+    // The workspace `beginFailedInboxRead` was last called for -- lets it
+    // tell a genuine workspace switch, which must clear any cached data
+    // until the new workspace's response applies, apart from a
+    // same-workspace refresh trigger, which must leave already-loaded data
+    // alone.
+    activeWorkspaceId: string | null;
   };
 };
 
