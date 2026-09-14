@@ -1999,7 +1999,8 @@ func queuedMessageAttachmentsToV1(attachments []messagequeue.MessageAttachment) 
 // entity references are re-added via WithEntityReferences, and a carried
 // completion handoff (messagequeue.MetadataStepHandoff) is already folded
 // into the recorded content by the caller, so neither belongs in the row's
-// own stored metadata.
+// own stored metadata. Admission provenance remains so clients can reconcile
+// an accepted message after its queue row has been dispatched.
 func metadataWithoutQueueOnlyKeys(metadata map[string]interface{}) map[string]interface{} {
 	if len(metadata) == 0 {
 		return nil

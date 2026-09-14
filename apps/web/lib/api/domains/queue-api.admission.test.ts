@@ -20,6 +20,7 @@ const QUEUE_ADD_ACTION = "message.queue.add";
 const QUEUE_GET_ACTION = "message.queue.get";
 const MESSAGE_LIST_ACTION = "message.list";
 const ATTACHMENT_ID = "file-1";
+const QUEUE_TIMEOUT_ERROR = "WebSocket request timed out";
 
 beforeEach(() => {
   getWebSocketClientMock.mockReset();
@@ -53,7 +54,7 @@ describe("identified queue admission", () => {
     const request = vi.fn(async (action: string, ..._args: unknown[]) => {
       if (action === QUEUE_ADD_ACTION) {
         adds++;
-        if (adds === 1) throw new Error("WebSocket request timed out");
+        if (adds === 1) throw new Error(QUEUE_TIMEOUT_ERROR);
         return { id: baseParams.client_queue_id };
       }
       if (action === QUEUE_GET_ACTION) return { entries: [], count: 0, max: 10 };
@@ -83,7 +84,7 @@ describe("identified queue admission", () => {
     const request = vi.fn(async (action: string, ..._args: unknown[]) => {
       if (action === QUEUE_ADD_ACTION) {
         adds++;
-        if (adds === 1) throw new Error("WebSocket request timed out");
+        if (adds === 1) throw new Error(QUEUE_TIMEOUT_ERROR);
         return { id: baseParams.client_queue_id };
       }
       if (action === QUEUE_GET_ACTION) return { entries: [], count: 0, max: 10 };
@@ -107,7 +108,7 @@ describe("identified queue admission", () => {
     const request = vi.fn(async (action: string, ..._args: unknown[]) => {
       if (action === QUEUE_ADD_ACTION) {
         adds++;
-        if (adds === 1) throw new Error("WebSocket request timed out");
+        if (adds === 1) throw new Error(QUEUE_TIMEOUT_ERROR);
         return { id: baseParams.client_queue_id };
       }
       if (action === QUEUE_GET_ACTION) return { entries: [], count: 0, max: 10 };
@@ -128,6 +129,49 @@ describe("identified queue admission", () => {
   });
 });
 
+describe("post-dispatch queue admission", () => {
+  it("reconciles an accepted admission from ordinary transcript provenance", async () => {
+    let admissions = 0;
+    let transcriptReads = 0;
+    const request = vi.fn(async (action: string, ..._args: unknown[]) => {
+      if (action === QUEUE_ADD_ACTION) {
+        admissions++;
+        throw new Error(QUEUE_TIMEOUT_ERROR);
+      }
+      if (action === QUEUE_GET_ACTION) return { entries: [], count: 0, max: 10 };
+      if (action === MESSAGE_LIST_ACTION) {
+        transcriptReads++;
+        if (transcriptReads < 2) return { messages: [], has_more: false };
+        return {
+          messages: [
+            {
+              id: "transcript-1",
+              session_id: baseParams.session_id,
+              task_id: baseParams.task_id,
+              author_type: "user",
+              content: baseParams.content,
+              type: "message",
+              created_at: "2026-09-14T12:00:00Z",
+              metadata: { queue_admission_ids: [baseParams.client_queue_id] },
+            },
+          ],
+          has_more: false,
+        };
+      }
+      return undefined;
+    });
+    getWebSocketClientMock.mockReturnValue({ request, getStatus: () => "connected" });
+
+    await expect(queueMessage(baseParams)).resolves.toMatchObject({
+      id: baseParams.client_queue_id,
+      content: baseParams.content,
+      queued_at: "2026-09-14T12:00:00Z",
+    });
+    expect(admissions).toBe(2);
+    expect(transcriptReads).toBe(2);
+  });
+});
+
 describe("identified queue admission errors", () => {
   it("maps deterministic queue rejection codes to typed errors", async () => {
     const cases = [
@@ -136,6 +180,7 @@ describe("identified queue admission errors", () => {
       ["queue_session_unavailable", QueueAdmissionError],
       ["queue_admission_unavailable", QueueAdmissionError],
       ["VALIDATION_ERROR", QueueAdmissionError],
+      ["NOT_FOUND", QueueAdmissionError],
     ] as const;
     for (const [code, errorType] of cases) {
       const request = vi.fn().mockRejectedValue(new WebSocketRequestError("rejected", code));

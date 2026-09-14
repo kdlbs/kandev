@@ -122,11 +122,11 @@ Implemented stable ordinary admission IDs, 10-second and 30-second request budge
 
 Verification passed:
 
-- The targeted Vitest command above: 8 files, 142 tests.
+- The targeted Vitest command above: 8 files, 146 tests.
 - `pnpm run typecheck`, `pnpm run lint`, `pnpm run i18n:check`, and `pnpm run build`.
 - `pnpm run e2e:sleep-ratchet`.
 - Chromium admission E2E: 4 passed.
 - Mobile Chrome admission E2E: 2 passed.
 - `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check`.
 
-Review remediation passed: unrecognized structured WebSocket conflicts preserve their original error identity, code, and details for plan-comment and primary-session recovery. The pseudo-locale retains the named `count` component tags, and unrelated generated catalog churn was removed.
+Review remediation passed: unrecognized structured WebSocket conflicts preserve their original error identity, code, and details for plan-comment and primary-session recovery. Admission-only WebSocket mappings are scoped to queue submission, identified missing sessions use the typed unavailable code, and accepted queue submissions remain successful when the plan-comment refresh fails. Ordinary admission IDs are retained through queue merge and transcript recording so post-dispatch reconciliation can find them. The pseudo-locale retains the named `count` component tags, and unrelated generated catalog churn was removed.

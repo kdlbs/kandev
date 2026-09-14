@@ -64,7 +64,7 @@ The receipt design and alternatives are recorded in the ADR. The implementation 
 ## Technical approach
 
 Apply the [queue-admission design](../../specs/tasks/system-design/queue-admission.md) and
-[proposed receipt ADR](../../decisions/2026-09-14-durable-queue-admission-receipts.md).
+[receipt ADR](../../decisions/2026-09-14-durable-queue-admission-receipts.md).
 The server transaction is the correctness boundary. Receipt lookup precedes mutable admission checks, after authorization and incarnation validation.
 Client queue/transcript reads accelerate recovery but are not the deduplication authority.
 Keep optional unidentified-client compatibility and plan-comment behavior.
@@ -137,8 +137,8 @@ Executed sequentially. Task 02 depended on the server replay guarantee from Task
 Diagnostic evidence: 3 Vitest files, 37 tests passed. Temporary reproduction removed.
 Specification validation passed: 268 decisions and 904 specifications validated. All specification files passed.
 `git diff --check` passed. The package inventory contains two completed work orders.
-Implementation checks passed: backend build and lint, focused backend and race suites, SQL guard, persistence store conformance, 142 focused web tests, typecheck, web lint, i18n validation, production build, and the desktop and mobile admission E2E suites.
-Review remediation checks passed: structured WebSocket conflict preservation, staged-upload full-capacity rejection, full-fold acceptance timestamps with replay stability, and pseudo-locale component-tag preservation.
+Implementation checks passed: backend build and lint, focused backend and race suites, SQL guard, persistence store conformance, 146 focused web tests, typecheck, web lint, i18n validation, production build, and the desktop and mobile admission E2E suites.
+Review remediation checks passed: structured WebSocket conflict preservation, scoped admission error mapping, ordinary transcript provenance, staged-upload rejection, full-fold acceptance timestamps with replay stability, session-incarnation fencing, persistence conformance coverage, accepted comment refresh handling, and pseudo-locale component-tag preservation.
 The Postgres admission parity test was discovered and skipped because `KANDEV_TEST_POSTGRES_DSN` was not set; it remains available for configured database CI.
 
 ## Risks

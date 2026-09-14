@@ -75,6 +75,7 @@ func queueAdmissionFingerprint(identity QueueSessionIdentity, message *QueuedMes
 	delete(metadata, plancomments.MetadataClientQueueID)
 	delete(metadata, plancomments.MetadataRequestFingerprint)
 	delete(metadata, plancomments.MetadataClientMessageFingerprint)
+	delete(metadata, MetadataQueueAdmissionIDs)
 	input := queueAdmissionFingerprintInput{
 		TaskID: identity.TaskID, SessionID: identity.SessionID,
 		SessionIncarnationID: identity.SessionIncarnationID,

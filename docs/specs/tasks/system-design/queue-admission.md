@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: tasks
 requirements:
   - REQ-TASKS-QUEUE-ADMISSION-001
@@ -37,7 +37,7 @@ Write the receipt in the same transaction as the accepted insertion or fold and 
 A transaction failure commits neither content nor receipt. A database uniqueness constraint closes concurrent replay races.
 Do not implement a separate receipt write after queue commit or a read-then-insert deduplication check outside the transaction.
 
-Do not put each request ID into merge compatibility metadata. Ordinary entries must retain their current compatibility behavior.
+Store ordinary contributing IDs in a provenance metadata key that is ignored by merge compatibility and unioned by automatic and manual folds. Ordinary entries must retain their current compatibility behavior, while their provenance remains available after a source row is folded or dispatched.
 The earlier tail still survives automatic merging. A receipt identifies admission, not the continued existence of a visible source row.
 Post-admission readiness checks retain current behavior and cannot convert committed acceptance into rejection.
 
@@ -96,6 +96,6 @@ No new metrics, high-cardinality labels, or global transport logging are require
 
 ## Related decisions and implementation
 
-- [Durable admission receipts](../../../decisions/2026-09-14-durable-queue-admission-receipts.md) records the proposed persistence choice.
+- [Durable admission receipts](../../../decisions/2026-09-14-durable-queue-admission-receipts.md) records the accepted persistence choice.
 - [Server-owned Auto-run](../../../decisions/2026-08-16-server-owned-queue-auto-run.md) remains authoritative for dispatch.
 - [Implementation plan](../../../plans/queue-admission-reliability/plan.md)

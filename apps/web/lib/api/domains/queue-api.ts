@@ -127,7 +127,10 @@ const QUEUE_ADMISSION_ERROR_CODES: Readonly<Record<string, QueueAdmissionErrorCo
   queue_admission_unavailable: "unavailable",
   UNAVAILABLE: "unavailable",
   VALIDATION_ERROR: "validation",
+  NOT_FOUND: "session-unavailable",
 };
+
+type QueueErrorContext = "admission" | "operation";
 
 function asWSError(err: unknown): WSError | undefined {
   // Some WS error payloads omit `code` and only carry `message`/`details`;
@@ -152,14 +155,16 @@ function asWSError(err: unknown): WSError | undefined {
   return undefined;
 }
 
-function knownQueueError(wsErr: WSError): Error | undefined {
+function knownQueueError(wsErr: WSError, context: QueueErrorContext): Error | undefined {
   if (wsErr.code === "queue_full") {
     const size = typeof wsErr.details?.queue_size === "number" ? wsErr.details.queue_size : 0;
     const max = typeof wsErr.details?.max === "number" ? wsErr.details.max : 0;
     return new QueueFullError(size, max);
   }
-  const admissionCode = wsErr.code ? QUEUE_ADMISSION_ERROR_CODES[wsErr.code] : undefined;
-  if (admissionCode) return new QueueAdmissionError(admissionCode);
+  if (context === "admission") {
+    const admissionCode = wsErr.code ? QUEUE_ADMISSION_ERROR_CODES[wsErr.code] : undefined;
+    if (admissionCode) return new QueueAdmissionError(admissionCode);
+  }
   if (wsErr.code === "entry_not_found") return new QueueEntryNotFoundError();
   if (wsErr.code === "edit_conflict" || wsErr.code === "queue_conflict") {
     return new QueueEditConflictError();
@@ -171,10 +176,10 @@ function knownQueueError(wsErr: WSError): Error | undefined {
   return undefined;
 }
 
-export function rethrowQueueError(err: unknown): never {
+export function rethrowQueueError(err: unknown, context: QueueErrorContext = "operation"): never {
   const wsErr = asWSError(err);
   if (wsErr) {
-    const known = knownQueueError(wsErr);
+    const known = knownQueueError(wsErr, context);
     if (known) throw known;
     if (err instanceof WebSocketRequestError) throw err;
     if (wsErr.message) throw new Error(wsErr.message);
@@ -222,6 +227,7 @@ function isUncertainQueueTransportError(error: unknown): boolean {
 
 function hasQueueAdmissionMetadata(metadata: Message["metadata"], clientQueueId: string): boolean {
   if (metadata?.client_queue_id === clientQueueId) return true;
+  if (metadata?.queue_admission_ids?.includes(clientQueueId)) return true;
   const sources = metadata?.send_now_sources;
   if (!Array.isArray(sources)) return false;
   return sources.some((source) => {
@@ -362,10 +368,10 @@ export async function queueMessage(params: QueueMessageParams): Promise<QueuedMe
           request,
         );
       } catch (reconcileError) {
-        rethrowQueueError(reconcileError);
+        rethrowQueueError(reconcileError, "admission");
       }
     }
-    rethrowQueueError(err);
+    rethrowQueueError(err, "admission");
   }
 }
 

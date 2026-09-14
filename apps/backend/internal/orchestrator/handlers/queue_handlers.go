@@ -583,6 +583,9 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "task_id, session_id, and session_incarnation_id are required", nil)
 	}
 	if denied := h.authorizeQueueIdentity(ctx, msg, req.TaskID, req.SessionID, req.SessionIncarnationID); denied != nil {
+		if req.ClientQueueID != "" {
+			return ws.NewError(msg.ID, msg.Action, "queue_session_unavailable", "Session is no longer available", nil)
+		}
 		return denied, nil
 	}
 	if req.Content == "" && len(req.Attachments) == 0 && len(req.PlanCommentRefs) == 0 {
@@ -629,6 +632,12 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 		WithContextFiles(req.ContextFiles).
 		WithEntityReferences(req.EntityReferences).
 		ToMap()
+	if identifiedOrdinary {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata[messagequeue.MetadataQueueAdmissionIDs] = []string{req.ClientQueueID}
+	}
 	var snapshot *models.TaskPlanCommentSnapshot
 	var replay bool
 	var queued *messagequeue.QueuedMessage
@@ -653,7 +662,7 @@ func (h *QueueHandlers) wsQueueMessage(ctx context.Context, msg *ws.Message) (*w
 				TaskID: req.TaskID, SessionID: req.SessionID, SessionIncarnationID: req.SessionIncarnationID,
 			})
 		}
-		if len(req.PlanCommentRefs) == 0 {
+		if identifiedOrdinary {
 			if errors.Is(err, messagequeue.ErrQueueIDConflict) {
 				return ws.NewError(msg.ID, msg.Action, "queue_id_conflict", "client_queue_id is already used", nil)
 			}
@@ -730,6 +739,10 @@ func (h *QueueHandlers) admitIdentifiedOrdinaryQueuedMessage(
 		WithContextFiles(req.ContextFiles).
 		WithEntityReferences(req.EntityReferences).
 		ToMap()
+	if metadata == nil {
+		metadata = make(map[string]interface{})
+	}
+	metadata[messagequeue.MetadataQueueAdmissionIDs] = []string{req.ClientQueueID}
 	queued, err = h.admitIdentifiedQueuedMessage(ctx, req, queuedBy, metadata)
 	return queued, false, err
 }

@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/common/logger"
@@ -16,6 +17,37 @@ import (
 type recordingQueueAdmissionReadinessChecker struct {
 	calls    int
 	identity messagequeue.QueueSessionIdentity
+}
+
+type denyingQueueIdentityAccess struct {
+	allowQueueIdentityAccess
+}
+
+type taskInactiveQueueService struct {
+	*messagequeue.Service
+}
+
+func (taskInactiveQueueService) QueueMessageWithMetadata(
+	context.Context,
+	string,
+	string,
+	string,
+	string,
+	string,
+	bool,
+	[]messagequeue.MessageAttachment,
+	map[string]interface{},
+) (*messagequeue.QueuedMessage, error) {
+	return nil, messagequeue.ErrTaskInactive
+}
+
+func (denyingQueueIdentityAccess) AuthorizeTaskSessionIncarnationAccess(
+	context.Context,
+	string,
+	string,
+	string,
+) error {
+	return errors.New("session is unavailable")
 }
 
 func (c *recordingQueueAdmissionReadinessChecker) DrainQueuedMessage(context.Context, string) (bool, error) {
@@ -88,6 +120,52 @@ func TestWsQueueMessagePreservesOrdinaryClientAdmissionIdentity(t *testing.T) {
 	var queued messagequeue.QueuedMessage
 	require.NoError(t, json.Unmarshal(response.Payload, &queued))
 	require.Equal(t, "ordinary-admission-1", queued.ID)
+	entries, _, err := queue.SnapshotSession(context.Background(), "session-1")
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	require.Equal(t, []string{"ordinary-admission-1"}, entries[0].Metadata[messagequeue.MetadataQueueAdmissionIDs])
+}
+
+func TestWsQueueMessagePreservesLegacyTaskInactiveError(t *testing.T) {
+	log := logger.Default()
+	service := taskInactiveQueueService{Service: messagequeue.NewServiceMemory(log)}
+	handlers := NewQueueHandlers(service, &mockEventBus{}, log, nil, allowQueueAccess{}, nil)
+
+	response, err := handlers.wsQueueMessage(context.Background(), createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{
+		"task_id":    "task-1",
+		"session_id": "session-1",
+		"content":    "legacy submission",
+	}))
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, response.Type)
+	queueError := parseError(t, response)
+	require.Equal(t, ws.ErrorCodeValidation, queueError.Code)
+	require.Equal(t, "Task is no longer active", queueError.Message)
+}
+
+func TestWsQueueMessageMapsDeniedIdentifiedSessionToAdmissionUnavailable(t *testing.T) {
+	log := logger.Default()
+	handlers := NewQueueHandlers(
+		messagequeue.NewServiceMemory(log),
+		&mockEventBus{},
+		log,
+		nil,
+		denyingQueueIdentityAccess{},
+		nil,
+	)
+
+	response, err := handlers.wsQueueMessage(context.Background(), createTestMessage(t, ws.ActionMessageQueueAdd, map[string]interface{}{
+		"task_id":                "task-1",
+		"session_id":             "session-1",
+		"session_incarnation_id": "memory:session-1",
+		"client_queue_id":        "ordinary-admission-denied",
+		"content":                "retain this draft",
+	}))
+
+	require.NoError(t, err)
+	require.Equal(t, ws.MessageTypeError, response.Type)
+	require.Equal(t, "queue_session_unavailable", parseError(t, response).Code)
 }
 
 // @covers AC-TASKS-QUEUE-ADMISSION-001.2

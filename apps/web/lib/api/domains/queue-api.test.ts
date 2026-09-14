@@ -192,6 +192,21 @@ describe("structured plan comment conflicts", () => {
       primarySessionState: "RUNNING",
     });
   });
+
+  it("preserves admission-only validation errors for non-admission operations", () => {
+    const details = { field: "content" };
+    const original = new WebSocketRequestError("Invalid queue edit", "VALIDATION_ERROR", details);
+    let caught: unknown;
+    try {
+      rethrowQueueError(original);
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBe(original);
+    expect((caught as WebSocketRequestError).code).toBe("VALIDATION_ERROR");
+    expect((caught as WebSocketRequestError).details).toEqual(details);
+  });
 });
 
 describe("rethrowQueueError values", () => {

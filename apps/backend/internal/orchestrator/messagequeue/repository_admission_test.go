@@ -83,9 +83,12 @@ func TestMemoryQueueAdmissionBindsReceiptToSessionIncarnation(t *testing.T) {
 	}
 	service := NewService(repo, 10, logger.Default())
 	ctx := context.Background()
-	_, _, err := service.QueueMessageWithMetadataForSessionWithClientQueueID(
+	first, replay, err := service.QueueMessageWithMetadataForSessionWithClientQueueID(
 		ctx, firstIdentity, "client-reset", "first", "", QueuedByUser, false, nil, nil, nil,
 	)
+	require.NoError(t, err)
+	require.False(t, replay)
+	_, err = repo.DeleteByIDForSession(ctx, firstIdentity, first.ID)
 	require.NoError(t, err)
 
 	secondIdentity := QueueSessionIdentity{
@@ -93,13 +96,39 @@ func TestMemoryQueueAdmissionBindsReceiptToSessionIncarnation(t *testing.T) {
 	}
 	memoryRepo := repo.(*memoryRepository)
 	memoryRepo.mu.Lock()
-	memoryRepo.clearSessionStateLocked(secondIdentity.SessionID)
 	memoryRepo.identities[secondIdentity.SessionID] = secondIdentity
+	_, oldReceipt := memoryRepo.admissionReceipts[queueAdmissionKey{
+		TaskID: firstIdentity.TaskID, SessionID: firstIdentity.SessionID,
+		SessionIncarnationID: firstIdentity.SessionIncarnationID, ClientQueueID: "client-reset",
+	}]
 	memoryRepo.mu.Unlock()
-	_, replay, err := service.QueueMessageWithMetadataForSessionWithClientQueueID(
+	require.True(t, oldReceipt, "changing the incarnation must retain the old receipt until task/session deletion")
+	second, replay, err := service.QueueMessageWithMetadataForSessionWithClientQueueID(
 		ctx, secondIdentity, "client-reset", "second", "", QueuedByUser, false, nil, nil, nil,
 	)
 	require.NoError(t, err)
+	require.False(t, replay)
+	require.Equal(t, "second", second.Content)
+}
+
+func TestMemoryQueueAdmissionConflictIsNotReplay(t *testing.T) {
+	repo := NewMemoryRepository()
+	identity := QueueSessionIdentity{
+		TaskID: "conflict-task", SessionID: "conflict-session", SessionIncarnationID: "memory:conflict-session",
+	}
+	seedQueueSessionIdentity(t, repo, identity)
+	service := NewService(repo, 10, logger.Default())
+	ctx := context.Background()
+	_, replay, err := service.QueueMessageWithMetadataForSessionWithClientQueueID(
+		ctx, identity, "client-conflict", "first", "", QueuedByUser, false, nil, nil, nil,
+	)
+	require.NoError(t, err)
+	require.False(t, replay)
+
+	_, replay, err = service.QueueMessageWithMetadataForSessionWithClientQueueID(
+		ctx, identity, "client-conflict", "changed", "", QueuedByUser, false, nil, nil, nil,
+	)
+	require.ErrorIs(t, err, ErrQueueIDConflict)
 	require.False(t, replay)
 }
 
@@ -330,6 +359,37 @@ func TestMemoryQueueAdmissionStagedAttachmentFullQueueRejects(t *testing.T) {
 	_, stored := memoryRepo.admissionReceipts[queueAdmissionKey{
 		TaskID: identity.TaskID, SessionID: identity.SessionID,
 		SessionIncarnationID: identity.SessionIncarnationID, ClientQueueID: "client-full",
+	}]
+	memoryRepo.mu.Unlock()
+	require.False(t, stored)
+}
+
+func TestMemoryQueueAdmissionRejectsStagedClaimWithoutAttachmentStore(t *testing.T) {
+	repo := NewMemoryRepository()
+	identity := QueueSessionIdentity{
+		TaskID: "staged-memory-task", SessionID: "staged-memory-session", SessionIncarnationID: "memory:staged-memory-session",
+	}
+	seedQueueSessionIdentity(t, repo, identity)
+	service := NewService(repo, 10, logger.Default())
+	ctx := context.Background()
+	attachments := []MessageAttachment{{Type: "resource", AttachmentID: "attachment-memory"}}
+	claim := &QueueAttachmentClaim{OwnerID: "owner", WorkspaceID: "workspace", IDs: []string{"attachment-memory"}}
+
+	for range 2 {
+		_, replay, err := service.QueueMessageWithMetadataForSessionWithClientQueueID(
+			ctx, identity, "client-staged-memory", "second", "", QueuedByUser, false, attachments, nil, claim,
+		)
+		require.ErrorIs(t, err, ErrQueueAdmissionUnavailable)
+		require.False(t, replay)
+	}
+	entries, err := repo.ListBySession(ctx, identity.SessionID)
+	require.NoError(t, err)
+	require.Empty(t, entries)
+	memoryRepo := repo.(*memoryRepository)
+	memoryRepo.mu.Lock()
+	_, stored := memoryRepo.admissionReceipts[queueAdmissionKey{
+		TaskID: identity.TaskID, SessionID: identity.SessionID,
+		SessionIncarnationID: identity.SessionIncarnationID, ClientQueueID: "client-staged-memory",
 	}]
 	memoryRepo.mu.Unlock()
 	require.False(t, stored)

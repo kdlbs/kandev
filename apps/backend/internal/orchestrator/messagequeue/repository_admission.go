@@ -178,7 +178,7 @@ func (r *sqliteRepository) readQueueAdmissionReceiptTx(
 		SELECT request_fingerprint, response_json
 		FROM queue_admission_receipts
 		WHERE task_id = ? AND session_id = ? AND session_incarnation_id = ? AND client_queue_id = ?`
-	if r.db.DriverName() == "pgx" {
+	if r.db.DriverName() == postgresDriverName {
 		query += postgresForUpdateSuffix
 	}
 	var fingerprint, responseJSON string

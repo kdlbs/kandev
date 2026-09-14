@@ -78,7 +78,7 @@ func (r *memoryRepository) replayAdmissionLocked(
 		return nil, false, nil
 	}
 	if receipt.Fingerprint != fingerprint {
-		return nil, true, ErrQueueIDConflict
+		return nil, false, ErrQueueIDConflict
 	}
 	return cloneQueuedMessage(receipt.Message), true, nil
 }
@@ -111,6 +111,9 @@ func (r *memoryRepository) admitNewAdmissionLocked(
 			return nil, false, ErrQueueFull
 		}
 		return r.admitFullAdmissionLocked(key, fingerprint, message, policy)
+	}
+	if claim != nil && len(claim.IDs) > 0 {
+		return nil, false, ErrQueueAdmissionUnavailable
 	}
 	if err := r.insertLocked(message, maxPerSession); err != nil {
 		return nil, false, err

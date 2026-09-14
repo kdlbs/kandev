@@ -1,6 +1,6 @@
 # ADR-2026-09-14-durable-queue-admission-receipts: Durable queue admission receipts
 
-**Status:** proposed
+**Status:** accepted
 **Date:** 2026-09-14
 **Area:** protocol
 
@@ -11,11 +11,11 @@ Plan-comment rows have special replay handling and intentionally avoid automatic
 
 ## Decision
 
-The proposed fix stores an admission receipt atomically with each identified ordinary admission.
+The fix stores an admission receipt atomically with each identified ordinary admission.
 The receipt binds the request fingerprint and accepted response to the task, session incarnation, and client queue ID.
-It survives queue operations until the owning session is deleted. Stale incarnation checks still reject old requests.
+It survives queue operations until the owning task or session is deleted. Stale incarnation checks still reject old requests.
 
-Receipt identity is separate from queue-row identity and merge metadata. Retries consult the receipt before repeating capacity checks or attachment claims.
+Receipt identity is separate from queue-row identity. Ordinary admission provenance is stored in a merge-ignored metadata key and unioned when rows fold, so retries can reconcile transcript messages after dispatch. Retries consult the receipt before repeating capacity checks or attachment claims.
 The client enables ordinary retries only after the server supplies this contract.
 
 ## Consequences
@@ -23,7 +23,7 @@ The client enables ordinary retries only after the server supplies this contract
 Lost responses no longer require an existing queue row or transcript message to prevent duplicate admission.
 The repository needs additive schema initialization, database parity, and lifecycle cleanup coverage.
 Receipt storage grows with accepted submissions in retained sessions. Response snapshots must not copy inline attachment bytes.
-This proposal accompanies a draft fix package. It does not authorize implementation.
+Task and session purge transactions remove the associated receipts with the queue state. The accepted implementation package applies this decision.
 
 ## Alternatives Considered
 
