@@ -103,6 +103,7 @@ test.describe("Compact task topbar workflow stepper", () => {
       await expect(disclosure).toBeVisible();
       await expect(disclosureSurface).toHaveCount(1);
 
+      await waitForFiniteAnimations(disclosureSurface.first());
       const surfaceBox = await disclosureSurface.boundingBox();
       expect(surfaceBox).not.toBeNull();
       if (!surfaceBox) return;
