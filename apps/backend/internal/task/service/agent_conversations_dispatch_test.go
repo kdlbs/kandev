@@ -12,6 +12,26 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+type cancellationAwareStateRepo struct {
+	*acFakeStateRepo
+}
+
+func (r cancellationAwareStateRepo) Delete(ctx context.Context, pluginID, scope, scopeID, key string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return r.acFakeStateRepo.Delete(ctx, pluginID, scope, scopeID, key)
+}
+
+type cancelingErrorDispatcher struct {
+	cancel context.CancelFunc
+}
+
+func (d cancelingErrorDispatcher) Deliver(context.Context, string, *models.TaskSession, string, string, string) (string, error) {
+	d.cancel()
+	return "", errors.New("delivery failed")
+}
+
 // ── Profile validation tests (blocker: Ensure must gate hidden task/session
 // creation on a resolved, enabled profile — zero partial rows otherwise) ──
 
@@ -278,6 +298,35 @@ func TestDispatchWithOccurrenceKeyDeduplicates(t *testing.T) {
 	// must never fire the agent twice.
 	if deps.dispatcher.callCount() != 1 {
 		t.Fatalf("expected 1 runtime dispatch, got %d", deps.dispatcher.callCount())
+	}
+}
+
+func TestDispatchRetriesOccurrenceAfterCancelledDelivery(t *testing.T) {
+	tasks := &acFakeTaskRepo{}
+	sessions := newACFakeSessionRepo()
+	profiles := newACFakeProfileRepo()
+	state := cancellationAwareStateRepo{acFakeStateRepo: newACFakeStateRepo()}
+	svc := NewAgentConversationService(tasks, sessions, profiles, state, &acFakeEventBus{})
+	ctx, cancel := context.WithCancel(context.Background())
+	svc.SetDispatcher(cancelingErrorDispatcher{cancel: cancel})
+
+	if _, _, err := svc.Ensure(ctx, "plugin-coordinator", pluginsdk.AgentConversationSpec{
+		WorkspaceID: "ws-1", ConversationKey: "coordinator",
+	}); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	const occurrenceKey = "wake:cancelled-delivery"
+	if _, err := svc.Dispatch(ctx, "plugin-coordinator", "ws-1", "coordinator", "Check", occurrenceKey); err == nil {
+		t.Fatal("first Dispatch succeeded, want delivery failure")
+	}
+
+	svc.SetDispatcher(newACFakeDispatcher())
+	retry, err := svc.Dispatch(context.Background(), "plugin-coordinator", "ws-1", "coordinator", "Check", occurrenceKey)
+	if err != nil {
+		t.Fatalf("retry Dispatch: %v", err)
+	}
+	if retry.Status != "started" {
+		t.Fatalf("retry status = %q, want started", retry.Status)
 	}
 }
 

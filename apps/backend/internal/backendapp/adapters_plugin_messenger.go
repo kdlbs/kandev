@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -231,7 +232,9 @@ func (a pluginsTaskMessengerAdapter) deleteRecordedMessage(ctx context.Context, 
 	if message == nil {
 		return
 	}
-	if err := a.tasks.DeleteMessage(ctx, message.ID); err != nil {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if err := a.tasks.DeleteMessage(cleanupCtx, message.ID); err != nil {
 		a.log.Warn("plugins: failed to delete recorded message after failed SendMessage")
 	}
 }

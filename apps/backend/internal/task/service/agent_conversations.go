@@ -607,7 +607,9 @@ func (s *AgentConversationService) deliverConversationPrompt(ctx context.Context
 	if !claimedOccurrence {
 		return "", fmt.Errorf("failed to deliver message: %w", err)
 	}
-	if releaseErr := s.releaseOccurrenceKey(ctx, pluginID, workspaceID, conversationKey, occurrenceKey); releaseErr != nil {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
+	if releaseErr := s.releaseOccurrenceKey(cleanupCtx, pluginID, workspaceID, conversationKey, occurrenceKey); releaseErr != nil {
 		return "", fmt.Errorf("failed to deliver message: %w; failed to release occurrence key: %v", err, releaseErr)
 	}
 	return "", fmt.Errorf("failed to deliver message: %w", err)

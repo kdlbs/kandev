@@ -308,7 +308,9 @@ disk on its first restart after upgrading to this version.
   sessions, workspaces, workflows, agent profiles, repositories) is gated
   individually via `api_read:<resource>`. Task create/update and message send
   are independently gated by `api_write:tasks` and `api_write:messages` and
-  use Kandev's first-party service paths. An undeclared capability returns
+  use Kandev's first-party service paths. `agent_conversation` separately gates
+  plugin-owned hidden agent sessions and their Ensure, Dispatch, and Delete
+  lifecycle. An undeclared capability returns
   gRPC `PermissionDenied` with a message naming the missing capability,
   checked before the handler runs. `GetConfig` and `EmitEvent` are the only
   ungated RPCs: a plugin can always read its own config (secrets included)

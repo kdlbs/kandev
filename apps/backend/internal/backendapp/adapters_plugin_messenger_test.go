@@ -22,12 +22,14 @@ import (
 )
 
 type fakeMessengerTaskSvc struct {
-	primary    *taskmodels.TaskSession
-	primaryErr error
-	byID       map[string]*taskmodels.TaskSession
-	created    *taskmodels.Message
-	deleted    []string
-	waitErr    error
+	primary                  *taskmodels.TaskSession
+	primaryErr               error
+	byID                     map[string]*taskmodels.TaskSession
+	created                  *taskmodels.Message
+	deleted                  []string
+	waitErr                  error
+	idempotentMessagePresent bool
+	deleteRequiresLiveCtx    bool
 }
 
 func (f *fakeMessengerTaskSvc) GetTaskSession(_ context.Context, id string) (*taskmodels.TaskSession, error) {
@@ -49,15 +51,25 @@ func (f *fakeMessengerTaskSvc) CreateMessage(_ context.Context, req *taskservice
 
 func (f *fakeMessengerTaskSvc) CreateMessageIdempotent(_ context.Context, id string, req *taskservice.CreateMessageRequest) (*taskmodels.Message, error) {
 	f.created = &taskmodels.Message{ID: id, TaskSessionID: req.TaskSessionID, TaskID: req.TaskID, Content: req.Content}
+	f.idempotentMessagePresent = true
 	return f.created, nil
 }
 
 func (f *fakeMessengerTaskSvc) GetMessageWithPromptIndex(_ context.Context, id string) (*taskmodels.Message, error) {
+	if f.idempotentMessagePresent && f.created != nil && f.created.ID == id {
+		return f.created, nil
+	}
 	return nil, sql.ErrNoRows
 }
 
-func (f *fakeMessengerTaskSvc) DeleteMessage(_ context.Context, id string) error {
+func (f *fakeMessengerTaskSvc) DeleteMessage(ctx context.Context, id string) error {
+	if f.deleteRequiresLiveCtx && ctx.Err() != nil {
+		return ctx.Err()
+	}
 	f.deleted = append(f.deleted, id)
+	if f.created != nil && f.created.ID == id {
+		f.idempotentMessagePresent = false
+	}
 	return nil
 }
 
@@ -74,6 +86,7 @@ type fakeMessengerOrch struct {
 	queueStatusCtx      context.Context
 	promptErr           error
 	promptFailFirstOnly bool
+	promptHook          func()
 }
 
 func (f *fakeMessengerOrch) GetMessageQueue() *messagequeue.Service { return f.queue }
@@ -90,6 +103,9 @@ func (f *fakeMessengerOrch) StartCreatedSession(_ context.Context, _, _, _, _ st
 
 func (f *fakeMessengerOrch) PromptTask(_ context.Context, _, _, _, _ string, _ bool, _ []v1.MessageAttachment, _ bool) (*orchestrator.PromptResult, error) {
 	f.promptCalls++
+	if f.promptHook != nil {
+		f.promptHook()
+	}
 	retriedAfterResume := f.promptFailFirstOnly && f.promptCalls > 1
 	if f.promptErr != nil && !retriedAfterResume {
 		return nil, f.promptErr
@@ -208,6 +224,23 @@ func TestPluginsMessenger_PromptFailureDeletesRecordedMessage(t *testing.T) {
 	_, err := a.SendMessage(context.Background(), "t1", "", "nope", "plugin:p")
 	require.Error(t, err)
 	require.Equal(t, []string{"msg-1"}, tasks.deleted, "a failed dispatch must not leave an orphan message")
+}
+
+func TestPluginsMessenger_IdempotentFailureDeletesMessageAfterRequestCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	tasks := &fakeMessengerTaskSvc{
+		primary:               &taskmodels.TaskSession{ID: "s1", TaskID: "t1", State: taskmodels.TaskSessionStateWaitingForInput, AgentExecutionID: "exec-1"},
+		deleteRequiresLiveCtx: true,
+	}
+	orch := &fakeMessengerOrch{
+		promptErr:  errors.New("dispatch boom"),
+		promptHook: cancel,
+	}
+	a := newMessengerAdapter(t, tasks, orch)
+
+	_, err := a.StartOrPromptIdempotent(ctx, "t1", tasks.primary, "nope", "plugin:p", "occurrence-message")
+	require.Error(t, err)
+	require.False(t, tasks.idempotentMessagePresent, "a failed dispatch must not leave an idempotent message that suppresses the retry")
 }
 
 func TestPluginsMessenger_ExplicitSessionMustBelongToTask(t *testing.T) {
