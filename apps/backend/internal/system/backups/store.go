@@ -379,7 +379,13 @@ func (s *Service) writeStagedRestore(snapshotPath, stagedPath string) error {
 // Delete removes a snapshot file. Refuses to delete pre-reset recovery
 // snapshots.
 func (s *Service) Delete(name string) error {
-	return s.deleteContext(context.Background(), name)
+	return s.DeleteContext(context.Background(), name)
+}
+
+// DeleteContext removes a snapshot while honoring cancellation while waiting
+// for shared maintenance admission.
+func (s *Service) DeleteContext(ctx context.Context, name string) error {
+	return s.deleteContext(ctx, name)
 }
 
 func (s *Service) deleteContext(ctx context.Context, name string) error {

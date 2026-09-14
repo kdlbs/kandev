@@ -191,7 +191,7 @@ func TestDeleteWaitsForMaintenanceAdmission(t *testing.T) {
 	// Cancellation proves that deletion attempts admission before touching the file.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := s.deleteContext(ctx, receipt.Name); !errors.Is(err, context.Canceled) {
+	if err := s.DeleteContext(ctx, receipt.Name); !errors.Is(err, context.Canceled) {
 		t.Fatalf("want canceled, got %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(s.backupsDir(), receipt.Name)); err != nil {
