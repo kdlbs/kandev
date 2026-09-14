@@ -6,15 +6,15 @@ wave: 1
 depends_on: ["01-canonical-watch-migration"]
 plan: "plan.md"
 requirements:
-  - REQ-INTEGRATIONS-PR-WATCH-IDENTITY-001
-  - REQ-INTEGRATIONS-PR-WATCH-IDENTITY-002
+  - REQ-PLATFORM-PR-WATCH-IDENTITY-001
+  - REQ-PLATFORM-PR-WATCH-IDENTITY-002
 acceptance_criteria:
-  - AC-INTEGRATIONS-PR-WATCH-IDENTITY-001.3
-  - AC-INTEGRATIONS-PR-WATCH-IDENTITY-001.6
-  - AC-INTEGRATIONS-PR-WATCH-IDENTITY-002.1
-  - AC-INTEGRATIONS-PR-WATCH-IDENTITY-002.2
+  - AC-PLATFORM-PR-WATCH-IDENTITY-001.3
+  - AC-PLATFORM-PR-WATCH-IDENTITY-001.6
+  - AC-PLATFORM-PR-WATCH-IDENTITY-002.1
+  - AC-PLATFORM-PR-WATCH-IDENTITY-002.2
 system_design:
-  - ../../specs/integrations/system-design/pr-watch-identity.md
+  - ../../specs/platform/system-design/pr-watch-and-bounded-storage.md
 ---
 
 # Task 02: Reconcile and publish canonical PR state

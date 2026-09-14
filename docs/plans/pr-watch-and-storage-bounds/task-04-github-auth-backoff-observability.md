@@ -6,19 +6,15 @@ wave: 2
 depends_on: ["02-idempotent-polling-events", "03-contention-safe-projection"]
 plan: "plan.md"
 requirements:
-  - REQ-INTEGRATIONS-PROVIDER-BACKOFF-001
-  - REQ-INTEGRATIONS-PROVIDER-BACKOFF-002
+  - REQ-PLATFORM-PROVIDER-BACKOFF-001
 acceptance_criteria:
-  - AC-INTEGRATIONS-PROVIDER-BACKOFF-001.1
-  - AC-INTEGRATIONS-PROVIDER-BACKOFF-001.2
-  - AC-INTEGRATIONS-PROVIDER-BACKOFF-001.3
-  - AC-INTEGRATIONS-PROVIDER-BACKOFF-001.4
-  - AC-INTEGRATIONS-PROVIDER-BACKOFF-001.5
-  - AC-INTEGRATIONS-PROVIDER-BACKOFF-002.1
-  - AC-INTEGRATIONS-PROVIDER-BACKOFF-002.2
-  - AC-INTEGRATIONS-PROVIDER-BACKOFF-002.3
+  - AC-PLATFORM-PROVIDER-BACKOFF-001.1
+  - AC-PLATFORM-PROVIDER-BACKOFF-001.2
+  - AC-PLATFORM-PROVIDER-BACKOFF-001.3
+  - AC-PLATFORM-PROVIDER-BACKOFF-001.4
+  - AC-PLATFORM-PROVIDER-BACKOFF-001.5
 system_design:
-  - ../../specs/integrations/system-design/provider-failure-backoff.md
+  - ../../specs/platform/system-design/pr-watch-and-bounded-storage.md
 ---
 
 # Task 04: Back off failed GitHub integrations and expose health

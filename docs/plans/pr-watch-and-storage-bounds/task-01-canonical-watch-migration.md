@@ -6,15 +6,15 @@ wave: 1
 depends_on: []
 plan: "plan.md"
 requirements:
-  - REQ-INTEGRATIONS-PR-WATCH-IDENTITY-001
+  - REQ-PLATFORM-PR-WATCH-IDENTITY-001
 acceptance_criteria:
-  - AC-INTEGRATIONS-PR-WATCH-IDENTITY-001.1
-  - AC-INTEGRATIONS-PR-WATCH-IDENTITY-001.2
-  - AC-INTEGRATIONS-PR-WATCH-IDENTITY-001.3
-  - AC-INTEGRATIONS-PR-WATCH-IDENTITY-001.4
-  - AC-INTEGRATIONS-PR-WATCH-IDENTITY-001.5
+  - AC-PLATFORM-PR-WATCH-IDENTITY-001.1
+  - AC-PLATFORM-PR-WATCH-IDENTITY-001.2
+  - AC-PLATFORM-PR-WATCH-IDENTITY-001.3
+  - AC-PLATFORM-PR-WATCH-IDENTITY-001.4
+  - AC-PLATFORM-PR-WATCH-IDENTITY-001.5
 system_design:
-  - ../../specs/integrations/system-design/pr-watch-identity.md
+  - ../../specs/platform/system-design/pr-watch-and-bounded-storage.md
 ---
 
 # Task 01: Migrate PR watches to task ownership

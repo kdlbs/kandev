@@ -14,7 +14,7 @@ acceptance_criteria:
   - AC-PLATFORM-TASK-SUMMARY-CONTENTION-001.4
   - AC-PLATFORM-TASK-SUMMARY-CONTENTION-001.5
 system_design:
-  - ../../specs/platform/system-design/task-summary-contention.md
+  - ../../specs/platform/system-design/pr-watch-and-bounded-storage.md
 ---
 
 # Task 03: Coalesce task-status projection contention
