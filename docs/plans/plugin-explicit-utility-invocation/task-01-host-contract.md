@@ -107,4 +107,4 @@ for `pkg/pluginsdk`, `internal/plugins/...`, `internal/backendapp`,
 `TestPromptUsesCurrentSessionModel`, which proves that ACP session model
 selection reaches prompt execution. `git diff --check` passed.
 
-The host commit and PR head are recorded in the parent plan after delivery.
+Host commit: `eb9cfceda75cdc51c40efa289018e1a6f008d04a`, pushed to PR #2870.

@@ -1,6 +1,6 @@
 ---
 created: 2026-09-14
-status: implemented
+status: active
 requirements:
   - REQ-PLUGINS-EXPLICIT-UTILITY-001
 system_design:
@@ -86,7 +86,7 @@ This exercises existing settings controls; no new UI structure or mobile-only be
 
 - [x] [Task 01: Explicit host invocation contract](task-01-host-contract.md)
 - [x] [Task 02: Plugin caller integration and public contract](task-02-caller-integration.md)
-- [x] [Task 03: Notes companion migration](task-03-notes-companion.md)
+- [ ] [Task 03: Notes companion migration](task-03-notes-companion.md) (implemented locally; delivery blocked by repository permissions)
 
 Execute 01 -> 02 -> 03. This ordering does not authorize subagents.
 Task 03 belongs to the separate Notes repository. Host readiness and companion readiness must be reported separately.
@@ -108,8 +108,9 @@ Host checks passed:
 - Chromium E2E: one test passed in `e2e/tests/plugins/plugin-utility-invocation.spec.ts`
 - Public docs, document catalog, specification tests, full specification lint, and `git diff --check`
 
-The host delivery commit and final PR head are recorded after push. Notes is a
-separate repository and PR; its delivery is recorded in Task 03.
+Host delivery commit: `eb9cfceda75cdc51c40efa289018e1a6f008d04a`, pushed to PR
+#2870 branch `feature/implement-host-agent-oav`. Notes is a separate repository
+and PR; its local implementation and delivery blocker are recorded in Task 03.
 
 ## Delivery instructions for the implementation agent
 

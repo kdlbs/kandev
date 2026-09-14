@@ -1,7 +1,7 @@
 ---
 id: "03-notes-companion"
 title: "Notes companion migration"
-status: done
+status: blocked
 wave: 3
 depends_on: ['02-caller-integration']
 plan: "plan.md"
@@ -96,5 +96,9 @@ Exercise Enhance with AI using default A, explicit B, and deleted B. Record host
 
 Implemented in the separate `yattdev/kandev-plugin-notes` checkout. The Notes
 Go suite passed, all 96 UI tests passed, `make vet` passed, `make package-host`
-passed, and `git diff --check` passed. The companion commit and PR head are
-recorded after its separate push.
+passed, and `git diff --check` passed. Companion commit `fcb1ab2f6d126e91a0e8dd7a823c1b9a3977f07f`
+is ready locally and was built against host commit
+`eb9cfceda75cdc51c40efa289018e1a6f008d04a`. Delivery to PR #7 is blocked:
+the PR has `maintainerCanModify: false`, and the SSH push was rejected because
+the authenticated account `carlosflorencio` has no write access to
+`yattdev/kandev-plugin-notes`.
