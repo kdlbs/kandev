@@ -400,9 +400,12 @@ func (r *Repository) createRunTables() error {
 	);
 	CREATE INDEX IF NOT EXISTS idx_run_status_requested ON runs(status, requested_at);
 	CREATE UNIQUE INDEX IF NOT EXISTS idx_run_idempotency ON runs(idempotency_key) WHERE idempotency_key IS NOT NULL;
-	CREATE INDEX IF NOT EXISTS idx_run_causation_id ON runs(causation_id);
-	CREATE INDEX IF NOT EXISTS idx_run_claim_order ON runs(status, priority_class, requested_at, id);
-	CREATE INDEX IF NOT EXISTS idx_run_self_trigger_window ON runs(agent_profile_id, reason, actor_id, requested_at);
+	-- The causation_id/priority_class/actor_id indexes are declared in
+	-- migrateLaunchSafetyColumns, after the ADD COLUMN statements that
+	-- create those columns on an existing database, not here: this block
+	-- runs before runMigrations, so an index on a not-yet-added column
+	-- would fail the whole boot on any database that already has a runs
+	-- table.
 
 	CREATE TABLE IF NOT EXISTS office_run_skills (
 		run_id TEXT NOT NULL,
