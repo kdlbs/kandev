@@ -62,11 +62,10 @@ func hasPlanCommentAdmission(metadata map[string]interface{}) bool {
 	return false
 }
 
-// mergeEntryMetadata returns a copy of the target metadata with
-// MetadataEntityReferences replaced by the union of both entries' references,
-// normalized and deduplicated by canonical ref. The key is dropped when the
-// union is empty. Returns ErrMergeReferenceOverflow when the union would
-// exceed the per-message reference cap.
+// mergeEntryMetadata returns a copy of the target metadata with additive
+// entity references and ordinary admission provenance replaced by their
+// normalized, deduplicated unions. Empty union keys are removed. Returns
+// ErrMergeReferenceOverflow when the entity-reference union exceeds its cap.
 func mergeEntryMetadata(target, source map[string]interface{}) (map[string]interface{}, error) {
 	merged := make(map[string]interface{}, len(target)+1)
 	for key, value := range target {
@@ -78,9 +77,18 @@ func mergeEntryMetadata(target, source map[string]interface{}) (map[string]inter
 	}
 	if len(union) == 0 {
 		delete(merged, MetadataEntityReferences)
-		return merged, nil
+	} else {
+		merged[MetadataEntityReferences] = union
 	}
-	merged[MetadataEntityReferences] = union
+	admissionIDs, ok := unionQueueAdmissionIDs(target, source)
+	if !ok {
+		return nil, ErrInvalidQueueAdmissionIDs
+	}
+	if len(admissionIDs) == 0 {
+		delete(merged, MetadataQueueAdmissionIDs)
+	} else {
+		merged[MetadataQueueAdmissionIDs] = admissionIDs
+	}
 	return merged, nil
 }
 

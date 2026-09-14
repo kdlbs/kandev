@@ -259,8 +259,11 @@ function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | nu
 
   useEffect(() => {
     if (!sessionId || !isVisible) return;
+    // Visibility is synchronized by usePanelActive, including the initial
+    // portal-registration race. Ask for a fresh snapshot whenever the panel
+    // becomes visible or its session changes.
     getWebSocketClient()?.refreshSessionData(sessionId);
-  }, [isVisible, panelId, sessionId]);
+  }, [sessionId, isVisible]);
 }
 
 /** Render the changes/diff viewer for the panel's params (`kind` "all" or
