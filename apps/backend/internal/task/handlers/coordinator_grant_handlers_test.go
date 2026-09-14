@@ -153,8 +153,16 @@ func TestCreateCoordinatorGrantRegistersNormalTaskPrincipal(t *testing.T) {
 	if err != nil || claimed == nil || claimed.BackingSessionID != "session-1" {
 		t.Fatalf("first session claim = %#v, %v; want session-1", claimed, err)
 	}
-	if _, err := coordinator.EnsureTaskPrincipal(ctx, repo, "ws-1", "normal-task", "session-2"); err == nil {
-		t.Fatal("second session claim succeeded, want denial")
+	rotated, err := coordinator.EnsureTaskPrincipal(ctx, repo, "ws-1", "normal-task", "session-2")
+	if err != nil || rotated == nil || rotated.BackingSessionID != "session-2" {
+		t.Fatalf("second session rotation = %#v, %v; want session-2 binding", rotated, err)
+	}
+	settled, err := repo.GetActiveWorkspaceAgentPrincipalForTask(ctx, "ws-1", "normal-task")
+	if err != nil {
+		t.Fatalf("GetActiveWorkspaceAgentPrincipalForTask after rotation: %v", err)
+	}
+	if settled == nil || settled.BackingSessionID != "session-2" {
+		t.Fatalf("persisted principal = %#v, want session-2 binding after rotation", settled)
 	}
 }
 
