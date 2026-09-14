@@ -164,19 +164,14 @@ type AgentConversationService struct {
 	mu         sync.RWMutex
 	dispatcher agentConversationDispatcher
 
-	// ensureLocksMu/ensureLocks serialize Ensure per (pluginID, workspaceID,
-	// conversationKey). The metadata-backed conversation lookup
-	// (findManagedConversation) has no repository-level uniqueness
-	// constraint to close a check-then-create race on its own — two
-	// same-process callers (e.g. a browser open and the plugin's heartbeat
-	// runner firing at the same moment) can both observe "no existing
-	// conversation" and both create a task. This in-process lock closes that
-	// window for the common single-instance deployment; it does not extend
-	// across multiple backend processes sharing one database (the plan
-	// defers a dedicated uniqueness table unless that is demonstrated
-	// necessary). Entries are never evicted — the key space is bounded by
-	// the number of distinct managed conversations, which is small and
-	// long-lived for the lifetime of the process.
+	dispatchLocksMu sync.Mutex
+	dispatchLocks   map[string]*sync.Mutex
+
+	// ensureLocksMu/ensureLocks serialize same-process Ensure calls while the
+	// deterministic task id provides the cross-process uniqueness boundary.
+	// Entries are never evicted — the key space is bounded by the number of
+	// distinct managed conversations, which is small and long-lived for the
+	// lifetime of the process.
 	ensureLocksMu sync.Mutex
 	ensureLocks   map[string]*sync.Mutex
 }
@@ -246,6 +241,25 @@ func (s *AgentConversationService) lockEnsureKey(key string) func() {
 	return l.Unlock
 }
 
+// lockDispatchSession keeps the observation that a conversation is idle and
+// its delivery in one ownership window. The runtime changes session state
+// asynchronously, so observing an idle row alone cannot prevent two distinct
+// occurrences from both starting a turn.
+func (s *AgentConversationService) lockDispatchSession(sessionID string) func() {
+	s.dispatchLocksMu.Lock()
+	if s.dispatchLocks == nil {
+		s.dispatchLocks = make(map[string]*sync.Mutex)
+	}
+	l, ok := s.dispatchLocks[sessionID]
+	if !ok {
+		l = &sync.Mutex{}
+		s.dispatchLocks[sessionID] = l
+	}
+	s.dispatchLocksMu.Unlock()
+	l.Lock()
+	return l.Unlock
+}
+
 // Ensure creates or repairs exactly one managed conversation per
 // (pluginID, workspaceID, conversationKey). The status string returned is
 // one of "created", "exists", or AgentConversationStatusConfigurationRequired
@@ -298,7 +312,7 @@ func (s *AgentConversationService) Ensure(ctx context.Context, pluginID string, 
 	}
 
 	task := &models.Task{
-		ID:          uuid.New().String(),
+		ID:          conversationTaskID(pluginID, spec.WorkspaceID, spec.ConversationKey),
 		WorkspaceID: spec.WorkspaceID,
 		Title:       defaultAgentConversationTitle + " - " + spec.ConversationKey,
 		State:       v1.TaskStateCreated,
@@ -311,6 +325,14 @@ func (s *AgentConversationService) Ensure(ctx context.Context, pluginID string, 
 	}
 
 	if err := s.tasks.CreateTask(ctx, task); err != nil {
+		// The deterministic backing-task id is the cross-process uniqueness
+		// boundary. A competing backend can win the insert after this call's
+		// metadata scan but before its insert; reload and repair that row rather
+		// than surfacing a duplicate-key error or creating a second conversation.
+		existing, findErr := s.findManagedConversation(ctx, pluginID, spec.WorkspaceID, spec.ConversationKey)
+		if findErr == nil && existing != nil {
+			return s.repairIfNeeded(ctx, existing, spec)
+		}
 		return pluginsdk.AgentConversationDescriptor{}, "", fmt.Errorf("failed to insert conversation task: %w", err)
 	}
 
@@ -465,7 +487,7 @@ func (s *AgentConversationService) reconcileConversationTask(ctx context.Context
 // createPrimarySession creates a primary session row for the given task.
 func (s *AgentConversationService) createPrimarySession(ctx context.Context, taskID, agentProfileID string) (*models.TaskSession, error) {
 	primary := &models.TaskSession{
-		ID:             uuid.New().String(),
+		ID:             conversationPrimarySessionID(taskID),
 		TaskID:         taskID,
 		AgentProfileID: agentProfileID,
 		State:          models.TaskSessionStateCreated,
@@ -474,9 +496,26 @@ func (s *AgentConversationService) createPrimarySession(ctx context.Context, tas
 		UpdatedAt:      time.Now().UTC(),
 	}
 	if err := s.sess.CreateTaskSession(ctx, primary); err != nil {
+		existing, findErr := s.sess.GetPrimarySessionByTaskID(ctx, taskID)
+		if findErr == nil && existing != nil {
+			return existing, nil
+		}
 		return nil, err
 	}
 	return primary, nil
+}
+
+func conversationTaskID(pluginID, workspaceID, conversationKey string) string {
+	return conversationIdentity("task", pluginID, workspaceID, conversationKey)
+}
+
+func conversationPrimarySessionID(taskID string) string {
+	return conversationIdentity("primary-session", taskID)
+}
+
+func conversationIdentity(parts ...string) string {
+	encoded, _ := json.Marshal(parts)
+	return uuid.NewSHA1(uuid.NameSpaceOID, encoded).String()
 }
 
 // publishTaskCreated publishes a task.created event for the managed
@@ -508,6 +547,9 @@ func (s *AgentConversationService) Dispatch(ctx context.Context, pluginID, works
 	if pluginID == "" || workspaceID == "" || conversationKey == "" {
 		return pluginsdk.AgentConversationDispatch{}, status.Error(codes.InvalidArgument, "plugin_id, workspace_id, and conversation_key are required")
 	}
+
+	unlock := s.lockDispatchSession(pluginID + "/" + workspaceID + "/" + conversationKey)
+	defer unlock()
 
 	existing, primary, busy, err := s.dispatchTarget(ctx, pluginID, workspaceID, conversationKey)
 	if err != nil {

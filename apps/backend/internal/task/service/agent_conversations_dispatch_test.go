@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/pkg/pluginsdk"
@@ -30,6 +31,29 @@ type cancelingErrorDispatcher struct {
 func (d cancelingErrorDispatcher) Deliver(context.Context, string, *models.TaskSession, string, string, string) (string, error) {
 	d.cancel()
 	return "", errors.New("delivery failed")
+}
+
+type blockingConversationDispatcher struct {
+	entered   chan struct{}
+	release   chan struct{}
+	onRelease func()
+	mu        sync.Mutex
+	calls     int
+}
+
+func (d *blockingConversationDispatcher) Deliver(_ context.Context, _ string, session *models.TaskSession, _ string, _ string, _ string) (string, error) {
+	d.mu.Lock()
+	d.calls++
+	d.mu.Unlock()
+	d.entered <- struct{}{}
+	<-d.release
+	if d.onRelease != nil {
+		d.onRelease()
+	}
+	if session.State == models.TaskSessionStateCreated {
+		return "started", nil
+	}
+	return "sent", nil
 }
 
 // ── Profile validation tests (blocker: Ensure must gate hidden task/session
@@ -230,6 +254,56 @@ func TestDispatchWithIdleSessionSendsRatherThanStarts(t *testing.T) {
 	}
 	if dispatch.Status != "sent" {
 		t.Fatalf("status = %q, want sent", dispatch.Status)
+	}
+}
+
+func TestDispatchCoalescesDistinctConcurrentOccurrencesForAnIdleSession(t *testing.T) {
+	svc, deps := newACTestService()
+	desc, _, err := svc.Ensure(context.Background(), "plugin-coordinator", pluginsdk.AgentConversationSpec{WorkspaceID: "ws-1", ConversationKey: "coordinator"})
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	deps.sess.setState(desc.SessionID, models.TaskSessionStateWaitingForInput)
+
+	dispatcher := &blockingConversationDispatcher{
+		entered: make(chan struct{}, 2),
+		release: make(chan struct{}),
+		onRelease: func() {
+			deps.sess.setState(desc.SessionID, models.TaskSessionStateRunning)
+		},
+	}
+	svc.SetDispatcher(dispatcher)
+	results := make(chan pluginsdk.AgentConversationDispatch, 2)
+	errs := make(chan error, 2)
+	startDispatch := func(key string) {
+		go func(occurrenceKey string) {
+			result, dispatchErr := svc.Dispatch(context.Background(), "plugin-coordinator", "ws-1", "coordinator", "wake", occurrenceKey)
+			results <- result
+			errs <- dispatchErr
+		}(key)
+	}
+	startDispatch("occurrence-a")
+
+	<-dispatcher.entered
+	startDispatch("occurrence-b")
+	select {
+	case <-dispatcher.entered:
+		close(dispatcher.release)
+		t.Fatal("a second distinct occurrence reached the runtime while the first dispatch still owned the idle session")
+	case <-time.After(time.Second):
+	}
+	close(dispatcher.release)
+	skippedBusy := 0
+	for range 2 {
+		if dispatchErr := <-errs; dispatchErr != nil {
+			t.Fatalf("Dispatch: %v", dispatchErr)
+		}
+		if result := <-results; result.Status == "skipped_busy" {
+			skippedBusy++
+		}
+	}
+	if skippedBusy != 1 {
+		t.Fatalf("skipped_busy results = %d, want one coalesced occurrence", skippedBusy)
 	}
 }
 

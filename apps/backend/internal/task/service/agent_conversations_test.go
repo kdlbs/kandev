@@ -69,7 +69,14 @@ func (f *acFakeTaskRepo) ListEphemeralTasksAllWorkspaces(_ context.Context) ([]*
 func (f *acFakeTaskRepo) CreateTask(_ context.Context, task *models.Task) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	task.ID = f.makeID()
+	if task.ID == "" {
+		task.ID = f.makeID()
+	}
+	for _, existing := range f.tasks {
+		if existing.ID == task.ID {
+			return errors.New("task already exists")
+		}
+	}
 	f.tasks = append(f.tasks, task)
 	return nil
 }
@@ -147,8 +154,13 @@ func (f *acFakeSessionRepo) GetPrimarySessionByTaskID(_ context.Context, taskID 
 func (f *acFakeSessionRepo) CreateTaskSession(_ context.Context, session *models.TaskSession) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.nextIdx++
-	session.ID = "session-" + acItoa(f.nextIdx)
+	if session.ID == "" {
+		f.nextIdx++
+		session.ID = "session-" + acItoa(f.nextIdx)
+	}
+	if _, exists := f.sessions[session.ID]; exists {
+		return errors.New("session already exists")
+	}
 	f.sessions[session.ID] = session
 	return nil
 }
