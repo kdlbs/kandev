@@ -14,6 +14,7 @@ import { usePanelActive } from "@/hooks/use-panel-active";
 import { t } from "@/lib/i18n";
 import { setPanelTitle } from "@/lib/layout/panel-portal-manager";
 import { useDockviewStore } from "@/lib/state/dockview-store";
+import { getWebSocketClient } from "@/lib/ws/connection";
 import { BrowserPanel } from "./browser-panel";
 import type { CommitDetailTarget, OpenDiffOptions } from "./changes-diff-target";
 import { ChangesPanel } from "./changes-panel";
@@ -103,6 +104,24 @@ function ChatContent({ panelId, params }: { panelId: string; params: Record<stri
   );
 }
 
+/**
+ * Force a fresh git-status push whenever a diff panel becomes visible.
+ *
+ * The diff content is derived from the git-status snapshot. A visible panel
+ * can otherwise keep the snapshot that arrived while its comparison target
+ * was unavailable. Visibility is used instead of active state because a
+ * right-column group can remain visible while another dockview group owns
+ * global focus.
+ */
+function useResyncGitStatusOnTabActivate(panelId: string, sessionId: string | null) {
+  const isVisible = usePanelActive(panelId);
+
+  useEffect(() => {
+    if (!sessionId || !isVisible) return;
+    getWebSocketClient()?.refreshSessionData(sessionId);
+  }, [sessionId, isVisible]);
+}
+
 /** Render the changes/diff viewer for the panel's params (`kind` "all" or
  *  "file"), closing the panel when it becomes empty. */
 function DiffViewerContent({
@@ -124,6 +143,8 @@ function DiffViewerContent({
     panelKind === "file" ? (params?.changeLayer as OpenDiffOptions["changeLayer"]) : undefined;
   const sourceFilter = ((params?.source as string) || "all") as "all" | ReviewSource;
   const panelSelectedDiff = panelKind === "all" ? selectedDiff : null;
+  const activeSessionId = useAppStore((state) => state.tasks.activeSessionId);
+  useResyncGitStatusOnTabActivate(panelId, activeSessionId);
   const handleClosePanel = useCallback(() => {
     const dockApi = useDockviewStore.getState().api;
     const panel = dockApi?.getPanel(panelId);
@@ -158,6 +179,7 @@ function ChangesContent({ panelId }: { panelId: string }) {
   // Dynamic title with file count - use environment-stable sessionId so the
   // tab title doesn't re-fetch on same-environment session tab switches.
   const activeSessionId = useEnvironmentSessionId();
+  useResyncGitStatusOnTabActivate(panelId, activeSessionId);
   const totalCount = useSessionChangesCount(activeSessionId);
 
   useEffect(() => {
