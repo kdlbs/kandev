@@ -548,14 +548,17 @@ func taskIDFromPayload(payload string) string {
 // its ceiling/budget gate evaluation and launch-ledger append.
 
 // ScheduleRetry resets a run to queued with an incremented retry count
-// and a scheduled retry time.
+// and a scheduled retry time. Re-stamps priority_class to recovery
+// unless it is already human (AC-OFFICE-BACKPRESSURE-001.7), so a
+// retried run is not stuck behind the class of work it kept losing to.
 func (r *Repository) ScheduleRetry(ctx context.Context, runID string, retryAt time.Time, retryCount int) error {
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE runs
 		SET status = 'queued', retry_count = ?, scheduled_retry_at = ?,
-		    claimed_at = NULL, finished_at = NULL
+		    claimed_at = NULL, finished_at = NULL,
+		    priority_class = CASE WHEN priority_class = ? THEN priority_class ELSE ? END
 		WHERE id = ?
-	`), retryCount, retryAt, runID)
+	`), retryCount, retryAt, models.PriorityClassHuman, models.PriorityClassRecovery, runID)
 	return err
 }
 
@@ -571,13 +574,18 @@ func (r *Repository) CleanExpired(ctx context.Context, olderThan time.Time) (int
 	return res.RowsAffected()
 }
 
-// RecoverStale resets claimed runs older than the given time back to queued.
+// RecoverStale resets claimed runs older than the given time back to
+// queued. Re-stamps priority_class to recovery unless it is already
+// human (AC-OFFICE-BACKPRESSURE-001.7), the same rule ScheduleRetry
+// applies, so a run stuck long enough to be swept is not also stuck at
+// its original, possibly lower, claim priority.
 func (r *Repository) RecoverStale(ctx context.Context, claimedOlderThan time.Time) (int64, error) {
 	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE runs
-		SET status = 'queued', claimed_at = NULL
+		SET status = 'queued', claimed_at = NULL,
+		    priority_class = CASE WHEN priority_class = ? THEN priority_class ELSE ? END
 		WHERE status = 'claimed' AND claimed_at < ?
-	`), claimedOlderThan)
+	`), models.PriorityClassHuman, models.PriorityClassRecovery, claimedOlderThan)
 	if err != nil {
 		return 0, err
 	}

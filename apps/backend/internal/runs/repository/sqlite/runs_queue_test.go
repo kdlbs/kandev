@@ -319,6 +319,43 @@ func TestScheduleRetry_WritesTheAttemptCountVerbatim(t *testing.T) {
 	}
 }
 
+// TestScheduleRetry_RestampsPriorityClassToRecoveryUnlessAlreadyHuman
+// covers AC-OFFICE-BACKPRESSURE-001.7: a retried run must re-enter the
+// queue at recovery priority so it is not starved behind the same class
+// of work it kept losing to, unless it was already human.
+func TestScheduleRetry_RestampsPriorityClassToRecoveryUnlessAlreadyHuman(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+
+	periodic := mustCreateRun(t, repo, &models.Run{
+		ID: "retry-periodic", AgentProfileID: "a1", WorkspaceID: "ws-a1",
+		Reason: "routine_dispatch_cron", Payload: `{}`, Status: "queued",
+		CoalescedCount: 1, PriorityClass: models.PriorityClassPeriodic,
+	})
+	human := mustCreateRun(t, repo, &models.Run{
+		ID: "retry-human", AgentProfileID: "a1", WorkspaceID: "ws-a1",
+		Reason: "manual_resume_after_failure", Payload: `{}`, Status: "queued",
+		CoalescedCount: 1, PriorityClass: models.PriorityClassHuman,
+	})
+	setStatus(t, repo, periodic.ID, "failed", nil, timePtr(now))
+	setStatus(t, repo, human.ID, "failed", nil, timePtr(now))
+
+	if err := repo.ScheduleRetry(ctx, periodic.ID, now.Add(time.Minute), 1); err != nil {
+		t.Fatalf("schedule retry (periodic): %v", err)
+	}
+	if err := repo.ScheduleRetry(ctx, human.ID, now.Add(time.Minute), 1); err != nil {
+		t.Fatalf("schedule retry (human): %v", err)
+	}
+
+	if got := mustGetRun(t, repo, periodic.ID).PriorityClass; got != models.PriorityClassRecovery {
+		t.Errorf("periodic run's priority_class after retry = %v, want PriorityClassRecovery", got)
+	}
+	if got := mustGetRun(t, repo, human.ID).PriorityClass; got != models.PriorityClassHuman {
+		t.Errorf("human run's priority_class after retry = %v, want PriorityClassHuman (unchanged)", got)
+	}
+}
+
 // TestRecoverStale_ResetsOnlyClaimedRunsStrictlyOlderThanTheCutoff
 // exercises the staleness boundary in both directions. The cutoff is a
 // parameter, so the equality case is exact rather than clock-dependent.
@@ -370,6 +407,40 @@ func TestRecoverStale_NothingToRecoverReportsZero(t *testing.T) {
 	}
 	if recovered != 0 {
 		t.Errorf("recovered = %d, want 0", recovered)
+	}
+}
+
+// TestRecoverStale_RestampsPriorityClassToRecoveryUnlessAlreadyHuman
+// covers AC-OFFICE-BACKPRESSURE-001.7 for the recovery-sweep path: a
+// stuck run returned to queued must re-enter at recovery priority so it
+// can drain the pool, unless it was already human.
+func TestRecoverStale_RestampsPriorityClassToRecoveryUnlessAlreadyHuman(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	cutoff := time.Date(2026, 4, 1, 12, 0, 0, 0, time.UTC)
+
+	periodic := mustCreateRun(t, repo, &models.Run{
+		ID: "stale-periodic", AgentProfileID: "a1", WorkspaceID: "ws-a1",
+		Reason: "heartbeat", Payload: `{}`, Status: "queued",
+		CoalescedCount: 1, PriorityClass: models.PriorityClassPeriodic,
+	})
+	human := mustCreateRun(t, repo, &models.Run{
+		ID: "stale-human", AgentProfileID: "a1", WorkspaceID: "ws-a1",
+		Reason: "manual_resume_after_failure", Payload: `{}`, Status: "queued",
+		CoalescedCount: 1, PriorityClass: models.PriorityClassHuman,
+	})
+	setStatus(t, repo, periodic.ID, "claimed", timePtr(cutoff.Add(-time.Minute)), nil)
+	setStatus(t, repo, human.ID, "claimed", timePtr(cutoff.Add(-time.Minute)), nil)
+
+	if _, err := repo.RecoverStale(ctx, cutoff); err != nil {
+		t.Fatalf("recover stale: %v", err)
+	}
+
+	if got := mustGetRun(t, repo, periodic.ID).PriorityClass; got != models.PriorityClassRecovery {
+		t.Errorf("periodic run's priority_class after recovery = %v, want PriorityClassRecovery", got)
+	}
+	if got := mustGetRun(t, repo, human.ID).PriorityClass; got != models.PriorityClassHuman {
+		t.Errorf("human run's priority_class after recovery = %v, want PriorityClassHuman (unchanged)", got)
 	}
 }
 
