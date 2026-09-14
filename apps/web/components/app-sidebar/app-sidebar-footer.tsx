@@ -333,6 +333,7 @@ function useSettingsGearToggle(
 ) {
   const router = useRouter();
   const pathname = usePathname();
+  const startupPage = useAppStore((s) => s.userSettings.startupPage);
 
   return () => {
     const onSettingsRoute = isSettingsRoute(pathname);
@@ -341,7 +342,9 @@ function useSettingsGearToggle(
       return;
     }
     if (settingsMode && onSettingsRoute) {
-      router.push(workspaceHomeHref(activeWorkspace), { onNavigated: onToggleSettingsMode });
+      router.push(workspaceHomeHref(activeWorkspace, startupPage), {
+        onNavigated: onToggleSettingsMode,
+      });
       return;
     }
     onToggleSettingsMode();

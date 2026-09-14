@@ -35,7 +35,7 @@ func TestRequestFreshCIRunClassifiesInitialPRRateLimitAsRetryable(t *testing.T) 
 	reset := service.ciRunClock()().UTC().Add(10 * time.Minute)
 	client.prErrSequence = []error{&GitHubAPIError{
 		StatusCode: 429, Endpoint: "/repos/kdlbs/kandev/pulls/42",
-		Body: "rate limit exceeded", RetryAfter: &reset,
+		Body: "rate limit exceeded", RetryAt: &reset,
 	}}
 
 	receipt, err := service.RequestFreshCIRun(context.Background(), input)
@@ -61,7 +61,7 @@ func TestRequestFreshCIRunClassifiesFinalPRRateLimitAsRetryable(t *testing.T) {
 	reset := service.ciRunClock()().UTC().Add(10 * time.Minute)
 	client.prErrSequence = []error{nil, &GitHubAPIError{
 		StatusCode: 429, Endpoint: "/repos/kdlbs/kandev/pulls/42",
-		Body: "rate limit exceeded", RetryAfter: &reset,
+		Body: "rate limit exceeded", RetryAt: &reset,
 	}}
 
 	receipt, err := service.RequestFreshCIRun(context.Background(), input)
@@ -85,7 +85,7 @@ func TestRequestFreshCIRunDefersPostMutationRateLimitWithoutResending(t *testing
 	client.runs[0].Attempt = input.ExpectedSourceAttempt + 1
 	client.listErrSequence = []error{&GitHubAPIError{
 		StatusCode: 429, Endpoint: "/repos/kdlbs/kandev/actions/workflows/77/runs",
-		Body: "rate limit exceeded", RetryAfter: &reset,
+		Body: "rate limit exceeded", RetryAt: &reset,
 	}}
 
 	receipt, err := service.RequestFreshCIRun(context.Background(), input)

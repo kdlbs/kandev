@@ -32,6 +32,19 @@ type MockState = {
     tasks: Array<{ id: string; workflowStepId: string; title: string; position: number }>;
     steps: Array<{ id: string; title: string; color: string; position: number }>;
   };
+  workspaceContextGeneration?: number;
+  workspaceContextRead?: {
+    workspaceId: string | null;
+    generation: number;
+    pending: { workflows: boolean; repositories: boolean; steps: boolean };
+    errors: {
+      workflows: "transient" | null;
+      repositories: "transient" | null;
+      steps: "transient" | null;
+    };
+    snapshotPending: boolean;
+    snapshotError: "transient" | null;
+  };
 };
 
 let mockState: MockState = {
@@ -76,6 +89,7 @@ function makeSnapshot(
   };
 }
 
+// eslint-disable-next-line max-lines-per-function -- sidebar projection cases share one state harness
 describe("useWorkspaceSidebarTasks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -89,6 +103,29 @@ describe("useWorkspaceSidebarTasks", () => {
   it("fires useAllWorkflowSnapshots with the workspaceId", () => {
     renderHook(() => useWorkspaceSidebarTasks("ws-1"));
     expect(mockUseAllWorkflowSnapshots).toHaveBeenCalledWith("ws-1");
+  });
+
+  it("surfaces a failed workflow snapshot through the shared retry status", () => {
+    setMockState({
+      workflows: { items: [{ id: "wf-A", workspaceId: "ws-1", name: "A" }] },
+    });
+    mockState = {
+      ...mockState,
+      workspaceContextGeneration: 0,
+      workspaceContextRead: {
+        workspaceId: "ws-1",
+        generation: 0,
+        pending: { workflows: false, repositories: false, steps: false },
+        errors: { workflows: null, repositories: null, steps: null },
+        snapshotPending: false,
+        snapshotError: "transient",
+      },
+    };
+
+    const { result } = renderHook(() => useWorkspaceSidebarTasks("ws-1"));
+
+    expect(result.current.workspaceContextError).toBe("transient");
+    expect(result.current.workspaceContextPending).toBe(false);
   });
 
   it("aggregates tasks from every workflow snapshot scoped to the workspace", () => {

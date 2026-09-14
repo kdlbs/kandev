@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "../../fixtures/test-base";
+import { expectControlHeight } from "../../helpers/control-sizing";
 
 const DEFAULT_REPO = "defaultorg/defaultrepo";
 const DEFAULT_REPO_ISSUE = "Issue in saved default repo";
@@ -261,6 +262,18 @@ test.describe("Desktop /github scope bar", () => {
     await testPage.getByTestId("github-repo-filter-trigger").click();
     const search = testPage.getByTestId("github-repo-filter-dropdown").getByRole("combobox");
     await expect(search).toBeVisible();
+    const searchGroup = search.locator('xpath=ancestor::*[@data-slot="input-group"]');
+    for (const control of [search, searchGroup]) {
+      await expect
+        .poll(
+          async () => {
+            const box = await control.boundingBox();
+            return box ? Math.abs(box.height - 28) : Number.POSITIVE_INFINITY;
+          },
+          { timeout: 5_000 },
+        )
+        .toBeLessThanOrEqual(1);
+    }
 
     await search.fill("testorg");
     await testPage.getByRole("option", { name: "testorg/testrepo" }).click();
@@ -315,9 +328,7 @@ test.describe("Desktop /github scope bar", () => {
     await dialog.getByLabel("Name").fill(savedQuery);
     const saveRepoTrigger = dialog.getByTestId("github-save-query-repo-trigger");
     await expect(saveRepoTrigger).toBeVisible();
-    await expect
-      .poll(async () => (await saveRepoTrigger.boundingBox())?.height ?? 0)
-      .toBeCloseTo(36, 0);
+    await expectControlHeight(saveRepoTrigger, 28);
     await saveRepoTrigger.click();
     const saveRepoDropdown = testPage.getByTestId("github-save-query-repo-dropdown");
     await expect(saveRepoDropdown).toBeVisible();

@@ -258,7 +258,7 @@ func classifyNonNilCIRunProviderError(err error, mutation, rerun bool) error {
 			RequestID: apiErr.RequestID, URL: apiErr.URL}
 	case isCIRunRateLimitResponse(apiErr.StatusCode, body):
 		return &CIRunProviderError{Class: CIRunFailureProviderRateLimited, StatusCode: apiErr.StatusCode,
-			Retryable: true, RetryAfter: apiErr.RetryAfter, RequestID: apiErr.RequestID, URL: apiErr.URL}
+			Retryable: true, RetryAfter: apiErr.ProviderRetryAt(), RequestID: apiErr.RequestID, URL: apiErr.URL}
 	case apiErr.StatusCode == http.StatusUnauthorized || apiErr.StatusCode == http.StatusForbidden:
 		return &CIRunProviderError{Class: CIRunFailureInstallationPermission, StatusCode: apiErr.StatusCode,
 			RequestID: apiErr.RequestID, URL: apiErr.URL}

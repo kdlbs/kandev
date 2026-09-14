@@ -426,6 +426,34 @@ func TestUpdateTaskEndpoint_409OnApprovalGate(t *testing.T) {
 	if body["status"] != "in_review" {
 		t.Errorf("response status = %v, want in_review", body["status"])
 	}
+	if body["reason"] != dashboard.ApprovalGateReasonApprovals {
+		t.Errorf("response reason = %v, want %s", body["reason"], dashboard.ApprovalGateReasonApprovals)
+	}
+}
+
+func TestUpdateTaskEndpoint_409OnWorkflowStepGate(t *testing.T) {
+	deps := newTestDeps(t)
+	insertTestTaskAtNonTerminalStep(t, deps.db, "ep-step-gate", "ws-step-gate", "Step gate", "in_progress", "Review")
+
+	req := httptest.NewRequest(http.MethodPatch,
+		"/api/v1/office/tasks/ep-step-gate",
+		strings.NewReader(`{"status":"done"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	deps.router.ServeHTTP(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d body = %s", w.Code, w.Body.String())
+	}
+	var body map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if body["reason"] != dashboard.ApprovalGateReasonWorkflowStep {
+		t.Errorf("response reason = %v, want %s", body["reason"], dashboard.ApprovalGateReasonWorkflowStep)
+	}
+	if body["status"] != "in_review" {
+		t.Errorf("response status = %v, want in_review", body["status"])
+	}
 }
 
 // TestUpdateTaskEndpoint_409PendingApproversIncludesNames verifies that the

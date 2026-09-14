@@ -146,28 +146,31 @@ type Service struct {
 	// a single task by ID) because reset must walk the task tree and clean
 	// up subtasks, runs, and worktrees too. Wired post-construction via
 	// SetCascadeTaskDeleter to avoid an import cycle with the task service.
-	cascadeTaskDeleter   watchreset.TaskDeleter
-	taskSessionChecker   TaskSessionChecker
-	syncGroup            singleflight.Group
-	taskEventSubs        []bus.Subscription
-	searchCache          *ttlCache
-	prStatusCache        *ttlCache
-	prFeedbackCache      *ttlCache
-	mergeMethodsCache    *ttlCache
-	accessibleReposCache *ttlCache
-	repoErrorCache       *ttlCache
-	forkParentCache      *ttlCache
-	protectionCache      *branchProtectionCache
-	rateTracker          *RateTracker
-	promptResolver       PromptResolver
-	tokenClientFactory   func(string) Client
-	ghAccountLister      func(context.Context) ([]GHAccount, error)
-	mockAuth             *MockAuthState
-	workspaceAuthorizer  func(context.Context, string) error
-	freshDefaultsMu      sync.Mutex
-	freshDefaultsDone    bool
-	ciRunClientResolver  func(context.Context, string, string, string) (ciRunActionsClient, error)
-	ciRunNow             func() time.Time
+	cascadeTaskDeleter    watchreset.TaskDeleter
+	taskSessionChecker    TaskSessionChecker
+	syncGroup             singleflight.Group
+	taskEventSubs         []bus.Subscription
+	searchCache           *ttlCache
+	prStatusCache         *ttlCache
+	prFeedbackCache       *ttlCache
+	mergeMethodsCache     *ttlCache
+	accessibleReposCache  *ttlCache
+	repoErrorCache        *ttlCache
+	forkParentCache       *ttlCache
+	protectionCache       *branchProtectionCache
+	rateTracker           *RateTracker
+	prDiscoveryHealth     *prDiscoveryHealthStore
+	prDiscoveryAttemptsMu sync.Mutex
+	prDiscoveryAttempts   map[string]*prDiscoveryAttemptResult
+	promptResolver        PromptResolver
+	tokenClientFactory    func(string) Client
+	ghAccountLister       func(context.Context) ([]GHAccount, error)
+	mockAuth              *MockAuthState
+	workspaceAuthorizer   func(context.Context, string) error
+	freshDefaultsMu       sync.Mutex
+	freshDefaultsDone     bool
+	ciRunClientResolver   func(context.Context, string, string, string) (ciRunActionsClient, error)
+	ciRunNow              func() time.Time
 
 	// cleanupFailureMu guards cleanupFailureCounts; the cleanup loop is the
 	// only writer but the global sweep + per-watch sweep can run concurrently
@@ -231,6 +234,8 @@ func NewService(client Client, authMethod string, secrets SecretProvider, store 
 		forkParentCache:         newForkParentCache(),
 		protectionCache:         newBranchProtectionCache(),
 		rateTracker:             NewRateTracker(eventBus, log),
+		prDiscoveryHealth:       newPRDiscoveryHealth(eventBus, log),
+		prDiscoveryAttempts:     make(map[string]*prDiscoveryAttemptResult),
 		tokenClientFactory:      func(token string) Client { return NewPATClient(token) },
 		ghAccountLister:         ListGHAccounts,
 		cleanupFailureCounts:    make(map[string]int),
@@ -272,6 +277,10 @@ func (s *Service) Stop() {
 	s.stopOnce.Do(func() {
 		s.stopCancel()
 		s.bgWG.Wait()
+		if s.prDiscoveryHealth != nil {
+			s.prDiscoveryHealth.clearAll()
+			s.invalidateAllPRDiscoveryAttempts("")
+		}
 	})
 }
 

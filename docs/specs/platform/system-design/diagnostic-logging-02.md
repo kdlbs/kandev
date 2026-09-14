@@ -3,6 +3,7 @@ status: draft
 system: platform
 requirements:
   - REQ-PLATFORM-DIAGNOSTIC-LOGGING-001
+  - REQ-PLATFORM-BROWSER-CONSOLE-RETENTION-001
 created: 2026-07-30
 owners:
   - tbd
@@ -18,6 +19,7 @@ This design preserves the technical source detail for `REQ-PLATFORM-DIAGNOSTIC-L
 | Requirement | Design section |
 | --- | --- |
 | `REQ-PLATFORM-DIAGNOSTIC-LOGGING-001` | [Migrated source detail](#migrated-source-detail) |
+| `REQ-PLATFORM-BROWSER-CONSOLE-RETENTION-001` | [Frontend capture paging](#frontend-capture-paging) |
 
 ## Migrated source detail
 
@@ -187,10 +189,16 @@ the requesting identity:
 {
   "bundle_id": "01J...",
   "capture_deadline": "2026-07-30T12:35:15Z",
+  "capture_timeout_ms": 15000,
   "max_chunk_bytes": 1048576,
   "max_browser_profiles": 4
 }
 ```
+
+`capture_deadline` is the absolute backend expiry time. The backend calculates
+`capture_timeout_ms` from its clock when it creates the notification. The value
+is not more than 15,000 milliseconds. A new frontend uses this duration with a
+monotonic clock. An older frontend can continue to use `capture_deadline`.
 
 Each frontend snapshots its local three-day store and uploads sequential chunks
 to `POST /api/v1/system/logs/bundles/:id/frontend`:
@@ -222,6 +230,54 @@ to `POST /api/v1/system/logs/bundles/:id/frontend`:
   entry truncations, and storage mode. Earlier chunks omit it.
 - Accepted chunks return `204 No Content`; invalid ordering or bounds return
   `400` or `413`; unknown/expired jobs return `404` or `410`.
+
+#### Frontend capture paging
+
+The browser records a capture watermark when it receives the notification. It
+also keeps a bounded memory snapshot for that watermark. Entries that arrive
+later remain in normal staging and cannot extend this capture.
+
+At receipt, the browser starts a `readwrite` boundary transaction on its already
+open IndexedDB connection. The transaction is serialized with append
+transactions before the receipt-prefix drain starts. If the browser cannot
+prove this boundary, it uses the receipt-time memory snapshot.
+
+The browser waits at most one second for the serialized persistence drain to
+reach the watermark. If this wait expires, the browser uses the receipt-time
+memory snapshot. The persistence drain continues and its storage mode does not
+change. The upload uses `storage_mode: memory`. Its final metadata includes
+`flush_timeout: true`.
+
+The fixed-prefix drain returns the exact persisted object-store primary keys.
+IndexedDB capture uses the receipt boundary key for prior rows and those exact
+prefix keys for later rows. A row written by another tab between the boundary
+transaction and the prefix drain is not in that key set. Every page excludes
+other rows written after receipt, including rows written between page
+transactions. A capture with no persisted rows sends an empty IndexedDB page.
+
+IndexedDB capture reads use the existing `timestamp_ms` index. Each page resumes
+with the prior timestamp and primary key. The index cursor uses
+`continuePrimaryKey()` when it resumes inside an equal-timestamp group. The
+cursor filters the requested identity while it scans the globally bounded
+store. The browser does not use an unbounded `getAll` or sort the complete
+partition in memory.
+
+The first page uses a 128 KiB entry-data target. Later pages use the existing
+800 KiB target. A server value less than either target lowers that target. The
+request envelope stays below the 1 MiB body limit.
+
+The browser uploads each page before it reads the next page. This sequence
+keeps chunk indexes ordered and gives the renderer time between pages. The final
+page carries `done: true`. An empty history sends one empty final page.
+
+The frontend creates a local deadline from `capture_timeout_ms` and
+`performance.now()`. It checks this deadline before each page and upload. An
+`AbortController` cancels an active upload at the local deadline.
+
+The backend still uses `capture_deadline` as the authoritative job boundary.
+Transport delay can cause an upload to reach the backend after this boundary.
+The backend rejects that request. The browser does not retry or log the error
+through the console interceptor.
 
 `GET /api/v1/system/logs/bundles/:id` returns the caller-owned job state:
 `collecting`, `building`, `ready`, `partial`, `failed`, or `expired`, plus

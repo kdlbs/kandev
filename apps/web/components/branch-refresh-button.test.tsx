@@ -26,8 +26,8 @@ describe("BranchRefreshButton", () => {
 
     const button = screen.getByTestId("repo-refresh-button");
     expect(button.getAttribute("aria-label")).toBe("Refresh repositories");
-    expect(button.className).toContain("h-12");
-    expect(button.className).toContain("w-12");
+    expect(button.className).toContain("size-7");
+    expect(button.className).toContain("max-md:size-11");
   });
 
   it("refreshes on click", () => {

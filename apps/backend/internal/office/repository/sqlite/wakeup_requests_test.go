@@ -147,6 +147,38 @@ func TestWakeupRequest_MarkSkipped(t *testing.T) {
 	}
 }
 
+func TestWakeupRequest_MarkFailed(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	_ = repo.CreateWakeupRequest(ctx, &sqlite.WakeupRequest{
+		ID: "w-1", AgentProfileID: "agent-1", Source: "routine",
+	})
+	if err := repo.MarkWakeupRequestFailed(ctx, "w-1", "dispatch failed"); err != nil {
+		t.Fatalf("mark failed: %v", err)
+	}
+	got, err := repo.GetWakeupRequest(ctx, "w-1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status != sqlite.WakeupStatusFailed {
+		t.Errorf("status: got %q", got.Status)
+	}
+	if got.Reason != "dispatch failed" {
+		t.Errorf("reason: got %q", got.Reason)
+	}
+	if !got.FinishedAt.Valid {
+		t.Error("finished_at should be set")
+	}
+	rows, err := repo.ListQueuedWakeupRequestsForAgent(ctx, "agent-1")
+	if err != nil {
+		t.Fatalf("list queued: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("failed request remains queued: %+v", rows)
+	}
+}
+
 // TestWakeupRequest_MarkCoalesced creates a runs row, then a wakeup
 // request, then marks the request coalesced into the run. Verifies the
 // status transition, coalesced_count bump, and that context_snapshot

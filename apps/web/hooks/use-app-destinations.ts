@@ -18,7 +18,8 @@ import type {
 export function useNavContext(): NavContext {
   const workspaceId = useAppStore((s) => s.workspaces.activeId);
   const inOffice = useInOffice();
-  return { workspaceId, inOffice };
+  const startupPage = useAppStore((s) => s.userSettings.startupPage);
+  return { workspaceId, inOffice, startupPage };
 }
 
 /**

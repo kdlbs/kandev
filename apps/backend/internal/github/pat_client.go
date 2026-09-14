@@ -33,12 +33,70 @@ type GitHubAPIError struct {
 	StatusCode int
 	Endpoint   string
 	Body       string
-	RetryAfter *time.Time
-	RequestID  string
-	URL        string
+	// RetryAt preserves provider-supplied retry evidence so PR discovery
+	// backs off to the later of Retry-After and X-RateLimit-Reset.
+	RetryAt *time.Time
+	// RequestID and URL carry provider-side evidence recorded with scoped
+	// CI run provider errors.
+	RequestID string
+	URL       string
 }
 
-func githubAPIRetryAfter(resp *http.Response) *time.Time {
+func (e *GitHubAPIError) Error() string {
+	return fmt.Sprintf("GitHub API %s returned %d: %s", e.Endpoint, e.StatusCode, e.Body)
+}
+
+func (e *GitHubAPIError) ProviderRetryAt() *time.Time {
+	if e == nil || e.RetryAt == nil {
+		return nil
+	}
+	value := *e.RetryAt
+	return &value
+}
+
+// retryAtFromHTTPResponse preserves provider-supplied retry evidence. The
+// later of Retry-After and X-RateLimit-Reset is used so a secondary-limit hint
+// cannot cause discovery to resume before the primary reset.
+func retryAtFromHTTPResponse(resp *http.Response, defaultResource Resource, now time.Time) *time.Time {
+	if resp == nil {
+		return nil
+	}
+	var latest *time.Time
+	if value := strings.TrimSpace(resp.Header.Get("Retry-After")); value != "" {
+		var retryAt time.Time
+		if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+			retryAt = now.Add(time.Duration(seconds) * time.Second)
+		} else if parsed, parseErr := http.ParseTime(value); parseErr == nil {
+			retryAt = parsed.UTC()
+		}
+		if retryAt.After(now) {
+			latest = &retryAt
+		}
+	}
+	if snapshot, ok := parseRateHeaders(resp, defaultResource); ok && snapshot.ResetAt.After(now) &&
+		(latest == nil || snapshot.ResetAt.After(*latest)) {
+		resetAt := snapshot.ResetAt
+		latest = &resetAt
+	}
+	if latest == nil {
+		return nil
+	}
+	copy := *latest
+	return &copy
+}
+
+// WithRateTracker attaches a rate tracker so response headers are recorded.
+// Returns the client for chaining; safe to call before any requests are made.
+func (c *PATClient) WithRateTracker(t *RateTracker) *PATClient {
+	c.rateTracker = t
+	return c
+}
+
+// providerResetEvidence extracts raw provider retry evidence for scoped CI
+// run errors. Unlike retryAtFromHTTPResponse it does not gate on "now": the
+// stored ProviderRetryAfter is evidence of what the provider sent, and the
+// CI rate-limit deferral logic decides whether the reset is still actionable.
+func providerResetEvidence(resp *http.Response) *time.Time {
 	if resp == nil {
 		return nil
 	}
@@ -61,30 +119,27 @@ func githubAPIRetryAfter(resp *http.Response) *time.Time {
 	return nil
 }
 
-func (e *GitHubAPIError) Error() string {
-	return fmt.Sprintf("GitHub API %s returned %d: %s", e.Endpoint, e.StatusCode, e.Body)
-}
-
-// WithRateTracker attaches a rate tracker so response headers are recorded.
-// Returns the client for chaining; safe to call before any requests are made.
-func (c *PATClient) WithRateTracker(t *RateTracker) *PATClient {
-	c.rateTracker = t
-	return c
+// resourceForEndpoint maps a REST endpoint prefix to the rate-limit resource
+// bucket GitHub uses for it, used when a response omits the
+// X-RateLimit-Resource header.
+func resourceForEndpoint(endpoint string) Resource {
+	if strings.HasPrefix(endpoint, "/search/") {
+		return ResourceSearch
+	}
+	if strings.HasPrefix(endpoint, "/graphql") {
+		return ResourceGraphQL
+	}
+	return ResourceCore
 }
 
 // recordRateHeaders feeds rate-limit data from a response into the tracker.
 // endpoint is used to pick the default resource bucket when the response
-// omits the X-RateLimit-Resource header.
+// omits X-RateLimit-Resource.
 func (c *PATClient) recordRateHeaders(resp *http.Response, endpoint string) {
 	if c.rateTracker == nil || resp == nil {
 		return
 	}
-	defaultResource := ResourceCore
-	if strings.HasPrefix(endpoint, "/search/") {
-		defaultResource = ResourceSearch
-	} else if strings.HasPrefix(endpoint, "/graphql") {
-		defaultResource = ResourceGraphQL
-	}
+	defaultResource := resourceForEndpoint(endpoint)
 	snap, headersOK := parseRateHeaders(resp, defaultResource)
 	if headersOK {
 		c.rateTracker.Record(snap)
@@ -637,6 +692,45 @@ func (c *PATClient) ListCheckRuns(ctx context.Context, owner, repo, ref string) 
 	), nil
 }
 
+func (c *PATClient) ListWorkflowRuns(ctx context.Context, owner, repo, headSHA string) ([]WorkflowRun, error) {
+	endpoint := fmt.Sprintf("/repos/%s/%s/actions/runs?head_sha=%s&per_page=100", owner, repo, url.QueryEscape(headSHA))
+	var runs []WorkflowRun
+	for endpoint != "" {
+		var page struct {
+			WorkflowRuns []ghWorkflowRun `json:"workflow_runs"`
+		}
+		next, err := c.getPaginated(ctx, endpoint, &page)
+		if err != nil {
+			return nil, err
+		}
+		for _, raw := range page.WorkflowRuns {
+			runs = append(runs, convertRawWorkflowRun(raw))
+		}
+		endpoint = next
+	}
+	return runs, nil
+}
+
+func (c *PATClient) ListWorkflowRunJobs(ctx context.Context, owner, repo string, runID int64, attempt int) ([]WorkflowJob, error) {
+	endpoint := fmt.Sprintf("/repos/%s/%s/actions/runs/%d/jobs?per_page=100", owner, repo, runID)
+	if attempt > 0 {
+		endpoint = fmt.Sprintf("/repos/%s/%s/actions/runs/%d/attempts/%d/jobs?per_page=100", owner, repo, runID, attempt)
+	}
+	var jobs []WorkflowJob
+	for endpoint != "" {
+		var page struct {
+			Jobs []ghWorkflowJob `json:"jobs"`
+		}
+		next, err := c.getPaginated(ctx, endpoint, &page)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, convertRawWorkflowJobs(page.Jobs)...)
+		endpoint = next
+	}
+	return jobs, nil
+}
+
 func (c *PATClient) GetPRFeedback(ctx context.Context, owner, repo string, number int) (*PRFeedback, error) {
 	return getPRFeedback(ctx, c, owner, repo, number)
 }
@@ -960,7 +1054,7 @@ func (c *PATClient) requestJSONWithMetadataVersion(
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, respBody)
 		return metadata, &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint,
-			Body: string(respBody), RetryAfter: githubAPIRetryAfter(resp),
+			Body: string(respBody), RetryAt: providerResetEvidence(resp),
 			RequestID: metadata.RequestID, URL: metadata.URL}
 	}
 	if result == nil {
@@ -1025,7 +1119,7 @@ func (c *PATClient) get(ctx context.Context, endpoint string, result interface{}
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, body)
 		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint,
-			Body: string(body), RetryAfter: githubAPIRetryAfter(resp)}
+			Body: string(body), RetryAt: providerResetEvidence(resp)}
 	}
 	return json.NewDecoder(resp.Body).Decode(result)
 }

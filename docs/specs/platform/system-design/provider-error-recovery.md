@@ -4,7 +4,7 @@ system: platform
 requirements:
   - REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001
 created: 2026-08-08
-updated: 2026-08-31
+updated: 2026-09-03
 owners:
   - Kandev
 ---
@@ -18,7 +18,7 @@ This design preserves the technical source detail for `REQ-PLATFORM-PROVIDER-ERR
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` | [Migrated source detail](#migrated-source-detail), [Cursor normal-completion failure projection](#cursor-normal-completion-failure-projection), [Cursor retry-safety semantics](#cursor-retry-safety-semantics), [Interactive transient retry notice lifecycle](#interactive-transient-retry-notice-lifecycle) |
+| `REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001` | [Migrated source detail](#migrated-source-detail), [Cursor normal-completion failure projection](#cursor-normal-completion-failure-projection), [Cursor retry-safety semantics](#cursor-retry-safety-semantics), [Interactive transient retry notice lifecycle](#interactive-transient-retry-notice-lifecycle). Matching ACP diagnostic and error projection is owned by [Part 3](provider-error-recovery-03.md#matching-acp-diagnostic-and-error-projection). |
 
 ## Migrated source detail
 
@@ -161,6 +161,10 @@ Classification does not by itself authorize retry or switching.
 - Assistant output, tool activity, partial utility output, ambiguous prompt
   delivery, or stale event ordering fails closed unless a durable continuation
   package makes successor delivery safe under the dynamic-routing contract.
+- A correlated ACP diagnostic satisfying [Matching ACP diagnostic and error
+  projection](provider-error-recovery-03.md#matching-acp-diagnostic-and-error-projection)
+  is not assistant output for this gate; non-diagnostic later progress
+  restores the normal output/effect safety fence.
 - User configuration cannot override this gate. An unsafe transient or hard
   failure stops for manual recovery even when its class policy requests retry
   or skip.
@@ -409,6 +413,10 @@ an earlier decision occurred.
 Raw streams, credentials, account identifiers, and unbounded error text are not
 stored in policy or route state.
 
+Continuation package sanitization tiers are defined in [Part
+4](provider-error-recovery-04.md#continuation-package-sanitization-tiers),
+relocated there verbatim when this file reached its size limit.
+
 ## API surface
 
 - Dynamic profile CRUD accepts and returns the versioned per-class policy
@@ -505,6 +513,12 @@ stored in policy or route state.
 - **GIVEN** a failure follows tool activity, **WHEN** the candidate policy says
   retry or skip, **THEN** effect safety overrides the policy and Kandev stops for
   manual recovery.
+- **GIVEN** a current prompt emits a high-confidence `provider_overloaded`
+  diagnostic and then returns a matching structured provider error before any
+  output or tool activity, **WHEN** the transient policy permits retry or
+  candidate fallback, **THEN** the transcript retains the diagnostic and the
+  policy may proceed. **GIVEN** either error does not match or later progress
+  occurs, **THEN** Kandev stops automatic recovery.
 - **GIVEN** the same dynamic profile is selected by Kanban and Office, **WHEN**
   each sees the same classified, effect-safe error, **THEN** both apply the same
   candidate policy and route transition.

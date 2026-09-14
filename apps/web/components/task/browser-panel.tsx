@@ -156,6 +156,7 @@ export const BrowserPanel = memo(function BrowserPanel({ params }: BrowserPanelP
     <PanelRoot data-testid="browser-panel">
       <PanelHeaderBar>
         <Input
+          controlSize="none"
           value={url.displayDraft}
           onChange={(e) => url.setUrlDraft(e.target.value)}
           onKeyDown={(e) => {

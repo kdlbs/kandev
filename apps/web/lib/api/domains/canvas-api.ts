@@ -15,7 +15,9 @@ export type CanvasRelease = {
   source_actor_kind?: string;
   source_user_id?: string;
   source_task_id?: string;
+  source_task_title?: string;
   source_session_id?: string;
+  source_session_name?: string;
   protocol_version?: number;
   created_at?: string;
 };
@@ -83,7 +85,9 @@ export type CanvasPromotionPreview = {
   source_actor_kind?: string;
   source_user_id?: string;
   source_task_id?: string;
+  source_task_title?: string;
   source_session_id?: string;
+  source_session_name?: string;
   active_release?: CanvasRelease;
   permissions?: CanvasPermissionReview;
   active_release_id?: string;

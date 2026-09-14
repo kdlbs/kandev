@@ -223,7 +223,7 @@ func (h *RepositoryHandlers) httpListDiscoveryRoots(c *gin.Context) {
 func (h *RepositoryHandlers) httpAddDiscoveryRoot(c *gin.Context) {
 	var body discoveryRootRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
 		return
 	}
 	root, err := h.service.AddDesktopDiscoveryRoot(c.Request.Context(), body.Path)
@@ -242,7 +242,7 @@ func (h *RepositoryHandlers) httpAddDiscoveryRoot(c *gin.Context) {
 func (h *RepositoryHandlers) httpReconnectDiscoveryRoot(c *gin.Context) {
 	var body discoveryRootRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
 		return
 	}
 	root, err := h.service.ReconnectDesktopDiscoveryRoot(c.Request.Context(), body.Path, body.NewPath)
@@ -306,7 +306,7 @@ type httpCreateDirectoryRequest struct {
 func (h *RepositoryHandlers) httpCreateDirectory(c *gin.Context) {
 	var body httpCreateDirectoryRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
 		return
 	}
 	result, err := h.service.CreateDirectory(c.Request.Context(), body.ParentPath, body.Name)
@@ -525,7 +525,7 @@ func (h *RepositoryHandlers) readOnlyRepositoryMessage(ctx context.Context, repo
 func (h *RepositoryHandlers) httpInitializeLocalRepository(c *gin.Context) {
 	var body httpInitializeLocalRepositoryRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
 		return
 	}
 	if h.rejectReadOnlyWorkspaceHTTP(c, c.Param("id")) {
@@ -556,7 +556,7 @@ func (h *RepositoryHandlers) httpInitializeLocalRepository(c *gin.Context) {
 func (h *RepositoryHandlers) httpCreateRepository(c *gin.Context) {
 	var body httpCreateRepositoryRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
 		return
 	}
 	if body.Name == "" {
@@ -682,7 +682,7 @@ type httpUpdateRepositoryRequest struct {
 func (h *RepositoryHandlers) httpUpdateRepository(c *gin.Context) {
 	var body httpUpdateRepositoryRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request body"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": invalidRequestBody})
 		return
 	}
 	if h.rejectReadOnlyRepositoryHTTP(c, c.Param("id")) {

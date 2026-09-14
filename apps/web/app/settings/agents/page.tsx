@@ -46,6 +46,8 @@ import { toAgentProfileOption } from "@/lib/state/slices/settings/types";
 import { HideDisabledAgentProfilesSetting } from "@/app/settings/agents/hide-disabled-agent-profiles-setting";
 import type { AgentDiscovery, Agent, AvailableAgent, RuntimeUpdate } from "@/lib/types/http";
 
+const installedAgentsActionClassName = settingsActionClassName("cursor-pointer");
+
 type InstalledAgentsSectionProps = {
   installedAgents: AgentDiscovery[];
   /** The full scan, detected or not — the backend's ranking of every agent. */
@@ -99,9 +101,8 @@ function InstalledAgentsHeader({
       <div className="flex w-full flex-wrap gap-2 md:w-auto" data-testid="installed-agents-actions">
         <Button
           variant="outline"
-          size="sm"
           onClick={onOpenShell}
-          className="h-11 cursor-pointer md:h-6"
+          className={installedAgentsActionClassName}
           data-testid="open-host-shell"
         >
           <IconTerminal2 className="h-4 w-4 mr-2" />
@@ -109,10 +110,9 @@ function InstalledAgentsHeader({
         </Button>
         <Button
           variant="outline"
-          size="sm"
           onClick={onRescan}
           disabled={rescanning}
-          className="h-11 cursor-pointer md:h-6"
+          className={installedAgentsActionClassName}
           data-testid="rescan-agents-button"
         >
           {rescanning ? (
@@ -125,9 +125,8 @@ function InstalledAgentsHeader({
         {onOpenTuiDialog && (
           <Button
             variant="outline"
-            size="sm"
             onClick={onOpenTuiDialog}
-            className="h-11 cursor-pointer md:h-6"
+            className={installedAgentsActionClassName}
             data-testid="new-agent-button"
           >
             <IconPlus className="h-4 w-4 mr-2" />
@@ -408,8 +407,7 @@ export default function AgentsSettingsPage() {
             is already installed. */}
         {canManage && (
           <Button
-            size="sm"
-            className={settingsActionClassName("cursor-pointer")}
+            className={installedAgentsActionClassName}
             asChild
             data-testid="install-agents-button"
           >

@@ -266,6 +266,76 @@ describe("workflow step cancellation fields", () => {
   });
 });
 
+describe("workflow step completion fields", () => {
+  beforeEach(() => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          id: "step-1",
+          workflow_id: "wf-1",
+          name: REVIEW_STEP_NAME,
+          position: 1,
+          color: STEP_COLOR,
+          complete_task_on_enter: true,
+          created_at: "",
+          updated_at: "",
+        }),
+      ),
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("preserves the completion policy returned from the step API", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        Response.json({
+          steps: [
+            {
+              id: "step-1",
+              workflow_id: "wf-1",
+              name: REVIEW_STEP_NAME,
+              position: 1,
+              color: STEP_COLOR,
+              complete_task_on_enter: true,
+              created_at: "",
+              updated_at: "",
+            },
+          ],
+        }),
+      ),
+    );
+
+    const result = await listWorkflowStepsAction("wf-1");
+
+    expect(result.steps[0].complete_task_on_enter).toBe(true);
+  });
+
+  it("sends explicit false when creating and updating completion policy", async () => {
+    await createWorkflowStepAction({
+      workflow_id: "wf-1",
+      name: REVIEW_STEP_NAME,
+      position: 1,
+      color: STEP_COLOR,
+      complete_task_on_enter: false,
+    });
+    await updateWorkflowStepAction("step-1", { complete_task_on_enter: false });
+
+    const fetchMock = fetch as unknown as ReturnType<typeof vi.fn>;
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toMatchObject({
+      complete_task_on_enter: false,
+    });
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body as string)).toMatchObject({
+      complete_task_on_enter: false,
+    });
+  });
+});
+
 describe("workflow step stage types", () => {
   beforeEach(() => {
     vi.stubGlobal(

@@ -236,6 +236,8 @@ test.describe("Kanban preview workflow step navigation", () => {
       .first()
       .evaluate((el) => el.scrollWidth - el.clientWidth);
     expect(headerScrollWidth).toBeLessThanOrEqual(1);
+
+    await apiClient.deleteWorkflowStep(longStep.id).catch(() => {});
   });
 
   test("dismisses the disclosure on the first Escape and the preview on the second", async ({

@@ -88,7 +88,8 @@ test.describe.serial("Claude mid-turn steering experiment", () => {
       );
 
       await waitForActiveSessionSupportsSteering(testPage, true);
-      await apiClient.queueMessage(taskId, sessionId, "already queued");
+      const queueIdentity = await apiClient.getQueueSessionIdentity(taskId, sessionId);
+      await apiClient.queueMessage(queueIdentity, "already queued");
 
       const chat = session.activeChat();
       await expect(chat.getByTestId("queue-chip")).toBeVisible({ timeout: 10_000 });

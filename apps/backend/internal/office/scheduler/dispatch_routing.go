@@ -14,7 +14,22 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	sqliterepo "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routing"
+	"github.com/kandev/kandev/internal/office/service"
 )
+
+// TaskStarterWithSession optionally returns the id of the agent session
+// a routed launch created, mirroring service.TaskStarterWithSession for
+// the legacy launch path (AC-OFFICE-LOOP-LIVENESS-002.7). A starter that
+// does not implement this falls back to StartTaskWithRoute, and the
+// run's session id stays empty.
+type TaskStarterWithSession interface {
+	StartTaskWithRouteReturningSession(
+		ctx context.Context,
+		taskID, agentProfileID string,
+		launch LaunchContext,
+		route RouteOverride,
+	) (sessionID string, err error)
+}
 
 // RouteAttemptOutcomeLaunched is the in-flight outcome string the
 // dispatcher writes when an attempt is appended. It is overwritten with
@@ -257,7 +272,7 @@ func (ss *SchedulerService) tryCandidates(
 		if err != nil {
 			return false, nil, err
 		}
-		launchErr := ss.launchCandidate(ctx, taskID, agent.ID, candidate, candidateLaunch)
+		sessionID, launchErr := ss.launchCandidate(ctx, taskID, agent.ID, candidate, candidateLaunch)
 		if launchErr == nil {
 			if prev != nil {
 				// We walked past at least one prior candidate — that's
@@ -270,7 +285,7 @@ func (ss *SchedulerService) tryCandidates(
 			}
 			ss.recordRouteAttempt(agent.WorkspaceID,
 				string(candidate.ProviderID), metricOutcomeSuccess, "")
-			return ss.handleLaunchSuccess(ctx, run, agent, candidate)
+			return ss.handleLaunchSuccess(ctx, run, agent, candidate, sessionID)
 		}
 		// Emit the failure-side route_attempt before classifying. The
 		// outcome label is refined by handleLaunchFailure.
@@ -402,20 +417,20 @@ func (ss *SchedulerService) recordAttemptStart(
 func (ss *SchedulerService) launchCandidate(
 	ctx context.Context, taskID, agentID string,
 	candidate routing.Candidate, launch LaunchContext,
-) error {
+) (string, error) {
 	if taskID == "" {
-		return fmt.Errorf("dispatch: empty task id in run payload")
+		return "", fmt.Errorf("dispatch: empty task id in run payload")
 	}
 	if _, ok := routingerr.InjectedCode(string(candidate.ProviderID)); ok {
 		// Synthesize a launch failure via Classify so injection is
 		// honoured for deterministic E2E specs. Classify short-circuits
 		// to the injected code at the head of its decision chain.
-		return routingerr.Classify(routingerr.Input{
+		return "", routingerr.Classify(routingerr.Input{
 			Phase:      routingerr.PhaseProcessStart,
 			ProviderID: string(candidate.ProviderID),
 		})
 	}
-	return ss.taskStarter.StartTaskWithRoute(ctx, taskID, agentID, launch, RouteOverride{
+	route := RouteOverride{
 		ExecutionProfileID: candidate.ExecutionProfileID,
 		ProviderID:         string(candidate.ProviderID),
 		Model:              candidate.Model,
@@ -423,22 +438,70 @@ func (ss *SchedulerService) launchCandidate(
 		Mode:               candidate.Mode,
 		Flags:              candidate.Flags,
 		Env:                candidate.Env,
-	})
+	}
+	if starter, ok := ss.taskStarter.(TaskStarterWithSession); ok {
+		return starter.StartTaskWithRouteReturningSession(ctx, taskID, agentID, launch, route)
+	}
+	return "", ss.taskStarter.StartTaskWithRoute(ctx, taskID, agentID, launch, route)
 }
 
-// handleLaunchSuccess records the resolved provider/model on the run
-// row and flips every health scope this candidate touched back to
-// healthy. Returns (launched=true, nil, nil) on success.
+// handleLaunchSuccess persists the launched session id, counts the
+// launch, records the resolved provider/model on the run row, and
+// flips every health scope this candidate touched back to healthy.
+// Always returns (launched=true, nil, nil): by the time this is called
+// launchCandidate has already started a real agent session, so nothing
+// downstream may report the launch as failed or leave it uncounted
+// (AC-002.7, AC-003.9). The session id and the launch counter are
+// persisted first and unconditionally — they are the correlation this
+// capability exists to preserve — before the best-effort
+// resolved-route snapshot, whose own failure (Review round 3, R3-2)
+// must not undo them or cause a caller to retry-launch an agent that
+// is already running.
 func (ss *SchedulerService) handleLaunchSuccess(
 	ctx context.Context, run *models.Run,
-	agent *models.AgentInstance, candidate routing.Candidate,
+	agent *models.AgentInstance, candidate routing.Candidate, sessionID string,
 ) (bool, *routing.BlockReason, error) {
+	service.IncLoopLaunch(agent.WorkspaceID)
+	ss.persistLaunchedSession(ctx, run.ID, agent.WorkspaceID, sessionID)
 	if err := ss.repo.SetRunResolvedRoute(ctx,
 		run.ID, candidate.ExecutionProfileID, string(candidate.ProviderID), candidate.Model); err != nil {
-		return false, nil, err
+		ss.logger.Warn("persist resolved route failed",
+			zap.String("run_id", run.ID), zap.String("provider_id", string(candidate.ProviderID)), zap.Error(err))
 	}
 	ss.markHealthScopes(ctx, agent.WorkspaceID, candidate)
 	return true, nil, nil
+}
+
+// persistLaunchedSession stores the session id a successful launch
+// produced (AC-OFFICE-LOOP-LIVENESS-002.7). An empty id is counted as a
+// without-session launch (AC-002.8) rather than attempted as a write.
+// A write failure does not fail the launch — the agent is already
+// running — and is counted separately from the without-session case
+// (AC-002.11) so the two causes of an identical "processed, no
+// session" row stay distinguishable in the counters. A non-empty id
+// whose write affects zero rows (e.g. the run row vanished between
+// claim and this write) is the same AC-002.11 case as a hard write
+// error — a real session id that failed to persist — not the AC-002.8
+// case, so it counts under the same persist-failed counter.
+func (ss *SchedulerService) persistLaunchedSession(
+	ctx context.Context, runID, workspaceID, sessionID string,
+) {
+	if sessionID == "" {
+		service.IncLoopLaunchWithoutSession(workspaceID)
+		return
+	}
+	wrote, err := ss.repo.SetRunSessionID(ctx, runID, sessionID)
+	if err != nil {
+		ss.logger.Warn("persist launched session id failed",
+			zap.String("run_id", runID), zap.String("session_id", sessionID), zap.Error(err))
+		service.IncLoopSessionPersistFailed(workspaceID)
+		return
+	}
+	if !wrote {
+		ss.logger.Warn("persist launched session id matched no row",
+			zap.String("run_id", runID), zap.String("session_id", sessionID))
+		service.IncLoopSessionPersistFailed(workspaceID)
+	}
 }
 
 // markHealthScopes marks the provider, tier, and model scopes healthy

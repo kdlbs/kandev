@@ -113,7 +113,7 @@ export function GitHubCLIForm({
           onValueChange={setSelected}
           disabled={disabled || loading || !accounts.length}
         >
-          <SelectTrigger id="github-cli-account" className="min-h-11 min-w-0 flex-1">
+          <SelectTrigger id="github-cli-account" className="min-w-0 sm:flex-1">
             <SelectValue placeholder={accountPlaceholder(t, loading, loadError)} />
           </SelectTrigger>
           <SelectContent>

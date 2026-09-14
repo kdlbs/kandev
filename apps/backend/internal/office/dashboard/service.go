@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/routing"
 	"github.com/kandev/kandev/internal/office/shared"
+	runssqlite "github.com/kandev/kandev/internal/runs/repository/sqlite"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
 	workflowmodels "github.com/kandev/kandev/internal/workflow/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -73,7 +74,11 @@ type Repository interface {
 	GetRunsByCommentIDs(ctx context.Context, commentIDs []string) (map[string]sqlite.CommentRunStatus, error)
 	UpdateTaskState(ctx context.Context, taskID, state string) error
 	GetTaskExecutionFields(ctx context.Context, taskID string) (*sqlite.TaskExecutionFields, error)
-	UpdateTaskAssignee(ctx context.Context, taskID, assigneeID string) error
+	// UpdateTaskAssignee returns the task's assignment_generation after the
+	// bump, read back inside the same transaction that wrote the runner
+	// seat (see the sqlite implementation's doc comment).
+	UpdateTaskAssignee(ctx context.Context, taskID, assigneeID string) (int64, error)
+	UpdateTaskStateIfWorkflowStep(ctx context.Context, taskID, expectedStepID, state string) (bool, error)
 	UpdateTaskPriority(ctx context.Context, taskID, priority string) error
 	UpdateTaskProjectID(ctx context.Context, taskID, projectID string) error
 	GetTaskProjectID(ctx context.Context, taskID string) (string, error)
@@ -98,8 +103,13 @@ type Repository interface {
 	GetTaskWorkflowStepID(ctx context.Context, taskID string) (string, error)
 	// CancelDisplacedParticipantRun cancels the run(s) the step-entry
 	// fan-out queued for agentProfileID at (taskID, stepID). Used after a
-	// claim displaces an agent from a role.
-	CancelDisplacedParticipantRun(ctx context.Context, taskID, stepID, agentProfileID string) (int64, error)
+	// claim displaces an agent from a role. Returns the rows actually
+	// cancelled so the caller can record each one's loop-liveness
+	// terminal shape.
+	CancelDisplacedParticipantRun(
+		ctx context.Context, taskID, stepID, agentProfileID string,
+	) ([]runssqlite.CancelledRun, error)
+	IsTaskWorkflowStepTerminal(ctx context.Context, taskID string) (terminal, hasStep bool, err error)
 }
 
 // DecisionStore is the workflow-domain decisions interface required by
@@ -150,6 +160,17 @@ type RetryCanceller interface {
 	CancelPendingRetriesForTask(ctx context.Context, taskID string) error
 }
 
+// TerminalShapeRecorder classifies and counts a loop-liveness terminal
+// shape (office_loop_terminal_total, REQ-OFFICE-LOOP-LIVENESS-005) for
+// runs the dashboard package cancelled directly. Mirrors the RetryCanceller
+// / TaskCanceller pattern above: the classification logic (activation
+// instant, workspace resolution) is stateful and already lives once on
+// *office/service.Service, so this seam reuses it instead of a second,
+// divergence-prone copy in dashboard.
+type TerminalShapeRecorder interface {
+	RecordCancelledRunTerminalShapes(ctx context.Context, cancelled []runssqlite.CancelledRun)
+}
+
 // ProjectBudgetEvaluator evaluates project-scoped budget policies for a
 // destination project. Wired to costs.CostService.EvaluateProjectBudget so
 // reassigning a task into a project re-checks that project's policies —
@@ -189,6 +210,14 @@ type HumanAssigneeWriter interface {
 // publishes the task lifecycle and Office refresh events.
 type TaskDetacher interface {
 	DetachTask(ctx context.Context, taskID string) (*taskmodels.Task, error)
+}
+
+// TaskLifecyclePublisher reloads and publishes the canonical task.updated
+// event for a task row Office has just mutated. The implementation owns task
+// publication ordering so concurrent status writes cannot publish stale
+// snapshots. Office's own status-change events only reach the Office board.
+type TaskLifecyclePublisher interface {
+	PublishTaskUpdatedByID(ctx context.Context, id string)
 }
 
 // SessionTerminator flips the (task, agent) office session row to a terminal
@@ -244,6 +273,11 @@ type MarkFixedHandler interface {
 type TaskReactivityChange struct {
 	NewStatus     *string
 	NewAssigneeID *string
+	// AssignmentGeneration is the value UpdateTaskAssignee's transaction
+	// committed and read back, carried here rather than re-read. Nil means
+	// the caller could not supply one (e.g. the read-back itself failed);
+	// the pipeline then enqueues the task_assigned wake keyless.
+	AssignmentGeneration *int64
 	// PrevAssigneeID is the assignee BEFORE the mutation. Required when
 	// NewAssigneeID is set so the pipeline can detect a real change and
 	// hand off the previous assignee's session.
@@ -366,33 +400,35 @@ type WorkspaceSettings struct {
 
 // DashboardService provides dashboard, inbox, activity, run, and task-search business logic.
 type DashboardService struct {
-	repo             Repository
-	logger           *logger.Logger
-	activity         shared.ActivityLogger
-	agents           shared.AgentReader
-	costs            shared.CostChecker
-	permissions      shared.PermissionLister         // optional; nil means no permission items in inbox
-	settingsProvider SettingsProvider                // optional; nil means settings endpoints are unavailable
-	governanceStore  GovernanceSettingsStore         // optional; nil means governance settings are unavailable
-	eb               bus.EventBus                    // optional; nil means no events are published
-	retryCanceller   RetryCanceller                  // optional; nil means retries are not cancelled on reassign
-	taskCanceller    TaskCanceller                   // optional; used to hard-cancel sessions on status→cancelled
-	taskDetacher     TaskDetacher                    // optional; canonical empty-parent mutation
-	sessionTerm      SessionTerminator               // optional; flips office session rows to COMPLETED on participation removal
-	reactivity       ReactivityApplier               // optional; runs the office reactivity pipeline on mutations
-	engineDispatcher shared.WorkflowEngineDispatcher // optional; synchronously routes comment triggers through the engine
-	approvalQueuer   ApprovalReactivityQueuer        // optional; queues approval-flow runs
-	skillLister      SkillLister                     // optional; nil means skill_count is always 0
-	routineLister    RoutineLister                   // optional; nil means routine_count is always 0
-	failureNotifier  FailureNotifier                 // optional; nil means assignee changes don't auto-dismiss inbox entries
-	failureInbox     FailureInboxSource              // optional; nil disables the new agent_run_failed / agent_paused_after_failures inbox sources
-	markFixed        MarkFixedHandler                // optional; nil disables the dismiss endpoint
-	decisions        DecisionStore                   // workflow-domain decisions store (ADR 0005 Wave E); nil disables decision endpoints
-	routingProvider  RoutingProvider                 // optional; nil disables /routing endpoints (503)
-	attemptLister    RouteAttemptLister              // optional; nil disables attempt embedding on run-detail responses
-	runResolver      RunResolver                     // optional; nil means status-change activity rows have no run_id
-	assigneeWriter   HumanAssigneeWriter             // optional; nil rejects human-assignee writes rather than skipping authorization
-	projectBudget    ProjectBudgetEvaluator          // optional; nil means reassignment doesn't re-evaluate the destination project's budget policies
+	repo                  Repository
+	logger                *logger.Logger
+	activity              shared.ActivityLogger
+	agents                shared.AgentReader
+	costs                 shared.CostChecker
+	permissions           shared.PermissionLister         // optional; nil means no permission items in inbox
+	settingsProvider      SettingsProvider                // optional; nil means settings endpoints are unavailable
+	governanceStore       GovernanceSettingsStore         // optional; nil means governance settings are unavailable
+	eb                    bus.EventBus                    // optional; nil means no events are published
+	retryCanceller        RetryCanceller                  // optional; nil means retries are not cancelled on reassign
+	terminalShapeRecorder TerminalShapeRecorder           // optional; nil means displaced-run cancellations aren't counted in office_loop_terminal_total
+	taskCanceller         TaskCanceller                   // optional; used to hard-cancel sessions on status→cancelled
+	taskDetacher          TaskDetacher                    // optional; canonical empty-parent mutation
+	taskLifecycle         TaskLifecyclePublisher          // optional; nil means status changes don't publish canonical task.updated
+	sessionTerm           SessionTerminator               // optional; flips office session rows to COMPLETED on participation removal
+	reactivity            ReactivityApplier               // optional; runs the office reactivity pipeline on mutations
+	engineDispatcher      shared.WorkflowEngineDispatcher // optional; synchronously routes comment triggers through the engine
+	approvalQueuer        ApprovalReactivityQueuer        // optional; queues approval-flow runs
+	skillLister           SkillLister                     // optional; nil means skill_count is always 0
+	routineLister         RoutineLister                   // optional; nil means routine_count is always 0
+	failureNotifier       FailureNotifier                 // optional; nil means assignee changes don't auto-dismiss inbox entries
+	failureInbox          FailureInboxSource              // optional; nil disables the new agent_run_failed / agent_paused_after_failures inbox sources
+	markFixed             MarkFixedHandler                // optional; nil disables the dismiss endpoint
+	decisions             DecisionStore                   // workflow-domain decisions store (ADR 0005 Wave E); nil disables decision endpoints
+	routingProvider       RoutingProvider                 // optional; nil disables /routing endpoints (503)
+	attemptLister         RouteAttemptLister              // optional; nil disables attempt embedding on run-detail responses
+	runResolver           RunResolver                     // optional; nil means status-change activity rows have no run_id
+	assigneeWriter        HumanAssigneeWriter             // optional; nil rejects human-assignee writes rather than skipping authorization
+	projectBudget         ProjectBudgetEvaluator          // optional; nil means reassignment doesn't re-evaluate the destination project's budget policies
 	// officeSessionIdentity gates RecordAgentDecision's use of the caller's
 	// own session id. Defaults false (zero value); set via
 	// SetOfficeSessionIdentity, wired from features.officeSessionIdentity.
@@ -505,6 +541,13 @@ func (s *DashboardService) SetRetryCanceller(c RetryCanceller) {
 	s.retryCanceller = c
 }
 
+// SetTerminalShapeRecorder wires the seam used to count a loop-liveness
+// terminal shape for a run this package cancelled directly (a displaced
+// participant's queued run).
+func (s *DashboardService) SetTerminalShapeRecorder(r TerminalShapeRecorder) {
+	s.terminalShapeRecorder = r
+}
+
 // SetRunResolver wires the seam used to attribute status-change activity
 // rows back to the office run that produced them. Optional; when unset,
 // rows are logged with an empty run_id.
@@ -567,6 +610,12 @@ func (s *DashboardService) SetHumanAssigneeWriter(w HumanAssigneeWriter) {
 // Office parent picker selects "No parent".
 func (s *DashboardService) SetTaskDetacher(d TaskDetacher) {
 	s.taskDetacher = d
+}
+
+// SetTaskLifecyclePublisher wires the canonical task.updated publisher used
+// after a status change persists a task row mutation.
+func (s *DashboardService) SetTaskLifecyclePublisher(p TaskLifecyclePublisher) {
+	s.taskLifecycle = p
 }
 
 // SetSessionTerminator wires the office session terminator. Optional; when

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { IconAlertTriangle, IconRotate, IconX } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 import { CardContent, CardHeader, CardTitle } from "@kandev/ui/card";
 import { Kbd } from "@kandev/ui/kbd";
 import type { Key, KeyboardShortcut } from "@/lib/keyboard/constants";
@@ -114,13 +115,12 @@ export function ShortcutRecorder({
           data-testid={`shortcut-recorder-${shortcutId}`}
           data-settings-dirty={isDirty}
           onClick={() => setRecording(!recording)}
-          className={`min-w-0 px-3 py-1.5 rounded-md border text-sm cursor-pointer transition-colors ${
-            touchSized ? "min-h-11" : ""
-          } ${
-            recording
-              ? "border-primary bg-primary/10 text-primary"
-              : "border-border bg-background hover:bg-accent"
-          }`}
+          className={`${controlSizingClassName("standard", "min-w-0 px-3 rounded-md border text-sm")}
+            ${
+              recording
+                ? "border-primary bg-primary/10 text-primary"
+                : "border-border bg-background hover:bg-accent"
+            }`}
         >
           <RecorderLabel recording={recording} current={current} isUnbound={isUnbound} />
         </button>
@@ -131,7 +131,6 @@ export function ShortcutRecorder({
           defaultIsUnbound={defaultIsUnbound}
           onReset={onReset}
           onClear={onClear}
-          touchSized={touchSized}
         />
       </div>
     </div>
@@ -168,7 +167,6 @@ function ShortcutRecorderActions({
   defaultIsUnbound,
   onReset,
   onClear,
-  touchSized,
 }: {
   shortcutId: string;
   isDefault: boolean;
@@ -176,7 +174,6 @@ function ShortcutRecorderActions({
   defaultIsUnbound: boolean;
   onReset: (id: string) => void;
   onClear?: (id: string) => void;
-  touchSized: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -185,7 +182,7 @@ function ShortcutRecorderActions({
         <Button
           variant="ghost"
           size="icon"
-          className={`${touchSized ? "h-11 w-11" : "h-8 w-8"} cursor-pointer`}
+          className={`${controlSizingClassName("icon")} cursor-pointer`}
           onClick={() => onClear(shortcutId)}
           aria-label={t("settings:clearShortcut")}
           title={t("settings:clearShortcut")}
@@ -197,7 +194,7 @@ function ShortcutRecorderActions({
         <Button
           variant="ghost"
           size="icon"
-          className={`${touchSized ? "h-11 w-11" : "h-8 w-8"} cursor-pointer`}
+          className={`${controlSizingClassName("icon")} cursor-pointer`}
           onClick={() => onReset(shortcutId)}
           aria-label={
             defaultIsUnbound ? t("settings:resetClearShortcut") : t("settings:resetToDefault")
