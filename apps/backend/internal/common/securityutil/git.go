@@ -127,6 +127,7 @@ func IsKnownSafeGitFlag(arg string) bool {
 		"--amend", "--allow-empty", "--soft", "--mixed", "--hard",
 		"--cached", "--force", "--source=HEAD", "--staged", "--worktree",
 		"--dry-run", "--no-verify", "--get-all", "--first-parent", "--is-ancestor",
+		"--git-path", "--count", "--merges",
 		"--refs",
 		"--src-prefix=", "--dst-prefix=",
 	}

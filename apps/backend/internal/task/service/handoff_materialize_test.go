@@ -41,6 +41,25 @@ func (f *fakeSessionReader) ListTaskSessions(_ context.Context, taskID string) (
 	return f.sessions[taskID], nil
 }
 
+func (f *fakeSessionReader) ListActiveTaskSessionsByTaskID(_ context.Context, taskID string) ([]*models.TaskSession, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var active []*models.TaskSession
+	for _, session := range f.sessions[taskID] {
+		if session == nil {
+			continue
+		}
+		switch session.State {
+		case models.TaskSessionStateCreated,
+			models.TaskSessionStateStarting,
+			models.TaskSessionStateRunning,
+			models.TaskSessionStateWaitingForInput:
+			active = append(active, session)
+		}
+	}
+	return active, nil
+}
+
 func (f *fakeSessionReader) ListTaskSessionWorktrees(_ context.Context, sessionID string) ([]*models.TaskEnvironmentRepo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -64,6 +83,7 @@ func newMaterializerService(t *testing.T, tasks *fakeTaskRepo, ws *fakeWSGroupRe
 	tr := newCascadeRepo(tasks)
 	svc := NewHandoffService(tr, nil, nil, nil, ws, nil)
 	svc.SetSessionReader(sr)
+	svc.SetWorkspaceCleaner(&fakeWorkspaceCleaner{})
 	return svc
 }
 

@@ -132,6 +132,52 @@ func TestRetryUnavailableComparisonTargetsRecoversOnFreshRequest(t *testing.T) {
 	}
 }
 
+func TestRetryUnavailableComparisonTargetsReplacesStaleMatchingOperation(t *testing.T) {
+	repoDir, cleanup := setupTestRepo(t)
+	t.Cleanup(cleanup)
+	target := comparisonTargetProcessTestTarget()
+	mgr, markers := newComparisonTargetTestManager(t, repoDir, target, nil)
+	tracker := mgr.GetWorkspaceTracker()
+	tracker.SetComparisonTargetUnavailable(&target, comparisonTargetErrorFetch)
+	tracker.SetGitEnvironment([]string{
+		comparisonTargetGitShimModeEnv + "=comparison",
+		"KANDEV_TEST_GIT_LOG=" + markers.commandLog,
+		"KANDEV_TEST_FETCH_STARTED=" + markers.fetchStarted,
+		"KANDEV_TEST_STATUS_STARTED=" + markers.statusStarted,
+	})
+
+	// A failed operation publishes unavailable before its deferred cleanup
+	// removes the operation from the manager. A fresh request in that window
+	// must replace the stale same-target entry instead of leaving the tracker
+	// pending forever.
+	oldCanceled := make(chan struct{})
+	oldOperation := &comparisonTargetOperation{
+		target:  target,
+		tracker: tracker,
+		cancel: func() {
+			select {
+			case <-oldCanceled:
+			default:
+				close(oldCanceled)
+			}
+		},
+	}
+	mgr.comparisonTargetOpsMu.Lock()
+	mgr.comparisonTargetOps = map[string]*comparisonTargetOperation{"": oldOperation}
+	mgr.comparisonTargetOpsMu.Unlock()
+
+	mgr.RetryUnavailableComparisonTargets()
+	resolution := waitForComparisonResolution(t, tracker, comparisonTargetStatusReady, "")
+	if resolution.Ref != target.ComparisonRef() {
+		t.Fatalf("recovered comparison ref = %q, want %q", resolution.Ref, target.ComparisonRef())
+	}
+	select {
+	case <-oldCanceled:
+	default:
+		t.Fatal("stale comparison operation was not canceled")
+	}
+}
+
 func TestComparisonTargetPublicationRequiresActiveOperation(t *testing.T) {
 	repoDir, cleanup := setupTestRepo(t)
 	t.Cleanup(cleanup)

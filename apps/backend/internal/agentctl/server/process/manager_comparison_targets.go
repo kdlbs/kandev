@@ -44,10 +44,10 @@ func (m *Manager) getComparisonTargets() map[string]models.ComparisonTarget {
 func (m *Manager) PrepareComparisonTargets(_ context.Context) {
 	root, trackers := m.snapshotTrackers()
 	if root != nil {
-		m.prepareTrackerComparisonTarget(root)
+		m.prepareTrackerComparisonTarget(root, false)
 	}
 	for _, tracker := range trackers {
-		m.prepareTrackerComparisonTarget(tracker)
+		m.prepareTrackerComparisonTarget(tracker, false)
 	}
 }
 
@@ -84,7 +84,7 @@ func (m *Manager) RetryUnavailableComparisonTargets() {
 			resolution.ErrorCode == comparisonTargetErrorInvalid {
 			continue
 		}
-		m.prepareTrackerComparisonTarget(tracker)
+		m.prepareTrackerComparisonTarget(tracker, true)
 	}
 }
 
@@ -112,7 +112,7 @@ func (m *Manager) UpdateComparisonTargets(_ context.Context, targets map[string]
 		if tracker == nil || comparisonTargetMapsEqual(previous, current, tracker.RepositoryName()) {
 			continue
 		}
-		m.prepareTrackerComparisonTarget(tracker)
+		m.prepareTrackerComparisonTarget(tracker, false)
 	}
 }
 
@@ -122,7 +122,7 @@ func comparisonTargetMapsEqual(previous, current map[string]models.ComparisonTar
 	return leftOK == rightOK && (!leftOK || left.Equal(right))
 }
 
-func (m *Manager) prepareTrackerComparisonTarget(tracker *WorkspaceTracker) {
+func (m *Manager) prepareTrackerComparisonTarget(tracker *WorkspaceTracker, forceRetry bool) {
 	if tracker == nil {
 		return
 	}
@@ -147,13 +147,14 @@ func (m *Manager) prepareTrackerComparisonTarget(tracker *WorkspaceTracker) {
 		return
 	}
 
-	m.scheduleComparisonTargetOperation(repositoryName, tracker, *target)
+	m.scheduleComparisonTargetOperation(repositoryName, tracker, *target, forceRetry)
 }
 
 func (m *Manager) scheduleComparisonTargetOperation(
 	repositoryName string,
 	tracker *WorkspaceTracker,
 	target models.ComparisonTarget,
+	forceRetry bool,
 ) {
 	m.comparisonTargetOpsMu.Lock()
 	if m.comparisonTargetOpsStopping {
@@ -175,7 +176,7 @@ func (m *Manager) scheduleComparisonTargetOperation(
 		return
 	}
 	if existing := m.comparisonTargetOps[repositoryName]; existing != nil {
-		if existing.tracker == tracker && existing.target.Equal(target) {
+		if existing.tracker == tracker && existing.target.Equal(target) && !forceRetry {
 			m.comparisonTargetOpsMu.Unlock()
 			cancel()
 			release()

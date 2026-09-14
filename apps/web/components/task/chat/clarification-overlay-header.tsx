@@ -1,6 +1,6 @@
 "use client";
 
-import { IconChevronDown, IconCheck, IconX } from "@tabler/icons-react";
+import { IconChevronDown, IconCheck, IconX, IconMessageQuestion } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Spinner } from "@kandev/ui/spinner";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -8,6 +8,84 @@ import { KeyboardShortcutTooltip } from "@/components/keyboard-shortcut-tooltip"
 import { SHORTCUTS } from "@/lib/keyboard/constants";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
+import { ClarificationStepper } from "./clarification-overlay-parts";
+
+function clarificationHeaderClassName(total: number): string {
+  return cn(
+    "flex min-h-11 justify-between",
+    total > 1
+      ? "flex-col items-stretch gap-2 px-3 py-2 md:flex-row md:items-center md:gap-3 md:px-4 md:py-0"
+      : "items-center gap-3 px-4",
+  );
+}
+
+type ClarificationOverlayTopBarProps = {
+  total: number;
+  activeIndex: number;
+  isAnswered: (index: number) => boolean;
+  onJump: (index: number) => void;
+  isSubmitting: boolean;
+  answeredCount: number;
+  answerableTotal: number;
+  allAnswered: boolean;
+  onSubmit: () => void;
+  onSkip: () => void;
+  onCollapse?: () => void;
+  collapseContentId?: string;
+};
+
+// Groups the stepper, progress text, and header actions row shared by
+// ClarificationInputOverlay -- kept here (rather than inline) so that file
+// stays under the repo's max-lines-per-function/file limits.
+export function ClarificationOverlayTopBar({
+  total,
+  activeIndex,
+  isAnswered,
+  onJump,
+  isSubmitting,
+  answeredCount,
+  answerableTotal,
+  allAnswered,
+  onSubmit,
+  onSkip,
+  onCollapse,
+  collapseContentId,
+}: ClarificationOverlayTopBarProps) {
+  const { t } = useTranslation();
+  return (
+    <div className={clarificationHeaderClassName(total)} data-testid="clarification-overlay-header">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <IconMessageQuestion className="h-4 w-4 text-blue-500 flex-shrink-0" />
+        {total > 1 && (
+          <ClarificationStepper
+            total={total}
+            activeIndex={activeIndex}
+            isAnswered={isAnswered}
+            onJump={onJump}
+            isSubmitting={isSubmitting}
+          />
+        )}
+        {total > 1 && (
+          <span
+            data-testid="clarification-group-progress"
+            className="ml-auto min-w-0 truncate text-xs text-muted-foreground md:ml-0"
+          >
+            {t("task:answeredOfTotal", { answeredCount, total: answerableTotal })}
+          </span>
+        )}
+      </div>
+      <ClarificationHeaderActions
+        total={total}
+        allAnswered={allAnswered}
+        isSubmitting={isSubmitting}
+        onSubmit={onSubmit}
+        onSkip={onSkip}
+        onCollapse={onCollapse}
+        collapseContentId={collapseContentId}
+      />
+    </div>
+  );
+}
 
 type ClarificationHeaderActionsProps = {
   total: number;

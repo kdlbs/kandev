@@ -189,19 +189,23 @@ func (s *Service) authorizeTaskScope(ctx context.Context, taskID string, scope a
 	if err != nil {
 		return err
 	}
+	if task == nil {
+		return repoerrors.ErrTaskNotFound
+	}
 	if task.WorkspaceID == "" {
 		return nil
 	}
 	workspace, err := s.workspaces.GetWorkspace(ctx, task.WorkspaceID)
-	if err != nil {
-		// A dangling workspace reference (the row is genuinely gone) should
-		// not hide the task from the single user who can already see
-		// everything else about it. Any OTHER lookup failure fails closed: a
-		// transient database error must not read as "granted".
-		if errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
-			return nil
-		}
+	switch {
+	case errors.Is(err, repoerrors.ErrWorkspaceNotFound):
+		// A task can outlive its workspace row during durable cleanup. Its
+		// own row remains readable because there is no workspace owner left
+		// to authorize against.
+		return nil
+	case err != nil:
 		return err
+	case workspace == nil:
+		return repoerrors.ErrTaskNotFound
 	}
 	decision := s.workspaceDecision(ctx, workspace)
 	if !decision.CanRead() {
@@ -221,6 +225,9 @@ func (s *Service) authorizeWorkflowID(ctx context.Context, workflowID string) er
 	workflow, err := s.workflows.GetWorkflow(ctx, workflowID)
 	if err != nil {
 		return err
+	}
+	if workflow == nil {
+		return repoerrors.ErrWorkspaceNotFound
 	}
 	if workflow.WorkspaceID == "" {
 		return nil
@@ -279,6 +286,27 @@ func (s *Service) AuthorizeTaskAccess(ctx context.Context, taskID string) error 
 // by ID but does not own workspace permissions.
 func (s *Service) AuthorizeWorkflowAccess(ctx context.Context, workflowID string) error {
 	return s.authorizeWorkflowID(ctx, workflowID)
+}
+
+// AuthorizeWorkflowStepAccess resolves a step's owning workflow before
+// authorizing the workflow, so step-count endpoints cannot disclose another
+// workspace's task count.
+func (s *Service) AuthorizeWorkflowStepAccess(ctx context.Context, stepID string) error {
+	_, scoped := callerScope(ctx)
+	if !scoped {
+		return nil
+	}
+	if s.workflowStepGetter == nil {
+		return repoerrors.ErrTaskNotFound
+	}
+	step, err := s.workflowStepGetter.GetStep(ctx, stepID)
+	if err != nil {
+		return err
+	}
+	if step == nil || step.WorkflowID == "" {
+		return repoerrors.ErrTaskNotFound
+	}
+	return s.authorizeWorkflowID(ctx, step.WorkflowID)
 }
 
 // AuthorizeWorkspaceAccess is the public form of authorizeWorkspaceID,

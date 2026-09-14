@@ -354,6 +354,7 @@ const (
 	GitLabNewReviewMR    = "gitlab.new_mr_to_review" // New MR found needing review
 	GitLabNewIssue       = "gitlab.new_issue"        // New issue found matching issue watch
 	GitLabTaskMRUpdated  = "gitlab.task_mr.updated"  // TaskMR record updated (for UI refresh)
+	GitLabTaskMRDeleted  = "gitlab.task_mr.deleted"  // TaskMR association detached (for UI refresh)
 	GitLabWatchEvent     = "gitlab.watch.event"      // Watch created/deleted
 
 	// GitLabTaskMROptionsUpdated fires after a task's MR lifecycle

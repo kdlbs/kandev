@@ -30,6 +30,11 @@ and provider status. Task and UI systems consume its results.
 - **AC-INTEGRATIONS-GITHUB-PR-DISCOVERY-001.3:** A rejected provider query shall
   not be treated as a successful search with no PR. Existing associations and
   explicit unlink decisions shall remain intact.
+- **AC-INTEGRATIONS-GITHUB-PR-DISCOVERY-001.4:** For every unchanged attached
+  repository and branch, repeated watch reconciliation shall preserve its
+  discovery target independently of sibling branches and task-group ownership.
+  A confirmed rename may update that target; missing or ambiguous branch
+  information shall not redirect it to a sibling target.
 
 ### REQ-INTEGRATIONS-GITHUB-PR-DISCOVERY-HEALTH-001: Explain discovery failures
 
@@ -74,3 +79,4 @@ runtime status, not a permanent incident archive.
 - [Frontend synchronization coordination](github-task-pr-sync-coordination.md)
 - [System design](../system-design/github-pr-discovery-health.md)
 - [Implementation package](../../../plans/github-pr-discovery-health/plan.md)
+- [Watch reconciliation repair](../../../plans/github-pr-watch-reconciliation/plan.md)

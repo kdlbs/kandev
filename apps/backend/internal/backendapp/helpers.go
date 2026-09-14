@@ -779,6 +779,9 @@ func registerRoutes(p routeParams) {
 	handoffDocSvc := taskservice.NewDocumentService(p.taskRepo, p.log)
 	handoffSvc := taskservice.NewHandoffService(p.taskRepo, p.taskRepo, handoffDocSvc,
 		p.officeRepo, p.officeRepo, p.log)
+	p.taskSvc.SetAutoArchiveCoordinator(handoffSvc)
+	p.taskSvc.SetWorkflowTaskArchiveCoordinator(handoffSvc)
+	p.taskSvc.SetTaskLifecycleCoordinator(handoffSvc)
 	p.taskSvc.SetWorkspacePolicyAttacher(handoffSvc)
 	p.taskSvc.SetWorkspaceGroupMembershipReader(p.officeRepo)
 	handoffSvc.SetCommentReader(&officeCommentReaderAdapter{reader: p.officeRepo})
@@ -792,6 +795,7 @@ func registerRoutes(p routeParams) {
 		}
 	}
 	handoffSvc.SetRunCanceller(p.orchestratorSvc)
+	handoffSvc.SetGitArchiveCapture(p.orchestratorSvc)
 	// Cascade archive/delete must re-publish task.updated / task.deleted
 	// events; HandoffService walks the repo directly and bypasses the
 	// Service wrappers that normally publish these. Without this wiring
@@ -810,6 +814,16 @@ func registerRoutes(p routeParams) {
 	if p.services.Office != nil {
 		p.services.Office.SetWorkspaceGroupCleaner(handoffSvc)
 	}
+	if p.services.Office != nil {
+		p.services.Office.SetTaskTreeDeleter(func(ctx context.Context, taskID string) error {
+			_, err := handoffSvc.DeleteTaskTree(ctx, taskID, false)
+			var postCommitErr *taskservice.CascadePostCommitError
+			if errors.As(err, &postCommitErr) {
+				return nil
+			}
+			return err
+		})
+	}
 	// Config sync's own tables (office_config_sync_configs,
 	// office_config_sync_manifest) have no FK/cascade onto the workspace
 	// row, so DeleteWorkspace must release them explicitly or the poller
@@ -824,6 +838,7 @@ func registerRoutes(p routeParams) {
 	// runCanceller but its container leaks because the cascade bypasses
 	// Service.ArchiveTask's runAsyncTaskCleanup branch.
 	handoffSvc.SetTaskResourceCleaner(p.taskSvc)
+	p.orchestratorSvc.SetTaskLifecycleDeleter(p.taskSvc)
 	// Watch reset (Reset button on integration settings) cascade-deletes
 	// every task a watch previously created. The integrations re-use the
 	// shared HandoffService so the reset path goes through the same
@@ -1404,6 +1419,9 @@ func registerSecondaryRoutes(
 		p.eventBus,
 		clarificationResolver,
 		p.log,
+		p.taskSvc,
+		p.taskRepo,
+		p.features.NeedsYouInbox,
 	)
 	p.log.Debug("Registered Clarification handlers (HTTP)")
 
@@ -1842,11 +1860,60 @@ func (a mcpTaskPRListerAdapter) ListTaskPRsByTaskIDs(
 				continue
 			}
 			infos = append(infos, mcphandlers.TaskPRInfo{
-				Number:   pr.PRNumber,
-				URL:      pr.PRURL,
-				Title:    pr.PRTitle,
-				State:    pr.State,
-				MergedAt: pr.MergedAt,
+				RepositoryID: pr.RepositoryID,
+				Number:       pr.PRNumber,
+				URL:          pr.PRURL,
+				Title:        pr.PRTitle,
+				State:        pr.State,
+				Draft:        pr.IsDraft,
+				BaseRef:      pr.BaseBranch,
+				HeadRef:      pr.HeadBranch,
+				HeadSHA:      pr.HeadSHA,
+				MergedAt:     pr.MergedAt,
+				ClosedAt:     pr.ClosedAt,
+			})
+		}
+		if len(infos) > 0 {
+			out[taskID] = infos
+		}
+	}
+	return out, nil
+}
+
+type mcpTaskMRListerAdapter struct {
+	gl *gitlab.Service
+}
+
+func (a mcpTaskMRListerAdapter) ListTaskMRsByTaskIDs(
+	ctx context.Context, taskIDs []string,
+) (map[string][]mcphandlers.TaskMRInfo, error) {
+	out := make(map[string][]mcphandlers.TaskMRInfo)
+	if a.gl == nil || len(taskIDs) == 0 {
+		return out, nil
+	}
+	byTask, err := a.gl.ListTaskMRsByTaskIDs(ctx, taskIDs)
+	if err != nil {
+		return nil, err
+	}
+	for taskID, mrs := range byTask {
+		infos := make([]mcphandlers.TaskMRInfo, 0, len(mrs))
+		for _, mr := range mrs {
+			if mr == nil {
+				continue
+			}
+			infos = append(infos, mcphandlers.TaskMRInfo{
+				RepositoryID: mr.RepositoryID,
+				Number:       mr.MRIID,
+				URL:          mr.MRURL,
+				Title:        mr.MRTitle,
+				State:        mr.State,
+				Draft:        mr.Draft,
+				BaseRef:      mr.BaseBranch,
+				BaseSHA:      mr.BaseSHA,
+				HeadRef:      mr.HeadBranch,
+				HeadSHA:      mr.HeadSHA,
+				MergedAt:     mr.MergedAt,
+				ClosedAt:     mr.ClosedAt,
 			})
 		}
 		if len(infos) > 0 {
@@ -1933,8 +2000,8 @@ func registerMCPAndDebugRoutes(
 		mcpHandlers.SetDiagnosticBundleServices(p.systemSvc.LogBundles, p.lifecycleMgr)
 	}
 
-	// Enrich list_tasks responses with associated GitHub PRs (link, title,
-	// number, state) when the github service is available.
+	// Enrich task-listing responses with associated change requests when
+	// provider services are available.
 	if p.services.GitHub != nil {
 		mcpHandlers.SetTaskPRLister(mcpTaskPRListerAdapter{gh: p.services.GitHub})
 		mcpHandlers.SetTaskPRAutomationService(p.services.GitHub)
@@ -1943,6 +2010,7 @@ func registerMCPAndDebugRoutes(
 		mcpHandlers.SetTaskPRAutoFixOutcomeService(p.orchestratorSvc)
 	}
 	if p.services.GitLab != nil {
+		mcpHandlers.SetTaskMRLister(mcpTaskMRListerAdapter{gl: p.services.GitLab})
 		mcpHandlers.SetTaskMRAutomationService(p.services.GitLab)
 	}
 	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Agents != nil {
@@ -1950,6 +2018,9 @@ func registerMCPAndDebugRoutes(
 			tasks: p.taskSvc, sessions: p.taskRepo, agents: p.services.OfficeSvcs.Agents,
 		})
 	}
+	mcpHandlers.SetTaskChangeLinkService(taskChangeLinkCoordinator{
+		tasks: p.taskSvc, github: p.services.GitHub, gitlab: p.services.GitLab,
+	})
 	// Reuse the cross-task handoff service constructed in registerRoutes —
 	// the same instance backs the MCP path and the HTTP Kanban path so
 	// workspace-group state stays consistent across both surfaces.

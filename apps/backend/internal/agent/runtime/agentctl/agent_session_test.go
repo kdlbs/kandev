@@ -122,6 +122,62 @@ func TestResetSession_FailureModes(t *testing.T) {
 	})
 }
 
+func TestResetSession_ContextCancellationRemovesPendingRequestBeforeLateResponse(t *testing.T) {
+	received := make(chan ws.Message)
+	releaseResponse := make(chan struct{})
+	c, ts := newTestClientWithStream(t, func(msg ws.Message) *ws.Message {
+		received <- msg
+		<-releaseResponse
+		resp, _ := ws.NewResponse(msg.ID, msg.Action, map[string]any{
+			"success": true, "session_id": "late-session",
+		})
+		return resp
+	})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseResponse) }) }
+	t.Cleanup(func() {
+		release()
+		c.Close()
+		ts.Close()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	result := make(chan error, 1)
+	go func() {
+		_, err := c.ResetSession(ctx, "/workspace", nil)
+		result <- err
+	}()
+
+	select {
+	case msg := <-received:
+		if msg.Action != "agent.session.reset" {
+			t.Fatalf("request action = %q, want agent.session.reset", msg.Action)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for reset request")
+	}
+
+	select {
+	case err := <-result:
+		if err == nil || !strings.Contains(err.Error(), "context deadline exceeded") {
+			t.Fatalf("ResetSession error = %v, want context deadline exceeded", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("ResetSession did not stop waiting after context cancellation")
+	}
+
+	c.pendingMu.Lock()
+	pendingRequests := len(c.pendingRequests)
+	pendingConnections := len(c.pendingRequestConns)
+	c.pendingMu.Unlock()
+	if pendingRequests != 0 || pendingConnections != 0 {
+		t.Fatalf("pending reset request state = %d requests, %d connections, want both zero", pendingRequests, pendingConnections)
+	}
+
+	release()
+}
+
 // SetMode / SetModel / SetConfigOption / Authenticate share one shape: send a
 // typed payload, treat an error frame as a failure, ignore the response body.
 func TestAgentSessionSetters_SendExpectedActionAndPayload(t *testing.T) {
