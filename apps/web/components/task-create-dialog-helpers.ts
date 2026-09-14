@@ -172,6 +172,7 @@ export function shouldShowTaskTitleField(
 }
 
 export type ActivatePlanModeArgs = {
+  autoFocus?: boolean;
   sessionId: string;
   taskId: string;
   setActiveDocument: AppState["setActiveDocument"];
@@ -180,6 +181,7 @@ export type ActivatePlanModeArgs = {
 };
 
 export function activatePlanMode({
+  autoFocus = true,
   sessionId,
   taskId,
   setActiveDocument,
@@ -189,7 +191,7 @@ export function activatePlanMode({
   setActiveDocument(sessionId, { type: "plan", taskId });
   setPlanMode(sessionId, true);
   useContextFilesStore.getState().addFile(sessionId, { path: "plan:context", name: "Plan" });
-  router.push(linkToTask(taskId, INTENT_PLAN));
+  if (autoFocus) router.push(linkToTask(taskId, INTENT_PLAN));
 }
 
 export type BuildCreatePayloadArgs = {

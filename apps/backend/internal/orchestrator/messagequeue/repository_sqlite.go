@@ -515,6 +515,9 @@ func (r *sqliteRepository) initSchema() error {
 	if err != nil {
 		return err
 	}
+	if _, err := r.db.Exec(queueAdmissionReceiptSchema); err != nil {
+		return fmt.Errorf("create queue admission receipts: %w", err)
+	}
 	// Current queue mutations create the session lock row before writing a
 	// pending move. Backfill older armed rows so exact administrative
 	// cancellation can lock without creating state from a mismatched request.
@@ -1752,6 +1755,9 @@ func purgeQueueRowSessions(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskID
 }
 
 func ensureTaskPurgeRecoverySchemas(ctx context.Context, tx *sqlx.Tx) error {
+	if _, err := tx.ExecContext(ctx, queueAdmissionReceiptSchema); err != nil {
+		return fmt.Errorf("ensure queue admission receipt schema: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, queueDispatchRecoverySchema); err != nil {
 		return fmt.Errorf("ensure task purge dispatch recovery schema: %w", err)
 	}
@@ -1911,6 +1917,11 @@ func PurgeTaskInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskI
 	if err != nil {
 		return 0, fmt.Errorf("purge queued task entries rows affected: %w", err)
 	}
+	if _, err := tx.ExecContext(ctx, db.Rebind(`
+		DELETE FROM queue_admission_receipts WHERE task_id = ?
+	`), taskID); err != nil {
+		return 0, fmt.Errorf("purge task queue admission receipts: %w", err)
+	}
 	if _, err := tx.ExecContext(ctx, db.Rebind(`DELETE FROM pending_moves WHERE task_id = ?`), taskID); err != nil {
 		return 0, fmt.Errorf("purge pending task moves: %w", err)
 	}
@@ -1970,6 +1981,11 @@ func PurgeSessionInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, se
 	removed, err := result.RowsAffected()
 	if err != nil {
 		return 0, fmt.Errorf("purge queued session entries rows affected: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, db.Rebind(`
+		DELETE FROM queue_admission_receipts WHERE session_id = ?
+	`), sessionID); err != nil {
+		return 0, fmt.Errorf("purge session queue admission receipts: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, db.Rebind(`
 		DELETE FROM pending_moves WHERE session_id = ?
@@ -5323,6 +5339,11 @@ func (r *sqliteRepository) PurgeSession(ctx context.Context, sessionID string) (
 	removed, err := res.RowsAffected()
 	if err != nil {
 		return 0, fmt.Errorf("purge session queue rows affected: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
+		DELETE FROM queue_admission_receipts WHERE session_id = ?
+	`), sessionID); err != nil {
+		return 0, fmt.Errorf("purge session queue admission receipts: %w", err)
 	}
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		DELETE FROM pending_moves WHERE session_id = ?

@@ -23,6 +23,9 @@ records and Quick Terminal descriptors remain owned by their existing backend se
 | `REQ-UI-QUICK-TERMINAL-001` | [Migrated source detail](#migrated-source-detail), [Launcher focus return](#launcher-focus-return), [Launcher toggle and terminal Escape routing](#launcher-toggle-and-terminal-escape-routing) |
 | `REQ-UI-QUICK-TERMINAL-002` | [Tab order and editing](#tab-order-and-editing) |
 
+Remembered conversation selection is defined in the
+[selection design](quick-chat-selection.md).
+
 ## Tab order and editing
 
 ### Components and responsibilities

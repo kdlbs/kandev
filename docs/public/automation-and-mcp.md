@@ -32,6 +32,10 @@ Task creation depends on the caller surface and the destination workspace:
 
 Office sessions do not receive an MCP task-creation tool. A direct backend call from an Office session is also denied. External MCP uses the same `create_task_kandev` contract for both workspace modes, subject to the client's authorization. The `workspace_mode` argument controls materialized workspace behavior, not Kanban or Office mode. `agent_profile_id` selects a launch profile and is not an Office assignee.
 
+The optional `workspace_mode` field advertises exactly two values: `inherit_parent` reuses the parent's materialized workspace/worktree and requires `parent_id`; `new_workspace` requests a separate workspace/worktree. Omitting the field for a subtask selects `inherit_parent`. There is no unconditional schema default for top-level tasks.
+
+Omit `workspace_mode` to use defaulting instead of sending an empty string. MCP schema validation rejects empty, whitespace-only, and padded values before backend dispatch, even though the backend policy resolver still trims strings. `shared` and `shared_group` are not supported by this MCP endpoint.
+
 ## Quick path
 
 - Use a **workflow event** for predictable transitions on existing tasks.
@@ -261,6 +265,29 @@ The same data is available directly over REST for scripting: `GET /api/v1/worksp
 ## Task MCP
 
 Kandev automatically injects a task-aware MCP server into supported agent sessions. You do not need to add it to the profile. It lets the active agent use current IDs and structured operations instead of inferring board state from text.
+
+### Link an existing pull or merge request
+
+Task MCP provides `link_task_pr_kandev`, `unlink_task_pr_kandev`, and
+`replace_task_pr_kandev` for GitHub pull requests and GitLab merge requests.
+Each request needs `task_id`, `provider` (`github` or `gitlab`), the canonical
+`repository_id`, and a positive request number. A number by itself is rejected,
+so a fork and its canonical repository can safely have the same number.
+
+For example, link GitLab merge request 42 to its target task with
+`{ "task_id": "…", "provider": "gitlab", "repository_id": "…", "number": 42 }`.
+`replace_task_pr_kandev` also requires `old_provider`, `old_repository_id`, and
+`old_number`. Replacement supports associations from the same provider only;
+to switch between GitHub and GitLab, unlink the current association and then
+link the new one. Every successful mutation returns the resulting active link set.
+The target task must be reachable from the calling task's workspace.
+`list_tasks_kandev` and `list_related_tasks_kandev` expose active GitHub PR and
+GitLab MR associations in the provider-neutral `change_requests` field; the
+legacy `prs` field remains GitHub-only for compatibility.
+
+Unlinking changes only the active association and its matching automation
+state. It does not delete conversation history, terminal receipts, or the
+upstream pull request or merge request.
 
 Names ending in `_kandev` are the canonical MCP protocol tool names. Some agent clients show or register a server-qualified alias instead. For example, a client may expose canonical `step_complete_kandev` as `mcp__kandev__step_complete_kandev`. That qualified form is client-specific, not a second tool or a universal name; use the form exposed by the active client.
 

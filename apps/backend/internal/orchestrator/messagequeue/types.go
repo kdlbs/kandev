@@ -50,6 +50,12 @@ const MetadataCoalesceKey = "coalesce_key"
 // queued message.
 const MetadataEntityReferences = "entity_references"
 
+// MetadataQueueAdmissionIDs carries the client admission IDs that contributed
+// to a queued message. Unlike plan-comment admission metadata, this key does
+// not affect ordinary queue merge eligibility and is retained in the user
+// transcript for bounded client reconciliation after dispatch.
+const MetadataQueueAdmissionIDs = "queue_admission_ids"
+
 // MetadataStepHandoff carries a completion-handoff carry token's claimed text
 // for a queued workflow auto-start prompt, so a dispatch path that defers
 // delivery through the queue (rather than sending it directly) still appends

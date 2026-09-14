@@ -47,6 +47,7 @@
   "logOut": "Terminar sessão",
   "maxViews_one": "máx. {{count}}",
   "maxViews_other": "máx. {{count}}",
+  "needsYouInbox": "Precisa de si",
   "nestUnder": "Aninhar em {{title}}",
   "newKanbanWorkspace": "Nova área de trabalho kanban",
   "newOfficeWorkspace": "Nova área de trabalho de escritório",

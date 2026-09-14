@@ -8,6 +8,7 @@ import (
 	"time"
 
 	orchmodels "github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/task/archivecascade"
 	"github.com/kandev/kandev/internal/task/models"
 )
 
@@ -16,6 +17,8 @@ import (
 // to exercise the cascade walk.
 type fakeCascadeRepo struct {
 	*phase4TaskRepo
+	autoArchiveCASLoss bool
+	unarchiveErr       error
 }
 
 func newCascadeRepo(base *fakeTaskRepo) *fakeCascadeRepo {
@@ -25,6 +28,18 @@ func newCascadeRepo(base *fakeTaskRepo) *fakeCascadeRepo {
 func (r *fakeCascadeRepo) ArchiveTaskIfActive(ctx context.Context, id, cascadeID string) (bool, error) {
 	_, changed, err := r.ArchiveTaskIfActiveWithVacatedStep(ctx, id, cascadeID)
 	return changed, err
+}
+
+func (r *fakeCascadeRepo) ArchiveTaskIfAutoArchiveEligible(
+	ctx context.Context,
+	id string,
+	_ time.Time,
+	cascadeID string,
+) (bool, error) {
+	if r.autoArchiveCASLoss {
+		return false, nil
+	}
+	return r.ArchiveTaskIfActive(ctx, id, cascadeID)
 }
 
 func (r *fakeCascadeRepo) ArchiveTaskIfActiveWithVacatedStep(
@@ -43,10 +58,12 @@ func (r *fakeCascadeRepo) ArchiveTaskIfActiveWithVacatedStep(
 	t.ArchivedByCascadeID = cascadeID
 	return t.WorkflowStepID, true, nil
 }
-
 func (r *fakeCascadeRepo) UnarchiveTaskByCascade(_ context.Context, id, cascadeID string) (bool, error) {
 	r.base.mu.Lock()
 	defer r.base.mu.Unlock()
+	if r.unarchiveErr != nil {
+		return false, r.unarchiveErr
+	}
 	t := r.base.tasks[id]
 	if t == nil || t.ArchivedByCascadeID != cascadeID {
 		return false, nil
@@ -70,12 +87,49 @@ func (r *fakeCascadeRepo) UnarchiveTask(_ context.Context, id string) (bool, err
 }
 
 // fakeWSGroupRepoCascade extends fakeWSGroupRepo with the phase 6
+
+type archiveSerializationProbe struct {
+	*fakeCascadeRepo
+	firstMutationStarted  chan struct{}
+	secondMutationStarted chan struct{}
+	releaseFirstMutation  chan struct{}
+	mu                    sync.Mutex
+	changedMutations      int
+}
+
+func (r *archiveSerializationProbe) ArchiveTaskIfActiveWithVacatedStep(
+	ctx context.Context,
+	id, cascadeID string,
+) (string, bool, error) {
+	stepID, changed, err := r.fakeCascadeRepo.ArchiveTaskIfActiveWithVacatedStep(ctx, id, cascadeID)
+	if err != nil || !changed {
+		return stepID, changed, err
+	}
+	r.mu.Lock()
+	r.changedMutations++
+	mutation := r.changedMutations
+	r.mu.Unlock()
+	switch mutation {
+	case 1:
+		close(r.firstMutationStarted)
+		<-r.releaseFirstMutation
+	case 2:
+		close(r.secondMutationStarted)
+	}
+	return stepID, changed, nil
+}
+
 // release/restore/cleanup-status methods.
 type fakeWSGroupRepoCascade struct {
 	*fakeWSGroupRepo
-	releaseErr   error
-	releaseCalls []struct {
+	releaseErr      error
+	releaseErrAfter int
+	restoreErr      error
+	releaseCalls    []struct {
 		groupID, taskID, reason, cascadeID string
+	}
+	restoreCalls []struct {
+		taskID, cascadeID string
 	}
 	cleanupStatuses map[string]string
 	// allMembers records every member that ever joined the group
@@ -114,7 +168,7 @@ func (f *fakeWSGroupRepoCascade) ListWorkspaceGroupMembers(ctx context.Context, 
 func (f *fakeWSGroupRepoCascade) ReleaseWorkspaceGroupMember(_ context.Context, groupID, taskID, reason, cascadeID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.releaseErr != nil {
+	if f.releaseErr != nil && (f.releaseErrAfter == 0 || len(f.releaseCalls) >= f.releaseErrAfter) {
 		return f.releaseErr
 	}
 	f.releaseCalls = append(f.releaseCalls, struct {
@@ -128,10 +182,12 @@ func (f *fakeWSGroupRepoCascade) ReleaseWorkspaceGroupMember(_ context.Context, 
 type recordingCleanupCoordinator struct {
 	mu                    sync.Mutex
 	prepareErr            error
+	startErr              error
 	prepared              []string
 	deleteEnvironmentRows []bool
 	started               []string
 	cancelled             []string
+	restored              []string
 	cleaned               []string
 }
 
@@ -168,6 +224,14 @@ func (c *recordingCleanupCoordinator) CleanupTaskResources(_ context.Context, ta
 	c.cleaned = append(c.cleaned, taskID)
 }
 
+type recordingRunCanceller struct {
+	calls []string
+}
+
+func (r *recordingRunCanceller) CancelTaskExecution(_ context.Context, taskID, _ string, _ bool) error {
+	r.calls = append(r.calls, taskID)
+	return nil
+}
 func (c *recordingCleanupCoordinator) PrepareTaskResourceCleanup(
 	_ context.Context,
 	_ string,
@@ -180,6 +244,34 @@ func (c *recordingCleanupCoordinator) PrepareTaskResourceCleanup(
 	c.prepared = append(c.prepared, operationID)
 	c.deleteEnvironmentRows = append(c.deleteEnvironmentRows, deleteEnvironmentRow)
 	return c.prepareErr
+}
+
+func TestArchiveAutoTaskCASLossCancelsPreparedCleanupWithoutStoppingRun(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("candidate", "", "ws-1")
+	repo := newCascadeRepo(tasks)
+	repo.autoArchiveCASLoss = true
+	coordinator := &recordingCleanupCoordinator{}
+	canceller := &recordingRunCanceller{}
+	svc := NewHandoffService(repo, nil, nil, nil, nil, nil)
+	svc.SetTaskResourceCleaner(coordinator)
+	svc.SetRunCanceller(canceller)
+
+	out, err := svc.ArchiveAutoTask(context.Background(), tasks.tasks["candidate"])
+	if err != nil {
+		t.Fatalf("ArchiveAutoTask: %v", err)
+	}
+	if out == nil || len(out.ArchivedTaskIDs) != 0 || len(out.SkippedTaskIDs) != 1 {
+		t.Fatalf("outcome = %#v, want skipped candidate", out)
+	}
+	if len(canceller.calls) != 0 {
+		t.Fatalf("run cancellation calls = %v, want none after CAS loss", canceller.calls)
+	}
+	coordinator.mu.Lock()
+	defer coordinator.mu.Unlock()
+	if len(coordinator.prepared) != 1 || len(coordinator.cancelled) != 1 {
+		t.Fatalf("cleanup prepared=%v cancelled=%v, want one of each", coordinator.prepared, coordinator.cancelled)
+	}
 }
 
 func TestDeleteTaskTreePreparedCleanupDeletesEnvironmentRow(t *testing.T) {
@@ -261,7 +353,6 @@ func TestDeleteTaskTree_NoCascadeNormalizesInheritedChildren(t *testing.T) {
 		},
 		"keep": "this field",
 	}
-
 	svc := NewHandoffService(&fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)}, nil, nil, nil, nil, nil)
 	if _, err := svc.DeleteTaskTree(context.Background(), "root", false); err != nil {
 		t.Fatalf("DeleteTaskTree: %v", err)
@@ -283,6 +374,26 @@ func TestDeleteTaskTree_NoCascadeNormalizesInheritedChildren(t *testing.T) {
 	}
 	if workspace["group_id"] != "group-1" || child.Metadata["keep"] != "this field" {
 		t.Fatalf("child metadata was not preserved: %#v", child.Metadata)
+	}
+}
+
+func TestDeleteTaskTree_NoCascadeRejectsCrossWorkspaceChild(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("foreign-child", "root", "ws-2")
+	svc := NewHandoffService(&fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)}, nil, nil, nil, nil, nil)
+
+	_, err := svc.DeleteTaskTree(context.Background(), "root", false)
+	if !errors.Is(err, archivecascade.ErrCrossWorkspaceDescendant) {
+		t.Fatalf("DeleteTaskTree error = %v, want cross-workspace error", err)
+	}
+	root, rootErr := tasks.GetTask(context.Background(), "root")
+	child, childErr := tasks.GetTask(context.Background(), "foreign-child")
+	if rootErr != nil || childErr != nil || root == nil || child == nil {
+		t.Fatalf("tasks after rejected delete = root=%#v child=%#v errors=%v/%v", root, child, rootErr, childErr)
+	}
+	if child.ParentID != "root" {
+		t.Fatalf("foreign child parent_id = %q, want unchanged root", child.ParentID)
 	}
 }
 
@@ -329,13 +440,20 @@ func (c *recordingCleanupCoordinator) StartPreparedTaskResourceCleanup(_ context
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.started = append(c.started, operationID)
-	return nil
+	return c.startErr
 }
 
 func (c *recordingCleanupCoordinator) CancelPreparedTaskResourceCleanup(_ context.Context, operationID string) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.cancelled = append(c.cancelled, operationID)
+	return nil
+}
+
+func (c *recordingCleanupCoordinator) RestoreCancelledTaskResourceCleanup(_ context.Context, operationID string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.restored = append(c.restored, operationID)
 	return nil
 }
 
@@ -381,10 +499,10 @@ func TestDeleteTaskTree_MembershipReleaseFailureCancelsEveryPreparedCleanup(t *t
 }
 
 func (f *fakeWSGroupRepoCascade) RestoreWorkspaceGroupMemberByCascade(_ context.Context, taskID, cascadeID string) error {
-	// no-op for these tests
-	_ = taskID
-	_ = cascadeID
-	return nil
+	f.restoreCalls = append(f.restoreCalls, struct {
+		taskID, cascadeID string
+	}{taskID, cascadeID})
+	return f.restoreErr
 }
 
 func (f *fakeWSGroupRepoCascade) ListActiveWorkspaceGroupMembers(_ context.Context, groupID string) ([]orchmodels.WorkspaceGroupMember, error) {
@@ -459,6 +577,76 @@ func TestArchiveTaskTree_StampsCascadeAcrossDescendants(t *testing.T) {
 		if got.ArchivedByCascadeID != out.CascadeID {
 			t.Errorf("%s cascade id = %q, want %q", id, got.ArchivedByCascadeID, out.CascadeID)
 		}
+	}
+}
+
+func TestArchiveTaskTree_IgnoresConflictingIndependentChildCascades(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("c1", "root", "ws-1")
+	tasks.addTask("c2", "root", "ws-1")
+	repo := newCascadeRepo(tasks)
+	if _, changed, err := repo.ArchiveTaskIfActiveWithVacatedStep(
+		context.Background(), "c1", "independent-cascade-1",
+	); err != nil || !changed {
+		t.Fatalf("archive c1: changed=%v err=%v", changed, err)
+	}
+	if _, changed, err := repo.ArchiveTaskIfActiveWithVacatedStep(
+		context.Background(), "c2", "independent-cascade-2",
+	); err != nil || !changed {
+		t.Fatalf("archive c2: changed=%v err=%v", changed, err)
+	}
+
+	svc := NewHandoffService(repo, nil, nil, nil, newCascadeWSGroupRepo(), nil)
+	out, err := svc.ArchiveTaskTree(context.Background(), "root", true)
+	if err != nil {
+		t.Fatalf("archive parent with independently archived children: %v", err)
+	}
+	if len(out.ArchivedTaskIDs) != 1 || out.ArchivedTaskIDs[0] != "root" {
+		t.Fatalf("archived task IDs = %v, want [root]", out.ArchivedTaskIDs)
+	}
+	root, _ := tasks.GetTask(context.Background(), "root")
+	if root.ArchivedByCascadeID == "" {
+		t.Fatal("parent archive did not receive a cascade identity")
+	}
+	for _, id := range []string{"c1", "c2"} {
+		child, _ := tasks.GetTask(context.Background(), id)
+		if child.ArchivedByCascadeID == root.ArchivedByCascadeID {
+			t.Fatalf("%s was incorrectly claimed by parent cascade %q", id, root.ArchivedByCascadeID)
+		}
+	}
+}
+
+func TestArchiveTaskTreeDoesNotAdoptIndependentChildCascade(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("child", "root", "ws-1")
+	repo := newCascadeRepo(tasks)
+	svc := NewHandoffService(repo, nil, nil, nil, newCascadeWSGroupRepo(), nil)
+
+	if _, err := svc.ArchiveTaskTree(context.Background(), "child", false); err != nil {
+		t.Fatalf("archive child: %v", err)
+	}
+	child, _ := tasks.GetTask(context.Background(), "child")
+	childCascadeID := child.ArchivedByCascadeID
+
+	out, err := svc.ArchiveTaskTree(context.Background(), "root", true)
+	if err != nil {
+		t.Fatalf("archive parent: %v", err)
+	}
+	root, _ := tasks.GetTask(context.Background(), "root")
+	if root.ArchivedByCascadeID == "" || root.ArchivedByCascadeID == childCascadeID {
+		t.Fatalf("parent cascade ID = %q, child cascade ID = %q", root.ArchivedByCascadeID, childCascadeID)
+	}
+	if _, err := svc.UnarchiveTaskTree(context.Background(), "root"); err != nil {
+		t.Fatalf("unarchive parent: %v", err)
+	}
+	child, _ = tasks.GetTask(context.Background(), "child")
+	if child.ArchivedAt == nil {
+		t.Fatal("independently archived child was restored with parent")
+	}
+	if len(out.ArchivedTaskIDs) != 1 || out.ArchivedTaskIDs[0] != "root" {
+		t.Fatalf("parent archive IDs = %v, want [root]", out.ArchivedTaskIDs)
 	}
 }
 
@@ -538,6 +726,69 @@ func TestUnarchiveTaskTree_LeavesPriorlyArchivedDescendantsAlone(t *testing.T) {
 	}
 }
 
+type restoringCascadeWSGroupRepo struct {
+	*fakeWSGroupRepoCascade
+}
+
+func (f *restoringCascadeWSGroupRepo) RestoreWorkspaceGroupMemberByCascade(
+	ctx context.Context, taskID, cascadeID string,
+) error {
+	if err := f.fakeWSGroupRepoCascade.RestoreWorkspaceGroupMemberByCascade(ctx, taskID, cascadeID); err != nil {
+		return err
+	}
+	f.members["g1"][taskID] = orchmodels.WorkspaceMemberRoleMember
+	return nil
+}
+
+func TestUnarchiveTaskTreeRestoresCleanedWorkspaceGroupAfterMembershipRestore(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	groups := &restoringCascadeWSGroupRepo{fakeWSGroupRepoCascade: newCascadeWSGroupRepo()}
+	groups.groups["g1"] = &orchmodels.WorkspaceGroup{
+		ID: "g1", WorkspaceID: "ws-1",
+		CleanupStatus:     orchmodels.WorkspaceCleanupStatusCleaned,
+		MaterializedKind:  orchmodels.WorkspaceGroupKindSingleRepo,
+		RestoreConfigJSON: `{"kind":"single_repo","worktree_ids":{"r":"wt"}}`,
+	}
+	groups.members["g1"] = map[string]string{"root": orchmodels.WorkspaceMemberRoleMember}
+	svc := NewHandoffService(newCascadeRepo(tasks), nil, nil, nil, groups, nil)
+
+	archive, err := svc.ArchiveTaskTree(context.Background(), "root", false)
+	if err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	if _, err := svc.UnarchiveTaskTree(context.Background(), "root"); err != nil {
+		t.Fatalf("unarchive: %v", err)
+	}
+	if got := groups.cleanupStatuses["g1"]; got != orchmodels.WorkspaceCleanupStatusActive {
+		t.Fatalf("group cleanup status = %q, want active", got)
+	}
+	if len(archive.ArchivedTaskIDs) != 1 {
+		t.Fatalf("archived tasks = %v, want root only", archive.ArchivedTaskIDs)
+	}
+}
+
+func TestUnarchiveTaskTree_RestoresCleanupAfterMutationFailure(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addArchivedTask("root", "", "ws-1", "cascade-1")
+	repo := newCascadeRepo(tasks)
+	repo.unarchiveErr = errors.New("unarchive unavailable")
+	coordinator := &recordingCleanupCoordinator{}
+	svc := NewHandoffService(repo, nil, nil, nil, nil, nil)
+	svc.SetTaskResourceCleaner(coordinator)
+
+	_, err := svc.UnarchiveTaskTree(context.Background(), "root")
+	if err == nil {
+		t.Fatal("UnarchiveTaskTree unexpectedly succeeded")
+	}
+	if len(coordinator.cancelled) != 1 || coordinator.cancelled[0] != "cascade_archive:cascade-1:root" {
+		t.Fatalf("cancelled cleanup operations = %v", coordinator.cancelled)
+	}
+	if len(coordinator.restored) != 1 || coordinator.restored[0] != "cascade_archive:cascade-1:root" {
+		t.Fatalf("restored cleanup operations = %v", coordinator.restored)
+	}
+}
+
 func TestArchiveTaskTree_ReleasesGroupMemberships(t *testing.T) {
 	tasks := newFakeTaskRepo()
 	tasks.addTask("root", "", "ws-1")
@@ -574,6 +825,35 @@ func TestArchiveTaskTree_ReleasesGroupMemberships(t *testing.T) {
 	}
 }
 
+func TestArchiveTaskTreeEvaluatesGroupsReleasedBeforeMembershipFailure(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("c1", "root", "ws-1")
+	groups := newCascadeWSGroupRepo()
+	groups.groups["g1"] = &orchmodels.WorkspaceGroup{
+		ID: "g1", WorkspaceID: "ws-1", OwnerTaskID: "root",
+		MaterializedKind: orchmodels.WorkspaceGroupKindSingleRepo,
+		CleanupStatus:    orchmodels.WorkspaceCleanupStatusActive,
+	}
+	groups.members["g1"] = map[string]string{
+		"root": orchmodels.WorkspaceMemberRoleOwner,
+		"c1":   orchmodels.WorkspaceMemberRoleMember,
+	}
+	groups.releaseErr = errors.New("membership release unavailable")
+	groups.releaseErrAfter = 1
+	svc := newCascadeService(t, tasks, groups)
+
+	out, err := svc.ArchiveTaskTree(context.Background(), "root", true)
+	if err == nil {
+		t.Fatal("archive succeeded, want post-commit membership error")
+	}
+	if len(out.ReleasedGroupIDs) != 1 || out.ReleasedGroupIDs[0] != "g1" {
+		t.Fatalf("ReleasedGroupIDs = %v, want [g1]", out.ReleasedGroupIDs)
+	}
+	if len(groups.releaseCalls) != 1 || groups.releaseCalls[0].taskID != "c1" {
+		t.Fatalf("release calls = %v, want successful child release", groups.releaseCalls)
+	}
+}
 func TestEvaluateWorkspaceGroupCleanup_NoOpForUserOwned(t *testing.T) {
 	tasks := newFakeTaskRepo()
 	groups := newCascadeWSGroupRepo()
@@ -607,6 +887,7 @@ func TestEvaluateWorkspaceGroupCleanup_PendingWhenLastMemberLeavesKandevGroup(t 
 	}
 	groups.members["g1"] = map[string]string{}
 	svc := newCascadeService(t, tasks, groups)
+	svc.SetSessionReader(newFakeSessionReader())
 
 	if err := svc.evaluateWorkspaceGroupCleanup(context.Background(), "g1"); err != nil {
 		t.Fatalf("evaluate: %v", err)
@@ -629,6 +910,16 @@ func (f *fakeRunCanceller) CancelTaskExecution(_ context.Context, taskID, _ stri
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, taskID)
 	return f.failOn[taskID]
+}
+
+type recordingArchiveCapture struct {
+	calls []string
+	err   error
+}
+
+func (r *recordingArchiveCapture) CaptureArchiveSnapshot(_ context.Context, sessionID string) error {
+	r.calls = append(r.calls, sessionID)
+	return r.err
 }
 
 type cancellableCascadeSessionReader struct {
@@ -751,6 +1042,35 @@ func (r *fakeDeleteRepo) DeleteTask(ctx context.Context, id string) error {
 	return err
 }
 
+func (r *fakeDeleteRepo) UpdateTask(_ context.Context, task *models.Task) error {
+	r.base.mu.Lock()
+	defer r.base.mu.Unlock()
+	r.base.tasks[task.ID] = task
+	return nil
+}
+func (r *fakeDeleteRepo) RestoreTaskParentIfUnchanged(
+	_ context.Context,
+	taskID, expectedParentID, restoredParentID, restoredWorkspaceMode string,
+) error {
+	r.base.mu.Lock()
+	defer r.base.mu.Unlock()
+	task := r.base.tasks[taskID]
+	if task == nil {
+		return errors.New("task not found")
+	}
+	if task.ParentID != expectedParentID {
+		return errors.New("task parent changed during compensation")
+	}
+	task.ParentID = restoredParentID
+	if restoredWorkspaceMode == workspaceModeInheritParent {
+		if workspace, ok := task.Metadata["workspace"].(map[string]interface{}); ok &&
+			workspace["mode"] == workspaceModeSharedGroup {
+			workspace["mode"] = restoredWorkspaceMode
+		}
+	}
+	return nil
+}
+
 func (r *fakeDeleteRepo) DeleteTaskWithVacatedStep(_ context.Context, id string) (string, error) {
 	r.base.mu.Lock()
 	defer r.base.mu.Unlock()
@@ -802,6 +1122,49 @@ func TestDeleteTaskTree_DoesNotFinalizeSessionWhenDeleteFails(t *testing.T) {
 	}
 	if len(sessions.cancelCalls) != 0 {
 		t.Fatalf("cancel calls = %v, want none after failed delete", sessions.cancelCalls)
+	}
+}
+
+func TestDeleteTaskTreeRestoresReparentedChildrenAfterRootDeleteFailure(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("child", "root", "ws-1")
+	deleteErr := errors.New("delete unavailable")
+	svc := NewHandoffService(&deleteErrorCascadeRepo{
+		fakeDeleteRepo: &fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)},
+		err:            deleteErr,
+	}, nil, nil, nil, nil, nil)
+
+	if _, err := svc.DeleteTaskTree(context.Background(), "root", false); !errors.Is(err, deleteErr) {
+		t.Fatalf("delete error = %v, want %v", err, deleteErr)
+	}
+	tasks.mu.Lock()
+	defer tasks.mu.Unlock()
+	if got := tasks.tasks["child"].ParentID; got != "root" {
+		t.Fatalf("child parent after failed delete = %q, want root", got)
+	}
+}
+
+func TestDeleteTaskTreeRestoresMembershipAfterDeleteFailure(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	groups := newCascadeWSGroupRepo()
+	groups.groups["group-1"] = &orchmodels.WorkspaceGroup{ID: "group-1", WorkspaceID: "ws-1"}
+	groups.members["group-1"] = map[string]string{"root": orchmodels.WorkspaceMemberRoleOwner}
+	deleteErr := errors.New("delete unavailable")
+	svc := NewHandoffService(&deleteErrorCascadeRepo{
+		fakeDeleteRepo: &fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)},
+		err:            deleteErr,
+	}, nil, nil, nil, groups, nil)
+
+	if _, err := svc.DeleteTaskTree(context.Background(), "root", false); !errors.Is(err, deleteErr) {
+		t.Fatalf("delete error = %v, want %v", err, deleteErr)
+	}
+	if len(groups.restoreCalls) != 1 || groups.restoreCalls[0].taskID != "root" {
+		t.Fatalf("membership restore calls = %v, want root restore", groups.restoreCalls)
+	}
+	if groups.restoreCalls[0].cascadeID == "" {
+		t.Fatal("membership restore did not retain cascade identity")
 	}
 }
 
@@ -873,12 +1236,32 @@ func TestDeleteTaskTree_RemovesAllAndCancelsRuns(t *testing.T) {
 	}
 }
 
+func TestDeleteTaskTreeRemovesDependencyEdges(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("dependent", "", "ws-1")
+	blockers := &fakeBlockerRepo{}
+	blockers.blockers = append(blockers.blockers, &orchmodels.TaskBlocker{
+		TaskID: "dependent", BlockerTaskID: "root",
+	})
+	repo := &fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)}
+	svc := NewHandoffService(repo, nil, nil, blockers, nil, nil)
+
+	if _, err := svc.DeleteTaskTree(context.Background(), "root", false); err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if got := len(blockers.blockers); got != 0 {
+		t.Fatalf("dependency edges after delete = %d, want 0", got)
+	}
+}
+
 func TestArchiveTaskTree_CancelsRunsBeforeArchive(t *testing.T) {
 	tasks := newFakeTaskRepo()
 	tasks.addTask("root", "", "ws-1")
 	tasks.addTask("c1", "root", "ws-1")
 	groups := newCascadeWSGroupRepo()
 	svc := newCascadeService(t, tasks, groups)
+
 	canceller := &fakeRunCanceller{}
 	svc.SetRunCanceller(canceller)
 
@@ -887,6 +1270,25 @@ func TestArchiveTaskTree_CancelsRunsBeforeArchive(t *testing.T) {
 	}
 	if len(canceller.calls) != 2 {
 		t.Errorf("expected 2 cancel calls (root + c1), got %d", len(canceller.calls))
+	}
+}
+func TestArchiveTaskTreeCapturesActiveSessionBeforeArchive(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	sessions := newFakeSessionReader()
+	sessions.sessions["root"] = []*models.TaskSession{
+		{ID: "session-root", TaskID: "root", State: models.TaskSessionStateRunning},
+	}
+	svc := newCascadeService(t, tasks, newCascadeWSGroupRepo())
+	svc.SetSessionReader(sessions)
+	capture := &recordingArchiveCapture{err: errors.New("capture unavailable")}
+	svc.SetGitArchiveCapture(capture)
+
+	if _, err := svc.ArchiveTaskTree(context.Background(), "root", false); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	if len(capture.calls) != 1 || capture.calls[0] != "session-root" {
+		t.Fatalf("capture calls = %v, want [session-root]", capture.calls)
 	}
 }
 
@@ -950,14 +1352,79 @@ func TestArchiveTaskTree_RaceFree(t *testing.T) {
 	}
 	wg.Wait()
 	// Whatever order the goroutines ran in, every task should be
-	// archived exactly once (CAS guard) and the cascade IDs must be
-	// consistent within each task — though different tasks may carry
-	// different cascade IDs depending on which goroutine won the race.
+	// archived exactly once (CAS guard) under one cascade identity.
+	// A later unarchive must be able to restore the complete tree.
 	for _, id := range []string{"root", "c1", "c2"} {
 		got, _ := tasks.GetTask(context.Background(), id)
 		if got.ArchivedAt == nil {
 			t.Errorf("%s should be archived", id)
 		}
+	}
+}
+
+func TestArchiveTaskTree_SerializesCascadeIdentity(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("c1", "root", "ws-1")
+	base := newCascadeRepo(tasks)
+	probe := &archiveSerializationProbe{
+		fakeCascadeRepo:       base,
+		firstMutationStarted:  make(chan struct{}),
+		secondMutationStarted: make(chan struct{}),
+		releaseFirstMutation:  make(chan struct{}),
+	}
+	groups := &restoringCascadeWSGroupRepo{fakeWSGroupRepoCascade: newCascadeWSGroupRepo()}
+	groups.groups["g1"] = &orchmodels.WorkspaceGroup{
+		ID: "g1", WorkspaceID: "ws-1",
+		MaterializedKind: orchmodels.WorkspaceGroupKindSingleRepo,
+	}
+	groups.members["g1"] = map[string]string{
+		"root": orchmodels.WorkspaceMemberRoleMember,
+		"c1":   orchmodels.WorkspaceMemberRoleMember,
+	}
+	svc := NewHandoffService(probe, nil, nil, nil, groups, nil)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		_, _ = svc.ArchiveTaskTree(context.Background(), "root", true)
+	}()
+	go func() {
+		defer wg.Done()
+		_, _ = svc.ArchiveTaskTree(context.Background(), "root", true)
+	}()
+
+	select {
+	case <-probe.firstMutationStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first archive mutation did not start")
+	}
+	concurrentMutation := false
+	select {
+	case <-probe.secondMutationStarted:
+		concurrentMutation = true
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(probe.releaseFirstMutation)
+	wg.Wait()
+	if concurrentMutation {
+		t.Fatal("archive cascades mutated the same tree concurrently")
+	}
+
+	root, _ := tasks.GetTask(context.Background(), "root")
+	child, _ := tasks.GetTask(context.Background(), "c1")
+	if root.ArchivedByCascadeID == "" || root.ArchivedByCascadeID != child.ArchivedByCascadeID {
+		t.Fatalf("archive cascade IDs = root %q, child %q, want one identity",
+			root.ArchivedByCascadeID, child.ArchivedByCascadeID)
+	}
+	if _, err := svc.UnarchiveTaskTree(context.Background(), "root"); err != nil {
+		t.Fatalf("unarchive serialized archive: %v", err)
+	}
+	root, _ = tasks.GetTask(context.Background(), "root")
+	child, _ = tasks.GetTask(context.Background(), "c1")
+	if root.ArchivedAt != nil || child.ArchivedAt != nil {
+		t.Fatalf("unarchive left tasks archived: root=%v child=%v", root.ArchivedAt, child.ArchivedAt)
 	}
 }
 
@@ -968,10 +1435,11 @@ func TestArchiveTaskTree_RaceFree(t *testing.T) {
 // task.deleted and the kanban board's All-Workflows view shows stale
 // rows after a cascade.
 type fakeEventPublisher struct {
-	mu       sync.Mutex
-	updated  []string
-	deleted  []string
-	archived []bool // archivedAt nil/non-nil per updated entry
+	mu                sync.Mutex
+	updated           []string
+	deleted           []string
+	dependencyChanges []string
+	archived          []bool // archivedAt nil/non-nil per updated entry
 }
 
 func (f *fakeEventPublisher) PublishTaskUpdated(_ context.Context, task *models.Task, _ ...string) {
@@ -985,6 +1453,32 @@ func (f *fakeEventPublisher) PublishTaskDeleted(_ context.Context, task *models.
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.deleted = append(f.deleted, task.ID)
+}
+
+func (f *fakeEventPublisher) PublishDependencyChange(_ context.Context, taskIDs ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.dependencyChanges = append(f.dependencyChanges, taskIDs...)
+}
+
+func TestDeleteTaskTreePublishesSurvivingDependencyChanges(t *testing.T) {
+	tasks := newFakeTaskRepo()
+	tasks.addTask("root", "", "ws-1")
+	tasks.addTask("dependent", "", "ws-1")
+	blockers := &mockBlockerRepo{blockers: []*orchmodels.TaskBlocker{
+		{TaskID: "dependent", BlockerTaskID: "root"},
+	}}
+	repo := &fakeDeleteRepo{fakeCascadeRepo: newCascadeRepo(tasks)}
+	publisher := &fakeEventPublisher{}
+	svc := NewHandoffService(repo, nil, nil, blockers, nil, nil)
+	svc.SetTaskEventPublisher(publisher)
+
+	if _, err := svc.DeleteTaskTree(context.Background(), "root", false); err != nil {
+		t.Fatalf("DeleteTaskTree: %v", err)
+	}
+	if len(publisher.dependencyChanges) != 1 || publisher.dependencyChanges[0] != "dependent" {
+		t.Fatalf("dependency projection updates = %v, want [dependent]", publisher.dependencyChanges)
+	}
 }
 
 // TestArchiveTaskTree_PublishesTaskUpdatedPerTask pins the regression
@@ -1204,7 +1698,12 @@ func (f *fakeResourceCleaner) CleanupTaskResources(_ context.Context, taskID str
 }
 
 type fakeWorkspaceCleaner struct {
-	plainFolders []string
+	plainFolders   []string
+	multiRepoRoots []string
+}
+
+func (f *fakeWorkspaceCleaner) ValidateManagedRoot(string) error {
+	return nil
 }
 
 func (f *fakeWorkspaceCleaner) CleanupPlainFolder(_ context.Context, path string) error {
@@ -1216,12 +1715,31 @@ func (f *fakeWorkspaceCleaner) CleanupSingleRepoWorktree(context.Context, string
 	return nil
 }
 
-func (f *fakeWorkspaceCleaner) CleanupMultiRepoRoot(context.Context, string, []string) error {
+func (f *fakeWorkspaceCleaner) CleanupMultiRepoRoot(_ context.Context, root string, _ []string) error {
+	f.multiRepoRoots = append(f.multiRepoRoots, root)
 	return nil
 }
 
 func (f *fakeWorkspaceCleaner) CleanupRemoteEnvironment(context.Context, string, string) error {
 	return nil
+}
+func TestRunWorkspaceGroupCleanupRejectsMalformedMultiRepoConfig(t *testing.T) {
+	handoff := NewHandoffService(nil, nil, nil, nil, nil, nil)
+	cleaner := &fakeWorkspaceCleaner{}
+	handoff.SetWorkspaceCleaner(cleaner)
+	group := &orchmodels.WorkspaceGroup{
+		ID:                "group-malformed-restore",
+		MaterializedKind:  orchmodels.WorkspaceGroupKindMultiRepo,
+		MaterializedPath:  "/managed/root",
+		RestoreConfigJSON: "{malformed",
+	}
+
+	if err := handoff.runWorkspaceGroupCleanup(context.Background(), group); err == nil {
+		t.Fatal("malformed multi-repo restore config was accepted")
+	}
+	if len(cleaner.multiRepoRoots) != 0 {
+		t.Fatalf("multi-repo cleanup calls = %d, want none", len(cleaner.multiRepoRoots))
+	}
 }
 
 type flippingActiveSessionReader struct {
@@ -1448,6 +1966,12 @@ type fakeReparentErrRepo struct {
 }
 
 func (r *fakeReparentErrRepo) ReparentDirectChildren(_ context.Context, _, _ string) error {
+	return errors.New("simulated DB failure")
+}
+
+func (r *fakeReparentErrRepo) ReparentDirectChildrenInWorkspace(
+	_ context.Context, _, _, _ string,
+) error {
 	return errors.New("simulated DB failure")
 }
 

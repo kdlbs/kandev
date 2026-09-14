@@ -787,7 +787,7 @@ func (m *Manager) GetWorkspaceTrackerFor(subpath string) (*WorkspaceTracker, err
 	}
 	t := NewWorkspaceTrackerForRepo(full, cleaned, m.logger)
 	m.configureTracker(t, cleaned, m.currentWorkspaceSourceRoots())
-	m.prepareTrackerComparisonTarget(t)
+	m.prepareTrackerComparisonTarget(t, false)
 	m.workspaceTrackersBySubpath[cleaned] = t
 	return t, nil
 }

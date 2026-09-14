@@ -4,6 +4,7 @@ import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import type { Locator, Page } from "@playwright/test";
 import type { WorkflowStep } from "../../../lib/types/http";
+import { expandDisplaySettingsGroup } from "../../helpers/display-settings";
 
 const TASK_VISIBLE_TIMEOUT = 10_000;
 
@@ -34,7 +35,7 @@ async function pickListboxOption(page: Page, optionLabel: string): Promise<void>
 }
 
 async function closeDisplayDropdown(page: Page): Promise<void> {
-  // The Display DropdownMenu does NOT auto-close when an inner Select option
+  // The display settings Popover does NOT auto-close when an inner Select option
   // is picked. Click the trigger to toggle closed. Radix leaves a brief
   // pointer-events overlay on <html> after the inner Select closes, so use
   // force: true to bypass Playwright's interception check.
@@ -46,11 +47,12 @@ async function closeDisplayDropdown(page: Page): Promise<void> {
   // Wait for the menu portal to fully unmount before any subsequent open;
   // otherwise re-clicking the trigger lands while Radix is mid-cleanup and
   // the menu content fails to render.
-  await expect(page.getByRole("menu")).toHaveCount(0);
+  await expect(page.getByTestId("display-settings-content")).toHaveCount(0);
 }
 
 async function selectWorkflowFilter(page: Page, optionLabel: string): Promise<void> {
   await page.getByTestId("display-button").click();
+  await expandDisplaySettingsGroup(page, "filters");
   await page.getByTestId("display-workflow-filter").click();
   await pickListboxOption(page, optionLabel);
   await closeDisplayDropdown(page);
@@ -58,6 +60,7 @@ async function selectWorkflowFilter(page: Page, optionLabel: string): Promise<vo
 
 async function selectRepositoryFilter(page: Page, optionLabel: string): Promise<void> {
   await page.getByTestId("display-button").click();
+  await expandDisplaySettingsGroup(page, "filters");
   await page.getByTestId("display-repository-filter").click();
   await pickListboxOption(page, optionLabel);
   await closeDisplayDropdown(page);

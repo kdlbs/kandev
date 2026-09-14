@@ -62,6 +62,7 @@ type UpdateUserSettingsRequest struct {
 	PreventAutoStartAgentOnOpen       *bool
 	UnreadDivider                     *bool
 	AgentGeneratedTaskTitles          *bool
+	AutoFocusNewTasks                 *bool
 	MCPTaskAgentProfileDefault        *string
 	ShowAnchoredPromptBar             *bool
 	ShowScrollToLastPrompt            *bool
@@ -628,6 +629,9 @@ func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSe
 	if req.AgentGeneratedTaskTitles != nil {
 		settings.AgentGeneratedTaskTitles = *req.AgentGeneratedTaskTitles
 	}
+	if req.AutoFocusNewTasks != nil {
+		settings.AutoFocusNewTasks = *req.AutoFocusNewTasks
+	}
 	if err := applyMCPTaskAgentProfileDefault(settings, req.MCPTaskAgentProfileDefault); err != nil {
 		return err
 	}
@@ -1079,6 +1083,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"prevent_auto_start_agent_on_open":         settings.PreventAutoStartAgentOnOpen,
 		"unread_divider":                           settings.UnreadDivider,
 		"agent_generated_task_titles":              settings.AgentGeneratedTaskTitles,
+		"auto_focus_new_tasks":                     settings.AutoFocusNewTasks,
 		"mcp_task_agent_profile_default":           models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"show_anchored_prompt_bar":                 settings.ShowAnchoredPromptBar,
 		"show_scroll_to_last_prompt":               settings.ShowScrollToLastPrompt,

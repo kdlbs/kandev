@@ -112,4 +112,18 @@ describe("useResponsiveBreakpoint", () => {
     expect(result.current.breakpoint).toBe("compactDesktop");
     expect(result.current.usesDesktopWorkbench).toBe(true);
   });
+
+  it("updates pointer mode while the subscription remains mounted", () => {
+    const { result } = renderHook(() => useResponsiveBreakpoint());
+
+    expect(result.current.isFinePointer).toBe(true);
+
+    notifyResize(1024, "coarse");
+
+    expect(result.current.isFinePointer).toBe(false);
+    expect(result.current.breakpoint).toBe("desktop");
+
+    notifyResize(1024, "fine");
+    expect(result.current.isFinePointer).toBe(true);
+  });
 });
