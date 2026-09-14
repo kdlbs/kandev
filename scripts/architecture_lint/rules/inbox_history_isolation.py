@@ -51,10 +51,12 @@ HISTORY_SOURCE_PREFIXES = (
     "apps/web/lib/state/slices/inbox-history/",
     "apps/web/hooks/domains/inbox-history/",
     "apps/web/components/inbox-history/",
+    "apps/web/lib/inbox-history/",
 )
 HISTORY_SOURCE_FILES = frozenset(
     {
         "apps/web/lib/api/domains/inbox-history-api.ts",
+        "apps/web/lib/types/inbox-history.ts",
         "apps/backend/internal/task/repository/sqlite/clarification_history_query.go",
     }
 )
@@ -62,10 +64,19 @@ HISTORY_SOURCE_FILES = frozenset(
 # AC .17's forbidden targets. NOT the bare identifier "count": AC .16
 # requires History to render its own bundle count, so that target could
 # never pass. These are the Needs-you slice's own symbols instead -- the
-# sidebar-badge selector, and the slice's own workspace-state field access
-# -- verified round 4 against lib/state/slices/needs-you-inbox/{selectors,
-# types}.ts and app-sidebar-primary-nav.tsx:30.
-NEEDS_YOU_TARGETS = ("selectNeedsYouInboxCount", "needsYouInbox.byWorkspaceId")
+# sidebar-badge selector, the slice's own workspace-state field access, and
+# the slice's write actions (lib/state/slices/needs-you-inbox/
+# needs-you-inbox-slice.ts) -- verified against lib/state/slices/
+# needs-you-inbox/{selectors,types,needs-you-inbox-slice}.ts and
+# app-sidebar-primary-nav.tsx:30.
+NEEDS_YOU_TARGETS = (
+    "selectNeedsYouInboxCount",
+    "needsYouInbox.byWorkspaceId",
+    "setNeedsYouInboxPage",
+    "setNeedsYouInboxError",
+    "seedNeedsYouInboxBoot",
+    "beginNeedsYouInboxRead",
+)
 
 # AC .22's forbidden targets. There is no dedicated event-stream
 # subscription entry-point symbol -- client.on is a generic method on a

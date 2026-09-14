@@ -104,6 +104,56 @@ class InboxHistoryIsolationSourceTest(ArchitectureFixture):
         self.assertEqual(result.returncode, 1)
         self.assertIn("needsYouInbox.byWorkspaceId", result.stdout)
 
+    def test_history_slice_calling_needs_you_write_action_is_flagged(self) -> None:
+        path = "apps/web/lib/state/slices/inbox-history/inbox-history-slice.ts"
+        self.write(
+            path,
+            """
+            import { setNeedsYouInboxPage } from "@/lib/state/slices/needs-you-inbox/needs-you-inbox-slice";
+            export function bumpPage(state: any) {
+              return setNeedsYouInboxPage(state);
+            }
+            """,
+        )
+        self.track_all()
+
+        result = self.run_cli("--all")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("setNeedsYouInboxPage", result.stdout)
+
+    def test_history_presentation_module_is_scanned(self) -> None:
+        path = "apps/web/lib/inbox-history/row-presentation.ts"
+        self.write(
+            path,
+            """
+            import { selectNeedsYouInboxCount } from "@/lib/state/slices/needs-you-inbox/selectors";
+            export const x = selectNeedsYouInboxCount;
+            """,
+        )
+        self.track_all()
+
+        result = self.run_cli("--all")
+
+        self.assertEqual(result.returncode, 1)
+        self.assert_diagnostic_location(result, path, 1)
+        self.assertIn("selectNeedsYouInboxCount", result.stdout)
+
+    def test_history_types_file_is_scanned(self) -> None:
+        path = "apps/web/lib/types/inbox-history.ts"
+        self.write(
+            path,
+            """
+            export const x = "needsYouInbox.byWorkspaceId";
+            """,
+        )
+        self.track_all()
+
+        result = self.run_cli("--all")
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("needsYouInbox.byWorkspaceId", result.stdout)
+
     def test_history_component_subscribing_to_pending_action_event_is_flagged(self) -> None:
         path = "apps/web/components/inbox-history/inbox-history-list.tsx"
         self.write(
