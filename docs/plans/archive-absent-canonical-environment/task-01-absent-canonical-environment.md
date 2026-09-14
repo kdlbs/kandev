@@ -5,7 +5,13 @@ status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
-spec: "../../specs/tasks/requirements/detached-workspace-continuity.md"
+requirements:
+  - REQ-TASKS-DETACHED-WORKSPACE-CONTINUITY-001
+acceptance_criteria:
+  - AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.6
+  - AC-TASKS-DETACHED-WORKSPACE-CONTINUITY-001.7
+system_design:
+  - ../../specs/tasks/system-design/detached-workspace-continuity.md
 ---
 
 # Task 01: Tolerate an absent canonical environment on archive

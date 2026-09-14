@@ -1,5 +1,8 @@
 ---
-spec: docs/specs/tasks/requirements/detached-workspace-continuity.md
+requirements:
+  - REQ-TASKS-DETACHED-WORKSPACE-CONTINUITY-001
+system_design:
+  - ../../specs/tasks/system-design/detached-workspace-continuity.md
 created: 2026-09-14
 status: completed
 ---
@@ -95,4 +98,4 @@ migration in front of a verified one-call fix.
 
 | Task | Title | Wave | Depends on |
 | --- | --- | --- | --- |
-| 01 | Tolerate an absent canonical environment on archive | 1 | — |
+| [01](task-01-absent-canonical-environment.md) | Tolerate an absent canonical environment on archive | 1 | — |
