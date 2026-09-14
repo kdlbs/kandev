@@ -152,6 +152,45 @@ func TestStartSessionForWorkflowStep_PreConsultationRefusalOverCeiling(t *testin
 	}
 }
 
+// TestStartSessionForWorkflowStep_PreConsultReservationReleasedWhenResumeFails
+// closes the coverage gap ccdac03c2 left at StartSessionForWorkflowStep's own
+// pre-consult gate (admitOrDeferWorkflowStepEnsure): that commit moved this
+// call site's recordManualOverrideIfAdmitted audit next to admission, mirroring
+// ensureSessionRunning's own move, but only ensureSessionRunning's half was
+// covered by a regression test (TestPromptTask_ManualOverCeilingIsAuditedEvenWhenTheResumeFails,
+// reached through PromptTask's hardcoded manual origin).
+//
+// The pre-consult gate itself always admits with launchOriginAutomatic
+// (admitOrDeferWorkflowStepEnsure hardcodes it), and decideLocked only ever
+// sets manualOverride for a manual-origin request, so this specific gate can
+// never produce a manual override to audit — recordManualOverrideIfAdmitted is
+// unconditionally a no-op here regardless of where it sits relative to the
+// downstream resume. What is genuinely load-bearing for this call site's
+// failure path, and was not otherwise covered, is that its reservation itself
+// does not leak when the resume it precedes fails after admission (no
+// executors_running row for the session, so attemptColdResume fails
+// deterministically before either reservation's consume() is reached).
+func TestStartSessionForWorkflowStep_PreConsultReservationReleasedWhenResumeFails(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "wfstep-fail-task", "wfstep-fail-session", models.TaskSessionStateWaitingForInput)
+
+	stepGetter := newMockStepGetter()
+	stepGetter.steps["step2"] = &wfmodels.WorkflowStep{ID: "step2", WorkflowID: "wf1"}
+	agentMgr := &mockAgentManager{isAgentRunning: false}
+	svc := createTestServiceWithAgent(repo, stepGetter, newMockTaskRepo(), agentMgr)
+	svc.executor = executor.NewExecutor(agentMgr, repo, testLogger(), executor.ExecutorConfig{})
+	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
+
+	err := svc.StartSessionForWorkflowStep(ctx, "wfstep-fail-task", "wfstep-fail-session", "step2")
+	require.Error(t, err, "the resume must still fail: no executors_running row exists for the session")
+
+	population, popErr := svc.sessionCeiling.population(ctx)
+	require.NoError(t, popErr)
+	require.Equal(t, 0, population,
+		"a resume failure after the pre-consult admission must release its reservation, not leak it")
+}
+
 // TestTryEnsureExecution_ViewingShapeSwallowsRefusal covers AC-47a: a
 // ceiling refusal reached from the viewing call shape (EnsureSession's
 // resume-for-viewing path) has nothing to replay and nobody waiting, so it
