@@ -147,6 +147,14 @@ type Capabilities struct {
 	// browser session's user with no Go backend of its own (Approach D1,
 	// docs/decisions/2026-08-01-per-user-plugin-storage.md).
 	UserState bool `yaml:"user_state,omitempty" json:"user_state,omitempty"`
+	// AgentConversation gates the plugin's access to managed workspace agent
+	// conversations (EnsureAgentConversation / DispatchAgentConversation /
+	// DeleteAgentConversation Host RPCs). A plugin holding this capability can
+	// create, prompt, and delete a hidden workflowless ephemeral task/session
+	// per (plugin_id, workspace_id, conversation_key). The host owns identity,
+	// visibility, and lifecycle — the plugin never receives raw database or
+	// user identity through this surface.
+	AgentConversation bool `yaml:"agent_conversation,omitempty" json:"agent_conversation,omitempty"`
 }
 
 // AuthProvider is a login option a plugin contributes to the pre-auth login

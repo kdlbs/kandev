@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 
@@ -27,6 +28,8 @@ type messengerTaskSvc interface {
 	GetTaskSession(ctx context.Context, sessionID string) (*taskmodels.TaskSession, error)
 	GetPrimarySession(ctx context.Context, taskID string) (*taskmodels.TaskSession, error)
 	CreateMessage(ctx context.Context, req *taskservice.CreateMessageRequest) (*taskmodels.Message, error)
+	CreateMessageIdempotent(ctx context.Context, id string, req *taskservice.CreateMessageRequest) (*taskmodels.Message, error)
+	GetMessageWithPromptIndex(ctx context.Context, id string) (*taskmodels.Message, error)
 	DeleteMessage(ctx context.Context, id string) error
 	WaitForSessionReady(ctx context.Context, sessionID string) error
 }
@@ -127,6 +130,57 @@ func (a pluginsTaskMessengerAdapter) startOrPromptSession(ctx context.Context, t
 		return plugins.PluginMessageResult{}, err
 	}
 	return plugins.PluginMessageResult{SessionID: session.ID, Status: "sent"}, nil
+}
+
+// StartOrPromptIdempotent is the agent-conversation dispatcher's delivery
+// primitive (see internal/task/service's agentConversationDispatcher
+// interface): it starts a never-launched session or prompts/resumes an idle
+// one, exactly like startOrPromptSession, but records the user message with
+// a caller-supplied idempotencyID via CreateMessageIdempotent instead of
+// always minting a new one. A retried occurrence (same idempotencyID —
+// derived by the caller from stable scheduler coordinates) replays the
+// already-committed message row and returns its outcome without dispatching
+// to the orchestrator a second time, so a scheduled wake can never fire
+// the agent twice for one occurrence. The caller (AgentConversationService)
+// has already confirmed the session is not RUNNING/STARTING before calling
+// this — session is passed in rather than re-resolved.
+func (a pluginsTaskMessengerAdapter) StartOrPromptIdempotent(ctx context.Context, taskID string, session *taskmodels.TaskSession, text, source, idempotencyID string) (string, error) {
+	// A committed row for this id means another caller already delivered this
+	// occurrence: replay its outcome without re-dispatching the runtime.
+	existing, err := a.tasks.GetMessageWithPromptIndex(ctx, idempotencyID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("check existing dispatch message: %w", err)
+	}
+	if err == nil && existing != nil {
+		if shouldStartMessagedSession(session) {
+			return "started", nil
+		}
+		return "sent", nil
+	}
+
+	metadata := map[string]interface{}{"source": source}
+	recorded, err := a.tasks.CreateMessageIdempotent(ctx, idempotencyID, &taskservice.CreateMessageRequest{
+		TaskSessionID: session.ID,
+		TaskID:        taskID,
+		Content:       text,
+		AuthorType:    "user",
+		Metadata:      metadata,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to record idempotent message: %w", err)
+	}
+	if shouldStartMessagedSession(session) {
+		if _, err := a.orch.StartCreatedSession(ctx, taskID, session.ID, session.AgentProfileID, text, true, false, true, nil, nil); err != nil {
+			a.deleteRecordedMessage(ctx, recorded)
+			return "", fmt.Errorf("failed to start session: %w", err)
+		}
+		return "started", nil
+	}
+	if err := a.promptWithResume(ctx, taskID, session.ID, text); err != nil {
+		a.deleteRecordedMessage(ctx, recorded)
+		return "", err
+	}
+	return "sent", nil
 }
 
 // promptWithResume dispatches the prompt, resuming the agent process first when

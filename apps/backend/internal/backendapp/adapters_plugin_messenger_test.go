@@ -2,6 +2,7 @@ package backendapp
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 
@@ -44,6 +45,15 @@ func (f *fakeMessengerTaskSvc) GetPrimarySession(_ context.Context, _ string) (*
 func (f *fakeMessengerTaskSvc) CreateMessage(_ context.Context, req *taskservice.CreateMessageRequest) (*taskmodels.Message, error) {
 	f.created = &taskmodels.Message{ID: "msg-1", TaskSessionID: req.TaskSessionID, TaskID: req.TaskID, Content: req.Content}
 	return f.created, nil
+}
+
+func (f *fakeMessengerTaskSvc) CreateMessageIdempotent(_ context.Context, id string, req *taskservice.CreateMessageRequest) (*taskmodels.Message, error) {
+	f.created = &taskmodels.Message{ID: id, TaskSessionID: req.TaskSessionID, TaskID: req.TaskID, Content: req.Content}
+	return f.created, nil
+}
+
+func (f *fakeMessengerTaskSvc) GetMessageWithPromptIndex(_ context.Context, id string) (*taskmodels.Message, error) {
+	return nil, sql.ErrNoRows
 }
 
 func (f *fakeMessengerTaskSvc) DeleteMessage(_ context.Context, id string) error {
