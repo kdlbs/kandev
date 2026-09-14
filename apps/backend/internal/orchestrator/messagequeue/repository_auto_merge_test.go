@@ -81,9 +81,10 @@ func TestRepository_AutoMergeIntoAbove_PreservesIdentityAndCombinesAdditiveData(
 				SessionID: "session", TaskID: "task", Content: "first", Model: "model", PlanMode: true, QueuedBy: "alice",
 				Attachments: []MessageAttachment{{AttachmentID: "target-file", Name: "target.txt", SizeBytes: 6}},
 				Metadata: map[string]interface{}{
-					"route":                  map[string]interface{}{"attempt": 1, "tags": []string{"one"}},
-					MetadataEntityReferences: entityRefs("1"),
-					MetadataContextFiles:     []apiv1.ContextFileMeta{{Path: "a.go", Name: "a.go"}},
+					"route":                   map[string]interface{}{"attempt": 1, "tags": []string{"one"}},
+					MetadataEntityReferences:  entityRefs("1"),
+					MetadataContextFiles:      []apiv1.ContextFileMeta{{Path: "a.go", Name: "a.go"}},
+					MetadataQueueAdmissionIDs: []string{"client-first"},
 				},
 			})
 			source := insertAutoMergeEntry(t, repo, QueuedMessage{
@@ -96,6 +97,7 @@ func TestRepository_AutoMergeIntoAbove_PreservesIdentityAndCombinesAdditiveData(
 						map[string]interface{}{"path": "a.go", "name": "a.go"},
 						map[string]interface{}{"path": "dir", "name": "dir", "is_directory": isDirectory},
 					},
+					MetadataQueueAdmissionIDs: []interface{}{"client-first", "client-second"},
 				},
 			})
 			targetIdentity := autoMergeIdentity(*target)
@@ -123,7 +125,25 @@ func TestRepository_AutoMergeIntoAbove_PreservesIdentityAndCombinesAdditiveData(
 			if !ok || len(contexts) != 2 || contexts[0].Path != "a.go" || contexts[1].Path != "dir" {
 				t.Errorf("context union = %+v, valid=%v", contexts, ok)
 			}
+			admissionIDs, ok := normalizeQueueAdmissionIDs(merged.Metadata[MetadataQueueAdmissionIDs])
+			if !ok || !reflect.DeepEqual(admissionIDs, []string{"client-first", "client-second"}) {
+				t.Errorf("admission ID union = %v, valid=%v", admissionIDs, ok)
+			}
 		})
+	}
+}
+
+func TestMergeEntryMetadataPreservesQueueAdmissionIDs(t *testing.T) {
+	merged, err := mergeEntryMetadata(
+		map[string]interface{}{MetadataQueueAdmissionIDs: []string{"client-first"}},
+		map[string]interface{}{MetadataQueueAdmissionIDs: []interface{}{"client-second", "client-first"}},
+	)
+	if err != nil {
+		t.Fatalf("merge metadata: %v", err)
+	}
+	ids, ok := normalizeQueueAdmissionIDs(merged[MetadataQueueAdmissionIDs])
+	if !ok || !reflect.DeepEqual(ids, []string{"client-first", "client-second"}) {
+		t.Fatalf("admission ID union = %v, valid=%v", ids, ok)
 	}
 }
 

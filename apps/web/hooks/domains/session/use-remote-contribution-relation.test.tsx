@@ -123,6 +123,26 @@ function status(
   };
 }
 
+function expectSelectedRepositoryState(current: ReturnType<typeof useRemoteContributionRelation>) {
+  expect(current.relation).toMatchObject({
+    kind: "aligned",
+    canPush: false,
+    canPull: false,
+    canReplaceRemote: false,
+    canUseRemote: false,
+  });
+  expect(current.contributionHistoryTarget).toMatchObject({
+    sessionId: "session-1",
+    workspaceId: "workspace-1",
+    repositoryScope: "frontend",
+    branch: "feature",
+    selectedPRKey: "acme/frontend/2",
+    expectedLocalHead: mocks.providerHead,
+    expectedRemoteHead: mocks.providerHead,
+  });
+  expect(current.repositoryScope).toBe("frontend");
+}
+
 describe("useRemoteContributionRelation repository scoping", () => {
   beforeEach(() => {
     mocks.selectedPR = selectedPR;
@@ -151,14 +171,7 @@ describe("useRemoteContributionRelation repository scoping", () => {
     );
 
     const { result } = renderHook(() => useRemoteContributionRelation("session-1"));
-
-    expect(result.current.relation).toMatchObject({
-      kind: "aligned",
-      canPush: false,
-      canPull: false,
-      canReplaceRemote: false,
-      canUseRemote: false,
-    });
+    expectSelectedRepositoryState(result.current);
   });
 
   it("uses the empty-key status for a single-repository session", () => {
@@ -173,6 +186,8 @@ describe("useRemoteContributionRelation repository scoping", () => {
       canReplaceRemote: false,
       canUseRemote: false,
     });
+    expect(result.current.contributionHistoryTarget?.repositoryScope).toBe("");
+    expect(result.current.repositoryScope).toBe("");
   });
 
   // @covers AC-TASKS-REMOTE-CONTRIBUTION-TASKS-001.7

@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -48,6 +49,16 @@ var (
 	errContextResetCancellationConflict     = errors.New("context reset cancellation is already in progress")
 	errSessionAttachmentTransferUnavailable = errors.New("session attachment transfer service is unavailable")
 )
+
+const (
+	workflowResetFailureCode    = "workflow_context_reset_failed"
+	workflowResetFailureMessage = "Context reset failed. The workflow step prompt did not start."
+)
+
+// workflowResetFailureCleanupTimeout bounds each failure-settlement stage. It
+// remains a variable so tests can force a persistence timeout without waiting
+// for the production budget.
+var workflowResetFailureCleanupTimeout = 5 * time.Second
 
 func sessionAttachmentTransfererAvailable(transfer SessionAttachmentTransferer) bool {
 	if transfer == nil {
@@ -4070,9 +4081,10 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		// skips the actual reset and no "Context reset" divider should show.
 		// Capture this before the call, which may flip session.State.
 		hadConversation := session.State != models.TaskSessionStateCreated
-		if !s.resetAgentContext(ctx, taskID, session, step.Name) {
-			s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
-			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
+		_, resetErr := s.resetAgentContextWithError(ctx, taskID, session, step.Name, func(executionID string, err error) {
+			s.persistWorkflowResetFailure(ctx, taskID, sessionID, step.ID, step.Name, executionID, err)
+		})
+		if resetErr != nil {
 			return
 		}
 		s.markIdleAfterReset(ctx, taskID, sessionID, session, step, isPassthrough)
@@ -6190,7 +6202,29 @@ func (s *Service) markIdleAfterReset(
 // resetAgentContext restarts the agent subprocess with a fresh ACP session, clearing
 // the agent's conversation context. The workspace environment is preserved.
 func (s *Service) resetAgentContext(ctx context.Context, taskID string, session *models.TaskSession, stepName string) bool {
+	_, err := s.resetAgentContextWithError(ctx, taskID, session, stepName)
+	return err == nil
+}
+
+type workflowResetFailureHandler func(executionID string, err error)
+
+// resetAgentContextWithError performs a workflow context reset and retains the
+// execution identity for callers that need to report a failed reset. The
+// boolean wrapper above keeps manual and callback callers focused on the
+// existing success contract.
+//
+//nolint:funlen // Reset settlement must keep provider, persistence, and guard stages together.
+func (s *Service) resetAgentContextWithError(
+	ctx context.Context, taskID string, session *models.TaskSession, stepName string,
+	failureHandlers ...workflowResetFailureHandler,
+) (string, error) {
 	sessionID := session.ID
+	settleFailure := func(executionID string, err error) (string, error) {
+		if len(failureHandlers) > 0 && failureHandlers[0] != nil {
+			failureHandlers[0](executionID, err)
+		}
+		return executionID, err
+	}
 
 	// A CREATED session has never been prompted, so there is no agent
 	// conversation to clear. Its execution may still be workspace-only
@@ -6205,7 +6239,7 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 		s.logger.Debug("session has no agent context to reset, skipping",
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName))
-		return true
+		return "", nil
 	}
 
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
@@ -6225,7 +6259,7 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName),
 			zap.Error(err))
-		return false
+		return settleFailure(session.AgentExecutionID, fmt.Errorf("quiesce active turn: %w", err))
 	}
 
 	executionID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
@@ -6248,10 +6282,10 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 				zap.String("session_id", sessionID),
 				zap.String("step_name", stepName),
 				zap.Error(err))
-			return false
+			return settleFailure("", fmt.Errorf("clear lazy resume token: %w", err))
 		}
 		s.clearPersistedResetState(ctx, sessionID, session)
-		return true
+		return "", nil
 	}
 
 	s.logger.Info("resetting agent context for workflow step",
@@ -6261,14 +6295,23 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 		zap.String("agent_execution_id", executionID))
 
 	previousACPSessionID := s.currentACPSessionID(sessionID)
-	if err := s.agentManager.ResetAgentContext(ctx, executionID); err != nil {
+	// The lifecycle manager synchronously republishes setup events that arrived
+	// during session replacement. Those publications enter the orchestrator's
+	// stream handler, which acquires this same guard. Keep reset admission fenced
+	// by the reset marker and lifecycle lock, but yield the stream guard while the
+	// provider operation and its event replay run; reacquire it before any result
+	// reconciliation or failure settlement.
+	resetGuard.unlock()
+	resetErr := s.agentManager.ResetAgentContext(ctx, executionID)
+	resetGuard.relock()
+	if resetErr != nil {
 		s.logger.Error("failed to reset agent context",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName),
-			zap.Error(err))
+			zap.Error(resetErr))
 		s.reconcileFailedContextReset(ctx, taskID, session, executionID, previousACPSessionID)
-		return false
+		return settleFailure(executionID, fmt.Errorf("provider context reset: %w", resetErr))
 	}
 
 	// Clear the old resume token only after the provider reset succeeds. This
@@ -6281,7 +6324,7 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName),
 			zap.Error(err))
-		return false
+		return settleFailure(executionID, fmt.Errorf("clear resume token after context reset: %w", err))
 	}
 	if acpSessionID := s.currentACPSessionID(sessionID); acpSessionID != "" {
 		s.storeResumeToken(ctx, taskID, sessionID, executionID, acpSessionID, "")
@@ -6290,7 +6333,51 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 	// Clear the remaining persisted state (ACP session metadata, context window)
 	// after the provider reset succeeds. The token is handled explicitly above.
 	s.clearPersistedResetState(ctx, sessionID, session)
-	return true
+	return executionID, nil
+}
+
+// persistWorkflowResetFailure settles the visible failure while the caller's
+// session lifecycle lock and cancel guard still own reset admission. A queued
+// successor or deletion therefore cannot observe the reset error midway
+// through its metadata/state publication and overwrite the successor turn.
+func (s *Service) persistWorkflowResetFailure(
+	ctx context.Context,
+	taskID, sessionID, stepID, stepName, executionID string,
+	resetErr error,
+) {
+	failureCtx, cancelFailure := context.WithTimeout(
+		context.WithoutCancel(ctx), workflowResetFailureCleanupTimeout,
+	)
+	defer cancelFailure()
+	if executionID == "" {
+		if session, err := s.repo.GetTaskSession(failureCtx, sessionID); err == nil && session != nil {
+			executionID = session.AgentExecutionID
+		}
+	}
+	failureData := watcher.AgentEventData{
+		TaskID:           taskID,
+		SessionID:        sessionID,
+		AgentExecutionID: executionID,
+		ErrorMessage:     workflowResetFailureMessage,
+		FailureCode:      workflowResetFailureCode,
+		FailureDetails:   fmt.Sprintf("workflow step %q: %s", stepName, resetErr),
+	}
+	if persistErr := s.persistLastAgentError(failureCtx, failureData); persistErr != nil {
+		s.logger.Error("failed to persist workflow context reset failure",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("step_name", stepName),
+			zap.Error(persistErr))
+	}
+	cancelFailure()
+	settlementCtx, cancelSettlement := context.WithTimeout(
+		context.WithoutCancel(ctx), workflowResetFailureCleanupTimeout,
+	)
+	defer cancelSettlement()
+	// Do not pass the pre-reset session snapshot to either operation. The
+	// metadata write above must be visible in the waiting-state projection.
+	s.setSessionWaitingForInput(settlementCtx, taskID, sessionID)
+	s.publishSessionWaitingEvent(settlementCtx, taskID, sessionID, stepID)
 }
 
 // quiesceActiveResetTurn stops an in-flight turn through the internal silent
@@ -6318,11 +6405,19 @@ func (s *Service) quiesceActiveResetTurn(
 		// best-effort cancellation behavior without an expected durable ID.
 		turnID = ""
 	}
-	if _, err := s.cancelAgentSilentWithGuardActionKindExclusiveConflict(
+	operation, _, err := s.cancelAgentSilentWithGuardActionKindExclusiveConflict(
 		ctx, taskID, sessionID, resetGuard.unlock, resetGuard.relock,
 		nil, cancellationKindInternal, turnID, errContextResetCancellationConflict,
-	); err != nil {
+	)
+	if err != nil {
 		return fmt.Errorf("cancel active turn for context reset at %s: %w", stepName, err)
+	}
+	providerErr, outcomeReady := s.cancellationProviderOutcomeSnapshot(operation)
+	if !outcomeReady {
+		return fmt.Errorf("cancel active turn for context reset at %s: provider outcome unavailable", stepName)
+	}
+	if errors.Is(providerErr, agentruntime.ErrCancelEscalated) {
+		return fmt.Errorf("cancel active turn for context reset at %s: provider cancellation escalated: %w", stepName, providerErr)
 	}
 	return nil
 }

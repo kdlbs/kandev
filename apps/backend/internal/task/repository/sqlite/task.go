@@ -37,6 +37,11 @@ const forUpdateClause = " FOR UPDATE"
 // the `tasks` table directly rather than through a join alias.
 const defaultTaskAlias = "tasks"
 
+const (
+	taskWorkspaceModeInheritParent = "inherit_parent"
+	taskWorkspaceModeSharedGroup   = "shared_group"
+)
+
 type taskScanColumn struct {
 	name       string
 	selectExpr func(alias string) string
@@ -2971,20 +2976,13 @@ func (r *Repository) NextQueuedTaskForStepExcluding(ctx context.Context, feederS
 // Returns an empty list when parentID is empty (so root tasks resolve to
 // "no children" cleanly).
 func (r *Repository) ListChildren(ctx context.Context, parentID string) ([]*models.Task, error) {
-	if parentID == "" {
-		return []*models.Task{}, nil
-	}
-	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT `+taskSelectColumns("t")+`
-		FROM tasks t
-		WHERE t.parent_id = ? AND t.archived_at IS NULL AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
-		ORDER BY t.created_at ASC, t.id ASC
-	`), parentID)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	return r.scanTasks(rows)
+	return r.listChildren(ctx, parentID, false, "", 0)
+}
+
+// ListChildrenLimited returns at most limit active children without
+// materializing the complete sibling list.
+func (r *Repository) ListChildrenLimited(ctx context.Context, parentID string, limit int) ([]*models.Task, error) {
+	return r.listChildren(ctx, parentID, false, "", limit)
 }
 
 // ListChildCompletionRows returns active direct children with the compact
@@ -3011,15 +3009,82 @@ func (r *Repository) ListChildCompletionRows(ctx context.Context, parentID strin
 // unarchive cascade (phase 6) to walk a previously-archived descendant
 // subtree.
 func (r *Repository) ListChildrenIncludingArchived(ctx context.Context, parentID string) ([]*models.Task, error) {
+	return r.listChildren(ctx, parentID, true, "", 0)
+}
+
+// ListChildrenIncludingArchivedLimited returns at most limit children,
+// including archived rows, for bounded cascade recovery.
+func (r *Repository) ListChildrenIncludingArchivedLimited(ctx context.Context, parentID string, limit int) ([]*models.Task, error) {
+	return r.listChildren(ctx, parentID, true, "", limit)
+}
+
+// ListStructuralChildrenLimited returns every direct child row, including
+// ephemeral and automation-origin rows. Structural lifecycle validation must
+// inspect these rows before a parent is deleted.
+func (r *Repository) ListStructuralChildrenLimited(
+	ctx context.Context, parentID string, limit int,
+) ([]*models.Task, error) {
 	if parentID == "" {
 		return []*models.Task{}, nil
+	}
+	if limit <= 0 {
+		limit = 1
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT `+taskSelectColumns("t")+`
 		FROM tasks t
-		WHERE t.parent_id = ? AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
+		WHERE t.parent_id = ?
 		ORDER BY t.created_at ASC, t.id ASC
-	`), parentID)
+		LIMIT ?
+	`), parentID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	return r.scanTasks(rows)
+}
+
+// ListChildrenIncludingArchivedByCascadeLimited returns at most limit
+// children belonging to cascadeID, including archived rows.
+func (r *Repository) ListChildrenIncludingArchivedByCascadeLimited(
+	ctx context.Context,
+	parentID, cascadeID string,
+	limit int,
+) ([]*models.Task, error) {
+	return r.listChildren(ctx, parentID, true, cascadeID, limit)
+}
+
+func (r *Repository) listChildren(
+	ctx context.Context,
+	parentID string,
+	includeArchived bool,
+	cascadeID string,
+	limit int,
+) ([]*models.Task, error) {
+	if parentID == "" {
+		return []*models.Task{}, nil
+	}
+	archivedClause := " AND t.archived_at IS NULL"
+	if includeArchived {
+		archivedClause = ""
+	}
+	cascadeClause := ""
+	args := []any{parentID}
+	if cascadeID != "" {
+		cascadeClause = " AND t.archived_by_cascade_id = ?"
+		args = append(args, cascadeID)
+	}
+	limitClause := ""
+	if limit > 0 {
+		limitClause = " LIMIT ?"
+		args = append(args, limit)
+	}
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT `+taskSelectColumns("t")+`
+		FROM tasks t
+		WHERE t.parent_id = ?`+archivedClause+cascadeClause+` AND t.is_ephemeral = 0`+andNotAutomationOriginT+`
+		ORDER BY t.created_at ASC, t.id ASC`+limitClause+`
+	`), args...)
 	if err != nil {
 		return nil, err
 	}
@@ -3039,6 +3104,25 @@ func (r *Repository) ReparentDirectChildren(ctx context.Context, oldParentID, ne
 		UPDATE tasks SET parent_id = ?, updated_at = ?
 		WHERE parent_id = ?
 	`), newParentID, time.Now().UTC(), oldParentID)
+	return err
+}
+
+// ReparentDirectChildrenInWorkspace limits no-cascade reparenting to the
+// authorized root's workspace so a corrupt cross-workspace parent edge cannot
+// mutate an unrelated task.
+func (r *Repository) ReparentDirectChildrenInWorkspace(
+	ctx context.Context, oldParentID, newParentID, workspaceID string,
+) error {
+	if oldParentID == "" {
+		return nil
+	}
+	if workspaceID == "" {
+		return errors.New("workspace id is required")
+	}
+	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET parent_id = ?, updated_at = ?
+		WHERE parent_id = ? AND workspace_id = ?
+	`), newParentID, time.Now().UTC(), oldParentID, workspaceID)
 	return err
 }
 
@@ -3201,6 +3285,87 @@ func (r *Repository) ListTasksByWorkspaceWithArchiveMode(ctx context.Context, wo
 	}
 
 	return tasks, total, nil
+}
+
+// ListTasksForDeletion returns every task in a workspace or workflow,
+// including archived, ephemeral, and automation-origin tasks. Destructive
+// callers use this contract instead of the user-facing list filters.
+func (r *Repository) ListTasksForDeletion(
+	ctx context.Context,
+	workspaceID, workflowID string,
+	page, pageSize int,
+) ([]*models.Task, int, error) {
+	ctx, span := tracing.Tracer("kandev-db").Start(ctx, "db.ListTasksForDeletion")
+	defer span.End()
+	offset := (page - 1) * pageSize
+	if offset < 0 {
+		offset = 0
+	}
+	if pageSize <= 0 {
+		pageSize = 1
+	}
+	rows, total, err := r.queryAllTasks(ctx, workspaceID, "", workflowID, "", pageSize, offset, "")
+	if err != nil {
+		return nil, 0, err
+	}
+	defer func() { _ = rows.Close() }()
+	tasks, err := r.scanTasks(rows)
+	if err != nil {
+		return nil, 0, err
+	}
+	return tasks, total, nil
+}
+
+// RestoreTaskParentIfUnchanged restores only the structural fields changed by
+// no-cascade deletion. The row lock and parent comparison are in one
+// transaction so compensation cannot overwrite a concurrent reparent or edit.
+func (r *Repository) RestoreTaskParentIfUnchanged(
+	ctx context.Context,
+	taskID, expectedParentID, restoredParentID string,
+	restoredWorkspaceMode string,
+) error {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	query := `SELECT parent_id, metadata FROM tasks WHERE id = ?`
+	if dialect.IsPostgres(r.db.DriverName()) {
+		query += ` FOR UPDATE`
+	}
+	var currentParent sql.NullString
+	var metadataJSON []byte
+	if err := tx.QueryRowxContext(ctx, r.db.Rebind(query), taskID).Scan(&currentParent, &metadataJSON); err != nil {
+		return err
+	}
+	if currentParent.String != expectedParentID {
+		return fmt.Errorf("task %s parent changed during compensation", taskID)
+	}
+
+	metadata := map[string]interface{}{}
+	if len(metadataJSON) > 0 {
+		if err := json.Unmarshal(metadataJSON, &metadata); err != nil {
+			return fmt.Errorf("decode task %s metadata during compensation: %w", taskID, err)
+		}
+	}
+	if restoredWorkspaceMode == taskWorkspaceModeInheritParent {
+		if workspace, ok := metadata["workspace"].(map[string]interface{}); ok &&
+			workspace["mode"] == taskWorkspaceModeSharedGroup {
+			workspace["mode"] = restoredWorkspaceMode
+		}
+	}
+	metadataJSON, err = json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("encode task %s metadata during compensation: %w", taskID, err)
+	}
+	_, err = tx.ExecContext(ctx, r.db.Rebind(`
+		UPDATE tasks SET parent_id = ?, metadata = ?, updated_at = ? WHERE id = ?
+	`), restoredParentID, string(metadataJSON), r.nowUTC(), taskID)
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // queryAllTasks fetches all tasks (no search) for a workspace with pagination.
@@ -3540,6 +3705,58 @@ func (r *Repository) ArchiveTask(ctx context.Context, id string) error {
 func (r *Repository) ArchiveTaskIfActive(ctx context.Context, id, cascadeID string) (bool, error) {
 	_, changed, err := r.ArchiveTaskIfActiveWithVacatedStep(ctx, id, cascadeID)
 	return changed, err
+}
+
+// ArchiveTaskIfAutoArchiveEligible atomically archives a candidate returned
+// by ListTasksForAutoArchive only while its task timestamp is unchanged and
+// its current workflow step still has an active auto-archive policy.
+func (r *Repository) ArchiveTaskIfAutoArchiveEligible(
+	ctx context.Context,
+	id string,
+	expectedUpdatedAt time.Time,
+	cascadeID string,
+) (bool, error) {
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := time.Now().UTC()
+	query := fmt.Sprintf(`
+		UPDATE tasks AS t
+		SET archived_at = ?, archived_by_cascade_id = ?, updated_at = ?
+		WHERE t.id = ? AND t.archived_at IS NULL AND t.updated_at = ?
+			AND EXISTS (
+				SELECT 1
+				FROM workflow_steps ws
+				WHERE ws.id = t.workflow_step_id
+					AND ws.auto_archive_after_hours > 0
+					AND t.updated_at <= %s
+			)
+	`, dialect.NowMinusHours(r.db.DriverName(), "ws.auto_archive_after_hours"))
+	result, err := tx.ExecContext(ctx, r.db.Rebind(query), now, cascadeID, now, id, expectedUpdatedAt)
+	if err != nil {
+		return false, err
+	}
+	rows, _ := result.RowsAffected()
+	if rows == 0 {
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	sessions, err := r.taskQueueSessionsInTx(ctx, tx, id)
+	if err != nil {
+		return false, err
+	}
+	if err := r.purgeTaskQueueInTx(ctx, tx, id, sessions, false); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	r.notifyTaskQueuePurged(ctx, id)
+	return true, nil
 }
 
 // ArchiveTaskIfActiveWithVacatedStep archives an active task and returns the

@@ -143,6 +143,50 @@ task-listing mode.
   label and a touch target at least 44 CSS pixels high, with visible save
   controls, safe-area clearance, and no horizontal document overflow.
 
+## Grouped display settings extension
+
+The user accepted this layout on 2026-09-13. Delivery is tracked separately in
+[Grouped homepage settings](../../../plans/homepage-view-settings/plan.md).
+Existing requirements 001 to 003 and their completed plans retain their scope.
+
+### REQ-UI-TASK-LISTING-DISPLAY-PREFERENCES-004: Expandable display settings
+
+**Intent:** Let users scan current display choices without showing every control.
+
+#### Acceptance criteria
+
+- **AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-004.1:** On opening the display
+  surface, applicable groups shall start collapsed. Each complete header shall
+  toggle its group independently. Changing a value shall not close its group.
+  Closing and reopening the surface shall reset expansion, without resetting values.
+- **AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-004.2:** Board settings shall group
+  Workflow, Repository, Priority, and registered plugin filters under Filters,
+  followed by Sort and Preview panel. Existing page visibility rules shall
+  remain: List retains List rows, Threads retains only its applicable workflow
+  filter, and board-only controls remain board-only. Empty groups shall be omitted.
+- **AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-004.3:** Collapsed summaries shall
+  show current workflow/repository names or their All labels, selected priority
+  labels or All priorities, the current sort label, and preview On/Off.
+  List rows shall summarize task details On/Off. Active plugin filters shall
+  remain visible in the Filters summary. Summaries shall update with setting
+  changes and shall omit controls unavailable on the current surface.
+- **AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-004.4:** Expanding or collapsing
+  groups shall not change filters, task ordering, stored preferences, or tasks.
+  Existing loading, disabled, empty, and setting-save behavior shall remain.
+  Missing names shall use a neutral unavailable/loading summary, never falsely
+  report All or clear a selection. All new host copy shall be localized.
+- **AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-004.5:** Headers shall support keyboard
+  activation, expose expanded state and controlled content, and retain visible
+  focus. Collapsed controls shall not be focusable. Nested choices shall remain
+  usable; dismissing the surface shall return focus to its opener.
+- **AC-UI-TASK-LISTING-DISPLAY-PREFERENCES-004.6:** Phone users shall access the
+  groups inside the existing menu drawer, using the same setting values and
+  existing phone visibility rules. Headers and changed touch controls shall have
+  hit targets of at least 44 CSS pixels. Expanded content shall use the drawer's
+  scroll region, remain within its viewport and safe area, and produce no
+  horizontal document overflow. Phone Board workflow selection remains in its
+  existing workflow navigation; Columns remains reachable outside these groups.
+
 ## Out of scope
 
 - Syncing the remembered listing or exact recent task between devices.

@@ -99,3 +99,25 @@ Read a supporting reference only when its topic is needed:
 - `references/events-and-recovery.md` for events, reconnect, and retries.
 - `references/security.md` for opaque-origin and source safety rules.
 - `references/ui-patterns.md` for responsive and accessible UI patterns.
+
+## Distribution checklist
+
+When the user asks for a portable canvas, keep the distribution boundary
+separate from authoring and runtime state:
+
+1. Add `distribution.schema_version: 1`, `distribution.kind: canvas`, a
+   license, and `source_mode: static` or `source_mode: project`.
+2. Keep `README.md`, the manifest, the application entry, and every local asset
+   in the package. Use project mode only when the retained project is complete
+   and bounded below `distribution/source/`.
+3. Publish a valid release before offering a bundle or source download. The
+   host prepares both archives from that immutable release and does not include
+   screenshots.
+4. Add screenshots later as ordered `previews` objects in a registry entry.
+   The first preview is the cover, canvas entries require one to eight images,
+   and plugin entries may omit images.
+
+The authoring tools do not create repositories, releases, registry entries, or
+pull requests. Report those manual follow-up steps to the user. Do not claim
+that a local archive or build is published until the Kandev release flow
+confirms it.

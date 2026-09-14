@@ -449,6 +449,9 @@ func TestServerModeTask_RegistersCorrectTools(t *testing.T) {
 	assert.Contains(t, tools, "get_diagnostic_bundle_kandev")
 	assert.Contains(t, tools, "get_task_mr_automation_kandev")
 	assert.Contains(t, tools, "update_task_mr_automation_kandev")
+	assert.Contains(t, tools, "link_task_pr_kandev")
+	assert.Contains(t, tools, "unlink_task_pr_kandev")
+	assert.Contains(t, tools, "replace_task_pr_kandev")
 
 	// Task mode should have plan tools
 	assert.Contains(t, tools, "create_task_plan_kandev")
@@ -658,6 +661,9 @@ func TestServerModeTask_AbsentProvidersFailClosedForReviewAutomation(t *testing.
 	assert.NotContains(t, tools, "update_task_pr_automation_kandev")
 	assert.NotContains(t, tools, "get_task_mr_automation_kandev")
 	assert.NotContains(t, tools, "update_task_mr_automation_kandev")
+	assert.NotContains(t, tools, "link_task_pr_kandev")
+	assert.NotContains(t, tools, "unlink_task_pr_kandev")
+	assert.NotContains(t, tools, "replace_task_pr_kandev")
 }
 
 func TestServerModeTask_ProviderMembership(t *testing.T) {
@@ -682,11 +688,15 @@ func TestServerModeTask_ProviderMembership(t *testing.T) {
 			t.Cleanup(backend.Close)
 			s := New(backend, "test-session", "test-task", 10005, log, "", false, ModeTask, tt.providers)
 			tools := getRegisteredToolNames(s)
+			wantLinkTools := tt.wantPR || tt.wantMR
 			assert.Equal(t, tt.wantPR, containsTool(tools, "get_task_pr_automation_kandev"))
 			assert.Equal(t, tt.wantPR, containsTool(tools, "update_task_pr_automation_kandev"))
 			assert.Equal(t, tt.wantPR, containsTool(tools, "report_pr_auto_fix_outcome_kandev"))
 			assert.Equal(t, tt.wantMR, containsTool(tools, "get_task_mr_automation_kandev"))
 			assert.Equal(t, tt.wantMR, containsTool(tools, "update_task_mr_automation_kandev"))
+			assert.Equal(t, wantLinkTools, containsTool(tools, "link_task_pr_kandev"))
+			assert.Equal(t, wantLinkTools, containsTool(tools, "unlink_task_pr_kandev"))
+			assert.Equal(t, wantLinkTools, containsTool(tools, "replace_task_pr_kandev"))
 			assert.Contains(t, tools, "stop_task_kandev")
 		})
 	}
@@ -705,6 +715,9 @@ func TestServerSetProvidersPreservesModeAndRebuildsTools(t *testing.T) {
 	assert.Contains(t, tools, "set_task_title_kandev")
 	assert.NotContains(t, tools, "get_task_pr_automation_kandev")
 	assert.Contains(t, tools, "get_task_mr_automation_kandev")
+	assert.Contains(t, tools, "link_task_pr_kandev")
+	assert.Contains(t, tools, "unlink_task_pr_kandev")
+	assert.Contains(t, tools, "replace_task_pr_kandev")
 }
 
 type providerRefreshTestSession struct {
@@ -925,9 +938,8 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	// 1 add_workspace_sources + 1 update_repository_base_branch +
 	// 1 step_complete (ADR 0015) + 1 interaction + 4 plan + 3 walkthrough +
 	// 1 publish_review_findings + 1 related-tasks + 1 diagnostic bundle
-	// + 2 task-dependency (add/remove) + 1 rich-output + 1 exact stale-session
-	// recovery + 2 durable delivery recovery tools plus the current upstream
-	// task-mode catalog = 42.
+	// + 2 task-dependency (add/remove) + 3 task change-link operations + 1 rich-output
+	// + 1 exact stale-session recovery + 2 durable delivery recovery tools = 45.
 	// Task-document tools (list/get/write) are office-only.
 	assert.Contains(t, tools, "step_complete_kandev", "ADR 0015 explicit-completion signal must be registered in task mode")
 	assert.Contains(t, tools, "show_walkthrough_kandev", "walkthrough tool must be registered in task mode")
@@ -941,7 +953,10 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	assert.Contains(t, tools, "settle_stale_session_kandev")
 	assert.Contains(t, tools, "get_message_delivery_kandev")
 	assert.Contains(t, tools, "retry_message_delivery_kandev")
-	assert.Equal(t, 42, len(tools))
+	assert.Contains(t, tools, "link_task_pr_kandev")
+	assert.Contains(t, tools, "unlink_task_pr_kandev")
+	assert.Contains(t, tools, "replace_task_pr_kandev")
+	assert.Equal(t, 45, len(tools))
 }
 
 func TestServerStepCompleteTool_TaskAndOfficeOnlyAndDiscoverable(t *testing.T) {

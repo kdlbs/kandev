@@ -1,0 +1,269 @@
+schema_version: 1
+owner: internal/task/archivecascade/registry
+purpose: Canonical namespaced states, dispositions, policies, and legal transitions.
+conventions:
+  state: Lifecycle/claim state of the named row; never carries a disposition.
+  disposition: Outcome or routing decision attached to a state/evidence row.
+  policy: Admission or exhaustion policy, never a row state.
+  unknown: Ambiguous external outcome; never treated as success.
+  namespaces: Every value is valid only under its declared table/kind.
+registries:
+  creation_step:
+    state: [planned, running, retry_wait, unknown, failed, succeeded, armed, cancelled]
+    disposition: [none, workspace_deleted]
+    transitions:
+      planned: [running]
+      retry_wait: [running]
+      running: [retry_wait, unknown, failed, succeeded, armed]
+      unknown: [running, succeeded, retry_wait, failed]
+      armed: [cancelled]
+      failed: []
+      succeeded: []
+      cancelled: []
+    constraints:
+      - armed is valid only for launch_intent.
+      - cancelled is valid only for an armed launch_intent during workspace deletion.
+      - failed requires absent_proven evidence.
+  creation_operation:
+    state: [preparing, preparing-release, completing, completed, aborted]
+    disposition: [none, request_id_conflict, stale_revision, invalid_evidence]
+    transitions:
+      preparing: [preparing-release, completing, aborted]
+      preparing-release: [preparing, aborted]
+      completing: [completed]
+      completed: []
+      aborted: []
+  external_id_release_operation:
+    state: [preparing, completed, aborted, workspace_deleted]
+    disposition: [none, request_id_conflict, stale_revision, invalid_evidence]
+    transitions:
+      preparing: [completed, aborted, workspace_deleted]
+      completed: []
+      aborted: []
+      workspace_deleted: []
+  workspace_deletion_step:
+    state: [pending, running, retry_wait, unknown, succeeded]
+    disposition: [none, rehome_pending, confirmed_missing, delete_owned, rehome_owned, blocked_missing]
+    transitions:
+      pending: [running, succeeded]
+      running: [retry_wait, unknown, succeeded]
+      retry_wait: [running]
+      unknown: [running, retry_wait, succeeded]
+      succeeded: []
+    constraints:
+      - rehome_pending is a retry_wait disposition, not a state.
+      - unknown -> succeeded requires exact untouched proof and disposition rehome_owned.
+      - unknown -> retry_wait requires ambiguous proof and disposition rehome_pending.
+      - blocked_missing is retained evidence and never means success.
+  task_cleanup_job:
+    state: [prepared, pending, running, retry_wait, unknown, restore_pending, restoring, restore_retry_wait, failed, cancelled, restored, succeeded]
+    policy: [cascade_retry, bounded_terminal]
+    target: [cleanup, restore]
+    disposition: [none, cleanup, restore, transferred, missing_group_snapshot, blocked_missing]
+    transitions:
+      prepared: [pending, cancelled]
+      pending: [running, cancelled]
+      running: [retry_wait, unknown, failed, cancelled, restored, succeeded]
+      retry_wait: [running, cancelled]
+      unknown: [retry_wait, cancelled, restored, succeeded, restore_retry_wait]
+      restore_pending: [restoring, restore_retry_wait, cancelled]
+      restoring: [restore_retry_wait, restored, unknown, failed, cancelled]
+      restore_retry_wait: [restoring, cancelled]
+      failed: [cancelled]
+      cancelled: []
+      restored: []
+      succeeded: []
+    transition_guards:
+      - from: prepared
+        to: cancelled
+        when: unarchive or workspace deletion wins before any physical I/O claim; no proof rows exist.
+      - from: pending
+        to: running
+        when: a lifecycle/claim-generation-fenced claim commits and the activation marker is present.
+      - from: pending
+        to: cancelled
+        when: unarchive or workspace deletion wins while unclaimed and no physical I/O exists.
+      - from: running
+        to: retry_wait
+        when: a transient failure leaves no committed outcome; any policy below exhaustion.
+      - from: running
+        to: unknown
+        when: lease expiry or ambiguous I/O; the outcome is never assumed.
+      - from: running
+        to: failed
+        when: policy=bounded_terminal and attempts>=8 and committed failure; cascade_retry never enters failed.
+      - from: running
+        to: cancelled
+        when: target=restore and no physical I/O claim exists; cleanup claims with possible I/O become unknown.
+      - from: running
+        to: restored
+        when: target=restore and exact fenced restore proof is committed.
+      - from: running
+        to: succeeded
+        when: target=cleanup and exact fenced cleanup proof is committed.
+      - from: retry_wait
+        to: running
+        when: a lifecycle/claim-generation-fenced claim commits.
+      - from: retry_wait
+        to: cancelled
+        when: unarchive or workspace deletion wins while unclaimed and no physical I/O exists.
+      - from: unknown
+        to: retry_wait
+        when: target=cleanup and safe retry under the lifecycle fence.
+      - from: unknown
+        to: cancelled
+        when: target=restore and fenced no-cleanup proof is committed.
+      - from: unknown
+        to: restored
+        when: target=restore and fenced restore proof is committed.
+      - from: unknown
+        to: succeeded
+        when: target=cleanup and fenced cleanup proof is committed.
+      - from: unknown
+        to: restore_retry_wait
+        when: target=restore and safe retry under the lifecycle fence.
+      - from: restore_pending
+        to: restoring
+        when: target=restore and materialization admission is claimed under the fence.
+      - from: restore_pending
+        to: restore_retry_wait
+        when: target=restore and a retryable materialization failure leaves no committed outcome.
+      - from: restore_pending
+        to: cancelled
+        when: workspace deletion supersedes before the claim.
+      - from: restoring
+        to: restore_retry_wait
+        when: a transient failure leaves no committed outcome.
+      - from: restoring
+        to: restored
+        when: target=restore and exact fenced restore proof is committed.
+      - from: restoring
+        to: unknown
+        when: lease expiry or ambiguous I/O; the outcome is never assumed.
+      - from: restoring
+        to: failed
+        when: policy=bounded_terminal and attempts>=8 and committed failure; cascade_retry never enters failed.
+      - from: restoring
+        to: cancelled
+        when: workspace deletion supersedes with no committed outcome.
+      - from: restore_retry_wait
+        to: restoring
+        when: a lifecycle/claim-generation-fenced claim commits.
+      - from: restore_retry_wait
+        to: cancelled
+        when: workspace deletion supersedes while unclaimed and no physical I/O exists.
+      - from: failed
+        to: cancelled
+        when: policy=bounded_terminal and deletion supersedes.
+    constraints:
+      - cleanup target uses prepared|pending|running|retry_wait|unknown; restore target uses restore_pending|restoring|restore_retry_wait|unknown.
+      - cascade_retry never enters failed; retryable failures use retry_wait or unknown. bounded_terminal alone may enter failed at attempts>=8, and failed exits only to cancelled under deletion supersession.
+      - restored requires target=restore proof; succeeded requires target=cleanup proof; cancelled requires a no-I/O or deletion-supersession guard.
+      - transferred is evidence of cleanup ownership, not success.
+      - missing_group_snapshot and blocked_missing are restore evidence, not success.
+  materialization_claim:
+    state: [planned, running, retry_wait, unknown, blocked, transferred, succeeded, cancelled]
+    disposition: [none, cleanup, restore, transferred]
+    transitions:
+      planned: [running, cancelled]
+      running: [retry_wait, unknown, succeeded, cancelled, transferred]
+      retry_wait: [running, cancelled]
+      unknown: [running, blocked, transferred, cancelled]
+      blocked: [running, cancelled]
+      transferred: []
+      succeeded: []
+      cancelled: []
+  launch_dispatch_claim:
+    state: [planned, running, retry_wait, unknown, blocked, transferred, succeeded, cancelled]
+    disposition: [none, cleanup, transferred]
+    transitions:
+      planned: [running, cancelled]
+      running: [retry_wait, unknown, succeeded, cancelled, transferred]
+      retry_wait: [running, cancelled]
+      unknown: [running, transferred, cancelled]
+      blocked: [running, cancelled]
+      transferred: []
+      succeeded: []
+      cancelled: []
+  resource_marker:
+    state: [cleanup_claimed, cleanup_unknown, restore_claimed, restore_unknown, cleaned, cleanup_cancelled, restored]
+    disposition: [none, cleanup, restore, transferred]
+    transitions:
+      cleanup_claimed: [cleanup_unknown, cleaned, cleanup_cancelled]
+      cleanup_unknown: [cleanup_claimed, cleaned, cleanup_cancelled]
+      restore_claimed: [restore_unknown, restored, cleanup_cancelled]
+      restore_unknown: [restore_claimed, restored, cleanup_cancelled]
+      cleaned: []
+      cleanup_cancelled: []
+      restored: []
+  workspace_group:
+    state: [active, cleanup_pending, cleanup_failed, blocked_missing_member, deleted]
+    disposition: [none, owner_transferred, confirmed_missing, blocked_missing]
+    transitions:
+      active: [cleanup_pending, blocked_missing_member, deleted]
+      cleanup_pending: [cleanup_failed, blocked_missing_member, deleted]
+      cleanup_failed: [cleanup_pending, blocked_missing_member, deleted]
+      blocked_missing_member: [active, deleted]
+      deleted: []
+  runtime:
+    state: [starting, running, stopping, stopped, failed, unknown]
+    disposition: [none, cleanup, transferred]
+    transitions:
+      starting: [running, failed, unknown]
+      running: [stopping, failed, unknown]
+      stopping: [stopped, failed, unknown]
+      stopped: []
+      failed: [stopping, stopped, unknown]
+      unknown: [stopping, stopped, failed]
+  archive_operation:
+    state: [preparing, archiving, archived, unarchiving, restore_pending, retry_wait, completed, aborted, foreign_scope_blocked, foreign_scope_resolved, workspace_deleted]
+    disposition: [none, request_id_conflict, stale_revision, invalid_evidence, delete_owned, confirmed_missing, foreign_scope_resolved]
+    transitions:
+      preparing: [archiving, aborted, foreign_scope_blocked, workspace_deleted]
+      archiving: [retry_wait, archived, foreign_scope_blocked, workspace_deleted]
+      archived: [unarchiving, workspace_deleted]
+      unarchiving: [retry_wait, restore_pending, workspace_deleted]
+      restore_pending: [unarchiving, retry_wait, workspace_deleted]
+      retry_wait: [archiving, unarchiving, workspace_deleted]
+      foreign_scope_blocked: [foreign_scope_resolved, workspace_deleted]
+      completed: []
+      aborted: []
+      foreign_scope_resolved: []
+      workspace_deleted: []
+    transition_guards:
+      - from: preparing
+        to: workspace_deleted
+        when: uncommitted branch - workspace deletion wins before any member/effect commit; disposition=delete_owned; the reservation barrier is released and no membership/cleanup proof is retained.
+      - from: preparing
+        to: workspace_deleted
+        when: committed-membership branch - workspace deletion wins after the membership marker commits; disposition=delete_owned; the committed membership and its cleanup proof are retained as delete-owned evidence.
+      - from: archiving
+        to: workspace_deleted
+        when: committed membership is always present; delete-owned dispositions retain membership/cleanup proof.
+      - from: archived
+        to: workspace_deleted
+        when: delete-owned dispositions retain membership/cleanup proof.
+      - from: unarchiving
+        to: workspace_deleted
+        when: delete-owned dispositions retain membership/cleanup proof.
+      - from: restore_pending
+        to: workspace_deleted
+        when: delete-owned dispositions retain membership/cleanup proof.
+      - from: retry_wait
+        to: workspace_deleted
+        when: delete-owned dispositions retain membership/cleanup proof.
+      - from: foreign_scope_blocked
+        to: workspace_deleted
+        when: only deleted-workspace edges are removed and foreign members are rehomed or left foreign-scope-owned.
+    constraints:
+      - preparing -> workspace_deleted has exactly two delete-owned branches: uncommitted preparation retains no membership/cleanup proof and releases the barrier, while committed membership retains its membership/cleanup proof; neither branch emits a lifecycle task event or permits restore replay.
+      - archiving|archived|unarchiving|restore_pending|retry_wait -> workspace_deleted always has committed membership; delete-owned proof is retained with no lifecycle task event and no restore replay.
+      - archive_operation aborted is legal only from preparing before any member/effect commit.
+      - archive_operation restore_pending is entered only when unarchive materialization is absent.
+validation:
+  reject_unqualified_values: true
+  reject_unknown_values: true
+  reject_state_disposition_mixing: true
+  reject_transition_not_in_registry: true
+  reject_unknown_as_success: true
+  require_namespace_in_tests_and_designs: true

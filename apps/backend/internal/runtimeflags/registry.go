@@ -70,6 +70,23 @@ var registrations = []runtimeFlagRegistration{
 	},
 	{
 		definition: RuntimeFlagDefinition{
+			Key:         "features.needsYouInbox",
+			EnvVar:      "KANDEV_FEATURES_NEEDS_YOU_INBOX",
+			Kind:        KindFeature,
+			Label:       "Needs-you Inbox",
+			Description: "Enables a workspace-scoped sidebar destination listing exactly the answerable clarification bundles for the active workspace, independent of Office mode.",
+			Stability:   StabilityExperimental,
+			RiskLevel:   RiskLow,
+			RiskDescription: "The Inbox is a new read surface plus a per-user dismiss/snooze sidecar; it never mutates " +
+				"the underlying clarification record. Still evolving and should be reviewed before relying on it.",
+			RestartRequired: true,
+			Mutable:         true,
+		},
+		read:  func(cfg *config.Config) bool { return cfg.Features.NeedsYouInbox },
+		apply: func(cfg *config.Config, value bool) { cfg.Features.NeedsYouInbox = value },
+	},
+	{
+		definition: RuntimeFlagDefinition{
 			Key:         "features.auth",
 			EnvVar:      "KANDEV_FEATURES_AUTH",
 			Kind:        KindFeature,

@@ -27,6 +27,7 @@ import { updateUserSettings } from "@/lib/api";
 import type { Theme } from "@/lib/settings/types";
 import type { UserSettingsState } from "@/lib/state/slices/settings/types";
 import { ArchiveConfirmationSettings } from "@/components/settings/archive-confirmation-settings";
+import { CreationAutoFocusSettings } from "@/components/settings/creation-auto-focus-settings";
 import { PreventAutoStartAgentSettings } from "@/components/settings/prevent-auto-start-agent-settings";
 import { LanguageSettings } from "@/components/settings/language-settings";
 import { MCPTaskAgentProfileDefaultSettings } from "@/components/settings/mcp-task-agent-profile-default-settings";
@@ -233,6 +234,7 @@ export function TaskActionsSettings() {
       >
         <div className="space-y-4">
           <PreventAutoStartAgentSettings />
+          <CreationAutoFocusSettings />
           <MCPTaskAgentProfileDefaultSettings />
           <AgentGeneratedTaskTitleSettings />
           <ArchiveConfirmationSettings />

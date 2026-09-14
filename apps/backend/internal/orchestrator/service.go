@@ -744,6 +744,9 @@ type Service struct {
 	// session.ensure). Nil = unscoped.
 	taskAccessCheck func(ctx context.Context, taskID string) error
 
+	// taskLifecycleDeleter owns cleanup of automation tasks abandoned before
+	// their run was durably recorded.
+	taskLifecycleDeleter taskLifecycleDeleter
 	// retrackedSessionCheck reports whether the lifecycle manager
 	// successfully re-tracked a session during this backend's own startup
 	// recovery pass (AC-EXECUTORS-SURVIVAL-003.1). Consulted by startup
@@ -2070,6 +2073,11 @@ func (s *Service) SetSessionAccessChecker(check func(ctx context.Context, sessio
 // than a session. Same contract: nil for identity-less internal callers.
 func (s *Service) SetTaskAccessChecker(check func(ctx context.Context, taskID string) error) {
 	s.taskAccessCheck = check
+}
+
+// SetTaskLifecycleDeleter wires durable task cleanup for automation rollback.
+func (s *Service) SetTaskLifecycleDeleter(deleter taskLifecycleDeleter) {
+	s.taskLifecycleDeleter = deleter
 }
 
 // SetRetrackedSessionChecker installs the lifecycle manager's query for
