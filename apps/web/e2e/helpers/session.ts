@@ -97,6 +97,28 @@ export async function waitForSessionState(
   );
 }
 
+export async function waitForArchiveCancelledSession(
+  apiClient: ApiClient,
+  taskId: string,
+  sessionId: string,
+  message: string,
+  timeout = 30_000,
+): Promise<void> {
+  await pollUntil(
+    async () => {
+      const { sessions } = await apiClient.listTaskSessions(taskId);
+      const session = sessions.find((candidate) => candidate.id === sessionId);
+      return {
+        state: session?.state ?? null,
+        errorMessage: session?.error_message ?? null,
+      };
+    },
+    (result) => result.state === "CANCELLED" && result.errorMessage === "task tree archived",
+    timeout,
+    message,
+  );
+}
+
 export async function waitForSessionEnvironment(
   apiClient: ApiClient,
   options: {

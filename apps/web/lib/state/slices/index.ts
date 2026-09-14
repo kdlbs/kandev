@@ -142,6 +142,12 @@ export type {
   QueueState,
 } from "./session/types";
 export type {
+  WorkspaceRestorationAttempt,
+  WorkspaceRestorationInput,
+  WorkspaceRestorationState,
+  WorkspaceRestorationStatus,
+} from "./session-runtime/workspace-restoration";
+export type {
   TerminalState,
   ShellState,
   ProcessStatusEntry,

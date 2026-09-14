@@ -141,15 +141,16 @@ function makePlanItem(onPlanSelect: () => void): MentionItem {
   };
 }
 
-export type PromptInsertMode = "context" | "inline";
+export type PromptInsertMode = "context" | "inline" | "reference";
 
 /**
  * Build a prompt mention item.
  *
  * - `"context"` (default): delete the `@query` text and notify `onPromptSelect`
  *   so the caller can attach the prompt as context (used by chat).
- * - `"inline"`: replace the `@query` text with the prompt's full content
- *   (used by task-create where there is no context store yet).
+ * - `"inline"`: replace the `@query` text with the prompt's full content.
+ * - `"reference"`: replace the `@query` text with the canonical `@name`
+ *   reference while leaving definition expansion to the server.
  *
  * Exported for unit tests.
  */
@@ -166,9 +167,13 @@ export function makePromptItem(
       prompt.content.length > 100 ? prompt.content.slice(0, 100) + "..." : prompt.content,
     onSelect: (input, value, triggerStart, onChange) => {
       const cursorPos = input.getSelectionStart();
-      if (mode === "inline") {
-        const insertion = prompt.content;
-        onChange(value.substring(0, triggerStart) + insertion + value.substring(cursorPos));
+      if (mode === "inline" || mode === "reference") {
+        const insertion = mode === "reference" ? `@${prompt.name}` : prompt.content;
+        const nextValue = value.substring(0, triggerStart) + insertion + value.substring(cursorPos);
+        if (mode === "reference") {
+          input.insertText(insertion, triggerStart, cursorPos);
+        }
+        onChange(nextValue);
         const caret = triggerStart + insertion.length;
         requestAnimationFrame(() => {
           input.setSelectionRange(caret, caret);
@@ -363,50 +368,69 @@ function useMentionItems({
   }, [planItem, promptItems, fileItems, query]);
 }
 
-export function useInlineMention({
-  inputRef,
-  value,
-  onChange,
-  sessionId,
-  onPlanSelect,
-  onFileSelect,
-  onPromptSelect,
-  promptInsertMode = "context",
-}: UseInlineMentionParams) {
-  const [isOpen, setIsOpen] = useState(false);
-  const [position, setPosition] = useState<Position | null>(null);
-  const [triggerStart, setTriggerStart] = useState<number>(-1);
-  const [query, setQuery] = useState("");
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const { schedule: scheduleMentionChange, invalidate: invalidateMentionChange } =
-    useMentionChangeScheduler();
-
-  const { prompts } = useCustomPrompts();
-  const { fileResults, isLoading } = useFileSearch(sessionId, isOpen, query);
-  const filteredItems = useMentionItems({
-    query,
-    fileResults,
-    prompts,
-    onPlanSelect,
-    onFileSelect,
-    onPromptSelect,
-    promptInsertMode,
-  });
-
+function useResetMentionSelection(
+  query: string,
+  itemCount: number,
+  setSelectedIndex: (index: number) => void,
+) {
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     setSelectedIndex(0);
-  }, [query, filteredItems.length]);
+  }, [query, itemCount, setSelectedIndex]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+}
 
+type EmptyMentionStateOptions = {
+  isOpen: boolean;
+  isLoading: boolean;
+  itemCount: number;
+  queryLength: number;
+  setIsOpen: (open: boolean) => void;
+  setTriggerStart: (start: number) => void;
+  setQuery: (query: string) => void;
+};
+
+function useCloseEmptyMention({
+  isOpen,
+  isLoading,
+  itemCount,
+  queryLength,
+  setIsOpen,
+  setTriggerStart,
+  setQuery,
+}: EmptyMentionStateOptions) {
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (!isOpen || isLoading) return;
-    if (filteredItems.length === 0 && query.length >= NO_RESULTS_CLOSE_THRESHOLD) {
+    if (itemCount === 0 && queryLength >= NO_RESULTS_CLOSE_THRESHOLD) {
       clearMentionState(setIsOpen, setTriggerStart, setQuery);
     }
-  }, [isOpen, isLoading, filteredItems.length, query.length]);
+  }, [isOpen, isLoading, itemCount, queryLength, setIsOpen, setTriggerStart, setQuery]);
   /* eslint-enable react-hooks/set-state-in-effect */
+}
 
-  const handleChange = useCallback(
+type MentionValueChangeOptions = {
+  inputRef: UseInlineMentionParams["inputRef"];
+  onChange: (value: string) => void;
+  scheduleMentionChange: (callback: () => void) => void;
+  setPosition: (position: Position) => void;
+  setTriggerStart: (start: number) => void;
+  setQuery: (query: string) => void;
+  setSelectedIndex: (index: number) => void;
+  setIsOpen: (open: boolean) => void;
+};
+
+function useMentionValueChange({
+  inputRef,
+  onChange,
+  scheduleMentionChange,
+  setPosition,
+  setTriggerStart,
+  setQuery,
+  setSelectedIndex,
+  setIsOpen,
+}: MentionValueChangeOptions) {
+  return useCallback(
     (newValue: string, cursorPosition?: number) => {
       onChange(newValue);
       const input = inputRef.current;
@@ -429,10 +453,82 @@ export function useInlineMention({
         clearMentionState(setIsOpen, setTriggerStart, setQuery);
       });
     },
-    [inputRef, onChange, scheduleMentionChange],
+    [
+      inputRef,
+      onChange,
+      scheduleMentionChange,
+      setPosition,
+      setTriggerStart,
+      setQuery,
+      setSelectedIndex,
+      setIsOpen,
+    ],
   );
+}
+
+export function useInlineMention({
+  inputRef,
+  value,
+  onChange,
+  sessionId,
+  onPlanSelect,
+  onFileSelect,
+  onPromptSelect,
+  promptInsertMode = "context",
+}: UseInlineMentionParams) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [position, setPosition] = useState<Position | null>(null);
+  const [triggerStart, setTriggerStart] = useState<number>(-1);
+  const [query, setQuery] = useState("");
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const suppressOpenRef = useRef(false);
+  const { schedule: scheduleMentionChange, invalidate: invalidateMentionChange } =
+    useMentionChangeScheduler();
+
+  const { prompts } = useCustomPrompts();
+  const { fileResults, isLoading } = useFileSearch(sessionId, isOpen, query);
+  const filteredItems = useMentionItems({
+    query,
+    fileResults,
+    prompts,
+    onPlanSelect,
+    onFileSelect,
+    onPromptSelect,
+    promptInsertMode,
+  });
+
+  useResetMentionSelection(query, filteredItems.length, setSelectedIndex);
+  useCloseEmptyMention({
+    isOpen,
+    isLoading,
+    itemCount: filteredItems.length,
+    queryLength: query.length,
+    setIsOpen,
+    setTriggerStart,
+    setQuery,
+  });
+
+  const handleChange = useMentionValueChange({
+    inputRef,
+    onChange: (newValue) => {
+      suppressOpenRef.current = false;
+      onChange(newValue);
+    },
+    scheduleMentionChange: (callback) => {
+      scheduleMentionChange(() => {
+        if (suppressOpenRef.current) return;
+        callback();
+      });
+    },
+    setPosition,
+    setTriggerStart,
+    setQuery,
+    setSelectedIndex,
+    setIsOpen,
+  });
 
   const closeMenu = useCallback(() => {
+    suppressOpenRef.current = true;
     invalidateMentionChange();
     clearMentionState(setIsOpen, setTriggerStart, setQuery);
   }, [invalidateMentionChange]);

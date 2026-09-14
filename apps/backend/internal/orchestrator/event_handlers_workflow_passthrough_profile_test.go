@@ -58,6 +58,7 @@ func TestPrepareWorkflowStepSessionSwitchesPassthroughProfile(t *testing.T) {
 	stepGetter := newMockStepGetter()
 	sourceStep := &wfmodels.WorkflowStep{
 		ID: "step1", WorkflowID: "wf1", AgentProfileID: "profile-a",
+		ProfileSessionEndPolicy: models.WorkflowProfileSessionEndPolicyComplete,
 	}
 	step := &wfmodels.WorkflowStep{
 		ID: "step2", WorkflowID: "wf1", AgentProfileID: "profile-b",

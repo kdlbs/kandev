@@ -122,10 +122,7 @@ test.describe("Mobile layout profiles", () => {
     await assertNoDescendantOverflowsRight(layouts.root, "edited layouts settings");
   });
 
-  test("morphs custom profile deletion into touch-sized inline actions", async ({
-    testPage,
-    apiClient,
-  }) => {
+  test("opens custom profile deletion in a touch-sized sheet", async ({ testPage, apiClient }) => {
     await apiClient.saveUserSettings({
       saved_layouts: [
         {
@@ -144,7 +141,7 @@ test.describe("Mobile layout profiles", () => {
     await expect(deleteButton).toBeVisible();
     await deleteButton.tap();
 
-    const inline = testPage.getByTestId("layout-profile-delete-inline-confirmation");
+    const inline = testPage.getByRole("dialog", { name: "Delete Mobile layout to delete?" });
     await expect(inline).toBeVisible();
     await expect(testPage.getByRole("alertdialog")).toHaveCount(0);
     for (const action of await inline.getByRole("button").all()) {
@@ -157,7 +154,7 @@ test.describe("Mobile layout profiles", () => {
 
     await deleteButton.tap();
     await testPage
-      .getByTestId("layout-profile-delete-inline-confirmation")
+      .getByRole("dialog", { name: "Delete Mobile layout to delete?" })
       .getByTestId("layout-profile-delete-confirm")
       .tap();
     await expect(deleteButton).toHaveCount(0);

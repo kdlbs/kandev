@@ -22,8 +22,16 @@
 #     container.
 #
 # Usage:
-#   run-e2e.sh [run] [options] [-- <playwright args>]   # default subcommand: run
-#   run-e2e.sh clean                                    # remove build/test artifacts (incl. root-owned)
+#   Direct:  run-e2e.sh [run] [options] [-- <playwright args>]   # default subcommand: run
+#            run-e2e.sh clean                                    # remove build/test artifacts (incl. root-owned)
+#   Via pnpm: pnpm e2e:run [options] [-- <playwright args>]
+#   pnpm/npm forward a caller-supplied `--` verbatim, so `pnpm e2e:run -- --host`
+#   reaches this script as `-- --host`. The package entry point drops that leading
+#   artifact before option parsing; direct script calls preserve `--` as the
+#   documented Playwright separator. For package calls, write script options
+#   directly after `e2e:run` (`pnpm e2e:run --host --no-build -- --grep foo`).
+#   A `--` anywhere else still ends option parsing and forwards everything after it
+#   straight to Playwright.
 #
 # Options:
 #   --docker | --host     Force runner (default: auto-detect)
@@ -38,6 +46,8 @@
 #   KANDEV_CI_BUILD_IMAGE   (default: ghcr.io/kdlbs/kandev-ci:build-latest)
 #   KANDEV_CI_RUNTIME_IMAGE (default: kandev-ci:runtime-local, falls back to ghcr…:runtime-latest)
 #   KANDEV_E2E_ALLOW_UNSAFE_PARALLELISM=1  bypass local shard/worker guards for experiments
+#   KANDEV_E2E_DOCKER_PROBE_TIMEOUT (default: 10)  seconds to wait for `docker info`
+#   before treating Docker as unavailable in auto/clean mode
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -48,11 +58,50 @@ WEB_DIR="$REPO_ROOT/apps/web"
 BACKEND_DIR="$REPO_ROOT/apps/backend"
 BUILD_IMAGE="${KANDEV_CI_BUILD_IMAGE:-ghcr.io/kdlbs/kandev-ci:build-latest}"
 RUNTIME_IMAGE="${KANDEV_CI_RUNTIME_IMAGE:-}"
+DOCKER_PROBE_TIMEOUT="${KANDEV_E2E_DOCKER_PROBE_TIMEOUT:-10}"
 
 log() { printf '\033[36m[e2e]\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[31m[e2e] %s\033[0m\n' "$*" >&2; exit 1; }
 
-docker_up() { command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; }
+# Feeds arithmetic in docker_up; validated to reject fractional, suffixed, and
+# whitespace-padded values. 0 is accepted — it means "skip the probe, treat
+# Docker as unavailable". No leading zeros: bash arithmetic reads them as octal,
+# so "08" is a parse error and "010" silently means 8.
+[[ "$DOCKER_PROBE_TIMEOUT" =~ ^(0|[1-9][0-9]*)$ ]] \
+  || die "KANDEV_E2E_DOCKER_PROBE_TIMEOUT must be a non-negative integer (got '$DOCKER_PROBE_TIMEOUT')"
+
+# Bounded in pure bash (no `timeout`/`gtimeout` dependency — bare macOS has
+# neither). Backgrounds the probe and kills it if it outlives the budget, so a
+# hung daemon degrades to host mode with a visible reason instead of hanging
+# the whole runner forever.
+docker_up() {
+  command -v docker >/dev/null 2>&1 || return 1
+  if (( DOCKER_PROBE_TIMEOUT == 0 )); then
+    log "docker info did not respond within 0s; treating Docker as unavailable (pass --host to skip this probe)"
+    return 1
+  fi
+  local had_monitor=0
+  case "$-" in
+    *m*) had_monitor=1 ;;
+  esac
+  set -m
+  docker info >/dev/null 2>&1 &
+  local pid=$! max_ticks=$(( DOCKER_PROBE_TIMEOUT * 10 )) tick=0
+  [[ "$had_monitor" -eq 1 ]] || set +m
+  while kill -0 "$pid" 2>/dev/null; do
+    if (( tick >= max_ticks )); then
+      # SIGKILL, not SIGTERM: a wedged docker client can be blocked in a way
+      # that doesn't honor SIGTERM, and `wait` below blocks until it exits.
+      kill -9 -- "-$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      log "docker info did not respond within ${DOCKER_PROBE_TIMEOUT}s; treating Docker as unavailable (pass --host to skip this probe)"
+      return 1
+    fi
+    sleep 0.1
+    tick=$(( tick + 1 ))
+  done
+  wait "$pid"
+}
 is_container_project() { [[ "$PROJECT" == containers || "$PROJECT" == kubernetes-compat ]]; }
 
 resolve_runtime_image() {
@@ -171,6 +220,12 @@ DO_BUILD=1
 STRICT=1
 PROJECT=chromium
 PW_ARGS=()
+# pnpm/npm forward the caller's `--` verbatim, so `pnpm e2e:run -- --host`
+# reaches this script as `-- --host`. Only the package entry point drops that
+# artifact. Direct calls keep the documented `-- <playwright args>` separator.
+if [[ "${npm_lifecycle_event:-}" == e2e:run && "${1:-}" == -- ]]; then
+  shift
+fi
 [[ "${1:-}" == clean ]] && { SUBCMD=clean; shift; }
 [[ "${1:-}" == run ]] && shift
 while [[ $# -gt 0 ]]; do

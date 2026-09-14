@@ -20,7 +20,7 @@ const revisionSelectCols = `id, task_id, revision_number, title, content, author
 // and is the fallback for unknown values when persisting plan history rows.
 const authorKindAgent = "agent"
 
-const planSelectCols = `id, task_id, title, content, created_by, created_at, updated_at, implementation_started_at, implementation_started_session_id, implementation_started_by`
+const planSelectCols = `id, task_id, title, content, created_by, created_at, updated_at, comments_revision, implementation_started_at, implementation_started_session_id, implementation_started_by`
 
 // CreateTaskPlan creates a new task plan.
 func (r *Repository) CreateTaskPlan(ctx context.Context, plan *models.TaskPlan) error {
@@ -110,7 +110,13 @@ func (r *Repository) MarkTaskPlanImplementationStarted(ctx context.Context, task
 
 // DeleteTaskPlan deletes a task plan by task ID.
 func (r *Repository) DeleteTaskPlan(ctx context.Context, taskID string) error {
-	result, err := r.db.ExecContext(ctx, r.db.Rebind(`DELETE FROM task_plans WHERE task_id = ?`), taskID)
+	tx, release, err := r.beginPlanCommentTx(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("begin task plan deletion: %w", err)
+	}
+	defer release()
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, tx.Rebind(`DELETE FROM task_plans WHERE task_id = ?`), taskID)
 	if err != nil {
 		return fmt.Errorf("failed to delete task plan: %w", err)
 	}
@@ -118,6 +124,9 @@ func (r *Repository) DeleteTaskPlan(ctx context.Context, taskID string) error {
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
 		return fmt.Errorf("task plan not found for task: %s", taskID)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit task plan deletion: %w", err)
 	}
 	return nil
 }
@@ -304,6 +313,7 @@ func scanPlanRow(row *sql.Row) (*models.TaskPlan, error) {
 		&plan.CreatedBy,
 		&plan.CreatedAt,
 		&plan.UpdatedAt,
+		&plan.CommentsRevision,
 		&startedAt,
 		&sessionID,
 		&actor,

@@ -151,6 +151,15 @@ func TestDateOf(t *testing.T) {
 	}
 }
 
+func TestDateText(t *testing.T) {
+	if got := DateText(SQLite3, "date"); got != "date(date)" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	if got := DateText(PGX, "date"); got != "to_char(date, 'YYYY-MM-DD')" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
 func TestDateTimeOf(t *testing.T) {
 	got := DateTimeOf(SQLite3, "activation.value")
 	if got != "datetime(activation.value)" {
@@ -178,6 +187,17 @@ func TestNaiveUTCTimestampOf(t *testing.T) {
 	}
 	got = NaiveUTCTimestampOf(PGX, "ts.started_at")
 	if got != "(ts.started_at AT TIME ZONE 'UTC')" {
+		t.Errorf("pgx: got %q", got)
+	}
+}
+
+func TestSecondPrecisionText(t *testing.T) {
+	got := SecondPrecisionText(SQLite3, "MAX(c.updated_at)")
+	if got != "strftime('%Y-%m-%d %H:%M:%S', MAX(c.updated_at))" {
+		t.Errorf("sqlite: got %q", got)
+	}
+	got = SecondPrecisionText(PGX, "MAX(c.updated_at)")
+	if got != "to_char(MAX(c.updated_at), 'YYYY-MM-DD HH24:MI:SS')" {
 		t.Errorf("pgx: got %q", got)
 	}
 }
@@ -217,7 +237,7 @@ func TestCurrentDate(t *testing.T) {
 	if CurrentDate(SQLite3) != "date('now')" {
 		t.Errorf("sqlite: got %q", CurrentDate(SQLite3))
 	}
-	if CurrentDate(PGX) != "CURRENT_DATE" {
+	if CurrentDate(PGX) != "(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date" {
 		t.Errorf("pgx: got %q", CurrentDate(PGX))
 	}
 }
@@ -228,7 +248,7 @@ func TestDateNowMinusDays(t *testing.T) {
 		t.Errorf("sqlite: got %q", got)
 	}
 	got = DateNowMinusDays(PGX, "?")
-	if got != "CURRENT_DATE - (? || ' days')::interval" {
+	if got != "(CURRENT_TIMESTAMP AT TIME ZONE 'UTC')::date - (?::int)" {
 		t.Errorf("pgx: got %q", got)
 	}
 }
@@ -239,7 +259,7 @@ func TestDatePlusOneDay(t *testing.T) {
 		t.Errorf("sqlite: got %q", got)
 	}
 	got = DatePlusOneDay(PGX, "date")
-	if got != "(date)::date + INTERVAL '1 day'" {
+	if got != "(date)::date + 1" {
 		t.Errorf("pgx: got %q", got)
 	}
 }

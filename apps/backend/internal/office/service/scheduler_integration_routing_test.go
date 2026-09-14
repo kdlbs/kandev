@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/service"
+	"github.com/kandev/kandev/internal/workflow/engine"
 )
 
 // captureDispatcher implements service.RoutingDispatcher and records the
@@ -108,7 +109,7 @@ func TestSchedulerIntegration_RoutingReceivesBuiltPromptAndEnv(t *testing.T) {
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, priority, created_at, updated_at)
 		VALUES ('task-routing-1', 'ws-1', 'ROUTING_PROMPT_SENTINEL_TITLE',
 		        'Implement endpoint', 'medium', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-routing-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -136,13 +137,24 @@ func TestSchedulerIntegration_RoutingReceivesBuiltPromptAndEnv(t *testing.T) {
 	}
 }
 
-func TestSchedulerIntegration_SeatActionFlowsToPromptOnly(t *testing.T) {
+func TestSchedulerIntegration_SeatActionFlowsToPromptAndLaunch(t *testing.T) {
 	mock := &mockTaskStarter{}
 	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
 	dispatcher := &captureDispatcher{}
 	svc.SetRoutingDispatcher(dispatcher)
 	svc.SetWorkflowEngineDispatcher(&seatSpyDispatcher{})
 	ctx := context.Background()
+	if err := svc.CreateSkill(ctx, &models.Skill{
+		ID:          "decision-skill",
+		WorkspaceID: "ws-1",
+		Name:        "Step decision",
+		Slug:        "kandev-step-decision",
+		Content:     "decision skill",
+		Version:     "0.42.0",
+		ContentHash: "decision-skill-hash",
+	}); err != nil {
+		t.Fatalf("create decision skill: %v", err)
+	}
 
 	agent := &models.AgentInstance{
 		ID:                 "decision-agent-1",
@@ -159,7 +171,7 @@ func TestSchedulerIntegration_SeatActionFlowsToPromptOnly(t *testing.T) {
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, workflow_step_id, title, description, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
 		"task-decision", "ws-1", "step-decision", "Decision task", "Review the change")
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-decision"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -173,6 +185,10 @@ func TestSchedulerIntegration_SeatActionFlowsToPromptOnly(t *testing.T) {
 	allowedIdx := strings.Index(prompt, "- Allowed actions:")
 	if allowedIdx == -1 || !containsIgnoreCase(prompt[allowedIdx:], "record_step_decision") {
 		t.Fatalf("prompt must advertise the seat-derived action: %s", dispatcher.lastCall().Prompt)
+	}
+	launch := dispatcher.lastCall()
+	if len(launch.AdditionalSkillSlugs) != 1 || launch.AdditionalSkillSlugs[0] != "kandev-step-decision" {
+		t.Fatalf("launch skill additions = %v, want decision skill", launch.AdditionalSkillSlugs)
 	}
 
 	runs, err := svc.ListRuns(ctx, "ws-1")
@@ -203,6 +219,78 @@ func TestSchedulerIntegration_SeatActionFlowsToPromptOnly(t *testing.T) {
 	if actions, ok := snapshot["available_actions"].([]any); !ok || len(actions) != 1 || actions[0] != "record_step_decision" {
 		t.Fatalf("persisted snapshot missing advisory action: %#v", snapshot["available_actions"])
 	}
+
+	snapshots, err := svc.ListRunSkillSnapshotsForTest(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("list run skill snapshots: %v", err)
+	}
+	if len(snapshots) != 1 || snapshots[0].SkillID != "decision-skill" {
+		t.Fatalf("decision seat run snapshots = %#v, want decision skill", snapshots)
+	}
+}
+
+func TestSchedulerIntegration_NonSeatRunDoesNotReceiveDecisionSkill(t *testing.T) {
+	mock := &mockTaskStarter{}
+	svc := newTestService(t, service.ServiceOptions{TaskStarter: mock})
+	dispatcher := &captureDispatcher{}
+	svc.SetRoutingDispatcher(dispatcher)
+	svc.SetWorkflowEngineDispatcher(&seatSpyDispatcher{err: engine.ErrParticipantNotFound})
+	ctx := context.Background()
+
+	if err := svc.CreateSkill(ctx, &models.Skill{
+		ID:          "decision-skill",
+		WorkspaceID: "ws-1",
+		Name:        "Step decision",
+		Slug:        "kandev-step-decision",
+		Content:     "decision skill",
+		Version:     "0.42.0",
+		ContentHash: "decision-skill-hash",
+	}); err != nil {
+		t.Fatalf("create decision skill: %v", err)
+	}
+	agent := &models.AgentInstance{
+		ID:                 "non-seat-decision-agent",
+		WorkspaceID:        "ws-1",
+		Name:               "non-seat-reviewer",
+		Role:               models.AgentRoleWorker,
+		Status:             models.AgentStatusIdle,
+		ExecutorPreference: `{"type":"worktree"}`,
+	}
+	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	svc.ExecSQL(t, `INSERT INTO workflow_steps (id, stage_type) VALUES (?, ?)`, "step-non-seat", "review")
+	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, workflow_step_id, title, description, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+		"task-non-seat", "ws-1", "step-non-seat", "Non-seat task", "Review the change")
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+		`{"task_id":"task-non-seat"}`, ""); err != nil {
+		t.Fatalf("queue: %v", err)
+	}
+
+	service.RunSchedulerTick(svc, ctx)
+
+	runs, err := svc.ListRuns(ctx, "ws-1")
+	if err != nil {
+		t.Fatalf("list runs: %v", err)
+	}
+	var run *models.Run
+	for _, candidate := range runs {
+		if candidate.AgentProfileID == agent.ID && candidate.Reason == service.RunReasonTaskAssigned {
+			run = candidate
+			break
+		}
+	}
+	if run == nil {
+		t.Fatal("missing non-seat decision run")
+	}
+	snapshots, err := svc.ListRunSkillSnapshotsForTest(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("list run skill snapshots: %v", err)
+	}
+	if len(snapshots) != 0 {
+		t.Fatalf("non-seat run snapshots = %#v, want no decision skill", snapshots)
+	}
 }
 
 // TestSchedulerIntegration_RoutingFallThrough_FallsBackToLegacy asserts
@@ -229,7 +317,7 @@ func TestSchedulerIntegration_RoutingFallThrough_FallsBackToLegacy(t *testing.T)
 	}
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
 		VALUES ('task-ft-1', 'ws-1', 'Fall-through Task', 'desc', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-ft-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -273,7 +361,7 @@ func TestSchedulerIntegration_RoutingParked_LeavesAgentIdle(t *testing.T) {
 	}
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
 		VALUES ('task-parked-1', 'ws-1', 'Parked Task', 'desc', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-parked-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -314,7 +402,7 @@ func TestSchedulerIntegration_RoutingDispatchError_LeavesAgentIdle(t *testing.T)
 	}
 	svc.ExecSQL(t, `INSERT INTO tasks (id, workspace_id, title, description, created_at, updated_at)
 		VALUES ('task-routing-err-1', 'ws-1', 'Routing Error Task', 'desc', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`)
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-routing-err-1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}

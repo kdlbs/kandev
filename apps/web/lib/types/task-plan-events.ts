@@ -9,7 +9,10 @@ export type TaskPlanEventPayload = {
   implementation_started_at?: string | null;
   implementation_started_session_id?: string | null;
   implementation_started_by?: string | null;
+  comments_revision?: number;
 };
+
+export type TaskPlanCommentEventPayload = import("./http-agents").TaskPlanCommentSnapshot;
 
 export type TaskPlanRevisionEventPayload = {
   id: string;

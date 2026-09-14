@@ -58,9 +58,12 @@ func (s *Service) startDynamicPolicyRecovery(ctx context.Context) {
 // LaunchDynamicRouteAction) can strand a route this way, and no timer or
 // event fires for a durable status that is not a pending wait. A route that
 // reached MarkActive is no longer "starting", so this sweep cannot demote a
-// healthy idling dynamic session.
+// healthy idling dynamic session. Dynamic routing disabled means any
+// recovery action this sweep produces is guaranteed to fail
+// (LaunchDynamicRouteAction returns ErrDynamicRoutingDisabled), so it must
+// stay a no-op exactly like startDynamicPolicyRecovery.
 func (s *Service) reconcileOrphanedDynamicStartingRoutes(ctx context.Context) {
-	if s.profileExecutionResolver == nil {
+	if s.profileExecutionResolver == nil || !s.profileExecutionResolver.Enabled() {
 		return
 	}
 	lister, ok := s.repo.(dynamicStartingRouteLister)

@@ -52,7 +52,7 @@ async function seedMobilePlanTask(
 }
 
 test.describe("Mobile plan restore confirmation", () => {
-  test("keeps restore confirmation inline and creates a new head revision", async ({
+  test("hands history off to a restore sheet and creates a new head revision", async ({
     testPage,
     apiClient,
     seedData,
@@ -72,12 +72,16 @@ test.describe("Mobile plan restore confirmation", () => {
     const row = session.revisionRow(1);
     await session.revertButton(row).tap();
 
-    const inlineConfirmation = session.revertInlineConfirmation(row);
+    const inlineConfirmation = testPage.getByTestId("mobile-action-confirmation");
     await expect(inlineConfirmation).toBeVisible();
+    await expect(session.revisionsPopover()).toBeHidden();
+    await expect(testPage.getByRole("dialog")).toHaveAttribute("data-slot", "drawer-content");
     await expect(inlineConfirmation).toContainText("v1");
     await expect(session.revertConfirmPopover()).toHaveCount(0);
 
-    const restoreBox = await session.revertInlineConfirm(row).boundingBox();
+    const restoreBox = await inlineConfirmation
+      .getByTestId("plan-revision-restore-confirm")
+      .boundingBox();
     expect(restoreBox).not.toBeNull();
     expect(restoreBox!.height).toBeGreaterThanOrEqual(44);
     expect(
@@ -87,12 +91,14 @@ test.describe("Mobile plan restore confirmation", () => {
       }),
     ).toBe(true);
 
-    await session.revertInlineCancel(row).tap();
+    await inlineConfirmation.getByRole("button", { name: "Cancel" }).tap();
     await expect(inlineConfirmation).toBeHidden();
+    await expect(session.rewindButton()).toBeFocused();
+    await session.rewindButton().tap();
     await expect(session.revertButton(row)).toBeVisible();
 
     await session.revertButton(row).tap();
-    await session.revertInlineConfirm(row).tap();
+    await inlineConfirmation.getByTestId("plan-revision-restore-confirm").tap();
     await expect(session.planPanel).toContainText("Mobile draft A", { timeout: 15_000 });
     expect(nativeDialogOpened).toBe(false);
 

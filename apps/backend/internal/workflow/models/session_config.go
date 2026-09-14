@@ -85,12 +85,21 @@ func ValidateWorkflowStep(step *WorkflowStep) error {
 	if step == nil {
 		return fmt.Errorf("workflow step is required")
 	}
-	return ValidateStepEvents(step.Events, step.AgentProfileID != "")
+	if err := ValidateWorkflowSessionTarget(step.SessionTarget); err != nil {
+		return err
+	}
+	return ValidateStepEventsWithRouting(step.Events, step.AgentProfileID != "", step.SessionTarget != nil)
 }
 
 // ValidateStepEvents validates on-enter action invariants for a step shape
 // that does not carry a full WorkflowStep, such as a portable export.
 func ValidateStepEvents(events StepEvents, hasAgentProfile bool) error {
+	return ValidateStepEventsWithRouting(events, hasAgentProfile, false)
+}
+
+// ValidateStepEventsWithRouting validates on-enter action invariants for a
+// step shape that may select an explicit session target.
+func ValidateStepEventsWithRouting(events StepEvents, hasAgentProfile, hasSessionTarget bool) error {
 	configureCount := 0
 	for _, action := range events.OnEnter {
 		switch action.Type {
@@ -98,6 +107,9 @@ func ValidateStepEvents(events StepEvents, hasAgentProfile bool) error {
 			configureCount++
 			if hasAgentProfile {
 				return fmt.Errorf("configure_session cannot be combined with agent_profile_id")
+			}
+			if hasSessionTarget {
+				return fmt.Errorf("configure_session cannot be combined with a session target")
 			}
 			if _, err := ParseConfigureSessionRules(action); err != nil {
 				return err

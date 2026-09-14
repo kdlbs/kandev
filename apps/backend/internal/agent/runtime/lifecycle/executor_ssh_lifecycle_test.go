@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 
@@ -75,7 +76,7 @@ func TestSSHExecutorStaticSurface(t *testing.T) {
 	if exec.GetInteractiveRunner() != nil {
 		t.Fatal("SSH has no host-side interactive runner")
 	}
-	instances, err := exec.RecoverInstances(context.Background())
+	instances, err := exec.RecoverInstances(context.Background(), nil)
 	if err != nil || instances != nil {
 		t.Fatalf("RecoverInstances() = %v, %v; want nil, nil", instances, err)
 	}
@@ -322,6 +323,7 @@ func (h *sshLaunchHarness) createInstanceBodies() []string {
 }
 
 func TestSSHExecutorCreateInstanceProvisionsAndTracksTheSession(t *testing.T) {
+	withSSHKeepaliveTuning(t, 5*time.Second, 20*time.Second)
 	harness := newSSHLaunchHarness(t, "4242")
 	exec := NewSSHExecutor(nil, nil, NewAgentctlResolver(newTestLogger()), newTestLogger())
 	t.Cleanup(func() { _ = exec.Close() })
@@ -431,6 +433,9 @@ func TestSSHExecutorCreateInstanceProvisionsAndTracksTheSession(t *testing.T) {
 	}
 	if state.platform.GOOS != "linux" || state.platform.GOARCH != "amd64" {
 		t.Fatalf("session platform = %+v", state.platform)
+	}
+	if state.watchdog == nil {
+		t.Fatal("CreateInstance must start a transport-liveness watchdog for the session (AC-EXECUTORS-SSH-TRANSPORT-LIVENESS-001.1)")
 	}
 
 	// StopInstance releases the forwarder and SSH client and forgets the state.

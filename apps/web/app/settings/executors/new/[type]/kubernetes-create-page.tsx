@@ -15,6 +15,7 @@ import { KubernetesWorkloadCard } from "@/components/settings/kubernetes-workloa
 import { KubernetesWorkspaceCard } from "@/components/settings/kubernetes-workspace-card";
 import { ProfileDetailsCard } from "@/components/settings/profile-edit/profile-details-card";
 import { useSettingsSaveContributor } from "@/components/settings/settings-save-provider";
+import { settingsActionClassName } from "@/components/settings/settings-control";
 import { serializeSettingsRevision } from "@/components/settings/settings-save-revision";
 import {
   createDefaultKubernetesExecutorForm,
@@ -157,9 +158,8 @@ function KubernetesCreateHeader() {
         </div>
         <Button
           variant="outline"
-          size="sm"
           onClick={() => router.push(EXECUTORS_ROUTE)}
-          className="min-h-11 w-full cursor-pointer text-sm md:min-h-7 md:w-auto md:text-xs"
+          className={settingsActionClassName("w-full cursor-pointer text-sm md:w-auto md:text-xs")}
         >
           {t("executors:backToExecutors")}
         </Button>

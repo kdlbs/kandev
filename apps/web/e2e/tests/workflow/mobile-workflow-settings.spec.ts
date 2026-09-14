@@ -2,6 +2,38 @@ import { test, expect } from "../../fixtures/test-base";
 import { WorkflowSettingsPage } from "../../pages/workflow-settings-page";
 
 test.describe("Workflow settings on mobile", () => {
+  test("keeps the workflow reorder handle inside the card with a touch-sized target", async ({
+    testPage,
+    seedData,
+  }) => {
+    const page = new WorkflowSettingsPage(testPage);
+    await page.goto(seedData.workspaceId);
+
+    const card = await page.findWorkflowCard("E2E Workflow");
+    const handle = page.dragHandle(seedData.workflowId);
+    const list = testPage.getByTestId("workflow-order-list");
+    await expect(handle).toBeVisible();
+    await expect(handle).toHaveAccessibleName("Reorder E2E Workflow");
+
+    const [cardBox, handleBox, listBox] = await Promise.all([
+      card.boundingBox(),
+      handle.boundingBox(),
+      list.boundingBox(),
+    ]);
+    expect(cardBox).not.toBeNull();
+    expect(handleBox).not.toBeNull();
+    expect(listBox).not.toBeNull();
+    expect(handleBox!.width).toBeGreaterThanOrEqual(44);
+    expect(handleBox!.height).toBeGreaterThanOrEqual(44);
+    expect(handleBox!.x).toBeGreaterThanOrEqual(cardBox!.x);
+    expect(handleBox!.x + handleBox!.width).toBeLessThanOrEqual(cardBox!.x + cardBox!.width);
+    expect(handleBox!.x).toBeGreaterThan(cardBox!.x + cardBox!.width / 2);
+    expect(Math.abs(cardBox!.x - listBox!.x)).toBeLessThanOrEqual(1);
+    expect(
+      await testPage.evaluate(() => document.documentElement.scrollWidth > window.innerWidth),
+    ).toBe(false);
+  });
+
   test("remove sync confirmation keeps 44px inline actions", async ({
     testPage,
     apiClient,

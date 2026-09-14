@@ -203,7 +203,7 @@ func TestHandleReportTaskPRAutoFixOutcomeRejectsInvalidAndStaleReports(t *testin
 	}))
 	require.NoError(t, err)
 	assert.Equal(t, ws.MessageTypeError, response.Type)
-	assert.Contains(t, string(response.Payload), "not found")
+	assert.Contains(t, string(response.Payload), "Finish ordinary work without retrying this report or enabling auto-fix")
 }
 
 func TestHandleReportTaskPRAutoFixOutcomeRejectsSpoofedIdentity(t *testing.T) {

@@ -16,6 +16,7 @@ test.describe("quick chat activity indicators", () => {
   }) => {
     const ws = watchWs(testPage);
     await testPage.goto("/");
+    await testPage.getByTestId("mobile-topbar-menu").tap();
     await testPage.getByTestId("mobile-quick-chat-button").tap();
     const dialog = testPage.getByRole("dialog", { name: "Quick Chat" });
     const created = testPage.waitForResponse(
@@ -31,7 +32,7 @@ test.describe("quick chat activity indicators", () => {
       task_id: string;
     };
     const tab = dialog.getByTestId("quick-chat-tab");
-    const button = testPage.getByTestId("mobile-quick-chat-button");
+    const button = testPage.getByTestId("mobile-topbar-menu");
     const indicator = button.getByTestId("quick-chat-activity-indicator");
 
     await expect(tab).toHaveCount(1);
@@ -55,6 +56,7 @@ test.describe("quick chat activity indicators", () => {
     await expect(indicator).toHaveAttribute("data-state", "finished");
 
     await button.tap();
+    await testPage.getByTestId("mobile-quick-chat-button").tap();
     await expect(indicator).toHaveCount(0);
     await expect(dialog).toBeVisible();
   });

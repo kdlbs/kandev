@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/kandev/kandev/internal/office/models"
+	runsservice "github.com/kandev/kandev/internal/runs/service"
 	"github.com/kandev/kandev/internal/workflow/engine"
 )
 
@@ -13,6 +14,34 @@ import (
 // no active or reusable session, so the workflow engine cannot evaluate a
 // trigger for it.
 var ErrEngineNoSession = errors.New("workflow engine: no active session for task")
+
+// ErrWorkspacePaused is the typed error every gate site (workspace-kill-
+// switch) returns when PauseGate.PauseState reports a confirmed pause. It
+// is a shared sentinel — not office/pause's own type — so every consumer
+// package (routines, service, scheduler, wakeup) and every caller that
+// branches on it (routine HTTP handlers, the cron ticker, reactivity, the
+// approval adapter) can import it without importing office/pause itself.
+var ErrWorkspacePaused = errors.New("office: workspace paused")
+
+// ErrPauseGateUnavailable is the typed error a gate site returns when
+// PauseGate.PauseState itself failed (read error), distinct from a
+// confirmed pause: the gate fails closed on this error too, but callers
+// that map it to HTTP use 503, not 409, and cron/event logging keeps it at
+// its ordinary level rather than swallowing it the way a confirmed pause is.
+var ErrPauseGateUnavailable = errors.New("office: workspace pause state unavailable")
+
+// PauseGate is the narrow read-only surface every gate site consults
+// before dispatching, queueing, or launching work. Implemented by
+// office/pause.Service and wired in via each consumer's own SetPauseGate
+// setter — defined once here (rather than duplicated per consumer package)
+// because every implementation and every caller share the identical
+// signature and the same two sentinel errors above.
+type PauseGate interface {
+	// PauseState returns the workspace's active pause record, or (nil, nil)
+	// when the workspace is running. A non-nil error means the read itself
+	// failed (fail closed); it is not a signal that the workspace is paused.
+	PauseState(ctx context.Context, workspaceID string) (*models.WorkspacePause, error)
+}
 
 // AgentReader provides read access to agent instances.
 // Implemented by the agents feature (and transitionally by office/service.Service).
@@ -39,8 +68,11 @@ type AgentWriter interface {
 // Implemented by the run feature (and transitionally by office/service.Service).
 type RunQueuer interface {
 	// QueueRun enqueues a run for agentInstanceID with the given reason, payload,
-	// and optional idempotency key (empty string disables deduplication).
-	QueueRun(ctx context.Context, agentInstanceID, reason, payload, idempotencyKey string) error
+	// and optional idempotency key (empty string disables deduplication). The
+	// returned QueueOutcome reports what actually happened (queued / deduped /
+	// coalesced / none-on-error) so callers that need to distinguish a fresh
+	// insert from a no-op don't have to infer it from side effects.
+	QueueRun(ctx context.Context, agentInstanceID, reason, payload, idempotencyKey string) (runsservice.QueueOutcome, error)
 }
 
 // WorkflowEngineDispatcher routes typed office task events through the

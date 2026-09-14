@@ -31,6 +31,7 @@ import {
   removeArchivedTaskFromCache,
   updateTaskStatusSummaryInBothKanbans,
 } from "@/lib/ws/handlers/task-status-summary";
+import { taskRemovalOwnsDepartureForTask } from "@/lib/state/task-removal";
 const lifecycleDebug = createDebugLogger("task-lifecycle:ws");
 
 function upsertTask(
@@ -341,6 +342,10 @@ function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessag
   // different session) and follow focus to the new primary.
   const beforeState = store.getState();
   const taskId = message.payload.task_id;
+  const localRemovalOwnsDeparture = taskRemovalOwnsDepartureForTask(
+    beforeState.taskRemoval,
+    taskId,
+  );
   const previousPrimary = findTaskInState(beforeState, taskId)?.primarySessionId ?? null;
   const { archivedAt, partialArchivedTask, isArchivedUpdate, archivedWorkspaceId } =
     getTaskUpdatedArchiveContext(beforeState, message.payload, taskId);
@@ -364,7 +369,7 @@ function handleTaskUpdated(store: StoreApi<AppState>, message: TaskUpdatedMessag
   );
 
   if (archivedAt) {
-    redirectAwayFromRemovedTask(taskId);
+    if (!localRemovalOwnsDeparture) redirectAwayFromRemovedTask(taskId);
     return;
   }
 
@@ -397,14 +402,21 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
     "task.updated": (message) => handleTaskUpdated(store, message),
     "task.deleted": (message) => {
       const deletedId = message.payload.task_id;
+      const currentState = store.getState();
       removeRecentTask(deletedId);
       // A quick chat closed on another device must not linger here as a tab
       // pointing at a task the backend already deleted.
       store.getState().removeQuickChatSessionsForTask(deletedId);
 
-      const currentState = store.getState();
-      const sessionIds = (currentState.taskSessionsByTask.itemsByTaskId[deletedId] ?? []).map(
-        (s) => s.id,
+      const sessionIds = Array.from(
+        new Set([
+          ...(currentState.taskSessionsByTask.itemsByTaskId[deletedId] ?? []).map(
+            (session) => session.id,
+          ),
+          ...Object.values(currentState.taskSessions?.items ?? {})
+            .filter((session) => session.task_id === deletedId)
+            .map((session) => session.id),
+        ]),
       );
       const task = currentState.kanban.tasks.find((t) => t.id === deletedId);
       if (task?.primarySessionId) {
@@ -425,6 +437,7 @@ export function registerTasksHandlers(store: StoreApi<AppState>): WsHandlers {
       currentState.removeTaskFromSidebarPrefs(deletedId);
       for (const sid of sessionIds) {
         useContextFilesStore.getState().clearSession(sid);
+        currentState.clearQueueStatus?.(sid);
       }
 
       const wasActive = currentState.tasks.activeTaskId === deletedId;

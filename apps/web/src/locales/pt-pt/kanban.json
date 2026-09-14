@@ -62,6 +62,8 @@
   "openPreviewOnClick": "Abrir a pré-visualização ao clicar",
   "overWipLimit": "Acima do limite de WIP",
   "pipeline": "Pipeline",
+  "pipelineRowPosition": "{{title}}, passo {{position}} de {{total}}",
+  "pipelineUnassignedStep": "Não atribuído",
   "previewPanel": "Painel de pré-visualização",
   "previousStep": "Passo anterior",
   "priority": "Prioridade",
@@ -74,6 +76,7 @@
   "queuedCount_other": "{{count}} em fila",
   "queuedForStep": "Em fila para {{step}}",
   "queuedSection": "Em fila",
+  "reorderPositionAnnouncement": "{{title}}, posição {{position}} de {{total}}",
   "repository": "Repositório",
   "searchPlaceholder": "Pesquisar...",
   "searchSection": "Pesquisar",
@@ -115,5 +118,9 @@
   "noWorkflowsAvailableYet": "Ainda não há fluxos de trabalho disponíveis.",
   "pullToRefreshPull": "Puxe para atualizar",
   "pullToRefreshRefreshing": "A atualizar tarefas",
-  "pullToRefreshRelease": "Largue para atualizar"
+  "pullToRefreshRelease": "Largue para atualizar",
+  "boardSort": "Ordenação do quadro",
+  "boardSortCreatedDesc": "Mais recentes primeiro",
+  "boardSortPriorityDesc": "Prioridade",
+  "priorityFilter": "Filtro de prioridade"
 }

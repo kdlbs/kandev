@@ -20,7 +20,7 @@ type DefaultSelFake = Pick<
   | "executorProfileId"
   | "setAgentProfileId"
   | "setExecutorId"
-  | "setExecutorProfileId"
+  | "setExecutorProfileIdFromSeed"
   | "noRepository"
   | "preferLocalExecutor"
   | "repositories"
@@ -37,7 +37,7 @@ function makeDefaultSelFs(overrides: Partial<DefaultSelFake> = {}): DialogFormSt
     executorProfileId: "profile-1",
     setAgentProfileId: vi.fn(),
     setExecutorId: vi.fn(),
-    setExecutorProfileId: vi.fn(),
+    setExecutorProfileIdFromSeed: vi.fn(),
     noRepository: false,
     preferLocalExecutor: false,
     repositories: [],
@@ -98,8 +98,10 @@ describe("useDefaultSelectionsEffect - executor profile defaults", () => {
 
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
-    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_WORKTREE));
-    expect(fs.setExecutorProfileId).not.toHaveBeenCalledWith(PROFILE_LOCAL);
+    await waitFor(() =>
+      expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_WORKTREE),
+    );
+    expect(fs.setExecutorProfileIdFromSeed).not.toHaveBeenCalledWith(PROFILE_LOCAL);
     await waitFor(() => expect(fs.setExecutorId).toHaveBeenCalledWith(worktree.id));
     expect(fs.setExecutorId).not.toHaveBeenCalledWith(local.id);
   });
@@ -113,7 +115,9 @@ describe("useDefaultSelectionsEffect - executor profile defaults", () => {
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
     await waitFor(() => expect(fs.setExecutorId).toHaveBeenCalledWith(worktree.id));
-    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_WORKTREE));
+    await waitFor(() =>
+      expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_WORKTREE),
+    );
   });
 
   it("defaults repo-less tasks to a local profile because worktree needs a repo", async () => {
@@ -129,9 +133,13 @@ describe("useDefaultSelectionsEffect - executor profile defaults", () => {
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
     await waitFor(() => expect(fs.setExecutorId).toHaveBeenCalledWith(local.id));
-    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_LOCAL));
+    await waitFor(() =>
+      expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_LOCAL),
+    );
   });
+});
 
+describe("useDefaultSelectionsEffect - executor profile defaults for explicit local-path tasks", () => {
   it("defaults explicit local-path tasks to a local profile when no profile was saved", async () => {
     const fs = makeDefaultSelFs({
       executorId: "",
@@ -149,7 +157,9 @@ describe("useDefaultSelectionsEffect - executor profile defaults", () => {
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
     await waitFor(() => expect(fs.setExecutorId).toHaveBeenCalledWith(local.id));
-    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_LOCAL));
+    await waitFor(() =>
+      expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_LOCAL),
+    );
   });
 
   it("ignores a workspace-default worktree executor for explicit local-path tasks", async () => {
@@ -171,7 +181,9 @@ describe("useDefaultSelectionsEffect - executor profile defaults", () => {
 
     await waitFor(() => expect(fs.setExecutorId).toHaveBeenCalledWith(local.id));
     expect(fs.setExecutorId).not.toHaveBeenCalledWith(worktree.id);
-    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_LOCAL));
+    await waitFor(() =>
+      expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_LOCAL),
+    );
   });
 
   it("does not fall back to a worktree profile for explicit local-path tasks", async () => {
@@ -187,8 +199,50 @@ describe("useDefaultSelectionsEffect - executor profile defaults", () => {
 
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
-    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_DOCKER));
-    expect(fs.setExecutorProfileId).not.toHaveBeenCalledWith(PROFILE_WORKTREE);
+    await waitFor(() =>
+      expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_DOCKER),
+    );
+    expect(fs.setExecutorProfileIdFromSeed).not.toHaveBeenCalledWith(PROFILE_WORKTREE);
+  });
+});
+
+// AC-TASKS-RUNNER-SWITCH-004.5a: a task with a stored executor profile seeds
+// the picker from that stored value, not from the create-mode "resolve a
+// default" autopick.
+describe("useDefaultSelectionsEffect - editing task's stored executor profile", () => {
+  it("seeds the stored profile instead of resolving a create-mode default", async () => {
+    const fs = makeDefaultSelFs({ executorId: "", executorProfileId: "" });
+    const local = localExecutor();
+    const worktree = worktreeExecutor();
+    const sel = makeSel({ executors: [local, worktree] });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, [], PROFILE_LOCAL));
+
+    await waitFor(() =>
+      expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_LOCAL),
+    );
+    expect(fs.setExecutorProfileIdFromSeed).not.toHaveBeenCalledWith(PROFILE_WORKTREE);
+  });
+
+  it("does not reseed once the picker already carries a value", async () => {
+    const fs = makeDefaultSelFs({ executorId: "exec-local", executorProfileId: PROFILE_WORKTREE });
+    const sel = makeSel({ executors: [worktreeExecutor()] });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, [], PROFILE_LOCAL));
+
+    expect(fs.setExecutorProfileIdFromSeed).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the create-mode default when the task stores no profile", async () => {
+    const fs = makeDefaultSelFs({ executorId: "", executorProfileId: "" });
+    const worktree = worktreeExecutor();
+    const sel = makeSel({ executors: [worktree] });
+
+    renderHook(() => useDefaultSelectionsEffect(fs, true, sel, [], null));
+
+    await waitFor(() =>
+      expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_WORKTREE),
+    );
   });
 });
 
@@ -207,7 +261,7 @@ describe("useDefaultSelectionsEffect - executor profile restoration", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(fs.setExecutorId).not.toHaveBeenCalled();
-    expect(fs.setExecutorProfileId).not.toHaveBeenCalled();
+    expect(fs.setExecutorProfileIdFromSeed).not.toHaveBeenCalled();
 
     const selAfter = makeSel({
       executors: [worktree],
@@ -215,7 +269,9 @@ describe("useDefaultSelectionsEffect - executor profile restoration", () => {
     });
     rerender({ sel: selAfter });
 
-    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_WORKTREE));
+    await waitFor(() =>
+      expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_WORKTREE),
+    );
   });
 });
 
@@ -231,7 +287,9 @@ describe("useDefaultSelectionsEffect - executor profile settings restoration", (
 
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
-    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_WORKTREE_B));
+    await waitFor(() =>
+      expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_WORKTREE_B),
+    );
   });
 
   it("keeps an explicit local workspace default ahead of a saved worktree profile", async () => {
@@ -245,7 +303,7 @@ describe("useDefaultSelectionsEffect - executor profile settings restoration", (
     });
 
     const setExecutorId = vi.fn();
-    const setExecutorProfileId = vi.fn();
+    const setExecutorProfileIdFromSeed = vi.fn();
     const { rerender } = renderHook(
       ({ formState }) => useDefaultSelectionsEffect(formState, true, sel, []),
       {
@@ -254,20 +312,20 @@ describe("useDefaultSelectionsEffect - executor profile settings restoration", (
             executorProfileId: "",
             executorId: "",
             setExecutorId,
-            setExecutorProfileId,
+            setExecutorProfileIdFromSeed,
           }),
         },
       },
     );
 
-    await waitFor(() => expect(setExecutorProfileId).toHaveBeenCalledWith(PROFILE_LOCAL));
-    expect(setExecutorProfileId).not.toHaveBeenCalledWith(PROFILE_WORKTREE_B);
+    await waitFor(() => expect(setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_LOCAL));
+    expect(setExecutorProfileIdFromSeed).not.toHaveBeenCalledWith(PROFILE_WORKTREE_B);
     rerender({
       formState: makeDefaultSelFs({
         executorProfileId: PROFILE_LOCAL,
         executorId: "",
         setExecutorId,
-        setExecutorProfileId,
+        setExecutorProfileIdFromSeed,
       }),
     });
 
@@ -297,7 +355,9 @@ describe("useDefaultSelectionsEffect - launch preferences", () => {
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
     await waitFor(() => expect(fs.setExecutorId).toHaveBeenCalledWith(local.id));
-    await waitFor(() => expect(fs.setExecutorProfileId).toHaveBeenCalledWith(PROFILE_LOCAL));
+    await waitFor(() =>
+      expect(fs.setExecutorProfileIdFromSeed).toHaveBeenCalledWith(PROFILE_LOCAL),
+    );
   });
 });
 
@@ -317,7 +377,7 @@ describe("useDefaultSelectionsEffect - multi-repo executor selection", () => {
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(fs.setExecutorProfileId).not.toHaveBeenCalled();
+    expect(fs.setExecutorProfileIdFromSeed).not.toHaveBeenCalled();
   });
 
   it("leaves a worktree profile alone when 2+ Remote rows are set", async () => {
@@ -335,7 +395,7 @@ describe("useDefaultSelectionsEffect - multi-repo executor selection", () => {
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(fs.setExecutorProfileId).not.toHaveBeenCalled();
+    expect(fs.setExecutorProfileIdFromSeed).not.toHaveBeenCalled();
   });
 
   it("does not swap when only a single Remote row is filled", async () => {
@@ -353,6 +413,6 @@ describe("useDefaultSelectionsEffect - multi-repo executor selection", () => {
     renderHook(() => useDefaultSelectionsEffect(fs, true, sel, []));
 
     await new Promise((resolve) => setTimeout(resolve, 10));
-    expect(fs.setExecutorProfileId).not.toHaveBeenCalled();
+    expect(fs.setExecutorProfileIdFromSeed).not.toHaveBeenCalled();
   });
 });

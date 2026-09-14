@@ -275,9 +275,10 @@ func (r *sqliteRepository) seedBuiltinPrompts() error {
 	for _, prompt := range r.getBuiltinPrompts() {
 		_, err := r.db.Exec(r.db.Rebind(`
 			INSERT INTO custom_prompts (id, name, content, builtin, created_at, updated_at)
-			VALUES (?, ?, ?, 1, ?, ?)
+			SELECT ?, ?, ?, 1, ?, ?
+			WHERE (SELECT COUNT(*) FROM custom_prompts) < ?
 			ON CONFLICT DO NOTHING
-		`), prompt.ID, prompt.Name, prompt.Content, prompt.CreatedAt, prompt.UpdatedAt)
+		`), prompt.ID, prompt.Name, prompt.Content, prompt.CreatedAt, prompt.UpdatedAt, maxPromptListItems)
 		if err != nil {
 			return fmt.Errorf("failed to upsert built-in prompt %s: %w", prompt.ID, err)
 		}
@@ -386,6 +387,7 @@ func isLegacyCIAutoFixPrompt(content string) bool {
 func (r *sqliteRepository) getBuiltinPrompts() []*models.Prompt {
 	now := time.Now().UTC()
 	return []*models.Prompt{
+		{ID: "builtin-create-canvas", Name: "create-canvas", Builtin: true, CreatedAt: now, UpdatedAt: now, Content: promptcfg.Get("create-canvas")},
 		{ID: "builtin-code-review", Name: "code-review", Builtin: true, CreatedAt: now, UpdatedAt: now, Content: promptcfg.Get("code-review")},
 		{ID: "builtin-open-pr", Name: "open-pr", Builtin: true, CreatedAt: now, UpdatedAt: now, Content: promptcfg.Get("open-pr")},
 		{ID: "builtin-merge-base", Name: "merge-base", Builtin: true, CreatedAt: now, UpdatedAt: now, Content: promptcfg.Get("merge-base")},

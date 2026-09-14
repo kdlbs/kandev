@@ -87,7 +87,7 @@ function WorkspaceSettingsSwitcher({
             // Same control, sized for a page heading rather than a sidebar
             // row, at a fixed 240px: long names truncate, short ones leave
             // the chevron anchored instead of the header jumping per page.
-            className="h-9 w-60 flex-none gap-2 px-3 text-base font-semibold"
+            className="w-60 flex-none gap-2 px-3 text-base font-semibold"
           />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-72">

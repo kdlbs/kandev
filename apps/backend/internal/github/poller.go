@@ -347,9 +347,7 @@ func (p *Poller) detectPRForWatch(ctx context.Context, watch *PRWatch) {
 		return
 	}
 
-	pr, err := p.service.FindPRByBranchForWorkspace(
-		ctx, watch.WorkspaceID, watch.Owner, watch.Repo, watch.Branch,
-	)
+	pr, err := p.service.findPRByBranchForWatch(ctx, watch)
 	if err != nil {
 		p.logger.Debug("failed to search for PR by branch",
 			zap.String("watch_id", watch.ID),
