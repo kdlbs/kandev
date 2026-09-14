@@ -68,6 +68,14 @@ type TaskRepository interface {
 	// task.Position as given, for the generic task-update API's explicit
 	// position field (predates REQ-TASKS-KANBAN-TASK-REORDERING-001).
 	UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error
+	// UpdateTaskPreservingDeferredLaunch is UpdateTask for callers holding a
+	// task snapshot old enough to race the session ceiling's deferred_launch
+	// compare-and-set writers: deferred_launch in the write payload is
+	// replaced by the row's own current value at write time, so a stale
+	// snapshot can never resurrect or clobber a concurrent CAS write. Every
+	// other key keeps ordinary replace semantics, including deletion by
+	// omission.
+	UpdateTaskPreservingDeferredLaunch(ctx context.Context, task *models.Task) error
 	DeleteTask(ctx context.Context, id string) error
 	ListTasks(ctx context.Context, workflowID string) ([]*models.Task, error)
 	ListTasksByWorkspace(ctx context.Context, workspaceID, workflowID, repositoryID, query string, page, pageSize int, sort string, includeArchived, includeEphemeral, onlyEphemeral, excludeConfig bool) ([]*models.Task, int, error)

@@ -2031,7 +2031,7 @@ func (s *Service) UpdateTask(ctx context.Context, id string, req *UpdateTaskRequ
 	if req.Position != nil {
 		updateErr = s.tasks.UpdateTaskWithExplicitPosition(updateCtx, task)
 	} else {
-		updateErr = s.tasks.UpdateTask(updateCtx, task)
+		updateErr = s.tasks.UpdateTaskPreservingDeferredLaunch(updateCtx, task)
 	}
 	if updateErr != nil {
 		s.logger.Error("failed to update task", zap.String("task_id", id), zap.Error(updateErr))

@@ -687,6 +687,10 @@ func (r *phase4TaskRepo) UpdateTaskWithExplicitPosition(context.Context, *models
 	r.panicNotUsed("UpdateTaskWithExplicitPosition")
 	return nil
 }
+func (r *phase4TaskRepo) UpdateTaskPreservingDeferredLaunch(context.Context, *models.Task) error {
+	r.panicNotUsed("UpdateTaskPreservingDeferredLaunch")
+	return nil
+}
 func (r *phase4TaskRepo) DeleteTask(context.Context, string) error {
 	r.panicNotUsed("DeleteTask")
 	return nil
