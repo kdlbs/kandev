@@ -6,6 +6,7 @@ import (
 	"errors"
 
 	agentsettingscontroller "github.com/kandev/kandev/internal/agent/settings/controller"
+	settingsdto "github.com/kandev/kandev/internal/agent/settings/dto"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
 	ws "github.com/kandev/kandev/pkg/websocket"
@@ -161,12 +162,23 @@ func (h *Handlers) handleUpdateAgentProfile(ctx context.Context, msg *ws.Message
 // publishAgentProfileEvent publishes an agent profile event to the event bus.
 // The payload wraps the profile in a "profile" key to match the format expected
 // by existing frontend WS handlers (same format as HTTP agent settings handlers).
-func (h *Handlers) publishAgentProfileEvent(ctx context.Context, eventType string, profile interface{}) {
+func (h *Handlers) publishAgentProfileEvent(ctx context.Context, eventType string, profile *settingsdto.AgentProfileDTO) {
 	if h.eventBus == nil || profile == nil {
 		return
 	}
+	// Profile events can arrive before settings-agent hydration (the profile
+	// still carries its owning agent ID on delete), so include the capability
+	// needed by sessionless pickers mirroring the HTTP broadcaster.
+	inferenceCapable := false
+	agent, err := h.agentSettingsCtrl.GetAgent(ctx, profile.AgentID)
+	if err != nil {
+		h.logger.Warn("failed to load agent capability for profile event", zap.Error(err))
+	} else if agent != nil {
+		inferenceCapable = agent.InferenceCapable
+	}
 	data := map[string]interface{}{
-		"profile": profile,
+		"profile":           profile,
+		"inference_capable": inferenceCapable,
 	}
 	if err := h.eventBus.Publish(ctx, eventType, bus.NewEvent(eventType, "mcp-handlers", data)); err != nil {
 		h.logger.Error("failed to publish agent profile event",
