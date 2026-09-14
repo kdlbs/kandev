@@ -51,6 +51,129 @@ const deliveryReconciliationTimeout = 3 * time.Second
 
 var errAgentDeliveryCursorUnavailable = errors.New("agent delivery cursor is unavailable")
 
+const durableDeliveryReplayPageSize = 1000
+
+// ReplayRecoveredDelivery drains the retained durable stream through the same
+// inbox, canonical projection, lifecycle, and acknowledgement pipeline used
+// by live WebSocket events. The descriptor's captured high-water mark is the
+// completion boundary; a page of 1000 events is only one page and never means
+// that replay is complete.
+func (sm *StreamManager) ReplayRecoveredDelivery(ctx context.Context, execution *AgentExecution) error {
+	if execution == nil || execution.DeliveryMode != DurableDeliveryV1 {
+		return nil
+	}
+	descriptor := execution.DeliveryDescriptor
+	if descriptor == nil || descriptor.Stream == nil || descriptor.Stream.HighWater == 0 {
+		return nil
+	}
+	streamID := execution.DeliveryStreamID
+	if streamID == "" || descriptor.Stream.StreamID != streamID {
+		return fmt.Errorf("durable recovery stream identity is missing or inconsistent")
+	}
+	delivery := sm.deliveryRepository()
+	if delivery == nil {
+		return errors.New("durable recovery repository is unavailable")
+	}
+	after := execution.DeliveryReplayCursor
+	target := descriptor.Stream.HighWater
+	if after > target {
+		return fmt.Errorf("durable recovery cursor %d is ahead of captured high-water %d", after, target)
+	}
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	if client == nil {
+		return errors.New("durable recovery agentctl client is unavailable")
+	}
+	defer releaseClient()
+
+	startupGeneration := execution.startupAttemptSnapshot()
+	for after < target {
+		next, err := sm.replayRecoveredDeliveryPage(
+			ctx, execution, client, delivery, streamID, after, target, startupGeneration,
+		)
+		if err != nil {
+			return err
+		}
+		after = next
+		execution.DeliveryReplayCursor = after
+	}
+	return nil
+}
+
+func (sm *StreamManager) replayRecoveredDeliveryPage(
+	ctx context.Context,
+	execution *AgentExecution,
+	client *agentctl.Client,
+	delivery AgentDeliveryRepository,
+	streamID string,
+	after, target, startupGeneration uint64,
+) (uint64, error) {
+	page, stream, err := client.ReplayDelivery(ctx, streamID, after, durableDeliveryReplayPageSize)
+	if err != nil {
+		return after, fmt.Errorf("replay durable delivery after sequence %d: %w", after, err)
+	}
+	if err := validateRecoveredReplayStream(stream, execution, streamID, target); err != nil {
+		return after, err
+	}
+	if len(page) == 0 {
+		return after, fmt.Errorf("durable replay has a gap after sequence %d before high-water %d", after, target)
+	}
+	start := after
+	for _, committed := range page {
+		if committed.Sequence != after+1 || committed.Sequence > target {
+			return after, fmt.Errorf("durable replay expected sequence %d, received %d", after+1, committed.Sequence)
+		}
+		if err := sm.processRecoveredDeliveryEvent(ctx, execution, client, delivery, committed, startupGeneration); err != nil {
+			return after, err
+		}
+		after = committed.Sequence
+	}
+	if after == start {
+		return after, fmt.Errorf("durable replay made no progress after sequence %d", after)
+	}
+	return after, nil
+}
+
+func validateRecoveredReplayStream(
+	stream journal.Stream,
+	execution *AgentExecution,
+	streamID string,
+	target uint64,
+) error {
+	if stream.StreamID != streamID || stream.SessionID != execution.SessionID ||
+		stream.IncarnationID != execution.DeliveryIncarnationID ||
+		stream.HarnessGeneration != execution.DeliveryHarnessGeneration ||
+		stream.HighWater < target {
+		return errors.New("durable replay returned an inconsistent stream owner or high-water mark")
+	}
+	return nil
+}
+
+func (sm *StreamManager) processRecoveredDeliveryEvent(
+	ctx context.Context,
+	execution *AgentExecution,
+	client *agentctl.Client,
+	delivery AgentDeliveryRepository,
+	committed journal.Event,
+	startupGeneration uint64,
+) error {
+	var event agentctl.AgentEvent
+	if err := json.Unmarshal(committed.Payload, &event); err != nil {
+		return fmt.Errorf("decode durable replay sequence %d: %w", committed.Sequence, err)
+	}
+	if event.Type == "" {
+		event.Type = committed.Type
+	}
+	event.DeliveryStreamID = committed.StreamID
+	event.DeliveryIncarnationID = committed.IncarnationID
+	event.DeliveryHarnessGeneration = committed.HarnessGeneration
+	event.DeliverySequence = committed.Sequence
+	event.DeliverySubmissionID = committed.SubmissionID
+	if err := sm.processAgentEvent(ctx, execution, client, delivery, event, startupGeneration); err != nil {
+		return fmt.Errorf("process durable replay sequence %d: %w", committed.Sequence, err)
+	}
+	return nil
+}
+
 // reconcileDisconnectedSubmission performs one bounded state query before the
 // ordinary disconnect failure path. Dispatch completion only means that the
 // prompt call was accepted by the harness. Recovery is safe only after the
@@ -317,24 +440,22 @@ func (sm *StreamManager) deliveryEffectAlreadyApplied(
 	ctx context.Context,
 	repository AgentDeliveryRepository,
 	effect *models.AgentDeliveryEffect,
-) bool {
+) (bool, error) {
 	if effect == nil {
-		return false
+		return false, nil
 	}
 	reader, ok := repository.(agentDeliveryEffectReader)
 	if !ok {
-		return false
+		return false, nil
 	}
 	stored, err := reader.GetAgentDeliveryEffect(ctx, effect.EffectKey)
 	if errors.Is(err, repoerrors.ErrAgentDeliveryEffectNotFound) {
-		return false
+		return false, nil
 	}
 	if err != nil {
-		sm.logger.Warn("failed to read durable delivery effect; suppressing replay",
-			zap.String("effect_key", effect.EffectKey), zap.Error(err))
-		return true
+		return false, fmt.Errorf("read durable delivery effect %q: %w", effect.EffectKey, err)
 	}
-	return stored != nil && stored.State == models.DeliveryEffectCompleted
+	return stored != nil && stored.State == models.DeliveryEffectCompleted, nil
 }
 
 func deliveryEventIsStale(

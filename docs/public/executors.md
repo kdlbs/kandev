@@ -105,9 +105,13 @@ existing executor file and does not read the host again.
 
 Kandev also keeps durable delivery records in retained executor storage when
 the executor supports them. The records help Kandev replay accepted output
-after an agentctl replacement. They do not replace native harness state. If
-the retained journal is unavailable, Kandev blocks unsafe prompt admission. It
-does not silently use a less durable path.
+after an agentctl replacement or backend restart. A compatible surviving
+agentctl keeps its delivery identity, and Kandev replays committed records
+before it accepts new work. These records do not replace native harness state.
+Durable delivery is independent of the optional process-survival setting. When
+process survival is disabled, the agent process stops and there is no live
+agentctl to adopt. If the retained journal is unavailable, Kandev blocks unsafe
+prompt admission. It does not silently use a less durable path.
 
 Each file is limited to 1 MiB and each launch is limited to 4 MiB. Kandev
 writes copied files with owner-only mode `0600`. Missing, unreadable, invalid,

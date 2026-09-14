@@ -27,6 +27,28 @@ type immutableDeliveryRepository struct {
 	recordingAgentDeliveryRepository
 }
 
+type effectReadFailureDeliveryRepository struct {
+	recordingAgentDeliveryRepository
+	effectErr error
+}
+
+func (r *effectReadFailureDeliveryRepository) GetAgentDeliveryEffect(
+	context.Context, string,
+) (*models.AgentDeliveryEffect, error) {
+	return nil, r.effectErr
+}
+
+type canonicalProjectionFailureDeliveryRepository struct {
+	recordingAgentDeliveryRepository
+	projectionErr error
+}
+
+func (r *canonicalProjectionFailureDeliveryRepository) ProjectCanonicalAgentDeliveryEvent(
+	context.Context, *models.AgentDeliveryEvent, *models.AgentDeliveryEffect,
+) (bool, error) {
+	return false, r.projectionErr
+}
+
 func (r *immutableDeliveryRepository) ReceiveAgentDeliveryEvent(
 	ctx context.Context,
 	event *models.AgentDeliveryEvent,
@@ -133,6 +155,64 @@ func TestDurableAgentEventProjectionFailureDoesNotAcknowledge(t *testing.T) {
 	}
 	if len(acknowledger.acknowledged) != 0 {
 		t.Fatalf("acknowledged = %v, want no acknowledgments", acknowledger.acknowledged)
+	}
+}
+
+func TestDurableAgentEventEffectReadFailureBlocksProcessing(t *testing.T) {
+	effectErr := errors.New("effect store unavailable")
+	repository := &effectReadFailureDeliveryRepository{
+		recordingAgentDeliveryRepository: recordingAgentDeliveryRepository{},
+		effectErr:                        effectErr,
+	}
+	callbackCalled := false
+	sm := NewStreamManager(newTestLogger(), StreamCallbacks{
+		OnAgentEvent: func(*AgentExecution, agentctl.AgentEvent) { callbackCalled = true },
+	}, nil, nil)
+	event := agentctl.AgentEvent{
+		Type:                      streams.EventTypeComplete,
+		DeliveryStreamID:          "stream-1",
+		DeliveryIncarnationID:     "incarnation-1",
+		DeliveryHarnessGeneration: 1,
+		DeliverySequence:          1,
+	}
+
+	err := sm.processAgentEvent(context.Background(), &AgentExecution{SessionID: "session-1"}, nil, repository, event, 0)
+	if !errors.Is(err, effectErr) {
+		t.Fatalf("error = %v, want effect read error", err)
+	}
+	if callbackCalled {
+		t.Fatal("agent callback ran after effect read failed")
+	}
+	if len(repository.projected) != 0 {
+		t.Fatalf("projected events = %d, want none", len(repository.projected))
+	}
+}
+
+func TestDurableAgentEventCanonicalProjectionFailureBlocksProcessing(t *testing.T) {
+	projectionErr := errors.New("canonical projection unavailable")
+	repository := &canonicalProjectionFailureDeliveryRepository{
+		recordingAgentDeliveryRepository: recordingAgentDeliveryRepository{},
+		projectionErr:                    projectionErr,
+	}
+	callbackCalled := false
+	sm := NewStreamManager(newTestLogger(), StreamCallbacks{
+		OnAgentEvent: func(*AgentExecution, agentctl.AgentEvent) { callbackCalled = true },
+	}, nil, nil)
+	event := agentctl.AgentEvent{
+		Type:                      streams.EventTypeMessageChunk,
+		Text:                      "hello",
+		DeliveryStreamID:          "stream-1",
+		DeliveryIncarnationID:     "incarnation-1",
+		DeliveryHarnessGeneration: 1,
+		DeliverySequence:          1,
+	}
+
+	err := sm.processAgentEvent(context.Background(), &AgentExecution{SessionID: "session-1"}, nil, repository, event, 0)
+	if !errors.Is(err, projectionErr) {
+		t.Fatalf("error = %v, want canonical projection error", err)
+	}
+	if callbackCalled {
+		t.Fatal("agent callback ran after canonical projection failed")
 	}
 }
 

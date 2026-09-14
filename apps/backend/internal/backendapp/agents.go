@@ -38,6 +38,7 @@ func provideLifecycleManager(
 	mcpPrincipalScoper lifecycle.MCPPrincipalScoper,
 	recoveryDeadlineStart time.Time,
 	inheritedRecordScope lifecycle.InheritedRecordScope,
+	peerCapabilities []string,
 	workspaceInfoProvider lifecycle.WorkspaceInfoProvider,
 	passthroughSessionProvider lifecycle.PassthroughSessionProvider,
 	runningWriter lifecycle.ExecutorRunningWriter,
@@ -65,6 +66,9 @@ func provideLifecycleManager(
 	// Per-instance servers enforce the same single rotating credential as
 	// the control server -- see the field doc on config.AgentConfig.
 	standaloneExec.SetAuthToken(cfg.Agent.StandaloneAuthToken)
+	if len(peerCapabilities) > 0 {
+		standaloneExec.SetPeerCapabilities(peerCapabilities)
+	}
 
 	// Create InteractiveRunner for passthrough mode (no WorkspaceTracker, uses callbacks)
 	interactiveRunner := process.NewInteractiveRunner(nil, log, 2*1024*1024) // 2MB buffer

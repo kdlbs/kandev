@@ -5,9 +5,10 @@ import "github.com/kandev/kandev/internal/agentctl/journal"
 type DurableDeliveryMode string
 
 const (
-	DurableDeliveryV1      DurableDeliveryMode = "durable_v1"
-	DurableDeliveryLegacy  DurableDeliveryMode = "legacy"
-	DurableDeliveryBlocked DurableDeliveryMode = "blocked"
+	DurableDeliveryV1                DurableDeliveryMode = "durable_v1"
+	DurableDeliveryLegacy            DurableDeliveryMode = "legacy"
+	DurableDeliveryBlocked           DurableDeliveryMode = "blocked"
+	durableDeliveryStorageNotDurable                     = "storage_not_durable"
 )
 
 type DurableDeliveryDecision struct {
@@ -29,7 +30,7 @@ type DurableDeliveryCapability struct {
 // owner with unresolved work cannot be silently downgraded to legacy.
 func NegotiateDurableDelivery(local journal.StorageCapability, peerVersion uint32, peerDurable, unresolved bool) DurableDeliveryDecision {
 	if !local.Durable {
-		if local.Reason == "storage_not_durable" && !unresolved && !peerDurable && peerVersion == 0 {
+		if local.Reason == durableDeliveryStorageNotDurable && !unresolved && !peerDurable && peerVersion == 0 {
 			return DurableDeliveryDecision{Mode: DurableDeliveryLegacy, Reason: "legacy_peer"}
 		}
 		return DurableDeliveryDecision{Mode: DurableDeliveryBlocked, Reason: local.Reason}

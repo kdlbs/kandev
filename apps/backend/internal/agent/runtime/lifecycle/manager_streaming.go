@@ -60,6 +60,20 @@ func (m *Manager) streamCoalescer(execution *AgentExecution) *streamCoalescer {
 	defer execution.streamMu.Unlock()
 	if execution.stream == nil {
 		execution.stream = newStreamCoalescer(defaultStreamCoalesceWindow, func(chunk coalescedStreamChunk) {
+			if chunk.canonicalProjection {
+				m.publishStreamingContentNowWithProjection(
+					execution,
+					chunk.eventType,
+					chunk.messageID,
+					chunk.content,
+					chunk.isAppend,
+					chunk.attemptID,
+					true,
+					chunk.diagnostic,
+					chunk.promptGeneration,
+				)
+				return
+			}
 			m.publishStreamingContentNow(
 				execution,
 				chunk.eventType,
@@ -347,24 +361,24 @@ func (m *Manager) publishStreamingContentNow(
 	)
 }
 
-func (m *Manager) publishCanonicalStreamingContentNow(
+func (m *Manager) publishCanonicalStreamingContent(
 	execution *AgentExecution,
 	eventType string,
 	messageID string,
 	content string,
 	isAppend bool,
 ) {
-	m.publishStreamingContentNowWithProjection(
-		execution,
-		eventType,
-		messageID,
-		content,
-		isAppend,
-		execution.currentStartupAttemptID(),
-		true,
-		false,
-		0,
-	)
+	if content == "" {
+		return
+	}
+	m.streamCoalescer(execution).add(coalescedStreamChunk{
+		eventType:           eventType,
+		messageID:           messageID,
+		content:             content,
+		isAppend:            isAppend,
+		attemptID:           execution.currentStartupAttemptID(),
+		canonicalProjection: true,
+	})
 }
 
 func (m *Manager) publishStreamingContentNowWithProjection(

@@ -726,6 +726,21 @@ type ExecutorInstance struct {
 	// "provider session identity" row). Same recovery-only shape as Env above.
 	ProviderSessionID string
 
+	// DeliveryStatus is the authenticated recovery descriptor captured from the
+	// surviving instance before lifecycle re-tracking. It is nil for legacy
+	// runtimes and isolated recovery callers that do not advertise the durable
+	// delivery capability.
+	DeliveryStatus *agentctl.DeliveryStatus
+	// DeliveryLegacyEvidence is true only when an authenticated old peer
+	// positively lacks the durable-delivery capability and explicitly does not
+	// implement the status route. It is distinct from an undiscovered or failed
+	// status request, both of which block durable recovery.
+	DeliveryLegacyEvidence bool
+	// DeliveryRecoveryError carries an adoption evidence failure back to the
+	// lifecycle manager. The instance remains attached so the manager can use
+	// its existing bounded stop and recovery-guard path.
+	DeliveryRecoveryError error
+
 	// AgentProfileID is a recovery-only carrier for
 	// AC-EXECUTORS-SURVIVAL-002.14's "agent profile identity" row: the
 	// recovery-inventory record's execution-profile column, read by

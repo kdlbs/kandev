@@ -483,11 +483,60 @@ func (m *Manager) DeliveryCapability() journal.StorageCapability {
 	if m.deliveryJournalErr != nil || m.deliveryJournal == nil {
 		return journal.StorageCapability{Version: journal.CurrentVersion, Reason: "storage_unavailable"}
 	}
+	// Stream records are replayable and can be acknowledged by the connected
+	// backend while a session is starting. Only an unsettled prompt outcome
+	// makes a new prompt unsafe to admit here; recovery status still reports
+	// unacknowledged stream records through the full descriptor.
 	unresolved, err := m.deliveryJournal.HasUnresolvedSubmissions(context.Background())
 	if err != nil {
 		return journal.StorageCapability{Version: journal.CurrentVersion, Reason: "storage_unavailable"}
 	}
 	return journal.StorageCapability{Version: journal.CurrentVersion, Durable: true, Unresolved: unresolved}
+}
+
+// DeliveryRecoveryDescriptor returns the authenticated instance's durable
+// identity and bounded retained-work evidence. A configured journal failure is
+// returned to the caller; it must never look like an empty legacy journal.
+func (m *Manager) DeliveryRecoveryDescriptor(ctx context.Context, streamID string) (journal.RecoveryDescriptor, error) {
+	if m == nil || m.cfg == nil {
+		return journal.RecoveryDescriptor{}, journal.ErrJournalCorrupt
+	}
+	currentStreamID := m.DeliveryStreamID()
+	if streamID == "" {
+		streamID = currentStreamID
+	}
+	if streamID != currentStreamID {
+		return journal.RecoveryDescriptor{}, journal.ErrOwnerMismatch
+	}
+	capability := m.DeliveryCapability()
+	if !capability.Durable {
+		if capability.Reason == "storage_not_durable" {
+			return journal.RecoveryDescriptor{
+				StorageCapability: capability,
+				SessionID:         m.cfg.SessionID,
+				IncarnationID:     m.DeliveryIncarnationID(),
+				HarnessGeneration: m.DeliveryHarnessGeneration(),
+				StreamID:          currentStreamID,
+			}, nil
+		}
+		return journal.RecoveryDescriptor{}, journal.ErrJournalCorrupt
+	}
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return journal.RecoveryDescriptor{}, err
+	}
+	descriptor, err := deliveryJournal.RecoveryDescriptor(
+		ctx,
+		m.cfg.SessionID,
+		m.DeliveryIncarnationID(),
+		m.DeliveryHarnessGeneration(),
+		currentStreamID,
+	)
+	if err != nil {
+		return journal.RecoveryDescriptor{}, err
+	}
+	descriptor.StorageCapability = capability
+	return descriptor, nil
 }
 
 // DeliveryStreamID returns the stable transport stream identity. Agentctl
@@ -3051,11 +3100,12 @@ func (m *Manager) waitForExit(stderrDone <-chan struct{}) {
 				"recent_stderr": recentStderr,
 			},
 		}
+		m.recordTerminalOutcome(&event)
 		if persisted, persistErr := m.persistDeliveryEvent(event); persistErr != nil {
 			m.logger.Error("failed to commit durable exit error event", zap.Error(persistErr))
 		} else {
 			event = persisted
-			m.sendUpdateBlocking(event)
+			m.sendUpdateBlockingRecorded(event)
 		}
 	default:
 		m.exitCode.Store(0)

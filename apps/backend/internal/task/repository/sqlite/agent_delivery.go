@@ -146,6 +146,38 @@ func (r *Repository) GetAgentDeliverySubmission(ctx context.Context, id string) 
 	return &submission, nil
 }
 
+// ListAgentDeliverySubmissions returns the backend-owned submissions for one
+// session in creation order. Recovery uses the complete bounded SQL view to
+// compare a surviving peer's submission evidence before it admits a stream.
+func (r *Repository) ListAgentDeliverySubmissions(ctx context.Context, sessionID string) ([]*models.AgentDeliverySubmission, error) {
+	rows, err := r.ro.QueryxContext(ctx, r.ro.Rebind(`
+		SELECT id, session_id, incarnation_id, harness_generation, owner_generation,
+		       dispatch_attempt_id, payload_hash, payload, state, outcome, created_at, updated_at
+		FROM agent_delivery_submissions
+		WHERE session_id = ?
+		ORDER BY created_at ASC, id ASC`), sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var submissions []*models.AgentDeliverySubmission
+	for rows.Next() {
+		submission := new(models.AgentDeliverySubmission)
+		if err := rows.Scan(
+			&submission.ID, &submission.SessionID, &submission.IncarnationID,
+			&submission.HarnessGeneration, &submission.OwnerGeneration, &submission.DispatchAttemptID,
+			&submission.PayloadHash, &submission.Payload, &submission.State, &submission.Outcome,
+			&submission.CreatedAt, &submission.UpdatedAt); err != nil {
+			return nil, err
+		}
+		submissions = append(submissions, submission)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return submissions, nil
+}
+
 func (r *Repository) TransitionAgentDeliverySubmission(ctx context.Context, id string, from, to models.DeliverySubmissionState, outcome string, updatedAt time.Time) (bool, error) {
 	if updatedAt.IsZero() {
 		updatedAt = r.nowUTC()

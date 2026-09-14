@@ -327,51 +327,9 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 	}
 
 	err := client.StreamUpdatesFrom(ctx, func(event agentctl.AgentEvent) {
-		if event.DeliverySubmissionID != "" {
-			execution.setDeliverySubmissionID(event.DeliverySubmissionID)
-		}
-		var deliveryEffect *models.AgentDeliveryEffect
-		var durableEvent *models.AgentDeliveryEvent
-		skipCallback := false
-		if delivery != nil {
-			// Capture the durable record before invoking lifecycle callbacks. Those
-			// callbacks can advance or clear prompt state, but the inbox payload
-			// must remain byte-identical from admission through projection.
-			durableEvent = durableAgentEvent(execution, event)
-			process, durableSkip, effect, deliveryErr := sm.prepareDurableAgentDeliveryEvent(
-				ctx, execution, durableEvent, delivery,
-			)
-			if deliveryErr != nil {
-				sm.logger.Error("durable agent event ownership check failed",
-					zap.String("instance_id", execution.ID), zap.Error(deliveryErr))
-				return
-			}
-			if !process {
-				if deliveryErr := acknowledgeDurableAgentEvent(ctx, event, client); deliveryErr != nil {
-					sm.logger.Error("durable duplicate event acknowledgment failed",
-						zap.String("instance_id", execution.ID), zap.Error(deliveryErr))
-				}
-				return
-			}
-			deliveryEffect = effect
-			skipCallback = durableSkip
-		}
-		event, canonicalProjected, skipEvent := sm.projectCanonicalAgentEvent(
-			ctx, execution, event, durableEvent, delivery, client, skipCallback,
-		)
-		if skipEvent {
-			return
-		}
-		if !skipCallback && sm.callbacks.OnAgentEventWithGeneration != nil {
-			sm.callbacks.OnAgentEventWithGeneration(execution, event, startupGeneration)
-		} else if !skipCallback && sm.callbacks.OnAgentEvent != nil {
-			sm.callbacks.OnAgentEvent(execution, event)
-		}
-		if delivery != nil && !canonicalProjected {
-			if deliveryErr := sm.projectAndAcknowledgeDurableAgentDeliveryEventWithEffect(ctx, durableEvent, event, delivery, client, deliveryEffect); deliveryErr != nil {
-				sm.logger.Error("durable agent event projection or acknowledgment failed",
-					zap.String("instance_id", execution.ID), zap.Error(deliveryErr))
-			}
+		if err := sm.processAgentEvent(ctx, execution, client, delivery, event, startupGeneration); err != nil {
+			sm.logger.Error("durable agent event processing failed",
+				zap.String("instance_id", execution.ID), zap.Error(err))
 		}
 	}, sm.mcpHandlerFor(execution), func(disconnectErr error) {
 		if disconnectErr != nil {
@@ -397,6 +355,104 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 	}
 }
 
+type preparedAgentEvent struct {
+	event          agentctl.AgentEvent
+	durableEvent   *models.AgentDeliveryEvent
+	deliveryEffect *models.AgentDeliveryEffect
+	skipCallback   bool
+	duplicate      bool
+}
+
+func (sm *StreamManager) processAgentEvent(
+	ctx context.Context,
+	execution *AgentExecution,
+	client *agentctl.Client,
+	delivery AgentDeliveryRepository,
+	event agentctl.AgentEvent,
+	startupGeneration uint64,
+) error {
+	prepared, err := sm.prepareAgentEvent(ctx, execution, client, delivery, event)
+	if err != nil {
+		return err
+	}
+	if prepared.duplicate {
+		return nil
+	}
+	event, canonicalProjected, err := sm.projectCanonicalAgentEvent(
+		ctx, execution, prepared.event, prepared.durableEvent, delivery, client,
+	)
+	if err != nil {
+		return fmt.Errorf("canonical agent event projection: %w", err)
+	}
+	if !prepared.skipCallback {
+		sm.notifyAgentEvent(execution, event, startupGeneration)
+	}
+	if prepared.durableEvent == nil || canonicalProjected {
+		return nil
+	}
+	if err := sm.projectAndAcknowledgeDurableAgentDeliveryEventWithEffect(
+		ctx, prepared.durableEvent, event, delivery, client, prepared.deliveryEffect,
+	); err != nil {
+		return fmt.Errorf("project or acknowledge durable agent event: %w", err)
+	}
+	return nil
+}
+
+func (sm *StreamManager) prepareAgentEvent(
+	ctx context.Context,
+	execution *AgentExecution,
+	client *agentctl.Client,
+	delivery AgentDeliveryRepository,
+	event agentctl.AgentEvent,
+) (preparedAgentEvent, error) {
+	if delivery == nil {
+		if event.DeliverySubmissionID != "" {
+			execution.setDeliverySubmissionID(event.DeliverySubmissionID)
+		}
+		return preparedAgentEvent{event: event}, nil
+	}
+
+	// Capture the durable record before invoking lifecycle callbacks. Those
+	// callbacks can advance or clear prompt state, but the inbox payload must
+	// remain byte-identical from admission through projection.
+	durableEvent := durableAgentEvent(execution, event)
+	process, skipCallback, effect, err := sm.prepareDurableAgentDeliveryEvent(
+		ctx, execution, durableEvent, delivery,
+	)
+	if err != nil {
+		return preparedAgentEvent{}, fmt.Errorf("durable agent event ownership check: %w", err)
+	}
+	if event.DeliverySubmissionID != "" {
+		execution.setDeliverySubmissionID(event.DeliverySubmissionID)
+	}
+	if !process {
+		if err := acknowledgeDurableAgentEvent(ctx, event, client); err != nil {
+			return preparedAgentEvent{}, fmt.Errorf("acknowledge duplicate durable event: %w", err)
+		}
+		return preparedAgentEvent{duplicate: true}, nil
+	}
+	return preparedAgentEvent{
+		event:          event,
+		durableEvent:   durableEvent,
+		deliveryEffect: effect,
+		skipCallback:   skipCallback,
+	}, nil
+}
+
+func (sm *StreamManager) notifyAgentEvent(
+	execution *AgentExecution,
+	event agentctl.AgentEvent,
+	startupGeneration uint64,
+) {
+	if sm.callbacks.OnAgentEventWithGeneration != nil {
+		sm.callbacks.OnAgentEventWithGeneration(execution, event, startupGeneration)
+		return
+	}
+	if sm.callbacks.OnAgentEvent != nil {
+		sm.callbacks.OnAgentEvent(execution, event)
+	}
+}
+
 func (sm *StreamManager) prepareDurableAgentDeliveryEvent(
 	ctx context.Context,
 	execution *AgentExecution,
@@ -415,7 +471,11 @@ func (sm *StreamManager) prepareDurableAgentDeliveryEvent(
 		return false, false, nil, fmt.Errorf("admit durable agent event: %w", err)
 	}
 	effect = deliveryEffectForDeliveryEvent(durableEvent)
-	return process, stale || sm.deliveryEffectAlreadyApplied(ctx, repository, effect), effect, nil
+	alreadyApplied, err := sm.deliveryEffectAlreadyApplied(ctx, repository, effect)
+	if err != nil {
+		return false, false, nil, err
+	}
+	return process, stale || alreadyApplied, effect, nil
 }
 
 func (sm *StreamManager) projectCanonicalAgentEvent(
@@ -425,10 +485,9 @@ func (sm *StreamManager) projectCanonicalAgentEvent(
 	durableEvent *models.AgentDeliveryEvent,
 	delivery AgentDeliveryRepository,
 	client *agentctl.Client,
-	skipCallback bool,
-) (agentctl.AgentEvent, bool, bool) {
-	if skipCallback || delivery == nil || !canonicalAgentDeliveryEvent(event) {
-		return event, false, false
+) (agentctl.AgentEvent, bool, error) {
+	if delivery == nil || !canonicalAgentDeliveryEvent(event) {
+		return event, false, nil
 	}
 	if durableEvent == nil {
 		durableEvent = durableAgentEvent(execution, event)
@@ -438,7 +497,7 @@ func (sm *StreamManager) projectCanonicalAgentEvent(
 		sm.logger.Debug("canonical agent delivery projector is unavailable; using legacy projection",
 			zap.String("instance_id", execution.ID),
 			zap.String("event_type", event.Type))
-		return event, false, false
+		return event, false, nil
 	}
 	isAppend, err := projector.ProjectCanonicalAgentDeliveryEvent(
 		ctx, durableEvent, deliveryEffectForEvent(event),
@@ -448,7 +507,7 @@ func (sm *StreamManager) projectCanonicalAgentEvent(
 			zap.String("instance_id", execution.ID),
 			zap.String("event_type", event.Type),
 			zap.Error(err))
-		return event, false, true
+		return event, false, err
 	}
 	event.CanonicalMessageID = canonicalAgentMessageID(execution, event)
 	event.CanonicalProjection = true
@@ -458,9 +517,9 @@ func (sm *StreamManager) projectCanonicalAgentEvent(
 			zap.String("instance_id", execution.ID),
 			zap.String("event_type", event.Type),
 			zap.Error(err))
-		return event, false, true
+		return event, false, err
 	}
-	return event, true, false
+	return event, true, nil
 }
 
 func (sm *StreamManager) handleUpdatesDisconnect(execution *AgentExecution, disconnectErr error) {

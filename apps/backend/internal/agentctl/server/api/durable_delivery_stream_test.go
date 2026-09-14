@@ -111,6 +111,66 @@ func TestDeliveryAPIRejectsForeignStreamIdentity(t *testing.T) {
 	}
 }
 
+func TestDeliveryAPIStatusReturnsBoundedRecoveryDescriptor(t *testing.T) {
+	server, _, deliveryJournal := newDurableDeliveryTestServer(t)
+	ctx := context.Background()
+	payload, err := json.Marshal(adapter.AgentEvent{Type: adapter.EventTypeMessageChunk, Text: "private event"})
+	if err != nil {
+		t.Fatalf("marshal event: %v", err)
+	}
+	if _, err := deliveryJournal.Append(ctx, journal.Event{
+		SessionID:         "session-1",
+		IncarnationID:     "session-1",
+		HarnessGeneration: 1,
+		StreamID:          "session-1",
+		Type:              adapter.EventTypeMessageChunk,
+		Payload:           payload,
+	}); err != nil {
+		t.Fatalf("append event: %v", err)
+	}
+	if _, err := deliveryJournal.PutSubmission(ctx, journal.Submission{
+		ID:                "submission-status",
+		SessionID:         "session-1",
+		IncarnationID:     "session-1",
+		HarnessGeneration: 1,
+		Hash:              "hash-status",
+		Payload:           []byte("private prompt"),
+		State:             journal.SubmissionAccepted,
+	}); err != nil {
+		t.Fatalf("store submission: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/agent/delivery", nil)
+	resp := httptest.NewRecorder()
+	server.Router().ServeHTTP(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d: %s", resp.Code, http.StatusOK, resp.Body.String())
+	}
+	var descriptor journal.RecoveryDescriptor
+	if err := json.Unmarshal(resp.Body.Bytes(), &descriptor); err != nil {
+		t.Fatalf("decode descriptor: %v", err)
+	}
+	if !descriptor.Durable || descriptor.Version != journal.CurrentVersion {
+		t.Fatalf("storage capability = %+v, want durable version %d", descriptor.StorageCapability, journal.CurrentVersion)
+	}
+	if descriptor.SessionID != "session-1" || descriptor.IncarnationID != "session-1" || descriptor.HarnessGeneration != 1 {
+		t.Fatalf("owner identity = %q/%q/%d", descriptor.SessionID, descriptor.IncarnationID, descriptor.HarnessGeneration)
+	}
+	if descriptor.Stream == nil || descriptor.Stream.HighWater != 1 || descriptor.Stream.FirstRetained != 1 {
+		t.Fatalf("stream descriptor = %+v, want high-water 1 and first-retained 1", descriptor.Stream)
+	}
+	if !descriptor.Unresolved || descriptor.SubmissionCount != 1 || len(descriptor.Submissions) != 1 {
+		t.Fatalf("retained work = unresolved:%t count:%d summaries:%d", descriptor.Unresolved, descriptor.SubmissionCount, len(descriptor.Submissions))
+	}
+	if descriptor.Submissions[0].ID != "submission-status" || descriptor.Submissions[0].Hash != "hash-status" {
+		t.Fatalf("submission summary = %+v", descriptor.Submissions[0])
+	}
+	if bytes.Contains(resp.Body.Bytes(), []byte("private")) {
+		t.Fatal("recovery descriptor leaked retained payload")
+	}
+}
+
 func TestDeliveryAPIRejectsForeignSubmissionIdentity(t *testing.T) {
 	server, _, deliveryJournal := newDurableDeliveryTestServer(t)
 

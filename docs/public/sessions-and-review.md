@@ -79,6 +79,13 @@ It does not restore private harness state, running tools, or old provider paths.
 Kandev does not resend a prompt when its outcome is uncertain. Resolve the
 recovery notice before sending new work.
 
+When a compatible agentctl process survives a backend restart, Kandev first
+checks its delivery identity and durable cursor, then replays committed events
+before it accepts new work. This delivery recovery is automatic and separate
+from the executor setting that controls whether the agent process survives.
+If the delivery evidence is missing or inconsistent, Kandev keeps the session
+blocked and preserves Stop and the available recovery action.
+
 Stopping a turn does not itself run the next queued message. If pending rows remain, Kandev sets their session's **Auto-run** switch to OFF. Expand the queue and turn Auto-run ON when you want FIFO processing to continue.
 
 The expanded queue also lets you pause or discard stale work. Its compact header places the **Auto-run** and **Auto-merge** pills beside the queue count. **Remove** is available for every visible pending row, including messages from users, peer agents, workflows, and server actions; **Clear all** removes all visible pending rows in that session. Only user-origin rows remain editable. A message already reserved for delivery is hidden from the queue and cannot be cancelled with these controls.

@@ -60,23 +60,35 @@ type AgentExecution struct {
 	OfficeAgentProfileID      string
 	AgentID                   string // Agent type ID (e.g., "claude-acp", "codex") — used for fallback auth methods
 	ContainerID               string
-	ContainerIP               string               // IP address of the container for agentctl communication
-	WorkspacePath             string               // Path to the workspace (worktree or repository path)
-	WorkspaceSourceRoots      []string             // Canonical durable source roots permitted by agentctl file operations
-	ACPSessionID              string               // ACP session ID to resume, if available
-	DeliveryStreamID          string               // Generation-scoped durable agentctl stream
-	DeliveryIncarnationID     string               // Kandev session incarnation owning the stream
-	DeliveryHarnessGeneration uint64               // Native harness generation owning the stream
-	AgentCommand              string               // Command to start the agent subprocess
-	ContinueCommand           string               // Command for follow-up prompts (one-shot agents)
-	AgentArgs                 []string             // Structured argv for AgentCommand
-	ContinueArgs              []string             // Structured argv for ContinueCommand
-	RuntimeName               agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
-	Status                    v1.AgentStatus
-	StartedAt                 time.Time
-	FinishedAt                *time.Time
-	ExitCode                  *int
-	ErrorMessage              string
+	ContainerIP               string   // IP address of the container for agentctl communication
+	WorkspacePath             string   // Path to the workspace (worktree or repository path)
+	WorkspaceSourceRoots      []string // Canonical durable source roots permitted by agentctl file operations
+	ACPSessionID              string   // ACP session ID to resume, if available
+	DeliveryStreamID          string   // Generation-scoped durable agentctl stream
+	DeliveryIncarnationID     string   // Kandev session incarnation owning the stream
+	DeliveryHarnessGeneration uint64   // Native harness generation owning the stream
+	// DeliveryMode records the recovery protocol selected for this execution.
+	// It is set before an adopted execution is published so admission and stream
+	// replay cannot observe an undiscovered peer as legacy.
+	DeliveryMode DurableDeliveryMode
+	// DeliveryDescriptor is the authenticated owner snapshot captured during
+	// adoption. It is retained in memory for bounded replay and Stop
+	// reconciliation; prompt payloads are never present in it.
+	DeliveryDescriptor *agentctl.DeliveryStatus
+	// DeliveryReplayCursor is the exact SQL projected position captured during
+	// adoption. It is used to reconcile the descriptor's bounded high-water
+	// mark before a live stream is attached.
+	DeliveryReplayCursor uint64
+	AgentCommand         string               // Command to start the agent subprocess
+	ContinueCommand      string               // Command for follow-up prompts (one-shot agents)
+	AgentArgs            []string             // Structured argv for AgentCommand
+	ContinueArgs         []string             // Structured argv for ContinueCommand
+	RuntimeName          agentruntime.Runtime // Name of the runtime used (e.g., "docker", "standalone")
+	Status               v1.AgentStatus
+	StartedAt            time.Time
+	FinishedAt           *time.Time
+	ExitCode             *int
+	ErrorMessage         string
 	// OriginalWorkspacePath is the first agent-visible CWD for this native
 	// session. It is retained separately from the current target so restore
 	// policy can classify relocation before touching native state.

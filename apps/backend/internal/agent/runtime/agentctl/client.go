@@ -71,6 +71,10 @@ type Client struct {
 	// initialize. It is separate from ACP capabilities because it describes the
 	// retained agentctl-to-backend journal rather than the native harness.
 	durableDelivery *DurableDeliveryInfo
+	// deliveryStatus is populated by authenticated recovery discovery. It lets
+	// a newly constructed client carry the adopted owner's capability and
+	// identity before any prompt or ACP operation is considered.
+	deliveryStatus *DeliveryStatus
 
 	// lastDeliverySubmissionID is the immutable agentctl record returned for
 	// the most recent accepted prompt. It lets lifecycle reconcile a disconnect

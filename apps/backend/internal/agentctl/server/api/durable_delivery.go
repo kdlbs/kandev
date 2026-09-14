@@ -50,34 +50,27 @@ func (s *Server) getDeliveryJournal(c *gin.Context) (*journal.Journal, bool) {
 }
 
 func (s *Server) handleDeliveryStatus(c *gin.Context) {
-	if s.procMgr != nil {
-		capability := s.procMgr.DeliveryCapability()
-		if !capability.Durable && capability.Reason == "storage_not_durable" {
-			c.JSON(http.StatusOK, capability)
-			return
-		}
-	}
-	deliveryJournal, ok := s.getDeliveryJournal(c)
-	if !ok {
+	if s.procMgr == nil {
+		c.JSON(http.StatusConflict, gin.H{
+			"code":    "DURABLE_DELIVERY_UNAVAILABLE",
+			"message": "durable delivery process manager is unavailable",
+		})
 		return
 	}
 	streamID := c.Query("stream_id")
-	response := gin.H{"version": journal.CurrentVersion, "durable": true}
-	if streamID != "" {
-		if !s.validateDeliveryStreamID(c, streamID) {
-			return
-		}
-		stream, err := deliveryJournal.GetStream(c.Request.Context(), streamID)
-		if err != nil {
+	descriptor, err := s.procMgr.DeliveryRecoveryDescriptor(c.Request.Context(), streamID)
+	if err != nil {
+		if errors.Is(err, journal.ErrOwnerMismatch) {
 			writeDeliveryError(c, err)
 			return
 		}
-		if !s.validateDeliveryStream(c, stream) {
-			return
-		}
-		response["stream"] = stream
+		// Keep the existing typed storage-unavailable response for a configured
+		// journal that cannot be read. A missing configured journal is never
+		// serialized as a successful legacy capability.
+		_, _ = s.getDeliveryJournal(c)
+		return
 	}
-	c.JSON(http.StatusOK, response)
+	c.JSON(http.StatusOK, descriptor)
 }
 
 func (s *Server) handleDeliverySubmission(c *gin.Context) {
