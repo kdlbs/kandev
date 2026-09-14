@@ -57,4 +57,3 @@ inert; normal plugin uninstall or the lifecycle cleanup path removes them.
 ## Work orders
 
 - [x] [Task 01: Port the AgentConversation Host contract](task-01-port-agent-conversation-host.md)
-

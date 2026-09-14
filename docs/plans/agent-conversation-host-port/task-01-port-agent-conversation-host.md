@@ -78,4 +78,3 @@ git diff --check
   stale ephemeral metadata compatibility coverage.
 - Focused and touched-package tests, build, vet, lint, documentation checks, and
   diff validation passed at the delivery head before PR review follow-up.
-
