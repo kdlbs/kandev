@@ -78,8 +78,35 @@ func useExistingTaskPrincipal(ctx context.Context, store PrincipalLifecycleStore
 		return claimUnboundTaskPrincipal(ctx, store, principal, taskID, sessionID)
 	}
 	if principal.BackingSessionID != sessionID {
-		return nil, fmt.Errorf("ensure task principal: task is bound to another session")
+		principal, err := rebindExistingTaskPrincipal(ctx, store, principal, taskID, sessionID)
+		if err != nil {
+			return nil, err
+		}
+		if principal == nil {
+			return nil, fmt.Errorf("ensure task principal: principal is revoked")
+		}
+		return principal, nil
 	}
+	return principal, nil
+}
+
+// rebindExistingTaskPrincipal rotates the server-owned task principal to the
+// session that is actually dispatching. Sessions of one task are sequential:
+// when a new session starts, the previous binding is stale by construction,
+// so the rebind applies to the next authorization check (AC-...-003.4) while
+// the unique task/session indexes still keep two principals off the same
+// backing task or session.
+func rebindExistingTaskPrincipal(ctx context.Context, store PrincipalLifecycleStore, principal *models.WorkspaceAgentPrincipal, taskID, sessionID string) (*models.WorkspaceAgentPrincipal, error) {
+	boundAt := time.Now().UTC()
+	if err := store.RebindWorkspaceAgentPrincipal(ctx, principal.ID, taskID, sessionID, boundAt); err != nil {
+		if errors.Is(err, repoerrors.ErrWorkspaceAgentPrincipalNotFound) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("bind MCP task principal: %w", err)
+	}
+	principal.BackingTaskID = taskID
+	principal.BackingSessionID = sessionID
+	principal.UpdatedAt = boundAt
 	return principal, nil
 }
 

@@ -129,13 +129,86 @@ func TestEnsureTaskPrincipalClaimsUnboundPrincipalOnce(t *testing.T) {
 	if principal == nil || principal.BackingSessionID != "session-1" {
 		t.Fatalf("claimed principal = %#v, want session-1", principal)
 	}
-
-	if _, err := EnsureTaskPrincipal(context.Background(), store, "workspace-1", "task-1", "session-2"); err == nil {
-		t.Fatal("second session claim succeeded, want denial")
-	}
 	if store.claims != 1 {
 		t.Fatalf("claims = %d, want exactly one", store.claims)
 	}
+}
+
+func TestEnsureTaskPrincipalRotatesSessionBindingToDispatchingSession(t *testing.T) {
+	store := &rotatingPrincipalStore{principal: &models.WorkspaceAgentPrincipal{
+		ID: "principal-1", WorkspaceID: "workspace-1", PluginInstallationID: TaskPrincipalInstallationID,
+		LogicalKey: TaskPrincipalLogicalKey("task-1"), BackingTaskID: "task-1", BackingSessionID: "session-1",
+	}}
+
+	principal, err := EnsureTaskPrincipal(context.Background(), store, "workspace-1", "task-1", "session-2")
+	if err != nil {
+		t.Fatalf("EnsureTaskPrincipal session rotation: %v", err)
+	}
+	if principal == nil || principal.BackingSessionID != "session-2" {
+		t.Fatalf("rotated principal = %#v, want session-2 binding", principal)
+	}
+	if store.rebinds != 1 {
+		t.Fatalf("rebinds = %d, want exactly one", store.rebinds)
+	}
+
+	// The same dispatching session stays bound: no churn on repeated calls.
+	principal, err = EnsureTaskPrincipal(context.Background(), store, "workspace-1", "task-1", "session-2")
+	if err != nil {
+		t.Fatalf("EnsureTaskPrincipal settled session: %v", err)
+	}
+	if principal == nil || principal.BackingSessionID != "session-2" {
+		t.Fatalf("settled principal = %#v, want session-2 binding", principal)
+	}
+	if store.rebinds != 1 {
+		t.Fatalf("rebinds after settle = %d, want exactly one", store.rebinds)
+	}
+}
+
+func TestEnsureTaskPrincipalRevokedDuringRotationIsReported(t *testing.T) {
+	store := &rotatingPrincipalStore{
+		principal: &models.WorkspaceAgentPrincipal{
+			ID: "principal-1", WorkspaceID: "workspace-1", PluginInstallationID: TaskPrincipalInstallationID,
+			LogicalKey: TaskPrincipalLogicalKey("task-1"), BackingTaskID: "task-1", BackingSessionID: "session-1",
+		},
+		revokedOnRebind: true,
+	}
+
+	_, err := EnsureTaskPrincipal(context.Background(), store, "workspace-1", "task-1", "session-2")
+	if err == nil {
+		t.Fatal("rotation onto revoked principal succeeded, want denial")
+	}
+}
+
+type rotatingPrincipalStore struct {
+	principal       *models.WorkspaceAgentPrincipal
+	rebinds         int
+	revokedOnRebind bool
+}
+
+func (s *rotatingPrincipalStore) GetActiveWorkspaceAgentPrincipalForTask(context.Context, string, string) (*models.WorkspaceAgentPrincipal, error) {
+	return s.principal, nil
+}
+
+func (s *rotatingPrincipalStore) GetWorkspaceAgentPrincipalByContext(context.Context, string, string, string) (*models.WorkspaceAgentPrincipal, error) {
+	return nil, repoerrors.ErrWorkspaceAgentPrincipalNotFound
+}
+
+func (s *rotatingPrincipalStore) CreateWorkspaceAgentPrincipal(context.Context, *models.WorkspaceAgentPrincipal) error {
+	return errors.New("unexpected create")
+}
+
+func (s *rotatingPrincipalStore) RebindWorkspaceAgentPrincipal(_ context.Context, id, taskID, sessionID string, updatedAt time.Time) error {
+	if s.revokedOnRebind {
+		return repoerrors.ErrWorkspaceAgentPrincipalNotFound
+	}
+	if s.principal == nil || s.principal.ID != id {
+		return repoerrors.ErrWorkspaceAgentPrincipalNotFound
+	}
+	s.principal.BackingTaskID = taskID
+	s.principal.BackingSessionID = sessionID
+	s.principal.UpdatedAt = updatedAt
+	s.rebinds++
+	return nil
 }
 
 type claimingPrincipalStore struct {
