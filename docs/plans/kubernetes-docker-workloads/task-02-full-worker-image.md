@@ -121,7 +121,8 @@ source/browser/Docker smoke scripts are present. `TestFullWorkerTemplate` and
 `TestFullWorkerPreparationClonesBeforeCachesAndRetainsWorkspace` passed, proving
 clone/cache ordering and retained checkout reuse. Shell syntax, input validation
 and immutable image rendering passed. The renderer regression first failed
-because the renderer was absent; its Go rerun remains pending.
+because the renderer was absent; `TestFullWorkerTemplateRequiresImmutableImage`
+passed in the focused Go regression rerun after rebasing.
 
 A bounded `build.sh --build --verify` attempt did not complete. No image ID,
 source/browser image verification or supported full runtime matrix is claimed.
