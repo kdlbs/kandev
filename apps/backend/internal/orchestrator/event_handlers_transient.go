@@ -94,10 +94,12 @@ type capturedPrompt struct {
 // transientRetryEntry tracks one session's in-progress retry loop: the current
 // attempt count and the cancel func for the armed backoff timer.
 type transientRetryEntry struct {
-	attempt int
-	cancel  func()
-	mu      sync.Mutex
-	claimed bool
+	attempt  int
+	cancel   func()
+	retryCtx context.Context
+	mu       sync.Mutex
+	claimed  bool
+	armed    bool
 }
 
 func (e *transientRetryEntry) claim() bool {
@@ -107,6 +109,16 @@ func (e *transientRetryEntry) claim() bool {
 		return false
 	}
 	e.claimed = true
+	return true
+}
+
+func (e *transientRetryEntry) arm() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.armed {
+		return false
+	}
+	e.armed = true
 	return true
 }
 
@@ -174,6 +186,9 @@ func (s *Service) reclaimTransientRetryNoticeStateLocked(sessionID string, state
 }
 
 func (s *Service) retireTransientRetryNoticeLocked(sessionID string, state *transientRetryNoticeState) {
+	// Callers hold state.mu. Keep this order, state.mu -> statesMu, everywhere
+	// that touches the lifecycle map so a waiter cannot observe a replacement
+	// state while another caller still owns this state's mutex.
 	state.retired.Store(true)
 	ttl := s.transientRetryNoticeFenceDuration()
 	state.retiredUntil.Store(time.Now().Add(ttl).UnixNano())
@@ -233,13 +248,6 @@ func (s *Service) rememberTurnPromptWithAccepted(
 	if sessionID == "" {
 		return
 	}
-	state, release := s.acquireTransientRetryNoticeState(sessionID)
-	state.mu.Lock()
-	// A newly accepted prompt starts a fresh retry lifecycle. Clear the fence
-	// left by cancellation or terminal cleanup before its first failure can
-	// write a new notice.
-	s.clearTransientRetryNoticeFenceLocked(sessionID, state)
-	state.owned.Store(true)
 	s.lastTurnPrompt.Store(sessionID, capturedPrompt{
 		text:        text,
 		model:       model,
@@ -247,8 +255,6 @@ func (s *Service) rememberTurnPromptWithAccepted(
 		attachments: attachments,
 		onAccepted:  onAccepted,
 	})
-	state.mu.Unlock()
-	release()
 }
 
 // handleTransientFailure routes a high-confidence short provider error
@@ -257,30 +263,13 @@ func (s *Service) rememberTurnPromptWithAccepted(
 // handleRecoverableFailure); false for non-transient errors, office tasks,
 // or an exhausted retry budget.
 func (s *Service) handleTransientFailure(ctx context.Context, data watcher.AgentEventData) bool {
-	data = s.withPromptAttemptEvidence(data)
 	// Dynamic profiles own both error classes and their retry/reset policy. The
 	// legacy Kanban retry ladder must not consume a configured dynamic retry
 	// budget before the shared evaluator sees the failure.
 	if data.DynamicRouteAttempt {
 		return false
 	}
-	if !s.promptAttemptPreResultSafe(data) {
-		s.logger.Debug("refusing automatic transient retry without safe prompt-attempt evidence",
-			zap.String("task_id", data.TaskID),
-			zap.String("session_id", data.SessionID),
-			zap.String("agent_execution_id", data.AgentExecutionID),
-			zap.Uint64("prompt_generation", data.PromptGeneration))
-		return false
-	}
-	classified := classifyKanbanFailure(data)
-	if data.SessionID == "" || routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) != routingerr.DecisionShortRetry {
-		return false
-	}
-	// Genuine Office-owned tasks render their
-	// own structured error UI — keep them on the existing path rather than the
-	// kanban-style yellow retry card. The canonical task projection avoids
-	// treating ordinary Kanban tasks with an assigned profile as Office tasks.
-	if s.isOfficeTask(ctx, data.TaskID) {
+	if data.SessionID == "" {
 		return false
 	}
 
@@ -293,6 +282,30 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID))
 		return true
+	}
+	data = s.withPromptAttemptEvidenceLocked(data)
+	if data.DynamicRouteAttempt || !s.promptAttemptPreResultSafe(data) {
+		noticeState.mu.Unlock()
+		releaseNoticeState()
+		s.logger.Debug("refusing automatic transient retry without safe prompt-attempt evidence",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("agent_execution_id", data.AgentExecutionID),
+			zap.Uint64("prompt_generation", data.PromptGeneration))
+		return false
+	}
+	classified := classifyKanbanFailure(data)
+	if routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) != routingerr.DecisionShortRetry {
+		noticeState.mu.Unlock()
+		releaseNoticeState()
+		return false
+	}
+	// Genuine Office-owned tasks render their own structured error UI. Keep them
+	// on the existing path rather than the Kanban-style yellow retry card.
+	if s.isOfficeTask(ctx, data.TaskID) {
+		noticeState.mu.Unlock()
+		releaseNoticeState()
+		return false
 	}
 	attempt := s.nextTransientAttemptLocked(data.SessionID)
 	if attempt > transientMaxAttempts {
@@ -318,10 +331,10 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 
 	// Emit the yellow status (against the failed turn) before completing it.
 	s.createTransientRetryStatusMessageLocked(noticeState, ctx, data, classified, attempt, delay, retryAt)
-	// Arm the next timer while the notice lifecycle is still serialized. A
-	// concurrent reset either waits for this pair and then retires the message,
-	// or retires first and the fence above prevents this attempt from starting.
-	s.scheduleTransientRetryWithMetadataLocked(
+	// Reserve the next timer while the notice lifecycle is still serialized. A
+	// concurrent failure can replace this reservation, but cannot arm it until
+	// its own failed turn has been parked.
+	entry := s.reserveTransientRetryWithMetadataLocked(
 		noticeState,
 		data.TaskID,
 		data.SessionID,
@@ -341,6 +354,19 @@ func (s *Service) handleTransientFailure(ctx context.Context, data watcher.Agent
 	// also lets the yellow retry card render — ActionMessage hides itself while
 	// the session is RUNNING). Deliberately NOT FAILED and NOT task→REVIEW.
 	s.updateTaskSessionState(ctx, data.TaskID, data.SessionID, models.TaskSessionStateWaitingForInput, "", false)
+
+	// Parking must complete before a zero-delay retry can dispatch. Reacquiring
+	// the notice mutex also lets cancellation or a later failure replace this
+	// reservation before it is armed.
+	if entry != nil {
+		state, release := s.acquireTransientRetryNoticeState(data.SessionID)
+		state.mu.Lock()
+		if current, ok := s.transientRetries.Load(data.SessionID); ok && current == entry && !state.retired.Load() {
+			s.armTransientRetryEntryLocked(data.TaskID, data.SessionID, data.AgentExecutionID, entry, delay)
+		}
+		state.mu.Unlock()
+		release()
+	}
 
 	return true
 }
@@ -402,14 +428,39 @@ func (s *Service) scheduleTransientRetryWithMetadataLocked(
 	retryAt time.Time,
 	classified *routingerr.Error,
 ) {
+	entry := s.reserveTransientRetryWithMetadataLocked(state, taskID, sessionID, execID, attempt, delay, retryAt, classified)
+	if entry != nil {
+		s.armTransientRetryEntryLocked(taskID, sessionID, execID, entry, delay)
+	}
+}
+
+func (s *Service) reserveTransientRetryWithMetadataLocked(
+	state *transientRetryNoticeState,
+	taskID, sessionID, execID string,
+	attempt int,
+	delay time.Duration,
+	retryAt time.Time,
+	classified *routingerr.Error,
+) *transientRetryEntry {
 	if state.retired.Load() {
-		return
+		return nil
 	}
 	retryCtx, cancel := context.WithCancel(context.Background())
-	entry := &transientRetryEntry{attempt: attempt, cancel: cancel}
+	entry := &transientRetryEntry{attempt: attempt, cancel: cancel, retryCtx: retryCtx}
 	state.owned.Store(true)
 	s.transientRetries.Store(sessionID, entry)
-	go s.runTransientRetry(retryCtx, taskID, sessionID, execID, entry, delay)
+	return entry
+}
+
+func (s *Service) armTransientRetryEntryLocked(
+	taskID, sessionID, execID string,
+	entry *transientRetryEntry,
+	delay time.Duration,
+) {
+	if entry == nil || !entry.arm() {
+		return
+	}
+	go s.runTransientRetry(entry.retryCtx, taskID, sessionID, execID, entry, delay)
 }
 
 // runTransientRetry waits out the backoff (or cancellation) then re-drives the
@@ -627,6 +678,9 @@ func (s *Service) updateTransientRetryStatusMessageLocked(
 	content string,
 	metadata map[string]interface{},
 ) {
+	// state.mu intentionally covers this DB I/O. Retirement and notice writes
+	// must serialize so cancellation cannot delete a row that this update then
+	// resurrects.
 	messages, err := s.transientRetryMessages.ListMessages(ctx, data.SessionID)
 	if err != nil {
 		s.logger.Warn("failed to list transient retry status messages before write",
@@ -680,9 +734,9 @@ func transientRetryNotices(messages []*models.Message, taskID, sessionID string)
 	}
 	sort.SliceStable(notices, func(i, j int) bool {
 		if notices[i].CreatedAt.Equal(notices[j].CreatedAt) {
-			return notices[i].ID < notices[j].ID
+			return notices[i].ID > notices[j].ID
 		}
-		return notices[i].CreatedAt.Before(notices[j].CreatedAt)
+		return notices[i].CreatedAt.After(notices[j].CreatedAt)
 	})
 	return notices
 }
@@ -912,6 +966,9 @@ func (s *Service) CancelTransientRetry(ctx context.Context, taskID, sessionID st
 		return false
 	}
 	noticeState, releaseNoticeState := s.acquireTransientRetryNoticeState(sessionID)
+	if noticeState == nil {
+		return false
+	}
 	noticeState.mu.Lock()
 	_, active := s.transientRetries.Load(sessionID)
 	s.resetTransientRetryWithContextLocked(noticeState, ctx, sessionID, true)

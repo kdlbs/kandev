@@ -25,6 +25,14 @@ type transientRetryMessageServiceStub struct {
 	deleted   []string
 }
 
+func armRetiredTransientPromptEvidence(svc *Service) {
+	svc.dynamicAttemptEvidence.Store("s1", &promptAttemptEvidence{
+		executionID:      "execution-1",
+		promptGeneration: 7,
+		evidenceKnown:    true,
+	})
+}
+
 type blockingTransientRetryMessageService struct {
 	*transientRetryMessageServiceStub
 	updateStarted chan struct{}
@@ -334,16 +342,16 @@ func TestTransientRetryStatusMessage_ConsolidatesDuplicatesAndIgnoresUnrelatedRo
 		base.Add(20*time.Second),
 	)
 
-	require.Equal(t, []string{"retry-earlier"}, store.updated)
-	require.Equal(t, []string{"retry-later"}, store.deleted)
+	require.Equal(t, []string{"retry-later"}, store.updated)
+	require.Equal(t, []string{"retry-earlier"}, store.deleted)
 	require.Empty(t, creator.sessionMessages)
-	earlier := store.messages[0]
-	require.Contains(t, earlier.Content, "attempt 3/5")
-	require.Equal(t, "codex-acp", earlier.Metadata["provider_name"])
-	require.NotContains(t, earlier.Metadata, "model_id")
+	later := store.messages[0]
+	require.Contains(t, later.Content, "attempt 3/5")
+	require.Equal(t, "codex-acp", later.Metadata["provider_name"])
+	require.NotContains(t, later.Metadata, "model_id")
 	remaining := transientRetryNotices(store.messages, "t1", "s1")
 	require.Len(t, remaining, 1)
-	require.Equal(t, "retry-earlier", remaining[0].ID)
+	require.Equal(t, "retry-later", remaining[0].ID)
 }
 
 // @covers AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.25
@@ -405,14 +413,14 @@ func TestTransientRetryStatusMessage_RetainsDuplicatesAfterDeleteErrorForNextWri
 		)
 	}
 	write(2)
-	require.Equal(t, []string{"retry-2"}, store.deleted)
+	require.Equal(t, []string{"retry-1"}, store.deleted)
 	require.Len(t, store.messages, 2)
 
 	store.deleteErr = nil
 	write(3)
-	require.Equal(t, []string{"retry-2", "retry-2"}, store.deleted)
+	require.Equal(t, []string{"retry-1", "retry-1"}, store.deleted)
 	require.Len(t, store.messages, 1)
-	require.Equal(t, "retry-1", store.messages[0].ID)
+	require.Equal(t, "retry-2", store.messages[0].ID)
 }
 
 // @covers AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.25
@@ -494,7 +502,7 @@ func TestHandleTransientFailure_RetiredLifecycleIgnoresLateFailure(t *testing.T)
 		svc.scheduleTransientRetry("t1", "s1", "execution-1", 1, time.Hour)
 
 		require.True(t, svc.CancelTransientRetry(context.Background(), "t1", "s1"))
-		armTransientPromptEvidence(svc)
+		armRetiredTransientPromptEvidence(svc)
 
 		require.True(t, svc.handleTransientFailure(context.Background(), watcher.AgentEventData{
 			TaskID:           "t1",
@@ -527,7 +535,7 @@ func TestHandleTransientFailure_RetiredLifecycleIgnoresLateFailure(t *testing.T)
 			AgentExecutionID: "execution-1",
 			ErrorMessage:     overloaded529,
 		})
-		armTransientPromptEvidence(svc)
+		armRetiredTransientPromptEvidence(svc)
 
 		require.True(t, svc.handleTransientFailure(context.Background(), watcher.AgentEventData{
 			TaskID:           "t1",
@@ -565,6 +573,51 @@ func TestHandleTransientFailure_NewPromptAfterRetirementStartsAtAttemptOne(t *te
 	entryValue, ok := svc.transientRetries.Load("s1")
 	require.True(t, ok)
 	require.Equal(t, 1, entryValue.(*transientRetryEntry).attempt)
+}
+
+// @covers AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.25
+func TestHandleTransientFailure_RetiredFenceWaitsForNewPromptIdentity(t *testing.T) {
+	svc, taskSvc, _ := newPersistentTransientRetryTestService(t)
+	t.Cleanup(svc.cancelAllTransientRetries)
+	svc.rememberTurnPrompt("s1", "old prompt", "", false, nil)
+	svc.scheduleTransientRetry("t1", "s1", "execution-old", 1, time.Hour)
+	require.True(t, svc.CancelTransientRetry(context.Background(), "t1", "s1"))
+
+	// A new initial prompt has a generation before its replacement execution is
+	// known. It must not open the retired lifecycle during that interval.
+	svc.rememberTurnPrompt("s1", "new prompt", "", false, nil)
+	svc.beginInitialPromptAttempt("s1", false)
+	require.True(t, svc.handleTransientFailure(context.Background(), watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s1",
+		AgentExecutionID: "execution-old",
+		PromptGeneration: 1,
+		ErrorMessage:     overloaded529,
+	}), "a late failure while the replacement execution is unbound must be consumed")
+	require.Empty(t, retryingMessages(t, taskSvc))
+
+	// Binding the replacement identity is the admission boundary that opens the
+	// fence. The same late event must then fail closed on identity mismatch.
+	svc.bindPromptAttempt("s1", "execution-new", 1)
+	require.False(t, svc.handleTransientFailure(context.Background(), watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s1",
+		AgentExecutionID: "execution-old",
+		PromptGeneration: 1,
+		ErrorMessage:     overloaded529,
+	}))
+	require.Empty(t, retryingMessages(t, taskSvc))
+
+	require.True(t, svc.handleTransientFailure(context.Background(), watcher.AgentEventData{
+		TaskID:           "t1",
+		SessionID:        "s1",
+		AgentExecutionID: "execution-new",
+		PromptGeneration: 1,
+		ErrorMessage:     overloaded529,
+	}))
+	notices := retryingMessages(t, taskSvc)
+	require.Len(t, notices, 1)
+	require.Equal(t, float64(1), notices[0].Metadata["attempt"])
 }
 
 // @covers AC-PLATFORM-PROVIDER-ERROR-RECOVERY-001.25

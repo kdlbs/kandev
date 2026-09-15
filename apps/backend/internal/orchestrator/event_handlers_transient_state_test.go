@@ -15,6 +15,16 @@ func transientRetryNoticeStateCount(svc *Service) int {
 	return len(svc.transientRetryNoticeStates)
 }
 
+func TestTransientRetryNoticeState_CachedPromptDoesNotOwnState(t *testing.T) {
+	svc := &Service{}
+
+	svc.rememberTurnPrompt("uncertain", "prompt", "", false, nil)
+
+	if got := transientRetryNoticeStateCount(svc); got != 0 {
+		t.Fatalf("notice state entries for an unaccepted prompt = %d, want 0", got)
+	}
+}
+
 func TestTransientRetryNoticeState_ReclaimsSuccessfulSessionChurn(t *testing.T) {
 	svc := &Service{}
 

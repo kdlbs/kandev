@@ -117,28 +117,35 @@ Do not introduce database I/O under the global runtime-state mutex.
 ## Results
 
 Implemented the single persisted retry-notice lifecycle. The orchestrator
-updates the earliest exact task and session match, replaces retry metadata as a
+updates the newest exact task and session match, replaces retry metadata as a
 unit, removes legacy duplicates after a successful update, and leaves failed
 storage operations eligible for later cleanup. Per-session serialization and a
 retirement fence prevent cancellation or terminal cleanup from being undone by
-late provider events. The existing WebSocket update-by-ID path now has a retry
-metadata regression, and the desktop and mobile E2E suites verify one current
-notice through advancement, reload, and Cancel.
+late provider events. The WebSocket update path upserts a reused retry row when
+the row is outside the loaded transcript window, and the desktop and mobile E2E
+suites verify one current notice through advancement, reload, and Cancel.
 
 The review remediation adds reference-counted guard ownership and a bounded
 five-minute retirement fence. Active prompt/retry state remains owned, normal
 successful-turn cleanup releases it, and deletion/terminal cleanup keeps only
-the short fence needed to reject late provider events. Deterministic backend
-tests cover session churn, deletion, concurrent guard users, cancellation and
-terminal late failures, new-prompt fence reset, and concurrent failures that
-share one notice and timer entry.
+the short fence needed to reject late provider events. New prompt evidence
+opens that fence only after its execution identity is complete. Retry entries
+are reserved before completion but armed after the failed turn is completed and
+the session is parked. Deterministic backend tests cover session churn,
+deletion, concurrent guard users, cancellation and terminal late failures,
+stale-event identity fencing, new-prompt fence reset, and concurrent failures
+that share one notice and timer entry; frontend tests cover a reused row missing
+from the loaded transcript.
 
 - `go test ./internal/orchestrator -run 'Test.*Transient.*' -count=1`: passed.
 - `go test -race ./internal/orchestrator -run 'Test.*Transient.*' -count=1`:
   passed.
+- `go test ./internal/orchestrator -count=1`: passed.
 - `make build`: passed.
 - `make lint`: passed with 0 issues.
-- Focused Vitest: 44 tests passed in 2 files.
+- Changed-file Go lint with `--new-from-rev`: passed with 0 issues.
+- Focused Vitest: 50 tests passed in 3 files.
+- Web lint: passed with 0 issues.
 - `pnpm run typecheck`: passed.
 - Managed Chromium E2E: 4 passed.
 - Managed mobile-chrome E2E: 1 passed.

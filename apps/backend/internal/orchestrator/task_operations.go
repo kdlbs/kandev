@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -946,6 +947,10 @@ func (s *Service) handleSessionLaunchFailure(
 ) error {
 	failureCtx := context.WithoutCancel(ctx)
 	safeErr := routingerr.SanitizeError(launchErr)
+	// A launch failure cannot produce a retryable prompt lifecycle. Release the
+	// replay payload here so an early admission or startup failure does not keep
+	// attachment data alive until a later session event.
+	s.clearTransientRetryState(sessionID)
 	_ = s.recordSessionLaunchFailure(
 		failureCtx, taskID, sessionID, safeErr, preloadedSession...,
 	)
@@ -5403,7 +5408,22 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	// Cache and reserve the replay identity before model switching. A restart
 	// based switch dispatches its prompt from StartAgentProcess, before the
 	// ordinary PromptTask admission path can initialize these records.
-	s.rememberTurnPromptWithAccepted(sessionID, prompt, model, planMode, attachments, options.onAccepted)
+	// Keep the cache only after the provider accepts this prompt; all admission
+	// and dispatch failures after this point release it through the defer.
+	var promptAccepted atomic.Bool
+	originalOnAccepted := options.onAccepted
+	options.onAccepted = func(turnID string) {
+		promptAccepted.Store(true)
+		if originalOnAccepted != nil {
+			originalOnAccepted(turnID)
+		}
+	}
+	s.rememberTurnPromptWithAccepted(sessionID, prompt, model, planMode, attachments, originalOnAccepted)
+	defer func() {
+		if !promptAccepted.Load() {
+			s.lastTurnPrompt.Delete(sessionID)
+		}
+	}()
 	requiresModelSwitch := modelSwitchRequired(session, model)
 	var modelSwitchGuard *lockedCancelInFlightGuard
 	if requiresModelSwitch && resumeAttempt != nil {
@@ -5431,6 +5451,9 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	if result, handled, switchErr := s.trySwitchModelForPrompt(
 		resumePromptCtx, taskID, sessionID, model, effectivePrompt, session, foregroundDispatch,
 	); handled {
+		if switchErr == nil {
+			promptAccepted.Store(true)
+		}
 		if resumeErr := s.validateResumeAttempt(resumeAttempt); resumeErr != nil {
 			s.cleanupCancelledResumeAttempt(resumeAttempt)
 			return nil, resumeErr
@@ -5597,6 +5620,9 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		onDispatched, session,
 	)
 	dispatchAccepted, publicationErr := dispatchOutcome.snapshot()
+	if dispatchAccepted {
+		promptAccepted.Store(true)
+	}
 	if err != nil {
 		// Missing-execution recovery reacquires the cancel guard while it resets
 		// the session. Release dispatch admission before entering that path.

@@ -49,8 +49,11 @@ Extend `TransientRetryMessageService` with existing task-service `UpdateMessage`
 Keep task-service mutation and event publication as the single persistence path.
 Use the selection and error rules in the
 [interactive lifecycle design](../../specs/platform/system-design/provider-error-recovery.md#interactive-transient-retry-notice-lifecycle).
-Preserve the original ID, timestamp, and turn association. Replace retry metadata
-as a unit so obsolete provider or model fields cannot leak into later attempts.
+Preserve the original ID, timestamp, and turn association. Select the newest
+matching notice when repairing legacy duplicates so the live row remains inside
+the newest-message hydration window. Replace retry metadata as a unit so
+obsolete provider or model fields cannot leak into later attempts. Upsert a
+reused retry update in the client when its row is absent from the loaded window.
 Retain existing message update handling and countdown rerender behavior.
 Audit existing per-session guards before changing event ordering. Do not hold
 `taskRuntimeStateMu` across storage operations or introduce recursive guard acquisition.
@@ -131,7 +134,7 @@ Run sequentially from the repository root. Managed E2E commands rebuild artifact
 (cd apps && pnpm install --frozen-lockfile)
 (cd apps/backend && go test ./internal/orchestrator -run 'Test.*Transient.*' -count=1)
 (cd apps/backend && go test -race ./internal/orchestrator -run 'Test.*Transient.*' -count=1)
-(cd apps/web && pnpm exec vitest run components/task/chat/messages/action-message.test.tsx lib/ws/handlers/messages.test.ts)
+(cd apps/web && pnpm exec vitest run components/task/chat/messages/action-message.test.tsx lib/ws/handlers/messages.test.ts lib/state/slices/session/session-slice.update-messages.test.ts)
 (cd apps/web && pnpm run typecheck)
 (cd apps/web && pnpm e2e:run --project chromium tests/session/transient-retry.spec.ts)
 (cd apps/web && pnpm e2e:run --project mobile-chrome tests/session/mobile-transient-retry.spec.ts)
@@ -143,19 +146,25 @@ git diff --check
 ## Verification results
 
 Implementation and verification completed. The retry writer now updates the
-earliest matching status message, consolidates duplicates after a successful
+newest matching status message, consolidates duplicates after a successful
 update, preserves storage error behavior, and serializes writes with
 retirement. Its per-session guard uses reference accounting for concurrent
 users and a bounded five-minute retirement fence, so ordinary session churn
-and deleted sessions do not retain obsolete state. Desktop and mobile E2E
-cover attempt advancement, reload, stable message identity, Cancel cleanup,
-and mobile document containment.
+and deleted sessions do not retain obsolete state. Prompt evidence opens a
+retired lifecycle only after a new execution identity is installed, and retry
+timers arm after the failed turn is completed and the session is parked. The
+client upserts a reused retry row when it is outside the loaded transcript
+window. Desktop and mobile E2E cover attempt advancement, reload, stable
+message identity, Cancel cleanup, and mobile document containment.
 
 - Focused Go tests: passed.
 - Focused Go tests with `-race`: passed.
+- Full `internal/orchestrator` package tests: passed.
 - Backend `make build`: passed.
 - Backend `make lint`: passed with 0 issues.
-- Focused Vitest: 44 tests passed in 2 files.
+- Changed-file Go lint with `--new-from-rev`: passed with 0 issues.
+- Focused Vitest: 50 tests passed in 3 files.
+- Web lint: passed with 0 issues.
 - Web `pnpm run typecheck`: passed.
 - Desktop managed E2E: 4 tests passed.
 - Mobile managed E2E: 1 test passed.
@@ -164,8 +173,9 @@ and mobile document containment.
 - Specification lint: passed.
 - `git diff --check`: passed.
 - Review regressions: passed for session churn/deletion reclamation, guard
-  reference accounting, cancellation and terminal late failures, new-prompt
-  fence reset, and concurrent failures sharing one notice and timer entry.
+  reference accounting, cancellation and terminal late failures, stale-event
+  identity fencing, new-prompt fence reset, concurrent failures sharing one
+  notice and timer entry, and client upsert of a reused retry row.
 
 The repository-wide `pnpm run lint:e2e-sleeps` command remains non-clean because
 of existing violations in untouched files, including missing ESLint rule
