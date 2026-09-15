@@ -222,3 +222,9 @@ Use TDD for changed logic and record exact commands and results in each work ord
 Keep the original eighteen tasks complete and this package pending until its own evidence passes.
 Before any authorized push, use the repository commit, push, and PR-fixup skills.
 This planning turn does not merge main, change production code, publish, or start another agent.
+
+## Streaming repair follow-up (2026-09-15)
+
+The [streaming repair package](../durable-agent-stream-repair/plan.md) tracks confirmed replay, legacy, batching, capacity, and recovery defects.
+Its seven work orders are pending. Historical completed task results above remain unchanged and do not prove these repairs.
+Release readiness requires the follow-up evidence; earlier green CI does not cover the new regressions.

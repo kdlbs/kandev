@@ -105,7 +105,7 @@ No debug-only JSONL file serves as the journal.
 
 The adapter first produces a normalized event.
 The journal writer commits that event before the API can publish it.
-A bounded batch can contain at most 64 KiB or wait at most 20 ms.
+Batch bounds follow the [stream processing design](durable-agent-stream-processing.md).
 Terminal state and its terminal event commit together.
 
 The producer queue has a 4 MiB byte bound.

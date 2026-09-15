@@ -132,6 +132,7 @@ and repository-context identity.
 - [Expected runtime log severity](system-design/expected-runtime-log-severity.md)
 - [Frontend feature state](system-design/features-slice-state.md)
 - [Durable agent delivery](system-design/durable-agent-delivery.md) (draft)
+- [Durable agent stream processing](system-design/durable-agent-stream-processing.md) (draft)
 - [Duration-aware E2E sharding and CI reliability](system-design/e2e-duration-aware-sharding.md)
 - [External CI runner capacity](system-design/external-e2e-runner-capacity.md)
 - [Health Endpoint — Surface the Running Version](system-design/health-endpoint-version.md)
