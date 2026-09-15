@@ -47,6 +47,135 @@ func TestAddTrigger_AcceptsWhatTheSchedulerAccepts(t *testing.T) {
 	}
 }
 
+// Without save-time validation, a filter row with an empty path or an
+// operator/values mismatch fails every subsequent delivery closed forever —
+// the webhook route always returns 200 by design (S7), so nothing on the
+// sender's side ever reveals the misconfiguration.
+func TestAddTrigger_RejectsInvalidWebhookFilters(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	a := &Automation{WorkspaceID: "ws-1", Name: "x", WorkflowID: "wf-1", WorkflowStepID: "s-1"}
+	if err := svc.store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name   string
+		filter WebhookFilter
+	}{
+		{"empty path", WebhookFilter{Path: "", Op: WebhookFilterOpEq, Values: []string{"v"}}},
+		{"unknown op", WebhookFilter{Path: "p", Op: WebhookFilterOp("regex"), Values: []string{"v"}}},
+		{"eq with no values", WebhookFilter{Path: "p", Op: WebhookFilterOpEq, Values: nil}},
+		{"eq with two values", WebhookFilter{Path: "p", Op: WebhookFilterOpEq, Values: []string{"a", "b"}}},
+		{"ne with no values", WebhookFilter{Path: "p", Op: WebhookFilterOpNe, Values: nil}},
+		{"contains with two values", WebhookFilter{Path: "p", Op: WebhookFilterOpContains, Values: []string{"a", "b"}}},
+		{"exists with values", WebhookFilter{Path: "p", Op: WebhookFilterOpExists, Values: []string{"v"}}},
+		{"not_exists with values", WebhookFilter{Path: "p", Op: WebhookFilterOpNotExists, Values: []string{"v"}}},
+	}
+
+	for _, tc := range cases {
+		cfg, err := json.Marshal(WebhookTriggerConfig{Filters: []WebhookFilter{tc.filter}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := svc.AddTrigger(ctx, &AddTriggerRequest{
+			AutomationID: a.ID, Type: TriggerTypeWebhook, Config: cfg, Enabled: true,
+		}); err == nil {
+			t.Errorf("%s: expected the filter to be rejected", tc.name)
+		}
+	}
+}
+
+// The cardinality rule is deliberately asymmetric: eq/ne/contains compare
+// against exactly one value, in/not_in accept a list of any length including
+// zero (a legal, if useless, "always fails" predicate), and exists/not_exists
+// take none. A valid config across the whole operator set must pass through.
+func TestAddTrigger_AcceptsValidWebhookFilters(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	a := &Automation{WorkspaceID: "ws-1", Name: "x", WorkflowID: "wf-1", WorkflowStepID: "s-1"}
+	if err := svc.store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := json.Marshal(WebhookTriggerConfig{Filters: []WebhookFilter{
+		{Path: "a", Op: WebhookFilterOpEq, Values: []string{"v"}},
+		{Path: "b", Op: WebhookFilterOpNe, Values: []string{"v"}},
+		{Path: "c", Op: WebhookFilterOpIn, Values: []string{"v1", "v2"}},
+		{Path: "d", Op: WebhookFilterOpNotIn, Values: nil},
+		{Path: "e", Op: WebhookFilterOpExists},
+		{Path: "f", Op: WebhookFilterOpNotExists},
+		{Path: "g", Op: WebhookFilterOpContains, Values: []string{"v"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.AddTrigger(ctx, &AddTriggerRequest{
+		AutomationID: a.ID, Type: TriggerTypeWebhook, Config: cfg, Enabled: true,
+	}); err != nil {
+		t.Fatalf("expected a valid filter set to be accepted, got %v", err)
+	}
+}
+
+// A webhook config with no filters declared at all (dedup/repository only,
+// or entirely empty) must not be rejected — filters are optional.
+func TestAddTrigger_AcceptsWebhookConfigWithNoFilters(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	a := &Automation{WorkspaceID: "ws-1", Name: "x", WorkflowID: "wf-1", WorkflowStepID: "s-1"}
+	if err := svc.store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := json.Marshal(WebhookTriggerConfig{DedupKey: "id"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.AddTrigger(ctx, &AddTriggerRequest{
+		AutomationID: a.ID, Type: TriggerTypeWebhook, Config: cfg, Enabled: true,
+	}); err != nil {
+		t.Fatalf("expected a webhook config with no filters to be accepted, got %v", err)
+	}
+}
+
+// The update path is the one a long-lived webhook trigger actually travels —
+// mirroring TestCreateAutomation_RejectsAnUnparseableSchedule's rationale for
+// TriggerTypeScheduled, the same boundary must hold on edit, not just create.
+func TestUpdateTrigger_RejectsInvalidWebhookFilters(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+
+	a := &Automation{WorkspaceID: "ws-1", Name: "x", WorkflowID: "wf-1", WorkflowStepID: "s-1"}
+	if err := svc.store.CreateAutomation(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	validCfg, err := json.Marshal(WebhookTriggerConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trig, err := svc.AddTrigger(ctx, &AddTriggerRequest{
+		AutomationID: a.ID, Type: TriggerTypeWebhook, Config: validCfg, Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("seed trigger: %v", err)
+	}
+
+	badCfg, err := json.Marshal(WebhookTriggerConfig{Filters: []WebhookFilter{
+		{Path: "", Op: WebhookFilterOpEq, Values: []string{"v"}},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := json.RawMessage(badCfg)
+	if err := svc.UpdateTrigger(ctx, trig.ID, &UpdateTriggerRequest{Config: &raw}); err == nil {
+		t.Fatal("expected an invalid filter to be rejected on update")
+	}
+}
+
 type stubWorkflowLocator struct{ workspaceID string }
 
 func (s stubWorkflowLocator) WorkflowWorkspaceID(context.Context, string) (string, error) {

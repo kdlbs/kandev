@@ -171,6 +171,18 @@ const (
 	migrateRunRepositoryReasonSQL = `ALTER TABLE automation_runs ADD COLUMN repository_reason TEXT DEFAULT ''`
 )
 
+// migrateRunDedupUniqueIndexSQL backstops admitTriggerLocked's check-then-insert
+// admission with a real constraint: idx_automation_runs_dedup (above) is a
+// plain index, so two instances racing the same dedup key can both pass
+// HasRunWithDedupKey and both CreateRun. CREATE INDEX IF NOT EXISTS is
+// idempotent on its own, so this runs as a plain statement rather than
+// through the ADD COLUMN migration list. It must run after
+// dedupeAutomationRunDuplicateKeys, which clears any duplicate the
+// unconstrained window already produced — otherwise this statement itself
+// fails on exactly the database it exists to protect.
+const migrateRunDedupUniqueIndexSQL = `CREATE UNIQUE INDEX IF NOT EXISTS idx_automation_runs_dedup_unique
+	ON automation_runs(automation_id, dedup_key) WHERE dedup_key != ''`
+
 // automationColumns is the explicit column list for every query that scans a
 // full Automation row. Spelled out rather than `SELECT *` because the table
 // carries columns the Automation struct does not: the legacy repository_id
@@ -233,7 +245,54 @@ func (s *Store) initSchema() error {
 	if err := s.backfillLegacyRepositoryIDs(); err != nil {
 		return err
 	}
-	return s.backfillRepositoryModes()
+	if err := s.backfillRepositoryModes(); err != nil {
+		return err
+	}
+	if err := s.dedupeAutomationRunDuplicateKeys(); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(schemaSQLForDriver(migrateRunDedupUniqueIndexSQL, s.db.DriverName())); err != nil {
+		return fmt.Errorf("create automation_runs dedup unique index: %w", err)
+	}
+	return nil
+}
+
+// dedupeAutomationRunDuplicateKeys blanks dedup_key on every row but one for
+// each (automation_id, dedup_key) pair, so migrateRunDedupUniqueIndexSQL can
+// be created even on a database where the race it backstops already produced
+// a duplicate. Which row keeps the key is arbitrary — both already fired, so
+// nothing downstream depends on which survives — only that at most one does.
+// Idempotent: once no pair has more than one row, the select returns nothing.
+func (s *Store) dedupeAutomationRunDuplicateKeys() error {
+	type dupRow struct {
+		ID string `db:"id"`
+	}
+	var rows []dupRow
+	err := s.db.Select(&rows, `
+		SELECT id FROM automation_runs
+		WHERE dedup_key != ''
+		AND id NOT IN (
+			SELECT MIN(id) FROM automation_runs
+			WHERE dedup_key != ''
+			GROUP BY automation_id, dedup_key
+		)`)
+	if err != nil {
+		return fmt.Errorf("select duplicate dedup_key rows: %w", err)
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	tx, err := s.db.Beginx()
+	if err != nil {
+		return fmt.Errorf("begin dedup_key cleanup: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, row := range rows {
+		if _, err := tx.Exec(tx.Rebind(`UPDATE automation_runs SET dedup_key = '' WHERE id = ?`), row.ID); err != nil {
+			return fmt.Errorf("clear duplicate dedup_key for run %s: %w", row.ID, err)
+		}
+	}
+	return tx.Commit()
 }
 
 // backfillLegacyRepositoryIDs copies every non-empty legacy

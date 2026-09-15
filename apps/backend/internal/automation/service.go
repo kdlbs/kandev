@@ -1016,6 +1016,42 @@ func validateScheduledConfig(triggerType TriggerType, raw json.RawMessage) error
 	return nil
 }
 
+// validateWebhookConfig rejects a filter the webhook admission path could
+// never evaluate. Without it, a filter with an empty path or an
+// operator/values cardinality mismatch (see EvaluateFilters) saves
+// successfully and then fails every subsequent delivery closed forever: the
+// webhook route always returns 200 regardless of outcome (S7), so nothing on
+// the sender's side ever reveals the misconfiguration.
+func validateWebhookConfig(triggerType TriggerType, raw json.RawMessage) error {
+	if triggerType != TriggerTypeWebhook || len(raw) == 0 {
+		return nil
+	}
+	var cfg WebhookTriggerConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return fmt.Errorf("invalid webhook trigger config: %w", err)
+	}
+	for i, f := range cfg.Filters {
+		if strings.TrimSpace(f.Path) == "" {
+			return fmt.Errorf("webhook filter %d: path is required", i)
+		}
+		switch f.Op {
+		case WebhookFilterOpEq, WebhookFilterOpNe, WebhookFilterOpContains:
+			if len(f.Values) != 1 {
+				return fmt.Errorf("webhook filter %d: op %q requires exactly one value", i, f.Op)
+			}
+		case WebhookFilterOpIn, WebhookFilterOpNotIn:
+			// Any number of values, including zero, is a legal predicate.
+		case WebhookFilterOpExists, WebhookFilterOpNotExists:
+			if len(f.Values) != 0 {
+				return fmt.Errorf("webhook filter %d: op %q takes no values", i, f.Op)
+			}
+		default:
+			return fmt.Errorf("webhook filter %d: unknown op %q", i, f.Op)
+		}
+	}
+	return nil
+}
+
 // AddTrigger adds a trigger to an automation.
 func (s *Service) AddTrigger(ctx context.Context, req *AddTriggerRequest) (*AutomationTrigger, error) {
 	if req.AutomationID == "" {
@@ -1025,6 +1061,9 @@ func (s *Service) AddTrigger(ctx context.Context, req *AddTriggerRequest) (*Auto
 		return nil, err
 	}
 	if err := validateScheduledConfig(req.Type, req.Config); err != nil {
+		return nil, err
+	}
+	if err := validateWebhookConfig(req.Type, req.Config); err != nil {
 		return nil, err
 	}
 	a, err := s.store.GetAutomation(ctx, req.AutomationID)
@@ -1080,6 +1119,9 @@ func (s *Service) UpdateTrigger(ctx context.Context, id string, req *UpdateTrigg
 	}
 	if req.Config != nil {
 		if err := validateScheduledConfig(existing.Type, *req.Config); err != nil {
+			return err
+		}
+		if err := validateWebhookConfig(existing.Type, *req.Config); err != nil {
 			return err
 		}
 	}
@@ -1598,6 +1640,19 @@ func (s *Service) admitTriggerLocked(
 		DisplayTitle: RenderRunDisplayTitle(a, triggerType, triggerData),
 	}
 	if err := s.store.CreateRun(ctx, run); err != nil {
+		// idx_automation_runs_dedup_unique backstops the check above: on a
+		// multi-instance deployment, another instance can win the race
+		// between this instance's HasRunWithDedupKey check and this insert.
+		// The constraint is the source of truth here, not a hard failure —
+		// the firing this instance lost the race to already recorded (or is
+		// about to record) the admission, so this one is exactly the
+		// duplicate the pre-check above exists to catch.
+		if IsDedupKeyUniqueViolation(err) {
+			s.logger.Debug("dedup admission race: concurrent insert already claimed this key",
+				zap.String("automation_id", a.ID), zap.String("dedup_key", dedupKey))
+			s.recordDuplicateSkippedTrigger(ctx, a, triggerID, triggerType, triggerData, dedupKey)
+			return nil, "", true, nil
+		}
 		return nil, "", false, fmt.Errorf("record admitted run: %w", err)
 	}
 	return run, "", false, nil
