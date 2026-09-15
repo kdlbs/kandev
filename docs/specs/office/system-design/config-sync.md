@@ -140,9 +140,9 @@ of `TestOfficeRouteScopeCompleteness`.
 
 ### Config fields
 
-A separate table, with column names, types, and semantics deliberately
-identical to `workflow_sync_configs` so a later extraction is a merge rather
-than a rename: `workspace_id` (primary key), `provider`,
+A separate table whose column names, types, and semantics match
+`workflow_sync_configs` as shipped; the two are no longer held aligned:
+`workspace_id` (primary key), `provider`,
 `repo_owner`, `repo_name`, `project_path`, `branch`, `path`,
 `interval_seconds`, `poll_enabled`, `last_synced_at`, `last_ok`, `last_error`,
 `last_warnings`, `last_hash`, `created_at`, `updated_at`.
@@ -432,7 +432,7 @@ provider, and repository for human debugging. Recorded
 ## Frontend
 
 Office gets its own card,
-`components/office/settings/office-config-sync-card.tsx`, modelled on
+`components/office/settings/office-config-sync-status-card.tsx`, modelled on
 `components/settings/workflow-sync-status-banner.tsx` but not shared with it.
 `workflow-sync-status-banner.tsx` is not edited, extracted, or rewrapped.
 
@@ -483,9 +483,8 @@ seam an earlier draft of this design proposed: a shared `internal/reposync`
 library onto which `internal/workflowsync` would be migrated and Office then
 built.
 
-**That extraction is deferred, and this design builds Office standalone
-instead.** The same note is the reason: it records a **god-object failure** from
-a codebase where a `SyncCoordinator` reached 2,506 lines, and warns that the
+**This design builds Office standalone instead.** The same note is the reason:
+it records a **god-object failure** from a codebase where a `SyncCoordinator` reached 2,506 lines, and warns that the
 failure begins when a shared coordinator absorbs per-caller variation. The two
 callers here are already known to
 diverge on five points, every one of which the shared seam would have had to
@@ -552,8 +551,9 @@ no step in this order can regress a shipped feature.
 ## Related decisions
 
 - [Decline the `internal/reposync` extraction](../../../decisions/2026-09-15-reposync-extraction-declined.md)
-  is the disposition of the card this design deferred to. It supersedes three
-  statements above, rewritten here and quoted there.
+  is the disposition of the card this design deferred to. It retires three
+  positions quoted in full there; every sentence stating them is rewritten
+  above.
 - [ADR 0031](../../../decisions/0031-office-skill-reference-files.md) defined
   skill support files and `file_inventory`, which round 2's `references/`
   request exists to populate.

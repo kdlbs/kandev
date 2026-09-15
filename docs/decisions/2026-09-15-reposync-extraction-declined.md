@@ -208,6 +208,14 @@ and it is the sole record: there is no counter anywhere else, so an occurrence
 that goes unwritten here is an occurrence that did not happen as far as the next
 reader is concerned.
 
+Appending an occurrence is a post-acceptance edit to this document, so it also
+takes the repository's amendment marker: change the Status line to
+`accepted (amended YYYY-MM-DD)`, the form 36 of the 270 files under
+`docs/decisions/` already use. The marker records that this document changed,
+not that the decision reversed. Without the bump an appended occurrence is
+invisible both to a Status-line skim and to
+`list-docs.py decisions --status accepted`.
+
 ## Alternatives considered
 
 **Extract `internal/reposync` with a `Domain` seam.** The round-4 findings imply
