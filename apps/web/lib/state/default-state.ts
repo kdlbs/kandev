@@ -528,7 +528,14 @@ export function mergeInitialState(initialState?: HydrationState): DefaultState {
     },
     office: { ...defaultState.office, ...initialState.office },
     needsYouInbox: { ...defaultState.needsYouInbox, ...initialState.needsYouInbox },
-    failedInbox: { ...defaultState.failedInbox, ...initialState.failedInbox },
+    failedInbox: {
+      ...defaultState.failedInbox,
+      ...initialState.failedInbox,
+      readRevisionByWorkspaceId: {
+        ...defaultState.failedInbox.readRevisionByWorkspaceId,
+        ...initialState.failedInbox?.readRevisionByWorkspaceId,
+      },
+    },
     features: { ...defaultState.features, ...initialState.features },
     auth: { ...defaultState.auth, ...initialState.auth },
     ...mergeSessionHostnamesState(initialState),

@@ -4,6 +4,11 @@ import type { WsHandlers } from "@/lib/ws/handlers/types";
 
 type WorkspaceItem = WorkspaceState["items"][number];
 
+function nextActiveWorkspaceRevision(workspaces: WorkspaceState, activeId: string | null): number {
+  const revision = workspaces.activeIdRevision ?? 0;
+  return workspaces.activeId === activeId ? revision : revision + 1;
+}
+
 function handleWorkspaceDeleted(store: StoreApi<AppState>, workspaceId: string): void {
   const currentState = store.getState();
   const workspaceTaskIds = new Set(
@@ -26,10 +31,11 @@ function handleWorkspaceDeleted(store: StoreApi<AppState>, workspaceId: string):
       state.workspaces.activeId === workspaceId
         ? (items[0]?.id ?? null)
         : state.workspaces.activeId;
+    const activeIdRevision = nextActiveWorkspaceRevision(state.workspaces, activeId);
     const clearBoards = state.workspaces.activeId === workspaceId;
     return {
       ...state,
-      workspaces: { items, activeId },
+      workspaces: { items, activeId, activeIdRevision },
       workflows: clearBoards ? { items: [], activeId: null } : state.workflows,
       kanban: clearBoards ? { workflowId: null, steps: [], tasks: [] } : state.kanban,
     };
@@ -61,11 +67,13 @@ export function registerWorkspacesHandlers(store: StoreApi<AppState>): WsHandler
             )
           : [newWorkspace, ...state.workspaces.items];
         const activeId = state.workspaces.activeId ?? payload.id;
+        const activeIdRevision = nextActiveWorkspaceRevision(state.workspaces, activeId);
         return {
           ...state,
           workspaces: {
             items,
             activeId,
+            activeIdRevision,
           },
         };
       });

@@ -36,7 +36,10 @@ export function FailedInboxRow({ row }: { row: FailedInboxRowData }) {
       : null;
 
   return (
-    <div className="flex items-center gap-3 px-4 py-2.5" data-testid="failed-inbox-row">
+    <div
+      className="flex items-start gap-3 px-4 py-2.5 md:items-center"
+      data-testid="failed-inbox-row"
+    >
       <span
         className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted"
         data-testid="failed-inbox-status-icon"
@@ -45,31 +48,35 @@ export function FailedInboxRow({ row }: { row: FailedInboxRowData }) {
       >
         {getTaskStateIcon("FAILED")}
       </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium">{row.title}</span>
-        <span className="block truncate text-xs text-muted-foreground">
-          {!hasResolvableFailedInboxReason(row.reason) ? (
-            <span data-testid="failed-inbox-reason-fallback">{reasonText}</span>
-          ) : (
-            reasonText
+      <div className="flex min-w-0 flex-1 flex-col md:contents">
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-medium">{row.title}</span>
+          <span className="block truncate text-xs text-muted-foreground">
+            {!hasResolvableFailedInboxReason(row.reason) ? (
+              <span data-testid="failed-inbox-reason-fallback">{reasonText}</span>
+            ) : (
+              reasonText
+            )}
+          </span>
+          {originMarkerKey && (
+            <span
+              className="block truncate text-xs text-muted-foreground"
+              data-testid="failed-inbox-origin-marker"
+            >
+              {t(originMarkerKey)}
+            </span>
           )}
         </span>
-        {originMarkerKey && (
-          <span
-            className="block truncate text-xs text-muted-foreground"
-            data-testid="failed-inbox-origin-marker"
-          >
-            {t(originMarkerKey)}
-          </span>
-        )}
-      </span>
-      <span className="shrink-0 text-xs text-muted-foreground">
-        {relativeTime !== null && relativeTime !== "" ? (
-          relativeTime
-        ) : (
-          <span data-testid="failed-inbox-unknown-time">{t("failedInbox:unknownFailureTime")}</span>
-        )}
-      </span>
+        <span className="shrink-0 text-xs text-muted-foreground">
+          {relativeTime !== null && relativeTime !== "" ? (
+            relativeTime
+          ) : (
+            <span data-testid="failed-inbox-unknown-time">
+              {t("failedInbox:unknownFailureTime")}
+            </span>
+          )}
+        </span>
+      </div>
       {/* Always visible at every viewport width -- AC-UI-INBOX-FAILED-001.18
           requires the open-task control be reachable where a fixed-width
           button would otherwise be withheld, and this row has no actions

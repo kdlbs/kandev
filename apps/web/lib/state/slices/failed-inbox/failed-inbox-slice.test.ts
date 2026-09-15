@@ -149,6 +149,37 @@ describe("failed-inbox slice", () => {
   });
 });
 
+describe("failed-inbox slice: response identity", () => {
+  it("drops a response after the active workspace changes", () => {
+    const store = newStore();
+    store.getState().setActiveWorkspace("w1");
+    const generation = store.getState().beginFailedInboxRead("w1");
+
+    store.getState().setActiveWorkspace("w2");
+    store.getState().setFailedInboxPage("w1", generation, {
+      rows: [row()],
+      count: 1,
+      truncated: false,
+    });
+
+    expect(store.getState().failedInbox.byWorkspaceId.w1.status).toBe("loading");
+    expect(store.getState().failedInbox.byWorkspaceId.w1.rows).toHaveLength(0);
+  });
+
+  it("drops a response after switching away and back to the same workspace", () => {
+    const store = newStore();
+    store.getState().setActiveWorkspace("w1");
+    const generation = store.getState().beginFailedInboxRead("w1");
+
+    store.getState().setActiveWorkspace("w2");
+    store.getState().setActiveWorkspace("w1");
+    store.getState().setFailedInboxError("w1", generation);
+
+    expect(store.getState().failedInbox.byWorkspaceId.w1.status).toBe("loading");
+    expect(store.getState().failedInbox.byWorkspaceId.w1.rows).toHaveLength(0);
+  });
+});
+
 describe("failed-inbox slice: workspace-change status transitions (AC .16)", () => {
   // The count "shall remain rendered" across a background refresh -- only a
   // never-read or previously-errored workspace should show as not-yet-known

@@ -22,8 +22,11 @@ test.describe("Inbox Failed tab on mobile", () => {
       workflow_step_id: seedData.startStepId,
     });
     await apiClient.seedTaskSession(taskId, {
-      state: "FAILED",
-      completedAt: new Date().toISOString(),
+      // Keep the session non-terminal so its completed_at remains NULL. The
+      // task is still failed below, which exercises the row's unknown-time
+      // fallback without violating the harness contract for terminal
+      // sessions.
+      state: "IDLE",
       errorMessage: reason,
     });
     await apiClient.updateTaskState(taskId, "FAILED");
@@ -52,6 +55,17 @@ test.describe("Inbox Failed tab on mobile", () => {
     const openTaskBox = await openTask.boundingBox();
     expect(openTaskBox, "open-task control should have a box").not.toBeNull();
     expect(openTaskBox!.height).toBeGreaterThanOrEqual(MIN_TOUCH_TARGET_PX);
+
+    const unknownTime = row.getByTestId("failed-inbox-unknown-time");
+    await expect(unknownTime).toBeVisible();
+    const rowBox = await row.boundingBox();
+    const unknownTimeBox = await unknownTime.boundingBox();
+    expect(rowBox, "failed row should have a box").not.toBeNull();
+    expect(unknownTimeBox, "unknown failure time should have a box").not.toBeNull();
+    expect(openTaskBox!.x + openTaskBox!.width).toBeLessThanOrEqual(rowBox!.x + rowBox!.width);
+    expect(unknownTimeBox!.x + unknownTimeBox!.width).toBeLessThanOrEqual(
+      rowBox!.x + rowBox!.width,
+    );
 
     // The Inbox/Failed-tab page itself must not scroll horizontally on a
     // phone viewport -- checked here, before navigating away, so this

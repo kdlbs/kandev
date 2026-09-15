@@ -2,6 +2,7 @@
 
 import { useTranslation } from "react-i18next";
 import { Tabs, TabsList, TabsTrigger } from "@kandev/ui/tabs";
+import type { ReactNode } from "react";
 import { Badge } from "@kandev/ui/badge";
 import type { InboxTab } from "@/lib/failed-inbox/inbox-tab";
 
@@ -20,6 +21,7 @@ export function InboxTabStrip({
   needsYouHasMore,
   failedCount,
   failedTruncated,
+  children,
 }: {
   selectedTab: InboxTab;
   onSelectTab: (tab: InboxTab) => void;
@@ -27,6 +29,7 @@ export function InboxTabStrip({
   needsYouHasMore: boolean;
   failedCount: number | undefined;
   failedTruncated: boolean;
+  children?: ReactNode;
 }) {
   const { t } = useTranslation();
   const needsYouBadge = badgeText(needsYouCount, needsYouHasMore);
@@ -55,6 +58,7 @@ export function InboxTabStrip({
           )}
         </TabsTrigger>
       </TabsList>
+      {children}
     </Tabs>
   );
 }

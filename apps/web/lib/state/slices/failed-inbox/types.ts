@@ -26,6 +26,10 @@ export type FailedInboxSliceState = {
     // Keyed on workspace only, deliberately never on the selected tab
     // (design-01#Control-flow).
     generationByWorkspaceId: Record<string, number>;
+    // Active-workspace revision captured when each request was issued. A
+    // response for an inactive or re-selected workspace must not mutate its
+    // cache after the selection boundary has moved.
+    readRevisionByWorkspaceId: Record<string, number>;
   };
 };
 

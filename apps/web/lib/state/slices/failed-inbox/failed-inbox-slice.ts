@@ -6,6 +6,7 @@ export const defaultFailedInboxState: FailedInboxSliceState = {
   failedInbox: {
     byWorkspaceId: {},
     generationByWorkspaceId: {},
+    readRevisionByWorkspaceId: {},
   },
 };
 
@@ -48,6 +49,7 @@ export const createFailedInboxSlice = (set: ImmerSet, get: ImmerGet): FailedInbo
     set((draft) => {
       const next = (draft.failedInbox.generationByWorkspaceId[workspaceId] ?? 0) + 1;
       draft.failedInbox.generationByWorkspaceId[workspaceId] = next;
+      draft.failedInbox.readRevisionByWorkspaceId[workspaceId] = currentRevision;
       const existing = draft.failedInbox.byWorkspaceId[workspaceId] ?? emptyWorkspaceState();
       const isStaleWorkspaceRevision = existing.readAtWorkspaceRevision !== currentRevision;
       // A same-workspace refresh trigger (periodic tick, tab change,
@@ -71,20 +73,37 @@ export const createFailedInboxSlice = (set: ImmerSet, get: ImmerGet): FailedInbo
   setFailedInboxPage: (workspaceId, generation, page) =>
     set((draft) => {
       if (draft.failedInbox.generationByWorkspaceId[workspaceId] !== generation) return;
+      const requestRevision = draft.failedInbox.readRevisionByWorkspaceId[workspaceId] ?? 0;
+      const activeWorkspaceId = get().workspaces.activeId;
+      const activeRevision = get().workspaces.activeIdRevision ?? 0;
+      if (
+        (activeWorkspaceId !== null && activeWorkspaceId !== workspaceId) ||
+        activeRevision !== requestRevision
+      ) {
+        return;
+      }
       draft.failedInbox.byWorkspaceId[workspaceId] = {
         rows: page.rows,
         count: page.count,
         truncated: page.truncated,
         status: "ready",
         appliedGeneration: generation,
-        readAtWorkspaceRevision:
-          draft.failedInbox.byWorkspaceId[workspaceId]?.readAtWorkspaceRevision ?? 0,
+        readAtWorkspaceRevision: requestRevision,
       };
     }),
 
   setFailedInboxError: (workspaceId, generation) =>
     set((draft) => {
       if (draft.failedInbox.generationByWorkspaceId[workspaceId] !== generation) return;
+      const requestRevision = draft.failedInbox.readRevisionByWorkspaceId[workspaceId] ?? 0;
+      const activeWorkspaceId = get().workspaces.activeId;
+      const activeRevision = get().workspaces.activeIdRevision ?? 0;
+      if (
+        (activeWorkspaceId !== null && activeWorkspaceId !== workspaceId) ||
+        activeRevision !== requestRevision
+      ) {
+        return;
+      }
       // A failed read clears the rows it was replacing in the SAME update
       // (design-01#Failure-and-recovery) -- stale rows over an absent count
       // is a disagreement the count and the list must never show.

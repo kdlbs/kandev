@@ -2,6 +2,7 @@
 
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { TabsContent } from "@kandev/ui/tabs";
 import { PageShell } from "@/components/page-shell";
 import { useAppStore } from "@/components/state-provider";
 import { usePathname, useRouter, useSearchParams } from "@/lib/routing/client-router";
@@ -155,12 +156,14 @@ export function NeedsYouInboxPageClient() {
         needsYouHasMore={needsYouHasMore}
         failedCount={failedCountKnown ? failedCount : undefined}
         failedTruncated={failedTruncated}
-      />
-      {selectedTab === "failed" ? (
-        <FailedInboxTabPanel />
-      ) : (
-        <NeedsYouInboxTabContent retry={retry} />
-      )}
+      >
+        <TabsContent value="needs-you">
+          <NeedsYouInboxTabContent retry={retry} />
+        </TabsContent>
+        <TabsContent value="failed">
+          <FailedInboxTabPanel />
+        </TabsContent>
+      </InboxTabStrip>
     </PageShell>
   );
 }

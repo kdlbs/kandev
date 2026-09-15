@@ -1,5 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { TabsContent } from "@kandev/ui/tabs";
+import type { ReactNode } from "react";
 import { InboxTabStrip } from "./inbox-tab-strip";
 import type { InboxTab } from "@/lib/failed-inbox/inbox-tab";
 
@@ -13,6 +15,7 @@ function renderStrip(
     needsYouHasMore: boolean;
     failedCount: number | undefined;
     failedTruncated: boolean;
+    children?: ReactNode;
   }> = {},
 ) {
   return render(
@@ -77,5 +80,16 @@ describe("InboxTabStrip", () => {
     for (const tab of screen.getAllByRole("tab")) {
       expect(tab.className).toContain("min-h-11");
     }
+  });
+
+  it("connects a tab trigger to its content panel", () => {
+    renderStrip({
+      children: <TabsContent value="needs-you">Needs you content</TabsContent>,
+    });
+
+    const tab = screen.getByRole("tab", { name: /Needs you/ });
+    const panel = screen.getByRole("tabpanel");
+    expect(tab.getAttribute("aria-controls")).toBe(panel.getAttribute("id"));
+    expect(panel.getAttribute("aria-labelledby")).toBe(tab.getAttribute("id"));
   });
 });
