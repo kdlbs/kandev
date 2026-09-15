@@ -650,7 +650,7 @@ func durableAgentEventIdentity(execution *AgentExecution, event agentctl.AgentEv
 		event.DeliveryIncarnationID != "" ||
 		event.DeliveryHarnessGeneration != 0 ||
 		event.DeliverySequence != 0
-	durableExpected := execution != nil && (execution.DeliveryMode == DurableDeliveryV1 || execution.DeliveryStreamID != "")
+	durableExpected := execution != nil && execution.DeliveryMode == DurableDeliveryV1
 	if partial || durableExpected {
 		return false, fmt.Errorf("%w: durable agent event identity is missing", ErrUncertainPromptDelivery)
 	}

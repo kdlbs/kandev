@@ -93,6 +93,7 @@ func TestInitializeSession_LoadFailureDoesNotCreateReplacement(t *testing.T) {
 
 			_, err := sessionManager.InitializeSession(
 				context.Background(),
+				nil,
 				client,
 				agentConfig,
 				"saved-session",
@@ -189,6 +190,7 @@ func TestInitializeSession_LoadCompatibilityFailureBlocksReplacement(t *testing.
 
 			_, err := sessionManager.InitializeSession(
 				context.Background(),
+				nil,
 				client,
 				agentConfig,
 				"saved-session",
