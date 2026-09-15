@@ -106,24 +106,23 @@ func dialTestWSWithAuth(t *testing.T, server *httptest.Server, token string) *we
 	return conn
 }
 
-// assertConnectionClosedByServer reads from conn and requires the read to
-// fail with something other than a deadline timeout. A bare "err == nil
-// means still open" check cannot tell a deliberate server-side close apart
-// from an untouched connection that simply outlived `within`: both produce
-// a non-nil error from ReadMessage, but only the timeout case means the
-// fencing mechanism never fired. Confirmed empirically: an identical dial
-// with no rotation at all still errors with "i/o timeout" once `within`
-// elapses, which a bare nil check would have accepted as proof of closure.
+// assertConnectionClosedByServer reads from conn until the server closes it.
+// Frames already queued by a live stream can arrive after rotation, so one
+// successful read is not proof that fencing failed. The read deadline still
+// makes a stream that never closes fail instead of waiting forever.
 func assertConnectionClosedByServer(t *testing.T, conn *websocket.Conn, within time.Duration) {
 	t.Helper()
 	_ = conn.SetReadDeadline(time.Now().Add(within))
-	_, _, err := conn.ReadMessage()
-	if err == nil {
-		t.Fatal("ReadMessage after credential rotation = nil error, want the server to have closed the connection")
-	}
-	var netErr net.Error
-	if errors.As(err, &netErr) && netErr.Timeout() {
-		t.Fatalf("ReadMessage after credential rotation timed out waiting for the server to close (%v), want the server to close immediately", err)
+	for {
+		_, _, err := conn.ReadMessage()
+		if err == nil {
+			continue
+		}
+		var netErr net.Error
+		if errors.As(err, &netErr) && netErr.Timeout() {
+			t.Fatalf("ReadMessage after credential rotation timed out waiting for the server to close (%v), want the server to close immediately", err)
+		}
+		return
 	}
 }
 
