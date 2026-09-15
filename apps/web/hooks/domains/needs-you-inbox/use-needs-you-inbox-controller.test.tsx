@@ -9,8 +9,26 @@ vi.mock("@/lib/api/domains/clarification-inbox-api", () => ({
   listClarificationInbox: (...args: unknown[]) => listClarificationInboxMock(...args),
 }));
 
+const SESSION_STATE_CHANGED = "session.state_changed";
+
+type WsHandler = () => void;
+const wsMocks = vi.hoisted(() => ({
+  handlers: new Map<string, Set<WsHandler>>(),
+}));
+
+function emitWsEvent(type: string) {
+  for (const handler of wsMocks.handlers.get(type) ?? []) handler();
+}
+
 vi.mock("@/lib/ws/connection", () => ({
-  getWebSocketClient: () => null,
+  getWebSocketClient: () => ({
+    on: (type: string, handler: WsHandler) => {
+      const handlers = wsMocks.handlers.get(type) ?? new Set<WsHandler>();
+      handlers.add(handler);
+      wsMocks.handlers.set(type, handlers);
+      return () => handlers.delete(handler);
+    },
+  }),
 }));
 
 const readBootPayloadMock = vi.fn();
@@ -58,6 +76,7 @@ beforeEach(() => {
   listClarificationInboxMock.mockResolvedValue(page());
   readBootPayloadMock.mockReset();
   readBootPayloadMock.mockReturnValue({ initialState: {} });
+  wsMocks.handlers.clear();
 });
 
 afterEach(() => {
@@ -237,5 +256,47 @@ describe("useNeedsYouInboxController boot-hydration seed (AC .34, .40, .41)", ()
       await Promise.resolve();
     });
     expect(result.current.getState().needsYouInbox.byWorkspaceId[WORKSPACE_ID]).toBeUndefined();
+  });
+});
+
+describe("useNeedsYouInboxController WS event coalescing", () => {
+  it("coalesces a burst of WS session events within the 250ms window into one re-read", async () => {
+    vi.useFakeTimers();
+    renderController(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      emitWsEvent(SESSION_STATE_CHANGED);
+      emitWsEvent("session.pending_action_changed");
+      emitWsEvent(SESSION_STATE_CHANGED);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(2);
+
+    // Still inside the coalescing window: dropped, not queued.
+    act(() => {
+      emitWsEvent(SESSION_STATE_CHANGED);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(2);
+
+    // Past the window: a later, separate event still causes its own read.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    act(() => {
+      emitWsEvent(SESSION_STATE_CHANGED);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(3);
   });
 });

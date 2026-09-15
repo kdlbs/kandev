@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from "react";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
-import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
+import { FOREGROUND_EVENT_COALESCE_MS, useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { getWebSocketClient } from "@/lib/ws/connection";
 import { listClarificationInbox } from "@/lib/api/domains/clarification-inbox-api";
 import { selectNeedsYouInboxNextSnoozeExpiry } from "@/lib/state/slices/needs-you-inbox/selectors";
@@ -100,6 +100,11 @@ export function useNeedsYouInboxController() {
   // effect keyed on connectionStatus so a client created after this hook
   // mounts is picked up the moment status first changes.
   const wasConnectedRef = useRef(false);
+  // session.state_changed is broadcast workspace-wide, so a burst of
+  // unrelated session transitions must not cause a burst of reads: coalesce
+  // with the same window use-foreground-refresh.ts uses for its own bursty
+  // browser events.
+  const lastWsBumpAtRef = useRef(-Infinity);
   useEffect(() => {
     if (!enabled) return;
     const isConnected = connectionStatus === "connected";
@@ -110,7 +115,12 @@ export function useNeedsYouInboxController() {
 
     const client = getWebSocketClient();
     if (!client) return;
-    const bump = () => storeApi.getState().bumpNeedsYouInboxRefreshTick();
+    const bump = () => {
+      const now = Date.now();
+      if (now - lastWsBumpAtRef.current < FOREGROUND_EVENT_COALESCE_MS) return;
+      lastWsBumpAtRef.current = now;
+      storeApi.getState().bumpNeedsYouInboxRefreshTick();
+    };
     const offPending = client.on("session.pending_action_changed", bump);
     const offStateChanged = client.on("session.state_changed", bump);
     return () => {

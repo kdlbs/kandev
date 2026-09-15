@@ -14,6 +14,7 @@ let state: {
   bundles: ClarificationInboxBundle[];
   hiddenCount: number;
   hasMore: boolean;
+  appliedGeneration?: number;
 };
 
 vi.mock("@/components/state-provider", () => ({
@@ -150,10 +151,44 @@ describe("NeedsYouInboxPageClient", () => {
   });
 
   it("shows a loading indicator on the very first read, not the empty state", () => {
-    state = { status: "loading", bundles: [], hiddenCount: 0, hasMore: false };
+    state = {
+      status: "loading",
+      bundles: [],
+      hiddenCount: 0,
+      hasMore: false,
+      appliedGeneration: 0,
+    };
     render(<NeedsYouInboxPageClient />);
 
     expect(screen.getByRole("status")).not.toBeNull();
     expect(screen.queryByTestId(EMPTY_TESTID)).toBeNull();
+  });
+
+  it("keeps the settled empty state during a background refresh, instead of re-flashing loading", () => {
+    state = {
+      status: "loading",
+      bundles: [],
+      hiddenCount: 0,
+      hasMore: false,
+      appliedGeneration: 1,
+    };
+    render(<NeedsYouInboxPageClient />);
+
+    expect(screen.getByTestId(EMPTY_TESTID)).not.toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("does not flash the error state for a truncated boot payload before the first read resolves", () => {
+    state = {
+      status: "loading",
+      bundles: [],
+      hiddenCount: 0,
+      hasMore: true,
+      appliedGeneration: 0,
+    };
+    render(<NeedsYouInboxPageClient />);
+
+    expect(screen.getByRole("status")).not.toBeNull();
+    expect(screen.queryByTestId("needs-you-inbox-error")).toBeNull();
   });
 });

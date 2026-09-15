@@ -21,15 +21,29 @@ type ViewMode = "error" | "loading" | "empty" | "list";
 
 // A page reporting truncation while listing zero rows means enrichment
 // emptied a page the query had filled, so this resolves to the retryable
-// "error" state rather than "empty" (design-01#Data-and-contracts).
+// "error" state rather than "empty" (design-01#Data-and-contracts) -- but
+// only once a read has actually applied (`appliedGeneration > 0`): a boot
+// seed's truncation flag arrives before any read settles, and must not flash
+// as an error.
+//
+// `status === "loading"` covers both the very first read and every
+// background refresh after it, and by itself can't tell them apart -- gate
+// the spinner on `appliedGeneration === 0` too, so a refresh over an already
+// settled (possibly empty) inbox keeps its settled view instead of reverting
+// to the first-load spinner.
 function resolveViewMode(
   status: string,
   bundleCount: number,
   hiddenCount: number,
   hasMore: boolean,
+  appliedGeneration: number,
 ): ViewMode {
-  if (status === "error" || (bundleCount === 0 && hasMore)) return "error";
-  if (status === "loading" && bundleCount === 0 && hiddenCount === 0) return "loading";
+  if (status === "error" || (bundleCount === 0 && hasMore && appliedGeneration !== 0)) {
+    return "error";
+  }
+  if (status === "loading" && bundleCount === 0 && hiddenCount === 0 && appliedGeneration === 0) {
+    return "loading";
+  }
   if (bundleCount === 0) return "empty";
   return "list";
 }
@@ -79,7 +93,7 @@ export function NeedsYouInboxPageClient() {
   const bumpRefreshTick = useAppStore((s) => s.bumpNeedsYouInboxRefreshTick);
   const retry = useCallback(() => bumpRefreshTick(), [bumpRefreshTick]);
 
-  const viewMode = resolveViewMode(status, bundles.length, hiddenCount, hasMore);
+  const viewMode = resolveViewMode(status, bundles.length, hiddenCount, hasMore, listRevision);
 
   return (
     <PageShell title={t("sidebar:inbox")} contentClassName="space-y-4 p-6">
