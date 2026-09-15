@@ -768,9 +768,10 @@ drained:
 	// as in TestServerModeTask_ToolCount and
 	// TestRegisterTools_LoggedCountMatchesRegisteredTools (list_task_sessions_test.go),
 	// which pin the per-mode registration rather than this SetProviders rebuild.
-	require.Len(t, tools, 39, "final registry should contain the complete GitLab-only task tool set")
+	require.Len(t, tools, 40, "final registry should contain the complete task tool set")
 	assert.Contains(t, tools, "get_task_mr_automation_kandev")
 	assert.NotContains(t, tools, "get_task_pr_automation_kandev")
+	assert.Contains(t, tools, "request_fresh_ci_run_kandev")
 }
 
 func TestServerSetProvidersAndModeSkipNormalizedNoOps(t *testing.T) {
@@ -937,7 +938,8 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	// 1 add_workspace_sources + 1 update_repository_base_branch +
 	// 1 step_complete (ADR 0015) + 1 interaction + 4 plan + 3 walkthrough +
 	// 1 publish_review_findings + 1 related-tasks + 1 diagnostic bundle
-	// + 2 task-dependency (add/remove) + 3 task change-link operations + 1 rich-output = 42.
+	// + 2 task-dependency (add/remove) + 1 scoped CI run + 3 task change-link
+	// operations + 1 rich-output = 43.
 	// Task-document tools (list/get/write) are office-only.
 	assert.Contains(t, tools, "step_complete_kandev", "ADR 0015 explicit-completion signal must be registered in task mode")
 	assert.Contains(t, tools, "show_walkthrough_kandev", "walkthrough tool must be registered in task mode")
@@ -948,7 +950,8 @@ func TestServerModeTask_ToolCount(t *testing.T) {
 	assert.Contains(t, tools, "add_task_dependency_kandev", "dependency edges must be manageable in task mode")
 	assert.Contains(t, tools, "remove_task_dependency_kandev")
 	assert.Contains(t, tools, "show_rich_output_kandev", "native rich output must be registered in task mode")
-	assert.Equal(t, 42, len(tools))
+	assert.Contains(t, tools, "request_fresh_ci_run_kandev")
+	assert.Equal(t, 43, len(tools))
 }
 
 func TestServerStepCompleteTool_TaskAndOfficeOnlyAndDiscoverable(t *testing.T) {

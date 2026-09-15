@@ -11,7 +11,8 @@ test.describe("Mobile cancel progress across reloads", () => {
     test.setTimeout(120_000);
 
     const session = await seedIdleSession(testPage, apiClient, seedData, "Mobile cancel progress");
-    await session.sendMessageViaButton("/slow 8s");
+    // /sleep 30 keeps the backend cancellation alive long enough to survive a reload.
+    await session.sendMessageViaButton("/sleep 30");
 
     const cancel = session.activeChat().getByTestId("cancel-agent-button");
     await expect(cancel).toBeVisible({ timeout: 15_000 });

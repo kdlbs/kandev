@@ -51,6 +51,7 @@ const (
 	CapabilityChecksRead           GitHubAppCapability = "checks_read"
 	CapabilityStatusesRead         GitHubAppCapability = "statuses_read"
 	CapabilityActionsRead          GitHubAppCapability = "actions_read"
+	CapabilityActionsWrite         GitHubAppCapability = "actions_write"
 	CapabilityBranchProtectionRead GitHubAppCapability = "branch_protection_read"
 	CapabilityMembersRead          GitHubAppCapability = "members_read"
 	CapabilityWorkflowsWrite       GitHubAppCapability = "workflows_write"
@@ -358,7 +359,7 @@ func CapabilitiesForPermissions(permissions InstallationPermissions) map[GitHubA
 	grant("issues", CapabilityIssueRead, CapabilityIssueWrite)
 	grant("checks", CapabilityChecksRead, "")
 	grant("statuses", CapabilityStatusesRead, "")
-	grant("actions", CapabilityActionsRead, "")
+	grant("actions", CapabilityActionsRead, CapabilityActionsWrite)
 	grant("administration", CapabilityBranchProtectionRead, "")
 	grant("members", CapabilityMembersRead, "")
 	if permissions["workflows"] == PermissionWrite {
