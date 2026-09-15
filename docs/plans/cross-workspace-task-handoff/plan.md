@@ -4,7 +4,8 @@ requirements:
   - REQ-TASKS-CROSS-WORKSPACE-HANDOFF-001
   - REQ-TASKS-CROSS-WORKSPACE-HANDOFF-002
 system_design:
-  - ../../specs/tasks/system-design/cross-workspace-task-handoff.md
+  - ../../specs/cross-workspace-task-handoff/system-design/handoff-mechanism.md
+  - ../../specs/cross-workspace-task-handoff/system-design/failure-modes-and-verification.md
 legacy_specs: []
 ---
 
@@ -12,11 +13,14 @@ legacy_specs: []
 
 ## Status
 
-Superseded by revision 5 of
-`docs/specs/cross-workspace-task-handoff/spec.md`, which withdrew the mechanism
-this plan delivered. The requirements and the system design are unchanged; only
-the transport and the gating vocabulary moved. No work order has been written
-for the replacement yet, so this plan describes the gap rather than a schedule.
+Superseded by revision 5 of the cross-workspace task handoff spec, which
+withdrew the mechanism this plan delivered. The requirements and the system
+design are unchanged; only the transport and the gating vocabulary moved. The
+spec now lives as `docs/specs/cross-workspace-task-handoff/README.md` plus its
+`requirements/` and `system-design/` subdirectories (the single-file
+`spec.md` this section originally pointed at was retired by the revision-6
+spec split). No work order has been written for the replacement yet, so this
+plan describes the gap rather than a schedule.
 
 ## Overview
 
@@ -80,6 +84,6 @@ step.
 
 ## Delivery notes
 
-The source specification is
-`docs/specs/cross-workspace-task-handoff/spec.md`. No public UI or public
-documentation surface is part of this delivery.
+The source specification is `docs/specs/cross-workspace-task-handoff/README.md`
+plus its `requirements/` and `system-design/` subdirectories. No public UI or
+public documentation surface is part of this delivery.

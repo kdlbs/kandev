@@ -104,6 +104,55 @@ func (r *Repository) lockTaskRowForHandoffs(ctx context.Context, tx *sqlx.Tx, ta
 	return raw.String, nil
 }
 
+// handoffProvenanceMetaKeys are the task-handoff provenance keys that must
+// never regress to a stale in-memory value: SetTaskHandoffsIfUnchanged's
+// key-scoped compare-and-set writes MetaKeyHandoffs directly against the DB
+// row, entirely outside of any *models.Task snapshot a concurrent full-row
+// writer might be holding.
+var handoffProvenanceMetaKeys = []string{models.MetaKeyHandoffs, models.MetaKeyHandoffSource}
+
+// preserveLiveHandoffProvenance overwrites handoffProvenanceMetaKeys in
+// outgoing (the metadata a full-row task write is about to persist) with
+// whatever is currently committed for the task, so that write can never
+// revert a provenance key to the value it held when the caller's in-memory
+// task snapshot was read. It must run inside the same transaction and after
+// the same row lock (readTaskStepInTx) as the write it protects, so on
+// Postgres it observes any handoffs CAS append that committed first; SQLite
+// gets the same ordering from single-writer transaction serialization.
+func (r *Repository) preserveLiveHandoffProvenance(ctx context.Context, tx *sql.Tx, taskID string, outgoing []byte) ([]byte, error) {
+	var raw sql.NullString
+	err := tx.QueryRowContext(ctx, r.db.Rebind("SELECT metadata FROM tasks WHERE id = ?"), taskID).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return outgoing, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("read current metadata for handoff provenance: %w", err)
+	}
+
+	merged := make(map[string]json.RawMessage)
+	if len(outgoing) > 0 {
+		if err := json.Unmarshal(outgoing, &merged); err != nil {
+			return nil, fmt.Errorf("parse outgoing metadata for handoff provenance: %w", err)
+		}
+	}
+
+	var current map[string]json.RawMessage
+	if raw.Valid && strings.TrimSpace(raw.String) != "" {
+		if err := json.Unmarshal([]byte(raw.String), &current); err != nil {
+			return nil, fmt.Errorf("parse current metadata for handoff provenance: %w", err)
+		}
+	}
+
+	for _, key := range handoffProvenanceMetaKeys {
+		if value, ok := current[key]; ok {
+			merged[key] = value
+		} else {
+			delete(merged, key)
+		}
+	}
+	return json.Marshal(merged)
+}
+
 // handoffsRawValue extracts the raw JSON bytes stored under MetaKeyHandoffs
 // from a task's metadata JSON blob, returning "" only when the key is
 // genuinely absent (including when the whole metadata blob is absent or

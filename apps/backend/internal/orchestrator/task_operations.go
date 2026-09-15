@@ -1623,7 +1623,6 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 			includeCanvasGuidance:     includeCanvasGuidance,
 			autopilot:                 task.Autopilot,
 			includeParentQuestionTool: task.Autopilot && task.ParentID != "",
-			agentProfileID:            launchSession.AgentProfileID,
 			spawnOrigin:               opts.SpawnOrigin,
 		})
 	}
@@ -1718,7 +1717,6 @@ type launchPromptContext struct {
 	includeParentQuestionTool bool
 	referenceContext          string
 	spawnOrigin               *SpawnOrigin
-	agentProfileID            string
 }
 
 // applyLaunchPromptContext prepends the first-turn system context to a launch

@@ -34,6 +34,7 @@ const (
 	handoffPermissionDeniedMessage = "the handoff action requires the can_handoff_tasks permission, granted per agent or per role"
 	handoffTargetIsSourceMessage   = "target_workspace_id equals your own workspace; create same-workspace tasks through kandev task create instead"
 	handoffTasklessRunMessage      = "the handoff action requires a task-scoped run; a taskless run has no owning task to authorize a target workspace against"
+	handoffSessionlessRunMessage   = "the handoff action requires a session-scoped run; a run with no session id has no source to record in the reverse-link and forward provenance"
 
 	handoffReverseLinkUnreadableSuffix = "the source task's stored handoff_source.handed_off_at is unreadable; this handoff cannot be repaired automatically"
 )
@@ -81,6 +82,14 @@ var errHandoffPermissionDenied = fmt.Errorf("%w: %s", shared.ErrForbidden, hando
 // caller, which the task service treats as having owner rights on every
 // workspace, so this case must be refused before Scope is ever called.
 var errHandoffTasklessRun = fmt.Errorf("%w: %s", shared.ErrForbidden, handoffTasklessRunMessage)
+
+// errHandoffSessionlessRun is returned when a run with no session id attempts
+// a handoff (AC-CROSS-WORKSPACE-TASK-HANDOFF-PROVENANCE-001.2: an empty
+// source task id OR source session id must be refused before any write). The
+// forward provenance record on the delivery task and the activity log both
+// name the source session id, so a handoff recorded without one would name a
+// source that cannot be attributed back to the run that requested it.
+var errHandoffSessionlessRun = fmt.Errorf("%w: %s", shared.ErrForbidden, handoffSessionlessRunMessage)
 
 // HandoffWorkspaceScoper attaches the identity of the source task's owning
 // user to ctx (AC-11), reusing the same per-user scoping in-session MCP
@@ -212,7 +221,7 @@ func (a *Actions) Handoff(ctx context.Context, runCtx RunContext, req HandoffReq
 		return nil, errHandoffPermissionDenied
 	}
 
-	scopedCtx, workspace, err := a.authorizeHandoffTargetWorkspace(ctx, runCtx.TaskID, trimmed.TargetWorkspaceID)
+	scopedCtx, workspace, err := a.authorizeHandoffTargetWorkspace(ctx, runCtx.TaskID, runCtx.SessionID, trimmed.TargetWorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -285,10 +294,13 @@ func validateHandoffShape(req HandoffRequest) (HandoffRequest, *HandoffValidatio
 // authorizeHandoffTargetWorkspace is D3a step 5 (AC-11): the existing
 // per-user workspace scoping, indistinguishable from not-found on denial.
 func (a *Actions) authorizeHandoffTargetWorkspace(
-	ctx context.Context, sourceTaskID, targetWorkspaceID string,
+	ctx context.Context, sourceTaskID, sourceSessionID, targetWorkspaceID string,
 ) (context.Context, *taskmodels.Workspace, error) {
 	if sourceTaskID == "" {
 		return nil, nil, errHandoffTasklessRun
+	}
+	if sourceSessionID == "" {
+		return nil, nil, errHandoffSessionlessRun
 	}
 	if a.deps.Handoff.Workspaces == nil || a.deps.Handoff.Tasks == nil {
 		return nil, nil, fmt.Errorf("%w: handoff", ErrRuntimeDependencyMissing)

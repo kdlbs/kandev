@@ -15,6 +15,7 @@ import (
 	"github.com/kandev/kandev/internal/office/agents"
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/shared"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 )
 
 const runtimeInternalErrorMessage = "internal runtime error"
@@ -540,7 +541,7 @@ func (h *Handler) respondRuntimeError(
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	if errors.Is(err, shared.ErrForbidden) {
+	if errors.Is(err, shared.ErrForbidden) || errors.Is(err, taskservice.ErrForbidden) {
 		h.appendDeniedRunEvent(c.Request.Context(), runCtx, action, targetType, targetID, err)
 		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
 		return
