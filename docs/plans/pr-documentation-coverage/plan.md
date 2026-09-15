@@ -19,7 +19,7 @@ The CI system owns this package because it controls repository checks and label 
 
 ## Scope
 
-In scope: narrow exemptions, linked artifact validation, the exact `no-docs-allow` override, current-revision statuses, queue compatibility, and actionable summaries.
+In scope: narrow exemptions, linked artifact validation, the exact `no-docs-allow` override, current-revision statuses, queue compatibility, actionable summaries, and resilient GitHub API reads.
 
 Out of scope: AI classification, application UI, automatic label management, publishing a PR, and live ruleset mutations.
 Public user documentation remains governed by the existing contribution checklist.
@@ -27,6 +27,8 @@ Public user documentation remains governed by the existing contribution checklis
 ## Technical approach
 
 Use the proposed `.github/scripts/pr-docs.cjs` module for pure policy functions and bounded GitHub reads.
+The API adapter retries transient failures with bounded backoff while retaining
+the code-search and exact-head directory fallback needed for ambiguity checks.
 Use `.github/workflows/pr-docs.yml` for base-controlled execution and the `PR documentation coverage` commit status.
 Reuse the existing Node runtime from GitHub-hosted runners and the built-in test runner; no pnpm dependency installation is needed.
 Register Node and workflow contract tests in `.github/workflows/lint-action-pinning.yml`.
@@ -61,8 +63,26 @@ Live smoke tests and required-check activation are deployment steps, not complet
 - [x] [Task 01: Validate documentation coverage](task-01-coverage-validator.md)
 - [x] [Task 02: Report pull request coverage](task-02-pr-workflow.md)
 - [x] [Task 03: Support merge queue coverage](task-03-queue-coverage.md)
+- [x] [Task 04: Make API evaluation resilient](task-04-resilient-api-evaluation.md)
 
 Execute sequentially. No subagents are authorized.
+
+## Reliability fix verification
+
+Task 04 adds bounded retries for transient GitHub API and transport failures,
+keeps permanent errors fail-closed, and writes the final policy or
+infrastructure reason to the runner log as well as the step summary. The
+implementation and contract checks pass:
+
+- `node --test .github/scripts/pr-docs.test.cjs` (63 passed)
+- `python3 .github/scripts/pr-docs-workflow-contract_test.py` (5 passed)
+- `python3 .github/scripts/lint-action-pinning_test.py` (9 passed)
+- `python3 scripts/lint-spec-files.py --all` (passed)
+- `git diff --check` (passed)
+
+A read-only evaluation of PR #3677 at its current head also returned
+`covered` with the two linked workflow-move-preview work orders. Required
+check activation and live outage testing remain deployment evidence.
 
 ## Verification results
 

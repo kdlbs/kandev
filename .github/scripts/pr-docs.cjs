@@ -67,9 +67,62 @@ const MAX_TOTAL_DOCUMENT_BYTES = 4 * 1024 * 1024;
 const MAX_RESPONSE_BYTES = 8 * 1024 * 1024;
 const MAX_CHANGED_FILES = 3000;
 const REQUEST_TIMEOUT_MS = 30_000;
+const MAX_REQUEST_ATTEMPTS = 3;
+const RETRY_BASE_DELAY_MS = 250;
+const RETRY_MAX_DELAY_MS = 60_000;
 const NO_DOCS_LABEL = 'no-docs-allow';
 const STATUS_CONTEXT = 'PR documentation coverage';
 const GITHUB_API = 'https://api.github.com';
+
+function defaultSleep(delay) {
+  return new Promise(resolve => setTimeout(resolve, delay));
+}
+
+function responseHeader(response, name) {
+  if (typeof response?.headers?.get === 'function') {
+    return response.headers.get(name) ?? undefined;
+  }
+  if (!response?.headers || typeof response.headers !== 'object') {
+    return undefined;
+  }
+  const key = Object.keys(response.headers).find(header =>
+    header.toLowerCase() === name.toLowerCase()
+  );
+  return key === undefined ? undefined : String(response.headers[key]);
+}
+
+function retryDelay(response, attempt) {
+  const retryAfter = responseHeader(response, 'retry-after');
+  if (retryAfter !== undefined) {
+    const trimmed = retryAfter.trim();
+    if (/^\d+(?:\.\d+)?$/.test(trimmed)) {
+      const requested = Number(trimmed) * 1000;
+      if (Number.isFinite(requested)) {
+        return requested > RETRY_MAX_DELAY_MS ? undefined : Math.max(0, requested);
+      }
+    }
+    const requested = Date.parse(trimmed) - Date.now();
+    if (Number.isFinite(requested)) {
+      return requested > RETRY_MAX_DELAY_MS ? undefined : Math.max(0, requested);
+    }
+  }
+  const resetAt = Number(responseHeader(response, 'x-ratelimit-reset'));
+  if (Number.isFinite(resetAt) && resetAt > 0) {
+    const requested = resetAt * 1000 - Date.now();
+    return requested > RETRY_MAX_DELAY_MS ? undefined : Math.max(0, requested);
+  }
+  return Math.min(RETRY_BASE_DELAY_MS * (2 ** attempt), RETRY_MAX_DELAY_MS);
+}
+
+function isRetryableResponse(response, payload) {
+  if ([408, 429, 500, 502, 503, 504].includes(response?.status)) {
+    return true;
+  }
+  return response?.status === 403
+    && /rate limit|secondary rate limit|abuse detection|temporarily unavailable/i.test(
+      String(payload?.message ?? ''),
+    );
+}
 
 function normalizeRepoPath(value) {
   if (typeof value !== 'string' || value.length === 0) {
@@ -775,7 +828,13 @@ function requirePullRequestNumber(value) {
 }
 
 class GitHubClient {
-  constructor({ owner, repo, token, fetchImpl = globalThis.fetch } = {}) {
+  constructor({
+    owner,
+    repo,
+    token,
+    fetchImpl = globalThis.fetch,
+    sleepImpl = defaultSleep,
+  } = {}) {
     if (typeof owner !== 'string' || typeof repo !== 'string' || owner === '' || repo === '') {
       throw new Error('GitHub repository owner and name are required');
     }
@@ -785,10 +844,14 @@ class GitHubClient {
     if (typeof fetchImpl !== 'function') {
       throw new Error('fetch implementation is required');
     }
+    if (typeof sleepImpl !== 'function') {
+      throw new Error('sleep implementation is required');
+    }
     this.owner = owner;
     this.repo = repo;
     this.token = token;
     this.fetchImpl = fetchImpl;
+    this.sleepImpl = sleepImpl;
   }
 
   async request(endpoint, { method = 'GET', body } = {}) {
@@ -803,45 +866,87 @@ class GitHubClient {
     if (body !== undefined) {
       headers['Content-Type'] = 'application/json';
     }
-    const timeoutSignal = typeof AbortSignal === 'function'
-      && typeof AbortSignal.timeout === 'function'
-      ? AbortSignal.timeout(REQUEST_TIMEOUT_MS)
-      : undefined;
-    let response;
-    try {
-      response = await this.fetchImpl(`${GITHUB_API}${endpoint}`, {
-        method,
-        headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
-        ...(timeoutSignal ? { signal: timeoutSignal } : {}),
-      });
-    } catch (error) {
-      if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
-        throw new Error(`GitHub API request timed out after ${REQUEST_TIMEOUT_MS}ms`);
-      }
-      throw error;
-    }
-    if (!response || typeof response.text !== 'function') {
-      throw new Error('GitHub API returned an invalid response');
-    }
-    const text = await response.text();
-    if (Buffer.byteLength(text, 'utf8') > MAX_RESPONSE_BYTES) {
-      throw new Error(`GitHub API response exceeds the ${MAX_RESPONSE_BYTES}-byte limit`);
-    }
-    let payload = null;
-    if (text.length > 0) {
+    for (let attempt = 0; attempt < MAX_REQUEST_ATTEMPTS; attempt += 1) {
+      const timeoutSignal = typeof AbortSignal === 'function'
+        && typeof AbortSignal.timeout === 'function'
+        ? AbortSignal.timeout(REQUEST_TIMEOUT_MS)
+        : undefined;
+      let response;
       try {
-        payload = JSON.parse(text);
-      } catch {
-        throw new Error('GitHub API returned invalid JSON');
+        response = await this.fetchImpl(`${GITHUB_API}${endpoint}`, {
+          method,
+          headers,
+          body: body === undefined ? undefined : JSON.stringify(body),
+          ...(timeoutSignal ? { signal: timeoutSignal } : {}),
+        });
+      } catch (error) {
+        if (attempt + 1 < MAX_REQUEST_ATTEMPTS) {
+          await this.sleepImpl(retryDelay(undefined, attempt));
+          continue;
+        }
+        if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+          throw new Error(`GitHub API request timed out after ${REQUEST_TIMEOUT_MS}ms`);
+        }
+        throw error;
       }
+      if (!response || typeof response.text !== 'function') {
+        throw new Error('GitHub API returned an invalid response');
+      }
+      let text;
+      try {
+        text = await response.text();
+      } catch (error) {
+        const delay = retryDelay(response, attempt);
+        if (attempt + 1 < MAX_REQUEST_ATTEMPTS && delay !== undefined) {
+          await this.sleepImpl(delay);
+          continue;
+        }
+        if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+          throw new Error(`GitHub API request timed out after ${REQUEST_TIMEOUT_MS}ms`);
+        }
+        throw error;
+      }
+      if (Buffer.byteLength(text, 'utf8') > MAX_RESPONSE_BYTES) {
+        throw new Error(`GitHub API response exceeds the ${MAX_RESPONSE_BYTES}-byte limit`);
+      }
+      let payload = null;
+      if (text.length > 0) {
+        try {
+          payload = JSON.parse(text);
+        } catch {
+          if (!response.ok) {
+            const error = new Error(
+              `GitHub API request failed with HTTP ${response.status}: invalid JSON`,
+            );
+            if (attempt + 1 < MAX_REQUEST_ATTEMPTS && isRetryableResponse(response)) {
+              const delay = retryDelay(response, attempt);
+              if (delay !== undefined) {
+                await this.sleepImpl(delay);
+                continue;
+              }
+            }
+            throw error;
+          }
+          throw new Error('GitHub API returned invalid JSON');
+        }
+      }
+      if (!response.ok) {
+        const detail =
+          payload && typeof payload.message === 'string' ? `: ${payload.message.slice(0, 200)}` : '';
+        const error = new Error(
+          `GitHub API request failed with HTTP ${response.status}${detail}`,
+        );
+        if (attempt + 1 < MAX_REQUEST_ATTEMPTS && isRetryableResponse(response, payload)) {
+          const delay = retryDelay(response, attempt);
+          if (delay !== undefined) {
+            await this.sleepImpl(delay);
+            continue;
+          }
+        }
+        throw error;
+      }
+      return payload;
     }
-    if (!response.ok) {
-      const detail =
-        payload && typeof payload.message === 'string' ? `: ${payload.message.slice(0, 200)}` : '';
-      throw new Error(`GitHub API request failed with HTTP ${response.status}${detail}`);
-    }
-    return payload;
   }
 
   async getPullRequest(number) {
@@ -1589,6 +1694,13 @@ function resultSummary(result) {
   return `${lines.join('\n')}\n`;
 }
 
+function resultLogMessage(result) {
+  return (result?.errors ?? [])
+    .map(error => String(error).replace(/[\r\n]/g, ' '))
+    .join('; ')
+    .slice(0, 2_000);
+}
+
 function statusDescription(result) {
   if (result.override) {
     return `Override: ${NO_DOCS_LABEL}`;
@@ -1666,7 +1778,7 @@ async function evaluateAffectedGroups({ client, pullNumber, targetUrl, entries }
   return groupResults;
 }
 
-async function run({ client, env = process.env, event, eventName, writeSummary } = {}) {
+async function run({ client, env = process.env, event, eventName, writeSummary, writeError } = {}) {
   const effectiveEventName = eventName ?? env.GITHUB_EVENT_NAME;
   const effectiveEvent = event ?? (() => {
     if (typeof env.GITHUB_EVENT_PATH !== 'string' || env.GITHUB_EVENT_PATH.length === 0) {
@@ -1778,6 +1890,15 @@ async function run({ client, env = process.env, event, eventName, writeSummary }
     }
   }
 
+  if (!result.ok && result.errors?.length > 0) {
+    const kind = result.status === 'error' ? 'infrastructure error' : 'policy failure';
+    const message = `PR documentation coverage ${kind}: ${resultLogMessage(result)}\n`;
+    if (typeof writeError === 'function') {
+      await writeError(message);
+    } else {
+      process.stderr.write(message);
+    }
+  }
   await writeRunSummary(resultSummary(result), env, writeSummary);
   return { exitCode: result.ok ? 0 : 1, result };
 }
