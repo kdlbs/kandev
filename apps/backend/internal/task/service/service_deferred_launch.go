@@ -97,6 +97,12 @@ func (s *Service) UpdateDeferredLaunchPrompt(ctx context.Context, taskID, prompt
 		updated := make(map[string]interface{}, len(launch)+1)
 		maps.Copy(updated, launch)
 		updated["prompt"] = prompt
+		if payload, ok := launch[models.CeilingLaunchPayloadKey].(map[string]interface{}); ok {
+			updatedPayload := make(map[string]interface{}, len(payload)+1)
+			maps.Copy(updatedPayload, payload)
+			updatedPayload["prompt"] = prompt
+			updated[models.CeilingLaunchPayloadKey] = updatedPayload
+		}
 		stored, lostCompare, err := s.tasks.SetTaskDeferredLaunchIfUnchanged(ctx, taskID, prior, updated)
 		if err != nil {
 			return nil, err

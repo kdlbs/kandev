@@ -2,9 +2,30 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
+
+// ceilingCallbackOwnsSession rejects a late process callback when the session
+// already points at a different execution. The callback can arrive after a
+// failed launch has been replaced; releasing the reservation by session ID in
+// that case would free the successor's slot. Focused adapters that do not
+// expose a session row retain the legacy callback behavior, while repository
+// read failures fail closed so a transient read cannot release another launch.
+func (s *Service) ceilingCallbackOwnsSession(ctx context.Context, sessionID, agentExecutionID string) bool {
+	if sessionID == "" || s.repo == nil {
+		return true
+	}
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return errors.Is(err, models.ErrTaskSessionNotFound)
+	}
+	if session == nil {
+		return false
+	}
+	return session.AgentExecutionID == "" || agentExecutionID == "" || session.AgentExecutionID == agentExecutionID
+}
 
 // isAC1SessionState reports whether state counts toward the session ceiling's
 // population: task_sessions in STARTING or RUNNING (AC-1).

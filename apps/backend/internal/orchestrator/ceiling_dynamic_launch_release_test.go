@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/kandev/kandev/internal/task/models"
 	"github.com/stretchr/testify/require"
 )
 
@@ -60,5 +61,31 @@ func TestHandleAgentProcessStartFailed_ReleasesCeilingReservationUnconditionally
 	case <-svc.ceilingSweeper.signal:
 	default:
 		t.Fatal("releasing on a start failure must signal the retry sweep")
+	}
+}
+
+func TestHandleAgentProcessStartFailed_IgnoresStaleExecutionReservationRelease(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newServiceWithRealRepo(t)
+	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
+	svc.ceilingSweeper = newCeilingSweeper()
+	seedTaskAndSession(t, repo, "task-stale-start", "session-stale-start", models.TaskSessionStateStarting)
+	seedExecutorRunning(t, repo, "session-stale-start", "task-stale-start", "exec-successor")
+
+	decision := svc.sessionCeiling.admit(ctx, admissionRequest{
+		taskID: "task-stale-start", sessionID: "session-stale-start", origin: launchOriginAutomatic, seam: "test",
+	})
+	require.True(t, decision.admitted)
+
+	svc.handleAgentProcessStartFailed(ctx, "task-stale-start", "session-stale-start", "exec-predecessor", context.DeadlineExceeded)
+
+	svc.sessionCeiling.mu.Lock()
+	_, held := svc.sessionCeiling.reservations["session-stale-start"]
+	svc.sessionCeiling.mu.Unlock()
+	require.True(t, held, "a stale predecessor callback must not release the successor reservation")
+	select {
+	case <-svc.ceilingSweeper.signal:
+		t.Fatal("a stale callback must not wake the ceiling sweep")
+	default:
 	}
 }

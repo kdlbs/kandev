@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -108,8 +109,8 @@ func TestDeferCeilingRefusalRetainsEarlierRecordOnDifferingDuplicate(t *testing.
 	if err := svc.deferCeilingRefusal(ctx, "defer-collide", "", models.CeilingLaunchStart, map[string]interface{}{"prompt": "first"}, ceilingReasonRefused, 0, false, 0); err != nil {
 		t.Fatalf("deferCeilingRefusal (1): %v", err)
 	}
-	if err := svc.deferCeilingRefusal(ctx, "defer-collide", "", models.CeilingLaunchStart, map[string]interface{}{"prompt": "second"}, ceilingReasonRefused, 0, false, 0); err != nil {
-		t.Fatalf("deferCeilingRefusal (2): %v", err)
+	if err := svc.deferCeilingRefusal(ctx, "defer-collide", "", models.CeilingLaunchStart, map[string]interface{}{"prompt": "second"}, ceilingReasonRefused, 0, false, 0); !errors.Is(err, ErrCeilingLaunchConflict) {
+		t.Fatalf("deferCeilingRefusal (2) error = %v, want ErrCeilingLaunchConflict", err)
 	}
 
 	record := deferredLaunchOf(t, svc, "defer-collide")

@@ -195,6 +195,27 @@ func TestEvaluateCeilingDropReasons_StartKindStepNoLongerAutoStarts(t *testing.T
 	require.Contains(t, detail, "no longer auto-starts")
 }
 
+func TestEvaluateCeilingDropReasons_OfficeStartIgnoresWorkflowAutoStartEligibility(t *testing.T) {
+	svc, repo := newServiceWithRealRepo(t)
+	stepGetter := newMockStepGetter()
+	svc.workflowStepGetter = stepGetter
+	ctx := context.Background()
+
+	stepGetter.steps["office-step-no-auto-start"] = &wfmodels.WorkflowStep{ID: "office-step-no-auto-start"}
+	task := &models.Task{
+		ID: "keep-office-start", Title: "Office task", State: v1.TaskStateInProgress,
+		WorkflowStepID: "office-step-no-auto-start", IsFromOffice: true,
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	require.NoError(t, repo.CreateTask(ctx, task))
+
+	_, detail, drop := svc.evaluateCeilingDropReasons(ctx, task, models.CeilingDeferral{
+		Kind: models.CeilingLaunchStart, Payload: map[string]interface{}{},
+	})
+	require.False(t, drop, "an Office automatic start is not governed by workflow auto-start eligibility")
+	require.Empty(t, detail)
+}
+
 func TestEvaluateCeilingDropReasons_NonStartKindIgnoresStepAutoStart(t *testing.T) {
 	// A resume/prompt_ensure/etc. record must not be dropped just because the
 	// task's current step no longer auto-starts (AC-17b(d) is scoped to "start").

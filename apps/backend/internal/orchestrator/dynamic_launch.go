@@ -299,6 +299,9 @@ func (s *Service) handleAgentProcessStarted(
 	ctx context.Context,
 	_, sessionID, agentExecutionID string,
 ) {
+	if !s.ceilingCallbackOwnsSession(ctx, sessionID, agentExecutionID) {
+		return
+	}
 	// AC-52's acceptance edge, composed first and unconditionally on
 	// sessionID alone (AC-56a): profileExecutionResolver is a dynamic-routing
 	// precondition, not a launch one, so an instance without it configured
@@ -334,6 +337,9 @@ func (s *Service) handleAgentProcessStartFailed(
 	_, sessionID, agentExecutionID string,
 	_ error,
 ) {
+	if !s.ceilingCallbackOwnsSession(ctx, sessionID, agentExecutionID) {
+		return
+	}
 	// AC-52's failure edge, composed first and unconditionally on sessionID
 	// alone (AC-56a) — see handleAgentProcessStarted's acceptance edge.
 	s.releaseCeilingReservation(sessionID)
@@ -846,7 +852,10 @@ func (s *Service) launchDynamicSuccessorDetached(
 // runDetachedDynamicSuccessorLaunch serializes with the session's cancel guard
 // like every other session-backed failure decision, then launches the
 // successor. A launch that cannot complete falls back to the ordinary
-// recoverable-failure surface instead of leaving the session RUNNING.
+// recoverable-failure surface instead of leaving the session RUNNING. A
+// ceiling deferral is different: the durable replay record owns the retry, so
+// the automation run must remain open until that replay either succeeds or
+// fails for a non-ceiling reason.
 func (s *Service) runDetachedDynamicSuccessorLaunch(
 	ctx context.Context,
 	data watcher.AgentEventData,
@@ -887,7 +896,14 @@ func (s *Service) runDetachedDynamicSuccessorLaunch(
 			zap.Error(ctx.Err()))
 		return
 	}
-	if s.relaunchDynamicTaskAfterFailure(ctx, data, executionProfileID, launchOriginAutomatic) {
+	switch s.relaunchDynamicTaskAfterFailureOutcome(ctx, data, executionProfileID, launchOriginAutomatic) {
+	case dynamicRelaunchSucceeded:
+		return
+	case dynamicRelaunchDeferred:
+		s.logger.Debug("dynamic successor launch deferred by session ceiling",
+			zap.String("task_id", data.TaskID),
+			zap.String("session_id", data.SessionID),
+			zap.String("execution_profile_id", executionProfileID))
 		return
 	}
 	if errors.Is(ctx.Err(), context.Canceled) {
@@ -1041,26 +1057,46 @@ func (s *Service) dynamicFailureSession(
 	return session, true
 }
 
+type dynamicRelaunchOutcome uint8
+
+const (
+	dynamicRelaunchFailed dynamicRelaunchOutcome = iota
+	dynamicRelaunchDeferred
+	dynamicRelaunchSucceeded
+)
+
+// relaunchDynamicTaskAfterFailure preserves the historical boolean API for
+// synchronous route actions. Callers that own terminalization use the richer
+// outcome so a durable ceiling deferral is not mistaken for a failed launch.
 func (s *Service) relaunchDynamicTaskAfterFailure(
 	ctx context.Context,
 	data watcher.AgentEventData,
 	executionProfileID string,
 	origin launchOrigin,
-) (succeeded bool) {
+) bool {
+	return s.relaunchDynamicTaskAfterFailureOutcome(ctx, data, executionProfileID, origin) == dynamicRelaunchSucceeded
+}
+
+func (s *Service) relaunchDynamicTaskAfterFailureOutcome(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	executionProfileID string,
+	origin launchOrigin,
+) (outcome dynamicRelaunchOutcome) {
 	seam5Res, deferredLaunch, err := s.admitOrDeferSeam5(ctx, data.TaskID, origin, seam5DynamicRelaunchPayload(data, executionProfileID))
 	if err != nil {
 		s.logger.Zap().Error("could not persist a ceiling deferral; the dynamic relaunch could not be admitted or recorded",
 			zap.String("task_id", data.TaskID), zap.String("session_id", data.SessionID), zap.Error(err))
-		return false
+		return dynamicRelaunchFailed
 	}
 	if deferredLaunch {
-		return false
+		return dynamicRelaunchDeferred
 	}
 	defer seam5Res.releaseIfNotConsumed()
 	s.recordManualOverrideIfAdmitted(ctx, data.TaskID, data.SessionID, seam5Res.manualOverride, seam5Res.population, seam5Res.populationKnown, seam5Res.ceiling)
 
 	defer func() {
-		if succeeded || s.profileExecutionResolver == nil || data.SessionID == "" {
+		if outcome == dynamicRelaunchSucceeded || s.profileExecutionResolver == nil || data.SessionID == "" {
 			return
 		}
 		// This helper is used by both the synchronous route-failure path and
@@ -1081,32 +1117,61 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 		)
 	}()
 
+	task, session, prompt, ok := s.prepareDynamicRelaunchAfterFailure(ctx, data)
+	if !ok {
+		return dynamicRelaunchFailed
+	}
+	return s.launchPreparedDynamicRelaunch(ctx, data, task, session, prompt, executionProfileID, seam5Res)
+}
+
+func (s *Service) prepareDynamicRelaunchAfterFailure(
+	ctx context.Context,
+	data watcher.AgentEventData,
+) (*v1.Task, *models.TaskSession, capturedPrompt, bool) {
 	prompt, ok := s.dynamicRelaunchPrompt(ctx, data.SessionID)
 	if !ok {
-		return false
+		return nil, nil, capturedPrompt{}, false
 	}
 	task, err := s.scheduler.GetTask(ctx, data.TaskID)
 	if err != nil {
-		return false
+		return nil, nil, capturedPrompt{}, false
 	}
 	session, err := s.repo.GetTaskSession(ctx, data.SessionID)
 	if err != nil || session == nil {
-		return false
+		return nil, nil, capturedPrompt{}, false
 	}
-	if err := s.executor.StopExecution(ctx, data.AgentExecutionID, "dynamic route fallback", true); err != nil {
-		if errors.Is(err, agentruntime.ErrNotFound) {
-			s.logger.Debug("dynamic fallback predecessor is already absent", zap.Error(err))
-		} else {
-			s.logger.Debug("failed to stop dynamic fallback predecessor", zap.Error(err))
-			return false
-		}
+	if !s.stopDynamicRelaunchPredecessor(ctx, data.AgentExecutionID) {
+		return nil, nil, capturedPrompt{}, false
 	}
+	if !s.resetDynamicRelaunchSession(ctx, data.SessionID) {
+		return nil, nil, capturedPrompt{}, false
+	}
+	s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
+	s.completeTurnForSession(ctx, data.SessionID)
+	s.retireExecutionActivityAndPublish(ctx, data.TaskID, data.SessionID, data.AgentExecutionID)
+	return task, session, prompt, true
+}
+
+func (s *Service) stopDynamicRelaunchPredecessor(ctx context.Context, agentExecutionID string) bool {
+	err := s.executor.StopExecution(ctx, agentExecutionID, "dynamic route fallback", true)
+	if err == nil {
+		return true
+	}
+	if errors.Is(err, agentruntime.ErrNotFound) {
+		s.logger.Debug("dynamic fallback predecessor is already absent", zap.Error(err))
+		return true
+	}
+	s.logger.Debug("failed to stop dynamic fallback predecessor", zap.Error(err))
+	return false
+}
+
+func (s *Service) resetDynamicRelaunchSession(ctx context.Context, sessionID string) bool {
 	// Reload immediately before the reset: StopExecution is I/O and a
 	// coordinator stop can commit a terminal state while it runs. A stale
 	// pre-stop snapshot would let this write resurrect a session the user
 	// already cancelled, so refuse on a reloaded terminal state and CAS the
 	// write on that same reload to catch a cancellation landing after it.
-	preResetState, err := s.repo.GetTaskSession(ctx, data.SessionID)
+	preResetState, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil || preResetState == nil {
 		return false
 	}
@@ -1114,14 +1179,20 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 		return false
 	}
 	changed, _, err := s.repo.UpdateTaskSessionStateIfCurrent(
-		ctx, data.SessionID, preResetState.State, models.TaskSessionStateCreated, "",
+		ctx, sessionID, preResetState.State, models.TaskSessionStateCreated, "",
 	)
-	if err != nil || !changed {
-		return false
-	}
-	s.reconcileCIAutoFixTurnBeforeCompletion(ctx, data.TaskID, data.SessionID, "")
-	s.completeTurnForSession(ctx, data.SessionID)
-	s.retireExecutionActivityAndPublish(ctx, data.TaskID, data.SessionID, data.AgentExecutionID)
+	return err == nil && changed
+}
+
+func (s *Service) launchPreparedDynamicRelaunch(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	task *v1.Task,
+	session *models.TaskSession,
+	prompt capturedPrompt,
+	executionProfileID string,
+	seam5Res *sessionKeyedCeilingReservation,
+) dynamicRelaunchOutcome {
 	officeAgentProfileID := data.AgentProfileID
 	if officeAgentProfileID == "" {
 		officeAgentProfileID = session.AgentProfileID
@@ -1132,12 +1203,13 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 			ctx, data.TaskID, data.SessionID, session.AgentProfileID,
 			prompt.text, true, prompt.planMode, true, prompt.attachments, nil,
 		)
-		if err == nil {
-			seam5Res.consume()
+		if err != nil {
+			return dynamicRelaunchFailed
 		}
-		return err == nil
+		seam5Res.consume()
+		return dynamicRelaunchSucceeded
 	}
-	_, err = s.launchPreparedSessionWithDynamicFallback(ctx, task, data.SessionID, executor.LaunchOptions{
+	_, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, data.SessionID, executor.LaunchOptions{
 		AgentProfileID:       executionProfileID,
 		OfficeAgentProfileID: officeAgentProfileID,
 		ExecutorID:           "",
@@ -1145,10 +1217,11 @@ func (s *Service) relaunchDynamicTaskAfterFailure(
 		StartAgent:           true,
 		McpMode:              executor.McpModeOffice,
 	})
-	if err == nil {
-		seam5Res.consume()
+	if err != nil {
+		return dynamicRelaunchFailed
 	}
-	return err == nil
+	seam5Res.consume()
+	return dynamicRelaunchSucceeded
 }
 
 // dynamicRelaunchPrompt prefers the in-memory prompt cache for an automatic

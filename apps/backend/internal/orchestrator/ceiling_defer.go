@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -13,6 +14,12 @@ import (
 // deferredLaunchCASRetryBudget bounds the read-compare-write retry AC-40a
 // requires when a concurrent writer wins the compare-and-set race.
 const deferredLaunchCASRetryBudget = 3
+
+// ErrCeilingLaunchConflict reports an automatic launch refusal that could not
+// replace a different launch already queued for the same task. The first
+// record remains durable, while the caller retains ownership of the second
+// launch because no replay record was created for it.
+var ErrCeilingLaunchConflict = errors.New("a different ceiling launch is already deferred for this task")
 
 // publishTaskUpdatedByID reloads taskID and publishes it. The ceiling
 // deferral CAS helpers (GetTaskDeferredLaunch/SetTaskDeferredLaunchIfUnchanged)
@@ -74,7 +81,7 @@ func (s *Service) deferCeilingRefusal(
 					zap.String("stored_kind", string(existingCeiling.Kind)),
 					zap.String("superseded_kind", string(kind)),
 					zap.String(ceilingFieldReasonCode, ceilingReasonSuperseded))
-				return nil
+				return fmt.Errorf("%w: task %s already holds %s", ErrCeilingLaunchConflict, taskID, existingCeiling.Kind)
 			}
 			if existingCeiling.ReasonCode == reasonCode {
 				// AC-12a/AC-49e: the same launch, refused for the same reason,

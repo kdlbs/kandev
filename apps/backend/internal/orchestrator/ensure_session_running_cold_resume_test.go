@@ -12,6 +12,40 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+func TestColdResumeSession_CeilingRefusalKeepsStartupAttemptOwnership(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newServiceWithCeiling(t, 1)
+	seedTaskAndSession(t, repo, "task-cold-refused", "session-cold-refused", models.TaskSessionStateWaitingForInput)
+	session, err := repo.GetTaskSession(ctx, "session-cold-refused")
+	if err != nil {
+		t.Fatalf("load session: %v", err)
+	}
+
+	decision := svc.sessionCeiling.admit(ctx, admissionRequest{
+		taskID: "task-held", sessionID: "session-held", origin: launchOriginAutomatic, seam: "test",
+	})
+	if !decision.admitted {
+		t.Fatal("failed to occupy the only session-ceiling slot")
+	}
+
+	startupAttempt, owner, err := svc.beginResumeAttempt(ctx, session.TaskID, session.ID)
+	if err != nil || !owner || startupAttempt == nil {
+		t.Fatalf("begin resume attempt: attempt=%v owner=%t err=%v", startupAttempt, owner, err)
+	}
+	t.Cleanup(func() { startupAttempt.finish(svc.resumeAttemptStore()) })
+
+	got, err := svc.coldResumeSession(ctx, session.ID, session, false, startupAttempt, launchOriginAutomatic)
+	if _, ok := isSeam3Refusal(err); !ok {
+		t.Fatalf("cold resume error = %v, want a seam-3 refusal", err)
+	}
+	if got != startupAttempt {
+		t.Fatalf("cold resume returned attempt %p, want the registered attempt %p", got, startupAttempt)
+	}
+	if current, ok := svc.resumeAttemptStore().current(session.ID); !ok || current != startupAttempt {
+		t.Fatal("the startup attempt was lost after a ceiling refusal")
+	}
+}
+
 // TestEnsureSessionRunning_ColdResumeReapsAndRetriesOnPromptReadyTimeout pins
 // down a self-healing gap specific to the "kandev restart" cold-resume path:
 // when the backend restarts, the in-memory execution store is empty even

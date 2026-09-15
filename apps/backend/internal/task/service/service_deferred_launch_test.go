@@ -202,6 +202,30 @@ func TestUpdateDeferredLaunchPromptReplacesOnlyThePrompt(t *testing.T) {
 	}
 }
 
+func TestUpdateDeferredLaunchPromptPatchesNestedCeilingPayload(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	seedDeferredLaunchTask(t, repo)
+	task, err := repo.GetTask(context.Background(), deferredLaunchTaskID)
+	require.NoError(t, err)
+	launch := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	launch[models.CeilingDeferredKey] = true
+	launch[models.CeilingLaunchKindKey] = string(models.CeilingLaunchStart)
+	launch[models.CeilingLaunchPayloadKey] = map[string]interface{}{
+		"prompt":           "old nested prompt",
+		"agent_profile_id": "profile-1",
+	}
+	require.NoError(t, repo.UpdateTask(context.Background(), task))
+
+	_, err = svc.UpdateDeferredLaunchPrompt(context.Background(), deferredLaunchTaskID, "new nested prompt")
+	require.NoError(t, err)
+
+	launch = storedLaunch(t, repo)
+	nested, ok := launch[models.CeilingLaunchPayloadKey].(map[string]interface{})
+	require.True(t, ok, "ceiling launch payload must remain an object")
+	require.Equal(t, "new nested prompt", nested["prompt"])
+	require.Equal(t, "new nested prompt", launch["prompt"], "legacy top-level prompt remains updated for older readers")
+}
+
 // Once the task has a session it is running, and a launch prompt nothing will
 // read must not be silently accepted.
 func TestUpdateDeferredLaunchPromptRejectsAStartedTask(t *testing.T) {

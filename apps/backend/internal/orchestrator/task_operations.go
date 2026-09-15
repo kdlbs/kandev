@@ -2729,7 +2729,7 @@ func (s *Service) ResumeTaskSessionAndPrompt(
 		ctx,
 		taskID,
 		sessionID,
-		executor.ResumeOptions{},
+		executor.ResumeOptions{Origin: string(launchOriginManual)},
 		func(resumeCtx context.Context, attempt *resumeAttempt, _ *executor.TaskExecution) error {
 			var promptErr error
 			result, promptErr = s.promptTask(
@@ -3407,7 +3407,7 @@ func (s *Service) coldResumeSession(
 ) (*resumeAttempt, error) {
 	seam3Res, refusal := s.admitSeam3(ctx, session.TaskID, sessionID, origin)
 	if refusal != nil {
-		return nil, refusal
+		return startupAttempt, refusal
 	}
 	defer seam3Res.releaseIfNotConsumed()
 	s.recordManualOverrideIfAdmitted(ctx, session.TaskID, sessionID, seam3Res.manualOverride, seam3Res.population, seam3Res.populationKnown, seam3Res.ceiling)
@@ -5489,7 +5489,7 @@ func (s *Service) runPromptTurn(
 		ctx, taskID, sessionID, prompt, planMode, resumedForPrompt, attachments,
 		session, rollback, options, foregroundDispatch, runBeforeDispatch,
 	)
-	if err != nil {
+	if err != nil || earlyResult != nil {
 		return earlyResult, err
 	}
 	onDispatched, dispatchOutcome := s.preparePromptDispatchCallback(

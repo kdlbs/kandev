@@ -106,6 +106,27 @@ func TestRelaunchDynamicTaskAfterFailure_SecondAutomaticOverCeilingIsDeferred(t 
 	}
 }
 
+func TestRelaunchDynamicTaskAfterFailure_ReportsDeferredOutcome(t *testing.T) {
+	ctx := context.Background()
+	svcA, _ := newSeam5TestService(t, "seam5-outcome-task-a", "seam5-outcome-session-a", "seam5-outcome-exec-a")
+	svcA.sessionCeiling = newSessionCeilingController(1, nil, nil)
+	require.True(t, svcA.relaunchDynamicTaskAfterFailure(
+		ctx,
+		seam5EventData("seam5-outcome-task-a", "seam5-outcome-session-a", "seam5-outcome-exec-a"),
+		"profile-1",
+		launchOriginAutomatic,
+	))
+
+	svcB, _ := newSeam5TestService(t, "seam5-outcome-task-b", "seam5-outcome-session-b", "seam5-outcome-exec-b")
+	svcB.sessionCeiling = svcA.sessionCeiling
+	require.Equal(t, dynamicRelaunchDeferred, svcB.relaunchDynamicTaskAfterFailureOutcome(
+		ctx,
+		seam5EventData("seam5-outcome-task-b", "seam5-outcome-session-b", "seam5-outcome-exec-b"),
+		"profile-1",
+		launchOriginAutomatic,
+	))
+}
+
 // TestRelaunchDynamicTaskAfterFailure_ManualOverCeilingIsAdmitted pins AC-14
 // through the real relaunchDynamicTaskAfterFailure entry point: the manual
 // route-action origin is always admitted, even at the ceiling.

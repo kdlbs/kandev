@@ -141,7 +141,7 @@ func (s *Service) evaluateCeilingDropReasons(
 		}
 	}
 	if deferral.Kind == models.CeilingLaunchStart {
-		if !s.shouldAutoStartStep(ctx, task.WorkflowStepID) {
+		if !task.IsFromOffice && !s.shouldAutoStartStep(ctx, task.WorkflowStepID) {
 			return ceilingReasonDroppedTaskIneligible, "workflow step no longer auto-starts", true
 		}
 		if s.shouldSkipTerminalPRAutoStart(ctx, task) {
@@ -512,11 +512,9 @@ func (s *Service) replayCeilingLaunchResume(ctx context.Context, task *models.Ta
 }
 
 // replayCeilingLaunchDynamicRelaunch replays an AC-42f "dynamic_relaunch"
-// record. relaunchDynamicTaskAfterFailure reports only a bool: false is
-// ambiguous between still-refused and a non-ceiling failure, and both are
-// handled identically here — retained for a later pass — since its own
-// admission gate re-persists an unchanged record on a repeat refusal either
-// way (AC-32/AC-55a).
+// record. A repeated ceiling refusal remains deferred; a launch failure after
+// admission is retained as a non-ceiling failure for the next sweep without
+// being reported as another refusal.
 func (s *Service) replayCeilingLaunchDynamicRelaunch(ctx context.Context, task *models.Task, payload map[string]interface{}) ceilingReplayOutcome {
 	data := watcher.AgentEventData{
 		TaskID:           stringField(payload, metaKeyTaskID),
@@ -524,10 +522,14 @@ func (s *Service) replayCeilingLaunchDynamicRelaunch(ctx context.Context, task *
 		AgentExecutionID: stringField(payload, "agent_execution_id"),
 		AgentProfileID:   stringField(payload, metaKeyAgentProfileID),
 	}
-	if s.relaunchDynamicTaskAfterFailure(ctx, data, stringField(payload, "execution_profile_id"), launchOriginAutomatic) {
+	switch s.relaunchDynamicTaskAfterFailureOutcome(ctx, data, stringField(payload, "execution_profile_id"), launchOriginAutomatic) {
+	case dynamicRelaunchSucceeded:
 		return ceilingReplaySucceeded
+	case dynamicRelaunchDeferred:
+		return ceilingReplayStillDeferred
+	default:
+		return ceilingReplayFailed
 	}
-	return ceilingReplayStillDeferred
 }
 
 // ceilingReplayOutcomeFromExecution is the shared classification for the four
