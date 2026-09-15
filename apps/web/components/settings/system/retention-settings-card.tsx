@@ -144,7 +144,8 @@ function useRetentionDraft(remote: ReturnType<typeof useRetentionSettings>, isAd
   }, [saved]);
 
   const isDirty = Boolean(draft && saved && serialize(draft) !== serialize(saved));
-  const canEdit = isAdmin && !remote.isLoading && Boolean(saved) && invalidFields.size === 0;
+  const canEdit = isAdmin && !remote.isLoading && Boolean(saved);
+  const canSave = canEdit && invalidFields.size === 0;
   let invalidReason: string | undefined;
   if (!isAdmin) {
     invalidReason = t("system:retentionAdminOnly");
@@ -157,7 +158,7 @@ function useRetentionDraft(remote: ReturnType<typeof useRetentionSettings>, isAd
     order: 25,
     revision: serialize(draft),
     isDirty,
-    canSave: canEdit,
+    canSave,
     invalidReason,
     save: async () => {
       if (!draft) return;
@@ -169,7 +170,7 @@ function useRetentionDraft(remote: ReturnType<typeof useRetentionSettings>, isAd
     },
   });
 
-  return { draft, setDraft, saved, canEdit, invalidFields };
+  return { draft, setDraft, saved, canEdit, canSave, invalidFields };
 }
 
 function RetentionEnabledRow({

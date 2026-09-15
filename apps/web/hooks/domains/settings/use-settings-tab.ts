@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
+import { LOCATION_CHANGE_EVENT } from "@/lib/routing/navigation-event";
 import {
   SETTINGS_TARGET_REQUEST_EVENT,
   settingsTargetFromHash,
@@ -52,9 +53,11 @@ export function useSettingsTab({ tabs, defaultTab, targetToTab = {} }: UseSettin
     const updateHash = () => setLocationHash(window.location.hash);
     window.addEventListener("hashchange", updateHash);
     window.addEventListener("popstate", updateHash);
+    window.addEventListener(LOCATION_CHANGE_EVENT, updateHash);
     return () => {
       window.removeEventListener("hashchange", updateHash);
       window.removeEventListener("popstate", updateHash);
+      window.removeEventListener(LOCATION_CHANGE_EVENT, updateHash);
     };
   }, []);
   const value = useMemo(

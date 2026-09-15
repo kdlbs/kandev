@@ -76,6 +76,37 @@ function renderCard() {
   );
 }
 
+async function correctInvalidBatchLimit() {
+  const batchLimit = screen.getByTestId(BATCH_LIMIT_TEST_ID);
+
+  fireEvent.change(batchLimit, { target: { value: "0" } });
+
+  await waitFor(() => {
+    expect(screen.getByTestId("retention-advanced-settings").getAttribute("open")).toBe("");
+    expect(batchLimit).toHaveProperty("disabled", false);
+    expect(batchLimit.getAttribute("aria-invalid")).toBe("true");
+    expect(screen.getByTestId(`${BATCH_LIMIT_TEST_ID}-error`)).toBeTruthy();
+    expect(saveContributor?.canSave).toBe(false);
+  });
+  if (!saveContributor) throw new Error(EXPECTED_SAVE_CONTRIBUTOR_ERROR);
+
+  await act(async () => {
+    await expect(saveContributor?.save(saveContributor.revision)).rejects.toThrow(
+      "Fix the highlighted retention fields before saving.",
+    );
+  });
+  expect(saveRetentionSettingsMock).not.toHaveBeenCalled();
+
+  fireEvent.change(batchLimit, { target: { value: "5000" } });
+
+  await waitFor(() => {
+    expect(batchLimit).toHaveProperty("disabled", false);
+    expect(batchLimit).toHaveProperty("value", "5000");
+    expect(batchLimit.getAttribute("aria-invalid")).toBeNull();
+    expect(saveContributor?.canSave).toBe(true);
+  });
+}
+
 beforeEach(() => {
   fetchRetentionStatusMock.mockReset();
   saveRetentionSettingsMock.mockReset();
@@ -129,24 +160,7 @@ describe("RetentionSettingsCard", () => {
   it("opens Advanced settings and annotates an invalid field before saving", async () => {
     renderCard();
     await screen.findByTestId(ENABLED_TOGGLE_TEST_ID);
-    const batchLimit = screen.getByTestId(BATCH_LIMIT_TEST_ID);
-
-    fireEvent.change(batchLimit, { target: { value: "0" } });
-
-    await waitFor(() => {
-      expect(screen.getByTestId("retention-advanced-settings").getAttribute("open")).toBe("");
-      expect(batchLimit.getAttribute("aria-invalid")).toBe("true");
-      expect(screen.getByTestId(`${BATCH_LIMIT_TEST_ID}-error`)).toBeTruthy();
-      expect(saveContributor?.canSave).toBe(false);
-    });
-    if (!saveContributor) throw new Error(EXPECTED_SAVE_CONTRIBUTOR_ERROR);
-
-    await act(async () => {
-      await expect(saveContributor?.save(saveContributor.revision)).rejects.toThrow(
-        "Fix the highlighted retention fields before saving.",
-      );
-    });
-    expect(saveRetentionSettingsMock).not.toHaveBeenCalled();
+    await correctInvalidBatchLimit();
   });
 
   it("renders the last sweep outcome, backlog flag, and retained counts", async () => {

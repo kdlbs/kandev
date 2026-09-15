@@ -113,17 +113,28 @@ test.describe("Settings header tabs", () => {
     );
 
     await testPage.evaluate(() => {
-      window.history.pushState(
-        {},
-        "",
-        "/settings/system/storage?tab=host#setting-system-retention",
-      );
-      window.dispatchEvent(new HashChangeEvent("hashchange"));
+      window.location.hash = "#setting-system-retention";
     });
 
     await expect(
       testPage.getByRole("tab", { name: "Office retention", exact: true }),
     ).toHaveAttribute("aria-selected", "true");
     await expect(testPage.getByTestId("retention-policy-card")).toBeVisible();
+  });
+
+  test("clears a target fragment when switching away from its tab", async ({ testPage }) => {
+    await testPage.setViewportSize({ width: 1440, height: 900 });
+    await testPage.goto("/settings/system/storage?tab=office-retention#setting-system-retention");
+
+    await expect(
+      testPage.getByRole("tab", { name: "Office retention", exact: true }),
+    ).toHaveAttribute("aria-selected", "true");
+    await testPage.getByRole("tab", { name: "Host", exact: true }).click();
+
+    await expect(testPage).toHaveURL(/\/settings\/system\/storage\?tab=host$/);
+    await expect(testPage.getByRole("tab", { name: "Host", exact: true })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
   });
 });
