@@ -308,6 +308,43 @@ docker volume inspect kandev-data
 
 Delete `kandev-data` only after verifying that its database, workspaces, and credentials are no longer needed.
 
+## Docker address-pool exhaustion
+
+Every Compose project that `docker compose up` starts creates its own bridge network, and the daemon allocates each one an IPv4 subnet from its `default-address-pools`. When enough project networks accumulate without cleanup, every new network fails with:
+
+```
+could not find an available, non-overlapping IPv4 address pool
+```
+
+or, when the pool is fully subnetted:
+
+```
+all predefined address pools have been fully subnetted
+```
+
+Any new Compose project, `docker compose run`, or `docker network create` then fails, including tooling you did not write yourself.
+
+Kandev's in-product answer is **Settings > System > Data storage > Docker network reclamation**. It is always-on analysis (a read-only census of every bridge network on the daemon, classifying each one as active, attached, orphaned, safely stale, or uncertain) plus an opt-in reclaimer:
+
+- Networks with a connected container or an active task are never removal candidates.
+- A finished task's network is only reclaimed after a grace window, through a persisted quarantine ledger (which itself waits a quarantine window), and only after a fresh list+inspect revalidation immediately before the deletion. Removals are per-network, by ID; Kandev never calls any daemon-wide network prune.
+- A network whose owning task cannot be resolved is reclaimed only after it has been observed untouched for the full stable-age window (168 hours by default).
+- After each reclaim cycle, a capacity probe creates a throwaway bridge network, asserts the daemon allocated it a subnet, and removes it again. The probe result is recorded with the run.
+
+Reclamation ships disabled: until you enable it, every run records exactly what *would* be reclaimed, with evidence, and removes nothing.
+
+**Expanding the pool is a host-level, Human-only action.** Kandev does not edit `daemon.json` or restart the Docker daemon. If reclamation provably cannot keep up (the probe still fails after orphaned networks were reclaimed), add a larger pool to `/etc/docker/daemon.json` on the Docker host and restart the daemon during a maintenance window:
+
+```json
+{
+  "default-address-pools": [
+    { "base": "10.0.0.0/8", "size": 24 }
+  ]
+}
+```
+
+Rule: expand the pool only when reclamation proves insufficient. The reclaim feature runs continuously; pool expansion covers genuine sustained concurrency that reclamation cannot free.
+
 ## Troubleshooting
 
 - **UI unreachable:** check `docker ps`, published address/port, host firewall, and `docker logs kandev`; then call `/ready`.
@@ -318,5 +355,6 @@ Delete `kandev-data` only after verifying that its database, workspaces, and cre
 - **WebSocket disconnects behind proxy:** forward the whole origin, enable upgrade support, and increase proxy idle timeouts.
 - **Docker agent container fails to mount helper/session paths:** the control plane is probably containerized or using a remote daemon whose filesystem paths do not match; use a same-host control plane or a fully mirrored custom layout.
 - **Disk growth:** inspect `/data`, retained Docker agent containers, image layers/build cache, and Docker volumes before deleting anything.
+- **`could not find an available, non-overlapping IPv4 address pool`:** the daemon's address pool is exhausted by accumulated bridge networks. Open **Settings > System > Data storage**, review the Docker-network census, and enable reclamation; see [Docker address-pool exhaustion](#docker-address-pool-exhaustion).
 
 Related pages: [Configuration](configuration.md), [Executors](executors.md), [Operations](operations.md), and [Run as a Service](run-as-a-service.md).
