@@ -122,14 +122,20 @@ test("classifies orphan and active networks and probe passes without removing an
     expect(networkExists(orphanNetworkId)).toBe(true);
     expect(networkExists(activeNetworkId)).toBe(true);
 
-    // The read-only analysis census classifies both networks. The orphan's
-    // first seeing is now, so while it is not yet past any window, the
-    // DISABLED cleanup below proves nothing is removed even so.
-    await expect
-      .poll(async () => (await getDockerNetworksSummary(apiClient))?.available, {
-        timeout: 60_000,
-      })
-      .toBe(true);
+    // The read-only analysis census classifies both networks. The overview
+    // endpoint serves a cached snapshot, so explicitly refresh it after the
+    // fixture networks are created before asserting their classification.
+    await testPage.goto("/settings/system/data-storage", {
+      waitUntil: "commit",
+      timeout: 20_000,
+    });
+    await expect(testPage.getByTestId("storage-settings-page")).toBeVisible({ timeout: 60_000 });
+    await testPage.getByTestId("storage-analyze").click();
+    await expect(testPage.getByTestId("storage-analyze")).toHaveAttribute(
+      "data-job-state",
+      "succeeded",
+      { timeout: 120_000 },
+    );
     const networksSummary = await getDockerNetworksSummary(apiClient);
     expect(networksSummary, "network census available").not.toBeNull();
 
