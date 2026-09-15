@@ -88,11 +88,16 @@ existing claims remain operator-owned.
 
 ## Compatibility limits
 
-Real acceptance results are recorded in the implementation work orders. A
-successful image smoke alone does not establish Kubernetes Docker acceptance.
+The focused lifecycle suite passed on Linux/amd64 with Kind v0.32.0,
+Kubernetes v1.36.1 and Docker 29.1.5. It exercised source/browser work, Docker
+build/run, Compose binds, finite readiness failure, Stop/Resume, lost-Pod
+replacement, independent daemons, nested cgroup accounting and exact cleanup.
+The implementation work orders record the commands, timings and accepted image
+config digest.
+
 Kind evidence applies only to the recorded architecture and runtime. Measure
-nested cgroup ancestry and counters before claiming resource enforcement;
-privileged DinD is not an adversarial isolation boundary.
+nested cgroup ancestry and counters before claiming resource enforcement on a
+different runtime; privileged DinD is not an adversarial isolation boundary.
 
 Only `/workspace` is shared with the daemon. Agent-only HOME/temp bind sources,
 callbacks, SSH fixtures and arbitrary Docker plugins are not promised to work.

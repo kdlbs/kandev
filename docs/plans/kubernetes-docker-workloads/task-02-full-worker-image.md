@@ -1,7 +1,7 @@
 ---
 id: "02-full-worker-image"
 title: "Full worker image and daemon recipe"
-status: blocked
+status: completed
 wave: 2
 depends_on:
   - "01-workspace-grants"
@@ -112,30 +112,20 @@ a different host; resolve that before consuming significant resources.
 
 ## Results
 
-Implementation authored; runtime acceptance remains blocked. Do not treat this
-work order as accepted or promote the pull request to ready.
+Completed on Linux/amd64. The immutable recipe built and its constrained
+non-root verifier passed source builds/tests for Go, Rust, Node/pnpm, Python and
+C, plus a real headless Chromium interaction. The accepted image config digest
+was `sha256:101d44047de5238b7846295a2e175c162c79328b42db9a2693d568a9ac59a0f6`.
+The same image then passed the Docker build/run/Compose smoke in task 03.
 
-The immutable recipe, explicit daemon template, finite preparation, renderer and
-source/browser/Docker smoke scripts are present. `TestFullWorkerTemplate` and
-`TestFullWorkerPreparationContract` passed. The filesystem preparation test
-`TestFullWorkerPreparationClonesBeforeCachesAndRetainsWorkspace` passed, proving
-clone/cache ordering and retained checkout reuse. Shell syntax, input validation
-and immutable image rendering passed. The renderer regression first failed
-because the renderer was absent; `TestFullWorkerTemplateRequiresImmutableImage`
-passed in the focused Go regression rerun after rebasing.
+`TestFullWorkerTemplate`, `TestFullWorkerPreparationContract`,
+`TestFullWorkerPreparationClonesBeforeCachesAndRetainsWorkspace` and
+`TestFullWorkerTemplateRequiresImmutableImage` passed. Shell syntax, input
+validation, immutable image rendering and the three Python process-boundary
+tests passed. The latter include exact cleanup after failed verification.
 
-A bounded `build.sh --build --verify` attempt did not complete. No image ID,
-source/browser image verification or supported full runtime matrix is claimed.
-The disposable build resources were removed. Complete the image build and
-verification on a suitable isolated test host before running task 03.
-
-`python3 k8s/worker-images/full/build_test.py` passed after reproducing a failed
-verification leaving an untracked container. The verifier now has an exact
-owned name and explicit cleanup. This process-boundary test uses a fake Docker
-command and does not replace real image/container acceptance.
-
-`python3 -m unittest discover -s k8s/worker-images/full -p '*_test.py'`
-passes three tests. The daemon startup regression first reproduced failure on a
-non-eth0 interface. Startup now reads the default-route interface (IPv4, then
-IPv6) and its MTU, rejecting missing routes and invalid MTUs. This executes the
-template shell with command fixtures; actual CNI compatibility remains unverified.
+The daemon startup regression covers default-route discovery for IPv4 and IPv6,
+rejecting missing routes and invalid MTUs. The runtime test used that startup
+path with Docker 29.1.5 and verified the Pod interface MTU, Unix-only daemon,
+cgroupfs driver and relative cgroup parent. Compatibility remains limited to
+the recorded architecture and runtime boundary.
