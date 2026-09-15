@@ -151,6 +151,7 @@ function renderToolbar(onCancel: () => void | Promise<void>) {
         taskId="t1"
         taskDescription=""
         isAgentBusy
+        canCancelAgent
         isDisabled={false}
         isSending={false}
         onCancel={onCancel}
@@ -242,6 +243,7 @@ describe("ChatInputToolbar backend cancellation state", () => {
           taskId="t1"
           taskDescription=""
           isAgentBusy
+          canCancelAgent
           isDisabled={false}
           isSending={false}
           onCancel={() => {}}
@@ -268,6 +270,7 @@ describe("ChatInputToolbar backend cancellation state", () => {
           taskId="t1"
           taskDescription=""
           isAgentBusy
+          canCancelAgent
           isDisabled={false}
           isSending={false}
           onCancel={onCancel}
@@ -290,6 +293,12 @@ describe("ChatInputToolbar backend cancellation state", () => {
 // tears down a long-running tool (Claude Monitor, etc.) sends N cancel requests
 // to the backend, each producing a duplicate "Turn cancelled by user" message.
 describe("ChatInputToolbar cancel button", () => {
+  it("gives the cancel icon its localized accessible name", () => {
+    renderToolbar(() => {});
+
+    expect(screen.getByRole("button", { name: "Cancel agent" })).toBeTruthy();
+  });
+
   it.each(["desktop", "mobile"] as const)(
     "keeps cancellation progress after a %s toolbar remount",
     async (breakpoint) => {
@@ -308,6 +317,7 @@ describe("ChatInputToolbar cancel button", () => {
               taskId="t1"
               taskDescription=""
               isAgentBusy
+              canCancelAgent
               isDisabled={false}
               isSending={false}
               onCancel={onCancel}

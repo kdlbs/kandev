@@ -74,6 +74,9 @@ type ChatInputContainerProps = {
   mcpAttachmentHistory?: MCPAttachmentHistory;
   onPlanModeChange: (enabled: boolean) => void;
   isAgentBusy: boolean;
+  isWorking: boolean;
+  /** False for surfaces whose cancel callback only dismisses the composer. */
+  showCancelAgent?: boolean;
   /** True when a send would be delivered into the running turn (mid-turn
    * steering) rather than queued. Defaults to false. */
   supportsSteering?: boolean;
@@ -164,10 +167,12 @@ type EnhancePromptExtras = {
 };
 
 export function shouldShowCancelAgent(
-  isAgentBusy: boolean,
+  isWorking: boolean,
   pendingClarification: Message | null | undefined,
+  sessionId: string | null,
 ): boolean {
-  if (!pendingClarification) return isAgentBusy;
+  if (!sessionId) return false;
+  if (!pendingClarification) return isWorking;
   return !(pendingClarification.metadata as ClarificationRequestMetadata | undefined)
     ?.agent_disconnected;
 }
@@ -204,7 +209,9 @@ function buildEditorAreaProps(
     fileInputRef: s.fileInputRef,
     showRequestChangesTooltip: p.showRequestChangesTooltip,
     isAgentBusy: p.isAgentBusy || !!(p.pendingClarification && p.onClarificationResolved),
-    canCancelAgent: shouldShowCancelAgent(p.isAgentBusy, p.pendingClarification),
+    canCancelAgent:
+      p.showCancelAgent !== false &&
+      shouldShowCancelAgent(p.isWorking, p.pendingClarification, p.sessionId),
     onPlanModeChange: p.onPlanModeChange,
     taskTitle: p.taskTitle,
     taskDescription: p.taskDescription,

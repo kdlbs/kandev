@@ -200,8 +200,20 @@ describe("shouldShowCancelAgent", () => {
       attachedClarification,
       true,
     ],
-    ["keeps cancel for a running session without clarification", true, null, true],
-  ])("%s", (_name, isAgentBusy, pendingClarification, expected) => {
-    expect(shouldShowCancelAgent(isAgentBusy, pendingClarification)).toBe(expected);
+    ["shows cancel for a generating session with direct input", true, null, true],
+    ["shows cancel for background work with direct input", true, null, true],
+    ["shows cancel while the session is starting", true, null, true],
+    ["shows cancel while the executor is preparing", true, null, true],
+    ["hides cancel for an idle session", false, null, false],
+  ])("%s", (_name, isWorking, pendingClarification, expected, sessionId = "session-1") => {
+    expect(shouldShowCancelAgent(isWorking, pendingClarification, sessionId)).toBe(expected);
+  });
+
+  it("hides cancel when the session identity is missing", () => {
+    expect(shouldShowCancelAgent(true, null, null)).toBe(false);
+  });
+
+  it("retains the connected clarification override while the session is settled", () => {
+    expect(shouldShowCancelAgent(false, attachedClarification, "session-1")).toBe(true);
   });
 });

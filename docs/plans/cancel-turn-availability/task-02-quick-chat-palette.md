@@ -1,7 +1,7 @@
 ---
 id: "02-quick-chat-palette"
 title: "Scope Quick Chat palette cancellation"
-status: pending
+status: done
 wave: 2
 depends_on: ['01-composer-availability']
 plan: "plan.md"
@@ -43,9 +43,10 @@ new palette state architecture; changing the command registry globally.
 
 ## Acceptance
 
-1. Add a failing registry integration test named `targets only the active Quick
-   Chat session over a running task`. Exercise actual source registration under
-   `CommandRegistryProvider`, assert one cancel entry, and inspect its action.
+1. Add a registry integration test named `targets only the active Quick Chat
+   session over a running task`. Exercise actual `SessionCommands` and Quick
+   Chat source registration together under `CommandRegistryProvider`, assert one
+   cancel entry, and inspect its action.
 2. Cover A-to-B chat switching, closing Quick Chat, unmount, terminal/setup/idle
    content, disconnected clarification, and pending cancellation. No stale
    callback, duplicate entry, or underlying task cancel may remain active.
@@ -89,6 +90,7 @@ git diff --check
 Existing files:
 
 - `apps/web/components/quick-chat/quick-chat-content.tsx`
+- `apps/web/components/command-panel-results.tsx`
 - `apps/web/components/session-commands.tsx`
 - `apps/web/components/session-commands.test.tsx`
 
@@ -120,5 +122,22 @@ steering delivery. Palette sources do not deduplicate matching command IDs.
 
 ## Results
 
-Pending. Run the regression before production changes and record its expected
-failure. Then record each verification command and actual result after the fix.
+- The earlier review correctly identified that the claimed RED integration
+  result was unsupported: the original test only exercised the command builder.
+  The regression is now an actual registry test with both command producers
+  mounted.
+- GREEN: Quick Chat registers one cancel command only for its active structured
+  conversation, uses that conversation's session ID and existing cancel
+  handler, and guards duplicate dispatch while cancellation is pending. Task
+  cancellation is suppressed for the full Quick Chat open state and restored
+  when it closes. The registry matrix covers A-to-B switching, unmount cleanup,
+  setup/terminal/idle and disconnected clarification states, backend-pending
+  rejection, and retry after a failed request.
+- The command row uses the existing coarse-pointer sizing convention so the
+  mobile palette action remains touch-sized. Focused registry tests, typecheck,
+  i18n, targeted ESLint, Vite build, and desktop/mobile E2E coverage passed.
+  The mobile palette measured at least 44px and had no horizontal overflow.
+- Desktop and phone Quick Chat composer regressions negotiate steering, observe
+  generating activity with an empty editor and queue, use the visible cancel
+  control, and wait for the exact session to settle. Desktop also covers
+  detached background work.

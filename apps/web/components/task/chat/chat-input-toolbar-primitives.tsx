@@ -129,7 +129,7 @@ function SendSubmitButton({
 
 export function SubmitButton({
   isAgentBusy,
-  canCancelAgent = isAgentBusy,
+  canCancelAgent = false,
   sessionId,
   taskId,
   taskTitle,
@@ -187,6 +187,7 @@ export function SubmitButton({
               )}
               onClick={handleCancelClick}
               disabled={isCancelling}
+              aria-label={isCancelling ? t("task:cancelling") : t("task:cancelAgent")}
               data-testid="cancel-agent-button"
             >
               {isCancelling ? (

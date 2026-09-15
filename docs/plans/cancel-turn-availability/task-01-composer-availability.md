@@ -1,7 +1,7 @@
 ---
 id: "01-composer-availability"
 title: "Restore shared cancellation availability"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -129,5 +129,23 @@ steering delivery. Palette sources do not deduplicate matching command IDs.
 
 ## Results
 
-Pending. Run the regression before production changes and record its expected
-failure. Then record each verification command and actual result after the fix.
+- RED: the direct working-input integration regression returned
+  `canCancelAgent=false` before `isWorking` was wired through the composer;
+  the hook, toolbar accessible-name, and state-table regressions also failed at
+  their pre-fix boundaries.
+- GREEN: `isWorking` now travels from `useComposerProps` through
+  `ChatInputContainer`, cancellation requires a session identity, and the
+  clarification override remains intact. The toolbar uses the existing
+  localized cancel label and keeps send and queue behavior independent.
+- Passthrough explicitly sets `showCancelAgent={false}` because its parent
+  `onCancel` callback dismisses the composer. The parent-path regression proves
+  the callback still closes the composer and cannot cancel the agent, including
+  through the existing Escape dismissal.
+- The queue E2E helper now waits for the queue-derived composer classes instead
+  of using cancel visibility as queue evidence.
+- Focused frontend suite passed with 9 files and 128 tests. Typecheck, i18n,
+  targeted ESLint, targeted E2E sleep lint, Vite build, and the desktop and
+  mobile cancellation regressions passed. Mobile coverage verified the 44px
+  composer target, composer containment, screenshot capture, and no horizontal
+  overflow. Quick Chat direct composer coverage is recorded in Task 02 because
+  it shares the Quick Chat palette fixture.

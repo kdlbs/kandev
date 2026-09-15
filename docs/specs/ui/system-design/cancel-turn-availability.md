@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: ui
 created: 2026-09-15
 requirements:
@@ -43,6 +43,11 @@ copy, queue handling, and styling. Keep pending cancellation disabled and animat
 through the existing optimistic and backend session-keyed state. Keep the
 existing `agent.cancel` handler, payload, authorization, and retry behavior.
 Use the existing localized cancel label as the icon button's accessible name.
+
+The passthrough composer keeps Escape and its parent `onCancel` callback as
+editor dismissal. It does not own an agent-cancel transport, so it explicitly
+suppresses the agent cancel control even while its session is working. This
+prevents a dismissal callback from being mistaken for cancellation.
 
 Phone composition reuses `chat-input-toolbar-mobile.tsx` and its existing
 44px controls. Desktop retains the 28px controls. No new overlay or scroll owner

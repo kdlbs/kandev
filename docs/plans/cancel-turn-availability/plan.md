@@ -1,6 +1,6 @@
 ---
 created: 2026-09-15
-status: draft
+status: complete
 requirements:
   - REQ-UI-CANCEL-TURN-PROGRESS-001
 system_design:
@@ -15,7 +15,7 @@ legacy_specs: []
 Restore cancellation for steering and background-working sessions in task and
 Quick Chat composers. Then add a correctly scoped Quick Chat palette fallback.
 [Issue #3700](https://github.com/kdlbs/kandev/issues/3700) is assigned to
-`carlosflorencio`. Implementation awaits a later explicit request.
+`carlosflorencio`. Implementation was explicitly requested on 2026-09-15.
 
 ## Evidence and root cause
 
@@ -68,6 +68,8 @@ Task 01 passes working state through `use-composer-props.ts` into
 `chat-input-toolbar-primitives.tsx` receives independent cancel/send signals.
 Use a required prop and update all direct callers/test fixtures; do not silently
 fall back to `isAgentBusy`. Add the localized accessible name to the cancel icon.
+Passthrough keeps its Escape callback as composer dismissal and explicitly hides
+the agent cancel control because that surface has no agent-cancel transport.
 
 Task 02 adds `quick-chat-cancel-commands.tsx` beside `quick-chat-content.tsx`.
 Reuse `buildSessionCommands` and the existing callback. Suppress task cancellation
@@ -119,31 +121,36 @@ UI-01 maps to criteria .7-.10 and .12; UI-02 maps to .11.
   `isWorking=true, isAgentBusy=false`. Cover steering, background, STARTING,
   preparation, idle, missing session, connected and disconnected clarification.
 - Existing toolbar tests cover pending state and cancellation callback. Assert
-  independent send behavior, a localized accessible name, and session isolation.
-- Task 02: component/registry tests assert zero or one cancel entry and the exact
-  session_id after tab switches, closing, terminal/setup selection, and pending.
+  independent send behavior, a localized accessible name, session isolation, and
+  passthrough dismissal without agent cancellation.
+- Task 02: mount `SessionCommands` and the Quick Chat source together and assert
+  zero or one cancel entry and the exact callback/session target after tab
+  switches, close/unmount, terminal/setup/idle/disconnected selection, backend
+  pending rejection, and failed-request cleanup.
 
 ## E2E tests
 
 Task 01 owns `cancel-turn-availability.spec.ts` and
 `mobile-cancel-turn-availability.spec.ts` under `apps/web/e2e/tests/chat/`.
-Cover task and Quick Chat steering with empty input/queue; click/tap cancel and
-observe the selected session settle. Cover background work and preserve direct
-submission. Use existing generating-session and parked-background fixtures.
-Retain cancellation reload checks and steering/queue delivery checks.
+Cover task steering and background work with empty input/queue; click/tap cancel
+and observe the selected session settle. Preserve direct submission. Use
+existing generating-session and parked-background fixtures. Retain cancellation
+reload checks and steering/queue delivery checks.
 
 Task 02 owns `quick-chat-cancel-palette.spec.ts` and
-`mobile-quick-chat-cancel-palette.spec.ts` in the same directory. Prove exact
-session targeting with a running task beneath Quick Chat, active-chat switching,
-closed-chat restoration, and no underlying action for idle/setup/terminal tabs.
-Use the existing phone command-panel entry and verify touch composer fallback.
+`mobile-quick-chat-cancel-palette.spec.ts` in the same directory. The desktop
+and phone suites now exercise negotiated Quick Chat steering with generating
+activity, an empty editor and queue, then click/tap the visible composer cancel
+control and wait for the exact Quick Chat session to settle. Desktop also covers
+detached background work. The palette cases prove exact session targeting with
+a running task beneath Quick Chat, and retain the existing phone palette entry.
 All mobile files run in `mobile-chrome`; other files run in `chromium`.
 Arm causal transport waits before actions and assert session outcomes afterward.
 
 ## Work orders
 
-- [ ] [Task 01: Restore shared cancellation availability](task-01-composer-availability.md)
-- [ ] [Task 02: Scope Quick Chat palette cancellation](task-02-quick-chat-palette.md)
+- [x] [Task 01: Restore shared cancellation availability](task-01-composer-availability.md) - complete
+- [x] [Task 02: Scope Quick Chat palette cancellation](task-02-quick-chat-palette.md) - complete
 
 Sequential execution; Task 02 depends on Task 01's eligibility wiring.
 
@@ -152,14 +159,45 @@ Sequential execution; Task 02 depends on Task 01's eligibility wiring.
 Planning validation on 2026-09-15:
 
 - `python3 scripts/list-docs.py validate`: passed (272 decisions, 937 specifications).
-- `python3 scripts/lint-spec-files.test.py`: passed (36 tests).
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - `git diff --check -- docs/specs docs/plans/cancel-turn-availability`: passed.
-- `git status --short -- docs/plans/cancel-turn-availability`: all three new
-  package files identified and included for commit.
 
-All work-order requirement IDs and design paths resolve. New production/test
-paths are explicitly marked new. Product tests have not run; implementation is pending.
+Implementation validation on 2026-09-15:
+
+- RED regressions were observed before the production changes: direct working
+  input produced `canCancelAgent=false`, the composer hook omitted `isWorking`,
+  the toolbar had no cancel accessible name, and the task command remained
+  registered while Quick Chat was open. The later review found that the
+  underlying-command claim had only been covered by a builder test; no RED
+  integration result is claimed for that earlier test.
+- Review remediation added a passthrough callback regression and an actual
+  registry integration matrix with both command sources mounted. It covers
+  active A-to-B switching, close/unmount restoration, setup/terminal/idle and
+  disconnected clarification suppression, backend-pending rejection, and
+  failed-request cleanup.
+- Focused frontend suite: 9 files, 128 tests passed.
+- `pnpm run build:vite`: passed. Existing Vite chunk-size and dynamic-import
+  warnings remain informational.
+- `pnpm run typecheck`: passed.
+- Targeted ESLint for all changed frontend and E2E files: passed.
+- Targeted E2E sleep lint for changed E2E files: passed.
+- `pnpm run i18n:check`: passed; the existing 200 orphan catalog warning remains.
+- Chromium cancellation, queue, steering, and cancellation-progress coverage:
+  28 tests passed.
+- Chromium Quick Chat composer and palette coverage: 3 tests passed, including
+  negotiated steering, detached background work, empty editor/queue evidence,
+  exact Quick Chat settle, and underlying-task preservation.
+- Mobile cancellation, reload progress, and Quick Chat composer/palette
+  coverage: 4 tests passed, including touch-only composer cancellation with a
+  44px control and exact Quick Chat settle.
+- `python3 scripts/list-docs.py validate`: passed (272 decisions, 937 specifications).
+- `python3 scripts/lint-spec-files.py --all`: passed.
+- `git diff --check`: passed.
+
+The repo-wide `pnpm run lint:e2e-sleeps` audit still reports unrelated baseline
+errors in other files, including missing rule definitions and existing
+unsanctioned sleeps. The changed E2E files pass the same configuration in the
+targeted check above.
 
 ## Risks
 
