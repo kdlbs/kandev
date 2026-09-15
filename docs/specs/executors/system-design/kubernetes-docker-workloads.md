@@ -103,6 +103,12 @@ the managed workspace at `/workspace`; only the agent receives runtime/auth
 mounts. Docker data uses its own `emptyDir` at `/var/lib/docker` with an explicit
 size budget, separate from the durable checkout.
 
+On cgroup v2, configure Docker's cgroupfs driver with a relative cgroup parent.
+This keeps nested scopes beneath the daemon container's cgroup on compatible
+runtimes instead of placing them in a host-root systemd slice. Treat measured
+ancestry and accounting as runtime acceptance evidence; configuration alone is
+not proof of containment.
+
 Docker bridges run inside an already reduced-MTU Pod network. Set their MTU no
 higher than the actual Pod interface MTU,
 and test HTTPS/large transfers from nested containers. Do not change Flannel or
@@ -111,8 +117,12 @@ the cluster API endpoint to fix a nested bridge problem.
 An administrator prepare script prefixes a bounded `docker info` wait before
 the existing Kubernetes preparation flow. Preserve clone/origin verification,
 repository setup, agent installation and Kandev's branch-selection postlude;
-do not use a wait-only replacement script. A startup probe or running main
-container is not a substitute for this preparation gate.
+do not use a wait-only replacement script. The backend uploads and executes the
+resolved script through the existing Pod exec channel within the setup budget,
+captures a bounded sanitized diagnostic, and creates the preparation marker
+only on success. It then signals the waiting managed entrypoint. A failed
+prepare command must return without releasing agentctl; a startup probe or a
+running main container is not a substitute for this preparation gate.
 
 Nested bind sources must exist in the daemon's mount namespace. `/workspace`
 is deliberately shared; arbitrary agent paths such as its private runtime home

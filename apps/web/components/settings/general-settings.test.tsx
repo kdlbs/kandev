@@ -397,3 +397,26 @@ describe("AppearanceSettings status bar preference", () => {
     verifyNewerSaveResponseWinsOverOlderLiveUpdate,
   );
 });
+
+it("validates hover drafts, preserves them after a failed save, and discards", async () => {
+  renderAppearance();
+  const delay = screen.getByRole("spinbutton", { name: "Hover delay (ms)" });
+  fireEvent.change(delay, { target: { value: "" } });
+  expect(
+    (screen.getByRole("button", { name: SAVE_CHANGES_LABEL }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  fireEvent.change(delay, { target: { value: "750" } });
+  apiMocks.updateUserSettings.mockRejectedValueOnce(new Error("Save failed"));
+  fireEvent.click(screen.getByRole("button", { name: SAVE_CHANGES_LABEL }));
+  await waitFor(() =>
+    expect(apiMocks.updateUserSettings).toHaveBeenCalledWith({ sidebar_hover_delay_ms: 750 }),
+  );
+  await waitFor(() =>
+    expect((screen.getByRole("button", { name: "Retry save" }) as HTMLButtonElement).disabled).toBe(
+      false,
+    ),
+  );
+  expect((delay as HTMLInputElement).value).toBe("750");
+  fireEvent.click(screen.getByRole("button", { name: "Reset" }));
+  expect((delay as HTMLInputElement).value).toBe("500");
+});

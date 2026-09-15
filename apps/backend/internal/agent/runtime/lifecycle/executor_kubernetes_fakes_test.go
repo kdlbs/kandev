@@ -351,9 +351,10 @@ type recordingKubernetesExec struct {
 	mu       sync.Mutex
 	requests []recordedKubernetesExec
 	err      error
+	execFunc func(context.Context, kubeexecutor.ExecRequest) error
 }
 
-func (r *recordingKubernetesExec) Exec(_ context.Context, request kubeexecutor.ExecRequest) error {
+func (r *recordingKubernetesExec) Exec(ctx context.Context, request kubeexecutor.ExecRequest) error {
 	var data []byte
 	if request.Stdin != nil {
 		var err error
@@ -363,8 +364,11 @@ func (r *recordingKubernetesExec) Exec(_ context.Context, request kubeexecutor.E
 		}
 	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.requests = append(r.requests, recordedKubernetesExec{request: request, stdin: data})
+	r.mu.Unlock()
+	if r.execFunc != nil {
+		return r.execFunc(ctx, request)
+	}
 	return r.err
 }
 

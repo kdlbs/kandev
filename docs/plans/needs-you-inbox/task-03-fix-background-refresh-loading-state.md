@@ -1,5 +1,5 @@
 ---
-id: "02-fix-background-refresh-loading-state"
+id: "03-fix-background-refresh-loading-state"
 title: "Fix Needs-you Inbox background-refresh loading state"
 status: done
 wave: 2
@@ -16,7 +16,7 @@ system_design:
   - ../../specs/ui/system-design/needs-you-inbox-02.md
 ---
 
-# Task 02: Fix background-refresh loading state
+# Task 03: Fix background-refresh loading state
 
 ## Summary
 

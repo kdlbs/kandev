@@ -47,6 +47,12 @@ const (
 const (
 	LaunchErrorPhaseBootstrap = "bootstrap"
 
+	// Error scopes identify the owner of a failure. Session failures belong in
+	// the session transcript; task failures belong to the task shell and remain
+	// visible while the task changes tabs or sessions.
+	ErrorScopeSession = "session"
+	ErrorScopeTask    = "task"
+
 	AgentErrorCauseOperationResume           = "resume"
 	AgentErrorCauseOperationRestoreWorkspace = "restore_workspace"
 
@@ -138,6 +144,8 @@ func isKnownAgentErrorCauseCode(code string) bool {
 type TaskLaunchError struct {
 	Message          string    `json:"message"`
 	OccurredAt       time.Time `json:"occurred_at"`
+	Scope            string    `json:"scope,omitempty"`
+	SessionID        string    `json:"session_id,omitempty"`
 	Code             string    `json:"code,omitempty"`
 	Details          string    `json:"details,omitempty"`
 	RecoveryActions  []string  `json:"recovery_actions,omitempty"`
@@ -210,6 +218,7 @@ func isKnownRecoveryAction(action string) bool {
 }
 
 func normalizeLastAgentError(value LastAgentError) LastAgentError {
+	value.Scope = normalizeErrorScope(value.Scope, ErrorScopeSession)
 	value.Message = truncateUTF8Bytes(value.Message, maxLaunchErrorMessageBytes)
 	value.Code = truncateUTF8Bytes(value.Code, maxLaunchErrorCategoryBytes)
 	value.RecoveryActions = NormalizeRecoveryActionsForCategory(value.Code, value.RecoveryActions)
@@ -233,13 +242,26 @@ func normalizeLastAgentError(value LastAgentError) LastAgentError {
 }
 
 func normalizeTaskLaunchError(value TaskLaunchError) TaskLaunchError {
+	value.Scope = normalizeErrorScope(value.Scope, ErrorScopeTask)
 	value.Message = truncateUTF8Bytes(value.Message, maxLaunchErrorMessageBytes)
 	value.Code = truncateUTF8Bytes(value.Code, maxLaunchErrorCategoryBytes)
+	value.SessionID = truncateUTF8Bytes(value.SessionID, maxLaunchErrorIDBytes)
 	value.RecoveryActions = NormalizeRecoveryActionsForCategory(value.Code, value.RecoveryActions)
 	value.TaskRepositoryID = truncateUTF8Bytes(value.TaskRepositoryID, maxTaskRepositoryIDBytes)
 	value.StampValue = boundedLaunchErrorStamp(value.StampValue)
 	value.Details = truncateUTF8Bytes(value.Details, maxLaunchErrorDetailsBytes)
 	return value
+}
+
+func normalizeErrorScope(value, fallback string) string {
+	switch strings.TrimSpace(value) {
+	case ErrorScopeSession:
+		return ErrorScopeSession
+	case ErrorScopeTask:
+		return ErrorScopeTask
+	default:
+		return fallback
+	}
 }
 
 // LoadTaskLaunchError reads and validates the task-owned launch error.

@@ -735,6 +735,7 @@ const SessionMetaKeyLastAgentError = "last_agent_error"
 type LastAgentError struct {
 	Message          string            `json:"message"`
 	OccurredAt       time.Time         `json:"occurred_at"`
+	Scope            string            `json:"scope,omitempty"`
 	AgentExecutionID string            `json:"agent_execution_id,omitempty"`
 	ExecutionID      string            `json:"execution_id,omitempty"`
 	Phase            string            `json:"phase,omitempty"`

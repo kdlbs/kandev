@@ -705,7 +705,11 @@
   "hidePreparationDetails": "Hide preparation details",
   "hidePreviousAgentError": "Hide previous agent error",
   "hideRightPanel": "Hide right panel",
+  "hideRightPane": "Hide right pane",
   "hideRightPanels": "Hide right panels",
+  "rightPaneUnavailable": "No separate right pane to hide",
+  "rightPaneUnavailableWhileMaximized": "Right pane is unavailable while a panel is maximized",
+  "rightPanelsUnavailableWhileMaximized": "Right panels are unavailable while a panel is maximized",
   "hideSidebar": "Hide sidebar",
   "hideTheCommentListTheComments": "Hide the comment list. The comments stay queued and will still be sent next time you submit (here or from the chat box).",
   "host": "Host",
@@ -1528,6 +1532,8 @@
   "showPreparationDetails": "Show preparation details",
   "showRawText": "Show raw text",
   "showRightPanel": "Show right panel",
+  "showRightPane": "Show right pane",
+  "showRightPanels": "Show right panels",
   "showSidebar": "Show sidebar",
   "sibling": "Sibling",
   "sidebarFilters": "Sidebar filters",
@@ -2174,5 +2180,7 @@
   "primarySessionChangedRetry": "The primary session changed. Try Run again.",
   "planCommentMigrationFailed": "Some saved plan comments could not be restored.",
   "planCommentMigrationNeedsPlan": "Create or restore a plan to recover saved comments.",
-  "planCommentMigrationPending": "Saved plan comments are still being restored. Your message is kept."
+  "planCommentMigrationPending": "Saved plan comments are still being restored. Your message is kept.",
+  "toolPayloadRemovedAt": "Tool details removed on {{date}}.",
+  "toolPayloadRemoved": "Tool details removed."
 }

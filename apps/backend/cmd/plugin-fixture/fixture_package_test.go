@@ -38,6 +38,8 @@ func TestFixtureManifest_ParsesAndValidates(t *testing.T) {
 	}
 	require.Equal(t, "workspace", actions[repositoryInspectActionKey].ResourceScope)
 	require.Equal(t, "workspace", actions[repositoryBranchesActionKey].ResourceScope)
+	require.Equal(t, "workspace", actions[utilityDefaultAction].ResourceScope)
+	require.Equal(t, "workspace", actions[utilityPreferenceAction].ResourceScope)
 	require.Equal(t, "task", actions["link-pull-request"].ResourceScope)
 	require.Len(t, m.ReferenceSources, 1)
 	require.Equal(t, "fixture-pull-requests", m.ReferenceSources[0].Source)

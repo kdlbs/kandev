@@ -1,3 +1,4 @@
+import { isToolPayloadRemovedError } from "@/lib/utils/tool-payload-retention";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchShellCommandOutput,
@@ -104,6 +105,13 @@ export function useShellCommandOutput({
       } catch (requestError) {
         if (operation.generation !== generation || controller.signal.aborted) return;
         operation.controller = null;
+        if (isToolPayloadRemovedError(requestError)) {
+          snapshotRef.current = null;
+          setSnapshot(null);
+          setError(requestError as Error);
+          setIsLoading(false);
+          return;
+        }
         failureCount += 1;
         setError(asError(requestError));
         setIsLoading(false);

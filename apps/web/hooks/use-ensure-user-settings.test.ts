@@ -112,6 +112,8 @@ function makeUnloadedSettings(): UserSettingsState {
     changesPanelLayout: "tree",
     lastSeenDisplay: "absolute",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
+    sidebarHoverEnabled: true,
+    sidebarHoverDelayMs: 500,
     appStatusBarEnabled: false,
     resolveSessionHostnames: false,
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
