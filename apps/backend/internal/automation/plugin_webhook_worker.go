@@ -25,7 +25,8 @@ func (s *Service) ProcessWebhookReceipts(ctx context.Context) error {
 		return nil
 	}
 	if err := s.cleanupWebhookSecrets(ctx); err != nil {
-		return err
+		webhookCounters.Add("cleanup_failures", 1)
+		s.logger.Warn("webhook secret cleanup failed", zap.Error(err))
 	}
 	receipts := []WebhookReceipt{}
 	if err := s.store.db.SelectContext(ctx, &receipts, s.store.db.Rebind(`SELECT * FROM automation_webhook_receipts WHERE state IN ('pending','dispatch') AND next_attempt_at <= ? ORDER BY next_attempt_at,created_at,id LIMIT 100`), time.Now().Unix()); err != nil {

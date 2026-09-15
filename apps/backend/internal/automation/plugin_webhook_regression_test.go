@@ -3,8 +3,10 @@ package automation
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/kandev/kandev/internal/plugins/manifest"
+	"github.com/kandev/kandev/internal/secrets"
 	"github.com/kandev/kandev/pkg/pluginsdk"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"github.com/stretchr/testify/require"
@@ -114,6 +116,84 @@ func TestPluginWebhookUnclaimedDispatchHasBoundedAttempts(t *testing.T) {
 	count, err := s.store.CountActiveRuns(ctx, b.AutomationID)
 	require.NoError(t, err)
 	require.Zero(t, count)
+}
+
+func TestPluginWebhookCleanupMissingSecretDoesNotBlockReceipts(t *testing.T) {
+	s, adapter, b, router := webhookTestSetup(t)
+	ctx := context.Background()
+	require.Equal(t, 202, sendPluginWebhook(router, b.ID, `{}`, "valid").Code)
+	_, err := s.store.db.Exec(`INSERT INTO automation_webhook_secret_cleanup (secret_id) VALUES (?)`, "automation-webhook:already-deleted")
+	require.NoError(t, err)
+	adapter.deleteErr = secrets.ErrNotFound
+
+	require.NoError(t, s.ProcessWebhookReceipts(ctx))
+	rows, err := s.store.webhookReceipts(ctx, b.AutomationID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "dispatch", rows[0].State)
+	var cleanupRows int
+	require.NoError(t, s.store.db.Get(&cleanupRows, `SELECT COUNT(*) FROM automation_webhook_secret_cleanup`))
+	require.Zero(t, cleanupRows)
+	require.Equal(t, 1, adapter.deleteCalls)
+}
+
+func TestPluginWebhookCleanupFailureDoesNotBlockReceipts(t *testing.T) {
+	s, adapter, b, router := webhookTestSetup(t)
+	ctx := context.Background()
+	require.Equal(t, 202, sendPluginWebhook(router, b.ID, `{}`, "valid").Code)
+	_, err := s.store.db.Exec(`INSERT INTO automation_webhook_secret_cleanup (secret_id) VALUES (?)`, "automation-webhook:retry-later")
+	require.NoError(t, err)
+	adapter.deleteErr = errors.New("vault unavailable")
+
+	require.NoError(t, s.ProcessWebhookReceipts(ctx))
+	rows, err := s.store.webhookReceipts(ctx, b.AutomationID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "dispatch", rows[0].State)
+	var cleanupRows int
+	require.NoError(t, s.store.db.Get(&cleanupRows, `SELECT COUNT(*) FROM automation_webhook_secret_cleanup`))
+	require.Equal(t, 1, cleanupRows)
+}
+
+func TestPluginWebhookManualRunDoesNotInvalidateBinding(t *testing.T) {
+	s, _, b, router := webhookTestSetup(t)
+	ctx := context.Background()
+	_, err := s.store.db.Exec(`UPDATE automations SET max_concurrent_runs=2 WHERE id=?`, b.AutomationID)
+	require.NoError(t, err)
+
+	result, err := s.FireTrigger(ctx, b.AutomationID, b.TriggerID, TriggerType("manual"), json.RawMessage(`{"source":"manual"}`), "")
+	require.NoError(t, err)
+	require.False(t, result.Skipped)
+	require.Equal(t, 202, sendPluginWebhook(router, b.ID, `{}`, "valid").Code)
+	require.NoError(t, s.ProcessWebhookReceipts(ctx))
+	rows, err := s.store.webhookReceipts(ctx, b.AutomationID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "dispatch", rows[0].State)
+}
+
+func TestPluginWebhookConcurrencySkipDoesNotInvalidateBinding(t *testing.T) {
+	s, _, b, router := webhookTestSetup(t)
+	ctx := context.Background()
+	active := &AutomationRun{
+		AutomationID: b.AutomationID,
+		TriggerID:    b.TriggerID,
+		TriggerType:  TriggerTypePluginEvent,
+		Status:       RunStatusTaskCreated,
+		DedupKey:     "active-run",
+		TriggerData:  json.RawMessage(`{}`),
+	}
+	require.NoError(t, s.store.CreateRun(ctx, active))
+
+	result, err := s.FireTrigger(ctx, b.AutomationID, b.TriggerID, TriggerType("manual"), json.RawMessage(`{"source":"manual"}`), "")
+	require.NoError(t, err)
+	require.True(t, result.Skipped)
+	require.Equal(t, 202, sendPluginWebhook(router, b.ID, `{}`, "valid").Code)
+	require.NoError(t, s.ProcessWebhookReceipts(ctx))
+	rows, err := s.store.webhookReceipts(ctx, b.AutomationID)
+	require.NoError(t, err)
+	require.Len(t, rows, 1)
+	require.Equal(t, "skipped", rows[0].State)
 }
 
 func TestPluginWebhookRejectsMixedSchedules(t *testing.T) {

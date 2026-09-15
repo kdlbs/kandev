@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+
+	"github.com/kandev/kandev/internal/secrets"
 )
 
 const pluginWebhookTablesSQL = `
@@ -59,13 +62,17 @@ func (s *Service) cleanupWebhookSecrets(ctx context.Context) error {
 	if err := s.store.db.SelectContext(ctx, &ids, `SELECT secret_id FROM automation_webhook_secret_cleanup WHERE secret_id NOT IN (SELECT secret_id FROM automation_webhook_bindings) LIMIT 100`); err != nil {
 		return err
 	}
+	var cleanupErr error
 	for _, id := range ids {
 		if err := s.pluginAutomation.DeleteAutomationSecret(ctx, id); err != nil {
-			return err
+			if !errors.Is(err, secrets.ErrNotFound) {
+				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("delete webhook secret %q: %w", id, err))
+				continue
+			}
 		}
 		if _, err := s.store.db.ExecContext(ctx, s.store.db.Rebind(`DELETE FROM automation_webhook_secret_cleanup WHERE secret_id=?`), id); err != nil {
-			return err
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("delete webhook secret cleanup row %q: %w", id, err))
 		}
 	}
-	return nil
+	return cleanupErr
 }

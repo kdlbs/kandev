@@ -1090,11 +1090,13 @@ func (s *Store) DeleteTrigger(ctx context.Context, id string) error {
 	return err
 }
 
-// UpdateTriggerEvaluatedAt sets the last_evaluated_at timestamp.
+// UpdateTriggerEvaluatedAt sets the evaluation timestamp without changing the
+// configuration timestamp. UpdatedAt is a lifecycle fence for bindings and
+// must move only when trigger configuration changes.
 func (s *Store) UpdateTriggerEvaluatedAt(ctx context.Context, id string, t time.Time) error {
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(
-		`UPDATE automation_triggers SET last_evaluated_at = ?, updated_at = ? WHERE id = ?`),
-		t, time.Now().UTC(), id)
+		`UPDATE automation_triggers SET last_evaluated_at = ? WHERE id = ?`),
+		t, id)
 	return err
 }
 

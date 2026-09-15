@@ -19,11 +19,13 @@ import (
 )
 
 type testAutomationAdapter struct {
-	onVerify   func()
-	secret     string
-	generation string
-	connection string
-	seen       *pluginsdk.AutomationWebhookRequest
+	onVerify    func()
+	secret      string
+	deleteErr   error
+	deleteCalls int
+	generation  string
+	connection  string
+	seen        *pluginsdk.AutomationWebhookRequest
 }
 
 func (a *testAutomationAdapter) AutomationConditions(context.Context, string) []PluginConditionInfo {
@@ -39,7 +41,10 @@ func (a *testAutomationAdapter) SetAutomationSecret(_ context.Context, _, value 
 func (a *testAutomationAdapter) ReadAutomationSecret(context.Context, string) (string, error) {
 	return a.secret, nil
 }
-func (a *testAutomationAdapter) DeleteAutomationSecret(context.Context, string) error { return nil }
+func (a *testAutomationAdapter) DeleteAutomationSecret(context.Context, string) error {
+	a.deleteCalls++
+	return a.deleteErr
+}
 func (a *testAutomationAdapter) DescribeAutomationCondition(context.Context, *pluginsdk.AutomationConditionRequest) (*pluginsdk.AutomationConditionResponse, error) {
 	return &pluginsdk.AutomationConditionResponse{Available: true, ConnectionId: "connection", ConnectionRevision: a.connection}, nil
 }
