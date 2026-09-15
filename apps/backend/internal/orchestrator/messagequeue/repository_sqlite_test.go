@@ -1123,7 +1123,7 @@ func TestSQLiteRepository_SetPendingMoveRotatesRowIdentity(t *testing.T) {
 	}
 }
 
-// @covers AC-TASKS-PENDING-MOVE-CANCELLATION-001.7
+// @covers AC-TASKS-PENDING-MOVE-CANCELLATION-001.6
 func TestSQLiteRepository_SnapshotRestorePreservesPendingMoveIdentity(t *testing.T) {
 	repo := newTestSQLiteRepo(t)
 	ctx := context.Background()

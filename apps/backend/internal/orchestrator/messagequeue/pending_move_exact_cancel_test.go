@@ -218,7 +218,7 @@ func TestSQLiteRepository_ExactCancelPendingMove(t *testing.T) {
 	}
 }
 
-// @covers AC-TASKS-PENDING-MOVE-CANCELLATION-001.7
+// @covers AC-TASKS-PENDING-MOVE-CANCELLATION-001.6
 func TestSQLiteRepository_ExactCancelPendingMoveFencesSnapshotRestore(t *testing.T) {
 	fixture := newExactCancelFixture(t)
 	ctx := context.Background()
