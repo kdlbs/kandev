@@ -186,7 +186,15 @@ func (s *Service) selectConfigureSessionRule(
 	rules []wfmodels.ConfigureSessionRule,
 	agentName string,
 ) configureSessionRuleSelection {
-	sessionFamily, sessionAmbiguous := s.resolveSessionAgentFamily(agentName)
+	return selectConfigureSessionRuleWithResolver(rules, agentName, s.agentFamilyResolver)
+}
+
+func selectConfigureSessionRuleWithResolver(
+	rules []wfmodels.ConfigureSessionRule,
+	agentName string,
+	resolver AgentFamilyResolver,
+) configureSessionRuleSelection {
+	sessionFamily, sessionAmbiguous := resolveSessionAgentFamilyWithResolver(agentName, resolver)
 	if sessionAmbiguous {
 		return configureSessionRuleSelection{warning: ambiguousAgentFamilyWarning(agentName)}
 	}
@@ -194,7 +202,7 @@ func (s *Service) selectConfigureSessionRule(
 	matched := make([]*wfmodels.ConfigureSessionRule, 0, 1)
 	anyKnownFamily := false
 	for index := range rules {
-		switch s.classifyRuleAgentFamily(rules[index].AgentName, sessionFamily) {
+		switch classifyRuleAgentFamilyWithResolver(rules[index].AgentName, sessionFamily, resolver) {
 		case ruleGovernsSession:
 			anyKnownFamily = true
 			matched = append(matched, &rules[index])
@@ -257,11 +265,15 @@ func conflictingRulesWarning(count int, family string) string {
 // returned so rule matching degrades to the exact comparison this used to
 // perform.
 func (s *Service) resolveSessionAgentFamily(name string) (string, bool) {
+	return resolveSessionAgentFamilyWithResolver(name, s.agentFamilyResolver)
+}
+
+func resolveSessionAgentFamilyWithResolver(name string, resolver AgentFamilyResolver) (string, bool) {
 	trimmed := strings.TrimSpace(name)
-	if s.agentFamilyResolver == nil {
+	if resolver == nil {
 		return trimmed, false
 	}
-	switch candidates := s.agentFamilyResolver.ResolveFamilyIDs(trimmed); len(candidates) {
+	switch candidates := resolver.ResolveFamilyIDs(trimmed); len(candidates) {
 	case 0:
 		return trimmed, false
 	case 1:
@@ -276,14 +288,21 @@ func (s *Service) resolveSessionAgentFamily(name string) (string, bool) {
 // exact comparison, so it can still match an equally unrecognized session family
 // the way it did before resolution existed.
 func (s *Service) classifyRuleAgentFamily(ruleAgentName, sessionFamily string) ruleAgentFamilyVerdict {
+	return classifyRuleAgentFamilyWithResolver(ruleAgentName, sessionFamily, s.agentFamilyResolver)
+}
+
+func classifyRuleAgentFamilyWithResolver(
+	ruleAgentName, sessionFamily string,
+	resolver AgentFamilyResolver,
+) ruleAgentFamilyVerdict {
 	trimmed := strings.TrimSpace(ruleAgentName)
-	if s.agentFamilyResolver == nil {
+	if resolver == nil {
 		// Nothing is knowable about an agent family without a resolver, so a
 		// reference that does not match verbatim is treated as naming some other
 		// agent rather than reported to the user as a workflow typo.
 		return verbatimRuleVerdict(trimmed, sessionFamily)
 	}
-	candidates := s.agentFamilyResolver.ResolveFamilyIDs(trimmed)
+	candidates := resolver.ResolveFamilyIDs(trimmed)
 	switch {
 	case len(candidates) == 0:
 		if trimmed == sessionFamily {

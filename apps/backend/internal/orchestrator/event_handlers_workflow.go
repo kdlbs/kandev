@@ -1957,7 +1957,7 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 	if s.launchDeferredTask(ctx, task, eventName, restoreQueuePromotion, autoStartOnCreateClaimed) {
 		return
 	}
-	if step == nil || !step.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent) {
+	if !workflowmove.ShouldAutoStartAgent(step, nil) {
 		s.logger.Debug(eventName+": target step has no auto-start",
 			zap.String("task_id", task.ID),
 			zap.String("to_step_id", step.ID))
@@ -1986,7 +1986,7 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 	if moveOptions != nil {
 		s.clearWorkflowMovePending(ctx, task.ID)
 	}
-	if moveOptions != nil && moveOptions.SkipStepPrompt && moveOptions.Instructions == "" {
+	if !workflowmove.ShouldAutoStartAgent(step, moveOptions) {
 		// skip_step_prompt with no instructions suppresses the turn entirely.
 		// For a task with no session that means preparing nothing: leave it idle
 		// exactly as a step without auto_start_agent would, so the user starts
@@ -3120,25 +3120,7 @@ func (s *Service) findReusableSessionForProfile(ctx context.Context, taskID, pro
 	if err != nil {
 		return nil, err
 	}
-	var best *models.TaskSession
-	for _, sess := range sessions {
-		if sess.ID == excludeSessionID {
-			continue
-		}
-		if sess.AgentProfileID != profileID {
-			continue
-		}
-		if models.IsCompletionFollowUpSession(sess.Metadata) {
-			continue
-		}
-		if isTerminalSessionState(sess.State) {
-			continue
-		}
-		if best == nil || sess.UpdatedAt.After(best.UpdatedAt) {
-			best = sess
-		}
-	}
-	return best, nil
+	return selectReusableWorkflowSession(sessions, profileID, excludeSessionID), nil
 }
 
 // transferQueuedSessionState keeps queue rows and their claimed attachment
