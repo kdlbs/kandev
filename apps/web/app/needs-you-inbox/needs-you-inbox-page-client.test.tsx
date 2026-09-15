@@ -18,13 +18,14 @@ let state: {
   appliedGeneration?: number;
   lastAppliedOk?: boolean;
 };
+let workspacesActiveId: string | null;
 
 vi.mock("@/components/state-provider", () => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   useAppStore: (selector: (s: any) => unknown) =>
     selector({
       needsYouInbox: { byWorkspaceId: { w1: state } },
-      workspaces: { activeId: "w1" },
+      workspaces: { activeId: workspacesActiveId },
       bumpNeedsYouInboxRefreshTick: mocks.bumpRefreshTick,
     }),
 }));
@@ -85,6 +86,7 @@ function bundle(id: string): ClarificationInboxBundle {
 beforeEach(() => {
   mocks.bumpRefreshTick.mockReset();
   state = { status: "idle", bundles: [], hiddenCount: 0, hasMore: false };
+  workspacesActiveId = "w1";
 });
 
 afterEach(() => cleanup());
@@ -238,5 +240,25 @@ describe("NeedsYouInboxPageClient loading vs. settled/refresh states", () => {
     expect(screen.getByRole("status")).not.toBeNull();
     expect(screen.queryByTestId(EMPTY_TESTID)).toBeNull();
     expect(screen.queryByTestId(ERROR_TESTID)).toBeNull();
+  });
+
+  // R3-F1: with no active workspace the controller never issues a read (every
+  // trigger is guarded on `workspaceId`), so `lastAppliedOk` can never flip
+  // and the pre-read "idle"/`!lastAppliedOk` spinner would otherwise never
+  // resolve. This must render the empty state, not a permanent spinner.
+  it("renders the empty state, not a permanent spinner, when no active workspace resolves", () => {
+    workspacesActiveId = null;
+    state = {
+      status: "idle",
+      bundles: [],
+      hiddenCount: 0,
+      hasMore: false,
+      appliedGeneration: 0,
+      lastAppliedOk: false,
+    };
+    render(<NeedsYouInboxPageClient />);
+
+    expect(screen.getByTestId(EMPTY_TESTID)).not.toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
   });
 });

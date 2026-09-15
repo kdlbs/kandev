@@ -24,14 +24,22 @@ type ViewMode = "error" | "loading" | "empty" | "list";
 // refresh that follows success from one that follows a failure:
 // `beginNeedsYouInboxRead` overwrites `status` to "loading" without touching
 // what preceded it, so both refresh cases reach here as the identical tuple
-// of the other four arguments. `lastAppliedOk` (whether the last applied
-// response was a successful page, set by `setNeedsYouInboxPage` and cleared
-// by `setNeedsYouInboxError`) is what actually distinguishes them, and gates
-// the spinner: it stays up for the very first read, for "idle" (boot-seeded
-// but not yet read), and for a refresh following a failure, so a failed read
-// never reads as a false all-clear while its retry is in flight; it steps
-// aside for a refresh over an already-settled (possibly empty) inbox, which
-// keeps its settled view instead of reverting to a spinner.
+// of the other two state arguments (`bundleCount`, `hasMore`). `lastAppliedOk`
+// (whether the last applied response was a successful page, set by
+// `setNeedsYouInboxPage` and cleared by `setNeedsYouInboxError`) is what
+// actually distinguishes them, and gates the spinner: it stays up for the
+// very first read, for "idle" (boot-seeded but not yet read), and for a
+// refresh following a failure, so a failed read never reads as a false
+// all-clear while its retry is in flight; it steps aside for a refresh over
+// an already-settled (possibly empty) inbox, which keeps its settled view
+// instead of reverting to a spinner.
+//
+// `hasActiveWorkspace` short-circuits all of the above: with no active
+// workspace, every read trigger in the controller is guarded on
+// `workspaceId` and none ever fires, so `lastAppliedOk` can never flip and
+// the spinner would otherwise hang forever with no retry affordance. That
+// case resolves to "empty" instead, which the empty state already renders
+// correctly (its own workspace-name lookup falls back to unnamed copy).
 //
 // A page reporting truncation while listing zero rows means enrichment
 // emptied a page the query had filled, so this resolves to the retryable
@@ -43,7 +51,9 @@ function resolveViewMode(
   bundleCount: number,
   hasMore: boolean,
   lastAppliedOk: boolean,
+  hasActiveWorkspace: boolean,
 ): ViewMode {
+  if (!hasActiveWorkspace) return "empty";
   if ((status === "loading" || status === "idle") && !lastAppliedOk) {
     return "loading";
   }
@@ -96,10 +106,17 @@ export function NeedsYouInboxPageClient() {
   const listRevision = useAppStore(selectNeedsYouInboxRevision);
   const hasMore = useAppStore(selectNeedsYouInboxHasMore);
   const lastAppliedOk = useAppStore(selectNeedsYouInboxLastAppliedOk);
+  const hasActiveWorkspace = useAppStore((s) => s.workspaces.activeId !== null);
   const bumpRefreshTick = useAppStore((s) => s.bumpNeedsYouInboxRefreshTick);
   const retry = useCallback(() => bumpRefreshTick(), [bumpRefreshTick]);
 
-  const viewMode = resolveViewMode(status, bundles.length, hasMore, lastAppliedOk);
+  const viewMode = resolveViewMode(
+    status,
+    bundles.length,
+    hasMore,
+    lastAppliedOk,
+    hasActiveWorkspace,
+  );
 
   return (
     <PageShell title={t("sidebar:inbox")} contentClassName="space-y-4 p-6">

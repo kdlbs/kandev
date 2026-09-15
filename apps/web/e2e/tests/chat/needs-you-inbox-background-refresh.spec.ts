@@ -1,9 +1,9 @@
 // AC-UI-NEEDS-YOU-INBOX-001: a workspace-wide session event must not flash
 // the first-load "Loading…" state over an already-settled (here: empty)
-// Inbox. Regression coverage for the `appliedGeneration`-gated view mode in
+// Inbox. Regression coverage for the `lastAppliedOk`-gated view mode in
 // needs-you-inbox-page-client.tsx.
 import { test, expect } from "../../fixtures/test-base";
-import { watchWs } from "../../helpers/causal-waits";
+import { watchWs, waitForHttp } from "../../helpers/causal-waits";
 
 test.describe("Needs-you Inbox background refresh", () => {
   test("keeps the settled empty state during a WS-triggered background refresh", async ({
@@ -17,9 +17,11 @@ test.describe("Needs-you Inbox background refresh", () => {
     // sockets opened after this call (see causal-waits.ts).
     const wsWatcher = watchWs(testPage);
 
+    const initialInboxLoaded = waitForHttp(testPage, "GET", /\/api\/v1\/clarification-inbox$/);
     await testPage.goto("/needs-you-inbox");
+    await initialInboxLoaded;
     const emptyState = testPage.getByTestId("needs-you-inbox-empty");
-    await expect(emptyState).toBeVisible({ timeout: 30_000 });
+    await expect(emptyState).toBeVisible();
     const loadingText = testPage.getByText("Loading…", { exact: true });
     await expect(loadingText).toHaveCount(0);
 
@@ -68,9 +70,11 @@ test.describe("Needs-you Inbox background refresh", () => {
     await expect(emptyState).toBeVisible();
     await expect(loadingText).toHaveCount(0);
 
+    const backgroundReadResolved = waitForHttp(testPage, "GET", /\/api\/v1\/clarification-inbox$/);
     resolveReleaseAll?.();
+    await backgroundReadResolved;
     // Still empty once the background reads actually resolve: the new task
     // never produced a clarification, so nothing should have changed.
-    await expect(emptyState).toBeVisible({ timeout: 15_000 });
+    await expect(emptyState).toBeVisible();
   });
 });
