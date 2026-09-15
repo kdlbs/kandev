@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -338,6 +339,22 @@ func TestValidateHandoffShape(t *testing.T) {
 			wantErr: "external_id must not be blank when supplied",
 		},
 		{
+			name: "external_id with a raw control character is rejected, not silently trimmed",
+			mutate: func(r *HandoffRequest) {
+				v := "key\n"
+				r.ExternalID = &v
+			},
+			wantErr: "external_id is invalid: invalid external_id: control characters are not allowed",
+		},
+		{
+			name: "oversized external_id is rejected",
+			mutate: func(r *HandoffRequest) {
+				v := strings.Repeat("a", service.ExternalIDMaxBytes+1)
+				r.ExternalID = &v
+			},
+			wantErr: fmt.Sprintf("external_id is invalid: invalid external_id: must be %d UTF-8 bytes or fewer", service.ExternalIDMaxBytes),
+		},
+		{
 			name:    "fully valid request",
 			mutate:  func(_ *HandoffRequest) {},
 			wantErr: "",
@@ -481,6 +498,12 @@ func TestActionsHandoff_SettlementFailureReturnsParseableSuffix(t *testing.T) {
 	if !strings.HasSuffix(err.Error(), wantSuffix) {
 		t.Errorf("error = %q, want it to end with %q", err.Error(), wantSuffix)
 	}
+	if strings.Contains(err.Error(), "db unavailable") {
+		t.Errorf("error = %q, must not echo the raw settlement cause beyond the delivery task id (spec's settlement-500 carve-out)", err.Error())
+	}
+	if unwrapped := settlement.Unwrap(); unwrapped == nil || unwrapped.Error() != "db unavailable" {
+		t.Errorf("Unwrap() = %v, want the raw settlement cause to remain reachable for logging", unwrapped)
+	}
 	if reverseLinks.raw != "" {
 		t.Error("reverse link was written despite settlement failure")
 	}
@@ -489,6 +512,29 @@ func TestActionsHandoff_SettlementFailureReturnsParseableSuffix(t *testing.T) {
 	}
 	if len(activity.calls) != 0 {
 		t.Error("activity was logged despite settlement failure")
+	}
+}
+
+// TestActionsHandoff_CreateTaskExternalIDInvalidSurfacesAs400 is defense in
+// depth for validateHandoffShape's own external_id check: even if CreateTask
+// itself rejects the (already-normalized) external_id via
+// service.ErrExternalIDInvalid, the handoff action must translate that into
+// a *HandoffValidationError (400), not fall through to the generic 500 path.
+func TestActionsHandoff_CreateTaskExternalIDInvalidSurfacesAs400(t *testing.T) {
+	deps, tasks, _, _, _ := baseHandoffDeps()
+	tasks.createErr = fmt.Errorf("%w: must be %d UTF-8 bytes or fewer", service.ErrExternalIDInvalid, service.ExternalIDMaxBytes)
+	req := baseHandoffRequest()
+	externalID := "ext-1"
+	req.ExternalID = &externalID
+	actions := NewActions(ActionDependencies{Handoff: deps})
+
+	_, err := actions.Handoff(context.Background(), baseHandoffRunContext(), req)
+	var validation *HandoffValidationError
+	if !errors.As(err, &validation) {
+		t.Fatalf("error = %v, want *HandoffValidationError", err)
+	}
+	if !strings.Contains(validation.Error(), "external_id is invalid") {
+		t.Errorf("error = %q, want it to name external_id as invalid", validation.Error())
 	}
 }
 
@@ -819,5 +865,8 @@ func TestHandoffHandler_SettlementFailureRespondsWithParseableTaskIDSuffix(t *te
 	wantSuffix := handoffSettlementTaskIDSuffix + "delivery-task-1"
 	if !strings.HasSuffix(body.Error, wantSuffix) {
 		t.Errorf("error = %q, want it to end with the parseable suffix %q", body.Error, wantSuffix)
+	}
+	if strings.Contains(body.Error, "db unavailable") {
+		t.Errorf("error = %q, must not leak the raw settlement cause to the HTTP caller", body.Error)
 	}
 }

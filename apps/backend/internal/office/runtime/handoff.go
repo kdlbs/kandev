@@ -62,15 +62,19 @@ const handoffSettlementTaskIDSuffix = "; task_id="
 // external_id could not be settled (AC-24d/F53). The route maps this to HTTP
 // 500 with the delivery task id carried in the error body as a stable
 // suffix (handoffSettlementTaskIDSuffix + TaskID), since the task was NOT
-// rolled back and the caller needs its id to recover manually.
+// rolled back and the caller needs its id to recover manually. Error()
+// deliberately omits cause: the spec's settlement-500 carve-out authorizes
+// naming only the delivery task's id beyond the fixed generic message, not
+// echoing the underlying driver/service error text. cause remains available
+// via Unwrap() for server-side logging.
 type HandoffSettlementError struct {
 	TaskID string
 	cause  error
 }
 
 func (e *HandoffSettlementError) Error() string {
-	return fmt.Sprintf("delivery task was created but could not settle its external_id: %v%s%s",
-		e.cause, handoffSettlementTaskIDSuffix, e.TaskID)
+	return fmt.Sprintf("delivery task was created but could not settle its external_id%s%s",
+		handoffSettlementTaskIDSuffix, e.TaskID)
 }
 
 func (e *HandoffSettlementError) Unwrap() error { return e.cause }
@@ -282,11 +286,14 @@ func validateHandoffShape(req HandoffRequest) (HandoffRequest, *HandoffValidatio
 		out.BaseBranch = &v
 	}
 	if req.ExternalID != nil {
-		v := strings.TrimSpace(*req.ExternalID)
-		if v == "" {
+		normalized, normErr := service.NormalizeExternalID(*req.ExternalID)
+		if normErr != nil {
+			return out, newHandoffValidationError("external_id is invalid: %v", normErr)
+		}
+		if normalized == "" {
 			return out, newHandoffValidationError("external_id must not be blank when supplied")
 		}
-		out.ExternalID = &v
+		out.ExternalID = &normalized
 	}
 	return out, nil
 }
@@ -531,6 +538,9 @@ func (a *Actions) executeHandoff(
 		ExternalID:             externalID,
 	})
 	if err != nil {
+		if errors.Is(err, service.ErrExternalIDInvalid) {
+			return nil, newHandoffValidationError("external_id is invalid: %v", err)
+		}
 		return nil, fmt.Errorf("failed to create delivery task: %w", err)
 	}
 

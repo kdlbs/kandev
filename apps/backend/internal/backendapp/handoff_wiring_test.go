@@ -12,6 +12,9 @@ import (
 	dynamicruntime "github.com/kandev/kandev/internal/agent/runtime/dynamic"
 	agentsettingsmodels "github.com/kandev/kandev/internal/agent/settings/models"
 	agentsettingsstore "github.com/kandev/kandev/internal/agent/settings/store"
+	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/common/logger"
+	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	officeruntime "github.com/kandev/kandev/internal/office/runtime"
 	"github.com/kandev/kandev/internal/orchestrator"
 	taskmodels "github.com/kandev/kandev/internal/task/models"
@@ -153,5 +156,78 @@ func TestHandoffLaunchAdapter_ControlWithoutProfileExplicitFailsOnStalePin(t *te
 	})
 	if err == nil {
 		t.Fatal("LaunchSession() error = nil, want the preflight to reject the step's stale pinned profile")
+	}
+}
+
+// fakeHandoffTaskOwnerLookup and fakeHandoffIdentityLookup are minimal fakes
+// for mcpscope.TaskOwnerLookup / mcpscope.IdentityLookup, mirroring the ones
+// internal/mcp/scope's own tests use, so handoffScopeAdapter can be wired
+// against a real *mcpscope.Resolver without standing up an *auth.Service.
+type fakeHandoffTaskOwnerLookup struct {
+	tasks      map[string]*taskmodels.Task
+	workspaces map[string]*taskmodels.Workspace
+}
+
+func (f *fakeHandoffTaskOwnerLookup) GetTask(_ context.Context, id string) (*taskmodels.Task, error) {
+	return f.tasks[id], nil
+}
+
+func (f *fakeHandoffTaskOwnerLookup) GetWorkspace(_ context.Context, id string) (*taskmodels.Workspace, error) {
+	return f.workspaces[id], nil
+}
+
+type fakeHandoffIdentityLookup map[string]authn.Identity
+
+func (f fakeHandoffIdentityLookup) IdentityForUser(_ context.Context, userID string) (authn.Identity, bool) {
+	identity, ok := f[userID]
+	return identity, ok
+}
+
+func testHandoffLogger(t *testing.T) *logger.Logger {
+	t.Helper()
+	log, err := logger.NewLogger(logger.LoggingConfig{Level: "error", Format: "json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return log
+}
+
+// TestHandoffScopeAdapter_OverridesPreExistingRequestIdentity is Review round
+// 4's codex-found identity-precedence defect (handoff_wiring.go, scope.go):
+// the handoff route is authenticated by its own runtime JWT, so its
+// target-workspace authorization must always be decided against the source
+// task's owner — even when the request context already carries a different
+// identity (e.g. a session cookie or PAT belonging to whichever user happens
+// to be logged into the agent's browser, which the global auth middleware
+// resolves and attaches before the office-route JWT deferral path is ever
+// reached). This proves buildHandoffDependencies' Workspaces scoper actually
+// overrides that pre-existing identity rather than deferring to it, the way
+// the withdrawn direct-*mcpscope.Resolver wiring did.
+func TestHandoffScopeAdapter_OverridesPreExistingRequestIdentity(t *testing.T) {
+	lookup := &fakeHandoffTaskOwnerLookup{
+		tasks:      map[string]*taskmodels.Task{"source-task": {ID: "source-task", WorkspaceID: "ws-source"}},
+		workspaces: map[string]*taskmodels.Workspace{"ws-source": {ID: "ws-source", OwnerID: "task-owner"}},
+	}
+	identities := fakeHandoffIdentityLookup{"task-owner": {UserID: "task-owner", Role: authn.RoleAdmin}}
+	resolver := mcpscope.NewResolver(lookup, identities, func() bool { return true }, testHandoffLogger(t))
+	adapter := handoffScopeAdapter{resolver: resolver}
+
+	// Simulate the global auth middleware having already attached a
+	// different, unrelated caller's identity to the request context ahead of
+	// dispatch (a session cookie or PAT belonging to some other logged-in
+	// user), exactly as codex's finding describes.
+	preExisting := authn.Identity{UserID: "cookie-user", Role: authn.RoleMember, TokenID: "pat-unrelated"}
+	ctx, err := adapter.Scope(authn.WithIdentity(context.Background(), preExisting), "source-task")
+	if err != nil {
+		t.Fatalf("Scope() error = %v, want nil", err)
+	}
+
+	got, ok := authn.IdentityFromContext(ctx)
+	if !ok {
+		t.Fatal("expected an identity on the scoped context")
+	}
+	if got.UserID != "task-owner" {
+		t.Errorf("UserID = %q, want the source task's owner %q, not the pre-existing caller %q",
+			got.UserID, "task-owner", preExisting.UserID)
 	}
 }

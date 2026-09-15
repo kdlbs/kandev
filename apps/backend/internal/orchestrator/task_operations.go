@@ -1439,18 +1439,28 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	var explicitStartRoute *models.WorkflowSessionRoute
 	var selectedExplicitSession *models.TaskSession
 	var explicitProfileID string
-	selectedExplicitSession, explicitProfileID, explicitStartRoute, err = s.prepareExplicitWorkflowStartRoute(
-		ctx,
-		task.ID,
-		workflowSessionConfigStepID,
-		opts.WorkflowEntryID,
-	)
-	if err != nil {
-		return nil, err
-	}
-	if explicitStartRoute != nil && explicitProfileID != "" {
-		agentProfileID = explicitProfileID
-		overrideApplied = agentProfileID != callerProfileID
+	// opts.ProfileExplicit means the caller's agent_profile_id must be used
+	// exactly as supplied, with no inheritance or defaulting from the
+	// destination workflow step (AC-PROFILES-001.4/D14a). SessionTarget
+	// routing is itself a form of that defaulting — it can resolve to a
+	// different profile (and reuse a different session) than the one the
+	// caller asked for — so it must not even be consulted here, not merely
+	// have its result discarded, or a step-targeted session/executor could
+	// still be picked underneath the overwritten profile.
+	if !opts.ProfileExplicit {
+		selectedExplicitSession, explicitProfileID, explicitStartRoute, err = s.prepareExplicitWorkflowStartRoute(
+			ctx,
+			task.ID,
+			workflowSessionConfigStepID,
+			opts.WorkflowEntryID,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if explicitStartRoute != nil && explicitProfileID != "" {
+			agentProfileID = explicitProfileID
+			overrideApplied = agentProfileID != callerProfileID
+		}
 	}
 
 	// Use provided prompt, fall back to task description

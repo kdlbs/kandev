@@ -41,6 +41,26 @@ func (a handoffLaunchAdapter) LaunchSession(ctx context.Context, req officerunti
 	return err
 }
 
+// handoffScopeAdapter narrows *mcpscope.Resolver to the
+// officeruntime.HandoffWorkspaceScoper seam via ScopeOverridingIdentity
+// rather than Scope. The handoff HTTP route is authenticated by its own
+// runtime JWT (Handler.contextFromRequest in internal/office/runtime), so
+// its authorization must always be decided against the source task's owner —
+// never deferred to a different identity the global auth middleware may
+// separately have attached to the same request context (a session cookie or
+// PAT belonging to whichever user happens to be logged into the same
+// browser, checked ahead of the office-route JWT deferral path). Scope's
+// "preserve an existing identity" rule is correct only for in-session MCP
+// dispatch, which has no credential of its own; reusing it here was Review
+// round 4's codex-found identity-precedence defect.
+type handoffScopeAdapter struct {
+	resolver *mcpscope.Resolver
+}
+
+func (a handoffScopeAdapter) Scope(ctx context.Context, taskID string) (context.Context, error) {
+	return a.resolver.ScopeOverridingIdentity(ctx, taskID)
+}
+
 // buildHandoffDependencies wires the concrete backend services that satisfy
 // the officeruntime.HandoffDependencies seam for the cross-workspace handoff
 // runtime action. It builds its own *mcpscope.Resolver (rather than reusing
@@ -66,7 +86,7 @@ func buildHandoffDependencies(
 	)
 
 	var deps officeruntime.HandoffDependencies
-	deps.Workspaces = scopeResolver
+	deps.Workspaces = handoffScopeAdapter{resolver: scopeResolver}
 	deps.Tasks = taskSvc
 	deps.Workflows = workflowCtrl
 	deps.AgentProfiles = agentSettingsCtrl

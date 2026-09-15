@@ -433,6 +433,7 @@ func (h *Handler) respondHandoffError(c *gin.Context, runCtx RunContext, err err
 			zap.String("run_id", runCtx.RunID),
 			zap.String("agent_id", runCtx.AgentID),
 			zap.Error(err),
+			zap.NamedError("cause", settlement.Unwrap()),
 		)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
