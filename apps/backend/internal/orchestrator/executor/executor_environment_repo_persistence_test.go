@@ -2,7 +2,9 @@ package executor
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -80,5 +82,79 @@ func TestPersistTaskEnvironmentRepos_ReplacesAndDeletesOmittedRows(t *testing.T)
 	}
 	if removed == nil || removed.Status != taskEnvironmentRepoStatusDeleted || removed.DeletedAt == nil {
 		t.Fatalf("removed row = %#v, want deleted tombstone", removed)
+	}
+}
+
+func TestPersistTaskEnvironmentReposForTransitionClearsCompactionMetadataOnReplacement(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	const envID = "env-transition-replace-compacted"
+	compactedAt := time.Now().UTC().Add(-time.Hour)
+	repo.taskEnvironmentRepos[envID] = []*models.TaskEnvironmentRepo{
+		{
+			ID: "replace", TaskEnvironmentID: envID, RepositoryID: "repo-1", BranchSlug: "main",
+			WorktreeID: "wt-old", WorktreeBranch: "feature/old", WorktreeBranchOwner: "kandev",
+			WorktreeIntegrationRef: "main", WorktreeRecoveryHeadSHA: strings.Repeat("a", 40),
+			WorktreeBranchCompactedAt: &compactedAt, Status: taskEnvironmentRepoStatusDeleted, DeletedAt: &compactedAt,
+		},
+	}
+
+	if err := exec.persistTaskEnvironmentReposForTransition(context.Background(), envID, []*models.TaskEnvironmentRepo{
+		{
+			RepositoryID: "repo-1", BranchSlug: "main", WorktreeID: "wt-new",
+			WorktreePath: "/new", WorktreeBranch: "feature/new",
+			WorktreeBranchOwner: "kandev", WorktreeIntegrationRef: "main",
+		},
+	}, true); err != nil {
+		t.Fatalf("persistTaskEnvironmentReposForTransition: %v", err)
+	}
+
+	row := repo.taskEnvironmentRepos[envID][0]
+	if row.Status != taskEnvironmentRepoStatusActive || row.DeletedAt != nil || row.WorktreeID != "wt-new" {
+		t.Fatalf("replacement row = %#v, want active replacement worktree", row)
+	}
+	if row.WorktreeRecoveryHeadSHA != "" || row.WorktreeBranchCompactedAt != nil {
+		t.Fatalf("replacement row kept stale compaction metadata: head=%q compacted_at=%v", row.WorktreeRecoveryHeadSHA, row.WorktreeBranchCompactedAt)
+	}
+}
+
+func TestPersistTaskEnvironmentReposForTransitionClearsMissingIntegrationRef(t *testing.T) {
+	repo := newMockRepository()
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	const envID = "env-transition-empty-integration"
+	repo.taskEnvironmentRepos[envID] = []*models.TaskEnvironmentRepo{
+		{
+			ID: "replace", TaskEnvironmentID: envID, RepositoryID: "repo-1", BranchSlug: "main",
+			WorktreeID: "wt-old", WorktreeBranch: "feature/old", WorktreeBranchOwner: "kandev",
+			WorktreeIntegrationRef: "main", Status: taskEnvironmentRepoStatusActive,
+		},
+	}
+
+	if err := exec.persistTaskEnvironmentReposForTransition(context.Background(), envID, []*models.TaskEnvironmentRepo{
+		{
+			RepositoryID: "repo-1", BranchSlug: "main", WorktreeID: "wt-new",
+			WorktreePath: "/new", WorktreeBranch: "feature/new",
+			WorktreeBranchOwner: "kandev", WorktreeIntegrationRef: "",
+		},
+	}, true); err != nil {
+		t.Fatalf("persistTaskEnvironmentReposForTransition: %v", err)
+	}
+
+	row := repo.taskEnvironmentRepos[envID][0]
+	if row.WorktreeIntegrationRef != "" {
+		t.Fatalf("WorktreeIntegrationRef = %q, want empty so cleanup fails closed", row.WorktreeIntegrationRef)
+	}
+}
+
+func TestEnvironmentReposForLaunch_PersistsBranchCompactionMetadata(t *testing.T) {
+	repos := environmentReposForLaunch(
+		&LaunchAgentRequest{},
+		&LaunchAgentResponse{Worktrees: []RepoWorktreeResult{{
+			RepositoryID: "repo-kandev", WorktreeID: "wt-managed", WorktreeBranch: "feature/task",
+			WorktreeBranchOwner: "kandev", WorktreeIntegrationRef: "develop",
+		}}},
+	)
+	if len(repos) != 1 || repos[0].WorktreeBranchOwner != "kandev" || repos[0].WorktreeIntegrationRef != "develop" {
+		t.Fatalf("environment repository metadata = %+v", repos)
 	}
 }

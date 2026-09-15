@@ -1038,6 +1038,7 @@ type RepoLaunchSpec struct {
 	RepositoryURL      string // Clone URL for remote executors that need to clone
 	RepoName           string // Repository name used as subdirectory inside TaskDirName
 	BaseBranch         string
+	IntegrationRef     string
 	DefaultBranch      string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch     string
 	PRNumber           int // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
@@ -1084,6 +1085,7 @@ type WorkspaceRepositorySpec struct {
 	RepositoryID           string
 	RepositoryPath         string
 	RepoName               string
+	IntegrationRef         string
 	BaseBranch             string
 	DefaultBranch          string
 	CheckoutBranch         string
@@ -1192,6 +1194,7 @@ type LaunchRequest struct {
 	TaskRepositoryID       string // Exact task_repositories row for worktree recovery
 	RepositoryPath         string // Path to the main repository (for worktree creation)
 	BaseBranch             string // Base branch for the worktree (e.g., "main")
+	IntegrationRef         string // Verified terminal integration target for managed branch compaction
 	DefaultBranch          string // Repository's default_branch, used as fallback when BaseBranch is missing
 	CheckoutBranch         string // Branch to fetch and checkout after worktree creation (e.g., PR head branch)
 	PRNumber               int    // GitHub PR number when CheckoutBranch is a PR head; enables refs/pull/<N>/head fetch for fork PRs.
@@ -1246,6 +1249,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		RepositoryPath:             r.RepositoryPath,
 		RepoName:                   r.RepoName,
 		BaseBranch:                 r.BaseBranch,
+		IntegrationRef:             r.IntegrationRef,
 		DefaultBranch:              r.DefaultBranch,
 		CheckoutBranch:             r.CheckoutBranch,
 		PRNumber:                   r.PRNumber,
