@@ -13,7 +13,6 @@ const automationStringType = "string"
 type AutomationCondition struct {
 	VerificationHeaders []string       `yaml:"verification_headers" json:"verification_headers"`
 	Key                 string         `yaml:"key" json:"key"`
-	AdapterKey          string         `yaml:"adapter_key" json:"adapter_key"`
 	Access              string         `yaml:"access" json:"access"`
 	ConfigVersion       int            `yaml:"config_version" json:"config_version"`
 	LabelKey            string         `yaml:"label_key,omitempty" json:"label_key,omitempty"`
@@ -35,11 +34,14 @@ func (m *Manifest) validateAutomationConditions() []error {
 			errs = append(errs, fmt.Errorf("invalid or duplicate automation condition key %q", c.Key))
 		}
 		seen[c.Key] = true
-		if !actionKeyPattern.MatchString(c.AdapterKey) || c.Access != "public" || c.ConfigVersion != 1 || c.Label == "" || len(c.Label) > 200 {
-			errs = append(errs, fmt.Errorf("automation condition %q requires an adapter, explicit public access, schema version 1 and label", c.Key))
+		if c.Access != "public" || c.ConfigVersion != 1 || c.Label == "" || len(c.Label) > 200 {
+			errs = append(errs, fmt.Errorf("automation condition %q requires explicit public access, schema version 1 and label", c.Key))
 		}
 		if !validVerificationHeaders(c.VerificationHeaders) {
 			errs = append(errs, fmt.Errorf("invalid automation verification headers for %q", c.Key))
+		}
+		if !validAutomationDefaults(c) {
+			errs = append(errs, fmt.Errorf("automation condition %q has invalid defaults", c.Key))
 		}
 		if !validAutomationSchema(c.ConfigSchema) {
 			errs = append(errs, fmt.Errorf("automation condition %q requires an object config schema", c.Key))
@@ -155,6 +157,68 @@ func validAutomationEnum(field map[string]any) bool {
 	for _, value := range options {
 		str, ok := value.(string)
 		if !ok || len(str) > 4096 {
+			return false
+		}
+	}
+	return true
+}
+
+// ValidAutomationValue validates a supplied setting in the supported schema dialect.
+func ValidAutomationValue(prop map[string]any, value any) bool {
+	valid := false
+	switch prop["type"] {
+	case "string":
+		text, ok := value.(string)
+		valid = ok && len(text) <= 4096
+	case "boolean":
+		_, valid = value.(bool)
+	case "array":
+		return validConditionList(value)
+	}
+	if !valid {
+		return false
+	}
+	if options, ok := prop["enum"].([]any); ok {
+		for _, option := range options {
+			if str, ok := option.(string); ok && str == value {
+				return true
+			}
+		}
+		return false
+	}
+	return true
+}
+func validConditionList(value any) bool {
+	values, ok := value.([]any)
+	if !ok || len(values) > 100 {
+		return false
+	}
+	for _, value := range values {
+		str, ok := value.(string)
+		if !ok || len(str) > 4096 {
+			return false
+		}
+	}
+	return true
+}
+
+func validAutomationDefaults(c AutomationCondition) bool {
+	if c.DefaultConfig == nil {
+		return true
+	}
+	raw, err := json.Marshal(c.DefaultConfig)
+	if err != nil || len(raw) > 65536 {
+		return false
+	}
+	// Normalize YAML and Go collection shapes to the same JSON values used at save time.
+	var values map[string]any
+	if json.Unmarshal(raw, &values) != nil {
+		return false
+	}
+	props, _ := c.ConfigSchema["properties"].(map[string]any)
+	for key, value := range values {
+		prop, ok := props[key].(map[string]any)
+		if !ok || !ValidAutomationValue(prop, value) {
 			return false
 		}
 	}

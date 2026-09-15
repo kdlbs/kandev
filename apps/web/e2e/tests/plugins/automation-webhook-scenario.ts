@@ -5,11 +5,14 @@ import type { ApiClient } from "../../helpers/api-client";
 import type { SeedData } from "../../fixtures/test-base";
 import { installFixturePlugin, PLUGIN_ID } from "../../helpers/plugin-fixture";
 
-export async function selectPluginCondition(page: Page, seed: SeedData, apiClient: ApiClient) {
+export async function selectPluginCondition(page: Page, seed: SeedData) {
   await installFixturePlugin(page);
   const automations = new AutomationsPage(page, seed.workspaceId);
   await automations.gotoNew();
   await automations.addConditionButton.click();
+  if ((page.viewportSize()?.width ?? 1024) < 768) {
+    await expect(page.getByRole("dialog", { name: "Add Condition" })).toBeVisible();
+  }
   await page.getByRole("option", { name: "Fixture signed event" }).click();
   const card = page.getByTestId("trigger-card-plugin_event");
   await expect(card).toBeVisible();

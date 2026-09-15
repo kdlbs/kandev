@@ -57,6 +57,7 @@ func webhookTestSetup(t *testing.T) (*Service, *testAutomationAdapter, *WebhookB
 	t.Helper()
 	svc := newTestService(t)
 	svc.store.db.SetMaxOpenConns(1)
+	require.NoError(t, func() error { _, err := svc.store.db.Exec(`PRAGMA foreign_keys=ON`); return err }())
 	adapter := &testAutomationAdapter{generation: "v1", connection: "revision-1"}
 	svc.SetPluginAutomationProvider(adapter)
 	a := &Automation{WorkspaceID: "workspace", Name: "Webhook", Enabled: true, MaxConcurrentRuns: 1}

@@ -1,67 +1,10 @@
-import { useEffect, useState } from "react";
+import { useWebhookControls } from "@/hooks/use-plugin-webhook-controls";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
 import { Input } from "@kandev/ui/input";
 import { Label } from "@kandev/ui/label";
-import {
-  managePluginWebhook,
-  listPluginWebhookReceipts,
-  type PluginWebhookBinding,
-  type PluginWebhookReceipt,
-} from "@/lib/api/domains/automation-api";
 import type { AutomationTrigger } from "@/lib/types/automation";
 import { copyToClipboard } from "@/lib/utils/copy-to-clipboard";
-
-function useWebhookControls(trigger: AutomationTrigger, dirty: boolean) {
-  const [binding, setBinding] = useState<PluginWebhookBinding | null>(null);
-  const [receipts, setReceipts] = useState<PluginWebhookReceipt[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(false);
-  const [secret, setSecret] = useState<string | null>(null);
-  const saved = Boolean(trigger.automation_id);
-  useEffect(() => {
-    let current = true;
-    setSecret(null);
-    setBinding(null);
-    if (saved)
-      managePluginWebhook(trigger.automation_id, trigger.id, "get")
-        .then((value) => {
-          if (current) setBinding(value);
-        })
-        .catch(() => {
-          if (current) setError(true);
-        });
-    return () => {
-      current = false;
-    };
-  }, [saved, trigger.automation_id, trigger.id, trigger.updated_at, dirty]);
-  const act = async (operation: "configure" | "rotate" | "reveal" | "delete") => {
-    setBusy(true);
-    setError(false);
-    setSecret(null);
-    try {
-      const value = await managePluginWebhook(trigger.automation_id, trigger.id, operation);
-      setBinding(value);
-      setSecret(value?.secret ?? null);
-    } catch {
-      setError(true);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const refresh = async () => {
-    setBusy(true);
-    try {
-      setReceipts(await listPluginWebhookReceipts(trigger.automation_id));
-    } catch {
-      setError(true);
-    } finally {
-      setBusy(false);
-    }
-  };
-  const url = binding ? new URL(binding.path, window.location.origin).toString() : "";
-  return { binding, receipts, busy, error, secret, saved, act, refresh, url, setError, setSecret };
-}
 
 export function PluginWebhookControls({
   trigger,
@@ -107,7 +50,13 @@ export function PluginWebhookControls({
           <Button
             type="button"
             variant="outline"
-            onClick={() => copyToClipboard(url).catch(() => setError(true))}
+            onClick={() =>
+              copyToClipboard(url)
+                .then((copied) => {
+                  if (!copied) setError(true);
+                })
+                .catch(() => setError(true))
+            }
           >
             {t("automations:pluginWebhookCopy")}
           </Button>

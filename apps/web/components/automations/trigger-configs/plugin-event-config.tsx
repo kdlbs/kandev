@@ -4,39 +4,22 @@ import { Input } from "@kandev/ui/input";
 import { Textarea } from "@kandev/ui/textarea";
 import { Label } from "@kandev/ui/label";
 import { Switch } from "@kandev/ui/switch";
-import { listTriggerTypes } from "@/lib/api/domains/automation-api";
 import { PluginWebhookControls } from "./plugin-webhook-controls";
 import type { AutomationTrigger, TriggerTypeInfo } from "@/lib/types/automation";
-import { conditionSettings, findTriggerInfo } from "../plugin-condition";
+import { conditionSettings } from "../plugin-condition";
 
 export function PluginEventConfig({
   trigger,
-  workspaceId,
+  info,
   onUpdate,
   dirty,
 }: {
   dirty: boolean;
   trigger: AutomationTrigger;
-  workspaceId: string;
+  info?: NonNullable<TriggerTypeInfo["plugin"]>;
   onUpdate: (config: Record<string, unknown>) => void;
 }) {
   const { t } = useTranslation();
-  const [infos, setInfos] = useState<TriggerTypeInfo[]>([]);
-  const [error, setError] = useState(false);
-  useEffect(() => {
-    let current = true;
-    listTriggerTypes(workspaceId)
-      .then((items) => {
-        if (current) setInfos(items);
-      })
-      .catch(() => {
-        if (current) setError(true);
-      });
-    return () => {
-      current = false;
-    };
-  }, [workspaceId]);
-  const info = findTriggerInfo(trigger, infos)?.plugin;
   const compatible = info?.condition.config_version === trigger.config.config_version;
   const settings = conditionSettings(trigger.config);
   const properties = (compatible ? (info?.condition.config_schema.properties ?? {}) : {}) as Record<
@@ -52,7 +35,7 @@ export function PluginEventConfig({
           {label(info.condition.label_key ?? info.condition.label, info.condition.label)}
         </p>
       )}
-      {(error || !info?.available || !compatible) && (
+      {(!info?.available || !compatible) && (
         <p role="status">{t("automations:pluginWebhookUnavailable")}</p>
       )}
       {Object.entries(properties).map(([name, schema]) => {
@@ -104,7 +87,7 @@ function ConditionField({
     return (
       <select
         id={id}
-        className="w-full min-h-11 rounded-md border bg-background px-3"
+        className="w-full h-7 rounded-md border bg-background px-2 text-xs [@media(pointer:coarse)]:min-h-11"
         value={String(value ?? "")}
         onChange={(event) => onChange(event.target.value)}
       >

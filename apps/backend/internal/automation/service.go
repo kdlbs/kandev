@@ -511,6 +511,13 @@ func (s *Service) CreateAutomation(ctx context.Context, req *CreateAutomationReq
 	if err := s.validateAgentProfileID(ctx, req.AgentProfileID); err != nil {
 		return nil, err
 	}
+	kinds := make([]TriggerType, 0, len(req.Triggers))
+	for _, trigger := range req.Triggers {
+		kinds = append(kinds, trigger.Type)
+	}
+	if err := validateTriggerCombination(kinds); err != nil {
+		return nil, err
+	}
 	for _, trigger := range req.Triggers {
 		if err := s.validatePluginTrigger(ctx, req.WorkspaceID, trigger.Type, trigger.Config, trigger.Enabled); err != nil {
 			return nil, err
@@ -1027,6 +1034,19 @@ func (s *Service) AddTrigger(ctx context.Context, req *AddTriggerRequest) (*Auto
 	if err = s.validatePluginTrigger(ctx, a.WorkspaceID, req.Type, req.Config, req.Enabled); err != nil {
 		return nil, err
 	}
+	unlock := s.automationRunLock(req.AutomationID)
+	defer unlock()
+	a, err = s.store.GetAutomation(ctx, req.AutomationID)
+	if err != nil || a == nil {
+		return nil, ErrAutomationNotFound
+	}
+	kinds := []TriggerType{req.Type}
+	for _, trigger := range a.Triggers {
+		kinds = append(kinds, trigger.Type)
+	}
+	if err := validateTriggerCombination(kinds); err != nil {
+		return nil, err
+	}
 	t := &AutomationTrigger{
 		AutomationID: req.AutomationID,
 		Type:         req.Type,
@@ -1098,6 +1118,9 @@ func (s *Service) DeleteTrigger(ctx context.Context, id string) error {
 	unlock := s.automationRunLock(t.AutomationID)
 	defer unlock()
 	if err := s.store.enqueueWebhookSecrets(ctx, "trigger_id", id); err != nil {
+		return err
+	}
+	if err := s.cancelTriggerWebhookReceipts(ctx, id, "condition deleted"); err != nil {
 		return err
 	}
 	return s.store.DeleteTrigger(ctx, id)

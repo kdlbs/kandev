@@ -197,6 +197,8 @@ func (s *Store) initSchema() error {
 		name string
 		stmt string
 	}{
+		{"automation_webhook_receipts.attempt_count", `ALTER TABLE automation_webhook_receipts ADD COLUMN attempt_count INTEGER NOT NULL DEFAULT 0`},
+		{"automation_webhook_receipts.next_attempt_at", `ALTER TABLE automation_webhook_receipts ADD COLUMN next_attempt_at BIGINT NOT NULL DEFAULT 0`},
 		{"automations.task_title_template", schemaSQLForDriver(migrateTaskTitleSQL, s.db.DriverName())},
 		{"automations.execution_mode", schemaSQLForDriver(migrateExecutionModeSQL, s.db.DriverName())},
 		{"automations.repository_id", schemaSQLForDriver(migrateRepositoryIDSQL, s.db.DriverName())},
@@ -218,6 +220,9 @@ func (s *Store) initSchema() error {
 	}
 	if err := migrate.Err(); err != nil {
 		return fmt.Errorf("required automation migration: %w", err)
+	}
+	if _, err := s.db.Exec(`CREATE INDEX IF NOT EXISTS automation_webhook_receipts_due ON automation_webhook_receipts(state,next_attempt_at,created_at,id)`); err != nil {
+		return err
 	}
 	if err := s.backfillLegacyRepositoryIDs(); err != nil {
 		return err
@@ -1100,6 +1105,7 @@ func (s *Store) ListEnabledTriggersByType(ctx context.Context, triggerType Trigg
 		SELECT t.* FROM automation_triggers t
 		JOIN automations a ON a.id = t.automation_id
 		WHERE t.type = ? AND t.enabled = TRUE AND a.enabled = TRUE
+        AND (t.type != 'scheduled' OR NOT EXISTS (SELECT 1 FROM automation_triggers p WHERE p.automation_id=t.automation_id AND p.type='plugin_event'))
 		ORDER BY t.created_at ASC, t.id ASC`), string(triggerType))
 	hydrateTriggers(triggers)
 	return triggers, err

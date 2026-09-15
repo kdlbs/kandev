@@ -16,7 +16,7 @@ import {
   IconChevronUp,
   IconInfoCircle,
 } from "@tabler/icons-react";
-import type { AutomationTrigger, TriggerType } from "@/lib/types/automation";
+import type { AutomationTrigger, TriggerType, TriggerTypeInfo } from "@/lib/types/automation";
 import { ScheduledConfig } from "./trigger-configs/scheduled-config";
 import { GitHubPRConfig } from "./trigger-configs/github-pr-config";
 import { GitHubPRMergedConfig } from "./trigger-configs/github-pr-merged-config";
@@ -26,6 +26,7 @@ import { WebhookConfig } from "./trigger-configs/webhook-config";
 import { describeSchedule } from "./schedule-expression";
 
 type TriggerCardProps = {
+  pluginInfo?: NonNullable<TriggerTypeInfo["plugin"]>;
   trigger: AutomationTrigger;
   savedTrigger?: AutomationTrigger;
   automationId: string | null;
@@ -121,6 +122,7 @@ function getTriggerSummary(
 }
 
 export function TriggerCard({
+  pluginInfo,
   trigger,
   savedTrigger,
   automationId,
@@ -190,6 +192,7 @@ export function TriggerCard({
       {expanded && (
         <div className="px-4 pb-4 pt-1 border-t">
           <TriggerConfigForm
+            pluginInfo={pluginInfo}
             trigger={trigger}
             dirty={isDirty}
             automationId={automationId}
@@ -203,12 +206,14 @@ export function TriggerCard({
 }
 
 function TriggerConfigForm({
+  pluginInfo,
   trigger,
   dirty,
   automationId,
   workspaceId,
   onUpdate,
 }: {
+  pluginInfo?: NonNullable<TriggerTypeInfo["plugin"]>;
   trigger: AutomationTrigger;
   dirty: boolean;
   automationId: string | null;
@@ -235,12 +240,7 @@ function TriggerConfigForm({
       return <GitHubCIConfig config={trigger.config} onUpdate={onUpdate} />;
     case "plugin_event":
       return (
-        <PluginEventConfig
-          trigger={trigger}
-          workspaceId={workspaceId}
-          onUpdate={onUpdate}
-          dirty={dirty}
-        />
+        <PluginEventConfig trigger={trigger} info={pluginInfo} onUpdate={onUpdate} dirty={dirty} />
       );
     case "webhook":
       return <WebhookConfig automationId={automationId} workspaceId={workspaceId} />;

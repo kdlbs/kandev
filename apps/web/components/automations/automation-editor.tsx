@@ -1,5 +1,7 @@
 "use client";
 
+import { useTriggerTypeMetadata } from "@/hooks/use-automation-trigger-types";
+
 import { findTriggerInfo } from "./plugin-condition";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
@@ -12,7 +14,7 @@ import { Separator } from "@kandev/ui/separator";
 import { useAppStore } from "@/components/state-provider";
 import { getMultiRepoExecutorDisabledReason } from "@/components/task-create-dialog-multi-repo-guard";
 import { useAutomations } from "@/hooks/domains/settings/use-automations";
-import { getAutomation, listTriggerTypes } from "@/lib/api/domains/automation-api";
+import { getAutomation } from "@/lib/api/domains/automation-api";
 import type {
   Automation,
   CreateAutomationRequest,
@@ -98,18 +100,6 @@ function formFromAutomation(a: Automation): FormState {
     maxConcurrentRuns: a.max_concurrent_runs,
     continuationPolicy: a.continuation_policy ?? "new_task",
   };
-}
-
-function useTriggerTypeMetadata(workspaceId: string) {
-  const [triggerTypes, setTriggerTypes] = useState<TriggerTypeInfo[]>([]);
-
-  useEffect(() => {
-    listTriggerTypes(workspaceId)
-      .then(setTriggerTypes)
-      .catch(() => setTriggerTypes([]));
-  }, [workspaceId]);
-
-  return triggerTypes;
 }
 
 /** Returns the condition type from the current triggers (the non-scheduled, non-webhook trigger). */

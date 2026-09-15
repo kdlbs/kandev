@@ -32,6 +32,8 @@ func (s *Service) AcquireAutomationAdapter(id, key string) (manifest.AutomationC
 	return empty, "", nil, nil, fmt.Errorf("automation adapter unavailable")
 }
 func (s *Service) AutomationConditions(ctx context.Context, workspaceID string) []automation.PluginConditionInfo {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	result := []automation.PluginConditionInfo{}
 	for _, rec := range s.List() {
 		if rec.Status != StatusActive {
@@ -39,6 +41,10 @@ func (s *Service) AutomationConditions(ctx context.Context, workspaceID string) 
 		}
 		for _, c := range rec.AutomationConditions {
 			info := automation.PluginConditionInfo{PluginID: rec.ID, ProviderLabel: rec.DisplayName, Condition: c}
+			if ctx.Err() != nil {
+				result = append(result, info)
+				continue
+			}
 			_, _, adapter, release, err := s.AcquireAutomationAdapter(rec.ID, c.Key)
 			if err == nil {
 				callCtx, cancel := context.WithTimeout(ctx, 5*time.Second)

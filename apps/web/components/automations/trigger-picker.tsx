@@ -10,7 +10,7 @@ import { IconPlus, IconBrandGithub, IconWebhook, IconInfoCircle } from "@tabler/
 import type { TriggerType, TriggerTypeInfo } from "@/lib/types/automation";
 
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle, DrawerTrigger } from "@kandev/ui/drawer";
-import { useIsMobile } from "@/hooks/use-mobile";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 type TriggerPickerProps = {
   triggerTypes: TriggerTypeInfo[];
@@ -167,7 +167,7 @@ function ConditionPickerSurface({
   trigger: ReactNode;
   children: ReactNode;
 }) {
-  const mobile = useIsMobile();
+  const { isMobile: mobile } = useResponsiveBreakpoint();
   const { t } = useTranslation();
   if (mobile)
     return (

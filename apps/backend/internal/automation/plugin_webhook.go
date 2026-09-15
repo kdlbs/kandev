@@ -48,7 +48,7 @@ func validateConditionSettings(c manifest.AutomationCondition, raw []byte) error
 		if !ok {
 			return fmt.Errorf("unknown condition field %q", key)
 		}
-		if !validConditionValue(prop, value) {
+		if !manifest.ValidAutomationValue(prop, value) {
 			return fmt.Errorf("invalid condition field %q", key)
 		}
 	}
@@ -63,8 +63,8 @@ func validateConditionSettings(c manifest.AutomationCondition, raw []byte) error
 	}
 	return nil
 }
-func bindingRevision(t *AutomationTrigger, _ string, connection string) string {
-	sum := sha256.Sum256([]byte(connection + "\x00" + t.UpdatedAt.UTC().Format(time.RFC3339Nano) + "\x00" + string(t.Config)))
+func bindingRevision(t *AutomationTrigger, generation string, connection string) string {
+	sum := sha256.Sum256([]byte(generation + "\x00" + connection + "\x00" + t.UpdatedAt.UTC().Format(time.RFC3339Nano) + "\x00" + string(t.Config)))
 	return hex.EncodeToString(sum[:])
 }
 
@@ -127,7 +127,11 @@ func (s *Service) saveConfiguredWebhook(ctx context.Context, t *AutomationTrigge
 		return nil, err
 	}
 	oldSecret := b.SecretID
-	if rotate || b.SecretID == "" {
+	changed := b.Revision != bindingRevision(t, generation, resp.ConnectionRevision)+":"+b.SecretID
+	if rotate || changed || b.SecretID == "" {
+		if err := s.cancelTriggerWebhookReceipts(ctx, t.ID, "binding reconfigured"); err != nil {
+			return nil, err
+		}
 		b.SecretID = "automation-webhook:" + uuid.NewString()
 		if err = s.pluginAutomation.SetAutomationSecret(ctx, b.SecretID, generateSecret()); err != nil {
 			return nil, err
@@ -370,6 +374,9 @@ func (s *Service) webhookBindingResponse(ctx context.Context, msg *ws.Message, o
 	if operation == "delete" {
 		unlock := s.automationRunLock(a.ID)
 		defer unlock()
+		if err = s.cancelTriggerWebhookReceipts(ctx, t.ID, "binding revoked"); err != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "binding cancellation failed", nil)
+		}
 		if err = s.store.enqueueWebhookSecrets(ctx, "trigger_id", t.ID); err != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "binding deletion failed", nil)
 		}
@@ -490,44 +497,20 @@ func (s *Service) cancelAutomationWebhookReceipts(ctx context.Context, id string
 	return nil
 }
 
-func validConditionValue(prop map[string]any, value any) bool {
-	valid := false
-	switch prop["type"] {
-	case "string":
-		text, ok := value.(string)
-		valid = ok && len(text) <= 4096
-	case "boolean":
-		_, valid = value.(bool)
-	case "array":
-		return validConditionList(value)
-	}
-	if !valid {
-		return false
-	}
-	if options, ok := prop["enum"].([]any); ok {
-		for _, option := range options {
-			if str, ok := option.(string); ok && str == value {
-				return true
-			}
-		}
-		return false
-	}
-	return true
-}
-func validConditionList(value any) bool {
-	values, ok := value.([]any)
-	if !ok || len(values) > 100 {
-		return false
-	}
-	for _, value := range values {
-		str, ok := value.(string)
-		if !ok || len(str) > 4096 {
-			return false
-		}
-	}
-	return true
-}
-
 func validWebhookDescription(resp *pluginsdk.AutomationConditionResponse) bool {
 	return resp != nil && resp.Available && resp.ConnectionId != "" && resp.ConnectionRevision != ""
+}
+
+// Caller holds the automation lock; settle admitted runs before cascading receipts.
+func (s *Service) cancelTriggerWebhookReceipts(ctx context.Context, triggerID, reason string) error {
+	rows := []WebhookReceipt{}
+	if err := s.store.db.SelectContext(ctx, &rows, s.store.db.Rebind(`SELECT r.* FROM automation_webhook_receipts r JOIN automation_webhook_bindings b ON b.id=r.binding_id WHERE b.trigger_id=? AND r.state IN ('pending','dispatch')`), triggerID); err != nil {
+		return err
+	}
+	for i := range rows {
+		if err := s.finishWebhookReceipt(ctx, &rows[i], "cancelled", reason); err != nil {
+			return err
+		}
+	}
+	return nil
 }

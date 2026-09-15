@@ -28,10 +28,17 @@ func (s *Service) ProcessWebhookReceipts(ctx context.Context) error {
 		return err
 	}
 	receipts := []WebhookReceipt{}
-	if err := s.store.db.SelectContext(ctx, &receipts, `SELECT * FROM automation_webhook_receipts WHERE state IN ('pending','dispatch') ORDER BY created_at LIMIT 100`); err != nil {
+	if err := s.store.db.SelectContext(ctx, &receipts, s.store.db.Rebind(`SELECT * FROM automation_webhook_receipts WHERE state IN ('pending','dispatch') AND next_attempt_at <= ? ORDER BY next_attempt_at,created_at,id LIMIT 100`), time.Now().Unix()); err != nil {
 		return err
 	}
 	for i := range receipts {
+		ready, err := s.reserveWebhookAttempt(ctx, &receipts[i])
+		if err != nil {
+			return err
+		}
+		if !ready {
+			continue
+		}
 		if err := s.processWebhookReceipt(ctx, &receipts[i]); err != nil {
 			webhookCounters.Add("processing_failures", 1)
 			s.logger.Warn("webhook receipt processing failed", zap.String("receipt_id", receipts[i].ID), zap.Error(err))
@@ -162,19 +169,33 @@ func (s *Service) admitWebhookReceipt(ctx context.Context, a *Automation, t *Aut
 	return nil
 }
 func (s *Service) finishWebhookReceipt(ctx context.Context, r *WebhookReceipt, state, reason string) error {
-	result, err := s.store.db.ExecContext(ctx, s.store.db.Rebind(`UPDATE automation_webhook_receipts SET state=?,reason=?,payload='{}',finished_at=? WHERE id=? AND state IN ('pending','dispatch')`), state, reason, time.Now().Unix(), r.ID)
+	tx, err := s.store.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	result, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE automation_webhook_receipts SET state=?,reason=?,payload='{}',finished_at=? WHERE id=? AND state IN ('pending','dispatch')`), state, reason, time.Now().Unix(), r.ID)
 	if err != nil {
 		return err
 	}
 	n, err := result.RowsAffected()
-	if err != nil || n == 0 {
+	if err != nil {
 		return err
 	}
-	webhookCounters.Add(state, 1)
-	if r.RunID != "" && (state == "cancelled" || state == "failed") {
-		err = s.store.MarkRunTerminal(ctx, r.RunID, "", "", RunStatusFailed, reason)
+	if n > 0 && (state == "cancelled" || state == "failed") {
+		// Read the current run identity transactionally; the caller may hold a pre-admission snapshot.
+		_, err = tx.ExecContext(ctx, tx.Rebind(`UPDATE automation_runs SET status=?,error_message=? WHERE id=(SELECT run_id FROM automation_webhook_receipts WHERE id=?) AND status=?`), RunStatusFailed, reason, r.ID, RunStatusTriggered)
+		if err != nil {
+			return err
+		}
 	}
-	return err
+	if err = tx.Commit(); err != nil {
+		return err
+	}
+	if n > 0 {
+		webhookCounters.Add(state, n)
+	}
+	return nil
 }
 
 // ClaimPluginWebhookRun is consumed before task creation; a claimed run is never dispatched twice.
@@ -300,4 +321,21 @@ func recordWebhookAdmission(ctx context.Context, tx *sqlx.Tx, automationID, trig
 	}
 	_, err := tx.ExecContext(ctx, tx.Rebind(`UPDATE automation_triggers SET last_evaluated_at=? WHERE id=?`), now, triggerID)
 	return err
+}
+
+const webhookMaxAttempts = 8
+
+// Reserve the retry budget before any fallible dispatch, including an unclaimed publish.
+func (s *Service) reserveWebhookAttempt(ctx context.Context, r *WebhookReceipt) (bool, error) {
+	if r.AttemptCount >= webhookMaxAttempts {
+		return false, s.finishWebhookReceipt(ctx, r, "failed", "delivery retry limit reached")
+	}
+	delay := min(5*time.Second*time.Duration(1<<r.AttemptCount), 5*time.Minute)
+	now := time.Now().Unix()
+	result, err := s.store.db.ExecContext(ctx, s.store.db.Rebind(`UPDATE automation_webhook_receipts SET attempt_count=attempt_count+1,next_attempt_at=? WHERE id=? AND state IN ('pending','dispatch') AND attempt_count=? AND next_attempt_at<=?`), now+int64(delay/time.Second), r.ID, r.AttemptCount, now)
+	if err != nil {
+		return false, err
+	}
+	n, err := result.RowsAffected()
+	return n == 1, err
 }

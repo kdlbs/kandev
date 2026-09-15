@@ -24,6 +24,10 @@ scope follows the discussion of plugin-provided conditions, verified deliveries,
 and host-owned automation execution. Protocol details are proposed in the paired
 [system design](../system-design/automation-webhook-adapters.md).
 
+## Implementation Plans
+
+- [Host implementation and review corrections](../../../plans/automation-webhook-adapters/plan.md).
+
 ## Terminology
 
 - **Condition:** A selectable provider event and its filters in “Watch for”.
@@ -57,6 +61,16 @@ and host-owned automation execution. Protocol details are proposed in the paired
 - **AC-PLUGINS-AUTOMATION-WEBHOOK-001.5:** Host and plugin copy shall follow the
   existing localization contracts; missing or loading metadata shall not erase
   saved configuration or silently substitute another condition.
+
+- **AC-PLUGINS-AUTOMATION-WEBHOOK-001.6:** Supplied defaults shall match declared
+  fields, types, limits, and enums; missing required fields may await user input.
+  Scheduled and plugin-event triggers shall not coexist in one automation,
+  including when either trigger is disabled. API creation and additions shall
+  reject the combination; the editor shall remove a schedule when switching.
+- **AC-PLUGINS-AUTOMATION-WEBHOOK-001.7:** Metadata shall be shared per workspace;
+  stale responses shall not replace another workspace's metadata or a newer
+  binding operation. URL copy shall use the configured backend origin and report
+  clipboard failure. Condition discovery shall have one bounded overall timeout.
 
 ### REQ-PLUGINS-AUTOMATION-WEBHOOK-002: Authorized and verified delivery
 
@@ -109,6 +123,12 @@ and host-owned automation execution. Protocol details are proposed in the paired
   a run link when one exists. Authentication failure shall not expose secrets or
   raw payloads in diagnostics.
 
+- **AC-PLUGINS-AUTOMATION-WEBHOOK-003.6:** Retry budgets and next-attempt times
+  shall survive restart. Failing or unclaimed deliveries shall back off and
+  eventually become terminal without starving newer receipts. Deleting a trigger
+  or revoking its binding shall settle admitted but unclaimed runs before
+  cascading receipt deletion, releasing their concurrency slots.
+
 ### REQ-PLUGINS-AUTOMATION-WEBHOOK-004: Compatibility and lifecycle
 
 **Intent:** Existing automations remain usable and missing plugins fail safely.
@@ -133,7 +153,9 @@ and host-owned automation execution. Protocol details are proposed in the paired
   and secret are provisioned; unknown plugins shall not become generic webhooks.
 - **AC-PLUGINS-AUTOMATION-WEBHOOK-004.5:** A plugin upgrade shall not silently change
   the meaning of saved filters, reuse a removed condition identity, or expand a
-  binding's authority. Incompatible versions shall require explicit user repair.
+  binding's authority. Incompatible versions shall require explicit user repair. In the first host
+  version, upgrades and reinstalls require explicit webhook reconfiguration and
+  a new signing secret. An ordinary backend restart shall preserve the binding.
 
 ### REQ-PLUGINS-AUTOMATION-WEBHOOK-005: Bitbucket acceptance integration
 

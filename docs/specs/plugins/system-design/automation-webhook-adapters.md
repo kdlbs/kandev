@@ -37,21 +37,22 @@ Existing grounding:
 
 ## Requirement mapping
 
-| Requirement | Design sections |
-| --- | --- |
-| `REQ-PLUGINS-AUTOMATION-WEBHOOK-001` | Registration and editor |
-| `REQ-PLUGINS-AUTOMATION-WEBHOOK-002` | Bindings and verification; Security |
+| Requirement                          | Design sections                       |
+| ------------------------------------ | ------------------------------------- |
+| `REQ-PLUGINS-AUTOMATION-WEBHOOK-001` | Registration and editor               |
+| `REQ-PLUGINS-AUTOMATION-WEBHOOK-002` | Bindings and verification; Security   |
 | `REQ-PLUGINS-AUTOMATION-WEBHOOK-003` | Admission and recovery; Observability |
-| `REQ-PLUGINS-AUTOMATION-WEBHOOK-004` | Lifecycle and compatibility |
-| `REQ-PLUGINS-AUTOMATION-WEBHOOK-005` | Bitbucket adapter |
+| `REQ-PLUGINS-AUTOMATION-WEBHOOK-004` | Lifecycle and compatibility           |
+| `REQ-PLUGINS-AUTOMATION-WEBHOOK-005` | Bitbucket adapter                     |
 
 ## Registration and editor
 
 Add proposed manifest contribution `automation_conditions`, with stable local key,
 configuration version, localized label/description, provider grouping, event kind,
-configuration schema, payload placeholder metadata, and a declared adapter key.
+configuration schema and payload placeholder metadata.
 Identity is `(plugin_id, condition_key)`; labels never serve as identifiers.
-A condition cannot name another plugin's adapter. Declare external access
+The RPC routes within the contributing plugin by condition key; no separate
+adapter-key metadata is required. Declare external access
 explicitly and advertise this optional capability through protocol negotiation.
 Missing RPC support or invalid/duplicate declarations makes the contribution
 unavailable rather than falling back to `HandleWebhook`.
@@ -85,15 +86,15 @@ Expose URL copy and explicit secret reveal after save, never as hidden form defa
 
 Proposed host-owned binding model:
 
-| Field | Meaning |
-| --- | --- |
-| binding_id | Opaque public routing identity, not an authentication credential |
-| workspace_id, automation_id, trigger_id | Server-resolved destination |
-| plugin_id, condition_key, adapter_key | Exact contributing capability |
-| connection_id, connection_revision | Exact provider connection and freshness |
-| config_version, config, binding_revision | Validated filters and authority revision |
-| secret_reference, secret_revision | Encrypted signing secret and rotation fence |
-| enabled | Explicit user activation, separate from derived availability |
+| Field                                    | Meaning                                                          |
+| ---------------------------------------- | ---------------------------------------------------------------- |
+| binding_id                               | Opaque public routing identity, not an authentication credential |
+| workspace_id, automation_id, trigger_id  | Server-resolved destination                                      |
+| plugin_id, condition_key                 | Exact contributing capability                                    |
+| connection_id, connection_revision       | Exact provider connection and freshness                          |
+| config_version, config, binding_revision | Validated filters and authority revision                         |
+| secret_reference, secret_revision        | Encrypted signing secret and rotation fence                      |
+| enabled                                  | Explicit user activation, separate from derived availability     |
 
 Creation, update, reveal, rotation, and deletion use authenticated host management
 operations authorized against the automation's workspace. The management response
@@ -150,7 +151,7 @@ Return 200 for a duplicate or verified ignored event, 401 for bad authentication
 400 for authenticated malformed input, 413 for excess size, and 503 for transient
 failures before persistence. HTTP acceptance is not a claim that an agent started.
 
-A restart-safe worker claims pending receipts using a persisted lease. Recheck
+A restart-safe worker reserves a persisted attempt before processing a receipt. Recheck
 workspace, connection revision, enabled automation/trigger, binding revision, and
 plugin availability immediately before admission. Revoked or obsolete receipts
 become cancelled and never resume automatically. A concurrency-policy skip is a
@@ -263,7 +264,6 @@ compatible host for signed acceptance and duplicate delivery. Implementation tes
 - [Contribution lifecycle authority](../../../decisions/2026-08-04-plugin-contribution-lifecycle-authority.md).
 - [Plugin localization](../../../decisions/2026-08-12-plugin-localization-contract.md).
 
-
 ## Implementation notes (2026-09-15)
 
 The implementation uses additive `DescribeAutomationCondition` and
@@ -297,3 +297,41 @@ The first released compatible host version remains a release-time decision.
 Until that pin is set, build both sibling checkouts for webhook development.
 See [the manifest contract](../../../public/plugins-manifest.md) and the Bitbucket
 plugin README for the implemented setup and operational behavior.
+
+## Review corrections and delivery policy
+
+The [host work order](../../../plans/automation-webhook-adapters/task-01-host-adapters.md)
+covers AC-001.6, AC-001.7, AC-003.6, and AC-004.5 with the original host contract.
+
+- Hash plugin version plus installed-at timestamp into the binding revision.
+  Reconfiguration after an installation change creates a fresh signing secret;
+  it cancels pending/unclaimed work before replacing authority. Host restarts and
+  compatible disable/re-enable retain the installation identity. Existing draft
+  bindings with the old digest require reconfiguration; they fail closed.
+- Persist `attempt_count` and `next_attempt_at`, migrating older receipt tables.
+  Reserve at most eight processing/publish attempts, with delays of 5, 10, 20,
+  40, 80, 160, 300, and 300 seconds. A still-unclaimed receipt becomes failed
+  when eligible again after its last attempt. Select at most 100 eligible rows
+  ordered by next-attempt time, creation time, and ID. New receipts start at
+  zero and therefore cannot be permanently excluded by repeatedly failing rows.
+- Complete cancellation/failure of the receipt and its unclaimed run in one
+  transaction. Before deleting a trigger or binding, cancel pending/dispatch
+  receipts while holding the automation lock. Already claimed execution retains
+  ordinary task lifecycle semantics; never dispatch it a second time.
+- Reject schedule/plugin-event combinations during creation and trigger addition,
+  regardless of enabled flags. Legacy mixed records remain fail-closed; exclude
+  their schedules in the scheduler query before hydration. Switching conditions
+  in the editor deletes the old schedule before adding the plugin trigger.
+- Validate supplied manifest defaults through the same value validator used for
+  saved settings, without requiring all required fields at installation time.
+- Store condition metadata by workspace in the automation state slice. Hooks
+  load it once per concurrent enumeration and supply the same snapshot to the
+  picker and expanded form. Give enumeration one shared five-second deadline.
+- Disable binding operations during the initial lookup and fence results across
+  changed triggers. Build URLs with the configured backend origin; a remotely
+  reachable ingress address still depends on deployment. Use the application
+  phone breakpoint (768px), desktop-density selectors, and coarse-pointer touch
+  sizing. Preserve the existing localized copy and error surface.
+
+These rules replace any earlier draft reference to an independent adapter key or
+an indefinitely retried pending receipt.

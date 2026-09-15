@@ -34,6 +34,17 @@ automation. Only a user-authorized binding provides that authority. Add an optio
 typed adapter contract without changing generic HTTP callback semantics. Existing
 GitHub and generic webhook behavior remains compatible.
 
+The first host contract routes adapters by plugin and condition identity, without
+an unused separate adapter key. Binding revisions include installation identity;
+upgrades and reinstalls require user reconfiguration with a fresh secret while
+ordinary restarts preserve the binding. Pending/unclaimed dispatch has a persisted
+bounded retry budget, and cancellation settles admitted runs before receipt
+removal. Scheduled triggers cannot coexist with plugin-event conditions.
+
+The [delivery plan](../plans/automation-webhook-adapters/plan.md) records host
+implementation and corrective verification; live provider acceptance remains a
+separate integration check.
+
 ## Consequences
 
 Providers can add conditions without adding provider-specific branches to core.
