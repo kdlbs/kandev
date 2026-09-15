@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/plugins"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
 )
@@ -53,6 +54,7 @@ type Hub struct {
 	sessionDataProvider       SessionDataProvider
 	sessionGitDataProvider    SessionGitDataProvider
 	userSubscriptionListeners []func(userID string)
+	pluginConversationService *plugins.Service
 
 	// clientDisconnectListener releases connection-bound resources after a
 	// client is removed from the hub. It runs asynchronously so durable cleanup
@@ -75,8 +77,11 @@ type Hub struct {
 	// value = unscoped, today's behavior. See access.go.
 	authPolicy AuthPolicy
 
-	mu     sync.RWMutex
-	logger *logger.Logger
+	// orderedSessionMu closes the replay/register/append race for the ordered
+	// session stream. Never acquire it while holding h.mu or a client mutex.
+	orderedSessionMu sync.Mutex
+	mu               sync.RWMutex
+	logger           *logger.Logger
 }
 
 // NewHub creates a new WebSocket hub
@@ -95,6 +100,19 @@ func NewHub(dispatcher *ws.Dispatcher, log *logger.Logger) *Hub {
 		dispatcher:               dispatcher,
 		sessionMode:              newSessionModeTracker(),
 		logger:                   log.WithFields(zap.String("component", "ws_hub")),
+	}
+}
+
+func (h *Hub) SetPluginConversationService(service *plugins.Service) {
+	h.mu.Lock()
+	h.pluginConversationService = service
+	h.mu.Unlock()
+	if service != nil {
+		service.SetSessionEventSink(func(event plugins.SessionEvent) {
+			h.orderedSessionMu.Lock()
+			defer h.orderedSessionMu.Unlock()
+			h.broadcastCommittedOrderedSessionEvent(service, event)
+		})
 	}
 }
 
@@ -515,12 +533,22 @@ func (h *Hub) getSessionRecipientsLocked(sessionID string) []*Client {
 // BroadcastToSession sends a notification to clients subscribed to OR focused on
 // a specific session. See getSessionRecipientsLocked for why focus is included.
 func (h *Hub) BroadcastToSession(sessionID string, msg *ws.Message) {
+	h.appendAndBroadcastOrderedSessionEvent(sessionID, msg)
 	data, err := json.Marshal(msg)
 	if err != nil {
 		h.logger.Error("Failed to marshal message", zap.Error(err))
 		return
 	}
 	clients := h.authorizedSessionRecipients(sessionID)
+	if _, ordered := orderedEventTypeByAction[msg.Action]; ordered {
+		legacyClients := clients[:0]
+		for _, client := range clients {
+			if !client.hasOrderedSessionSubscription(sessionID) {
+				legacyClients = append(legacyClients, client)
+			}
+		}
+		clients = legacyClients
+	}
 	h.logger.Debug("BroadcastToSession",
 		zap.String("session_id", sessionID),
 		zap.String("action", msg.Action),
