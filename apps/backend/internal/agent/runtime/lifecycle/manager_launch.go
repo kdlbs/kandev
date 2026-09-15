@@ -1022,6 +1022,14 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("resolve launch auth token: %w", err)
 	}
+	// The journal is opened by the agentctl process, so concurrent sessions
+	// sharing one task environment must have separate files. A session remains
+	// the stable owner across agentctl replacement; the environment fallback is
+	// only for callers that do not provide a session identity.
+	journalOwnerID := reqWithWorktree.SessionID
+	if journalOwnerID == "" {
+		journalOwnerID = reqWithWorktree.TaskEnvironmentID
+	}
 
 	var autoApproveOverride *bool
 	if profileInfo != nil {
@@ -1034,10 +1042,17 @@ func (m *Manager) launchBuildExecutorRequest(ctx context.Context, executionID st
 		SessionID:                      reqWithWorktree.SessionID,
 		TaskEnvironmentID:              reqWithWorktree.TaskEnvironmentID,
 		WorkspaceReuseRequired:         reqWithWorktree.WorkspaceReuseRequired,
+		ForceContextContinuation:       reqWithWorktree.ForceContextContinuation,
 		AgentProfileID:                 executionProfileID(reqWithWorktree),
 		OfficeAgentProfileID:           reqWithWorktree.AgentProfileID,
 		PromptTurnID:                   reqWithWorktree.TurnID,
 		WorkspacePath:                  reqWithWorktree.WorkspacePath,
+		OriginalWorkspacePath:          reqWithWorktree.OriginalWorkspacePath,
+		DeliveryStreamID:               reqWithWorktree.DeliveryStreamID,
+		DeliveryIncarnationID:          reqWithWorktree.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:      reqWithWorktree.DeliveryHarnessGeneration,
+		DurableJournalHostRoot:         m.dataDir,
+		DurableJournalOwnerID:          journalOwnerID,
 		WorkspaceSourceRoots:           workspaceSourceRoots(reqWithWorktree.WorkspaceFolders, workspaceRepositorySpecsFromLaunch(reqWithWorktree)),
 		Protocol:                       string(agentConfig.Runtime().Protocol),
 		Env:                            env,

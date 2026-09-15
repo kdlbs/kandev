@@ -42,7 +42,12 @@ async function runAndWait(
   // The API completion is the readiness signal. The idle wait allows the
   // config-chat WS subscription to replay the completed turn into the UI.
   await page.waitForChatIdle({ timeout: 30_000 });
-  await expect(page.activeChat().getByText(marker, { exact: true })).toBeVisible({
+  const markerMessage = page
+    .activeChat()
+    .getByTestId("agent-message-highlight")
+    .filter({ hasText: marker })
+    .last();
+  await expect(markerMessage).toContainText(marker, {
     timeout: 60_000,
   });
   return page;

@@ -689,7 +689,7 @@ export class SessionPage {
 
   /** "Start fresh session" button shown after agent crash. */
   recoveryFreshButton(): Locator {
-    return this.page.getByTestId("recovery-fresh-button");
+    return this.page.getByTestId("recovery-fresh-button").last();
   }
 
   /** Terminal-state banner shown when the active session has completed. */

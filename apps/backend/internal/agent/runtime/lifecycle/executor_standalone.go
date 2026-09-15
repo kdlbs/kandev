@@ -2,7 +2,9 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -11,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/agent/agents"
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/server/process"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/subproc"
@@ -57,6 +60,8 @@ type StandaloneExecutor struct {
 	recoveryReadTimeout time.Duration
 	recoveryReadRetries int
 	unstoppableRecorder UnstoppableSessionRecorder
+	peerCapabilities    []string
+	peerCapabilitiesSet bool
 }
 
 // NewStandaloneExecutor creates a new standalone runtime.
@@ -76,6 +81,16 @@ func NewStandaloneExecutor(ctl *agentctl.ControlClient, host string, port int, l
 // SetAuthToken sets the per-launch auth token for authenticating instance clients.
 func (r *StandaloneExecutor) SetAuthToken(token string) {
 	r.authToken = token
+}
+
+// SetPeerCapabilities records the authenticated control-server capability
+// set. Recovery uses the durable-delivery capability as positive evidence for
+// requiring the status descriptor; an absent capability can establish the
+// genuine legacy route only when the status endpoint also explicitly reports
+// that it is unsupported.
+func (r *StandaloneExecutor) SetPeerCapabilities(capabilities []string) {
+	r.peerCapabilities = append([]string(nil), capabilities...)
+	r.peerCapabilitiesSet = true
 }
 
 // SetRecoveryRetryConfig installs the bounded per-attempt timeout and retry
@@ -226,6 +241,9 @@ func buildStandaloneCreateInstanceRequest(
 		RemoteContributions:        req.RemoteContributions,
 		ContributionDestinations:   req.ContributionDestinations,
 		ComparisonTargets:          req.ComparisonTargets,
+		DeliveryStreamID:           req.DeliveryStreamID,
+		DeliveryIncarnationID:      req.DeliveryIncarnationID,
+		DeliveryHarnessGeneration:  req.DeliveryHarnessGeneration,
 		WorkspaceSourceRoots:       req.WorkspaceSourceRoots,
 	}
 }
@@ -266,6 +284,13 @@ func (r *StandaloneExecutor) CreateInstance(ctx context.Context, req *ExecutorCr
 	createReq := buildStandaloneCreateInstanceRequest(
 		req, env, agentType, disableAskQuestion, assumeMcpSse, assumeMcpHttp, requiresProcessKill, stripEnv,
 	)
+	if req.DurableJournalHostRoot != "" && req.DurableJournalOwnerID != "" {
+		location, err := resolveDurableJournal(req)
+		if err != nil {
+			return nil, fmt.Errorf("resolve retained delivery journal: %w", err)
+		}
+		createReq.DurableJournalPath = location.Path
+	}
 
 	r.logger.Info("CreateInstance: sending request to agentctl",
 		zap.String("instance_id", req.InstanceID),
@@ -383,7 +408,7 @@ func (r *StandaloneExecutor) RecoverInstances(ctx context.Context, records []*mo
 	tracker := &jointFailureTracker{exec: r, winners: winnersBySession}
 	r.collectRecoveryStops(ctx, results, correlation.Winners, pending, tracker)
 
-	return r.buildRecoveredInstances(correlation.Winners, indexRecordsBySession(records)), nil
+	return r.buildRecoveredInstances(ctx, correlation.Winners, indexRecordsBySession(records)), nil
 }
 
 // recoveryStopOutcome is one instance's bounded stop attempt result.
@@ -589,6 +614,7 @@ func indexRecordsBySession(records []*models.ExecutorRunning) map[string]*models
 // buildRecoveredInstances converts every still-winning correlated instance
 // into an ExecutorInstance for the caller to re-track.
 func (r *StandaloneExecutor) buildRecoveredInstances(
+	ctx context.Context,
 	winners map[string]*agentctl.InstanceInfo,
 	recordBySession map[string]*models.ExecutorRunning,
 ) []*ExecutorInstance {
@@ -600,6 +626,7 @@ func (r *StandaloneExecutor) buildRecoveredInstances(
 			agentctl.WithExecutionID(inst.ID),
 			agentctl.WithSessionID(sessionID),
 			agentctl.WithAuthToken(r.authToken))
+		deliveryStatus, legacyEvidence, deliveryErr := r.discoverDeliveryStatus(ctx, client)
 
 		// AC-EXECUTORS-SURVIVAL-002.14: task identity and workspace path's
 		// declared source is the recovery-inventory record, never the
@@ -624,22 +651,83 @@ func (r *StandaloneExecutor) buildRecoveredInstances(
 		}
 
 		recovered = append(recovered, &ExecutorInstance{
-			InstanceID:           inst.ID,
-			TaskID:               taskID,
-			SessionID:            sessionID,
-			AgentProfileID:       agentProfileID,
-			RuntimeName:          r.Name(),
-			Client:               client,
-			StandaloneInstanceID: inst.ID,
-			StandalonePort:       inst.Port,
-			WorkspacePath:        workspacePath,
-			Metadata:             metadata,
-			Env:                  inst.Env,
-			WorkspaceSourceRoots: inst.WorkspaceSourceRoots,
-			ProviderSessionID:    inst.ProviderSessionID,
+			InstanceID:             inst.ID,
+			TaskID:                 taskID,
+			SessionID:              sessionID,
+			AgentProfileID:         agentProfileID,
+			RuntimeName:            r.Name(),
+			Client:                 client,
+			StandaloneInstanceID:   inst.ID,
+			StandalonePort:         inst.Port,
+			WorkspacePath:          workspacePath,
+			Metadata:               metadata,
+			Env:                    inst.Env,
+			WorkspaceSourceRoots:   inst.WorkspaceSourceRoots,
+			ProviderSessionID:      inst.ProviderSessionID,
+			DeliveryStatus:         deliveryStatus,
+			DeliveryLegacyEvidence: legacyEvidence,
+			DeliveryRecoveryError:  deliveryErr,
 		})
 	}
 	return recovered
+}
+
+const durableDeliveryCapabilityName = "agent-delivery.v1"
+
+func (r *StandaloneExecutor) peerHasCapability(name string) bool {
+	for _, capability := range r.peerCapabilities {
+		if capability == name {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *StandaloneExecutor) discoverDeliveryStatus(
+	ctx context.Context,
+	client *agentctl.Client,
+) (*agentctl.DeliveryStatus, bool, error) {
+	// Direct unit callers and pre-capability control clients do not have an
+	// adoption identity to evaluate. Preserve their legacy recovery surface;
+	// production adoption always sets this bit from GET /identity.
+	if !r.peerCapabilitiesSet {
+		return nil, false, nil
+	}
+
+	timeout := r.recoveryReadTimeout
+	if timeout <= 0 {
+		timeout = defaultRecoveryReadTimeout
+	}
+	retries := r.recoveryReadRetries
+	if retries < 0 {
+		retries = defaultRecoveryReadRetries
+	}
+	var lastErr error
+	for attempt := 0; attempt <= retries; attempt++ {
+		attemptCtx, cancel := context.WithTimeout(ctx, timeout)
+		status, err := client.GetDeliveryStatus(attemptCtx, "")
+		cancel()
+		if err == nil {
+			if status.Version != journal.CurrentVersion {
+				return nil, false, fmt.Errorf("unsupported durable delivery version %d", status.Version)
+			}
+			if status.Durable {
+				return status, false, nil
+			}
+			if !r.peerHasCapability(durableDeliveryCapabilityName) && status.Reason == "storage_not_durable" {
+				return status, true, nil
+			}
+			return nil, false, fmt.Errorf("durable delivery is unavailable: %s", status.Reason)
+		}
+		lastErr = err
+		var httpErr *agentctl.DeliveryHTTPError
+		if errors.As(err, &httpErr) &&
+			!r.peerHasCapability(durableDeliveryCapabilityName) &&
+			(httpErr.StatusCode == http.StatusNotFound || httpErr.StatusCode == http.StatusMethodNotAllowed) {
+			return nil, true, nil
+		}
+	}
+	return nil, false, fmt.Errorf("discover durable delivery status: %w", lastErr)
 }
 
 // SetInteractiveRunner sets the interactive runner for passthrough mode.

@@ -127,7 +127,10 @@ test.describe("mobile: cancelled turn completion", () => {
       .toBe(workflow.workingStepId);
     await expect(session.cancelAgentButton()).toBeVisible({ timeout: 30_000 });
     await expect(
-      session.activeChat().getByText("mobile cancelable turn started", { exact: false }),
+      session
+        .activeChat()
+        .getByTestId("agent-message-highlight")
+        .filter({ hasText: "mobile cancelable turn started" }),
     ).toBeVisible({ timeout: 15_000 });
 
     expect((await apiClient.listTaskSessions(task.id)).sessions).toHaveLength(1);

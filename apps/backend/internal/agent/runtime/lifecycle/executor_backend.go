@@ -266,6 +266,10 @@ const (
 	// change. Empty for every non-Office launch, which is legitimate, not
 	// missing.
 	MetadataKeyOfficeAgentProfileID = "office_agent_profile_id"
+	// MetadataKeyOriginalWorkspacePath preserves the first agent-visible CWD
+	// across runtime and backend restarts so restore policy can distinguish a
+	// relocation from an unchanged workspace.
+	MetadataKeyOriginalWorkspacePath = "original_workspace_path"
 
 	// SSH runtime metadata keys (per-session, except SSHWorkdirRoot which is per-profile).
 	MetadataKeySSHHostAlias            = "ssh_host_alias"
@@ -395,6 +399,7 @@ var persistentMetadataKeys = map[string]bool{
 	MetadataKeyRemoteContributions:      true,
 	MetadataKeyContributionDestinations: true,
 	MetadataKeyOfficeAgentProfileID:     true,
+	MetadataKeyOriginalWorkspacePath:    true,
 }
 
 // persistentMetadataPrefixes lists key prefixes that should persist.
@@ -414,7 +419,8 @@ var persistentMetadataPrefixes = []string{
 var sessionScopedMetadataKeys = map[string]bool{
 	// Office identity belongs to the session that produced the runtime row and
 	// must not be inherited by a sibling session sharing the environment.
-	MetadataKeyOfficeAgentProfileID: true,
+	MetadataKeyOfficeAgentProfileID:  true,
+	MetadataKeyOriginalWorkspacePath: true,
 
 	MetadataKeySSHRemoteSessionDir:             true,
 	MetadataKeySSHRemoteAgentctlPort:           true,
@@ -594,13 +600,26 @@ type ExecutorCreateRequest struct {
 	// WorkspaceReuseRequired means this runtime must attach to the supplied
 	// environment handle and must never fall back to provisioning a replacement.
 	WorkspaceReuseRequired bool
-	AgentProfileID         string
-	OfficeAgentProfileID   string
-	PromptTurnID           string
-	WorkspacePath          string
-	WorkspaceSourceRoots   []string
-	Protocol               string
-	Env                    map[string]string
+	// ForceContextContinuation records that the explicit recovery path started
+	// a new native conversation from a bounded Kandev context snapshot.
+	ForceContextContinuation bool
+	AgentProfileID           string
+	OfficeAgentProfileID     string
+	PromptTurnID             string
+	WorkspacePath            string
+	OriginalWorkspacePath    string
+	// DurableJournalHostRoot is the retained storage root owned by the
+	// executor. Providers map it to their own stable environment path.
+	DurableJournalHostRoot string
+	DurableJournalOwnerID  string
+	// DeliveryStreamID is stable across agentctl replacement within one
+	// harness generation. The incarnation and generation fence stale events.
+	DeliveryStreamID          string
+	DeliveryIncarnationID     string
+	DeliveryHarnessGeneration uint64
+	WorkspaceSourceRoots      []string
+	Protocol                  string
+	Env                       map[string]string
 	// ApprovedSecretEnvKeys contains repository binding keys explicitly
 	// approved for SSH forwarding. Other request env keys remain filtered.
 	ApprovedSecretEnvKeys  []string
@@ -687,6 +706,21 @@ type ExecutorInstance struct {
 	// "provider session identity" row). Same recovery-only shape as Env above.
 	ProviderSessionID string
 
+	// DeliveryStatus is the authenticated recovery descriptor captured from the
+	// surviving instance before lifecycle re-tracking. It is nil for legacy
+	// runtimes and isolated recovery callers that do not advertise the durable
+	// delivery capability.
+	DeliveryStatus *agentctl.DeliveryStatus
+	// DeliveryLegacyEvidence is true only when an authenticated old peer
+	// positively lacks the durable-delivery capability and explicitly does not
+	// implement the status route. It is distinct from an undiscovered or failed
+	// status request, both of which block durable recovery.
+	DeliveryLegacyEvidence bool
+	// DeliveryRecoveryError carries an adoption evidence failure back to the
+	// lifecycle manager. The instance remains attached so the manager can use
+	// its existing bounded stop and recovery-guard path.
+	DeliveryRecoveryError error
+
 	// AgentProfileID is a recovery-only carrier for
 	// AC-EXECUTORS-SURVIVAL-002.14's "agent profile identity" row: the
 	// recovery-inventory record's execution-profile column, read by
@@ -715,9 +749,9 @@ type ExecutorInstance struct {
 
 // ToAgentExecution converts a ExecutorInstance to an AgentExecution.
 func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentExecution {
-	metadata := req.Metadata
-	if metadata == nil {
-		metadata = make(map[string]interface{})
+	metadata := make(map[string]interface{}, len(req.Metadata)+len(ri.Metadata)+1)
+	for k, v := range req.Metadata {
+		metadata[k] = v
 	}
 	// Merge runtime metadata
 	for k, v := range ri.Metadata {
@@ -728,6 +762,11 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 	if workspacePath == "" {
 		workspacePath = req.WorkspacePath
 	}
+	originalWorkspacePath := req.OriginalWorkspacePath
+	if originalWorkspacePath == "" {
+		originalWorkspacePath = workspacePath
+	}
+	metadata[MetadataKeyOriginalWorkspacePath] = originalWorkspacePath
 
 	var historyEnabled bool
 	var agentID string
@@ -738,30 +777,35 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 				rt.SessionConfig.NewSessionOnWorkspaceRebind
 		}
 	}
+	historyEnabled = historyEnabled || req.ForceContextContinuation
 
 	execution := &AgentExecution{
-		ID:                   ri.InstanceID,
-		RunID:                req.Env["KANDEV_RUN_ID"],
-		TaskID:               req.TaskID,
-		SessionID:            req.SessionID,
-		TaskEnvironmentID:    req.TaskEnvironmentID,
-		AgentProfileID:       req.AgentProfileID,
-		OfficeAgentProfileID: req.OfficeAgentProfileID,
-		promptTurnID:         req.PromptTurnID,
-		AgentID:              agentID,
-		ContainerID:          ri.ContainerID,
-		ContainerIP:          ri.ContainerIP,
-		WorkspacePath:        workspacePath,
-		WorkspaceSourceRoots: append([]string(nil), req.WorkspaceSourceRoots...),
-		RuntimeName:          ri.RuntimeName,
-		Status:               v1.AgentStatusRunning,
-		StartedAt:            time.Now(),
-		metadata:             metadata,
-		agentctl:             ri.Client,
-		standaloneInstanceID: ri.StandaloneInstanceID,
-		standalonePort:       ri.StandalonePort,
-		historyEnabled:       historyEnabled,
-		promptDoneCh:         make(chan PromptCompletionSignal, 1),
+		ID:                        ri.InstanceID,
+		RunID:                     req.Env["KANDEV_RUN_ID"],
+		TaskID:                    req.TaskID,
+		SessionID:                 req.SessionID,
+		TaskEnvironmentID:         req.TaskEnvironmentID,
+		AgentProfileID:            req.AgentProfileID,
+		OfficeAgentProfileID:      req.OfficeAgentProfileID,
+		promptTurnID:              req.PromptTurnID,
+		AgentID:                   agentID,
+		ContainerID:               ri.ContainerID,
+		ContainerIP:               ri.ContainerIP,
+		WorkspacePath:             workspacePath,
+		OriginalWorkspacePath:     originalWorkspacePath,
+		WorkspaceSourceRoots:      append([]string(nil), req.WorkspaceSourceRoots...),
+		DeliveryStreamID:          req.DeliveryStreamID,
+		DeliveryIncarnationID:     req.DeliveryIncarnationID,
+		DeliveryHarnessGeneration: req.DeliveryHarnessGeneration,
+		RuntimeName:               ri.RuntimeName,
+		Status:                    v1.AgentStatusRunning,
+		StartedAt:                 time.Now(),
+		metadata:                  metadata,
+		agentctl:                  ri.Client,
+		standaloneInstanceID:      ri.StandaloneInstanceID,
+		standalonePort:            ri.StandalonePort,
+		historyEnabled:            historyEnabled,
+		promptDoneCh:              make(chan PromptCompletionSignal, 1),
 	}
 	execution.setRuntimeEnvironment(req.Env)
 	return execution

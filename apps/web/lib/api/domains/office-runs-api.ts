@@ -81,6 +81,8 @@ export type RunRouting = {
   resolved_provider_id?: string;
   resolved_model?: string;
   blocked_status?: string;
+  session_recovery_block_id?: string;
+  session_recovery_reason?: string;
   earliest_retry_at?: string;
   attempts: RouteAttempt[];
 };

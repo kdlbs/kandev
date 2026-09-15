@@ -2,13 +2,18 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // StreamCallbacks defines callbacks for stream events
@@ -35,6 +40,11 @@ type StreamCallbacks struct {
 type StreamManager struct {
 	logger     *logger.Logger
 	callbacks  StreamCallbacks
+	deliveryMu sync.RWMutex
+	delivery   AgentDeliveryRepository
+	ackMu      sync.Mutex
+	ackWorkers map[string]*durableDeliveryAckWorker
+	ackWG      sync.WaitGroup
 	mcpMu      sync.RWMutex
 	mcpHandler agentctl.MCPHandler
 	// mcpIdentityScoper scopes in-session MCP dispatches to the owner of the
@@ -153,6 +163,7 @@ func NewStreamManager(log *logger.Logger, callbacks StreamCallbacks, mcpHandler 
 		mcpHandler: mcpHandler,
 		stopCh:     stopCh,
 		waitCh:     make(chan struct{}),
+		ackWorkers: make(map[string]*durableDeliveryAckWorker),
 	}
 }
 
@@ -201,6 +212,12 @@ func (sm *StreamManager) Wait() {
 	sm.wgMu.Unlock()
 	sm.waitChOnce.Do(func() { close(sm.waitCh) })
 	sm.wg.Wait()
+	sm.ackMu.Lock()
+	for _, worker := range sm.ackWorkers {
+		worker.cancel()
+	}
+	sm.ackMu.Unlock()
+	sm.ackWG.Wait()
 }
 
 func (sm *StreamManager) start(fn func()) bool {
@@ -304,18 +321,62 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 		}
 		return
 	}
+	delivery := sm.deliveryRepository()
+	streamID := execution.DeliveryStreamID
+	if streamID == "" {
+		streamID = execution.SessionID
+	}
+	after, cursorErr := sm.deliveryReplayCursor(ctx, delivery, streamID)
+	if cursorErr != nil {
+		sm.logger.Error("failed to load durable delivery replay cursor",
+			zap.String("instance_id", execution.ID),
+			zap.String("stream_id", streamID),
+			zap.Error(cursorErr))
+		releaseClient()
+		if ready != nil {
+			close(ready)
+		}
+		return
+	}
 
-	err := client.StreamUpdates(ctx, func(event agentctl.AgentEvent) {
-		if sm.callbacks.OnAgentEventWithGeneration != nil {
-			sm.callbacks.OnAgentEventWithGeneration(execution, event, startupGeneration)
-		} else if sm.callbacks.OnAgentEvent != nil {
-			sm.callbacks.OnAgentEvent(execution, event)
+	processor := newStreamEventProcessor(sm, ctx, execution, client, delivery, startupGeneration)
+	err := client.StreamUpdatesFrom(ctx, func(event agentctl.AgentEvent) {
+		if !processor.enqueue(event) {
+			sm.logger.Error("durable agent event processor is unavailable",
+				zap.String("instance_id", execution.ID))
+			if processor.ctx.Err() == nil {
+				processor.fail(errStreamEventProcessorQueueFull)
+				client.CloseUpdatesStream()
+			}
 		}
 	}, sm.mcpHandlerFor(execution), func(disconnectErr error) {
+		processErr := processor.close()
+		if processErr != nil {
+			sm.logger.Error("durable agent event processing failed",
+				zap.String("instance_id", execution.ID), zap.Error(processErr))
+			if disconnectErr == nil {
+				disconnectErr = processErr
+			} else {
+				disconnectErr = errors.Join(disconnectErr, processErr)
+			}
+		}
 		if disconnectErr != nil {
+			overloaded := errors.Is(disconnectErr, agentctl.ErrAgentEventQueueFull) ||
+				errors.Is(disconnectErr, errStreamEventProcessorQueueFull)
+			if overloaded && execution.DeliveryMode != DurableDeliveryV1 {
+				disconnectErr = fmt.Errorf("%w: %v", ErrUncertainPromptDelivery, disconnectErr)
+				sm.handleUpdatesDisconnectWithGeneration(execution, disconnectErr, startupGeneration)
+				return
+			}
+			if sm.shouldReconnectAfterStreamOverload(execution, disconnectErr) {
+				return
+			}
+			if sm.reconcileDisconnectedSubmission(ctx, execution, client) {
+				return
+			}
 			sm.handleUpdatesDisconnectWithGeneration(execution, disconnectErr, startupGeneration)
 		}
-	})
+	}, after)
 	releaseClient()
 
 	// Signal that the stream connection attempt is complete (success or failure)
@@ -330,6 +391,325 @@ func (sm *StreamManager) connectUpdatesStream(execution *AgentExecution, ready c
 			zap.String("instance_id", execution.ID),
 			zap.Error(err))
 	}
+}
+
+// shouldReconnectAfterStreamOverload handles bounded queue pressure without
+// converting a recoverable durable stream into a failed prompt. The next
+// connection replays from the SQL projected cursor. Legacy streams have no
+// retained cursor contract, so their overflow is classified as uncertain.
+func (sm *StreamManager) shouldReconnectAfterStreamOverload(
+	execution *AgentExecution,
+	err error,
+) bool {
+	if execution == nil {
+		return false
+	}
+	readerOverflow := errors.Is(err, agentctl.ErrAgentEventQueueFull)
+	processorOverflow := errors.Is(err, errStreamEventProcessorQueueFull)
+	if !readerOverflow && !processorOverflow {
+		return false
+	}
+	if execution.DeliveryMode != DurableDeliveryV1 {
+		return false
+	}
+	if !sm.start(func() {
+		if !sm.sleepOrStop(20 * time.Millisecond) {
+			return
+		}
+		sm.connectUpdatesStream(execution, nil)
+	}) {
+		sm.logger.Debug("skipping durable stream overload reconnect during shutdown",
+			zap.String("execution_id", execution.ID))
+	}
+	return true
+}
+
+type preparedAgentEvent struct {
+	event          agentctl.AgentEvent
+	durableEvent   *models.AgentDeliveryEvent
+	deliveryEffect *models.AgentDeliveryEffect
+	skipCallback   bool
+	duplicate      bool
+}
+
+func (sm *StreamManager) processAgentEvent(
+	ctx context.Context,
+	execution *AgentExecution,
+	client *agentctl.Client,
+	delivery AgentDeliveryRepository,
+	event agentctl.AgentEvent,
+	startupGeneration uint64,
+) error {
+	prepared, err := sm.prepareAgentEvent(ctx, execution, client, delivery, event)
+	if err != nil {
+		return err
+	}
+	return sm.processPreparedAgentEvent(ctx, execution, client, delivery, prepared, startupGeneration)
+}
+
+func (sm *StreamManager) prepareAgentEvent(
+	ctx context.Context,
+	execution *AgentExecution,
+	client *agentctl.Client,
+	delivery AgentDeliveryRepository,
+	event agentctl.AgentEvent,
+) (preparedAgentEvent, error) {
+	durable, err := durableAgentEventIdentity(execution, event)
+	if err != nil {
+		return preparedAgentEvent{}, err
+	}
+	if !durable {
+		if event.DeliverySubmissionID != "" {
+			execution.setDeliverySubmissionID(event.DeliverySubmissionID)
+		}
+		return preparedAgentEvent{event: event}, nil
+	}
+	if delivery == nil {
+		if event.DeliverySubmissionID != "" {
+			execution.setDeliverySubmissionID(event.DeliverySubmissionID)
+		}
+		return preparedAgentEvent{event: event}, nil
+	}
+
+	// Capture the durable record before invoking lifecycle callbacks. Those
+	// callbacks can advance or clear prompt state, but the inbox payload must
+	// remain byte-identical from admission through projection.
+	durableEvent := durableAgentEvent(execution, event)
+	process, skipCallback, effect, err := sm.prepareDurableAgentDeliveryEvent(
+		ctx, execution, durableEvent, delivery,
+	)
+	if err != nil {
+		return preparedAgentEvent{}, fmt.Errorf("durable agent event ownership check: %w", err)
+	}
+	if event.DeliverySubmissionID != "" {
+		execution.setDeliverySubmissionID(event.DeliverySubmissionID)
+	}
+	if !process {
+		if err := acknowledgeDurableAgentEvent(ctx, event, client); err != nil {
+			return preparedAgentEvent{}, fmt.Errorf("acknowledge duplicate durable event: %w", err)
+		}
+		return preparedAgentEvent{event: event, duplicate: true}, nil
+	}
+	return preparedAgentEvent{
+		event:          event,
+		durableEvent:   durableEvent,
+		deliveryEffect: effect,
+		skipCallback:   skipCallback,
+	}, nil
+}
+
+func (sm *StreamManager) notifyAgentEvent(
+	execution *AgentExecution,
+	event agentctl.AgentEvent,
+	startupGeneration uint64,
+) {
+	if sm.callbacks.OnAgentEventWithGeneration != nil {
+		sm.callbacks.OnAgentEventWithGeneration(execution, event, startupGeneration)
+		return
+	}
+	if sm.callbacks.OnAgentEvent != nil {
+		sm.callbacks.OnAgentEvent(execution, event)
+	}
+}
+
+func (sm *StreamManager) prepareDurableAgentDeliveryEvent(
+	ctx context.Context,
+	execution *AgentExecution,
+	durableEvent *models.AgentDeliveryEvent,
+	repository AgentDeliveryRepository,
+) (process, skipCallback bool, effect *models.AgentDeliveryEffect, err error) {
+	if durableEvent == nil || durableEvent.StreamID == "" || durableEvent.Sequence == 0 {
+		return true, false, nil, nil
+	}
+	stale, err := deliveryEventIsStale(ctx, execution, durableEvent, repository)
+	if err != nil {
+		return false, false, nil, err
+	}
+	process, err = sm.receiveDurableAgentDeliveryEvent(ctx, durableEvent, repository)
+	if err != nil {
+		return false, false, nil, fmt.Errorf("admit durable agent event: %w", err)
+	}
+	effect = deliveryEffectForDeliveryEvent(durableEvent)
+	alreadyApplied, err := sm.deliveryEffectAlreadyApplied(ctx, repository, effect)
+	if err != nil {
+		return false, false, nil, err
+	}
+	return process, stale || alreadyApplied, effect, nil
+}
+
+func (sm *StreamManager) projectCanonicalAgentEvent(
+	ctx context.Context,
+	execution *AgentExecution,
+	event agentctl.AgentEvent,
+	durableEvent *models.AgentDeliveryEvent,
+	delivery AgentDeliveryRepository,
+	client *agentctl.Client,
+) (agentctl.AgentEvent, bool, error) {
+	if delivery == nil || !canonicalAgentDeliveryEvent(event) {
+		return event, false, nil
+	}
+	if event.DeliveryStreamID == "" || event.DeliverySequence == 0 {
+		return event, false, nil
+	}
+	if durableEvent == nil {
+		durableEvent = durableAgentEvent(execution, event)
+	}
+	projector, ok := delivery.(canonicalAgentDeliveryProjector)
+	if !ok {
+		sm.logger.Debug("canonical agent delivery projector is unavailable; using legacy projection",
+			zap.String("instance_id", execution.ID),
+			zap.String("event_type", event.Type))
+		return event, false, nil
+	}
+	isAppend, err := projector.ProjectCanonicalAgentDeliveryEvent(
+		ctx, durableEvent, deliveryEffectForEvent(event),
+	)
+	if err != nil {
+		sm.logger.Error("canonical agent event projection failed",
+			zap.String("instance_id", execution.ID),
+			zap.String("event_type", event.Type),
+			zap.Error(err))
+		return event, false, err
+	}
+	event.CanonicalMessageID = canonicalAgentMessageID(execution, event)
+	event.CanonicalProjection = true
+	event.CanonicalMessageAppend = isAppend
+	// Projection is the canonical commit boundary. ACK transport is scheduled
+	// independently so a lost ACK cannot hide output that is already durable.
+	sm.scheduleDurableDeliveryAck(client, event)
+	return event, true, nil
+}
+
+// projectCanonicalAgentEvents applies one contiguous compatible batch before
+// any lifecycle callback is notified. Repositories without the optional batch
+// contract retain the single-event projection path.
+func (sm *StreamManager) projectCanonicalAgentEvents(
+	ctx context.Context,
+	execution *AgentExecution,
+	prepared []preparedAgentEvent,
+	delivery AgentDeliveryRepository,
+	client *agentctl.Client,
+	startupGeneration uint64,
+) error {
+	if len(prepared) == 0 {
+		return nil
+	}
+	projector, ok := delivery.(canonicalAgentDeliveryBatchProjector)
+	if !ok {
+		return sm.projectCanonicalAgentEventsIndividually(
+			ctx, execution, prepared, delivery, client, startupGeneration,
+		)
+	}
+
+	events, effects, err := canonicalDeliveryBatchInputs(prepared)
+	if err != nil {
+		return err
+	}
+	appendMessages, err := projector.ProjectCanonicalAgentDeliveryEvents(ctx, events, effects)
+	if err != nil {
+		return err
+	}
+	if len(appendMessages) != len(prepared) {
+		return fmt.Errorf("canonical delivery projector returned %d results for %d events", len(appendMessages), len(prepared))
+	}
+	sm.notifyCanonicalAgentEventBatch(execution, prepared, appendMessages, client, startupGeneration)
+	return nil
+}
+
+func (sm *StreamManager) projectCanonicalAgentEventsIndividually(
+	ctx context.Context,
+	execution *AgentExecution,
+	prepared []preparedAgentEvent,
+	delivery AgentDeliveryRepository,
+	client *agentctl.Client,
+	startupGeneration uint64,
+) error {
+	for _, item := range prepared {
+		event, _, err := sm.projectCanonicalAgentEvent(
+			ctx, execution, item.event, item.durableEvent, delivery, client,
+		)
+		if err != nil {
+			return err
+		}
+		if !item.skipCallback {
+			sm.notifyAgentEvent(execution, event, startupGeneration)
+		}
+	}
+	return nil
+}
+
+func canonicalDeliveryBatchInputs(
+	prepared []preparedAgentEvent,
+) ([]*models.AgentDeliveryEvent, []*models.AgentDeliveryEffect, error) {
+	events := make([]*models.AgentDeliveryEvent, len(prepared))
+	effects := make([]*models.AgentDeliveryEffect, len(prepared))
+	for i, item := range prepared {
+		if item.durableEvent == nil || !canonicalAgentDeliveryEvent(item.event) {
+			return nil, nil, fmt.Errorf("canonical delivery batch contains a non-canonical event")
+		}
+		events[i] = item.durableEvent
+		effects[i] = item.deliveryEffect
+	}
+	return events, effects, nil
+}
+
+func (sm *StreamManager) notifyCanonicalAgentEventBatch(
+	execution *AgentExecution,
+	prepared []preparedAgentEvent,
+	appendMessages []bool,
+	client *agentctl.Client,
+	startupGeneration uint64,
+) {
+	var notification agentctl.AgentEvent
+	var notify bool
+	var content strings.Builder
+	for i, item := range prepared {
+		event := item.event
+		event.CanonicalMessageID = canonicalAgentMessageID(execution, event)
+		event.CanonicalProjection = true
+		event.CanonicalMessageAppend = appendMessages[i]
+		sm.scheduleDurableDeliveryAck(client, event)
+		if item.skipCallback {
+			continue
+		}
+		if !notify {
+			notification = event
+			notify = true
+		}
+		if event.Type == streams.EventTypeReasoning {
+			content.WriteString(event.ReasoningText)
+		} else {
+			content.WriteString(event.Text)
+		}
+	}
+	if notify {
+		if notification.Type == streams.EventTypeReasoning {
+			notification.ReasoningText = content.String()
+		} else {
+			notification.Text = content.String()
+		}
+		sm.notifyAgentEvent(execution, notification, startupGeneration)
+	}
+}
+
+// durableAgentEventIdentity distinguishes a genuine legacy event from a
+// malformed event from an execution that already negotiated retained
+// delivery. Legacy callbacks must remain usable when a repository is present,
+// while a v1 stream must fail closed if its cursor identity is absent.
+func durableAgentEventIdentity(execution *AgentExecution, event agentctl.AgentEvent) (bool, error) {
+	complete := event.DeliveryStreamID != "" && event.DeliverySequence > 0
+	if complete {
+		return true, nil
+	}
+	partial := event.DeliveryStreamID != "" ||
+		event.DeliveryIncarnationID != "" ||
+		event.DeliveryHarnessGeneration != 0 ||
+		event.DeliverySequence != 0
+	durableExpected := execution != nil && execution.DeliveryMode == DurableDeliveryV1
+	if partial || durableExpected {
+		return false, fmt.Errorf("%w: durable agent event identity is missing", ErrUncertainPromptDelivery)
+	}
+	return false, nil
 }
 
 func (sm *StreamManager) handleUpdatesDisconnect(execution *AgentExecution, disconnectErr error) {
@@ -350,11 +730,23 @@ func (sm *StreamManager) handleUpdatesDisconnectWithGeneration(
 		sm.callbacks.OnStreamDisconnectWithGeneration(execution, disconnectErr, promptGeneration, startupGeneration)
 		return
 	}
+	uncertainSubmissionID := execution.deliverySubmissionIDSnapshot()
+	uncertain := uncertainSubmissionID != "" || errors.Is(disconnectErr, ErrUncertainPromptDelivery)
+	signalError := "agent stream disconnected: " + disconnectErr.Error()
+	if uncertain {
+		signalError = fmt.Sprintf(
+			"%s: %s; reconcile submission %q before retrying",
+			ErrUncertainPromptDelivery,
+			disconnectErr,
+			uncertainSubmissionID,
+		)
+	}
 	if !execution.signalPromptCompletionForStartupGeneration(
 		startupGeneration,
 		PromptCompletionSignal{
 			IsError:          true,
-			Error:            "agent stream disconnected: " + disconnectErr.Error(),
+			Uncertain:        uncertain,
+			Error:            signalError,
 			PromptGeneration: promptGeneration,
 		},
 	) {

@@ -7,9 +7,11 @@ import (
 
 	"github.com/kandev/kandev/internal/agent/executor"
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/journal"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
+	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
 // fakeTurnOutcomeBackend embeds *MockExecutor so it satisfies ExecutorBackend
@@ -247,6 +249,66 @@ func TestPublishRecoveredExecutionRunningPublishesAgentRunning(t *testing.T) {
 
 	if !hasEventType(eventBus.PublishedEvents, events.AgentRunning) {
 		t.Fatal("expected agent.running to be published")
+	}
+}
+
+func TestPublishRecoveredExecutionReadySettlesIdleDurableRecovery(t *testing.T) {
+	mgr, eventBus := newTurnOutcomeTestManagerPlain(t)
+	execution := createTestExecution("exec-1", "task-1", "session-1")
+	execution.recoveredPromptGenerationPending.Store(true)
+	if err := mgr.executionStore.Add(execution); err != nil {
+		t.Fatalf("add execution: %v", err)
+	}
+
+	mgr.publishRecoveredExecutionReady(context.Background(), execution)
+
+	if execution.Status != v1.AgentStatusReady {
+		t.Fatalf("status = %q, want ready", execution.Status)
+	}
+	if execution.recoveredPromptGenerationPending.Load() {
+		t.Fatal("idle recovered execution retained pending prompt-generation state")
+	}
+	if !hasEventType(eventBus.PublishedEvents, events.AgentReady) {
+		t.Fatal("expected agent.ready to be published")
+	}
+}
+
+func TestDurableRecoveryHasPendingWork(t *testing.T) {
+	tests := []struct {
+		name      string
+		execution *AgentExecution
+		want      bool
+	}{
+		{name: "nil", execution: nil, want: false},
+		{name: "empty descriptor", execution: &AgentExecution{}, want: false},
+		{
+			name: "replay suffix",
+			execution: &AgentExecution{
+				DeliveryDescriptor:   &agentctl.DeliveryStatus{Stream: &journal.Stream{HighWater: 3}},
+				DeliveryReplayCursor: 2,
+			},
+			want: true,
+		},
+		{
+			name: "projected idle",
+			execution: &AgentExecution{
+				DeliveryDescriptor:   &agentctl.DeliveryStatus{Stream: &journal.Stream{HighWater: 3}},
+				DeliveryReplayCursor: 3,
+			},
+			want: false,
+		},
+		{
+			name:      "active submission",
+			execution: &AgentExecution{deliverySubmissionID: "prompt:active"},
+			want:      true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := durableRecoveryHasPendingWork(test.execution); got != test.want {
+				t.Fatalf("durableRecoveryHasPendingWork = %t, want %t", got, test.want)
+			}
+		})
 	}
 }
 

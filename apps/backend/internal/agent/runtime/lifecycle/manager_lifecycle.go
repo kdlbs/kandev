@@ -10,6 +10,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/executor"
+	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
 	"github.com/kandev/kandev/internal/agentctl/tracing"
 	agentctltypes "github.com/kandev/kandev/internal/agentctl/types"
 	"github.com/kandev/kandev/internal/task/models"
@@ -140,18 +141,19 @@ func (m *Manager) Start(ctx context.Context) error {
 				// declared source is the recovery-inventory record's
 				// execution-profile column, carried onto ri by
 				// buildRecoveredInstances -- never the adopted instance.
-				AgentProfileID:       ri.AgentProfileID,
-				ContainerID:          ri.ContainerID,
-				ContainerIP:          ri.ContainerIP,
-				WorkspacePath:        ri.WorkspacePath,
-				RuntimeName:          ri.RuntimeName,
-				Status:               v1.AgentStatusRunning,
-				StartedAt:            time.Now(),
-				metadata:             ri.Metadata,
-				agentctl:             ri.Client,
-				standaloneInstanceID: ri.StandaloneInstanceID,
-				standalonePort:       ri.StandalonePort,
-				promptDoneCh:         make(chan PromptCompletionSignal, 1),
+				AgentProfileID:        ri.AgentProfileID,
+				ContainerID:           ri.ContainerID,
+				ContainerIP:           ri.ContainerIP,
+				WorkspacePath:         ri.WorkspacePath,
+				RuntimeName:           ri.RuntimeName,
+				Status:                v1.AgentStatusRunning,
+				StartedAt:             time.Now(),
+				metadata:              ri.Metadata,
+				agentctl:              ri.Client,
+				standaloneInstanceID:  ri.StandaloneInstanceID,
+				standalonePort:        ri.StandalonePort,
+				promptDoneCh:          make(chan PromptCompletionSignal, 1),
+				OriginalWorkspacePath: getMetadataString(ri.Metadata, MetadataKeyOriginalWorkspacePath),
 				// AC-EXECUTORS-SURVIVAL-002.14: run identity is re-derived from
 				// the runtime environment, which is itself read back from the
 				// adopted instance rather than the database (both deliberately
@@ -167,6 +169,9 @@ func (m *Manager) Start(ctx context.Context) error {
 				// session -- never from a durable/database value, which could be
 				// stale relative to what the instance actually resumed.
 				ACPSessionID: ri.ProviderSessionID,
+			}
+			if execution.OriginalWorkspacePath == "" {
+				execution.OriginalWorkspacePath = execution.WorkspacePath
 			}
 			// AC-EXECUTORS-SURVIVAL-002.14's declared source for task
 			// identity is the recovery-inventory record alone, never the
@@ -225,19 +230,65 @@ func (m *Manager) Start(ctx context.Context) error {
 				m.dispatchUnreconstructableStop(&stopWG, ri)
 				continue
 			}
-			// AC-EXECUTORS-SURVIVAL-004.2/004.5: retrieve this instance's
-			// retained turn status before this session's state is published.
-			// A read failure (retries exhausted) must not publish the session
-			// as running -- it is authoritatively unknown, not running -- so
-			// it takes the same not-re-tracked stop path as an
-			// unreconstructable agent identity above.
-			turnOutcome, turnOutcomeResult := m.retrieveRecoveredTurnOutcome(recoveryCtx, ri)
-			if turnOutcomeResult == recoveredTurnOutcomeReadFailed {
-				m.logger.Error("refusing to re-track recovered execution: turn status could not be retrieved",
+			// Durable adoption must establish the authenticated owner, SQL
+			// generation, exact projected cursor, and quiet prompt submission
+			// before any stream or prompt admission can observe this execution.
+			// A failed evidence read uses the same guarded stop path as every
+			// other unreconstructable recovery outcome.
+			if err := m.restoreRecoveredDelivery(recoveryCtx, execution, ri); err != nil {
+				m.logger.Error("refusing to re-track recovered execution: durable delivery identity could not be reconstructed",
 					zap.String("instance_id", execution.ID),
-					zap.String("session_id", execution.SessionID))
+					zap.String("session_id", execution.SessionID),
+					zap.Error(err))
 				m.dispatchUnreconstructableStop(&stopWG, ri)
 				continue
+			}
+			var turnOutcome *agentctl.TurnOutcome
+			turnOutcomeResult := recoveredTurnOutcomeNone
+			durableExecutionAdded := false
+			if execution.DeliveryMode == DurableDeliveryV1 {
+				// Add the recovered execution before replay so terminal events can
+				// claim the reconstructed prompt generation through the normal
+				// lifecycle store. The durable branch publishes a running state
+				// before replay so a replayed terminal can safely publish Ready.
+				if err := m.executionStore.Add(execution); err != nil {
+					m.logger.Error("skipping durable recovered execution before replay",
+						zap.String("execution_id", execution.ID),
+						zap.String("session_id", execution.SessionID),
+						zap.Error(err))
+					m.dispatchUnreconstructableStop(&stopWG, ri)
+					continue
+				}
+				durableExecutionAdded = true
+				m.setRuntimeInterest(execution.SessionID, true)
+				if durableRecoveryHasPendingWork(execution) {
+					m.publishRecoveredExecutionRunning(recoveryCtx, execution)
+				}
+				if err := m.streamManager.ReplayRecoveredDelivery(recoveryCtx, execution); err != nil {
+					m.logger.Error("refusing to re-track recovered execution: durable delivery replay could not be reconciled",
+						zap.String("instance_id", execution.ID),
+						zap.String("session_id", execution.SessionID),
+						zap.Error(err))
+					m.executionStore.Remove(execution.ID)
+					m.setRuntimeInterest(execution.SessionID, false)
+					m.dispatchUnreconstructableStop(&stopWG, ri)
+					continue
+				}
+			} else {
+				// AC-EXECUTORS-SURVIVAL-004.2/004.5: retrieve this instance's
+				// retained turn status before this session's state is published.
+				// A read failure (retries exhausted) must not publish the session
+				// as running -- it is authoritatively unknown, not running -- so
+				// it takes the same not-re-tracked stop path as an
+				// unreconstructable agent identity above.
+				turnOutcome, turnOutcomeResult = m.retrieveRecoveredTurnOutcome(recoveryCtx, ri)
+				if turnOutcomeResult == recoveredTurnOutcomeReadFailed {
+					m.logger.Error("refusing to re-track recovered execution: turn status could not be retrieved",
+						zap.String("instance_id", execution.ID),
+						zap.String("session_id", execution.SessionID))
+					m.dispatchUnreconstructableStop(&stopWG, ri)
+					continue
+				}
 			}
 			// Create trace span for the recovered session
 			_, recoverySpan := tracing.TraceSessionRecovered(
@@ -253,20 +304,22 @@ func (m *Manager) Start(ctx context.Context) error {
 				execution.SessionTraceContext(), execution.TaskID, execution.SessionID, execution.ID,
 			)
 
-			if err := m.executionStore.Add(execution); err != nil {
-				// Should not happen at startup — duplicate sessions in the recovery
-				// list signal a DB consistency issue, not a normal race. Log loudly
-				// and skip; the first one to land wins.
-				m.logger.Error("skipping duplicate execution during recovery",
-					zap.String("execution_id", execution.ID),
-					zap.String("session_id", execution.SessionID),
-					zap.Error(err))
-				if ri.Client != nil {
-					ri.Client.Close()
+			if !durableExecutionAdded {
+				if err := m.executionStore.Add(execution); err != nil {
+					// Should not happen at startup — duplicate sessions in the recovery
+					// list signal a DB consistency issue, not a normal race. Log loudly
+					// and skip; the first one to land wins.
+					m.logger.Error("skipping duplicate execution during recovery",
+						zap.String("execution_id", execution.ID),
+						zap.String("session_id", execution.SessionID),
+						zap.Error(err))
+					if ri.Client != nil {
+						ri.Client.Close()
+					}
+					execution.EndSessionSpan()
+					initSpan.End()
+					continue
 				}
-				execution.EndSessionSpan()
-				initSpan.End()
-				continue
 			}
 			m.setRuntimeInterest(execution.SessionID, true)
 			// AC-EXECUTORS-SURVIVAL-003.1: this execution is durably in the
@@ -298,9 +351,16 @@ func (m *Manager) Start(ctx context.Context) error {
 			// deliver the same terminal event live (AC-EXECUTORS-SURVIVAL-
 			// 004.3/004.4), so this ordering makes the recovery-time
 			// application the one that wins in the common case.
-			if turnOutcomeResult == recoveredTurnOutcomeApplied {
+			switch {
+			case execution.DeliveryMode == DurableDeliveryV1:
+				// The durable branch published running before its bounded replay.
+				// Replay callbacks have already applied any terminal outcome.
+				if !durableRecoveryHasPendingWork(execution) && execution.Status != v1.AgentStatusReady {
+					m.publishRecoveredExecutionReady(recoveryCtx, execution)
+				}
+			case turnOutcomeResult == recoveredTurnOutcomeApplied:
 				m.applyRecoveredTurnOutcome(recoveryCtx, execution, ri, turnOutcome)
-			} else {
+			default:
 				m.publishRecoveredExecutionRunning(recoveryCtx, execution)
 			}
 

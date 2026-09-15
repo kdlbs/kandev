@@ -32,9 +32,17 @@ type (
 
 // Re-export stream types for convenience.
 type (
-	AgentEvent = streams.AgentEvent
-	PlanEntry  = streams.PlanEntry
+	AgentEvent                 = streams.AgentEvent
+	PlanEntry                  = streams.PlanEntry
+	SessionRestoreCapabilities = shared.SessionRestoreCapabilities
 )
+
+// SessionRestoreCapabilitiesProvider is optional so older adapters and test
+// doubles remain source-compatible while lifecycle can use negotiated native
+// restore evidence when it is available.
+type SessionRestoreCapabilitiesProvider interface {
+	GetSessionRestoreCapabilities() SessionRestoreCapabilities
+}
 
 // Re-export agent event type constants from streams package.
 const (

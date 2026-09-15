@@ -32,9 +32,12 @@ export async function waitForSettingsSession(testPage: Page, apiClient: ApiClien
   const page = new SessionPage(testPage);
   await page.waitForLoad();
   await page.waitForChatIdle({ timeout: 30_000 });
-  await expect(page.activeChat().getByText("Settings flow complete", { exact: true })).toBeVisible({
-    timeout: 60_000,
-  });
+  await expect(
+    page
+      .activeChat()
+      .getByTestId("agent-message-highlight")
+      .getByText("Settings flow complete", { exact: false }),
+  ).toBeVisible({ timeout: 60_000 });
   return page;
 }
 

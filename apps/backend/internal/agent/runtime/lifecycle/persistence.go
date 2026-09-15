@@ -73,6 +73,12 @@ func buildRunningFromExecution(execution *AgentExecution, prior *models.Executor
 	}
 
 	metadata := execution.MetadataSnapshot()
+	if execution.OriginalWorkspacePath != "" {
+		if metadata == nil {
+			metadata = make(map[string]interface{})
+		}
+		metadata[MetadataKeyOriginalWorkspacePath] = execution.OriginalWorkspacePath
+	}
 	if execution.OfficeAgentProfileID != "" {
 		if metadata == nil {
 			metadata = make(map[string]interface{})

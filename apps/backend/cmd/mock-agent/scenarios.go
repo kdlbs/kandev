@@ -861,10 +861,17 @@ func scenarioClarificationTimeout(e *emitter) {
 
 	result, err := callMCPToolCtx(ctx, "kandev", "ask_user_question_kandev", clarificationQuestionArgs())
 	if err != nil {
-		fixedDelay(50)
-		if ctx.Err() != nil {
-			e.text("Question timed out, continuing without answer.")
+		if ctx.Err() != nil || strings.Contains(strings.ToLower(err.Error()), "timeout") {
+			// The backend cancels the in-flight ACP prompt when the MCP client
+			// times out. Keep the mock's explicit continuation update on the
+			// live transport so this scenario exercises the late-event
+			// admission path rather than dropping it with the canceled prompt
+			// context.
+			continuation := *e
+			continuation.ctx = context.WithoutCancel(e.ctx)
+			continuation.text("Question timed out, continuing without answer.")
 		} else {
+			fixedDelay(50)
 			e.text(fmt.Sprintf("Question failed: %s", err))
 		}
 		return
