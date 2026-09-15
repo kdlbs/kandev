@@ -339,3 +339,8 @@ estimates, and errors remain visible outside collapsed details.
 Validation: focused component/hook tests, desktop backup/skip flows, and phone
 flows at 320px and 390px, including disclosure and control geometry checks.
 User requested no commit.
+
+## Follow-up presentation package
+
+The [settings storage tabs package](../settings-storage-tabs/plan.md) owns the planned header tabs and maintenance presentation changes.
+This package retains its historical implementation results. The follow-up owns new route, copy, and regression verification.

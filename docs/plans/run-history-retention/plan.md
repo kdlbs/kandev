@@ -62,3 +62,8 @@ System page surface are
 ## Tasks
 
 - [x] [Task 01: Bound run history with a scheduled retention sweep](task-01-bound-run-history-with-retention-sweep.md)
+
+## Follow-up presentation package
+
+The [settings storage tabs package](../settings-storage-tabs/plan.md) owns the planned header tabs and maintenance presentation changes.
+This package retains its historical implementation results. The follow-up owns new route, copy, and regression verification.

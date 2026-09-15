@@ -8,6 +8,13 @@ requirements:
 
 # Office Run History Retention Operations System Design
 
+## Presentation migration (planned)
+
+The [settings storage tabs design](../../system-page/system-design/system-data-storage-pages.md)
+replaces the page allocation described below when its work orders ship.
+Office retention moves to Storage > Office retention. Message compaction remains in Data & Logs > Database.
+Policy, API, and persistence contracts remain unchanged.
+
 ## Purpose and boundaries
 
 This design covers the operator half of run history retention: the settings

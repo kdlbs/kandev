@@ -58,6 +58,13 @@ func TestChecker_NameAndCategory(t *testing.T) {
 	}
 }
 
+func TestChecker_IssueFixURLOpensOfficeRetentionTab(t *testing.T) {
+	got := issue("test", "test", "test")
+	if got.FixURL != "/settings/system/storage?tab=office-retention" {
+		t.Fatalf("FixURL = %q, want Office retention tab", got.FixURL)
+	}
+}
+
 func TestChecker_FreshInstallNoSweepNoIssues(t *testing.T) {
 	checker, sweeper, _ := newTestChecker(t)
 	ctx := context.Background()

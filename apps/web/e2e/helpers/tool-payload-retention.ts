@@ -7,7 +7,7 @@ import type { SeedData } from "../fixtures/test-base";
 import type { ToolPayloadRetentionStatus } from "../../lib/types/tool-payload-retention";
 
 export const RETENTION_API = "/api/v1/system/database/tool-payload-retention";
-export const RETENTION_ROUTE = "/settings/system/data-storage";
+export const RETENTION_ROUTE = "/settings/system/data-storage?tab=database";
 export const PAYLOAD_TEXT = "retention fixture output\n".repeat(1024);
 export const TOOL_COMMAND = "printf retention-fixture";
 

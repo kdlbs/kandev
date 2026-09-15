@@ -9,6 +9,13 @@ requirements:
 
 # Tool Payload Retention System Design
 
+## Presentation migration (planned)
+
+The [settings storage tabs design](../../system-page/system-design/system-data-storage-pages.md)
+replaces the page allocation described below when its work orders ship.
+Office retention moves to Storage > Office retention. Message compaction remains in Data & Logs > Database.
+Policy, API, and persistence contracts remain unchanged.
+
 ## Purpose and boundaries
 
 This capability belongs to system-page. It uses task persistence to

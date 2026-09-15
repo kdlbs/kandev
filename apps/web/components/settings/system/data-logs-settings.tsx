@@ -1,16 +1,25 @@
 "use client";
 
+import { useEffect } from "react";
 import { Separator } from "@kandev/ui/separator";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 import { SettingsTarget } from "@/components/settings/settings-target";
+import {
+  SettingsTabs,
+  SettingsTabsList,
+  SettingsTabsPanel,
+  type SettingsTabOption,
+} from "@/components/settings/settings-tabs";
 import { BackupsTable } from "@/components/settings/system/backups-table";
 import { DatabaseStatsCard } from "@/components/settings/system/database-stats-card";
 import { LogViewer } from "@/components/settings/system/log-viewer";
-import { ToolPayloadRetentionCard } from "./tool-payload-retention-card";
-import { RetentionSettingsCard } from "@/components/settings/system/retention-settings-card";
-import { BACKUP_SQL_COMMAND } from "@/components/settings/system/system-route-shell";
+import { useSettingsTab } from "@/hooks/domains/settings/use-settings-tab";
+import { useRouter } from "@/lib/routing/client-router";
+import { settingsTargetFromHash } from "@/lib/settings-discovery/target";
 import { SYSTEM_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/system";
+import { ToolPayloadRetentionCard } from "./tool-payload-retention-card";
+import { BACKUP_SQL_COMMAND, SystemRouteShell } from "./system-route-shell";
 
 function SectionHeading({ title, description }: { title: string; description?: string }) {
   return (
@@ -23,8 +32,14 @@ function SectionHeading({ title, description }: { title: string; description?: s
   );
 }
 
-/** Data & Logs contains database status, backups, and diagnostic logs. */
-export function DataLogsSettings() {
+const DATA_LOGS_TARGET_TO_TAB = {
+  [SYSTEM_SETTINGS_TARGETS.database]: "database",
+  [SYSTEM_SETTINGS_TARGETS.toolPayloadRetention]: "database",
+  [SYSTEM_SETTINGS_TARGETS.backups]: "database",
+  [SYSTEM_SETTINGS_TARGETS.logs]: "logs",
+} as const;
+
+function DatabasePanel() {
   const { t } = useTranslation();
   const backupDirectory = useAppStore((s) => s.system.database?.backup_directory);
   return (
@@ -35,14 +50,6 @@ export function DataLogsSettings() {
           description={t("system:databasePageDescription")}
         />
         <DatabaseStatsCard />
-      </SettingsTarget>
-      <Separator />
-      <SettingsTarget targetId={SYSTEM_SETTINGS_TARGETS.retention} className="space-y-4">
-        <SectionHeading
-          title={t("system:navRetention")}
-          description={t("system:retentionPageDescription")}
-        />
-        <RetentionSettingsCard />
       </SettingsTarget>
       <Separator />
       <SettingsTarget targetId={SYSTEM_SETTINGS_TARGETS.toolPayloadRetention}>
@@ -63,14 +70,57 @@ export function DataLogsSettings() {
         />
         <BackupsTable />
       </SettingsTarget>
-      <Separator />
-      <SettingsTarget targetId={SYSTEM_SETTINGS_TARGETS.logs} className="space-y-4">
-        <SectionHeading
-          title={t("system:navLogs")}
-          description={t("settings:logsPageDescription")}
-        />
-        <LogViewer />
-      </SettingsTarget>
     </div>
+  );
+}
+
+function LogsPanel({ active }: { active: boolean }) {
+  const { t } = useTranslation();
+  return (
+    <SettingsTarget targetId={SYSTEM_SETTINGS_TARGETS.logs} className="space-y-4">
+      <SectionHeading title={t("system:navLogs")} description={t("settings:logsPageDescription")} />
+      {active && <LogViewer />}
+    </SettingsTarget>
+  );
+}
+
+export function DataLogsSettings() {
+  const { t } = useTranslation();
+  const router = useRouter();
+  const tabs: SettingsTabOption[] = [
+    { id: "database", label: t("system:navDatabase") },
+    { id: "logs", label: t("system:navLogs") },
+  ];
+  const { value, selectTab } = useSettingsTab({
+    tabs: tabs.map((tab) => tab.id),
+    defaultTab: "database",
+    targetToTab: DATA_LOGS_TARGET_TO_TAB,
+  });
+
+  useEffect(() => {
+    const targetId = settingsTargetFromHash(window.location.hash);
+    if (targetId !== SYSTEM_SETTINGS_TARGETS.retention) return;
+    const params = new URLSearchParams(window.location.search);
+    params.set("tab", "office-retention");
+    router.replace(`/settings/system/storage?${params.toString()}${window.location.hash}`, {
+      scroll: false,
+    });
+  }, [router]);
+
+  return (
+    <SettingsTabs tabs={tabs} value={value} onValueChange={selectTab}>
+      <SystemRouteShell
+        titleKey="system:navDataStorage"
+        descriptionKey="system:dataStoragePageDescription"
+        tabs={<SettingsTabsList ariaLabel={t("system:navDataStorage")} />}
+      >
+        <SettingsTabsPanel value="database" testId="settings-data-storage-database">
+          <DatabasePanel />
+        </SettingsTabsPanel>
+        <SettingsTabsPanel value="logs" testId="settings-data-storage-logs">
+          <LogsPanel active={value === "logs"} />
+        </SettingsTabsPanel>
+      </SystemRouteShell>
+    </SettingsTabs>
   );
 }

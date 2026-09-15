@@ -62,7 +62,6 @@ lib/state/
 │   ├── gitlab/                    # GitLab MRs, watches, MR automation options
 │   └── ui/                        # preview, connection, active state, sidebar views
 ├── hydration/                     # SSR merge strategies
-
 hooks/domains/{kanban,session,workspace,settings,comments,github,gitlab}/  # Domain-organized hooks
 lib/api/domains/                    # API clients
 ├── kanban-api, session-api, workspace-api, settings-api, process-api
@@ -147,6 +146,7 @@ surface.
   floating **Save changes** control, navigation guard, and discard flow own persistence. Do not add
   page-local Save/Cancel controls. Contributor `save` callbacks must reject on failure so the
   coordinator can report an error; `discard` must restore the contributor's authoritative baseline.
+- **Settings tabs:** use `components/settings/settings-tabs.tsx` in `SettingsPageHeader`; preserve drafts with validated URL `tab` state, map discovery fragments to the owning tab, and use 44px controls on phones and coarse pointers.
 - **Dialog Enter-to-confirm:** the base `@kandev/ui` `DialogContent` / `AlertDialogContent`
   activate the dialog's semantic action on plain Enter (`packages/ui/src/lib/dialog-default-action.ts`),
   so per-dialog "submit on Enter" input handlers are unnecessary — let the base own it.
