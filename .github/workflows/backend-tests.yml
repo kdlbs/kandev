@@ -624,6 +624,7 @@ jobs:
             ./internal/notifications/store
             ./internal/office/configsync
             ./internal/office/repository/sqlite
+            ./internal/office/retention
             ./internal/orchestrator/messagequeue
             ./internal/persistence
             ./internal/persistence/storeconformance
@@ -746,7 +747,10 @@ jobs:
       # a self-hosting Go helper (see testmain_test.go) so they run on
       # every platform.
       - name: Test windows-sensitive packages
-        run: go test -race -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/...
+        # The process package is large and the race detector is slow on
+        # windows-latest. Go's default package timeout is 10 minutes, which can
+        # terminate a healthy suite before the workflow's 30-minute job cap.
+        run: go test -race -v -timeout 25m ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/common/ptyexec/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/...
 
       - name: Test Windows managed runtime cache repair
         run: go test -race -v ./internal/agent/managedruntime -run TestRemoveNpxExecutionTreeTreatsMissingWindowsChildAsAbsent
@@ -767,3 +771,8 @@ jobs:
           go test -race -v
           -run '^(TestExplicitLocalRepositoryWindowsPathSemantics|TestListDirectory.*|TestDriveRootsFromMask|TestSplitAbsForRoot)$'
           ./internal/task/service
+
+      # Pure GOOS-branch logic (no syscalls), but it must actually observe
+      # Windows to prove the unavailable branch, not just compile under it.
+      - name: Test Windows agent-survival flag availability
+        run: go test -race -v -run '^TestAgentSurvivalAvailabilityMatchesPlatformScope$' ./internal/runtimeflags

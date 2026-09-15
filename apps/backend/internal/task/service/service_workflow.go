@@ -1521,13 +1521,31 @@ func isSessionActive(state models.TaskSessionState) bool {
 		state == models.TaskSessionStateWaitingForInput
 }
 
-// CountTasksByWorkflow returns the number of tasks in a workflow
+// CountTasksByWorkflow returns the number of tasks in a workflow.
 func (s *Service) CountTasksByWorkflow(ctx context.Context, workflowID string) (int, error) {
+	if err := s.authorizeWorkflowID(ctx, workflowID); err != nil {
+		return 0, err
+	}
 	return s.tasks.CountTasksByWorkflow(ctx, workflowID)
 }
 
-// CountTasksByWorkflowStep returns the number of tasks in a workflow step
+// CountTasksByWorkflowStep returns the number of tasks in a workflow step.
 func (s *Service) CountTasksByWorkflowStep(ctx context.Context, stepID string) (int, error) {
+	if _, scoped := callerScope(ctx); scoped {
+		if s.workflowStepGetter == nil {
+			return 0, errors.New("workflow step getter unavailable")
+		}
+		step, err := s.workflowStepGetter.GetStep(ctx, stepID)
+		if err != nil {
+			return 0, err
+		}
+		if step == nil {
+			return 0, repoerrors.ErrWorkspaceNotFound
+		}
+		if err := s.authorizeWorkflowID(ctx, step.WorkflowID); err != nil {
+			return 0, err
+		}
+	}
 	return s.tasks.CountTasksByWorkflowStep(ctx, stepID)
 }
 

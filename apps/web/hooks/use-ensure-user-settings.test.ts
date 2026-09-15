@@ -70,6 +70,7 @@ function makeUnloadedSettings(): UserSettingsState {
     preventAutoStartAgentOnOpen: false,
     unreadDivider: true,
     agentGeneratedTaskTitles: false,
+    autoFocusNewTasks: true,
     mcpTaskAgentProfileDefault: "current_task",
     showAnchoredPromptBar: false,
     showScrollToLastPrompt: true,
@@ -111,6 +112,8 @@ function makeUnloadedSettings(): UserSettingsState {
     changesPanelLayout: "tree",
     lastSeenDisplay: "absolute",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
+    sidebarHoverEnabled: true,
+    sidebarHoverDelayMs: 500,
     appStatusBarEnabled: false,
     resolveSessionHostnames: false,
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
@@ -121,6 +124,8 @@ function makeUnloadedSettings(): UserSettingsState {
     lspStatusLocation: "toolbar",
     hiddenWorkflowStepIds: {},
     workflowIdsWithAutoHideEmptySteps: [],
+    kanbanSort: "created_desc",
+    kanbanPriorityFilterTokens: [],
     loaded: false,
   };
 }

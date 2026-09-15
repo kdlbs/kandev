@@ -2,6 +2,8 @@ package statussummary
 
 import (
 	"strings"
+
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 func deriveSummary(state *projectionState) TaskStatusSummary {
@@ -12,11 +14,22 @@ func deriveSummary(state *projectionState) TaskStatusSummary {
 		ActiveSubagentCount: activeSubagentCount,
 		PendingAction:       derivePendingAction(state),
 		ActiveError:         deriveActiveError(state),
+		TaskError:           cloneActiveError(state.taskError),
 		Git:                 deriveGitSummary(state),
 		PullRequest:         derivePullRequestSummary(state),
 		QueuedPromptCount:   state.queuedCount,
 		LastActivityAt:      cloneTimePtr(state.lastActivityAt),
 	}
+}
+
+func cloneActiveError(value *ActiveErrorSummary) *ActiveErrorSummary {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	copy.RecoveryActions = append([]string(nil), value.RecoveryActions...)
+	copy.Causes = append([]models.AgentErrorCause(nil), value.Causes...)
+	return &copy
 }
 
 func deriveSessionFields(state *projectionState) (*PrimarySessionSummary, string, int) {
@@ -90,7 +103,7 @@ func derivePendingAction(state *projectionState) string {
 func deriveActiveError(state *projectionState) *ActiveErrorSummary {
 	var active *ActiveErrorSummary
 	if !state.errorsObserved && state.current != nil && state.current.ActiveError != nil &&
-		(!state.taskErrorObserved || state.current.ActiveError.SessionID != "") {
+		(!state.taskErrorObserved || activeErrorScope(state.current.ActiveError) == models.ErrorScopeSession) {
 		copy := *state.current.ActiveError
 		active = &copy
 	}
@@ -106,6 +119,18 @@ func deriveActiveError(state *projectionState) *ActiveErrorSummary {
 		active = &copy
 	}
 	return active
+}
+
+// activeErrorScope routes explicit ownership first. Older summaries omitted
+// scope, so their session-id inference remains the compatibility fallback.
+func activeErrorScope(value *ActiveErrorSummary) string {
+	if value != nil && (value.Scope == models.ErrorScopeSession || value.Scope == models.ErrorScopeTask) {
+		return value.Scope
+	}
+	if value != nil && value.SessionID != "" {
+		return models.ErrorScopeSession
+	}
+	return models.ErrorScopeTask
 }
 
 func newerActiveError(candidate, current *ActiveErrorSummary) bool {

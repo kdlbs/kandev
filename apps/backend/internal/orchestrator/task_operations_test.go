@@ -4714,25 +4714,27 @@ func TestIssue1884_StepProfileSignalGateStaysInTaskMode(t *testing.T) {
 // mockMessageCreator implements MessageCreator for testing.
 // Only CreateUserMessage is tracked; all other methods are no-op stubs.
 type mockMessageCreator struct {
-	mu                     sync.Mutex
-	userMessages           []mockUserMessage
-	sessionMessages        []mockSessionMessage
-	sessionMessageAttempts int
-	sessionMessageDone     chan struct{}
-	sessionMessageOnce     sync.Once
-	sessionMessageErr      error
-	agentMessages          []mockAgentMessage
-	agentMessageWrites     int
-	agentStreamWrites      int
-	thinkingWrites         int
-	toolCallWrites         int
-	toolUpdateWrites       int
-	userMessageErr         error
-	idempotentUserMessages map[string]struct{}
-	permissionClaimFn      func(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
-	permissionFinishFn     func(context.Context, models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
-	permissionAuditFn      func(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error)
-	permissionUpdateFn     func(context.Context, string, string, string, string, models.PermissionStatus) error
+	mu                        sync.Mutex
+	userMessages              []mockUserMessage
+	sessionMessages           []mockSessionMessage
+	sessionMessageAttempts    int
+	sessionMessageDone        chan struct{}
+	sessionMessageOnce        sync.Once
+	sessionMessageErr         error
+	idempotentSessionMessages map[string]struct{}
+	agentMessages             []mockAgentMessage
+	agentMessageWrites        int
+	agentStreamWrites         int
+	agentStreamTexts          []string
+	thinkingWrites            int
+	toolCallWrites            int
+	toolUpdateWrites          int
+	userMessageErr            error
+	idempotentUserMessages    map[string]struct{}
+	permissionClaimFn         func(context.Context, models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
+	permissionFinishFn        func(context.Context, models.PermissionResolutionFinalizeRequest) (*models.PermissionResolutionFinalizeResult, error)
+	permissionAuditFn         func(context.Context, string, string, string, string) (*models.PermissionResolutionAudit, error)
+	permissionUpdateFn        func(context.Context, string, string, string, string, models.PermissionStatus) error
 }
 
 type mockUserMessage struct {
@@ -4817,6 +4819,31 @@ func (m *mockMessageCreator) CreateSessionMessage(_ context.Context, taskID, con
 	return nil
 }
 
+func (m *mockMessageCreator) CreateSessionMessageIdempotent(_ context.Context, messageID, taskID, content, sessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.sessionMessageErr != nil {
+		return m.sessionMessageErr
+	}
+	if m.idempotentSessionMessages == nil {
+		m.idempotentSessionMessages = make(map[string]struct{})
+	}
+	if _, exists := m.idempotentSessionMessages[messageID]; exists {
+		return nil
+	}
+	m.idempotentSessionMessages[messageID] = struct{}{}
+	m.sessionMessages = append(m.sessionMessages, mockSessionMessage{
+		taskID:        taskID,
+		content:       content,
+		sessionID:     sessionID,
+		messageType:   messageType,
+		turnID:        turnID,
+		metadata:      metadata,
+		requestsInput: requestsInput,
+	})
+	return nil
+}
+
 func (m *mockMessageCreator) CreatePermissionRequestMessage(context.Context, string, string, string, string, string, string, string, []map[string]interface{}, string, map[string]interface{}) (string, error) {
 	return "", nil
 }
@@ -4849,13 +4876,15 @@ func (m *mockMessageCreator) GetPermissionResolutionAudit(ctx context.Context, t
 	return nil, nil
 }
 
-func (m *mockMessageCreator) CreateAgentMessageStreaming(context.Context, string, string, string, string, string) error {
+func (m *mockMessageCreator) CreateAgentMessageStreaming(_ context.Context, _, _, content, _, _ string) error {
 	m.agentStreamWrites++
+	m.agentStreamTexts = append(m.agentStreamTexts, content)
 	return nil
 }
 
-func (m *mockMessageCreator) AppendAgentMessage(context.Context, string, string) error {
+func (m *mockMessageCreator) AppendAgentMessage(_ context.Context, _, content string) error {
 	m.agentStreamWrites++
+	m.agentStreamTexts = append(m.agentStreamTexts, content)
 	return nil
 }
 

@@ -35,6 +35,9 @@ const (
 	fixtureCredentialHost       = "bitbucket.example.test"
 	fixtureCredentialPath       = "/scm/TEAM/fixture"
 	connectionStatusAction      = "connection-status"
+	utilityDefaultAction        = "utility-default"
+	utilityPreferenceAction     = "utility-preference"
+	utilityProfilePrompt        = "/e2e:utility-profile"
 	repositoryInspectActionKey  = "repositories.inspect"
 	repositoryBranchesActionKey = "repositories.branches"
 	searchPurpose               = "search"
@@ -181,6 +184,10 @@ func (p *fixturePlugin) HandleAction(ctx context.Context, req *pluginsdk.PluginA
 			response["connected"] = false
 			response["error"] = "connection unavailable"
 		}
+	case utilityDefaultAction:
+		return p.invokeUtilityAgent(ctx, false)
+	case utilityPreferenceAction:
+		return p.invokeUtilityAgent(ctx, true)
 	case "link-pull-request":
 		response["linked"] = true
 		response[fixtureTaskIDKey] = req.Context.TaskID
@@ -199,6 +206,46 @@ func (p *fixturePlugin) HandleAction(ctx context.Context, req *pluginsdk.PluginA
 		return nil, fmt.Errorf("plugin-fixture: marshaling action response: %w", err)
 	}
 	return &pluginsdk.PluginActionResponse{Body: body}, nil
+}
+
+func (p *fixturePlugin) invokeUtilityAgent(ctx context.Context, usePreference bool) (*pluginsdk.PluginActionResponse, error) {
+	host := p.Host()
+	if host == nil {
+		return nil, fmt.Errorf("plugin-fixture: host unavailable")
+	}
+
+	options, err := p.utilityAgentOptions(ctx, usePreference)
+	if err != nil {
+		return nil, err
+	}
+	response, err := host.InvokeUtilityAgent(ctx, utilityProfilePrompt, options...)
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: invoke utility agent: %w", err)
+	}
+	body, err := json.Marshal(map[string]string{"response": response})
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: marshaling utility response: %w", err)
+	}
+	return &pluginsdk.PluginActionResponse{Body: body}, nil
+}
+
+func (p *fixturePlugin) utilityAgentOptions(ctx context.Context, usePreference bool) ([]pluginsdk.UtilityAgentOptions, error) {
+	if !usePreference {
+		return nil, nil
+	}
+	config, err := p.Host().GetConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("plugin-fixture: read config: %w", err)
+	}
+	profileID := ""
+	if raw, ok := config["agent_profile"]; ok {
+		var valid bool
+		profileID, valid = raw.(string)
+		if !valid {
+			return nil, fmt.Errorf("plugin-fixture: config %q must be a string", "agent_profile")
+		}
+	}
+	return []pluginsdk.UtilityAgentOptions{{ProfileID: profileID}}, nil
 }
 
 func (p *fixturePlugin) inspectRepository(body []byte) (*pluginsdk.PluginActionResponse, error) {

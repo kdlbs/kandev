@@ -20,6 +20,8 @@ export const GENERAL_SETTINGS_TARGETS = {
   settingsMenuMode: "setting-settings-menu-mode",
   startupPage: "setting-startup-page",
   displayLanguage: "setting-display-language",
+  sidebarHover: "setting-sidebar-hover",
+  sidebarHoverDelay: "setting-sidebar-hover-delay",
   appStatusBar: "setting-status-bar",
   changesPanelLayout: "setting-changes-panel-layout",
   resourceMetrics: "setting-resource-metrics",
@@ -35,6 +37,7 @@ export const GENERAL_SETTINGS_TARGETS = {
   agentTaskProfile: "setting-agent-task-profile",
   agentGeneratedTitles: "setting-agent-generated-task-titles",
   archiveConfirmation: "setting-archive-confirmation",
+  creationAutoFocus: "setting-creation-auto-focus",
   preventAutoStartOnOpen: "setting-prevent-auto-start-on-open",
   unreadMessages: "setting-unread-messages",
   transcriptNavigation: "setting-transcript-navigation",
@@ -44,6 +47,29 @@ export const GENERAL_SETTINGS_TARGETS = {
 } as const;
 
 export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
+  {
+    id: "appearance-sidebar-hover-enabled",
+    kind: "control",
+    labelKey: "settings:sidebarHoverEnabled",
+    aliasesKey: "settings:discoveryAliasesSidebarHover",
+    parentId: APPEARANCE_ID,
+    groupId: "preferences",
+    href: APPEARANCE_SETTINGS_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.sidebarHover,
+    order: 24,
+  },
+  {
+    id: "appearance-sidebar-hover-delay",
+    kind: "control",
+    labelKey: "settings:sidebarHoverDelay",
+    aliasesKey: "settings:discoveryAliasesSidebarHover",
+    parentId: APPEARANCE_ID,
+    groupId: "preferences",
+    href: APPEARANCE_SETTINGS_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.sidebarHoverDelay,
+    order: 25,
+  },
+
   {
     id: APPEARANCE_ID,
     kind: "page",
@@ -339,6 +365,16 @@ export const PREFERENCES_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = 
     href: TASK_BEHAVIOR_SETTINGS_HREF,
     targetId: GENERAL_SETTINGS_TARGETS.preventAutoStartOnOpen,
     order: 63,
+  },
+  {
+    id: "task-actions-creation-auto-focus",
+    kind: "control",
+    labelKey: "settings:autoFocusNewTasks",
+    parentId: TASK_BEHAVIOR_ID,
+    groupId: "preferences",
+    href: TASK_BEHAVIOR_SETTINGS_HREF,
+    targetId: GENERAL_SETTINGS_TARGETS.creationAutoFocus,
+    order: 63.5,
   },
   {
     id: "task-actions-archive-confirmation",

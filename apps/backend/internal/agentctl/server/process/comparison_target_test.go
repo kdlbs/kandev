@@ -25,7 +25,7 @@ func (f *comparisonTargetGitFake) run(_ context.Context, args ...string) (string
 	if output, ok := f.outputs[key]; ok {
 		return output, nil
 	}
-	if len(args) >= 3 && args[0] == "remote" && args[1] == "get-url" {
+	if len(args) >= 3 && args[0] == "config" && args[1] == "--get" && strings.HasPrefix(args[2], "remote.") {
 		if f.remoteURL == "" {
 			return "", errors.New("remote not found")
 		}
@@ -74,7 +74,7 @@ func TestMaterializeComparisonTargetUsesExactNoPushRefspec(t *testing.T) {
 	if !hasComparisonCommand(fake.commands, "config", "remote."+target.ComparisonRemoteName()+".pushurl", "DISABLED") {
 		t.Fatalf("push disabling command missing: %v", fake.commands)
 	}
-	if !hasComparisonCommand(fake.commands, "fetch", "--no-tags", target.ComparisonRemoteName(), "refs/heads/main:"+target.ComparisonRef()) {
+	if !hasComparisonCommand(fake.commands, "fetch", "--no-tags", target.ComparisonRemoteName(), "+refs/heads/main:"+target.ComparisonRef()) {
 		t.Fatalf("exact fetch command missing: %v", fake.commands)
 	}
 	for _, command := range fake.commands {
@@ -90,6 +90,22 @@ func TestMaterializeComparisonTargetRejectsRemoteCollision(t *testing.T) {
 	_, err := materializeComparisonTarget(context.Background(), fake.run, target)
 	if err == nil || !strings.Contains(err.Error(), "remote collision") {
 		t.Fatalf("collision error = %v, want bounded remote collision", err)
+	}
+}
+
+func TestMaterializeComparisonTargetAcceptsCanonicalConfiguredURL(t *testing.T) {
+	target := comparisonTargetProcessTestTarget()
+	fake := &comparisonTargetGitFake{remoteURL: target.TargetRepository.RemoteURL, outputs: map[string]string{
+		"rev-parse --verify " + target.ComparisonRef() + "^{commit}": "0123456789abcdef0123456789abcdef01234567",
+	}}
+	if _, err := materializeComparisonTarget(context.Background(), fake.run, target); err != nil {
+		t.Fatalf("materializeComparisonTarget: %v", err)
+	}
+	if hasComparisonCommand(fake.commands, "remote", "add", "--no-tags", target.ComparisonRemoteName(), target.TargetRepository.RemoteURL) {
+		t.Fatalf("materialization re-added the canonical comparison remote: %v", fake.commands)
+	}
+	if !hasComparisonCommand(fake.commands, "config", "--get", "remote."+target.ComparisonRemoteName()+".url") {
+		t.Fatalf("raw comparison remote URL lookup missing: %v", fake.commands)
 	}
 }
 

@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/kdlbs/kandev/blob/main/plugin-registry/schema.json",
+  "title": "Kandev marketplace registry",
+  "description": "Proposed registry schema for plugin and canvas repositories. Preview image URLs belong to registry entries; release metadata remains package-owned.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "plugins"
+  ],
+  "properties": {
+    "plugins": {
+      "type": "array",
+      "description": "The curated list of plugin repositories, one entry per plugin.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "repo"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable plugin identifier. MUST equal the plugin manifest `id` of the repo's latest release. Unique across the file.",
+            "pattern": "^[a-z0-9][a-z0-9-]*$"
+          },
+          "repo": {
+            "type": "string",
+            "description": "GitHub repository in owner/name form; the release source for this plugin.",
+            "pattern": "^[^/]+/[^/]+$"
+          },
+          "featured": {
+            "type": "boolean",
+            "description": "When true, a maintainer has pinned this entry above star order in the catalog.",
+            "default": false
+          },
+          "categories": {
+            "type": "array",
+            "description": "Curation-only category tags used for filtering in the catalog.",
+            "items": {
+              "type": "string"
+            }
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "plugin",
+              "canvas"
+            ],
+            "default": "plugin",
+            "description": "Omitted kind means plugin for backward compatibility; canvas kind must match the validated package."
+          },
+          "previews": {
+            "type": "array",
+            "maxItems": 8,
+            "items": {
+              "$ref": "#/$defs/preview"
+            },
+            "description": "Ordered preview images. First image is the cover. Optional for plugins; required for canvas registry listings."
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "required": [
+                "kind"
+              ],
+              "properties": {
+                "kind": {
+                  "const": "canvas"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "previews"
+              ],
+              "properties": {
+                "previews": {
+                  "minItems": 1
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "preview": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url",
+        "alt"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://",
+          "maxLength": 2048,
+          "description": "Direct HTTPS image URL. Credentials and fragments are rejected by registry validation."
+        },
+        "alt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "\\S",
+          "description": "Description of the preview image for accessibility."
+        }
+      }
+    }
+  }
+}

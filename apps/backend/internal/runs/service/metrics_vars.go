@@ -47,6 +47,21 @@ var (
 	runDedupKeylessTotal = expvar.NewMap("office_run_dedup_keyless_total")
 )
 
+// ParentWakeDedupedTotal counts a task_children_completed insert rejected by
+// idx_run_wake_wave — the only direct evidence the completion-wave identity
+// constraint is doing work, since a run that never exists leaves no other
+// trace. Incremented at both classification sites (runs/service and
+// office/scheduler, which insert through the same CreateRun but classify
+// its error independently) so a producer-side dedupe is as visible as an
+// engine-routed one.
+//
+// Declared here rather than in internal/office/shared: that package started
+// importing internal/runs/service for RunQueuer's QueueOutcome return type,
+// so the reverse edge this counter used to need would be an import cycle.
+// office/scheduler already imports this package directly (for QueueOutcome),
+// so it reaches the counter the same way.
+var ParentWakeDedupedTotal = expvar.NewInt("parent_wake_deduped_total")
+
 // metricLabel builds a "k1=v1;k2=v2;..." label string for an expvar map key.
 func metricLabel(pairs ...string) string {
 	if len(pairs)%2 != 0 {

@@ -17,6 +17,27 @@ An administrator can enable `features.canvases` in **Settings > System > Feature
 
 With the flag off, Kandev does not expose canvas tools, routes, events, background work, or navigation. Database migrations can still exist, but Kandev does not read or change canvas data.
 
+## Start a canvas task
+
+When canvases are enabled, open the workspace sidebar and expand **Canvases**.
+If the workspace has no active canvases, select **Set up a canvas**. Kandev
+opens the normal task form on the current page. It starts with an editable
+coordinator-view goal followed by the `@create-canvas` saved-prompt reference.
+
+Choose the agent, executor, workflow, and other task options, then select
+**Start task**. The task uses no repository by default and prefers a local
+executor. The saved-prompt reference appears as an editable chip. Select it to
+preview the current instructions, or remove only that occurrence before you
+submit.
+
+On a phone, open **Settings > Workspace > Canvases** and select **Create
+canvas**. The same full-screen task form and task options are available.
+
+The `@create-canvas` reference keeps the detailed authoring instructions out
+of the visible task description. Customize those instructions in **Settings >
+Prompts**. The task description keeps the text you submitted, while the
+reference is expanded when Kandev launches the task.
+
 ## Create a task canvas
 
 1. Open the task that owns the canvas.
@@ -154,6 +175,45 @@ Kandev records artifact cleanup before it removes release ownership. A worker co
 Kandev allows up to 100 workspace canvas instances across scopes. Archived canvases count toward instance and storage limits. A workspace can retain up to 2 GiB of canvas artifacts. One Kandev installation can retain up to 10 GiB.
 
 On desktop, workspace canvases use the workspace Canvases area. On phones, Kandev opens a full-height canvas route and keeps canvas controls in an inset bottom drawer.
+
+## Share and install a canvas
+
+Canvas sharing is manual and release-bound. It does not capture screenshots or
+publish a repository. Screenshots belong to a marketplace registry entry, not
+to the canvas package.
+
+1. Open the canvas host or the workspace canvas list.
+2. Choose **Share canvas**.
+3. Review the active release, package identity, file inventory, and archive
+   sizes.
+4. Choose **Prepare downloads**, then download the bundle or source archive.
+5. Check the downloaded files for private content before sharing them.
+
+The bundle is an installable `.tar.gz`. The source download is a ZIP of the
+retained project when the release uses project source mode. The preparation is
+temporary and expires after 15 minutes. A release change, lost authorization,
+expiry, or cancellation requires a new preparation. Kandev does not change the
+running canvas while it prepares these files.
+
+Recipients can install a bundle from **Settings > Plugins > Canvases** by
+uploading the file or entering an HTTPS direct link. A registry entry provides
+an additional catalog path. Kandev fetches and inspects the exact package,
+shows its manifest and permissions, and requires an explicit confirmation
+before it creates an independent workspace canvas. A registry preview is only
+listing metadata. It does not grant permissions and it is not executed during
+review.
+
+Canvas registry entries use the same ordered `previews` field as plugin
+entries. A canvas entry must contain one to eight objects with an HTTPS `url`
+and non-empty `alt` text. The first object is the cover image. Plugin entries
+may omit `previews` or include up to eight images. Use **Preview images** in the
+catalog to move between images and retry a failed image.
+
+The official registry uses a manually reviewed pull request. Authors publish a
+versioned bundle as a release asset, add the repository and preview URLs to
+`plugin-registry/plugins.yaml`, and wait for the registry workflow to inspect
+the exact asset. Team registries can host an `index.json` with the same shape.
+Direct file and direct-link sharing does not require registry admission.
 
 ## Related guides
 

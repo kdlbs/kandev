@@ -19,6 +19,7 @@ import type {
 import type { OnEnterActionType, StepEvents } from "./workflow-actions";
 import type { EntityReference } from "./entity-reference";
 import type { TaskStatusSummary } from "./task-status-summary";
+import type { AgentGoalReconciliation } from "@/lib/agent-goal";
 
 export type { TaskStatusSummary } from "./task-status-summary";
 
@@ -496,6 +497,14 @@ export type Task = ActiveSubagentCountFields & {
   status_summary?: TaskStatusSummary | null;
   /** Explicitly clears a cached status summary. Omission keeps partial-response semantics. */
   status_summary_invalidated?: boolean;
+  /**
+   * Whether the task's executor profile can be switched right now (nothing has
+   * materialized yet). Always present on an enriched read; not gap-filled on
+   * merge (an omitted value reads as ineligible, never as the cached one).
+   */
+  runner_editable?: boolean;
+  /** Machine-readable reason for `runner_editable`; always present alongside it. */
+  runner_ineligible_reason?: string;
 };
 
 // Task origin values mirror models.TaskOrigin* constants in the Go backend.
@@ -682,6 +691,8 @@ export type TaskSession = ActiveSubagentCountFields & {
   pending_action_revision?: TaskPendingActionRevision;
   error_message?: string;
   metadata?: Record<string, unknown> | null;
+  /** Frontend-only ordering guard for live ACP goal updates and stale hydration. */
+  goal_reconciliation?: AgentGoalReconciliation;
   agent_profile_snapshot?: Record<string, unknown> | null;
   executor_snapshot?: Record<string, unknown> | null;
   environment_snapshot?: Record<string, unknown> | null;
@@ -963,6 +974,7 @@ export type MessageType =
 export type MessageMetadata = Record<string, unknown> & {
   entity_references?: EntityReference[];
   client_queue_id?: string;
+  queue_admission_ids?: string[];
 };
 
 export type Message = {

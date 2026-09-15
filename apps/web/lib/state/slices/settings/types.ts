@@ -22,6 +22,8 @@ import type { SidebarTaskPrefsState } from "@/lib/state/slices/ui/types";
 import type { SecretListItem } from "@/lib/types/http-secrets";
 import type { SpritesStatus, SpritesInstance } from "@/lib/types/http-sprites";
 import type { TasksListGroup, TasksListSort } from "@/lib/tasks/tasks-list-options";
+import type { KanbanSort } from "@/lib/kanban/kanban-sort";
+import type { TaskPriority } from "@/lib/types/http";
 import type { SleepInhibitionResponse } from "@/lib/types/system";
 import type { AgentProfileKind } from "@/lib/types/agent-profile";
 import type {
@@ -64,6 +66,8 @@ export type AgentProfileOption = {
   agent_name: string;
   kind?: AgentProfileKind;
   cli_passthrough: boolean;
+  /** Whether the profile's agent supports sessionless inference. */
+  inference_capable?: boolean;
   /** Configured start model (ACP model ID). Empty = agent default. */
   model?: string;
   /** Optional explicit fallback model; ignored when auto_fallback is on. */
@@ -268,7 +272,10 @@ export function refreshSettingsAgentsCapabilities(
 
 /** Single source of truth for mapping an API Agent+Profile to a store AgentProfileOption. */
 export function toAgentProfileOption(
-  agent: Pick<Agent, "id" | "name" | "capability_status" | "capability_error">,
+  agent: Pick<
+    Agent,
+    "id" | "name" | "capability_status" | "capability_error" | "inference_capable"
+  >,
   profile: Pick<AgentProfile, "id" | "agentDisplayName" | "name" | "workspaceId"> & {
     updatedAt?: string;
     kind?: AgentProfileKind;
@@ -286,6 +293,7 @@ export function toAgentProfileOption(
     agent_name: agent.name,
     kind: profile.kind,
     cli_passthrough: profile.cliPassthrough ?? false,
+    inference_capable: agent.inference_capable,
     model: profile.model ?? undefined,
     fallback_model: profile.fallbackModel ?? undefined,
     auto_fallback: profile.autoFallback ?? undefined,
@@ -419,6 +427,7 @@ export type UserSettingsState = {
   preventAutoStartAgentOnOpen: boolean;
   unreadDivider: boolean;
   agentGeneratedTaskTitles: boolean;
+  autoFocusNewTasks: boolean;
   mcpTaskAgentProfileDefault: MCPTaskAgentProfileDefault;
   showAnchoredPromptBar: boolean;
   showScrollToLastPrompt: boolean;
@@ -459,11 +468,15 @@ export type UserSettingsState = {
   lastSeenDisplay: LastSeenDisplay;
   systemMetricsDisplay: { showInTopbar: boolean; simplified: boolean };
   appStatusBarEnabled: boolean;
+  sidebarHoverEnabled: boolean;
+  sidebarHoverDelayMs: number;
   resolveSessionHostnames: boolean;
   appStatusBarOrder: AppStatusBarOrderState;
   quickChatTabOrderByWorkspace: Record<string, string[]>;
   hiddenWorkflowStepIds: Record<string, string[]>;
   workflowIdsWithAutoHideEmptySteps: string[];
+  kanbanSort: KanbanSort;
+  kanbanPriorityFilterTokens: TaskPriority[];
   loaded: boolean;
 };
 

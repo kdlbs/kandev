@@ -103,13 +103,25 @@ func (s *Service) handleAgentStreamEvent(ctx context.Context, payload *lifecycle
 	}
 	switch eventType {
 	case "message_streaming":
-		s.observePromptAttempt(
-			payload.SessionID,
-			eventExecutionID,
-			payload.Data.PromptGeneration,
-			strings.TrimSpace(payload.Data.Text) != "",
-			false,
-		)
+		// Claude ACP emits some provider failures as a diagnostic message chunk
+		// immediately before the session/prompt RPC error. Track those chunks
+		// separately so the matching typed failure can still be safely routed.
+		if payload.Data.ProviderDiagnosticCandidate {
+			s.observeProviderDiagnostic(
+				payload.SessionID,
+				eventExecutionID,
+				payload.Data.PromptGeneration,
+				payload.Data.Text,
+			)
+		} else {
+			s.observePromptAttempt(
+				payload.SessionID,
+				eventExecutionID,
+				payload.Data.PromptGeneration,
+				strings.TrimSpace(payload.Data.Text) != "",
+				false,
+			)
+		}
 	case "thinking_streaming":
 		s.observePromptAttempt(
 			payload.SessionID,
@@ -686,8 +698,11 @@ func (s *Service) handleStreamingEventKind(
 // It creates a new message on first chunk (IsAppend=false) or appends to existing (IsAppend=true).
 func (s *Service) handleMessageStreamingEvent(ctx context.Context, payload *lifecycle.AgentStreamEventPayload) {
 	// Keep the private ownership estimate current for accounting. Only genuine
-	// output flips it; empty/invalid frames are discarded below.
-	if payload.Data.Text != "" && s.markForegroundGenerating(payload.SessionID, payload.ExecutionID) {
+	// output flips it; empty/invalid frames and provider-diagnostic transport
+	// text are discarded below (mirroring the lifecycle-tier suppression in
+	// Manager.recordActivity).
+	if payload.Data.Text != "" && !payload.Data.ProviderDiagnosticCandidate &&
+		s.markForegroundGenerating(payload.SessionID, payload.ExecutionID) {
 		s.publishForegroundActivityChanged(ctx, payload.TaskID, payload.SessionID)
 	}
 	s.handleStreamingEventKind(ctx, payload, "message",
@@ -1358,7 +1373,9 @@ func (s *Service) transitionBootstrapFailure(
 
 	committer, ok := s.repo.(bootstrapFailureCommitter)
 	if !ok {
-		return s.transitionTaskSessionState(ctx, taskID, sessionID, models.TaskSessionStateFailed, errorValue.Message, nil)
+		return false, expectedState, fmt.Errorf(
+			"bootstrap failure requires an execution-fenced repository commit",
+		)
 	}
 	changed, updatedAt, err := committer.CommitBootstrapFailureIfCurrentExecution(
 		ctx,
@@ -1374,11 +1391,12 @@ func (s *Service) transitionBootstrapFailure(
 	}
 	refreshed, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
-		return false, models.TaskSessionStateFailed, fmt.Errorf("get session after bootstrap failure commit: %w", err)
+		return true, models.TaskSessionStateFailed, fmt.Errorf("get session after bootstrap failure commit: %w", err)
 	}
 	if refreshed == nil {
-		return false, models.TaskSessionStateFailed, fmt.Errorf("get session after bootstrap failure commit: session %q is nil", sessionID)
+		return true, models.TaskSessionStateFailed, fmt.Errorf("get session after bootstrap failure commit: session %q is nil", sessionID)
 	}
+	messageErr := s.persistBootstrapFailureMessage(ctx, taskID, sessionID, agentExecutionID, errorValue)
 	authoritativeUpdatedAt := updatedAt.UTC()
 	s.publishAcceptedTaskSessionState(
 		ctx,
@@ -1390,7 +1408,35 @@ func (s *Service) transitionBootstrapFailure(
 		&authoritativeUpdatedAt,
 		refreshed,
 	)
+	if messageErr != nil {
+		return true, models.TaskSessionStateFailed, fmt.Errorf("persist bootstrap failure history: %w", messageErr)
+	}
 	return true, models.TaskSessionStateFailed, nil
+}
+
+// persistBootstrapFailureMessage records the accepted bootstrap failure as a
+// chronological session entry. Its stable message identity makes a retry
+// after the state commit idempotent.
+func (s *Service) persistBootstrapFailureMessage(
+	ctx context.Context,
+	taskID, sessionID, agentExecutionID string,
+	errorValue models.LastAgentError,
+) error {
+	if s.messageCreator == nil {
+		return fmt.Errorf("bootstrap failure message creator is unavailable")
+	}
+	return s.createRecoveryStatusMessage(ctx, watcher.AgentEventData{
+		TaskID:           taskID,
+		SessionID:        sessionID,
+		AgentExecutionID: agentExecutionID,
+		ErrorMessage:     errorValue.Message,
+		FailureCode:      errorValue.Code,
+		FailureDetails:   errorValue.Details,
+		Phase:            errorValue.Phase,
+		AttemptID:        errorValue.AttemptID,
+		ErrorStamp:       errorValue.Stamp(),
+		Causes:           errorValue.Causes,
+	})
 }
 
 func (s *Service) publishAcceptedTaskSessionState(
@@ -3301,6 +3347,14 @@ func (s *Service) handleSessionInfoEvent(ctx context.Context, payload *lifecycle
 	if !s.resumeAttemptAllowsExecution(payload.SessionID, payload.ExecutionID, payload.AttemptID) {
 		return
 	}
+	if currentACPSessionID := s.currentACPSessionID(payload.SessionID); currentACPSessionID != "" &&
+		payload.Data.ACPSessionID != "" && payload.Data.ACPSessionID != currentACPSessionID {
+		s.logger.Info("dropping session info from stale ACP session generation",
+			zap.String("session_id", payload.SessionID),
+			zap.String("acp_session_id", payload.Data.ACPSessionID),
+			zap.String("current_acp_session_id", currentACPSessionID))
+		return
+	}
 	info, err := s.mergedACPSessionInfo(ctx, payload.SessionID, payload.Data)
 	if err != nil {
 		s.logger.Warn("failed to read existing ACP session info",
@@ -3360,6 +3414,7 @@ func (s *Service) mergedACPSessionInfo(
 			}
 		}
 	}
+	existingACPSessionID := stringFromMap(info, "session_id")
 	if data.ACPSessionID != "" {
 		info["session_id"] = data.ACPSessionID
 	}
@@ -3369,8 +3424,27 @@ func (s *Service) mergedACPSessionInfo(
 	if data.SessionUpdatedAt != "" {
 		info["updated_at"] = data.SessionUpdatedAt
 	}
-	if data.SessionMeta != nil {
-		info["meta"] = data.SessionMeta
+	attachmentChanged := data.ACPSessionID != "" &&
+		existingACPSessionID != "" &&
+		data.ACPSessionID != existingACPSessionID
+	if data.SessionMeta != nil || attachmentChanged {
+		existingMeta, _ := info["meta"].(map[string]any)
+		incomingMeta := data.SessionMeta
+		if incomingMeta == nil {
+			incomingMeta = map[string]any{}
+		}
+		mergedMeta, clearWatermark := mergeACPGoalMetaWithClearWatermark(
+			existingMeta,
+			incomingMeta,
+			attachmentChanged,
+			info[goalClearWatermarkInfoKey],
+		)
+		info["meta"] = mergedMeta
+		if clearWatermark == nil {
+			delete(info, goalClearWatermarkInfoKey)
+		} else {
+			info[goalClearWatermarkInfoKey] = clearWatermark
+		}
 	}
 	return info, nil
 }

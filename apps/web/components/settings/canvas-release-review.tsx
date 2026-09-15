@@ -393,7 +393,7 @@ export function CanvasReleaseDialog({
     selectedRelease.id !== canvas?.active_release_id;
   const surfaceClassName = isMobile
     ? "!left-0 !top-0 !h-dvh !max-h-dvh !w-screen !max-w-none !translate-x-0 !translate-y-0 flex flex-col gap-0 overflow-hidden rounded-none p-0 [padding-top:max(1rem,env(safe-area-inset-top))]"
-    : "flex h-[min(90dvh,48rem)] max-h-[calc(100dvh-2rem)] w-full max-w-[48rem] flex-col gap-0 overflow-hidden p-0";
+    : "flex h-[min(90dvh,48rem)] max-h-[calc(100dvh-2rem)] w-full sm:max-w-[48rem] flex-col gap-0 overflow-hidden p-0";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

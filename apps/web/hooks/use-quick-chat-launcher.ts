@@ -5,6 +5,7 @@ import {
   requestQuickChatClose,
   type QuickChatLauncherFocusOptions,
 } from "@/components/quick-chat/quick-chat-focus";
+import { orderQuickChatTabs } from "@/lib/state/slices/ui/quick-chat-tab-order";
 import type { QuickChatSessionKind } from "@/lib/state/slices/ui/types";
 
 type QuickChatLauncherOptions = Pick<QuickChatLauncherFocusOptions, "returnFocusRef"> & {
@@ -29,6 +30,23 @@ export function useQuickChatLauncher(
   const isQuickChatOpen = useAppStore((state) => state.quickChat.isOpen);
   const quickChatSessions = useAppStore((state) => state.quickChat.sessions);
   const activeSessionId = useAppStore((state) => state.quickChat.activeSessionId);
+  const selectionRevision = useAppStore(
+    (state) => state.quickChat.selectionRevisionByWorkspace[workspaceId ?? ""] ?? 0,
+  );
+  const rememberedSelection = useAppStore(
+    (state) => state.quickChat.rememberedSelectionByWorkspace[workspaceId ?? ""],
+  );
+  const selectionReady = useAppStore(
+    (state) => state.quickChat.selectionReadyByWorkspace[workspaceId ?? ""] ?? false,
+  );
+  const tabOrder = useAppStore((state) => {
+    const workspace = workspaceId ?? "";
+    return (
+      state.quickChat.tabOrderByWorkspace[workspace] ??
+      state.userSettings.quickChatTabOrderByWorkspace[workspace]
+    );
+  });
+  const requestQuickChatOpen = useAppStore((state) => state.requestQuickChatOpen);
 
   const handleOpenQuickChat = useCallback(() => {
     if (!workspaceId) return;
@@ -43,8 +61,16 @@ export function useQuickChatLauncher(
       (session) => session.workspaceId === workspaceId && (session.kind ?? "chat") === kind,
     );
     const existingSession =
-      matchingSessions.find((session) => session.sessionId === activeSessionId) ??
-      matchingSessions[0];
+      (selectionRevision > 0
+        ? matchingSessions.find((session) => session.sessionId === activeSessionId)
+        : undefined) ??
+      matchingSessions.find((session) => session.sessionId === rememberedSelection?.[kind]) ??
+      (selectionReady ? orderQuickChatTabs(matchingSessions, [], tabOrder).sessions[0] : undefined);
+    if (!selectionReady && !existingSession) {
+      if (tabOrder) requestQuickChatOpen(workspaceId, kind, tabOrder);
+      else requestQuickChatOpen(workspaceId, kind);
+      return;
+    }
     if (existingSession) {
       openQuickChat(
         existingSession.sessionId,
@@ -66,6 +92,11 @@ export function useQuickChatLauncher(
     quickChatSessions,
     kind,
     activeSessionId,
+    selectionRevision,
+    rememberedSelection,
+    selectionReady,
+    tabOrder,
+    requestQuickChatOpen,
     openQuickChat,
   ]);
 

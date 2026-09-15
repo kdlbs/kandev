@@ -319,6 +319,7 @@ type NativeMessageListBodyProps = {
  *   keep their existing visible-host behavior without participating in read
  *   tracking.
  */
+// eslint-disable-next-line max-lines-per-function -- divider and initial placement share one scroll lifecycle.
 export function useScrollToDividerOrBottom(
   scrollRef: React.RefObject<HTMLDivElement | null>,
   itemCount: number,
@@ -363,7 +364,8 @@ export function useScrollToDividerOrBottom(
       settlingDeadlineRef.current = Date.now() + DIVIDER_SETTLING_WINDOW_MS;
     }
     const el = scrollRef.current;
-    if (!el || itemCount === 0 || historyRefreshPending) return;
+    if (!el || historyRefreshPending) return;
+    if (itemCount === 0) return;
 
     const placeInitialPosition = () => {
       if (!isVisibleRef.current) return;

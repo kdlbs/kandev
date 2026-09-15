@@ -163,14 +163,43 @@ function SectionDivider({ id, label }: { id: string; label: string }) {
   );
 }
 
-function ErrorPanel({ title, message }: { title: string; message: string }) {
+function ErrorPanel({
+  title,
+  message,
+  onRetry,
+  retrying = false,
+}: {
+  title: string;
+  message: string;
+  onRetry?: () => void;
+  retrying?: boolean;
+}) {
+  const { t } = useTranslation();
   return (
-    <Card className="rounded-sm">
+    <Card className="rounded-sm" role="status" aria-live="polite">
       <CardHeader className="pb-2">
         <CardTitle className="text-sm font-medium text-muted-foreground">{title}</CardTitle>
       </CardHeader>
       <CardContent>
         <p className="text-sm text-muted-foreground">{message}</p>
+        {onRetry && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="mt-3 min-h-11 cursor-pointer px-3 text-xs [@media(pointer:fine)]:h-7 [@media(pointer:fine)]:min-h-7"
+            onClick={onRetry}
+            disabled={retrying}
+            aria-label={t("stats:retry")}
+          >
+            {t("stats:retry")}
+          </Button>
+        )}
+        {retrying && (
+          <span className="sr-only" role="status" aria-live="polite">
+            {t("stats:retrying")}
+          </span>
+        )}
       </CardContent>
     </Card>
   );
@@ -184,34 +213,78 @@ function renderSection<T>(
     skeleton: React.ReactNode;
     errorTitle: string;
     ready: (data: T) => React.ReactNode;
+    onRetry?: () => void;
+    showError?: boolean;
   },
 ): React.ReactNode {
   if (status.kind === "loading") return options.skeleton;
-  if (status.kind === "error")
-    return <ErrorPanel title={options.errorTitle} message={status.message} />;
+  if (status.kind === "error") {
+    return (
+      <>
+        {options.showError !== false && (
+          <ErrorPanel
+            title={options.errorTitle}
+            message={status.message}
+            onRetry={options.onRetry}
+            retrying={status.retrying}
+          />
+        )}
+        {status.data !== undefined && options.ready(status.data)}
+      </>
+    );
+  }
   return options.ready(status.data);
 }
 
 function OverviewPanel({
   global,
   git,
+  onRetryGlobal,
+  onRetryGit,
 }: {
   global: SectionStatus<GlobalStatsDTO>;
   git: SectionStatus<GitStatsDTO>;
+  onRetryGlobal: () => void;
+  onRetryGit: () => void;
 }) {
   const { t } = useTranslation();
   if (global.kind === "loading") return <OverviewCardsSkeleton />;
-  if (global.kind === "error")
-    return <ErrorPanel title={t("stats:overview")} message={global.message} />;
   // Render global cards as soon as `global` is ready; `git` is independent and
   // its failure must not blank the tasks/sessions/turns summary the user can
   // already see. OverviewCards.git_stats is optional → falls back to the
   // averages card when git data is missing.
-  const gitData = git.kind === "ready" ? git.data : undefined;
-  return <OverviewCards global={global.data} git_stats={gitData} />;
+  const gitData = git.kind === "loading" ? undefined : git.data;
+  const cards = global.data ? <OverviewCards global={global.data} git_stats={gitData} /> : null;
+  return (
+    <>
+      {global.kind === "error" && (
+        <ErrorPanel
+          title={t("stats:overview")}
+          message={global.message}
+          onRetry={onRetryGlobal}
+          retrying={global.retrying}
+        />
+      )}
+      {cards}
+      {git.kind === "error" && (
+        <ErrorPanel
+          title={t("stats:gitActivity")}
+          message={git.message}
+          onRetry={onRetryGit}
+          retrying={git.retrying}
+        />
+      )}
+    </>
+  );
 }
 
-function CompletedPanel({ status }: { status: SectionStatus<CompletedTaskActivityDTO[]> }) {
+function CompletedPanel({
+  status,
+  onRetry,
+}: {
+  status: SectionStatus<CompletedTaskActivityDTO[]>;
+  onRetry: () => void;
+}) {
   const { t } = useTranslation();
   return renderSection(status, {
     skeleton: (
@@ -220,6 +293,7 @@ function CompletedPanel({ status }: { status: SectionStatus<CompletedTaskActivit
       </div>
     ),
     errorTitle: t("stats:completedTasksOverTime"),
+    onRetry,
     ready: (data) => (
       <div id="completed" className="scroll-mt-24">
         <div className="grid gap-4 lg:grid-cols-3">
@@ -253,10 +327,14 @@ function ActivityPanel({
   daily,
   models,
   rangeLabel,
+  onRetryDaily,
+  onRetryModels,
 }: {
   daily: SectionStatus<DailyActivityDTO[]>;
   models: SectionStatus<ModelUsageDTO[]>;
   rangeLabel: string;
+  onRetryDaily: () => void;
+  onRetryModels: () => void;
 }) {
   const { t } = useTranslation();
   return (
@@ -264,6 +342,7 @@ function ActivityPanel({
       {renderSection(daily, {
         skeleton: <ActivitySkeleton />,
         errorTitle: t("stats:activity"),
+        onRetry: onRetryDaily,
         ready: (data) => (
           <Card className="rounded-sm">
             <CardHeader className="pb-2">
@@ -280,6 +359,7 @@ function ActivityPanel({
       {renderSection(models, {
         skeleton: <ActivitySkeleton />,
         errorTitle: t("stats:topModels"),
+        onRetry: onRetryModels,
         ready: (data) => (
           <Card className="rounded-sm">
             <CardHeader className="pb-2">
@@ -297,11 +377,18 @@ function ActivityPanel({
   );
 }
 
-function RepositoryActivityPanel({ status }: { status: SectionStatus<RepositoryStatsDTO[]> }) {
+function RepositoryActivityPanel({
+  status,
+  onRetry,
+}: {
+  status: SectionStatus<RepositoryStatsDTO[]>;
+  onRetry: () => void;
+}) {
   const { t } = useTranslation();
   return renderSection(status, {
     skeleton: <RepositoriesSkeleton />,
     errorTitle: t("stats:repositoryActivity"),
+    onRetry,
     ready: (data) => (
       <Card id="repositories" className="rounded-sm scroll-mt-24">
         <CardHeader className="pb-2">
@@ -317,11 +404,19 @@ function RepositoryActivityPanel({ status }: { status: SectionStatus<RepositoryS
   });
 }
 
-function TopRepositoriesPanel({ status }: { status: SectionStatus<RepositoryStatsDTO[]> }) {
+function TopRepositoriesPanel({
+  status,
+  onRetry,
+}: {
+  status: SectionStatus<RepositoryStatsDTO[]>;
+  onRetry: () => void;
+}) {
   const { t } = useTranslation();
   return renderSection(status, {
     skeleton: <TopRepositoriesSkeleton />,
     errorTitle: t("stats:topRepositories"),
+    onRetry,
+    showError: false,
     ready: (data) => (
       <Card className="rounded-sm">
         <CardHeader className="pb-2">
@@ -337,11 +432,19 @@ function TopRepositoriesPanel({ status }: { status: SectionStatus<RepositoryStat
   });
 }
 
-function RepoLeadersPanel({ status }: { status: SectionStatus<RepositoryStatsDTO[]> }) {
+function RepoLeadersPanel({
+  status,
+  onRetry,
+}: {
+  status: SectionStatus<RepositoryStatsDTO[]>;
+  onRetry: () => void;
+}) {
   const { t } = useTranslation();
   return renderSection(status, {
     skeleton: <RepoLeadersSkeleton />,
     errorTitle: t("stats:repoLeaders"),
+    onRetry,
+    showError: false,
     ready: (data) => (
       <Card className="rounded-sm">
         <CardHeader className="pb-2">
@@ -357,11 +460,18 @@ function RepoLeadersPanel({ status }: { status: SectionStatus<RepositoryStatsDTO
   });
 }
 
-function WorkloadPanel({ status }: { status: SectionStatus<TaskStatsDTO[]> }) {
+function WorkloadPanel({
+  status,
+  onRetry,
+}: {
+  status: SectionStatus<TaskStatsDTO[]>;
+  onRetry: () => void;
+}) {
   const { t } = useTranslation();
   return renderSection(status, {
     skeleton: <WorkloadSkeleton />,
     errorTitle: t("stats:workload"),
+    onRetry,
     ready: (data) => <WorkloadSection task_stats={data} />,
   });
 }
@@ -370,10 +480,14 @@ function StatsContent({
   sections,
   rangeLabel,
   workspaceId,
+  onRetrySection,
 }: {
   sections: StatsSections;
   rangeLabel: string;
   workspaceId?: string;
+  onRetrySection: (
+    key: "global" | "tasks" | "daily" | "completed" | "models" | "repos" | "git",
+  ) => void;
 }) {
   const { t } = useTranslation();
   const taskStatus = flattenTaskStats(sections.tasks);
@@ -381,17 +495,31 @@ function StatsContent({
     <div className="min-h-0 flex-1 overflow-auto bg-background">
       <div className="max-w-7xl mx-auto p-6">
         <div className="space-y-5">
-          <OverviewPanel global={sections.global} git={sections.git} />
+          <OverviewPanel
+            global={sections.global}
+            git={sections.git}
+            onRetryGlobal={() => onRetrySection("global")}
+            onRetryGit={() => onRetrySection("git")}
+          />
           <SectionDivider id="telemetry" label={t("stats:telemetry")} />
-          <CompletedPanel status={sections.completed} />
-          <ActivityPanel daily={sections.daily} models={sections.models} rangeLabel={rangeLabel} />
-          <RepositoryActivityPanel status={sections.repos} />
-          <TopRepositoriesPanel status={sections.repos} />
-          <RepoLeadersPanel status={sections.repos} />
+          <CompletedPanel status={sections.completed} onRetry={() => onRetrySection("completed")} />
+          <ActivityPanel
+            daily={sections.daily}
+            models={sections.models}
+            rangeLabel={rangeLabel}
+            onRetryDaily={() => onRetrySection("daily")}
+            onRetryModels={() => onRetrySection("models")}
+          />
+          <RepositoryActivityPanel
+            status={sections.repos}
+            onRetry={() => onRetrySection("repos")}
+          />
+          <TopRepositoriesPanel status={sections.repos} onRetry={() => onRetrySection("repos")} />
+          <RepoLeadersPanel status={sections.repos} onRetry={() => onRetrySection("repos")} />
           <SectionDivider id="github" label="GitHub" />
           <PRStatsPanel workspaceId={workspaceId ?? null} />
           <SectionDivider id="workload" label={t("stats:workload")} />
-          <WorkloadPanel status={taskStatus} />
+          <WorkloadPanel status={taskStatus} onRetry={() => onRetrySection("tasks")} />
         </div>
       </div>
     </div>
@@ -412,7 +540,7 @@ export function StatsPageClient({ workspaceId, activeRange, initialError }: Stat
   const rangeLabel = getRangeLabel(range);
   const rangeLabelDisplay = t(RANGE_LABEL_KEYS[range]);
 
-  const sections = useStatsSections(workspaceId, range);
+  const { retrySection, ...sections } = useStatsSections(workspaceId, range);
   const fetchError = firstError(sections);
   const globalReady = readyGlobal(sections);
   const fullStats = composeStatsResponse(sections);
@@ -467,7 +595,12 @@ export function StatsPageClient({ workspaceId, activeRange, initialError }: Stat
       onRangeChange={handleRangeChange}
       onCopy={handleCopyStats}
     >
-      <StatsContent sections={sections} rangeLabel={rangeLabelDisplay} workspaceId={workspaceId} />
+      <StatsContent
+        sections={sections}
+        rangeLabel={rangeLabelDisplay}
+        workspaceId={workspaceId}
+        onRetrySection={retrySection}
+      />
     </StatsShell>
   );
 }

@@ -1,7 +1,10 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { StateProvider } from "@/components/state-provider";
+import { StateProvider, useAppStoreApi } from "@/components/state-provider";
+import type { AppState } from "@/lib/state/store";
+import type { Repository } from "@/lib/types/http";
+import type { StoreApi } from "zustand";
 import { SpaRoutes } from "./spa-routes";
 
 const mocks = vi.hoisted(() => ({
@@ -14,7 +17,24 @@ const mocks = vi.hoisted(() => ({
 
 const DEFAULT_WORKSPACE_ID = "ws-default";
 const SELECTED_WORKSPACE_ID = "ws-selected";
+const EXISTING_WORKFLOW_ID = "wf-existing";
+const EXISTING_REPOSITORY_ID = "repo-existing";
 const TEST_TIMESTAMP = "2026-06-24T00:00:00Z";
+
+let store: StoreApi<AppState>;
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
+function CaptureStore() {
+  store = useAppStoreApi();
+  return null;
+}
 
 vi.mock("@/app/github/github-page-client", () => ({
   GitHubPageClient: ({ workspaceId }: { workspaceId?: string }) => (
@@ -53,6 +73,7 @@ afterEach(() => {
   window.history.replaceState({}, "", "/");
 });
 
+// eslint-disable-next-line max-lines-per-function -- route recovery cases share one boot fixture
 describe("SpaRoutes data-backed workspace context", () => {
   it("passes the selected workspace to the kanban home client after bootstrap", async () => {
     mockGitHubWorkspaceBootstrap();
@@ -114,6 +135,199 @@ describe("SpaRoutes data-backed workspace context", () => {
     );
 
     await expectSelectedWorkspace();
+  });
+
+  it("retains workflows after a failed refresh", async () => {
+    mockGitHubWorkspaceBootstrap();
+    mocks.listWorkflows.mockRejectedValueOnce(new Error("workflow read failed"));
+    mocks.listRepositories.mockRejectedValueOnce(new Error("repository read failed"));
+    mocks.fetchJson.mockRejectedValueOnce(new Error("step read failed"));
+
+    render(
+      <StateProvider
+        initialState={{
+          workspaces: {
+            items: [workspace(DEFAULT_WORKSPACE_ID), workspace(SELECTED_WORKSPACE_ID)],
+            activeId: SELECTED_WORKSPACE_ID,
+          },
+          workflows: {
+            activeId: EXISTING_WORKFLOW_ID,
+            items: [
+              {
+                id: EXISTING_WORKFLOW_ID,
+                workspaceId: SELECTED_WORKSPACE_ID,
+                name: "Existing",
+                description: null,
+                sortOrder: 0,
+              },
+            ],
+          },
+          repositories: {
+            itemsByWorkspaceId: {
+              [SELECTED_WORKSPACE_ID]: [repository(EXISTING_REPOSITORY_ID)],
+            },
+            loadingByWorkspaceId: {},
+            loadedByWorkspaceId: {},
+          },
+        }}
+      >
+        <CaptureStore />
+        <SpaRoutes />
+      </StateProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("github-page")).toBeTruthy());
+    expect(store.getState().workflows.items).toEqual([
+      expect.objectContaining({ id: EXISTING_WORKFLOW_ID }),
+    ]);
+    expect(store.getState().repositories.itemsByWorkspaceId[SELECTED_WORKSPACE_ID]).toEqual([
+      expect.objectContaining({ id: EXISTING_REPOSITORY_ID }),
+    ]);
+  });
+
+  it("accepts a successful empty list", async () => {
+    mockGitHubWorkspaceBootstrap();
+    mocks.listWorkflows.mockResolvedValueOnce({ workflows: [] });
+
+    render(
+      <StateProvider
+        initialState={{
+          workspaces: {
+            items: [workspace(DEFAULT_WORKSPACE_ID), workspace(SELECTED_WORKSPACE_ID)],
+            activeId: SELECTED_WORKSPACE_ID,
+          },
+          workflows: {
+            activeId: EXISTING_WORKFLOW_ID,
+            items: [
+              {
+                id: EXISTING_WORKFLOW_ID,
+                workspaceId: SELECTED_WORKSPACE_ID,
+                name: "Existing",
+                description: null,
+                sortOrder: 0,
+              },
+            ],
+          },
+          repositories: {
+            itemsByWorkspaceId: {
+              [SELECTED_WORKSPACE_ID]: [repository(EXISTING_REPOSITORY_ID)],
+            },
+            loadingByWorkspaceId: {},
+            loadedByWorkspaceId: {},
+          },
+        }}
+      >
+        <CaptureStore />
+        <SpaRoutes />
+      </StateProvider>,
+    );
+
+    await waitFor(() => expect(store.getState().workflows.items).toEqual([]));
+    expect(store.getState().repositories.itemsByWorkspaceId[SELECTED_WORKSPACE_ID]).toEqual([]);
+  });
+
+  it("applies partial successes", async () => {
+    mockGitHubWorkspaceBootstrap();
+    mocks.listWorkflows.mockResolvedValueOnce({
+      workflows: [workflow("wf-new", SELECTED_WORKSPACE_ID)],
+    });
+    mocks.listRepositories.mockRejectedValueOnce(new Error("repository read failed"));
+
+    render(
+      <StateProvider
+        initialState={{
+          workspaces: {
+            items: [workspace(DEFAULT_WORKSPACE_ID), workspace(SELECTED_WORKSPACE_ID)],
+            activeId: SELECTED_WORKSPACE_ID,
+          },
+          workflows: {
+            activeId: EXISTING_WORKFLOW_ID,
+            items: [
+              {
+                id: EXISTING_WORKFLOW_ID,
+                workspaceId: SELECTED_WORKSPACE_ID,
+                name: "Existing",
+                description: null,
+                sortOrder: 0,
+              },
+            ],
+          },
+          repositories: {
+            itemsByWorkspaceId: {
+              [SELECTED_WORKSPACE_ID]: [repository(EXISTING_REPOSITORY_ID)],
+            },
+            loadingByWorkspaceId: {},
+            loadedByWorkspaceId: {},
+          },
+        }}
+      >
+        <CaptureStore />
+        <SpaRoutes />
+      </StateProvider>,
+    );
+
+    await waitFor(() =>
+      expect(store.getState().workflows.items).toEqual([expect.objectContaining({ id: "wf-new" })]),
+    );
+    expect(store.getState().repositories.itemsByWorkspaceId[SELECTED_WORKSPACE_ID]).toEqual([
+      expect.objectContaining({ id: EXISTING_REPOSITORY_ID }),
+    ]);
+    expect(store.getState().workspaceContextRead.errors.repositories).toBe("transient");
+  });
+
+  it("settles route-owned pending reads before recovering a later transient failure", async () => {
+    mockGitHubWorkspaceBootstrap();
+    const oldWorkflows = deferred<{ workflows: Array<Record<string, unknown>> }>();
+    const oldRepositories = deferred<{ repositories: Repository[] }>();
+    const oldSteps = deferred<{ steps: Array<Record<string, unknown>>; total: number }>();
+    mocks.listWorkflows.mockReturnValueOnce(oldWorkflows.promise);
+    mocks.listRepositories.mockReturnValueOnce(oldRepositories.promise);
+    mocks.fetchJson.mockReturnValueOnce(oldSteps.promise);
+
+    const first = render(
+      <StateProvider>
+        <CaptureStore />
+        <SpaRoutes />
+      </StateProvider>,
+    );
+
+    await waitFor(() =>
+      expect(store.getState().workspaceContextRead.pending).toMatchObject({
+        workflows: true,
+        repositories: true,
+        steps: true,
+      }),
+    );
+    first.unmount();
+    expect(store.getState().workspaceContextRead.pending).toEqual({
+      workflows: false,
+      repositories: false,
+      steps: false,
+    });
+
+    await act(async () => {
+      oldWorkflows.resolve({ workflows: [] });
+      oldRepositories.resolve({ repositories: [] });
+      oldSteps.resolve({ steps: [], total: 0 });
+    });
+
+    mocks.listWorkflows.mockRejectedValueOnce(new Error("temporary workflow failure"));
+    mocks.listRepositories.mockResolvedValueOnce({ repositories: [] });
+    mocks.fetchJson.mockResolvedValueOnce({ steps: [], total: 0 });
+    const second = render(
+      <StateProvider>
+        <CaptureStore />
+        <SpaRoutes />
+      </StateProvider>,
+    );
+    await waitFor(() =>
+      expect(store.getState().workspaceContextRead.errors.workflows).toBe("transient"),
+    );
+
+    mocks.listWorkflows.mockResolvedValueOnce({ workflows: [] });
+    act(() => store.getState().requestWorkspaceContextRefresh());
+    await waitFor(() => expect(store.getState().workspaceContextRead.errors.workflows).toBeNull());
+    second.unmount();
   });
 });
 
@@ -182,4 +396,28 @@ function workflow(id: string, workspaceId: string) {
     created_at: TEST_TIMESTAMP,
     updated_at: TEST_TIMESTAMP,
   };
+}
+
+function repository(id: string): Repository {
+  return {
+    id,
+    workspace_id: SELECTED_WORKSPACE_ID,
+    name: id,
+    source_type: "local",
+    path: `/tmp/${id}`,
+    local_path: `/tmp/${id}`,
+    provider: "",
+    provider_repo_id: "",
+    provider_owner: "",
+    provider_name: "",
+    default_branch: "main",
+    worktree_branch_prefix: "task/",
+    pull_before_worktree: false,
+    setup_script: "",
+    cleanup_script: "",
+    dev_script: "",
+    copy_files: "",
+    created_at: TEST_TIMESTAMP,
+    updated_at: TEST_TIMESTAMP,
+  } as unknown as Repository;
 }

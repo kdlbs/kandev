@@ -201,6 +201,117 @@ func TestRuntimeStartupBootstrapPreservesArtifact(t *testing.T) {
 	}
 }
 
+func TestRuntimeStartupBootstrapSupportsOmittedHTMLWrappers(t *testing.T) {
+	entry := `<!doctype html><meta charset="utf-8"><title>Report</title><p>Hello</p>`
+	archive := canvasArchive(t, map[string]string{
+		"manifest.yaml": staticManifestYAML,
+		"ui/index.html": entry,
+	})
+	pkg, err := ValidatePackage(bytes.NewReader(archive))
+	if err != nil {
+		t.Fatalf("ValidatePackage: %v", err)
+	}
+	artifacts, err := NewArtifactStore(filepath.Join(t.TempDir(), "artifacts"))
+	if err != nil {
+		t.Fatalf("NewArtifactStore: %v", err)
+	}
+	artifact, err := artifacts.Put(pkg)
+	if err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	manager := NewTokenManager(nil)
+	token, err := manager.Issue(CapabilityBinding{
+		UserID: "user-1", InstanceID: "instance-1", ReleaseID: "release-1", WebAppKey: "main",
+		Placement: "task-canvas", Artifact: artifact, Entry: "ui/index.html",
+	}, 0)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	runtime := NewRuntime(manager, artifacts, nil, nil)
+
+	response := httptest.NewRecorder()
+	runtime.Serve(response, httptest.NewRequest(http.MethodGet, "/", nil), token, "")
+	if response.Code != http.StatusOK {
+		t.Fatalf("entry status = %d, body = %s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	bootstrap := `<script src="./_kandev/host-runtime.js"></script>`
+	if !strings.HasPrefix(body, `<!doctype html><meta charset="utf-8">`) {
+		t.Fatalf("doctype or encoding prefix changed: %q", body)
+	}
+	if strings.Index(body, bootstrap) <= strings.Index(body, "<p>Hello</p>") {
+		t.Fatalf("host bootstrap was not appended to the implied body: %q", body)
+	}
+	if got := response.Header().Get("Content-Length"); got != fmt.Sprintf("%d", len(body)) {
+		t.Fatalf("Content-Length = %q, want %d", got, len(body))
+	}
+	stored, err := os.ReadFile(filepath.Join(artifacts.Path(artifact), "ui", "index.html"))
+	if err != nil {
+		t.Fatalf("ReadFile stored entry: %v", err)
+	}
+	if string(stored) != entry {
+		t.Fatalf("stored entry changed: %q", stored)
+	}
+}
+
+func TestInjectRuntimeBootstrapSkipsTemplateContent(t *testing.T) {
+	entry := `<!doctype html><template><script>window.__template = true;</script></template><script src="./app.js"></script>`
+	result, err := injectRuntimeBootstrap([]byte(entry))
+	if err != nil {
+		t.Fatalf("injectRuntimeBootstrap: %v", err)
+	}
+	body := string(result)
+	bootstrap := `<script src="./_kandev/host-runtime.js"></script>`
+	bootstrapIndex := strings.Index(body, bootstrap)
+	templateEnd := strings.Index(body, "</template>")
+	authoredScript := strings.Index(body, `<script src="./app.js">`)
+	if bootstrapIndex <= templateEnd || bootstrapIndex >= authoredScript {
+		t.Fatalf("host bootstrap was inserted outside executable document order: %q", body)
+	}
+}
+
+func TestInjectRuntimeBootstrapRejectsUnclosedHTMLTemplate(t *testing.T) {
+	for _, entry := range []string{
+		`<template><p>Hello`,
+		`<div><template><script>window.__template = true;</script></div>`,
+	} {
+		if _, err := injectRuntimeBootstrap([]byte(entry)); !errors.Is(err, ErrRuntimeBootstrapUnavailable) {
+			t.Fatalf("injectRuntimeBootstrap(%q) error = %v, want %v", entry, err, ErrRuntimeBootstrapUnavailable)
+		}
+	}
+}
+
+func TestInjectRuntimeBootstrapDoesNotTreatForeignTemplateAsInert(t *testing.T) {
+	entry := `<svg><template><script>window.__svg = true;</script></template></svg><script src="./app.js"></script>`
+	result, err := injectRuntimeBootstrap([]byte(entry))
+	if err != nil {
+		t.Fatalf("injectRuntimeBootstrap: %v", err)
+	}
+	body := string(result)
+	bootstrap := `<script src="./_kandev/host-runtime.js"></script>`
+	bootstrapIndex := strings.Index(body, bootstrap)
+	foreignScript := strings.Index(body, `<script>window.__svg = true;</script>`)
+	if bootstrapIndex < 0 || foreignScript < 0 || bootstrapIndex >= foreignScript {
+		t.Fatalf("host bootstrap was inserted after foreign executable script: %q", body)
+	}
+}
+
+func TestInjectRuntimeBootstrapTracksHTMLTemplateAfterForeignBreakout(t *testing.T) {
+	entry := `<svg><p><template><script>window.__template = true;</script></template></p></svg><script src="./app.js"></script>`
+	result, err := injectRuntimeBootstrap([]byte(entry))
+	if err != nil {
+		t.Fatalf("injectRuntimeBootstrap: %v", err)
+	}
+	body := string(result)
+	bootstrap := `<script src="./_kandev/host-runtime.js"></script>`
+	bootstrapIndex := strings.Index(body, bootstrap)
+	templateScript := strings.Index(body, `<script>window.__template = true;</script>`)
+	authoredScript := strings.Index(body, `<script src="./app.js">`)
+	if bootstrapIndex <= templateScript || bootstrapIndex >= authoredScript {
+		t.Fatalf("host bootstrap was inserted inside HTML template content: %q", body)
+	}
+}
+
 func TestRuntimeBootstrapFailureDoesNotKeepArtifactContentLength(t *testing.T) {
 	archive := canvasArchive(t, map[string]string{
 		"manifest.yaml": staticManifestYAML,

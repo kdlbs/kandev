@@ -45,6 +45,20 @@ type SessionTaskSwitcherSheetProps = {
   navigate?: (taskId: string) => void;
   onCloseAutoFocus?: (event: Event) => void;
 };
+function useTaskSheetOpener(open: boolean) {
+  const [opener, setOpener] = useState({ open: false, current: null as HTMLElement | null });
+  if (opener.open !== open) {
+    setOpener({
+      open,
+      current:
+        open && document.activeElement instanceof HTMLElement
+          ? document.activeElement
+          : opener.current,
+    });
+  }
+  return opener;
+}
+
 export function useTaskSheetSelectionController() {
   const [selectionController] = useState(createTaskSheetSelectionController);
   useEffect(
@@ -298,6 +312,7 @@ type TaskSwitcherSurfaceContentProps = {
   linking: ReturnType<typeof useMobileTaskLinking>;
 };
 
+// eslint-disable-next-line max-lines-per-function -- this surface keeps the existing mobile scroll owner intact
 function TaskSwitcherSurfaceContent({
   open,
   presentation,
@@ -313,6 +328,17 @@ function TaskSwitcherSurfaceContent({
   linking,
 }: TaskSwitcherSurfaceContentProps) {
   const { t } = useTranslation();
+  let taskLoadError: string | null = null;
+  if (data.workspaceContextError) {
+    taskLoadError = data.workspaceContextAccessDenied
+      ? t("sidebar:workspaceContextAccessDenied")
+      : t("sidebar:workspaceContextRefreshFailed");
+  } else if (data.archivedError) {
+    taskLoadError = t("sidebar:archivedLoadFailed");
+  }
+  const retryTaskLoad = data.workspaceContextError
+    ? data.retryWorkspaceContext
+    : data.retryArchivedTasks;
   const moveOptions = useMobileTaskMoveOptions({
     open,
     stepsByWorkflowId: data.stepsByWorkflowId,
@@ -376,9 +402,12 @@ function TaskSwitcherSurfaceContent({
             deletingTaskId={actions.deletingTaskId}
             archivingTaskId={actions.archivingTaskId}
             isArchiving={actions.isArchiving}
-            isLoading={data.tasksLoading}
-            loadError={data.archivedError ? t("sidebar:archivedLoadFailed") : null}
-            onRetryLoad={data.retryArchivedTasks}
+            isLoading={
+              data.tasksLoading ||
+              (data.workspaceContextPending && data.tasksWithRepositories.length === 0)
+            }
+            loadError={taskLoadError}
+            onRetryLoad={retryTaskLoad}
             retryLabel={t("sidebar:retry")}
           />
         </PluginTaskLinkActionSurfaceProvider>
@@ -430,6 +459,8 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
   onCloseAutoFocus,
 }: SessionTaskSwitcherSheetProps) {
   const [dialogOpen, setDialogOpen] = useState(false);
+  const opener = useTaskSheetOpener(open);
+  const autoFocusNewTasks = useAppStore((state) => state.userSettings.autoFocusNewTasks) !== false;
   const [subtaskTarget, setSubtaskTarget] = useState<{ id: string; title: string } | null>(null);
   const data = useSheetData(workspaceId);
   const selectionController = useTaskSheetSelectionController();
@@ -500,6 +531,7 @@ export const SessionTaskSwitcherSheet = memo(function SessionTaskSwitcherSheet({
     <>
       {surface}
       <TaskSwitcherDialogs
+        focusReturnRef={presentation === "drawer" && !autoFocusNewTasks ? opener : undefined}
         dialogOpen={dialogOpen}
         onDialogOpenChange={setDialogOpen}
         workspaceId={workspaceId}

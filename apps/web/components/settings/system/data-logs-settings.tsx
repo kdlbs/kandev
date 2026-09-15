@@ -7,6 +7,8 @@ import { SettingsTarget } from "@/components/settings/settings-target";
 import { BackupsTable } from "@/components/settings/system/backups-table";
 import { DatabaseStatsCard } from "@/components/settings/system/database-stats-card";
 import { LogViewer } from "@/components/settings/system/log-viewer";
+import { ToolPayloadRetentionCard } from "./tool-payload-retention-card";
+import { RetentionSettingsCard } from "@/components/settings/system/retention-settings-card";
 import { BACKUP_SQL_COMMAND } from "@/components/settings/system/system-route-shell";
 import { SYSTEM_SETTINGS_TARGETS } from "@/lib/settings-discovery/catalog/system";
 
@@ -33,6 +35,18 @@ export function DataLogsSettings() {
           description={t("system:databasePageDescription")}
         />
         <DatabaseStatsCard />
+      </SettingsTarget>
+      <Separator />
+      <SettingsTarget targetId={SYSTEM_SETTINGS_TARGETS.retention} className="space-y-4">
+        <SectionHeading
+          title={t("system:navRetention")}
+          description={t("system:retentionPageDescription")}
+        />
+        <RetentionSettingsCard />
+      </SettingsTarget>
+      <Separator />
+      <SettingsTarget targetId={SYSTEM_SETTINGS_TARGETS.toolPayloadRetention}>
+        <ToolPayloadRetentionCard />
       </SettingsTarget>
       <Separator />
       <SettingsTarget targetId={SYSTEM_SETTINGS_TARGETS.backups} className="space-y-4">

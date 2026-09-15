@@ -2,7 +2,7 @@
 status: active
 system: agents
 created: 2026-09-11
-updated: 2026-09-12
+updated: 2026-09-14
 owners:
   - Kandev
 ---
@@ -42,10 +42,22 @@ results, including the shared recovery owner and phone touch-target checks.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.1:** When the same failure appears in automatic recovery, session state, and the transcript, the selected session shall show one active recovery card. An equivalent top banner, stopped-session warning, or synthetic agent error shall not repeat it.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.2:** The card shall show a localized cause summary, valid actions, and one initially collapsed details disclosure. Resume and restore causes shall have separate labels and bounded, sanitized details.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.3:** A failure before agent startup shall be described as startup or recovery failure. It shall not state that the agent encountered an error while working.
-- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.4:** Retry shall update the existing card and disable equivalent actions while pending. Successful resume shall clear the active failure; workspace-only success shall show a nonblocking notice that the agent remains stopped.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.4:** Retry shall show pending state on the error entry and disable equivalent actions. Successful resume shall retire its actions without removing history. Workspace-only success shall retain the stopped-agent notice.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.5:** Reload, reconnect, and reversed event order shall converge on the current failure. A stale attempt or unrelated historical error shall neither replace nor be hidden by that failure.
 - **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.6:** Desktop and phone shall expose the same recovery choices and details. Phone actions shall have at least 44-pixel touch targets, with no horizontal page overflow or extra details scroller.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.7:** Chat shall show the session error at its chronological position in the transcript. Normal message scrolling shall govern initial placement, pagination, and new entries. Errors shall not force a separate scroll position. Recovery actions and the composer shall remain reachable on desktop and phone.
 
+
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.8:** After manual or automatic recovery, the session error shall remain readable before later messages. It shall retain its original cause and occurrence time after reload.
+- **AC-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-006.9:** Only the current unresolved failure shall offer recovery actions. Pending recovery shall not imply success. A later failure shall not reactivate controls on an older entry.
+
+## Session error history amendment
+
+The September 14 amendment changes criteria 006.4 and 006.7 and adds 006.8 and 006.9.
+Implementation is complete in the [error scope package](../../../plans/error-scope-and-history/plan.md).
+This supersedes the reveal-at-top behavior from the completed startup recovery scrolling package.
+The task system owns durable history and shared error scope through
+[task error ownership](../../tasks/requirements/task-launch-failure-recovery.md).
 
 ## Proposed recovery attempt amendment
 

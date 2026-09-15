@@ -145,8 +145,10 @@ var transportLostErrorData = map[string]any{"error": "peer disconnected before r
 // transportLostCmdRe matches `/transport-lost` or `/e2e:transport-lost`,
 // optionally followed by `:N` — the number of consecutive prompts to fail
 // with the ACP peer-disconnected signature before recovering (default 1).
-// Use a large N (e.g. `/transport-lost:9`) to exhaust the retry budget and
-// fall through to the red recovery banner.
+// The signature lives only in the error's Data, which the generic
+// prompt-error projection never reads, so every failure presents as
+// terminal and exposes manual recovery; N does not drive an automatic
+// retry ladder here the way it does for `/overloaded`.
 var transportLostCmdRe = regexp.MustCompile(`(?i)^/(?:e2e:)?transport-lost(?::(\d+))?$`)
 
 // parseTransportLostCmd reports whether the prompt is the /transport-lost
@@ -433,6 +435,8 @@ func handlePrompt(e *emitter, prompt, model string) {
 		emitSubagentSequence(e, model)
 	case strings.EqualFold(cmd, "/subtask") || strings.HasPrefix(strings.ToLower(cmd), "/subtask "):
 		emitCreateSubtask(e, cmd, model)
+	case strings.EqualFold(cmd, "/e2e:utility-profile"):
+		e.text("utility profile model: " + model)
 	case strings.HasPrefix(cmd, "/e2e:"):
 		rest := strings.TrimPrefix(cmd, "/e2e:")
 		scenarioName, _, _ := strings.Cut(strings.TrimSpace(rest), " ")

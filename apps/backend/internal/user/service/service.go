@@ -62,6 +62,7 @@ type UpdateUserSettingsRequest struct {
 	PreventAutoStartAgentOnOpen       *bool
 	UnreadDivider                     *bool
 	AgentGeneratedTaskTitles          *bool
+	AutoFocusNewTasks                 *bool
 	MCPTaskAgentProfileDefault        *string
 	ShowAnchoredPromptBar             *bool
 	ShowScrollToLastPrompt            *bool
@@ -103,11 +104,15 @@ type UpdateUserSettingsRequest struct {
 	LastSeenDisplay                   *string
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch
 	AppStatusBarEnabled               *bool
+	SidebarHoverEnabled               *bool
+	SidebarHoverDelayMs               *int
 	ResolveSessionHostnames           *bool
 	AppStatusBarOrder                 *models.AppStatusBarOrder
 	QuickChatTabOrderByWorkspace      *map[string][]string
 	KanbanHiddenStepIDs               *map[string][]string
 	WorkflowIDsWithAutoHideEmptySteps *[]string
+	KanbanSort                        *string
+	KanbanPriorityFilterTokens        *[]string
 }
 
 type SystemMetricsDisplaySettingsPatch struct {
@@ -345,6 +350,9 @@ func taskCreateLastUsedPatchEmpty(patch models.TaskCreateLastUsed) bool {
 
 // applyBasicSettings copies simple (non-validated) fields from req to settings.
 func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if err := applySidebarHoverSettings(settings, req); err != nil {
+		return err
+	}
 	if err := applyWorkspaceAndTaskListPreferences(settings, req); err != nil {
 		return err
 	}
@@ -437,6 +445,21 @@ func applyWorkspaceAndTaskListPreferences(settings *models.UserSettings, req *Up
 		}
 		settings.WorkflowIDsWithAutoHideEmptySteps = workflowIDs
 	}
+	if err := applyKanbanSort(settings, req.KanbanSort); err != nil {
+		return err
+	}
+	if req.KanbanPriorityFilterTokens != nil {
+		if len(*req.KanbanPriorityFilterTokens) > maxKanbanPriorityFilterTokens {
+			return fmt.Errorf(
+				"kanban_priority_filter_tokens: max %d tokens allowed",
+				maxKanbanPriorityFilterTokens,
+			)
+		}
+		if err := validateKanbanPriorityFilterTokensSize(*req.KanbanPriorityFilterTokens); err != nil {
+			return err
+		}
+		settings.KanbanPriorityFilterTokens = normalizeKanbanPriorityFilterTokens(*req.KanbanPriorityFilterTokens)
+	}
 	return nil
 }
 
@@ -457,6 +480,19 @@ const (
 	// transport-level guard.
 	maxKanbanHiddenStepIDsTotalBytes     = maxUserPreferenceBlobBytes
 	maxWorkflowIDsWithAutoHideEmptySteps = 200
+	// maxKanbanPriorityFilterTokens bounds the request before
+	// normalizeKanbanPriorityFilterTokens allocates a slice and map sized to the
+	// caller-supplied length. The vocabulary holds only 4 valid tokens, so this is a
+	// generous multiple rather than an exact fit — it exists to cap allocation and
+	// iteration cost on a WS payload (no per-field size guard, unlike the 2MB HTTP
+	// body cap), not to bound legitimate selections.
+	maxKanbanPriorityFilterTokens = 64
+	// maxKanbanPriorityFilterTokensTotalBytes bounds total content regardless of
+	// per-token length, the same total-content guard maxKanbanHiddenStepIDsTotalBytes
+	// applies to its sibling field: the count cap alone still admits 64 individually
+	// oversized tokens before normalizeKanbanPriorityFilterTokens trims and looks up
+	// each one.
+	maxKanbanPriorityFilterTokensTotalBytes = 4096
 )
 
 // validateQuickChatTabOrder bounds the client-supplied mixed-tab order before
@@ -545,6 +581,24 @@ func validateKanbanHiddenStepIDs(hidden map[string][]string) error {
 	return nil
 }
 
+// validateKanbanPriorityFilterTokensSize bounds total token content before
+// normalizeKanbanPriorityFilterTokens trims and looks up each one, so an
+// individually oversized member cannot cost CPU and allocation before the
+// count cap alone would have dropped it as invalid.
+func validateKanbanPriorityFilterTokensSize(tokens []string) error {
+	total := 0
+	for _, token := range tokens {
+		total += len(token)
+		if total > maxKanbanPriorityFilterTokensTotalBytes {
+			return fmt.Errorf(
+				"kanban_priority_filter_tokens: max %d bytes allowed",
+				maxKanbanPriorityFilterTokensTotalBytes,
+			)
+		}
+	}
+	return nil
+}
+
 // applyStartupPage validates and applies the startup page enum.
 func applyStartupPage(settings *models.UserSettings, value *string) error {
 	if value == nil {
@@ -579,6 +633,9 @@ func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSe
 	}
 	if req.AgentGeneratedTaskTitles != nil {
 		settings.AgentGeneratedTaskTitles = *req.AgentGeneratedTaskTitles
+	}
+	if req.AutoFocusNewTasks != nil {
+		settings.AutoFocusNewTasks = *req.AutoFocusNewTasks
 	}
 	if err := applyMCPTaskAgentProfileDefault(settings, req.MCPTaskAgentProfileDefault); err != nil {
 		return err
@@ -708,6 +765,51 @@ func applyTasksListPreferences(settings *models.UserSettings, sortValue, groupVa
 		settings.TasksListGroup = v
 	}
 	return nil
+}
+
+// applyKanbanSort validates and applies the board sort enum, defaulting an
+// empty value and rejecting the whole request on an invalid one, modeled on
+// applyTasksListPreferences.
+func applyKanbanSort(settings *models.UserSettings, sortValue *string) error {
+	if sortValue == nil {
+		return nil
+	}
+	v := strings.TrimSpace(*sortValue)
+	if v == "" {
+		v = models.KanbanSortDefault
+	}
+	if !models.IsValidKanbanSort(v) {
+		return fmt.Errorf("kanban_sort must be one of %s", strings.Join(models.KanbanSortValues(), ", "))
+	}
+	settings.KanbanSort = v
+	return nil
+}
+
+// normalizeKanbanPriorityFilterTokens drops any member outside the four
+// priority tokens, removes duplicates, and orders the remainder by priority
+// rank. An invalid member is dropped rather than rejecting the whole request,
+// since this field is a subset selection applied inside the same best-effort
+// settings payload as the record's other fields.
+func normalizeKanbanPriorityFilterTokens(tokens []string) []string {
+	valid := make([]string, 0, len(tokens))
+	seen := make(map[string]struct{}, len(tokens))
+	for _, token := range tokens {
+		token = strings.TrimSpace(token)
+		if !models.IsValidKanbanPriorityFilterToken(token) {
+			continue
+		}
+		if _, dup := seen[token]; dup {
+			continue
+		}
+		seen[token] = struct{}{}
+		valid = append(valid, token)
+	}
+	sort.SliceStable(valid, func(i, j int) bool {
+		rankI, _ := models.KanbanPriorityFilterTokenRank(valid[i])
+		rankJ, _ := models.KanbanPriorityFilterTokenRank(valid[j])
+		return rankI < rankJ
+	})
+	return valid
 }
 
 // applyTerminalLinkBehavior validates and applies the terminal link behavior
@@ -986,6 +1088,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"prevent_auto_start_agent_on_open":         settings.PreventAutoStartAgentOnOpen,
 		"unread_divider":                           settings.UnreadDivider,
 		"agent_generated_task_titles":              settings.AgentGeneratedTaskTitles,
+		"auto_focus_new_tasks":                     settings.AutoFocusNewTasks,
 		"mcp_task_agent_profile_default":           models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"show_anchored_prompt_bar":                 settings.ShowAnchoredPromptBar,
 		"show_scroll_to_last_prompt":               settings.ShowScrollToLastPrompt,
@@ -1027,10 +1130,14 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"last_seen_display":                        models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
+		"sidebar_hover_enabled":                    settings.SidebarHoverEnabled,
+		"sidebar_hover_delay_ms":                   settings.SidebarHoverDelayMs,
 		"resolve_session_hostnames":                settings.ResolveSessionHostnames,
 		"app_status_bar_order":                     settings.AppStatusBarOrder,
 		"kanban_hidden_step_ids":                   settings.KanbanHiddenStepIDs,
 		"workflow_ids_with_auto_hide_empty_steps":  settings.WorkflowIDsWithAutoHideEmptySteps,
+		"kanban_sort":                              settings.KanbanSort,
+		"kanban_priority_filter_tokens":            settings.KanbanPriorityFilterTokens,
 		"revision":                                 settings.Revision,
 		"updated_at":                               settings.UpdatedAt.Format(time.RFC3339),
 	}

@@ -71,6 +71,7 @@ describe("kanban slice active session selection", () => {
   });
 });
 
+// eslint-disable-next-line max-lines-per-function -- workspace transition cases share one store harness
 describe("kanban slice workspace transition", () => {
   it("clears workflow, board, and active task context before loading another workspace", () => {
     const store = makeStore();
@@ -130,6 +131,118 @@ describe("kanban slice workspace transition", () => {
         lastSessionByTaskId: {},
       },
     });
+  });
+
+  it("tracks scoped context read outcomes and ignores stale generations", () => {
+    const store = makeStore();
+
+    store.getState().setWorkspaceContextRead("workflows", ARCHIVED_WORKSPACE_ID, 0, "pending");
+    store
+      .getState()
+      .setWorkspaceContextRead("workflows", ARCHIVED_WORKSPACE_ID, 0, "transient", 4_000);
+    expect(store.getState().workspaceContextRead).toMatchObject({
+      workspaceId: ARCHIVED_WORKSPACE_ID,
+      generation: 0,
+      pending: { workflows: false },
+      errors: { workflows: "transient" },
+      retryAfterMs: { workflows: 4_000 },
+    });
+
+    store.getState().resetKanbanWorkspaceContext();
+    store.getState().setWorkspaceContextRead("workflows", ARCHIVED_WORKSPACE_ID, 0, "success");
+    expect(store.getState().workspaceContextRead).toMatchObject({
+      workspaceId: null,
+      generation: 0,
+      errors: { workflows: null },
+    });
+    expect(store.getState().workspaceContextGeneration).toBe(1);
+  });
+
+  it("clears a context error on success and preserves the retry version", () => {
+    const store = makeStore();
+
+    store.getState().requestWorkspaceContextRefresh();
+    store.getState().setWorkspaceContextRead("repositories", ARCHIVED_WORKSPACE_ID, 0, "pending");
+    store
+      .getState()
+      .setWorkspaceContextRead("repositories", ARCHIVED_WORKSPACE_ID, 0, "access_denied");
+    store.getState().setWorkspaceContextRead("repositories", ARCHIVED_WORKSPACE_ID, 0, "success");
+
+    expect(store.getState().workspaceContextRead).toMatchObject({
+      retryVersion: 1,
+      errors: { repositories: null },
+      retryAfterMs: { repositories: null },
+    });
+  });
+
+  it("does not let an abandoned request settle a replacement collection read", () => {
+    const store = makeStore();
+    const setRead = store.getState().setWorkspaceContextRead;
+
+    Reflect.apply(setRead, undefined, [
+      "workflows",
+      ARCHIVED_WORKSPACE_ID,
+      0,
+      "pending",
+      undefined,
+      "request-a",
+    ]);
+    Reflect.apply(setRead, undefined, [
+      "workflows",
+      ARCHIVED_WORKSPACE_ID,
+      0,
+      "pending",
+      undefined,
+      "request-b",
+    ]);
+    Reflect.apply(setRead, undefined, [
+      "workflows",
+      ARCHIVED_WORKSPACE_ID,
+      0,
+      "cancelled",
+      undefined,
+      "request-a",
+    ]);
+
+    expect(store.getState().workspaceContextRead.pending.workflows).toBe(true);
+    expect(store.getState().workspaceContextRead.requestIds.workflows).toBe("request-b");
+
+    Reflect.apply(setRead, undefined, [
+      "workflows",
+      ARCHIVED_WORKSPACE_ID,
+      0,
+      "success",
+      undefined,
+      "request-b",
+    ]);
+    expect(store.getState().workspaceContextRead.pending.workflows).toBe(false);
+  });
+
+  it("tracks snapshot failures independently from the workflow list request", () => {
+    const store = makeStore();
+
+    store
+      .getState()
+      .setWorkspaceSnapshotRead(ARCHIVED_WORKSPACE_ID, 0, "pending", undefined, "snapshot-a");
+    store
+      .getState()
+      .setWorkspaceSnapshotRead(ARCHIVED_WORKSPACE_ID, 0, "transient", 4_000, "snapshot-a");
+
+    expect(store.getState().workspaceContextRead).toMatchObject({
+      snapshotPending: false,
+      snapshotError: "transient",
+      snapshotRetryAfterMs: 4_000,
+      snapshotRequestId: null,
+    });
+
+    store
+      .getState()
+      .setWorkspaceSnapshotRead(ARCHIVED_WORKSPACE_ID, 0, "pending", undefined, "snapshot-b");
+    store
+      .getState()
+      .setWorkspaceSnapshotRead(ARCHIVED_WORKSPACE_ID, 0, "cancelled", undefined, "snapshot-a");
+    expect(store.getState().workspaceContextRead.snapshotPending).toBe(true);
+    expect(store.getState().workspaceContextRead.snapshotRequestId).toBe("snapshot-b");
   });
 });
 

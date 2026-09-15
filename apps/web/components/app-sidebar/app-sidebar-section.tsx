@@ -1,5 +1,6 @@
 "use client";
 
+import type { RefObject } from "react";
 import { IconChevronRight } from "@tabler/icons-react";
 import type { Icon as TablerIcon } from "@tabler/icons-react";
 import { Collapsible, CollapsibleContent } from "@kandev/ui/collapsible";
@@ -28,6 +29,8 @@ type AppSidebarSectionProps = {
   grow?: boolean;
   /** Initial expansion when the persisted section map does not yet contain this id. */
   defaultExpanded?: boolean;
+  /** Stable focus target for dialogs opened from this section. */
+  headerRef?: RefObject<HTMLButtonElement | null>;
 };
 
 type SectionHeaderProps = {
@@ -37,6 +40,7 @@ type SectionHeaderProps = {
   headerActionVisibility: "expanded" | "always";
   collapsedSummary?: React.ReactNode;
   onToggle: () => void;
+  headerRef?: RefObject<HTMLButtonElement | null>;
 };
 
 function SectionHeader({
@@ -46,12 +50,14 @@ function SectionHeader({
   headerActionVisibility,
   collapsedSummary,
   onToggle,
+  headerRef,
 }: SectionHeaderProps) {
   const showHeaderAction = !!headerAction && (expanded || headerActionVisibility === "always");
 
   return (
     <div className="group/section flex items-center px-2 h-7 shrink-0">
       <button
+        ref={headerRef}
         type="button"
         onClick={onToggle}
         className="flex min-w-0 flex-1 items-center gap-1.5 text-left cursor-pointer text-foreground/70 hover:text-foreground transition-colors"
@@ -94,6 +100,7 @@ export function AppSidebarSection({
   collapsedSummary,
   grow,
   defaultExpanded = false,
+  headerRef,
 }: AppSidebarSectionProps) {
   const expanded = useAppStore((s) => s.appSidebar.sectionExpanded[id] ?? defaultExpanded);
   const toggleSection = useAppStore((s) => s.toggleAppSidebarSection);
@@ -103,6 +110,7 @@ export function AppSidebarSection({
     <Tooltip>
       <TooltipTrigger asChild>
         <button
+          ref={headerRef}
           type="button"
           className="flex h-9 w-9 mx-auto items-center justify-center rounded-md text-foreground/70 hover:bg-muted/60 cursor-pointer"
           onClick={() => {
@@ -145,6 +153,7 @@ export function AppSidebarSection({
             headerActionVisibility={headerActionVisibility}
             collapsedSummary={collapsedSummary}
             onToggle={handleToggle}
+            headerRef={headerRef}
           />
         )}
         {expanded && (
@@ -170,6 +179,7 @@ export function AppSidebarSection({
         headerActionVisibility={headerActionVisibility}
         collapsedSummary={collapsedSummary}
         onToggle={handleToggle}
+        headerRef={headerRef}
       />
       <CollapsibleContent className="sidebar-section-content">
         <div className="flex flex-col gap-0.5">{children}</div>

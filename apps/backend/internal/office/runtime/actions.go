@@ -377,6 +377,20 @@ func NewActions(deps ActionDependencies) *Actions {
 	return &Actions{deps: deps}
 }
 
+func (a *Actions) authorizeTaskWorkspace(ctx context.Context, runCtx RunContext, taskID string) error {
+	if strings.TrimSpace(runCtx.WorkspaceID) == "" {
+		return nil
+	}
+	if a.deps.Tasks == nil {
+		return fmt.Errorf("%w: tasks", ErrRuntimeDependencyMissing)
+	}
+	workspaceID, err := a.deps.Tasks.GetTaskWorkspaceID(ctx, taskID)
+	if err != nil || workspaceID != runCtx.WorkspaceID {
+		return ErrWorkspaceOutOfScope
+	}
+	return nil
+}
+
 // PostComment records an agent-authored task comment when the run is scoped for it.
 func (a *Actions) PostComment(ctx context.Context, runCtx RunContext, taskID, body string) error {
 	if !runCtx.Capabilities.Allows(CapabilityPostComment) {
@@ -384,6 +398,9 @@ func (a *Actions) PostComment(ctx context.Context, runCtx RunContext, taskID, bo
 	}
 	if !runCtx.CanMutateTask(taskID) {
 		return ErrTaskOutOfScope
+	}
+	if err := a.authorizeTaskWorkspace(ctx, runCtx, taskID); err != nil {
+		return err
 	}
 	if a.deps.Comments == nil {
 		return fmt.Errorf("%w: comments", ErrRuntimeDependencyMissing)
@@ -424,6 +441,9 @@ func (a *Actions) UpdateTaskStatus(
 	if !runCtx.CanMutateTask(taskID) {
 		return ErrTaskOutOfScope
 	}
+	if err := a.authorizeTaskWorkspace(ctx, runCtx, taskID); err != nil {
+		return err
+	}
 	if a.deps.TaskStatus == nil {
 		return fmt.Errorf("%w: task status", ErrRuntimeDependencyMissing)
 	}
@@ -460,6 +480,9 @@ func (a *Actions) CreateSubtask(
 	}
 	if !runCtx.CanMutateTask(parentTaskID) {
 		return "", ErrTaskOutOfScope
+	}
+	if err := a.authorizeTaskWorkspace(ctx, runCtx, parentTaskID); err != nil {
+		return "", err
 	}
 	if a.deps.Tasks == nil {
 		return "", fmt.Errorf("%w: tasks", ErrRuntimeDependencyMissing)

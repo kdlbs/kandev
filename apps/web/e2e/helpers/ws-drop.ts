@@ -16,6 +16,15 @@ type MessageAddResponseDropController = {
   droppedCount: () => number;
 };
 
+export type QueueAdmissionDropController = {
+  dropNextQueueAddRequest: () => void;
+  dropNextQueueAddResponse: (count?: number) => void;
+  dropQueueAdmissionReconciliation: () => void;
+  queueAddRequestCount: () => number;
+  droppedRequestCount: () => number;
+  droppedResponseCount: () => number;
+};
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null ? (value as Record<string, unknown>) : null;
 }
@@ -220,5 +229,138 @@ export async function routeMainWebSocketWithMessageAddResponseDrop(
       dropped.value = 0;
     },
     droppedCount: () => dropped.value,
+  };
+}
+
+/**
+ * Injects one pre-server request loss or one post-admission response loss for
+ * `message.queue.add`. Every other gateway frame continues through the proxy.
+ */
+type QueueAdmissionProxyState = {
+  responseRequestIDs: Set<string>;
+  dropRequest: { value: boolean };
+  dropResponseCount: { value: number };
+  dropReconciliation: { value: boolean };
+  queueAddRequests: { value: number };
+  droppedRequests: { value: number };
+  droppedResponses: { value: number };
+};
+
+function parseQueueAdmissionFrame(part: string): Record<string, unknown> | undefined {
+  if (!part.trim()) return undefined;
+  try {
+    return asRecord(JSON.parse(part.trim())) ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function filterQueueAdmissionFrames(
+  message: string,
+  shouldDrop: (frame: Record<string, unknown>) => boolean,
+): string {
+  return message
+    .split("\n")
+    .filter((part) => {
+      const frame = parseQueueAdmissionFrame(part);
+      return frame === undefined || !shouldDrop(frame);
+    })
+    .join("\n");
+}
+
+function inspectQueueAdmissionRequest(
+  frame: Record<string, unknown>,
+  state: QueueAdmissionProxyState,
+): boolean {
+  if (frame.type !== "request" || frame.action !== "message.queue.add") return false;
+  state.queueAddRequests.value += 1;
+  if (state.dropRequest.value) {
+    state.dropRequest.value = false;
+    state.droppedRequests.value += 1;
+    return true;
+  }
+  if (state.dropResponseCount.value > 0 && typeof frame.id === "string") {
+    state.responseRequestIDs.add(frame.id);
+  }
+  return false;
+}
+
+function inspectQueueAdmissionResponse(
+  frame: Record<string, unknown>,
+  state: QueueAdmissionProxyState,
+): boolean {
+  const isReconciliationResponse =
+    state.dropReconciliation.value &&
+    frame.type === "response" &&
+    (frame.action === "message.queue.get" || frame.action === "message.list");
+  if (isReconciliationResponse) return true;
+
+  const isAdmissionResponse =
+    frame.type === "response" &&
+    frame.action === "message.queue.add" &&
+    typeof frame.id === "string" &&
+    state.responseRequestIDs.has(frame.id) &&
+    state.dropResponseCount.value > 0;
+  if (!isAdmissionResponse) return false;
+
+  state.responseRequestIDs.delete(frame.id as string);
+  state.dropResponseCount.value -= 1;
+  state.droppedResponses.value += 1;
+  return true;
+}
+
+export async function routeMainWebSocketWithQueueAdmissionDrops(
+  page: Page,
+): Promise<QueueAdmissionDropController> {
+  const state: QueueAdmissionProxyState = {
+    responseRequestIDs: new Set<string>(),
+    dropRequest: { value: false },
+    dropResponseCount: { value: 0 },
+    dropReconciliation: { value: false },
+    queueAddRequests: { value: 0 },
+    droppedRequests: { value: 0 },
+    droppedResponses: { value: 0 },
+  };
+
+  await page.routeWebSocket(/\/ws$/, (ws) => {
+    const server = ws.connectToServer();
+    ws.onMessage((message) => {
+      if (typeof message !== "string") {
+        server.send(message);
+        return;
+      }
+      const filtered = filterQueueAdmissionFrames(message, (frame) =>
+        inspectQueueAdmissionRequest(frame, state),
+      );
+      if (filtered.trim()) server.send(filtered);
+    });
+    server.onMessage((message) => {
+      if (typeof message !== "string") {
+        ws.send(message);
+        return;
+      }
+      const filtered = filterQueueAdmissionFrames(message, (frame) =>
+        inspectQueueAdmissionResponse(frame, state),
+      );
+      if (filtered.trim()) ws.send(filtered);
+    });
+  });
+
+  return {
+    dropNextQueueAddRequest: () => {
+      state.dropRequest.value = true;
+    },
+    dropNextQueueAddResponse: (count = 1) => {
+      state.responseRequestIDs.clear();
+      state.dropResponseCount.value = Math.max(1, count);
+      state.dropReconciliation.value = false;
+      state.droppedResponses.value = 0;
+    },
+    dropQueueAdmissionReconciliation: () => {
+      state.dropReconciliation.value = true;
+    },
+    queueAddRequestCount: () => state.queueAddRequests.value,
+    droppedRequestCount: () => state.droppedRequests.value,
+    droppedResponseCount: () => state.droppedResponses.value,
   };
 }

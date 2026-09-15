@@ -789,5 +789,13 @@
   "unitAddMember": "Add",
   "unitRemoveMember": "Remove member",
   "unitPickPerson": "Pick someone",
-  "unitActionFailed": "That did not work."
+  "unitActionFailed": "That did not work.",
+  "sidebarHoverTitle": "Sidebar",
+  "sidebarHoverEnabled": "Show sidebar on hover",
+  "sidebarHoverDelay": "Hover delay (ms)",
+  "sidebarHoverHelp": "Use a mouse or trackpad to reveal the collapsed sidebar. Set the delay from 0 to 5000 ms; 0 reveals immediately.",
+  "sidebarHoverDelayError": "Enter a whole number from 0 to 5000.",
+  "discoveryAliasesSidebarHover": "sidebar hover reveal delay wait mouse trackpad",
+  "autoFocusNewTasks": "Auto-focus new tasks",
+  "autoFocusNewTasksHelp": "Open newly created tasks automatically. Turn this off to stay on your current view. Tasks and agents still start as requested."
 }

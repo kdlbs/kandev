@@ -57,6 +57,28 @@ func (r *Repository) GetTaskWorkflowStepID(ctx context.Context, taskID string) (
 	return r.stepIDForTask(ctx, taskID)
 }
 
+// GetTaskWorkflowID returns the task's current workflow_id. Returns "" with
+// no error when the task has no workflow bound. Exposed so the cascade
+// producer can workflow-scope its fan-out seat resolution the same way the
+// engine's own ParticipantAdapter does for a same-task queue_run_for_each_
+// participant action (parent-wake-wave-identity payload parity).
+func (r *Repository) GetTaskWorkflowID(ctx context.Context, taskID string) (string, error) {
+	var workflowID sql.NullString
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(
+		`SELECT workflow_id FROM tasks WHERE id = ?`,
+	), taskID).Scan(&workflowID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	if !workflowID.Valid {
+		return "", nil
+	}
+	return workflowID.String, nil
+}
+
 // GetWorkflowStepStageType returns the persisted stage type for a workflow
 // step. It returns an empty string when the step does not exist so callers
 // can apply compatibility fallbacks for older run payloads.
@@ -174,6 +196,14 @@ type ParticipantWriteResult struct {
 	DisplacedAgentProfileID string
 }
 
+// ErrEmptyAgentProfileID is returned by AddTaskParticipant when the
+// registration names no agent. A seat exists to name an agent: one naming
+// nobody satisfies the natural key, is counted by the quorum guard, and can
+// never be woken or decided. Exported as a single identity so callers
+// distinguish it from the store's nil-error "unchanged" outcome without
+// matching on a message.
+var ErrEmptyAgentProfileID = errors.New("participant: agent_profile_id required")
+
 // AddTaskParticipant registers agentID in role for taskID, claiming an
 // unclaimed automatic seat in place when one exists rather than always
 // inserting a second seat into the role's slate. Returns
@@ -189,7 +219,17 @@ type ParticipantWriteResult struct {
 // resolved on the transaction handle, inside that lock — never through the
 // read-only pool, which would escape the exclusion as surely as a
 // mismatched lock key would on the server dialect.
+//
+// A registration naming no agent is refused with ErrEmptyAgentProfileID
+// before the transaction begins, so it takes no exclusion and leaves
+// nothing to roll back. Only the empty identifier: a whitespace identifier
+// names no agent profile and stays governed by the claim search's own
+// existence check.
 func (r *Repository) AddTaskParticipant(ctx context.Context, taskID, agentID, role string) (ParticipantWriteResult, error) {
+	if agentID == "" {
+		return ParticipantWriteResult{}, ErrEmptyAgentProfileID
+	}
+
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return ParticipantWriteResult{}, fmt.Errorf("begin tx: %w", err)
@@ -227,11 +267,18 @@ func (r *Repository) AddTaskParticipant(ctx context.Context, taskID, agentID, ro
 	}
 	// No claim landed — either no claimable auto seat existed, or the
 	// selected one was removed, reprovenanced, or decided since
-	// findClaimableAutoSeat's read (claimAutoSeat's guard is a defensive
-	// backstop: recordStepDecisionTx now shares this transaction's
-	// ParticipantRoleSeatLockKey exclusion, so it cannot actually interleave
-	// here). Either way, fall through to inserting a fresh seat rather than
-	// completing having written nothing.
+	// findClaimableAutoSeat's read. Either way, fall through to inserting a
+	// fresh seat rather than completing having written nothing.
+	//
+	// Which of the two defenses covers the decided case depends on the
+	// decision: recordStepDecisionTx acquires this transaction's
+	// ParticipantRoleSeatLockKey exclusion only when the decision carries a
+	// role, so a role-carrying decision cannot commit between
+	// findClaimableAutoSeat and claimAutoSeat. A roleless decision takes
+	// neither that exclusion nor the seat validation, and for it claimAutoSeat's
+	// NOT EXISTS condition is the whole defense — see
+	// participant_claim_decision_guard_test.go, which drives that window
+	// through claimWindowHook.
 
 	inserted, err := r.insertManualParticipant(ctx, tx, stepID, taskID, role, agentID)
 	if err != nil {
@@ -288,6 +335,10 @@ func (r *Repository) attemptClaim(
 	}
 	if claim == nil {
 		return nil, nil
+	}
+
+	if claimWindowHook != nil {
+		claimWindowHook(ctx, tx, claim.id)
 	}
 
 	claimed, err := r.claimAutoSeat(ctx, tx, claim.id, agentID)
@@ -483,6 +534,17 @@ func (r *Repository) findClaimableAutoSeat(
 	}
 	return &candidates[0], nil
 }
+
+// claimWindowHook is a yield point between the statement that selects a
+// claimable seat and the statement that reassigns it. It is nil in every build
+// that does not set it, nothing production reads it, and it carries no
+// behavior of its own.
+//
+// It exists because that window is the only place claimAutoSeat's decision
+// condition can add anything the selection did not already provide, and the
+// window cannot be reached by racing goroutines in a way a test can rely on.
+// Unexported, so only this package's tests can set it.
+var claimWindowHook func(ctx context.Context, tx *sqlx.Tx, seatID string)
 
 // claimAutoSeat reassigns the seat identified by seatID to agentID and
 // marks it "manual", conditional on the seat still carrying provenance

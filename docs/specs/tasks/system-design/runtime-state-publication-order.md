@@ -28,11 +28,17 @@ The backend follows
 It persists an eligible task as `IN_PROGRESS` before it publishes the owning
 session as `RUNNING`.
 
-The task event and session event use the same per-task publication queue. The
-WebSocket gateway receives both event types through one ordered subscription.
-
-The existing backend guards remain authoritative. They cover archive state,
-Office ownership, terminal state, and concurrent session transitions.
+Every lifecycle envelope carries immutable `task_id`, `lifecycle_epoch`, monotonic
+`task_revision`, durable `queue_sequence`, `event_id`, terminal/tombstone state,
+and canonical payload. Task/session events persist in
+`task_lifecycle_event_outbox`; session rows add `session_id`, `session_event_id`,
+and terminal session payload. A task epoch allocates one unique queue sequence to
+each row. Delivery locks its watermark cursor
+`(task_revision,queue_sequence)`, publishes only the exact next lexicographic
+successor, then advances the cursor; crash/retry leaves that row pending and
+serializes workers per epoch. The gateway rejects malformed envelopes, discards
+older cursors, and suppresses all events after the accepted task tombstone.
+Delayed session events never resurrect a deleted session or tombstoned task.
 
 ## Client projections
 
@@ -50,54 +56,40 @@ workflow snapshot through HTTP.
 snapshots with the active workflow. Both task-list surfaces consume this shared
 aggregation path before `applyView` groups tasks by state.
 
-## Client freshness contract
+Client task projections retain accepted lifecycle epoch, revision, queue sequence,
+event ID, and tombstone state alongside `Task.updated_at`. Within an epoch,
+`(task_revision, queue_sequence)` owns event order; a tombstone blocks later
+nonterminal task/session updates. Older cursors are discarded. `TaskStatusSummary`
+revision still orders only the bounded status summary.
 
-Task-level freshness uses `Task.updated_at`, mapped to `KanbanTask.updatedAt`.
-The newer task-level timestamp owns `state` and `updatedAt`.
+Workflow snapshot requests record the projection at request start. If a live event
+advances state before the response completes, merge keeps the newer envelope;
+snapshot responses cannot resurrect a tombstoned task. Independent placement,
+status-summary, executor, autopilot, and auto-start-error merge rules remain.
+The sidebar compares lifecycle revision/epoch before task timestamps and summary
+revisions, selecting each projection's freshest valid value.
 
-`TaskStatusSummary.revision` orders only the bounded status summary. It does
-not order task state or other task-level fields.
-
-The workflow snapshot request records the task projection at request start. If
-a live event advances task state before the response completes, the merge keeps
-the newer state and task update time.
-
-The snapshot merge retains its existing independent rules for workflow
-placement, status summary, executor binding, autopilot, and auto-start errors.
-This change does not make task state sticky. A snapshot with a newer task
-update time remains authoritative.
-
-The sidebar aggregator compares task update times before it compares status
-summary revisions. It selects the freshest status summary independently, so a
-new task state cannot erase newer summary data.
-
-When status-summary revisions are equal, the workflow snapshot is treated as
-the incoming reading. Snapshot responses can re-stamp `queued_prompt_count`
-from a fresh queue read without incrementing the revision; the active summary
-remains the fallback when the snapshot omits the summary.
-
-The active `kanban` hydration path already rejects an older task by task update
-time. The workflow snapshot path must apply the same task-state ordering before
-it writes `kanbanMulti.snapshots`.
+When status-summary revisions are equal, workflow snapshots may update only
+independent summary fields such as `queued_prompt_count`; they must preserve the
+freshest lifecycle epoch/revision/tombstone. The active `kanban` hydration and
+workflow snapshot paths apply this same ordering before writing either projection.
 
 ## Control flow
 
 1. The backend persists a task-state change.
 2. The backend publishes `task.state_changed` before the running-session event.
-3. The WebSocket handler updates the active and multi-workflow projections.
+3. The WebSocket handler updates active and multi-workflow projections.
 4. A delayed workflow snapshot response reaches the client.
-5. The snapshot merge compares task update times.
-6. The merge keeps the newer state and task update time.
+5. The snapshot merge compares lifecycle epoch/revision/tombstone.
+6. The merge keeps the newer valid lifecycle envelope and independent summaries.
 7. The sidebar aggregator selects the newest task-level projection.
 8. `applyView` groups the task by that persisted state.
 
 ## Failure and recovery
 
 A failed snapshot request does not clear the current task projection. The
-existing foreground refresh can retry the request.
-
-An invalid or missing task update time has the current fallback behavior. The
-implementation must not use status-summary revision as a substitute task clock.
+existing foreground refresh can retry. An invalid or missing lifecycle envelope
+is discarded; timestamps and status-summary revision cannot substitute for it.
 
 The existing workspace generation guard discards responses from an earlier
 workspace context.

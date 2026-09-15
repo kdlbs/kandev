@@ -49,6 +49,7 @@
   "logOut": "登出",
   "maxViews_one": "最多 {{count}} 個",
   "maxViews_other": "最多 {{count}} 個",
+  "needsYouInbox": "需要你處理",
   "nestUnder": "嵌套到「{{title}}」下",
   "newKanbanWorkspace": "新建看板工作區",
   "newOfficeWorkspace": "新建辦公室工作區",
@@ -118,5 +119,7 @@
   "failedToSyncSidebarViews": "同步側邊欄視圖失敗",
   "morePluginItems": "更多外掛程式項",
   "newViewNumbered": "新視圖 {{suffix}}",
-  "untitledView": "未命名視圖"
+  "untitledView": "未命名視圖",
+  "workspaceContextRefreshFailed": "無法重新整理任務。",
+  "workspaceContextAccessDenied": "您已無法存取此工作區。"
 }

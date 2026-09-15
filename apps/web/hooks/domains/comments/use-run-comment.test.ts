@@ -509,6 +509,21 @@ describe("useRunComment — plan routing", () => {
     expect(mockMarkCommentsSent).not.toHaveBeenCalled();
   });
 
+  it("keeps an accepted queued plan comment successful when comment refresh fails", async () => {
+    const state = makeStoreState("WAITING_FOR_INPUT");
+    (state.taskSessions.items["primary-session"] as { state: string }).state = "RUNNING";
+    (state.taskSessionsByTask.itemsByTaskId["task-1"][0] as { state: string }).state = "RUNNING";
+    mockStoreState = state;
+    mockGetTaskPlanComments.mockRejectedValueOnce(new Error("plan comment refresh failed"));
+    const { result } = renderCommentHook();
+
+    await expect(result.current.runComment(makePlanComment())).resolves.toEqual({ queued: true });
+    expect(mockQueueMessage).toHaveBeenCalledWith(
+      expect.objectContaining({ client_queue_id: expect.any(String) }),
+    );
+    expect(mockSetTaskPlanComments).not.toHaveBeenCalled();
+  });
+
   it("queues a steer-capable primary when earlier prompts are already queued", async () => {
     const state = makeStoreState("WAITING_FOR_INPUT");
     Object.assign(state.taskSessions.items["primary-session"], {

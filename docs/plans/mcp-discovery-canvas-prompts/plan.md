@@ -14,6 +14,13 @@ legacy_specs: []
 
 # Implementation plan: MCP discovery and canvas prompts
 
+## Subsequent design
+
+The [direct canvas creation package](../canvas-direct-creation/plan.md) replaces
+the long visible preset from Task 02 with a short goal and saved reference.
+This package's completed results remain historical; the new package owns
+updated catalog, delivery, and desktop/mobile checks. Task 01 is unchanged.
+
 ## Overview
 
 Make Kandev tool discovery explicit, reduce repeated tool descriptions, and

@@ -789,5 +789,13 @@
   "unitAddMember": "添加",
   "unitRemoveMember": "移除成员",
   "unitPickPerson": "选择成员",
-  "unitActionFailed": "操作未成功。"
+  "unitActionFailed": "操作未成功。",
+  "sidebarHoverTitle": "侧边栏",
+  "sidebarHoverEnabled": "悬停时显示侧边栏",
+  "sidebarHoverDelay": "悬停延迟（毫秒）",
+  "sidebarHoverHelp": "使用鼠标或触控板悬停以显示已折叠的侧边栏。延迟可设为 0 到 5000 毫秒；设为 0 时立即显示。",
+  "sidebarHoverDelayError": "请输入 0 到 5000 之间的整数。",
+  "discoveryAliasesSidebarHover": "侧边栏 悬停 显示 延迟 等待 鼠标 触控板",
+  "autoFocusNewTasks": "自动聚焦新任务",
+  "autoFocusNewTasksHelp": "自动打开新创建的任务。关闭此选项可保留当前视图。任务和代理仍会按要求启动。"
 }

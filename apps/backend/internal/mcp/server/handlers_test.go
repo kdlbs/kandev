@@ -1052,6 +1052,53 @@ func TestTaskMRAutomationToolsNoTaskIDArgument(t *testing.T) {
 	assert.NotContains(t, properties, "task_id")
 }
 
+func TestTaskPRLinkToolsRequireTaskAndCanonicalIdentity(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"task_id": "task-current"}}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "link_task_pr_kandev", map[string]interface{}{
+		"task_id": "task-target", "provider": "gitlab", "repository_id": "repo-1", "number": 42,
+	})
+	assert.False(t, result.IsError)
+	assert.Equal(t, ws.ActionMCPLinkTaskPR, backend.lastAction)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "task-target", payload["task_id"])
+	assert.Equal(t, "task-current", payload["caller_task_id"])
+	assert.Equal(t, "gitlab", payload["provider"])
+	assert.Equal(t, "repo-1", payload["repository_id"])
+	assert.Equal(t, float64(42), payload["number"])
+
+	properties := toolInputProperties(t, s, "link_task_pr_kandev")
+	assert.Contains(t, properties, "task_id")
+	assert.Contains(t, properties, "provider")
+	assert.Contains(t, properties, "repository_id")
+	assert.Contains(t, properties, "number")
+	assert.NotContains(t, properties, "caller_task_id")
+}
+
+func TestReplaceTaskPRToolRequiresOldCanonicalIdentity(t *testing.T) {
+	backend := &testBackend{response: map[string]interface{}{"task_id": "task-target"}}
+	s := newTaskModeServer(t, backend, "task-current")
+
+	result := callTool(t, s, "replace_task_pr_kandev", map[string]interface{}{
+		"task_id": "task-target", "provider": "gitlab", "repository_id": "repo-new", "number": 42,
+		"old_provider": "github", "old_repository_id": "repo-old", "old_number": 7,
+	})
+	assert.False(t, result.IsError)
+	payload, ok := backend.lastPayload.(map[string]interface{})
+	require.True(t, ok)
+	assert.Equal(t, "github", payload["old_provider"])
+	assert.Equal(t, "repo-old", payload["old_repository_id"])
+	assert.Equal(t, float64(7), payload["old_number"])
+
+	properties := toolInputProperties(t, s, "replace_task_pr_kandev")
+	assert.Contains(t, properties, "old_provider")
+	assert.Contains(t, properties, "old_repository_id")
+	assert.Contains(t, properties, "old_number")
+	assert.Contains(t, s.mcpServer.ListTools()["replace_task_pr_kandev"].Tool.Description, "same provider")
+}
+
 // TestUpdateTaskMRAutomationToolForwardsMRIdentityAndAutoFixFields covers
 // AC31: repository_id/project_path/mr_iid must reach the backend payload
 // unchanged (including an explicit empty repository_id, R6) so the WS

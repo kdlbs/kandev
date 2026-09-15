@@ -735,6 +735,7 @@ const SessionMetaKeyLastAgentError = "last_agent_error"
 type LastAgentError struct {
 	Message          string            `json:"message"`
 	OccurredAt       time.Time         `json:"occurred_at"`
+	Scope            string            `json:"scope,omitempty"`
 	AgentExecutionID string            `json:"agent_execution_id,omitempty"`
 	ExecutionID      string            `json:"execution_id,omitempty"`
 	Phase            string            `json:"phase,omitempty"`
@@ -1800,6 +1801,16 @@ type TaskSession struct {
 
 	// Environment reference
 	TaskEnvironmentID string `json:"task_environment_id,omitempty"` // FK to task_environments for shared env
+
+	// TaskRunnerResolvedFromTask marks a session whose executor profile came
+	// from task metadata rather than an explicit launch argument. It is
+	// transient and lets the persistence transaction reject a stale
+	// pre-lock resolution before inserting the session or environment.
+	TaskRunnerResolvedFromTask bool `json:"-"`
+	// TaskRunnerProfileAtResolution is the task metadata value observed when
+	// the session's runner was resolved. It is transient and paired with
+	// TaskRunnerResolvedFromTask for the persistence-time recheck.
+	TaskRunnerProfileAtResolution string `json:"-"`
 
 	// Workflow-related fields
 	IsPrimary     bool         `json:"is_primary"`              // Whether this is the primary session for the task

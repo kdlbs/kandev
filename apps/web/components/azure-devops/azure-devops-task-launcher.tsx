@@ -105,6 +105,16 @@ function matchingRepository(
   );
 }
 
+function findLaunchWorkflow(workflows: Workflow[], steps: WorkflowStep[]) {
+  const workflow = workflows.find((candidate) =>
+    steps.some((step) => step.workflow_id === candidate.id),
+  );
+  const workflowSteps = steps
+    .filter((step) => step.workflow_id === workflow?.id)
+    .sort((left, right) => left.position - right.position);
+  return { workflow, workflowSteps };
+}
+
 export function AzureDevOpsTaskLauncher({
   workspaceId,
   workflows,
@@ -125,12 +135,7 @@ export function AzureDevOpsTaskLauncher({
   const setTaskWorkItem = useAppStore((state) => state.setAzureDevOpsTaskWorkItem);
   const launch = useMemo(() => {
     if (!payload) return null;
-    const workflow = workflows.find((candidate) =>
-      steps.some((step) => step.workflow_id === candidate.id),
-    );
-    const workflowSteps = steps
-      .filter((step) => step.workflow_id === workflow?.id)
-      .sort((left, right) => left.position - right.position);
+    const { workflow, workflowSteps } = findLaunchWorkflow(workflows, steps);
     return {
       workflow,
       workflowSteps,
@@ -139,7 +144,7 @@ export function AzureDevOpsTaskLauncher({
     };
   }, [payload, repositories, steps, workflows]);
 
-  const onSuccess = async (task: Task) => {
+  const linkCreatedTask = async (task: Task) => {
     if (payload?.kind === "work-item" && workspaceId) {
       if (!payload.item.project) {
         toast.error(t("azuredevops:failedToLinkWorkItemNoProject"));
@@ -172,8 +177,16 @@ export function AzureDevOpsTaskLauncher({
         );
       }
     }
+  };
+
+  const onSuccess = async (
+    task: Task,
+    _mode?: "create" | "edit",
+    meta?: { autoFocus?: boolean },
+  ) => {
+    await linkCreatedTask(task);
     onClose();
-    router.push(`/tasks/${task.id}`);
+    if (meta?.autoFocus !== false) router.push(`/tasks/${task.id}`);
   };
 
   if (!workspaceId || !payload || !launch?.workflow || !launch.workflowSteps[0]) return null;

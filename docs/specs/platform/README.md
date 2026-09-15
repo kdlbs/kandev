@@ -15,6 +15,9 @@ The platform system owns cross-cutting runtime services, configuration,
 observability, notifications, localization, lifecycle safety, and shared
 operational guarantees.
 
+Shared read-capacity protection and aggregate reporting availability belong here.
+Domain systems retain ownership of source records and workspace context identity.
+
 ## Ownership
 
 This system owns startup and shutdown contracts, process and port-independent
@@ -128,3 +131,4 @@ find current sources.
 - [Agents](../agents/README.md): consumes shared runtime services.
 - [Executors](../executors/README.md): owns execution-environment details.
 - [Desktop](../desktop/README.md): embeds platform startup and shutdown.
+- [Workspaces](../workspaces/README.md): owns cached context identity and read recovery.

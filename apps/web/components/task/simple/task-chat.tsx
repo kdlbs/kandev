@@ -21,7 +21,6 @@ import { formatRelativeTime } from "@/lib/utils";
 import { MarkdownComment } from "./markdown-comment";
 import { AgentTurnPanel } from "./components/agent-turn-panel";
 import { RunErrorEntry } from "./components/run-error-entry";
-import { TaskChatLaunchError } from "./components/task-chat-launch-error";
 import { UserCommentRunBadge } from "./components/user-comment-run-badge";
 import { buildCommentTurnContext, type CommentTurnContext } from "./turn-context";
 import { groupSessionsForTimeline, groupSortKey, type SessionGroup } from "./session-groups";
@@ -35,7 +34,6 @@ import type {
 import {
   buildLaterAgentReplyMap,
   buildRunErrorsFromSessions,
-  filterVisibleRunErrors,
   mergeChatEntries,
   type ChatEntry,
 } from "./chat-entries";
@@ -591,7 +589,6 @@ export function TaskChat({
   onCommentsChanged,
   taskTitle,
   taskDescription,
-  statusSummary,
   repositories,
 }: TaskChatProps) {
   const { t } = useTranslation();
@@ -616,10 +613,6 @@ export function TaskChat({
   );
   const turnCtx = useMemo(() => buildCommentTurnContext(comments, sessions), [comments, sessions]);
   const runErrors = useMemo(() => buildRunErrorsFromSessions(sessions), [sessions]);
-  const visibleRunErrors = useMemo(
-    () => filterVisibleRunErrors(runErrors, statusSummary?.active_error),
-    [runErrors, statusSummary?.active_error],
-  );
   const laterAgentReplyMap = useMemo(() => buildLaterAgentReplyMap(comments), [comments]);
   const entries = useMemo(
     () =>
@@ -629,10 +622,10 @@ export function TaskChat({
         groups: renderedGroups,
         decisions,
         turnCtx,
-        runErrors: visibleRunErrors,
+        runErrors,
         laterAgentReplyMap,
       }),
-    [comments, timeline, renderedGroups, decisions, turnCtx, visibleRunErrors, laterAgentReplyMap],
+    [comments, timeline, renderedGroups, decisions, turnCtx, runErrors, laterAgentReplyMap],
   );
 
   useChatAutoScroll(scrollParent ?? null, sessions, taskId);
@@ -653,12 +646,6 @@ export function TaskChat({
           {t("task:showOlderSessions", { count: olderGroups.length })}
         </button>
       )}
-      <TaskChatLaunchError
-        taskId={taskId}
-        workspaceId={workspaceId}
-        statusSummary={statusSummary}
-        repositories={repositories}
-      />
       {isEmpty ? (
         <p className="text-sm text-muted-foreground py-4">{t("task:noCommentsYet")}</p>
       ) : (

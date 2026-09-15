@@ -285,6 +285,17 @@ func (e *Executor) handleAgentProcessStartFailure(
 			zap.String("session_id", sessionID),
 			zap.String("agent_execution_id", agentExecutionID),
 			zap.Error(transitionErr))
+		if changed && finalState == models.TaskSessionStateFailed && e.onBootstrapFailureMessageRepair != nil {
+			if repairErr := e.onBootstrapFailureMessageRepair(
+				ctx, taskID, sessionID, agentExecutionID, errorValue,
+			); repairErr != nil {
+				e.logger.Warn("failed to repair bootstrap failure history",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID),
+					zap.String("agent_execution_id", agentExecutionID),
+					zap.Error(repairErr))
+			}
+		}
 	} else if !changed {
 		// An ownership or compare-and-set miss means a newer execution won the
 		// race. Do not
@@ -986,8 +997,45 @@ func workflowEnvironmentHasRepository(rows []*models.TaskEnvironmentRepo, reposi
 	return false
 }
 
-//nolint:cyclop,funlen // Session construction keeps its existing validation sequence in one transaction boundary.
+// prepareSession retries a task-derived runner selection when the persistence
+// transaction observes that a concurrent runner switch committed after the
+// caller loaded the task. Explicit runner selections keep their existing
+// caller-owned semantics and are not replaced by the task metadata.
 func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, bindWorkspace bool, taskEnvironmentID string, workflowRoute *models.WorkflowSessionRoute) (string, error) {
+	runnerProfileExplicit := taskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != "")
+	currentTask := task
+	currentExecutorProfileID := executorProfileID
+	for attempt := 0; attempt < 2; attempt++ {
+		sessionID, err := e.prepareSessionAttempt(
+			ctx,
+			currentTask,
+			agentProfileID,
+			executorID,
+			currentExecutorProfileID,
+			workflowStepID,
+			bindWorkspace,
+			taskEnvironmentID,
+			workflowRoute,
+		)
+		if err == nil || !errors.Is(err, models.ErrTaskRunnerChanged) || runnerProfileExplicit || attempt == 1 {
+			return sessionID, err
+		}
+
+		refreshed, refreshedExecutorProfileID, refreshErr := e.reloadTaskForRunnerRetry(ctx, task.ID)
+		if refreshErr != nil {
+			return "", fmt.Errorf("reload task after runner change: %w", refreshErr)
+		}
+		if refreshed == nil {
+			return "", fmt.Errorf("reload task after runner change: task %s not found", task.ID)
+		}
+		currentTask = refreshed
+		currentExecutorProfileID = refreshedExecutorProfileID
+	}
+	return "", models.ErrTaskRunnerChanged
+}
+
+//nolint:cyclop,funlen,gocognit // Session construction keeps its existing validation sequence in one transaction boundary.
+func (e *Executor) prepareSessionAttempt(ctx context.Context, task *v1.Task, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, bindWorkspace bool, taskEnvironmentID string, workflowRoute *models.WorkflowSessionRoute) (string, error) {
 	if err := e.admitWorktreeRecovery(ctx, task.ID); err != nil {
 		return "", err
 	}
@@ -997,6 +1045,9 @@ func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfi
 	}
 
 	metadata := cloneMetadata(task.Metadata)
+	runnerResolvedFromTask, taskRunnerProfileID := taskRunnerResolution(
+		task, executorProfileID, taskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != ""),
+	)
 	initialRuntimeConfig, hasInitialRuntimeConfig := models.LoadInitialSessionRuntimeConfig(task.Metadata)
 	delete(metadata, models.MetaKeyInitialSessionRuntimeConfig)
 	delete(metadata, models.MetaKeyInitialSessionRuntimeConfigProfileID)
@@ -1057,19 +1108,21 @@ func (e *Executor) prepareSession(ctx context.Context, task *v1.Task, agentProfi
 	sessionID := uuid.New().String()
 	now := time.Now().UTC()
 	session := &models.TaskSession{
-		ID:                   sessionID,
-		TaskID:               task.ID,
-		AgentProfileID:       agentProfileID,
-		RepositoryID:         repositoryID,
-		BaseBranch:           baseBranch,
-		WorkspacePath:        workspacePath,
-		State:                models.TaskSessionStateCreated,
-		StartedAt:            now,
-		UpdatedAt:            now,
-		AgentProfileSnapshot: agentProfileSnapshot,
-		IsPrimary:            isPrimarySession,
-		IsPassthrough:        isPassthrough,
-		Metadata:             metadata,
+		ID:                            sessionID,
+		TaskID:                        task.ID,
+		AgentProfileID:                agentProfileID,
+		RepositoryID:                  repositoryID,
+		BaseBranch:                    baseBranch,
+		WorkspacePath:                 workspacePath,
+		State:                         models.TaskSessionStateCreated,
+		StartedAt:                     now,
+		UpdatedAt:                     now,
+		AgentProfileSnapshot:          agentProfileSnapshot,
+		IsPrimary:                     isPrimarySession,
+		IsPassthrough:                 isPassthrough,
+		Metadata:                      metadata,
+		TaskRunnerResolvedFromTask:    runnerResolvedFromTask,
+		TaskRunnerProfileAtResolution: taskRunnerProfileID,
 	}
 	if taskEnvironmentID != "" {
 		session.TaskEnvironmentID = taskEnvironmentID

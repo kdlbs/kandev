@@ -11,6 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	"github.com/kandev/kandev/internal/agentruntime"
+	kandevdb "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/recoveryclaim"
@@ -139,6 +141,15 @@ func (r *Repository) ListExecutors(ctx context.Context) ([]*models.Executor, err
 	return result, rows.Err()
 }
 
+// UpsertExecutorRunning takes the shared task-row lock (kandevdb.LockTaskRowInTx)
+// before writing so a concurrent runner switch cannot land between this
+// write's mutability read and its own re-check — the two either fully
+// precede or fully follow each other. A row with no
+// TaskID (defensive only; every production caller populates it from the
+// owning execution) skips the lock, matching guardWorkspaceSourceParentTx's
+// no-parent case. It also locks the session row and, when the session names
+// a task environment, rejects the write via recoveryclaim.EnsureAvailableTx
+// while that environment is under an active recovery claim.
 func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.ExecutorRunning) error {
 	if running == nil {
 		return fmt.Errorf("executor running is nil")
@@ -169,6 +180,13 @@ func (r *Repository) UpsertExecutorRunning(ctx context.Context, running *models.
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+
+	if running.TaskID != "" {
+		if lockErr := kandevdb.LockTaskRowInTx(ctx, tx, r.db.DriverName(), running.TaskID); lockErr != nil &&
+			!errors.Is(lockErr, kandevdb.ErrTaskRowNotFound) {
+			return lockErr
+		}
+	}
 	if _, err := lockTaskSessionRow(ctx, tx, running.SessionID); err != nil {
 		return err
 	}
@@ -281,6 +299,29 @@ func (r *Repository) ListExecutorsRunningIdle(ctx context.Context, cutoff time.T
 	return scanExecutorRunningRows(rows)
 }
 
+// ListExecutorsRunningLiveStandalone returns every non-terminal executors_running
+// row whose runtime is the standalone control server (worktree/local executors).
+// Used by startup recovery to build the guard/correlation inventory at step 3,
+// before any control-server contact (discovery H).
+func (r *Repository) ListExecutorsRunningLiveStandalone(ctx context.Context) ([]*models.ExecutorRunning, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT id, session_id, task_id, execution_profile_id, executor_id, runtime, status, resumable, resume_token,
+			last_message_uuid, agent_execution_id, container_id, agentctl_url, agentctl_port, pid, local_pid,
+			worktree_id, worktree_path, worktree_branch, last_seen_at, error_message, metadata,
+			created_at, updated_at
+		FROM executors_running
+		WHERE runtime = ? AND status NOT IN (?, ?, ?)
+		ORDER BY updated_at DESC
+	`), agentruntime.RuntimeStandalone,
+		models.ExecutorRunningStatusStopped, models.ExecutorRunningStatusComplete, models.ExecutorRunningStatusFailed)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	return scanExecutorRunningRows(rows)
+}
+
 func (r *Repository) ListExecutorsRunningByTaskID(ctx context.Context, taskID string) ([]*models.ExecutorRunning, error) {
 	if taskID == "" {
 		return nil, fmt.Errorf("task_id is required")
@@ -300,6 +341,14 @@ func (r *Repository) ListExecutorsRunningByTaskID(ctx context.Context, taskID st
 	defer func() { _ = rows.Close() }()
 
 	return scanExecutorRunningRows(rows)
+}
+
+// GetExecutorRunningExistenceByTaskIDs reports, for each of taskIDs, whether
+// any executors_running row exists — the same unconditional presence check
+// runnerHasExecutorRunning makes for one task, batched behind a single
+// IN-clause query for a projection covering many.
+func (r *Repository) GetExecutorRunningExistenceByTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error) {
+	return r.batchedTaskIDExistence(ctx, "executors_running", taskIDs)
 }
 
 func (r *Repository) GetExecutorRunningBySessionID(ctx context.Context, sessionID string) (*models.ExecutorRunning, error) {

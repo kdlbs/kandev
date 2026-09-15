@@ -444,6 +444,7 @@ export const TaskCreateDialogFooter = memo(function TaskCreateDialogFooter(
           onClick={onCancel}
           disabled={isCreatingSession || isCreatingTask}
           className="w-full border-0 cursor-pointer sm:w-auto sm:border"
+          data-testid="submit-cancel"
         >
           {t("common:cancel")}
         </Button>

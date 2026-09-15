@@ -34,6 +34,7 @@ type UserSettingsDTO struct {
 	PreventAutoStartAgentOnOpen       bool                                `json:"prevent_auto_start_agent_on_open"`
 	UnreadDivider                     bool                                `json:"unread_divider"`
 	AgentGeneratedTaskTitles          bool                                `json:"agent_generated_task_titles"`
+	AutoFocusNewTasks                 bool                                `json:"auto_focus_new_tasks"`
 	MCPTaskAgentProfileDefault        string                              `json:"mcp_task_agent_profile_default"`
 	ShowAnchoredPromptBar             bool                                `json:"show_anchored_prompt_bar"`
 	ShowScrollToLastPrompt            bool                                `json:"show_scroll_to_last_prompt"`
@@ -75,11 +76,15 @@ type UserSettingsDTO struct {
 	LastSeenDisplay                   string                              `json:"last_seen_display"`
 	SystemMetricsDisplay              models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                                `json:"app_status_bar_enabled"`
+	SidebarHoverEnabled               bool                                `json:"sidebar_hover_enabled"`
+	SidebarHoverDelayMs               int                                 `json:"sidebar_hover_delay_ms"`
 	ResolveSessionHostnames           bool                                `json:"resolve_session_hostnames"`
 	AppStatusBarOrder                 models.AppStatusBarOrder            `json:"app_status_bar_order"`
 	QuickChatTabOrderByWorkspace      map[string][]string                 `json:"quick_chat_tab_order_by_workspace"`
 	KanbanHiddenStepIDs               map[string][]string                 `json:"kanban_hidden_step_ids"`
 	WorkflowIDsWithAutoHideEmptySteps []string                            `json:"workflow_ids_with_auto_hide_empty_steps"`
+	KanbanSort                        string                              `json:"kanban_sort"`
+	KanbanPriorityFilterTokens        []string                            `json:"kanban_priority_filter_tokens"`
 	Revision                          int64                               `json:"revision"`
 	UpdatedAt                         string                              `json:"updated_at"`
 }
@@ -143,6 +148,7 @@ type UpdateUserSettingsRequest struct {
 	PreventAutoStartAgentOnOpen       *bool                              `json:"prevent_auto_start_agent_on_open,omitempty"`
 	UnreadDivider                     *bool                              `json:"unread_divider,omitempty"`
 	AgentGeneratedTaskTitles          *bool                              `json:"agent_generated_task_titles,omitempty"`
+	AutoFocusNewTasks                 *bool                              `json:"auto_focus_new_tasks,omitempty"`
 	MCPTaskAgentProfileDefault        *string                            `json:"mcp_task_agent_profile_default,omitempty"`
 	ShowAnchoredPromptBar             *bool                              `json:"show_anchored_prompt_bar,omitempty"`
 	ShowScrollToLastPrompt            *bool                              `json:"show_scroll_to_last_prompt,omitempty"`
@@ -184,11 +190,15 @@ type UpdateUserSettingsRequest struct {
 	LastSeenDisplay                   *string                            `json:"last_seen_display,omitempty"`
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch `json:"system_metrics_display,omitempty"`
 	AppStatusBarEnabled               *bool                              `json:"app_status_bar_enabled,omitempty"`
+	SidebarHoverEnabled               *bool                              `json:"sidebar_hover_enabled,omitempty"`
+	SidebarHoverDelayMs               *int                               `json:"sidebar_hover_delay_ms,omitempty"`
 	ResolveSessionHostnames           *bool                              `json:"resolve_session_hostnames,omitempty"`
 	AppStatusBarOrder                 *models.AppStatusBarOrder          `json:"app_status_bar_order,omitempty"`
 	QuickChatTabOrderByWorkspace      *map[string][]string               `json:"quick_chat_tab_order_by_workspace,omitempty"`
 	KanbanHiddenStepIDs               *map[string][]string               `json:"kanban_hidden_step_ids,omitempty"`
 	WorkflowIDsWithAutoHideEmptySteps *[]string                          `json:"workflow_ids_with_auto_hide_empty_steps,omitempty"`
+	KanbanSort                        *string                            `json:"kanban_sort,omitempty"`
+	KanbanPriorityFilterTokens        *[]string                          `json:"kanban_priority_filter_tokens,omitempty"`
 }
 
 type SystemMetricsDisplaySettingsPatch struct {
@@ -336,6 +346,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		PreventAutoStartAgentOnOpen:       settings.PreventAutoStartAgentOnOpen,
 		UnreadDivider:                     settings.UnreadDivider,
 		AgentGeneratedTaskTitles:          settings.AgentGeneratedTaskTitles,
+		AutoFocusNewTasks:                 settings.AutoFocusNewTasks,
 		MCPTaskAgentProfileDefault:        models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		ShowAnchoredPromptBar:             settings.ShowAnchoredPromptBar,
 		ShowScrollToLastPrompt:            settings.ShowScrollToLastPrompt,
@@ -377,11 +388,15 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		LastSeenDisplay:                   models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
 		SystemMetricsDisplay:              settings.SystemMetricsDisplay,
 		AppStatusBarEnabled:               settings.AppStatusBarEnabled,
+		SidebarHoverEnabled:               settings.SidebarHoverEnabled,
+		SidebarHoverDelayMs:               settings.SidebarHoverDelayMs,
 		ResolveSessionHostnames:           settings.ResolveSessionHostnames,
 		AppStatusBarOrder:                 settings.AppStatusBarOrder,
 		QuickChatTabOrderByWorkspace:      settings.QuickChatTabOrderByWorkspace,
 		KanbanHiddenStepIDs:               settings.KanbanHiddenStepIDs,
 		WorkflowIDsWithAutoHideEmptySteps: append([]string{}, settings.WorkflowIDsWithAutoHideEmptySteps...),
+		KanbanSort:                        settings.KanbanSort,
+		KanbanPriorityFilterTokens:        append([]string{}, settings.KanbanPriorityFilterTokens...),
 		Revision:                          settings.Revision,
 		UpdatedAt:                         settings.UpdatedAt.Format(time.RFC3339),
 	}

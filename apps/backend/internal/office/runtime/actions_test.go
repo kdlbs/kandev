@@ -126,7 +126,12 @@ func TestActionsCreateSubtaskDeniesWithoutCapability(t *testing.T) {
 }
 
 func TestActionsCreateSubtaskPreservesCallerIdentity(t *testing.T) {
-	creator := &recordingTaskCreator{taskID: "created-task"}
+	creator := &recordingTaskCreator{
+		taskID: "created-task",
+		taskScopes: map[string]taskScope{
+			"task-parent": {WorkspaceID: "ws-1"},
+		},
+	}
 	actions := NewActions(ActionDependencies{Tasks: creator})
 	runCtx := RunContext{
 		AgentID:     "agent-1",
@@ -608,6 +613,30 @@ func TestActionsUpdateTaskStatusDeniesUnscopedTask(t *testing.T) {
 	}
 	if len(updater.calls) != 0 {
 		t.Fatal("status updater should not be called for an unscoped task")
+	}
+}
+
+func TestActionsUpdateTaskStatusDeniesCrossWorkspaceWildcard(t *testing.T) {
+	updater := &recordingStatusUpdater{}
+	creator := &recordingTaskCreator{taskScopes: map[string]taskScope{
+		"task-other": {WorkspaceID: "workspace-other"},
+	}}
+	actions := NewActions(ActionDependencies{Tasks: creator, TaskStatus: updater})
+	runCtx := RunContext{
+		WorkspaceID: "workspace-run",
+		TaskID:      "task-current",
+		Capabilities: Capabilities{
+			CanUpdateTaskStatus: true,
+			AllowedTaskIDs:      []string{WildcardTaskScope},
+		},
+	}
+
+	err := actions.UpdateTaskStatus(context.Background(), runCtx, "task-other", "done", "")
+	if !errors.Is(err, ErrWorkspaceOutOfScope) {
+		t.Fatalf("error = %v, want workspace denial", err)
+	}
+	if len(updater.calls) != 0 {
+		t.Fatal("status updater should not be called for a cross-workspace task")
 	}
 }
 

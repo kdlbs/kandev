@@ -98,6 +98,18 @@ function pathExemption(pathname) {
   if (/\.(?:md|mdx|markdown)$/i.test(pathname)) {
     return 'Markdown file';
   }
+  if (/^\.codex\/agents\/[^/]+\.toml$/.test(pathname)) {
+    return 'Codex agent definition';
+  }
+  if (pathname === '.codex/config.toml') {
+    return 'Codex configuration';
+  }
+  if (pathname === '.claude/settings.json') {
+    return 'Claude configuration';
+  }
+  if (/^\.cursor\/rules\/[^/]+\.mdc$/.test(pathname)) {
+    return 'Cursor rule';
+  }
   if (/_test\.go$/i.test(pathname)) {
     return 'Go test file';
   }
@@ -1194,8 +1206,12 @@ async function loadCoverageContents({ client, changedFiles, headSha }) {
         continue;
       }
       let system;
+      let designRequirements = [];
       try {
-        parseFrontmatter(designContent);
+        const design = parseFrontmatter(designContent);
+        designRequirements = Array.isArray(design.data.requirements)
+          ? design.data.requirements
+          : [];
         const match = /^docs\/specs\/([^/]+)\/system-design\/[^/]+\.md$/.exec(designPath);
         if (!match) {
           continue;
@@ -1213,8 +1229,12 @@ async function loadCoverageContents({ client, changedFiles, headSha }) {
         }
       }
       const unresolvedRequirementIds = [];
+      const workOrderRequirements = new Set(workOrder.requirements ?? []);
+      const referencedRequirementIds = designRequirements.filter(requirementId =>
+        workOrderRequirements.has(requirementId)
+      );
       if (typeof client.searchCode === 'function') {
-        for (const requirementId of workOrder.requirements ?? []) {
+        for (const requirementId of referencedRequirementIds) {
           const searchKey = JSON.stringify([requirementDirectory, requirementId]);
           if (!requirementSearches.has(searchKey)) {
             requirementSearches.set(
@@ -1231,7 +1251,7 @@ async function loadCoverageContents({ client, changedFiles, headSha }) {
           }
         }
       } else {
-        unresolvedRequirementIds.push(...(workOrder.requirements ?? []));
+        unresolvedRequirementIds.push(...referencedRequirementIds);
       }
       if (unresolvedRequirementIds.length > 0 && typeof client.listDirectory === 'function') {
         if (!requirementDirectories.has(requirementDirectory)) {

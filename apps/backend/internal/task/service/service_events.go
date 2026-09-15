@@ -131,6 +131,16 @@ func (s *Service) PublishTaskDeleted(ctx context.Context, task *models.Task) {
 	s.publishTaskEvent(ctx, events.TaskDeleted, task, nil)
 }
 
+// PublishTaskDeletedWithExtra publishes a task.deleted event with additional
+// lifecycle attribution fields.
+func (s *Service) PublishTaskDeletedWithExtra(
+	ctx context.Context,
+	task *models.Task,
+	extra map[string]interface{},
+) {
+	s.publishTaskEventWithExtra(ctx, events.TaskDeleted, task, nil, extra)
+}
+
 // PublishTaskSessionsCancelled publishes session.state_changed events for
 // sessions finalized by a cascade path that bypasses Service.ArchiveTask.
 func (s *Service) PublishTaskSessionsCancelled(
@@ -437,6 +447,12 @@ func (s *Service) publishTaskEventNow(ctx context.Context, eventType string, tas
 		// already-open clients rather than being pinned by preserveOmittedField.
 		"workspace_orphaned": models.WorkspaceOrphaned(task.Metadata),
 	}
+	// runner_editable/runner_ineligible_reason mirror the task projection's
+	// always-present contract: never omitted, so a client merging this event
+	// never mistakes an absent key for a retained stale value.
+	runnerView := s.runnerMutabilityEventView(ctx, task)
+	data["runner_editable"] = runnerView.Editable
+	data["runner_ineligible_reason"] = runnerView.Reason
 	data["queued_for_step_id"] = task.QueuedForStepID
 	if task.QueuedAt != nil {
 		data["queued_at"] = task.QueuedAt.Format(time.RFC3339Nano)

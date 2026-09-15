@@ -1,15 +1,67 @@
 import { expect, test } from "../../fixtures/test-base";
 import { waitForHttp } from "../../helpers/causal-waits";
+import { waitForSessionDone } from "../../helpers/session";
 import { resizeColumnViaSplitview } from "../../helpers/dockview-resize";
 import { SessionPage } from "../../pages/session-page";
+import { expectTaskDescription, readTaskDescription } from "../../pages/task-description-editor";
 import {
+  canvasHref,
   enableCanvasFeature,
   expectCanvasFrameFillsHost,
+  listCanvasReleases,
   removeCanvas,
   seedTaskCanvas,
+  waitForSessionWorkspace,
+  writeCanvasSource,
 } from "./canvas-fixture";
 
 test.describe("Plugin-backed canvases in the desktop task workbench", () => {
+  test("canvas setup opens the task dialog directly from the empty sidebar", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    test.setTimeout(120_000);
+
+    const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
+    try {
+      await testPage.goto(`/?workspaceId=${encodeURIComponent(seedData.workspaceId)}`);
+      await expect(testPage.getByTestId("kanban-board")).toBeVisible();
+      await expect(testPage.getByTestId("sidebar-canvases-settings")).toBeVisible();
+
+      const sectionHeader = testPage.getByRole("button", { name: /canvases/i }).first();
+      await sectionHeader.click();
+      const setup = testPage.getByTestId("sidebar-canvases-empty");
+      await expect(setup).toBeVisible();
+
+      const routeBeforeOpen = testPage.url();
+      await setup.click();
+      const dialog = testPage.getByTestId("create-task-dialog");
+      await expect(dialog).toBeVisible();
+      await expect(testPage).toHaveURL(routeBeforeOpen);
+      await expect(dialog.getByTestId("source-mode-scratch")).toHaveAttribute(
+        "aria-checked",
+        "true",
+      );
+      await expectTaskDescription(
+        dialog.getByTestId("task-description-input"),
+        "Create a new Kandev canvas with a coordinator view that lists the existing tasks.\n\n@create-canvas",
+      );
+
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(dialog).toBeHidden();
+      await expect(setup).toBeFocused();
+
+      await setup.click();
+      await expect(dialog).toBeVisible();
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+      await expect(dialog).toBeHidden();
+    } finally {
+      await releaseFeature();
+    }
+  });
+
   test("shows the canvas creation prompt and retains the edited description on desktop", async ({
     testPage,
     apiClient,
@@ -47,17 +99,13 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
         localProfile!.name,
       );
 
-      const defaultPrompt = await dialog.getByTestId("task-description-input").inputValue();
-      for (const tool of [
-        "create_canvas_kandev",
-        "read_canvas_authoring_skill_kandev",
-        "publish_canvas_kandev",
-      ]) {
-        expect(defaultPrompt, `desktop preset is missing ${tool}`).toContain(tool);
-      }
+      const defaultPrompt = await readTaskDescription(dialog.getByTestId("task-description-input"));
+      expect(defaultPrompt).toBe(
+        "Create a new Kandev canvas with a coordinator view that lists the existing tasks.\n\n@create-canvas",
+      );
       expect(defaultPrompt).not.toContain("e2e:mcp:");
 
-      const editedDescription = "desktop canvas prompt override";
+      const editedDescription = "desktop canvas prompt override\n\n@create-canvas";
       await dialog.getByTestId("task-title-input").fill("E2E Desktop Canvas Task");
       await dialog.getByTestId("task-description-input").fill(editedDescription);
 
@@ -308,19 +356,31 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
     test.setTimeout(180_000);
 
     const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
-    let contextFailures = 0;
-    await testPage.route("**/_kandev/v1/context", async (route) => {
-      if (contextFailures === 0) {
-        contextFailures += 1;
-        await route.abort();
-        return;
-      }
-      await route.continue();
-    });
+    let runtimeFailures = 0;
     let canvasId: string | undefined;
     try {
       const seeded = await seedTaskCanvas(testPage, apiClient, seedData);
       canvasId = seeded.canvas.id;
+
+      await testPage.goto(canvasHref(seeded.canvas.id));
+      await expect(testPage.getByTestId("web-app-frame")).toHaveAttribute(
+        "data-frame-state",
+        "ready",
+        { timeout: 20_000 },
+      );
+      await testPage.route(
+        `**/api/v1/canvases/${encodeURIComponent(seeded.canvas.id)}/runtime**`,
+        async (route) => {
+          if (runtimeFailures === 0) {
+            runtimeFailures += 1;
+            await route.fulfill({ status: 503, body: "runtime unavailable" });
+            return;
+          }
+          await route.continue();
+        },
+      );
+      await testPage.reload();
+      await expect.poll(() => runtimeFailures).toBe(1);
 
       await expect(testPage.getByTestId("canvas-host-state")).toHaveText("Canvas unavailable", {
         timeout: 20_000,
@@ -337,9 +397,106 @@ test.describe("Plugin-backed canvases in the desktop task workbench", () => {
         "ready",
         { timeout: 20_000 },
       );
-      expect(contextFailures).toBe(1);
+      expect(runtimeFailures).toBe(1);
     } finally {
-      await testPage.unroute("**/_kandev/v1/context");
+      await testPage.unroute(`**/api/v1/canvases/${encodeURIComponent(canvasId ?? "")}/runtime**`);
+      if (canvasId) await removeCanvas(apiClient, canvasId);
+      await releaseFeature();
+    }
+  });
+
+  test("keeps the desktop release review wide without scrolling two permissions", async ({
+    testPage,
+    apiClient,
+    backend,
+    seedData,
+  }) => {
+    test.setTimeout(180_000);
+    await testPage.setViewportSize({ width: 1280, height: 720 });
+
+    const releaseFeature = await enableCanvasFeature(backend, apiClient, seedData.workspaceId);
+    let canvasId: string | undefined;
+    try {
+      const seeded = await seedTaskCanvas(testPage, apiClient, seedData, true, {
+        noPermissions: true,
+      });
+      canvasId = seeded.canvas.id;
+
+      const workspacePath = await waitForSessionWorkspace(
+        apiClient,
+        seeded.taskId,
+        seeded.taskSessionId,
+      );
+      writeCanvasSource(workspacePath, seeded.canvas, { minimalPermissions: true });
+      const publishScript = `e2e:mcp:kandev:publish_canvas_kandev(${JSON.stringify({
+        canvas_id: seeded.canvas.id,
+        source_path: `.kandev/canvases/${seeded.canvas.id}`,
+      })})`;
+      const reviewSession = await apiClient.launchSession({
+        task_id: seeded.taskId,
+        agent_profile_id: seedData.agentProfileId,
+        executor_profile_id: seedData.worktreeExecutorProfileId,
+        workflow_step_id: seedData.startStepId,
+        prompt: `e2e:delay(2500)\n${publishScript}`,
+      });
+      const reviewWorkspacePath = await waitForSessionWorkspace(
+        apiClient,
+        seeded.taskId,
+        reviewSession.session_id,
+      );
+      writeCanvasSource(reviewWorkspacePath, seeded.canvas, { minimalPermissions: true });
+      await waitForSessionDone(
+        apiClient,
+        seeded.taskId,
+        reviewSession.session_id,
+        "The permission-increasing canvas publication did not finish.",
+        45_000,
+      );
+      let pendingReleaseId: string | undefined;
+      await expect
+        .poll(
+          async () => {
+            const releases = await listCanvasReleases(apiClient, canvasId!);
+            pendingReleaseId = releases.find(
+              (release) => release.validation_status === "pending_permission",
+            )?.id;
+            return pendingReleaseId ?? null;
+          },
+          {
+            timeout: 30_000,
+            message: "The permission-increasing canvas release did not pend.",
+          },
+        )
+        .not.toBeNull();
+      expect(pendingReleaseId).toBeTruthy();
+
+      await testPage.goto(canvasHref(canvasId));
+      const releasesButton = testPage.getByRole("button", {
+        name: "Releases and permissions",
+        exact: true,
+      });
+      await expect(releasesButton).toBeVisible({
+        timeout: 20_000,
+      });
+      await releasesButton.click();
+
+      const dialog = testPage.getByTestId("canvas-releases-dialog");
+      await expect(dialog).toBeVisible();
+      const dialogBox = await dialog.boundingBox();
+      expect(dialogBox?.width).toBeGreaterThanOrEqual(720);
+      expect(dialogBox?.width).toBeLessThanOrEqual(780);
+
+      const permissions = dialog.getByTestId("canvas-permission-summary");
+      await expect(permissions).toBeVisible();
+      await expect(permissions.locator("li")).toHaveCount(2);
+      const scrollMetrics = await dialog
+        .getByTestId("canvas-release-review-scroll")
+        .evaluate((element) => ({
+          clientHeight: element.clientHeight,
+          scrollHeight: element.scrollHeight,
+        }));
+      expect(scrollMetrics.scrollHeight).toBeLessThanOrEqual(scrollMetrics.clientHeight);
+    } finally {
       if (canvasId) await removeCanvas(apiClient, canvasId);
       await releaseFeature();
     }

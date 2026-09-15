@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -27,6 +28,11 @@ var ErrOperationInProgress = errors.New("git operation already in progress")
 var ErrInvalidBranchName = errors.New("invalid branch name")
 
 const preflightReasonHistoryUpdateRequired = "history_update_required"
+
+const (
+	gitOperatorDefaultTimeout = 30 * time.Second
+	gitOperatorNetworkTimeout = 5 * time.Minute
+)
 
 var contributionPreflightEnvironment = map[string]string{
 	"GIT_TERMINAL_PROMPT": "0",
@@ -60,10 +66,11 @@ type GitOperationResult struct {
 
 // GitOperator executes git operations in a workspace directory.
 type GitOperator struct {
-	workDir          string
-	logger           *logger.Logger
-	workspaceTracker *WorkspaceTracker
-	environment      func() []string
+	workDir                            string
+	logger                             *logger.Logger
+	workspaceTracker                   *WorkspaceTracker
+	environment                        func() []string
+	contributionHistoryCommandOverride func(context.Context, ...string) (string, error)
 	// repoName is the multi-repo subpath this operator runs in (e.g. "kandev").
 	// Empty for the workspace-root operator. Stamped on emitted commit
 	// notifications so the frontend can group commits per repo.
@@ -216,20 +223,25 @@ func (g *GitOperator) runGitCommandWithEnvironment(
 		return "", err
 	}
 
-	// All args validated: flags in securityutil.IsKnownSafeGitFlag whitelist, branch names via securityutil.IsValidBranchName
-	// regex, commit SHAs via securityutil.LooksLikeCommitSHA pattern, args after "--" separator skipped.
-	// This defense-in-depth validation prevents injection of arbitrary commands.
-	cmd := subproc.NewGitCommand(ctx, args...)
-	cmd.Dir = g.workDir
-	cmd.Env = withEnvironmentOverrides(filterGitEnv(g.environmentValues()), environmentOverrides)
-
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
 	g.logger.Debug("executing git command", zap.Strings("args", args))
-
-	err := subproc.RunGitClass(ctx, subproc.GitInteractive, cmd)
+	environment := withEnvironmentOverrides(filterGitEnv(g.environmentValues()), environmentOverrides)
+	var stdout, stderr bytes.Buffer
+	err, execCtxErr := subproc.RunGitAfterAcquire(
+		ctx,
+		subproc.GitInteractive,
+		gitOperatorTimeout(args),
+		func(execCtx context.Context) *exec.Cmd {
+			cmd := subproc.NewGitCommand(execCtx, args...)
+			cmd.Dir = g.workDir
+			cmd.Env = append([]string(nil), environment...)
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+			return cmd
+		},
+	)
+	if err == nil {
+		err = execCtxErr
+	}
 	output := stdout.String()
 	if stderr.Len() > 0 {
 		if output != "" {
@@ -248,6 +260,18 @@ func (g *GitOperator) runGitCommandWithEnvironment(
 	}
 
 	return output, nil
+}
+
+func gitOperatorTimeout(args []string) time.Duration {
+	if len(args) == 0 {
+		return gitOperatorDefaultTimeout
+	}
+	switch args[0] {
+	case "clone", "push", "submodule":
+		return gitOperatorNetworkTimeout
+	default:
+		return gitOperatorDefaultTimeout
+	}
 }
 
 func validateGitCommandArgs(args []string) error {

@@ -70,8 +70,10 @@ function resetWorkspaceSelectTest() {
   storeState.features.office = false;
   storeState.userSettings.startupPage = "task_overview";
   storeState.workspaces.activeId = "w1";
-  storeState.setActiveWorkspace = vi.fn();
   storeState.resetKanbanWorkspaceContext = vi.fn();
+  storeState.setActiveWorkspace = vi.fn(() => {
+    storeState.resetKanbanWorkspaceContext();
+  });
   cookieWrites = [];
   cookieDescriptor = Object.getOwnPropertyDescriptor(Document.prototype, "cookie");
   Object.defineProperty(document, "cookie", {
@@ -181,9 +183,6 @@ describe("AppSidebarWorkspacePicker — workspace select", () => {
     fireEvent.click(screen.getByTestId(ALTERNATE_KANBAN_WORKSPACE_ITEM));
 
     expect(storeState.resetKanbanWorkspaceContext).toHaveBeenCalledOnce();
-    expect(storeState.resetKanbanWorkspaceContext.mock.invocationCallOrder[0]).toBeLessThan(
-      storeState.setActiveWorkspace.mock.invocationCallOrder[0],
-    );
     expect(storeState.setActiveWorkspace).toHaveBeenCalledWith("w3");
     expect(navigationMock.push).toHaveBeenCalledWith("/?home=overview&workspaceId=w3");
   });

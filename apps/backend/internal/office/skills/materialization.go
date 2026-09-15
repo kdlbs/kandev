@@ -7,15 +7,21 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kandev/kandev/internal/common/subproc"
 	"github.com/kandev/kandev/internal/office/models"
 )
 
 // skillSourceTypeGit is the source type for skills fetched from a git repository.
-const skillSourceTypeGit = "git"
+const (
+	skillSourceTypeGit   = "git"
+	skillGitFetchTimeout = 30 * time.Second
+	skillGitCloneTimeout = 5 * time.Minute
+)
 
 // SkillDir represents a materialized skill directory on disk.
 type SkillDir struct {
@@ -39,7 +45,7 @@ func (s *SkillService) MaterializeSkills(ctx context.Context, skillIDs []string,
 			s.logger.Warn("skipping skill: " + err.Error())
 			continue
 		}
-		sd, err := materializeSkill(skill, cacheDir, allowedRoot)
+		sd, err := materializeSkill(ctx, skill, cacheDir, allowedRoot)
 		if err != nil {
 			s.logger.Warn("failed to materialize skill " + skill.Slug + ": " + err.Error())
 			continue
@@ -49,14 +55,14 @@ func (s *SkillService) MaterializeSkills(ctx context.Context, skillIDs []string,
 	return dirs, nil
 }
 
-func materializeSkill(skill *models.Skill, cacheDir, allowedRoot string) (SkillDir, error) {
+func materializeSkill(ctx context.Context, skill *models.Skill, cacheDir, allowedRoot string) (SkillDir, error) {
 	switch skill.SourceType {
 	case SkillSourceTypeInline, "filesystem":
 		return materializeInline(skill, cacheDir)
 	case "local_path":
 		return materializeLocalPath(skill, allowedRoot)
 	case skillSourceTypeGit:
-		return materializeGit(skill, cacheDir)
+		return materializeGit(ctx, skill, cacheDir)
 	default:
 		return SkillDir{}, fmt.Errorf("unknown source type: %s", skill.SourceType)
 	}
@@ -115,7 +121,7 @@ func validateLocalPathUnderRoot(locator, allowedRoot string) error {
 	return nil
 }
 
-func materializeGit(skill *models.Skill, cacheDir string) (SkillDir, error) {
+func materializeGit(ctx context.Context, skill *models.Skill, cacheDir string) (SkillDir, error) {
 	if err := validateGitLocator(skill.SourceLocator); err != nil {
 		return SkillDir{}, err
 	}
@@ -124,10 +130,10 @@ func materializeGit(skill *models.Skill, cacheDir string) (SkillDir, error) {
 		return SkillDir{}, fmt.Errorf("creating git cache: %w", err)
 	}
 	if _, err := os.Stat(filepath.Join(repoDir, ".git")); err == nil {
-		if err := runGit(repoDir, "pull", "--ff-only"); err != nil {
+		if err := runGit(ctx, repoDir, "pull", "--ff-only"); err != nil {
 			return SkillDir{}, err
 		}
-	} else if err := runGit("", gitCloneArgs(skill.SourceLocator, repoDir)...); err != nil {
+	} else if err := runGit(ctx, "", gitCloneArgs(skill.SourceLocator, repoDir)...); err != nil {
 		return SkillDir{}, err
 	}
 	if _, err := os.Stat(filepath.Join(repoDir, "SKILL.md")); err != nil {
@@ -175,16 +181,33 @@ func hashLocator(locator string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func runGit(dir string, args ...string) error {
-	cmd := subproc.NewGitCommand(context.Background(), args...)
-	if dir != "" {
-		cmd.Dir = dir
+func runGit(ctx context.Context, dir string, args ...string) error {
+	output, runErr, execCtxErr := subproc.RunGitCombinedAfterAcquire(
+		ctx,
+		subproc.GitLifecycle,
+		skillGitTimeout(args),
+		func(execCtx context.Context) *exec.Cmd {
+			cmd := subproc.NewGitCommand(execCtx, args...)
+			if dir != "" {
+				cmd.Dir = dir
+			}
+			return cmd
+		},
+	)
+	if runErr == nil {
+		runErr = execCtxErr
 	}
-	out, err := subproc.RunGitCombinedOutputClass(context.Background(), subproc.GitLifecycle, cmd)
-	if err != nil {
-		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	if runErr != nil {
+		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), runErr, strings.TrimSpace(string(output)))
 	}
 	return nil
+}
+
+func skillGitTimeout(args []string) time.Duration {
+	if len(args) > 0 && args[0] == "clone" {
+		return skillGitCloneTimeout
+	}
+	return skillGitFetchTimeout
 }
 
 // SymlinkSkills creates symlinks from the agent's skill directory to skill paths.

@@ -28,6 +28,11 @@ const (
 	moveConflictCodePending            = "task_move_pending"
 )
 
+// errorDetailKeyErrorCode is the JSON key every machine-readable error detail
+// map keys its code under, so a client can branch on it without parsing the
+// human-readable message.
+const errorDetailKeyErrorCode = "error_code"
+
 func handleNotFound(c *gin.Context, log *logger.Logger, err error, fallback string) {
 	if isClientDisconnect(err) {
 		abortClientDisconnect(c)
@@ -81,16 +86,16 @@ func taskErrorBody(err error) gin.H {
 func taskErrorDetails(err error) map[string]interface{} {
 	var selectionErr *service.RepositorySelectionError
 	if errors.As(err, &selectionErr) {
-		return map[string]interface{}{"error_code": string(selectionErr.Code)}
+		return map[string]interface{}{errorDetailKeyErrorCode: string(selectionErr.Code)}
 	}
 	if errors.Is(err, service.ErrRepositoryBranchPolicyStale) {
-		return map[string]interface{}{"error_code": service.BranchPolicyStaleErrorCode}
+		return map[string]interface{}{errorDetailKeyErrorCode: service.BranchPolicyStaleErrorCode}
 	}
 	var dirtyWorktreeErr *service.TaskDeleteDirtyWorktreeError
 	if errors.As(err, &dirtyWorktreeErr) {
 		return map[string]interface{}{
-			"error_code":      service.TaskDeleteDirtyWorktreeErrorCode,
-			"dirty_worktrees": dirtyWorktreeErr.DirtyWorktrees,
+			errorDetailKeyErrorCode: service.TaskDeleteDirtyWorktreeErrorCode,
+			"dirty_worktrees":       dirtyWorktreeErr.DirtyWorktrees,
 		}
 	}
 	return nil

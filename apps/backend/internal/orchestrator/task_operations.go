@@ -272,6 +272,7 @@ func (s *Service) EnqueueTask(ctx context.Context, task *v1.Task) error {
 // When launchWorkspace is true, workspace infrastructure (agentctl) is launched asynchronously;
 // the frontend receives preparation progress via executor.prepare.progress WS events.
 func (s *Service) PrepareTaskSession(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, workflowStepID string, launchWorkspace bool) (string, error) {
+	ctx = executor.WithTaskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != "")
 	s.logger.Debug("preparing task session",
 		zap.String("task_id", taskID),
 		zap.String("agent_profile_id", agentProfileID),
@@ -1243,6 +1244,7 @@ func (s *Service) promoteSelectedExplicitWorkflowSession(
 
 //nolint:cyclop,funlen,gocognit // launch path threads many orthogonal concerns (workflow-step / agent-profile / office-task / config-mode / route / system-prompt wrapping); splitting it would require shared mutable state across helpers
 func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID string, executorID string, executorProfileID string, priority string, prompt string, workflowStepID string, planMode, autoStart bool, attachments []v1.MessageAttachment, opts startTaskOptions) (*executor.TaskExecution, error) {
+	ctx = executor.WithTaskRunnerProfileExplicit(ctx, strings.TrimSpace(executorProfileID) != "")
 	// One GetWorkflowMeta read shared by profile resolution and prompt build.
 	ctx = withWorkflowMetaCache(ctx)
 	// Fail before task-state or session mutations when the selected logical
@@ -4316,6 +4318,9 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	if s.isSessionResetInProgress(sessionID) {
+		return ErrSessionResetInProgress
+	}
 
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
 	if err != nil {
@@ -7304,6 +7309,8 @@ type cancelOperation struct {
 	joined                     chan struct{}
 	joinObserved               bool
 	err                        error
+	providerCancelErr          error
+	providerCancelOutcomeReady bool
 	projectionRelease          func()
 	kind                       cancellationKind
 	identity                   cancellationIdentity
@@ -7571,6 +7578,24 @@ func (s *Service) cancellationPreparationSnapshot(operation *cancelOperation) (c
 		return cancellationIdentity{}, false, false
 	}
 	return operation.identity, operation.completionEligible, operation.completionEligibilityReady
+}
+
+func (s *Service) setCancellationProviderOutcome(sessionID string, operation *cancelOperation, err error) {
+	s.cancellationOperationsMu.Lock()
+	defer s.cancellationOperationsMu.Unlock()
+	if current := s.cancellationOperations[sessionID]; current == operation {
+		operation.providerCancelErr = err
+		operation.providerCancelOutcomeReady = true
+	}
+}
+
+func (s *Service) cancellationProviderOutcomeSnapshot(operation *cancelOperation) (error, bool) {
+	s.cancellationOperationsMu.Lock()
+	defer s.cancellationOperationsMu.Unlock()
+	if operation == nil {
+		return nil, false
+	}
+	return operation.providerCancelErr, operation.providerCancelOutcomeReady
 }
 
 func (s *Service) finishCancellation(sessionID string, operation *cancelOperation, err error) {
@@ -8144,7 +8169,7 @@ func (s *Service) runExplicitCancellationOwned(ctx context.Context, sessionID st
 	}
 	s.setCancellationIdentity(sessionID, operation, prepared.identity)
 	s.setCancellationCompletionEligible(sessionID, operation, prepared.completionEligible)
-	if err := s.cancelAgentWhileUnlocked(ctx, sessionID, unlockGuard, relockGuard); err != nil {
+	if err := s.cancelAgentWhileUnlocked(ctx, sessionID, operation, unlockGuard, relockGuard); err != nil {
 		return err
 	}
 	if err := s.finishCancelledAgentTurn(ctx, sessionID, prepared); err != nil {
@@ -8297,7 +8322,12 @@ func (s *Service) cancelTurnCompletionEligible(ctx context.Context, session *mod
 	}
 }
 
-func (s *Service) cancelAgentWhileUnlocked(ctx context.Context, sessionID string, unlockGuard, relockGuard func()) error {
+func (s *Service) cancelAgentWhileUnlocked(
+	ctx context.Context,
+	sessionID string,
+	operation *cancelOperation,
+	unlockGuard, relockGuard func(),
+) error {
 	if s.agentManager == nil {
 		return nil
 	}
@@ -8308,6 +8338,7 @@ func (s *Service) cancelAgentWhileUnlocked(ctx context.Context, sessionID string
 	unlockGuard()
 	cancelErr := s.agentManager.CancelAgent(ctx, sessionID)
 	relockGuard()
+	s.setCancellationProviderOutcome(sessionID, operation, cancelErr)
 	if cancelErr == nil {
 		return nil
 	}

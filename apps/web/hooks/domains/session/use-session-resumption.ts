@@ -35,6 +35,7 @@ import {
   isCurrentRequest,
   type SessionRequestIdentity,
 } from "./use-session-resumption-request-guard";
+import { resolveRequestErrorMessage } from "@/lib/services/session-recovery-service";
 import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import {
   sessionId as toSessionId,
@@ -421,6 +422,7 @@ interface UseSessionResumptionReturn {
   error: string | null;
   notice: string | null;
   recoveryFailure: SessionRecoveryFailure | null;
+  recoveryAttemptId: number;
   taskSessionState: TaskSessionState | null;
   worktreePath: string | null;
   worktreeBranch: string | null;
@@ -658,7 +660,7 @@ function handleManualResumeError(
   if (!canContinue()) return false;
   setters.setResumptionState("error");
   setters.setRecoveryFailure?.(null);
-  setters.setError(error instanceof Error ? error.message : t("common:unknownError"));
+  setters.setError(resolveRequestErrorMessage(error, t));
   return false;
 }
 
@@ -723,7 +725,21 @@ export function useSessionResumption(
   taskArchiveState: TaskArchiveState = false,
   options: SessionResumptionOptions = {},
 ): UseSessionResumptionReturn {
-  const [resumptionState, setResumptionState] = useState<ResumptionState>("idle");
+  const [resumptionState, setResumptionStateRaw] = useState<ResumptionState>("idle");
+  const recoveryAttemptIdRef = useRef(0);
+  const recoveryAttemptActiveRef = useRef(false);
+  const setResumptionState = useCallback((nextState: ResumptionState) => {
+    const startsRecoveryAttempt = nextState === "checking" || nextState === "resuming";
+    if (startsRecoveryAttempt) {
+      if (!recoveryAttemptActiveRef.current) {
+        recoveryAttemptIdRef.current += 1;
+        recoveryAttemptActiveRef.current = true;
+      }
+    } else {
+      recoveryAttemptActiveRef.current = false;
+    }
+    setResumptionStateRaw(nextState);
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [recoveryFailure, setRecoveryFailure] = useState<SessionRecoveryFailure | null>(null);
@@ -786,6 +802,7 @@ export function useSessionResumption(
     error,
     notice,
     recoveryFailure,
+    recoveryAttemptId: recoveryAttemptIdRef.current,
     taskSessionState: session?.state ?? null,
     worktreePath,
     worktreeBranch,

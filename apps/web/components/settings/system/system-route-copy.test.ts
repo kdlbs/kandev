@@ -17,6 +17,8 @@ vi.mock("@/components/settings/settings-target", () => ({
 vi.mock("./backups-table", () => ({ BackupsTable: () => null }));
 vi.mock("./database-stats-card", () => ({ DatabaseStatsCard: () => null }));
 vi.mock("./log-viewer", () => ({ LogViewer: () => null }));
+vi.mock("./retention-settings-card", () => ({ RetentionSettingsCard: () => null }));
+vi.mock("./tool-payload-retention-card", () => ({ ToolPayloadRetentionCard: () => null }));
 afterEach(() => {
   cleanup();
   databaseState.value = null;
@@ -147,6 +149,7 @@ describe("Data & Logs composition", () => {
     render(createElement(DataLogsSettings));
 
     expect(screen.getByText(t("system:navDatabase"))).toBeTruthy();
+    expect(screen.getByText(t("system:navRetention"))).toBeTruthy();
     expect(screen.getByText(t("system:navBackups"))).toBeTruthy();
     expect(screen.getByText(t("system:navLogs"))).toBeTruthy();
     expect(screen.queryByText(t("system:storageTitle"))).toBeNull();

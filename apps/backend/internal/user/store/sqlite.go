@@ -629,6 +629,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"prevent_auto_start_agent_on_open":         settings.PreventAutoStartAgentOnOpen,
 		"unread_divider":                           settings.UnreadDivider,
 		"agent_generated_task_titles":              settings.AgentGeneratedTaskTitles,
+		"auto_focus_new_tasks":                     settings.AutoFocusNewTasks,
 		"mcp_task_agent_profile_default":           models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"show_anchored_prompt_bar":                 settings.ShowAnchoredPromptBar,
 		"show_scroll_to_last_prompt":               settings.ShowScrollToLastPrompt,
@@ -670,11 +671,15 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"last_seen_display":                        models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
+		"sidebar_hover_enabled":                    settings.SidebarHoverEnabled,
+		"sidebar_hover_delay_ms":                   settings.SidebarHoverDelayMs,
 		"resolve_session_hostnames":                settings.ResolveSessionHostnames,
 		"app_status_bar_order":                     normalizeAppStatusBarOrder(settings.AppStatusBarOrder),
 		"quick_chat_tab_order_by_workspace":        quickChatTabOrderByWorkspace,
 		"kanban_hidden_step_ids":                   settings.KanbanHiddenStepIDs,
 		"workflow_ids_with_auto_hide_empty_steps":  settings.WorkflowIDsWithAutoHideEmptySteps,
+		"kanban_sort":                              models.NormalizeKanbanSort(settings.KanbanSort),
+		"kanban_priority_filter_tokens":            settings.KanbanPriorityFilterTokens,
 	})
 }
 
@@ -730,6 +735,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		ConfirmTaskArchive:                true,
 		UnreadDivider:                     false,
 		AgentGeneratedTaskTitles:          true,
+		AutoFocusNewTasks:                 true,
 		MCPTaskAgentProfileDefault:        models.MCPTaskAgentProfileDefaultCurrentTask,
 		ShowAnchoredPromptBar:             false,
 		ShowScrollToLastPrompt:            true,
@@ -756,11 +762,15 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		SidebarTaskColorAutomation:        models.DefaultSidebarTaskColorAutomation(),
 		SidebarTaskColors:                 map[string]*string{},
 		AppStatusBarEnabled:               false,
+		SidebarHoverEnabled:               true,
+		SidebarHoverDelayMs:               500,
 		ResolveSessionHostnames:           false,
 		AppStatusBarOrder:                 normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
 		QuickChatTabOrderByWorkspace:      map[string][]string{},
 		KanbanHiddenStepIDs:               map[string][]string{},
 		WorkflowIDsWithAutoHideEmptySteps: []string{},
+		KanbanSort:                        models.KanbanSortDefault,
+		KanbanPriorityFilterTokens:        []string{},
 	}
 }
 
@@ -807,6 +817,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		PreventAutoStartAgentOnOpen       *bool                               `json:"prevent_auto_start_agent_on_open"`
 		UnreadDivider                     *bool                               `json:"unread_divider"`
 		AgentGeneratedTaskTitles          *bool                               `json:"agent_generated_task_titles"`
+		AutoFocusNewTasks                 *bool                               `json:"auto_focus_new_tasks"`
 		MCPTaskAgentProfileDefault        string                              `json:"mcp_task_agent_profile_default"`
 		ShowAnchoredPromptBar             *bool                               `json:"show_anchored_prompt_bar"`
 		ShowScrollToLastPrompt            *bool                               `json:"show_scroll_to_last_prompt"`
@@ -848,11 +859,15 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		LastSeenDisplay                   json.RawMessage                     `json:"last_seen_display"`
 		SystemMetricsDisplay              models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
 		AppStatusBarEnabled               *bool                               `json:"app_status_bar_enabled"`
+		SidebarHoverEnabled               *bool                               `json:"sidebar_hover_enabled"`
+		SidebarHoverDelayMs               json.RawMessage                     `json:"sidebar_hover_delay_ms"`
 		ResolveSessionHostnames           *bool                               `json:"resolve_session_hostnames"`
 		AppStatusBarOrder                 models.AppStatusBarOrder            `json:"app_status_bar_order"`
 		QuickChatTabOrderByWorkspace      map[string][]string                 `json:"quick_chat_tab_order_by_workspace"`
 		KanbanHiddenStepIDs               json.RawMessage                     `json:"kanban_hidden_step_ids"`
 		WorkflowIDsWithAutoHideEmptySteps json.RawMessage                     `json:"workflow_ids_with_auto_hide_empty_steps"`
+		KanbanSort                        string                              `json:"kanban_sort"`
+		KanbanPriorityFilterTokens        json.RawMessage                     `json:"kanban_priority_filter_tokens"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -889,6 +904,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	if payload.AgentGeneratedTaskTitles != nil {
 		settings.AgentGeneratedTaskTitles = *payload.AgentGeneratedTaskTitles
+	}
+	if payload.AutoFocusNewTasks != nil {
+		settings.AutoFocusNewTasks = *payload.AutoFocusNewTasks
 	}
 	settings.MCPTaskAgentProfileDefault = models.NormalizeMCPTaskAgentProfileDefault(payload.MCPTaskAgentProfileDefault)
 	if payload.ShowAnchoredPromptBar != nil {
@@ -1006,6 +1024,13 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.TerminalFontFamily = payload.TerminalFontFamily
 	settings.TerminalFontSize = payload.TerminalFontSize
 	settings.SystemMetricsDisplay = payload.SystemMetricsDisplay
+	if payload.SidebarHoverEnabled != nil {
+		settings.SidebarHoverEnabled = *payload.SidebarHoverEnabled
+	}
+	var hoverDelay *int
+	if json.Unmarshal(payload.SidebarHoverDelayMs, &hoverDelay) == nil && hoverDelay != nil && *hoverDelay >= 0 && *hoverDelay <= 5000 {
+		settings.SidebarHoverDelayMs = *hoverDelay
+	}
 	if payload.AppStatusBarEnabled != nil {
 		settings.AppStatusBarEnabled = *payload.AppStatusBarEnabled
 	}
@@ -1025,6 +1050,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.LastSeenDisplay = normalizeLastSeenDisplayStored(payload.LastSeenDisplay)
 	settings.KanbanHiddenStepIDs = decodeKanbanHiddenStepIDs(payload.KanbanHiddenStepIDs)
 	settings.WorkflowIDsWithAutoHideEmptySteps = decodeStringIDs(payload.WorkflowIDsWithAutoHideEmptySteps)
+	settings.KanbanSort = models.NormalizeKanbanSort(payload.KanbanSort)
+	settings.KanbanPriorityFilterTokens = decodeKanbanPriorityFilterTokens(payload.KanbanPriorityFilterTokens)
 	return settings, nil
 }
 
@@ -1090,6 +1117,37 @@ func decodeKanbanHiddenStepIDs(raw json.RawMessage) map[string][]string {
 		return map[string][]string{}
 	}
 	return decoded
+}
+
+// decodeKanbanPriorityFilterTokens parses the persisted priority filter
+// selection, resolving to the empty selection rather than failing the read
+// when the stored value is not a list at all (missing, null, a bare string)
+// or when it was written before this capability normalized on write. A
+// member outside the four priority tokens is dropped rather than retained,
+// covering a row written directly or before write-side validation existed.
+// Each element is decoded independently so one non-string member (also only
+// reachable via a row written directly) discards just that member instead of
+// the whole list.
+func decodeKanbanPriorityFilterTokens(raw json.RawMessage) []string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return []string{}
+	}
+	var rawTokens []json.RawMessage
+	if err := json.Unmarshal(raw, &rawTokens); err != nil || rawTokens == nil {
+		return []string{}
+	}
+	valid := make([]string, 0, len(rawTokens))
+	for _, rawToken := range rawTokens {
+		var token string
+		if err := json.Unmarshal(rawToken, &token); err != nil {
+			continue
+		}
+		trimmed := strings.TrimSpace(token)
+		if models.IsValidKanbanPriorityFilterToken(trimmed) {
+			valid = append(valid, trimmed)
+		}
+	}
+	return valid
 }
 
 // normalizeSidebarTaskPrefs defaults nil sidebar task pref collections so the

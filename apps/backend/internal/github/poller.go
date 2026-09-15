@@ -83,9 +83,9 @@ type TaskBranchInfo struct {
 // TaskBranchProvider lists tasks that should have PR watches and resolves branches.
 type TaskBranchProvider interface {
 	ListTasksNeedingPRWatch(ctx context.Context) ([]TaskBranchInfo, error)
-	// ResolveBranchForSession returns the current branch for a task+session pair.
-	// Used to detect branch renames and update stale PR watches.
-	ResolveBranchForSession(ctx context.Context, taskID, sessionID string) string
+	// ResolveBranchForWatch resolves a branch within the watch's source session and repository.
+	// An empty result leaves the watch unchanged.
+	ResolveBranchForWatch(ctx context.Context, watch *PRWatch) string
 }
 
 // Poller runs background loops for PR monitoring and review queue checking.
@@ -460,9 +460,7 @@ func (p *Poller) refreshStaleBranches(ctx context.Context) {
 		if watch.PRNumber != 0 {
 			continue // already found a PR, branch is correct
 		}
-		currentBranch := p.taskBranchProvider.ResolveBranchForSession(
-			ctx, watch.TaskID, watch.SessionID,
-		)
+		currentBranch := p.taskBranchProvider.ResolveBranchForWatch(ctx, watch)
 		if currentBranch == "" || currentBranch == watch.Branch {
 			continue
 		}

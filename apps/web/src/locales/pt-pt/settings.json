@@ -789,5 +789,13 @@
   "unitAddMember": "Adicionar",
   "unitRemoveMember": "Remover membro",
   "unitPickPerson": "Escolher alguém",
-  "unitActionFailed": "Não foi possível concluir."
+  "unitActionFailed": "Não foi possível concluir.",
+  "sidebarHoverTitle": "Barra lateral",
+  "sidebarHoverEnabled": "Mostrar a barra lateral ao passar o rato",
+  "sidebarHoverDelay": "Tempo de espera (ms)",
+  "sidebarHoverHelp": "Use um rato ou trackpad para mostrar a barra lateral recolhida. Defina o tempo de espera entre 0 e 5000 ms; 0 mostra-a imediatamente.",
+  "sidebarHoverDelayError": "Introduza um número inteiro entre 0 e 5000.",
+  "discoveryAliasesSidebarHover": "barra lateral passar rato mostrar atraso espera trackpad",
+  "autoFocusNewTasks": "Focar automaticamente novas tarefas",
+  "autoFocusNewTasksHelp": "Abre automaticamente as tarefas recém-criadas. Desative esta opção para manter a vista atual. As tarefas e os agentes continuam a iniciar conforme solicitado."
 }

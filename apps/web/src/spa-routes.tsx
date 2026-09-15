@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- route dispatch and its bootstrap remain one public boundary */
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { GitHubPageClient } from "@/app/github/github-page-client";
 import { GitLabPageClient } from "@/app/gitlab/gitlab-page-client";
@@ -30,7 +31,7 @@ import { listWorkflows } from "@/lib/api/domains/kanban-api";
 import { fetchUserSettings } from "@/lib/api/domains/settings-api";
 import { listRepositories, listWorkspaces } from "@/lib/api/domains/workspace-api";
 import { resolveDesiredWorkflowId } from "@/lib/kanban/resolve-workflow";
-import { useRouter, usePathname, useSearchParams } from "@/lib/routing/client-router";
+import { usePathname, useSearchParams } from "@/lib/routing/client-router";
 import { pluginRegistry, usePluginRegistry } from "@/lib/plugins/registry";
 import {
   PluginErrorBoundary,
@@ -46,6 +47,11 @@ import {
 import { resolveActiveId } from "@/lib/ssr/resolve-active-id";
 import { KanbanRoute } from "./kanban-route";
 import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
+import {
+  classifyWorkspaceContextReadError,
+  isCurrentWorkspaceContext,
+  retryAfterMilliseconds,
+} from "@/lib/state/workspace-context";
 import type {
   ListWorkflowStepsResponse,
   Repository,
@@ -53,11 +59,11 @@ import type {
   WorkflowStep,
 } from "@/lib/types/http";
 import { TaskDetailRoute } from "./task-detail-route";
-import { useTranslation } from "react-i18next";
-import { CanvasHostRoute } from "@/components/settings/canvas-host-route";
-import { SettingsLayoutClient } from "@/components/settings/settings-layout-client";
-import { WorkspaceCanvasesPage } from "@/components/settings/workspace-canvases-page";
-import { WorkspaceSettingsShell } from "@/components/settings/workspaces/workspace-settings-shell";
+import { CanvasRoute } from "./canvas-route";
+import { NeedsYouInboxRoute } from "./needs-you-inbox-route";
+import { AuthRouteRedirect, RouteLoading } from "./spa-route-chrome";
+import { NEEDS_YOU_INBOX_HREF } from "@/lib/navigation/needs-you-inbox-destination";
+import { generateUUID } from "@/lib/utils";
 
 const OfficeRoutes = lazy(() =>
   import("./office-routes").then((mod) => ({ default: mod.OfficeRoutes })),
@@ -72,7 +78,6 @@ const ThreadsPageClient = lazy(() =>
     default: mod.ThreadsPageClient,
   })),
 );
-
 const EMPTY_REPOSITORIES: Repository[] = [];
 
 type SpaRoute =
@@ -103,6 +108,7 @@ type SpaRoute =
   | { kind: "runDetail"; automationId: string; tab?: string; runId?: string }
   | { kind: "canvas"; canvasId: string }
   | { kind: "canvasSettings"; workspaceId: string }
+  | { kind: "needsYouInbox" }
   | { kind: "settings"; pathname: string }
   | { kind: "office"; pathname: string }
   | { kind: "plugin"; path: string }
@@ -117,6 +123,7 @@ type DataBackedSpaRoute = Exclude<
       | "kanban"
       | "canvas"
       | "canvasSettings"
+      | "needsYouInbox"
       | "settings"
       | "office"
       | "login"
@@ -135,6 +142,7 @@ type RouteDataState = {
 
 type SpaRouteOptions = {
   canvasesEnabled?: boolean;
+  needsYouInboxEnabled?: boolean;
 };
 
 export function resolveSpaRoute(
@@ -148,10 +156,18 @@ export function resolveSpaRoute(
     resolveRunsRoute(normalized, searchParams) ??
     resolveTopLevelRoute(normalized, searchParams) ??
     resolveCanvasRoute(normalized, options.canvasesEnabled === true) ??
+    resolveNeedsYouInboxRoute(normalized, options.needsYouInboxEnabled === true) ??
     resolveNestedRoute(normalized) ??
     resolvePluginRoute(normalized) ??
     resolveKanbanRoute(searchParams)
   );
+}
+
+// The destination resolves only where the flag is enabled; disabled falls
+// through to the kanban catch-all like an unrecognized path would.
+function resolveNeedsYouInboxRoute(normalized: string, enabled: boolean): SpaRoute | null {
+  if (!enabled) return null;
+  return normalized === NEEDS_YOU_INBOX_HREF ? { kind: "needsYouInbox" } : null;
 }
 
 function resolveCanvasRoute(normalized: string, canvasesEnabled: boolean): SpaRoute | null {
@@ -285,7 +301,8 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const canvasesEnabled = useFeature("canvases");
-  const route = resolveSpaRoute(pathname, searchParams, { canvasesEnabled });
+  const needsYouInboxEnabled = useFeature("needsYouInbox");
+  const route = resolveSpaRoute(pathname, searchParams, { canvasesEnabled, needsYouInboxEnabled });
 
   // Reaching /login, /setup, or /invite here means the pre-auth gate in
   // main.tsx already decided the app shell should render (authenticated, or
@@ -294,15 +311,10 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
     return <AuthRouteRedirect />;
   }
   if (route.kind === "canvas" || route.kind === "canvasSettings") {
-    if (!canvasesEnabled) return <AuthRouteRedirect />;
-    if (route.kind === "canvas") return <CanvasHostRoute canvasId={route.canvasId} />;
-    return (
-      <SettingsLayoutClient>
-        <WorkspaceSettingsShell workspaceId={route.workspaceId} activeTab="canvases">
-          <WorkspaceCanvasesPage workspaceId={route.workspaceId} />
-        </WorkspaceSettingsShell>
-      </SettingsLayoutClient>
-    );
+    return <CanvasRoute route={route} enabled={canvasesEnabled} />;
+  }
+  if (route.kind === "needsYouInbox") {
+    return <NeedsYouInboxRoute enabled={needsYouInboxEnabled} />;
   }
   if (route.kind === "plugin") {
     return <PluginRoute path={route.path} />;
@@ -345,27 +357,6 @@ export function SpaRoutes({ routeData }: { routeData?: BootRouteData }) {
   }
 
   return <DataBackedRoute route={route} routeData={routeData} />;
-}
-
-// Takes the route name as a catalog KEY, not resolved copy: a `t()` at the call
-// site would sit in a plain route-dispatch function with no hook of its own.
-function RouteLoading({ routeNameKey }: { routeNameKey: string }) {
-  const { t } = useTranslation();
-  return (
-    <div className="flex h-full min-h-0 w-full items-center justify-center bg-background">
-      <p role="status" aria-live="polite" className="text-sm text-muted-foreground">
-        {t("common:loadingRoute", { routeName: t(routeNameKey) })}
-      </p>
-    </div>
-  );
-}
-
-function AuthRouteRedirect() {
-  const router = useRouter();
-  useEffect(() => {
-    router.replace("/");
-  }, [router]);
-  return null;
 }
 
 /**
@@ -543,6 +534,7 @@ function resolveEffectiveRouteData(
   };
 }
 
+// eslint-disable-next-line max-lines-per-function, complexity -- route bootstrap owns one guarded async lifecycle
 function useRouteData({
   skipBootstrap = false,
 }: {
@@ -553,19 +545,28 @@ function useRouteData({
   const [workflows, setRouteWorkflows] = useState<Workflow[]>([]);
   const [steps, setSteps] = useState<WorkflowStep[]>([]);
   const activeWorkspaceId = useAppStore((state) => state.workspaces.activeId);
+  const workspaceContextRetryVersion = useAppStore(
+    (state) => state.workspaceContextRead.retryVersion,
+  );
   const repositories = useAppStore((state) =>
     activeWorkspaceId
       ? (state.repositories.itemsByWorkspaceId[activeWorkspaceId] ?? EMPTY_REPOSITORIES)
       : EMPTY_REPOSITORIES,
   );
 
+  // eslint-disable-next-line max-lines-per-function -- route bootstrap keeps its cancellation guard with its effect
   useEffect(() => {
     if (bootstrappedRef.current) return;
     promoteLegacyWorkspaceSelection(store.getState().workspaces.items);
     if (skipBootstrap) return;
     bootstrappedRef.current = true;
     let cancelled = false;
+    const requestIds = new Map<
+      "workflows" | "repositories" | "steps",
+      { workspaceId: string; generation: number; requestId: string }
+    >();
 
+    // eslint-disable-next-line max-lines-per-function, complexity -- each branch preserves a distinct workspace read outcome
     async function bootstrap() {
       const [workspacesResponse, settingsResponse] = await Promise.all([
         listWorkspaces({ cache: "no-store" }).catch(() => null),
@@ -593,45 +594,120 @@ function useRouteData({
               settingsWorkspaceId,
             )
           : firstKnownWorkspaceId(storeWorkspaceId, cookieWorkspaceId, settingsWorkspaceId);
+      const workspaceBeforeHydration = store.getState().workspaces.activeId;
       store.getState().hydrate({
-        workspaces: { items: workspaceItems, activeId: workspaceId },
+        workspaces: { items: workspaceItems, activeId: workspaceBeforeHydration },
         workflows: { items: store.getState().workflows.items, activeId: settingsWorkflowId },
         userSettings: { ...mapUserSettingsResponse(settingsResponse), workspaceId },
       });
+      if (workspaceId !== workspaceBeforeHydration) {
+        store.getState().setActiveWorkspace(workspaceId);
+      }
       if (!workspaceId) return;
 
-      const [workflowsResponse, repositoriesResponse, stepsResponse] = await Promise.all([
-        listWorkflows(workspaceId, { cache: "no-store" }).catch(() => ({ workflows: [] })),
-        listRepositories(workspaceId, undefined, { cache: "no-store" }).catch(() => ({
-          repositories: [],
-        })),
-        listWorkspaceWorkflowSteps(workspaceId).catch(() => ({ steps: [], total: 0 })),
+      const generation = store.getState().workspaceContextGeneration;
+      for (const collection of ["workflows", "repositories", "steps"] as const) {
+        const requestId = generateUUID();
+        requestIds.set(collection, { workspaceId, generation, requestId });
+        store
+          .getState()
+          .setWorkspaceContextRead(
+            collection,
+            workspaceId,
+            generation,
+            "pending",
+            undefined,
+            requestId,
+          );
+      }
+      const [workflowsResult, repositoriesResult, stepsResult] = await Promise.all([
+        settleRouteRead(listWorkflows(workspaceId, { cache: "no-store" })),
+        settleRouteRead(listRepositories(workspaceId, undefined, { cache: "no-store" })),
+        settleRouteRead(listWorkspaceWorkflowSteps(workspaceId)),
       ]);
-      if (cancelled) return;
+      if (cancelled || !isCurrentWorkspaceContext(store.getState(), workspaceId, generation)) {
+        return;
+      }
 
-      const workflowItems = workflowsResponse.workflows.map(mapWorkflowItem);
+      const currentState = store.getState();
+      const readResults = [
+        ["workflows", workflowsResult],
+        ["repositories", repositoriesResult],
+        ["steps", stepsResult],
+      ] as const;
+      for (const [collection, result] of readResults) {
+        const requestId = requestIds.get(collection)?.requestId;
+        if (result.ok) {
+          currentState.setWorkspaceContextRead(
+            collection,
+            workspaceId,
+            generation,
+            "success",
+            undefined,
+            requestId,
+          );
+        } else {
+          currentState.setWorkspaceContextRead(
+            collection,
+            workspaceId,
+            generation,
+            classifyWorkspaceContextReadError(result.error),
+            retryAfterMilliseconds(result.error),
+            requestId,
+          );
+        }
+      }
+
+      const workflowItems = workflowsResult.ok
+        ? workflowsResult.value.workflows.map(mapWorkflowItem)
+        : currentState.workflows.items.filter((workflow) => workflow.workspaceId === workspaceId);
       const activeWorkflowId = resolveDesiredWorkflowId({
-        activeWorkflowId: store.getState().workflows.activeId,
+        activeWorkflowId: currentState.workflows.activeId,
         settingsWorkflowId,
         workspaceWorkflows: workflowItems,
       });
 
-      store.getState().hydrate({
-        workflows: { items: workflowItems, activeId: activeWorkflowId },
-      });
-      store.getState().setRepositories(workspaceId, repositoriesResponse.repositories);
-      setRouteWorkflows(workflowsResponse.workflows);
-      setSteps(stepsResponse.steps);
+      if (workflowsResult.ok) {
+        store.getState().hydrate({
+          workflows: { items: workflowItems, activeId: activeWorkflowId },
+        });
+        setRouteWorkflows(workflowsResult.value.workflows);
+      }
+      if (repositoriesResult.ok) {
+        store.getState().setRepositories(workspaceId, repositoriesResult.value.repositories);
+      }
+      if (stepsResult.ok) setSteps(stepsResult.value.steps);
     }
 
     void bootstrap();
     return () => {
       cancelled = true;
+      const state = store.getState();
+      for (const [collection, request] of requestIds) {
+        state.setWorkspaceContextRead(
+          collection,
+          request.workspaceId,
+          request.generation,
+          "cancelled",
+          undefined,
+          request.requestId,
+        );
+      }
       bootstrappedRef.current = false;
     };
-  }, [skipBootstrap, store]);
+  }, [skipBootstrap, store, workspaceContextRetryVersion]);
 
   return { activeWorkspaceId, workflows, steps, repositories };
+}
+
+type RouteReadResult<T> = { ok: true; value: T } | { ok: false; error: unknown };
+
+async function settleRouteRead<T>(promise: Promise<T>): Promise<RouteReadResult<T>> {
+  try {
+    return { ok: true, value: await promise };
+  } catch (error) {
+    return { ok: false, error };
+  }
 }
 
 function listWorkspaceWorkflowSteps(workspaceId: string) {

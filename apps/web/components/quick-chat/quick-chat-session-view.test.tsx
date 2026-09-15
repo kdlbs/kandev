@@ -25,6 +25,7 @@ const useSessionResumption = vi.hoisted(() =>
     error: null,
     notice: null,
     recoveryFailure: null,
+    recoveryAttemptId: 0,
     taskSessionState: null,
     worktreePath: null,
     worktreeBranch: null,
@@ -32,6 +33,10 @@ const useSessionResumption = vi.hoisted(() =>
   })),
 );
 const useTaskStatusSummary = vi.hoisted(() => vi.fn());
+const TEST_IDS = vi.hoisted(() => ({
+  sessionRecoveryCard: "session-bootstrap-recovery-card",
+  quickChatContent: "quick-chat-content",
+}));
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: unknown) => unknown) =>
@@ -50,25 +55,7 @@ vi.mock("@/components/task/passthrough-terminal", () => ({
   PassthroughTerminal: () => <div data-testid="passthrough-terminal" />,
 }));
 vi.mock("./quick-chat-content", () => ({
-  QuickChatContent: () => <div data-testid="quick-chat-content" />,
-}));
-vi.mock("@/components/task/chat/session-bootstrap-recovery-card", () => ({
-  SessionBootstrapRecoveryCard: ({
-    error,
-    automaticRecovery,
-  }: {
-    error: { stamp: string };
-    automaticRecovery?: {
-      notice: string | null;
-      recoveryFailure: { outcome: string } | null;
-    };
-  }) => (
-    <div data-testid="session-bootstrap-recovery-card">
-      {error.stamp}
-      {automaticRecovery?.notice ?? ""}
-      {automaticRecovery?.recoveryFailure?.outcome ?? ""}
-    </div>
-  ),
+  QuickChatContent: () => <div data-testid={TEST_IDS.quickChatContent} />,
 }));
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -83,7 +70,6 @@ const BOOTSTRAP_OCCURRED_AT = "2026-09-11T10:00:00Z";
 const BOOTSTRAP_PREVIEW = "The agent could not start.";
 const WORKSPACE_READ_ONLY_NOTICE = "workspace restored read-only";
 const RESUME_FAILURE = "resume failed";
-const RECOVERY_CARD_TEST_ID = "session-bootstrap-recovery-card";
 
 const session = {
   kind: "chat" as const,
@@ -177,7 +163,7 @@ describe("QuickChatSessionView session resumption", () => {
     );
   });
 
-  it("gives a matching bootstrap failure to the inline recovery card", () => {
+  it("keeps a session bootstrap failure in the transcript-owned path", () => {
     sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
     useTask.mockReturnValue({ isArchived: false, workspaceId: WORKSPACE_ID });
     useTaskStatusSummary.mockReturnValue({
@@ -192,11 +178,11 @@ describe("QuickChatSessionView session resumption", () => {
 
     render(<QuickChatSessionView session={session} />);
 
-    expect(screen.getByTestId(RECOVERY_CARD_TEST_ID).textContent).toBe("bootstrap-1");
-    expect(screen.getByTestId("quick-chat-content")).toBeTruthy();
+    expect(screen.queryByTestId(TEST_IDS.sessionRecoveryCard)).toBeNull();
+    expect(screen.getByTestId(TEST_IDS.quickChatContent)).toBeTruthy();
   });
 
-  it("passes automatic read-only recovery into the inline card", () => {
+  it("does not move session recovery feedback into the transcript", () => {
     sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
     useTask.mockReturnValue({ isArchived: false, workspaceId: WORKSPACE_ID });
     useTaskStatusSummary.mockReturnValue({
@@ -222,13 +208,11 @@ describe("QuickChatSessionView session resumption", () => {
 
     render(<QuickChatSessionView session={session} />);
 
-    expect(screen.getByTestId(RECOVERY_CARD_TEST_ID).textContent).toContain(
-      WORKSPACE_READ_ONLY_NOTICE,
-    );
-    expect(screen.getByTestId(RECOVERY_CARD_TEST_ID).textContent).not.toContain(RESUME_FAILURE);
+    expect(screen.queryByTestId(TEST_IDS.sessionRecoveryCard)).toBeNull();
+    expect(screen.getByTestId(TEST_IDS.quickChatContent)).toBeTruthy();
   });
 
-  it("passes automatic recovery failure into the inline card", () => {
+  it("keeps session recovery failure out of the transcript", () => {
     sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID };
     useTask.mockReturnValue({ isArchived: false, workspaceId: WORKSPACE_ID });
     useTaskStatusSummary.mockReturnValue({
@@ -258,10 +242,19 @@ describe("QuickChatSessionView session resumption", () => {
 
     render(<QuickChatSessionView session={session} />);
 
-    expect(screen.getByTestId(RECOVERY_CARD_TEST_ID).textContent).toContain("recovery_failed");
+    expect(screen.queryByTestId(TEST_IDS.sessionRecoveryCard)).toBeNull();
+    expect(screen.getByTestId(TEST_IDS.quickChatContent)).toBeTruthy();
   });
 
-  it("keeps the bootstrap recovery card and automatic outcome in passthrough Quick Chat", () => {
+  it("does not pass a recovery reveal key to Quick Chat content", () => {
+    const view = render(<QuickChatSessionView session={session} />);
+    expect(screen.getByTestId(TEST_IDS.quickChatContent)).toBeTruthy();
+
+    view.rerender(<QuickChatSessionView session={session} />);
+    expect(screen.getByTestId(TEST_IDS.quickChatContent)).toBeTruthy();
+  });
+
+  it("keeps passthrough recovery feedback outside the terminal", () => {
     sessionRows[session.sessionId] = { task_id: HYDRATED_TASK_ID, is_passthrough: true };
     useTask.mockReturnValue({ isArchived: false, workspaceId: WORKSPACE_ID });
     useTaskStatusSummary.mockReturnValue({
@@ -287,10 +280,11 @@ describe("QuickChatSessionView session resumption", () => {
 
     render(<QuickChatSessionView session={session} />);
 
-    expect(screen.getByTestId(RECOVERY_CARD_TEST_ID).textContent).toContain(
+    expect(screen.queryByTestId(TEST_IDS.sessionRecoveryCard)).toBeNull();
+    expect(screen.getByTestId("session-recovery-notice").textContent).toContain(
       WORKSPACE_READ_ONLY_NOTICE,
     );
     expect(screen.getByTestId("passthrough-terminal")).toBeTruthy();
-    expect(screen.queryByTestId("quick-chat-content")).toBeNull();
+    expect(screen.queryByTestId(TEST_IDS.quickChatContent)).toBeNull();
   });
 });

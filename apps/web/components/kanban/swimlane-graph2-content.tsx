@@ -13,7 +13,7 @@ import type { Task } from "@/components/kanban-card";
 import type { WorkflowStep } from "@/components/kanban-column";
 import { useTranslation } from "react-i18next";
 import { areAllEmptyStepsAutoHidden } from "@/lib/kanban/auto-hide-empty-columns";
-import { compareStepOrder } from "@/lib/kanban/task-order";
+import { compareStepOrder, sortTasksForPipelineView } from "@/lib/kanban/task-order";
 
 /**
  * Pipeline row order: each step's contiguous run of rows in step-list order
@@ -23,19 +23,23 @@ import { compareStepOrder } from "@/lib/kanban/task-order";
  * total order, and ties are the ship-time norm for tasks that arrived
  * together.
  */
-export function sortGraph2Tasks(displayTasks: Task[], displaySteps: WorkflowStep[]): Task[] {
-  // A finite sentinel, not Number.POSITIVE_INFINITY: two no-resolvable-step
-  // tasks must still subtract to a finite, sortable delta so compareStepOrder
-  // below is reachable (Infinity - Infinity is NaN, which a sort comparator
-  // cannot use to order a pair).
-  const noStepSentinel = displaySteps.length;
-  const stepIndex = new Map(displaySteps.map((step, index) => [step.id, index]));
-  const resolvedStepIndex = (task: Task) => stepIndex.get(task.workflowStepId) ?? noStepSentinel;
-  return [...displayTasks].sort((a, b) => {
-    const stepDelta = resolvedStepIndex(a) - resolvedStepIndex(b);
-    if (stepDelta !== 0) return stepDelta;
-    return compareStepOrder(a, b);
-  });
+export function sortGraph2Tasks(
+  displayTasks: Task[],
+  displaySteps: WorkflowStep[],
+  sortToken: Parameters<typeof sortTasksForPipelineView>[2] = "created_desc",
+): Task[] {
+  if (sortToken === "created_desc" && displayTasks.some((task) => "position" in task)) {
+    const noStepSentinel = displaySteps.length;
+    const stepIndex = new Map(displaySteps.map((step, index) => [step.id, index]));
+    return [...displayTasks].sort((left, right) => {
+      const stepDiff =
+        (stepIndex.get(left.workflowStepId) ?? noStepSentinel) -
+        (stepIndex.get(right.workflowStepId) ?? noStepSentinel);
+      if (stepDiff !== 0) return stepDiff;
+      return compareStepOrder(left, right);
+    });
+  }
+  return sortTasksForPipelineView(displayTasks, displaySteps, sortToken);
 }
 
 export function getGraph2DisplayState(
@@ -75,6 +79,7 @@ export function SwimlaneGraph2Content({
   });
   const { movingTaskIds, handleMoveTask } = useTaskMoveGuard(moveTask);
   const workspaceId = useAppStore((state) => state.workspaces.activeId);
+  const kanbanSort = useAppStore((state) => state.userSettings.kanbanSort);
   const repositories = useActiveWorkspaceRepositories();
   const externalLinkAvailability = useKanbanExternalLinkAvailability(workspaceId);
   const { displayTasks, displaySteps } = useMemo(
@@ -87,8 +92,8 @@ export function SwimlaneGraph2Content({
   }, [displaySteps, moveTargetSteps]);
 
   const sortedTasks = useMemo(
-    () => sortGraph2Tasks(displayTasks, displaySteps),
-    [displayTasks, displaySteps],
+    () => sortGraph2Tasks(displayTasks, displaySteps, kanbanSort),
+    [displayTasks, displaySteps, kanbanSort],
   );
   const orderedTaskIds = useMemo(() => sortedTasks.map((task) => task.id), [sortedTasks]);
 

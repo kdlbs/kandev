@@ -13,9 +13,15 @@ import (
 // generic (non-ErrWakeupAlreadyRequested) error, but still lets Dispatch/
 // FailWakeupRequest succeed trivially — they are never reached once
 // CreateWakeupRequest itself fails.
-type failingCreateWakeupEnqueuer struct{ fakeWakeupEnqueuer }
+type failingCreateWakeupEnqueuer struct {
+	fakeWakeupEnqueuer
+	createErr error
+}
 
 func (f *failingCreateWakeupEnqueuer) CreateWakeupRequest(context.Context, *routines.WakeupRequest) error {
+	if f.createErr != nil {
+		return f.createErr
+	}
 	return errors.New("wakeup store unavailable")
 }
 

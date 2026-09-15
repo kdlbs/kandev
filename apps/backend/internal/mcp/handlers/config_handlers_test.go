@@ -667,6 +667,25 @@ func TestHandleArchiveTask_InvalidPayload(t *testing.T) {
 	assertWSError(t, resp, ws.ErrorCodeBadRequest)
 }
 
+func TestHandleArchiveTask_RedactsCallerLookupError(t *testing.T) {
+	h := &Handlers{
+		taskSvc: service.NewService(service.Repos{
+			Tasks: failingCallerTaskRepository{err: errors.New("database unavailable: secret path")},
+		}, nil, testLogger(t), service.RepositoryDiscoveryConfig{}),
+		logger: testLogger(t).WithFields(),
+	}
+	msg := makeWSMessage(t, ws.ActionMCPArchiveTask, map[string]string{
+		"task_id": "target-task", "caller_task_id": "caller-task",
+	})
+
+	resp, err := h.handleArchiveTask(context.Background(), msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	assertWSError(t, resp, ws.ErrorCodeValidation)
+	require.NotContains(t, string(resp.Payload), "secret path")
+	require.NotContains(t, string(resp.Payload), "database unavailable")
+}
+
 func TestHandleArchiveTask_MergedPRRunRejectsDifferentTarget(t *testing.T) {
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()

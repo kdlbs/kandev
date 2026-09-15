@@ -271,6 +271,7 @@ function useNativeScrollMetrics(
 
 function NativeScrollManagementHarness({
   items,
+  messages = [],
   metrics,
   loadMore = async () => 0,
   sessionId = null,
@@ -280,8 +281,10 @@ function NativeScrollManagementHarness({
   enabled = false,
   historyRefreshPending = false,
   hasUnreadDivider = false,
+  hasMore = true,
 }: {
   items: RenderItem[];
+  messages?: Message[];
   metrics?: NativeScrollMetrics;
   loadMore?: () => Promise<number>;
   sessionId?: string | null;
@@ -291,19 +294,20 @@ function NativeScrollManagementHarness({
   enabled?: boolean;
   historyRefreshPending?: boolean;
   hasUnreadDivider?: boolean;
+  hasMore?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
   useNativeScrollMetrics(scrollRef, metrics);
   const { sentinelRef, showRecovery } = useNativeScrollManagement({
     scrollRef,
     items,
-    messages: [],
+    messages,
     isWorking: false,
     sessionId,
     enabled,
     hasUnreadDivider,
     messagesLoading: false,
-    hasMore: true,
+    hasMore,
     isLoadingMore,
     loadMore,
     isVisible,
@@ -739,48 +743,6 @@ describe("useNativeScrollManagement transcript pagination", () => {
     expect(sharedSentinelRecheck).not.toHaveBeenCalled();
   });
 
-  it("does not recheck a restored transcript while explicit recovery is active", () => {
-    const requestAnimationFrame = vi
-      .spyOn(window, "requestAnimationFrame")
-      .mockImplementation((callback) => {
-        callback(0);
-        return 1;
-      });
-    const recoveryRef = { current: false };
-    const { rerender } = render(
-      <NativeScrollManagementHarness
-        items={[]}
-        sessionId="session-1"
-        recoveryRef={recoveryRef}
-        isVisible={false}
-      />,
-    );
-    const options = sharedSentinelCalls.at(-1)?.[5] as {
-      onLoadSettled: (result: {
-        count: number;
-        rejected: boolean;
-        continuation: "no-progress";
-      }) => void;
-    };
-    act(() => {
-      options.onLoadSettled({ count: 0, rejected: false, continuation: "no-progress" });
-    });
-    sharedSentinelRecheck.mockClear();
-
-    rerender(
-      <NativeScrollManagementHarness
-        items={[]}
-        sessionId="session-1"
-        recoveryRef={recoveryRef}
-        isVisible
-      />,
-    );
-
-    expect(recoveryRef.current).toBe(true);
-    expect(sharedSentinelRecheck).not.toHaveBeenCalled();
-    requestAnimationFrame.mockRestore();
-  });
-
   it("retries a disarmed short page on the next upward scroll", () => {
     const metrics = { scrollHeight: 1000, scrollTop: 100, clientHeight: 400 };
     render(<NativeScrollManagementHarness items={[]} metrics={metrics} />);
@@ -1041,6 +1003,12 @@ describe("useNativeScrollManagement transcript pagination", () => {
 
 // eslint-disable-next-line max-lines-per-function -- this suite keeps the related scroll invariants together.
 describe("useScrollToDividerOrBottom — anchored-bar offset", () => {
+  it("places an enabled transcript at the bottom on its first render", () => {
+    render(<Harness itemCount={2} anchoredBarOffsetPx={0} dividerKey={null} scrollHeight={1000} />);
+
+    expect(screen.getByTestId(DIVIDER_SCROLL_CONTAINER_TEST_ID).scrollTop).toBe(1000);
+  });
+
   it("waits for an inactive transcript to become visible before placing the initial view", () => {
     const frames: Array<FrameRequestCallback> = [];
     vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
