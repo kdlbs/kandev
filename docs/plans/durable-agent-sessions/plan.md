@@ -384,3 +384,9 @@ PR #3598 contains the original implementation, review remediation, and merged su
 remaining environment-dependent checks are recorded above.
 Automatic context continuation and release publication remain outside this
 package.
+
+## Streaming repair follow-up (2026-09-15)
+
+The [streaming repair package](../durable-agent-stream-repair/plan.md) tracks confirmed replay, legacy, batching, capacity, and recovery defects.
+Its seven work orders are pending. Historical completed task results above remain unchanged and do not prove these repairs.
+Release readiness requires the follow-up evidence; earlier green CI does not cover the new regressions.
