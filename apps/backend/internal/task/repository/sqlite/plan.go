@@ -272,13 +272,13 @@ func (r *Repository) ListObsoletePlanRevisionCandidates(ctx context.Context, tas
 				    SELECT MAX(revision_number) FROM task_plan_revisions WHERE task_id = ?
 			    )
 			  ORDER BY recent.revision_number DESC
-			  LIMIT ?
+			  ` + sqlLimitClause + `
 		  )`
 		args = append(args, taskID, taskID, keepLastN)
 	}
 	query += ` ORDER BY rev.revision_number ASC`
 	if limit > 0 {
-		query += ` LIMIT ?`
+		query += sqlLimitClause
 		args = append(args, limit)
 	}
 
