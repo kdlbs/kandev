@@ -170,6 +170,8 @@ type UserSettings struct {
 	LastSeenDisplay                   string                            `json:"last_seen_display"`    // "absolute" | "relative"
 	SystemMetricsDisplay              SystemMetricsDisplaySettings      `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                              `json:"app_status_bar_enabled"`
+	SidebarHoverEnabled               bool                              `json:"sidebar_hover_enabled"`
+	SidebarHoverDelayMs               int                               `json:"sidebar_hover_delay_ms"`
 	ResolveSessionHostnames           bool                              `json:"resolve_session_hostnames"`
 	AppStatusBarOrder                 AppStatusBarOrder                 `json:"app_status_bar_order"`
 	QuickChatTabOrderByWorkspace      map[string][]string               `json:"quick_chat_tab_order_by_workspace"`

@@ -241,6 +241,53 @@ describe("filterVisibleMessages empty-turn notice supersession", () => {
   });
 });
 
+describe("filterVisibleMessages recovery history", () => {
+  const RECOVERY_MESSAGE = "Could not resume the saved session.";
+  const FIRST_RECOVERY_ID = "recovery-1";
+
+  it("keeps a session failure after later agent output arrives", () => {
+    const failure = baseMessage({
+      id: FIRST_RECOVERY_ID,
+      type: "status",
+      content: RECOVERY_MESSAGE,
+      metadata: { recovery_actions: true, recovery_stamp: "failure-1" },
+    });
+    const output = baseMessage({
+      id: "agent-1",
+      type: "message",
+      content: "The resumed session is ready.",
+      created_at: AFTER,
+    });
+
+    expect(
+      filterVisibleMessages([failure, output], new Set(), new Set()).map((message) => message.id),
+    ).toEqual([FIRST_RECOVERY_ID, "agent-1"]);
+  });
+
+  it("collapses duplicate deliveries of one failure while keeping later failures", () => {
+    const first = baseMessage({
+      id: FIRST_RECOVERY_ID,
+      type: "status",
+      content: RECOVERY_MESSAGE,
+      metadata: { recovery_actions: true, recovery_stamp: "failure-1" },
+    });
+    const duplicate = { ...first, id: `${FIRST_RECOVERY_ID}-duplicate` };
+    const second = baseMessage({
+      id: "recovery-2",
+      type: "status",
+      content: RECOVERY_MESSAGE,
+      metadata: { recovery_actions: true, recovery_stamp: "failure-2" },
+      created_at: AFTER,
+    });
+
+    expect(
+      filterVisibleMessages([first, duplicate, second], new Set(), new Set()).map(
+        (message) => message.id,
+      ),
+    ).toEqual([FIRST_RECOVERY_ID, "recovery-2"]);
+  });
+});
+
 describe("hasFailedAgentBootAfter", () => {
   it("returns true when a boot after the failure reports status failed", () => {
     expect(hasFailedAgentBootAfter([bootMessage(AFTER, { status: "failed" })], ERROR_AT)).toBe(

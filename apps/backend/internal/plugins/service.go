@@ -137,9 +137,10 @@ type Service struct {
 	taskPRs    taskPRSource
 	taskWriter taskWriter
 
-	// Utility agent invocation (ADR 0048), wired via SetUtilityAgent.
-	utilityAgents utilityAgentSource
-	utilityRunner utilityRunner
+	// Utility agent invocation dependencies, wired via SetUtilityAgent.
+	utilityDefaultProfile utilityDefaultProfileSource
+	utilityProfiles       agentProfileSource
+	utilityRunner         utilityRunner
 
 	// Host data API write dependencies wired late via SetWriteDeps (ADR
 	// 0043): the task-message delivery path and the orchestrator task-starter,
@@ -591,30 +592,26 @@ func (s *Service) writeDependencies() (taskMessenger, taskStarter) {
 	return s.messenger, s.taskStarter
 }
 
-// SetUtilityAgent wires the dependencies behind Host.InvokeUtilityAgent
-// (ADR 0048): the service that resolves the utility agent selected in plugin
-// configuration, and the sessionless runner that executes a one-shot
-// completion. Wired by backendapp (not Provide) for the same import-cycle
-// reason as SetDataSources. Unlike the data sources, this is wired LATE in boot
-// (hostUtilityMgr is only available after agentctl control is healthy, by which
-// point StartActivePlugins has already spawned boot-active plugins), so hosts
-// read these live via utilityAgentDeps rather than snapshotting them — the
-// write here is mutex-guarded against those concurrent reads.
-func (s *Service) SetUtilityAgent(agents utilityAgentSource, runner utilityRunner) {
+// SetUtilityAgent wires the default-profile source, profile validator, and
+// sessionless runner behind Host.InvokeUtilityAgent. Wired by backendapp (not
+// Provide) for the same import-cycle reason as SetDataSources. The runner is
+// wired late in boot, so hosts read these live via utilityAgentDeps instead of
+// snapshotting them.
+func (s *Service) SetUtilityAgent(defaultProfile utilityDefaultProfileSource, profiles agentProfileSource, runner utilityRunner) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.utilityAgents = agents
+	s.utilityDefaultProfile = defaultProfile
+	s.utilityProfiles = profiles
 	s.utilityRunner = runner
 }
 
-// utilityAgentDeps returns the currently-wired utility-agent dependencies. Read
-// live (not snapshotted at hostForPlugin time) so a plugin spawned before
-// SetUtilityAgent still resolves them once it is called. Guarded by s.mu against
-// the SetUtilityAgent write.
-func (s *Service) utilityAgentDeps() (utilityAgentSource, utilityRunner) {
+// utilityAgentDeps returns the currently-wired utility invocation
+// dependencies. Read live so a plugin spawned before SetUtilityAgent still
+// resolves them once it is called. Guarded by s.mu against the write.
+func (s *Service) utilityAgentDeps() (utilityDefaultProfileSource, agentProfileSource, utilityRunner) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.utilityAgents, s.utilityRunner
+	return s.utilityDefaultProfile, s.utilityProfiles, s.utilityRunner
 }
 
 // SetAuthLoginBridge wires the SSO login bridge auth-capable plugins use to

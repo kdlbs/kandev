@@ -74,6 +74,10 @@ export function resolveMobileReviewSource(
 const TOP_NAV_HEIGHT = "3.5rem";
 const BOTTOM_NAV_HEIGHT = "3.25rem";
 
+export function mobilePanelTopNavHeight(hasSharedTaskError: boolean): string {
+  return hasSharedTaskError ? "0px" : TOP_NAV_HEIGHT;
+}
+
 type SessionMobileLayoutProps = {
   workspaceId: string | null;
   workflowId: string | null;
@@ -94,6 +98,7 @@ type SessionMobileLayoutProps = {
   onTaskUnarchived?: (taskId: string) => void;
   taskCanvases?: Canvas[];
   onOpenCanvas?: (canvasId: string) => void;
+  hasSharedTaskError?: boolean;
 };
 
 function MobileChatPanelContent({
@@ -213,7 +218,7 @@ export function MobilePanelArea({
       style={{
         paddingTop: `calc(${topNavHeight} + env(safe-area-inset-top, 0px))`,
         paddingBottom: `calc(${bottomNavHeight} + env(safe-area-inset-bottom, 0px))`,
-        height: "100dvh",
+        height: "100%",
       }}
     >
       {currentMobilePanel === "chat" && (
@@ -662,7 +667,7 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
     }
   }, [currentMobilePanel, effectiveMobilePanel]);
   return (
-    <div className="h-dvh relative bg-background" data-testid="mobile-task-layout">
+    <div className="relative h-full min-h-0 bg-background" data-testid="mobile-task-layout">
       <MobileTopBarSticky
         {...props}
         activeTaskId={activeTaskId}
@@ -686,7 +691,7 @@ export const SessionMobileLayout = memo(function SessionMobileLayout(
         onNavigateToPrompt={handleNavigateToPrompt}
         onScrollTargetConsumed={handleMobileScrollTargetConsumed}
         mobileScrollTarget={mobileScrollTarget}
-        topNavHeight={TOP_NAV_HEIGHT}
+        topNavHeight={mobilePanelTopNavHeight(Boolean(props.hasSharedTaskError))}
         bottomNavHeight={BOTTOM_NAV_HEIGHT}
         reviews={reviews}
         selectedReview={selectedReview}

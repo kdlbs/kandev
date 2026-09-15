@@ -1,5 +1,7 @@
 "use client";
 
+import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
+
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { IconEye, IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
@@ -160,7 +162,12 @@ function MobileFileViewerHeader({
   return (
     <PanelHeaderBarSplit
       className="h-11 px-2"
-      left={<span className="truncate font-mono text-xs">{file.path}</span>}
+      left={
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate font-mono text-xs">{file.path}</span>
+          <SymlinkIndicator isSymlink={!!file.resolvedPath} showLabel />
+        </div>
+      }
       right={
         <div className="flex items-center gap-1">
           <ExternalVcsFileLink

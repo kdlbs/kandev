@@ -104,6 +104,8 @@ type UpdateUserSettingsRequest struct {
 	LastSeenDisplay                   *string
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch
 	AppStatusBarEnabled               *bool
+	SidebarHoverEnabled               *bool
+	SidebarHoverDelayMs               *int
 	ResolveSessionHostnames           *bool
 	AppStatusBarOrder                 *models.AppStatusBarOrder
 	QuickChatTabOrderByWorkspace      *map[string][]string
@@ -348,6 +350,9 @@ func taskCreateLastUsedPatchEmpty(patch models.TaskCreateLastUsed) bool {
 
 // applyBasicSettings copies simple (non-validated) fields from req to settings.
 func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if err := applySidebarHoverSettings(settings, req); err != nil {
+		return err
+	}
 	if err := applyWorkspaceAndTaskListPreferences(settings, req); err != nil {
 		return err
 	}
@@ -1125,6 +1130,8 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"last_seen_display":                        models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
+		"sidebar_hover_enabled":                    settings.SidebarHoverEnabled,
+		"sidebar_hover_delay_ms":                   settings.SidebarHoverDelayMs,
 		"resolve_session_hostnames":                settings.ResolveSessionHostnames,
 		"app_status_bar_order":                     settings.AppStatusBarOrder,
 		"kanban_hidden_step_ids":                   settings.KanbanHiddenStepIDs,

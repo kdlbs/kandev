@@ -10,6 +10,8 @@ export type AppearanceState = {
   startupPage: UserSettingsState["startupPage"];
   changesPanelLayout: UserSettingsState["changesPanelLayout"];
   appStatusBarEnabled: boolean;
+  sidebarHoverEnabled: boolean;
+  sidebarHoverDelayMs: string;
   showMetrics: boolean;
   simplifiedMetrics: boolean;
 };
@@ -20,11 +22,18 @@ export function createAppearanceSavedState(
   richOutputAnimationsEnabled: boolean,
   userSettings: Pick<
     UserSettingsState,
-    "appStatusBarEnabled" | "changesPanelLayout" | "startupPage" | "systemMetricsDisplay"
+    | "appStatusBarEnabled"
+    | "changesPanelLayout"
+    | "startupPage"
+    | "systemMetricsDisplay"
+    | "sidebarHoverEnabled"
+    | "sidebarHoverDelayMs"
   >,
 ): AppearanceState {
   return {
     theme,
+    sidebarHoverEnabled: userSettings.sidebarHoverEnabled,
+    sidebarHoverDelayMs: String(userSettings.sidebarHoverDelayMs),
     appStatusBarEnabled: userSettings.appStatusBarEnabled,
     // Per-device, but drafted and saved with account settings under one control.
     settingsMenuMode,
@@ -40,7 +49,16 @@ export function buildAppearanceUserSettingsPatch(
   submitted: AppearanceState,
   saved: AppearanceState,
 ): UserSettingsUpdatePayload {
+  const delay = parseSidebarHoverDelay(submitted.sidebarHoverDelayMs);
+  // i18n-exempt: unreachable invariant guard; the contributor presents localized validation.
+  if (delay === null) throw new Error("Invalid sidebar hover delay");
   const patch: UserSettingsUpdatePayload = {};
+  if (submitted.sidebarHoverEnabled !== saved.sidebarHoverEnabled) {
+    patch.sidebar_hover_enabled = submitted.sidebarHoverEnabled;
+  }
+  if (delay !== Number(saved.sidebarHoverDelayMs)) {
+    patch.sidebar_hover_delay_ms = delay;
+  }
   if (submitted.startupPage !== saved.startupPage) {
     patch.startup_page = submitted.startupPage;
   }
@@ -75,6 +93,8 @@ export function rebaseAppearanceDraft(
       : nextSaved[field];
   return {
     theme: rebase("theme"),
+    sidebarHoverEnabled: rebase("sidebarHoverEnabled"),
+    sidebarHoverDelayMs: rebase("sidebarHoverDelayMs"),
     settingsMenuMode: rebase("settingsMenuMode"),
     richOutputAnimationsEnabled: rebase("richOutputAnimationsEnabled"),
     startupPage: rebase("startupPage"),
@@ -88,6 +108,8 @@ export function rebaseAppearanceDraft(
 export function appearanceRevision(state: AppearanceState): string {
   return JSON.stringify([
     state.theme,
+    state.sidebarHoverEnabled,
+    state.sidebarHoverDelayMs,
     state.settingsMenuMode,
     state.richOutputAnimationsEnabled,
     state.startupPage,
@@ -96,4 +118,10 @@ export function appearanceRevision(state: AppearanceState): string {
     state.showMetrics,
     state.simplifiedMetrics,
   ]);
+}
+
+export function parseSidebarHoverDelay(value: string): number | null {
+  if (!/^\d+$/.test(value)) return null;
+  const delay = Number(value);
+  return Number.isInteger(delay) && delay >= 0 && delay <= 5000 ? delay : null;
 }

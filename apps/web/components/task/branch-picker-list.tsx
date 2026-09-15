@@ -6,6 +6,7 @@ import { cn } from "@/lib/utils";
 import { prioritizeSelectedOption } from "@/lib/utils/selector-options";
 import type { Branch } from "@/lib/types/http";
 import { useTranslation } from "react-i18next";
+import { sortBranches } from "../branch-picker-options";
 
 type BranchPickerListProps = {
   branches: Branch[];
@@ -44,7 +45,7 @@ export function BranchPickerList({
   }, [filter, uniqueByName]);
   const orderedBranches = useMemo(() => {
     if (filter.trim()) return filtered;
-    return prioritizeSelectedOption(filtered, currentBase, (branch) => branch.name);
+    return prioritizeSelectedOption(sortBranches(filtered), currentBase, (branch) => branch.name);
   }, [currentBase, filter, filtered]);
 
   return (

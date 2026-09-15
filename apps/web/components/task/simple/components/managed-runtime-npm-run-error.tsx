@@ -16,7 +16,7 @@ export function ManagedRuntimeNpmRunError({
 }: {
   error: RunError;
   agentName: string;
-  onRetry: () => void;
+  onRetry?: () => void;
 }) {
   const { t } = useTranslation();
   const [showDetails, setShowDetails] = useState(false);
@@ -56,18 +56,20 @@ export function ManagedRuntimeNpmRunError({
             </CollapsibleContent>
           </Collapsible>
         )}
-        <div className="mt-2 flex flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-auto min-h-11 cursor-pointer gap-1.5 text-xs sm:min-h-8"
-            onClick={onRetry}
-            data-testid="run-error-managed-runtime-retry-button"
-          >
-            <IconRefresh className="h-3 w-3" />
-            {t("chat:managedRuntimeRetry")}
-          </Button>
-        </div>
+        {onRetry && (
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-auto min-h-11 cursor-pointer gap-1.5 text-xs sm:min-h-8"
+              onClick={onRetry}
+              data-testid="run-error-managed-runtime-retry-button"
+            >
+              <IconRefresh className="h-3 w-3" />
+              {t("chat:managedRuntimeRetry")}
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

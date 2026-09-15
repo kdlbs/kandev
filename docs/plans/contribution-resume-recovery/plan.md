@@ -298,3 +298,9 @@ Verification passed:
   copy and sanitized details; never infer a specific Git diagnosis from them.
 - Exact contributor history and the actor who changed it were not established.
   Neither is necessary to reproduce the product defects.
+
+## September 14 presentation successor
+
+The [error scope package](../error-scope-and-history/plan.md) supersedes the session card placement and removal behavior.
+Completed results here remain historical evidence. Provider recovery, timeout budgets, cancellation, and authorization remain unchanged.
+The successor owns chronological error retention, ordinary scroll behavior, and shared task alerts.

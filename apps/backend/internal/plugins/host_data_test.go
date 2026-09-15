@@ -143,11 +143,25 @@ func (f *fakeWorkflowStepLister) ListStepsByWorkflow(_ context.Context, workflow
 }
 
 type fakeAgentProfileDataSource struct {
-	resp *agentsettingsdto.ListAgentsResponse
+	resp         *agentsettingsdto.ListAgentsResponse
+	profilesByID map[string]*AgentProfile
+	profileErr   error
+	profileCalls int
 }
 
 func (f *fakeAgentProfileDataSource) ListAgents(context.Context) (*agentsettingsdto.ListAgentsResponse, error) {
 	return f.resp, nil
+}
+
+func (f *fakeAgentProfileDataSource) GetProfileByID(_ context.Context, id string) (*AgentProfile, error) {
+	f.profileCalls++
+	if f.profileErr != nil {
+		return nil, f.profileErr
+	}
+	if profile, ok := f.profilesByID[id]; ok {
+		return profile, nil
+	}
+	return nil, ErrAgentProfileNotFound
 }
 
 type fakeSessionCodeStatsSource struct {
@@ -296,19 +310,19 @@ func (f *fakeTaskStarter) StartTask(_ context.Context, taskID string, launch Tas
 // tests can both drive Host calls and assert against the fakes' recorded
 // state.
 type testDataHost struct {
-	host       *pluginHost
-	tasks      *fakeTaskDataSource
-	workflows  *fakeWorkflowLister
-	steps      *fakeWorkflowStepLister
-	profiles   *fakeAgentProfileDataSource
-	codeStats  *fakeSessionCodeStatsSource
-	messages   *fakeMessageDataSource
-	utilAgents *fakeUtilityAgentSource
-	utilRun    *fakeUtilityRunner
-	taskWriter *fakeTaskWriter
-	relations  *fakeTaskRelationsSource
-	messenger  *fakeMessenger
-	starter    *fakeTaskStarter
+	host           *pluginHost
+	tasks          *fakeTaskDataSource
+	workflows      *fakeWorkflowLister
+	steps          *fakeWorkflowStepLister
+	profiles       *fakeAgentProfileDataSource
+	codeStats      *fakeSessionCodeStatsSource
+	messages       *fakeMessageDataSource
+	defaultProfile *fakeDefaultUtilityProfileSource
+	utilRun        *fakeUtilityRunner
+	taskWriter     *fakeTaskWriter
+	relations      *fakeTaskRelationsSource
+	messenger      *fakeMessenger
+	starter        *fakeTaskStarter
 
 	interactions *fakeInteractionDataSource
 	responder    *fakeInteractionResponder
@@ -319,18 +333,18 @@ type testDataHost struct {
 // resource) so each test only needs to vary caps.
 func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 	d := &testDataHost{
-		tasks:      &fakeTaskDataSource{},
-		workflows:  &fakeWorkflowLister{},
-		steps:      &fakeWorkflowStepLister{},
-		profiles:   &fakeAgentProfileDataSource{resp: &agentsettingsdto.ListAgentsResponse{}},
-		codeStats:  &fakeSessionCodeStatsSource{},
-		messages:   &fakeMessageDataSource{},
-		utilAgents: &fakeUtilityAgentSource{},
-		utilRun:    &fakeUtilityRunner{text: "ok"},
-		taskWriter: &fakeTaskWriter{},
-		relations:  &fakeTaskRelationsSource{},
-		messenger:  &fakeMessenger{},
-		starter:    &fakeTaskStarter{},
+		tasks:          &fakeTaskDataSource{},
+		workflows:      &fakeWorkflowLister{},
+		steps:          &fakeWorkflowStepLister{},
+		profiles:       &fakeAgentProfileDataSource{resp: &agentsettingsdto.ListAgentsResponse{}},
+		codeStats:      &fakeSessionCodeStatsSource{},
+		messages:       &fakeMessageDataSource{},
+		defaultProfile: &fakeDefaultUtilityProfileSource{},
+		utilRun:        &fakeUtilityRunner{text: "ok"},
+		taskWriter:     &fakeTaskWriter{},
+		relations:      &fakeTaskRelationsSource{},
+		messenger:      &fakeMessenger{},
+		starter:        &fakeTaskStarter{},
 
 		interactions: &fakeInteractionDataSource{},
 		responder:    &fakeInteractionResponder{},
@@ -349,9 +363,9 @@ func newTestDataHost(caps manifest.Capabilities) *testDataHost {
 		taskRelations: func() taskRelationsSource {
 			return d.relations
 		},
-		configs: &fakeConfigReader{configs: map[string]any{utilityAgentConfigKey: "utility-agent-42"}},
-		utilityDeps: func() (utilityAgentSource, utilityRunner) {
-			return d.utilAgents, d.utilRun
+		configs: &fakeConfigReader{configs: map[string]any{"utility_agent": "utility-agent-42"}},
+		utilityDeps: func() (utilityDefaultProfileSource, agentProfileSource, utilityRunner) {
+			return d.defaultProfile, d.profiles, d.utilRun
 		},
 		writeDeps: func() (taskMessenger, taskStarter) {
 			return d.messenger, d.starter

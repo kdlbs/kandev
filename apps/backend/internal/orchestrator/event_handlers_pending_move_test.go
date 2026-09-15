@@ -860,6 +860,14 @@ func TestHandleAgentBootReady_DoesNotTriggerOnTurnComplete(t *testing.T) {
 			}); err != nil {
 				t.Fatalf("create session: %v", err)
 			}
+			if err := repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyLastAgentError, models.LastAgentError{
+				Message:    "saved session failed before recovery",
+				OccurredAt: now,
+				Scope:      models.ErrorScopeSession,
+				StampValue: "saved-session-failure",
+			}); err != nil {
+				t.Fatalf("set saved session failure: %v", err)
+			}
 
 			taskRepo := newMockTaskRepo()
 			taskRepo.tasks["task-1"] = &v1.Task{
@@ -914,6 +922,10 @@ func TestHandleAgentBootReady_DoesNotTriggerOnTurnComplete(t *testing.T) {
 			}
 			if _, err := time.Parse(time.RFC3339Nano, resolvedAt); err != nil {
 				t.Fatalf("recovery resolution timestamp %q is invalid: %v", resolvedAt, err)
+			}
+			lastError, ok := models.LoadLastAgentError(finalSess.Metadata)
+			if !ok || !lastError.IsDismissed() {
+				t.Fatalf("last agent error = %#v, want dismissed historical error", lastError)
 			}
 		})
 	}

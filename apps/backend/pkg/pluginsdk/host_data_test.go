@@ -33,12 +33,13 @@ type dataRecordingHost struct {
 	messagePage   *PageInfo
 	utilityText   string
 
-	lastTaskFilter    TaskFilter
-	lastSessionFilter SessionFilter
-	lastMessageFilter MessageFilter
-	lastWorkspaceID   string
-	lastWorkflowID    string
-	lastUtilityPrompt string
+	lastTaskFilter     TaskFilter
+	lastSessionFilter  SessionFilter
+	lastMessageFilter  MessageFilter
+	lastWorkspaceID    string
+	lastWorkflowID     string
+	lastUtilityPrompt  string
+	lastUtilityOptions []UtilityAgentOptions
 
 	createdTask     Task
 	lastCreateInput CreateTaskInput
@@ -90,8 +91,9 @@ func (h *dataRecordingHost) Repositories() RepositoryReader {
 	return dataRecordingRepositoryReader{h}
 }
 func (h *dataRecordingHost) Messages() MessageReader { return dataRecordingMessageReader{h} }
-func (h *dataRecordingHost) InvokeUtilityAgent(_ context.Context, prompt string) (string, error) {
+func (h *dataRecordingHost) InvokeUtilityAgent(_ context.Context, prompt string, options ...UtilityAgentOptions) (string, error) {
 	h.lastUtilityPrompt = prompt
+	h.lastUtilityOptions = append([]UtilityAgentOptions(nil), options...)
 	return h.utilityText, nil
 }
 
@@ -377,10 +379,11 @@ func TestHostData_InvokeUtilityAgent(t *testing.T) {
 	impl := &dataRecordingHost{utilityText: "the completion"}
 	host := dialHostOverBufconn(t, impl)
 
-	text, err := host.InvokeUtilityAgent(context.Background(), "do the thing")
+	text, err := host.InvokeUtilityAgent(context.Background(), "do the thing", UtilityAgentOptions{ProfileID: "profile-1"})
 	require.NoError(t, err)
 	require.Equal(t, "the completion", text)
 	require.Equal(t, "do the thing", impl.lastUtilityPrompt)
+	require.Equal(t, []UtilityAgentOptions{{ProfileID: "profile-1"}}, impl.lastUtilityOptions)
 }
 
 func TestHostData_Messages(t *testing.T) {

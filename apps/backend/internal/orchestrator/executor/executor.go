@@ -111,23 +111,6 @@ type sessionMetadataKeyStateSetter interface {
 	) (bool, error)
 }
 
-// sessionMetadataErrorCASWriter is the optional persistence seam for
-// execution-scoped bootstrap errors. Production repositories implement both
-// operations atomically; legacy test stores can fall back to the ordinary
-// metadata setter after the executor's current-execution fence.
-type sessionMetadataErrorCASWriter interface {
-	SetSessionMetadataKeyIfAbsent(
-		ctx context.Context,
-		sessionID, key string,
-		value interface{},
-	) (bool, error)
-	SetSessionMetadataKeyIfStamp(
-		ctx context.Context,
-		sessionID, key, expectedStamp string,
-		value interface{},
-	) (bool, error)
-}
-
 // bootstrapFailureCommitter is the atomic repository boundary for an
 // asynchronous process-start failure. The expected state and error stamp are
 // captured immediately before the commit; the repository must also require
@@ -831,6 +814,16 @@ type BootstrapFailureTransitionFunc func(
 	errorValue models.LastAgentError,
 ) (changed bool, finalState models.TaskSessionState, err error)
 
+// BootstrapFailureMessageRepairFunc retries the idempotent transcript write
+// after the state admission has already succeeded. The repair is deliberately
+// separate from the state commit so a transient message-store failure cannot
+// make an accepted bootstrap failure disappear from session history.
+type BootstrapFailureMessageRepairFunc func(
+	ctx context.Context,
+	taskID, sessionID, agentExecutionID string,
+	errorValue models.LastAgentError,
+) error
+
 // SessionStartingFunc is called when the executor has prepared/resumed an
 // execution and needs to mark the session STARTING while preserving other
 // session-row updates such as metadata. expectedState is the state observed
@@ -991,6 +984,9 @@ type Executor struct {
 	// typed error, FAILED state, and corresponding publication as one ownership
 	// decision.
 	onBootstrapFailureTransition BootstrapFailureTransitionFunc
+	// Retry hook for the chronological transcript entry when the state commit
+	// succeeds but the first idempotent message write fails.
+	onBootstrapFailureMessageRepair BootstrapFailureMessageRepairFunc
 
 	// Callback for STARTING writes that carry full session-row changes. Set by
 	// the orchestrator so launch/resume/model-switch transitions serialize with
@@ -1316,6 +1312,12 @@ func (e *Executor) SetOnSessionStateTransition(fn SessionStateTransitionFunc) {
 // used by asynchronous agent-process start failures.
 func (e *Executor) SetOnBootstrapFailureTransition(fn BootstrapFailureTransitionFunc) {
 	e.onBootstrapFailureTransition = fn
+}
+
+// SetOnBootstrapFailureMessageRepair wires the bounded repair hook for a
+// bootstrap failure whose session admission already succeeded.
+func (e *Executor) SetOnBootstrapFailureMessageRepair(fn BootstrapFailureMessageRepairFunc) {
+	e.onBootstrapFailureMessageRepair = fn
 }
 
 // SetOnSessionStarting sets a callback for full session-row STARTING updates.

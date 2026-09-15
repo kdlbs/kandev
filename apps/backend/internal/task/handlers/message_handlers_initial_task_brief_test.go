@@ -506,7 +506,7 @@ func TestWSAddMessage_ConcurrentInitialBriefStartsOnlyAdmittedCandidate(t *testi
 	}
 
 	require.Eventually(t, func() bool { return len(orch.queueCalls()) == 1 }, time.Second, time.Millisecond)
-	require.Len(t, orch.started, 1)
+	require.Eventually(t, func() bool { return len(orch.started) == 1 }, time.Second, time.Millisecond)
 	require.Len(t, repo.messages, 2)
 	queuedCalls := orch.queueCalls()
 	require.True(t, queuedCalls[0].userMessageRecorded)

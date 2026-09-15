@@ -313,6 +313,17 @@ func (e *Executor) handleAgentProcessStartFailure(
 			zap.String("session_id", sessionID),
 			zap.String("agent_execution_id", agentExecutionID),
 			zap.Error(transitionErr))
+		if changed && finalState == models.TaskSessionStateFailed && e.onBootstrapFailureMessageRepair != nil {
+			if repairErr := e.onBootstrapFailureMessageRepair(
+				ctx, taskID, sessionID, agentExecutionID, errorValue,
+			); repairErr != nil {
+				e.logger.Warn("failed to repair bootstrap failure history",
+					zap.String("task_id", taskID),
+					zap.String("session_id", sessionID),
+					zap.String("agent_execution_id", agentExecutionID),
+					zap.Error(repairErr))
+			}
+		}
 	} else if !changed {
 		// An ownership or compare-and-set miss means a newer execution won the
 		// race. Do not
