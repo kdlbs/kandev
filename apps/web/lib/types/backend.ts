@@ -329,6 +329,7 @@ export type OfficeInboxItemNotificationPayload = {
 };
 
 export type FileChangeFacet = {
+  is_symlink?: boolean;
   status: "modified" | "added" | "deleted" | "untracked" | "renamed";
   additions?: number;
   deletions?: number;
@@ -338,6 +339,7 @@ export type FileChangeFacet = {
 };
 
 export type FileInfo = {
+  is_symlink?: boolean;
   path: string;
   status: "modified" | "added" | "deleted" | "untracked" | "renamed";
   staged: boolean;

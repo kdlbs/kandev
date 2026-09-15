@@ -253,6 +253,13 @@ impossible data when reported use exceeds the reported window.
 
 Open **+ > Changes** on desktop. A repository-less task has no Git state, so Kandev closes this panel automatically.
 
+Symbolic links have a link icon beside their filename in workspace **Staged**
+and **Unstaged** rows, including untracked links. Opening a readable link shows
+**Symlink** beside its path in the file editor. These indicators are also visible
+on phones. In **Files**, symbolic links use a link icon in place of the usual
+file or folder icon. Each Changes row identifies the entry in that change layer; a deleted
+link keeps its marker. Opening and saving files follows the existing behavior.
+
 Changes are grouped by repository and then by state:
 
 - **PR Changes** for the linked pull-request comparison;

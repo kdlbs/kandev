@@ -41,6 +41,7 @@ function response(content = "export const value = 1;"): FileContentResponse {
     path: FILE_PATH,
     content,
     is_binary: false,
+    resolved_path: "target.ts",
   } as FileContentResponse;
 }
 
@@ -65,6 +66,7 @@ describe("fetchAndOpenFile", () => {
         repo: REPO,
         content: "export const value = 1;",
         isDirty: false,
+        resolvedPath: "target.ts",
       }),
     );
     expect(toast).not.toHaveBeenCalled();
