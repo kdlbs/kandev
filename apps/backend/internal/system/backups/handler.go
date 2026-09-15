@@ -98,7 +98,7 @@ func HandleDelete(svc *Service) gin.HandlerFunc {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid name"})
 			return
 		}
-		if err := svc.Delete(name); err != nil {
+		if err := svc.DeleteContext(c.Request.Context(), name); err != nil {
 			// Differentiate by cause: pre-reset rejections and not-found
 			// map to client-visible statuses; anything else (filesystem
 			// errors etc.) is a 500 so we don't leak raw storage detail.

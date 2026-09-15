@@ -1130,11 +1130,11 @@ func (s *Service) applyToolCallMessageUpdate(message *models.Message, status, re
 		message.Metadata = make(map[string]interface{})
 	}
 	message.Metadata["status"] = status
-	if result != "" {
+	if result != "" && !models.ToolPayloadRemoved(message.Metadata) {
 		message.Metadata["result"] = result
 	}
 
-	if normalized != nil {
+	if normalized != nil && !models.ToolPayloadRemoved(message.Metadata) {
 		message.Metadata["normalized"] = normalized
 		// Update message type if the normalized kind changed
 		// This handles cases like Read on a directory converting to code_search

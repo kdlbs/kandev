@@ -295,6 +295,15 @@ func (h *MessageHandlers) httpGetShellOutput(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "message not found")
 		return
 	}
+	if message.TaskSessionID != c.Param("id") {
+		c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
+		return
+	}
+	if message.Type == models.MessageTypeToolExecute && models.ToolPayloadRemoved(message.Metadata) {
+		marker, _ := message.Metadata["payload_retention"].(map[string]any)
+		c.JSON(http.StatusGone, gin.H{"code": "tool_payload_removed", "message_id": message.ID, "removed_at": marker["removed_at"], "summary": message.Content})
+		return
+	}
 	if message.PayloadDigest != "" {
 		// Large output was externalized at write time (see
 		// externalizeMessagePayload) and message.Metadata currently holds
@@ -310,7 +319,7 @@ func (h *MessageHandlers) httpGetShellOutput(c *gin.Context) {
 		}
 	}
 	output, ok := models.ExtractShellExecOutput(message.Metadata)
-	if !ok || message.TaskSessionID != c.Param("id") {
+	if !ok {
 		c.JSON(http.StatusNotFound, gin.H{"error": "message not found"})
 		return
 	}

@@ -7,15 +7,26 @@ import { useTranslation } from "react-i18next";
 
 type FileBinaryViewerProps = {
   path: string;
+  isSymlink?: boolean;
   worktreePath?: string;
   headerActions?: ReactNode;
 };
 
-export function FileBinaryViewer({ path, worktreePath, headerActions }: FileBinaryViewerProps) {
+export function FileBinaryViewer({
+  path,
+  isSymlink,
+  worktreePath,
+  headerActions,
+}: FileBinaryViewerProps) {
   const { t } = useTranslation();
   return (
     <div className="flex flex-col h-full">
-      <FileViewerHeader path={path} worktreePath={worktreePath} actions={headerActions} />
+      <FileViewerHeader
+        path={path}
+        isSymlink={isSymlink}
+        worktreePath={worktreePath}
+        actions={headerActions}
+      />
       <div className="flex-1 flex flex-col items-center justify-center gap-3 text-muted-foreground">
         <IconFileOff size={48} strokeWidth={1.2} />
         <div className="text-sm font-medium">{t("task:cannotPreviewThisFile")}</div>

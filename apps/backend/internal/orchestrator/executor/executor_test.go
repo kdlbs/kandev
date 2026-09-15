@@ -2135,6 +2135,27 @@ func TestRunAgentProcessAsync_CleansUpOnStartFailure(t *testing.T) {
 	exec.SetOnSessionStateChange(func(ctx context.Context, taskID, sessionID string, state models.TaskSessionState, errorMessage string) error {
 		return repo.UpdateTaskSessionState(ctx, sessionID, state, errorMessage)
 	})
+	exec.SetOnBootstrapFailureTransition(func(
+		ctx context.Context,
+		taskID, sessionID, _ string,
+		_ models.TaskSessionState,
+		_ string,
+		errorValue models.LastAgentError,
+	) (bool, models.TaskSessionState, error) {
+		changed, _, err := repo.CommitBootstrapFailureIfCurrentExecution(
+			ctx,
+			taskID,
+			sessionID,
+			"exec-456",
+			models.TaskSessionStateStarting,
+			"",
+			errorValue,
+		)
+		if err != nil || !changed {
+			return changed, models.TaskSessionStateStarting, err
+		}
+		return true, models.TaskSessionStateFailed, nil
+	})
 	exec.SetOnTaskStateChange(func(ctx context.Context, taskID string, state v1.TaskState) error {
 		return repo.UpdateTaskState(ctx, taskID, state)
 	})
@@ -2309,6 +2330,15 @@ func TestHandleAgentProcessStartFailure_CancellationDuringCallbackStopsUnclaimed
 	) (bool, models.TaskSessionState, error) {
 		transitionCalls.Add(1)
 		return false, models.TaskSessionStateCancelled, nil
+	})
+	exec.SetOnBootstrapFailureTransition(func(
+		ctx context.Context,
+		taskID, sessionID, _ string,
+		_ models.TaskSessionState,
+		_ string,
+		errorValue models.LastAgentError,
+	) (bool, models.TaskSessionState, error) {
+		return exec.transitionSessionState(ctx, taskID, sessionID, models.TaskSessionStateFailed, errorValue.Message)
 	})
 	exec.SetOnExecutionCleanupClaim(func(sessionID, executionID string) bool {
 		if sessionID != "session-123" || executionID != "exec-456" {
@@ -2653,6 +2683,30 @@ func newRunAgentProcessAsyncFailureFixture(t *testing.T) *runAgentProcessAsyncFa
 			f.sessionFailedSeen = true
 		}
 		return repo.UpdateTaskSessionState(ctx, sessionID, state, errorMessage)
+	})
+	f.exec.SetOnBootstrapFailureTransition(func(
+		ctx context.Context,
+		taskID, sessionID, _ string,
+		_ models.TaskSessionState,
+		_ string,
+		errorValue models.LastAgentError,
+	) (bool, models.TaskSessionState, error) {
+		changed, _, err := repo.CommitBootstrapFailureIfCurrentExecution(
+			ctx,
+			taskID,
+			sessionID,
+			"exec-456",
+			models.TaskSessionStateStarting,
+			"",
+			errorValue,
+		)
+		if changed {
+			f.sessionFailedSeen = true
+		}
+		if err != nil || !changed {
+			return changed, models.TaskSessionStateStarting, err
+		}
+		return true, models.TaskSessionStateFailed, nil
 	})
 	f.exec.SetOnAgentStartFailed(func(ctx context.Context, taskID, sessionID, agentExecutionID string, err error, fromResume bool) bool {
 		f.startFailedCalls++

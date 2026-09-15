@@ -64,10 +64,6 @@ export type MessageListProps = {
    * top — the desktop-only, opt-in anchored last-prompt bar. `null`/`undefined`
    * when the setting is off or on mobile. */
   stickyPromptBar?: ReactNode;
-  /** Rendered above transcript status and messages inside the native viewport. */
-  prependContent?: ReactNode;
-  /** Identity of the active recovery content for one-time initial reveal. */
-  recoveryRevealKey?: string | null;
   /** Current rendered height (px) of the anchored last-prompt bar's pinned
    * overlay, or 0/undefined when it isn't showing. Lets a target scrolled
    * to the top of the transcript (e.g. the unread "New" divider) reserve

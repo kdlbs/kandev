@@ -1,5 +1,7 @@
 "use client";
 
+import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
+
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { IconDownload } from "@tabler/icons-react";
@@ -13,17 +15,24 @@ import {
 
 type FileViewerHeaderProps = {
   path: string;
+  isSymlink?: boolean;
   worktreePath?: string;
   actions?: ReactNode;
 };
 
-export function FileViewerHeader({ path, worktreePath, actions }: FileViewerHeaderProps) {
+export function FileViewerHeader({
+  path,
+  isSymlink,
+  worktreePath,
+  actions,
+}: FileViewerHeaderProps) {
   const label = toRelativePath(path, worktreePath);
   if (!actions) {
     return (
       <div className="flex items-center px-2 border-foreground/10 border-b">
-        <div className="flex items-center gap-2 text-xs text-muted-foreground py-2">
-          <span className="font-mono">{label}</span>
+        <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground py-2">
+          <span className="truncate font-mono">{label}</span>
+          <SymlinkIndicator isSymlink={isSymlink} showLabel />
         </div>
       </div>
     );
@@ -32,6 +41,7 @@ export function FileViewerHeader({ path, worktreePath, actions }: FileViewerHead
     <div className="flex items-center px-2 border-foreground/10 border-b">
       <div className="flex min-w-0 flex-1 items-center gap-2 py-2 text-xs text-muted-foreground">
         <span className="truncate font-mono">{label}</span>
+        <SymlinkIndicator isSymlink={isSymlink} showLabel />
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-1">{actions}</div>
     </div>
