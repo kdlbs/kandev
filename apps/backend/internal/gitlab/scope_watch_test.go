@@ -51,6 +51,7 @@ func TestListAllIssueWatches_FiltersToAccessibleWorkspaces(t *testing.T) {
 	svc, store := newScopeWatchFixture(t)
 	ctx := context.Background()
 	seedIssueWatch(t, store, "ws-allowed")
+	seedIssueWatch(t, store, "ws-allowed")
 	seedIssueWatch(t, store, "ws-denied")
 	svc.SetWorkspaceAuthorizer(denyOnly("ws-denied"))
 
@@ -58,8 +59,13 @@ func TestListAllIssueWatches_FiltersToAccessibleWorkspaces(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListAllIssueWatches: %v", err)
 	}
-	if len(watches) != 1 || watches[0].WorkspaceID != "ws-allowed" {
-		t.Fatalf("watches = %+v, want only ws-allowed's watch", watches)
+	if len(watches) != 2 {
+		t.Fatalf("watches = %+v, want both of ws-allowed's watches", watches)
+	}
+	for _, w := range watches {
+		if w.WorkspaceID != "ws-allowed" {
+			t.Fatalf("watches = %+v, want only ws-allowed's watches", watches)
+		}
 	}
 }
 

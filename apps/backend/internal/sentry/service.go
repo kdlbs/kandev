@@ -98,16 +98,19 @@ type Service struct {
 // an unscoped list (workspace_id omitted) returns only the caller's own
 // workspaces' watches.
 func (s *Service) SetWorkspaceAuthorizer(authorizer func(context.Context, string) error) {
-	if s != nil {
-		s.workspaceAuthorizer = authorizer
-	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.workspaceAuthorizer = authorizer
 }
 
 func (s *Service) authorizeWorkspaceAccess(ctx context.Context, workspaceID string) error {
-	if s == nil || s.workspaceAuthorizer == nil {
+	s.mu.Lock()
+	authorizer := s.workspaceAuthorizer
+	s.mu.Unlock()
+	if authorizer == nil {
 		return nil
 	}
-	return s.workspaceAuthorizer(ctx, workspaceID)
+	return authorizer(ctx, workspaceID)
 }
 
 // SetTaskDeleter wires the cascade-delete dependency used by ResetIssueWatch.

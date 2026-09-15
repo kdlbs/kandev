@@ -32,32 +32,38 @@ func denyOnly(denied ...string) func(context.Context, string) error {
 func TestListAllIssueWatches_FiltersToAccessibleWorkspaces(t *testing.T) {
 	f := newSvcFixture(t)
 	ctx := context.Background()
-	if err := f.store.CreateIssueWatch(ctx, &IssueWatch{
-		WorkspaceID: "ws-allowed", WorkflowID: "wf", WorkflowStepID: "step",
-		Filter: SearchFilter{OrgSlug: "org", ProjectSlugs: []string{"proj"}}, AgentProfileID: "ap", Enabled: true,
-	}); err != nil {
-		t.Fatalf("seed allowed watch: %v", err)
+	seed := func(ws, projectSlug string) {
+		if err := f.store.CreateIssueWatch(ctx, &IssueWatch{
+			WorkspaceID: ws, WorkflowID: "wf", WorkflowStepID: "step",
+			Filter: SearchFilter{OrgSlug: "org", ProjectSlugs: []string{projectSlug}}, AgentProfileID: "ap", Enabled: true,
+		}); err != nil {
+			t.Fatalf("seed watch: %v", err)
+		}
 	}
-	if err := f.store.CreateIssueWatch(ctx, &IssueWatch{
-		WorkspaceID: "ws-denied", WorkflowID: "wf", WorkflowStepID: "step",
-		Filter: SearchFilter{OrgSlug: "org", ProjectSlugs: []string{"proj"}}, AgentProfileID: "ap", Enabled: true,
-	}); err != nil {
-		t.Fatalf("seed denied watch: %v", err)
-	}
+	seed("ws-allowed", "proj1")
+	seed("ws-allowed", "proj2")
+	seed("ws-denied", "proj3")
 	f.svc.SetWorkspaceAuthorizer(denyOnly("ws-denied"))
 
 	watches, err := f.svc.ListAllIssueWatches(ctx)
 	if err != nil {
 		t.Fatalf("ListAllIssueWatches: %v", err)
 	}
-	if len(watches) != 1 || watches[0].WorkspaceID != "ws-allowed" {
-		t.Fatalf("watches = %+v, want only ws-allowed's watch", watches)
+	if len(watches) != 2 {
+		t.Fatalf("watches = %+v, want both of ws-allowed's watches", watches)
+	}
+	for _, w := range watches {
+		if w.WorkspaceID != "ws-allowed" {
+			t.Fatalf("watches = %+v, want only ws-allowed's watches", watches)
+		}
 	}
 }
 
 // TestListAllIssueWatches_NilAuthorizerReturnsEveryWorkspace preserves the
-// identity-less internal caller behaviour: poller.go's ListAllIssueWatches
-// call must keep seeing every watch when no authorizer is wired. Mirrors
+// identity-less internal caller behaviour: an unscoped caller of
+// ListAllIssueWatches must keep seeing every watch when no authorizer is
+// wired. (Sentry's own poller calls Store().ListEnabledIssueWatches directly
+// and does not go through this path.) Mirrors
 // TestIssueAndPRAllWorkspaceListsRetainIdentitylessInternalUse
 // (internal/github/service_workspace_authorization_test.go).
 func TestListAllIssueWatches_NilAuthorizerReturnsEveryWorkspace(t *testing.T) {
