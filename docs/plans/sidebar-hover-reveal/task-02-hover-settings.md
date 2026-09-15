@@ -196,3 +196,10 @@ Codex identified stale generated settings snapshots. Reproduced with
 `GOCACHE=/tmp/kandev-sidebar-go-cache node --test scripts/settings-contract-ci.test.mjs`
 from the repository root. This restores the existing catalog contract without
 changing product behavior or requirements.
+
+CodeRabbit's aggregate review identified focus loss on hover-capability changes.
+A regression failed before the fix; the hook now restores toggle focus when hover
+or fine-pointer eligibility changes while revealed navigation owns focus. The
+existing explicit-collapse regression remains covered. Verification:
+`pnpm --dir apps/web exec vitest run hooks/domains/sidebar/use-sidebar-hover-reveal.test.ts components/app-sidebar/app-sidebar.test.tsx`
+and focused hook ESLint. This enforces the existing focus-restoration contract.

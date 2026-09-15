@@ -33,17 +33,19 @@ function returnFocusToToggle(root: HTMLElement | null) {
   });
 }
 
+type SidebarHoverOptions = {
+  enabled: boolean;
+  delayMs: number;
+  collapsed: boolean;
+  pathname: string | null;
+};
+
 export function useSidebarHoverReveal({
   collapsed,
   pathname,
   enabled,
   delayMs,
-}: {
-  enabled: boolean;
-  delayMs: number;
-  collapsed: boolean;
-  pathname: string | null;
-}) {
+}: SidebarHoverOptions) {
   const { isMobile, isFinePointer } = useResponsiveBreakpoint();
   const eligible = enabled && !isMobile && isFinePointer;
   const ref = useRef<HTMLElement>(null);
@@ -52,7 +54,7 @@ export function useSidebarHoverReveal({
   const inside = useRef(false);
   const focused = useRef(false);
   const mounted = useRef(true);
-  const previousSettings = useRef({ enabled, delayMs });
+  const previousSettings = useRef({ enabled, delayMs, eligible });
 
   function cancelTimer() {
     if (timer.current !== null) clearTimeout(timer.current);
@@ -78,22 +80,25 @@ export function useSidebarHoverReveal({
   useEffect(() => {
     mounted.current = true;
     const media = window.matchMedia(HOVER_QUERY);
-    const reset = () => {
+    const reset = (capabilityChanged = false) => {
       cancelTimer();
       const changed =
+        capabilityChanged ||
+        previousSettings.current.eligible !== eligible ||
         previousSettings.current.enabled !== enabled ||
         previousSettings.current.delayMs !== delayMs;
       if (changed && collapsed && focused.current) returnFocusToToggle(ref.current);
-      previousSettings.current = { enabled, delayMs };
+      previousSettings.current = { enabled, delayMs, eligible };
       focused.current = false;
       setRevealed(false);
     };
     reset();
-    media.addEventListener("change", reset);
+    const onCapabilityChange = () => reset(true);
+    media.addEventListener("change", onCapabilityChange);
     return () => {
       mounted.current = false;
       cancelTimer();
-      media.removeEventListener("change", reset);
+      media.removeEventListener("change", onCapabilityChange);
     };
     // The callbacks only read refs; saved-state and route changes reset the interaction.
     // eslint-disable-next-line react-hooks/exhaustive-deps

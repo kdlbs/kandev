@@ -297,3 +297,49 @@ it("does not restore stale focus after explicit collapse and retain a later hove
   act(() => current.handlers.onPointerLeave());
   expect(current!.revealed).toBe(false);
 });
+
+it.each(["(hover: hover)", "(pointer: fine)"])(
+  "restores focus when %s capability disappears while navigation is focused",
+  (capabilityQuery) => {
+    let hover = true;
+    let changed = () => {};
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        get matches() {
+          return query === capabilityQuery ? hover : true;
+        },
+        addEventListener: (_name: string, callback: () => void) => {
+          if (query === capabilityQuery) changed = callback;
+        },
+        removeEventListener: vi.fn(),
+      })),
+    );
+    let current: ReturnType<typeof useSidebarHoverReveal>;
+    function Harness() {
+      current = useSidebarHoverReveal({
+        collapsed: true,
+        pathname: "/",
+        enabled: true,
+        delayMs: 500,
+      });
+      return createElement(
+        "aside",
+        { ref: current.ref, ...current.handlers },
+        createElement("button", { "data-sidebar-toggle": "" }, "Expand"),
+        current.revealed && createElement("button", { "data-navigation": "" }, "Navigation"),
+      );
+    }
+    const { container } = render(createElement(Harness));
+    act(() => current.handlers.onPointerEnter(pointer()));
+    act(() => vi.advanceTimersByTime(500));
+    act(() => container.querySelector<HTMLButtonElement>("[data-navigation]")!.focus());
+    act(() => {
+      hover = false;
+      changed();
+    });
+    act(() => vi.advanceTimersByTime(20));
+    expect(current!.revealed).toBe(false);
+    expect(document.activeElement).toBe(container.querySelector("[data-sidebar-toggle]"));
+  },
+);
