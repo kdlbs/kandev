@@ -11,6 +11,7 @@ import {
   selectNeedsYouInboxCount,
   selectNeedsYouInboxHasMore,
   selectNeedsYouInboxHiddenCount,
+  selectNeedsYouInboxLastAppliedOk,
   selectNeedsYouInboxRevision,
   selectNeedsYouInboxStatus,
 } from "@/lib/state/slices/needs-you-inbox/selectors";
@@ -19,6 +20,7 @@ import {
   selectFailedInboxCountIsKnown,
   selectFailedInboxTruncated,
 } from "@/lib/state/slices/failed-inbox/selectors";
+import type { NeedsYouInboxReadStatus } from "@/lib/state/slices/needs-you-inbox/types";
 import type { ClarificationInboxBundle } from "@/lib/types/clarification-inbox";
 import { NeedsYouInboxRow } from "@/components/needs-you-inbox/needs-you-inbox-row";
 import { NeedsYouInboxEmptyState } from "@/components/needs-you-inbox/needs-you-inbox-empty-state";
@@ -31,17 +33,27 @@ import { buildInboxTabHref, resolveInboxTab, type InboxTab } from "@/lib/failed-
 
 type ViewMode = "error" | "loading" | "empty" | "list";
 
-// A page reporting truncation while listing zero rows means enrichment
-// emptied a page the query had filled, so this resolves to the retryable
-// "error" state rather than "empty" (design-01#Data-and-contracts).
+// `status` alone can't distinguish a refresh after success from one after a
+// failure, since `beginNeedsYouInboxRead` overwrites it to "loading" without
+// touching what preceded it; `lastAppliedOk` carries that distinction and
+// gates the loading view. `hasActiveWorkspace` short-circuits to the empty
+// view, since with no active workspace no controller trigger ever applies a
+// response and `lastAppliedOk` can never flip. A truncated page with zero
+// rows is enrichment having emptied a filled page, not an empty inbox, so it
+// resolves to the retryable error view instead.
 function resolveViewMode(
-  status: string,
+  status: NeedsYouInboxReadStatus,
   bundleCount: number,
-  hiddenCount: number,
   hasMore: boolean,
+  lastAppliedOk: boolean,
+  hasActiveWorkspace: boolean,
 ): ViewMode {
-  if (status === "error" || (bundleCount === 0 && hasMore)) return "error";
-  if (status === "loading" && bundleCount === 0 && hiddenCount === 0) return "loading";
+  if (!hasActiveWorkspace) return "empty";
+  if ((status === "loading" || status === "idle") && !lastAppliedOk) {
+    return "loading";
+  }
+  if (status === "error") return "error";
+  if (bundleCount === 0 && hasMore) return "error";
   if (bundleCount === 0) return "empty";
   return "list";
 }
@@ -86,8 +98,16 @@ function NeedsYouInboxTabContent({ retry }: { retry: () => void }) {
   const hasMore = useAppStore(selectNeedsYouInboxHasMore);
   const failedCount = useAppStore(selectFailedInboxCount);
   const failedCountKnown = useAppStore(selectFailedInboxCountIsKnown);
+  const lastAppliedOk = useAppStore(selectNeedsYouInboxLastAppliedOk);
+  const hasActiveWorkspace = useAppStore((s) => s.workspaces.activeId !== null);
 
-  const viewMode = resolveViewMode(status, bundles.length, hiddenCount, hasMore);
+  const viewMode = resolveViewMode(
+    status,
+    bundles.length,
+    hasMore,
+    lastAppliedOk,
+    hasActiveWorkspace,
+  );
 
   return (
     <>

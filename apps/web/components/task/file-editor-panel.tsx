@@ -39,11 +39,13 @@ function ImagePanel({
   worktreePath: string | undefined;
   headerActions?: React.ReactNode;
 }) {
+  const isSymlink = useDockviewStore((s) => !!s.openFiles.get(fileKey)?.resolvedPath);
   const content = useDockviewStore((s) => s.openFiles.get(fileKey)?.content ?? "");
   return (
     <PanelRoot>
       <PanelBody padding={false} scroll={false}>
         <FileImageViewer
+          isSymlink={isSymlink}
           path={path}
           content={content}
           worktreePath={worktreePath}
@@ -157,6 +159,7 @@ function StaticFilePanel({
   repositoryId,
   repositoryName,
 }: StaticFilePanelProps) {
+  const isSymlink = useDockviewStore((s) => !!s.openFiles.get(fileKey)?.resolvedPath);
   const onDownload = useOpenFileDownload(fileKey, path);
   const headerActions = (
     <>
@@ -183,7 +186,12 @@ function StaticFilePanel({
   return (
     <PanelRoot>
       <PanelBody padding={false} scroll={false}>
-        <FileBinaryViewer path={path} worktreePath={worktreePath} headerActions={headerActions} />
+        <FileBinaryViewer
+          isSymlink={isSymlink}
+          path={path}
+          worktreePath={worktreePath}
+          headerActions={headerActions}
+        />
       </PanelBody>
     </PanelRoot>
   );
@@ -235,6 +243,7 @@ function useFileLoader({
           originalHash: hash,
           isDirty: false,
           isBinary: response.is_binary,
+          resolvedPath: response.resolved_path,
         };
         setFileState(fileKey, state);
       })
@@ -329,6 +338,7 @@ type FileEditorPanelProps = {
 
 function useFileEditorBuffer(fileKey: string) {
   const hasFile = useDockviewStore((s) => s.openFiles.has(fileKey));
+  const isSymlink = useDockviewStore((s) => !!s.openFiles.get(fileKey)?.resolvedPath);
   const content = useDockviewStore((s) => s.openFiles.get(fileKey)?.content ?? "");
   const isDirty = useDockviewStore((s) => s.openFiles.get(fileKey)?.isDirty ?? false);
   const hasRemoteUpdate = useDockviewStore(
@@ -342,6 +352,7 @@ function useFileEditorBuffer(fileKey: string) {
   );
   return {
     hasFile,
+    isSymlink,
     content,
     isDirty,
     hasRemoteUpdate,
@@ -454,7 +465,7 @@ type LoadedFileEditorPanelProps = {
   >;
   buffer: Pick<
     FileEditorContentProps,
-    "path" | "content" | "originalContent" | "isDirty" | "hasRemoteUpdate" | "vcsDiff"
+    "isSymlink" | "path" | "content" | "originalContent" | "isDirty" | "hasRemoteUpdate" | "vcsDiff"
   >;
   options: Pick<
     FileEditorContentProps,
@@ -561,6 +572,7 @@ export const FileEditorPanel = memo(function FileEditorPanel({
       fileKey={fileKey}
       panelProps={panelProps}
       buffer={{
+        isSymlink: file.isSymlink,
         path,
         content: file.content,
         originalContent: file.originalContent,

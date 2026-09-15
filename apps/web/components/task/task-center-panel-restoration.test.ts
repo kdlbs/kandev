@@ -139,6 +139,7 @@ describe("task center file restoration", () => {
       path: "README.md",
       content: "# README",
       is_binary: false,
+      resolved_path: "docs/README.md",
     });
 
     const tabs = await loadSavedFileTabs("session", [
@@ -151,6 +152,7 @@ describe("task center file restoration", () => {
       content: "# README",
       originalContent: "# README",
       originalHash: "hash:8",
+      resolvedPath: "docs/README.md",
       isDirty: false,
       isBinary: false,
       renderedPreview: true,

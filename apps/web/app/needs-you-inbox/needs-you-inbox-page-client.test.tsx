@@ -10,13 +10,17 @@ const mocks = vi.hoisted(() => ({
 }));
 
 const EMPTY_TESTID = "needs-you-inbox-empty";
+const ERROR_TESTID = "needs-you-inbox-error";
 
 let needsYouState: {
   status: "idle" | "loading" | "ready" | "error";
   bundles: ClarificationInboxBundle[];
   hiddenCount: number;
   hasMore: boolean;
+  appliedGeneration?: number;
+  lastAppliedOk?: boolean;
 };
+let workspacesActiveId: string | null;
 
 let failedState: {
   rows: FailedInboxRowData[];
@@ -31,7 +35,7 @@ vi.mock("@/components/state-provider", () => ({
     selector({
       needsYouInbox: { byWorkspaceId: { w1: needsYouState } },
       failedInbox: { byWorkspaceId: { w1: failedState } },
-      workspaces: { activeId: "w1", items: [{ id: "w1", name: "Kegmil V2" }] },
+      workspaces: { activeId: workspacesActiveId, items: [{ id: "w1", name: "Kegmil V2" }] },
       bumpNeedsYouInboxRefreshTick: mocks.bumpRefreshTick,
     }),
 }));
@@ -117,6 +121,7 @@ beforeEach(() => {
   mocks.useFailedInboxController.mockReset();
   needsYouState = { status: "idle", bundles: [], hiddenCount: 0, hasMore: false };
   failedState = { rows: [], count: 0, truncated: false, status: "idle" };
+  workspacesActiveId = "w1";
   setLocation("/needs-you-inbox");
 });
 
@@ -155,7 +160,7 @@ describe("NeedsYouInboxPageClient", () => {
     needsYouState = { status: "error", bundles: [], hiddenCount: 0, hasMore: false };
     render(<NeedsYouInboxPageClient />);
 
-    expect(screen.getByTestId("needs-you-inbox-error")).not.toBeNull();
+    expect(screen.getByTestId(ERROR_TESTID)).not.toBeNull();
     expect(screen.queryByTestId(EMPTY_TESTID)).toBeNull();
   });
 
@@ -163,7 +168,7 @@ describe("NeedsYouInboxPageClient", () => {
     needsYouState = { status: "ready", bundles: [], hiddenCount: 0, hasMore: true };
     render(<NeedsYouInboxPageClient />);
 
-    expect(screen.getByTestId("needs-you-inbox-error")).not.toBeNull();
+    expect(screen.getByTestId(ERROR_TESTID)).not.toBeNull();
     expect(screen.queryByTestId(EMPTY_TESTID)).toBeNull();
   });
 
@@ -187,13 +192,129 @@ describe("NeedsYouInboxPageClient", () => {
 
     expect(screen.getByTestId("stub-hidden-panel").textContent).toBe("2");
   });
+});
 
+describe("NeedsYouInboxPageClient loading vs. settled/refresh states", () => {
   it("shows a loading indicator on the very first read, not the empty state", () => {
-    needsYouState = { status: "loading", bundles: [], hiddenCount: 0, hasMore: false };
+    needsYouState = {
+      status: "loading",
+      bundles: [],
+      hiddenCount: 0,
+      hasMore: false,
+      appliedGeneration: 0,
+      lastAppliedOk: false,
+    };
     render(<NeedsYouInboxPageClient />);
 
     expect(screen.getByRole("status")).not.toBeNull();
     expect(screen.queryByTestId(EMPTY_TESTID)).toBeNull();
+  });
+
+  it("keeps the settled empty state during a background refresh, instead of re-flashing loading", () => {
+    needsYouState = {
+      status: "loading",
+      bundles: [],
+      hiddenCount: 0,
+      hasMore: false,
+      appliedGeneration: 1,
+      lastAppliedOk: true,
+    };
+    render(<NeedsYouInboxPageClient />);
+
+    expect(screen.getByTestId(EMPTY_TESTID)).not.toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("keeps the settled list during a background refresh, instead of re-flashing loading", () => {
+    needsYouState = {
+      status: "loading",
+      bundles: [bundle("p1")],
+      hiddenCount: 0,
+      hasMore: false,
+      appliedGeneration: 1,
+      lastAppliedOk: true,
+    };
+    render(<NeedsYouInboxPageClient />);
+
+    expect(screen.getAllByTestId("stub-row")).toHaveLength(1);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("does not flash the error state for a truncated boot payload before the first read resolves", () => {
+    needsYouState = {
+      status: "loading",
+      bundles: [],
+      hiddenCount: 0,
+      hasMore: true,
+      appliedGeneration: 0,
+      lastAppliedOk: false,
+    };
+    render(<NeedsYouInboxPageClient />);
+
+    expect(screen.getByRole("status")).not.toBeNull();
+    expect(screen.queryByTestId(ERROR_TESTID)).toBeNull();
+  });
+
+  // R2-F1: a refresh that follows a FAILED read reaches resolveViewMode as
+  // the same (loading, 0 bundles, 0 hidden, hasMore=false) tuple as a refresh
+  // over an already-settled empty inbox -- only `lastAppliedOk` (false here,
+  // since the last applied response was the error, not a page) tells them
+  // apart. Getting this wrong renders a false "Nothing needs your attention"
+  // over a read that is still failing.
+  it("shows the loading indicator, not a false empty state, during a refresh that follows a failed read", () => {
+    needsYouState = {
+      status: "loading",
+      bundles: [],
+      hiddenCount: 0,
+      hasMore: false,
+      appliedGeneration: 3,
+      lastAppliedOk: false,
+    };
+    render(<NeedsYouInboxPageClient />);
+
+    expect(screen.getByRole("status")).not.toBeNull();
+    expect(screen.queryByTestId(EMPTY_TESTID)).toBeNull();
+    expect(screen.queryByTestId(ERROR_TESTID)).toBeNull();
+  });
+
+  // R2-F5: the boot seed applies before the first read starts, so `status`
+  // can observably be "idle" (not yet "loading") with a truncation flag
+  // already set. That must read the same as any other pre-first-read state:
+  // the honest spinner, not a false empty.
+  it("shows the loading indicator, not a false empty state, for an idle truncated boot seed", () => {
+    needsYouState = {
+      status: "idle",
+      bundles: [],
+      hiddenCount: 0,
+      hasMore: true,
+      appliedGeneration: 0,
+      lastAppliedOk: false,
+    };
+    render(<NeedsYouInboxPageClient />);
+
+    expect(screen.getByRole("status")).not.toBeNull();
+    expect(screen.queryByTestId(EMPTY_TESTID)).toBeNull();
+    expect(screen.queryByTestId(ERROR_TESTID)).toBeNull();
+  });
+
+  // R3-F1: with no active workspace the controller never issues a read (every
+  // trigger is guarded on `workspaceId`), so `lastAppliedOk` can never flip
+  // and the pre-read "idle"/`!lastAppliedOk` spinner would otherwise never
+  // resolve. This must render the empty state, not a permanent spinner.
+  it("renders the empty state, not a permanent spinner, when no active workspace resolves", () => {
+    workspacesActiveId = null;
+    needsYouState = {
+      status: "idle",
+      bundles: [],
+      hiddenCount: 0,
+      hasMore: false,
+      appliedGeneration: 0,
+      lastAppliedOk: false,
+    };
+    render(<NeedsYouInboxPageClient />);
+
+    expect(screen.getByTestId(EMPTY_TESTID)).not.toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
   });
 });
 
