@@ -121,5 +121,6 @@ test.describe.serial("Quick Chat cancellation palette and composer", () => {
     await testPage.keyboard.press("Escape");
     await expect(quickChat).not.toBeVisible();
     await expect(underlyingCancel).toBeVisible({ timeout: 10_000 });
+    await expect(underlyingCancel).toBeEnabled();
   });
 });
