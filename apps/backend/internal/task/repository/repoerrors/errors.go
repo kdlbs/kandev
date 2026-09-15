@@ -83,6 +83,10 @@ var ErrTaskCleanupInProgress = errors.New("task cleanup in progress")
 // contract.
 var ErrWorkflowResolutionConflict = errors.New("task workflow changed since resolution")
 
+// ErrTaskTransferConflict is the stable, non-leaking result for a stale,
+// ambiguous, incompatible, or idempotency-mismatched transfer request.
+var ErrTaskTransferConflict = errors.New("task transfer conflict")
+
 // ErrRunnerMutabilityConflict wraps one of the ten ordered mutability reason
 // codes rejecting a runner switch. Reason is always a member of the same
 // closed vocabulary the projection uses, never "eligible" and never empty.

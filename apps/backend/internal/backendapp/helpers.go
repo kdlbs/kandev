@@ -2013,6 +2013,11 @@ func registerMCPAndDebugRoutes(
 		mcpHandlers.SetTaskMRLister(mcpTaskMRListerAdapter{gl: p.services.GitLab})
 		mcpHandlers.SetTaskMRAutomationService(p.services.GitLab)
 	}
+	if p.services.OfficeSvcs != nil && p.services.OfficeSvcs.Agents != nil {
+		mcpHandlers.SetTaskTransferCoordinatorAuthorizer(taskTransferCoordinatorAttestor{
+			tasks: p.taskSvc, sessions: p.taskRepo, agents: p.services.OfficeSvcs.Agents,
+		})
+	}
 	mcpHandlers.SetTaskChangeLinkService(taskChangeLinkCoordinator{
 		tasks: p.taskSvc, github: p.services.GitHub, gitlab: p.services.GitLab,
 	})
