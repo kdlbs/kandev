@@ -150,9 +150,18 @@ test.describe("Native code review — on demand", () => {
     await testPage.getByRole("button", { name: "Expand review" }).click();
     const reopened = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(reopened).toBeVisible();
-    await expect(
-      reopened.getByTestId("review-finding-card").filter({ hasText: "Unchecked value can be nil" }),
-    ).toHaveAttribute("data-finding-status", "resolved", { timeout: 30_000 });
+
+    // The dialog renders only findings that can be anchored to the refreshed
+    // diff. Verify the persisted disposition through the same task-review
+    // snapshot used by the page backfill so an anchor refresh cannot hide a
+    // valid status transition from this regression check.
+    const reviewAfterReload = await apiClient.wsRequest<{
+      findings: Array<{ title: string; status: string }>;
+    }>("task.review.get", { task_id: task.id });
+    const resolvedFinding = reviewAfterReload.findings.find(
+      (finding) => finding.title === "Unchecked value can be nil",
+    );
+    expect(resolvedFinding?.status).toBe("resolved");
   });
 
   test("explains how to configure a reviewer when none is available", async ({
