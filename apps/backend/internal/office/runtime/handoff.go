@@ -33,6 +33,7 @@ const (
 
 	handoffPermissionDeniedMessage = "the handoff action requires the can_handoff_tasks permission, granted per agent or per role"
 	handoffTargetIsSourceMessage   = "target_workspace_id equals your own workspace; create same-workspace tasks through kandev task create instead"
+	handoffTasklessRunMessage      = "the handoff action requires a task-scoped run; a taskless run has no owning task to authorize a target workspace against"
 
 	handoffReverseLinkUnreadableSuffix = "the source task's stored handoff_source.handed_off_at is unreadable; this handoff cannot be repaired automatically"
 )
@@ -74,6 +75,12 @@ func (e *HandoffSettlementError) Error() string {
 func (e *HandoffSettlementError) Unwrap() error { return e.cause }
 
 var errHandoffPermissionDenied = fmt.Errorf("%w: %s", shared.ErrForbidden, handoffPermissionDeniedMessage)
+
+// errHandoffTasklessRun is returned when a run with no owning task attempts
+// a handoff. Workspaces.Scope resolves an empty task ID to an unscoped
+// caller, which the task service treats as having owner rights on every
+// workspace, so this case must be refused before Scope is ever called.
+var errHandoffTasklessRun = fmt.Errorf("%w: %s", shared.ErrForbidden, handoffTasklessRunMessage)
 
 // HandoffWorkspaceScoper attaches the identity of the source task's owning
 // user to ctx (AC-11), reusing the same per-user scoping in-session MCP
@@ -280,6 +287,9 @@ func validateHandoffShape(req HandoffRequest) (HandoffRequest, *HandoffValidatio
 func (a *Actions) authorizeHandoffTargetWorkspace(
 	ctx context.Context, sourceTaskID, targetWorkspaceID string,
 ) (context.Context, *taskmodels.Workspace, error) {
+	if sourceTaskID == "" {
+		return nil, nil, errHandoffTasklessRun
+	}
 	if a.deps.Handoff.Workspaces == nil || a.deps.Handoff.Tasks == nil {
 		return nil, nil, fmt.Errorf("%w: handoff", ErrRuntimeDependencyMissing)
 	}

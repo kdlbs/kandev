@@ -30,10 +30,12 @@ import (
 // --- fakes for HandoffDependencies's sub-interfaces ---
 
 type fakeHandoffScoper struct {
-	err error
+	err   error
+	calls []string
 }
 
-func (f *fakeHandoffScoper) Scope(ctx context.Context, _ string) (context.Context, error) {
+func (f *fakeHandoffScoper) Scope(ctx context.Context, taskID string) (context.Context, error) {
+	f.calls = append(f.calls, taskID)
 	if f.err != nil {
 		return nil, f.err
 	}
