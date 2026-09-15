@@ -330,7 +330,9 @@ func (e *Executor) claimForcedExecutionCleanup(sessionID, agentExecutionID strin
 }
 
 func (e *Executor) stopFailedStartExecution(ctx context.Context, agentExecutionID, phase string) {
-	if stopErr := e.agentManager.StopAgent(ctx, agentExecutionID, true); stopErr != nil {
+	if stopErr := e.agentManager.StopAgentWithReason(
+		ctx, agentExecutionID, lifecycle.StopReasonAgentBootstrapFailed, true,
+	); stopErr != nil {
 		e.logger.Warn("failed to clean up agent after "+phase,
 			zap.String("agent_execution_id", agentExecutionID),
 			zap.Error(stopErr))
@@ -423,7 +425,9 @@ func (e *Executor) stopUnstartedExecution(ctx context.Context, sessionID, agentE
 	}
 	stopCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
-	if stopErr := e.agentManager.StopAgent(stopCtx, agentExecutionID, true); stopErr != nil {
+	if stopErr := e.agentManager.StopAgentWithReason(
+		stopCtx, agentExecutionID, lifecycle.StopReasonAgentBootstrapFailed, true,
+	); stopErr != nil {
 		e.logger.Warn("failed to stop unstarted agent execution",
 			zap.String("session_id", sessionID),
 			zap.String("agent_execution_id", agentExecutionID),
