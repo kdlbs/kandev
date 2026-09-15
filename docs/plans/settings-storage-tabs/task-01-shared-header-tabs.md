@@ -42,7 +42,7 @@ Deliver the shared header tabs through both real settings pages. Preserve drafts
 
 - Extend the existing header and shells, add shared SettingsTabs and useSettingsTab, and adopt them on both pages.
 - Move Office retention, update discovery and legacy redirects, and update the backend retention health fix URL.
-- Keep forms mounted after activation, hide inactive panels explicitly, and mount the log viewer only while selected.
+- Mount each panel lazily on first activation, retain it after activation, hide inactive panels explicitly, and keep an active diagnostic bundle mounted while Logs is hidden.
 - Add all changed locale keys and update route-dependent E2E selectors/helpers without removing existing action scenarios.
 - Add the shared-component convention to apps/web/AGENTS.md.
 
@@ -134,7 +134,7 @@ Use TDD for changed logic. Run focused failing tests before implementation, then
 The E2E runner rebuilds current sources; do not pass `--no-build` for changed UI.
 
 ```bash
-(cd apps/web && pnpm exec vitest run components/settings/settings-tabs.test.tsx components/settings/settings-typography.test.ts hooks/domains/settings/use-settings-tab.test.tsx components/settings/settings-save-provider.test.tsx src/settings-routes.test.ts lib/settings-discovery/catalog.test.ts lib/settings-discovery/navigation.test.ts lib/settings-discovery/target.test.ts)
+(cd apps/web && pnpm exec vitest run components/settings/settings-tabs.test.tsx components/settings/settings-typography.test.ts hooks/domains/settings/use-settings-tab.test.ts src/settings-route-helpers.test.ts src/settings-routes.test.ts lib/settings-discovery/catalog.test.ts lib/settings-discovery/navigation.test.ts lib/settings-discovery/target.test.ts)
 (cd apps/backend && go test ./internal/office/retention ./internal/health)
 (cd apps/web && pnpm e2e:run --project chromium e2e/tests/system/settings-header-tabs.spec.ts e2e/tests/system/database-page.spec.ts e2e/tests/system/backups-page.spec.ts e2e/tests/system/logs-page.spec.ts e2e/tests/system/retention-settings.spec.ts)
 (cd apps/web && pnpm e2e:run --project mobile-chrome e2e/tests/system/mobile-settings-header-tabs.spec.ts e2e/tests/system/mobile-database-page.spec.ts e2e/tests/system/mobile-logs-bundle.spec.ts)

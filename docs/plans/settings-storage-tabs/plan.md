@@ -285,17 +285,14 @@ Their manifests link here so future work can find the changed allocation.
 
 ## Verification results
 
-Implementation checks: in progress. Task 01 is in progress; Tasks 02-04 remain pending.
-Design-package checks passed:
+Implementation is complete. All four work orders are done. Focused Vitest,
+frontend typecheck and lint, i18n, public documentation, specification, Go,
+desktop, mobile, and authenticated E2E checks passed. Fresh desktop and mobile
+PR captures were published from the affected pages.
 
-- `python3 scripts/list-docs.py validate`: 273 decisions and 933 specifications validated.
-- `python3 scripts/lint-spec-files.test.py`: 36 tests passed.
-- `python3 scripts/lint-spec-files.py --all`: all specification files passed.
-- `git diff --check -- docs`: passed.
-- Package link, REQ/AC identity, and design-path audit: passed.
-- `git status --short -- docs/plans/settings-storage-tabs`: confirmed the new manifest and work-order directory.
-
-These results validate the design package only. No production code or permanent tests changed.
+The full backend matrix still has unrelated failures in existing process probe
+timing, ambient config discovery, launcher setup, and an Office FTS migration
+test. The changed retention backend packages pass independently.
 
 ## Risks
 

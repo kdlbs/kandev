@@ -9,6 +9,8 @@ const saveRetentionSettingsMock = vi.fn();
 let saveContributor: SettingsSaveContributor | null = null;
 let currentRole: "admin" | "member" | undefined = "admin";
 const ENABLED_TOGGLE_TEST_ID = "retention-enabled";
+const BATCH_LIMIT_TEST_ID = "retention-batch-limit";
+const EXPECTED_SAVE_CONTRIBUTOR_ERROR = "expected save contributor";
 
 vi.mock("@/lib/api/domains/system-api", () => ({
   fetchRetentionStatus: (...args: unknown[]) => fetchRetentionStatusMock(...args),
@@ -113,7 +115,7 @@ describe("RetentionSettingsCard", () => {
     renderCard();
     await screen.findByTestId(ENABLED_TOGGLE_TEST_ID);
     fireEvent.click(screen.getByTestId(ENABLED_TOGGLE_TEST_ID));
-    if (!saveContributor) throw new Error("expected save contributor");
+    if (!saveContributor) throw new Error(EXPECTED_SAVE_CONTRIBUTOR_ERROR);
 
     saveRetentionSettingsMock.mockRejectedValueOnce(new Error("offline"));
     await act(async () => {
@@ -122,6 +124,29 @@ describe("RetentionSettingsCard", () => {
 
     expect(saveContributor?.isDirty).toBe(true);
     await screen.findByTestId("retention-save-error");
+  });
+
+  it("opens Advanced settings and annotates an invalid field before saving", async () => {
+    renderCard();
+    await screen.findByTestId(ENABLED_TOGGLE_TEST_ID);
+    const batchLimit = screen.getByTestId(BATCH_LIMIT_TEST_ID);
+
+    fireEvent.change(batchLimit, { target: { value: "0" } });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("retention-advanced-settings").getAttribute("open")).toBe("");
+      expect(batchLimit.getAttribute("aria-invalid")).toBe("true");
+      expect(screen.getByTestId(`${BATCH_LIMIT_TEST_ID}-error`)).toBeTruthy();
+      expect(saveContributor?.canSave).toBe(false);
+    });
+    if (!saveContributor) throw new Error(EXPECTED_SAVE_CONTRIBUTOR_ERROR);
+
+    await act(async () => {
+      await expect(saveContributor?.save(saveContributor.revision)).rejects.toThrow(
+        "Fix the highlighted retention fields before saving.",
+      );
+    });
+    expect(saveRetentionSettingsMock).not.toHaveBeenCalled();
   });
 
   it("renders the last sweep outcome, backlog flag, and retained counts", async () => {
@@ -181,7 +206,7 @@ describe("RetentionSettingsCard save/reload consistency", () => {
     fireEvent.click(toggle);
     expect(saveRetentionSettingsMock).not.toHaveBeenCalled();
     expect(saveContributor?.isDirty).toBe(true);
-    if (!saveContributor) throw new Error("expected save contributor");
+    if (!saveContributor) throw new Error(EXPECTED_SAVE_CONTRIBUTOR_ERROR);
 
     saveRetentionSettingsMock.mockResolvedValueOnce(defaultSettings({ enabled: false }));
     fetchRetentionStatusMock.mockResolvedValueOnce(
@@ -200,7 +225,7 @@ describe("RetentionSettingsCard save/reload consistency", () => {
     renderCard();
     await screen.findByTestId(ENABLED_TOGGLE_TEST_ID);
     fireEvent.click(screen.getByTestId(ENABLED_TOGGLE_TEST_ID));
-    if (!saveContributor) throw new Error("expected save contributor");
+    if (!saveContributor) throw new Error(EXPECTED_SAVE_CONTRIBUTOR_ERROR);
 
     saveRetentionSettingsMock.mockResolvedValueOnce(defaultSettings({ enabled: false }));
     fetchRetentionStatusMock.mockRejectedValueOnce(new Error("offline"));

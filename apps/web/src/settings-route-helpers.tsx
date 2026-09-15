@@ -27,7 +27,8 @@ export function resolveSettingsRedirect(to: string): string {
   for (const key of new Set(destination.searchParams.keys())) query.delete(key);
   for (const [key, value] of destination.searchParams) query.append(key, value);
   const search = query.toString();
-  return `${destination.pathname}${search ? `?${search}` : ""}${destination.hash || current.hash}`;
+  const hash = destination.hash || (destination.searchParams.has("tab") ? "" : current.hash);
+  return `${destination.pathname}${search ? `?${search}` : ""}${hash}`;
 }
 
 /**

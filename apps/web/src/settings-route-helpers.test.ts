@@ -18,11 +18,11 @@ describe("resolveSettingsRedirect", () => {
     ).toBe("/settings/system/data-storage?filter=recent&tab=database#setting-system-backups");
   });
 
-  it("preserves the current hash when the destination has no fragment", () => {
+  it("drops a conflicting current hash when the destination selects a tab", () => {
     window.history.replaceState({}, "", "/settings/system/storage?tab=host#setting-system-storage");
 
     expect(resolveSettingsRedirect("/settings/system/storage?tab=office-retention")).toBe(
-      "/settings/system/storage?tab=office-retention#setting-system-storage",
+      "/settings/system/storage?tab=office-retention",
     );
   });
 });

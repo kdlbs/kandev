@@ -212,6 +212,8 @@
   "retentionAdminOnly": "Só um administrador pode alterar as definições de retenção.",
   "retentionLoadFailed": "Não foi possível carregar as definições de retenção.",
   "retentionSaveFailed": "Não foi possível guardar as definições de retenção.",
+  "retentionInvalidFields": "Corrija os campos de retenção destacados antes de guardar.",
+  "retentionInvalidField": "Introduza um valor dentro do intervalo permitido.",
   "retentionPolicyTitle": "Política de retenção",
   "retentionPolicyDescription": "Remova automaticamente o histórico concluído antigo e os detalhes relacionados das execuções. O trabalho ativo permanece protegido.",
   "retentionEnabledLabel": "Limpeza automática",

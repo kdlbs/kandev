@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Separator } from "@kandev/ui/separator";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
@@ -74,12 +74,12 @@ function DatabasePanel() {
   );
 }
 
-function LogsPanel({ active }: { active: boolean }) {
+function LogsPanel() {
   const { t } = useTranslation();
   return (
     <SettingsTarget targetId={SYSTEM_SETTINGS_TARGETS.logs} className="space-y-4">
       <SectionHeading title={t("system:navLogs")} description={t("settings:logsPageDescription")} />
-      {active && <LogViewer />}
+      <LogViewer />
     </SettingsTarget>
   );
 }
@@ -87,6 +87,9 @@ function LogsPanel({ active }: { active: boolean }) {
 export function DataLogsSettings() {
   const { t } = useTranslation();
   const router = useRouter();
+  const [locationHash, setLocationHash] = useState(() =>
+    typeof window === "undefined" ? "" : window.location.hash,
+  );
   const tabs: SettingsTabOption[] = [
     { id: "database", label: t("system:navDatabase") },
     { id: "logs", label: t("system:navLogs") },
@@ -98,14 +101,24 @@ export function DataLogsSettings() {
   });
 
   useEffect(() => {
-    const targetId = settingsTargetFromHash(window.location.hash);
+    const updateHash = () => setLocationHash(window.location.hash);
+    window.addEventListener("hashchange", updateHash);
+    window.addEventListener("popstate", updateHash);
+    return () => {
+      window.removeEventListener("hashchange", updateHash);
+      window.removeEventListener("popstate", updateHash);
+    };
+  }, []);
+
+  useEffect(() => {
+    const targetId = settingsTargetFromHash(locationHash);
     if (targetId !== SYSTEM_SETTINGS_TARGETS.retention) return;
     const params = new URLSearchParams(window.location.search);
     params.set("tab", "office-retention");
-    router.replace(`/settings/system/storage?${params.toString()}${window.location.hash}`, {
+    router.replace(`/settings/system/storage?${params.toString()}${locationHash}`, {
       scroll: false,
     });
-  }, [router]);
+  }, [locationHash, router]);
 
   return (
     <SettingsTabs tabs={tabs} value={value} onValueChange={selectTab}>
@@ -118,7 +131,7 @@ export function DataLogsSettings() {
           <DatabasePanel />
         </SettingsTabsPanel>
         <SettingsTabsPanel value="logs" testId="settings-data-storage-logs">
-          <LogsPanel active={value === "logs"} />
+          <LogsPanel />
         </SettingsTabsPanel>
       </SystemRouteShell>
     </SettingsTabs>

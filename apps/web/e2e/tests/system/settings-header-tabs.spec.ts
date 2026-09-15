@@ -81,6 +81,12 @@ test.describe("Settings header tabs", () => {
       /\/settings\/system\/data-storage\?preserve=1&tab=database#setting-system-backups$/,
     );
     await expect(testPage.getByTestId("system-backups-card")).toBeVisible();
+
+    await testPage.goto("/settings/system/data-storage?preserve=1#setting-system-retention");
+    await expect(testPage).toHaveURL(
+      /\/settings\/system\/storage\?preserve=1&tab=office-retention#setting-system-retention$/,
+    );
+    await expect(testPage.getByTestId("retention-policy-card")).toBeVisible();
   });
 
   test("opens the tab that owns a discovery target", async ({ testPage }) => {
@@ -96,5 +102,28 @@ test.describe("Settings header tabs", () => {
       "true",
       { timeout: 5_000 },
     );
+  });
+
+  test("reacts when browser history changes only the target hash", async ({ testPage }) => {
+    await testPage.setViewportSize({ width: 1440, height: 900 });
+    await testPage.goto("/settings/system/storage?tab=host");
+    await expect(testPage.getByRole("tab", { name: "Host", exact: true })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+
+    await testPage.evaluate(() => {
+      window.history.pushState(
+        {},
+        "",
+        "/settings/system/storage?tab=host#setting-system-retention",
+      );
+      window.dispatchEvent(new HashChangeEvent("hashchange"));
+    });
+
+    await expect(
+      testPage.getByRole("tab", { name: "Office retention", exact: true }),
+    ).toHaveAttribute("aria-selected", "true");
+    await expect(testPage.getByTestId("retention-policy-card")).toBeVisible();
   });
 });

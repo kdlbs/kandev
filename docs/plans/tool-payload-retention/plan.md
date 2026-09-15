@@ -65,8 +65,8 @@ are illustrative. Product copy must use localization keys.
 
 ### UI-01: Desktop, disabled policy with optional estimate
 
-Entry: Settings > System > Data & Logs. The existing Database section precedes
-the retention area. Office history retains its independent card.
+Entry: Settings > System > Data & Logs > Database. Office history is maintained
+independently at Settings > System > Storage > Office retention.
 
 ```text
 Tool payload cleanup                              [Off]
@@ -342,5 +342,5 @@ User requested no commit.
 
 ## Follow-up presentation package
 
-The [settings storage tabs package](../settings-storage-tabs/plan.md) owns the planned header tabs and maintenance presentation changes.
-This package retains its historical implementation results. The follow-up owns new route, copy, and regression verification.
+The [settings storage tabs package](../settings-storage-tabs/plan.md) completed the header tabs and maintenance presentation changes.
+This package retains its historical implementation results. Its route and copy references are current.

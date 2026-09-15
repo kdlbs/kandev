@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useEffect, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@kandev/ui/tabs";
 import { cn } from "@/lib/utils";
 import { emitSettingsTargetRequest, settingsTargetFromHash } from "@/lib/settings-discovery/target";
@@ -13,6 +13,7 @@ export type SettingsTabOption = {
 type SettingsTabsContextValue = {
   tabs: readonly SettingsTabOption[];
   value: string;
+  visitedTabs: ReadonlySet<string>;
 };
 
 const SettingsTabsContext = createContext<SettingsTabsContextValue | null>(null);
@@ -28,13 +29,22 @@ export function SettingsTabs({
   onValueChange: (value: string) => void;
   children: ReactNode;
 }) {
+  const [visitedTabs, setVisitedTabs] = useState<ReadonlySet<string>>(() => new Set([value]));
+
+  useEffect(() => {
+    setVisitedTabs((current) => {
+      if (current.has(value)) return current;
+      return new Set([...current, value]);
+    });
+  }, [value]);
+
   useEffect(() => {
     const targetId = settingsTargetFromHash(window.location.hash);
     if (targetId) emitSettingsTargetRequest(targetId);
   }, [value]);
 
   return (
-    <SettingsTabsContext.Provider value={{ tabs, value }}>
+    <SettingsTabsContext.Provider value={{ tabs, value, visitedTabs }}>
       <Tabs value={value} onValueChange={onValueChange} activationMode="manual" className="min-w-0">
         {children}
       </Tabs>
@@ -89,6 +99,7 @@ export function SettingsTabsPanel({
   // i18n-exempt: programmer error for an invalid component composition.
   if (!context) throw new Error("SettingsTabsPanel must be used inside SettingsTabs");
   const active = context.value === value;
+  const visited = context.visitedTabs.has(value);
   return (
     <TabsContent
       value={value}
@@ -97,7 +108,7 @@ export function SettingsTabsPanel({
       className={cn("min-w-0 data-[state=inactive]:hidden", className)}
       data-testid={testId}
     >
-      {children}
+      {visited ? children : null}
     </TabsContent>
   );
 }

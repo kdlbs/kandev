@@ -217,6 +217,8 @@
   "retentionAdminOnly": "Only an admin can change retention settings.",
   "retentionLoadFailed": "Retention settings could not be loaded.",
   "retentionSaveFailed": "Retention settings could not be saved.",
+  "retentionInvalidFields": "Fix the highlighted retention fields before saving.",
+  "retentionInvalidField": "Enter a value within the allowed range.",
   "retentionPolicyTitle": "Retention policy",
   "retentionPolicyDescription": "Automatically remove old finished history and related run details. Active work remains protected.",
   "retentionEnabledLabel": "Automatic cleanup",

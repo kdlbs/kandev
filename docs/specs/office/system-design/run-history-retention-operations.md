@@ -8,11 +8,11 @@ requirements:
 
 # Office Run History Retention Operations System Design
 
-## Presentation migration (planned)
+## Presentation allocation
 
 The [settings storage tabs design](../../system-page/system-design/system-data-storage-pages.md)
-replaces the page allocation described below when its work orders ship.
-Office retention moves to Storage > Office retention. Message compaction remains in Data & Logs > Database.
+allocates the shipped page composition. Office retention lives at Storage > Office retention.
+Message compaction remains in Data & Logs > Database.
 Policy, API, and persistence contracts remain unchanged.
 
 ## Purpose and boundaries
@@ -214,12 +214,10 @@ Three surfaces, in descending durability:
 2. **Health issues.** The package implements `health.Checker` with
    `Name() = "Office run retention"` and `Category() = "office"`, returning a
    `health.Issue` per active condition with
-   `FixURL = "/settings/system/data-storage"`, which is the live route
-   registered in `apps/web/src/settings-routes.tsx` — note the suffix, as
-   `/settings/system/data` is not a registered path and `/settings/system/database`
-   is only a redirect to it. `internal/health/checks_test.go` pins fix URLs to
-   live routes ("expectedGitHubFixURL is the live route in ..."), and this one
-   is pinned the same way. This is the production-visible surface
+   `FixURL = "/settings/system/storage?tab=office-retention"`, which is the
+   Office retention tab of the live route registered in
+   `apps/web/src/settings-routes.tsx`. `internal/health/checks_test.go` pins fix
+   URLs to live routes, and this one is pinned the same way. This is the production-visible surface
    required by AC-OFFICE-RUN-HISTORY-RETENTION-003.8 and is why the debug
    metrics endpoint is not it: `/debug/vars` is gated on the dev profile.
    Issue ids are stable and one per condition:
@@ -267,11 +265,11 @@ are indistinguishable. Successful writes return the normalized document.
 Both routes are admin-scoped like the other System routes and are readable while
 retention is disabled (AC-OFFICE-RUN-HISTORY-RETENTION-004.8).
 
-One card on **Settings > System > Data & Logs**, the page served at
-`/settings/system/data-storage` and rendered by
-`apps/web/components/settings/system/data-logs-settings.tsx`, beside
-`database-stats-card.tsx`: the enable toggle, the numeric fields, and the
-last-sweep readout. It follows the storage-maintenance cards' shape. All new
+One card on **Settings > System > Storage > Office retention**, the page served at
+`/settings/system/storage?tab=office-retention` and rendered by
+`apps/web/components/settings/system/retention-settings-card.tsx` with the
+status card beside it: the enable toggle, numeric fields, and last-sweep readout.
+It follows the storage-maintenance cards' shape. All new
 copy goes through `t()` and must ship in `pt-pt`, `zh-cn`, `zh-hk`, and `zh-tw`;
 `pnpm run i18n:check` and the new-code ratchet gate the build. Health issue
 titles and messages stay English, matching every other backend-produced

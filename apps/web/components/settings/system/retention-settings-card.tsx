@@ -23,8 +23,52 @@ import type { RetentionSettings } from "@/lib/types/system";
 import { StorageSettingHelp } from "./storage/storage-setting-help";
 import { RetentionStatusCard } from "./retention-status-card";
 
+type Translate = ReturnType<typeof useTranslation>["t"];
+
+function getRetentionInvalidFieldMessage(t: Translate): string {
+  return t("system:retentionInvalidField");
+}
+
 function serialize(settings: RetentionSettings | null): string {
   return settings ? JSON.stringify(settings) : "loading";
+}
+
+type RetentionFieldId =
+  | "retention-sweep-interval"
+  | "retention-batch-limit"
+  | "retention-routine-runs-window-days"
+  | "retention-routine-runs-floor-per-owner"
+  | "retention-runs-window-days"
+  | "retention-runs-floor-per-owner"
+  | "retention-routine-runs-warn-rows"
+  | "retention-runs-warn-rows"
+  | "retention-run-events-warn-rows";
+
+function isOutsideRange(value: number, min: number, max?: number): boolean {
+  return !Number.isFinite(value) || value < min || (max !== undefined && value > max);
+}
+
+function invalidRetentionFields(settings: RetentionSettings): Set<RetentionFieldId> {
+  const invalid = new Set<RetentionFieldId>();
+  const addIfInvalid = (field: RetentionFieldId, value: number, min: number, max?: number) => {
+    if (isOutsideRange(value, min, max)) invalid.add(field);
+  };
+
+  addIfInvalid("retention-sweep-interval", settings.sweep_interval_hours, 1, 168);
+  addIfInvalid("retention-batch-limit", settings.batch_limit, 100, 100000);
+  addIfInvalid("retention-routine-runs-window-days", settings.routine_runs.window_days, 1, 3650);
+  addIfInvalid(
+    "retention-routine-runs-floor-per-owner",
+    settings.routine_runs.floor_per_owner,
+    0,
+    10000,
+  );
+  addIfInvalid("retention-runs-window-days", settings.runs.window_days, 1, 3650);
+  addIfInvalid("retention-runs-floor-per-owner", settings.runs.floor_per_owner, 0, 10000);
+  addIfInvalid("retention-routine-runs-warn-rows", settings.routine_runs.warn_rows, 0);
+  addIfInvalid("retention-runs-warn-rows", settings.runs.warn_rows, 0);
+  addIfInvalid("retention-run-events-warn-rows", settings.run_events.warn_rows, 0);
+  return invalid;
 }
 
 function NumberField({
@@ -34,6 +78,8 @@ function NumberField({
   min,
   max,
   disabled,
+  invalid,
+  invalidMessage,
   onChange,
   testId,
 }: {
@@ -43,6 +89,8 @@ function NumberField({
   min: number;
   max?: number;
   disabled?: boolean;
+  invalid?: boolean;
+  invalidMessage?: string;
   onChange: (value: number) => void;
   testId: string;
 }) {
@@ -61,8 +109,19 @@ function NumberField({
         value={value}
         onChange={(event) => onChange(Number(event.target.value))}
         className={settingsControlClassName()}
+        aria-invalid={invalid || undefined}
+        aria-describedby={invalid ? `${testId}-error` : undefined}
         data-testid={testId}
       />
+      {invalid && (
+        <p
+          id={`${testId}-error`}
+          className="text-xs text-destructive"
+          data-testid={`${testId}-error`}
+        >
+          {invalidMessage}
+        </p>
+      )}
     </div>
   );
 }
@@ -72,6 +131,7 @@ function useRetentionDraft(remote: ReturnType<typeof useRetentionSettings>, isAd
   const [draft, setDraft] = useState<RetentionSettings | null>(null);
   const previousSaved = useRef<RetentionSettings | null>(null);
   const saved = remote.status?.settings ?? null;
+  const invalidFields = draft ? invalidRetentionFields(draft) : new Set<RetentionFieldId>();
 
   useEffect(() => {
     if (!saved) return;
@@ -84,8 +144,13 @@ function useRetentionDraft(remote: ReturnType<typeof useRetentionSettings>, isAd
   }, [saved]);
 
   const isDirty = Boolean(draft && saved && serialize(draft) !== serialize(saved));
-  const canEdit = isAdmin && !remote.isLoading && Boolean(saved);
-  const invalidReason = !isAdmin ? t("system:retentionAdminOnly") : undefined;
+  const canEdit = isAdmin && !remote.isLoading && Boolean(saved) && invalidFields.size === 0;
+  let invalidReason: string | undefined;
+  if (!isAdmin) {
+    invalidReason = t("system:retentionAdminOnly");
+  } else if (invalidFields.size > 0) {
+    invalidReason = t("system:retentionInvalidFields");
+  }
 
   useSettingsSaveContributor({
     id: "system:retention",
@@ -96,6 +161,7 @@ function useRetentionDraft(remote: ReturnType<typeof useRetentionSettings>, isAd
     invalidReason,
     save: async () => {
       if (!draft) return;
+      if (invalidFields.size > 0) throw new Error(t("system:retentionInvalidFields"));
       await remote.save(draft);
     },
     discard: () => {
@@ -103,7 +169,7 @@ function useRetentionDraft(remote: ReturnType<typeof useRetentionSettings>, isAd
     },
   });
 
-  return { draft, setDraft, saved, canEdit };
+  return { draft, setDraft, saved, canEdit, invalidFields };
 }
 
 function RetentionEnabledRow({
@@ -141,10 +207,12 @@ function RetentionEnabledRow({
 function RetentionScheduleFields({
   settings,
   disabled,
+  invalidFields,
   onChange,
 }: {
   settings: RetentionSettings;
   disabled: boolean;
+  invalidFields: ReadonlySet<RetentionFieldId>;
   onChange: (settings: RetentionSettings) => void;
 }) {
   const { t } = useTranslation();
@@ -157,6 +225,8 @@ function RetentionScheduleFields({
         min={1}
         max={168}
         disabled={disabled}
+        invalid={invalidFields.has("retention-sweep-interval")}
+        invalidMessage={getRetentionInvalidFieldMessage(t)}
         onChange={(sweep_interval_hours) => onChange({ ...settings, sweep_interval_hours })}
         testId="retention-sweep-interval"
       />
@@ -167,6 +237,8 @@ function RetentionScheduleFields({
         min={100}
         max={100000}
         disabled={disabled}
+        invalid={invalidFields.has("retention-batch-limit")}
+        invalidMessage={getRetentionInvalidFieldMessage(t)}
         onChange={(batch_limit) => onChange({ ...settings, batch_limit })}
         testId="retention-batch-limit"
       />
@@ -202,6 +274,7 @@ function WindowedTableSection({
   description,
   settings,
   disabled,
+  invalidFields,
   onChange,
 }: {
   tableKey: WindowedTableKey;
@@ -209,6 +282,7 @@ function WindowedTableSection({
   description: string;
   settings: RetentionSettings;
   disabled: boolean;
+  invalidFields: ReadonlySet<RetentionFieldId>;
   onChange: (settings: RetentionSettings) => void;
 }) {
   const { t } = useTranslation();
@@ -223,6 +297,8 @@ function WindowedTableSection({
         min={1}
         max={3650}
         disabled={disabled}
+        invalid={invalidFields.has(`${testPrefix}-window-days` as RetentionFieldId)}
+        invalidMessage={getRetentionInvalidFieldMessage(t)}
         onChange={(window_days) => onChange({ ...settings, [tableKey]: { ...table, window_days } })}
         testId={`${testPrefix}-window-days`}
       />
@@ -237,6 +313,8 @@ function WindowedTableSection({
         min={0}
         max={10000}
         disabled={disabled}
+        invalid={invalidFields.has(`${testPrefix}-floor-per-owner` as RetentionFieldId)}
+        invalidMessage={getRetentionInvalidFieldMessage(t)}
         onChange={(floor_per_owner) =>
           onChange({ ...settings, [tableKey]: { ...table, floor_per_owner } })
         }
@@ -249,10 +327,12 @@ function WindowedTableSection({
 function RoutineRunsAndRunsSections({
   settings,
   disabled,
+  invalidFields,
   onChange,
 }: {
   settings: RetentionSettings;
   disabled: boolean;
+  invalidFields: ReadonlySet<RetentionFieldId>;
   onChange: (settings: RetentionSettings) => void;
 }) {
   const { t } = useTranslation();
@@ -264,6 +344,7 @@ function RoutineRunsAndRunsSections({
         description={t("system:retentionRoutineHistoryDescription")}
         settings={settings}
         disabled={disabled}
+        invalidFields={invalidFields}
         onChange={onChange}
       />
       <WindowedTableSection
@@ -272,6 +353,7 @@ function RoutineRunsAndRunsSections({
         description={t("system:retentionAgentRunHistoryDescription")}
         settings={settings}
         disabled={disabled}
+        invalidFields={invalidFields}
         onChange={onChange}
       />
     </>
@@ -281,10 +363,12 @@ function RoutineRunsAndRunsSections({
 function WarningThresholdFields({
   settings,
   disabled,
+  invalidFields,
   onChange,
 }: {
   settings: RetentionSettings;
   disabled: boolean;
+  invalidFields: ReadonlySet<RetentionFieldId>;
   onChange: (settings: RetentionSettings) => void;
 }) {
   const { t } = useTranslation();
@@ -303,6 +387,8 @@ function WarningThresholdFields({
           value={settings.routine_runs.warn_rows}
           min={0}
           disabled={disabled}
+          invalid={invalidFields.has("retention-routine-runs-warn-rows")}
+          invalidMessage={getRetentionInvalidFieldMessage(t)}
           onChange={(warn_rows) =>
             onChange({ ...settings, routine_runs: { ...settings.routine_runs, warn_rows } })
           }
@@ -314,6 +400,8 @@ function WarningThresholdFields({
           value={settings.runs.warn_rows}
           min={0}
           disabled={disabled}
+          invalid={invalidFields.has("retention-runs-warn-rows")}
+          invalidMessage={getRetentionInvalidFieldMessage(t)}
           onChange={(warn_rows) => onChange({ ...settings, runs: { ...settings.runs, warn_rows } })}
           testId="retention-runs-warn-rows"
         />
@@ -323,6 +411,8 @@ function WarningThresholdFields({
           value={settings.run_events.warn_rows}
           min={0}
           disabled={disabled}
+          invalid={invalidFields.has("retention-run-events-warn-rows")}
+          invalidMessage={getRetentionInvalidFieldMessage(t)}
           onChange={(warn_rows) => onChange({ ...settings, run_events: { warn_rows } })}
           testId="retention-run-events-warn-rows"
         />
@@ -334,23 +424,54 @@ function WarningThresholdFields({
 function AdvancedRetentionSettings({
   settings,
   disabled,
+  invalidFields,
   onChange,
 }: {
   settings: RetentionSettings;
   disabled: boolean;
+  invalidFields: ReadonlySet<RetentionFieldId>;
   onChange: (settings: RetentionSettings) => void;
 }) {
   const { t } = useTranslation();
+  const advancedFieldIds: RetentionFieldId[] = [
+    "retention-sweep-interval",
+    "retention-batch-limit",
+    "retention-routine-runs-warn-rows",
+    "retention-runs-warn-rows",
+    "retention-run-events-warn-rows",
+  ];
+  const hasInvalidAdvancedField = advancedFieldIds.some((field) => invalidFields.has(field));
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (hasInvalidAdvancedField) setOpen(true);
+  }, [hasInvalidAdvancedField]);
   return (
-    <details className="border-t pt-3" data-testid="retention-advanced-settings">
+    <details
+      className="border-t pt-3"
+      data-testid="retention-advanced-settings"
+      open={open || hasInvalidAdvancedField}
+      onToggle={(event) => {
+        if (!hasInvalidAdvancedField) setOpen(event.currentTarget.open);
+      }}
+    >
       <summary className="cursor-pointer text-sm font-medium">
         {t("system:retentionAdvancedSettingsTitle")}
       </summary>
       <p className="pt-2 text-xs text-muted-foreground">
         {t("system:retentionAdvancedSettingsDescription")}
       </p>
-      <RetentionScheduleFields settings={settings} disabled={disabled} onChange={onChange} />
-      <WarningThresholdFields settings={settings} disabled={disabled} onChange={onChange} />
+      <RetentionScheduleFields
+        settings={settings}
+        disabled={disabled}
+        invalidFields={invalidFields}
+        onChange={onChange}
+      />
+      <WarningThresholdFields
+        settings={settings}
+        disabled={disabled}
+        invalidFields={invalidFields}
+        onChange={onChange}
+      />
     </details>
   );
 }
@@ -358,10 +479,12 @@ function AdvancedRetentionSettings({
 function RetentionPolicyCard({
   draft,
   canEdit,
+  invalidFields,
   onChange,
 }: {
   draft: RetentionSettings;
   canEdit: boolean;
+  invalidFields: ReadonlySet<RetentionFieldId>;
   onChange: (settings: RetentionSettings) => void;
 }) {
   const { t } = useTranslation();
@@ -378,8 +501,18 @@ function RetentionPolicyCard({
       />
       <CardContent>
         <RetentionEnabledRow settings={draft} disabled={disabled} onChange={onChange} />
-        <RoutineRunsAndRunsSections settings={draft} disabled={disabled} onChange={onChange} />
-        <AdvancedRetentionSettings settings={draft} disabled={disabled} onChange={onChange} />
+        <RoutineRunsAndRunsSections
+          settings={draft}
+          disabled={disabled}
+          invalidFields={invalidFields}
+          onChange={onChange}
+        />
+        <AdvancedRetentionSettings
+          settings={draft}
+          disabled={disabled}
+          invalidFields={invalidFields}
+          onChange={onChange}
+        />
         <p className="border-t pt-3 text-xs text-muted-foreground">
           {t("system:retentionActiveWorkProtection")}
         </p>
@@ -418,7 +551,7 @@ function RetentionSettingsLoadError({ error }: { error: string }) {
 export function RetentionSettingsCard() {
   const remote = useRetentionSettings();
   const isAdmin = useIsAdmin();
-  const { draft, setDraft, canEdit } = useRetentionDraft(remote, isAdmin);
+  const { draft, setDraft, canEdit, invalidFields } = useRetentionDraft(remote, isAdmin);
   const { t } = useTranslation();
 
   if (remote.isLoading && !remote.status) return <RetentionSettingsLoading />;
@@ -427,7 +560,14 @@ export function RetentionSettingsCard() {
   return (
     <div className="min-w-0 space-y-4" data-testid="retention-settings">
       <RetentionStatusCard status={remote.status} />
-      {draft && <RetentionPolicyCard draft={draft} canEdit={canEdit} onChange={setDraft} />}
+      {draft && (
+        <RetentionPolicyCard
+          draft={draft}
+          canEdit={canEdit}
+          invalidFields={invalidFields}
+          onChange={setDraft}
+        />
+      )}
       {remote.saveError && (
         <Alert variant="destructive" data-testid="retention-save-error">
           <IconAlertCircle className="size-4" />

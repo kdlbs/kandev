@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "@/lib/routing/client-router";
 import { runWithNavigationBlockerBypassed } from "@/lib/routing/navigation-guard";
 import {
@@ -25,9 +25,11 @@ export function resolveSettingsTab(
   return value && tabs.includes(value) ? value : defaultTab;
 }
 
-function currentTargetTab(targetToTab: Readonly<Record<string, SettingsTabId>>): string | null {
-  if (typeof window === "undefined") return null;
-  const targetId = settingsTargetFromHash(window.location.hash);
+function currentTargetTab(
+  targetToTab: Readonly<Record<string, SettingsTabId>>,
+  hash: string,
+): string | null {
+  const targetId = settingsTargetFromHash(hash);
   return targetId ? (targetToTab[targetId] ?? null) : null;
 }
 
@@ -43,11 +45,23 @@ export function useSettingsTab({ tabs, defaultTab, targetToTab = {} }: UseSettin
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const [locationHash, setLocationHash] = useState(() =>
+    typeof window === "undefined" ? "" : window.location.hash,
+  );
+  useEffect(() => {
+    const updateHash = () => setLocationHash(window.location.hash);
+    window.addEventListener("hashchange", updateHash);
+    window.addEventListener("popstate", updateHash);
+    return () => {
+      window.removeEventListener("hashchange", updateHash);
+      window.removeEventListener("popstate", updateHash);
+    };
+  }, []);
   const value = useMemo(
     () =>
-      currentTargetTab(targetToTab) ??
+      currentTargetTab(targetToTab, locationHash) ??
       resolveSettingsTab(searchParams.get("tab"), tabs, defaultTab),
-    [defaultTab, searchParams, tabs, targetToTab],
+    [defaultTab, locationHash, searchParams, tabs, targetToTab],
   );
 
   const selectTab = useCallback(
@@ -60,9 +74,9 @@ export function useSettingsTab({ tabs, defaultTab, targetToTab = {} }: UseSettin
   );
 
   useEffect(() => {
-    const targetTab = currentTargetTab(targetToTab);
+    const targetTab = currentTargetTab(targetToTab, locationHash);
     if (targetTab && targetTab !== value) selectTab(targetTab, false);
-  }, [selectTab, targetToTab, value]);
+  }, [locationHash, selectTab, targetToTab, value]);
 
   useEffect(() => {
     const requestTargetTab = (event: Event) => {

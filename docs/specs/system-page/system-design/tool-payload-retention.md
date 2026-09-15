@@ -9,11 +9,11 @@ requirements:
 
 # Tool Payload Retention System Design
 
-## Presentation migration (planned)
+## Presentation allocation
 
 The [settings storage tabs design](../../system-page/system-design/system-data-storage-pages.md)
-replaces the page allocation described below when its work orders ship.
-Office retention moves to Storage > Office retention. Message compaction remains in Data & Logs > Database.
+defines the shipped page allocation. Office retention lives at Storage > Office retention.
+Message compaction remains in Data & Logs > Database.
 Policy, API, and persistence contracts remain unchanged.
 
 ## Purpose and boundaries
@@ -22,10 +22,10 @@ This capability belongs to system-page. It uses task persistence to
 remove selected payload fields and retains the original conversation structure.
 The [requirements](../requirements/tool-payload-retention.md) define the outcomes.
 
-The existing `DataLogsSettings` mounts `DatabaseStatsCard`,
-`RetentionSettingsCard`, `BackupsTable`, and `LogViewer`. Its existing retention
-card controls Office run history through contributor `system:retention`.
-The tool payload card uses a separate policy and save contributor.
+The Database tab of `DataLogsSettings` mounts `DatabaseStatsCard`,
+`ToolPayloadRetentionCard`, `BackupsTable`, and `LogViewer`. Office run history
+is owned by the separate Storage > Office retention tab through contributor
+`system:retention`. The tool payload card uses a separate policy and save contributor.
 
 The [Data & Logs route design](system-data-storage-pages.md) describes the route
 split and the separate save contributors for database retention settings.

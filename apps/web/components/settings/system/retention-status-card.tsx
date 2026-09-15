@@ -18,6 +18,50 @@ function formatUnknownStatuses(unknown: RetentionUnknownStatusCount[]): string {
   return unknown.map((item) => `${item.status} (${item.count})`).join(", ");
 }
 
+type RetentionSweepEntry = {
+  id: string;
+  label: string;
+  result: RetentionTableSweepResult;
+  preview?: RetentionSweptTableResult;
+};
+
+function getRetentionSweepEntries(
+  lastSweep: NonNullable<RetentionStatus["last_sweep"]>,
+  labels: {
+    routineHistory: string;
+    agentRunHistory: string;
+    runEvents: string;
+    providerAttempts: string;
+    runSkillRecords: string;
+  },
+): RetentionSweepEntry[] {
+  return [
+    {
+      id: "office_routine_runs",
+      label: labels.routineHistory,
+      result: lastSweep.office_routine_runs,
+      preview: lastSweep.office_routine_runs,
+    },
+    {
+      id: "runs",
+      label: labels.agentRunHistory,
+      result: lastSweep.runs,
+      preview: lastSweep.runs,
+    },
+    { id: "run_events", label: labels.runEvents, result: lastSweep.run_events },
+    {
+      id: "office_run_route_attempts",
+      label: labels.providerAttempts,
+      result: lastSweep.route_attempts,
+    },
+    {
+      id: "office_run_skills",
+      label: labels.runSkillRecords,
+      result: lastSweep.run_skills,
+    },
+  ];
+}
+
 function SweepTableRow({
   label,
   targetId,
@@ -60,6 +104,13 @@ function LastSweepDetails({ status }: { status: RetentionStatus }) {
   const { t } = useTranslation();
   const lastSweep = status.last_sweep;
   if (!lastSweep) return null;
+  const entries = getRetentionSweepEntries(lastSweep, {
+    routineHistory: t("system:retentionRoutineHistoryLabel"),
+    agentRunHistory: t("system:retentionAgentRunHistoryLabel"),
+    runEvents: t("system:retentionRunEventsLabel"),
+    providerAttempts: t("system:retentionProviderAttemptsLabel"),
+    runSkillRecords: t("system:retentionRunSkillRecordsLabel"),
+  });
   return (
     <div className="space-y-2" data-testid="retention-last-sweep">
       <p className="text-xs text-muted-foreground">
@@ -67,33 +118,15 @@ function LastSweepDetails({ status }: { status: RetentionStatus }) {
         {" · "}
         {t("system:retentionSweepFinishedAtLabel")}: {formatDateTime(lastSweep.finished_at)}
       </p>
-      <SweepTableRow
-        label={t("system:retentionRoutineHistoryLabel")}
-        targetId="office_routine_runs"
-        result={lastSweep.office_routine_runs}
-        preview={lastSweep.office_routine_runs}
-      />
-      <SweepTableRow
-        label={t("system:retentionAgentRunHistoryLabel")}
-        targetId="runs"
-        result={lastSweep.runs}
-        preview={lastSweep.runs}
-      />
-      <SweepTableRow
-        label={t("system:retentionRunEventsLabel")}
-        targetId="run_events"
-        result={lastSweep.run_events}
-      />
-      <SweepTableRow
-        label={t("system:retentionProviderAttemptsLabel")}
-        targetId="office_run_route_attempts"
-        result={lastSweep.route_attempts}
-      />
-      <SweepTableRow
-        label={t("system:retentionRunSkillRecordsLabel")}
-        targetId="office_run_skills"
-        result={lastSweep.run_skills}
-      />
+      {entries.map((entry) => (
+        <SweepTableRow
+          key={entry.id}
+          label={entry.label}
+          targetId={entry.id}
+          result={entry.result}
+          preview={entry.preview}
+        />
+      ))}
     </div>
   );
 }
@@ -152,29 +185,13 @@ function RetentionSweepIssues({ status }: { status: RetentionStatus }) {
   const { t } = useTranslation();
   const lastSweep = status.last_sweep;
   if (!lastSweep) return null;
-  const entries = [
-    {
-      id: "office_routine_runs",
-      label: t("system:retentionRoutineHistoryLabel"),
-      result: lastSweep.office_routine_runs,
-    },
-    { id: "runs", label: t("system:retentionAgentRunHistoryLabel"), result: lastSweep.runs },
-    {
-      id: "run_events",
-      label: t("system:retentionRunEventsLabel"),
-      result: lastSweep.run_events,
-    },
-    {
-      id: "office_run_route_attempts",
-      label: t("system:retentionProviderAttemptsLabel"),
-      result: lastSweep.route_attempts,
-    },
-    {
-      id: "office_run_skills",
-      label: t("system:retentionRunSkillRecordsLabel"),
-      result: lastSweep.run_skills,
-    },
-  ];
+  const entries = getRetentionSweepEntries(lastSweep, {
+    routineHistory: t("system:retentionRoutineHistoryLabel"),
+    agentRunHistory: t("system:retentionAgentRunHistoryLabel"),
+    runEvents: t("system:retentionRunEventsLabel"),
+    providerAttempts: t("system:retentionProviderAttemptsLabel"),
+    runSkillRecords: t("system:retentionRunSkillRecordsLabel"),
+  });
   return (
     <div className="space-y-1 text-xs">
       {entries

@@ -214,6 +214,8 @@
   "retentionAdminOnly": "只有管理員才能更改保留設定。",
   "retentionLoadFailed": "無法載入保留設定。",
   "retentionSaveFailed": "無法儲存保留設定。",
+  "retentionInvalidFields": "儲存前請修正突出顯示的保留欄位。",
+  "retentionInvalidField": "請輸入允許範圍內的值。",
   "retentionPolicyTitle": "保留策略",
   "retentionPolicyDescription": "自動移除舊的已完成歷史記錄和相關執行詳情。活動中的工作會受到保護。",
   "retentionEnabledLabel": "自動清理",

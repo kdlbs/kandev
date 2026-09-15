@@ -13,8 +13,8 @@ requirements:
 ## Purpose and boundaries
 
 System-page owns the composition and maintenance presentation of these two routes.
-This revision describes the pending [settings storage tabs package](../../../plans/settings-storage-tabs/plan.md).
-The existing two-page split is already implemented.
+This revision describes the implemented [settings storage tabs package](../../../plans/settings-storage-tabs/plan.md).
+The existing two-page split and the new tab allocation are current.
 The [UI header-tab design](../../ui/system-design/settings-header-tabs.md) owns the reusable interaction.
 Office owns retention policy, deletion eligibility, preview markers, and count semantics.
 Those backend contracts remain unchanged.
@@ -43,8 +43,8 @@ Do not put a second page heading or tab strip inside the content.
 | `/settings/system/storage` | `tab=host` (default) | StorageMaintenanceSettings |
 | `/settings/system/storage` | `tab=office-retention` | Retention status, retention policy |
 
-`DataLogsSettings` becomes the Data & Logs tab composition.
-A proposed `StorageSettings` composition wraps existing host maintenance and Office retention.
+`DataLogsSettings` is the Data & Logs tab composition.
+`StorageSettings` wraps existing host maintenance and Office retention.
 Settings menu labels and breadcrumb paths remain unchanged.
 Storage description includes host cleanup and Office history retention.
 
@@ -73,7 +73,9 @@ The existing `SettingsSaveProvider` is keyed by pathname, not query.
 Use the UI design's same-path tab replacement and retained stateful panels.
 Keep contributors `system:storage-policy`, `system:retention`, and `system:tool-payload-retention` in their owning page.
 Do not duplicate them or reset their dirty baselines on tab activation.
-Visit panels lazily, then retain forms until route exit. Mount LogViewer only while selected to avoid hidden streaming work.
+Visit panels lazily, then retain forms until route exit. The Logs panel mounts
+`LogViewer` on first activation and keeps it mounted while hidden so an in-progress
+diagnostic bundle can finish and download.
 Existing ongoing maintenance/preparation jobs keep their current lifecycle when a form is hidden.
 
 The floating Save changes control saves all dirty contributors on the page, including inactive panels.

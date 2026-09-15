@@ -21,7 +21,8 @@ Tab clicks replace the current history entry and preserve drafts. Cross-page nav
 This decision supersedes only the no-tabs constraint in
 [the page-split decision](2026-09-03-separate-system-data-storage-pages.md).
 It preserves the two direct settings destinations and their ownership boundaries.
-Implementation is pending in [the plan package](../plans/settings-storage-tabs/plan.md).
+Implementation is complete in [the plan package](../plans/settings-storage-tabs/plan.md),
+including focused desktop and phone verification and the published maintenance documentation.
 
 ## Consequences
 

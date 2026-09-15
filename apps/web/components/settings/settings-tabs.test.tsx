@@ -8,9 +8,14 @@ import {
   type SettingsTabOption,
 } from "./settings-tabs";
 
+const databaseTabLabel = "Database";
+const logsTabLabel = "Logs";
+const databasePanelTestId = "database-panel";
+const logsPanelTestId = "logs-panel";
+
 const tabs: SettingsTabOption[] = [
-  { id: "database", label: "Database" },
-  { id: "logs", label: "Logs" },
+  { id: "database", label: databaseTabLabel },
+  { id: "logs", label: logsTabLabel },
 ];
 
 afterEach(cleanup);
@@ -20,10 +25,10 @@ function ExampleTabs() {
   return (
     <SettingsTabs tabs={tabs} value={value} onValueChange={setValue}>
       <SettingsTabsList ariaLabel="Data and logs" />
-      <SettingsTabsPanel value="database" testId="database-panel">
+      <SettingsTabsPanel value="database" testId={databasePanelTestId}>
         Database content
       </SettingsTabsPanel>
-      <SettingsTabsPanel value="logs" testId="logs-panel">
+      <SettingsTabsPanel value="logs" testId={logsPanelTestId}>
         Logs content
       </SettingsTabsPanel>
     </SettingsTabs>
@@ -34,26 +39,28 @@ describe("SettingsTabs", () => {
   it("connects header triggers to panels and uses manual activation", () => {
     render(<ExampleTabs />);
 
-    const database = screen.getByRole("tab", { name: "Database" });
-    const logs = screen.getByRole("tab", { name: "Logs" });
+    const database = screen.getByRole("tab", { name: databaseTabLabel });
+    const logs = screen.getByRole("tab", { name: logsTabLabel });
     expect(database.getAttribute("aria-controls")).toBeTruthy();
     expect(logs.getAttribute("aria-controls")).toBeTruthy();
     expect(database.getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByTestId("database-panel").getAttribute("data-state")).toBe("active");
-    expect(screen.getByTestId("logs-panel").getAttribute("data-state")).toBe("inactive");
+    expect(screen.getByTestId(databasePanelTestId).getAttribute("data-state")).toBe("active");
+    expect(screen.getByTestId(logsPanelTestId).getAttribute("data-state")).toBe("inactive");
+    expect(screen.getByTestId(logsPanelTestId).textContent).toBe("");
 
     fireEvent.keyDown(database, { key: "ArrowRight" });
     expect(database.getAttribute("aria-selected")).toBe("true");
     fireEvent.keyDown(logs, { key: "Enter" });
     expect(logs.getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByTestId("logs-panel").getAttribute("data-state")).toBe("active");
+    expect(screen.getByTestId(logsPanelTestId).getAttribute("data-state")).toBe("active");
+    expect(screen.getByTestId(logsPanelTestId).textContent).toContain("Logs content");
   });
 
   it("keeps desktop and touch target sizing on the shared controls", () => {
     render(<ExampleTabs />);
 
     expect(screen.getAllByRole("tablist")[0]?.className).toContain("h-8");
-    expect(screen.getByRole("tab", { name: "Database" }).className).toContain("h-7");
-    expect(screen.getByRole("tab", { name: "Database" }).className).toContain("h-11");
+    expect(screen.getByRole("tab", { name: databaseTabLabel }).className).toContain("h-7");
+    expect(screen.getByRole("tab", { name: databaseTabLabel }).className).toContain("h-11");
   });
 });
