@@ -2,11 +2,16 @@ package handlers
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
 	"github.com/kandev/kandev/internal/common/logger"
+	officemodels "github.com/kandev/kandev/internal/office/models"
+	officesqlite "github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/service"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -21,18 +26,32 @@ func TestListRelatedTasksDispatcherEnforcesRelatedReadAuthorization(t *testing.T
 	svc, repo := newTestTaskService(t)
 	ctx := context.Background()
 	log := testLogger(t)
+	sharedDB := sqlx.NewDb(repo.DB(), "sqlite3")
+	officeRepo, err := officesqlite.NewWithDB(sharedDB, sharedDB, log)
+	require.NoError(t, err)
 	docs := service.NewDocumentService(repo, log)
-	handoff := service.NewHandoffService(repo, repo, docs, nil, nil, log)
+	handoff := service.NewHandoffService(repo, repo, docs, officeRepo, nil, log)
 	handlers := NewHandlers(svc, nil, nil, nil, nil, repo, repo, nil, nil, nil, nil, nil, log)
 	handlers.SetHandoffService(handoff)
 	dispatcher := ws.NewDispatcher()
 	handlers.RegisterHandlers(dispatcher)
 
 	seedRelatedReadTasks(t, repo)
-	_, err := docs.CreateOrUpdateDocument(ctx, "parent", "spec", "custom", "Spec", "parent body", "agent", "Agent")
+	_, err = docs.CreateOrUpdateDocument(ctx, "parent", "spec", "custom", "Spec", "parent body", "agent", "Agent")
 	require.NoError(t, err)
 	_, err = docs.CreateOrUpdateDocument(ctx, "stranger", "secret", "custom", "Secret", "stranger body", "agent", "Agent")
 	require.NoError(t, err)
+	require.NoError(t, officeRepo.CreateTaskBlocker(ctx, &officemodels.TaskBlocker{
+		TaskID: "stranger", BlockerTaskID: "stranger-blocker",
+	}))
+	require.NoError(t, officeRepo.CreateTaskBlocker(ctx, &officemodels.TaskBlocker{
+		TaskID: "stranger-dependent", BlockerTaskID: "stranger",
+	}))
+	require.NoError(t, officeRepo.CreateActivityEntry(ctx, &officemodels.ActivityEntry{
+		ID: "activity-before-read", WorkspaceID: "ws-a", ActorType: officemodels.ActivityActorAgent,
+		ActorID: "agent", Action: officemodels.ActivityAction("sentinel"),
+		TargetType: officemodels.ActivityTargetTask, TargetID: "stranger", Details: `{}`,
+	}))
 
 	before := snapshotRelatedReadTables(t, repo)
 
@@ -65,6 +84,10 @@ func TestListRelatedTasksDispatcherEnforcesRelatedReadAuthorization(t *testing.T
 	assert.Equal(t, "stranger", compactPayload.Task.ID)
 	assertRelatedTasksOmitDescriptions(t, &compactPayload)
 	assert.Empty(t, compactPayload.Task.DocumentKeys)
+	require.Len(t, compactPayload.Blockers, 1)
+	assert.Equal(t, "stranger-blocker", compactPayload.Blockers[0].ID)
+	require.Len(t, compactPayload.BlockedBy, 1)
+	assert.Equal(t, "stranger-dependent", compactPayload.BlockedBy[0].ID)
 
 	ordinary := dispatchRelatedRead(t, dispatcher, map[string]any{
 		"task_id": "stranger", "caller_task_id": "child-a", "caller_session_id": "session-caller",
@@ -155,6 +178,8 @@ func seedRelatedReadTasks(t *testing.T, repo relatedReadSeedRepo) {
 		{ID: "child-a", WorkspaceID: "ws-a", WorkflowID: "wf-a", Title: "Child A", ParentID: "parent", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now},
 		{ID: "child-b", WorkspaceID: "ws-a", WorkflowID: "wf-a", Title: "Child B", ParentID: "parent", State: v1.TaskStateCreated, CreatedAt: now, UpdatedAt: now},
 		{ID: "stranger", WorkspaceID: "ws-a", WorkflowID: "wf-a", Title: "Unrelated", Description: "stranger description", State: v1.TaskStateReview, CreatedAt: now, UpdatedAt: now},
+		{ID: "stranger-blocker", WorkspaceID: "ws-a", WorkflowID: "wf-a", Title: "Unrelated blocker", State: v1.TaskStateInProgress, CreatedAt: now, UpdatedAt: now},
+		{ID: "stranger-dependent", WorkspaceID: "ws-a", WorkflowID: "wf-a", Title: "Unrelated dependent", State: v1.TaskStateCreated, CreatedAt: now, UpdatedAt: now},
 		{ID: "foreign", WorkspaceID: "ws-b", WorkflowID: "wf-b", Title: "Foreign secret", Description: "Foreign secret description", State: v1.TaskStateCreated, CreatedAt: now, UpdatedAt: now},
 	} {
 		require.NoError(t, repo.CreateTask(ctx, task))
@@ -219,41 +244,58 @@ func assertRelatedTaskOmitsDescription(t *testing.T, task *service.RelatedTask) 
 }
 
 type relatedReadTableSnapshot struct {
-	tasksA       int
-	tasksB       int
-	callerSess   int
-	parentDocs   int
-	strangerDocs int
-	foreignDocs  int
+	tasks             [][]string
+	workflows         [][]string
+	sessions          [][]string
+	documents         [][]string
+	documentRevisions [][]string
+	blockers          [][]string
+	activities        [][]string
 }
 
 func snapshotRelatedReadTables(t *testing.T, repo relatedReadSnapshotRepo) relatedReadTableSnapshot {
 	t.Helper()
-	ctx := context.Background()
-	tasksA, err := repo.CountTasksByWorkflow(ctx, "wf-a")
-	require.NoError(t, err)
-	tasksB, err := repo.CountTasksByWorkflow(ctx, "wf-b")
-	require.NoError(t, err)
-	sessionCounts, err := repo.GetSessionCountsByTaskIDs(ctx, []string{"child-a"})
-	require.NoError(t, err)
-	parentDocs, err := repo.ListDocuments(ctx, "parent")
-	require.NoError(t, err)
-	strangerDocs, err := repo.ListDocuments(ctx, "stranger")
-	require.NoError(t, err)
-	foreignDocs, err := repo.ListDocuments(ctx, "foreign")
-	require.NoError(t, err)
+	db := repo.DB()
 	return relatedReadTableSnapshot{
-		tasksA:       tasksA,
-		tasksB:       tasksB,
-		callerSess:   sessionCounts["child-a"],
-		parentDocs:   len(parentDocs),
-		strangerDocs: len(strangerDocs),
-		foreignDocs:  len(foreignDocs),
+		tasks:             snapshotSQLRows(t, db, "SELECT * FROM tasks ORDER BY id"),
+		workflows:         snapshotSQLRows(t, db, "SELECT * FROM workflows ORDER BY id"),
+		sessions:          snapshotSQLRows(t, db, "SELECT * FROM task_sessions ORDER BY id"),
+		documents:         snapshotSQLRows(t, db, "SELECT * FROM task_documents ORDER BY task_id, key"),
+		documentRevisions: snapshotSQLRows(t, db, "SELECT * FROM task_document_revisions ORDER BY task_id, document_key, revision_number"),
+		blockers:          snapshotSQLRows(t, db, "SELECT * FROM task_blockers ORDER BY task_id, blocker_task_id"),
+		activities:        snapshotSQLRows(t, db, "SELECT * FROM office_activity_log ORDER BY id"),
 	}
 }
 
 type relatedReadSnapshotRepo interface {
-	CountTasksByWorkflow(context.Context, string) (int, error)
-	GetSessionCountsByTaskIDs(context.Context, []string) (map[string]int, error)
-	ListDocuments(context.Context, string) ([]*models.TaskDocument, error)
+	DB() *sql.DB
+}
+
+func snapshotSQLRows(t *testing.T, db *sql.DB, query string) [][]string {
+	t.Helper()
+	rows, err := db.QueryContext(context.Background(), query)
+	require.NoError(t, err)
+	defer func() { require.NoError(t, rows.Close()) }()
+
+	columns, err := rows.Columns()
+	require.NoError(t, err)
+	result := make([][]string, 0)
+	for rows.Next() {
+		values := make([]any, len(columns))
+		destinations := make([]any, len(columns))
+		for i := range values {
+			destinations[i] = &values[i]
+		}
+		require.NoError(t, rows.Scan(destinations...))
+		serialized := make([]string, len(values))
+		for i, value := range values {
+			if bytes, ok := value.([]byte); ok {
+				value = string(bytes)
+			}
+			serialized[i] = fmt.Sprintf("%T:%v", value, value)
+		}
+		result = append(result, serialized)
+	}
+	require.NoError(t, rows.Err())
+	return result
 }
