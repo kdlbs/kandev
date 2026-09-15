@@ -53,6 +53,28 @@ When all subtasks are complete:
 2. If satisfactory, mark the parent task as done.
 3. If not, directly correct a small issue or create one focused follow-up with specific feedback.
 
+## Cross-Workspace Handoff
+
+To hand work to a **different** workspace (not a subtask in your own), use:
+
+```bash
+$KANDEV_CLI kandev task handoff \
+  --target-workspace-id "<workspace-id>" \
+  --workflow-id "<workflow-id-in-target-workspace>" \
+  --title "Delivery task title" \
+  --prompt "Delivery agent's first user message" \
+  --agent-profile-id "<agent-profile-id-in-target-workspace>" \
+  --executor-profile-id "<executor-profile-id-in-target-workspace>"
+```
+
+`--target-workspace-id`, `--workflow-id`, `--title`, `--prompt`,
+`--agent-profile-id` and `--executor-profile-id` are required. Optional flags:
+`--repository-id` (with `--base-branch`) attaches a repository, `--start-agent`
+launches the delivery agent immediately (default false), and `--external-id`
+makes a retried handoff idempotent. This creates a task in the named target
+workspace — it does not create a subtask of your own task, and you need the
+`can_handoff_tasks` permission to use it.
+
 ## References
 
 Read `./HEARTBEAT.md` for the per-wakeup checklist to follow each time you are activated.

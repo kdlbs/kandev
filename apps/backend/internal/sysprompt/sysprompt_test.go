@@ -297,19 +297,11 @@ func TestFormatOfficeContext_InjectsIDs(t *testing.T) {
 }
 
 func TestFormatOfficeContext_CompletionInstructionFollowsStepGate(t *testing.T) {
-	withoutSignal := FormatOfficeContextWithOptions("task-office", "session-office", false, false)
+	withoutSignal := FormatOfficeContextWithOptions("task-office", "session-office", false)
 	assert.NotContains(t, withoutSignal, "Call step_complete_kandev as the LAST action")
 
-	withSignal := FormatOfficeContextWithOptions("task-office", "session-office", true, false)
+	withSignal := FormatOfficeContextWithOptions("task-office", "session-office", true)
 	assert.Contains(t, withSignal, "Call step_complete_kandev as the LAST action")
-}
-
-func TestFormatOfficeContext_HandoffToolFollowsCapabilityGrant(t *testing.T) {
-	withoutHandoff := FormatOfficeContextWithOptions("task-office", "session-office", false, false)
-	assert.NotContains(t, withoutHandoff, "handoff_task_kandev")
-
-	withHandoff := FormatOfficeContextWithOptions("task-office", "session-office", false, true)
-	assert.Contains(t, withHandoff, "handoff_task_kandev")
 }
 
 func TestInjectOfficeContext_WrapsAndIsStrippable(t *testing.T) {

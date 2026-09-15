@@ -28,7 +28,6 @@ const (
 	CapabilityGitHubPR       Capability = "github-pr"
 	CapabilityGitLabMR       Capability = "gitlab-mr"
 	CapabilityCanvas         Capability = "canvas-authoring"
-	CapabilityHandoffTask    Capability = "handoff-task"
 )
 
 // Context is the complete, backend-resolved MCP profile for one agent

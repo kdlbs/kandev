@@ -25,6 +25,7 @@ const (
 	CapabilitySpawnAgentRun    = "spawn_agent_run"
 	CapabilityModifyAgents     = "modify_agents"
 	CapabilityDeleteSkills     = "delete_skills"
+	CapabilityHandoffTask      = "handoff_task"
 )
 
 // AvailableActionRecordStepDecision identifies the advisory runtime decision
@@ -63,6 +64,8 @@ func (c Capabilities) Allows(key string) bool {
 		return c.CanModifyAgents
 	case CapabilityDeleteSkills:
 		return c.CanDeleteSkills
+	case CapabilityHandoffTask:
+		return c.CanHandoffTasks
 	default:
 		return false
 	}
@@ -92,6 +95,7 @@ func (c Capabilities) AllowedKeys() []string {
 		CapabilitySpawnAgentRun,
 		CapabilityModifyAgents,
 		CapabilityDeleteSkills,
+		CapabilityHandoffTask,
 	}
 	out := make([]string, 0, len(keys))
 	for _, key := range keys {
@@ -124,5 +128,6 @@ func FromAgent(agent *models.AgentInstance) Capabilities {
 		CanSpawnAgentRun:    shared.HasPermission(perms, shared.PermCanAssignTasks),
 		CanModifyAgents:     shared.HasPermission(perms, shared.PermCanCreateAgents),
 		CanDeleteSkills:     false,
+		CanHandoffTasks:     shared.HasPermission(perms, shared.PermCanHandoffTasks),
 	}
 }
