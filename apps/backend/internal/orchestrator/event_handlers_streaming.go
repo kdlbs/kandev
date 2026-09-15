@@ -2542,6 +2542,19 @@ func (s *Service) setSessionRunningForExecution(ctx context.Context, taskID, ses
 	if isTerminalSessionState(session.State) {
 		return
 	}
+	if session.State == models.TaskSessionStateWaitingForInput &&
+		!s.isExecutionCompleted(sessionID, executionID) &&
+		s.sessionHasLiveClarification(ctx, sessionID) {
+		// Tool-stream events from the execution that opened a clarification can
+		// arrive while the MCP request is still blocked. Keep the durable input
+		// barrier visible until the user answers; the clarification handler owns
+		// the transition back to RUNNING.
+		s.logger.Debug("ignoring stream event while clarification is pending",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("agent_execution_id", executionID))
+		return
+	}
 	if session.State == models.TaskSessionStateWaitingForInput && s.isExecutionCompleted(sessionID, executionID) {
 		s.logger.Debug("ignoring stream event for completed execution",
 			zap.String("task_id", taskID),

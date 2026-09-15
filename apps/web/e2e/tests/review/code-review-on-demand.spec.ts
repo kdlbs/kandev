@@ -90,12 +90,14 @@ test.describe("Native code review — on demand", () => {
     await runButton.click();
 
     // Findings land as inline annotations in the diff.
-    const findingCard = dialog.getByTestId("review-finding-card").first();
+    const findingCard = dialog
+      .getByTestId("review-finding-card")
+      .filter({ hasText: "Unchecked value can be nil" });
     await expect(findingCard).toBeVisible({ timeout: 90_000 });
-    await expect(dialog.getByTestId("review-finding-title").first()).toContainText(
+    await expect(findingCard.getByTestId("review-finding-title")).toContainText(
       "Unchecked value can be nil",
     );
-    await expect(dialog.getByTestId("review-finding-severity-blocker").first()).toBeVisible();
+    await expect(findingCard.getByTestId("review-finding-severity-blocker")).toBeVisible();
     await expect(dialog.getByTestId("review-open-count")).toContainText("finding");
 
     await testPage.screenshot({
@@ -125,11 +127,9 @@ test.describe("Native code review — on demand", () => {
 
     // A finding is advisory: resolving it is the human's call and it persists.
     await findingCard.getByTestId("review-finding-resolve").click();
-    await expect(dialog.getByTestId("review-finding-card").first()).toHaveAttribute(
-      "data-finding-status",
-      "resolved",
-      { timeout: 15_000 },
-    );
+    await expect(findingCard).toHaveAttribute("data-finding-status", "resolved", {
+      timeout: 15_000,
+    });
 
     await testPage.screenshot({
       path: "e2e-artifacts/review-03-resolved.png",
@@ -150,11 +150,9 @@ test.describe("Native code review — on demand", () => {
     await testPage.getByRole("button", { name: "Expand review" }).click();
     const reopened = testPage.getByRole("dialog", { name: "Review Changes" });
     await expect(reopened).toBeVisible();
-    await expect(reopened.getByTestId("review-finding-card").first()).toHaveAttribute(
-      "data-finding-status",
-      "resolved",
-      { timeout: 30_000 },
-    );
+    await expect(
+      reopened.getByTestId("review-finding-card").filter({ hasText: "Unchecked value can be nil" }),
+    ).toHaveAttribute("data-finding-status", "resolved", { timeout: 30_000 });
   });
 
   test("explains how to configure a reviewer when none is available", async ({
