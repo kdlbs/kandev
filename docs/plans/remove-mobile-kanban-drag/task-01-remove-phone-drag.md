@@ -161,3 +161,10 @@ Reconciled the active adaptive Kanban requirements/design and the auto-hide phon
 scenario with native scrolling and menu-based moves. Removed stale promises of
 phone drop targets. Specification catalog and full specification lint pass.
 No production behavior or rendered UI changed during this documentation repair.
+
+Claude review: classified the 350ms hold as a negative assertion, matching the
+causal-waits contract. Both hold cases passed with `E2E_DEBUG=1 E2E_PORT_OFFSET=22
+pnpm e2e:run --host --no-build --project mobile-chrome
+tests/kanban/mobile-kanban-reorder.spec.ts -- --grep "after a hold" --retries=0`
+from apps/web. The original port was occupied; the isolated-port run passed
+without retries. Test timing, assertions, and rendered UI are unchanged.

@@ -25,8 +25,8 @@ async function swipeCard(page: Page, cdp: CDPSession, scroll: Locator, hold: boo
     await dwell(
       page,
       350,
-      "library-timer",
-      "Exceed the former 250ms card drag activation delay before swiping",
+      "negative-assertion",
+      "Hold exceeds the former 250ms dnd-kit threshold; asserting drag never fires even then",
     );
   }
   for (let step = 1; step <= 10; step++) {
