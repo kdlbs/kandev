@@ -95,7 +95,7 @@ Same as `chromium` but on Playwright's Pixel-5 viewport, gated on `tests/**/mobi
 This project:
 
 - **Skips entirely** when no Docker daemon is reachable. Contributors without Docker can still run `chromium` + `mobile-chrome`.
-- **Builds container images on demand.** First run builds `kandev-agent:e2e` (slim Node base + git), `kandev-sshd:e2e` (Alpine + openssh-server + git + pre-baked mock-agent), and the Kubernetes runtime/backend image. Subsequent runs hit Docker's layer cache.
+- **Builds container images on demand.** First run builds `kandev-agent:e2e` (slim Node base + git), `kandev-sshd:e2e` (Alpine + openssh-server + git + pre-baked mock-agent), and a Kubernetes runtime/backend image derived from its pinned CI runtime base. Subsequent runs hit Docker's layer cache.
 - **Has a longer per-test timeout** (180s vs 60s) because container starts + agent setup are slow.
 
 How to run it locally (requires Docker running):
@@ -166,9 +166,18 @@ KANDEV_E2E_CONTAINERS=1 \
 pnpm e2e:run --host --project kubernetes-compat tests/kubernetes-compat
 ```
 
+The fixture application image uses the immutable `KUBERNETES_E2E_BASE_IMAGE`
+pin from `kubernetes-pins.ts`. CI pre-pulls this prebuilt GHCR runtime image
+with bounded retries. The per-run image build only copies the current backend
+and web artifacts, so it does not contact an Ubuntu package mirror.
+
 The compatibility fixture uses the same exact-name ownership marker, narrow
 teardown, foreign-image refusal, and credential-redacted diagnostics as the full
 suite. Unsupported version selectors fail before provisioning.
+
+The compatibility runtime image is the immutable `kandev-ci:runtime-latest`
+image used by CI. It includes the lifecycle tools required by the backend, so
+the fixture does not resolve Ubuntu packages during every matrix job.
 
 ### Remote-executor fixture contracts
 
@@ -765,3 +774,25 @@ Record results as `{ "workers": 2, "wall_seconds": 0, "max_rss_kb": 0,
 "retries": 0, "backend_errors": 0 }`. Compare at least three repetitions
 with the same build, duration-aware manifest, and profile before considering a
 default change.
+
+### Full worker Docker lifecycle acceptance
+
+`tests/kubernetes/kubernetes-docker-workloads.spec.ts` is an explicit opt-in
+`containers` suite. First build and verify the [full worker recipe](../../../k8s/worker-images/full/README.md)
+on an isolated host with adequate disk/I/O capacity, then pass the exact printed
+local `IMAGE_ID` as `KANDEV_E2E_FULL_WORKER_IMAGE`:
+
+```bash
+KANDEV_E2E_FULL_WORKER_IMAGE=sha256:<verified-local-image-id> \
+KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --host --shards 1 --project containers tests/kubernetes/kubernetes-docker-workloads.spec.ts
+```
+
+The fixture creates a never-started container to add the mock transport, loads
+that exact derived image into its disposable Kind cluster, and caps the test
+node at two CPUs/eight GiB before starting Docker workloads. Existing Kind
+provisioning still requires an isolated bounded test host. No credentials are
+needed. The tests cover real source/browser/Compose results through the terminal,
+finite preparation failure, retained/replaced workspaces, independent daemons,
+Pod cgroup ancestry and exact cleanup including an untouched existing claim.
+The cgroup case fails if nested work escapes the Pod budget. Missing image input
+skips the suite; skips and test discovery do not count as execution acceptance.

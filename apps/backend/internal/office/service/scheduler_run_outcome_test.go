@@ -64,7 +64,7 @@ func TestSchedulerOutcome_AgentInactive_WritesOutcome(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned, `{"task_id":"t1"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -106,7 +106,7 @@ func TestSchedulerOutcome_IdleSkipped_WritesOutcome(t *testing.T) {
 	}
 	// Worker defaults to skip_idle_runs=true, no tasks assigned.
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonHeartbeat, `{}`, ""); err != nil {
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonHeartbeat, `{}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
 
@@ -134,7 +134,7 @@ func TestSchedulerOutcome_TaskTreeHeld_WritesOutcome(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-tree-outcome"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestSchedulerOutcome_CheckoutError_RetriesInsteadOfFinishing(t *testing.T) 
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-checkout-error"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestSchedulerOutcome_CheckoutUnavailable_RetriesInsteadOfFinishing(t *testi
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-checkout-unavail"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -286,7 +286,7 @@ func TestSchedulerOutcome_BudgetBlocked_WritesOutcome(t *testing.T) {
 	insertTestTask(t, svc, "task-budget-outcome", "ws-1")
 	insertTestCostEvent(t, svc, agent.ID, "task-budget-outcome", int64(600))
 
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-budget-outcome"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestSchedulerOutcome_NoTaskStarter_FailsRun(t *testing.T) {
 	if err := svc.CreateAgentInstance(ctx, agent); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
-	if err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
+	if _, err := svc.QueueRun(ctx, agent.ID, service.RunReasonTaskAssigned,
 		`{"task_id":"task-no-launch"}`, ""); err != nil {
 		t.Fatalf("queue: %v", err)
 	}
@@ -353,7 +353,7 @@ func TestSchedulerOutcome_Processed_WritesOutcome(t *testing.T) {
 	createTestAgent(t, svc, "ws-1", "worker-processed")
 	taskID := createOfficeTask(t, svc, "ws-1", "worker-processed")
 
-	if err := svc.QueueRun(
+	if _, err := svc.QueueRun(
 		ctx, "worker-processed", service.RunReasonTaskAssigned,
 		`{"task_id":"`+taskID+`"}`, "processed-outcome",
 	); err != nil {

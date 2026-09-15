@@ -210,10 +210,10 @@ function requireBuildArtifacts(): void {
 function buildRuntimeImage(tag: string): void {
   requireBuildArtifacts();
   const context = fs.mkdtempSync(path.join(os.tmpdir(), "kandev-kubernetes-e2e-image-"));
+  // The pinned CI runtime already contains the lifecycle tools used by the
+  // backend. Reusing it keeps compatibility jobs independent of live package
+  // mirror resolution on each hosted runner.
   const dockerfile = `FROM ${KUBERNETES_E2E_BASE_IMAGE}
-RUN apt-get update \\
- && apt-get install -y --no-install-recommends ca-certificates curl git \\
- && rm -rf /var/lib/apt/lists/*
 COPY kandev /usr/local/bin/kandev
 COPY agentctl-linux-amd64 /usr/local/bin/agentctl-linux-amd64
 COPY mock-agent-linux-amd64 /usr/local/bin/mock-agent
@@ -450,6 +450,18 @@ function uniqueClusterName(workerIndex: number): string {
   return `kandev-e2e-${process.pid}-${workerIndex}-${randomUUID().slice(0, 6)}`;
 }
 
+function kindClusterConfig(): string {
+  return `apiVersion: kind.x-k8s.io/v1alpha4
+kind: Cluster
+kubeadmConfigPatches:
+  - |
+    apiVersion: kubelet.config.k8s.io/v1beta1
+    kind: KubeletConfiguration
+    featureGates:
+      KubeletInUserNamespace: true
+`;
+}
+
 async function waitForPortForward(proc: ChildProcess, timeoutMs = 30_000): Promise<number> {
   return new Promise<number>((resolve, reject) => {
     const timer = setTimeout(() => {
@@ -481,6 +493,12 @@ async function waitForPortForward(proc: ChildProcess, timeoutMs = 30_000): Promi
   });
 }
 
+export function waitForInClusterBackendReady(baseUrl: string, proc?: ChildProcess): Promise<void> {
+  // /health only proves that the listener is bound; /ready gates API
+  // requests until the in-cluster backend has finished wiring routes.
+  return waitForHealth(`${baseUrl}/ready`, 30_000, proc);
+}
+
 async function stopChild(proc: ChildProcess): Promise<void> {
   if (proc.exitCode !== null) return;
   proc.kill("SIGTERM");
@@ -496,7 +514,7 @@ async function stopChild(proc: ChildProcess): Promise<void> {
   });
 }
 
-function inClusterBackendPod(image: string): string {
+export function inClusterBackendPod(image: string): string {
   return `apiVersion: v1
 kind: Pod
 metadata:
@@ -519,7 +537,7 @@ spec:
           containerPort: 8080
       readinessProbe:
         httpGet:
-          path: /health
+          path: /ready
           port: http
         periodSeconds: 1
         failureThreshold: 60
@@ -683,6 +701,7 @@ export async function provisionKubernetesCluster(
   const adminKubeconfig = path.join(root, `${name}.kubeconfig`);
   const hostKubeconfig = path.join(root, `${name}.host.kubeconfig`);
   const restrictedKubeconfig = path.join(root, `${name}.restricted.kubeconfig`);
+  const kindConfigPath = path.join(root, `${name}.kind.yaml`);
   const image = `kandev-kubernetes-e2e:${name}`;
   const marker = ownershipMarkerPath();
   const ownership = new FixtureResourceOwnership();
@@ -732,6 +751,7 @@ export async function provisionKubernetesCluster(
     }
     assertRuntimeImageTagAvailable(image, dockerImageTagExists(image));
     ownership.acquire("image", () => buildRuntimeImage(image));
+    fs.writeFileSync(kindConfigPath, kindClusterConfig(), { mode: 0o600 });
     writeClusterOwnershipMarker(marker, name);
     ownership.acquire("cluster", () =>
       execFileSync(
@@ -741,6 +761,8 @@ export async function provisionKubernetesCluster(
           "cluster",
           "--name",
           name,
+          "--config",
+          kindConfigPath,
           "--image",
           fixturePin.nodeImage,
           "--kubeconfig",
@@ -833,7 +855,7 @@ export async function provisionKubernetesCluster(
     try {
       const port = await waitForPortForward(proc);
       const baseUrl = `http://127.0.0.1:${port}`;
-      await waitForHealth(`${baseUrl}/health`, 30_000, proc);
+      await waitForInClusterBackendReady(baseUrl, proc);
       const context: InClusterBackend = {
         baseUrl,
         frontendUrl: baseUrl,

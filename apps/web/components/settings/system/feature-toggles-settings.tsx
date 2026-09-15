@@ -221,10 +221,9 @@ function RestartRequiredAlert({
         </span>
         {!loading && supported && (
           <Button
-            size="sm"
             onClick={onRestart}
             disabled={restarting}
-            className="h-11 w-full cursor-pointer sm:h-6 sm:w-auto"
+            className="w-full cursor-pointer sm:w-auto"
           >
             <IconPower className="mr-1 h-3.5 w-3.5" />
             {t("system:restartAction")}

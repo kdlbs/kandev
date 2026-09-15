@@ -11,6 +11,7 @@ import (
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/recoveryclaim"
 )
 
 // SQLiteStore implements Store interface using SQLite.
@@ -30,6 +31,24 @@ type SQLiteStore struct {
 // initializer; the store adds nothing on its own.
 func NewSQLiteStore(writer, reader *sqlx.DB) (*SQLiteStore, error) {
 	return &SQLiteStore{db: writer, ro: reader}, nil
+}
+
+// AcquireTaskEnvironmentRecoveryClaim exposes the shared durable authority
+// through the worktree store used by the orchestrator's recovery manager.
+func (s *SQLiteStore) AcquireTaskEnvironmentRecoveryClaim(
+	ctx context.Context,
+	req models.TaskEnvironmentRecoveryClaimRequest,
+) (*models.TaskEnvironmentRecoveryClaim, error) {
+	return recoveryclaim.Acquire(ctx, s.db, req)
+}
+
+// ReleaseTaskEnvironmentRecoveryClaim releases the exact recovery authority
+// previously acquired for an environment.
+func (s *SQLiteStore) ReleaseTaskEnvironmentRecoveryClaim(
+	ctx context.Context,
+	claim *models.TaskEnvironmentRecoveryClaim,
+) error {
+	return recoveryclaim.Release(ctx, s.db, claim)
 }
 
 // worktreeSelectCols is the SELECT projection shared by every worktree query.
@@ -175,6 +194,9 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 	if err := s.checkTaskCleanupBarrierLocked(ctx, tx, taskID); err != nil {
 		return err
 	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, s.db, tx, envID); err != nil {
+		return err
+	}
 
 	_, err = tx.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO task_environment_repos (
@@ -198,6 +220,69 @@ func (s *SQLiteStore) CreateWorktree(ctx context.Context, wt *Worktree) error {
 		return err
 	}
 	return tx.Commit()
+}
+
+// CompareAndSwapWorktree atomically retargets the exact environment/repository
+// row. A changed path, branch, or ownership tuple rejects the replacement.
+func (s *SQLiteStore) CompareAndSwapWorktree(ctx context.Context, expected, replacement *Worktree) (bool, error) {
+	if expected == nil || replacement == nil || expected.TaskEnvironmentID == "" || expected.RepositoryID == "" {
+		return false, fmt.Errorf("invalid worktree compare-and-swap identity")
+	}
+	result, err := s.db.ExecContext(ctx, s.db.Rebind(`
+		UPDATE task_environment_repos
+		SET worktree_id = ?, worktree_path = ?, worktree_branch = ?, updated_at = ?
+		WHERE task_environment_id = ? AND repository_id = ? AND branch_slug = ?
+		  AND worktree_id = ? AND worktree_path = ? AND worktree_branch = ?
+		  AND status = ? AND deleted_at IS NULL
+	`), replacement.ID, replacement.Path, replacement.Branch, replacement.UpdatedAt,
+		expected.TaskEnvironmentID, expected.RepositoryID, expected.BranchSlug,
+		expected.ID, expected.Path, expected.Branch, StatusActive)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows == 1, err
+}
+
+// CompareAndSwapWorktreeWithRecoveryClaim publishes a recovery replacement
+// only while the environment owner, generation, and durable claim are still
+// current. The claim validation and pointer update share one transaction.
+func (s *SQLiteStore) CompareAndSwapWorktreeWithRecoveryClaim(
+	ctx context.Context,
+	expected, replacement *Worktree,
+	claim *models.TaskEnvironmentRecoveryClaim,
+) (bool, error) {
+	if expected == nil || replacement == nil || claim == nil || expected.TaskEnvironmentID == "" || expected.RepositoryID == "" {
+		return false, fmt.Errorf("invalid guarded worktree compare-and-swap identity")
+	}
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := recoveryclaim.ValidateTx(ctx, s.db, tx, claim); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, s.db.Rebind(`
+		UPDATE task_environment_repos
+		SET worktree_id = ?, worktree_path = ?, worktree_branch = ?, updated_at = ?
+		WHERE task_environment_id = ? AND repository_id = ? AND branch_slug = ?
+		  AND worktree_id = ? AND worktree_path = ? AND worktree_branch = ?
+		  AND status = ? AND deleted_at IS NULL
+	`), replacement.ID, replacement.Path, replacement.Branch, replacement.UpdatedAt,
+		expected.TaskEnvironmentID, expected.RepositoryID, expected.BranchSlug,
+		expected.ID, expected.Path, expected.Branch, StatusActive)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, err
+	}
+	return rows == 1, nil
 }
 
 // checkTaskCleanupBarrierLocked rejects the persistence when a task lifecycle
@@ -325,7 +410,31 @@ func (s *SQLiteStore) GetWorktreesByRepositoryID(ctx context.Context, repoID str
 
 // UpdateWorktree updates an existing worktree record.
 func (s *SQLiteStore) UpdateWorktree(ctx context.Context, wt *Worktree) error {
+	if wt == nil || wt.ID == "" {
+		return fmt.Errorf("worktree is required")
+	}
 	wt.UpdatedAt = time.Now().UTC()
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var environmentID string
+	if err := tx.QueryRowContext(ctx, s.db.Rebind(`
+		SELECT task_environment_id FROM task_environment_repos WHERE worktree_id = ?
+	`), wt.ID).Scan(&environmentID); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("%w: %s", ErrWorktreeNotFound, wt.ID)
+		}
+		return err
+	}
+	if wt.TaskEnvironmentID != "" && wt.TaskEnvironmentID != environmentID {
+		return fmt.Errorf("%w: %s", ErrWorktreeNotFound, wt.ID)
+	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, s.db, tx, environmentID); err != nil {
+		return err
+	}
 
 	query := `
 		UPDATE task_environment_repos SET
@@ -347,7 +456,7 @@ func (s *SQLiteStore) UpdateWorktree(ctx context.Context, wt *Worktree) error {
 		args = append(args, wt.TaskEnvironmentID)
 	}
 
-	result, err := s.db.ExecContext(ctx, s.db.Rebind(query), args...)
+	result, err := tx.ExecContext(ctx, s.db.Rebind(query), args...)
 	if err != nil {
 		return err
 	}
@@ -356,12 +465,29 @@ func (s *SQLiteStore) UpdateWorktree(ctx context.Context, wt *Worktree) error {
 	if rows == 0 {
 		return fmt.Errorf("%w: %s", ErrWorktreeNotFound, wt.ID)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // DeleteWorktree removes a worktree record.
 func (s *SQLiteStore) DeleteWorktree(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, s.db.Rebind(`DELETE FROM task_environment_repos WHERE worktree_id = ?`), id)
+	tx, err := s.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var environmentID string
+	if err := tx.QueryRowContext(ctx, s.db.Rebind(`
+		SELECT task_environment_id FROM task_environment_repos WHERE worktree_id = ?
+	`), id).Scan(&environmentID); err != nil {
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("worktree not found: %s", id)
+		}
+		return err
+	}
+	if err := recoveryclaim.EnsureAvailableTx(ctx, s.db, tx, environmentID); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, s.db.Rebind(`DELETE FROM task_environment_repos WHERE worktree_id = ?`), id)
 	if err != nil {
 		return err
 	}
@@ -370,7 +496,7 @@ func (s *SQLiteStore) DeleteWorktree(ctx context.Context, id string) error {
 	if rows == 0 {
 		return fmt.Errorf("worktree not found: %s", id)
 	}
-	return nil
+	return tx.Commit()
 }
 
 // ListActiveWorktrees returns all worktrees with status 'active'.
@@ -393,10 +519,7 @@ func (s *SQLiteStore) ListActiveWorktrees(ctx context.Context) ([]*Worktree, err
 }
 
 // ListActiveWorktreePaths returns the worktree_path of every active,
-// non-deleted environment-repository row that has a non-empty path. The
-// office GC uses this set as the authoritative inventory of live worktrees;
-// any directory under the worktree base that does not appear here (and is
-// older than the GC grace period) is considered orphaned.
+// non-deleted environment-repository row that has a non-empty path.
 func (s *SQLiteStore) ListActiveWorktreePaths(ctx context.Context) ([]string, error) {
 	rows, err := s.ro.QueryContext(ctx, s.ro.Rebind(`
 		SELECT worktree_path

@@ -1101,12 +1101,17 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "configuration-prompts", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigPromptTools() }},
 		{name: "configuration-executors", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigExecutorTools() }},
 		{name: "configuration-tasks", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigTaskTools() }},
+		{name: "configuration-settings", enabled: func(ctx mcpprofile.Context) bool { return config(ctx) || external(ctx) }, register: func(s *Server) { s.registerConfigSettingsTools() }},
 		{name: "external-create-task", enabled: external, register: func(s *Server) { s.registerCreateTaskTool() }},
 		{name: "external-questions", enabled: external, register: func(s *Server) { s.registerQuestionAnsweringTools() }},
 		{name: "external-agent-permissions", enabled: external, register: func(s *Server) { s.registerAgentPermissionTools() }},
 		// Dependency edges are manageable wherever a task can be created.
 		{name: "task-dependencies", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || external(ctx) }, register: func(s *Server) { s.registerTaskDependencyTools() }},
 		{name: "kanban-task", enabled: kanban, register: func(s *Server) { s.registerKanbanTools() }},
+		{name: "task-pr-links", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool {
+			return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) ||
+				mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab)
+		}), register: func(s *Server) { s.registerTaskPRLinkTools() }},
 		{name: "github-pr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) }), register: func(s *Server) { s.registerPRAutomationTools() }},
 		{name: "gitlab-mr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab) }), register: func(s *Server) { s.registerMRAutomationTools() }},
 		{name: "user-question", enabled: capabilityEnabled(mcpprofile.CapabilityUserQuestion), register: func(s *Server) { s.registerInteractionTools() }},
@@ -1117,7 +1122,6 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 		{name: "review", enabled: kanban, register: func(s *Server) { s.registerReviewTools() }},
 		{name: "related-tasks", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerRelatedTasksTool() }},
 		{name: "office-documents", enabled: office, register: func(s *Server) { s.registerTaskDocumentTools() }},
-		{name: "office-decisions", enabled: office, register: func(s *Server) { s.registerRecordStepDecisionTool() }},
 		{name: "task-branch-sources", enabled: kanban, register: func(s *Server) {
 			s.registerAddBranchToTaskTool()
 			s.registerAddWorkspaceSourcesTool()
@@ -1287,12 +1291,13 @@ func (s *Server) registerKanbanTools() {
 	)
 	s.mcpServer.AddTool(
 		mcp.NewTool("move_task_kandev",
-			mcp.WithDescription("Move a task to a different workflow step. When the source session is mid-turn (RUNNING), the move is deferred to turn-end automatically — prompt is optional (use it for cross-agent hand-offs). Idle-session and admin moves apply immediately."),
+			mcp.WithDescription(`Move a task to a different workflow step. When the source session is mid-turn (RUNNING), the move is deferred to turn-end automatically — prompt is optional (use it for cross-agent hand-offs). Idle-session and admin moves apply immediately. Returns a move-result envelope: "disposition" is "applied" when the move committed immediately or "deferred" when it was recorded for turn-end, "task" is the moved (or target-step) task, and an optioned move also returns "move_id" and the accepted "entry_options" so you can correlate the one-shot override with the eventual entry.`),
 			mcp.WithString("task_id", mcp.Required(), mcp.Description("The task ID")),
 			mcp.WithString("workflow_id", mcp.Required(), mcp.Description("Target workflow ID")),
 			mcp.WithString("workflow_step_id", mcp.Required(), mcp.Description("Target workflow step ID")),
 			mcp.WithNumber("position", mcp.Description("Position within the step (0-based)")),
 			mcp.WithString("prompt", mcp.Description("Optional hand-off message for the receiving agent at the new step. Mid-turn moves are always deferred; include a prompt when the next agent needs context (e.g. QA → review). Omit for self-moves like Work → Done.")),
+			moveTaskEntryOptionsToolOption(),
 		),
 		s.wrapHandler("move_task_kandev", s.moveTaskHandler()),
 	)
@@ -1396,10 +1401,14 @@ func (s *Server) registerPRAutomationTools() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("report_pr_auto_fix_outcome_kandev",
 			mcp.WithDescription(
-				"Report the one explicit outcome for the current GitHub PR auto-fix turn. "+
+				"Report the one explicit outcome for the current Kandev-dispatched auto-fix turn. "+
+					"Use this tool only when this turn received the server-owned outcome protocol. "+
+					"Do not use it for manual PR fixup, sibling review messages, or instructions carried over from an earlier auto-fix turn. "+
+					"Tool availability or enabled automation settings alone do not establish an obligation to report. "+
 					"Use action_taken when a concrete provider-visible change was made, "+
 					"non_actionable when the feedback identifies no change this task can make, "+
 					"or blocked when an external condition prevents the needed change. "+
+					"Report exactly once for the dispatched turn. "+
 					"The task, session, turn, and PR are bound by Kandev and are not tool arguments.",
 			),
 			mcp.WithString("outcome", mcp.Required(), mcp.Enum("action_taken", "non_actionable", "blocked"), mcp.Description("The disposition of this auto-fix turn.")),
@@ -1407,6 +1416,40 @@ func (s *Server) registerPRAutomationTools() {
 		),
 		s.wrapHandler("report_pr_auto_fix_outcome_kandev", s.reportTaskPRAutoFixOutcomeHandler()),
 	)
+}
+
+func (s *Server) registerTaskPRLinkTools() {
+	s.mcpServer.AddTool(
+		mcp.NewTool("link_task_pr_kandev", taskPRLinkToolOptions(false)...),
+		s.wrapHandler("link_task_pr_kandev", s.taskPRLinkHandler("link_task_pr_kandev")),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("unlink_task_pr_kandev", taskPRLinkToolOptions(false)...),
+		s.wrapHandler("unlink_task_pr_kandev", s.taskPRLinkHandler("unlink_task_pr_kandev")),
+	)
+	s.mcpServer.AddTool(
+		mcp.NewTool("replace_task_pr_kandev", taskPRLinkToolOptions(true)...),
+		s.wrapHandler("replace_task_pr_kandev", s.taskPRLinkHandler("replace_task_pr_kandev")),
+	)
+}
+
+func taskPRLinkToolOptions(replace bool) []mcp.ToolOption {
+	options := []mcp.ToolOption{
+		mcp.WithDescription("Manage an explicit GitHub PR or GitLab MR association. Provide task_id, provider, canonical repository_id, and pull-request or merge-request number."),
+		mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("Target task identifier")),
+		mcp.WithString("provider", mcp.Required(), mcp.Description("Provider identity: github or gitlab")),
+		mcp.WithString("repository_id", mcp.Required(), mcp.Description("Canonical task repository identity")),
+		mcp.WithNumber("number", mcp.Required(), mcp.Description("Pull request or merge request number")),
+	}
+	if replace {
+		options[0] = mcp.WithDescription("Replace an explicit GitHub PR or GitLab MR association. Provide task_id, provider, canonical repository_id, and pull-request or merge-request number. The old and new associations must use the same provider.")
+		options = append(options,
+			mcp.WithString("old_provider", mcp.Required(), mcp.Description("Current association provider identity: github or gitlab")),
+			mcp.WithString("old_repository_id", mcp.Required(), mcp.Description("Current association canonical repository identity")),
+			mcp.WithNumber("old_number", mcp.Required(), mcp.Description("Current pull request or merge request number")),
+		)
+	}
+	return options
 }
 
 func (s *Server) registerMRAutomationTools() {
@@ -1445,12 +1488,12 @@ func (s *Server) registerMRAutomationTools() {
 func (s *Server) registerCreateTaskTool() {
 	toolDesc := `Create a persistent Kandev task or subtask and optionally start its agent. Use only for user-requested Kandev-tracked work; use the host's native subagent mechanism for ordinary delegation. Set parent_id="self" for a subtask of the current task and omit it for an unrelated top-level task. Subtasks inherit the parent's workspace, workflow, repository, profiles, executor, and materialized workspace unless the matching input overrides them. external_id provides create-if-absent idempotency and is not a lookup.`
 	parentDesc := "Parent task ID for subtasks. Use 'self' for a user-requested Kandev subtask or plan phase. Omit only for unrelated top-level tasks."
-	agentProfileDesc := "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task uses the verified creating session's profile and effective model, mode, and dynamic options for a session-bound call, then falls back to the current/source or parent profile without verified session context. workspace_default skips those task profiles and the creating session, then uses workflow profiles before the target workspace default. Explicit profiles do not copy creator-session runtime values. start_agent=false still needs a resolvable profile for later manual start."
+	agentProfileDesc := "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task uses the verified creating session's profile and effective model, mode, and dynamic options for a session-bound call, then falls back to the current/source or parent profile without verified session context. workspace_default skips those task profiles and the creating session, then uses workflow profiles before the target workspace default. Explicit profiles do not copy creator-session runtime values. start_agent=false still needs a resolvable profile for later manual start. agent_profile_id is the launch profile only and does not set an Office task's assignee; set the Office assignee through the Office UI or PATCH /api/v1/office/tasks/:id with an assignee_agent_profile_id field in the request body. Agent callers need can_assign_tasks for this PATCH operation (agent_profile_id there is not recognized)."
 
 	if s.mode == ModeExternal {
 		toolDesc = `Create a persistent Kandev task and optionally start its agent from an external client. Use only for user-requested Kandev-tracked work; use the host's native subagent mechanism for ordinary delegation. Provide a repository for a top-level task; parent_id may target a known task when the user requested a subtask. external_id provides create-if-absent idempotency and is not a lookup.`
 		parentDesc = "Optional parent task ID. Omit for top-level tasks; provide an existing task ID only to create a subtask of that task."
-		agentProfileDesc = "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task uses the parent task profile because external mode has no creating session or current/source task context; workspace_default skips the parent profile, then uses workflow profiles before the target workspace default. External mode never copies creator-session runtime values. start_agent=false still needs a resolvable profile for later manual start."
+		agentProfileDesc = "Agent profile ID to use. On a workflow step, the step's launch profile (its pinned profile, or the workflow default when unpinned) outranks it; otherwise an explicit agent_profile_id wins. When both are absent, current_task uses the parent task profile because external mode has no creating session or current/source task context; workspace_default skips the parent profile, then uses workflow profiles before the target workspace default. External mode never copies creator-session runtime values. start_agent=false still needs a resolvable profile for later manual start. agent_profile_id is the launch profile only and does not set an Office task's assignee; set the Office assignee through the Office UI or PATCH /api/v1/office/tasks/:id with an assignee_agent_profile_id field in the request body. Agent callers need can_assign_tasks for this PATCH operation (agent_profile_id there is not recognized)."
 	}
 
 	s.mcpServer.AddTool(
@@ -1460,7 +1503,7 @@ func (s *Server) registerCreateTaskTool() {
 			mcp.WithString("workspace_id", mcp.Description("The workspace ID. Auto-resolved if only one workspace exists. Defaulted from parent for subtasks when omitted.")),
 			mcp.WithString("workflow_id", mcp.Description("The workflow ID. Auto-resolved if the workspace has only one workflow. Defaulted from parent for subtasks when workspace_id is also omitted; if supplied, it must belong to the effective workspace_id.")),
 			mcp.WithString("workflow_step_id", mcp.Description("The workflow step ID (optional, auto-resolved if omitted; for subtasks, pass only with an explicit workflow_id)")),
-			mcp.WithString("workspace_mode", mcp.Description("Subtask materialized-workspace mode: inherit_parent reuses the parent's worktree/materialized workspace (default for subtasks); new_workspace launches the subtask in its own workspace/worktree.")),
+			mcp.WithString("workspace_mode", mcp.Enum("inherit_parent", "new_workspace"), mcp.Description("Optional materialized-workspace mode. Omit for subtasks to inherit the parent's workspace/worktree. inherit_parent requires parent_id and reuses the parent's materialized workspace/worktree; new_workspace requests a separate workspace/worktree.")),
 			mcp.WithString("title", mcp.Required(), mcp.MaxLength(service.TaskTitleMaxLength), mcp.Description("A concise, few-word task title (maximum 60 characters).")),
 			mcp.WithString("prompt", mcp.Description("The initial prompt for the task agent. This is the ONLY context the agent receives when it starts — treat it as the agent's first user message. For auto-started subtasks, provide a specific and detailed prompt; omitting it starts the task agent without task-specific context.")),
 			mcp.WithBoolean("autopilot", mcp.Description("Start this task in autopilot mode. Default: false. The value is fixed at creation and is not inherited by subtasks. The agent does not ask the user directly; it asks its direct parent only for critical decisions.")),
@@ -1732,10 +1775,10 @@ func (s *Server) updateRepositoryBaseBranchHandler() server.ToolHandlerFunc {
 func (s *Server) registerStepCompleteTool() {
 	s.mcpServer.AddTool(
 		mcp.NewTool("step_complete_kandev",
-			mcp.WithDescription(`Signal that every requirement for the current workflow step is complete. Call this as the step's final action; do not call before asking the user, during partial work, or with an unresolved blocker. The signal is idempotent within a step, and any configured transition runs asynchronously at turn end. A new user message cancels a pending signal. The summary is shown to the user and may be forwarded to the next step.`),
+			mcp.WithDescription(`Signal that every requirement for the current workflow step is complete. Call this as the step's final action; do not call before asking the user or during partial work. If you cannot make further progress without input, describe the issue in blockers. The signal is idempotent within a step, and any configured transition runs asynchronously at turn end. A new user message cancels a pending signal. The summary is shown to the user and is recorded on the step-transition history.`),
 			mcp.WithString("summary", mcp.Required(), mcp.Description("One-paragraph plain-text summary of what was done in this step. Shown to the user.")),
-			mcp.WithString("handoff", mcp.Description("Optional context the next step's agent will need to pick up where you left off (decisions, open files, follow-ups).")),
-			mcp.WithString("blockers", mcp.Description("Optional list of known unresolved issues. Use sparingly — only when the step is complete in the sense that you cannot make further progress without input, not for normal partial work.")),
+			mcp.WithString("handoff", mcp.Description("Optional context for the immediately-following step's agent, delivered once in that step's first prompt and not carried beyond it. Up to 8,192 bytes; longer values are truncated.")),
+			mcp.WithString("blockers", mcp.Description("Optional list of known unresolved issues. Recorded on this step's transition history, not delivered to the next step's agent — do not use it to pass context forward. Use sparingly, only when you cannot make further progress without input. Up to 8,192 bytes; longer values are truncated.")),
 		),
 		s.wrapHandler("step_complete_kandev", s.stepCompleteHandler()),
 	)

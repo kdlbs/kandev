@@ -16,6 +16,7 @@ import {
 import type { ChangesPanelBodyProps } from "./changes-panel-data";
 import { useTranslation } from "react-i18next";
 import { IconAlertTriangle } from "@tabler/icons-react";
+import { WorkspaceUnavailable } from "./workspace-unavailable";
 
 function ComparisonTargetNotice({
   comparisonTargets,
@@ -47,7 +48,9 @@ function ComparisonTargetNotice({
 function ChangesPanelDialogsSection({
   dialogs,
   isLoading,
-}: Pick<ChangesPanelBodyProps, "dialogs" | "isLoading">) {
+  workspaceBlocked,
+}: Pick<ChangesPanelBodyProps, "dialogs" | "isLoading"> & { workspaceBlocked: boolean }) {
+  if (workspaceBlocked) return null;
   return (
     <>
       <DiscardDialog
@@ -124,6 +127,7 @@ type TimelineProps = Pick<
   | "repoDisplayName"
   | "perRepoStatus"
   | "prByRepo"
+  | "comparisonRequestToken"
 >;
 
 type WorkingTreeProps = Pick<
@@ -210,12 +214,14 @@ function CommitHistorySections({
   defaultCollapsed,
   mergedCommits,
   separated,
+  comparisonRequestToken,
 }: {
   props: TimelineProps;
   isDiverged: boolean;
   defaultCollapsed: boolean;
   mergedCommits: ReturnType<typeof mergeCommits>;
   separated: ReturnType<typeof separateCommitHistories>;
+  comparisonRequestToken?: number;
 }) {
   const { t } = useTranslation();
   if (isDiverged) {
@@ -227,6 +233,7 @@ function CommitHistorySections({
             label={t("task:localCheckoutCommits")}
             testId="local-checkout-commits-section"
             defaultCollapsed={defaultCollapsed}
+            expandOnRequestToken={comparisonRequestToken}
             pushDisabled={props.pushDisabled}
             onOpenCommitDetail={props.onOpenCommitDetail}
             onRevertCommit={props.onRevertCommit}
@@ -245,6 +252,8 @@ function CommitHistorySections({
             label={t("task:prNumberVersion", { number: props.providerPRNumber ?? "" })}
             testId="current-pr-commits-section"
             defaultCollapsed
+            expandOnRequestToken={comparisonRequestToken}
+            focusOnExpand
             showActions={false}
             onOpenCommitDetail={props.onOpenCommitDetail}
             repoDisplayName={props.repoDisplayName}
@@ -341,6 +350,7 @@ function ChangesPanelTimeline(props: TimelineProps) {
           defaultCollapsed={firstSection !== "commits"}
           mergedCommits={mergedCommits}
           separated={separated}
+          comparisonRequestToken={props.comparisonRequestToken}
         />
       )}
     </div>
@@ -348,6 +358,8 @@ function ChangesPanelTimeline(props: TimelineProps) {
 }
 
 export function ChangesPanelBody(props: ChangesPanelBodyProps) {
+  const workspaceBlocked =
+    props.workspaceRestoration && props.workspaceRestoration.status !== "ready";
   return (
     <PanelBody className="flex flex-col">
       <ComparisonTargetNotice
@@ -355,14 +367,39 @@ export function ChangesPanelBody(props: ChangesPanelBodyProps) {
         comparisonUnavailable={props.comparisonUnavailable}
       />
       <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
-        <ChangesPanelTimeline {...props} />
+        {workspaceBlocked && !props.hasAnything ? (
+          <WorkspaceUnavailable
+            restoration={props.workspaceRestoration}
+            onRetry={props.onRestoreWorkspace}
+            retryDisabled={props.restoreWorkspaceDisabled}
+          />
+        ) : (
+          <>
+            {workspaceBlocked && (
+              <WorkspaceUnavailable
+                restoration={props.workspaceRestoration}
+                onRetry={props.onRestoreWorkspace}
+                retryDisabled={props.restoreWorkspaceDisabled}
+                compact
+              />
+            )}
+            <ChangesPanelTimeline
+              {...props}
+              isLoading={workspaceBlocked ? false : props.isLoading}
+            />
+          </>
+        )}
       </div>
       <ReviewProgressBar
         reviewedCount={props.reviewedCount}
         totalFileCount={props.totalFileCount}
         onOpenReview={props.onOpenReview}
       />
-      <ChangesPanelDialogsSection dialogs={props.dialogs} isLoading={props.isLoading} />
+      <ChangesPanelDialogsSection
+        dialogs={props.dialogs}
+        isLoading={props.isLoading}
+        workspaceBlocked={Boolean(workspaceBlocked)}
+      />
     </PanelBody>
   );
 }

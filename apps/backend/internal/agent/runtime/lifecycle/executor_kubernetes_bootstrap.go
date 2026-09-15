@@ -11,10 +11,14 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"unicode/utf8"
 
 	corev1 "k8s.io/api/core/v1"
 
 	kubeexecutor "github.com/kandev/kandev/internal/agent/kubernetes"
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
+	"github.com/kandev/kandev/internal/common/constants"
 	"github.com/kandev/kandev/internal/githubauth"
 	"github.com/kandev/kandev/internal/scriptengine"
 )
@@ -63,6 +67,9 @@ func (r *KubernetesExecutor) bootstrapPod(
 	if err := r.materializeKubernetesRemoteFiles(ctx, runtime, req, pod, profile.MainContainer); err != nil {
 		return err
 	}
+	if err := runKubernetesPrepareScript(ctx, runtime.streams, pod, profile.MainContainer); err != nil {
+		return err
+	}
 	if err := kubernetesWriteFile(ctx, runtime.streams, pod, profile.MainContainer,
 		kubernetesStartPath, nil, 0o600); err != nil {
 		return fmt.Errorf("kubernetes lifecycle: signal bootstrap: %w", err)
@@ -70,8 +77,81 @@ func (r *KubernetesExecutor) bootstrapPod(
 	return nil
 }
 
+type kubernetesPrepareOutput struct {
+	mu       sync.Mutex
+	data     []byte
+	overflow bool
+}
+
+const kubernetesPrepareCaptureBytes = 256 * 1024
+
+func (w *kubernetesPrepareOutput) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.overflow {
+		return len(p), nil
+	}
+	if len(p) > kubernetesPrepareCaptureBytes-len(w.data) {
+		w.data = nil
+		w.overflow = true
+		return len(p), nil
+	}
+	w.data = append(w.data, p...)
+	return len(p), nil
+}
+
+func (w *kubernetesPrepareOutput) diagnostic() string {
+	w.mu.Lock()
+	if w.overflow {
+		w.mu.Unlock()
+		return ""
+	}
+	raw := string(w.data)
+	w.mu.Unlock()
+
+	diagnostic := routingerr.SanitizeFullUnbounded(raw)
+	if len(diagnostic) > routingerr.MaxRawExcerptBytes {
+		start := len(diagnostic) - routingerr.MaxRawExcerptBytes
+		for start < len(diagnostic) && !utf8.RuneStart(diagnostic[start]) {
+			start++
+		}
+		diagnostic = diagnostic[start:]
+	}
+	return strings.TrimSpace(diagnostic)
+}
+
+func runKubernetesPrepareScript(
+	ctx context.Context,
+	streams *kubeexecutor.StreamOperations,
+	pod *corev1.Pod,
+	container string,
+) error {
+	prepareCtx, cancel := context.WithTimeout(preparationContext(ctx), constants.SetupScriptTimeout)
+	defer cancel()
+	output := &kubernetesPrepareOutput{}
+	command := `set -eu
+set -a
+. /opt/kandev/runtime.env
+. /run/kandev/auth.env
+set +a
+sh /opt/kandev/prepare.sh
+: > /opt/kandev/prepared`
+	err := streams.Exec(prepareCtx, kubeexecutor.ExecRequest{
+		Namespace: pod.Namespace, Pod: pod.Name, Container: container,
+		Command: []string{"sh", "-c", command}, Stdout: output, Stderr: output,
+	})
+	if err == nil {
+		return nil
+	}
+	diagnostic := output.diagnostic()
+	if diagnostic == "" {
+		return fmt.Errorf("kubernetes lifecycle: prepare script failed: %w", err)
+	}
+	return fmt.Errorf("kubernetes lifecycle: prepare script failed: %s: %w", diagnostic, err)
+}
+
 func kubernetesRuntimeEnvironment(req *ExecutorCreateRequest) map[string]string {
-	return map[string]string{
+	values := map[string]string{
 		"AGENTCTL_LISTEN_HOST":        kubernetesControlHost,
 		"AGENTCTL_PORT":               strconv.Itoa(int(kubeexecutor.DefaultAgentctlPort)),
 		"AGENTCTL_INSTANCE_PORT_BASE": strconv.Itoa(dockerAgentctlInstancePortBase),
@@ -83,6 +163,10 @@ func kubernetesRuntimeEnvironment(req *ExecutorCreateRequest) map[string]string 
 		kubernetesEnvAgentProfile:     req.OfficeAgentProfileID,
 		kubernetesEnvExecutionProfile: req.AgentProfileID,
 	}
+	if selectedCheckoutIsPullRequest(req.Metadata) {
+		values[selectedCheckoutMarker] = "1"
+	}
+	return values
 }
 
 func kubernetesAuthEnvironment(input map[string]string, nonce string) map[string]string {
@@ -224,7 +308,7 @@ func kubernetesPrepareScript(req *ExecutorCreateRequest) (string, error) {
 	if script == "" {
 		return ":\n", nil
 	}
-	script += KandevBranchCheckoutPostlude()
+	script = withBranchCheckout(req, script)
 	if binding, ok := req.RemoteContributions[""]; ok {
 		addition, err := scriptengine.RemoteContributionSetupScript(&binding)
 		if err != nil {

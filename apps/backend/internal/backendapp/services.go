@@ -222,6 +222,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 
 	// Wire start step resolver to task service for CreateTask
 	taskSvc.SetStartStepResolver(&startStepResolverAdapter{svc: workflowSvc})
+
 	// Session history is owned by workflow service, but access is owned by the
 	// task service. Keep the authorization check at the service boundary.
 	workflowSvc.SetSessionAccessChecker(taskSvc.AuthorizeSessionAccess)
@@ -322,6 +323,26 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	if err != nil {
 		return nil, nil, fmt.Errorf("initialize canvas service: %w", err)
 	}
+	var canvasDistributionSvc *canvasservice.DistributionService
+	if cfg.Features.Canvases {
+		preparations, prepErr := canvasservice.NewPreparationStore(filepath.Join(cfg.ResolvedHomeDir(), "canvas-preparations"))
+		if prepErr != nil {
+			return nil, nil, fmt.Errorf("initialize canvas preparations: %w", prepErr)
+		}
+		canvasDistributionSvc = canvasservice.NewDistributionService(
+			canvasSvc,
+			pluginsSvc.Instances(),
+			pluginsSvc.WebArtifacts(),
+			taskSvc.AuthorizeWorkspaceAccess,
+			preparations,
+		)
+		canvasDistributionSvc.SetKandevVersion(version)
+		canvasDistributionSvc.SetInstallReceiptStore(canvasRepo)
+		canvasDistributionSvc.SetArtifactQuota(pluginsSvc.Instances())
+		if pluginsSvc != nil {
+			canvasDistributionSvc.SetCatalogResolver(pluginsSvc.Marketplace())
+		}
+	}
 	gitCredentialBroker := newGitCredentialBroker(githubSvc, pluginsSvc, repos.Task, cfg.GitHubCredentialBroker.ReissueSigningKey)
 	if pluginsSvc != nil {
 		pluginsSvc.SetGitCredentialLeaseRevoker(gitCredentialBroker.RevokeProvider)
@@ -414,6 +435,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		Automation:               automationComponents,
 		Plugins:                  pluginsSvc,
 		Canvas:                   canvasSvc,
+		CanvasDistribution:       canvasDistributionSvc,
 		GitCredentials:           gitCredentialBroker,
 		// Office is constructed later in initOfficeServices once all
 		// of its dependencies (config loader, task integrations, etc.) are available.
@@ -1484,6 +1506,11 @@ func (a pluginsTaskWriterAdapter) CreateTask(ctx context.Context, in plugins.Tas
 }
 
 func (a pluginsTaskWriterAdapter) DeleteTask(ctx context.Context, id string) error {
+	if lifecycle, ok := a.svc.(interface {
+		DeleteTaskWithLifecycle(context.Context, string) error
+	}); ok {
+		return lifecycle.DeleteTaskWithLifecycle(ctx, id)
+	}
 	return a.svc.DeleteTask(ctx, id)
 }
 

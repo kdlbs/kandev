@@ -16,6 +16,8 @@ type AppSidebarNavItemProps = {
   href?: string;
   badge?: number;
   badgeVariant?: "primary" | "muted";
+  /** Appended after the number, e.g. "+" for a capped/truncated count. */
+  badgeSuffix?: string;
   activity?: QuickChatActivityState;
   onClick?: () => void;
   collapsed: boolean;
@@ -86,12 +88,21 @@ function sidebarBadgeClass(variant: NonNullable<AppSidebarNavItemProps["badgeVar
   );
 }
 
+// Absent for a zero/absent badge; a truncated count carries `badgeSuffix`
+// (e.g. "+") appended after the number, both on the visible badge and the
+// collapsed-rail tooltip.
+function badgeText(badge: number | undefined, suffix: string | undefined): string | null {
+  if (typeof badge !== "number" || badge <= 0) return null;
+  return `${badge}${suffix ?? ""}`;
+}
+
 export function AppSidebarNavItem({
   icon: Icon,
   label,
   href,
   badge,
   badgeVariant = "primary",
+  badgeSuffix,
   onClick,
   collapsed,
   isActive,
@@ -103,6 +114,7 @@ export function AppSidebarNavItem({
 }: AppSidebarNavItemProps) {
   const pathname = usePathname();
   const active = isActive ?? isPathActive(pathname, href, exactMatch);
+  const badgeLabel = badgeText(badge, badgeSuffix);
 
   const baseClass = cn(
     "flex items-center rounded-md text-[13px] font-medium transition-colors",
@@ -122,9 +134,7 @@ export function AppSidebarNavItem({
       {!collapsed && (
         <>
           <span className="flex-1 truncate sidebar-fade-in">{label}</span>
-          {typeof badge === "number" && badge > 0 && (
-            <Badge className={sidebarBadgeClass(badgeVariant)}>{badge}</Badge>
-          )}
+          {badgeLabel && <Badge className={sidebarBadgeClass(badgeVariant)}>{badgeLabel}</Badge>}
         </>
       )}
     </>
@@ -138,7 +148,7 @@ export function AppSidebarNavItem({
       <TooltipTrigger asChild>{buttonOrLink}</TooltipTrigger>
       <TooltipContent side="right">
         {label}
-        {typeof badge === "number" && badge > 0 ? ` (${badge})` : ""}
+        {badgeLabel ? ` (${badgeLabel})` : ""}
       </TooltipContent>
     </Tooltip>
   );

@@ -40,7 +40,7 @@ type Descriptor struct {
 // of the database contract and must be initialized before readiness.
 var catalog = []Descriptor{
 	{ID: "schema-meta", OwnerPackage: "internal/persistence", RequiredTables: []string{"kandev_meta"}},
-	{ID: "task", OwnerPackage: "internal/task/repository/sqlite", RequiredTables: []string{"workspaces", "tasks"}, DependsOn: []string{"schema-meta"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
+	{ID: "task", OwnerPackage: "internal/task/repository/sqlite", RequiredTables: []string{"workspaces", "tasks", "task_workflow_session_bindings"}, DependsOn: []string{"schema-meta"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
 	{ID: "workflow", OwnerPackage: "internal/workflow/repository", RequiredTables: []string{"workflow_templates", "workflow_steps"}, DependsOn: []string{"task"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
 	{ID: "analytics", OwnerPackage: "internal/analytics/repository", RequiredTables: []string{"tasks"}, DependsOn: []string{"task", "workflow"}, Capabilities: []Capability{CapabilityTimestamp}},
 	{ID: "agent-settings", OwnerPackage: "internal/agent/settings/store", RequiredTables: []string{"agents", "agent_profiles"}, DependsOn: []string{"schema-meta"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
@@ -59,7 +59,7 @@ var catalog = []Descriptor{
 	{ID: "auth-hostnames", OwnerPackage: "internal/auth/hostnames", RequiredTables: []string{"auth_hostname_cache"}, DependsOn: []string{"auth"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}},
 	{ID: "organizations", OwnerPackage: "internal/org", RequiredTables: []string{"orgs"}, DependsOn: []string{"user"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
 	{ID: "organization-units", OwnerPackage: "internal/orgunit", RequiredTables: []string{"org_units"}, DependsOn: []string{"organizations"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}},
-	{ID: "message-queue", OwnerPackage: "internal/orchestrator/messagequeue", RequiredTables: []string{"queued_messages"}, DependsOn: []string{"task"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
+	{ID: "message-queue", OwnerPackage: "internal/orchestrator/messagequeue", RequiredTables: []string{"queued_messages", "queue_admission_receipts"}, DependsOn: []string{"task"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
 	{ID: "task-share", OwnerPackage: "internal/task/share", RequiredTables: []string{"task_shares"}, DependsOn: []string{"task"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}},
 	{ID: "telemetry-contract", OwnerPackage: "internal/telemetrycontract", RequiredTables: []string{"telemetry_activations"}, DependsOn: []string{"schema-meta"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict}},
 	{ID: "delivery", OwnerPackage: "internal/delivery", RequiredTables: []string{"task_delivery_ledger"}, DependsOn: []string{"task"}, Capabilities: []Capability{CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
@@ -70,7 +70,7 @@ var catalog = []Descriptor{
 	{ID: "plugin-state", OwnerPackage: "internal/plugins/state", RequiredTables: []string{"plugin_state"}, DependsOn: []string{"schema-meta"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
 	{ID: "plugin-instance-state", OwnerPackage: "internal/plugins/state", RequiredTables: []string{"plugin_instance_state"}, DependsOn: []string{"plugin-instances"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
 	{ID: "plugin-user-state", OwnerPackage: "internal/plugins/state", RequiredTables: []string{"plugin_user_state"}, DependsOn: []string{"user"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
-	{ID: "canvas", OwnerPackage: "internal/canvas", RequiredTables: []string{"canvas_lifecycle_metadata"}, DependsOn: []string{"plugin-instances"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
+	{ID: "canvas", OwnerPackage: "internal/canvas", RequiredTables: []string{"canvas_lifecycle_metadata", "canvas_creation_authority", "canvas_install_receipts"}, DependsOn: []string{"plugin-instances"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict, CapabilityTransaction}},
 	{ID: "github", OwnerPackage: "internal/github", RequiredTables: []string{"github_pr_watches"}, DependsOn: []string{"task", "user"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
 	{ID: "gitlab", OwnerPackage: "internal/gitlab", RequiredTables: []string{"gitlab_configs"}, DependsOn: []string{"task", "user"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},
 	{ID: "jira", OwnerPackage: "internal/jira", RequiredTables: []string{"jira_configs"}, DependsOn: []string{"task", "user"}, Capabilities: []Capability{CapabilityBoolean, CapabilityTimestamp, CapabilityConflict}},

@@ -18,10 +18,28 @@ const (
 	TaskStateCancelled       TaskState = "CANCELLED"
 )
 
+// TaskChangeRequestSummary is a compact provider-neutral view of a pull or
+// merge request associated with a task.
+type TaskChangeRequestSummary struct {
+	Provider     string     `json:"provider"`
+	RepositoryID string     `json:"repository_id,omitempty"`
+	Number       int        `json:"number"`
+	URL          string     `json:"url"`
+	Title        string     `json:"title,omitempty"`
+	State        string     `json:"state"`
+	Draft        *bool      `json:"draft,omitempty"`
+	BaseRef      string     `json:"base_ref,omitempty"`
+	BaseSHA      string     `json:"base_sha"`
+	HeadRef      string     `json:"head_ref,omitempty"`
+	HeadSHA      string     `json:"head_sha"`
+	MergedAt     *time.Time `json:"merged_at,omitempty"`
+	ClosedAt     *time.Time `json:"closed_at,omitempty"`
+}
+
 // TaskPRSummary is a compact view of a GitHub pull request associated with a
-// task. Surfaced through the task-listing MCP tools so agents can reason about
-// PR status. State is one of "open", "closed", "merged"; MergedAt is set only
-// when the PR has merged, so agents can report when the work landed.
+// task. Surfaced through the task-listing MCP tools for compatibility with
+// existing agents. State is one of "open", "closed", "merged"; MergedAt is set
+// only when the PR has merged, so agents can report when the work landed.
 type TaskPRSummary struct {
 	Number   int        `json:"number"`
 	URL      string     `json:"url"`
@@ -157,11 +175,17 @@ type Task struct {
 	// action failed to launch a run for this task. Derived from the
 	// auto_start_failed metadata key at DTO conversion time; the orchestrator
 	// clears it when a session of the task next enters STARTING/RUNNING.
-	AutoStartFailed bool   `json:"auto_start_failed,omitempty"`
-	IsEphemeral     bool   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
-	ParentID        string `json:"parent_id,omitempty"` // FK to parent task for subtasks
-	Autopilot       bool   `json:"autopilot"`
-	Identifier      string `json:"identifier,omitempty"`
+	AutoStartFailed bool `json:"auto_start_failed,omitempty"`
+	// WorkspaceOrphaned reports that this task's materialized workspace was
+	// removed when its parent was archived (metadata.workspace.orphaned),
+	// while workspace.mode is still inherit_parent, so the task cannot start.
+	// Derived at DTO conversion time; a re-parent, detach or unarchive that
+	// resolves the state clears it without touching the underlying keys.
+	WorkspaceOrphaned bool   `json:"workspace_orphaned,omitempty"`
+	IsEphemeral       bool   `json:"is_ephemeral"`        // Ephemeral tasks are not shown in kanban, used for quick chat
+	ParentID          string `json:"parent_id,omitempty"` // FK to parent task for subtasks
+	Autopilot         bool   `json:"autopilot"`
+	Identifier        string `json:"identifier,omitempty"`
 }
 
 // TaskRepositoryInput for creating/updating task repositories

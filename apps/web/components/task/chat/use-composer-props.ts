@@ -52,6 +52,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     hidePlanMode,
   } = args;
   const { resolvedSessionId, taskId, isAgentBusy, needsRecovery, planModeEnabled } = panelState;
+  const canQueueWhileStarting = panelState.inputMode === "queue" && panelState.isQueueReady;
   const supportsSteering = panelState.supportsSteering;
   const hasContextComments =
     panelState.planComments.length > 0 ||
@@ -74,6 +75,7 @@ export function useComposerProps(args: ComposerPropsArgs) {
     isAgentBusy,
     supportsSteering,
     isStarting: panelState.isStarting,
+    canQueueWhileStarting,
     isPreparingEnvironment: panelState.isPreparingEnvironment,
     isMoving,
     isSending,

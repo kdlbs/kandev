@@ -79,10 +79,26 @@ func setupTestRepo(t *testing.T) (string, func()) {
 	runGit(t, localDir, "commit", "-m", "Initial commit")
 
 	// Add remote and push
-	runGit(t, localDir, "remote", "add", "origin", remoteDir)
+	runGit(t, localDir, "remote", "add", "origin", localGitRemotePath(remoteDir))
 	runGit(t, localDir, "push", "-u", "origin", "main")
 
 	return localDir, cleanup
+}
+
+// localGitRemotePath keeps temporary repository paths in the form that Git
+// recognizes as local paths on every platform. A raw Windows path such as
+// C:\\Temp\\remote.git can be parsed as an SSH-style host named "C", which
+// leaves a test waiting for network input. Forward slashes keep the drive
+// prefix unambiguous without changing the path returned by Git to callers.
+func localGitRemotePath(path string) string {
+	return filepath.ToSlash(path)
+}
+
+func TestLocalGitRemotePathUsesForwardSlashes(t *testing.T) {
+	remotePath := filepath.Join(t.TempDir(), "remote.git")
+	if got := localGitRemotePath(remotePath); strings.ContainsRune(got, '\\') {
+		t.Fatalf("localGitRemotePath(%q) = %q, want forward slashes", remotePath, got)
+	}
 }
 
 func runGit(t *testing.T, dir string, args ...string) string {
@@ -470,7 +486,7 @@ func TestFilterLocalCommits_PullAndResetScenario(t *testing.T) {
 	writeFile(t, localDir, "README.md", "# Test Repo")
 	runGit(t, localDir, "add", ".")
 	runGit(t, localDir, "commit", "-m", "Initial commit (X)")
-	runGit(t, localDir, "remote", "add", "origin", remoteDir)
+	runGit(t, localDir, "remote", "add", "origin", localGitRemotePath(remoteDir))
 	runGit(t, localDir, "push", "-u", "origin", "main")
 
 	// Record the starting point (commit X)
@@ -478,7 +494,7 @@ func TestFilterLocalCommits_PullAndResetScenario(t *testing.T) {
 	startingSHA = startingSHA[:len(startingSHA)-1]
 
 	// Clone to upstream clone and make commits there (simulating main evolving)
-	runGit(t, upstreamClone, "clone", remoteDir, ".")
+	runGit(t, upstreamClone, "clone", localGitRemotePath(remoteDir), ".")
 	runGit(t, upstreamClone, "config", "user.email", "upstream@test.com")
 	runGit(t, upstreamClone, "config", "user.name", "Upstream User")
 	runGit(t, upstreamClone, "config", "core.hooksPath", "/dev/null") // Disable hooks in test repo

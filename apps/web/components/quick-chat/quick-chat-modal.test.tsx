@@ -1,7 +1,9 @@
 import { useCallback, useState } from "react";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
+import { ResetContextButton } from "@/components/task/chat/reset-context-button";
+import { TooltipProvider } from "@kandev/ui/tooltip";
 
 const setQuickChatInitialPrompt = vi.fn();
 const quickChatSessionItems: Record<string, { state: string; task_id: string }> = {};
@@ -18,7 +20,7 @@ const WORKSPACE_ID = "ws-1";
 const TERMINAL_TAB_ID = "terminal-1";
 const FIRE_ESCAPE_TESTID = "fire-escape";
 const TOGGLE_ESCAPE_GUARD_TESTID = "toggle-escape-guard";
-const responsiveMock = vi.hoisted(() => ({ isFinePointer: true }));
+const responsiveMock = vi.hoisted(() => ({ isFinePointer: true, isMobile: false }));
 
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => responsiveMock,
@@ -34,6 +36,7 @@ vi.mock("@/components/state-provider", () => ({
   ) =>
     selector({
       setQuickChatInitialPrompt,
+      clearContextWindow: vi.fn(),
       taskSessions: { items: quickChatSessionItems },
       prepareProgress: { bySessionId: quickChatPrepareProgress },
     }),
@@ -126,6 +129,9 @@ function EscapeGuardProbe() {
   useClarificationEscapeGuard(predicate);
   return (
     <div data-testid="quick-chat-session-view">
+      <TooltipProvider>
+        <ResetContextButton sessionId="chat-1" presentation="mobile" />
+      </TooltipProvider>
       <button
         type="button"
         data-testid={TOGGLE_ESCAPE_GUARD_TESTID}
@@ -147,6 +153,24 @@ const useQuickChatModalMock = vi.fn(() => defaultQuickChatModalState);
 vi.mock("./use-quick-chat-modal", () => ({
   useQuickChatModal: () => useQuickChatModalMock(),
 }));
+
+it("hosts phone context reset inside Quick Chat without another modal", async () => {
+  responsiveMock.isMobile = true;
+  useQuickChatModalMock.mockReturnValue({
+    ...defaultQuickChatModalState,
+    activeKind: "conversation",
+    activeSessionNeedsAgent: false,
+  });
+  render(<QuickChatModal workspaceId={WORKSPACE_ID} />);
+  const trigger = screen.getByTestId("reset-context-button");
+  fireEvent.click(trigger);
+  const confirmation = await screen.findByTestId("mobile-action-confirmation");
+  expect(document.querySelector('[data-slot="drawer-content"]')).toBeNull();
+  expect(trigger.closest('[aria-hidden="true"][inert]')).toBeTruthy();
+  fireEvent.click(within(confirmation).getByRole("button", { name: "Back" }));
+  await waitFor(() => expect(document.activeElement).toBe(trigger));
+  responsiveMock.isMobile = false;
+});
 
 const defaultQuickChatModalState = {
   isOpen: true,
@@ -201,6 +225,7 @@ const defaultQuickChatModalState = {
 import { QuickChatModal } from "./quick-chat-modal";
 
 afterEach(() => {
+  responsiveMock.isMobile = false;
   cleanup();
   for (const key of Object.keys(quickChatSessionItems)) delete quickChatSessionItems[key];
   for (const key of Object.keys(quickChatPrepareProgress)) delete quickChatPrepareProgress[key];
@@ -250,6 +275,19 @@ describe("QuickChatModal mixed tabs", () => {
     const tabs = screen.getAllByTestId("quick-chat-tab");
     expect(within(tabs[0]).getByRole("status", { name: "Loading" })).toBeTruthy();
     expect(tabs[1].querySelector('[role="status"]')).toBeNull();
+  });
+
+  it("does not leave the previous tab content interactive during a pending selection", () => {
+    useQuickChatModalMock.mockReturnValue({
+      ...defaultQuickChatModalState,
+      pendingQuickChatOpen: true,
+    });
+
+    render(<QuickChatModal workspaceId={WORKSPACE_ID} />);
+
+    expect(screen.getByTestId("quick-chat-selection-loading")).toBeTruthy();
+    expect(screen.queryByTestId("mock-quick-terminal-view")).toBeNull();
+    expect(screen.queryByTestId("quick-chat-session-view")).toBeNull();
   });
 
   it("uses the same persisted order callback for coarse-pointer moves", () => {

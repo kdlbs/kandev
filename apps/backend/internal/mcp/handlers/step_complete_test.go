@@ -378,6 +378,53 @@ func TestHandleStepComplete_DedupRunningNoRepublish(t *testing.T) {
 	assert.Equal(t, before, after, "already_signaled dedup must not increment workflow_step_completion_signal_received_total")
 }
 
+// TestHandleStepComplete_DuplicateCallDoesNotOverwriteHandoffOrBlockers covers
+// AC-001.13: a rejected duplicate call must not mutate the already-persisted
+// bag, even when the second call's handoff/blockers differ from the first's.
+// Only the first accepted call's content may ever reach the single-slot carry
+// token or the audit metadata — a duplicate silently replacing it would let a
+// second, unvetted call clobber content already committed to the transition.
+func TestHandleStepComplete_DuplicateCallDoesNotOverwriteHandoffOrBlockers(t *testing.T) {
+	ctx := context.Background()
+	svc, repo := newTestTaskService(t)
+	seedStepCompleteTarget(t, repo, "task-dup-overwrite", "session-dup-overwrite", "step-1", models.TaskSessionStateRunning)
+	require.NoError(t, repo.SetSessionMetadataKey(ctx, "session-dup-overwrite", models.SessionMetaKeyPendingStepCompletion, models.PendingStepCompletionSignal{
+		StepID:     "step-1",
+		Source:     models.StepCompletionSourceAgent,
+		Summary:    "first call",
+		Handoff:    "first handoff",
+		Blockers:   "first blockers",
+		SignaledAt: time.Now().UTC(),
+	}))
+	seedAgentProfileSnapshot(t, repo, "session-dup-overwrite", "claude-dup-overwrite")
+	bus := &mcpRecordingEventBus{}
+	h := newStepCompleteHandler(t, svc, repo, bus)
+
+	msg := makeWSMessage(t, ws.ActionMCPStepComplete, map[string]interface{}{
+		"task_id":    "task-dup-overwrite",
+		"session_id": "session-dup-overwrite",
+		"summary":    "second call (same step)",
+		"handoff":    "second handoff should not land",
+		"blockers":   "second blockers should not land",
+	})
+	resp, err := h.handleStepComplete(ctx, msg)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+
+	var payload map[string]interface{}
+	require.NoError(t, json.Unmarshal(resp.Payload, &payload))
+	assert.Equal(t, false, payload["accepted"])
+	assert.Equal(t, "already_signaled", payload["reason"])
+
+	session, err := repo.GetTaskSession(ctx, "session-dup-overwrite")
+	require.NoError(t, err)
+	bag, ok := models.LoadPendingStepSignal(session.Metadata)
+	require.True(t, ok, "expected the original bag entry to still be present")
+	assert.Equal(t, "first call", bag.Summary, "duplicate call must not overwrite the persisted summary")
+	assert.Equal(t, "first handoff", bag.Handoff, "duplicate call must not overwrite the persisted handoff")
+	assert.Equal(t, "first blockers", bag.Blockers, "duplicate call must not overwrite the persisted blockers")
+}
+
 // TestHandleStepComplete_DedupWaitingRepublishes covers the retry-after-
 // publish-failure path. When the session is WAITING_FOR_INPUT, the bag is
 // already persisted but the orchestrator subscriber may have never fired

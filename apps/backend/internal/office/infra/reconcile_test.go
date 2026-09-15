@@ -134,7 +134,7 @@ func TestReconcileAgentWorkingStatus_ClearsTerminalOwner(t *testing.T) {
 	if _, err := repo.MarkAgentWorking(ctx, agent.ID, claimed.ID); err != nil {
 		t.Fatalf("mark agent working: %v", err)
 	}
-	if err := repo.FinishRun(ctx, claimed.ID, "finished", nil); err != nil {
+	if _, err := repo.FinishRun(ctx, claimed.ID, "finished", nil); err != nil {
 		t.Fatalf("finish run: %v", err)
 	}
 

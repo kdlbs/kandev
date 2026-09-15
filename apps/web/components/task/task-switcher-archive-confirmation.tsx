@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { TaskArchiveConfirmation } from "./task-archive-confirmation";
 import type { TaskSwitcherItem } from "./task-switcher-types";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
 
 type TaskSwitcherArchiveConfirmationOptions = {
   task: TaskSwitcherItem;
@@ -17,7 +18,9 @@ export function useTaskSwitcherArchiveConfirmation({
   isArchiving,
   closeMenu,
 }: TaskSwitcherArchiveConfirmationOptions) {
+  const { isMobile } = useResponsiveBreakpoint();
   const [archiveOpen, setArchiveOpen] = useState(false);
+  const pendingPhoneArchive = useRef(false);
   const archiveAnchorRef = useRef<HTMLDivElement>(null);
   const openTimerRef = useRef<number | null>(null);
   useEffect(
@@ -28,6 +31,10 @@ export function useTaskSwitcherArchiveConfirmation({
   );
   const requestArchive = onArchiveTask
     ? () => {
+        if (isMobile) {
+          pendingPhoneArchive.current = true;
+          return;
+        }
         closeMenu();
         openTimerRef.current = window.setTimeout(() => {
           openTimerRef.current = null;
@@ -51,5 +58,17 @@ export function useTaskSwitcherArchiveConfirmation({
       />
     ) : undefined;
 
-  return { archiveOpen, archiveAnchorRef, requestArchive, archiveConfirmation };
+  const handleMenuCloseAutoFocus = (event: Event) => {
+    if (!pendingPhoneArchive.current) return;
+    event.preventDefault();
+    pendingPhoneArchive.current = false;
+    setArchiveOpen(true);
+  };
+  return {
+    archiveOpen,
+    archiveAnchorRef,
+    requestArchive,
+    archiveConfirmation,
+    handleMenuCloseAutoFocus,
+  };
 }

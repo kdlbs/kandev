@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, renderHook } from "@testing-library/react";
+import {
+  beginTaskRemoval,
+  createTaskRemovalState,
+  type TaskRemovalState,
+} from "@/lib/state/task-removal";
 
 const mockEnsureTaskSession = vi.fn();
 const mockLoadSessions = vi.fn().mockResolvedValue(undefined);
@@ -26,10 +31,12 @@ let mockStoreState: {
       { steps: Array<{ id: string; position: number }>; isPlaceholder?: boolean }
     >;
   };
+  taskRemoval?: TaskRemovalState;
 } = {
   userSettings: { preventAutoStartAgentOnOpen: false },
   kanban: { workflowId: "wf-active", steps: [], isLoading: false },
   kanbanMulti: { snapshots: {} },
+  taskRemoval: undefined,
 };
 
 vi.mock("@/lib/services/session-launch-service", () => ({
@@ -64,6 +71,7 @@ function resetEnsureTaskSessionMocks() {
     userSettings: { preventAutoStartAgentOnOpen: false },
     kanban: { workflowId: "wf-active", steps: [], isLoading: false },
     kanbanMulti: { snapshots: {} },
+    taskRemoval: undefined,
   };
   mockEnsureTaskSession.mockResolvedValue({
     success: true,
@@ -114,6 +122,21 @@ describe("useEnsureTaskSession", () => {
 
   it("no-ops when disabled", () => {
     renderHook(() => useEnsureTaskSession(TASK, { enabled: false }));
+    expect(mockEnsureTaskSession).not.toHaveBeenCalled();
+  });
+
+  it("does not dispatch ensure while the task is pending removal", () => {
+    mockStoreState.taskRemoval = beginTaskRemoval(createTaskRemovalState(), {
+      token: "removal-1",
+      action: "delete",
+      workspaceId: "workspace-1",
+      taskIds: ["task-1"],
+      requestIds: ["task-1"],
+      departure: null,
+    })!;
+
+    renderHook(() => useEnsureTaskSession(TASK));
+
     expect(mockEnsureTaskSession).not.toHaveBeenCalled();
   });
 

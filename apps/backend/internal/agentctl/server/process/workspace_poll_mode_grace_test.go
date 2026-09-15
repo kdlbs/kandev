@@ -187,6 +187,11 @@ func TestPollModeGrace_StopDisarmsTimer(t *testing.T) {
 // it to return, and prevent the callback from changing the mode afterward.
 func TestPollModeGrace_StopJoinsFinalScan(t *testing.T) {
 	wt := newGraceTestTracker(t, graceFiresQuickly)
+	// The test covers the grace callback's cancellation and wait-group
+	// ownership. Disable the independent polling loops so their real Git work
+	// cannot change poll mode while this lifecycle boundary is under test (the
+	// Windows race runner can otherwise report an unrelated paused transition).
+	wt.gitIndexPath = ""
 	finalScanStarted := make(chan struct{})
 	finalScanFinished := make(chan struct{})
 	wt.gitStatusObserver = func(ctx context.Context) (types.GitStatusUpdate, error) {

@@ -121,6 +121,12 @@ does not need a Go backend or an injected Kandev JavaScript API.
    the app needs.
 5. Package the manifest and static files as a gzip-compressed tar archive.
 
+For a new owner-created task canvas, the first valid release can receive the
+declared supported task-scoped permissions through its initial permission
+policy. Imported packages and later permission increases need human approval.
+Keep `network_origins` as exact HTTPS origins. Do not use wildcards, paths,
+credentials, query strings, or fragments.
+
 For example, a page can read task data with the browser Fetch API:
 
 ```js
@@ -134,6 +140,15 @@ const tasks = await response.json();
 Use `./_kandev/v1/events` for the event stream. Keep all protocol paths
 relative so the same package works in task and workspace scope. Do not copy a
 capability URL from the host into the app.
+
+Kandev injects a reserved startup bootstrap into the packaged entry document.
+It runs before authored scripts, reports an initial document error when one is
+observed, and checks `./_kandev/v1/context` after the document loads. The host
+reveals the frame only after it receives a versioned acknowledgement for the
+current startup attempt. A missing acknowledgement or context failure makes
+the canvas recoverable after 15 seconds. Keep the entry document and its
+relative assets valid HTML, and make the app render its own loading and error
+states after startup.
 
 The frame has an opaque browser origin. Do not use `localStorage`,
 `sessionStorage`, IndexedDB, or service workers. Use the state protocol for
@@ -156,6 +171,24 @@ The manifest limit is 64 KiB and the normalized path limit is 240 bytes.
 Build and test the archive outside Kandev. Kandev validates the archive before
 it stores or runs a release. Use [Agent-authored Canvases](canvases.md) for
 creation, permission review, promotion, Quick Chat editing, and recovery.
+
+### Share a portable canvas
+
+For a canvas that another workspace can install, add the `distribution` block
+described in the [manifest reference](plugins-manifest.md#portable-canvas-distribution-metadata).
+Choose `static` when the packaged application is the only source you want to
+share. Choose `project` when you retain a bounded editable project under
+`distribution/source/`. Do not put screenshots in the package.
+
+After a valid release is active, use **Share canvas** in the host or workspace
+canvas list. Prepare and download the bundle and source archive, inspect them
+for private content, and share them as files or HTTPS links. This action does
+not create a repository, release, registry entry, or pull request.
+
+To list the canvas, publish the exact bundle as a versioned release asset and
+add a `kind: canvas` entry with one to eight ordered `previews` objects to a
+trusted registry. The first preview is the cover. Preview URLs and alt text
+are registry metadata and are not part of the package manifest.
 
 There is no separate HTTP server to launch. pluginsdk.Serve owns the
 go-plugin/gRPC handshake and Host injection. The backend implements

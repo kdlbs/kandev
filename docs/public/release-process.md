@@ -11,6 +11,10 @@ GitHub Release, container images, Homebrew formula, and Scoop bucket.
 
 Kandev uses one semantic version across the Git tag, native runtime bundles, desktop app, npm packages, GitHub release, container images, Homebrew formula, and Scoop bucket. Publish through the manual **Release** GitHub Actions workflow; do not update channels independently.
 
+Each platform release contains a native Go `kandev` binary with the compiled
+web frontend embedded. Runtime archives also include `agentctl` binaries for
+task environments.
+
 ## Quick path
 
 1. Choose one workflow mode.
@@ -93,7 +97,7 @@ Normal mode performs these stages:
 
 1. **Preflight and prepare version.** Compute the next version from packages and tags, then verify that the committed public key matches the `release` environment fingerprint before changing release files. Update the CLI package/lock, desktop package and Tauri/Cargo manifests, and `CHANGELOG.md`.
 2. **Merge and tag.** Open a release branch and PR. Use the protected administrator token to squash-merge the exact head without queue or CI latency. Select GitHub's reported merge commit, then revalidate the public key before importing the protected signing key. Verify the signed `vX.Y.Z` tag locally before the push.
-3. **Build web and runtimes.** Build the SPA and five runtime targets: Linux x64/arm64, macOS x64/arm64, and Windows x64. Each archive contains `kandev`, the host `agentctl`, and required remote agentctl helpers; the workflow produces an adjacent checksum for each archive.
+3. **Build web and runtimes.** Build the SPA and five runtime targets: Linux x64/arm64, macOS x64/arm64, and Windows x64. Embed the SPA in each native Go `kandev` binary. Each archive contains `kandev`, the host `agentctl`, and required remote agentctl helpers. The workflow produces an adjacent checksum for each archive.
 4. **Build desktop.** Embed the matching runtime and package the same five platform/architecture targets into macOS, Linux, and Windows installer formats.
 5. **Build containers.** Publish amd64/arm64 base manifests, enforce the universal-image size gate, then publish multi-architecture universal images.
 6. **Publish GitHub Release.** Attach runtime archives, checksums, desktop artifacts, notes, and the updater feed when eligible.

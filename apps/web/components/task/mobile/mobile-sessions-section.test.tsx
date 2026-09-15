@@ -406,6 +406,33 @@ describe("MobileSessionsPicker pending lifecycle", () => {
 });
 
 describe("MobileSessionsPicker session delete confirmation", () => {
+  it("uses the same modal for the named delete step and restores the picker on Back", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
+    try {
+      render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_A} fullWidth />);
+      fireEvent.click(screen.getByTestId(PILL_TESTID));
+      const picker = screen.getByRole("dialog", { name: "Sessions" });
+      const row = screen.getByTestId(`mobile-session-row-${SESSION_A}`);
+      fireEvent.pointerDown(within(row).getByRole("button", { name: SESSION_ACTIONS_LABEL }));
+      fireEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
+      expect(await screen.findByRole("dialog", { name: "Delete session?" })).toBe(picker);
+      expect(screen.getAllByRole("dialog", { hidden: true })).toHaveLength(1);
+      expect(screen.getByRole("group").textContent).toContain("Alpha");
+      expect(screen.queryByRole("button", { name: SESSION_ACTIONS_LABEL })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Back" }));
+      expect(screen.getByRole("dialog", { name: "Sessions" })).toBe(picker);
+      expect(row.isConnected).toBe(true);
+      await vi.waitFor(() =>
+        expect(document.activeElement).toBe(
+          within(row).getByRole("button", { name: SESSION_ACTIONS_LABEL }),
+        ),
+      );
+      expect(mocks.removeSession).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
+    }
+  });
+
   it("morphs the target row into local touch-sized confirmation actions", () => {
     mocks.sessions = [session(SESSION_A, "profile-a", START_TIME, { state: "COMPLETED" })];
     render(<MobileSessionsPicker taskId={TASK_ID} sessionId={SESSION_A} fullWidth />);

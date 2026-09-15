@@ -644,6 +644,7 @@ func (s *Service) autoStartReviewTask(
 	if s.shouldSkipTerminalPRAutoStart(ctx, task) {
 		return
 	}
+	createAutoStartOwned := s.ownsAutoStartOnCreateInFlight(task.ID)
 	// Compete for the one-shot auto-start token set at task creation.
 	// The promotion that ran inside CreateTask may have already triggered
 	// autoStartTaskForStep (Path A) asynchronously; only the first claimer
@@ -673,8 +674,16 @@ func (s *Service) autoStartReviewTask(
 			zap.String("task_id", task.ID),
 			zap.Error(err))
 		s.restoreAutoStartClaim(ctx, task.ID, "review.auto_start")
+		if createAutoStartOwned || s.ownsAutoStartOnCreateInFlight(task.ID) {
+			s.restoreAutoStartOnCreate(ctx, task.ID, "review.auto_start")
+		}
 		return
 	}
+	// The watcher path can win the permanent review guard while the
+	// create-time path is still preparing its detached launch. A successful
+	// watcher launch satisfies that intent too, so clear the durable marker
+	// owned by the other path.
+	s.completeAutoStartOnCreate(ctx, task.ID, "review.auto_start")
 	s.logger.Info("auto-started review task",
 		zap.String("task_id", task.ID),
 		zap.Int("pr_number", evt.PR.Number))
@@ -1435,12 +1444,6 @@ func (s *Service) ListTasksNeedingPRWatch(ctx context.Context) ([]github.TaskBra
 	return s.buildTaskBranchList(ctx, store)
 }
 
-// ResolveBranchForSession returns the current branch for a task+session.
-// This is used by the poller to detect branch renames on existing PR watches.
-func (s *Service) ResolveBranchForSession(ctx context.Context, taskID, sessionID string) string {
-	return s.resolvePRWatchBranch(ctx, taskID, sessionID, "")
-}
-
 // buildTaskBranchList walks sessions × their repositories and emits one
 // TaskBranchInfo per (session, repository) that doesn't already have a PR
 // watch. Multi-repo: previously dedup was keyed by sessionID, which silently
@@ -1463,11 +1466,15 @@ func (s *Service) buildTaskBranchList(ctx context.Context, store repoStore) ([]g
 	watchedKeys := s.buildWatchedSessionRepoSet(ctx)
 
 	var result []github.TaskBranchInfo
+	seenSessions := make(map[string]struct{})
 	for _, sess := range sessions {
-		// Pass sess.Branch as fallback for the primary repo (legacy callers
-		// stored the worktree branch on SessionBranchInfo); per-repo branches
-		// come from session.Worktrees inside resolveSessionWatchTargets.
-		targets := s.resolveSessionWatchTargets(ctx, sess.TaskID, sess.SessionID, sess.Branch)
+		if _, seen := seenSessions[sess.SessionID]; seen {
+			continue
+		}
+		seenSessions[sess.SessionID] = struct{}{}
+		// Inventory rows can carry any repository's branch. Resolve each session
+		// once from its per-repository targets, as watch refresh does.
+		targets := s.resolveSessionWatchTargets(ctx, sess.TaskID, sess.SessionID, "")
 		for _, t := range targets {
 			if watchedKeys[watchedSessionRepoKey(sess.SessionID, t.RepositoryID, t.Branch)] {
 				continue

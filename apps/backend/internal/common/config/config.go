@@ -83,6 +83,21 @@ type AgentctlConfig struct {
 	IdleTimeout               time.Duration `mapstructure:"idleTimeout"`
 	IdleReaperInterval        time.Duration `mapstructure:"idleReaperInterval"`
 	NotificationQueueCapacity int           `mapstructure:"notificationQueueCapacity"`
+
+	// RecoveryDeadline is the single global bound covering adoption,
+	// enumeration and reconstruction together during standalone agent
+	// survival re-tracking at backend startup.
+	RecoveryDeadline time.Duration `mapstructure:"recoveryDeadline"`
+	// RecoveryReadTimeout and RecoveryReadRetries bound each read of a
+	// reconstruction value from the adopted control server during re-tracking.
+	RecoveryReadTimeout time.Duration `mapstructure:"recoveryReadTimeout"`
+	RecoveryReadRetries int           `mapstructure:"recoveryReadRetries"`
+	// UnownedPeriod is how long a standalone control server tolerates having
+	// no owning backend before it stops its instances and exits.
+	UnownedPeriod time.Duration `mapstructure:"unownedPeriod"`
+	// DetachedEventLimit bounds the per-instance retained-event count while
+	// a standalone control server has no owning backend attached.
+	DetachedEventLimit int `mapstructure:"detachedEventLimit"`
 }
 
 // PlanningConfig contains planning service timing settings.
@@ -478,10 +493,27 @@ type FeaturesConfig struct {
 	// OfficeSessionIdentity keys an Office task's session identity on the run's
 	// own agent instead of the task's runner seat, and binds an agent's
 	// decision re-evaluation to its own calling session instead of the task's
-	// most-recently-started session. Off in every embedded profile: enabling it
-	// exposes pre-existing duplicate (task_id, agent_profile_id) rows until the
-	// companion unique-index fix has shipped.
+	// most-recently-started session. On in every embedded profile; it remains a
+	// high-risk, path-scoped change to durable session identity. A live
+	// (task_id, agent_profile_id) pair is guarded in-transaction on the office
+	// session creation path, not by a table-level constraint, and pre-existing
+	// duplicate rows stay safe by selection, not migration. The toggle remains a
+	// kill switch that restores runner-seat binding and task-active-session
+	// decision re-evaluation when disabled.
 	OfficeSessionIdentity bool `mapstructure:"office_session_identity" json:"officeSessionIdentity"`
+
+	// NeedsYouInbox gates the Needs-you Inbox: a workspace-scoped sidebar
+	// destination, independent of Office, listing exactly the answerable
+	// clarification bundles for the active workspace. Off in prod until the
+	// feature is user-ready.
+	NeedsYouInbox bool `mapstructure:"needs_you_inbox" json:"needsYouInbox"`
+
+	// AgentSurvival lets a worktree or local-executor agent session survive a
+	// backend restart by adopting its still-running standalone control server
+	// instead of killing it. Off in every embedded profile, and unavailable on
+	// Windows (survival trades the platform's kill-on-job-close safeguard for
+	// an adoption handshake, which is untested there).
+	AgentSurvival bool `mapstructure:"agent_survival" json:"agentSurvival"`
 }
 
 // LoggingConfig holds logging configuration.
@@ -532,8 +564,15 @@ type AgentConfig struct {
 	// StandalonePort is the control port for standalone agentctl (default: 39429)
 	StandalonePort int `mapstructure:"standalonePort"`
 
-	// StandaloneAuthToken is the per-launch auth token retrieved via handshake.
-	// Set at runtime after agentctl starts; not persisted in config files.
+	// StandaloneAuthToken is the single credential that authenticates both
+	// the agentctl *control server* (instance create/list/delete, health,
+	// ownership rotate/confirm) and every per-instance agentctl server it
+	// supervises (/agent/stream, file tree, shell, ...), per design 01
+	// "Single driver" (AC-EXECUTORS-CONTROL-OWNERSHIP-002.6). After adopting
+	// a surviving control server it holds the freshly rotated credential
+	// (AC-EXECUTORS-CONTROL-OWNERSHIP-002); use it for every client built
+	// against this control server or any instance it supervises. Set at
+	// runtime after agentctl starts; not persisted in config files.
 	StandaloneAuthToken string `mapstructure:"-"`
 
 	// StandalonePID is the OS process id of the standalone agentctl control-server
@@ -778,6 +817,9 @@ func loadWithPath(configPath, homeDir string) (*Config, error) {
 		return nil, fmt.Errorf("error unmarshaling config: %w", err)
 	}
 	sources := applyStartupDefaultsAndEnvironment(&cfg, yamlKeys, profileDefaults, envSnapshot)
+	if err := applySurvivalRecoveryEnv(&cfg, envSnapshot, sources); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
 	warnings := inspectSecretPermissions(selection, v)
 	cfg.Source = buildConfigSource(selection, v, sources, warnings)
 

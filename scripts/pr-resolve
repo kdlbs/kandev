@@ -10,6 +10,10 @@
 #       Print the full thread/comment body plus path, line, author, commit id,
 #       and URL. Use before deciding how to answer a preview from list.
 #
+#   scripts/pr-resolve reopen <PR> <thread_id>
+#       Reopen an already-resolved review thread after an authorized later
+#       change invalidates its resolution rationale.
+#
 #   scripts/pr-resolve reply <PR> <comment_id> <thread_id> <body>
 #   scripts/pr-resolve reply <PR> <comment_id> <thread_id> --body-file <path>
 #       Reply to the thread starter, resolve the thread, and add a +1
@@ -56,6 +60,14 @@ if [[ "$cmd" == "reply" && ( $# -eq 4 || $# -eq 5 ) ]]; then
     [[ -f "$5" ]] || { echo "body file not found: $5" >&2; exit 1; }
     [[ -s "$5" ]] || { echo "body file is empty: $5" >&2; exit 1; }
   fi
+fi
+
+if [[ "$cmd" == "reopen" ]]; then
+  [ $# -eq 2 ] || usage
+  [[ "$2" == PRRT_* ]] || {
+    echo "reopen expects a review thread ID as its second argument" >&2
+    exit 1
+  }
 fi
 
 read -r OWNER REPO < <(gh repo view --json owner,name --jq '"\(.owner.login) \(.name)"')
@@ -157,6 +169,46 @@ case "$cmd" in
               end'
         ;;
     esac
+    ;;
+
+  reopen)
+    PR=$1; THREAD_ID=$2
+    if ! THREAD_JSON=$(gh api graphql -f query='
+      query($id: ID!) {
+        node(id: $id) {
+          ... on PullRequestReviewThread {
+            id
+            isResolved
+            pullRequest { number repository { nameWithOwner } }
+          }
+        }
+      }' -f id="$THREAD_ID"); then
+      echo "failed to fetch review thread $THREAD_ID for PR #$PR" >&2
+      exit 1
+    fi
+    if ! jq -e --arg pr "$PR" --arg thread_id "$THREAD_ID" --arg repository "$OWNER/$REPO" '
+      .data.node as $thread
+      | if $thread == null then error("review thread \($thread_id) not found on PR #\($pr)")
+        elif (($thread.pullRequest.number // -1) | tostring) != $pr then
+          error("thread belongs to PR #\($thread.pullRequest.number), not #\($pr)")
+        elif (($thread.pullRequest.repository.nameWithOwner // "") != $repository) then
+          ($thread.pullRequest.repository.nameWithOwner // "unknown") as $thread_repository
+          | error("thread belongs to repository \($thread_repository), not \($repository)")
+        elif $thread.isResolved != true then error("thread is not resolved")
+        else true
+        end' <<<"$THREAD_JSON" >/dev/null; then
+      exit 1
+    fi
+    if ! UNRESOLVE_JSON=$(gh api graphql -f query='mutation($t: ID!) { unresolveReviewThread(input: {threadId: $t}) { thread { isResolved } } }' \
+      -f t="$THREAD_ID"); then
+      echo "failed to reopen review thread $THREAD_ID on PR #$PR" >&2
+      exit 1
+    fi
+    if ! jq -e '.data.unresolveReviewThread.thread.isResolved == false' <<<"$UNRESOLVE_JSON" >/dev/null; then
+      echo "GitHub returned an invalid reopen response for review thread $THREAD_ID on PR #$PR" >&2
+      exit 1
+    fi
+    echo "ok $THREAD_ID"
     ;;
 
   reply)

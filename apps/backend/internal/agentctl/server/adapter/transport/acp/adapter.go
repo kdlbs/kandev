@@ -288,6 +288,8 @@ type Adapter struct {
 	// Session transitions use a separate mutex because a reset must keep the
 	// adapter transitionally consistent from session/new through session/close.
 	sessionTransitionMu sync.Mutex
+	sessionCleanupDone  chan struct{}
+	sessionCleanupWg    sync.WaitGroup
 	configChangeMu      sync.Mutex
 	configGeneration    uint64
 	contextSamples      map[string]contextWindowSample
@@ -520,9 +522,13 @@ func (a *Adapter) Initialize(ctx context.Context) error {
 	// queue and is drained by our update worker. Requires a coder/acp-go-sdk
 	// fork with WithMaxQueuedNotifications; see go.mod replace directive.
 	notifQueueCap := acpNotifQueueCapacity(a.cfg.NotificationQueueCapacity)
-	a.acpConn = acp.NewClientSideConnection(a.acpClient, a.stdin, a.stdout,
-		acp.WithMaxQueuedNotifications(notifQueueCap))
-	a.acpConn.SetLogger(slog.Default().With("component", "acp-conn"))
+	a.acpConn = acpclient.NewClientSideConnectionWithLogger(
+		a.acpClient,
+		a.stdin,
+		a.stdout,
+		slog.Default().With("component", "acp-conn"),
+		acp.WithMaxQueuedNotifications(notifQueueCap),
+	)
 	a.logger.Debug("ACP connection notification queue sized",
 		zap.Int("capacity", notifQueueCap))
 
@@ -632,6 +638,15 @@ func (a *Adapter) GetSessionModelState() *streams.SessionModelState {
 	}
 }
 
+// ProviderErrorContext implements adapter.ProviderErrorContextProvider.
+// modelID is empty until the adapter has settled a model for the session: a
+// non-empty currentModelFromConfig(availableConfigOptions) value at read time.
+func (a *Adapter) ProviderErrorContext() (providerID, modelID string) {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.agentID, currentModelFromConfig(a.availableConfigOptions)
+}
+
 func cloneSessionModels(models []streams.SessionModelInfo) []streams.SessionModelInfo {
 	if len(models) == 0 {
 		return nil
@@ -730,6 +745,7 @@ func (a *Adapter) Close() error {
 	a.mu.Lock()
 	if a.closed {
 		a.mu.Unlock()
+		a.waitForSessionCleanup()
 		return nil
 	}
 	a.closed = true
@@ -751,6 +767,12 @@ func (a *Adapter) Close() error {
 	if a.lifetimeCancel != nil {
 		a.lifetimeCancel()
 	}
+
+	// A successful reset returns before its best-effort session/close request,
+	// but adapter shutdown owns that worker and must drain it before returning.
+	// Synchronizing with the transition mutex first ensures a reset that is just
+	// committing its cleanup has registered the wait-group entry.
+	a.waitForSessionCleanup()
 
 	// Wait for the update worker to exit before closing updatesCh.
 	// handleACPUpdate may call sendUpdate, so updatesCh must remain open

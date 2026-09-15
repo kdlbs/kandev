@@ -156,6 +156,13 @@ func TestCIAutomationReadyToMerge(t *testing.T) {
 		{name: "pending review", mutate: func(pr *github.TaskPR) { pr.PendingReviewCount = 1 }, want: false},
 		{name: "not enough approvals", mutate: func(pr *github.TaskPR) { pr.ReviewCount = 0 }, want: false},
 		{name: "unresolved threads", mutate: func(pr *github.TaskPR) { pr.UnresolvedReviewThreads = 1 }, want: false},
+		{name: "workflow attention", mutate: func(pr *github.TaskPR) {
+			pr.WorkflowAttention = &github.WorkflowAttention{
+				State:   github.WorkflowAttentionApprovalRequired,
+				HeadSHA: "head-sha",
+			}
+			pr.HeadSHA = "head-sha"
+		}, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2576,7 +2583,7 @@ func TestDispatchCIAutomationPromptForPRQueuesWhenRunningUserMessageCannotBeReco
 	repo := setupTestRepo(t)
 	seedTaskAndSession(t, repo, "task-1", "session-1", models.TaskSessionStateRunning)
 	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
-	svc.messageQueue = messagequeue.NewServiceMemory(testLogger())
+	svc.messageQueue = newAuthoritativeMemoryQueue(repo, testLogger())
 	messageCreator := &mockMessageCreator{userMessageErr: errors.New("message db unavailable")}
 	svc.messageCreator = messageCreator
 	session, err := repo.GetTaskSession(ctx, "session-1")

@@ -27,7 +27,7 @@ type decisionSeatDispatcher interface {
 // HoldsDecisionSeat reports whether agentProfileID currently holds a
 // decision seat (reviewer or approver) at the task's current workflow step.
 // It resolves the seat the same way RecordAgentDecision authorizes a real
-// record_step_decision_kandev call, so runtime.ContextBuilder can grant the
+// runtime decision call, so runtime.ContextBuilder can grant the
 // matching capability without over- or under-stating who can actually
 // decide.
 func (s *Service) HoldsDecisionSeat(ctx context.Context, taskID, agentProfileID string) (bool, error) {

@@ -367,6 +367,14 @@ CREATE TABLE office_budget_policies (
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL
 	);
+CREATE TABLE office_budget_claims (
+		policy_id TEXT NOT NULL,
+		period_key TEXT NOT NULL,
+		level TEXT NOT NULL,
+		claimed_at TIMESTAMP NOT NULL,
+		PRIMARY KEY (policy_id, period_key, level),
+		FOREIGN KEY (policy_id) REFERENCES office_budget_policies(id) ON DELETE CASCADE
+);
 CREATE TABLE office_channels (
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL,

@@ -274,6 +274,34 @@ func TestStore_ListTaskMRsByTask_ReturnsEmptyForUnknownTask(t *testing.T) {
 	}
 }
 
+func TestStore_ListTaskMRsByTaskIDs_GroupsByTaskAndPreservesRepositoryIdentity(t *testing.T) {
+	store := newTestStore(t)
+	ctx := context.Background()
+	seedWorkspace(t, store, "ws-1")
+	seedTask(t, store, "task-1", "ws-1")
+	seedTask(t, store, "task-2", "ws-1")
+	if err := store.UpsertTaskMR(ctx, newTestMR("task-1", "repo-canonical", "group/project", 224)); err != nil {
+		t.Fatalf("upsert task-1 MR: %v", err)
+	}
+	if err := store.UpsertTaskMR(ctx, newTestMR("task-2", "repo-fork", "fork/project", 224)); err != nil {
+		t.Fatalf("upsert task-2 MR: %v", err)
+	}
+
+	got, err := store.ListTaskMRsByTaskIDs(ctx, []string{"task-1", "task-2", "missing"})
+	if err != nil {
+		t.Fatalf("ListTaskMRsByTaskIDs: %v", err)
+	}
+	if len(got["task-1"]) != 1 || got["task-1"][0].RepositoryID != "repo-canonical" {
+		t.Fatalf("task-1 MRs = %#v, want canonical repo row", got["task-1"])
+	}
+	if len(got["task-2"]) != 1 || got["task-2"][0].RepositoryID != "repo-fork" {
+		t.Fatalf("task-2 MRs = %#v, want fork repo row", got["task-2"])
+	}
+	if _, ok := got["missing"]; ok {
+		t.Fatal("missing task unexpectedly present in grouped results")
+	}
+}
+
 func TestStore_DeleteTaskMR_RemovesByID(t *testing.T) {
 	store := newTestStore(t)
 	ctx := context.Background()

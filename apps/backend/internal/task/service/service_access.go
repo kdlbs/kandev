@@ -189,19 +189,23 @@ func (s *Service) authorizeTaskScope(ctx context.Context, taskID string, scope a
 	if err != nil {
 		return err
 	}
+	if task == nil {
+		return repoerrors.ErrTaskNotFound
+	}
 	if task.WorkspaceID == "" {
 		return nil
 	}
 	workspace, err := s.workspaces.GetWorkspace(ctx, task.WorkspaceID)
-	if err != nil {
-		// A dangling workspace reference (the row is genuinely gone) should
-		// not hide the task from the single user who can already see
-		// everything else about it. Any OTHER lookup failure fails closed: a
-		// transient database error must not read as "granted".
-		if errors.Is(err, repoerrors.ErrWorkspaceNotFound) {
-			return nil
-		}
+	switch {
+	case errors.Is(err, repoerrors.ErrWorkspaceNotFound):
+		// A task can outlive its workspace row during durable cleanup. Its
+		// own row remains readable because there is no workspace owner left
+		// to authorize against.
+		return nil
+	case err != nil:
 		return err
+	case workspace == nil:
+		return repoerrors.ErrTaskNotFound
 	}
 	decision := s.workspaceDecision(ctx, workspace)
 	if !decision.CanRead() {
@@ -221,6 +225,9 @@ func (s *Service) authorizeWorkflowID(ctx context.Context, workflowID string) er
 	workflow, err := s.workflows.GetWorkflow(ctx, workflowID)
 	if err != nil {
 		return err
+	}
+	if workflow == nil {
+		return repoerrors.ErrWorkspaceNotFound
 	}
 	if workflow.WorkspaceID == "" {
 		return nil
@@ -251,6 +258,23 @@ func (s *Service) authorizeWorkflowID(ctx context.Context, workflowID string) er
 	return nil
 }
 
+// authorizeWorkflowScope checks reach and one action scope for a workflow.
+// Workflow access is resolved through its workspace so callers that can read
+// a board but cannot write its tasks receive ErrForbidden.
+func (s *Service) authorizeWorkflowScope(ctx context.Context, workflowID string, scope authz.Scope) error {
+	if _, scoped := callerScope(ctx); !scoped {
+		return nil
+	}
+	workflow, err := s.workflows.GetWorkflow(ctx, workflowID)
+	if err != nil {
+		return err
+	}
+	if workflow.WorkspaceID == "" {
+		return nil
+	}
+	return s.AuthorizeWorkspaceScope(ctx, workflow.WorkspaceID, scope)
+}
+
 // AuthorizeTaskAccess is the public form of authorizeTaskID, consumed by the
 // WS gateway's subscription checks.
 func (s *Service) AuthorizeTaskAccess(ctx context.Context, taskID string) error {
@@ -262,6 +286,27 @@ func (s *Service) AuthorizeTaskAccess(ctx context.Context, taskID string) error 
 // by ID but does not own workspace permissions.
 func (s *Service) AuthorizeWorkflowAccess(ctx context.Context, workflowID string) error {
 	return s.authorizeWorkflowID(ctx, workflowID)
+}
+
+// AuthorizeWorkflowStepAccess resolves a step's owning workflow before
+// authorizing the workflow, so step-count endpoints cannot disclose another
+// workspace's task count.
+func (s *Service) AuthorizeWorkflowStepAccess(ctx context.Context, stepID string) error {
+	_, scoped := callerScope(ctx)
+	if !scoped {
+		return nil
+	}
+	if s.workflowStepGetter == nil {
+		return repoerrors.ErrTaskNotFound
+	}
+	step, err := s.workflowStepGetter.GetStep(ctx, stepID)
+	if err != nil {
+		return err
+	}
+	if step == nil || step.WorkflowID == "" {
+		return repoerrors.ErrTaskNotFound
+	}
+	return s.authorizeWorkflowID(ctx, step.WorkflowID)
 }
 
 // AuthorizeWorkspaceAccess is the public form of authorizeWorkspaceID,
@@ -296,7 +341,21 @@ func (s *Service) AuthorizeSessionScope(ctx context.Context, sessionID string, s
 // caller and that the session belongs to the supplied task. Mismatches use the
 // task not-found sentinel so callers cannot enumerate another task's sessions.
 func (s *Service) AuthorizeTaskSessionAccess(ctx context.Context, taskID, sessionID string) error {
-	if err := s.AuthorizeTaskAccess(ctx, taskID); err != nil {
+	return s.authorizeTaskSessionScope(ctx, taskID, sessionID, authz.ScopeWorkspaceRead)
+}
+
+// AuthorizeTaskSessionPromptAccess checks the task/session pair and requires
+// the session.prompt capability used to create or dispatch user messages.
+func (s *Service) AuthorizeTaskSessionPromptAccess(ctx context.Context, taskID, sessionID string) error {
+	return s.authorizeTaskSessionScope(ctx, taskID, sessionID, authz.ScopeSessionPrompt)
+}
+
+func (s *Service) authorizeTaskSessionScope(
+	ctx context.Context,
+	taskID, sessionID string,
+	scope authz.Scope,
+) error {
+	if err := s.authorizeTaskScope(ctx, taskID, scope); err != nil {
 		return err
 	}
 	session, err := s.sessions.GetTaskSession(ctx, sessionID)
@@ -309,9 +368,28 @@ func (s *Service) AuthorizeTaskSessionAccess(ctx context.Context, taskID, sessio
 	return nil
 }
 
+// AuthorizeTaskSessionIncarnationAccess additionally rejects a stale queue
+// identity after a textual session ID has been deleted and recreated.
+func (s *Service) AuthorizeTaskSessionIncarnationAccess(
+	ctx context.Context,
+	taskID, sessionID, incarnationID string,
+) error {
+	if err := s.AuthorizeTaskAccess(ctx, taskID); err != nil {
+		return err
+	}
+	session, err := s.sessions.GetTaskSession(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	if session == nil || session.TaskID != taskID || session.QueueIncarnationID != incarnationID {
+		return repoerrors.ErrTaskNotFound
+	}
+	return nil
+}
+
 // AuthorizeEnvironmentAccess checks reach of a task environment via its task's
-// workspace. Used by the terminal environment-shell route, which resolves
-// executions by environment ID rather than session ID.
+// workspace. Used by the terminal environment-shell route, which
+// resolves executions by environment ID rather than session ID.
 func (s *Service) AuthorizeEnvironmentAccess(ctx context.Context, taskEnvironmentID string) error {
 	return s.AuthorizeEnvironmentScope(ctx, taskEnvironmentID, authz.ScopeWorkspaceRead)
 }

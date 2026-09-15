@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/kandev/kandev/internal/office/models"
@@ -13,16 +15,30 @@ func (s *Service) ListAgentsFromConfig(ctx context.Context, workspaceID string) 
 	return s.repo.ListAgentInstances(ctx, workspaceID)
 }
 
-// GetAgentFromConfig looks up an agent by ID or name.
+// GetAgentFromConfig looks up an agent by ID or name. The error it returns
+// wraps sql.ErrNoRows if, and only if, both underlying lookups genuinely
+// found no matching row -- never if either failed for another reason (a
+// transient I/O error). Callers that must tell "no such agent" apart from
+// a transient failure (AC-OFFICE-BUDGET-001.13) use errors.Is(err,
+// sql.ErrNoRows) rather than a second lookup or a new sentinel type; this
+// is the same two calls as before, just no longer collapsing a real error
+// into the generic not-found string.
 func (s *Service) GetAgentFromConfig(ctx context.Context, idOrName string) (*models.AgentInstance, error) {
-	if agent, err := s.repo.GetAgentInstance(ctx, idOrName); err == nil {
+	agent, errByID := s.repo.GetAgentInstance(ctx, idOrName)
+	if errByID == nil {
 		return agent, nil
 	}
-	agent, err := s.repo.GetAgentInstanceByNameAny(ctx, idOrName)
-	if err != nil {
-		return nil, fmt.Errorf("agent not found: %s", idOrName)
+	agent, errByName := s.repo.GetAgentInstanceByNameAny(ctx, idOrName)
+	if errByName == nil {
+		return agent, nil
 	}
-	return agent, nil
+	if !errors.Is(errByID, sql.ErrNoRows) {
+		return nil, errByID
+	}
+	if !errors.Is(errByName, sql.ErrNoRows) {
+		return nil, errByName
+	}
+	return nil, fmt.Errorf("agent not found: %s: %w", idOrName, sql.ErrNoRows)
 }
 
 // ListSkillsFromConfig returns all skills for a workspace.

@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- the mobile task switcher owns its complete data and action boundary */
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
@@ -12,7 +13,7 @@ import {
 } from "@/hooks/use-task-actions";
 import { useTaskDetachDialog } from "@/hooks/use-detach-task";
 import { useNestTaskByDrag } from "@/hooks/use-nest-task";
-import { useTaskRemoval } from "@/hooks/use-task-removal";
+import { useTaskRemoval, useTaskRemovalSuccessNotifier } from "@/hooks/use-task-removal";
 import { workspaceModeFromMetadata } from "@/lib/kanban/map-task";
 import { type Repository, type Task } from "@/lib/types/http";
 import type { KanbanState } from "@/lib/state/slices";
@@ -30,6 +31,12 @@ import { useArchivedTaskState } from "../task-archived-context";
 import { buildArchivedSidebarItem } from "../task-session-sidebar-archived-item";
 import type { SidebarItemContext } from "../task-session-sidebar-item";
 import type { TaskSwitcherItem } from "../task-switcher";
+import {
+  classifyWorkspaceContextReadError,
+  isCurrentWorkspaceContext,
+  retryAfterMilliseconds,
+} from "@/lib/state/workspace-context";
+import { generateUUID } from "@/lib/utils";
 
 function findSheetTask(
   state: ReturnType<ReturnType<typeof useAppStoreApi>["getState"]>,
@@ -44,6 +51,7 @@ function findSheetTask(
   return undefined;
 }
 
+// eslint-disable-next-line max-lines-per-function -- task projection and recovery status share one memoized view model
 export function useSheetData(workspaceId: string | null) {
   const activeTaskId = useAppStore((state) => state.tasks.activeTaskId);
   const {
@@ -55,6 +63,10 @@ export function useSheetData(workspaceId: string | null) {
     isLoading: tasksLoading,
     archivedError,
     retryArchivedTasks,
+    workspaceContextError,
+    workspaceContextPending,
+    workspaceContextAccessDenied,
+    retryWorkspaceContext,
   } = useWorkspaceSidebarTasks(workspaceId);
   const steps = useAppStore((state) => state.kanban.steps);
   const workspaces = useAppStore((state) => state.workspaces.items);
@@ -89,8 +101,11 @@ export function useSheetData(workspaceId: string | null) {
       stepColorById: new Map(allSteps.map((step) => [step.id, step.color])),
       automaticColorSettings,
     };
-    const items: TaskSwitcherItem[] = allTasks.map((task) => toSheetItem(task, ctx));
+    const items: TaskSwitcherItem[] = workspaceContextAccessDenied
+      ? []
+      : allTasks.map((task) => toSheetItem(task, ctx));
     if (
+      !workspaceContextAccessDenied &&
       archivedState.isArchived &&
       archivedState.archivedTaskId &&
       !items.some((task) => task.id === archivedState.archivedTaskId)
@@ -122,6 +137,7 @@ export function useSheetData(workspaceId: string | null) {
     wipQueueByTaskId,
     automaticColorSettings,
     archivedState,
+    workspaceContextAccessDenied,
   ]);
 
   const dialogSteps = useMemo(
@@ -145,12 +161,17 @@ export function useSheetData(workspaceId: string | null) {
     tasksLoading,
     archivedError,
     retryArchivedTasks,
+    workspaceContextError,
+    workspaceContextPending,
+    workspaceContextAccessDenied,
+    retryWorkspaceContext,
     tasksWithRepositories,
     dialogSteps,
   };
 }
 
 type SheetNavOptions = {
+  navigate: (taskId: string) => void;
   workspaceId: string | null;
   store: ReturnType<typeof useAppStoreApi>;
   loadTaskSessionsForTask: (
@@ -162,21 +183,73 @@ type SheetNavOptions = {
   onOpenChange: (open: boolean) => void;
 };
 
+export type WorkspaceTaskSession = {
+  id: string;
+  updated_at?: string | null;
+};
+
+export async function loadWorkspaceTaskSessions(
+  loader: SheetNavOptions["loadTaskSessionsForTask"],
+  taskId: string,
+): Promise<WorkspaceTaskSession[]> {
+  try {
+    return await loader(taskId);
+  } catch {
+    return [];
+  }
+}
+
+// eslint-disable-next-line max-lines-per-function -- workspace switching keeps its generation guard around every async phase
 async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
   const { store, loadTaskSessionsForTask, setActiveSession, setActiveTask, onOpenChange } = opts;
+  store.getState().setActiveWorkspace(newWorkspaceId);
+  const generation = store.getState().workspaceContextGeneration;
+  const requestId = generateUUID();
+  store
+    .getState()
+    .setWorkspaceContextRead(
+      "workflows",
+      newWorkspaceId,
+      generation,
+      "pending",
+      undefined,
+      requestId,
+    );
   store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: true } }));
   try {
     const workflowsResponse = await listWorkflows(newWorkspaceId, {
       cache: "no-store",
       includeHidden: true,
     });
+    if (!isCurrentWorkspaceContext(store.getState(), newWorkspaceId, generation)) return;
     const newWorkspaceWorkflows = workflowsResponse.workflows ?? [];
     const firstWorkflow = newWorkspaceWorkflows.find((w) => !w.hidden);
     if (!firstWorkflow) {
+      store
+        .getState()
+        .setWorkspaceContextRead(
+          "workflows",
+          newWorkspaceId,
+          generation,
+          "success",
+          undefined,
+          requestId,
+        );
       store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: false } }));
       return;
     }
     const snapshot = await fetchWorkflowSnapshot(firstWorkflow.id);
+    if (!isCurrentWorkspaceContext(store.getState(), newWorkspaceId, generation)) return;
+    store
+      .getState()
+      .setWorkspaceContextRead(
+        "workflows",
+        newWorkspaceId,
+        generation,
+        "success",
+        undefined,
+        requestId,
+      );
     store.setState((state) => ({
       ...state,
       workflows: {
@@ -198,19 +271,33 @@ async function switchWorkspace(newWorkspaceId: string, opts: SheetNavOptions) {
     }));
     const mostRecentTask = sortByUpdatedAtDesc(snapshot.tasks)[0];
     if (mostRecentTask) {
-      const sessions = await loadTaskSessionsForTask(mostRecentTask.id);
+      const sessions = await loadWorkspaceTaskSessions(loadTaskSessionsForTask, mostRecentTask.id);
+      if (!isCurrentWorkspaceContext(store.getState(), newWorkspaceId, generation)) return;
       const mostRecentSession = sortByUpdatedAtDesc(sessions)[0];
       if (mostRecentSession) {
         setActiveSession(mostRecentTask.id, mostRecentSession.id);
       } else {
         setActiveTask(mostRecentTask.id);
       }
-      replaceTaskUrl(mostRecentTask.id);
+      opts.navigate(mostRecentTask.id);
     }
     onOpenChange(false);
   } catch (error) {
     console.error("Failed to switch workspace:", error);
-    store.setState((state) => ({ ...state, kanban: { ...state.kanban, isLoading: false } }));
+    const state = store.getState();
+    if (!isCurrentWorkspaceContext(state, newWorkspaceId, generation)) return;
+    state.setWorkspaceContextRead(
+      "workflows",
+      newWorkspaceId,
+      generation,
+      classifyWorkspaceContextReadError(error),
+      retryAfterMilliseconds(error),
+      requestId,
+    );
+    store.setState((current) => ({
+      ...current,
+      kanban: { ...current.kanban, isLoading: false },
+    }));
   }
 }
 
@@ -328,6 +415,7 @@ function buildKanbanTaskUpsert(
 
 function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
   const {
+    navigate,
     workspaceId,
     store,
     loadTaskSessionsForTask,
@@ -340,6 +428,7 @@ function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
     async (newWorkspaceId: string) => {
       if (newWorkspaceId === workspaceId) return;
       await switchWorkspace(newWorkspaceId, {
+        navigate,
         workspaceId,
         store,
         loadTaskSessionsForTask,
@@ -350,11 +439,23 @@ function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
     },
     // Spread the individual fields rather than the `opts` object so callers
     // re-passing a fresh literal each render don't defeat memoization.
-    [workspaceId, store, loadTaskSessionsForTask, setActiveSession, setActiveTask, onOpenChange],
+    [
+      workspaceId,
+      store,
+      loadTaskSessionsForTask,
+      setActiveSession,
+      setActiveTask,
+      onOpenChange,
+      navigate,
+    ],
   );
 
   const handleTaskCreated = useCallback(
-    (task: Task, _mode: "create" | "edit", meta?: { taskSessionId?: string | null }) => {
+    (
+      task: Task,
+      _mode: "create" | "edit",
+      meta?: { taskSessionId?: string | null; autoFocus?: boolean },
+    ) => {
       store.setState((state) => {
         if (state.kanban.workflowId !== task.workflow_id) return state;
         const existing = state.kanban.tasks.find(
@@ -375,14 +476,18 @@ function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
           },
         };
       });
+      if (meta?.autoFocus === false) {
+        onOpenChange(false);
+        return;
+      }
       setActiveTask(task.id);
       if (meta?.taskSessionId) {
         setActiveSession(task.id, meta.taskSessionId);
       }
-      replaceTaskUrl(task.id);
+      navigate(task.id);
       onOpenChange(false);
     },
-    [store, setActiveTask, setActiveSession, onOpenChange],
+    [store, setActiveTask, setActiveSession, onOpenChange, navigate],
   );
 
   return { handleWorkspaceChange, handleTaskCreated };
@@ -390,7 +495,7 @@ function useWorkspaceAndTaskCreatedActions(opts: SheetNavOptions) {
 
 function useSheetDeleteActions(
   store: ReturnType<typeof useAppStoreApi>,
-  removeTaskFromBoard: ReturnType<typeof useTaskRemoval>["removeTaskFromBoard"],
+  runTaskRemoval: ReturnType<typeof useTaskRemoval>["runTaskRemoval"],
 ) {
   const { t } = useTranslation();
   const { deleteTaskById } = useTaskActions();
@@ -419,13 +524,12 @@ function useSheetDeleteActions(
       if (!deletingTask || isDeleting) return;
       const taskId = deletingTask.id;
       setIsDeleting(true);
-      // Capture active state before the async API call — the WS "task.deleted"
-      // handler may clear activeTaskId/activeSessionId before removeTaskFromBoard runs.
-      const { activeTaskId: wasActiveTaskId, activeSessionId: wasActiveSessionId } =
-        store.getState().tasks;
       try {
-        await deleteTaskById(taskId, opts);
-        await removeTaskFromBoard(taskId, { wasActiveTaskId, wasActiveSessionId });
+        await runTaskRemoval(
+          "delete",
+          { taskId, mutate: () => deleteTaskById(taskId, opts) },
+          { cascade: opts?.cascade },
+        );
       } catch (error) {
         console.error("Failed to delete task:", error);
       } finally {
@@ -433,7 +537,7 @@ function useSheetDeleteActions(
         setDeletingTask(null);
       }
     },
-    [deletingTask, isDeleting, deleteTaskById, removeTaskFromBoard, store],
+    [deletingTask, isDeleting, deleteTaskById, runTaskRemoval],
   );
 
   const deletingTaskId = isDeleting ? (deletingTask?.id ?? null) : null;
@@ -524,14 +628,19 @@ export function useSheetActions(
   workspaceId: string | null,
   onOpenChange: (open: boolean) => void,
   selection: TaskSheetSelectionController,
+  navigate: (taskId: string) => void = replaceTaskUrl,
 ) {
   const setActiveTask = useAppStore((state) => state.setActiveTask);
   const setActiveSession = useAppStore((state) => state.setActiveSession);
   const store = useAppStoreApi();
   const archiveAndSwitch = useArchiveAndSwitchTask();
   const archiveActions = useSheetArchiveActions(store, archiveAndSwitch);
-  const { removeTaskFromBoard, loadTaskSessionsForTask } = useTaskRemoval({ store });
-  const deleteActions = useSheetDeleteActions(store, removeTaskFromBoard);
+  const notifySuccess = useTaskRemovalSuccessNotifier();
+  const { runTaskRemoval, loadTaskSessionsForTask } = useTaskRemoval({
+    store,
+    notifySuccess,
+  });
+  const deleteActions = useSheetDeleteActions(store, runTaskRemoval);
   const detachActions = useTaskDetachDialog(store);
   const handleNestTask = useSheetNestTask();
   const handleSelectTask = useCallback(
@@ -553,14 +662,23 @@ export function useSheetActions(
           const selectedTask = findSheetTask(store.getState(), selectedTaskId);
           return selectedTask ? taskPendingSelectionSnapshot(selectedTask) : undefined;
         },
-        navigate: replaceTaskUrl,
+        navigate,
         onOpenChange,
       });
     },
-    [loadTaskSessionsForTask, setActiveSession, setActiveTask, store, onOpenChange, selection],
+    [
+      loadTaskSessionsForTask,
+      setActiveSession,
+      setActiveTask,
+      store,
+      onOpenChange,
+      selection,
+      navigate,
+    ],
   );
 
   const { handleWorkspaceChange, handleTaskCreated } = useWorkspaceAndTaskCreatedActions({
+    navigate,
     workspaceId,
     store,
     loadTaskSessionsForTask,
