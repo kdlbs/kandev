@@ -103,7 +103,11 @@ export function useNeedsYouInboxController() {
   // session.state_changed is broadcast workspace-wide, so a burst of
   // unrelated session transitions must not cause a burst of reads: coalesce
   // with the same window use-foreground-refresh.ts uses for its own bursty
-  // browser events.
+  // browser events. Unlike that hook's duplicate browser events, though,
+  // session.state_changed and session.pending_action_changed are distinct
+  // signals from distinct sessions -- a read triggered by one cannot reflect
+  // a change the other carries -- so an event landing inside the window is
+  // queued for one trailing bump at the end of it, never dropped.
   const lastWsBumpAtRef = useRef(-Infinity);
   useEffect(() => {
     if (!enabled) return;
@@ -115,17 +119,29 @@ export function useNeedsYouInboxController() {
 
     const client = getWebSocketClient();
     if (!client) return;
-    const bump = () => {
-      const now = Date.now();
-      if (now - lastWsBumpAtRef.current < FOREGROUND_EVENT_COALESCE_MS) return;
-      lastWsBumpAtRef.current = now;
+    let trailingBumpTimeout: number | undefined;
+    const doBump = () => {
+      lastWsBumpAtRef.current = Date.now();
       storeApi.getState().bumpNeedsYouInboxRefreshTick();
+    };
+    const bump = () => {
+      const elapsed = Date.now() - lastWsBumpAtRef.current;
+      if (elapsed >= FOREGROUND_EVENT_COALESCE_MS) {
+        doBump();
+        return;
+      }
+      if (trailingBumpTimeout !== undefined) return;
+      trailingBumpTimeout = window.setTimeout(() => {
+        trailingBumpTimeout = undefined;
+        doBump();
+      }, FOREGROUND_EVENT_COALESCE_MS - elapsed);
     };
     const offPending = client.on("session.pending_action_changed", bump);
     const offStateChanged = client.on("session.state_changed", bump);
     return () => {
       offPending();
       offStateChanged();
+      if (trailingBumpTimeout !== undefined) window.clearTimeout(trailingBumpTimeout);
     };
   }, [enabled, connectionStatus, workspaceId, refresh, storeApi]);
 
