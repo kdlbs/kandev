@@ -4565,6 +4565,21 @@
           "settings_href": "/settings/preferences"
         },
         {
+          "key": "user_settings.auto_focus_new_tasks",
+          "field_path": "auto_focus_new_tasks",
+          "label": "auto focus new tasks",
+          "description": "Portable preference owned by the current user.",
+          "json_type": "boolean",
+          "support": "supported",
+          "classification": "writable",
+          "owner": "user-settings",
+          "writable": true,
+          "validator": "user-settings",
+          "authority": "user.self",
+          "change_timing": "future_views",
+          "settings_href": "/settings/preferences"
+        },
+        {
           "key": "user_settings.mcp_task_agent_profile_default",
           "field_path": "mcp_task_agent_profile_default",
           "label": "MCP task profile",
@@ -6149,6 +6164,7 @@
       "agent_generated_task_titles",
       "app_status_bar_enabled",
       "app_status_bar_order",
+      "auto_focus_new_tasks",
       "azure_devops_browse_preferences",
       "changes_panel_layout",
       "chat_submit_key",

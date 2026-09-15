@@ -25,6 +25,7 @@ type memoryRepository struct {
 	autoRunIncarnation map[string]string
 	autoMergeOverrides map[QueueSessionIdentity]AutoMergeOverride
 	identities         map[string]QueueSessionIdentity
+	admissionReceipts  map[queueAdmissionKey]queueAdmissionReceipt
 	statusGeneration   map[string]int64
 	authority          func(context.Context, string, string) (QueueSessionIdentity, error)
 }
@@ -44,6 +45,7 @@ func NewMemoryRepository() Repository {
 		autoMergeOverrides: make(map[QueueSessionIdentity]AutoMergeOverride),
 		statusGeneration:   make(map[string]int64),
 		identities:         make(map[string]QueueSessionIdentity),
+		admissionReceipts:  make(map[queueAdmissionKey]queueAdmissionReceipt),
 	}
 }
 
@@ -67,6 +69,11 @@ func (r *memoryRepository) clearSessionStateLocked(sessionID string) {
 	delete(r.autoRunIncarnation, sessionID)
 	delete(r.statusGeneration, sessionID)
 	delete(r.identities, sessionID)
+	for key := range r.admissionReceipts {
+		if key.SessionID == sessionID {
+			delete(r.admissionReceipts, key)
+		}
+	}
 	for identity := range r.autoMergeOverrides {
 		if identity.SessionID == sessionID {
 			delete(r.autoMergeOverrides, identity)
@@ -206,6 +213,11 @@ func (r *memoryRepository) PurgeTask(_ context.Context, taskID string) (int, err
 		if move != nil && move.TaskID == taskID {
 			delete(r.pendingMoves, sessionID)
 			affectedSessions[sessionID] = struct{}{}
+		}
+	}
+	for key := range r.admissionReceipts {
+		if key.TaskID == taskID {
+			delete(r.admissionReceipts, key)
 		}
 	}
 	for sessionID := range affectedSessions {
@@ -2180,6 +2192,11 @@ func (r *memoryRepository) PurgeSession(_ context.Context, sessionID string) (in
 	defer r.mu.Unlock()
 	removed := len(r.entries[sessionID])
 	delete(r.entries, sessionID)
+	for key := range r.admissionReceipts {
+		if key.SessionID == sessionID {
+			delete(r.admissionReceipts, key)
+		}
+	}
 	delete(r.pendingMoves, sessionID)
 	delete(r.autoRun, sessionID)
 	r.sessionGeneration[sessionID]++

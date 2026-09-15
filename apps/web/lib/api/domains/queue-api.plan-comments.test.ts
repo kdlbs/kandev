@@ -34,16 +34,20 @@ describe("task plan queue admission", () => {
       require_primary_session: true,
     });
 
-    expect(request).toHaveBeenCalledWith(QUEUE_ADD_ACTION, {
-      session_id: PRIMARY_SESSION_ID,
-      session_incarnation_id: INCARNATION_ID,
-      task_id: "task-1",
-      client_queue_id: CLIENT_QUEUE_ID,
-      content: "",
-      plan_mode: true,
-      plan_comment_refs: [{ id: "comment-1", version: 2 }],
-      require_primary_session: true,
-    });
+    expect(request).toHaveBeenCalledWith(
+      QUEUE_ADD_ACTION,
+      {
+        session_id: PRIMARY_SESSION_ID,
+        session_incarnation_id: INCARNATION_ID,
+        task_id: "task-1",
+        client_queue_id: CLIENT_QUEUE_ID,
+        content: "",
+        plan_mode: true,
+        plan_comment_refs: [{ id: "comment-1", version: 2 }],
+        require_primary_session: true,
+      },
+      10000,
+    );
   });
 
   it("reconciles a timed-out comment queue admission from queue state", async () => {

@@ -1061,6 +1061,90 @@ func (s *Service) QueueMessageWithMetadataForSession(
 	)
 }
 
+// QueueMessageWithMetadataForSessionWithClientQueueID admits an ordinary
+// browser queue message with a durable caller-owned replay identity. The
+// receipt and any queue insertion, fold, or attachment claim share one
+// repository transaction.
+func (s *Service) QueueMessageWithMetadataForSessionWithClientQueueID(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	clientQueueID, content, model, userID string,
+	planMode bool,
+	attachments []MessageAttachment,
+	metadata map[string]interface{},
+	claim *QueueAttachmentClaim,
+) (*QueuedMessage, bool, error) {
+	if clientQueueID == "" || len(clientQueueID) > MaxQueueAdmissionIDLength {
+		return nil, false, errors.New("client queue id is invalid")
+	}
+	writer, ok := s.repo.(queueAdmissionRepository)
+	if !ok {
+		return nil, false, ErrQueueAdmissionUnavailable
+	}
+	candidate := &QueuedMessage{
+		ID: clientQueueID, SessionID: identity.SessionID, TaskID: identity.TaskID,
+		Content: content, Model: model, PlanMode: planMode,
+		Attachments: append([]MessageAttachment(nil), attachments...),
+		Metadata:    copyMessageMetadata(metadata, 0), QueuedBy: userID,
+	}
+	var admitted *QueuedMessage
+	var replay bool
+	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		for {
+			policy := s.resolveAdmissionAutoMergePolicy(admittedCtx, &identity, identity.SessionID)
+			var err error
+			admitted, replay, err = writer.AdmitQueueMessage(
+				admittedCtx, identity, clientQueueID, candidate, claim, s.MaxPerSession(), policy,
+			)
+			if errors.Is(err, ErrAutoMergePolicyChanged) {
+				continue
+			}
+			return err
+		}
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return admitted, replay, nil
+}
+
+// LookupQueueAdmissionWithClientQueueID checks a caller-owned admission
+// receipt before validation that depends on mutable external references or
+// attachment ownership.
+func (s *Service) LookupQueueAdmissionWithClientQueueID(
+	ctx context.Context,
+	identity QueueSessionIdentity,
+	clientQueueID, content, model, userID string,
+	planMode bool,
+	attachments []MessageAttachment,
+	metadata map[string]interface{},
+) (*QueuedMessage, bool, error) {
+	if clientQueueID == "" || len(clientQueueID) > MaxQueueAdmissionIDLength {
+		return nil, false, errors.New("client queue id is invalid")
+	}
+	reader, ok := s.repo.(queueAdmissionRepository)
+	if !ok {
+		return nil, false, ErrQueueAdmissionUnavailable
+	}
+	candidate := &QueuedMessage{
+		ID: clientQueueID, SessionID: identity.SessionID, TaskID: identity.TaskID,
+		Content: content, Model: model, PlanMode: planMode,
+		Attachments: append([]MessageAttachment(nil), attachments...),
+		Metadata:    copyMessageMetadata(metadata, 0), QueuedBy: userID,
+	}
+	var admitted *QueuedMessage
+	var replay bool
+	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
+		var lookupErr error
+		admitted, replay, lookupErr = reader.LookupQueueAdmission(admittedCtx, identity, clientQueueID, candidate)
+		return lookupErr
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	return admitted, replay, nil
+}
+
 // QueueMessageWithMetadataForSessionWithClaim atomically claims staged
 // attachments when admission inserts a queue entry. An empty claim carries
 // inline-only attachments and may use the compatible full-queue fold path.

@@ -6,6 +6,15 @@ export type CanvasReleaseStatus = "valid" | "pending_permission" | "invalid" | "
 
 export type CanvasRelease = {
   id: string;
+  package_id?: string;
+  version?: string;
+  display_name?: string;
+  description?: string;
+  author?: string;
+  license?: string;
+  source_mode?: "static" | "project" | string;
+  min_kandev_version?: string;
+  repo_url?: string;
   package_digest?: string;
   validation_status: CanvasReleaseStatus | string;
   validation_error?: string;

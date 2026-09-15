@@ -277,6 +277,19 @@ describe("QuickChatModal mixed tabs", () => {
     expect(tabs[1].querySelector('[role="status"]')).toBeNull();
   });
 
+  it("does not leave the previous tab content interactive during a pending selection", () => {
+    useQuickChatModalMock.mockReturnValue({
+      ...defaultQuickChatModalState,
+      pendingQuickChatOpen: true,
+    });
+
+    render(<QuickChatModal workspaceId={WORKSPACE_ID} />);
+
+    expect(screen.getByTestId("quick-chat-selection-loading")).toBeTruthy();
+    expect(screen.queryByTestId("mock-quick-terminal-view")).toBeNull();
+    expect(screen.queryByTestId("quick-chat-session-view")).toBeNull();
+  });
+
   it("uses the same persisted order callback for coarse-pointer moves", () => {
     responsiveMock.isFinePointer = false;
     render(<QuickChatModal workspaceId={WORKSPACE_ID} />);

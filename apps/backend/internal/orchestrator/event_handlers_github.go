@@ -1566,11 +1566,15 @@ func (s *Service) buildTaskBranchList(ctx context.Context, store repoStore) ([]g
 	emitted := make(map[string]bool)
 
 	var result []github.TaskBranchInfo
+	seenSessions := make(map[string]struct{})
 	for _, sess := range sessions {
-		// Pass sess.Branch as fallback for the primary repo (legacy callers
-		// stored the worktree branch on SessionBranchInfo); per-repo branches
-		// come from session.Worktrees inside resolveSessionWatchTargets.
-		targets := s.resolveSessionWatchTargets(ctx, sess.TaskID, sess.SessionID, sess.Branch)
+		if _, seen := seenSessions[sess.SessionID]; seen {
+			continue
+		}
+		seenSessions[sess.SessionID] = struct{}{}
+		// Inventory rows can carry any repository's branch. Resolve each session
+		// once from its per-repository targets, as watch refresh does.
+		targets := s.resolveSessionWatchTargets(ctx, sess.TaskID, sess.SessionID, "")
 		for _, t := range targets {
 			effectiveTaskID := s.resolveEffectivePushTaskIDForSession(ctx, sess.SessionID, sess.TaskID, t.RepositoryID)
 			key := watchedTaskRepoBranchKey(effectiveTaskID, t.RepositoryID, t.Branch)

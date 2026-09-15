@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -62,6 +63,33 @@ func (r *transientStartCleanupRepository) StartPreparedTaskResourceCleanupJob(
 	}
 	r.mu.Unlock()
 	return r.TaskResourceCleanupRepository.StartPreparedTaskResourceCleanupJob(ctx, id)
+}
+
+type nilPreparedCleanupLookupRepository struct {
+	repository.TaskResourceCleanupRepository
+}
+
+func (nilPreparedCleanupLookupRepository) GetTaskResourceCleanupJobByOperationID(
+	context.Context, string,
+) (*models.TaskResourceCleanupJob, error) {
+	return nil, nil
+}
+
+func TestStartPreparedCleanupReturnsErrorWhenJobLookupIsEmpty(t *testing.T) {
+	taskSvc, _ := setupOfficeTest(t)
+	taskSvc.resourceCleanups = nilPreparedCleanupLookupRepository{
+		TaskResourceCleanupRepository: taskSvc.resourceCleanups,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	err := taskSvc.StartPreparedTaskResourceCleanup(ctx, "delete:missing")
+	if err == nil {
+		t.Fatal("StartPreparedTaskResourceCleanup unexpectedly succeeded")
+	}
+	if !strings.Contains(err.Error(), "prepared cleanup job") {
+		t.Fatalf("error = %v, want missing prepared cleanup job", err)
+	}
 }
 
 type blockingTaskMutationRepository struct {
@@ -557,8 +585,13 @@ func TestArchiveReadFailureLeavesRecoverablePreparedCleanup(t *testing.T) {
 	failingTasks := &failPostArchiveReadRepository{TaskRepository: taskSvc.tasks}
 	taskSvc.tasks = failingTasks
 
-	if err := taskSvc.ArchiveTask(ctx, "task-archive-reread"); err == nil {
-		t.Fatal("ArchiveTask succeeded despite forced post-commit read failure")
+	err := taskSvc.ArchiveTask(ctx, "task-archive-reread")
+	var postCommitErr *CascadePostCommitError
+	if !errors.As(err, &postCommitErr) {
+		t.Fatalf("ArchiveTask error = %v, want post-commit read failure", err)
+	}
+	if !failingTasks.archived {
+		t.Fatal("archive mutation did not commit")
 	}
 	var operationID string
 	if err := repo.DB().QueryRowContext(ctx, `

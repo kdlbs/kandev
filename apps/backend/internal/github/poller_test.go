@@ -304,6 +304,13 @@ func (m *mockTaskBranchProvider) ResolveBranchForRepository(_ context.Context, _
 	return ""
 }
 
+func (m *mockTaskBranchProvider) ResolveBranchForWatch(_ context.Context, watch *PRWatch) string {
+	if m.branches != nil {
+		return m.branches[watch.SessionID]
+	}
+	return ""
+}
+
 func (m *mockTaskBranchProvider) ResolveBranchesForRepository(_ context.Context, _, repositoryID string) []string {
 	if m.branchSets != nil {
 		return m.branchSets[repositoryID]

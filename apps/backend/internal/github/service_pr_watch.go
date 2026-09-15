@@ -321,6 +321,12 @@ func (s *Service) ensurePRWatch(
 	if err != nil {
 		return nil, err
 	}
+	if existing == nil {
+		existing, err = s.store.GetPRWatchByTaskRepoBranchAny(ctx, taskID, repositoryID, branch)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if existing != nil {
 		return existing, nil
 	}
