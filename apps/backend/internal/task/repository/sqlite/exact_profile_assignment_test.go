@@ -115,3 +115,38 @@ func TestAssignExactProfileAssignmentActivatesAtomically(t *testing.T) {
 		t.Fatalf("replay exact profile = (%v, %v), want (false, nil)", changed, err)
 	}
 }
+
+func TestActivateExactProfileAssignmentRejectsStaleGeneration(t *testing.T) {
+	repo, assignment := newExactProfileAssignmentRepo(t)
+	if _, err := repo.UpsertExactProfileAssignment(context.Background(), assignment); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := repo.ActivateExactProfileAssignment(context.Background(), assignment.TaskID, 2)
+	if err != nil || changed {
+		t.Fatalf("stale activation = (%v, %v)", changed, err)
+	}
+	changed, err = repo.ActivateExactProfileAssignment(context.Background(), assignment.TaskID, 1)
+	if err != nil || !changed {
+		t.Fatalf("activation = (%v, %v)", changed, err)
+	}
+}
+
+func newExactProfileAssignmentRepo(t *testing.T) (*Repository, *models.ExactProfileAssignment) {
+	t.Helper()
+	dbConn, err := dbutil.OpenSQLite(filepath.Join(t.TempDir(), "exact.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Round(0)
+	a := &models.ExactProfileAssignment{TaskID: "task-test", WorkspaceID: "workspace-1", AgentProfileID: "profile-1", ProfileRevision: now, Generation: 1}
+	if _, err := db.Exec(`INSERT INTO tasks (id, workspace_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`, a.TaskID, a.WorkspaceID, "Exact", now, now); err != nil {
+		t.Fatal(err)
+	}
+	return repo, a
+}
