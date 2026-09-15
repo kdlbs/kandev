@@ -104,7 +104,7 @@
   "sourceActorSystem": "Kandev",
   "sourceActorUnknown": "未知作者",
   "archivedCanvasActionHelp": "此畫布已歸檔。請先在工作區設定中恢復它，然後再進行更改。",
-  "disabledCanvasActionHelp": "此畫布已停用。請先啟用它，然後再進行更改。",
+  "disabledCanvasActionHelp": "此畫布已停用。請先啓用它，然後再進行更改。",
   "shareCanvas": "分享畫布",
   "shareCanvasDescription": "準備經過驗證的包或原始碼歸檔，以便審核和分享。",
   "prepareDownloads": "準備下載",

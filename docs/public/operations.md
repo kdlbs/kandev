@@ -179,7 +179,7 @@ To recover capacity in one session, expand its queue chip in the task workbench.
 
 Database snapshots do not contain Git worktrees, clones, the master key, service metadata, or provider-side objects. Native agent and `gh` login files also normally live in the service user's home outside `~/.kandev` (for example `~/.codex` and `~/.config/gh`). The official container instead sets `HOME=/data/home`, so those CLI credentials live on its mounted volume.
 
-The System Database and Backups pages use the configured SQLite file path. They use `backups/` under the parent directory of that file. The default remains `<home>/data/kandev.db` with snapshots in `<home>/data/backups/`. A custom path can place the database and snapshots outside the Kandev home. Kandev does not move snapshots from another directory automatically.
+The **Data & Logs > Database** tab and its Backups section use the configured SQLite file path. They use `backups/` under the parent directory of that file. The default remains `<home>/data/kandev.db` with snapshots in `<home>/data/backups/`. A custom path can place the database and snapshots outside the Kandev home. Kandev does not move snapshots from another directory automatically.
 
 ### Canvas artifacts and recovery
 
@@ -211,8 +211,8 @@ or cleanup jobs still exist.
 <details>
 <summary>Storage maintenance details</summary>
 
-Open **Settings > System > Storage** to inspect Kandev-managed disk usage and
-configure cleanup.
+Open **Settings > System > Storage > Host** to inspect Kandev-managed disk usage and
+configure cleanup. Open **Storage > Office retention** for Office history policy and status.
 **Analyze** is read-only. **Run now** applies only the enabled cleanup rules and refuses to start
 while another maintenance run owns the cleanup gate. If task resources are active, the page names
 the active work and offers **Run anyway** after an explicit disruption warning. Use that override
@@ -310,14 +310,14 @@ Resolved roots, measured size, and partial or unavailable status are shown. This
 informational and can overlap counted categories, so it is excluded from **Total counted**. It has
 no cleanup action and does not claim ownership of any path.
 
-The page separately reports **Kandev temporary artifacts** created by services that need a short-lived
-directory under the host temporary root. Each current artifact is registered in the Kandev database
-and carries an owner-only marker in its exact directory. Active artifacts and artifacts created
-within the last 24 hours are protected. The **Clean stale Kandev temporary artifacts** policy is off
+The Host tab separately reports **Temporary Kandev files** created by services that need a short-lived
+directory under the host temporary root. Each current file is registered in the Kandev database
+and carries an owner-only marker in its exact directory. Active files and files created within the
+last 24 hours are protected. The **Clean inactive Kandev temporary files** policy is off
 by default. When enabled, scheduled maintenance and a full **Run now** may move eligible, registered
-artifacts into Kandev quarantine. Kandev uses a same-filesystem rename when possible. If the
+files into Kandev quarantine. Kandev uses a same-filesystem rename when possible. If the
 quarantine is on another filesystem, it stages and verifies a copy before publishing it and removes
-the original only after revalidating its identity. An explicit **Clean stale artifacts** action is
+the original only after revalidating its identity. An explicit **Clean inactive files** action is
 available even when the policy is off. Quarantine entries can be restored during the configured
 retention period; this action does not permanently delete them or immediately free disk space.
 The action does not inspect or claim arbitrary `/tmp` entries, shared caches, Node or Playwright
@@ -350,7 +350,7 @@ the Kandev service first provides the clearest maintenance boundary.
 
 ## Office run history retention
 
-Open **Settings > System > Data & Logs** to manage automatic deletion of old
+Open **Settings > System > Storage > Office retention** to manage automatic deletion of old
 Office run history. Deletion is enabled by default. The first sweep starts five
 minutes after the backend starts or after you enable deletion.
 
@@ -360,7 +360,7 @@ Deletion is permanent. Back up the database before you enable deletion if you
 need to keep old history outside the configured window.
 
 The retention window controls the age of rows that can be deleted. The minimum
-kept per owner control keeps the newest rows for each routine or agent, even
+per routine and minimum per agent profile controls keep the newest rows for each owner, even
 when those rows are older than the window. A floor of zero removes this extra
 protection. Run event, route attempt, and skill rows are deleted with their
 parent run.
@@ -371,15 +371,15 @@ is disabled, so you can monitor growth before you enable it again.
 
 To disable automatic deletion:
 
-1. Open **Settings > System > Data & Logs**.
-2. Clear **Delete eligible run history**.
+1. Open **Settings > System > Storage > Office retention**.
+2. Turn off **Automatic cleanup**.
 3. Select **Save changes**.
 4. Check the retention status. It must show that deletion is disabled.
 
 ## Messages compaction
 
-Open **Settings > System > Data & Logs** to reduce old tool details in a SQLite
-database. **Messages compaction** is independent of Office run history retention
+Open **Settings > System > Data & Logs > Database** to reduce old tool details in a SQLite
+database. **Message compaction** is independent of Office run history retention
 and is disabled by default. The initial period is three calendar months.
 
 1. Set **Tasks inactive for** to whole weeks or calendar months.
@@ -445,7 +445,7 @@ explicit path skips legacy discovery. When both defaults contain task history,
 Kandev keeps the current default and does not merge the databases. Use a
 verified snapshot or a later deliberate recovery procedure to reconcile them.
 
-Open **Settings > System > Database** to see database size, WAL size, schema version, path, and the newest modification time among regular entries in the sibling `backups/` directory. That timestamp is a filesystem hint, not proof of a valid snapshot: an unrelated or temporary file in the directory can affect it. SQLite exposes three maintenance actions:
+Open **Settings > System > Data & Logs > Database** to see database size, WAL size, schema version, path, and the newest modification time among regular entries in the sibling `backups/` directory. That timestamp is a filesystem hint, not proof of a valid snapshot: an unrelated or temporary file in the directory can affect it. SQLite exposes three maintenance actions:
 
 - **Optimize** runs `PRAGMA optimize`. It is quick and updates planner statistics.
 - **Vacuum** runs `VACUUM`, compacts the file, and reports bytes reclaimed. It can need substantial temporary disk and can block writes, so run it during a quiet period.
