@@ -1,6 +1,7 @@
 package docknet
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -13,11 +14,25 @@ type fakeOracle struct {
 	lookup  TaskLookup
 	err     error
 	lastNet agentdocker.NetworkInfo
+	lastCtx context.Context
 }
 
-func (o *fakeOracle) Ownership(network agentdocker.NetworkInfo) (string, TaskLookup, error) {
+type contextKey struct{}
+
+func (o *fakeOracle) Ownership(ctx context.Context, network agentdocker.NetworkInfo) (string, TaskLookup, error) {
+	o.lastCtx = ctx
 	o.lastNet = network
 	return o.key, o.lookup, o.err
+}
+
+func TestClassifyPassesContextToTaskOracle(t *testing.T) {
+	oracle := &fakeOracle{key: activeTaskKey, lookup: TaskLookupActive}
+	ctx := context.WithValue(context.Background(), contextKey{}, "maintenance-lease")
+	Classify(ctx, taskNetwork("kd_context", map[string]string{"kandev.task_id": activeTaskKey}), oracle,
+		time.Time{}, graceWindow, staleAge, classifyOptions)
+	if oracle.lastCtx != ctx {
+		t.Fatal("Classify must pass the maintenance context to the task oracle")
+	}
 }
 
 var classifyOptions = ClassifyOptions{Now: func() time.Time {
@@ -43,7 +58,7 @@ func TestClassifyActiveNetworkNeverRemoved(t *testing.T) {
 	// AC1: connected container + active owning task => active, never removed.
 	network := taskNetwork("kd_a_default", map[string]string{"kandev.task_id": activeTaskKey})
 	network.Containers = map[string]string{"container-1": "web"}
-	got := Classify(network, &fakeOracle{key: activeTaskKey, lookup: TaskLookupActive},
+	got := Classify(context.Background(), network, &fakeOracle{key: activeTaskKey, lookup: TaskLookupActive},
 		time.Time{}, graceWindow, staleAge, classifyOptions)
 
 	if got.Class != ClassActive {
@@ -60,7 +75,7 @@ func TestClassifyActiveNetworkNeverRemoved(t *testing.T) {
 func TestClassifyAttachedOwnedByActiveTaskWithoutContainers(t *testing.T) {
 	// AC2: kandev labels, owning task active, zero containers => attached.
 	network := taskNetwork("kd_b", map[string]string{"kandev.task_id": activeTaskKey})
-	got := Classify(network, &fakeOracle{key: activeTaskKey, lookup: TaskLookupActive},
+	got := Classify(context.Background(), network, &fakeOracle{key: activeTaskKey, lookup: TaskLookupActive},
 		time.Time{}, graceWindow, staleAge, classifyOptions)
 
 	if got.Class != ClassAttached {
@@ -76,7 +91,7 @@ func TestClassifyOrphanedAfterGraceWindow(t *testing.T) {
 	network := taskNetwork("kd_c", map[string]string{"kandev.task_id": "task-gone"})
 	firstSeen := classifyOptions.Now().Add(-2 * graceWindow)
 	got := Classify(
-		network, &fakeOracle{key: "task-gone", lookup: TaskLookupInactive},
+		context.Background(), network, &fakeOracle{key: "task-gone", lookup: TaskLookupInactive},
 		firstSeen, graceWindow, staleAge, classifyOptions,
 	)
 
@@ -95,7 +110,7 @@ func TestClassifyOrphanedInsideGraceWindowKept(t *testing.T) {
 	network := taskNetwork("kd_c", map[string]string{"kandev.task_id": "task-gone"})
 	firstSeen := classifyOptions.Now().Add(-graceWindow / 2)
 	got := Classify(
-		network, &fakeOracle{key: "task-gone", lookup: TaskLookupInactive},
+		context.Background(), network, &fakeOracle{key: "task-gone", lookup: TaskLookupInactive},
 		firstSeen, graceWindow, staleAge, classifyOptions,
 	)
 
@@ -108,7 +123,7 @@ func TestClassifyOracleErrorFailsClosed(t *testing.T) {
 	// AC3 fail-closed: any task-repository read error => stale-uncertain, skip.
 	network := taskNetwork("kd_d", map[string]string{"kandev.task_id": "task-err"})
 	got := Classify(
-		network, &fakeOracle{err: errors.New("task store unavailable")},
+		context.Background(), network, &fakeOracle{err: errors.New("task store unavailable")},
 		time.Time{}, graceWindow, staleAge, classifyOptions,
 	)
 
@@ -125,7 +140,7 @@ func TestClassifySafelyStaleAfterStableAge(t *testing.T) {
 	network := taskNetwork("kd_e", map[string]string{"com.docker.compose.project": "kd_unknown"})
 	firstSeen := classifyOptions.Now().Add(-staleAge)
 	got := Classify(
-		network, &fakeOracle{key: "kd_unknown", lookup: TaskLookupUnknown},
+		context.Background(), network, &fakeOracle{key: "kd_unknown", lookup: TaskLookupUnknown},
 		firstSeen, graceWindow, staleAge, classifyOptions,
 	)
 
@@ -141,7 +156,7 @@ func TestClassifySafelyStaleFirstSightingKept(t *testing.T) {
 	// AC4: first sighting < threshold => keep observing.
 	network := taskNetwork("kd_f", nil)
 	got := Classify(
-		network, &fakeOracle{key: "", lookup: TaskLookupUnknown},
+		context.Background(), network, &fakeOracle{key: "", lookup: TaskLookupUnknown},
 		classifyOptions.Now(), graceWindow, staleAge, classifyOptions,
 	)
 
@@ -170,7 +185,7 @@ func TestClassifyExcludesSpecialNetworks(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := Classify(tt.net, &fakeOracle{}, time.Time{}, graceWindow, staleAge, classifyOptions)
+			got := Classify(context.Background(), tt.net, &fakeOracle{}, time.Time{}, graceWindow, staleAge, classifyOptions)
 			if got.Class != ClassExcluded && got.Class != ClassStaleUncertain {
 				t.Fatalf("class = %s, want excluded", got.Class)
 			}
@@ -186,7 +201,7 @@ func TestClassifyExcludesSpecialNetworks(t *testing.T) {
 func TestClassifyOracleNotConsultedForExcluded(t *testing.T) {
 	bridge := taskNetwork("bridge", nil)
 	oracle := &fakeOracle{err: errors.New("must not be consulted")}
-	got := Classify(bridge, oracle, time.Time{}, graceWindow, staleAge, classifyOptions)
+	got := Classify(context.Background(), bridge, oracle, time.Time{}, graceWindow, staleAge, classifyOptions)
 	if got.Class != ClassExcluded {
 		t.Fatalf("class = %s, want excluded", got.Class)
 	}

@@ -125,7 +125,7 @@ test("classifies orphan and active networks and probe passes without removing an
     // The read-only analysis census classifies both networks. The overview
     // endpoint serves a cached snapshot, so explicitly refresh it after the
     // fixture networks are created before asserting their classification.
-    await testPage.goto("/settings/system/data-storage", {
+    await testPage.goto("/settings/system/storage", {
       waitUntil: "commit",
       timeout: 20_000,
     });
@@ -166,7 +166,7 @@ test("classifies orphan and active networks and probe passes without removing an
 });
 
 async function runStorageCleanup(page: Page): Promise<void> {
-  await page.goto("/settings/system/data-storage", { waitUntil: "commit", timeout: 20_000 });
+  await page.goto("/settings/system/storage", { waitUntil: "commit", timeout: 20_000 });
   await expect(page.getByTestId("storage-settings-page")).toBeVisible({ timeout: 60_000 });
   await page.getByTestId("storage-run-now").click();
   await expect(page.getByTestId("storage-run-now")).toHaveAttribute("data-job-state", "succeeded", {

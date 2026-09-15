@@ -153,7 +153,7 @@ type staticOracle struct {
 	err     error
 }
 
-func (o *staticOracle) Ownership(network agentdocker.NetworkInfo) (string, TaskLookup, error) {
+func (o *staticOracle) Ownership(_ context.Context, network agentdocker.NetworkInfo) (string, TaskLookup, error) {
 	if o.err != nil {
 		return "", 0, o.err
 	}
@@ -354,6 +354,15 @@ func TestCleanupRemovesOrphanedNetworkEndToEnd(t *testing.T) {
 	}
 	if len(h.docker.removed) != 0 {
 		t.Fatal("first cycle must not remove; quarantine window must elapse")
+	}
+	// Repeating a still-pending cycle preserves the existing mark but must not
+	// report it as a newly-created quarantine action.
+	result, err = h.provider.Cleanup(context.Background())
+	if err != nil {
+		t.Fatalf("Cleanup repeated mark cycle: %v", err)
+	}
+	if result["marked"] != float64(0) {
+		t.Fatalf("repeated mark cycle = %#v, want marked=0", result)
 	}
 	entry, err := h.ledger.GetNetworkLedgerEntry(context.Background(), "net-kd_orphan")
 	if err != nil {

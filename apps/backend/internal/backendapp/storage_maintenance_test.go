@@ -247,7 +247,7 @@ func TestStorageOverviewReportsProgressForEachSource(t *testing.T) {
 	docker := dockerstore.NewProvider(
 		&overviewDockerClient{}, overviewContainerInventory{}, settings,
 	)
-	events := make(chan storagepkg.OverviewProgress, 16)
+	events := make(chan storagepkg.OverviewProgress, 20)
 	overview := &storageOverview{
 		settings:   settings,
 		quarantine: failingQuarantineSummarizer{err: errors.New("quarantine unavailable")},
@@ -280,6 +280,7 @@ func TestStorageOverviewReportsProgressForEachSource(t *testing.T) {
 		storagepkg.StorageSourceTemporaryArtifacts,
 		storagepkg.StorageSourceSystemTemporary,
 		storagepkg.StorageSourceDocker,
+		storagepkg.StorageSourceDockerNetworks,
 		storagepkg.StorageSourceDatabase,
 		storagepkg.StorageSourceDatabaseBackups,
 	} {

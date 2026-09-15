@@ -6,6 +6,7 @@
 package docknet
 
 import (
+	"context"
 	"strings"
 	"time"
 
@@ -61,7 +62,7 @@ const (
 type TaskOracle interface {
 	// Ownership returns the resolved ownership key for the network's labels
 	// and the lookup result for that key.
-	Ownership(network agentdocker.NetworkInfo) (key string, lookup TaskLookup, err error)
+	Ownership(ctx context.Context, network agentdocker.NetworkInfo) (key string, lookup TaskLookup, err error)
 }
 
 // Evidence records why a network received its classification; it is persisted
@@ -113,6 +114,7 @@ func IsExcluded(network agentdocker.NetworkInfo) bool {
 
 // Classify applies the fail-closed decision tree to one census network.
 func Classify(
+	ctx context.Context,
 	network agentdocker.NetworkInfo,
 	oracle TaskOracle,
 	firstSeen time.Time,
@@ -139,7 +141,7 @@ func Classify(
 			Evidence: evidenceWith(evidence, "preinstalled or out-of-scope network"),
 		}
 	}
-	key, lookup, err := oracle.Ownership(network)
+	key, lookup, err := oracle.Ownership(ctx, network)
 	evidence.OwnershipKey = key
 	if err != nil {
 		return ClassifiedNetwork{

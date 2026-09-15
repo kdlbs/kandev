@@ -425,9 +425,11 @@ func (o *storageOverview) summary(
 	}()
 	go func() {
 		defer measurements.Done()
+		reporter.start(storagepkg.StorageSourceDockerNetworks)
 		if o.dockerNetworks != nil {
 			dockerNetworks = o.dockerNetworks.Analyze(ctx)
 		}
+		reporter.complete(storagepkg.StorageSourceDockerNetworks, dockerNetworksSummaryMap(dockerNetworks), nil)
 	}()
 	go func() {
 		defer measurements.Done()
@@ -648,6 +650,13 @@ func dockerSummaryMap(summary dockerstore.Analysis) map[string]any {
 		"unused_image_bytes": summary.UnusedImageBytes, "warnings": summary.Warnings,
 		"managed_container_count": summary.ManagedContainerCount,
 		"managed_container_bytes": summary.ManagedContainerBytes,
+	}
+}
+
+func dockerNetworksSummaryMap(summary docknet.Analysis) map[string]any {
+	return map[string]any{
+		"available": summary.Available, "classified": summary.Classified,
+		"candidates": summary.Candidates, "warnings": summary.Warnings,
 	}
 }
 
@@ -875,19 +884,13 @@ func storageCleanupProviders(
 		dockerContainerCleanupAdapter(settings, docker),
 		dockerBuildCacheCleanupAdapter(settings, docker),
 		dockerImageCleanupAdapter(settings, docker),
-		dockerNetworkCleanupAdapter(settings, dockerNetworks),
+		dockerNetworkCleanupAdapter(dockerNetworks),
 	}
 	return append(providers, temporary...)
 }
 
-func dockerNetworkCleanupAdapter(
-	settings *storagepkg.SettingsStore,
-	provider *docknet.Provider,
-) storagepkg.CleanupProvider {
+func dockerNetworkCleanupAdapter(provider *docknet.Provider) storagepkg.CleanupProvider {
 	return namedCleanupProvider{name: docknet.ProviderName, cleanup: func(ctx context.Context) (map[string]any, error) {
-		if _, err := settings.GetSettings(ctx); err != nil {
-			return nil, err
-		}
 		return provider.Cleanup(ctx)
 	}}
 }

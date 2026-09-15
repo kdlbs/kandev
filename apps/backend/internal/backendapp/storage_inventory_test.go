@@ -393,7 +393,7 @@ func TestNetworkTaskOracleResolvesComposeProjectNames(t *testing.T) {
 		t.Fatalf("hashed compose project lookup = %v, want active", hashed)
 	}
 	now := time.Date(2026, time.September, 15, 0, 0, 0, 0, time.UTC)
-	classified := docknet.Classify(agentdocker.NetworkInfo{
+	classified := docknet.Classify(context.Background(), agentdocker.NetworkInfo{
 		ID: "network-live", Name: "kd_7d15c4f3a4fd5328_default", Driver: "bridge",
 		Labels: map[string]string{"com.docker.compose.project": "kd_7d15c4f3a4fd5328"},
 	}, oracle, now.Add(-8*24*time.Hour), time.Hour, 7*24*time.Hour, docknet.ClassifyOptions{
@@ -434,7 +434,7 @@ func TestNetworkTaskOracleRejectsAmbiguousComposeProjectHash(t *testing.T) {
 		"com.docker.compose.project": "kd_7d15c4f3a4fd5328",
 	}}
 
-	_, lookup, err := oracle.Ownership(network)
+	_, lookup, err := oracle.Ownership(context.Background(), network)
 	if err == nil || lookup != docknet.TaskLookupUnknown {
 		t.Fatalf("ambiguous hash lookup = %v (%v), want unknown with error", lookup, err)
 	}
@@ -450,7 +450,7 @@ func TestNetworkTaskOracleOwnershipKeyResolution(t *testing.T) {
 		ID: "n1", Name: "kd_x_default", Driver: "bridge",
 		Labels: map[string]string{"kandev.task_id": taskID},
 	}
-	key, lookup, err := oracle.Ownership(kandevLabeled)
+	key, lookup, err := oracle.Ownership(context.Background(), kandevLabeled)
 	if err != nil {
 		t.Fatalf("Ownership: %v", err)
 	}
@@ -462,7 +462,7 @@ func TestNetworkTaskOracleOwnershipKeyResolution(t *testing.T) {
 		ID: "n2", Name: "kd_y_default", Driver: "bridge",
 		Labels: map[string]string{"com.docker.compose.project": "kd_" + taskID},
 	}
-	key, lookup, err = oracle.Ownership(composeLabeled)
+	key, lookup, err = oracle.Ownership(context.Background(), composeLabeled)
 	if err != nil {
 		t.Fatalf("Ownership compose: %v", err)
 	}
@@ -471,7 +471,7 @@ func TestNetworkTaskOracleOwnershipKeyResolution(t *testing.T) {
 	}
 
 	// Label-less networks never consult the task store.
-	_, lookup, err = oracle.Ownership(agentdocker.NetworkInfo{ID: "n3", Name: "anon", Labels: map[string]string{}})
+	_, lookup, err = oracle.Ownership(context.Background(), agentdocker.NetworkInfo{ID: "n3", Name: "anon", Labels: map[string]string{}})
 	if err != nil || lookup != docknet.TaskLookupUnknown {
 		t.Fatalf("label-free lookup = %v (%v), want unknown without error", lookup, err)
 	}
@@ -483,7 +483,7 @@ func oracleLookup(t *testing.T, oracle *networkTaskOracle, key string) docknet.T
 	if !isUUID(key) {
 		network = agentdocker.NetworkInfo{Labels: map[string]string{"com.docker.compose.project": key}}
 	}
-	_, lookup, err := oracle.Ownership(network)
+	_, lookup, err := oracle.Ownership(context.Background(), network)
 	if err != nil {
 		t.Fatalf("Ownership for %q: %v", key, err)
 	}

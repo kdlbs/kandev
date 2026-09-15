@@ -64,22 +64,23 @@ func (l *Ledger) ObserveSighting(
 // cannot be trapped in an endless re-mark loop.
 func (l *Ledger) Mark(
 	ctx context.Context, networkID, networkName string, quarantineWindow time.Duration, metadata json.RawMessage,
-) (storage.NetworkLedgerEntry, error) {
+) (storage.NetworkLedgerEntry, bool, error) {
 	current, err := l.store.GetNetworkLedgerEntry(ctx, networkID)
 	if err == nil && current.State == storage.NetworkLedgerStateMarked && current.DeleteAfter != nil {
 		if !l.now().Before(*current.DeleteAfter) {
-			return current, nil // mark matured: keep the original due deadline
+			return current, false, nil // mark matured: keep the original due deadline
 		}
-		return current, nil // window still running: original mark stands
+		return current, false, nil // window still running: original mark stands
 	}
 	if err != nil && !isNotFound(err) {
-		return storage.NetworkLedgerEntry{}, err
+		return storage.NetworkLedgerEntry{}, false, err
 	}
 	at := l.now().UTC()
 	deleteAfter := at.Add(quarantineWindow)
-	return l.store.TransitionNetworkLedgerEntry(
+	entry, err := l.store.TransitionNetworkLedgerEntry(
 		ctx, networkID, storage.NetworkLedgerStateMarked, at, deleteAfter, metadata, "",
 	)
+	return entry, err == nil, err
 }
 
 func isNotFound(err error) bool {

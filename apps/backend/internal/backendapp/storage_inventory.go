@@ -138,14 +138,14 @@ type networkTaskOracle struct{ reader *sqlx.DB }
 // Ownership resolves the network's ownership key, then looks the key up as a
 // task ID first and as a kd_-prefixed compose project name second: broker-
 // launched projects hom via labels only.
-func (o *networkTaskOracle) Ownership(network agentdocker.NetworkInfo) (string, docknet.TaskLookup, error) {
+func (o *networkTaskOracle) Ownership(ctx context.Context, network agentdocker.NetworkInfo) (string, docknet.TaskLookup, error) {
 	key := docknet.OwnershipKeyFromLabels(network.Labels)
 	if key == "" {
 		return "", docknet.TaskLookupUnknown, nil
 	}
 	taskID := key
 	if !isUUID(key) {
-		resolved, ok, err := o.taskIDForProjectName(key)
+		resolved, ok, err := o.taskIDForProjectName(ctx, key)
 		if err != nil {
 			return key, docknet.TaskLookupUnknown, err
 		}
@@ -154,7 +154,7 @@ func (o *networkTaskOracle) Ownership(network agentdocker.NetworkInfo) (string, 
 		}
 		taskID = resolved
 	}
-	removable, err := o.taskRemovable(taskID)
+	removable, err := o.taskRemovable(ctx, taskID)
 	if err != nil {
 		return key, docknet.TaskLookupUnknown, err
 	}
@@ -167,9 +167,9 @@ func (o *networkTaskOracle) Ownership(network agentdocker.NetworkInfo) (string, 
 // taskRemovable mirrors containerInventory's liveness composite: done means
 // the task is archived or terminal AND has no live environment/executor.
 // A missing task row is removable-by-unknown handled by the caller.
-func (o *networkTaskOracle) taskRemovable(taskID string) (bool, error) {
+func (o *networkTaskOracle) taskRemovable(ctx context.Context, taskID string) (bool, error) {
 	inventory := &containerInventory{reader: o.reader}
-	removable, err := inventory.ContainerTaskRemovable(context.Background(), taskID)
+	removable, err := inventory.ContainerTaskRemovable(ctx, taskID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return true, nil
@@ -182,7 +182,7 @@ func (o *networkTaskOracle) taskRemovable(taskID string) (bool, error) {
 // taskIDForProjectName resolves a kd_<task-hash> compose project name to a
 // task row. The guarded Compose broker hashes the absolute task root with
 // SHA-256 and uses the first 16 hexadecimal characters after the kd_ prefix.
-func (o *networkTaskOracle) taskIDForProjectName(name string) (string, bool, error) {
+func (o *networkTaskOracle) taskIDForProjectName(ctx context.Context, name string) (string, bool, error) {
 	if !strings.HasPrefix(name, "kd_") {
 		return "", false, nil
 	}
@@ -193,7 +193,7 @@ func (o *networkTaskOracle) taskIDForProjectName(name string) (string, bool, err
 	var taskID string
 	// Exact task-ID match first (the deployment's canonical form).
 	query := o.reader.Rebind("SELECT id FROM tasks WHERE id = ?")
-	if err := o.reader.GetContext(context.Background(), &taskID, query, fragment); err == nil {
+	if err := o.reader.GetContext(ctx, &taskID, query, fragment); err == nil {
 		return taskID, true, nil
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return "", false, err
@@ -205,7 +205,7 @@ func (o *networkTaskOracle) taskIDForProjectName(name string) (string, bool, err
 		       COALESCE(te.task_dir_name, '') AS task_dir_name
 		FROM tasks t
 		LEFT JOIN task_environments te ON te.task_id = t.id`)
-	if err := o.reader.SelectContext(context.Background(), &roots, query); err != nil {
+	if err := o.reader.SelectContext(ctx, &roots, query); err != nil {
 		return "", false, err
 	}
 	var matchedTaskID string

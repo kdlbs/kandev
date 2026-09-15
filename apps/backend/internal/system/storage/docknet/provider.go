@@ -207,7 +207,7 @@ func (p *Provider) reclaim(
 		if !due {
 			continue // mark persisted; the quarantine window runs to a later cycle
 		}
-		deadline, revalidated, err := p.revalidate(ctx, item.Network.ID)
+		revalidated, err := p.revalidate(ctx, item.Network.ID)
 		if err != nil {
 			result.Skipped++
 			p.recordSkip(ctx, item.Network.ID, err.Error())
@@ -230,7 +230,6 @@ func (p *Provider) reclaim(
 		}
 		result.Removed++
 		recordRemoval("removed")
-		_ = deadline
 	}
 }
 
@@ -251,13 +250,13 @@ func (p *Provider) advanceQuarantine(
 		return false, false, false
 	}
 	reclassified := Classify(
-		item.Network, p.oracle, entry.FirstSeenAt, t.graceWindow, t.staleAge,
+		ctx, item.Network, p.oracle, entry.FirstSeenAt, t.graceWindow, t.staleAge,
 		ClassifyOptions{Now: p.now},
 	)
 	if !Eligible(reclassified.Class) {
 		return false, false, false
 	}
-	marked, err := p.ledger.Mark(ctx, item.Network.ID, item.Network.Name, t.quarantine, evidenceMetadata(reclassified))
+	marked, markRecorded, err := p.ledger.Mark(ctx, item.Network.ID, item.Network.Name, t.quarantine, evidenceMetadata(reclassified))
 	if err != nil {
 		_, _ = p.ledger.RecordSkipped(ctx, item.Network.ID, fmt.Sprintf("mark ledger: %v", err))
 		return false, false, false
@@ -265,17 +264,16 @@ func (p *Provider) advanceQuarantine(
 	if marked.DeleteAfter == nil {
 		return false, false, false
 	}
-	return !p.now().Before(*marked.DeleteAfter), true, true
+	return !p.now().Before(*marked.DeleteAfter), markRecorded, true
 }
 
 // revalidation re-lists and re-inspects the network inside the same cycle
 // right before removal (AC7): the network must still be listed and a fresh
 // inspect must show zero connected containers, else abort this network.
-func (p *Provider) revalidate(ctx context.Context, networkID string) (time.Time, bool, error) {
-	deadline := p.now()
+func (p *Provider) revalidate(ctx context.Context, networkID string) (bool, error) {
 	current, err := p.docker.ListNetworks(ctx, agentdocker.NetworkListOptions{Driver: "bridge"})
 	if err != nil {
-		return deadline, false, fmt.Errorf("re-list networks: %w", err)
+		return false, fmt.Errorf("re-list networks: %w", err)
 	}
 	found := false
 	for _, net := range current {
@@ -285,16 +283,16 @@ func (p *Provider) revalidate(ctx context.Context, networkID string) (time.Time,
 		}
 	}
 	if !found {
-		return deadline, false, fmt.Errorf("network %s no longer present", networkID)
+		return false, fmt.Errorf("network %s no longer present", networkID)
 	}
 	detail, err := p.docker.InspectNetwork(ctx, networkID)
 	if err != nil {
-		return deadline, false, fmt.Errorf("re-inspect network %s: %w", networkID, err)
+		return false, fmt.Errorf("re-inspect network %s: %w", networkID, err)
 	}
 	if len(detail.Containers) > 0 {
-		return deadline, false, nil
+		return false, nil
 	}
-	return deadline, true, nil
+	return true, nil
 }
 
 func (p *Provider) recordSkip(ctx context.Context, networkID, reason string) {
@@ -341,7 +339,7 @@ func (p *Provider) classifyOne(
 			Evidence: Evidence{Reason: "ledger write failed; kept pending next cycle"},
 		}
 	}
-	return Classify(detail, p.oracle, entry.FirstSeenAt, t.graceWindow, t.staleAge, ClassifyOptions{Now: p.now})
+	return Classify(ctx, detail, p.oracle, entry.FirstSeenAt, t.graceWindow, t.staleAge, ClassifyOptions{Now: p.now})
 }
 
 func (p *Provider) loadSettings(
