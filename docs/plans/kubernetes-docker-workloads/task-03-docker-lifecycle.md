@@ -134,3 +134,17 @@ The exact implementation revision was exercised with image config digest
 Required Kubernetes and lifecycle Go packages, changed-file ESLint and test
 discovery also passed. This evidence applies to the recorded Kind/runtime
 combination; other container runtimes still require their own cgroup validation.
+
+A later Kubernetes acceptance run exposed two retained-workspace portability
+gaps. A non-root workload could copy a checkout onto a group-writable,
+root-owned PVC and then fail when `cp -a` restored metadata on the mount root.
+The preparation scripts now copy checkout contents recursively without
+restoring source ownership or timestamps. The same run also showed that a
+credential-free GitHub HTTPS origin and the equivalent GitHub SSH origin were
+compared literally during lost-Pod replacement. Preparation now normalizes
+those GitHub URL forms before comparison while continuing to reject a different
+repository. Runtime resolution upgrades exact persisted copies of the two
+Kandev-supplied scripts; any customized script remains byte-for-byte unchanged.
+Focused lifecycle regressions exercise both the built-in Kubernetes script and
+the full worker script, preserve retained files, and reproduce the restricted
+copy boundary with the real `cp` implementation.

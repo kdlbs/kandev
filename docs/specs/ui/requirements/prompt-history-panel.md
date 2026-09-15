@@ -35,3 +35,11 @@ Reviewing what was asked of an agent requires scrolling the transcript; past pro
 ## System design
 
 The migrated technical source is split into [part 1](../system-design/prompt-history-panel.md).
+
+## Related plugin prerequisites
+
+The public Host contracts required before a later external plugin extraction
+are owned by
+[Prompt History Plugin Host Prerequisites](../../plugins/requirements/prompt-history-extraction-host.md).
+The core panel remains authoritative until a separate extraction package
+migrates product ownership.

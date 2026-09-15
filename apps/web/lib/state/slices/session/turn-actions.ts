@@ -168,6 +168,19 @@ export function mergeTurnRows(target: Draft<Turn[]>, incoming: Turn[]): void {
   }
 }
 
+/** Replaces a complete turn snapshot while preserving newer rows by id. */
+export function replaceTurnRows(target: Draft<Turn[]>, incoming: Turn[]): void {
+  const existingById = new Map(target.map((turn) => [turn.id, turn]));
+  const nextRows = incoming.map((turn) => {
+    const existing = existingById.get(turn.id);
+    if (!existing) return turn;
+    if (!shouldApplyTurnUpdate(existing as Turn, turn)) return existing as Turn;
+    return { ...turn, completed_at: existing.completed_at ?? turn.completed_at };
+  });
+  target.length = 0;
+  target.push(...nextRows);
+}
+
 /** Applies active-turn reconciliation to a draft owned by a hydration path. */
 export function reconcileActiveTurnAfterHydrationDraft(
   draft: TurnReconciliationDraft,
@@ -216,11 +229,17 @@ export function shouldApplyTurnUpdate(existing: Turn, incoming: Turn): boolean {
 
 /** Store action: merges a complete REST turn snapshot and reconciles its marker atomically. */
 function mergeTurnsSnapshotAction(set: ImmerSet) {
-  return (sessionId: string, turns: Turn[], hydrationEpoch: number) =>
+  return (
+    sessionId: string,
+    turns: Turn[],
+    hydrationEpoch: number,
+    options?: { replace?: boolean },
+  ) =>
     set((draft) => {
       if (!draft.taskSessions.items[sessionId]) return;
       const target = (draft.turns.bySession[sessionId] ??= []);
-      mergeTurnRows(target, turns);
+      if (options?.replace) replaceTurnRows(target, turns);
+      else mergeTurnRows(target, turns);
       applyActiveTurnReconciliation(draft, sessionId, hydrationEpoch);
       draft.turns.loadedBySession[sessionId] = true;
     });

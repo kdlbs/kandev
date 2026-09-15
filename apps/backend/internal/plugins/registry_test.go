@@ -106,8 +106,13 @@ func TestRegistrySetStatusMissingReturnsNotOK(t *testing.T) {
 func TestRegistryGetReturnsIndependentCopy(t *testing.T) {
 	reg := NewRegistry()
 	autoUpdate := true
+	mf := testManifest("kandev-plugin-slack")
+	mf.Categories = []string{"chat"}
+	mf.RepositoryProviders = []string{"github"}
+	mf.ConfigSchema = map[string]any{"nested": map[string]any{"deep": "value"}}
+	mf.AgentTools = []manifest.AgentTool{{Name: "tool", Surfaces: []string{"kanban-task"}}}
 	reg.Add(&store.Record{
-		Manifest:   *testManifest("kandev-plugin-slack"),
+		Manifest:   *mf,
 		Status:     store.StatusRegistered,
 		AutoUpdate: &autoUpdate,
 	})
@@ -118,6 +123,11 @@ func TestRegistryGetReturnsIndependentCopy(t *testing.T) {
 	}
 	rec.Status = store.StatusActive // mutate the returned copy
 	*rec.AutoUpdate = false         // mutate the returned pointer copy
+	rec.Categories[0] = "mutated"   // mutate a returned nested slice element
+	rec.RepositoryProviders = append(rec.RepositoryProviders, "gitlab")
+	rec.ConfigSchema["nested"].(map[string]any)["deep"] = "mutated"
+	rec.AgentTools[0].Surfaces[0] = "office-task"
+	rec.Runtime.Executables["linux-amd64"] = "server/mutated"
 
 	fresh, ok := reg.Get("kandev-plugin-slack")
 	if !ok {
@@ -128,6 +138,18 @@ func TestRegistryGetReturnsIndependentCopy(t *testing.T) {
 	}
 	if fresh.AutoUpdate == nil || !*fresh.AutoUpdate {
 		t.Fatalf("mutating a Get() result leaked into the registry: AutoUpdate = %v, want true", fresh.AutoUpdate)
+	}
+	if fresh.Categories[0] != "chat" || len(fresh.RepositoryProviders) != 1 || fresh.RepositoryProviders[0] != "github" {
+		t.Fatalf("mutating a Get() result leaked into the registry: Categories=%v RepositoryProviders=%v", fresh.Categories, fresh.RepositoryProviders)
+	}
+	if fresh.ConfigSchema["nested"].(map[string]any)["deep"] != "value" {
+		t.Fatalf("mutating a Get() result leaked into the registry: ConfigSchema=%v", fresh.ConfigSchema)
+	}
+	if fresh.AgentTools[0].Surfaces[0] != "kanban-task" {
+		t.Fatalf("mutating a Get() result leaked into the registry: AgentTools=%v", fresh.AgentTools)
+	}
+	if fresh.Runtime.Executables["linux-amd64"] != "server/plugin-linux-amd64" {
+		t.Fatalf("mutating a Get() result leaked into the registry: Executables=%v", fresh.Runtime.Executables)
 	}
 }
 
