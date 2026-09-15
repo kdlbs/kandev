@@ -28,6 +28,24 @@ test.describe("Web preview feedback", () => {
         server.url,
       );
 
+      const trigger = testPage.getByTestId("preview-feedback-trigger");
+      const triggerBox = await trigger.boundingBox();
+      expect(triggerBox?.height).toBeLessThanOrEqual(30);
+      expect(triggerBox?.width).toBeLessThanOrEqual(48);
+      await trigger.click();
+      const choices = [
+        { name: "Select text", label: "Text" },
+        { name: "Select element", label: "Element" },
+        { name: "Select screenshot region", label: "Screenshot" },
+      ];
+      const choiceBoxes = [];
+      for (const choice of choices) {
+        const button = testPage.getByRole("button", { name: choice.name, exact: true });
+        await expect(button).toHaveText(choice.label);
+        choiceBoxes.push(await button.boundingBox());
+      }
+      expect(new Set(choiceBoxes.map((box) => Math.round(box?.y ?? -1))).size).toBe(1);
+
       await chooseCapture(testPage, "Select element");
       await frame.locator("#save").hover();
       const candidate = frame.locator('[data-kandev-inspector-ui="candidate"]');

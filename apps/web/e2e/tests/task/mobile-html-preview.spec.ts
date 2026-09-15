@@ -193,6 +193,19 @@ test.describe("Mobile HTML preview", () => {
     expect(drawerBox!.x + drawerBox!.width).toBeLessThanOrEqual(viewport!.width);
     expect(drawerBox!.y + drawerBox!.height).toBeLessThanOrEqual(viewport!.height);
 
+    const captureChoices = [
+      { name: "Select text", label: "Text" },
+      { name: "Select element", label: "Element" },
+      { name: "Select screenshot region", label: "Screenshot" },
+    ];
+    const captureChoiceBoxes = [];
+    for (const choice of captureChoices) {
+      const button = drawer.getByRole("button", { name: choice.name, exact: true });
+      await expect(button).toHaveText(choice.label);
+      captureChoiceBoxes.push(await button.boundingBox());
+    }
+    expect(new Set(captureChoiceBoxes.map((box) => Math.round(box?.y ?? -1))).size).toBe(1);
+
     const elementChoice = drawer.getByRole("button", { name: "Select element", exact: true });
     const elementChoiceBox = await elementChoice.boundingBox();
     expect(elementChoiceBox?.height).toBeGreaterThanOrEqual(44);

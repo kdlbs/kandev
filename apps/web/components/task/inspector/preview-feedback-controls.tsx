@@ -1,7 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { IconClick, IconEdit, IconMessagePlus, IconTrash, IconX } from "@tabler/icons-react";
+import {
+  IconClick,
+  IconEdit,
+  IconMessagePlus,
+  IconScreenshot,
+  IconTextScan2,
+  IconTrash,
+  IconX,
+} from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
 import { Textarea } from "@kandev/ui/textarea";
@@ -69,39 +77,44 @@ function CaptureChoices({
   touch: boolean;
 }) {
   const { t } = useTranslation();
-  const buttonClass = touch ? "h-11 justify-start" : "h-8 justify-start";
+  const buttonClass = touch ? "h-11 min-w-0 gap-1 px-2 text-xs" : "h-8 min-w-0 gap-1 px-2 text-xs";
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className="grid grid-cols-3 gap-1.5">
       <Button
         type="button"
         variant="outline"
         className={buttonClass}
         onClick={() => onChoose("text")}
+        aria-label={t("task:previewSelectText")}
       >
-        {t("task:previewSelectText")}
+        <IconTextScan2 className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <span className="truncate">{t("task:previewCaptureText")}</span>
       </Button>
       <Button
         type="button"
         variant="outline"
         className={buttonClass}
         onClick={() => onChoose("element")}
+        aria-label={t("task:previewSelectElement")}
       >
-        <IconClick className="h-4 w-4" />
-        {t("task:previewSelectElement")}
+        <IconClick className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <span className="truncate">{t("task:previewCaptureElement")}</span>
       </Button>
       <Button
         type="button"
         variant="outline"
-        className={`${buttonClass} col-span-2`}
+        className={buttonClass}
         onClick={() => onChoose("screenshot")}
+        aria-label={t("task:previewSelectScreenshot")}
       >
-        {t("task:previewSelectScreenshot")}
+        <IconScreenshot className="h-4 w-4 shrink-0" aria-hidden="true" />
+        <span className="truncate">{t("task:previewCaptureScreenshot")}</span>
       </Button>
       {capture.mode && (
         <Button
           type="button"
           variant="ghost"
-          className={`${buttonClass} col-span-2`}
+          className={`${buttonClass} col-span-3`}
           onClick={capture.cancelCapture}
         >
           <IconX className="h-4 w-4" />
@@ -378,20 +391,27 @@ function Trigger({
   onClick,
 }: PreviewFeedbackControlsProps & { touch: boolean; onClick?: () => void }) {
   const { t } = useTranslation();
+  const label = t("task:previewAnnotateWithCount", { count: capture.items.length });
   return (
     <Button
       type="button"
       size="sm"
-      variant={capture.mode ? "default" : "outline"}
+      variant={capture.mode ? "default" : "ghost"}
       disabled={!enabled}
       onClick={onClick}
-      className={touch ? "h-11 min-w-11 cursor-pointer" : "h-8 cursor-pointer"}
-      aria-label={t("task:previewAnnotateWithCount", { count: capture.items.length })}
+      className={
+        touch
+          ? "h-11 min-w-11 cursor-pointer gap-1 px-2 text-xs"
+          : "h-7 min-w-7 cursor-pointer gap-1 px-1.5 text-xs"
+      }
+      aria-label={label}
+      title={label}
       data-testid="preview-feedback-trigger"
     >
-      <IconMessagePlus className="h-4 w-4" />
-      <span>{t("task:previewAnnotate")}</span>
-      {capture.items.length > 0 && <span className="font-mono">{capture.items.length}</span>}
+      <IconMessagePlus className="h-4 w-4 shrink-0" aria-hidden="true" />
+      {capture.items.length > 0 && (
+        <span className="font-medium tabular-nums">{capture.items.length}</span>
+      )}
     </Button>
   );
 }
