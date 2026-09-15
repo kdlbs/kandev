@@ -17,7 +17,9 @@ acceptance_criteria:
   - AC-UI-INBOX-FAILED-001.7
   - AC-UI-INBOX-FAILED-001.8
   - AC-UI-INBOX-FAILED-001.9
+  - AC-UI-INBOX-FAILED-001.9a
   - AC-UI-INBOX-FAILED-001.10
+  - AC-UI-INBOX-FAILED-001.10a
   - AC-UI-INBOX-FAILED-001.11
   - AC-UI-INBOX-FAILED-001.12
   - AC-UI-INBOX-FAILED-001.13
@@ -26,8 +28,11 @@ acceptance_criteria:
   - AC-UI-INBOX-FAILED-001.16
   - AC-UI-INBOX-FAILED-001.17
   - AC-UI-INBOX-FAILED-001.18
+  - AC-UI-INBOX-FAILED-001.18a
   - AC-UI-INBOX-FAILED-001.19
+  - AC-UI-INBOX-FAILED-001.19a
   - AC-UI-INBOX-FAILED-001.20
+  - AC-UI-INBOX-FAILED-001.20a
   - AC-UI-INBOX-FAILED-001.21
   - AC-UI-INBOX-FAILED-001.22
   - AC-UI-INBOX-FAILED-001.23
@@ -38,6 +43,7 @@ acceptance_criteria:
   - AC-UI-INBOX-FAILED-001.28
   - AC-UI-INBOX-FAILED-001.29
   - AC-UI-INBOX-FAILED-001.30
+  - AC-UI-INBOX-FAILED-001.30a
 system_design:
   - ../../specs/ui/system-design/inbox-failed-bucket-01.md
 ---
@@ -79,7 +85,8 @@ full list.
 
 ## Acceptance
 
-All 30 acceptance criteria under `REQ-UI-INBOX-FAILED-001`; see
+All 36 acceptance criteria under `REQ-UI-INBOX-FAILED-001` (30 numbered plus 6
+lettered sub-criteria: .9a, .10a, .18a, .19a, .20a, .30a); see
 [requirements](../../specs/ui/requirements/inbox-failed.md) for the
 full text. Notable ones with dedicated regression coverage:
 
