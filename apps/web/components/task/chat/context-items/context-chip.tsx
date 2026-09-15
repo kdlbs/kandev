@@ -76,6 +76,7 @@ export const ContextChip = memo(function ContextChip({
   const { t } = useTranslation();
   const Icon = ICON_BY_KIND[kind];
   const labelSizingClass = isFinePointer ? "min-h-0" : "min-h-11";
+  const isInteractive = !!preview || !!onClick;
   let iconNode: ReactNode;
   if (leadingIcon) {
     iconNode = leadingIcon;
@@ -161,7 +162,7 @@ export const ContextChip = memo(function ContextChip({
       data-testid={dataTestId}
       data-path={dataPath}
       data-is-directory={dataIsDirectory ? "true" : "false"}
-      className={`group flex items-center gap-1 px-2 py-0.5 text-xs text-muted-foreground bg-muted/50 rounded border border-border/50 ${onClick ? "cursor-pointer hover:bg-muted/80" : ""}`}
+      className={`group flex items-center gap-1 px-2 py-0.5 text-xs text-muted-foreground bg-muted/50 rounded border border-border/50 ${isInteractive ? "cursor-pointer hover:bg-muted/80" : ""}`}
     >
       {labelElement}
       {controls}
@@ -228,6 +229,10 @@ function ControlledHoverChip({
       <HoverCardTrigger
         asChild
         onClick={() => {
+          if (!onClick) {
+            setOpen((current) => !current);
+            return;
+          }
           suppressRef.current = true;
           setOpen(false);
           setTimeout(() => {

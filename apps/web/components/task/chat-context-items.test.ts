@@ -92,8 +92,7 @@ describe("buildContextItems task plan comments", () => {
 });
 
 describe("buildContextItems task preview feedback", () => {
-  it("opens the shared collection and has no session-local remove control", () => {
-    const openPreviewFeedback = vi.fn();
+  it("keeps the shared collection local to the context chip", () => {
     const items = buildContextItems({
       planContextEnabled: false,
       contextFiles: [],
@@ -117,7 +116,6 @@ describe("buildContextItems task preview feedback", () => {
           page_route: "/cart",
         },
       ],
-      onOpenPreviewFeedback: openPreviewFeedback,
       pendingPRFeedback: [],
       handleRemovePRFeedback: vi.fn(),
       handleClearPRFeedback: vi.fn(),
@@ -133,8 +131,8 @@ describe("buildContextItems task preview feedback", () => {
     expect(item).toMatchObject({
       kind: "preview-feedback",
       label: "1 preview feedback item",
-      onOpen: openPreviewFeedback,
     });
+    expect(item).not.toHaveProperty("onOpen");
     expect(item?.onRemove).toBeUndefined();
   });
 });

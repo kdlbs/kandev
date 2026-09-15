@@ -378,7 +378,7 @@ function useChatContextItems(opts: ChatContextItemsOptions) {
     onOpenFile,
     onOpenFileAtLine,
   } = opts;
-  const { addPlan, addBrowser } = usePanelActions();
+  const { addPlan } = usePanelActions();
   const { prompts } = useCustomPrompts();
 
   const promptsMap = useMemo(() => {
@@ -405,7 +405,6 @@ function useChatContextItems(opts: ChatContextItemsOptions) {
         planComments: comments.planComments,
         handleClearPlanComments: comments.clearSessionPlanComments,
         previewFeedback,
-        onOpenPreviewFeedback: addBrowser,
         pendingPRFeedback: comments.pendingPRFeedback,
         handleRemovePRFeedback: comments.handleRemovePRFeedback,
         handleClearPRFeedback: comments.handleClearPRFeedback,
@@ -432,7 +431,6 @@ function useChatContextItems(opts: ChatContextItemsOptions) {
       comments.planComments,
       comments.clearSessionPlanComments,
       previewFeedback,
-      addBrowser,
       comments.pendingPRFeedback,
       comments.handleRemovePRFeedback,
       comments.handleClearPRFeedback,
