@@ -140,13 +140,10 @@ of `TestOfficeRouteScopeCompleteness`.
 
 ### Config fields
 
-A separate table whose column names and types match `workflow_sync_configs` as
-shipped; the semantics of `provider`, `path` and `last_warnings` deliberately
-differ, and the two are no longer held aligned: `workspace_id` (primary key),
-`provider`,
-`repo_owner`, `repo_name`, `project_path`, `branch`, `path`,
-`interval_seconds`, `poll_enabled`, `last_synced_at`, `last_ok`, `last_error`,
-`last_warnings`, `last_hash`, `created_at`, `updated_at`.
+Office's own table: `workspace_id` (primary key), `provider`, `repo_owner`,
+`repo_name`, `project_path`, `branch`, `path`, `interval_seconds`,
+`poll_enabled`, `last_synced_at`, `last_ok`, `last_error`, `last_warnings`,
+`last_hash`, `created_at`, `updated_at`.
 
 ### Defaults and the addressable root
 
@@ -548,6 +545,12 @@ in
 [Office Config Sync Reconciliation System Design](config-sync-reconciliation.md),
 then the settings card. `internal/workflowsync` is not touched at any point, so
 no step in this order can regress a shipped feature.
+
+## Out of scope
+
+**Table alignment with `workflow_sync_configs`.** Not held aligned and not
+compared here; `branch` and the three timestamp columns diverge. The ADR below
+owns the comparison.
 
 ## Related decisions
 
