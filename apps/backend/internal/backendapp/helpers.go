@@ -1518,13 +1518,24 @@ func registerSecondaryRoutes(
 	}
 
 	if p.services.Plugins != nil {
+		p.gateway.SetPluginConversationService(p.services.Plugins)
 		if p.authSvc != nil {
 			// Lets an auth-capable plugin complete OIDC/SAML SSO: it asserts a
 			// validated external identity on its webhook response and the host
 			// mints + sets the session cookie (the plugin never sees the token).
 			p.services.Plugins.SetAuthLoginBridge(pluginSSOBridge{auth: p.authSvc})
 		}
-		plugins.RegisterRoutes(p.router, p.services.Plugins, p.services.Plugins.Deliverer(), p.log)
+		conversationReaders := make([]plugins.ConversationReader, 0, 1)
+		if p.services.Task != nil {
+			conversationReaders = append(conversationReaders, p.services.Task)
+		}
+		plugins.RegisterRoutes(
+			p.router,
+			p.services.Plugins,
+			p.services.Plugins.Deliverer(),
+			p.log,
+			conversationReaders...,
+		)
 		if p.features.Canvases {
 			plugins.RegisterWebAppRuntimeRoutes(p.router, p.services.Plugins.WebRuntime())
 			registerCanvasRoutes(p)
@@ -2015,6 +2026,7 @@ func registerMCPAndDebugRoutes(
 	}
 	mcpHandlers.SetTaskChangeLinkService(taskChangeLinkCoordinator{
 		tasks: p.taskSvc, github: p.services.GitHub, gitlab: p.services.GitLab,
+		singleUserIdentity: taskChangeLinkIdentityResolver(p.authSvc),
 	})
 	// Reuse the cross-task handoff service constructed in registerRoutes —
 	// the same instance backs the MCP path and the HTTP Kanban path so

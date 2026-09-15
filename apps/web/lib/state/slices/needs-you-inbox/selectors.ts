@@ -12,6 +12,7 @@ const EMPTY_WORKSPACE_STATE: NeedsYouInboxWorkspaceState = {
   hasMore: false,
   status: "idle",
   appliedGeneration: 0,
+  lastAppliedOk: false,
 };
 
 function selectActiveWorkspaceState(state: AppState): NeedsYouInboxWorkspaceState {
@@ -42,6 +43,14 @@ export function selectNeedsYouInboxHiddenCount(state: AppState): number {
 
 export function selectNeedsYouInboxRevision(state: AppState): number {
   return selectActiveWorkspaceState(state).appliedGeneration;
+}
+
+/** Whether a successful page (as opposed to an error, or no response yet) is
+ * the last thing actually applied to this workspace's rows -- see
+ * `resolveViewMode`'s use of this for why `status`/`appliedGeneration` alone
+ * cannot answer it during a refresh. */
+export function selectNeedsYouInboxLastAppliedOk(state: AppState): boolean {
+  return selectActiveWorkspaceState(state).lastAppliedOk;
 }
 
 export function selectNeedsYouInboxHasMore(state: AppState): boolean {

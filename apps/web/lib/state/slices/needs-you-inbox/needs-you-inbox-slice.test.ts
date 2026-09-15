@@ -107,6 +107,41 @@ describe("needs-you-inbox slice", () => {
     expect(state.count).toBe(0);
   });
 
+  // R2-F1: `resolveViewMode` needs to tell a refresh following success apart
+  // from one following a failure, and `status` alone can't -- a refresh in
+  // flight is "loading" either way, since `beginNeedsYouInboxRead` only ever
+  // writes `status`. `lastAppliedOk` is the field that survives that
+  // overwrite untouched.
+  it("marks lastAppliedOk true after a successful page and false after a failed read, unaffected by the loading transition between them", () => {
+    const store = newStore();
+    const okGeneration = store.getState().beginNeedsYouInboxRead("w1");
+    store.getState().setNeedsYouInboxPage("w1", okGeneration, {
+      bundles: [bundle()],
+      count: 1,
+      hiddenCount: 0,
+      nextSnoozeExpiry: null,
+      hasMore: false,
+    });
+    expect(store.getState().needsYouInbox.byWorkspaceId.w1.lastAppliedOk).toBe(true);
+
+    const failGeneration = store.getState().beginNeedsYouInboxRead("w1");
+    // Mid-refresh: status flips to "loading" but the prior success must still
+    // be visible until the read actually settles one way or the other.
+    expect(store.getState().needsYouInbox.byWorkspaceId.w1.status).toBe("loading");
+    expect(store.getState().needsYouInbox.byWorkspaceId.w1.lastAppliedOk).toBe(true);
+
+    store.getState().setNeedsYouInboxError("w1", failGeneration);
+    expect(store.getState().needsYouInbox.byWorkspaceId.w1.lastAppliedOk).toBe(false);
+
+    // A refresh started after the failure is "loading" again, but now with no
+    // successful page behind it -- this is the exact tuple `resolveViewMode`
+    // must not render as a false "empty".
+    store.getState().beginNeedsYouInboxRead("w1");
+    const state = store.getState().needsYouInbox.byWorkspaceId.w1;
+    expect(state.status).toBe("loading");
+    expect(state.lastAppliedOk).toBe(false);
+  });
+
   it("drops a stale error response the same way it drops a stale page response", () => {
     const store = newStore();
     const staleGeneration = store.getState().beginNeedsYouInboxRead("w1");

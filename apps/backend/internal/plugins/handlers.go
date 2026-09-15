@@ -62,18 +62,37 @@ type webhookInvoker interface {
 // static-file serving (from the extracted package on disk), and the
 // external webhook relay (HTTP -> Host RPC over the live subprocess).
 type Controller struct {
-	svc            *Service
-	log            *logger.Logger
-	actionInvoker  actionInvoker
-	webhookInvoker webhookInvoker
+	svc                *Service
+	log                *logger.Logger
+	actionInvoker      actionInvoker
+	webhookInvoker     webhookInvoker
+	conversationTokens *conversationTokenManager
+	conversationReader ConversationReader
 }
 
 // RegisterRoutes wires the plugin HTTP surface. deliverer is accepted for
 // parity with the backendapp wiring (svc.SetDeliverer(deliverer) happens
 // alongside this call) — no handler in this file calls it directly, since
 // Service already notifies it on every install/status change.
-func RegisterRoutes(router *gin.Engine, svc *Service, _ Deliverer, log *logger.Logger) {
-	ctrl := &Controller{svc: svc, log: log, actionInvoker: svc, webhookInvoker: svc}
+func RegisterRoutes(
+	router *gin.Engine,
+	svc *Service,
+	_ Deliverer,
+	log *logger.Logger,
+	conversationReaders ...ConversationReader,
+) {
+	var conversationReader ConversationReader
+	if len(conversationReaders) > 0 {
+		conversationReader = conversationReaders[0]
+	}
+	ctrl := &Controller{
+		svc:                svc,
+		log:                log,
+		actionInvoker:      svc,
+		webhookInvoker:     svc,
+		conversationTokens: svc.conversationTokens,
+		conversationReader: conversationReader,
+	}
 
 	api := router.Group("/api/plugins")
 	// Instance admin, not an org scope: plugins load into the shared host
@@ -106,6 +125,7 @@ func RegisterRoutes(router *gin.Engine, svc *Service, _ Deliverer, log *logger.L
 	// /settings is registered before /:id above: some gin/httprouter tree
 	// versions reject a static-ish sibling added after an existing wildcard.
 	registerUserStateRoutes(api, ctrl)
+	registerConversationRoutes(api, ctrl)
 	api.POST("/:id/webhooks/:key", ctrl.webhook)
 	api.GET("/:id/webhooks/:key", ctrl.webhook)
 }

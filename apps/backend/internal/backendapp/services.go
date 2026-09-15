@@ -296,8 +296,11 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 	if recordErr := recordRequiredStore(storeTracker, "workflow-sync", workflowSyncErr); recordErr != nil {
 		return nil, nil, fmt.Errorf("initialize workflow sync: %w", recordErr)
 	}
-	pluginsSvc, _, pluginStoreErrors := initPluginsServiceRequired(cfg, dbPool, eventBus, repos.Secrets, log)
+	pluginsSvc, pluginsCleanup, pluginStoreErrors := initPluginsServiceRequired(cfg, dbPool, eventBus, repos.Secrets, log)
 	if recordErr := recordPluginStores(storeTracker, pluginStoreErrors); recordErr != nil {
+		if pluginsCleanup != nil {
+			_ = pluginsCleanup()
+		}
 		return nil, nil, fmt.Errorf("initialize plugins: %w", recordErr)
 	}
 	var agentConversationsSvc *taskservice.AgentConversationService
@@ -445,6 +448,7 @@ func provideServices(cfg *config.Config, log *logger.Logger, repos *Repositories
 		Automation:               automationComponents,
 		Plugins:                  pluginsSvc,
 		AgentConversations:       agentConversationsSvc,
+		PluginsCleanup:           pluginsCleanup,
 		Canvas:                   canvasSvc,
 		CanvasDistribution:       canvasDistributionSvc,
 		GitCredentials:           gitCredentialBroker,

@@ -151,6 +151,7 @@ export type ProcessedMessagesOptions = {
   hasOlderMessages?: boolean;
   lastAgentError?: LastAgentError | null;
   currentTurnId?: string | null;
+  currentTurnCompleted?: boolean;
   pendingAction?: TaskPendingAction | null;
 };
 
@@ -475,9 +476,13 @@ function usePendingClarificationState(messages: Message[], options: ProcessedMes
   const scope = useMemo(
     () =>
       hasScopeKeys
-        ? { currentTurnId: options.currentTurnId, pendingAction: options.pendingAction }
+        ? {
+            currentTurnId: options.currentTurnId,
+            currentTurnCompleted: options.currentTurnCompleted,
+            pendingAction: options.pendingAction,
+          }
         : undefined,
-    [hasScopeKeys, options.currentTurnId, options.pendingAction],
+    [hasScopeKeys, options.currentTurnCompleted, options.currentTurnId, options.pendingAction],
   );
   return {
     scope,

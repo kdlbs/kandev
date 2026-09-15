@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/events/bus"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -70,5 +72,38 @@ func TestDeleteSession_PreservesTaskWorkspaceAndNeverEnqueuesCleanup(t *testing.
 	}
 	if jobCount != 0 {
 		t.Fatalf("cleanup jobs = %d, want 0 — session deletion must not reserve cleanup", jobCount)
+	}
+}
+
+func TestDeleteSessionPublishesTerminalOrderedEvent(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedTaskAndSession(t, repo, "task-terminal", "session-terminal", models.TaskSessionStateCompleted)
+	svc := createTestServiceWithAgent(
+		repo,
+		newMockStepGetter(),
+		newMockTaskRepo(),
+		&mockAgentManager{},
+	)
+	eventBus := bus.NewMemoryEventBus(testLogger())
+	t.Cleanup(func() { eventBus.Close() })
+	svc.eventBus = eventBus
+	var received map[string]interface{}
+	if _, err := svc.eventBus.Subscribe(
+		events.SessionRemoved,
+		func(_ context.Context, event *bus.Event) error {
+			received, _ = event.Data.(map[string]interface{})
+			return nil
+		},
+	); err != nil {
+		t.Fatalf("subscribe: %v", err)
+	}
+
+	if err := svc.DeleteSession(ctx, "session-terminal"); err != nil {
+		t.Fatalf("DeleteSession: %v", err)
+	}
+
+	if received["session_id"] != "session-terminal" || received["task_id"] != "task-terminal" {
+		t.Fatalf("terminal event payload = %#v", received)
 	}
 }
