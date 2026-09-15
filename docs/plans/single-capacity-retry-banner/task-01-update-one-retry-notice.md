@@ -157,3 +157,18 @@ from the loaded transcript.
 Targeted lint for the changed E2E files passed. The repository-wide
 `pnpm run lint:e2e-sleeps` command still reports pre-existing violations in
 untouched files.
+
+CI fixup also removed two unrelated E2E blockers exposed by the first PR run.
+The workflow settings test now dismisses the shared picker explicitly after a
+model selection, because dependent options can keep it open. The LSP file
+opening helper now uses exact file search when virtualization leaves a valid
+file outside the mounted tree rows. The archive cleanup regression seeds 48
+preceding files so that path is exercised deterministically.
+
+- Workflow settings focused Chromium E2E with retries disabled and
+  `--repeat-each=3`: 3 passed.
+- LSP file intelligence focused archive cleanup E2E with retries disabled: 1
+  passed with the virtualized-tree regression fixture.
+- Full LSP file intelligence E2E with retries disabled: 13 passed.
+- Targeted ESLint for the three changed E2E files: passed.
+- Web TypeScript typecheck: passed.

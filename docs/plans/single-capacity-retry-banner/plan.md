@@ -182,6 +182,19 @@ of existing violations in untouched files, including missing ESLint rule
 definitions and pre-existing hand-rolled waits. Targeted lint for the changed
 E2E files passed.
 
+CI fixup additionally stabilized the existing workflow settings and LSP E2E
+surfaces. The workflow picker test dismisses a picker that can remain open
+while dependent options are present. The LSP helper searches for exact paths
+when virtualization leaves a valid file outside the mounted tree rows; its
+archive cleanup test forces that condition with 48 preceding files.
+
+- Workflow settings focused Chromium E2E with retries disabled and
+  `--repeat-each=3`: 3 passed.
+- LSP file intelligence with retries disabled: 13 passed.
+- LSP archive cleanup focused E2E with retries disabled: 1 passed with the
+  virtualized-tree regression fixture.
+- Targeted ESLint and web TypeScript typecheck: passed.
+
 ## Risks
 
 - A delayed update must not recreate a notice after cancellation or deletion.
