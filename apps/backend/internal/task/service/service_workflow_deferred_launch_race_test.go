@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
+	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/repository"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -46,7 +48,7 @@ func (r *ceilingWriteRaceRepo) GetTask(ctx context.Context, id string) (*models.
 // wrote the stale in-memory metadata verbatim and silently erased the
 // concurrently-written ceiling_deferred record.
 func TestUpdateTaskMetadataSurvivesAConcurrentCeilingWrite(t *testing.T) {
-	svc, _, repo := createTestService(t)
+	svc, eventBus, repo := createTestService(t)
 	ctx := context.Background()
 	require.NoError(t, repo.CreateWorkspace(ctx, &models.Workspace{ID: "ws-meta-race", Name: "Race"}))
 	require.NoError(t, repo.CreateWorkflow(ctx, &models.Workflow{ID: "wf-meta-race", WorkspaceID: "ws-meta-race", Name: "flow"}))
@@ -62,9 +64,29 @@ func TestUpdateTaskMetadataSurvivesAConcurrentCeilingWrite(t *testing.T) {
 	raceRepo := &ceilingWriteRaceRepo{TaskRepository: repo, t: t, watchTaskID: "task-meta-race"}
 	svc.tasks = raceRepo
 
-	_, err = svc.UpdateTaskMetadata(ctx, "task-meta-race", map[string]interface{}{"ordinary": "value"})
+	returned, err := svc.UpdateTaskMetadata(ctx, "task-meta-race", map[string]interface{}{"ordinary": "value"})
 	require.NoError(t, err)
 	require.True(t, raceRepo.fired, "the concurrent race must have actually been injected")
+
+	// The returned task must be the reloaded, authoritative row, not the
+	// pre-write in-memory snapshot: that snapshot was read before the
+	// concurrent ceiling CAS landed and never had deferred_launch merged
+	// into it locally, so it would report the race write as lost even
+	// though the database preserved it.
+	require.Equal(t, "value", returned.Metadata["ordinary"], "the caller's own metadata update must still apply")
+	returnedDeferred, ok := returned.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	require.True(t, ok, "returned task's deferred_launch missing or wrong shape: %#v", returned.Metadata[models.MetaKeyDeferredLaunch])
+	require.Equal(t, true, returnedDeferred["ceiling_deferred"],
+		"UpdateTaskMetadata must return a task reflecting the concurrent ceiling CAS write")
+
+	published := eventBus.GetPublishedEvents()
+	require.NotEmpty(t, published, "UpdateTaskMetadata must publish a task.updated event")
+	last := published[len(published)-1]
+	require.Equal(t, events.TaskUpdated, last.Type)
+	data, ok := last.Data.(map[string]interface{})
+	require.True(t, ok, "event data missing or wrong shape: %#v", last.Data)
+	require.Equal(t, returned.UpdatedAt.Format(time.RFC3339Nano), data["updated_at"],
+		"the published event must describe the same reloaded task that was returned, not the stale pre-write snapshot")
 
 	current, err := repo.GetTask(ctx, "task-meta-race")
 	require.NoError(t, err)

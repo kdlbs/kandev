@@ -14,6 +14,21 @@ import (
 // requires when a concurrent writer wins the compare-and-set race.
 const deferredLaunchCASRetryBudget = 3
 
+// publishTaskUpdatedByID reloads taskID and publishes it. The ceiling
+// deferral CAS helpers (GetTaskDeferredLaunch/SetTaskDeferredLaunchIfUnchanged)
+// write tasks.metadata directly and do not publish on their own, so a caller
+// that lands a ceiling_deferred change uses this to keep the WS-driven UI
+// (queued/cleared state) in sync with the row it just wrote.
+func (s *Service) publishTaskUpdatedByID(ctx context.Context, taskID string) {
+	task, err := s.repo.GetTask(ctx, taskID)
+	if err != nil {
+		s.logger.Zap().Warn("could not reload task after a ceiling deferral change; task.updated not published",
+			zap.String("task_id", taskID), zap.Error(err))
+		return
+	}
+	s.publishTaskUpdated(ctx, task)
+}
+
 // deferCeilingRefusal persists a ceiling_deferred record for an automatic launch
 // the admission controller refused, merging it into whatever the task's shared
 // deferred_launch value already holds (AC-46/AC-46a) under a row-locked
@@ -79,6 +94,7 @@ func (s *Service) deferCeilingRefusal(
 			updated.Ceiling = ceiling
 			if s.writeCeilingDeferralUpdate(ctx, taskID, existingRaw, prior, updated) {
 				s.attemptCeilingSurfaceWrite(ctx, taskID)
+				s.publishTaskUpdatedByID(ctx, taskID)
 			}
 			return nil
 		}
@@ -95,6 +111,7 @@ func (s *Service) deferCeilingRefusal(
 		}
 		if stored {
 			s.attemptCeilingSurfaceWrite(ctx, taskID)
+			s.publishTaskUpdatedByID(ctx, taskID)
 			return nil
 		}
 		if lostCompare {

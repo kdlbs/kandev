@@ -11,6 +11,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -177,6 +178,7 @@ func (s *Service) dropCeilingDeferral(
 	}
 
 	s.clearCeilingDeferredRecord(ctx, task.ID)
+	s.publishTaskUpdatedByID(ctx, task.ID)
 }
 
 // clearCeilingDeferredRecord is AC-17's "clear the whole record" disposition,
@@ -267,6 +269,41 @@ func boolField(payload map[string]interface{}, key string) bool {
 	return v
 }
 
+// int64Field reads an integer out of a generically-decoded payload map. A
+// JSON round trip through map[string]interface{} always decodes numbers as
+// float64, so this cannot type-assert int64 directly like boolField does.
+func int64Field(payload map[string]interface{}, key string) int64 {
+	switch v := payload[key].(type) {
+	case float64:
+		return int64(v)
+	case int64:
+		return v
+	default:
+		return 0
+	}
+}
+
+// remintCeilingLaunchCredentials refreshes the short-lived Office runtime
+// credentials redactedCeilingLaunchEnv stripped before persisting, using
+// whichever CeilingLaunchCredentialReminter was wired (nil for a non-Office
+// deployment, or when no reminter is registered — env round-trips unchanged
+// in that case). A re-mint failure is not fatal to the replay attempt: it
+// logs and falls back to the captured env, which is only stale — not
+// wrong — for a non-Office launch, since only Office launches carry these
+// credential keys in the first place.
+func (s *Service) remintCeilingLaunchCredentials(ctx context.Context, taskID string, env map[string]string) map[string]string {
+	if s.ceilingCredentialReminter == nil || len(env) == 0 {
+		return env
+	}
+	refreshed, err := s.ceilingCredentialReminter.RemintCeilingLaunchCredentials(ctx, taskID, env)
+	if err != nil {
+		s.logger.Zap().Warn("ceiling replay: credential re-mint failed; replaying with the captured env",
+			zap.String("task_id", taskID), zap.Error(err))
+		return env
+	}
+	return refreshed
+}
+
 // decodeCeilingPayloadField reconstructs a typed replay field from its
 // generically-decoded form. The original payload was built by placing typed
 // Go values directly into a map[string]interface{} that the repository then
@@ -293,11 +330,26 @@ func (s *Service) replayCeilingLaunchStart(ctx context.Context, task *models.Tas
 	decodeCeilingPayloadField(payload["env"], &env)
 	var route *executor.RouteOverride
 	decodeCeilingPayloadField(payload["route"], &route)
+	var additionalSkillSlugs []string
+	decodeCeilingPayloadField(payload["additional_skill_slugs"], &additionalSkillSlugs)
+	var entryOptions *workflowmove.EntryOptions
+	decodeCeilingPayloadField(payload["entry_options"], &entryOptions)
+
+	env = s.remintCeilingLaunchCredentials(ctx, task.ID, env)
 
 	opts := startTaskOptions{
-		ProfileExplicit: boolField(payload, "profile_explicit"),
-		Env:             env,
-		Route:           route,
+		ProfileExplicit:      boolField(payload, "profile_explicit"),
+		Env:                  env,
+		Route:                route,
+		AdditionalSkillSlugs: additionalSkillSlugs,
+		EntryOptions:         entryOptions,
+		WorkflowEntryID:      int64Field(payload, "workflow_entry_id"),
+		// Origin must round-trip rather than be re-derived from auto_start:
+		// an AC-13d caller (Office-routed launch) passes autoStart=false with
+		// an explicit automatic Origin override, and re-deriving from
+		// auto_start alone would replay it as a manual override that bypasses
+		// the ceiling.
+		Origin: launchOrigin(stringField(payload, "origin")),
 	}
 	if spawnRaw, ok := payload["spawn_origin"].(map[string]interface{}); ok {
 		opts.SpawnOrigin = &SpawnOrigin{
@@ -342,6 +394,10 @@ func (s *Service) replayCeilingLaunchStartCreated(ctx context.Context, task *mod
 		skipTaskDescriptionFallback: boolField(payload, "skip_task_description_fallback"),
 		promptAlreadyComposed:       boolField(payload, "prompt_already_composed"),
 		retryPrompt:                 stringField(payload, "retry_prompt"),
+		canvasGuidanceResolved:      boolField(payload, "canvas_guidance_resolved"),
+		includeCanvasGuidance:       boolField(payload, "include_canvas_guidance"),
+		promptReferencesPrepared:    boolField(payload, "prompt_references_prepared"),
+		preserveDirectPrompt:        boolField(payload, "preserve_direct_prompt"),
 	}
 
 	execution, err := s.startCreatedSession(

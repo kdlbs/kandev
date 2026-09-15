@@ -360,7 +360,12 @@ func (c *sessionCeilingController) rekey(ctx context.Context, fromSessionID, toS
 	delete(c.reservations, fromSessionID)
 
 	if _, alreadyReserved := c.reservations[toSessionID]; alreadyReserved {
-		return true
+		// Do not transfer ownership onto a reservation the caller does not
+		// hold: the source key is already gone (deleted above), so the
+		// caller's later releaseIfNotConsumed becomes a no-op instead of
+		// deleting the actual holder's reservation and undercounting the
+		// population, matching rebind's collision behavior.
+		return false
 	}
 	if counted, err := c.countedRowsLocked(context.WithoutCancel(ctx)); err == nil {
 		if _, alreadyCounted := counted[toSessionID]; alreadyCounted {

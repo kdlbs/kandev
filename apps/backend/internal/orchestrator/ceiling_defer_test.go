@@ -140,3 +140,34 @@ func TestDeferCeilingRefusalReplacesNonObjectValue(t *testing.T) {
 		t.Fatalf("non-object value was not replaced with a ceiling record: %+v", record)
 	}
 }
+
+// TestDeferCeilingRefusalPublishesTaskUpdated pins the fix for a ceiling
+// deferral write not publishing task.updated: without it, the WS-driven UI
+// never learns a launch was queued behind the session ceiling.
+func TestDeferCeilingRefusalPublishesTaskUpdated(t *testing.T) {
+	svc, repo := newServiceWithRealRepo(t)
+	ctx := context.Background()
+	if err := repo.CreateTask(ctx, &models.Task{ID: "defer-publish", Title: "T"}); err != nil {
+		t.Fatalf("CreateTask: %v", err)
+	}
+	events := &capturingTaskEvents{}
+	svc.SetTaskEventPublisher(events)
+
+	if err := svc.deferCeilingRefusal(ctx, "defer-publish", "s1", models.CeilingLaunchStart,
+		map[string]interface{}{"prompt": "hello"}, ceilingReasonRefused, 0, false, 0); err != nil {
+		t.Fatalf("deferCeilingRefusal: %v", err)
+	}
+
+	published := events.last()
+	if published == nil {
+		t.Fatal("deferCeilingRefusal did not publish a task.updated event")
+	}
+	if published.ID != "defer-publish" {
+		t.Fatalf("published task id = %q, want %q", published.ID, "defer-publish")
+	}
+	deferred, ok := published.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
+	if !ok || deferred[models.CeilingDeferredKey] != true {
+		t.Fatalf("published task's deferred_launch is missing the new ceiling record: %#v",
+			published.Metadata[models.MetaKeyDeferredLaunch])
+	}
+}

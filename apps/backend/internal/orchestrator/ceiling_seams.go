@@ -96,6 +96,49 @@ func (r *seam1Reservation) releaseIfNotConsumed() {
 	r.controller.release(r.key)
 }
 
+// ceilingCredentialEnvKeys are short-lived Office runtime credentials
+// (internal/office/agents/auth.go mints them with a 4-hour expiry) that must
+// never be persisted verbatim in task metadata: a launch can sit deferred
+// longer than that, and replaying it with an expired bearer token leaves the
+// agent unable to call the Kandev API. seam1StartPayload strips them before
+// persisting; CeilingLaunchCredentialReminter re-mints fresh ones immediately
+// before replay from the durable identity fields (agent/workspace/run id)
+// that remain in the payload.
+var ceilingCredentialEnvKeys = []string{"KANDEV_API_KEY", "KANDEV_RUN_TOKEN"}
+
+// redactedCeilingLaunchEnv returns a copy of env with ceilingCredentialEnvKeys
+// removed, leaving the original map (still used for the live launch attempt
+// this payload is only a record of) untouched.
+func redactedCeilingLaunchEnv(env map[string]string) map[string]string {
+	if len(env) == 0 {
+		return env
+	}
+	redacted := make(map[string]string, len(env))
+	for k, v := range env {
+		redacted[k] = v
+	}
+	for _, k := range ceilingCredentialEnvKeys {
+		delete(redacted, k)
+	}
+	return redacted
+}
+
+// CeilingLaunchCredentialReminter refreshes the short-lived Office runtime
+// credentials a ceiling-deferred "start" replay needs, immediately before
+// replay, using the durable identity fields (agent/workspace/run id) that
+// redactedCeilingLaunchEnv left in the persisted env. Registered via
+// SetCeilingLaunchCredentialReminter; nil is a valid, common case (non-Office
+// launches never carry these keys, so there is nothing to re-mint).
+type CeilingLaunchCredentialReminter interface {
+	RemintCeilingLaunchCredentials(ctx context.Context, taskID string, env map[string]string) (map[string]string, error)
+}
+
+// SetCeilingLaunchCredentialReminter wires the Office-side credential
+// re-minter. See CeilingLaunchCredentialReminter.
+func (s *Service) SetCeilingLaunchCredentialReminter(r CeilingLaunchCredentialReminter) {
+	s.ceilingCredentialReminter = r
+}
+
 // seam1StartPayload builds the AC-42 "start" replay row from startTask's own
 // frame, at the point the gate is consulted — before any workflow-step profile
 // resolution, so the recorded profile is the one the caller actually chose.
@@ -106,18 +149,22 @@ func seam1StartPayload(
 	opts startTaskOptions,
 ) map[string]interface{} {
 	payload := map[string]interface{}{
-		metaKeyAgentProfileID:  agentProfileID,
-		"executor_id":          executorID,
-		metaKeyExecutorProfile: executorProfileID,
-		"priority":             priority,
-		metaKeyPrompt:          prompt,
-		metaKeyWorkflowStepID:  workflowStepID,
-		metaKeyPlanMode:        planMode,
-		metaKeyAttachments:     attachments,
-		"env":                  opts.Env,
-		"route":                opts.Route,
-		"profile_explicit":     opts.ProfileExplicit,
-		"auto_start":           autoStart,
+		metaKeyAgentProfileID:    agentProfileID,
+		"executor_id":            executorID,
+		metaKeyExecutorProfile:   executorProfileID,
+		"priority":               priority,
+		metaKeyPrompt:            prompt,
+		metaKeyWorkflowStepID:    workflowStepID,
+		metaKeyPlanMode:          planMode,
+		metaKeyAttachments:       attachments,
+		"env":                    redactedCeilingLaunchEnv(opts.Env),
+		"route":                  opts.Route,
+		"profile_explicit":       opts.ProfileExplicit,
+		"auto_start":             autoStart,
+		"additional_skill_slugs": opts.AdditionalSkillSlugs,
+		"entry_options":          opts.EntryOptions,
+		"workflow_entry_id":      opts.WorkflowEntryID,
+		"origin":                 string(opts.Origin),
 	}
 	if opts.SpawnOrigin != nil {
 		payload["spawn_origin"] = map[string]interface{}{

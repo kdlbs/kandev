@@ -32,6 +32,10 @@ func seam2StartCreatedPayload(
 		"skip_task_description_fallback": options.skipTaskDescriptionFallback,
 		"prompt_already_composed":        options.promptAlreadyComposed,
 		"retry_prompt":                   options.retryPrompt,
+		"canvas_guidance_resolved":       options.canvasGuidanceResolved,
+		"include_canvas_guidance":        options.includeCanvasGuidance,
+		"prompt_references_prepared":     options.promptReferencesPrepared,
+		"preserve_direct_prompt":         options.preserveDirectPrompt,
 	}
 }
 

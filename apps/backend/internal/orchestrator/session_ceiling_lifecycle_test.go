@@ -92,6 +92,39 @@ func TestRekeyConsumesNoSecondUnitWhenTheReplacementIsAlreadyCounted(t *testing.
 	}
 }
 
+// Where the replacement session already holds its own unrelated reservation
+// (not a counted row), rekey must not report ownership transferring onto it:
+// the caller would then release someone else's reservation instead of its
+// own already-deleted, already-no-op key.
+func TestRekeyDoesNotTransferOwnershipOnAReservationCollision(t *testing.T) {
+	lister := &fakeAdmittedLister{}
+	c := newTestController(t, 4, lister)
+	c.admit(context.Background(), admissionRequest{taskID: "t1", sessionID: "original", origin: launchOriginAutomatic, seam: "seam2"})
+	c.admit(context.Background(), admissionRequest{taskID: "t2", sessionID: "replacement", origin: launchOriginAutomatic, seam: "seam2"})
+	if got := mustPopulation(t, c); got != 2 {
+		t.Fatalf("precondition: population = %d, want 2", got)
+	}
+
+	if c.rekey(context.Background(), "original", "replacement") {
+		t.Fatal("rekey reported ownership transferring onto a reservation collision, want false")
+	}
+	if got := mustPopulation(t, c); got != 1 {
+		t.Fatalf("population after the collision = %d, want 1 (original released, replacement untouched)", got)
+	}
+
+	// A caller told "false" leaves its key at "original" (already deleted by
+	// rekey), so its own cleanup is a no-op rather than deleting the
+	// replacement's still-live reservation.
+	c.release("original")
+	if got := mustPopulation(t, c); got != 1 {
+		t.Fatalf("population after releasing the stale original key = %d, want 1 (no-op)", got)
+	}
+	c.release("replacement")
+	if got := mustPopulation(t, c); got != 0 {
+		t.Fatalf("population after releasing the replacement's own reservation = %d, want 0", got)
+	}
+}
+
 // The automatic dynamic-route path enters while its session is still RUNNING. The
 // hand-off converts that membership into a reservation without consulting the
 // ceiling, so the population is flat across the CREATED write instead of dipping.
