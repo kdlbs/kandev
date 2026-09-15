@@ -36,6 +36,7 @@ import { ChatStatusBar, ComposerCIStatus, resolveStatusRowTaskId } from "./chat-
 import { DynamicRouteRecovery } from "./dynamic-route-recovery";
 import { hasPendingClarification } from "./types";
 import { toTaskPlanCommentRefs } from "@/lib/plan-comment-refs";
+import { toTaskPreviewFeedbackRefs } from "@/lib/preview-feedback-refs";
 import { PlanCommentMigrationNotice } from "@/components/task/plan-comment-migration-notice";
 import {
   ComposerCollapseButton,
@@ -176,6 +177,7 @@ function usePanelMessageHandler(panelState: ChatPanelState) {
     pendingClarification,
     activeDocument,
     planComments,
+    previewFeedback,
     contextFiles,
     prompts,
   } = panelState;
@@ -188,9 +190,35 @@ function usePanelMessageHandler(panelState: ChatPanelState) {
     hasPendingClarification: !!pendingClarification,
     activeDocument,
     planComments,
+    previewFeedback,
     contextFiles,
     prompts,
   });
+}
+
+function completeChatSubmission(payload: ChatSubmitPayload, panelState: ChatPanelState) {
+  const {
+    resolvedSessionId,
+    pendingPRFeedback,
+    walkthroughComments,
+    messageComments,
+    markCommentsSent,
+    handleClearPRFeedback,
+    handleClearWalkthroughComments,
+    clearEphemeral,
+    addContextFile,
+    planModeEnabled,
+  } = panelState;
+  if (payload.reviewComments?.length) markCommentsSent(payload.reviewComments.map((c) => c.id));
+  if (messageComments.length > 0) markCommentsSent(messageComments.map((c) => c.id));
+  if (pendingPRFeedback.length > 0) handleClearPRFeedback();
+  if (walkthroughComments.length > 0) handleClearWalkthroughComments();
+  if (!resolvedSessionId) return true;
+  clearEphemeral(resolvedSessionId);
+  if (planModeEnabled) {
+    addContextFile(resolvedSessionId, { path: PLAN_CONTEXT_PATH, name: "Plan" });
+  }
+  return true;
 }
 
 async function submitChatPayload({
@@ -207,17 +235,11 @@ async function submitChatPayload({
   handleSendMessage: (payload: ChatSubmitPayload) => Promise<void | boolean>;
 }) {
   const {
-    resolvedSessionId,
     planComments,
+    previewFeedback,
     pendingPRFeedback,
     walkthroughComments,
     messageComments,
-    markCommentsSent,
-    handleClearPRFeedback,
-    handleClearWalkthroughComments,
-    clearEphemeral,
-    addContextFile,
-    planModeEnabled,
     pendingClarification,
   } = panelState;
   const finalMessage = buildSubmitMessage({
@@ -229,10 +251,12 @@ async function submitChatPayload({
     messageComments,
   });
   const planCommentRefs = toTaskPlanCommentRefs(planComments);
+  const previewFeedbackRefs = toTaskPreviewFeedbackRefs(previewFeedback ?? []);
   const outbound = {
     ...payload,
     message: finalMessage,
     ...(planCommentRefs.length > 0 ? { planCommentRefs } : {}),
+    ...(previewFeedbackRefs.length > 0 ? { previewFeedbackRefs } : {}),
   };
   let submissionResult: void | boolean;
   if (onSend && !pendingClarification) {
@@ -244,16 +268,7 @@ async function submitChatPayload({
     submissionResult = await handleSendMessage(outbound);
   }
   if (submissionResult === false) return false;
-  if (payload.reviewComments?.length) markCommentsSent(payload.reviewComments.map((c) => c.id));
-  if (messageComments.length > 0) markCommentsSent(messageComments.map((c) => c.id));
-  if (pendingPRFeedback.length > 0) handleClearPRFeedback();
-  if (walkthroughComments.length > 0) handleClearWalkthroughComments();
-  if (!resolvedSessionId) return true;
-  clearEphemeral(resolvedSessionId);
-  if (planModeEnabled) {
-    addContextFile(resolvedSessionId, { path: PLAN_CONTEXT_PATH, name: "Plan" });
-  }
-  return true;
+  return completeChatSubmission(payload, panelState);
 }
 
 /** Builds the composer's submit handler, tracking in-flight sends and

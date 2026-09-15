@@ -48,6 +48,7 @@ export function useQueueAdmissionAction(
       contextFilesMeta,
       clientQueueId,
       planCommentRefs,
+      previewFeedbackRefs,
       requirePrimarySession,
     }: QueueMessageInput) => {
       if (!identity || identity.task_id !== taskId) return false;
@@ -67,6 +68,7 @@ export function useQueueAdmissionAction(
             entity_references: entityReferences,
             ...(clientQueueId ? { client_queue_id: clientQueueId } : {}),
             ...(planCommentRefs?.length ? { plan_comment_refs: planCommentRefs } : {}),
+            ...(previewFeedbackRefs?.length ? { preview_feedback_refs: previewFeedbackRefs } : {}),
             ...(requirePrimarySession ? { require_primary_session: true } : {}),
             ...(contextFilesMeta ? { context_files: contextFilesMeta } : {}),
           },

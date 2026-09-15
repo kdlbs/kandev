@@ -1,7 +1,7 @@
 ---
 id: "01-persist-and-sync-feedback"
 title: "Persist and synchronize preview feedback"
-status: pending
+status: completed
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -122,4 +122,8 @@ None.
 
 ## Results
 
-Pending implementation.
+Implemented task-owned SQLite/PostgreSQL-compatible storage, optimistic CRUD,
+idempotent creates, screenshot claim validation and cleanup, authorized
+WebSocket actions, authoritative change events, and a reconnecting task-keyed
+frontend snapshot projection. Focused backend tests pass under the race detector;
+the frontend API, state, WebSocket, and hook tests plus the web typecheck pass.

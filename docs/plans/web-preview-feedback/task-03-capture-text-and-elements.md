@@ -1,7 +1,7 @@
 ---
 id: "03-capture-text-and-elements"
 title: "Capture text and elements across previews"
-status: pending
+status: done
 wave: 3
 depends_on:
   - "02-deliver-feedback-through-chat"
@@ -159,4 +159,18 @@ pnpm exec eslint lib/preview-inspect-bridge.ts hooks/use-preview-capture.ts comp
 
 ## Results
 
-Pending implementation.
+Implemented the versioned iframe bridge with strict source and payload
+validation, full rendered text range evidence, bounded element snapshots,
+route announcements, task-backed marker projection, and pointer, focus, and
+touch candidate highlighting. Browser and HTML-file previews now share one
+task-owned capture controller and one localized review surface: desktop uses a
+Popover and coarse pointers use a touch-sized Drawer with an internal scroll
+owner and safe-area clearance. The old Browser-local annotations, Copy/Clear
+panel, and inspect hook were removed.
+
+Focused evidence passed: bridge and capture-hook Vitest, Browser/HTML host and
+responsive review component tests (19 tests), frontend typecheck, i18n checks,
+scoped ESLint with zero warnings, JavaScript syntax validation, and the
+inspector injection tests under Go's race detector. The package-wide
+agentctl/API race suite still requires a network-enabled environment because
+an unrelated `httptest` listener is denied by this sandbox.

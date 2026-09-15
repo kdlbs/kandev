@@ -1,7 +1,7 @@
 ---
 id: "02-deliver-feedback-through-chat"
 title: "Deliver preview feedback through chat"
-status: pending
+status: completed
 wave: 2
 depends_on:
   - "01-persist-and-sync-feedback"
@@ -141,4 +141,17 @@ pnpm exec eslint components/task/chat hooks/use-message-handler.ts lib/comments/
 
 ## Results
 
-Pending implementation.
+- Added exact `preview_feedback_refs` to direct and queued message contracts,
+  replay fingerprints, task/session admission leases, and changed-snapshot
+  errors.
+- Added one shared transaction for plan comments, preview feedback, ordinary
+  staged attachments, screenshot transfers, queue capacity, and durable
+  message or queue acceptance.
+- Added the canonical server formatter with complete runtime text anchors,
+  escaped rendered element HTML, screenshot context, page grouping, and prompt
+  bounds.
+- Projected the task-owned pending count into every composer and froze visible
+  versions on Send without client-formatted duplication or local clearing.
+- Verified focused backend packages under the race detector and 51 frontend
+  submission, queue, context, and settlement tests; web typecheck and i18n
+  validation pass.

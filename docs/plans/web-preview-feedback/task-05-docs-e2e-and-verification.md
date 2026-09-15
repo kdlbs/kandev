@@ -1,7 +1,7 @@
 ---
 id: "05-docs-e2e-and-verification"
 title: "Document and prove the complete workflow"
-status: pending
+status: done
 wave: 5
 depends_on:
   - "04-capture-screenshot-regions"
@@ -153,4 +153,22 @@ make typecheck test lint
 
 ## Results
 
-Pending implementation.
+- Added a desktop Chromium scenario for multi-route text, element, and region
+  capture; generated-text position evidence; candidate hinting; durable reopen;
+  direct and queued Send; transcript rendering; and screenshot attachment
+  delivery.
+- Added mobile Chrome coverage for the inline HTML preview Drawer, touch
+  capture, source return, touch target sizing, containment, and overflow, plus
+  a Docker-backed Browser scenario for a published local HTTP page.
+- Removed the obsolete Browser-local annotation E2E and documented task-owned
+  pending feedback, navigation, delivery, limits, raster behavior, and recovery
+  in `docs/public/developer-tools.md`.
+- Verified rebuilt host and Linux backend artifacts, the E2E web bundle, all
+  three focused Playwright scenarios, public docs, specs, CLI, 88 focused web
+  tests, the affected backend packages, and the full 2,095-file web suite with
+  18,041 passing tests and 4 intentional skips.
+- The full backend suite passes every package except the unchanged real-process
+  probe integration in the elevated runner, whose host PID namespace conflicts
+  with container `/proc/uptime`; that package passes 20 consecutive runs in the
+  normal namespace. Synthetic Git fixtures now set repository-local empty hook
+  paths and remain independent of machine-wide Git policy.

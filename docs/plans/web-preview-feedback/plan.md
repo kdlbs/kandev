@@ -1,5 +1,5 @@
 ---
-status: pending
+status: done
 created: 2026-09-15
 requirements:
   - REQ-TASKS-WEB-PREVIEW-FEEDBACK-001
@@ -224,11 +224,11 @@ Entry point: after selecting a region. Covers
 
 ## Work orders
 
-- [ ] [Task 01: Persist and synchronize preview feedback](task-01-persist-and-sync-feedback.md)
-- [ ] [Task 02: Deliver preview feedback through chat](task-02-deliver-feedback-through-chat.md)
-- [ ] [Task 03: Capture text and elements across previews](task-03-capture-text-and-elements.md)
-- [ ] [Task 04: Capture screenshot regions as attachments](task-04-capture-screenshot-regions.md)
-- [ ] [Task 05: Document and prove the complete workflow](task-05-docs-e2e-and-verification.md)
+- [x] [Task 01: Persist and synchronize preview feedback](task-01-persist-and-sync-feedback.md)
+- [x] [Task 02: Deliver preview feedback through chat](task-02-deliver-feedback-through-chat.md)
+- [x] [Task 03: Capture text and elements across previews](task-03-capture-text-and-elements.md)
+- [x] [Task 04: Capture screenshot regions as attachments](task-04-capture-screenshot-regions.md)
+- [x] [Task 05: Document and prove the complete workflow](task-05-docs-e2e-and-verification.md)
 
 ## Dependency order
 
@@ -301,4 +301,20 @@ move the task to Test.
 
 ## Verification results
 
-Pending implementation.
+- Desktop Chromium, mobile Chrome, and Docker-backed Playwright scenarios each
+  pass against rebuilt production artifacts. They cover multi-route durable
+  review, exact generated-text position evidence, candidate highlighting,
+  touch region capture, panel reopening, direct delivery, queued delivery, and
+  real screenshot attachments.
+- The full web suite passes 2,095 files and 18,041 tests, with 4 intentional
+  skips. Focused frontend suites pass 88 preview, composer, API, store, bridge,
+  screenshot, and WebSocket tests.
+- Preview-feedback repository, service, handler, queue, and attachment tests
+  pass. The full backend run passes every package except the unchanged
+  real-process probe integration in the elevated test namespace, where host
+  PIDs are combined with container `/proc/uptime`; that package passes 20
+  consecutive runs in the normal namespace.
+- Host and Linux backend artifacts, the E2E web bundle, public-doc validators,
+  spec validators, CLI tests, formatting, typecheck, and lint pass. Script
+  Git fixtures use repository-local empty hook paths so machine-wide hooks do
+  not affect their synthetic commits.

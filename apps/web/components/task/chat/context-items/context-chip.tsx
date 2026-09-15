@@ -32,6 +32,7 @@ const ICON_BY_KIND: Record<ContextItemKind, TablerIcon> = {
   file: IconFile,
   comment: IconMessageDots,
   "plan-comment": IconMessageDots,
+  "preview-feedback": IconMessageDots,
   "walkthrough-comment": IconRoute,
   image: IconPhoto,
   "file-attachment": IconFile,

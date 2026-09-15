@@ -6,6 +6,7 @@ import (
 
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
+	"github.com/kandev/kandev/internal/task/previewfeedback"
 	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
 )
 
@@ -23,15 +24,30 @@ type PlanCommentQueueRequest struct {
 	Attachments           []MessageAttachment
 	Metadata              map[string]interface{}
 	PlanCommentRefs       []models.TaskPlanCommentRef
+	PreviewFeedbackRefs   []models.TaskPreviewFeedbackRef
 	RequirePrimarySession bool
 	AttachmentClaim       *QueueAttachmentClaim
 }
 
 // PlanCommentQueueResult distinguishes a first admission from an exact replay.
 type PlanCommentQueueResult struct {
-	Message  *QueuedMessage
-	Snapshot *models.TaskPlanCommentSnapshot
-	Replay   bool
+	Message         *QueuedMessage
+	Snapshot        *models.TaskPlanCommentSnapshot
+	PreviewSnapshot *models.TaskPreviewFeedbackSnapshot
+	Replay          bool
+}
+
+type taskFeedbackQueueWriter interface {
+	InsertWithTaskFeedback(
+		context.Context,
+		QueueSessionIdentity,
+		*QueuedMessage,
+		[]models.TaskPlanCommentRef,
+		[]models.TaskPreviewFeedbackRef,
+		bool,
+		*QueueAttachmentClaim,
+		int,
+	) (*models.TaskPlanCommentSnapshot, *models.TaskPreviewFeedbackSnapshot, bool, error)
 }
 
 type planCommentQueueWriter interface {
@@ -47,18 +63,19 @@ type planCommentQueueWriter interface {
 }
 
 type planCommentQueueReplayIdentity struct {
-	ClientQueueID         string                      `json:"client_queue_id"`
-	SessionID             string                      `json:"session_id"`
-	TaskID                string                      `json:"task_id"`
-	SessionIncarnationID  string                      `json:"session_incarnation_id"`
-	Content               string                      `json:"content"`
-	Model                 string                      `json:"model"`
-	UserID                string                      `json:"user_id"`
-	PlanMode              bool                        `json:"plan_mode"`
-	Attachments           []MessageAttachment         `json:"attachments"`
-	Metadata              map[string]interface{}      `json:"metadata"`
-	Refs                  []models.TaskPlanCommentRef `json:"refs"`
-	RequirePrimarySession bool                        `json:"require_primary_session"`
+	ClientQueueID         string                          `json:"client_queue_id"`
+	SessionID             string                          `json:"session_id"`
+	TaskID                string                          `json:"task_id"`
+	SessionIncarnationID  string                          `json:"session_incarnation_id"`
+	Content               string                          `json:"content"`
+	Model                 string                          `json:"model"`
+	UserID                string                          `json:"user_id"`
+	PlanMode              bool                            `json:"plan_mode"`
+	Attachments           []MessageAttachment             `json:"attachments"`
+	Metadata              map[string]interface{}          `json:"metadata"`
+	Refs                  []models.TaskPlanCommentRef     `json:"refs"`
+	PreviewRefs           []models.TaskPreviewFeedbackRef `json:"preview_refs"`
+	RequirePrimarySession bool                            `json:"require_primary_session"`
 }
 
 // QueueMessageWithPlanComments admits a comment-bearing row without automatic
@@ -71,8 +88,8 @@ func (s *Service) QueueMessageWithPlanComments(
 	if req.ClientQueueID == "" {
 		return nil, errors.New("client queue id is required")
 	}
-	if len(req.PlanCommentRefs) == 0 {
-		return nil, errors.New("plan comment refs are required")
+	if len(req.PlanCommentRefs) == 0 && len(req.PreviewFeedbackRefs) == 0 {
+		return nil, errors.New("task feedback refs are required")
 	}
 	identity := QueueSessionIdentity{
 		TaskID: req.TaskID, SessionID: req.SessionID, SessionIncarnationID: req.SessionIncarnationID,
@@ -80,17 +97,17 @@ func (s *Service) QueueMessageWithPlanComments(
 	if identity.TaskID == "" || identity.SessionID == "" || identity.SessionIncarnationID == "" {
 		return nil, ErrSessionIdentityMismatch
 	}
-	writer, ok := s.repo.(planCommentQueueWriter)
-	if !ok {
-		return nil, errors.New("plan comment queue admission is unavailable")
-	}
 	metadata, err := preparePlanCommentQueueMetadata(req)
 	if err != nil {
 		return nil, err
 	}
+	content := req.Content
+	if len(req.PlanCommentRefs) > 0 {
+		content = plancomments.WithPlaceholder(content)
+	}
 	message := &QueuedMessage{
 		ID: req.ClientQueueID, SessionID: req.SessionID, TaskID: req.TaskID,
-		Content: plancomments.WithPlaceholder(req.Content), Model: req.Model,
+		Content: content, Model: req.Model,
 		PlanMode: req.PlanMode, Attachments: req.Attachments, Metadata: metadata,
 		QueuedBy: req.UserID,
 	}
@@ -102,25 +119,47 @@ func (s *Service) QueueMessageWithPlanComments(
 	ctx = plancommenttx.WithLocalAdmission(ctx, req.TaskID)
 	var result *PlanCommentQueueResult
 	err = s.WithSessionAdmission(ctx, req.SessionID, func(admittedCtx context.Context) error {
-		snapshot, replay, insertErr := writer.InsertWithPlanComments(
-			admittedCtx, identity, message, req.PlanCommentRefs, req.RequirePrimarySession,
-			req.AttachmentClaim, s.MaxPerSession(),
-		)
+		var snapshot *models.TaskPlanCommentSnapshot
+		var previewSnapshot *models.TaskPreviewFeedbackSnapshot
+		var replay bool
+		var insertErr error
+		if len(req.PreviewFeedbackRefs) > 0 {
+			writer, ok := s.repo.(taskFeedbackQueueWriter)
+			if !ok {
+				return errors.New("task feedback queue admission is unavailable")
+			}
+			snapshot, previewSnapshot, replay, insertErr = writer.InsertWithTaskFeedback(
+				admittedCtx, identity, message, req.PlanCommentRefs, req.PreviewFeedbackRefs,
+				req.RequirePrimarySession, req.AttachmentClaim, s.MaxPerSession(),
+			)
+		} else {
+			writer, ok := s.repo.(planCommentQueueWriter)
+			if !ok {
+				return errors.New("plan comment queue admission is unavailable")
+			}
+			snapshot, replay, insertErr = writer.InsertWithPlanComments(
+				admittedCtx, identity, message, req.PlanCommentRefs, req.RequirePrimarySession,
+				req.AttachmentClaim, s.MaxPerSession(),
+			)
+		}
 		if insertErr != nil {
 			return insertErr
 		}
-		result = &PlanCommentQueueResult{Message: message, Snapshot: snapshot, Replay: replay}
+		result = &PlanCommentQueueResult{
+			Message: message, Snapshot: snapshot, PreviewSnapshot: previewSnapshot, Replay: replay,
+		}
 		return nil
 	})
 	return result, err
 }
 
 func preparePlanCommentQueueMetadata(req PlanCommentQueueRequest) (map[string]interface{}, error) {
-	metadata := make(map[string]interface{}, len(req.Metadata)+3)
+	metadata := make(map[string]interface{}, len(req.Metadata)+4)
 	for key, value := range req.Metadata {
 		if key != plancomments.MetadataRefs &&
 			key != plancomments.MetadataRequestFingerprint &&
-			key != plancomments.MetadataClientQueueID {
+			key != plancomments.MetadataClientQueueID &&
+			key != previewfeedback.MetadataRefs {
 			metadata[key] = value
 		}
 	}
@@ -129,6 +168,7 @@ func preparePlanCommentQueueMetadata(req PlanCommentQueueRequest) (map[string]in
 		SessionIncarnationID: req.SessionIncarnationID,
 		Content:              req.Content, Model: req.Model, UserID: req.UserID, PlanMode: req.PlanMode,
 		Attachments: req.Attachments, Metadata: metadata, Refs: req.PlanCommentRefs,
+		PreviewRefs:           req.PreviewFeedbackRefs,
 		RequirePrimarySession: req.RequirePrimarySession,
 	}
 	fingerprint, err := plancomments.Fingerprint(identity)
@@ -138,5 +178,6 @@ func preparePlanCommentQueueMetadata(req PlanCommentQueueRequest) (map[string]in
 	metadata[plancomments.MetadataRefs] = req.PlanCommentRefs
 	metadata[plancomments.MetadataRequestFingerprint] = fingerprint
 	metadata[plancomments.MetadataClientQueueID] = req.ClientQueueID
+	metadata[previewfeedback.MetadataRefs] = req.PreviewFeedbackRefs
 	return metadata, nil
 }

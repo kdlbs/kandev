@@ -1,7 +1,10 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { HtmlPreviewContent } from "./html-preview-content";
+
+const usePreviewCapture = vi.hoisted(() => vi.fn());
+vi.mock("@/hooks/use-preview-capture", () => ({ usePreviewCapture }));
 
 vi.mock("@/components/editors/external-vcs-file-link", () => ({
   ExternalVcsFileLink: () => null,
@@ -12,6 +15,27 @@ afterEach(() => {
   cleanup();
 });
 
+const capture = {
+  items: [],
+  snapshot: { task_id: "task-1", revision: 0, items: [] },
+  mode: null,
+  draft: null,
+  candidateLabel: null,
+  captureError: null,
+  isRasterizing: false,
+  isUploading: false,
+  isMutating: false,
+  mutationError: null,
+  startCapture: vi.fn(),
+  cancelCapture: vi.fn(),
+  discardDraft: vi.fn(),
+  saveDraft: vi.fn(),
+  update: vi.fn(),
+  remove: vi.fn(),
+  clear: vi.fn(),
+  handleIframeLoad: vi.fn(),
+};
+
 function renderPreview(onTogglePreview = vi.fn(), overrides: Record<string, unknown> = {}) {
   return {
     onTogglePreview,
@@ -20,6 +44,8 @@ function renderPreview(onTogglePreview = vi.fn(), overrides: Record<string, unkn
         <HtmlPreviewContent
           path="reports/index.html"
           previewUrl="http://api.test/port-proxy/session-1/43127/reports/index.html?v=4"
+          taskId="task-1"
+          sessionId="session-1"
           showExternalVcsLink={false}
           onTogglePreview={onTogglePreview}
           {...overrides}
@@ -30,6 +56,8 @@ function renderPreview(onTogglePreview = vi.fn(), overrides: Record<string, unkn
 }
 
 describe("HtmlPreviewContent", () => {
+  beforeEach(() => usePreviewCapture.mockReturnValue(capture));
+
   it("renders a native iframe for the published preview URL", () => {
     const { onTogglePreview } = renderPreview();
 
@@ -79,5 +107,23 @@ describe("HtmlPreviewContent", () => {
 
     screen.getByRole("button", { name: /Open in browser panel/i }).click();
     expect(onOpenInBrowser).toHaveBeenCalledOnce();
+  });
+
+  it("uses the same task-backed annotation controls as the Browser panel", () => {
+    renderPreview();
+
+    expect(screen.getByRole("button", { name: "Annotate (0)" })).toBeTruthy();
+    expect(usePreviewCapture).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: "task-1",
+        enabled: true,
+        source: {
+          kind: "html_file",
+          sessionId: "session-1",
+          label: "reports/index.html",
+          path: "reports/index.html",
+        },
+      }),
+    );
   });
 });

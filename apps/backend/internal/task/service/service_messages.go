@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/messagequeue"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
+	"github.com/kandev/kandev/internal/task/previewfeedback"
 	"github.com/kandev/kandev/internal/task/repository/admission"
 	"github.com/kandev/kandev/internal/task/repository/plancommenttx"
 	"github.com/kandev/kandev/internal/task/repository/repoerrors"
@@ -41,6 +42,36 @@ type planCommentMessageWriter interface {
 	) (*models.TaskPlanCommentSnapshot, error)
 }
 
+type taskFeedbackMessageWriter interface {
+	CreateMessageWithTaskFeedback(
+		context.Context,
+		*models.Message,
+		[]models.TaskPlanCommentRef,
+		[]models.TaskPreviewFeedbackRef,
+		bool,
+		models.TaskSessionState,
+		*messagequeue.QueueAttachmentClaim,
+	) (*models.TaskPlanCommentSnapshot, *models.TaskPreviewFeedbackSnapshot, error)
+}
+
+type initialTaskBriefTaskFeedbackMessageWriter interface {
+	CreateMessageWithTaskFeedbackWithInitialTaskBrief(
+		context.Context,
+		*models.Message,
+		*admission.InitialTaskBriefCandidate,
+		[]models.TaskPlanCommentRef,
+		[]models.TaskPreviewFeedbackRef,
+		bool,
+		models.TaskSessionState,
+		*messagequeue.QueueAttachmentClaim,
+	) (*models.TaskPlanCommentSnapshot, *models.TaskPreviewFeedbackSnapshot, error)
+}
+
+type messageFeedbackSnapshots struct {
+	plan    *models.TaskPlanCommentSnapshot
+	preview *models.TaskPreviewFeedbackSnapshot
+}
+
 type queuedPlanCommentMessageWriter interface {
 	CreateMessageWithPlanCommentsAndQueue(
 		context.Context,
@@ -52,6 +83,35 @@ type queuedPlanCommentMessageWriter interface {
 		*messagequeue.QueueAttachmentClaim,
 		int,
 	) (*models.TaskPlanCommentSnapshot, error)
+}
+
+type queuedTaskFeedbackMessageWriter interface {
+	CreateMessageWithTaskFeedbackAndQueue(
+		context.Context,
+		*models.Message,
+		*messagequeue.QueuedMessage,
+		[]models.TaskPlanCommentRef,
+		[]models.TaskPreviewFeedbackRef,
+		bool,
+		models.TaskSessionState,
+		*messagequeue.QueueAttachmentClaim,
+		int,
+	) (*models.TaskPlanCommentSnapshot, *models.TaskPreviewFeedbackSnapshot, error)
+}
+
+type initialTaskBriefQueuedTaskFeedbackMessageWriter interface {
+	CreateMessageWithTaskFeedbackAndQueueWithInitialTaskBrief(
+		context.Context,
+		*models.Message,
+		*messagequeue.QueuedMessage,
+		*admission.InitialTaskBriefCandidate,
+		[]models.TaskPlanCommentRef,
+		[]models.TaskPreviewFeedbackRef,
+		bool,
+		models.TaskSessionState,
+		*messagequeue.QueueAttachmentClaim,
+		int,
+	) (*models.TaskPlanCommentSnapshot, *models.TaskPreviewFeedbackSnapshot, error)
 }
 
 type initialTaskBriefMessageWriter interface {
@@ -162,7 +222,7 @@ func (s *Service) acquireMessageCreateAdmission(
 	messageID string,
 	req *CreateMessageRequest,
 ) (context.Context, func(), error) {
-	if req != nil && len(req.PlanCommentRefs) > 0 {
+	if req != nil && (len(req.PlanCommentRefs) > 0 || len(req.PreviewFeedbackRefs) > 0) {
 		return s.AcquirePlanCommentAndMessageAdmission(ctx, req.TaskID, messageID)
 	}
 	return s.AcquireMessageAdmission(ctx, messageID)
@@ -246,7 +306,7 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 		// as an explicit import and reject same-microsecond creates.
 	}
 
-	snapshot, err := s.persistMessage(ctx, message, req)
+	snapshots, err := s.persistMessage(ctx, message, req)
 	if err != nil {
 		s.logger.Error("failed to create message", zap.Error(err))
 		return nil, err
@@ -254,7 +314,7 @@ func (s *Service) CreateMessage(ctx context.Context, req *CreateMessageRequest) 
 
 	// Publish message.added event
 	s.publishMessageEvent(ctx, events.MessageAdded, message)
-	s.publishMessagePlanCommentSnapshot(ctx, snapshot)
+	s.publishMessageFeedbackSnapshots(ctx, snapshots)
 
 	s.logger.Info("message created",
 		zap.String("message_id", message.ID),
@@ -328,6 +388,46 @@ type planCommentMessageValidator interface {
 	) error
 }
 
+type taskFeedbackMessageValidator interface {
+	ValidateMessageTaskFeedback(
+		context.Context,
+		string,
+		string,
+		string,
+		[]models.TaskPlanCommentRef,
+		[]models.TaskPreviewFeedbackRef,
+		bool,
+		models.TaskSessionState,
+	) error
+}
+
+// ValidateTaskFeedbackMessage rejects stale preview references before stateful
+// workflow hooks. Persistence repeats this under the final transaction.
+func (s *Service) ValidateTaskFeedbackMessage(
+	ctx context.Context,
+	taskID, sessionID, content string,
+	planRefs []models.TaskPlanCommentRef,
+	previewRefs []models.TaskPreviewFeedbackRef,
+	requirePrimary bool,
+	expectedState models.TaskSessionState,
+) error {
+	if len(previewRefs) == 0 {
+		return s.ValidatePlanCommentMessage(
+			ctx, taskID, sessionID, content, planRefs, requirePrimary, expectedState,
+		)
+	}
+	validator, ok := s.messages.(taskFeedbackMessageValidator)
+	if !ok {
+		return errors.New("task feedback message validation is unavailable")
+	}
+	if len(planRefs) > 0 {
+		content = plancomments.WithPlaceholder(content)
+	}
+	return validator.ValidateMessageTaskFeedback(
+		ctx, taskID, sessionID, content, planRefs, previewRefs, requirePrimary, expectedState,
+	)
+}
+
 // ValidatePlanCommentMessage rejects stale references before callers execute
 // stateful turn-start hooks. Persistence repeats the same validation under its
 // atomic message/comment boundary to close races.
@@ -392,22 +492,42 @@ func (s *Service) CreateQueuedMessageIdempotent(
 	queued.Content = message.Content
 	queued.QueuedBy = messagequeue.QueuedByUser
 
-	writer, ok := s.messages.(queuedPlanCommentMessageWriter)
-	if !ok {
-		return nil, errors.New("queued plan comment message admission is unavailable")
-	}
-	var snapshot *models.TaskPlanCommentSnapshot
+	var snapshots messageFeedbackSnapshots
 	if req.InitialTaskBrief != nil {
-		initialWriter, initialOK := s.messages.(initialTaskBriefQueuedPlanCommentMessageWriter)
-		if !initialOK {
-			return nil, errors.New("queued initial task brief admission is unavailable")
+		if len(req.PreviewFeedbackRefs) > 0 {
+			writer, ok := s.messages.(initialTaskBriefQueuedTaskFeedbackMessageWriter)
+			if !ok {
+				return nil, errors.New("queued preview feedback initial task brief admission is unavailable")
+			}
+			snapshots.plan, snapshots.preview, err = writer.CreateMessageWithTaskFeedbackAndQueueWithInitialTaskBrief(
+				ctx, message, queued, req.InitialTaskBrief, req.PlanCommentRefs, req.PreviewFeedbackRefs,
+				req.RequirePrimarySession, req.ExpectedSessionState, req.AttachmentClaim, maxPerSession,
+			)
+		} else {
+			initialWriter, initialOK := s.messages.(initialTaskBriefQueuedPlanCommentMessageWriter)
+			if !initialOK {
+				return nil, errors.New("queued initial task brief admission is unavailable")
+			}
+			snapshots.plan, err = initialWriter.CreateMessageWithPlanCommentsAndQueueWithInitialTaskBrief(
+				ctx, message, queued, req.InitialTaskBrief, req.PlanCommentRefs,
+				req.RequirePrimarySession, req.ExpectedSessionState, req.AttachmentClaim, maxPerSession,
+			)
 		}
-		snapshot, err = initialWriter.CreateMessageWithPlanCommentsAndQueueWithInitialTaskBrief(
-			ctx, message, queued, req.InitialTaskBrief, req.PlanCommentRefs,
+	} else if len(req.PreviewFeedbackRefs) > 0 {
+		writer, ok := s.messages.(queuedTaskFeedbackMessageWriter)
+		if !ok {
+			return nil, errors.New("queued task feedback message admission is unavailable")
+		}
+		snapshots.plan, snapshots.preview, err = writer.CreateMessageWithTaskFeedbackAndQueue(
+			ctx, message, queued, req.PlanCommentRefs, req.PreviewFeedbackRefs,
 			req.RequirePrimarySession, req.ExpectedSessionState, req.AttachmentClaim, maxPerSession,
 		)
 	} else {
-		snapshot, err = writer.CreateMessageWithPlanCommentsAndQueue(
+		writer, ok := s.messages.(queuedPlanCommentMessageWriter)
+		if !ok {
+			return nil, errors.New("queued plan comment message admission is unavailable")
+		}
+		snapshots.plan, err = writer.CreateMessageWithPlanCommentsAndQueue(
 			ctx, message, queued, req.PlanCommentRefs, req.RequirePrimarySession,
 			req.ExpectedSessionState, req.AttachmentClaim, maxPerSession,
 		)
@@ -421,7 +541,7 @@ func (s *Service) CreateQueuedMessageIdempotent(
 	}
 
 	_ = s.publishMessageEvent(ctx, events.MessageAdded, message)
-	s.publishMessagePlanCommentSnapshot(ctx, snapshot)
+	s.publishMessageFeedbackSnapshots(ctx, &snapshots)
 	s.logger.Info("queued message created with ID",
 		zap.String("message_id", message.ID),
 		zap.String("session_id", message.TaskSessionID),
@@ -437,8 +557,8 @@ func validateQueuedPlanCommentMessage(
 	if id == "" {
 		return errors.New("message id is required for idempotent creation")
 	}
-	if req == nil || len(req.PlanCommentRefs) == 0 {
-		return errors.New("plan comment refs are required for queued message creation")
+	if req == nil || len(req.PlanCommentRefs) == 0 && len(req.PreviewFeedbackRefs) == 0 {
+		return errors.New("task feedback refs are required for queued message creation")
 	}
 	if queued == nil {
 		return errors.New("queued message is required")
@@ -504,7 +624,7 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 		return nil, err
 	}
 
-	snapshot, err := s.createMessageWithRequestRetry(
+	snapshots, err := s.createMessageWithRequestRetry(
 		ctx, message, req, messageCreateMaxRetries, messageCreateRetryDelay,
 	)
 	if err != nil {
@@ -513,7 +633,7 @@ func (s *Service) CreateMessageWithID(ctx context.Context, id string, req *Creat
 
 	// Publish message.added event
 	s.publishMessageEvent(ctx, events.MessageAdded, message)
-	s.publishMessagePlanCommentSnapshot(ctx, snapshot)
+	s.publishMessageFeedbackSnapshots(ctx, snapshots)
 
 	s.logger.Info("message created with ID",
 		zap.String("message_id", message.ID),
@@ -645,13 +765,13 @@ func (s *Service) createMessageWithRequestRetry(
 	req *CreateMessageRequest,
 	maxRetries int,
 	retryDelay time.Duration,
-) (*models.TaskPlanCommentSnapshot, error) {
+) (*messageFeedbackSnapshots, error) {
 	var err error
 	for attempt := 0; attempt < maxRetries; attempt++ {
-		var snapshot *models.TaskPlanCommentSnapshot
-		snapshot, err = s.persistMessage(ctx, message, req)
+		var snapshots *messageFeedbackSnapshots
+		snapshots, err = s.persistMessage(ctx, message, req)
 		if err == nil {
-			return snapshot, nil
+			return snapshots, nil
 		}
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
@@ -679,8 +799,8 @@ func (s *Service) persistMessage(
 	ctx context.Context,
 	message *models.Message,
 	req *CreateMessageRequest,
-) (*models.TaskPlanCommentSnapshot, error) {
-	if len(req.PlanCommentRefs) == 0 {
+) (*messageFeedbackSnapshots, error) {
+	if len(req.PlanCommentRefs) == 0 && len(req.PreviewFeedbackRefs) == 0 {
 		if req.InitialTaskBrief != nil {
 			writer, ok := s.messages.(initialTaskBriefMessageWriter)
 			if !ok {
@@ -690,51 +810,78 @@ func (s *Service) persistMessage(
 		}
 		return nil, s.messages.CreateMessage(ctx, message)
 	}
+	if len(req.PreviewFeedbackRefs) > 0 {
+		if req.InitialTaskBrief != nil {
+			writer, ok := s.messages.(initialTaskBriefTaskFeedbackMessageWriter)
+			if !ok {
+				return nil, errors.New("preview feedback initial task brief admission is unavailable")
+			}
+			planSnapshot, previewSnapshot, err := writer.CreateMessageWithTaskFeedbackWithInitialTaskBrief(
+				ctx, message, req.InitialTaskBrief, req.PlanCommentRefs, req.PreviewFeedbackRefs,
+				req.RequirePrimarySession, req.ExpectedSessionState, req.AttachmentClaim,
+			)
+			return &messageFeedbackSnapshots{plan: planSnapshot, preview: previewSnapshot}, err
+		}
+		writer, ok := s.messages.(taskFeedbackMessageWriter)
+		if !ok {
+			return nil, errors.New("task feedback message admission is unavailable")
+		}
+		planSnapshot, previewSnapshot, err := writer.CreateMessageWithTaskFeedback(
+			ctx, message, req.PlanCommentRefs, req.PreviewFeedbackRefs,
+			req.RequirePrimarySession, req.ExpectedSessionState, req.AttachmentClaim,
+		)
+		return &messageFeedbackSnapshots{plan: planSnapshot, preview: previewSnapshot}, err
+	}
 	if req.InitialTaskBrief != nil {
 		writer, ok := s.messages.(initialTaskBriefPlanCommentMessageWriter)
 		if !ok {
 			return nil, errors.New("plan comment initial task brief admission is unavailable")
 		}
-		return writer.CreateMessageWithPlanCommentsWithInitialTaskBrief(
+		snapshot, err := writer.CreateMessageWithPlanCommentsWithInitialTaskBrief(
 			ctx, message, req.InitialTaskBrief, req.PlanCommentRefs, req.RequirePrimarySession,
 			req.ExpectedSessionState, req.AttachmentClaim,
 		)
+		return &messageFeedbackSnapshots{plan: snapshot}, err
 	}
 	writer, ok := s.messages.(planCommentMessageWriter)
 	if !ok {
 		return nil, errors.New("plan comment message admission is unavailable")
 	}
-	return writer.CreateMessageWithPlanComments(
+	snapshot, err := writer.CreateMessageWithPlanComments(
 		ctx, message, req.PlanCommentRefs, req.RequirePrimarySession, req.ExpectedSessionState, req.AttachmentClaim,
 	)
+	return &messageFeedbackSnapshots{plan: snapshot}, err
 }
 
 type planCommentMessageReplayIdentity struct {
-	TaskSessionID  string                      `json:"session_id"`
-	TaskID         string                      `json:"task_id"`
-	TurnID         string                      `json:"turn_id"`
-	Content        string                      `json:"content"`
-	AuthorID       string                      `json:"author_id"`
-	MessageType    string                      `json:"message_type"`
-	Metadata       map[string]interface{}      `json:"metadata"`
-	Refs           []models.TaskPlanCommentRef `json:"refs"`
-	RequirePrimary bool                        `json:"require_primary"`
+	TaskSessionID  string                          `json:"session_id"`
+	TaskID         string                          `json:"task_id"`
+	TurnID         string                          `json:"turn_id"`
+	Content        string                          `json:"content"`
+	AuthorID       string                          `json:"author_id"`
+	MessageType    string                          `json:"message_type"`
+	Metadata       map[string]interface{}          `json:"metadata"`
+	Refs           []models.TaskPlanCommentRef     `json:"refs"`
+	PreviewRefs    []models.TaskPreviewFeedbackRef `json:"preview_refs"`
+	RequirePrimary bool                            `json:"require_primary"`
 }
 
 func preparePlanCommentMessageRequest(req *CreateMessageRequest) error {
-	if req == nil || len(req.PlanCommentRefs) == 0 {
+	if req == nil || len(req.PlanCommentRefs) == 0 && len(req.PreviewFeedbackRefs) == 0 {
 		return nil
 	}
-	metadata := make(map[string]interface{}, len(req.Metadata)+2)
+	metadata := make(map[string]interface{}, len(req.Metadata)+4)
 	for key, value := range req.Metadata {
-		if key != plancomments.MetadataRefs && key != plancomments.MetadataRequestFingerprint {
+		if key != plancomments.MetadataRefs && key != plancomments.MetadataRequestFingerprint &&
+			key != previewfeedback.MetadataRefs && key != previewfeedback.MetadataRequestFingerprint {
 			metadata[key] = value
 		}
 	}
 	identity := planCommentMessageReplayIdentity{
 		TaskSessionID: req.TaskSessionID, TaskID: req.TaskID, TurnID: req.TurnID,
 		Content: req.Content, AuthorID: req.AuthorID, MessageType: req.Type,
-		Metadata: metadata, Refs: req.PlanCommentRefs, RequirePrimary: req.RequirePrimarySession,
+		Metadata: metadata, Refs: req.PlanCommentRefs, PreviewRefs: req.PreviewFeedbackRefs,
+		RequirePrimary: req.RequirePrimarySession,
 	}
 	fingerprint, err := plancomments.Fingerprint(identity)
 	if err != nil {
@@ -742,6 +889,8 @@ func preparePlanCommentMessageRequest(req *CreateMessageRequest) error {
 	}
 	metadata[plancomments.MetadataRefs] = req.PlanCommentRefs
 	metadata[plancomments.MetadataRequestFingerprint] = fingerprint
+	metadata[previewfeedback.MetadataRefs] = req.PreviewFeedbackRefs
+	metadata[previewfeedback.MetadataRequestFingerprint] = fingerprint
 	req.Metadata = metadata
 	return nil
 }
@@ -751,12 +900,41 @@ func matchesPlanCommentMessageReplay(existing *models.Message, req *CreateMessag
 		got, _ := existing.Metadata[plancomments.MetadataClientMessageFingerprint].(string)
 		return got == want
 	}
-	if len(req.PlanCommentRefs) == 0 {
+	if len(req.PlanCommentRefs) == 0 && len(req.PreviewFeedbackRefs) == 0 {
 		return true
 	}
 	want, _ := req.Metadata[plancomments.MetadataRequestFingerprint].(string)
 	got, _ := existing.Metadata[plancomments.MetadataRequestFingerprint].(string)
 	return want != "" && got == want
+}
+
+func (s *Service) publishMessageFeedbackSnapshots(
+	ctx context.Context,
+	snapshots *messageFeedbackSnapshots,
+) {
+	if snapshots == nil {
+		return
+	}
+	s.publishMessagePlanCommentSnapshot(ctx, snapshots.plan)
+	s.publishMessagePreviewFeedbackSnapshot(ctx, snapshots.preview)
+}
+
+func (s *Service) publishMessagePreviewFeedbackSnapshot(
+	ctx context.Context,
+	snapshot *models.TaskPreviewFeedbackSnapshot,
+) {
+	if snapshot == nil || s.eventBus == nil {
+		return
+	}
+	if err := s.eventBus.Publish(ctx, events.TaskPreviewFeedbackChanged,
+		bus.NewEvent(events.TaskPreviewFeedbackChanged, "task-service", snapshot)); err != nil {
+		s.logger.Error("publish consumed preview feedback",
+			zap.String("task_id", snapshot.TaskID),
+			zap.Int64("revision", snapshot.Revision),
+			zap.Int("item_count", len(snapshot.Items)),
+			zap.Error(err),
+		)
+	}
 }
 
 func (s *Service) publishMessagePlanCommentSnapshot(

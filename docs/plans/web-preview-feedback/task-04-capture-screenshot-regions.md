@@ -1,7 +1,7 @@
 ---
 id: "04-capture-screenshot-regions"
 title: "Capture screenshot regions as attachments"
-status: pending
+status: done
 wave: 4
 depends_on:
   - "03-capture-text-and-elements"
@@ -142,4 +142,17 @@ pnpm exec eslint lib/preview-screenshot.ts hooks/use-preview-capture.ts componen
 
 ## Results
 
-Pending implementation.
+- Added bounded `html2canvas` region rasterization with CSS/document coordinate
+  normalization, pre-allocation downscaling, PNG signature and byte checks, and
+  a reviewable thumbnail with dimensions before upload.
+- Added explicit pointer and touch screenshot-region mode to the injected
+  inspector. It owns gestures only while active and restores cursor, touch,
+  navigation, and scrolling behavior on completion or cancellation.
+- Added retryable upload and create behavior, progress and localized failures,
+  cancellation cleanup for in-flight uploads, staged-orphan cleanup, and
+  task-feedback claim transfer through the existing attachment lifecycle.
+- Added backend validation for owner, workspace, task, MIME, image kind, prompt
+  delivery, exact bytes, PNG signature, 10-MiB size, and 16-megapixel metadata.
+- Verified the four affected backend packages under the race detector, 49
+  focused frontend tests, web typecheck, i18n checks and ratchet, scoped ESLint
+  with zero warnings, and regenerated dependency notices for `html2canvas`.

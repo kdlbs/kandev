@@ -44,6 +44,7 @@ import type { BuiltInPreset } from "@/lib/state/layout-manager/presets";
 import { readLastAgentError } from "@/lib/session-last-agent-error";
 import { clarificationTurnIdForSession } from "@/lib/utils/pending-clarification";
 import { usePlanCommentMigration } from "@/hooks/domains/comments/use-plan-comment-migration";
+import { usePreviewFeedback } from "@/hooks/domains/comments/use-preview-feedback";
 
 const EMPTY_CONTEXT_FILES: ContextFile[] = [];
 const PLAN_CONTEXT_PATH = "plan:context";
@@ -358,6 +359,7 @@ type ChatContextItemsOptions = {
   removeContextFile: (sid: string, path: string) => void;
   unpinFile: (sid: string, path: string) => void;
   comments: CommentsState;
+  previewFeedback: import("@/lib/types/http").TaskPreviewFeedback[];
   taskId: string | null;
   onOpenFile?: (path: string, repo?: string) => void;
   onOpenFileAtLine?: (filePath: string) => void;
@@ -371,11 +373,12 @@ function useChatContextItems(opts: ChatContextItemsOptions) {
     removeContextFile,
     unpinFile,
     comments,
+    previewFeedback,
     taskId,
     onOpenFile,
     onOpenFileAtLine,
   } = opts;
-  const { addPlan } = usePanelActions();
+  const { addPlan, addBrowser } = usePanelActions();
   const { prompts } = useCustomPrompts();
 
   const promptsMap = useMemo(() => {
@@ -401,6 +404,8 @@ function useChatContextItems(opts: ChatContextItemsOptions) {
         onOpenFileAtLine,
         planComments: comments.planComments,
         handleClearPlanComments: comments.clearSessionPlanComments,
+        previewFeedback,
+        onOpenPreviewFeedback: addBrowser,
         pendingPRFeedback: comments.pendingPRFeedback,
         handleRemovePRFeedback: comments.handleRemovePRFeedback,
         handleClearPRFeedback: comments.handleClearPRFeedback,
@@ -426,6 +431,8 @@ function useChatContextItems(opts: ChatContextItemsOptions) {
       onOpenFileAtLine,
       comments.planComments,
       comments.clearSessionPlanComments,
+      previewFeedback,
+      addBrowser,
       comments.pendingPRFeedback,
       comments.handleRemovePRFeedback,
       comments.handleClearPRFeedback,
@@ -605,6 +612,7 @@ export function useChatPanelState({
     sessionState.taskDescription,
   );
   const comments = useCommentsState(resolvedSessionId, taskId);
+  const previewFeedbackState = usePreviewFeedback(taskId);
   const planCommentMigration = usePlanCommentMigration(taskId);
 
   const planContextEnabled = useMemo(
@@ -619,6 +627,7 @@ export function useChatPanelState({
     removeContextFile,
     unpinFile,
     comments,
+    previewFeedback: previewFeedbackState.items,
     taskId,
     onOpenFile,
     onOpenFileAtLine,
@@ -633,6 +642,7 @@ export function useChatPanelState({
     ...contextFilesState,
     ...sessionData,
     ...comments,
+    previewFeedback: previewFeedbackState.items,
     planCommentMigration,
     contextItems,
     planContextEnabled,

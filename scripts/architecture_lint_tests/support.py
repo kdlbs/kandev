@@ -27,6 +27,8 @@ class ArchitectureFixture(unittest.TestCase):
     def setUp(self) -> None:
         self.tempdir = tempfile.TemporaryDirectory()
         self.repo = Path(self.tempdir.name)
+        self.test_hooks = self.repo / ".empty-git-hooks"
+        self.test_hooks.mkdir()
         self.git("init", "-q")
         self.git("config", "user.email", "test@example.com")
         self.git("config", "user.name", "Architecture Test")
@@ -37,8 +39,9 @@ class ArchitectureFixture(unittest.TestCase):
         self.tempdir.cleanup()
 
     def git(self, *args: str) -> subprocess.CompletedProcess[str]:
+        # Synthetic history must not depend on machine-wide Git hooks.
         return subprocess.run(
-            ["git", *args],
+            ["git", "-c", f"core.hooksPath={self.test_hooks}", *args],
             cwd=self.repo,
             text=True,
             capture_output=True,

@@ -114,6 +114,7 @@
     "diff": "^8.0.3",
     "dockview-react": "^4.13.1",
     "embla-carousel-react": "^8.6.0",
+    "html2canvas": "^1.4.1",
     "i18next": "^26.3.6",
     "immer": "^10.1.1",
     "input-otp": "^1.4.2",
