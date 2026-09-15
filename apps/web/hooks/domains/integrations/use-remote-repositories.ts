@@ -1,23 +1,34 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fetchAccessibleRepos } from "@/lib/api/domains/github-api";
-import { listUserProjects } from "@/lib/api/domains/gitlab-api";
-import {
-  listAzureDevOpsProjects,
-  listAzureDevOpsRepositories,
-} from "@/lib/api/domains/azure-devops-api";
 import { useGitHubStatus } from "@/hooks/domains/github/use-github-status";
+import { useGitHubEnabled } from "@/hooks/domains/github/use-github-enabled";
 import { useGitLabStatus } from "@/hooks/domains/gitlab/use-gitlab-status";
+import { useGitLabEnabled } from "@/hooks/domains/gitlab/use-gitlab-enabled";
 import { useAzureDevOpsConnection } from "@/hooks/domains/azure-devops/use-azure-devops-browse";
+import { useAzureDevOpsEnabled } from "@/hooks/domains/azure-devops/use-azure-devops-enabled";
+import { INTEGRATION_STATUS_REFRESH_MS } from "@/hooks/domains/integrations/use-integration-availability";
+import { subscribeIntegrationAvailability } from "@/lib/integrations/integration-availability-events";
 import { usePluginRegistry } from "@/lib/plugins/registry";
 import type { PluginRepositoryProviderRegistration } from "@/lib/plugins/registry";
+import type { PluginIcon, RepositoryProviderAvailability } from "@/lib/plugins/types";
 import { repositoryProviderMatchesURL } from "@/lib/plugins/repository-provider-url-resolution";
 import { looksLikeSupportedRemoteURL } from "@/components/workspace-source-picker/remote-url";
+import { useBuiltInRepositorySource, usePluginRepositorySource } from "./remote-repository-sources";
 
 export const REMOTE_REPOSITORY_PROVIDERS = ["github", "gitlab", "azure_devops"] as const;
 
 export type RemoteRepositoryProvider = (typeof REMOTE_REPOSITORY_PROVIDERS)[number] | (string & {});
+
+export type RemoteRepositoryProviderReadiness = "loading" | "ready" | "unavailable" | "failed";
+
+export type RemoteRepositoryProviderCatalogEntry = {
+  provider: RemoteRepositoryProvider;
+  label?: string;
+  icon?: PluginIcon;
+  readiness: RemoteRepositoryProviderReadiness;
+  error?: Error;
+};
 
 export type RemoteRepository = {
   provider: RemoteRepositoryProvider;
@@ -35,6 +46,8 @@ export type RemoteRepository = {
 export type UseRemoteRepositoriesResult = {
   repos: RemoteRepository[];
   availableProviders: RemoteRepositoryProvider[];
+  /** Optional for compatibility with existing consumers that provide a test double. */
+  providerCatalog?: RemoteRepositoryProviderCatalogEntry[];
   loading: boolean;
   error: Error | null;
   sourceErrors?: RemoteRepositorySourceError[];
@@ -44,365 +57,406 @@ export type UseRemoteRepositoriesResult = {
   matchesURL?: (url: string) => boolean;
 };
 
-async function loadAzureRepositories(workspaceId: string): Promise<RemoteRepository[]> {
-  if (!workspaceId) return [];
-  const { projects = [] } = await listAzureDevOpsProjects(workspaceId);
-  const batches = await Promise.all(
-    projects.map((project) =>
-      listAzureDevOpsRepositories(workspaceId, project.id).then(({ repositories = [] }) =>
-        repositories.map((repo) => ({
-          provider: "azure_devops" as const,
-          id: repo.id,
-          owner: repo.projectId,
-          name: repo.name,
-          fullName: `${repo.projectName}/${repo.name}`,
-          url: repo.webUrl,
-          defaultBranch: (repo.defaultBranch || "").replace(/^refs\/heads\//, ""),
-          private: true,
-        })),
-      ),
-    ),
-  );
-  return batches.flat();
-}
-
-type RemoteRepositoryLoad = {
-  repos: RemoteRepository[];
-  availableProviders: RemoteRepositoryProvider[];
-  sourceErrors: RemoteRepositorySourceError[];
-};
-
 export type RemoteRepositorySourceError = {
   provider: RemoteRepositoryProvider;
   error: Error;
 };
 
-type RepositoryRequest = {
-  provider: RemoteRepositoryProvider;
-  load: Promise<RemoteRepository[]>;
-};
-
-type BuiltInRepositoryEligibility = {
+export type BuiltInRepositoryEligibility = {
   providers: ReadonlySet<RemoteRepositoryProvider>;
   loading: boolean;
 };
 
 type ProviderConnectionStatus = {
   authenticated?: boolean;
-  token_configured?: boolean;
 };
 
 type BuiltInRepositoryAccess = {
   eligibility: BuiltInRepositoryEligibility;
+  providerCatalog: RemoteRepositoryProviderCatalogEntry[];
   refresh: () => void;
 };
 
-function hasProviderConnection(status: ProviderConnectionStatus | null | undefined) {
-  return Boolean(status?.authenticated || status?.token_configured);
+function hasVerifiedProviderConnection(status: ProviderConnectionStatus | null | undefined) {
+  return status?.authenticated === true;
 }
 
 function useBuiltInRepositoryAccess(workspaceId: string): BuiltInRepositoryAccess {
   const githubStatus = useGitHubStatus(workspaceId);
+  const githubEnabled = useGitHubEnabled(workspaceId);
   const gitlabStatus = useGitLabStatus(workspaceId);
+  const gitlabEnabled = useGitLabEnabled(workspaceId);
   const azureDevOpsConnection = useAzureDevOpsConnection(workspaceId || undefined);
+  const azureDevOpsEnabled = useAzureDevOpsEnabled(workspaceId);
   const providers = useMemo(() => {
     const eligible = new Set<RemoteRepositoryProvider>();
-    if (hasProviderConnection(githubStatus.status)) eligible.add("github");
-    if (hasProviderConnection(gitlabStatus.status)) eligible.add("gitlab");
-    if (azureDevOpsConnection.data?.hasSecret && azureDevOpsConnection.data.lastOk) {
+    if (githubEnabled.enabled && hasVerifiedProviderConnection(githubStatus.status)) {
+      eligible.add("github");
+    }
+    if (gitlabEnabled.enabled && hasVerifiedProviderConnection(gitlabStatus.status)) {
+      eligible.add("gitlab");
+    }
+    if (
+      azureDevOpsEnabled.enabled &&
+      azureDevOpsConnection.data?.hasSecret &&
+      azureDevOpsConnection.data.lastOk
+    ) {
       eligible.add("azure_devops");
     }
     return eligible;
   }, [
     azureDevOpsConnection.data?.hasSecret,
     azureDevOpsConnection.data?.lastOk,
+    azureDevOpsEnabled.enabled,
+    githubEnabled.enabled,
     githubStatus.status?.authenticated,
-    githubStatus.status?.token_configured,
+    gitlabEnabled.enabled,
     gitlabStatus.status?.authenticated,
-    gitlabStatus.status?.token_configured,
   ]);
   const eligibility = useMemo(
     () => ({
       providers,
       loading:
         Boolean(workspaceId) &&
-        (githubStatus.loading ||
-          !githubStatus.loaded ||
-          gitlabStatus.loading ||
-          azureDevOpsConnection.loading),
+        ((githubEnabled.enabled && (githubStatus.loading || !githubStatus.loaded)) ||
+          (gitlabEnabled.enabled && gitlabStatus.loading) ||
+          (azureDevOpsEnabled.enabled && azureDevOpsConnection.loading)),
     }),
     [
       azureDevOpsConnection.loading,
+      azureDevOpsEnabled.enabled,
+      githubEnabled.enabled,
       gitlabStatus.loading,
+      gitlabEnabled.enabled,
       githubStatus.loaded,
       githubStatus.loading,
       providers,
       workspaceId,
     ],
   );
+  const providerCatalog = useBuiltInProviderCatalog({
+    githubEnabled: githubEnabled.enabled,
+    githubLoading: githubStatus.loading || !githubStatus.loaded,
+    githubConnected: hasVerifiedProviderConnection(githubStatus.status),
+    gitlabEnabled: gitlabEnabled.enabled,
+    gitlabLoading: gitlabStatus.loading,
+    gitlabConnected: hasVerifiedProviderConnection(gitlabStatus.status),
+    azureEnabled: azureDevOpsEnabled.enabled,
+    azureLoading: azureDevOpsConnection.loading,
+    azureConnected: Boolean(
+      azureDevOpsConnection.data?.hasSecret && azureDevOpsConnection.data.lastOk,
+    ),
+    azureError: azureDevOpsConnection.error,
+  });
   const refresh = useCallback(() => {
     void githubStatus.refresh();
     void gitlabStatus.refresh();
     azureDevOpsConnection.refresh();
   }, [azureDevOpsConnection.refresh, githubStatus.refresh, gitlabStatus.refresh]);
-  return { eligibility, refresh };
+  return { eligibility, providerCatalog, refresh };
 }
 
-async function loadBuiltInRepositories(
-  workspaceId: string,
-  eligibleProviders: ReadonlySet<RemoteRepositoryProvider>,
-): Promise<RemoteRepositoryLoad> {
-  if (!workspaceId) return { repos: [], availableProviders: [], sourceErrors: [] };
-  const requests: RepositoryRequest[] = [];
-  if (eligibleProviders.has("github")) {
-    requests.push({
-      provider: "github",
-      load: fetchAccessibleRepos({ workspaceId, limit: 100 }).then((repos) =>
-        repos.map((repo) => ({
-          provider: "github" as const,
-          id: repo.full_name,
-          owner: repo.owner,
-          name: repo.name,
-          fullName: repo.full_name,
-          url: `https://github.com/${repo.owner}/${repo.name}`,
-          defaultBranch: repo.default_branch,
-          private: repo.private,
-        })),
-      ),
-    });
-  }
-  if (eligibleProviders.has("gitlab")) {
-    requests.push({
-      provider: "gitlab",
-      load: listUserProjects(workspaceId).then(({ projects = [] }) =>
-        projects.map((project) => ({
-          provider: "gitlab" as const,
-          id: String(project.id),
-          owner: project.namespace,
-          name: project.path,
-          fullName: project.path_with_namespace,
-          url: project.web_url || `https://gitlab.com/${project.path_with_namespace}.git`,
-          defaultBranch: project.default_branch || "main",
-          private: project.visibility === "private",
-        })),
-      ),
-    });
-  }
-  if (eligibleProviders.has("azure_devops")) {
-    requests.push({ provider: "azure_devops", load: loadAzureRepositories(workspaceId) });
-  }
-  return settleRepositoryRequests(requests);
-}
-
-async function loadPluginRepositories(
-  workspaceId: string,
-  pluginProviders: PluginRepositoryProviderRegistration[],
-  query: string,
-  signal: AbortSignal,
-): Promise<RemoteRepositoryLoad> {
-  if (!workspaceId) return { repos: [], availableProviders: [], sourceErrors: [] };
-  return settleRepositoryRequests(
-    pluginProviders.map((provider) => ({
-      provider: provider.id,
-      load: listAllPluginRepositories(provider, workspaceId, query, signal),
-    })),
+function useBuiltInProviderCatalog({
+  githubEnabled,
+  githubLoading,
+  githubConnected,
+  gitlabEnabled,
+  gitlabLoading,
+  gitlabConnected,
+  azureEnabled,
+  azureLoading,
+  azureConnected,
+  azureError,
+}: {
+  githubEnabled: boolean;
+  githubLoading: boolean;
+  githubConnected: boolean;
+  gitlabEnabled: boolean;
+  gitlabLoading: boolean;
+  gitlabConnected: boolean;
+  azureEnabled: boolean;
+  azureLoading: boolean;
+  azureConnected: boolean;
+  azureError?: string | null;
+}) {
+  return useMemo<RemoteRepositoryProviderCatalogEntry[]>(
+    () => [
+      {
+        provider: "github",
+        readiness: builtInProviderReadiness(githubEnabled, githubLoading, githubConnected),
+      },
+      {
+        provider: "gitlab",
+        readiness: builtInProviderReadiness(gitlabEnabled, gitlabLoading, gitlabConnected),
+      },
+      {
+        provider: "azure_devops",
+        readiness: builtInProviderReadiness(azureEnabled, azureLoading, azureConnected),
+        ...(azureError ? { error: new Error(azureError) } : {}),
+      },
+    ],
+    [
+      azureConnected,
+      azureEnabled,
+      azureError,
+      azureLoading,
+      githubConnected,
+      githubEnabled,
+      githubLoading,
+      gitlabConnected,
+      gitlabEnabled,
+      gitlabLoading,
+    ],
   );
 }
 
-async function settleRepositoryRequests(
-  requests: RepositoryRequest[],
-): Promise<RemoteRepositoryLoad> {
-  const results = await Promise.allSettled(requests.map((request) => request.load));
-  const availableProviders = results.flatMap((result, index) =>
-    result.status === "fulfilled" ? [requests[index]!.provider] : [],
+function builtInProviderReadiness(
+  enabled: boolean,
+  loading: boolean,
+  connected: boolean,
+): RemoteRepositoryProviderReadiness {
+  if (loading && enabled) return "loading";
+  return enabled && connected ? "ready" : "unavailable";
+}
+
+type PluginRepositoryAvailabilityState = {
+  scopeKey: string;
+  providerScopeKey: string;
+  providerCatalog: RemoteRepositoryProviderCatalogEntry[];
+  readyProviders: PluginRepositoryProviderRegistration[];
+  sourceErrors: RemoteRepositorySourceError[];
+  loading: boolean;
+};
+
+function hasPositiveAvailability(
+  availability: RepositoryProviderAvailability | null | undefined,
+): boolean {
+  return (
+    availability?.configured === true &&
+    availability.enabled === true &&
+    availability.tested === true
   );
-  const sourceErrors = results.flatMap((result, index) =>
-    result.status === "rejected"
-      ? [{ provider: requests[index]!.provider, error: toError(result.reason) }]
-      : [],
-  );
-  return {
-    repos: results.flatMap((result) => (result.status === "fulfilled" ? result.value : [])),
-    availableProviders,
-    sourceErrors,
-  };
 }
 
-async function listAllPluginRepositories(
-  provider: PluginRepositoryProviderRegistration,
-  workspaceId: string,
-  query: string,
-  signal: AbortSignal,
-): Promise<RemoteRepository[]> {
-  const repositories: RemoteRepository[] = [];
-  const seenCursors = new Set<string>();
-  let cursor: string | undefined;
-  do {
-    const result = await provider.listRepositories({
-      workspaceId,
-      query,
-      cursor,
-      limit: 100,
-      signal,
-    });
-    const page = Array.isArray(result) ? { repositories: result } : result;
-    repositories.push(
-      ...page.repositories.flatMap((repository) => toRemoteRepository(provider.id, repository)),
-    );
-    cursor = page.nextCursor;
-    if (cursor) {
-      if (seenCursors.has(cursor))
-        throw new Error("Repository provider pagination did not advance");
-      seenCursors.add(cursor);
-    }
-  } while (cursor);
-  return repositories;
-}
-
-function toRemoteRepository(provider: string, value: unknown): RemoteRepository[] {
-  if (!value || typeof value !== "object") return [];
-  const repository = value as Record<string, unknown>;
-  const repositoryId = readString(repository.repositoryId) ?? readString(repository.id);
-  const owner = readString(repository.ownerOrProject) ?? readString(repository.owner);
-  const name = readString(repository.repositoryName) ?? readString(repository.name);
-  const url = readString(repository.cloneUrl) ?? readString(repository.url);
-  if (!repositoryId || !owner || !name || !url) return [];
-  return [
-    {
-      provider,
-      id: repositoryId,
-      owner,
-      name,
-      fullName: readString(repository.fullName) ?? `${owner}/${name}`,
-      url,
-      providerHost: readString(repository.providerHost),
-      providerScope: readString(repository.providerScope),
-      defaultBranch: readString(repository.defaultBranch) ?? "",
-      private: repository.private === true,
-    },
-  ];
-}
-
-function readString(value: unknown): string | undefined {
-  return typeof value === "string" && value ? value : undefined;
+function boundedError(cause: unknown): Error {
+  const error = toError(cause);
+  return new Error(error.message.slice(0, 512));
 }
 
 function toError(cause: unknown): Error {
   return cause instanceof Error ? cause : new Error(String(cause));
 }
 
-type RepositorySourceState = {
-  repos: RemoteRepository[];
-  availableProviders: RemoteRepositoryProvider[];
-  sourceErrors: RemoteRepositorySourceError[];
-  loading: boolean;
-};
-
-function useBuiltInRepositorySource(
-  workspaceId: string,
-  refreshVersion: number,
-  eligibility: BuiltInRepositoryEligibility,
-): RepositorySourceState {
-  const [repos, setRepos] = useState<RemoteRepository[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [sourceErrors, setSourceErrors] = useState<RemoteRepositorySourceError[]>([]);
-  const [availableProviders, setAvailableProviders] = useState<RemoteRepositoryProvider[]>([]);
-  const workspaceRef = useRef(workspaceId);
-
-  useEffect(() => {
-    let cancelled = false;
-    const sameWorkspace = workspaceRef.current === workspaceId;
-    workspaceRef.current = workspaceId;
-    setRepos([]);
-    setAvailableProviders((current) =>
-      sameWorkspace ? current.filter((provider) => eligibility.providers.has(provider)) : [],
-    );
-    setSourceErrors([]);
-    setLoading(true);
-    if (eligibility.loading) {
-      return () => {
-        cancelled = true;
-      };
-    }
-    loadBuiltInRepositories(workspaceId, eligibility.providers)
-      .then((result) => {
-        if (cancelled) return;
-        setRepos(result.repos);
-        setAvailableProviders(result.availableProviders);
-        setSourceErrors(result.sourceErrors);
-      })
-      .catch((cause) => {
-        if (!cancelled) setSourceErrors([{ provider: "built-in", error: toError(cause) }]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [eligibility.loading, eligibility.providers, refreshVersion, workspaceId]);
-
-  return { repos, availableProviders, sourceErrors, loading };
+function initialPluginProviderCatalog(
+  providers: PluginRepositoryProviderRegistration[],
+): RemoteRepositoryProviderCatalogEntry[] {
+  return providers.map((provider) => ({
+    provider: provider.id,
+    label: provider.label,
+    icon: provider.icon,
+    readiness: provider.getAvailability ? "loading" : "unavailable",
+  }));
 }
 
-function usePluginRepositorySource(
-  workspaceId: string,
-  pluginProviders: PluginRepositoryProviderRegistration[],
-  debouncedQuery: string,
-  refreshVersion: number,
-): RepositorySourceState {
-  const [repos, setRepos] = useState<RemoteRepository[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [sourceErrors, setSourceErrors] = useState<RemoteRepositorySourceError[]>([]);
-  const [availableProviders, setAvailableProviders] = useState<RemoteRepositoryProvider[]>([]);
-  const generationRef = useRef(0);
+function reusableReadyProviders(
+  previous: PluginRepositoryAvailabilityState,
+  providerScopeKey: string,
+  providers: PluginRepositoryProviderRegistration[],
+): PluginRepositoryProviderRegistration[] {
+  if (previous.providerScopeKey !== providerScopeKey) return [];
+  const reusable = previous.readyProviders.filter(
+    (provider) => provider.getAvailability && providers.includes(provider),
+  );
+  return reusable.length === previous.readyProviders.length ? previous.readyProviders : reusable;
+}
 
-  useEffect(() => {
-    setRepos([]);
-    setAvailableProviders([]);
-    setSourceErrors([]);
-  }, [workspaceId, pluginProviders]);
+function initialPluginAvailabilityState(
+  scopeKey: string,
+  providerScopeKey: string,
+  providers: PluginRepositoryProviderRegistration[],
+): PluginRepositoryAvailabilityState {
+  return {
+    scopeKey,
+    providerScopeKey,
+    providerCatalog: initialPluginProviderCatalog(providers),
+    readyProviders: [],
+    sourceErrors: [],
+    loading: false,
+  };
+}
+
+function buildPluginAvailabilityLoadingState({
+  previous,
+  scopeKey,
+  providerScopeKey,
+  providerCatalog,
+  providers,
+  workspaceId,
+}: {
+  previous: PluginRepositoryAvailabilityState;
+  scopeKey: string;
+  providerScopeKey: string;
+  providerCatalog: RemoteRepositoryProviderCatalogEntry[];
+  providers: PluginRepositoryProviderRegistration[];
+  workspaceId: string;
+}): PluginRepositoryAvailabilityState {
+  const providersWithAvailability = providers.filter((provider) => provider.getAvailability);
+  return {
+    scopeKey,
+    providerScopeKey,
+    providerCatalog,
+    readyProviders: reusableReadyProviders(previous, providerScopeKey, providers),
+    sourceErrors: [],
+    loading: Boolean(workspaceId) && providersWithAvailability.length > 0,
+  };
+}
+
+function stalePluginAvailabilityState(
+  state: PluginRepositoryAvailabilityState,
+  scopeKey: string,
+  providerScopeKey: string,
+  providers: PluginRepositoryProviderRegistration[],
+  workspaceId: string,
+): PluginRepositoryAvailabilityState {
+  return {
+    scopeKey,
+    providerScopeKey,
+    providerCatalog: initialPluginProviderCatalog(providers),
+    readyProviders: reusableReadyProviders(state, providerScopeKey, providers),
+    sourceErrors: [],
+    loading: Boolean(workspaceId) && providers.some((provider) => provider.getAvailability),
+  };
+}
+
+function usePluginRepositoryAvailability(
+  workspaceId: string,
+  providers: PluginRepositoryProviderRegistration[],
+  refreshVersion: number,
+  readinessVersion: number,
+): PluginRepositoryAvailabilityState {
+  const providerScopeKey = `${workspaceId}\u0000${providers.map((provider) => provider.id).join("\u0000")}`;
+  const scopeKey = `${providerScopeKey}\u0000${refreshVersion}\u0000${readinessVersion}`;
+  const [state, setState] = useState<PluginRepositoryAvailabilityState>(() =>
+    initialPluginAvailabilityState(scopeKey, providerScopeKey, providers),
+  );
+  const generationRef = useRef(0);
 
   useEffect(() => {
     const generation = ++generationRef.current;
     const controller = new AbortController();
-    setSourceErrors([]);
-    setLoading(true);
-    loadPluginRepositories(workspaceId, pluginProviders, debouncedQuery, controller.signal)
-      .then((result) => {
-        if (generation !== generationRef.current) return;
-        setRepos(result.repos);
-        setAvailableProviders(result.availableProviders);
-        setSourceErrors(result.sourceErrors);
-      })
-      .catch((cause) => {
-        if (generation !== generationRef.current || controller.signal.aborted) return;
-        setSourceErrors([{ provider: "plugin", error: toError(cause) }]);
-      })
-      .finally(() => {
-        if (generation === generationRef.current) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [debouncedQuery, pluginProviders, refreshVersion, workspaceId]);
+    let cancelled = false;
+    const initialCatalog = initialPluginProviderCatalog(providers);
+    const providersWithAvailability = providers.filter((provider) => provider.getAvailability);
+    setState((previous) =>
+      buildPluginAvailabilityLoadingState({
+        previous,
+        scopeKey,
+        providerScopeKey,
+        providerCatalog: initialCatalog,
+        providers,
+        workspaceId,
+      }),
+    );
+    if (!workspaceId || providersWithAvailability.length === 0) {
+      return () => {
+        cancelled = true;
+        controller.abort();
+      };
+    }
 
-  return { repos, availableProviders, sourceErrors, loading };
+    const load = async () => {
+      const results = await Promise.all(
+        providersWithAvailability.map(async (provider) => {
+          try {
+            const availability = await provider.getAvailability!({
+              workspaceId,
+              signal: controller.signal,
+            });
+            return {
+              provider,
+              readiness: hasPositiveAvailability(availability)
+                ? ("ready" as const)
+                : ("unavailable" as const),
+            };
+          } catch (cause) {
+            if (controller.signal.aborted) return { provider, readiness: "unavailable" as const };
+            const error = boundedError(cause);
+            return { provider, readiness: "failed" as const, error };
+          }
+        }),
+      );
+      if (cancelled || generation !== generationRef.current || controller.signal.aborted) return;
+      const resultsByProvider = new Map(results.map((result) => [result.provider.id, result]));
+      const providerCatalog = initialCatalog.map((entry) => {
+        const result = resultsByProvider.get(entry.provider);
+        return result
+          ? {
+              ...entry,
+              readiness: result.readiness,
+              ...(result.error ? { error: result.error } : {}),
+            }
+          : entry;
+      });
+      const nextReadyProviders = results
+        .filter((result) => result.readiness === "ready")
+        .map((result) => result.provider);
+      const sourceErrors = results.flatMap((result) =>
+        result.error ? [{ provider: result.provider.id, error: result.error }] : [],
+      );
+      setState((previous) => ({
+        scopeKey,
+        providerScopeKey,
+        providerCatalog,
+        readyProviders: sameProviders(previous.readyProviders, nextReadyProviders)
+          ? previous.readyProviders
+          : nextReadyProviders,
+        sourceErrors,
+        loading: false,
+      }));
+    };
+    void load();
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [providers, readinessVersion, refreshVersion, workspaceId]);
+
+  if (state.scopeKey !== scopeKey) {
+    return stalePluginAvailabilityState(state, scopeKey, providerScopeKey, providers, workspaceId);
+  }
+  return state;
+}
+
+function sameProviders(
+  left: PluginRepositoryProviderRegistration[],
+  right: PluginRepositoryProviderRegistration[],
+): boolean {
+  return left.length === right.length && left.every((provider, index) => provider === right[index]);
 }
 
 export function useRemoteRepositories(workspaceId: string): UseRemoteRepositoriesResult {
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebouncedValue(query, 250);
   const [refreshVersion, setRefreshVersion] = useState(0);
+  const [readinessVersion, setReadinessVersion] = useState(0);
   const registry = usePluginRegistry();
   const registryVersion = registry.getVersion();
   const pluginProviders = useMemo(
     () => registry.getRepositoryProviders(),
     [registry, registryVersion],
   );
-  const { eligibility, refresh: refreshBuiltIns } = useBuiltInRepositoryAccess(workspaceId);
+  const builtInAccess = useBuiltInRepositoryAccess(workspaceId);
+  const pluginAvailability = usePluginRepositoryAvailability(
+    workspaceId,
+    pluginProviders,
+    refreshVersion,
+    readinessVersion,
+  );
+  const { eligibility, refresh: refreshBuiltIns } = builtInAccess;
   const builtInSource = useBuiltInRepositorySource(workspaceId, refreshVersion, eligibility);
   const pluginSource = usePluginRepositorySource(
     workspaceId,
-    pluginProviders,
+    pluginAvailability.readyProviders,
     debouncedQuery,
     refreshVersion,
   );
@@ -418,20 +472,44 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
     );
   }, [builtInSource.repos, pluginSource.repos, query]);
   const availableProviders = useMemo(
-    () => [...builtInSource.availableProviders, ...pluginSource.availableProviders],
-    [builtInSource.availableProviders, pluginSource.availableProviders],
+    () => [
+      ...eligibility.providers,
+      ...pluginAvailability.readyProviders.map((provider) => provider.id),
+    ],
+    [eligibility.providers, pluginAvailability.readyProviders],
   );
-  const loading = builtInSource.loading || pluginSource.loading;
+  const providerCatalog = useMemo(
+    () => [...builtInAccess.providerCatalog, ...pluginAvailability.providerCatalog],
+    [builtInAccess.providerCatalog, pluginAvailability.providerCatalog],
+  );
+  const loading = builtInSource.loading || pluginAvailability.loading || pluginSource.loading;
   const sourceErrors = useMemo(
-    () => [...builtInSource.sourceErrors, ...pluginSource.sourceErrors],
-    [builtInSource.sourceErrors, pluginSource.sourceErrors],
+    () => [
+      ...builtInSource.sourceErrors,
+      ...pluginAvailability.sourceErrors,
+      ...pluginSource.sourceErrors,
+    ],
+    [builtInSource.sourceErrors, pluginAvailability.sourceErrors, pluginSource.sourceErrors],
   );
   const error = sourceErrors[0]?.error ?? null;
   const search = useCallback((value: string) => setQuery(value), []);
+  const refreshReadiness = useCallback(() => {
+    refreshBuiltIns();
+    setReadinessVersion((version) => version + 1);
+  }, [refreshBuiltIns]);
   const refresh = useCallback(() => {
     refreshBuiltIns();
     setRefreshVersion((version) => version + 1);
+    setReadinessVersion((version) => version + 1);
   }, [refreshBuiltIns]);
+  useEffect(() => {
+    const unsubscribe = subscribeIntegrationAvailability(refreshReadiness);
+    const interval = window.setInterval(refreshReadiness, INTEGRATION_STATUS_REFRESH_MS);
+    return () => {
+      unsubscribe();
+      window.clearInterval(interval);
+    };
+  }, [refreshReadiness]);
   const matchesURL = useCallback(
     (url: string) =>
       looksLikeSupportedRemoteURL(url) ||
@@ -441,6 +519,7 @@ export function useRemoteRepositories(workspaceId: string): UseRemoteRepositorie
   return {
     repos,
     availableProviders,
+    providerCatalog,
     loading,
     error,
     sourceErrors,

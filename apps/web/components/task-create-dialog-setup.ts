@@ -33,6 +33,8 @@ import { truncateRemoteTaskTitle } from "@/lib/task-title";
 import { t } from "@/lib/i18n";
 import { listRepositoryBranchPolicies } from "@/lib/api";
 import { useTaskEditDialogDependencies } from "@/hooks/domains/task/use-task-edit-dialog-dependencies";
+import { resolveRepositorySelections } from "@/components/task-create-dialog-repositories-state";
+import { hasLastUsedWorkspaceSnapshot } from "@/components/task-create-dialog-workspace-defaults";
 
 // Catalog key: module scope, so it is resolved at the call site.
 const PROMPT_INSERTED_MESSAGE_KEY = "task:enhancedPromptInserted";
@@ -177,7 +179,9 @@ function useSubmitHandlersWiring({
     workflowId,
     effectiveWorkflowId: computed.effectiveWorkflowId,
     repositories: fs.repositories,
+    repositorySelections: fs.repositorySelections,
     repositoriesDirty: fs.repositoriesDirty,
+    remoteProviderReadiness: fs.remoteProviderReadiness,
     discoveredRepositories: fs.discoveredRepositories,
     workspaceRepositories,
     useRemote: fs.useRemote,
@@ -204,6 +208,7 @@ function useSubmitHandlersWiring({
     setTaskName: fs.setTaskName,
     setRepositories: fs.setRepositories,
     setRemoteRepos: fs.setRemoteRepos,
+    resetRepositorySelections: fs.resetRepositorySelections,
     setAgentProfileId: fs.setAgentProfileId,
     setExecutorId: fs.setExecutorId,
     setSelectedWorkflowId: fs.setSelectedWorkflowId,
@@ -211,6 +216,7 @@ function useSubmitHandlersWiring({
     clearDraft: fs.clearDraft,
     freshBranchEnabled: fs.freshBranchEnabled,
     isLocalExecutor: computed.isLocalExecutor,
+    sourcePolicyInvalid: computed.executorSourcePolicy?.incompatible ?? false,
     repositoryLocalPath,
     noRepository: fs.noRepository,
     workspacePath: fs.workspacePath,
@@ -221,8 +227,9 @@ function useSubmitHandlersWiring({
 }
 
 function resolveSingleRowLocalPath(fs: DialogFormState, repositories: Repository[]): string {
-  if (fs.repositories.length !== 1) return "";
-  const row = fs.repositories[0];
+  const selections = resolveRepositorySelections(fs);
+  if (selections.length !== 1 || selections[0]?.kind !== "local") return "";
+  const row = selections[0];
   if (row.localPath) return row.localPath;
   if (row.repositoryId)
     return repositories.find((r) => r.id === row.repositoryId)?.local_path ?? "";
@@ -243,7 +250,8 @@ function resolveDialogMode(
 }
 
 function canUseFreshBranch(fs: DialogFormState, isLocalExecutor: boolean): boolean {
-  return !fs.useRemote && isLocalExecutor && fs.repositories.length === 1;
+  const selections = resolveRepositorySelections(fs);
+  return isLocalExecutor && selections.length === 1 && selections[0]?.kind === "local";
 }
 
 export function hasUnavailableSavedBase(
@@ -348,6 +356,7 @@ function useDialogSetupData(
     executors,
     repositories,
     repositoriesLoading,
+    repositoriesLoaded,
     taskCreateLastUsed,
     userSettingsLoaded,
     computed,
@@ -359,6 +368,7 @@ function useDialogSetupData(
     effectiveWorkflowId: computed.effectiveWorkflowId,
     repositories,
     repositoriesLoading,
+    repositoriesLoaded,
     agentProfiles,
     compatibleAgentProfiles: computed.compatibleAgentProfiles,
     authLoaded: computed.authLoaded,
@@ -368,6 +378,15 @@ function useDialogSetupData(
     workflows,
     isLocalExecutor: computed.isLocalExecutor,
     lastUsedRepositoryId: taskCreateLastUsed.repositoryId,
+    workspaceSourcesByWorkspace: taskCreateLastUsed.workspaceSourcesByWorkspace,
+    hasWorkspaceSourcesSnapshot:
+      userSettingsLoaded &&
+      hasLastUsedWorkspaceSnapshot(
+        taskCreateLastUsed.workspaceSourcesByWorkspace ?? {},
+        workspaceId,
+      ),
+    restoreWorkspaceContents: props.mode !== "edit" && props.mode !== "session",
+    initialValues,
     userSettingsLoaded,
     lastUsedAgentProfileId: taskCreateLastUsed.agentProfileId,
     lastUsedExecutorProfileId: taskCreateLastUsed.executorProfileId,
@@ -502,9 +521,12 @@ function useDialogRepositorySets(
     workspaceId: resolvedProps.workspaceId ?? null,
     open: resolvedProps.open,
     rows: fs.repositories,
+    selections: resolveRepositorySelections(fs),
     repositories,
     setRepositories: fs.setRepositories,
     setRepositoriesDirty: fs.setRepositoriesDirty,
+    setNoRepository: fs.setNoRepository,
+    setRepositorySelections: fs.resetRepositorySelections,
     userSettingsLoaded,
     isLocalExecutor: computed.isLocalExecutor,
     freshBranchEnabled: fs.freshBranchEnabled,
@@ -515,9 +537,12 @@ type RepositorySetsForDialogArgs = {
   workspaceId: string | null;
   open: boolean;
   rows: DialogFormState["repositories"];
+  selections: ReturnType<typeof resolveRepositorySelections>;
   repositories: Repository[];
   setRepositories: DialogFormState["setRepositories"];
   setRepositoriesDirty: DialogFormState["setRepositoriesDirty"];
+  setNoRepository: DialogFormState["setNoRepository"];
+  setRepositorySelections?: DialogFormState["resetRepositorySelections"];
   userSettingsLoaded: boolean;
   isLocalExecutor: boolean;
   freshBranchEnabled: boolean;
@@ -535,9 +560,12 @@ function useRepositorySetsForDialog({
   workspaceId,
   open,
   rows,
+  selections,
   repositories,
   setRepositories,
   setRepositoriesDirty,
+  setNoRepository,
+  setRepositorySelections,
   userSettingsLoaded,
   isLocalExecutor,
   freshBranchEnabled,
@@ -548,6 +576,9 @@ function useRepositorySetsForDialog({
     repositories,
     setRepositories,
     setRepositoriesDirty,
+    setNoRepository,
+    selections,
+    setRepositorySelections,
   });
   const [saveOpen, setSaveOpen] = useState(false);
   // Offer "Save as set" only when there is a workspace-repository selection worth
@@ -557,6 +588,8 @@ function useRepositorySetsForDialog({
   return {
     sets,
     onApply,
+    rows,
+    repositories,
     save:
       canSave && workspaceId
         ? {
@@ -565,6 +598,7 @@ function useRepositorySetsForDialog({
             repositories,
             isLocalExecutor,
             freshBranchEnabled,
+            selections,
             open: saveOpen,
             setOpen: setSaveOpen,
           }

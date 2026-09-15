@@ -51,12 +51,17 @@ vi.mock("@/components/state-provider", () => ({
 
 vi.mock("@/components/task-create-dialog-helpers", () => ({
   buildRepositoriesPayload: vi.fn(() => []),
+  buildWorkspaceSourcesPayload: vi.fn(() => []),
   hasPendingAttachmentUploads: (...args: Parameters<typeof mockHasPendingAttachmentUploads>) =>
     mockHasPendingAttachmentUploads(...args),
   toMessageAttachments: vi.fn(() => []),
 }));
 
-import { useSubtaskPromptZone, useSubtaskSubmit } from "./use-subtask-submit";
+import {
+  shouldSubmitFreshBranch,
+  useSubtaskPromptZone,
+  useSubtaskSubmit,
+} from "./use-subtask-submit";
 
 const GENERATED_RESULT = {
   content: "improved prompt",
@@ -278,6 +283,36 @@ describe("useSubtaskSubmit", () => {
     );
   });
 
+  it("blocks submission when a picker repository loses provider availability", async () => {
+    const opts = makeSubmitOptions({
+      fs: {
+        useRemote: false,
+        remoteRepos: [],
+        repositories: [],
+        discoveredRepositories: [],
+        repositorySelections: [
+          {
+            kind: "remote",
+            key: "remote-1",
+            url: "https://bitbucket.example.test/acme/app",
+            branch: "main",
+            source: "picker",
+            provider: "bitbucket",
+          },
+        ],
+        remoteProviderReadiness: { bitbucket: "unavailable" },
+      } as unknown as Parameters<typeof useSubtaskSubmit>[0]["fs"],
+    });
+    const { result } = renderHook(() => useSubtaskSubmit(opts));
+
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault: vi.fn() } as never);
+    });
+
+    expect(mockCreateTask).not.toHaveBeenCalled();
+    expect(opts.setIsCreating).not.toHaveBeenCalled();
+  });
+
   it("sends the autopilot creation flag for a subtask", async () => {
     const opts = makeSubmitOptions({ autopilot: true });
     const { result } = renderHook(() => useSubtaskSubmit(opts));
@@ -290,7 +325,7 @@ describe("useSubtaskSubmit", () => {
   });
 
   it("passes fresh-branch metadata when a local executor uses a policy row", async () => {
-    const buildRepositoriesPayload = await import("@/components/task-create-dialog-helpers");
+    const builders = await import("@/components/task-create-dialog-helpers");
     const opts = makeSubmitOptions({
       isLocalExecutor: true,
       fs: {
@@ -317,11 +352,101 @@ describe("useSubtaskSubmit", () => {
       await result.current.handleSubmit({ preventDefault: vi.fn() } as never);
     });
 
-    expect(buildRepositoriesPayload.buildRepositoriesPayload).toHaveBeenCalledWith(
+    expect(builders.buildWorkspaceSourcesPayload).toHaveBeenCalledWith(
       expect.objectContaining({
         isLocalExecutor: true,
         freshBranch: { confirmDiscard: false, consentedDirtyFiles: [] },
       }),
+    );
+  });
+
+  it("drops stale fresh-branch metadata after a second local row is added", async () => {
+    const builders = await import("@/components/task-create-dialog-helpers");
+    const opts = makeSubmitOptions({
+      isLocalExecutor: true,
+      fs: {
+        useRemote: false,
+        remoteRepos: [],
+        prInfoByUrl: {},
+        repositorySelections: [
+          { kind: "local", key: "row-1", repositoryId: "repo-1", branch: "main" },
+          { kind: "local", key: "row-2", localPath: "/work/second", branch: "main" },
+        ],
+        repositories: [],
+        discoveredRepositories: [],
+        agentProfileId: "",
+        executorProfileId: "local-profile",
+        freshBranchEnabled: true,
+      } as unknown as Parameters<typeof useSubtaskSubmit>[0]["fs"],
+    });
+    const { result } = renderHook(() => useSubtaskSubmit(opts));
+
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault: vi.fn() } as never);
+    });
+
+    expect(builders.buildWorkspaceSourcesPayload).toHaveBeenCalledWith(
+      expect.not.objectContaining({ freshBranch: expect.anything() }),
+    );
+  });
+
+  it("requires one current local selection before serializing a fresh branch", () => {
+    const selection = {
+      kind: "local" as const,
+      key: "row-1",
+      repositoryId: "repo-1",
+      branch: "main",
+    };
+    expect(
+      shouldSubmitFreshBranch({
+        selections: [selection],
+        freshBranchEnabled: true,
+        workspaceMode: "new_workspace",
+        isLocalExecutor: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldSubmitFreshBranch({
+        selections: [selection, { ...selection, key: "row-2" }],
+        freshBranchEnabled: true,
+        workspaceMode: "new_workspace",
+        isLocalExecutor: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("passes the ordered mixed selection to the shared repository serializer", async () => {
+    const builders = await import("@/components/task-create-dialog-helpers");
+    const selections = [
+      { kind: "local", key: "local-1", repositoryId: "repo-local", branch: "main" },
+      {
+        kind: "remote",
+        key: "remote-1",
+        url: "https://github.com/acme/remote",
+        branch: "develop",
+        source: "paste",
+      },
+    ] as const;
+    const opts = makeSubmitOptions({
+      fs: {
+        useRemote: false,
+        remoteRepos: [],
+        repositorySelections: [...selections],
+        prInfoByUrl: {},
+        repositories: [],
+        discoveredRepositories: [],
+        agentProfileId: "",
+        executorProfileId: "local-profile",
+      } as unknown as Parameters<typeof useSubtaskSubmit>[0]["fs"],
+    });
+    const { result } = renderHook(() => useSubtaskSubmit(opts));
+
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault: vi.fn() } as never);
+    });
+
+    expect(builders.buildWorkspaceSourcesPayload).toHaveBeenCalledWith(
+      expect.objectContaining({ selections: [...selections] }),
     );
   });
 

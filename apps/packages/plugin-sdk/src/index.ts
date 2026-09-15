@@ -168,10 +168,21 @@ export interface RepositoryInspection {
   pullRequest?: { number: number; title: string };
 }
 
+export interface RepositoryProviderAvailability {
+  configured: boolean;
+  enabled: boolean;
+  tested: boolean;
+}
+
 export interface RepositoryProviderRegistration {
   id: string;
   label: string;
   icon?: PluginIcon;
+  /** Credential-free workspace readiness. All three values must be true to browse. */
+  getAvailability?(context: {
+    workspaceId: string;
+    signal: AbortSignal;
+  }): Promise<RepositoryProviderAvailability>;
   listRepositories(context: {
     workspaceId: string;
     query?: string;

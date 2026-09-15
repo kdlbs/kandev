@@ -1,6 +1,7 @@
 import { ApiError, fetchJson, type ApiRequestOptions } from "../client";
 import { getBackendConfig } from "@/lib/config";
 import type { PluginRecord, PluginSettings, SyncResult } from "@/lib/types/plugins";
+import { invalidateIntegrationAvailabilityAfter } from "@/lib/integrations/integration-availability-events";
 
 const BASE = "/api/plugins";
 
@@ -109,14 +110,16 @@ export async function updatePluginConfig(
   config: Record<string, unknown>,
   options?: ApiRequestOptions,
 ) {
-  return fetchJson<{ updated: boolean }>(`${BASE}/${encodeURIComponent(id)}`, {
-    ...options,
-    init: {
-      ...(options?.init ?? {}),
-      method: "PATCH",
-      body: JSON.stringify({ config }),
-    },
-  });
+  return invalidateIntegrationAvailabilityAfter(
+    fetchJson<{ updated: boolean }>(`${BASE}/${encodeURIComponent(id)}`, {
+      ...options,
+      init: {
+        ...(options?.init ?? {}),
+        method: "PATCH",
+        body: JSON.stringify({ config }),
+      },
+    }),
+  );
 }
 
 // enablePlugin transitions a plugin to active (POST /api/plugins/:id/enable).

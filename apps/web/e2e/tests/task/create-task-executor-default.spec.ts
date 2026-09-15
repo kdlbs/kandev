@@ -111,7 +111,7 @@ test.describe("Task-create executor safety defaults", () => {
     }
   });
 
-  test("returns to Worktree after leaving repository-less mode", async ({
+  test("keeps the worktree default while opening and dismissing the shared picker", async ({
     testPage,
     apiClient,
     seedData,
@@ -130,10 +130,10 @@ test.describe("Task-create executor safety defaults", () => {
       const executorSelector = testPage.getByTestId("executor-profile-selector");
       await expect(executorSelector).toContainText(worktreeProfile.name);
 
-      await testPage.getByTestId("source-mode-scratch").click();
-      await expect(executorSelector).toContainText(localProfile.name);
-
-      await testPage.getByTestId("source-mode-workspace").click();
+      await testPage.getByTestId("add-repository").click();
+      await testPage.getByTestId("workspace-source-menu-repository").click();
+      await expect(testPage.getByTestId("task-repository-picker")).toBeVisible();
+      await testPage.keyboard.press("Escape");
       await expect(executorSelector).toContainText(worktreeProfile.name);
     } finally {
       await apiClient.updateWorkspace(seedData.workspaceId, {

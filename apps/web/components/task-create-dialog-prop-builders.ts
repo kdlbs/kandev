@@ -15,6 +15,7 @@ import {
   resolveTaskCreateLaunchPreview,
   type TaskCreateLaunchPreview,
 } from "@/components/task-create-dialog-launch-preview";
+import { hasUnavailablePickerRemoteProvider } from "@/components/task-create-dialog-remote-provider-readiness";
 import {
   computeRunnerEditable,
   computeRunnerIneligibleReason,
@@ -22,6 +23,14 @@ import {
 
 export function computeHasAllBranches(fs: DialogFormState): boolean {
   if (fs.noRepository) return true;
+  if (fs.repositorySelections) {
+    const selected = fs.repositorySelections.filter(hasSelectedSourceValue);
+    return (
+      selected.length > 0 &&
+      selected.every(hasSelectedSourceBranch) &&
+      !hasUnavailablePickerRemoteProvider(selected, fs.remoteProviderReadiness)
+    );
+  }
   if (fs.useRemote) {
     const rows = fs.remoteRepos.filter((r) => r.url.trim() !== "");
     return rows.length > 0 && rows.every((r) => !!r.branch);
@@ -29,6 +38,22 @@ export function computeHasAllBranches(fs: DialogFormState): boolean {
   return (
     fs.repositories.length > 0 && fs.repositories.every((r) => Boolean(r.baseBranch || r.branch))
   );
+}
+
+function hasSelectedSourceValue(
+  selection: NonNullable<DialogFormState["repositorySelections"]>[number],
+): boolean {
+  if (selection.kind === "remote") return selection.url.trim() !== "";
+  if (selection.kind === "folder") return Boolean(selection.localPath.trim());
+  return Boolean(selection.repositoryId || selection.localPath);
+}
+
+function hasSelectedSourceBranch(
+  selection: NonNullable<DialogFormState["repositorySelections"]>[number],
+): boolean {
+  if (selection.kind === "folder") return true;
+  if (selection.kind === "local") return Boolean(selection.branch || selection.baseBranch);
+  return Boolean(selection.branch);
 }
 
 export function localRepositoryCreationEnabled(isCreateMode: boolean, repoLocked: boolean) {
@@ -68,6 +93,8 @@ export function buildDialogFormBodyProps(
     onRowRepositoryChange: handlers.handleRowRepositoryChange,
     onRowBranchChange: handlers.handleRowBranchChange,
     onRowPolicyChange: handlers.handleRowPolicyChange,
+    repositoryLocked: repoLocked,
+    branchLocked: !!props.lockedFields?.branch,
     initialDescription: fs.currentDefaults.description,
     workspaceId: props.workspaceId,
     onJiraImport: setup.handleJiraImport,
@@ -99,6 +126,9 @@ export function buildDialogFormBodyProps(
     onToggleFreshBranch: handlers.handleToggleFreshBranch,
     onToggleNoRepository: repoLocked ? undefined : handlers.handleToggleNoRepository,
     onWorkspacePathChange: handlers.handleWorkspacePathChange,
+    onFolderSelectionAdded: handlers.onFolderSelectionAdded,
+    onRepositorySelectionAdded: handlers.onRepositorySelectionAdded,
+    onAllWorkspaceSourcesRemoved: handlers.onAllWorkspaceSourcesRemoved,
     localRepositoryCreation: localRepositoryCreationEnabled(setup.isCreateMode, repoLocked)
       ? {
           executorSelection: handlers.directLocalExecutorSelection,
@@ -113,10 +143,11 @@ export function buildDialogFormBodyProps(
     lastUsedBranch: setup.taskCreateLastUsed.branch,
     userSettingsLoaded: setup.userSettingsLoaded,
     freshBranchAvailable: setup.freshBranchAvailable,
-    // The same lock disables the source-mode and local-repository controls, and
-    // applying a set writes fs.repositories just as they would.
+    // Applying a set writes into the same ordered draft as the repository picker.
     repositorySets: repoLocked ? undefined : setup.repositorySets,
     isLocalExecutor: computed.isLocalExecutor,
+    executorSourcePolicy: computed.executorSourcePolicy,
+    executorSourceNotice: computed.executorSourceNotice,
     agentCompatState: computed.agentCompatState,
     selectedAgentProfileName: computed.selectedAgentProfileName,
     effectiveWorkflowName: resolveWorkflowName(setup.workflows, computed.effectiveWorkflowId),
@@ -162,6 +193,7 @@ export function buildDialogFooterProps(
     workspaceId: props.workspaceId,
     effectiveWorkflowId: computed.effectiveWorkflowId ?? null,
     executorHint: computed.executorHint,
+    executorSourceNotice: computed.executorSourceNotice,
     noCompatibleAgent: computed.noCompatibleAgent,
     agentCompatState: computed.agentCompatState,
     selectedAgentProfileName: computed.selectedAgentProfileName,
@@ -173,7 +205,8 @@ export function buildDialogFooterProps(
     submitBlockedReason:
       props.submitBlockedReason ??
       pendingAttachmentUploadReason ??
-      setup.savedBaseSubmitBlockedReason,
+      setup.savedBaseSubmitBlockedReason ??
+      (computed.executorSourcePolicy?.incompatible ? computed.sourcePolicyReason : null),
     editDependenciesReady: setup.isEditMode ? setup.editDependencies.ready : undefined,
   };
 }

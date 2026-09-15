@@ -430,6 +430,19 @@ Radix/portal/context-based would split React context across instances and
 break refs/`asChild`. Pure-React libs (e.g. `@tabler/icons-react`) bundle
 fine.
 
+### Repository provider readiness
+
+The native repository picker calls `getAvailability` before it calls
+`listRepositories`. The callback is scoped to one workspace and must not
+return credentials. Set `configured: true` only when the workspace has the
+provider settings it needs, `enabled: true` only when the workspace toggle
+permits browsing, and `tested: true` only after a current provider-side
+connection check succeeds. The host evaluates readiness separately for each
+workspace and refresh. It does not infer readiness from registration,
+declared action keys, or a successful or empty repository list. A registration
+without this callback remains valid for existing URL and task consumers but
+has no native browse tab.
+
 ### First-use repository inspection action
 
 A manifest-owned repository provider that supports native task creation from a
@@ -1327,10 +1340,22 @@ interface IntegrationSettingsActionProps {
 // /settings/workspaces/{workspaceId}/integrations/{id}. IDs are URL-safe, cannot
 // shadow first-party integrations, and have one active owner; unload revokes them.
 
+interface RepositoryProviderAvailability {
+  configured: boolean;
+  enabled: boolean;
+  tested: boolean;
+}
+
 interface RepositoryProviderRegistration {
   id: string;
   label: string;
   icon?: PluginIcon;
+  // Optional credential-free, workspace-scoped readiness check. All three
+  // values must be true before the host displays this provider for browsing.
+  getAvailability?(context: {
+    workspaceId: string;
+    signal: AbortSignal;
+  }): Promise<RepositoryProviderAvailability>;
   listRepositories(context: {
     workspaceId: string;
     /** Optional server-side search text. */

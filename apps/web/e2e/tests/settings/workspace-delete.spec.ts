@@ -57,7 +57,7 @@ test.describe("Workspace settings", () => {
 
       // Select the new workspace from the user-facing picker, then verify the
       // bootstrap immediately makes its workflow usable by the standard New
-      // Task flow. Scratch mode avoids introducing a repository as test setup.
+      // Task flow. A new workspace starts with an explicitly empty source list.
       const kanban = new KanbanPage(testPage);
       await kanban.goto();
       await testPage.getByTestId("sidebar-workspace-trigger").click();
@@ -71,7 +71,7 @@ test.describe("Workspace settings", () => {
       const dialog = testPage.getByTestId("create-task-dialog");
       await expect(dialog).toBeVisible();
 
-      await dialog.getByTestId("source-mode-scratch").click();
+      await expect(dialog.getByTestId("repo-chip-trigger")).toHaveCount(0);
       await dialog.getByTestId("task-title-input").fill(taskTitle);
       await dialog.getByTestId("task-description-input").fill("Created without starting an agent");
       await expect(dialog.getByTestId("submit-start-agent-chevron")).toBeEnabled();

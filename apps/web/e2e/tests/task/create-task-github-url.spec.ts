@@ -4,21 +4,26 @@ import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import { createEmptyRemoteRepository } from "../../helpers/empty-remote-repository";
+import { openTaskRepositoryPicker } from "../../helpers/task-repository-picker";
 
 // Exercises the regular task-create dialog (New Task in the sidebar); run with office off.
 useRegularMode();
 
 /**
- * Helper: switch the create-task dialog to the Remote tab and type a URL
- * into the (newly nested) chip popover and submit it with Enter. Replaces the old "click
- * toggle-github-url + fill github-url-input" pair after Task 5/8 swapped the
- * top-level URL input for a per-row chip + popover.
+ * Adds a URL through the shared repository picker and submits it with Enter.
  */
 async function openRemoteAndPasteURL(testPage: Page, url: string): Promise<void> {
-  await testPage.getByTestId("source-mode-remote").click();
-  // The chip popover holds the paste input. Open the first chip.
-  await testPage.getByTestId("remote-repo-chip-trigger").first().click();
-  const urlInput = testPage.getByTestId("remote-repo-input");
+  for (const removeTestId of ["remove-repo-chip", "remote-chip-remove"]) {
+    const removeButtons = testPage.getByTestId(removeTestId);
+    while ((await removeButtons.count()) > 0) {
+      const previousCount = await removeButtons.count();
+      await expect(removeButtons.first()).toBeVisible();
+      await removeButtons.first().click();
+      await expect(removeButtons).toHaveCount(previousCount - 1);
+    }
+  }
+  await openTaskRepositoryPicker(testPage);
+  const urlInput = testPage.getByTestId("task-repository-picker-input");
   await expect(urlInput).toBeVisible();
   await urlInput.fill(url);
   await urlInput.press("Enter");
@@ -819,7 +824,9 @@ test.describe("Task creation from GitHub URL", () => {
     await sessionB.expectTerminalHasText("feature/shared-pr-");
   });
 
-  test("can toggle between GitHub URL and repository selector", async ({ testPage }) => {
+  test("uses one shared picker for URL entry and local repository selection", async ({
+    testPage,
+  }) => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
 
@@ -827,25 +834,11 @@ test.describe("Task creation from GitHub URL", () => {
     const dialog = testPage.getByTestId("create-task-dialog");
     await expect(dialog).toBeVisible();
 
-    // The source-mode segmented control: Repo (workspace), Remote (chip
-    // picker / paste), None (scratch).
-    const urlModeBtn = testPage.getByTestId("source-mode-remote");
-    const repoModeBtn = testPage.getByTestId("source-mode-workspace");
-
-    // Default state: workspace mode, remote chips row not rendered.
-    await expect(repoModeBtn).toHaveAttribute("aria-checked", "true");
-    await expect(testPage.getByTestId("remote-repo-chips-row")).not.toBeVisible();
-
-    // Switch to Remote mode — chip row appears, Remote button is selected.
-    await urlModeBtn.click();
-    await expect(testPage.getByTestId("remote-repo-chips-row")).toBeVisible();
-    await expect(urlModeBtn).toHaveAttribute("aria-checked", "true");
-    await expect(repoModeBtn).toHaveAttribute("aria-checked", "false");
-
-    // Switch back to workspace mode — chip row disappears.
-    await repoModeBtn.click();
-    await expect(testPage.getByTestId("remote-repo-chips-row")).not.toBeVisible();
-    await expect(repoModeBtn).toHaveAttribute("aria-checked", "true");
-    await expect(urlModeBtn).toHaveAttribute("aria-checked", "false");
+    await expect(testPage.getByTestId("source-mode-remote")).toHaveCount(0);
+    await expect(testPage.getByTestId("source-mode-workspace")).toHaveCount(0);
+    await expect(testPage.getByTestId("add-repository")).toBeVisible();
+    await openTaskRepositoryPicker(testPage);
+    await expect(testPage.getByTestId("task-repository-source-local")).toBeVisible();
+    await testPage.keyboard.press("Escape");
   });
 });

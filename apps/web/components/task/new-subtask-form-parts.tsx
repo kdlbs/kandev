@@ -246,6 +246,7 @@ function WorkspaceSection({
     repositories: availableRepositories,
     setRepositories: fs.setRepositories,
     setRepositoriesDirty: fs.setRepositoriesDirty,
+    setNoRepository: fs.setNoRepository,
   });
   if (inheritParent) {
     return <WorktreeBadge show={!!worktreeBranch} branch={worktreeBranch} />;
@@ -286,6 +287,7 @@ type SubtaskFormBodyProps = {
   worktreeBranch: string | null;
   isLocalExecutor: boolean;
   freshBranchAvailable: boolean;
+  hasAllBranches: boolean;
   profileOptions: ReturnType<typeof useAgentProfileOptions>;
   executorProfileOptions: ReturnType<typeof useExecutorProfileOptions>;
   agentProfileId: string;
@@ -419,6 +421,7 @@ export function SubtaskFormBody({
   worktreeBranch,
   isLocalExecutor,
   freshBranchAvailable,
+  hasAllBranches,
   profileOptions,
   executorProfileOptions,
   agentProfileId,
@@ -516,7 +519,13 @@ export function SubtaskFormBody({
         </Button>
         <Button
           type="submit"
-          disabled={isCreating || isSummarizing || !hasPrompt || (!autoTitle && !title.trim())}
+          disabled={
+            isCreating ||
+            isSummarizing ||
+            !hasPrompt ||
+            (!autoTitle && !title.trim()) ||
+            !hasAllBranches
+          }
           className="cursor-pointer"
         >
           {isCreating ? t("task:creatingEllipsis") : t("task:createSubtask")}

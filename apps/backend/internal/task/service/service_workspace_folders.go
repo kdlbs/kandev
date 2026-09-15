@@ -8,10 +8,14 @@ import (
 )
 
 func (s *Service) hydrateTaskWorkspaceFolders(ctx context.Context, task *models.Task) {
-	if s.workspaceFolders == nil {
+	store := s.workspaceFolders
+	if store == nil {
+		store = s.workspaceSourceStore()
+	}
+	if store == nil {
 		return
 	}
-	folders, err := s.workspaceFolders.ListTaskWorkspaceFolders(ctx, task.ID)
+	folders, err := store.ListTaskWorkspaceFolders(ctx, task.ID)
 	if err != nil {
 		s.logger.Error("failed to list task workspace folders", zap.Error(err))
 		return
@@ -20,14 +24,21 @@ func (s *Service) hydrateTaskWorkspaceFolders(ctx context.Context, task *models.
 }
 
 func (s *Service) hydrateTaskWorkspaceFoldersBatch(ctx context.Context, tasks []*models.Task) {
-	if len(tasks) == 0 || s.workspaceFolders == nil {
+	if len(tasks) == 0 {
+		return
+	}
+	store := s.workspaceFolders
+	if store == nil {
+		store = s.workspaceSourceStore()
+	}
+	if store == nil {
 		return
 	}
 	taskIDs := make([]string, len(tasks))
 	for i, task := range tasks {
 		taskIDs[i] = task.ID
 	}
-	folders, err := s.workspaceFolders.ListTaskWorkspaceFoldersByTaskIDs(ctx, taskIDs)
+	folders, err := store.ListTaskWorkspaceFoldersByTaskIDs(ctx, taskIDs)
 	if err != nil {
 		s.logger.Error("failed to batch-load task workspace folders", zap.Error(err))
 		return

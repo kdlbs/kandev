@@ -621,6 +621,7 @@ describe("user settings websocket task-create last-used", () => {
       agentProfileId: null,
       executorProfileId: null,
       workflowIdsByWorkspace: {},
+      workspaceSourcesByWorkspace: {},
       synced: false,
     });
   });

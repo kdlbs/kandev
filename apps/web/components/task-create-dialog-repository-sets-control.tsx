@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { IconStack2 } from "@tabler/icons-react";
 import {
   DropdownMenu,
@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils";
 import type { Repository, RepositorySet } from "@/lib/types/http";
 import type { TaskRepoRow } from "@/components/task-create-dialog-types";
 import { applyRepositorySet } from "@/components/task-create-dialog-repository-sets";
+import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 
 type RepositorySetsControlProps = {
   sets: RepositorySet[];
@@ -49,19 +50,27 @@ export function RepositorySetsControl({
   footerActions,
 }: RepositorySetsControlProps) {
   const { t } = useTranslation();
+  const touchDrawer = useTouchDrawer();
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   // Absent rather than disabled when there is nothing to offer: a control that
   // only ever says "you have no sets" is noise in a crowded row.
   if (sets.length === 0 && !footerActions) return null;
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
+    <DropdownMenu open={open} onOpenChange={setOpen} modal={!touchDrawer}>
+      <DropdownMenuTrigger
+        asChild
+        ref={triggerRef}
+        onPointerDown={touchDrawer ? (event) => event.preventDefault() : undefined}
+        onClick={touchDrawer ? () => setOpen((current) => !current) : undefined}
+      >
         <button
           type="button"
           aria-label={t("task:repositorySetsApplyLabel")}
           data-testid="repository-sets-trigger"
           className={cn(
-            "inline-flex h-9 items-center justify-center gap-1.5 rounded-md px-2 text-xs",
+            "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-md px-2 text-xs sm:h-9 sm:min-h-0",
             "cursor-pointer text-muted-foreground hover:bg-muted hover:text-foreground",
           )}
         >
@@ -69,7 +78,16 @@ export function RepositorySetsControl({
           <span>{t("task:repositorySetsTrigger")}</span>
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-72">
+      <DropdownMenuContent
+        align="start"
+        className="w-72"
+        onPointerDownOutside={(event) => {
+          const target = event.detail.originalEvent.target;
+          if (target instanceof Node && triggerRef.current?.contains(target)) {
+            event.preventDefault();
+          }
+        }}
+      >
         <RepositorySetMenuItems
           sets={sets}
           repositories={repositories}

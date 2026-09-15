@@ -58,6 +58,80 @@ func TestAttachWorkspaceSourcesDerivesLegacyPrimaryBranchForWorktreeProjection(t
 	}
 }
 
+func TestCreateTaskPersistsMixedWorkspaceSourcesInInputOrder(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	svc.workspaceFolders = repo
+	ctx := context.Background()
+	workspaceID := "ws-create-sources"
+	workflowID := "wf-create-sources"
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Workspace"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: workflowID, WorkspaceID: workspaceID, Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-create-sources", WorkspaceID: workspaceID, Name: "app",
+		SourceType: sourceTypeLocal, LocalPath: canonicalRepoTestPath(t, t.TempDir()), DefaultBranch: "main",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	firstFolder := t.TempDir()
+	secondFolder := t.TempDir()
+	sources := []WorkspaceSourceInput{
+		{Kind: WorkspaceSourceFolder, LocalPath: firstFolder, DisplayName: "design"},
+		{Kind: WorkspaceSourceRepository, RepositoryID: "repo-create-sources", BaseBranch: "main"},
+		{Kind: WorkspaceSourceFolder, LocalPath: secondFolder, DisplayName: "notes"},
+	}
+
+	result, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: workspaceID, WorkflowID: workflowID, WorkflowStepID: "step",
+		Title: "Mixed sources", WorkspaceSources: &sources,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result.Task)
+
+	folders, err := repo.ListTaskWorkspaceFolders(ctx, result.Task.ID)
+	require.NoError(t, err)
+	require.Len(t, folders, 2)
+	require.Equal(t, "design", folders[0].DisplayName)
+	require.Equal(t, 0, folders[0].Position)
+	require.Equal(t, "notes", folders[1].DisplayName)
+	require.Equal(t, 2, folders[1].Position)
+
+	repositories, err := repo.ListTaskRepositories(ctx, result.Task.ID)
+	require.NoError(t, err)
+	require.Len(t, repositories, 1)
+	require.Equal(t, "repo-create-sources", repositories[0].RepositoryID)
+	require.Equal(t, 1, repositories[0].Position)
+	require.Len(t, result.Task.WorkspaceFolders, 2)
+}
+
+func TestCreateTaskRejectsInvalidWorkspaceSourceBeforeTaskInsert(t *testing.T) {
+	svc, _, repo := createTestService(t)
+	ctx := context.Background()
+	workspaceID := "ws-invalid-create-source"
+	workflowID := "wf-invalid-create-source"
+	if err := repo.CreateWorkspace(ctx, &models.Workspace{ID: workspaceID, Name: "Workspace"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateWorkflow(ctx, &models.Workflow{ID: workflowID, WorkspaceID: workspaceID, Name: "Workflow"}); err != nil {
+		t.Fatal(err)
+	}
+	sources := []WorkspaceSourceInput{{
+		Kind: WorkspaceSourceFolder, LocalPath: filepath.Join(t.TempDir(), "missing"), DisplayName: "missing",
+	}}
+
+	_, err := svc.CreateTask(ctx, &CreateTaskRequest{
+		WorkspaceID: workspaceID, WorkflowID: workflowID, WorkflowStepID: "step",
+		Title: "Invalid source", WorkspaceSources: &sources,
+	})
+	require.ErrorIs(t, err, ErrInvalidWorkspaceSource)
+	var taskCount int
+	require.NoError(t, repo.DB().QueryRowContext(ctx, "SELECT COUNT(*) FROM tasks WHERE workspace_id = ?", workspaceID).Scan(&taskCount))
+	require.Zero(t, taskCount)
+}
+
 func TestAttachWorkspaceSourcesRejectsDetachedLegacyPrimaryAtomically(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	svc.workspaceFolders = repo

@@ -7,7 +7,11 @@ import {
   selectedRepositoryIdsForSet,
   selectedRepositoryMembersForSet,
 } from "@/components/task-create-dialog-repository-sets";
-import type { TaskRepoRow } from "@/components/task-create-dialog-types";
+import type { TaskRepoRow, TaskRepositorySelection } from "@/components/task-create-dialog-types";
+import {
+  repositorySelectionReducer,
+  type RepositorySelectionState,
+} from "@/components/task-create-dialog-repositories-state";
 
 function repository(id: string): Repository {
   return { id: repositoryId(id), name: id } as unknown as Repository;
@@ -43,11 +47,56 @@ function row(key: string, repositoryIdValue?: string, branch = ""): TaskRepoRow 
   return { key, repositoryId: repositoryIdValue, branch };
 }
 
+function localSelection(
+  key: string,
+  repositoryIdValue: string,
+): Extract<TaskRepositorySelection, { kind: "local" }> {
+  return { kind: "local", ...row(key, repositoryIdValue, "main") };
+}
+
 function idsOf(rows: TaskRepoRow[]) {
   return rows.map((entry) => entry.repositoryId);
 }
 
 describe("applyRepositorySet", () => {
+  it("appends new local members after mixed rows without changing remote rows", () => {
+    const existingRemote: TaskRepositorySelection = {
+      kind: "remote",
+      key: "remote-1",
+      url: "https://github.com/acme/remote",
+      branch: "release",
+      source: "picker",
+      provider: "github",
+      providerRepoId: "remote-1",
+    };
+    const existingLocal = localSelection("local-1", REPO_WEB);
+    const state: RepositorySelectionState = {
+      selections: [existingLocal, existingRemote],
+      touched: true,
+      dirty: true,
+    };
+    const outcome = applyRepositorySet({
+      rows: [
+        {
+          key: existingLocal.key,
+          repositoryId: existingLocal.repositoryId,
+          branch: existingLocal.branch,
+        },
+      ],
+      set: repositorySet([REPO_WEB, REPO_GATEWAY]),
+      repositories: AVAILABLE,
+    });
+
+    const next = repositorySelectionReducer(state, { type: "set-local", rows: outcome.rows });
+
+    expect(next.selections).toEqual([
+      existingLocal,
+      existingRemote,
+      expect.objectContaining({ kind: "local", repositoryId: REPO_GATEWAY }),
+    ]);
+    expect(next.selections[1]).toEqual(existingRemote);
+  });
+
   it("adds one row per member in set order", () => {
     const result = applyRepositorySet({
       rows: [],
@@ -92,7 +141,9 @@ describe("applyRepositorySet", () => {
 
     expect(result.rows[0]).not.toHaveProperty("baseBranch");
   });
+});
 
+describe("applyRepositorySet row merging", () => {
   it("consumes a single blank placeholder row instead of leaving it behind", () => {
     const result = applyRepositorySet({
       rows: [row(ROW_0)],

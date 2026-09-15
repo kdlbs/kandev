@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -594,14 +595,31 @@ func (s *Service) addDynamicPlan(ctx context.Context, taskID string, input *dyna
 }
 
 func dynamicRepositorySummary(task *v1.Task) string {
-	repositories := make([]string, 0, len(task.Repositories)+len(task.WorkspaceFolders))
+	type summaryEntry struct {
+		position int
+		text     string
+	}
+	entries := make([]summaryEntry, 0, len(task.Repositories)+len(task.WorkspaceFolders))
 	for _, repository := range task.Repositories {
-		repositories = append(repositories, repository.RepositoryID+" @ "+repository.BaseBranch)
+		entries = append(entries, summaryEntry{
+			position: repository.Position,
+			text:     repository.RepositoryID + " @ " + repository.BaseBranch,
+		})
 	}
 	for _, folder := range task.WorkspaceFolders {
-		repositories = append(repositories, "folder: "+folder.DisplayName+" @ "+folder.LocalPath)
+		entries = append(entries, summaryEntry{
+			position: folder.Position,
+			text:     "folder: " + folder.DisplayName + " @ " + folder.LocalPath,
+		})
 	}
-	return strings.Join(repositories, "\n")
+	sort.SliceStable(entries, func(i, j int) bool {
+		return entries[i].position < entries[j].position
+	})
+	summary := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		summary = append(summary, entry.text)
+	}
+	return strings.Join(summary, "\n")
 }
 
 func (s *Service) dynamicLaunchDecision(

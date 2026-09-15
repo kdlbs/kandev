@@ -173,6 +173,18 @@ describe("computeExecutorHint", () => {
     const odd = [{ id: "x", type: "remote" as Executor["type"] } as Executor];
     expect(computeExecutorHint(odd, "x", 1)).toBeNull();
   });
+
+  it("describes an empty scratch workspace", () => {
+    expect(computeExecutorHint(executors, "loc", 0, 0, 0)).toBe(
+      "An empty scratch workspace will be created.",
+    );
+  });
+
+  it("describes a folder-only workspace", () => {
+    expect(computeExecutorHint(executors, "loc", 0, 1, 1)).toBe(
+      "The agent will run directly in the selected folder.",
+    );
+  });
 });
 
 describe("useAgentProfileOptions enabled filter", () => {

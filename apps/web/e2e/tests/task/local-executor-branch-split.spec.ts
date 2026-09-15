@@ -453,13 +453,14 @@ test.describe("Local executor + fresh-branch toggle", () => {
       // bypass, base_branch would be "main" and applyFreshBranch would fork
       // from the wrong base.
       const payload = JSON.parse(req.postData() ?? "{}") as {
-        repositories?: Array<{
+        workspace_sources?: Array<{
+          kind?: string;
           base_branch?: string;
           checkout_branch?: string;
           fresh_branch?: boolean;
         }>;
       };
-      const repo = payload.repositories?.[0];
+      const repo = payload.workspace_sources?.find((source) => source.kind === "repository");
       expect(repo?.base_branch).toBe("develop");
       expect(repo?.checkout_branch ?? undefined).toBeUndefined();
       expect(repo?.fresh_branch).toBe(true);
@@ -518,10 +519,15 @@ test.describe("Local executor + fresh-branch toggle", () => {
       const req = (await createTaskResponse).request();
 
       const payload = JSON.parse(req.postData() ?? "{}") as {
-        repositories?: Array<{ base_branch?: string; checkout_branch?: string }>;
+        workspace_sources?: Array<{
+          kind?: string;
+          base_branch?: string;
+          checkout_branch?: string;
+        }>;
       };
-      expect(payload.repositories?.[0]?.base_branch).toBe("main");
-      expect(payload.repositories?.[0]?.checkout_branch ?? undefined).toBeUndefined();
+      const repo = payload.workspace_sources?.find((source) => source.kind === "repository");
+      expect(repo?.base_branch).toBe("main");
+      expect(repo?.checkout_branch ?? undefined).toBeUndefined();
     } finally {
       await apiClient.deleteExecutorProfile(setup.profileId).catch(() => {});
     }

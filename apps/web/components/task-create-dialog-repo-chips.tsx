@@ -4,13 +4,18 @@ import { useCallback, useRef, useState } from "react";
 import { IconGitFork } from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
-import type { Repository, RepositorySet } from "@/lib/types/http";
-import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
+import type { Repository } from "@/lib/types/http";
+import type {
+  DialogFormState,
+  TaskRepoRow,
+  TaskRepositorySetsConfig,
+} from "@/components/task-create-dialog-types";
 import { RemoteRepoChipsRow } from "@/components/task-create-dialog-remote-repo-chips";
 import { FolderPicker } from "@/components/folder-picker";
 import { SourceModeSwitch } from "@/components/task-create-dialog-source-mode";
 import { WorkspaceRepoChips } from "@/components/task-create-dialog-workspace-repo-chips";
 import { CreateLocalRepositorySurface } from "@/components/create-local-repository-surface";
+import { MixedRepositoryChips } from "@/components/task-create-dialog-mixed-repository-chips";
 import { RepositorySetsControl } from "@/components/task-create-dialog-repository-sets-control";
 import { SaveRepositorySetDialog } from "@/components/task-create-dialog-repository-sets-save";
 import { SaveRepositorySetMenuAction } from "@/components/task-create-dialog-repository-sets-save-action";
@@ -34,6 +39,8 @@ type RepoChipsRowProps = {
   onRowBranchChange: (key: string, value: string) => void;
   onRowPolicyChange?: (key: string, policyId: string, baseBranch: string) => void;
   onPolicySelected?: () => void;
+  repositoryLocked?: boolean;
+  branchLocked?: boolean;
   /** Toggles the Remote tab on/off. Remote-mode rows live in `fs.remoteRepos`. */
   onToggleRemote?: () => void;
   /**
@@ -54,6 +61,11 @@ type RepoChipsRowProps = {
    * mode is independent: it creates a new branch from a chosen base.
    */
   isLocalExecutor?: boolean;
+  executorSourcePolicy?: import("@/components/task-create-dialog-executor-source-policy").ExecutorSourcePolicy;
+  folderDisabledReason?: string;
+  onFolderSelectionAdded?: (wasEmpty: boolean) => void;
+  onRepositorySelectionAdded?: (wasFolderOnly: boolean) => void;
+  onAllWorkspaceSourcesRemoved?: () => void;
   /** "No repository" mode: replace the chip row with a folder picker. */
   onToggleNoRepository?: () => void;
   onWorkspacePathChange?: (value: string) => void;
@@ -71,20 +83,7 @@ type RepoChipsRowProps = {
    * with one line, and Quick Chat - which renders WorkspaceRepoChips directly -
    * is untouched.
    */
-  repositorySets?: {
-    sets: RepositorySet[];
-    onApply: (set: RepositorySet) => void;
-    /** Present when the current selection can be saved as a new set. */
-    save?: {
-      workspaceId: string;
-      rows: TaskRepoRow[];
-      repositories: Repository[];
-      isLocalExecutor: boolean;
-      freshBranchEnabled: boolean;
-      open: boolean;
-      setOpen: (open: boolean) => void;
-    } | null;
-  };
+  repositorySets?: TaskRepositorySetsConfig;
 };
 
 function applyRowBranchChange(
@@ -160,15 +159,140 @@ function LocalRepositoryCreationSurface({
   );
 }
 
-export function RepoChipsRow({
+type RepositoryCreationController = ReturnType<typeof useRepositoryCreationController>;
+
+function useRepositoryCreationController() {
+  const chipRowRef = useRef<HTMLDivElement>(null);
+  const { target, targetRef, openForRow, clear } = useCreatingRepositoryTarget();
+  const handleCreationOpenChange = (open: boolean) => {
+    if (open || target === null) return;
+    const rowKey = clear();
+    if (rowKey === null) return;
+    requestAnimationFrame(() => {
+      const candidates = [
+        ...Array.from(
+          chipRowRef.current?.querySelectorAll<HTMLElement>("[data-repo-row-key]") ?? [],
+        ),
+        ...Array.from(document.querySelectorAll<HTMLElement>("[data-repo-row-key]")),
+      ];
+      const row = candidates.find((candidate) => candidate.dataset.repoRowKey === rowKey);
+      row?.querySelector<HTMLElement>("[data-testid='repo-chip-trigger']")?.focus();
+    });
+  };
+  return { chipRowRef, target, targetRef, openForRow, handleCreationOpenChange };
+}
+
+type RepoChipsRenderProps = RepoChipsRowProps & {
+  creation: RepositoryCreationController;
+};
+
+export function RepoChipsRow(props: RepoChipsRowProps) {
+  const creation = useRepositoryCreationController();
+  const handleRowBranchChange = (key: string, value: string) =>
+    applyRowBranchChange(props.fs, props.isLocalExecutor, props.onRowBranchChange, key, value);
+  if (props.isTaskStarted) return null;
+
+  return (
+    <div
+      ref={creation.chipRowRef}
+      className="flex min-h-9 flex-wrap items-center gap-2"
+      data-testid="repo-chips-row"
+    >
+      <RepoChipsContent {...props} creation={creation} onRowBranchChange={handleRowBranchChange} />
+    </div>
+  );
+}
+
+function RepoChipsContent(props: RepoChipsRenderProps) {
+  if (props.fs.repositorySelections) return <MixedRepositorySurface {...props} />;
+  return <LegacyRepositorySurface {...props} />;
+}
+
+function MixedRepositorySurface({
   fs,
   repositories,
-  isTaskStarted,
   workspaceId,
   onRowRepositoryChange,
   onRowBranchChange,
   onRowPolicyChange,
   onPolicySelected,
+  repositoryLocked,
+  branchLocked,
+  freshBranchAvailable,
+  freshBranchEnabled,
+  onToggleFreshBranch,
+  isLocalExecutor,
+  executorSourcePolicy,
+  folderDisabledReason,
+  onFolderSelectionAdded,
+  onRepositorySelectionAdded,
+  onAllWorkspaceSourcesRemoved,
+  onWorkspacePathChange,
+  lastUsedBranch,
+  userSettingsLoaded,
+  localRepositoryCreation,
+  onRefreshRepositories,
+  repositoriesRefreshing,
+  repositorySets,
+  creation,
+}: RepoChipsRenderProps) {
+  return (
+    <>
+      <MixedRepositoryChips
+        fs={fs}
+        repositories={repositories}
+        workspaceId={workspaceId}
+        isLocalExecutor={!!isLocalExecutor}
+        executorSourcePolicy={executorSourcePolicy}
+        folderDisabledReason={folderDisabledReason}
+        repositoryLocked={repositoryLocked}
+        branchLocked={branchLocked}
+        freshBranchEnabled={freshBranchEnabled}
+        branchPolicyDisabledReason={policyDisabled(isLocalExecutor, freshBranchAvailable)}
+        freshBranchToggle={buildFreshBranchToggle(
+          fs.repositories.length,
+          freshBranchAvailable,
+          freshBranchEnabled,
+          onToggleFreshBranch,
+        )}
+        onRowRepositoryChange={onRowRepositoryChange}
+        onRowBranchChange={onRowBranchChange}
+        onRowPolicyChange={onRowPolicyChange}
+        onPolicySelected={onPolicySelected}
+        onWorkspacePathChange={onWorkspacePathChange}
+        lastUsedBranch={lastUsedBranch}
+        userSettingsLoaded={userSettingsLoaded}
+        onCreateRepository={localRepositoryCreation ? creation.openForRow : undefined}
+        repositoryCreationOpen={creation.target !== null}
+        onRefreshRepositories={onRefreshRepositories}
+        repositoriesRefreshing={repositoriesRefreshing}
+        repositorySets={repositoryLocked || branchLocked ? undefined : repositorySets}
+        onFolderSelectionAdded={onFolderSelectionAdded}
+        onRepositorySelectionAdded={onRepositorySelectionAdded}
+        onAllWorkspaceSourcesRemoved={onAllWorkspaceSourcesRemoved}
+      />
+      <LocalRepositoryCreationSurface
+        creation={localRepositoryCreation}
+        target={creation.target}
+        targetRef={creation.targetRef}
+        workspaceId={workspaceId}
+        multiRow={(fs.repositorySelections?.length ?? 0) > 1}
+        onOpenChange={creation.handleCreationOpenChange}
+      />
+    </>
+  );
+}
+
+function LegacyRepositorySurface({
+  fs,
+  repositories,
+  workspaceId,
+  onRowRepositoryChange,
+  onRowBranchChange,
+  onRowPolicyChange,
+  onPolicySelected,
+  repositoryLocked,
+  branchLocked,
   onToggleRemote,
   freshBranchAvailable,
   freshBranchEnabled,
@@ -182,54 +306,15 @@ export function RepoChipsRow({
   onRefreshRepositories,
   repositoriesRefreshing,
   repositorySets,
-}: RepoChipsRowProps) {
-  const chipRowRef = useRef<HTMLDivElement>(null);
-  const { target, targetRef, openForRow, clear } = useCreatingRepositoryTarget();
-  const handleCreationOpenChange = (open: boolean) => {
-    if (open || target === null) return;
-    const rowKey = clear();
-    if (rowKey === null) return;
-    requestAnimationFrame(() => {
-      const row = Array.from(
-        chipRowRef.current?.querySelectorAll<HTMLElement>("[data-repo-row-key]") ?? [],
-      ).find((candidate) => candidate.dataset.repoRowKey === rowKey);
-      row?.querySelector<HTMLElement>("[data-testid='repo-chip-trigger']")?.focus();
-    });
-  };
-  // Local executor branch behavior:
-  //   - chip is clickable (user can switch to any existing branch on disk)
-  //   - row.branch seeds from the workspace's current branch (currentLocalBranch)
-  //     via the autoselect path, so the chip displays the current branch by
-  //     default and the submit payload always carries an explicit value
-  //   - if user keeps the default, backend's "branch == current → skip" logic
-  //     runs (no git ops)
-  //   - if user picks a different existing branch, backend runs `git checkout`
-  //   - "Fork a new branch" toggle is a separate flow that creates a NEW branch
-  //     from the selected base
-  // Other executors: branch is fully editable (no special pre-fill).
-  const handleRowBranchChange = (key: string, value: string) =>
-    applyRowBranchChange(fs, isLocalExecutor, onRowBranchChange, key, value);
-  // No early returns above hooks. URL mode and started-state checks happen below.
-  if (isTaskStarted) return null;
-
-  // Multi-branch support keeps repository options selectable across rows. The
-  // picker marks selections already made elsewhere so users can intentionally
-  // choose the same repository for another branch without doing so by mistake.
+  creation,
+}: RepoChipsRenderProps) {
   const hasDiscovered = fs.discoveredRepositories.length > 0;
   const canAddMore = repositories.length > 0 || hasDiscovered;
   const addHint = computeAddHint(canAddMore, repositories.length);
   const branchPolicyDisabledReason = policyDisabled(isLocalExecutor, freshBranchAvailable);
 
   return (
-    // min-h-9 reserves enough vertical space for the tallest mode body so the
-    // modal doesn't jump when the user toggles between Repo / URL / None
-    // (None renders a single pill, Repo can render chips + branch + add and
-    // sometimes wraps when the segmented control crowds the row).
-    <div
-      ref={chipRowRef}
-      className="flex min-h-9 flex-wrap items-center gap-2"
-      data-testid="repo-chips-row"
-    >
+    <>
       <ModeBody
         fs={fs}
         repositories={repositories}
@@ -240,42 +325,44 @@ export function RepoChipsRow({
         freshBranchAvailable={freshBranchAvailable}
         freshBranchEnabled={freshBranchEnabled}
         branchPolicyDisabledReason={branchPolicyDisabledReason}
+        repositoryLocked={repositoryLocked}
+        branchLocked={branchLocked}
         onRowRepositoryChange={onRowRepositoryChange}
-        onRowBranchChange={handleRowBranchChange}
+        onRowBranchChange={onRowBranchChange}
         onRowPolicyChange={onRowPolicyChange}
         onPolicySelected={onPolicySelected}
         onToggleFreshBranch={onToggleFreshBranch}
         onWorkspacePathChange={onWorkspacePathChange}
         lastUsedBranch={lastUsedBranch}
         userSettingsLoaded={userSettingsLoaded}
-        onCreateRepository={localRepositoryCreation ? openForRow : undefined}
+        onCreateRepository={localRepositoryCreation ? creation.openForRow : undefined}
         onRefreshRepositories={onRefreshRepositories}
         repositoriesRefreshing={repositoriesRefreshing}
       />
-      {/* Sets select workspace repositories, so they are offered only in the mode
-          that selects those: not in Remote URL or No repository. */}
-      {repositorySets && !fs.useRemote && !fs.noRepository ? (
+      {repositorySets && !repositoryLocked && !branchLocked && !fs.useRemote && !fs.noRepository ? (
         <RepositorySetsSurface
           repositorySets={repositorySets}
           repositories={repositories}
           rows={fs.repositories}
         />
       ) : null}
-      <SourceModeSwitch
-        useRemote={fs.useRemote}
-        noRepository={fs.noRepository}
-        onToggleRemote={onToggleRemote}
-        onToggleNoRepository={onToggleNoRepository}
-      />
+      {repositoryLocked ? null : (
+        <SourceModeSwitch
+          useRemote={fs.useRemote}
+          noRepository={fs.noRepository}
+          onToggleRemote={onToggleRemote}
+          onToggleNoRepository={onToggleNoRepository}
+        />
+      )}
       <LocalRepositoryCreationSurface
         creation={localRepositoryCreation}
-        target={target}
-        targetRef={targetRef}
+        target={creation.target}
+        targetRef={creation.targetRef}
         workspaceId={workspaceId}
         multiRow={fs.repositories.length > 1}
-        onOpenChange={handleCreationOpenChange}
+        onOpenChange={creation.handleCreationOpenChange}
       />
-    </div>
+    </>
   );
 }
 
@@ -310,6 +397,7 @@ function RepositorySetsSurface({
           onOpenChange={save.setOpen}
           workspaceId={save.workspaceId}
           rows={save.rows}
+          selections={save.selections}
           repositories={save.repositories}
           isLocalExecutor={save.isLocalExecutor}
           freshBranchEnabled={save.freshBranchEnabled}
@@ -324,6 +412,8 @@ function ModeBody({
   repositories,
   workspaceId,
   isLocalExecutor,
+  repositoryLocked,
+  branchLocked,
   canAddMore,
   addHint,
   freshBranchAvailable,
@@ -345,6 +435,8 @@ function ModeBody({
   repositories: Repository[];
   workspaceId: string | null;
   isLocalExecutor: boolean;
+  repositoryLocked?: boolean;
+  branchLocked?: boolean;
   canAddMore: boolean;
   addHint: string | undefined;
   freshBranchAvailable?: boolean;
@@ -382,7 +474,8 @@ function ModeBody({
       repositories={repositories}
       discoveredRepositories={fs.discoveredRepositories}
       workspaceId={workspaceId}
-      branchLocked={false}
+      repositoryLocked={repositoryLocked}
+      branchLocked={branchLocked}
       isLocalExecutor={isLocalExecutor}
       currentLocalBranch={fs.currentLocalBranch}
       currentLocalBranchLoading={fs.currentLocalBranchLoading}

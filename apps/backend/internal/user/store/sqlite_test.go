@@ -1235,6 +1235,48 @@ func TestSQLiteRepositoryUpdateTaskCreateLastUsedPreservesWorkflowHistory(t *tes
 	}
 }
 
+func TestSQLiteRepositoryUpdateTaskCreateLastUsedPreservesWorkspaceSourceSnapshot(t *testing.T) {
+	conn, err := sqlx.Open("sqlite3", ":memory:")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	conn.SetMaxOpenConns(1)
+	t.Cleanup(func() { _ = conn.Close() })
+	repo, err := newSQLiteRepositoryWithDB(conn, conn)
+	if err != nil {
+		t.Fatalf("new repo: %v", err)
+	}
+
+	ctx := context.Background()
+	_, err = repo.UpdateTaskCreateLastUsed(ctx, DefaultUserID, models.TaskCreateLastUsed{
+		WorkspaceSourcesByWorkspace: map[string][]models.TaskCreateLastUsedSource{
+			"workspace-a": {
+				{Kind: "folder", LocalPath: "/work/assets", DisplayName: "assets"},
+				{Kind: "repository", RepositoryID: "repo-a", BaseBranch: "main", CheckoutBranch: "feature/a"},
+			},
+			"workspace-empty": {},
+		},
+	})
+	if err != nil {
+		t.Fatalf("update source snapshots: %v", err)
+	}
+
+	settings, err := repo.GetUserSettings(ctx, DefaultUserID)
+	if err != nil {
+		t.Fatalf("read source snapshots: %v", err)
+	}
+	want := map[string][]models.TaskCreateLastUsedSource{
+		"workspace-a": {
+			{Kind: "folder", LocalPath: "/work/assets", DisplayName: "assets"},
+			{Kind: "repository", RepositoryID: "repo-a", BaseBranch: "main", CheckoutBranch: "feature/a"},
+		},
+		"workspace-empty": {},
+	}
+	if !reflect.DeepEqual(settings.TaskCreateLastUsed.WorkspaceSourcesByWorkspace, want) {
+		t.Fatalf("workspace source snapshots = %#v, want %#v", settings.TaskCreateLastUsed.WorkspaceSourcesByWorkspace, want)
+	}
+}
+
 // TestSQLiteRepositoryUpdateTaskCreateLastUsedClearsBranchOnRepositoryChange verifies the branch is cleared when the repository changes.
 func TestSQLiteRepositoryUpdateTaskCreateLastUsedClearsBranchOnRepositoryChange(t *testing.T) {
 	conn, err := sqlx.Open("sqlite3", ":memory:")
@@ -1335,6 +1377,22 @@ func TestBuildPostgresTaskCreateLastUsedUpdatePatchesWorkflowHistoryEntries(t *t
 	}
 }
 
+func TestBuildPostgresTaskCreateLastUsedUpdatePatchesWorkspaceSourceSnapshots(t *testing.T) {
+	query, args := buildPostgresTaskCreateLastUsedUpdate(models.TaskCreateLastUsed{
+		WorkspaceSourcesByWorkspace: map[string][]models.TaskCreateLastUsedSource{
+			"workspace-1": {{Kind: "folder", LocalPath: "/work/assets"}},
+		},
+	})
+
+	if !strings.Contains(query, "{workspace_sources_by_workspace}") ||
+		!strings.Contains(query, "ARRAY['task_create_last_used','workspace_sources_by_workspace',?::text]") {
+		t.Fatalf("postgres update should patch workspace source snapshots: %s", query)
+	}
+	if len(args) != 2 || args[0] != "workspace-1" || args[1] != `[{"kind":"folder","local_path":"/work/assets"}]` {
+		t.Fatalf("unexpected workspace source args: %#v", args)
+	}
+}
+
 // TestMakeTaskCreateLastUsedJSONSetArgsRejectsUnsafeWorkspacePathKeys verifies unsafe workspace keys are excluded from JSON set arguments.
 func TestMakeTaskCreateLastUsedJSONSetArgsRejectsUnsafeWorkspacePathKeys(t *testing.T) {
 	args := makeTaskCreateLastUsedJSONSetArgs(models.TaskCreateLastUsed{
@@ -1352,6 +1410,27 @@ func TestMakeTaskCreateLastUsedJSONSetArgsRejectsUnsafeWorkspacePathKeys(t *test
 		args[1] != "workflow-safe" {
 		t.Fatalf("unexpected safe workspace args: %#v", args)
 	}
+}
+
+func TestMakeTaskCreateLastUsedJSONSetArgsPreservesWorkspaceSnapshotPresence(t *testing.T) {
+	args := makeTaskCreateLastUsedJSONSetArgs(models.TaskCreateLastUsed{
+		WorkspaceSourcesByWorkspace: map[string][]models.TaskCreateLastUsedSource{
+			"workspace-empty":    {},
+			"workspace-safe":     {{Kind: "folder", LocalPath: "/work/assets"}},
+			"workspace.with.dot": {{Kind: "folder", LocalPath: "/work/ignored"}},
+		},
+	})
+
+	require := func(condition bool, message string, values ...any) {
+		if !condition {
+			t.Fatalf(message, values...)
+		}
+	}
+	require(len(args) == 4, "expected two safe source paths, got %#v", args)
+	require(args[0] == "$.task_create_last_used.workspace_sources_by_workspace.workspace-empty", "unexpected empty snapshot path: %#v", args)
+	require(args[1] == "[]", "empty snapshot must serialize as an empty array: %#v", args)
+	require(args[2] == "$.task_create_last_used.workspace_sources_by_workspace.workspace-safe", "unexpected source snapshot path: %#v", args)
+	require(args[3] == `[{"kind":"folder","local_path":"/work/assets"}]`, "unexpected source snapshot value: %#v", args)
 }
 
 // TestBuildPostgresTaskCreateLastUsedUpdateClearsBranchOnRepositoryChange verifies the generated Postgres update clears the branch when the repository changes.

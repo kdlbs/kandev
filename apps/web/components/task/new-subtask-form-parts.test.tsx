@@ -84,6 +84,7 @@ function createFormProps(workspaceMode: FormProps["workspaceMode"]): FormProps {
     worktreeBranch: "feature/parent",
     isLocalExecutor: false,
     freshBranchAvailable: false,
+    hasAllBranches: true,
     profileOptions: [],
     executorProfileOptions: [],
     agentProfileId: "agent-profile",
@@ -162,5 +163,12 @@ describe("SubtaskFormBody workspace messaging", () => {
 
     expect(screen.queryByText("Same branch as current session")).toBeNull();
     expect(screen.getByTestId("repo-chip-trigger")).toBeTruthy();
+  });
+
+  it("disables creation while a selected repository is unresolved", () => {
+    render(<SubtaskFormBody {...createFormProps("new_workspace")} hasAllBranches={false} />);
+
+    const submitButtons = screen.getAllByRole("button", { name: /create subtask/i });
+    expect((submitButtons.at(-1) as HTMLButtonElement).disabled).toBe(true);
   });
 });

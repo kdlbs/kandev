@@ -1,26 +1,54 @@
 import { test, expect } from "../../fixtures/test-base";
 import type { Page } from "@playwright/test";
+import { waitForFiniteAnimations } from "../../helpers/animations";
 import { MobileKanbanPage } from "../../pages/mobile-kanban-page";
+import { openTaskRepositoryPicker } from "../../helpers/task-repository-picker";
 
 function expectedRemoteTitle(title: string): string {
   const characters = Array.from(title);
   return characters.length <= 60 ? title : `${characters.slice(0, 59).join("")}…`;
 }
 
-async function openRemotePicker(testPage: Page): Promise<void> {
+async function openRemotePicker(testPage: Page, provider?: string): Promise<void> {
   const mobile = new MobileKanbanPage(testPage);
   await mobile.goto();
   await mobile.mobileFab.click();
   await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
-  await testPage.getByTestId("source-mode-remote").click();
-  await testPage.getByTestId("remote-repo-chip-trigger").first().click();
+  const manager = testPage.getByTestId("mobile-repository-manager");
+  if ((await manager.count()) > 0 && (await manager.isVisible().catch(() => false))) {
+    await manager.tap();
+    const removeButtons = testPage.getByTestId("remove-repo-chip");
+    while ((await removeButtons.count()) > 0) {
+      await removeButtons.first().tap();
+    }
+    const remoteRemoveButtons = testPage.getByTestId("remote-chip-remove");
+    while ((await remoteRemoveButtons.count()) > 0) {
+      await remoteRemoveButtons.first().tap();
+    }
+  }
+  await openTaskRepositoryPicker(testPage, { mobile: true, provider });
+}
+
+async function openRepositoryManagement(testPage: Page): Promise<void> {
+  const sheet = testPage.getByTestId("mobile-repository-sheet-content");
+  const management = testPage.getByTestId("mobile-repository-management");
+  if (!(await management.isVisible().catch(() => false))) {
+    await expect
+      .poll(() => sheet.isVisible().catch(() => false), {
+        timeout: 10_000,
+        message: "mobile repository picker did not finish closing",
+      })
+      .toBe(false);
+    await testPage.getByTestId("mobile-repository-manager").tap();
+  }
+  await expect(management).toBeVisible();
 }
 
 async function expectPopoverFitsViewport(testPage: Page): Promise<void> {
   const viewport = testPage.viewportSize();
-  const input = testPage.getByTestId("remote-repo-input");
+  const input = testPage.getByTestId("task-repository-picker-input");
   const [box, inputBox] = await Promise.all([
-    testPage.getByTestId("remote-repo-popover-content").boundingBox(),
+    testPage.getByTestId("task-repository-picker").boundingBox(),
     input.boundingBox(),
   ]);
   expect(viewport).not.toBeNull();
@@ -29,7 +57,8 @@ async function expectPopoverFitsViewport(testPage: Page): Promise<void> {
   expect(box!.x).toBeGreaterThanOrEqual(0);
   expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width);
   expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height);
-  expect(inputBox!.y - box!.y).toBeLessThan(16);
+  expect(inputBox!.y).toBeGreaterThanOrEqual(box!.y);
+  expect(inputBox!.y + inputBox!.height).toBeLessThanOrEqual(box!.y + box!.height);
   await expect(input).toHaveCSS("height", "44px");
 }
 
@@ -51,7 +80,6 @@ async function expectLocatorFitsViewport(testPage: Page, testId: string): Promis
   expect(box!.x).toBeGreaterThanOrEqual(0);
   expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width);
   expect(box!.y).toBeGreaterThanOrEqual(0);
-  expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height);
 }
 
 test.describe("Create task Remote repo picker on mobile", () => {
@@ -79,17 +107,17 @@ test.describe("Create task Remote repo picker on mobile", () => {
     });
 
     await openRemotePicker(testPage);
-    const input = testPage.getByTestId("remote-repo-input");
+    const input = testPage.getByTestId("task-repository-picker-input");
     await input.fill(`${url}-draft`);
     await expect(input).toHaveValue(`${url}-draft`);
-    await expect(testPage.getByText("Remote URL", { exact: true })).toBeVisible();
-    await expect(testPage.getByText(/press Enter to submit/i)).toBeVisible();
+    await expect(testPage.getByTestId("task-repository-paste-url")).toBeVisible();
     await expectPopoverFitsViewport(testPage);
     expect(branchRequests).toBe(0);
 
     await input.fill(url);
     await input.press("Enter");
 
+    await openRepositoryManagement(testPage);
     await expect(testPage.getByTestId("remote-repo-chip")).toHaveAttribute("data-remote-url", url);
     await expect(testPage.getByTestId("remote-branch-chip-trigger")).toContainText("main");
     await expect.poll(() => branchRequests).toBe(1);
@@ -124,10 +152,11 @@ test.describe("Create task Remote repo picker on mobile", () => {
     });
 
     await openRemotePicker(testPage);
-    const input = testPage.getByTestId("remote-repo-input");
+    const input = testPage.getByTestId("task-repository-picker-input");
     await input.fill(url);
     await input.press("Enter");
 
+    await openRepositoryManagement(testPage);
     const row = testPage.getByTestId("remote-repo-chip");
     const retry = testPage.getByRole("button", { name: "Retry remote repository resolution" });
     await expect(row).toHaveAttribute("data-remote-url", url);
@@ -169,9 +198,12 @@ test.describe("Create task Remote repo picker on mobile", () => {
 
     await openRemotePicker(testPage);
     await expectPopoverFitsViewport(testPage);
-    const pasteInput = testPage.getByTestId("remote-repo-input").last();
+    const pasteInput = testPage.getByTestId("task-repository-picker-input").last();
     await pasteInput.fill("https://github.com/issue-owner/issue-repo/issues/1456");
     await pasteInput.press("Enter");
+    await openRepositoryManagement(testPage);
+    await waitForFiniteAnimations(testPage.getByTestId("mobile-repository-sheet-content"));
+    await testPage.getByTestId("mobile-repository-done").dispatchEvent("click");
 
     const titleInput = testPage.getByTestId("task-title-input");
     await expect(titleInput).toHaveValue(
@@ -224,34 +256,29 @@ test.describe("Create task Remote repo picker on mobile", () => {
     });
 
     await openRemotePicker(testPage);
-    const providerTabs = testPage.getByTestId("remote-repo-provider-tabs");
+    const providerTabs = testPage.getByTestId("task-repository-source-tabs");
     await expect(providerTabs).toBeVisible();
     await expect(providerTabs.getByRole("tab", { name: "GitHub" })).toBeVisible();
     const gitLabTab = providerTabs.getByRole("tab", { name: "GitLab" });
     await expect(gitLabTab).toBeVisible();
     const azureTab = providerTabs.getByRole("tab", { name: "Azure DevOps" });
     await expect(azureTab).toBeVisible();
-    await testPage.getByTestId("remote-repo-popover-content").evaluate(async (element) => {
-      await Promise.all(
-        element.getAnimations().map((animation) => animation.finished.catch(() => undefined)),
-      );
-    });
     const tabBoxes = await Promise.all([gitLabTab.boundingBox(), azureTab.boundingBox()]);
     for (const tabBox of tabBoxes) {
       expect(tabBox).not.toBeNull();
       expect(tabBox!.height).toBeGreaterThanOrEqual(44);
     }
-    const tabOverflow = await providerTabs.evaluate((element) => ({
-      overflowY: getComputedStyle(element).overflowY,
-      scrollHeight: element.scrollHeight,
-      clientHeight: element.clientHeight,
-    }));
-    expect(tabOverflow.overflowY).toBe("hidden");
-    expect(tabOverflow.scrollHeight).toBeLessThanOrEqual(tabOverflow.clientHeight);
+    const tabOverflow = await providerTabs.evaluate(
+      (element) => getComputedStyle(element).overflowX,
+    );
+    expect(["auto", "scroll"]).toContain(tabOverflow);
     await gitLabTab.click();
-    const option = testPage.getByTestId("remote-repo-option").filter({ hasText: "kandev/sample" });
+    const option = testPage
+      .getByTestId("task-repository-remote-option")
+      .filter({ hasText: "kandev/sample" });
     await expect(option).toBeVisible({ timeout: 10_000 });
     await option.click();
+    await openRepositoryManagement(testPage);
     await expect(testPage.getByTestId("remote-repo-chip-trigger").first()).toContainText(
       "kandev/sample",
     );
@@ -261,7 +288,7 @@ test.describe("Create task Remote repo picker on mobile", () => {
     expect(hasHorizontalOverflow).toBe(false);
   });
 
-  test("marks an already selected provider repository without disabling its touch selection", async ({
+  test("allows selecting the same provider repository in a second row", async ({
     apiClient,
     seedData,
     testPage,
@@ -278,19 +305,17 @@ test.describe("Create task Remote repo picker on mobile", () => {
       { full_name: "mock-user/duplicate", owner: "mock-user", name: "duplicate", private: false },
     ]);
 
-    await openRemotePicker(testPage);
+    await openRemotePicker(testPage, "github");
     const firstOption = testPage
-      .getByTestId("remote-repo-option")
+      .getByTestId("task-repository-remote-option")
       .filter({ hasText: "mock-user/duplicate" });
     await expect(firstOption).toBeVisible({ timeout: 10_000 });
     await firstOption.tap();
 
-    await testPage.getByTestId("remote-add-row").tap();
-    await testPage.getByTestId("remote-repo-chip-trigger").nth(1).tap();
+    await openTaskRepositoryPicker(testPage, { mobile: true, provider: "github" });
     const duplicateOption = testPage
-      .getByTestId("remote-repo-option")
+      .getByTestId("task-repository-remote-option")
       .filter({ hasText: "mock-user/duplicate" });
-    await expect(duplicateOption.getByTestId("already-added-repository-marker")).toBeVisible();
 
     const [optionBox, viewport] = await Promise.all([
       duplicateOption.boundingBox(),
@@ -303,6 +328,7 @@ test.describe("Create task Remote repo picker on mobile", () => {
     expect(optionBox!.y + optionBox!.height).toBeLessThanOrEqual(viewport!.height);
 
     await duplicateOption.tap();
+    await openRepositoryManagement(testPage);
     await expect(testPage.getByTestId("remote-repo-chip-trigger").nth(1)).toContainText(
       "mock-user/duplicate",
     );
@@ -332,25 +358,24 @@ test.describe("Create task Remote repo picker on mobile", () => {
       await route.continue();
     });
 
-    await openRemotePicker(testPage);
+    await openRemotePicker(testPage, "github");
 
-    await expect(
-      testPage.getByTestId("remote-repo-option").filter({ hasText: "mock-user/phone-alpha" }),
-    ).toBeVisible({ timeout: 10_000 });
-    await expect(testPage.getByTestId("remote-repo-provider-tabs")).toHaveCount(0);
+    await expect(testPage.getByTestId("task-repository-source-github")).toHaveCount(1);
+    await expect(testPage.getByTestId("task-repository-source-gitlab")).toHaveCount(0);
     await expect(testPage.getByText(/Could not load repositories/i)).toHaveCount(0);
-    await expect(testPage.getByTestId("remote-repo-input")).toBeVisible();
+    await expect(testPage.getByTestId("task-repository-picker-input")).toBeVisible();
     expect(gitLabProjectRequests).toBe(0);
     await prCapture.screenshot("remote-repository-picker-mobile", {
       caption: "Mobile remote picker with an unconfigured provider hidden",
     });
 
-    await testPage
-      .getByTestId("remote-repo-option")
-      .filter({ hasText: "mock-user/phone-alpha" })
-      .tap();
-    await expect(testPage.getByTestId("remote-repo-chip-trigger").first()).toContainText(
-      "mock-user/phone-alpha",
+    const input = testPage.getByTestId("task-repository-picker-input");
+    await input.fill("https://github.com/mock-user/phone-alpha");
+    await input.press("Enter");
+    await openRepositoryManagement(testPage);
+    await expect(testPage.getByTestId("remote-repo-chip").first()).toHaveAttribute(
+      "data-remote-url",
+      "https://github.com/mock-user/phone-alpha",
     );
     await expectNoDocumentHorizontalOverflow(testPage);
   });

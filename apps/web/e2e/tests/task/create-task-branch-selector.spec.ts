@@ -6,6 +6,7 @@ import { expectWebkitDialogMotion } from "../../helpers/dialog-webkit-metrics";
 import { useRegularMode } from "../../helpers/regular-mode";
 import { KanbanPage } from "../../pages/kanban-page";
 import { makeGitEnv } from "../../helpers/git-helper";
+import { openTaskRepositoryPicker } from "../../helpers/task-repository-picker";
 
 function escapeRe(s: string) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -159,10 +160,11 @@ test.describe("Branch selector behavior with executor types", () => {
       const dialog = testPage.getByTestId("create-task-dialog");
       await expect(dialog).toBeVisible();
 
-      // Switch to Remote tab and paste via the chip popover.
-      await testPage.getByTestId("source-mode-remote").click();
-      await testPage.getByTestId("remote-repo-chip-trigger").first().click();
-      const pasteInput = testPage.getByTestId("remote-repo-input");
+      // Add a provider URL through the shared repository picker.
+      await expect(dialog.getByTestId("remove-repo-chip").first()).toBeVisible();
+      await dialog.getByTestId("remove-repo-chip").first().click();
+      await openTaskRepositoryPicker(testPage);
+      const pasteInput = testPage.getByTestId("task-repository-picker-input");
       await pasteInput.fill("https://github.com/branch-test-owner/branch-test-repo");
       await pasteInput.press("Enter");
 
@@ -504,16 +506,17 @@ test.describe("Fresh-branch flow", () => {
       await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
       await testPage.getByTestId("task-title-input").fill("Hide toggle");
       await testPage.getByTestId("task-description-input").fill("github url");
-      // Switch to Remote tab and paste via the chip popover.
-      await testPage.getByTestId("source-mode-remote").click();
-      await testPage.getByTestId("remote-repo-chip-trigger").first().click();
-      const pasteInput = testPage.getByTestId("remote-repo-input");
+      // Add a provider URL through the shared repository picker.
+      await expect(testPage.getByTestId("remove-repo-chip").first()).toBeVisible();
+      await testPage.getByTestId("remove-repo-chip").first().click();
+      await openTaskRepositoryPicker(testPage);
+      const pasteInput = testPage.getByTestId("task-repository-picker-input");
       await pasteInput.fill("https://github.com/branch-test-owner/branch-test-repo");
       await pasteInput.press("Enter");
       await testPage.getByTestId("executor-profile-selector").click();
       await testPage.getByRole("option", { name: /E2E Fresh Branch GH/i }).click();
 
-      // Toggle is gated behind isLocalExecutor && !useRemote, so it must not render.
+      // Fresh branches are available only for local repository rows.
       await expect(testPage.getByTestId("fresh-branch-toggle")).toHaveCount(0);
     } finally {
       await apiClient.deleteExecutorProfile(profile.id).catch(() => {});

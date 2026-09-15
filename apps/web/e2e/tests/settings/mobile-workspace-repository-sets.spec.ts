@@ -33,6 +33,13 @@ test.describe("Mobile workspace repository sets", () => {
       const dropdown = testPage.getByTestId(`repository-set-base-dropdown-${repository.id}`);
       const list = dropdown.getByRole("listbox");
       await expect(list.getByRole("option", { name: /scroll-test-39/ })).toBeAttached();
+      await expect
+        .poll(async () => {
+          const box = await list.boundingBox();
+          const viewport = testPage.viewportSize();
+          return Boolean(box && viewport && box.y >= 0 && box.y + box.height <= viewport.height);
+        })
+        .toBe(true);
       const box = await list.boundingBox();
       expect(box).not.toBeNull();
       const cdp = await testPage.context().newCDPSession(testPage);

@@ -353,8 +353,8 @@ test.describe("@-mention autocomplete: adversarial QA", () => {
     await kanban.createTaskButton.first().click();
     await expect(testPage.getByTestId("create-task-dialog")).toBeVisible();
 
-    // Use scratch mode so submit does not depend on a pre-selected repository.
-    await testPage.getByTestId("source-mode-scratch").click();
+    // Remove the seeded empty row so submit does not depend on a repository.
+    await testPage.getByTestId("remove-repo-chip").first().click();
     await testPage.getByTestId("task-title-input").fill("qa-submit-task");
     const editor = testPage.getByTestId("task-description-input");
     await editor.click();

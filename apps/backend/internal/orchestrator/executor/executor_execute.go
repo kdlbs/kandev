@@ -2120,6 +2120,9 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 			}
 		}
 	}
+	if err := validateWorkspaceFoldersForExecutor(req.ExecutorType, req.WorkspaceFolders); err != nil {
+		return nil, execConfig, err
+	}
 
 	// Activate config-mode MCP tools when config_mode is set in session metadata.
 	if isConfigModeSession(session) {
@@ -2131,6 +2134,13 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	}
 
 	return req, execConfig, nil
+}
+
+func validateWorkspaceFoldersForExecutor(executorType string, folders []WorkspaceFolderSpec) error {
+	if len(folders) == 0 || executorType == string(models.ExecutorTypeLocal) || executorType == "local_pc" || executorType == string(models.ExecutorTypeWorktree) {
+		return nil
+	}
+	return fmt.Errorf("workspace folders are not supported by executor %q", executorType)
 }
 
 func workspaceReuseAllowed(existingEnv *models.TaskEnvironment, requestedExecutorType string, required, repoBacked bool) bool {

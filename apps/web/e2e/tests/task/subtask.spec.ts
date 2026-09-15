@@ -5,6 +5,7 @@ import type { Locator } from "@playwright/test";
 import { expect, resetSeedRepositoryCheckout, test } from "../../fixtures/test-base";
 import { makeGitEnv } from "../../helpers/git-helper";
 import { useRegularMode } from "../../helpers/regular-mode";
+import { openTaskRepositoryPicker } from "../../helpers/task-repository-picker";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 
@@ -317,8 +318,12 @@ test.describe("Subtask basics", () => {
       let submittedRepositories: Array<Record<string, unknown>> | undefined;
       testPage.on("request", (request) => {
         if (request.method() !== "POST" || !request.url().endsWith("/api/v1/tasks")) return;
-        submittedRepositories = (JSON.parse(request.postData() ?? "{}").repositories ??
-          []) as Array<Record<string, unknown>>;
+        const payload = JSON.parse(request.postData() ?? "{}") as {
+          workspace_sources?: Array<Record<string, unknown> & { kind?: string }>;
+        };
+        submittedRepositories = (payload.workspace_sources ?? []).filter(
+          (source) => source.kind === "repository",
+        );
       });
       await dialog.getByTestId("subtask-title-input").fill(childTitle);
       await dialog.getByTestId("subtask-prompt-input").fill("/e2e:simple-message");
@@ -918,21 +923,15 @@ test.describe("Subtask dialog feature parity", () => {
     await session.waitForLoad();
     await session.waitForChatIdle({ timeout: 30_000 });
 
-    // 3. Open the subtask dialog and toggle to GitHub URL mode.
+    // 3. Open the subtask dialog and enter the GitHub URL through the shared picker.
     await session.openCreateSubtaskForSidebarTask("Subtask GH URL Parent");
     const titleInput = testPage.getByTestId("subtask-title-input");
     await expect(titleInput).toBeVisible({ timeout: 5_000 });
 
-    // Switch to Remote tab. The subtask form-state runs
-    // useRemoteReposSeedEffect (shared with the create-task dialog), which
-    // auto-seeds an empty chip row on the initial toggle.
-    const remoteModeBtn = testPage.getByTestId("source-mode-remote");
-    await expect(remoteModeBtn).toBeVisible({ timeout: 5_000 });
-    await remoteModeBtn.click();
-    const chipTrigger = testPage.getByTestId("remote-repo-chip-trigger").first();
-    await expect(chipTrigger).toBeVisible({ timeout: 5_000 });
-    await chipTrigger.click();
-    const urlInput = testPage.getByTestId("remote-repo-input").last();
+    await expect(testPage.getByTestId("remove-repo-chip").first()).toBeVisible();
+    await testPage.getByTestId("remove-repo-chip").first().click();
+    await openTaskRepositoryPicker(testPage);
+    const urlInput = testPage.getByTestId("task-repository-picker-input");
     await expect(urlInput).toBeVisible({ timeout: 5_000 });
     await urlInput.fill("https://github.com/subtask-owner/subtask-repo");
     await urlInput.press("Enter");
@@ -1096,17 +1095,20 @@ test.describe("Subtask dialog feature parity", () => {
     await session.waitForChatIdle({ timeout: 30_000 });
 
     // 3. Open the subtask dialog. The first chip is seeded with the parent's
-    //    repo. Click the "+ add repository" button to append a second chip,
-    //    then point that chip at repo B.
+    //    repo. Use the shared picker to append a second local row for repo B.
     await session.openCreateSubtaskForSidebarTask("Subtask MultiRepo Parent");
     const titleInput = testPage.getByTestId("subtask-title-input");
     await expect(titleInput).toBeVisible({ timeout: 5_000 });
 
-    await testPage.getByTestId("add-repository").click();
+    await openTaskRepositoryPicker(testPage);
+    await testPage.getByTestId("task-repository-source-local").click();
+    const localOption = testPage
+      .getByTestId("task-repository-local-option")
+      .filter({ hasText: otherRepoName });
+    await expect(localOption).toBeVisible({ timeout: 5_000 });
+    await localOption.click();
     const chipTriggers = testPage.getByTestId("repo-chip-trigger");
     await expect(chipTriggers).toHaveCount(2, { timeout: 5_000 });
-    await chipTriggers.nth(1).click();
-    await testPage.getByRole("option", { name: new RegExp(otherRepoName) }).click();
     await expect(chipTriggers.nth(1)).toContainText(otherRepoName);
 
     // 4. Submit.

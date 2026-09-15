@@ -20,6 +20,7 @@ import {
   updatePluginSettings,
 } from "./plugins-api";
 import { ApiError } from "../client";
+import { subscribeIntegrationAvailability } from "@/lib/integrations/integration-availability-events";
 
 type FetchInput = Parameters<typeof fetch>[0];
 type FetchInit = Parameters<typeof fetch>[1];
@@ -258,6 +259,17 @@ describe("updatePluginConfig", () => {
     expect(init?.method).toBe("PATCH");
     expect(JSON.parse(String(init?.body))).toEqual({ config: { apiKey: "x" } });
     expect(result).toEqual({ updated: true });
+  });
+
+  it("invalidates repository-provider readiness after saving configuration", async () => {
+    fetchSpy.mockResolvedValueOnce(jsonResponse({ updated: true }));
+    const onAvailabilityInvalidated = vi.fn();
+    const unsubscribe = subscribeIntegrationAvailability(onAvailabilityInvalidated);
+
+    await updatePluginConfig(PLUGIN_ID, { apiKey: "x" });
+
+    unsubscribe();
+    expect(onAvailabilityInvalidated).toHaveBeenCalledOnce();
   });
 });
 

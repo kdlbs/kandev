@@ -6,6 +6,7 @@ import type { DialogFormState } from "./task-create-dialog-types";
 type UrlErrorFake = {
   useRemote?: boolean;
   remoteRepos?: Array<{ key: string; url: string; branch: string; source: "paste" | "picker" }>;
+  repositorySelections?: DialogFormState["repositorySelections"];
   setGitHubUrlError?: ReturnType<typeof vi.fn>;
 };
 
@@ -17,6 +18,7 @@ function makeUrlErrorFs(overrides: UrlErrorFake = {}): DialogFormState {
     useRemote: overrides.useRemote ?? true,
     setGitHubUrlError: overrides.setGitHubUrlError ?? vi.fn(),
     remoteRepos,
+    repositorySelections: overrides.repositorySelections,
   } as unknown as DialogFormState;
 }
 
@@ -62,5 +64,26 @@ describe("useGitHubUrlErrorEffect", () => {
     });
     renderHook(() => useGitHubUrlErrorEffect(fs, true));
     expect(setGitHubUrlError).toHaveBeenCalledWith(null);
+  });
+
+  it("does not validate canonical non-GitHub selections as GitHub URLs", () => {
+    const setGitHubUrlError = vi.fn();
+    const fs = makeUrlErrorFs({
+      setGitHubUrlError,
+      repositorySelections: [
+        {
+          kind: "remote",
+          key: "remote-0",
+          url: "https://gitlab.com/acme/site",
+          branch: "main",
+          source: "picker",
+          provider: "gitlab",
+        },
+      ],
+    });
+
+    renderHook(() => useGitHubUrlErrorEffect(fs, true));
+
+    expect(setGitHubUrlError).toHaveBeenLastCalledWith(null);
   });
 });

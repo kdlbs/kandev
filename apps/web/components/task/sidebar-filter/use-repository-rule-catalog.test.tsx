@@ -70,6 +70,7 @@ describe("useRepositoryRuleCatalog", () => {
           cloneUrl: "https://bitbucket.org/platform/api.git",
         },
       ],
+      getAvailability: async () => ({ configured: true, enabled: true, tested: true }),
     });
     mocks.fetchAccessibleRepos.mockRejectedValue(new Error("GitHub not configured"));
     mocks.fetchGitHubStatus.mockResolvedValue({

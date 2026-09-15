@@ -209,6 +209,7 @@ describe("useEnsureUserSettings — fetched settings overlays", () => {
       agentProfileId: "agent-2",
       executorProfileId: "exec-profile-1",
       workflowIdsByWorkspace: {},
+      workspaceSourcesByWorkspace: {},
       synced: true,
     });
   });

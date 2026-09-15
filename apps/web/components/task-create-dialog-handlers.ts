@@ -2,6 +2,7 @@
 
 import { useCallback } from "react";
 import type { Executor, Repository } from "@/lib/types/http";
+import type { WorkspaceSourceRequest } from "@/lib/types/http-workspace-sources";
 import type { DialogFormState, TaskRepoRow } from "@/components/task-create-dialog-types";
 import { createDebugLogger } from "@/lib/debug/log";
 import type { TaskCreateLastUsedState } from "@/lib/state/slices/settings/types";
@@ -14,6 +15,7 @@ type TaskCreateLastUsedPatch = {
   executor_profile_id?: string | null;
   workspace_id?: string | null;
   workflow_id?: string | null;
+  workspace_sources?: NonNullable<TaskCreateLastUsedState["workspaceSourcesByWorkspace"]>[string];
 };
 
 type TaskCreateLastUsedPayload = {
@@ -25,6 +27,7 @@ type TaskCreateLastUsedPayload = {
     checkout_branch?: string;
     fresh_branch?: boolean;
   }>;
+  workspace_sources?: WorkspaceSourceRequest[];
   agent_profile_id?: string;
   executor_profile_id?: string;
 };
@@ -152,6 +155,14 @@ function taskCreateLastUsedSettingsMatchQueue(
         return synced[workspaceId] === workflowId;
       });
     }
+    if (key === "workspaceSourcesByWorkspace") {
+      const queued = value as NonNullable<TaskCreateLastUsedState["workspaceSourcesByWorkspace"]>;
+      const synced = settings?.workspaceSourcesByWorkspace ?? {};
+      return Object.entries(queued).every(([workspaceId, sources]) => {
+        if (!Object.prototype.hasOwnProperty.call(synced, workspaceId)) return false;
+        return JSON.stringify(synced[workspaceId] ?? []) === JSON.stringify(sources);
+      });
+    }
     return settings?.[key as keyof TaskCreateLastUsedState] === value;
   });
 }
@@ -167,6 +178,10 @@ function mapTaskCreateLastUsedPatch(
     workflowIdsByWorkspace:
       pending.workspace_id && pending.workflow_id
         ? { [pending.workspace_id]: pending.workflow_id }
+        : undefined,
+    workspaceSourcesByWorkspace:
+      pending.workspace_id && pending.workspace_sources !== undefined
+        ? { [pending.workspace_id]: pending.workspace_sources }
         : undefined,
   };
 }
@@ -193,18 +208,77 @@ export function queueTaskCreateLastUsedFromPayload(
 ) {
   if (!payload) return;
   const previousWorkflowIdsByWorkspace = lastQueuedLastUsed.workflowIdsByWorkspace;
-  lastQueuedLastUsed = previousWorkflowIdsByWorkspace
-    ? { workflowIdsByWorkspace: previousWorkflowIdsByWorkspace }
-    : {};
+  const previousWorkspaceSourcesByWorkspace = lastQueuedLastUsed.workspaceSourcesByWorkspace;
+  lastQueuedLastUsed = {
+    ...(previousWorkflowIdsByWorkspace
+      ? { workflowIdsByWorkspace: previousWorkflowIdsByWorkspace }
+      : {}),
+    ...(previousWorkspaceSourcesByWorkspace
+      ? { workspaceSourcesByWorkspace: previousWorkspaceSourcesByWorkspace }
+      : {}),
+  };
   const firstWorkspaceRepo = payload.repositories?.find((repo) => repo.repository_id);
+  const firstSourceRepo = payload.workspace_sources?.find(
+    (source): source is Extract<WorkspaceSourceRequest, { kind: "repository" }> =>
+      source.kind === "repository" && Boolean(source.repository_id),
+  );
+  const sourceBranch = payload.workspace_sources?.find((source) => source.kind === "repository");
   syncTaskCreateLastUsed({
     workspace_id: payload.workspace_id,
     workflow_id: payload.workflow_id,
-    repository_id: firstWorkspaceRepo?.repository_id,
-    branch: firstWorkspaceRepo ? taskCreateLastUsedPayloadBranch(firstWorkspaceRepo) : undefined,
+    repository_id: firstWorkspaceRepo?.repository_id ?? firstSourceRepo?.repository_id,
+    branch: taskCreateLastUsedBranch(firstWorkspaceRepo, sourceBranch),
     agent_profile_id: payload.agent_profile_id,
     executor_profile_id: payload.executor_profile_id,
+    workspace_sources:
+      payload.workspace_sources === undefined
+        ? undefined
+        : payload.workspace_sources.map(mapTaskCreateLastUsedSource),
   });
+}
+
+function mapTaskCreateLastUsedSource(
+  source: WorkspaceSourceRequest,
+): NonNullable<TaskCreateLastUsedState["workspaceSourcesByWorkspace"]>[string][number] {
+  if (source.kind === "folder") {
+    return {
+      kind: source.kind,
+      ...presentSourceFields({
+        local_path: source.local_path,
+        display_name: source.display_name,
+      }),
+    };
+  }
+  return {
+    kind: source.kind,
+    ...presentSourceFields({
+      repository_id: source.repository_id,
+      local_path: source.local_path,
+      github_url: source.github_url,
+      remote_url: source.remote_url,
+      provider: source.provider,
+      provider_host: source.provider_host,
+      provider_scope: source.provider_scope,
+      provider_repo_id: source.provider_repo_id,
+      provider_owner: source.provider_owner,
+      provider_name: source.provider_name,
+      checkout_source: source.checkout_source,
+      expected_origin: source.expected_origin,
+      base_branch: source.base_branch,
+      checkout_branch: source.checkout_branch,
+      branch_policy_id: source.branch_policy_id,
+      pr_number: source.pr_number,
+    }),
+  };
+}
+
+function presentSourceFields<T extends Record<string, unknown>>(fields: T): Partial<T> {
+  return Object.fromEntries(Object.entries(fields).filter(sourceFieldIsPresent)) as Partial<T>;
+}
+
+function sourceFieldIsPresent([key, value]: [string, unknown]): boolean {
+  if (key === "pr_number") return value !== undefined;
+  return Boolean(value);
 }
 
 function mergeTaskCreateLastUsedState(
@@ -218,6 +292,12 @@ function mergeTaskCreateLastUsedState(
       ...patch.workflowIdsByWorkspace,
     };
   }
+  if (patch.workspaceSourcesByWorkspace) {
+    merged.workspaceSourcesByWorkspace = {
+      ...(previous.workspaceSourcesByWorkspace ?? {}),
+      ...patch.workspaceSourcesByWorkspace,
+    };
+  }
   return merged;
 }
 
@@ -226,6 +306,17 @@ function taskCreateLastUsedPayloadBranch(
 ) {
   if (repo.fresh_branch) return firstNonEmpty(repo.base_branch, repo.checkout_branch);
   return firstNonEmpty(repo.checkout_branch, repo.base_branch);
+}
+
+function taskCreateLastUsedBranch(
+  workspaceRepo: NonNullable<TaskCreateLastUsedPayload["repositories"]>[number] | undefined,
+  sourceRepo: WorkspaceSourceRequest | undefined,
+) {
+  if (workspaceRepo) return taskCreateLastUsedPayloadBranch(workspaceRepo);
+  if (sourceRepo?.kind === "repository") {
+    return firstNonEmpty(sourceRepo.checkout_branch, sourceRepo.base_branch);
+  }
+  return undefined;
 }
 
 function firstNonEmpty(...values: Array<string | undefined>) {
@@ -273,6 +364,9 @@ function useRepositoryHandlers(fs: DialogFormState, repositories: Repository[]) 
             branch: "",
             baseBranch: undefined,
             branchPolicyId: undefined,
+            checkoutSource: undefined,
+            expectedOrigin: undefined,
+            remoteBranches: undefined,
           }
         : {
             repositoryId: undefined,
@@ -280,6 +374,9 @@ function useRepositoryHandlers(fs: DialogFormState, repositories: Repository[]) 
             branch: "",
             baseBranch: undefined,
             branchPolicyId: undefined,
+            checkoutSource: undefined,
+            expectedOrigin: undefined,
+            remoteBranches: undefined,
           };
       fs.updateRepository(key, patch);
       if (wasLocalPath !== isLocalPath) {
@@ -332,6 +429,9 @@ function useProfileAndNameHandlers(fs: DialogFormState) {
   const handleExecutorProfileChange = useCallback(
     (value: string) => {
       fs.setExecutorProfileId(value);
+      fs.setExecutorChoiceTouched?.(true);
+      fs.setAutomaticExecutorRestore?.(null);
+      fs.setFolderOnlyExecutorNotice?.(false);
       syncTaskCreateLastUsed({ executor_profile_id: value });
     },
     [fs],
@@ -449,6 +549,45 @@ export function useDialogHandlers(
     context?.executors ?? [],
     fs.executorProfileId,
   );
+  const currentExecutorType =
+    context?.executors
+      ?.find((executor) => executor.id === fs.executorId)
+      ?.profiles?.find((profile) => profile.id === fs.executorProfileId)?.executor_type ??
+    context?.executors?.find((executor) => executor.id === fs.executorId)?.type;
+  const handleFolderSelectionAdded = useCallback(
+    (wasEmpty: boolean) => {
+      if (!wasEmpty || currentExecutorType !== "worktree") return;
+      fs.setFolderOnlyExecutorNotice?.(true);
+      if (!directLocalExecutorSelection) return;
+      fs.setAutomaticExecutorRestore?.({
+        executorId: fs.executorId,
+        executorProfileId: fs.executorProfileId,
+      });
+      fs.setExecutorId(directLocalExecutorSelection.executorId);
+      fs.setExecutorProfileId(directLocalExecutorSelection.executorProfileId);
+    },
+    [currentExecutorType, directLocalExecutorSelection, fs],
+  );
+  const handleRepositorySelectionAdded = useCallback(
+    (wasFolderOnly: boolean) => {
+      if (!wasFolderOnly || fs.executorChoiceTouched || !fs.automaticExecutorRestore) return;
+      const restore = fs.automaticExecutorRestore;
+      fs.setExecutorId(restore.executorId);
+      fs.setExecutorProfileId(restore.executorProfileId);
+      fs.setAutomaticExecutorRestore?.(null);
+      fs.setFolderOnlyExecutorNotice?.(false);
+    },
+    [fs],
+  );
+  const handleAllWorkspaceSourcesRemoved = useCallback(() => {
+    if (!fs.executorChoiceTouched && fs.automaticExecutorRestore) {
+      const restore = fs.automaticExecutorRestore;
+      fs.setExecutorId(restore.executorId);
+      fs.setExecutorProfileId(restore.executorProfileId);
+    }
+    fs.setAutomaticExecutorRestore?.(null);
+    fs.setFolderOnlyExecutorNotice?.(false);
+  }, [fs]);
   const handleLocalRepositoryCreated = useCallback(
     (rowKey: string, repository: Repository) => {
       if (!context?.workspaceId) return;
@@ -472,5 +611,8 @@ export function useDialogHandlers(
     ...gh,
     directLocalExecutorSelection,
     handleLocalRepositoryCreated,
+    onFolderSelectionAdded: handleFolderSelectionAdded,
+    onRepositorySelectionAdded: handleRepositorySelectionAdded,
+    onAllWorkspaceSourcesRemoved: handleAllWorkspaceSourcesRemoved,
   };
 }

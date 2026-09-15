@@ -81,6 +81,81 @@ describe("computeHasAllBranches", () => {
       ),
     ).toBe(true);
   });
+
+  it("accepts a saved base branch on a workspace repository row", () => {
+    expect(
+      computeHasAllBranches(
+        formState({
+          repositorySelections: [
+            {
+              kind: "local",
+              key: "one",
+              repositoryId: "repo-one",
+              branch: "",
+              baseBranch: "develop",
+            },
+          ],
+        }),
+      ),
+    ).toBe(true);
+  });
+});
+
+describe("computeHasAllBranches provider readiness", () => {
+  it("blocks a picker row when its provider connection becomes unavailable", () => {
+    const selection = {
+      kind: "remote" as const,
+      key: "remote-1",
+      url: "https://bitbucket.example.test/acme/app",
+      branch: "main",
+      source: "picker" as const,
+      provider: "bitbucket",
+    };
+
+    expect(
+      computeHasAllBranches(
+        formState({
+          repositorySelections: [selection],
+          remoteProviderReadiness: { bitbucket: "unavailable" },
+        }),
+      ),
+    ).toBe(false);
+    expect(
+      computeHasAllBranches(
+        formState({
+          repositorySelections: [selection],
+          remoteProviderReadiness: { bitbucket: "ready" },
+        }),
+      ),
+    ).toBe(true);
+    expect(
+      computeHasAllBranches(
+        formState({
+          repositorySelections: [selection],
+          remoteProviderReadiness: undefined,
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it("does not gate a supported pasted URL on provider catalog readiness", () => {
+    expect(
+      computeHasAllBranches(
+        formState({
+          repositorySelections: [
+            {
+              kind: "remote",
+              key: "remote-1",
+              url: "https://bitbucket.example.test/acme/app",
+              branch: "main",
+              source: "paste",
+            },
+          ],
+          remoteProviderReadiness: { bitbucket: "unavailable" },
+        }),
+      ),
+    ).toBe(true);
+  });
 });
 
 describe("localRepositoryCreationEnabled", () => {

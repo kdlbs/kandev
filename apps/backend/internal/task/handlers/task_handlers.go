@@ -295,6 +295,8 @@ func convertToServiceRepos(repos []dto.TaskRepositoryInput) []service.TaskReposi
 			ProviderRepoID:     r.ProviderRepoID,
 			ProviderOwner:      r.ProviderOwner,
 			ProviderName:       r.ProviderName,
+			CheckoutSource:     r.CheckoutSource,
+			ExpectedOrigin:     r.ExpectedOrigin,
 			PreserveBaseBranch: r.PreserveBaseBranch,
 		}
 	}

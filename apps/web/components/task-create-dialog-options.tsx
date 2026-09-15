@@ -306,19 +306,33 @@ export function computeExecutorHint(
   executors: Executor[],
   executorId: string,
   repoCount: number,
+  sourceCount = repoCount,
+  folderCount = 0,
 ): string | null {
   const selectedExecutor = executors.find((e: Executor) => e.id === executorId);
-  if (selectedExecutor?.type === "worktree") {
+  if (!selectedExecutor) return null;
+  return executorHintForType(selectedExecutor.type, repoCount, sourceCount, folderCount);
+}
+
+function executorHintForType(
+  executorType: string,
+  repoCount: number,
+  sourceCount: number,
+  folderCount: number,
+): string | null {
+  if (sourceCount === 0) return t("task:executorHintScratch");
+  if (folderCount > 0 && repoCount === 0) return t("task:executorHintFolderOnly");
+  if (folderCount > 0) return t("task:executorHintMixedSources");
+  if (executorType === "worktree") {
     if (repoCount > 1) {
       return t("task:executorHintWorktreeMulti");
     }
     return t("task:executorHintWorktreeSingle");
   }
-  if (selectedExecutor?.type === "local_docker" || selectedExecutor?.type === "remote_docker") {
+  if (executorType === "local_docker" || executorType === "remote_docker") {
     return t("task:executorHintDocker");
   }
-  if (selectedExecutor?.type === "local" || selectedExecutor?.type === "local_pc")
-    return t("task:executorHintLocal");
+  if (executorType === "local" || executorType === "local_pc") return t("task:executorHintLocal");
   return null;
 }
 
@@ -326,10 +340,12 @@ export function useExecutorHint(
   executors: Executor[],
   executorId: string,
   repoCount: number,
+  sourceCount = repoCount,
+  folderCount = 0,
 ): string | null {
   return useMemo(
-    () => computeExecutorHint(executors, executorId, repoCount),
-    [executors, executorId, repoCount],
+    () => computeExecutorHint(executors, executorId, repoCount, sourceCount, folderCount),
+    [executors, executorId, repoCount, sourceCount, folderCount],
   );
 }
 

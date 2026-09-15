@@ -13,6 +13,40 @@ vi.mock("@/hooks/domains/github/use-branches-by-url", () => ({
 }));
 
 describe("useSubtaskFormState — remoteRepos seed", () => {
+  it("keeps local and remote additions in one ordered selection list", () => {
+    const { result } = renderHook(() => useSubtaskFormState("ws-1"));
+
+    act(() => {
+      result.current.appendRepositorySelection({
+        kind: "local",
+        repositoryId: "repo-local",
+        branch: "main",
+      });
+      result.current.appendRepositorySelection({
+        kind: "remote",
+        url: "https://github.com/acme/remote",
+        branch: "develop",
+        source: "paste",
+      });
+      result.current.appendRepositorySelection({
+        kind: "local",
+        localPath: "/work/second",
+        branch: "trunk",
+      });
+    });
+
+    expect(result.current.repositorySelections.map((selection) => selection.kind)).toEqual([
+      "local",
+      "remote",
+      "local",
+    ]);
+    expect(
+      result.current.repositorySelections.map((selection) =>
+        selection.kind === "folder" ? undefined : selection.branch,
+      ),
+    ).toEqual(["main", "develop", "trunk"]);
+  });
+
   it("seeds one empty remoteRepos row when useRemote toggles on with an empty list", () => {
     const { result } = renderHook(() => useSubtaskFormState("ws-1"));
     expect(result.current.remoteRepos).toHaveLength(0);

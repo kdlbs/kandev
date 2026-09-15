@@ -37,6 +37,13 @@ export function wrapRepositoryProviderLifecycle(
         provider.inspectURL({ workspaceId, url, signal: lifecycleSignal }),
       ).then((repository) => (repository ? bindRepositoryProvider(provider.id, repository) : null)),
   };
+  if (provider.getAvailability) {
+    const getAvailability = provider.getAvailability;
+    wrapped.getAvailability = ({ workspaceId, signal }) =>
+      runAbortable(signal, (lifecycleSignal) =>
+        getAvailability({ workspaceId, signal: lifecycleSignal }),
+      );
+  }
   if (provider.createChangeRequest) {
     const createChangeRequest = provider.createChangeRequest;
     wrapped.createChangeRequest = (context) =>

@@ -30,6 +30,15 @@ const DEFAULT_THREAD_VIEW = {
 const AGENT_PROFILE_READY_TIMEOUT_MS = 30_000;
 const AGENT_PROFILE_READY_POLL_MS = 250;
 
+function defaultTaskCreateWorkspaceSource(repositoryId: string) {
+  return {
+    kind: "repository" as const,
+    repository_id: repositoryId,
+    base_branch: "main",
+    checkout_branch: "main",
+  };
+}
+
 function isFetchTransportError(error: unknown): boolean {
   return error instanceof TypeError && /fetch failed|network error/i.test(error.message);
 }
@@ -386,6 +395,9 @@ export const test = backendFixture.extend<
           branch: "main",
           agent_profile_id: seedData.agentProfileId,
           workflow_ids_by_workspace: { [seedData.workspaceId]: seedData.workflowId },
+          workspace_sources_by_workspace: {
+            [seedData.workspaceId]: [defaultTaskCreateWorkspaceSource(seedData.repositoryId)],
+          },
         },
         // Reset to default kanban view. Pipeline-view tests switch this to
         // "graph2", which persists per-workspace; without this reset the next
@@ -653,6 +665,9 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
         branch: "main",
         agent_profile_id: seedData.agentProfileId,
         workflow_ids_by_workspace: { [seedData.workspaceId]: seedData.workflowId },
+        workspace_sources_by_workspace: {
+          [seedData.workspaceId]: [defaultTaskCreateWorkspaceSource(seedData.repositoryId)],
+        },
       },
       sidebar_task_color_automation: { enabled: false, rules: [] },
     });

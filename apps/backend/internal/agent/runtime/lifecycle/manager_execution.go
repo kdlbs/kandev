@@ -172,11 +172,15 @@ func (m *Manager) GetOrEnsureExecutionForEnvironment(ctx context.Context, taskEn
 	if info.TaskEnvironmentID != taskEnvironmentID {
 		return nil, fmt.Errorf("workspace info resolved environment %s, want %s", info.TaskEnvironmentID, taskEnvironmentID)
 	}
+	if err := validateWorkspaceFolderExecutor(info.ExecutorType, info.WorkspaceFolders); err != nil {
+		return nil, err
+	}
+	m.resolveWorkspaceInfoPath(ctx, info)
 	if info.WorkspacePath == "" {
 		return nil, fmt.Errorf("%w: task environment %s has no workspace path yet", ErrSessionWorkspaceNotReady, taskEnvironmentID)
 	}
 	if err := validateWorkspaceInfoForExecution(ctx, info); err != nil {
-		return nil, fmt.Errorf("%w: repository workspace failed validation", ErrSessionWorkspaceNotReady)
+		return nil, fmt.Errorf("%w: workspace failed validation", ErrSessionWorkspaceNotReady)
 	}
 	if info.SessionID == "" {
 		return nil, fmt.Errorf("task environment %s has no task session", taskEnvironmentID)
@@ -335,6 +339,10 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 	} else if info.TaskID == "" || info.TaskID != taskID {
 		return nil, fmt.Errorf("session %s is not owned by task %s", sessionID, taskID)
 	}
+	if err := validateWorkspaceFolderExecutor(info.ExecutorType, info.WorkspaceFolders); err != nil {
+		return nil, err
+	}
+	m.resolveWorkspaceInfoPath(ctx, info)
 	if err := m.ensureWorkspaceSessionAdmitted(ctx, taskID, info); err != nil {
 		return nil, err
 	}
@@ -357,7 +365,7 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 		return nil, fmt.Errorf("%w: session %s has no workspace path yet", ErrSessionWorkspaceNotReady, sessionID)
 	}
 	if err := validateWorkspaceInfoForExecution(ctx, info); err != nil {
-		return nil, fmt.Errorf("%w: repository workspace failed validation", ErrSessionWorkspaceNotReady)
+		return nil, fmt.Errorf("%w: workspace failed validation", ErrSessionWorkspaceNotReady)
 	}
 
 	m.logger.Info("creating execution for task session",
@@ -413,8 +421,20 @@ func (m *Manager) ensureWorkspaceExecutionLocked(ctx context.Context, taskID, se
 // the selected Git checkout. Remote executors validate inside their backend
 // and are intentionally excluded from host filesystem inspection.
 func validateWorkspaceInfoForExecution(ctx context.Context, info *WorkspaceInfo) error {
-	if info == nil || len(info.WorkspaceRepositories) == 0 || models.IsRemoteExecutorType(models.ExecutorType(info.ExecutorType)) {
+	if info == nil {
 		return nil
+	}
+	if err := validateWorkspaceFolderExecutor(info.ExecutorType, info.WorkspaceFolders); err != nil {
+		return err
+	}
+	if models.IsRemoteExecutorType(models.ExecutorType(info.ExecutorType)) {
+		return nil
+	}
+	if len(info.WorkspaceRepositories) == 0 {
+		if len(info.WorkspaceFolders) == 0 {
+			return nil
+		}
+		return validateWorkspaceFolderTargets(info.WorkspacePath, info.WorkspaceFolders)
 	}
 	if info.TaskEnvironmentID != "" &&
 		(info.ValidatedTaskEnvironmentID == "" || info.ValidatedTaskEnvironmentID != info.TaskEnvironmentID ||
@@ -423,6 +443,22 @@ func validateWorkspaceInfoForExecution(ctx context.Context, info *WorkspaceInfo)
 	}
 	if info.WorkspacePath == "" {
 		return ErrSessionWorkspaceNotReady
+	}
+	managedRoot := len(info.WorkspaceFolders) > 0 &&
+		len(info.WorkspaceRepositories)+len(info.WorkspaceFolders) > 1
+	if managedRoot {
+		if err := validateWorkspaceFolderTargets(info.WorkspacePath, info.WorkspaceFolders); err != nil {
+			return err
+		}
+		// The links may not exist yet after a restart or a failed cleanup. Verify
+		// the durable repository source here and let the creation path recreate
+		// its named sibling before agentctl is started.
+		for _, repository := range info.WorkspaceRepositories {
+			if err := validateLocalRepositoryWorkspace(ctx, repository.RepositoryPath, repository.RepositoryPath); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	for index, repository := range info.WorkspaceRepositories {
 		candidate := info.WorkspacePath
@@ -581,6 +617,10 @@ func (m *Manager) createExecutionFromSessionInfo(ctx context.Context, sessionID 
 		return nil, fmt.Errorf("get workspace info for session %s: %w", sessionID, err)
 	}
 
+	if err := validateWorkspaceFolderExecutor(info.ExecutorType, info.WorkspaceFolders); err != nil {
+		return nil, err
+	}
+	m.resolveWorkspaceInfoPath(ctx, info)
 	if info.WorkspacePath == "" {
 		return nil, fmt.Errorf("%w: session %s has no workspace path configured", ErrSessionWorkspaceNotReady, sessionID)
 	}
@@ -901,7 +941,11 @@ type executionEnvironmentPreparation struct {
 }
 
 func (m *Manager) reconcileExecutionWorkspace(ctx context.Context, taskID string, info *WorkspaceInfo) error {
-	owner := ownedDirectoryLinkOwner(taskID, info.TaskDirName)
+	if err := validateWorkspaceFolderExecutor(info.ExecutorType, info.WorkspaceFolders); err != nil {
+		return err
+	}
+	m.resolveWorkspaceInfoPath(ctx, info)
+	owner := workspaceLinkOwner(taskID, info.TaskDirName)
 	if err := reconcileWorkspaceSources(ctx, info.WorkspacePath, info.WorkspaceFolders, owner); err != nil {
 		return err
 	}

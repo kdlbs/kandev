@@ -197,9 +197,14 @@ func (r *Repository) insertWorkspaceRepositoryTx(ctx context.Context, tx *sqlx.T
 	}
 	_, err = tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_repositories
-			(id, task_id, repository_id, base_branch, checkout_branch, position, metadata, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), taskRepo.ID, taskRepo.TaskID, taskRepo.RepositoryID, taskRepo.BaseBranch, taskRepo.CheckoutBranch, taskRepo.Position, string(metadata), taskRepo.CreatedAt, taskRepo.UpdatedAt)
+			(id, task_id, repository_id, base_branch, checkout_branch, branch_policy_id, branch_policy_name,
+			 branch_policy_base_branch, branch_policy_branch_template, branch_policy_pull_request_target,
+			 position, metadata, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), taskRepo.ID, taskRepo.TaskID, taskRepo.RepositoryID, taskRepo.BaseBranch, taskRepo.CheckoutBranch,
+		taskRepo.BranchPolicyID, taskRepo.BranchPolicyName, taskRepo.BranchPolicyBaseBranch,
+		taskRepo.BranchPolicyBranchTemplate, taskRepo.BranchPolicyPullRequestTarget,
+		taskRepo.Position, string(metadata), taskRepo.CreatedAt, taskRepo.UpdatedAt)
 	return err
 }
 

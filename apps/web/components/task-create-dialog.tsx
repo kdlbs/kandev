@@ -54,6 +54,8 @@ function CreateModeBody(props: DialogFormBodyProps) {
     onRowRepositoryChange,
     onRowBranchChange,
     onRowPolicyChange,
+    repositoryLocked,
+    branchLocked,
     onToggleRemote,
     onToggleFreshBranch,
     repositories,
@@ -61,11 +63,16 @@ function CreateModeBody(props: DialogFormBodyProps) {
     repositoriesRefreshing,
     freshBranchAvailable,
     isLocalExecutor,
+    executorSourcePolicy,
+    folderDisabledReason,
+    onFolderSelectionAdded,
+    onRepositorySelectionAdded,
+    onAllWorkspaceSourcesRemoved,
     localRepositoryCreation,
   } = props;
   const showTaskName =
     shouldShowTaskTitleField(isCreateMode, isEditMode, isTaskStarted) && !autoTitle;
-  const taskNameAutoFocus = !autoTitle && !isEditMode && !fs.useRemote;
+  const taskNameAutoFocus = !autoTitle && !isEditMode;
   return (
     <>
       <RepoChipsRow
@@ -73,6 +80,8 @@ function CreateModeBody(props: DialogFormBodyProps) {
         repositories={repositories}
         isTaskStarted={isTaskStarted}
         workspaceId={workspaceId}
+        repositoryLocked={repositoryLocked}
+        branchLocked={branchLocked}
         onRowRepositoryChange={onRowRepositoryChange}
         onRowBranchChange={onRowBranchChange}
         onRowPolicyChange={onRowPolicyChange}
@@ -84,6 +93,8 @@ function CreateModeBody(props: DialogFormBodyProps) {
         freshBranchEnabled={fs.freshBranchEnabled}
         onToggleFreshBranch={onToggleFreshBranch}
         isLocalExecutor={isLocalExecutor}
+        executorSourcePolicy={executorSourcePolicy}
+        folderDisabledReason={folderDisabledReason}
         lastUsedBranch={props.lastUsedBranch}
         userSettingsLoaded={props.userSettingsLoaded}
         onToggleNoRepository={props.onToggleNoRepository}
@@ -92,6 +103,9 @@ function CreateModeBody(props: DialogFormBodyProps) {
         onRefreshRepositories={onRefreshRepositories}
         repositoriesRefreshing={repositoriesRefreshing}
         repositorySets={props.repositorySets}
+        onFolderSelectionAdded={onFolderSelectionAdded}
+        onRepositorySelectionAdded={onRepositorySelectionAdded}
+        onAllWorkspaceSourcesRemoved={onAllWorkspaceSourcesRemoved}
       />
       {showTaskName && (
         <InlineTaskName

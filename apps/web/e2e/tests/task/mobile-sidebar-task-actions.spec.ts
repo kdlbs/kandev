@@ -774,8 +774,11 @@ test.describe("Mobile sidebar task actions", () => {
     );
     await dialog.getByTestId("subtask-workspace-mode-new").tap();
     await expect(parentBranchBadge).toHaveCount(0);
-    await expect(dialog.getByTestId("repo-chip-trigger")).toBeVisible();
-    await expect(dialog.getByTestId("branch-chip-trigger")).toBeVisible();
+    await dialog.getByTestId("mobile-repository-manager").tap();
+    const management = testPage.getByTestId("mobile-repository-management");
+    await expect(management.getByTestId("repo-chip-trigger")).toBeVisible();
+    await expect(management.getByTestId("branch-chip-trigger")).toBeVisible();
+    await testPage.getByTestId("mobile-repository-done").tap();
     await prCapture.screenshot("mobile-subtask-isolated-workspace", {
       caption: "Mobile New Subtask dialog with isolated workspace controls",
     });
@@ -854,10 +857,13 @@ test.describe("Mobile sidebar task actions", () => {
 
     const dialog = testPage.getByTestId("new-subtask-dialog");
     await expect(dialog).toBeVisible();
-    await expect(testPage.getByTestId("repo-chip-trigger")).toContainText("Mobile parent repo");
+    await dialog.getByTestId("mobile-repository-manager").tap();
+    const management = testPage.getByTestId("mobile-repository-management");
+    await expect(management.getByTestId("repo-chip-trigger")).toContainText("Mobile parent repo");
     await expect(testPage.getByTestId("subtask-title-input")).toHaveValue(
       /Mobile non-active parent \/ Subtask 1/,
     );
+    await testPage.getByTestId("mobile-repository-done").tap();
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
   });
 
@@ -979,12 +985,19 @@ test.describe("Mobile sidebar task actions", () => {
           .tap({ force: true });
         await expect(executorSelector).toContainText(localProfile.name, { timeout: 1_000 });
       }).toPass({ timeout: 10_000 });
-      await dialog.getByTestId("branch-chip-trigger").tap();
-      await testPage.getByRole("option", { name: new RegExp(policy.name) }).tap({ force: true });
-      await expect(dialog.getByTestId("fresh-branch-toggle")).toHaveAttribute(
+      await dialog.getByTestId("mobile-repository-manager").tap();
+      const management = testPage.getByTestId("mobile-repository-management");
+      const branchTrigger = management.getByTestId("branch-chip-trigger").first();
+      await branchTrigger.tap();
+      const branchPicker = testPage.getByRole("dialog", { name: "Branch" });
+      await expect(branchPicker).toBeVisible();
+      await branchPicker.getByRole("combobox").fill(policy.name);
+      await branchPicker.getByRole("option", { name: new RegExp(policy.name) }).tap();
+      await expect(management.getByTestId("fresh-branch-toggle")).toHaveAttribute(
         "aria-pressed",
         "true",
       );
+      await testPage.getByTestId("mobile-repository-done").tap();
       await dialog.getByTestId("subtask-title-input").fill(childTitle);
       await dialog.getByTestId("subtask-prompt-input").fill("/e2e:simple-message");
       const createSubtask = dialog.getByRole("button", { name: "Create Subtask", exact: true });

@@ -5,8 +5,10 @@ import type { ApiClient } from "../../helpers/api-client";
 import { PrAssetCapture } from "../../helpers/pr-asset-capture";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import { openTaskRepositoryPicker } from "../../helpers/task-repository-picker";
 
 const PLUGIN_ID = "kandev-plugin-e2e";
+const FIXTURE_PROVIDER = "fixture-source-control";
 const PACKAGE_PATH = path.resolve(
   __dirname,
   "../../../../../apps/backend/.build/kandev-plugin-e2e-1.0.0.tar.gz",
@@ -83,9 +85,11 @@ test.describe("Bitbucket plugin contract", () => {
     const kanban = new KanbanPage(testPage);
     await kanban.goto();
     await kanban.createTaskButton.first().click();
-    await testPage.getByTestId("source-mode-remote").click();
-    await testPage.getByTestId("remote-repo-chip-trigger").first().click();
-    await testPage.getByTestId("remote-repo-option").filter({ hasText: "TEAM/fixture" }).click();
+    await openTaskRepositoryPicker(testPage, { provider: FIXTURE_PROVIDER });
+    await testPage
+      .getByTestId("task-repository-remote-option")
+      .filter({ hasText: "TEAM/fixture" })
+      .click();
     await expect(testPage.getByTestId("remote-repo-chip-trigger").first()).toContainText(
       "TEAM/fixture",
     );

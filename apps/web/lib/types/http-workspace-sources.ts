@@ -47,13 +47,26 @@ export type WorkspaceRepositorySourceRequest = {
   kind: "repository";
   repository_id?: string;
   local_path?: string;
+  github_url?: string;
   remote_url?: string;
   provider?: string;
+  provider_host?: string;
+  provider_scope?: string;
   provider_repo_id?: string;
   provider_owner?: string;
   provider_name?: string;
-  base_branch: string;
+  /** Explicitly clone a verified host checkout origin in a remote executor. */
+  checkout_source?: "remote_origin";
+  /** Credential-free origin identity returned by server-side inspection. */
+  expected_origin?: string;
+  base_branch?: string;
   checkout_branch?: string;
+  branch_policy_id?: string;
+  pr_number?: number;
+  fresh_branch?: boolean;
+  new_branch_name?: string;
+  confirm_discard?: boolean;
+  consented_dirty_files?: string[];
 };
 
 export type WorkspaceFolderSourceRequest = {
