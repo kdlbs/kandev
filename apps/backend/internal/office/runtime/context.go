@@ -18,6 +18,7 @@ type Capabilities struct {
 	CanSpawnAgentRun    bool     `json:"spawn_agent_run"`
 	CanModifyAgents     bool     `json:"modify_agents"`
 	CanDeleteSkills     bool     `json:"delete_skills"`
+	CanHandoffTasks     bool     `json:"handoff_task"`
 	AllowedTaskIDs      []string `json:"allowed_task_ids"`
 }
 

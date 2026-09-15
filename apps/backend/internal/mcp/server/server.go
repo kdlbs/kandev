@@ -71,6 +71,7 @@ const mcpToolNameSuffix = "_kandev"
 // doesn't flag the literals as repeated string occurrences.
 const (
 	mcpKeyTaskID           = "task_id"
+	mcpKeySessionID        = "session_id"
 	mcpKeyRepositoryID     = "repository_id"
 	mcpKeyTaskRepositoryID = "task_repository_id"
 	mcpKeyRepositoryURL    = "repository_url"

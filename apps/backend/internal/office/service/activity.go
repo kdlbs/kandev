@@ -63,6 +63,22 @@ func (s *Service) ResolveRunForTask(ctx context.Context, taskID string) string {
 	return run.ID
 }
 
+// ResolveRunForTaskAndSession returns the currently-claimed office run id for
+// taskID if one exists AND that run's own session id matches sessionID, or
+// empty string otherwise. This is the run-attribution rule for activity
+// logged from the tool call itself: a wrong or stale match would misfile the
+// entry against a different agent's run on the same task.
+func (s *Service) ResolveRunForTaskAndSession(ctx context.Context, taskID, sessionID string) string {
+	if taskID == "" || sessionID == "" {
+		return ""
+	}
+	run, err := s.repo.GetClaimedRunByTaskID(ctx, taskID)
+	if err != nil || run == nil || run.SessionID != sessionID {
+		return ""
+	}
+	return run.ID
+}
+
 // AppendRunEvent writes a single run lifecycle event row and
 // publishes a per-run-id notification on the event bus so the WS
 // gateway can fan the event out to subscribed clients in real time.
