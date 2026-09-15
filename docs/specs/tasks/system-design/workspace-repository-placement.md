@@ -2,6 +2,7 @@
 status: draft
 system: tasks
 requirements:
+  - REQ-TASKS-ATTACH-WORKSPACE-SOURCES-001
   - REQ-TASKS-ATTACH-WORKSPACE-SOURCES-002
   - REQ-TASKS-ATTACH-WORKSPACE-SOURCES-003
   - REQ-TASKS-ATTACH-WORKSPACE-SOURCES-004
@@ -19,6 +20,7 @@ This design extends [Attach Workspace Sources](attach-workspace-sources.md), inc
 
 | Requirement | Design sections |
 | --- | --- |
+| REQ-TASKS-ATTACH-WORKSPACE-SOURCES-001 | Ownership; Preview contract; Failure behavior |
 | REQ-TASKS-ATTACH-WORKSPACE-SOURCES-002 | Data and migration; Launch and reuse; Presentation |
 | REQ-TASKS-ATTACH-WORKSPACE-SOURCES-003 | Placement; Nested worktrees; Expansion and recovery; Tracking and cleanup |
 | REQ-TASKS-ATTACH-WORKSPACE-SOURCES-004 | Preview contract; Presentation; Failure behavior |

@@ -717,7 +717,7 @@ func (m *workspaceSourceMaterializer) loadEnvironmentRepositoryInventory(ctx con
 	existing := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
 		if row != nil && row.RepositoryID != "" {
-			existing[environmentRepoInventoryKey(row.RepositoryID, row.BranchSlug, row.WorkspaceRelativePath)] = struct{}{}
+			existing[environmentRepoInventoryKey(row.RepositoryID, row.BranchSlug)] = struct{}{}
 		}
 	}
 	return existing, nil
@@ -734,7 +734,7 @@ func workspaceSourceInventoryRows(
 		if branch != nil && branch.repositoryID != "" {
 			materialized[workspaceSourceMaterializationKey(branch.taskRepositoryID, branch.repositoryID, branch.slug)] = branch
 			if branch.taskRepositoryID == "" {
-				materialized[environmentRepoInventoryKey(branch.repositoryID, branch.slug, "")] = branch
+				materialized[environmentRepoInventoryKey(branch.repositoryID, branch.slug)] = branch
 			}
 		}
 	}
@@ -744,7 +744,7 @@ func workspaceSourceInventoryRows(
 		if !ok {
 			continue
 		}
-		if _, found := existing[environmentRepoInventoryKey(row.RepositoryID, row.BranchSlug, row.WorkspaceRelativePath)]; found {
+		if _, found := existing[environmentRepoInventoryKey(row.RepositoryID, row.BranchSlug)]; found {
 			continue
 		}
 		rows = append(rows, row)
@@ -763,7 +763,7 @@ func workspaceSourceInventoryRow(
 	branchSlug := workspaceSourceBranchSlug(taskRepository)
 	branch := materialized[workspaceSourceMaterializationKey(taskRepository.ID, taskRepository.RepositoryID, branchSlug)]
 	if branch == nil {
-		branch = materialized[environmentRepoInventoryKey(taskRepository.RepositoryID, branchSlug, "")]
+		branch = materialized[environmentRepoInventoryKey(taskRepository.RepositoryID, branchSlug)]
 	}
 	if executorType == string(models.ExecutorTypeWorktree) && branch == nil {
 		// A worktree source that was not materialized has no physical checkout
@@ -798,11 +798,11 @@ func workspaceSourceMaterializationKey(taskRepositoryID, repositoryID, branchSlu
 	if taskRepositoryID != "" {
 		return "task-repository\x00" + taskRepositoryID
 	}
-	return environmentRepoInventoryKey(repositoryID, branchSlug, "")
+	return environmentRepoInventoryKey(repositoryID, branchSlug)
 }
 
-func environmentRepoInventoryKey(repositoryID, branchSlug, workspaceRelativePath string) string {
-	return repositoryID + "\x00" + branchSlug + "\x00" + workspaceRelativePath
+func environmentRepoInventoryKey(repositoryID, branchSlug string) string {
+	return repositoryID + "\x00" + branchSlug
 }
 
 // buildRemoteWorkspaceRepositoryBatch projects only the sources created by

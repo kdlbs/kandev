@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { TaskCreateAdvancedSettings } from "./task-create-dialog-advanced-settings";
+import { TaskCreateParentWorkspaceSetting } from "./task-create-dialog-parent-workspace-setting";
 
 const touchState = vi.hoisted(() => ({ enabled: false }));
 
@@ -187,6 +188,35 @@ describe("TaskCreateAdvancedSettings", () => {
     ).toContain("A parent workspace is already used for multiple repositories.");
     expect(screen.queryByTestId("task-create-initial-workspace-layout-checkbox")).toBeNull();
     expect(onLayoutChange).toHaveBeenCalledWith("task_root");
+  });
+
+  it("restores the repository layout after a forced multi-repository transition", async () => {
+    function Harness() {
+      const [layout, setLayout] = useState<"repository" | "task_root">("repository");
+      const [mode, setMode] = useState<"multiple-repositories" | "single-repository">(
+        "multiple-repositories",
+      );
+      return (
+        <TooltipProvider>
+          <button type="button" onClick={() => setMode("single-repository")}>
+            Remove repository
+          </button>
+          <span data-testid="current-layout">{layout}</span>
+          <TaskCreateParentWorkspaceSetting
+            initialWorkspaceLayout={layout}
+            onInitialWorkspaceLayoutChange={setLayout}
+            initialWorkspaceLayoutMode={mode}
+          />
+        </TooltipProvider>
+      );
+    }
+
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByTestId("current-layout").textContent).toBe("task_root"));
+    fireEvent.click(screen.getByRole("button", { name: "Remove repository" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("current-layout").textContent).toBe("repository"),
+    );
   });
 
   it("preserves selected dependencies across collapse and reopen", () => {

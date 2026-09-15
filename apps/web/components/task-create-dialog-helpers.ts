@@ -302,13 +302,7 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
   };
 }
 
-const PARENT_WORKSPACE_EXECUTOR_TYPES: ReadonlySet<Executor["type"]> = new Set([
-  "worktree",
-  "local_docker",
-  "ssh",
-  "sprites",
-  "k8s",
-]);
+const PARENT_WORKSPACE_EXECUTOR_TYPES: ReadonlySet<Executor["type"]> = new Set(["worktree"]);
 
 export function resolveSelectedExecutorType(
   executors: Executor[],

@@ -180,6 +180,73 @@ func TestNestedWorkspaceExclusionPreservesImplicitGlobalIgnore(t *testing.T) {
 	}
 }
 
+func TestNestedWorkspaceExclusionRefreshesImplicitGlobalIgnoreAndRecreatesMissingFile(t *testing.T) {
+	configHome := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(configHome, "git"), 0o755); err != nil {
+		t.Fatalf("mkdir XDG git config: %v", err)
+	}
+	globalIgnore := filepath.Join(configHome, "git", "ignore")
+	if err := os.WriteFile(globalIgnore, []byte("global-old/\n"), 0o644); err != nil {
+		t.Fatalf("write initial implicit global ignore: %v", err)
+	}
+	globalConfig := filepath.Join(t.TempDir(), "global-config")
+	if err := os.WriteFile(globalConfig, nil, 0o644); err != nil {
+		t.Fatalf("write isolated global config: %v", err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", configHome)
+	t.Setenv("GIT_CONFIG_GLOBAL", globalConfig)
+	t.Setenv("GIT_CONFIG_SYSTEM", filepath.Join(t.TempDir(), "missing-system-config"))
+
+	repositoryPath := t.TempDir()
+	runGit(t, repositoryPath, "init", "-b", "main")
+	mgr, err := NewManager(newTestConfig(t), newMockStore(), newTestLogger())
+	if err != nil {
+		t.Fatalf("NewManager: %v", err)
+	}
+	firstNestedPath := filepath.Join(repositoryPath, "kandev", "payments")
+	if _, err := mgr.addNestedWorkspaceExclusion(context.Background(), repositoryPath, firstNestedPath); err != nil {
+		t.Fatalf("initial addNestedWorkspaceExclusion: %v", err)
+	}
+	target, err := mgr.nestedWorkspaceExcludeTarget(firstNestedPath)
+	if err != nil {
+		t.Fatalf("nestedWorkspaceExcludeTarget: %v", err)
+	}
+	if err := os.Remove(target.excludePath); err != nil {
+		t.Fatalf("remove managed exclude to simulate stale include: %v", err)
+	}
+	if _, err := mgr.addNestedWorkspaceExclusion(context.Background(), repositoryPath, firstNestedPath); err != nil {
+		t.Fatalf("recreate managed exclusion: %v", err)
+	}
+	if _, err := os.Stat(target.excludePath); err != nil {
+		t.Fatalf("managed exclude was not recreated: %v", err)
+	}
+
+	if err := os.WriteFile(globalIgnore, []byte("global-old/\nglobal-new/\n"), 0o644); err != nil {
+		t.Fatalf("write updated implicit global ignore: %v", err)
+	}
+	secondNestedPath := filepath.Join(repositoryPath, "kandev", "billing")
+	if _, err := mgr.addNestedWorkspaceExclusion(context.Background(), repositoryPath, secondNestedPath); err != nil {
+		t.Fatalf("refreshing addNestedWorkspaceExclusion: %v", err)
+	}
+	content, err := os.ReadFile(target.excludePath)
+	if err != nil {
+		t.Fatalf("read refreshed managed exclude: %v", err)
+	}
+	if !strings.Contains(string(content), "global-new/\n") {
+		t.Fatalf("updated implicit global ignore was not copied into managed excludes:\n%s", content)
+	}
+	for _, pattern := range []string{"/kandev/payments/", "/kandev/billing/"} {
+		marker := managedWorkspaceExclusionPrefix + pattern
+		if count := strings.Count(string(content), marker); count != 1 {
+			t.Fatalf("managed exclusion marker %q count = %d, want 1", pattern, count)
+		}
+	}
+	check := exec.Command("git", "-C", repositoryPath, "check-ignore", "--no-index", "global-new/file.txt")
+	if output, err := check.CombinedOutput(); err != nil {
+		t.Fatalf("refreshed implicit global ignore was not effective: %v\n%s", err, output)
+	}
+}
+
 func TestNestedWorkspaceExclusionRejectsTrackedNegation(t *testing.T) {
 	repositoryPath := t.TempDir()
 	runGit(t, repositoryPath, "init", "-b", "main")

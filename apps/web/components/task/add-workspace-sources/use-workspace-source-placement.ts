@@ -31,7 +31,7 @@ export function useWorkspaceSourcePlacement({ open, taskId, executorType, rows, 
     if (placement) next.repository_placement = placement;
     return next;
   }, [placement, rows]);
-  const previewable = eligible && placement !== null && Object.keys(errors).length === 0;
+  const previewable = eligible && Object.keys(errors).length === 0;
 
   useEffect(() => {
     if (!open || !previewable) {

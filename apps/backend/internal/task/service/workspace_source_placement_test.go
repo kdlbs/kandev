@@ -195,6 +195,22 @@ func TestPreviewWorkspaceRepositoryPlacementScopesRepositoryReferencesToTaskWork
 	if len(preview.Sources) != 1 || preview.Sources[0].RepositoryName != "owned-api" {
 		t.Fatalf("owned preview sources = %+v, want owned-api", preview.Sources)
 	}
+	if err := os.Mkdir(filepath.Join(workspacePath, "owned-api"), 0o755); err != nil {
+		t.Fatalf("create occupied illustrative destination: %v", err)
+	}
+	capabilityPreview, err := svc.PreviewWorkspaceRepositoryPlacement(ctxAs("user-placement"), "task-placement-auth", []WorkspaceSourceInput{{
+		Kind: WorkspaceSourceRepository, RepositoryID: "repo-placement-owned",
+	}}, "")
+	if err != nil {
+		t.Fatalf("capability preview: %v", err)
+	}
+	if capabilityPreview.Placement != "" || len(capabilityPreview.SupportedPlacements) != 3 {
+		t.Fatalf("capability preview = %+v, want no selected placement and all capability options", capabilityPreview)
+	}
+	if capabilityPreview.SupportedPlacements[1].Placement != WorkspacePlacementCurrentRoot ||
+		!capabilityPreview.SupportedPlacements[1].Enabled {
+		t.Fatalf("current-root capability = %+v, want enabled", capabilityPreview.SupportedPlacements[1])
+	}
 
 	for _, repositoryID := range []string{"repo-placement-same-user", "repo-placement-other-user"} {
 		_, err := svc.PreviewWorkspaceRepositoryPlacement(ctxAs("user-placement"), "task-placement-auth", []WorkspaceSourceInput{{

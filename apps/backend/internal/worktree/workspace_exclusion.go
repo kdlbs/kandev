@@ -1,6 +1,7 @@
 package worktree
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -35,6 +36,15 @@ type nestedWorkspaceExclusionTarget struct {
 	pattern          string
 }
 
+type nestedWorkspaceExclusionState struct {
+	originalIncludeExists     bool
+	previousInclude           []byte
+	previousIncludeFileExists bool
+	previousExclude           []byte
+	previousExcludeFileExists bool
+	changed                   bool
+}
+
 // addNestedWorkspaceExclusion installs a worktree-scoped Git exclude file for
 // the outer worktree that contains worktreePath. The conditional include is
 // written to the shared repository config, but its gitdir condition matches
@@ -49,60 +59,134 @@ func (m *Manager) addNestedWorkspaceExclusion(ctx context.Context, _, worktreePa
 	release := m.lockWorkspaceExclusion(target.commonConfigPath)
 	defer release()
 
-	includePaths, err := m.workspaceExclusionIncludes(ctx, target)
+	state, err := m.prepareNestedWorkspaceExclusion(ctx, target)
 	if err != nil {
 		return false, err
 	}
+	changed, err := m.reconcileNestedWorkspaceExclusionFiles(ctx, target)
+	if err != nil {
+		return false, err
+	}
+	state.changed = state.changed || changed
+	if err := m.verifyNestedWorkspaceExclusion(ctx, target); err != nil {
+		rollbackErr := m.rollbackProvisionalNestedWorkspaceExclusion(ctx, target, state.originalIncludeExists, state.previousInclude, state.previousIncludeFileExists, state.previousExclude, state.previousExcludeFileExists)
+		return false, errors.Join(err, rollbackErr)
+	}
+	return state.changed, nil
+}
+
+func (m *Manager) prepareNestedWorkspaceExclusion(ctx context.Context, target nestedWorkspaceExclusionTarget) (nestedWorkspaceExclusionState, error) {
+	includePaths, err := m.workspaceExclusionIncludes(ctx, target)
+	if err != nil {
+		return nestedWorkspaceExclusionState{}, err
+	}
 	includeExists := containsPath(includePaths, target.includePath)
-	changed := false
+	previousInclude, previousIncludeFileExists, err := readOptionalWorkspaceExclusionFile(target.includePath)
+	if err != nil {
+		return nestedWorkspaceExclusionState{}, fmt.Errorf("inspect managed Git include file: %w", err)
+	}
+	previousExclude, previousExcludeFileExists, err := readOptionalWorkspaceExclusionFile(target.excludePath)
+	if err != nil {
+		return nestedWorkspaceExclusionState{}, fmt.Errorf("inspect managed Git exclude file: %w", err)
+	}
+	state := nestedWorkspaceExclusionState{
+		originalIncludeExists:     includeExists,
+		previousInclude:           previousInclude,
+		previousIncludeFileExists: previousIncludeFileExists,
+		previousExclude:           previousExclude,
+		previousExcludeFileExists: previousExcludeFileExists,
+	}
+	if includeExists && !previousExcludeFileExists {
+		// A stale conditional include must not keep shadowing the effective
+		// excludes file. Remove it before rebuilding the managed pair.
+		if err := m.removeWorkspaceExclusionInclude(ctx, target); err != nil {
+			return nestedWorkspaceExclusionState{}, err
+		}
+		if err := os.Remove(target.includePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return nestedWorkspaceExclusionState{}, fmt.Errorf("remove stale managed Git include file: %w", err)
+		}
+		includeExists = false
+		state.changed = true
+	}
 	if !includeExists {
 		if err := m.createNestedWorkspaceExclusion(ctx, target); err != nil {
-			return false, err
+			return nestedWorkspaceExclusionState{}, err
 		}
-		changed = true
-	} else if _, err := os.Stat(target.excludePath); err != nil {
-		return false, fmt.Errorf("inspect managed Git exclude file: %w", err)
+		state.changed = true
 	}
+	return state, nil
+}
 
+func (m *Manager) reconcileNestedWorkspaceExclusionFiles(ctx context.Context, target nestedWorkspaceExclusionTarget) (bool, error) {
 	content, err := os.ReadFile(target.excludePath)
 	if err != nil {
 		return false, fmt.Errorf("read managed Git exclude file: %w", err)
 	}
-	previousContent := content
-	updated, entryChanged := appendManagedWorkspaceExclusion(string(content), target.pattern)
-	if entryChanged {
+	baseline, err := m.readConfiguredExcludesExcept(ctx, target.outerRoot, target.excludePath)
+	if err != nil {
+		return false, err
+	}
+	updated := refreshManagedWorkspaceExclusion(string(content), baseline, target.includePath)
+	changed := false
+	if currentInclude, readErr := os.ReadFile(target.includePath); readErr != nil || !bytes.Equal(currentInclude, managedWorkspaceIncludeContent(target.excludePath, baseline)) {
+		if err := writeWorkspaceExclusionInclude(target.includePath, target.excludePath, baseline); err != nil {
+			return false, err
+		}
+		changed = true
+	}
+	updated, _ = appendManagedWorkspaceExclusion(updated, target.pattern)
+	if updated != string(content) {
 		if err := os.WriteFile(target.excludePath, []byte(updated), 0o644); err != nil {
 			return false, fmt.Errorf("update managed Git exclude file: %w", err)
 		}
 		changed = true
 	}
-	if err := m.verifyNestedWorkspaceExclusion(ctx, target); err != nil {
-		rollbackErr := m.rollbackProvisionalNestedWorkspaceExclusion(ctx, target, includeExists, previousContent, entryChanged)
-		return false, errors.Join(err, rollbackErr)
-	}
 	return changed, nil
 }
 
-func (m *Manager) rollbackProvisionalNestedWorkspaceExclusion(ctx context.Context, target nestedWorkspaceExclusionTarget, includeExists bool, previousContent []byte, entryChanged bool) error {
+func (m *Manager) rollbackProvisionalNestedWorkspaceExclusion(
+	ctx context.Context,
+	target nestedWorkspaceExclusionTarget,
+	includeExists bool,
+	previousInclude []byte,
+	previousIncludeFileExists bool,
+	previousExclude []byte,
+	previousExcludeFileExists bool,
+) error {
 	var rollbackErr error
-	if entryChanged {
-		if err := os.WriteFile(target.excludePath, previousContent, 0o644); err != nil {
+	if previousExcludeFileExists {
+		if err := os.WriteFile(target.excludePath, previousExclude, 0o644); err != nil {
 			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("restore managed Git exclude file: %w", err))
 		}
-	}
-	if includeExists {
-		return rollbackErr
-	}
-	if err := m.removeWorkspaceExclusionInclude(ctx, target); err != nil {
-		rollbackErr = errors.Join(rollbackErr, err)
-	}
-	if err := os.Remove(target.includePath); err != nil && !errors.Is(err, os.ErrNotExist) {
-		rollbackErr = errors.Join(rollbackErr, fmt.Errorf("remove managed Git include file: %w", err))
-	}
-	if err := os.Remove(target.excludePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+	} else if err := os.Remove(target.excludePath); err != nil && !errors.Is(err, os.ErrNotExist) {
 		rollbackErr = errors.Join(rollbackErr, fmt.Errorf("remove managed Git exclude file: %w", err))
 	}
+	if includeExists {
+		if err := m.ensureWorkspaceExclusionInclude(ctx, target); err != nil {
+			rollbackErr = errors.Join(rollbackErr, err)
+		}
+	} else if err := m.removeWorkspaceExclusionInclude(ctx, target); err != nil {
+		rollbackErr = errors.Join(rollbackErr, err)
+	}
+	if previousIncludeFileExists {
+		if err := os.WriteFile(target.includePath, previousInclude, 0o644); err != nil {
+			rollbackErr = errors.Join(rollbackErr, fmt.Errorf("restore managed Git include file: %w", err))
+		}
+	} else if err := os.Remove(target.includePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		rollbackErr = errors.Join(rollbackErr, fmt.Errorf("remove managed Git include file: %w", err))
+	}
 	return rollbackErr
+}
+
+func (m *Manager) ensureWorkspaceExclusionInclude(ctx context.Context, target nestedWorkspaceExclusionTarget) error {
+	paths, err := m.workspaceExclusionIncludes(ctx, target)
+	if err != nil {
+		return err
+	}
+	if containsPath(paths, target.includePath) {
+		return nil
+	}
+	return m.addWorkspaceExclusionInclude(ctx, target)
 }
 
 // removeNestedWorkspaceExclusion removes only the managed entry for one
@@ -138,7 +222,7 @@ func (m *Manager) removeNestedWorkspaceExclusion(ctx context.Context, _, worktre
 }
 
 func (m *Manager) createNestedWorkspaceExclusion(ctx context.Context, target nestedWorkspaceExclusionTarget) error {
-	base, err := m.readConfiguredExcludes(ctx, target.outerRoot)
+	base, err := m.readConfiguredExcludesExcept(ctx, target.outerRoot, target.excludePath)
 	if err != nil {
 		return err
 	}
@@ -294,6 +378,13 @@ func (m *Manager) addWorkspaceExclusionInclude(ctx context.Context, target neste
 }
 
 func (m *Manager) removeWorkspaceExclusionInclude(ctx context.Context, target nestedWorkspaceExclusionTarget) error {
+	paths, err := m.workspaceExclusionIncludes(ctx, target)
+	if err != nil {
+		return err
+	}
+	if !containsPath(paths, target.includePath) {
+		return nil
+	}
 	cmd := m.newNonInteractiveGitCmd(ctx, filepath.Dir(target.commonConfigPath), "config", "--file", target.commonConfigPath, "--unset", target.configKey, regexp.QuoteMeta(target.includePath))
 	if output, err := runGitCmdCombinedOutput(ctx, cmd); err != nil {
 		return fmt.Errorf("remove Git workspace include: %s: %w", strings.TrimSpace(string(output)), err)
@@ -301,8 +392,8 @@ func (m *Manager) removeWorkspaceExclusionInclude(ctx context.Context, target ne
 	return nil
 }
 
-func (m *Manager) readConfiguredExcludes(ctx context.Context, worktreePath string) ([]byte, error) {
-	output, err := runGitCmdOutput(ctx, m.newNonInteractiveGitCmd(ctx, worktreePath, "config", "--path", "--get", "core.excludesFile"))
+func (m *Manager) readConfiguredExcludesExcept(ctx context.Context, worktreePath, excludedPath string) ([]byte, error) {
+	output, err := runGitCmdOutput(ctx, m.newNonInteractiveGitCmd(ctx, worktreePath, "config", "--path", "--get-all", "core.excludesFile"))
 	if err != nil {
 		var exitErr *exec.ExitError
 		if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
@@ -310,17 +401,31 @@ func (m *Manager) readConfiguredExcludes(ctx context.Context, worktreePath strin
 		}
 		output = nil
 	}
-	path := strings.TrimSpace(string(output))
+	path := ""
+	for _, line := range strings.Split(string(output), "\n") {
+		candidate := strings.TrimSpace(line)
+		if candidate == "" {
+			continue
+		}
+		resolved, resolveErr := resolveConfiguredExcludesPath(worktreePath, candidate)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		if excludedPath != "" {
+			excluded, excludeErr := filepath.Abs(filepath.Clean(excludedPath))
+			if excludeErr != nil {
+				return nil, fmt.Errorf("resolve managed Git excludes: %w", excludeErr)
+			}
+			if filepath.Clean(resolved) == filepath.Clean(excluded) {
+				continue
+			}
+		}
+		path = resolved
+	}
 	if path == "" {
 		path = implicitGlobalGitIgnorePath()
 		if path == "" {
 			return []byte{}, nil
-		}
-	}
-	if !filepath.IsAbs(path) {
-		path, err = filepath.Abs(filepath.Join(worktreePath, path))
-		if err != nil {
-			return nil, fmt.Errorf("resolve configured Git excludes: %w", err)
 		}
 	}
 	content, err := os.ReadFile(path)
@@ -331,6 +436,28 @@ func (m *Manager) readConfiguredExcludes(ctx context.Context, worktreePath strin
 		return nil, fmt.Errorf("read configured Git excludes: %w", err)
 	}
 	return content, nil
+}
+
+func resolveConfiguredExcludesPath(worktreePath, path string) (string, error) {
+	if filepath.IsAbs(path) {
+		return filepath.Abs(filepath.Clean(path))
+	}
+	resolved, err := filepath.Abs(filepath.Join(worktreePath, path))
+	if err != nil {
+		return "", fmt.Errorf("resolve configured Git excludes: %w", err)
+	}
+	return resolved, nil
+}
+
+func readOptionalWorkspaceExclusionFile(path string) ([]byte, bool, error) {
+	content, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return content, true, nil
 }
 
 func implicitGlobalGitIgnorePath() string {
@@ -376,12 +503,16 @@ func writeWorkspaceExclusionInclude(includePath, excludePath string, baseline []
 	if err := os.MkdirAll(filepath.Dir(includePath), 0o755); err != nil {
 		return fmt.Errorf("create Git include directory: %w", err)
 	}
-	hash := sha256.Sum256(baseline)
-	content := managedWorkspaceIncludeHeader + managedWorkspaceBaseHashPrefix + hex.EncodeToString(hash[:]) + "\n[core]\n\texcludesFile = " + quoteGitConfigValue(excludePath) + "\n"
-	if err := os.WriteFile(includePath, []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(includePath, managedWorkspaceIncludeContent(excludePath, baseline), 0o644); err != nil {
 		return fmt.Errorf("write managed Git include file: %w", err)
 	}
 	return nil
+}
+
+func managedWorkspaceIncludeContent(excludePath string, baseline []byte) []byte {
+	hash := sha256.Sum256(baseline)
+	content := managedWorkspaceIncludeHeader + managedWorkspaceBaseHashPrefix + hex.EncodeToString(hash[:]) + "\n[core]\n\texcludesFile = " + quoteGitConfigValue(excludePath) + "\n"
+	return []byte(content)
 }
 
 func quoteGitConfigValue(value string) string {
@@ -409,6 +540,94 @@ func workspaceExclusionBaseline(includePath string) ([32]byte, bool) {
 		return hash, true
 	}
 	return [32]byte{}, false
+}
+
+func refreshManagedWorkspaceExclusion(content string, baseline []byte, includePath string) string {
+	inherited := stripManagedWorkspaceExclusions(content)
+	refreshed := ""
+	if baseHash, ok := workspaceExclusionBaseline(includePath); ok && equivalentWorkspaceExclusionContent([]byte(inherited), baseline, baseHash) {
+		refreshed = string(baseline)
+	} else {
+		refreshed = mergeWorkspaceExclusionContent(string(baseline), inherited)
+	}
+	for _, pattern := range managedWorkspaceExclusionPatterns(content) {
+		refreshed, _ = appendManagedWorkspaceExclusion(refreshed, pattern)
+	}
+	return refreshed
+}
+
+func stripManagedWorkspaceExclusions(content string) string {
+	lines := strings.SplitAfter(content, "\n")
+	var builder strings.Builder
+	skipNext := false
+	for _, line := range lines {
+		trimmed := strings.TrimSuffix(line, "\n")
+		if strings.HasPrefix(trimmed, managedWorkspaceExclusionPrefix) {
+			skipNext = true
+			continue
+		}
+		if skipNext {
+			skipNext = false
+			continue
+		}
+		builder.WriteString(line)
+	}
+	return builder.String()
+}
+
+func managedWorkspaceExclusionPatterns(content string) []string {
+	lines := strings.SplitAfter(content, "\n")
+	patterns := make([]string, 0)
+	for index, line := range lines {
+		marker := strings.TrimSuffix(line, "\n")
+		pattern, found := strings.CutPrefix(marker, managedWorkspaceExclusionPrefix)
+		if !found || pattern == "" || index+1 >= len(lines) {
+			continue
+		}
+		entryPattern := strings.TrimSuffix(lines[index+1], "\n")
+		if entryPattern == pattern {
+			patterns = append(patterns, pattern)
+		}
+	}
+	return patterns
+}
+
+func equivalentWorkspaceExclusionContent(content, baseline []byte, baselineHash [32]byte) bool {
+	if bytes.Equal(content, baseline) || bytes.Equal(bytes.TrimSuffix(content, []byte("\n")), bytes.TrimSuffix(baseline, []byte("\n"))) {
+		return true
+	}
+	return sha256.Sum256(content) == baselineHash || sha256.Sum256(bytes.TrimSuffix(content, []byte("\n"))) == baselineHash
+}
+
+func mergeWorkspaceExclusionContent(baseline, inherited string) string {
+	if baseline == "" && inherited == "" {
+		return ""
+	}
+	seen := make(map[string]struct{})
+	lines := make([]string, 0)
+	appendLines := func(content string) {
+		for _, line := range strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n") {
+			if line == "" {
+				if len(lines) == 0 || lines[len(lines)-1] == "" {
+					continue
+				}
+			}
+			if _, exists := seen[line]; exists {
+				continue
+			}
+			seen[line] = struct{}{}
+			lines = append(lines, line)
+		}
+	}
+	appendLines(baseline)
+	appendLines(inherited)
+	for len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n") + "\n"
 }
 
 func appendManagedWorkspaceExclusion(content, pattern string) (string, bool) {

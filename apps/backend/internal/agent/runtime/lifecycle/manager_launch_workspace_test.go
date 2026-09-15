@@ -180,6 +180,7 @@ func TestValidateLaunchWorkspaceAdmissionUsesNestedRepositoryRelativePaths(t *te
 
 	req := &LaunchRequest{
 		ExecutorType:    string(models.ExecutorTypeWorktree),
+		ACPSessionID:    "acp-session-1",
 		WorkspaceLayout: "task_root",
 		Repositories: []RepoLaunchSpec{
 			{RepositoryID: "repository-1", RepositoryPath: first, RepoName: "first", WorkspaceRelativePath: "first"},

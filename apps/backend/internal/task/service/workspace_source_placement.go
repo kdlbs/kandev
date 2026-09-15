@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/kandev/kandev/internal/task/models"
@@ -299,10 +300,7 @@ func workspaceRepositoryPlacementConflict(detail string) error {
 }
 
 func (s *Service) PreviewWorkspaceRepositoryPlacement(ctx context.Context, taskID string, sources []WorkspaceSourceInput, placement WorkspaceRepositoryPlacement) (*WorkspaceRepositoryPlacementPreview, error) {
-	if taskID == "" || len(sources) == 0 {
-		return nil, fmt.Errorf("%w: task_id and sources are required", ErrInvalidWorkspaceSource)
-	}
-	if err := validateWorkspaceRepositoryPlacement(placement); err != nil {
+	if err := validateWorkspaceRepositoryPlacementPreviewRequest(taskID, sources, placement); err != nil {
 		return nil, err
 	}
 	if err := s.authorizeTaskID(ctx, taskID); err != nil {
@@ -320,11 +318,8 @@ func (s *Service) PreviewWorkspaceRepositoryPlacement(ctx context.Context, taskI
 		return nil, err
 	}
 	layout := EffectiveTaskEnvironmentWorkspaceLayout(env)
-	if layout == WorkspaceLayoutTaskRoot && placement == WorkspacePlacementKandevDirectory {
+	if placement == WorkspacePlacementKandevDirectory && layout == WorkspaceLayoutTaskRoot {
 		return nil, fmt.Errorf("%w: the task already uses the parent workspace layout", ErrInvalidWorkspaceRepositoryPlacement)
-	}
-	if placement == WorkspacePlacementExpandRoot {
-		return nil, ErrWorkspaceExpansionUnavailable
 	}
 	preview := &WorkspaceRepositoryPlacementPreview{
 		TaskID:        taskID,
@@ -337,19 +332,43 @@ func (s *Service) PreviewWorkspaceRepositoryPlacement(ctx context.Context, taskI
 			{Placement: WorkspacePlacementExpandRoot, Enabled: false, Reason: "explicit session recovery is required before expanding the workspace root"},
 		},
 	}
-	previewSources, paths, err := s.buildWorkspaceRepositoryPlacementPreviewSources(ctx, task.WorkspaceID, env, sources, placement)
+	previewPlacement := placement
+	if previewPlacement == "" {
+		// The initial request only asks which destinations are available. Use the
+		// current root to render illustrative source paths, and defer collision
+		// checks until the user selects a destination.
+		previewPlacement = WorkspacePlacementCurrentRoot
+	}
+	previewSources, paths, err := s.buildWorkspaceRepositoryPlacementPreviewSources(ctx, task.WorkspaceID, env, sources, previewPlacement)
 	if err != nil {
 		return nil, err
 	}
 	preview.Sources = previewSources
-	if err := preflightWorkspaceRepositoryDestinations(paths); err != nil {
-		return nil, err
+	if placement != "" {
+		if err := preflightWorkspaceRepositoryDestinations(paths); err != nil {
+			return nil, err
+		}
 	}
 	preview.Revision, err = s.workspaceRepositoryPlacementRevision(ctx, taskID, env)
 	if err != nil {
 		return nil, err
 	}
 	return preview, nil
+}
+
+func validateWorkspaceRepositoryPlacementPreviewRequest(taskID string, sources []WorkspaceSourceInput, placement WorkspaceRepositoryPlacement) error {
+	if taskID == "" || len(sources) == 0 {
+		return fmt.Errorf("%w: task_id and sources are required", ErrInvalidWorkspaceSource)
+	}
+	if placement != "" {
+		if err := validateWorkspaceRepositoryPlacement(placement); err != nil {
+			return err
+		}
+	}
+	if placement == WorkspacePlacementExpandRoot {
+		return ErrWorkspaceExpansionUnavailable
+	}
+	return nil
 }
 
 func (s *Service) buildWorkspaceRepositoryPlacementPreviewSources(ctx context.Context, workspaceID string, env *models.TaskEnvironment, sources []WorkspaceSourceInput, placement WorkspaceRepositoryPlacement) ([]WorkspaceRepositoryPreviewSource, []string, error) {
@@ -481,17 +500,39 @@ func (s *Service) workspaceRepositoryPlacementRevision(ctx context.Context, task
 	}
 	h := sha256.New()
 	values := []string{env.ID, fmt.Sprint(env.OwnershipGeneration), env.TaskDirName, env.WorkspacePath, env.WorkspaceLayout}
-	for _, row := range env.Repos {
+	repoRows := append([]*models.TaskEnvironmentRepo(nil), env.Repos...)
+	sort.Slice(repoRows, func(i, j int) bool {
+		return taskEnvironmentRepoRevisionKey(repoRows[i]) < taskEnvironmentRepoRevisionKey(repoRows[j])
+	})
+	for _, row := range repoRows {
 		if row == nil {
 			continue
 		}
 		values = append(values, row.RepositoryID, row.BranchSlug, row.WorktreeID, row.WorktreePath, row.WorkspaceRelativePath)
 	}
-	for _, session := range sessions {
+	sessionRows := append([]*models.TaskSession(nil), sessions...)
+	sort.Slice(sessionRows, func(i, j int) bool {
+		return taskSessionRevisionKey(sessionRows[i]) < taskSessionRevisionKey(sessionRows[j])
+	})
+	for _, session := range sessionRows {
 		if session != nil {
 			values = append(values, session.ID, session.TaskEnvironmentID, session.WorkspacePath, string(session.State))
 		}
 	}
 	_, _ = h.Write([]byte(strings.Join(values, "\x00")))
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+func taskEnvironmentRepoRevisionKey(row *models.TaskEnvironmentRepo) string {
+	if row == nil {
+		return ""
+	}
+	return strings.Join([]string{row.RepositoryID, row.BranchSlug, row.WorktreeID, row.WorktreePath, row.WorkspaceRelativePath}, "\x00")
+}
+
+func taskSessionRevisionKey(session *models.TaskSession) string {
+	if session == nil {
+		return ""
+	}
+	return strings.Join([]string{session.ID, session.TaskEnvironmentID, session.WorkspacePath, string(session.State)}, "\x00")
 }

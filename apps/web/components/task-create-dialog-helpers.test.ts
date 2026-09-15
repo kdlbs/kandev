@@ -372,7 +372,20 @@ describe("initial workspace layout", () => {
     expect(resolveInitialWorkspaceLayout({ requested: "repository", mode })).toBe("repository");
   });
 
-  it("forces a parent layout for supported multi-repository tasks", () => {
+  it("offers a parent layout for multi-repository Worktree tasks", () => {
+    const mode = resolveInitialWorkspaceLayoutMode({
+      isCreateMode: true,
+      isTaskStarted: false,
+      noRepository: false,
+      repositoryCount: 2,
+      executorType: "worktree",
+    });
+
+    expect(mode).toBe("multiple-repositories");
+    expect(resolveInitialWorkspaceLayout({ requested: "repository", mode })).toBe("task_root");
+  });
+
+  it("omits the parent layout for multi-repository remote tasks", () => {
     const mode = resolveInitialWorkspaceLayoutMode({
       isCreateMode: true,
       isTaskStarted: false,
@@ -381,8 +394,8 @@ describe("initial workspace layout", () => {
       executorType: "ssh",
     });
 
-    expect(mode).toBe("multiple-repositories");
-    expect(resolveInitialWorkspaceLayout({ requested: "repository", mode })).toBe("task_root");
+    expect(mode).toBe("unavailable");
+    expect(resolveInitialWorkspaceLayout({ requested: "task_root", mode })).toBeUndefined();
   });
 
   it.each([

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { IconInfoCircle } from "@tabler/icons-react";
 import { Checkbox } from "@kandev/ui/checkbox";
 import {
@@ -81,12 +81,28 @@ export function TaskCreateParentWorkspaceSetting({
   initialWorkspaceLayoutMode,
 }: TaskCreateParentWorkspaceSettingProps) {
   const { t } = useTranslation();
+  const layoutForcedByMultipleRepositories = useRef(false);
 
   useEffect(() => {
-    const next =
-      initialWorkspaceLayoutMode === "multiple-repositories" ? "task_root" : "repository";
-    if (initialWorkspaceLayoutMode !== "single-repository" && initialWorkspaceLayout !== next) {
-      onInitialWorkspaceLayoutChange(next);
+    if (initialWorkspaceLayoutMode === "multiple-repositories") {
+      layoutForcedByMultipleRepositories.current = true;
+      if (initialWorkspaceLayout !== "task_root") {
+        onInitialWorkspaceLayoutChange("task_root");
+      }
+      return;
+    }
+    if (initialWorkspaceLayoutMode === "single-repository") {
+      if (layoutForcedByMultipleRepositories.current) {
+        layoutForcedByMultipleRepositories.current = false;
+        if (initialWorkspaceLayout !== "repository") {
+          onInitialWorkspaceLayoutChange("repository");
+        }
+      }
+      return;
+    }
+    layoutForcedByMultipleRepositories.current = false;
+    if (initialWorkspaceLayout !== "repository") {
+      onInitialWorkspaceLayoutChange("repository");
     }
   }, [initialWorkspaceLayout, initialWorkspaceLayoutMode, onInitialWorkspaceLayoutChange]);
 

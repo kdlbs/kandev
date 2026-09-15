@@ -10,6 +10,10 @@ import { repositoryDiscoveryCoordinator } from "@/hooks/domains/workspace/use-re
 
 let isMobile = false;
 const ADD_SOURCES_LABEL = "Add sources";
+const WORKSPACE_REPOSITORY_LABEL = "Workspace repository";
+const REPO_CHIP_TRIGGER_TEST_ID = "repo-chip-trigger";
+const ADD_WORKSPACE_SOURCES_SUBMIT_TEST_ID = "add-workspace-sources-submit";
+const TEST_TIMESTAMP = "2026-01-01T00:00:00Z";
 const SURFACE_CASES = [
   ["desktop", false, "add-workspace-sources-dialog"],
   ["mobile", true, "add-workspace-sources-drawer"],
@@ -18,6 +22,7 @@ const {
   attachTaskWorkspaceSources,
   discoverRepositoriesAction,
   getRepositoryDiscoveryAction,
+  previewTaskWorkspaceSources,
   refreshRepositoryDiscoveryAction,
   addDesktopDiscoveryRootAction,
   refreshRepositories,
@@ -28,6 +33,7 @@ const {
     attachTaskWorkspaceSources: vi.fn(),
     discoverRepositoriesAction: discover,
     getRepositoryDiscoveryAction: discover,
+    previewTaskWorkspaceSources: vi.fn().mockResolvedValue(null),
     refreshRepositoryDiscoveryAction: discover,
     addDesktopDiscoveryRootAction: vi.fn().mockResolvedValue({}),
     refreshRepositories: vi.fn().mockResolvedValue(undefined),
@@ -40,6 +46,13 @@ vi.mock("@/components/toast-provider", () => ({
 }));
 vi.mock("@/hooks/use-responsive-breakpoint", () => ({
   useResponsiveBreakpoint: () => ({ isMobile }),
+}));
+vi.mock("@/hooks/domains/workspace/use-repository-branches", () => ({
+  useBranches: () => ({
+    branches: [{ name: "main", type: "local" }],
+    isLoaded: true,
+    isLoading: false,
+  }),
 }));
 vi.mock("@/hooks/domains/workspace/use-repositories", () => ({
   useRepositories: () => ({
@@ -59,7 +72,10 @@ vi.mock("@/components/repository-discovery-controls", () => ({
   RepositoryDiscoveryControls: ({ enabled }: { enabled?: boolean }) =>
     enabled !== false ? <div data-testid="repository-discovery-controls" /> : null,
 }));
-vi.mock("@/lib/api/domains/kanban-api", () => ({ attachTaskWorkspaceSources }));
+vi.mock("@/lib/api/domains/kanban-api", () => ({
+  attachTaskWorkspaceSources,
+  previewTaskWorkspaceSources,
+}));
 vi.mock("@/app/actions/workspaces", () => ({
   discoverRepositoriesAction,
   getRepositoryDiscoveryAction,
@@ -149,6 +165,7 @@ afterEach(() => {
   repositoryDiscoveryCoordinator.dispose();
   isMobile = false;
   attachTaskWorkspaceSources.mockReset();
+  previewTaskWorkspaceSources.mockReset().mockResolvedValue(null);
   discoverRepositoriesAction.mockClear();
   refreshRepositories.mockClear();
   savedRepositories.length = 0;
@@ -213,8 +230,8 @@ describe("AddWorkspaceSourcesDialog repository discovery", () => {
     fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
     expect(screen.queryByTestId("repository-discovery-controls")).toBeNull();
     openRepositoryMenu();
-    await selectRepositoryMenuItem("Workspace repository");
-    fireEvent.click(screen.getByTestId("repo-chip-trigger"));
+    await selectRepositoryMenuItem(WORKSPACE_REPOSITORY_LABEL);
+    fireEvent.click(screen.getByTestId(REPO_CHIP_TRIGGER_TEST_ID));
     expect(screen.getByTestId("repository-discovery-settings-button")).toBeTruthy();
     expect(screen.queryByTestId("repository-discovery-controls")).toBeNull();
 
@@ -255,7 +272,7 @@ describe("AddWorkspaceSourcesDialog", () => {
     expect(screen.queryByTestId("source-mode-local")).toBeNull();
     expect(screen.queryByTestId("source-mode-remote")).toBeNull();
     const addRepository = screen.getByRole("button", { name: "Add repository" });
-    const submit = screen.getByTestId("add-workspace-sources-submit");
+    const submit = screen.getByTestId(ADD_WORKSPACE_SOURCES_SUBMIT_TEST_ID);
     expect(addRepository.className).toContain("min-h-11");
     expect((submit as HTMLButtonElement).disabled).toBe(true);
 
@@ -342,7 +359,7 @@ describe("AddWorkspaceSourcesDialog", () => {
       await waitFor(() => expect(opener.disabled).toBe(true));
       fireEvent.click(screen.getByRole("button", { name: "Add folder" }));
       fireEvent.click(screen.getByRole("button", { name: "Choose local folder" }));
-      fireEvent.click(screen.getByTestId("add-workspace-sources-submit"));
+      fireEvent.click(screen.getByTestId(ADD_WORKSPACE_SOURCES_SUBMIT_TEST_ID));
 
       await waitFor(() => expect(opener.disabled).toBe(false));
       await waitFor(() => expect(surface.getAttribute("data-state")).not.toBe("open"));
@@ -374,8 +391,8 @@ describe("AddWorkspaceSourcesDialog saved repository picker", () => {
     fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
     await waitFor(() => expect(discoverRepositoriesAction).toHaveBeenCalledWith("workspace-1"));
     openRepositoryMenu();
-    await selectRepositoryMenuItem("Workspace repository");
-    fireEvent.click(screen.getByTestId("repo-chip-trigger"));
+    await selectRepositoryMenuItem(WORKSPACE_REPOSITORY_LABEL);
+    fireEvent.click(screen.getByTestId(REPO_CHIP_TRIGGER_TEST_ID));
 
     expect(await screen.findByText("discovered-project")).toBeTruthy();
     expect(await screen.findByText("on disk")).toBeTruthy();
@@ -405,8 +422,8 @@ describe("AddWorkspaceSourcesDialog saved repository picker", () => {
         cleanup_script: "",
         dev_script: "",
         copy_files: "",
-        created_at: "2026-01-01T00:00:00Z",
-        updated_at: "2026-01-01T00:00:00Z",
+        created_at: TEST_TIMESTAMP,
+        updated_at: TEST_TIMESTAMP,
       });
       render(
         <TooltipProvider>
@@ -417,8 +434,8 @@ describe("AddWorkspaceSourcesDialog saved repository picker", () => {
       fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
       await screen.findByTestId(surfaceTestId);
       await openRepositoryMenu();
-      await selectRepositoryMenuItem("Workspace repository");
-      fireEvent.click(screen.getByTestId("repo-chip-trigger"));
+      await selectRepositoryMenuItem(WORKSPACE_REPOSITORY_LABEL);
+      fireEvent.click(screen.getByTestId(REPO_CHIP_TRIGGER_TEST_ID));
       fireEvent.click(await screen.findByRole("option", { name: /payments/ }));
 
       expect(screen.getByTestId("workspace-source-placement")).toBeTruthy();
@@ -426,8 +443,77 @@ describe("AddWorkspaceSourcesDialog saved repository picker", () => {
         "Choose where to add the repositories.",
       );
       expect(
-        (screen.getByTestId("add-workspace-sources-submit") as HTMLButtonElement).disabled,
+        (screen.getByTestId(ADD_WORKSPACE_SOURCES_SUBMIT_TEST_ID) as HTMLButtonElement).disabled,
       ).toBe(true);
     },
   );
+});
+
+describe("AddWorkspaceSourcesDialog placement validation", () => {
+  it("keeps submit disabled when the selected placement becomes unsupported", async () => {
+    savedRepositories.push({
+      id: "repo-1" as Repository["id"],
+      workspace_id: "workspace-1" as Repository["workspace_id"],
+      name: "payments",
+      source_type: "local",
+      local_path: "/projects/payments",
+      provider: "",
+      provider_repo_id: "",
+      provider_owner: "",
+      provider_name: "",
+      default_branch: "main",
+      worktree_branch_prefix: "task",
+      pull_before_worktree: false,
+      setup_script: "",
+      cleanup_script: "",
+      dev_script: "",
+      copy_files: "",
+      created_at: TEST_TIMESTAMP,
+      updated_at: TEST_TIMESTAMP,
+    });
+    previewTaskWorkspaceSources.mockImplementation((_taskId, payload) =>
+      Promise.resolve({
+        task_id: "task-1",
+        revision: "revision-1",
+        workspace_path: "/workspace/task-1",
+        placement: payload.repository_placement ?? "",
+        sources: [
+          {
+            repository_id: "repo-1",
+            repository_name: "payments",
+            workspace_relative_path: "payments",
+          },
+        ],
+        supported_placements: [
+          {
+            placement: "kandev_directory",
+            enabled: payload.repository_placement !== "kandev_directory",
+            reason: "destination is occupied",
+          },
+          { placement: "current_root", enabled: true },
+          { placement: "expand_root", enabled: false, reason: "recovery is required" },
+        ],
+      }),
+    );
+
+    render(
+      <TooltipProvider>
+        <Harness />
+      </TooltipProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
+    await openRepositoryMenu();
+    await selectRepositoryMenuItem(WORKSPACE_REPOSITORY_LABEL);
+    fireEvent.click(screen.getByTestId(REPO_CHIP_TRIGGER_TEST_ID));
+    fireEvent.click(await screen.findByRole("option", { name: /payments/ }));
+    await waitFor(() => expect(previewTaskWorkspaceSources).toHaveBeenCalledOnce());
+
+    fireEvent.click(screen.getAllByRole("radio")[0]);
+    await waitFor(() => expect(previewTaskWorkspaceSources).toHaveBeenCalledTimes(2));
+    await waitFor(() => {
+      expect(
+        (screen.getByTestId(ADD_WORKSPACE_SOURCES_SUBMIT_TEST_ID) as HTMLButtonElement).disabled,
+      ).toBe(true);
+    });
+  });
 });

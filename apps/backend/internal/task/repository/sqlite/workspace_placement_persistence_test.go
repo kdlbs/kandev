@@ -162,6 +162,17 @@ func TestWorkspacePlacementPersistenceRoundTripsThroughCRUD(t *testing.T) {
 		persistedEnv.Repos[0].WorkspaceRelativePath != "apps/api" {
 		t.Fatalf("persisted task environment = %#v, want task_root and repo path apps/api", persistedEnv)
 	}
+	persistedEnv.WorkspaceLayout = ""
+	if err := repo.UpdateTaskEnvironment(ctx, persistedEnv); err != nil {
+		t.Fatalf("update task environment with omitted layout: %v", err)
+	}
+	persistedEnv, err = repo.GetTaskEnvironmentByTaskID(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("get task environment after omitted layout: %v", err)
+	}
+	if persistedEnv.WorkspaceLayout != "task_root" {
+		t.Fatalf("omitted workspace layout cleared persisted value: %q", persistedEnv.WorkspaceLayout)
+	}
 	persistedEnv.WorkspaceLayout = "repository"
 	if err := repo.UpdateTaskEnvironment(ctx, persistedEnv); err != nil {
 		t.Fatalf("update task environment: %v", err)

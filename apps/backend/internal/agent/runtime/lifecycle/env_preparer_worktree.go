@@ -119,7 +119,10 @@ func (p *WorktreePreparer) Prepare(ctx context.Context, req *EnvPrepareRequest, 
 	if err != nil {
 		return nil, fmt.Errorf("resolve workspace root: %w", err)
 	}
-	setupPath := wt.Path
+	// Repository setup already ran at wt.Path inside worktree.Manager.Create.
+	// The executor-level setup belongs to the agent's effective workspace root,
+	// which can be the task directory for a parent-root layout.
+	setupPath := workspacePath
 	mainRepoGitDir := filepath.Join(req.RepositoryPath, ".git")
 
 	// Step 3 (optional): Fetch PR branch is handled inside worktree.Manager.Create

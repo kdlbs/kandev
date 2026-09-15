@@ -219,10 +219,18 @@ function canSubmitWorkspaceSources(
   rowCount: number,
   placement: ReturnType<typeof useWorkspaceSourcePlacement>,
 ): boolean {
+  const selectedPlacement = placement.preview?.supported_placements.find(
+    (option) => option.placement === placement.placement,
+  );
   return (
     rowCount > 0 &&
     (!placement.eligible ||
-      Boolean(placement.placement && placement.preview && !placement.previewError))
+      Boolean(
+        placement.placement &&
+        placement.preview &&
+        !placement.previewError &&
+        selectedPlacement?.enabled === true,
+      ))
   );
 }
 

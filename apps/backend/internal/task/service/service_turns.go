@@ -1392,11 +1392,12 @@ func applyTaskEnvironmentToWorkspaceInfo(info *lifecycle.WorkspaceInfo, env *mod
 	info.TaskEnvironmentID = env.ID
 	info.EnvironmentOwnerTaskID = env.TaskID
 	info.OwnershipGeneration = env.OwnershipGeneration
-	info.WorkspaceLayout = EffectiveTaskEnvironmentWorkspaceLayout(env)
+	effectiveLayout := EffectiveTaskEnvironmentWorkspaceLayout(env)
+	info.WorkspaceLayout = effectiveLayout
 	if info.ExecutorProfileID == "" {
 		info.ExecutorProfileID = env.ExecutorProfileID
 	}
-	if env.WorkspacePath != "" && (info.WorkspacePath == "" || env.WorkspaceLayout != "" || env.TaskDirName != "" || (!filepath.IsAbs(info.WorkspacePath) && filepath.IsAbs(env.WorkspacePath))) {
+	if env.WorkspacePath != "" && (info.WorkspacePath == "" || env.WorkspaceLayout != "" || env.TaskDirName != "" || effectiveLayout == WorkspaceLayoutTaskRoot || (!filepath.IsAbs(info.WorkspacePath) && filepath.IsAbs(env.WorkspacePath))) {
 		info.WorkspacePath = env.WorkspacePath
 	}
 	if env.ContainerID != "" {

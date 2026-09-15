@@ -484,9 +484,10 @@ siblings and does not show these placement choices.
 If adding a source promotes a Worktree or Local/Local PC workspace from one repository directory to
 the task root, Kandev restarts the idle agent in the new root. Existing files, Git changes, task
 state, messages, plan, attached sources, model, and mode remain. Native cross-directory resume is
-retained where supported; otherwise Kandev starts a fresh provider session and supplies recorded
-conversation context with the next prompt. Provider-private context not recorded by Kandev may not
-carry over. The intentional restart is not shown as a previous agent error.
+retained where supported. When it is unavailable, Kandev presents an explicit recorded-history
+continuation that requires user confirmation before it starts a replacement provider session. The
+user can cancel the continuation. Provider-private context not recorded by Kandev may not carry
+over. The intentional restart is not shown as a previous agent error.
 
 The host rebind stops open task terminals, dev servers, the task editor server, and other
 agentctl-managed workspace processes, so save unsaved work and restart those processes afterward.
