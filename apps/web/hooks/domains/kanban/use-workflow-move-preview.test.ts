@@ -270,4 +270,50 @@ describe("useWorkflowMovePreview cleanup", () => {
     expect(result.current.status).toBe("idle");
     resolveRequest(makePreview(FIRST_STEP_ID));
   });
+
+  it("re-enables and issues a fresh request after disabling with the same key", async () => {
+    let resolveFirst!: (value: WorkflowMovePreviewResponse) => void;
+    previewWorkflowMoveMock
+      .mockImplementationOnce(
+        () =>
+          new Promise<WorkflowMovePreviewResponse>((resolve) => {
+            resolveFirst = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(makePreview(FIRST_STEP_ID));
+
+    const { result, rerender } = renderHook(
+      ({ enabled }: { enabled: boolean }) =>
+        useWorkflowMovePreview({
+          taskId: TASK_ID,
+          workflowId: WORKFLOW_ID,
+          workflowStepId: FIRST_STEP_ID,
+          enabled,
+        }),
+      { initialProps: { enabled: true } },
+    );
+
+    await act(async () => {
+      vi.advanceTimersByTime(150);
+      await Promise.resolve();
+    });
+    expect(previewWorkflowMoveMock).toHaveBeenCalledOnce();
+
+    rerender({ enabled: false });
+    expect(result.current.status).toBe("idle");
+
+    rerender({ enabled: true });
+    await act(async () => {
+      vi.advanceTimersByTime(150);
+      await Promise.resolve();
+    });
+    expect(previewWorkflowMoveMock).toHaveBeenCalledTimes(2);
+    expect(result.current.status).toBe("success");
+
+    resolveFirst(makePreview(FIRST_STEP_ID));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(result.current.status).toBe("success");
+  });
 });

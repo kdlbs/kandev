@@ -164,15 +164,17 @@ successfully.
 
 The request hook now receives a store-derived revision containing relevant task,
 source and destination step, session, workflow, profile, workspace, and
-connection state. It clears a successful result before refetching on live
-updates and retains cancellation and generation guards. Drawer rows all enqueue
-their previews; the shared queue limits active requests to two and allows later
-rows to resolve after earlier requests finish.
+connection state, including per-session model and fallback data. It clears a
+successful result before refetching on live updates and retains cancellation
+and generation guards. Drawer rows all enqueue their previews; the shared queue
+limits active requests to two and allows later rows to resolve after earlier
+requests finish.
 
 The renderer maps known notice, field, and built-in value codes to localized
-copy, while retaining a generic fallback for unknown diagnostics and safe data
-labels for provider options. A non-English DTO-shape test covers missing
-snapshot, ambiguous rule, and inapplicable-session notices.
+copy, including a dedicated no-session dispatch state, while retaining a
+generic fallback for unknown diagnostics and safe data labels for provider
+options. A non-English DTO-shape test covers missing snapshot, ambiguous rule,
+and inapplicable-session notices.
 
 Remediation verification passed on 2026-09-15:
 

@@ -20,6 +20,7 @@ type RevisionState = Pick<
   | "taskSessions"
   | "taskSessionsByTask"
   | "agentProfiles"
+  | "sessionModels"
 >;
 
 let state: RevisionState;
@@ -97,6 +98,15 @@ function resetState() {
       errorByTaskId: {},
     },
     agentProfiles: { items: [], version: 1 },
+    sessionModels: {
+      bySessionId: {
+        [SESSION_ID]: {
+          currentModelId: "gpt-5.6-luna",
+          models: [],
+          configOptions: [],
+        },
+      },
+    },
   } as unknown as RevisionState;
 }
 
@@ -151,6 +161,17 @@ describe("workflow move preview revisions", () => {
     expect(
       getWorkflowMovePreviewRevision(state as AppState, TASK_ID, WORKFLOW_ID, "step-2"),
     ).not.toBe(afterSourceStep);
+
+    const beforeModel = getWorkflowMovePreviewRevision(
+      state as AppState,
+      TASK_ID,
+      WORKFLOW_ID,
+      "step-2",
+    );
+    state.sessionModels.bySessionId[SESSION_ID]!.currentModelId = "gpt-5.6-astra";
+    expect(
+      getWorkflowMovePreviewRevision(state as AppState, TASK_ID, WORKFLOW_ID, "step-2"),
+    ).not.toBe(beforeModel);
   });
 
   it("exposes the authoritative revision through the hook", () => {

@@ -927,6 +927,7 @@
   "workflowMovePreviewDispatchPrompt": "傳送步驟提示",
   "workflowMovePreviewDispatchNoPrompt": "不傳送提示",
   "workflowMovePreviewDispatchDeferred": "回合結束時重新檢查",
+  "workflowMovePreviewDispatchNoSession": "代理未啓動",
   "workflowMovePreviewNotes": "備註",
   "workflowMovePreviewNoticeRetainedOverride": "工作階段會保留模型覆蓋設定。",
   "workflowMovePreviewNoticeUnavailable": "部分預覽設定不可用。",

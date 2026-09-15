@@ -115,11 +115,17 @@ no-session launch handler. A destination without `auto_start_agent`, or a
 recipient. A permitted sessionless launch still resolves the task-level agent
 profile when the destination has no step profile. Provider option labels are
 bounded display labels, while Kandev-owned setting fields keep stable keys for
-localization.
+localization. The endpoint authorizes the task before repository access, keeps
+current-session routing when only the task profile fallback exists, predicts
+profile switches from an existing source session, and projects applicable
+configure-session rules for a fresh launch. Busy reusable targets report
+deferred dispatch, while fresh context and passthrough mode changes report
+skipped applicability.
 
 Regression coverage compares both idle launch gates with the actual move path,
 checks task-profile fallback for an allowed launch, and verifies the setting
-label DTO shape.
+label DTO shape, task authorization ordering, typed configuration notices, and
+busy-target dispatch.
 
 Remediation verification passed on 2026-09-15:
 

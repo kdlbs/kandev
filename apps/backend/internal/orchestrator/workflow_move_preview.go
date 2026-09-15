@@ -64,10 +64,11 @@ const (
 type WorkflowMovePreviewDispatch string
 
 const (
-	WorkflowMovePreviewDispatchPrompt   WorkflowMovePreviewDispatch = "prompt"
-	WorkflowMovePreviewDispatchNoPrompt WorkflowMovePreviewDispatch = "no_prompt"
-	WorkflowMovePreviewDispatchDeferred WorkflowMovePreviewDispatch = "deferred"
-	WorkflowMovePreviewDispatchUnknown  WorkflowMovePreviewDispatch = "unknown"
+	WorkflowMovePreviewDispatchPrompt    WorkflowMovePreviewDispatch = "prompt"
+	WorkflowMovePreviewDispatchNoPrompt  WorkflowMovePreviewDispatch = "no_prompt"
+	WorkflowMovePreviewDispatchNoSession WorkflowMovePreviewDispatch = "no_session"
+	WorkflowMovePreviewDispatchDeferred  WorkflowMovePreviewDispatch = "deferred"
+	WorkflowMovePreviewDispatchUnknown   WorkflowMovePreviewDispatch = "unknown"
 )
 
 // WorkflowMovePreview is a read-only prediction of the recipient and
@@ -158,6 +159,9 @@ func (s *Service) PreviewWorkflowMove(ctx context.Context, request WorkflowMoveP
 	}
 	if strings.TrimSpace(request.WorkflowID) == "" || strings.TrimSpace(request.WorkflowStepID) == "" {
 		return nil, fmt.Errorf("workflow id and workflow step id are required")
+	}
+	if err := s.authorizeTask(ctx, request.TaskID); err != nil {
+		return nil, err
 	}
 	if s.repo == nil || s.workflowStepGetter == nil {
 		return nil, fmt.Errorf("workflow move preview is unavailable")
@@ -253,7 +257,7 @@ func (s *Service) resolveWorkflowMovePreviewRecipient(
 			input.TargetProfileID = profileID
 		}
 	} else {
-		profileID, err := s.previewStepAgentProfile(ctx, destination, task)
+		profileID, err := s.previewStepAgentProfile(ctx, destination, task, input.SourceSession == nil)
 		input.TargetProfileID = profileID
 		if err != nil {
 			input.Notices = append(input.Notices, workflowMovePreviewNotice("profile_unavailable", nil))
@@ -278,7 +282,7 @@ func (s *Service) resolveWorkflowMovePreviewRecipient(
 		strings.EqualFold(profile.AgentName, agents.DynamicAgentID)
 }
 
-func (s *Service) previewStepAgentProfile(ctx context.Context, step *wfmodels.WorkflowStep, task *models.Task) (string, error) {
+func (s *Service) previewStepAgentProfile(ctx context.Context, step *wfmodels.WorkflowStep, task *models.Task, sessionless bool) (string, error) {
 	if step == nil || step.SessionTarget != nil {
 		return "", nil
 	}
@@ -286,14 +290,14 @@ func (s *Service) previewStepAgentProfile(ctx context.Context, step *wfmodels.Wo
 		return profileID, nil
 	}
 	if step.WorkflowID == "" || s.workflowStepGetter == nil {
-		if task != nil {
+		if task != nil && sessionless {
 			return strings.TrimSpace(models.StringFromAny(task.Metadata[models.MetaKeyAgentProfileID])), nil
 		}
 		return "", nil
 	}
 	meta, err := s.getWorkflowMeta(ctx, step.WorkflowID)
 	profileID := strings.TrimSpace(meta.AgentProfileID)
-	if profileID == "" && task != nil {
+	if profileID == "" && task != nil && sessionless {
 		profileID = strings.TrimSpace(models.StringFromAny(task.Metadata[models.MetaKeyAgentProfileID]))
 	}
 	if profileID != "" {
@@ -390,7 +394,6 @@ func buildWorkflowMovePreview(input workflowMovePreviewInput) *WorkflowMovePrevi
 		Outcome:           WorkflowMovePreviewOutcomeUnknown,
 		SourceDisposition: WorkflowMovePreviewSourceDispositionUnknown,
 		Dispatch:          WorkflowMovePreviewDispatchUnknown,
-		Notices:           append([]WorkflowMovePreviewNotice(nil), input.Notices...),
 	}
 	if input.SourceSession != nil {
 		preview.SourceSessionID = input.SourceSession.ID
@@ -416,10 +419,12 @@ func buildWorkflowMovePreview(input workflowMovePreviewInput) *WorkflowMovePrevi
 		}
 		preview.ContextResetState = WorkflowMovePreviewUnchanged
 		preview.Dispatch = WorkflowMovePreviewDispatchNoPrompt
+		preview.Notices = append([]WorkflowMovePreviewNotice(nil), input.Notices...)
 		return preview
 	}
 
 	target, outcome := previewRecipient(input)
+	input.TargetSession = target
 	preview.Outcome = outcome
 	if outcome != WorkflowMovePreviewOutcomeUnknown && outcome != WorkflowMovePreviewOutcomeNoSession {
 		preview.Recipient = previewRecipientDTO(target, input)
@@ -442,7 +447,7 @@ func buildWorkflowMovePreview(input workflowMovePreviewInput) *WorkflowMovePrevi
 		after, afterKnown, afterSource = models.SessionRuntimeConfig{}, false, "unknown"
 	}
 
-	applyPreviewConfigureSession(&after, &afterKnown, &afterSource, target, &input)
+	applyPreviewConfigureSession(&after, &afterKnown, &afterSource, target, outcome, &input)
 	applyPreviewSessionMode(&after, &afterKnown, target, input)
 	preview.Model = WorkflowMovePreviewModel{
 		Before:       previewModelValue(before, beforeKnown),
@@ -506,7 +511,7 @@ func previewProfileRecipient(input workflowMovePreviewInput) (*models.TaskSessio
 }
 
 func previewSessionlessRecipient(input workflowMovePreviewInput) (*models.TaskSession, WorkflowMovePreviewOutcome) {
-	if !input.SessionlessLaunchAllowed {
+	if input.SourceSession == nil && !input.SessionlessLaunchAllowed {
 		return nil, WorkflowMovePreviewOutcomeNoSession
 	}
 	return nil, WorkflowMovePreviewOutcomeCreateNew

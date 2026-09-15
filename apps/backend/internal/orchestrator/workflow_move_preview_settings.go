@@ -14,9 +14,10 @@ func applyPreviewConfigureSession(
 	afterKnown *bool,
 	afterSource *string,
 	target *models.TaskSession,
+	outcome WorkflowMovePreviewOutcome,
 	input *workflowMovePreviewInput,
 ) {
-	if input == nil || input.Destination == nil || target == nil {
+	if input == nil || input.Destination == nil {
 		return
 	}
 	action, ok := configureSessionAction(input.Destination)
@@ -28,8 +29,20 @@ func applyPreviewConfigureSession(
 		input.Notices = append(input.Notices, workflowMovePreviewNotice("invalid_session_configuration", nil))
 		return
 	}
-	rule, ok := previewConfigureSessionRule(target, input, rules)
-	if !ok || rule.Operation == wfmodels.ConfigureSessionKeep {
+	var rule *wfmodels.ConfigureSessionRule
+	if target == nil {
+		if outcome != WorkflowMovePreviewOutcomeCreateNew || input.SourceSession != nil {
+			return
+		}
+		rule = previewFreshConfigureSessionRule(input, rules)
+	} else {
+		var ok bool
+		rule, ok = previewConfigureSessionRule(target, input, rules)
+		if !ok {
+			return
+		}
+	}
+	if rule == nil || rule.Operation == wfmodels.ConfigureSessionKeep {
 		return
 	}
 	targetConfig, ok := sessionConfigurationTargetForRule(target, *rule)
@@ -38,6 +51,27 @@ func applyPreviewConfigureSession(
 		return
 	}
 	applyPreviewConfigurationTarget(after, afterKnown, afterSource, targetConfig, rule.Operation)
+}
+
+func previewFreshConfigureSessionRule(
+	input *workflowMovePreviewInput,
+	rules []wfmodels.ConfigureSessionRule,
+) *wfmodels.ConfigureSessionRule {
+	if input.ProfileInfo == nil {
+		return nil
+	}
+	selection := selectConfigureSessionRuleWithResolver(rules, input.ProfileInfo.AgentName, input.AgentResolver)
+	if selection.rule == nil {
+		if selection.warning != "" {
+			input.Notices = appendPreviewNoticeOnce(input.Notices, previewConfigureSelectionNotice(selection))
+		}
+		return nil
+	}
+	if selection.rule.Operation == wfmodels.ConfigureSessionRestoreOriginal {
+		input.Notices = appendPreviewNoticeOnce(input.Notices, workflowMovePreviewNotice("session_configuration_unavailable", nil))
+		return nil
+	}
+	return selection.rule
 }
 
 func applyPreviewConfigurationTarget(
@@ -91,7 +125,7 @@ func previewConfigureSessionRule(
 	selection := selectConfigureSessionRuleWithResolver(rules, agentName, input.AgentResolver)
 	if selection.rule == nil {
 		if selection.warning != "" {
-			input.Notices = appendPreviewNoticeOnce(input.Notices, previewConfigureSelectionNotice(selection.warning))
+			input.Notices = appendPreviewNoticeOnce(input.Notices, previewConfigureSelectionNotice(selection))
 		}
 		return nil, false
 	}
@@ -122,7 +156,7 @@ func applyPreviewSessionMode(
 		if mode == "" {
 			continue
 		}
-		if target != nil && (target.IsPassthrough || input.TargetPassthrough) {
+		if (target != nil && target.IsPassthrough) || input.TargetPassthrough {
 			return
 		}
 		after.Mode = mode
@@ -218,8 +252,11 @@ func previewContextReset(input workflowMovePreviewInput, outcome WorkflowMovePre
 	if !requested && !declared {
 		return false, WorkflowMovePreviewUnchanged
 	}
-	if outcome == WorkflowMovePreviewOutcomeUnknown || outcome == WorkflowMovePreviewOutcomeNoSession {
+	if outcome == WorkflowMovePreviewOutcomeUnknown {
 		return requested || declared, WorkflowMovePreviewUnknown
+	}
+	if outcome == WorkflowMovePreviewOutcomeCreateNew || outcome == WorkflowMovePreviewOutcomeNoSession {
+		return requested || declared, WorkflowMovePreviewSkipped
 	}
 	return requested || declared, WorkflowMovePreviewPlanned
 }
@@ -262,7 +299,7 @@ func previewDispatch(input workflowMovePreviewInput, outcome WorkflowMovePreview
 		return WorkflowMovePreviewDispatchUnknown
 	}
 	if outcome == WorkflowMovePreviewOutcomeNoSession {
-		return WorkflowMovePreviewDispatchNoPrompt
+		return WorkflowMovePreviewDispatchNoSession
 	}
 	if !input.Destination.HasOnEnterAction(wfmodels.OnEnterAutoStartAgent) {
 		return WorkflowMovePreviewDispatchNoPrompt
@@ -303,13 +340,9 @@ func appendPreviewNoticeOnce(notices []WorkflowMovePreviewNotice, notice Workflo
 	return append(notices, notice)
 }
 
-func previewConfigureSelectionNotice(warning string) WorkflowMovePreviewNotice {
-	switch {
-	case strings.Contains(warning, "ambiguous"):
-		return workflowMovePreviewNotice("ambiguous_session_configuration", nil)
-	case strings.Contains(warning, "conflicting"):
-		return workflowMovePreviewNotice("conflicting_session_configuration", nil)
-	default:
+func previewConfigureSelectionNotice(selection configureSessionRuleSelection) WorkflowMovePreviewNotice {
+	if selection.noticeCode == "" {
 		return workflowMovePreviewNotice("session_configuration_unavailable", nil)
 	}
+	return workflowMovePreviewNotice(selection.noticeCode, nil)
 }
