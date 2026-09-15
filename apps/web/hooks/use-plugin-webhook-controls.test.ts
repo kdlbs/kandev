@@ -11,7 +11,10 @@ vi.mock("@/lib/api/domains/automation-api", () => ({
   listPluginWebhookReceipts: vi.fn().mockResolvedValue([]),
 }));
 const trigger = { id: "t", automation_id: "a", updated_at: "1" } as AutomationTrigger;
-const binding = { id: "b", trigger_id: "t", path: "/api/v1/automations/webhook-bindings/b" };
+const binding = {
+  binding: { id: "b", trigger_id: "t" },
+  path: "/api/v1/automations/webhook-bindings/b",
+};
 beforeEach(() => vi.clearAllMocks());
 it("blocks configuration during initial lookup and builds the backend URL", async () => {
   let resolve!: (value: null) => void;
