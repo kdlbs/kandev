@@ -2708,6 +2708,9 @@ func (s *Service) ResumeTaskSessionWithOptions(
 	taskID, sessionID string,
 	options executor.ResumeOptions,
 ) (*executor.TaskExecution, error) {
+	if _, err := s.resolveExactProfileAssignment(ctx, taskID); err != nil {
+		return nil, err
+	}
 	return s.resumeTaskSessionWithContinuation(ctx, taskID, sessionID, options, nil)
 }
 
