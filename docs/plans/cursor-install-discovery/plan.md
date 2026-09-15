@@ -113,3 +113,22 @@ installation, and propagate to subprocesses. An already-running old launcher or
 agentctl may retain its old environment until the runtime is restarted. If the
 regular-launch symptom persists with a verified correct PATH, investigate that
 separately instead of expanding this repair without evidence.
+
+## PR review remediation
+
+Codex identified that a system LaunchDaemon can inherit an absent or incorrect
+HOME after selecting a non-root account. System-service local executable PATH
+now uses the effective UID's account home and preserves PATH when lookup fails.
+Added `local_agent_service_path_test.go` with a generated non-root LaunchDaemon
+fixture, actual discovery/execution, and failed/invalid account lookup coverage.
+Regular launches retain final child HOME precedence.
+
+CodeRabbit's summary suggestion is addressed by documenting the usable absolute
+home condition in the requirement and public CLI guide.
+
+Remediation validation:
+- `GOCACHE=/tmp/kandev-cursor-go-cache go test -race ./internal/launcher -run '^TestLocalAgentPath' -count=1`: passed.
+- `go test -race ./internal/launcher -count=1` with inherited `KANDEV_*` settings removed, writable GOCACHE, and local socket access: passed (16.928s).
+- `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check`: passed.
+
+Remote CI/review evidence remains pending for the remediation head.

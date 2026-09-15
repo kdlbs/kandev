@@ -30,8 +30,12 @@ Unix-only helper appends the effective user's absolute `.local/bin` path unless
 already present. Preserve inherited PATH ordering and do not gate addition on
 the directory existing: installation may create it after startup.
 
-Use the final child HOME when valid; otherwise use `os.UserHomeDir` when it yields
-an absolute home. Do not substitute `KANDEV_HOME_DIR`, the database directory,
+For system services (`KANDEV_SERVICE_MODE=system`), look up the effective UID
+with `os/user.LookupId` and use that account's home. Do not fall back to inherited
+HOME when account lookup fails: launchd may leave HOME unset or naming root after
+selecting another account through `UserName`. For regular launches and user
+services, use the final child HOME when valid; otherwise use `os.UserHomeDir`
+when it yields an absolute home. Do not substitute `KANDEV_HOME_DIR`, the database directory,
 the workspace, or a privileged installer's home. Missing/unusable home discovery
 leaves PATH unchanged. Preserve Windows behavior. Avoid an empty leading PATH
 component when the original PATH is empty.

@@ -5,8 +5,10 @@ import (
 	"encoding/xml"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -23,33 +25,7 @@ func TestLocalAgentPathPostInstall(t *testing.T) {
 
 func TestLocalAgentPathLaunchd(t *testing.T) {
 	plist := renderLaunchdPlist(nativeServiceUnitInput{Executable: "/opt/kandev/bin/kandev", HomeDir: t.TempDir()})
-	// EnvironmentVariables is a nested dictionary; decode its serialized producer output.
-	decoder := xml.NewDecoder(strings.NewReader(plist))
-	var path string
-	for {
-		token, err := decoder.Token()
-		if err != nil {
-			break
-		}
-		start, ok := token.(xml.StartElement)
-		if !ok || start.Name.Local != "key" {
-			continue
-		}
-		var key string
-		if err := decoder.DecodeElement(&key, &start); err != nil {
-			t.Fatal(err)
-		}
-		if key != "PATH" {
-			continue
-		}
-		if err := decoder.Decode(&path); err != nil {
-			t.Fatal(err)
-		}
-		break
-	}
-	if path == "" {
-		t.Fatal("launchd plist has no PATH")
-	}
+	path := launchdPlistString(t, plist, "PATH")
 	home, env := localAgentEnvironment(t, path)
 	installLocalAgentFixture(t, home)
 	runLocalAgentChild(t, env)
@@ -62,6 +38,7 @@ func localAgentEnvironment(t *testing.T, path string) (string, []string) {
 	}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("KANDEV_SERVICE_MODE", "")
 	t.Setenv("PATH", path)
 	t.Setenv("KANDEV_HOME_DIR", t.TempDir())
 	env := backendEnv(portConfig{}, "", "", false, "test", nil)
@@ -117,6 +94,7 @@ func TestLocalAgentPathChild(t *testing.T) {
 
 // @covers AC-PLATFORM-LOCAL-AGENT-PATH-001.4 AC-PLATFORM-LOCAL-AGENT-PATH-001.5
 func TestLocalAgentPathEnvironment(t *testing.T) {
+	t.Setenv("KANDEV_SERVICE_MODE", "")
 	if runtime.GOOS == "windows" {
 		t.Setenv("PATH", `C:\tools`)
 		env := backendEnv(portConfig{}, "", "", false, "test", nil)
@@ -230,4 +208,60 @@ func TestLocalAgentPathRestart(t *testing.T) {
 			backend.restart()
 		}
 	}
+}
+
+func TestLocalAgentPathLaunchDaemon(t *testing.T) {
+	if runtime.GOOS == goosWindows {
+		t.Skip("Unix service identity")
+	}
+	account, err := user.LookupId(strconv.Itoa(os.Geteuid()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !filepath.IsAbs(account.HomeDir) {
+		t.Skip("account has no absolute home")
+	}
+	for _, inheritedHome := range []string{"", t.TempDir()} {
+		t.Run(inheritedHome, func(t *testing.T) {
+			t.Setenv("HOME", inheritedHome)
+			t.Setenv("PATH", "/usr/bin:/bin")
+			env := backendEnv(portConfig{}, "", "", false, "test", []string{"KANDEV_SERVICE_MODE=system"})
+			want := "/usr/bin:/bin:" + filepath.Join(account.HomeDir, ".local", "bin")
+			if got := processEnvValue(env, "PATH"); got != want {
+				t.Fatalf("service PATH = %q, want account home %q", got, want)
+			}
+		})
+	}
+}
+
+func launchdPlistString(t *testing.T, plist, wanted string) string {
+	t.Helper()
+	// EnvironmentVariables is a nested dictionary; decode its serialized producer output.
+	decoder := xml.NewDecoder(strings.NewReader(plist))
+	var path string
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		start, ok := token.(xml.StartElement)
+		if !ok || start.Name.Local != "key" {
+			continue
+		}
+		var key string
+		if err := decoder.DecodeElement(&key, &start); err != nil {
+			t.Fatal(err)
+		}
+		if key != wanted {
+			continue
+		}
+		if err := decoder.Decode(&path); err != nil {
+			t.Fatal(err)
+		}
+		break
+	}
+	if path == "" {
+		t.Fatalf("launchd plist has no %s", wanted)
+	}
+	return path
 }

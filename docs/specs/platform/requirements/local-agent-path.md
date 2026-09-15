@@ -27,7 +27,8 @@ solely to load shell configuration.
 
 - **AC-PLATFORM-LOCAL-AGENT-PATH-001.1:** On macOS and Linux, regular native/npm
   launches and service launches shall discover executable agent CLIs in the
-  runtime user's `~/.local/bin` even when the launcher's inherited PATH omits it.
+  runtime user's `~/.local/bin` even when the launcher's inherited PATH omits it,
+  provided the runtime home resolves to a usable absolute path.
 - **AC-PLATFORM-LOCAL-AGENT-PATH-001.2:** If that directory or executable is
   created after startup, the existing post-install refresh or manual rescan
   shall discover it without a PATH-related restart.
@@ -38,9 +39,11 @@ solely to load shell configuration.
 - **AC-PLATFORM-LOCAL-AGENT-PATH-001.4:** Existing PATH entries shall retain their
   order and precedence. Repeated startup normalization shall not duplicate the
   added directory. The directory shall be derived from the runtime user's home,
-  independently of Kandev's data directory.
+  independently of Kandev's data directory. System services shall use the effective
+  service account's home even when inherited HOME is missing or names another user.
 - **AC-PLATFORM-LOCAL-AGENT-PATH-001.5:** Missing or non-executable agent files
-  shall remain unavailable. Windows startup and remote executor environments
+  shall remain unavailable. When the runtime home cannot be resolved to a usable
+  absolute path, inherited PATH shall remain unchanged. Windows startup and remote executor environments
   shall retain their existing behavior.
 
 ## Out of scope
