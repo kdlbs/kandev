@@ -35,6 +35,10 @@ type canonicalAgentDeliveryProjector interface {
 	ProjectCanonicalAgentDeliveryEvent(ctx context.Context, event *models.AgentDeliveryEvent, effect *models.AgentDeliveryEffect) (bool, error)
 }
 
+type canonicalAgentDeliveryBatchProjector interface {
+	ProjectCanonicalAgentDeliveryEvents(ctx context.Context, events []*models.AgentDeliveryEvent, effects []*models.AgentDeliveryEffect) ([]bool, error)
+}
+
 type agentDeliveryAcknowledger interface {
 	AcknowledgeDelivery(ctx context.Context, streamID string, sequence uint64) error
 }

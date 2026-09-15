@@ -49,6 +49,17 @@ func (r *canonicalProjectionFailureDeliveryRepository) ProjectCanonicalAgentDeli
 	return false, r.projectionErr
 }
 
+type canonicalProjectionDeliveryRepository struct {
+	recordingAgentDeliveryRepository
+}
+
+func (r *canonicalProjectionDeliveryRepository) ProjectCanonicalAgentDeliveryEvent(
+	_ context.Context, event *models.AgentDeliveryEvent, _ *models.AgentDeliveryEffect,
+) (bool, error) {
+	r.projected = append(r.projected, event)
+	return false, nil
+}
+
 func (r *immutableDeliveryRepository) ReceiveAgentDeliveryEvent(
 	ctx context.Context,
 	event *models.AgentDeliveryEvent,
@@ -213,6 +224,38 @@ func TestDurableAgentEventCanonicalProjectionFailureBlocksProcessing(t *testing.
 	}
 	if callbackCalled {
 		t.Fatal("agent callback ran after canonical projection failed")
+	}
+}
+
+func TestCanonicalProjectionNotifiesWhenAckTransportFails(t *testing.T) {
+	repository := &canonicalProjectionDeliveryRepository{}
+	callbackCalled := false
+	sm := NewStreamManager(newTestLogger(), StreamCallbacks{
+		OnAgentEvent: func(_ *AgentExecution, event agentctl.AgentEvent) {
+			callbackCalled = event.CanonicalProjection
+		},
+	}, nil, nil)
+	event := agentctl.AgentEvent{
+		Type:                      streams.EventTypeMessageChunk,
+		Text:                      "already committed",
+		DeliveryStreamID:          "stream-ack-failure",
+		DeliveryIncarnationID:     "incarnation-ack-failure",
+		DeliveryHarnessGeneration: 1,
+		DeliverySequence:          1,
+	}
+
+	// A nil client models an ACK transport that is unavailable after the
+	// canonical repository commit. The callback must still observe the output.
+	if err := sm.processAgentEvent(
+		context.Background(), &AgentExecution{SessionID: "session-1"}, nil, repository, event, 0,
+	); err != nil {
+		t.Fatalf("process canonical event: %v", err)
+	}
+	if !callbackCalled {
+		t.Fatal("canonical output callback did not run after ACK transport failure")
+	}
+	if len(repository.projected) != 1 {
+		t.Fatalf("projected events = %d, want 1", len(repository.projected))
 	}
 }
 

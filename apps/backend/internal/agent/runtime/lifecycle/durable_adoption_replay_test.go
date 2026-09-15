@@ -85,6 +85,7 @@ func TestDurableAdoptionReplayReadsEveryPageToCapturedHighWater(t *testing.T) {
 			callbackCount.Add(1)
 		},
 	}, nil, nil)
+	t.Cleanup(streamManager.Wait)
 	streamManager.setAgentDeliveryRepository(repository)
 	execution := &AgentExecution{
 		SessionID:                 "session-1",
@@ -242,6 +243,7 @@ func TestDurableAdoptionReplayStopsAtCapturedHighWaterWhenPeerAppendsTail(t *tes
 			callbackCount.Add(1)
 		},
 	}, nil, nil)
+	t.Cleanup(streamManager.Wait)
 	streamManager.setAgentDeliveryRepository(repository)
 	execution := &AgentExecution{
 		SessionID:                 "session-1",

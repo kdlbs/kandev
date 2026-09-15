@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import {
   IconAlertTriangle,
   IconCircleCheck,
   IconPlayerPlay,
+  IconPlayerStop,
   IconPlus,
   IconRefresh,
 } from "@tabler/icons-react";
@@ -17,6 +18,7 @@ import {
   SessionRecoveryNotice,
 } from "@/components/task/ensure-session-error";
 import { useAppStore } from "@/components/state-provider";
+import { useSessionActions } from "@/hooks/domains/session/use-session-actions";
 import {
   useSessionRecoveryActions,
   type SessionRecoveryBusyAction,
@@ -41,6 +43,7 @@ export type SessionStoppedBannerProps = {
   detail?: string;
   resumeLabel?: string;
   resumingLabel?: string;
+  uncertainDelivery?: boolean;
   recoveryActions?: SessionRecoveryActions;
 };
 
@@ -135,6 +138,7 @@ function RecoverableSessionActions({
   workspaceId,
   resumeLabel,
   resumingLabel,
+  uncertainDelivery,
   recoveryActions,
 }: Pick<
   SessionStoppedBannerProps,
@@ -144,6 +148,7 @@ function RecoverableSessionActions({
   | "workspaceId"
   | "resumeLabel"
   | "resumingLabel"
+  | "uncertainDelivery"
   | "recoveryActions"
 >) {
   const { t } = useTranslation();
@@ -180,6 +185,21 @@ function RecoverableSessionActions({
     if (taskId && sessionId) void handleRecover("fresh_start");
   }, [profileExists, onShowDialog, handleRecover]);
 
+  if (uncertainDelivery) {
+    return (
+      <UncertainDeliveryActions
+        taskId={taskId}
+        sessionId={sessionId}
+        workspaceId={workspaceId}
+        recoveryError={recoveryError}
+        recoveryNotice={recoveryNotice}
+        busyAction={busyAction}
+        handleRecover={handleRecover}
+        handleRetry={handleRetry}
+      />
+    );
+  }
+
   return (
     <div className="flex w-full flex-col gap-2 sm:w-auto">
       <StoppedRecoveryFeedback
@@ -205,6 +225,78 @@ function RecoverableSessionActions({
         onResume={handleResume}
         onFreshStart={handleFreshStart}
       />
+    </div>
+  );
+}
+
+function UncertainDeliveryActions({
+  taskId,
+  sessionId,
+  workspaceId,
+  recoveryError,
+  recoveryNotice,
+  busyAction,
+  handleRecover,
+  handleRetry,
+}: {
+  taskId: string | null;
+  sessionId: string | null;
+  workspaceId?: string | null;
+  recoveryError: Error | null;
+  recoveryNotice: string | null;
+  busyAction: SessionRecoveryBusyAction;
+  handleRecover: SessionRecoveryActions["handleRecover"];
+  handleRetry: SessionRecoveryActions["handleRetry"];
+}) {
+  const { t } = useTranslation();
+  const { stop } = useSessionActions({ sessionId, taskId });
+  const [stopping, setStopping] = useState(false);
+  const retryBusy = busyAction === "retry_connection";
+  const handleStop = useCallback(async () => {
+    setStopping(true);
+    try {
+      await stop();
+    } finally {
+      setStopping(false);
+    }
+  }, [stop]);
+
+  return (
+    <div className="flex w-full flex-col gap-2 sm:w-auto">
+      {recoveryError ? (
+        <EnsureSessionErrorBanner
+          error={recoveryError}
+          onRetry={() => void handleRetry()}
+          retryDisabled={busyAction !== null || stopping}
+          workspaceId={workspaceId}
+          compact
+          showRetry={false}
+          testId="session-recovery-error"
+        />
+      ) : null}
+      {recoveryNotice ? <SessionRecoveryNotice message={recoveryNotice} /> : null}
+      <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+        <Button
+          variant="default"
+          className="min-h-11 w-full shrink-0 gap-1.5 cursor-pointer sm:min-h-7 sm:w-auto"
+          onClick={() => void handleRecover("retry_connection")}
+          disabled={busyAction !== null || stopping || !taskId || !sessionId}
+          data-testid="recovery-retry-connection-button"
+        >
+          <IconRefresh className="h-3.5 w-3.5" />
+          {retryBusy ? t("task:retryingConnection") : t("task:retryConnection")}
+        </Button>
+        <Button
+          variant="outline"
+          className="min-h-11 w-full shrink-0 gap-1.5 cursor-pointer sm:min-h-7 sm:w-auto"
+          onClick={() => void handleStop()}
+          disabled={stopping || busyAction !== null}
+          data-testid="recovery-stop-button"
+        >
+          <IconPlayerStop className="h-3.5 w-3.5" />
+          {stopping ? t("task:stopping") : t("task:stop")}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -373,13 +465,14 @@ export function SessionStoppedBanner({
   detail,
   resumeLabel,
   resumingLabel,
+  uncertainDelivery,
   recoveryActions,
 }: SessionStoppedBannerProps) {
   const { t } = useTranslation();
   const isCompleted = mode === "completed";
-  const bannerMessage = isCompleted
-    ? t("task:sessionCompleted")
-    : (message ?? t("task:agentHasStopped"));
+  let bannerMessage = message ?? t("task:agentHasStopped");
+  if (uncertainDelivery && !isCompleted) bannerMessage = t("task:durableDeliveryUncertain");
+  if (isCompleted) bannerMessage = t("task:sessionCompleted");
 
   return (
     <>
@@ -396,7 +489,7 @@ export function SessionStoppedBanner({
               <IconAlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-orange-500" />
             )}
             <span className="min-w-0 break-words">{bannerMessage}</span>
-            {detail && (
+            {detail && !uncertainDelivery && (
               <span className="min-w-0 break-words text-xs text-muted-foreground">({detail})</span>
             )}
           </div>
@@ -417,6 +510,7 @@ export function SessionStoppedBanner({
               workspaceId={workspaceId}
               resumeLabel={resumeLabel}
               resumingLabel={resumingLabel}
+              uncertainDelivery={uncertainDelivery}
               recoveryActions={recoveryActions}
             />
           )}

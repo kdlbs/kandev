@@ -110,6 +110,7 @@ type ChatInputContainerProps = {
   isFailed?: boolean;
   isCompleted?: boolean;
   sessionErrorMessage?: string;
+  uncertainDelivery?: boolean;
   needsRecovery?: boolean;
   /** The task-owned launch card renders the failed-start recovery. */
   launchErrorOwned?: boolean;
@@ -375,6 +376,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
           taskId={taskId}
           sessionId={sessionId}
           workspaceId={props.workspaceId}
+          uncertainDelivery={props.uncertainDelivery}
           recoveryActions={recoveryActions}
           {...buildStoppedBannerProps(props)}
         />

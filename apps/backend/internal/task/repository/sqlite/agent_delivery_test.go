@@ -257,6 +257,60 @@ func TestCanonicalAgentDeliveryProjectionPersistsNewlineFreeChunksExactlyOnce(t 
 	}
 }
 
+func TestCanonicalAgentDeliveryProjectionBatchesCompatibleChunks(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-canonical-batch", "session-canonical-batch", "turn-canonical-batch")
+
+	events := make([]*models.AgentDeliveryEvent, 0, 3)
+	effects := make([]*models.AgentDeliveryEffect, 0, 3)
+	for sequence, text := range []string{"a", "b", "c"} {
+		sequenceNumber := int64(sequence + 1)
+		payload, err := json.Marshal(streams.AgentEvent{
+			Type: streams.EventTypeMessageChunk, Text: text,
+			TurnID: "turn-canonical-batch", CanonicalMessageID: "canonical-batch-1",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		event := &models.AgentDeliveryEvent{
+			SessionID: "session-canonical-batch", IncarnationID: "incarnation-canonical-batch",
+			HarnessGeneration: 1, StreamID: "stream-canonical-batch", Sequence: sequenceNumber,
+			EventType: streams.EventTypeMessageChunk, Payload: payload,
+		}
+		if inserted, err := repo.ReceiveAgentDeliveryEvent(ctx, event, 3); err != nil || !inserted {
+			t.Fatalf("receive sequence %d = %v, err=%v", sequenceNumber, inserted, err)
+		}
+		events = append(events, event)
+		effects = append(effects, &models.AgentDeliveryEffect{
+			EffectKey: fmt.Sprintf("canonical-batch:%d", sequenceNumber), StreamID: event.StreamID,
+			Sequence: sequenceNumber, EffectType: "agent_delivery.event",
+		})
+	}
+
+	appended, err := repo.ProjectCanonicalAgentDeliveryEvents(ctx, events, effects)
+	if err != nil {
+		t.Fatalf("project canonical batch: %v", err)
+	}
+	if len(appended) != 3 || appended[0] || !appended[1] || !appended[2] {
+		t.Fatalf("batch append results = %v, want [false true true]", appended)
+	}
+	message, err := repo.GetMessage(ctx, "canonical-batch-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if message.Content != "abc" {
+		t.Fatalf("batched canonical content = %q, want %q", message.Content, "abc")
+	}
+	cursor, err := repo.GetAgentDeliveryCursor(ctx, "stream-canonical-batch")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cursor.ProjectedSequence != 3 {
+		t.Fatalf("batched projected cursor = %d, want 3", cursor.ProjectedSequence)
+	}
+}
+
 func TestCanonicalAgentDeliveryProjectionPersistsThinkingInMetadata(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()

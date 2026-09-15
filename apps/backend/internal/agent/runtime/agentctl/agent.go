@@ -607,29 +607,53 @@ func (c *Client) dispatchAgentEvents(handler func(AgentEvent), events *agentEven
 // delivery. A single-slot notify channel wakes the worker without accumulating
 // a signal per event.
 type agentEventQueue struct {
-	mu     sync.Mutex
-	items  []AgentEvent
-	limit  int
-	notify chan struct{}
-	closed bool
+	mu        sync.Mutex
+	items     []queuedAgentEvent
+	bytes     int
+	limit     int
+	byteLimit int
+	notify    chan struct{}
+	closed    bool
 }
 
 const maxAgentEventQueueItems = 4096
+const maxAgentEventQueueBytes = 4 << 20
 
-var errAgentEventQueueFull = errors.New("agent event dispatch queue is full")
+// ErrAgentEventQueueFull indicates that the bounded reader-side event queue
+// could not accept another event. Durable callers reconnect from their
+// committed cursor; legacy callers must surface an uncertain outcome.
+var ErrAgentEventQueueFull = errors.New("agent event dispatch queue is full")
+
+// Keep the package-local name for tests and older callers inside this package.
+var errAgentEventQueueFull = ErrAgentEventQueueFull
+
+type queuedAgentEvent struct {
+	event AgentEvent
+	bytes int
+}
 
 func newAgentEventQueue() *agentEventQueue {
-	return &agentEventQueue{limit: maxAgentEventQueueItems, notify: make(chan struct{}, 1)}
+	return &agentEventQueue{
+		limit:     maxAgentEventQueueItems,
+		byteLimit: maxAgentEventQueueBytes,
+		notify:    make(chan struct{}, 1),
+	}
 }
 
 // enqueue appends an event and wakes the worker. It is a no-op after close.
 func (q *agentEventQueue) enqueue(event AgentEvent) bool {
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return false
+	}
+	eventBytes := len(payload)
 	q.mu.Lock()
-	if q.closed || len(q.items) >= q.limit {
+	if q.closed || len(q.items) >= q.limit || q.bytes+eventBytes > q.byteLimit {
 		q.mu.Unlock()
 		return false
 	}
-	q.items = append(q.items, event)
+	q.items = append(q.items, queuedAgentEvent{event: event, bytes: eventBytes})
+	q.bytes += eventBytes
 	q.mu.Unlock()
 	select {
 	case q.notify <- struct{}{}:
@@ -657,15 +681,16 @@ func (q *agentEventQueue) dequeue() (AgentEvent, bool) {
 	for {
 		q.mu.Lock()
 		if len(q.items) > 0 {
-			event := q.items[0]
+			queued := q.items[0]
 			// Zero the vacated slot before advancing so the evicted event's
 			// maps/slices/pointer fields (tool-call payloads can be large)
 			// become collectable now, not only when the whole backing array is
 			// freed at stream shutdown.
-			q.items[0] = AgentEvent{}
+			q.items[0] = queuedAgentEvent{}
 			q.items = q.items[1:]
+			q.bytes -= queued.bytes
 			q.mu.Unlock()
-			return event, true
+			return queued.event, true
 		}
 		if q.closed {
 			q.mu.Unlock()

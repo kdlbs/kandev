@@ -8,7 +8,8 @@ export type SessionRecoveryAction =
   | "resume_new_branch"
   | "continue_from_history"
   | "fresh_start"
-  | "runtime_retry";
+  | "runtime_retry"
+  | "retry_connection";
 
 export type BranchRecoveryDetails = WebSocketRequestErrorDetails & {
   kind: "branch_unrecoverable";

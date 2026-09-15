@@ -186,13 +186,6 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 
 	ctx, cancel := context.WithCancel(c.Request.Context())
 	defer cancel()
-	replay, err := s.loadAgentStreamReplay(ctx, after)
-	if err != nil {
-		s.logger.Error("failed to load agent stream replay", zap.Error(err))
-		_ = conn.Close()
-		return
-	}
-
 	// AC-EXECUTORS-CONTROL-OWNERSHIP-002.2: terminate this stream if the
 	// control server's credential rotates while it is open, so a prior
 	// holder cannot keep consuming an instance's events past the moment its
@@ -231,7 +224,7 @@ func (s *Server) handleAgentStreamWS(c *gin.Context) {
 	wg.Add(1)
 	go s.runAgentStreamReader(ctx, conn, writeMessage, cancel, &wg)
 	wg.Add(1)
-	go s.runAgentStreamWriterWithReplay(ctx, conn, streamID, replay, after, s.procMgr.DeliveryStreamID(), updatesCh, mcpRequestCh, writeMessage, &wg)
+	go s.runAgentStreamWriterWithJournalReplay(ctx, conn, streamID, after, s.procMgr.DeliveryStreamID(), updatesCh, mcpRequestCh, writeMessage, &wg)
 	wg.Wait()
 	if s.mcpBackendClient != nil {
 		s.mcpBackendClient.FailStreamRequests(streamID, errors.New("agent stream disconnected"))
@@ -283,6 +276,33 @@ func (s *Server) runAgentStreamReader(ctx context.Context, conn *websocket.Conn,
 // runAgentStreamWriter sends agent events and MCP requests to the backend connection.
 func (s *Server) runAgentStreamWriter(ctx context.Context, conn *websocket.Conn, streamID string, updatesCh <-chan adapter.AgentEvent, mcpRequestCh <-chan *ws.Message, writeMessage func([]byte) error, wg *sync.WaitGroup) {
 	s.runAgentStreamWriterWithReplay(ctx, conn, streamID, nil, 0, "", updatesCh, mcpRequestCh, writeMessage, wg)
+}
+
+// runAgentStreamWriterWithJournalReplay sends every committed replay page
+// before selecting the live channel. The replay helper keeps only one journal
+// page in memory and performs a final high-water check so the live channel is
+// not the sole bridge for events committed during reconnect.
+func (s *Server) runAgentStreamWriterWithJournalReplay(ctx context.Context, conn *websocket.Conn, streamID string, after uint64, deliveryStreamID string, updatesCh <-chan adapter.AgentEvent, mcpRequestCh <-chan *ws.Message, writeMessage func([]byte) error, wg *sync.WaitGroup) {
+	defer wg.Done()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			s.logger.Debug("failed to close agent stream websocket", zap.Error(err))
+		}
+	}()
+
+	after, err := s.replayAgentStream(ctx, after, func(notification adapter.AgentEvent) error {
+		if !s.writeAgentStreamNotification(notification, writeMessage, true) {
+			return errAgentStreamReplayStopped
+		}
+		return nil
+	})
+	if err != nil {
+		if !errors.Is(err, errAgentStreamReplayStopped) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+			s.logger.Error("failed to stream agent delivery replay", zap.Error(err))
+		}
+		return
+	}
+	s.runAgentStreamWriterLoop(ctx, conn, streamID, after, deliveryStreamID, updatesCh, mcpRequestCh, writeMessage)
 }
 
 // runAgentStreamWriterWithReplay sends committed replay events before it

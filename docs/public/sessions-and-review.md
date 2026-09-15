@@ -86,6 +86,13 @@ from the executor setting that controls whether the agent process survives.
 If the delivery evidence is missing or inconsistent, Kandev keeps the session
 blocked and preserves Stop and the available recovery action.
 
+If delivery is interrupted and the prompt outcome is uncertain, the recovery
+card shows **Retry connection** and **Stop**. Retry connection reconnects the
+original stream and replays committed output from its durable cursor. It does
+not resend the prompt or start a replacement conversation. Legacy streams use
+bounded intake and can show the same uncertain state when their missing output
+cannot be replayed.
+
 Stopping a turn does not itself run the next queued message. If pending rows remain, Kandev sets their session's **Auto-run** switch to OFF. Expand the queue and turn Auto-run ON when you want FIFO processing to continue.
 
 The expanded queue also lets you pause or discard stale work. Its compact header places the **Auto-run** and **Auto-merge** pills beside the queue count. **Remove** is available for every visible pending row, including messages from users, peer agents, workflows, and server actions; **Clear all** removes all visible pending rows in that session. Only user-origin rows remain editable. A message already reserved for delivery is hidden from the queue and cannot be cancelled with these controls.

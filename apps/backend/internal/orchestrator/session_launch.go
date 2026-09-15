@@ -1241,6 +1241,36 @@ func (s *Service) RecoverSession(ctx context.Context, taskID, sessionID, action 
 	return resp, nil
 }
 
+// RetrySessionDelivery reconnects the existing agent stream and replays from
+// its committed cursor. It is deliberately separate from RecoverSession:
+// reconnecting after an uncertain prompt must never send that prompt again or
+// create a replacement native session.
+func (s *Service) RetrySessionDelivery(ctx context.Context, taskID, sessionID string) (*LaunchSessionResponse, error) {
+	if err := s.authorizeTaskSessionPair(ctx, taskID, sessionID); err != nil {
+		return nil, err
+	}
+	if err := s.authorizeSessionControl(ctx, sessionID); err != nil {
+		return nil, err
+	}
+	if err := s.ensureTaskNotArchived(ctx, taskID); err != nil {
+		return nil, err
+	}
+	recoverer, ok := s.agentManager.(agentPromptStreamRecoverer)
+	if !ok {
+		return nil, errors.New("agent prompt stream recovery is unavailable")
+	}
+	retryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	if err := recoverer.RecoverAgentPromptStream(retryCtx, sessionID); err != nil {
+		return nil, fmt.Errorf("failed to reconnect agent stream: %w", err)
+	}
+	return &LaunchSessionResponse{
+		Success:   true,
+		TaskID:    taskID,
+		SessionID: sessionID,
+	}, nil
+}
+
 func (s *Service) handleContinuationLaunchError(
 	ctx context.Context,
 	checkpoint *continuationCheckpoint,

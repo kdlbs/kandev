@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 
@@ -320,44 +321,130 @@ func (s *Server) validateDeliverySubmission(c *gin.Context, submission journal.S
 	return true
 }
 
-// loadAgentStreamReplay reads the retained prefix before the live update
+var errAgentStreamReplayStopped = errors.New("agent stream replay stopped")
+
+const agentStreamReplayPageSize = 1000
+
+// replayAgentStream sends committed replay pages before the live update
 // channel is selected. Agentctl commits events before publishing them, so a
-// backend reconnect can safely use this boundary without racing a live event.
-func (s *Server) loadAgentStreamReplay(ctx context.Context, after uint64) ([]adapter.AgentEvent, error) {
+// backend reconnect can use the journal as the source of truth for the whole
+// interval between the first snapshot and live attachment.
+func (s *Server) replayAgentStream(ctx context.Context, after uint64, write func(adapter.AgentEvent) error) (uint64, error) {
 	capability := s.procMgr.DeliveryCapability()
 	if !capability.Durable {
 		if capability.Reason == "storage_not_durable" {
-			return nil, nil
+			return after, nil
 		}
-		return nil, errors.New("durable delivery storage is unavailable")
+		return after, errors.New("durable delivery storage is unavailable")
 	}
 	deliveryJournal, err := s.procMgr.DeliveryJournal()
 	if err != nil {
-		return nil, err
+		return after, err
 	}
-	events, _, err := deliveryJournal.Replay(ctx, s.procMgr.DeliveryStreamID(), after, 1000)
+	streamID := s.procMgr.DeliveryStreamID()
+	cursor := after
+	for {
+		nextCursor, highWater, eventCount, err := s.replayAgentStreamPage(
+			ctx, deliveryJournal, streamID, cursor, write,
+		)
+		if err != nil {
+			// A first connection has no cursor and no retained stream yet. That is
+			// a normal empty history, not a cursor loss.
+			if cursor == 0 && errors.Is(err, journal.ErrStreamNotFound) {
+				return cursor, nil
+			}
+			return cursor, err
+		}
+		cursor = nextCursor
+
+		if eventCount == 0 && cursor < highWater {
+			return cursor, fmt.Errorf("%w: replay page ended at %d before high-water %d", journal.ErrSequenceConflict, cursor, highWater)
+		}
+		if cursor < highWater {
+			continue
+		}
+
+		// Refresh the captured high-water after the page has been delivered.
+		// Events committed before this read are replayed here; an event committed
+		// after it is published to the live channel only after its journal commit,
+		// and the writer suppresses any duplicate sequence.
+		refreshed, err := s.refreshAgentStreamHighWater(ctx, deliveryJournal, streamID, cursor)
+		if err != nil {
+			return cursor, err
+		}
+		if refreshed.HighWater <= cursor {
+			return cursor, nil
+		}
+	}
+}
+
+func (s *Server) replayAgentStreamPage(
+	ctx context.Context,
+	deliveryJournal *journal.Journal,
+	streamID string,
+	cursor uint64,
+	write func(adapter.AgentEvent) error,
+) (uint64, uint64, int, error) {
+	events, stream, err := deliveryJournal.Replay(ctx, streamID, cursor, agentStreamReplayPageSize)
 	if err != nil {
-		// A first connection has no cursor and no retained stream yet. That is
-		// a normal empty history, not a cursor loss.
-		if after == 0 && errors.Is(err, journal.ErrStreamNotFound) {
-			return nil, nil
-		}
-		return nil, err
+		return cursor, 0, 0, err
 	}
-	replay := make([]adapter.AgentEvent, 0, len(events))
+	if err := s.validateAgentStreamReplay(stream); err != nil {
+		return cursor, 0, 0, err
+	}
+	if stream.HighWater < cursor {
+		return cursor, 0, 0, fmt.Errorf("%w: replay high-water %d is behind cursor %d", journal.ErrSequenceConflict, stream.HighWater, cursor)
+	}
 	for _, event := range events {
-		var notification adapter.AgentEvent
-		if err := json.Unmarshal(event.Payload, &notification); err != nil {
-			return nil, err
+		if event.Sequence != cursor+1 {
+			return cursor, 0, 0, fmt.Errorf("%w: replay sequence %d follows cursor %d", journal.ErrSequenceConflict, event.Sequence, cursor)
 		}
-		notification.DeliveryStreamID = event.StreamID
-		notification.DeliveryIncarnationID = event.IncarnationID
-		notification.DeliveryHarnessGeneration = event.HarnessGeneration
-		notification.DeliverySequence = event.Sequence
-		notification.DeliverySubmissionID = event.SubmissionID
-		replay = append(replay, notification)
+		if err := writeAgentStreamReplayEvent(event, write); err != nil {
+			return cursor, 0, 0, err
+		}
+		cursor = event.Sequence
 	}
-	return replay, nil
+	return cursor, stream.HighWater, len(events), nil
+}
+
+func writeAgentStreamReplayEvent(event journal.Event, write func(adapter.AgentEvent) error) error {
+	var notification adapter.AgentEvent
+	if err := json.Unmarshal(event.Payload, &notification); err != nil {
+		return err
+	}
+	notification.DeliveryStreamID = event.StreamID
+	notification.DeliveryIncarnationID = event.IncarnationID
+	notification.DeliveryHarnessGeneration = event.HarnessGeneration
+	notification.DeliverySequence = event.Sequence
+	notification.DeliverySubmissionID = event.SubmissionID
+	return write(notification)
+}
+
+func (s *Server) refreshAgentStreamHighWater(
+	ctx context.Context,
+	deliveryJournal *journal.Journal,
+	streamID string,
+	cursor uint64,
+) (journal.Stream, error) {
+	_, stream, err := deliveryJournal.Replay(ctx, streamID, cursor, 1)
+	if err != nil {
+		return journal.Stream{}, err
+	}
+	if err := s.validateAgentStreamReplay(stream); err != nil {
+		return journal.Stream{}, err
+	}
+	return stream, nil
+}
+
+func (s *Server) validateAgentStreamReplay(stream journal.Stream) error {
+	if s.procMgr == nil || stream.StreamID != s.procMgr.DeliveryStreamID() {
+		return journal.ErrOwnerMismatch
+	}
+	sessionID, incarnationID, generation := s.procMgr.DeliverySubmissionIdentity()
+	if stream.SessionID != sessionID || stream.IncarnationID != incarnationID || stream.HarnessGeneration != generation {
+		return journal.ErrOwnerMismatch
+	}
+	return nil
 }
 
 func parseDeliveryUint(raw string) (uint64, error) {

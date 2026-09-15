@@ -117,6 +117,7 @@ type Manager struct {
 	// but unreadable journal is an admission error, never a legacy fallback.
 	deliveryJournal            *journal.Journal
 	deliveryJournalErr         error
+	deliveryWriter             *deliveryEventWriter
 	deliveryJournalMu          sync.RWMutex
 	deliveryJournalClose       sync.Once
 	deliveryJournalCloseErr    error
@@ -555,6 +556,36 @@ func (m *Manager) DeliveryStreamID() string {
 	return m.cfg.InstanceID
 }
 
+// RolloverDeliveryStream changes only the retained transport identity after
+// the current stream is idle and settled. Native harness generation and the
+// active ACP conversation remain unchanged; callers persist the corresponding
+// backend checkpoint before admitting the next submission.
+func (m *Manager) RolloverDeliveryStream(ctx context.Context, replacementID string) error {
+	if m == nil || replacementID == "" {
+		return journal.ErrOwnerMismatch
+	}
+	if m.activeDeliverySubmissionID() != "" {
+		return journal.ErrSubmissionState
+	}
+	deliveryJournal, err := m.DeliveryJournal()
+	if err != nil {
+		return err
+	}
+	oldID := m.DeliveryStreamID()
+	sessionID, incarnationID, generation := m.DeliverySubmissionIdentity()
+	if err := deliveryJournal.RolloverStream(ctx, oldID, journal.Stream{
+		StreamID: replacementID, SessionID: sessionID, IncarnationID: incarnationID, HarnessGeneration: generation,
+	}); err != nil {
+		return err
+	}
+	m.deliveryJournalMu.Lock()
+	if m.cfg != nil {
+		m.cfg.DeliveryStreamID = replacementID
+	}
+	m.deliveryJournalMu.Unlock()
+	return nil
+}
+
 // DeliveryIncarnationID returns the durable Kandev session lifetime that owns
 // this agentctl instance. The stream ID fallback preserves legacy test and
 // standalone configurations that do not provide continuity metadata.
@@ -585,6 +616,9 @@ func (m *Manager) AdmitDeliverySubmission(ctx context.Context, submission journa
 	deliveryJournal, err := m.DeliveryJournal()
 	if err != nil {
 		return journal.Submission{}, err
+	}
+	if submission.StreamID == "" {
+		submission.StreamID = m.DeliveryStreamID()
 	}
 	return (&SubmissionDelivery{Journal: deliveryJournal}).Admit(ctx, submission)
 }
@@ -2266,60 +2300,87 @@ func (m *Manager) forwardUpdates(agentAdapter adapter.AgentAdapter, stopCh <-cha
 // The normalized event is kept as an opaque payload here; backend projection
 // remains the owner of canonical task messages and workflow effects.
 func (m *Manager) persistDeliveryEvent(update adapter.AgentEvent) (adapter.AgentEvent, error) {
-	m.deliveryJournalMu.RLock()
-	deliveryJournal := m.deliveryJournal
+	m.deliveryJournalMu.Lock()
 	configured := m.cfg != nil && m.cfg.DurableJournalPath != ""
-	m.deliveryJournalMu.RUnlock()
+	deliveryJournal := m.deliveryJournal
+	if deliveryJournal != nil && m.deliveryWriter == nil {
+		m.deliveryWriter = newDeliveryEventWriter(m)
+	}
+	writer := m.deliveryWriter
+	m.deliveryJournalMu.Unlock()
 	if !configured || deliveryJournal == nil {
 		return update, nil
 	}
-	payload, err := json.Marshal(update)
+	if writer != nil {
+		return writer.persist(context.Background(), update)
+	}
+	committed, err := m.persistDeliveryBatch(context.Background(), []adapter.AgentEvent{update})
 	if err != nil {
 		return update, err
 	}
-	sessionID := ""
-	if m.cfg != nil {
-		sessionID = m.cfg.SessionID
+	return committed[0], nil
+}
+
+func (m *Manager) persistDeliveryBatch(ctx context.Context, updates []adapter.AgentEvent) ([]adapter.AgentEvent, error) {
+	m.deliveryJournalMu.RLock()
+	deliveryJournal := m.deliveryJournal
+	m.deliveryJournalMu.RUnlock()
+	if deliveryJournal == nil {
+		return updates, nil
 	}
-	if sessionID == "" {
-		sessionID = update.SessionID
+	events := make([]journal.Event, len(updates))
+	for i, update := range updates {
+		payload, err := json.Marshal(update)
+		if err != nil {
+			return updates, err
+		}
+		sessionID := ""
+		if m.cfg != nil {
+			sessionID = m.cfg.SessionID
+		}
+		if sessionID == "" {
+			sessionID = update.SessionID
+		}
+		streamID := m.DeliveryStreamID()
+		incarnationID := streamID
+		harnessGeneration := m.DeliveryHarnessGeneration()
+		if m.DeliveryIncarnationID() != "" {
+			incarnationID = m.DeliveryIncarnationID()
+		}
+		if streamID == "" {
+			return updates, fmt.Errorf("durable delivery stream identity is missing")
+		}
+		if sessionID == "" {
+			sessionID = streamID
+		}
+		events[i] = journal.Event{
+			SessionID:         sessionID,
+			IncarnationID:     incarnationID,
+			HarnessGeneration: harnessGeneration,
+			StreamID:          streamID,
+			SubmissionID:      m.deliverySubmissionIDForEvent(update),
+			Type:              update.Type,
+			Payload:           payload,
+			Terminal:          update.Type == adapter.EventTypeComplete || update.Type == adapter.EventTypeError,
+		}
 	}
-	streamID := m.DeliveryStreamID()
-	incarnationID := streamID
-	harnessGeneration := m.DeliveryHarnessGeneration()
-	if m.DeliveryIncarnationID() != "" {
-		incarnationID = m.DeliveryIncarnationID()
-	}
-	if streamID == "" {
-		return update, fmt.Errorf("durable delivery stream identity is missing")
-	}
-	if sessionID == "" {
-		sessionID = streamID
-	}
-	committed, err := deliveryJournal.Append(context.Background(), journal.Event{
-		SessionID:         sessionID,
-		IncarnationID:     incarnationID,
-		HarnessGeneration: harnessGeneration,
-		StreamID:          streamID,
-		SubmissionID:      m.deliverySubmissionIDForEvent(update),
-		Type:              update.Type,
-		Payload:           payload,
-		Terminal:          update.Type == adapter.EventTypeComplete || update.Type == adapter.EventTypeError,
-	})
+	committed, err := deliveryJournal.AppendBatch(ctx, events)
 	if err != nil {
 		m.deliveryJournalMu.Lock()
 		if m.deliveryJournalErr == nil {
 			m.deliveryJournalErr = err
 		}
 		m.deliveryJournalMu.Unlock()
-		return update, err
+		return updates, err
 	}
-	update.DeliveryStreamID = committed.StreamID
-	update.DeliveryIncarnationID = committed.IncarnationID
-	update.DeliveryHarnessGeneration = committed.HarnessGeneration
-	update.DeliverySequence = committed.Sequence
-	update.DeliverySubmissionID = committed.SubmissionID
-	return update, nil
+	for i := range updates {
+		updates[i].DeliveryStreamID = committed[i].StreamID
+		updates[i].DeliveryIncarnationID = committed[i].IncarnationID
+		updates[i].DeliveryHarnessGeneration = committed[i].HarnessGeneration
+		updates[i].DeliverySequence = committed[i].Sequence
+		updates[i].DeliverySubmissionID = committed[i].SubmissionID
+	}
+	return updates, nil
 }
 
 // GetUpdates returns the channel for agent event notifications
@@ -2447,6 +2508,9 @@ func (m *Manager) closeDeliveryJournal() error {
 		return nil
 	}
 	m.deliveryJournalClose.Do(func() {
+		if m.deliveryWriter != nil {
+			m.deliveryWriter.close()
+		}
 		m.deliveryJournalMu.Lock()
 		defer m.deliveryJournalMu.Unlock()
 		if m.deliveryJournal == nil {

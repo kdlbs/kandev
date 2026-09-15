@@ -23,6 +23,7 @@ const (
 	DefaultMaxStreamBytes         = 256 << 20
 	DefaultMaxJournalBytes        = 2 << 30
 	DefaultReserveBytes           = 1 << 20
+	MaxStreamSubmissions          = 10000
 )
 
 var (
@@ -116,6 +117,7 @@ const (
 
 type Submission struct {
 	ID                    string          `json:"id"`
+	StreamID              string          `json:"stream_id,omitempty"`
 	SessionID             string          `json:"session_id"`
 	IncarnationID         string          `json:"incarnation_id"`
 	HarnessGeneration     uint64          `json:"harness_generation"`
@@ -124,6 +126,7 @@ type Submission struct {
 	State                 SubmissionState `json:"state"`
 	TerminalEventRetained bool            `json:"terminal_event_retained,omitempty"`
 	TerminalSequence      uint64          `json:"terminal_sequence,omitempty"`
+	Retired               bool            `json:"retired,omitempty"`
 	CreatedAt             time.Time       `json:"created_at"`
 	UpdatedAt             time.Time       `json:"updated_at"`
 }
@@ -209,8 +212,37 @@ func validateExistingJournal(tx *bolt.Tx, meta *bolt.Bucket, version []byte) err
 	if err := validateJournalBuckets(tx); err != nil {
 		return err
 	}
-	_, err := decodeInt64(meta.Get(keyJournalBytes))
-	return err
+	if _, err := decodeInt64(meta.Get(keyJournalBytes)); err != nil {
+		return err
+	}
+	return reconcileJournalBytes(tx, meta)
+}
+
+// reconcileJournalBytes repairs the logical counter used by admission before
+// any new record is accepted. Older journals counted event payloads only, so
+// reopening them must include retained submission metadata and payloads.
+func reconcileJournalBytes(tx *bolt.Tx, meta *bolt.Bucket) error {
+	var total int64
+	if err := tx.Bucket(bucketEvents).ForEach(func(streamID, value []byte) error {
+		if value != nil {
+			return nil
+		}
+		return tx.Bucket(bucketEvents).Bucket(streamID).ForEach(func(_, eventValue []byte) error {
+			total += int64(len(eventValue))
+			return nil
+		})
+	}); err != nil {
+		return ErrJournalCorrupt
+	}
+	if err := tx.Bucket(bucketSubmissions).ForEach(func(_, value []byte) error {
+		if value != nil {
+			total += int64(len(value))
+		}
+		return nil
+	}); err != nil {
+		return ErrJournalCorrupt
+	}
+	return meta.Put(keyJournalBytes, encodeInt64(total))
 }
 
 func createJournalBuckets(tx *bolt.Tx) error {
@@ -340,21 +372,36 @@ func (j *Journal) MaxEventBytes() int64 {
 }
 
 func (j *Journal) Append(ctx context.Context, event Event) (Event, error) {
-	j.mu.RLock()
-	defer j.mu.RUnlock()
-	if err := ctx.Err(); err != nil {
+	events, err := j.AppendBatch(ctx, []Event{event})
+	if err != nil {
 		return Event{}, err
 	}
-	if event.StreamID == "" || event.SessionID == "" || event.Type == "" {
-		return Event{}, fmt.Errorf("event stream, session, and type are required")
+	return events[0], nil
+}
+
+// AppendBatch commits an ordered group of normalized events in one durable
+// bbolt transaction. Sequence allocation, capacity checks, and terminal
+// submission evidence all roll back together when any member fails.
+func (j *Journal) AppendBatch(ctx context.Context, events []Event) ([]Event, error) {
+	j.mu.RLock()
+	defer j.mu.RUnlock()
+	if len(events) == 0 {
+		return nil, nil
 	}
-	if len(event.Payload) > int(j.config.MaxEventBytes) {
-		return Event{}, fmt.Errorf("%w: %d bytes", ErrStreamFull, len(event.Payload))
+	if err := ctx.Err(); err != nil {
+		return nil, err
 	}
-	if event.CreatedAt.IsZero() {
-		event.CreatedAt = time.Now().UTC()
+	if err := prepareAppendEvents(events, j.config.MaxEventBytes); err != nil {
+		return nil, err
 	}
-	err := j.db.Update(func(tx *bolt.Tx) error { return j.appendEventTx(ctx, tx, &event) })
+	err := j.db.Update(func(tx *bolt.Tx) error {
+		for i := range events {
+			if err := j.appendEventTx(ctx, tx, &events[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	if err != nil {
 		if errors.Is(err, ErrSequenceConflict) || errors.Is(err, ErrOwnerMismatch) {
 			RecordSequenceError(classifyJournalError(err))
@@ -362,10 +409,26 @@ func (j *Journal) Append(ctx context.Context, event Event) (Event, error) {
 		if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 			RecordJournalError(classifyJournalError(err))
 		}
-		return Event{}, err
+		return nil, err
 	}
 	j.refreshMetricsLocked()
-	return event, nil
+	return events, nil
+}
+
+func prepareAppendEvents(events []Event, maxEventBytes int64) error {
+	for i := range events {
+		event := &events[i]
+		if event.StreamID == "" || event.SessionID == "" || event.Type == "" {
+			return fmt.Errorf("event stream, session, and type are required")
+		}
+		if len(event.Payload) > int(maxEventBytes) {
+			return fmt.Errorf("%w: %d bytes", ErrStreamFull, len(event.Payload))
+		}
+		if event.CreatedAt.IsZero() {
+			event.CreatedAt = time.Now().UTC()
+		}
+	}
+	return nil
 }
 
 func (j *Journal) appendEventTx(ctx context.Context, tx *bolt.Tx, event *Event) error {
@@ -400,7 +463,7 @@ func (j *Journal) appendEventTx(ctx context.Context, tx *bolt.Tx, event *Event) 
 		return err
 	}
 	if event.Terminal && event.SubmissionID != "" {
-		return markSubmissionTerminalTx(ctx, tx, event.SubmissionID, event.Sequence)
+		return markSubmissionTerminalTx(ctx, tx, event.SubmissionID, event.Sequence, j.config.MaxJournalBytes)
 	}
 	return nil
 }
@@ -583,6 +646,10 @@ func acknowledgeStreamTx(ctx context.Context, tx *bolt.Tx, streamID string, sequ
 	if err != nil {
 		return err
 	}
+	journalBytes, err = pruneAcknowledgedSubmissionsTx(ctx, tx, stream, sequence, journalBytes)
+	if err != nil {
+		return err
+	}
 	stream.Acknowledged = sequence
 	if sequence == ^uint64(0) {
 		stream.FirstRetained = 0
@@ -601,18 +668,86 @@ func acknowledgeStreamTx(ctx context.Context, tx *bolt.Tx, streamID string, sequ
 
 func deleteAcknowledgedEvents(bucket *bolt.Bucket, sequence uint64, journalBytes int64, stream *Stream) (int64, error) {
 	cursor := bucket.Cursor()
-	for key, value := cursor.First(); key != nil; key, value = cursor.Next() {
+	for key, value := cursor.First(); key != nil; {
 		if binary.BigEndian.Uint64(key) > sequence {
 			break
 		}
+		keyCopy := append([]byte(nil), key...)
 		stream.Bytes -= int64(len(value))
 		journalBytes -= int64(len(value))
 		if journalBytes < 0 {
 			journalBytes = 0
 		}
-		if err := bucket.Delete(key); err != nil {
+		nextKey, nextValue := cursor.Next()
+		if err := bucket.Delete(keyCopy); err != nil {
 			return 0, err
 		}
+		key, value = nextKey, nextValue
+	}
+	return journalBytes, nil
+}
+
+// pruneAcknowledgedSubmissionsTx releases prompt payload bytes while keeping
+// the immutable submission ID, hash, state, and terminal tombstone. Cursor
+// traversal copies the next key before deleting the current record so several
+// bbolt leaf pages and materialized nodes are handled without skipping data.
+func pruneAcknowledgedSubmissionsTx(ctx context.Context, tx *bolt.Tx, stream Stream, sequence uint64, journalBytes int64) (int64, error) {
+	bucket := tx.Bucket(bucketSubmissions)
+	var pruneKeys [][]byte
+	if err := bucket.ForEach(func(key, raw []byte) error {
+		if raw != nil {
+			var submission Submission
+			if err := json.Unmarshal(raw, &submission); err != nil {
+				return ErrJournalCorrupt
+			}
+			if prunableSubmission(submission, stream, sequence) {
+				pruneKeys = append(pruneKeys, append([]byte(nil), key...))
+			}
+		}
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+	for _, key := range pruneKeys {
+		var err error
+		journalBytes, err = pruneSubmissionPayloadTx(ctx, bucket, key, journalBytes)
+		if err != nil {
+			return 0, err
+		}
+	}
+	return journalBytes, nil
+}
+
+func prunableSubmission(submission Submission, stream Stream, sequence uint64) bool {
+	return submission.SessionID == stream.SessionID && submission.IncarnationID == stream.IncarnationID &&
+		submission.HarnessGeneration == stream.HarnessGeneration && submission.TerminalEventRetained &&
+		submission.TerminalSequence <= sequence && len(submission.Payload) > 0 &&
+		(submission.State == SubmissionCompleted || submission.State == SubmissionFailed || submission.State == SubmissionCancelled)
+}
+
+func pruneSubmissionPayloadTx(ctx context.Context, bucket *bolt.Bucket, key []byte, journalBytes int64) (int64, error) {
+	raw := bucket.Get(key)
+	if raw == nil {
+		return journalBytes, nil
+	}
+	var submission Submission
+	if err := json.Unmarshal(raw, &submission); err != nil {
+		return 0, ErrJournalCorrupt
+	}
+	submission.Payload = nil
+	encoded, err := json.Marshal(submission)
+	if err != nil {
+		return 0, err
+	}
+	journalBytes -= int64(len(raw)) - int64(len(encoded))
+	if journalBytes < 0 {
+		journalBytes = 0
+	}
+	if err := bucket.Put(key, encoded); err != nil {
+		return 0, err
+	}
+	if err := ctx.Err(); err != nil {
+		return 0, err
 	}
 	return journalBytes, nil
 }
@@ -636,205 +771,4 @@ func (j *Journal) GetStream(ctx context.Context, streamID string) (Stream, error
 		return nil
 	})
 	return stream, err
-}
-
-func (j *Journal) PutSubmission(ctx context.Context, submission Submission) (Submission, error) {
-	j.mu.RLock()
-	defer j.mu.RUnlock()
-	if submission.ID == "" || submission.Hash == "" {
-		return Submission{}, fmt.Errorf("submission id and hash are required")
-	}
-	if int64(len(submission.Payload)) > j.config.MaxEventBytes {
-		return Submission{}, fmt.Errorf("%w: %d bytes", ErrStreamFull, len(submission.Payload))
-	}
-	if submission.CreatedAt.IsZero() {
-		submission.CreatedAt = time.Now().UTC()
-	}
-	if submission.UpdatedAt.IsZero() {
-		submission.UpdatedAt = submission.CreatedAt
-	}
-	if submission.State == "" {
-		submission.State = SubmissionPrepared
-	}
-	duplicate := false
-	err := j.db.Update(func(tx *bolt.Tx) error {
-		stored, isDuplicate, err := putSubmissionTx(ctx, tx, submission)
-		if err != nil {
-			return err
-		}
-		submission = stored
-		duplicate = isDuplicate
-		return nil
-	})
-	if duplicate {
-		RecordDuplicateSubmission("same_hash")
-	}
-	if errors.Is(err, ErrSubmissionConflict) {
-		RecordDuplicateSubmission("hash_conflict")
-	}
-	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-		RecordJournalError(classifyJournalError(err))
-	}
-	return submission, err
-}
-
-func putSubmissionTx(ctx context.Context, tx *bolt.Tx, submission Submission) (Submission, bool, error) {
-	if err := ctx.Err(); err != nil {
-		return Submission{}, false, err
-	}
-	bucket := tx.Bucket(bucketSubmissions)
-	if raw := bucket.Get([]byte(submission.ID)); raw != nil {
-		var existing Submission
-		if err := json.Unmarshal(raw, &existing); err != nil {
-			return Submission{}, false, ErrJournalCorrupt
-		}
-		if existing.Hash != submission.Hash {
-			return Submission{}, false, ErrSubmissionConflict
-		}
-		return existing, true, nil
-	}
-	encoded, err := json.Marshal(submission)
-	if err != nil {
-		return Submission{}, false, err
-	}
-	if err := bucket.Put([]byte(submission.ID), encoded); err != nil {
-		return Submission{}, false, err
-	}
-	return submission, false, nil
-}
-
-func markSubmissionTerminalTx(ctx context.Context, tx *bolt.Tx, id string, sequence uint64) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	bucket := tx.Bucket(bucketSubmissions)
-	raw := bucket.Get([]byte(id))
-	if raw == nil {
-		return ErrSubmissionNotFound
-	}
-	var submission Submission
-	if err := json.Unmarshal(raw, &submission); err != nil {
-		return ErrJournalCorrupt
-	}
-	if submission.TerminalEventRetained {
-		if submission.TerminalSequence != sequence {
-			return ErrSequenceConflict
-		}
-		return nil
-	}
-	submission.TerminalEventRetained = true
-	submission.TerminalSequence = sequence
-	submission.UpdatedAt = time.Now().UTC()
-	encoded, err := json.Marshal(submission)
-	if err != nil {
-		return err
-	}
-	return bucket.Put([]byte(id), encoded)
-}
-
-func (j *Journal) GetSubmission(ctx context.Context, id string) (Submission, error) {
-	j.mu.RLock()
-	defer j.mu.RUnlock()
-	var submission Submission
-	err := j.db.View(func(tx *bolt.Tx) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		raw := tx.Bucket(bucketSubmissions).Get([]byte(id))
-		if raw == nil {
-			return ErrSubmissionNotFound
-		}
-		return json.Unmarshal(raw, &submission)
-	})
-	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-		RecordJournalError(classifyJournalError(err))
-	}
-	return submission, err
-}
-
-// HasUnresolvedWork reports whether the retained journal contains work that
-// cannot be silently downgraded to a legacy delivery path. It covers both
-// prompt outcomes and event records that still need backend acknowledgment.
-func (j *Journal) HasUnresolvedWork(ctx context.Context) (bool, error) {
-	j.mu.RLock()
-	defer j.mu.RUnlock()
-	var unresolved bool
-	err := j.db.View(func(tx *bolt.Tx) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := tx.Bucket(bucketSubmissions).ForEach(func(_, raw []byte) error {
-			if raw == nil {
-				return nil
-			}
-			var submission Submission
-			if err := json.Unmarshal(raw, &submission); err != nil {
-				return ErrJournalCorrupt
-			}
-			switch submission.State {
-			case SubmissionPrepared, SubmissionAccepted, SubmissionDispatching, SubmissionInterruptedUnknown:
-				unresolved = true
-			case SubmissionCompleted:
-				if !submission.TerminalEventRetained {
-					unresolved = true
-				}
-			}
-			return nil
-		}); err != nil || unresolved {
-			return err
-		}
-		return tx.Bucket(bucketStreamMeta).ForEach(func(_, raw []byte) error {
-			if raw == nil {
-				return nil
-			}
-			stream, err := decodeStream(raw)
-			if err != nil {
-				return err
-			}
-			if stream.HighWater > stream.Acknowledged {
-				unresolved = true
-			}
-			return nil
-		})
-	})
-	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-		RecordJournalError(classifyJournalError(err))
-	}
-	return unresolved, err
-}
-
-func (j *Journal) TransitionSubmission(ctx context.Context, id string, next SubmissionState, updatedAt time.Time) (Submission, error) {
-	j.mu.RLock()
-	defer j.mu.RUnlock()
-	var submission Submission
-	err := j.db.Update(func(tx *bolt.Tx) error {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		bucket := tx.Bucket(bucketSubmissions)
-		raw := bucket.Get([]byte(id))
-		if raw == nil {
-			return ErrSubmissionNotFound
-		}
-		if err := json.Unmarshal(raw, &submission); err != nil {
-			return ErrJournalCorrupt
-		}
-		if !validSubmissionTransition(submission.State, next) {
-			return ErrSubmissionState
-		}
-		submission.State = next
-		if updatedAt.IsZero() {
-			updatedAt = time.Now().UTC()
-		}
-		submission.UpdatedAt = updatedAt
-		encoded, err := json.Marshal(submission)
-		if err != nil {
-			return err
-		}
-		return bucket.Put([]byte(id), encoded)
-	})
-	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-		RecordJournalError(classifyJournalError(err))
-	}
-	return submission, err
 }

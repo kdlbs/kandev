@@ -22,15 +22,93 @@ func (r *Repository) ProjectCanonicalAgentDeliveryEvent(
 	event *models.AgentDeliveryEvent,
 	effect *models.AgentDeliveryEffect,
 ) (bool, error) {
-	if event == nil {
-		return false, fmt.Errorf("event is required")
-	}
-	tx, err := r.db.BeginTxx(ctx, nil)
+	appendMessages, err := r.ProjectCanonicalAgentDeliveryEvents(ctx,
+		[]*models.AgentDeliveryEvent{event}, []*models.AgentDeliveryEffect{effect})
 	if err != nil {
 		return false, err
 	}
+	return len(appendMessages) == 1 && appendMessages[0], nil
+}
+
+// ProjectCanonicalAgentDeliveryEvents projects one contiguous stream batch in
+// one transaction. Every inbox sequence and effect remains individually
+// idempotent, while compatible message chunks share the transaction and the
+// cursor advances only after each committed event has been applied.
+func (r *Repository) ProjectCanonicalAgentDeliveryEvents(
+	ctx context.Context,
+	events []*models.AgentDeliveryEvent,
+	effects []*models.AgentDeliveryEffect,
+) ([]bool, error) {
+	streamID, err := validateCanonicalDeliveryBatch(events, effects)
+	if err != nil {
+		return nil, err
+	}
+	if len(events) == 0 {
+		return nil, nil
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
 	defer func() { _ = tx.Rollback() }()
 
+	var projectedSequence int64
+	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT projected_sequence FROM agent_delivery_cursors WHERE stream_id = ?`),
+		streamID).Scan(&projectedSequence); err != nil {
+		return nil, fmt.Errorf("load canonical delivery cursor: %w", err)
+	}
+	appendMessages := make([]bool, len(events))
+	for i, event := range events {
+		appendMessages[i], err = r.projectCanonicalAgentDeliveryEventTx(
+			ctx, tx, event, effects[i], &projectedSequence,
+		)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	r.refreshAgentDeliveryLag(ctx)
+	return appendMessages, nil
+}
+
+func validateCanonicalDeliveryBatch(
+	events []*models.AgentDeliveryEvent,
+	effects []*models.AgentDeliveryEffect,
+) (string, error) {
+	if len(events) == 0 {
+		return "", nil
+	}
+	if len(effects) != len(events) {
+		return "", fmt.Errorf("canonical delivery events and effects must have equal lengths")
+	}
+	if events[0] == nil {
+		return "", fmt.Errorf("event 0 is required")
+	}
+	streamID := events[0].StreamID
+	if streamID == "" {
+		return "", fmt.Errorf("event stream is required")
+	}
+	for i, event := range events {
+		if event == nil {
+			return "", fmt.Errorf("event %d is required", i)
+		}
+		if event.StreamID != streamID {
+			return "", fmt.Errorf("canonical delivery batch contains multiple streams")
+		}
+	}
+	return streamID, nil
+}
+
+func (r *Repository) projectCanonicalAgentDeliveryEventTx(
+	ctx context.Context,
+	tx *sqlx.Tx,
+	event *models.AgentDeliveryEvent,
+	effect *models.AgentDeliveryEffect,
+	projectedSequence *int64,
+) (bool, error) {
 	stored, projectedAt, err := r.loadAgentDeliveryEventTx(ctx, tx, event.StreamID, event.Sequence)
 	if err != nil {
 		return false, err
@@ -39,19 +117,13 @@ func (r *Repository) ProjectCanonicalAgentDeliveryEvent(
 		return false, repoerrors.ErrAgentDeliveryEventConflict
 	}
 	if projectedAt.Valid {
-		if err := tx.Commit(); err != nil {
-			return false, err
+		if stored.Sequence > *projectedSequence {
+			*projectedSequence = stored.Sequence
 		}
 		return false, nil
 	}
-	var projectedSequence int64
-	if err := tx.QueryRowxContext(ctx, r.db.Rebind(`
-		SELECT projected_sequence FROM agent_delivery_cursors WHERE stream_id = ?`),
-		stored.StreamID).Scan(&projectedSequence); err != nil {
-		return false, fmt.Errorf("load canonical delivery cursor: %w", err)
-	}
-	if stored.Sequence != projectedSequence+1 {
-		return false, fmt.Errorf("canonical agent delivery sequence gap: expected %d, got %d", projectedSequence+1, stored.Sequence)
+	if stored.Sequence != *projectedSequence+1 {
+		return false, fmt.Errorf("canonical agent delivery sequence gap: expected %d, got %d", *projectedSequence+1, stored.Sequence)
 	}
 
 	var agentEvent streams.AgentEvent
@@ -70,10 +142,7 @@ func (r *Repository) ProjectCanonicalAgentDeliveryEvent(
 	if err := r.markAgentDeliveryProjectedTx(ctx, tx, stored.StreamID, stored.Sequence); err != nil {
 		return false, err
 	}
-	if err := tx.Commit(); err != nil {
-		return false, err
-	}
-	r.refreshAgentDeliveryLag(ctx)
+	*projectedSequence = stored.Sequence
 	return appendMessage, nil
 }
 
