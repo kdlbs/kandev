@@ -586,7 +586,21 @@ IMPACT_COLUMNS = {
 IMPACT_STATUS = {"changed": "Changed", "none": "No changes found", "unknown": "Not verified"}
 
 
-def validate_impact(impact):
+def is_safe_repo_path(value):
+    """Return true for a repository-relative POSIX path.
+
+    Impact source links must identify a file in the PR. Reject path syntax that
+    can never name a repository file before the managed manifest check.
+    """
+    if not isinstance(value, str) or not value.strip():
+        return False
+    if value.startswith(("/", ":")) or "\\" in value or "\x00" in value:
+        return False
+    parts = value.split("/")
+    return all(part not in {"", ".", ".."} for part in parts)
+
+
+def validate_impact(impact, changed_paths=None):
     require(isinstance(impact, dict), "impact must be an object")
     for key, (_, columns) in IMPACT_COLUMNS.items():
         ctx = f"impact.{key}"
@@ -599,7 +613,7 @@ def validate_impact(impact):
         require(bool(items) == (status == "changed"), f"{ctx}.items must match status")
         if status == "unknown" or "note" in section:
             require(isinstance(section.get("note"), str) and section["note"].strip(),
-                    f"{ctx}.note must explain the evidence limit")
+                    f"{ctx}.note must be a non-empty string")
         identities = set()
         for i, item in enumerate(items):
             row = f"{ctx}.items[{i}]"
@@ -607,6 +621,11 @@ def validate_impact(impact):
             for field in [c[0] for c in columns] + ["file"]:
                 require(isinstance(item.get(field), str) and item[field].strip(),
                         f"{row}.{field} must be a non-empty string")
+            require(is_safe_repo_path(item["file"]),
+                    f"{row}.file must be a repository-relative POSIX path")
+            if changed_paths is not None:
+                require(item["file"] in changed_paths,
+                        f"{row}.file must identify a changed file in the prepared manifest")
             if key in ("plugins", "mcp"):
                 require(item["change"] in ("added", "changed", "removed"),
                         f"{row}.change must be added, changed, or removed")
@@ -694,7 +713,7 @@ def require_str_list(value, ctx):
                 f"{ctx}[{k}] must be a non-empty string")
 
 
-def validate(data):
+def validate(data, *, require_impact=False, changed_paths=None):
     require("pr" in data, 'missing "pr"')
     pr = data["pr"]
     for k in ("number", "title", "url", "base", "head", "repo"):
@@ -702,11 +721,12 @@ def validate(data):
     require(data.get("why", {}).get("problem"), "why.problem is required")
     require_str_list(data.get("why", {}).get("what"), "why.what")
     for key in ("audience", "outcome"):
-        if key in data["why"]:
-            require(isinstance(data["why"][key], str) and data["why"][key].strip(),
-                    f"why.{key} must be a non-empty string")
-    if "impact" in data:
-        validate_impact(data["impact"])
+        if require_impact or key in data["why"]:
+            require(isinstance(data["why"].get(key), str) and data["why"][key].strip(),
+                    f"why.{key} is required and must be a non-empty string")
+    if require_impact or "impact" in data:
+        require("impact" in data, 'impact is required for new walkthroughs')
+        validate_impact(data["impact"], changed_paths=changed_paths)
     changes = data.get("changes") or []
     require(len(changes) >= 1, "changes needs at least one entry")
     for i, c in enumerate(changes):
@@ -727,8 +747,8 @@ def validate(data):
     require("review" in data, 'missing "review"')
 
 
-def build(data):
-    validate(data)
+def build(data, *, require_impact=False, changed_paths=None):
+    validate(data, require_impact=require_impact, changed_paths=changed_paths)
     pr = data["pr"]
     content = render_content(data)
     shell = SHELL.read_text(encoding="utf-8")

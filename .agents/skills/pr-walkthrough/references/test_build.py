@@ -64,6 +64,27 @@ class TestImpact(unittest.TestCase):
         data["impact"]["ux"]["note"] = "UI files were unavailable."
         self.assertIn("Not verified", build.build(data))
 
+    def test_new_contract_requires_why_and_impact(self):
+        with self.assertRaises(build.BuildError):
+            build.validate(minimal_data(), require_impact=True)
+        data = self.data()
+        data["why"] = {"problem": "p", "what": ["w"], "audience": "users", "outcome": "result"}
+        build.validate(data, require_impact=True, changed_paths={"a/b.go"})
+
+    def test_impact_source_paths_are_safe_and_in_inventory(self):
+        data = self.data()
+        data["impact"]["ux"] = {"status": "changed", "items": [{
+            "surface": "Settings", "before": "Old", "after": "New", "file": "a/b.go",
+        }]}
+        for value in ("/absolute.go", "../outside.go", "a/../b.go", "a\\b.go", "https://example.invalid/x"):
+            data["impact"]["ux"]["items"][0]["file"] = value
+            with self.subTest(value=value):
+                with self.assertRaises(build.BuildError):
+                    build.validate(data, changed_paths={"a/b.go"})
+        data["impact"]["ux"]["items"][0]["file"] = "a/other.go"
+        with self.assertRaises(build.BuildError):
+            build.validate(data, changed_paths={"a/b.go"})
+
     def test_breaking_precedes_code_and_escapes_evidence(self):
         data = self.data()
         data["impact"]["breaking"] = {"status": "changed", "items": [{

@@ -25,6 +25,10 @@ async function main() {
     for (const [key, row] of Object.entries(rows)) {
       data.impact[key] = { status: 'changed', items: [{ ...row, file: 'src/model.ts' }] };
     }
+    data.impact.breaking = { status: 'changed', items: [{
+      audience: 'Existing users', before: 'Automatic fallback', after: 'Mismatch error',
+      action: 'Select a matching model', file: 'src/model.ts',
+    }] };
     const input = path.join(dir, 'test.json');
     const output = path.join(dir, 'test.html');
     fs.writeFileSync(input, JSON.stringify(data));
