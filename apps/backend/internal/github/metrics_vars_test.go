@@ -1,6 +1,7 @@
 package github
 
 import (
+	"context"
 	"expvar"
 	"strconv"
 	"strings"
@@ -25,6 +26,47 @@ func readOutcomeCounter(t *testing.T, m *expvar.Map, prefix string) int64 {
 		total += n
 	})
 	return total
+}
+
+func TestPRWatchCardinalityCountsCurrentCanonicalState(t *testing.T) {
+	_, _, _, store := setupPollerTest(t)
+	ctx := context.Background()
+	if _, err := store.db.Exec(`CREATE TABLE task_repositories (
+		id TEXT PRIMARY KEY, task_id TEXT NOT NULL, repository_id TEXT NOT NULL
+	)`); err != nil {
+		t.Fatalf("create task_repositories: %v", err)
+	}
+	if _, err := store.db.Exec(`INSERT INTO task_repositories (id, task_id, repository_id)
+		VALUES ('binding-active', 'task-active', 'repo-attached')`); err != nil {
+		t.Fatalf("seed task_repositories: %v", err)
+	}
+	seedTask(t, store, "task-active", false)
+	seedTask(t, store, "task-archived", true)
+
+	watches := []*PRWatch{
+		withTestWorkspace(&PRWatch{ID: "watch-searching", TaskID: "task-active", Branch: "feature/a"}),
+		withTestWorkspace(&PRWatch{ID: "watch-discovered", TaskID: "task-active", Branch: "feature/b", PRNumber: 42}),
+		withTestWorkspace(&PRWatch{ID: "watch-archived", TaskID: "task-archived", Branch: "feature/c"}),
+		withTestWorkspace(&PRWatch{ID: "watch-orphan", TaskID: "task-missing", Branch: "feature/d"}),
+		withTestWorkspace(&PRWatch{ID: "watch-detached", TaskID: "task-active", RepositoryID: "repo-detached", Branch: "feature/e"}),
+		withTestWorkspace(&PRWatch{ID: "watch-attached", TaskID: "task-active", RepositoryID: "repo-attached", Branch: "feature/f"}),
+	}
+	for _, watch := range watches {
+		watch.Owner = "owner"
+		watch.Repo = "repo"
+		if err := store.CreatePRWatch(ctx, watch); err != nil {
+			t.Fatalf("CreatePRWatch(%s): %v", watch.ID, err)
+		}
+	}
+
+	got, err := store.PRWatchCardinality(ctx)
+	if err != nil {
+		t.Fatalf("PRWatchCardinality: %v", err)
+	}
+	want := (PRWatchCardinality{Active: 4, Searching: 3, Duplicates: 0, Orphans: 2})
+	if got != want {
+		t.Fatalf("PRWatchCardinality = %+v, want %+v", got, want)
+	}
 }
 
 func TestOutcomeMetricLabel(t *testing.T) {
@@ -83,10 +125,37 @@ func TestIncTaskPROutcomeSyncRecordsOnExpvarMap(t *testing.T) {
 func TestOutcomeExpvarMapsPublishedAtKnownNames(t *testing.T) {
 	expected := []string{
 		"github_task_pr_outcome_syncs_total",
+		"github_pr_watch_active",
+		"github_pr_watch_searching",
+		"github_pr_watch_duplicates",
+		"github_pr_watch_orphans",
+		"github_pr_watch_canonical_poll_requests_total",
 	}
 	for _, name := range expected {
 		if expvar.Get(name) == nil {
 			t.Errorf("expvar %q not published — /debug/vars consumers will miss it", name)
 		}
+	}
+}
+
+func TestPRWatchOperationalMetricsRecordAggregateValues(t *testing.T) {
+	recordPRWatchCardinality(PRWatchCardinality{Active: 7, Searching: 3, Duplicates: 1, Orphans: 2})
+	if got := prWatchActive.Value(); got != 7 {
+		t.Fatalf("active watch gauge = %d, want 7", got)
+	}
+	if got := prWatchSearching.Value(); got != 3 {
+		t.Fatalf("searching watch gauge = %d, want 3", got)
+	}
+	if got := prWatchDuplicates.Value(); got != 1 {
+		t.Fatalf("duplicate watch gauge = %d, want 1", got)
+	}
+	if got := prWatchOrphans.Value(); got != 2 {
+		t.Fatalf("orphan watch gauge = %d, want 2", got)
+	}
+
+	before := canonicalPollRequests.Value()
+	incCanonicalPollRequests(4)
+	if got := canonicalPollRequests.Value() - before; got != 4 {
+		t.Fatalf("canonical poll request delta = %d, want 4", got)
 	}
 }

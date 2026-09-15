@@ -90,6 +90,7 @@ func (s *ExecutionStore) Add(execution *AgentExecution) error {
 	if execution.ContainerID != "" {
 		s.byContainer[execution.ContainerID] = execution.ID
 	}
+	agentActiveRuntimes.Set(int64(len(s.executions)))
 	return nil
 }
 
@@ -114,6 +115,7 @@ func (s *ExecutionStore) Remove(executionID string) {
 
 	// Remove from primary map
 	delete(s.executions, executionID)
+	agentActiveRuntimes.Set(int64(len(s.executions)))
 }
 
 // Get returns an agent execution by its ID.
