@@ -1,3 +1,25 @@
+---
+id: "01-webhook-alert-ingest-path"
+title: "Webhook alert ingest path"
+status: pending
+wave: 0
+depends_on: []
+plan: "plan.md"
+requirements:
+  - REQ-INTEGRATIONS-ALERT-INGEST-001
+acceptance_criteria:
+  - AC-INTEGRATIONS-ALERT-INGEST-001.1
+  - AC-INTEGRATIONS-ALERT-INGEST-001.2
+  - AC-INTEGRATIONS-ALERT-INGEST-001.3
+  - AC-INTEGRATIONS-ALERT-INGEST-001.4
+  - AC-INTEGRATIONS-ALERT-INGEST-001.5
+  - AC-INTEGRATIONS-ALERT-INGEST-001.6
+  - AC-INTEGRATIONS-ALERT-INGEST-001.7
+  - AC-INTEGRATIONS-ALERT-INGEST-001.8
+system_design:
+  - ../../specs/integrations/system-design/alert-ingest.md
+---
+
 # T01: Webhook alert ingest path
 
 ## Outcome

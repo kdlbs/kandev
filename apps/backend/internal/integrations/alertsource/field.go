@@ -13,6 +13,10 @@ const (
 	FieldKindDuration
 )
 
+// jsonTypeString is the JSON Schema "type" value shared by FieldKindString
+// and FieldKindDuration, and the x-kandev-field-kind tag for FieldKindString.
+const jsonTypeString = "string"
+
 // tag is the x-kandev-field-kind value for the kind (A3). It matches the
 // constructor's kind name: NewIntField -> "int". It deliberately differs
 // from jsonType for Int (whose JSON Schema "type" is "integer") and for
@@ -21,7 +25,7 @@ const (
 func (k FieldKind) tag() string {
 	switch k {
 	case FieldKindString:
-		return "string"
+		return jsonTypeString
 	case FieldKindInt:
 		return "int"
 	case FieldKindBool:
@@ -37,7 +41,7 @@ func (k FieldKind) tag() string {
 func (k FieldKind) jsonType() string {
 	switch k {
 	case FieldKindString, FieldKindDuration:
-		return "string"
+		return jsonTypeString
 	case FieldKindInt:
 		return "integer"
 	case FieldKindBool:

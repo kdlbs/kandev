@@ -1,3 +1,25 @@
+---
+id: "04-alert-model-and-descriptor"
+title: "Alert model, shared storage, and the source descriptor"
+status: done
+wave: 0
+depends_on: []
+plan: "plan.md"
+requirements:
+  - REQ-INTEGRATIONS-ALERT-INGEST-002
+  - REQ-INTEGRATIONS-ALERT-INGEST-003
+acceptance_criteria:
+  - AC-INTEGRATIONS-ALERT-INGEST-002.2
+  - AC-INTEGRATIONS-ALERT-INGEST-002.3
+  - AC-INTEGRATIONS-ALERT-INGEST-002.4
+  - AC-INTEGRATIONS-ALERT-INGEST-003.1
+  - AC-INTEGRATIONS-ALERT-INGEST-003.2
+  - AC-INTEGRATIONS-ALERT-INGEST-003.3
+  - AC-INTEGRATIONS-ALERT-INGEST-003.7
+system_design:
+  - ../../specs/integrations/system-design/alert-ingest.md
+---
+
 # T04: Alert model, shared storage, and the source descriptor
 
 ## Outcome
