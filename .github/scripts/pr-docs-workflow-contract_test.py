@@ -31,7 +31,7 @@ class PullRequestDocumentationWorkflowContractTest(unittest.TestCase):
             "unlabeled",
             "ready_for_review",
         ):
-            if event in {"edited", "ready_for_review"}:
+            if event == "ready_for_review":
                 self.assertNotIn(event, trigger)
             else:
                 self.assertIn(event, trigger)
@@ -49,6 +49,13 @@ class PullRequestDocumentationWorkflowContractTest(unittest.TestCase):
         self.assertIn("github.event.action != 'unlabeled'", coverage_job)
         self.assertIn("github.event.label.name == 'no-docs-allow'", coverage_job)
         self.assertLess(coverage_job.index("github.event.label.name"), coverage_job.index("runs-on:"))
+
+    # @covers AC-CI-PR-DOCS-004.4
+    def test_description_edits_are_rejected_but_base_retargets_run(self) -> None:
+        coverage_job = self.workflow.partition("jobs:\n")[2]
+        self.assertIn("github.event.action != 'edited'", coverage_job)
+        self.assertIn("github.event.changes.base != null", coverage_job)
+        self.assertLess(coverage_job.index("github.event.changes.base"), coverage_job.index("runs-on:"))
 
     # @covers AC-CI-PR-DOCS-003.1, AC-CI-PR-DOCS-003.4
     def test_serializes_prs_without_cancelling_merge_group_runs(self) -> None:

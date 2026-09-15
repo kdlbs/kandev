@@ -807,6 +807,118 @@ test('GitHub client uses the documented secondary-limit delays without headers',
   assert.equal(logs.some(log => log.includes('outcome=retry-exhausted')), true);
 });
 
+test('GitHub client shares the rate-limit sleep budget across requests', async () => {
+  let calls = 0;
+  const delays = [];
+  const client = new validator.GitHubClient({
+    owner: 'kdlbs',
+    repo: 'kandev',
+    token: 'token',
+    sleepImpl: async delay => delays.push(delay),
+    fetchImpl: async () => {
+      calls += 1;
+      if (calls <= 2 || calls === 4) {
+        return {
+          ok: false,
+          status: 429,
+          async text() {
+            return JSON.stringify({ message: 'secondary rate limit' });
+          },
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        async text() {
+          return JSON.stringify({
+            number: 42,
+            head: { sha: SHA_B },
+            base: { sha: SHA_A, ref: 'main' },
+            labels: [],
+            changed_files: 0,
+          });
+        },
+      };
+    },
+  });
+
+  await client.getPullRequest(42);
+  await assert.rejects(client.getPullRequest(42), /wait-budget-exhausted/);
+
+  assert.equal(calls, 4);
+  assert.deepEqual(delays, [60_000, 120_000]);
+});
+
+test('GitHub client retries rate-limited GraphQL error payloads', async () => {
+  let calls = 0;
+  const delays = [];
+  const client = new validator.GitHubClient({
+    owner: 'kdlbs',
+    repo: 'kandev',
+    token: 'token',
+    sleepImpl: async delay => delays.push(delay),
+    fetchImpl: async () => {
+      calls += 1;
+      if (calls === 1) {
+        return {
+          ok: true,
+          status: 200,
+          async text() {
+            return JSON.stringify({
+              data: null,
+              errors: [{ type: 'RATE_LIMITED', message: 'rate limit exceeded' }],
+            });
+          },
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        async text() {
+          return JSON.stringify({
+            data: { repository: { mergeQueue: { entries: { nodes: [] } } } },
+          });
+        },
+      };
+    },
+  });
+
+  const result = await client.graphql('query { repository { name } }', {});
+
+  assert.deepEqual(result, { repository: { mergeQueue: { entries: { nodes: [] } } } });
+  assert.equal(calls, 2);
+  assert.deepEqual(delays, [60_000]);
+});
+
+test('GitHub client does not retry unrelated GraphQL errors', async () => {
+  let calls = 0;
+  const delays = [];
+  const client = new validator.GitHubClient({
+    owner: 'kdlbs',
+    repo: 'kandev',
+    token: 'token',
+    sleepImpl: async delay => delays.push(delay),
+    fetchImpl: async () => {
+      calls += 1;
+      return {
+        ok: true,
+        status: 200,
+        async text() {
+          return JSON.stringify({
+            data: null,
+            errors: [{ type: 'FORBIDDEN', message: 'permission denied' }],
+          });
+        },
+      };
+    },
+  });
+
+  await assert.rejects(client.graphql('query { repository { name } }', {}), /permission denied/);
+
+  assert.equal(calls, 1);
+  assert.deepEqual(delays, []);
+});
+
 test('GitHub client retries status writes with the original request payload', async () => {
   const requests = [];
   let calls = 0;

@@ -50,9 +50,9 @@ versions before using code search. Keep code search as the bounded fallback for
 new, moved, unresolved, and ambiguous identities.
 
 Narrow documentation coverage to events that can change its inputs. Keep
-`labeled` and `unlabeled` triggers for GitHub routing, but use a job-level gate
-for the exact `no-docs-allow` label. Remove description-edit and
-ready-for-review triggers.
+`labeled` and `unlabeled` triggers for GitHub routing, use a job-level gate for
+the exact `no-docs-allow` label, and admit `edited` only for base-branch
+retargets. Exclude title and description edits and ready-for-review changes.
 
 For size labels, list current pull request labels once and optimistically apply
 the target. Create only the target definition after a narrowly recognized

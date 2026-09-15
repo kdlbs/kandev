@@ -109,10 +109,13 @@ and byte limits apply across the head and base reads.
 
 ## Events and overrides
 
-Use `pull_request_target` events `opened`, `reopened`, `synchronize`, `labeled`, and `unlabeled` without path filters.
+Use `pull_request_target` events `opened`, `reopened`, `synchronize`, `edited`,
+`labeled`, and `unlabeled` without path filters.
 At the job boundary, admit label events only when the event label is exactly
-`no-docs-allow`. Pull request description edits and draft-readiness transitions
-do not change any evaluator input, so they do not start the job.
+`no-docs-allow`. Admit an `edited` event only when its `changes.base` field is
+present, because GitHub reports base-branch retargets as edited events. Title
+and description edits and draft-readiness transitions do not change any
+evaluator input, so they do not start the job.
 Read current PR metadata and labels, not just the event snapshot. Drafts follow the same policy.
 The exact current label `no-docs-allow` returns an override success before expensive file reads.
 Failure to read current metadata or labels is still an infrastructure error.
@@ -150,13 +153,15 @@ Bound artifact reads to 100 documents, 256 KiB each, and 4 MiB total. Report lim
 
 The API adapter makes at most three attempts for transient transport failures,
 HTTP 408 or 429, and retryable 5xx responses. It also retries HTTP 403 responses
-that GitHub identifies as rate limiting. Other 4xx responses fail immediately. A usable
-`Retry-After` value takes precedence. A primary limit with no remaining quota
-uses `X-RateLimit-Reset`. A secondary limit without usable guidance waits 60
-seconds before the second attempt and 120 seconds before the third. Transport,
-408, and 5xx failures use short exponential backoff. The total sleep budget is
-180 seconds. A server wait beyond the remaining budget fails instead of
-exceeding the job timeout.
+that GitHub identifies as rate limiting and successful merge-queue GraphQL
+responses with an error of type `RATE_LIMITED`. Other 4xx responses and other
+GraphQL errors fail immediately. A usable `Retry-After` value takes
+precedence. A primary limit with no remaining quota uses `X-RateLimit-Reset`.
+A secondary limit without usable guidance waits 60 seconds before the second
+attempt and 120 seconds before the third. Transport, 408, and 5xx failures use
+short exponential backoff. The 180-second sleep budget is shared across all
+requests in one client evaluation. A server wait beyond the remaining budget
+fails instead of exceeding the job timeout.
 
 Each attempt has its own request timeout. A status retry uses the same revision,
 context, state, and target URL. An uncertain response can create a duplicate

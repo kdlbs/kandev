@@ -49,9 +49,10 @@ rulesets, tokens, and other GitHub workflows.
 - Resolve a verified existing requirement from changed head/base documents with
   zero code-search calls. Keep bounded fallback and duplicate detection for new,
   moved, missing, or ambiguous IDs.
-- Route opened, reopened, synchronize, exact `no-docs-allow` label transitions,
-  dispatch, and merge-group checks. Skip description, readiness, and unrelated
-  label events before checkout or API use.
+- Route opened, reopened, synchronize, base-branch retargets, exact
+  `no-docs-allow` label transitions, dispatch, and merge-group checks. Skip
+  title, description, readiness, and unrelated label events before checkout or
+  API use.
 
 ## Verification
 
@@ -109,14 +110,15 @@ and the relevant event gates in `.github/workflows/pr-docs.yml`.
   heading/ID in their trusted base path skip code search, including body or
   acceptance-text changes. New, moved without a trusted base identity, missing,
   and ambiguous identities keep the bounded search and directory fallback.
-- The workflow admits only opened, reopened, synchronize, exact override-label
-  transitions, manual dispatch, and merge-group checks. Description edits,
-  readiness changes, and unrelated label events are rejected at the job gate.
+- The workflow admits only opened, reopened, synchronize, base-branch retargets,
+  exact override-label transitions, manual dispatch, and merge-group checks.
+  Title and description edits, readiness changes, and unrelated label events
+  are rejected at the job gate.
 
 Verification:
 
-- `node --test .github/scripts/pr-docs.test.cjs` (72 passed)
-- `python3 .github/scripts/pr-docs-workflow-contract_test.py` (6 passed)
+- `node --test .github/scripts/pr-docs.test.cjs` (75 passed)
+- `python3 .github/scripts/pr-docs-workflow-contract_test.py` (7 passed)
 - `python3 .github/scripts/lint-action-pinning_test.py` (9 passed)
 - `python3 .github/scripts/lint-action-pinning.py` (24 workflows passed)
 - `zizmor .github/workflows/pr-docs.yml` (no findings)

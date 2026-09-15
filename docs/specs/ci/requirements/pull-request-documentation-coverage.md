@@ -17,7 +17,7 @@ Contributors can write the artifacts manually; use of the repository harness is 
 ## Terminology
 
 - **Full evaluation:** Reading the current pull request state, changed files, and linked delivery artifacts to calculate a documentation coverage result.
-- **Transient GitHub failure:** A transport failure, HTTP 408 or 429 response, retryable server response, or HTTP 403 response that GitHub identifies as rate limiting.
+- **Transient GitHub failure:** A transport failure, HTTP 408 or 429 response, retryable server response, HTTP 403 response that GitHub identifies as rate limiting, or a merge-queue GraphQL error with type `RATE_LIMITED`.
 
 ## Requirements
 
@@ -68,7 +68,7 @@ Contributors can write the artifacts manually; use of the repository harness is 
 - **AC-CI-PR-DOCS-004.1:** Within one pull request revision or merge-group member evaluation, the system shall reuse the initial pull request snapshot and each repeated artifact lookup.
 - **AC-CI-PR-DOCS-004.2:** When a changed requirement keeps its trusted base identity, the system shall resolve it from the exact-head and base documents. It shall not make a GitHub code-search request for that requirement.
 - **AC-CI-PR-DOCS-004.3:** When a requirement is new, moved, unresolved, or ambiguous, the system shall use bounded fallback lookup and shall preserve missing-definition and duplicate-definition failures.
-- **AC-CI-PR-DOCS-004.4:** A full evaluation shall run after pull request creation, reopening, revision changes, exact exception-label transitions, manual retries, and merge-group checks. It shall not run after description edits, draft-readiness changes, or unrelated label changes.
+- **AC-CI-PR-DOCS-004.4:** A full evaluation shall run after pull request creation, reopening, revision changes, base-branch retargets, exact exception-label transitions, manual retries, and merge-group checks. It shall not run after title or description edits, draft-readiness changes, or unrelated label changes.
 
 ## Out of scope
 

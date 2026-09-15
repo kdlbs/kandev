@@ -86,7 +86,10 @@ Implemented the bounded GitHub API client recovery path in
 `.github/scripts/pr-docs.test.cjs`.
 
 - Classified transport and timeout failures, HTTP 408, 429, retryable 5xx,
-  and rate-limit 403 responses for at most three attempts.
+  rate-limit 403 responses, and merge-queue GraphQL `RATE_LIMITED` payloads for
+  at most three attempts.
+- Shared the 180-second sleep budget across every request made by one client
+  evaluation.
 - Permanent 4xx responses fail immediately when their body cannot be read or
   contains invalid JSON.
 - Honored numeric and date `Retry-After` values and primary reset headers.
@@ -98,8 +101,8 @@ Implemented the bounded GitHub API client recovery path in
 
 Verification:
 
-- `node --test .github/scripts/pr-docs.test.cjs` (72 passed)
-- `python3 .github/scripts/pr-docs-workflow-contract_test.py` (6 passed)
+- `node --test .github/scripts/pr-docs.test.cjs` (75 passed)
+- `python3 .github/scripts/pr-docs-workflow-contract_test.py` (7 passed)
 - `python3 .github/scripts/lint-action-pinning_test.py` (9 passed)
 - `python3 .github/scripts/lint-action-pinning.py` (24 workflows passed)
 - `zizmor .github/workflows/pr-docs.yml` (no findings)

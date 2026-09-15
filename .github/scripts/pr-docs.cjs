@@ -122,7 +122,15 @@ function primaryRateLimitResetDelay(response) {
   return Math.max(0, reset * 1000 - Date.now());
 }
 
-function isRateLimitResponse(response, payload) {
+function isGraphqlRateLimitPayload(payload) {
+  return Array.isArray(payload?.errors)
+    && payload.errors.some(error => error?.type === 'RATE_LIMITED');
+}
+
+function isRateLimitResponse(response, payload, requestClass) {
+  if (requestClass === 'merge-queue' && isGraphqlRateLimitPayload(payload)) {
+    return true;
+  }
   if (response?.status === 429) {
     return true;
   }
@@ -139,18 +147,18 @@ function isRateLimitResponse(response, payload) {
   );
 }
 
-function isRetryableResponse(response, payload) {
+function isRetryableResponse(response, payload, requestClass) {
   const status = response?.status;
   return (
     status === 408
     || status === 429
     || (Number.isInteger(status) && status >= 500 && status <= 599)
-    || isRateLimitResponse(response, payload)
+    || isRateLimitResponse(response, payload, requestClass)
   );
 }
 
-function retryPlan(response, payload, attemptIndex, category) {
-  const rateLimited = isRateLimitResponse(response, payload);
+function retryPlan(response, payload, attemptIndex, category, requestClass) {
+  const rateLimited = isRateLimitResponse(response, payload, requestClass);
   const serverDelay = retryAfterDelay(response);
   if (serverDelay !== undefined) {
     return { delay: serverDelay, reason: 'server-wait' };
@@ -181,9 +189,6 @@ function requestClassForEndpoint(endpoint, method) {
   }
   if (pathname.includes('/pulls/') && pathname.endsWith('/files')) {
     return 'changed-files';
-  }
-  if (pathname.includes('/contents/')) {
-    return 'repository-content';
   }
   if (pathname === '/search/code') {
     return 'code-search';
@@ -936,6 +941,7 @@ class GitHubClient {
     this.fetchImpl = fetchImpl;
     this.sleepImpl = sleepImpl;
     this.logImpl = logImpl;
+    this.sleptMs = 0;
   }
 
   async request(endpoint, { method = 'GET', body, requestClass: requestedClass } = {}) {
@@ -954,7 +960,6 @@ class GitHubClient {
       headers['Content-Type'] = 'application/json';
     }
 
-    let sleptMs = 0;
     const statusForLog = response => Number.isInteger(response?.status)
       ? `HTTP ${response.status}`
       : 'none';
@@ -989,7 +994,7 @@ class GitHubClient {
       return new Error(`GitHub API request failed (${diagnostic})`);
     };
     const waitBeforeRetry = async ({ response, category, attempt, plan }) => {
-      const remainingMs = MAX_RETRY_SLEEP_MS - sleptMs;
+      const remainingMs = MAX_RETRY_SLEEP_MS - this.sleptMs;
       if (plan.delay > remainingMs) {
         return false;
       }
@@ -1008,7 +1013,7 @@ class GitHubClient {
           outcome: 'retry-aborted',
         });
       }
-      sleptMs += plan.delay;
+      this.sleptMs += plan.delay;
       return true;
     };
 
@@ -1027,7 +1032,7 @@ class GitHubClient {
         });
       } catch (error) {
         const category = transportCategory(error);
-        const plan = retryPlan(undefined, undefined, attempt, category);
+        const plan = retryPlan(undefined, undefined, attempt, category, requestClass);
         if (attempt + 1 < MAX_REQUEST_ATTEMPTS && plan) {
           if (await waitBeforeRetry({ category, attempt, plan })) {
             continue;
@@ -1061,9 +1066,11 @@ class GitHubClient {
       try {
         text = await response.text();
       } catch (error) {
-        const retryable = response.ok || isRetryableResponse(response);
+        const retryable = response.ok || isRetryableResponse(response, undefined, requestClass);
         const category = retryable ? transportCategory(error) : 'http';
-        const plan = retryable ? retryPlan(response, undefined, attempt, category) : undefined;
+        const plan = retryable
+          ? retryPlan(response, undefined, attempt, category, requestClass)
+          : undefined;
         if (retryable && attempt + 1 < MAX_REQUEST_ATTEMPTS && plan) {
           if (await waitBeforeRetry({ response, category, attempt, plan })) {
             continue;
@@ -1097,13 +1104,16 @@ class GitHubClient {
         try {
           payload = JSON.parse(text);
         } catch {
-          const retryable = !response.ok && isRetryableResponse(response);
-          const category = isRateLimitResponse(response)
+          const retryable = !response.ok && isRetryableResponse(response, undefined, requestClass);
+          // The body is unavailable after parsing fails, so headers are the only signal.
+          const category = isRateLimitResponse(response, undefined, requestClass)
             ? 'rate-limit'
             : response.status >= 500
               ? 'server'
               : 'protocol';
-          const plan = retryable ? retryPlan(response, undefined, attempt, category) : undefined;
+          const plan = retryable
+            ? retryPlan(response, undefined, attempt, category, requestClass)
+            : undefined;
           if (
             retryable
             && attempt + 1 < MAX_REQUEST_ATTEMPTS
@@ -1131,16 +1141,38 @@ class GitHubClient {
           });
         }
       }
+      if (response.ok && isRateLimitResponse(response, payload, requestClass)) {
+        const category = 'rate-limit';
+        const plan = retryPlan(response, payload, attempt, category, requestClass);
+        if (attempt + 1 < MAX_REQUEST_ATTEMPTS && plan) {
+          if (await waitBeforeRetry({ response, category, attempt, plan })) {
+            continue;
+          }
+          throw terminalError({
+            category,
+            response,
+            attempt: attempt + 1,
+            outcome: 'wait-budget-exhausted',
+            nextDelay: plan.delay,
+          });
+        }
+        throw terminalError({
+          category,
+          response,
+          attempt: attempt + 1,
+          outcome: 'retry-exhausted',
+        });
+      }
       if (!response.ok) {
-        const category = isRateLimitResponse(response, payload)
+        const category = isRateLimitResponse(response, payload, requestClass)
           ? 'rate-limit'
           : response.status >= 500
             ? 'server'
             : 'http';
-        const plan = retryPlan(response, payload, attempt, category);
+        const plan = retryPlan(response, payload, attempt, category, requestClass);
         if (
           attempt + 1 < MAX_REQUEST_ATTEMPTS
-          && isRetryableResponse(response, payload)
+          && isRetryableResponse(response, payload, requestClass)
           && plan
         ) {
           if (await waitBeforeRetry({ response, category, attempt, plan })) {
@@ -1159,7 +1191,9 @@ class GitHubClient {
           response,
           attempt: attempt + 1,
           message: `GitHub API request failed with HTTP ${response.status}`,
-          outcome: isRetryableResponse(response, payload) ? 'retry-exhausted' : 'permanent',
+          outcome: isRetryableResponse(response, payload, requestClass)
+            ? 'retry-exhausted'
+            : 'permanent',
         });
       }
       return payload;
