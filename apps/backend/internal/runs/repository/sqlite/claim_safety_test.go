@@ -357,6 +357,53 @@ func TestClaimNextEligibleRun_AgeBasedPromotionReordersClaim(t *testing.T) {
 	}
 }
 
+// TestClaimNextEligibleRun_AgeBasedPromotionIsNoOpForHumanClass pins
+// AC-OFFICE-BACKPRESSURE-002.2 verbatim: "a human run's promotion is a
+// no-op." Two human-class (0) runs, one aged past PromotionAge and one
+// fresh: a no-op promotion leaves both at class 0, so FIFO (requested_at)
+// picks the older one. An underflowing promotion (GREATEST(0-1, 1) = 1)
+// would instead demote the aged run to class 1 (recovery), leaving the
+// fresh, untouched class-0 run to win the claim ahead of it — exactly
+// backwards from "no-op".
+func TestClaimNextEligibleRun_AgeBasedPromotionIsNoOpForHumanClass(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	seedClaimAgent(t, repo, "a1")
+	repo.SetClaimSafetyLimits(runssqlite.ClaimSafetyLimits{PromotionAge: 10 * time.Minute})
+
+	now := time.Now().UTC()
+	staleHuman := mustCreateRun(t, repo, &models.Run{
+		ID:             "stale-human",
+		AgentProfileID: "a1",
+		WorkspaceID:    claimTestWorkspace("a1"),
+		Reason:         "task_assigned",
+		Payload:        `{}`,
+		Status:         "queued",
+		CoalescedCount: 1,
+		PriorityClass:  models.PriorityClassHuman,
+	})
+	setRequestedAt(t, repo, staleHuman.ID, now.Add(-20*time.Minute))
+	freshHuman := mustCreateRun(t, repo, &models.Run{
+		ID:             "fresh-human",
+		AgentProfileID: "a1",
+		WorkspaceID:    claimTestWorkspace("a1"),
+		Reason:         "task_assigned",
+		Payload:        `{}`,
+		Status:         "queued",
+		CoalescedCount: 1,
+		PriorityClass:  models.PriorityClassHuman,
+	})
+	setRequestedAt(t, repo, freshHuman.ID, now.Add(-time.Minute))
+
+	claimed, err := repo.ClaimNextEligibleRun(ctx)
+	if err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	if claimed.ID != staleHuman.ID {
+		t.Errorf("claimed %q, want %q (aged human-class run must stay class 0 and win FIFO, not be demoted below the fresh human run)", claimed.ID, staleHuman.ID)
+	}
+}
+
 // TestClaimNextEligibleRun_AppendsLedgerRowOnClaim pins
 // REQ-OFFICE-LAUNCH-SAFETY-002: a successful claim durably records itself
 // in office_launch_ledger, independent of runs.claimed_at.

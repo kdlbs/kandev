@@ -135,7 +135,10 @@ func (s *Service) resolveCausation(
 
 	if res.CausationDepth > s.effectiveMaxCausationDepth() {
 		shared.LaunchRefusedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalCausationDepth)), 1)
-		s.logRefusal(RefusalCausationDepth, agentInstanceID, req, res.CausationID)
+		s.logRefusal(RefusalCausationDepth, agentInstanceID, req, res.CausationID,
+			zap.Int("causation_depth", res.CausationDepth),
+			zap.Int("max_causation_depth", s.effectiveMaxCausationDepth()),
+		)
 		// The depth compared above was already read without error inside
 		// applyCausationLineage, so this gate can never fail closed on an
 		// unreadable input; only a genuinely successful evaluation is
@@ -191,13 +194,18 @@ func (s *Service) applyCausationLineage(
 	causing, err := s.repo.GetRunByIDTx(ctx, tx, req.CausingRunID)
 	if err != nil {
 		shared.LaunchRefusedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalCausingRunUnreadable)), 1)
-		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalCausingRunUnreadable)), 1)
 		s.logRefusal(RefusalCausingRunUnreadable, agentInstanceID, req, "")
-		// The causing run itself is the input this gate could not read,
-		// which is exactly AC-OFFICE-BACKPRESSURE-003.3's "input cannot
-		// be read" case, so it counts toward the durable escalation
-		// record alongside the refusal.
-		rec.record(res.WorkspaceID, RefusalCausingRunUnreadable, false)
+		if !isShutdownCanceled(ctx, err) {
+			// The causing run itself is the input this gate could not
+			// read, which is exactly AC-OFFICE-BACKPRESSURE-003.3's "input
+			// cannot be read" case, so it counts toward the durable
+			// escalation record alongside the refusal. A shutdown
+			// cancellation is not that case (AC-OFFICE-LAUNCH-SAFETY-001.8):
+			// counting it would make every restart look like a gate
+			// failing closed.
+			shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalCausingRunUnreadable)), 1)
+			rec.record(res.WorkspaceID, RefusalCausingRunUnreadable, false)
+		}
 		return &RefusalError{
 			Gate:   RefusalCausingRunUnreadable,
 			Reason: fmt.Sprintf("causing run %s unreadable: %v", req.CausingRunID, err),
@@ -219,6 +227,15 @@ func (s *Service) applyCausationLineage(
 		res.RoutineID = causing.RoutineID
 	}
 	return nil
+}
+
+// isShutdownCanceled reports whether err (from a causation-gate DB read)
+// is a context cancellation rather than a genuine unreadable-input
+// failure. AC-OFFICE-LAUNCH-SAFETY-001.8: "A shutdown-cancelled
+// evaluation shall defer the run without recording a gate failure, so a
+// restart is not mistaken for a gate that is failing closed."
+func isShutdownCanceled(ctx context.Context, err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled)
 }
 
 // normalizeActor applies AC-OFFICE-RUN-CAUSATION-001.16: an absent,
@@ -271,9 +288,14 @@ func (s *Service) checkSelfTriggerAllowance(
 	since := time.Now().UTC().Add(-SelfTriggerWindow)
 	count, err := s.repo.CountSelfTriggeredRunsTx(ctx, tx, agentInstanceID, reason, since)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalSelfTrigger)), 1)
 		s.logRefusal(RefusalSelfTrigger, agentInstanceID, req, causationID)
-		rec.record(workspaceID, RefusalSelfTrigger, false)
+		if !isShutdownCanceled(ctx, err) {
+			// A shutdown cancellation is not an unreadable-input gate
+			// failure (AC-OFFICE-LAUNCH-SAFETY-001.8): counting it would
+			// make every restart look like a gate failing closed.
+			shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalSelfTrigger)), 1)
+			rec.record(workspaceID, RefusalSelfTrigger, false)
+		}
 		return &RefusalError{
 			Gate:   RefusalSelfTrigger,
 			Reason: fmt.Sprintf("self-trigger count unreadable: %v", err),
@@ -300,7 +322,9 @@ func (s *Service) checkSelfTriggerAllowance(
 // resolved it before this gate ran (empty otherwise, per
 // AC-OFFICE-BACKPRESSURE-003.1's "not for the missing workspace" carve-out
 // and applyCausationLineage's own refusal, neither of which has one yet).
-func (s *Service) logRefusal(gate RefusalGate, agentInstanceID string, req QueueRunRequest, causationID string) {
+// extra carries gate-specific fields (for example the refusing depth)
+// that don't apply to every refusal gate.
+func (s *Service) logRefusal(gate RefusalGate, agentInstanceID string, req QueueRunRequest, causationID string, extra ...zap.Field) {
 	fields := []zap.Field{
 		zap.String("gate", string(gate)),
 		zap.String("agent_profile", agentInstanceID),
@@ -312,6 +336,7 @@ func (s *Service) logRefusal(gate RefusalGate, agentInstanceID string, req Queue
 	if causationID != "" {
 		fields = append(fields, zap.String("causation_id", causationID))
 	}
+	fields = append(fields, extra...)
 	s.log.Info("run enqueue refused", fields...)
 }
 

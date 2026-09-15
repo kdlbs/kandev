@@ -103,14 +103,10 @@ func (r *Repository) ClaimNextEligibleRun(ctx context.Context) (*models.Run, err
 	budgetWindowStart := now.Add(-BudgetWindow)
 
 	// AC-OFFICE-BACKPRESSURE-002.1/002.2: a run queued strictly longer
-	// than PromotionAge claims as one class better, clamped at
-	// `recovery` (1) so promotion can never reach `human` (0). Reused
-	// from dialect.GreatestTimestamp, which is a generic two-argument
-	// max/GREATEST despite the timestamp-flavoured name.
-	promotedClass := fmt.Sprintf(
-		"CASE WHEN w.requested_at < ? THEN %s ELSE w.priority_class END",
-		dialect.GreatestTimestamp(driver, "w.priority_class - 1", "1"),
-	)
+	// than PromotionAge claims as one class better. Only classes above
+	// `recovery` (1) are eligible: `human` (0) and `recovery` (1) are
+	// left untouched so a human run's promotion is always a no-op.
+	const promotedClass = "CASE WHEN w.requested_at < ? AND w.priority_class > 1 THEN w.priority_class - 1 ELSE w.priority_class END"
 	query := fmt.Sprintf(`
 		SELECT w.* FROM runs w
 		WHERE w.status = 'queued'
@@ -331,6 +327,15 @@ func (r *Repository) recordGateOutcome(ctx context.Context, tx *sqlx.Tx, workspa
 	}
 }
 
+// isShutdownCanceled reports whether err (from a gate's DB read) is a
+// context cancellation rather than a genuine unreadable-input failure.
+// AC-OFFICE-LAUNCH-SAFETY-001.8: "A shutdown-cancelled evaluation shall
+// defer the run without recording a gate failure, so a restart is not
+// mistaken for a gate that is failing closed."
+func isShutdownCanceled(ctx context.Context, err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled)
+}
+
 // evalAgentCeilingGate reports whether candidate's agent is at or over its
 // effective per-agent ceiling. Returns true (blocked) both when the
 // ceiling is reached and when a required input could not be read
@@ -340,6 +345,9 @@ func (r *Repository) evalAgentCeilingGate(
 ) bool {
 	agentCap, err := r.agentCeiling(ctx, tx, candidate.AgentProfileID, limits)
 	if err != nil {
+		if isShutdownCanceled(ctx, err) {
+			return true
+		}
 		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateAgentCeiling), 1)
 		r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateAgentCeiling, false)
 		return true
@@ -355,6 +363,9 @@ func (r *Repository) evalAgentCeilingGate(
 	}
 	agentClaimed, err := r.countClaimed(ctx, tx, "agent_profile_id = ?", candidate.AgentProfileID)
 	if err != nil {
+		if isShutdownCanceled(ctx, err) {
+			return true
+		}
 		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateAgentCeiling), 1)
 		r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateAgentCeiling, false)
 		return true
@@ -370,6 +381,9 @@ func (r *Repository) evalWorkspaceCeilingGate(
 ) bool {
 	workspaceClaimed, err := r.countClaimed(ctx, tx, "workspace_id = ?", candidate.WorkspaceID)
 	if err != nil {
+		if isShutdownCanceled(ctx, err) {
+			return true
+		}
 		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateWorkspaceCeiling), 1)
 		r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateWorkspaceCeiling, false)
 		return true
@@ -385,6 +399,9 @@ func (r *Repository) evalInstanceCeilingGate(
 ) bool {
 	instanceClaimed, err := r.countClaimed(ctx, tx, "1 = 1")
 	if err != nil {
+		if isShutdownCanceled(ctx, err) {
+			return true
+		}
 		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateInstanceCeiling), 1)
 		r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateInstanceCeiling, false)
 		return true
@@ -401,6 +418,9 @@ func (r *Repository) evalRoutineBudgetGate(
 ) bool {
 	routineClaims, err := r.countLedger(ctx, tx, "routine_id = ? AND claimed_at > ?", candidate.RoutineID, budgetWindowStart)
 	if err != nil {
+		if isShutdownCanceled(ctx, err) {
+			return true
+		}
 		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateRoutineBudget), 1)
 		r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateRoutineBudget, false)
 		return true
@@ -417,6 +437,9 @@ func (r *Repository) evalWorkspaceBudgetGate(
 ) bool {
 	workspaceClaims, err := r.countLedger(ctx, tx, "workspace_id = ? AND claimed_at > ?", candidate.WorkspaceID, budgetWindowStart)
 	if err != nil {
+		if isShutdownCanceled(ctx, err) {
+			return true
+		}
 		shared.LaunchCheckFailedTotal.Add(shared.LaunchSafetyLabel("gate", gateWorkspaceBudget), 1)
 		r.recordGateOutcome(ctx, tx, candidate.WorkspaceID, gateWorkspaceBudget, false)
 		return true

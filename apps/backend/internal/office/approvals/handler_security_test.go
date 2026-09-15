@@ -271,11 +271,14 @@ func TestDecideApproval_AgentCallerQueuesRunAsActorKindAgent(t *testing.T) {
 	}
 }
 
-// TestDecideApproval_UnauthenticatedCallerQueuesRunAsActorKindUser is the
-// ActorKindUser counterpart: a request with no agent JWT (the dashboard's
-// current auth-less path) must reach QueueRunWithActor as ActorKindUser,
-// not system.
-func TestDecideApproval_UnauthenticatedCallerQueuesRunAsActorKindUser(t *testing.T) {
+// TestDecideApproval_UnauthenticatedCallerQueuesRunAsActorKindSystem pins
+// AC-OFFICE-RUN-CAUSATION-001.16: an absent or unrecognized actor shall
+// never be read as `user`. A request with no agent JWT (the dashboard's
+// current auth-less path) is unverified — it must reach QueueRunWithActor
+// as ActorKindSystem, never ActorKindUser, so it cannot manufacture
+// HumanRooted=true and bypass the causation-depth/self-trigger/budget
+// gates that key off it.
+func TestDecideApproval_UnauthenticatedCallerQueuesRunAsActorKindSystem(t *testing.T) {
 	queuer := &capturingRunQueuer{}
 	f := newApprovalHandlerFixtureWithQueuer(t, queuer)
 	approval := seedPendingApproval(t, f.repo, "appr-1", "ws-1", "other-agent")
@@ -289,10 +292,34 @@ func TestDecideApproval_UnauthenticatedCallerQueuesRunAsActorKindUser(t *testing
 	if !queuer.called {
 		t.Fatal("QueueRunWithActor was not called")
 	}
-	if queuer.actorKind != models.ActorKindUser {
-		t.Errorf("actorKind = %q, want %q", queuer.actorKind, models.ActorKindUser)
+	if queuer.actorKind != models.ActorKindSystem {
+		t.Errorf("actorKind = %q, want %q (unverified caller must never be human-rooted)", queuer.actorKind, models.ActorKindSystem)
 	}
 	if queuer.actorID != "ui" {
 		t.Errorf("actorID = %q, want ui", queuer.actorID)
+	}
+}
+
+// TestDecideApproval_UnauthenticatedCallerWithSpoofedDecidedByStaysActorKindSystem
+// covers the exploit path the finding names directly: an unauthenticated
+// caller supplying an arbitrary decided_by must still resolve to
+// ActorKindSystem, not gain ActorKindUser (and therefore HumanRooted=true)
+// by spoofing a plausible-looking identity in the request body.
+func TestDecideApproval_UnauthenticatedCallerWithSpoofedDecidedByStaysActorKindSystem(t *testing.T) {
+	queuer := &capturingRunQueuer{}
+	f := newApprovalHandlerFixtureWithQueuer(t, queuer)
+	approval := seedPendingApproval(t, f.repo, "appr-1", "ws-1", "other-agent")
+
+	rec := httptest.NewRecorder()
+	f.router.ServeHTTP(rec, decideReq(approval.ID, "", `{"status":"approved","decided_by":"anything"}`))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+	if !queuer.called {
+		t.Fatal("QueueRunWithActor was not called")
+	}
+	if queuer.actorKind != models.ActorKindSystem {
+		t.Errorf("actorKind = %q, want %q (spoofed decided_by must not drive actor kind)", queuer.actorKind, models.ActorKindSystem)
 	}
 }

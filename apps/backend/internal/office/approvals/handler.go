@@ -90,19 +90,23 @@ func (h *Handler) decideApproval(c *gin.Context) {
 // handler stops.
 //
 // For UI callers (no agent JWT) the request body's DecidedBy is still
-// accepted for now — the dashboard does not yet ship a real user-session
-// auth layer; once it does, this branch should derive the identity from
-// the session instead. Either way, an unauthenticated caller is not a
-// verified agent, so it is attributed as ActorKindUser
-// (AC-OFFICE-RUN-CAUSATION-001.15).
+// accepted for now, for display/audit purposes only — the dashboard does
+// not yet ship a real user-session auth layer; once it does, this branch
+// should derive the identity from the session instead. An unauthenticated
+// caller is not a verified human or agent, so per
+// AC-OFFICE-RUN-CAUSATION-001.16 it is never attributed as ActorKindUser:
+// that would manufacture HumanRooted=true and exempt the resulting run
+// from the causation-depth, self-trigger, and launch-budget gates. It is
+// attributed as ActorKindSystem instead, deliberately, per
+// AC-OFFICE-RUN-CAUSATION-001.15.
 func resolveDecider(
 	c *gin.Context, caller *models.AgentInstance, approval *Approval, requestedDecidedBy string,
 ) (string, models.ActorKind, error) {
 	if caller == nil {
 		if requestedDecidedBy != "" {
-			return requestedDecidedBy, models.ActorKindUser, nil
+			return requestedDecidedBy, models.ActorKindSystem, nil
 		}
-		return "ui", models.ActorKindUser, nil
+		return "ui", models.ActorKindSystem, nil
 	}
 	if caller.WorkspaceID != approval.WorkspaceID {
 		c.JSON(http.StatusForbidden, gin.H{"error": "cannot decide approvals from another workspace"})
