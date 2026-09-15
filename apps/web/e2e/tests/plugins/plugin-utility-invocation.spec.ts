@@ -123,6 +123,9 @@ test.describe("Packaged plugin utility invocation", () => {
       );
 
       await apiClient.updateAgentProfile(profileSmart.id, { enabled: false });
+      await apiClient.saveUserSettings({
+        default_utility_agent_profile_id: profileSlow.id,
+      });
       const invalidExplicitCall = await invokeUtilityAction(
         apiClient,
         "utility-preference",
@@ -130,9 +133,6 @@ test.describe("Packaged plugin utility invocation", () => {
       );
       expect(invalidExplicitCall.status).toBeGreaterThanOrEqual(400);
 
-      await apiClient.saveUserSettings({
-        default_utility_agent_profile_id: profileSlow.id,
-      });
       const defaultAfterInvalidOverride = await invokeUtilityAction(
         apiClient,
         "utility-default",
