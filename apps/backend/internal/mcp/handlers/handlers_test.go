@@ -3144,6 +3144,7 @@ func TestHandleAskUserQuestion_Dedup_CreatesOnePendingBundle(t *testing.T) {
 	payload := map[string]interface{}{
 		"session_id": sess.ID,
 		"task_id":    task.ID,
+		"retry_key":  "conn-dedup/int64:1",
 		"questions": []map[string]interface{}{
 			{"prompt": "What colour?", "options": []map[string]interface{}{
 				{"label": "Red", "description": "R"},
@@ -3172,6 +3173,9 @@ func TestHandleAskUserQuestion_Dedup_CreatesOnePendingBundle(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return len(store.ListPending()) == 1
 	}, time.Second, 5*time.Millisecond)
+	if got, want := store.ListPending()[0].PendingID, clarification.PendingIDForRequest(sess.ID, "conn-dedup/int64:1"); got != want {
+		t.Fatalf("pending ID = %q, want transport retry identity %q", got, want)
+	}
 	store.CancelSession(sess.ID)
 	wg.Wait()
 
