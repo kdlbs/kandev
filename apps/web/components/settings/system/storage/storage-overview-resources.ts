@@ -1,5 +1,6 @@
 import type {
   StorageFootprintMeasurement,
+  StorageDockerNetworkSummary,
   StorageOverviewResponse,
   StorageQuarantineSummary,
   StorageSourceProgress,
@@ -486,6 +487,31 @@ function dockerResources(
   ];
 }
 
+function dockerNetworksResource(
+  t: Translate,
+  summary: StorageDockerNetworkSummary | null | undefined,
+): StorageResource {
+  if (!summary || summary.available === false) {
+    return {
+      id: "docker-networks",
+      label: t("system:storageDockerNetworks"),
+      value: t(STORAGE_UNAVAILABLE_VALUE_KEY),
+      detail: t("system:storageDockerNetworksUnmeasured"),
+      warning: summary?.warning,
+      source: "docker_networks",
+    };
+  }
+  const candidates = summary.candidates?.length ?? 0;
+  return {
+    id: "docker-networks",
+    label: t("system:storageDockerNetworks"),
+    value: String(candidates),
+    detail: t("system:storageDockerNetworksDetail", { count: candidates }),
+    warning: summary.warnings?.join(" · ") || undefined,
+    source: "docker_networks",
+  };
+}
+
 export function storageResources(
   t: Translate,
   overview: StorageOverviewResponse,
@@ -526,5 +552,6 @@ export function storageResources(
       progress.temporary_artifacts,
     ),
     ...dockerResources(t, summary.docker, progress.docker, overview.capabilities.docker_host),
+    dockerNetworksResource(t, summary.docker_networks),
   ];
 }

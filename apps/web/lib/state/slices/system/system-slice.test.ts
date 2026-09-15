@@ -120,6 +120,13 @@ describe("system storage slice", () => {
           unused_images_enabled: false,
           unused_images_hours: 168,
         },
+        docker_networks: {
+          enabled: false,
+          stale_hours: 168,
+          quarantine_hours: 24,
+          orphan_grace_hours: 1,
+          probe_enabled: true,
+        },
       },
       capabilities: {
         managed_go_cache_path: "/data/cache/go-build",

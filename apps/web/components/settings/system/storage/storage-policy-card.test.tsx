@@ -21,6 +21,13 @@ const settings: StorageMaintenanceSettings = {
     unused_images_enabled: true,
     unused_images_hours: 168,
   },
+  docker_networks: {
+    enabled: false,
+    stale_hours: 168,
+    quarantine_hours: 24,
+    orphan_grace_hours: 1,
+    probe_enabled: true,
+  },
 };
 
 const capabilities = {
@@ -454,7 +461,7 @@ describe("StoragePolicyCard interactions", () => {
     ]) {
       expect(screen.getByText(heading)).toBeTruthy();
     }
-    expect(screen.getAllByLabelText(/^More information about /)).toHaveLength(19);
+    expect(screen.getAllByLabelText(/^More information about /)).toHaveLength(24);
   });
 });
 

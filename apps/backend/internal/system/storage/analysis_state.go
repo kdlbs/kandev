@@ -29,6 +29,7 @@ const (
 	StorageSourceTemporaryArtifacts = "temporary_artifacts"
 	StorageSourceSystemTemporary    = "system_temporary"
 	StorageSourceDocker             = "docker"
+	StorageSourceDockerNetworks     = "docker_networks"
 	StorageSourceDatabase           = "database"
 	StorageSourceDatabaseBackups    = "database_backups"
 )
@@ -40,6 +41,7 @@ var storageAnalysisSources = [...]string{
 	StorageSourceTemporaryArtifacts,
 	StorageSourceSystemTemporary,
 	StorageSourceDocker,
+	StorageSourceDockerNetworks,
 	StorageSourceDatabase,
 	StorageSourceDatabaseBackups,
 }

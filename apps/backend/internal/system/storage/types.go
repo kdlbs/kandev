@@ -50,17 +50,29 @@ type DockerSettings struct {
 	UnusedImagesHours           int   `json:"unused_images_hours"`
 }
 
+// DockerNetworkSettings controls the conservative network-reclamation provider.
+// Analysis remains available while Enabled is false; false is the safe first-run
+// default and records candidates without removing any network.
+type DockerNetworkSettings struct {
+	Enabled          bool `json:"enabled"`
+	StaleHours       int  `json:"stale_hours"`
+	QuarantineHours  int  `json:"quarantine_hours"`
+	OrphanGraceHours int  `json:"orphan_grace_hours"`
+	ProbeEnabled     bool `json:"probe_enabled"`
+}
+
 type StorageMaintenanceSettings struct {
-	Enabled                  bool              `json:"enabled"`
-	CheckIntervalHours       int               `json:"check_interval_hours"`
-	IdleForMinutes           int               `json:"idle_for_minutes"`
-	OrphanGraceHours         int               `json:"orphan_grace_hours"`
-	QuarantineRetentionHours int               `json:"quarantine_retention_hours"`
-	Workspaces               WorkspaceSettings `json:"workspaces"`
-	KandevContainers         ResourceSettings  `json:"kandev_containers"`
-	TemporaryArtifacts       ResourceSettings  `json:"temporary_artifacts"`
-	GoCache                  GoCacheSettings   `json:"go_cache"`
-	Docker                   DockerSettings    `json:"docker"`
+	Enabled                  bool                  `json:"enabled"`
+	CheckIntervalHours       int                   `json:"check_interval_hours"`
+	IdleForMinutes           int                   `json:"idle_for_minutes"`
+	OrphanGraceHours         int                   `json:"orphan_grace_hours"`
+	QuarantineRetentionHours int                   `json:"quarantine_retention_hours"`
+	Workspaces               WorkspaceSettings     `json:"workspaces"`
+	KandevContainers         ResourceSettings      `json:"kandev_containers"`
+	TemporaryArtifacts       ResourceSettings      `json:"temporary_artifacts"`
+	GoCache                  GoCacheSettings       `json:"go_cache"`
+	Docker                   DockerSettings        `json:"docker"`
+	DockerNetworks           DockerNetworkSettings `json:"docker_networks"`
 }
 
 func DefaultSettings() StorageMaintenanceSettings {
@@ -79,6 +91,12 @@ func DefaultSettings() StorageMaintenanceSettings {
 			BuildCacheKeepBytes:   10737418240,
 			BuildCacheUnusedHours: 168,
 			UnusedImagesHours:     168,
+		},
+		DockerNetworks: DockerNetworkSettings{
+			StaleHours:       168,
+			QuarantineHours:  24,
+			OrphanGraceHours: 1,
+			ProbeEnabled:     true,
 		},
 	}
 }
@@ -118,7 +136,32 @@ func NormalizeSettings(in StorageMaintenanceSettings) (StorageMaintenanceSetting
 	); err != nil {
 		return StorageMaintenanceSettings{}, err
 	}
-	if (in.Docker.BuildCacheEnabled || in.Docker.UnusedImagesEnabled) && !in.Docker.DedicatedDaemonAcknowledged {
+	if err := validateRange(
+		"docker_networks.stale_hours",
+		in.DockerNetworks.StaleHours,
+		MinGraceHours,
+		MaxDockerUnusedHours,
+	); err != nil {
+		return StorageMaintenanceSettings{}, err
+	}
+	if err := validateRange(
+		"docker_networks.quarantine_hours",
+		in.DockerNetworks.QuarantineHours,
+		MinGraceHours,
+		MaxGraceHours,
+	); err != nil {
+		return StorageMaintenanceSettings{}, err
+	}
+	if err := validateRange(
+		"docker_networks.orphan_grace_hours",
+		in.DockerNetworks.OrphanGraceHours,
+		1,
+		MaxGraceHours,
+	); err != nil {
+		return StorageMaintenanceSettings{}, err
+	}
+	if (in.Docker.BuildCacheEnabled || in.Docker.UnusedImagesEnabled || in.DockerNetworks.Enabled) &&
+		!in.Docker.DedicatedDaemonAcknowledged {
 		return StorageMaintenanceSettings{}, validationError("docker cleanup requires dedicated daemon acknowledgement")
 	}
 	if in.GoCache.AdoptedPath != "" {
