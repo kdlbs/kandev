@@ -210,6 +210,7 @@ func TestFeatures_ProductionDefaults(t *testing.T) {
 	// host shell cannot change the production-profile defaults under test.
 	t.Setenv("KANDEV_FEATURES_OFFICE", "")
 	unsetEnv(t, "KANDEV_FEATURES_AUTH")
+	unsetEnv(t, "KANDEV_FEATURES_CANVASES")
 	unsetEnv(t, "KANDEV_FEATURES_CLAUDE_BACKGROUND_PROMPT_HANDOFF")
 	t.Setenv("KANDEV_DEBUG_DEV_MODE", "")
 	t.Setenv("KANDEV_DEBUG_PPROF_ENABLED", "")

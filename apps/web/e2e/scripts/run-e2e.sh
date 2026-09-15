@@ -12,8 +12,9 @@
 #     the binary in the image first and only falls back to the BUILD image
 #     (KANDEV_CI_BUILD_IMAGE) if the host glibc is newer. FE Vite builds
 #     on the host and are served by the Go backend.
-#   • Runs N shards concurrently (--shards N): N isolated containers in docker
-#     mode, or N host processes with distinct E2E_PORT_OFFSET + output dirs.
+#   • Runs a resource-bounded number of shards concurrently (--shards N):
+#     isolated containers in docker mode, or host processes with distinct
+#     E2E_PORT_OFFSET + output dirs.
 #   • Never leaves root-owned junk in the repo: points normal Playwright output
 #     at a container-local dir. With CAPTURE_PR_ASSETS, captures are written to
 #     the mounted workspace and ownership is restored after the run. `clean`
@@ -21,12 +22,20 @@
 #     container.
 #
 # Usage:
-#   run-e2e.sh [run] [options] [-- <playwright args>]   # default subcommand: run
-#   run-e2e.sh clean                                    # remove build/test artifacts (incl. root-owned)
+#   Direct:  run-e2e.sh [run] [options] [-- <playwright args>]   # default subcommand: run
+#            run-e2e.sh clean                                    # remove build/test artifacts (incl. root-owned)
+#   Via pnpm: pnpm e2e:run [options] [-- <playwright args>]
+#   pnpm/npm forward a caller-supplied `--` verbatim, so `pnpm e2e:run -- --host`
+#   reaches this script as `-- --host`. The package entry point drops that leading
+#   artifact before option parsing; direct script calls preserve `--` as the
+#   documented Playwright separator. For package calls, write script options
+#   directly after `e2e:run` (`pnpm e2e:run --host --no-build -- --grep foo`).
+#   A `--` anywhere else still ends option parsing and forwards everything after it
+#   straight to Playwright.
 #
 # Options:
 #   --docker | --host     Force runner (default: auto-detect)
-#   --shards N            Run the chromium project as N concurrent shards
+#   --shards N            Run the project as N concurrent shards (local limit applies)
 #   --no-build           Skip the build step (reuse existing artifacts)
 #   --no-strict          Don't set KANDEV_E2E_WS_ASSERT=1 (it's on by default here, matching CI)
 #   --project NAME       Playwright project (default: chromium)
@@ -36,18 +45,64 @@
 # Env overrides:
 #   KANDEV_CI_BUILD_IMAGE   (default: ghcr.io/kdlbs/kandev-ci:build-latest)
 #   KANDEV_CI_RUNTIME_IMAGE (default: kandev-ci:runtime-local, falls back to ghcr…:runtime-latest)
+#   KANDEV_E2E_ALLOW_UNSAFE_PARALLELISM=1  bypass local shard/worker guards for experiments
+#   KANDEV_E2E_DOCKER_PROBE_TIMEOUT (default: 10)  seconds to wait for `docker info`
+#   before treating Docker as unavailable in auto/clean mode
 set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/resource-guard.sh"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd)"
 WEB_DIR="$REPO_ROOT/apps/web"
 BACKEND_DIR="$REPO_ROOT/apps/backend"
 BUILD_IMAGE="${KANDEV_CI_BUILD_IMAGE:-ghcr.io/kdlbs/kandev-ci:build-latest}"
 RUNTIME_IMAGE="${KANDEV_CI_RUNTIME_IMAGE:-}"
+DOCKER_PROBE_TIMEOUT="${KANDEV_E2E_DOCKER_PROBE_TIMEOUT:-10}"
 
 log() { printf '\033[36m[e2e]\033[0m %s\n' "$*" >&2; }
 die() { printf '\033[31m[e2e] %s\033[0m\n' "$*" >&2; exit 1; }
 
-docker_up() { command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; }
+# Feeds arithmetic in docker_up; validated to reject fractional, suffixed, and
+# whitespace-padded values. 0 is accepted — it means "skip the probe, treat
+# Docker as unavailable". No leading zeros: bash arithmetic reads them as octal,
+# so "08" is a parse error and "010" silently means 8.
+[[ "$DOCKER_PROBE_TIMEOUT" =~ ^(0|[1-9][0-9]*)$ ]] \
+  || die "KANDEV_E2E_DOCKER_PROBE_TIMEOUT must be a non-negative integer (got '$DOCKER_PROBE_TIMEOUT')"
+
+# Bounded in pure bash (no `timeout`/`gtimeout` dependency — bare macOS has
+# neither). Backgrounds the probe and kills it if it outlives the budget, so a
+# hung daemon degrades to host mode with a visible reason instead of hanging
+# the whole runner forever.
+docker_up() {
+  command -v docker >/dev/null 2>&1 || return 1
+  if (( DOCKER_PROBE_TIMEOUT == 0 )); then
+    log "docker info did not respond within 0s; treating Docker as unavailable (pass --host to skip this probe)"
+    return 1
+  fi
+  local had_monitor=0
+  case "$-" in
+    *m*) had_monitor=1 ;;
+  esac
+  set -m
+  docker info >/dev/null 2>&1 &
+  local pid=$! max_ticks=$(( DOCKER_PROBE_TIMEOUT * 10 )) tick=0
+  [[ "$had_monitor" -eq 1 ]] || set +m
+  while kill -0 "$pid" 2>/dev/null; do
+    if (( tick >= max_ticks )); then
+      # SIGKILL, not SIGTERM: a wedged docker client can be blocked in a way
+      # that doesn't honor SIGTERM, and `wait` below blocks until it exits.
+      kill -9 -- "-$pid" 2>/dev/null || true
+      wait "$pid" 2>/dev/null || true
+      log "docker info did not respond within ${DOCKER_PROBE_TIMEOUT}s; treating Docker as unavailable (pass --host to skip this probe)"
+      return 1
+    fi
+    sleep 0.1
+    tick=$(( tick + 1 ))
+  done
+  wait "$pid"
+}
+is_container_project() { [[ "$PROJECT" == containers || "$PROJECT" == kubernetes-compat ]]; }
 
 resolve_runtime_image() {
   if [[ -n "$RUNTIME_IMAGE" ]]; then echo "$RUNTIME_IMAGE"; return; fi
@@ -106,8 +161,9 @@ build_fe() {
 build_backend_host() {
   log "building backend (host)"
   local targets=(build)
-  # PROJECT is normalized above, so this also covers the deprecated `docker` alias.
-  [[ "$PROJECT" == containers ]] && targets+=(build-agentctl-linux build-mock-agent-linux)
+  # Both real-runtime projects need Linux helpers; the deprecated docker alias
+  # is normalized to containers before this point.
+  is_container_project && targets+=(build-agentctl-linux build-mock-agent-linux)
   make -C "$BACKEND_DIR" "${targets[@]}" >/dev/null || die "backend build failed"
 }
 
@@ -164,6 +220,12 @@ DO_BUILD=1
 STRICT=1
 PROJECT=chromium
 PW_ARGS=()
+# pnpm/npm forward the caller's `--` verbatim, so `pnpm e2e:run -- --host`
+# reaches this script as `-- --host`. Only the package entry point drops that
+# artifact. Direct calls keep the documented `-- <playwright args>` separator.
+if [[ "${npm_lifecycle_event:-}" == e2e:run && "${1:-}" == -- ]]; then
+  shift
+fi
 [[ "${1:-}" == clean ]] && { SUBCMD=clean; shift; }
 [[ "${1:-}" == run ]] && shift
 while [[ $# -gt 0 ]]; do
@@ -192,6 +254,9 @@ if [[ "$PROJECT" == docker ]]; then
   PROJECT=containers
 fi
 
+e2e_validate_shards "$SHARDS" || die "unsafe shard count rejected"
+e2e_validate_playwright_args "${PW_ARGS[@]}" || die "unsafe Playwright worker count rejected"
+
 # Resolve mode
 if [[ "$MODE" == auto ]]; then
   if docker_up && { [[ -n "$RUNTIME_IMAGE" ]] || docker image inspect kandev-ci:runtime-local >/dev/null 2>&1 || docker image inspect ghcr.io/kdlbs/kandev-ci:runtime-latest >/dev/null 2>&1; }; then
@@ -200,12 +265,12 @@ if [[ "$MODE" == auto ]]; then
     MODE=host
   fi
 fi
-log "mode=$MODE  shards=$SHARDS  project=$PROJECT  strict=$STRICT"
+log "mode=$MODE  shards=$SHARDS  project=$PROJECT  strict=$STRICT  workers=1"
 
 STRICT_ENV=()
 [[ "$STRICT" == 1 ]] && STRICT_ENV=(KANDEV_E2E_WS_ASSERT=1)
 CONTAINER_ENV=()
-[[ "$PROJECT" == containers ]] && CONTAINER_ENV=(KANDEV_E2E_CONTAINERS=1)
+is_container_project && CONTAINER_ENV=(KANDEV_E2E_CONTAINERS=1)
 
 # ---------------------------------------------------------------------------
 # HOST mode
@@ -213,7 +278,7 @@ CONTAINER_ENV=()
 run_host() {
   prepare_pr_assets
   [[ "$DO_BUILD" == 1 ]] && { build_backend_host; build_fe; build_plugin_package; }
-  local base_args=(playwright test --config e2e/playwright.config.ts --project="$PROJECT")
+  local base_args=(playwright test --config e2e/playwright.config.ts --project="$PROJECT" --workers=1)
   # `env FOO=bar cmd` inherits the rest of the parent shell's environment as-is,
   # so a KANDEV_E2E_CONTAINERS/KANDEV_E2E_DOCKER left over from an earlier
   # containers run in the same shell would otherwise leak into an ordinary
@@ -252,10 +317,10 @@ run_docker() {
   local strict_flag=()
   [[ "$STRICT" == 1 ]] && strict_flag=(-e KANDEV_E2E_WS_ASSERT=1)
   local container_flag=()
-  [[ "$PROJECT" == containers ]] && container_flag=(-e KANDEV_E2E_CONTAINERS=1)
+  is_container_project && container_flag=(-e KANDEV_E2E_CONTAINERS=1)
   local capture_flag=()
   [[ -n "${CAPTURE_PR_ASSETS:-}" ]] && capture_flag=(-e CAPTURE_PR_ASSETS)
-  local pw="git config --global --add safe.directory /work 2>/dev/null; cd /work/apps/web && pnpm exec playwright test --config e2e/playwright.config.ts --project=\"$PROJECT\""
+  local pw="git config --global --add safe.directory /work 2>/dev/null; cd /work/apps/web && pnpm exec playwright test --config e2e/playwright.config.ts --project=\"$PROJECT\" --workers=1"
 
   run_one() {  # $1=shard index (or 0 for unsharded)
     local i="$1" shardflag="" out="/tmp/pw-out"

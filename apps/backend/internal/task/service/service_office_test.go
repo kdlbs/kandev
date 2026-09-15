@@ -19,6 +19,12 @@ type dbStepResolver struct {
 	repo *sqliterepo.Repository
 }
 
+type noOpWorkspacePolicyAttacher struct{}
+
+func (noOpWorkspacePolicyAttacher) AttachWorkspacePolicy(context.Context, string, string, WorkspacePolicy) error {
+	return nil
+}
+
 func (r *dbStepResolver) ResolveStartStep(ctx context.Context, workflowID string) (string, error) {
 	var stepID string
 	err := r.repo.DB().QueryRowContext(ctx,
@@ -83,6 +89,7 @@ func setupOfficeTest(t *testing.T) (*Service, *sqliterepo.Repository) {
 		t.Fatalf("EnsureOfficeWorkflow: %v", err)
 	}
 	svc.SetStartStepResolver(&dbStepResolver{repo: repo})
+	svc.SetWorkspacePolicyAttacher(noOpWorkspacePolicyAttacher{})
 	return svc, repo
 }
 
@@ -353,6 +360,16 @@ func (m *mockBlockerRepo) DeleteTaskBlocker(_ context.Context, taskID, blockerTa
 			return nil
 		}
 	}
+	return nil
+}
+func (m *mockBlockerRepo) DeleteTaskBlockersForTask(_ context.Context, taskID string) error {
+	filtered := m.blockers[:0]
+	for _, b := range m.blockers {
+		if b.TaskID != taskID && b.BlockerTaskID != taskID {
+			filtered = append(filtered, b)
+		}
+	}
+	m.blockers = filtered
 	return nil
 }
 

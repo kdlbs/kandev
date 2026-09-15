@@ -33,7 +33,12 @@ test.describe("Sidebar office gating", () => {
     await expect(sidebar).toBeVisible();
     await expect(sidebar.getByText("Projects", { exact: true })).toHaveCount(0);
     await expect(sidebar.getByText("Agents", { exact: true })).toHaveCount(0);
-    await expect(sidebar.getByRole("link", { name: "Inbox", exact: true })).toHaveCount(0);
+    // Needs-you Inbox is workspace-scoped, so it remains available outside
+    // Office. Only the Office-specific sections disappear after the switch.
+    await expect(sidebar.getByRole("link", { name: "Inbox", exact: true })).toHaveAttribute(
+      "href",
+      "/needs-you-inbox",
+    );
   });
 
   test("a Settings round trip keeps the active office workspace", async ({

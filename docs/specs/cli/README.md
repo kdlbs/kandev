@@ -24,25 +24,10 @@ and CLI-specific compatibility behavior.
 - Shared launcher behavior belongs to the [platform system](../platform/README.md).
 - Desktop shell behavior belongs to the [desktop system](../desktop/README.md).
 
-## Specification map
-
-### Requirements
-
-
-
-- [CLI-Mode Task Parity (Kanban)](requirements/cli-mode-parity.md)
-- [Native Kandev CLI](requirements/native-kandev-cli.md)
-
-### System design
-
-
-
-- None.
-
 ## Migration record
 
 Migration remains in progress while legacy source detail is extracted from the
-canonical requirement and system-design documents above.
+canonical requirement and system-design documents. Use the catalog command to find them.
 
 ## Related systems
 

@@ -15,6 +15,10 @@ import (
 	"github.com/jmoiron/sqlx"
 	"go.uber.org/zap"
 
+	agentkubernetes "github.com/kandev/kandev/internal/agent/kubernetes"
+	"github.com/kandev/kandev/internal/agentruntime"
+	"github.com/kandev/kandev/internal/auth/authn"
+	"github.com/kandev/kandev/internal/authz"
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/secrets"
@@ -30,6 +34,10 @@ const (
 	workspaceDeletePageSize           = 500
 	workspaceDeleteCleanupConcurrency = 8
 )
+
+type workflowDeleteTaskLister interface {
+	ListTasksForDeletion(context.Context, string, string, int, int) ([]*models.Task, int, error)
+}
 
 var ErrWorkspaceConfirmNameMismatch = errors.New("confirm_name does not match workspace name")
 
@@ -78,9 +86,13 @@ type workspaceDeleteTaskCleanup struct {
 	worktrees   []*worktree.Worktree
 	stopTargets []taskStopTarget
 	taskEnv     *models.TaskEnvironment
+	attachments []*models.TaskMessageAttachment
 	cleanupJob  *models.TaskResourceCleanupJob
 }
 
+type workspaceAttachmentLister interface {
+	ListMessageAttachmentsByWorkspace(ctx context.Context, workspaceID string) ([]*models.TaskMessageAttachment, error)
+}
 type repositorySessionPruner interface {
 	DeleteRepositoryIfNoActiveTaskSessions(ctx context.Context, id string) (bool, error)
 }
@@ -104,7 +116,16 @@ func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceReque
 		DefaultEnvironmentID:        normalizeOptionalID(req.DefaultEnvironmentID),
 		DefaultAgentProfileID:       normalizeOptionalID(req.DefaultAgentProfileID),
 		DefaultConfigAgentProfileID: normalizeOptionalID(req.DefaultConfigAgentProfileID),
+		// The tenant comes from the creating identity and from nowhere else.
+		// There is no org field on the request on purpose: a caller must not
+		// be able to place a workspace in another tenant.
+		OrgID: callerOrgID(ctx),
 	}
+	placement, placementErr := s.placementFor(ctx, ownerID, workspace.OrgID)
+	if placementErr != nil {
+		return nil, placementErr
+	}
+	workspace.UnitID = placement
 
 	var kanbanWorkflow *models.Workflow
 	if req.BootstrapKanbanWorkflow {
@@ -130,6 +151,10 @@ func (s *Service) CreateWorkspace(ctx context.Context, req *CreateWorkspaceReque
 		}
 	}
 
+	if err := s.seedWorkspaceOwnerMember(ctx, workspace); err != nil {
+		return nil, err
+	}
+
 	s.publishWorkspaceEvent(ctx, events.WorkspaceCreated, workspace)
 	s.logger.Info("workspace created", zap.String("workspace_id", workspace.ID), zap.String("name", workspace.Name))
 	if kanbanWorkflow != nil {
@@ -145,7 +170,7 @@ func (s *Service) GetWorkspace(ctx context.Context, id string) (*models.Workspac
 	if err != nil {
 		return nil, err
 	}
-	if userID, scoped := callerScope(ctx); scoped && !workspaceVisibleTo(workspace, userID) {
+	if scoped := s.workspaceDecision(ctx, workspace); !scoped.CanRead() {
 		return nil, repoerrors.ErrWorkspaceNotFound
 	}
 	return workspace, nil
@@ -157,10 +182,15 @@ func (s *Service) UpdateWorkspace(ctx context.Context, id string, req *UpdateWor
 	if err != nil {
 		return nil, err
 	}
-	if userID, scoped := callerScope(ctx); scoped && !workspaceVisibleTo(workspace, userID) {
-		return nil, repoerrors.ErrWorkspaceNotFound
+	if err := s.requireWorkspaceManage(ctx, workspace); err != nil {
+		return nil, err
 	}
 
+	if req.UnitID != nil {
+		if err := s.moveWorkspaceToUnit(ctx, workspace, *req.UnitID); err != nil {
+			return nil, err
+		}
+	}
 	if req.Name != nil {
 		workspace.Name = *req.Name
 	}
@@ -197,8 +227,8 @@ func (s *Service) DeleteWorkspace(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
-	if userID, scoped := callerScope(ctx); scoped && !workspaceVisibleTo(workspace, userID) {
-		return repoerrors.ErrWorkspaceNotFound
+	if err := s.requireWorkspaceManage(ctx, workspace); err != nil {
+		return err
 	}
 	return s.deleteWorkspace(ctx, workspace, nil)
 }
@@ -210,34 +240,137 @@ func (s *Service) DeleteWorkspaceWithConfirmName(ctx context.Context, id, confir
 	if err != nil {
 		return err
 	}
-	if userID, scoped := callerScope(ctx); scoped && !workspaceVisibleTo(workspace, userID) {
-		return repoerrors.ErrWorkspaceNotFound
+	if err := s.requireWorkspaceManage(ctx, workspace); err != nil {
+		return err
 	}
 	if confirmName != workspace.Name {
 		return ErrWorkspaceConfirmNameMismatch
 	}
 	return s.deleteWorkspace(ctx, workspace, &confirmName)
 }
+func (s *Service) prepareWorkspaceAttachmentCleanup(ctx context.Context, workspaceID string) (*models.TaskResourceCleanupJob, error) {
+	attachmentRepo := s.attachments
+	if attachmentRepo == nil && s.attachmentSvc != nil {
+		attachmentRepo = s.attachmentSvc.repo
+	}
+	lister, ok := attachmentRepo.(workspaceAttachmentLister)
+	if !ok {
+		if attachmentRepo != nil {
+			return nil, fmt.Errorf("workspace attachment repository cannot list attachments")
+		}
+		if s.resourceCleanups == nil && s.attachmentSvc != nil {
+			return nil, fmt.Errorf("workspace attachment cleanup persistence is unavailable")
+		}
+		return nil, nil
+	}
+	attachments, err := lister.ListMessageAttachmentsByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("list workspace attachments for cleanup: %w", err)
+	}
+	if len(attachments) == 0 {
+		if s.resourceCleanups == nil && s.attachmentSvc == nil {
+			return nil, fmt.Errorf("workspace attachment cleanup executor is unavailable")
+		}
+		return nil, nil
+	}
+	if s.resourceCleanups == nil {
+		if s.attachmentSvc != nil {
+			return nil, fmt.Errorf("workspace attachment cleanup persistence is unavailable")
+		}
+		return nil, fmt.Errorf("workspace attachment cleanup executor is unavailable")
+	}
+	if s.attachmentSvc == nil {
+		return nil, fmt.Errorf("workspace attachment cleanup executor is unavailable")
+	}
+	return s.persistTaskResourceCleanup(
+		ctx, "", models.TaskResourceCleanupTriggerWorkspaceDelete,
+		newTaskResourceCleanupOperationID(models.TaskResourceCleanupTriggerWorkspaceDelete, "workspace-attachments:"+workspaceID),
+		nil, nil, nil, attachments, taskEnvironmentCleanup{}, true, false, workspaceID,
+	)
+}
+
+// DeleteOrganizationWorkspaces removes every workspace in one organization
+// through the same lifecycle as an ordinary workspace deletion. Authorization
+// is performed by the operator-only organization controller before this
+// narrow internal seam is called.
+func (s *Service) DeleteOrganizationWorkspaces(ctx context.Context, orgID string) error {
+	if orgID == "" {
+		return nil
+	}
+	workspaces, err := s.workspaces.ListWorkspaces(ctx)
+	if err != nil {
+		return fmt.Errorf("list organization workspaces: %w", err)
+	}
+	for _, workspace := range workspaces {
+		if workspace == nil || workspace.OrgID != orgID {
+			continue
+		}
+		if err := s.deleteWorkspace(ctx, workspace, nil); err != nil {
+			return fmt.Errorf("delete workspace %s: %w", workspace.ID, err)
+		}
+	}
+	return nil
+}
 
 func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspace, confirmedName *string) error {
+	var releaseAttachmentAdmission func()
+	if s.attachmentSvc != nil {
+		releaseAttachmentAdmission = s.attachmentSvc.beginWorkspaceDeletion(workspace.ID)
+		defer releaseAttachmentAdmission()
+	}
 	tasks, err := s.listAllTasksForWorkspaceDelete(ctx, workspace.ID)
 	if err != nil {
 		return err
 	}
 	// Runtime cleanup needs task rows before the cascade removes them.
-	cleanups, err := s.prepareWorkspaceDeleteTaskCleanups(ctx, tasks)
+	workspaceAttachmentCleanup, err := s.prepareWorkspaceAttachmentCleanup(ctx, workspace.ID)
 	if err != nil {
 		return err
 	}
+	// Record canvas artifact cleanup before the workspace cascade removes its
+	// task and workspace rows. This keeps the release ownership boundary
+	// durable across a process stop between the two operations.
+	if s.canvasCleanup != nil {
+		if err := s.canvasCleanup.CleanupWorkspaceCanvases(ctx, workspace.ID); err != nil {
+			return fmt.Errorf("cleanup workspace canvases before workspace delete: %w", err)
+		}
+	}
+	cleanups := make([]workspaceDeleteTaskCleanup, 0, len(tasks)+1)
+	if workspaceAttachmentCleanup != nil {
+		cleanups = append(cleanups, workspaceDeleteTaskCleanup{cleanupJob: workspaceAttachmentCleanup})
+	}
+	taskCleanups, err := s.prepareWorkspaceDeleteTaskCleanups(ctx, tasks)
+	if err != nil {
+		cancelErr := s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
+		return errors.Join(err, cancelErr)
+	}
+	cleanups = append(cleanups, taskCleanups...)
 
+	var deletedWorkspaceAttachments []*models.TaskMessageAttachment
 	var deletedTasks []*models.Task
 	var deletedWorkflows []*models.Workflow
 	transactionalCleanup, hasTransactionalCleanup := s.workspaceSecretDeleter.(secrets.WorkspaceSecretTransactionalDeleter)
 	transactionalCascade, hasTransactionalCascade := s.workspaces.(transactionalWorkspaceCascade)
+	useTransactionalCleanup := hasTransactionalCascade &&
+		(hasTransactionalCleanup || s.attachmentSvc != nil)
 	switch {
-	case hasTransactionalCleanup && hasTransactionalCascade:
+	case useTransactionalCleanup:
 		cleanup := func(cleanupCtx context.Context, tx *sqlx.Tx) error {
-			return transactionalCleanup.DeleteWorkspaceSecretsTx(cleanupCtx, tx, workspace.ID)
+			if hasTransactionalCleanup {
+				if err := transactionalCleanup.DeleteWorkspaceSecretsTx(cleanupCtx, tx, workspace.ID); err != nil {
+					return err
+				}
+			}
+			if s.attachmentSvc != nil {
+				var err error
+				deletedWorkspaceAttachments, err = s.attachmentSvc.DeleteWorkspaceAttachmentsTx(
+					cleanupCtx, tx, workspace.ID,
+				)
+				if err != nil {
+					return err
+				}
+			}
+			return nil
 		}
 		if confirmedName == nil {
 			deletedTasks, deletedWorkflows, err = transactionalCascade.DeleteWorkspaceCascadeWithSecretCleanup(ctx, workspace.ID, cleanup)
@@ -250,24 +383,32 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 		deletedTasks, deletedWorkflows, err = s.workspaces.DeleteWorkspaceCascadeWithName(ctx, workspace.ID, *confirmedName)
 	}
 	if err != nil {
-		s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
-		return s.mapWorkspaceDeleteError(workspace.ID, err)
+		cancelErr := s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
+		return s.mapWorkspaceDeleteError(workspace.ID, errors.Join(err, cancelErr))
+	}
+	var postCommitErr error
+	if s.attachmentSvc != nil {
+		s.attachmentSvc.RemoveBytes(deletedWorkspaceAttachments)
 	}
 	if s.workspaceSecretDeleter != nil && (!hasTransactionalCleanup || !hasTransactionalCascade) {
 		if err := s.workspaceSecretDeleter.DeleteWorkspaceSecrets(ctx, workspace.ID); err != nil {
-			s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
 			s.logger.Error("failed to delete workspace secrets", zap.String("workspace_id", workspace.ID), zap.Error(err))
-			return err
+			postCommitErr = errors.Join(postCommitErr, err)
 		}
 	}
-	cleanups = s.appendWorkspaceDeleteMissingTaskCleanups(ctx, cleanups, deletedTasks)
+	var lateCleanupErr error
+	cleanups, lateCleanupErr = s.appendWorkspaceDeleteMissingTaskCleanups(ctx, cleanups, deletedTasks)
+	postCommitErr = errors.Join(postCommitErr, lateCleanupErr)
 	s.publishWorkspaceDeleteChildEvents(ctx, deletedTasks, deletedWorkflows)
 	s.runWorkspaceDeleteTaskCleanups(cleanups, deletedTasks)
 	s.publishWorkspaceEvent(ctx, events.WorkspaceDeleted, workspace)
 	s.logger.Info("workspace deleted", zap.String("workspace_id", workspace.ID))
+	if postCommitErr != nil {
+		return &CascadePostCommitError{Err: postCommitErr}
+	}
 	return nil
-}
 
+}
 func (s *Service) prepareWorkspaceDeleteTaskCleanups(ctx context.Context, tasks []*models.Task) ([]workspaceDeleteTaskCleanup, error) {
 	cleanups := make([]workspaceDeleteTaskCleanup, 0, len(tasks))
 	for _, task := range tasks {
@@ -276,8 +417,8 @@ func (s *Service) prepareWorkspaceDeleteTaskCleanups(ctx context.Context, tasks 
 		}
 		cleanup, err := s.prepareWorkspaceDeleteTaskCleanup(ctx, task)
 		if err != nil {
-			s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
-			return nil, err
+			cancelErr := s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
+			return nil, errors.Join(err, cancelErr)
 		}
 		cleanups = append(cleanups, cleanup)
 	}
@@ -288,13 +429,14 @@ func (s *Service) appendWorkspaceDeleteMissingTaskCleanups(
 	ctx context.Context,
 	cleanups []workspaceDeleteTaskCleanup,
 	deletedTasks []*models.Task,
-) []workspaceDeleteTaskCleanup {
+) ([]workspaceDeleteTaskCleanup, error) {
 	prepared := make(map[string]struct{}, len(cleanups))
 	for _, cleanup := range cleanups {
 		if cleanup.task != nil && cleanup.task.ID != "" {
 			prepared[cleanup.task.ID] = struct{}{}
 		}
 	}
+	var errs []error
 	for _, task := range deletedTasks {
 		if task == nil || task.ID == "" {
 			continue
@@ -307,12 +449,22 @@ func (s *Service) appendWorkspaceDeleteMissingTaskCleanups(
 			s.logger.Error("failed to prepare late workspace task cleanup",
 				zap.String("task_id", task.ID),
 				zap.Error(err))
+			errs = append(errs, fmt.Errorf("prepare late workspace task cleanup %q: %w", task.ID, err))
+			if job, persistErr := s.persistTaskResourceCleanup(
+				ctx, task.ID, models.TaskResourceCleanupTriggerWorkspaceDelete,
+				newTaskResourceCleanupOperationID(models.TaskResourceCleanupTriggerWorkspaceDelete, task.ID),
+				nil, nil, nil, nil, taskEnvironmentCleanup{}, false, false, "",
+			); persistErr != nil {
+				errs = append(errs, fmt.Errorf("persist late workspace task cleanup %q: %w", task.ID, persistErr))
+			} else if job != nil {
+				cleanups = append(cleanups, workspaceDeleteTaskCleanup{task: task, cleanupJob: job})
+			}
 			continue
 		}
 		cleanups = append(cleanups, cleanup)
 		prepared[task.ID] = struct{}{}
 	}
-	return cleanups
+	return cleanups, errors.Join(errs...)
 }
 
 func (s *Service) prepareWorkspaceDeleteTaskCleanup(ctx context.Context, task *models.Task) (workspaceDeleteTaskCleanup, error) {
@@ -324,7 +476,18 @@ func (s *Service) prepareWorkspaceDeleteTaskCleanup(ctx context.Context, task *m
 	if err != nil {
 		return workspaceDeleteTaskCleanup{}, fmt.Errorf("lookup environment for workspace delete task %q: %w", task.ID, err)
 	}
-	cleanup := workspaceDeleteTaskCleanup{task: task, worktrees: worktrees, taskEnv: taskEnv}
+	var attachments []*models.TaskMessageAttachment
+	attachmentRepo := s.attachments
+	if attachmentRepo == nil && s.attachmentSvc != nil {
+		attachmentRepo = s.attachmentSvc.repo
+	}
+	if attachmentRepo != nil {
+		attachments, err = attachmentRepo.ListMessageAttachmentsByTask(ctx, task.ID)
+		if err != nil {
+			return workspaceDeleteTaskCleanup{}, fmt.Errorf("list attachments for workspace delete task %q: %w", task.ID, err)
+		}
+	}
+	cleanup := workspaceDeleteTaskCleanup{task: task, worktrees: worktrees, taskEnv: taskEnv, attachments: attachments}
 	cleanup.sessions, err = s.sessions.ListTaskSessions(ctx, task.ID)
 	if err != nil {
 		return workspaceDeleteTaskCleanup{}, fmt.Errorf("list task sessions for workspace delete task %q: %w", task.ID, err)
@@ -342,27 +505,46 @@ func (s *Service) prepareWorkspaceDeleteTaskCleanup(ctx context.Context, task *m
 	cleanup.cleanupJob, err = s.persistTaskResourceCleanup(
 		ctx, task.ID, models.TaskResourceCleanupTriggerWorkspaceDelete,
 		newTaskResourceCleanupOperationID(models.TaskResourceCleanupTriggerWorkspaceDelete, task.ID),
-		cleanup.sessions, cleanup.worktrees, cleanup.stopTargets,
-		taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false}, true,
+		cleanup.sessions, cleanup.worktrees, cleanup.stopTargets, cleanup.attachments,
+		taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false}, true, true, "",
 	)
 	return cleanup, err
 }
-
-func (s *Service) cancelWorkspaceDeleteTaskCleanupJobs(ctx context.Context, cleanups []workspaceDeleteTaskCleanup) {
+func (s *Service) cancelWorkspaceDeleteTaskCleanupJobs(ctx context.Context, cleanups []workspaceDeleteTaskCleanup) error {
+	jobIDs := make([]string, 0, len(cleanups))
+	for _, cleanup := range cleanups {
+		if cleanup.cleanupJob != nil {
+			jobIDs = append(jobIDs, cleanup.cleanupJob.ID)
+		}
+	}
+	s.cancelTaskResourceCleanupRuns(jobIDs)
 	transitionCtx, cancel := detachedCleanupTransitionContext(ctx)
 	defer cancel()
+	var cancellationErrs []error
 	for _, cleanup := range cleanups {
 		if cleanup.cleanupJob == nil || s.resourceCleanups == nil {
 			continue
 		}
-		if err := s.resourceCleanups.CompleteTaskResourceCleanupJob(
-			transitionCtx, cleanup.cleanupJob.ID, models.TaskResourceCleanupStateCancelled, "", nil,
-		); err != nil {
-			s.logger.Warn("cancel workspace delete task cleanup job",
-				zap.String("job_id", cleanup.cleanupJob.ID),
-				zap.String("task_id", cleanup.cleanupJob.TaskID), zap.Error(err))
+		cas, ok := s.resourceCleanups.(taskResourceCleanupCancellationCAS)
+		if !ok {
+			cancellationErrs = append(cancellationErrs,
+				fmt.Errorf("%w: cleanup repository cannot fence cancellation for %s",
+					ErrCleanupCancellationRace, cleanup.cleanupJob.ID))
+			continue
+		}
+		cancelled, err := cas.CancelTaskResourceCleanupJobIfPending(transitionCtx, cleanup.cleanupJob.ID)
+		if err != nil {
+			cancellationErrs = append(cancellationErrs, err)
+		} else if !cancelled {
+			cancellationErrs = append(cancellationErrs,
+				fmt.Errorf("%w: workspace-delete cleanup %s was claimed concurrently",
+					ErrCleanupCancellationRace, cleanup.cleanupJob.ID))
 		}
 	}
+	if len(cancellationErrs) > 0 {
+		return errors.Join(cancellationErrs...)
+	}
+	return nil
 }
 
 func (s *Service) publishWorkspaceDeleteChildEvents(ctx context.Context, tasks []*models.Task, workflows []*models.Workflow) {
@@ -401,13 +583,17 @@ func (s *Service) workspaceDeleteTaskCleanupJobs(
 	jobs := make([]workspaceDeleteTaskCleanup, 0, len(cleanups))
 	for _, cleanup := range cleanups {
 		if cleanup.task == nil {
+			if cleanup.cleanupJob != nil {
+				jobs = append(jobs, cleanup)
+			}
 			continue
 		}
 		if _, ok := deletedTaskIDs[cleanup.task.ID]; !ok {
 			continue
 		}
 		hasCleanup := len(cleanup.stopTargets) > 0 || s.worktreeCleanup != nil ||
-			len(cleanup.sessions) > 0 || cleanup.task.IsEphemeral || cleanup.taskEnv != nil
+			len(cleanup.sessions) > 0 || cleanup.task.IsEphemeral || cleanup.taskEnv != nil ||
+			len(cleanup.attachments) > 0
 		if !hasCleanup {
 			continue
 		}
@@ -503,14 +689,14 @@ func (s *Service) ListWorkspaces(ctx context.Context) ([]*models.Workspace, erro
 	if err != nil {
 		return nil, err
 	}
-	return filterWorkspacesForCaller(ctx, workspaces), nil
+	return s.filterWorkspacesForCaller(ctx, workspaces), nil
 }
 
 // Workflow operations
 
 // CreateWorkflow creates a new workflow
 func (s *Service) CreateWorkflow(ctx context.Context, req *CreateWorkflowRequest) (*models.Workflow, error) {
-	if err := s.authorizeWorkspaceID(ctx, req.WorkspaceID); err != nil {
+	if err := s.AuthorizeWorkspaceScope(ctx, req.WorkspaceID, authz.ScopeRepositoryManage); err != nil {
 		return nil, err
 	}
 	workflow := &models.Workflow{
@@ -633,6 +819,29 @@ func (s *Service) SetWorkflowSource(ctx context.Context, id, source, sourcePath 
 // they do not linger as orphan rows pointing at a workflow_id that no longer
 // exists (the tasks.workflow_id FK was dropped to support empty workflow_id
 // on ephemeral tasks, so SQLite cannot cascade for us).
+func (s *Service) listWorkflowTasksForDelete(
+	ctx context.Context,
+	workflow *models.Workflow,
+) ([]*models.Task, error) {
+	var all []*models.Task
+	for page := 1; ; page++ {
+		lister, ok := s.tasks.(workflowDeleteTaskLister)
+		if !ok {
+			return nil, errors.New("task repository cannot enumerate all task origins for workflow deletion")
+		}
+		tasks, total, err := lister.ListTasksForDeletion(
+			ctx, workflow.WorkspaceID, workflow.ID, page, workspaceDeletePageSize,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("list tasks for workflow delete cascade: %w", err)
+		}
+		all = append(all, tasks...)
+		if len(tasks) == 0 || len(all) >= total {
+			return all, nil
+		}
+	}
+}
+
 func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 	if err := s.authorizeWorkflowID(ctx, id); err != nil {
 		return err
@@ -645,13 +854,14 @@ func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 		return fmt.Errorf("workflow not found: %s", id)
 	}
 
-	tasks, err := s.tasks.ListTasks(ctx, id)
+	tasks, err := s.listWorkflowTasksForDelete(ctx, workflow)
 	if err != nil {
 		s.logger.Error("failed to list tasks for workflow delete cascade",
 			zap.String("workflow_id", id), zap.Error(err))
 		return err
 	}
 	archived := 0
+	var postCommitErr error
 	for _, task := range tasks {
 		if task == nil || task.WorkspaceID != workflow.WorkspaceID {
 			taskID, taskWorkspaceID := "", ""
@@ -666,9 +876,28 @@ func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 				zap.String("task_workspace_id", taskWorkspaceID))
 			continue
 		}
-		if err := s.ArchiveTask(ctx, task.ID); err != nil {
-			// Concurrent archive between ListTasks and here is a no-op:
-			// the task is already in the desired state, keep cascading.
+
+		var archiveErr error
+		if s.workflowTaskArchiveCoordinator != nil {
+			outcome, err := s.workflowTaskArchiveCoordinator.ArchiveTaskTree(ctx, task.ID, false)
+			if outcome != nil && len(outcome.ArchivedTaskIDs) > 0 {
+				archived += len(outcome.ArchivedTaskIDs)
+			}
+			var cascadePostCommitErr *CascadePostCommitError
+			if errors.As(err, &cascadePostCommitErr) {
+				s.logger.Warn("workflow task archived with post-commit lifecycle errors",
+					zap.String("workflow_id", id), zap.String("task_id", task.ID), zap.Error(err))
+				postCommitErr = errors.Join(postCommitErr, err)
+				continue
+			}
+		} else {
+			archiveErr = s.ArchiveTask(ctx, task.ID)
+			if errors.Is(archiveErr, ErrTaskAlreadyArchived) {
+				continue
+			}
+		}
+		if archiveErr != nil {
+			err = archiveErr
 			if errors.Is(err, ErrTaskAlreadyArchived) {
 				continue
 			}
@@ -678,7 +907,9 @@ func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 				zap.Error(err))
 			return err
 		}
-		archived++
+		if s.workflowTaskArchiveCoordinator == nil {
+			archived++
+		}
 	}
 
 	if err := s.workflows.DeleteWorkflow(ctx, id); err != nil {
@@ -690,6 +921,9 @@ func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 	s.logger.Info("workflow deleted",
 		zap.String("workflow_id", id),
 		zap.Int("archived_tasks", archived))
+	if postCommitErr != nil {
+		return &CascadePostCommitError{Err: postCommitErr}
+	}
 	return nil
 }
 
@@ -754,7 +988,7 @@ func (s *Service) createRepository(
 	localPath string,
 	resolveProvider bool,
 ) (*models.Repository, error) {
-	if err := s.authorizeWorkspaceID(ctx, req.WorkspaceID); err != nil {
+	if err := s.AuthorizeWorkspaceScope(ctx, req.WorkspaceID, authz.ScopeRepositoryManage); err != nil {
 		return nil, err
 	}
 	sourceType := req.SourceType
@@ -1068,7 +1302,7 @@ func (s *Service) UpdateRepository(ctx context.Context, id string, req *UpdateRe
 		return nil, err
 	}
 	if repository != nil {
-		if err := s.authorizeWorkspaceID(ctx, repository.WorkspaceID); err != nil {
+		if err := s.AuthorizeWorkspaceScope(ctx, repository.WorkspaceID, authz.ScopeRepositoryManage); err != nil {
 			return nil, repoerrors.ErrRepositoryNotFound
 		}
 	}
@@ -1194,6 +1428,9 @@ func applyRepositoryUpdates(repository *models.Repository, req *UpdateRepository
 	if req.ProviderName != nil {
 		repository.ProviderName = *req.ProviderName
 	}
+	if req.RemoteURL != nil {
+		repository.RemoteURL = strings.TrimSpace(*req.RemoteURL)
+	}
 	if req.DefaultBranch != nil {
 		if *req.DefaultBranch != "" && !securityutil.IsValidDefaultBranchName(*req.DefaultBranch) {
 			return fmt.Errorf("%w: invalid default branch", ErrInvalidRepositorySettings)
@@ -1241,7 +1478,10 @@ func (s *Service) DeleteRepository(ctx context.Context, id string) error {
 		return err
 	}
 	if repository != nil {
-		if err := s.authorizeWorkspaceID(ctx, repository.WorkspaceID); err != nil {
+		if err := s.AuthorizeWorkspaceScope(ctx, repository.WorkspaceID, authz.ScopeRepositoryManage); err != nil {
+			if IsForbidden(err) {
+				return err
+			}
 			return repoerrors.ErrRepositoryNotFound
 		}
 	}
@@ -1492,8 +1732,43 @@ func (s *Service) ListScriptsByRepositoryIDs(ctx context.Context, repoIDs []stri
 
 // Executor operations
 
+var ErrKubernetesAdminRequired = errors.New("administrator identity required for Kubernetes settings")
+
+func requireKubernetesAdmin(ctx context.Context) error {
+	identity, ok := authn.IdentityFromContext(ctx)
+	if !ok || !identity.IsAdmin() {
+		return ErrKubernetesAdminRequired
+	}
+	return nil
+}
+
+func validateExecutorForType(executorType models.ExecutorType, config map[string]string) error {
+	if err := validateExecutorConfig(config); err != nil {
+		return err
+	}
+	if executorType != models.ExecutorTypeKubernetes {
+		return nil
+	}
+	if _, err := agentkubernetes.ParseExecutorConfig(config); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidExecutorConfig, err)
+	}
+	return nil
+}
+
+func validateKubernetesProfileConfig(config map[string]string) error {
+	if _, err := agentkubernetes.ParseProfileConfig(config); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidExecutorConfig, err)
+	}
+	return nil
+}
+
 func (s *Service) CreateExecutor(ctx context.Context, req *CreateExecutorRequest) (*models.Executor, error) {
-	if err := validateExecutorConfig(req.Config); err != nil {
+	if req.Type == models.ExecutorTypeKubernetes {
+		if err := requireKubernetesAdmin(ctx); err != nil {
+			return nil, err
+		}
+	}
+	if err := validateExecutorForType(req.Type, req.Config); err != nil {
 		return nil, err
 	}
 	executor := &models.Executor{
@@ -1522,8 +1797,29 @@ func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExec
 	if err != nil {
 		return nil, err
 	}
+	targetType := executor.Type
+	if req.Type != nil {
+		targetType = *req.Type
+	}
+	if executor.Type == models.ExecutorTypeKubernetes || targetType == models.ExecutorTypeKubernetes {
+		if err := requireKubernetesAdmin(ctx); err != nil {
+			return nil, err
+		}
+	}
 	if err := validateExecutorUpdateRequest(executor, req); err != nil {
 		return nil, err
+	}
+	if req.Type != nil && *req.Type != executor.Type &&
+		(executor.Type == models.ExecutorTypeKubernetes || *req.Type == models.ExecutorTypeKubernetes) {
+		retained, inventoryErr := s.hasExecutorRunningInventory(ctx, id)
+		if inventoryErr != nil {
+			s.logger.Error("failed to check retained Kubernetes inventory before executor type change",
+				zap.String("executor_id", id), zap.Error(inventoryErr))
+			return nil, inventoryErr
+		}
+		if retained {
+			return nil, ErrActiveTaskSessions
+		}
 	}
 	applyExecutorUpdates(executor, req)
 	executor.UpdatedAt = time.Now().UTC()
@@ -1536,8 +1832,16 @@ func (s *Service) UpdateExecutor(ctx context.Context, id string, req *UpdateExec
 
 // validateExecutorUpdateRequest validates config and system executor constraints.
 func validateExecutorUpdateRequest(executor *models.Executor, req *UpdateExecutorRequest) error {
+	targetType := executor.Type
+	if req.Type != nil {
+		targetType = *req.Type
+	}
 	if req.Config != nil {
-		if err := validateExecutorConfig(req.Config); err != nil {
+		if err := validateExecutorForType(targetType, req.Config); err != nil {
+			return err
+		}
+	} else if targetType == models.ExecutorTypeKubernetes {
+		if err := validateExecutorForType(targetType, executor.Config); err != nil {
 			return err
 		}
 	}
@@ -1583,6 +1887,11 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	if executor.Type == models.ExecutorTypeKubernetes {
+		if err := requireKubernetesAdmin(ctx); err != nil {
+			return err
+		}
+	}
 	if executor.IsSystem {
 		return fmt.Errorf("system executors cannot be deleted")
 	}
@@ -1594,11 +1903,50 @@ func (s *Service) DeleteExecutor(ctx context.Context, id string) error {
 	if active {
 		return ErrActiveTaskSessions
 	}
+	if executor.Type == models.ExecutorTypeKubernetes {
+		retained, inventoryErr := s.hasExecutorRunningInventory(ctx, id)
+		if inventoryErr != nil {
+			s.logger.Error("failed to check retained Kubernetes inventory for executor",
+				zap.String("executor_id", id), zap.Error(inventoryErr))
+			return inventoryErr
+		}
+		if retained {
+			return ErrActiveTaskSessions
+		}
+	}
 	if err := s.executors.DeleteExecutor(ctx, id); err != nil {
 		return err
 	}
 	s.publishExecutorEvent(ctx, events.ExecutorDeleted, executor)
 	return nil
+}
+
+func (s *Service) hasExecutorRunningInventory(ctx context.Context, executorID string) (bool, error) {
+	running, err := s.executors.ListExecutorsRunning(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, row := range running {
+		if row == nil {
+			continue
+		}
+		currentID := strings.TrimSpace(row.ExecutorID)
+		recordedID, recordedOK := row.Metadata[agentkubernetes.MetadataKeyResourceExecutorID].(string)
+		recordedID = strings.TrimSpace(recordedID)
+		if currentID == executorID {
+			return true, nil
+		}
+		if recordedID == executorID {
+			return true, nil
+		}
+		// Only two matching, nonempty associations can prove that a Kubernetes
+		// row belongs to some other executor. Anything less must block cleanup.
+		if row.Runtime == agentruntime.RuntimeKubernetes &&
+			(currentID == "" || !recordedOK || recordedID == "" || currentID != recordedID) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (s *Service) ListExecutors(ctx context.Context) ([]*models.Executor, error) {
@@ -1614,13 +1962,21 @@ func (s *Service) CreateExecutorProfile(ctx context.Context, req *CreateExecutor
 	if req.ExecutorID == "" {
 		return nil, fmt.Errorf("executor_id is required")
 	}
-	if err := s.validateGlobalProfileEnvRefs(ctx, req.EnvVars); err != nil {
-		return nil, err
-	}
 	// Verify executor exists
 	executor, err := s.executors.GetExecutor(ctx, req.ExecutorID)
 	if err != nil {
 		return nil, fmt.Errorf("executor not found: %w", err)
+	}
+	if executor.Type == models.ExecutorTypeKubernetes {
+		if err := requireKubernetesAdmin(ctx); err != nil {
+			return nil, err
+		}
+		if err := validateKubernetesProfileConfig(req.Config); err != nil {
+			return nil, err
+		}
+	}
+	if err := s.validateGlobalProfileEnvRefs(ctx, req.EnvVars); err != nil {
+		return nil, err
 	}
 	if executor.Type == models.ExecutorTypeSprites && !hasSpritesToken(req.EnvVars) {
 		return nil, fmt.Errorf("sprites profiles require %s env var", spritesTokenEnvKey)
@@ -1654,6 +2010,18 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 	if err != nil {
 		return nil, err
 	}
+	if executor.Type == models.ExecutorTypeKubernetes {
+		if err := requireKubernetesAdmin(ctx); err != nil {
+			return nil, err
+		}
+		config := profile.Config
+		if req.Config != nil {
+			config = req.Config
+		}
+		if err := validateKubernetesProfileConfig(config); err != nil {
+			return nil, err
+		}
+	}
 	if req.Name != nil {
 		profile.Name = *req.Name
 	}
@@ -1678,8 +2046,14 @@ func (s *Service) UpdateExecutorProfile(ctx context.Context, id string, req *Upd
 		}
 		profile.EnvVars = req.EnvVars
 	}
-	if err := s.executors.UpdateExecutorProfile(ctx, profile); err != nil {
-		return nil, err
+	var updateErr error
+	if req.ExpectedUpdatedAt != nil {
+		updateErr = s.executors.UpdateExecutorProfileIfUnmodified(ctx, profile, *req.ExpectedUpdatedAt)
+	} else {
+		updateErr = s.executors.UpdateExecutorProfile(ctx, profile)
+	}
+	if updateErr != nil {
+		return nil, updateErr
 	}
 	s.publishExecutorProfileEvent(ctx, events.ExecutorProfileUpdated, profile)
 	return profile, nil
@@ -1754,6 +2128,15 @@ func (s *Service) DeleteExecutorProfile(ctx context.Context, id string) error {
 	profile, err := s.executors.GetExecutorProfile(ctx, id)
 	if err != nil {
 		return err
+	}
+	executor, err := s.executors.GetExecutor(ctx, profile.ExecutorID)
+	if err != nil && !errors.Is(err, models.ErrExecutorNotFound) {
+		return err
+	}
+	if executor != nil && executor.Type == models.ExecutorTypeKubernetes {
+		if err := requireKubernetesAdmin(ctx); err != nil {
+			return err
+		}
 	}
 	if err := s.executors.DeleteExecutorProfile(ctx, id); err != nil {
 		return err

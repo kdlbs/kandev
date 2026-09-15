@@ -27,14 +27,19 @@ type QueueOutcome string
 const (
 	// QueueOutcomeQueued means a new runs row was inserted.
 	QueueOutcomeQueued QueueOutcome = "queued"
-	// QueueOutcomeDeduped means an existing row with the same
-	// IdempotencyKey already exists within the dedupe window, so nothing
-	// was inserted.
+	// QueueOutcomeDeduped means an existing row with the same IdempotencyKey
+	// already exists in the durable queue identity, so nothing was inserted.
 	QueueOutcomeDeduped QueueOutcome = "deduped"
 	// QueueOutcomeCoalesced means the request was merged into an existing
 	// queued row for the same agent + reason within the coalescing
 	// window, so nothing new was inserted.
 	QueueOutcomeCoalesced QueueOutcome = "coalesced"
+	// QueueOutcomeNone means no enqueue was attempted, or the attempt
+	// returned an error. It is the zero value, so it is what a widened
+	// signature yields on any path that returns before deciding an
+	// outcome. Declared identically in internal/runs/service — both
+	// declarations MUST match.
+	QueueOutcomeNone QueueOutcome = ""
 )
 
 // QueueRunRequest is the typed payload the engine hands to RunQueueAdapter.
@@ -50,6 +55,11 @@ type QueueRunRequest struct {
 	Reason         string
 	IdempotencyKey string
 	Payload        map[string]any
+	// WaveKey and WaveString carry a completion-wave identity through from
+	// OnChildrenCompletedPayload (parent-wake-wave-identity). Empty for
+	// every trigger except on_children_completed.
+	WaveKey    string
+	WaveString string
 }
 
 // ParticipantInfo is a lightweight projection of a workflow_step_participants
@@ -92,6 +102,13 @@ type DecisionInfo struct {
 	DeciderID   string
 	Role        string
 	Comment     string
+
+	// SupersededAt is non-nil once a rework round has superseded this row
+	// (workflow_step_decisions.superseded_at). ListStepDecisions returns
+	// superseded rows alongside active ones so timelines render full history;
+	// a caller that needs only the currently-decided state must filter on
+	// this field itself rather than treating a non-empty result as "decided".
+	SupersededAt *time.Time
 }
 
 // ParticipantStore reads the workflow_step_participants table for an engine
@@ -165,6 +182,12 @@ const (
 // resolved for the role at all. WorkspaceID is populated on every result,
 // including Unfillable ones, so the AC-OFFICE-REVIEW-SEATS-004.1 warning
 // record can identify the workspace without a second lookup.
+//
+// SelfReview is true both when the chosen agent is the task's runner and
+// when it already holds another seat on this task (the office seat
+// caster's best-effort cross-step exclusion, AC-OFFICE-REVIEW-SEATS-002.3,
+// ran out of alternatives). It is a counter label on RecordSeatProvenance,
+// not a persisted or user-visible field.
 type ParticipantSeatCastResult struct {
 	AgentProfileID string
 	WorkspaceID    string
@@ -175,13 +198,18 @@ type ParticipantSeatCastResult struct {
 
 // ParticipantSeatCaster resolves which agent should fill a role's seat when
 // none exists yet, per REQ-002's five-step deterministic algorithm. The
-// office package implements this against the workspace's CEO-role agent
-// roster; the engine treats the result as opaque.
+// office package implements this against role-specific workspace agent pools;
+// the engine treats the result as opaque.
 type ParticipantSeatCaster interface {
 	// stepID is the immutable workflow step that the task entered. Callers
 	// must pass this value instead of asking the adapter to re-read mutable
-	// task state after the transition commits.
-	CastParticipantSeat(ctx context.Context, taskID, stepID, role string) (ParticipantSeatCastResult, error)
+	// task state after the transition commits. workflowID scopes any
+	// cross-step exclusion read the caster performs to the task's current
+	// workflow, so participant rows left over from a workflow the task has
+	// since switched away from (switch_workflow durably keeps them; see
+	// ListParticipantsForTaskWorkflow's doc comment) never count as already
+	// seated for the new workflow's casting decision.
+	CastParticipantSeat(ctx context.Context, workflowID, taskID, stepID, role string) (ParticipantSeatCastResult, error)
 }
 
 // AgentProfileResolver answers whether an agent profile id still resolves to
@@ -239,6 +267,33 @@ type ChildTaskSpec struct {
 // always commits.
 type TaskCreator interface {
 	CreateChildTask(ctx context.Context, parentTaskID string, spec ChildTaskSpec) (taskID string, err error)
+}
+
+// MarkerBearingStepEntryExecutor is the engine's contract for executing one
+// marker-bearing on_enter action (clear_decisions,
+// queue_run_for_each_participant) from within DispatchStepEntry's loop. The
+// implementation claims the action's step-entry marker before executing and
+// completes it after, so a redelivered arrival — or a concurrent dispatch
+// racing the same entry — is a safe no-op instead of a duplicate side effect
+// (AC-OFFICE-STEP-ENTRY-DISPATCH-002.3/.4). Wired by the orchestrator, which
+// owns both the marker CAS primitives (ClaimStepEntryMarker et al.) and the
+// Phase 2 callbacks these two kinds already use.
+//
+// abandon reports that a concurrent dispatch already holds this position's
+// marker in_progress — not a failure, but per AC-002.10 the caller must still
+// abandon the remainder of this entry's sequence, the same as a genuine
+// error. err is non-nil exactly when the action itself failed (including a
+// prior attempt's recorded failure surfacing on a CAS loss).
+//
+// Nil-safe like every other optional Engine dependency: when unset,
+// DispatchStepEntry executes a marker-bearing action directly and
+// unprotected, matching the pre-convergence behaviour for any write
+// chokepoint that has not allocated a step entry for this arrival
+// (markerEntryID == 0).
+type MarkerBearingStepEntryExecutor interface {
+	ExecuteMarkerBearingStepEntryAction(
+		ctx context.Context, taskID string, step StepSpec, action Action, position int, markerEntryID int64,
+	) (abandon bool, err error)
 }
 
 // WorkflowSwitcher is the engine's contract for in-place workflow swap.

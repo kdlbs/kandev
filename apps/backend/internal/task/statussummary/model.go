@@ -23,6 +23,7 @@ const (
 	// MaxActiveErrorPreviewBytes keeps an error decoration safe to send with
 	// every task row without turning it into a message-stream transport.
 	MaxActiveErrorPreviewBytes  = 512
+	MaxActiveErrorDetailsBytes  = 4096
 	maxSessionIDBytes           = 256
 	maxTaskRepositoryIDBytes    = 256
 	maxPendingActionBytes       = 128
@@ -59,13 +60,18 @@ type PrimarySessionSummary struct {
 }
 
 type ActiveErrorSummary struct {
-	SessionID        string    `json:"session_id,omitempty"`
-	TaskRepositoryID string    `json:"task_repository_id,omitempty"`
-	Stamp            string    `json:"stamp"`
-	OccurredAt       time.Time `json:"occurred_at"`
-	Preview          string    `json:"preview"`
-	Category         string    `json:"category,omitempty"`
-	RecoveryActions  []string  `json:"recovery_actions,omitempty"`
+	SessionID        string                   `json:"session_id,omitempty"`
+	TaskRepositoryID string                   `json:"task_repository_id,omitempty"`
+	ExecutionID      string                   `json:"execution_id,omitempty"`
+	AttemptID        string                   `json:"attempt_id,omitempty"`
+	Phase            string                   `json:"phase,omitempty"`
+	Stamp            string                   `json:"stamp"`
+	OccurredAt       time.Time                `json:"occurred_at"`
+	Preview          string                   `json:"preview"`
+	Details          string                   `json:"details,omitempty"`
+	Category         string                   `json:"category,omitempty"`
+	RecoveryActions  []string                 `json:"recovery_actions,omitempty"`
+	Causes           []models.AgentErrorCause `json:"causes,omitempty"`
 }
 
 type GitSummary struct {
@@ -154,8 +160,12 @@ func validateActiveError(activeError *ActiveErrorSummary) error {
 	}{
 		{"active error session id", activeError.SessionID, maxSessionIDBytes},
 		{"active error task repository id", activeError.TaskRepositoryID, maxTaskRepositoryIDBytes},
+		{"active error execution id", activeError.ExecutionID, maxSessionIDBytes},
+		{"active error attempt id", activeError.AttemptID, maxSessionIDBytes},
+		{"active error phase", activeError.Phase, maxActiveErrorCategoryBytes},
 		{"active error stamp", activeError.Stamp, maxActiveErrorStampBytes},
 		{"active error preview", activeError.Preview, MaxActiveErrorPreviewBytes},
+		{"active error details", activeError.Details, MaxActiveErrorDetailsBytes},
 		{"active error category", activeError.Category, maxActiveErrorCategoryBytes},
 	}
 	for _, field := range fields {
@@ -166,8 +176,17 @@ func validateActiveError(activeError *ActiveErrorSummary) error {
 	if len(activeError.RecoveryActions) > 3 {
 		return fmt.Errorf("active error has more than three recovery actions")
 	}
-	if !slices.Equal(activeError.RecoveryActions, models.NormalizeRecoveryActions(activeError.RecoveryActions)) {
+	if !slices.Equal(activeError.RecoveryActions, models.NormalizeRecoveryActionsForCategory(activeError.Category, activeError.RecoveryActions)) {
 		return fmt.Errorf("active error has unknown or duplicate recovery actions")
+	}
+	if activeError.Phase != "" && activeError.Phase != models.LaunchErrorPhaseBootstrap {
+		return fmt.Errorf("active error has unknown phase")
+	}
+	if !slices.Equal(activeError.Causes, models.NormalizeAgentErrorCauses(activeError.Causes)) {
+		return fmt.Errorf("active error has malformed causes")
+	}
+	if activeError.Details != models.NormalizeAgentErrorDetails(activeError.Details, activeError.Causes) {
+		return fmt.Errorf("active error details exceed the combined cause budget")
 	}
 	return nil
 }

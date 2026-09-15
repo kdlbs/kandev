@@ -12,15 +12,15 @@ const file: OpenFileTab = {
 };
 
 describe("upsertOpenFileTab", () => {
-  it("enables Markdown preview on an already-open tab", () => {
-    const result = upsertOpenFileTab([file], { ...file, markdownPreview: true });
+  it("enables rendered preview on an already-open tab", () => {
+    const result = upsertOpenFileTab([file], { ...file, renderedPreview: true });
 
-    expect(result).toEqual([{ ...file, markdownPreview: true }]);
+    expect(result).toEqual([{ ...file, renderedPreview: true }]);
   });
 
   it("keeps same-path tabs from different repositories separate", () => {
     const frontend = { ...file, repo: "frontend" };
-    const backend = { ...file, repo: "backend", markdownPreview: true };
+    const backend = { ...file, repo: "backend", renderedPreview: true };
 
     expect(upsertOpenFileTab([frontend], backend)).toEqual([frontend, backend]);
   });

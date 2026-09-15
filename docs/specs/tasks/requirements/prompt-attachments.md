@@ -2,6 +2,7 @@
 status: draft
 system: tasks
 created: 2026-08-04
+updated: 2026-09-10
 owners:
   - Kandev team
 ---
@@ -20,6 +21,41 @@ This document is the migrated task-system source for the capability. The source 
 #### Acceptance criteria
 
 - **AC-TASKS-PROMPT-ATTACHMENTS-001.1:** When a consumer uses this capability, the system shall provide the observable behavior and exclusions documented below.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.2:** When a session launch references
+  valid staged attachments, the system shall claim them for the authorized task
+  before it starts the agent or creates the prompt turn.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.3:** When a session launch references an
+  expired, unauthorized, missing, or conflicting attachment, the system shall
+  reject the launch without starting the agent or creating a prompt turn.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.4:** When a task-scoped attachment claim
+  reaches a later launch for the same task, the system shall accept that claim
+  without weakening cross-task or cross-session isolation.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.5:** When attachment materialization fails
+  before the initial prompt reaches the agent, the system shall show a durable
+  launch error and shall not present the session as active work.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.6:** When a message carrying claimed
+  attachments is delivered into a turn that is already generating, the system
+  shall materialize those attachments into the active session before the agent
+  receives the message, on the same terms as a message that starts a new turn.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.7:** When materialization fails for a
+  message delivered into a generating turn, the system shall surface a durable
+  error for that message and shall not deliver an attachment reference whose
+  bytes are absent from the session.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.8:** While a newly created task session
+  prepares its workspace, its initial message preview shall show the submitted
+  text, image previews, and file labels before the agent starts. An attachment-only
+  submission shall show its attachments without an empty text bubble.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.9:** Reloading that session during
+  preparation, or after preparation fails, shall preserve its initial preview.
+  The preview shall not imply successful agent delivery or hide preparation errors.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.10:** When a stored user message becomes
+  visible, the transcript shall replace the initial preview without duplicate
+  messages or attachments. A different session shall not inherit that preview.
+  Unloaded older history shall not cause the preview to reappear.
+- **AC-TASKS-PROMPT-ATTACHMENTS-001.11:** Desktop and phone users shall be
+  able to open preparation image previews and inspect file labels through the
+  existing attachment controls. Preview failures shall not hide prompt text
+  or other attachments, and the phone transcript shall remain within the viewport.
 
 ## Migrated source detail
 
@@ -61,6 +97,8 @@ move files into a workspace manually or strip useful evidence.
 - Path-delivered files are materialized in the active execution beneath the
   session's `.kandev/attachments/<session-id>/` directory before the agent is
   prompted. Existing native-prompt and path delivery choices remain available.
+  This holds for every delivery route, including a message folded into a turn
+  that is already generating.
 - Desktop and mobile expose the same upload, retry, removal, submission, and
   size-error outcomes through their existing prompt composers.
 

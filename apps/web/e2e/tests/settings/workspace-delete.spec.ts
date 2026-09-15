@@ -21,7 +21,9 @@ test.describe("Workspace settings", () => {
     // it through the API: this covers the standard Settings creation flow. The
     // card's link is an empty overlay named by `aria-label` — the workspace
     // name is a sibling `h4`, not the link's child.
-    const workspaceLink = testPage.getByRole("link", { name: workspaceName, exact: true });
+    const workspaceLink = testPage
+      .getByTestId("settings-scroll-container")
+      .getByRole("link", { name: workspaceName, exact: true });
     await expect(workspaceLink).toBeVisible();
     const workspaceHref = await workspaceLink.getAttribute("href");
     const workspaceId = new URL(workspaceHref ?? "", "http://kandev.test").pathname.split("/")[3];

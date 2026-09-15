@@ -24,6 +24,7 @@ const (
 	DefaultSidebarViewID = "view-all-tasks"
 
 	defaultChangesPanelLayout = "tree"
+	jsonNull                  = "null"
 )
 
 type sqliteRepository struct {
@@ -66,6 +67,8 @@ func (r *sqliteRepository) initSchema() error {
 		email TEXT NOT NULL,
 		display_name TEXT NOT NULL DEFAULT '',
 		role TEXT NOT NULL DEFAULT 'admin',
+		org_id TEXT NOT NULL DEFAULT '',
+		is_operator INTEGER NOT NULL DEFAULT 0,
 		status TEXT NOT NULL DEFAULT 'active',
 		settings TEXT NOT NULL DEFAULT '{}',
 		settings_revision BIGINT NOT NULL DEFAULT 0,
@@ -85,7 +88,9 @@ func (r *sqliteRepository) initSchema() error {
 	if _, err := r.db.Exec(schema); err != nil {
 		return err
 	}
-	r.runMigrations()
+	if err := r.runMigrations(); err != nil {
+		return err
+	}
 
 	return r.ensureDefaultUser()
 }
@@ -93,16 +98,30 @@ func (r *sqliteRepository) initSchema() error {
 // runMigrations evolves existing databases. CREATE TABLE IF NOT EXISTS is a
 // no-op on a table that already exists, so every added column must also appear
 // here as an idempotent ADD COLUMN (see apps/backend/CLAUDE.md, ADR 0027).
-func (r *sqliteRepository) runMigrations() {
-	m := db.NewMigrateLogger(r.db, nil)
+func (r *sqliteRepository) runMigrations() error {
+	m := db.NewRequiredMigrateLogger(r.db, nil)
 	m.Apply("users.display_name", "ALTER TABLE users ADD COLUMN display_name TEXT NOT NULL DEFAULT ''")
 	// Default 'admin': the pre-auth singleton default-user becomes the admin
 	// when authentication is enabled. Explicit CreateUser calls always set role.
 	m.Apply("users.role", "ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'")
 	m.Apply("users.status", "ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active'")
 	m.Apply("users.settings_revision", "ALTER TABLE users ADD COLUMN settings_revision BIGINT NOT NULL DEFAULT 0")
+	// Organizations. Empty means "not yet assigned"; the tenancy migration
+	// puts every existing account into the default org on first boot with the
+	// feature on. Email stays unique instance-wide rather than per-org, so an
+	// address identifies one person and the login form needs no org picker.
+	m.Apply("users.org_id", "ALTER TABLE users ADD COLUMN org_id TEXT NOT NULL DEFAULT ''")
+	m.Apply("users.org_idx", "CREATE INDEX IF NOT EXISTS idx_users_org ON users(org_id)")
+	// The instance operator tier. Granted to the first admin by the tenancy
+	// migration so an upgraded instance is never left with nobody able to
+	// manage organizations.
+	m.Apply("users.is_operator", "ALTER TABLE users ADD COLUMN is_operator INTEGER NOT NULL DEFAULT 0")
 	// Safe pre-auth: the table only ever held the single default-user row.
 	m.Apply("users.email_unique", "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+	if err := m.Err(); err != nil {
+		return fmt.Errorf("required user migration: %w", err)
+	}
+	return nil
 }
 
 // ensureDefaultUser inserts the pre-auth default user row when it does not
@@ -141,7 +160,7 @@ func (r *sqliteRepository) SetAgentProfileRecentUseLogger(log *commonlogger.Logg
 	r.recentUseLogger = log
 }
 
-const userColumns = "id, email, display_name, role, status, created_at, updated_at"
+const userColumns = "id, email, display_name, role, status, org_id, is_operator, created_at, updated_at"
 
 // GetUser returns the user row for the given id.
 func (r *sqliteRepository) GetUser(ctx context.Context, id string) (*models.User, error) {
@@ -200,9 +219,10 @@ func (r *sqliteRepository) CreateUser(ctx context.Context, user *models.User) er
 	user.CreatedAt = now
 	user.UpdatedAt = now
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
-		INSERT INTO users (id, email, display_name, role, status, settings, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, '{}', ?, ?)
-	`), user.ID, user.Email, user.DisplayName, user.Role, user.Status, user.CreatedAt, user.UpdatedAt)
+		INSERT INTO users (id, email, display_name, role, status, org_id, is_operator, settings, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)
+	`), user.ID, user.Email, user.DisplayName, user.Role, user.Status, user.OrgID, dialect.BoolToInt(user.IsOperator),
+		user.CreatedAt, user.UpdatedAt)
 	return err
 }
 
@@ -575,7 +595,16 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 	if sidebarViews == nil {
 		sidebarViews = []models.SidebarView{}
 	}
+	threadViews := settings.ThreadViews
+	if threadViews == nil {
+		threadViews = []models.ThreadView{}
+	}
 	sidebarTaskPrefs := normalizeSidebarTaskPrefs(settings.SidebarTaskPrefs)
+	sidebarTaskColorAutomation := settings.SidebarTaskColorAutomation
+	if sidebarTaskColorAutomation.Rules == nil {
+		sidebarTaskColorAutomation.Rules = []models.SidebarTaskColorRule{}
+	}
+	sidebarTaskColors := models.CloneSidebarTaskColors(settings.SidebarTaskColors)
 	keyboardShortcuts := settings.KeyboardShortcuts
 	if keyboardShortcuts == nil {
 		keyboardShortcuts = map[string]interface{}{}
@@ -600,6 +629,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"prevent_auto_start_agent_on_open":         settings.PreventAutoStartAgentOnOpen,
 		"unread_divider":                           settings.UnreadDivider,
 		"agent_generated_task_titles":              settings.AgentGeneratedTaskTitles,
+		"auto_focus_new_tasks":                     settings.AutoFocusNewTasks,
 		"mcp_task_agent_profile_default":           models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"show_anchored_prompt_bar":                 settings.ShowAnchoredPromptBar,
 		"show_scroll_to_last_prompt":               settings.ShowScrollToLastPrompt,
@@ -617,7 +647,12 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"sidebar_views":                            sidebarViews,
 		"sidebar_active_view_id":                   settings.SidebarActiveViewID,
 		"sidebar_draft":                            settings.SidebarDraft,
+		"thread_views":                             threadViews,
+		"thread_active_view_id":                    settings.ThreadActiveViewID,
+		"thread_view_draft":                        settings.ThreadViewDraft,
 		"sidebar_task_prefs":                       sidebarTaskPrefs,
+		"sidebar_task_color_automation":            sidebarTaskColorAutomation,
+		"sidebar_task_colors":                      sidebarTaskColors,
 		"task_create_last_used":                    settings.TaskCreateLastUsed,
 		"jira_saved_views":                         settings.JiraSavedViews,
 		"jira_task_presets":                        settings.JiraTaskPresets,
@@ -636,10 +671,13 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"last_seen_display":                        models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
+		"resolve_session_hostnames":                settings.ResolveSessionHostnames,
 		"app_status_bar_order":                     normalizeAppStatusBarOrder(settings.AppStatusBarOrder),
 		"quick_chat_tab_order_by_workspace":        quickChatTabOrderByWorkspace,
 		"kanban_hidden_step_ids":                   settings.KanbanHiddenStepIDs,
 		"workflow_ids_with_auto_hide_empty_steps":  settings.WorkflowIDsWithAutoHideEmptySteps,
+		"kanban_sort":                              models.NormalizeKanbanSort(settings.KanbanSort),
+		"kanban_priority_filter_tokens":            settings.KanbanPriorityFilterTokens,
 	})
 }
 
@@ -676,7 +714,7 @@ func (r *sqliteRepository) scanConditionalSettingsUpdate(ctx context.Context, sc
 // scanUser scans a single user row into a models.User.
 func scanUser(scanner interface{ Scan(dest ...any) error }) (*models.User, error) {
 	user := &models.User{}
-	if err := scanner.Scan(&user.ID, &user.Email, &user.DisplayName, &user.Role, &user.Status, &user.CreatedAt, &user.UpdatedAt); err != nil {
+	if err := scanner.Scan(&user.ID, &user.Email, &user.DisplayName, &user.Role, &user.Status, &user.OrgID, &user.IsOperator, &user.CreatedAt, &user.UpdatedAt); err != nil {
 		return nil, err
 	}
 	return user, nil
@@ -695,6 +733,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		ConfirmTaskArchive:                true,
 		UnreadDivider:                     false,
 		AgentGeneratedTaskTitles:          true,
+		AutoFocusNewTasks:                 true,
 		MCPTaskAgentProfileDefault:        models.MCPTaskAgentProfileDefaultCurrentTask,
 		ShowAnchoredPromptBar:             false,
 		ShowScrollToLastPrompt:            true,
@@ -715,12 +754,19 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		LastSeenDisplay:                   models.LastSeenDisplayAbsolute,
 		SidebarViews:                      DefaultSidebarViews(),
 		SidebarActiveViewID:               DefaultSidebarViewID,
+		ThreadViews:                       DefaultThreadViews(),
+		ThreadActiveViewID:                DefaultThreadViewID,
 		SidebarTaskPrefs:                  normalizeSidebarTaskPrefs(models.SidebarTaskPrefs{}),
+		SidebarTaskColorAutomation:        models.DefaultSidebarTaskColorAutomation(),
+		SidebarTaskColors:                 map[string]*string{},
 		AppStatusBarEnabled:               false,
+		ResolveSessionHostnames:           false,
 		AppStatusBarOrder:                 normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
 		QuickChatTabOrderByWorkspace:      map[string][]string{},
 		KanbanHiddenStepIDs:               map[string][]string{},
 		WorkflowIDsWithAutoHideEmptySteps: []string{},
+		KanbanSort:                        models.KanbanSortDefault,
+		KanbanPriorityFilterTokens:        []string{},
 	}
 }
 
@@ -767,6 +813,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		PreventAutoStartAgentOnOpen       *bool                               `json:"prevent_auto_start_agent_on_open"`
 		UnreadDivider                     *bool                               `json:"unread_divider"`
 		AgentGeneratedTaskTitles          *bool                               `json:"agent_generated_task_titles"`
+		AutoFocusNewTasks                 *bool                               `json:"auto_focus_new_tasks"`
 		MCPTaskAgentProfileDefault        string                              `json:"mcp_task_agent_profile_default"`
 		ShowAnchoredPromptBar             *bool                               `json:"show_anchored_prompt_bar"`
 		ShowScrollToLastPrompt            *bool                               `json:"show_scroll_to_last_prompt"`
@@ -784,7 +831,12 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		SidebarViews                      json.RawMessage                     `json:"sidebar_views"`
 		SidebarActiveViewID               json.RawMessage                     `json:"sidebar_active_view_id"`
 		SidebarDraft                      *models.SidebarViewDraft            `json:"sidebar_draft"`
+		ThreadViews                       json.RawMessage                     `json:"thread_views"`
+		ThreadActiveViewID                json.RawMessage                     `json:"thread_active_view_id"`
+		ThreadViewDraft                   json.RawMessage                     `json:"thread_view_draft"`
 		SidebarTaskPrefs                  models.SidebarTaskPrefs             `json:"sidebar_task_prefs"`
+		SidebarTaskColorAutomation        json.RawMessage                     `json:"sidebar_task_color_automation"`
+		SidebarTaskColors                 json.RawMessage                     `json:"sidebar_task_colors"`
 		TaskCreateLastUsed                models.TaskCreateLastUsed           `json:"task_create_last_used"`
 		JiraSavedViews                    json.RawMessage                     `json:"jira_saved_views"`
 		JiraTaskPresets                   json.RawMessage                     `json:"jira_task_presets"`
@@ -803,10 +855,13 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		LastSeenDisplay                   json.RawMessage                     `json:"last_seen_display"`
 		SystemMetricsDisplay              models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
 		AppStatusBarEnabled               *bool                               `json:"app_status_bar_enabled"`
+		ResolveSessionHostnames           *bool                               `json:"resolve_session_hostnames"`
 		AppStatusBarOrder                 models.AppStatusBarOrder            `json:"app_status_bar_order"`
 		QuickChatTabOrderByWorkspace      map[string][]string                 `json:"quick_chat_tab_order_by_workspace"`
 		KanbanHiddenStepIDs               json.RawMessage                     `json:"kanban_hidden_step_ids"`
 		WorkflowIDsWithAutoHideEmptySteps json.RawMessage                     `json:"workflow_ids_with_auto_hide_empty_steps"`
+		KanbanSort                        string                              `json:"kanban_sort"`
+		KanbanPriorityFilterTokens        json.RawMessage                     `json:"kanban_priority_filter_tokens"`
 	}
 	if err := json.Unmarshal([]byte(settingsRaw), &payload); err != nil {
 		return nil, err
@@ -843,6 +898,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	if payload.AgentGeneratedTaskTitles != nil {
 		settings.AgentGeneratedTaskTitles = *payload.AgentGeneratedTaskTitles
+	}
+	if payload.AutoFocusNewTasks != nil {
+		settings.AutoFocusNewTasks = *payload.AutoFocusNewTasks
 	}
 	settings.MCPTaskAgentProfileDefault = models.NormalizeMCPTaskAgentProfileDefault(payload.MCPTaskAgentProfileDefault)
 	if payload.ShowAnchoredPromptBar != nil {
@@ -904,7 +962,40 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		}
 	}
 	settings.SidebarDraft = payload.SidebarDraft
+	if len(payload.ThreadViews) > 0 {
+		threadViews, err := decodeStoredThreadViews(payload.ThreadViews)
+		if err != nil {
+			return nil, err
+		}
+		if len(threadViews) > 0 {
+			settings.ThreadViews = threadViews
+		} else {
+			settings.ThreadViews = DefaultThreadViews()
+		}
+	}
+	if len(payload.ThreadActiveViewID) > 0 {
+		var activeViewID *string
+		if err := json.Unmarshal(payload.ThreadActiveViewID, &activeViewID); err != nil {
+			return nil, err
+		}
+		if activeViewID != nil {
+			settings.ThreadActiveViewID = *activeViewID
+		}
+	}
+	if !threadViewIDExists(settings.ThreadViews, settings.ThreadActiveViewID) {
+		if len(settings.ThreadViews) == 0 {
+			settings.ThreadViews = DefaultThreadViews()
+		}
+		settings.ThreadActiveViewID = settings.ThreadViews[0].ID
+	}
+	threadDraft, err := decodeStoredThreadDraft(payload.ThreadViewDraft)
+	if err != nil {
+		return nil, err
+	}
+	settings.ThreadViewDraft = threadDraft
 	settings.SidebarTaskPrefs = normalizeSidebarTaskPrefs(payload.SidebarTaskPrefs)
+	settings.SidebarTaskColorAutomation = decodeSidebarTaskColorAutomation(payload.SidebarTaskColorAutomation)
+	settings.SidebarTaskColors = decodeSidebarTaskColors(payload.SidebarTaskColors)
 	settings.TaskCreateLastUsed = payload.TaskCreateLastUsed
 	settings.JiraSavedViews = payload.JiraSavedViews
 	settings.JiraTaskPresets = payload.JiraTaskPresets
@@ -930,6 +1021,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	if payload.AppStatusBarEnabled != nil {
 		settings.AppStatusBarEnabled = *payload.AppStatusBarEnabled
 	}
+	if payload.ResolveSessionHostnames != nil {
+		settings.ResolveSessionHostnames = *payload.ResolveSessionHostnames
+	}
 	settings.AppStatusBarOrder = normalizeAppStatusBarOrder(payload.AppStatusBarOrder)
 	settings.QuickChatTabOrderByWorkspace = payload.QuickChatTabOrderByWorkspace
 	if settings.QuickChatTabOrderByWorkspace == nil {
@@ -943,11 +1037,32 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.LastSeenDisplay = normalizeLastSeenDisplayStored(payload.LastSeenDisplay)
 	settings.KanbanHiddenStepIDs = decodeKanbanHiddenStepIDs(payload.KanbanHiddenStepIDs)
 	settings.WorkflowIDsWithAutoHideEmptySteps = decodeStringIDs(payload.WorkflowIDsWithAutoHideEmptySteps)
+	settings.KanbanSort = models.NormalizeKanbanSort(payload.KanbanSort)
+	settings.KanbanPriorityFilterTokens = decodeKanbanPriorityFilterTokens(payload.KanbanPriorityFilterTokens)
 	return settings, nil
 }
 
+// decodeSidebarTaskColorAutomation keeps one corrupt personal rule set from
+// preventing the rest of user settings from loading.
+func decodeSidebarTaskColorAutomation(raw json.RawMessage) models.SidebarTaskColorAutomation {
+	if len(raw) == 0 || string(raw) == jsonNull {
+		return models.DefaultSidebarTaskColorAutomation()
+	}
+	var value models.SidebarTaskColorAutomation
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return models.DefaultSidebarTaskColorAutomation()
+	}
+	if err := models.ValidateSidebarTaskColorAutomation(value); err != nil {
+		return models.DefaultSidebarTaskColorAutomation()
+	}
+	if value.Rules == nil {
+		value.Rules = []models.SidebarTaskColorRule{}
+	}
+	return value
+}
+
 func decodeStringIDs(raw json.RawMessage) []string {
-	if len(raw) == 0 || string(raw) == "null" {
+	if len(raw) == 0 || string(raw) == jsonNull {
 		return []string{}
 	}
 	var ids []string
@@ -989,6 +1104,37 @@ func decodeKanbanHiddenStepIDs(raw json.RawMessage) map[string][]string {
 		return map[string][]string{}
 	}
 	return decoded
+}
+
+// decodeKanbanPriorityFilterTokens parses the persisted priority filter
+// selection, resolving to the empty selection rather than failing the read
+// when the stored value is not a list at all (missing, null, a bare string)
+// or when it was written before this capability normalized on write. A
+// member outside the four priority tokens is dropped rather than retained,
+// covering a row written directly or before write-side validation existed.
+// Each element is decoded independently so one non-string member (also only
+// reachable via a row written directly) discards just that member instead of
+// the whole list.
+func decodeKanbanPriorityFilterTokens(raw json.RawMessage) []string {
+	if len(raw) == 0 || string(raw) == "null" {
+		return []string{}
+	}
+	var rawTokens []json.RawMessage
+	if err := json.Unmarshal(raw, &rawTokens); err != nil || rawTokens == nil {
+		return []string{}
+	}
+	valid := make([]string, 0, len(rawTokens))
+	for _, rawToken := range rawTokens {
+		var token string
+		if err := json.Unmarshal(rawToken, &token); err != nil {
+			continue
+		}
+		trimmed := strings.TrimSpace(token)
+		if models.IsValidKanbanPriorityFilterToken(trimmed) {
+			valid = append(valid, trimmed)
+		}
+	}
+	return valid
 }
 
 // normalizeSidebarTaskPrefs defaults nil sidebar task pref collections so the

@@ -9,6 +9,7 @@ import {
   openQuickChatSetup,
   openQuickChatWithAgent,
   quickChatTabReferences,
+  readQuickChatViewportLayout,
   selectAgentIfNeeded,
   sendQuickChatMessage,
   startQuickChatFromSetup,
@@ -55,6 +56,47 @@ async function dragQuickChatTab(page: Page, source: Locator, target: Locator) {
 }
 
 test.describe("Quick Chat", () => {
+  // @covers AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.1 AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.2 AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.3 AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.4 AC-UI-QUICK-CHAT-VIEWPORT-LAYOUT-001.6
+  test("keeps the viewport layout contained for new and long chats", async ({ testPage }) => {
+    await testPage.setViewportSize({ width: 1440, height: 800 });
+    const dialog = await openQuickChatWithAgent(testPage);
+
+    const newChatLayout = await readQuickChatViewportLayout(dialog);
+    expect(newChatLayout.composerTop).toBeGreaterThan(newChatLayout.dialogTop);
+    expect(newChatLayout.composerBottom).toBeLessThanOrEqual(newChatLayout.dialogBottom + 1);
+    expect(newChatLayout.dialogBottom - newChatLayout.composerBottom).toBeLessThanOrEqual(8);
+    expect(newChatLayout.contentBottom).toBeLessThanOrEqual(newChatLayout.dialogBottom + 1);
+    expect(newChatLayout.dialogBottom - newChatLayout.contentBottom).toBeLessThanOrEqual(2);
+    expect(newChatLayout.dialogScrollHeight).toBeLessThanOrEqual(
+      newChatLayout.dialogClientHeight + 1,
+    );
+
+    await sendQuickChatMessage(dialog, testPage, "/e2e:bulk:20");
+    await expect(dialog.getByText(/Done\. Emitted 20 messages/)).toBeVisible({ timeout: 30_000 });
+
+    const longChatLayout = await readQuickChatViewportLayout(dialog);
+    expect(longChatLayout.messageScrollerScrollHeight).toBeGreaterThan(
+      longChatLayout.messageScrollerClientHeight,
+    );
+    expect(longChatLayout.composerBottom).toBeLessThanOrEqual(longChatLayout.dialogBottom + 1);
+    expect(longChatLayout.dialogBottom - longChatLayout.composerBottom).toBeLessThanOrEqual(8);
+    expect(longChatLayout.dialogScrollHeight).toBeLessThanOrEqual(
+      longChatLayout.dialogClientHeight + 1,
+    );
+
+    await testPage.setViewportSize({ width: 1440, height: 600 });
+
+    const resizedLayout = await readQuickChatViewportLayout(dialog);
+    expect(resizedLayout.messageScrollerScrollHeight).toBeGreaterThan(
+      resizedLayout.messageScrollerClientHeight,
+    );
+    expect(resizedLayout.composerBottom).toBeLessThanOrEqual(resizedLayout.dialogBottom + 1);
+    expect(resizedLayout.dialogBottom - resizedLayout.composerBottom).toBeLessThanOrEqual(8);
+    expect(resizedLayout.dialogScrollHeight).toBeLessThanOrEqual(
+      resizedLayout.dialogClientHeight + 1,
+    );
+  });
+
   // @covers AC-UI-QUICK-CHAT-ELEVATION-001.1 AC-UI-QUICK-CHAT-ELEVATION-001.2 AC-UI-QUICK-CHAT-ELEVATION-001.5 AC-UI-QUICK-CHAT-ELEVATION-001.6
   test("adds a stronger elevation backdrop when opened over the page", async ({ testPage }) => {
     const dialog = await openQuickChatSetup(testPage);
@@ -939,6 +981,14 @@ test.describe("Quick Chat", () => {
     const secondTab = dialog.locator(
       `[data-tab-reference="${secondReference}"] [data-testid="quick-chat-tab"]`,
     );
+    // Explicitly select the non-first conversation so reload coverage proves
+    // the remembered selection wins over the deterministic first-tab fallback.
+    await secondTab.click();
+    await expect
+      .poll(() =>
+        testPage.evaluate("window.__KANDEV_E2E_STORE__?.getState().quickChat.activeSessionId"),
+      )
+      .toBe(second.session_id);
     await secondTab.locator('button[title="Double-click to rename"]').click({ button: "right" });
     await testPage.getByRole("menuitem", { name: "Rename", exact: true }).click();
     const renameInput = secondTab.getByRole("textbox", { name: "Rename chat" });
@@ -1015,6 +1065,11 @@ test.describe("Quick Chat", () => {
     await expect
       .poll(() => quickChatTabReferences(restoredDialog), { timeout: 15_000 })
       .toEqual([terminalReference, firstReference, secondReference]);
+    await expect
+      .poll(() =>
+        testPage.evaluate("window.__KANDEV_E2E_STORE__?.getState().quickChat.activeSessionId"),
+      )
+      .toBe(second.session_id);
     await expect(
       restoredDialog.locator(
         `[data-tab-reference="${firstReference}"] [data-testid="quick-chat-tab-name"]`,

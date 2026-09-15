@@ -4,11 +4,13 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
@@ -45,6 +47,36 @@ type TaskStarterWithEnv interface {
 		planMode bool, attachments []v1.MessageAttachment, env map[string]string) error
 }
 
+// TaskStarterWithLaunchContext optionally carries the complete Office launch
+// context into the agent runtime, including per-run skill additions.
+type TaskStarterWithLaunchContext interface {
+	StartTaskWithLaunchContext(ctx context.Context, taskID string, agentProfileID string, launch LaunchContext) error
+}
+
+// TaskStarterWithSession optionally returns the id of the agent session
+// a direct (non-routed) launch created, so the caller can persist it on
+// the run row (AC-OFFICE-LOOP-LIVENESS-002.7). A starter that does not
+// implement this leaves the run's session id empty, counted as a
+// without-session launch.
+type TaskStarterWithSession interface {
+	StartTaskWithEnvReturningSession(ctx context.Context, taskID string, agentProfileID string, executorID string,
+		executorProfileID string, priority string, prompt string, workflowStepID string,
+		planMode bool, attachments []v1.MessageAttachment, env map[string]string) (sessionID string, err error)
+}
+
+// TaskStarterWithLaunchContextSession combines TaskStarterWithLaunchContext
+// and TaskStarterWithSession: a starter satisfying this carries the full
+// launch context (skills included) AND returns the launched session id in
+// the same call, so neither capability has to be dropped for the other.
+// AC-OFFICE-LOOP-LIVENESS-002.7 requires the session id unconditionally, on
+// every direct launch, regardless of whether that launch also carries
+// per-run skill additions — the production adapter must satisfy this
+// rather than TaskStarterWithLaunchContext alone.
+type TaskStarterWithLaunchContextSession interface {
+	StartTaskWithLaunchContextReturningSession(ctx context.Context, taskID string, agentProfileID string,
+		launch LaunchContext) (sessionID string, err error)
+}
+
 // LaunchContext mirrors scheduler.LaunchContext so the office.service
 // package can carry the Office-built launch context (prompt, env,
 // workflow step, attachments, plan-mode, profile) into the routing
@@ -53,15 +85,16 @@ type TaskStarterWithEnv interface {
 // The scheduler.RoutingDispatcher implementation translates this to
 // the scheduler-side LaunchContext when calling StartTaskWithRoute.
 type LaunchContext struct {
-	ExecutorID        string
-	ExecutorProfileID string
-	Priority          string
-	Prompt            string
-	WorkflowStepID    string
-	PlanMode          bool
-	Attachments       []v1.MessageAttachment
-	Env               map[string]string
-	ProfileID         string
+	ExecutorID           string
+	ExecutorProfileID    string
+	Priority             string
+	Prompt               string
+	WorkflowStepID       string
+	PlanMode             bool
+	Attachments          []v1.MessageAttachment
+	Env                  map[string]string
+	ProfileID            string
+	AdditionalSkillSlugs []string
 }
 
 // RoutingDispatcher is the seam the office scheduler integration uses to
@@ -109,10 +142,34 @@ type TaskWorkspaceService interface {
 	GetLastAgentMessageForTurn(ctx context.Context, turnID string) (string, error)
 }
 
+// TaskTreeDeleter removes one task through the task lifecycle coordinator.
+// The callback is invoked with cascade=false because DeleteWorkspace enumerates
+// every task and must not delete a sibling twice through a parent cascade.
+type TaskTreeDeleter func(ctx context.Context, taskID string) error
+
 // WorkspaceGroupCleaner removes Kandev-owned materialized task workspaces
 // before the office repository deletes the rows holding their cleanup handles.
 type WorkspaceGroupCleaner interface {
 	CleanupWorkspaceGroups(ctx context.Context, workspaceID string) error
+}
+
+// ConfigSyncCleaner removes config sync's ownership rows for a workspace
+// before DeleteWorkspace wipes the office repository (which owns every
+// entity config sync manages). office_config_sync_configs and
+// office_config_sync_manifest carry no FK/cascade onto the workspace row —
+// see the "Workspace deletion side tables" convention — so without this a
+// deleted workspace's poller keeps running and can resurrect entities into
+// it. This is not the release-semantics unlink path: the entities themselves
+// are being deleted by this same workspace teardown, so there is nothing to
+// release them back to. PurgeForWorkspaceDeletion returns the per-workspace
+// lock still held, via the returned unlock func: the caller must defer it
+// until the rest of this workspace's data has been deleted, so an in-flight
+// sync run queued behind the lock cannot write config sync rows back in
+// after teardown completes. A non-nil error returns a nil unlock func with
+// the lock already released. Implemented by *configsync.Service; declared
+// locally so this package stays configsync-free.
+type ConfigSyncCleaner interface {
+	PurgeForWorkspaceDeletion(ctx context.Context, workspaceID string) (unlock func(), err error)
 }
 
 // TaskStarterFunc adapts a function to the TaskStarter interface.
@@ -148,6 +205,46 @@ func (f TaskStarterWithEnvFunc) StartTaskWithEnv(ctx context.Context, taskID, ag
 	planMode bool, attachments []v1.MessageAttachment, env map[string]string) error {
 	return f(ctx, taskID, agentProfileID, executorID, executorProfileID,
 		priority, prompt, workflowStepID, planMode, attachments, env)
+}
+
+// TaskStarterWithLaunchContextFunc adapts a complete launch-context function
+// to the TaskStarter interfaces used by the Office scheduler.
+type TaskStarterWithLaunchContextFunc func(ctx context.Context, taskID, agentProfileID string, launch LaunchContext) error
+
+// StartTask implements TaskStarter.
+func (f TaskStarterWithLaunchContextFunc) StartTask(ctx context.Context, taskID, agentProfileID, executorID,
+	executorProfileID string, priority string, prompt, workflowStepID string,
+	planMode bool, attachments []v1.MessageAttachment) error {
+	return f(ctx, taskID, agentProfileID, LaunchContext{
+		ExecutorID:        executorID,
+		ExecutorProfileID: executorProfileID,
+		Priority:          priority,
+		Prompt:            prompt,
+		WorkflowStepID:    workflowStepID,
+		PlanMode:          planMode,
+		Attachments:       attachments,
+	})
+}
+
+// StartTaskWithEnv implements TaskStarterWithEnv.
+func (f TaskStarterWithLaunchContextFunc) StartTaskWithEnv(ctx context.Context, taskID, agentProfileID, executorID,
+	executorProfileID string, priority string, prompt, workflowStepID string,
+	planMode bool, attachments []v1.MessageAttachment, env map[string]string) error {
+	return f(ctx, taskID, agentProfileID, LaunchContext{
+		ExecutorID:        executorID,
+		ExecutorProfileID: executorProfileID,
+		Priority:          priority,
+		Prompt:            prompt,
+		WorkflowStepID:    workflowStepID,
+		PlanMode:          planMode,
+		Attachments:       attachments,
+		Env:               env,
+	})
+}
+
+// StartTaskWithLaunchContext implements TaskStarterWithLaunchContext.
+func (f TaskStarterWithLaunchContextFunc) StartTaskWithLaunchContext(ctx context.Context, taskID, agentProfileID string, launch LaunchContext) error {
+	return f(ctx, taskID, agentProfileID, launch)
 }
 
 // WorkspaceCreator creates a DB workspace row for kanban compatibility.
@@ -208,6 +305,7 @@ type ServiceOptions struct {
 	TaskStarter             TaskStarter
 	TaskCanceller           TaskCanceller
 	TaskWorkspace           TaskWorkspaceService
+	TaskTreeDeleter         TaskTreeDeleter
 	WorkspaceGroupCleaner   WorkspaceGroupCleaner
 	TaskCreator             TaskCreator
 	WorkspaceCreator        WorkspaceCreator
@@ -233,7 +331,9 @@ type Service struct {
 	routingDispatcher       RoutingDispatcher
 	taskCanceller           TaskCanceller
 	taskWorkspace           TaskWorkspaceService
+	taskTreeDeleter         TaskTreeDeleter
 	workspaceGroupCleaner   WorkspaceGroupCleaner
+	configSyncCleaner       ConfigSyncCleaner
 	taskCreator             TaskCreator
 	workspaceCreator        WorkspaceCreator
 	taskPRs                 TaskPRLister
@@ -261,7 +361,33 @@ type Service struct {
 	// the budget pathways. Both CheckBudget and CheckPreExecutionBudget
 	// delegate to it.
 	budgetChecker BudgetEvaluator
+
+	// routineRunSyncer closes out a heavy routine run when its linked
+	// task reaches a terminal step. Wired to the routines.RoutineService
+	// at startup; nil in tests that don't exercise routines.
+	routineRunSyncer RoutineRunSyncer
+
+	// pauseGate is the workspace-pause read used to block run queuing
+	// (QueueRun) and finalize processing terminally (see
+	// scheduler_integration.go). Optional — nil means the kill switch
+	// gate is not wired (older tests, transitional deployments).
+	pauseGate shared.PauseGate
 }
+
+// RoutineRunSyncer is the surface the office service needs from the
+// routines feature to close out a routine run once its linked task
+// finishes. Implemented by *routines.RoutineService.SyncRunStatus —
+// declared here so tests can supply fakes without pulling the routines
+// package. terminalStatus is "done" or "cancelled".
+type RoutineRunSyncer interface {
+	SyncRunStatus(ctx context.Context, taskID, terminalStatus string) error
+}
+
+// SetRoutineRunSyncer wires the routines.RoutineService (or a test fake)
+// used to close out a heavy routine run when its linked task reaches a
+// terminal step. Without this wired, a heavy routine's run stays in
+// task_created until routines.activeRunMaxAge lets a later fire through.
+func (s *Service) SetRoutineRunSyncer(r RoutineRunSyncer) { s.routineRunSyncer = r }
 
 // BudgetEvaluator is the surface the office service needs from the
 // costs feature for budget evaluation. Implemented by
@@ -273,6 +399,22 @@ type BudgetEvaluator interface {
 	// pause). The office service discards the per-policy results; the
 	// costs package is responsible for any side effects.
 	EvaluateBudget(ctx context.Context, workspaceID, agentInstanceID, projectID string) error
+
+	// EvaluatePreLaunch and EvaluateDefaultCeiling back the pre-launch
+	// admission gates of REQ-OFFICE-BUDGET-001/-003/-006
+	// (internal/office/service/budget_admission.go). Unlike
+	// CheckPreExecutionBudget/EvaluateBudget above, neither has a
+	// nil-evaluator fallback: "no evaluator wired" is its own admission gate
+	// (AC-OFFICE-BUDGET-001.5/.6), decided by the caller before either method
+	// is invoked, never a fail-open default inside it.
+	EvaluatePreLaunch(
+		ctx context.Context,
+		workspaceID, agentInstanceID, projectID string,
+		hasProject bool,
+		provenance shared.RunProvenance,
+		at time.Time,
+	) (models.PreLaunchResult, error)
+	EvaluateDefaultCeiling(ctx context.Context, workspaceID string, at time.Time) (models.PreLaunchPolicyResult, error)
 }
 
 // SetBudgetChecker wires the costs.CostService (or a test fake) as the
@@ -282,6 +424,11 @@ func (s *Service) SetBudgetChecker(b BudgetEvaluator) { s.budgetChecker = b }
 
 // SetPricingLookup wires the models.dev pricing lookup.
 func (s *Service) SetPricingLookup(p shared.PricingLookup) { s.pricingLookup = p }
+
+// SetPauseGate wires the workspace-pause read used by QueueRun and run
+// processing to enforce the operator kill switch. Optional — when nil,
+// neither gate is enforced.
+func (s *Service) SetPauseGate(g shared.PauseGate) { s.pauseGate = g }
 
 // SetAgentTokenMinter wires the runtime token minter after feature services are constructed.
 func (s *Service) SetAgentTokenMinter(minter AgentTokenMinter) {
@@ -347,6 +494,7 @@ func NewService(opts ServiceOptions) *Service {
 		taskStarter:             opts.TaskStarter,
 		taskCanceller:           opts.TaskCanceller,
 		taskWorkspace:           opts.TaskWorkspace,
+		taskTreeDeleter:         opts.TaskTreeDeleter,
 		workspaceGroupCleaner:   opts.WorkspaceGroupCleaner,
 		taskCreator:             opts.TaskCreator,
 		workspaceCreator:        opts.WorkspaceCreator,
@@ -364,6 +512,19 @@ func NewService(opts ServiceOptions) *Service {
 // constructs the shared HandoffService instance.
 func (s *Service) SetWorkspaceGroupCleaner(cleaner WorkspaceGroupCleaner) {
 	s.workspaceGroupCleaner = cleaner
+}
+
+// SetTaskTreeDeleter wires the lifecycle coordinator used by permanent
+// workspace deletion. Without it, the legacy task-row delete fallback remains
+// available for isolated tests and older composition roots.
+func (s *Service) SetTaskTreeDeleter(deleter TaskTreeDeleter) {
+	s.taskTreeDeleter = deleter
+}
+
+// SetConfigSyncCleaner wires the config sync service after startup
+// constructs it, mirroring SetWorkspaceGroupCleaner.
+func (s *Service) SetConfigSyncCleaner(cleaner ConfigSyncCleaner) {
+	s.configSyncCleaner = cleaner
 }
 
 // SetAgentctlBinaryPath overrides the host path to the agentctl binary.
@@ -654,6 +815,46 @@ func (s *Service) CheckBudget(ctx context.Context, workspaceID, agentInstanceID,
 		return nil
 	}
 	return s.budgetChecker.EvaluateBudget(ctx, workspaceID, agentInstanceID, projectID)
+}
+
+// errBudgetEvaluatorNotConfigured is returned by EvaluatePreLaunch and
+// EvaluateDefaultCeiling when no BudgetEvaluator is wired. Unlike
+// CheckBudget's no-op, both calls always need a real disposition -- there
+// is no zero-value PreLaunchResult/PreLaunchPolicyResult that means
+// anything -- so a nil budgetChecker is a distinguishable error rather than
+// a silent no-op. Safe today only because admitRun's gate 2
+// (budget_admission.go) already checks budgetChecker == nil before either
+// is ever called; this guard is what keeps a future caller that skips gate
+// 2 from a nil-pointer dereference instead.
+var errBudgetEvaluatorNotConfigured = errors.New("office: no budget evaluator configured")
+
+// EvaluatePreLaunch delegates to the wired BudgetEvaluator for the
+// pre-launch admission gates (budget_admission.go). Callers must check
+// gate 2 (evaluator presence, s.budgetChecker == nil) themselves before
+// calling this — see the BudgetEvaluator doc comment above.
+func (s *Service) EvaluatePreLaunch(
+	ctx context.Context,
+	workspaceID, agentInstanceID, projectID string,
+	hasProject bool,
+	provenance shared.RunProvenance,
+	at time.Time,
+) (models.PreLaunchResult, error) {
+	if s.budgetChecker == nil {
+		return models.PreLaunchResult{}, errBudgetEvaluatorNotConfigured
+	}
+	return s.budgetChecker.EvaluatePreLaunch(ctx, workspaceID, agentInstanceID, projectID, hasProject, provenance, at)
+}
+
+// EvaluateDefaultCeiling delegates to the wired BudgetEvaluator for gate 5
+// of budget_admission.go. See EvaluatePreLaunch above for the nil-evaluator
+// caveat.
+func (s *Service) EvaluateDefaultCeiling(
+	ctx context.Context, workspaceID string, at time.Time,
+) (models.PreLaunchPolicyResult, error) {
+	if s.budgetChecker == nil {
+		return models.PreLaunchPolicyResult{}, errBudgetEvaluatorNotConfigured
+	}
+	return s.budgetChecker.EvaluateDefaultCeiling(ctx, workspaceID, at)
 }
 
 // CreateBudgetPolicy creates a new budget policy.

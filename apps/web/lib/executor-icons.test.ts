@@ -1,7 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { IconBox, IconCloud, IconFolder, IconFolders } from "@tabler/icons-react";
+import {
+  IconBox,
+  IconCloud,
+  IconFolder,
+  IconFolders,
+  IconPackage,
+  IconPackageOff,
+} from "@tabler/icons-react";
 
-import { EXECUTOR_ICON_MAP, getExecutorIcon, getExecutorLabel } from "./executor-icons";
+import {
+  EXECUTOR_ICON_MAP,
+  getExecutorIcon,
+  getExecutorLabel,
+  getExecutorStatusIcon,
+} from "./executor-icons";
 
 describe("executor icons", () => {
   it("maps both docker variants to the box icon", () => {
@@ -21,6 +33,12 @@ describe("executor icons", () => {
     expect(getExecutorIcon("does-not-exist")).toBe(IconFolder);
   });
 
+  it("maps Kubernetes normal and error states to the Pod package icons", () => {
+    expect(getExecutorIcon("k8s")).toBe(IconPackage);
+    expect(getExecutorStatusIcon("k8s", false).Icon).toBe(IconPackage);
+    expect(getExecutorStatusIcon("k8s", true).Icon).toBe(IconPackageOff);
+  });
+
   it("returns human-readable labels for known executor types", () => {
     expect(getExecutorLabel("local")).toBe("Local");
     expect(getExecutorLabel("worktree")).toBe("Worktree");
@@ -28,6 +46,7 @@ describe("executor icons", () => {
     expect(getExecutorLabel("remote_docker")).toBe("Remote Docker");
     expect(getExecutorLabel("sprites")).toBe("Sprites.dev");
     expect(getExecutorLabel("ssh")).toBe("SSH");
+    expect(getExecutorLabel("k8s")).toBe("Kubernetes");
     expect(getExecutorLabel("does-not-exist")).toBe("does-not-exist");
   });
 });

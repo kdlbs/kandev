@@ -3,6 +3,7 @@
 import { IconArrowDown, IconArrowUp, IconRefresh } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { useAppStore } from "@/components/state-provider";
+import { useOfficeConfigSyncActive } from "@/hooks/domains/office/use-office-config-sync-active";
 import { SyncDiffPane } from "./sync-diff-pane";
 import { useSyncState } from "./use-sync-state";
 import { useTranslation } from "react-i18next";
@@ -11,6 +12,13 @@ export function SyncContent() {
   const { t } = useTranslation();
   const activeWorkspaceId = useAppStore((s) => s.workspaces?.activeId ?? "");
   const sync = useSyncState(activeWorkspaceId);
+  // AC-OFFICE-CONFIG-SYNC-006.6: apply-incoming and apply-outgoing are
+  // refused server-side while config sync owns this workspace; the read-only
+  // diff views below keep rendering regardless (AC-OFFICE-CONFIG-SYNC-005.3).
+  const configSyncActive = useOfficeConfigSyncActive(activeWorkspaceId);
+  const applyDisabledReason = configSyncActive
+    ? t("office:configSyncActiveGuardReason")
+    : undefined;
 
   return (
     <div className="flex flex-col h-full">
@@ -43,6 +51,7 @@ export function SyncContent() {
             applying={sync.applyingIn}
             applyLabel={t("office:importFromFilesystem")}
             onApply={sync.applyIncoming}
+            disabledReason={applyDisabledReason}
           />
           <SyncDiffPane
             title={t("office:outgoingDatabaseFilesystem")}
@@ -53,6 +62,7 @@ export function SyncContent() {
             applying={sync.applyingOut}
             applyLabel={t("office:exportToFilesystem")}
             onApply={sync.applyOutgoing}
+            disabledReason={applyDisabledReason}
           />
         </div>
       </div>

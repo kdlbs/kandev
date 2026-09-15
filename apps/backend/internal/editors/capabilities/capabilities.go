@@ -16,7 +16,7 @@ func SupportsEmbeddedVscode(executorType models.ExecutorType, hostOS string) boo
 	case models.ExecutorTypeLocal, models.ExecutorTypeWorktree:
 		return hostOS == hostOSLinux || hostOS == hostOSDarwin
 	case models.ExecutorTypeLocalDocker, models.ExecutorTypeRemoteDocker,
-		models.ExecutorTypeSprites, models.ExecutorTypeSSH:
+		models.ExecutorTypeSprites, models.ExecutorTypeSSH, models.ExecutorTypeKubernetes:
 		return true
 	default:
 		return false

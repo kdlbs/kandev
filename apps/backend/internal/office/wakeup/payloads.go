@@ -56,15 +56,20 @@ type AgentErrorPayload struct {
 // (free-form JSON) so the dispatcher / scriptengine can render them
 // into the prompt at run-build time.
 //
-// MissedTicks is set by the routines cron tick when the catch-up cap
-// collapsed N missed fires into one. Zero on the happy path; non-zero
-// signals "you missed N ticks since the last fire" — the prompt
-// builder surfaces it in the wake context so the agent can decide
-// whether the gap matters.
+// MissedTicks, MissedSince and MissedTruncated are the gap this claim
+// measured, written together only when the routine's cron tick counted at
+// least one missed tick under the summarize_missed policy
+// (docs/specs/office/requirements/routine-catch-up.md,
+// AC-OFFICE-ROUTINE-CATCHUP-002.1). They state the ticks counted and
+// reported, never the ticks fired — exactly one run is ever dispatched per
+// claim. All three are omitempty, so a gapless fire's payload is
+// byte-identical to one with no catch-up fields at all.
 type RoutinePayload struct {
-	RoutineID   string         `json:"routine_id"`
-	Variables   map[string]any `json:"variables,omitempty"`
-	MissedTicks int            `json:"missed_ticks,omitempty"`
+	RoutineID       string         `json:"routine_id"`
+	Variables       map[string]any `json:"variables,omitempty"`
+	MissedTicks     int            `json:"missed_ticks,omitempty"`
+	MissedSince     string         `json:"missed_since,omitempty"`
+	MissedTruncated bool           `json:"missed_truncated,omitempty"`
 }
 
 // SelfPayload is the wakeup-request payload for an agent-initiated

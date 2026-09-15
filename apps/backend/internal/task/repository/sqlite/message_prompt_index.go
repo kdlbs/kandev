@@ -10,6 +10,9 @@ import (
 
 	"github.com/kandev/kandev/internal/db/dialect"
 	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/plancomments"
+	"github.com/kandev/kandev/internal/task/repository/admission"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 )
 
 // promptKeyLayout is the exact byte form of the normalized-microsecond
@@ -106,6 +109,64 @@ func (r *Repository) allocatePromptSeq(ctx context.Context, execer messageBounda
 	return seq, nil
 }
 
+// HasUserPromptHistory reports whether a session has accepted or reserved a
+// user prompt. The durable sequence is not decremented when a message is
+// deleted, so this remains true after the transcript row is removed. An empty
+// sequence row is the reservation marker written by
+// ClaimInitialPromptFallback; it is also history for the one-time fallback
+// decision. The single-row lookup is bounded by the session primary key and
+// does not scan message history.
+func (r *Repository) HasUserPromptHistory(ctx context.Context, sessionID string) (bool, error) {
+	var marker int
+	err := r.ro.QueryRowContext(ctx, r.ro.Rebind(
+		`SELECT 1 FROM task_session_prompt_seq WHERE task_session_id = ?`,
+	), sessionID).Scan(&marker)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("read session prompt history: %w", err)
+	}
+	return marker == 1, nil
+}
+
+// ClaimInitialPromptFallback atomically reserves the first prompt slot for an
+// empty workflow-step task-description fallback. User-message creation uses
+// the same per-session write boundary, so a direct prompt that commits first
+// wins the slot and a concurrent fallback cannot also qualify. A successful
+// claim writes a zero-valued reservation marker; the later visible fallback
+// message then receives prompt ordinal 1 without making the reservation itself
+// an empty transcript row.
+func (r *Repository) ClaimInitialPromptFallback(ctx context.Context, sessionID string) (bool, error) {
+	if sessionID == "" {
+		return false, fmt.Errorf("session ID is required")
+	}
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin initial prompt fallback claim: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := lockSessionTurnWrites(ctx, tx, r.db.DriverName(), sessionID); err != nil {
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
+		INSERT INTO task_session_prompt_seq (task_session_id, last_seq)
+		VALUES (?, 0)
+		ON CONFLICT(task_session_id) DO NOTHING
+	`), sessionID)
+	if err != nil {
+		return false, fmt.Errorf("claim initial prompt fallback: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit initial prompt fallback claim: %w", err)
+	}
+	claimed, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("read initial prompt fallback claim result: %w", err)
+	}
+	return claimed > 0, nil
+}
+
 // readSessionMaxUserKey returns the session's newest user-message normalized
 // key in the exact key layout, and whether any user row exists. On SQLite the
 // key expression yields the text directly; on PostgreSQL the native TIMESTAMP
@@ -152,9 +213,21 @@ func (r *Repository) createUserMessageWithBoundary(
 	requestsInput int,
 	messageType, metadataJSON string,
 ) error {
+	return r.createUserMessageWithBoundaryAndInitialTaskBrief(
+		ctx, message, requestsInput, messageType, metadataJSON, nil,
+	)
+}
+
+func (r *Repository) createUserMessageWithBoundaryAndInitialTaskBrief(
+	ctx context.Context,
+	message *models.Message,
+	requestsInput int,
+	messageType, metadataJSON string,
+	candidate *admission.InitialTaskBriefCandidate,
+) error {
 	driver := r.db.DriverName()
 	nm := dialect.NormalizedMicrosecond(driver, "created_at")
-	return r.executeBoundaryTransaction(ctx, message, requestsInput, messageType, metadataJSON, driver, nm)
+	return r.executeBoundaryTransaction(ctx, message, requestsInput, messageType, metadataJSON, driver, nm, candidate)
 }
 
 // executeBoundaryTransaction runs one per-session write boundary: begin a
@@ -167,32 +240,126 @@ func (r *Repository) executeBoundaryTransaction(
 	message *models.Message,
 	requestsInput int,
 	messageType, metadataJSON, driver, nm string,
-) error {
+	candidate *admission.InitialTaskBriefCandidate,
+) (err error) {
 	origCreatedAt := message.CreatedAt
 	origUpdatedAt := message.UpdatedAt
 	origPromptIndex := message.PromptIndex
+	origContent := message.Content
+	origCandidateSelected := false
+	if candidate != nil {
+		origCandidateSelected = candidate.Selected
+	}
 	restore := func() {
 		message.CreatedAt = origCreatedAt
 		message.UpdatedAt = origUpdatedAt
 		message.PromptIndex = origPromptIndex
+		message.Content = origContent
+		if candidate != nil {
+			candidate.Selected = origCandidateSelected
+		}
 	}
 
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin user message creation: %w", err)
 	}
-	defer func() { _ = tx.Rollback() }()
+	defer func() {
+		_ = tx.Rollback()
+		if err != nil {
+			restore()
+		}
+	}()
+	if candidate != nil {
+		if err := r.lockTaskRowInTx(ctx, tx, message.TaskID); err != nil {
+			return err
+		}
+		if err := r.validateInitialTaskBriefCandidate(ctx, tx, message.TaskID, candidate); err != nil {
+			return err
+		}
+	}
 	if err := lockSessionTurnWrites(ctx, tx, driver, message.TaskSessionID); err != nil {
 		return err
 	}
+	if candidate != nil {
+		if err := r.selectInitialTaskBriefCandidate(ctx, tx, message.TaskSessionID, message, candidate); err != nil {
+			return err
+		}
+	}
+	if err := plancomments.ValidateRenderedPrompt(message.Content); err != nil {
+		return err
+	}
+	if err := r.assignUserMessageBoundary(ctx, tx, message, driver, nm); err != nil {
+		return err
+	}
+	if err := r.insertMessageRow(ctx, tx, message, requestsInput, messageType, metadataJSON); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit user message creation: %w", err)
+	}
+	return nil
+}
 
+func (r *Repository) validateInitialTaskBriefCandidate(
+	ctx context.Context,
+	tx messageBoundaryExecer,
+	taskID string,
+	candidate *admission.InitialTaskBriefCandidate,
+) error {
+	var description string
+	err := tx.QueryRowContext(ctx, tx.Rebind(
+		`SELECT description FROM tasks WHERE id = ?`,
+	), taskID).Scan(&description)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: %s", repoerrors.ErrTaskNotFound, taskID)
+	}
+	if err != nil {
+		return fmt.Errorf("read task description for initial task brief: %w", err)
+	}
+	if description != candidate.DescriptionSnapshot {
+		return fmt.Errorf("%w: %s", repoerrors.ErrInitialTaskBriefStale, taskID)
+	}
+	return nil
+}
+
+func (r *Repository) selectInitialTaskBriefCandidate(
+	ctx context.Context,
+	tx messageBoundaryExecer,
+	sessionID string,
+	message *models.Message,
+	candidate *admission.InitialTaskBriefCandidate,
+) error {
+	candidate.Selected = false
+	var marker int
+	err := tx.QueryRowContext(ctx, tx.Rebind(
+		`SELECT 1 FROM task_session_prompt_seq WHERE task_session_id = ?`,
+	), sessionID).Scan(&marker)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		message.Content = candidate.Content
+		candidate.Selected = true
+		return nil
+	case err != nil:
+		return fmt.Errorf("read initial task brief admission marker: %w", err)
+	default:
+		return nil
+	}
+}
+
+func (r *Repository) assignUserMessageBoundary(
+	ctx context.Context,
+	tx messageBoundaryExecer,
+	message *models.Message,
+	driver, normalizedTime string,
+) error {
 	now := r.nowUTC()
 	created := message.CreatedAt
 	if created.IsZero() {
 		created = now
 	}
 
-	maxKeyStr, maxKeyValid, err := r.readSessionMaxUserKey(ctx, tx, driver, nm, message.TaskSessionID)
+	maxKeyStr, maxKeyValid, err := r.readSessionMaxUserKey(ctx, tx, driver, normalizedTime, message.TaskSessionID)
 	if err != nil {
 		return err
 	}
@@ -215,14 +382,6 @@ func (r *Repository) executeBoundaryTransaction(
 	message.PromptIndex = seq
 	if message.UpdatedAt.IsZero() {
 		message.UpdatedAt = created
-	}
-	if err := r.insertMessageRow(ctx, tx, message, requestsInput, messageType, metadataJSON); err != nil {
-		restore()
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		restore()
-		return fmt.Errorf("commit user message creation: %w", err)
 	}
 	return nil
 }

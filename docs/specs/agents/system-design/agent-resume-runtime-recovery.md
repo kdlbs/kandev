@@ -5,6 +5,7 @@ requirements:
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002
   - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003
+  - REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004
 ---
 
 # Agent resume and runtime recovery system design
@@ -16,8 +17,9 @@ also defines visible recovery errors and explicit continuation after confirmed
 Git branch loss.
 
 The orchestrator owns recovery authorization, session identity, and warning
-persistence. The worktree manager owns branch verification and fresh branch
-creation. The web client owns error presentation and recovery choices.
+persistence. The agent lifecycle manager owns balanced preparation progress and
+completion publication. The worktree manager owns branch verification and fresh
+branch creation. The web client owns error presentation and recovery choices.
 
 The task environment remains the owner of worktrees. A task session refers to
 that environment and does not acquire its own worktree lifecycle.
@@ -26,9 +28,70 @@ that environment and does not acquire its own worktree lifecycle.
 
 | Requirement | Design section |
 | --- | --- |
-| `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001` | [Session identity](#session-identity) |
+| `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-001` | [Session identity](#session-identity), [Resume preparation lifecycle](#resume-preparation-lifecycle) |
 | `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-002` | [Visible recovery errors](#visible-recovery-errors) |
 | `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-003` | [Explicit branch replacement](#explicit-branch-replacement), [Warning persistence](#warning-persistence) |
+| `REQ-AGENTS-AGENT-RESUME-RUNTIME-RECOVERY-004` | [Archive transition eligibility](#archive-transition-eligibility) |
+
+## Archive transition eligibility
+
+Workspace-only registration and recovery presentation amendments are defined in
+[Session recovery failures](session-recovery-failures.md).
+
+
+`GetTaskSessionStatus` resolves the owning task after session authorization and
+task/session binding validation. Before runtime probing, state healing, or
+resume eligibility evaluation, an archived task returns its persisted session
+state with `is_resumable`, `needs_resume`, and `needs_workspace_restore` false.
+Use the existing `resume_reason` field with `task_archived` to identify this
+state. Task lookup failures remain errors; they do not imply an active task.
+
+This guard precedes both token-based and fresh-start archive-cancelled branches.
+An archive cancellation reason is evidence of a recoverable past stop, not
+evidence that the task has since been unarchived. Normal eligibility evaluation
+continues only for an active task.
+
+Keep the executor's archived-task rejection under the existing resume lock.
+Guard `launchRestoreWorkspace` before `EnsureWorkspaceExecutionForSession` so
+a direct restore request cannot bypass archive state. Reuse
+`executor.ErrTaskArchived`; do not weaken runtime terminal-state or task cleanup
+barriers. A status read is not authorization for a later launch.
+
+The `session.launch` handler maps this sentinel to the existing WebSocket
+conflict envelope with `details.kind = task_archived`. It returns a short
+message directing the user to unarchive. Expected archive rejections use a
+bounded diagnostic without an internal-error stack trace. Authorization and
+task/session binding checks still precede this classification.
+
+The web resumption hook receives the owning task's resolved archive state from
+each caller. Unknown task hydration defers automatic recovery. Task detail,
+preview, and Quick Chat use their own task identity; they must not consult an
+unrelated globally active task. The task detail hook lives above
+`TaskArchivedProvider`, so reading that context inside it is insufficient.
+
+Extend the existing task/session request generation to include archive-state
+transitions. Commit-phase invalidation occurs before asynchronous results can
+apply. Archived state clears local recovery feedback and prevents automatic
+and manual launches. Guard continuations before launching, before fallback,
+and before status refresh, as well as guarding state setters. A stale attempt
+must not start another operation merely because its final setters are ignored.
+
+On successful unarchive, the existing task-detail callback and task update
+events supply active state. Reset the attempt marker and perform one new
+eligibility check for that generation. Repeated renders do not duplicate the
+attempt. Preserve `preventAutoStartAgentOnOpen`; unarchive does not introduce
+an implicit override. Failed unarchive never advances the generation to active.
+A typed archive rejection also ends fallback and refreshes task state through
+the existing task data layer, covering archive changes missed by the client.
+
+The existing unarchive handler retains branch and quarantine recovery. Resume
+then uses task-environment preparation to reactivate or recreate recoverable
+worktrees, as specified by
+[task runtime cleanup](../../tasks/requirements/runtime-cleanup.md).
+This change introduces no schema migration, environment reconstruction, or
+alternative workspace owner. Missing or ambiguous ownership remains a failure.
+It must not be inferred from an old path or a task title. Existing branch-loss
+and provider-identity rules still govern subsequent recovery choices.
 
 ## Current failure path
 
@@ -56,6 +119,31 @@ branch deletion.
 The web client currently converts WebSocket failures to a plain `Error` and
 several resume call sites then discard that error. Automatic resume also hides
 the resume error when read-only workspace restore succeeds.
+
+## Resume preparation lifecycle
+
+Native ACP resume normally reuses an already prepared workspace. A worktree
+resume is different: `shouldPrepareEnvironment` can re-enter environment and
+runtime preparation so Git recovery can validate, recreate, or replace the
+task-owned worktree.
+
+Preparation event publication follows one balanced lifecycle. If a launch path
+can publish `executor.prepare.progress`, it publishes exactly one terminal
+`executor.prepare.completed` event for that attempt after environment and
+runtime preparation succeeds or fails. The presence of an ACP session ID can
+skip both event kinds when no preparation runs; it cannot suppress only the
+terminal event after a worktree resume has emitted progress.
+
+The web preparation handler projects progress as `preparing` and the terminal
+event as `completed` or `failed`. `useSessionState` can treat live preparation
+as working while the durable session is temporarily `STARTING` or
+`WAITING_FOR_INPUT`, but that derived state ends with the terminal event. A
+resumed session that settles at `WAITING_FOR_INPUT` without foreground or
+detached activity therefore renders as idle and keeps the composer available.
+
+Session snapshots remain recovery evidence, not a substitute for balancing the
+live stream. They can hydrate a missing preparation projection, while a live
+in-flight projection remains authoritative until its matching terminal event.
 
 ## Recovery protocol
 
@@ -184,7 +272,7 @@ the typed WebSocket error. `SessionStoppedBanner` and `RunErrorEntry` retain the
 last error in component state and render the existing destructive alert
 pattern. The busy state ends after the request, but the error stays visible.
 
-The alert shows the backend message and these applicable actions:
+The alert retains the backend message and these applicable actions:
 
 - **Retry resume** for a normal recoverable failure.
 - **Restore read-only workspace** when workspace restoration remains useful.
@@ -201,6 +289,26 @@ succeeds, the hook returns a nonblocking notice with the resume cause and the
 read-only state. If restore also fails, it returns both causes. Task, preview,
 and Quick Chat consumers render this state instead of ignoring it.
 
+For automatic recovery feedback, keep a small structured value with outcome
+(`resume_failed`, `workspace_read_only`, or `resume_and_restore_failed`) and
+separate resume and restore errors. Retain typed error details; do not split a
+translated concatenated string to recover causes. Existing callers that need
+the legacy error string can derive it during migration.
+
+`SessionRecoveryFeedback` selects a short localized title and summary from the
+outcome. Both underlying causes remain in an initially collapsed, labeled
+details region. Each cause has its operation label. Unknown errors retain their
+original message in details, rather than claiming a specific cause. Successful
+read-only fallback retains its nonblocking severity and states that the agent
+did not resume. Successful resume clears both causes. The generic
+`EnsureSessionErrorBanner` used for initial session creation keeps its current
+behavior; recovery presentation must not mislabel creation failures.
+
+Archived task views suppress recovery controls and use their existing archive
+chrome and Unarchive action. Do not add a duplicate Unarchive action or treat
+archive as a destructive error. Active task retry uses the request's busy state
+to disable all equivalent controls until completion.
+
 The recovery result uses separate error and notice fields. Manual resume and
 read-only restore retain separate causes, so a second failure does not hide the
 first cause or its branch details. A later successful resume clears both. A
@@ -209,6 +317,18 @@ until the session state changes or the user dismisses it. The automatic
 resumption hook also clears stale feedback when the shared live session state
 transitions to `STARTING`, `RUNNING`, or `WAITING_FOR_INPUT` after an external
 manual recovery.
+
+An automatic status or recovery attempt is owned by the complete task-session
+identity, not by the session ID alone. Task navigation can briefly present the
+new route session while the task store still contains the previously active
+task. Each callback therefore applies feedback and status only when both its
+captured task ID and session ID still match the current request identity. The
+identity also carries a monotonic generation that changes on every committed
+navigation cycle, so returning to the same task-session pair still invalidates
+callbacks from the earlier cycle. The frontend publishes the identity during
+the commit phase, before passive effects can start or finish a request. A late
+result from the prior task or navigation cycle cannot set an error, notice, or
+status on the newly selected task.
 
 ## Frontend status rendering
 
@@ -230,10 +350,22 @@ Recovery remains inside the existing chat and stopped-session surfaces. This
 change adds no navigation, modal, drawer, or mobile-only workflow.
 
 On wide screens, related actions can share a row and wrap. On narrow screens,
-actions use the existing stacked layout. Each action keeps a minimum 44-pixel
-touch target. The alert stays in the chat scroll owner and does not create
+actions use the existing stacked layout. Coarse-pointer actions keep a minimum
+44-pixel touch target; fine-pointer actions retain the surrounding compact
+button size. The alert stays in the chat scroll owner and does not create
 horizontal page overflow. Error text and button labels remain available to
 assistive technology and keyboard navigation.
+
+Automatic feedback remains inline in task detail, preview, and Quick Chat.
+`task-layout.tsx` supplies the shipped mobile composition; the existing
+`SessionRecoveryFeedback` is the nearest inline feedback exemplar. The task's
+existing mobile archive chrome provides Unarchive. This short status and
+occasional detail lookup does not need another drawer or navigation destination.
+The collapsed hierarchy is summary, applicable action, then details disclosure.
+Use a semantic disclosure with expanded state and keyboard activation. Wrap
+long identifiers inside the details region without adding a second vertical
+scroll owner. Keep the containing task layout's dynamic viewport and safe-area
+behavior. Test expansion, retry, and unarchive on the configured mobile device.
 
 ## Internationalization
 
@@ -246,6 +378,9 @@ not translated strings. User-facing copy does not use a Unicode em dash.
 
 Backend tests start with the current failure:
 
+- An ACP worktree resume that publishes preparation progress also publishes one
+  terminal completion event. An ACP resume that skips preparation publishes
+  neither event.
 - Normal resume returns an error that matches `ErrBranchUnrecoverable` and does
   not mutate the branch.
 - Explicit replacement keeps the session and resume token, creates a unique
@@ -267,7 +402,8 @@ Backend tests start with the current failure:
 - The WebSocket handler maps the sentinel to a conflict with recovery details.
 
 Frontend unit tests cover the typed WebSocket error, both manual recovery
-surfaces, visible automatic fallback, dual failure detail, and
+surfaces, visible automatic fallback, dual failure detail, task navigation
+with the same route session while the task identity changes, and
 `branch_recreated` status rendering.
 
 Desktop and mobile Playwright tests cover the user sequence from a failed

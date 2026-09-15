@@ -244,6 +244,7 @@ func (s *Service) reclaimSSHTaskDirs(
 			detail := "directory ownership lookup failed: " + claimErr.Error()
 			s.recordSSHReclaimOutcome(target, sshReclaimOutcomeSkipped, sshReclaimSkipShared, detail)
 			s.logSSHReclaim(job.TaskID, *target, sshReclaimOutcomeSkipped, sshReclaimSkipShared, detail)
+			errs = append(errs, fmt.Errorf("lookup ownership for remote directory %s: %w", target.TaskDir, claimErr))
 		case containsRemoteDir(claims, *target):
 			detail := "another task still holds this remote directory"
 			s.recordSSHReclaimOutcome(target, sshReclaimOutcomeSkipped, sshReclaimSkipShared, detail)

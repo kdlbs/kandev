@@ -5,7 +5,11 @@ description: "Run the Kandev control plane in Docker and understand Docker-based
 
 # Docker
 
-The published image runs the Kandev control plane: native backend, web UI, API, WebSocket endpoint, external MCP endpoint, and the host-side `agentctl`. This is different from the **Local Docker executor**, which creates a separate container for an agent.
+The published image runs the Kandev control plane from a native Go binary. The
+binary contains the compiled web UI and serves the API, WebSocket endpoint, and
+external MCP endpoint. The image also includes the host-side `agentctl`. This
+is different from the **Local Docker executor**, which creates a separate
+container for an agent.
 
 For Kubernetes, see [Kubernetes](k8s.md). For executor profiles, see [Executors](executors.md#local-docker).
 
@@ -29,7 +33,7 @@ Open `http://localhost:38429` and follow logs with:
 docker logs -f kandev
 ```
 
-Kandev currently has no built-in multi-user web login or API authorization boundary. `auth.jwtSecret` does not add one. Docker's unqualified `-p 38429:38429` publishes on every host interface, so do not use that form on an untrusted network. Use loopback, a private network/VPN, or an authenticated reverse proxy with TLS.
+Kandev ships with its experimental [Authentication & Users](authentication.md) feature disabled, so the default container has no multi-user web login or API authorization boundary. Setting `auth.jwtSecret` does not enable it. Docker's unqualified `-p 38429:38429` publishes on every host interface, so do not use that form on an untrusted network. Use loopback, a private network/VPN, or an authenticated reverse proxy with TLS.
 
 ## Published images
 
@@ -263,7 +267,7 @@ Remote Docker profiles are not a workaround: that executor runtime is currently 
 
 ## Health and observability
 
-`GET /health` returns 200 as soon as the listener is accepting connections, even mid-startup; `GET /ready` returns 503 during startup and 200 after routes are registered:
+`GET /health` returns 200 as soon as the listener is accepting connections, even mid-startup. `GET /ready` returns 503 during startup and includes the current startup phase and elapsed time; it returns 200 after routes are registered:
 
 ```bash
 curl --fail http://localhost:38429/ready

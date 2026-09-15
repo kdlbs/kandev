@@ -16,6 +16,7 @@ import {
   seedInitialCanonical,
 } from "@/lib/state/office-task-content-sync";
 import type { OfficeTask } from "@/lib/state/slices/office/types";
+import { repositoryId, type TaskSession as ApiTaskSession } from "@/lib/types/http";
 import type { Task } from "./types";
 
 const mockGetTask = vi.fn();
@@ -117,6 +118,61 @@ function deferred<T>() {
   });
   return { promise, resolve };
 }
+
+function apiSession(overrides: Partial<ApiTaskSession> = {}): ApiTaskSession {
+  return {
+    id: "session-1",
+    task_id: TASK_ID,
+    state: "WAITING_FOR_INPUT",
+    started_at: TS,
+    updated_at: TS,
+    ...overrides,
+  } as ApiTaskSession;
+}
+
+describe("useIssueData session activity ordering", () => {
+  it("preserves a live activity event newer than the detail request", async () => {
+    mockGetTask.mockResolvedValue({ task: officeTaskFixture, timeline: [] });
+    mockListActivityForTarget.mockResolvedValue({ activity: [] });
+    mockListComments.mockResolvedValue({ comments: [] });
+    const sessionResponse = deferred<{ sessions: ApiTaskSession[] }>();
+    mockListTaskSessions.mockReturnValue(sessionResponse.promise);
+
+    const Wrapper = makeStoreWrapper([officeTaskFixture]);
+    const { result } = renderHook(
+      () => ({ issue: useIssueData(TASK_ID), store: useAppStoreApi() }),
+      { wrapper: Wrapper },
+    );
+    await waitFor(() => expect(mockListTaskSessions).toHaveBeenCalledOnce());
+
+    act(() => {
+      result.current.store.getState().upsertTaskSessionFromEvent(
+        TASK_ID,
+        apiSession({
+          foreground_activity: "background",
+          active_subagent_count: 2,
+          supports_steering: true,
+        }),
+      );
+    });
+    await act(async () => {
+      sessionResponse.resolve({
+        sessions: [apiSession({ repository_id: repositoryId("repo-1") })],
+      });
+      await sessionResponse.promise;
+    });
+
+    await waitFor(() =>
+      expect(result.current.store.getState().taskSessions.items["session-1"]).toMatchObject({
+        foreground_activity: "background",
+        active_subagent_count: 2,
+        supports_steering: true,
+        repository_id: "repo-1",
+      }),
+    );
+    expect(result.current.issue.loading).toBe(false);
+  });
+});
 
 describe("useIssueData — initial load guard preservation (AC-27/28/38/39)", () => {
   it("does not overwrite title/description with a stale GET response that resolves after a mid-flight commit", async () => {

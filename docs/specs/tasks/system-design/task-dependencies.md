@@ -7,7 +7,7 @@ created: 2026-08-09
 owners:
   - kandev
 ---
-# Task Dependencies and Auto-Start Chains System Design
+# Task Dependencies System Design
 
 ## Purpose and boundaries
 
@@ -69,9 +69,9 @@ running agents unattended.
   start the dependent manually). Kandev never auto-retries a failed
   predecessor and never silently drops the edge.
 - Users declare dependencies in the **task-create dialog** ("Depends on") and
-  manage them afterwards over MCP. The task detail view deliberately has no edge
-  editor: dependencies describe how work was planned, and the surfaces that read
-  them (card badge, chip, graph) stay read-only.
+  manage them afterwards from the **Edit task dialog** or over MCP. The edit
+  dialog behavior is defined in
+  [`task-dependency-detail-editing.md`](task-dependency-detail-editing.md).
 - An open task SHALL show a **dependency chip** in the status row directly above
   its chat composer, alongside the PR status chip. The chip reports both
   directions — the tasks this task is blocked by, and the tasks it blocks — and
@@ -155,10 +155,11 @@ model can ask — the answer is always "the last one to resolve".
 denormalized `is_blocked` column: a stale copy of it would gate launches
 incorrectly, which is the one failure this feature must not have.
 
-A predecessor is **resolved** when it satisfies the existing successful-completion
-convention: `state = COMPLETED`, or resident in a final workflow step whose name
-is `Done`, `Complete`, `Completed`, or `Approved` (`wfmodels.IsTerminalStepName`,
-which also persists `state = COMPLETED`).
+A predecessor is **resolved** when its persisted state is `COMPLETED`.
+[Task completion](task-completion.md) owns the explicit step-entry setting
+and compatibility backfill. Step name, position, or membership alone does not
+resolve a dependency. A conversation follow-up does not create another
+dependency-completion cycle.
 
 A predecessor is **failed** when `state` is `FAILED` or `CANCELLED`.
 
@@ -227,22 +228,29 @@ Task DTOs returned over HTTP, WebSocket boot, WebSocket events, and MCP gain:
 { "blocked_by": ["task-a"], "start_when_unblocked": true }
 ```
 
+Dependency admission is canonical and request-shaped: it passes iff the
+request's `blocked_by` is empty; non-empty always defers regardless of
+predecessor state. Creation never evaluates resolution
+retroactively: an intent waits for a later `dependencies_resolved` transition
+and never fires from deletion. This is the sole predicate behind
+`CreationPlan.start_policy` in the creation ledger; exact `none|immediate|deferred`
+cardinality and promotion are in
+[Task Creation Protocol](task-creation-protocol.md#canonical-bindings).
+
 When `start_when_unblocked` is true **and `blocked_by` is non-empty**, the
 create request's agent/executor/prompt resolution is recorded as the deferred
 launch intent instead of launching now.
 
-`start_when_unblocked: true` with an empty `blocked_by` records no intent. The
-task is born unblocked, so there is no later moment at which it would fire; a
-create that also asked to start an agent launches immediately, exactly as it
-would without the flag, and one that did not launches nothing. The flag defers
-a start, it never invents one. Adding a dependency to that task afterwards
-gates its *automated* starts but does not retroactively create an intent.
+`start_when_unblocked: true` with an empty `blocked_by` records no intent: the
+task is born unblocked, so no later moment would fire it. A create that asked
+to start an agent launches immediately, one that did not launches nothing. The
+flag defers a start, never invents one, and adding a dependency afterwards never
+retroactively creates an intent.
 
 When `blocked_by` is non-empty and `start_when_unblocked` is omitted, it defaults
 to the request's agent-start intent: a create that asked to start an agent
-records the intent, and a create that did not records no intent. The response
-reports `started` and `start_when_unblocked` so the caller never has to infer
-which happened. This rule is what makes an automated caller's habitual
+records the intent, and one that did not records none. The response reports
+`started` and `start_when_unblocked`, which makes an automated caller's
 `start_agent: true` build a chain instead of launching every step at once.
 
 ### WebSocket events
@@ -571,9 +579,6 @@ MCP:
   A chain is a set of edges between concrete tasks in v1.
 - Gantt or timeline rendering, and estimated-duration modelling.
 - Editing dependencies from the multi-select toolbar or via bulk operations.
-- An edge editor on the task detail view. Declaring dependencies is a planning
-  act that belongs to task creation (or to MCP for an agent decomposing work);
-  the task view only reports them.
 
 ## Implementation plan
 

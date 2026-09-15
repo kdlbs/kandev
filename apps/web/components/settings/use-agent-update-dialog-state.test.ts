@@ -1,6 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentUpdateJob, AgentUpdatePreview } from "@/lib/api";
+import { ApiError, INTERIM_SETTINGS_INTERLOCK_ERROR_CODE } from "@/lib/api/client";
 import { useAgentUpdateDialogState } from "./use-agent-update-dialog-state";
 
 function deferred<T>() {
@@ -118,6 +119,35 @@ describe("useAgentUpdateDialogState", () => {
 
     expect(result.current.previewError).toBeNull();
     expect(result.current.approveError).toBe(UPDATE_ALREADY_RUNNING);
+  });
+});
+
+describe("useAgentUpdateDialogState handled failures", () => {
+  it("closes without exposing a handled stale-page approval error", async () => {
+    const staleError = new ApiError("interim settings interlock required", 403, {
+      error_code: INTERIM_SETTINGS_INTERLOCK_ERROR_CODE,
+    });
+    staleError.handled = true;
+    const onUpdate = vi.fn().mockRejectedValue(staleError);
+    const { result } = renderHook(() =>
+      useAgentUpdateDialogState({
+        agentName: AGENT_NAME,
+        onPreview: vi.fn().mockResolvedValue(FIRST_PREVIEW),
+        onUpdate,
+      }),
+    );
+
+    act(() => result.current.handleOpenChange(true));
+    await waitFor(() => expect(result.current.preview).toEqual(FIRST_PREVIEW));
+    await act(async () => {
+      await result.current.approve();
+    });
+
+    expect(result.current.open).toBe(false);
+    expect(result.current.approveError).toBeNull();
+    expect(result.current.activeJob).toBeUndefined();
+    expect(result.current.starting).toBe(false);
+    expect(onUpdate).toHaveBeenCalledOnce();
   });
 });
 

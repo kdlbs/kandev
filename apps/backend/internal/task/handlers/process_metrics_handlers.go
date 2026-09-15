@@ -9,6 +9,8 @@ import (
 	agentctlmetrics "github.com/kandev/kandev/internal/system/metrics"
 )
 
+const agentctlNotReadyError = "agentctl not ready"
+
 var sessionAgentctlDiagnosticMetricIDs = []string{
 	agentctlmetrics.MetricAgentctlGoroutines,
 	agentctlmetrics.MetricAgentctlGitPollMillis,
@@ -32,12 +34,18 @@ func (h *ProcessHandlers) httpGetAgentctlMetrics(c *gin.Context) {
 	}
 
 	execution, found := h.lifecycleMgr.GetExecutionBySessionID(sessionID)
-	if !found || execution == nil || execution.GetAgentCtlClient() == nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "agentctl not ready"})
+	if !found || execution == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": agentctlNotReadyError})
+		return
+	}
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
+	if client == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": agentctlNotReadyError})
 		return
 	}
 
-	snapshot, err := execution.GetAgentCtlClient().SystemMetrics(
+	snapshot, err := client.SystemMetrics(
 		c.Request.Context(), sessionAgentctlDiagnosticMetricIDs, "",
 	)
 	if err != nil {

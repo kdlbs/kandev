@@ -5,10 +5,11 @@ import { AdaptiveDesktopKanban } from "./adaptive-desktop-kanban";
 const blankColumnSpaceTestId = "blank-column-space";
 const grabbingCursorClass = "cursor-grabbing";
 
-function renderBoard() {
+function renderBoard(isDragging = false) {
   render(
     <AdaptiveDesktopKanban
       steps={[{ id: "backlog", title: "Backlog", color: "bg-blue-500" }]}
+      isDragging={isDragging}
       renderColumn={() => (
         <div>
           <div data-testid={blankColumnSpaceTestId} />
@@ -39,6 +40,19 @@ function startPan(window: HTMLElement, clientX = 200) {
 }
 
 afterEach(cleanup);
+
+describe("AdaptiveDesktopKanban drag end reserve", () => {
+  it("@covers AC-UI-ADAPTIVE-KANBAN-001.9 keeps the reserve outside grid sizing", () => {
+    renderBoard(true);
+
+    const grid = screen.getByTestId("desktop-kanban-lane-grid");
+    expect(grid.style.paddingInlineEnd).toBe("");
+    expect(screen.getByTestId("desktop-kanban-drag-end-reserve").getAttribute("aria-hidden")).toBe(
+      "true",
+    );
+  });
+});
+
 describe("AdaptiveDesktopKanban mouse panning", () => {
   it("shows a grabbing cursor only while holding an eligible board background", () => {
     const window = renderBoard();

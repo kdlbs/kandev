@@ -30,6 +30,7 @@ Reviewing what was asked of an agent requires scrolling the transcript; past pro
 - **AC-UI-PROMPT-HISTORY-PANEL-001.9:** Prompt history requests user messages with the session message API's `author_type=user` filter. It uses the returned cursor and `has_more` value for older prompt pages, and it keeps this pagination state separate from transcript pagination.
 - **AC-UI-PROMPT-HISTORY-PANEL-001.10:** Session message create, update, and delete events reconcile both the transcript cache and the prompt projection. A stale HTTP response cannot overwrite a newer live event, and removing a session cancels its pending prompt updates.
 - **AC-UI-PROMPT-HISTORY-PANEL-001.11:** Selecting a prompt activates the session chat. If the prompt is not in the loaded transcript, chat requests an around window for that message, merges the response, and scrolls to the prompt after it renders. Desktop and phone use the same behavior.
+- **AC-UI-PROMPT-HISTORY-PANEL-001.12:** When an unloaded prompt is selected and the around-window response causes transcript pagination or live content to change the initial viewport, the session chat shall repeat the same prompt navigation once within one second of the initial navigation completing, so the selected prompt remains aligned at the top of the transcript viewport. This applies equally on desktop and phone and does not repeat indefinitely.
 
 ## System design
 

@@ -1,53 +1,423 @@
 package routingerr
 
-import "regexp"
+import (
+	"regexp"
+	"strings"
+	"unicode/utf8"
+)
 
 // MaxRawExcerptBytes caps the sanitized excerpt before persistence.
 const MaxRawExcerptBytes = 4096
 
 const redactionMask = "***"
 
-type redaction struct {
-	pattern *regexp.Regexp
-	replace string
+// redaction transforms a string, applied in sequence by applyRedactions.
+type redaction func(string) string
+
+// literalRedaction wraps a fixed regexp substitution as a redaction.
+func literalRedaction(pattern, replace string) redaction {
+	re := regexp.MustCompile(pattern)
+	return func(s string) string { return re.ReplaceAllString(s, replace) }
 }
 
-var redactions = []redaction{
+// credentialRedactions matches only credential-shaped patterns: API keys,
+// personal access tokens, auth headers, and password/secret/token
+// assignments. It excludes the URL rewrite, the opaque session-id rule, the
+// 32-plus-char catch-all, and home-path normalization, all of which are safe
+// to apply to provider diagnostics but would mangle unrelated content (commit
+// SHAs, UUIDs, base64 samples, URLs with paths) in user-authored text.
+var credentialRedactions = []redaction{
+	literalRedaction(`sk-[A-Za-z0-9_-]{12,}`, "sk-"+redactionMask),
+	literalRedaction(`github_pat_[A-Za-z0-9_]{50,}`, "github_pat_"+redactionMask),
+	literalRedaction(`ghp_[A-Za-z0-9]{30,}`, "ghp_"+redactionMask),
+	// Kandev personal access tokens, including the ?token=<PAT> form used by
+	// headerless WS clients.
+	literalRedaction(`kandev_pat_[A-Za-z0-9_]+`, "kandev_pat_"+redactionMask),
+	literalRedaction(`(?i)Bearer\s+[A-Za-z0-9._\-+/=]{20,}`, "Bearer "+redactionMask),
+	literalRedaction(`(?i)Authorization:\s*[^\r\n]+`, "Authorization: "+redactionMask),
+	literalRedaction(`--api-key[= ]\S+`, "--api-key "+redactionMask),
+	redactAssignments,
+	// URL userinfo (user:pass@host) carries a live credential even though the
+	// rest of the URL does not. Unlike the full Sanitize tier's URL rewrite,
+	// this masks only the userinfo and keeps the path and query intact. The
+	// scheme is not restricted to http(s): any scheme://user:pass@ form
+	// (postgres, mysql, redis, ...) carries the same live credential. The
+	// userinfo class includes '@' so the match backtracks to the LAST '@'
+	// before the next '/' or whitespace, matching how a real credential
+	// embedding a raw '@' actually terminates.
+	literalRedaction(`(?i)([a-z][a-z0-9+.-]*://)[^\s/?#]+@`, "$1"+redactionMask+"@"),
+}
+
+var redactions = append(append([]redaction{
 	// Provider diagnostics may include account/workspace links and opaque
 	// session identifiers. These are not useful recovery details and must not
 	// cross the lifecycle or message boundaries.
 	// Keep only the scheme and host. This preserves the existing safe-endpoint
 	// contract used by MCP diagnostics while dropping paths, query strings, and
 	// fragments that can carry account or workspace identifiers.
-	{regexp.MustCompile(`(https?://)(?:[^@\s/]+@)?([^/\s?#]+)[^\s]*`), "$1$2"},
-	{regexp.MustCompile(`\b(?:wrk|ses|run)_[A-Za-z0-9_-]+\b`), "[redacted-id]"},
-	{regexp.MustCompile(`sk-[A-Za-z0-9_-]{12,}`), "sk-" + redactionMask},
-	{regexp.MustCompile(`github_pat_[A-Za-z0-9_]{50,}`), "github_pat_" + redactionMask},
-	{regexp.MustCompile(`ghp_[A-Za-z0-9]{30,}`), "ghp_" + redactionMask},
-	// Kandev personal access tokens, including the ?token=<PAT> form used by
-	// headerless WS clients. The generic token/32-char rules below also catch
-	// these; this keeps the credential type visible in redacted logs.
-	{regexp.MustCompile(`kandev_pat_[A-Za-z0-9_]+`), "kandev_pat_" + redactionMask},
-	{regexp.MustCompile(`(?i)Bearer\s+[A-Za-z0-9._\-+/=]{20,}`), "Bearer " + redactionMask},
-	{regexp.MustCompile(`(?i)Authorization:\s*[^\r\n]+`), "Authorization: " + redactionMask},
-	{regexp.MustCompile(`--api-key[= ]\S+`), "--api-key " + redactionMask},
-	{regexp.MustCompile(`(?i)(password|secret|token)\s*[:=]\s*\S+`), "$1: " + redactionMask},
-	{regexp.MustCompile(`[A-Za-z0-9+/=_-]{32,}`), redactionMask},
-	{regexp.MustCompile(`/Users/[^/\s]+/`), "/Users/<redacted>/"},
-	{regexp.MustCompile(`/home/[^/\s]+/`), "/home/<redacted>/"},
+	literalRedaction(`(https?://)(?:[^@\s/]+@)?([^/\s?#]+)[^\s]*`, "$1$2"),
+	literalRedaction(`\b(?:wrk|ses|run)_[A-Za-z0-9_-]+\b`, "[redacted-id]"),
+}, credentialRedactions...), []redaction{
+	literalRedaction(`[A-Za-z0-9+/=_-]{32,}`, redactionMask),
+	literalRedaction(`/Users/[^/\s]+/`, "/Users/<redacted>/"),
+	literalRedaction(`/home/[^/\s]+/`, "/home/<redacted>/"),
+	redactLocalPaths,
+}...)
+
+// credentialAssignmentKey matches a password/secret/token/api-key field name
+// plus its `:`/`=` separator, but not the value: the value is consumed
+// separately by scanValue, which needs to make quote- and delimiter-aware
+// decisions a single regexp alternation cannot express reliably (see
+// redactAssignments). The key's surrounding quote is optional but, when
+// present, must match on both sides (`"key"` or `'key'`) — RE2 has no
+// backreferences, so the three shapes (double-quoted, single-quoted, bare)
+// are spelled out as separate alternatives instead of an independent
+// `["']?` on each side, which could consume an opening quote with no
+// corresponding closing quote and silently drop it from the output.
+var credentialAssignmentKey = regexp.MustCompile(`(?i)(?:"([A-Za-z0-9_.-]*(?:password|secret|token|api[_-]?key)[A-Za-z0-9_.-]*)"|'([A-Za-z0-9_.-]*(?:password|secret|token|api[_-]?key)[A-Za-z0-9_.-]*)'|([A-Za-z0-9_.-]*(?:password|secret|token|api[_-]?key)[A-Za-z0-9_.-]*))\s*[:=]\s*`)
+
+// assignmentKeySpan returns the start/end offsets of whichever
+// credentialAssignmentKey alternative (double-quoted, single-quoted, or
+// bare) matched the key name in a FindAllStringSubmatchIndex result.
+func assignmentKeySpan(loc []int) (int, int) {
+	for i := 1; i <= 3; i++ {
+		if start := loc[2*i]; start != -1 {
+			return start, loc[2*i+1]
+		}
+	}
+	return -1, -1
+}
+
+// isBareDecimalInteger reports whether s consists of one or more ASCII
+// digits and nothing else.
+func isBareDecimalInteger(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// isCountKey reports whether a credential-like assignment key is a known
+// token-count field. Only these fields can preserve a bare decimal value.
+func isCountKey(key string) bool {
+	switch strings.ToLower(key) {
+	case "tokens", "max_tokens", "input_tokens", "output_tokens",
+		"total_tokens", "prompt_tokens", "completion_tokens":
+		return true
+	default:
+		return false
+	}
+}
+
+// redactAssignments replaces each password/secret/token/api-key assignment
+// with its key name and a mask, consuming the value with scanValue so an
+// embedded quote or leading structural delimiter cannot truncate the match
+// early and leave part of the credential in cleartext. A bare decimal integer
+// is preserved only for the explicit token-count keys, because the key pattern
+// also matches non-credential fields that contain a keyword as a substring.
+func redactAssignments(s string) string {
+	matches := credentialAssignmentKey.FindAllStringSubmatchIndex(s, -1)
+	if matches == nil {
+		return s
+	}
+	var b strings.Builder
+	last := 0
+	for _, loc := range matches {
+		start, end := loc[0], loc[1]
+		if start < last {
+			// Already consumed as part of a preceding assignment's value.
+			continue
+		}
+		valueLen := scanValue(s[end:])
+		keyStart, keyEnd := assignmentKeySpan(loc)
+		b.WriteString(s[last:start])
+		if isCountKey(s[keyStart:keyEnd]) && isBareDecimalInteger(s[end:end+valueLen]) {
+			b.WriteString(s[start : end+valueLen])
+		} else {
+			b.WriteString(s[keyStart:keyEnd])
+			b.WriteString(": ")
+			b.WriteString(redactionMask)
+		}
+		last = end + valueLen
+	}
+	b.WriteString(s[last:])
+	return b.String()
+}
+
+// delimiterBytes identify closing structural characters that can follow a
+// bare value. Commas and semicolons are handled only as part of a trailing
+// structural suffix, because either can appear inside a credential value.
+const delimiterBytes = "}])>"
+
+func isSpaceByte(c byte) bool {
+	switch c {
+	case ' ', '\t', '\n', '\r', '\f', '\v':
+		return true
+	default:
+		return false
+	}
+}
+
+func isDelimiterByte(c byte) bool {
+	return strings.IndexByte(delimiterBytes, c) >= 0
+}
+
+// scanValue returns the byte length of the credential value starting at s[0].
+// A value starting with a quote is scanned by scanQuoted; anything else,
+// including a value whose first character is itself a structural delimiter
+// (`,`, `}`, ...), is scanned by scanBare so at least one character is always
+// consumed.
+func scanValue(s string) int {
+	if len(s) == 0 {
+		return 0
+	}
+	if s[0] == '"' || s[0] == '\'' {
+		if n, ok := scanQuoted(s); ok {
+			return n
+		}
+	}
+	return scanBare(s)
+}
+
+// scanBare consumes a bare value until whitespace. A closing delimiter at the
+// end of the token is kept outside the value so JSON-like structure survives;
+// a delimiter inside the token remains part of the value and cannot expose a
+// suffix after redaction.
+func scanBare(s string) int {
+	n := len(s)
+	i := 0
+	for i < n {
+		c := s[i]
+		if isSpaceByte(c) {
+			break
+		}
+		i++
+	}
+	if i == 0 {
+		return 0
+	}
+	suffixStart := i
+	hasClosingDelimiter := false
+	for suffixStart > 0 {
+		c := s[suffixStart-1]
+		switch {
+		case isDelimiterByte(c):
+			hasClosingDelimiter = true
+			suffixStart--
+		case c == ',' || c == ';':
+			suffixStart--
+		default:
+			if hasClosingDelimiter && suffixStart > 0 {
+				return suffixStart
+			}
+			return i
+		}
+	}
+	return i
+}
+
+// scanQuoted consumes a quoted value starting at s[0], honoring backslash
+// escapes so an escaped quote does not end the string early. It returns
+// ok=false if no closing quote is found before a newline or the end of s, so
+// the caller falls back to bare scanning.
+//
+// A closing quote ends the value when it is followed by whitespace, the end
+// of the string, or a trailing structural suffix. Otherwise the quote did not
+// terminate the credential, and scanning continues to consume the value.
+func scanQuoted(s string) (int, bool) {
+	n := len(s)
+	quote := s[0]
+	j := 1
+	for j < n {
+		switch {
+		case s[j] == '\\' && j+1 < n:
+			j += 2
+		case s[j] == quote:
+			j++
+			return extendPastQuote(s, j), true
+		case s[j] == '\n' || s[j] == '\r':
+			return 0, false
+		default:
+			j++
+		}
+	}
+	return 0, false
+}
+
+// extendPastQuote is called once a closing quote is found at s[:j]. See
+// scanQuoted for when the scan needs to continue past that quote.
+func extendPastQuote(s string, j int) int {
+	n := len(s)
+	if j >= n || isSpaceByte(s[j]) {
+		return j
+	}
+	if isDelimiterByte(s[j]) {
+		if isTrailingStructuralSuffix(s[j:]) {
+			return j
+		}
+		return j + scanBare(s[j:])
+	}
+	return j + scanContinuation(s[j:])
+}
+
+// isTrailingStructuralSuffix reports whether s starts with a closing
+// delimiter and then contains only structural punctuation until whitespace or
+// the end. Such a suffix belongs to the surrounding object, not the value.
+func isTrailingStructuralSuffix(s string) bool {
+	if len(s) == 0 || !isDelimiterByte(s[0]) {
+		return false
+	}
+	hasClosingDelimiter := false
+	for i := 0; i < len(s) && !isSpaceByte(s[i]); i++ {
+		switch {
+		case isDelimiterByte(s[i]):
+			hasClosingDelimiter = true
+		case s[i] != ',' && s[i] != ';':
+			return false
+		}
+	}
+	return hasClosingDelimiter
+}
+
+// scanContinuation scans the trailing content directly after a quote that
+// turned out not to terminate the value. It behaves like scanBare (stopping
+// at whitespace or a structural delimiter) but re-enters scanQuoted on
+// another quote character, since that one might be the real terminator.
+func scanContinuation(s string) int {
+	n := len(s)
+	i := 0
+	for i < n {
+		c := s[i]
+		if isSpaceByte(c) {
+			return i
+		}
+		if c == '"' || c == '\'' {
+			if extra, ok := scanQuoted(s[i:]); ok {
+				return i + extra
+			}
+			i++
+			continue
+		}
+		if isDelimiterByte(c) {
+			return i
+		}
+		i++
+	}
+	return i
+}
+
+// localUnixPathPattern and localWindowsPathPattern back redactLocalPaths,
+// the last rule in the broad redactions tier: any absolute filesystem path
+// mentioned in provider diagnostics can carry a workspace or account
+// identifier, so it is collapsed to a fixed placeholder rather than only
+// normalizing the well-known /Users and /home prefixes above.
+var (
+	localUnixPathPattern    = regexp.MustCompile(`/(?:[^/\s"']+/)+[^\r\n\s"'<>]+`)
+	localWindowsPathPattern = regexp.MustCompile(`(?i)[A-Z]:[\\/][^\r\n"']+`)
+)
+
+func redactLocalPaths(s string) string {
+	s = localWindowsPathPattern.ReplaceAllStringFunc(s, func(path string) string {
+		if len(path) >= 4 && path[2:4] == "//" {
+			return path
+		}
+		return "[path-redacted]"
+	})
+	matches := localUnixPathPattern.FindAllStringIndex(s, -1)
+	if len(matches) == 0 {
+		return s
+	}
+
+	var redacted strings.Builder
+	redacted.Grow(len(s))
+	last := 0
+	for _, match := range matches {
+		start, end := match[0], match[1]
+		redacted.WriteString(s[last:start])
+		path := s[start:end]
+		if start >= 2 && s[start-2:start] == ":/" {
+			redacted.WriteString(path)
+			last = end
+			continue
+		}
+		redacted.WriteString(redactUnixPath(path))
+		last = end
+	}
+	redacted.WriteString(s[last:])
+	return redacted.String()
+}
+
+func redactUnixPath(path string) string {
+	if strings.Contains(path, "[path-redacted]") {
+		return path
+	}
+	switch {
+	case strings.HasPrefix(path, "/Users/"):
+		return "/Users/<redacted>/[path-redacted]"
+	case strings.HasPrefix(path, "/home/"):
+		return "/home/<redacted>/[path-redacted]"
+	default:
+		return "[path-redacted]"
+	}
+}
+
+// applyRedactionsUnbounded runs rules over the entire input with no output
+// cap, so every credential's key marker is guaranteed to stay attached to its
+// full value regardless of length. The credential rules have no maximum
+// matched length, so any caller that instead cut its input to a fixed window
+// before redacting could split a marker from a value long enough to cross
+// the window boundary, leaving the split-off remainder unredacted.
+func applyRedactionsUnbounded(s string, rules []redaction) string {
+	for _, r := range rules {
+		s = r(s)
+	}
+	return s
+}
+
+func applyRedactions(s string, rules []redaction) string {
+	s = applyRedactionsUnbounded(s, rules)
+	if len(s) > MaxRawExcerptBytes {
+		cut := MaxRawExcerptBytes
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = s[:cut]
+	}
+	return s
 }
 
 // Sanitize redacts likely credentials, normalizes home paths, and truncates
 // to MaxRawExcerptBytes. The function is idempotent: applying it twice
-// equals applying it once.
+// equals applying it once. Use this for provider stdout/stderr and other
+// diagnostic text, where collapsing opaque identifiers and paths is
+// acceptable collateral.
 func Sanitize(s string) string {
-	for _, r := range redactions {
-		s = r.pattern.ReplaceAllString(s, r.replace)
-	}
-	if len(s) > MaxRawExcerptBytes {
-		s = s[:MaxRawExcerptBytes]
-	}
-	return s
+	return applyRedactions(s, redactions)
+}
+
+// SanitizeCredentials redacts only credential-shaped patterns (API keys,
+// tokens, auth headers, password/secret/token assignments) and truncates to
+// MaxRawExcerptBytes. Unlike Sanitize, it leaves URLs, opaque IDs, and any
+// other 32-plus-char run untouched, so it is safe to apply to user-authored
+// text (a task description, a plan) that must not carry a live credential
+// across a provider boundary but should otherwise survive intact. It is
+// idempotent for the same reason Sanitize is.
+func SanitizeCredentials(s string) string {
+	return applyRedactions(s, credentialRedactions)
+}
+
+// SanitizeFullUnbounded applies the same rule set as Sanitize but without the
+// MaxRawExcerptBytes output cap. Use this only when the caller will apply its
+// own tail truncation afterward (see dynamic.sanitizedTail): sanitizing
+// before cutting, rather than cutting a window and sanitizing that, is what
+// guarantees a credential is never split from its key marker by the cut.
+func SanitizeFullUnbounded(s string) string {
+	return applyRedactionsUnbounded(s, redactions)
 }
 
 type sanitizedError struct {

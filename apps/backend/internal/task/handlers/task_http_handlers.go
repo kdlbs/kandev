@@ -17,6 +17,7 @@ import (
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
+	"github.com/kandev/kandev/internal/task/archivecascade"
 	"github.com/kandev/kandev/internal/task/dto"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
@@ -25,6 +26,7 @@ import (
 	"github.com/kandev/kandev/internal/task/statussummary"
 	usermodels "github.com/kandev/kandev/internal/user/models"
 	wfmodels "github.com/kandev/kandev/internal/workflow/models"
+	workflowmove "github.com/kandev/kandev/internal/workflow/move"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 	"go.uber.org/zap"
@@ -207,6 +209,7 @@ func buildTaskDTOsWithSessionInfo(
 	svc *service.Service,
 	log *logger.Logger,
 	activityProvider dto.ForegroundActivityProvider,
+	taskParkedProvider dto.TaskParkedProvider,
 	tasks []*models.Task,
 ) ([]dto.TaskDTO, error) {
 	if len(tasks) == 0 {
@@ -257,6 +260,9 @@ func buildTaskDTOsWithSessionInfo(
 	// batched call for the whole list: a per-task query would add a round trip
 	// per card to every board load.
 	dependencyViews := svc.BuildDependencyViews(ctx, tasks)
+	// Runner-mutability verdict is likewise derived, never stored, and must
+	// not fan out per task.
+	runnerViews := svc.BuildRunnerMutabilityViews(ctx, tasks)
 	result := make([]dto.TaskDTO, 0, len(tasks))
 	for _, task := range tasks {
 		sessions := sessionsByTask[task.ID]
@@ -279,9 +285,11 @@ func buildTaskDTOsWithSessionInfo(
 			sessionCount,
 			si.reviewStatus,
 			si.executorID,
+			si.executorProfileID,
 			si.executorType,
 			si.executorName,
 			si.agentName,
+			si.agentProfileID,
 			si.workingDirectory,
 			si.sessionState,
 			dto.PendingActionPtr(si.sessionID, pendingActionsBySession),
@@ -289,7 +297,9 @@ func buildTaskDTOsWithSessionInfo(
 		taskDTO.TaskPendingAction = dto.TaskPendingActionPtr(sessions, pendingActionsBySession)
 		dto.EnrichTaskForegroundActivity(&taskDTO, sessions, activityProvider)
 		dto.EnrichTaskDependencies(&taskDTO, dependencyProjection(dependencyViews[task.ID]), task)
+		dto.EnrichTaskRunnerMutability(&taskDTO, runnerMutabilityProjection(runnerViews[task.ID]))
 		dto.EnrichTaskStatusSummary(&taskDTO, task.ID, statusSummaries)
+		dto.EnrichTaskParkedProjection(&taskDTO, taskParkedProvider)
 		if taskDTO.StatusSummary != nil {
 			switch {
 			case queuedErr != nil:
@@ -310,14 +320,16 @@ func buildTaskDTOsWithSessionInfo(
 }
 
 type sessionInfoFields struct {
-	sessionID        *string
-	reviewStatus     models.ReviewStatus
-	sessionState     *string
-	executorID       *string
-	executorType     *string
-	executorName     *string
-	agentName        *string
-	workingDirectory *string
+	sessionID         *string
+	reviewStatus      models.ReviewStatus
+	sessionState      *string
+	executorID        *string
+	executorProfileID *string
+	executorType      *string
+	executorName      *string
+	agentName         *string
+	agentProfileID    *string
+	workingDirectory  *string
 }
 
 func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
@@ -338,6 +350,10 @@ func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
 		val := info.ExecutorID
 		si.executorID = &val
 	}
+	if info.ExecutorProfileID != "" {
+		val := info.ExecutorProfileID
+		si.executorProfileID = &val
+	}
 	if info.ExecutorSnapshot != nil {
 		if t, ok := info.ExecutorSnapshot["executor_type"].(string); ok && t != "" {
 			si.executorType = &t
@@ -350,6 +366,10 @@ func extractSessionInfo(info *models.TaskSession) sessionInfoFields {
 		if name, ok := info.AgentProfileSnapshot["name"].(string); ok && name != "" {
 			si.agentName = &name
 		}
+	}
+	if info.AgentProfileID != "" {
+		id := info.AgentProfileID
+		si.agentProfileID = &id
 	}
 	if info.RepositorySnapshot != nil {
 		if path, ok := info.RepositorySnapshot["path"].(string); ok && path != "" {
@@ -411,6 +431,7 @@ func pendingActionRevisionPtr(
 func (h *TaskHandlers) taskSessionDTO(ctx context.Context, session *models.TaskSession) dto.TaskSessionDTO {
 	result := dto.FromTaskSession(session)
 	dto.EnrichCancellationPending(&result, h.cancellationPending)
+	dto.EnrichParkedProjection(&result, h.parkedProjection)
 	actions, revisions, err := h.service.GetPendingActionProjectionsForSessions(
 		ctx,
 		[]string{session.ID},
@@ -428,7 +449,7 @@ func (h *TaskHandlers) taskSessionDTO(ctx context.Context, session *models.TaskS
 }
 
 func (h *TaskHandlers) toTaskDTOsWithSessionInfo(ctx context.Context, tasks []*models.Task) ([]dto.TaskDTO, error) {
-	return buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, tasks)
+	return buildTaskDTOsWithSessionInfo(ctx, h.service, h.logger, h.foregroundActivity, h.taskParkedProjection, tasks)
 }
 
 func (h *TaskHandlers) httpGetTask(c *gin.Context) {
@@ -437,7 +458,7 @@ func (h *TaskHandlers) httpGetTask(c *gin.Context) {
 		handleNotFound(c, h.logger, err, "task not found")
 		return
 	}
-	dtos, err := buildTaskDTOsWithSessionInfo(c.Request.Context(), h.service, h.logger, h.foregroundActivity, []*models.Task{task})
+	dtos, err := buildTaskDTOsWithSessionInfo(c.Request.Context(), h.service, h.logger, h.foregroundActivity, h.taskParkedProjection, []*models.Task{task})
 	if err != nil {
 		h.logger.Error("failed to build task DTO with session info", zap.Error(err))
 		c.JSON(http.StatusOK, dto.FromTask(task))
@@ -619,6 +640,10 @@ func (h *TaskHandlers) httpApproveSession(c *gin.Context) {
 }
 
 func (h *TaskHandlers) httpGetWorkflowTaskCount(c *gin.Context) {
+	if err := h.service.AuthorizeWorkflowAccess(c.Request.Context(), c.Param("id")); err != nil {
+		handleNotFound(c, h.logger, err, "workflow not found")
+		return
+	}
 	count, err := h.service.CountTasksByWorkflow(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		h.logger.Error("failed to count tasks by workflow", zap.Error(err))
@@ -629,6 +654,10 @@ func (h *TaskHandlers) httpGetWorkflowTaskCount(c *gin.Context) {
 }
 
 func (h *TaskHandlers) httpGetStepTaskCount(c *gin.Context) {
+	if err := h.service.AuthorizeWorkflowStepAccess(c.Request.Context(), c.Param("id")); err != nil {
+		handleNotFound(c, h.logger, err, "workflow step not found")
+		return
+	}
 	count, err := h.service.CountTasksByWorkflowStep(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		h.logger.Error("failed to count tasks by step", zap.Error(err))
@@ -956,6 +985,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		ProjectID:                   body.ProjectID,
 		Labels:                      labels,
 		ExternalID:                  body.ExternalID,
+		WorkspacePolicy:             &wsPolicy,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not created")
@@ -976,7 +1006,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 	if err := h.service.ClaimMessageAttachments(c.Request.Context(), task.ID, "", body.Attachments); err != nil {
 		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(c.Request.Context()), 10*time.Second)
 		defer cancel()
-		if deleteErr := h.service.DeleteTask(rollbackCtx, task.ID); deleteErr != nil {
+		if deleteErr := h.service.DeleteTaskWithLifecycle(rollbackCtx, task.ID); deleteErr != nil {
 			h.logger.Warn("failed to roll back task after attachment claim", zap.String("task_id", task.ID), zap.Error(deleteErr))
 		}
 		switch {
@@ -991,21 +1021,6 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to claim task attachments"})
 		}
 		return
-	}
-
-	if h.handoffSvc != nil && wsPolicy.NeedsAttachment() {
-		if attachErr := h.handoffSvc.AttachWorkspacePolicy(c.Request.Context(), task.ID, body.ParentID, wsPolicy); attachErr != nil {
-			h.logger.Error("attach workspace policy; rolling back task creation",
-				zap.String("task_id", task.ID), zap.Error(attachErr))
-			if delErr := h.service.DeleteTask(c.Request.Context(), task.ID); delErr != nil {
-				h.logger.Error("rollback delete failed; task left in inconsistent state",
-					zap.String("task_id", task.ID), zap.Error(delErr))
-			}
-			c.JSON(http.StatusInternalServerError, gin.H{
-				"error": "failed to attach workspace policy: " + attachErr.Error(),
-			})
-			return
-		}
 	}
 
 	if !h.commitFreshBranch(c, task.ID, task.Title, body.WorkspaceID, body.Repositories, repos) {
@@ -1225,7 +1240,7 @@ func (h *TaskHandlers) commitFreshBranch(
 }
 
 func (h *TaskHandlers) rollbackFreshBranchTask(ctx context.Context, taskID string) {
-	if err := h.service.DeleteTask(ctx, taskID); err != nil {
+	if err := h.service.DeleteTaskWithLifecycle(ctx, taskID); err != nil {
 		h.logger.Warn("failed to compensate by deleting task after fresh-branch failure",
 			zap.String("task_id", taskID), zap.Error(err))
 	}
@@ -1440,13 +1455,14 @@ func (h *TaskHandlers) prepareTaskSession(
 		// upgraded to a full launch here so the terminal has a PTY to attach to.
 		// (Contrast the start_agent branch below, which sets DeferredStart=true.)
 		resp, err := h.orchestrator.LaunchSession(c.Request.Context(), &orchestrator.LaunchSessionRequest{
-			TaskID:            taskID,
-			Intent:            orchestrator.IntentPrepare,
-			AgentProfileID:    body.AgentProfileID,
-			ExecutorID:        body.ExecutorID,
-			ExecutorProfileID: body.ExecutorProfileID,
-			WorkflowStepID:    resolvedStepID,
-			LaunchWorkspace:   true,
+			InitialPromptPreview: models.NewInitialPromptPreview(strings.TrimSpace(body.Description), body.Attachments),
+			TaskID:               taskID,
+			Intent:               orchestrator.IntentPrepare,
+			AgentProfileID:       body.AgentProfileID,
+			ExecutorID:           body.ExecutorID,
+			ExecutorProfileID:    body.ExecutorProfileID,
+			WorkflowStepID:       resolvedStepID,
+			LaunchWorkspace:      true,
 		})
 		if err != nil {
 			h.logger.Error("failed to prepare session for task", zap.Error(err), zap.String("task_id", taskID))
@@ -1474,12 +1490,13 @@ func (h *TaskHandlers) prepareStartAgentSession(
 	resolvedStepID string,
 ) *startAgentDispatch {
 	prepResp, err := h.orchestrator.LaunchSession(ctx, &orchestrator.LaunchSessionRequest{
-		TaskID:            taskID,
-		Intent:            orchestrator.IntentPrepare,
-		AgentProfileID:    body.AgentProfileID,
-		ExecutorID:        body.ExecutorID,
-		ExecutorProfileID: body.ExecutorProfileID,
-		WorkflowStepID:    resolvedStepID,
+		InitialPromptPreview: models.NewInitialPromptPreview(strings.TrimSpace(body.Description), body.Attachments),
+		TaskID:               taskID,
+		Intent:               orchestrator.IntentPrepare,
+		AgentProfileID:       body.AgentProfileID,
+		ExecutorID:           body.ExecutorID,
+		ExecutorProfileID:    body.ExecutorProfileID,
+		WorkflowStepID:       resolvedStepID,
 		// The async IntentStartCreated dispatch below carries the prompt. Mark
 		// this as a deferred start so a passthrough profile is not eagerly
 		// launched here with an empty prompt (which would pre-empt that
@@ -1575,6 +1592,8 @@ type httpUpdateTaskRequest struct {
 	Metadata     map[string]interface{}    `json:"metadata,omitempty"`
 	// ParentID nests the task under another task. "" clears the parent.
 	ParentID *string `json:"parent_id,omitempty"`
+	// AssigneeUserID sets the human assignee. "" unassigns.
+	AssigneeUserID *string `json:"assignee_user_id,omitempty"`
 }
 
 type httpUpdateTaskPortForwardingRequest struct {
@@ -1649,14 +1668,15 @@ func (h *TaskHandlers) httpUpdateTask(c *gin.Context) {
 	}
 
 	task, err := h.service.UpdateTask(c.Request.Context(), c.Param("id"), &service.UpdateTaskRequest{
-		Title:        title,
-		Description:  description,
-		Priority:     body.Priority,
-		State:        body.State,
-		Repositories: convertUpdateRepositories(body.Repositories != nil, repos),
-		Position:     body.Position,
-		Metadata:     body.Metadata,
-		ParentID:     body.ParentID,
+		Title:          title,
+		Description:    description,
+		Priority:       body.Priority,
+		State:          body.State,
+		Repositories:   convertUpdateRepositories(body.Repositories != nil, repos),
+		Position:       body.Position,
+		Metadata:       body.Metadata,
+		ParentID:       body.ParentID,
+		AssigneeUserID: body.AssigneeUserID,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not updated")
@@ -1721,9 +1741,70 @@ func (h *TaskHandlers) httpUpdateTaskRepository(c *gin.Context) {
 }
 
 type httpMoveTaskRequest struct {
-	WorkflowID     string `json:"workflow_id"`
-	WorkflowStepID string `json:"workflow_step_id"`
-	Position       int    `json:"position"`
+	WorkflowID     string                     `json:"workflow_id"`
+	WorkflowStepID string                     `json:"workflow_step_id"`
+	Position       int                        `json:"position"`
+	EntryOptions   *workflowmove.EntryOptions `json:"entry_options,omitempty"`
+}
+
+// httpReorderStepTasksRequest is the frozen reorder request contract
+// (REQ-TASKS-KANBAN-TASK-REORDERING-001.17): the step is the path parameter,
+// so the body never repeats it, and the band is an explicit discriminator
+// rather than inferred from the submitted ids.
+type httpReorderStepTasksRequest struct {
+	Band           string   `json:"band"`
+	OrderedTaskIDs []string `json:"ordered_task_ids"`
+}
+
+func (h *TaskHandlers) httpReorderStepTasks(c *gin.Context) {
+	var body httpReorderStepTasksRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_reorder"})
+		return
+	}
+	result, err := h.service.ReorderStepTasks(c.Request.Context(), c.Param("id"), body.Band, body.OrderedTaskIDs)
+	if err != nil {
+		h.handleReorderStepTasksError(c, err, result)
+		return
+	}
+	c.JSON(http.StatusOK, reorderStepTasksResponseBody(result))
+}
+
+// handleReorderStepTasksError maps a reorder failure to the frozen response
+// shapes: step_changed carries the authoritative whole-step order the board
+// reconciles to silently (REQ-TASKS-KANBAN-TASK-REORDERING-001.19);
+// invalid_reorder carries no task list, since a malformed request implies
+// nothing about the persisted order (REQ-TASKS-KANBAN-TASK-REORDERING-001.18).
+func (h *TaskHandlers) handleReorderStepTasksError(c *gin.Context, err error, result *service.ReorderStepTasksResult) {
+	switch {
+	case isClientDisconnect(err):
+		abortClientDisconnect(c)
+	case errors.Is(err, taskrepository.ErrStepChanged):
+		body := reorderStepTasksResponseBody(result)
+		body["code"] = "step_changed"
+		c.JSON(http.StatusConflict, body)
+	case errors.Is(err, taskrepository.ErrInvalidReorder):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_reorder"})
+	case isNotFound(err):
+		c.JSON(http.StatusNotFound, gin.H{"error": "workflow step not found"})
+	case service.IsForbidden(err):
+		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+	default:
+		h.logger.Error("reorder step tasks failed", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "reorder failed"})
+	}
+}
+
+func reorderStepTasksResponseBody(result *service.ReorderStepTasksResult) gin.H {
+	entries := make([]gin.H, len(result.Tasks))
+	for i, task := range result.Tasks {
+		entries[i] = gin.H{"id": task.ID, "position": task.Position}
+	}
+	return gin.H{
+		"workflow_step_id": result.WorkflowStepID,
+		"revision":         result.Revision,
+		"tasks":            entries,
+	}
 }
 
 func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
@@ -1739,7 +1820,11 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 	result, err := h.service.MoveTaskWithOptions(
 		c.Request.Context(), c.Param("id"),
 		body.WorkflowID, body.WorkflowStepID, body.Position,
-		service.MoveTaskOptions{AllowActivePrimarySession: true, StepHistoryActor: wfmodels.StepTransitionActorHuman},
+		service.MoveTaskOptions{
+			AllowActivePrimarySession: true,
+			StepHistoryActor:          wfmodels.StepTransitionActorHuman,
+			EntryOptions:              body.EntryOptions,
+		},
 	)
 	if err != nil {
 		handleSelectedMoveError(c, h.logger, err)
@@ -1747,7 +1832,9 @@ func (h *TaskHandlers) httpMoveTask(c *gin.Context) {
 	}
 
 	response := dto.MoveTaskResponse{
-		Task: dto.FromTask(result.Task),
+		Task:         dto.FromTask(result.Task),
+		MoveID:       result.MoveID,
+		EntryOptions: result.EntryOptions,
 	}
 	if result.WorkflowStep != nil {
 		response.WorkflowStep = dto.FromWorkflowStep(result.WorkflowStep)
@@ -1767,18 +1854,45 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 	defer cancel()
 	taskID := c.Param("id")
 	cascade := cascadeQueryParam(c)
+	discardWorktreeChanges := discardWorktreeChangesQueryParam(c)
 	// Office task-handoffs phase 6: route through HandoffService.DeleteTaskTree
 	// when wired so descendant runs are cancelled, group memberships are
 	// released with reason=deleted, and the cleanup state machine fires.
 	if h.handoffSvc != nil {
-		if _, err := h.handoffSvc.DeleteTaskTree(deleteCtx, taskID, cascade); err != nil {
-			handleNotFound(c, h.logger, err, "task not deleted")
+		if _, err := h.handoffSvc.DeleteTaskTreeWithOptions(
+			deleteCtx, taskID, cascade, service.DeleteTaskOptions{
+				DiscardWorktreeChanges: discardWorktreeChanges,
+			},
+		); err != nil {
+			if !isCascadePostCommitError(err) {
+				handleNotFound(c, h.logger, err, "task not deleted")
+				return
+			}
+			h.logger.Warn("task deleted but post-commit housekeeping failed",
+				zap.String("task_id", taskID), zap.Error(err))
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				responseKeySuccess: false,
+				responseKeyPending: true,
+				"task_id":          taskID,
+			})
 			return
 		}
 		c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
 		return
 	}
-	if err := h.service.DeleteTask(deleteCtx, taskID); err != nil {
+	if err := h.service.DeleteTaskWithOptions(deleteCtx, taskID, service.DeleteTaskOptions{
+		DiscardWorktreeChanges: discardWorktreeChanges,
+	}); err != nil {
+		if isCascadePostCommitError(err) {
+			h.logger.Warn("task deleted but post-commit housekeeping failed",
+				zap.String("task_id", taskID), zap.Error(err))
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				responseKeySuccess: false,
+				responseKeyPending: true,
+				"task_id":          taskID,
+			})
+			return
+		}
 		handleNotFound(c, h.logger, err, "task not deleted")
 		return
 	}
@@ -1788,21 +1902,55 @@ func (h *TaskHandlers) httpDeleteTask(c *gin.Context) {
 func (h *TaskHandlers) httpArchiveTask(c *gin.Context) {
 	taskID := c.Param("id")
 	cascade := cascadeQueryParam(c)
+	// WithoutCancel, not Background: archiving cancels sessions and starts
+	// cleanup, so it must survive the client navigating away — but
+	// context.Background() also drops the request identity used by auth checks.
+	archiveCtx, cancel := archivecascade.ContinuationContext(c.Request.Context())
+	defer cancel()
 	// Office task-handoffs phase 6: when a HandoffService is wired,
 	// archive the whole subtree under a single cascade ID so
 	// descendants get tagged for scoped unarchive AND workspace-group
 	// memberships are released. When HandoffService is unconfigured
 	// (legacy / tests) fall back to the single-task path.
 	if h.handoffSvc != nil {
-		if _, err := h.handoffSvc.ArchiveTaskTree(c.Request.Context(), taskID, cascade); err != nil {
+		out, err := h.handoffSvc.ArchiveTaskTree(archiveCtx, taskID, cascade)
+		if err != nil {
+			if !isCascadePostCommitError(err) {
+				handleNotFound(c, h.logger, err, "task not archived")
+				return
+			}
+			h.logger.Warn("task archived but post-commit housekeeping failed",
+				zap.String("task_id", taskID), zap.Error(err))
+			c.JSON(http.StatusServiceUnavailable, gin.H{
+				responseKeySuccess: false,
+				responseKeyPending: true,
+				"task_id":          taskID,
+			})
+			return
+		}
+		response := gin.H{responseKeySuccess: true}
+		if out != nil && len(out.ArchivedTaskIDs) == 0 && len(out.SkippedTaskIDs) > 0 {
+			response["already_archived"] = true
+		}
+		c.JSON(http.StatusOK, response)
+		return
+	}
+	if err := h.service.ArchiveTask(archiveCtx, taskID); err != nil {
+		if errors.Is(err, service.ErrTaskAlreadyArchived) {
+			c.JSON(http.StatusOK, gin.H{responseKeySuccess: true, "already_archived": true})
+			return
+		}
+		if !isCascadePostCommitError(err) {
 			handleNotFound(c, h.logger, err, "task not archived")
 			return
 		}
-		c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
-		return
-	}
-	if err := h.service.ArchiveTask(c.Request.Context(), taskID); err != nil {
-		handleNotFound(c, h.logger, err, "task not archived")
+		h.logger.Warn("task archived but post-commit task projection failed",
+			zap.String("task_id", taskID), zap.Error(err))
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			responseKeySuccess: false,
+			responseKeyPending: true,
+			"task_id":          taskID,
+		})
 		return
 	}
 	c.JSON(http.StatusOK, dto.SuccessResponse{Success: true})
@@ -1815,12 +1963,27 @@ func cascadeQueryParam(c *gin.Context) bool {
 	return strings.EqualFold(c.Query("cascade"), "true")
 }
 
+func isCascadePostCommitError(err error) bool {
+	var postCommitErr *service.CascadePostCommitError
+	return errors.As(err, &postCommitErr)
+}
+
+func discardWorktreeChangesQueryParam(c *gin.Context) bool {
+	return strings.EqualFold(c.Query("discard_worktree_changes"), "true")
+}
+
 // httpTaskSubtaskCount returns the count of direct, non-archived,
 // non-ephemeral subtasks for a task. Used by the frontend's archive /
 // delete confirmation dialogs to decide whether to render the
 // "Also archive/delete subtasks" checkbox.
 func (h *TaskHandlers) httpTaskSubtaskCount(c *gin.Context) {
 	taskID := c.Param("id")
+	if h.service != nil {
+		if err := h.service.AuthorizeTaskAccess(c.Request.Context(), taskID); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+			return
+		}
+	}
 	children, err := h.repo.ListChildren(c.Request.Context(), taskID)
 	if err != nil {
 		// Don't surface the raw repo error to the client — it can leak
@@ -1846,10 +2009,18 @@ func (h *TaskHandlers) httpUnarchiveTask(c *gin.Context) {
 		return
 	}
 	taskID := c.Param("id")
-	outcome, err := h.handoffSvc.UnarchiveTaskTree(c.Request.Context(), taskID)
+	unarchiveCtx, cancelUnarchive := archivecascade.ContinuationContext(c.Request.Context())
+	defer cancelUnarchive()
+	outcome, err := h.handoffSvc.UnarchiveTaskTree(unarchiveCtx, taskID)
+	postCommitError := false
 	if err != nil {
-		handleNotFound(c, h.logger, err, "task not unarchived")
-		return
+		if !isCascadePostCommitError(err) {
+			handleNotFound(c, h.logger, err, "task not unarchived")
+			return
+		}
+		h.logger.Warn("task unarchive committed with post-commit errors",
+			zap.String("task_id", taskID), zap.Error(err))
+		postCommitError = true
 	}
 	// Probe branch recoverability for every restored task: archive deleted
 	// the local branch + worktree, so report whether the branch still
@@ -1872,6 +2043,20 @@ func (h *TaskHandlers) httpUnarchiveTask(c *gin.Context) {
 		for _, id := range outcome.ArchivedTaskIDs {
 			workspaceRecovery = append(workspaceRecovery, h.workspaceRestorer.RestoreTask(recoveryCtx, id))
 		}
+	}
+	if postCommitError {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			responseKeySuccess:   false,
+			"error":              "task unarchive requires retry",
+			"task_id":            taskID,
+			"cascade_id":         outcome.CascadeID,
+			"unarchived_ids":     outcome.ArchivedTaskIDs,
+			"skipped_ids":        outcome.SkippedTaskIDs,
+			"affected_group_ids": outcome.ReleasedGroupIDs,
+			"workspace_recovery": workspaceRecovery,
+			"recovery":           recovery,
+		})
+		return
 	}
 	c.JSON(http.StatusOK, gin.H{
 		"success":            true,
@@ -2064,7 +2249,7 @@ func (h *TaskHandlers) httpStartQuickChat(c *gin.Context) {
 		// in this file so a future change to the constant covers this path too.
 		rollbackCtx, cancel := context.WithTimeout(context.Background(), constants.TaskDeleteTimeout)
 		defer cancel()
-		if deleteErr := h.service.DeleteTask(rollbackCtx, task.ID); deleteErr != nil {
+		if deleteErr := h.service.DeleteTaskWithLifecycle(rollbackCtx, task.ID); deleteErr != nil {
 			h.logger.Error("failed to rollback quick chat task",
 				zap.String("task_id", task.ID),
 				zap.Error(deleteErr))
@@ -2128,6 +2313,7 @@ func (h *TaskHandlers) httpListQuickChatSessions(c *gin.Context) {
 		})
 		sessionDTO := dto.FromTaskSession(item.Session)
 		dto.EnrichCancellationPending(&sessionDTO, h.cancellationPending)
+		dto.EnrichParkedProjection(&sessionDTO, h.parkedProjection)
 		response.TaskSessions = append(response.TaskSessions, sessionDTO)
 	}
 	c.JSON(http.StatusOK, response)
@@ -2242,7 +2428,7 @@ func (h *TaskHandlers) httpStartConfigChat(c *gin.Context) {
 }
 
 func (h *TaskHandlers) deleteTaskOnError(taskID, label string, err error) {
-	if deleteErr := h.service.DeleteTask(context.Background(), taskID); deleteErr != nil {
+	if deleteErr := h.service.DeleteTaskWithLifecycle(context.Background(), taskID); deleteErr != nil {
 		h.logger.Error("failed to rollback "+label+" task",
 			zap.String("task_id", taskID), zap.Error(deleteErr))
 	}

@@ -14,7 +14,7 @@ import {
 import { listRemoteCredentials, type RemoteAuthSpec } from "@/lib/api/domains/settings-api";
 import { listAgentConfigBundles, type AgentConfigBundle } from "@/lib/api/domains/agent-config-api";
 import type { SecretListItem } from "@/lib/types/http-secrets";
-import { AuthSection, getSpecMethods } from "./remote-auth-section";
+import { AuthSection } from "./remote-auth-section";
 export type { GitIdentityMode, GitIdentityState } from "./git-identity-fields";
 
 type RemoteCredentialsCardProps = {
@@ -110,30 +110,24 @@ export function RemoteCredentialsCard({
                   localGitIdentity={localGitIdentity}
                 />
               )}
-              {agentSections.map(({ spec, configBundles: agentConfigBundles }) => {
-                const methods = getSpecMethods(spec);
-                const envMethod = methods.find((m) => m.type === "env");
-                return (
-                  <AuthSection
-                    key={spec.id}
-                    spec={spec}
-                    selectedIds={selectedSet}
-                    baselineSelectedIds={baselineSelectedSet}
-                    onCredentialsChange={onChange}
-                    envSecretId={envMethod ? (agentEnvVars[envMethod.method_id] ?? null) : null}
-                    baselineEnvSecretId={
-                      envMethod ? (baselineAgentEnvVars[envMethod.method_id] ?? null) : null
-                    }
-                    onMethodSecretChange={onAgentEnvVarChange}
-                    secrets={secrets}
-                    configBundles={agentConfigBundles}
-                    configBundleIds={configBundleIds}
-                    baselineConfigBundleIds={baselineConfigBundleIds}
-                    onConfigBundleChange={onConfigBundleChange}
-                    isSSH={isSSH}
-                  />
-                );
-              })}
+              {agentSections.map(({ spec, configBundles: agentConfigBundles }) => (
+                <AuthSection
+                  key={spec.id}
+                  spec={spec}
+                  selectedIds={selectedSet}
+                  baselineSelectedIds={baselineSelectedSet}
+                  onCredentialsChange={onChange}
+                  agentEnvVars={agentEnvVars}
+                  baselineAgentEnvVars={baselineAgentEnvVars}
+                  onMethodSecretChange={onAgentEnvVarChange}
+                  secrets={secrets}
+                  configBundles={agentConfigBundles}
+                  configBundleIds={configBundleIds}
+                  baselineConfigBundleIds={baselineConfigBundleIds}
+                  onConfigBundleChange={onConfigBundleChange}
+                  isSSH={isSSH}
+                />
+              ))}
             </Accordion>
           </>
         ) : (

@@ -10,6 +10,7 @@ import { listProjectMembers } from "@/lib/api/domains/gitlab-api";
 import type { GitLabMRUser, GitLabProjectMember } from "@/lib/types/gitlab";
 import { isCurrentIdentityRequest } from "@/hooks/domains/gitlab/request-identity";
 import { useTranslation } from "react-i18next";
+import { controlSizingClassName } from "@kandev/ui/control-sizing";
 
 export function toggleMemberId(ids: number[], id: number): number[] {
   return ids.includes(id) ? ids.filter((candidate) => candidate !== id) : [...ids, id];
@@ -49,7 +50,7 @@ function SelectedMemberBadges({
       {member.username}
       <button
         type="button"
-        className="flex h-11 w-11 cursor-pointer items-center justify-center sm:h-6 sm:w-6"
+        className={`${controlSizingClassName("icon")} cursor-pointer`}
         aria-label={t(
           kind === "reviewers" ? "gitlab:removeFromReviewers" : "gitlab:removeFromAssignees",
           { username: member.username },
@@ -146,9 +147,8 @@ export function MRReviewerControl({
       <div className="flex items-center justify-between gap-2">
         <h4 className="text-xs font-semibold">{sectionLabel}</h4>
         <Button
-          size="sm"
           variant="outline"
-          className="h-11 cursor-pointer sm:h-8"
+          className={controlSizingClassName("standard", "cursor-pointer")}
           disabled={busy || !changed}
           onClick={() => void onSave(selectedIds)}
         >
@@ -178,7 +178,7 @@ export function MRReviewerControl({
         <Button
           size="icon"
           variant="outline"
-          className="h-11 w-11 shrink-0 cursor-pointer sm:h-9 sm:w-9"
+          className={controlSizingClassName("icon", "shrink-0 cursor-pointer")}
           aria-label={searchLabel}
           disabled={searching}
           onClick={() => void search()}

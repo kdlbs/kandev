@@ -46,6 +46,15 @@ const (
 	TargetWorkspaceCEO  = "workspace.ceo_agent"
 	TaskIDThis          = "this"
 	defaultQueueReasonR = "queue_run"
+
+	// reasonTaskChildrenCompleted is the reason string the wave-identity
+	// columns (runs.wake_wave_key/wake_wave_string) are scoped to: only a
+	// request resolving to this reason may carry them, so a differently
+	// reasoned action on the same on_children_completed trigger never enters
+	// idx_run_wake_wave's uniqueness domain. Duplicated from
+	// office/service.RunReasonTaskChildrenCompleted rather than imported —
+	// engine must not depend on office.
+	reasonTaskChildrenCompleted = "task_children_completed"
 )
 
 // PrimaryAgentResolver resolves the task's "primary" agent profile id. The
@@ -65,13 +74,16 @@ type TargetTaskStepResolver interface {
 }
 
 // QueueRunCallback executes the queue_run action by resolving Target/TaskID
-// then enqueuing a run via RunQueueAdapter.
+// then enqueuing a run via RunQueueAdapter. Logger is nil-safe (AC-24
+// convention, same as EnsureParticipantSeatCallback): a nil Logger skips
+// warning emission for the workspace.ceo_agent self-escalation guard.
 type QueueRunCallback struct {
 	Adapter      RunQueueAdapter
 	Participants ParticipantStore
 	CEOResolver  CEOAgentResolver
 	Primary      PrimaryAgentResolver
 	TaskSteps    TargetTaskStepResolver
+	Logger       *logger.Logger
 }
 
 // Execute satisfies ActionCallback.
@@ -87,14 +99,23 @@ func (c QueueRunCallback) Execute(ctx context.Context, in ActionInput) (ActionRe
 	if err != nil {
 		return ActionResult{}, err
 	}
+	reason := queueRunReason(in)
+	var waveKey, waveString string
+	// The wave belongs to the trigger task. A queue_run action can target a
+	// different task, which must keep the ordinary task-scoped admission path.
+	if reason == reasonTaskChildrenCompleted && taskID == in.State.TaskID {
+		waveKey, waveString = waveIdentityPayload(in.Payload)
+	}
 	for _, agentID := range agentIDs {
 		req := QueueRunRequest{
 			AgentProfileID: agentID,
 			TaskID:         taskID,
 			WorkflowStepID: workflowStepID,
-			Reason:         queueRunReason(in),
+			Reason:         reason,
 			IdempotencyKey: idempotencyKey(in, agentID, taskID),
 			Payload:        queueRunPayload(in, in.Action.QueueRun.Payload, taskID),
+			WaveKey:        waveKey,
+			WaveString:     waveString,
 		}
 		if _, err := c.Adapter.QueueRun(ctx, req); err != nil {
 			return ActionResult{}, fmt.Errorf("queue_run for agent %s: %w", agentID, err)
@@ -143,7 +164,7 @@ func (c QueueRunCallback) resolveTarget(
 		if err != nil {
 			return nil, "", err
 		}
-		agentIDs, err := c.resolveCEO(ctx, taskID)
+		agentIDs, err := c.resolveCEO(ctx, in, taskID)
 		return agentIDs, stepID, err
 	default:
 		return nil, "", fmt.Errorf("queue_run: unsupported target %q", target)
@@ -240,6 +261,17 @@ func (c QueueRunCallback) resolveParticipantRoleStepScoped(ctx context.Context, 
 	return ids, nil
 }
 
+// ResolveFanOutSeats exposes roleSeatsForFanOut to callers outside the
+// engine that must predict a queue_run_for_each_participant action's
+// resolved seats without going through HandleTrigger — office/scheduler's
+// cascade producer needs this to attach the same payload the engine-routed
+// fan-out would for the same (wave, agent) pair (AC-002.10/.16).
+func ResolveFanOutSeats(
+	ctx context.Context, store ParticipantStore, stepID, taskID, workflowID, role string,
+) ([]ParticipantInfo, error) {
+	return roleSeatsForFanOut(ctx, store, stepID, taskID, workflowID, role)
+}
+
 // roleSeatsForFanOut gathers the same participant population the quorum
 // guard counts (gatherParticipantSlate — per-task rows at any step, unioned
 // with template rows at the evaluating step), filters to role (deliberately
@@ -273,7 +305,13 @@ func roleSeatsForFanOut(ctx context.Context, store ParticipantStore, stepID, tas
 	return seats, nil
 }
 
-func (c QueueRunCallback) resolveCEO(ctx context.Context, taskID string) ([]string, error) {
+// resolveCEO resolves the workspace CEO for a workspace.ceo_agent target. On
+// an on_agent_error trigger whose failed agent IS the resolved CEO, it
+// returns no agents instead of re-queueing the CEO to escalate its own
+// failure to itself — the run failure and inbox activity are already
+// recorded by the caller before this trigger fires, so skipping here loses
+// no visibility, only the self-escalation loop.
+func (c QueueRunCallback) resolveCEO(ctx context.Context, in ActionInput, taskID string) ([]string, error) {
 	if c.CEOResolver == nil {
 		return nil, fmt.Errorf("%w: queue_run target=workspace.ceo_agent requires CEOAgentResolver", ErrActionNotYetWired)
 	}
@@ -284,7 +322,26 @@ func (c QueueRunCallback) resolveCEO(ctx context.Context, taskID string) ([]stri
 	if id == "" {
 		return nil, fmt.Errorf("queue_run: workspace has no CEO agent profile for task %s", taskID)
 	}
+	if in.Trigger == TriggerOnAgentError {
+		if payload, ok := agentErrorPayload(in.Payload); ok && payload.FailedAgentID == id {
+			c.recordCEOSelfEscalationSkipped(taskID, id)
+			return nil, nil
+		}
+	}
 	return []string{id}, nil
+}
+
+// recordCEOSelfEscalationSkipped logs the skipped self-escalation for
+// operator visibility. Nil-safe: see the AC-24 convention note on
+// QueueRunCallback.
+func (c QueueRunCallback) recordCEOSelfEscalationSkipped(taskID, ceoAgentID string) {
+	if c.Logger == nil {
+		return
+	}
+	c.Logger.Warn("queue_run: skipped workspace.ceo_agent self-escalation",
+		zap.String("task_id", taskID),
+		zap.String("ceo_agent_id", ceoAgentID),
+	)
 }
 
 // resolveTaskID maps the action's TaskID string into a concrete id, honouring
@@ -372,6 +429,8 @@ func queueActionDigest(in ActionInput) string {
 	return hex.EncodeToString(sum[:8])
 }
 
+// queueRunPayload combines trigger metadata with workflow-authored fields.
+// Typed failure metadata provides defaults, while authored fields override it.
 func queueRunPayload(in ActionInput, actionPayload map[string]any, targetTaskID string) map[string]any {
 	out := make(map[string]any, len(actionPayload))
 	comment, ok := commentPayload(in.Payload)
@@ -383,8 +442,20 @@ func queueRunPayload(in ActionInput, actionPayload map[string]any, targetTaskID 
 			out["author_id"] = comment.AuthorID
 		}
 	}
+	if agentErr, aok := agentErrorPayload(in.Payload); aok {
+		if agentErr.FailedAgentID != "" {
+			out["failed_agent_id"] = agentErr.FailedAgentID
+		}
+		if agentErr.FailedSessionID != "" {
+			out["failed_session_id"] = agentErr.FailedSessionID
+		}
+		if agentErr.ErrorMessage != "" {
+			out["error"] = agentErr.ErrorMessage
+		}
+	}
 	// Workflow-authored payload fields are explicit overrides. The trigger's
-	// comment_id/author_id only provide defaults for ordinary comment wakes.
+	// comment_id/author_id/failed_agent_id/etc. only provide defaults for
+	// their respective wake kinds.
 	for k, v := range actionPayload {
 		out[k] = v
 	}
@@ -400,6 +471,22 @@ func queueRunPayload(in ActionInput, actionPayload map[string]any, targetTaskID 
 	return out
 }
 
+// waveIdentityPayload extracts the completion-wave identity from a
+// TriggerOnChildrenCompleted dispatch, or ("", "") for any other trigger
+// (OnChildrenCompletedPayload's WaveKey/WaveString default to empty when
+// the dispatching producer could not derive one).
+func waveIdentityPayload(payload any) (waveKey, waveString string) {
+	switch p := payload.(type) {
+	case OnChildrenCompletedPayload:
+		return p.WaveKey, p.WaveString
+	case *OnChildrenCompletedPayload:
+		if p != nil {
+			return p.WaveKey, p.WaveString
+		}
+	}
+	return "", ""
+}
+
 func commentPayload(payload any) (OnCommentPayload, bool) {
 	switch p := payload.(type) {
 	case OnCommentPayload:
@@ -410,6 +497,19 @@ func commentPayload(payload any) (OnCommentPayload, bool) {
 		}
 	}
 	return OnCommentPayload{}, false
+}
+
+// agentErrorPayload normalizes value and pointer trigger payloads.
+func agentErrorPayload(payload any) (OnAgentErrorPayload, bool) {
+	switch p := payload.(type) {
+	case OnAgentErrorPayload:
+		return p, true
+	case *OnAgentErrorPayload:
+		if p != nil {
+			return *p, true
+		}
+	}
+	return OnAgentErrorPayload{}, false
 }
 
 // ClearDecisionsCallback executes the clear_decisions action by deleting all
@@ -454,6 +554,10 @@ func (c QueueRunForEachParticipantCallback) Execute(ctx context.Context, in Acti
 		return ActionResult{}, fmt.Errorf("queue_run_for_each_participant list participants: %w", err)
 	}
 	reason := queueRunForEachParticipantReason(in)
+	var waveKey, waveString string
+	if reason == reasonTaskChildrenCompleted {
+		waveKey, waveString = waveIdentityPayload(in.Payload)
+	}
 	// Collect-and-continue (AC-C1): one participant's QueueRun failure must
 	// not abort the fan-out to their siblings — a reviewer whose queue is
 	// briefly unavailable should not silently block every other reviewer's
@@ -465,10 +569,19 @@ func (c QueueRunForEachParticipantCallback) Execute(ctx context.Context, in Acti
 	// participant list with roleSeatsForFanOut, which already filters by
 	// role and canonicalizes the slate, so #2907's inline `p.Role != cfg.Role`
 	// guard is redundant here and is dropped rather than duplicated.
+	//
+	// waveKey/waveString (parent-wake-wave-identity): this is the second
+	// on_children_completed action callback alongside QueueRunCallback, and
+	// both attach the trigger's wave identity to every request they queue
+	// when the resolved reason is task_children_completed — idx_run_wake_wave,
+	// not this loop, is what collapses two participant roles resolving to the
+	// same agent profile into one run.
 	var errs []error
 	for _, p := range seats {
 		req := QueueRunRequest{
 			AgentProfileID: p.AgentProfileID,
+			WaveKey:        waveKey,
+			WaveString:     waveString,
 			TaskID:         taskID,
 			WorkflowStepID: in.Step.ID,
 			Reason:         reason,
@@ -572,7 +685,7 @@ func (c EnsureParticipantSeatCallback) Execute(ctx context.Context, in ActionInp
 		c.recordSeatEnsureError(taskID, stepID, role, err)
 		return ActionResult{}, err
 	}
-	cast, err := c.Caster.CastParticipantSeat(ctx, taskID, stepID, role)
+	cast, err := c.Caster.CastParticipantSeat(ctx, workflowID, taskID, stepID, role)
 	if err != nil {
 		c.recordSeatEnsureError(taskID, stepID, role, err)
 		return ActionResult{}, fmt.Errorf("ensure_participant_seat cast: %w", err)

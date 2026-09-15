@@ -74,7 +74,7 @@ The launcher selects the platform runtime, starts the Go backend and agent runti
 
 By default, persistent state is under `~/.kandev`, including the SQLite database, repository materializations, sessions, logs, and backups. `KANDEV_HOME_DIR` relocates that root. `KANDEV_DATABASE_PATH` overrides the database file and moves System snapshots to `backups/` beside that file. Kandev creates its data directory with owner-only permissions and rejects symlinked components in that path, but file permissions do not replace host access controls. Kandev does not move snapshots from another directory automatically.
 
-See the [CLI reference](cli.md) for commands, port and logging flags, data paths, environment variables, and update behavior. Other supported entry points are the [desktop app](desktop-app.md), [service](run-as-a-service.md), and [Docker deployment](docker.md). Read [Security and trust](security.md) before making any installation remotely reachable.
+See the [CLI reference](cli.md) for commands, port and logging flags, data paths, environment variables, and update behavior. Other supported entry points are the [desktop app](desktop-app.md), [service](run-as-a-service.md), and [Docker deployment](docker.md). Follow [Mobile Remote Access](mobile-remote-access.md) for a private phone connection. Read [Security and trust](security.md) before making any installation remotely reachable.
 
 <details>
 <summary>First-run records and onboarding details</summary>
@@ -151,7 +151,7 @@ Remote repository and issue/PR URLs are not added from this settings page. Use t
 
 Detected capabilities come from the installed CLI and can change after an agent upgrade or login. A model or mode shown in documentation is not guaranteed for every account. If no built-in adapter fits, **Add TUI Agent** creates a passthrough integration; passthrough has a different resume, usage, and MCP contract from an ACP-capable agent.
 
-For the first task on an existing repository, keep the seeded **Worktree** executor profile. It creates a separate Git checkout so concurrent Kandev tasks do not edit the same working tree. A worktree is Git isolation, not operating-system isolation. Choose **Local** only when direct edits in the selected checkout are intentional. A repository initialized from **New Task** already has one empty initial commit and no project files, and Kandev selects a direct Local profile for that flow. See [Agents and profiles](agents-and-profiles.md) and [Executors](executors.md) before using Docker, SSH, Sprites, custom scripts, or shared infrastructure.
+For the first task on an existing repository, keep the seeded **Worktree** executor profile. It creates a separate Git checkout so concurrent Kandev tasks do not edit the same working tree. A worktree is Git isolation, not operating-system isolation. Choose **Local** only when direct edits in the selected checkout are intentional. A repository initialized from **New Task** has one empty initial commit and no project files. Creation selects a direct Local profile for a single-row task when one is available and preserves the selected executor for multiple rows. Without a direct Local profile, single-row creation remains disabled. See [Agents and profiles](agents-and-profiles.md) and [Executors](executors.md) before using Docker, SSH, Sprites, custom scripts, or shared infrastructure.
 
 ## Create and start the first task
 
@@ -174,7 +174,7 @@ If another actor initializes the remote first, Kandev stops without replacing th
 The dialog also supports multiple repositories, remote GitHub rows, and a single-repository **Fork a new branch** option when the Local executor is selected. Important boundaries:
 
 - Multi-repository tasks require the Worktree executor in the current task-create path.
-- Creating an empty repository is available only for a single repository row and switches the task to a direct Local profile.
+- Every editable local repository row offers **Refresh repositories** and **Create new repository**, regardless of existing repositories or search results. Creation preserves the executor for multiple rows and selects a direct Local profile for a single row.
 - No-repository tasks cannot use the Worktree executor.
 - The local fork option is off by default and requires explicit consent before Kandev discards dirty source-checkout changes.
 - Agent and executor choices can be disabled when their remote credential requirements are incompatible.
@@ -196,10 +196,11 @@ See [Sessions and review](sessions-and-review.md) for the workbench and [Tasks a
 - **Auto Approve**, permission-skipping flags, and unrestricted passthrough remove human gates inside the agent CLI. They are security decisions.
 - Local and worktree sessions run on the Kandev host. Worktree separation does not limit process, filesystem, network, or credential access.
 - Containers and remote executors change the boundary, but their mounted files, copied credentials, environment, daemon/socket access, and prepare scripts can reintroduce host or provider access.
-- Managed GitHub task access (the default) uses task/repository-bound broker leases from the workspace automation connection. GitHub App tokens are minted for the redeemed repository; PAT and named-CLI bearer tokens retain all provider-granted scopes once delivered to the trusted agent subprocess. Personal tokens and the App private key never enter executors. Choose **Inherit executor Git credentials** in the workspace GitHub settings only when task Git and `gh` should use host-visible credentials for Local/Worktree or intentionally configured credentials for remote executors.
+- **Managed GitHub task access** may remain the saved policy for historical workspaces. New workspaces default to **Inherit executor Git credentials**. Managed mode uses task/repository-bound broker leases; stored PATs and App private keys stay out of task processes.
+- **Inherit executor Git credentials** uses host-visible credentials for Local and Worktree tasks, or credentials configured in remote executors. See [Choose task Git credentials](integrations.md#choose-task-git-credentials) for the credential paths and entry points.
 - A profile-supplied `GITHUB_TOKEN` or `GH_TOKEN` is an explicit unmanaged override and bypasses workspace broker selection. Ambient backend tokens and the host-active `gh` account are used only by migration-only **Legacy shared** workspace connections.
 - Repository, executor, and task action scripts are executable configuration. Review them like code.
-- The web app, HTTP API, WebSocket, and external MCP routes currently have no Kandev user-login boundary. Treat anyone who can reach the backend as an operator; keep the whole origin on loopback or a trusted network, or put it behind an authenticated TLS proxy.
+- Authentication is opt-in. When it is disabled, treat anyone who can reach the backend as an operator. Keep the whole origin on loopback or a trusted network, or put it behind an authenticated TLS proxy.
 
 Use the [Security and trust](security.md) guide to choose a local, remote, shared-team, or unattended-automation boundary and to review the deployment checklist.
 

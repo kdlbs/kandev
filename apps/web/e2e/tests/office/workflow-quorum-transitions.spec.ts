@@ -109,16 +109,33 @@ async function getQuorumGuards(
   apiClient: { rawRequest: (method: string, path: string) => Promise<Response> },
   workspaceId: string,
   taskId: string,
-): Promise<Array<{ role: string; satisfied: boolean; reason?: string }>> {
+): Promise<Array<{ role: string; required_count: number; satisfied: boolean; reason?: string }>> {
   const res = await apiClient.rawRequest(
     "GET",
     `/api/v1/office/workspaces/${workspaceId}/tasks/${taskId}/quorum`,
   );
   expect(res.ok).toBe(true);
   const body = (await res.json()) as {
-    guards: Array<{ role: string; satisfied: boolean; reason?: string }>;
+    guards: Array<{ role: string; required_count: number; satisfied: boolean; reason?: string }>;
   };
   return body.guards;
+}
+
+// REQ-OFFICE-SEAT-PROVENANCE-006 (AC-006.5): a role's participant listing
+// after registration must show exactly one entry naming the registered
+// agent, not two — the on_enter `ensure_participant_seat` action already
+// cast an "auto" seat before the operator's registration runs, and a
+// correct registration claims that seat in place rather than adding a
+// second one beside it.
+async function getParticipants(
+  apiClient: { rawRequest: (method: string, path: string) => Promise<Response> },
+  taskId: string,
+  role: "reviewers" | "approvers",
+): Promise<string[]> {
+  const res = await apiClient.rawRequest("GET", `/api/v1/office/tasks/${taskId}/${role}`);
+  expect(res.ok).toBe(true);
+  const body = (await res.json()) as { agent_profile_ids: string[] };
+  return body.agent_profile_ids;
 }
 
 test.describe("Office workflow quorum-guarded transitions", () => {
@@ -163,6 +180,15 @@ test.describe("Office workflow quorum-guarded transitions", () => {
       .poll(async () => (await apiClient.getTask(task.id)).workflow_step_id)
       .toBe(reviewStepId);
 
+    // REQ-OFFICE-SEAT-PROVENANCE-006 setup: Review's on_enter already ran
+    // `ensure_participant_seat`, casting an automatic reviewer seat before
+    // this test registers its own. Confirm that seat landed first — the
+    // registration below is only a real test of the claim behavior (not a
+    // duplicate-seat false negative) if there is something to claim.
+    await expect
+      .poll(async () => (await getParticipants(apiClient, task.id, "reviewers")).length)
+      .toBe(1);
+
     // AddTaskParticipant binds the new row to the task's CURRENT
     // workflow_step_id (workflow_step_participants.step_id), not a
     // caller-chosen step: register the reviewer only after the move so the
@@ -174,6 +200,14 @@ test.describe("Office workflow quorum-guarded transitions", () => {
       agent_profile_id: reviewerId,
     });
 
+    // AC-006.5: registering a different agent claims the automatically
+    // cast seat in place rather than adding a second one beside it — the
+    // role's listing still names exactly one agent, and it is the one just
+    // registered, not the auto-cast one.
+    await expect
+      .poll(async () => getParticipants(apiClient, task.id, "reviewers"))
+      .toEqual([reviewerId]);
+
     // The quorum evaluator resolves a session-scoped machine state (AC-16/
     // F38), so a task with no session at all always yields an empty
     // snapshot regardless of workflow_step_id.
@@ -181,11 +215,20 @@ test.describe("Office workflow quorum-guarded transitions", () => {
 
     // AC-25: the Review step's guard is unsatisfied (reviewer has not
     // decided yet), so the diagnostic read reports one awaiting entry.
+    //
+    // AC-OFFICE-SEAT-PROVENANCE-006.1/-006.2: the guard must require
+    // exactly one decision. That count is the operator-visible consequence
+    // of the claim above — a registration that added a second seat instead
+    // of claiming the cast one leaves the role reading "reviewer" and the
+    // listing arguably explicable, and shows up only here, as a gate that
+    // silently never fires because it is waiting on two decisions a single
+    // reviewer can never supply.
     await expect
-      .poll(
-        async () => (await getQuorumGuards(apiClient, officeSeed.workspaceId, task.id))[0]?.role,
-      )
-      .toBe("reviewer");
+      .poll(async () => {
+        const guard = (await getQuorumGuards(apiClient, officeSeed.workspaceId, task.id))[0];
+        return guard && { role: guard.role, requiredCount: guard.required_count };
+      })
+      .toEqual({ role: "reviewer", requiredCount: 1 });
 
     // AC-25 UI presentation: the badge renders the awaiting state.
     await testPage.goto(`/office/tasks/${task.id}`);
@@ -227,6 +270,13 @@ test.describe("Office workflow quorum-guarded transitions", () => {
     await apiClient.rawRequest("POST", `/api/v1/office/tasks/${task.id}/approvers`, {
       agent_profile_id: approverId,
     });
+
+    // AC-006.5 for the approver role too: whatever the slate looked like
+    // before this registration, it now shows exactly one entry, naming the
+    // agent just registered.
+    await expect
+      .poll(async () => getParticipants(apiClient, task.id, "approvers"))
+      .toEqual([approverId]);
 
     await testPage.reload();
     await expect(badge).toContainText("Approver", { timeout: 10_000 });

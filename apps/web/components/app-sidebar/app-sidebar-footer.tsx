@@ -159,7 +159,7 @@ function SidebarFooterDialogs({
   improveOpen: boolean;
   onImproveOpenChange: (open: boolean) => void;
   workspaceId: string | null;
-  onTaskCreated: (task: { id: string }) => void;
+  onTaskCreated: (task: { id: string }, meta?: { autoFocus?: boolean }) => void;
   releaseNotes: ReturnType<typeof useReleaseNotes>;
 }) {
   return (
@@ -333,6 +333,7 @@ function useSettingsGearToggle(
 ) {
   const router = useRouter();
   const pathname = usePathname();
+  const startupPage = useAppStore((s) => s.userSettings.startupPage);
 
   return () => {
     const onSettingsRoute = isSettingsRoute(pathname);
@@ -341,7 +342,9 @@ function useSettingsGearToggle(
       return;
     }
     if (settingsMode && onSettingsRoute) {
-      router.push(workspaceHomeHref(activeWorkspace), { onNavigated: onToggleSettingsMode });
+      router.push(workspaceHomeHref(activeWorkspace, startupPage), {
+        onNavigated: onToggleSettingsMode,
+      });
       return;
     }
     onToggleSettingsMode();
@@ -411,7 +414,9 @@ export function AppSidebarFooter({ collapsed, onToggleSettingsMode }: AppSidebar
         improveOpen={improveOpen}
         onImproveOpenChange={setImproveOpen}
         workspaceId={workspaceId ?? null}
-        onTaskCreated={(task) => router.push(linkToTask(task.id))}
+        onTaskCreated={(task, meta) => {
+          if (meta?.autoFocus !== false) router.push(linkToTask(task.id));
+        }}
         releaseNotes={releaseNotes}
       />
     </div>

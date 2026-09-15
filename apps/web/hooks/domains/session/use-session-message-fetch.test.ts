@@ -27,6 +27,8 @@ function makeParams(
     } as never,
     setIsLoading: vi.fn(),
     setIsWaitingForInitialMessages: vi.fn(),
+    setHistoryStatus: vi.fn(),
+    setHistoryError: vi.fn(),
     initialFetchStartRef: { current: null },
     lastFetchedSessionIdRef: { current: null },
     fetchAndStoreMessages,
@@ -78,5 +80,66 @@ describe("doFetchMessages", () => {
     second.resolve([]);
     await secondFetch;
     expect(setMessagesLoading).toHaveBeenLastCalledWith(SESSION_ID, false);
+  });
+
+  it("releases store and local loading bookkeeping when a stale fetch settles", async () => {
+    const result = deferred<Message[]>();
+    const setMessagesLoading = vi.fn();
+    const params = makeParams(vi.fn().mockReturnValue(result.promise), setMessagesLoading);
+    const isActive = { value: true };
+    const fetch = doFetchMessages({ ...params, isActive: () => isActive.value } as never);
+
+    isActive.value = false;
+    result.resolve([]);
+    await fetch;
+
+    expect(params.setIsLoading).toHaveBeenLastCalledWith(false);
+    expect(params.setIsWaitingForInitialMessages).toHaveBeenLastCalledWith(true);
+    expect(setMessagesLoading).toHaveBeenLastCalledWith(SESSION_ID, false);
+  });
+
+  it("does not finalize a newer hook generation from a stale fetch", async () => {
+    const result = deferred<Message[]>();
+    const setMessagesLoading = vi.fn();
+    const params = makeParams(vi.fn().mockReturnValue(result.promise), setMessagesLoading);
+    const isActive = { value: true };
+    const fetch = doFetchMessages({
+      ...params,
+      isActive: () => isActive.value,
+      canFinalizeLoading: () => isActive.value,
+    } as never);
+
+    isActive.value = false;
+    result.resolve([]);
+    await fetch;
+
+    expect(params.setIsLoading).toHaveBeenLastCalledWith(true);
+    expect(setMessagesLoading).toHaveBeenLastCalledWith(SESSION_ID, false);
+  });
+
+  it("preserves cached messages when the history request fails", async () => {
+    const setMessages = vi.fn();
+    const setMessagesLoading = vi.fn();
+    const store = {
+      getState: () => ({ setMessages, setMessagesLoading }),
+    } as unknown as Parameters<typeof doFetchMessages>[0]["store"];
+    const lastFetchedSessionIdRef = { current: null as string | null };
+    const initialFetchStartRef = { current: null as number | null };
+
+    await doFetchMessages({
+      taskSessionId: SESSION_ID,
+      store,
+      setIsLoading: vi.fn(),
+      setIsWaitingForInitialMessages: vi.fn(),
+      setHistoryStatus: vi.fn(),
+      setHistoryError: vi.fn(),
+      initialFetchStartRef,
+      lastFetchedSessionIdRef,
+      fetchAndStoreMessages: vi.fn().mockRejectedValue(new Error("history unavailable")),
+      onError: vi.fn(),
+    });
+
+    expect(setMessages).not.toHaveBeenCalled();
+    expect(lastFetchedSessionIdRef.current).toBeNull();
   });
 });

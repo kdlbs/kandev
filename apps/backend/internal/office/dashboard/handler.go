@@ -12,6 +12,7 @@ import (
 	"github.com/kandev/kandev/internal/office/models"
 	"github.com/kandev/kandev/internal/office/repository/sqlite"
 	"github.com/kandev/kandev/internal/office/shared"
+	"github.com/kandev/kandev/internal/task/repository/repoerrors"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 
 	"go.uber.org/zap"
@@ -24,6 +25,17 @@ type labelFetcher interface {
 	ListLabelsForTasks(ctx context.Context, taskIDs []string) (map[string][]*sqlite.Label, error)
 }
 
+// ActiveSourceChecker reports whether a workspace has an Office config sync
+// source configured, so Handler can refuse the git write routes that would
+// otherwise race a second reconciler over the same workspace files
+// (AC-OFFICE-CONFIG-SYNC-005.2/005.2b). Declared locally so this package
+// gains no import to internal/office/configsync; the composition root
+// (internal/office/routes.go) supplies the real implementation via
+// configsync.Service.HasActiveSource.
+type ActiveSourceChecker interface {
+	HasActiveSource(ctx context.Context, workspaceID string) (bool, error)
+}
+
 // Handler provides HTTP handlers for dashboard, inbox, activity, run,
 // task search, git, and meta routes.
 type Handler struct {
@@ -32,7 +44,9 @@ type Handler struct {
 	gitMgr       *configloader.GitManager
 	runDetail    RunDetailRepo
 	agentSummary AgentSummaryRepository
+	loopHealth   LoopHealthRepo
 	handoff      *taskservice.HandoffService
+	guard        ActiveSourceChecker
 	logger       *logger.Logger
 }
 
@@ -46,12 +60,15 @@ type Handler struct {
 // handoff may be nil in tests that never exercise the agent-caller comment
 // read branch; an agent request against a nil handoff responds 503 rather
 // than panicking (mirrors the runDetail/agentSummary nil-dependency pattern).
-func NewHandler(svc *DashboardService, labelRepo labelFetcher, gitMgr *configloader.GitManager, handoff *taskservice.HandoffService, log *logger.Logger) *Handler {
+// guard may be nil (no config sync service wired), in which case no
+// workspace is ever treated as having an active config sync source.
+func NewHandler(svc *DashboardService, labelRepo labelFetcher, gitMgr *configloader.GitManager, handoff *taskservice.HandoffService, guard ActiveSourceChecker, log *logger.Logger) *Handler {
 	h := &Handler{
 		svc:     svc,
 		labels:  labelRepo,
 		gitMgr:  gitMgr,
 		handoff: handoff,
+		guard:   guard,
 		logger:  log.WithFields(zap.String("component", "office-dashboard-handler")),
 	}
 	if r, ok := labelRepo.(RunDetailRepo); ok {
@@ -60,12 +77,15 @@ func NewHandler(svc *DashboardService, labelRepo labelFetcher, gitMgr *configloa
 	if r, ok := labelRepo.(AgentSummaryRepository); ok {
 		h.agentSummary = r
 	}
+	if r, ok := labelRepo.(LoopHealthRepo); ok {
+		h.loopHealth = r
+	}
 	return h
 }
 
 // RegisterRoutes registers all dashboard-related routes on the given router group.
-func RegisterRoutes(api *gin.RouterGroup, svc *DashboardService, labelRepo labelFetcher, gitMgr *configloader.GitManager, handoff *taskservice.HandoffService, log *logger.Logger) {
-	h := NewHandler(svc, labelRepo, gitMgr, handoff, log)
+func RegisterRoutes(api *gin.RouterGroup, svc *DashboardService, labelRepo labelFetcher, gitMgr *configloader.GitManager, handoff *taskservice.HandoffService, guard ActiveSourceChecker, log *logger.Logger) {
+	h := NewHandler(svc, labelRepo, gitMgr, handoff, guard, log)
 
 	api.GET("/meta", h.getMeta)
 	api.GET("/workspaces/:wsId/dashboard", h.getDashboard)
@@ -111,6 +131,8 @@ func RegisterRoutes(api *gin.RouterGroup, svc *DashboardService, labelRepo label
 	api.GET("/workspaces/:wsId/routing/preview", h.getWorkspaceRoutingPreview)
 	api.GET("/runs/:id/attempts", h.listRunAttempts)
 	api.GET("/agents/:id/route", h.getAgentRoute)
+
+	registerLoopHealthRoutes(api, h)
 }
 
 // -- Dashboard --
@@ -523,6 +545,7 @@ func taskRowToDTO(r *sqlite.TaskRow, lbls []*sqlite.Label) *TaskDTO {
 		ParentID:               r.ParentID,
 		ProjectID:              r.ProjectID,
 		AssigneeAgentProfileID: r.AssigneeAgentProfileID,
+		AssigneeUserID:         r.AssigneeUserID,
 		Labels:                 labels,
 		Reviewers:              []string{},
 		Approvers:              []string{},
@@ -554,6 +577,10 @@ type UpdateTaskRequest struct {
 	// string → clear). The picker UI sends "" when the user picks
 	// "No assignee".
 	AssigneeAgentProfileID *string `json:"assignee_agent_profile_id"`
+	// AssigneeUserID is the HUMAN assignee and is entirely separate from the
+	// agent assignee above: sending one never clears the other. Same pointer
+	// convention — nil is "leave alone", "" is "clear".
+	AssigneeUserID *string `json:"assignee_user_id,omitempty"`
 	// Priority is one of "critical" | "high" | "medium" | "low" when set.
 	Priority *string `json:"priority,omitempty"`
 	// ProjectID empty string clears the project; otherwise must be a project
@@ -578,7 +605,7 @@ func (req *UpdateTaskRequest) hasAnyField() bool {
 	if req.Status != "" || req.Comment != "" {
 		return true
 	}
-	if req.AssigneeAgentProfileID != nil ||
+	if req.AssigneeAgentProfileID != nil || req.AssigneeUserID != nil ||
 		req.Priority != nil || req.ProjectID != nil || req.ParentID != nil {
 		return true
 	}
@@ -616,12 +643,18 @@ func (h *Handler) updateTask(c *gin.Context) {
 // whether all writes succeeded. When a mutation fails the handler responds
 // with the appropriate status code and applyTaskMutations returns false.
 //
-// Order: assignee → priority → project → parent → status.
+// Order: assignee (agent, then human) → priority → project → parent → status.
 // Status is last because it triggers the reactivity pipeline.
 func (h *Handler) applyTaskMutations(c *gin.Context, taskID, actorAgentID string, req *UpdateTaskRequest) bool {
 	ctx := c.Request.Context()
 	if req.AssigneeAgentProfileID != nil {
 		if err := h.svc.SetTaskAssigneeAsAgent(ctx, actorAgentID, taskID, *req.AssigneeAgentProfileID); err != nil {
+			respondMutationError(c, err)
+			return false
+		}
+	}
+	if req.AssigneeUserID != nil {
+		if err := h.svc.SetTaskAssigneeUser(ctx, taskID, *req.AssigneeUserID); err != nil {
 			respondMutationError(c, err)
 			return false
 		}
@@ -662,16 +695,24 @@ func (h *Handler) applyTaskMutations(c *gin.Context, taskID, actorAgentID string
 }
 
 // respondStatusUpdateError translates UpdateTaskStatus errors into HTTP
-// responses. ApprovalsPendingError → 409 with a body listing pending
-// approvers (resolved to {agent_profile_id, name}) and the redirected
-// status. Everything else → 400.
+// responses. Gate errors return 409 with a stable reason, pending approvers,
+// and the redirected status. Everything else returns 400.
 func (h *Handler) respondStatusUpdateError(c *gin.Context, err error) {
 	var pending *ApprovalsPendingError
 	if errors.As(err, &pending) {
 		c.JSON(http.StatusConflict, gin.H{
 			"error":             err.Error(),
+			"reason":            pending.ReasonCode(),
 			"pending_approvers": h.svc.resolvePendingApprovers(c.Request.Context(), pending.Pending),
 			"status":            statusInReviewLowercase,
+		})
+		return
+	}
+	var stepChanged *WorkflowStepChangedError
+	if errors.As(err, &stepChanged) {
+		c.JSON(http.StatusConflict, gin.H{
+			"error":  err.Error(),
+			"reason": "workflow_step_changed",
 		})
 		return
 	}
@@ -681,8 +722,25 @@ func (h *Handler) respondStatusUpdateError(c *gin.Context, err error) {
 // respondMutationError translates a mutation error into the matching HTTP
 // response. Forbidden bubbles up as 403; everything else as 500.
 func respondMutationError(c *gin.Context, err error) {
-	if errors.Is(err, shared.ErrForbidden) {
+	if errors.Is(err, shared.ErrForbidden) || taskservice.IsForbidden(err) {
 		c.JSON(http.StatusForbidden, gin.H{"error": err.Error()})
+		return
+	}
+	// The human-assignee mutation delegates to the task service, which applies
+	// the 404-vs-403 rule: a caller who cannot see the task at all gets
+	// "not found" so its existence is not leaked, while a caller who can see it
+	// but lacks task.write gets a plain 403. Without this branch both surface
+	// as 500, which reads as a server fault rather than a decision.
+	if errors.Is(err, repoerrors.ErrTaskNotFound) {
+		c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+		return
+	}
+	// A rejected assignee is the caller picking a person who cannot reach the
+	// workspace, not a server fault. The picker lists everyone in the user
+	// directory because reach is not computable client-side, so this is a
+	// reachable outcome and its message is written to be shown as-is.
+	if errors.Is(err, taskservice.ErrAssigneeCannotReachWorkspace) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 	c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})

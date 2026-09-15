@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1200 680" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="workflow-sync-title workflow-sync-desc" width="1200" height="680">
+      <title id="workflow-sync-title">Sync reconciles valid files safely</title>
+      <desc id="workflow-sync-desc">A workflow sync flowchart fetches a repository directory, parses each file, branches on validation, reconciles valid workflows by source path and name, freezes invalid-file workflows with a warning, applies safe changes, and returns a sync result.</desc>
+      <defs><style>@import url('https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&amp;family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500;600&amp;display=swap');</style>
+        <marker id="workflow-sync-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#a1a1a1"/></marker>
+        <marker id="workflow-sync-arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#6468f0"/></marker>
+      </defs>
+      <rect width="1200" height="680" fill="#0d0d10"/>
+
+      <!-- Flow connectors are painted before every node. -->
+      <line x1="600" y1="96" x2="600" y2="128" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#workflow-sync-arrow)"/>
+      <line x1="600" y1="192" x2="600" y2="228" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#workflow-sync-arrow)"/>
+      <line x1="600" y1="292" x2="600" y2="324" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#workflow-sync-arrow)"/>
+      <line x1="720" y1="360" x2="800" y2="360" stroke="#6468f0" stroke-width="1.4" marker-end="url(#workflow-sync-arrow-accent)"/>
+      <line x1="480" y1="360" x2="400" y2="360" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#workflow-sync-arrow)"/>
+      <path d="M920 392 V432 Q920 440 912 440 H608 Q600 440 600 448" fill="none" stroke="#6468f0" stroke-width="1.4" marker-end="url(#workflow-sync-arrow-accent)"/>
+      <path d="M280 392 V432 Q280 440 288 440 H592 Q600 440 600 448" fill="none" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#workflow-sync-arrow)"/>
+      <line x1="600" y1="456" x2="600" y2="480" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#workflow-sync-arrow)"/>
+      <line x1="600" y1="544" x2="600" y2="584" stroke="#a1a1a1" stroke-width="1.2" marker-end="url(#workflow-sync-arrow)"/>
+
+      <rect x="608" y="102" width="56" height="12" rx="2" fill="#0d0d10"/>
+      <text x="636" y="111" fill="#a1a1a1" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.06em">FETCH</text>
+      <rect x="608" y="198" width="64" height="12" rx="2" fill="#0d0d10"/>
+      <text x="640" y="207" fill="#a1a1a1" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.06em">PARSE</text>
+      <rect x="732" y="342" width="56" height="12" rx="2" fill="#0d0d10"/>
+      <text x="760" y="351" fill="#6468f0" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.06em">VALID</text>
+      <rect x="412" y="342" width="72" height="12" rx="2" fill="#0d0d10"/>
+      <text x="448" y="351" text-anchor="middle" fill="#a1a1a1" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.06em">INVALID</text>
+      <rect x="928" y="416" width="80" height="12" rx="2" fill="#0d0d10"/>
+      <text x="968" y="425" text-anchor="middle" fill="#6468f0" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.06em">RECONCILE</text>
+      <rect x="192" y="416" width="80" height="12" rx="2" fill="#0d0d10"/>
+      <text x="232" y="425" text-anchor="middle" fill="#a1a1a1" font-size="8" font-family="'Geist Mono',monospace" letter-spacing="0.06em">FREEZE</text>
+
+      <g role="group" aria-label="Repository workflow files">
+        <ellipse cx="600" cy="68" rx="120" ry="28" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="600" y="64" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" font-family="'Figtree','Geist',sans-serif">Workflow files</text>
+        <text x="600" y="80" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono',monospace">Git source of truth</text>
+      </g>
+      <g role="group" aria-label="Fetch branch and directory">
+        <rect x="480" y="128" width="240" height="64" rx="6" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <rect x="488" y="136" width="48" height="12" rx="2" fill="transparent" stroke="rgba(255,255,255,0.28)" stroke-width="0.8"/>
+        <text x="512" y="145" text-anchor="middle" fill="#a1a1a1" font-size="7" font-family="'Geist Mono',monospace" letter-spacing="0.08em">READ</text>
+        <text x="600" y="164" text-anchor="middle" fill="#ffffff" font-size="15" font-weight="600" font-family="'Figtree','Geist',sans-serif">Fetch branch + directory</text>
+        <text x="600" y="182" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono',monospace">immediate files only</text>
+      </g>
+      <g role="group" aria-label="Parse each file">
+        <rect x="480" y="228" width="240" height="64" rx="6" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <rect x="488" y="236" width="64" height="12" rx="2" fill="transparent" stroke="rgba(255,255,255,0.28)" stroke-width="0.8"/>
+        <text x="520" y="245" text-anchor="middle" fill="#a1a1a1" font-size="7" font-family="'Geist Mono',monospace" letter-spacing="0.08em">VALIDATE</text>
+        <text x="600" y="264" text-anchor="middle" fill="#ffffff" font-size="15" font-weight="600" font-family="'Figtree','Geist',sans-serif">Parse each file</text>
+        <text x="600" y="282" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono',monospace">YAML / JSON envelope</text>
+      </g>
+      <g role="group" aria-label="File validation decision">
+        <polygon points="600,324 720,360 600,396 480,360" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="600" y="356" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" font-family="'Figtree','Geist',sans-serif">File valid?</text>
+        <text x="600" y="372" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono',monospace">per-file decision</text>
+      </g>
+      <g role="group" aria-label="Reconcile valid workflows">
+        <rect x="800" y="328" width="240" height="64" rx="6" fill="rgba(100,104,240,0.16)" stroke="#6468f0" stroke-width="1.2"/>
+        <rect x="808" y="336" width="56" height="12" rx="2" fill="transparent" stroke="rgba(100,104,240,0.60)" stroke-width="0.8"/>
+        <text x="836" y="345" text-anchor="middle" fill="#6468f0" font-size="7" font-family="'Geist Mono',monospace" letter-spacing="0.08em">MATCH</text>
+        <text x="920" y="364" text-anchor="middle" fill="#ffffff" font-size="15" font-weight="600" font-family="'Figtree','Geist',sans-serif">Reconcile workflows</text>
+        <text x="920" y="382" text-anchor="middle" fill="#a1a1a1" font-size="9" font-family="'Geist Mono',monospace">exact path + name key</text>
+      </g>
+      <g role="group" aria-label="Freeze invalid workflow and warn">
+        <rect x="160" y="328" width="240" height="64" rx="6" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <rect x="168" y="336" width="56" height="12" rx="2" fill="transparent" stroke="rgba(255,255,255,0.28)" stroke-width="0.8"/>
+        <text x="196" y="345" text-anchor="middle" fill="#a1a1a1" font-size="7" font-family="'Geist Mono',monospace" letter-spacing="0.08em">SAFEGUARD</text>
+        <text x="280" y="364" text-anchor="middle" fill="#ffffff" font-size="15" font-weight="600" font-family="'Figtree','Geist',sans-serif">Freeze + warn</text>
+        <text x="280" y="382" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono',monospace">existing sync-owned state</text>
+      </g>
+      <circle cx="600" cy="456" r="5" fill="#ffffff"/>
+      <g role="group" aria-label="Apply safe changes">
+        <rect x="480" y="480" width="240" height="64" rx="6" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <rect x="488" y="488" width="48" height="12" rx="2" fill="transparent" stroke="rgba(255,255,255,0.28)" stroke-width="0.8"/>
+        <text x="512" y="497" text-anchor="middle" fill="#a1a1a1" font-size="7" font-family="'Geist Mono',monospace" letter-spacing="0.08em">APPLY</text>
+        <text x="600" y="516" text-anchor="middle" fill="#ffffff" font-size="15" font-weight="600" font-family="'Figtree','Geist',sans-serif">Apply safe changes</text>
+        <text x="600" y="534" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono',monospace">create · update · remove</text>
+      </g>
+      <g role="group" aria-label="Sync result">
+        <ellipse cx="600" cy="612" rx="120" ry="28" fill="#111114" stroke="#404040" stroke-width="1"/>
+        <text x="600" y="608" text-anchor="middle" fill="#ffffff" font-size="14" font-weight="600" font-family="'Figtree','Geist',sans-serif">Sync result</text>
+        <text x="600" y="624" text-anchor="middle" fill="#737373" font-size="9" font-family="'Geist Mono',monospace">counts + warnings</text>
+      </g>
+
+      <line x1="40" y1="652" x2="1160" y2="652" stroke="rgba(255,255,255,0.12)" stroke-width="0.8"/>
+      <line x1="64" y1="668" x2="96" y2="668" stroke="#6468f0" stroke-width="1.4" marker-end="url(#workflow-sync-arrow-accent)"/>
+      <text x="112" y="672" fill="#6468f0" font-size="9" font-family="'Geist Mono',monospace" letter-spacing="0.06em">VALID SET</text>
+      <text x="280" y="672" fill="#737373" font-size="9" font-family="'Geist Mono',monospace" letter-spacing="0.06em">INVALID FILES DO NOT DELETE EXISTING WORKFLOWS</text>
+    </svg>

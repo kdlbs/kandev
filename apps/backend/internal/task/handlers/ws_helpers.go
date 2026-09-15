@@ -6,6 +6,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/dto"
+	"github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/task/service"
 	ws "github.com/kandev/kandev/pkg/websocket"
 	"go.uber.org/zap"
@@ -33,6 +34,9 @@ func wsDeleteWithActiveSessionCheck(
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "id is required", nil)
 	}
 	if err := deleteFn(ctx, req.ID); err != nil {
+		if errors.Is(err, service.ErrKubernetesAdminRequired) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, service.ErrKubernetesAdminRequired.Error(), nil)
+		}
 		log.Error("failed to delete "+resourceName, zap.Error(err))
 		if errors.Is(err, service.ErrActiveTaskSessions) {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, resourceName+" is used by an active agent session", nil)
@@ -61,6 +65,9 @@ func wsHandleIDRequest(
 	resp, err := fn(ctx, req.ID)
 	if err != nil {
 		log.Error(errMsg, zap.Error(err))
+		if errors.Is(err, repository.ErrTaskNotFound) {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeNotFound, "Task not found", nil)
+		}
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, errMsg, nil)
 	}
 	return ws.NewResponse(msg.ID, msg.Action, resp)

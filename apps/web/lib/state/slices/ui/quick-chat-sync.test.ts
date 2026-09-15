@@ -48,6 +48,12 @@ function state(sessions: QuickChatSession[], overrides: Partial<QuickChatState> 
     tabOrderByWorkspace: {},
     tabOrderSyncErrorByWorkspace: {},
     tabOrderSyncPendingByWorkspace: {},
+    rememberedSelectionByWorkspace: {},
+    rememberedSelectionOrder: [],
+    selectionStorageIdentity: null,
+    selectionReadyByWorkspace: {},
+    selectionRevisionByWorkspace: {},
+    pendingOpen: null,
     ...overrides,
   };
 }

@@ -75,6 +75,7 @@ func (s *Service) handleClarificationStaleDismissed(ctx context.Context, event *
 	defer release()
 	lock.Lock()
 	defer lock.Unlock()
+	writeCtx = withWorkflowProfileSwitchGuardHeld(writeCtx, data.SessionID, "")
 	if s.isCancelInFlight(data.SessionID) {
 		s.logger.Debug("ignoring stale clarification dismissal while cancellation is in progress",
 			zap.String("task_id", data.TaskID),
@@ -583,14 +584,21 @@ func (s *Service) dispatchClarificationResumeLocked(ctx context.Context, data cl
 		// silently the way a bare false return did.
 		return fmt.Errorf("cannot resume clarification: message queue is not configured")
 	}
-	queued, err := s.messageQueue.QueueMessageWithMetadata(
-		ctx, data.SessionID, data.TaskID, prompt, "", messagequeue.QueuedByAgent, false, nil,
+	identity, err := s.messageQueue.ResolveSessionIdentity(ctx, data.TaskID, data.SessionID)
+	if err != nil {
+		return fmt.Errorf("resolve clarification resume session: %w", err)
+	}
+	queued, err := s.messageQueue.QueueMessageWithMetadataForSession(
+		ctx, identity, prompt, "", messagequeue.QueuedByAgent, false, nil,
 		map[string]interface{}{metaKeyUserMessageRecorded: true},
 	)
 	if err != nil {
 		return fmt.Errorf("queue clarification resume prompt: %w", err)
 	}
-	dispatched, err := s.takeAndDispatchEntryLocked(ctx, data.SessionID, queued.ID)
+	// Queue insertion is observable even when a concurrent drain prevents the
+	// targeted take, so publish before attempting dispatch.
+	s.publishQueueStatusEvent(ctx, data.SessionID)
+	dispatched, err := s.takeAndDispatchEntryLocked(ctx, identity, queued.ID)
 	if err != nil {
 		return fmt.Errorf("dispatch clarification resume prompt: %w", err)
 	}
@@ -876,7 +884,7 @@ func (s *Service) runSilentCancellationOwned(ctx context.Context, taskID, sessio
 		return ErrSendNowTurnChanged
 	}
 	s.setCancellationIdentity(sessionID, operation, identity)
-	if err := s.cancelAgentWhileUnlocked(ctx, sessionID, guard.unlock, guard.relock); err != nil {
+	if err := s.cancelAgentWhileUnlocked(ctx, sessionID, operation, guard.unlock, guard.relock); err != nil {
 		return err
 	}
 	session, err := s.repo.GetTaskSession(ctx, sessionID)
@@ -1024,24 +1032,25 @@ func (s *Service) cancelAgentSilentWithGuardActionKindExclusiveConflict(
 	kind cancellationKind,
 	expectedTurnID string,
 	conflictErr error,
-) (bool, error) {
+) (*cancelOperation, bool, error) {
 	operation, registered, err := s.startExclusiveSilentCancellation(
 		ctx, taskID, sessionID, action, kind, expectedTurnID, conflictErr,
 	)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	if unlockGuard != nil {
 		unlockGuard()
 		defer relockGuard()
 	}
 	if err := operation.wait(ctx); err != nil {
-		return false, err
+		return operation, false, err
 	}
 	if registered == nil {
-		return false, nil
+		return operation, false, nil
 	}
-	return registered.wait(ctx)
+	dispatched, err := registered.wait(ctx)
+	return operation, dispatched, err
 }
 
 func (s *Service) logSilentCancelReconciled(taskID, sessionID string, err error) {

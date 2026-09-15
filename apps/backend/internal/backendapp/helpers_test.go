@@ -22,8 +22,11 @@ import (
 	"github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/events/bus"
 	gateways "github.com/kandev/kandev/internal/gateway/websocket"
+	"github.com/kandev/kandev/internal/github"
 	"github.com/kandev/kandev/internal/quickterminal"
 	quickterminalrepo "github.com/kandev/kandev/internal/quickterminal/repository"
+	systemsvc "github.com/kandev/kandev/internal/system"
+	systeminfo "github.com/kandev/kandev/internal/system/info"
 	storagepkg "github.com/kandev/kandev/internal/system/storage"
 	storageworkspaces "github.com/kandev/kandev/internal/system/storage/workspaces"
 	taskdto "github.com/kandev/kandev/internal/task/dto"
@@ -148,6 +151,48 @@ func TestBuildGitStatusNotificationIncludesAncestryEvidence(t *testing.T) {
 		if got := status[key]; got != want {
 			t.Errorf("status[%q] = %#v, want %#v", key, got, want)
 		}
+	}
+}
+
+func TestMCPTaskPRListerAdapterPreservesGitHubChangeFacts(t *testing.T) {
+	ctx := context.Background()
+	store := newStatusSummaryTestStore(t)
+	draft := true
+	pr := &github.TaskPR{
+		TaskID:       "task-change-facts",
+		RepositoryID: "repo-change-facts",
+		PRNumber:     42,
+		PRURL:        "https://github.com/acme/api/pull/42",
+		PRTitle:      "Preserve exact facts",
+		State:        "open",
+		BaseBranch:   "main",
+		HeadBranch:   "feature/facts",
+		HeadSHA:      "head-sha-42",
+		IsDraft:      &draft,
+		CreatedAt:    time.Now().UTC(),
+	}
+	if err := store.CreateTaskPR(ctx, pr); err != nil {
+		t.Fatalf("CreateTaskPR: %v", err)
+	}
+
+	adapter := mcpTaskPRListerAdapter{gh: github.NewService(nil, "", nil, store, nil, nil)}
+	byTask, err := adapter.ListTaskPRsByTaskIDs(ctx, []string{pr.TaskID})
+	if err != nil {
+		t.Fatalf("ListTaskPRsByTaskIDs: %v", err)
+	}
+	infos := byTask[pr.TaskID]
+	if len(infos) != 1 {
+		t.Fatalf("infos = %#v, want one association", infos)
+	}
+	got := infos[0]
+	if got.RepositoryID != pr.RepositoryID || got.Number != pr.PRNumber || got.URL != pr.PRURL || got.Title != pr.PRTitle || got.State != pr.State || got.BaseRef != pr.BaseBranch || got.HeadRef != pr.HeadBranch {
+		t.Fatalf("adapter facts = %#v", got)
+	}
+	if got.Draft == nil || !*got.Draft {
+		t.Fatalf("Draft = %v, want true", got.Draft)
+	}
+	if got.HeadSHA != pr.HeadSHA {
+		t.Fatalf("HeadSHA = %q, want %q", got.HeadSHA, pr.HeadSHA)
 	}
 }
 
@@ -470,7 +515,7 @@ func (s *shutdownDeadlineExecutor) StopInstance(
 	return nil
 }
 
-func (s *shutdownDeadlineExecutor) RecoverInstances(context.Context) ([]*lifecycle.ExecutorInstance, error) {
+func (s *shutdownDeadlineExecutor) RecoverInstances(context.Context, []*models.ExecutorRunning) ([]*lifecycle.ExecutorInstance, error) {
 	return nil, nil
 }
 
@@ -1430,6 +1475,34 @@ func TestBootPayloadOmitsUnsetTitlePrefix(t *testing.T) {
 	}
 }
 
+func TestBootPayloadCarriesSystemInfoBootID(t *testing.T) {
+	t.Parallel()
+
+	infoSvc := systeminfo.NewService("version", "commit", "build-time")
+	payload := bootPayload(
+		context.Background(),
+		nil,
+		routeParams{systemSvc: &systemsvc.Service{Info: infoSvc}},
+		webapp.ClassifyRoute("/"),
+	)
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("Marshal payload: %v", err)
+	}
+	var decoded struct {
+		Runtime struct {
+			BootID string `json:"bootId"`
+		} `json:"runtime"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("Unmarshal payload: %v", err)
+	}
+	if decoded.Runtime.BootID != infoSvc.Info().BootID {
+		t.Fatalf("runtime.bootId = %q, want %q", decoded.Runtime.BootID, infoSvc.Info().BootID)
+	}
+}
+
 func TestBootPayloadRestoresQuickChatSessions(t *testing.T) {
 	harness := newBootStateTestHarness(t)
 	ctx := context.Background()
@@ -1927,6 +2000,15 @@ type bootStateTestHarness struct {
 	userSvc     *userservice.Service
 }
 
+// testWorkspacePolicyAttacher keeps boot-state tests focused on route and
+// service composition while satisfying the service's required attachment
+// boundary. Production wiring installs HandoffService here.
+type testWorkspacePolicyAttacher struct{}
+
+func (testWorkspacePolicyAttacher) AttachWorkspacePolicy(context.Context, string, string, taskservice.WorkspacePolicy) error {
+	return nil
+}
+
 func newBootStateTestServices(t *testing.T) (*taskservice.Service, *workflowservice.Service) {
 	harness := newBootStateTestHarness(t)
 	return harness.taskSvc, harness.workflowSvc
@@ -1988,6 +2070,7 @@ func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 			TaskEnvironments: taskRepo,
 			Reviews:          taskRepo,
 			StatusSummaries:  taskRepo,
+			WorkspaceFolders: taskRepo,
 		},
 		eventBus,
 		log,
@@ -1997,6 +2080,7 @@ func newBootStateTestHarness(t *testing.T) bootStateTestHarness {
 	taskSvc.SetWorkspaceBootstrapper(taskRepo)
 	taskSvc.SetWorkflowStepGetter(&workflowStepGetterAdapter{svc: workflowSvc})
 	taskSvc.SetStartStepResolver(&startStepResolverAdapter{svc: workflowSvc})
+	taskSvc.SetWorkspacePolicyAttacher(testWorkspacePolicyAttacher{})
 	workflowSvc.SetWorkflowProvider(&workflowProviderAdapter{svc: taskSvc})
 	return bootStateTestHarness{
 		db:          sqlxDB,

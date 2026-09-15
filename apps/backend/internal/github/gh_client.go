@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"net/url"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -770,6 +772,40 @@ func (c *GHClient) ListCheckRuns(ctx context.Context, owner, repo, ref string) (
 	return mergeChecks(convertRawCheckRuns(checkRunsRaw), convertRawStatusContexts(statusRaw)), nil
 }
 
+func (c *GHClient) ListWorkflowRuns(ctx context.Context, owner, repo, headSHA string) ([]WorkflowRun, error) {
+	runsOut, err := c.run(ctx, "api", "--paginate",
+		fmt.Sprintf("repos/%s/%s/actions/runs?head_sha=%s&per_page=100", owner, repo, url.QueryEscape(headSHA)),
+		"--jq", ".workflow_runs[]")
+	if err != nil {
+		return nil, fmt.Errorf("list workflow runs: %w", err)
+	}
+	runsRaw, err := decodeGHWorkflowRuns(runsOut)
+	if err != nil {
+		return nil, fmt.Errorf("parse workflow runs: %w", err)
+	}
+	runs := make([]WorkflowRun, 0, len(runsRaw))
+	for _, raw := range runsRaw {
+		runs = append(runs, convertRawWorkflowRun(raw))
+	}
+	return runs, nil
+}
+
+func (c *GHClient) ListWorkflowRunJobs(ctx context.Context, owner, repo string, runID int64, attempt int) ([]WorkflowJob, error) {
+	endpoint := fmt.Sprintf("repos/%s/%s/actions/runs/%d/jobs?per_page=100", owner, repo, runID)
+	if attempt > 0 {
+		endpoint = fmt.Sprintf("repos/%s/%s/actions/runs/%d/attempts/%d/jobs?per_page=100", owner, repo, runID, attempt)
+	}
+	jobsOut, err := c.run(ctx, "api", "--paginate", endpoint, "--jq", ".jobs[]")
+	if err != nil {
+		return nil, fmt.Errorf("list workflow jobs: %w", err)
+	}
+	jobsRaw, err := decodeGHWorkflowJobs(jobsOut)
+	if err != nil {
+		return nil, fmt.Errorf("parse workflow jobs: %w", err)
+	}
+	return convertRawWorkflowJobs(jobsRaw), nil
+}
+
 // decodeGHCheckRuns decodes whitespace-separated JSON check-run objects
 // emitted by gh --paginate --jq '.check_runs[]'.
 func decodeGHCheckRuns(out string) ([]ghCheckRun, error) {
@@ -855,6 +891,75 @@ func isForbiddenErr(err error) bool {
 	return strings.Contains(s, "HTTP 403") ||
 		strings.Contains(s, "403 Forbidden") ||
 		strings.Contains(s, "status: 403")
+}
+
+// isUnauthorizedErr matches the formats the `gh` CLI uses to report a 401
+// (expired or revoked credential).
+func isUnauthorizedErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "HTTP 401") ||
+		strings.Contains(s, "401 Unauthorized") ||
+		strings.Contains(s, "status: 401")
+}
+
+// isRateLimitedErr matches the formats the `gh` CLI uses to report a 429.
+func isRateLimitedErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "HTTP 429") ||
+		strings.Contains(s, "429 Too Many Requests") ||
+		strings.Contains(s, "status: 429")
+}
+
+// ghServerErrPattern extracts a 5xx status from gh CLI stderr. Unlike the
+// single-status matchers above, a server error can be any code in the range,
+// so this is a pattern rather than an enumeration; every 5xx classifies the
+// same way (config sync's ErrUnavailable), so the exact code only matters for
+// diagnostics.
+var ghServerErrPattern = regexp.MustCompile(`(?:HTTP |status: )(5\d\d)\b`)
+
+func ghServerErrStatusCode(err error) (int, bool) {
+	if err == nil {
+		return 0, false
+	}
+	m := ghServerErrPattern.FindStringSubmatch(err.Error())
+	if m == nil {
+		return 0, false
+	}
+	code, convErr := strconv.Atoi(m[1])
+	if convErr != nil {
+		return 0, false
+	}
+	return code, true
+}
+
+// ghClassifyContentsErr promotes a gh CLI repo-contents failure to a
+// *GitHubAPIError for every status config sync's fetch-error classification
+// needs to see: 404 (existing, unchanged), 401, 403, 429, and any 5xx.
+// Returns nil when the error matches none of those, so the caller falls back
+// to a bare wrapped error — which is exactly right, since an unclassified
+// status belongs in the residue class by exclusion, not by a guess here.
+func ghClassifyContentsErr(err error, endpoint string) *GitHubAPIError {
+	switch {
+	case isNotFoundErr(err):
+		return &GitHubAPIError{StatusCode: http.StatusNotFound, Endpoint: endpoint, Body: err.Error()}
+	case isUnauthorizedErr(err):
+		return &GitHubAPIError{StatusCode: http.StatusUnauthorized, Endpoint: endpoint, Body: err.Error()}
+	case isForbiddenErr(err):
+		return &GitHubAPIError{StatusCode: http.StatusForbidden, Endpoint: endpoint, Body: err.Error()}
+	case isRateLimitedErr(err):
+		return &GitHubAPIError{StatusCode: http.StatusTooManyRequests, Endpoint: endpoint, Body: err.Error()}
+	default:
+		if code, ok := ghServerErrStatusCode(err); ok {
+			return &GitHubAPIError{StatusCode: code, Endpoint: endpoint, Body: err.Error()}
+		}
+		return nil
+	}
 }
 
 func (c *GHClient) ListPRFiles(ctx context.Context, owner, repo string, number int) ([]PRFile, error) {
@@ -1139,18 +1244,16 @@ func (c *GHClient) DeleteGist(ctx context.Context, gistID string) error {
 }
 
 // ListRepoDirectory lists the entries of a directory in a repository at the
-// given ref via `gh api repos/{owner}/{repo}/contents/{path}`. A 404 (missing
-// directory) is promoted to a *GitHubAPIError, mirroring PATClient.
+// given ref via `gh api repos/{owner}/{repo}/contents/{path}`. 404 (missing
+// directory), 401, 403, 429, and any 5xx are promoted to a *GitHubAPIError,
+// mirroring PATClient.
 func (c *GHClient) ListRepoDirectory(ctx context.Context, owner, repo, dir, ref string) ([]RepoContentEntry, error) {
 	args := ghContentsArgs(owner, repo, dir, ref)
 	out, err := c.run(ctx, args...)
 	if err != nil {
-		if isNotFoundErr(err) {
-			return nil, &GitHubAPIError{
-				StatusCode: http.StatusNotFound,
-				Endpoint:   fmt.Sprintf("repos/%s/%s/contents/%s", owner, repo, repoContentsPath(dir)),
-				Body:       err.Error(),
-			}
+		endpoint := fmt.Sprintf("repos/%s/%s/contents/%s", owner, repo, repoContentsPath(dir))
+		if apiErr := ghClassifyContentsErr(err, endpoint); apiErr != nil {
+			return nil, apiErr
 		}
 		return nil, fmt.Errorf("list repo directory: %w", err)
 	}
@@ -1162,18 +1265,16 @@ func (c *GHClient) ListRepoDirectory(ctx context.Context, owner, repo, dir, ref 
 }
 
 // GetRepoFileContent fetches the raw decoded content of a single file via
-// `gh api repos/{owner}/{repo}/contents/{path}`. A 404 (missing file) is
-// promoted to a *GitHubAPIError, mirroring PATClient.
+// `gh api repos/{owner}/{repo}/contents/{path}`. 404 (missing file), 401,
+// 403, 429, and any 5xx are promoted to a *GitHubAPIError, mirroring
+// PATClient.
 func (c *GHClient) GetRepoFileContent(ctx context.Context, owner, repo, path, ref string) ([]byte, error) {
 	args := ghContentsArgs(owner, repo, path, ref)
 	out, err := c.run(ctx, args...)
 	if err != nil {
-		if isNotFoundErr(err) {
-			return nil, &GitHubAPIError{
-				StatusCode: http.StatusNotFound,
-				Endpoint:   fmt.Sprintf("repos/%s/%s/contents/%s", owner, repo, repoContentsPath(path)),
-				Body:       err.Error(),
-			}
+		endpoint := fmt.Sprintf("repos/%s/%s/contents/%s", owner, repo, repoContentsPath(path))
+		if apiErr := ghClassifyContentsErr(err, endpoint); apiErr != nil {
+			return nil, apiErr
 		}
 		return nil, fmt.Errorf("get repo file content: %w", err)
 	}

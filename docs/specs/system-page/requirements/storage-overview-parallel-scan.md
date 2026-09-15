@@ -2,6 +2,7 @@
 status: active
 system: system-page
 created: 2026-08-08
+updated: 2026-09-05
 owners:
   - kandev
 ---
@@ -27,6 +28,37 @@ The Storage maintenance page currently waits for a cold overview scan before it 
 - **AC-SYSTEM-PAGE-STORAGE-OVERVIEW-PARALLEL-SCAN-001.6:** a progress bar with the same value exposed through `aria-valuenow`;
 - **AC-SYSTEM-PAGE-STORAGE-OVERVIEW-PARALLEL-SCAN-001.7:** used, available, and total capacity in the existing GB formatting; and
 - **AC-SYSTEM-PAGE-STORAGE-OVERVIEW-PARALLEL-SCAN-001.8:** the measured storage path or a localized explanation when the capacity read is unavailable.
+
+### REQ-SYSTEM-PAGE-STORAGE-OVERVIEW-PARALLEL-SCAN-002: Progressive storage analysis
+
+**Intent:** Operators need useful storage information while Kandev scans large directory trees.
+They also need clear freshness details for each completed snapshot.
+
+**User story:** As an operator, I want progressive storage results and scan timing, so that I can
+understand long scans and the freshness of displayed values.
+
+#### Acceptance criteria
+
+- **AC-SYSTEM-PAGE-STORAGE-OVERVIEW-PARALLEL-SCAN-002.1:** When no fresh snapshot exists, the
+  Storage page shall start or join one background scan without waiting for directory traversal.
+- **AC-SYSTEM-PAGE-STORAGE-OVERVIEW-PARALLEL-SCAN-002.2:** During the first scan, the analysis card
+  shall show each completed source while unfinished sources retain distinct progress states.
+- **AC-SYSTEM-PAGE-STORAGE-OVERVIEW-PARALLEL-SCAN-002.3:** During the first scan, the page shall
+  identify every aggregate as incomplete and shall never present scanned bytes as a final total.
+- **AC-SYSTEM-PAGE-STORAGE-OVERVIEW-PARALLEL-SCAN-002.4:** When a completed snapshot expires, the
+  page shall keep that snapshot visible while one background refresh replaces it atomically.
+- **AC-SYSTEM-PAGE-STORAGE-OVERVIEW-PARALLEL-SCAN-002.5:** While the page is open, live events shall
+  update scan progress. A polling fallback shall recover missed events within two seconds.
+- **AC-SYSTEM-PAGE-STORAGE-OVERVIEW-PARALLEL-SCAN-002.6:** A completed snapshot shall include scan
+  duration, cache lifetime, and the next refresh time in a localized information disclosure.
+- **AC-SYSTEM-PAGE-STORAGE-OVERVIEW-PARALLEL-SCAN-002.7:** The disclosure shall open by pointer
+  hover, keyboard focus, or activation. Its phone trigger shall provide a 44-pixel touch target.
+- **AC-SYSTEM-PAGE-STORAGE-OVERVIEW-PARALLEL-SCAN-002.8:** While the Storage page stays open, Kandev
+  shall request a refresh when the snapshot reaches its refresh time. **Analyze** shall refresh now.
+- **AC-SYSTEM-PAGE-STORAGE-OVERVIEW-PARALLEL-SCAN-002.9:** When a refresh fails, Kandev shall keep
+  the last successful snapshot and shall show the failed attempt without changing its measurement time.
+- **AC-SYSTEM-PAGE-STORAGE-OVERVIEW-PARALLEL-SCAN-002.10:** Concurrent requests and manual analysis
+  shall join one scan. Invalidated or older scans shall not overwrite newer progress or snapshots.
 
 ## Migrated source detail
 

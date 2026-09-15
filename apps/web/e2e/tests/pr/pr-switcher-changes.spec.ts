@@ -1,6 +1,8 @@
 import { test, expect } from "../../fixtures/test-base";
+import { GitHelper, makeGitEnv } from "../../helpers/git-helper";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
+import path from "node:path";
 
 test.describe("PR switcher changes panel", () => {
   /**
@@ -18,6 +20,7 @@ test.describe("PR switcher changes panel", () => {
     testPage,
     apiClient,
     seedData,
+    backend,
   }) => {
     test.setTimeout(120_000);
 
@@ -45,6 +48,13 @@ test.describe("PR switcher changes panel", () => {
     // --- Seed mock GitHub data ---
     await apiClient.mockGitHubReset();
     await apiClient.mockGitHubSetUser("test-user");
+    const git = new GitHelper(
+      path.join(backend.tmpDir, "repos", "e2e-repo"),
+      makeGitEnv(backend.tmpDir),
+    );
+    git.createFile("auth-fix-task.txt", "auth fix task commit");
+    git.stageFile("auth-fix-task.txt");
+    const authCommitSHA = git.commit("fix auth token expiry");
 
     // PR #101 files and commits
     await apiClient.mockGitHubAddPRs([
@@ -57,6 +67,7 @@ test.describe("PR switcher changes panel", () => {
         author_login: "test-user",
         repo_owner: "testorg",
         repo_name: "testrepo",
+        head_sha: authCommitSHA,
         additions: 35,
         deletions: 3,
       },
@@ -80,7 +91,7 @@ test.describe("PR switcher changes panel", () => {
     ]);
     await apiClient.mockGitHubAddPRCommits("testorg", "testrepo", 101, [
       {
-        sha: "aaa1111222233334444555566667777aaaabbbb",
+        sha: authCommitSHA,
         message: "fix auth token expiry",
         author_login: "test-user",
         author_date: "2026-03-01T12:00:00Z",
@@ -162,6 +173,7 @@ test.describe("PR switcher changes panel", () => {
       head_branch: "main",
       base_branch: "main",
       author_login: "test-user",
+      head_sha: authCommitSHA,
       additions: 35,
       deletions: 3,
     });
@@ -198,6 +210,13 @@ test.describe("PR switcher changes panel", () => {
 
     await expect(session.commitsSection()).toBeVisible();
     await expect(session.commitsSection().getByText("fix auth token expiry")).toBeVisible();
+    const authCommitRow = session
+      .commitsSection()
+      .getByTestId(`commit-row-${authCommitSHA.slice(0, 7)}`);
+    await expect(authCommitRow.getByTestId("commit-provenance")).toHaveAttribute(
+      "data-commit-provenance",
+      "pushed",
+    );
 
     // --- Switch to Task B ---
     await session.taskInSidebar("Dashboard Task").click();
@@ -236,6 +255,23 @@ test.describe("PR switcher changes panel", () => {
     await expect(session.changes.getByText("add api client")).not.toBeVisible();
 
     // --- Switch back to Task A to confirm data reappears ---
+    // Force the newly versioned provider request to fail. The last confirmed
+    // same-PR provenance must remain visible while the selected task refreshes.
+    await apiClient.mockGitHubSetPRCommitsFailures("testorg", "testrepo", 101, 100);
+    await apiClient.mockGitHubAssociateTaskPR({
+      task_id: taskA.id,
+      owner: "testorg",
+      repo: "testrepo",
+      pr_number: 101,
+      pr_url: "https://github.com/testorg/testrepo/pull/101",
+      pr_title: "Fix auth bug",
+      head_branch: "main",
+      base_branch: "main",
+      author_login: "test-user",
+      head_sha: authCommitSHA,
+      additions: 35,
+      deletions: 3,
+    });
     await session.taskInSidebar("Auth Fix Task").click();
     await expect(testPage).toHaveURL((url) => url.pathname.includes(taskA.id), {
       timeout: 15_000,
@@ -248,5 +284,9 @@ test.describe("PR switcher changes panel", () => {
     await expect(session.prFilesSection().getByText("auth.go")).toBeVisible();
     await expect(session.prFilesSection().getByText("auth_test.go")).toBeVisible();
     await expect(session.commitsSection().getByText("fix auth token expiry")).toBeVisible();
+    await expect(authCommitRow.getByTestId("commit-provenance")).toHaveAttribute(
+      "data-commit-provenance",
+      "pushed",
+    );
   });
 });

@@ -223,6 +223,15 @@ func (s *Service) CheckSessionMR(ctx context.Context, taskID, sessionID string) 
 	if projectPath == "" || repositoryID == "" {
 		return false, nil
 	}
+
+	// The watch/association write destination is redirected the same way as
+	// push detection (resolveEffectivePushTaskID): this on-demand entry point
+	// is the frontend's manual alternative to that same detection path, so
+	// without the redirect, checking from a shared-worktree subtask would
+	// write gitlab_task_mrs/gitlab_mr_watches under the member instead of the
+	// workspace-group owner, reproducing the multi-binding on demand.
+	effectiveTaskID := s.resolveEffectivePushTaskIDForSession(ctx, sessionID, taskID, repositoryID)
+
 	branch := strings.TrimSpace(s.resolvePRWatchBranch(ctx, taskID, sessionID, ""))
 	if branch == "" {
 		return false, nil
@@ -234,8 +243,8 @@ func (s *Service) CheckSessionMR(ctx context.Context, taskID, sessionID string) 
 	// to (repositoryID, branch) rather than "any MR linked to the task", so a
 	// multi-repo/multi-branch task's on-demand check for one branch isn't
 	// short-circuited by a sibling branch's already-linked MR.
-	if existing := s.gitlabTaskMRFor(ctx, taskID, repositoryID, branch); existing != nil {
-		s.ensureWatchForLinkedMR(ctx, sessionID, taskID, repositoryID, existing)
+	if existing := s.gitlabTaskMRFor(ctx, effectiveTaskID, repositoryID, branch); existing != nil {
+		s.ensureWatchForLinkedMR(ctx, sessionID, effectiveTaskID, repositoryID, existing)
 		return true, nil
 	}
 
@@ -248,13 +257,13 @@ func (s *Service) CheckSessionMR(ctx context.Context, taskID, sessionID string) 
 	// match) before searching, so the background poller keeps checking this
 	// branch even when no MR is open yet — mirrors CheckSessionPR's
 	// EnsurePRWatchForWorkspace-before-lookup ordering.
-	if _, err := s.gitlabMRLinkService.EnsureMRWatch(ctx, sessionID, taskID, repositoryID, projectPath, 0, branch); err != nil {
+	if _, err := s.gitlabMRLinkService.EnsureMRWatch(ctx, sessionID, effectiveTaskID, repositoryID, projectPath, 0, branch); err != nil {
 		s.logger.Warn("failed to ensure MR watch during check",
 			zap.String("session_id", sessionID), zap.Error(err))
 	}
 
 	assoc, err := s.gitlabMRLinkService.AutoLinkMRForBranch(
-		ctx, workspaceID, sessionID, taskID, repositoryID, projectPath, branch,
+		ctx, workspaceID, sessionID, effectiveTaskID, repositoryID, projectPath, branch,
 	)
 	// A real service/store error (e.g. an unconfigured GitLab connection) is
 	// a backend problem, not "no MR is open on this branch" — propagate it

@@ -12,7 +12,9 @@ Use this as the routing map for Kandev's local skills. Prefer the repo's existin
 ```text
 Task arrives
 |
-|-- Need to clarify intent first? ----------> /interview-me
+|-- Standalone interview or stress test? --> /interview-me
+|-- Feature/fix planning assumptions? -----> /interview-me (question only material unknowns)
+|-- Large initiative with dependent unknowns? -> /interview-me decision-mapping reference
 |-- Create/change/fix/publish Kandev plugin? -> /create-kandev-plugin plus /fix or /tdd as needed
 |-- New feature or behavior-changing fix? --> /spec-driven-development
 |-- Bug regression? ------------------------> /fix -> requirement/design check -> fix plan/work orders -> /tdd
@@ -32,7 +34,7 @@ Task arrives
 |-- Need local QA/review/simplification? ----> only on explicit user request or PR finding
 |-- Improve skills/agents/commands? --------> /harness-improvement
 |-- Record decisions/specification changes? -> /record
-|-- Public docs impact? --------------------> /docs-maintainer
+|-- Public docs impact? --------------------> /docs-maintainer -> /diagram-design when a visual helps
 |-- Commit/push/PR? ------------------------> /commit -> /push or /pr
 `-- Release/versioning? --------------------> /release
 ```

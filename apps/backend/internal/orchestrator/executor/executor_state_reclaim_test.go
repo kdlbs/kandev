@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
+	"github.com/kandev/kandev/internal/task/models"
 )
 
 // Reclaiming a remote task directory is irreversible and happens on a machine
@@ -55,7 +56,7 @@ func TestApplyProfileConfigToMetadata_TaskCannotEnableReclaim(t *testing.T) {
 			for k, v := range tc.taskMetadata {
 				metadata[k] = v
 			}
-			applyProfileConfigToMetadata(tc.profileConfig, metadata)
+			applyProfileConfigToMetadata(string(models.ExecutorTypeSSH), tc.profileConfig, metadata)
 
 			got, _ := metadata[lifecycle.MetadataKeySSHReclaimTaskDir].(string)
 			if got != tc.want {

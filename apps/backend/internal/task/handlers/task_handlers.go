@@ -35,6 +35,8 @@ type TaskHandlers struct {
 	orchestrator                  OrchestratorStarter
 	foregroundActivity            dto.ForegroundActivityProvider
 	cancellationPending           dto.CancellationPendingProvider
+	parkedProjection              dto.ParkedProvider
+	taskParkedProjection          dto.TaskParkedProvider
 	repo                          handlerRepo
 	planService                   *service.PlanService
 	handoffSvc                    *service.HandoffService
@@ -77,9 +79,8 @@ type agentProfileRecentUseRecorder interface {
 }
 
 // SetHandoffService wires the office task-handoffs service used by the
-// Kanban subtask path to attach workspace-group membership and the
-// sequential blocker chain (handoffs phase 5). Optional — nil disables
-// post-create attachment, matching the pre-handoffs behaviour.
+// Kanban subtask path. The task service uses the same instance to attach
+// workspace-group membership before any create route returns.
 //
 // Wiring a HandoffService also re-installs the per-user task guard on it. That
 // is not a convenience: this setter is what makes the archive / delete / unarchive
@@ -91,8 +92,13 @@ type agentProfileRecentUseRecorder interface {
 // everywhere else.
 func (h *TaskHandlers) SetHandoffService(svc *service.HandoffService) {
 	h.handoffSvc = svc
-	if svc != nil && h.service != nil {
-		svc.SetTaskAccessChecker(h.service.AuthorizeTaskAccess)
+	if h.service != nil {
+		if svc == nil {
+			h.service.SetWorkspacePolicyAttacher(nil)
+		} else {
+			svc.SetTaskAccessChecker(h.service.AuthorizeTaskAccess)
+			h.service.SetWorkspacePolicyAttacher(svc)
+		}
 	}
 }
 
@@ -153,6 +159,12 @@ func NewTaskHandlers(svc *service.Service, orchestrator OrchestratorStarter, rep
 	if cancellation, ok := orchestrator.(dto.CancellationPendingProvider); ok {
 		h.cancellationPending = cancellation
 	}
+	if parked, ok := orchestrator.(dto.ParkedProvider); ok {
+		h.parkedProjection = parked
+	}
+	if taskParked, ok := orchestrator.(dto.TaskParkedProvider); ok {
+		h.taskParkedProjection = taskParked
+	}
 	return h
 }
 
@@ -184,6 +196,7 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	api.POST("/tasks/:id/environment/reset", h.httpResetTaskEnvironment)
 	api.GET("/task-sessions/:id/turns", h.httpListSessionTurns)
 	api.POST("/tasks", h.httpCreateTask)
+	api.POST("/tasks/delete-preflight", h.httpTaskDeletePreflight)
 	api.PATCH("/tasks/:id", h.httpUpdateTask)
 	api.PATCH("/tasks/:id/port-forwarding", h.httpUpdateTaskPortForwarding)
 	api.POST("/tasks/:id/detach", h.httpDetachTask)
@@ -204,11 +217,17 @@ func (h *TaskHandlers) registerHTTP(router *gin.Engine) {
 	// equivalents of the Office-only blocker routes; both go through the single
 	// validator in the task service.
 	api.POST("/tasks/:id/dependencies", h.httpAddTaskDependency)
+	api.PUT("/tasks/:id/dependencies", h.httpReplaceTaskDependencies)
 	api.DELETE("/tasks/:id/dependencies/:depId", h.httpRemoveTaskDependency)
 
 	api.POST("/tasks/bulk-move", h.httpBulkMoveTasks)
 	api.GET("/workflows/:id/task-count", h.httpGetWorkflowTaskCount)
 	api.GET("/workflow/steps/:id/task-count", h.httpGetStepTaskCount)
+
+	// Kanban task reordering (REQ-TASKS-KANBAN-TASK-REORDERING-001.17): the
+	// only request surface for a reorder, mirroring the hyphenated
+	// collection-reorder precedent PUT /api/v1/workspaces/:id/workflows/reorder.
+	api.PUT("/workflow-steps/:id/tasks/reorder", h.httpReorderStepTasks)
 
 	// Session workflow review endpoints
 	api.POST("/sessions/:id/approve", h.httpApproveSession)
@@ -232,6 +251,7 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskMove, h.wsMoveTask)
 	dispatcher.RegisterFunc(ws.ActionTaskState, h.wsUpdateTaskState)
 	dispatcher.RegisterFunc(ws.ActionTaskArchive, h.wsArchiveTask)
+	dispatcher.RegisterFunc(ws.ActionTaskRunner, h.wsUpdateTaskRunner)
 	dispatcher.RegisterFunc(ws.ActionTaskSessionList, h.wsListTaskSessions)
 	// Git snapshot handler (commits and cumulative diff are handled by agent/handlers/git_handlers.go)
 	dispatcher.RegisterFunc(ws.ActionSessionGitSnapshots, h.wsGetGitSnapshots)
@@ -248,6 +268,10 @@ func (h *TaskHandlers) registerWS(dispatcher *ws.Dispatcher) {
 	dispatcher.RegisterFunc(ws.ActionTaskPlanRevisionGet, h.wsGetTaskPlanRevision)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanRevert, h.wsRevertTaskPlan)
 	dispatcher.RegisterFunc(ws.ActionTaskPlanImplement, h.wsMarkTaskPlanImplementationStarted)
+	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentsList, h.wsListTaskPlanComments)
+	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentCreate, h.wsCreateTaskPlanComment)
+	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentUpdate, h.wsUpdateTaskPlanComment)
+	dispatcher.RegisterFunc(ws.ActionTaskPlanCommentDelete, h.wsDeleteTaskPlanComment)
 }
 
 // convertToServiceRepos converts dto.TaskRepositoryInput slice to service.TaskRepositoryInput slice.

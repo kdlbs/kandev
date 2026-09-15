@@ -5,12 +5,41 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 
+	kandevdb "github.com/kandev/kandev/internal/db"
 	"github.com/kandev/kandev/internal/office/models"
 )
+
+// workspaceGroupMaxHostParams bounds a single IN-clause query's bind
+// parameters, well below SQLite's 999/32766 and PostgreSQL's 65535 limits,
+// so a batched read stays portable across builds. Mirrors
+// internal/task/repository/sqlite's sqliteMaxHostParams; kept local here
+// because these helpers are unexported and this package cannot import them.
+const workspaceGroupMaxHostParams = 500
+
+// chunkTaskIDs splits ids into sub-slices of at most workspaceGroupMaxHostParams
+// entries, so callers can keep IN-clause queries below the host-parameter limit.
+func chunkTaskIDs(ids []string) [][]string {
+	if len(ids) == 0 {
+		return nil
+	}
+	if len(ids) <= workspaceGroupMaxHostParams {
+		return [][]string{ids}
+	}
+	chunks := make([][]string, 0, (len(ids)+workspaceGroupMaxHostParams-1)/workspaceGroupMaxHostParams)
+	for i := 0; i < len(ids); i += workspaceGroupMaxHostParams {
+		end := i + workspaceGroupMaxHostParams
+		if end > len(ids) {
+			end = len(ids)
+		}
+		chunks = append(chunks, ids[i:end])
+	}
+	return chunks
+}
 
 // createWorkspaceGroupTables creates the task_workspace_groups and
 // task_workspace_group_members tables used by office task handoffs.
@@ -25,6 +54,7 @@ func (r *Repository) createWorkspaceGroupTables() error {
 		id TEXT PRIMARY KEY,
 		workspace_id TEXT NOT NULL,
 		owner_task_id TEXT NOT NULL,
+		ownership_generation INTEGER NOT NULL DEFAULT 1,
 		materialized_path TEXT NOT NULL DEFAULT '',
 		materialized_environment_id TEXT NOT NULL DEFAULT '',
 		materialized_kind TEXT NOT NULL,
@@ -80,6 +110,9 @@ func (r *Repository) CreateWorkspaceGroup(ctx context.Context, g *models.Workspa
 	if g.CreatedAt.IsZero() {
 		g.CreatedAt = now
 	}
+	if g.OwnershipGeneration == 0 {
+		g.OwnershipGeneration = 1
+	}
 	g.UpdatedAt = now
 	if g.CleanupPolicy == "" {
 		g.CleanupPolicy = models.WorkspaceCleanupPolicyNeverDelete
@@ -92,13 +125,13 @@ func (r *Repository) CreateWorkspaceGroup(ctx context.Context, g *models.Workspa
 	}
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_workspace_groups (
-			id, workspace_id, owner_task_id, materialized_path,
+			id, workspace_id, owner_task_id, ownership_generation, materialized_path,
 			materialized_environment_id, materialized_kind, owned_by_kandev,
 			cleanup_policy, cleanup_status, cleaned_at, cleanup_error,
 			restore_status, restore_error, restore_config_json,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`), g.ID, g.WorkspaceID, g.OwnerTaskID, g.MaterializedPath,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`), g.ID, g.WorkspaceID, g.OwnerTaskID, g.OwnershipGeneration, g.MaterializedPath,
 		g.MaterializedEnvironmentID, g.MaterializedKind, g.OwnedByKandev,
 		g.CleanupPolicy, g.CleanupStatus, g.CleanedAt, g.CleanupError,
 		g.RestoreStatus, g.RestoreError, g.RestoreConfigJSON,
@@ -110,7 +143,7 @@ func (r *Repository) CreateWorkspaceGroup(ctx context.Context, g *models.Workspa
 func (r *Repository) GetWorkspaceGroup(ctx context.Context, id string) (*models.WorkspaceGroup, error) {
 	var g models.WorkspaceGroup
 	err := r.ro.GetContext(ctx, &g, r.ro.Rebind(`
-		SELECT id, workspace_id, owner_task_id, materialized_path,
+		SELECT id, workspace_id, owner_task_id, ownership_generation, materialized_path,
 			materialized_environment_id, materialized_kind, owned_by_kandev,
 			cleanup_policy, cleanup_status, cleaned_at, cleanup_error,
 			restore_status, restore_error, restore_config_json,
@@ -131,7 +164,7 @@ func (r *Repository) GetWorkspaceGroup(ctx context.Context, id string) (*models.
 func (r *Repository) ListWorkspaceGroupsByWorkspace(ctx context.Context, workspaceID string) ([]*models.WorkspaceGroup, error) {
 	var groups []*models.WorkspaceGroup
 	err := r.ro.SelectContext(ctx, &groups, r.ro.Rebind(`
-		SELECT id, workspace_id, owner_task_id, materialized_path,
+		SELECT id, workspace_id, owner_task_id, ownership_generation, materialized_path,
 			materialized_environment_id, materialized_kind, owned_by_kandev,
 			cleanup_policy, cleanup_status, cleaned_at, cleanup_error,
 			restore_status, restore_error, restore_config_json,
@@ -218,6 +251,57 @@ func (r *Repository) UpdateWorkspaceGroupCleanupStatus(ctx context.Context, id, 
 	return err
 }
 
+// ClaimWorkspaceGroupCleanup reserves destructive cleanup for one ownership
+// generation. The active-member predicate is part of the same write so a
+// caller cannot race a membership admission between its read and this claim.
+func (r *Repository) ClaimWorkspaceGroupCleanup(ctx context.Context, id string, generation int64) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_workspace_groups
+		SET cleanup_status = ?, cleanup_error = '', cleaned_at = NULL, updated_at = ?
+		WHERE id = ?
+		  AND ownership_generation = ?
+		  AND owned_by_kandev = ?
+		  AND cleanup_policy = ?
+		  AND cleanup_status IN (?, ?)
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM task_workspace_group_members member
+			JOIN tasks task ON task.id = member.task_id
+			WHERE member.workspace_group_id = task_workspace_groups.id
+			  AND member.released_at IS NULL
+			  AND task.archived_at IS NULL
+		  )
+	`), models.WorkspaceCleanupStatusPending, time.Now().UTC(), id, generation, true,
+		models.WorkspaceCleanupPolicyDeleteWhenLastMemberArchivedOrDel,
+		models.WorkspaceCleanupStatusActive, models.WorkspaceCleanupStatusFailed)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows == 1, err
+}
+
+// CompleteWorkspaceGroupCleanup records a result only while the claimed
+// ownership generation is still current.
+func (r *Repository) CompleteWorkspaceGroupCleanup(
+	ctx context.Context,
+	id string,
+	generation int64,
+	status, errStr string,
+	cleanedAt *time.Time,
+) (bool, error) {
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_workspace_groups
+		SET cleanup_status = ?, cleanup_error = ?, cleaned_at = ?, updated_at = ?
+		WHERE id = ? AND ownership_generation = ? AND cleanup_status = ?
+	`), status, errStr, cleanedAt, time.Now().UTC(), id, generation, models.WorkspaceCleanupStatusPending)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	return rows == 1, err
+}
+
 // UpdateWorkspaceGroupRestoreStatus updates the restore_status (+ optional
 // error) and bumps updated_at.
 func (r *Repository) UpdateWorkspaceGroupRestoreStatus(ctx context.Context, id, status, errStr string) error {
@@ -231,6 +315,12 @@ func (r *Repository) UpdateWorkspaceGroupRestoreStatus(ctx context.Context, id, 
 
 // AddWorkspaceGroupMember inserts a membership row. role defaults to "member"
 // when empty. INSERT OR IGNORE: re-adding the same task is a no-op.
+//
+// Takes the shared task-row lock before writing: office and the task package
+// share the same tasks table through the same SQLite writer pool, so this
+// membership insert and a concurrent runner switch on taskID must resolve to
+// exactly one of two outcomes rather than each proceeding unaware of the
+// other.
 func (r *Repository) AddWorkspaceGroupMember(ctx context.Context, groupID, taskID, role string) error {
 	if groupID == "" || taskID == "" {
 		return errors.New("workspace group member: groupID and taskID required")
@@ -238,12 +328,46 @@ func (r *Repository) AddWorkspaceGroupMember(ctx context.Context, groupID, taskI
 	if role == "" {
 		role = models.WorkspaceMemberRoleMember
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	if lockErr := kandevdb.LockTaskRowInTx(ctx, tx, r.db.DriverName(), taskID); lockErr != nil &&
+		!errors.Is(lockErr, kandevdb.ErrTaskRowNotFound) {
+		return lockErr
+	}
+
+	result, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT OR IGNORE INTO task_workspace_group_members (
 			workspace_group_id, task_id, role, created_at
-		) VALUES (?, ?, ?, ?)
-	`), groupID, taskID, role, time.Now().UTC())
-	return err
+		)
+		SELECT id, ?, ?, ?
+		FROM task_workspace_groups
+		WHERE id = ? AND cleanup_status IN ('active', 'cleanup_failed')
+	`), taskID, role, time.Now().UTC(), groupID)
+	if err != nil {
+		return err
+	}
+	if rows, err := result.RowsAffected(); err != nil {
+		return err
+	} else if rows == 0 {
+		var exists bool
+		if err := tx.QueryRowContext(ctx, r.db.Rebind(`
+			SELECT EXISTS (
+				SELECT 1 FROM task_workspace_group_members
+				WHERE workspace_group_id = ? AND task_id = ?
+			)
+		`), groupID, taskID).Scan(&exists); err != nil {
+			return err
+		}
+		if exists {
+			return tx.Commit()
+		}
+		return fmt.Errorf("workspace group %s is not accepting members", groupID)
+	}
+	return tx.Commit()
 }
 
 // ReleaseWorkspaceGroupMember stamps released_at + release_reason and
@@ -269,12 +393,48 @@ func (r *Repository) RestoreWorkspaceGroupMemberByCascade(ctx context.Context, t
 	if taskID == "" || cascadeID == "" {
 		return errors.New("restore membership: taskID and cascadeID required")
 	}
-	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
+	var released int
+	if err := r.ro.GetContext(ctx, &released, r.ro.Rebind(`
+		SELECT COUNT(*) FROM task_workspace_group_members
+		WHERE task_id = ? AND released_by_cascade_id = ?
+	`), taskID, cascadeID); err != nil {
+		return err
+	}
+	if released == 0 {
+		return nil
+	}
+	var pending int
+	if err := r.ro.GetContext(ctx, &pending, r.ro.Rebind(`
+		SELECT COUNT(*) FROM task_workspace_group_members m
+		JOIN task_workspace_groups g ON g.id = m.workspace_group_id
+		WHERE m.task_id = ? AND m.released_by_cascade_id = ?
+		  AND g.cleanup_status = ?
+	`), taskID, cascadeID, models.WorkspaceCleanupStatusPending); err != nil {
+		return err
+	}
+	if pending > 0 {
+		return fmt.Errorf("workspace group cleanup is in progress for task %s", taskID)
+	}
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_workspace_group_members
 		SET released_at = NULL, release_reason = '', released_by_cascade_id = ''
 		WHERE task_id = ? AND released_by_cascade_id = ?
-	`), taskID, cascadeID)
-	return err
+		  AND NOT EXISTS (
+			SELECT 1 FROM task_workspace_groups
+			WHERE id = workspace_group_id AND cleanup_status = ?
+		  )
+	`), taskID, cascadeID, models.WorkspaceCleanupStatusPending)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows != int64(released) {
+		return fmt.Errorf("workspace group membership restore incomplete for task %s: restored %d of %d", taskID, rows, released)
+	}
+	return nil
 }
 
 // ListWorkspaceGroupMembers returns every membership row for the group,
@@ -328,7 +488,7 @@ func (r *Repository) ListActiveWorkspaceGroupMembers(ctx context.Context, groupI
 func (r *Repository) GetWorkspaceGroupForTask(ctx context.Context, taskID string) (*models.WorkspaceGroup, error) {
 	var g models.WorkspaceGroup
 	err := r.ro.GetContext(ctx, &g, r.ro.Rebind(`
-		SELECT g.id, g.workspace_id, g.owner_task_id, g.materialized_path,
+		SELECT g.id, g.workspace_id, g.owner_task_id, g.ownership_generation, g.materialized_path,
 			g.materialized_environment_id, g.materialized_kind, g.owned_by_kandev,
 			g.cleanup_policy, g.cleanup_status, g.cleaned_at, g.cleanup_error,
 			g.restore_status, g.restore_error, g.restore_config_json,
@@ -345,4 +505,57 @@ func (r *Repository) GetWorkspaceGroupForTask(ctx context.Context, taskID string
 		return nil, err
 	}
 	return &g, nil
+}
+
+// HasWorkspaceGroupForTask reports whether a task currently holds an active
+// (non-released) workspace-group membership, without exposing the group
+// itself. Adapts GetWorkspaceGroupForTask to the existence-only contract
+// task-tier callers (the runner-mutability evaluator) need, so they can read
+// office's workspace-group membership without importing office's models.
+func (r *Repository) HasWorkspaceGroupForTask(ctx context.Context, taskID string) (bool, error) {
+	g, err := r.GetWorkspaceGroupForTask(ctx, taskID)
+	if err != nil {
+		return false, err
+	}
+	return g != nil, nil
+}
+
+// GetActiveWorkspaceGroupTaskIDs reports, for each of taskIDs, whether the
+// task holds an active (non-released) workspace-group membership — the same
+// predicate GetWorkspaceGroupForTask applies for one task, batched behind a
+// single IN-clause query so a projection covering many tasks does not fan
+// out into one query per task.
+func (r *Repository) GetActiveWorkspaceGroupTaskIDs(ctx context.Context, taskIDs []string) (map[string]bool, error) {
+	result := make(map[string]bool, len(taskIDs))
+	if len(taskIDs) == 0 {
+		return result, nil
+	}
+	for _, chunk := range chunkTaskIDs(taskIDs) {
+		placeholders := make([]string, len(chunk))
+		args := make([]interface{}, len(chunk))
+		for i, id := range chunk {
+			placeholders[i], args[i] = "?", id
+		}
+		rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(fmt.Sprintf(
+			`SELECT DISTINCT task_id FROM task_workspace_group_members WHERE released_at IS NULL AND task_id IN (%s)`,
+			strings.Join(placeholders, ","),
+		)), args...)
+		if err != nil {
+			return nil, err
+		}
+		for rows.Next() {
+			var taskID string
+			if err := rows.Scan(&taskID); err != nil {
+				_ = rows.Close()
+				return nil, err
+			}
+			result[taskID] = true
+		}
+		err = rows.Err()
+		_ = rows.Close()
+		if err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
 }

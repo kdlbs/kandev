@@ -654,9 +654,12 @@ export class SessionPage {
     return this.page.getByTestId("reset-context-confirm");
   }
 
-  /** "Resume session" button shown after agent crash. */
+  /** Observe the first visible recovery action, including while it is already resuming. */
   recoveryResumeButton(): Locator {
-    return this.page.getByTestId("recovery-resume-button");
+    return this.activeChat()
+      .getByTestId("recovery-resume-button")
+      .filter({ visible: true })
+      .first();
   }
 
   /** Error returned by a manual session recovery action. */
@@ -699,6 +702,11 @@ export class SessionPage {
     return this.completedSessionBanner().getByTestId("completed-session-new-agent-button");
   }
 
+  /** "Resume" action shown for an explicitly completed conversation. */
+  completedSessionResumeButton(): Locator {
+    return this.completedSessionBanner().getByTestId("recovery-resume-button");
+  }
+
   /** "Cancel" button shown on the yellow transient-retry (529 Overloaded) card. */
   recoveryCancelRetryButton(): Locator {
     return this.page.getByTestId("recovery-cancel-retry-button");
@@ -719,12 +727,29 @@ export class SessionPage {
    * Hovers to reveal the menu trigger, opens it, clicks "Delete",
    * and confirms the delete dialog.
    */
-  async deleteTaskInSidebar(title: string): Promise<void> {
+  async deleteTaskInSidebar(
+    title: string,
+    options: { discardWorktreeChanges?: boolean; waitForCompletion?: boolean } = {},
+  ): Promise<void> {
     await this.openSidebarMenuAndClick(title, "Delete");
-    const confirmButton = this.page
-      .getByRole("alertdialog")
-      .getByRole("button", { name: "Delete" });
+    const dialog = this.page.getByRole("alertdialog");
+    const confirmButton = dialog.getByRole("button", { name: "Delete" });
+    const discardCheckbox = dialog.getByTestId("delete-discard-worktree-checkbox");
+    if (options.discardWorktreeChanges) {
+      await expect(discardCheckbox).toBeVisible();
+      await discardCheckbox.click();
+      await expect(discardCheckbox).toBeChecked();
+    } else {
+      await expect(confirmButton).toBeEnabled();
+      await expect(discardCheckbox).toHaveCount(0);
+    }
+    await expect(confirmButton).toBeEnabled();
     await confirmButton.click();
+    if (options.waitForCompletion !== false) {
+      await expect(
+        this.page.getByTestId("toast-message").filter({ hasText: "Deleted 1 task." }),
+      ).toBeVisible({ timeout: 15_000 });
+    }
   }
 
   /**
@@ -1272,27 +1297,21 @@ export class SessionPage {
 
   /**
    * Resolve the active chat's ProseMirror composer and wait until it is
-   * actually editable before returning it.
+   * ready for a normal prompt before returning it.
    *
    * TipTap uses `immediatelyRender: false`, so `EditorContent` mounts the
    * `.tiptap.ProseMirror` node only after the editor instance is created in a
    * post-mount effect; until then the contenteditable host is absent or still
-   * `contenteditable="false"`. Callers reach here after `waitForLoad` /
-   * `waitForChatIdle` have already driven hydration, so the default
-   * `toBeEditable` wait is the correct condition to synchronize on.
+   * `contenteditable="false"`. Startup now intentionally leaves that host
+   * editable while the submit button remains disabled, so editability alone
+   * no longer proves that a prompt can be sent. Wait for the idle placeholder
+   * and editable host together, which also handles callers that only waited for
+   * the chat panel to mount.
    */
   async composerReady(): Promise<Locator> {
+    await this.waitForChatIdle({ timeout: 30_000, requireEditable: true });
     const editor = this.activeChat().locator('.tiptap.ProseMirror[contenteditable="true"]').first();
-    try {
-      await expect(editor).toBeEditable();
-    } catch {
-      // `waitForChatIdle` intentionally treats the visible idle placeholder as
-      // sufficient for terminal workflow states, where the composer may stay
-      // disabled. Sending requires the stronger editable condition; re-drive
-      // that condition when startup hydration exposed a stale idle placeholder.
-      await this.waitForChatIdle({ timeout: 30_000, requireEditable: true });
-      await expect(editor).toBeEditable();
-    }
+    await expect(editor).toBeEditable();
     return editor;
   }
 
@@ -1315,7 +1334,7 @@ export class SessionPage {
    * than a real bug.
    */
   async togglePlanMode() {
-    const btn = this.page.getByTestId("plan-mode-toggle-button");
+    const btn = this.activeChat().getByTestId("plan-mode-toggle-button");
     await expect(btn).toBeVisible({ timeout: 10_000 });
     await expect(btn).toHaveAttribute("data-plan-available", "true", { timeout: 10_000 });
     await btn.click();
@@ -1717,6 +1736,16 @@ export class SessionPage {
   /** Find a tree node by its data-path attribute. */
   fileTreeNode(nodePath: string): Locator {
     return this.fileTree.fileTreeNode(nodePath);
+  }
+
+  /** The existing Files viewport that owns tree scrolling. */
+  fileTreeScrollViewport(): Locator {
+    return this.fileTree.fileTreeScrollViewport();
+  }
+
+  /** Visible tree rows, including only rows currently mounted by the tree. */
+  visibleFileTreeNodes(): Locator {
+    return this.fileTree.visibleFileTreeNodes();
   }
 
   /** Visible search button in the Files panel. */

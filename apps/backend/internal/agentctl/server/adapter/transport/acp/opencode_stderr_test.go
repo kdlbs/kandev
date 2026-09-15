@@ -40,7 +40,8 @@ func TestNormalizeOpenCodeActionURLAcceptsOnlyAllowlistedRoute(t *testing.T) {
 		"https://opencode.ai/workspace/wrk_123/go#fragment",
 		"https://opencode.ai/workspace/wrk_123/go#",
 		"https://opencode.ai/workspace/wrk_123/go?#",
-		"https://user:pass@opencode.ai/workspace/wrk_123/go",
+		"https://user:" +
+			"PASSWORD@opencode.ai/workspace/wrk_123/go",
 		"https://opencode.ai:443/workspace/wrk_123/go",
 		"https://opencode.ai/workspace/wrk_123%2F..%2Fgo",
 		"https://opencode.ai/workspace/%77rk_123/go",
@@ -86,7 +87,7 @@ func TestProviderErrorFromACPRequestErrorReadsOnlyStructuredActionURL(t *testing
 			Message: "AI_APICallError: 5-hour usage limit reached: " + wantURL,
 			Data:    map[string]any{"action_url": wantURL},
 		}
-		got := ProviderErrorFromError(err)
+		got := ProviderErrorFromError(err, "", "")
 		if got == nil {
 			t.Fatal("ProviderErrorFromError() = nil, want provider error")
 		}
@@ -105,38 +106,91 @@ func TestProviderErrorFromACPRequestErrorReadsOnlyStructuredActionURL(t *testing
 		}
 	})
 
-	t.Run("missing or malformed action_url keeps the generic error path", func(t *testing.T) {
+	t.Run("missing or malformed action_url uses the generic ACP projection", func(t *testing.T) {
 		for _, tt := range []struct {
-			name string
-			err  error
+			name         string
+			err          error
+			wantProvider bool
 		}{
-			{name: "no data", err: &sdk.RequestError{Code: -32603, Message: "provider failed"}},
-			{name: "wrong shape", err: &sdk.RequestError{Code: -32603, Message: "provider failed", Data: "action_url"}},
+			{name: "no data", err: &sdk.RequestError{Code: -32603, Message: "provider failed"}, wantProvider: true},
+			{name: "wrong shape", err: &sdk.RequestError{Code: -32603, Message: "provider failed", Data: "action_url"}, wantProvider: true},
 			{name: "wrong host", err: &sdk.RequestError{
 				Code: -32603, Message: "provider failed",
 				Data: map[string]any{"action_url": "https://example.test/workspace/wrk_123/go"},
-			}},
+			}, wantProvider: true},
 			{name: "query", err: &sdk.RequestError{
 				Code: -32603, Message: "provider failed",
 				Data: map[string]any{"action_url": wantURL + "?source=email"},
-			}},
+			}, wantProvider: true},
 			{name: "malformed id", err: &sdk.RequestError{
 				Code: -32603, Message: "provider failed",
 				Data: map[string]any{"action_url": "https://opencode.ai/workspace/../go"},
-			}},
+			}, wantProvider: true},
 			{name: "oversized", err: &sdk.RequestError{
 				Code: -32603, Message: "provider failed",
 				Data: map[string]any{"action_url": "https://opencode.ai/workspace/" + strings.Repeat("w", 300) + "/go"},
-			}},
+			}, wantProvider: true},
 			{name: "wrapped generic error", err: fmt.Errorf("provider failed")},
 		} {
 			t.Run(tt.name, func(t *testing.T) {
-				if got := ProviderErrorFromError(tt.err); got != nil {
+				got := ProviderErrorFromError(tt.err, "", "")
+				if tt.wantProvider && (got == nil || got.Source != streams.ProviderErrorSourceACPPrompt) {
+					t.Fatalf("ProviderErrorFromError() = %+v, want generic ACP provider error", got)
+				}
+				if !tt.wantProvider && got != nil {
 					t.Fatalf("ProviderErrorFromError() = %+v, want nil", got)
 				}
 			})
 		}
 	})
+}
+
+func TestParseOpenCodeStderrLineWeeklyLimitResetInDays(t *testing.T) {
+	line := `timestamp=2026-09-03T07:19:45.000Z level=ERROR run=4120ce87 message="stream error" providerID=opencode-go modelID=deepseek-v4-flash session.id=ses_f99491a97ffeeWlCMErV9o00vr small=false agent=build mode=primary error.error="AI_APICallError: Weekly usage limit reached. Resets in 3 days. To continue using this model now, enable usage from your available balance: https://opencode.ai/workspace/wrk_01KQM7K5CYT715264YKKFB17ZY/go"`
+
+	diagnostic, ok := parseOpenCodeStderrLine(line)
+	if !ok {
+		t.Fatal("parseOpenCodeStderrLine() rejected a weekly usage-limit stream error")
+	}
+	wantOccurred := time.Date(2026, 9, 3, 7, 19, 45, 0, time.UTC)
+	wantReset := wantOccurred.Add(3 * 24 * time.Hour)
+	if diagnostic.ProviderError.ResetAt == nil || !diagnostic.ProviderError.ResetAt.Equal(wantReset) {
+		t.Fatalf("reset at = %v, want %s", diagnostic.ProviderError.ResetAt, wantReset)
+	}
+
+	t.Run("mixed units", func(t *testing.T) {
+		line := `timestamp=2026-09-03T07:19:45.000Z level=ERROR run=4120ce87 message="stream error" providerID=opencode-go modelID=deepseek-v4-flash session.id=ses_f99491a97ffeeWlCMErV9o00vr small=false agent=build mode=primary error.error="AI_APICallError: Weekly usage limit reached. Resets in 3 days 4 hours 19 min."`
+		diagnostic, ok := parseOpenCodeStderrLine(line)
+		if !ok {
+			t.Fatal("parseOpenCodeStderrLine() rejected a mixed-unit weekly usage-limit stream error")
+		}
+		wantReset := wantOccurred.Add(3*24*time.Hour + 4*time.Hour + 19*time.Minute)
+		if diagnostic.ProviderError.ResetAt == nil || !diagnostic.ProviderError.ResetAt.Equal(wantReset) {
+			t.Fatalf("reset at = %v, want %s", diagnostic.ProviderError.ResetAt, wantReset)
+		}
+	})
+}
+
+func TestProviderErrorFromACPRequestErrorProjectsGenericPromptFailure(t *testing.T) {
+	err := &sdk.RequestError{
+		Code:    -32603,
+		Message: "Internal error: API Error: Repeated 529 Overloaded errors. See https://gateway.example/private/session",
+		Data:    map[string]any{"errorKind": "server_error", "private_token": "must-not-cross-boundary"},
+	}
+
+	got := ProviderErrorFromError(err, "", "")
+	if got == nil {
+		t.Fatal("ProviderErrorFromError() = nil, want a sanitized generic ACP provider error")
+	}
+	if got.Source != "acp_prompt" {
+		t.Fatalf("source = %q, want acp_prompt", got.Source)
+	}
+	if strings.Contains(got.Message, "https://") || strings.Contains(got.Message, "private_token") {
+		t.Fatalf("generic ACP message leaked private detail: %q", got.Message)
+	}
+	if !strings.Contains(got.Message, "529 Overloaded") {
+		t.Fatalf("generic ACP message = %q, want provider diagnostic", got.Message)
+	}
 }
 
 func TestParseOpenCodeStderrLineAcceptsForegroundStreamError(t *testing.T) {

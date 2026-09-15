@@ -179,20 +179,17 @@ func (s *Service) hasPendingCoordinatorPermissions(ctx context.Context, sessionI
 	return len(permissions) > 0, nil
 }
 
-// taskCleaner deletes a task a firing has abandoned.
-//
-// Deliberately one method wide, and asserted at the call site rather than added
-// to repoStore: that interface is implemented by several mocks, and none of
-// them should have to grow a method for a path they never take.
-type taskCleaner interface {
-	DeleteTask(ctx context.Context, id string) error
+// taskLifecycleDeleter owns destructive task cleanup for an abandoned
+// automation firing. It deliberately stays off repoStore so repository
+// implementations cannot accidentally perform lifecycle-blind deletion.
+type taskLifecycleDeleter interface {
+	DeleteTaskWithLifecycle(ctx context.Context, id string) error
 }
 
 // automationRunRetention names the runs whose workspaces have aged out, and
 // answers whether one of them has since gone live. Kept off AutomationService
-// and asserted at the call site for the same reason taskCleaner is kept off
-// repoStore: several test stubs implement that interface and none of them
-// should grow a method for a path they never take.
+// and asserted at the call site so repository stubs need not implement
+// retention-only capabilities.
 //
 // Both halves live on one interface on purpose. Selection and the pre-removal
 // re-check are two readings of the same question a moment apart, and a service
@@ -230,6 +227,9 @@ func (s *Service) SetWorktreeManager(mgr *worktree.Manager) {
 	}
 	s.worktreeReaper = mgr
 	s.taskLaunchRecoveryWorktree = mgr
+	if s.executor != nil {
+		s.executor.SetSelectedWorktreeRecoveryAdmission(mgr.AdmitRecovery)
+	}
 }
 
 // subscribeAutomationEvents subscribes to automation-related events on the event bus.
@@ -340,7 +340,7 @@ func (s *Service) createAutomationTask(ctx context.Context, evt *automation.Auto
 		zap.String("trigger_type", string(evt.TriggerType)))
 
 	if continuationSession != nil {
-		s.dispatchAutomationContinuation(ctx, a, task, continuationSession, prompt, evt.RunID, action, reason)
+		s.dispatchAutomationContinuation(ctx, a, task, continuationSession, prompt, metadata, evt.RunID, action, reason)
 		return
 	}
 
@@ -422,6 +422,130 @@ func (s *Service) prepareAutomationTask(
 		reason = "previous continuation was unavailable; created a replacement task"
 	}
 	return task, nil, action, reason, nil
+}
+
+// automationContinuationMetadataSnapshot records the values that a firing
+// replaces. It lets a failed dispatch restore the previous authorization
+// target instead of leaving a stopped firing's target on the shared task.
+type automationContinuationMetadataSnapshot struct {
+	values  map[string]interface{}
+	present map[string]bool
+}
+
+// refreshAutomationContinuationMetadata is kept as the small direct helper
+// used by tests and legacy callers. The run-aware path uses the snapshot form
+// so it can restore the task when dispatch or exact binding fails.
+func (s *Service) refreshAutomationContinuationMetadata(ctx context.Context, task *models.Task, metadata map[string]interface{}) error {
+	_, err := s.refreshAutomationContinuationMetadataWithSnapshot(ctx, task, metadata)
+	return err
+}
+
+// refreshAutomationContinuationMetadataWithSnapshot merges this firing's
+// freshly-computed metadata onto a resumed continuation task and persists it.
+// The writes happen only after DispatchRun has admitted the firing and holds
+// its per-automation lock. This prevents a stopped or deleted run from
+// changing the shared task's archive authorization.
+//
+// Each key is patched independently through the concurrent-key-safe
+// SetTaskMetadataKey primitive rather than a full-row UpdateTask. A full-row
+// write built from an in-memory snapshot could silently resurrect a key that
+// another lifecycle operation just removed. Deferred-launch ownership is
+// server-managed and is skipped here.
+func (s *Service) refreshAutomationContinuationMetadataWithSnapshot(
+	ctx context.Context,
+	task *models.Task,
+	metadata map[string]interface{},
+) (*automationContinuationMetadataSnapshot, error) {
+	keys := orderedAutomationContinuationMetadataKeys(metadata)
+	snapshot := &automationContinuationMetadataSnapshot{
+		values:  make(map[string]interface{}, len(keys)),
+		present: make(map[string]bool, len(keys)),
+	}
+	for _, key := range keys {
+		value, ok := task.Metadata[key]
+		snapshot.values[key] = value
+		snapshot.present[key] = ok
+	}
+
+	written := make([]string, 0, len(keys))
+	for _, key := range keys {
+		if err := s.repo.SetTaskMetadataKey(ctx, task.ID, key, metadata[key]); err != nil {
+			s.logger.Error("failed to refresh automation continuation task metadata",
+				zap.String("task_id", task.ID), zap.String("metadata_key", key), zap.Error(err))
+			if restoreErr := s.restoreAutomationContinuationMetadata(ctx, task, snapshot, written); restoreErr != nil {
+				s.logger.Warn("failed to restore automation continuation task metadata after refresh failure",
+					zap.String("task_id", task.ID), zap.Error(restoreErr))
+			}
+			return nil, fmt.Errorf("refresh automation continuation metadata key %q: %w", key, err)
+		}
+		written = append(written, key)
+	}
+	if len(written) == 0 {
+		return snapshot, nil
+	}
+	if err := s.reloadAutomationContinuationTask(ctx, task); err != nil {
+		if restoreErr := s.restoreAutomationContinuationMetadata(ctx, task, snapshot, written); restoreErr != nil {
+			s.logger.Warn("failed to restore automation continuation task metadata after reload failure",
+				zap.String("task_id", task.ID), zap.Error(restoreErr))
+		}
+		return nil, fmt.Errorf("reload refreshed automation continuation task: %w", err)
+	}
+	s.publishTaskUpdated(ctx, task)
+	return snapshot, nil
+}
+
+func orderedAutomationContinuationMetadataKeys(metadata map[string]interface{}) []string {
+	keys := make([]string, 0, len(metadata))
+	for key := range metadata {
+		if key == models.MetaKeyDeferredLaunch || key == models.MetaKeyAutomationTargetTaskID {
+			continue
+		}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	if _, ok := metadata[models.MetaKeyAutomationTargetTaskID]; ok {
+		keys = append([]string{models.MetaKeyAutomationTargetTaskID}, keys...)
+	}
+	return keys
+}
+
+func (s *Service) restoreAutomationContinuationMetadata(
+	ctx context.Context,
+	task *models.Task,
+	snapshot *automationContinuationMetadataSnapshot,
+	keys []string,
+) error {
+	if snapshot == nil || len(keys) == 0 {
+		return nil
+	}
+	for _, key := range keys {
+		var err error
+		if snapshot.present[key] {
+			err = s.repo.SetTaskMetadataKey(ctx, task.ID, key, snapshot.values[key])
+		} else {
+			_, err = s.repo.RemoveTaskMetadataKey(ctx, task.ID, key)
+		}
+		if err != nil {
+			return fmt.Errorf("restore automation continuation metadata key %q: %w", key, err)
+		}
+	}
+	if err := s.reloadAutomationContinuationTask(ctx, task); err != nil {
+		return err
+	}
+	s.publishTaskUpdated(ctx, task)
+	return nil
+}
+
+func (s *Service) reloadAutomationContinuationTask(ctx context.Context, task *models.Task) error {
+	refreshed, err := s.repo.GetTask(ctx, task.ID)
+	if err != nil {
+		return err
+	}
+	if refreshed == nil {
+		return fmt.Errorf("task %s was not found", task.ID)
+	}
+	*task = *refreshed
+	return nil
 }
 
 func (s *Service) findAutomationContinuation(ctx context.Context, a *automation.Automation, evt *automation.AutomationTriggeredEvent) (*models.Task, *models.TaskSession, string) {
@@ -563,6 +687,7 @@ func (s *Service) dispatchAutomationRun(
 	action automation.ThreadAction,
 	reason, operation string,
 	dispatch func() (automation.RunDispatch, error),
+	onFailure func(),
 ) bool {
 	if runID == "" {
 		return false
@@ -574,6 +699,9 @@ func (s *Service) dispatchAutomationRun(
 	if err := dispatcher.DispatchRun(ctx, runID, action, reason, dispatch); err == nil {
 		return true
 	} else {
+		if onFailure != nil {
+			onFailure()
+		}
 		s.logger.Error("failed to dispatch automation run",
 			zap.String("operation", operation), zap.String("automation_id", automationID),
 			zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
@@ -618,14 +746,37 @@ func (s *Service) bindAutomationRun(
 	return false
 }
 
-func (s *Service) dispatchAutomationContinuation(ctx context.Context, a *automation.Automation, task *models.Task, session *models.TaskSession, prompt, runID string, action automation.ThreadAction, reason string) {
-	if s.dispatchAutomationRun(ctx, a.ID, task.ID, session.ID, runID, action, reason, "continuation", func() (automation.RunDispatch, error) {
-		return s.promptAutomationContinuation(ctx, task, session, prompt)
-	}) {
+func (s *Service) dispatchAutomationContinuation(ctx context.Context, a *automation.Automation, task *models.Task, session *models.TaskSession, prompt string, metadata map[string]interface{}, runID string, action automation.ThreadAction, reason string) {
+	var snapshot *automationContinuationMetadataSnapshot
+	restore := func() {
+		if snapshot == nil {
+			return
+		}
+		keys := orderedAutomationContinuationMetadataKeys(metadata)
+		if err := s.restoreAutomationContinuationMetadata(ctx, task, snapshot, keys); err != nil {
+			s.logger.Warn("failed to restore automation continuation task metadata",
+				zap.String("task_id", task.ID), zap.Error(err))
+		}
+		snapshot = nil
+	}
+	dispatch := func() (automation.RunDispatch, error) {
+		var err error
+		snapshot, err = s.refreshAutomationContinuationMetadataWithSnapshot(ctx, task, metadata)
+		if err != nil {
+			return automation.RunDispatch{}, err
+		}
+		result, err := s.promptAutomationContinuation(ctx, task, session, prompt)
+		if err != nil {
+			restore()
+			return automation.RunDispatch{}, err
+		}
+		return result, nil
+	}
+	if s.dispatchAutomationRun(ctx, a.ID, task.ID, session.ID, runID, action, reason, "continuation", dispatch, restore) {
 		return
 	}
 
-	dispatch, err := s.promptAutomationContinuation(ctx, task, session, prompt)
+	dispatchResult, err := dispatch()
 	if err != nil {
 		s.logger.Error("failed to dispatch automation continuation",
 			zap.String("automation_id", a.ID), zap.String("task_id", task.ID), zap.String("session_id", session.ID), zap.Error(err))
@@ -634,7 +785,8 @@ func (s *Service) dispatchAutomationContinuation(ctx context.Context, a *automat
 		}
 		return
 	}
-	if !s.bindAutomationRun(ctx, runID, dispatch.TaskID, dispatch.SessionID, dispatch.TurnID, action, reason, "continuation") {
+	if !s.bindAutomationRun(ctx, runID, dispatchResult.TaskID, dispatchResult.SessionID, dispatchResult.TurnID, action, reason, "continuation") {
+		restore()
 		return
 	}
 }
@@ -693,7 +845,7 @@ func (s *Service) autoStartAutomationTask(ctx context.Context, a *automation.Aut
 func (s *Service) autoStartAutomationTaskForRun(ctx context.Context, a *automation.Automation, task *models.Task, workflowStepID, runID string, action automation.ThreadAction, reason string) {
 	if s.dispatchAutomationRun(ctx, a.ID, task.ID, "", runID, action, reason, "auto-start", func() (automation.RunDispatch, error) {
 		return s.startAutomationTask(ctx, a, task, workflowStepID)
-	}) {
+	}, nil) {
 		return
 	}
 
@@ -929,18 +1081,21 @@ func (s *Service) recordFailedRun(ctx context.Context, evt *automation.Automatio
 // recordSuccessRun writes the row that makes a firing visible and countable.
 // It reports failure rather than logging it: the caller must not launch an
 // agent for a run nothing can see.
+
 // deleteAbandonedTask removes a task whose run row was never written.
 //
-// A failure here is reported rather than swallowed: the task is then genuinely
-// orphaned — hidden by its origin, pointed at by no run — and only a human
-// reading this line will know it is there.
+// A missing lifecycle deleter is a composition error. Skipping deletion is
+// safer than falling back to repository deletion, which would strand workspace
+// group state and cleanup metadata.
 func (s *Service) deleteAbandonedTask(ctx context.Context, automationID, taskID string) {
 	s.clearAbandonedContinuation(ctx, automationID, taskID)
-	cleaner, ok := s.repo.(taskCleaner)
-	if !ok {
+	if s.taskLifecycleDeleter == nil {
+		s.logger.Error("task lifecycle deleter is not configured for abandoned automation task",
+			zap.String("automation_id", automationID),
+			zap.String("task_id", taskID))
 		return
 	}
-	if err := cleaner.DeleteTask(ctx, taskID); err != nil {
+	if err := s.taskLifecycleDeleter.DeleteTaskWithLifecycle(ctx, taskID); err != nil {
 		s.logger.Error("failed to delete the task of an unrecorded automation run",
 			zap.String("automation_id", automationID),
 			zap.String("task_id", taskID),

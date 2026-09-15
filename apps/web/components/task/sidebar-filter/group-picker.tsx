@@ -49,7 +49,7 @@ export function GroupPicker({ value, onChange }: Props) {
   const { t } = useTranslation();
   return (
     <Select value={value} onValueChange={(v) => onChange(v as GroupKey)}>
-      <SelectTrigger size="sm" className="h-7 w-full text-xs" data-testid="group-key-select">
+      <SelectTrigger className="w-full text-xs" data-testid="group-key-select">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>

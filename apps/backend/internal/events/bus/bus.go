@@ -79,6 +79,9 @@ type EventBus interface {
 	// several subjects sequentially is fine: the memory bus dispatches its
 	// handlers synchronously inside Publish, so each handler observes the
 	// subject it was published on.
+	// Implementations contain panics raised by EventHandler. For synchronous
+	// delivery, a recovered panic does not stop later subscribers or become a
+	// Publish error. NATS callbacks also contain panics on the client goroutine.
 	Publish(ctx context.Context, subject string, event *Event) error
 
 	// Subscribe creates a subscription to a subject pattern

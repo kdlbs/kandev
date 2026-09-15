@@ -22,6 +22,7 @@ import { AppSidebarResizeHandle } from "./app-sidebar-resize-handle";
 import { AppSidebarSettingsMode } from "./app-sidebar-settings-mode";
 import { AgentsSection } from "./sections/agents-section";
 import { AutomationsSection } from "./sections/automations-section";
+import { CanvasesSection } from "./sections/canvases-section";
 import { IntegrationsSection } from "./sections/integrations-section";
 import { OfficeNavigationSection } from "./sections/office-navigation-section";
 import { ProjectsSection } from "./sections/projects-section";
@@ -81,6 +82,7 @@ function AppSidebarModeNav({ collapsed, inOffice }: { collapsed: boolean; inOffi
             same weight as a project, and the list IS the nav — picking one
             opens its history rather than a settings form. */}
         {!inOffice && <AutomationsSection collapsed={collapsed} />}
+        {!inOffice && <CanvasesSection collapsed={collapsed} />}
         <PluginNavItems collapsed={collapsed} />
         {inOffice && <OfficeNavigationSection collapsed={collapsed} section="work" />}
         <ProjectsSection collapsed={collapsed} />

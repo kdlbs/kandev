@@ -2,12 +2,15 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 
 const archiveTaskMock = vi.fn();
+const deleteTaskMock = vi.fn();
 const removeTaskFromBoardMock = vi.fn();
+const runTaskRemovalMock = vi.fn();
 const getStateMock = vi.fn();
 const storeMock = { getState: getStateMock };
 const replaceTaskUrlMock = vi.fn();
 const setActiveSessionMock = vi.fn();
 const setActiveTaskMock = vi.fn();
+const toastMock = vi.fn();
 let storeState: {
   tasks: { activeTaskId: string | null; activeSessionId: string | null };
   setActiveSession: (...args: unknown[]) => void;
@@ -16,7 +19,7 @@ let storeState: {
 
 vi.mock("@/lib/api", () => ({
   archiveTask: (...args: unknown[]) => archiveTaskMock(...args),
-  deleteTask: vi.fn(),
+  deleteTask: (...args: unknown[]) => deleteTaskMock(...args),
   moveTask: vi.fn(),
   updateTask: vi.fn(),
 }));
@@ -30,22 +33,21 @@ vi.mock("@/components/state-provider", () => ({
 }));
 
 vi.mock("@/hooks/use-task-removal", () => ({
+  useTaskRemovalSuccessNotifier: () => vi.fn(),
   useTaskRemoval: () => ({
     removeTaskFromBoard: (...args: unknown[]) => removeTaskFromBoardMock(...args),
+    runTaskRemoval: (...args: unknown[]) => runTaskRemovalMock(...args),
   }),
 }));
+vi.mock("@/components/toast-provider", () => ({
+  useToast: () => ({ toast: toastMock }),
+}));
 
-import { useArchiveAndSwitchTask } from "./use-task-actions";
-
-function deferred<T>() {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
-}
+import {
+  useArchiveAndSwitchTask,
+  useDeleteAndSwitchTask,
+  useTaskActions,
+} from "./use-task-actions";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -56,92 +58,116 @@ beforeEach(() => {
   };
   getStateMock.mockReturnValue(storeState);
   removeTaskFromBoardMock.mockResolvedValue({ switchedTaskId: "task-B" });
+  runTaskRemovalMock.mockImplementation(
+    async (_action: string, request: { mutate: () => Promise<void> }) => {
+      await request.mutate();
+      return {
+        skipped: false,
+        operationToken: "removal-1",
+        switchedTaskId: "task-B",
+        succeededTaskIds: ["task-A"],
+        failedTaskIds: [],
+      };
+    },
+  );
 });
 
 describe("useArchiveAndSwitchTask", () => {
-  it("removes and switches away from the active task before archive API resolves", async () => {
-    const archive = deferred<void>();
-    archiveTaskMock.mockReturnValueOnce(archive.promise);
+  it("delegates archive mutation and navigation to the shared coordinator", async () => {
     const { result } = renderHook(() => useArchiveAndSwitchTask());
 
-    let archiveAndSwitchPromise!: Promise<void>;
-    act(() => {
-      archiveAndSwitchPromise = result.current("task-A");
-    });
+    await act(() => result.current("task-A"));
 
-    expect(removeTaskFromBoardMock).toHaveBeenCalledWith("task-A", {
-      wasActiveTaskId: "task-A",
-      wasActiveSessionId: "sess-A",
-      switchOnly: true,
-    });
-
-    archive.resolve();
-    await archiveAndSwitchPromise;
+    expect(runTaskRemovalMock).toHaveBeenCalledWith(
+      "archive",
+      { taskId: "task-A", mutate: expect.any(Function) },
+      { cascade: undefined },
+    );
     expect(archiveTaskMock).toHaveBeenCalledWith("task-A", undefined);
-    expect(removeTaskFromBoardMock).toHaveBeenLastCalledWith("task-A", {
-      wasActiveTaskId: "task-A",
-      wasActiveSessionId: "sess-A",
-    });
   });
 
-  it("restores active task when archive API rejects after switching", async () => {
+  it("propagates coordinator failures without a second rollback", async () => {
     const error = new Error("network error");
-    archiveTaskMock.mockRejectedValueOnce(error);
-    removeTaskFromBoardMock.mockImplementationOnce(async () => {
-      storeState.tasks.activeTaskId = "task-B";
-      return { switchedTaskId: "task-B" };
-    });
+    runTaskRemovalMock.mockRejectedValueOnce(error);
     const { result } = renderHook(() => useArchiveAndSwitchTask());
 
     await expect(result.current("task-A")).rejects.toThrow("network error");
 
-    expect(removeTaskFromBoardMock).toHaveBeenCalledTimes(1);
-    expect(removeTaskFromBoardMock).toHaveBeenCalledWith("task-A", {
-      wasActiveTaskId: "task-A",
-      wasActiveSessionId: "sess-A",
-      switchOnly: true,
-    });
-    expect(setActiveSessionMock).toHaveBeenCalledWith("task-A", "sess-A");
-    expect(replaceTaskUrlMock).toHaveBeenCalledWith("task-A");
-    expect(archiveTaskMock).toHaveBeenCalledWith("task-A", undefined);
+    expect(setActiveSessionMock).not.toHaveBeenCalled();
+    expect(replaceTaskUrlMock).not.toHaveBeenCalled();
+    expect(archiveTaskMock).not.toHaveBeenCalled();
   });
 
-  it("excludes the cascade tree before and after the archive request", async () => {
+  it("passes the cascade choice to the shared coordinator", async () => {
     archiveTaskMock.mockResolvedValueOnce(undefined);
-    const excludedTaskIds = new Set(["task-A", "task-child"]);
-    removeTaskFromBoardMock
-      .mockResolvedValueOnce({ switchedTaskId: "task-B", excludedTaskIds })
-      .mockResolvedValueOnce({ switchedTaskId: "task-B" });
     const { result } = renderHook(() => useArchiveAndSwitchTask());
 
     await result.current("task-A", { cascade: true });
 
-    expect(removeTaskFromBoardMock).toHaveBeenNthCalledWith(1, "task-A", {
-      wasActiveTaskId: "task-A",
-      wasActiveSessionId: "sess-A",
-      switchOnly: true,
-      excludeTaskTree: true,
-    });
-    expect(removeTaskFromBoardMock).toHaveBeenNthCalledWith(2, "task-A", {
-      wasActiveTaskId: "task-A",
-      wasActiveSessionId: "sess-A",
-      excludeTaskTree: true,
-      excludedTaskIds,
-    });
-    expect(archiveTaskMock).toHaveBeenCalledWith("task-A", { cascade: true });
+    expect(runTaskRemovalMock).toHaveBeenCalledWith(
+      "archive",
+      { taskId: "task-A", mutate: expect.any(Function) },
+      { cascade: true },
+    );
   });
 
-  it("does not restore a task when a cascade archive fails before any switch", async () => {
+  it("does not restore a task when the coordinator rejects before mutation", async () => {
     const error = new Error("archive failed");
-    archiveTaskMock.mockRejectedValueOnce(error);
-    removeTaskFromBoardMock.mockResolvedValueOnce({ switchedTaskId: null });
+    runTaskRemovalMock.mockRejectedValueOnce(error);
     const { result } = renderHook(() => useArchiveAndSwitchTask());
 
     await expect(result.current("task-A", { cascade: true })).rejects.toThrow("archive failed");
 
-    expect(removeTaskFromBoardMock).toHaveBeenCalledTimes(1);
     expect(setActiveSessionMock).not.toHaveBeenCalled();
     expect(setActiveTaskMock).not.toHaveBeenCalled();
     expect(replaceTaskUrlMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("useDeleteAndSwitchTask", () => {
+  it("delegates delete mutation and navigation to the shared coordinator", async () => {
+    const { result } = renderHook(() => useDeleteAndSwitchTask());
+
+    await act(() => result.current("task-A"));
+
+    expect(runTaskRemovalMock).toHaveBeenCalledWith(
+      "delete",
+      { taskId: "task-A", mutate: expect.any(Function) },
+      { cascade: undefined },
+    );
+    expect(deleteTaskMock).toHaveBeenCalledWith("task-A", undefined);
+  });
+
+  it("propagates coordinator failures without a second rollback", async () => {
+    const error = new Error("delete failed");
+    runTaskRemovalMock.mockRejectedValueOnce(error);
+    const { result } = renderHook(() => useDeleteAndSwitchTask());
+
+    await expect(result.current("task-A")).rejects.toThrow("delete failed");
+
+    expect(setActiveSessionMock).not.toHaveBeenCalled();
+    expect(setActiveTaskMock).not.toHaveBeenCalled();
+    expect(replaceTaskUrlMock).not.toHaveBeenCalled();
+    expect(deleteTaskMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("useTaskActions", () => {
+  it("shows localized retry guidance for a dirty-worktree delete conflict", async () => {
+    const { ApiError } = await import("@/lib/api/client");
+    deleteTaskMock.mockRejectedValueOnce(
+      new ApiError("task worktree contains local changes", 409, {
+        error_code: "task_delete_dirty_worktree",
+      }),
+    );
+    const { result } = renderHook(() => useTaskActions());
+
+    await expect(result.current.deleteTaskById("task-1")).rejects.toMatchObject({ status: 409 });
+    expect(toastMock).toHaveBeenCalledWith({
+      title: "Task deletion needs your confirmation",
+      description:
+        "The task stays visible. Review the local changes, then select discard and try again.",
+      variant: "error",
+    });
   });
 });

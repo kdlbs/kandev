@@ -54,6 +54,11 @@ type Hub struct {
 	sessionGitDataProvider    SessionGitDataProvider
 	userSubscriptionListeners []func(userID string)
 
+	// clientDisconnectListener releases connection-bound resources after a
+	// client is removed from the hub. It runs asynchronously so durable cleanup
+	// cannot block the hub event loop.
+	clientDisconnectListener func(connectionID string)
+
 	// sessionMode tracks per-session focus state and fires listeners when
 	// effective mode (paused/slow/fast) transitions. See hub_session_mode.go.
 	sessionMode            *sessionModeTracker
@@ -137,7 +142,9 @@ func (h *Hub) Run(ctx context.Context) {
 func (h *Hub) closeAllClients() {
 	h.mu.Lock()
 	metricClientIDs := make([]string, 0, len(h.systemMetricsSubscribers))
+	disconnectedIDs := make([]string, 0, len(h.clients))
 	for client := range h.clients {
+		disconnectedIDs = append(disconnectedIDs, client.ID)
 		if client.systemMetricsSubscribed {
 			metricClientIDs = append(metricClientIDs, client.ID)
 			client.systemMetricsSubscribed = false
@@ -146,6 +153,7 @@ func (h *Hub) closeAllClients() {
 		delete(h.clients, client)
 	}
 	tracker := h.metricsInterestTracker
+	listener := h.clientDisconnectListener
 	h.taskSubscribers = make(map[string]map[*Client]bool)
 	h.sessionSubscribers = make(map[string]map[*Client]bool)
 	h.runSubscribers = make(map[string]map[*Client]bool)
@@ -156,6 +164,12 @@ func (h *Hub) closeAllClients() {
 	for _, clientID := range metricClientIDs {
 		if tracker != nil {
 			tracker.MetricsUnsubscribe(clientID)
+		}
+	}
+
+	if listener != nil {
+		for _, clientID := range disconnectedIDs {
+			go listener(clientID)
 		}
 	}
 
@@ -205,10 +219,15 @@ func (h *Hub) removeClient(client *Client) {
 		metricClientID = client.ID
 		tracker = h.metricsInterestTracker
 	}
+	listener := h.clientDisconnectListener
 	h.mu.Unlock()
 
 	if tracker != nil && metricClientID != "" {
 		tracker.MetricsUnsubscribe(metricClientID)
+	}
+
+	if listener != nil {
+		go listener(client.ID)
 	}
 
 	for _, sessionID := range dedupStrings(affectedSessions) {
@@ -216,6 +235,14 @@ func (h *Hub) removeClient(client *Client) {
 	}
 
 	h.logger.Debug("Client unregistered", zap.String("client_id", client.ID))
+}
+
+// SetClientDisconnectListener registers a callback for connection teardown.
+// The callback runs once for each client that was present in the hub.
+func (h *Hub) SetClientDisconnectListener(listener func(connectionID string)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.clientDisconnectListener = listener
 }
 
 func (h *Hub) SetSystemMetricsInterestTracker(tracker SystemMetricsInterestTracker) {
@@ -307,6 +334,17 @@ func (h *Hub) setAuthPolicy(policy AuthPolicy) {
 // event never disappears entirely because ownership could not be resolved;
 // it only stops crossing user boundaries once ownership is known.
 func (h *Hub) BroadcastToWorkspace(workspaceID string, msg *ws.Message) {
+	// Prefer the reach set: with team access a workspace is readable by its
+	// members and, when it is org-visible, by the whole organization. Routing
+	// to the owner alone would deliver a shared board's updates to nobody but
+	// the person who happened to create it.
+	if readers := h.authPolicy.WorkspaceReaders; readers != nil && workspaceID != "" {
+		recipients, err := readers(h.DispatchContext(), workspaceID)
+		if err == nil {
+			h.broadcastToUsers(recipients, msg)
+			return
+		}
+	}
 	resolver := h.authPolicy.WorkspaceOwner
 	if resolver == nil || workspaceID == "" {
 		h.Broadcast(msg)
@@ -318,6 +356,30 @@ func (h *Hub) BroadcastToWorkspace(workspaceID string, msg *ws.Message) {
 		return
 	}
 	h.broadcastToOwner(owner, msg)
+}
+
+// broadcastToUsers delivers to exactly the given user IDs. An empty set
+// delivers to nobody: "no one may read this workspace" is a real answer, and
+// falling back to a global broadcast would invert it.
+func (h *Hub) broadcastToUsers(userIDs []string, msg *ws.Message) {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		h.logger.Error("Failed to marshal workspace broadcast", zap.Error(err))
+		return
+	}
+	allowed := make(map[string]struct{}, len(userIDs))
+	for _, id := range userIDs {
+		allowed[id] = struct{}{}
+	}
+	h.mu.RLock()
+	recipients := make([]*Client, 0, len(h.clients))
+	for client := range h.clients {
+		if clientMayReceiveAny(client, allowed) {
+			recipients = append(recipients, client)
+		}
+	}
+	h.mu.RUnlock()
+	h.sendToClients(data, recipients, msg.Action)
 }
 
 // BroadcastToWorkspaceOrDrop is the fail-closed sibling of
@@ -410,7 +472,7 @@ func (h *Hub) BroadcastToTask(taskID string, msg *ws.Message) {
 		h.logger.Error("Failed to marshal message", zap.Error(err))
 		return
 	}
-	clients := h.getSubscribersLocked(h.taskSubscribers, taskID)
+	clients := h.authorizedTaskRecipients(taskID)
 	h.logger.Debug("BroadcastToTask",
 		zap.String("task_id", taskID),
 		zap.String("action", msg.Action),
@@ -458,12 +520,64 @@ func (h *Hub) BroadcastToSession(sessionID string, msg *ws.Message) {
 		h.logger.Error("Failed to marshal message", zap.Error(err))
 		return
 	}
-	clients := h.getSessionRecipientsLocked(sessionID)
+	clients := h.authorizedSessionRecipients(sessionID)
 	h.logger.Debug("BroadcastToSession",
 		zap.String("session_id", sessionID),
 		zap.String("action", msg.Action),
 		zap.Int("recipient_count", len(clients)))
 	h.sendToClients(data, clients, msg.Action)
+}
+
+func (h *Hub) authorizedTaskRecipients(taskID string) []*Client {
+	clients := h.getSubscribersLocked(h.taskSubscribers, taskID)
+	allowed, denied := h.partitionAuthorized(clients, taskID, h.authPolicy.Subscriptions.Task)
+	if len(denied) == 0 {
+		return allowed
+	}
+	h.mu.Lock()
+	for _, client := range denied {
+		removeClientFromSubscriberMap(h.taskSubscribers, taskID, client)
+		delete(client.subscriptions, taskID)
+	}
+	h.mu.Unlock()
+	return allowed
+}
+
+func (h *Hub) authorizedSessionRecipients(sessionID string) []*Client {
+	clients := h.getSessionRecipientsLocked(sessionID)
+	allowed, denied := h.partitionAuthorized(clients, sessionID, h.authPolicy.Subscriptions.Session)
+	if len(denied) == 0 {
+		return allowed
+	}
+	h.mu.Lock()
+	for _, client := range denied {
+		removeClientFromSubscriberMap(h.sessionSubscribers, sessionID, client)
+		removeClientFromSubscriberMap(h.sessionMode.focusByClient, sessionID, client)
+		delete(client.sessionSubscriptions, sessionID)
+		delete(client.sessionFocus, sessionID)
+	}
+	h.mu.Unlock()
+	h.recomputeSessionMode(sessionID)
+	return allowed
+}
+
+func (h *Hub) partitionAuthorized(
+	clients []*Client,
+	topicID string,
+	authorize func(context.Context, string) error,
+) (allowed, denied []*Client) {
+	if authorize == nil {
+		return clients, nil
+	}
+	allowed = make([]*Client, 0, len(clients))
+	for _, client := range clients {
+		if err := authorize(client.dispatchContext(), topicID); err != nil {
+			denied = append(denied, client)
+			continue
+		}
+		allowed = append(allowed, client)
+	}
+	return allowed, denied
 }
 
 // BroadcastToUser sends a notification to clients subscribed to a specific user

@@ -8,7 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
+	internaldb "github.com/kandev/kandev/internal/db"
 )
 
 // OpenIsolatedPostgres opens dsn with a unique schema on a single connection.
@@ -18,10 +18,11 @@ func OpenIsolatedPostgres(t testing.TB, dsn string) *sqlx.DB {
 	t.Helper()
 
 	schema := "kandev_test_" + strings.ReplaceAll(uuid.NewString(), "-", "")
-	db, err := sqlx.Open("pgx", dsn)
+	raw, err := internaldb.OpenPostgres(dsn, 1, 1)
 	if err != nil {
 		t.Fatalf("open postgres: %v", err)
 	}
+	db := sqlx.NewDb(raw, "pgx")
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 

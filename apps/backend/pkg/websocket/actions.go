@@ -81,6 +81,7 @@ const (
 	ActionTaskMove              = "task.move"
 	ActionTaskState             = "task.state"
 	ActionTaskArchive           = "task.archive"
+	ActionTaskRunner            = "task.runner"
 	ActionTaskPlanCreate        = "task.plan.create"
 	ActionTaskPlanGet           = "task.plan.get"
 	ActionTaskPlanUpdate        = "task.plan.update"
@@ -89,6 +90,20 @@ const (
 	ActionTaskPlanRevisionGet   = "task.plan.revision.get"
 	ActionTaskPlanRevert        = "task.plan.revert"
 	ActionTaskPlanImplement     = "task.plan.implementation_started"
+	ActionTaskPlanCommentsList  = "task.plan.comments.list"
+	ActionTaskPlanCommentCreate = "task.plan.comments.create"
+	ActionTaskPlanCommentUpdate = "task.plan.comments.update"
+	ActionTaskPlanCommentDelete = "task.plan.comments.delete"
+
+	// Plugin-backed canvas lifecycle notifications. These are owner-scoped
+	// workspace/task events and contain no application content or capabilities.
+	ActionCanvasCreated                   = "canvas.created"
+	ActionCanvasReleaseActivated          = "canvas.release.activated"
+	ActionCanvasReleasePermissionRequired = "canvas.release.permission_required"
+	ActionCanvasPromoted                  = "canvas.promoted"
+	ActionCanvasArchived                  = "canvas.archived"
+	ActionCanvasRestored                  = "canvas.restored"
+	ActionCanvasRemoved                   = "canvas.removed"
 
 	ActionTaskSessionList   = "task.session.list"
 	ActionTaskSessionStatus = "task.session.status"
@@ -132,10 +147,14 @@ const (
 	ActionMessageQueueCancel        = "message.queue.cancel" // Clears the entire queue for a session
 	ActionMessageQueueGet           = "message.queue.get"
 	ActionMessageQueueUpdate        = "message.queue.update"
+	ActionMessageQueueEditBegin     = "message.queue.edit.begin"
+	ActionMessageQueueEditRenew     = "message.queue.edit.renew"
+	ActionMessageQueueEditEnd       = "message.queue.edit.end"
 	ActionMessageQueueAppend        = "message.queue.append"
 	ActionMessageQueueDrain         = "message.queue.drain"          // Dispatch one queued entry now when the session is promptable
 	ActionMessageQueueSendNow       = "message.queue.send_now"       // Interrupt and replace the active turn with an exact queue selection
 	ActionMessageQueueAutoRunSet    = "message.queue.auto_run.set"   // Persist automatic queue processing and optionally dispatch the head
+	ActionMessageQueueAutoMergeSet  = "message.queue.auto_merge.set" // Persist a per-session automatic-merge override
 	ActionMessageQueueRemove        = "message.queue.remove"         // Delete a single entry by id
 	ActionMessageQueueMerge         = "message.queue.merge"          // Fold an entry into the entry above it
 	ActionMessageQueueReorder       = "message.queue.reorder"        // Rewrite the visible pending order for a session
@@ -181,6 +200,7 @@ const (
 	ActionACPHeartbeat                   = "acp.heartbeat"
 	ActionTaskCreated                    = "task.created"
 	ActionTaskUpdated                    = "task.updated"
+	ActionTaskReordered                  = "task.reordered"
 	ActionTaskDeleted                    = "task.deleted"
 	ActionTaskStateChanged               = "task.state_changed"
 	ActionSessionWorkspaceSourcesUpdated = "session.workspace_sources.updated"
@@ -189,6 +209,7 @@ const (
 	ActionTaskPlanDeleted                = "task.plan.deleted"
 	ActionTaskPlanRevisionCreated        = "task.plan.revision.created"
 	ActionTaskPlanReverted               = "task.plan.reverted"
+	ActionTaskPlanCommentsChanged        = "task.plan.comments.changed"
 	ActionTaskWalkthroughGet             = "task.walkthrough.get"
 	ActionTaskWalkthroughDelete          = "task.walkthrough.delete"
 	ActionTaskWalkthroughCreated         = "task.walkthrough.created"
@@ -207,6 +228,7 @@ const (
 	ActionTaskReviewFindingUpdated      = "task.review.finding_updated"
 	ActionTaskReviewCleared             = "task.review.cleared"
 	ActionAgentUpdated                  = "agent.updated"
+	ActionAgentProfileMCPConfigUpdated  = "agent.profile.mcp_config.updated"
 	ActionAgentAvailableUpdated         = "agent.available.updated"
 	ActionAgentInstallStarted           = "agent.install.started"
 	ActionAgentInstallOutput            = "agent.install.output"
@@ -227,6 +249,7 @@ const (
 	ActionSessionMessageUpdated         = "session.message.updated"
 	ActionSessionMessageDeleted         = "session.message.deleted"
 	ActionSessionStateChanged           = "session.state_changed"
+	ActionSessionPendingActionChanged   = "session.pending_action_changed"
 	ActionSessionActivityChanged        = "session.activity_changed"
 	ActionSessionCancellationChanged    = "session.cancellation_changed"
 	ActionTaskStatusSummaryUpdated      = "task.status_summary.updated"
@@ -345,27 +368,29 @@ const (
 	ActionSessionProcessStatus = "session.process.status"
 
 	// Git worktree actions
-	ActionWorktreePull                = "worktree.pull"                 // Pull from remote
-	ActionWorktreePush                = "worktree.push"                 // Push to remote
-	ActionWorktreeReplaceContribution = "worktree.replace_contribution" // Replace the bound contribution branch
-	ActionWorktreeUseContribution     = "worktree.use_contribution"     // Adopt the bound contribution version
-	ActionWorktreeRebase              = "worktree.rebase"               // Rebase onto base branch
-	ActionWorktreeMerge               = "worktree.merge"                // Merge base branch into worktree
-	ActionWorktreeAbort               = "worktree.abort"                // Abort in-progress merge or rebase
-	ActionWorktreeCommit              = "worktree.commit"               // Commit changes
-	ActionWorktreeStage               = "worktree.stage"                // Stage files for commit
-	ActionWorktreeUnstage             = "worktree.unstage"              // Unstage files from index
-	ActionWorktreeDiscard             = "worktree.discard"              // Discard changes to files
-	ActionWorktreeCreatePR            = "worktree.create_pr"            // Create a pull request
-	ActionWorktreeRevertCommit        = "worktree.revert_commit"        // Revert a commit (staged, no new commit)
-	ActionWorktreeRenameBranch        = "worktree.rename_branch"        // Rename the current branch
-	ActionWorktreeReset               = "worktree.reset"                // Reset HEAD to a commit (soft/hard)
+	ActionWorktreePull                           = "worktree.pull"                             // Pull from remote
+	ActionWorktreePush                           = "worktree.push"                             // Push to remote
+	ActionWorktreeReplaceContribution            = "worktree.replace_contribution"             // Replace the bound contribution branch
+	ActionWorktreeUseContribution                = "worktree.use_contribution"                 // Adopt the bound contribution version
+	ActionWorktreeContributionHistoryExplanation = "worktree.contribution_history_explanation" // Observe contribution history evidence
+	ActionWorktreeRebase                         = "worktree.rebase"                           // Rebase onto base branch
+	ActionWorktreeMerge                          = "worktree.merge"                            // Merge base branch into worktree
+	ActionWorktreeAbort                          = "worktree.abort"                            // Abort in-progress merge or rebase
+	ActionWorktreeCommit                         = "worktree.commit"                           // Commit changes
+	ActionWorktreeStage                          = "worktree.stage"                            // Stage files for commit
+	ActionWorktreeUnstage                        = "worktree.unstage"                          // Unstage files from index
+	ActionWorktreeDiscard                        = "worktree.discard"                          // Discard changes to files
+	ActionWorktreeCreatePR                       = "worktree.create_pr"                        // Create a pull request
+	ActionWorktreeRevertCommit                   = "worktree.revert_commit"                    // Revert a commit (staged, no new commit)
+	ActionWorktreeRenameBranch                   = "worktree.rename_branch"                    // Rename the current branch
+	ActionWorktreeReset                          = "worktree.reset"                            // Reset HEAD to a commit (soft/hard)
 
 	// User actions
 	ActionUserGet                          = "user.get"
 	ActionUserSettingsUpdate               = "user.settings.update"
 	ActionUserSettingsUpdated              = "user.settings.updated"
 	ActionUserAgentProfileRecentUseUpdated = "user.agent_profile_recent_use.updated"
+	ActionSessionHostnameResolved          = "auth.session.hostname.resolved"
 
 	// ActionPluginUserStateUpdated notifies the writing user's other WS
 	// connections that one of their per-user plugin storage keys changed
@@ -377,6 +402,7 @@ const (
 	// disk walk). Broadcast to all connected clients so the System pages can
 	// render progress.
 	ActionSystemJobUpdate                 = "system.job.update"
+	ActionSystemStorageAnalysisUpdated    = "system.storage.analysis.updated"
 	ActionSystemAgentRuntimeStatusChanged = "system.agent_runtime.status_changed"
 
 	// VS Code server actions
@@ -418,8 +444,12 @@ const (
 	ActionMCPUpdateTask                 = "mcp.update_task"
 	ActionMCPGetTaskPRAutomation        = "mcp.get_task_pr_automation"
 	ActionMCPUpdateTaskPRAutomation     = "mcp.update_task_pr_automation"
+	ActionMCPReportPRAutoFixOutcome     = "mcp.report_pr_auto_fix_outcome"
 	ActionMCPGetTaskMRAutomation        = "mcp.get_task_mr_automation"
 	ActionMCPUpdateTaskMRAutomation     = "mcp.update_task_mr_automation"
+	ActionMCPLinkTaskPR                 = "mcp.link_task_pr"
+	ActionMCPUnlinkTaskPR               = "mcp.unlink_task_pr"
+	ActionMCPReplaceTaskPR              = "mcp.replace_task_pr"
 	ActionMCPAddTaskDependency          = "mcp.add_task_dependency"
 	ActionMCPRemoveTaskDependency       = "mcp.remove_task_dependency"
 	ActionMCPAddBranchToTask            = "mcp.add_branch_to_task"
@@ -443,15 +473,19 @@ const (
 	ActionMCPGetDiagnosticBundle        = "mcp.get_diagnostic_bundle"
 
 	// Office task handoffs (cross-task context).
-	ActionMCPListRelatedTasks  = "mcp.list_related_tasks"
-	ActionMCPListTaskDocuments = "mcp.list_task_documents"
-	ActionMCPGetTaskDocument   = "mcp.get_task_document"
-	ActionMCPWriteTaskDocument = "mcp.write_task_document"
-	ActionMCPListPluginTools   = "mcp.list_plugin_tools"
-	ActionMCPInvokePluginTool  = "mcp.invoke_plugin_tool"
-
-	// Office quorum decision recording.
-	ActionMCPRecordStepDecision = "mcp.record_step_decision"
+	ActionMCPListRelatedTasks         = "mcp.list_related_tasks"
+	ActionMCPListTaskDocuments        = "mcp.list_task_documents"
+	ActionMCPGetTaskDocument          = "mcp.get_task_document"
+	ActionMCPWriteTaskDocument        = "mcp.write_task_document"
+	ActionMCPListPluginTools          = "mcp.list_plugin_tools"
+	ActionMCPInvokePluginTool         = "mcp.invoke_plugin_tool"
+	ActionMCPListCanvases             = "mcp.list_canvases"
+	ActionMCPReadCanvasAuthoringSkill = "mcp.read_canvas_authoring_skill"
+	ActionMCPCreateCanvas             = "mcp.create_canvas"
+	ActionMCPGetCanvas                = "mcp.get_canvas"
+	ActionMCPPublishCanvas            = "mcp.publish_canvas"
+	ActionMCPGetCanvasState           = "mcp.get_canvas_state"
+	ActionMCPSetCanvasState           = "mcp.set_canvas_state"
 
 	// Config-mode MCP actions (agent-native configuration)
 	ActionMCPCreateWorkflow = "mcp.create_workflow"
@@ -468,14 +502,19 @@ const (
 	ActionMCPListAgents  = "mcp.list_agents"
 	ActionMCPUpdateAgent = "mcp.update_agent"
 
-	ActionMCPListAgentProfiles  = "mcp.list_agent_profiles"
-	ActionMCPCreateAgentProfile = "mcp.create_agent_profile"
-	ActionMCPUpdateAgentProfile = "mcp.update_agent_profile"
-	ActionMCPDeleteAgentProfile = "mcp.delete_agent_profile"
-	ActionMCPGetMcpConfig       = "mcp.get_mcp_config"
-	ActionMCPUpdateMcpConfig    = "mcp.update_mcp_config"
-	ActionMCPListSharedPrompts  = "mcp.list_shared_prompts"
-	ActionMCPGetSharedPrompt    = "mcp.get_shared_prompt"
+	ActionMCPListAgentProfiles     = "mcp.list_agent_profiles"
+	ActionMCPCreateAgentProfile    = "mcp.create_agent_profile"
+	ActionMCPUpdateAgentProfile    = "mcp.update_agent_profile"
+	ActionMCPDeleteAgentProfile    = "mcp.delete_agent_profile"
+	ActionMCPGetMcpConfig          = "mcp.get_mcp_config"
+	ActionMCPUpdateMcpConfig       = "mcp.update_mcp_config"
+	ActionMCPListSharedPrompts     = "mcp.list_shared_prompts"
+	ActionMCPGetSharedPrompt       = "mcp.get_shared_prompt"
+	ActionMCPSearchSettings        = "mcp.search_settings"
+	ActionMCPDescribeSetting       = "mcp.describe_setting"
+	ActionMCPGetSettings           = "mcp.get_settings"
+	ActionMCPUpdateSettings        = "mcp.update_settings"
+	ActionMCPListSettingsResources = "mcp.list_settings_resources"
 
 	ActionMCPListExecutors         = "mcp.list_executors"
 	ActionMCPListExecutorProfiles  = "mcp.list_executor_profiles"
@@ -504,31 +543,32 @@ const (
 
 // GitHub integration actions
 const (
-	ActionGitHubStatus               = "github.status"
-	ActionGitHubTaskPRsList          = "github.task_prs.list"
-	ActionGitHubTaskPRGet            = "github.task_pr.get"
-	ActionGitHubPRFeedbackGet        = "github.pr_feedback.get"
-	ActionGitHubReviewWatchesList    = "github.review_watches.list"
-	ActionGitHubReviewWatchCreate    = "github.review_watches.create"
-	ActionGitHubReviewWatchUpdate    = "github.review_watches.update"
-	ActionGitHubReviewWatchDelete    = "github.review_watches.delete"
-	ActionGitHubReviewTrigger        = "github.review_watches.trigger"
-	ActionGitHubReviewTriggerAll     = "github.review_watches.trigger_all"
-	ActionGitHubPRWatchesList        = "github.pr_watches.list"
-	ActionGitHubPRWatchDelete        = "github.pr_watches.delete"
-	ActionGitHubPRFilesGet           = "github.pr_files.get"
-	ActionGitHubPRCommitsGet         = "github.pr_commits.get"
-	ActionGitHubPRCommitGet          = "github.pr_commit.get"
-	ActionGitHubTaskPRUpdated        = "github.task_pr.updated"         // Notification
-	ActionGitHubTaskPRDeleted        = "github.task_pr.deleted"         // Notification
-	ActionGitHubTaskCIOptionsUpdated = "github.task_ci_options.updated" // Notification
-	ActionGitHubRateLimitUpdated     = "github.rate_limit.updated"      // Notification
-	ActionGitHubPRFeedbackNotify     = "github.pr_feedback.notify"      // Notification
-	ActionGitHubNewReviewPRNotify    = "github.new_review_pr.notify"    // Notification
-	ActionGitHubTaskPRSync           = "github.task_pr.sync"
-	ActionGitHubStats                = "github.stats"
-	ActionGitHubCheckSessionPR       = "github.check_session_pr"
-	ActionGitLabCheckSessionMR       = "gitlab.check_session_mr"
+	ActionGitHubStatus                   = "github.status"
+	ActionGitHubTaskPRsList              = "github.task_prs.list"
+	ActionGitHubTaskPRGet                = "github.task_pr.get"
+	ActionGitHubPRFeedbackGet            = "github.pr_feedback.get"
+	ActionGitHubReviewWatchesList        = "github.review_watches.list"
+	ActionGitHubReviewWatchCreate        = "github.review_watches.create"
+	ActionGitHubReviewWatchUpdate        = "github.review_watches.update"
+	ActionGitHubReviewWatchDelete        = "github.review_watches.delete"
+	ActionGitHubReviewTrigger            = "github.review_watches.trigger"
+	ActionGitHubReviewTriggerAll         = "github.review_watches.trigger_all"
+	ActionGitHubPRWatchesList            = "github.pr_watches.list"
+	ActionGitHubPRWatchDelete            = "github.pr_watches.delete"
+	ActionGitHubPRFilesGet               = "github.pr_files.get"
+	ActionGitHubPRCommitsGet             = "github.pr_commits.get"
+	ActionGitHubPRCommitGet              = "github.pr_commit.get"
+	ActionGitHubTaskPRUpdated            = "github.task_pr.updated"             // Notification
+	ActionGitHubTaskPRDeleted            = "github.task_pr.deleted"             // Notification
+	ActionGitHubTaskCIOptionsUpdated     = "github.task_ci_options.updated"     // Notification
+	ActionGitHubRateLimitUpdated         = "github.rate_limit.updated"          // Notification
+	ActionGitHubPRDiscoveryHealthUpdated = "github.pr_discovery_health.updated" // Notification
+	ActionGitHubPRFeedbackNotify         = "github.pr_feedback.notify"          // Notification
+	ActionGitHubNewReviewPRNotify        = "github.new_review_pr.notify"        // Notification
+	ActionGitHubTaskPRSync               = "github.task_pr.sync"
+	ActionGitHubStats                    = "github.stats"
+	ActionGitHubCheckSessionPR           = "github.check_session_pr"
+	ActionGitLabCheckSessionMR           = "gitlab.check_session_mr"
 
 	// Issue watch actions
 	ActionGitHubIssueWatchesList = "github.issue_watches.list"
@@ -550,61 +590,11 @@ const (
 	ActionGitHubCleanupIssueTasks  = "github.cleanup.issue_tasks"
 )
 
-// GitLab integration actions
+// GitLab integration notifications
 const (
-	ActionGitLabStatus            = "gitlab.status"
-	ActionGitLabTaskMRsList       = "gitlab.task_mrs.list"
-	ActionGitLabTaskMRGet         = "gitlab.task_mr.get"
-	ActionGitLabMRFeedbackGet     = "gitlab.mr_feedback.get"
-	ActionGitLabReviewWatchesList = "gitlab.review_watches.list"
-	ActionGitLabReviewWatchCreate = "gitlab.review_watches.create"
-	ActionGitLabReviewWatchUpdate = "gitlab.review_watches.update"
-	ActionGitLabReviewWatchDelete = "gitlab.review_watches.delete"
-	ActionGitLabReviewTrigger     = "gitlab.review_watches.trigger"
-	ActionGitLabReviewTriggerAll  = "gitlab.review_watches.trigger_all"
-	ActionGitLabMRWatchesList     = "gitlab.mr_watches.list"
-	ActionGitLabMRWatchDelete     = "gitlab.mr_watches.delete"
-	ActionGitLabMRFilesGet        = "gitlab.mr_files.get"
-	ActionGitLabMRCommitsGet      = "gitlab.mr_commits.get"
-	ActionGitLabTaskMRUpdated     = "gitlab.task_mr.updated"      // Notification
-	ActionGitLabMRFeedbackNotify  = "gitlab.mr_feedback.notify"   // Notification
-	ActionGitLabNewReviewMRNotify = "gitlab.new_review_mr.notify" // Notification
-	ActionGitLabTaskMRSync        = "gitlab.task_mr.sync"
-	ActionGitLabStats             = "gitlab.stats"
-
+	ActionGitLabTaskMRUpdated           = "gitlab.task_mr.updated"         // Notification
+	ActionGitLabTaskMRDeleted           = "gitlab.task_mr.deleted"         // Notification
 	ActionGitLabTaskMRAutomationUpdated = "gitlab.task_mr_options.updated" // Notification
-
-	ActionGitLabMRMerge                = "gitlab.mr.merge"
-	ActionGitLabMRApprove              = "gitlab.mr.approve"
-	ActionGitLabMRUnapprove            = "gitlab.mr.unapprove"
-	ActionGitLabMRSetLabels            = "gitlab.mr.set_labels"
-	ActionGitLabMRSetAssignees         = "gitlab.mr.set_assignees"
-	ActionGitLabMRDiscussionNew        = "gitlab.mr.discussion.new"
-	ActionGitLabMRDiscussionResolve    = "gitlab.mr.discussion.resolve"
-	ActionGitLabProjectMergeMethodsGet = "gitlab.project.merge_methods.get"
-
-	// Issue watch actions
-	ActionGitLabIssueWatchesList = "gitlab.issue_watches.list"
-	ActionGitLabIssueWatchCreate = "gitlab.issue_watches.create"
-	ActionGitLabIssueWatchUpdate = "gitlab.issue_watches.update"
-	ActionGitLabIssueWatchDelete = "gitlab.issue_watches.delete"
-	ActionGitLabIssueTrigger     = "gitlab.issue_watches.trigger"
-	ActionGitLabIssueTriggerAll  = "gitlab.issue_watches.trigger_all"
-	ActionGitLabNewIssueNotify   = "gitlab.new_issue.notify" // Notification
-
-	// Action preset actions for the /gitlab page quick-launch prompts.
-	ActionGitLabActionPresetsList   = "gitlab.action_presets.list"
-	ActionGitLabActionPresetsUpdate = "gitlab.action_presets.update"
-	ActionGitLabActionPresetsReset  = "gitlab.action_presets.reset"
-
-	// Project discovery / autocomplete.
-	ActionGitLabListUserProjects = "gitlab.projects.list"
-	ActionGitLabSearchProjects   = "gitlab.projects.search"
-	ActionGitLabProjectBranches  = "gitlab.project.branches"
-
-	// Manual cleanup sweeps.
-	ActionGitLabCleanupReviewTasks = "gitlab.cleanup.review_tasks"
-	ActionGitLabCleanupIssueTasks  = "gitlab.cleanup.issue_tasks"
 )
 
 // Jira integration actions
@@ -689,13 +679,15 @@ const (
 
 // Error codes
 const (
-	ErrorCodeBadRequest    = "BAD_REQUEST"
-	ErrorCodeNotFound      = "NOT_FOUND"
-	ErrorCodeInternalError = "INTERNAL_ERROR"
-	ErrorCodeUnauthorized  = "UNAUTHORIZED"
-	ErrorCodeForbidden     = "FORBIDDEN"
-	ErrorCodeValidation    = "VALIDATION_ERROR"
-	ErrorCodeConflict      = "CONFLICT"
-	ErrorCodeUnavailable   = "UNAVAILABLE"
-	ErrorCodeUnknownAction = "UNKNOWN_ACTION"
+	ErrorCodeBadRequest            = "BAD_REQUEST"
+	ErrorCodeNotFound              = "NOT_FOUND"
+	ErrorCodeInternalError         = "INTERNAL_ERROR"
+	ErrorCodeUnauthorized          = "UNAUTHORIZED"
+	ErrorCodeForbidden             = "FORBIDDEN"
+	ErrorCodeValidation            = "VALIDATION_ERROR"
+	ErrorCodeConflict              = "CONFLICT"
+	ErrorCodeUnavailable           = "UNAVAILABLE"
+	ErrorCodeUnknownAction         = "UNKNOWN_ACTION"
+	ErrorCodePlanCommentsChanged   = "plan_comments_changed"
+	ErrorCodePrimarySessionChanged = "primary_session_changed"
 )

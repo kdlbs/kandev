@@ -308,6 +308,62 @@ test.describe("Command Panel", () => {
     await expect(dialog.getByText("Searchable E2E Task")).toBeVisible({ timeout: 5_000 });
   });
 
+  // @covers AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.1, AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.2,
+  // AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.3, AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.5,
+  // AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.6, AC-TASKS-COMMAND-PANEL-ARCHIVED-TASKS-001.7
+  test("archived task results show archive cues and follow active results", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    const unarchivedCompleted = await apiClient.createTask(
+      seedData.workspaceId,
+      "Command panel unarchived completed",
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+      },
+    );
+    await apiClient.updateTaskState(unarchivedCompleted.id, "COMPLETED");
+
+    const archivedInProgress = await apiClient.createTask(
+      seedData.workspaceId,
+      "Command panel archived in progress",
+      {
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+      },
+    );
+    await apiClient.archiveTask(archivedInProgress.id);
+
+    const kanban = new KanbanPage(testPage);
+    await kanban.goto();
+
+    await openCommandPanel(testPage);
+    const dialog = commandDialog(testPage);
+    await expect(dialog).toBeVisible({ timeout: 5_000 });
+    await dialog.getByRole("combobox").fill("Command panel");
+
+    const taskResults = dialog.getByTestId("command-panel-task-preview");
+    await expect(taskResults).toBeVisible({ timeout: 10_000 });
+    const resultOptions = taskResults.getByRole("option");
+    await expect(resultOptions).toHaveCount(2);
+    await expect(resultOptions.nth(0)).toContainText(unarchivedCompleted.title);
+    await expect(resultOptions.nth(1)).toContainText(archivedInProgress.title);
+
+    const archivedOption = resultOptions.nth(1);
+    const startStep = seedData.steps.find((step) => step.id === seedData.startStepId)!;
+    await expect(archivedOption.getByTestId("task-state-archived")).toBeVisible();
+    await expect(archivedOption.getByRole("img", { name: "Archived" })).toBeVisible();
+    await expect(archivedOption.getByText("Archived", { exact: true })).toBeVisible();
+    await expect(archivedOption.getByText(startStep.name, { exact: true })).toHaveCount(0);
+    await expect(resultOptions.nth(0).getByTestId("task-state-archived")).toHaveCount(0);
+    await expect(resultOptions.nth(0).getByText("Archived", { exact: true })).toHaveCount(0);
+
+    await archivedOption.click();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${archivedInProgress.id}$`));
+  });
+
   test("task activity icon distinguishes running and idle search results", async ({
     testPage,
     apiClient,

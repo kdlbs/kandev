@@ -96,7 +96,7 @@ func TestStoreRoundTripAndValidation(t *testing.T) {
 	if err := json.Unmarshal(raw.raw, &saved); err != nil {
 		t.Fatalf("decode saved JSON: %v", err)
 	}
-	if saved["auto_merge_enabled"] != true || len(saved) != 3 {
+	if saved["auto_merge_enabled"] != true || saved["auto_merge_revision"] != float64(0) || len(saved) != 4 {
 		t.Fatalf("saved settings are not normalized: %s", raw.raw)
 	}
 	loaded, err = store.Load(context.Background())
@@ -315,6 +315,80 @@ func TestServiceSerializesPersistenceAndLiveApply(t *testing.T) {
 	}
 	if configured.MaxPerSession != 9 || target.MaxPerSession() != 9 {
 		t.Fatalf("final configured=%d live=%d, want both 9", configured.MaxPerSession, target.MaxPerSession())
+	}
+}
+
+func TestServicesSerializeConcurrentSettingsUpdatesAcrossInstances(t *testing.T) {
+	raw := &compareAndSwapRawStore{
+		raw:   []byte(`{"max_per_session":10,"merge_enabled":true,"auto_merge_enabled":true,"auto_merge_revision":0}`),
+		found: true,
+	}
+	first := NewService(
+		NewStore(raw), &fakeTarget{max: 10, mergeEnabled: true, autoMergeEnabled: true},
+		func() Environment { return Environment{} }, testLogger(t),
+	)
+	second := NewService(
+		NewStore(raw), &fakeTarget{max: 10, mergeEnabled: true, autoMergeEnabled: true},
+		func() Environment { return Environment{} }, testLogger(t),
+	)
+
+	start := make(chan struct{})
+	results := make(chan error, 2)
+	go func() {
+		<-start
+		_, err := first.Update(context.Background(), SettingsPatch{AutoMergeEnabled: new(false)})
+		results <- err
+	}()
+	go func() {
+		<-start
+		_, err := second.Update(context.Background(), SettingsPatch{MaxPerSession: new(20)})
+		results <- err
+	}()
+	close(start)
+	if err := <-results; err != nil {
+		t.Fatalf("first concurrent update: %v", err)
+	}
+	if err := <-results; err != nil {
+		t.Fatalf("second concurrent update: %v", err)
+	}
+
+	configured, err := NewStore(raw).Load(context.Background())
+	if err != nil || configured == nil {
+		t.Fatalf("load concurrent result: configured=%+v err=%v", configured, err)
+	}
+	if configured.MaxPerSession != 20 || configured.AutoMergeEnabled ||
+		configured.AutoMergeRevision != 1 {
+		t.Fatalf("concurrent result = %+v, want max=20 automatic=false revision=1", configured)
+	}
+}
+
+func TestServiceInstallsConsistentAutoMergePolicyLoader(t *testing.T) {
+	raw := &compareAndSwapRawStore{}
+	writer := NewService(
+		NewStore(raw), &fakeTarget{max: 10, mergeEnabled: true, autoMergeEnabled: true},
+		func() Environment { return Environment{} }, testLogger(t),
+	)
+	readerTarget := &policyLoaderTarget{
+		fakeTarget: fakeTarget{max: 10, mergeEnabled: true, autoMergeEnabled: true},
+	}
+	_ = NewService(
+		NewStore(raw), readerTarget, func() Environment { return Environment{} }, testLogger(t),
+	)
+	if readerTarget.load == nil {
+		t.Fatal("queue settings service did not install a shared policy loader")
+	}
+	if _, err := writer.Update(
+		context.Background(),
+		SettingsPatch{AutoMergeEnabled: new(false)},
+	); err != nil {
+		t.Fatalf("disable Auto-merge: %v", err)
+	}
+	enabled, revision, err := readerTarget.load(context.Background())
+	if err != nil {
+		t.Fatalf("load shared policy: %v", err)
+	}
+	if enabled || revision != 1 {
+		t.Fatalf("shared policy = enabled=%v revision=%d, want false/1", enabled, revision)
 	}
 }
 
@@ -584,12 +658,65 @@ func (f *fakeRawStore) Save(_ context.Context, _ string, value []byte) error {
 	return nil
 }
 
+type compareAndSwapRawStore struct {
+	mu    sync.Mutex
+	raw   []byte
+	found bool
+}
+
+func (s *compareAndSwapRawStore) Get(context.Context, string) ([]byte, bool, error) {
+	return s.GetConsistent(context.Background(), "")
+}
+
+func (s *compareAndSwapRawStore) GetConsistent(context.Context, string) ([]byte, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]byte(nil), s.raw...), s.found, nil
+}
+
+func (s *compareAndSwapRawStore) Save(_ context.Context, _ string, value []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.raw = append([]byte(nil), value...)
+	s.found = true
+	return nil
+}
+
+func (s *compareAndSwapRawStore) CompareAndSwap(
+	_ context.Context,
+	_ string,
+	expected, value []byte,
+) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if expected == nil {
+		if s.found {
+			return false, nil
+		}
+	} else if !s.found || !bytes.Equal(s.raw, expected) {
+		return false, nil
+	}
+	s.raw = append([]byte(nil), value...)
+	s.found = true
+	return true, nil
+}
+
 type fakeTarget struct {
 	max              int
 	mergeEnabled     bool
 	autoMergeEnabled bool
 }
 
+type policyLoaderTarget struct {
+	fakeTarget
+	load func(context.Context) (bool, int64, error)
+}
+
+func (t *policyLoaderTarget) SetAutoMergePolicyLoader(
+	load func(context.Context) (bool, int64, error),
+) {
+	t.load = load
+}
 func (f *fakeTarget) MaxPerSession() int         { return f.max }
 func (f *fakeTarget) SetMaxPerSession(n int)     { f.max = n }
 func (f *fakeTarget) MergeEnabled() bool         { return f.mergeEnabled }

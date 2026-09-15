@@ -557,3 +557,14 @@ func TestStampTransportRequestID_PreservesExistingMeta(t *testing.T) {
 	stampTransportRequestID(untouched, nil)
 	assert.Nil(t, untouched.Params.Meta, "a nil id must not allocate meta")
 }
+
+// TestAskUserQuestion_KeepAliveIntervalBelowClientIdleDeadline protects the
+// managed-default safety margin described in the timeout design record. The
+// <= 60s bound targets the managed 300s watchdog, not every accepted
+// MCP_TOOL_TIMEOUT override. An override below this interval remains a
+// documented configuration edge. TestAskUserQuestion_StreamsKeepAliveDuringWait
+// cannot catch a default-value regression because it overrides the interval.
+func TestAskUserQuestion_KeepAliveIntervalBelowClientIdleDeadline(t *testing.T) {
+	assert.Greater(t, askQuestionKeepAliveInterval, time.Duration(0), "a non-positive interval disables emitKeepAlivePings entirely")
+	assert.LessOrEqual(t, askQuestionKeepAliveInterval, 60*time.Second)
+}

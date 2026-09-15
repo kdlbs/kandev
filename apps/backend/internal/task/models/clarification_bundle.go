@@ -39,6 +39,22 @@ type ListClarificationBundlesOptions struct {
 	// Limit is the page size, already resolved by the caller to the L10
 	// default/cap (default 50, capped at 200). Must be >= 1.
 	Limit int
+	// Sidecar optionally joins the Needs-you Inbox per-user dismiss/snooze
+	// sidecar into the same query. Nil leaves the query byte-for-byte as it
+	// is without this feature (needs-you-inbox design, "Persistence").
+	Sidecar *ClarificationSidecarFilter
+}
+
+// ClarificationSidecarFilter selects one operator's dismiss/snooze sidecar
+// rows and a direction: Only=false excludes bundles that operator is hiding
+// (the main Inbox list); Only=true keeps exactly the bundles that operator is
+// hiding (the hidden-bundles enumeration and count). Now is the instant a
+// snooze is compared against server-side, so a skewed client clock cannot
+// hide or reveal a row early.
+type ClarificationSidecarFilter struct {
+	UserID string
+	Only   bool
+	Now    time.Time
 }
 
 // ClarificationBundlePage is one page of ListUnresolvedClarificationBundles,

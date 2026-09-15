@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatBytes } from "./format-bytes";
+import { formatBytes, formatDistinctByteSizes } from "./format-bytes";
 
 describe("formatBytes", () => {
   it("returns '-' for nullish input", () => {
@@ -37,5 +37,21 @@ describe("formatBytes", () => {
     expect(formatBytes(NaN)).toBe("-");
     expect(formatBytes(Infinity)).toBe("-");
     expect(formatBytes(-Infinity)).toBe("-");
+  });
+});
+
+describe("formatDistinctByteSizes", () => {
+  it("uses formatBytes for both values when they render distinctly", () => {
+    expect(formatDistinctByteSizes(262144, 300000)).toEqual(["256.0 KB", "293.0 KB"]);
+  });
+
+  it("falls back to exact byte counts when the rounded forms would collide", () => {
+    // Both round to "256.0 KB" under formatBytes' one-decimal precision.
+    expect(formatBytes(262144)).toBe(formatBytes(262150));
+    expect(formatDistinctByteSizes(262144, 262150)).toEqual(["262144 B", "262150 B"]);
+  });
+
+  it("does not fall back when the two values are exactly equal", () => {
+    expect(formatDistinctByteSizes(262144, 262144)).toEqual(["256.0 KB", "256.0 KB"]);
   });
 });

@@ -59,6 +59,7 @@ type stubExecutors struct {
 	runningBySession *models.ExecutorRunning
 	runningBySessErr error
 	deletedSessions  []string
+	deleteErr        error
 	repairedSessions []string
 }
 
@@ -69,10 +70,9 @@ func (s *stubExecutors) ListExecutorsRunningByTaskID(_ context.Context, _ string
 func (s *stubExecutors) GetExecutorRunningBySessionID(_ context.Context, _ string) (*models.ExecutorRunning, error) {
 	return s.runningBySession, s.runningBySessErr
 }
-
 func (s *stubExecutors) DeleteExecutorRunningBySessionID(_ context.Context, sessionID string) error {
 	s.deletedSessions = append(s.deletedSessions, sessionID)
-	return nil
+	return s.deleteErr
 }
 
 func (s *stubExecutors) RepairExecutorRunningDead(_ context.Context, sessionID string) error {
@@ -85,6 +85,7 @@ func (s *stubExecutors) HasExecutorRunningRow(_ context.Context, _ string) (bool
 }
 
 func TestBuildStopTargets_TerminalExecutorRow(t *testing.T) {
+
 	svc, _, _ := createTestService(t)
 	svc.executors = &stubExecutors{
 		runningByTaskID: []*models.ExecutorRunning{
@@ -106,6 +107,23 @@ func TestBuildStopTargets_TerminalExecutorRow(t *testing.T) {
 	}
 	if !targets[0].terminal {
 		t.Error("expected target to be marked terminal for a CANCELLED session")
+	}
+}
+func TestPerformTaskCleanupReportsExecutorRowDeletionFailure(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	deleteErr := errors.New("executor row deletion failed")
+	svc.executors = &stubExecutors{deleteErr: deleteErr}
+	errs := svc.performTaskCleanup(
+		context.Background(),
+		"task-executor-row-failure",
+		[]*models.TaskSession{{ID: "session-executor-row-failure"}},
+		nil,
+		nil,
+		taskEnvironmentCleanup{},
+		nil,
+	)
+	if !errors.Is(errors.Join(errs...), deleteErr) {
+		t.Fatalf("cleanup errors = %v, want executor deletion error", errs)
 	}
 }
 
@@ -351,6 +369,30 @@ func TestStopTaskRuntimeTargets_TerminalStopFailureBlocksCleanup(t *testing.T) {
 				t.Fatalf("cleanup deleted executor rows after failed stop: %v", execs.deletedSessions)
 			}
 		})
+	}
+}
+
+func TestStopTaskRuntimeTargets_KubernetesTerminalCleanupFailurePreservesRow(t *testing.T) {
+	svc, _, _ := createTestService(t)
+	executors := &stubExecutors{}
+	svc.executors = executors
+	svc.executionStopper = &stubStopper{stopExecutionErr: errors.New("exact Kubernetes cleanup failed")}
+	targets := []taskStopTarget{{
+		sessionID: "sess-k8s", executionID: "exec-k8s", terminal: true,
+		runtime: agentruntime.RuntimeKubernetes,
+	}}
+
+	outcome := svc.stopTaskRuntimeTargets(context.Background(), "task-k8s", targets, "delete", "stop failed")
+	svc.performTaskCleanup(
+		context.Background(), "task-k8s", nil, nil, targets, taskEnvironmentCleanup{},
+		taskCleanupPreserveRows(outcome),
+	)
+
+	if _, ok := outcome.failed["sess-k8s"]; !ok {
+		t.Fatalf("Kubernetes cleanup failure must remain retryable: %#v", outcome.failed)
+	}
+	if len(executors.deletedSessions) != 0 {
+		t.Fatalf("failed Kubernetes cleanup deleted authoritative row: %v", executors.deletedSessions)
 	}
 }
 

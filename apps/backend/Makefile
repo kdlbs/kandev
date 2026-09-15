@@ -186,10 +186,14 @@ endif
 DEADCODE_VERSION ?= v0.48.0
 DEADCODE_GO_TOOLCHAIN ?= go1.26.0
 
-.PHONY: all build build-dev build-runtime build-kandev build-all build-agentctl build-agentctl-dev build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint deadcode fmt vet check-make-shells help
+.PHONY: all build build-dev build-runtime build-kandev build-all build-agentctl build-agentctl-dev build-agentctl-remote build-agentctl-linux build-agentctl-linux-arm64 build-agentctl-darwin-arm64 build-agentctl-darwin-amd64 build-acpdbg acpdbg build-mock-agent build-mock-agent-linux build-preview build-winjob e2e-plugin-package clean run dev start-debug test test-e2e test-sprites-e2e test-lifecycle-goleak lint deadcode fmt vet sqlguard check-make-shells help
 
 ## Default target
 all: build
+
+## Check SQL source for unsafe cross-dialect constructs.
+sqlguard:
+	$(GO) run ./cmd/sqlguard ./internal
 
 ## Build the preview CLI for deploying PR preview environments to Sprites
 build-preview:
@@ -356,7 +360,7 @@ test:
 ## guards in source.
 test-windows:
 	@echo "Running Windows-sensitive packages..."
-	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/backendapp/ownershiplock/...
+	$(CGO_LOCALE) $(CGO_PREFIX) $(GO) test -tags fts5 -v ./internal/agentctl/server/process/... ./internal/agent/runtime/agentctl/launcher/... ./internal/backendapp/ownershiplock/... ./internal/system/storage/workspaces/...
 	@echo "Running Windows managed runtime cache tests..."
 	# Scoped to the Windows-tagged test only: untagged tests in this package use os.Symlink
 	# which requires Developer Mode on Windows. Add new //go:build windows tests here.

@@ -151,7 +151,7 @@ func (s *Service) SearchMentionIssuesForWorkspace(
 	return collectMentionSearchPages(ctx, scope, limit, MentionIssueURL, func(
 		ctx context.Context, pageNumber, pageSize int,
 	) (mentionSearchPage, error) {
-		page, err := client.ListIssuesPaged(ctx, "", titleQuery, pageNumber, pageSize)
+		page, err := client.ListIssuesPaged(ctx, "", titleQuery, "", pageNumber, pageSize)
 		if err != nil {
 			return mentionSearchPage{}, fmt.Errorf("search GitLab issue mentions: %w", err)
 		}

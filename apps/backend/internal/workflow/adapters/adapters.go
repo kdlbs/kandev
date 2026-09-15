@@ -164,6 +164,7 @@ func (a *DecisionAdapter) ListStepDecisions(
 			DeciderID:     d.DeciderID,
 			Role:          d.Role,
 			Comment:       d.Comment,
+			SupersededAt:  d.SupersededAt,
 		})
 	}
 	return out, nil

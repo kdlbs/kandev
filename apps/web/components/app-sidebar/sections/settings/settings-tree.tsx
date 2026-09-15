@@ -151,9 +151,10 @@ function SettingsMenuRow({
  * expand/collapse — and every row is a page.
  *
  * How deep it goes is a per-device preference (Settings → Appearance):
- * `flat` is the fixed two-level menu and the default; `accordion` and
- * `persistent` additionally grow the Workspaces, Agents and Executors rows into
- * their records, differing only in whether opening one branch closes the others.
+ * `flat` is the fixed two-level menu; `accordion` and `persistent` additionally
+ * grow the Workspaces, Agents and Executors rows into their records, differing
+ * only in whether opening one branch closes the others. Accordion is the
+ * default for devices without a saved mode.
  * See `settings-menu-branches.ts` for what those branches contain.
  *
  * Rendered both inside the sidebar settings takeover and, on a phone, as the
@@ -169,10 +170,16 @@ export function SettingsTree({
 }) {
   const { t } = useTranslation();
   const authEnabled = useFeature("auth");
+  const multiTenancyEnabled = useFeature("multiTenancy");
   const authMode = useAppStore((s) => s.auth.mode);
   const isAdmin = useIsAdmin();
   const showAccountItems = authEnabled && authMode === "enabled";
   const showUsersItem = authEnabled && isAdmin;
+  // Only the instance operator can use this page, but that answer costs a
+  // request, so the row is gated on the feature instead and the page itself
+  // turns a non-operator away. Before this it was rendered even on installs
+  // with Organizations switched off.
+  const showOrganizationsItem = authEnabled && multiTenancyEnabled;
   const discoveryItems = useSettingsDiscovery();
   const counts = useSettingsMenuCounts();
   const [query, setQuery] = useState("");
@@ -184,6 +191,7 @@ export function SettingsTree({
   const itemVisible = (item: SettingsMenuItem) => {
     if (item.requires === "account") return showAccountItems;
     if (item.requires === "users") return showUsersItem;
+    if (item.requires === "organizations") return showOrganizationsItem;
     return true;
   };
 
@@ -202,7 +210,11 @@ export function SettingsTree({
             const items = section.items.filter(itemVisible);
             if (items.length === 0) return null;
             return (
-              <div key={section.id} className="flex flex-col gap-0.5">
+              <div
+                key={section.id}
+                data-testid={`settings-section-${section.id}`}
+                className="flex flex-col gap-0.5"
+              >
                 <SettingsSectionHeader label={t(section.labelKey)} />
                 {items.map((item) => (
                   <SettingsMenuRow

@@ -53,6 +53,9 @@ func registerE2EResetRoutes(
 
 	api := router.Group("/api/v1/e2e")
 	api.DELETE("/reset/:workspaceId", handleE2EReset(repo, taskSvc, automationSvc, githubSvc, gitlabSvc, log))
+	if githubSvc != nil {
+		api.POST("/tasks/:id/remote-contribution", handleE2EAttachGitHubContribution(repo, taskSvc, githubSvc, log))
+	}
 	// Hidden-workflow factory: lets E2E tests cover the system-only
 	// workflow path (e.g. improve-kandev) without depending on the real
 	// bootstrap endpoint, which clones from GitHub and shells out to gh.
@@ -88,6 +91,87 @@ func registerE2EResetRoutes(
 	api.PATCH("/tasks/:id/origin", handleE2ESetTaskOrigin(repo, log))
 
 	log.Info("registered E2E endpoints (test-only)")
+}
+
+type e2eAttachGitHubContributionRequest struct {
+	PRURL string `json:"pr_url"`
+}
+
+type e2eAttachGitHubContributionResponse struct {
+	Binding    taskmodels.RemoteContribution `json:"binding"`
+	RemoteName string                        `json:"remote_name"`
+}
+
+type e2eTaskAccessAuthorizer interface {
+	AuthorizeTaskAccess(context.Context, string) error
+}
+
+// handleE2EAttachGitHubContribution resolves a mock-provider PR and persists
+// the same server-authored binding that a remote-contribution task carries at
+// launch. It exists only in the mock-agent E2E surface so tests can prepare a
+// task before opening its session; callers cannot submit a writable binding.
+func handleE2EAttachGitHubContribution(
+	repo *sqliterepo.Repository,
+	authorizer e2eTaskAccessAuthorizer,
+	githubSvc *github.Service,
+	log *logger.Logger,
+) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req e2eAttachGitHubContributionRequest
+		if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.PRURL) == "" {
+			c.JSON(http.StatusBadRequest, gin.H{errKey: "pr_url is required"})
+			return
+		}
+
+		ctx := c.Request.Context()
+		taskID := c.Param("id")
+		if err := authorizer.AuthorizeTaskAccess(ctx, taskID); err != nil {
+			c.JSON(http.StatusNotFound, gin.H{errKey: "task not found"})
+			return
+		}
+		task, err := repo.GetTask(ctx, taskID)
+		if err != nil || task == nil {
+			c.JSON(http.StatusNotFound, gin.H{errKey: "task not found"})
+			return
+		}
+		resolution, err := githubSvc.ResolveRemoteContributionForWorkspace(
+			ctx, task.WorkspaceID, github.DefaultUserID, req.PRURL,
+		)
+		if err != nil {
+			log.Warn("e2e remote contribution resolution failed", zap.String("task_id", task.ID), zap.Error(err))
+			c.JSON(http.StatusUnprocessableEntity, gin.H{errKey: err.Error()})
+			return
+		}
+
+		link, err := repo.GetPrimaryTaskRepository(ctx, task.ID)
+		if err != nil || link == nil {
+			c.JSON(http.StatusBadRequest, gin.H{errKey: "task has no primary repository"})
+			return
+		}
+		metadata := make(map[string]interface{}, len(link.Metadata)+1)
+		for key, value := range link.Metadata {
+			metadata[key] = value
+		}
+		binding := resolution.Binding
+		if err := taskmodels.PutRemoteContribution(metadata, &binding); err != nil {
+			log.Error("e2e remote contribution binding validation failed", zap.String("task_id", task.ID), zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: "failed to persist remote contribution"})
+			return
+		}
+		link.Metadata = metadata
+		link.BaseBranch = binding.BaseBranch
+		link.CheckoutBranch = binding.HeadBranch
+		if err := repo.UpdateTaskRepository(ctx, link); err != nil {
+			log.Error("e2e remote contribution binding persistence failed", zap.String("task_id", task.ID), zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{errKey: "failed to persist remote contribution"})
+			return
+		}
+
+		c.JSON(http.StatusOK, e2eAttachGitHubContributionResponse{
+			Binding:    binding,
+			RemoteName: binding.ContributionRemoteName(),
+		})
+	}
 }
 
 func handleE2EReset(
@@ -129,6 +213,12 @@ func handleE2EReset(
 			`DELETE FROM runs WHERE agent_profile_id IN (SELECT id FROM agent_profiles WHERE workspace_id = ?)`,
 			`DELETE FROM office_provider_health WHERE workspace_id = ?`,
 			`DELETE FROM office_workspace_routing WHERE workspace_id = ?`,
+			// office_workspace_pauses has no FK/cascade (workspace deletion
+			// cleans it via workspace_deletion.go, but the reused E2E
+			// workspace never hits that path), so a spec that pauses and
+			// fails before resuming would otherwise leave later specs
+			// paused too.
+			`DELETE FROM office_workspace_pauses WHERE workspace_id = ?`,
 		} {
 			if _, err := repo.DB().ExecContext(ctx, q, workspaceID); err != nil {
 				// Best-effort: log + continue. Some routing tables may
@@ -174,6 +264,21 @@ func handleE2EReset(
 			log.Error("e2e reset: workflow sync config cleanup failed", zap.Error(err))
 			c.JSON(http.StatusInternalServerError, gin.H{errKey: "workflow sync config cleanup failed"})
 			return
+		}
+		// Office config sync's poller reads office_config_sync_configs the
+		// same way the workflow-sync poller reads workflow_sync_configs
+		// above; office_config_sync_manifest has no FK/cascade onto it
+		// either, so both are deleted here before task/workspace deletion
+		// for the same reason.
+		for _, q := range []string{
+			`DELETE FROM office_config_sync_manifest WHERE workspace_id = ?`,
+			`DELETE FROM office_config_sync_configs WHERE workspace_id = ?`,
+		} {
+			if _, err := repo.DB().ExecContext(ctx, q, workspaceID); err != nil {
+				log.Error("e2e reset: office config sync cleanup failed", zap.String("sql", q), zap.Error(err))
+				c.JSON(http.StatusInternalServerError, gin.H{errKey: "office config sync cleanup failed"})
+				return
+			}
 		}
 
 		// Reset every agent's routing override to the inherit-markers
@@ -269,7 +374,7 @@ func handleE2EReset(
 			deletedTaskIDSet[taskID] = struct{}{}
 		}
 		for _, t := range tasks {
-			if err := taskSvc.DeleteTask(ctx, t.ID); err != nil {
+			if err := deleteTaskForE2EReset(ctx, taskSvc, t.ID); err != nil {
 				// Abort: leaving an undeleted task with its workflow gone
 				// would create orphan rows visible to subsequent tests.
 				log.Error("e2e reset: failed to delete task",
@@ -312,6 +417,22 @@ func handleE2EReset(
 			"deleted_gitlab_issue_watches":  gitLabReset.IssueWatches,
 		})
 	}
+}
+
+type e2eResetTaskDeleter interface {
+	DeleteTaskWithOptions(context.Context, string, taskservice.DeleteTaskOptions) error
+}
+
+func deleteTaskForE2EReset(
+	ctx context.Context,
+	taskDeleter e2eResetTaskDeleter,
+	taskID string,
+) error {
+	return taskDeleter.DeleteTaskWithOptions(ctx, taskID, taskservice.DeleteTaskOptions{
+		// E2E reset is an explicit test cleanup boundary. It must remove
+		// disposable local changes left by the test that created the task.
+		DiscardWorktreeChanges: true,
+	})
 }
 
 func waitForE2ETaskCleanup(ctx context.Context, database *sql.DB, taskIDs []string) error {

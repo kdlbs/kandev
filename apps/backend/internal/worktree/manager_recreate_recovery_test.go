@@ -455,7 +455,7 @@ func TestRecreate_ForkPRFetchesPullHeadRef(t *testing.T) {
 
 func TestRecreate_ManagedRefreshUsesRefreshedPRHeadWithoutNetwork(t *testing.T) {
 	repoPath, wantSHA := initGitRepoWithPullRef(t, 975, "feature/managed-fork-pr")
-	runGit(t, repoPath, "fetch", "origin", "pull/975/head:refs/remotes/origin/pr/975")
+	runGit(t, repoPath, "fetch", "origin", "pull/975/head:"+pullRequestSnapshotRef(975))
 	runGit(t, repoPath, "remote", "set-url", "origin", "https://127.0.0.1:1/never.git")
 	worktreePath := filepath.Join(t.TempDir(), "task-managed-pr", "repo-1")
 	if err := os.MkdirAll(worktreePath, 0755); err != nil {

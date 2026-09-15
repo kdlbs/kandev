@@ -26,7 +26,8 @@ This design preserves the technical source detail for `REQ-OFFICE-AUTOMATION-RUN
 ## Migrated source detail
 
 Decision:
-[ADR-2026-08-22-user-configured-automation-continuity](../../decisions/2026-08-22-user-configured-automation-continuity.md)
+[ADR-2026-08-22-user-configured-automation-continuity](../../../decisions/2026-08-22-user-configured-automation-continuity.md)
+and [ADR-2026-09-02-automation-self-archive](../../../decisions/2026-09-02-automation-self-archive.md)
 
 ## Why
 

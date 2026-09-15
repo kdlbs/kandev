@@ -1,26 +1,28 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
-import { IconMessageQuestion, IconInfoCircle } from "@tabler/icons-react";
+import { IconInfoCircle } from "@tabler/icons-react";
 import type {
   Message,
   ClarificationRequestMetadata,
   ClarificationAnswer,
   ClarificationQuestion,
 } from "@/lib/types/http";
-import { useClarificationGroup } from "@/hooks/domains/session/use-clarification-group";
+import {
+  useClarificationGroup,
+  type ClarificationOutcome,
+} from "@/hooks/domains/session/use-clarification-group";
 import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
 import {
   CLARIFICATION_CUSTOM_TEXT_MAX_RUNES,
   ClarificationCarouselNav,
   ClarificationCustomInput,
   ClarificationOptions,
-  ClarificationStepper,
   countRunes,
 } from "./clarification-overlay-parts";
-import { ClarificationHeaderActions } from "./clarification-overlay-header";
+import { ClarificationOverlayTopBar } from "./clarification-overlay-header";
+import { ClarificationStatusBanner } from "./clarification-status-banner";
 import { ClarificationMarkdown } from "./clarification-markdown";
-import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 
 type ClarificationInputOverlayProps = {
@@ -35,6 +37,14 @@ type ClarificationInputOverlayProps = {
   // Called by the expanded header's collapse control.
   onCollapse?: () => void;
   collapseContentId?: string;
+  // Additive: reports every settled submission outcome, distinct from
+  // onResolved's narrower "this caller's own answer landed" signal. The
+  // task session and Quick Chat hosts leave this unset and keep their
+  // existing behavior identical; the Needs-you Inbox is the first host that
+  // needs to tell "this caller won" apart from "another caller won" /
+  // "no longer active" / "submission failed" to decide whether to remove its
+  // row (design-02#Failure-and-recovery).
+  onOutcome?: (outcome: ClarificationOutcome) => void;
 };
 
 type SingleQuestionMeta = {
@@ -43,15 +53,6 @@ type SingleQuestionMeta = {
   question: ClarificationQuestion;
   questionId: string;
 };
-
-function clarificationHeaderClassName(total: number): string {
-  return cn(
-    "flex min-h-11 justify-between",
-    total > 1
-      ? "flex-col items-stretch gap-2 px-3 py-2 md:flex-row md:items-center md:gap-3 md:px-4 md:py-0"
-      : "items-center gap-3 px-4",
-  );
-}
 
 function readSingleQuestionMeta(message: Message | null | undefined): SingleQuestionMeta | null {
   if (!message) return null;
@@ -65,6 +66,21 @@ function readSingleQuestionMeta(message: Message | null | undefined): SingleQues
 function resolveQuestionMessages(messages: readonly Message[] | null | undefined): Message[] {
   if (messages && messages.length > 0) return [...messages];
   return [];
+}
+
+function useResetOverlayStateOnBundleChange(
+  pendingId: string | null,
+  setCustomDrafts: (drafts: Record<string, string>) => void,
+  setActiveIndex: (index: number) => void,
+) {
+  useEffect(() => {
+    // The hook resets its answer and retry state when a new pending bundle
+    // replaces the current one. Drafts and carousel navigation are overlay-
+    // local state, so they need the same lifecycle fence as well. Question IDs
+    // can repeat across bundles, which makes an ID-only draft key unsafe.
+    setCustomDrafts({});
+    setActiveIndex(0);
+  }, [pendingId, setCustomDrafts, setActiveIndex]);
 }
 
 function sortMessagesByQuestionIndex(messages: Message[]): Message[] {
@@ -567,6 +583,7 @@ function ClarificationCarouselBody({
 export function ClarificationInputOverlay({
   messages,
   onResolved,
+  onOutcome,
   shortcutScopeRef,
   keyboardShortcutsEnabled = true,
   onDismiss,
@@ -577,10 +594,11 @@ export function ClarificationInputOverlay({
     () => sortMessagesByQuestionIndex(resolveQuestionMessages(messages)),
     [messages],
   );
-  const group = useClarificationGroup(sortedMessages);
+  const group = useClarificationGroup(sortedMessages, onOutcome);
   const isSubmitting = group.submitState === "submitting";
   const [customDrafts, setCustomDrafts] = useState<Record<string, string>>({});
   const [rawActiveIndex, setActiveIndex] = useState(0);
+  useResetOverlayStateOnBundleChange(group.pendingId, setCustomDrafts, setActiveIndex);
   // Clamp the active index to the current bundle size so late-arriving
   // messages or shrunk bundles never put us out of range.
   const total = sortedMessages.length;
@@ -614,40 +632,23 @@ export function ClarificationInputOverlay({
 
   return (
     <div className="relative" data-testid="clarification-overlay">
-      <div
-        className={clarificationHeaderClassName(total)}
-        data-testid="clarification-overlay-header"
-      >
-        <div className="flex min-w-0 flex-1 items-center gap-3">
-          <IconMessageQuestion className="h-4 w-4 text-blue-500 flex-shrink-0" />
-          {total > 1 && (
-            <ClarificationStepper
-              total={total}
-              activeIndex={activeIndex}
-              isAnswered={(index) => isQuestionAnsweredAt(sortedMessages, group.answers, index)}
-              onJump={setActiveIndex}
-              isSubmitting={isSubmitting}
-            />
-          )}
-          {total > 1 && (
-            <span
-              data-testid="clarification-group-progress"
-              className="ml-auto min-w-0 truncate text-xs text-muted-foreground md:ml-0"
-            >
-              {group.answeredCount} of {group.total} answered
-            </span>
-          )}
-        </div>
-        <ClarificationHeaderActions
-          total={total}
-          allAnswered={allAnswered}
-          isSubmitting={isSubmitting}
-          onSubmit={handleSubmit}
-          onSkip={() => void group.skipAll("User skipped")}
-          onCollapse={onCollapse}
-          collapseContentId={collapseContentId}
-        />
-      </div>
+      <ClarificationOverlayTopBar
+        total={total}
+        activeIndex={activeIndex}
+        isAnswered={(index) => isQuestionAnsweredAt(sortedMessages, group.answers, index)}
+        onJump={setActiveIndex}
+        isSubmitting={isSubmitting}
+        answeredCount={group.answeredCount}
+        answerableTotal={group.total}
+        allAnswered={allAnswered}
+        onSubmit={handleSubmit}
+        onSkip={() => void group.skipAll("User skipped")}
+        onCollapse={onCollapse}
+        collapseContentId={collapseContentId}
+      />
+      {(group.submitState === "error" || group.submitState === "expired") && (
+        <ClarificationStatusBanner state={group.submitState} onRetry={() => void group.retry()} />
+      )}
       {sharedContext && (
         <div
           data-testid="clarification-context"

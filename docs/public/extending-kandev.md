@@ -73,7 +73,7 @@ A new relayed tool normally requires:
 4. server mode/count, handler, transport, and integration tests;
 5. an update to [Automation and MCP](automation-and-mcp.md) when capability changes.
 
-Inject task/session identity from server context instead of trusting arguments. Enforce task/workspace reachability, confirmation for destructive actions, pagination, concurrency behavior, and least-privilege credentials. The backend's external MCP routes currently have no Kandev user-auth middleware; deployment network controls are part of the security boundary.
+Inject task/session identity from server context instead of trusting arguments. Enforce task/workspace reachability, confirmation for destructive actions, pagination, concurrency behavior, and least-privilege credentials. External MCP remains open while authentication is disabled; when the experimental authentication feature is enabled, it requires an authenticated identity and carries that user into dispatch. External clients use personal access tokens, while same-origin browser tooling can use a session. Deployment network controls remain part of the security boundary.
 
 ## Build a plugin
 

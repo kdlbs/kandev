@@ -165,6 +165,10 @@
   "profileNameRequiredDescription": "Ƥĺēàśē ēńţēŕ à ƥŕōƒĩĺē ńàḿē ƀēƒōŕē śàvĩńĝ.",
   "profileNameRequiredTitle": "Ƥŕōƒĩĺē ńàḿē ĩś ŕēqũĩŕēď",
   "profileNotFound": "Ƥŕōƒĩĺē ńōţ ƒōũńď.",
+  "profileExternalChangeTitle": "Ƥŕōƒĩĺē ćĥàńĝēď ēĺśēŵĥēŕē",
+  "profileExternalChangeDescription": "Ţĥĩś ƥŕōƒĩĺē ćĥàńĝēď ŵĥĩĺē ŷōũ ŵēŕē ēďĩţĩńĝ. Ŷōũŕ ďŕàƒţ ĩś ƥŕēśēŕvēď. Ďĩśćàŕď ĩţ ţō ĺōàď ţĥē ĺàţēśţ śàvēď vàĺũēś ƀēƒōŕē śàvĩńĝ àĝàĩń.",
+  "profileExternalChangeDiscard": "Ĺōàď ĺàţēśţ ƥŕōƒĩĺē",
+  "profileExternalChangeInvalidReason": "Ĺōàď ţĥē ĺàţēśţ ƥŕōƒĩĺē ƀēƒōŕē śàvĩńĝ.",
   "profileSettings": "Ƥŕōƒĩĺē śēţţĩńĝś",
   "promptTokenHint": "<0>{{token}}</0> ŵĩĺĺ ƀē ŕēƥĺàćēď ŵĩţĥ ŷōũŕ ţàśķ ďēśćŕĩƥţĩōń ōŕ ƒōĺĺōŵ-ũƥ ḿēśśàĝē.",
   "ptyConnectionError": "Ćōńńēćţĩōń ēŕŕōŕ",
@@ -295,5 +299,6 @@
   "savingProfile": "Śàvĩńĝ...",
   "saveProfile": "Śàvē ƥŕōƒĩĺē",
   "createProfile": "Ćŕēàţē ƥŕōƒĩĺē",
-  "creatingProfile": "Ćŕēàţĩńĝ..."
+  "creatingProfile": "Ćŕēàţĩńĝ...",
+  "adminOnly": "Ōńĺŷ àďḿĩńĩśţŕàţōŕś ćàń ćĥàńĝē àĝēńţś àńď àĝēńţ ƥŕōƒĩĺēś."
 }

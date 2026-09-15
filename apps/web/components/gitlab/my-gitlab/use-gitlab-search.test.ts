@@ -110,6 +110,7 @@ function fakeIssue(overrides: Partial<Issue> = {}): Issue {
     project_path: "acme/api",
     labels: [],
     assignees: [],
+    milestone: "",
     created_at: "",
     updated_at: "",
     ...overrides,
@@ -222,6 +223,73 @@ describe("useGitLabSearch — fetch wiring", () => {
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.items).toEqual([issue]);
     expect(searchUserMRsMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("useGitLabSearch — milestone", () => {
+  beforeEach(resetMocks);
+
+  it("forwards the milestone to the issues API", async () => {
+    searchUserIssuesMock.mockResolvedValue({ issues: [], total_count: 0, page: 1, per_page: 25 });
+    renderHook(() =>
+      useGitLabSearch({
+        workspaceId: WORKSPACE_ID,
+        kind: "issue",
+        presets: PRESETS,
+        preset: PRESET_ASSIGNED,
+        customQuery: "",
+        milestone: "Next",
+      }),
+    );
+    await waitFor(() => expect(searchUserIssuesMock).toHaveBeenCalled());
+    const args = searchUserIssuesMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(args.milestone).toBe("Next");
+  });
+
+  it("never forwards a milestone to the MR API", async () => {
+    searchUserMRsMock.mockResolvedValue(EMPTY_PAGE);
+    renderHook(() =>
+      useGitLabSearch({
+        workspaceId: WORKSPACE_ID,
+        kind: "mr",
+        presets: PRESETS,
+        preset: PRESET_ASSIGNED,
+        customQuery: "",
+        milestone: "Next",
+      }),
+    );
+    await waitFor(() => expect(searchUserMRsMock).toHaveBeenCalled());
+    const args = searchUserMRsMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(args).not.toHaveProperty("milestone");
+  });
+
+  it("refetches when the milestone changes, without moving the current page", async () => {
+    searchUserIssuesMock.mockResolvedValue({ issues: [], total_count: 0, page: 1, per_page: 25 });
+    const { result, rerender } = renderHook(
+      ({ milestone }: { milestone: string }) =>
+        useGitLabSearch({
+          workspaceId: WORKSPACE_ID,
+          kind: "issue",
+          presets: PRESETS,
+          preset: PRESET_ASSIGNED,
+          customQuery: "",
+          milestone,
+        }),
+      { initialProps: { milestone: "" } },
+    );
+    await waitFor(() => expect(searchUserIssuesMock).toHaveBeenCalledTimes(1));
+    act(() => result.current.setPage(3));
+    await waitFor(() => expect(result.current.page).toBe(3));
+    await waitFor(() => expect(searchUserIssuesMock).toHaveBeenCalledTimes(2));
+
+    rerender({ milestone: "Next" });
+    await waitFor(() => expect(searchUserIssuesMock).toHaveBeenCalledTimes(3));
+    const args = searchUserIssuesMock.mock.calls[2][0] as Record<string, unknown>;
+    expect(args.milestone).toBe("Next");
+    // The hook itself does not reset the page on a milestone change — callers
+    // that commit a milestone are responsible for calling setPage(1) in the
+    // same event handler (see use-gitlab-page-state.ts).
+    expect(args.page).toBe(3);
   });
 });
 

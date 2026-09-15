@@ -47,19 +47,23 @@ type restartMockAgentctlServer struct {
 	setModeIDs         []string
 	setOptions         []restartConfigOption
 
-	failStop           bool
-	failSessionNew     bool
-	failSessionReset   bool
-	failCacheRepair    bool
-	failMode           bool
-	failModel          bool
-	failConfigOptionID string
-	stderrLines        []string
-	modelState         *streams.SessionModelState
-	newModelState      *streams.SessionModelState
-	onReset            func()
-	onSessionNew       func()
-	onCacheRepair      func()
+	failStop                     bool
+	failSessionNew               bool
+	failSessionReset             bool
+	failCacheRepair              bool
+	failMode                     bool
+	failModel                    bool
+	failConfigOptionID           string
+	stderrLines                  []string
+	modelState                   *streams.SessionModelState
+	newModelState                *streams.SessionModelState
+	suppressSessionResetResponse bool
+	resetResponseDelay           time.Duration
+	resetLateEvent               *agentctl.AgentEvent
+	resetLateEventSent           chan struct{}
+	onReset                      func()
+	onSessionNew                 func()
+	onCacheRepair                func()
 }
 
 type restartConfigOption struct {
@@ -73,6 +77,60 @@ func TestStopAgentWithReason_MissingExecutionIsClassified(t *testing.T) {
 	err := mgr.StopAgentWithReason(context.Background(), "missing", "cleanup", true)
 
 	require.ErrorIs(t, err, ErrExecutionNotFound)
+}
+
+func TestStopAgentWithReasonReleasesAgentctlBeforeStoppedEventSnapshot(t *testing.T) {
+	mgr := newTestManager(t)
+	execution := &AgentExecution{
+		ID:        "exec-stop-lock-order",
+		SessionID: "session-stop-lock-order",
+		agentctl:  agentctl.NewClient("127.0.0.1", 12345, newTestLogger()),
+	}
+	require.NoError(t, mgr.executionStore.Add(execution))
+
+	// Hold the prompt lock so stop reaches the stopped-event snapshot and waits.
+	// It must release and detach agentctl first; prompt operations may need an
+	// agentctl read lease while this event snapshot is pending.
+	stopDone := make(chan error, 1)
+	execution.promptLifecycleMu.Lock()
+	promptLocked := true
+	stopJoined := false
+	defer func() {
+		if promptLocked {
+			execution.promptLifecycleMu.Unlock()
+		}
+		if !stopJoined {
+			select {
+			case <-stopDone:
+			case <-time.After(time.Second):
+			}
+		}
+	}()
+	go func() {
+		stopDone <- mgr.StopAgentWithReason(
+			context.Background(), execution.ID, StopReasonTaskDeleted, true,
+		)
+	}()
+
+	require.Eventually(t, func() bool {
+		_, exists := mgr.executionStore.Get(execution.ID)
+		return !exists
+	}, time.Second, time.Millisecond)
+
+	agentctlUnlocked := execution.agentctlLifecycleMu.TryRLock()
+	var currentClient *agentctl.Client
+	if agentctlUnlocked {
+		currentClient = execution.currentAgentCtlClient()
+		execution.agentctlLifecycleMu.RUnlock()
+	}
+	execution.promptLifecycleMu.Unlock()
+	promptLocked = false
+
+	stopErr := <-stopDone
+	stopJoined = true
+	require.NoError(t, stopErr)
+	require.True(t, agentctlUnlocked, "agentctl lifecycle lock remained held while publishing the stopped event")
+	require.Nil(t, currentClient, "terminal stop must detach the closed agentctl client")
 }
 
 func TestWaitForFreshSessionModelStateWaitsForAdvertisedCatalog(t *testing.T) {
@@ -205,6 +263,21 @@ func newRestartMockAgentctlServer(t *testing.T, failStop, failSessionNew bool) *
 			case "agent.session.reset":
 				if m.onReset != nil {
 					m.onReset()
+				}
+				if m.suppressSessionResetResponse {
+					continue
+				}
+				if m.resetResponseDelay > 0 {
+					time.Sleep(m.resetResponseDelay)
+				}
+				if m.resetLateEvent != nil {
+					eventData, _ := json.Marshal(m.resetLateEvent)
+					if err := conn.WriteMessage(websocket.TextMessage, eventData); err != nil {
+						return
+					}
+					if m.resetLateEventSent != nil {
+						close(m.resetLateEventSent)
+					}
 				}
 				if m.failSessionReset {
 					resp, _ = ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{

@@ -5,12 +5,13 @@ import type { WorkflowStep } from "@/components/kanban-column";
 import { getKanbanColumnGridTemplate, KANBAN_COLUMN_MIN_PX } from "./kanban-grid-template";
 
 type AdaptiveDesktopKanbanProps = {
+  columnHeight?: string;
   steps: WorkflowStep[];
   isDragging?: boolean;
   renderColumn: (step: WorkflowStep) => ReactNode;
 };
 
-export const KANBAN_DRAG_END_PADDING = `max(0px, calc(100% - ${KANBAN_COLUMN_MIN_PX}px))`;
+const KANBAN_DRAG_END_RESERVE = `max(0px, calc(100cqw - ${KANBAN_COLUMN_MIN_PX}px))`;
 
 const PAN_ACTIVATION_DISTANCE_PX = 4;
 const INTERACTIVE_TARGET_SELECTOR = [
@@ -34,6 +35,7 @@ type PanStart = {
 };
 
 export function AdaptiveDesktopKanban({
+  columnHeight,
   steps,
   isDragging = false,
   renderColumn,
@@ -81,35 +83,69 @@ export function AdaptiveDesktopKanban({
   };
 
   return (
-    <div data-testid="desktop-kanban-layout" className="h-full min-h-0 min-w-0">
+    <div
+      data-testid="desktop-kanban-layout"
+      className="h-full min-h-0 min-w-0"
+      style={{ height: columnHeight ? "auto" : undefined }}
+    >
       <div
         ref={scrollWindowRef}
         data-testid="desktop-kanban-scroll-window"
         className={`h-full min-h-0 min-w-0 overflow-x-auto snap-x snap-mandatory ${
           isPanCandidate ? "cursor-grabbing" : ""
-        } ${isPanning ? "select-none" : ""}`}
-        style={{ scrollSnapType: isPanning ? "none" : undefined }}
+        } ${isPanning ? "select-none" : ""} ${isDragging ? "scrollbar-hide" : ""}`}
+        style={{
+          height: columnHeight ? "auto" : undefined,
+          containerType: "inline-size",
+          scrollSnapType: isPanning ? "none" : undefined,
+        }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={cancelPan}
         onMouseLeave={cancelPan}
       >
         <div
-          data-testid="desktop-kanban-lane-grid"
-          className="grid h-full min-h-0 min-w-full gap-0"
+          className="flex h-full min-h-0"
           style={{
-            gridTemplateColumns: getKanbanColumnGridTemplate(steps.length),
-            paddingInlineEnd: isDragging ? KANBAN_DRAG_END_PADDING : undefined,
+            height: columnHeight,
+            width: `calc(max(100cqw, ${steps.length * KANBAN_COLUMN_MIN_PX}px) + ${
+              isDragging ? KANBAN_DRAG_END_RESERVE : "0px"
+            })`,
           }}
         >
-          {steps.map((step) => (
-            <div key={step.id} data-kanban-step-id={step.id} className="min-h-0 min-w-0 snap-start">
-              {renderColumn(step)}
-            </div>
-          ))}
+          <div
+            data-testid="desktop-kanban-lane-grid"
+            className="grid h-full min-h-0 flex-none gap-0"
+            style={{
+              gridTemplateColumns: getKanbanColumnGridTemplate(steps.length),
+              width: `max(100cqw, ${steps.length * KANBAN_COLUMN_MIN_PX}px)`,
+            }}
+          >
+            {steps.map((step) => (
+              <div
+                key={step.id}
+                data-kanban-step-id={step.id}
+                className="min-h-0 min-w-0 snap-start"
+              >
+                {renderColumn(step)}
+              </div>
+            ))}
+          </div>
+          {isDragging && <DragEndReserve />}
         </div>
       </div>
     </div>
+  );
+}
+
+function DragEndReserve() {
+  return (
+    <div
+      data-testid="desktop-kanban-drag-end-reserve"
+      aria-hidden="true"
+      className="h-full flex-none"
+      style={{ width: KANBAN_DRAG_END_RESERVE }}
+    />
   );
 }
 

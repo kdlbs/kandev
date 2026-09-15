@@ -98,9 +98,6 @@ function buildPromptContextItem(
     onRemove: makeRemoveHandler(helpers.sid, f.path, helpers.removeContextFile),
     onUnpin: makeUnpinHandler(f.pinned, helpers.sid, f.path, helpers.unpinFile),
     promptContent: prompt?.content,
-    onClick: () => {
-      /* navigate to settings/prompts if desired */
-    },
   };
 }
 
@@ -250,7 +247,6 @@ export function buildContextItems(params: BuildContextItemsParams): ContextItem[
       id: "plan-comments",
       label: t("task:planCommentCount", { count: params.planComments.length }),
       comments: params.planComments,
-      onRemove: params.handleClearPlanComments,
       onOpen: params.addPlan,
     });
   }

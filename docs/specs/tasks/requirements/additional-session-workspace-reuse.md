@@ -57,6 +57,29 @@ reconstructs or resumes its runtime.
   or recovered runtime workspace exists, a legacy repository-backed session
   can continue to use its source checkout as a compatibility fallback.
 
+### REQ-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003: Executor Transition Workspace Validation
+
+**Intent:** Prevent a session launched with a different executor type from
+starting in a stale workspace retained by the previous executor.
+
+#### Acceptance criteria
+
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.1:** When the requested
+  executor type differs from the canonical task environment executor type, the
+  launch shall not reuse that environment's workspace path, repository
+  inventory, execution identity, or runtime handles.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.2:** A repo-backed launch
+  may become ready only after its selected environment has a complete canonical
+  repository inventory and every selected local workspace path resolves to the
+  expected Git repository checkout.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.3:** A missing, non-Git,
+  path-mismatched, or executor-mismatched workspace shall fail before agent
+  process startup with a typed, recoverable error; it shall not expose the
+  invalid workspace as ready or as the task's current change projection.
+- **AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-003.4:** Rejecting an invalid
+  workspace shall not delete, move, reset, clean, checkout, or otherwise modify
+  the stale path, the canonical repository, or either environment inventory.
+
 ## Migrated source detail
 
 ## Why
@@ -93,6 +116,11 @@ the task and can hide or modify uncommitted work from the new agent.
 | `shared_group` | none | Atomically elect one group materializer. |
 | `shared_group` | creating | Return recoverable `workspace_preparing`. |
 | `shared_group` | ready and complete | Attach to the group environment. |
+
+An executor-type transition is not an attach. It must select or materialize an
+environment owned by the requested executor before a session can start. A
+persisted session or environment workspace path from the previous executor is
+diagnostic evidence only and is never a fallback launch directory.
 
 An incomplete, failed, deleted, path-mismatched, branch-mismatched, or
 duplicate repository slot is `workspace_reuse_unsafe`. An executor that cannot

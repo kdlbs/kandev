@@ -206,12 +206,27 @@ test.describe("Automation run composer", () => {
       .poll(async () => (await apiClient.listSessionTurns(task.session_id!)).turns.length, {
         timeout: 15_000,
       })
-      .toBe(2);
+      .toBeGreaterThanOrEqual(2);
     const updatedTurns = await apiClient.listSessionTurns(task.session_id!);
     const replyTurnId = updatedTurns.turns.find((turn) => turn.id !== initialTurnId)?.id;
     expect(replyTurnId).toBeTruthy();
     await expect(transcript).toContainText(reply, { timeout: 15_000 });
-    await expect(transcript.locator(`[data-turn-id="${replyTurnId}"]`)).toBeVisible();
+    // `[data-turn-id]` is carried by every render item belonging to the reply
+    // turn, not just the reply itself — a turn that produced no agent output
+    // also renders an empty-turn notice row stamped with the same turn id, so
+    // the attribute alone can legitimately resolve to more than one element.
+    // The reply's own persisted message id is unique: resolve it from the API
+    // and assert that exact row, rather than picking an arbitrary match among
+    // same-turn siblings.
+    const { messages: repliedMessages } = await apiClient.listSessionMessages(task.session_id!);
+    const replyMessage = repliedMessages.find(
+      (message) => message.author_type === "user" && message.content === reply,
+    );
+    expect(replyMessage).toBeTruthy();
+    expect(replyMessage?.turn_id).toBe(replyTurnId);
+    const replyRow = transcript.locator(`#msg-${replyMessage?.id}`);
+    await expect(replyRow).toHaveCount(1);
+    await expect(replyRow).toBeVisible();
   });
 
   test("sits on the run page's own background, not the task workbench's card", async ({

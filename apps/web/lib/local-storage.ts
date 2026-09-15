@@ -1,6 +1,7 @@
 import { setWalkthroughLastSeen } from "@/lib/walkthrough-notification-storage";
 import { attachmentContentUrl } from "@/lib/api/domains/attachment-api";
 import type { LayoutProfileIdentity } from "@/lib/layout/layout-profiles";
+import { normalizeStoredFileTab } from "./local-storage-file-tabs";
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
@@ -529,6 +530,8 @@ export interface StoredFileTab {
   /** Multi-repo subpath (repository_name) so a restored tab re-fetches its
    *  content under the right repository after a refresh. */
   repo?: string;
+  renderedPreview?: boolean;
+  /** Legacy Markdown-only preview field accepted during one-way migration. */
   markdownPreview?: boolean;
   pinned?: boolean;
 }
@@ -554,14 +557,15 @@ export function getOpenFileTabs(sessionId: string): StoredFileTab[] {
     let previewSeen = false;
     const normalized: StoredFileTab[] = [];
     for (let i = parsed.length - 1; i >= 0; i--) {
-      const t = parsed[i];
-      if (!t) continue;
-      const isPinned = t.pinned === true || t.pinned === undefined;
+      const tab = parsed[i];
+      if (!tab) continue;
+      const normalizedTab = normalizeStoredFileTab(tab);
+      const isPinned = normalizedTab.pinned === true || normalizedTab.pinned === undefined;
       if (isPinned) {
-        normalized.unshift({ ...t, pinned: true });
+        normalized.unshift({ ...normalizedTab, pinned: true });
       } else if (!previewSeen) {
         previewSeen = true;
-        normalized.unshift({ ...t, pinned: false });
+        normalized.unshift({ ...normalizedTab, pinned: false });
       }
     }
     return normalized;
@@ -575,7 +579,7 @@ export function setOpenFileTabs(sessionId: string, tabs: StoredFileTab[]): void 
   if (typeof window === "undefined") return;
   try {
     const key = `${OPEN_FILES_KEY}.${sessionId}`;
-    window.sessionStorage.setItem(key, JSON.stringify(tabs));
+    window.sessionStorage.setItem(key, JSON.stringify(tabs.map(normalizeStoredFileTab)));
   } catch {
     // Ignore write failures
   }

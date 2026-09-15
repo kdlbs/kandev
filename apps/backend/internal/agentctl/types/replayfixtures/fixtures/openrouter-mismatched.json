@@ -1,0 +1,24 @@
+{
+  "gateway": "openrouter",
+  "agentId": "claude-acp",
+  "classifying": false,
+  "case": "mismatched",
+  "capture": "reconstructed",
+  "source": "https://openrouter.ai/docs/api-reference/errors",
+  "identity": {
+    "sessionId": "openrouter-mismatched",
+    "executionId": "exec-openrouter-mismatched",
+    "promptGeneration": 7
+  },
+  "frames": [
+    {"kind": "message_chunk", "role": "assistant", "text": "Upstream provider returned error 502: Bad gateway from the model provider."},
+    {"kind": "prompt_error", "code": -32603, "message": "Provider error: too many requests to this model, please slow down.", "data": {"errorKind": "rate_limited"}}
+  ],
+  "expect": {
+    "events": ["message_chunk", "error"],
+    "providerError": {"source": "acp_prompt", "rpcCode": -32603, "errorKind": "rate_limited", "providerId": "claude-acp"},
+    "diagnosticCode": "agent_runtime_error",
+    "preResultSafe": false,
+    "recordedDiagnosticCode": ""
+  }
+}

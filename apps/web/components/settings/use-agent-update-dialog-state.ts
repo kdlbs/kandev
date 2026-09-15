@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AgentUpdateJob, AgentUpdatePreview } from "@/lib/api";
+import { isHandledApiError } from "@/lib/api/client";
 
 function errorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
@@ -57,6 +58,20 @@ function resetDialogState({
   setActiveJobID(null);
 }
 
+function handleApprovalError(
+  error: unknown,
+  requestID: number,
+  previewRequestID: { current: number },
+  setApproveError: (value: string | null) => void,
+  onHandledError: () => void,
+) {
+  if (isHandledApiError(error)) {
+    onHandledError();
+    return;
+  }
+  if (requestID === previewRequestID.current) setApproveError(errorMessage(error));
+}
+
 async function approveRuntimeUpdate({
   requestID,
   previewRequestID,
@@ -68,6 +83,7 @@ async function approveRuntimeUpdate({
   setStarting,
   setApproveError,
   setActiveJobID,
+  onHandledError,
 }: {
   requestID: number;
   previewRequestID: { current: number };
@@ -79,6 +95,7 @@ async function approveRuntimeUpdate({
   setStarting: (value: boolean) => void;
   setApproveError: (value: string | null) => void;
   setActiveJobID: (value: string | null) => void;
+  onHandledError: () => void;
 }) {
   const targetVersion = selectedUseDefault
     ? preview?.default_version || preview?.target_version || ""
@@ -92,10 +109,15 @@ async function approveRuntimeUpdate({
       : await onUpdate(agentName, targetVersion);
     if (requestID === previewRequestID.current) setActiveJobID(nextJob.job_id);
   } catch (error) {
-    if (requestID === previewRequestID.current) setApproveError(errorMessage(error));
+    handleApprovalError(error, requestID, previewRequestID, setApproveError, onHandledError);
   } finally {
     if (requestID === previewRequestID.current) setStarting(false);
   }
+}
+
+function closeHandledDialog(setOpen: (value: boolean) => void, reset: () => void) {
+  setOpen(false);
+  reset();
 }
 
 function handleDialogOpenChange(
@@ -196,6 +218,8 @@ export function useAgentUpdateDialogState({
     setSelectedUseDefault,
   );
 
+  const closeOnHandledError = useCallback(() => closeHandledDialog(setOpen, reset), [reset]);
+
   useEffect(() => {
     if (open) void loadPreview();
   }, [loadPreview, open]);
@@ -215,8 +239,9 @@ export function useAgentUpdateDialogState({
         setStarting,
         setApproveError,
         setActiveJobID,
+        onHandledError: closeOnHandledError,
       }),
-    [agentName, onUpdate, preview, selectedTarget, selectedUseDefault],
+    [agentName, closeOnHandledError, onUpdate, preview, selectedTarget, selectedUseDefault],
   );
 
   return {

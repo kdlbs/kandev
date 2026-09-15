@@ -4,11 +4,12 @@ import type { OpenFileTab } from "@/lib/types/backend";
 
 const mockUpdateFileContent = vi.fn();
 const mockGetWebSocketClient = vi.fn();
+const mockRequestFileContent = vi.fn();
 const mockSaveDocument = vi.fn();
 const mockToast = vi.fn();
 
 vi.mock("@/lib/ws/workspace-files", () => ({
-  requestFileContent: vi.fn(),
+  requestFileContent: (...args: unknown[]) => mockRequestFileContent(...args),
   updateFileContent: (...args: unknown[]) => mockUpdateFileContent(...args),
   deleteFile: vi.fn(),
 }));
@@ -28,11 +29,11 @@ vi.mock("@/components/toast-provider", () => ({
 }));
 
 vi.mock("@/lib/utils/file-diff", () => ({
-  calculateHash: vi.fn(),
+  calculateHash: async (content: string) => `hash:${content.length}`,
   generateUnifiedDiff: () => "@@ -1 +1 @@\n-before\n+after",
 }));
 
-import { useFileSaveDelete } from "./task-center-panel-restoration";
+import { loadSavedFileTabs, useFileSaveDelete } from "./task-center-panel-restoration";
 
 const SESSION_ID = "session";
 const PATH = "src/Main.kt";
@@ -124,5 +125,49 @@ describe("task center file saves", () => {
     });
 
     expect(mockSaveDocument).not.toHaveBeenCalled();
+  });
+});
+
+describe("task center file restoration", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetWebSocketClient.mockReturnValue(CLIENT);
+  });
+
+  it("restores generic rendered preview state for center-panel tabs", async () => {
+    mockRequestFileContent.mockResolvedValueOnce({
+      path: "README.md",
+      content: "# README",
+      is_binary: false,
+    });
+
+    const tabs = await loadSavedFileTabs("session", [
+      { path: "README.md", name: "README.md", renderedPreview: true, pinned: true },
+    ]);
+
+    expect(tabs?.[0]).toEqual({
+      path: "README.md",
+      name: "README.md",
+      content: "# README",
+      originalContent: "# README",
+      originalHash: "hash:8",
+      isDirty: false,
+      isBinary: false,
+      renderedPreview: true,
+    });
+  });
+
+  it("does not restore obsolete in-place preview state for HTML tabs", async () => {
+    mockRequestFileContent.mockResolvedValueOnce({
+      path: "reports/index.html",
+      content: "<h1>Report</h1>",
+      is_binary: false,
+    });
+
+    const tabs = await loadSavedFileTabs("session", [
+      { path: "reports/index.html", name: "index.html", renderedPreview: true, pinned: true },
+    ]);
+
+    expect(tabs?.[0]?.renderedPreview).toBeUndefined();
   });
 });

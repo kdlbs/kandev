@@ -448,11 +448,17 @@ test.describe("Session tab management — close behavior", () => {
 
       fs.rmSync(localChangePath);
       await expect
-        .poll(() => environmentFiles(session1Id), {
-          timeout: 20_000,
-          message: "waiting for the removed Changes file to leave the environment store",
-        })
-        .toEqual({});
+        .poll(
+          async () => {
+            const files = await environmentFiles(session1Id);
+            return files ? Object.hasOwn(files, localChange) : false;
+          },
+          {
+            timeout: 20_000,
+            message: "waiting for the removed Changes file to leave the environment store",
+          },
+        )
+        .toBe(false);
       await expect(session.changesFileRow(localChange)).not.toBeVisible({ timeout: 10_000 });
 
       traffic.frames.length = 0;

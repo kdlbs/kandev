@@ -4,7 +4,7 @@ system: tasks
 requirements:
   - REQ-TASKS-RUNTIME-CLEANUP-001
 created: 2026-06-22
-updated: 2026-08-31
+updated: 2026-09-09
 owners:
   - cfl
 ---
@@ -12,7 +12,14 @@ owners:
 
 ## Purpose and boundaries
 
-This design record preserves the technical source for the capability mapped to REQ-TASKS-RUNTIME-CLEANUP-001 while the task system completes its migration.
+This design defines task runtime cleanup for REQ-TASKS-RUNTIME-CLEANUP-001.
+
+The active implementation authority is split into
+[Archive Cleanup Evidence](archive-cleanup-evidence.md),
+[Runtime Startup Registry](runtime-startup-registry.md), and
+[Workspace Deletion Table Registry](workspace-deletion-table-registry.md).
+This migrated record remains the behavioral requirement source; those records
+own exact evidence, startup symbols, and table names.
 
 ## Requirement mapping
 
@@ -33,18 +40,17 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
 
 ## What
 
-- Archiving a task stops every runtime execution that is still durably associated
-  with that task before the task's worktrees or runtime tracking rows are removed.
-- Deleting a task stops every runtime execution that is still durably associated
-  with that task before task records, worktrees, or runtime tracking rows are
-  removed.
+- Archive and delete durably inventory every runtime still associated with the
+  task before removing live task, worktree, or runtime-tracking rows. Physical
+  stop is attempted by the cleanup worker outside the deletion transaction.
 - Cleanup ownership is based on `executors_running`, not only on active
   `task_sessions` state. A runtime row for a completed, cancelled, archived, or
-  otherwise terminal session is still a cleanup target until the runtime stop has
-  been attempted.
-- A cleanup path MUST NOT delete the last durable runtime handle for a task until
-  either the matching runtime execution has stopped successfully or the failure is
-  preserved for retry/diagnosis.
+  otherwise terminal session is still a cleanup target until the runtime stop
+  has been attempted.
+- Before deleting live runtime/session/environment/repository rows, cleanup
+  persists an immutable `task_resource_cleanup_snapshots` record containing the
+  exact handles and ownership proof. That retained record remains authoritative
+  until stop/cleanup succeeds or a retryable failure is preserved.
 - Worktree and task-environment cleanup is ownership-aware. A task cleanup may
   destroy only resources owned by that task's `TaskEnvironment`; borrowed or
   inherited worktrees remain owned by the source task.
@@ -61,102 +67,75 @@ worktrees, or executor rows behind and the machine slowly runs out of memory.
 - Physical workspace cleanup is initiated only by task lifecycle operations:
   archive, delete, cascade archive/delete, workspace delete, quick-chat expiry,
   or explicit task-environment reset. Session deletion is not a cleanup trigger.
-- Agent subprocess shutdown kills the whole agent process group when graceful
-  shutdown does not finish within the configured stop timeout.
-- Agent subprocess shutdown does not treat the command leader exiting as
-  sufficient while descendants remain alive in the same process group.
-- Agentctl instance shutdown never leaves an agent subprocess group alive as a
-  child of `init`/PID 1.
-- Standalone agentctl is isolated from terminal foreground interrupts so the
-  backend remains the owner of Ctrl+C shutdown sequencing.
-- Top-level launchers, including `make start-debug` through `kandev start`, send
-  the backend a graceful termination signal before any force kill so backend
-  shutdown can stop agents and agentctl instances.
-- Backend shutdown waits long enough for standalone agentctl's instance cleanup
-  window before reporting shutdown complete.
-- Backend startup reconciles stale runtime rows for archived/deleted/missing task
-  state and attempts safe cleanup instead of treating the rows as live sessions.
-- Startup reconciliation classifies each stop result and row liveness before it
-  chooses cleanup or preservation. Already-absent, confirmed-dead local runtimes
-  are removed idempotently without repeated warnings. Alive, unknown, remote, or
-  generically failed rows remain preserved.
-- Expected fail-closed preservation is reported as a bounded structured startup
-  summary with counts and safe classification fields. Unexpected generic stop
-  failures retain individual warning records.
-- Cleanup is idempotent: repeating archive/delete cleanup, startup reconciliation,
-  or explicit session stop does not fail because the process, task, session, or
-  worktree was already removed.
-- A cleanup operation treats a classifiable missing owned resource as already
-  complete. This includes a missing worktree and a missing `TaskEnvironment`
-  row captured by the durable cleanup snapshot.
-- Stopping a runtime that is already gone is a successful, idempotent stop, not a
-  failed stop. When a stop operation is asked to stop an execution or session
-  that no longer exists, and the row it owns is a confirmed-dead local runtime,
-  the cleanup treats the runtime as already stopped so the runtime row can be
-  pruned or repaired under the resume-safety invariant and the durable cleanup
-  job does not retry solely because the owned runtime is absent.
-- "Confirmed dead" is judged in a runtime-aware way. A row is confirmed dead only
-  when it is a local runtime whose local liveness handle refers to a process that
-  no longer exists on this host. An alive local runtime, or a runtime whose
-  liveness is Unknown (remote SSH, containerized, or a local row with no liveness
-  handle), is never treated as dead on the basis of a not-found stop result; its
-  row is preserved and the outcome remains retryable.
-- Missing-runtime handling never blanket-ignores every session-level or
-  execution-level not-found error. Only a not-found result for a runtime whose row
-  is confirmed dead is reclassified as a successful stop. A not-found result for
-  an alive or unknown/remote row, or a session/task lookup error that is not a
-  typed not-found sentinel, remains a preserved, retryable outcome so a transient
-  store error is never mistaken for an absent runtime.
-- Where a runtime-specific persisted stop handle exists (for example
-  `agent_execution_id`, or a remote/container handle), missing-runtime handling
-  uses it to decide the stop result rather than inferring absence from a generic
-  error.
-- Archive, delete, cascade, workspace-delete, and quick-chat expiration persist a
-  cleanup intent and resource snapshot before mutating or deleting task state.
-  Cleanup is performed by a durable worker rather than a detached goroutine.
-- Advisory stop-owner registration skips a contended `cancelInFlightGuard` claim
-  without blocking; the requested stop and durable cleanup continue.
-- A durable cleanup job makes at most eight attempts. Failed attempts back off
-  for 1 minute, 5 minutes, 15 minutes, 1 hour, 3 hours, 6 hours, and 12 hours
-  before the next claim. An eighth failed attempt becomes terminal `failed`
-  instead of scheduling another retry.
-- Archive cleanup revalidates that the task remains archived before every
-  destructive step. Unarchiving a task cancels its pending archive cleanup so a
-  delayed retry cannot remove the newly active task's resources.
-- Cleanup preserves historical archived-task worktree records and branch metadata
-  used by unarchive recovery. Filesystem removal does not imply recovery-history
-  removal.
-- A worktree resume uses attach-only preparation only when the requested
-  executor matches the environment owner and the durable environment inventory
-  contains a live physical worktree row. When no live physical repository row
-  exists, normal preparation runs so Git recovery can run.
-- Normal worktree preparation retains the historical worktree ID when one is
-  available. The worktree manager resolves the deleted record, recreates its
-  recoverable branch and directory, then marks the row active and clears
-  `deleted_at`. If no historical ID is available, creation persists the new
-  worktree by updating any soft-deleted row with the same environment,
-  repository, and branch identity.
+- Agent shutdown escalates to the whole process group when its timeout expires
+  and waits for descendants; neither agentctl nor backend shutdown reports
+  completion while an owned process remains under PID 1.
+- Standalone agentctl ignores terminal foreground interrupts so the backend owns
+  Ctrl+C sequencing. Launchers gracefully terminate the backend before force
+  kill, and backend shutdown includes agentctl's cleanup window.
+- Startup reconciliation classifies stale runtime ownership and liveness.
+  Confirmed-dead local rows clean idempotently; alive, unknown, remote, or
+  generic failures remain durable. Expected fail-closed cases are aggregated in
+  a bounded structured summary; unexpected failures retain individual warnings.
+- Cleanup is idempotent only for classifiable absence. Persisted stop handles and
+  runtime-aware liveness may complete confirmed-dead local rows; alive, unknown,
+  remote, and lookup failures remain retryable.
+- Archive/delete/cascade/workspace-delete/quick-chat expiry persist cleanup intent
+  and snapshot before task mutation; a durable worker, never a detached goroutine,
+  owns execution. A contended advisory stop guard does not block requested stop.
+- `bounded_terminal` retries eight times with 1m, 5m, 15m, 1h, 3h, 6h, and 12h
+  delays. Cascade-critical archive/unarchive retains attempt-eight diagnostics and
+  continues every 12h under `cascade_retry`.
+- Archive cleanup revalidates archived state before destruction. Unarchive
+  cancels pending archive cleanup and preserves historical worktree/branch data.
+- Attach-only resume requires the same executor owner and a live durable worktree
+  row. Otherwise normal preparation recreates the directory/branch using the
+  historical worktree ID when available, then reactivates or upserts the matching
+  environment/repository/branch row.
+
+## Archive cascade coordination
+
+[Durable Archive Cascades](durable-archive-cascades.md) owns operation
+reservation, immutable membership, workspace authorization, partial-mutation
+recovery, unarchive, and parent-mutation admission. The architecture choice is
+recorded in [Persist task cascade mutation progress](../../../decisions/2026-09-05-durable-task-cascade-mutations.md).
+
+This cleanup design owns the caller-cancellation boundary after preparation.
+The request computes one absolute deadline: the earlier caller deadline or entry
+plus `TaskArchiveTimeout` (two minutes). Authorization, reservation, and cleanup
+preparation remain caller-cancellable. After preparation, request-owned runtime
+stop, mutation, finalization, publication, vacancy, activation, rollback, and
+compensation use cancellation-independent contexts capped by
+`min(original_deadline, now+step_budget)`. No “fresh” context extends it.
+
+When the original deadline has expired, synchronous recovery stops after
+persisting retry direction/error and waking the mandatory runtime; the response
+returns the durable operation identity. A later worker claim has its own bounded
+attempt deadline and is not part of the expired request attempt. Exact nested
+budgets and expiry tests are in
+[Archive Cascade Boundary Contracts](archive-cascade-boundary-contracts.md#absolute-request-deadline).
+Task/group jobs use the full execution-contract state machine.
+
+Cleaner/restorer receives versioned database-scoped `CleanupFence` keys, exact
+snapshot/lifecycle marker identity, and provider proof. Claim commits before
+guard wait; no SQL transaction waits. Short marker/completion transactions
+bracket I/O. Unarchive advances lifecycle generation before joining cleanup;
+restore uses identical keys under that newer fence.
 
 ## Archive cleanup disposition
 
-Direct and cascade archive use the same cleanup disposition. A caller-specific
-Boolean must not change it:
-
-- Stop the task runtimes and remove executor-specific runtime resources.
-- Remove the physical worktree directory and mark its repository row deleted.
-- Preserve the owning `task_environments` row, every
-  `task_environment_repos` row (including worktree ID, path, branch, and slug),
-  and the local Git branch ref.
-
-If a worktree appears in both snapshots, every pass uses this disposition and
-must not delete a branch preserved earlier.
-
-Unarchive keeps the preserved environment link. If its repository row is not
-live, normal preparation reactivates it and uses the preserved local branch
-before remote or pull-request recovery. Delete remains separate and may remove
-owner rows after capturing its cleanup snapshot.
+Direct and cascade archive share one disposition: stop task runtimes, remove the
+physical worktree, mark its repository row deleted, and retain the owning
+`task_environments` plus every `task_environment_repos` identity/path/branch/slug
+and local branch ref. Duplicate snapshot references cannot delete a ref retained
+by an earlier pass. Unarchive reuses that environment and branch; absent live
+repository rows use normal preparation. Delete may remove owner rows only after
+capturing the cleanup snapshot.
 
 ## Data Model
+
+Preparation with absent resources follows
+[Cleanup preparation](runtime-cleanup-preparation.md).
 
 ### `executors_running`
 
@@ -192,48 +171,43 @@ and is the single source of physical worktree identity, path, branch, status, an
 lifecycle timestamps. Task cleanup queries repository rows through the owning
 environment's `task_id`; it never needs a session row.
 
-Sessions refer to the complete shared workspace through
-`task_sessions.task_environment_id`. The legacy `task_session_worktrees` table is
-redundant and is removed after a transactional SQLite/PostgreSQL backfill into
-`task_environment_repos`. The same migration removes deprecated flat
-`repository_id`, `worktree_id`, `worktree_path`, and `worktree_branch` columns
-from `task_environments`. Runtime code, APIs, storage inventory, and cleanup use
-only the normalized schema; there is no permanent dual-read or dual-write path.
-
-The migration fails closed when existing environment, session, repository,
-identity, or path data cannot be normalized to exactly one environment owner.
-Fresh databases are created directly in the final schema.
-
-Normalization uses a dedicated error-returning migration under the database
-writer/migration lock. Shadow tables are populated and compared against the full
-legacy worktree inventory before legacy schema is dropped. Ownership, uniqueness,
-foreign keys, row counts, and the final schema are validated before commit. Any
-failure rolls back the entire cutover. SQLite additionally requires the existing
-fatal pre-upgrade snapshot; PostgreSQL uses transactional DDL under an advisory
-migration lock. The migration never performs filesystem or Git cleanup.
+Sessions reference shared workspaces through `task_environment_id`. A
+transactional SQLite/PostgreSQL migration backfills `task_session_worktrees`
+into `task_environment_repos`, removes redundant columns, and leaves no dual
+path. It fails closed unless every legacy identity and path has one owner.
+Under the migration lock it verifies shadow inventory, ownership, constraints,
+row counts, and final schema before commit; failure rolls back. SQLite requires
+the pre-upgrade snapshot, while PostgreSQL uses transactional DDL and its
+advisory lock. Migration performs no filesystem/Git work; fresh databases use
+the final schema.
 
 ### `task_resource_cleanup_jobs`
 
-`task_resource_cleanup_jobs` is the durable task-lifecycle cleanup intent. It has
-no foreign key to `tasks`, so delete cleanup survives deletion of the owning row.
-It stores the trigger, state, retry timing, last error, and a JSON snapshot of the
-runtime, environment, worktree OIDs, and path handles captured before task mutation.
-Only one non-terminal row exists for an operation ID; repeated event delivery
-reuses the same cleanup job. `attempts` counts successful worker claims. A
-terminal `failed` row retains its final error and completion timestamp for
-diagnosis but is not selected by the automatic worker.
+`task_resource_cleanup_jobs` is durable task-lifecycle intent. It has no foreign
+key to live task, session, runtime, environment, group, or physical rows, so
+delete cannot remove its immutable resource snapshot. It stores operation,
+workspace, task, resource-key set, snapshot hash/payload, target/work direction,
+lifecycle generation, state/retry/error, claim generation/owner/lease/heartbeat,
+unknown-resolution evidence, and timestamps.
 
-A prepared task-lifecycle cleanup job also acts as a durable creation barrier.
-The barrier is reserved before resource inventory is captured. Session creation
-and physical worktree persistence serialize against the task row and refuse new
-ownership while archive/delete preparation is active. The barrier transaction
-never holds filesystem, target-path, or repository Git locks.
+Task cleanup uses the exact task/group transition table in
+[Archive Cascade Execution Contracts](archive-cascade-execution-contracts.md#task-and-group-cleanup-jobs).
+Cascade archive/unarchive uses unbounded `cascade_retry`: after the normal seven
+delays, failures retain an exhausted diagnostic and retry every 12 hours.
+Non-restorable delete/shutdown may use `bounded_terminal` and enter retained
+`failed` on attempt eight. Ambiguous I/O always enters `unknown`.
+
+A prepared job is also the durable creation barrier. Every production writer to
+session, runtime, environment, and physical-handle tables is registered as
+admitted or column-scoped exempt in the aggregate writer inventory. Admitted
+writes serialize against the task/operation barrier; writer-first state enters
+the snapshot and reservation-first returns typed conflict. The barrier
+transaction holds no filesystem, target-path, or Git lock.
 
 ## API Surface
 
-No new user-facing HTTP or WebSocket action is required. Existing task archive,
-task delete, session stop, and backend startup behavior gain stronger cleanup
-guarantees.
+No new action is required for the base contract. Dirty deletion admission is in
+[Dirty Worktree Task Deletion](dirty-worktree-deletion.md).
 
 `session.delete` keeps its existing request and response contract. Success means
 the session row is gone. It does not mean the task workspace was cleaned, and it
@@ -262,34 +236,49 @@ Runtime cleanup for a task follows this lifecycle:
 
 - `tracked`: an `executors_running` row exists for the task.
 - `stop_requested`: archive, delete, explicit stop, terminal-agent cleanup, or
-  startup reconciliation has selected the row for cleanup.
-- `stopped`: the runtime instance and its subprocess group have exited or were
-  already absent.
-- `tracking_removed`: the `executors_running` row is deleted after the stop
-  result is known.
-- `retryable_failure`: stop could not be confirmed before the timeout. The row
-  remains durable with enough context to retry and diagnose.
+  startup reconciliation selected the row.
+- `snapshot_handed_off`: task/cascade/workspace deletion committed an immutable
+  resource snapshot; the live row may be removed, but the retained handle owns
+  cleanup.
+- `stopped`: the runtime instance and subprocess group exited or were absent.
+- `tracking_removed`: the live runtime row is deleted after stop, or after the
+  snapshot handoff that preserves its authoritative handle.
 
 Allowed transitions:
 
 - `tracked` -> `stop_requested` by archive/delete/session stop/reconciliation.
-- `stop_requested` -> `stopped` when runtime shutdown succeeds or the runtime is
-  confirmed absent.
-- `stopped` -> `tracking_removed` after worktree/environment cleanup has been
-  attempted and the runtime row is no longer needed as the durable stop handle.
-- `stop_requested` -> `retryable_failure` on timeout or uncertain runtime state.
+- `stop_requested` -> `snapshot_handed_off` for task, cascade, or workspace
+  deletion after its immutable snapshot commits, or -> `stopped` when shutdown
+  succeeds/absence is proved.
+- `snapshot_handed_off` -> `tracking_removed` after the live row is deleted.
+- `stopped` -> `tracking_removed` after cleanup no longer needs the live handle.
+- `stop_requested` -> `retryable_failure` on timeout or uncertain state.
 - `retryable_failure` -> `stop_requested` on the next cleanup attempt.
 
-The durable cleanup job wraps that resource lifecycle:
+The deleting transaction commits the snapshot, cleanup claim, and handoff
+generation before removing the live runtime row. The cleanup worker owns the
+stop from that claim; lease expiry permits a higher-generation takeover, and a
+crash after commit cannot leave an unowned running runtime.
+The durable task cleanup job follows the authoritative
+[task/group table](archive-cascade-execution-contracts.md#task-and-group-cleanup-jobs).
+It stores desired `target_direction` separately from the claimed
+`work_direction`.
 
-- `pending` -> `running` when the cleanup worker claims the job.
-- `running` -> `succeeded` when runtime and owned resource cleanup finish.
-- `running` -> `retry_wait` when bounded cleanup fails and the resource snapshot
-  must be retried and fewer than eight claims have run.
-- `running` -> `failed` when the eighth claimed attempt fails.
-- `retry_wait` -> `running` on the next scheduled retry or manual storage run.
-- `pending|running|retry_wait` -> `cancelled` when an archive-triggered cleanup
-  observes that its task has been unarchived.
+Unarchive sets target restore and advances lifecycle generation before joining a
+running cleanup claim. Prepared/pending/unclaimed retry jobs cancel directly.
+Running or unknown cleanup becomes `unknown` under the new fence; reconciliation
+acquires the same physical guard and proves either no cleanup (`cancelled`) or
+completed cleanup (`restore_pending`). It never labels possibly completed I/O
+cancelled from lease state alone.
+
+Restore claims move `restore_pending|restore_retry_wait` through `restoring` to
+`restored`; ambiguous/expired work enters `unknown` until proof selects restored
+or safe retry. Task restore validates retained environment/repository/branch
+metadata and marks it safely materializable; normal admitted session preparation
+recreates an absent worktree later. Archive requires every required nonmissing
+cascade job `succeeded`; unarchive requires each `cancelled` or `restored`.
+Concurrently deleted members instead retain `delete_owned` cleanup and are
+reported missing rather than exposed.
 
 ## Failure Modes
 
@@ -318,16 +307,18 @@ The durable cleanup job wraps that resource lifecycle:
 - If a session or task lookup during stop fails with an error that is not a typed
   not-found sentinel, cleanup treats it as a retryable failure and preserves the
   row; it does not reinterpret the error as an absent runtime.
-- If worktree or task environment cleanup fails after runtime shutdown is
+- If worktree or task-environment cleanup fails after runtime shutdown is
   confirmed, the runtime tracking row can still be removed because it no longer
-  identifies a live process. The resource cleanup error is logged and handled by
-  the resource-specific retry path.
-- If a worktree or captured task-environment row is already absent, cleanup
-  treats that deletion step as successful and continues. Other teardown errors
-  remain retryable and are not hidden by an accompanying not-found result.
-- If cleanup still fails on its eighth worker claim, the job becomes terminal
-  `failed`, preserves `last_error`, clears `next_attempt_at`, stamps
-  `completed_at`, and is excluded from automatic due-job selection.
+  identifies a live process. The resource cleanup error remains retryable.
+- An absent captured database row is an idempotent metadata-deletion success; it
+  says nothing about a physical path. An absent physical worktree/environment
+  path succeeds only when the authenticated external ownership marker and locked
+  Git registration prove that exact snapshot was already removed. Generic
+  filesystem or Git not-found is `unknown`, preserves evidence, and retries.
+- Bounded-policy delete/shutdown jobs may enter retained terminal `failed` on
+  claim eight, except DeleteTask Git registration/branch cleanup, which always
+  uses unbounded generation-fenced `cascade_retry`. Other cascade jobs retain
+  `last_error`, set `exhausted`, and schedule the next claim in 12 hours.
 - If cleanup cannot prove that a session worktree belongs to the task being
   cleaned, destructive worktree deletion fails closed and skips that worktree.
   Stale Git state is removed only with pinned path, branch, and commit ownership.
@@ -372,25 +363,27 @@ The durable cleanup job wraps that resource lifecycle:
 
 ## Persistence Guarantees
 
-- Runtime cleanup intent survives backend restarts because `executors_running`
-  rows remain durable until cleanup succeeds or a retryable failure is recorded.
-- Worktrees and task environment rows are not removed before runtime stop has been
-  attempted for every runtime row owned by the task.
-- Startup reconciliation is allowed to recover from a previous backend crash by
-  reattempting cleanup for stale runtime rows.
-- A typed-not-found, confirmed-dead local row removed during one startup does not
-  reappear or produce the same cleanup warning on the next startup. Rows with
-  Unknown liveness remain durable until Kandev can prove safe removal.
+- Runtime cleanup intent survives backend restarts because live
+  `executors_running` rows remain until stop is attempted; after live-row
+  deletion, `task_resource_cleanup_snapshots` retains the exact handle,
+  ownership, and proof envelope until cleanup succeeds or retryable failure is
+  recorded.
+- Runtime stop is represented in the retained snapshot before live worktree or
+  task-environment rows are removed; the cleanup worker attempts the stop and
+  later physical teardown from that snapshot.
+- Startup reconciliation reloads retained snapshots and stale runtime rows.
+  A typed-not-found, confirmed-dead local row is removed only after its
+  snapshot records the result; unknown liveness remains durable.
 - Pending and retryable task cleanup jobs survive restart and resume independently
   of whether optional scheduled storage maintenance is enabled.
-- Terminal failed task cleanup jobs survive restart for diagnosis but do not
-  resume automatically.
+- Terminal `failed` bounded-policy jobs survive restart for diagnosis and do not
+  resume automatically; cascade-policy jobs never enter that state.
 - Cleanup snapshots needed after task deletion survive without foreign-keyed task,
   session, environment, or worktree rows.
 - A `task_environment_repos` row, its directory, Git registration, branch, and
-  uncommitted files survive deletion of every session for the task and survive
-  backend restart. They remain discoverable through
-  `task_environments.task_id` until task lifecycle cleanup takes ownership.
+  uncommitted files survive deletion of every session. Task lifecycle deletion
+  snapshots those identities before removing live rows; the retained snapshot
+  remains discoverable for cleanup and proof.
 - Storage inventory protects paths from task environment repository rows, not
   only paths referenced by live sessions, so a zero-session task workspace is
   not classified as orphaned.
@@ -505,18 +498,22 @@ The durable cleanup job wraps that resource lifecycle:
 - **GIVEN** the backend exits after a task is deleted but before its worktree is
   removed, **WHEN** the backend restarts, **THEN** the durable cleanup job retries
   using its captured resource snapshot.
-- **GIVEN** a delete cleanup snapshot references a worktree that is already
-  absent, **WHEN** the cleanup worker runs, **THEN** the worktree step is treated
-  as complete and the job does not retry because of that absence.
-- **GIVEN** a delete cleanup snapshot requests deletion of a task-environment row
-  that is already absent, **WHEN** the cleanup worker runs, **THEN** the row step
-  is treated as complete and the job does not retry because of that absence.
+- **GIVEN** a delete cleanup snapshot references a physical worktree that is
+  already absent, **WHEN** the cleanup worker runs, **THEN** it succeeds only
+  after the authenticated external marker and locked Git registration prove
+  exact prior removal; generic path not-found is `unknown` and retries.
+- **GIVEN** a delete cleanup snapshot requests deletion of a captured
+  task-environment database row that is already absent, **WHEN** the cleanup
+  worker runs, **THEN** the metadata step is idempotently complete and does not
+  retry because of that absence.
 - **GIVEN** a cleanup job fails for a genuinely retryable reason, **WHEN** fewer
   than eight attempts have run, **THEN** it enters `retry_wait` using the
   documented backoff schedule.
-- **GIVEN** a cleanup job fails on its eighth attempt, **WHEN** the worker records
-  the result, **THEN** it enters terminal `failed` with the final diagnostic and
-  is not automatically claimed again.
+- **GIVEN** a bounded-policy cleanup job fails on attempt eight, **WHEN** the
+  worker records it, **THEN** it enters retained terminal `failed`.
+- **GIVEN** a cascade-policy job fails on attempt eight or later, **WHEN** the
+  worker records it, **THEN** it retains the exhausted diagnostic and schedules
+  another generation-fenced attempt after 12 hours.
 - **GIVEN** an archive cleanup job is pending, **WHEN** the task is unarchived,
   **THEN** the job is cancelled and cannot delete resources created after
   unarchive.

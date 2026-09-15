@@ -408,13 +408,43 @@ func TestGHClient_ListRepoDirectory_Errors(t *testing.T) {
 			t.Errorf("endpoint = %q", apiErr.Endpoint)
 		}
 	})
+	// 422 is not one of the statuses config sync's fetch classification needs
+	// promoted (404/401/403/429/5xx), so it stays the residue case: any
+	// status this client does not recognize falls through to a bare wrap
+	// rather than being guessed at.
 	t.Run("other failures stay untyped", func(t *testing.T) {
-		newFakeGH(t, ghResponse{Prefix: "api repos/", Stderr: "HTTP 500", Exit: 1})
+		newFakeGH(t, ghResponse{Prefix: "api repos/", Stderr: "HTTP 422", Exit: 1})
 		_, err := NewGHClient().ListRepoDirectory(context.Background(), "acme", "widget", "docs", "")
 		if err == nil || !strings.Contains(err.Error(), "list repo directory") {
 			t.Fatalf("err = %v, want a wrapped error", err)
 		}
+		var apiErr *GitHubAPIError
+		if errors.As(err, &apiErr) {
+			t.Fatalf("err = %v, want it to stay untyped", err)
+		}
 	})
+	for _, tt := range []struct {
+		name   string
+		stderr string
+		want   int
+	}{
+		{"401 becomes a typed error", "gh: HTTP 401: Bad credentials", http.StatusUnauthorized},
+		{"403 becomes a typed error", "gh: HTTP 403: Forbidden", http.StatusForbidden},
+		{"429 becomes a typed error", "gh: HTTP 429: Too Many Requests", http.StatusTooManyRequests},
+		{"5xx becomes a typed error", "gh: HTTP 503: Service Unavailable", http.StatusServiceUnavailable},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			newFakeGH(t, ghResponse{Prefix: "api repos/", Stderr: tt.stderr, Exit: 1})
+			entries, err := NewGHClient().ListRepoDirectory(context.Background(), "acme", "widget", "docs", "")
+			if entries != nil {
+				t.Errorf("entries = %#v, want nil", entries)
+			}
+			var apiErr *GitHubAPIError
+			if !errors.As(err, &apiErr) || apiErr.StatusCode != tt.want {
+				t.Fatalf("err = %v, want a *GitHubAPIError with %d", err, tt.want)
+			}
+		})
+	}
 	t.Run("unparseable output", func(t *testing.T) {
 		newFakeGH(t, ghResponse{Prefix: "api repos/", Stdout: "nope"})
 		_, err := NewGHClient().ListRepoDirectory(context.Background(), "acme", "widget", "docs", "")
@@ -459,13 +489,39 @@ func TestGHClient_GetRepoFileContent_Errors(t *testing.T) {
 			t.Errorf("endpoint = %q", apiErr.Endpoint)
 		}
 	})
+	// 422 stays the residue case for the same reason as
+	// TestGHClient_ListRepoDirectory_Errors: it is not one of the statuses
+	// config sync's fetch classification promotes.
 	t.Run("other failures stay untyped", func(t *testing.T) {
-		newFakeGH(t, ghResponse{Prefix: "api repos/", Stderr: "HTTP 500", Exit: 1})
+		newFakeGH(t, ghResponse{Prefix: "api repos/", Stderr: "HTTP 422", Exit: 1})
 		_, err := NewGHClient().GetRepoFileContent(context.Background(), "acme", "widget", "x", "")
 		if err == nil || !strings.Contains(err.Error(), "get repo file content") {
 			t.Fatalf("err = %v, want a wrapped error", err)
 		}
+		var apiErr *GitHubAPIError
+		if errors.As(err, &apiErr) {
+			t.Fatalf("err = %v, want it to stay untyped", err)
+		}
 	})
+	for _, tt := range []struct {
+		name   string
+		stderr string
+		want   int
+	}{
+		{"401 becomes a typed error", "gh: HTTP 401: Bad credentials", http.StatusUnauthorized},
+		{"403 becomes a typed error", "gh: HTTP 403: Forbidden", http.StatusForbidden},
+		{"429 becomes a typed error", "gh: HTTP 429: Too Many Requests", http.StatusTooManyRequests},
+		{"5xx becomes a typed error", "gh: HTTP 503: Service Unavailable", http.StatusServiceUnavailable},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			newFakeGH(t, ghResponse{Prefix: "api repos/", Stderr: tt.stderr, Exit: 1})
+			_, err := NewGHClient().GetRepoFileContent(context.Background(), "acme", "widget", "x", "")
+			var apiErr *GitHubAPIError
+			if !errors.As(err, &apiErr) || apiErr.StatusCode != tt.want {
+				t.Fatalf("err = %v, want a *GitHubAPIError with %d", err, tt.want)
+			}
+		})
+	}
 	t.Run("unparseable output", func(t *testing.T) {
 		newFakeGH(t, ghResponse{Prefix: "api repos/", Stdout: "nope"})
 		_, err := NewGHClient().GetRepoFileContent(context.Background(), "acme", "widget", "x", "")

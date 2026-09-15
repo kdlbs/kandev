@@ -7,6 +7,7 @@ import type { DiffComment } from "@/lib/diff/types";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
 import type { EntityReference } from "@/lib/types/entity-reference";
+import type { TaskPlanCommentRef } from "@/lib/types/http";
 import { useChatInputContainer } from "./use-chat-input-container";
 import { SessionStoppedBanner } from "./session-stopped-banner";
 import { useSessionRecoveryActions } from "@/hooks/domains/session/use-session-recovery-actions";
@@ -21,6 +22,7 @@ import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import { t } from "@/lib/i18n";
+import { shouldHideChatInputForLaunchError, shouldRenderStoppedSessionBanner } from "./types";
 
 // Re-export ImageAttachment type for consumers
 export type { ImageAttachment } from "./image-attachment-preview";
@@ -55,6 +57,7 @@ export type ChatSubmitPayload = {
   inlineMentions?: ContextFile[];
   inlineTaskMentions?: TaskMentionData[];
   entityReferences?: EntityReference[];
+  planCommentRefs?: TaskPlanCommentRef[];
 };
 
 type ChatInputContainerProps = {
@@ -75,6 +78,8 @@ type ChatInputContainerProps = {
    * steering) rather than queued. Defaults to false. */
   supportsSteering?: boolean;
   isStarting: boolean;
+  /** True when startup submission can be persisted to this session's queue. */
+  canQueueWhileStarting?: boolean;
   /** True only while a containerized executor is bootstrapping (Docker
    * prepare, Sprites sandbox spin-up). Distinct from the brief STARTING
    * state every session — including local quick-chat — passes through;
@@ -94,7 +99,10 @@ type ChatInputContainerProps = {
   hasAgentCommands?: boolean;
   isFailed?: boolean;
   isCompleted?: boolean;
+  sessionErrorMessage?: string;
   needsRecovery?: boolean;
+  /** The task-owned launch card renders the failed-start recovery. */
+  launchErrorOwned?: boolean;
   executorUnavailable?: boolean;
   executorUnavailableReason?: string;
   contextItems?: ContextItem[];
@@ -217,10 +225,17 @@ function buildEditorAreaProps(
   };
 }
 
-function buildStoppedBannerProps(p: ChatInputContainerProps) {
-  if (!p.executorUnavailable) return {};
+type StoppedBannerSource = Pick<
+  ChatInputContainerProps,
+  "executorUnavailable" | "executorUnavailableReason" | "sessionErrorMessage"
+>;
+
+export function buildStoppedBannerProps(p: StoppedBannerSource) {
+  if (!p.executorUnavailable) {
+    return p.sessionErrorMessage ? { message: p.sessionErrorMessage } : {};
+  }
   return {
-    message: t("task:executorEnvironmentIsUnavailable"),
+    message: p.sessionErrorMessage ?? t("task:executorEnvironmentIsUnavailable"),
     detail: p.executorUnavailableReason,
     resumeLabel: t("task:restart"),
     resumingLabel: t("task:restarting"),
@@ -279,8 +294,15 @@ function useChatPromptEnhancement({
   return { handleEnhancePrompt, isEnhancingPrompt, isUtilityConfigured, promptDelivery };
 }
 
+function useChatInputRecoveryActions(taskId: string | null, sessionId: string | null) {
+  return useSessionRecoveryActions({
+    taskId: taskId ?? "",
+    sessionId: sessionId ?? "",
+  });
+}
+
 export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInputContainerProps>(
-  // eslint-disable-next-line complexity -- top-level component chooses the stopped or editor surface after shared hook setup.
+  // eslint-disable-next-line complexity, max-lines-per-function -- top-level component chooses the stopped or editor surface after shared hook setup.
   function ChatInputContainer(props, ref) {
     const { sessionId, taskId, taskTitle, taskDescription, isAgentBusy, isStarting, isSending } =
       props;
@@ -296,6 +318,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       isSending,
       isStarting,
       isPreparingEnvironment: props.isPreparingEnvironment ?? false,
+      canQueueWhileStarting: props.canQueueWhileStarting ?? false,
       isMoving,
       isFailed: p.isFailed,
       needsRecovery: props.needsRecovery ?? false,
@@ -314,10 +337,7 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       onSubmit: props.onSubmit,
     });
 
-    const recoveryActions = useSessionRecoveryActions({
-      taskId: taskId ?? "",
-      sessionId: sessionId ?? "",
-    });
+    const recoveryActions = useChatInputRecoveryActions(taskId, sessionId);
 
     const promptEnhancement = useChatPromptEnhancement({
       inputRef: s.inputRef,
@@ -327,7 +347,23 @@ export const ChatInputContainer = forwardRef<ChatInputContainerHandle, ChatInput
       taskDescription,
     });
 
-    if (p.isFailed || p.isCompleted || executorUnavailable) {
+    if (
+      shouldHideChatInputForLaunchError({
+        isFailed: p.isFailed,
+        launchErrorOwned: p.launchErrorOwned,
+      })
+    ) {
+      return null;
+    }
+
+    if (
+      shouldRenderStoppedSessionBanner({
+        isFailed: p.isFailed,
+        isCompleted: p.isCompleted,
+        executorUnavailable,
+        launchErrorOwned: p.launchErrorOwned,
+      })
+    ) {
       return (
         <SessionStoppedBanner
           mode={p.isCompleted ? "completed" : "recoverable"}

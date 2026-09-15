@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ExecutorProfile } from "@/lib/types/http";
 import {
+  computeAgentCompatState,
   computeHasRepositorySelection,
   computeSelectedRepoCount,
   filterCompatibleAgentProfiles,
@@ -225,5 +226,119 @@ describe("filterCompatibleAgentProfiles", () => {
         [],
       ).map((p) => p.id),
     ).toEqual(["enabled"]);
+  });
+});
+
+describe("computeAgentCompatState", () => {
+  const sprites = {
+    id: "exec-sprites",
+    executor_type: "sprites",
+    config: {},
+  } as unknown as ExecutorProfile;
+  function profile(id: string, enabled = true): AgentProfileOption {
+    return {
+      id,
+      label: id,
+      agent_id: `agent-${id}`,
+      agent_name: id,
+      cli_passthrough: false,
+      enabled,
+    };
+  }
+  const claude = profile("claude");
+  const cursor = profile("cursor");
+  function state(
+    overrides: Partial<Parameters<typeof computeAgentCompatState>[0]> = {},
+  ): ReturnType<typeof computeAgentCompatState> {
+    return computeAgentCompatState({
+      selectedExecutorProfile: sprites,
+      compatibleAgentProfiles: [cursor],
+      selectedAgentProfileId: claude.id,
+      selectedAgentProfile: claude,
+      workflowAgentLocked: false,
+      dynamicRoutingEnabled: true,
+      ...overrides,
+    });
+  }
+
+  it("is compatible while no executor profile is selected", () => {
+    expect(state({ selectedExecutorProfile: null, compatibleAgentProfiles: [] })).toBe(
+      "compatible",
+    );
+  });
+
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.4
+  it("is none-compatible when the compatible list is empty and nothing locks the agent", () => {
+    expect(state({ compatibleAgentProfiles: [] })).toBe("none-compatible");
+    expect(
+      state({
+        compatibleAgentProfiles: [],
+        selectedAgentProfileId: "",
+        selectedAgentProfile: null,
+      }),
+    ).toBe("none-compatible");
+  });
+
+  it("is compatible while nothing is selected and a compatible profile exists", () => {
+    expect(state({ selectedAgentProfileId: "", selectedAgentProfile: null })).toBe("compatible");
+  });
+
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.6
+  it("is selected-incompatible, never none-compatible, when the selection is absent from a non-empty list", () => {
+    expect(state()).toBe("selected-incompatible");
+  });
+
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.3
+  it("is compatible when the selection is in the list", () => {
+    expect(state({ compatibleAgentProfiles: [claude, cursor] })).toBe("compatible");
+  });
+
+  // @covers AC-TASKS-TASK-CREATE-AGENT-COMPATIBILITY-001.5
+  it("keeps the workflow-locked state even when nothing else is compatible", () => {
+    expect(state({ compatibleAgentProfiles: [], workflowAgentLocked: true })).toBe(
+      "selected-incompatible",
+    );
+  });
+
+  it("treats a disabled locked profile as no compatible agent, not a credential problem", () => {
+    const disabled = profile("disabled", false);
+    expect(
+      state({
+        selectedAgentProfileId: disabled.id,
+        selectedAgentProfile: disabled,
+        workflowAgentLocked: true,
+      }),
+    ).toBe("none-compatible");
+  });
+
+  it("keeps an unlocked disabled selection distinct when an alternative exists", () => {
+    const disabled = profile("disabled", false);
+    expect(
+      state({
+        selectedAgentProfileId: disabled.id,
+        selectedAgentProfile: disabled,
+        workflowAgentLocked: false,
+        compatibleAgentProfiles: [cursor],
+      }),
+    ).toBe("selected-unavailable");
+  });
+
+  it("keeps an unlocked dynamic selection distinct when routing is disabled", () => {
+    const dynamic = { ...profile("dynamic"), kind: "dynamic" } satisfies AgentProfileOption;
+    expect(
+      state({
+        selectedAgentProfileId: dynamic.id,
+        selectedAgentProfile: dynamic,
+        workflowAgentLocked: false,
+        dynamicRoutingEnabled: false,
+        compatibleAgentProfiles: [cursor],
+      }),
+    ).toBe("selected-unavailable");
+  });
+
+  it("treats an unknown selected id as a credential problem when a compatible profile exists", () => {
+    expect(state({ selectedAgentProfileId: "gone", selectedAgentProfile: null })).toBe(
+      "selected-incompatible",
+    );
   });
 });

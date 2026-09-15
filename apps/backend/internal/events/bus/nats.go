@@ -104,7 +104,7 @@ func (b *NATSEventBus) Publish(ctx context.Context, subject string, event *Event
 
 // Subscribe creates a subscription to a subject pattern
 func (b *NATSEventBus) Subscribe(subject string, handler EventHandler) (Subscription, error) {
-	sub, err := b.conn.Subscribe(subject, b.createMsgHandler(handler))
+	sub, err := b.conn.Subscribe(subject, b.createMsgHandler(subject, handler))
 	if err != nil {
 		return nil, fmt.Errorf("failed to subscribe to %s: %w", subject, err)
 	}
@@ -115,7 +115,7 @@ func (b *NATSEventBus) Subscribe(subject string, handler EventHandler) (Subscrip
 
 // QueueSubscribe creates a queue subscription for load balancing
 func (b *NATSEventBus) QueueSubscribe(subject, queue string, handler EventHandler) (Subscription, error) {
-	sub, err := b.conn.QueueSubscribe(subject, queue, b.createMsgHandler(handler))
+	sub, err := b.conn.QueueSubscribe(subject, queue, b.createMsgHandler(subject, handler))
 	if err != nil {
 		return nil, fmt.Errorf("failed to queue subscribe to %s: %w", subject, err)
 	}
@@ -127,8 +127,12 @@ func (b *NATSEventBus) QueueSubscribe(subject, queue string, handler EventHandle
 	return &natsSubscription{sub: sub}, nil
 }
 
-// createMsgHandler creates a NATS message handler from an EventHandler
-func (b *NATSEventBus) createMsgHandler(handler EventHandler) nats.MsgHandler {
+// createMsgHandler creates a NATS message handler from an EventHandler.
+// pattern is the subject (possibly wildcarded) the subscription was
+// registered with; it is logged alongside the delivering msg.Subject if the
+// handler panics, since msg.Subject alone doesn't identify which
+// subscription matched on a shared bus.
+func (b *NATSEventBus) createMsgHandler(pattern string, handler EventHandler) nats.MsgHandler {
 	return func(msg *nats.Msg) {
 		var event Event
 		if err := json.Unmarshal(msg.Data, &event); err != nil {
@@ -145,7 +149,11 @@ func (b *NATSEventBus) createMsgHandler(handler EventHandler) nats.MsgHandler {
 		event.Subject = msg.Subject
 
 		ctx := context.Background()
-		if err := handler(ctx, &event); err != nil {
+		// The NATS client invokes this handler on its own goroutine, so an
+		// unrecovered panic here would kill the process rather than merely
+		// truncate a delivery loop — invokeHandler contains it the same way
+		// as the in-memory bus.
+		if err := invokeHandler(ctx, b.logger, "nats", msg.Subject, pattern, &event, handler); err != nil {
 			b.logger.Error("Event handler failed",
 				zap.String("subject", msg.Subject),
 				zap.String("event_id", event.ID),

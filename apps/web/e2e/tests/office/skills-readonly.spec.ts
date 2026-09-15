@@ -49,7 +49,9 @@ test.describe("Office skills - Monaco read-only mode", () => {
       slug: unique,
       content: "# Editable\n\nWorkspace-scope skill content.\n",
     })) as { id?: string; slug?: string };
-    expect(created.slug).toBe(unique);
+    // A caller-supplied slug is normalized to its canonical kandev-prefixed
+    // form on write (AC-001.12).
+    expect(created.slug).toBe(`kandev-${unique}`);
 
     await testPage.goto("/office/workspace/skills");
 

@@ -147,6 +147,16 @@ export async function updateExecutor(
   });
 }
 
+export async function deleteExecutor(
+  executorId: string,
+  options?: ApiRequestOptions,
+): Promise<{ success: boolean }> {
+  return fetchJson<{ success: boolean }>(`/api/v1/executors/${encodeURIComponent(executorId)}`, {
+    ...options,
+    init: { ...(options?.init ?? {}), method: "DELETE" },
+  });
+}
+
 // Executor profiles
 export async function listExecutorProfiles(
   executorId: string,

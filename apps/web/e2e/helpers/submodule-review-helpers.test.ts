@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { retryGitIndexLock } from "../tests/review/submodule-review-helpers";
+import { retryGitIndexLock } from "../tests/review/git-retry";
 
 describe("retryGitIndexLock", () => {
   it("retries a transient Git index lock before returning the operation result", async () => {

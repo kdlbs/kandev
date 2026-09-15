@@ -1,5 +1,5 @@
 use kandev_desktop::{
-    backend, external_links,
+    backend, external_links, folder_picker,
     native_notifications::{self, NativeNotificationState},
     shell::{self, MenuAction, ZoomState},
     updater::{self, UpdaterState},
@@ -22,6 +22,7 @@ fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_opener::Builder::new()
                 .open_js_links_on_click(false)
@@ -42,6 +43,7 @@ fn main() {
             native_notifications::get_native_notification_permission,
             native_notifications::request_native_notification_permission,
             external_links::open_external_url,
+            folder_picker::pick_directory,
         ])
         .menu(build_menu)
         .on_menu_event(handle_menu_event)

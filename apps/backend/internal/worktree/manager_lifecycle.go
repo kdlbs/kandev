@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -363,7 +364,7 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 			if handle != nil {
 				defer func() { _ = handle.Close() }()
 			}
-			if valid {
+			if valid && m.IsValid(existing.Path) {
 				if err := m.validateReusableContribution(ctx, req, existing); err != nil {
 					return nil, true, err
 				}
@@ -375,11 +376,14 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 					zap.String("path", existing.Path))
 				return existing, true, nil
 			}
-			m.logger.Warn("worktree directory invalid, recreating",
+			m.logger.Warn("worktree directory invalid; preserving checkout",
 				zap.String("worktree_id", existing.ID),
 				zap.String("session_id", req.SessionID),
 				zap.String("repository_id", req.RepositoryID),
 				zap.String("task_id", req.TaskID))
+			if _, statErr := os.Lstat(existing.Path); statErr == nil {
+				return nil, true, &WorktreeRecoveryError{TaskID: existing.TaskID, Checkout: existing.Path, Reason: m.linkedWorktreeRecoveryReason(ctx, existing)}
+			}
 			wt, err := m.recreate(ctx, existing, req)
 			return wt, true, err
 		}
@@ -396,7 +400,7 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 			if handle != nil {
 				defer func() { _ = handle.Close() }()
 			}
-			if valid {
+			if valid && m.IsValid(existing.Path) {
 				if err := m.validateReusableContribution(ctx, req, existing); err != nil {
 					return nil, true, err
 				}
@@ -407,10 +411,13 @@ func (m *Manager) tryReuseExisting(ctx context.Context, req CreateRequest) (*Wor
 					zap.String("path", existing.Path))
 				return existing, true, nil
 			}
-			m.logger.Warn("worktree directory invalid, recreating",
+			m.logger.Warn("worktree directory invalid; preserving checkout",
 				zap.String("worktree_id", req.WorktreeID),
 				zap.String("session_id", req.SessionID),
 				zap.String("task_id", req.TaskID))
+			if _, statErr := os.Lstat(existing.Path); statErr == nil {
+				return nil, true, &WorktreeRecoveryError{TaskID: existing.TaskID, Checkout: existing.Path, Reason: m.linkedWorktreeRecoveryReason(ctx, existing)}
+			}
 			wt, err := m.recreate(ctx, existing, req)
 			return wt, true, err
 		}
@@ -465,10 +472,10 @@ func (m *Manager) openNoFollowWorktreePath(worktreePath string) (storageworkspac
 	}
 	handle, err := storageworkspaces.OpenDirectoryNoFollow(filepath.Dir(cleanPath), cleanPath)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("unsafe worktree path: %w", err)
+		return nil, fmt.Errorf("unsafe worktree path %s: %w", cleanPath, err)
 	}
 	if err := handle.VerifyPath(cleanPath); err != nil {
 		_ = handle.Close()
@@ -588,6 +595,13 @@ func requestBranchIdentitySlug(req CreateRequest) string {
 		return SanitizeBranchSlug(req.BranchIdentitySlug)
 	}
 	return SanitizeBranchSlug(req.BranchSlug)
+}
+
+func recreateSourceBranch(existingBranch, checkoutBranch string) string {
+	if checkoutBranch != "" {
+		return checkoutBranch
+	}
+	return existingBranch
 }
 
 // resolveBaseRefWithFallback resolves the base ref for a new worktree, optionally
@@ -933,9 +947,30 @@ func (m *Manager) prepareTaskWorktreePath(req CreateRequest) (string, error) {
 		TaskID: req.TaskID, WorkspaceID: req.WorkspaceID, TaskDirName: req.TaskDirName,
 		LayoutVersion: storageworkspaces.LayoutVersionSemantic,
 	}); err != nil {
-		return "", fmt.Errorf("mark task directory ownership: %w", err)
+		return "", m.describeOwnershipMarkerFailure(taskDir, req.TaskID, err)
 	}
 	return worktreePath, nil
+}
+
+// describeOwnershipMarkerFailure enriches a WriteOwnershipMarker failure with
+// the conflicting owner's task id when one can be read back from disk. This
+// is the on-disk symptom of an inherit_parent child whose original owner
+// task (the parent it inherited a workspace from) was archived: the child's
+// session then has no bound environment, falls through to creating a fresh
+// worktree here, and finds the shared task directory still marked for the
+// now-archived owner. This package sits below internal/task and cannot look
+// up whether that owner is actually archived, so the message can only name
+// the conflicting task id and point at the workaround rather than confirm
+// the cause.
+func (m *Manager) describeOwnershipMarkerFailure(taskDir, requestedTaskID string, cause error) error {
+	existing, found, readErr := storageworkspaces.ReadOwnershipMarker(taskDir)
+	if readErr == nil && found && existing.TaskID != "" && existing.TaskID != requestedTaskID {
+		return fmt.Errorf(
+			"mark task directory ownership: %w (task directory is already owned by task %s; if that task was archived, this task can no longer reuse its workspace and needs workspace_mode=new_workspace)",
+			cause, existing.TaskID,
+		)
+	}
+	return fmt.Errorf("mark task directory ownership: %w", cause)
 }
 
 func (m *Manager) validateTaskDir(taskDir string) error {
@@ -960,11 +995,34 @@ func (m *Manager) validateTaskDir(taskDir string) error {
 // addWorktreeForBranch creates the git worktree, trying the checkout branch directly first
 // and falling back to a suffixed branch if the checkout branch is already in use.
 // When a checkout branch is specified, it sets the upstream tracking branch to
-// origin/<checkout-branch> so ahead/behind counts are relative to the PR's remote branch.
+// origin/<checkout-branch> when that ref points to the worktree's start point.
 func (m *Manager) addWorktreeForBranch(ctx context.Context, req CreateRequest, worktreePath, fallbackBranch, startPoint, baseRef string) (string, string, error) {
 	if req.CheckoutBranch == "" {
 		id, err := m.gitAddWorktree(ctx, req.RepositoryPath, fallbackBranch, worktreePath, baseRef)
 		return id, fallbackBranch, err
+	}
+
+	// A pull request head is an immutable remote ref for this launch. Never
+	// update or reset a local branch with the same name as the PR head: that
+	// branch may belong to another task and may contain unpushed work.
+	if req.PRNumber > 0 {
+		branchName := req.CheckoutBranch
+		exists, probeErr := m.branchExists(ctx, req.RepositoryPath, branchName)
+		if probeErr != nil {
+			return "", "", fmt.Errorf("verify PR checkout branch %q: %w: %w", branchName, ErrWorkspaceCheckoutFailed, probeErr)
+		}
+		if exists {
+			return m.addPRWorktreeWithUniqueBranch(ctx, req, worktreePath, startPoint)
+		}
+		id, addErr := m.gitAddWorktree(ctx, req.RepositoryPath, branchName, worktreePath, startPoint)
+		if addErr == nil {
+			m.setUpstreamIfMatchesStartPoint(ctx, worktreePath, branchName, req.CheckoutBranch, startPoint)
+			return id, branchName, nil
+		}
+		if !errors.Is(addErr, ErrBranchExists) {
+			return "", "", fmt.Errorf("materialize PR checkout branch %q: %w: %w", branchName, ErrWorkspaceCheckoutFailed, addErr)
+		}
+		return m.addPRWorktreeWithUniqueBranch(ctx, req, worktreePath, startPoint)
 	}
 
 	// Try checking out the PR branch directly (common case: single task per PR).
@@ -993,6 +1051,51 @@ func (m *Manager) addWorktreeForBranch(ctx context.Context, req CreateRequest, w
 	return id, suffixed, err
 }
 
+const prCheckoutBranchAttempts = 20
+
+func prCheckoutBranchCandidates(checkoutBranch, taskID string) []string {
+	suffix := TaskDirSuffix(taskID)
+	if suffix == "" {
+		suffix = SmallSuffix(3)
+	}
+	candidates := make([]string, 0, prCheckoutBranchAttempts)
+	for attempt := 0; attempt < prCheckoutBranchAttempts; attempt++ {
+		candidate := checkoutBranch + "-" + suffix
+		if attempt > 0 {
+			candidate += "-" + strconv.Itoa(attempt)
+		}
+		candidates = append(candidates, candidate)
+	}
+	return candidates
+}
+
+func (m *Manager) addPRWorktreeWithUniqueBranch(ctx context.Context, req CreateRequest, worktreePath, startPoint string) (string, string, error) {
+	for _, branchName := range prCheckoutBranchCandidates(req.CheckoutBranch, req.TaskID) {
+		exists, probeErr := m.branchExists(ctx, req.RepositoryPath, branchName)
+		if probeErr != nil {
+			return "", "", fmt.Errorf("verify PR checkout branch %q: %w: %w", branchName, ErrWorkspaceCheckoutFailed, probeErr)
+		}
+		if exists {
+			continue
+		}
+		id, addErr := m.gitAddWorktree(ctx, req.RepositoryPath, branchName, worktreePath, startPoint)
+		if addErr == nil {
+			m.setUpstreamIfMatchesStartPoint(ctx, worktreePath, branchName, req.CheckoutBranch, startPoint)
+			return id, branchName, nil
+		}
+		if !errors.Is(addErr, ErrBranchExists) {
+			return "", "", fmt.Errorf("materialize PR checkout branch %q: %w: %w", branchName, ErrWorkspaceCheckoutFailed, addErr)
+		}
+	}
+	return "", "", fmt.Errorf(
+		"materialize PR checkout branch %q after %d candidates: %w: %w",
+		req.CheckoutBranch,
+		prCheckoutBranchAttempts,
+		ErrWorkspaceCheckoutFailed,
+		ErrBranchExists,
+	)
+}
+
 // setUpstreamIfExists sets the upstream tracking branch for a worktree branch
 // to origin/<remoteBranch> if the remote-tracking ref exists. Non-fatal on failure.
 func (m *Manager) setUpstreamIfExists(ctx context.Context, worktreePath, localBranch, remoteBranch string) {
@@ -1011,6 +1114,25 @@ func (m *Manager) setUpstreamIfExists(ctx context.Context, worktreePath, localBr
 			zap.String("output", string(out)),
 			zap.Error(err))
 	}
+}
+
+func (m *Manager) setUpstreamIfMatchesStartPoint(
+	ctx context.Context,
+	worktreePath, localBranch, remoteBranch, startPoint string,
+) {
+	upstream := "origin/" + remoteBranch
+	upstreamOID, upstreamErr := m.refCommitOID(ctx, worktreePath, upstream)
+	startOID, startErr := m.refCommitOID(ctx, worktreePath, startPoint)
+	if upstreamErr != nil || startErr != nil || upstreamOID != startOID {
+		return
+	}
+	m.setUpstreamIfExists(ctx, worktreePath, localBranch, remoteBranch)
+}
+
+func (m *Manager) refCommitOID(ctx context.Context, worktreePath, ref string) (string, error) {
+	cmd := m.newNonInteractiveGitCmd(ctx, worktreePath, "rev-parse", "--verify", ref+"^{commit}")
+	output, err := runGitCmdCombinedOutput(ctx, cmd)
+	return strings.TrimSpace(string(output)), err
 }
 
 // FetchBranchResult holds the outcome of a fetchBranchToLocal call.
@@ -1050,10 +1172,35 @@ func (m *Manager) fetchBranchToLocalWithPolicy(
 	// the manager_git.go probes fixed in PR #1216 (70s lock-held trace,
 	// signal:killed). With this ordering the budget only counts actual
 	// git execution time.
-	refspec := branch + ":" + branch
 	if prNumber > 0 {
-		refspec = fmt.Sprintf("pull/%d/head:%s", prNumber, branch)
+		remoteRef := pullRequestSnapshotRef(prNumber)
+		refspec := fmt.Sprintf("+refs/pull/%d/head:%s", prNumber, remoteRef)
+		output, err, fetchCtxErr := m.runGitCombinedAfterAcquire(ctx, m.fetchTimeout, repoPath, "fetch", gitNoTags, "origin", refspec)
+		if err != nil {
+			outputStr := string(output)
+			if isRemoteBranchMissingError(outputStr) || isRemoteRefMissingError(errors.New(outputStr)) {
+				return nil, fmt.Errorf(
+					"fetch pull request head %d found no remote ref: %w: %w",
+					prNumber, ErrWorkspaceCheckoutFailed, newConfirmedRemoteRefMissingError(outputStr),
+				)
+			}
+			reason := classifyGitFallbackReason(err, outputStr, fetchCtxErr)
+			return nil, fmt.Errorf(
+				"fetch pull request head %d failed (%s): %w: %w",
+				prNumber, reason, ErrWorkspaceCheckoutFailed, syncFailureCause(reason, err, fetchCtxErr),
+			)
+		}
+		exists, verifyErr := m.branchExists(ctx, repoPath, remoteRef)
+		if verifyErr != nil {
+			return nil, fmt.Errorf("verify fetched pull request head %d: %w: %w", prNumber, ErrWorkspaceCheckoutFailed, verifyErr)
+		}
+		if !exists {
+			return nil, fmt.Errorf("verify fetched pull request head %d: %w", prNumber, ErrWorkspaceCheckoutFailed)
+		}
+		return &FetchBranchResult{StartPoint: remoteRef}, nil
 	}
+
+	refspec := branch + ":" + branch
 	output, err, fetchCtxErr := m.runGitCombinedAfterAcquire(ctx, m.fetchTimeout, repoPath, "fetch", gitNoTags, "origin", refspec)
 	if err == nil {
 		return &FetchBranchResult{}, nil
@@ -1930,22 +2077,21 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 	}
 	refreshedStartPoint := ""
 	if req.RemoteSyncHandled && req.RemoteContribution == nil && emptyRemoteBaseRef == "" {
-		sourceBranch := existing.Branch
-		if req.CheckoutBranch != "" {
-			sourceBranch = req.CheckoutBranch
-		}
+		sourceBranch := recreateSourceBranch(existing.Branch, req.CheckoutBranch)
 		selectedRef, prepareErr := m.prepareBranchFromRefreshedOrigin(
 			ctx, req.RepositoryPath, existing.Branch, sourceBranch, req.PRNumber,
 		)
 		if prepareErr != nil {
 			return nil, prepareErr
 		}
-		if selectedRef == "" {
+		if selectedRef == "" && !req.AllowBranchReplacement {
 			err := &BranchUnrecoverableError{Branch: sourceBranch}
-			if req.AllowBranchReplacement {
-				return m.replaceUnrecoverableWorktree(ctx, existing, req, err)
-			}
 			return nil, fmt.Errorf("%w: refreshed branch %q was not materialized", err, sourceBranch)
+		}
+		if selectedRef == "" {
+			return m.replaceUnrecoverableWorktree(
+				ctx, existing, req, &BranchUnrecoverableError{Branch: sourceBranch},
+			)
 		}
 		if selectedRef != existing.Branch {
 			refreshedStartPoint = selectedRef
@@ -1964,10 +2110,11 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 				return nil, fmt.Errorf("restore empty-remote worktree branch: %s: %w", strings.TrimSpace(string(output)), branchErr)
 			}
 		} else {
-			if _, fetchErr := m.fetchBranchToLocalWithPolicy(
+			fetchResult, fetchErr := m.fetchBranchToLocalWithPolicy(
 				ctx, req.RepositoryPath, existing.Branch, req.PRNumber,
 				req.PullBeforeWorktree && !req.RemoteSyncHandled,
-			); fetchErr != nil {
+			)
+			if fetchErr != nil {
 				m.logger.Warn("failed to restore worktree branch during recreate",
 					zap.String("worktree_id", existing.ID),
 					zap.String("branch", existing.Branch),
@@ -1983,6 +2130,13 @@ func (m *Manager) recreate(ctx context.Context, existing *Worktree, req CreateRe
 					return nil, err
 				}
 				return nil, fetchErr
+			}
+			if fetchResult != nil && fetchResult.StartPoint != "" {
+				branchCmd := m.newNonInteractiveGitCmd(ctx, req.RepositoryPath, "branch", existing.Branch, fetchResult.StartPoint)
+				if output, branchErr := runGitCmdCombinedOutput(ctx, branchCmd); branchErr != nil {
+					return nil, fmt.Errorf("restore worktree branch from refreshed ref: %s: %w", strings.TrimSpace(string(output)), branchErr)
+				}
+				exists = true
 			}
 		}
 	}

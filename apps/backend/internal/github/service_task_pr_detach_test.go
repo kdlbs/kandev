@@ -193,7 +193,7 @@ func TestAssociatePRWithTaskExplicitLinkRestoresDetachedAssociation(t *testing.T
 		Title: "fresh title", HeadBranch: "fresh-branch", BaseBranch: "develop", AuthorLogin: "bob",
 		State: "closed", MergeableState: "dirty", Additions: 8, Deletions: 3,
 	}
-	associated, err := svc.associatePRWithTask(ctx, row.WorkspaceID, row.TaskID, row.RepositoryID, freshPR, true, true)
+	associated, err := svc.associatePRWithTask(ctx, row.WorkspaceID, row.TaskID, row.RepositoryID, freshPR, true, true, TaskPRSourceURLLink)
 	if err != nil {
 		t.Fatalf("explicitly associate PR: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestAssociatePRWithTaskExplicitLinkOnAlreadyMergedDetachedPRPopulatesOutcom
 		ChangedFiles: 12, ChangedFilesObserved: true,
 		MergedByLogin: "carlosflorencio",
 	}
-	associated, err := svc.associatePRWithTask(ctx, row.WorkspaceID, row.TaskID, row.RepositoryID, mergedPR, true, true)
+	associated, err := svc.associatePRWithTask(ctx, row.WorkspaceID, row.TaskID, row.RepositoryID, mergedPR, true, true, TaskPRSourceURLLink)
 	if err != nil {
 		t.Fatalf("explicitly associate PR: %v", err)
 	}

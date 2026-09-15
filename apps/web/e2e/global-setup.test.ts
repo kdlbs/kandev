@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -46,6 +47,24 @@ function assertBackendBinaryFresh(
   );
 }
 
+function writeBuildIdentity(sourceRevision: string, artifacts: string[]): string {
+  const identityPath = path.join(backendDir, "bin", "e2e-build-identity.json");
+  fs.writeFileSync(
+    identityPath,
+    JSON.stringify({
+      schema_version: 1,
+      source_revision: sourceRevision,
+      artifacts: Object.fromEntries(
+        artifacts.map((artifactPath) => [
+          path.relative(backendDir, artifactPath).split(path.sep).join("/"),
+          createHash("sha256").update(fs.readFileSync(artifactPath)).digest("hex"),
+        ]),
+      ),
+    }),
+  );
+  return identityPath;
+}
+
 describe("assertBackendBinaryFresh", () => {
   it("passes when the binary is newer than every backend source file", () => {
     touch(
@@ -89,6 +108,45 @@ describe("assertBackendBinaryFresh", () => {
     expect(() =>
       assertBackendBinaryFresh(backendDir, [binPath], { KANDEV_E2E_SKIP_FRESHNESS: "1" }),
     ).not.toThrow();
+  });
+
+  it("accepts stale artifact mtimes only after validating immutable build identity", () => {
+    touch(binPath, new Date("2026-01-01T00:00:00Z"));
+    touch(
+      path.join(backendDir, "internal", "task", "service.go"),
+      new Date("2026-01-02T00:00:00Z"),
+    );
+    const identityPath = writeBuildIdentity("revision-1", [binPath]);
+
+    expect(() =>
+      assertBackendBinaryFresh(backendDir, [binPath], {
+        KANDEV_E2E_BUILD_IDENTITY: identityPath,
+        KANDEV_E2E_EXPECTED_SOURCE_REVISION: "revision-1",
+      }),
+    ).not.toThrow();
+  });
+
+  it("rejects a build identity from another source revision", () => {
+    const identityPath = writeBuildIdentity("revision-1", [binPath]);
+
+    expect(() =>
+      assertBackendBinaryFresh(backendDir, [binPath], {
+        KANDEV_E2E_BUILD_IDENTITY: identityPath,
+        KANDEV_E2E_EXPECTED_SOURCE_REVISION: "revision-2",
+      }),
+    ).toThrow(/source revision.*revision-1.*revision-2/i);
+  });
+
+  it("rejects an artifact whose bytes do not match its build identity", () => {
+    const identityPath = writeBuildIdentity("revision-1", [binPath]);
+    fs.writeFileSync(binPath, "tampered binary");
+
+    expect(() =>
+      assertBackendBinaryFresh(backendDir, [binPath], {
+        KANDEV_E2E_BUILD_IDENTITY: identityPath,
+        KANDEV_E2E_EXPECTED_SOURCE_REVISION: "revision-1",
+      }),
+    ).toThrow(/build identity checksum mismatch.*bin\/kandev/i);
   });
 
   it("throws when an embedded non-Go asset is newer than the binary", () => {
@@ -138,6 +196,34 @@ describe("assertBackendBinaryFresh", () => {
       fs.writeFileSync(artifact, "generated");
       touch(artifact, new Date("2026-06-01T00:00:00Z"));
     }
+
+    expect(() => assertBackendBinaryFresh(backendDir, [binPath], {})).not.toThrow();
+  });
+
+  it("ignores nested Git metadata when checking backend source freshness", () => {
+    touch(
+      path.join(backendDir, "internal", "task", "service.go"),
+      new Date("2025-01-01T00:00:00Z"),
+    );
+    touch(binPath, new Date("2026-01-01T00:00:00Z"));
+    const gitInfo = path.join(backendDir, "internal", "task", ".git", "info");
+    fs.mkdirSync(gitInfo, { recursive: true });
+    const exclude = path.join(gitInfo, "exclude");
+    fs.writeFileSync(exclude, "# local repository metadata\n");
+    touch(exclude, new Date("2026-06-01T00:00:00Z"));
+
+    expect(() => assertBackendBinaryFresh(backendDir, [binPath], {})).not.toThrow();
+  });
+
+  it("ignores Go test sources that are not linked into backend artifacts", () => {
+    touch(
+      path.join(backendDir, "internal", "task", "service.go"),
+      new Date("2025-01-01T00:00:00Z"),
+    );
+    touch(binPath, new Date("2026-01-01T00:00:00Z"));
+    const testSource = path.join(backendDir, "internal", "task", "service_test.go");
+    fs.writeFileSync(testSource, "package task\n");
+    touch(testSource, new Date("2026-06-01T00:00:00Z"));
 
     expect(() => assertBackendBinaryFresh(backendDir, [binPath], {})).not.toThrow();
   });
@@ -305,6 +391,23 @@ describe("globalSetup", () => {
     vi.stubEnv("KANDEV_E2E_CONTAINERS", "");
     vi.stubEnv("KANDEV_E2E_DOCKER", "");
     process.argv = [...originalArgv, "--project=containers"];
+    const existsSync = vi.spyOn(fs, "existsSync").mockReturnValue(true);
+
+    (globalSetup as () => void)();
+
+    expect(existsSync).toHaveBeenCalledWith(
+      path.join(backendDirForTest(), "bin", "mock-agent-linux-amd64"),
+    );
+    expect(existsSync).toHaveBeenCalledWith(
+      path.join(backendDirForTest(), "bin", "agentctl-linux-amd64"),
+    );
+  });
+
+  it("checks Linux helper binaries for a direct Kubernetes compatibility selection", () => {
+    vi.stubEnv("KANDEV_E2E_SKIP_FRESHNESS", "1");
+    vi.stubEnv("KANDEV_E2E_CONTAINERS", "");
+    vi.stubEnv("KANDEV_E2E_DOCKER", "");
+    process.argv = [...originalArgv, "--project=kubernetes-compat"];
     const existsSync = vi.spyOn(fs, "existsSync").mockReturnValue(true);
 
     (globalSetup as () => void)();

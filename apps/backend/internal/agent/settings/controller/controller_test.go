@@ -14,7 +14,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/managedruntime"
 	"github.com/kandev/kandev/internal/agent/registry"
 	"github.com/kandev/kandev/internal/agent/settings/dto"
-	"github.com/kandev/kandev/internal/agent/settings/modelfetcher"
 	"github.com/kandev/kandev/internal/agent/usage"
 	"github.com/kandev/kandev/internal/common/logger"
 )
@@ -112,7 +111,6 @@ func newTestController(agentList map[string]agents.Agent) *Controller {
 	}
 	return &Controller{
 		agentRegistry: reg,
-		modelCache:    modelfetcher.NewCache(),
 		logger:        log,
 	}
 }
@@ -344,11 +342,10 @@ func TestController_PreviewAgentCommand_PassthroughDisabled(t *testing.T) {
 	}
 }
 
-// TestController_PreviewAgentCommand_PassthroughDoesNotDuplicateCLIFlag regresses
-// the Auggie case where enabling CLI passthrough caused --allow-indexing to be
-// emitted twice: once by BuildPassthroughCommand via Settings() and again by an
-// unconditional CLIFlagTokens append in the preview. The launch path only adds
-// it via Settings(), so the preview must match.
+// TestController_PreviewAgentCommand_PassthroughDoesNotDuplicateCLIFlag keeps
+// legacy permission CLI flags from being emitted twice when the same token is
+// also present in the profile CLI-flags list. Preview and launch use the shared
+// passthrough builder, so both paths must emit one token.
 func TestController_PreviewAgentCommand_PassthroughDoesNotDuplicateCLIFlag(t *testing.T) {
 	permSettings := map[string]agents.PermissionSetting{
 		"allow_indexing": {

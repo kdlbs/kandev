@@ -5,6 +5,10 @@ import path from "node:path";
 import { test, expect } from "../../fixtures/test-base";
 import type { ApiClient } from "../../helpers/api-client";
 import { waitForSessionState } from "../../helpers/session";
+import {
+  seedActiveSessionForegroundActivity,
+  waitForActiveSessionForegroundActivity,
+} from "../../helpers/session-store";
 import { KanbanPage } from "../../pages/kanban-page";
 import { SessionPage } from "../../pages/session-page";
 import type { Page } from "@playwright/test";
@@ -147,6 +151,74 @@ test.describe("Session resume (ACP mode)", () => {
 
     // 10. The agent should respond to the new prompt
     await session.expectChatResponseVisible("simple mock response", 1, { timeout: 30_000 });
+  });
+
+  // @covers AC-PLATFORM-BACKGROUND-WORK-LIVENESS-001.9
+  test("clears stale background activity after backend restart", async ({
+    testPage,
+    apiClient,
+    seedData,
+    backend,
+  }) => {
+    test.setTimeout(120_000);
+
+    const task = await apiClient.createTaskWithAgent(
+      seedData.workspaceId,
+      "Settled Activity Resume Task",
+      seedData.agentProfileId,
+      {
+        description: "/e2e:simple-message",
+        workflow_id: seedData.workflowId,
+        workflow_step_id: seedData.startStepId,
+        repository_ids: [seedData.repositoryId],
+      },
+    );
+    const sessionId = task.session_id;
+    if (!sessionId) throw new Error("createTaskWithAgent did not return a session_id");
+
+    const session = await openTaskSession(testPage, "Settled Activity Resume Task");
+    await session.waitForChatIdle({ timeout: 30_000 });
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Initial session did not settle before restart",
+      timeout: 30_000,
+    });
+
+    await backend.restart();
+    await testPage.reload();
+    await session.waitForLoad();
+    await session.waitForChatIdle({ timeout: 60_000 });
+    await expect(session.chat.getByText("Resumed agent Mock", { exact: false })).toBeVisible({
+      timeout: 15_000,
+    });
+    await waitForSessionState(apiClient, {
+      taskId: task.id,
+      sessionId,
+      expectedState: "WAITING_FOR_INPUT",
+      message: "Resumed session did not settle before activity reconciliation",
+      timeout: 30_000,
+    });
+
+    // Reproduce the stale client projection left behind when the reconnect
+    // state_changed event is missed. The real session-list refresh must clear it.
+    await seedActiveSessionForegroundActivity(testPage, "background");
+    await waitForActiveSessionForegroundActivity(testPage, "background");
+    await expect(session.agentStatus()).toHaveAccessibleName("Background work is running");
+
+    const refreshedSessions = testPage.waitForResponse((response) => {
+      const path = new URL(response.url()).pathname;
+      return response.request().method() === "GET" && path === `/api/v1/tasks/${task.id}/sessions`;
+    });
+    await testPage.evaluate(() => window.dispatchEvent(new Event("focus")));
+    expect((await refreshedSessions).ok()).toBe(true);
+
+    await waitForActiveSessionForegroundActivity(testPage, null);
+    await expect(testPage.getByRole("status", { name: "Background work is running" })).toHaveCount(
+      0,
+    );
+    await expect(session.anyIdleInput()).toBeVisible();
   });
 
   // @covers AC-TASKS-ADDITIONAL-SESSION-WORKSPACE-REUSE-002.2

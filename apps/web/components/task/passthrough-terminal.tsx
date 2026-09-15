@@ -32,6 +32,12 @@ import { useTerminalBusyTracking } from "./use-terminal-busy-tracking";
 import { useTerminalTheme } from "./use-terminal-theme";
 import { useTranslation } from "react-i18next";
 import { useClarificationEscapeGuard } from "@/hooks/use-clarification-escape-guard";
+import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
+import {
+  useWorkspaceRestoration,
+  type WorkspaceRestorationResult,
+} from "@/hooks/domains/session/use-workspace-restoration";
+import { WorkspaceUnavailable } from "./workspace-unavailable";
 
 type BaseProps = {
   autoFocus?: boolean;
@@ -54,9 +60,9 @@ type BaseProps = {
    * Mobile uses this to register a key-bar sender that writes raw bytes
    * directly to this terminal's socket. */
   onWsReady?: (ws: WebSocket) => void;
-  /** Translate single-finger touch swipes on the terminal area into xterm
-   * scrollback navigation. Mobile callers set this so the xterm canvas no
-   * longer silently absorbs touch gestures. */
+  /** Optional touch-scroll override. Coarse-pointer shell terminals enable
+   * touch scrolling by default, while fine pointers never install the custom
+   * handler. */
   enableTouchScroll?: boolean;
 };
 type AgentTerminalProps = BaseProps & { mode: "agent"; sessionId?: string | null; label?: string };
@@ -139,13 +145,22 @@ export function computeCanConnect(
   connectionID: string | null | undefined,
   sessionId: string | null | undefined,
   environmentEnded = false,
+  workspaceReady = false,
 ): boolean {
   if (!connectionID) return false;
   if (mode === "agent") return Boolean(sessionId);
-  // The env handler refuses a shell for a dead environment, and refuses it
-  // identically on every attempt. Connecting anyway only restarts the retry
-  // timer, so stop before opening the socket at all.
-  return !environmentEnded;
+  // The env handler refuses a shell for a dead environment until the workspace
+  // admission flow has recreated or reattached its retained execution.
+  return workspaceReady || !environmentEnded;
+}
+
+export function resolveTouchScrollEnabled(
+  mode: "agent" | "shell",
+  isFinePointer: boolean,
+  requested?: boolean,
+): boolean {
+  if (isFinePointer) return false;
+  return requested ?? mode === "shell";
 }
 
 const SESSION_TERMINAL_STATES = new Set<TaskSessionState>(["COMPLETED", "FAILED", "CANCELLED"]);
@@ -214,8 +229,9 @@ export function computeTerminalPaneState(
   mode: "agent" | "shell",
   environmentEnded: boolean,
   isConnected: boolean,
+  workspaceReady = false,
 ): "connected" | "connecting" | "ended" {
-  if (mode === "shell" && environmentEnded) return "ended";
+  if (mode === "shell" && environmentEnded && !workspaceReady) return "ended";
   return isConnected ? "connected" : "connecting";
 }
 
@@ -405,6 +421,7 @@ function usePassthroughEffects({
 
 export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const { mode, autoFocus, onXtermReady } = props;
+  const { isFinePointer } = useResponsiveBreakpoint();
   const { resolvedTheme } = useTheme();
   const terminalId = mode === "shell" ? props.terminalId : undefined;
   const environmentId = mode === "shell" ? props.environmentId : undefined;
@@ -415,9 +432,17 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
   const sessionId = mode === "agent" ? (props.sessionId ?? storeSessionId) : environmentSessionId;
   const { session } = useSession(sessionId);
   const taskId = session?.task_id ?? null;
+  const workspaceRestoration = useWorkspaceRestoration(
+    mode === "shell" ? taskId : null,
+    mode === "shell" ? sessionId : null,
+    environmentId,
+  );
+  const workspaceReady = mode === "shell" && workspaceRestoration.status === "ready";
   const connectionID = mode === "agent" ? sessionId : environmentId;
   const environmentEnded = useEnvironmentEnded(environmentId);
-  const canConnect = computeCanConnect(mode, connectionID, sessionId, environmentEnded);
+  const canConnect =
+    computeCanConnect(mode, connectionID, sessionId, environmentEnded, workspaceReady) &&
+    (mode !== "shell" || !workspaceRestoration.status || workspaceRestoration.status === "ready");
   const wsBaseUrl = useWsBaseUrl();
   const connection = usePassthroughConnection({
     connectionID,
@@ -427,9 +452,18 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
     attachAddonRef,
     wsRef,
   });
-  const paneState = computeTerminalPaneState(mode, environmentEnded, connection.isConnected);
+  const paneState = computeTerminalPaneState(
+    mode,
+    environmentEnded,
+    connection.isConnected,
+    workspaceReady,
+  );
+  const effectiveProps: PassthroughTerminalProps = {
+    ...props,
+    enableTouchScroll: resolveTouchScrollEnabled(mode, isFinePointer, props.enableTouchScroll),
+  };
   const { containerRef, search } = usePassthroughEffects({
-    props,
+    props: effectiveProps,
     refs,
     terminalId,
     environmentId,
@@ -454,7 +488,11 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
         <div ref={terminalRef} data-testid="terminal-xterm-host" className="h-full w-full" />
       </div>
       <TerminalSearchBar search={search} />
-      <TerminalPaneOverlay paneState={paneState} mode={mode} />
+      <TerminalPaneOverlay
+        paneState={paneState}
+        mode={mode}
+        workspaceRestoration={workspaceRestoration}
+      />
     </div>
   );
 }
@@ -466,11 +504,24 @@ export function PassthroughTerminal(props: PassthroughTerminalProps) {
 function TerminalPaneOverlay({
   paneState,
   mode,
+  workspaceRestoration,
 }: {
   paneState: ReturnType<typeof computeTerminalPaneState>;
   mode: "agent" | "shell";
+  workspaceRestoration?: WorkspaceRestorationResult;
 }) {
   const { t } = useTranslation();
+  if (mode === "shell" && workspaceRestoration?.status && workspaceRestoration.status !== "ready") {
+    return (
+      <div className="absolute inset-0 z-10 bg-background">
+        <WorkspaceUnavailable
+          restoration={workspaceRestoration.attempt}
+          onRetry={() => void workspaceRestoration.restore()}
+          retryDisabled={workspaceRestoration.status === "pending"}
+        />
+      </div>
+    );
+  }
   if (paneState === "connected") return null;
   if (paneState === "ended") {
     return (

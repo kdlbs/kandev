@@ -202,12 +202,16 @@ function TreeModeFileActionSlot({
       {isFinePointer && (
         <FileIcon
           fileName={name}
-          className="size-4 transition-opacity group-hover:opacity-0 pointer-events-none"
+          className={cn(
+            "size-4 transition-opacity pointer-events-none",
+            isPending ? "opacity-0" : "group-hover:opacity-0",
+          )}
         />
       )}
       <div
         className={cn(
           isFinePointer &&
+            !isPending &&
             "opacity-0 transition-opacity pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto",
         )}
       >

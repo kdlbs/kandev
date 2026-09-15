@@ -114,7 +114,7 @@ func (s *Store) PrunableRunTaskIDs(ctx context.Context, finalizedTaskID string, 
 	// retention unit is the distinct task checkout, not each run row. Keep the
 	// newest run ordering for each task, and protect the current continuation
 	// even when it has already parked after a successful turn.
-	err := s.ro.SelectContext(ctx, &taskIDs, `
+	err := s.ro.SelectContext(ctx, &taskIDs, s.ro.Rebind(`
 		WITH terminal_tasks AS (
 			SELECT ar.automation_id, ar.task_id,
 				MAX(ar.created_at) AS latest_created_at,
@@ -139,7 +139,7 @@ func (s *Store) PrunableRunTaskIDs(ctx context.Context, finalizedTaskID string, 
 			)
 			AND`+strings.ReplaceAll(runHasLiveWorktreeSQL, "ar.task_id", "tt.task_id")+`
 		ORDER BY tt.latest_created_at DESC, tt.latest_id DESC
-		LIMIT ? OFFSET ?`, args...)
+		LIMIT ? OFFSET ?`), args...)
 	return taskIDs, err
 }
 
@@ -167,11 +167,11 @@ func (s *Store) RunWorkspaceInUse(ctx context.Context, taskID string) (bool, err
 	}
 	var inUse bool
 	args := append([]any{taskID}, runWorktreeInUseArgs()...)
-	err := s.ro.GetContext(ctx, &inUse, `
+	err := s.ro.GetContext(ctx, &inUse, s.ro.Rebind(`
 		SELECT EXISTS (
 			SELECT 1 FROM task_sessions ts
 			WHERE ts.task_id = ? AND ts.state IN (?, ?)
-		)`, args...)
+		)`), args...)
 	return inUse, err
 }
 

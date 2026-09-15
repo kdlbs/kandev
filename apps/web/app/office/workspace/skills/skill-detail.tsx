@@ -82,8 +82,10 @@ export function SkillDetail({ skill, onSave, onDelete }: SkillDetailProps) {
   const readOnly = sourceMeta.readOnly || !!skill.isSystem;
   const agents = useAppStore(selectOfficeAgentProfiles);
   const usedByCount = useMemo(
-    () => agents.filter((a) => a.desiredSkills?.includes(skill.id)).length,
-    [agents, skill.id],
+    () =>
+      agents.filter((a) => a.skillIds?.includes(skill.id) || a.desiredSkills?.includes(skill.slug))
+        .length,
+    [agents, skill.id, skill.slug],
   );
 
   const fileTree = useMemo(() => buildFileTree(skill.fileInventory), [skill.fileInventory]);

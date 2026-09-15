@@ -9,7 +9,7 @@ import { useAppStore } from "@/components/state-provider";
 import { useFeature } from "@/hooks/domains/features/use-feature";
 import { useRouter } from "@/lib/routing/client-router";
 import {
-  WORKSPACE_SETTINGS_TABS,
+  getWorkspaceSettingsTabs,
   workspaceSettingsHref,
   type WorkspaceSettingsTab,
 } from "@/lib/settings/workspace-settings-tabs";
@@ -87,7 +87,7 @@ function WorkspaceSettingsSwitcher({
             // Same control, sized for a page heading rather than a sidebar
             // row, at a fixed 240px: long names truncate, short ones leave
             // the chevron anchored instead of the header jumping per page.
-            className="h-9 w-60 flex-none gap-2 px-3 text-base font-semibold"
+            className="w-60 flex-none gap-2 px-3 text-base font-semibold"
           />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" className="w-72">
@@ -131,7 +131,9 @@ export function WorkspaceSettingsShell({
 }) {
   const { t } = useTranslation();
   const workspaces = useAppStore((s) => s.workspaces.items);
+  const canvasesEnabled = useFeature("canvases");
   const workspace = workspaces.find((item) => item.id === workspaceId);
+  const tabs = getWorkspaceSettingsTabs(canvasesEnabled);
   const tabsRef = useRef<HTMLElement | null>(null);
 
   // Each tab is its own route, so navigating remounts this shell and the
@@ -178,7 +180,7 @@ export function WorkspaceSettingsShell({
         className="flex gap-2 overflow-x-auto pb-1 scrollbar-hide md:gap-1 md:border-b md:border-border md:pb-0"
         data-testid="workspace-settings-tabs"
       >
-        {WORKSPACE_SETTINGS_TABS.map(({ tab, labelKey }) => (
+        {tabs.map(({ tab, labelKey }) => (
           <Link
             key={tab}
             href={workspaceSettingsHref(workspaceId, tab)}

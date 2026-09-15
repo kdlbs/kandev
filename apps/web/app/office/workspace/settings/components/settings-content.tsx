@@ -24,6 +24,7 @@ import type { WorkspaceState } from "@/lib/state/slices/workspace/types";
 import { ConfigSection } from "./config-section";
 import { DangerZoneSection } from "./danger-zone-section";
 import { GitSection } from "./git-section";
+import { OfficeConfigSyncSection } from "./office-config-sync-section";
 import { useTranslation } from "react-i18next";
 
 function SectionHeader({ children }: { children: React.ReactNode }) {
@@ -637,6 +638,13 @@ export function SettingsContent() {
         <SectionHeader>{t("office:configuration")}</SectionHeader>
         <SettingCard>
           <ConfigSection />
+        </SettingCard>
+      </div>
+
+      <div>
+        <SectionHeader>{t("office:configSyncSectionTitle")}</SectionHeader>
+        <SettingCard>
+          <OfficeConfigSyncSection />
         </SettingCard>
       </div>
 

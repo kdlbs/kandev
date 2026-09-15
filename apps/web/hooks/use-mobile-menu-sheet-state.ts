@@ -3,18 +3,22 @@
 import { useRef } from "react";
 import { useRouter } from "@/lib/routing/client-router";
 import { useKanbanDisplaySettings } from "@/hooks/use-kanban-display-settings";
+import { usePluginTaskFilters } from "@/hooks/use-plugin-task-filters";
 import { useAppStore } from "@/components/state-provider";
 import { useResponsiveBreakpoint } from "@/hooks/use-responsive-breakpoint";
-import { linkToTaskOverview, linkToTasks } from "@/lib/links";
 import type {
   MobileColumnsSection,
   MobileDisplayOptionsProps,
-  MobileMenuSheetProps,
-} from "@/components/kanban/mobile-menu-sheet";
+} from "@/components/kanban/mobile-display-options";
+import type { MobileMenuSheetProps } from "@/components/kanban/mobile-menu-sheet";
 import type { TasksListDisplayOptions } from "@/components/kanban/mobile-menu-task-list-options";
+import {
+  resolveTaskListingNavigation,
+  type TaskListingPage,
+} from "@/lib/task-listing/view-navigation";
 
 type MobileMenuViewChangeInput = {
-  currentPage: "kanban" | "tasks";
+  currentPage: TaskListingPage;
   workspaceId?: string;
   activeWorkflowId: string | null;
   isMobile: boolean;
@@ -32,31 +36,38 @@ function buildMobileMenuViewChange({
   onOpenChange,
   router,
 }: MobileMenuViewChangeInput) {
-  const goToBoard = () =>
-    router.push(linkToTaskOverview({ workspaceId, workflowId: activeWorkflowId ?? undefined }));
   return (value: string) => {
-    if (!value) return;
-    if (value === "list") {
-      onViewModeChange("list");
-      if (currentPage !== "tasks") router.push(linkToTasks(workspaceId));
-    } else if (value === "kanban") {
-      onViewModeChange("kanban");
-      if (currentPage !== "kanban") goToBoard();
-    } else if (value === "pipeline" && !isMobile) {
-      onViewModeChange("pipeline");
-      if (currentPage !== "kanban") goToBoard();
-    } else {
-      return;
-    }
+    const next = resolveTaskListingNavigation({
+      view: value,
+      currentPage,
+      workspaceId,
+      workflowId: activeWorkflowId,
+      allowPipeline: !isMobile,
+    });
+    if (!next) return;
+    onViewModeChange(next.view);
+    if (next.href) router.push(next.href);
     onOpenChange(false);
   };
 }
 
+/** The page a phone is on pins the segment, exactly as it does on desktop. */
+function resolveMobileMenuViewValue(currentPage: TaskListingPage, effectiveView: string): string {
+  if (currentPage === "tasks") return "list";
+  return currentPage === "threads" ? "threads" : effectiveView;
+}
+
 type BuildMobileDisplayOptionsInput = Omit<
   MobileDisplayOptionsProps,
-  "showTaskDetails" | "showWorkflow" | "tasksListOptions" | "columnsSection"
+  | "showTaskDetails"
+  | "showWorkflow"
+  | "showRepository"
+  | "showPreviewPanel"
+  | "tasksListOptions"
+  | "columnsSection"
+  | "showBoardControls"
 > & {
-  currentPage: "kanban" | "tasks";
+  currentPage: TaskListingPage;
   isMobile: boolean;
   tasksListOptions?: TasksListDisplayOptions;
 };
@@ -74,8 +85,11 @@ function buildMobileDisplayOptions({
     ...rest,
     showTaskDetails: currentPage === "tasks",
     showWorkflow: !isMobile || currentPage !== "kanban",
+    showRepository: currentPage !== "threads",
+    showPreviewPanel: currentPage !== "threads",
     tasksListOptions: isMobile && currentPage === "tasks" ? tasksListOptions : undefined,
     columnsSection,
+    showBoardControls: currentPage === "kanban",
   };
 }
 
@@ -96,7 +110,7 @@ function buildColumnsSection({
   onToggleAutoHideEmpty,
 }: {
   isMobile: boolean;
-  currentPage: "kanban" | "tasks";
+  currentPage: TaskListingPage;
   focusedWorkflowId: string | null;
   eligibleWorkflows: Array<{ id: string; name: string }>;
   snapshots: Record<string, { steps?: Array<{ id: string; title: string; position: number }> }>;
@@ -153,7 +167,16 @@ export function useMobileMenuSheetState({
     onToggleStepVisibility,
     workflowIdsWithAutoHideEmptySteps,
     onToggleAutoHideEmpty,
+    boardSort,
+    priorityFilterTokens,
+    onBoardSortChange,
+    onPriorityFilterChange,
   } = useKanbanDisplaySettings();
+  const {
+    filters: pluginFilters,
+    selections: pluginFilterSelections,
+    setFilterSelection: onPluginFilterChange,
+  } = usePluginTaskFilters();
   const focusedWorkflowId = useAppStore((state) => state.mobileKanban.focusedWorkflowId);
   const columnsSection = buildColumnsSection({
     isMobile,
@@ -167,7 +190,7 @@ export function useMobileMenuSheetState({
     onToggleAutoHideEmpty,
   });
   const repositoryValue = allRepositoriesSelected ? "all" : (selectedRepositoryId ?? "all");
-  const viewValue = currentPage === "tasks" ? "list" : effectiveTaskListingView;
+  const viewValue = resolveMobileMenuViewValue(currentPage ?? "kanban", effectiveTaskListingView);
   const handleViewChange = buildMobileMenuViewChange({
     currentPage: currentPage ?? "kanban",
     workspaceId,
@@ -193,6 +216,13 @@ export function useMobileMenuSheetState({
     isMobile,
     columnsSection,
     tasksListOptions,
+    boardSort,
+    priorityFilterTokens,
+    onBoardSortChange,
+    onPriorityFilterChange,
+    pluginFilters: currentPage === "threads" ? [] : pluginFilters,
+    pluginFilterSelections,
+    onPluginFilterChange,
   });
   const focusMenu = (event: Event) => {
     event.preventDefault();

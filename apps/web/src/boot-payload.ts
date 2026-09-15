@@ -1,4 +1,4 @@
-import type { AppState } from "@/lib/state/store";
+import type { HydrationState } from "@/lib/state/store";
 import { getBackendConfig } from "@/lib/config";
 import type { FetchedSessionData } from "@/lib/ssr/session-page-state";
 import type {
@@ -23,6 +23,7 @@ export type BootRoute = {
 export type BootRuntime = {
   apiPrefix?: string;
   webSocketPath?: string;
+  bootId?: string;
   lspAutoInstallPreferenceLanguages?: string[];
   debug?: boolean;
   /**
@@ -40,6 +41,10 @@ export type BootRuntime = {
    * which never renders through the shell.
    */
   titlePrefix?: string;
+  /** True only when the Tauri shell launched the backend with its picker bridge. */
+  nativeFolderPickerAvailable?: boolean;
+  /** True when the backend was launched by the desktop shell. */
+  desktopRuntime?: boolean;
 };
 
 export type BootRouteData = {
@@ -70,7 +75,7 @@ export type BootPayload = {
   version?: number;
   route?: BootRoute;
   runtime?: BootRuntime;
-  initialState?: Partial<AppState>;
+  initialState?: HydrationState;
   routeData?: BootRouteData;
   plugins?: ActivePlugin[];
   /** Replayable per-boot CSRF/accidental-mutation interlock; not authentication. */
@@ -94,7 +99,7 @@ export function readBootPayload(win: Window = window): BootPayload {
     version: typeof payload.version === "number" ? payload.version : undefined,
     route: isRecord(payload.route) ? readRoute(payload.route) : undefined,
     runtime,
-    initialState: isRecord(payload.initialState) ? (payload.initialState as Partial<AppState>) : {},
+    initialState: isRecord(payload.initialState) ? (payload.initialState as HydrationState) : {},
     routeData: isRecord(payload.routeData) ? (payload.routeData as BootRouteData) : undefined,
     plugins: Array.isArray(payload.plugins) ? readPlugins(payload.plugins) : undefined,
     interimSettingsInterlockToken: readNonEmptyString(payload.interimSettingsInterlockToken),
@@ -169,11 +174,14 @@ function readRuntime(value: Record<string, unknown>): BootRuntime {
   return {
     apiPrefix: readString(value.apiPrefix),
     webSocketPath: readString(value.webSocketPath),
+    bootId: readNonEmptyString(value.bootId),
     lspAutoInstallPreferenceLanguages: readStringArray(value.lspAutoInstallPreferenceLanguages),
     debug: value.debug === true ? true : undefined,
     nonProduction: value.nonProduction === true ? true : undefined,
     locale: readString(value.locale),
     titlePrefix: readString(value.titlePrefix),
+    nativeFolderPickerAvailable: value.nativeFolderPickerAvailable === true ? true : undefined,
+    desktopRuntime: value.desktopRuntime === true ? true : undefined,
   };
 }
 

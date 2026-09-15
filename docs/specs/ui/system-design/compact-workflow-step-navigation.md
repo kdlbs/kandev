@@ -5,7 +5,7 @@ requirements:
   - REQ-UI-COMPACT-WORKFLOW-STEP-NAVIGATION-001
 ---
 
-# Compact Workflow Step Navigation System Design
+# Compact step navigation
 
 ## Purpose and boundaries
 
@@ -87,7 +87,7 @@ The current row uses `aria-current="step"`. Eligible movement controls are direc
 
 Fine-pointer movement controls use the surrounding compact desktop button density. The 44px minimum applies to the coarse-pointer drawer's action hit areas and rows, not to the desktop button's visual height.
 
-The Popover stays within the viewport through Radix collision handling. The drawer uses internal scrolling and bottom safe-area padding.
+The Popover uses a preferred width of 28rem (448px at the default root font size), capped at `calc(100vw - 1rem)`. This gives step names room beside capability icons and move actions. Keep label truncation as the fallback for unusually long names. Apply this width only to the fine-pointer Popover in `CompactWorkflowDisclosureSurface`; retain the existing touch Drawer geometry. The Popover stays within the viewport through Radix collision handling. The drawer uses internal scrolling and bottom safe-area padding.
 
 The disclosure supports Escape dismissal and focus return. Touch rows use a minimum active height of 44px.
 

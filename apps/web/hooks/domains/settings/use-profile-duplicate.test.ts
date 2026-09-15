@@ -1,17 +1,30 @@
+import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { create, type StoreApi } from "zustand";
 import { immer } from "zustand/middleware/immer";
+import { ApiError } from "@/lib/api/client";
 import type { Agent, AgentProfile } from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices/settings/types";
 import { createSettingsSlice } from "@/lib/state/slices/settings/settings-slice";
 import type { SettingsSlice } from "@/lib/state/slices/settings/types";
 import type { AppState } from "@/lib/state/store";
 import { registerAgentsHandlers } from "@/lib/ws/handlers/agents";
-import { applyProfileDuplicated } from "./use-profile-duplicate";
+import { applyProfileDuplicated, useProfileDuplicate } from "./use-profile-duplicate";
 
-vi.mock("@/app/actions/agents", () => ({ duplicateAgentProfileAction: vi.fn() }));
-vi.mock("@/components/state-provider", () => ({ useAppStoreApi: vi.fn() }));
-vi.mock("@/components/toast-provider", () => ({ useToast: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  duplicateAgentProfileAction: vi.fn(),
+  setState: vi.fn(),
+  toast: vi.fn(),
+}));
+
+vi.mock("@/app/actions/agents", () => ({
+  duplicateAgentProfileAction: (...args: unknown[]) => mocks.duplicateAgentProfileAction(...args),
+}));
+vi.mock("@/components/state-provider", () => ({
+  useAppStoreApi: () => ({ setState: mocks.setState }),
+}));
+vi.mock("@/components/toast-provider", () => ({ useToast: () => ({ toast: mocks.toast }) }));
+vi.mock("@/lib/i18n", () => ({ t: (key: string) => key }));
 
 const COPY_NAME = "Default Copy";
 const OLD_REVISION = "2026-08-11T21:00:00Z";
@@ -211,6 +224,23 @@ describe("applyProfileDuplicated", () => {
     expect(ids).toContain("p-orphan");
     expect(ids).toContain("p2");
     expect(ids.filter((id) => id === "p2")).toHaveLength(1);
+  });
+});
+
+describe("useProfileDuplicate", () => {
+  it("does not toast a stale interlock error already handled by the coordinator", async () => {
+    const error = new ApiError("stale document", 403, {
+      error_code: "interim_settings_interlock_required",
+    });
+    error.handled = true;
+    mocks.duplicateAgentProfileAction.mockRejectedValue(error);
+
+    const { result } = renderHook(() => useProfileDuplicate());
+    await act(async () => {
+      await result.current(agent("a1"), profile("p1", "a1"));
+    });
+
+    expect(mocks.toast).not.toHaveBeenCalled();
   });
 });
 

@@ -18,6 +18,8 @@
     "integrations",
     "automation-and-mcp",
     "authentication",
+    "team-access",
+    "organizations",
     "configuration",
     "---Install Kandev---",
     "cli",
@@ -25,6 +27,7 @@
     "---Deploy and Operate---",
     "docker",
     "run-as-a-service",
+    "mobile-remote-access",
     "windows-support",
     "k8s",
     "operations",
@@ -48,8 +51,10 @@
     "plugins-marketplace",
     "plugins-authoring",
     "plugins-manifest",
+    "canvases",
     "---Office---",
     "office-provider-routing",
+    "office-config-sync",
     "---Protocol Reference---",
     "websocket-api"
   ]

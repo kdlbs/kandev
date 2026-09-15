@@ -14,7 +14,7 @@ type ContextWindowStore = Window & {
   };
 };
 
-type ContextWindowFixture = {
+export type ContextWindowFixture = {
   size: number;
   used: number;
   remaining: number;
@@ -30,7 +30,7 @@ export async function seedContextWindowTask(
   apiClient: ApiClient,
   seedData: SeedData,
   seed: ContextWindowSeed = {},
-): Promise<void> {
+): Promise<{ sessionId: string }> {
   const task = await apiClient.createTaskWithAgent(
     seedData.workspaceId,
     "Context Window Source Test",
@@ -122,6 +122,22 @@ export async function seedContextWindowTask(
           0,
         )}% used`;
   await expect(testPage.getByRole("button", { name: triggerName })).toBeVisible();
+  return { sessionId: task.session_id };
+}
+
+export async function setContextWindowFixture(
+  testPage: Page,
+  sessionId: string,
+  fixture: ContextWindowFixture,
+): Promise<void> {
+  await testPage.evaluate(
+    ({ sessionId: candidateId, fixture: candidateFixture }) => {
+      const store = (window as ContextWindowStore).__KANDEV_E2E_STORE__;
+      if (!store) throw new Error("E2E store bridge is unavailable");
+      store.getState().setContextWindow(candidateId, candidateFixture);
+    },
+    { sessionId, fixture },
+  );
 }
 
 export async function expectCompactionCount(contextTooltip: Locator): Promise<void> {

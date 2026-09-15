@@ -28,6 +28,7 @@ import (
 	"github.com/kandev/kandev/internal/workflow"
 	workflowcontroller "github.com/kandev/kandev/internal/workflow/controller"
 	workflowhandlers "github.com/kandev/kandev/internal/workflow/handlers"
+	wfmodels "github.com/kandev/kandev/internal/workflow/models"
 	workflowservice "github.com/kandev/kandev/internal/workflow/service"
 	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
@@ -52,6 +53,61 @@ type OrchestratorTestServer struct {
 type taskRepositoryAdapter struct {
 	repo *sqliterepo.Repository
 	svc  *taskservice.Service
+}
+
+type orchestratorWorkflowStepGetter struct {
+	svc *workflowservice.Service
+}
+
+type integrationWorkflowProvider struct {
+	svc *taskservice.Service
+}
+
+func (a *integrationWorkflowProvider) ListWorkflows(ctx context.Context, workspaceID string, includeHidden bool) ([]*models.Workflow, error) {
+	return a.svc.ListWorkflows(ctx, workspaceID, includeHidden)
+}
+
+func (a *integrationWorkflowProvider) GetWorkflow(ctx context.Context, id string) (*models.Workflow, error) {
+	return a.svc.GetWorkflow(ctx, id)
+}
+
+func (a *integrationWorkflowProvider) CreateWorkflow(ctx context.Context, workspaceID, name, description string) (*models.Workflow, error) {
+	return a.svc.CreateWorkflow(ctx, &taskservice.CreateWorkflowRequest{
+		WorkspaceID: workspaceID,
+		Name:        name,
+		Description: description,
+	})
+}
+
+func (a *integrationWorkflowProvider) UpdateWorkflow(ctx context.Context, workflow *models.Workflow) error {
+	prompt := workflow.Prompt
+	_, err := a.svc.UpdateWorkflow(ctx, workflow.ID, &taskservice.UpdateWorkflowRequest{
+		Name:           &workflow.Name,
+		Description:    &workflow.Description,
+		Prompt:         &prompt,
+		AgentProfileID: &workflow.AgentProfileID,
+	})
+	return err
+}
+
+func (a orchestratorWorkflowStepGetter) GetStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
+	return a.svc.GetStep(ctx, stepID)
+}
+
+func (a orchestratorWorkflowStepGetter) GetNextStepByPosition(ctx context.Context, workflowID string, position int) (*wfmodels.WorkflowStep, error) {
+	return a.svc.GetNextStepByPosition(ctx, workflowID, position)
+}
+
+func (a orchestratorWorkflowStepGetter) GetPreviousStepByPosition(ctx context.Context, workflowID string, position int) (*wfmodels.WorkflowStep, error) {
+	return a.svc.GetPreviousStepByPosition(ctx, workflowID, position)
+}
+
+func (a orchestratorWorkflowStepGetter) GetWorkflowMeta(ctx context.Context, workflowID string) (orchestrator.WorkflowMeta, error) {
+	meta, err := a.svc.GetWorkflowMeta(ctx, workflowID)
+	if err != nil {
+		return orchestrator.WorkflowMeta{}, err
+	}
+	return orchestrator.WorkflowMeta{AgentProfileID: meta.AgentProfileID, Prompt: meta.Prompt}, nil
 }
 
 func (a *taskRepositoryAdapter) GetTask(ctx context.Context, taskID string) (*v1.Task, error) {
@@ -106,6 +162,22 @@ func (a *testMessageCreatorAdapter) CreateAgentMessage(ctx context.Context, task
 
 func (a *testMessageCreatorAdapter) CreateUserMessage(ctx context.Context, taskID, content, agentSessionID, turnID string, metadata map[string]interface{}) error {
 	_, err := a.svc.CreateMessage(ctx, &taskservice.CreateMessageRequest{
+		TaskSessionID: agentSessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		Content:       content,
+		AuthorType:    "user",
+		Metadata:      metadata,
+	})
+	return err
+}
+
+func (a *testMessageCreatorAdapter) CreateUserMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, agentSessionID, turnID string,
+	metadata map[string]interface{},
+) error {
+	_, err := a.svc.CreateMessageIdempotent(ctx, messageID, &taskservice.CreateMessageRequest{
 		TaskSessionID: agentSessionID,
 		TaskID:        taskID,
 		TurnID:        turnID,
@@ -351,6 +423,7 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 	taskSvc.SetWorkflowStepCreator(workflowSvc)
 	taskSvc.SetWorkflowStepGetter(workflowSvc)
 	taskSvc.SetWorkspaceBootstrapper(taskRepo)
+	workflowSvc.SetWorkflowProvider(&integrationWorkflowProvider{svc: taskSvc})
 
 	// Create simulated agent manager
 	agentManager := NewSimulatedAgentManager(eventBus, log)
@@ -367,6 +440,7 @@ func NewOrchestratorTestServer(t *testing.T) *OrchestratorTestServer {
 	msgCreator := &testMessageCreatorAdapter{svc: taskSvc}
 	orchestratorSvc.SetMessageCreator(msgCreator)
 	orchestratorSvc.SetTurnService(&testTurnServiceAdapter{svc: taskSvc})
+	orchestratorSvc.SetWorkflowStepGetter(orchestratorWorkflowStepGetter{svc: workflowSvc})
 
 	// Create WebSocket gateway
 	gateway := gateways.NewGateway(log)

@@ -87,7 +87,8 @@ func (m *Manager) renameBranchForSession(
 	if execution == nil {
 		return nil, fmt.Errorf("execution for session %s is unavailable", sessionID)
 	}
-	client := execution.GetAgentCtlClient()
+	client, releaseClient := execution.AcquireAgentCtlClient()
+	defer releaseClient()
 	if client == nil {
 		return nil, fmt.Errorf("agentctl client for session %s is unavailable", sessionID)
 	}
