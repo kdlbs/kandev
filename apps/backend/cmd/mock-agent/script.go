@@ -163,7 +163,10 @@ func executeMCPCommand(e *emitter, fullPrompt, line string) {
 	toolID := nextToolID()
 	e.startTool(toolID, toolName, acp.ToolKindOther, args)
 
-	result, err := callMCPTool(server, toolName, args)
+	// Tie scripted MCP calls to the ACP prompt context. A cancelled turn must
+	// be able to interrupt an in-flight HTTP/SSE call; otherwise the mock
+	// agent can keep the prompt RPC open while the backend waits for cancel.
+	result, err := e.callMCPToolCtx(e.ctx, server, toolName, args)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "mock-agent: MCP call %s/%s failed: %v\n", server, toolName, err)
 		e.completeTool(toolID, map[string]any{toolKeyError: "MCP error: " + err.Error()})

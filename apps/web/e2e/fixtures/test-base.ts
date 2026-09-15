@@ -405,6 +405,10 @@ export const test = backendFixture.extend<
         show_scroll_to_last_prompt: true,
         show_scroll_to_start: false,
         show_transcript_auto_scroll_control: true,
+        // Reset the Kanban priority filter. Priority-filter tests persist their
+        // selection, and a stale selection can hide default-priority tasks in
+        // unrelated tests that run later in the same worker.
+        kanban_priority_filter_tokens: [],
         tasks_list_sort: "updated_desc",
         tasks_list_group: "state",
       });
@@ -648,6 +652,10 @@ test.beforeEach(async ({ apiClient, backend, seedData }) => {
       show_scroll_to_last_prompt: true,
       show_scroll_to_start: false,
       show_transcript_auto_scroll_control: true,
+      // Reset the Kanban priority filter. Priority-filter tests persist their
+      // selection, and a stale selection can hide default-priority tasks in
+      // unrelated tests that run later in the same worker.
+      kanban_priority_filter_tokens: [],
       task_create_last_used: {
         repository_id: seedData.repositoryId,
         branch: "main",

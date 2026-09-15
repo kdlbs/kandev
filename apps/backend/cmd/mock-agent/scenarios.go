@@ -809,7 +809,7 @@ func scenarioClarification(e *emitter) {
 	fixedDelay(100)
 	e.text("Let me ask you a question about the project setup.")
 
-	result, err := callMCPTool("kandev", "ask_user_question_kandev", clarificationQuestionArgs())
+	result, err := e.callMCPTool("kandev", "ask_user_question_kandev", clarificationQuestionArgs())
 	if err != nil {
 		e.text(fmt.Sprintf("Question failed: %s", err))
 		return
@@ -825,7 +825,7 @@ func scenarioClarificationMarkdown(e *emitter) {
 	fixedDelay(100)
 	e.text("Let me ask you a formatted question about project storage.")
 
-	result, err := callMCPTool("kandev", "ask_user_question_kandev", clarificationMarkdownQuestionArgs())
+	result, err := e.callMCPTool("kandev", "ask_user_question_kandev", clarificationMarkdownQuestionArgs())
 	if err != nil {
 		e.text(fmt.Sprintf("Question failed: %s", err))
 		return
@@ -841,7 +841,7 @@ func scenarioClarificationMulti(e *emitter) {
 	fixedDelay(100)
 	e.text("Let me ask you a few questions about the project setup.")
 
-	result, err := callMCPTool("kandev", "ask_user_question_kandev", clarificationMultiQuestionArgs())
+	result, err := e.callMCPTool("kandev", "ask_user_question_kandev", clarificationMultiQuestionArgs())
 	if err != nil {
 		e.text(fmt.Sprintf("Questions failed: %s", err))
 		return
@@ -859,7 +859,7 @@ func scenarioClarificationTimeout(e *emitter) {
 	ctx, cancel := contextWithTimeout(5)
 	defer cancel()
 
-	result, err := callMCPToolCtx(ctx, "kandev", "ask_user_question_kandev", clarificationQuestionArgs())
+	result, err := e.callMCPToolCtx(ctx, "kandev", "ask_user_question_kandev", clarificationQuestionArgs())
 	if err != nil {
 		fixedDelay(50)
 		if ctx.Err() != nil {
@@ -979,7 +979,7 @@ func scenarioWalkthroughReemit(e *emitter) {
 	}
 
 	e.text("First tour incoming.")
-	if _, err := callMCPTool("kandev", "show_walkthrough_kandev", wtArgs("First",
+	if _, err := e.callMCPTool("kandev", "show_walkthrough_kandev", wtArgs("First",
 		wtStep("First step", "reemit.txt", "REEMIT_FIRST step one.", 1, 0),
 		wtStep("First step 2", "reemit.txt", "REEMIT_FIRST step two.", 2, 0),
 	)); err != nil {
@@ -990,7 +990,7 @@ func scenarioWalkthroughReemit(e *emitter) {
 
 	fixedDelay(200)
 
-	if _, err := callMCPTool("kandev", "show_walkthrough_kandev", wtArgs("Second",
+	if _, err := e.callMCPTool("kandev", "show_walkthrough_kandev", wtArgs("Second",
 		wtStep("Second step", "reemit.txt", "REEMIT_SECOND step one.", 1, 0),
 		wtStep("Second step 2", "reemit.txt", "REEMIT_SECOND step two.", 2, 0),
 		wtStep("Second step 3", "reemit.txt", "REEMIT_SECOND step three.", 1, 0),
@@ -1093,7 +1093,7 @@ func emitWalkthroughTour(e *emitter, doneText string) {
 	toolName := "show_walkthrough_kandev"
 	args := walkthroughDemoArgs()
 	e.startTool(toolID, toolName, acp.ToolKindOther, args)
-	result, err := callMCPTool("kandev", toolName, args)
+	result, err := e.callMCPTool("kandev", toolName, args)
 	if err != nil {
 		e.completeTool(toolID, map[string]any{toolKeyError: "MCP error: " + err.Error()})
 		e.text(fmt.Sprintf("show_walkthrough failed: %s", err))

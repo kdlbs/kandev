@@ -89,6 +89,44 @@ func TestInitializePromptQueueingCanBeDisabled(t *testing.T) {
 	}
 }
 
+func TestNewSessionKeepsMCPServersScopedToSession(t *testing.T) {
+	mcpServers = nil
+	t.Cleanup(func() { mcpServers = nil })
+
+	agent := &mockAgent{
+		sessions:        make(map[acp.SessionId]bool),
+		sessionConfig:   make(map[acp.SessionId][]acp.SessionConfigOption),
+		commandsEmitted: make(map[acp.SessionId]bool),
+	}
+	first, err := agent.NewSession(context.Background(), acp.NewSessionRequest{
+		McpServers: []acp.McpServer{{Sse: &acp.McpServerSseInline{
+			Name: "kandev",
+			Url:  "http://127.0.0.1:10001/sse",
+		}}},
+	})
+	if err != nil {
+		t.Fatalf("create first session: %v", err)
+	}
+	second, err := agent.NewSession(context.Background(), acp.NewSessionRequest{
+		McpServers: []acp.McpServer{{Sse: &acp.McpServerSseInline{
+			Name: "kandev",
+			Url:  "http://127.0.0.1:10002/sse",
+		}}},
+	})
+	if err != nil {
+		t.Fatalf("create second session: %v", err)
+	}
+
+	firstServer := agent.sessionMCPServers[first.SessionId]["kandev"]
+	if firstServer.URL != "http://127.0.0.1:10001/sse" {
+		t.Fatalf("first session MCP URL = %q, want first endpoint", firstServer.URL)
+	}
+	secondServer := agent.sessionMCPServers[second.SessionId]["kandev"]
+	if secondServer.URL != "http://127.0.0.1:10002/sse" {
+		t.Fatalf("second session MCP URL = %q, want second endpoint", secondServer.URL)
+	}
+}
+
 func TestParseResumeDelayFromArgs(t *testing.T) {
 	tests := []struct {
 		name string

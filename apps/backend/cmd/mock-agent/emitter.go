@@ -17,9 +17,29 @@ type sessionUpdater interface {
 // emitter wraps an ACP connection and session ID to provide
 // convenient methods for streaming agent updates.
 type emitter struct {
-	ctx  context.Context
-	conn sessionUpdater
-	sid  acp.SessionId
+	ctx        context.Context
+	conn       sessionUpdater
+	sid        acp.SessionId
+	mcpServers map[string]mcpServerDef
+}
+
+// callMCPTool invokes an MCP tool through the server definitions attached to
+// this ACP session. ACP can create several sessions in one mock-agent process,
+// and each session can expose a different per-session SSE endpoint.
+func (e *emitter) callMCPTool(serverName, toolName string, args map[string]any) (string, error) {
+	if e == nil || e.mcpServers == nil {
+		return callMCPTool(serverName, toolName, args)
+	}
+	return callMCPToolCtxForServers(e.ctx, e.mcpServers, serverName, toolName, args)
+}
+
+// callMCPToolCtx invokes an MCP tool with a context and the server definitions
+// attached to this ACP session.
+func (e *emitter) callMCPToolCtx(ctx context.Context, serverName, toolName string, args map[string]any) (string, error) {
+	if e == nil || e.mcpServers == nil {
+		return callMCPToolCtx(ctx, serverName, toolName, args)
+	}
+	return callMCPToolCtxForServers(ctx, e.mcpServers, serverName, toolName, args)
 }
 
 // text sends an agent text message update.
