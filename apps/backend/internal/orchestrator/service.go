@@ -143,12 +143,27 @@ type MessageCreator interface {
 	InvalidateModelCache(sessionID string)
 }
 
-// TransientRetryMessageService is the narrow task-service seam used to retire
-// persisted retry status messages. The task service owns authorization and
-// event-bus publication for both operations.
+// TransientRetryMessageService is the narrow task-service seam used to write
+// and retire persisted retry status messages. The task service owns
+// authorization and event-bus publication for all operations.
 type TransientRetryMessageService interface {
 	ListMessages(ctx context.Context, sessionID string) ([]*models.Message, error)
+	UpdateMessage(ctx context.Context, message *models.Message) error
 	DeleteMessage(ctx context.Context, id string) error
+}
+
+// transientRetryNoticeState serializes retry-notice storage with the in-memory
+// retry lifecycle for one session. refs and fenceTimer are owned by
+// Service.transientRetryNoticeStatesMu. The bounded retirement fence keeps a
+// stale provider event from creating a new retry while terminal cleanup is in
+// flight, then allows the session entry to be reclaimed.
+type transientRetryNoticeState struct {
+	mu           sync.Mutex
+	retired      atomic.Bool
+	owned        atomic.Bool
+	retiredUntil atomic.Int64
+	refs         int
+	fenceTimer   *time.Timer
 }
 
 // SessionAttachmentCleaner removes file-backed prompt attachments after a
@@ -661,6 +676,13 @@ type Service struct {
 	// transientRetryMessages owns durable cleanup of persisted retry notices.
 	// It is optional for focused tests and pre-composition callers.
 	transientRetryMessages TransientRetryMessageService
+	// transientRetryNoticeStates serializes notice writes and cleanup by
+	// session. Entries are reference counted while callers use the mutex,
+	// retained while a prompt/retry is active, and retained for a bounded fence
+	// interval after retirement.
+	transientRetryNoticeStatesMu sync.Mutex
+	transientRetryNoticeStates   map[string]*transientRetryNoticeState
+	transientRetryNoticeFenceTTL time.Duration
 	// sessionQueuePurgeNotifierRegistered means the task repository owns
 	// queue cleanup and status publication after DeleteTaskSession commits.
 	// DeleteSession keeps its fallback cleanup for focused compositions that
@@ -1828,8 +1850,8 @@ func (s *Service) SetMessageCreator(mc MessageCreator) {
 	s.messageCreator = mc
 }
 
-// SetTransientRetryMessageService wires the task service used to retire
-// persisted transient-retry status messages.
+// SetTransientRetryMessageService wires the task service used to write and
+// retire persisted transient-retry status messages.
 func (s *Service) SetTransientRetryMessageService(service TransientRetryMessageService) {
 	s.transientRetryMessages = service
 }
