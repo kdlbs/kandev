@@ -72,9 +72,13 @@ sidecar through a Pod-local Unix socket. Both mount the workspace; only the
 agent gets Kandev runtime/auth mounts. Daemon data is explicitly disposable.
 
 Provide explicit resources, writable caches and a finite daemon readiness gate
-while preserving default clone/setup/agent-install/branch preparation. Deployers
-must choose their own namespace policy, placement, limits and network MTU.
-The recipe does not grant privileges or install anything by itself.
+while preserving default clone/setup/agent-install/branch preparation. Run the
+resolved preparation through the existing restricted Pod exec channel before
+releasing the managed entrypoint, with a bounded sanitized failure diagnostic.
+Use Docker's cgroupfs driver and a relative cgroup parent, then require runtime
+evidence that nested scopes remain inside the Pod budget. Deployers must choose
+their own namespace policy, placement, limits and network MTU. The recipe does
+not grant privileges or install anything by itself.
 
 ## Tests
 

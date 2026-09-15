@@ -51,12 +51,19 @@ container's non-root security context does not contain commands that use Docker.
 Schedule these Pods only on a worker node pool isolated from trusted workloads.
 
 The daemon reads the Pod interface MTU and applies it to default and
-user-defined bridges. Verify nested HTTPS transfers for the actual CNI/runtime.
+user-defined bridges. It selects Docker's cgroupfs driver with a relative
+`docker` parent so nested container cgroups remain below the daemon container's
+cgroup on compatible cgroup-v2 runtimes. Verify both properties on the actual
+CNI and container runtime before rollout.
+
 The preparation script waits at most 60 seconds (plus a bounded client call)
 for Docker before the standard clone/origin verification, repository setup and
-agent installation. Kandev still adds task-branch preparation. Cache directories
-are created only after repository materialization. Kandev owns `HOME`; baked
-tools and browsers remain outside `/workspace` and `/run/kandev`.
+agent installation. Kandev uploads and runs that script through its existing
+restricted Pod exec channel, then releases the managed entrypoint only after
+preparation succeeds. A failed script returns a bounded, sanitized diagnostic
+and never starts agentctl. Kandev still adds task-branch preparation. Cache
+directories are created only after repository materialization. Kandev owns
+`HOME`; baked tools and browsers remain outside `/workspace` and `/run/kandev`.
 
 ## Exercise source and Docker execution
 
