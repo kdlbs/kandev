@@ -133,6 +133,7 @@ function KanbanCardFrame({
         <KanbanCardContextMenu entries={menu.contextMenuEntries}>
           <KanbanCardShell
             task={task}
+            presentation={presentation}
             repositoryChips={repositoryChips}
             attributes={draggable.attributes}
             listeners={draggable.listeners}
@@ -210,7 +211,7 @@ export function KanbanCard({
 }: KanbanCardProps) {
   const draggable = useDraggable({
     id: task.id,
-    disabled: isMultiSelectMode,
+    disabled: presentation === "mobile" || isMultiSelectMode,
   });
   const isPreviewed = useAppStore((state) => state.kanbanPreviewedTaskId === task.id);
   const repositories = useActiveWorkspaceRepositories();

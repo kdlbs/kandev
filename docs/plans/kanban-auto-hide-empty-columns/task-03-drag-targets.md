@@ -42,3 +42,10 @@ spec: "../../specs/ui/requirements/kanban-auto-hide-empty-columns.md"
 - DnD completion is asynchronous; local drag state cannot be treated as authoritative task state.
 - Pipeline uses explicit move controls rather than DnD and must stay compact while retaining hidden
   destinations in its movement model.
+
+## Mobile interaction follow-up
+
+[Remove mobile Kanban dragging](../remove-mobile-kanban-drag/plan.md) replaces
+the historical phone drag-target path with the existing card Move to menu.
+The mobile auto-hide E2E now proves hidden-destination recovery through that
+menu; the original completed results above remain historical.
