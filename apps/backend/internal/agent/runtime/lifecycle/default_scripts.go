@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"strings"
 )
 
 const executorTypeSSH = "ssh"
@@ -11,6 +12,13 @@ const executorTypeSSH = "ssh"
 // in-place, full-history materialization flow. Upgrade only that exact value;
 // user-authored prepare scripts must remain unchanged.
 const legacySpritesPrepareScriptSHA256 = "e656f9e51496e1bb1e5cee205058bbeaa7fe1ab37073f600e6c94310ead7be4d"
+
+// These hashes identify scripts supplied by Kandev. Only exact matches receive
+// managed fixes; customized scripts remain byte-for-byte unchanged.
+const (
+	legacyKubernetesDefaultPrepareScriptSHA256 = "5fe05aedccc24565f338fc6d03f6814024aaf15655643b9ab6317986dfac0ce2"
+	legacyKubernetesFullPrepareScriptSHA256    = "540eece886af9577c6e9e652a845e373692c222453d62144cd6f03a4ab8bd734"
+)
 
 // DefaultPrepareScript returns the default prepare script for a given executor type string.
 func DefaultPrepareScript(executorType string) string {
@@ -36,6 +44,41 @@ func isLegacySpritesPrepareScript(script string) bool {
 	digest := sha256.Sum256([]byte(script))
 	return hex.EncodeToString(digest[:]) == legacySpritesPrepareScriptSHA256
 }
+
+func upgradeLegacyKubernetesPrepareScript(script string) string {
+	digest := sha256.Sum256([]byte(script))
+	switch hex.EncodeToString(digest[:]) {
+	case legacyKubernetesDefaultPrepareScriptSHA256:
+		return defaultKubernetesPrepareScript
+	case legacyKubernetesFullPrepareScriptSHA256:
+		upgraded := strings.Replace(script,
+			"clone_tmp=/opt/kandev/.workspace-clone\n",
+			"clone_tmp=/opt/kandev/.workspace-clone\n\n"+kubernetesRepositoryOriginNormalizer,
+			1,
+		)
+		upgraded = strings.Replace(upgraded, legacyKubernetesRepositoryOriginComparison,
+			currentKubernetesRepositoryOriginComparison, 1)
+		return strings.Replace(upgraded,
+			`cp -a "$clone_tmp"/. "$workspace"/`,
+			`cp -R "$clone_tmp"/. "$workspace"/`, 1)
+	default:
+		return script
+	}
+}
+
+const kubernetesRepositoryOriginNormalizer = `normalize_repository_origin() {
+  printf '%s\n' "$1" | sed \
+    -e 's|^https://[^/@]*@github.com/|https://github.com/|' \
+    -e 's|^git@github.com:|https://github.com/|' \
+    -e 's|^ssh://git@github.com/|https://github.com/|'
+}
+`
+
+const legacyKubernetesRepositoryOriginComparison = `    expected_origin=$(printf '%s\n' "$repository_url" | sed 's|^https://[^/@]*@github.com/|https://github.com/|')
+    retained_origin=$(printf '%s\n' "$workspace_origin" | sed 's|^https://[^/@]*@github.com/|https://github.com/|')`
+
+const currentKubernetesRepositoryOriginComparison = `    expected_origin=$(normalize_repository_origin "$repository_url")
+    retained_origin=$(normalize_repository_origin "$workspace_origin")`
 
 // KandevBranchCheckoutPostlude returns a kandev-managed shell snippet that
 // guarantees the session's feature branch is checked out inside the
@@ -205,8 +248,6 @@ if [ -n "$repository_url" ]; then
     rm -rf "$clone_tmp"
     trap 'rm -rf "$clone_tmp"' 0 1 2 15
     git clone --depth=1 --branch "$repository_branch" "$repository_url" "$clone_tmp"
-    # The PVC mount root can be group-writable without being owned by the
-    # container user. Copy content without restoring source ownership or times.
     cp -R "$clone_tmp"/. "$workspace"/
     rm -rf "$clone_tmp"
     trap - 0 1 2 15

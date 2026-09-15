@@ -45,6 +45,71 @@ func TestKubernetesPreparationAcceptsEquivalentGitHubOrigins(t *testing.T) {
 	}
 }
 
+func TestKubernetesPrepareScriptUpgradesPersistedManagedScripts(t *testing.T) {
+	full, err := os.ReadFile("../../../../../../k8s/worker-images/full/prepare.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyDefault := persistedKubernetesPrepareScriptBeforePVCFix(t, DefaultPrepareScript("k8s"))
+	for name, current := range map[string]string{
+		"default": DefaultPrepareScript("k8s"),
+		"full":    string(full),
+	} {
+		t.Run(name, func(t *testing.T) {
+			legacy := persistedKubernetesPrepareScriptBeforePVCFix(t, current)
+			if upgraded := upgradeLegacyKubernetesPrepareScript(legacy); upgraded != current {
+				t.Fatalf("managed script upgrade did not produce the current script")
+			}
+			req := validKubernetesCreateRequest()
+			req.Metadata[MetadataKeySetupScript] = legacy
+
+			resolved, err := kubernetesPrepareScript(req)
+
+			requireNoError(t, err)
+			if !strings.Contains(resolved, "normalize_repository_origin()") ||
+				!strings.Contains(resolved, `cp -R "$clone_tmp"/. "$workspace"/`) {
+				t.Fatalf("persisted managed script was not upgraded:\n%s", resolved)
+			}
+			if strings.Contains(resolved, `cp -a "$clone_tmp"/. "$workspace"/`) {
+				t.Fatalf("persisted managed script retained archive copy:\n%s", resolved)
+			}
+		})
+	}
+
+	const customization = "# user-managed customization"
+	req := validKubernetesCreateRequest()
+	req.Metadata[MetadataKeySetupScript] = legacyDefault + "\n" + customization
+	resolved, err := kubernetesPrepareScript(req)
+	requireNoError(t, err)
+	if !strings.Contains(resolved, customization) ||
+		!strings.Contains(resolved, `cp -a "$clone_tmp"/. "$workspace"/`) ||
+		strings.Contains(resolved, "normalize_repository_origin()") {
+		t.Fatalf("custom prepare script was modified:\n%s", resolved)
+	}
+}
+
+func persistedKubernetesPrepareScriptBeforePVCFix(t *testing.T, current string) string {
+	t.Helper()
+	legacy := strings.Replace(current, `
+normalize_repository_origin() {
+  printf '%s\n' "$1" | sed \
+    -e 's|^https://[^/@]*@github.com/|https://github.com/|' \
+    -e 's|^git@github.com:|https://github.com/|' \
+    -e 's|^ssh://git@github.com/|https://github.com/|'
+}
+`, "", 1)
+	legacy = strings.Replace(legacy, `    expected_origin=$(normalize_repository_origin "$repository_url")
+    retained_origin=$(normalize_repository_origin "$workspace_origin")`, `    expected_origin=$(printf '%s\n' "$repository_url" | sed 's|^https://[^/@]*@github.com/|https://github.com/|')
+    retained_origin=$(printf '%s\n' "$workspace_origin" | sed 's|^https://[^/@]*@github.com/|https://github.com/|')`, 1)
+	legacy = strings.Replace(legacy,
+		`cp -R "$clone_tmp"/. "$workspace"/`,
+		`cp -a "$clone_tmp"/. "$workspace"/`, 1)
+	if legacy == current {
+		t.Fatal("legacy fixture did not reverse the managed PVC preparation changes")
+	}
+	return legacy
+}
+
 func runKubernetesPreparationWithEquivalentGitHubOrigins(t *testing.T, script string, needsDocker bool) {
 	t.Helper()
 	workspace, _ := setupPostludeRepo(t, "main")

@@ -67,8 +67,6 @@ if [ -n "$repository_url" ]; then
     rm -rf "$clone_tmp"
     trap 'rm -rf "$clone_tmp"' 0 1 2 15
     git clone --depth=1 --branch "$repository_branch" "$repository_url" "$clone_tmp"
-    # The PVC mount root can be group-writable without being owned by the
-    # container user. Copy content without restoring source ownership or times.
     cp -R "$clone_tmp"/. "$workspace"/
     rm -rf "$clone_tmp"
     trap - 0 1 2 15
