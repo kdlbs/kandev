@@ -635,7 +635,7 @@ describe("TaskChat run error entries", () => {
     expect(screen.queryByTestId("run-error-raw-payload")).toBeNull();
   });
 
-  it("renders a task-owned launch error before the empty state", () => {
+  it("leaves task-owned launch errors to the task shell", () => {
     const statusSummary: TaskStatusSummary = {
       revision: 3,
       updated_at: T_11,
@@ -658,8 +658,8 @@ describe("TaskChat run error entries", () => {
         />,
       ),
     );
-    expect(screen.getByTestId("task-launch-error-entry")).toBeTruthy();
-    expect(screen.getByText(/choose a base branch/i)).toBeTruthy();
+    expect(screen.queryByTestId("task-launch-error-entry")).toBeNull();
+    expect(screen.queryByText(/choose a base branch/i)).toBeNull();
     expect(screen.getByText(/no comments yet/i)).toBeTruthy();
   });
 

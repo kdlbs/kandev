@@ -73,6 +73,29 @@ describe("parseConfigSchema", () => {
       }),
     ]);
   });
+
+  it("maps the agent-profile format to a direct profile picker field", () => {
+    const fields = parseConfigSchema({
+      type: "object",
+      required: ["agent_profile"],
+      properties: {
+        agent_profile: {
+          type: "string",
+          format: "agent-profile",
+          title: "Notes agent",
+        },
+      },
+    });
+
+    expect(fields).toEqual([
+      expect.objectContaining({
+        name: "agent_profile",
+        type: "agent_profile",
+        label: "Notes agent",
+        required: true,
+      }),
+    ]);
+  });
 });
 
 describe("buildInitialValues", () => {

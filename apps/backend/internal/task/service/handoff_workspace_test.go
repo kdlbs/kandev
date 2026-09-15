@@ -261,13 +261,17 @@ type fakeTaskRepo struct {
 	tasks            map[string]*models.Task
 	children         map[string][]string // parentID -> ordered child IDs
 	taskEnvironments map[string]*models.TaskEnvironment
+	// taskEnvironmentErrs injects a lookup failure for one environment ID so a
+	// test can distinguish a positively absent row from an uncertain signal.
+	taskEnvironmentErrs map[string]error
 }
 
 func newFakeTaskRepo() *fakeTaskRepo {
 	return &fakeTaskRepo{
-		tasks:            map[string]*models.Task{},
-		children:         map[string][]string{},
-		taskEnvironments: map[string]*models.TaskEnvironment{},
+		tasks:               map[string]*models.Task{},
+		children:            map[string][]string{},
+		taskEnvironments:    map[string]*models.TaskEnvironment{},
+		taskEnvironmentErrs: map[string]error{},
 	}
 }
 
@@ -472,6 +476,9 @@ func (f *fakeTaskRepo) SetTaskWorkspaceMetadataIfUnchanged(
 func (f *fakeTaskRepo) GetTaskEnvironment(_ context.Context, id string) (*models.TaskEnvironment, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if err, ok := f.taskEnvironmentErrs[id]; ok {
+		return nil, err
+	}
 	return f.taskEnvironments[id], nil
 }
 

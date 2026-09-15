@@ -78,6 +78,7 @@ vi.mock("./task-launch-error-context", () => ({
     mocks.taskLaunchErrorProviderValue = value;
     return <>{children}</>;
   },
+  useTaskLaunchErrorContext: () => null,
 }));
 vi.mock("@/hooks/use-task-sessions", () => ({
   useTaskSessions: mocks.useTaskSessions,
@@ -371,7 +372,7 @@ describe("PreviewSessionBody delivery", () => {
     expect(mocks.taskLaunchErrorProviderValue?.automaticRecovery).toBe(recovery);
   });
 
-  it("keeps the bootstrap recovery card and automatic outcome in passthrough preview", () => {
+  it("keeps passthrough recovery feedback outside the terminal preview", () => {
     mocks.sessions = [
       makeSession("session-1", {
         is_passthrough: true,
@@ -410,9 +411,7 @@ describe("PreviewSessionBody delivery", () => {
 
     render(<PreviewSessionTabs taskId={TASK_ID} sessionId="session-1" />);
 
-    expect(screen.getByTestId("preview-bootstrap-recovery-card").textContent).toContain(
-      "recovery_failed",
-    );
+    expect(screen.queryByTestId("preview-bootstrap-recovery-card")).toBeNull();
     expect(screen.getByTestId("preview-passthrough-toolbar")).toBeTruthy();
   });
 });

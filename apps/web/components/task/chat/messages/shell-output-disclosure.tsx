@@ -4,6 +4,7 @@ import { useState } from "react";
 import { IconChevronDown, IconChevronRight } from "@tabler/icons-react";
 import { Button } from "@kandev/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/collapsible";
+import { isToolPayloadRemovedError } from "@/lib/utils/tool-payload-retention";
 import { useShellCommandOutput } from "@/hooks/domains/session/use-shell-command-output";
 import type { ShellCommandOutput, ShellCommandOutputSnapshot } from "@/lib/api/domains/session-api";
 import { cn } from "@/lib/utils";
@@ -70,6 +71,13 @@ function ResultDetails({ snapshot }: { snapshot: ShellCommandOutputSnapshot }) {
   );
 }
 
+function emptyOutputLabel(snapshotStatus?: string, messageStatus?: string) {
+  return normalizeToolCallStatus(snapshotStatus) === "running" &&
+    !isTerminalToolCallStatus(messageStatus)
+    ? t("task:noCommandOutputYet")
+    : t("task:noCommandOutput");
+}
+
 function DisclosureContent({
   snapshot,
   isLoading,
@@ -84,12 +92,11 @@ function DisclosureContent({
   messageStatus?: string;
 }) {
   const { t } = useTranslation();
+  if (isToolPayloadRemovedError(error)) {
+    return <p className="text-xs text-muted-foreground">{t("task:toolPayloadRemoved")}</p>;
+  }
   const hasTranscript = Boolean(snapshot?.output.stdout || snapshot?.output.stderr);
-  const emptyLabel =
-    normalizeToolCallStatus(snapshot?.status) === "running" &&
-    !isTerminalToolCallStatus(messageStatus)
-      ? t("task:noCommandOutputYet")
-      : t("task:noCommandOutput");
+  const emptyLabel = emptyOutputLabel(snapshot?.status, messageStatus);
 
   return (
     <div className="min-w-0 space-y-2 border-l-2 border-border/30 pl-3 pt-1">
