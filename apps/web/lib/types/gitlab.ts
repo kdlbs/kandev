@@ -94,6 +94,13 @@ export type TaskMR = {
   updated_at: string;
 };
 
+/** Workspace-scoped websocket payload emitted when a task MR association is removed. */
+export type TaskMRDeletedEvent = {
+  workspace_id: string;
+  task_id: string;
+  association_id: string;
+};
+
 /** Response shape for `GET /api/v1/gitlab/workspaces/:id/task-mrs`. */
 export type TaskMRsResponse = {
   task_mrs: Record<string, TaskMR[]>;

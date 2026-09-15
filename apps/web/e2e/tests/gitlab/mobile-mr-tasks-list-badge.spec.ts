@@ -1,4 +1,5 @@
 import { test, expect } from "../../fixtures/test-base";
+import { expandDisplaySettingsGroup } from "../../helpers/display-settings";
 import { assertNoDocumentHorizontalOverflow } from "../../helpers/layout-assertions";
 import { GITLAB_HOST, GITLAB_PROJECT } from "../../helpers/gitlab";
 import type { ApiClient } from "../../helpers/api-client";
@@ -95,8 +96,9 @@ test.describe("mobile GitLab MR badge on the /tasks list rows", () => {
 
     // Mobile has no `display-button`; the display menu lives behind the
     // "Open menu" drawer (see mobile-task-listing-display.spec.ts).
-    await testPage.getByRole("button", { name: "Open menu" }).click();
+    await testPage.getByRole("button", { name: "Open menu" }).tap();
     const menu = testPage.getByRole("dialog", { name: "Menu" });
+    await expandDisplaySettingsGroup(testPage, "list-rows", "mobile");
     await menu.getByText("Show task details", { exact: true }).click();
     await testPage.keyboard.press("Escape");
     await expect(menu).toHaveCount(0);

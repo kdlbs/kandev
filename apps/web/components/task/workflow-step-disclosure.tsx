@@ -320,7 +320,7 @@ function CompactWorkflowDisclosureSurface({
         aria-label={t("task:moveTo")}
         side="bottom"
         align="center"
-        className="w-72 max-w-[calc(100vw-1rem)] p-2"
+        className="w-[28rem] max-w-[calc(100vw-1rem)] p-2"
         onOpenAutoFocus={controls.handleOpenAutoFocus}
         onCloseAutoFocus={controls.handleCloseAutoFocus}
         onEscapeKeyDown={(event) => event.stopPropagation()}

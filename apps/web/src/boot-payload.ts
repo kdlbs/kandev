@@ -1,4 +1,4 @@
-import type { AppState } from "@/lib/state/store";
+import type { HydrationState } from "@/lib/state/store";
 import { getBackendConfig } from "@/lib/config";
 import type { FetchedSessionData } from "@/lib/ssr/session-page-state";
 import type {
@@ -75,7 +75,7 @@ export type BootPayload = {
   version?: number;
   route?: BootRoute;
   runtime?: BootRuntime;
-  initialState?: Partial<AppState>;
+  initialState?: HydrationState;
   routeData?: BootRouteData;
   plugins?: ActivePlugin[];
   /** Replayable per-boot CSRF/accidental-mutation interlock; not authentication. */
@@ -99,7 +99,7 @@ export function readBootPayload(win: Window = window): BootPayload {
     version: typeof payload.version === "number" ? payload.version : undefined,
     route: isRecord(payload.route) ? readRoute(payload.route) : undefined,
     runtime,
-    initialState: isRecord(payload.initialState) ? (payload.initialState as Partial<AppState>) : {},
+    initialState: isRecord(payload.initialState) ? (payload.initialState as HydrationState) : {},
     routeData: isRecord(payload.routeData) ? (payload.routeData as BootRouteData) : undefined,
     plugins: Array.isArray(payload.plugins) ? readPlugins(payload.plugins) : undefined,
     interimSettingsInterlockToken: readNonEmptyString(payload.interimSettingsInterlockToken),

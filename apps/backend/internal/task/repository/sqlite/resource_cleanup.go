@@ -122,6 +122,31 @@ func (r *Repository) GetTaskResourceCleanupJob(ctx context.Context, id string) (
 	return scanTaskResourceCleanupJob(row)
 }
 
+func (r *Repository) ListArchiveTaskResourceCleanupJobs(
+	ctx context.Context, taskID string,
+) ([]*models.TaskResourceCleanupJob, error) {
+	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
+		SELECT `+taskResourceCleanupColumns+`
+		FROM task_resource_cleanup_jobs
+		WHERE task_id = ? AND trigger IN (?, ?)
+		ORDER BY created_at ASC
+	`), taskID, models.TaskResourceCleanupTriggerArchive,
+		models.TaskResourceCleanupTriggerCascadeArchive)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	jobs := make([]*models.TaskResourceCleanupJob, 0)
+	for rows.Next() {
+		job, scanErr := scanTaskResourceCleanupJob(rows)
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		jobs = append(jobs, job)
+	}
+	return jobs, rows.Err()
+}
+
 func (r *Repository) ListPreparedTaskResourceCleanupJobs(ctx context.Context) ([]*models.TaskResourceCleanupJob, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
 		SELECT `+taskResourceCleanupColumns+`
@@ -208,7 +233,13 @@ func (r *Repository) StartPreparedTaskResourceCleanupJob(ctx context.Context, id
 	return count == 1, nil
 }
 
-func (r *Repository) CompleteTaskResourceCleanupJob(ctx context.Context, id string, state models.TaskResourceCleanupState, lastError string, nextAttemptAt *time.Time) error {
+func (r *Repository) CompleteTaskResourceCleanupJob(
+	ctx context.Context,
+	id string,
+	state models.TaskResourceCleanupState,
+	lastError string,
+	nextAttemptAt *time.Time,
+) error {
 	now := time.Now().UTC()
 	var completedAt *time.Time
 	if state == models.TaskResourceCleanupStateSucceeded ||
@@ -222,6 +253,51 @@ func (r *Repository) CompleteTaskResourceCleanupJob(ctx context.Context, id stri
 		WHERE id = ?
 	`), state, lastError, nextAttemptAt, completedAt, now, id)
 	return err
+}
+
+// RestoreCancelledTaskResourceCleanupJobIfUnchanged re-prepares only the
+// cancelled cleanup generation that the caller inspected. The state and
+// attempt predicates prevent a delayed restore from overwriting a newer
+// prepared, pending, or running generation.
+func (r *Repository) RestoreCancelledTaskResourceCleanupJobIfUnchanged(
+	ctx context.Context,
+	id string,
+	attempts int,
+	lastError string,
+) (bool, error) {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_resource_cleanup_jobs
+		SET state = ?, last_error = ?, next_attempt_at = NULL, completed_at = NULL, updated_at = ?
+		WHERE id = ? AND state = ? AND attempts = ?
+	`), models.TaskResourceCleanupStatePrepared, lastError, now,
+		id, models.TaskResourceCleanupStateCancelled, attempts)
+	if err != nil {
+		return false, err
+	}
+	count, _ := result.RowsAffected()
+	return count == 1, nil
+}
+
+// CancelTaskResourceCleanupJobIfPending cancels only an eligible cleanup
+// generation. Running claims are left untouched for physical reconciliation.
+func (r *Repository) CancelTaskResourceCleanupJobIfPending(ctx context.Context, id string) (bool, error) {
+	now := time.Now().UTC()
+	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE task_resource_cleanup_jobs
+		SET state = ?, next_attempt_at = NULL, completed_at = ?, updated_at = ?
+		WHERE id = ? AND state IN (?, ?, ?)
+	`),
+		models.TaskResourceCleanupStateCancelled, now, now, id,
+		models.TaskResourceCleanupStatePrepared,
+		models.TaskResourceCleanupStatePending,
+		models.TaskResourceCleanupStateRetryWait,
+	)
+	if err != nil {
+		return false, err
+	}
+	count, _ := result.RowsAffected()
+	return count == 1, nil
 }
 
 // CompleteClaimedTaskResourceCleanupJob applies a worker result only to the
@@ -260,11 +336,10 @@ func (r *Repository) CancelArchiveTaskResourceCleanupJobs(ctx context.Context, t
 	_, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_resource_cleanup_jobs
 		SET state = ?, completed_at = ?, updated_at = ?
-		WHERE task_id = ? AND trigger IN (?, ?) AND state IN (?, ?, ?, ?)
+		WHERE task_id = ? AND trigger IN (?, ?) AND state IN (?, ?, ?)
 	`), models.TaskResourceCleanupStateCancelled, now, now, taskID,
 		models.TaskResourceCleanupTriggerArchive, models.TaskResourceCleanupTriggerCascadeArchive,
 		models.TaskResourceCleanupStatePrepared, models.TaskResourceCleanupStatePending,
-		models.TaskResourceCleanupStateRunning,
 		models.TaskResourceCleanupStateRetryWait)
 	return err
 }

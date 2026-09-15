@@ -69,6 +69,7 @@ type TipTapPlanEditorProps = {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  readOnly?: boolean;
   onSelectionChange?: (selection: TextSelection | null) => void;
   comments?: CommentForEditor[];
   onCommentClick?: (id: string, position: { x: number; y: number }) => void;
@@ -395,6 +396,7 @@ function usePlanEditor(props: TipTapPlanEditorProps): PlanEditorState {
   const editor = useEditor(
     {
       immediatelyRender: false,
+      editable: !props.readOnly,
       extensions,
       content: value,
       editorProps: {
@@ -423,6 +425,10 @@ function usePlanEditor(props: TipTapPlanEditorProps): PlanEditorState {
     },
     [tableResizeEnabled],
   );
+
+  useLayoutEffect(() => {
+    editor?.setEditable(!props.readOnly, false);
+  }, [editor, props.readOnly]);
 
   useEffect(() => {
     editorRef.current = editor;
@@ -496,7 +502,7 @@ export function TipTapPlanEditor(props: TipTapPlanEditorProps) {
         data-testid="plan-editor-scroll-container"
         className={cn("h-full min-h-0 overflow-y-auto overscroll-contain")}
       />
-      {editor && isReady && (
+      {editor && isReady && !props.readOnly && (
         <>
           <PlanBubbleMenu
             editor={editor}
@@ -508,11 +514,13 @@ export function TipTapPlanEditor(props: TipTapPlanEditorProps) {
           <PlanDragHandle editor={editor} />
         </>
       )}
-      <PlanSlashMenu
-        menuState={slash.menuState}
-        selectedIndex={slash.selectedIndex}
-        setSelectedIndex={slash.setSelectedIndex}
-      />
+      {!props.readOnly && (
+        <PlanSlashMenu
+          menuState={slash.menuState}
+          selectedIndex={slash.selectedIndex}
+          setSelectedIndex={slash.setSelectedIndex}
+        />
+      )}
       {!isReady && (
         <div className="absolute inset-0 flex items-center justify-center text-muted-foreground text-sm bg-background/80">
           {t("editors:loadingEditor")}

@@ -103,6 +103,14 @@ type testDeps struct {
 
 func newTestDeps(t *testing.T) *testDeps {
 	t.Helper()
+	return newTestDepsWithLogger(t, logger.Default())
+}
+
+// newTestDepsWithLogger is newTestDeps with a caller-supplied logger, so a
+// test can read what the service itself logged — the only way to assert a
+// best-effort failure the service swallows on purpose.
+func newTestDepsWithLogger(t *testing.T, log *logger.Logger) *testDeps {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 
 	db, err := sqlx.Open("sqlite3", ":memory:")
@@ -230,7 +238,6 @@ func newTestDeps(t *testing.T) *testDeps {
 		t.Fatalf("create office_task_labels table: %v", err)
 	}
 
-	log := logger.Default()
 	activity := shared.NewActivityLogger(repo, log)
 	agentSvc := &stubAgentReader{}
 	costSvc := &stubCostChecker{}

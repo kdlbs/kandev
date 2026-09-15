@@ -146,6 +146,29 @@ func TestFindMessagesByPendingIDOrdersEqualTimestampsByID(t *testing.T) {
 	}
 }
 
+func TestFindMessagesByPendingIDsGroupsMessagesInOneBatch(t *testing.T) {
+	repo := newRepoForSessionTests(t)
+	ctx := context.Background()
+	seedForMsgTest(t, repo, "task-pending-batch", "session-pending-batch", "turn-pending-batch")
+	createdAt := time.Date(2026, 9, 5, 22, 0, 0, 0, time.UTC)
+	insertPendingIndexMessage(t, repo, "message-batch-a", "session-pending-batch", "task-pending-batch", "turn-pending-batch", "pending-a", createdAt)
+	insertPendingIndexMessage(t, repo, "message-batch-b", "session-pending-batch", "task-pending-batch", "turn-pending-batch", "pending-b", createdAt.Add(time.Minute))
+
+	grouped, err := repo.FindMessagesByPendingIDs(ctx, []string{"pending-b", "missing", "pending-a"})
+	if err != nil {
+		t.Fatalf("find pending message batch: %v", err)
+	}
+	if got := messageIDs(grouped["pending-a"]); strings.Join(got, ",") != "message-batch-a" {
+		t.Fatalf("pending-a messages = %v, want [message-batch-a]", got)
+	}
+	if got := messageIDs(grouped["pending-b"]); strings.Join(got, ",") != "message-batch-b" {
+		t.Fatalf("pending-b messages = %v, want [message-batch-b]", got)
+	}
+	if _, ok := grouped["missing"]; ok {
+		t.Fatalf("missing pending ID returned a group: %#v", grouped["missing"])
+	}
+}
+
 func assertSQLiteIndexExists(t *testing.T, repo *Repository, indexName string) {
 	t.Helper()
 	var got string
