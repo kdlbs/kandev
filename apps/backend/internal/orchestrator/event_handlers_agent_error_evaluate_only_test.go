@@ -577,7 +577,7 @@ func TestDispatchKanbanAgentErrorTrigger_ConcurrentSameOperationExactlyOneCommit
 }
 
 // agentErrorBlockingCommitRepo blocks the first
-// UpdateTaskWithWorkflowStepAdmission call (the transition commit) until the
+// UpdateTaskWithWorkflowStepAdmissionIfAtStep call (the transition commit) until the
 // test releases it, and counts GetTaskSession calls the same way
 // agentErrorCountingGetTaskSessionRepo does. It embeds the concrete
 // *sqliterepo.Repository, not the narrower sessionExecutorStore interface,
@@ -611,8 +611,8 @@ func (r *agentErrorBlockingCommitRepo) sessionCallCount() int {
 	return r.sessionCalls
 }
 
-func (r *agentErrorBlockingCommitRepo) UpdateTaskWithWorkflowStepAdmission(
-	ctx context.Context, task *models.Task, sourceStepID, targetStepID string, limit int,
+func (r *agentErrorBlockingCommitRepo) UpdateTaskWithWorkflowStepAdmissionIfAtStep(
+	ctx context.Context, task *models.Task, expectedStepID, targetStepID string, limit int,
 ) (bool, error) {
 	r.commitMu.Lock()
 	r.commitCalls++
@@ -622,7 +622,7 @@ func (r *agentErrorBlockingCommitRepo) UpdateTaskWithWorkflowStepAdmission(
 		close(r.entered)
 		<-r.release
 	}
-	return r.Repository.UpdateTaskWithWorkflowStepAdmission(ctx, task, sourceStepID, targetStepID, limit)
+	return r.Repository.UpdateTaskWithWorkflowStepAdmissionIfAtStep(ctx, task, expectedStepID, targetStepID, limit)
 }
 
 // TestDispatchKanbanAgentErrorTrigger_ConcurrentSameOperationLockSpansThroughCommit

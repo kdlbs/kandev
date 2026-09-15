@@ -7,6 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	mcphandlers "github.com/kandev/kandev/internal/mcp/handlers"
 	mcpscope "github.com/kandev/kandev/internal/mcp/scope"
 	"github.com/kandev/kandev/internal/task/models"
@@ -82,6 +83,9 @@ func setupMCPTestServer(t *testing.T) (*TestServer, string, string, string, stri
 // dispatchTrustedMCP exercises the in-process dispatcher path used by the
 // authenticated agent stream. Raw /ws intentionally rejects the internal
 // mcp.* namespace (ADR-2026-07-19-reject-mcp-actions-on-raw-websocket).
+// The trusted path supplies the live execution identity the way
+// taskScopedMCPHandler.Dispatch does for the real agent stream; the
+// principal resolver rejects a principal scope without it.
 func dispatchTrustedMCP(
 	t *testing.T,
 	ts *TestServer,
@@ -95,6 +99,11 @@ func dispatchTrustedMCP(
 	}
 	ctx := context.Background()
 	if ts.mcpCallerTaskID != "" && ts.mcpCallerSessionID != "" {
+		ctx = streams.WithMCPExecutionContext(ctx, streams.MCPExecutionContext{
+			ExecutionID: "mcp-integration-execution",
+			TaskID:      ts.mcpCallerTaskID,
+			SessionID:   ts.mcpCallerSessionID,
+		})
 		resolver := mcpscope.NewResolver(ts.TaskRepo, nil, func() bool { return false }, ts.Logger)
 		ctx, err = resolver.ScopePrincipal(ctx, ts.mcpCallerTaskID, ts.mcpCallerSessionID)
 		if err != nil {

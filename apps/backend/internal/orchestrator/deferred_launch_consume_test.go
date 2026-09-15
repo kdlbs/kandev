@@ -500,6 +500,9 @@ func TestQueuePromotionOfBlockedWIPOverflowDoesNotLaunch(t *testing.T) {
 	seedChainStepTask(t, repo, deferredChainTaskID)
 	createdTask, err := repo.GetTask(ctx, deferredChainTaskID)
 	require.NoError(t, err)
+	// The routing arbiter treats fromStepID as a real source generation rather
+	// than the old advisory event label, so place this fixture in that lane.
+	createdTask.WorkflowStepID = "step-source"
 	createdLaunch := createdTask.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
 	createdLaunch[models.DeferredLaunchUserIDKey] = "creator-1"
 	createdLaunch[models.DeferredLaunchRecordRecentUseKey] = true

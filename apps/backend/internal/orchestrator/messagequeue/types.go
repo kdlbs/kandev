@@ -160,7 +160,8 @@ var (
 	ErrSessionIdentityMismatch = errors.New("queue session identity mismatch")
 	// ErrLifecycleCancelled means an archive/delete purge invalidated a
 	// previously accepted lifecycle entry before it could be retried.
-	ErrLifecycleCancelled = errors.New("lifecycle queue entry cancelled")
+	ErrLifecycleCancelled            = errors.New("lifecycle queue entry cancelled")
+	ErrPendingMoveGenerationConflict = errors.New("pending move generation changed")
 	// ErrQueueDispatchClaimChanged means the durable ordinary-dispatch claim
 	// was cleared or transferred before its worker attempted to settle it.
 	ErrQueueDispatchClaimChanged = errors.New("queue dispatch claim changed")
@@ -535,16 +536,19 @@ type QueueStatus struct {
 // move_task_kandev) while its turn is still active. Applied by handleAgentReady
 // once the turn ends.
 type PendingMove struct {
+	ID string `json:"id"`
 	// MoveID is the durable effect token for one deferred move request across
 	// queue snapshots. Rollback can restore a consumed snapshot, so replay uses
 	// this token to suppress a second workflow effect.
-	MoveID               string    `json:"move_id"`
-	SessionIncarnationID string    `json:"session_incarnation_id,omitempty"`
-	TaskID               string    `json:"task_id"`
-	WorkflowID           string    `json:"workflow_id"`
-	WorkflowStepID       string    `json:"workflow_step_id"`
-	Position             int       `json:"position"`
-	QueuedAt             time.Time `json:"queued_at"`
+	MoveID                 string    `json:"move_id"`
+	SessionIncarnationID   string    `json:"session_incarnation_id,omitempty"`
+	TaskID                 string    `json:"task_id"`
+	WorkflowID             string    `json:"workflow_id"`
+	WorkflowStepID         string    `json:"workflow_step_id"`
+	ExpectedWorkflowStepID string    `json:"expected_workflow_step_id,omitempty"`
+	InitiatingTurnID       string    `json:"initiating_turn_id,omitempty"`
+	Position               int       `json:"position"`
+	QueuedAt               time.Time `json:"queued_at"`
 	// Actor records provenance across the deferred move boundary. Agent is the
 	// value used by move_task_kandev; it prevents owner identity leakage.
 	Actor string `json:"actor,omitempty"`
