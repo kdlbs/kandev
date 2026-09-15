@@ -108,15 +108,11 @@ func TestTaskEventBroadcaster_TransferReconcilesSourceAndDestination(t *testing.
 	if destination.Action != ws.ActionTaskUpdated {
 		t.Fatalf("destination transfer action = %q, want task.updated", destination.Action)
 	}
-	source := <-hub.broadcast
-	if source.Action != ws.ActionTaskDeleted {
-		t.Fatalf("source transfer action = %q, want task.deleted", source.Action)
+	select {
+	case source := <-hub.broadcast:
+		t.Fatalf("global destination reader received source tombstone: %s", source.Action)
+	default:
 	}
-	var sourcePayload map[string]interface{}
-	require.NoError(t, json.Unmarshal(source.Payload, &sourcePayload))
-	require.Equal(t, "task-transfer", sourcePayload["task_id"])
-	require.Equal(t, "ws-source", sourcePayload["workspace_id"])
-	require.NotContains(t, sourcePayload, "description")
 }
 
 // TestTaskEventBroadcaster_NoDuplicateSubscriptions verifies that

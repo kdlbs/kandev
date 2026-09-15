@@ -219,7 +219,7 @@ func (b *TaskEventBroadcaster) broadcastTransferSourceRemoval(data interface{}, 
 	if err != nil {
 		return err
 	}
-	b.hub.BroadcastToWorkspace(sourceWorkspaceID, msg)
+	b.hub.BroadcastToWorkspaceExcludingWorkspaceReaders(sourceWorkspaceID, destinationWorkspaceID, msg)
 	return nil
 }
 

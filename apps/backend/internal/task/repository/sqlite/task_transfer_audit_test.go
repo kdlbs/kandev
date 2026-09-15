@@ -30,3 +30,25 @@ func TestRecordTaskTransferAttemptPersistsRedactedSchemaRejectedFields(t *testin
 		t.Fatalf("task transfer audit rows = %d, want 1", count)
 	}
 }
+
+func TestRecordTaskTransferAttemptDeduplicatesStableAttemptID(t *testing.T) {
+	repo := newRepoForWorkflowSourceTests(t)
+	command := models.TaskTransferCommand{
+		AuditAttemptID: "attempt-1",
+		Actor:          models.TaskTransferActor{Kind: models.TaskTransferActorRejected, ID: "human-1"},
+	}
+
+	for range 2 {
+		if err := repo.RecordTaskTransferAttempt(context.Background(), command, "failed"); err != nil {
+			t.Fatalf("RecordTaskTransferAttempt: %v", err)
+		}
+	}
+
+	var count int
+	if err := repo.db.Get(&count, `SELECT COUNT(*) FROM task_transfer_audit WHERE id = ?`, command.AuditAttemptID); err != nil {
+		t.Fatalf("read task transfer audit: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("task transfer audit rows = %d, want 1", count)
+	}
+}

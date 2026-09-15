@@ -78,6 +78,10 @@ func (r *Repository) RecordTaskTransferAttempt(
 		result = taskTransferResultFailed
 	}
 	stepID := command.DestinationStepID
+	auditID := command.AuditAttemptID
+	if auditID == "" {
+		auditID = uuid.NewString()
+	}
 	_, err := r.db.ExecContext(auditCtx, r.db.Rebind(`
 		INSERT INTO task_transfer_audit
 			(id, operation_id, actor_kind, actor_id, actor_session_id, task_id,
@@ -85,8 +89,9 @@ func (r *Repository) RecordTaskTransferAttempt(
 			 destination_workspace_id, destination_workflow_id, destination_step_id,
 			 task_generation, session_census_json, preservation_digest, idempotency_key,
 			 preservation_policy, result, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '', ?, ?, ?, ?)`),
-		uuid.NewString(), uuid.NewString(), command.Actor.Kind, command.Actor.ID, command.Actor.SessionID,
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', '', ?, ?, ?, ?)
+		ON CONFLICT (id) DO NOTHING`),
+		auditID, uuid.NewString(), command.Actor.Kind, command.Actor.ID, command.Actor.SessionID,
 		command.TaskID, command.ExpectedSourceWorkspaceID, command.ExpectedSourceWorkflowID,
 		command.ExpectedSourceStepID, command.DestinationWorkspaceID, command.DestinationWorkflowID,
 		stepID, command.ExpectedTaskUpdatedAt, command.IdempotencyKey, command.PreservationPolicy,

@@ -35,6 +35,7 @@ type TaskTransferCommand struct {
 	DestinationStepName       string            `json:"destination_workflow_step_name,omitempty"`
 	IdempotencyKey            string            `json:"idempotency_key"`
 	PreservationPolicy        string            `json:"preservation_policy"`
+	AuditAttemptID            string            `json:"-"`
 	Actor                     TaskTransferActor `json:"-"`
 	AuthorizedOwnerID         string            `json:"-"`
 	OwnerPredicateSet         bool              `json:"-"`

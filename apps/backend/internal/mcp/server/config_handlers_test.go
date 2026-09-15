@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -11,6 +12,24 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type retryingTransferAuditBackend struct {
+	payloads []map[string]any
+	calls    int
+}
+
+func (b *retryingTransferAuditBackend) RequestPayload(_ context.Context, _ string, payload, _ interface{}) error {
+	copyPayload := make(map[string]any)
+	for key, value := range payload.(map[string]any) {
+		copyPayload[key] = value
+	}
+	b.payloads = append(b.payloads, copyPayload)
+	b.calls++
+	if b.calls == 1 {
+		return errors.New("lost audit response")
+	}
+	return nil
+}
 
 // testBackend implements BackendClient for testing handlers.
 type testBackend struct {
@@ -125,6 +144,19 @@ func TestTransferTaskSchemaRejectionAuditsAfterRequestCancellation(t *testing.T)
 	require.True(t, result.IsError)
 	require.Equal(t, ws.ActionMCPAuditTaskTransferAttempt, backend.lastAction)
 	require.NoError(t, backend.contextErr)
+}
+
+func TestTransferTaskSchemaRejectionReusesAuditAttemptIDAcrossRetries(t *testing.T) {
+	backend := &retryingTransferAuditBackend{}
+	s := newTestServer(t, backend)
+
+	s.auditRejectedTransferTool(context.Background(), map[string]any{"task_id": "task-1"})
+
+	require.Len(t, backend.payloads, 2)
+	first, ok := backend.payloads[0]["audit_attempt_id"].(string)
+	require.True(t, ok)
+	require.NotEmpty(t, first)
+	require.Equal(t, first, backend.payloads[1]["audit_attempt_id"])
 }
 
 func TestMoveTaskToolSchemasExposeEntryOptions(t *testing.T) {

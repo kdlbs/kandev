@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/common/mcpmode"
@@ -733,6 +734,7 @@ func (s *Server) auditRejectedTransferTool(ctx context.Context, arguments any) {
 			payload[key] = value
 		}
 	}
+	payload["audit_attempt_id"] = uuid.NewString()
 	var ignored map[string]interface{}
 	auditCtx, cancel := context.WithTimeout(mcporigin.WithTrustedInternalCall(context.WithoutCancel(ctx)), rejectedTransferToolAuditTimeout)
 	defer cancel()

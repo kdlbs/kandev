@@ -52,6 +52,7 @@ type taskTransferRequest struct {
 	DestinationStepName       string `json:"destination_workflow_step_name"`
 	IdempotencyKey            string `json:"idempotency_key"`
 	PreservationPolicy        string `json:"preservation_policy"`
+	AuditAttemptID            string `json:"audit_attempt_id"`
 }
 
 const rejectedTaskTransferAuditTimeout = 2 * time.Second
@@ -138,6 +139,7 @@ func decodeTaskTransferAuditRequest(payload []byte) (taskTransferRequest, error)
 		DestinationStepName:       jsonStringField(fields, "destination_workflow_step_name"),
 		IdempotencyKey:            jsonStringField(fields, "idempotency_key"),
 		PreservationPolicy:        jsonStringField(fields, "preservation_policy"),
+		AuditAttemptID:            jsonStringField(fields, "audit_attempt_id"),
 	}, nil
 }
 
@@ -172,7 +174,7 @@ func (h *Handlers) recordRejectedTaskTransfer(
 		ExpectedTaskUpdatedAt: updatedAt, DestinationWorkspaceID: request.DestinationWorkspaceID,
 		DestinationWorkflowID: request.DestinationWorkflowID, DestinationStepID: request.DestinationStepID,
 		DestinationStepName: request.DestinationStepName, IdempotencyKey: request.IdempotencyKey,
-		PreservationPolicy: request.PreservationPolicy, Actor: models.TaskTransferActor{
+		PreservationPolicy: request.PreservationPolicy, AuditAttemptID: request.AuditAttemptID, Actor: models.TaskTransferActor{
 			Kind: models.TaskTransferActorRejected, ID: actorID, SessionID: principal.CallerSessionID,
 		},
 	}
