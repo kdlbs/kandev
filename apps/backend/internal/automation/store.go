@@ -1462,6 +1462,7 @@ const runTaskStateColumnsSQL = `
 		END AS status,
 		ar.dedup_key, ar.trigger_data, ar.error_message,
 		ar.session_id, ar.turn_id, ar.thread_action, ar.thread_reason, ar.display_title,
+		ar.dedup_reason, ar.repository_reason,
 		ar.created_at,
 		COALESCE((
 			SELECT substr(m.content, 1, 280) FROM task_session_messages m
