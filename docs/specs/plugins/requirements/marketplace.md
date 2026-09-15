@@ -41,23 +41,47 @@ marketplace — while keeping install-by-URL and sideloading as escape hatches.
 - **AC-PLUGINS-MARKETPLACE-001.7:** A catalog entry for a plugin that is already installed SHALL show an **Installed** state; when the catalog's latest version is newer than the installed version, it SHALL show an **Update available** affordance (which reinstalls the newer tarball).
 - **AC-PLUGINS-MARKETPLACE-001.8:** The catalog SHALL be assembled from **one or more marketplace sources**. kandev ships with the **official kandev source** enabled by default; operators MAY add **additional sources** (a team or corporate registry) and the catalog merges them.
 
-### REQ-PLUGINS-MARKETPLACE-002: Registry preview images
+### REQ-PLUGINS-MARKETPLACE-002: Prompt curated-release publication
+
+**Intent:** A valid release from an already-curated plugin repository should become discoverable
+without waiting for a Kandev source commit or a manual registry rebuild, while preserving central
+curation and package-integrity authority.
+
+#### Acceptance criteria
+
+- **AC-PLUGINS-MARKETPLACE-002.1:** The official registry SHALL poll only repositories listed in the
+  checked-out `plugin-registry/plugins.yaml` every five minutes and target publication within 10
+  minutes under normal provider scheduling. The provider's best-effort scheduling caveat SHALL be
+  documented and the 06:00 UTC daily rebuild SHALL remain enabled.
+- **AC-PLUGINS-MARKETPLACE-002.2:** A release SHALL enter the official index only when its exact
+  `<id>-<version>.tar.gz` asset passes the package checksum and manifest safety gate and the verified
+  manifest ID/version matches the curated ID/release version.
+- **AC-PLUGINS-MARKETPLACE-002.3:** A bad or missing release SHALL preserve the last known-good record
+  for that still-curated repository and emit visible workflow evidence. A provider-wide failure SHALL
+  preserve the published Pages site rather than replacing it.
+- **AC-PLUGINS-MARKETPLACE-002.4:** All official registry deployments SHALL share one serialized,
+  coalescing concurrency group. A release signal SHALL carry no repository selector or release
+  payload from a plugin repository.
+
+Decision: `ADR-2026-08-30-central-curated-plugin-release-polling`.
+
+### REQ-PLUGINS-MARKETPLACE-003: Registry preview images
 
 **Intent:** Registry maintainers can add a visual preview gallery to plugin
 listings without changing the plugin package.
 
 #### Acceptance criteria
 
-- **AC-PLUGINS-MARKETPLACE-002.1:** Official and custom marketplace entries
+- **AC-PLUGINS-MARKETPLACE-003.1:** Official and custom marketplace entries
   shall accept an ordered `previews` list of HTTPS image URLs and alternative
   text. Plugin entries can omit the list; existing entries shall remain valid.
-- **AC-PLUGINS-MARKETPLACE-002.2:** A plugin listing with screenshots shall show
+- **AC-PLUGINS-MARKETPLACE-003.2:** A plugin listing with screenshots shall show
   its first image as the preview cover and expose all images in a details
   gallery. Entries without screenshots shall keep their current presentation.
-- **AC-PLUGINS-MARKETPLACE-002.3:** Gallery navigation shall support keyboard
+- **AC-PLUGINS-MARKETPLACE-003.3:** Gallery navigation shall support keyboard
   and touch, display descriptions and image position, and keep install actions
   available when an image fails. Package code shall not run in the preview.
-- **AC-PLUGINS-MARKETPLACE-002.4:** Preview metadata shall belong to the registry,
+- **AC-PLUGINS-MARKETPLACE-003.4:** Preview metadata shall belong to the registry,
   not the plugin manifest or release bundle. Maintainers shall be able to change
   URLs, descriptions, or image order without releasing a new plugin version.
 
