@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	mcpprofile "github.com/kandev/kandev/internal/mcp/profile"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -13,11 +14,12 @@ import (
 // Automation handlers use the principal as their workspace and self-target
 // boundary in addition to the normal owner identity attached to the context.
 type Principal struct {
-	AutomationID    string
-	WorkspaceID     string
-	CallerTaskID    string
-	CallerSessionID string
-	Surface         mcpprofile.Surface
+	AutomationID      string
+	WorkspaceID       string
+	CallerTaskID      string
+	CallerSessionID   string
+	CallerExecutionID string
+	Surface           mcpprofile.Surface
 }
 
 func (p Principal) IsAutomation() bool {
@@ -52,6 +54,10 @@ func (r *Resolver) ScopePrincipal(ctx context.Context, taskID, sessionID string)
 	if err := r.validatePrincipalSession(ctx, taskID, sessionID); err != nil {
 		return nil, err
 	}
+	execution, ok := streams.MCPExecutionContextFromContext(ctx)
+	if !ok || execution.ExecutionID == "" || execution.TaskID != taskID || execution.SessionID != sessionID {
+		return nil, fmt.Errorf("resolve MCP principal: live execution identity is required")
+	}
 
 	workspaceID, err := r.resolvePrincipalWorkspace(ctx, task)
 	if err != nil {
@@ -63,11 +69,12 @@ func (r *Resolver) ScopePrincipal(ctx context.Context, taskID, sessionID string)
 		return nil, fmt.Errorf("resolve MCP principal task %s: %w", taskID, err)
 	}
 	return WithPrincipal(ctx, Principal{
-		AutomationID:    automationID,
-		WorkspaceID:     workspaceID,
-		CallerTaskID:    taskID,
-		CallerSessionID: sessionID,
-		Surface:         surface,
+		AutomationID:      automationID,
+		WorkspaceID:       workspaceID,
+		CallerTaskID:      taskID,
+		CallerSessionID:   sessionID,
+		CallerExecutionID: execution.ExecutionID,
+		Surface:           surface,
 	}), nil
 }
 

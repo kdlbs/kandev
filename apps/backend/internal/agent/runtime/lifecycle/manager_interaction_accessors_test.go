@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -355,6 +356,8 @@ func TestStopAgentForcePassesForceToBackend(t *testing.T) {
 	execRegistry.Register(stopTracker)
 	mgr := NewManager(newTestRegistry(), &MockEventBus{}, execRegistry, nil, nil, nil, ExecutorFallbackWarn, "", log)
 	cleanupManagerStopCh(t, mgr)
+	writer := &captureExecutorRunningWriter{}
+	mgr.SetExecutorRunningWriter(writer)
 
 	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
 		ID: "exec-force", SessionID: "session-force", RuntimeName: executor.NameStandalone,
@@ -364,6 +367,58 @@ func TestStopAgentForcePassesForceToBackend(t *testing.T) {
 
 	require.True(t, stopTracker.forced, "force must be forwarded to StopInstance")
 	require.Equal(t, StopReasonBackendShutdown, stopTracker.stopReason)
+	require.Equal(t, models.ExecutorRunningStatusStopped, writer.status)
+}
+
+func TestStopAgentWithReasonRetainsExecutionWhenTerminalPersistenceFails(t *testing.T) {
+	tests := map[string]func(*captureExecutorRunningWriter, error){
+		"terminal status update": func(writer *captureExecutorRunningWriter, failure error) {
+			writer.statusErr = failure
+		},
+	}
+	for name, injectFailure := range tests {
+		t.Run(name, func(t *testing.T) {
+			log := newTestRegistryLogger()
+			execRegistry := NewExecutorRegistry(log)
+			stopTracker := &forceRecordingStopTracker{
+				mockStopTracker: mockStopTracker{name: executor.NameStandalone},
+			}
+			execRegistry.Register(stopTracker)
+			bus := &MockEventBus{}
+			mgr := NewManager(newTestRegistry(), bus, execRegistry, nil, nil, nil, ExecutorFallbackWarn, "", log)
+			cleanupManagerStopCh(t, mgr)
+			writer := &captureExecutorRunningWriter{}
+			persistErr := errors.New("terminal persistence unavailable")
+			injectFailure(writer, persistErr)
+			mgr.SetExecutorRunningWriter(writer)
+
+			require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+				ID: "exec-terminal-persist", TaskID: "task-terminal-persist",
+				SessionID: "session-terminal-persist", RuntimeName: executor.NameStandalone,
+				Status: v1.AgentStatusRunning,
+			}))
+
+			err := mgr.StopAgentWithReason(
+				context.Background(), "exec-terminal-persist", StopReasonBackendShutdown, true,
+			)
+
+			require.ErrorIs(t, err, persistErr)
+			execution, exists := mgr.executionStore.Get("exec-terminal-persist")
+			require.True(t, exists, "failed terminal persistence must retain the execution for retry")
+			require.Equal(t, v1.AgentStatusStopped, execution.Status)
+			require.Empty(t, bus.PublishedEvents, "failed terminal persistence must not publish agent.stopped")
+
+			writer.getErr = nil
+			writer.statusErr = nil
+			require.NoError(t, mgr.StopAgentWithReason(
+				context.Background(), "exec-terminal-persist", StopReasonBackendShutdown, true,
+			))
+			_, exists = mgr.executionStore.Get("exec-terminal-persist")
+			require.False(t, exists)
+			require.Len(t, bus.PublishedEvents, 1)
+			require.Equal(t, events.AgentStopped, bus.PublishedEvents[0].Type)
+		})
+	}
 }
 
 func TestStopAgentWithReasonRetainsExecutionWhenBackendCleanupFails(t *testing.T) {
@@ -569,9 +624,74 @@ func TestStopAgentWithReason_BackendFailureKeepsExecutionRetryable(t *testing.T)
 	maintenance.Release()
 }
 
+func TestStopAgentWithReasonRetriesTerminalPersistenceBeforeReleasingExecution(t *testing.T) {
+	log := newTestRegistryLogger()
+	execRegistry := NewExecutorRegistry(log)
+	backend := &retryableStopBackend{MockExecutor: MockExecutor{name: executor.NameStandalone}}
+	execRegistry.Register(backend)
+	bus := &MockEventBus{}
+	mgr := NewManager(newTestRegistry(), bus, execRegistry, nil, nil, nil, ExecutorFallbackWarn, "", log)
+	cleanupManagerStopCh(t, mgr)
+	writer := &retryTerminalStatusWriter{failuresRemaining: 1}
+	mgr.SetExecutorRunningWriter(writer)
+
+	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+		ID: "exec-terminal-retry", TaskID: "task-terminal-retry", SessionID: "session-terminal-retry",
+		RuntimeName: executor.NameStandalone, Status: v1.AgentStatusRunning,
+	}))
+
+	err := mgr.StopAgentWithReason(context.Background(), "exec-terminal-retry", "idle cleanup", false)
+	require.Error(t, err, "the caller should observe the initial persistence failure")
+
+	require.Eventually(t, func() bool {
+		_, exists := mgr.executionStore.Get("exec-terminal-retry")
+		return !exists
+	}, time.Second, time.Millisecond)
+	require.NoError(t, mgr.Stop())
+	require.GreaterOrEqual(t, atomic.LoadInt32(&writer.statusCalls), int32(2), "terminal persistence must retry")
+	require.Len(t, bus.PublishedEvents, 1)
+	require.Equal(t, events.AgentStopped, bus.PublishedEvents[0].Type)
+}
+
+func TestStopAgentWithReasonDiscardsRotatedTerminalStatus(t *testing.T) {
+	mgr := newTestManager(t)
+	mgr.SetExecutorRunningWriter(&executionCASStatusWriter{statusErr: models.ErrExecutionRotated})
+	require.NoError(t, mgr.executionStore.Add(&AgentExecution{
+		ID: "exec-superseded-stop", SessionID: "session-superseded-stop", Status: v1.AgentStatusRunning,
+	}))
+
+	require.NoError(t, mgr.StopAgentWithReason(
+		context.Background(), "exec-superseded-stop", "replacement already won", true,
+	))
+	_, exists := mgr.executionStore.Get("exec-superseded-stop")
+	require.False(t, exists)
+	require.Empty(t, mgr.eventBus.(*MockEventBus).PublishedEvents)
+}
+
 type retryableStopBackend struct {
 	MockExecutor
 	stopErr error
+}
+
+type retryTerminalStatusWriter struct {
+	captureExecutorRunningWriter
+	failuresRemaining int32
+	statusCalls       int32
+}
+
+func (w *retryTerminalStatusWriter) UpdateExecutorRunningStatus(_ context.Context, _ string, _ string) error {
+	atomic.AddInt32(&w.statusCalls, 1)
+	return errors.New("transient terminal persistence failure")
+}
+
+func (w *retryTerminalStatusWriter) UpdateExecutorRunningStatusIfCurrent(
+	_ context.Context, _ string, _ string, _ string,
+) error {
+	atomic.AddInt32(&w.statusCalls, 1)
+	if atomic.AddInt32(&w.failuresRemaining, -1) >= 0 {
+		return errors.New("transient terminal persistence failure")
+	}
+	return nil
 }
 
 func (b *retryableStopBackend) StopInstance(context.Context, *ExecutorInstance, bool) error {
