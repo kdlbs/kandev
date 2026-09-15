@@ -138,12 +138,12 @@ func (a pluginsTaskMessengerAdapter) startOrPromptSession(ctx context.Context, t
 // interface): it starts a never-launched session or prompts/resumes an idle
 // one, exactly like startOrPromptSession, but records the user message with
 // a caller-supplied idempotencyID via CreateMessageIdempotent instead of
-// always minting a new one. When the message row already exists, the method
-// returns a non-dispatching status inferred from the session's current state;
-// it does not attempt to reproduce the original response status, and it never
-// dispatches the runtime twice. The caller (AgentConversationService) has
-// already confirmed the session is not RUNNING/STARTING before calling this —
-// session is passed in rather than re-resolved.
+// always minting a new one. A durable occurrence claim means a successful
+// dispatch never reaches this method twice. An existing message row therefore
+// identifies a failed marker compensation; it is removed before retrying the
+// runtime delivery. The caller (AgentConversationService) has already
+// confirmed the session is not RUNNING/STARTING before calling this — session
+// is passed in rather than re-resolved.
 func (a pluginsTaskMessengerAdapter) StartOrPromptIdempotent(ctx context.Context, taskID string, session *taskmodels.TaskSession, text, source, idempotencyID string) (string, error) {
 	// A committed row for this id means another caller already recorded this
 	// occurrence. Normally the durable occurrence claim prevents this path
