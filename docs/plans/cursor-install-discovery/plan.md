@@ -123,6 +123,11 @@ Added `local_agent_service_path_test.go` with a generated non-root LaunchDaemon
 fixture, actual discovery/execution, and failed/invalid account lookup coverage.
 Regular launches retain final child HOME precedence.
 
+Claude's delayed summary suggestion is addressed with a comment on
+`launchdServicePath` explaining that runtime normalization supplies the user
+executable directory because launchd has no home-directory specifier. This
+clarification changes no executable behavior.
+
 CodeRabbit's summary suggestion is addressed by documenting the usable absolute
 home condition in the requirement and public CLI guide.
 
