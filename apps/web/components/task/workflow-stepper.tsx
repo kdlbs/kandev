@@ -17,6 +17,8 @@ import {
   usePresentationToken,
   useWorkflowStepMove,
 } from "@/hooks/domains/kanban/use-workflow-step-move";
+import { useWorkflowMovePreview } from "@/hooks/domains/kanban/use-workflow-move-preview";
+import { useWorkflowMovePreviewRevision } from "@/hooks/domains/kanban/use-workflow-move-preview-revision";
 import {
   useWorkflowStepProgress,
   type WorkflowStepProgress,
@@ -35,6 +37,7 @@ import {
 } from "./workflow-step-progress-details";
 import { StepCircleIndicator } from "./workflow-step-marker";
 import { useHoverPopover } from "@/components/integrations/use-hover-popover";
+import { WorkflowMovePreviewDisclosure } from "./workflow-move-preview";
 
 type Step = WorkflowStepperStep;
 
@@ -232,6 +235,8 @@ function WorkflowStepItem({
           isCurrent={isCurrent}
           canMove={canMove}
           isMoving={movingToStepId === step.id}
+          taskId={taskId}
+          workflowId={workflowId}
           progress={progress}
           agentLabelsByProfileId={agentLabelsByProfileId}
           onMove={onMove}
@@ -258,6 +263,8 @@ function StepHoverContent({
   isCurrent,
   canMove,
   isMoving,
+  taskId,
+  workflowId,
   progress,
   agentLabelsByProfileId,
   onMove,
@@ -267,6 +274,8 @@ function StepHoverContent({
   isCurrent: boolean;
   canMove: boolean;
   isMoving: boolean;
+  taskId?: string | null;
+  workflowId?: string | null;
   progress?: WorkflowStepProgress;
   agentLabelsByProfileId: Readonly<Record<string, string>>;
   onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
@@ -289,7 +298,16 @@ function StepHoverContent({
       onBlurCapture={hover.onContentLeave}
       onOpenAutoFocus={(event) => event.preventDefault()}
     >
-      {canMove && <StepMoveControls step={step} isMoving={isMoving} onMove={onMove} />}
+      {canMove && (
+        <StepMoveControls
+          step={step}
+          taskId={taskId}
+          workflowId={workflowId}
+          previewEnabled={hover.open}
+          isMoving={isMoving}
+          onMove={onMove}
+        />
+      )}
       {isCurrent && (
         <div className="text-[11px] text-muted-foreground">{t("task:currentStep")}</div>
       )}
@@ -315,25 +333,42 @@ function StepHoverContent({
  */
 function StepMoveControls({
   step,
+  taskId,
+  workflowId,
+  previewEnabled,
   isMoving,
   onMove,
 }: {
   step: Step;
+  taskId?: string | null;
+  workflowId?: string | null;
+  previewEnabled: boolean;
   isMoving: boolean;
   onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
 }) {
   const { t } = useTranslation();
   const [showOptions, setShowOptions] = useState(false);
   const { draft, patchDraft } = useWorkflowMoveOptionsForm();
+  const entryOptions = workflowMoveOptionsPayload(draft);
+  const invalidationKey = useWorkflowMovePreviewRevision(taskId, workflowId, step.id);
+  const previewState = useWorkflowMovePreview({
+    taskId,
+    workflowId,
+    workflowStepId: step.id,
+    entryOptions,
+    enabled: previewEnabled,
+    invalidationKey,
+  });
 
   return (
     <div className="flex w-full flex-col items-stretch gap-1.5">
+      <WorkflowMovePreviewDisclosure state={previewState} isTouchSurface={false} />
       <Button
         size="sm"
         variant="default"
         className="cursor-pointer text-xs h-6 px-2.5 rounded-sm"
         disabled={isMoving}
-        onClick={() => void onMove(step.id, workflowMoveOptionsPayload(draft))}
+        onClick={() => void onMove(step.id, entryOptions)}
         data-testid="workflow-step-move-here"
       >
         <IconArrowRight className="h-3 w-3" />

@@ -48,6 +48,17 @@ Workflow position and runtime state are different. Moving a card changes its wor
 
 During a move and while the destination agent is preparing or starting, the destination marker shows a spinner in the existing marker space. Open the existing step disclosure to see the lifecycle status and agent profile. On touch devices, these details appear in the existing **Move to** Drawer. A destination without auto-start settles after the move and remains available for a later agent start.
 
+Before an allowed move, the step disclosure can show a compact preview of the
+recipient and effective model. It identifies whether the move reuses the
+current session, reuses another named session, creates a new session, or leaves
+the task idle without a recipient when the destination has no launch turn. The
+second line shows the current model or an expected model change and counts
+additional settings changes. Open **Details** for the session, profile, model,
+context reset, source-session disposition, and prompt dispatch information.
+The preview is advisory. **Move here** checks routing, permissions, WIP, and
+current session state again when the move runs. A preview can therefore change
+while a turn is running or while another session becomes available.
+
 ## Move a task with one-time entry options
 
 The normal **Move here** and next-step actions use the destination step's saved workflow defaults. When one transition needs an exception, open **Move with options** from the workflow stepper, Chat status bar, or passthrough toolbar. The options apply only to that entry and never rewrite the workflow step.

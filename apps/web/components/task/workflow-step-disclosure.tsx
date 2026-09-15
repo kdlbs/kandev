@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  forwardRef,
-  useEffect,
-  useState,
-  type ComponentPropsWithoutRef,
-  type ReactNode,
-} from "react";
+import { forwardRef, useEffect, type ComponentPropsWithoutRef, type ReactNode } from "react";
 import { cn } from "@kandev/ui/lib/utils";
 import {
   Drawer,
@@ -22,7 +16,6 @@ import { StepCapabilityIcons } from "@/components/step-capability-icons";
 import { useTouchDrawer } from "@/hooks/use-compact-task-chrome";
 import type { KanbanStepEvents } from "@/lib/state/slices/kanban/types";
 import type { WorkflowMoveEntryOptions } from "@/lib/api/domains/kanban-api";
-import { WorkflowMoveOptionsFields, useWorkflowMoveOptionsForm } from "./workflow-move-options";
 import {
   useCompactWorkflowDisclosure,
   type CompactWorkflowDisclosureControls,
@@ -33,8 +26,8 @@ import {
   workflowStepProgressTranslationKey,
 } from "./workflow-step-progress-details";
 import { StepCircleIndicator } from "./workflow-step-marker";
-import { StepDisclosureRowActions } from "./workflow-step-disclosure-actions";
 import { useTranslation } from "react-i18next";
+import { StepDisclosureMoveControls } from "./workflow-step-disclosure-move-controls";
 
 /** Move callback shared by every compact-disclosure surface. A revealed,
  * filled options draft rides along as one-shot `entry_options`. */
@@ -454,6 +447,9 @@ function StepDisclosureBody({
             isMoving={movingToStepId === step.id}
             movePending={movingToStepId !== null}
             isTouchSurface={isTouchSurface}
+            taskId={taskId}
+            workflowId={workflowId}
+            previewEnabled={canMove}
             progress={progressByStepId[step.id]}
             agentLabelsByProfileId={agentLabelsByProfileId}
             onMove={onMove}
@@ -480,6 +476,9 @@ function StepDisclosureRow({
   isMoving,
   movePending,
   isTouchSurface,
+  taskId,
+  workflowId,
+  previewEnabled,
   progress,
   agentLabelsByProfileId,
   onMove,
@@ -491,14 +490,14 @@ function StepDisclosureRow({
   isMoving: boolean;
   movePending: boolean;
   isTouchSurface: boolean;
+  taskId: string;
+  workflowId: string;
+  previewEnabled: boolean;
   progress?: WorkflowStepProgress;
   agentLabelsByProfileId: Readonly<Record<string, string>>;
   onMove: DisclosureMove;
 }) {
   const { t } = useTranslation();
-  const [showOptions, setShowOptions] = useState(false);
-  const { draft, patchDraft } = useWorkflowMoveOptionsForm();
-  const buttonSizeClass = isTouchSurface ? "h-11" : "h-7 [@media(pointer:coarse)]:h-11";
 
   return (
     <div
@@ -529,21 +528,20 @@ function StepDisclosureRow({
           <span className="shrink-0 text-[11px] text-muted-foreground">
             {t("task:currentStep")}
           </span>
-        ) : (
-          canMove && (
-            <StepDisclosureRowActions
-              stepId={step.id}
-              isMoving={isMoving}
-              movePending={movePending}
-              showOptions={showOptions}
-              buttonSizeClass={buttonSizeClass}
-              draft={draft}
-              onToggleOptions={() => setShowOptions((value) => !value)}
-              onMove={onMove}
-            />
-          )
-        )}
+        ) : null}
       </div>
+      {canMove && !isCurrent && (
+        <StepDisclosureMoveControls
+          stepId={step.id}
+          taskId={taskId}
+          workflowId={workflowId}
+          isMoving={isMoving}
+          movePending={movePending}
+          isTouchSurface={isTouchSurface}
+          previewEnabled={previewEnabled}
+          onMove={onMove}
+        />
+      )}
       {progress && (
         <StepProgressDetails
           progress={progress}
@@ -551,20 +549,6 @@ function StepDisclosureRow({
           agentLabelsByProfileId={agentLabelsByProfileId}
           testId={`workflow-step-progress-${step.id}`}
         />
-      )}
-      {canMove && !isCurrent && showOptions && (
-        <div
-          className="pb-1 pl-4 pr-1"
-          onKeyDown={(event) => event.stopPropagation()}
-          data-testid={`workflow-step-disclosure-options-panel-${step.id}`}
-        >
-          <WorkflowMoveOptionsFields
-            draft={draft}
-            onDraftChange={patchDraft}
-            isTouchSurface={isTouchSurface}
-            instructionsRows={3}
-          />
-        </div>
       )}
     </div>
   );

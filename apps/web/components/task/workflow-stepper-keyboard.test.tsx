@@ -3,9 +3,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { moveTask } from "@/lib/api";
 import { WorkflowStepper, type WorkflowStepperStep } from "./workflow-stepper";
 
-const { appStoreState, moveTaskMock } = vi.hoisted(() => ({
+const { appStoreState, moveTaskMock, previewWorkflowMoveMock } = vi.hoisted(() => ({
   moveTaskMock: vi.fn(),
+  previewWorkflowMoveMock: vi.fn().mockResolvedValue(undefined),
   appStoreState: {
+    connection: { status: "connected", error: null, issueSeverity: "none" },
+    workspaceContextGeneration: 1,
+    workflows: { items: [], activeId: null },
     tasks: { activeSessionId: null },
     chatInput: { planModeBySessionId: {} },
     kanban: {
@@ -19,14 +23,17 @@ const { appStoreState, moveTaskMock } = vi.hoisted(() => ({
     },
     kanbanMulti: { snapshots: {} },
     taskSessions: { items: {} },
-    taskSessionsByTask: { itemsByTaskId: {} },
+    taskSessionsByTask: { itemsByTaskId: {}, loadedByTaskId: {} },
     agentProfiles: { items: [] },
     setPlanMode: vi.fn(),
     setActiveDocument: vi.fn(),
   },
 }));
 
-vi.mock("@/lib/api", () => ({ moveTask: moveTaskMock }));
+vi.mock("@/lib/api", () => ({
+  moveTask: moveTaskMock,
+  previewWorkflowMove: previewWorkflowMoveMock,
+}));
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof appStoreState) => unknown) => selector(appStoreState),
