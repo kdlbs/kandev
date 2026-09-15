@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import html2canvas from "html2canvas";
+import html2canvas from "html2canvas-pro";
 import { useAppStore } from "@/components/state-provider";
 import { usePreviewFeedback } from "@/hooks/domains/comments/use-preview-feedback";
 import { deleteAttachment, uploadAttachment } from "@/lib/api/domains/attachment-api";

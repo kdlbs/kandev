@@ -38,7 +38,7 @@ const attachments = vi.hoisted(() => ({
 vi.mock("@/lib/api/domains/attachment-api", () => attachments);
 
 const html2canvas = vi.hoisted(() => vi.fn());
-vi.mock("html2canvas", () => ({ default: html2canvas }));
+vi.mock("html2canvas-pro", () => ({ default: html2canvas }));
 
 const bridge = vi.hoisted(() => ({
   sendSetPreviewCaptureMode: vi.fn(),
