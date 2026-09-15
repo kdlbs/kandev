@@ -1,0 +1,23 @@
+{
+  "tabLabel": "History",
+  "emptyTitle": "No history in {{workspace}}.",
+  "emptyTitleUnnamedWorkspace": "No history in this workspace.",
+  "emptyDescription": "This tab lists questions an agent asked that nobody answered: superseded by later work, left behind when a session ended, or unreadable. It is read-only audit evidence, not a queue to clear.",
+  "errorTitle": "Could not load history",
+  "errorDescription": "Something went wrong loading the questions in this workspace's history.",
+  "retry": "Retry",
+  "reasonSuperseded": "Superseded by later work",
+  "reasonSessionEnded": "Session ended without an answer",
+  "reasonUnreadable": "Could not be read",
+  "clarificationLabel": "Clarification question",
+  "permissionLabel": "Permission request",
+  "noContent": "This question could not be read.",
+  "openTask": "Open task",
+  "copyId": "Copy identifier",
+  "copyIdSuccess": "Copied the bundle identifier.",
+  "copyIdFailed": "Could not copy the bundle identifier.",
+  "turnAsked": "Asked in turn {{turn}}",
+  "turnSupersededBy": "Asked in turn {{askingTurn}}, superseded by turn {{supersedingTurn}}",
+  "stepStartsNoAgent": "This task's current step will not start an agent.",
+  "truncatedNotice": "Showing the oldest questions first. More are waiting."
+}

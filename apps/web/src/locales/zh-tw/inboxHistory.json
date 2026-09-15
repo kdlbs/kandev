@@ -1,0 +1,23 @@
+{
+  "tabLabel": "歷史記錄",
+  "emptyTitle": "{{workspace}}中沒有歷史記錄。",
+  "emptyTitleUnnamedWorkspace": "此工作區中沒有歷史記錄。",
+  "emptyDescription": "此標籤列出了代理提出但無人回答的問題：因後續工作被取代、工作階段結束時被遺留，或無法讀取。這是隻讀的審計證據，不是待清理的佇列。",
+  "errorTitle": "無法載入歷史記錄",
+  "errorDescription": "載入此工作區歷史記錄中的問題時出錯。",
+  "retry": "重試",
+  "reasonSuperseded": "已被後續工作取代",
+  "reasonSessionEnded": "工作階段結束時未獲回答",
+  "reasonUnreadable": "無法讀取",
+  "clarificationLabel": "澄清問題",
+  "permissionLabel": "權限請求",
+  "noContent": "無法讀取此問題。",
+  "openTask": "開啟任務",
+  "copyId": "複製識別符號",
+  "copyIdSuccess": "已複製該批次的識別符號。",
+  "copyIdFailed": "無法複製該批次的識別符號。",
+  "turnAsked": "在第 {{turn}} 輪提出",
+  "turnSupersededBy": "在第 {{askingTurn}} 輪提出，被第 {{supersedingTurn}} 輪取代",
+  "stepStartsNoAgent": "此任務的目前步驟不會啟動代理。",
+  "truncatedNotice": "優先顯示最早的問題。還有更多正在等待。"
+}
