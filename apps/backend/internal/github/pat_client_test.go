@@ -131,8 +131,11 @@ func TestExecuteGraphQLPreservesHTTPProviderRetryDeadline(t *testing.T) {
 			if !errors.As(err, &apiErr) {
 				t.Fatalf("error = %T %v, want GitHubAPIError", err, err)
 			}
-			if apiErr.RetryAt == nil || apiErr.RetryAt.Before(now.Add(tt.minWait)) {
+			if apiErr.RetryAt.IsZero() || apiErr.RetryAt.Before(now.Add(tt.minWait)) {
 				t.Fatalf("retry deadline = %v, want at least %v", apiErr.RetryAt, now.Add(tt.minWait))
+			}
+			if deadline := apiErr.ProviderRetryAt(); deadline == nil || deadline.Before(now.Add(tt.minWait)) {
+				t.Fatalf("provider retry deadline = %v, want at least %v", apiErr.ProviderRetryAt(), now.Add(tt.minWait))
 			}
 		})
 	}
@@ -603,6 +606,51 @@ func TestPATClient_RecordsRateHeadersOnSuccess(t *testing.T) {
 	}
 }
 
+// @covers AC-INTEGRATIONS-GITHUB-RATE-001.2
+// Field regression: GitHub can reject real requests while GET /rate_limit
+// still reports a full primary bucket. A secondary refusal must not rewrite
+// that healthy primary observation as synthetic exhaustion.
+func TestPATClient_RateLimit403WithFullPrimaryPreservesPrimarySnapshot(t *testing.T) {
+	reset := time.Date(2026, 8, 29, 6, 18, 9, 0, time.UTC)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-RateLimit-Limit", "5000")
+		w.Header().Set("X-RateLimit-Remaining", "5000")
+		w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(reset.Unix(), 10))
+		w.Header().Set("X-RateLimit-Resource", "core")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"message":"API rate limit exceeded for user ID 79718216"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newPATClientPointingAt(t, srv.URL)
+	tracker := NewRateTracker(nil, nil)
+	c.WithRateTracker(tracker)
+	classificationLabel := outcomeMetricLabel(
+		"kind", string(FailureSecondaryRateLimit),
+		"resource", string(ResourceCore),
+		"retry_source", string(RetrySourceConservativeFallback),
+	)
+	classificationBefore := readOutcomeCounter(t, githubResponseClassificationsTotal, classificationLabel)
+
+	var out struct{}
+	if err := c.get(context.Background(), "/user", &out); err == nil {
+		t.Fatal("expected the provider refusal")
+	}
+	snap, ok := tracker.Snapshot(ResourceCore)
+	if !ok {
+		t.Fatal("expected core snapshot")
+	}
+	if snap.Remaining != 5000 || tracker.IsExhausted(ResourceCore) {
+		t.Fatalf("secondary refusal corrupted healthy primary snapshot: %+v", snap)
+	}
+	if wait := tracker.WaitDuration(ResourceCore); wait <= 0 {
+		t.Fatalf("secondary refusal did not establish a retry window: %s", wait)
+	}
+	if delta := readOutcomeCounter(t, githubResponseClassificationsTotal, classificationLabel) - classificationBefore; delta != 1 {
+		t.Fatalf("secondary classification counter delta = %d, want 1", delta)
+	}
+}
+
 // Regression: when a 429 carries valid X-RateLimit-Reset headers, the reset
 // time from the headers must win — not the synthetic +1h fallback in
 // markRateExhausted. Previously, recordRateHeaders called Record(snap)
@@ -641,9 +689,9 @@ func TestPATClient_RateLimit429_PreservesRealReset(t *testing.T) {
 	}
 }
 
-// When a 429 has no rate-limit headers, the synthetic 1h fallback still
-// applies so the poller pauses instead of hammering the secondary limit.
-func TestPATClient_RateLimit429_NoHeaders_UsesSyntheticReset(t *testing.T) {
+// When a 429 has no rate-limit headers, a conservative secondary window still
+// applies without corrupting the primary bucket.
+func TestPATClient_RateLimit429_NoHeaders_UsesSecondaryFallback(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte(`{"message":"abuse detection"}`))
@@ -658,12 +706,16 @@ func TestPATClient_RateLimit429_NoHeaders_UsesSyntheticReset(t *testing.T) {
 	if err := c.get(context.Background(), "/repos/o/r/pulls/1", &out); err == nil {
 		t.Fatalf("expected error from 429")
 	}
-	if !tracker.IsExhausted(ResourceCore) {
-		t.Fatalf("expected core exhausted via synthetic fallback")
+	if tracker.IsExhausted(ResourceCore) {
+		t.Fatal("secondary fallback must not exhaust core")
+	}
+	secondary := tracker.Secondary(ResourceCore)
+	if !secondary.Active || secondary.RetrySource != RetrySourceConservativeFallback {
+		t.Fatalf("secondary = %+v", secondary)
 	}
 }
 
-func TestPATClient_MarksExhaustedFromRateLimitBody(t *testing.T) {
+func TestPATClient_RecordsSecondaryFromRateLimitBody(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// No headers — secondary limits sometimes omit them entirely.
 		w.WriteHeader(http.StatusForbidden)
@@ -679,8 +731,57 @@ func TestPATClient_MarksExhaustedFromRateLimitBody(t *testing.T) {
 	if err := c.get(context.Background(), "/repos/o/r/pulls/1", &out); err == nil {
 		t.Fatalf("expected error from 403")
 	}
-	if !tracker.IsExhausted(ResourceCore) {
-		t.Fatalf("expected core exhausted from body parse")
+	if tracker.IsExhausted(ResourceCore) {
+		t.Fatal("body-only secondary signal must not exhaust core")
+	}
+	if secondary := tracker.Secondary(ResourceCore); !secondary.Active {
+		t.Fatalf("expected observed secondary throttle: %+v", secondary)
+	}
+}
+
+// @covers AC-INTEGRATIONS-GITHUB-RATE-001.5
+func TestPATClient_SuccessClearsSecondaryBeforeEstimatedRetry(t *testing.T) {
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		if requests == 1 {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"message":"secondary rate limit"}`))
+			return
+		}
+		w.Header().Set("X-RateLimit-Limit", "5000")
+		w.Header().Set("X-RateLimit-Remaining", "5000")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"login":"yattdev"}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	c := newPATClientPointingAt(t, srv.URL)
+	tracker := NewRateTracker(nil, nil)
+	c.WithRateTracker(tracker)
+	recoveryLabel := outcomeMetricLabel(
+		"resource", string(ResourceCore),
+		"retry_source", string(RetrySourceConservativeFallback),
+		"early", "true",
+	)
+	recoveryBefore := readOutcomeCounter(t, githubSecondaryRecoveriesTotal, recoveryLabel)
+	var out struct {
+		Login string `json:"login"`
+	}
+	if err := c.get(context.Background(), "/user", &out); err == nil {
+		t.Fatal("expected first request to be throttled")
+	}
+	if !tracker.Secondary(ResourceCore).Active {
+		t.Fatal("secondary state was not recorded")
+	}
+	if err := c.get(context.Background(), "/user", &out); err != nil {
+		t.Fatalf("successful retry: %v", err)
+	}
+	if secondary := tracker.Secondary(ResourceCore); secondary.Active {
+		t.Fatalf("successful response did not clear secondary state: %+v", secondary)
+	}
+	if delta := readOutcomeCounter(t, githubSecondaryRecoveriesTotal, recoveryLabel) - recoveryBefore; delta != 1 {
+		t.Fatalf("secondary recovery counter delta = %d, want 1", delta)
 	}
 }
 

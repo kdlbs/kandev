@@ -3,6 +3,8 @@ package workflowsync
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
+	"errors"
 	"testing"
 	"time"
 
@@ -10,6 +12,9 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/kandev/kandev/internal/db/dialect"
+	"github.com/kandev/kandev/internal/github"
 )
 
 func setupTestStore(t *testing.T) *Store {
@@ -92,6 +97,25 @@ func TestStore_RecordSyncStatusRoundtrip(t *testing.T) {
 	assert.Equal(t, "hash-2", cfg.LastHash)
 }
 
+func TestStore_RecordSyncStatusBindsRecoveryResetTypes(t *testing.T) {
+	rawDB, err := sql.Open("workflowsync-record-status-args", "")
+	require.NoError(t, err)
+	db := sqlx.NewDb(rawDB, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+	store := &Store{db: db, ro: db}
+
+	err = store.RecordSyncStatus(
+		context.Background(),
+		"ws-1",
+		true,
+		"",
+		nil,
+		"hash-1",
+		time.Date(2026, 8, 29, 7, 0, 0, 0, time.UTC),
+	)
+	require.NoError(t, err)
+}
+
 func TestStore_ListConfigs(t *testing.T) {
 	store := setupTestStore(t)
 	ctx := context.Background()
@@ -136,4 +160,100 @@ func TestStore_PollEnabledRoundtrip(t *testing.T) {
 	cfg, err = store.UpsertConfigForWorkspace(ctx, "ws-1", req)
 	require.NoError(t, err)
 	assert.False(t, cfg.PollEnabled)
+}
+
+func TestStore_WorkflowSyncRecoveryColumnsExist(t *testing.T) {
+	store := setupTestStore(t)
+	rows, err := store.db.Query(`PRAGMA table_info(workflow_sync_configs)`)
+	require.NoError(t, err)
+	defer func() { _ = rows.Close() }()
+	columns := map[string]bool{}
+	for rows.Next() {
+		var cid, notNull, primaryKey int
+		var name, columnType string
+		var defaultValue any
+		require.NoError(t, rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey))
+		columns[name] = true
+	}
+	require.NoError(t, rows.Err())
+	for _, name := range []string{
+		"consecutive_failures", "next_attempt_at", "last_error_class",
+		"poll_suspended", "poll_suspension_reason",
+	} {
+		assert.True(t, columns[name], "missing workflow-sync recovery column %s", name)
+	}
+}
+
+func TestStore_RecordSyncFailureRoundtripAndConfigSaveReset(t *testing.T) {
+	store := setupTestStore(t)
+	ctx := context.Background()
+	_, err := store.UpsertConfigForWorkspace(ctx, "ws-1", testRequest())
+	require.NoError(t, err)
+	now := time.Date(2026, 8, 29, 7, 0, 0, 0, time.UTC)
+	nextAttempt := now.Add(5 * time.Minute)
+	require.NoError(t, store.RecordSyncFailure(ctx, "ws-1", "rate limited", failureDirective{
+		class: string(github.FailureSecondaryRateLimit), consecutive: 3,
+		nextAttemptAt: &nextAttempt,
+		suspended:     true,
+	}, now))
+
+	cfg, err := store.GetConfigForWorkspace(ctx, "ws-1")
+	require.NoError(t, err)
+	assert.Equal(t, 3, cfg.ConsecutiveFailures)
+	require.NotNil(t, cfg.NextAttemptAt)
+	assert.Equal(t, nextAttempt, *cfg.NextAttemptAt)
+	assert.Equal(t, string(github.FailureSecondaryRateLimit), cfg.LastErrorClass)
+	assert.True(t, cfg.PollSuspended)
+
+	cfg, err = store.UpsertConfigForWorkspace(ctx, "ws-1", testRequest())
+	require.NoError(t, err)
+	assert.Zero(t, cfg.ConsecutiveFailures)
+	assert.Nil(t, cfg.NextAttemptAt)
+	assert.Empty(t, cfg.LastErrorClass)
+	assert.False(t, cfg.PollSuspended)
+	assert.Empty(t, cfg.PollSuspensionReason)
+}
+
+func TestSchemaSQLForDriverRendersBooleanDefaultsForPostgres(t *testing.T) {
+	schema := "poll_suspended BOOLEAN NOT NULL DEFAULT 0, next_attempt_at DATETIME"
+	assert.Equal(t,
+		"poll_suspended BOOLEAN NOT NULL DEFAULT FALSE, next_attempt_at TIMESTAMPTZ",
+		schemaSQLForDriver(schema, dialect.PGX),
+	)
+}
+
+func init() {
+	sql.Register("workflowsync-record-status-args", recordStatusArgDriver{})
+}
+
+type recordStatusArgDriver struct{}
+
+func (recordStatusArgDriver) Open(string) (driver.Conn, error) {
+	return recordStatusArgConn{}, nil
+}
+
+type recordStatusArgConn struct{}
+
+func (recordStatusArgConn) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("prepare is not supported")
+}
+
+func (recordStatusArgConn) Close() error {
+	return nil
+}
+
+func (recordStatusArgConn) Begin() (driver.Tx, error) {
+	return nil, errors.New("transactions are not supported")
+}
+
+func (recordStatusArgConn) ExecContext(_ context.Context, _ string, args []driver.NamedValue) (driver.Result, error) {
+	if _, ok := args[8].Value.(bool); !ok {
+		return nil, errors.New("poll_suspended reset argument must be bool")
+	}
+	switch args[9].Value.(type) {
+	case int64:
+		return driver.RowsAffected(1), nil
+	default:
+		return nil, errors.New("poll_suspension_reason reset argument must be integer")
+	}
 }

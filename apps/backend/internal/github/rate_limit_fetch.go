@@ -36,11 +36,12 @@ func recordRateLimitResources(tracker *RateTracker, resources rateLimitResources
 			return
 		}
 		tracker.Record(RateSnapshot{
-			Resource:  resource,
-			Limit:     bucket.Limit,
-			Remaining: bucket.Remaining,
-			ResetAt:   time.Unix(bucket.Reset, 0).UTC(),
-			UpdatedAt: now,
+			Resource:          resource,
+			Limit:             bucket.Limit,
+			Remaining:         bucket.Remaining,
+			RemainingObserved: true,
+			ResetAt:           time.Unix(bucket.Reset, 0).UTC(),
+			UpdatedAt:         now,
 		})
 	}
 	record(ResourceCore, resources.Core)
