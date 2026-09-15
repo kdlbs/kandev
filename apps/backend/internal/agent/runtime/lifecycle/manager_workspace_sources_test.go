@@ -168,6 +168,8 @@ func TestRebindWorkspaceForSessionCreatesNewSessionWhenProviderCannotChangeResum
 func TestRebindWorkspaceForSessionRestoresExistingACPSessionAfterStrictModelRestoreFailure(t *testing.T) {
 	server := newWorkspaceRebindAgentctlServer(t, false)
 	mgr, execution := workspaceSourceTestManager(t, server.URL, []string{"/old"})
+	mgr.profileResolver = &restartProfileResolver{profile: &AgentProfileInfo{RequireExactModel: true}}
+	execution.AgentProfileID = "profile-1"
 	t.Cleanup(server.Close)
 	t.Cleanup(server.closeConnections)
 	mgr.registry = registry.NewRegistry(newTestLogger())
