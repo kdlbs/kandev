@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { StateProvider } from "@/components/state-provider";
 import { SettingsSaveProvider, useSettingsSaveContributor } from "./settings-save-provider";
-import { resolveAgentModelConfig } from "@/lib/api/domains/settings-api";
+import { fetchDynamicModels, resolveAgentModelConfig } from "@/lib/api/domains/settings-api";
 import { __resetModelConfigResolutionCache } from "@/hooks/domains/settings/use-dynamic-models";
 import { ProfileFormFields, type ProfileFormData } from "./profile-form-fields";
 import type { ModelConfig } from "@/lib/types/http";
@@ -225,6 +225,28 @@ describe("ProfileFormFields no-silent-model-fallback rows", () => {
 });
 
 describe("ProfileFormFields model options", () => {
+  it("uses a free-text model input for an OpenAI-compatible provider", async () => {
+    __resetModelConfigResolutionCache();
+    vi.mocked(fetchDynamicModels).mockClear();
+    vi.mocked(resolveAgentModelConfig).mockClear();
+    const onChange = vi.fn();
+
+    renderForm(
+      formData({ provider_kind: "openai_compatible", model: "gateway-model" }),
+      { ...modelConfig, supports_dynamic_models: true },
+      onChange,
+    );
+
+    const input = screen.getByTestId("profile-model-input");
+    expect((input as HTMLInputElement).value).toBe("gateway-model");
+    fireEvent.change(input, { target: { value: "gateway-only" } });
+    expect(onChange).toHaveBeenCalledWith({ model: "gateway-only" });
+    await waitFor(() => {
+      expect(fetchDynamicModels).not.toHaveBeenCalled();
+      expect(resolveAgentModelConfig).not.toHaveBeenCalled();
+    });
+  });
+
   it("constrains a single start model field on desktop", () => {
     renderForm(formData());
 
