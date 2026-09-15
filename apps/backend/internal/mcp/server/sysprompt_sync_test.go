@@ -152,6 +152,7 @@ func TestTaskControlDocs_MatchMessageSchemaAndStopChoice(t *testing.T) {
 	}
 	assert.Contains(t, context, fmt.Sprintf(`delivery_mode="%s" or omit it`, defaultValue))
 	assert.Contains(t, context, "direct parent")
+	assert.Contains(t, context, "explicitly granted coordinator authority")
 	assert.Contains(t, context, "stop_task_kandev")
 	assert.Contains(t, context, "halt-only")
 	assert.Contains(t, context, "no replacement turn")

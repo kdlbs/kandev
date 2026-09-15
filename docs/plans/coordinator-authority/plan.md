@@ -1,0 +1,64 @@
+---
+created: 2026-08-24
+status: complete
+requirements:
+  - REQ-TASKS-COORDINATOR-AUTHORITY-001
+  - REQ-TASKS-COORDINATOR-AUTHORITY-002
+system_design:
+  - ../../specs/tasks/system-design/coordinator-task-authority.md
+---
+
+# Coordinator Task Authority Plan
+
+## Objective
+
+Deliver an explicit, revocable operator-granted capability system that allows a
+"coordinator" task to orchestrate the board — stop/interrupt unrelated tasks,
+attach workspace sources, and read documents/relations — without requiring a
+parent/child topology. Default-off, flag-gated, audited, and fail-closed.
+
+## Work Orders
+
+| #   | Area          | Description                                                                   | Done |
+| --- | ------------- | ----------------------------------------------------------------------------- | ---- |
+| 01  | Persistence   | SQLite schema, interfaces, repository, dialect parity                         | ✓    |
+| 02  | Authority     | `internal/coordinator/` central authority, capability check, flag gate, audit | ✓    |
+| 03  | Call sites    | `stop_task.go`, `handlers.go`, `task_target_access.go`, `handoff_service.go`  | ✓    |
+| 04  | Agent surface | MCP server descriptions, sysprompt injection                                  | ✓    |
+| 05  | Operator API  | Gin handlers: grant CRUD, audit query — [task-05](task-05-operator-api.md)   | ✓    |
+| 06  | Operator UI   | Settings tab: grants table, grant dialog, revoke, audit viewer — [task-06](task-06-operator-ui.md) | ✓    |
+| 07  | Docs          | Public operator docs — [task-07](task-07-docs.md)                            | ✓    |
+| 08  | Specs & Plan  | Requirements, system design, ADR, plan file                                   | ✓    |
+| 09  | Runtime QA    | Task-owned exact-head auth-enabled: grant/revoke/denied-after-revoke/audit     | ✓    |
+| 10  | CI fixup      | Frontend test fix, thread resolution, credential audit, push                   | ✓    |
+
+## Dependencies
+
+- Runtime flag `features.coordinatorTaskAuthority` must be OFF in all shipped profiles.
+- Operator API and UI are independent of each other.
+- Docs depend on having the full API surface to document.
+
+## Validation Record
+
+| Item | Evidence |
+|------|----------|
+| **PR** | https://github.com/kdlbs/kandev/pull/3048 (Draft, no merge) |
+| **Head** | `6965745b3bcfde720f14bcba5705f0dab8878b32` on `yattdev:feature/grant-coordinator-ma-nnw`, including the upstream-main reconciliation merge (conflicts resolved: repository error aliases kept from both sides, translation catalogs unioned, decisions index converted to the catalog-command format) |
+| **CI** | Backend Tests 1/2 + 2/2, Backend Static/Postgres/Postgres 18/Windows/ambient, Frontend tests/lint/build, Desktop smoke green at this head |
+| **Threads** | 0 unresolved |
+| **Mergeable** | MERGEABLE against current `main` |
+| **QA image** | `kandev-qa-auth:77fb39625` (based on exact build of commits through 77fb39625) |
+| **QA container** | `kandev-qa-auth-77fb39625` on `http://192.168.50.131:8084`, restart=unless-stopped, auth-enabled |
+| **Auth accounts** | Admin: `admin@test.local`, Member: `member@test.local` (secrets set via `/api/v1/auth/setup` and `/api/v1/users`) |
+| **Feature flag** | `KANDEV_FEATURES_COORDINATOR_TASK_AUTHORITY=true` |
+| **Grant via API** | ✅ Admin POST `workspaces/:id/coordinator-grants` → 201 |
+| **Duplicate guard** | ✅ Same scope → 409 Conflict |
+| **Member denial** | ✅ Member user POST/DELETE → 403 Forbidden |
+| **Revoke** | ✅ Admin DELETE → 200 `{"revoked":true}` |
+| **Re-create after revoke** | ✅ 201 (partial unique index `WHERE revoked_at IS NULL`) |
+| **Workflow scope** | ✅ Workflow-scoped grant created with validation |
+| **Audit DB schema** | ✅ `task_coordinator_audit_events` with principal, actor, target, cap, decision, result, deny_reason |
+| **Authority allow+audit** | ✅ `coordinator.Authority.Authorize` + `Finish` → audit `allowed, result=ok` |
+| **Authority deny+audit** | ✅ Capability mismatch → audit `denied, reason=scope_or_capability, result=ok` |
+| **Deny after revoke** | ✅ Revoke full grant, keep inspect-only → `denied, reason=scope_or_capability, result=ok` |
+| **Credential safety** | Remote URLs cleaned; token rotation recommended (was in process memory) |

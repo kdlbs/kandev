@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { getWorkspaceSettingsTabs } from "@/lib/settings/workspace-settings-tabs";
+
 import {
   buildAgentsBranch,
   buildBranchRoot,
@@ -13,6 +15,17 @@ import {
 } from "./settings-menu-branches";
 
 const WORKSPACE_ID = "ws-1";
+
+// Derive expected tabs from the source of truth, not hardcoded literals,
+// so a new tab does not need a maintenance update here.
+const EXPECTED_WORKSPACE_TAB_HREFS = getWorkspaceSettingsTabs(false, false)
+  .filter(({ tab }) => tab !== "overview")
+  .map(({ tab }) => `/settings/workspaces/${WORKSPACE_ID}/${tab}`);
+
+const EXPECTED_WORKSPACE_TAB_HREFS_WITH_COORDINATORS = getWorkspaceSettingsTabs(false, true)
+  .filter(({ tab }) => tab !== "overview")
+  .map(({ tab }) => `/settings/workspaces/${WORKSPACE_ID}/${tab}`);
+
 const WORKSPACES_HREF = "/settings/workspaces";
 const EXECUTORS_HREF = "/settings/executors";
 const WORKSPACES = [{ id: WORKSPACE_ID, name: "Main Workspace" }];
@@ -81,13 +94,17 @@ describe("buildWorkspacesBranch", () => {
     const [workspace] = buildWorkspacesBranch(WORKSPACES);
 
     expect(workspace.href).toBe(`/settings/workspaces/${WORKSPACE_ID}`);
-    expect(hrefsOf(workspace.children ?? [])).toEqual([
-      `/settings/workspaces/${WORKSPACE_ID}/repositories`,
-      `/settings/workspaces/${WORKSPACE_ID}/workflows`,
-      `/settings/workspaces/${WORKSPACE_ID}/integrations`,
-      `/settings/workspaces/${WORKSPACE_ID}/automations`,
-      `/settings/workspaces/${WORKSPACE_ID}/secrets`,
-    ]);
+    expect(hrefsOf(workspace.children ?? [])).toEqual(EXPECTED_WORKSPACE_TAB_HREFS);
+  });
+
+  it("includes the Coordinators tab only for enabled coordinator authority", () => {
+    const [workspace] = buildWorkspacesBranch(WORKSPACES, null, undefined, [], {
+      coordinatorTaskAuthorityEnabled: true,
+    });
+
+    expect(hrefsOf(workspace.children ?? [])).toEqual(
+      EXPECTED_WORKSPACE_TAB_HREFS_WITH_COORDINATORS,
+    );
   });
 
   it("goes one level deeper for integrations, the menu's deepest branch", () => {

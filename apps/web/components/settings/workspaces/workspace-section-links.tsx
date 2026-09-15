@@ -31,6 +31,7 @@ export type SectionCounts = {
   automations?: number;
   secrets?: number;
   canvases?: number;
+  coordinators?: number;
 };
 
 // One probe per integration service; counts the ones configured/connected for
@@ -122,8 +123,11 @@ type SectionStat = {
 
 // Name and mark come from the tab table, so a tile and the tab it opens cannot
 // end up labelled or marked differently.
-function workspaceSectionStats(canvasesEnabled: boolean): SectionStat[] {
-  return getWorkspaceSettingsTabs(canvasesEnabled)
+function workspaceSectionStats(
+  canvasesEnabled: boolean,
+  coordinatorTaskAuthorityEnabled: boolean,
+): SectionStat[] {
+  return getWorkspaceSettingsTabs(canvasesEnabled, coordinatorTaskAuthorityEnabled)
     .filter(({ tab }) => tab !== "overview")
     .map(({ tab }) => ({ key: tab as keyof SectionCounts, tab }));
 }
@@ -144,7 +148,8 @@ export function WorkspaceSectionStats({
 }) {
   const { t } = useTranslation();
   const canvasesEnabled = useFeature("canvases");
-  const stats = workspaceSectionStats(canvasesEnabled);
+  const coordinatorTaskAuthorityEnabled = useFeature("coordinatorTaskAuthority");
+  const stats = workspaceSectionStats(canvasesEnabled, coordinatorTaskAuthorityEnabled);
 
   return (
     <div

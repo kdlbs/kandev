@@ -1,0 +1,19 @@
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates sqlite3 && rm -rf /var/lib/apt/lists/*
+
+COPY bin/kandev /usr/local/bin/kandev
+COPY bin/mock-agent /usr/local/bin/mock-agent
+COPY bin/agentctl /usr/local/bin/agentctl
+
+VOLUME /data
+VOLUME /tmp
+
+EXPOSE 8080
+
+ENV KANDEV_DEBUG_DEV_MODE=true
+ENV KANDEV_MOCK_AGENT=true
+ENV KANDEV_FEATURES_COORDINATOR_TASK_AUTHORITY=true
+ENV KANDEV_HOME_DIR=/data/kandev-home
+
+ENTRYPOINT ["kandev", "__backend", "-port", "8080", "-log-level", "info"]
