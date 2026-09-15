@@ -571,7 +571,10 @@ describe("provider config save payloads", () => {
     });
     const draftAgent = agentWithProfiles([baseProfile, newProfile]);
     const { callbacks } = createTestCallbacks(draftAgent);
-    vi.mocked(createAgentProfileAction).mockResolvedValue({ ...newProfile, id: PERSISTED_PROFILE_ID });
+    vi.mocked(createAgentProfileAction).mockResolvedValue({
+      ...newProfile,
+      id: PERSISTED_PROFILE_ID,
+    });
 
     await saveExistingAgent(draftAgent, savedAgent, false, callbacks);
 
