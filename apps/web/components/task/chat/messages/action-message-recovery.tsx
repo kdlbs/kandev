@@ -25,6 +25,7 @@ export function sessionRecoveryAction(action: MessageAction): SessionRecoveryAct
     case "resume":
     case "resume_new_branch":
     case "continue_from_history":
+    case "retry_connection":
     case "fresh_start":
     case "runtime_retry":
     case "relocate_and_resume":
@@ -43,6 +44,7 @@ function recoveryActionLabel(
   if (action === "resume_new_branch") return t("task:continueOnNewBranch");
   if (action === "relocate_and_resume") return t("task:managedCloneRelocateResume");
   if (action === "continue_from_history") return t("task:continueFromHistory");
+  if (action === "retry_connection") return t("task:retryConnection");
   return t("chat:managedRuntimeRetry");
 }
 
@@ -57,6 +59,21 @@ function recoveryActionTooltip(action: MessageAction, t: ReturnType<typeof useTr
     default:
       return action.tooltip;
   }
+}
+
+function addHistoryContinuationChoice(
+  choices: RecoveryChoice[],
+  enabled: boolean,
+  onContinueFromHistory: () => void,
+  label: string,
+) {
+  if (!enabled || choices.some((choice) => choice.kind === "continue_from_history")) return;
+  choices.push({
+    kind: "continue_from_history",
+    label,
+    testId: "recovery-continue-from-history-button",
+    onClick: onContinueFromHistory,
+  });
 }
 
 function buildRecoveryChoices({
@@ -131,13 +148,12 @@ function buildRecoveryChoices({
       testId: "recovery-new-branch-button",
       onClick: onNewBranch,
     });
-  if (!managedCloneRecoveryStamp && continuationDetails)
-    choices.push({
-      kind: "continue_from_history",
-      label: t("task:continueFromHistory"),
-      testId: "recovery-continue-from-history-button",
-      onClick: onContinueFromHistory,
-    });
+  addHistoryContinuationChoice(
+    choices,
+    !managedCloneRecoveryStamp && Boolean(continuationDetails),
+    onContinueFromHistory,
+    t("task:continueFromHistory"),
+  );
   return choices;
 }
 

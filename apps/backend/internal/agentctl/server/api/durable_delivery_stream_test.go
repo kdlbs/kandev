@@ -37,16 +37,21 @@ func TestLoadAgentStreamReplayAddsTransportCursor(t *testing.T) {
 		t.Fatalf("marshal event: %v", err)
 	}
 	if _, err := deliveryJournal.Append(context.Background(), journal.Event{
-		SessionID:     "session-1",
-		IncarnationID: "session-1",
-		StreamID:      "session-1",
-		Type:          adapter.EventTypeMessageChunk,
-		Payload:       payload,
+		SessionID:         "session-1",
+		IncarnationID:     "session-1",
+		HarnessGeneration: 1,
+		StreamID:          "session-1",
+		Type:              adapter.EventTypeMessageChunk,
+		Payload:           payload,
 	}); err != nil {
 		t.Fatalf("append event: %v", err)
 	}
 
-	replay, err := NewServer(cfg, procMgr, nil, nil, log).loadAgentStreamReplay(context.Background(), 0)
+	var replay []adapter.AgentEvent
+	_, err = NewServer(cfg, procMgr, nil, nil, log).replayAgentStream(context.Background(), 0, func(notification adapter.AgentEvent) error {
+		replay = append(replay, notification)
+		return nil
+	})
 	if err != nil {
 		t.Fatalf("load replay: %v", err)
 	}
@@ -55,6 +60,88 @@ func TestLoadAgentStreamReplayAddsTransportCursor(t *testing.T) {
 	}
 	if replay[0].DeliveryStreamID != "session-1" || replay[0].DeliverySequence != 1 {
 		t.Fatalf("replay cursor = %q/%d", replay[0].DeliveryStreamID, replay[0].DeliverySequence)
+	}
+}
+
+func TestAgentStreamReplayMultiplePages(t *testing.T) {
+	server, _, deliveryJournal := newDurableDeliveryTestServer(t)
+	ctx := context.Background()
+	const eventCount = 2501
+	for i := 0; i < eventCount; i++ {
+		payload, err := json.Marshal(adapter.AgentEvent{Type: adapter.EventTypeMessageChunk, Text: "replayed"})
+		if err != nil {
+			t.Fatalf("marshal event %d: %v", i+1, err)
+		}
+		if _, err := deliveryJournal.Append(ctx, journal.Event{
+			SessionID: "session-1", IncarnationID: "session-1", HarnessGeneration: 1,
+			StreamID: "session-1", Type: adapter.EventTypeMessageChunk, Payload: payload,
+		}); err != nil {
+			t.Fatalf("append event %d: %v", i+1, err)
+		}
+	}
+
+	sequences := make([]uint64, 0, eventCount)
+	after, err := server.replayAgentStream(ctx, 0, func(notification adapter.AgentEvent) error {
+		sequences = append(sequences, notification.DeliverySequence)
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("replay multiple pages: %v", err)
+	}
+	if after != eventCount || len(sequences) != eventCount {
+		t.Fatalf("replay cursor/count = %d/%d, want %d/%d", after, len(sequences), eventCount, eventCount)
+	}
+	for i, sequence := range sequences {
+		if sequence != uint64(i+1) {
+			t.Fatalf("sequence at index %d = %d, want %d", i, sequence, i+1)
+		}
+	}
+}
+
+func TestAgentStreamReplayLiveHandoff(t *testing.T) {
+	server, _, deliveryJournal := newDurableDeliveryTestServer(t)
+	ctx := context.Background()
+	const retainedEvents = 2501
+	for i := 0; i < retainedEvents; i++ {
+		payload, err := json.Marshal(adapter.AgentEvent{Type: adapter.EventTypeMessageChunk, Text: "replayed"})
+		if err != nil {
+			t.Fatalf("marshal event %d: %v", i+1, err)
+		}
+		if _, err := deliveryJournal.Append(ctx, journal.Event{
+			SessionID: "session-1", IncarnationID: "session-1", HarnessGeneration: 1,
+			StreamID: "session-1", Type: adapter.EventTypeMessageChunk, Payload: payload,
+		}); err != nil {
+			t.Fatalf("append event %d: %v", i+1, err)
+		}
+	}
+
+	seen := make([]uint64, 0, retainedEvents+1)
+	after, err := server.replayAgentStream(ctx, 0, func(notification adapter.AgentEvent) error {
+		seen = append(seen, notification.DeliverySequence)
+		if notification.DeliverySequence == retainedEvents {
+			payload, marshalErr := json.Marshal(adapter.AgentEvent{Type: adapter.EventTypeMessageChunk, Text: "committed during final page"})
+			if marshalErr != nil {
+				return marshalErr
+			}
+			if _, appendErr := deliveryJournal.Append(ctx, journal.Event{
+				SessionID: "session-1", IncarnationID: "session-1", HarnessGeneration: 1,
+				StreamID: "session-1", Type: adapter.EventTypeMessageChunk, Payload: payload,
+			}); appendErr != nil {
+				return appendErr
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("replay live handoff: %v", err)
+	}
+	if after != retainedEvents+1 || len(seen) != retainedEvents+1 {
+		t.Fatalf("handoff cursor/count = %d/%d, want %d/%d", after, len(seen), retainedEvents+1, retainedEvents+1)
+	}
+	for i, sequence := range seen {
+		if sequence != uint64(i+1) {
+			t.Fatalf("handoff sequence at index %d = %d, want %d", i, sequence, i+1)
+		}
 	}
 }
 

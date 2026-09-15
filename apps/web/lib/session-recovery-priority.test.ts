@@ -7,4 +7,8 @@ describe("primary recovery selection", () => {
       "continue_from_history",
     );
   });
+
+  it("prefers connection recovery before actions that submit another prompt", () => {
+    expect(selectPrimaryRecoveryAction(["resume", "retry_connection"])).toBe("retry_connection");
+  });
 });

@@ -1,13 +1,15 @@
 "use client";
 
-import { IconAlertTriangle, IconCircleCheck } from "@tabler/icons-react";
+import { useCallback, useState } from "react";
+import { IconAlertTriangle, IconCircleCheck, IconPlayerStop } from "@tabler/icons-react";
+import { Button } from "@kandev/ui/button";
 import { useTranslation } from "react-i18next";
-import { useState } from "react";
 import { NewSessionDialog } from "@/components/task/new-session-dialog";
 import { useAppStore } from "@/components/state-provider";
 import { RecoveryActions, type RecoveryChoice } from "@/components/task/recovery-actions";
 import { sanitizeSessionErrorDetails } from "@/lib/session-error-details";
 import { SessionErrorDetails } from "@/components/task/session-error-details";
+import { useSessionActions } from "@/hooks/domains/session/use-session-actions";
 import {
   useSessionRecoveryActions,
   type SessionRecoveryActions,
@@ -26,6 +28,7 @@ export type SessionStoppedBannerProps = {
   detail?: string;
   resumeLabel?: string;
   resumingLabel?: string;
+  uncertainDelivery?: boolean;
   recoveryActions?: SessionRecoveryActions;
 };
 
@@ -67,6 +70,16 @@ function useStoppedRecoveryChoices(
   }
 
   const choices: RecoveryChoice[] = [];
+  if (props.uncertainDelivery && !completed) {
+    if (props.taskId && props.sessionId)
+      choices.push({
+        kind: "retry_connection",
+        label: t("task:retryConnection"),
+        testId: "recovery-retry-connection-button",
+        onClick: () => void handleRecover("retry_connection"),
+      });
+    return choices;
+  }
   if (props.taskId && props.sessionId)
     choices.push({
       kind: "resume",
@@ -116,6 +129,55 @@ function useStoppedRecoveryChoices(
   return choices;
 }
 
+function UncertainDeliveryActions({
+  actions,
+  busyAction,
+  blocked,
+  taskId,
+  sessionId,
+}: {
+  actions: RecoveryChoice[];
+  busyAction: SessionRecoveryActions["busyAction"];
+  blocked: boolean;
+  taskId: string | null;
+  sessionId: string | null;
+}) {
+  const { t } = useTranslation();
+  const { stop } = useSessionActions({ taskId, sessionId });
+  const [stopping, setStopping] = useState(false);
+  const handleStop = useCallback(async () => {
+    setStopping(true);
+    try {
+      await stop();
+    } finally {
+      setStopping(false);
+    }
+  }, [stop]);
+
+  return (
+    <div className="mt-3 flex min-w-0 flex-col gap-2 md:flex-row md:flex-wrap md:items-center">
+      <RecoveryActions
+        actions={actions.map((action) => ({ ...action, disabled: stopping || action.disabled }))}
+        busy={busyAction !== null}
+        busyAction={busyAction}
+        blocked={blocked}
+      />
+      <Button
+        type="button"
+        variant="outline"
+        aria-label={t("task:stop")}
+        disabled={busyAction !== null || stopping || !taskId || !sessionId}
+        onClick={() => void handleStop()}
+        data-testid="recovery-stop-button"
+        className="h-auto min-h-11 w-full cursor-pointer gap-1.5 whitespace-normal md:min-h-7 md:w-auto"
+      >
+        <IconPlayerStop aria-hidden="true" className="size-3.5 shrink-0" />
+        {stopping ? t("task:stopping") : t("task:stop")}
+      </Button>
+    </div>
+  );
+}
+
 function stoppedRecoveryCause(
   actions: SessionRecoveryActions,
   t: ReturnType<typeof useTranslation>["t"],
@@ -134,11 +196,13 @@ function stoppedRecoveryCause(
 function stoppedSessionTitle(
   completed: boolean,
   managedCloneRecovery: boolean,
+  uncertainDelivery: boolean,
   message: string,
   t: ReturnType<typeof useTranslation>["t"],
 ) {
   if (managedCloneRecovery) return t("task:managedCloneRelocationTitle");
   if (completed) return t("task:sessionCompleted");
+  if (uncertainDelivery) return t("task:durableDeliveryUncertain");
   return sanitizeSessionErrorDetails(message, 240) || t("task:agentHasStopped");
 }
 
@@ -174,7 +238,13 @@ function StoppedSessionContent(
     cause,
     t,
   );
-  const title = stoppedSessionTitle(completed, managedCloneRecovery, props.message ?? "", t);
+  const title = stoppedSessionTitle(
+    completed,
+    managedCloneRecovery,
+    Boolean(props.uncertainDelivery),
+    props.message ?? "",
+    t,
+  );
   const Icon = completed ? IconCircleCheck : IconAlertTriangle;
   return (
     <>
@@ -211,15 +281,27 @@ function StoppedSessionContent(
                 {recoveryNotice}
               </p>
             )}
-            <RecoveryActions
-              actions={choices}
-              busy={busyAction !== null}
-              busyAction={busyAction}
-              blocked={blocked}
-            />
-            <SessionErrorDetails>
-              {[props.message, props.detail, recoveryError?.message].filter(Boolean).join("\n")}
-            </SessionErrorDetails>
+            {props.uncertainDelivery && !completed ? (
+              <UncertainDeliveryActions
+                actions={choices}
+                busyAction={busyAction}
+                blocked={blocked}
+                taskId={props.taskId}
+                sessionId={props.sessionId}
+              />
+            ) : (
+              <RecoveryActions
+                actions={choices}
+                busy={busyAction !== null}
+                busyAction={busyAction}
+                blocked={blocked}
+              />
+            )}
+            {!props.uncertainDelivery && (
+              <SessionErrorDetails>
+                {[props.message, props.detail, recoveryError?.message].filter(Boolean).join("\n")}
+              </SessionErrorDetails>
+            )}
           </div>
         </div>
       </div>

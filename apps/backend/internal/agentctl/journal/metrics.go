@@ -25,6 +25,7 @@ var boundedDeliveryLabels = map[string]struct{}{
 	"failed":                {},
 	"cancelled":             {},
 	"interrupted_unknown":   {},
+	"retired_submission":    {},
 	"same_hash":             {},
 	"hash_conflict":         {},
 	"cursor_expired":        {},

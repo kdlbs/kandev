@@ -134,6 +134,7 @@ function RecoveryActionIcon({ kind }: { kind: RecoveryActionKind }) {
     resume_new_branch: IconGitBranch,
     relocate_and_resume: IconFolder,
     continue_from_history: IconPlayerPlay,
+    retry_connection: IconRefresh,
     resume: IconPlayerPlay,
   };
   const Icon = icons[kind];
@@ -143,6 +144,7 @@ function RecoveryActionIcon({ kind }: { kind: RecoveryActionKind }) {
 function pendingLabel(action: RecoveryActionKind, t: ReturnType<typeof useTranslation>["t"]) {
   if (action === "restore") return t("task:restoring");
   if (action === "fresh_start") return t("task:starting");
+  if (action === "retry_connection") return t("task:retryingConnection");
   if (action === "runtime_retry") return t("task:retrying");
   return t("task:resuming");
 }

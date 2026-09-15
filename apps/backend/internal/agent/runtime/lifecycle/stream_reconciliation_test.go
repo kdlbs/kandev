@@ -67,3 +67,23 @@ func TestDisconnectMarksAcceptedPromptOutcomeUncertain(t *testing.T) {
 		t.Fatal("disconnect did not signal prompt completion")
 	}
 }
+
+func TestDeliveryOverloadMarksLegacyOutcomeUncertain(t *testing.T) {
+	execution := &AgentExecution{
+		SessionID:                "session-legacy-overload",
+		promptDoneCh:             make(chan PromptCompletionSignal, 1),
+		promptGeneration:         2,
+		startupAttemptGeneration: 1,
+	}
+	streamManager := NewStreamManager(newTestLogger(), StreamCallbacks{}, nil, nil)
+	streamManager.handleUpdatesDisconnectWithGeneration(execution, errStreamEventProcessorQueueFull, 1)
+
+	select {
+	case signal := <-execution.promptDoneCh:
+		if !signal.Uncertain || !signal.IsError {
+			t.Fatalf("overload signal = %#v, want uncertain error", signal)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("overload did not signal prompt completion")
+	}
+}

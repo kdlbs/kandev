@@ -9,7 +9,8 @@ export type SessionRecoveryAction =
   | "continue_from_history"
   | "fresh_start"
   | "runtime_retry"
-  | "relocate_and_resume";
+  | "relocate_and_resume"
+  | "retry_connection";
 
 export type SessionRecoverySettingsPolicy = "provider_restored";
 
