@@ -1,24 +1,3 @@
----
-id: "08-port-sentry"
-title: "Port Sentry onto the alert source framework"
-status: pending
-wave: 3
-depends_on:
-  - "00-issue-watch-workspace-scoping"
-  - "06-registry-ingest-and-http"
-  - "07-source-settings-ui"
-plan: "plan.md"
-requirements:
-  - REQ-INTEGRATIONS-ALERT-INGEST-002
-  - REQ-INTEGRATIONS-ALERT-INGEST-003
-acceptance_criteria:
-  - AC-INTEGRATIONS-ALERT-INGEST-003.4
-  - AC-INTEGRATIONS-ALERT-INGEST-003.5
-  - AC-INTEGRATIONS-ALERT-INGEST-003.6
-system_design:
-  - ../../specs/integrations/system-design/alert-ingest.md
----
-
 # T08: Port Sentry onto the alert source framework
 
 ## Outcome

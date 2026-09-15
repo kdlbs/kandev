@@ -1,26 +1,3 @@
----
-id: "06-registry-ingest-and-http"
-title: "Registry, ingest service and shared HTTP surface"
-status: pending
-wave: 1
-depends_on:
-  - "04-alert-model-and-descriptor"
-plan: "plan.md"
-requirements:
-  - REQ-INTEGRATIONS-ALERT-INGEST-002
-  - REQ-INTEGRATIONS-ALERT-INGEST-003
-acceptance_criteria:
-  - AC-INTEGRATIONS-ALERT-INGEST-002.1
-  - AC-INTEGRATIONS-ALERT-INGEST-002.5
-  - AC-INTEGRATIONS-ALERT-INGEST-002.6
-  - AC-INTEGRATIONS-ALERT-INGEST-002.7
-  - AC-INTEGRATIONS-ALERT-INGEST-003.4
-  - AC-INTEGRATIONS-ALERT-INGEST-003.5
-  - AC-INTEGRATIONS-ALERT-INGEST-003.6
-system_design:
-  - ../../specs/integrations/system-design/alert-ingest.md
----
-
 # T06: Registry, ingest service and shared HTTP surface
 
 ## Outcome
@@ -87,7 +64,7 @@ orchestrator path.
 
 ## Dependencies
 
-T04.
+T04, T05.
 
 ## Results
 

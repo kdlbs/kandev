@@ -1,15 +1,3 @@
----
-created: 2026-09-15
-status: in_progress
-requirements:
-  - REQ-INTEGRATIONS-ALERT-INGEST-001
-  - REQ-INTEGRATIONS-ALERT-INGEST-002
-  - REQ-INTEGRATIONS-ALERT-INGEST-003
-system_design:
-  - ../../specs/integrations/system-design/alert-ingest.md
-legacy_specs: []
----
-
 # Alert Ingest Plan
 
 ## Goal

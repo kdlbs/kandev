@@ -1,18 +1,3 @@
----
-id: "00-issue-watch-workspace-scoping"
-title: "Scope ListAllIssueWatches to the caller's workspaces in Sentry and GitLab"
-status: pending
-wave: 0
-depends_on: []
-plan: "plan.md"
-requirements:
-  - REQ-INTEGRATIONS-ALERT-INGEST-003
-acceptance_criteria:
-  - AC-INTEGRATIONS-ALERT-INGEST-003.6
-system_design:
-  - ../../specs/integrations/system-design/alert-ingest.md
----
-
 # T00: Scope ListAllIssueWatches to the caller's workspaces in Sentry and GitLab
 
 ## Outcome

@@ -1,20 +1,3 @@
----
-id: "09-datadog-source"
-title: "Datadog alert source, and measurement of the per-source cost"
-status: pending
-wave: 4
-depends_on:
-  - "08-port-sentry"
-plan: "plan.md"
-requirements:
-  - REQ-INTEGRATIONS-ALERT-INGEST-002
-acceptance_criteria:
-  - AC-INTEGRATIONS-ALERT-INGEST-002.1
-  - AC-INTEGRATIONS-ALERT-INGEST-002.6
-system_design:
-  - ../../specs/integrations/system-design/alert-ingest.md
----
-
 # T09: Datadog alert source, and measurement of the per-source cost
 
 ## Outcome

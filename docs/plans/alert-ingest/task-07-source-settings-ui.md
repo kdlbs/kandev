@@ -1,20 +1,3 @@
----
-id: "07-source-settings-ui"
-title: "Schema-driven alert source settings UI"
-status: pending
-wave: 2
-depends_on:
-  - "06-registry-ingest-and-http"
-plan: "plan.md"
-requirements:
-  - REQ-INTEGRATIONS-ALERT-INGEST-002
-acceptance_criteria:
-  - AC-INTEGRATIONS-ALERT-INGEST-002.3
-  - AC-INTEGRATIONS-ALERT-INGEST-002.4
-system_design:
-  - ../../specs/integrations/system-design/alert-ingest.md
----
-
 # T07: Schema-driven alert source settings UI
 
 ## Outcome
@@ -78,7 +61,7 @@ the descriptor; `Secret` renders masked; `Advanced` collapses.
 
 ## Dependencies
 
-T04 for the schema shape, T06 for the endpoints that serve it.
+T05 for the schema shape, T06 for the endpoints that serve it.
 
 ## Results
 
