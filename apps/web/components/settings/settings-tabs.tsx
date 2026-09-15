@@ -67,7 +67,7 @@ export function SettingsTabsList({
       aria-label={ariaLabel}
       className={cn(
         "min-w-0 max-w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
-        "h-8 max-md:h-11 [@media(pointer:coarse)]:h-11",
+        "h-auto group-data-horizontal/tabs:h-auto justify-start gap-1 border border-border/70 bg-muted/40 p-[3px]",
         className,
       )}
     >
@@ -75,7 +75,14 @@ export function SettingsTabsList({
         <TabsTrigger
           key={tab.id}
           value={tab.id}
-          className="h-7 min-w-24 flex-none cursor-pointer px-3 max-md:h-11 [@media(pointer:coarse)]:h-11"
+          className={cn(
+            "h-7 min-w-24 flex-none cursor-pointer px-3 max-md:h-11 [@media(pointer:coarse)]:h-11",
+            "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+            "data-[state=active]:border-border data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm",
+            "dark:data-[state=active]:border-foreground/15 dark:data-[state=active]:bg-muted dark:data-[state=active]:text-foreground",
+            "focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:ring-inset focus-visible:outline-none",
+            "transition-[color,background-color,border-color,box-shadow] duration-150 motion-reduce:transition-none",
+          )}
         >
           {tab.label}
         </TabsTrigger>

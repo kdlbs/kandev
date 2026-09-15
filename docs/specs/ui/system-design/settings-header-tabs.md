@@ -31,6 +31,28 @@ The page places the list in `SettingsPageHeader.tabs` and panels below the heade
 The component accepts no domain-specific tab names, network clients, or settings fields.
 
 Use the shared default segmented treatment: muted track, distinct selected surface, and visible keyboard focus.
+
+### Visual-state refinement
+
+The [visual-state repair package](../../../plans/settings-tab-visual-states/plan.md) refines the shared settings treatment.
+The shared primitive uses a faint translucent selected surface in dark mode and no inactive hover fill.
+The compiled Tailwind `data-active` variant does match Radix `data-state="active"`; selector mismatch is not the cause.
+For settings tabs, explicitly style `data-[state=active]` in `SettingsTabsList` trigger classes.
+Keep the repair local to the shared settings component. A global primitive change requires a separate consumer audit.
+
+Use a low-contrast track with a thin theme border and a 3px inset around the segments.
+The selected segment has a distinct theme surface, visible border, foreground text, and a small shadow.
+Inactive segments use readable muted text. Hover adds a subtle surface and stronger text without a selected border or shadow.
+Keyboard focus adds a ring independent of selection, because arrow keys move focus before activation.
+Use theme tokens in light and dark modes. Do not hardcode screenshot colors.
+Keep text weight stable to avoid width changes. Transition color, background, border, and shadow over 150ms.
+Disable these transitions for reduced motion. Do not animate position or add a moving indicator.
+
+Keep desktop trigger height at 28px and phone/coarse-pointer targets at least 44px.
+The track includes vertical padding and borders outside those targets rather than clipping them.
+Override the primitive horizontal group height with auto height so touch targets fit inside the track.
+Keep overflowing tabs left-aligned and horizontally scrollable. Focus and selected borders must remain visible.
+No icons, extra labels, or new routing behavior are required.
 The title/description occupies the left column. Tabs occupy the right column and align with the title.
 Actions, when supplied, follow the tabs within the right-side group.
 Below 768px, the title/description, tabs, and optional actions form successive rows.

@@ -138,3 +138,80 @@ test.describe("Settings header tabs", () => {
     );
   });
 });
+
+// @covers AC-UI-SETTINGS-HEADER-TABS-001.3/.4/.5
+for (const theme of ["light", "dark"] as const) {
+  for (const surface of [
+    { path: "data-storage", active: "Database", inactive: "Logs" },
+    { path: "storage", active: "Host", inactive: "Office retention" },
+  ]) {
+    test(`distinguishes tab visual states on ${surface.path} in ${theme}`, async ({
+      testPage,
+    }, testInfo) => {
+      await testPage.setViewportSize({ width: 1440, height: 900 });
+      await testPage.addInitScript((value) => localStorage.setItem("theme", value), theme);
+      await testPage.goto(`/settings/system/${surface.path}`);
+      await expect(testPage.locator("html")).toHaveClass(new RegExp(`(^|\\s)${theme}(\\s|$)`));
+      const active = testPage.getByRole("tab", { name: surface.active, exact: true });
+      const inactive = testPage.getByRole("tab", { name: surface.inactive, exact: true });
+      await expect(active).toHaveAttribute("aria-selected", "true");
+      await testPage.mouse.move(0, 0);
+      const inactiveBackground = await inactive.evaluate(
+        (el) => getComputedStyle(el).backgroundColor,
+      );
+      await expect
+        .poll(() => active.evaluate((el) => getComputedStyle(el).backgroundColor))
+        .not.toBe(inactiveBackground);
+      const selectedBackground = await active.evaluate(
+        (el) => getComputedStyle(el).backgroundColor,
+      );
+      expect(
+        await active.evaluate((element) => {
+          const canvas = document.createElement("canvas");
+          canvas.width = canvas.height = 1;
+          const context = canvas.getContext("2d")!;
+          context.fillStyle = getComputedStyle(element).backgroundColor;
+          context.fillRect(0, 0, 1, 1);
+          return context.getImageData(0, 0, 1, 1).data[3];
+        }),
+      ).toBe(255);
+      const inactiveBorder = await inactive.evaluate((el) => getComputedStyle(el).borderTopColor);
+      await expect
+        .poll(() => active.evaluate((el) => getComputedStyle(el).borderTopColor))
+        .not.toBe(inactiveBorder);
+      const originalBox = await inactive.boundingBox();
+      const activeBox = (await active.boundingBox())!;
+      const trackBox = (await testPage.getByRole("tablist").boundingBox())!;
+      expect(activeBox.height).toBeCloseTo(28, 0);
+      expect(activeBox.y).toBeGreaterThanOrEqual(trackBox.y + 3);
+      expect(activeBox.y + activeBox.height).toBeLessThanOrEqual(trackBox.y + trackBox.height - 3);
+
+      await inactive.hover();
+      await expect
+        .poll(() => inactive.evaluate((el) => getComputedStyle(el).backgroundColor))
+        .not.toBe(inactiveBackground);
+      await expect(active).toHaveCSS("background-color", selectedBackground);
+      await testPage.mouse.move(0, 0);
+      await expect(inactive).toHaveCSS("background-color", inactiveBackground);
+      const defaultShadow = await inactive.evaluate((el) => getComputedStyle(el).boxShadow);
+      await active.focus();
+      await active.press("ArrowRight");
+      await expect(inactive).toBeFocused();
+      await expect(inactive).toHaveAttribute("aria-selected", "false");
+      await expect
+        .poll(() => inactive.evaluate((el) => getComputedStyle(el).boxShadow))
+        .not.toBe(defaultShadow);
+      await inactive.press("Enter");
+      await expect(inactive).toHaveAttribute("aria-selected", "true");
+      await expect(inactive).toHaveCSS("background-color", selectedBackground);
+      expect((await inactive.boundingBox())!.width).toBeCloseTo(originalBox!.width, 0);
+      await testPage.emulateMedia({ reducedMotion: "reduce" });
+      await expect(inactive).toHaveCSS("transition-property", "none");
+      await testPage
+        .getByRole("tablist")
+        .screenshot({ path: testInfo.outputPath(`tabs-focus-${surface.path}-${theme}.png`) });
+      await inactive.blur();
+      await testPage.screenshot({ path: testInfo.outputPath(`tabs-${surface.path}-${theme}.png`) });
+    });
+  }
+}

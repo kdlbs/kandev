@@ -56,11 +56,13 @@ describe("SettingsTabs", () => {
     expect(screen.getByTestId(logsPanelTestId).textContent).toContain("Logs content");
   });
 
-  it("keeps desktop and touch target sizing on the shared controls", () => {
+  it("retains visited panel content when selection changes", () => {
     render(<ExampleTabs />);
-
-    expect(screen.getAllByRole("tablist")[0]?.className).toContain("h-8");
-    expect(screen.getByRole("tab", { name: databaseTabLabel }).className).toContain("h-7");
-    expect(screen.getByRole("tab", { name: databaseTabLabel }).className).toContain("h-11");
+    fireEvent.keyDown(screen.getByRole("tab", { name: logsTabLabel }), { key: "Enter" });
+    expect(screen.getByTestId(logsPanelTestId).textContent).toContain("Logs content");
+    fireEvent.keyDown(screen.getByRole("tab", { name: databaseTabLabel }), { key: "Enter" });
+    expect(screen.getByTestId(logsPanelTestId).getAttribute("aria-hidden")).toBe("true");
+    expect(screen.getByTestId(logsPanelTestId).textContent).toContain("Logs content");
+    expect(screen.getByTestId(databasePanelTestId).getAttribute("aria-hidden")).toBe("false");
   });
 });

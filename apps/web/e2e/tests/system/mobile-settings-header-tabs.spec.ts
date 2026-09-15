@@ -1,18 +1,33 @@
 import { test, expect } from "../../fixtures/test-base";
 
 test.describe("Settings header tabs on phones", () => {
-  for (const width of [767, 768]) {
-    test(`keeps the tab strip usable at the ${width}px breakpoint`, async ({ testPage }) => {
+  for (const width of [390, 767, 768, 1024]) {
+    test(`keeps touch tabs inside their track at ${width}px`, async ({ testPage }, testInfo) => {
       await testPage.setViewportSize({ width, height: 844 });
       await testPage.goto("/settings/system/data-storage?tab=logs");
 
       const tabList = testPage.getByRole("tablist", { name: "Data & Logs" });
       await expect(tabList).toBeVisible();
+      const trackBox = (await tabList.boundingBox())!;
       for (const tab of await testPage.getByRole("tab").all()) {
         const box = await tab.boundingBox();
         expect(box).not.toBeNull();
         expect(box!.height).toBeGreaterThanOrEqual(44);
+        expect(box!.y).toBeGreaterThanOrEqual(trackBox.y + 3);
+        expect(box!.y + box!.height).toBeLessThanOrEqual(trackBox.y + trackBox.height - 3);
+        expect(
+          await tab.evaluate((element) => {
+            const bounds = element.getBoundingClientRect();
+            return element.contains(
+              document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2),
+            );
+          }),
+        ).toBe(true);
       }
+      await testPage.getByRole("tab", { name: "Database", exact: true }).tap();
+      await expect(testPage.getByTestId("settings-data-storage-database")).toBeVisible();
+      await testPage.getByRole("tab", { name: "Logs", exact: true }).tap();
+      await testPage.screenshot({ path: testInfo.outputPath(`tabs-touch-${width}.png`) });
       await expect(testPage.getByTestId("customize-diagnostic-bundle")).toBeVisible();
       await expect
         .poll(() =>
