@@ -55,6 +55,7 @@ func protectedTaskMetadataUpdate(existing, requested map[string]interface{}) map
 func protectedTaskMetadataForCreate(metadata map[string]interface{}, trustedHandoff bool) map[string]interface{} {
 	created := cloneTaskMetadata(metadata)
 	delete(created, models.MetaKeyDeferredLaunch)
+	delete(created, models.MetaKeyStepHandoffCarry)
 	if !trustedHandoff {
 		delete(created, models.MetaKeyHandoffSource)
 		delete(created, models.MetaKeyHandoffs)

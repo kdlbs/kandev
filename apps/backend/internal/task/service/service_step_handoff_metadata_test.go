@@ -112,6 +112,30 @@ func TestProtectedTaskMetadataForCreateRequiresTrustedHandoff(t *testing.T) {
 	}
 }
 
+func TestProtectedTaskMetadataForCreateRejectsStepHandoffCarry(t *testing.T) {
+	metadata := map[string]interface{}{
+		"ordinary": "keep",
+		models.MetaKeyStepHandoffCarry: models.StepHandoffCarryToken{
+			Handoff: "forged handoff",
+			StepID:  "step-next",
+			Stamp:   "forged-stamp",
+		},
+	}
+
+	untrusted := protectedTaskMetadataForCreate(metadata, false)
+	if _, ok := untrusted[models.MetaKeyStepHandoffCarry]; ok {
+		t.Fatal("forged step handoff carry must not be accepted from an ordinary create call")
+	}
+	if got := untrusted["ordinary"]; got != "keep" {
+		t.Fatalf("ordinary metadata = %v, want keep", got)
+	}
+
+	trusted := protectedTaskMetadataForCreate(metadata, true)
+	if _, ok := trusted[models.MetaKeyStepHandoffCarry]; ok {
+		t.Fatal("step handoff carry is server-only and must never be set through create, trusted or not")
+	}
+}
+
 func TestUpdateTaskMetadataPreservesTaskHandoffRecords(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	ctx := context.Background()
