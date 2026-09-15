@@ -17,7 +17,7 @@ acceptance_criteria:
   - AC-AGENTS-OPENAI-COMPATIBLE-PROVIDERS-004.2
   - AC-AGENTS-OPENAI-COMPATIBLE-PROVIDERS-004.3
 system_design:
-  - docs/specs/agents/system-design/openai-compatible-providers.md
+  - ../../specs/agents/system-design/openai-compatible-providers.md
 ---
 
 # Task 03: Live session injection and credential-delivery fixes

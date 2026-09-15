@@ -12,7 +12,7 @@ acceptance_criteria:
   - AC-AGENTS-OPENAI-COMPATIBLE-PROVIDERS-002.1
   - AC-AGENTS-OPENAI-COMPATIBLE-PROVIDERS-002.2
 system_design:
-  - docs/specs/agents/system-design/openai-compatible-providers.md
+  - ../../specs/agents/system-design/openai-compatible-providers.md
 ---
 
 # Task 02: acpprovider gateway-auth package

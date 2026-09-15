@@ -1,3 +1,15 @@
+---
+created: 2026-08-31
+status: completed
+requirements:
+  - REQ-AGENTS-OPENAI-COMPATIBLE-PROVIDERS-001
+  - REQ-AGENTS-OPENAI-COMPATIBLE-PROVIDERS-002
+  - REQ-AGENTS-OPENAI-COMPATIBLE-PROVIDERS-003
+  - REQ-AGENTS-OPENAI-COMPATIBLE-PROVIDERS-004
+system_design:
+  - ../../specs/agents/system-design/openai-compatible-providers.md
+---
+
 # Plan: OpenAI-compatible AI providers
 
 ## Overview
@@ -21,11 +33,11 @@ a profile-declared key unreliable.
 
 | ID | Title | Wave | Depends on | Status |
 | --- | --- | --- | --- | --- |
-| task-01 | Provider primitive on the agent profile | 1 | — | done |
-| task-02 | ACP gateway builder (`internal/common/acpprovider`) | 2 | task-01 | done |
-| task-03 | Live session injection + credential-delivery fixes | 3 | task-02 | done |
-| task-04 | Probe and inference/utility provider reach | 4 | task-03 | done |
-| task-05 | Profile editor provider section (frontend) | 3 | task-01 | done |
+| [task-01](task-01-provider-primitive.md) | Provider primitive on the agent profile | 1 | — | done |
+| [task-02](task-02-providerinject.md) | ACP gateway builder (`internal/common/acpprovider`) | 2 | task-01 | done |
+| [task-03](task-03-session-injection.md) | Live session injection + credential-delivery fixes | 3 | task-02 | done |
+| [task-04](task-04-probe-inference-reach.md) | Probe and inference/utility provider reach | 4 | task-03 | done |
+| [task-05](task-05-profile-editor.md) | Profile editor provider section (frontend) | 3 | task-01 | done |
 
 Dependency order: 01 → 02 → 03 → 04. 05 runs any time after 01. 03 and 05 are
 parallel-safe (backend lifecycle vs `apps/web`).

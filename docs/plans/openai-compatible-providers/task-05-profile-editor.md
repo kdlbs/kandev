@@ -13,7 +13,7 @@ acceptance_criteria:
   - AC-AGENTS-OPENAI-COMPATIBLE-PROVIDERS-001.3
   - AC-AGENTS-OPENAI-COMPATIBLE-PROVIDERS-001.5
 system_design:
-  - docs/specs/agents/system-design/openai-compatible-providers.md
+  - ../../specs/agents/system-design/openai-compatible-providers.md
 ---
 
 # Task 05: Profile editor provider section (frontend)

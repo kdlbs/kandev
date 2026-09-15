@@ -14,7 +14,7 @@ acceptance_criteria:
   - AC-AGENTS-OPENAI-COMPATIBLE-PROVIDERS-001.4
   - AC-AGENTS-OPENAI-COMPATIBLE-PROVIDERS-001.5
 system_design:
-  - docs/specs/agents/system-design/openai-compatible-providers.md
+  - ../../specs/agents/system-design/openai-compatible-providers.md
 ---
 
 # Task 01: Provider primitive on the agent profile

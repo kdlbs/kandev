@@ -13,7 +13,7 @@ acceptance_criteria:
   - AC-AGENTS-OPENAI-COMPATIBLE-PROVIDERS-003.2
   - AC-AGENTS-OPENAI-COMPATIBLE-PROVIDERS-003.3
 system_design:
-  - docs/specs/agents/system-design/openai-compatible-providers.md
+  - ../../specs/agents/system-design/openai-compatible-providers.md
 ---
 
 # Task 04: Probe and inference/utility provider reach
