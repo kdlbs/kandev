@@ -204,6 +204,27 @@ Post-remediation managed E2E validation for PR #3705:
 - Mobile Chrome: 3 tests passed, covering task touch cancellation, Quick Chat
   touch composer cancellation, and the Quick Chat palette command.
 
+Review fixup and delivery validation for PR #3705:
+
+- PR [#3705](https://github.com/kdlbs/kandev/pull/3705) is open on
+  `feature/investigate-issue-37-922` and closes issue #3700.
+- Remediation commit `41882f3abe0011cf3112a014145496a760bb9cff` addresses all
+  six inline review threads. Final test cleanup commit
+  `96ff68d3f5b35704065e3aa43fefcf383f8a4e92` adds the enabled-state assertion
+  for the underlying task cancel control.
+- The required 15-minute post-creation wait was completed. Review fixup
+  replies were added and all six threads are resolved on the final head.
+- Fresh active-composer desktop and Pixel 5 screenshots are published from
+  media commit `125ef91d16b292d103f60fba714c17929403df35`.
+- The final desktop Quick Chat suite passed all 3 tests after the additional
+  assertion. The local worktree is clean and the final branch head is pushed.
+- Authenticated connector evidence reports no failed workflow runs on the
+  final head. Backend Tests and E2E Tests remain queued or pending, while
+  Frontend Tests and Preview Environment remain in progress. The managed
+  `pr-await` check could not complete its final rollup because GitHub's status
+  policy API rate limit was reached; remote CI is therefore recorded as
+  pending rather than green.
+
 The repo-wide `pnpm run lint:e2e-sleeps` audit still reports unrelated baseline
 errors in other files, including missing rule definitions and existing
 unsanctioned sleeps. The changed E2E files pass the same configuration in the

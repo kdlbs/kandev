@@ -143,3 +143,6 @@ steering delivery. Palette sources do not deduplicate matching command IDs.
   detached background work.
 - Failed Quick Chat cancellation callbacks are logged and clear the optimistic
   guard so a later command can retry the same session.
+- Final review cleanup adds an assertion that the underlying task cancel control
+  remains enabled after Quick Chat closes. The desktop Quick Chat suite passes
+  all 3 tests with this assertion.
