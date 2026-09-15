@@ -90,6 +90,7 @@ func (s *Service) retryOneDeferredCeilingLaunch(ctx context.Context, task *model
 	switch s.replayCeilingDeferral(ctx, task, deferral) {
 	case ceilingReplaySucceeded:
 		s.clearCeilingDeferredRecord(ctx, task.ID)
+		s.publishTaskUpdatedByID(ctx, task.ID)
 	case ceilingReplayFailed:
 		s.logger.Zap().Warn("ceiling retry replay failed for a non-ceiling reason; will retry on a later sweep",
 			zap.String("task_id", task.ID), zap.String("kind", string(deferral.Kind)))

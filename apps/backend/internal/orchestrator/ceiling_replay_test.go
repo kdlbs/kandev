@@ -230,6 +230,8 @@ func TestDrainDeferredCeilingLaunches_StillDeferredThenSucceedsOnceSlotFrees(t *
 	agentMgr := &mockAgentManager{repoForExecutionLookup: repo}
 	svc := createTestServiceWithScheduler(repo, newMockStepGetter(), taskRepo, agentMgr)
 	svc.sessionCeiling = newSessionCeilingController(1, nil, nil)
+	events := &capturingTaskEvents{}
+	svc.SetTaskEventPublisher(events)
 
 	// Occupy the only slot directly against the controller (session-a "holds"
 	// the ceiling's one unit for this test, without needing a real launch).
@@ -262,6 +264,12 @@ func TestDrainDeferredCeilingLaunches_StillDeferredThenSucceedsOnceSlotFrees(t *
 	require.False(t, models.HasCeilingDeferredIntent(&models.Task{Metadata: map[string]interface{}{
 		models.MetaKeyDeferredLaunch: deferredLaunchOf(t, svc, "drain-task-b"),
 	}}), "a successful replay must clear the ceiling record")
+
+	published := events.last()
+	require.NotNil(t, published, "a successful replay must publish task.updated so the WS-driven UI clears the queued state")
+	require.Equal(t, "drain-task-b", published.ID)
+	require.False(t, models.HasCeilingDeferredIntent(published),
+		"the published task after a successful replay must reflect the cleared record, not a stale queued snapshot")
 	agentMgr.mu.Lock()
 	callsAfterFree := len(agentMgr.setExecutionDescriptionCalls)
 	agentMgr.mu.Unlock()
