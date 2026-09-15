@@ -1,6 +1,10 @@
 package lifecycle
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/kandev/kandev/internal/githubauth"
+)
 
 // TestBuildWorktreeCreateRequestForwardsProfileEnv guards that resolved
 // executor-profile env vars (already merged into EnvPrepareRequest.Env) are
@@ -25,6 +29,56 @@ func TestBuildWorktreeCreateRequestForwardsProfileEnv(t *testing.T) {
 	}
 	if got.IntegrationRef != "develop" {
 		t.Fatalf("CreateRequest.IntegrationRef = %q, want develop", got.IntegrationRef)
+	}
+}
+
+func TestBuildWorktreeCreateRequestExcludesManagedGitCredentialsFromSetupScript(t *testing.T) {
+	req := &EnvPrepareRequest{
+		Env: map[string]string{
+			"PROFILE_NPM_TOKEN":                       "profile-secret",
+			githubauth.CredentialBrokerURLEnv:         "https://kandev.example/resolve",
+			githubauth.CredentialLeaseEnv:             "opaque-lease",
+			githubauth.CredentialReissueCapabilityEnv: "reissue-capability",
+			githubauth.CredentialTaskIDEnv:            "task-1",
+			githubauth.CredentialSessionIDEnv:         "session-1",
+			githubauth.CredentialRepositoryEnv:        "repo-1",
+			githubauth.CredentialHelperPathEnv:        "/opt/kandev/agentctl",
+			"GIT_CONFIG_COUNT":                        "5",
+			"GIT_CONFIG_KEY_0":                        "core.hooksPath",
+			"GIT_CONFIG_VALUE_0":                      "/profile/hooks",
+			"GIT_CONFIG_KEY_1":                        "credential.https://github.com.helper",
+			"GIT_CONFIG_VALUE_1":                      "",
+			"GIT_CONFIG_KEY_2":                        "credential.https://github.com.helper",
+			"GIT_CONFIG_VALUE_2":                      githubauth.ManagedGitCredentialHelper,
+			"GIT_CONFIG_KEY_3":                        "credential.https://gitlab.example.helper",
+			"GIT_CONFIG_VALUE_3":                      "!/usr/local/bin/custom-credential-helper",
+			"GIT_CONFIG_KEY_4":                        "credential.https://github.com.helper",
+			"GIT_CONFIG_VALUE_4":                      "!f() { : " + githubauth.HostGitHubCredentialHelperMarker + "; gh auth git-credential \"$@\"; }; f",
+		},
+	}
+
+	got := buildWorktreeCreateRequest(req).ScriptEnv
+
+	if got["PROFILE_NPM_TOKEN"] != "profile-secret" {
+		t.Fatalf("profile environment missing from setup script: %#v", got)
+	}
+	for _, key := range []string{
+		githubauth.CredentialBrokerURLEnv,
+		githubauth.CredentialLeaseEnv,
+		githubauth.CredentialReissueCapabilityEnv,
+		githubauth.CredentialTaskIDEnv,
+		githubauth.CredentialSessionIDEnv,
+		githubauth.CredentialRepositoryEnv,
+		githubauth.CredentialHelperPathEnv,
+	} {
+		if _, exists := got[key]; exists {
+			t.Fatalf("setup script received managed Git credential %q: %#v", key, got)
+		}
+	}
+	if got["GIT_CONFIG_COUNT"] != "2" ||
+		got["GIT_CONFIG_KEY_0"] != "core.hooksPath" || got["GIT_CONFIG_VALUE_0"] != "/profile/hooks" ||
+		got["GIT_CONFIG_KEY_1"] != "credential.https://gitlab.example.helper" || got["GIT_CONFIG_VALUE_1"] != "!/usr/local/bin/custom-credential-helper" {
+		t.Fatalf("setup script Git config = %#v, want only user-owned entries", got)
 	}
 }
 
