@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -959,6 +960,10 @@ func (s *Service) handleSessionLaunchFailure(
 ) error {
 	failureCtx := context.WithoutCancel(ctx)
 	safeErr := routingerr.SanitizeError(launchErr)
+	// A launch failure cannot produce a retryable prompt lifecycle. Release the
+	// replay payload here so an early admission or startup failure does not keep
+	// attachment data alive until a later session event.
+	s.clearTransientRetryState(sessionID)
 	_ = s.recordSessionLaunchFailure(
 		failureCtx, taskID, sessionID, safeErr, preloadedSession...,
 	)
@@ -4290,7 +4295,7 @@ func (s *Service) stopTaskSessionForCoordinatorLocked(
 	// Halt-only intent also disarms any provider-backoff retry. This must run
 	// even when the failed execution has already disappeared and the result is
 	// therefore not_running; otherwise its timer can launch replacement work.
-	s.clearTransientRetryState(sessionID)
+	s.retireAndClearTransientRetryState(sessionID)
 	result, stopErr := s.executor.StopSessionDetailed(ctx, session, coordinatorMCPStopReason, false)
 	if stopErr == nil && result.Changed {
 		// Cancellation takes effect before detached runtime teardown. Tombstone
@@ -4447,6 +4452,10 @@ func (s *Service) DeleteSession(ctx context.Context, sessionID string) error {
 	if err := s.quiesceSessionExecutionBeforeDeletion(ctx, taskID, sessionID); err != nil {
 		return err
 	}
+	// Deletion ends the session incarnation even when no execution remains.
+	// Retire the retry loop before removing the row so a buffered provider
+	// failure cannot recreate notice state for a deleted session ID.
+	s.resetTransientRetryWithContext(ctx, sessionID, true)
 
 	s.logger.Info("deleting session",
 		zap.String("session_id", sessionID),
@@ -5287,7 +5296,11 @@ type promptTaskOptions struct {
 	// onAccepted runs at the agentctl acceptance boundary, before PromptTask
 	// waits for the turn to finish. Automation callers use it to bind durable
 	// attempt identity to the exact turn.
-	onAccepted              func(turnID string)
+	onAccepted func(turnID string)
+	// promptAccepted is owned by promptTask and keeps the replay cache alive
+	// only when this prompt reaches provider acceptance. It is process-local
+	// plumbing and is never passed to a caller.
+	promptAccepted          *atomic.Bool
 	expectedSessionIdentity *messagequeue.QueueSessionIdentity
 	// promptAlreadyComposed and fallbackRetryPrompt mirror the composed-prompt
 	// seam autoStartStepPrompt's own ErrExecutionNotFound branch uses (see
@@ -5420,9 +5433,6 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		return nil, err
 	}
 
-	// Apply config-mode and plan-mode prompt transforms.
-	effectivePrompt := s.effectivePromptForSession(sessionID, prompt, planMode, session)
-
 	// After a lazy backend restart the session may be WAITING_FOR_INPUT with no agent process yet.
 	_, hadExecutionBeforeEnsure := s.executor.GetExecutionBySession(sessionID)
 	resumedForPrompt := options.resumeAttempt != nil || !hadExecutionBeforeEnsure
@@ -5466,6 +5476,17 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 	}
 	runBeforeDispatch := runBeforeDispatchOnce(options.beforeDispatch)
 
+	// Keep the replay payload only after this provider attempt is accepted.
+	// Admission and dispatch failures must not retain prompt attachments until
+	// a later session event happens to replace or consume the cache.
+	var promptAccepted atomic.Bool
+	options.promptAccepted = &promptAccepted
+	defer func() {
+		if !promptAccepted.Load() {
+			s.lastTurnPrompt.Delete(sessionID)
+		}
+	}()
+
 	// Cache the replay identity and acquire the model-switch guard before switching.
 	modelSwitchGuard, err := s.prepareModelSwitchGuard(
 		resumePromptCtx, taskID, sessionID, prompt, model, planMode, attachments, options, session,
@@ -5487,6 +5508,9 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		resumeAttempt, modelSwitchGuard,
 	)
 	if switchHandled {
+		if switchErr == nil {
+			promptAccepted.Store(true)
+		}
 		return switchResult, switchErr
 	}
 
@@ -5811,6 +5835,9 @@ func (s *Service) finishPromptExecutorDispatch(
 	resumeAttempt *resumeAttempt,
 ) (*PromptResult, error) {
 	dispatchAccepted, publicationErr := dispatchOutcome.snapshot()
+	if dispatchAccepted && options.promptAccepted != nil {
+		options.promptAccepted.Store(true)
+	}
 	if execErr != nil {
 		// Missing-execution recovery reacquires the cancel guard while it resets
 		// the session. Release dispatch admission before entering that path.
@@ -5906,6 +5933,15 @@ func (s *Service) preparePromptDispatchCallback(
 	dispatchOutcome = &promptDispatchOutcome{}
 	dispatchOutcome.turnID = rollback.turnID
 	dispatchOutcome.onAccepted = options.onAccepted
+	if options.promptAccepted != nil {
+		originalOnAccepted := dispatchOutcome.onAccepted
+		dispatchOutcome.onAccepted = func(turnID string) {
+			options.promptAccepted.Store(true)
+			if originalOnAccepted != nil {
+				originalOnAccepted(turnID)
+			}
+		}
+	}
 	onDispatched = s.promptDispatchCallbackForIdentity(
 		promptCtx, taskID, sessionID, rollback.sessionIdentity,
 		session.AgentExecutionID, rollback.reservedTurn, foregroundDispatch, dispatchOutcome,
