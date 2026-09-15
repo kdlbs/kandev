@@ -213,17 +213,19 @@ Review fixup and delivery validation for PR #3705:
   `96ff68d3f5b35704065e3aa43fefcf383f8a4e92` adds the enabled-state assertion
   for the underlying task cancel control.
 - The required 15-minute post-creation wait was completed. Review fixup
-  replies were added and all six threads are resolved on the final head.
+  replies were added and all six threads are resolved on the latest PR head.
 - Fresh active-composer desktop and Pixel 5 screenshots are published from
   media commit `125ef91d16b292d103f60fba714c17929403df35`.
 - The final desktop Quick Chat suite passed all 3 tests after the additional
-  assertion. The local worktree is clean and the final branch head is pushed.
-- Authenticated connector evidence reports no failed workflow runs on the
-  final head. Backend Tests and E2E Tests remain queued or pending, while
-  Frontend Tests and Preview Environment remain in progress. The managed
-  `pr-await` check could not complete its final rollup because GitHub's status
-  policy API rate limit was reached; remote CI is therefore recorded as
-  pending rather than green.
+  assertion. The local worktree is clean and the final branch head is pushed
+  in docs-results commit `3d50b35a4a0b2820d09f7beb16eb1a01ac0b395c`.
+- At implementation head `96ff68d3f5b35704065e3aa43fefcf383f8a4e92`,
+  authenticated connector evidence reported no failed workflow runs; Backend
+  Tests and E2E Tests were queued or pending, while Frontend Tests and Preview
+  Environment were in progress. The later docs-only push reset the workflow
+  rollup. The managed `pr-await` check could not complete its final rollup
+  because GitHub's status policy API rate limit was reached, so remote CI for
+  the latest head remains pending or unknown rather than green.
 
 The repo-wide `pnpm run lint:e2e-sleeps` audit still reports unrelated baseline
 errors in other files, including missing rule definitions and existing
