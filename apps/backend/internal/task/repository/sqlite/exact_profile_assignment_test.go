@@ -78,3 +78,40 @@ func TestUpsertExactProfileAssignmentGuardsGeneration(t *testing.T) {
 		t.Fatal("same generation with a different payload must not replace assignment")
 	}
 }
+
+func TestAssignExactProfileAssignmentActivatesAtomically(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "exact-profile-assignment-atomic.db")
+	dbConn, err := dbutil.OpenSQLite(dbPath)
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	db := sqlx.NewDb(dbConn, "sqlite3")
+	t.Cleanup(func() { _ = db.Close() })
+	repo, err := NewWithDB(db, db, nil)
+	if err != nil {
+		t.Fatalf("initialize schema: %v", err)
+	}
+	now := time.Now().UTC().Round(0)
+	assignment := &models.ExactProfileAssignment{
+		TaskID: "task-atomic", WorkspaceID: "workspace-1", AgentProfileID: "profile-1",
+		ProfileRevision: now, Generation: 1,
+	}
+	if _, err := db.Exec(`INSERT INTO tasks (id, workspace_id, title, created_at, updated_at) VALUES (?, ?, ?, ?, ?)`,
+		assignment.TaskID, assignment.WorkspaceID, "Exact profile assignment", now, now); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+
+	changed, err := repo.AssignExactProfileAssignment(context.Background(), assignment)
+	if err != nil || !changed {
+		t.Fatalf("assign exact profile = (%v, %v), want (true, nil)", changed, err)
+	}
+	stored, err := repo.GetExactProfileAssignment(context.Background(), assignment.TaskID)
+	if err != nil || stored == nil || !stored.Active {
+		t.Fatalf("stored assignment = %#v, %v; want active assignment", stored, err)
+	}
+
+	changed, err = repo.AssignExactProfileAssignment(context.Background(), assignment)
+	if err != nil || changed {
+		t.Fatalf("replay exact profile = (%v, %v), want (false, nil)", changed, err)
+	}
+}

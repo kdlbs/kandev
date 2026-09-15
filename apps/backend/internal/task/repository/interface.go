@@ -197,6 +197,9 @@ type TaskRepository interface {
 // selection used by exact-profile launches.
 type ExactProfileAssignmentRepository interface {
 	GetExactProfileAssignment(ctx context.Context, taskID string) (*models.ExactProfileAssignment, error)
+	// AssignExactProfileAssignment atomically records and activates an exact
+	// assignment. A replay of the same generation is a no-op.
+	AssignExactProfileAssignment(ctx context.Context, assignment *models.ExactProfileAssignment) (bool, error)
 	UpsertExactProfileAssignment(ctx context.Context, assignment *models.ExactProfileAssignment) (bool, error)
 	ActivateExactProfileAssignment(ctx context.Context, taskID string, generation int64) (bool, error)
 }

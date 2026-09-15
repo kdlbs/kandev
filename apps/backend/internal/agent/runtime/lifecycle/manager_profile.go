@@ -207,6 +207,7 @@ func (m *Manager) resolveStartModelPolicy(ctx context.Context, profileID string)
 // values across process recovery.
 func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExecution, agentConfig agents.Agent, taskDescription string, attachments []MessageAttachment, mcpServers []agentctltypes.McpServer) error {
 	profileModel, profileMode, profileConfigOptions, policy := m.resolveProfileSessionConfigAndPolicy(ctx, execution.AgentProfileID)
+	policy = exactProfileStartModelPolicy(policy, execution.ExactProfile)
 	runtimeModel, runtimeMode, runtimeConfigOptions := m.sessionRuntimeOverrides(ctx, execution)
 	startupGeneration := execution.startupAttemptSnapshot()
 	markBootReady := func(executionID string) error {
@@ -223,6 +224,17 @@ func (m *Manager) initializeACPSession(ctx context.Context, execution *AgentExec
 		runtimeModel, runtimeMode, runtimeConfigOptions,
 		policy,
 	)
+}
+
+func exactProfileStartModelPolicy(policy StartModelPolicy, exactProfile bool) StartModelPolicy {
+	if !exactProfile {
+		return policy
+	}
+	// A task-owned exact assignment authorizes only its recorded profile model.
+	// The profile's ordinary fallback settings cannot substitute it.
+	policy.FallbackModel = ""
+	policy.AutoFallback = false
+	return policy
 }
 
 func (m *Manager) sessionRuntimeOverrides(ctx context.Context, execution *AgentExecution) (string, string, map[string]string) {

@@ -173,6 +173,29 @@ func TestPendingMove_StaleExactProfileGenerationIsDiscarded(t *testing.T) {
 	}
 }
 
+func TestPendingMove_ZeroGenerationIsDiscardedAfterExactAssignment(t *testing.T) {
+	sc := buildPendingMoveScenario(t)
+	now := time.Now().UTC()
+	_, err := sc.repo.UpsertExactProfileAssignment(sc.ctx, &models.ExactProfileAssignment{
+		TaskID: "task-1", WorkspaceID: "ws1", AgentProfileID: profileReview, Generation: 1, ProfileRevision: now,
+	})
+	requireNoError(t, err)
+	_, err = sc.repo.ActivateExactProfileAssignment(sc.ctx, "task-1", 1)
+	requireNoError(t, err)
+
+	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)
+	requireNoError(t, err)
+	sc.svc.applyPendingMove(sc.ctx, "task-1", sc.reviewSessionID, session, &messagequeue.PendingMove{
+		TaskID: "task-1", WorkflowID: "wf1", WorkflowStepID: stepInProgressID,
+	})
+
+	task, err := sc.repo.GetTask(sc.ctx, "task-1")
+	requireNoError(t, err)
+	if task.WorkflowStepID != stepInReviewID {
+		t.Fatalf("zero-generation pending move changed step to %q, want %q", task.WorkflowStepID, stepInReviewID)
+	}
+}
+
 func TestPendingMove_DoesNotReplayAfterStaleSnapshotRestored(t *testing.T) {
 	sc := buildPendingMoveScenario(t)
 	session, err := sc.repo.GetTaskSession(sc.ctx, sc.reviewSessionID)

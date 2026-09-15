@@ -95,6 +95,104 @@ func (r *Repository) UpsertExactProfileAssignment(ctx context.Context, assignmen
 	return false, models.ErrExactProfileAssignmentGeneration
 }
 
+// AssignExactProfileAssignment records and activates a generation in one
+// transaction. No caller can observe a newly accepted generation inactive, or
+// activate an assignment after another writer has superseded it.
+//
+//nolint:cyclop,funlen // The transaction's three generation states must stay together.
+func (r *Repository) AssignExactProfileAssignment(ctx context.Context, assignment *models.ExactProfileAssignment) (bool, error) {
+	if err := validateExactProfileAssignment(assignment); err != nil {
+		return false, err
+	}
+	now := r.exactProfileAssignmentNow()
+	if assignment.CreatedAt.IsZero() {
+		assignment.CreatedAt = now
+	}
+	assignment.UpdatedAt = now
+
+	tx, err := r.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return false, fmt.Errorf("begin exact profile assignment: %w", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var current models.ExactProfileAssignment
+	err = tx.QueryRowxContext(ctx, r.db.Rebind(`
+		SELECT task_id, workspace_id, agent_profile_id, profile_revision, generation,
+			source_workflow_id, source_workflow_step_id, source_task_state, active, created_at, updated_at
+		FROM task_exact_profile_assignments WHERE task_id = ?
+	`), assignment.TaskID).Scan(
+		&current.TaskID, &current.WorkspaceID, &current.AgentProfileID, &current.ProfileRevision,
+		&current.Generation, &current.SourceWorkflowID, &current.SourceWorkflowStepID, &current.SourceTaskState,
+		&current.Active, &current.CreatedAt, &current.UpdatedAt,
+	)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false, fmt.Errorf("load exact profile assignment: %w", err)
+	}
+
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		if assignment.Generation != 1 {
+			return false, models.ErrExactProfileAssignmentGeneration
+		}
+		result, execErr := tx.ExecContext(ctx, r.db.Rebind(`
+			INSERT INTO task_exact_profile_assignments (
+				task_id, workspace_id, agent_profile_id, profile_revision, generation,
+				source_workflow_id, source_workflow_step_id, source_task_state, active, created_at, updated_at
+			) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+			WHERE EXISTS (SELECT 1 FROM tasks WHERE id = ? AND workspace_id = ?)
+		`), assignment.TaskID, assignment.WorkspaceID, assignment.AgentProfileID, assignment.ProfileRevision,
+			assignment.Generation, assignment.SourceWorkflowID, assignment.SourceWorkflowStepID, assignment.SourceTaskState,
+			dialect.BoolToInt(true), assignment.CreatedAt, assignment.UpdatedAt, assignment.TaskID, assignment.WorkspaceID)
+		if execErr != nil {
+			return false, fmt.Errorf("insert exact profile assignment: %w", execErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil {
+			return false, rowsErr
+		}
+		if rows != 1 {
+			return false, models.ErrExactProfileAssignmentGeneration
+		}
+	case current.Generation == assignment.Generation:
+		if !exactProfileAssignmentsEqual(&current, assignment) {
+			return false, models.ErrExactProfileAssignmentGeneration
+		}
+		if !current.Active {
+			return false, models.ErrExactProfileAssignmentGeneration
+		}
+		if err := tx.Commit(); err != nil {
+			return false, fmt.Errorf("commit exact profile assignment replay: %w", err)
+		}
+		return false, nil
+	case current.Generation == assignment.Generation-1:
+		result, execErr := tx.ExecContext(ctx, r.db.Rebind(`
+			UPDATE task_exact_profile_assignments
+			SET workspace_id = ?, agent_profile_id = ?, profile_revision = ?, generation = ?,
+				source_workflow_id = ?, source_workflow_step_id = ?, source_task_state = ?, active = ?, updated_at = ?
+			WHERE task_id = ? AND generation = ?
+		`), assignment.WorkspaceID, assignment.AgentProfileID, assignment.ProfileRevision, assignment.Generation,
+			assignment.SourceWorkflowID, assignment.SourceWorkflowStepID, assignment.SourceTaskState,
+			dialect.BoolToInt(true), assignment.UpdatedAt, assignment.TaskID, current.Generation)
+		if execErr != nil {
+			return false, fmt.Errorf("replace exact profile assignment: %w", execErr)
+		}
+		rows, rowsErr := result.RowsAffected()
+		if rowsErr != nil {
+			return false, rowsErr
+		}
+		if rows != 1 {
+			return false, models.ErrExactProfileAssignmentGeneration
+		}
+	default:
+		return false, models.ErrExactProfileAssignmentGeneration
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit exact profile assignment: %w", err)
+	}
+	return true, nil
+}
+
 // ActivateExactProfileAssignment makes one already-recorded generation
 // applicable to a transition. A later replacement cannot be activated by a
 // stale move because the generation predicate is in the same UPDATE.

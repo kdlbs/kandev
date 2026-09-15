@@ -1525,23 +1525,6 @@ CREATE TABLE tasks (
 
 
 
-CREATE TABLE task_exact_profile_assignments (
-    task_id text PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
-    workspace_id text NOT NULL,
-    agent_profile_id text NOT NULL,
-    profile_revision timestamp without time zone NOT NULL,
-    generation bigint NOT NULL,
-    source_workflow_id text DEFAULT ''::text NOT NULL,
-    source_workflow_step_id text DEFAULT ''::text NOT NULL,
-    source_task_state text DEFAULT ''::text NOT NULL,
-    active integer DEFAULT 0 NOT NULL,
-    created_at timestamp without time zone NOT NULL,
-    updated_at timestamp without time zone NOT NULL
-);
-CREATE INDEX idx_task_exact_profile_assignments_active ON task_exact_profile_assignments(task_id, active);
-
-
-
 CREATE TABLE telemetry_activations (
     contract_key text NOT NULL,
     contract_version integer NOT NULL,

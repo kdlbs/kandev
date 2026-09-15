@@ -1314,21 +1314,6 @@ CREATE TABLE user_agent_profile_recent_use (
 		PRIMARY KEY (user_id, context),
 		FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 	);
-CREATE TABLE task_exact_profile_assignments (
-		task_id TEXT PRIMARY KEY,
-		workspace_id TEXT NOT NULL,
-		agent_profile_id TEXT NOT NULL,
-		profile_revision TIMESTAMP NOT NULL,
-		generation BIGINT NOT NULL,
-		source_workflow_id TEXT NOT NULL DEFAULT '',
-		source_workflow_step_id TEXT NOT NULL DEFAULT '',
-		source_task_state TEXT NOT NULL DEFAULT '',
-		active INTEGER NOT NULL DEFAULT 0,
-		created_at TIMESTAMP NOT NULL,
-		updated_at TIMESTAMP NOT NULL,
-		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
-	);
-CREATE INDEX idx_task_exact_profile_assignments_active ON task_exact_profile_assignments(task_id, active);
 CREATE TABLE user_terminals (
 			id              TEXT PRIMARY KEY,
 			task_id         TEXT NOT NULL,

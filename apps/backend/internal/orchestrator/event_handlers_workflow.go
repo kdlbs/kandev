@@ -4852,15 +4852,18 @@ func (s *Service) applyPendingMove(ctx context.Context, taskID, sessionID string
 }
 
 func (s *Service) pendingMoveExactProfileGenerationCurrent(ctx context.Context, taskID string, generation int64) bool {
-	if generation == 0 {
-		return true
-	}
 	assignments, ok := s.repo.(exactProfileAssignmentStore)
 	if !ok {
-		return false
+		return generation == 0
 	}
 	assignment, err := assignments.GetExactProfileAssignment(ctx, taskID)
-	return err == nil && assignment != nil && assignment.Active && assignment.Generation == generation
+	if err != nil {
+		return false
+	}
+	if assignment == nil || !assignment.Active {
+		return generation == 0
+	}
+	return generation > 0 && assignment.Generation == generation
 }
 
 func (s *Service) consumeUnfencedPendingMove(

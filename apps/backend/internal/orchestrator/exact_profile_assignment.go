@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
+	"go.uber.org/zap"
 )
 
 // ErrExactProfileAssignmentInvalid is returned before launch selection can
@@ -20,8 +22,7 @@ type exactProfileAssignmentStore interface {
 
 type exactProfileAssignmentWriter interface {
 	exactProfileAssignmentStore
-	UpsertExactProfileAssignment(context.Context, *models.ExactProfileAssignment) (bool, error)
-	ActivateExactProfileAssignment(context.Context, string, int64) (bool, error)
+	AssignExactProfileAssignment(context.Context, *models.ExactProfileAssignment) (bool, error)
 }
 
 type exactProfileLookup interface {
@@ -34,6 +35,7 @@ type ExactProfileLaunchDecision struct {
 	AgentProfileID string
 	Generation     int64
 	Revision       int64
+	Model          string
 }
 
 // ExactProfileAssigner validates durable assignments against a current,
@@ -95,6 +97,9 @@ func (s *Service) AssignExactTaskProfile(
 	if !ok || s.agentManager == nil {
 		return nil, ErrExactProfileAssignmentInvalid
 	}
+	if err := s.authorizeTask(ctx, taskID); err != nil {
+		return nil, err
+	}
 	task, err := s.repo.GetTask(ctx, taskID)
 	if err != nil || task == nil {
 		return nil, fmt.Errorf("load task for exact profile assignment: %w", err)
@@ -109,14 +114,11 @@ func (s *Service) AssignExactTaskProfile(
 		SourceWorkflowID: task.WorkflowID, SourceWorkflowStepID: task.WorkflowStepID,
 		SourceTaskState: string(task.State),
 	}
-	if _, err := assignments.UpsertExactProfileAssignment(ctx, assignment); err != nil {
-		return nil, err
-	}
-	if _, err := assignments.ActivateExactProfileAssignment(ctx, taskID, generation); err != nil {
+	if _, err := assignments.AssignExactProfileAssignment(ctx, assignment); err != nil {
 		return nil, err
 	}
 	return &ExactProfileLaunchDecision{
-		AgentProfileID: agentProfileID, Generation: generation, Revision: profile.Revision.UnixNano(),
+		AgentProfileID: agentProfileID, Generation: generation, Revision: profile.Revision.UnixNano(), Model: profile.Model,
 	}, nil
 }
 
@@ -145,5 +147,39 @@ func (a ExactProfileAssigner) Resolve(ctx context.Context, taskID, workspaceID s
 		AgentProfileID: assignment.AgentProfileID,
 		Generation:     assignment.Generation,
 		Revision:       assignment.ProfileRevision.UnixNano(),
+		Model:          profile.Model,
 	}, nil
+}
+
+func (s *Service) recordExactProfileLaunchReceipt(
+	ctx context.Context, taskID, sessionID string, exact *ExactProfileLaunchDecision, model string, launchErr error,
+) {
+	if exact == nil {
+		return
+	}
+	receipts, ok := s.repo.(interface {
+		RecordExactProfileLaunchReceipt(context.Context, *models.ExactProfileLaunchReceipt) (bool, error)
+	})
+	if !ok {
+		return
+	}
+	receipt := &models.ExactProfileLaunchReceipt{
+		TaskID: taskID, SessionID: sessionID, AgentProfileID: exact.AgentProfileID,
+		Generation: exact.Generation, ProfileRevision: time.Unix(0, exact.Revision).UTC(), Model: model,
+		Outcome: models.ExactProfileLaunchOutcomeApplied, InferenceStarted: launchErr == nil,
+	}
+	if launchErr != nil {
+		receipt.Outcome = models.ExactProfileLaunchOutcomeFailedClosed
+		receipt.FailureReason = launchErr.Error()
+	}
+	if _, err := receipts.RecordExactProfileLaunchReceipt(ctx, receipt); err != nil {
+		s.logger.Warn("failed to record exact-profile launch receipt", zap.String("task_id", taskID), zap.String("session_id", sessionID), zap.Error(err))
+	}
+}
+
+func exactProfileModel(exact *ExactProfileLaunchDecision) string {
+	if exact == nil {
+		return ""
+	}
+	return exact.Model
 }
