@@ -41,6 +41,7 @@ type fakeGitHubChangeLinks struct {
 }
 
 func (f *fakeGitHubChangeLinks) AssociateExistingPRByURLForWorkspace(_ context.Context, workspaceID, userID, taskID, repositoryID, prURL string) (*github.TaskPR, error) {
+	// Record attempted calls, including failures, so tests can inspect their arguments.
 	f.linkedURL = prURL
 	f.linkedWorkspaceID = workspaceID
 	f.linkedUserID = userID
