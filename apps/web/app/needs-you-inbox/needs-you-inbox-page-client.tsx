@@ -8,6 +8,7 @@ import {
   selectNeedsYouInboxBundles,
   selectNeedsYouInboxHasMore,
   selectNeedsYouInboxHiddenCount,
+  selectNeedsYouInboxLastAppliedOk,
   selectNeedsYouInboxRevision,
   selectNeedsYouInboxStatus,
 } from "@/lib/state/slices/needs-you-inbox/selectors";
@@ -19,31 +20,35 @@ import { NeedsYouInboxHiddenPanel } from "@/components/needs-you-inbox/needs-you
 
 type ViewMode = "error" | "loading" | "empty" | "list";
 
+// `status` alone can't tell a first read from a background refresh, or a
+// refresh that follows success from one that follows a failure:
+// `beginNeedsYouInboxRead` overwrites `status` to "loading" without touching
+// what preceded it, so both refresh cases reach here as the identical tuple
+// of the other four arguments. `lastAppliedOk` (whether the last applied
+// response was a successful page, set by `setNeedsYouInboxPage` and cleared
+// by `setNeedsYouInboxError`) is what actually distinguishes them, and gates
+// the spinner: it stays up for the very first read, for "idle" (boot-seeded
+// but not yet read), and for a refresh following a failure, so a failed read
+// never reads as a false all-clear while its retry is in flight; it steps
+// aside for a refresh over an already-settled (possibly empty) inbox, which
+// keeps its settled view instead of reverting to a spinner.
+//
 // A page reporting truncation while listing zero rows means enrichment
 // emptied a page the query had filled, so this resolves to the retryable
-// "error" state rather than "empty" (design-01#Data-and-contracts) -- but
-// only once a read has actually applied (`appliedGeneration > 0`): a boot
-// seed's truncation flag arrives before any read settles, and must not flash
-// as an error.
-//
-// `status === "loading"` covers both the very first read and every
-// background refresh after it, and by itself can't tell them apart -- gate
-// the spinner on `appliedGeneration === 0` too, so a refresh over an already
-// settled (possibly empty) inbox keeps its settled view instead of reverting
-// to the first-load spinner.
+// "error" state rather than "empty" (design-01#Data-and-contracts) -- the
+// `lastAppliedOk` gate above already keeps this from firing on the pre-read
+// boot seed's own truncation flag.
 function resolveViewMode(
   status: string,
   bundleCount: number,
-  hiddenCount: number,
   hasMore: boolean,
-  appliedGeneration: number,
+  lastAppliedOk: boolean,
 ): ViewMode {
-  if (status === "error" || (bundleCount === 0 && hasMore && appliedGeneration !== 0)) {
-    return "error";
-  }
-  if (status === "loading" && bundleCount === 0 && hiddenCount === 0 && appliedGeneration === 0) {
+  if ((status === "loading" || status === "idle") && !lastAppliedOk) {
     return "loading";
   }
+  if (status === "error") return "error";
+  if (bundleCount === 0 && hasMore) return "error";
   if (bundleCount === 0) return "empty";
   return "list";
 }
@@ -90,10 +95,11 @@ export function NeedsYouInboxPageClient() {
   const hiddenCount = useAppStore(selectNeedsYouInboxHiddenCount);
   const listRevision = useAppStore(selectNeedsYouInboxRevision);
   const hasMore = useAppStore(selectNeedsYouInboxHasMore);
+  const lastAppliedOk = useAppStore(selectNeedsYouInboxLastAppliedOk);
   const bumpRefreshTick = useAppStore((s) => s.bumpNeedsYouInboxRefreshTick);
   const retry = useCallback(() => bumpRefreshTick(), [bumpRefreshTick]);
 
-  const viewMode = resolveViewMode(status, bundles.length, hiddenCount, hasMore, listRevision);
+  const viewMode = resolveViewMode(status, bundles.length, hasMore, lastAppliedOk);
 
   return (
     <PageShell title={t("sidebar:inbox")} contentClassName="space-y-4 p-6">

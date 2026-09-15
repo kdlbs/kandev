@@ -332,10 +332,55 @@ describe("useNeedsYouInboxController WS event coalescing", () => {
     });
     expect(listClarificationInboxMock).toHaveBeenCalledTimes(2);
 
+    // A trailing timer is now armed for the second (queued) event. A read
+    // count alone can't tell whether unmount actually cleared it: the effect
+    // that would turn a leaked timer's tick bump into a read is unmounted
+    // right along with it, so the count stays flat either way. Assert the
+    // timer itself.
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+
     unmount();
+
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  // R2-F3: `trailingBumpTimeoutRef` must survive an effect re-run triggered
+  // by something other than unmount (here, a connectionStatus change that is
+  // not itself a reconnect-to-"connected" edge) -- the effect's own cleanup
+  // only tears down the WS listeners it registered, and must not silently
+  // drop a still-pending trailing bump.
+  it("does not drop a pending trailing read when the WS effect re-runs for an unrelated reason", async () => {
+    vi.useFakeTimers();
+    listClarificationInboxMock.mockResolvedValueOnce(page());
+    listClarificationInboxMock.mockResolvedValueOnce(page());
+    listClarificationInboxMock.mockResolvedValue(page({ count: 3 }));
+    const { result } = renderController(true);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(1);
+
+    act(() => {
+      emitWsEvent(SESSION_STATE_CHANGED);
+      emitWsEvent(SESSION_STATE_CHANGED);
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(2);
+
+    // A connectionStatus change that is not a "disconnected -> connected"
+    // edge (so it does not itself trigger a reconnect read) still re-runs the
+    // effect the trailing timer lives inside.
+    act(() => {
+      result.current.getState().setConnectionStatus("reconnecting");
+    });
+
     await act(async () => {
       await vi.advanceTimersByTimeAsync(250);
     });
-    expect(listClarificationInboxMock).toHaveBeenCalledTimes(2);
+
+    expect(listClarificationInboxMock).toHaveBeenCalledTimes(3);
+    expect(result.current.getState().needsYouInbox.byWorkspaceId[WORKSPACE_ID]?.count).toBe(3);
   });
 });
