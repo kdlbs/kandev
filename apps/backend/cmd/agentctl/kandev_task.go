@@ -14,7 +14,7 @@ const (
 
 func runTaskCmd(args []string) int {
 	if len(args) == 0 {
-		cliError("usage: agentctl kandev task <get|update|create|decision> [flags]")
+		cliError("usage: agentctl kandev task <get|update|create|decision|handoff> [flags]")
 		return 1
 	}
 	switch args[0] {
@@ -26,6 +26,8 @@ func runTaskCmd(args []string) int {
 		return taskCreate(args[1:])
 	case "decision":
 		return taskDecision(args[1:])
+	case "handoff":
+		return taskHandoff(args[1:])
 	default:
 		cliError("unknown task subcommand: %s", args[0])
 		return 1
@@ -201,6 +203,78 @@ func taskCreate(args []string) int {
 	}
 
 	body, status, err := client.do(http.MethodPost, "/api/v1/office/runtime/tasks", payload)
+	return handleResponse(body, status, err)
+}
+
+// taskHandoff creates a delivery task in a workspace other than the caller's
+// own, through the authenticated Office runtime handoff route. Every flag is
+// tracked through fs.Visit rather than the sibling subcommands' `if value !=
+// "" { … }` idiom: a flag supplied with an empty value must still reach the
+// route so it can apply AC-5a's blank-vs-absent distinction, which the idiom
+// would silently swallow.
+func taskHandoff(args []string) int {
+	fs := flag.NewFlagSet("task handoff", flag.ContinueOnError)
+	targetWorkspaceID := fs.String("target-workspace-id", "", "Target workspace ID (required)")
+	workflowID := fs.String("workflow-id", "", "Workflow ID in the target workspace (required)")
+	title := fs.String("title", "", "Delivery task title, 60 runes or fewer (required)")
+	prompt := fs.String("prompt", "", "Delivery agent's first user message (required)")
+	agentProfileID := fs.String("agent-profile-id", "", "Delivery agent profile ID (required)")
+	executorProfileID := fs.String("executor-profile-id", "", "Delivery executor profile ID (required)")
+	repositoryID := fs.String("repository-id", "", "Repository to attach to the delivery task")
+	baseBranch := fs.String("base-branch", "", "Base branch; only valid with --repository-id")
+	startAgent := fs.Bool("start-agent", false, "Start the delivery agent immediately (default false)")
+	externalID := fs.String("external-id", "", "Create-idempotency key")
+	if err := fs.Parse(args); err != nil {
+		cliError("parse flags: %v", err)
+		return 1
+	}
+	if fs.NArg() > 0 {
+		cliError("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+		return 1
+	}
+
+	visited := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { visited[f.Name] = true })
+
+	payload := map[string]interface{}{}
+	if visited["target-workspace-id"] {
+		payload["target_workspace_id"] = *targetWorkspaceID
+	}
+	if visited["workflow-id"] {
+		payload["workflow_id"] = *workflowID
+	}
+	if visited["title"] {
+		payload["title"] = *title
+	}
+	if visited["prompt"] {
+		payload["prompt"] = *prompt
+	}
+	if visited["agent-profile-id"] {
+		payload["agent_profile_id"] = *agentProfileID
+	}
+	if visited["executor-profile-id"] {
+		payload["executor_profile_id"] = *executorProfileID
+	}
+	if visited["repository-id"] {
+		payload["repository_id"] = *repositoryID
+	}
+	if visited["base-branch"] {
+		payload["base_branch"] = *baseBranch
+	}
+	if visited["start-agent"] {
+		payload["start_agent"] = *startAgent
+	}
+	if visited["external-id"] {
+		payload["external_id"] = *externalID
+	}
+
+	client, err := newKandevClient()
+	if err != nil {
+		cliError("%v", err)
+		return 1
+	}
+
+	body, status, err := client.do(http.MethodPost, "/api/v1/office/runtime/handoffs", payload)
 	return handleResponse(body, status, err)
 }
 

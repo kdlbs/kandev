@@ -13,7 +13,7 @@ const (
 	PermCanCreateProjects  = "can_create_projects"
 	PermCanApprove         = "can_approve"
 	PermCanManageOwnSkills = "can_manage_own_skills"
-	// PermCanHandoffTasks grants handoff_task_kandev: creating a delivery
+	// PermCanHandoffTasks grants the handoff action: creating a delivery
 	// task in a different workspace. Default true only for the ceo role.
 	PermCanHandoffTasks = "can_handoff_tasks"
 	PermMaxSubtaskDepth = "max_subtask_depth"

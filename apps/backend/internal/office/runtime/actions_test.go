@@ -717,6 +717,21 @@ func TestFromAgentMapsExistingPermissions(t *testing.T) {
 	if securityCaps.Allows("create_task") {
 		t.Fatal("security should not receive create_task without an explicit permission override")
 	}
+
+	if !ceoCaps.Allows(CapabilityHandoffTask) {
+		t.Fatal("CEO should be allowed to hand off tasks by default")
+	}
+	if workerCaps.Allows(CapabilityHandoffTask) {
+		t.Fatal("worker should not be allowed to hand off tasks by default")
+	}
+
+	overriddenWorker := FromAgent(&models.AgentInstance{
+		Role:        models.AgentRoleWorker,
+		Permissions: `{"can_handoff_tasks":true}`,
+	})
+	if !overriddenWorker.Allows(CapabilityHandoffTask) {
+		t.Fatal("an explicit override should grant handoff_task to a worker")
+	}
 }
 
 func TestActionsCreateAgentUsesCallerAndReportsToDefault(t *testing.T) {
