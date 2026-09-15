@@ -1672,6 +1672,9 @@ func (a *schedulerTaskStarterAdapter) StartTaskWithRouteReturningSession(
 	route officescheduler.RouteOverride,
 ) (string, error) {
 	execution, err := a.startTaskWithRoute(ctx, taskID, agentProfileID, launch, route)
+	if errors.Is(err, orchestrator.ErrCeilingLaunchDeferred) {
+		return "", officeservice.ErrLaunchDeferredByCapacity
+	}
 	if err != nil || execution == nil {
 		return "", err
 	}
@@ -2224,6 +2227,9 @@ func (a *officeOrchestratorTaskStarter) StartTaskWithEnvReturningSession(
 ) (string, error) {
 	execution, err := a.startTaskWithEnvAndSkills(ctx, taskID, agentProfileID, executorID,
 		executorProfileID, priority, prompt, workflowStepID, planMode, attachments, env, nil)
+	if errors.Is(err, orchestrator.ErrCeilingLaunchDeferred) {
+		return "", officeservice.ErrLaunchDeferredByCapacity
+	}
 	if err != nil || execution == nil {
 		return "", err
 	}
@@ -2250,6 +2256,9 @@ func (a *officeOrchestratorTaskStarter) StartTaskWithLaunchContextReturningSessi
 		launch.ExecutorID, launch.ExecutorProfileID, launch.Priority, launch.Prompt,
 		launch.WorkflowStepID, launch.PlanMode, launch.Attachments, launch.Env,
 		launch.AdditionalSkillSlugs)
+	if errors.Is(err, orchestrator.ErrCeilingLaunchDeferred) {
+		return "", officeservice.ErrLaunchDeferredByCapacity
+	}
 	if err != nil || execution == nil {
 		return "", err
 	}

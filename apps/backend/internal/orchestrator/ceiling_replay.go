@@ -320,6 +320,14 @@ func (s *Service) replayCeilingLaunchStart(ctx context.Context, task *models.Tas
 		attachments,
 		opts,
 	)
+	// startTask reports a repeat refusal as ErrCeilingLaunchDeferred, not as
+	// (nil, nil) — ceilingReplayOutcomeFromExecution's execution==nil case
+	// would otherwise never fire and a still-refused replay would be
+	// misclassified as ceilingReplayFailed (a non-ceiling failure), skipping
+	// the AC-49g card-surface retry and logging a misleading warning.
+	if errors.Is(err, ErrCeilingLaunchDeferred) {
+		return ceilingReplayStillDeferred
+	}
 	return ceilingReplayOutcomeFromExecution(execution, err)
 }
 

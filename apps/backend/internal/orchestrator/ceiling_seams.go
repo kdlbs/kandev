@@ -2,12 +2,30 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
+
+// ErrCeilingLaunchDeferred is returned by startTask (and its StartTask*
+// variants) when admitOrDeferSeam1 refuses admission: a ceiling_deferred
+// record has already been written from the caller's own launch parameters,
+// so this launch will be replayed automatically once capacity frees up
+// rather than failing outright. A caller that only distinguishes "session
+// created" (non-nil execution) from "hard failure" (non-nil error) has no
+// way to notice this without checking for this sentinel — the nil execution
+// looks the same as it would for an ordinary success it forgot to populate.
+// Callers that only care whether the caller-visible request itself is
+// blocked (GitHub/automation/watcher auto-start, which hold a one-shot
+// claim that a real failure must restore) should treat this sentinel the
+// same as a successful dispatch, since the sweep owns retrying it; callers
+// that record launch bookkeeping (Office scheduler launch counters, health,
+// persisted session id) must treat it as "not launched yet" instead of a
+// success.
+var ErrCeilingLaunchDeferred = errors.New("orchestrator: launch deferred by session ceiling")
 
 // originFromAutoStart derives the launch origin from the existing autoStart
 // signal, the widening AC-13a describes for a seam that has no dedicated origin

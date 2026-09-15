@@ -1309,7 +1309,7 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 		return nil, err
 	}
 	if deferred {
-		return nil, nil
+		return nil, ErrCeilingLaunchDeferred
 	}
 	defer seam1Res.releaseIfNotConsumed()
 

@@ -41,7 +41,8 @@ func TestStartTask_SecondAutomaticLaunchOverCeilingIsDeferred(t *testing.T) {
 	require.Equal(t, 1, launches)
 
 	exec2, err := svc.StartTask(ctx, "seam1-it-second", "profile-1", "", "", "", "go", "", false, true, nil)
-	require.NoError(t, err)
+	require.ErrorIs(t, err, ErrCeilingLaunchDeferred,
+		"a refused automatic launch must report a distinguishable deferred error, not a silent no-op")
 	require.Nil(t, exec2, "a refused automatic launch must not produce a launched execution")
 	require.Equal(t, 1, launches, "the refused launch must not reach the agent manager")
 
