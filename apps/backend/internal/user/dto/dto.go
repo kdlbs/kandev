@@ -74,6 +74,7 @@ type UserSettingsDTO struct {
 	TerminalFontSize                  int                                 `json:"terminal_font_size"`
 	ChangesPanelLayout                string                              `json:"changes_panel_layout"`
 	LastSeenDisplay                   string                              `json:"last_seen_display"`
+	AgentTabCloseBehavior             string                              `json:"agent_tab_close_behavior"`
 	SystemMetricsDisplay              models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                                `json:"app_status_bar_enabled"`
 	ResolveSessionHostnames           bool                                `json:"resolve_session_hostnames"`
@@ -186,6 +187,7 @@ type UpdateUserSettingsRequest struct {
 	TerminalFontSize                  *int                               `json:"terminal_font_size,omitempty"`
 	ChangesPanelLayout                *string                            `json:"changes_panel_layout,omitempty"`
 	LastSeenDisplay                   *string                            `json:"last_seen_display,omitempty"`
+	AgentTabCloseBehavior             *string                            `json:"agent_tab_close_behavior,omitempty"`
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch `json:"system_metrics_display,omitempty"`
 	AppStatusBarEnabled               *bool                              `json:"app_status_bar_enabled,omitempty"`
 	ResolveSessionHostnames           *bool                              `json:"resolve_session_hostnames,omitempty"`
@@ -382,6 +384,7 @@ func FromUserSettings(settings *models.UserSettings) UserSettingsDTO {
 		TerminalFontSize:                  settings.TerminalFontSize,
 		ChangesPanelLayout:                settings.ChangesPanelLayout,
 		LastSeenDisplay:                   models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
+		AgentTabCloseBehavior:             models.NormalizeAgentTabCloseBehavior(settings.AgentTabCloseBehavior),
 		SystemMetricsDisplay:              settings.SystemMetricsDisplay,
 		AppStatusBarEnabled:               settings.AppStatusBarEnabled,
 		ResolveSessionHostnames:           settings.ResolveSessionHostnames,
