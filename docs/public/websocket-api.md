@@ -633,6 +633,7 @@ Configuration actions can persist or test credentials and can cause outbound net
 ```text
 mcp.add_branch_to_task
 mcp.archive_task
+mcp.assign_exact_task_profile
 mcp.ask_user_question
 mcp.clarification_timeout
 mcp.create_agent_profile

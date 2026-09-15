@@ -150,15 +150,13 @@ describe("ProfileFormFields no-silent-model-fallback rows", () => {
     expect(trigger.textContent).toContain("claude-gone");
   });
 
-  it("names a unique advertised variation while preserving the saved model", () => {
+  it("does not infer an advertised variation for a gone saved model", () => {
     renderForm(formData({ model: "opus" }), {
       ...modelConfig,
       available_models: [{ id: "opus[1m]", name: "Opus (1m)" }],
     });
 
-    const advisory = screen.getByTestId("profile-model-variation-advisory");
-    expect(advisory.textContent).toContain("opus[1m]");
-    expect(advisory.textContent).toContain("opus");
+    expect(screen.queryByTestId("profile-model-variation-advisory")).toBeNull();
     expect(
       screen.getByRole("button", { name: profileStartModelSettingsLabel }).textContent,
     ).toContain("opus");

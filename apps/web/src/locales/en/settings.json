@@ -521,6 +521,7 @@
   "previewSound": "Preview sound",
   "profileForTasksCreatedByAgents": "Profile for Tasks Created by Agents",
   "programming": "Programming",
+  "profileStartModelNotAdvertisedOnHost": "The host probe did not advertise {{model}}. The selected executor will decide the model at launch.",
   "modelVariationAdvisory": "The host catalog has one possible variation of {{model}}: {{variation}}. The saved model remains unchanged until launch.",
   "promptAdd": "Add prompt",
   "promptEditorAriaLabel": "Prompt editor",

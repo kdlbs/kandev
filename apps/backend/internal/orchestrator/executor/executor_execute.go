@@ -1554,6 +1554,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		session.ExecutorID = execCfg.ExecutorID
 	}
 	req.OfficeAgentProfileID = opts.OfficeAgentProfileID
+	req.ExactProfile = opts.ExactProfile
 	req.TurnID = opts.TurnID
 	if req.OfficeAgentProfileID == "" && session.AgentProfileID != "" {
 		req.OfficeAgentProfileID = session.AgentProfileID
