@@ -16,6 +16,55 @@ const ancestorWalkHopCap = 64
 // not allowed to read or write documents on the target task.
 var ErrAccessDenied = errors.New("document access denied")
 
+// RelatedReadScope is an internally attested extension to relation-scoped
+// related-task reads. It is deliberately not derived from callable arguments.
+type RelatedReadScope string
+
+const (
+	RelatedReadScopeRelation          RelatedReadScope = "relation"
+	RelatedReadScopeWorkspaceTaskTree RelatedReadScope = "workspace-task-tree"
+)
+
+// RelatedReadRequest separates compact task-tree inspection from the document
+// access rules. The MCP server supplies Scope after resolving its profile.
+type RelatedReadRequest struct {
+	CallerTaskID string
+	TargetTaskID string
+	Scope        RelatedReadScope
+	Verbose      bool
+}
+
+// RelatedReadDenialReason is safe to return to a caller. In particular,
+// target_unavailable intentionally combines unknown and foreign targets.
+type RelatedReadDenialReason string
+
+const (
+	RelatedReadDenialTargetUnavailable          RelatedReadDenialReason = "target_unavailable"
+	RelatedReadDenialScopeRequired              RelatedReadDenialReason = "related_task_scope_required"
+	RelatedReadDenialVerboseDocumentScopeNeeded RelatedReadDenialReason = "verbose_document_scope_required"
+)
+
+// RelatedReadAccessError preserves the existing ErrAccessDenied category for
+// callers that only need a 403 while making the public reason stable.
+type RelatedReadAccessError struct {
+	Reason         RelatedReadDenialReason
+	InternalReason string
+}
+
+func (e *RelatedReadAccessError) Error() string { return "related task access denied" }
+
+func (e *RelatedReadAccessError) Unwrap() error { return ErrAccessDenied }
+
+// RelatedReadDenialReasonFor extracts a safe reason without exposing an
+// operator-only classification such as an unknown or foreign target.
+func RelatedReadDenialReasonFor(err error) (RelatedReadDenialReason, bool) {
+	var denied *RelatedReadAccessError
+	if !errors.As(err, &denied) {
+		return "", false
+	}
+	return denied.Reason, true
+}
+
 // taskLookup is the minimal repository surface the access guards depend on.
 // Defined here (and not as a public interface) to keep the dependency arrow
 // in this file alone.
