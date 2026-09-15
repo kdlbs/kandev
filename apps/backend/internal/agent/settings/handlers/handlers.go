@@ -405,14 +405,15 @@ type createAgentRequest struct {
 }
 
 type createAgentProfileRequest struct {
-	Name          string                 `json:"name"`
-	Model         string                 `json:"model"`
-	FallbackModel string                 `json:"fallback_model,omitempty"`
-	AutoFallback  bool                   `json:"auto_fallback"`
-	Mode          string                 `json:"mode,omitempty"`
-	CLIFlags      []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
-	EnvVars       []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
-	CommandPrefix string                 `json:"command_prefix,omitempty"`
+	Name              string                 `json:"name"`
+	Model             string                 `json:"model"`
+	FallbackModel     string                 `json:"fallback_model,omitempty"`
+	AutoFallback      bool                   `json:"auto_fallback"`
+	RequireExactModel bool                   `json:"require_exact_model"`
+	Mode              string                 `json:"mode,omitempty"`
+	CLIFlags          []dto.CLIFlagDTO       `json:"cli_flags,omitempty"`
+	EnvVars           []dto.ProfileEnvVarDTO `json:"env_vars,omitempty"`
+	CommandPrefix     string                 `json:"command_prefix,omitempty"`
 }
 
 func (h *Handlers) httpCreateAgent(c *gin.Context) {
@@ -432,14 +433,15 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 			return
 		}
 		profiles = append(profiles, controller.CreateAgentProfileRequest{
-			Name:          profile.Name,
-			Model:         profile.Model,
-			FallbackModel: profile.FallbackModel,
-			AutoFallback:  profile.AutoFallback,
-			Mode:          profile.Mode,
-			CLIFlags:      profile.CLIFlags,
-			EnvVars:       profile.EnvVars,
-			CommandPrefix: profile.CommandPrefix,
+			Name:              profile.Name,
+			Model:             profile.Model,
+			FallbackModel:     profile.FallbackModel,
+			AutoFallback:      profile.AutoFallback,
+			RequireExactModel: profile.RequireExactModel,
+			Mode:              profile.Mode,
+			CLIFlags:          profile.CLIFlags,
+			EnvVars:           profile.EnvVars,
+			CommandPrefix:     profile.CommandPrefix,
 		})
 	}
 	resp, err := h.controller.CreateAgent(c.Request.Context(), controller.CreateAgentRequest{
@@ -449,7 +451,8 @@ func (h *Handlers) httpCreateAgent(c *gin.Context) {
 	})
 	if err != nil {
 		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) ||
-			errors.Is(err, controller.ErrInvalidProviderConfig) {
+			errors.Is(err, controller.ErrInvalidProviderConfig) ||
+			errors.Is(err, controller.ErrRequireExactModelNeedsModel) || errors.Is(err, controller.ErrRequireExactModelUnsupported) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -623,7 +626,8 @@ func (h *Handlers) httpCreateProfile(c *gin.Context) {
 			return
 		}
 		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) ||
-			errors.Is(err, controller.ErrInvalidProviderConfig) {
+			errors.Is(err, controller.ErrInvalidProviderConfig) ||
+			errors.Is(err, controller.ErrRequireExactModelNeedsModel) || errors.Is(err, controller.ErrRequireExactModelUnsupported) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}
@@ -660,7 +664,8 @@ func (h *Handlers) httpUpdateProfile(c *gin.Context) {
 			return
 		}
 		if errors.Is(err, controller.ErrInvalidProfileEnvVars) || errors.Is(err, controller.ErrInvalidCommandPrefix) ||
-			errors.Is(err, controller.ErrInvalidProviderConfig) {
+			errors.Is(err, controller.ErrInvalidProviderConfig) ||
+			errors.Is(err, controller.ErrRequireExactModelNeedsModel) || errors.Is(err, controller.ErrRequireExactModelUnsupported) {
 			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 			return
 		}

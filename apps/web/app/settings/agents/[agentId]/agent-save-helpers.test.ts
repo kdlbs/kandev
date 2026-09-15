@@ -115,6 +115,12 @@ describe("toAgentProfilePatch", () => {
     });
   });
 
+  it("maps require_exact_model to the camelCase field", () => {
+    expect(toAgentProfilePatch({ require_exact_model: true })).toEqual({
+      requireExactModel: true,
+    });
+  });
+
   it("omits undefined keys so partial patches do not clobber unrelated fields", () => {
     expect(toAgentProfilePatch({ cli_passthrough: false })).toEqual({ cliPassthrough: false });
     expect(toAgentProfilePatch({})).toEqual({});

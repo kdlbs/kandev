@@ -101,6 +101,8 @@ func namespacesMCPToolsByServerFromAgent(agent agents.Agent) bool {
 	return rt != nil && rt.NamespacesMCPToolsByServer
 }
 
+// buildContainerCreateInstanceRequest builds the agentctl request for a fresh
+// Docker instance, including the task and session identity used by MCP tools.
 func buildContainerCreateInstanceRequest(
 	config ContainerConfig,
 	agentType string,
@@ -120,6 +122,7 @@ func buildContainerCreateInstanceRequest(
 		AutoStart:                  false,
 		McpServers:                 config.McpServers,
 		SessionID:                  config.SessionID,
+		TaskID:                     config.TaskID,
 		DisableAskQuestion:         disableAskQuestion,
 		AssumeMcpSse:               assumeMcpSse,
 		AssumeMcpHttp:              assumeMcpHttp,

@@ -81,6 +81,28 @@ type ProfileEditorProps = {
   initialMcpConfig?: AgentProfileMcpConfig | null;
 };
 
+function toProfileFormData(
+  profile: AgentProfile,
+  permissionSettings: Record<string, PermissionSetting>,
+): ProfileFormData {
+  const permissionValues = profilePermissionValues(profile, permissionSettings);
+  return {
+    name: profile.name,
+    model: profile.model,
+    fallback_model: profile.fallbackModel ?? "",
+    auto_fallback: profile.autoFallback ?? false,
+    require_exact_model: profile.requireExactModel ?? false,
+    mode: profile.mode ?? "",
+    config_options: profile.configOptions ?? {},
+    auto_approve: permissionValues.auto_approve,
+    allow_indexing: permissionValues.allow_indexing,
+    cli_passthrough: profile.cliPassthrough,
+    cli_flags: profile.cliFlags ?? [],
+    command_prefix: profile.commandPrefix ?? "",
+    provider_kind: profile.providerKind ?? "",
+  };
+}
+
 type ProfileEditorHeaderProps = {
   agentName: string;
   agentDisplayName: string;
@@ -228,28 +250,6 @@ type ProfileSettingsCardProps = {
   onModelConfigResolutionPendingChange: (pending: boolean) => void;
 };
 
-type ProfileFormPermissions = ReturnType<typeof profilePermissionValues>;
-
-function profileFormData(
-  profile: AgentProfile,
-  permissions: ProfileFormPermissions,
-): ProfileFormData {
-  return {
-    name: profile.name,
-    model: profile.model,
-    fallback_model: profile.fallbackModel ?? "",
-    auto_fallback: profile.autoFallback ?? false,
-    mode: profile.mode ?? "",
-    config_options: profile.configOptions ?? {},
-    provider_kind: profile.providerKind ?? "",
-    auto_approve: permissions.auto_approve,
-    allow_indexing: permissions.allow_indexing,
-    cli_passthrough: profile.cliPassthrough,
-    cli_flags: profile.cliFlags ?? [],
-    command_prefix: profile.commandPrefix ?? "",
-  };
-}
-
 function ProfileSettingsCard({
   agent,
   draft,
@@ -265,8 +265,6 @@ function ProfileSettingsCard({
   const handleFormChange = (patch: Partial<ProfileFormData>) => {
     onDraftChange(toAgentProfilePatch(patch));
   };
-  const permissionValues = profilePermissionValues(draft, permissionSettings);
-  const savedPermissionValues = profilePermissionValues(savedProfile, permissionSettings);
 
   return (
     <SettingsCard
@@ -281,8 +279,8 @@ function ProfileSettingsCard({
       </CardHeader>
       <CardContent className="space-y-4">
         <ProfileFormFields
-          profile={profileFormData(draft, permissionValues)}
-          baselineProfile={profileFormData(savedProfile, savedPermissionValues)}
+          profile={toProfileFormData(draft, permissionSettings)}
+          baselineProfile={toProfileFormData(savedProfile, permissionSettings)}
           onChange={handleFormChange}
           modelConfig={modelConfig}
           permissionSettings={permissionSettings}

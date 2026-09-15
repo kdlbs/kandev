@@ -150,15 +150,13 @@ describe("ProfileFormFields no-silent-model-fallback rows", () => {
     expect(trigger.textContent).toContain("claude-gone");
   });
 
-  it("names a unique advertised variation while preserving the saved model", () => {
+  it("does not infer an advertised variation for a gone saved model", () => {
     renderForm(formData({ model: "opus" }), {
       ...modelConfig,
       available_models: [{ id: "opus[1m]", name: "Opus (1m)" }],
     });
 
-    const advisory = screen.getByTestId("profile-model-variation-advisory");
-    expect(advisory.textContent).toContain("opus[1m]");
-    expect(advisory.textContent).toContain("opus");
+    expect(screen.queryByTestId("profile-model-variation-advisory")).toBeNull();
     expect(
       screen.getByRole("button", { name: profileStartModelSettingsLabel }).textContent,
     ).toContain("opus");
@@ -176,6 +174,21 @@ describe("ProfileFormFields no-silent-model-fallback rows", () => {
     expect(screen.queryByTestId("profile-fallback-model-field")).not.toBeNull();
     expect(screen.getByRole("switch", { name: "Agent fallback" })).toHaveProperty("disabled", true);
     expect(screen.queryByTestId("profile-auto-fallback-field")).not.toBeNull();
+  });
+
+  it("disables fallback controls while exact model is required", () => {
+    renderForm(formData({ require_exact_model: true, fallback_model: "mock-fast" }));
+    expandFallbackSettings();
+    expect(
+      screen.getByRole("switch", { name: "Require exact model" }).getAttribute("data-state"),
+    ).toBe("checked");
+    expect(
+      screen.getByRole("switch", { name: "Fallback automatically to next model" }),
+    ).toHaveProperty("disabled", true);
+    expect(screen.getByRole("switch", { name: "Agent fallback" })).toHaveProperty("disabled", true);
+    expect(screen.getByTestId("profile-fallback-settings-summary").textContent).toContain(
+      "Exact model required",
+    );
   });
 
   it("marks a gone fallback model red in its picker", () => {

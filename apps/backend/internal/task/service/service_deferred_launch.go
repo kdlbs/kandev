@@ -9,6 +9,12 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
+// deferredLaunchPromptCASRetryBudget bounds the read-compare-write retry for
+// a concurrent, legitimate deferred_launch writer (the session ceiling's own
+// admission machinery) mutating a different field while this edit is
+// in flight. Mirrors the orchestrator's own deferredLaunchCASRetryBudget.
+const deferredLaunchPromptCASRetryBudget = 3
+
 var (
 	// ErrNoPendingDeferredLaunch means the task carries no deferred launch
 	// record to edit. Either it never had one, or it has already been consumed
@@ -38,7 +44,7 @@ var (
 // the record itself is gone (consumed by the gate or by a direct start), or a
 // session already exists on the task.
 //
-// # Why the write is a conditional single-key patch
+// # Why the write is a value-compared, retried single-key patch
 //
 // The obvious implementation — read the task, check it has no session, write
 // the task back — reintroduces the very bug this file exists to fix. A start
@@ -47,11 +53,19 @@ var (
 // metadata it read before, RESURRECTS the key. The gate fires a second session
 // on a task that is already running, which is exactly the production symptom.
 //
-// So the write goes through SetTaskMetadataKeyIfPresent, which patches the one
-// key and only while it is still there. A concurrent start wins the race and
-// this returns ErrDeferredLaunchAlreadyStarted, with nothing written. The
-// session check stays because it gives the common case a precise error instead
-// of a bare conflict; it is not what makes the update safe.
+// So the write goes through GetTaskDeferredLaunch/SetTaskDeferredLaunchIfUnchanged,
+// the session ceiling's own compare-and-set protocol, rather than
+// SetTaskMetadataKeyIfPresent: presence-only is not enough, because the ceiling's
+// admission machinery (for example the replay sweeper) can legitimately rewrite
+// other fields on this same record while this edit is in flight, and a
+// presence-only write would silently overwrite that change with the stale copy
+// this function read earlier. A lost comparison against an unchanged prior is
+// retried, bounded by deferredLaunchPromptCASRetryBudget; a lost comparison
+// against a record the retry finds gone means a concurrent start consumed it,
+// which reports the same ErrDeferredLaunchAlreadyStarted a presence-only write
+// would have. The session check stays because it gives the common case a
+// precise error instead of a bare conflict; it is not what makes the update
+// safe.
 func (s *Service) UpdateDeferredLaunchPrompt(ctx context.Context, taskID, prompt string) (*models.Task, error) {
 	if err := s.authorizeTaskID(ctx, taskID); err != nil {
 		return nil, err
@@ -59,14 +73,18 @@ func (s *Service) UpdateDeferredLaunchPrompt(ctx context.Context, taskID, prompt
 	if strings.TrimSpace(prompt) == "" {
 		return nil, ErrDeferredLaunchPromptEmpty
 	}
-	task, err := s.tasks.GetTask(ctx, taskID)
+	launch, prior, err := s.tasks.GetTaskDeferredLaunch(ctx, taskID)
 	if err != nil {
 		return nil, err
 	}
-	launch, ok := pendingDeferredLaunch(task)
-	if !ok {
+	if launch == nil {
 		return nil, ErrNoPendingDeferredLaunch
 	}
+	// The session check runs after establishing the record is present, so a
+	// concurrent start's atomic claim landing during this call (rather than
+	// before this function started) is caught below by the compare-and-set
+	// losing against the prior this function already captured, not
+	// misreported as "never had one".
 	started, err := s.taskHasAnySession(ctx, taskID)
 	if err != nil {
 		return nil, err
@@ -75,36 +93,43 @@ func (s *Service) UpdateDeferredLaunchPrompt(ctx context.Context, taskID, prompt
 		return nil, ErrDeferredLaunchAlreadyStarted
 	}
 
-	updated := make(map[string]interface{}, len(launch)+1)
-	maps.Copy(updated, launch)
-	updated["prompt"] = prompt
-	written, err := s.tasks.SetTaskMetadataKeyIfPresent(ctx, taskID, models.MetaKeyDeferredLaunch, updated)
-	if err != nil {
-		return nil, err
+	for attempt := 0; attempt < deferredLaunchPromptCASRetryBudget; attempt++ {
+		updated := make(map[string]interface{}, len(launch)+1)
+		maps.Copy(updated, launch)
+		updated["prompt"] = prompt
+		if payload, ok := launch[models.CeilingLaunchPayloadKey].(map[string]interface{}); ok {
+			updatedPayload := make(map[string]interface{}, len(payload)+1)
+			maps.Copy(updatedPayload, payload)
+			updatedPayload["prompt"] = prompt
+			updated[models.CeilingLaunchPayloadKey] = updatedPayload
+		}
+		stored, lostCompare, err := s.tasks.SetTaskDeferredLaunchIfUnchanged(ctx, taskID, prior, updated)
+		if err != nil {
+			return nil, err
+		}
+		if stored {
+			// Re-read rather than returning the patched in-memory copy: the row
+			// now carries whatever else changed while this ran, and handing
+			// back a stale snapshot is how the resurrection bug got in.
+			task, err := s.tasks.GetTask(ctx, taskID)
+			if err != nil {
+				return nil, err
+			}
+			s.PublishTaskUpdated(ctx, task)
+			return task, nil
+		}
+		if !lostCompare {
+			return nil, ErrDeferredLaunchAlreadyStarted
+		}
+		launch, prior, err = s.tasks.GetTaskDeferredLaunch(ctx, taskID)
+		if err != nil {
+			return nil, err
+		}
+		if launch == nil {
+			return nil, ErrDeferredLaunchAlreadyStarted
+		}
 	}
-	if !written {
-		return nil, ErrDeferredLaunchAlreadyStarted
-	}
-
-	// Re-read rather than returning the patched in-memory copy: the row now
-	// carries whatever else changed while this ran, and handing back a stale
-	// snapshot is how the resurrection bug got in.
-	stored, err := s.tasks.GetTask(ctx, taskID)
-	if err != nil {
-		return nil, err
-	}
-	s.PublishTaskUpdated(ctx, stored)
-	return stored, nil
-}
-
-// pendingDeferredLaunch returns the task's deferred launch record when it is
-// present and well-formed.
-func pendingDeferredLaunch(task *models.Task) (map[string]interface{}, bool) {
-	if task == nil || task.Metadata == nil {
-		return nil, false
-	}
-	launch, ok := task.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
-	return launch, ok
+	return nil, ErrDeferredLaunchAlreadyStarted
 }
 
 // taskHasAnySession reports whether any session row exists for the task,

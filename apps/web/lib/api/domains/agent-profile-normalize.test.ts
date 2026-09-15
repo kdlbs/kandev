@@ -34,6 +34,7 @@ const expectedCamelCaseProfile = {
   model: "claude-sonnet-4-5",
   fallbackModel: "",
   autoFallback: false,
+  requireExactModel: false,
   mode: "acp",
   allowIndexing: true,
   autoApprove: false,
@@ -150,15 +151,18 @@ describe("normalizeAgentProfile", () => {
       name: "default",
       fallback_model: "gpt-5",
       auto_fallback: true,
+      require_exact_model: true,
     });
     expect(result.fallbackModel).toBe("gpt-5");
     expect(result.autoFallback).toBe(true);
+    expect(result.requireExactModel).toBe(true);
   });
 
   it("defaults fallbackModel to empty and autoFallback to false when absent", () => {
     const result = normalizeAgentProfile({ id: SAMPLE_ID, name: "default" });
     expect(result.fallbackModel).toBe("");
     expect(result.autoFallback).toBe(false);
+    expect(result.requireExactModel).toBe(false);
   });
 
   it("normalizes a dynamic profile document and preserves candidate order", () => {
@@ -272,18 +276,20 @@ describe("toAgentProfilePayload", () => {
     expect(payload).toEqual({ id: SAMPLE_ID, name: "default", command_prefix: SAMPLE_PREFIX });
   });
 
-  it("maps fallbackModel/autoFallback to fallback_model/auto_fallback", () => {
+  it("maps fallbackModel/autoFallback/requireExactModel to snake_case", () => {
     const payload = toAgentProfilePayload({
       id: toAgentProfileId(SAMPLE_ID),
       name: "default",
       fallbackModel: "gpt-5",
       autoFallback: true,
+      requireExactModel: true,
     });
     expect(payload).toEqual({
       id: SAMPLE_ID,
       name: "default",
       fallback_model: "gpt-5",
       auto_fallback: true,
+      require_exact_model: true,
     });
   });
 

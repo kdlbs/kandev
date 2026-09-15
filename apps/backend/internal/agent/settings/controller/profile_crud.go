@@ -26,16 +26,17 @@ import (
 const dynamicProfileKind = "dynamic"
 
 type CreateProfileRequest struct {
-	AgentID        string
-	Name           string
-	Model          string
-	FallbackModel  string
-	AutoFallback   bool
-	Mode           string
-	ConfigOptions  map[string]string
-	AllowIndexing  bool
-	AutoApprove    bool
-	CLIPassthrough bool
+	AgentID           string
+	Name              string
+	Model             string
+	FallbackModel     string
+	AutoFallback      bool
+	RequireExactModel bool
+	Mode              string
+	ConfigOptions     map[string]string
+	AllowIndexing     bool
+	AutoApprove       bool
+	CLIPassthrough    bool
 	// CLIFlags is the explicit list to persist. When nil, the profile is
 	// seeded from the agent's curated PermissionSettings() list so a fresh
 	// profile opens with the agent's recommended flags (all disabled by
@@ -64,6 +65,9 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 	agentConfig, agOk := c.agentRegistry.Get(agent.Name)
 	if !agOk {
 		return nil, fmt.Errorf("unknown agent: %s", agent.Name)
+	}
+	if err := validateRequireExactModelPolicy(req.Model, req.RequireExactModel, req.CLIPassthrough, agent.Name == agents.DynamicAgentID); err != nil {
+		return nil, err
 	}
 	displayName, err := c.resolveDisplayName(agentConfig, agent.Name)
 	if err != nil {
@@ -94,6 +98,7 @@ func (c *Controller) CreateProfile(ctx context.Context, req CreateProfileRequest
 		Model:                  req.Model,
 		FallbackModel:          strings.TrimSpace(req.FallbackModel),
 		AutoFallback:           req.AutoFallback,
+		RequireExactModel:      req.RequireExactModel,
 		Mode:                   req.Mode,
 		ConfigOptions:          profileconfig.SanitizeConfigOptions(req.ConfigOptions),
 		AllowIndexing:          req.AllowIndexing,
@@ -334,16 +339,17 @@ func dynamicProfileDTO(profile *models.DynamicAgentProfile, routes []models.Dyna
 }
 
 type UpdateProfileRequest struct {
-	ID             string
-	Name           *string
-	Model          *string
-	FallbackModel  *string
-	AutoFallback   *bool
-	Mode           *string
-	ConfigOptions  *map[string]string
-	AllowIndexing  *bool
-	AutoApprove    *bool
-	CLIPassthrough *bool
+	ID                string
+	Name              *string
+	Model             *string
+	FallbackModel     *string
+	AutoFallback      *bool
+	RequireExactModel *bool
+	Mode              *string
+	ConfigOptions     *map[string]string
+	AllowIndexing     *bool
+	AutoApprove       *bool
+	CLIPassthrough    *bool
 	// Enabled replaces the value when non-nil. Nil means "leave unchanged".
 	Enabled *bool
 	// CLIFlags replaces the entire list when non-nil. Nil means "leave
@@ -369,7 +375,7 @@ func (req UpdateProfileRequest) touchesProvider() bool {
 
 func enabledOnlyUpdate(req UpdateProfileRequest) bool {
 	return req.Enabled != nil && req.Name == nil && req.Model == nil &&
-		req.FallbackModel == nil && req.AutoFallback == nil && req.Mode == nil &&
+		req.FallbackModel == nil && req.AutoFallback == nil && req.RequireExactModel == nil && req.Mode == nil &&
 		req.ConfigOptions == nil && req.AllowIndexing == nil && req.AutoApprove == nil &&
 		req.CLIPassthrough == nil && req.CLIFlags == nil && req.EnvVars == nil &&
 		req.CommandPrefix == nil && !req.touchesProvider() && req.Dynamic == nil
@@ -415,6 +421,9 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	if req.AutoFallback != nil {
 		profile.AutoFallback = *req.AutoFallback
 	}
+	if req.RequireExactModel != nil {
+		profile.RequireExactModel = *req.RequireExactModel
+	}
 	if req.Mode != nil {
 		profile.Mode = *req.Mode
 	}
@@ -429,6 +438,9 @@ func (c *Controller) UpdateProfile(ctx context.Context, req UpdateProfileRequest
 	}
 	if req.CLIPassthrough != nil {
 		profile.CLIPassthrough = *req.CLIPassthrough
+	}
+	if err := validateRequireExactModelPolicy(profile.Model, profile.RequireExactModel, profile.CLIPassthrough, isDynamic); err != nil {
+		return nil, err
 	}
 	if req.Enabled != nil {
 		dynamicRefs, err := c.listDynamicProfileReferences(ctx, req.ID)
@@ -547,6 +559,22 @@ func (c *Controller) applyProviderConfigUpdate(
 		agentName = ag.Name
 	}
 	return c.normalizeProviderConfig(ctx, profile, agentName)
+}
+
+// validateRequireExactModelPolicy validates the merged profile policy before
+// it reaches storage. Dynamic selectors and terminal passthrough profiles do
+// not own a concrete ACP model, so they cannot promise exact selection.
+func validateRequireExactModelPolicy(model string, requireExactModel, cliPassthrough, dynamic bool) error {
+	if !requireExactModel {
+		return nil
+	}
+	if dynamic || cliPassthrough {
+		return ErrRequireExactModelUnsupported
+	}
+	if strings.TrimSpace(model) == "" {
+		return ErrRequireExactModelNeedsModel
+	}
+	return nil
 }
 
 func (c *Controller) updateDynamicProfileAtomically(
@@ -692,6 +720,7 @@ func duplicateClone(source *models.AgentProfile) *models.AgentProfile {
 		Model:                      source.Model,
 		FallbackModel:              strings.TrimSpace(source.FallbackModel),
 		AutoFallback:               source.AutoFallback,
+		RequireExactModel:          source.RequireExactModel,
 		Mode:                       source.Mode,
 		ConfigOptions:              profileconfig.SanitizeConfigOptions(cloneStringMap(source.ConfigOptions)),
 		AllowIndexing:              source.AllowIndexing,
@@ -1250,6 +1279,7 @@ func toProfileDTO(profile *models.AgentProfile) dto.AgentProfileDTO {
 		Model:                  profile.Model,
 		FallbackModel:          profile.FallbackModel,
 		AutoFallback:           profile.AutoFallback,
+		RequireExactModel:      profile.RequireExactModel,
 		Mode:                   profile.Mode,
 		ConfigOptions:          profileconfig.SanitizeConfigOptions(profile.ConfigOptions),
 		AllowIndexing:          profile.AllowIndexing,

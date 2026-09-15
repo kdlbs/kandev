@@ -393,14 +393,22 @@ func (s *Service) UpdateTaskMetadata(ctx context.Context, id string, metadata ma
 	}
 	task.UpdatedAt = time.Now().UTC()
 
-	if err := s.tasks.UpdateTask(ctx, task); err != nil {
+	if err := s.tasks.UpdateTaskPreservingDeferredLaunch(ctx, task); err != nil {
 		s.logger.Error("failed to update task metadata", zap.String("task_id", id), zap.Error(err))
 		return nil, err
 	}
 
-	s.PublishTaskUpdated(ctx, task)
+	// Reload rather than publish/return the pre-write snapshot: the
+	// preserving update can win a concurrent ceiling CAS on deferred_launch,
+	// and that field lives only in the database row from this point on.
+	current, err := s.tasks.GetTask(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	s.PublishTaskUpdated(ctx, current)
 	s.logger.Debug("task metadata updated", zap.String("task_id", id), zap.Any("metadata", metadata))
-	return task, nil
+	return current, nil
 }
 
 // MoveTaskResult contains the result of a MoveTask operation.
@@ -1316,7 +1324,7 @@ func (s *Service) updateMovedTaskSameStep(ctx context.Context, task *models.Task
 		}
 		return task.WIPAdmitted, nil
 	}
-	if err := s.tasks.UpdateTask(ctx, task); err != nil {
+	if err := s.tasks.UpdateTaskPreservingDeferredLaunch(ctx, task); err != nil {
 		return false, err
 	}
 	return task.WIPAdmitted, nil

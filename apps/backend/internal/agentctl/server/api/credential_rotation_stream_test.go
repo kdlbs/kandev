@@ -106,13 +106,16 @@ func dialTestWSWithAuth(t *testing.T, server *httptest.Server, token string) *we
 	return conn
 }
 
-// assertConnectionClosedByServer reads from conn until the server closes it.
-// Frames already queued by a live stream can arrive after rotation, so one
-// successful read is not proof that fencing failed. The read deadline still
-// makes a stream that never closes fail instead of waiting forever.
+// assertConnectionClosedByServer drains any frames queued before the server
+// close and requires a non-timeout read error. A PTY-backed stream can finish
+// writing buffered output concurrently with credential invalidation, so the
+// first read after rotation may still return a frame. A timeout means the
+// fencing mechanism never fired; an identical dial with no rotation reaches
+// that path once `within` elapses.
 func assertConnectionClosedByServer(t *testing.T, conn *websocket.Conn, within time.Duration) {
 	t.Helper()
-	_ = conn.SetReadDeadline(time.Now().Add(within))
+	deadline := time.Now().Add(within)
+	_ = conn.SetReadDeadline(deadline)
 	for {
 		_, _, err := conn.ReadMessage()
 		if err == nil {

@@ -7,25 +7,24 @@ import "github.com/kandev/kandev/internal/agent/settings/dto"
 // CreateProfile owns those defaults.
 func CreateProfileRequestFromDTO(request dto.ProfileCreateRequest) CreateProfileRequest {
 	return CreateProfileRequest{
-		AgentID:        request.AgentID,
-		Name:           request.Name,
-		Model:          request.Model,
-		FallbackModel:  request.FallbackModel,
-		AutoFallback:   request.AutoFallback,
-		Mode:           request.Mode,
-		ConfigOptions:  request.ConfigOptions,
-		AllowIndexing:  request.AllowIndexing,
-		AutoApprove:    request.AutoApprove,
-		CLIPassthrough: request.CLIPassthrough,
-		CLIFlags:       request.CLIFlags,
-		EnvVars:        request.EnvVars,
-		CommandPrefix:  request.CommandPrefix,
-
+		AgentID:                request.AgentID,
+		Name:                   request.Name,
+		Model:                  request.Model,
+		FallbackModel:          request.FallbackModel,
+		AutoFallback:           request.AutoFallback,
+		RequireExactModel:      request.RequireExactModel,
+		Mode:                   request.Mode,
+		ConfigOptions:          request.ConfigOptions,
+		AllowIndexing:          request.AllowIndexing,
+		AutoApprove:            request.AutoApprove,
+		CLIPassthrough:         request.CLIPassthrough,
+		CLIFlags:               request.CLIFlags,
+		EnvVars:                request.EnvVars,
+		CommandPrefix:          request.CommandPrefix,
 		ProviderKind:           request.ProviderKind,
 		ProviderBaseURL:        request.ProviderBaseURL,
 		ProviderAPIKeySecretID: request.ProviderAPIKeySecretID,
-
-		Dynamic: request.Dynamic,
+		Dynamic:                request.Dynamic,
 	}
 }
 
@@ -34,26 +33,25 @@ func CreateProfileRequestFromDTO(request dto.ProfileCreateRequest) CreateProfile
 // empty values all the way to the controller.
 func UpdateProfileRequestFromDTO(request dto.ProfileUpdateRequest) UpdateProfileRequest {
 	return UpdateProfileRequest{
-		ID:             request.ID,
-		Name:           request.Name,
-		Model:          request.Model,
-		FallbackModel:  request.FallbackModel,
-		AutoFallback:   request.AutoFallback,
-		Mode:           request.Mode,
-		ConfigOptions:  request.ConfigOptions,
-		AllowIndexing:  request.AllowIndexing,
-		AutoApprove:    request.AutoApprove,
-		CLIPassthrough: request.CLIPassthrough,
-		Enabled:        request.Enabled,
-		CLIFlags:       request.CLIFlags,
-		EnvVars:        request.EnvVars,
-		CommandPrefix:  request.CommandPrefix,
-
+		ID:                     request.ID,
+		Name:                   request.Name,
+		Model:                  request.Model,
+		FallbackModel:          request.FallbackModel,
+		AutoFallback:           request.AutoFallback,
+		RequireExactModel:      request.RequireExactModel,
+		Mode:                   request.Mode,
+		ConfigOptions:          request.ConfigOptions,
+		AllowIndexing:          request.AllowIndexing,
+		AutoApprove:            request.AutoApprove,
+		CLIPassthrough:         request.CLIPassthrough,
+		Enabled:                request.Enabled,
+		CLIFlags:               request.CLIFlags,
+		EnvVars:                request.EnvVars,
+		CommandPrefix:          request.CommandPrefix,
 		ProviderKind:           request.ProviderKind,
 		ProviderBaseURL:        request.ProviderBaseURL,
 		ProviderAPIKeySecretID: request.ProviderAPIKeySecretID,
-
-		Dynamic: request.Dynamic,
-		Force:   request.Force,
+		Dynamic:                request.Dynamic,
+		Force:                  request.Force,
 	}
 }

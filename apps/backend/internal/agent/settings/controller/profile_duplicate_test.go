@@ -17,18 +17,19 @@ func sourceProfile() *models.AgentProfile {
 	failureThreshold := 4
 	lastRun := time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC)
 	return &models.AgentProfile{
-		ID:               "source-1",
-		AgentID:          "agent-1",
-		Name:             "Default",
-		AgentDisplayName: "Claude Code",
-		Model:            "claude-sonnet",
-		FallbackModel:    "claude-haiku",
-		AutoFallback:     true,
-		Mode:             "plan",
-		ConfigOptions:    map[string]string{"effort": "high"},
-		AllowIndexing:    true,
-		AutoApprove:      true,
-		CLIPassthrough:   true,
+		ID:                "source-1",
+		AgentID:           "agent-1",
+		Name:              "Default",
+		AgentDisplayName:  "Claude Code",
+		Model:             "claude-sonnet",
+		FallbackModel:     "claude-haiku",
+		AutoFallback:      true,
+		RequireExactModel: true,
+		Mode:              "plan",
+		ConfigOptions:     map[string]string{"effort": "high"},
+		AllowIndexing:     true,
+		AutoApprove:       true,
+		CLIPassthrough:    true,
 		CLIFlags: []models.CLIFlag{
 			{Description: "Allow all tools", Flag: "--allow-all-tools", Enabled: true},
 			{Description: "Custom", Flag: "--my-flag value", Enabled: false},
@@ -102,9 +103,9 @@ func TestDuplicateProfile_CopiesFullConfiguration(t *testing.T) {
 	if result.AgentDisplayName != source.AgentDisplayName {
 		t.Errorf("copy display name = %q, want %q", result.AgentDisplayName, source.AgentDisplayName)
 	}
-	if result.Model != source.Model || result.FallbackModel != source.FallbackModel || !result.AutoFallback {
-		t.Errorf("copy model fields = (%q, %q, %v), want (%q, %q, true)",
-			result.Model, result.FallbackModel, result.AutoFallback, source.Model, source.FallbackModel)
+	if result.Model != source.Model || result.FallbackModel != source.FallbackModel || !result.AutoFallback || !result.RequireExactModel {
+		t.Errorf("copy model fields = (%q, %q, %v, %v), want (%q, %q, true, true)",
+			result.Model, result.FallbackModel, result.AutoFallback, result.RequireExactModel, source.Model, source.FallbackModel)
 	}
 	if result.Mode != source.Mode {
 		t.Errorf("copy mode = %q, want %q", result.Mode, source.Mode)

@@ -2612,6 +2612,30 @@ func TestSetSessionRunning_PublishesTaskStateBeforeRunningSession(t *testing.T) 
 	require.Equal(t, events.TaskSessionStateChanged, eventBus.events[1].subject)
 }
 
+func TestSetSessionRunning_PreservesWaitingForLiveClarification(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	require.NoError(t, repo.UpdateTaskSessionState(
+		ctx,
+		"s1",
+		models.TaskSessionStateWaitingForInput,
+		"",
+	))
+	seedPendingClarificationMessage(t, repo, "t1", "s1")
+
+	taskRepo := newMockTaskRepo()
+	svc := createTestService(repo, newMockStepGetter(), taskRepo)
+
+	svc.setSessionRunningForExecution(ctx, "t1", "s1", "exec-1")
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	require.NoError(t, err)
+	require.Equal(t, models.TaskSessionStateWaitingForInput, session.State)
+	require.Empty(t, taskRepo.stateWrites,
+		"a stream event must not move the task while its clarification remains live")
+}
+
 func TestSetSessionRunning_WritesOnTransition(t *testing.T) {
 	ctx := context.Background()
 	repo := setupTestRepo(t)

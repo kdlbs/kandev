@@ -21,6 +21,13 @@ func newTestPool(t *testing.T) *db.Pool {
 		t.Fatalf("open sqlite: %v", err)
 	}
 	conn.SetMaxOpenConns(1)
+	if _, err := conn.Exec(`
+		CREATE TABLE conversation_session_streams (
+			session_id TEXT PRIMARY KEY,
+			watermark INTEGER NOT NULL
+		)`); err != nil {
+		t.Fatalf("create conversation journal schema: %v", err)
+	}
 	t.Cleanup(func() { _ = conn.Close() })
 	return db.NewPool(conn, conn)
 }
@@ -51,6 +58,27 @@ func TestProvideConstructsServiceUsingHomeDirPluginsSubdir(t *testing.T) {
 	wantPath := filepath.Join(homeDir, "plugins", "kandev-plugin-slack.yml")
 	if _, err := os.Stat(wantPath); err != nil {
 		t.Fatalf("expected installed record file at %s: %v", wantPath, err)
+	}
+}
+
+func TestSetPluginsDirKeepsInstallRootWhenConversationStateFails(t *testing.T) {
+	dir := t.TempDir()
+	hostDir := filepath.Join(dir, ".host")
+	if err := os.MkdirAll(hostDir, 0o700); err != nil {
+		t.Fatalf("create host directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(hostDir, "conversation-token.key"), []byte("corrupt"), 0o600); err != nil {
+		t.Fatalf("write corrupt signing key: %v", err)
+	}
+
+	svc := NewService(store.NewFSStore(filepath.Join(dir, "store")), NewRegistry(), nil, testLogger(t))
+	t.Cleanup(func() { _ = svc.Close() })
+
+	if err := svc.SetPluginsDir(dir); err == nil {
+		t.Fatal("SetPluginsDir() expected corrupt signing key error")
+	}
+	if svc.pluginsDir != dir {
+		t.Fatalf("pluginsDir = %q, want %q after initialization failure", svc.pluginsDir, dir)
 	}
 }
 

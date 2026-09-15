@@ -149,7 +149,7 @@
   "placeholderDescriptionBody": "描述正文",
   "placeholderIdDescription": "工作項或拉取要求 ID",
   "placeholderProjectDescription": "項目名稱",
-  "placeholderSourceBranchDescription": "來源分支",
+  "placeholderSourceBranchDescription": "源分支",
   "placeholderStateDescription": "目前狀態",
   "placeholderTargetBranchDescription": "目標分支",
   "placeholderTypeDescription": "工作項類型",

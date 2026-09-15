@@ -39,6 +39,7 @@ export function toAgentProfilePatch(patch: Partial<ProfileFormData>): Partial<Ag
   if (patch.model !== undefined) next.model = patch.model;
   if (patch.fallback_model !== undefined) next.fallbackModel = patch.fallback_model;
   if (patch.auto_fallback !== undefined) next.autoFallback = patch.auto_fallback;
+  if (patch.require_exact_model !== undefined) next.requireExactModel = patch.require_exact_model;
   if (patch.mode !== undefined) next.mode = patch.mode;
   if (patch.config_options !== undefined) next.configOptions = patch.config_options;
   if (patch.allow_indexing !== undefined) next.allowIndexing = patch.allow_indexing;

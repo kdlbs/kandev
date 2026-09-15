@@ -224,6 +224,7 @@ export function normalizeAgentProfile(raw: unknown): AgentProfile {
     model: pickString(profile, "model", "model"),
     fallbackModel: pickString(profile, "fallbackModel", "fallback_model"),
     autoFallback: pickBool(profile, "autoFallback", "auto_fallback"),
+    requireExactModel: pickBool(profile, "requireExactModel", "require_exact_model"),
     mode: (profile.mode as string | undefined) ?? undefined,
     configOptions: pickConfigOptions(profile),
     allowIndexing: pickBool(profile, "allowIndexing", "allow_indexing"),
@@ -279,6 +280,7 @@ export function toAgentProfilePayload(
   setPayloadField(payload, "model", profile.model);
   setPayloadField(payload, "fallback_model", profile.fallbackModel);
   setPayloadField(payload, "auto_fallback", profile.autoFallback);
+  setPayloadField(payload, "require_exact_model", profile.requireExactModel);
   setPayloadField(payload, "mode", profile.mode);
   setPayloadField(payload, "config_options", profile.configOptions);
   setPayloadField(payload, "allow_indexing", profile.allowIndexing);
