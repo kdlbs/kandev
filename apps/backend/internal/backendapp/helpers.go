@@ -752,6 +752,7 @@ func registerRoutes(p routeParams) {
 	// clear that session's parked-projection tracking (spec:
 	// docs/specs/disambiguate-waiting).
 	p.taskSvc.SetParkedProjectionCanceller(p.orchestratorSvc)
+	p.taskSvc.SetSessionCeilingReleaser(p.orchestratorSvc)
 	// Single resolver instance shared by the REST clarification routes and the
 	// external answer_question_kandev/list_pending_questions_kandev MCP tools
 	// (R3: both entry points must race through the same claim).
@@ -796,6 +797,7 @@ func registerRoutes(p routeParams) {
 	}
 	handoffSvc.SetRunCanceller(p.orchestratorSvc)
 	handoffSvc.SetGitArchiveCapture(p.orchestratorSvc)
+	handoffSvc.SetSessionCeilingReleaser(p.orchestratorSvc)
 	// Cascade archive/delete must re-publish task.updated / task.deleted
 	// events; HandoffService walks the repo directly and bypasses the
 	// Service wrappers that normally publish these. Without this wiring
@@ -1513,18 +1515,33 @@ func registerSecondaryRoutes(
 	}
 
 	if p.services.Automation != nil {
+		if p.services.Plugins != nil {
+			p.services.Automation.Service.SetPluginAutomationProvider(p.services.Plugins)
+			p.services.Plugins.SetAutomationRevoker(p.services.Automation.Service.CancelPluginWebhookDeliveries)
+		}
 		automation.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Automation.Service, p.log)
 		p.log.Debug("Registered Automation handlers (HTTP + WebSocket)")
 	}
 
 	if p.services.Plugins != nil {
+		p.gateway.SetPluginConversationService(p.services.Plugins)
 		if p.authSvc != nil {
 			// Lets an auth-capable plugin complete OIDC/SAML SSO: it asserts a
 			// validated external identity on its webhook response and the host
 			// mints + sets the session cookie (the plugin never sees the token).
 			p.services.Plugins.SetAuthLoginBridge(pluginSSOBridge{auth: p.authSvc})
 		}
-		plugins.RegisterRoutes(p.router, p.services.Plugins, p.services.Plugins.Deliverer(), p.log)
+		conversationReaders := make([]plugins.ConversationReader, 0, 1)
+		if p.services.Task != nil {
+			conversationReaders = append(conversationReaders, p.services.Task)
+		}
+		plugins.RegisterRoutes(
+			p.router,
+			p.services.Plugins,
+			p.services.Plugins.Deliverer(),
+			p.log,
+			conversationReaders...,
+		)
 		if p.features.Canvases {
 			plugins.RegisterWebAppRuntimeRoutes(p.router, p.services.Plugins.WebRuntime())
 			registerCanvasRoutes(p)
@@ -1986,6 +2003,7 @@ func registerMCPAndDebugRoutes(
 		))
 	}
 	mcpHandlers.SetClarificationInputPauser(p.orchestratorSvc)
+	mcpHandlers.SetSessionCeilingReleaser(p.orchestratorSvc)
 	mcpHandlers.SetPromptReferenceResolver(p.services.Prompts)
 	mcpHandlers.SetPromptReader(p.services.Prompts)
 	mcpHandlers.SetTaskStopper(p.orchestratorSvc)
@@ -2015,6 +2033,7 @@ func registerMCPAndDebugRoutes(
 	}
 	mcpHandlers.SetTaskChangeLinkService(taskChangeLinkCoordinator{
 		tasks: p.taskSvc, github: p.services.GitHub, gitlab: p.services.GitLab,
+		singleUserIdentity: taskChangeLinkIdentityResolver(p.authSvc),
 	})
 	// Reuse the cross-task handoff service constructed in registerRoutes —
 	// the same instance backs the MCP path and the HTTP Kanban path so

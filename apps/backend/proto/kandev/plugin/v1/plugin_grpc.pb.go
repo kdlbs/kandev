@@ -19,14 +19,16 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	Plugin_DeliverEvent_FullMethodName             = "/kandev.plugin.v1.Plugin/DeliverEvent"
-	Plugin_HandleWebhook_FullMethodName            = "/kandev.plugin.v1.Plugin/HandleWebhook"
-	Plugin_HandleAction_FullMethodName             = "/kandev.plugin.v1.Plugin/HandleAction"
-	Plugin_SearchEntityReferences_FullMethodName   = "/kandev.plugin.v1.Plugin/SearchEntityReferences"
-	Plugin_AuthorizeEntityReference_FullMethodName = "/kandev.plugin.v1.Plugin/AuthorizeEntityReference"
-	Plugin_ResolveGitCredential_FullMethodName     = "/kandev.plugin.v1.Plugin/ResolveGitCredential"
-	Plugin_GetGitCredentialBinding_FullMethodName  = "/kandev.plugin.v1.Plugin/GetGitCredentialBinding"
-	Plugin_InvokeAgentTool_FullMethodName          = "/kandev.plugin.v1.Plugin/InvokeAgentTool"
+	Plugin_DeliverEvent_FullMethodName                = "/kandev.plugin.v1.Plugin/DeliverEvent"
+	Plugin_HandleWebhook_FullMethodName               = "/kandev.plugin.v1.Plugin/HandleWebhook"
+	Plugin_DescribeAutomationCondition_FullMethodName = "/kandev.plugin.v1.Plugin/DescribeAutomationCondition"
+	Plugin_VerifyAutomationWebhook_FullMethodName     = "/kandev.plugin.v1.Plugin/VerifyAutomationWebhook"
+	Plugin_HandleAction_FullMethodName                = "/kandev.plugin.v1.Plugin/HandleAction"
+	Plugin_SearchEntityReferences_FullMethodName      = "/kandev.plugin.v1.Plugin/SearchEntityReferences"
+	Plugin_AuthorizeEntityReference_FullMethodName    = "/kandev.plugin.v1.Plugin/AuthorizeEntityReference"
+	Plugin_ResolveGitCredential_FullMethodName        = "/kandev.plugin.v1.Plugin/ResolveGitCredential"
+	Plugin_GetGitCredentialBinding_FullMethodName     = "/kandev.plugin.v1.Plugin/GetGitCredentialBinding"
+	Plugin_InvokeAgentTool_FullMethodName             = "/kandev.plugin.v1.Plugin/InvokeAgentTool"
 )
 
 // PluginClient is the client API for Plugin service.
@@ -37,6 +39,9 @@ const (
 type PluginClient interface {
 	DeliverEvent(ctx context.Context, in *Event, opts ...grpc.CallOption) (*EventAck, error)
 	HandleWebhook(ctx context.Context, in *WebhookRequest, opts ...grpc.CallOption) (*WebhookResponse, error)
+	// Optional automation adapter extension. Old plugins return Unimplemented.
+	DescribeAutomationCondition(ctx context.Context, in *AutomationConditionRequest, opts ...grpc.CallOption) (*AutomationConditionResponse, error)
+	VerifyAutomationWebhook(ctx context.Context, in *AutomationWebhookRequest, opts ...grpc.CallOption) (*AutomationWebhookResponse, error)
 	// Browser-originated calls reach this method only through Kandev's
 	// authenticated declared-action route. Context is host-verified; body is
 	// bounded untrusted JSON.
@@ -78,6 +83,26 @@ func (c *pluginClient) HandleWebhook(ctx context.Context, in *WebhookRequest, op
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(WebhookResponse)
 	err := c.cc.Invoke(ctx, Plugin_HandleWebhook_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pluginClient) DescribeAutomationCondition(ctx context.Context, in *AutomationConditionRequest, opts ...grpc.CallOption) (*AutomationConditionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AutomationConditionResponse)
+	err := c.cc.Invoke(ctx, Plugin_DescribeAutomationCondition_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *pluginClient) VerifyAutomationWebhook(ctx context.Context, in *AutomationWebhookRequest, opts ...grpc.CallOption) (*AutomationWebhookResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AutomationWebhookResponse)
+	err := c.cc.Invoke(ctx, Plugin_VerifyAutomationWebhook_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -152,6 +177,9 @@ func (c *pluginClient) InvokeAgentTool(ctx context.Context, in *AgentToolRequest
 type PluginServer interface {
 	DeliverEvent(context.Context, *Event) (*EventAck, error)
 	HandleWebhook(context.Context, *WebhookRequest) (*WebhookResponse, error)
+	// Optional automation adapter extension. Old plugins return Unimplemented.
+	DescribeAutomationCondition(context.Context, *AutomationConditionRequest) (*AutomationConditionResponse, error)
+	VerifyAutomationWebhook(context.Context, *AutomationWebhookRequest) (*AutomationWebhookResponse, error)
 	// Browser-originated calls reach this method only through Kandev's
 	// authenticated declared-action route. Context is host-verified; body is
 	// bounded untrusted JSON.
@@ -184,6 +212,12 @@ func (UnimplementedPluginServer) DeliverEvent(context.Context, *Event) (*EventAc
 }
 func (UnimplementedPluginServer) HandleWebhook(context.Context, *WebhookRequest) (*WebhookResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HandleWebhook not implemented")
+}
+func (UnimplementedPluginServer) DescribeAutomationCondition(context.Context, *AutomationConditionRequest) (*AutomationConditionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DescribeAutomationCondition not implemented")
+}
+func (UnimplementedPluginServer) VerifyAutomationWebhook(context.Context, *AutomationWebhookRequest) (*AutomationWebhookResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method VerifyAutomationWebhook not implemented")
 }
 func (UnimplementedPluginServer) HandleAction(context.Context, *PluginActionRequest) (*PluginActionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method HandleAction not implemented")
@@ -256,6 +290,42 @@ func _Plugin_HandleWebhook_Handler(srv interface{}, ctx context.Context, dec fun
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(PluginServer).HandleWebhook(ctx, req.(*WebhookRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Plugin_DescribeAutomationCondition_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AutomationConditionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).DescribeAutomationCondition(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_DescribeAutomationCondition_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).DescribeAutomationCondition(ctx, req.(*AutomationConditionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Plugin_VerifyAutomationWebhook_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AutomationWebhookRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(PluginServer).VerifyAutomationWebhook(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Plugin_VerifyAutomationWebhook_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(PluginServer).VerifyAutomationWebhook(ctx, req.(*AutomationWebhookRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -382,6 +452,14 @@ var Plugin_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "HandleWebhook",
 			Handler:    _Plugin_HandleWebhook_Handler,
+		},
+		{
+			MethodName: "DescribeAutomationCondition",
+			Handler:    _Plugin_DescribeAutomationCondition_Handler,
+		},
+		{
+			MethodName: "VerifyAutomationWebhook",
+			Handler:    _Plugin_VerifyAutomationWebhook_Handler,
 		},
 		{
 			MethodName: "HandleAction",

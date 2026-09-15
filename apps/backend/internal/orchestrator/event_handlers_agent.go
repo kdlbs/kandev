@@ -924,8 +924,11 @@ func (s *Service) handleAgentReady(ctx context.Context, data watcher.AgentEventD
 		return
 	}
 
-	// Explicit agent-requested moves (move_task_kandev) take precedence over pending clarifications.
+	// Agent.ready is the authoritative turn boundary. Detach the request before
+	// publishing WAITING_FOR_INPUT so a client that immediately reloads sees the
+	// deferred-answer metadata in its first snapshot.
 	if s.sessionHasPendingClarification(ctx, data.SessionID) {
+		s.detachClarificationWaiters(ctx, data.SessionID)
 		s.logger.Info("deferring on_turn_complete while clarification is pending",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID))
@@ -1467,6 +1470,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 	}
 	_, err := s.promptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
 		promptContent, queuedMsg.Model, queuedMsg.PlanMode, attachments, false,
+		launchOriginAutomatic,
 		promptTaskOptions{
 			claimEntryID:         claimEntryID,
 			lifecyclePrompt:      lifecyclePrompt,
@@ -1720,13 +1724,14 @@ func (s *Service) handleQueuedMessageExecutionError(
 		zap.Error(err))
 
 	manualRecovery := isManualRecoveryPromptError(err)
+	_, seam3Refusal := isSeam3Refusal(err)
 	passthroughAttachmentRecovery := !lifecyclePrompt &&
 		len(queuedMsg.Attachments) > 0 &&
 		s.agentManager != nil &&
 		s.agentManager.IsPassthroughSession(ctx, queuedMsg.SessionID)
 	if passthroughAttachmentRecovery || lifecyclePrompt || queuedMsg.IsDurablePlanComment() || errors.Is(err, errLifecyclePromptClaim) ||
 		errors.Is(err, errLifecyclePromptMessagePersistence) ||
-		isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery ||
+		isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery || seam3Refusal ||
 		errors.Is(err, lifecycle.ErrCancelEscalated) || isSessionResetInProgressError(err) ||
 		errors.Is(err, ErrSessionRuntimeUnavailable) {
 		if userMessageRecorded {

@@ -468,6 +468,8 @@ export type UserSettingsState = {
   lastSeenDisplay: LastSeenDisplay;
   systemMetricsDisplay: { showInTopbar: boolean; simplified: boolean };
   appStatusBarEnabled: boolean;
+  sidebarHoverEnabled: boolean;
+  sidebarHoverDelayMs: number;
   resolveSessionHostnames: boolean;
   appStatusBarOrder: AppStatusBarOrderState;
   quickChatTabOrderByWorkspace: Record<string, string[]>;

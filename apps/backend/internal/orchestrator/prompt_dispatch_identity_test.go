@@ -27,7 +27,7 @@ func TestPromptTaskExpectedIdentityRejectsReplacementAfterClaim(t *testing.T) {
 	}
 
 	_, err = svc.promptTask(
-		ctx, taskID, sessionID, "queued prompt", "", false, nil, true,
+		ctx, taskID, sessionID, "queued prompt", "", false, nil, true, launchOriginAutomatic,
 		promptTaskOptions{
 			expectedSessionIdentity: &identity,
 			afterClaim: func() error {

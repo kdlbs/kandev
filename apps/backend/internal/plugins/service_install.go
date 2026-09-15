@@ -96,6 +96,9 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	// package versions declare the same provider, so revoke before stopping the
 	// old runtime and exposing the new record.
 	if hadOldRec && oldRec.Status == StatusActive {
+		if err := s.cancelAutomationDeliveries(oldRec.ID); err != nil {
+			return nil, err
+		}
 		s.revokeGitCredentialProviderLeases(oldRec.RepositoryProviders)
 	}
 	if wasRunning {
@@ -206,7 +209,10 @@ func previousVersion(oldRec *store.Record, hadOldRec bool) string {
 // (cmd/kandev's `Version` default, mirrored by internal/system/updates'
 // devVersion). It sorts meaninglessly against real semver, and a developer
 // running from source must still be able to install a package that declares
-// a min_kandev_version, so it disables the check entirely.
+// a min_kandev_version, so it disables the release-boundary comparison only.
+// Manifest-level capability floors (e.g. api_read:messages >= 0.91.1) are
+// validated independently of the running version and remain enforced on dev
+// and unwired builds.
 const DevKandevVersion = "dev"
 
 // checkMinKandevVersion rejects a package whose manifest declares a
@@ -214,6 +220,8 @@ const DevKandevVersion = "dev"
 // tags may carry a leading `v`; development and git-describe build strings do
 // not provide a trustworthy release boundary, so they deliberately skip this
 // release-only compatibility gate. An invalid manifest minimum is rejected.
+// The capability floor above is enforced earlier, in Manifest validation,
+// regardless of what running version (if any) is wired here.
 func (s *Service) checkMinKandevVersion(minVersion string) error {
 	return manifest.CheckMinimumKandevVersion(minVersion, s.kandevVersion)
 }
@@ -336,6 +344,9 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 
 	rec, err := s.Get(id)
 	if err != nil {
+		return err
+	}
+	if err := s.cancelAutomationDeliveries(id); err != nil {
 		return err
 	}
 	wasRunning := s.runtime != nil && s.runtime.Running(id)

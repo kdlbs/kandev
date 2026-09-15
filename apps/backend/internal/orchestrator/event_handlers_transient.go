@@ -34,18 +34,27 @@ const recoveryCancelRetryButtonTestID = "recovery-cancel-retry-button"
 // keys are built in more than one place in this package (recovery + retry
 // status messages), which otherwise trips goconst on new code.
 const (
-	metaKeyVariant        = "variant"
-	metaKeySessionID      = "session_id"
-	metaKeyTaskID         = "task_id"
-	metaKeyAgentID        = "agent_id"
-	metaKeyNewState       = "new_state"
-	metaKeyAgentProfileID = "agent_profile_id"
-	metaKeyUpdatedAt      = "updated_at"
+	metaKeyVariant         = "variant"
+	metaKeySessionID       = "session_id"
+	metaKeyTaskID          = "task_id"
+	metaKeyAgentID         = "agent_id"
+	metaKeyNewState        = "new_state"
+	metaKeyAgentProfileID  = "agent_profile_id"
+	metaKeyUpdatedAt       = "updated_at"
+	metaKeyExecutorProfile = "executor_profile_id"
+	metaKeyWorkflowStepID  = "workflow_step_id"
+	metaKeyPrompt          = "prompt"
+	metaKeyPlanMode        = "plan_mode"
+	metaKeyAttachments     = "attachments"
 )
 
 // metaVariantWarning is the status-message variant that drives the frontend's
 // yellow (non-alarming) styling, as opposed to the red "error" variant.
 const metaVariantWarning = "warning"
+
+// metaVariantCeiling is the status-message variant AC-49 requires for every
+// session-ceiling card note, including AC-17c's drop note.
+const metaVariantCeiling = "ceiling"
 
 // transientRetryBackoff is the per-attempt delay before re-driving a turn that
 // failed transiently. Index is attempt-1 (5s → 10s → 20s → 40s → 60s).
@@ -542,7 +551,7 @@ func (s *Service) retryTransientPrompt(ctx context.Context, taskID, sessionID, e
 		return
 	}
 
-	if _, err := s.promptTask(ctx, taskID, sessionID, cp.text, cp.model, cp.planMode, cp.attachments, false, promptTaskOptions{
+	if _, err := s.promptTask(ctx, taskID, sessionID, cp.text, cp.model, cp.planMode, cp.attachments, false, launchOriginAutomatic, promptTaskOptions{
 		onAccepted: cp.onAccepted,
 	}); err != nil {
 		if ctx.Err() != nil {

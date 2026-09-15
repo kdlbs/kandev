@@ -42,6 +42,10 @@ function joinMessages(base: Message[], extras: Message[]): Message[] {
   return [...base, ...extras.filter((message) => !baseIds.has(message.id))].sort(compareMessages);
 }
 
+function isPendingLocalMessage(message: Message): boolean {
+  return message.metadata?.client_queue_id !== undefined;
+}
+
 /**
  * Reconcile a bounded newest-page response with the session cache while
  * preserving one contiguous pagination interval.
@@ -50,9 +54,17 @@ export function reconcileLatestMessageWindow(params: {
   cachedAtRequest: Message[];
   cachedAtResponse: Message[];
   fetched: Message[];
+  authoritative?: boolean;
 }): LatestMessageWindow {
-  const { cachedAtRequest, cachedAtResponse, fetched } = params;
+  const { cachedAtRequest, cachedAtResponse, fetched, authoritative = false } = params;
   if (fetched.length === 0) {
+    if (authoritative) {
+      const pendingLocal = cachedAtResponse.filter(isPendingLocalMessage);
+      return {
+        messages: pendingLocal,
+        oldestCursor: pendingLocal[0]?.id ?? null,
+      };
+    }
     return {
       messages: cachedAtResponse,
       oldestCursor: cachedAtResponse[0]?.id ?? null,
@@ -63,6 +75,18 @@ export function reconcileLatestMessageWindow(params: {
   const fetchedBoundary = orderedFetched[0];
   const fetchedIds = new Set(orderedFetched.map((message) => message.id));
   const overlapsCachedWindow = cachedAtRequest.some((message) => fetchedIds.has(message.id));
+
+  if (authoritative) {
+    const cachedAtRequestIds = new Set(cachedAtRequest.map((message) => message.id));
+    const retained = cachedAtResponse.filter((message) => {
+      if (fetchedIds.has(message.id)) return false;
+      if (isPendingLocalMessage(message)) return true;
+      if (compareMessages(message, fetchedBoundary) < 0) return true;
+      return !cachedAtRequestIds.has(message.id);
+    });
+    const messages = joinMessages(orderedFetched, retained);
+    return { messages, oldestCursor: messages[0]?.id ?? null };
+  }
 
   if (overlapsCachedWindow) {
     const messages = joinMessages(orderedFetched, cachedAtResponse);
