@@ -65,24 +65,20 @@ func (s *FieldSpec) Field(f *Field) *FieldSpec {
 }
 
 // isIdentifier reports whether s is a valid field/metadata-key identifier:
-// non-empty, starting with a lowercase letter, containing only lowercase
-// letters, digits and underscores. Shared by field-name validation
-// (FieldSpec.Validate) and Descriptor.WatchMetadataKey validation, because
-// both are used as JSON object keys and Go map keys under the same rule.
+// non-empty and restricted to [A-Za-z0-9_] (D11), with no constraint on the
+// first character. Shared by field-name validation (FieldSpec.Validate) and
+// Descriptor.WatchMetadataKey validation (D2), which use the same alphabet
+// for the same reason: both are spliced into a JSON object key / SQL path
+// and must reject anything a naive non-empty check would still let through.
 func isIdentifier(s string) bool {
 	if s == "" {
 		return false
 	}
-	for i, r := range s {
+	for _, r := range s {
+		isUpper := r >= 'A' && r <= 'Z'
 		isLower := r >= 'a' && r <= 'z'
 		isDigit := r >= '0' && r <= '9'
-		if i == 0 {
-			if !isLower {
-				return false
-			}
-			continue
-		}
-		if !isLower && !isDigit && r != '_' {
+		if !isUpper && !isLower && !isDigit && r != '_' {
 			return false
 		}
 	}

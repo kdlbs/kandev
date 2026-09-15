@@ -15,11 +15,11 @@ func TestIsIdentifier(t *testing.T) {
 		{"a", true},
 		{"a1", true},
 		{"", false},
-		{"1abc", false},
-		{"Abc", false},
+		{"1abc", true},
+		{"Abc", true},
 		{"has-dash", false},
 		{"has space", false},
-		{"_leading", false},
+		{"_leading", true},
 		{"trailing_", true},
 	}
 	for _, c := range cases {
