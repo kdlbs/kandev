@@ -2,7 +2,9 @@ package backendapp
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"path/filepath"
 	"strings"
@@ -178,10 +180,8 @@ func (o *networkTaskOracle) taskRemovable(taskID string) (bool, error) {
 }
 
 // taskIDForProjectName resolves a kd_<task-hash> compose project name to a
-// task row. Compose project names cannot carry arbitrary characters, so the
-// deployment encodes a task identifier fragment after the kd_ prefix; the
-// exact encoding is operator-side. This mirrors the natural prefixes the
-// backend itself can generate: any task whose ID suffix matches.
+// task row. The guarded Compose broker hashes the absolute task root with
+// SHA-256 and uses the first 16 hexadecimal characters after the kd_ prefix.
 func (o *networkTaskOracle) taskIDForProjectName(name string) (string, bool, error) {
 	if !strings.HasPrefix(name, "kd_") {
 		return "", false, nil
@@ -198,18 +198,61 @@ func (o *networkTaskOracle) taskIDForProjectName(name string) (string, bool, err
 	} else if !errors.Is(err, sql.ErrNoRows) {
 		return "", false, err
 	}
-	// Suffix fallback: project names may hash or truncate the ID.
-	var ids []string
-	query = o.reader.Rebind("SELECT id FROM tasks")
-	if err := o.reader.SelectContext(context.Background(), &ids, query); err != nil {
+	var roots []networkTaskRoot
+	query = o.reader.Rebind(`
+		SELECT t.id AS task_id,
+		       COALESCE(te.workspace_path, '') AS workspace_path,
+		       COALESCE(te.task_dir_name, '') AS task_dir_name
+		FROM tasks t
+		LEFT JOIN task_environments te ON te.task_id = t.id`)
+	if err := o.reader.SelectContext(context.Background(), &roots, query); err != nil {
 		return "", false, err
 	}
-	for _, id := range ids {
-		if strings.HasSuffix(id, fragment) {
-			return id, true, nil
+	var matchedTaskID string
+	for _, row := range roots {
+		for _, root := range row.candidateRoots() {
+			if guardedComposeProjectName(root) != name {
+				continue
+			}
+			if matchedTaskID != "" && matchedTaskID != row.TaskID {
+				return "", false, errors.New("compose project hash matches multiple tasks")
+			}
+			matchedTaskID = row.TaskID
 		}
 	}
-	return "", false, nil
+	return matchedTaskID, matchedTaskID != "", nil
+}
+
+type networkTaskRoot struct {
+	TaskID        string `db:"task_id"`
+	WorkspacePath string `db:"workspace_path"`
+	TaskDirName   string `db:"task_dir_name"`
+}
+
+func (r networkTaskRoot) candidateRoots() []string {
+	if r.WorkspacePath == "" || !filepath.IsAbs(r.WorkspacePath) {
+		return nil
+	}
+	workspacePath := filepath.Clean(r.WorkspacePath)
+	roots := []string{workspacePath}
+	for current := workspacePath; r.TaskDirName != ""; current = filepath.Dir(current) {
+		if filepath.Base(current) == r.TaskDirName {
+			if current != workspacePath {
+				roots = append(roots, current)
+			}
+			break
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+	}
+	return roots
+}
+
+func guardedComposeProjectName(taskRoot string) string {
+	digest := sha256.Sum256([]byte(taskRoot))
+	return "kd_" + hex.EncodeToString(digest[:8])
 }
 
 func isUUID(value string) bool {

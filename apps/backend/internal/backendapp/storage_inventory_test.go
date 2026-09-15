@@ -267,7 +267,8 @@ func newContainerInventoryDatabase(t *testing.T) *sqlx.DB {
 			id TEXT PRIMARY KEY,
 			task_id TEXT NOT NULL,
 			status TEXT NOT NULL,
-			workspace_path TEXT NOT NULL DEFAULT ''
+			workspace_path TEXT NOT NULL DEFAULT '',
+			task_dir_name TEXT NOT NULL DEFAULT ''
 		);
 		CREATE TABLE task_sessions (
 			id TEXT PRIMARY KEY,
@@ -370,12 +371,36 @@ func TestNetworkTaskOracleResolvesComposeProjectNames(t *testing.T) {
 	database := newContainerInventoryDatabase(t)
 	taskID := "33333333-3333-4333-8333-333333333333"
 	insertContainerInventoryTask(t, database, taskID, v1.TaskStateInProgress, false)
+	if _, err := database.Exec(
+		"INSERT INTO task_environments (id, task_id, status, workspace_path, task_dir_name) VALUES (?, ?, ?, ?, ?)",
+		"env-"+taskID, taskID, models.TaskEnvironmentStatusReady,
+		"/data/tasks/live-task_ab12cd34/kandev-source", "live-task_ab12cd34",
+	); err != nil {
+		t.Fatalf("insert task environment: %v", err)
+	}
 	oracle := &networkTaskOracle{reader: database}
 
 	// Exact project form: kd_<task id>.
 	lookup := oracleLookup(t, oracle, "kd_"+taskID)
 	if lookup != docknet.TaskLookupActive {
 		t.Fatalf("compose project lookup = %v, want active", lookup)
+	}
+	// The guarded broker derives its canonical project from the SHA-256 of
+	// the task root. /data/tasks/live-task_ab12cd34 hashes to a digest whose
+	// first 16 hex characters are 7d15c4f3a4fd5328.
+	hashed := oracleLookup(t, oracle, "kd_7d15c4f3a4fd5328")
+	if hashed != docknet.TaskLookupActive {
+		t.Fatalf("hashed compose project lookup = %v, want active", hashed)
+	}
+	now := time.Date(2026, time.September, 15, 0, 0, 0, 0, time.UTC)
+	classified := docknet.Classify(agentdocker.NetworkInfo{
+		ID: "network-live", Name: "kd_7d15c4f3a4fd5328_default", Driver: "bridge",
+		Labels: map[string]string{"com.docker.compose.project": "kd_7d15c4f3a4fd5328"},
+	}, oracle, now.Add(-8*24*time.Hour), time.Hour, 7*24*time.Hour, docknet.ClassifyOptions{
+		Now: func() time.Time { return now },
+	})
+	if classified.Class != docknet.ClassAttached || docknet.Eligible(classified.Class) {
+		t.Fatalf("aged live-task network class = %v, want attached and ineligible", classified.Class)
 	}
 	// Unknown project names stay unknown (fail-closed observation).
 	unknown := oracleLookup(t, oracle, "kd_nope")
@@ -386,6 +411,32 @@ func TestNetworkTaskOracleResolvesComposeProjectNames(t *testing.T) {
 	foreign := oracleLookup(t, oracle, "myapp_default")
 	if foreign != docknet.TaskLookupUnknown {
 		t.Fatalf("foreign project lookup = %v, want unknown", foreign)
+	}
+}
+
+func TestNetworkTaskOracleRejectsAmbiguousComposeProjectHash(t *testing.T) {
+	database := newContainerInventoryDatabase(t)
+	for _, taskID := range []string{
+		"33333333-3333-4333-8333-333333333333",
+		"44444444-4444-4444-8444-444444444444",
+	} {
+		insertContainerInventoryTask(t, database, taskID, v1.TaskStateInProgress, false)
+		if _, err := database.Exec(
+			"INSERT INTO task_environments (id, task_id, status, workspace_path, task_dir_name) VALUES (?, ?, ?, ?, ?)",
+			"env-"+taskID, taskID, models.TaskEnvironmentStatusReady,
+			"/data/tasks/live-task_ab12cd34/kandev-source", "live-task_ab12cd34",
+		); err != nil {
+			t.Fatalf("insert task environment: %v", err)
+		}
+	}
+	oracle := &networkTaskOracle{reader: database}
+	network := agentdocker.NetworkInfo{Labels: map[string]string{
+		"com.docker.compose.project": "kd_7d15c4f3a4fd5328",
+	}}
+
+	_, lookup, err := oracle.Ownership(network)
+	if err == nil || lookup != docknet.TaskLookupUnknown {
+		t.Fatalf("ambiguous hash lookup = %v (%v), want unknown with error", lookup, err)
 	}
 }
 
