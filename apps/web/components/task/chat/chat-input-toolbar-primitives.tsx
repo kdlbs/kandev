@@ -187,11 +187,11 @@ export function SubmitButton({
               )}
               onClick={handleCancelClick}
               disabled={isCancelling}
-              aria-label={isCancelling ? t("task:cancelling") : t("task:cancelAgent")}
+              aria-label={t("task:cancelAgent")}
               data-testid="cancel-agent-button"
             >
               {isCancelling ? (
-                <GridSpinner className="text-destructive" />
+                <GridSpinner className="text-destructive" ariaLabel={t("task:cancelling")} />
               ) : (
                 <IconPlayerPauseFilled className="h-3.5 w-3.5" />
               )}

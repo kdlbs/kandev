@@ -2,7 +2,7 @@
 
 import { forwardRef, useCallback } from "react";
 import type { ContextFile } from "@/lib/state/context-files-store";
-import type { ClarificationRequestMetadata, Message } from "@/lib/types/http";
+import type { Message } from "@/lib/types/http";
 import type { DiffComment } from "@/lib/diff/types";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import type { MCPAttachmentHistory } from "@/lib/state/slices/session-runtime/types";
@@ -22,7 +22,11 @@ import { useIsUtilityConfigured } from "@/hooks/use-is-utility-configured";
 import { usePromptResultDelivery } from "@/hooks/use-prompt-result-delivery";
 import { PromptResultRecovery } from "@/components/prompt-result-recovery";
 import { t } from "@/lib/i18n";
-import { shouldHideChatInputForLaunchError, shouldRenderStoppedSessionBanner } from "./types";
+import {
+  shouldHideChatInputForLaunchError,
+  shouldRenderStoppedSessionBanner,
+  shouldShowCancelAgent,
+} from "./types";
 
 // Re-export ImageAttachment type for consumers
 export type { ImageAttachment } from "./image-attachment-preview";
@@ -165,17 +169,6 @@ type EnhancePromptExtras = {
   isEnhancingPrompt?: boolean;
   isUtilityConfigured?: boolean;
 };
-
-export function shouldShowCancelAgent(
-  isWorking: boolean,
-  pendingClarification: Message | null | undefined,
-  sessionId: string | null,
-): boolean {
-  if (!sessionId) return false;
-  if (!pendingClarification) return isWorking;
-  return !(pendingClarification.metadata as ClarificationRequestMetadata | undefined)
-    ?.agent_disconnected;
-}
 
 function buildEditorAreaProps(
   s: ContainerState,

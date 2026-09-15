@@ -515,6 +515,12 @@ describe("PassthroughToolbar – composer toggle", () => {
 
     (props.onCancel as () => void)();
     await waitFor(() => expect(screen.queryByTestId(TID_COMPOSER)).toBeNull());
+    expect(mockSessionState).toBe("RUNNING");
+    expect(mockWsRequestFn).not.toHaveBeenCalledWith(
+      "agent.cancel",
+      expect.objectContaining({ session_id: SESSION_ID }),
+      expect.any(Number),
+    );
   });
 
   it("uses the passthrough-specific focus shortcut instead of the global slash shortcut", async () => {

@@ -6,7 +6,7 @@ import { useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { useRegisterCommands } from "@/hooks/use-register-commands";
 import { type Message } from "@/lib/types/http";
 import { buildSessionCommands } from "@/components/session-commands";
-import { shouldShowCancelAgent } from "@/components/task/chat/chat-input-container";
+import { shouldShowCancelAgent } from "@/components/task/chat/types";
 
 type QuickChatCancelCommandsProps = {
   sessionId: string;
@@ -44,6 +44,8 @@ export function QuickChatCancelCommands({
     state.setCancelTurnPending(sessionId, true);
     try {
       await onCancel();
+    } catch (error) {
+      console.error("Failed to cancel Quick Chat turn:", error);
     } finally {
       state.setCancelTurnPending(sessionId, false);
     }

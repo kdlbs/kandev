@@ -108,6 +108,28 @@ export async function waitForActiveSessionForegroundActivity(
   );
 }
 
+export async function waitForActiveSessionSupportsSteering(
+  page: Page,
+  expected = true,
+): Promise<void> {
+  await page.waitForFunction(
+    (expectedValue) => {
+      const store = (window as E2EStoreWindow).__KANDEV_E2E_STORE__;
+      if (!store) return false;
+      const state = store.getState();
+      const sessionId = state.tasks.activeSessionId;
+      return sessionId
+        ? state.taskSessions.items[sessionId]?.supports_steering === expectedValue
+        : false;
+    },
+    expected,
+    {
+      timeout: 15_000,
+      message: "Active session did not negotiate the expected steering capability",
+    },
+  );
+}
+
 /** Seed the stale activity projection that can survive a missed reconnect event. */
 export async function seedActiveSessionForegroundActivity(
   page: Page,

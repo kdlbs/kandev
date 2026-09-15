@@ -11,7 +11,7 @@ import { expect, type Locator, type Page } from "@playwright/test";
  * used to chase it with a fixed sleep.
  *
  * The cancel button is also available while direct input is working, so it is
- * not a queue-mode signal. Wait on the queue-derived composer class instead,
+ * not a queue-mode signal. Wait on the explicit queue-derived input mode,
  * scoped to the visible composer in the supplied surface.
  */
 export async function waitForComposerQueueMode(
@@ -19,9 +19,7 @@ export async function waitForComposerQueueMode(
   timeout = 15_000,
 ): Promise<void> {
   const activeComposer = scope.locator('[data-testid="chat-input-area"]:visible');
-  await expect(activeComposer.locator(".chat-input-running, .chat-input-running-plan")).toBeVisible(
-    { timeout },
-  );
+  await expect(activeComposer).toHaveAttribute("data-input-mode", "queue", { timeout });
 }
 
 /**

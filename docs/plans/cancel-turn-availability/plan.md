@@ -175,7 +175,9 @@ Implementation validation on 2026-09-15:
   active A-to-B switching, close/unmount restoration, setup/terminal/idle and
   disconnected clarification suppression, backend-pending rejection, and
   failed-request cleanup.
-- Focused frontend suite: 9 files, 128 tests passed.
+- Affected frontend unit suite: 9 files, 128 tests passed, including the
+  review remediation coverage for the changed composer, Quick Chat registry,
+  spinner semantics, and eligibility paths.
 - `pnpm run build:vite`: passed. Existing Vite chunk-size and dynamic-import
   warnings remain informational.
 - `pnpm run typecheck`: passed.
@@ -194,6 +196,14 @@ Implementation validation on 2026-09-15:
 - `python3 scripts/lint-spec-files.py --all`: passed.
 - `git diff --check`: passed.
 
+Post-remediation managed E2E validation for PR #3705:
+
+- Chromium: 5 tests passed, covering task steering/background cancellation and
+  Quick Chat composer cancellation, background cancellation, and preservation
+  of the underlying task turn.
+- Mobile Chrome: 3 tests passed, covering task touch cancellation, Quick Chat
+  touch composer cancellation, and the Quick Chat palette command.
+
 The repo-wide `pnpm run lint:e2e-sleeps` audit still reports unrelated baseline
 errors in other files, including missing rule definitions and existing
 unsanctioned sleeps. The changed E2E files pass the same configuration in the
@@ -204,7 +214,8 @@ targeted check above.
 - Hook working state includes executor preparation; preserve session identity.
 - Disconnected clarifications must retain their explicit suppression.
 - Multiple palette sources can register identical IDs; priority is insufficient.
-- The queue helper currently mistakes cancellation availability for queue mode.
+- Queue waits must use the explicit input-mode projection rather than visual
+  busy state, because cancellation is also available during direct input.
 - New mobile test filenames must use the mobile prefix to match the project.
 
 ## Documentation impact

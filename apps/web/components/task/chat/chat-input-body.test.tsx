@@ -3,7 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ChatInputBody, type ChatInputBodyProps } from "./chat-input-body";
-import { shouldShowCancelAgent } from "./chat-input-container";
+import { shouldShowCancelAgent } from "./types";
 
 const tipTapPropsMock = vi.hoisted(() => vi.fn());
 const CHAT_INPUT_GLOW_TEST_ID = "chat-input-glow";

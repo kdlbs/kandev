@@ -141,3 +141,5 @@ steering delivery. Palette sources do not deduplicate matching command IDs.
   generating activity with an empty editor and queue, use the visible cancel
   control, and wait for the exact session to settle. Desktop also covers
   detached background work.
+- Failed Quick Chat cancellation callbacks are logged and clear the optimistic
+  guard so a later command can retry the same session.

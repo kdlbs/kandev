@@ -501,6 +501,7 @@ export function ChatInputArea(props: ChatInputAreaProps) {
   return (
     <div
       data-testid="chat-input-area"
+      data-input-mode={panelState.inputMode}
       className={cn(
         "bg-card flex-shrink-0",
         !disclosure?.enabled && "px-2 pb-2 pt-1",

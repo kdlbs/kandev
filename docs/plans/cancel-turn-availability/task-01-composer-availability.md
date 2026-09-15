@@ -35,7 +35,7 @@ Deliver desktop and phone evidence through the real composer prop path.
 - Keep explicit `canCancelAgent` through body and both toolbars. Reuse existing
   localized copy for the cancel icon accessible name and existing progress state.
 - Replace `waitForComposerQueueMode`'s cancel-button wait with a scoped assertion
-  on existing queue-derived `chat-input-running` / `chat-input-running-plan` classes.
+  on the explicit queue-derived `data-input-mode` projection.
 - Add focused unit and browser coverage, including empty-input steering and
   background work in task and Quick Chat, and phone reachability.
 
@@ -141,8 +141,12 @@ steering delivery. Palette sources do not deduplicate matching command IDs.
   `onCancel` callback dismisses the composer. The parent-path regression proves
   the callback still closes the composer and cannot cancel the agent, including
   through the existing Escape dismissal.
-- The queue E2E helper now waits for the queue-derived composer classes instead
-  of using cancel visibility as queue evidence.
+- The queue E2E helper now waits for the explicit queue-derived input-mode
+  projection instead of using cancel visibility or a busy CSS class as queue
+  evidence.
+- Review remediation keeps the cancel button's accessible name stable while
+  exposing translated cancellation progress through its status spinner. The
+  shared `shouldShowCancelAgent` predicate now belongs to the chat domain types.
 - Focused frontend suite passed with 9 files and 128 tests. Typecheck, i18n,
   targeted ESLint, targeted E2E sleep lint, Vite build, and the desktop and
   mobile cancellation regressions passed. Mobile coverage verified the 44px

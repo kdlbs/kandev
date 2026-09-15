@@ -293,27 +293,36 @@ describe("QuickChatCancelCommands", () => {
     },
   );
 
-  it("rejects backend-pending cancellation and clears its failed request guard", async () => {
+  it("skips backend-pending cancellation and clears its failed request guard after failure", async () => {
     const onCancel = vi
       .fn<() => Promise<void>>()
       .mockRejectedValueOnce(new Error("cancel failed"))
       .mockResolvedValueOnce(undefined);
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const onCommands = vi.fn();
-    render(
-      <CommandRegistryProvider>
-        <QuickChatCancelCommands sessionId="quick-session" isWorking onCancel={onCancel} />
-        <CommandsProbe onCommands={onCommands} />
-      </CommandRegistryProvider>,
-    );
+    try {
+      render(
+        <CommandRegistryProvider>
+          <QuickChatCancelCommands sessionId="quick-session" isWorking onCancel={onCancel} />
+          <CommandsProbe onCommands={onCommands} />
+        </CommandRegistryProvider>,
+      );
 
-    const commands = await expectCancellationCount(onCommands, 1);
-    mocks.state.taskSessions.items["quick-session"].cancellation_pending = true;
-    await commands[0].action?.();
-    expect(onCancel).not.toHaveBeenCalled();
+      const commands = await expectCancellationCount(onCommands, 1);
+      mocks.state.taskSessions.items["quick-session"].cancellation_pending = true;
+      await commands[0].action?.();
+      expect(onCancel).not.toHaveBeenCalled();
 
-    mocks.state.taskSessions.items["quick-session"].cancellation_pending = false;
-    await expect(commands[0].action?.()).rejects.toThrow("cancel failed");
-    await commands[0].action?.();
-    expect(onCancel).toHaveBeenCalledTimes(2);
+      mocks.state.taskSessions.items["quick-session"].cancellation_pending = false;
+      await commands[0].action?.();
+      expect(consoleError).toHaveBeenCalledWith(
+        "Failed to cancel Quick Chat turn:",
+        expect.any(Error),
+      );
+      await commands[0].action?.();
+      expect(onCancel).toHaveBeenCalledTimes(2);
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 });
