@@ -2965,9 +2965,27 @@ func (s *Service) resolveStepProfileSessionEndPolicy(step *wfmodels.WorkflowStep
 // workflow step override rather than direct user selection. Uses the atomic
 // SetSessionMetadataKey (json_set) so other metadata keys are preserved.
 func (s *Service) tagSessionAsWorkflowSwitched(ctx context.Context, sessionID string) {
+	s.persistWorkflowSwitchTag(ctx, sessionID, true)
+}
+
+// tagSessionAsWorkflowSwitchedForSnapshot records workflow ownership using the
+// metadata observed by the caller. A workflow entry can run asynchronously
+// with a stale session snapshot, so it must not clear a conversational
+// follow-up marker written after that snapshot was loaded.
+func (s *Service) tagSessionAsWorkflowSwitchedForSnapshot(ctx context.Context, session *models.TaskSession) {
+	if session == nil {
+		return
+	}
+	s.persistWorkflowSwitchTag(ctx, session.ID, models.IsCompletionFollowUpSession(session.Metadata))
+}
+
+func (s *Service) persistWorkflowSwitchTag(ctx context.Context, sessionID string, clearCompletionFollowUp bool) {
 	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyCreatedBy, models.SessionCreatedByWorkflowSwitch); err != nil {
 		s.logger.Warn("failed to persist workflow-switch tag",
 			zap.String("session_id", sessionID), zap.Error(err))
+	}
+	if !clearCompletionFollowUp {
+		return
 	}
 	// A workflow step explicitly taking ownership of this session is the only
 	// path that clears conversational-only follow-up ownership. Ordinary sends,
@@ -3365,7 +3383,7 @@ func (s *Service) reuseSessionForStepWithEndPolicy(
 		}
 		return existing, nil
 	}
-	s.tagSessionAsWorkflowSwitched(ctx, existing.ID)
+	s.tagSessionAsWorkflowSwitchedForSnapshot(ctx, existing)
 
 	if err := s.transferWorkflowProfileSwitchQueue(ctx, currentSession.ID, existing.ID); err != nil {
 		transferErr := fmt.Errorf("transfer queued state to reused session: %w", err)
@@ -3775,7 +3793,7 @@ func (s *Service) keepCurrentWorkflowStepSession(
 	step *wfmodels.WorkflowStep,
 	entryIDs ...int64,
 ) (*models.TaskSession, bool, error) {
-	s.tagSessionAsWorkflowSwitched(ctx, session.ID)
+	s.tagSessionAsWorkflowSwitchedForSnapshot(ctx, session)
 	if !session.IsPrimary {
 		if err := s.SetPrimarySession(ctx, session.ID); err != nil {
 			s.logger.Warn("failed to preserve session as primary for workflow step",

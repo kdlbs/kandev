@@ -725,7 +725,7 @@ func (s *Service) startCreatedSession(
 		}
 		// Tag as workflow-spawned provenance only after the guarded profile
 		// write succeeds; a concurrent stop owns a rejected session.
-		s.tagSessionAsWorkflowSwitched(ctx, sessionID)
+		s.tagSessionAsWorkflowSwitchedForSnapshot(ctx, session)
 		s.promoteSessionIfTaskHasNoPrimary(ctx, taskID, session)
 	}
 
@@ -1238,7 +1238,7 @@ func (s *Service) promoteSelectedExplicitWorkflowSession(
 	if !promoted {
 		return "", false, nil
 	}
-	s.tagSessionAsWorkflowSwitched(ctx, session.ID)
+	s.tagSessionAsWorkflowSwitchedForSnapshot(ctx, session)
 	return session.ID, true, nil
 }
 
