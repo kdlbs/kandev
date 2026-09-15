@@ -5,7 +5,7 @@ requirements:
   - REQ-UI-ADAPTIVE-KANBAN-001
   - REQ-UI-ADAPTIVE-KANBAN-002
 created: 2026-09-05
-updated: 2026-09-11
+updated: 2026-09-15
 owners:
   - kandev
 ---
@@ -64,9 +64,9 @@ If the source step no longer exists, the hook keeps the current scroll position.
 
 The desktop layout uses this design. The tablet layout keeps its two-column snap-scrolling surface and uses the same workflow height allocation.
 
-The phone layout keeps one focused column and separate touch drop targets. This correction does not change mobile composition or touch behavior.
+The phone layout keeps one focused column with native touch scrolling and menu-based task moves. Phone cards do not activate dragging or expose drop targets, as defined by the [phone scrolling contract](../../tasks/requirements/mobile-kanban-scroll.md).
 
-The existing mobile auto-hide E2E scenario covers the nearest mobile surface. It proves touch destinations and document-width containment.
+The existing mobile auto-hide E2E scenario covers the nearest mobile surface. It proves menu-based moves to auto-hidden steps and document-width containment.
 
 ## Workflow height allocation
 
@@ -132,7 +132,7 @@ Responsive changes do not overwrite saved desktop preferences.
 - The same Chromium scenario covers a board whose minimum track width exceeds the viewport and verifies the added scroll range.
 - The Chromium scenario verifies document containment and the absence of a transient drag-only scrollbar.
 - The same E2E scenario proves temporary destinations, cancellation, and a successful drop.
-- The existing `mobile-chrome` scenario continues to prove mobile drag destinations and document-width containment.
+- The `mobile-chrome` scenarios prove menu-based moves, native card scrolling without drag activation, and document-width containment.
 
 ## Related decisions
 
