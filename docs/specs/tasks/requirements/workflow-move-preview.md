@@ -74,9 +74,12 @@ with a Luna profile can retain a later Astra model selection when reused.
 #### Acceptance criteria
 
 - **AC-TASKS-WORKFLOW-MOVE-PREVIEW-002.1:** The collapsed desktop preview shall
-  use two summary lines above Move here: session outcome, then model/settings.
+  use two centered summary lines below actions and capabilities: session outcome,
+  then model/settings with an icon-only details button.
   Details shall remain opt-in. Long labels shall truncate with full accessible
   text. Existing Options and capability/progress content shall remain usable.
+  The next-step options popover and touch drawer shall show the same footer
+  below their Move action, using the destination and draft of that action.
 - **AC-TASKS-WORKFLOW-MOVE-PREVIEW-002.2:** Hover, keyboard focus, and activation
   shall expose desktop feedback. Phones and coarse pointers shall expose the
   same information and details in the step drawer, without requiring hover.
@@ -104,4 +107,4 @@ with a Luna profile can retain a later Astra model selection when reused.
 Changing workflow defaults, editing profiles from the preview, automatically
 repairing model overrides, routing native subagents, and adding mandatory
 confirmation. This package targets the task stepper and its compact disclosure,
-not every board drag, bulk move, or move menu.
+and the next-step control above chat, not every board drag, bulk move, or move menu.

@@ -53,8 +53,11 @@ recipient and effective model. It identifies whether the move reuses the
 current session, reuses another named session, creates a new session, or leaves
 the task idle without a recipient when the destination has no launch turn. The
 second line shows the current model or an expected model change and counts
-additional settings changes. Open **Details** for the session, profile, model,
+additional settings changes. Use the info button for the session, profile, model,
 context reset, source-session disposition, and prompt dispatch information.
+The preview sits in a centered footer below the move controls. The next-step
+button above chat shows the same footer in its options popover or touch drawer.
+Changing the options refreshes that preview.
 The preview is advisory. **Move here** checks routing, permissions, WIP, and
 current session state again when the move runs. A preview can therefore change
 while a turn is running or while another session becomes available.

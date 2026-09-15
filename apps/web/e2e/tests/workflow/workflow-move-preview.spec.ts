@@ -1,3 +1,4 @@
+import { expectPreviewFooter } from "./workflow-move-preview-assertions";
 import type { Page } from "@playwright/test";
 import { expect, test } from "../../fixtures/test-base";
 import { SessionPage } from "../../pages/session-page";
@@ -42,6 +43,7 @@ test.describe("Workflow move preview", () => {
     await fixture.session.waitForLoad();
 
     const { popover, preview } = await openStepPreview(testPage, fixture.taskId, "Verify");
+    await expectPreviewFooter(popover, "workflow-step-move-here");
     expect(preview.outcome).toBe("reuse_current");
     expect(preview.recipient.session_id).toBe(fixture.primarySessionId);
     expect(preview.model.after.label).toBe("mock-slow");

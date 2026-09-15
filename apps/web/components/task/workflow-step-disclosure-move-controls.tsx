@@ -49,7 +49,6 @@ export function StepDisclosureMoveControls({
 
   return (
     <>
-      <WorkflowMovePreviewDisclosure state={previewState} isTouchSurface={isTouchSurface} />
       <div className="flex justify-end">
         <StepDisclosureRowActions
           stepId={stepId}
@@ -77,6 +76,7 @@ export function StepDisclosureMoveControls({
           />
         </div>
       )}
+      <WorkflowMovePreviewDisclosure state={previewState} isTouchSurface={isTouchSurface} />
     </>
   );
 }

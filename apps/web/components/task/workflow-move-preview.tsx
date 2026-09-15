@@ -2,7 +2,7 @@
 
 import { Button } from "@kandev/ui/button";
 import { cn } from "@kandev/ui/lib/utils";
-import { IconChevronDown, IconLoader2, IconRefresh } from "@tabler/icons-react";
+import { IconInfoCircle, IconLoader2, IconRefresh } from "@tabler/icons-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { WorkflowMovePreviewApplicability, WorkflowMovePreviewResponse } from "@/lib/api";
@@ -200,7 +200,7 @@ function WorkflowMovePreviewDetails({
   return (
     <div
       data-testid="workflow-move-preview-details"
-      className="grid gap-1.5 border-t border-border/60 pt-1.5 text-[11px] text-muted-foreground"
+      className="grid gap-1.5 text-left border-t border-border/60 pt-1.5 text-[11px] text-muted-foreground"
     >
       <div className="grid gap-0.5">
         <span className="font-medium text-foreground">{t("task:workflowMovePreviewSession")}</span>
@@ -285,7 +285,8 @@ export function WorkflowMovePreviewDisclosure({
 }: WorkflowMovePreviewDisclosureProps) {
   const { t } = useTranslation();
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const detailsButtonClass = isTouchSurface ? "min-h-11 px-2" : "h-7 px-1.5";
+  const retryButtonClass = isTouchSurface ? "min-h-11" : "h-7";
+  const detailsButtonClass = isTouchSurface ? "min-h-11 min-w-11 p-0" : "h-7 w-7 p-0";
 
   if (state.status === "idle") return null;
   if (state.status === "loading") {
@@ -294,9 +295,12 @@ export function WorkflowMovePreviewDisclosure({
         data-testid="workflow-move-preview-loading"
         role="status"
         aria-live="polite"
-        className={cn("grid min-w-0 gap-0.5 text-[11px] text-muted-foreground", className)}
+        className={cn(
+          "grid w-full min-w-0 gap-0.5 border-t border-border/60 pt-2 text-center text-[11px] text-muted-foreground",
+          className,
+        )}
       >
-        <span className="flex min-w-0 items-center gap-1 truncate">
+        <span className="flex min-w-0 items-center justify-center gap-1 truncate">
           <IconLoader2 className="h-3 w-3 shrink-0 animate-spin" aria-hidden="true" />
           {t("task:workflowMovePreviewChecking")}
         </span>
@@ -310,14 +314,17 @@ export function WorkflowMovePreviewDisclosure({
         data-testid="workflow-move-preview-error"
         role="status"
         aria-live="polite"
-        className={cn("grid min-w-0 gap-0.5 text-[11px] text-muted-foreground", className)}
+        className={cn(
+          "grid w-full min-w-0 gap-0.5 border-t border-border/60 pt-2 text-center text-[11px] text-muted-foreground",
+          className,
+        )}
       >
         <span className="truncate">{t("task:workflowMovePreviewUnavailable")}</span>
         <Button
           type="button"
           variant="ghost"
           size="sm"
-          className={cn("justify-self-start px-1.5 text-[11px]", detailsButtonClass)}
+          className={cn("justify-self-center px-1.5 text-[11px]", retryButtonClass)}
           onClick={state.retry}
           data-testid="workflow-move-preview-retry"
         >
@@ -334,13 +341,16 @@ export function WorkflowMovePreviewDisclosure({
   return (
     <div
       data-testid="workflow-move-preview"
-      className={cn("grid min-w-0 gap-0.5 text-[11px]", className)}
+      className={cn(
+        "grid w-full min-w-0 gap-0.5 border-t border-border/60 pt-2 text-center text-[11px] text-muted-foreground",
+        className,
+      )}
     >
       <div role="status" aria-live="polite" className="min-w-0 truncate" title={firstLine}>
         {firstLine}
       </div>
-      <div className="flex min-w-0 items-center gap-1">
-        <span className="min-w-0 flex-1 truncate" title={model.label}>
+      <div className="flex min-w-0 items-center justify-center gap-0">
+        <span className="min-w-0 truncate" title={model.label}>
           {model.label}
           {model.changeCount > 0 && (
             <span className="ml-1 text-muted-foreground">
@@ -362,13 +372,7 @@ export function WorkflowMovePreviewDisclosure({
           onClick={() => setDetailsOpen((open) => !open)}
           data-testid="workflow-move-preview-details-toggle"
         >
-          {detailsOpen
-            ? t("task:workflowMovePreviewHideDetails")
-            : t("task:workflowMovePreviewDetails")}
-          <IconChevronDown
-            className={cn("h-3 w-3 transition-transform", detailsOpen && "rotate-180")}
-            aria-hidden="true"
-          />
+          <IconInfoCircle className="h-3.5 w-3.5" aria-hidden="true" />
         </Button>
       </div>
       {detailsOpen && <WorkflowMovePreviewDetails preview={preview} t={t} />}

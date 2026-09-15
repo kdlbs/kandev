@@ -140,7 +140,7 @@ Add `workflow-move-preview.tsx` as a shared projection renderer with no fetches.
 normalized entry options to preview and move. Thread task/workflow identity down
 from the stepper. Integrate the renderer in `workflow-step-disclosure.tsx` rows.
 
-Collapsed layout is two lines above the action. Line one distinguishes current,
+Collapsed layout is two centered lines below actions and capabilities. Line one distinguishes current,
 other named, new conversations, and an idle task with no recipient. Line two shows an unchanged effective model
 or a before/after arrow, followed by an optional additional-change count.
 A retained model/profile mismatch uses the compact override label from UI-01.
@@ -157,6 +157,15 @@ The API returns stable field, value, and diagnostic reason codes for Kandev-owne
 settings. The renderer localizes those codes in the active locale and displays
 provider-defined labels only when they are safe display data. Model and session
 names remain data.
+
+Center both footer lines and use an icon-only info button with a localized
+accessible name. A separator divides actions from the muted footer.
+
+The chat and passthrough next-step controls pass the destination directly from
+`usePlanActions` through `WorkflowMoveProceedButton` to the options form. The
+form previews its current draft below the Move action, on desktop and touch.
+Mount the preview only while the options surface is open. Use the existing
+revision, debounce, cancellation, and concurrency logic.
 
 Use a keyboard/touch-operable details toggle with `aria-expanded`, not a nested
 hover-only tooltip. Details list full session/profile identity, planned changes,

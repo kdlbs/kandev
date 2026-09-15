@@ -3,6 +3,7 @@
 import {
   useCallback,
   type Dispatch,
+  type ReactNode,
   type SetStateAction,
   memo,
   useMemo,
@@ -322,6 +323,19 @@ function StepHoverContent({
   suppressFocusReturn: boolean;
 }) {
   const { t } = useTranslation();
+  const stepDetails = (
+    <div className="flex w-full flex-col items-center gap-1.5">
+      {progress && (
+        <StepProgressDetails
+          progress={progress}
+          agentProfileId={step.agent_profile_id}
+          agentLabelsByProfileId={agentLabelsByProfileId}
+          testId={`workflow-step-progress-${step.id}`}
+        />
+      )}
+      <StepCapabilityIcons events={step.events} agentProfileId={step.agent_profile_id} />
+    </div>
+  );
   return (
     <PopoverContent
       side="bottom"
@@ -348,6 +362,7 @@ function StepHoverContent({
           taskId={taskId}
           workflowId={workflowId}
           previewEnabled={hover.open}
+          children={stepDetails}
           isMoving={isMoving}
           onMove={onMove}
         />
@@ -355,15 +370,7 @@ function StepHoverContent({
       {isCurrent && (
         <div className="text-[11px] text-muted-foreground">{t("task:currentStep")}</div>
       )}
-      {progress && (
-        <StepProgressDetails
-          progress={progress}
-          agentProfileId={step.agent_profile_id}
-          agentLabelsByProfileId={agentLabelsByProfileId}
-          testId={`workflow-step-progress-${step.id}`}
-        />
-      )}
-      <StepCapabilityIcons events={step.events} agentProfileId={step.agent_profile_id} />
+      {!canMove && stepDetails}
     </PopoverContent>
   );
 }
@@ -376,6 +383,7 @@ function StepHoverContent({
  * hook subscribes lazily and resets whenever the pointer leaves the step.
  */
 function StepMoveControls({
+  children,
   step,
   taskId,
   workflowId,
@@ -387,6 +395,7 @@ function StepMoveControls({
   taskId?: string | null;
   workflowId?: string | null;
   previewEnabled: boolean;
+  children: ReactNode;
   isMoving: boolean;
   onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
 }) {
@@ -406,7 +415,6 @@ function StepMoveControls({
 
   return (
     <div className="flex w-full flex-col items-stretch gap-1.5">
-      <WorkflowMovePreviewDisclosure state={previewState} isTouchSurface={false} />
       <Button
         size="sm"
         variant="default"
@@ -442,6 +450,8 @@ function StepMoveControls({
           {t("task:workflowMoveOptions")}
         </Button>
       )}
+      {children}
+      <WorkflowMovePreviewDisclosure state={previewState} isTouchSurface={false} />
     </div>
   );
 }
