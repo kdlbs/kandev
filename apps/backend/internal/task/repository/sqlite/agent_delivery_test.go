@@ -302,6 +302,16 @@ func TestCanonicalAgentDeliveryProjectionBatchesCompatibleChunks(t *testing.T) {
 	if message.Content != "abc" {
 		t.Fatalf("batched canonical content = %q, want %q", message.Content, "abc")
 	}
+	var journalEvents int
+	if err := repo.db.Get(&journalEvents, repo.db.Rebind(`
+		SELECT COUNT(*) FROM conversation_session_events
+		WHERE session_id = ? AND event_type IN ('message.added', 'message.updated')`),
+		"session-canonical-batch"); err != nil {
+		t.Fatal(err)
+	}
+	if journalEvents != 1 {
+		t.Fatalf("batched canonical journal events = %d, want 1", journalEvents)
+	}
 	cursor, err := repo.GetAgentDeliveryCursor(ctx, "stream-canonical-batch")
 	if err != nil {
 		t.Fatal(err)

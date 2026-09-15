@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
 	agentctl "github.com/kandev/kandev/internal/agent/runtime/agentctl"
+	"github.com/kandev/kandev/internal/agentctl/types/streams"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/task/models"
 )
@@ -594,28 +596,14 @@ func (sm *StreamManager) projectCanonicalAgentEvents(
 	}
 	projector, ok := delivery.(canonicalAgentDeliveryBatchProjector)
 	if !ok {
-		for _, item := range prepared {
-			event, _, err := sm.projectCanonicalAgentEvent(
-				ctx, execution, item.event, item.durableEvent, delivery, client,
-			)
-			if err != nil {
-				return err
-			}
-			if !item.skipCallback {
-				sm.notifyAgentEvent(execution, event, startupGeneration)
-			}
-		}
-		return nil
+		return sm.projectCanonicalAgentEventsIndividually(
+			ctx, execution, prepared, delivery, client, startupGeneration,
+		)
 	}
 
-	events := make([]*models.AgentDeliveryEvent, len(prepared))
-	effects := make([]*models.AgentDeliveryEffect, len(prepared))
-	for i, item := range prepared {
-		if item.durableEvent == nil || !canonicalAgentDeliveryEvent(item.event) {
-			return fmt.Errorf("canonical delivery batch contains a non-canonical event")
-		}
-		events[i] = item.durableEvent
-		effects[i] = item.deliveryEffect
+	events, effects, err := canonicalDeliveryBatchInputs(prepared)
+	if err != nil {
+		return err
 	}
 	appendMessages, err := projector.ProjectCanonicalAgentDeliveryEvents(ctx, events, effects)
 	if err != nil {
@@ -624,17 +612,84 @@ func (sm *StreamManager) projectCanonicalAgentEvents(
 	if len(appendMessages) != len(prepared) {
 		return fmt.Errorf("canonical delivery projector returned %d results for %d events", len(appendMessages), len(prepared))
 	}
+	sm.notifyCanonicalAgentEventBatch(execution, prepared, appendMessages, client, startupGeneration)
+	return nil
+}
+
+func (sm *StreamManager) projectCanonicalAgentEventsIndividually(
+	ctx context.Context,
+	execution *AgentExecution,
+	prepared []preparedAgentEvent,
+	delivery AgentDeliveryRepository,
+	client *agentctl.Client,
+	startupGeneration uint64,
+) error {
+	for _, item := range prepared {
+		event, _, err := sm.projectCanonicalAgentEvent(
+			ctx, execution, item.event, item.durableEvent, delivery, client,
+		)
+		if err != nil {
+			return err
+		}
+		if !item.skipCallback {
+			sm.notifyAgentEvent(execution, event, startupGeneration)
+		}
+	}
+	return nil
+}
+
+func canonicalDeliveryBatchInputs(
+	prepared []preparedAgentEvent,
+) ([]*models.AgentDeliveryEvent, []*models.AgentDeliveryEffect, error) {
+	events := make([]*models.AgentDeliveryEvent, len(prepared))
+	effects := make([]*models.AgentDeliveryEffect, len(prepared))
+	for i, item := range prepared {
+		if item.durableEvent == nil || !canonicalAgentDeliveryEvent(item.event) {
+			return nil, nil, fmt.Errorf("canonical delivery batch contains a non-canonical event")
+		}
+		events[i] = item.durableEvent
+		effects[i] = item.deliveryEffect
+	}
+	return events, effects, nil
+}
+
+func (sm *StreamManager) notifyCanonicalAgentEventBatch(
+	execution *AgentExecution,
+	prepared []preparedAgentEvent,
+	appendMessages []bool,
+	client *agentctl.Client,
+	startupGeneration uint64,
+) {
+	var notification agentctl.AgentEvent
+	var notify bool
+	var content strings.Builder
 	for i, item := range prepared {
 		event := item.event
 		event.CanonicalMessageID = canonicalAgentMessageID(execution, event)
 		event.CanonicalProjection = true
 		event.CanonicalMessageAppend = appendMessages[i]
-		if !item.skipCallback {
-			sm.notifyAgentEvent(execution, event, startupGeneration)
-		}
 		sm.scheduleDurableDeliveryAck(client, event)
+		if item.skipCallback {
+			continue
+		}
+		if !notify {
+			notification = event
+			notify = true
+		}
+		if event.Type == streams.EventTypeReasoning {
+			content.WriteString(event.ReasoningText)
+		} else {
+			content.WriteString(event.Text)
+		}
 	}
-	return nil
+	if notify {
+		if notification.Type == streams.EventTypeReasoning {
+			notification.ReasoningText = content.String()
+		} else {
+			notification.Text = content.String()
+		}
+		sm.notifyAgentEvent(execution, notification, startupGeneration)
+	}
 }
 
 // durableAgentEventIdentity distinguishes a genuine legacy event from a

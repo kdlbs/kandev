@@ -53,11 +53,28 @@ type canonicalProjectionDeliveryRepository struct {
 	recordingAgentDeliveryRepository
 }
 
+type canonicalBatchProjectionDeliveryRepository struct {
+	recordingAgentDeliveryRepository
+	batchCalls int
+}
+
 func (r *canonicalProjectionDeliveryRepository) ProjectCanonicalAgentDeliveryEvent(
 	_ context.Context, event *models.AgentDeliveryEvent, _ *models.AgentDeliveryEffect,
 ) (bool, error) {
 	r.projected = append(r.projected, event)
 	return false, nil
+}
+
+func (r *canonicalBatchProjectionDeliveryRepository) ProjectCanonicalAgentDeliveryEvents(
+	_ context.Context, events []*models.AgentDeliveryEvent, _ []*models.AgentDeliveryEffect,
+) ([]bool, error) {
+	r.batchCalls++
+	r.projected = append(r.projected, events...)
+	appendMessages := make([]bool, len(events))
+	for index := range events {
+		appendMessages[index] = index > 0
+	}
+	return appendMessages, nil
 }
 
 func (r *immutableDeliveryRepository) ReceiveAgentDeliveryEvent(
@@ -256,6 +273,58 @@ func TestCanonicalProjectionNotifiesWhenAckTransportFails(t *testing.T) {
 	}
 	if len(repository.projected) != 1 {
 		t.Fatalf("projected events = %d, want 1", len(repository.projected))
+	}
+}
+
+func TestCanonicalProjectionBatchNotifiesOnceWithAccumulatedContent(t *testing.T) {
+	repository := &canonicalBatchProjectionDeliveryRepository{}
+	var callbacks []agentctl.AgentEvent
+	sm := NewStreamManager(newTestLogger(), StreamCallbacks{
+		OnAgentEvent: func(_ *AgentExecution, event agentctl.AgentEvent) {
+			callbacks = append(callbacks, event)
+		},
+	}, nil, nil)
+	execution := &AgentExecution{SessionID: "session-1", DeliveryStreamID: "stream-1"}
+	prepared := []preparedAgentEvent{
+		{
+			event: agentctl.AgentEvent{
+				Type:              streams.EventTypeMessageChunk,
+				Text:              "first",
+				ProtocolMessageID: "message-1",
+				DeliveryStreamID:  "stream-1",
+				DeliverySequence:  1,
+			},
+			durableEvent: &models.AgentDeliveryEvent{StreamID: "stream-1", Sequence: 1},
+		},
+		{
+			event: agentctl.AgentEvent{
+				Type:              streams.EventTypeMessageChunk,
+				Text:              "second",
+				ProtocolMessageID: "message-1",
+				DeliveryStreamID:  "stream-1",
+				DeliverySequence:  2,
+			},
+			durableEvent: &models.AgentDeliveryEvent{StreamID: "stream-1", Sequence: 2},
+		},
+	}
+
+	if err := sm.projectCanonicalAgentEvents(
+		context.Background(), execution, prepared, repository, nil, 0,
+	); err != nil {
+		t.Fatalf("project canonical batch: %v", err)
+	}
+	if repository.batchCalls != 1 {
+		t.Fatalf("batch projection calls = %d, want 1", repository.batchCalls)
+	}
+	if len(callbacks) != 1 {
+		t.Fatalf("callbacks = %d, want 1", len(callbacks))
+	}
+	callback := callbacks[0]
+	if callback.Text != "firstsecond" {
+		t.Fatalf("callback text = %q, want accumulated content", callback.Text)
+	}
+	if !callback.CanonicalProjection || callback.CanonicalMessageAppend {
+		t.Fatalf("callback projection metadata = projection:%t append:%t, want true:false", callback.CanonicalProjection, callback.CanonicalMessageAppend)
 	}
 }
 
