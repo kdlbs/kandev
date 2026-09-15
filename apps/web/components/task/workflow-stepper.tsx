@@ -1,6 +1,14 @@
 "use client";
 
-import { memo, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  type Dispatch,
+  type SetStateAction,
+  memo,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { cn } from "@kandev/ui/lib/utils";
 import { Popover, PopoverContent, PopoverTrigger } from "@kandev/ui/popover";
 import { Button } from "@kandev/ui/button";
@@ -83,6 +91,7 @@ const WorkflowStepper = memo(function WorkflowStepper({
     movingToStepId: progressingToStepId ?? movingToStepId,
   });
 
+  const [openStepId, setOpenStepId] = useState<string | null>(null);
   const sortedSteps = useMemo(() => sortWorkflowStepsByPosition(steps), [steps]);
 
   const currentIndex = useMemo(
@@ -121,6 +130,8 @@ const WorkflowStepper = memo(function WorkflowStepper({
               <WorkflowStepItem
                 key={step.id}
                 step={step}
+                openStepId={openStepId}
+                setOpenStepId={setOpenStepId}
                 index={index}
                 currentIndex={currentIndex}
                 isArchived={isArchived}
@@ -152,9 +163,33 @@ const WorkflowStepper = memo(function WorkflowStepper({
   );
 });
 
+function useStepHover(
+  stepId: string,
+  openStepId: string | null,
+  setOpenStepId: Dispatch<SetStateAction<string | null>>,
+) {
+  const onHoverOpenChange = useCallback(
+    (open: boolean) => {
+      setOpenStepId((current) => {
+        if (open) return stepId;
+        return current === stepId ? null : current;
+      });
+    },
+    [setOpenStepId, stepId],
+  );
+  return useHoverPopover({
+    openDelayMs: 200,
+    closeDelayMs: 100,
+    open: openStepId === stepId,
+    onOpenChange: onHoverOpenChange,
+  });
+}
+
 /** Individual step in the workflow stepper */
 function WorkflowStepItem({
   step,
+  openStepId,
+  setOpenStepId,
   index,
   currentIndex,
   isArchived,
@@ -167,6 +202,8 @@ function WorkflowStepItem({
   onMove,
 }: {
   step: Step;
+  openStepId: string | null;
+  setOpenStepId: Dispatch<SetStateAction<string | null>>;
   index: number;
   currentIndex: number;
   isArchived?: boolean;
@@ -190,7 +227,7 @@ function WorkflowStepItem({
     isAdjacent,
     allowManualMove: step.allow_manual_move,
   });
-  const hover = useHoverPopover({ openDelayMs: 200, closeDelayMs: 100 });
+  const hover = useStepHover(step.id, openStepId, setOpenStepId);
 
   return (
     <div className="flex items-center">
@@ -241,6 +278,7 @@ function WorkflowStepItem({
           agentLabelsByProfileId={agentLabelsByProfileId}
           onMove={onMove}
           hover={hover}
+          suppressFocusReturn={openStepId !== null && openStepId !== step.id}
         />
       </Popover>
     </div>
@@ -269,6 +307,7 @@ function StepHoverContent({
   agentLabelsByProfileId,
   onMove,
   hover,
+  suppressFocusReturn,
 }: {
   step: Step;
   isCurrent: boolean;
@@ -280,6 +319,7 @@ function StepHoverContent({
   agentLabelsByProfileId: Readonly<Record<string, string>>;
   onMove: (stepId: string, entryOptions?: WorkflowMoveEntryOptions) => Promise<boolean>;
   hover: ReturnType<typeof useHoverPopover>;
+  suppressFocusReturn: boolean;
 }) {
   const { t } = useTranslation();
   return (
@@ -287,7 +327,7 @@ function StepHoverContent({
       side="bottom"
       align="center"
       data-testid="workflow-step-popover"
-      className="p-1.5 flex flex-col gap-1.5 items-center w-auto min-w-28 max-w-[calc(100vw-1rem)]"
+      className="p-1.5 flex flex-col gap-1.5 items-center w-auto min-w-28 max-w-[calc(100vw-1rem)] data-[state=closed]:hidden"
       onMouseEnter={hover.onContentEnter}
       onMouseMove={hover.onContentEnter}
       onPointerEnter={hover.onContentEnter}
@@ -297,6 +337,10 @@ function StepHoverContent({
       onFocusCapture={hover.onContentEnter}
       onBlurCapture={hover.onContentLeave}
       onOpenAutoFocus={(event) => event.preventDefault()}
+      onCloseAutoFocus={(event) => {
+        // Switching steps must not restore focus to the previous trigger and reopen it.
+        if (suppressFocusReturn) event.preventDefault();
+      }}
     >
       {canMove && (
         <StepMoveControls
