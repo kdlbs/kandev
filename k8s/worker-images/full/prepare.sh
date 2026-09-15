@@ -28,6 +28,13 @@ repository_url={{repository.clone_url}}
 repository_branch={{repository.branch}}
 clone_tmp=/opt/kandev/.workspace-clone
 
+normalize_repository_origin() {
+  printf '%s\n' "$1" | sed \
+    -e 's|^https://[^/@]*@github.com/|https://github.com/|' \
+    -e 's|^git@github.com:|https://github.com/|' \
+    -e 's|^ssh://git@github.com/|https://github.com/|'
+}
+
 # ---- Git identity and HTTPS authentication ----
 {{git.identity_setup}}
 git config --global --add safe.directory '*'
@@ -44,8 +51,8 @@ if [ -n "$repository_url" ]; then
       exit 1
     fi
     workspace_origin=$(git -C "$workspace" remote get-url origin 2>/dev/null || true)
-    expected_origin=$(printf '%s\n' "$repository_url" | sed 's|^https://[^/@]*@github.com/|https://github.com/|')
-    retained_origin=$(printf '%s\n' "$workspace_origin" | sed 's|^https://[^/@]*@github.com/|https://github.com/|')
+    expected_origin=$(normalize_repository_origin "$repository_url")
+    retained_origin=$(normalize_repository_origin "$workspace_origin")
     if [ -z "$workspace_origin" ] || [ "$retained_origin" != "$expected_origin" ]; then
       echo 'kandev: retained workspace repository origin does not match the configured repository' >&2
       exit 1
