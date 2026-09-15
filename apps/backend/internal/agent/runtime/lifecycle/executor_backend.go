@@ -595,6 +595,7 @@ type ExecutorCreateRequest struct {
 	// environment handle and must never fall back to provisioning a replacement.
 	WorkspaceReuseRequired bool
 	AgentProfileID         string
+	ExactProfile           bool
 	OfficeAgentProfileID   string
 	PromptTurnID           string
 	WorkspacePath          string
@@ -746,6 +747,7 @@ func (ri *ExecutorInstance) ToAgentExecution(req *ExecutorCreateRequest) *AgentE
 		SessionID:            req.SessionID,
 		TaskEnvironmentID:    req.TaskEnvironmentID,
 		AgentProfileID:       req.AgentProfileID,
+		ExactProfile:         req.ExactProfile,
 		OfficeAgentProfileID: req.OfficeAgentProfileID,
 		promptTurnID:         req.PromptTurnID,
 		AgentID:              agentID,

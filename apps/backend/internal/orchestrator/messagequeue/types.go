@@ -552,6 +552,8 @@ type PendingMove struct {
 	// distinct from the session owning this queue, which is only the execution
 	// context used to apply the deferred move.
 	SenderSessionID string `json:"sender_session_id,omitempty"`
+	// ExactProfileGeneration fences a deferred move to its exact assignment.
+	ExactProfileGeneration int64 `json:"exact_profile_generation,omitempty"`
 	// EntryOptions carries the complete typed one-shot move overrides for a
 	// deferred move so the target-step entry can apply them once the source
 	// turn ends. It survives the queue's normal restart/reload path; existing

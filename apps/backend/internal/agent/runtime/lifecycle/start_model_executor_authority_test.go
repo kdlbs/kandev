@@ -225,6 +225,7 @@ func TestApplyStartModelPolicyExecutorAuthority(t *testing.T) {
 					t.Fatalf("error = %v, want substring %q", err, tt.wantErr)
 				}
 			}
+
 			if !reflect.DeepEqual(applier.calls, tt.wantCalls) {
 				t.Errorf("SetModel calls = %v, want %v", applier.calls, tt.wantCalls)
 			}
@@ -247,5 +248,20 @@ func TestApplyStartModelPolicyExecutorAuthority(t *testing.T) {
 				t.Errorf("auto-fallback fallback model = %q, want empty", decision.FallbackModel)
 			}
 		})
+	}
+}
+
+func TestApplyStartModelPolicyStrictRejectsUnavailableModelWithoutSubstitution(t *testing.T) {
+	applier := &fakeModelApplier{}
+	_, err := applyStartModelPolicy(
+		context.Background(), newPolicyTestLogger(), applier,
+		modelState("provider-default"),
+		StartModelPolicy{Model: "required-model", Strict: true},
+	)
+	if !errors.Is(err, ErrStrictModelSelection) {
+		t.Fatalf("apply strict policy error = %v, want strict model selection failure", err)
+	}
+	if len(applier.calls) != 0 {
+		t.Fatalf("SetModel calls = %v, want no substitution", applier.calls)
 	}
 }

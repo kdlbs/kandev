@@ -185,16 +185,26 @@ func (h *Handlers) deferMoveTask(
 	// queued once for an existing session). No hand-off message is pre-queued
 	// here; instructions ride the entry overlay.
 	moveID := uuid.NewString()
+	exactGeneration := int64(0)
+	if reader, ok := h.exactTaskProfileAssigner.(exactTaskProfileGenerationReader); ok {
+		var generationErr error
+		exactGeneration, generationErr = reader.ExactTaskProfileGeneration(ctx, req.TaskID)
+		if generationErr != nil {
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError,
+				"failed to read exact task profile assignment", nil)
+		}
+	}
 	if err := h.messageQueue.SetPendingMove(ctx, session.ID, &messagequeue.PendingMove{
-		MoveID:               moveID,
-		SessionIncarnationID: session.QueueIncarnationID,
-		TaskID:               req.TaskID,
-		WorkflowID:           req.WorkflowID,
-		WorkflowStepID:       req.WorkflowStepID,
-		Position:             req.Position,
-		Actor:                string(wfmodels.StepTransitionActorAgent),
-		SenderSessionID:      req.SenderSessionID,
-		EntryOptions:         req.EntryOptions,
+		MoveID:                 moveID,
+		SessionIncarnationID:   session.QueueIncarnationID,
+		TaskID:                 req.TaskID,
+		WorkflowID:             req.WorkflowID,
+		WorkflowStepID:         req.WorkflowStepID,
+		Position:               req.Position,
+		Actor:                  string(wfmodels.StepTransitionActorAgent),
+		SenderSessionID:        req.SenderSessionID,
+		EntryOptions:           req.EntryOptions,
+		ExactProfileGeneration: exactGeneration,
 	}); err != nil {
 		h.logger.Error("move_task: failed to persist deferred move",
 			zap.String("task_id", req.TaskID), zap.String("session_id", session.ID), zap.Error(err))

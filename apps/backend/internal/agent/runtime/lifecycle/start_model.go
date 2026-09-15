@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -23,7 +24,12 @@ type StartModelPolicy struct {
 	// AutoFallback keeps selection best-effort after an advertised model
 	// rejects SetModel. It does not bypass the executor catalog.
 	AutoFallback bool
+	// Strict rejects provider defaults, configured fallbacks, and model
+	// variations. Exact-profile launches use it to prevent model substitution.
+	Strict bool
 }
+
+var ErrStrictModelSelection = errors.New("strict model selection failed")
 
 // ModelSelectionOutcome describes the executor-authoritative result.
 type ModelSelectionOutcome string
@@ -153,10 +159,16 @@ func applyStartModelPolicy(
 	}
 	advertised := advertisedModelIDs(state)
 	if len(advertised) == 0 {
+		if policy.Strict {
+			return decision, fmt.Errorf("%w: requested model %q has no advertised catalog", ErrStrictModelSelection, policy.Model)
+		}
 		return providerDefaultDecision(state, policy, ModelSelectionReasonCatalogEmpty), nil
 	}
 
 	if !containsModel(advertised, policy.Model) {
+		if policy.Strict {
+			return decision, fmt.Errorf("%w: requested model %q is not advertised", ErrStrictModelSelection, policy.Model)
+		}
 		if policy.AutoFallback {
 			return providerDefaultDecision(state, policy, ModelSelectionReasonRequestedNotAdvertised), nil
 		}

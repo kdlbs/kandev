@@ -430,6 +430,7 @@ func buildLifecycleLaunchRequest(
 		TaskID:                        req.TaskID,
 		WorkspaceID:                   req.WorkspaceID,
 		SessionID:                     req.SessionID,
+		ExactProfile:                  req.ExactProfile,
 		TaskEnvironmentID:             req.TaskEnvironmentID,
 		WorkspaceReuseRequired:        req.WorkspaceReuseRequired,
 		AllowBranchReplacement:        req.AllowBranchReplacement,
@@ -971,6 +972,9 @@ func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID st
 	return &executor.AgentProfileInfo{
 		ProfileID:                  info.ProfileID,
 		ProfileName:                info.ProfileName,
+		WorkspaceID:                info.WorkspaceID,
+		Enabled:                    info.Enabled,
+		Revision:                   info.Revision,
 		AgentID:                    info.AgentID,
 		AgentName:                  info.AgentName,
 		Model:                      info.Model,

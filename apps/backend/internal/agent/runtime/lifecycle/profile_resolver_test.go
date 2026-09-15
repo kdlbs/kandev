@@ -160,8 +160,11 @@ func TestStoreProfileResolver_ResolveProfile_Success(t *testing.T) {
 				AgentID:                    "agent-456",
 				Name:                       "My Profile",
 				Model:                      "claude-3.5-sonnet",
+				WorkspaceID:                "workspace-1",
+				Enabled:                    true,
 				AutoApprove:                true,
 				DangerouslySkipPermissions: false,
+				UpdatedAt:                  time.Date(2026, 9, 11, 20, 0, 0, 0, time.UTC),
 			}, nil
 		},
 		GetAgentFn: func(ctx context.Context, id string) (*models.Agent, error) {
@@ -197,6 +200,9 @@ func TestStoreProfileResolver_ResolveProfile_Success(t *testing.T) {
 	}
 	if info.Model != "claude-3.5-sonnet" {
 		t.Errorf("expected Model 'claude-3.5-sonnet', got '%s'", info.Model)
+	}
+	if info.WorkspaceID != "workspace-1" || !info.Enabled || !info.Revision.Equal(time.Date(2026, 9, 11, 20, 0, 0, 0, time.UTC)) {
+		t.Errorf("exact profile snapshot = %+v, want workspace, enabled state, and revision", info)
 	}
 	if info.AutoApprove != true {
 		t.Error("expected AutoApprove to be true")
