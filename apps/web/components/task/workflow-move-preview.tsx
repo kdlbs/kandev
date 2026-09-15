@@ -160,6 +160,8 @@ function dispatchLabel(t: Translation, value: WorkflowMovePreviewResponse["dispa
       return t("task:workflowMovePreviewDispatchNoPrompt");
     case "deferred":
       return t("task:workflowMovePreviewDispatchDeferred");
+    case "no_session":
+      return t("task:workflowMovePreviewDispatchNoSession");
     default:
       return t(UNKNOWN_PREVIEW_LABEL_KEY);
   }

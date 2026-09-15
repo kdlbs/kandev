@@ -924,6 +924,7 @@
   "workflowMovePreviewDispatchPrompt": "Enviar o prompt do passo",
   "workflowMovePreviewDispatchNoPrompt": "Não enviar um prompt",
   "workflowMovePreviewDispatchDeferred": "Verificar novamente quando o turno terminar",
+  "workflowMovePreviewDispatchNoSession": "Agente não iniciado",
   "workflowMovePreviewNotes": "Notas",
   "workflowMovePreviewNoticeRetainedOverride": "A sessão mantém a substituição do modelo.",
   "workflowMovePreviewNoticeUnavailable": "Algumas definições da pré-visualização estão indisponíveis.",

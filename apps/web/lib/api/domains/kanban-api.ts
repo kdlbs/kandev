@@ -287,7 +287,12 @@ export type WorkflowMovePreviewOutcome =
   | "unknown";
 export type WorkflowMovePreviewApplicability = "planned" | "unchanged" | "skipped" | "unknown";
 export type WorkflowMovePreviewSourceDisposition = "keep" | "park" | "complete" | "unknown";
-export type WorkflowMovePreviewDispatch = "prompt" | "no_prompt" | "deferred" | "unknown";
+export type WorkflowMovePreviewDispatch =
+  | "prompt"
+  | "no_prompt"
+  | "deferred"
+  | "no_session"
+  | "unknown";
 
 export type WorkflowMovePreviewModelValue = {
   id?: string;

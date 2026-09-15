@@ -971,6 +971,7 @@
   "workflowMovePreviewDispatchPrompt": "Send step prompt",
   "workflowMovePreviewDispatchNoPrompt": "Do not send a prompt",
   "workflowMovePreviewDispatchDeferred": "Check again when the turn ends",
+  "workflowMovePreviewDispatchNoSession": "Agent not started",
   "workflowMovePreviewNotes": "Notes",
   "workflowMovePreviewNoticeRetainedOverride": "The session keeps its model override.",
   "workflowMovePreviewNoticeUnavailable": "Some preview settings are unavailable.",

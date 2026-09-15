@@ -88,6 +88,13 @@ export function getWorkflowMovePreviewRevision(
     .slice()
     .sort((left, right) => left.id.localeCompare(right.id))
     .map((profile) => ({ ...profile }));
+  const sessions = matchingSessions(state, taskId);
+  const sessionModels = Array.from(new Set(sessions.map(({ session }) => session.id)))
+    .sort()
+    .map((sessionId) => ({
+      session_id: sessionId,
+      models: state.sessionModels?.bySessionId?.[sessionId] ?? null,
+    }));
 
   return JSON.stringify({
     connection: state.connection.status,
@@ -99,7 +106,8 @@ export function getWorkflowMovePreviewRevision(
     steps: matchingSteps(state, workflowIds, workflowStepIds),
     tasks,
     sessions_loaded: taskId ? state.taskSessionsByTask.loadedByTaskId[taskId] === true : false,
-    sessions: matchingSessions(state, taskId),
+    sessions,
+    session_models: sessionModels,
     agent_profiles_version: state.agentProfiles.version,
     profiles,
   });

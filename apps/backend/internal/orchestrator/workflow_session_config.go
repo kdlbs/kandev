@@ -161,8 +161,9 @@ func (s *Service) resolveWorkflowSessionConfigTarget(
 // a session's agent family. A nil rule with an empty warning is the one silent
 // outcome: the step deliberately configures some other agent.
 type configureSessionRuleSelection struct {
-	rule    *wfmodels.ConfigureSessionRule
-	warning string
+	rule       *wfmodels.ConfigureSessionRule
+	warning    string
+	noticeCode string
 }
 
 // selectConfigureSessionRule returns the single rule governing the session's
@@ -196,7 +197,10 @@ func selectConfigureSessionRuleWithResolver(
 ) configureSessionRuleSelection {
 	sessionFamily, sessionAmbiguous := resolveSessionAgentFamilyWithResolver(agentName, resolver)
 	if sessionAmbiguous {
-		return configureSessionRuleSelection{warning: ambiguousAgentFamilyWarning(agentName)}
+		return configureSessionRuleSelection{
+			warning:    ambiguousAgentFamilyWarning(agentName),
+			noticeCode: "ambiguous_session_configuration",
+		}
 	}
 
 	matched := make([]*wfmodels.ConfigureSessionRule, 0, 1)
@@ -207,7 +211,10 @@ func selectConfigureSessionRuleWithResolver(
 			anyKnownFamily = true
 			matched = append(matched, &rules[index])
 		case ruleAmbiguousForSession:
-			return configureSessionRuleSelection{warning: ambiguousAgentFamilyWarning(rules[index].AgentName)}
+			return configureSessionRuleSelection{
+				warning:    ambiguousAgentFamilyWarning(rules[index].AgentName),
+				noticeCode: "ambiguous_session_configuration",
+			}
 		case ruleNamesOtherAgents:
 			anyKnownFamily = true
 		case ruleNamesNothingKnown:
@@ -216,11 +223,17 @@ func selectConfigureSessionRuleWithResolver(
 
 	switch {
 	case len(matched) > 1:
-		return configureSessionRuleSelection{warning: conflictingRulesWarning(len(matched), sessionFamily)}
+		return configureSessionRuleSelection{
+			warning:    conflictingRulesWarning(len(matched), sessionFamily),
+			noticeCode: "conflicting_session_configuration",
+		}
 	case len(matched) == 1:
 		return configureSessionRuleSelection{rule: matched[0]}
 	case !anyKnownFamily:
-		return configureSessionRuleSelection{warning: noKnownAgentFamilyWarning}
+		return configureSessionRuleSelection{
+			warning:    noKnownAgentFamilyWarning,
+			noticeCode: "session_configuration_unavailable",
+		}
 	default:
 		return configureSessionRuleSelection{}
 	}

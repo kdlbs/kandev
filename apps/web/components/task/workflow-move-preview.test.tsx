@@ -91,6 +91,19 @@ describe("WorkflowMovePreviewDisclosure", () => {
     expect(screen.getByText(/Send step prompt/)).toBeTruthy();
   });
 
+  it("labels a no-session dispatch separately from a suppressed prompt", () => {
+    render(
+      <WorkflowMovePreviewDisclosure
+        state={makeState(makePreview({ outcome: "no_session", dispatch: "no_session" }))}
+        isTouchSurface={false}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("workflow-move-preview-details-toggle"));
+
+    expect(screen.getByText("Agent not started")).toBeTruthy();
+  });
+
   it("prioritizes unknown models and identifies retained overrides", () => {
     const { rerender } = render(
       <WorkflowMovePreviewDisclosure

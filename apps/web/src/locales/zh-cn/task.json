@@ -923,6 +923,7 @@
   "workflowMovePreviewDispatchPrompt": "发送步骤提示",
   "workflowMovePreviewDispatchNoPrompt": "不发送提示",
   "workflowMovePreviewDispatchDeferred": "回合结束时重新检查",
+  "workflowMovePreviewDispatchNoSession": "代理未启动",
   "workflowMovePreviewNotes": "备注",
   "workflowMovePreviewNoticeRetainedOverride": "会话会保留模型覆盖设置。",
   "workflowMovePreviewNoticeUnavailable": "部分预览设置不可用。",

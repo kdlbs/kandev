@@ -163,20 +163,21 @@ pending-move, and task gates still apply. Phone rows use these same statuses.
 
 ## E2E tests
 
-New `tests/workflow/workflow-move-preview.spec.ts` (chromium) covers retained
-Astra override on a Luna profile, new Luna session, reuse of another named
-session, no profile/model change, and conditional model/settings changes.
-For each stable case, inspect the preview, move, and assert session ID/model
-against isolated fixture API state (001.1-.4). Test reset options and skipped
-configuration. Mock only preview transport to test failure/race states (001.7,
-002.3); use real backend routing for the behavioral scenarios.
+New `tests/workflow/workflow-move-preview.spec.ts` (chromium) covers a retained
+session model override during an in-place move, reuse of another named session,
+and creation of a fresh profiled session. Each scenario inspects the preview,
+executes the move, and checks the resulting session identity or model against
+isolated fixture API state. Unit and integration tests cover conditional
+settings, reset and skipped states, no-session launch gates, authorization,
+fresh-launch configuration projection, and stale-response handling.
 
 New `tests/workflow/mobile-workflow-move-preview.spec.ts` (mobile-chrome) covers
-drawer selection, inline details, move result, 44px targets, long translated
-labels, internal scrolling, safe areas, dismissal/focus return, and no horizontal
-overflow (002.1-.4). Include 320px and 767/768px boundary checks without overriding
-the project's device. Run existing step-targeting and move-option suites for
-regression evidence. No production DB or task is used.
+the coarse-pointer touch drawer, inline details, 44px controls, focus return on
+dismissal, and no horizontal overflow. The scenario uses the repository's
+tablet context because the full phone task route uses `SessionMobileLayout` and
+does not render the desktop task stepper. Existing step-targeting and move-option
+suites provide the adjacent mobile regression evidence. No production DB or task
+is used.
 
 ## Work orders
 
@@ -219,11 +220,20 @@ including the no-auto-start and skip-without-instructions gates. The preview
 returns `no_session` without a recipient when the task remains idle, and keeps
 the task-level profile fallback when an allowed fresh launch can occur.
 
+The preview endpoint authorizes the task before reading task state. Existing
+source sessions retain current-session routing when no destination profile is
+configured, while profile changes can predict a fresh target session even when
+the destination does not auto-start a prompt. Fresh launches project applicable
+session settings, and context reset and mode changes report skipped states when
+execution cannot apply them. Busy reusable targets report deferred dispatch,
+and no-session dispatch has its own localized detail label.
+
 Open previews now invalidate from live store revisions and connection changes,
-clear stale success while refreshing, and retain late-response guards. Every
-movable disclosure row can receive a preview through a two-request queue.
-Known diagnostics and Kandev-owned fields and values render through the active
-locale; provider option labels remain bounded display data.
+including session model and fallback updates, clear stale success while
+refreshing, and retain late-response guards. Every movable disclosure row can
+receive a preview through a two-request queue. Typed diagnostics and Kandev-owned
+fields and values render through the active locale; provider option labels remain
+bounded display data.
 
 Additional remediation checks passed on 2026-09-15:
 
