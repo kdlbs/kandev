@@ -222,8 +222,8 @@ func taskHandoff(args []string) int {
 	executorProfileID := fs.String("executor-profile-id", "", "Delivery executor profile ID (required)")
 	repositoryID := fs.String("repository-id", "", "Repository to attach to the delivery task")
 	baseBranch := fs.String("base-branch", "", "Base branch; only valid with --repository-id")
-	startAgent := fs.Bool("start-agent", false, "Start the delivery agent immediately (default false)")
-	externalID := fs.String("external-id", "", "Create-idempotency key")
+	startAgent := fs.Bool("start-agent", false, "Start the delivery agent immediately (default false, diverging from same-workspace task creation's default of true: starting immediately in a workspace you do not run in is the riskiest available default)")
+	externalID := fs.String("external-id", "", "Create-idempotency key; omitting it makes the call non-idempotent, so a retry can create a duplicate delivery task. When a retry is possible, derive it from the deciding artefact, not from --title, which can change between attempts")
 	if err := fs.Parse(args); err != nil {
 		cliError("parse flags: %v", err)
 		return 1
