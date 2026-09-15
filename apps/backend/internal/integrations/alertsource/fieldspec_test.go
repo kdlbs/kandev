@@ -73,6 +73,17 @@ func TestFieldSpec_Validate_SecretWithDefaultOrExample(t *testing.T) {
 	assertHasCode(t, err, ErrCodeSecretHasLiteral)
 }
 
+// TestFieldSpec_Validate_SecretWithDefault_ReversedModifierOrder is R5-13:
+// D5 records the defect "by the modifier", which is order-dependent
+// language, but Validate() checks the field's final state, so .Default(x)
+// before .Secret() must be flagged exactly like .Secret() before
+// .Default(x).
+func TestFieldSpec_Validate_SecretWithDefault_ReversedModifierOrder(t *testing.T) {
+	spec := NewFieldSpec().Field(NewStringField("token").Default("literal").Secret())
+	err := assertSpecError(t, spec.Validate())
+	assertHasCode(t, err, ErrCodeSecretHasLiteral)
+}
+
 func TestFieldSpec_Validate_SecretNonString(t *testing.T) {
 	spec := NewFieldSpec().Field(NewIntField("bad").Secret())
 	err := assertSpecError(t, spec.Validate())

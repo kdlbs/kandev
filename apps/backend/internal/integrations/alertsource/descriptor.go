@@ -208,19 +208,22 @@ func capabilityAgreement(declared, implemented bool) []FieldError {
 	}
 }
 
-// isNilInterfaceValue reports whether s is nil, either as an untyped nil
+// isNilInterfaceValue reports whether v is nil, either as an untyped nil
 // interface value or as a typed nil (pointer, map, slice, chan or func)
-// boxed into a non-nil interface value. s == nil alone misses the typed
-// case — (*fakeSource)(nil) is a non-nil Source under s == nil and panics
-// on the first method call instead of reporting NilSource (D18).
-func isNilInterfaceValue(s Source) bool {
-	if s == nil {
+// boxed into a non-nil interface value. v == nil alone misses the typed
+// case — (*fakeSource)(nil) is a non-nil Source under v == nil and panics
+// on the first method call instead of reporting NilSource (D18). Takes any
+// so the same check covers every interface-typed nil hazard in this
+// package: a Source here, a SecretResolver in checkLoadCall (R5-09) — both
+// are "an interface value that looks non-nil but panics on first use".
+func isNilInterfaceValue(v any) bool {
+	if v == nil {
 		return true
 	}
-	v := reflect.ValueOf(s)
-	switch v.Kind() {
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
 	case reflect.Pointer, reflect.Map, reflect.Slice, reflect.Chan, reflect.Func, reflect.Interface:
-		return v.IsNil()
+		return rv.IsNil()
 	default:
 		return false
 	}

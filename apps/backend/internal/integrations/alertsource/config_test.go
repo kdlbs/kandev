@@ -282,6 +282,17 @@ func TestLoadConfig_NilResolver_ErrorWhenSpecDeclaresSecret(t *testing.T) {
 	assertHasCode(t, serr, ErrCodeNilResolver)
 }
 
+// TestLoadConfig_TypedNilResolver_ErrorWhenSpecDeclaresSecret is R5-09: a
+// typed nil (*fakeResolver)(nil) is non-nil under r == nil and would panic
+// inside Reveal instead of reporting NilResolver, the same hazard D18
+// already names for Source (isNilInterfaceValue covers both).
+func TestLoadConfig_TypedNilResolver_ErrorWhenSpecDeclaresSecret(t *testing.T) {
+	var r *fakeResolver
+	_, err := LoadConfig(context.Background(), basicSpec(), "src-1", map[string]any{"site": "x"}, r)
+	serr := assertSpecError(t, err)
+	assertHasCode(t, serr, ErrCodeNilResolver)
+}
+
 func TestLoadConfig_PureFailureNeverCallsResolver(t *testing.T) {
 	resolver := &fakeResolver{values: map[string]string{}}
 	_, err := LoadConfig(context.Background(), basicSpec(), "src-1", map[string]any{}, resolver)
@@ -305,6 +316,34 @@ func TestLoadConfig_ResolvesSecret(t *testing.T) {
 	}
 	if len(resolver.calls) != 1 || resolver.calls[0] != SecretKey("src-1", "api_token") {
 		t.Fatalf("unexpected resolver calls: %v", resolver.calls)
+	}
+}
+
+// TestConfig_String_RedactsEveryDeclaredFieldByName is R5-12: the mandated
+// shape is "declared field names with values replaced", not merely "the
+// real secret value is absent" — a constant "redacted" string would pass a
+// sentinel-absence-only check while losing every field name. Map key order
+// is deterministic here because fmt sorts string map keys when formatting.
+func TestConfig_String_RedactsEveryDeclaredFieldByName(t *testing.T) {
+	resolver := &fakeResolver{values: map[string]string{
+		SecretKey("src-1", "api_token"): "the-secret",
+	}}
+	stored := map[string]any{"site": "datadoghq.com", "poll_interval": 60}
+	cfg, err := LoadConfig(context.Background(), basicSpec(), "src-1", stored, resolver)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := cfg.String()
+	if strings.Contains(got, "the-secret") {
+		t.Fatalf("String() leaked the real secret value: %s", got)
+	}
+	want := fmt.Sprintf("map[api_token:%s poll_interval:%s site:%s]",
+		secretRedactionMarker, secretRedactionMarker, secretRedactionMarker)
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+	if cfg.GoString() != got {
+		t.Fatalf("GoString() must match String(): %q vs %q", cfg.GoString(), got)
 	}
 }
 

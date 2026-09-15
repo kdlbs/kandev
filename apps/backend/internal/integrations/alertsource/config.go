@@ -296,7 +296,7 @@ func checkLoadCall(spec *FieldSpec, sourceID string, r SecretResolver) error {
 	if sourceID == "" {
 		return newSpecError([]FieldError{{Field: "sourceID", Code: ErrCodeEmptySourceID, Message: "source id must not be empty"}})
 	}
-	if r == nil && specDeclaresSecret(spec) {
+	if isNilInterfaceValue(r) && specDeclaresSecret(spec) {
 		return newSpecError([]FieldError{{Field: "", Code: ErrCodeNilResolver, Message: "a secret resolver is required because the spec declares a Secret field"}})
 	}
 	return nil

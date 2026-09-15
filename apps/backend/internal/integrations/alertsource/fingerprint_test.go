@@ -31,6 +31,28 @@ func TestFingerprint_DeterministicAcrossRuns(t *testing.T) {
 	}
 }
 
+// TestFingerprint_NilOrEmptyFieldsHashesFixedValue is R5-11: Fingerprint is
+// pure and does not re-validate FingerprintFields (Descriptor.Validate()
+// owns rejecting empty), so a nil or empty fields slice must hash a fixed,
+// well-formed value rather than panicking or returning "" — every call site
+// in store.go runs isFingerprint on the result before it ever reaches SQL.
+func TestFingerprint_NilOrEmptyFieldsHashesFixedValue(t *testing.T) {
+	labels := map[string]string{"alertname": "DiskFull"}
+	nilFields := Fingerprint(labels, nil)
+	emptyFields := Fingerprint(labels, []string{})
+	if !isFingerprint(nilFields) {
+		t.Fatalf("nil fields: not a well-formed fingerprint: %q", nilFields)
+	}
+	if nilFields != emptyFields {
+		t.Fatalf("nil and empty fields slices must hash identically: %s vs %s", nilFields, emptyFields)
+	}
+	// Fixed regardless of labels, since no key is ever consulted.
+	other := Fingerprint(map[string]string{"different": "labels"}, nil)
+	if other != nilFields {
+		t.Fatalf("expected the same fixed value regardless of labels, got %s vs %s", other, nilFields)
+	}
+}
+
 func TestFingerprint_AbsentKeyDiffersFromEmptyValue(t *testing.T) {
 	fields := []string{"k"}
 	absent := Fingerprint(map[string]string{}, fields)
