@@ -70,9 +70,11 @@ no new field.
   `use-needs-you-inbox-controller.test.tsx`.
 - AC .20: with `hasActiveWorkspace === false`, the Inbox renders the empty
   view rather than an unresolvable loading view.
-- AC .21: `resolveViewMode` renders the error view (not the loading or empty
-  view) for every reachable `(status, bundleCount, hasMore, lastAppliedOk,
-hasActiveWorkspace)` tuple in which the most recent apply was an error.
+- AC .21: after a failed read settles with `status === "error"`,
+  `resolveViewMode` renders the error view and never claims that the Inbox is
+  empty. While a retry is pending (`status === "loading"` and
+  `lastAppliedOk === false`), it renders the loading view until the retry
+  succeeds or fails.
 
 ## Verification
 
