@@ -177,6 +177,8 @@ Select an option, then choose **Save changes**. Workflow-selected profiles alway
 
 External MCP calls have no verified creating session. With **Creating session profile**, those calls keep the compatibility fallback to the parent task when one exists, then workflow and target-workspace defaults. The preference applies across workspaces, but **Workspace default profile** resolves the default from each new task's target workspace. A resolved profile and runtime seed are stored even when `start_agent=false`, so a later manual start uses the same decision.
 
+Configuration and External MCP clients can use `assign_exact_task_profile_kandev` to bind an existing task to one concrete enabled agent profile. Kandev stores the assignment with the current profile revision and applies it to later session starts, workflow-step auto-starts, and deferred moves for that task. If the profile is disabled, moved to another workspace, renamed, or changed before launch, Kandev fails the launch instead of falling back to a workflow or workspace default profile.
+
 ### Navigate long chat transcripts
 
 When your latest prompt has fully left the transcript viewport, **Scroll to
