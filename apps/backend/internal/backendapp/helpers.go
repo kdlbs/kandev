@@ -862,6 +862,7 @@ func registerRoutes(p routeParams) {
 		p.services.GitLab.SetWatchDependencyValidator(&gitLabWatchDependencyValidator{
 			tasks: p.taskSvc, workflows: p.services.Workflow, agents: p.agentSettingsRepo,
 		})
+		p.services.GitLab.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
 	}
 	if p.services.AzureDevOps != nil {
 		p.services.AzureDevOps.SetWatchRepositoryLookup(repoLookup)
@@ -882,6 +883,7 @@ func registerRoutes(p routeParams) {
 	if p.services.Sentry != nil {
 		p.services.Sentry.SetTaskDeleter(handoffSvc)
 		p.services.Sentry.SetRepositoryLookup(repoLookup)
+		p.services.Sentry.SetWorkspaceAuthorizer(p.taskSvc.AuthorizeWorkspaceAccess)
 	}
 	if p.services.Automation != nil {
 		p.services.Automation.Service.SetRepositoryLookup(repoLookup)
