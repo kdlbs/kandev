@@ -124,6 +124,7 @@ type MessageCreator interface {
 	// parentToolCallID is the parent Task tool call ID for subagent nesting (empty for top-level).
 	UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, parentToolCallID, status, result, agentSessionID, title, turnID, msgType string, normalized *streams.NormalizedPayload) error
 	CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error
+	CreateSessionMessageIdempotent(ctx context.Context, messageID, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error
 	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error)
 	UpdatePermissionMessage(ctx context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error
 	ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
@@ -744,6 +745,9 @@ type Service struct {
 	// session.ensure). Nil = unscoped.
 	taskAccessCheck func(ctx context.Context, taskID string) error
 
+	// taskLifecycleDeleter owns cleanup of automation tasks abandoned before
+	// their run was durably recorded.
+	taskLifecycleDeleter taskLifecycleDeleter
 	// retrackedSessionCheck reports whether the lifecycle manager
 	// successfully re-tracked a session during this backend's own startup
 	// recovery pass (AC-EXECUTORS-SURVIVAL-003.1). Consulted by startup
@@ -1704,6 +1708,7 @@ func NewService(
 	})
 	exec.SetOnSessionStateTransition(s.transitionTaskSessionState)
 	exec.SetOnBootstrapFailureTransition(s.transitionBootstrapFailure)
+	exec.SetOnBootstrapFailureMessageRepair(s.persistBootstrapFailureMessage)
 	exec.SetOnSessionStarting(func(
 		ctx context.Context,
 		taskID string,
@@ -1725,6 +1730,7 @@ func NewService(
 			ctx, taskID, session, expectedState, promoteTask, allowCompletedResume,
 		)
 	})
+	exec.SetOnLaunchFailed(s.handleLaunchFailed)
 	exec.SetOnExecutionCleanupClaim(s.claimForcedExecutionCleanup)
 	exec.SetOnExecutionStopOwnerRegistration(s.RegisterExecutionStopOwner)
 	exec.SetOnTaskReviewStateReconcile(func(ctx context.Context, taskID, completedSessionID string) {
@@ -2025,6 +2031,11 @@ func (s *Service) SetSessionAccessChecker(check func(ctx context.Context, sessio
 // than a session. Same contract: nil for identity-less internal callers.
 func (s *Service) SetTaskAccessChecker(check func(ctx context.Context, taskID string) error) {
 	s.taskAccessCheck = check
+}
+
+// SetTaskLifecycleDeleter wires durable task cleanup for automation rollback.
+func (s *Service) SetTaskLifecycleDeleter(deleter taskLifecycleDeleter) {
+	s.taskLifecycleDeleter = deleter
 }
 
 // SetRetrackedSessionChecker installs the lifecycle manager's query for

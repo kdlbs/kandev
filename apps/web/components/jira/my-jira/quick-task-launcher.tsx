@@ -60,9 +60,9 @@ export function QuickTaskLauncher({
   const handleOpenChange = (open: boolean) => {
     if (!open) onClose();
   };
-  const handleSuccess = (task: Task) => {
+  const handleSuccess = (task: Task, _mode?: "create" | "edit", meta?: { autoFocus?: boolean }) => {
     onClose();
-    router.push(`/tasks/${task.id}`);
+    if (meta?.autoFocus !== false) router.push(`/tasks/${task.id}`);
   };
 
   if (!workspaceId || !defaultWorkflow || !defaultStep || !dialog) return null;

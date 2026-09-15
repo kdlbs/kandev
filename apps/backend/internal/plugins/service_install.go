@@ -215,21 +215,7 @@ const DevKandevVersion = "dev"
 // not provide a trustworthy release boundary, so they deliberately skip this
 // release-only compatibility gate. An invalid manifest minimum is rejected.
 func (s *Service) checkMinKandevVersion(minVersion string) error {
-	if minVersion == "" || s.kandevVersion == "" || s.kandevVersion == DevKandevVersion {
-		return nil
-	}
-	runningVersion, runningRelease := manifest.NormalizeReleaseVersion(s.kandevVersion)
-	if !runningRelease {
-		return nil
-	}
-	minimumVersion, minimumRelease := manifest.NormalizeReleaseVersion(minVersion)
-	if !minimumRelease {
-		return fmt.Errorf("plugins: min_kandev_version %q is not a release version", minVersion)
-	}
-	if manifest.CompareVersions(runningVersion, minimumVersion) < 0 {
-		return fmt.Errorf("plugins: requires kandev >= %s, running %s", minVersion, s.kandevVersion)
-	}
-	return nil
+	return manifest.CheckMinimumKandevVersion(minVersion, s.kandevVersion)
 }
 
 // rollbackFailedInstall cleans up after a store.Save failure partway

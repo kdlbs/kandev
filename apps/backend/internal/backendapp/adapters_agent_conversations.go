@@ -116,6 +116,14 @@ func (a agentConversationStateStoreAdapter) Claim(ctx context.Context, pluginID,
 	return a.store.Claim(ctx, pluginID, scope, scopeID, key, value)
 }
 
+func (a agentConversationStateStoreAdapter) Get(ctx context.Context, pluginID, scope, scopeID, key string) (json.RawMessage, bool, error) {
+	return a.store.Get(ctx, pluginID, scope, scopeID, key)
+}
+
+func (a agentConversationStateStoreAdapter) Set(ctx context.Context, pluginID, scope, scopeID, key string, value json.RawMessage) error {
+	return a.store.Set(ctx, pluginID, scope, scopeID, key, value)
+}
+
 func (a agentConversationStateStoreAdapter) Delete(ctx context.Context, pluginID, scope, scopeID, key string) error {
 	return a.store.Delete(ctx, pluginID, scope, scopeID, key)
 }

@@ -105,3 +105,34 @@ describe("updateMessages", () => {
     expect(store.getState().messagePrompts.bySession[SESSION][0].content).toBe("after");
   });
 });
+
+it("keeps a committed removal marker through stale message events and HTTP snapshots", () => {
+  const store = makeStore();
+  const original = makeMessage("tool", "Command", SESSION, {
+    type: "tool_execute",
+    metadata: { normalized: { shell_exec: { output: { stdout: "removed payload" } } } },
+  });
+  store.getState().setMessages(SESSION, [original]);
+  const removed = {
+    ...original,
+    metadata: {
+      payload_retention: { version: 1, removed_at: "2026-09-14T00:00:00Z" },
+      normalized: { shell_exec: { output: { exit_code: 0 } } },
+    },
+  };
+  store.getState().updateMessage(removed);
+  store.getState().updateMessage(original);
+  expect(store.getState().messages.bySession[SESSION][0].metadata).toEqual(removed.metadata);
+  store.getState().mergeMessages(SESSION, [original]);
+  expect(store.getState().messages.bySession[SESSION][0].metadata).toEqual(removed.metadata);
+  store.getState().setMessages(SESSION, [original]);
+  expect(store.getState().messages.bySession[SESSION][0].metadata).toEqual(removed.metadata);
+});
+it("accepts a removal marker even when maintenance preserves message timestamps", () => {
+  const store = makeStore();
+  const original = makeMessage("tool", "Command");
+  store.getState().setMessages(SESSION, [original]);
+  const metadata = { payload_retention: { version: 1, removed_at: "2026-09-14T00:00:00Z" } };
+  store.getState().mergeMessages(SESSION, [{ ...original, metadata }]);
+  expect(store.getState().messages.bySession[SESSION][0].metadata).toEqual(metadata);
+});

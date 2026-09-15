@@ -40,6 +40,11 @@ const defaultAgentConversationTitle = "Managed Conversation"
 // writes itself through the ordinary State() RPCs.
 const agentConversationOccurrenceScope = "agent_conversation_occurrence"
 
+const (
+	agentConversationOccurrencePending  = "pending"
+	agentConversationOccurrenceAccepted = "accepted"
+)
+
 // Ensure's status results.
 const (
 	// AgentConversationStatusCreated is returned when Ensure created a brand
@@ -103,6 +108,8 @@ type agentConversationProfileRepo interface {
 // backing store is a shared SQLite/Postgres table, not a process-local
 // map — multiple backend instances.
 type agentConversationStateRepo interface {
+	Get(ctx context.Context, pluginID, scope, scopeID, key string) (json.RawMessage, bool, error)
+	Set(ctx context.Context, pluginID, scope, scopeID, key string, value json.RawMessage) error
 	Claim(ctx context.Context, pluginID, scope, scopeID, key string, value json.RawMessage) (claimed bool, err error)
 	Delete(ctx context.Context, pluginID, scope, scopeID, key string) error
 }
@@ -431,7 +438,12 @@ func (s *AgentConversationService) repairIfNeeded(ctx context.Context, existing 
 
 func (s *AgentConversationService) ensureConversationPrimarySession(ctx context.Context, taskID, profileID string) (*models.TaskSession, error) {
 	primary, err := s.sess.GetPrimarySessionByTaskID(ctx, taskID)
-	if err != nil {
+	if errors.Is(err, taskrepo.ErrNoPrimarySession) {
+		// The task row can survive a partial creation failure. Treat the typed
+		// repository result as a repairable absence, while preserving all other
+		// repository errors as failures.
+		primary = nil
+	} else if err != nil {
 		return nil, fmt.Errorf("failed to check existing conversation session: %w", err)
 	}
 	if primary == nil {
@@ -586,6 +598,11 @@ func (s *AgentConversationService) Dispatch(ctx context.Context, pluginID, works
 	if err != nil {
 		return pluginsdk.AgentConversationDispatch{}, err
 	}
+	if claimedOccurrence {
+		if err := s.acceptOccurrenceKey(ctx, pluginID, workspaceID, conversationKey, occurrenceKey); err != nil {
+			return pluginsdk.AgentConversationDispatch{}, fmt.Errorf("conversation prompt delivered but failed to record accepted occurrence: %w", err)
+		}
+	}
 
 	return agentConversationDispatch(existing, primary, workspaceID, conversationKey, deliverStatus), nil
 }
@@ -641,10 +658,36 @@ func (s *AgentConversationService) claimDispatchOccurrence(ctx context.Context, 
 	if err != nil {
 		return "", false, false, fmt.Errorf("failed to claim occurrence key: %w", err)
 	}
-	if alreadyClaimed {
+	idempotencyID := deriveOccurrenceMessageID(pluginID, workspaceID, conversationKey, occurrenceKey)
+	if !alreadyClaimed {
+		return idempotencyID, true, false, nil
+	}
+
+	scopeID := workspaceID + "/" + conversationKey
+	raw, found, err := s.state.Get(ctx, pluginID, agentConversationOccurrenceScope, scopeID, occurrenceKey)
+	if err != nil {
+		return "", false, false, fmt.Errorf("failed to inspect occurrence key: %w", err)
+	}
+	if !found {
+		// A failed delivery may have released the row between Claim and Get.
+		// Re-run the atomic insert once so that a retry can own the occurrence
+		// without treating a transient absence as a duplicate.
+		claimed, claimErr := s.claimOccurrenceKey(ctx, pluginID, workspaceID, conversationKey, occurrenceKey)
+		if claimErr != nil {
+			return "", false, false, fmt.Errorf("failed to reclaim occurrence key: %w", claimErr)
+		}
+		if claimed {
+			return idempotencyID, true, false, nil
+		}
 		return "", false, true, nil
 	}
-	return deriveOccurrenceMessageID(pluginID, workspaceID, conversationKey, occurrenceKey), true, false, nil
+	if occurrenceStatus(raw) == agentConversationOccurrencePending {
+		// The previous owner persisted intent but did not persist acceptance.
+		// Re-enter delivery with the same deterministic message identity. No
+		// expiry is used, so an accepted occurrence cannot be reclaimed blindly.
+		return idempotencyID, true, false, nil
+	}
+	return "", false, true, nil
 }
 
 func (s *AgentConversationService) deliverConversationPrompt(ctx context.Context, dispatcher agentConversationDispatcher, task *models.Task, primary *models.TaskSession, text, pluginID, workspaceID, conversationKey, idempotencyID string, claimedOccurrence bool, occurrenceKey string) (string, error) {
@@ -868,6 +911,7 @@ func isManagedConversationOwnedByPlugin(task *models.Task, pluginID string) bool
 func (s *AgentConversationService) claimOccurrenceKey(ctx context.Context, pluginID, workspaceID, conversationKey, occurrenceKey string) (bool, error) {
 	scopeID := workspaceID + "/" + conversationKey
 	value, _ := json.Marshal(map[string]interface{}{
+		"status":           agentConversationOccurrencePending,
 		"claimed":          true,
 		"plugin_id":        pluginID,
 		"workspace_id":     workspaceID,
@@ -883,6 +927,38 @@ func (s *AgentConversationService) claimOccurrenceKey(ctx context.Context, plugi
 func (s *AgentConversationService) releaseOccurrenceKey(ctx context.Context, pluginID, workspaceID, conversationKey, occurrenceKey string) error {
 	scopeID := workspaceID + "/" + conversationKey
 	return s.state.Delete(ctx, pluginID, agentConversationOccurrenceScope, scopeID, occurrenceKey)
+}
+
+func (s *AgentConversationService) acceptOccurrenceKey(ctx context.Context, pluginID, workspaceID, conversationKey, occurrenceKey string) error {
+	if occurrenceKey == "" {
+		return nil
+	}
+	scopeID := workspaceID + "/" + conversationKey
+	value, err := json.Marshal(map[string]interface{}{
+		"status":           agentConversationOccurrenceAccepted,
+		"plugin_id":        pluginID,
+		"workspace_id":     workspaceID,
+		"conversation_key": conversationKey,
+	})
+	if err != nil {
+		return err
+	}
+	return s.state.Set(ctx, pluginID, agentConversationOccurrenceScope, scopeID, occurrenceKey, value)
+}
+
+func occurrenceStatus(raw json.RawMessage) string {
+	var value struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(raw, &value); err != nil {
+		// Rows written by older releases have no status. Treat malformed or
+		// legacy rows as accepted so a migration never replays an occurrence.
+		return agentConversationOccurrenceAccepted
+	}
+	if value.Status == "" {
+		return agentConversationOccurrenceAccepted
+	}
+	return value.Status
 }
 
 // IsManagedConversationTask is a public predicate that reports whether a

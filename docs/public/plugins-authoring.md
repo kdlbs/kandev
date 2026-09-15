@@ -172,6 +172,24 @@ Build and test the archive outside Kandev. Kandev validates the archive before
 it stores or runs a release. Use [Agent-authored Canvases](canvases.md) for
 creation, permission review, promotion, Quick Chat editing, and recovery.
 
+### Share a portable canvas
+
+For a canvas that another workspace can install, add the `distribution` block
+described in the [manifest reference](plugins-manifest.md#portable-canvas-distribution-metadata).
+Choose `static` when the packaged application is the only source you want to
+share. Choose `project` when you retain a bounded editable project under
+`distribution/source/`. Do not put screenshots in the package.
+
+After a valid release is active, use **Share canvas** in the host or workspace
+canvas list. Prepare and download the bundle and source archive, inspect them
+for private content, and share them as files or HTTPS links. This action does
+not create a repository, release, registry entry, or pull request.
+
+To list the canvas, publish the exact bundle as a versioned release asset and
+add a `kind: canvas` entry with one to eight ordered `previews` objects to a
+trusted registry. The first preview is the cover. Preview URLs and alt text
+are registry metadata and are not part of the package manifest.
+
 There is no separate HTTP server to launch. pluginsdk.Serve owns the
 go-plugin/gRPC handshake and Host injection. The backend implements
 pluginsdk.Plugin (OnEvent and/or HandleWebhook) and embeds
@@ -294,7 +312,7 @@ of truth and must be updated together when the contract changes:
 - Wire contract: apps/backend/proto/kandev/plugin/v1/plugin.proto.
 - Manifest model and semantic validation: apps/backend/internal/plugins/manifest.
 - Package integrity and installation: apps/backend/internal/plugins/pkgtar.
-- Durable decisions: [ADR 0043](../decisions/0043-plugin-host-data-api.md), [ADR 0047](../decisions/0047-plugin-host-conversation-reads.md), [ADR 0048](../decisions/0048-plugin-host-utility-agent-invoke.md), and [ADR 0050](../decisions/0050-plugin-external-auth-capability.md).
+- Durable decisions: [ADR 0043](../decisions/0043-plugin-host-data-api.md), [ADR 0047](../decisions/0047-plugin-host-conversation-reads.md), [explicit plugin utility selection](../decisions/2026-09-14-explicit-plugin-utility-selection.md), and [ADR 0050](../decisions/0050-plugin-external-auth-capability.md).
 
 ## Frontend contract
 
@@ -607,7 +625,7 @@ subscription vocabulary and wildcard rules are in the
 | Message send          | Messages().Send                                                                | api_write: messages                                                         | Sends a prompt to a task session and records plugin:<id> author                                                                                                                             |
 | Interactions          | Interactions().ListPending, Interactions().Get                                 | api_read: interactions                                                      | Durable record of agent requests still owed a human answer; Get resolves resolved ones too                                                                                                  |
 | Interaction responses | Interactions().RespondToPermission, .AnswerClarification, .CancelClarification | api_write: interactions                                                     | Routed through the services the native UI drives; first terminal response wins                                                                                                              |
-| Utility agent         | InvokeUtilityAgent(ctx, prompt)                                                | agent_invoke: true plus config_schema.utility_agent (format: utility-agent) | One-shot completion using the selected utility-agent ID; Kandev resolves that utility's enabled profile, permissions, and launch settings. Missing or stale bindings are FailedPrecondition |
+| Agent invocation      | InvokeUtilityAgent(ctx, prompt, options...)                                    | agent_invoke: true                                                          | One-shot completion. No options, or an empty ProfileID, uses the current platform default. A non-empty ProfileID selects that exact eligible profile. An invalid explicit profile returns FailedPrecondition without fallback. The host does not read plugin configuration for selection. |
 | Agent conversations   | AgentConversations(host): Ensure, Dispatch, Delete                             | agent_conversation: true                                                    | Hidden workflowless ephemeral task/session per plugin, workspace, and conversation key; dispatch occurrence keys are durable and idempotent; uninstall removes every conversation owned by the plugin |
 
 The Go signatures, filters, DTOs, and pagination types live in
@@ -715,6 +733,10 @@ side effect.
 A plugin calls back into kandev through the injected `Host`:
 
 ```go
+type UtilityAgentOptions struct {
+	ProfileID string
+}
+
 type Host interface {
 	GetState(ctx context.Context, scope, scopeID, key string) (value map[string]any, found bool, err error)
 	SetState(ctx context.Context, scope, scopeID, key string, value map[string]any) error
@@ -755,10 +777,10 @@ type Host interface {
 	// delivers a user prompt through the task session (api_write:messages).
 	Messages() MessageReader
 
-	// InvokeUtilityAgent runs a one-shot completion using this plugin's
-	// selected utility agent (capability agent_invoke). No API key of your
-	// own; FailedPrecondition when no valid enabled agent is selected.
-	InvokeUtilityAgent(ctx context.Context, prompt string) (string, error)
+	// InvokeUtilityAgent runs a one-shot completion. No options uses the
+	// platform default. UtilityAgentOptions.ProfileID selects one eligible
+	// profile for this call (capability agent_invoke).
+	InvokeUtilityAgent(ctx context.Context, prompt string, options ...UtilityAgentOptions) (string, error)
 }
 ```
 
@@ -904,9 +926,20 @@ first" apart from "my cached id is stale". Do not retry a
 `FailedPrecondition`.
 
 `host.InvokeUtilityAgent(ctx, prompt)` runs a one-shot, non-interactive LLM
-completion using the utility agent selected for this plugin in **Settings >
-Plugins > `<plugin>`** (capability `agent_invoke`), and returns its text. Declare
-the selector in `manifest.yaml`:
+completion using the platform default profile configured in **Settings >
+Utility Agents** (capability `agent_invoke`), and returns its text. A plugin can
+pass an explicit profile for one call:
+
+```go
+text, err := host.InvokeUtilityAgent(ctx, prompt, pluginsdk.UtilityAgentOptions{
+	ProfileID: savedProfileID,
+})
+```
+
+The plugin owns persistence of `savedProfileID`. An empty or unset preference
+should omit the override or pass an empty ProfileID. The host does not inspect
+the plugin's configuration to choose a profile. Declare an optional profile
+field when the plugin wants the standard Settings picker:
 
 ```yaml
 capabilities:
@@ -915,23 +948,26 @@ capabilities:
 config_schema:
   type: object
   properties:
-    utility_agent:
+    agent_profile:
       type: string
-      format: utility-agent
-      title: Utility Agent
-      description: Agent used for this plugin's LLM calls
-  required: ["utility_agent"]
+      format: agent-profile
+      title: Utility agent profile
+      description: Optional profile used for this plugin's LLM calls
 ```
 
-The picker displays configured built-in and custom agent names but stores the
-selected agent's stable ID. Omit `utility_agent` from `required` only when the
-plugin supports operating without LLM delegation; optional selectors include a
-**Not set** choice. The plugin needs no provider API key because it delegates to
-a kandev-configured agent. A missing, deleted, or disabled selection returns
-gRPC `FailedPrecondition`, so handle that as "ask the operator to configure
-one" rather than a transient failure. This is the LLM step behind, e.g., a
-"summarize yesterday" plugin: read the conversation with `host.Messages()`,
-then summarize it with `host.InvokeUtilityAgent(...)`.
+The picker displays eligible global agent profiles and stores the selected
+profile's stable ID. The field is ordinary plugin configuration; read it with
+`host.GetConfig` and pass the value explicitly. A missing, deleted, disabled,
+CLI-passthrough, workspace-scoped, or non-inference explicit profile returns
+gRPC `FailedPrecondition`. The host does not switch to the default after an
+invalid explicit value. A revised SDK calls a separate wire method for the
+override, so an older host returns `Unimplemented` instead of silently
+ignoring the selection. Existing prompt-only wire callers continue to use the
+platform default on a revised host. The plugin needs no provider API key
+because it delegates to a kandev-configured profile. This is the LLM step
+behind, for example, a "summarize yesterday" plugin: read the conversation
+with `host.Messages()`, then summarize it with
+`host.InvokeUtilityAgent(ctx, prompt, options...)`.
 
 **Capability gating.** Every Host RPC except `GetConfig` and `EmitEvent` is
 checked against your manifest's `capabilities` before the handler runs:

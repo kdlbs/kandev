@@ -54,10 +54,22 @@ func (wt *WorkspaceTracker) applyUntrackedOutput(
 			return err
 		}
 		update.Untracked = append(update.Untracked, filePath)
-		update.Files[filePath] = types.FileInfo{
+		fileInfo := types.FileInfo{
 			Path:   filePath,
 			Status: fileStatusUntracked,
 		}
+		if existing, ok := update.Files[filePath]; ok && existing.Staged {
+			stagedChange := existing.StagedChange
+			if stagedChange == nil {
+				stagedChange = &types.FileChangeFacet{
+					Status:  existing.Status,
+					OldPath: existing.OldPath,
+				}
+			}
+			fileInfo.StagedChange = stagedChange
+			fileInfo.UnstagedChange = &types.FileChangeFacet{Status: fileStatusUntracked}
+		}
+		update.Files[filePath] = fileInfo
 	}
 	return nil
 }

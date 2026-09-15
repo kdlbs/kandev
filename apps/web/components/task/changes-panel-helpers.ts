@@ -14,6 +14,7 @@ import type { ChangeLayer, CommitDetailTarget } from "./changes-diff-target";
 import type { CommitPresentation } from "./commit-row";
 
 export type ChangedFile = {
+  isSymlink?: boolean;
   path: string;
   status: FileChangeStatus;
   staged: boolean;
@@ -64,6 +65,7 @@ export function mapToChangedFiles(files: FileInfo[]): ChangedFile[] {
     oldPath: file.old_path,
     repositoryName: file.repository_name,
     changeLayer: file.change_layer,
+    isSymlink: file.is_symlink,
   }));
 }
 

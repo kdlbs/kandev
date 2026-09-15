@@ -79,7 +79,7 @@ func autoMetadataEquivalent(target, source map[string]interface{}) bool {
 func comparableAutoMetadata(metadata map[string]interface{}) ([]byte, bool) {
 	comparable := make(map[string]interface{}, len(metadata))
 	for key, value := range metadata {
-		if key == MetadataEntityReferences || key == MetadataContextFiles {
+		if key == MetadataEntityReferences || key == MetadataContextFiles || key == MetadataQueueAdmissionIDs {
 			continue
 		}
 		comparable[key] = value
@@ -114,8 +114,13 @@ func mergeAutoMetadata(target, source map[string]interface{}) (map[string]interf
 	if !ok {
 		return nil, false
 	}
+	admissionIDs, ok := unionQueueAdmissionIDs(target, source)
+	if !ok {
+		return nil, false
+	}
 	merged = setAutoMetadataList(merged, MetadataEntityReferences, references)
 	merged = setAutoMetadataList(merged, MetadataContextFiles, contexts)
+	merged = setAutoMetadataList(merged, MetadataQueueAdmissionIDs, admissionIDs)
 	return merged, true
 }
 

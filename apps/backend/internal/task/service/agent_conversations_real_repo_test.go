@@ -59,6 +59,37 @@ func taskExists(t *testing.T, repo *sqliterepo.Repository, taskID string) bool {
 	return err == nil && task != nil
 }
 
+// SQLite wraps ErrNoPrimarySession with the task id. Ensure must classify that
+// typed absence as repairable instead of returning an error and leaving the
+// managed task without a session.
+func TestEnsureRepairsWrappedMissingPrimarySessionOverRealRepository(t *testing.T) {
+	svc, repo := newAgentConversationServiceOverRealRepo(t)
+	ctx := context.Background()
+	seedConversationWorkspace(t, repo, "ws-one")
+
+	original := ensureConversation(t, svc, "plugin-coordinator", "ws-one", "coordinator")
+	session, err := repo.GetTaskSession(ctx, original.SessionID)
+	if err != nil {
+		t.Fatalf("load conversation session: %v", err)
+	}
+	if err := repo.DeleteTaskSession(ctx, session); err != nil {
+		t.Fatalf("delete conversation session: %v", err)
+	}
+
+	repaired, status, err := svc.Ensure(ctx, "plugin-coordinator", pluginsdk.AgentConversationSpec{
+		WorkspaceID: "ws-one", ConversationKey: "coordinator",
+	})
+	if err != nil {
+		t.Fatalf("Ensure repair: %v", err)
+	}
+	if status != AgentConversationStatusExists {
+		t.Fatalf("Ensure repair status = %q, want %q", status, AgentConversationStatusExists)
+	}
+	if repaired.TaskID != original.TaskID || repaired.SessionID != original.SessionID {
+		t.Fatalf("repaired descriptor = %#v, want stable task/session %#v", repaired, original)
+	}
+}
+
 // Uninstall cleanup has to survive the metadata JSON round trip, reach every
 // workspace, and take the conversation's sessions with it.
 func TestDeleteAllForPluginOverRealRepository(t *testing.T) {

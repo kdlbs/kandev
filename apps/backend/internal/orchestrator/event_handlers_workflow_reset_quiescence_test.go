@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/orchestrator/executor"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
@@ -242,6 +243,108 @@ func TestResetAgentContext_CancelFailureStopsProviderReset(t *testing.T) {
 	requireResetEvents(t, manager.events, "cancel")
 	if got := len(manager.restartProcessCalls); got != 0 {
 		t.Fatalf("provider reset calls = %d, want 0", got)
+	}
+}
+
+func TestResetAgentContext_EscalatedCancelStopsProviderReset(t *testing.T) {
+	svc, _, manager, session := newActiveResetTestService(t)
+	manager.cancelAgentErr = lifecycle.ErrCancelEscalated
+
+	if svc.resetAgentContext(context.Background(), "task1", session, "Successor") {
+		t.Fatal("resetAgentContext returned true after cancellation escalation")
+	}
+
+	requireResetEvents(t, manager.events, "cancel")
+	select {
+	case event := <-manager.events:
+		t.Fatalf("provider operation %q started after cancellation escalation", event)
+	default:
+	}
+}
+
+func TestResetAgentContext_WrappedEscalatedCancelStopsProviderReset(t *testing.T) {
+	svc, _, manager, session := newActiveResetTestService(t)
+	manager.cancelAgentErr = errors.Join(errors.New("provider timeout"), lifecycle.ErrCancelEscalated)
+
+	if svc.resetAgentContext(context.Background(), "task1", session, "Successor") {
+		t.Fatal("resetAgentContext returned true after wrapped cancellation escalation")
+	}
+
+	requireResetEvents(t, manager.events, "cancel")
+	select {
+	case event := <-manager.events:
+		t.Fatalf("provider operation %q started after wrapped cancellation escalation", event)
+	default:
+	}
+}
+
+func TestResetAgentContext_MissingExecutionStillReconcilesBeforeProviderReset(t *testing.T) {
+	svc, _, manager, session := newActiveResetTestService(t)
+	manager.cancelAgentErr = lifecycle.ErrNoExecutionForSession
+
+	if !svc.resetAgentContext(context.Background(), "task1", session, "Successor") {
+		t.Fatal("resetAgentContext returned false after missing execution cancellation")
+	}
+
+	requireResetEvents(t, manager.events, "cancel", "reset")
+	if active, err := svc.hasActiveResetTurn(context.Background(), session.ID); err != nil {
+		t.Fatalf("hasActiveResetTurn: %v", err)
+	} else if active {
+		t.Fatal("cancelled turn remained active after missing execution reconciliation")
+	}
+}
+
+func TestResetAgentContext_JoinedExplicitCancelKeepsSuccessfulCancellationSemantics(t *testing.T) {
+	svc, _, manager, session := newActiveResetTestService(t)
+	manager.cancelAgentErr = lifecycle.ErrCancelEscalated
+	svc.messageCreator = &mockMessageCreator{}
+	cancelEntered := make(chan struct{}, 1)
+	cancelRelease := make(chan struct{})
+	manager.cancelAgentEntered = cancelEntered
+	manager.cancelAgentBlock = cancelRelease
+
+	resetDone := make(chan bool, 1)
+	go func() {
+		resetDone <- svc.resetAgentContext(context.Background(), session.TaskID, session, "Successor")
+	}()
+	select {
+	case <-cancelEntered:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for reset cancellation")
+	}
+
+	joinedDone := make(chan error, 1)
+	go func() {
+		joinedDone <- svc.CancelAgent(context.Background(), session.ID)
+	}()
+	operation := svc.currentCancellation(session.ID)
+	if operation == nil {
+		t.Fatal("expected reset cancellation operation to remain registered")
+	}
+	select {
+	case <-operation.joined:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for explicit cancellation to join reset cancellation")
+	}
+
+	close(cancelRelease)
+	if resetOK := <-resetDone; resetOK {
+		t.Fatal("resetAgentContext returned true after cancellation escalation")
+	}
+	select {
+	case err := <-joinedDone:
+		if err != nil {
+			t.Fatalf("joined explicit cancellation returned error: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for joined explicit cancellation")
+	}
+
+	requireResetEvents(t, manager.events, "cancel")
+	select {
+	case event := <-manager.events:
+		t.Fatalf("provider operation %q started after cancellation escalation", event)
+	default:
 	}
 }
 

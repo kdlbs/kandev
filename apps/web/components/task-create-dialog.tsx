@@ -223,6 +223,33 @@ function DialogFormBody(props: DialogFormBodyProps) {
 // `preventDefault` off the event, so a stubbed shape is sufficient.
 const PROGRAMMATIC_SUBMIT_EVENT = { preventDefault: () => {} } as unknown as FormEvent;
 
+function useTaskCreateFocusReturn(props: TaskCreateDialogProps, isCreateMode: boolean) {
+  const autoFocusNewTasks = useAppStore((state) => state.userSettings.autoFocusNewTasks) !== false;
+  const activeElement = () =>
+    document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const [openingFocus, setOpeningFocus] = useState(() => ({
+    open: props.open,
+    target: activeElement(),
+  }));
+  // Capture the opener before descendants run their input-focus effects.
+  if (openingFocus.open !== props.open) {
+    setOpeningFocus({
+      open: props.open,
+      target: props.open ? activeElement() : openingFocus.target,
+    });
+  }
+  return {
+    onCloseAutoFocus: (event: Event) => {
+      const target =
+        props.focusReturnRef?.current ??
+        (isCreateMode && !autoFocusNewTasks ? openingFocus.target : null);
+      if (!target || !document.contains(target)) return;
+      event.preventDefault();
+      target.focus();
+    },
+  };
+}
+
 export function TaskCreateDialog(props: TaskCreateDialogProps) {
   const { t } = useTranslation("chat");
   const syncedTaskCreateLastUsed = useAppStore((state) => state.userSettings.taskCreateLastUsed);
@@ -244,6 +271,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
   }, []);
   const setup = useTaskCreateDialogSetup(props, { preserveQueuedLastUsedOnClose });
   const { guardedHandleSubmit } = setup;
+  const focusReturn = useTaskCreateFocusReturn(props, setup.isCreateMode);
   const [popoverContainer, setPopoverContainer] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
     if (props.open) {
@@ -277,12 +305,7 @@ export function TaskCreateDialog(props: TaskCreateDialogProps) {
         onEscapeKeyDown={(event) => {
           if (setup.isCreateMode) event.preventDefault();
         }}
-        onCloseAutoFocus={(event) => {
-          const target = props.focusReturnRef?.current;
-          if (!target || !document.contains(target)) return;
-          event.preventDefault();
-          target.focus();
-        }}
+        {...focusReturn}
         data-testid="create-task-dialog"
         data-webkit-safe-motion="true"
         showCloseButton={false}

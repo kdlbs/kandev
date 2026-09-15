@@ -1,5 +1,7 @@
 "use client";
 
+import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
+
 import { Button } from "@kandev/ui/button";
 import { ScrollOnOverflow } from "@kandev/ui/scroll-on-overflow";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
@@ -69,11 +71,13 @@ function SaveButton({
 function ToolbarLeft({
   path,
   worktreePath,
+  isSymlink,
   isDirty,
   diffStats,
 }: {
   path: string;
   worktreePath?: string;
+  isSymlink?: boolean;
   isDirty: boolean;
   diffStats: { additions: number; deletions: number } | null;
 }) {
@@ -82,6 +86,7 @@ function ToolbarLeft({
       <ScrollOnOverflow className="min-w-0 font-mono">
         {toRelativePath(path, worktreePath)}
       </ScrollOnOverflow>
+      <SymlinkIndicator isSymlink={isSymlink} showLabel />
       {isDirty && diffStats && (
         <span className="shrink-0 text-xs text-yellow-500">
           {formatDiffStats(diffStats.additions, diffStats.deletions)}
@@ -284,6 +289,7 @@ interface MonacoEditorToolbarProps {
   path: string;
   repositoryName?: string;
   worktreePath?: string;
+  isSymlink?: boolean;
   isDirty: boolean;
   isSaving: boolean;
   diffStats: { additions: number; deletions: number } | null;
@@ -315,6 +321,7 @@ export function MonacoEditorToolbar({
   path,
   repositoryName,
   worktreePath,
+  isSymlink,
   isDirty,
   isSaving,
   diffStats,
@@ -348,6 +355,7 @@ export function MonacoEditorToolbar({
         <ToolbarLeft
           path={path}
           worktreePath={worktreePath}
+          isSymlink={isSymlink}
           isDirty={isDirty}
           diffStats={diffStats}
         />

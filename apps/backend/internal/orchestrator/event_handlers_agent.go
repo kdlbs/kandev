@@ -21,6 +21,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/task/plancomments"
+	"github.com/kandev/kandev/internal/worktree"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
@@ -1999,7 +2000,8 @@ func queuedMessageAttachmentsToV1(attachments []messagequeue.MessageAttachment) 
 // entity references are re-added via WithEntityReferences, and a carried
 // completion handoff (messagequeue.MetadataStepHandoff) is already folded
 // into the recorded content by the caller, so neither belongs in the row's
-// own stored metadata.
+// own stored metadata. Admission provenance remains so clients can reconcile
+// an accepted message after its queue row has been dispatched.
 func metadataWithoutQueueOnlyKeys(metadata map[string]interface{}) map[string]interface{} {
 	if len(metadata) == 0 {
 		return nil
@@ -2728,12 +2730,11 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 	s.completeTurnForSession(ctx, data.SessionID)
 	s.persistLastAgentError(ctx, data)
 
-	// Create a status message with recovery action metadata.
-	// Skipped for office sessions: the office task page renders its
-	// own structured RunErrorEntry sourced from the FAILED session,
-	// and including the legacy ActionMessage would double-show the
-	// red banner (top-level + inside the embedded chat panel).
-	if s.messageCreator != nil && !s.isOfficeSession(ctx, data.SessionID) {
+	// Create a status message with recovery action metadata. Session failures
+	// are chronological transcript entries for every task surface, including
+	// Office sessions. Only the current metadata record owns recovery controls;
+	// the persisted message remains as history after it is retired.
+	if s.messageCreator != nil {
 		s.createRecoveryStatusMessage(ctx, data)
 	}
 
@@ -2794,18 +2795,13 @@ func (s *Service) handleRecoverableFailureLockedState(ctx context.Context, data 
 	}
 }
 
-func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentEventData) {
-	errMsg := data.ErrorMessage
-	if errMsg == "" {
-		errMsg = defaultAgentFailedMessage
-	}
+func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentEventData) error {
+	errMsg := agentFailureMessage(data)
 	details := routingerr.Sanitize(data.FailureDetails)
-	// Keep this metadata until the user dismisses the UI notice locally or a
-	// later recoverable failure replaces it. A successful turn should not erase
-	// the investigation breadcrumb that explains why the task was marked REVIEW.
 	lastErr := models.LastAgentError{
 		Message:          errMsg,
 		OccurredAt:       time.Now().UTC(),
+		Scope:            models.ErrorScopeSession,
 		AgentExecutionID: data.AgentExecutionID,
 		ExecutionID:      data.AgentExecutionID,
 		Phase:            data.Phase,
@@ -2814,20 +2810,21 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 		RemediationURL:   providerRemediationURL(data),
 		Code:             data.FailureCode,
 		Details:          details,
-		StampValue:       data.ErrorStamp,
+		StampValue:       agentFailureStamp(data),
 	}
 	if err := s.repo.SetSessionMetadataKey(ctx, data.SessionID, models.SessionMetaKeyLastAgentError, lastErr); err != nil {
 		s.logger.Warn("failed to persist last agent error",
 			zap.String("task_id", data.TaskID),
 			zap.String("session_id", data.SessionID),
 			zap.Error(err))
-		return
+		return err
 	}
 	if s.eventBus != nil {
 		eventData := map[string]interface{}{
 			"task_id":            data.TaskID,
 			"session_id":         data.SessionID,
 			"active":             true,
+			"scope":              models.ErrorScopeSession,
 			"message":            lastErr.Message,
 			"occurred_at":        lastErr.OccurredAt.Format(time.RFC3339Nano),
 			"stamp":              lastErr.Stamp(),
@@ -2861,43 +2858,166 @@ func (s *Service) persistLastAgentError(ctx context.Context, data watcher.AgentE
 				zap.String("task_id", data.TaskID),
 				zap.String("session_id", data.SessionID),
 				zap.Error(err))
+			return err
 		}
+	}
+	return nil
+}
+
+func agentFailureMessage(data watcher.AgentEventData) string {
+	if strings.TrimSpace(data.ErrorMessage) != "" {
+		return data.ErrorMessage
+	}
+	return defaultAgentFailedMessage
+}
+
+func agentFailureStamp(data watcher.AgentEventData) string {
+	if stamp := strings.TrimSpace(data.ErrorStamp); stamp != "" {
+		return stamp
+	}
+	return models.StableLaunchErrorStamp(
+		data.TaskID,
+		data.SessionID,
+		data.AgentExecutionID,
+		data.AttemptID,
+		data.FailureCode,
+		agentFailureMessage(data),
+	)
+}
+
+// launchFailureIsTaskOwned reports whether the launch producer proved that a
+// failure affects the task's shared workspace or workflow. Generic launch
+// errors remain session-owned so a profile-specific startup failure cannot
+// surface recovery controls on another session.
+func launchFailureIsTaskOwned(lastError models.LastAgentError, launchErr error) bool {
+	if lastError.Scope == models.ErrorScopeTask {
+		return true
+	}
+	switch lastError.Code {
+	case models.LaunchErrorCategoryBaseBranchMissing,
+		models.LaunchErrorCategoryDefaultBranchUnresolved,
+		models.LaunchErrorCategoryWorkspaceCheckoutFailed,
+		models.LaunchErrorCategoryPRAlreadyClosed:
+		return true
+	case models.LaunchErrorCategoryGenericLaunchFailure:
+		var recoveryErr *worktree.WorktreeRecoveryError
+		return errors.As(launchErr, &recoveryErr)
+	default:
+		return false
 	}
 }
 
-// clearRecoveredAgentError drops a session's stored agent failure once the agent
-// completes a turn, and publishes the inactive error event so open clients drop
-// the red error affordance.
-//
-// persistLastAgentError deliberately keeps the record across a successful turn
-// as an investigation breadcrumb, but nothing ever retired it, so a failure the
-// agent recovered from weeks ago still read as live: every path that re-derives
-// task status from session metadata (a status-summary rebuild, a backend
-// restart, a later session event) put it straight back. The failure also lands
-// in the transcript as a recovery message, which is where an investigation
-// actually looks, so the metadata copy is not the durable record.
-//
-// Writes JSON null rather than a delete: LoadLastAgentError already treats that
-// as absent, so no new repository surface is needed.
+// handleLaunchFailed projects shared workspace failures at task scope while
+// retaining profile-specific startup failures on their originating session.
+// The executor has already persisted the source session marker when this
+// callback runs.
+func (s *Service) handleLaunchFailed(
+	ctx context.Context,
+	taskID, sessionID, _ string,
+	launchErr error,
+) {
+	session, err := s.repo.GetTaskSession(ctx, sessionID)
+	if err != nil || session == nil {
+		if err != nil {
+			s.logger.Warn("failed to load launch failure session",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+		return
+	}
+	lastError, found := models.LoadLastAgentError(session.Metadata)
+	if !found || lastError.IsDismissed() {
+		return
+	}
+	if !launchFailureIsTaskOwned(lastError, launchErr) {
+		if err := s.persistBootstrapFailureMessage(ctx, taskID, sessionID, session.AgentExecutionID, lastError); err != nil {
+			s.logger.Warn("failed to persist session-owned launch failure history",
+				zap.String("task_id", taskID),
+				zap.String("session_id", sessionID),
+				zap.Error(err))
+		}
+		return
+	}
+	taskError := models.TaskLaunchError{
+		Message:          lastError.Message,
+		OccurredAt:       lastError.OccurredAt,
+		Scope:            models.ErrorScopeTask,
+		SessionID:        sessionID,
+		Code:             lastError.Code,
+		Details:          lastError.Details,
+		RecoveryActions:  lastError.RecoveryActions,
+		TaskRepositoryID: lastError.TaskRepositoryID,
+		StampValue:       lastError.Stamp(),
+	}
+	if !s.persistTaskLaunchError(ctx, taskID, taskError) {
+		s.logger.Warn("failed to persist task-owned launch error",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.Error(launchErr))
+		return
+	}
+	s.dismissRecoveredAgentError(ctx, taskID, session, time.Now().UTC())
+}
+
+// clearRecoveredAgentError retires the current session error while preserving
+// its record for transcript hydration and investigation. The inactive event
+// clears only the live projection; a later failure publishes a new active
+// stamp and re-arms the controls.
 func (s *Service) clearRecoveredAgentError(ctx context.Context, taskID string, session *models.TaskSession) {
+	s.dismissRecoveredAgentError(ctx, taskID, session, time.Now().UTC())
+}
+
+func (s *Service) dismissRecoveredAgentError(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	dismissedAt time.Time,
+) {
 	if session == nil || session.ID == "" {
 		return
 	}
-	if _, ok := models.LoadLastAgentError(session.Metadata); !ok {
+	lastErr, ok := models.LoadLastAgentError(session.Metadata)
+	if !ok || lastErr.IsDismissed() {
 		return
 	}
-	if err := s.repo.SetSessionMetadataKey(
-		ctx, session.ID, models.SessionMetaKeyLastAgentError, nil,
-	); err != nil {
-		s.logger.Warn("failed to clear recovered agent error",
+	lastErr.DismissedAt = &dismissedAt
+	recoveryRepo := s.taskLaunchRecoveryRepo
+	if recoveryRepo == nil {
+		var ok bool
+		recoveryRepo, ok = s.repo.(taskLaunchRecoveryRepository)
+		if !ok {
+			s.logger.Warn("cannot retire recovered agent error without stamp-CAS repository",
+				zap.String("task_id", taskID),
+				zap.String("session_id", session.ID))
+			return
+		}
+	}
+	stored, err := recoveryRepo.SetSessionMetadataKeyIfStamp(
+		ctx,
+		session.ID,
+		models.SessionMetaKeyLastAgentError,
+		lastErr.Stamp(),
+		lastErr,
+	)
+	if err != nil {
+		s.logger.Warn("failed to retire recovered agent error",
 			zap.String("task_id", taskID),
 			zap.String("session_id", session.ID),
 			zap.Error(err))
 		return
 	}
+	if !stored {
+		// A successor failure won the metadata race. Do not overwrite the
+		// caller's snapshot or publish an inactive event for the old stamp.
+		return
+	}
 	// Keep the in-memory copy in step: the session-state publish below reads
 	// its `session_metadata` straight off this object.
-	delete(session.Metadata, models.SessionMetaKeyLastAgentError)
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+	session.Metadata[models.SessionMetaKeyLastAgentError] = lastErr
 	if s.eventBus == nil {
 		return
 	}
@@ -2907,6 +3027,8 @@ func (s *Service) clearRecoveredAgentError(ctx context.Context, taskID string, s
 		map[string]interface{}{
 			"task_id":    taskID,
 			"session_id": session.ID,
+			"scope":      models.ErrorScopeSession,
+			"stamp":      lastErr.Stamp(),
 			"active":     false,
 		},
 	)); err != nil {
@@ -2939,6 +3061,9 @@ func (s *Service) markRecoveryResolved(ctx context.Context, sessionID string, se
 		session.Metadata = make(map[string]interface{})
 	}
 	session.Metadata[models.SessionMetaKeyRecoveryResolvedAt] = resolvedAtValue
+	if session.TaskID != "" {
+		s.dismissRecoveredAgentError(ctx, session.TaskID, session, resolvedAt)
+	}
 	return &resolvedAt
 }
 
@@ -2953,13 +3078,16 @@ func providerRemediationURL(data watcher.AgentEventData) string {
 	return data.ProviderError.RemediationURL
 }
 
-// createRecoveryStatusMessage builds and persists the ActionMessage shown
-// in the kanban chat surface after a recoverable agent failure. Must only
-// be called for non-office sessions (office sessions render their own error UI).
-func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.AgentEventData) {
+// createRecoveryStatusMessage builds and persists the ActionMessage shown in
+// the session transcript after a recoverable agent failure. Its stable message
+// identity keeps retries and bootstrap failures idempotent.
+func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.AgentEventData) error {
+	if s.messageCreator == nil {
+		return fmt.Errorf("recovery status message creator is unavailable")
+	}
 	authErr := isAuthError(data.ErrorMessage)
 	resumeCorrupted := routingerr.IsResumeCorrupted(data.ErrorMessage)
-	displayMsg := data.ErrorMessage
+	displayMsg := agentFailureMessage(data)
 	if authErr {
 		if readable := extractReadableAuthError(data.ErrorMessage); readable != "" {
 			displayMsg = readable
@@ -2971,6 +3099,9 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	// session instead of dumping the raw 400.
 	classified := classifyKanbanFailure(data)
 	statusMsg := fmt.Sprintf("Agent encountered an error: %s", displayMsg)
+	if data.Phase == models.LaunchErrorPhaseBootstrap {
+		statusMsg = fmt.Sprintf("Agent startup failed: %s", displayMsg)
+	}
 	if resumeCorrupted {
 		statusMsg = "This agent session can't be resumed — its saved reasoning state is corrupted. Start a fresh session to continue."
 	} else if routingerr.Decide(routingerr.ContextKanban, classified, time.Now().UTC()) == routingerr.DecisionShortRetry {
@@ -2982,6 +3113,8 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	meta := map[string]interface{}{
 		"variant":          "error",
 		"recovery_actions": true,
+		"scope":            models.ErrorScopeSession,
+		"error_stamp":      agentFailureStamp(data),
 		"session_id":       data.SessionID,
 		"task_id":          data.TaskID,
 		"has_resume_token": hasResumeToken,
@@ -2991,6 +3124,11 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 	managedRuntimeNpmFailure := data.FailureCode == string(routingerr.CodeManagedRuntimeNpmResolution)
 	if managedRuntimeNpmFailure {
 		meta["failure_kind"] = string(routingerr.CodeManagedRuntimeNpmResolution)
+		if details := routingerr.Sanitize(data.FailureDetails); details != "" {
+			meta["error_output"] = details
+		}
+	}
+	if data.Phase == models.LaunchErrorPhaseBootstrap {
 		if details := routingerr.Sanitize(data.FailureDetails); details != "" {
 			meta["error_output"] = details
 		}
@@ -3025,8 +3163,22 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		meta["actions"] = buildRecoveryActions(data.TaskID, data.SessionID, hasResumeToken, authErr, resumeCorrupted)
 	}
 
-	if err := s.messageCreator.CreateSessionMessage(
+	return s.persistRecoveryStatusMessage(ctx, data, statusMsg, meta)
+}
+
+func (s *Service) persistRecoveryStatusMessage(
+	ctx context.Context,
+	data watcher.AgentEventData,
+	statusMsg string,
+	meta map[string]interface{},
+) error {
+	messageID := uuid.NewSHA1(
+		uuid.NameSpaceOID,
+		[]byte("session-recovery:"+data.SessionID+":"+agentFailureStamp(data)),
+	)
+	if err := s.messageCreator.CreateSessionMessageIdempotent(
 		ctx,
+		messageID.String(),
 		data.TaskID,
 		statusMsg,
 		data.SessionID,
@@ -3038,7 +3190,9 @@ func (s *Service) createRecoveryStatusMessage(ctx context.Context, data watcher.
 		s.logger.Warn("failed to create recovery status message",
 			zap.String("task_id", data.TaskID),
 			zap.Error(err))
+		return err
 	}
+	return nil
 }
 
 // applyProviderQuotaMetadata promotes only a validated OpenCode terminal

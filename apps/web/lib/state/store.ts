@@ -4,6 +4,7 @@ import { hydrateState } from "./hydration/hydrator";
 import type { AppState, HydrationState } from "./app-state-types";
 import { mergeInitialState } from "./default-state";
 import { buildStateOverrides } from "./store-overrides";
+import { getQuickChatSelectionIdentity } from "@/lib/quick-chat/selection-storage";
 
 import {
   createKanbanSlice,
@@ -24,6 +25,7 @@ import {
   createSystemSlice,
   createPluginsSlice,
   createReviewSlice,
+  createNeedsYouInboxSlice,
 } from "./slices";
 
 // Re-export all types from slices for backwards compatibility.
@@ -35,7 +37,7 @@ export type * from "./store-reexports";
 export function createAppStore(initialState?: HydrationState) {
   const merged = mergeInitialState(initialState);
 
-  return createStore<AppState>()(
+  const store = createStore<AppState>()(
     immer((set, get, api) => ({
       ...merged,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -80,12 +82,27 @@ export function createAppStore(initialState?: HydrationState) {
       // arguments (CodeQL js/superfluous-trailing-arguments).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ...createReviewSlice(set as any),
+      ...createNeedsYouInboxSlice(set),
       // Re-assert merged initial state so caller-supplied values win over slice defaults.
       ...buildStateOverrides(merged),
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       hydrate: (state, options) => set((draft) => hydrateState(draft as any, state, options)),
     })),
   );
+  let previousAuth = store.getState().auth;
+  const syncQuickChatSelectionIdentity = (auth: AppState["auth"]) => {
+    const identity = getQuickChatSelectionIdentity(auth);
+    if (store.getState().quickChat.selectionStorageIdentity !== identity) {
+      store.getState().setQuickChatSelectionIdentity(identity);
+    }
+  };
+  syncQuickChatSelectionIdentity(previousAuth);
+  store.subscribe((state) => {
+    if (state.auth === previousAuth) return;
+    previousAuth = state.auth;
+    syncQuickChatSelectionIdentity(state.auth);
+  });
+  return store;
 }
 
 export type StoreProviderProps = {

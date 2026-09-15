@@ -16,3 +16,14 @@ describe("turn hydration state", () => {
     expect(state.turns.loadedBySession).toEqual({ "session-1": true });
   });
 });
+
+describe("quick chat hydration state", () => {
+  it("marks an empty boot snapshot ready for the active workspace", () => {
+    const state = mergeInitialState({
+      workspaces: { items: [], activeId: "workspace-1" },
+      quickChat: { sessions: [] },
+    } as unknown as HydrationState);
+
+    expect(state.quickChat.selectionReadyByWorkspace).toEqual({ "workspace-1": true });
+  });
+});

@@ -62,6 +62,7 @@ type UpdateUserSettingsRequest struct {
 	PreventAutoStartAgentOnOpen       *bool
 	UnreadDivider                     *bool
 	AgentGeneratedTaskTitles          *bool
+	AutoFocusNewTasks                 *bool
 	MCPTaskAgentProfileDefault        *string
 	ShowAnchoredPromptBar             *bool
 	ShowScrollToLastPrompt            *bool
@@ -103,6 +104,8 @@ type UpdateUserSettingsRequest struct {
 	LastSeenDisplay                   *string
 	SystemMetricsDisplay              *SystemMetricsDisplaySettingsPatch
 	AppStatusBarEnabled               *bool
+	SidebarHoverEnabled               *bool
+	SidebarHoverDelayMs               *int
 	ResolveSessionHostnames           *bool
 	AppStatusBarOrder                 *models.AppStatusBarOrder
 	QuickChatTabOrderByWorkspace      *map[string][]string
@@ -347,6 +350,9 @@ func taskCreateLastUsedPatchEmpty(patch models.TaskCreateLastUsed) bool {
 
 // applyBasicSettings copies simple (non-validated) fields from req to settings.
 func applyBasicSettings(settings *models.UserSettings, req *UpdateUserSettingsRequest) error {
+	if err := applySidebarHoverSettings(settings, req); err != nil {
+		return err
+	}
 	if err := applyWorkspaceAndTaskListPreferences(settings, req); err != nil {
 		return err
 	}
@@ -627,6 +633,9 @@ func applyTaskActionPreferences(settings *models.UserSettings, req *UpdateUserSe
 	}
 	if req.AgentGeneratedTaskTitles != nil {
 		settings.AgentGeneratedTaskTitles = *req.AgentGeneratedTaskTitles
+	}
+	if req.AutoFocusNewTasks != nil {
+		settings.AutoFocusNewTasks = *req.AutoFocusNewTasks
 	}
 	if err := applyMCPTaskAgentProfileDefault(settings, req.MCPTaskAgentProfileDefault); err != nil {
 		return err
@@ -1079,6 +1088,7 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"prevent_auto_start_agent_on_open":         settings.PreventAutoStartAgentOnOpen,
 		"unread_divider":                           settings.UnreadDivider,
 		"agent_generated_task_titles":              settings.AgentGeneratedTaskTitles,
+		"auto_focus_new_tasks":                     settings.AutoFocusNewTasks,
 		"mcp_task_agent_profile_default":           models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"show_anchored_prompt_bar":                 settings.ShowAnchoredPromptBar,
 		"show_scroll_to_last_prompt":               settings.ShowScrollToLastPrompt,
@@ -1120,6 +1130,8 @@ func (s *Service) publishUserSettingsEvent(ctx context.Context, settings *models
 		"last_seen_display":                        models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
+		"sidebar_hover_enabled":                    settings.SidebarHoverEnabled,
+		"sidebar_hover_delay_ms":                   settings.SidebarHoverDelayMs,
 		"resolve_session_hostnames":                settings.ResolveSessionHostnames,
 		"app_status_bar_order":                     settings.AppStatusBarOrder,
 		"kanban_hidden_step_ids":                   settings.KanbanHiddenStepIDs,

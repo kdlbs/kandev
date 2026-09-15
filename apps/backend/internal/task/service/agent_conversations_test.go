@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"sync"
 	"testing"
@@ -227,38 +226,6 @@ func (f *acFakeProfileRepo) markDisabled(id string) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.disabled[id] = true
-}
-
-// acFakeStateRepo simulates the durable atomic Claim primitive
-// (internal/plugins/state.Store.Claim in production) with an in-process
-// mutex-guarded map — sufficient to prove AgentConversationService's own
-// concurrency handling; Store.Claim's SQL-level atomicity and restart
-// durability are proven separately in internal/plugins/state.
-type acFakeStateRepo struct {
-	mu     sync.Mutex
-	claims map[string]bool
-}
-
-func newACFakeStateRepo() *acFakeStateRepo {
-	return &acFakeStateRepo{claims: map[string]bool{}}
-}
-
-func (f *acFakeStateRepo) Claim(_ context.Context, pluginID, scope, scopeID, key string, _ json.RawMessage) (bool, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	k := pluginID + "/" + scope + "/" + scopeID + "/" + key
-	if f.claims[k] {
-		return false, nil
-	}
-	f.claims[k] = true
-	return true, nil
-}
-
-func (f *acFakeStateRepo) Delete(_ context.Context, pluginID, scope, scopeID, key string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	delete(f.claims, pluginID+"/"+scope+"/"+scopeID+"/"+key)
-	return nil
 }
 
 // acDeliverCall records one call reaching the fake dispatcher — i.e. one
@@ -829,6 +796,48 @@ func TestDispatchRetriesOccurrenceAfterDeliveryFailure(t *testing.T) {
 	}
 	if got := deps.dispatcher.callCount(); got != 1 {
 		t.Fatalf("dispatcher calls = %d, want one successful retry", got)
+	}
+	duplicate, err := svc.Dispatch(ctx, "plugin-coordinator", "ws-1", "coordinator", "WAKE:CYCLE", "occurrence-1")
+	if err != nil {
+		t.Fatalf("duplicate Dispatch: %v", err)
+	}
+	if duplicate.Status != "duplicate_occurrence" {
+		t.Fatalf("duplicate status = %q, want duplicate_occurrence", duplicate.Status)
+	}
+	if got := deps.dispatcher.callCount(); got != 1 {
+		t.Fatalf("dispatcher calls after duplicate = %d, want one", got)
+	}
+}
+
+func TestDispatchRecoversPendingOccurrenceAfterRestart(t *testing.T) {
+	svc, deps := newACTestService()
+	ctx := context.Background()
+	if _, _, err := svc.Ensure(ctx, "plugin-coordinator", pluginsdk.AgentConversationSpec{
+		WorkspaceID: "ws-1", ConversationKey: "coordinator",
+	}); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+
+	// Simulate a process stopping after the durable claim but before it reaches
+	// the dispatcher. A pending claim is recoverable; it is not an accepted
+	// duplicate and it must not require claim expiry.
+	deps.state.seedPending("plugin-coordinator", "ws-1", "coordinator", "occurrence-restart")
+	dispatch, err := svc.Dispatch(ctx, "plugin-coordinator", "ws-1", "coordinator", "WAKE:CYCLE", "occurrence-restart")
+	if err != nil {
+		t.Fatalf("recovered Dispatch: %v", err)
+	}
+	if dispatch.Status != "started" {
+		t.Fatalf("recovered status = %q, want started", dispatch.Status)
+	}
+	if got := deps.dispatcher.callCount(); got != 1 {
+		t.Fatalf("dispatcher calls = %d, want one recovered delivery", got)
+	}
+	raw, found, err := deps.state.Get(ctx, "plugin-coordinator", agentConversationOccurrenceScope, "ws-1/coordinator", "occurrence-restart")
+	if err != nil || !found {
+		t.Fatalf("accepted occurrence state = (%v, %v), want a stored value", string(raw), found)
+	}
+	if got := occurrenceStatus(raw); got != agentConversationOccurrenceAccepted {
+		t.Fatalf("occurrence status = %q, want accepted", got)
 	}
 }
 

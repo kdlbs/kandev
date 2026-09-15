@@ -1,5 +1,7 @@
 "use client";
 
+import { SymlinkIndicator } from "@/components/shared/symlink-indicator";
+
 import {
   createContext,
   createElement,
@@ -47,6 +49,7 @@ import { useTranslation } from "react-i18next";
 
 interface MarkdownPreviewToolbarProps {
   path: string;
+  isSymlink?: boolean;
   worktreePath?: string;
   commentCount: number;
   commentsEnabled: boolean;
@@ -61,6 +64,7 @@ interface MarkdownPreviewToolbarProps {
 
 function MarkdownPreviewToolbar({
   path,
+  isSymlink,
   worktreePath,
   commentCount,
   commentsEnabled,
@@ -77,8 +81,9 @@ function MarkdownPreviewToolbar({
   return (
     <PanelHeaderBarSplit
       left={
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="font-mono">{toRelativePath(path, worktreePath)}</span>
+        <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground">
+          <span className="truncate font-mono">{toRelativePath(path, worktreePath)}</span>
+          <SymlinkIndicator isSymlink={isSymlink} showLabel />
           <span className="text-xs text-muted-foreground/60">{t("task:preview")}</span>
         </div>
       }
@@ -125,6 +130,7 @@ function MarkdownPreviewToolbar({
 
 interface MarkdownPreviewContentProps {
   path: string;
+  isSymlink?: boolean;
   content: string;
   worktreePath?: string;
   sessionId?: string;
@@ -377,6 +383,7 @@ export function MarkdownPreviewRenderer({
 
 export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
   path,
+  isSymlink,
   content,
   worktreePath,
   sessionId,
@@ -429,6 +436,7 @@ export const MarkdownPreviewContent = memo(function MarkdownPreviewContent({
   return (
     <div className="relative flex h-full flex-col" data-testid="markdown-preview">
       <MarkdownPreviewToolbar
+        isSymlink={isSymlink}
         path={path}
         worktreePath={worktreePath}
         commentCount={commentState.comments.length}
