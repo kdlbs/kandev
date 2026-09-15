@@ -154,3 +154,10 @@ reachable, the visible menus remain present, and no mobile drag surface appears.
 Screenshot: `/tmp/kandev-mobile-scroll-visual/kanban-mobile-kanban-reord-367ae--393px-without-moving-tasks-mobile-chrome/phone-scrolled-cards.png`.
 The capture used the focused 393px test with `--output=/tmp/kandev-mobile-scroll-visual`
 after desktop verification, so the screenshot survives later default-output cleanup.
+
+## PR review remediation
+
+Reconciled the active adaptive Kanban requirements/design and the auto-hide phone
+scenario with native scrolling and menu-based moves. Removed stale promises of
+phone drop targets. Specification catalog and full specification lint pass.
+No production behavior or rendered UI changed during this documentation repair.

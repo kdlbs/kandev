@@ -197,7 +197,7 @@ live steps - manually hidden steps
 - **GIVEN** the preference is enabled, **WHEN** the page reloads or another tab hydrates settings,
   **THEN** the same workflow resumes automatic empty-column hiding.
 - **GIVEN** a phone viewport, **WHEN** the user enables auto-hide for the focused workflow, **THEN**
-  focused-column navigation and drag targets remain usable without document overflow.
+  focused-column navigation, native card scrolling, and menu-based moves to auto-hidden steps remain usable without document overflow.
 
 ## Out of scope
 
