@@ -212,9 +212,11 @@ Appending an occurrence is a post-acceptance edit to this document, so it also
 takes the repository's amendment marker: change the Status line to
 `accepted (amended YYYY-MM-DD)`, the form 36 of the 270 files under
 `docs/decisions/` already use. The marker records that this document changed,
-not that the decision reversed. Without the bump an appended occurrence is
-invisible both to a Status-line skim and to
-`list-docs.py decisions --status accepted`.
+not that the decision reversed. Without the bump the append leaves the Status
+line unchanged, and that line is the only place it would surface: a human skim
+reads it directly, and `list-docs.py decisions` echoes it in the Status column.
+The `--status accepted` filter is not that signal, since it matches on the
+leading word alone and lists an amended document either way.
 
 ## Alternatives considered
 

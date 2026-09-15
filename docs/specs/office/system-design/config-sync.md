@@ -140,9 +140,10 @@ of `TestOfficeRouteScopeCompleteness`.
 
 ### Config fields
 
-A separate table whose column names, types, and semantics match
-`workflow_sync_configs` as shipped; the two are no longer held aligned:
-`workspace_id` (primary key), `provider`,
+A separate table whose column names and types match `workflow_sync_configs` as
+shipped; the semantics of `provider`, `path` and `last_warnings` deliberately
+differ, and the two are no longer held aligned: `workspace_id` (primary key),
+`provider`,
 `repo_owner`, `repo_name`, `project_path`, `branch`, `path`,
 `interval_seconds`, `poll_enabled`, `last_synced_at`, `last_ok`, `last_error`,
 `last_warnings`, `last_hash`, `created_at`, `updated_at`.
