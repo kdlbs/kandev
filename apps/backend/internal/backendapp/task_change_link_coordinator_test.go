@@ -32,6 +32,7 @@ type fakeGitLabChangeLinks struct {
 }
 
 type fakeGitHubChangeLinks struct {
+	linkErr           error
 	prs               []*github.TaskPR
 	linkedURL         string
 	linkedWorkspaceID string
@@ -43,6 +44,9 @@ func (f *fakeGitHubChangeLinks) AssociateExistingPRByURLForWorkspace(_ context.C
 	f.linkedURL = prURL
 	f.linkedWorkspaceID = workspaceID
 	f.linkedUserID = userID
+	if f.linkErr != nil {
+		return nil, f.linkErr
+	}
 	pr := &github.TaskPR{ID: "linked-github", TaskID: taskID, RepositoryID: repositoryID, PRNumber: 42, PRURL: prURL}
 	f.prs = append(f.prs, pr)
 	return pr, nil
@@ -50,6 +54,12 @@ func (f *fakeGitHubChangeLinks) AssociateExistingPRByURLForWorkspace(_ context.C
 
 func (f *fakeGitHubChangeLinks) DetachTaskPR(_ context.Context, _ string, associationID string) (*github.TaskPR, error) {
 	f.unlinked = append(f.unlinked, associationID)
+	for i, pr := range f.prs {
+		if pr.ID == associationID {
+			f.prs = append(f.prs[:i], f.prs[i+1:]...)
+			return pr, nil
+		}
+	}
 	return nil, nil
 }
 
