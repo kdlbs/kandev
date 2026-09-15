@@ -20,6 +20,7 @@ import { Label } from "@kandev/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@kandev/ui/table";
 import { IconChevronDown, IconChevronUp, IconRefresh, IconTrash } from "@tabler/icons-react";
 import { useAutomationRuns } from "@/hooks/domains/settings/use-automation-runs";
+import { buildRunOutcomeReasonSuffix } from "@/lib/automation-run-reason";
 import type { AutomationRun, RunStatus } from "@/lib/types/automation";
 import { formatRelativeTime } from "@/lib/utils";
 
@@ -58,6 +59,7 @@ type RunRowProps = {
 function RunRow({ run, deleting, onDelete, onNavigate }: RunRowProps) {
   const { t } = useTranslation();
   const badge = STATUS_BADGE[run.status] ?? STATUS_BADGE.triggered;
+  const reasonSuffix = buildRunOutcomeReasonSuffix(t, run);
   // Any run that produced a task links to it, run-mode included. Run mode
   // keeps the task off the board, which is not a reason to withhold the only
   // route to what the run actually said.
@@ -81,13 +83,14 @@ function RunRow({ run, deleting, onDelete, onNavigate }: RunRowProps) {
         <Badge variant={badge.variant}>{t(badge.labelKey)}</Badge>
       </TableCell>
       <TableCell
-        className={`text-sm max-w-[420px] truncate ${
-          run.error_message ? "text-destructive" : "text-muted-foreground"
-        }`}
+        className="text-sm max-w-[420px] truncate text-muted-foreground"
         title={run.error_message || run.summary || undefined}
         data-testid="run-outcome"
       >
-        {run.error_message || run.summary || "-"}
+        <span className={run.error_message ? "text-destructive" : undefined}>
+          {run.error_message || run.summary || "-"}
+        </span>
+        {reasonSuffix && <span data-testid="run-outcome-reason"> {reasonSuffix}</span>}
       </TableCell>
       <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
         {formatRelativeTime(run.created_at)}

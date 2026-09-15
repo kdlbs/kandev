@@ -485,15 +485,20 @@
       "stability": "stable",
       "docs": [
         "automation-and-mcp",
+        "crashlytics-alerts",
         "integrations",
         "workflow-tips"
       ],
       "sources": [
         "apps/backend/internal/automation/service.go",
+        "apps/backend/internal/automation/webhook.go",
+        "apps/backend/internal/automation/webhook_filters.go",
         "apps/backend/internal/mcp/server/server.go"
       ],
       "tests": [
         "apps/backend/internal/automation/service_test.go",
+        "apps/backend/internal/automation/webhook_test.go",
+        "apps/backend/internal/automation/webhook_filters_test.go",
         "apps/backend/internal/mcp/server/server_test.go"
       ],
       "settingsRoutes": [

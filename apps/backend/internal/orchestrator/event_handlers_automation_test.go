@@ -64,7 +64,7 @@ func TestResolveAutomationRepository_MultipleExplicitRepositories(t *testing.T) 
 	a := &automation.Automation{WorkspaceID: "ws-1", RepositoryIDs: []string{"repo-a", "repo-b"}}
 	evt := &automation.AutomationTriggeredEvent{TriggerType: automation.TriggerTypeScheduled}
 
-	resolved := svc.resolveAutomationRepository(context.Background(), a, evt)
+	resolved, _ := svc.resolveAutomationRepository(context.Background(), a, evt)
 
 	if len(resolved) != 2 {
 		t.Fatalf("expected 2 resolved repositories, got %d: %+v", len(resolved), resolved)
@@ -85,7 +85,7 @@ func TestResolveAutomationRepository_SkipsUnloadableID(t *testing.T) {
 	a := &automation.Automation{WorkspaceID: "ws-1", RepositoryIDs: []string{"repo-a", "repo-missing"}}
 	evt := &automation.AutomationTriggeredEvent{TriggerType: automation.TriggerTypeScheduled}
 
-	resolved := svc.resolveAutomationRepository(context.Background(), a, evt)
+	resolved, _ := svc.resolveAutomationRepository(context.Background(), a, evt)
 
 	if len(resolved) != 1 || resolved[0].RepositoryID != "repo-a" {
 		t.Fatalf("expected only repo-a to resolve, got %+v", resolved)
@@ -100,7 +100,7 @@ func TestResolveAutomationRepository_EmptyListUsesNoRepository(t *testing.T) {
 	a := &automation.Automation{WorkspaceID: "ws-1"}
 	evt := &automation.AutomationTriggeredEvent{TriggerType: automation.TriggerTypeScheduled}
 
-	resolved := svc.resolveAutomationRepository(context.Background(), a, evt)
+	resolved, _ := svc.resolveAutomationRepository(context.Background(), a, evt)
 
 	if len(resolved) != 0 {
 		t.Fatalf("expected no repository, got %+v", resolved)
@@ -119,7 +119,7 @@ func TestResolveAutomationRepository_UsesSavedBaseBranches(t *testing.T) {
 		},
 	}
 
-	resolved := svc.resolveAutomationRepository(context.Background(), a, &automation.AutomationTriggeredEvent{
+	resolved, _ := svc.resolveAutomationRepository(context.Background(), a, &automation.AutomationTriggeredEvent{
 		TriggerType: automation.TriggerTypeScheduled,
 	})
 
@@ -252,7 +252,7 @@ func TestResolveAutomationRepository_GitHubPRIgnoresConfiguredRepositoryIDs(t *t
 		TriggerData: json.RawMessage(`{"repo":"owner/name","head_branch":"feature/x","base_branch":"main-repo-pr"}`),
 	}
 
-	resolved := svc.resolveAutomationRepository(context.Background(), a, evt)
+	resolved, _ := svc.resolveAutomationRepository(context.Background(), a, evt)
 
 	if len(resolved) != 1 || resolved[0].RepositoryID != "repo-pr" {
 		t.Fatalf("expected only the PR's own repository (repo-pr), got %+v", resolved)
@@ -562,14 +562,14 @@ func TestPrepareAutomationTask_DefersRefreshUntilDispatchAdmission(t *testing.T)
 		models.MetaKeyAutomationTargetTaskID: "target-after-stop",
 	}
 
-	task, session, action, reason, err := svc.prepareAutomationTask(ctx, autoSvc.automation, evt, "title", "prompt", metadata)
+	task, session, action, reasons, err := svc.prepareAutomationTask(ctx, autoSvc.automation, evt, "title", "prompt", metadata)
 	require.NoError(t, err)
-	require.Equal(t, automation.ThreadActionResumed, action, "reason=%q", reason)
+	require.Equal(t, automation.ThreadActionResumed, action, "reason=%q", reasons.Thread)
 	require.NotNil(t, session)
 	require.Equal(t, "target-before-stop", task.Metadata[models.MetaKeyAutomationTargetTaskID],
 		"preparing a resumed task must not authorize a run before dispatch admission")
 
-	svc.dispatchAutomationContinuation(ctx, autoSvc.automation, task, session, "prompt", metadata, evt.RunID, action, reason)
+	svc.dispatchAutomationContinuation(ctx, autoSvc.automation, task, session, "prompt", metadata, evt.RunID, action, reasons.Thread)
 	persisted, err := repo.GetTask(ctx, task.ID)
 	require.NoError(t, err)
 	require.Equal(t, "target-before-stop", persisted.Metadata[models.MetaKeyAutomationTargetTaskID],

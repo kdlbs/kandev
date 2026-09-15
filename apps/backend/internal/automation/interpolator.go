@@ -9,94 +9,136 @@ import (
 	"time"
 )
 
-// InterpolatePrompt replaces {{placeholder}} tokens in the prompt template
-// with values from the trigger data. Supports nested access via dot notation.
+// placeholderRe matches every {{token}} in a template, capturing the token
+// text. A single pass over the template drives the whole substitution: the
+// callback below never re-scans its own output, so a payload value that
+// happens to contain literal {{...}} text can never be expanded a second
+// time (see InterpolateAgentPrompt's quoting, which depends on this).
+var placeholderRe = regexp.MustCompile(`\{\{([a-zA-Z0-9_.-]+)\}\}`)
+
+// InterpolatePrompt replaces {{placeholder}} tokens in a template with values
+// from the trigger data, without quoting. Used for run display titles, which
+// are plain text shown in the runs list rather than an instruction channel to
+// an agent — quoting there would let a fence character leak into a truncated
+// title.
 func InterpolatePrompt(prompt string, triggerType TriggerType, triggerData json.RawMessage) string {
+	return interpolate(prompt, triggerType, triggerData, false)
+}
+
+// InterpolateAgentPrompt replaces {{placeholder}} tokens for the prompt sent
+// to the agent. On the webhook trigger, every substituted payload value is
+// quoted (inline code span, or a fenced block for a value containing a
+// newline) so that no payload-derived text can be mistaken for prompt syntax.
+// Other trigger types render exactly as InterpolatePrompt — hardening their
+// payload-derived tokens is out of scope for this change.
+func InterpolateAgentPrompt(prompt string, triggerType TriggerType, triggerData json.RawMessage) string {
+	return interpolate(prompt, triggerType, triggerData, triggerType == TriggerTypeWebhook)
+}
+
+func interpolate(prompt string, triggerType TriggerType, triggerData json.RawMessage, quoteValues bool) string {
 	if prompt == "" || !strings.Contains(prompt, "{{") {
 		return prompt
 	}
 
-	// Parse trigger data into a generic map for lookups.
 	var data map[string]interface{}
 	if err := json.Unmarshal(triggerData, &data); err != nil {
 		data = make(map[string]interface{})
 	}
+	fixed := fixedTriggerPlaceholders(triggerType, data)
+	now := time.Now().UTC().Format(time.RFC3339)
 
-	// Build replacer pairs from common placeholders.
-	pairs := []string{
-		"{{trigger.type}}", string(triggerType),
-		"{{trigger.timestamp}}", time.Now().UTC().Format(time.RFC3339),
-	}
+	result := placeholderRe.ReplaceAllStringFunc(prompt, func(match string) string {
+		token := match[2 : len(match)-2]
 
-	// Add trigger-type-specific placeholders.
-	switch triggerType {
-	case TriggerTypeGitHubPR:
-		pairs = append(pairs, prPlaceholders(data)...)
-	case TriggerTypeGitHubPush:
-		pairs = append(pairs, pushPlaceholders(data)...)
-	case TriggerTypeGitHubCI:
-		pairs = append(pairs, ciPlaceholders(data)...)
-	case TriggerTypePluginEvent:
-		original, _ := data["webhook"].(map[string]interface{})
-		pairs = append(pairs, webhookPlaceholders(original)...)
-	case TriggerTypeWebhook:
-		pairs = append(pairs, webhookPlaceholders(data)...)
-	}
-
-	result := strings.NewReplacer(pairs...).Replace(prompt)
-	// Resolve {{data.<path>}} and {{webhook.<path>}} tokens that didn't
-	// match the fixed list above. Dot-segments traverse nested objects;
-	// numeric segments index arrays (e.g. commits.0.message).
-	if triggerType == TriggerTypePluginEvent {
-		result = pathPlaceholderRe.ReplaceAllStringFunc(result, func(match string) string {
-			parts := pathPlaceholderRe.FindStringSubmatch(match)
-			root, _ := data[parts[1]].(map[string]interface{})
-			value, ok := lookupPath(root, parts[2])
-			if !ok {
-				return match
+		switch token {
+		case "trigger.type":
+			return string(triggerType)
+		case "trigger.timestamp":
+			return now
+		}
+		// A plugin event's payload is an envelope — data["webhook"] is the
+		// original third-party payload and data["data"] is the plugin's
+		// normalized view — so "webhook."/"data." select a different root
+		// object each, not just a namespacing convention. This is the one
+		// trigger type where that distinction matters; every other type
+		// resolves both prefixes against the same top-level data below.
+		if triggerType == TriggerTypePluginEvent {
+			if token == "webhook.body" {
+				original, _ := data["webhook"].(map[string]interface{})
+				raw, _ := json.Marshal(original)
+				if !quoteValues {
+					return string(raw)
+				}
+				return quoteFenced(string(raw), 3)
 			}
-			return value
-		})
-	} else {
-		result = resolvePathPlaceholders(result, data)
-	}
-	return stripUnresolved(result)
+			if value, ok := resolvePluginEventToken(token, data); ok {
+				return quoteOrPlain(value, quoteValues)
+			}
+			return ""
+		}
+		// webhook.body always means the whole payload, substituted from the
+		// original bytes (not a re-marshal of the parsed map, which loses
+		// non-object payloads). This carve-out only applies on the webhook
+		// trigger; on any other trigger type the token falls through to the
+		// data./webhook. path branch below and resolves a top-level "body"
+		// field instead — a deliberate no-op preserving today's behavior.
+		if triggerType == TriggerTypeWebhook && token == "webhook.body" {
+			raw := string(triggerData)
+			if !quoteValues {
+				return raw
+			}
+			return quoteFenced(raw, 3)
+		}
+		if v, ok := fixed[token]; ok {
+			return v
+		}
+		if value, ok := resolveDataOrWebhookToken(token, data); ok {
+			return quoteOrPlain(value, quoteValues)
+		}
+		return ""
+	})
+	return strings.TrimSpace(result)
 }
 
-// pathPlaceholderRe matches {{data.<path>}} or {{webhook.<path>}} tokens.
-// Path segments are dot-separated and may contain letters, digits,
-// underscores, dots, and hyphens — matching the JSON-key shapes external
-// systems actually emit (e.g. kebab-case headers like x-request-id).
-// The hyphen is placed last in the character class to avoid range interpretation.
-var pathPlaceholderRe = regexp.MustCompile(`\{\{(data|webhook)\.([a-zA-Z0-9_.-]+)\}\}`)
+// dataPathTokenRe matches the "data.<path>" or "webhook.<path>" shape of a
+// captured placeholder token (braces already stripped), requiring at least
+// one further segment after the prefix.
+var dataPathTokenRe = regexp.MustCompile(`^(?:data|webhook)\.(.+)$`)
 
-// resolvePathPlaceholders walks every remaining {{data.<path>}} and
-// {{webhook.<path>}} token and substitutes the value at that path in data.
-// Missing paths are left in place so stripUnresolved can clear them.
-func resolvePathPlaceholders(s string, data map[string]interface{}) string {
-	if !strings.Contains(s, "{{") {
-		return s
+// resolveDataOrWebhookToken resolves a "data.<path>" or "webhook.<path>"
+// token against the parsed payload via lookupPath. Available for any trigger
+// type — the prefix is just a namespacing convention, not a type gate.
+func resolveDataOrWebhookToken(token string, data map[string]interface{}) (string, bool) {
+	m := dataPathTokenRe.FindStringSubmatch(token)
+	if m == nil {
+		return "", false
 	}
-	return pathPlaceholderRe.ReplaceAllStringFunc(s, func(match string) string {
-		parts := pathPlaceholderRe.FindStringSubmatch(match)
-		if len(parts) != 3 {
-			return match
-		}
-		val, ok := lookupPath(data, parts[2])
-		if !ok {
-			return match
-		}
-		return val
-	})
+	return lookupPath(data, m[1])
+}
+
+// pluginEventTokenRe matches "data.<path>" or "webhook.<path>", capturing the
+// prefix separately from the suffix: for a plugin event the prefix selects
+// which top-level envelope object ("data" or "webhook") is the lookup root.
+var pluginEventTokenRe = regexp.MustCompile(`^(data|webhook)\.(.+)$`)
+
+// resolvePluginEventToken resolves a "data.<path>" or "webhook.<path>" token
+// against a plugin event's envelope payload — data["data"] or
+// data["webhook"] respectively, not the top-level payload itself.
+func resolvePluginEventToken(token string, data map[string]interface{}) (string, bool) {
+	m := pluginEventTokenRe.FindStringSubmatch(token)
+	if m == nil {
+		return "", false
+	}
+	root, _ := data[m[1]].(map[string]interface{})
+	return lookupPath(root, m[2])
 }
 
 // lookupPath resolves a dot-separated path against the parsed JSON payload.
 // Numeric segments index into JSON arrays; non-numeric segments key into
 // objects. Returns ("", false) when a segment can't be resolved (missing
-// key, out-of-range index, or a scalar reached before the path ends).
-// Non-leaf nodes (intermediate objects/arrays) are JSON-marshalled to a
-// string via toString — same convention as {{webhook.body}} returning the
-// whole payload.
+// key, out-of-range index, a scalar reached before the path ends, or a JSON
+// null). Non-leaf nodes (intermediate objects/arrays) are JSON-marshalled to
+// a string via toString.
 func lookupPath(data map[string]interface{}, path string) (string, bool) {
 	if path == "" {
 		return "", false
@@ -126,52 +168,67 @@ func lookupPath(data map[string]interface{}, path string) (string, bool) {
 	return toString(cur), true
 }
 
-// unresolvedRe matches leftover {{placeholder}} tokens that weren't replaced.
-// Includes hyphens (placed last to avoid range interpretation) so kebab-case
-// keys like x-request-id are stripped rather than leaking into the prompt.
-var unresolvedRe = regexp.MustCompile(`\{\{[a-zA-Z0-9_.-]+\}\}`)
-
-// stripUnresolved removes any remaining {{...}} placeholders so they don't
-// appear as raw text in the agent prompt.
-func stripUnresolved(s string) string {
-	return strings.TrimSpace(unresolvedRe.ReplaceAllString(s, ""))
+// ResolvePayloadPath resolves a dot path against a raw JSON payload,
+// trimming the result and treating a present-but-empty value as unresolved.
+// This is the shared trim-then-test semantics used by dedup key resolution
+// (webhook.go) and repository selector resolution (orchestrator package).
+func ResolvePayloadPath(triggerData json.RawMessage, path string) (value string, ok bool) {
+	if path == "" {
+		return "", false
+	}
+	var data map[string]interface{}
+	if err := json.Unmarshal(triggerData, &data); err != nil {
+		return "", false
+	}
+	raw, found := lookupPath(data, path)
+	if !found {
+		return "", false
+	}
+	trimmed := strings.TrimSpace(raw)
+	return trimmed, trimmed != ""
 }
 
-func prPlaceholders(data map[string]interface{}) []string {
-	return []string{
-		"{{pr.number}}", toString(data["number"]),
-		"{{pr.title}}", toString(data["title"]),
-		"{{pr.url}}", toString(data[automationHTMLURLKey]),
-		"{{pr.author}}", toString(data[automationAuthorLoginKey]),
-		"{{pr.repo}}", toString(data[automationRepoKey]),
-		"{{pr.branch}}", toString(data[automationHeadBranchKey]),
-		"{{pr.base_branch}}", toString(data[automationBaseBranchKey]),
-		"{{pr.body}}", toString(data[automationBodyKey]),
+func fixedTriggerPlaceholders(triggerType TriggerType, data map[string]interface{}) map[string]string {
+	switch triggerType {
+	case TriggerTypeGitHubPR:
+		return prPlaceholders(data)
+	case TriggerTypeGitHubPush:
+		return pushPlaceholders(data)
+	case TriggerTypeGitHubCI:
+		return ciPlaceholders(data)
+	default:
+		return nil
 	}
 }
 
-func pushPlaceholders(data map[string]interface{}) []string {
-	return []string{
-		"{{push.branch}}", toString(data["branch"]),
-		"{{push.repo}}", toString(data[automationRepoKey]),
-		"{{push.sha}}", toString(data["sha"]),
-		"{{push.message}}", toString(data["message"]),
+func prPlaceholders(data map[string]interface{}) map[string]string {
+	return map[string]string{
+		"pr.number":      toString(data["number"]),
+		"pr.title":       toString(data["title"]),
+		"pr.url":         toString(data[automationHTMLURLKey]),
+		"pr.author":      toString(data[automationAuthorLoginKey]),
+		"pr.repo":        toString(data[automationRepoKey]),
+		"pr.branch":      toString(data[automationHeadBranchKey]),
+		"pr.base_branch": toString(data[automationBaseBranchKey]),
+		"pr.body":        toString(data[automationBodyKey]),
 	}
 }
 
-func ciPlaceholders(data map[string]interface{}) []string {
-	return []string{
-		"{{ci.check_name}}", toString(data["check_name"]),
-		"{{ci.conclusion}}", toString(data["conclusion"]),
-		"{{ci.repo}}", toString(data[automationRepoKey]),
-		"{{ci.url}}", toString(data[automationHTMLURLKey]),
+func pushPlaceholders(data map[string]interface{}) map[string]string {
+	return map[string]string{
+		"push.branch":  toString(data["branch"]),
+		"push.repo":    toString(data[automationRepoKey]),
+		"push.sha":     toString(data["sha"]),
+		"push.message": toString(data["message"]),
 	}
 }
 
-func webhookPlaceholders(data map[string]interface{}) []string {
-	raw, _ := json.Marshal(data)
-	return []string{
-		"{{webhook.body}}", string(raw),
+func ciPlaceholders(data map[string]interface{}) map[string]string {
+	return map[string]string{
+		"ci.check_name": toString(data["check_name"]),
+		"ci.conclusion": toString(data["conclusion"]),
+		"ci.repo":       toString(data[automationRepoKey]),
+		"ci.url":        toString(data[automationHTMLURLKey]),
 	}
 }
 
@@ -196,4 +253,61 @@ func toString(v interface{}) string {
 		b, _ := json.Marshal(val)
 		return string(b)
 	}
+}
+
+// quoteOrPlain quotes value as an inline code span when quoteValues is true,
+// otherwise returns it unchanged.
+func quoteOrPlain(value string, quoteValues bool) string {
+	if !quoteValues {
+		return value
+	}
+	return quoteInline(value)
+}
+
+// longestBacktickRun returns the length of the longest run of consecutive
+// backtick characters in value.
+func longestBacktickRun(value string) int {
+	longest, current := 0, 0
+	for _, r := range value {
+		if r == '`' {
+			current++
+			if current > longest {
+				longest = current
+			}
+		} else {
+			current = 0
+		}
+	}
+	return longest
+}
+
+// codeFence returns a backtick run one longer than the longest run already
+// present in value, floored at floor — so the fence's own delimiters can
+// never appear, unescaped, inside the content they wrap.
+func codeFence(value string, floor int) string {
+	n := longestBacktickRun(value) + 1
+	if n < floor {
+		n = floor
+	}
+	return strings.Repeat("`", n)
+}
+
+// quoteInline wraps value in a Markdown inline code span. A value containing
+// a newline cannot be represented inline, so it falls back to the fenced
+// form instead.
+func quoteInline(value string) string {
+	if strings.Contains(value, "\n") {
+		return quoteFenced(value, 3)
+	}
+	fence := codeFence(value, 1)
+	if strings.HasPrefix(value, "`") || strings.HasSuffix(value, "`") {
+		return fence + " " + value + " " + fence
+	}
+	return fence + value + fence
+}
+
+// quoteFenced wraps value in a Markdown fenced code block.
+func quoteFenced(value string, floor int) string {
+	fence := codeFence(value, floor)
+	return fence + "\n" + value + "\n" + fence
 }

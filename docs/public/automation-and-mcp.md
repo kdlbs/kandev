@@ -178,9 +178,17 @@ X-Webhook-Secret: <secret>
 Content-Type: application/json
 ```
 
-Kandev silently reads only the first 1 MiB of the request body; it does not reject an oversized body. If that retained prefix is valid JSON, it becomes trigger data. Empty or invalid JSON is wrapped as `{"body":"<raw text>"}`. The endpoint returns 401 for a wrong secret, 404 for an unknown automation, and 409 when the automation or its webhook trigger is disabled.
+Kandev silently reads only the first 1 MiB of the request body; it does not reject an oversized body. If that retained prefix is valid JSON, it becomes trigger data. Empty or invalid JSON is wrapped as `{"body":"<raw text>"}`. The endpoint always returns `200 {"status":"triggered"}` for a well-formed, authenticated request, whether the delivery went on to fire, was filtered out, or was deduplicated; it returns 401 for a wrong secret, 404 for an unknown automation, and 409 when the automation or its webhook trigger is disabled.
 
-Webhook delivery has no event deduplication or filter-expression evaluator. Make downstream actions idempotent when the sender retries. The secret is stored with the automation rather than in Kandev's encrypted provider-secret store, and anyone with Kandev settings access can reveal it. Treat it as a credential, use TLS, keep it out of URLs/logs, and replace the automation if rotation is required.
+A webhook trigger's configuration can optionally set a deduplication key, a list of filters, and a repository selector:
+
+- **Deduplication key**: a dot path into the payload, for example `issue.id`. A delivery whose resolved value repeats an earlier firing's is recorded as a duplicate and creates no new task. Leave it blank to fire on every delivery.
+- **Filters**: an ordered list of `{path, op, values}` predicates, evaluated before deduplication and before the run's concurrency slot is claimed. Every filter must pass for the delivery to fire; a rejected delivery still returns the uniform 200 response, creates no task, and is recorded as skipped. Supported operators are `eq`, `ne`, `in`, `not_in`, `exists`, `not_exists`, and `contains`; the five comparison operators other than `exists`/`not_exists` trim and lowercase both sides before comparing, so filter values are case-insensitive. A path that does not resolve fails every operator except `not_exists`.
+- **Repository selector**: a dot path whose resolved value is matched, exactly and case-sensitively, against one of the automation's already-configured repositories by name. Exactly one match binds that repository to the run; no match, or more than one, binds none. This is deliberately not the same resolution GitHub pull request triggers use, because the webhook route is exempt from session authentication and authorized by its shared secret alone, so a payload must never be able to name an arbitrary repository.
+
+Make downstream actions idempotent regardless: a sender can still retry a delivery that Kandev has already deduplicated or filtered. The secret is stored with the automation rather than in Kandev's encrypted provider-secret store, and anyone with Kandev settings access can reveal it. Treat it as a credential, use TLS, keep it out of URLs/logs, and replace the automation if rotation is required.
+
+See [Firebase Crashlytics alerts](crashlytics-alerts.md) for a worked example of dedup key, filters, and repository selector configured together.
 
 ### Manual trigger
 
@@ -196,7 +204,7 @@ GitHub PR runs additionally support `{{pr.number}}`, `{{pr.title}}`, `{{pr.url}}
 
 Webhook runs support `{{webhook.body}}` and `{{webhook.<path>}}`. Dot segments traverse nested objects, and a numeric segment indexes an array, for example `{{webhook.commits.0.message}}`. Scalar values are converted to text; objects and arrays become JSON. Missing or unresolved placeholders are removed rather than sent literally.
 
-Trigger payloads are untrusted input. Do not let a PR body or webhook field silently choose credentials, repositories, shell commands, or a production target.
+Trigger payloads are untrusted input. Do not let a PR body or webhook field silently choose credentials, repositories, shell commands, or a production target. As a further precaution on the webhook trigger specifically, since its route is exempt from session authentication, every substituted `{{webhook.<path>}}` value and the whole `{{webhook.body}}` payload are wrapped in inline code or a fenced code block in the agent's prompt, so a payload cannot forge Markdown structure or a fake `{{...}}` placeholder that gets treated as another instruction. This does not apply to `{{data.<path>}}` values on other trigger types, whose payloads come from Kandev's own pollers rather than an unauthenticated endpoint.
 
 ## Read what an automation has been doing
 

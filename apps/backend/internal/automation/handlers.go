@@ -199,7 +199,7 @@ func wsManualTrigger(svc *Service, log *logger.Logger) func(ctx context.Context,
 		if len(a.Triggers) > 0 {
 			triggerID = a.Triggers[0].ID
 		}
-		result, fireErr := svc.FireTrigger(ctx, id, triggerID, "manual", data, "")
+		result, fireErr := svc.FireTrigger(ctx, id, triggerID, "manual", data, DedupNotConfigured())
 		if fireErr != nil {
 			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, fireErr.Error(), nil)
 		}

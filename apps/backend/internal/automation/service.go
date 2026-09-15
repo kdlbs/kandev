@@ -1441,9 +1441,29 @@ func RenderRunDisplayTitle(a *Automation, triggerType TriggerType, triggerData j
 	return taskservice.TruncateTaskTitle(fmt.Sprintf("[Auto] %s", a.Name))
 }
 
+// RecordFilteredTrigger persists a skip record for a webhook firing rejected
+// by a filter predicate, before dedup or the concurrency cap are evaluated.
+// Deliberately outside automationRunLock: filter evaluation is pure and
+// needs no lock, and no active-run count is touched (no cap check ran).
+func (s *Service) RecordFilteredTrigger(
+	ctx context.Context, a *Automation, triggerID string, triggerType TriggerType,
+	triggerData json.RawMessage, rejectedIndex int,
+) error {
+	run := &AutomationRun{
+		AutomationID: a.ID,
+		TriggerID:    triggerID,
+		TriggerType:  triggerType,
+		Status:       RunStatusSkipped,
+		TriggerData:  triggerData,
+		ErrorMessage: fmt.Sprintf("filter_rejected: %d", rejectedIndex),
+		DisplayTitle: RenderRunDisplayTitle(a, triggerType, triggerData),
+	}
+	return s.store.CreateRun(ctx, run)
+}
+
 // FireTrigger publishes an AutomationTriggered event for the given trigger.
 // The orchestrator handles task creation in response.
-func (s *Service) FireTrigger(ctx context.Context, automationID, triggerID string, triggerType TriggerType, triggerData json.RawMessage, dedupKey string) (FireResult, error) {
+func (s *Service) FireTrigger(ctx context.Context, automationID, triggerID string, triggerType TriggerType, triggerData json.RawMessage, dedup DedupBinding) (FireResult, error) {
 	// Admission decisions live in one place so every caller — scheduler,
 	// webhook, and the manual Run button — gets the same answer about whether a
 	// fire actually happened.
@@ -1465,7 +1485,7 @@ func (s *Service) FireTrigger(ctx context.Context, automationID, triggerID strin
 	// slot and publish two fires, or DeleteAllRuns can remove a row after its
 	// task snapshot but before the row is inserted.
 	admittedRun, capReason, duplicate, admissionErr := s.admitTrigger(
-		ctx, a, triggerID, triggerType, triggerData, dedupKey,
+		ctx, a, triggerID, triggerType, triggerData, dedup,
 	)
 	if admissionErr != nil {
 		return FireResult{}, admissionErr
@@ -1500,7 +1520,7 @@ func (s *Service) FireTrigger(ctx context.Context, automationID, triggerID strin
 		TriggerID:    triggerID,
 		TriggerType:  triggerType,
 		TriggerData:  triggerData,
-		DedupKey:     dedupKey,
+		DedupKey:     dedup.Key(),
 	}
 
 	event := bus.NewEvent(events.AutomationTriggered, "automation_service", evt)
@@ -1528,11 +1548,11 @@ func (s *Service) admitTrigger(
 	triggerID string,
 	triggerType TriggerType,
 	triggerData json.RawMessage,
-	dedupKey string,
+	dedup DedupBinding,
 ) (*AutomationRun, string, bool, error) {
 	unlock := s.automationRunLock(a.ID)
 	defer unlock()
-	return s.admitTriggerLocked(ctx, a, triggerID, triggerType, triggerData, dedupKey)
+	return s.admitTriggerLocked(ctx, a, triggerID, triggerType, triggerData, dedup)
 }
 
 func (s *Service) admitTriggerLocked(
@@ -1541,8 +1561,10 @@ func (s *Service) admitTriggerLocked(
 	triggerID string,
 	triggerType TriggerType,
 	triggerData json.RawMessage,
-	dedupKey string,
+	dedup DedupBinding,
 ) (*AutomationRun, string, bool, error) {
+	dedupKey := dedup.Key()
+	dedupReason := dedup.Reason()
 	if dedupKey != "" {
 		exists, err := s.store.HasRunWithDedupKey(ctx, a.ID, dedupKey)
 		if err != nil {
@@ -1551,6 +1573,7 @@ func (s *Service) admitTriggerLocked(
 		if exists {
 			s.logger.Debug("skipping duplicate trigger",
 				zap.String("automation_id", a.ID), zap.String("dedup_key", dedupKey))
+			s.recordDuplicateSkippedTrigger(ctx, a, triggerID, triggerType, triggerData, dedupKey)
 			return nil, "", true, nil
 		}
 	}
@@ -1560,7 +1583,7 @@ func (s *Service) admitTriggerLocked(
 		return nil, "", false, err
 	}
 	if full {
-		s.recordSkippedTrigger(ctx, a, triggerID, triggerType, triggerData, dedupKey, capReason, active)
+		s.recordSkippedTrigger(ctx, a, triggerID, triggerType, triggerData, dedupKey, dedupReason, capReason, active)
 		return nil, capReason, false, nil
 	}
 
@@ -1570,6 +1593,7 @@ func (s *Service) admitTriggerLocked(
 		TriggerType:  triggerType,
 		Status:       RunStatusTriggered,
 		DedupKey:     dedupKey,
+		DedupReason:  dedupReason,
 		TriggerData:  triggerData,
 		DisplayTitle: RenderRunDisplayTitle(a, triggerType, triggerData),
 	}
@@ -1577,6 +1601,28 @@ func (s *Service) admitTriggerLocked(
 		return nil, "", false, fmt.Errorf("record admitted run: %w", err)
 	}
 	return run, "", false, nil
+}
+
+// recordDuplicateSkippedTrigger persists the AC-001.2-required skip record
+// for a firing suppressed by dedup — previously this branch only logged at
+// Debug and left no audit trail.
+func (s *Service) recordDuplicateSkippedTrigger(
+	ctx context.Context, a *Automation, triggerID string, triggerType TriggerType,
+	triggerData json.RawMessage, dedupKey string,
+) {
+	run := &AutomationRun{
+		AutomationID: a.ID,
+		TriggerID:    triggerID,
+		TriggerType:  triggerType,
+		Status:       RunStatusSkipped,
+		DedupKey:     dedupKey,
+		TriggerData:  triggerData,
+		ErrorMessage: "duplicate trigger: dedup key already fired",
+		DisplayTitle: RenderRunDisplayTitle(a, triggerType, triggerData),
+	}
+	if err := s.store.CreateRun(ctx, run); err != nil {
+		s.logger.Warn("failed to record duplicate-skipped run", zap.Error(err))
+	}
 }
 
 func (s *Service) automationCapacity(ctx context.Context, a *Automation) (string, int, bool, error) {
@@ -1599,11 +1645,11 @@ func (s *Service) recordSkippedTrigger(
 	triggerID string,
 	triggerType TriggerType,
 	triggerData json.RawMessage,
-	dedupKey, reason string,
+	dedupKey, dedupReason, reason string,
 	active int,
 ) {
 	skipDedupKey := dedupKey
-	if triggerType == TriggerTypeGitHubPRMerged {
+	if triggerType == TriggerTypeGitHubPRMerged || triggerType == TriggerTypeWebhook {
 		skipDedupKey = ""
 	}
 	skipRun := &AutomationRun{
@@ -1612,6 +1658,7 @@ func (s *Service) recordSkippedTrigger(
 		TriggerType:  triggerType,
 		Status:       RunStatusSkipped,
 		DedupKey:     skipDedupKey,
+		DedupReason:  dedupReason,
 		TriggerData:  triggerData,
 		ErrorMessage: reason,
 		DisplayTitle: RenderRunDisplayTitle(a, triggerType, triggerData),
@@ -1643,13 +1690,13 @@ func (s *Service) RecordRun(ctx context.Context, run *AutomationRun) error {
 	return s.store.CreateRun(ctx, run)
 }
 
-func (s *Service) BindRunTask(ctx context.Context, runID, taskID string) error {
+func (s *Service) BindRunTask(ctx context.Context, runID, taskID, repositoryReason string) error {
 	unlock, err := s.lockRun(ctx, runID)
 	if err != nil {
 		return err
 	}
 	defer unlock()
-	return s.store.BindRunTask(ctx, runID, taskID)
+	return s.store.BindRunTask(ctx, runID, taskID, repositoryReason)
 }
 
 func (s *Service) SetContinuationTaskID(ctx context.Context, automationID, taskID string) error {
