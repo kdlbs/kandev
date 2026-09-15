@@ -835,11 +835,8 @@ const legacyScopedCIRunSemanticConstraint = "UNIQUE (\n\t\t\tworkspace_id, targe
 const scopedCIRunSemanticConstraint = "UNIQUE (workspace_id, target_task_id, workflow_id, workflow_step_id, repository_id, pr_number, expected_head_sha, source_run_id, expected_source_attempt, evidence_kind)"
 
 func (s *Store) migrateCIRunSemanticConstraint() error {
-	// The constraint-rebuild migration is SQLite-specific. PostgreSQL applies
-	// the current constraint through CREATE TABLE and does not expose
-	// sqlite_master, so there is nothing to rebuild on that driver.
 	if dialect.IsPostgres(s.db.DriverName()) {
-		return nil
+		return s.migratePostgresCIRunSemanticConstraint()
 	}
 	existingSQL, err := dbutil.SQLiteTableSQL(s.db, "github_ci_run_requests")
 	if err != nil {
@@ -893,6 +890,104 @@ func (s *Store) migrateCIRunSemanticConstraint() error {
 		}
 	}
 	return tx.Commit()
+}
+
+var legacyCIRunSemanticColumns = []string{
+	"target_task_id", "repository_id", "pr_number", "source_run_id", "expected_source_attempt", "evidence_kind",
+}
+
+var legacyScopedCIRunSemanticColumns = []string{
+	"workspace_id", "target_task_id", "workflow_id", "repository_id", "pr_number",
+	"expected_head_sha", "source_run_id", "expected_source_attempt", "evidence_kind",
+}
+
+var scopedCIRunSemanticColumns = []string{
+	"workspace_id", "target_task_id", "workflow_id", "workflow_step_id", "repository_id", "pr_number",
+	"expected_head_sha", "source_run_id", "expected_source_attempt", "evidence_kind",
+}
+
+func (s *Store) migratePostgresCIRunSemanticConstraint() error {
+	tx, err := s.db.BeginTxx(context.Background(), nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	for _, columns := range [][]string{legacyCIRunSemanticColumns, legacyScopedCIRunSemanticColumns} {
+		constraint, lookupErr := postgresCIRunUniqueConstraint(tx, columns...)
+		if lookupErr != nil {
+			return lookupErr
+		}
+		if constraint == "" {
+			continue
+		}
+		if _, err := tx.Exec(`ALTER TABLE github_ci_run_requests DROP CONSTRAINT ` + quotePostgresIdentifier(constraint)); err != nil {
+			return fmt.Errorf("drop legacy GitHub CI run constraint: %w", err)
+		}
+	}
+	constraint, err := postgresCIRunUniqueConstraint(tx, scopedCIRunSemanticColumns...)
+	if err != nil {
+		return err
+	}
+	if constraint == "" {
+		if _, err := tx.Exec(`ALTER TABLE github_ci_run_requests
+			ADD CONSTRAINT github_ci_run_requests_semantic_key UNIQUE (
+				workspace_id, target_task_id, workflow_id, workflow_step_id, repository_id, pr_number,
+				expected_head_sha, source_run_id, expected_source_attempt, evidence_kind)`); err != nil {
+			return fmt.Errorf("add scoped GitHub CI run constraint: %w", err)
+		}
+	}
+	return tx.Commit()
+}
+
+func postgresCIRunUniqueConstraint(tx *sqlx.Tx, columns ...string) (string, error) {
+	rows, err := tx.Query(`
+		SELECT tc.constraint_name, kcu.column_name
+		FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu
+			ON kcu.constraint_schema = tc.constraint_schema
+			AND kcu.constraint_name = tc.constraint_name
+			AND kcu.table_schema = tc.table_schema
+			AND kcu.table_name = tc.table_name
+		WHERE tc.table_schema = current_schema() AND tc.table_name = 'github_ci_run_requests'
+			AND tc.constraint_type = 'UNIQUE'
+		ORDER BY tc.constraint_name, kcu.ordinal_position`)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = rows.Close() }()
+	constraints := make(map[string][]string)
+	for rows.Next() {
+		var name, column string
+		if err := rows.Scan(&name, &column); err != nil {
+			return "", err
+		}
+		constraints[name] = append(constraints[name], column)
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+	for name, actual := range constraints {
+		if sameCIRunConstraintColumns(actual, columns) {
+			return name, nil
+		}
+	}
+	return "", nil
+}
+
+func sameCIRunConstraintColumns(actual, expected []string) bool {
+	if len(actual) != len(expected) {
+		return false
+	}
+	for index := range actual {
+		if actual[index] != expected[index] {
+			return false
+		}
+	}
+	return true
+}
+
+func quotePostgresIdentifier(identifier string) string {
+	return `"` + strings.ReplaceAll(identifier, `"`, `""`) + `"`
 }
 
 var taskPRMergeQueueColumnDDL = []struct {

@@ -193,14 +193,24 @@ func (s *Service) loadCIRunBinding(ctx context.Context, input RequestFreshCIRunI
 		return nil, err
 	}
 	taskPR, err := s.store.GetTaskPRByRepoAndNumber(ctx, input.TargetTaskID, input.RepositoryID, input.PRNumber)
-	if err != nil || taskPR == nil || taskPR.State != defaultPRState {
-		return nil, &CIRunRequestError{Class: CIRunFailureUnlinkedPR}
-	}
-	if !strings.EqualFold(taskPR.Owner, owner) || !strings.EqualFold(taskPR.Repo, repo) {
-		return nil, &CIRunRequestError{Class: CIRunFailureRepositoryMismatch}
+	if err := validateCIRunTaskPR(taskPR, err, owner, repo, input.ExpectedHeadSHA); err != nil {
+		return nil, err
 	}
 	return &ciRunBinding{WorkspaceID: target.WorkspaceID, WorkflowID: target.WorkflowID,
 		WorkflowStep: target.WorkflowStepID, Owner: owner, Repo: repo, TaskPR: taskPR, Grant: grant}, nil
+}
+
+func validateCIRunTaskPR(taskPR *TaskPR, lookupErr error, owner, repo, expectedHeadSHA string) error {
+	if lookupErr != nil || taskPR == nil || taskPR.State != defaultPRState {
+		return &CIRunRequestError{Class: CIRunFailureUnlinkedPR}
+	}
+	if !strings.EqualFold(taskPR.HeadSHA, expectedHeadSHA) {
+		return &CIRunRequestError{Class: CIRunFailureHeadDrift}
+	}
+	if !strings.EqualFold(taskPR.Owner, owner) || !strings.EqualFold(taskPR.Repo, repo) {
+		return &CIRunRequestError{Class: CIRunFailureRepositoryMismatch}
+	}
+	return nil
 }
 
 func (s *Service) loadCIRunRepository(

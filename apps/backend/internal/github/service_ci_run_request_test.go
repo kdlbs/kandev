@@ -665,7 +665,7 @@ func setupCIRunServiceTest(t *testing.T, fork bool) (*Service, *fakeCIRunActions
 		ID: "task-pr-1", WorkspaceID: "workspace-1", TaskID: "target-1",
 		RepositoryID: "repository-1", Owner: "kdlbs", Repo: "kandev", PRNumber: 42,
 		PRURL: "https://github.com/kdlbs/kandev/pull/42", PRTitle: "test",
-		HeadBranch: "feature/x", BaseBranch: "main", State: "open", CreatedAt: now, UpdatedAt: now,
+		HeadBranch: "feature/x", HeadSHA: strings.Repeat("a", 40), BaseBranch: "main", State: "open", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -701,4 +701,22 @@ func setupCIRunServiceTest(t *testing.T, fork bool) (*Service, *fakeCIRunActions
 		EvidenceKind: CIRunEvidencePRHead, IdempotencyKey: "consumer-42-attempt-1",
 	}
 	return service, client, input
+}
+
+func TestRequestFreshCIRunRejectsUnsynchronizedPersistedPRHead(t *testing.T) {
+	service, client, input := setupCIRunServiceTest(t, false)
+	if _, err := service.store.db.Exec(`UPDATE github_task_prs SET head_sha = ?
+		WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
+		strings.Repeat("b", 40), input.TargetTaskID, input.RepositoryID, input.PRNumber); err != nil {
+		t.Fatal(err)
+	}
+
+	receipt, err := service.RequestFreshCIRun(context.Background(), input)
+	var ciErr *CIRunRequestError
+	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureHeadDrift {
+		t.Fatalf("error = %#v, want head_drift", err)
+	}
+	if receipt != nil || client.reruns != 0 {
+		t.Fatalf("receipt = %+v, reruns = %d; want no claim or provider mutation", receipt, client.reruns)
+	}
 }

@@ -34,6 +34,30 @@ func TestRequestFreshCIRunRejectsHeadDriftAfterFinalSourceRunRead(t *testing.T) 
 	}
 }
 
+func TestRequestFreshCIRunRejectsPersistedHeadDriftAtProviderStart(t *testing.T) {
+	service, client, input := setupCIRunServiceTest(t, false)
+	client.runHook = func(call int) {
+		if call != 2 {
+			return
+		}
+		_, err := service.store.db.Exec(`UPDATE github_task_prs SET head_sha = ?
+			WHERE task_id = ? AND repository_id = ? AND pr_number = ?`,
+			strings.Repeat("b", 40), input.TargetTaskID, input.RepositoryID, input.PRNumber)
+		if err != nil {
+			t.Fatalf("advance persisted PR head: %v", err)
+		}
+	}
+
+	receipt, err := service.RequestFreshCIRun(context.Background(), input)
+	var ciErr *CIRunRequestError
+	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureHeadDrift {
+		t.Fatalf("error = %#v, want head_drift", err)
+	}
+	if receipt == nil || receipt.Status != CIRunRequestFailed || client.reruns != 0 {
+		t.Fatalf("receipt = %+v, reruns = %d; want terminal drift without mutation", receipt, client.reruns)
+	}
+}
+
 func TestRequestFreshCIRunRejectsLinkDriftAfterFinalSourceRunRead(t *testing.T) {
 	tests := []struct {
 		name string

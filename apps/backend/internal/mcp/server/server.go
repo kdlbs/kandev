@@ -1324,7 +1324,7 @@ func (s *Server) registerKanbanTools() {
 		),
 		s.wrapHandler("stop_task_kandev", s.stopTaskHandler()),
 	)
-	if s.profile.Surface == mcpprofile.SurfaceKanbanTask && mcpproviders.Contains(s.mcpProviders, mcpproviders.GitHub) {
+	if s.profile.Surface == mcpprofile.SurfaceKanbanTask {
 		s.mcpServer.AddTool(
 			mcp.NewTool("request_fresh_ci_run_kandev",
 				mcp.WithDescription("Request one server-authorized fresh GitHub Actions run for a task's linked pull request at an exact unchanged head. The backend binds the caller, workspace, task, current workflow step, repository, PR, source run attempt, and GitHub App installation. Callers cannot choose an owner, repository name, ref, workflow, inputs, or credential."),

@@ -19,6 +19,9 @@ func (s *Service) handleCIRunPreflightError(
 	if ciRunFailureFromError(classified) == CIRunFailureProviderRateLimited {
 		return s.deferCIRunForRateLimit(ctx, request, classified)
 	}
+	if ciRunProviderErrorIsRetryable(classified) {
+		return s.releaseCIRunForRetryablePreflight(ctx, request, classified)
+	}
 	return s.failCIRunRequest(ctx, request, ciRunFailureFromError(classified))
 }
 
@@ -29,6 +32,12 @@ func (s *Service) handleCIRunReconciliationReadError(
 	applyCIRunProviderMetadata(request, GitHubRequestMetadata{}, classified)
 	class := ciRunFailureFromError(classified)
 	if class != CIRunFailureProviderRateLimited {
+		request.FailureClass = string(class)
+		request.UpdatedAt = s.ciRunClock()().UTC()
+		if err := s.store.RecordCIRunReconciliationReadFailure(ctx, request,
+			s.newCIRunAuditEvent(request, "provider_reconciliation_read_failed", class)); err != nil {
+			return nil, err
+		}
 		return receiptFromCIRunRequest(request), &CIRunRequestError{Class: class}
 	}
 	now := s.ciRunClock()().UTC()
@@ -44,6 +53,25 @@ func (s *Service) handleCIRunReconciliationReadError(
 		return nil, err
 	}
 	return receiptFromCIRunRequest(request), &CIRunRequestError{Class: class}
+}
+
+func (s *Service) releaseCIRunForRetryablePreflight(
+	ctx context.Context, request *CIRunRequest, err error,
+) (*CIRunReceipt, error) {
+	class := ciRunFailureFromError(err)
+	now := s.ciRunClock()().UTC()
+	request.FailureClass = string(class)
+	request.UpdatedAt = now
+	if storeErr := s.store.ReleaseCIRunExecutionForRetryablePreflight(ctx, request,
+		s.newCIRunAuditEvent(request, "provider_preflight_retryable", class)); storeErr != nil {
+		return nil, storeErr
+	}
+	return receiptFromCIRunRequest(request), &CIRunRequestError{Class: class}
+}
+
+func ciRunProviderErrorIsRetryable(err error) bool {
+	var providerErr *CIRunProviderError
+	return errors.As(err, &providerErr) && providerErr.Retryable
 }
 
 func (s *Service) deferCIRunForRateLimit(

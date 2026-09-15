@@ -169,7 +169,6 @@ func (s *Store) RevokeCIRunGrant(ctx context.Context, workspaceID, id string, at
 	}
 	return nil
 }
-
 func (s *Store) ClaimCIRunRequest(ctx context.Context, request *CIRunRequest) (*CIRunRequest, bool, error) {
 	if err := validateCIRunRequest(request); err != nil {
 		return nil, false, err
@@ -208,9 +207,7 @@ func (s *Store) ClaimCIRunRequest(ctx context.Context, request *CIRunRequest) (*
 	return nil, false, errors.New("CI run request claim was not persisted")
 }
 
-// ClaimCIRunRequestWithAudit makes admission, the durable claim, and the
-// initial audit record one SQLite transaction. The admission predicate is
-// deliberately repeated here because the service's preflight reads may race
+// ClaimCIRunRequestWithAudit makes admission, the durable claim, and the initial audit record one SQLite transaction. The admission predicate is deliberately repeated here because the service's preflight reads may race
 // with grant revocation or a workflow-step transition.
 //
 //nolint:cyclop,funlen // durable admission keeps its failure gates together
@@ -243,10 +240,11 @@ func (s *Store) ClaimCIRunRequestWithAudit(ctx context.Context, request *CIRunRe
 			AND repository.workspace_id = grant.workspace_id AND repository.provider = 'github'
 			AND LOWER(repository.provider_owner || '/' || repository.provider_name) = LOWER(?)
 			AND task_pr.detached_at IS NULL AND task_pr.state = ?
+			AND LOWER(task_pr.head_sha) = LOWER(?)
 			AND LOWER(task_pr.owner || '/' || task_pr.repo) = LOWER(?)`),
 		request.TargetTaskID, request.RepositoryID, request.PRNumber, request.GrantID, request.GrantGeneration,
 		request.WorkspaceID, request.ActorTaskID, request.WorkflowID, request.WorkflowStepID,
-		request.CanonicalRepository, defaultPRState, request.CanonicalRepository)
+		request.CanonicalRepository, defaultPRState, request.ExpectedHeadSHA, request.CanonicalRepository)
 	if err != nil {
 		return nil, false, err
 	}
@@ -344,15 +342,6 @@ func validateCIRunRequest(request *CIRunRequest) error {
 		return errors.New("invalid CI run evidence kind")
 	}
 	return nil
-}
-
-func allCIRunStringsPresent(values ...string) bool {
-	for _, value := range values {
-		if value == "" {
-			return false
-		}
-	}
-	return true
 }
 
 func ciRunRequestArgs(r *CIRunRequest) []any {
@@ -490,6 +479,7 @@ func (s *Store) MarkCIRunProviderCallStarted(
 						LOWER(github_ci_run_requests.canonical_repository)
 					AND task_pr.detached_at IS NULL
 					AND task_pr.state = ?
+					AND LOWER(task_pr.head_sha) = LOWER(github_ci_run_requests.expected_head_sha)
 					AND LOWER(task_pr.owner || '/' || task_pr.repo) =
 						LOWER(github_ci_run_requests.canonical_repository)
 			)`),
@@ -596,6 +586,7 @@ func markCIRunProviderCallStarted(
 					AND LOWER(repository.provider_owner || '/' || repository.provider_name) =
 						LOWER(github_ci_run_requests.canonical_repository)
 					AND task_pr.detached_at IS NULL AND task_pr.state = ?
+					AND LOWER(task_pr.head_sha) = LOWER(github_ci_run_requests.expected_head_sha)
 					AND LOWER(task_pr.owner || '/' || task_pr.repo) =
 						LOWER(github_ci_run_requests.canonical_repository)
 			)`),

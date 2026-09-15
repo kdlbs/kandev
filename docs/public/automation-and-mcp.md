@@ -612,7 +612,8 @@ The HTTP equivalent is `POST /api/v1/tasks/:id/workspace-sources`, with `{ "sour
 `request_fresh_ci_run_kandev` is a narrow recovery tool for the case where a
 task reaches CI Fixup after a shared prerequisite changes but GitHub did not
 create a new run for the unchanged pull-request head. The tool is discoverable
-in task mode, but a request succeeds only when a workspace administrator has
+to every Kanban task, including a coordinator with no repository attachment,
+but a request succeeds only when a workspace administrator has
 created an active grant for the calling coordinator task, target task,
 workflow, current CI Fixup step, and task repository.
 

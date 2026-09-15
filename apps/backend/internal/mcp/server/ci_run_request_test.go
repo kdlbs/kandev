@@ -66,13 +66,13 @@ func TestRequestFreshCIRunToolRejectsNonHexHeadSHA(t *testing.T) {
 	assert.Empty(t, backend.lastAction)
 }
 
-func TestRequestFreshCIRunToolOnlyRegisteredForGitHubTaskContext(t *testing.T) {
+func TestRequestFreshCIRunToolRegistersForEveryKanbanTaskContext(t *testing.T) {
 	log := newTestLogger(t)
 	backend := &testBackend{}
 	noProvider := NewWithProfile(backend, "session", "task", 10005, log, "", false,
 		mcpprofile.New(mcpprofile.SurfaceKanbanTask, nil, nil))
 	_ = noProvider.Close(context.Background())
-	assert.NotContains(t, getRegisteredToolNames(noProvider), "request_fresh_ci_run_kandev")
+	assert.Contains(t, getRegisteredToolNames(noProvider), "request_fresh_ci_run_kandev")
 
 	gitHubTask := NewWithProfile(backend, "session", "task", 10005, log, "", false,
 		mcpprofile.New(mcpprofile.SurfaceKanbanTask, nil, []string{"github"}))

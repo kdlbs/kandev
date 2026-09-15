@@ -56,6 +56,62 @@ func TestRequestFreshCIRunClassifiesInitialPRRateLimitAsRetryable(t *testing.T) 
 	}
 }
 
+func TestRequestFreshCIRunKeepsRetryableInitialPRFailurePending(t *testing.T) {
+	service, client, input := setupCIRunServiceTest(t, false)
+	client.prErrSequence = []error{&GitHubAPIError{
+		StatusCode: 503, Endpoint: "/repos/kdlbs/kandev/pulls/42",
+	}}
+
+	receipt, err := service.RequestFreshCIRun(context.Background(), input)
+	var ciErr *CIRunRequestError
+	if !errors.As(err, &ciErr) || ciErr.Class != CIRunFailureProviderUnavailable {
+		t.Fatalf("error = %#v, want provider_unavailable", err)
+	}
+	if receipt == nil || receipt.Status != CIRunRequestPending {
+		t.Fatalf("receipt = %+v, want pending request", receipt)
+	}
+	loaded, loadErr := service.store.GetCIRunRequest(context.Background(), receipt.RequestID)
+	if loadErr != nil {
+		t.Fatal(loadErr)
+	}
+	if loaded.Status != CIRunRequestPending || loaded.ExecutionOwner != "" {
+		t.Fatalf("stored request = %+v, want retryable pending request without a lease", loaded)
+	}
+}
+
+func TestCIRunReconciliationReadErrorReturnsClassifiedReceipt(t *testing.T) {
+	service, _, input := setupCIRunServiceTest(t, false)
+	binding, err := service.loadCIRunBinding(context.Background(), input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := newCIRunRequest(binding, input, service.ciRunClock()().UTC())
+	claimed, _, claimErr := service.store.ClaimCIRunRequest(context.Background(), request)
+	if claimErr != nil {
+		t.Fatal(claimErr)
+	}
+	request = claimed
+	request.Status = CIRunRequestReconciling
+	startedAt := service.ciRunClock()().UTC()
+	request.ProviderCallStartedAt = &startedAt
+	request.Operation = CIRunOperationRerunFailedJobs
+	if _, err := service.store.db.Exec(`UPDATE github_ci_run_requests
+		SET status = ?, provider_call_started_at = ?, operation = ? WHERE id = ?`,
+		CIRunRequestReconciling, startedAt, CIRunOperationRerunFailedJobs, request.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	receipt, handledErr := service.handleCIRunReconciliationReadError(context.Background(), request,
+		&GitHubAPIError{StatusCode: 503, Endpoint: "/repos/kdlbs/kandev/actions/runs/100"})
+	var ciErr *CIRunRequestError
+	if !errors.As(handledErr, &ciErr) || ciErr.Class != CIRunFailureProviderUnavailable {
+		t.Fatalf("error = %#v, want provider_unavailable", handledErr)
+	}
+	if receipt == nil || receipt.FailureClass != string(CIRunFailureProviderUnavailable) {
+		t.Fatalf("receipt = %+v, want classified failure class", receipt)
+	}
+}
+
 func TestRequestFreshCIRunClassifiesFinalPRRateLimitAsRetryable(t *testing.T) {
 	service, client, input := setupCIRunServiceTest(t, false)
 	reset := service.ciRunClock()().UTC().Add(10 * time.Minute)

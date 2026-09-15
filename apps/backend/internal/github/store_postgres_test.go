@@ -8,6 +8,55 @@ import (
 	"github.com/kandev/kandev/internal/testutil"
 )
 
+func TestPostgresStoreMigratesLegacyCIRunSemanticConstraint(t *testing.T) {
+	database := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	if _, err := database.Exec(`
+		CREATE TABLE workspaces (id TEXT PRIMARY KEY);
+		CREATE TABLE tasks (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, archived_at TIMESTAMPTZ)`); err != nil {
+		t.Fatalf("create prerequisite tables: %v", err)
+	}
+	if _, err := NewStore(database, database); err != nil {
+		t.Fatalf("initialize GitHub store: %v", err)
+	}
+	var currentConstraint string
+	if err := database.Get(&currentConstraint, `
+		SELECT tc.constraint_name
+		FROM information_schema.table_constraints tc
+		JOIN information_schema.key_column_usage kcu
+			ON kcu.constraint_schema = tc.constraint_schema AND kcu.constraint_name = tc.constraint_name
+		WHERE tc.table_schema = current_schema() AND tc.table_name = 'github_ci_run_requests'
+			AND tc.constraint_type = 'UNIQUE'
+		GROUP BY tc.constraint_name
+		HAVING array_agg(kcu.column_name::text ORDER BY kcu.ordinal_position) = ARRAY[
+			'workspace_id', 'target_task_id', 'workflow_id', 'workflow_step_id', 'repository_id',
+			'pr_number', 'expected_head_sha', 'source_run_id', 'expected_source_attempt', 'evidence_kind']
+		LIMIT 1`); err != nil {
+		t.Fatalf("find current semantic constraint: %v", err)
+	}
+	if _, err := database.Exec(`ALTER TABLE github_ci_run_requests DROP CONSTRAINT "` + strings.ReplaceAll(currentConstraint, `"`, `""`) + `"`); err != nil {
+		t.Fatalf("drop current semantic constraint: %v", err)
+	}
+	const legacyConstraint = "github_ci_run_requests_legacy_semantic_key"
+	if _, err := database.Exec(`ALTER TABLE github_ci_run_requests ADD CONSTRAINT ` + legacyConstraint + ` UNIQUE (
+		workspace_id, target_task_id, workflow_id, repository_id, pr_number,
+		expected_head_sha, source_run_id, expected_source_attempt, evidence_kind)`); err != nil {
+		t.Fatalf("add legacy semantic constraint: %v", err)
+	}
+
+	if _, err := NewStore(database, database); err != nil {
+		t.Fatalf("upgrade GitHub store: %v", err)
+	}
+	var legacyCount int
+	if err := database.Get(&legacyCount, `SELECT COUNT(*) FROM information_schema.table_constraints
+		WHERE table_schema = current_schema() AND table_name = 'github_ci_run_requests'
+			AND constraint_name = $1`, legacyConstraint); err != nil {
+		t.Fatalf("read legacy constraint: %v", err)
+	}
+	if legacyCount != 0 {
+		t.Fatalf("legacy semantic constraint remains after upgrade")
+	}
+}
+
 // Reviewer-requested regression coverage for the PostgreSQL upgrade path.
 func TestPostgresStoreAddsCIRunRecoveryTimestampColumnsOnUpgrade(t *testing.T) {
 	database := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))

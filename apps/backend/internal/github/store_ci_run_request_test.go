@@ -770,7 +770,7 @@ func seedCIRunProviderStartScope(t *testing.T, store *Store, grant *CIRunGrant) 
 		ID: "task-pr-1", WorkspaceID: grant.WorkspaceID, TaskID: grant.TargetTaskID,
 		RepositoryID: grant.RepositoryID, Owner: "kdlbs", Repo: "kandev", PRNumber: 42,
 		PRURL: "https://github.com/kdlbs/kandev/pull/42", PRTitle: "test",
-		HeadBranch: "feature/x", BaseBranch: "main", State: defaultPRState,
+		HeadBranch: "feature/x", HeadSHA: strings.Repeat("a", 40), BaseBranch: "main", State: defaultPRState,
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
