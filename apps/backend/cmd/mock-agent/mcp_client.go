@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	acp "github.com/coder/acp-go-sdk"
 	mcpclient "github.com/mark3labs/mcp-go/client"
@@ -21,6 +22,10 @@ const mcpSSEProtocolVersion = mcp.ProtocolVersion20241105
 
 // getMCPClient returns (or creates) an initialized MCP client for the named server.
 func getMCPClient(serverName string) (*mcpclient.Client, error) {
+	return getMCPClientCtx(context.Background(), serverName)
+}
+
+func getMCPClientCtx(ctx context.Context, serverName string) (*mcpclient.Client, error) {
 	mcpClientsMu.Lock()
 	defer mcpClientsMu.Unlock()
 
@@ -38,7 +43,6 @@ func getMCPClient(serverName string) (*mcpclient.Client, error) {
 		return nil, fmt.Errorf("create SSE client for %s: %w", serverName, err)
 	}
 
-	ctx := context.Background()
 	if err := c.Start(ctx); err != nil {
 		return nil, fmt.Errorf("start MCP client %s: %w", serverName, err)
 	}
@@ -61,6 +65,22 @@ func getMCPClient(serverName string) (*mcpclient.Client, error) {
 
 	mcpClients[serverName] = c
 	return c, nil
+}
+
+// primeKandevMCPToolCatalog mirrors an MCP-capable agent's initial tools/list
+// request. CI auto-fix dispatch requires persisted evidence of the current
+// catalog before it adds the outcome protocol to a prompt, so the mock agent
+// must observe the injected Kandev tools even when the scenario does not call a
+// tool during its first turn.
+func primeKandevMCPToolCatalog(ctx context.Context) {
+	if _, configured := mcpServers["kandev"]; !configured {
+		return
+	}
+	primeCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if _, err := getMCPClientCtx(primeCtx, "kandev"); err != nil {
+		_, _ = fmt.Fprintf(logOutput, "mock-agent: failed to prime Kandev MCP tool catalog: %v\n", err)
+	}
 }
 
 // callMCPTool calls a tool on the named MCP server and returns the result text.

@@ -132,7 +132,7 @@ func mockPromptQueueingEnabled() bool {
 // them in the cache — this is what makes the utility-agents settings page
 // show model and mode options for mock-agent in E2E, and lets profile-mode
 // tests select a non-default mode.
-func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+func (a *mockAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	configOptions := mockSessionConfigOptions()
 	a.mu.Lock()
 	a.nextSessionID++
@@ -147,6 +147,7 @@ func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (ac
 	// Register MCP servers from the ACP session request (SSE servers).
 	// This bridges ACP protocol MCP config to the mock agent's MCP client.
 	registerACPMcpServers(req.McpServers)
+	primeKandevMCPToolCatalog(ctx)
 
 	// Emit available commands asynchronously after the session/new response
 	// flushes. Real ACP agents (OpenCode, Claude) emit available_commands_update
@@ -327,6 +328,7 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 	_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: resumed session %s\n", os.Getpid(), req.SessionId)
 
 	// Re-emit available commands after the session/load response flushes.
+	primeKandevMCPToolCatalog(ctx)
 	go a.emitAvailableCommandsAfterDelay(req.SessionId)
 
 	return acp.LoadSessionResponse{
