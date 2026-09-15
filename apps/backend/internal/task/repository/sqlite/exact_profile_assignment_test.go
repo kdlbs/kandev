@@ -129,6 +129,10 @@ func TestActivateExactProfileAssignmentRejectsStaleGeneration(t *testing.T) {
 	if err != nil || !changed {
 		t.Fatalf("activation = (%v, %v)", changed, err)
 	}
+	changed, err = repo.ActivateExactProfileAssignment(context.Background(), assignment.TaskID, 1)
+	if err != nil || changed {
+		t.Fatalf("activation replay = (%v, %v)", changed, err)
+	}
 }
 
 func TestExactProfileLaunchReceiptReplayDoesNotOverwrite(t *testing.T) {
@@ -168,6 +172,15 @@ func TestUpsertExactProfileAssignmentAdvancesGeneration(t *testing.T) {
 	changed, err = repo.UpsertExactProfileAssignment(context.Background(), &next)
 	if err != nil || changed {
 		t.Fatalf("replay = (%v, %v)", changed, err)
+	}
+}
+
+func TestUpsertExactProfileAssignmentRejectsForeignWorkspace(t *testing.T) {
+	repo, assignment := newExactProfileAssignmentRepo(t)
+	assignment.WorkspaceID = "workspace-foreign"
+	changed, err := repo.UpsertExactProfileAssignment(context.Background(), assignment)
+	if !errors.Is(err, models.ErrExactProfileAssignmentGeneration) || changed {
+		t.Fatalf("foreign workspace = (%v, %v)", changed, err)
 	}
 }
 
