@@ -7,6 +7,7 @@ requirements:
 system_design:
   - ../../specs/ui/system-design/needs-you-inbox-01.md
   - ../../specs/ui/system-design/needs-you-inbox-02.md
+  - ../../specs/ui/system-design/needs-you-inbox-03.md
   - ../../specs/ui/system-design/inbox-failed-bucket-01.md
 legacy_specs: []
 ---
@@ -20,7 +21,8 @@ bundle genuinely waiting on a human and lets the operator answer it without
 leaving the page, per
 [requirements](../../specs/ui/requirements/needs-you-inbox.md) and
 [system design](../../specs/ui/system-design/needs-you-inbox-01.md) (part 2:
-[control flow, failure, persistence, security](../../specs/ui/system-design/needs-you-inbox-02.md)).
+[control flow, failure, persistence, security](../../specs/ui/system-design/needs-you-inbox-02.md);
+part 3: [visual and copy contract](../../specs/ui/system-design/needs-you-inbox-03.md)).
 
 This feature was built through Kandev's own spec-driven-development workflow
 (5 spec-review rounds, 4 build rounds, security/test/code review, an
@@ -30,7 +32,7 @@ document exists to satisfy the repository's PR documentation coverage gate
 (`ci: enforce pull request documentation coverage`), which was not wired into
 that workflow when this feature's spec canon was authored.
 
-Task 02 adds the Inbox's second bucket, the failed-task bucket, per
+Task 03 adds the Inbox's second bucket, the failed-task bucket, per
 [requirements](../../specs/ui/requirements/inbox-failed.md) and
 [system design](../../specs/ui/system-design/inbox-failed-bucket-01.md). It
 was explicitly out of scope for Task 01 and is delivered as a separate work
@@ -49,7 +51,7 @@ order against the same Inbox surface.
   clarification record.
 - The Inbox's second, Failed tab: a bounded list of terminal-`FAILED` tasks,
   deliberately excluded from the existing Needs-you badge count
-  (Task 02, `REQ-UI-INBOX-FAILED-001`).
+  (Task 03, `REQ-UI-INBOX-FAILED-001`).
 - i18n in all five shipped locales.
 
 ### Out of scope
@@ -61,11 +63,13 @@ current-turn predicate's meaning. See the requirements documents' own
 ## Work orders
 
 - [x] [Task 01: Needs-you Inbox delivery](task-01-needs-you-inbox-delivery.md)
-- [x] [Task 02: Inbox Failed tab delivery](task-02-inbox-failed-tab.md)
+- [x] [Task 02: Inbox feature-toggle terminology](task-02-inbox-label-alignment.md)
+- [x] [Task 03: Inbox Failed tab delivery](task-03-inbox-failed-tab.md)
 
-Task 02 depends on Task 01's shipped Inbox surface (tab strip host, route,
+Task 02 depends on Task 01 and records the follow-up display-name alignment.
+Task 03 depends on Task 01's shipped Inbox surface (tab strip host, route,
 sidebar entry) but touches no file Task 01 did not already establish as
-extensible.
+extensible; it is otherwise independent of Task 02's label change.
 
 ## Verification results
 
@@ -77,4 +81,13 @@ failed-tab flows pass; `pnpm run i18n:check` and `pnpm run i18n:ratchet`
 clean; `python3 scripts/lint-spec-files.py --all` passes.
 
 PRs: https://github.com/kdlbs/kandev/pull/3641 (Task 01),
-https://github.com/kdlbs/kandev/pull/3683 (Task 02)
+https://github.com/kdlbs/kandev/pull/3673 (Task 02),
+https://github.com/kdlbs/kandev/pull/3683 (Task 03)
+
+## Task 02 results
+
+The follow-up label alignment keeps the stable feature identity, configuration,
+route, and runtime behavior unchanged. The runtime flag and public configuration
+reference now use `Inbox`, matching the destination copy contract in Part 3.
+
+Follow-up PR: https://github.com/kdlbs/kandev/pull/3673

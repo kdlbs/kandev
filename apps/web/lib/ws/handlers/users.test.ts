@@ -812,3 +812,19 @@ describe("user settings websocket sidebar settings", () => {
     });
   });
 });
+
+it("syncs hover settings while preserving omitted fields and rejecting old revisions", () => {
+  const store = makeStore();
+  const handler = registerUsersHandlers(store)["user.settings.updated"];
+  handler?.(
+    userSettingsMessage({ sidebar_hover_enabled: false, sidebar_hover_delay_ms: 0, revision: 10 }),
+  );
+  handler?.(userSettingsMessage({ app_status_bar_enabled: true, revision: 11 }));
+  handler?.(
+    userSettingsMessage({ sidebar_hover_enabled: true, sidebar_hover_delay_ms: 500, revision: 9 }),
+  );
+  expect(store.getState().userSettings).toMatchObject({
+    sidebarHoverEnabled: false,
+    sidebarHoverDelayMs: 0,
+  });
+});

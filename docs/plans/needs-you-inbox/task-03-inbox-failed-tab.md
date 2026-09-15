@@ -1,8 +1,8 @@
 ---
-id: "02-inbox-failed-tab"
+id: "03-inbox-failed-tab"
 title: "Inbox Failed tab delivery"
 status: done
-wave: 2
+wave: 3
 depends_on: ["01-needs-you-inbox-delivery"]
 plan: "plan.md"
 requirements:
@@ -42,7 +42,7 @@ system_design:
   - ../../specs/ui/system-design/inbox-failed-bucket-01.md
 ---
 
-# Task 02: Inbox Failed Tab Delivery
+# Task 03: Inbox Failed Tab Delivery
 
 ## Summary
 

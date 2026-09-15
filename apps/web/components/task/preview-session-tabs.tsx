@@ -25,11 +25,8 @@ import { TabRenameInput } from "./tab-rename-input";
 import { PreviewPlanPanel, usePreviewPlanSummary } from "./preview-plan-panel";
 import { TaskChatPanel } from "./task-chat-panel";
 import { TaskLaunchErrorProvider } from "./task-launch-error-context";
-import {
-  selectSessionRecoveryError,
-  type SessionRecoveryOwner,
-} from "@/lib/session-recovery-presentation";
-import { SessionBootstrapRecoveryCard } from "@/components/task/chat/session-bootstrap-recovery-card";
+import { PreviewTaskErrorShell } from "./preview-task-error-shell";
+import { type SessionRecoveryOwner } from "@/lib/session-recovery-presentation";
 import type { HandoffPreset } from "./new-session-dialog";
 import { MAX_SESSION_NAME_LENGTH, useSessionRenameCommitter } from "./use-session-rename";
 import {
@@ -253,30 +250,12 @@ function PreviewSessionTabDialogHost({
 }
 
 function PreviewSessionRecoverySurface({
-  taskId,
-  activeSession,
   workspaceId,
-  bootstrapRecoveryError,
   resumption,
 }: {
-  taskId: string;
-  activeSession: TaskSession | null;
   workspaceId?: string | null;
-  bootstrapRecoveryError: ReturnType<typeof selectSessionRecoveryError>;
   resumption: ReturnType<typeof useSessionResumption>;
 }) {
-  if (activeSession?.is_passthrough && bootstrapRecoveryError) {
-    return (
-      <SessionBootstrapRecoveryCard
-        taskId={taskId}
-        sessionId={activeSession.id}
-        workspaceId={workspaceId}
-        error={bootstrapRecoveryError}
-        automaticRecovery={resumption}
-      />
-    );
-  }
-  if (bootstrapRecoveryError) return null;
   return (
     <SessionRecoveryFeedback
       error={resumption.error}
@@ -351,12 +330,6 @@ export function PreviewSessionTabs({
   // active session is ready (resumes / restores workspace after a kandev
   // restart where the session row is persisted but agentctl isn't alive).
   const resumption = useSessionResumption(taskId, activeSessionId, isArchived ?? null);
-  const bootstrapRecoveryError = selectSessionRecoveryError(
-    taskStatusSummary?.active_error,
-    activeSessionId,
-    activeSession?.metadata,
-  );
-
   const dialogs = usePreviewSessionTabDialogs(taskId, sortedSessions);
   // `handleSessionRemoved` is captured once by `useSessionActions`'s `remove`
   // closure at the moment delete is confirmed, and `session.delete` can take
@@ -397,16 +370,32 @@ export function PreviewSessionTabs({
   const tabs = useMemo<SessionTab[]>(() => [...sessionTabs, planTab], [sessionTabs, planTab]);
 
   if (!isLoaded && sortedSessions.length === 0) {
-    return <PreviewLoadingState label={t("task:loadingAgents")} />;
+    return (
+      <PreviewTaskErrorShell
+        taskId={taskId}
+        workspaceId={workspaceId}
+        statusSummary={taskStatusSummary}
+        resumption={resumption}
+      >
+        <PreviewLoadingState label={t("task:loadingAgents")} />
+      </PreviewTaskErrorShell>
+    );
   }
 
   if (hasNoSessions && !hasPlan) {
     return (
-      <PreviewNoSessionsState
-        ensureSession={ensureSession}
-        resumption={resumption}
+      <PreviewTaskErrorShell
+        taskId={taskId}
         workspaceId={workspaceId}
-      />
+        statusSummary={taskStatusSummary}
+        resumption={resumption}
+      >
+        <PreviewNoSessionsState
+          ensureSession={ensureSession}
+          resumption={resumption}
+          workspaceId={workspaceId}
+        />
+      </PreviewTaskErrorShell>
     );
   }
 
@@ -414,42 +403,43 @@ export function PreviewSessionTabs({
   // still have a plan worth showing — fall back to the Plan view rather than
   // an empty session body when there's nothing else to select.
   return (
-    <div className="flex h-full flex-col min-h-0" data-testid="preview-session-tabs">
-      <PreviewSessionRecoverySurface
-        taskId={taskId}
-        activeSession={activeSession}
-        workspaceId={workspaceId}
-        bootstrapRecoveryError={bootstrapRecoveryError}
-        resumption={resumption}
-      />
-      <div className="border-b px-2 py-1">
-        <SessionTabs
-          tabs={tabs}
-          activeTab={viewMode === "plan" ? PLAN_TAB_ID : (activeSessionId ?? "")}
-          onTabChange={planTabState.handleTabChange}
-          listClassName="bg-transparent p-0 !h-7 gap-1 overflow-x-auto overflow-y-hidden min-w-0 shrink [@media(pointer:coarse)]:!h-11 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
-        />
-      </div>
-      <div className="flex-1 min-h-0">
-        <PreviewTabBody
-          viewMode={viewMode}
-          planState={planTabState.planState}
-          activeSession={activeSession}
+    <PreviewTaskErrorShell
+      taskId={taskId}
+      workspaceId={workspaceId}
+      statusSummary={taskStatusSummary}
+      resumption={resumption}
+    >
+      <div className="flex h-full flex-col min-h-0" data-testid="preview-session-tabs">
+        <PreviewSessionRecoverySurface workspaceId={workspaceId} resumption={resumption} />
+        <div className="border-b px-2 py-1">
+          <SessionTabs
+            tabs={tabs}
+            activeTab={viewMode === "plan" ? PLAN_TAB_ID : (activeSessionId ?? "")}
+            onTabChange={planTabState.handleTabChange}
+            listClassName="bg-transparent p-0 !h-7 gap-1 overflow-x-auto overflow-y-hidden min-w-0 shrink [@media(pointer:coarse)]:!h-11 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]"
+          />
+        </div>
+        <div className="flex-1 min-h-0">
+          <PreviewTabBody
+            viewMode={viewMode}
+            planState={planTabState.planState}
+            activeSession={activeSession}
+            taskId={taskId}
+            workspaceId={workspaceId}
+            statusSummary={taskStatusSummary}
+            resumption={resumption}
+          />
+        </div>
+        <PreviewSessionTabDialogHost
+          dialogs={dialogs}
+          sortedSessions={sortedSessions}
+          profilesById={profilesById}
+          agentLabelsById={agentLabelsById}
           taskId={taskId}
-          workspaceId={workspaceId}
-          statusSummary={taskStatusSummary}
-          resumption={resumption}
+          isPrimarySession={isPrimarySession}
         />
       </div>
-      <PreviewSessionTabDialogHost
-        dialogs={dialogs}
-        sortedSessions={sortedSessions}
-        profilesById={profilesById}
-        agentLabelsById={agentLabelsById}
-        taskId={taskId}
-        isPrimarySession={isPrimarySession}
-      />
-    </div>
+    </PreviewTaskErrorShell>
   );
 }
 

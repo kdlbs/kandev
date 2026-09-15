@@ -705,7 +705,11 @@
   "hidePreparationDetails": "Ĥĩďē ƥŕēƥàŕàţĩōń ďēţàĩĺś",
   "hidePreviousAgentError": "Ĥĩďē ƥŕēvĩōũś àĝēńţ ēŕŕōŕ",
   "hideRightPanel": "Ĥĩďē ŕĩĝĥţ ƥàńēĺ",
+  "hideRightPane": "Ĥĩďē ŕĩĝĥţ ƥàńē",
   "hideRightPanels": "Ĥĩďē ŕĩĝĥţ ƥàńēĺś",
+  "rightPaneUnavailable": "Ńō śēƥàŕàţē ŕĩĝĥţ ƥàńē ƭō ĥĩďē",
+  "rightPaneUnavailableWhileMaximized": "Ŕĩĝĥţ ƥàńē ĩś ũńàvàĩĺàƀĺē ŵĥĩĺē à ƥàńēĺ ĩś ḿàxĩḿĩźēď",
+  "rightPanelsUnavailableWhileMaximized": "Ŕĩĝĥţ ƥàńēĺś àŕē ũńàvàĩĺàƀĺē ŵĥĩĺē à ƥàńēĺ ĩś ḿàxĩḿĩźēď",
   "hideSidebar": "Ĥĩďē śĩďēƀàŕ",
   "hideTheCommentListTheComments": "Ĥĩďē ţĥē ćōḿḿēńţ ĺĩśţ. Ţĥē ćōḿḿēńţś śţàŷ qũēũēď àńď ŵĩĺĺ śţĩĺĺ ƀē śēńţ ńēxţ ţĩḿē ŷōũ śũƀḿĩţ (ĥēŕē ōŕ ƒŕōḿ ţĥē ćĥàţ ƀōx).",
   "host": "Ĥōśţ",
@@ -1528,6 +1532,8 @@
   "showPreparationDetails": "Śĥōŵ ƥŕēƥàŕàţĩōń ďēţàĩĺś",
   "showRawText": "Śĥōŵ ŕàŵ ţēxţ",
   "showRightPanel": "Śĥōŵ ŕĩĝĥţ ƥàńēĺ",
+  "showRightPane": "Śĥōŵ ŕĩĝĥţ ƥàńē",
+  "showRightPanels": "Śĥōŵ ŕĩĝĥţ ƥàńēĺś",
   "showSidebar": "Śĥōŵ śĩďēƀàŕ",
   "sibling": "Śĩƀĺĩńĝ",
   "sidebarFilters": "Śĩďēƀàŕ ƒĩĺţēŕś",
@@ -2174,5 +2180,7 @@
   "primarySessionChangedRetry": "Ţĥē ƥŕĩḿàŕŷ śēśśĩōń ćĥàńĝēď. Ţŕŷ Ŕũń àĝàĩń.",
   "planCommentMigrationFailed": "Śōḿē śàvēď ƥĺàń ćōḿḿēńţś ćōũĺď ńōţ ƀē ŕēśţōŕēď.",
   "planCommentMigrationNeedsPlan": "Ćŕēàţē ōŕ ŕēśţōŕē à ƥĺàń ţō ŕēćōvēŕ śàvēď ćōḿḿēńţś.",
-  "planCommentMigrationPending": "Śàvēď ƥĺàń ćōḿḿēńţś àŕē śţĩĺĺ ƀēĩńĝ ŕēśţōŕēď. Ŷōũŕ ḿēśśàĝē ĩś ķēƥţ."
+  "planCommentMigrationPending": "Śàvēď ƥĺàń ćōḿḿēńţś àŕē śţĩĺĺ ƀēĩńĝ ŕēśţōŕēď. Ŷōũŕ ḿēśśàĝē ĩś ķēƥţ.",
+  "toolPayloadRemovedAt": "Ţōōĺ ďēţàĩĺś ŕēḿōvēď ōń {{date}}.",
+  "toolPayloadRemoved": "Ţōōĺ ďēţàĩĺś ŕēḿōvēď."
 }

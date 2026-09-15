@@ -53,6 +53,6 @@ if [[ ${2:-} == --verify ]]; then
   verify_started=true
   timeout 600 docker run --rm --name "$verify_container" --init --cpus=2 --memory=4g --memory-swap=4g --pids-limit=512 \
     --user 1000:1000 --cap-drop=ALL --security-opt=no-new-privileges \
-    --tmpfs /workspace:rw,uid=1000,gid=1000,size=2g --tmpfs /run/kandev:rw,uid=1000,gid=1000,size=16m \
+    --tmpfs /workspace:rw,exec,uid=1000,gid=1000,size=2g --tmpfs /run/kandev:rw,uid=1000,gid=1000,size=16m \
     -e HOME=/run/kandev/home "$id" bash -ceu 'mkdir -p "$HOME"; /opt/full-worker/smoke.sh --tools'
 fi
