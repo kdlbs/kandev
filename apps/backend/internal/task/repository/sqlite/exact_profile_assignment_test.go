@@ -131,6 +131,46 @@ func TestActivateExactProfileAssignmentRejectsStaleGeneration(t *testing.T) {
 	}
 }
 
+func TestExactProfileLaunchReceiptReplayDoesNotOverwrite(t *testing.T) {
+	repo, assignment := newExactProfileAssignmentRepo(t)
+	receipt := &models.ExactProfileLaunchReceipt{TaskID: assignment.TaskID, SessionID: "session-1", AgentProfileID: assignment.AgentProfileID, Generation: 1, ProfileRevision: assignment.ProfileRevision, Model: "model-1", Outcome: models.ExactProfileLaunchOutcomeApplied, InferenceStarted: true}
+	changed, err := repo.RecordExactProfileLaunchReceipt(context.Background(), receipt)
+	if err != nil || !changed {
+		t.Fatalf("record = (%v, %v)", changed, err)
+	}
+	receipt.Outcome = models.ExactProfileLaunchOutcomeFailedClosed
+	changed, err = repo.RecordExactProfileLaunchReceipt(context.Background(), receipt)
+	if err != nil || changed {
+		t.Fatalf("replay = (%v, %v)", changed, err)
+	}
+	stored, err := repo.GetExactProfileLaunchReceipt(context.Background(), assignment.TaskID, receipt.SessionID)
+	if err != nil || stored == nil || stored.Outcome != models.ExactProfileLaunchOutcomeApplied {
+		t.Fatalf("stored = %#v, %v", stored, err)
+	}
+	missing, err := repo.GetExactProfileLaunchReceipt(context.Background(), assignment.TaskID, "missing")
+	if err != nil || missing != nil {
+		t.Fatalf("missing = %#v, %v", missing, err)
+	}
+}
+
+func TestUpsertExactProfileAssignmentAdvancesGeneration(t *testing.T) {
+	repo, assignment := newExactProfileAssignmentRepo(t)
+	if _, err := repo.UpsertExactProfileAssignment(context.Background(), assignment); err != nil {
+		t.Fatal(err)
+	}
+	next := *assignment
+	next.Generation = 2
+	next.AgentProfileID = "profile-2"
+	changed, err := repo.UpsertExactProfileAssignment(context.Background(), &next)
+	if err != nil || !changed {
+		t.Fatalf("advance = (%v, %v)", changed, err)
+	}
+	changed, err = repo.UpsertExactProfileAssignment(context.Background(), &next)
+	if err != nil || changed {
+		t.Fatalf("replay = (%v, %v)", changed, err)
+	}
+}
+
 func newExactProfileAssignmentRepo(t *testing.T) (*Repository, *models.ExactProfileAssignment) {
 	t.Helper()
 	dbConn, err := dbutil.OpenSQLite(filepath.Join(t.TempDir(), "exact.db"))
