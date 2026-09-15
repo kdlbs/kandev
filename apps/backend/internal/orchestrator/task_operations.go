@@ -2708,9 +2708,6 @@ func (s *Service) ResumeTaskSessionWithOptions(
 	taskID, sessionID string,
 	options executor.ResumeOptions,
 ) (*executor.TaskExecution, error) {
-	if _, err := s.resolveExactProfileAssignment(ctx, taskID); err != nil {
-		return nil, err
-	}
 	return s.resumeTaskSessionWithContinuation(ctx, taskID, sessionID, options, nil)
 }
 
@@ -2769,6 +2766,11 @@ func (s *Service) resumeTaskSessionWithContinuation(
 	}
 	if session.TaskID != taskID {
 		return nil, fmt.Errorf("task session does not belong to task")
+	}
+	if exact, err := s.resolveExactProfileAssignment(ctx, taskID); err != nil {
+		return nil, err
+	} else if exact != nil && (session.ExactProfileGeneration != exact.Generation || session.ExactProfileRevision != exact.Revision) {
+		return nil, ErrExactProfileAssignmentInvalid
 	}
 	allowCompletedResume := options.AllowCompletedSessionResume &&
 		session.State == models.TaskSessionStateCompleted
