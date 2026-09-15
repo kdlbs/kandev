@@ -168,3 +168,9 @@ pnpm e2e:run --host --no-build --project mobile-chrome
 tests/kanban/mobile-kanban-reorder.spec.ts -- --grep "after a hold" --retries=0`
 from apps/web. The original port was occupied; the isolated-port run passed
 without retries. Test timing, assertions, and rendered UI are unchanged.
+
+Coverage CI repair: keep the supersession note in the historical auto-hide plan
+and this current work order. Removed the duplicate note from its legacy task
+file, whose unsupported `spec` frontmatter caused changed-work-order validation
+to fail. The historical work order is restored unchanged; current requirements,
+acceptance criteria, and system-design links remain in this work order.
