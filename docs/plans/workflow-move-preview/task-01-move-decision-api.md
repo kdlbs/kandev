@@ -136,4 +136,6 @@ Final post-remediation verification also passed for the targeted backend race
 suite and the managed backend build:
 
 - `cd apps/backend && go test -race ./internal/orchestrator ./internal/task/handlers -run 'Preview|WorkflowStepSession|WorkflowSessionConfig|WorkflowSessionTarget|SameProfile'`
+- `cd apps/backend && go test -race ./internal/orchestrator -count=1`
+- `cd apps/backend && go test ./internal/orchestrator -run '^TestCompletedTaskFollowUpAdmissionIsConversationalOnly$' -count=100 -failfast`
 - `cd apps/backend && make build`

@@ -250,6 +250,9 @@ Final post-remediation verification passed on 2026-09-15:
 - The focused desktop move-preview spec passed 2 tests, and the focused mobile
   move-preview spec passed 1 test.
 - `go test -race ./internal/orchestrator ./internal/task/handlers -run 'Preview|WorkflowStepSession|WorkflowSessionConfig|WorkflowSessionTarget|SameProfile'`.
+- `go test -race ./internal/orchestrator -count=1`, including the completed-task
+  follow-up admission path.
+- `go test ./internal/orchestrator -run '^TestCompletedTaskFollowUpAdmissionIsConversationalOnly$' -count=100 -failfast`.
 - Specification, public-doc, formatting, and localization checks passed after
   trimming unrelated generated catalog churn.
 
