@@ -837,6 +837,8 @@ func (m *Manager) ResetAgentContext(ctx context.Context, executionID string) err
 	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
+	execution.guardedTTYMu.Lock()
+	defer execution.guardedTTYMu.Unlock()
 	if err := execution.beginContextReset(); err != nil {
 		return err
 	}
@@ -1062,6 +1064,8 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
+	execution.guardedTTYMu.Lock()
+	defer execution.guardedTTYMu.Unlock()
 	activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStopping)
 	if err != nil {
 		return err
@@ -1244,6 +1248,8 @@ func (m *Manager) RestartAgentProcess(ctx context.Context, executionID string) e
 	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
+	execution.guardedTTYMu.Lock()
+	defer execution.guardedTTYMu.Unlock()
 	operationRelease, err := execution.acquireContextResetExclusive(ctx)
 	if err != nil {
 		return err

@@ -39,6 +39,8 @@ func (m *Manager) RebindWorkspaceForSession(ctx context.Context, sessionID, work
 	if execution.IsPassthrough || client == nil || execution.ACPSessionID == "" {
 		return fmt.Errorf("workspace rebind is unsupported for this session; start a new session after attaching sources")
 	}
+	execution.guardedTTYMu.Lock()
+	defer execution.guardedTTYMu.Unlock()
 	execution.promptLifecycleMu.Lock()
 	defer execution.promptLifecycleMu.Unlock()
 	if execution.Status != v1.AgentStatusReady {
