@@ -123,23 +123,25 @@ function renderWithTranscript(
   });
 }
 
-describe("ActionMessage — recovery card retires once the agent is back", () => {
-  it("hides the card when a resume re-established the agent after the failure", () => {
+describe("ActionMessage — recovery history remains after the agent is back", () => {
+  it("retains the entry without controls when a resume re-established the agent", () => {
     // A resumed agent settles at WAITING_FOR_INPUT, not RUNNING, so the session
     // state alone never retires the card.
     renderWithTranscript("WAITING_FOR_INPUT", [bootMessage(BOOTED_AFTER_FAILURE)]);
 
-    expect(screen.queryByText(RECOVERY_MESSAGE)).toBeNull();
+    expect(screen.getByText(RECOVERY_MESSAGE)).toBeTruthy();
     expect(screen.queryByTestId(RESUME_TEST_ID)).toBeNull();
     expect(screen.queryByTestId(FRESH_TEST_ID)).toBeNull();
   });
 
-  it("hides the card when a fresh start re-established the agent after the failure", () => {
+  it("retains the entry without controls when a fresh start re-established the agent", () => {
     renderWithTranscript("WAITING_FOR_INPUT", [
       bootMessage(BOOTED_AFTER_FAILURE, { is_resuming: false }),
     ]);
 
+    expect(screen.getByText(RECOVERY_MESSAGE)).toBeTruthy();
     expect(screen.queryByTestId(RESUME_TEST_ID)).toBeNull();
+    expect(screen.queryByTestId(FRESH_TEST_ID)).toBeNull();
   });
 
   it("keeps the card visible when the resume attempt failed", () => {
@@ -314,7 +316,7 @@ describe("ActionMessage — a recovery that failed keeps its controls", () => {
 
     fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
     await waitFor(() => expect(requestMock).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.queryByText(RECOVERY_MESSAGE)).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId(RESUME_TEST_ID)).toBeNull());
 
     // The launch was accepted, so the card hid; the agent then failed to come up.
     live.setSessionState("STARTING");
@@ -329,7 +331,7 @@ describe("ActionMessage — a recovery that failed keeps its controls", () => {
     const live = renderWithLiveStore([]);
 
     fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
-    await waitFor(() => expect(screen.queryByText(RECOVERY_MESSAGE)).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId(RESUME_TEST_ID)).toBeNull());
 
     live.setSessionState("FAILED");
 
@@ -341,13 +343,13 @@ describe("ActionMessage — a recovery that failed keeps its controls", () => {
     const live = renderWithLiveStore([]);
 
     fireEvent.click(screen.getByTestId(RESUME_TEST_ID));
-    await waitFor(() => expect(screen.queryByText(RECOVERY_MESSAGE)).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId(RESUME_TEST_ID)).toBeNull());
 
     live.setSessionState("STARTING");
     live.setMessages([bootMessage(BOOTED_AFTER_FAILURE)]);
     live.setSessionState("WAITING_FOR_INPUT");
 
-    expect(screen.queryByText(RECOVERY_MESSAGE)).toBeNull();
+    expect(screen.getByText(RECOVERY_MESSAGE)).toBeTruthy();
     expect(screen.queryByTestId(RESUME_TEST_ID)).toBeNull();
   });
 });

@@ -149,6 +149,15 @@ type ParkedProjectionCanceller interface {
 	ClearParkedProjectionOnSessionTerminated(ctx context.Context, taskID, sessionID string, newState models.TaskSessionState)
 }
 
+// SessionCeilingReleaser releases the orchestrator's session-ceiling
+// reservation for a session cancelled through a task service-owned bulk path
+// (archive's batch session cancellation, delete's cascaded session removal),
+// neither of which passes through the orchestrator's own persistence
+// funnels. Releasing a session that held no reservation is a defined no-op.
+type SessionCeilingReleaser interface {
+	ReleaseCeilingReservation(sessionID string)
+}
+
 // TaskRowLivenessProber classifies an executors_running row's backing-process
 // liveness in a runtime-aware way (a local process check is never applied to a
 // remote/SSH row). It is optional and satisfied by the lifecycle adapter. When
@@ -401,6 +410,9 @@ type Service struct {
 	subagentContexts                repository.SubagentContextRepository
 	usage                           repository.UsageRepository
 	workspacePolicyAttacher         WorkspacePolicyAttacher
+	autoArchiveCoordinator          AutoArchiveCoordinator
+	workflowTaskArchiveCoordinator  WorkflowTaskArchiveCoordinator
+	taskLifecycleCoordinator        TaskLifecycleCoordinator
 	attachmentSvc                   *AttachmentService
 	statusSummaryPRs                TaskStatusSummaryPRReader
 	statusSummaryProjector          TaskStatusSummaryEventProjector
@@ -419,6 +431,7 @@ type Service struct {
 	executionStopper                TaskExecutionStopper
 	clarificationCanceller          TerminalClarificationCanceller
 	parkedProjectionCanceller       ParkedProjectionCanceller
+	sessionCeilingReleaser          SessionCeilingReleaser
 	rowLivenessProber               TaskRowLivenessProber
 	contextWindowResetter           func(context.Context, string) error
 	cleanupActivity                 TaskResourceCleanupActivityGate
@@ -536,6 +549,29 @@ type WorkspacePolicyAttacher interface {
 	AttachWorkspacePolicy(ctx context.Context, taskID, parentID string, policy WorkspacePolicy) error
 }
 
+// AutoArchiveCoordinator owns the full lifecycle transition for automatic
+// archive candidates, including workspace-group membership release and
+// resource cleanup.
+type AutoArchiveCoordinator interface {
+	ArchiveAutoTask(ctx context.Context, candidate *models.Task) (*CascadeOutcome, error)
+}
+
+// WorkflowTaskArchiveCoordinator routes workflow deletion through the same
+// lifecycle path as user archive requests.
+type WorkflowTaskArchiveCoordinator interface {
+	ArchiveTaskTree(ctx context.Context, rootID string, cascade bool) (*CascadeOutcome, error)
+}
+
+// TaskLifecycleCoordinator owns destructive task lifecycle transitions that
+// must release workspace-group state before or alongside deleting the task.
+type TaskLifecycleCoordinator interface {
+	DeleteTaskTree(ctx context.Context, rootID string, cascade bool) (*CascadeOutcome, error)
+}
+
+type taskLifecycleCoordinatorWithReason interface {
+	DeleteTaskTreeWithReason(ctx context.Context, rootID string, cascade bool, reason string) (*CascadeOutcome, error)
+}
+
 // WorkspacePolicyMembershipReleaser removes a task's workspace-group
 // membership after a post-create rollback. It is an optional companion to
 // WorkspacePolicyAttacher because lightweight task-service test harnesses may
@@ -580,6 +616,55 @@ func (s *Service) SetWorkspaceSecretDeleter(deleter WorkspaceSecretDeleter) {
 // coordinator used by every CreateTask caller.
 func (s *Service) SetWorkspacePolicyAttacher(attacher WorkspacePolicyAttacher) {
 	s.workspacePolicyAttacher = attacher
+}
+
+// SetTaskLifecycleCoordinator installs the canonical destructive task
+// transition used by automatic cleanup callers.
+func (s *Service) SetTaskLifecycleCoordinator(coordinator TaskLifecycleCoordinator) {
+	s.taskLifecycleCoordinator = coordinator
+}
+
+// DeleteTaskWithLifecycle deletes a task through the canonical coordinator
+// when one is wired, preserving the legacy service path for isolated callers.
+func (s *Service) DeleteTaskWithLifecycle(ctx context.Context, id string) error {
+	if s.taskLifecycleCoordinator == nil {
+		return s.DeleteTask(ctx, id)
+	}
+	_, err := s.taskLifecycleCoordinator.DeleteTaskTree(ctx, id, false)
+	var postCommitErr *CascadePostCommitError
+	if errors.As(err, &postCommitErr) {
+		return nil
+	}
+	return err
+}
+
+// DeleteTaskWithLifecycleAndReason preserves deletion attribution when the
+// configured coordinator supports reason-aware task-deleted events.
+func (s *Service) DeleteTaskWithLifecycleAndReason(ctx context.Context, id, reason string) error {
+	if s.taskLifecycleCoordinator == nil {
+		return s.DeleteTaskWithReason(ctx, id, reason)
+	}
+	if coordinator, ok := s.taskLifecycleCoordinator.(taskLifecycleCoordinatorWithReason); ok {
+		_, err := coordinator.DeleteTaskTreeWithReason(ctx, id, false, reason)
+		var postCommitErr *CascadePostCommitError
+		if errors.As(err, &postCommitErr) {
+			return nil
+		}
+		return err
+	}
+	return s.DeleteTaskWithLifecycle(ctx, id)
+}
+
+// SetAutoArchiveCoordinator installs the lifecycle coordinator used by the
+// automatic archive loop.
+func (s *Service) SetAutoArchiveCoordinator(coordinator AutoArchiveCoordinator) {
+	s.autoArchiveCoordinator = coordinator
+}
+
+// SetWorkflowTaskArchiveCoordinator installs the shared archive lifecycle used
+// when deleting a workflow.
+func (s *Service) SetWorkflowTaskArchiveCoordinator(coordinator WorkflowTaskArchiveCoordinator) {
+	s.workflowTaskArchiveCoordinator = coordinator
 }
 
 // NewService creates a new task service
@@ -698,6 +783,12 @@ func (s *Service) SetClarificationCanceller(canceller TerminalClarificationCance
 // orchestrator's per-session state-transition chokepoint.
 func (s *Service) SetParkedProjectionCanceller(canceller ParkedProjectionCanceller) {
 	s.parkedProjectionCanceller = canceller
+}
+
+// SetSessionCeilingReleaser wires session-ceiling release (orchestrator) for
+// the same task service-owned bulk paths SetParkedProjectionCanceller covers.
+func (s *Service) SetSessionCeilingReleaser(releaser SessionCeilingReleaser) {
+	s.sessionCeilingReleaser = releaser
 }
 
 // SetRowLivenessProber wires the runtime-aware executors_running liveness probe

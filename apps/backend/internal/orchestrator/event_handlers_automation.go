@@ -179,20 +179,17 @@ func (s *Service) hasPendingCoordinatorPermissions(ctx context.Context, sessionI
 	return len(permissions) > 0, nil
 }
 
-// taskCleaner deletes a task a firing has abandoned.
-//
-// Deliberately one method wide, and asserted at the call site rather than added
-// to repoStore: that interface is implemented by several mocks, and none of
-// them should have to grow a method for a path they never take.
-type taskCleaner interface {
-	DeleteTask(ctx context.Context, id string) error
+// taskLifecycleDeleter owns destructive task cleanup for an abandoned
+// automation firing. It deliberately stays off repoStore so repository
+// implementations cannot accidentally perform lifecycle-blind deletion.
+type taskLifecycleDeleter interface {
+	DeleteTaskWithLifecycle(ctx context.Context, id string) error
 }
 
 // automationRunRetention names the runs whose workspaces have aged out, and
 // answers whether one of them has since gone live. Kept off AutomationService
-// and asserted at the call site for the same reason taskCleaner is kept off
-// repoStore: several test stubs implement that interface and none of them
-// should grow a method for a path they never take.
+// and asserted at the call site so repository stubs need not implement
+// retention-only capabilities.
 //
 // Both halves live on one interface on purpose. Selection and the pre-removal
 // re-check are two readings of the same question a moment apart, and a service
@@ -800,7 +797,7 @@ func (s *Service) promptAutomationContinuation(
 	session *models.TaskSession,
 	prompt string,
 ) (automation.RunDispatch, error) {
-	result, err := s.PromptTask(ctx, task.ID, session.ID, prompt, "", false, nil, true)
+	result, err := s.promptTask(ctx, task.ID, session.ID, prompt, "", false, nil, true, launchOriginAutomatic, promptTaskOptions{})
 	if err != nil {
 		return automation.RunDispatch{}, err
 	}
@@ -1084,18 +1081,21 @@ func (s *Service) recordFailedRun(ctx context.Context, evt *automation.Automatio
 // recordSuccessRun writes the row that makes a firing visible and countable.
 // It reports failure rather than logging it: the caller must not launch an
 // agent for a run nothing can see.
+
 // deleteAbandonedTask removes a task whose run row was never written.
 //
-// A failure here is reported rather than swallowed: the task is then genuinely
-// orphaned — hidden by its origin, pointed at by no run — and only a human
-// reading this line will know it is there.
+// A missing lifecycle deleter is a composition error. Skipping deletion is
+// safer than falling back to repository deletion, which would strand workspace
+// group state and cleanup metadata.
 func (s *Service) deleteAbandonedTask(ctx context.Context, automationID, taskID string) {
 	s.clearAbandonedContinuation(ctx, automationID, taskID)
-	cleaner, ok := s.repo.(taskCleaner)
-	if !ok {
+	if s.taskLifecycleDeleter == nil {
+		s.logger.Error("task lifecycle deleter is not configured for abandoned automation task",
+			zap.String("automation_id", automationID),
+			zap.String("task_id", taskID))
 		return
 	}
-	if err := cleaner.DeleteTask(ctx, taskID); err != nil {
+	if err := s.taskLifecycleDeleter.DeleteTaskWithLifecycle(ctx, taskID); err != nil {
 		s.logger.Error("failed to delete the task of an unrecorded automation run",
 			zap.String("automation_id", automationID),
 			zap.String("task_id", taskID),

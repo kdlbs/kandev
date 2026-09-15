@@ -60,7 +60,7 @@ async function selectFixtureBranch(page: Page): Promise<void> {
   const option = page.getByRole("option", { name: FIXTURE_BRANCH, exact: false });
   await expect(option).toHaveCount(1);
   await expect(option).toBeVisible({ timeout: 15_000 });
-  await option.tap();
+  await option.tap({ force: true });
   await expect(branch).toContainText(FIXTURE_BRANCH);
 }
 

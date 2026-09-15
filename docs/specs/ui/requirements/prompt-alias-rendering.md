@@ -94,6 +94,22 @@ This extends the reusable alias presentation contract beyond transcript views.
   New Agent, task editing, and other prompt editors shall retain their existing insertion behavior.
   Backend expansion authority and passthrough exclusions shall remain unchanged.
 
+
+- **AC-UI-PROMPT-ALIAS-002.8:** On fine-pointer desktop at the standard root font,
+  editable reference chips shall have a 24px outer height and a 12px label.
+  One green background and border shall enclose the label and always-visible
+  removal control. The control shall show hover and keyboard-focus feedback.
+  Chip layout shall add no separate row margin around the reference.
+- **AC-UI-PROMPT-ALIAS-002.9:** Long reference names shall truncate inside the
+  available editor width while the removal control remains fully visible.
+  The full name shall remain accessible. Multiple chips shall wrap as whole
+  units without horizontal document overflow or overlapping action targets.
+- **AC-UI-PROMPT-ALIAS-002.10:** On phones and coarse-pointer devices, preview
+  and removal targets shall each measure at least 44px in both dimensions.
+  Both controls shall stay inside the same chip border with distinct hit areas.
+  Activating removal shall not open a preview or submit the form.
+  Desktop transcript, pinned-prompt, and history chip sizing shall remain unchanged.
+
 ## Out of scope
 
 - Changing prompt alias parsing, matching, expansion depth, or agent delivery.
@@ -105,3 +121,5 @@ This extends the reusable alias presentation contract beyond transcript views.
 
 - [Transcript alias rendering](../../../plans/prompt-alias-rendering/plan.md)
 - [Task-create reference chips](../../../plans/task-create-prompt-chips/plan.md)
+
+- [Compact task-create prompt chips](../../../plans/compact-task-prompt-chips/plan.md)

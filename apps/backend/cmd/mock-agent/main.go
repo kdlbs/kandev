@@ -21,6 +21,7 @@ import (
 // fixtures select for slow responses; it must be advertised for the
 // no-silent-model-fallback strict policy to accept it.
 const (
+	modelConfigID       = "model"
 	modelFast           = "mock-fast"
 	modelSmart          = "mock-smart"
 	modelSlow           = "mock-slow"
@@ -225,7 +226,7 @@ func mockSessionConfigOptionsForModel(model string) []acp.SessionConfigOption {
 		{Select: &acp.SessionConfigOptionSelect{
 			Category:     &modelCat,
 			CurrentValue: acp.SessionConfigValueId(model),
-			Id:           "model",
+			Id:           modelConfigID,
 			Name:         "Model",
 			Options:      acp.SessionConfigSelectOptions{Ungrouped: &modelOptions},
 			Type:         "select",
@@ -370,11 +371,22 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 		return resp, err
 	}
 	e := &emitter{ctx: promptCtx, conn: a.conn, sid: req.SessionId}
-	handlePrompt(e, prompt, a.model)
+	handlePrompt(e, prompt, a.sessionModel(req.SessionId))
 	if promptCtx.Err() != nil {
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
 	}
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+}
+
+func (a *mockAgent) sessionModel(sessionID acp.SessionId) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, option := range a.sessionConfig[sessionID] {
+		if option.Select != nil && option.Select.Id == modelConfigID && option.Select.CurrentValue != "" {
+			return string(option.Select.CurrentValue)
+		}
+	}
+	return a.model
 }
 
 // Cancel handles session cancellation.
@@ -427,7 +439,7 @@ func (a *mockAgent) SetSessionConfigOption(_ context.Context, req acp.SetSession
 	if !found {
 		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("unknown mock config option %q", req.ValueId.ConfigId)
 	}
-	if req.ValueId.ConfigId == "model" {
+	if req.ValueId.ConfigId == modelConfigID {
 		modeValue := mockConfigOptionValue(options, "mode")
 		options = mockSessionConfigOptionsForModel(string(req.ValueId.Value))
 		for i := range options {

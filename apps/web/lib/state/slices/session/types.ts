@@ -173,6 +173,7 @@ export type WalkthroughsState = {
 
 export type QueuedMessageMetadata = Record<string, unknown> & {
   entity_references?: EntityReference[];
+  queue_admission_ids?: string[];
   workflow_message?: boolean;
   workflow_auto_start?: boolean;
   workflow_step_id?: string;
@@ -341,7 +342,12 @@ export type SessionSliceActions = {
   /** Upserts a turn row, rejecting stale updates (see shouldApplyTurnUpdate). */
   addTurn: (turn: Turn) => void;
   /** Merges a complete REST snapshot and reconciles its marker atomically. */
-  mergeTurnsSnapshot: (sessionId: string, turns: Turn[], hydrationEpoch: number) => void;
+  mergeTurnsSnapshot: (
+    sessionId: string,
+    turns: Turn[],
+    hydrationEpoch: number,
+    options?: { replace?: boolean },
+  ) => void;
   completeTurn: (
     sessionId: string,
     turnId: string,

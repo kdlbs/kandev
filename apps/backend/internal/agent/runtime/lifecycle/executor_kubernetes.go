@@ -814,10 +814,7 @@ set -a
 . /opt/kandev/runtime.env
 . /run/kandev/auth.env
 set +a
-if [ ! -f /opt/kandev/prepared ]; then
-  sh /opt/kandev/prepare.sh
-  : > /opt/kandev/prepared
-fi
+[ -f /opt/kandev/prepared ] || { echo 'kubernetes preparation marker is missing' >&2; exit 70; }
 if [ "${` + selectedCheckoutMarker + `:-}" = "1" ]; then
   ` + selectedCheckoutCredentialScrubCommands + `
   rm -f /run/kandev/auth.env 2>/dev/null || true

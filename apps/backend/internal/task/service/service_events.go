@@ -131,6 +131,16 @@ func (s *Service) PublishTaskDeleted(ctx context.Context, task *models.Task) {
 	s.publishTaskEvent(ctx, events.TaskDeleted, task, nil)
 }
 
+// PublishTaskDeletedWithExtra publishes a task.deleted event with additional
+// lifecycle attribution fields.
+func (s *Service) PublishTaskDeletedWithExtra(
+	ctx context.Context,
+	task *models.Task,
+	extra map[string]interface{},
+) {
+	s.publishTaskEventWithExtra(ctx, events.TaskDeleted, task, nil, extra)
+}
+
 // PublishTaskSessionsCancelled publishes session.state_changed events for
 // sessions finalized by a cascade path that bypasses Service.ArchiveTask.
 func (s *Service) PublishTaskSessionsCancelled(

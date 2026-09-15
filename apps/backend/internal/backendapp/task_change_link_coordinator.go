@@ -21,10 +21,11 @@ import (
 // reach checks and repository identity resolution at the host boundary, then
 // delegates persistence and provider reads to the established services.
 type taskChangeLinkCoordinator struct {
-	tasks  *taskservice.Service
-	github githubChangeLinkProvider
-	gitlab gitlabChangeLinkProvider
-	logger *commonlogger.Logger
+	tasks              *taskservice.Service
+	github             githubChangeLinkProvider
+	gitlab             gitlabChangeLinkProvider
+	logger             *commonlogger.Logger
+	singleUserIdentity func() (authn.Identity, bool)
 }
 
 func (c taskChangeLinkCoordinator) ManageTaskChangeRequest(
@@ -244,6 +245,9 @@ func (c taskChangeLinkCoordinator) link(ctx context.Context, taskID string, link
 			return err
 		}
 		identity, ok := authn.IdentityFromContext(ctx)
+		if !ok && c.singleUserIdentity != nil {
+			identity, ok = c.singleUserIdentity()
+		}
 		if !ok || strings.TrimSpace(identity.UserID) == "" {
 			return fmt.Errorf("authenticated user identity is required for GitHub PR links")
 		}

@@ -124,6 +124,7 @@ type MessageCreator interface {
 	// parentToolCallID is the parent Task tool call ID for subagent nesting (empty for top-level).
 	UpdateToolCallMessage(ctx context.Context, taskID, toolCallID, parentToolCallID, status, result, agentSessionID, title, turnID, msgType string, normalized *streams.NormalizedPayload) error
 	CreateSessionMessage(ctx context.Context, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error
+	CreateSessionMessageIdempotent(ctx context.Context, messageID, taskID, content, agentSessionID, messageType, turnID string, metadata map[string]interface{}, requestsInput bool) error
 	CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error)
 	UpdatePermissionMessage(ctx context.Context, taskID, sessionID, requestID, pendingID string, status models.PermissionStatus) error
 	ClaimPermissionResolution(ctx context.Context, request models.PermissionResolutionClaimRequest) (*models.PermissionResolutionClaimResult, error)
@@ -437,6 +438,14 @@ type sessionExecutorStore interface {
 	// than an idempotent same-owner observation.
 	ClaimTaskTitleSession(ctx context.Context, taskID, sessionID string) (owned bool, newlyClaimed bool, err error)
 	UpdateTask(ctx context.Context, task *models.Task) error
+	// UpdateTaskPreservingDeferredLaunch is UpdateTask for a caller holding a
+	// task snapshot old enough to have missed a concurrent write to
+	// deferred_launch (any read-modify-write over a task fetched earlier in the
+	// same handler). It performs the same write as UpdateTask, except
+	// deferred_launch in the payload is replaced by the row's own current
+	// value at write time, so the stale snapshot can never resurrect or
+	// clobber a concurrent ceiling CAS write.
+	UpdateTaskPreservingDeferredLaunch(ctx context.Context, task *models.Task) error
 	// SetTaskMetadataKey / RemoveTaskMetadataKey are concurrent-key-safe JSON
 	// patch helpers on tasks.metadata (implemented by the sqlite/Postgres
 	// repository). Used by startup reconciliation to mark interrupted tasks
@@ -447,6 +456,18 @@ type sessionExecutorStore interface {
 	// check and the write cannot be separated by a concurrent archive).
 	SetTaskMetadataKeyIfNotArchived(ctx context.Context, taskID, key string, value interface{}) (bool, error)
 	RemoveTaskMetadataKey(ctx context.Context, taskID, key string) (bool, error)
+	// TakeTaskDeferredLaunchWIPKeys / RestoreTaskDeferredLaunchWIPKeys claim and
+	// release the launch-intent half of the shared deferred_launch record
+	// without touching the keys another writer owns.
+	TakeTaskDeferredLaunchWIPKeys(ctx context.Context, taskID string) (map[string]interface{}, bool, error)
+	RestoreTaskDeferredLaunchWIPKeys(ctx context.Context, taskID string, wip map[string]interface{}) error
+	// GetTaskDeferredLaunch / SetTaskDeferredLaunchIfUnchanged provide the
+	// row-locked compare-and-set the session ceiling uses to write a
+	// ceiling_deferred record without losing a concurrent refusal's payload.
+	// The prior-state token is threaded as interface{}, opaque to this package,
+	// because it is produced by the repository from the stored row's own bytes.
+	GetTaskDeferredLaunch(ctx context.Context, taskID string) (map[string]interface{}, interface{}, error)
+	SetTaskDeferredLaunchIfUnchanged(ctx context.Context, taskID string, prior interface{}, value map[string]interface{}) (stored bool, lostCompare bool, err error)
 	ListChildCompletionRows(ctx context.Context, parentID string) ([]models.ChildCompletionRow, error)
 	// Git snapshots and commits
 	GetLatestGitSnapshot(ctx context.Context, sessionID string) (*models.GitSnapshot, error)
@@ -744,6 +765,9 @@ type Service struct {
 	// session.ensure). Nil = unscoped.
 	taskAccessCheck func(ctx context.Context, taskID string) error
 
+	// taskLifecycleDeleter owns cleanup of automation tasks abandoned before
+	// their run was durably recorded.
+	taskLifecycleDeleter taskLifecycleDeleter
 	// retrackedSessionCheck reports whether the lifecycle manager
 	// successfully re-tracked a session during this backend's own startup
 	// recovery pass (AC-EXECUTORS-SURVIVAL-003.1). Consulted by startup
@@ -1060,6 +1084,22 @@ type Service struct {
 	// orchestrator instances) leave it nil and startIdleSessionReaper
 	// / stopIdleSessionReaper no-op. See idle_session_reaper.go.
 	idleReaper *idleSessionReaper
+
+	// sessionCeiling is the instance-wide admission controller for agent
+	// session launches. Its ceiling is resolved once here, at construction,
+	// and is constant for the lifetime of the process.
+	sessionCeiling *sessionCeilingController
+
+	// ceilingSweeper is the single background goroutine that expires stale
+	// reservations (AC-7) and retries deferred launches (AC-15, AC-17a).
+	// Nil-safe like idleReaper: callers that don't need it leave it nil and
+	// startCeilingSweeper / stopCeilingSweeper no-op. See ceiling_sweep.go.
+	ceilingSweeper *ceilingSweeper
+
+	// ceilingCredentialReminter re-mints short-lived Office runtime
+	// credentials immediately before a ceiling-deferred "start" replay. Nil
+	// is the common case; see CeilingLaunchCredentialReminter.
+	ceilingCredentialReminter CeilingLaunchCredentialReminter
 
 	// lifecycleSweepCancel / lifecycleSweepWorkers own the one-shot
 	// background goroutine that runs reconcileTaskLifecycleTokens and
@@ -1631,6 +1671,8 @@ func NewService(
 		dynamicSuccessorCtx:          dynamicSuccessorCtx,
 		dynamicSuccessorCancel:       dynamicSuccessorCancel,
 		idleReaper:                   newIdleSessionReaper(),
+		ceilingSweeper:               newCeilingSweeper(),
+		sessionCeiling:               newSessionCeilingForRepo(repo, svcLogger.Zap()),
 		backgroundProbeConfig:        LoadBackgroundProbeConfig(svcLogger),
 		parkedStates:                 make(map[string]*parkedSessionState),
 		taskParkedStates:             make(map[string]*taskParkedState),
@@ -1704,6 +1746,7 @@ func NewService(
 	})
 	exec.SetOnSessionStateTransition(s.transitionTaskSessionState)
 	exec.SetOnBootstrapFailureTransition(s.transitionBootstrapFailure)
+	exec.SetOnBootstrapFailureMessageRepair(s.persistBootstrapFailureMessage)
 	exec.SetOnSessionStarting(func(
 		ctx context.Context,
 		taskID string,
@@ -1725,6 +1768,7 @@ func NewService(
 			ctx, taskID, session, expectedState, promoteTask, allowCompletedResume,
 		)
 	})
+	exec.SetOnLaunchFailed(s.handleLaunchFailed)
 	exec.SetOnExecutionCleanupClaim(s.claimForcedExecutionCleanup)
 	exec.SetOnExecutionStopOwnerRegistration(s.RegisterExecutionStopOwner)
 	exec.SetOnTaskReviewStateReconcile(func(ctx context.Context, taskID, completedSessionID string) {
@@ -1734,6 +1778,8 @@ func NewService(
 	exec.SetOnAgentStartFailed(s.handleAgentStartFailed)
 	exec.SetOnAgentProcessStarted(s.handleAgentProcessStarted)
 	exec.SetOnAgentProcessStartFailed(s.handleAgentProcessStartFailed)
+	exec.SetOnCeilingReservationRelease(s.releaseCeilingReservation)
+	exec.SetCeilingBackingChecker(s)
 	if caps, ok := agentManager.(executor.ExecutorTypeCapabilities); ok {
 		exec.SetCapabilities(caps)
 	}
@@ -2025,6 +2071,11 @@ func (s *Service) SetSessionAccessChecker(check func(ctx context.Context, sessio
 // than a session. Same contract: nil for identity-less internal callers.
 func (s *Service) SetTaskAccessChecker(check func(ctx context.Context, taskID string) error) {
 	s.taskAccessCheck = check
+}
+
+// SetTaskLifecycleDeleter wires durable task cleanup for automation rollback.
+func (s *Service) SetTaskLifecycleDeleter(deleter taskLifecycleDeleter) {
+	s.taskLifecycleDeleter = deleter
 }
 
 // SetRetrackedSessionChecker installs the lifecycle manager's query for
@@ -3155,6 +3206,7 @@ func (s *Service) Start(ctx context.Context) error {
 	// background goroutine owns the reclaim tick; Service.Stop joins it
 	// before tearing down repo / agentManager.
 	s.startIdleSessionReaper(ctx)
+	s.startCeilingSweeper(ctx)
 
 	s.logger.Info("orchestrator service started successfully")
 	return nil
@@ -3205,6 +3257,7 @@ func (s *Service) Stop() error {
 	// Stop components in reverse order
 	var errs []error
 	s.stopIdleSessionReaper()
+	s.stopCeilingSweeper()
 	s.stopReservedPromptCallbacks()
 
 	if err := s.scheduler.Stop(); err != nil {

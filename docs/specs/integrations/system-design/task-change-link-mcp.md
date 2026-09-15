@@ -92,6 +92,49 @@ Use enum values for providers and operations. Reject null instead of treating it
 Schema validation and backend validation must agree, including direct backend calls.
 Backend authorization must not depend on successful agentctl validation.
 
+## GitHub caller identity
+
+GitHub associations use the existing workspace-scoped personal-read resolver.
+The user identity comes from trusted host context, never tool arguments.
+An existing non-empty caller identity is preserved. When an in-session MCP
+request has no identity, host wiring may supply the same synthetic single-user
+identity used by HTTP requests only when the auth service explicitly reports
+disabled mode. Setup, enabled, and unavailable auth state do not permit this
+fallback. An explicitly present but empty identity is rejected.
+
+This fallback is local to the GitHub association operation. It does not attach
+an identity to all MCP dispatches or change task reach, repository validation,
+provider credential selection, or the auth scope resolver's disabled-mode
+contract. The coordinator consumes a host-provided identity resolver; auth mode
+selection remains in backend composition. Link and replacement use the same
+resolution path before provider work. Failed resolution leaves associations
+unchanged.
+
+This completes the technical path for
+`AC-INTEGRATIONS-TASK-CHANGE-LINK-MCP-001.1` while preserving `.2` and `.4`.
+It follows the existing
+[opt-in authentication decision](../../../decisions/2026-07-24-opt-in-authentication.md)
+and [GitHub identity ownership](../../../decisions/0047-github-authentication-ownership.md).
+Delivery is tracked in the
+[single-user PR-link repair plan](../../../plans/mcp-pr-link-single-user/plan.md).
+
+## Tool example
+
+```json
+{
+  "task_id": "<task-id>",
+  "provider": "github",
+  "repository_id": "<repository-id>",
+  "number": 3506
+}
+```
+
+`link_task_pr_kandev` and `unlink_task_pr_kandev` accept this shape;
+`replace_task_pr_kandev` additionally requires the old association triple
+(`old_provider`, `old_repository_id`, `old_number`). See
+[docs/public/automation-and-mcp.md](../../../public/automation-and-mcp.md)
+for the operator-facing contract.
+
 ## Read contract
 
 `get_task_change_requests_kandev` takes `{}`. It reads only the bound current task.

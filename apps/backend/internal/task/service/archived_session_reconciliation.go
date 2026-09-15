@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/kandev/kandev/internal/task/archivecascade"
 	"go.uber.org/zap"
 )
 
@@ -51,7 +52,10 @@ func (s *Service) StartArchivedSessionReconciliationLoop(ctx context.Context) {
 }
 
 func (s *Service) runArchivedSessionReconciliation(ctx context.Context) {
-	taskIDs, err := s.tasks.ListArchivedTasksWithActiveSessions(ctx)
+	deadline := archivecascade.ArchiveDeadline(ctx)
+	reconcileCtx, cancel := archivecascade.ContinuationContextUntil(ctx, deadline)
+	defer cancel()
+	taskIDs, err := s.tasks.ListArchivedTasksWithActiveSessions(reconcileCtx)
 	if err != nil {
 		s.logger.Error("archived-session reconciliation: failed to list candidates", zap.Error(err))
 		return
@@ -62,7 +66,7 @@ func (s *Service) runArchivedSessionReconciliation(ctx context.Context) {
 
 	s.logger.Info("archived-session reconciliation: found candidates", zap.Int("count", len(taskIDs)))
 	for _, taskID := range taskIDs {
-		activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(ctx, taskID)
+		activeSessions, err := s.sessions.ListActiveTaskSessionsByTaskID(reconcileCtx, taskID)
 		if err != nil {
 			s.logger.Warn("archived-session reconciliation: failed to list active sessions",
 				zap.String("task_id", taskID),
@@ -74,6 +78,6 @@ func (s *Service) runArchivedSessionReconciliation(ctx context.Context) {
 			// between the candidate list query and this read.
 			continue
 		}
-		s.finalizeCancelledSessions(ctx, taskID, activeSessions)
+		s.finalizeCancelledSessions(reconcileCtx, taskID, activeSessions, deadline)
 	}
 }

@@ -6,23 +6,29 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/kandev/kandev/internal/system/maintenance"
 )
 
 // Vacuum runs VACUUM via a tracked job and returns the job ID. The job
 // result includes "size_before" and "size_after" bytes; "reclaimed_bytes"
-// is the difference (>= 0).
+// is the difference (>= 0). Accepted jobs outlive the caller context.
 func (s *Service) Vacuum(ctx context.Context) string {
-	return s.jobs.Start(ctx, "vacuum", func(jobCtx context.Context) (map[string]interface{}, error) {
+	return s.jobs.Start(context.WithoutCancel(ctx), "vacuum", func(jobCtx context.Context) (map[string]interface{}, error) {
 		return s.runVacuum(jobCtx)
 	})
 }
 
-func (s *Service) runVacuum(_ context.Context) (map[string]interface{}, error) {
+func (s *Service) runVacuum(ctx context.Context) (map[string]interface{}, error) {
+	release, err := maintenance.ForPool(s.pool).Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if err := s.requireSQLiteMaintenance("vacuum"); err != nil {
 		return nil, err
 	}
 	before, _ := readDatabaseSize(s.pool.Reader())
-	if _, err := s.pool.Writer().Exec("VACUUM"); err != nil {
+	if _, err := s.pool.Writer().ExecContext(ctx, "VACUUM"); err != nil {
 		return nil, fmt.Errorf("vacuum: %w", err)
 	}
 	after, _ := readDatabaseSize(s.pool.Reader())
@@ -39,18 +45,23 @@ func (s *Service) runVacuum(_ context.Context) (map[string]interface{}, error) {
 
 // Optimize runs PRAGMA optimize via a tracked job. PRAGMA optimize is
 // cheap and idempotent; we still track it so the UI can show progress
-// consistently with VACUUM.
+// consistently with VACUUM. Accepted jobs outlive the caller context.
 func (s *Service) Optimize(ctx context.Context) string {
-	return s.jobs.Start(ctx, "optimize", func(jobCtx context.Context) (map[string]interface{}, error) {
+	return s.jobs.Start(context.WithoutCancel(ctx), "optimize", func(jobCtx context.Context) (map[string]interface{}, error) {
 		return s.runOptimize(jobCtx)
 	})
 }
 
-func (s *Service) runOptimize(_ context.Context) (map[string]interface{}, error) {
+func (s *Service) runOptimize(ctx context.Context) (map[string]interface{}, error) {
+	release, err := maintenance.ForPool(s.pool).Acquire(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if err := s.requireSQLiteMaintenance("optimize"); err != nil {
 		return nil, err
 	}
-	if _, err := s.pool.Writer().Exec("PRAGMA optimize"); err != nil {
+	if _, err := s.pool.Writer().ExecContext(ctx, "PRAGMA optimize"); err != nil {
 		return nil, fmt.Errorf("pragma optimize: %w", err)
 	}
 	return map[string]interface{}{"status": "ok"}, nil

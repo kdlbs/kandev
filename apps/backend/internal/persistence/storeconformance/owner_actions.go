@@ -2,6 +2,7 @@
 package storeconformance
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -55,6 +56,24 @@ type metaBehaviorRecord struct {
 	Value     string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+}
+
+type queueAdmissionStore interface {
+	AdmitQueueMessage(
+		context.Context,
+		messagequeue.QueueSessionIdentity,
+		string,
+		*messagequeue.QueuedMessage,
+		*messagequeue.QueueAttachmentClaim,
+		int,
+		*messagequeue.AutoMergePolicy,
+	) (*messagequeue.QueuedMessage, bool, error)
+	LookupQueueAdmission(
+		context.Context,
+		messagequeue.QueueSessionIdentity,
+		string,
+		*messagequeue.QueuedMessage,
+	) (*messagequeue.QueuedMessage, bool, error)
 }
 
 //nolint:funlen // The catalog-to-owner mapping is deliberately explicit.
@@ -1192,8 +1211,48 @@ func messageQueueAction() apiAction {
 			return nil, err
 		}
 		msg := &messagequeue.QueuedMessage{ID: id, SessionID: sessionID, TaskID: taskID, Content: "initial", Model: "model", QueuedBy: "conformance", Metadata: map[string]interface{}{}}
-		if err := store.(messagequeue.Repository).Insert(s.Context, msg, 10); err != nil {
+		repository, ok := store.(messagequeue.Repository)
+		if !ok {
+			return nil, fmt.Errorf("message queue store %T does not implement Repository", store)
+		}
+		if err := repository.Insert(s.Context, msg, 10); err != nil {
 			return nil, err
+		}
+		admissions, ok := store.(queueAdmissionStore)
+		if !ok {
+			return nil, fmt.Errorf("message queue store %T does not implement admission API", store)
+		}
+		var incarnationID string
+		if err := s.DB.GetContext(s.Context, &incarnationID, s.DB.Rebind(`
+			SELECT queue_incarnation_id FROM task_sessions WHERE id = ? AND task_id = ?
+		`), sessionID, taskID); err != nil {
+			return nil, fmt.Errorf("read conformance queue session identity: %w", err)
+		}
+		identity := messagequeue.QueueSessionIdentity{
+			TaskID: taskID, SessionID: sessionID, SessionIncarnationID: incarnationID,
+		}
+		admissionID := id + "-admission"
+		candidate := &messagequeue.QueuedMessage{
+			ID: admissionID, SessionID: sessionID, TaskID: taskID,
+			Content: "admitted", Model: "model", QueuedBy: "conformance",
+			Metadata: map[string]interface{}{},
+		}
+		admitted, replay, err := admissions.AdmitQueueMessage(s.Context, identity, admissionID, candidate, nil, 10, nil)
+		if err != nil {
+			return nil, fmt.Errorf("admit identified queue message: %w", err)
+		}
+		if replay || admitted == nil || admitted.ID != admissionID || admitted.Content != candidate.Content {
+			return nil, fmt.Errorf("identified queue admission = %+v, replay=%t", admitted, replay)
+		}
+		replayed, replay, err := admissions.LookupQueueAdmission(s.Context, identity, admissionID, candidate)
+		if err != nil {
+			return nil, fmt.Errorf("lookup identified queue admission: %w", err)
+		}
+		if !replay || replayed == nil || replayed.ID != admitted.ID || replayed.Content != admitted.Content {
+			return nil, fmt.Errorf("identified queue admission replay = %+v, replay=%t", replayed, replay)
+		}
+		if err := repository.DeleteByID(s.Context, sessionID, admitted.ID); err != nil {
+			return nil, fmt.Errorf("clean up identified queue admission: %w", err)
 		}
 		return &queueRecord{ID: msg.ID, SessionID: msg.SessionID, TaskID: msg.TaskID, Content: msg.Content, QueuedAt: msg.QueuedAt, PlanMode: msg.PlanMode}, nil
 	}

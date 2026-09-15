@@ -6,6 +6,7 @@ requirements:
 system_design:
   - ../../specs/ui/system-design/needs-you-inbox-01.md
   - ../../specs/ui/system-design/needs-you-inbox-02.md
+  - ../../specs/ui/system-design/needs-you-inbox-03.md
 legacy_specs: []
 ---
 
@@ -18,7 +19,8 @@ bundle genuinely waiting on a human and lets the operator answer it without
 leaving the page, per
 [requirements](../../specs/ui/requirements/needs-you-inbox.md) and
 [system design](../../specs/ui/system-design/needs-you-inbox-01.md) (part 2:
-[control flow, failure, persistence, security](../../specs/ui/system-design/needs-you-inbox-02.md)).
+[control flow, failure, persistence, security](../../specs/ui/system-design/needs-you-inbox-02.md);
+part 3: [visual and copy contract](../../specs/ui/system-design/needs-you-inbox-03.md)).
 
 This feature was built through Kandev's own spec-driven-development workflow
 (5 spec-review rounds, 4 build rounds, security/test/code review, an
@@ -50,8 +52,12 @@ document's own "Out of scope" section for the full list.
 ## Work orders
 
 - [x] [Task 01: Needs-you Inbox delivery](task-01-needs-you-inbox-delivery.md)
+- [x] [Task 02: Inbox feature-toggle terminology](task-02-inbox-label-alignment.md)
+- [x] [Task 03: Fix background-refresh loading state](task-03-fix-background-refresh-loading-state.md)
 
-Single work order; no dependents.
+Task 02 depends on Task 01 and records the follow-up display-name alignment.
+Task 03 depends on Task 01 and fixes a `resolveViewMode` / WS-coalescing
+regression against AC .19-.21; see its own file for scope and verification.
 
 ## Verification results
 
@@ -63,3 +69,23 @@ worktree); desktop and mobile E2E specs for the answer-in-place flow pass;
 scripts/lint-spec-files.py --all` passes.
 
 PR: https://github.com/kdlbs/kandev/pull/3641
+
+## Task 02 results
+
+The follow-up label alignment keeps the stable feature identity, configuration,
+route, and runtime behavior unchanged. The runtime flag and public configuration
+reference now use `Inbox`, matching the destination copy contract in Part 3.
+
+Follow-up PR: https://github.com/kdlbs/kandev/pull/3673
+
+## Task 03 results
+
+`resolveViewMode` could not distinguish a background refresh that followed a
+successful read from one that followed a failure, so the Inbox re-flashed
+"Loading..." on every WS/periodic refresh trigger and never resolved at all
+with no active workspace. Fixed via a `lastAppliedOk` slice field that
+survives the `status -> "loading"` overwrite a refresh performs, a
+`hasActiveWorkspace` short-circuit to the empty view, and trailing-edge
+queueing for WS refresh triggers that land inside the coalescing window.
+
+Follow-up PR: https://github.com/kdlbs/kandev/pull/3685

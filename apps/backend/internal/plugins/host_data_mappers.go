@@ -123,7 +123,7 @@ func taskModelToDTO(t *taskmodels.Task) pluginsdk.Task {
 		Identifier:   t.Identifier,
 		IsEphemeral:  t.IsEphemeral,
 		Repositories: repos,
-		Metadata:     t.Metadata,
+		Metadata:     taskmodels.PublicTaskMetadata(t.Metadata),
 
 		ArchivedAt:             timePtrToRFC3339(t.ArchivedAt),
 		WorkflowStepID:         t.WorkflowStepID,

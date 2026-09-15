@@ -35,6 +35,10 @@ const (
 	workspaceDeleteCleanupConcurrency = 8
 )
 
+type workflowDeleteTaskLister interface {
+	ListTasksForDeletion(context.Context, string, string, int, int) ([]*models.Task, int, error)
+}
+
 var ErrWorkspaceConfirmNameMismatch = errors.New("confirm_name does not match workspace name")
 
 const maxRepositorySecretBindings = 100
@@ -82,9 +86,13 @@ type workspaceDeleteTaskCleanup struct {
 	worktrees   []*worktree.Worktree
 	stopTargets []taskStopTarget
 	taskEnv     *models.TaskEnvironment
+	attachments []*models.TaskMessageAttachment
 	cleanupJob  *models.TaskResourceCleanupJob
 }
 
+type workspaceAttachmentLister interface {
+	ListMessageAttachmentsByWorkspace(ctx context.Context, workspaceID string) ([]*models.TaskMessageAttachment, error)
+}
 type repositorySessionPruner interface {
 	DeleteRepositoryIfNoActiveTaskSessions(ctx context.Context, id string) (bool, error)
 }
@@ -240,6 +248,46 @@ func (s *Service) DeleteWorkspaceWithConfirmName(ctx context.Context, id, confir
 	}
 	return s.deleteWorkspace(ctx, workspace, &confirmName)
 }
+func (s *Service) prepareWorkspaceAttachmentCleanup(ctx context.Context, workspaceID string) (*models.TaskResourceCleanupJob, error) {
+	attachmentRepo := s.attachments
+	if attachmentRepo == nil && s.attachmentSvc != nil {
+		attachmentRepo = s.attachmentSvc.repo
+	}
+	lister, ok := attachmentRepo.(workspaceAttachmentLister)
+	if !ok {
+		if attachmentRepo != nil {
+			return nil, fmt.Errorf("workspace attachment repository cannot list attachments")
+		}
+		if s.resourceCleanups == nil && s.attachmentSvc != nil {
+			return nil, fmt.Errorf("workspace attachment cleanup persistence is unavailable")
+		}
+		return nil, nil
+	}
+	attachments, err := lister.ListMessageAttachmentsByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("list workspace attachments for cleanup: %w", err)
+	}
+	if len(attachments) == 0 {
+		if s.resourceCleanups == nil && s.attachmentSvc == nil {
+			return nil, fmt.Errorf("workspace attachment cleanup executor is unavailable")
+		}
+		return nil, nil
+	}
+	if s.resourceCleanups == nil {
+		if s.attachmentSvc != nil {
+			return nil, fmt.Errorf("workspace attachment cleanup persistence is unavailable")
+		}
+		return nil, fmt.Errorf("workspace attachment cleanup executor is unavailable")
+	}
+	if s.attachmentSvc == nil {
+		return nil, fmt.Errorf("workspace attachment cleanup executor is unavailable")
+	}
+	return s.persistTaskResourceCleanup(
+		ctx, "", models.TaskResourceCleanupTriggerWorkspaceDelete,
+		newTaskResourceCleanupOperationID(models.TaskResourceCleanupTriggerWorkspaceDelete, "workspace-attachments:"+workspaceID),
+		nil, nil, nil, attachments, taskEnvironmentCleanup{}, true, false, workspaceID,
+	)
+}
 
 // DeleteOrganizationWorkspaces removes every workspace in one organization
 // through the same lifecycle as an ordinary workspace deletion. Authorization
@@ -265,12 +313,17 @@ func (s *Service) DeleteOrganizationWorkspaces(ctx context.Context, orgID string
 }
 
 func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspace, confirmedName *string) error {
+	var releaseAttachmentAdmission func()
+	if s.attachmentSvc != nil {
+		releaseAttachmentAdmission = s.attachmentSvc.beginWorkspaceDeletion(workspace.ID)
+		defer releaseAttachmentAdmission()
+	}
 	tasks, err := s.listAllTasksForWorkspaceDelete(ctx, workspace.ID)
 	if err != nil {
 		return err
 	}
 	// Runtime cleanup needs task rows before the cascade removes them.
-	cleanups, err := s.prepareWorkspaceDeleteTaskCleanups(ctx, tasks)
+	workspaceAttachmentCleanup, err := s.prepareWorkspaceAttachmentCleanup(ctx, workspace.ID)
 	if err != nil {
 		return err
 	}
@@ -282,6 +335,16 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 			return fmt.Errorf("cleanup workspace canvases before workspace delete: %w", err)
 		}
 	}
+	cleanups := make([]workspaceDeleteTaskCleanup, 0, len(tasks)+1)
+	if workspaceAttachmentCleanup != nil {
+		cleanups = append(cleanups, workspaceDeleteTaskCleanup{cleanupJob: workspaceAttachmentCleanup})
+	}
+	taskCleanups, err := s.prepareWorkspaceDeleteTaskCleanups(ctx, tasks)
+	if err != nil {
+		cancelErr := s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
+		return errors.Join(err, cancelErr)
+	}
+	cleanups = append(cleanups, taskCleanups...)
 
 	var deletedWorkspaceAttachments []*models.TaskMessageAttachment
 	var deletedTasks []*models.Task
@@ -320,27 +383,32 @@ func (s *Service) deleteWorkspace(ctx context.Context, workspace *models.Workspa
 		deletedTasks, deletedWorkflows, err = s.workspaces.DeleteWorkspaceCascadeWithName(ctx, workspace.ID, *confirmedName)
 	}
 	if err != nil {
-		s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
-		return s.mapWorkspaceDeleteError(workspace.ID, err)
+		cancelErr := s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
+		return s.mapWorkspaceDeleteError(workspace.ID, errors.Join(err, cancelErr))
 	}
+	var postCommitErr error
 	if s.attachmentSvc != nil {
 		s.attachmentSvc.RemoveBytes(deletedWorkspaceAttachments)
 	}
 	if s.workspaceSecretDeleter != nil && (!hasTransactionalCleanup || !hasTransactionalCascade) {
 		if err := s.workspaceSecretDeleter.DeleteWorkspaceSecrets(ctx, workspace.ID); err != nil {
-			s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
 			s.logger.Error("failed to delete workspace secrets", zap.String("workspace_id", workspace.ID), zap.Error(err))
-			return err
+			postCommitErr = errors.Join(postCommitErr, err)
 		}
 	}
-	cleanups = s.appendWorkspaceDeleteMissingTaskCleanups(ctx, cleanups, deletedTasks)
+	var lateCleanupErr error
+	cleanups, lateCleanupErr = s.appendWorkspaceDeleteMissingTaskCleanups(ctx, cleanups, deletedTasks)
+	postCommitErr = errors.Join(postCommitErr, lateCleanupErr)
 	s.publishWorkspaceDeleteChildEvents(ctx, deletedTasks, deletedWorkflows)
 	s.runWorkspaceDeleteTaskCleanups(cleanups, deletedTasks)
 	s.publishWorkspaceEvent(ctx, events.WorkspaceDeleted, workspace)
 	s.logger.Info("workspace deleted", zap.String("workspace_id", workspace.ID))
+	if postCommitErr != nil {
+		return &CascadePostCommitError{Err: postCommitErr}
+	}
 	return nil
-}
 
+}
 func (s *Service) prepareWorkspaceDeleteTaskCleanups(ctx context.Context, tasks []*models.Task) ([]workspaceDeleteTaskCleanup, error) {
 	cleanups := make([]workspaceDeleteTaskCleanup, 0, len(tasks))
 	for _, task := range tasks {
@@ -349,8 +417,8 @@ func (s *Service) prepareWorkspaceDeleteTaskCleanups(ctx context.Context, tasks 
 		}
 		cleanup, err := s.prepareWorkspaceDeleteTaskCleanup(ctx, task)
 		if err != nil {
-			s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
-			return nil, err
+			cancelErr := s.cancelWorkspaceDeleteTaskCleanupJobs(ctx, cleanups)
+			return nil, errors.Join(err, cancelErr)
 		}
 		cleanups = append(cleanups, cleanup)
 	}
@@ -361,13 +429,14 @@ func (s *Service) appendWorkspaceDeleteMissingTaskCleanups(
 	ctx context.Context,
 	cleanups []workspaceDeleteTaskCleanup,
 	deletedTasks []*models.Task,
-) []workspaceDeleteTaskCleanup {
+) ([]workspaceDeleteTaskCleanup, error) {
 	prepared := make(map[string]struct{}, len(cleanups))
 	for _, cleanup := range cleanups {
 		if cleanup.task != nil && cleanup.task.ID != "" {
 			prepared[cleanup.task.ID] = struct{}{}
 		}
 	}
+	var errs []error
 	for _, task := range deletedTasks {
 		if task == nil || task.ID == "" {
 			continue
@@ -380,12 +449,22 @@ func (s *Service) appendWorkspaceDeleteMissingTaskCleanups(
 			s.logger.Error("failed to prepare late workspace task cleanup",
 				zap.String("task_id", task.ID),
 				zap.Error(err))
+			errs = append(errs, fmt.Errorf("prepare late workspace task cleanup %q: %w", task.ID, err))
+			if job, persistErr := s.persistTaskResourceCleanup(
+				ctx, task.ID, models.TaskResourceCleanupTriggerWorkspaceDelete,
+				newTaskResourceCleanupOperationID(models.TaskResourceCleanupTriggerWorkspaceDelete, task.ID),
+				nil, nil, nil, nil, taskEnvironmentCleanup{}, false, false, "",
+			); persistErr != nil {
+				errs = append(errs, fmt.Errorf("persist late workspace task cleanup %q: %w", task.ID, persistErr))
+			} else if job != nil {
+				cleanups = append(cleanups, workspaceDeleteTaskCleanup{task: task, cleanupJob: job})
+			}
 			continue
 		}
 		cleanups = append(cleanups, cleanup)
 		prepared[task.ID] = struct{}{}
 	}
-	return cleanups
+	return cleanups, errors.Join(errs...)
 }
 
 func (s *Service) prepareWorkspaceDeleteTaskCleanup(ctx context.Context, task *models.Task) (workspaceDeleteTaskCleanup, error) {
@@ -397,7 +476,18 @@ func (s *Service) prepareWorkspaceDeleteTaskCleanup(ctx context.Context, task *m
 	if err != nil {
 		return workspaceDeleteTaskCleanup{}, fmt.Errorf("lookup environment for workspace delete task %q: %w", task.ID, err)
 	}
-	cleanup := workspaceDeleteTaskCleanup{task: task, worktrees: worktrees, taskEnv: taskEnv}
+	var attachments []*models.TaskMessageAttachment
+	attachmentRepo := s.attachments
+	if attachmentRepo == nil && s.attachmentSvc != nil {
+		attachmentRepo = s.attachmentSvc.repo
+	}
+	if attachmentRepo != nil {
+		attachments, err = attachmentRepo.ListMessageAttachmentsByTask(ctx, task.ID)
+		if err != nil {
+			return workspaceDeleteTaskCleanup{}, fmt.Errorf("list attachments for workspace delete task %q: %w", task.ID, err)
+		}
+	}
+	cleanup := workspaceDeleteTaskCleanup{task: task, worktrees: worktrees, taskEnv: taskEnv, attachments: attachments}
 	cleanup.sessions, err = s.sessions.ListTaskSessions(ctx, task.ID)
 	if err != nil {
 		return workspaceDeleteTaskCleanup{}, fmt.Errorf("list task sessions for workspace delete task %q: %w", task.ID, err)
@@ -415,27 +505,46 @@ func (s *Service) prepareWorkspaceDeleteTaskCleanup(ctx context.Context, task *m
 	cleanup.cleanupJob, err = s.persistTaskResourceCleanup(
 		ctx, task.ID, models.TaskResourceCleanupTriggerWorkspaceDelete,
 		newTaskResourceCleanupOperationID(models.TaskResourceCleanupTriggerWorkspaceDelete, task.ID),
-		cleanup.sessions, cleanup.worktrees, cleanup.stopTargets,
-		taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false}, true,
+		cleanup.sessions, cleanup.worktrees, cleanup.stopTargets, cleanup.attachments,
+		taskEnvironmentCleanup{env: cleanup.taskEnv, deleteRow: false}, true, true, "",
 	)
 	return cleanup, err
 }
-
-func (s *Service) cancelWorkspaceDeleteTaskCleanupJobs(ctx context.Context, cleanups []workspaceDeleteTaskCleanup) {
+func (s *Service) cancelWorkspaceDeleteTaskCleanupJobs(ctx context.Context, cleanups []workspaceDeleteTaskCleanup) error {
+	jobIDs := make([]string, 0, len(cleanups))
+	for _, cleanup := range cleanups {
+		if cleanup.cleanupJob != nil {
+			jobIDs = append(jobIDs, cleanup.cleanupJob.ID)
+		}
+	}
+	s.cancelTaskResourceCleanupRuns(jobIDs)
 	transitionCtx, cancel := detachedCleanupTransitionContext(ctx)
 	defer cancel()
+	var cancellationErrs []error
 	for _, cleanup := range cleanups {
 		if cleanup.cleanupJob == nil || s.resourceCleanups == nil {
 			continue
 		}
-		if err := s.resourceCleanups.CompleteTaskResourceCleanupJob(
-			transitionCtx, cleanup.cleanupJob.ID, models.TaskResourceCleanupStateCancelled, "", nil,
-		); err != nil {
-			s.logger.Warn("cancel workspace delete task cleanup job",
-				zap.String("job_id", cleanup.cleanupJob.ID),
-				zap.String("task_id", cleanup.cleanupJob.TaskID), zap.Error(err))
+		cas, ok := s.resourceCleanups.(taskResourceCleanupCancellationCAS)
+		if !ok {
+			cancellationErrs = append(cancellationErrs,
+				fmt.Errorf("%w: cleanup repository cannot fence cancellation for %s",
+					ErrCleanupCancellationRace, cleanup.cleanupJob.ID))
+			continue
+		}
+		cancelled, err := cas.CancelTaskResourceCleanupJobIfPending(transitionCtx, cleanup.cleanupJob.ID)
+		if err != nil {
+			cancellationErrs = append(cancellationErrs, err)
+		} else if !cancelled {
+			cancellationErrs = append(cancellationErrs,
+				fmt.Errorf("%w: workspace-delete cleanup %s was claimed concurrently",
+					ErrCleanupCancellationRace, cleanup.cleanupJob.ID))
 		}
 	}
+	if len(cancellationErrs) > 0 {
+		return errors.Join(cancellationErrs...)
+	}
+	return nil
 }
 
 func (s *Service) publishWorkspaceDeleteChildEvents(ctx context.Context, tasks []*models.Task, workflows []*models.Workflow) {
@@ -474,13 +583,17 @@ func (s *Service) workspaceDeleteTaskCleanupJobs(
 	jobs := make([]workspaceDeleteTaskCleanup, 0, len(cleanups))
 	for _, cleanup := range cleanups {
 		if cleanup.task == nil {
+			if cleanup.cleanupJob != nil {
+				jobs = append(jobs, cleanup)
+			}
 			continue
 		}
 		if _, ok := deletedTaskIDs[cleanup.task.ID]; !ok {
 			continue
 		}
 		hasCleanup := len(cleanup.stopTargets) > 0 || s.worktreeCleanup != nil ||
-			len(cleanup.sessions) > 0 || cleanup.task.IsEphemeral || cleanup.taskEnv != nil
+			len(cleanup.sessions) > 0 || cleanup.task.IsEphemeral || cleanup.taskEnv != nil ||
+			len(cleanup.attachments) > 0
 		if !hasCleanup {
 			continue
 		}
@@ -706,6 +819,29 @@ func (s *Service) SetWorkflowSource(ctx context.Context, id, source, sourcePath 
 // they do not linger as orphan rows pointing at a workflow_id that no longer
 // exists (the tasks.workflow_id FK was dropped to support empty workflow_id
 // on ephemeral tasks, so SQLite cannot cascade for us).
+func (s *Service) listWorkflowTasksForDelete(
+	ctx context.Context,
+	workflow *models.Workflow,
+) ([]*models.Task, error) {
+	var all []*models.Task
+	for page := 1; ; page++ {
+		lister, ok := s.tasks.(workflowDeleteTaskLister)
+		if !ok {
+			return nil, errors.New("task repository cannot enumerate all task origins for workflow deletion")
+		}
+		tasks, total, err := lister.ListTasksForDeletion(
+			ctx, workflow.WorkspaceID, workflow.ID, page, workspaceDeletePageSize,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("list tasks for workflow delete cascade: %w", err)
+		}
+		all = append(all, tasks...)
+		if len(tasks) == 0 || len(all) >= total {
+			return all, nil
+		}
+	}
+}
+
 func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 	if err := s.authorizeWorkflowID(ctx, id); err != nil {
 		return err
@@ -718,13 +854,14 @@ func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 		return fmt.Errorf("workflow not found: %s", id)
 	}
 
-	tasks, err := s.tasks.ListTasks(ctx, id)
+	tasks, err := s.listWorkflowTasksForDelete(ctx, workflow)
 	if err != nil {
 		s.logger.Error("failed to list tasks for workflow delete cascade",
 			zap.String("workflow_id", id), zap.Error(err))
 		return err
 	}
 	archived := 0
+	var postCommitErr error
 	for _, task := range tasks {
 		if task == nil || task.WorkspaceID != workflow.WorkspaceID {
 			taskID, taskWorkspaceID := "", ""
@@ -739,9 +876,28 @@ func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 				zap.String("task_workspace_id", taskWorkspaceID))
 			continue
 		}
-		if err := s.ArchiveTask(ctx, task.ID); err != nil {
-			// Concurrent archive between ListTasks and here is a no-op:
-			// the task is already in the desired state, keep cascading.
+
+		var archiveErr error
+		if s.workflowTaskArchiveCoordinator != nil {
+			outcome, err := s.workflowTaskArchiveCoordinator.ArchiveTaskTree(ctx, task.ID, false)
+			if outcome != nil && len(outcome.ArchivedTaskIDs) > 0 {
+				archived += len(outcome.ArchivedTaskIDs)
+			}
+			var cascadePostCommitErr *CascadePostCommitError
+			if errors.As(err, &cascadePostCommitErr) {
+				s.logger.Warn("workflow task archived with post-commit lifecycle errors",
+					zap.String("workflow_id", id), zap.String("task_id", task.ID), zap.Error(err))
+				postCommitErr = errors.Join(postCommitErr, err)
+				continue
+			}
+		} else {
+			archiveErr = s.ArchiveTask(ctx, task.ID)
+			if errors.Is(archiveErr, ErrTaskAlreadyArchived) {
+				continue
+			}
+		}
+		if archiveErr != nil {
+			err = archiveErr
 			if errors.Is(err, ErrTaskAlreadyArchived) {
 				continue
 			}
@@ -751,7 +907,9 @@ func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 				zap.Error(err))
 			return err
 		}
-		archived++
+		if s.workflowTaskArchiveCoordinator == nil {
+			archived++
+		}
 	}
 
 	if err := s.workflows.DeleteWorkflow(ctx, id); err != nil {
@@ -763,6 +921,9 @@ func (s *Service) DeleteWorkflow(ctx context.Context, id string) error {
 	s.logger.Info("workflow deleted",
 		zap.String("workflow_id", id),
 		zap.Int("archived_tasks", archived))
+	if postCommitErr != nil {
+		return &CascadePostCommitError{Err: postCommitErr}
+	}
 	return nil
 }
 

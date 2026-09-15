@@ -124,6 +124,7 @@ export type WsFrame = {
   id?: string;
   type?: string;
   action?: string;
+  eventType?: string;
   payload: Record<string, unknown>;
 };
 
@@ -160,6 +161,7 @@ function decodeFrame(payload: string | Buffer | Uint8Array): WsFrame | null {
       id: typeof parsed.id === "string" ? parsed.id : undefined,
       type: typeof parsed.type === "string" ? parsed.type : undefined,
       action: typeof parsed.action === "string" ? parsed.action : undefined,
+      eventType: typeof parsed.event_type === "string" ? parsed.event_type : undefined,
       payload: body && typeof body === "object" ? (body as Record<string, unknown>) : {},
     };
   } catch {
@@ -214,6 +216,12 @@ export function watchWs(page: Page): WsWatcher {
   };
 }
 
+function matchesEventAction(frame: WsFrame, action: string): boolean {
+  if (frame.action === action) return true;
+  if (frame.type !== "session.event") return false;
+  const orderedEventType = action.startsWith("session.") ? action.slice("session.".length) : action;
+  return frame.eventType === action || frame.eventType === orderedEventType;
+}
 function waitForEvent(
   channels: Channels,
   action: string,
@@ -227,14 +235,9 @@ function waitForEvent(
       reject,
     );
     wait.listen(channels.received, (frame) => {
-      if (frame.action !== action) return;
-      // Strict, not `frame.type && ...`: a frame carrying the right `action` but
-      // no `type` is not a confirmed server push, and resolving on one would be
-      // the exact false-positive this module exists to remove. Matches the
-      // sibling guard in `waitForResponse`. Observed gateway traffic only ever
-      // carries `notification` / `response` / `request`, so nothing legitimate
-      // relies on the loose form.
-      if (frame.type !== "notification") return;
+      if (!matchesEventAction(frame, action)) return;
+      // Strictly require a server-push frame, including ordered session events.
+      if (frame.type !== "notification" && frame.type !== "session.event") return;
       if (where && !where(frame.payload)) return;
       wait.dispose();
       resolve(frame);
