@@ -257,3 +257,25 @@ func TestReconcileWorkspaceRepositories_LinksPrimaryWhenRootIsTaskDirectory(t *t
 		t.Fatalf("primary link = %q, %v; the primary must be linked into a Kandev task root", got, err)
 	}
 }
+
+func TestReconcileWorkspaceRepositoriesAtLayoutUsesNestedDurablePath(t *testing.T) {
+	taskRoot := canonicalTempDir(t)
+	workspace := filepath.Join(taskRoot, "repo")
+	if err := os.MkdirAll(filepath.Join(workspace, "kandev"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	source := t.TempDir()
+	writeMarker(t, source)
+
+	err := reconcileWorkspaceRepositoriesAtLayout(workspace, "repository", []WorkspaceRepositorySpec{{
+		RepoName:              "backend",
+		RepositoryPath:        source,
+		WorkspaceRelativePath: "repo/kandev/backend",
+	}}, nil, testWorkspaceLinkOwner())
+	if err != nil {
+		t.Fatalf("reconcileWorkspaceRepositoriesAtLayout: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(workspace, "kandev", "backend", "live.txt")); err != nil || string(got) != "one" {
+		t.Fatalf("nested repository link = %q, %v; want the durable task-root destination", got, err)
+	}
+}

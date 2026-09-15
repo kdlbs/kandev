@@ -113,6 +113,9 @@ func TestWorkspaceSourceHTTPStatusUsesTypedErrors(t *testing.T) {
 		{service.ErrWorkspaceSourceActive, http.StatusConflict},
 		{service.ErrUnsupportedWorkspaceSource, http.StatusUnprocessableEntity},
 		{service.ErrWorkspaceSourceMaterialize, http.StatusUnprocessableEntity},
+		{service.ErrInvalidWorkspaceRepositoryPlacement, http.StatusBadRequest},
+		{service.ErrWorkspaceSourcePreviewStale, http.StatusConflict},
+		{service.ErrWorkspaceExpansionUnavailable, http.StatusUnprocessableEntity},
 	}
 	for _, tt := range tests {
 		assert.Equal(t, tt.want, workspaceSourceHTTPStatus(tt.err))

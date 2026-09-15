@@ -3,7 +3,7 @@
 import { FormEvent, useCallback, useState } from "react";
 import type { JiraTicket } from "@/lib/types/jira";
 import type { LinearIssue } from "@/lib/types/linear";
-import type { Repository } from "@/lib/types/http";
+import type { InitialWorkspaceLayout, Repository } from "@/lib/types/http";
 import type { RepositoryBranchesState } from "@/lib/state/slices/workspace/types";
 import { branchOptionValue } from "@/components/branch-picker-options";
 import { SHORTCUTS } from "@/lib/keyboard/constants";
@@ -37,6 +37,12 @@ import {
   buildWorkflowAgentOverrideValidation,
   type WorkflowAgentOverrideValidation,
 } from "@/components/task-create-dialog-workflow-agent-override-validation";
+import { computeSelectedRepoCount } from "@/components/task-create-dialog-computed";
+import {
+  resolveInitialWorkspaceLayout,
+  resolveInitialWorkspaceLayoutMode,
+  resolveSelectedExecutorType,
+} from "@/components/task-create-dialog-helpers";
 
 // Catalog key: module scope, so it is resolved at the call site.
 const PROMPT_INSERTED_MESSAGE_KEY = "task:enhancedPromptInserted";
@@ -144,7 +150,8 @@ type SubmitWiringArgs = {
   editDependencies: ReturnType<typeof useTaskEditDialogDependencies>;
   refreshBranchPolicies: () => Promise<void>;
   preserveQueuedLastUsedOnClose: () => void;
-  workflowAgentOverridesBlockedReason?: string;
+	workflowAgentOverridesBlockedReason?: string;
+	initialWorkspaceLayout: InitialWorkspaceLayout | undefined;
 };
 
 function useSubmitHandlersWiring({
@@ -159,7 +166,8 @@ function useSubmitHandlersWiring({
   editDependencies,
   refreshBranchPolicies,
   preserveQueuedLastUsedOnClose,
-  workflowAgentOverridesBlockedReason,
+	workflowAgentOverridesBlockedReason,
+	initialWorkspaceLayout,
 }: SubmitWiringArgs) {
   const {
     workspaceId,
@@ -214,6 +222,7 @@ function useSubmitHandlersWiring({
     setExecutorId: fs.setExecutorId,
     setSelectedWorkflowId: fs.setSelectedWorkflowId,
     setFetchedSteps: fs.setFetchedSteps,
+    setInitialWorkspaceLayout: fs.setInitialWorkspaceLayout ?? (() => undefined),
     clearDraft: fs.clearDraft,
     freshBranchEnabled: fs.freshBranchEnabled,
     isLocalExecutor: computed.isLocalExecutor,
@@ -223,6 +232,7 @@ function useSubmitHandlersWiring({
     priority: fs.priority,
     workflowAgentOverrides: fs.workflowAgentOverrides,
     workflowAgentOverridesBlockedReason,
+    initialWorkspaceLayout,
     blockedBy: fs.blockedBy,
     editDependencies,
   });
@@ -421,6 +431,28 @@ function resolveWorkflowAgentOverrideValidation(
   });
 }
 
+function resolveInitialWorkspaceLayoutForDialog(
+  fs: DialogFormState,
+  data: ReturnType<typeof useTaskCreateDialogData>,
+  isCreateMode: boolean,
+  isTaskStarted: boolean,
+) {
+  const mode = resolveInitialWorkspaceLayoutMode({
+    isCreateMode,
+    isTaskStarted,
+    noRepository: fs.noRepository,
+    repositoryCount: computeSelectedRepoCount(fs),
+    executorType: resolveSelectedExecutorType(data.executors, fs.executorProfileId),
+  });
+  return {
+    mode,
+    layout: resolveInitialWorkspaceLayout({
+      requested: fs.initialWorkspaceLayout ?? "repository",
+      mode,
+    }),
+  };
+}
+
 export function useTaskCreateDialogSetup(
   props: TaskCreateDialogProps,
   options: { preserveQueuedLastUsedOnClose?: () => void } = {},
@@ -439,6 +471,7 @@ export function useTaskCreateDialogSetup(
     (state) => state.userSettings.agentGeneratedTaskTitles,
   );
   const autoTitle = mode === "create" && agentGeneratedTaskTitles;
+  const isCreateMode = mode === "create";
   const fs = useDialogFormState(
     open,
     workspaceId,
@@ -454,8 +487,14 @@ export function useTaskCreateDialogSetup(
   );
   const sessionRepoName = useSessionRepoName(isSessionMode);
   const data = useDialogSetupData(resolvedProps, fs);
-  const { computed, repositoryLocalPath, refreshBranchPolicies, savedBaseSubmitBlockedReason } =
-    data;
+  const {
+    repositories,
+    userSettingsLoaded,
+    computed,
+    repositoryLocalPath,
+    refreshBranchPolicies,
+    savedBaseSubmitBlockedReason,
+  } = data;
   const workflowAgentOverrideValidation = resolveWorkflowAgentOverrideValidation(
     mode,
     workspaceId,
@@ -464,6 +503,8 @@ export function useTaskCreateDialogSetup(
   );
   const workflowAgentOverridesBlockedReason =
     mode === "create" ? workflowAgentOverrideValidation.blockedReason : undefined;
+  const { mode: initialWorkspaceLayoutMode, layout: initialWorkspaceLayout } =
+    resolveInitialWorkspaceLayoutForDialog(fs, data, isCreateMode, isTaskStarted);
   const submitHandlers = useSubmitHandlersWiring({
     props: resolvedProps,
     fs,
@@ -477,6 +518,7 @@ export function useTaskCreateDialogSetup(
     refreshBranchPolicies,
     preserveQueuedLastUsedOnClose: options.preserveQueuedLastUsedOnClose ?? (() => undefined),
     workflowAgentOverridesBlockedReason,
+    initialWorkspaceLayout,
   });
   const { guardedHandleSubmit, handleKeyDown } = useDialogSubmitShortcut(
     submitHandlers.handleSubmit,
@@ -501,7 +543,7 @@ export function useTaskCreateDialogSetup(
     fs,
     isSessionMode,
     isEditMode,
-    isCreateMode: mode === "create",
+    isCreateMode,
     autoTitle,
     isTaskStarted,
     sessionRepoName,
@@ -517,6 +559,7 @@ export function useTaskCreateDialogSetup(
     editDependencies,
     savedBaseSubmitBlockedReason,
     workflowAgentOverrideValidation,
+    initialWorkspaceLayoutMode,
   };
 }
 

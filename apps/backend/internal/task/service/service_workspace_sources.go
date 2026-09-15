@@ -36,6 +36,8 @@ type WorkspaceSourceInput struct {
 type AttachWorkspaceSourcesRequest struct {
 	TaskID                    string
 	Sources                   []WorkspaceSourceInput
+	RepositoryPlacement       WorkspaceRepositoryPlacement
+	PreviewRevision           string
 	ExpectedParentID          string
 	ExpectedParentWorkspaceID string
 }
@@ -149,6 +151,18 @@ func (s *Service) AttachWorkspaceSources(ctx context.Context, req AttachWorkspac
 	}
 	batch.ExpectedParentID = req.ExpectedParentID
 	batch.ExpectedParentWorkspaceID = req.ExpectedParentWorkspaceID
+	if len(batch.Sources) == 0 && len(batch.RepositoryUpdates) == 0 && req.RepositoryPlacement != "" {
+		if err := s.validateExactWorkspaceRepositoryPlacement(ctx, task, req.Sources, req.RepositoryPlacement); err != nil {
+			return nil, err
+		}
+		if err := guardWorkspaceSourceParent(ctx, store, task, req); err != nil {
+			return nil, err
+		}
+		return s.hydrateWorkspaceSourceResult(ctx, task, store)
+	}
+	if err := s.applyWorkspaceRepositoryPlacement(ctx, task, batch, req.RepositoryPlacement, req.PreviewRevision); err != nil {
+		return nil, err
+	}
 	if len(batch.Sources) == 0 && len(batch.RepositoryUpdates) == 0 {
 		cleanupCreated(context.WithoutCancel(ctx))
 		if err := guardWorkspaceSourceParent(ctx, store, task, req); err != nil {

@@ -199,6 +199,8 @@ Use **New Task** in the sidebar. In an open task, the **Task** split button also
    and Kandev remembers your choice across in-app browsers. The desktop app's
    native folder picker uses the operating system's control for hidden entries.
 
+For a Worktree task with one initial repository, **Advanced settings** includes **Start in a parent workspace folder**. It is off by default. Enable it when later repositories should be siblings and the agent should start in the task folder above the first repository. A task with multiple initial repositories uses that parent layout automatically. The setting is available only when the selected executor and source set support the layout.
+
 4. **Choose an executor and agent profile.** Both profiles must be compatible. A workflow default agent profile locks the task-level selector.
 5. **Add a description when needed.** Use the eye button beside **Enhance prompt with AI** to preview a step's prompt template. The preview does not resolve task IDs or saved-prompt references until the task exists.
 6. **Choose how to start:**
@@ -470,6 +472,14 @@ The task must be idle: Kandev disables the action while a turn or tool call is a
 Before submission, the dialog or drawer summarizes the effect on the workspace, session context,
 and running processes. **Cancel** or closing the surface sends no request and changes nothing. A
 submitted batch remains all-or-nothing.
+
+For a single-repository Worktree task that still uses the repository as its workspace root, a
+repository-only batch lets you choose **Inside kandev/** or **Inside the current repository**. Both
+choices keep the agent CWD and running workspace processes unchanged. Kandev records the selected
+relative path, previews the destination, and protects the outer repository from staging the nested
+worktree. The **Expand workspace root** choice is shown as unavailable until explicit idle session
+recovery is available. A task that already starts in a parent workspace adds repositories as
+siblings and does not show these placement choices.
 
 If adding a source promotes a Worktree or Local/Local PC workspace from one repository directory to
 the task root, Kandev restarts the idle agent in the new root. Existing files, Git changes, task

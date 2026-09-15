@@ -108,6 +108,7 @@ type wsCreateTaskRequest struct {
 	PlanMode               bool                      `json:"plan_mode,omitempty"`
 	Attachments            []v1.MessageAttachment    `json:"attachments,omitempty"`
 	ParentID               string                    `json:"parent_id,omitempty"`
+	InitialWorkspaceLayout string                    `json:"initial_workspace_layout,omitempty"`
 }
 
 func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
@@ -204,6 +205,7 @@ func (h *TaskHandlers) wsCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		PlanMode:                    req.PlanMode,
 		StartAgent:                  req.StartAgent,
 		ParentID:                    req.ParentID,
+		InitialWorkspaceLayout:      req.InitialWorkspaceLayout,
 	})
 	if err != nil {
 		h.logger.Error("failed to create task", zap.Error(err))

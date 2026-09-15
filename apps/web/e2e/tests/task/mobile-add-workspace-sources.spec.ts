@@ -262,6 +262,7 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
     folderPath,
   );
   await expect(rows).toHaveCount(2);
+  await expect(testPage.getByTestId("folder-picker-popover")).toHaveCount(0);
   await prCapture.screenshot("workspace-actions-mixed-sources", {
     caption: "Pixel 5 Add to workspace drawer with a local repository and folder configured",
   });

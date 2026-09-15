@@ -209,6 +209,32 @@ func TestValidateWorkspaceInfoForExecutionAcceptsIndependentImplicitLocalReposit
 	}
 }
 
+func TestValidateWorkspaceInfoForExecutionUsesNestedRepositoryRelativePaths(t *testing.T) {
+	root := t.TempDir()
+	first := initGitRepo(t)
+	second := initGitRepo(t)
+	firstPath := filepath.Join(root, "first")
+	secondPath := filepath.Join(firstPath, "kandev", "second")
+	addLinkedWorktree(t, first, firstPath)
+	if err := os.MkdirAll(filepath.Dir(secondPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	addLinkedWorktree(t, second, secondPath)
+
+	err := validateWorkspaceInfoForExecution(context.Background(), &WorkspaceInfo{
+		ExecutorType:    string(models.ExecutorTypeWorktree),
+		WorkspacePath:   root,
+		WorkspaceLayout: "task_root",
+		WorkspaceRepositories: []WorkspaceRepositorySpec{
+			{RepositoryID: "repository-1", RepositoryPath: first, RepoName: "first", WorkspaceRelativePath: "first"},
+			{RepositoryID: "repository-2", RepositoryPath: second, RepoName: "second", WorkspaceRelativePath: "first/kandev/second"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("validateWorkspaceInfoForExecution() rejected nested repository paths: %v", err)
+	}
+}
+
 func TestValidateWorkspaceInfoForExecutionSkipsRepoLessWorkspace(t *testing.T) {
 	err := validateWorkspaceInfoForExecution(context.Background(), &WorkspaceInfo{
 		ExecutorType:  string(models.ExecutorTypeLocal),

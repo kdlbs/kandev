@@ -13,6 +13,7 @@ import (
 	"github.com/kandev/kandev/internal/orchestrator"
 	"github.com/kandev/kandev/internal/task/models"
 	sqliterepo "github.com/kandev/kandev/internal/task/repository/sqlite"
+	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/worktree"
 )
 
@@ -519,6 +520,273 @@ func TestWorkspaceSourceMaterializer_WorktreeAddsLiveFolderAtTaskRoot(t *testing
 	}
 }
 
+func TestWorkspaceSourceMaterializer_NestedRepositoryKeepsAgentRootAndRescans(t *testing.T) {
+	ctx := context.Background()
+	repoPath, taskRoot, primaryPath := setupMaterializerScenario(t)
+	repo := newMaterializerRepo(t)
+	seedMaterializerTask(t, ctx, repo, repoPath, taskRoot, primaryPath)
+	branch := &models.TaskRepository{
+		ID:                    "tr-nested",
+		TaskID:                "task-1",
+		RepositoryID:          "repo-1",
+		WorkspaceRelativePath: "kandev/added",
+		BaseBranch:            "main",
+		CheckoutBranch:        "branch-2",
+		Position:              1,
+		Metadata:              map[string]interface{}{},
+	}
+	if err := repo.CreateTaskRepository(ctx, branch); err != nil {
+		t.Fatal(err)
+	}
+	rescan := &nestedWorkspaceRescanStub{}
+	mgr := newMaterializerWorktreeMgr(t, taskRoot)
+	m := &workspaceSourceMaterializer{
+		repo:        repo,
+		worktreeMgr: mgr,
+		branches:    &branchMaterializer{repo: repo, worktreeMgr: mgr, rescanner: rescan, logger: newTestLogger()},
+		rescanner:   rescan,
+		logger:      newTestLogger(),
+	}
+
+	batch := &models.WorkspaceSourceBatch{
+		TaskID:              "task-1",
+		RepositoryPlacement: string(taskservice.WorkspacePlacementCurrentRoot),
+		Sources:             []models.WorkspaceSource{{Repository: branch}},
+	}
+	result, err := m.MaterializeWorkspaceSources(ctx, "task-1", batch)
+	if err != nil {
+		t.Fatalf("MaterializeWorkspaceSources: %v", err)
+	}
+
+	wantPath := filepath.Join(primaryPath, "added")
+	if result == nil || result.WorkspacePath != primaryPath || !reflect.DeepEqual(result.SessionIDs, []string{"session-1"}) {
+		t.Fatalf("materialization result = %#v, want primary workspace and session-1", result)
+	}
+	if _, err := os.Stat(wantPath); err != nil {
+		t.Fatalf("nested worktree = %s: %v", wantPath, err)
+	}
+	env, err := repo.GetTaskEnvironmentByTaskID(ctx, "task-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.WorkspacePath != primaryPath {
+		t.Fatalf("workspace path = %q, want unchanged primary path %q", env.WorkspacePath, primaryPath)
+	}
+	if len(rescan.rebindCalls) != 0 {
+		t.Fatalf("nested attachment rebound the running session: %+v", rescan.rebindCalls)
+	}
+	if len(rescan.rescanCalls) != 1 || rescan.rescanCalls[0].workDir != primaryPath {
+		t.Fatalf("nested attachment rescan calls = %+v, want one rescan at %q", rescan.rescanCalls, primaryPath)
+	}
+	if len(rescan.notifyCalls) != 1 || rescan.notifyCalls[0].WorktreePath != wantPath || rescan.notifyCalls[0].TaskWorkspacePath != primaryPath {
+		t.Fatalf("nested materialized events = %+v, want %q under %q", rescan.notifyCalls, wantPath, primaryPath)
+	}
+	envRepos, err := repo.ListTaskEnvironmentRepos(ctx, env.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found bool
+	for _, row := range envRepos {
+		if row.RepositoryID == "repo-1" && row.WorktreePath == wantPath && row.WorkspaceRelativePath == "kandev/added" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("environment repository inventory = %+v, want nested path", envRepos)
+	}
+}
+
+func TestWorkspaceSourceMaterializer_ParentRootAdditionRescansWithoutRebind(t *testing.T) {
+	ctx := context.Background()
+	repoPath, taskRoot, primaryPath := setupMaterializerScenario(t)
+	repo := newMaterializerRepo(t)
+	seedMaterializerTask(t, ctx, repo, repoPath, taskRoot, primaryPath)
+	env, err := repo.GetTaskEnvironmentByTaskID(ctx, "task-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.WorkspacePath = taskRoot
+	env.WorkspaceLayout = taskservice.WorkspaceLayoutTaskRoot
+	if err := repo.UpdateTaskEnvironment(ctx, env); err != nil {
+		t.Fatalf("UpdateTaskEnvironment: %v", err)
+	}
+	branch := &models.TaskRepository{
+		ID: "tr-parent-root", TaskID: "task-1", RepositoryID: "repo-1",
+		WorkspaceRelativePath: "added", BaseBranch: "main", CheckoutBranch: "branch-parent-root",
+		Position: 1, Metadata: map[string]interface{}{},
+	}
+	if err := repo.CreateTaskRepository(ctx, branch); err != nil {
+		t.Fatalf("CreateTaskRepository: %v", err)
+	}
+	rescan := &nestedWorkspaceRescanStub{}
+	mgr := newMaterializerWorktreeMgr(t, taskRoot)
+	m := &workspaceSourceMaterializer{
+		repo: repo, worktreeMgr: mgr,
+		branches:  &branchMaterializer{repo: repo, worktreeMgr: mgr, rescanner: rescan, logger: newTestLogger()},
+		rescanner: rescan, logger: newTestLogger(),
+	}
+
+	result, err := m.MaterializeWorkspaceSources(ctx, "task-1", &models.WorkspaceSourceBatch{
+		TaskID: "task-1", Sources: []models.WorkspaceSource{{Repository: branch}},
+		RepositoryPlacement: string(taskservice.WorkspacePlacementCurrentRoot),
+	})
+	if err != nil {
+		t.Fatalf("MaterializeWorkspaceSources: %v", err)
+	}
+	wantPath := filepath.Join(taskRoot, "added")
+	if result == nil || result.WorkspacePath != taskRoot || !reflect.DeepEqual(result.SessionIDs, []string{"session-1"}) {
+		t.Fatalf("materialization result = %#v, want parent workspace and session-1", result)
+	}
+	if _, err := os.Stat(wantPath); err != nil {
+		t.Fatalf("parent-root worktree = %s: %v", wantPath, err)
+	}
+	if len(rescan.rebindCalls) != 0 {
+		t.Fatalf("parent-root addition rebound the session: %+v", rescan.rebindCalls)
+	}
+	if len(rescan.rescanCalls) != 1 || rescan.rescanCalls[0].workDir != taskRoot {
+		t.Fatalf("parent-root rescan calls = %+v, want one rescan at %q", rescan.rescanCalls, taskRoot)
+	}
+}
+
+func TestWorkspaceSourceInventoryRowsKeepSameRepositoryBranchesDistinct(t *testing.T) {
+	first := &models.TaskRepository{
+		ID:                    "task-repo-first",
+		RepositoryID:          "repo-shared",
+		BaseBranch:            "main",
+		CheckoutBranch:        "feature/first",
+		WorkspaceRelativePath: "repo/first",
+		Position:              0,
+	}
+	second := &models.TaskRepository{
+		ID:                    "task-repo-second",
+		RepositoryID:          "repo-shared",
+		BaseBranch:            "main",
+		CheckoutBranch:        "feature/second",
+		WorkspaceRelativePath: "repo/second",
+		Position:              1,
+	}
+	rows := workspaceSourceInventoryRows(
+		"env-1",
+		string(models.ExecutorTypeWorktree),
+		&models.WorkspaceSourceBatch{Sources: []models.WorkspaceSource{{Repository: first}, {Repository: second}}},
+		[]*branchMaterialization{
+			{taskRepositoryID: first.ID, repositoryID: first.RepositoryID, slug: "feature-first", worktree: &worktree.Worktree{ID: "wt-first", Path: "/tasks/task-1/repo/first", Branch: "feature/first"}},
+			{taskRepositoryID: second.ID, repositoryID: second.RepositoryID, slug: "feature-second", worktree: &worktree.Worktree{ID: "wt-second", Path: "/tasks/task-1/repo/second", Branch: "feature/second"}},
+		},
+		nil,
+	)
+	if len(rows) != 2 {
+		t.Fatalf("inventory rows = %+v, want two rows", rows)
+	}
+	if rows[0].WorktreeID != "wt-first" || rows[1].WorktreeID != "wt-second" {
+		t.Fatalf("inventory rows aliased same-repository branches: %+v", rows)
+	}
+}
+
+func TestWorkspaceSourceMaterializer_NestedRescanFailureRestoresCompletedSessionsAndLeavesNoInventory(t *testing.T) {
+	ctx := context.Background()
+	repoPath, taskRoot, primaryPath := setupMaterializerScenario(t)
+	repo := newMaterializerRepo(t)
+	seedMaterializerTask(t, ctx, repo, repoPath, taskRoot, primaryPath)
+	now := time.Now().UTC()
+	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-2", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput, StartedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("CreateTaskSession: %v", err)
+	}
+	branch := &models.TaskRepository{
+		ID:                    "tr-nested-rollback",
+		TaskID:                "task-1",
+		RepositoryID:          "repo-1",
+		WorkspaceRelativePath: "kandev/rollback",
+		BaseBranch:            "main",
+		CheckoutBranch:        "branch-rollback",
+		Position:              1,
+		Metadata:              map[string]interface{}{},
+	}
+	if err := repo.CreateTaskRepository(ctx, branch); err != nil {
+		t.Fatalf("CreateTaskRepository: %v", err)
+	}
+	rescan := &failingWorkspaceRescanStub{failOnRescan: 2}
+	mgr := newMaterializerWorktreeMgr(t, taskRoot)
+	m := &workspaceSourceMaterializer{
+		repo:        repo,
+		worktreeMgr: mgr,
+		branches:    &branchMaterializer{repo: repo, worktreeMgr: mgr, rescanner: rescan, logger: newTestLogger()},
+		rescanner:   rescan,
+		logger:      newTestLogger(),
+	}
+
+	_, err := m.MaterializeWorkspaceSources(ctx, "task-1", &models.WorkspaceSourceBatch{
+		TaskID:              "task-1",
+		RepositoryPlacement: string(taskservice.WorkspacePlacementCurrentRoot),
+		Sources:             []models.WorkspaceSource{{Repository: branch}},
+	})
+	if err == nil {
+		t.Fatal("MaterializeWorkspaceSources succeeded despite second session rescan failure")
+	}
+	if len(rescan.rescanCalls) != 3 || len(rescan.rebindCalls) != 0 {
+		t.Fatalf("rescan calls = %+v, rebind calls = %+v; want two forward rescans, one rescan rollback, and no rebind", rescan.rescanCalls, rescan.rebindCalls)
+	}
+	if rescan.rescanCalls[2].sessionID != rescan.rescanCalls[0].sessionID || rescan.rescanCalls[2].workDir != primaryPath {
+		t.Fatalf("rollback rescan = %+v, want first session restored to %q", rescan.rescanCalls[2], primaryPath)
+	}
+	envRepos, err := repo.ListTaskEnvironmentRepos(ctx, "env-1")
+	if err != nil {
+		t.Fatalf("ListTaskEnvironmentRepos: %v", err)
+	}
+	for _, row := range envRepos {
+		if row != nil && row.WorkspaceRelativePath == "kandev/rollback" {
+			t.Fatalf("nested inventory row survived failed rescan: %+v", row)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(taskRoot, "kandev", "rollback")); !os.IsNotExist(err) {
+		t.Fatalf("new worktree survived rollback: %v", err)
+	}
+}
+
+func TestWorkspaceSourceMaterializer_NestedInventoryFailureRestoresWithRescan(t *testing.T) {
+	ctx := context.Background()
+	repoPath, taskRoot, primaryPath := setupMaterializerScenario(t)
+	baseRepo := newMaterializerRepo(t)
+	seedMaterializerTask(t, ctx, baseRepo, repoPath, taskRoot, primaryPath)
+	branch := &models.TaskRepository{
+		ID: "tr-nested-persist-failure", TaskID: "task-1", RepositoryID: "repo-1",
+		WorkspaceRelativePath: "kandev/persist-failure", BaseBranch: "main", CheckoutBranch: "branch-persist-failure",
+		Position: 1, Metadata: map[string]interface{}{},
+	}
+	if err := baseRepo.CreateTaskRepository(ctx, branch); err != nil {
+		t.Fatalf("CreateTaskRepository: %v", err)
+	}
+	rescan := &nestedWorkspaceRescanStub{}
+	mgr := newMaterializerWorktreeMgr(t, taskRoot)
+	materializerRepo := &failingEnvironmentInventoryRepo{
+		workspaceSourceMaterializerRepo: baseRepo,
+		err:                             errors.New("inventory persistence failed"),
+	}
+	m := &workspaceSourceMaterializer{
+		repo: materializerRepo, worktreeMgr: mgr,
+		branches:  &branchMaterializer{repo: baseRepo, worktreeMgr: mgr, rescanner: rescan, logger: newTestLogger()},
+		rescanner: rescan, logger: newTestLogger(),
+	}
+
+	_, err := m.MaterializeWorkspaceSources(ctx, "task-1", &models.WorkspaceSourceBatch{
+		TaskID: "task-1", RepositoryPlacement: string(taskservice.WorkspacePlacementCurrentRoot),
+		Sources: []models.WorkspaceSource{{Repository: branch}},
+	})
+	if err == nil {
+		t.Fatal("MaterializeWorkspaceSources succeeded despite inventory persistence failure")
+	}
+	if len(rescan.rebindCalls) != 0 {
+		t.Fatalf("inventory failure used workspace rebind for rollback: %+v", rescan.rebindCalls)
+	}
+	if len(rescan.rescanCalls) != 2 || rescan.rescanCalls[0].workDir != primaryPath || rescan.rescanCalls[1].workDir != primaryPath {
+		t.Fatalf("rescan calls = %+v, want forward and rollback rescans at %q", rescan.rescanCalls, primaryPath)
+	}
+	if _, err := os.Stat(filepath.Join(taskRoot, "kandev", "persist-failure")); !os.IsNotExist(err) {
+		t.Fatalf("new worktree survived inventory rollback: %v", err)
+	}
+}
+
 func TestWorkspaceSourceMaterializer_RollsBackLinkAndPathWhenAdoptionFails(t *testing.T) {
 	ctx := context.Background()
 	repo := newMaterializerRepo(t)
@@ -658,6 +926,57 @@ func TestWorkspaceSourceMaterializer_WorktreeLateFolderFailureEmitsNoMaterialize
 type workspaceSourceRescanStub struct {
 	calls []stubRescanCall
 	err   error
+}
+
+type failingWorkspaceRescanStub struct {
+	rescanCalls  []stubRescanCall
+	rebindCalls  []stubRescanCall
+	failOnRescan int
+}
+
+type failingEnvironmentInventoryRepo struct {
+	workspaceSourceMaterializerRepo
+	err error
+}
+
+func (r *failingEnvironmentInventoryRepo) CreateTaskEnvironmentRepo(context.Context, *models.TaskEnvironmentRepo) error {
+	return r.err
+}
+
+func (s *failingWorkspaceRescanStub) RebindWorkspaceForSession(_ context.Context, id, dir string, _ ...[]string) error {
+	s.rebindCalls = append(s.rebindCalls, stubRescanCall{sessionID: id, workDir: dir})
+	return nil
+}
+
+func (s *failingWorkspaceRescanStub) RescanWorkspaceForSession(_ context.Context, id, dir string, _ ...[]string) error {
+	s.rescanCalls = append(s.rescanCalls, stubRescanCall{sessionID: id, workDir: dir})
+	if len(s.rescanCalls) == s.failOnRescan {
+		return errors.New("rescan failed")
+	}
+	return nil
+}
+
+func (s *failingWorkspaceRescanStub) NotifyWorktreeMaterialized(context.Context, lifecycle.MaterializedWorktree) {
+}
+
+type nestedWorkspaceRescanStub struct {
+	rebindCalls []stubRescanCall
+	rescanCalls []stubRescanCall
+	notifyCalls []lifecycle.MaterializedWorktree
+}
+
+func (s *nestedWorkspaceRescanStub) RebindWorkspaceForSession(_ context.Context, id, dir string, _ ...[]string) error {
+	s.rebindCalls = append(s.rebindCalls, stubRescanCall{sessionID: id, workDir: dir})
+	return nil
+}
+
+func (s *nestedWorkspaceRescanStub) RescanWorkspaceForSession(_ context.Context, id, dir string, _ ...[]string) error {
+	s.rescanCalls = append(s.rescanCalls, stubRescanCall{sessionID: id, workDir: dir})
+	return nil
+}
+
+func (s *nestedWorkspaceRescanStub) NotifyWorktreeMaterialized(_ context.Context, wt lifecycle.MaterializedWorktree) {
+	s.notifyCalls = append(s.notifyCalls, wt)
 }
 
 type orderedWorkspaceRebindStub struct {

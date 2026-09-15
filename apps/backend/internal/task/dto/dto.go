@@ -194,6 +194,7 @@ type EnvironmentDTO struct {
 type TaskDTO struct {
 	ID                          string                         `json:"id"`
 	WorkspaceID                 string                         `json:"workspace_id"`
+	InitialWorkspaceLayout      string                         `json:"initial_workspace_layout,omitempty"`
 	WorkflowID                  string                         `json:"workflow_id"`
 	WorkflowStepID              string                         `json:"workflow_step_id"`
 	WorkflowAgentOverrides      *models.WorkflowAgentOverrides `json:"workflow_agent_overrides,omitempty"`
@@ -335,6 +336,7 @@ type TaskRepositoryDTO struct {
 	ID                            string                            `json:"id"`
 	TaskID                        string                            `json:"task_id"`
 	RepositoryID                  string                            `json:"repository_id"`
+	WorkspaceRelativePath         string                            `json:"workspace_relative_path,omitempty"`
 	BaseBranch                    string                            `json:"base_branch"`
 	CheckoutBranch                string                            `json:"checkout_branch,omitempty"`
 	BranchPolicyID                string                            `json:"branch_policy_id,omitempty"`
@@ -1040,6 +1042,7 @@ func FromTaskWithSessionInfo(
 			ID:                            repo.ID,
 			TaskID:                        repo.TaskID,
 			RepositoryID:                  repo.RepositoryID,
+			WorkspaceRelativePath:         repo.WorkspaceRelativePath,
 			BaseBranch:                    repo.BaseBranch,
 			CheckoutBranch:                repo.CheckoutBranch,
 			BranchPolicyID:                repo.BranchPolicyID,
@@ -1069,6 +1072,7 @@ func FromTaskWithSessionInfo(
 	return TaskDTO{
 		ID:                          task.ID,
 		WorkspaceID:                 task.WorkspaceID,
+		InitialWorkspaceLayout:      task.InitialWorkspaceLayout,
 		WorkflowID:                  task.WorkflowID,
 		WorkflowStepID:              task.WorkflowStepID,
 		WorkflowAgentOverrides:      workflowAgentOverrides,

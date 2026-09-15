@@ -1,0 +1,497 @@
+package service
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/kandev/kandev/internal/task/models"
+	"github.com/kandev/kandev/internal/task/repository"
+	"github.com/kandev/kandev/internal/worktree"
+)
+
+// WorkspaceRepositoryPlacement is the closed set of destinations offered by
+// the explicit repository-only attachment flow.
+type WorkspaceRepositoryPlacement string
+
+const (
+	WorkspacePlacementKandevDirectory WorkspaceRepositoryPlacement = "kandev_directory"
+	WorkspacePlacementCurrentRoot     WorkspaceRepositoryPlacement = "current_root"
+	WorkspacePlacementExpandRoot      WorkspaceRepositoryPlacement = "expand_root"
+)
+
+var (
+	ErrInvalidWorkspaceRepositoryPlacement = errors.New("invalid workspace repository placement")
+	ErrWorkspaceSourcePreviewStale         = errors.New("workspace source preview is stale")
+	ErrWorkspaceExpansionUnavailable       = errors.New("workspace expansion requires explicit session recovery")
+)
+
+type WorkspaceRepositoryPlacementOption struct {
+	Placement WorkspaceRepositoryPlacement `json:"placement"`
+	Enabled   bool                         `json:"enabled"`
+	Reason    string                       `json:"reason,omitempty"`
+}
+
+type WorkspaceRepositoryPreviewSource struct {
+	RepositoryID          string `json:"repository_id"`
+	RepositoryName        string `json:"repository_name"`
+	WorkspaceRelativePath string `json:"workspace_relative_path"`
+}
+
+type WorkspaceRepositoryPlacementPreview struct {
+	TaskID              string                               `json:"task_id"`
+	Revision            string                               `json:"revision"`
+	WorkspacePath       string                               `json:"workspace_path"`
+	Placement           WorkspaceRepositoryPlacement         `json:"placement,omitempty"`
+	Sources             []WorkspaceRepositoryPreviewSource   `json:"sources"`
+	SupportedPlacements []WorkspaceRepositoryPlacementOption `json:"supported_placements"`
+}
+
+type workspaceRepositoryPlacementTarget struct {
+	repository *models.TaskRepository
+	relative   string
+}
+
+func validateWorkspaceRepositoryPlacement(placement WorkspaceRepositoryPlacement) error {
+	switch placement {
+	case WorkspacePlacementKandevDirectory, WorkspacePlacementCurrentRoot, WorkspacePlacementExpandRoot:
+		return nil
+	default:
+		return fmt.Errorf("%w: %q", ErrInvalidWorkspaceRepositoryPlacement, placement)
+	}
+}
+
+func (s *Service) applyWorkspaceRepositoryPlacement(
+	ctx context.Context,
+	task *models.Task,
+	batch *models.WorkspaceSourceBatch,
+	placement WorkspaceRepositoryPlacement,
+	expectedRevision string,
+) error {
+	if placement == "" {
+		return nil
+	}
+	if err := validateWorkspaceRepositoryPlacementBatch(batch, placement); err != nil {
+		return err
+	}
+	env, err := s.workspaceRepositoryPlacementEnvironment(ctx, task.ID)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(expectedRevision) == "" {
+		return fmt.Errorf("%w: a current workspace preview is required", ErrWorkspaceSourcePreviewStale)
+	}
+	revision, revisionErr := s.workspaceRepositoryPlacementRevision(ctx, task.ID, env)
+	if revisionErr != nil {
+		return revisionErr
+	}
+	if revision != expectedRevision {
+		return fmt.Errorf("%w: refresh the workspace preview", ErrWorkspaceSourcePreviewStale)
+	}
+	placements, paths, err := s.buildWorkspaceRepositoryPlacementTargets(ctx, task.WorkspaceID, env, batch.Sources, placement)
+	if err != nil {
+		return err
+	}
+	if err := preflightWorkspaceRepositoryDestinations(paths); err != nil {
+		return err
+	}
+	for _, target := range placements {
+		target.repository.WorkspaceRelativePath = target.relative
+	}
+	batch.RepositoryPlacement = string(placement)
+	batch.PreviewRevision = expectedRevision
+	return nil
+}
+
+func validateWorkspaceRepositoryPlacementBatch(batch *models.WorkspaceSourceBatch, placement WorkspaceRepositoryPlacement) error {
+	if err := validateWorkspaceRepositoryPlacement(placement); err != nil {
+		return err
+	}
+	if placement == WorkspacePlacementExpandRoot {
+		return ErrWorkspaceExpansionUnavailable
+	}
+	if batch == nil || len(batch.Sources) == 0 {
+		return fmt.Errorf("%w: placement requires repository sources", ErrInvalidWorkspaceRepositoryPlacement)
+	}
+	if len(batch.RepositoryUpdates) > 0 {
+		return fmt.Errorf("%w: placement cannot be combined with branch updates", ErrInvalidWorkspaceRepositoryPlacement)
+	}
+	for _, source := range batch.Sources {
+		if source.Repository == nil || source.Folder != nil {
+			return fmt.Errorf("%w: placement applies only to repository-only batches", ErrInvalidWorkspaceRepositoryPlacement)
+		}
+	}
+	return nil
+}
+
+func (s *Service) workspaceRepositoryPlacementEnvironment(ctx context.Context, taskID string) (*models.TaskEnvironment, error) {
+	if s.taskEnvironments == nil {
+		return nil, fmt.Errorf("%w: task environment persistence is unavailable", ErrWorkspaceSourceMaterialize)
+	}
+	env, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if env == nil || env.ExecutorType != string(models.ExecutorTypeWorktree) {
+		return nil, fmt.Errorf("%w: explicit placement requires a Worktree environment", ErrUnsupportedWorkspaceSource)
+	}
+	if env.WorkspacePath == "" || env.TaskDirName == "" {
+		return nil, fmt.Errorf("%w: the task workspace root is not ready", ErrInvalidWorkspaceRepositoryPlacement)
+	}
+	return env, nil
+}
+
+func (s *Service) buildWorkspaceRepositoryPlacementTargets(ctx context.Context, workspaceID string, env *models.TaskEnvironment, sources []models.WorkspaceSource, placement WorkspaceRepositoryPlacement) ([]workspaceRepositoryPlacementTarget, []string, error) {
+	targets := make([]workspaceRepositoryPlacementTarget, 0, len(sources))
+	paths := make([]string, 0, len(sources))
+	for _, source := range sources {
+		target, path, err := s.buildWorkspaceRepositoryPlacementTarget(ctx, workspaceID, env, source.Repository, placement)
+		if err != nil {
+			return nil, nil, err
+		}
+		targets = append(targets, target)
+		paths = append(paths, path)
+	}
+	return targets, paths, nil
+}
+
+func (s *Service) buildWorkspaceRepositoryPlacementTarget(ctx context.Context, workspaceID string, env *models.TaskEnvironment, tr *models.TaskRepository, placement WorkspaceRepositoryPlacement) (workspaceRepositoryPlacementTarget, string, error) {
+	entity, err := s.repositoryEntityInWorkspace(ctx, workspaceID, tr.RepositoryID)
+	if err != nil {
+		return workspaceRepositoryPlacementTarget{}, "", err
+	}
+	name, err := WorkspaceSourceRuntimeEntryName(string(models.ExecutorTypeWorktree), entity, tr)
+	if err != nil {
+		return workspaceRepositoryPlacementTarget{}, "", err
+	}
+	relative, err := workspaceRepositoryRelativePath(env, placement, name)
+	if err != nil {
+		return workspaceRepositoryPlacementTarget{}, "", err
+	}
+	path, err := workspaceRepositoryPlacementPath(env, relative)
+	if err != nil {
+		return workspaceRepositoryPlacementTarget{}, "", err
+	}
+	return workspaceRepositoryPlacementTarget{repository: tr, relative: relative}, path, nil
+}
+
+func workspaceRepositoryRelativePath(env *models.TaskEnvironment, placement WorkspaceRepositoryPlacement, entry string) (string, error) {
+	if env == nil || entry == "" || filepath.Base(entry) != entry || worktree.SanitizeRepoDirName(entry) != entry {
+		return "", fmt.Errorf("%w: unsafe repository entry", ErrInvalidWorkspaceRepositoryPlacement)
+	}
+	layout := EffectiveTaskEnvironmentWorkspaceLayout(env)
+	if layout == WorkspaceLayoutTaskRoot && placement == WorkspacePlacementKandevDirectory {
+		return "", fmt.Errorf("%w: the task already uses the parent workspace layout", ErrInvalidWorkspaceRepositoryPlacement)
+	}
+	rootEntry := ""
+	if layout != WorkspaceLayoutTaskRoot {
+		rootEntry = filepath.Base(filepath.Clean(env.WorkspacePath))
+		if rootEntry == "." || rootEntry == string(filepath.Separator) || rootEntry == "" {
+			return "", fmt.Errorf("%w: cannot identify current workspace root", ErrInvalidWorkspaceRepositoryPlacement)
+		}
+	}
+	var relative string
+	switch placement {
+	case WorkspacePlacementKandevDirectory:
+		relative = filepath.Join(rootEntry, "kandev", entry)
+	case WorkspacePlacementCurrentRoot:
+		relative = filepath.Join(rootEntry, entry)
+	case WorkspacePlacementExpandRoot:
+		relative = entry
+	default:
+		return "", fmt.Errorf("%w: %q", ErrInvalidWorkspaceRepositoryPlacement, placement)
+	}
+	return filepath.ToSlash(relative), nil
+}
+
+// EffectiveTaskEnvironmentWorkspaceLayout returns the current physical layout,
+// including legacy environments that predate the persisted workspace_layout.
+func EffectiveTaskEnvironmentWorkspaceLayout(env *models.TaskEnvironment) string {
+	if env == nil {
+		return WorkspaceLayoutRepository
+	}
+	workspacePath := filepath.Clean(env.WorkspacePath)
+	hasChildWorktree := false
+	for _, repo := range env.Repos {
+		if repo == nil || repo.WorktreePath == "" {
+			continue
+		}
+		worktreePath := filepath.Clean(repo.WorktreePath)
+		if worktreePath == workspacePath {
+			return WorkspaceLayoutRepository
+		}
+		if filepath.Dir(worktreePath) == workspacePath {
+			hasChildWorktree = true
+		}
+	}
+	if hasChildWorktree {
+		return WorkspaceLayoutTaskRoot
+	}
+	if env.TaskDirName != "" && filepath.Base(filepath.Clean(env.WorkspacePath)) == env.TaskDirName {
+		return WorkspaceLayoutTaskRoot
+	}
+	if env.WorkspaceLayout != "" {
+		return env.WorkspaceLayout
+	}
+	return WorkspaceLayoutRepository
+}
+
+func workspaceRepositoryPlacementPath(env *models.TaskEnvironment, relative string) (string, error) {
+	if env == nil || env.WorkspacePath == "" || relative == "" {
+		return "", fmt.Errorf("%w: workspace destination is not available", ErrInvalidWorkspaceRepositoryPlacement)
+	}
+	root := env.WorkspacePath
+	if EffectiveTaskEnvironmentWorkspaceLayout(env) != WorkspaceLayoutTaskRoot {
+		root = filepath.Dir(root)
+	}
+	relativePath := filepath.Clean(filepath.FromSlash(relative))
+	if relativePath == "." || filepath.IsAbs(relativePath) || relativePath == ".." || strings.HasPrefix(relativePath, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("%w: unsafe workspace destination %q", ErrInvalidWorkspaceRepositoryPlacement, relative)
+	}
+	target := filepath.Join(root, relativePath)
+	contained, err := filepath.Rel(root, target)
+	if err != nil || contained == ".." || strings.HasPrefix(contained, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("%w: workspace destination escapes task root", ErrInvalidWorkspaceRepositoryPlacement)
+	}
+	return target, nil
+}
+
+func preflightWorkspaceRepositoryDestinations(paths []string) error {
+	seen := make(map[string]string, len(paths))
+	for _, path := range paths {
+		if path == "" {
+			return fmt.Errorf("%w: workspace destination is empty", ErrInvalidWorkspaceRepositoryPlacement)
+		}
+		key := strings.ToLower(filepath.ToSlash(filepath.Clean(path)))
+		if previous, found := seen[key]; found {
+			return workspaceRepositoryPlacementConflict(fmt.Sprintf("%q collides with %q", path, previous))
+		}
+		seen[key] = path
+		if _, err := os.Lstat(path); err == nil {
+			return workspaceRepositoryPlacementConflict(fmt.Sprintf("%q already exists", path))
+		} else if !errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("%w: inspect workspace destination %q: %v", ErrInvalidWorkspaceRepositoryPlacement, path, err)
+		}
+		entries, err := os.ReadDir(filepath.Dir(path))
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return fmt.Errorf("%w: inspect workspace destination directory %q: %v", ErrInvalidWorkspaceRepositoryPlacement, filepath.Dir(path), err)
+		}
+		name := filepath.Base(path)
+		for _, entry := range entries {
+			if entry.Name() != name && strings.EqualFold(entry.Name(), name) {
+				return workspaceRepositoryPlacementConflict(fmt.Sprintf("%q differs from existing entry %q only by case", name, entry.Name()))
+			}
+		}
+	}
+	return nil
+}
+
+func workspaceRepositoryPlacementConflict(detail string) error {
+	return fmt.Errorf("%w: %w: %s", ErrWorkspaceSourceConflict, worktree.ErrWorkspacePathOccupied, detail)
+}
+
+func (s *Service) PreviewWorkspaceRepositoryPlacement(ctx context.Context, taskID string, sources []WorkspaceSourceInput, placement WorkspaceRepositoryPlacement) (*WorkspaceRepositoryPlacementPreview, error) {
+	if taskID == "" || len(sources) == 0 {
+		return nil, fmt.Errorf("%w: task_id and sources are required", ErrInvalidWorkspaceSource)
+	}
+	if err := validateWorkspaceRepositoryPlacement(placement); err != nil {
+		return nil, err
+	}
+	if err := s.authorizeTaskID(ctx, taskID); err != nil {
+		return nil, err
+	}
+	task, err := s.tasks.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if task == nil {
+		return nil, fmt.Errorf("%w: %s", repository.ErrTaskNotFound, taskID)
+	}
+	env, err := s.workspaceRepositoryPlacementEnvironment(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	layout := EffectiveTaskEnvironmentWorkspaceLayout(env)
+	if layout == WorkspaceLayoutTaskRoot && placement == WorkspacePlacementKandevDirectory {
+		return nil, fmt.Errorf("%w: the task already uses the parent workspace layout", ErrInvalidWorkspaceRepositoryPlacement)
+	}
+	if placement == WorkspacePlacementExpandRoot {
+		return nil, ErrWorkspaceExpansionUnavailable
+	}
+	preview := &WorkspaceRepositoryPlacementPreview{
+		TaskID:        taskID,
+		WorkspacePath: env.WorkspacePath,
+		Placement:     placement,
+		Sources:       make([]WorkspaceRepositoryPreviewSource, 0, len(sources)),
+		SupportedPlacements: []WorkspaceRepositoryPlacementOption{
+			{Placement: WorkspacePlacementKandevDirectory, Enabled: layout != WorkspaceLayoutTaskRoot, Reason: placementUnavailableReason(layout != WorkspaceLayoutTaskRoot, "the task already uses the parent workspace layout")},
+			{Placement: WorkspacePlacementCurrentRoot, Enabled: true},
+			{Placement: WorkspacePlacementExpandRoot, Enabled: false, Reason: "explicit session recovery is required before expanding the workspace root"},
+		},
+	}
+	previewSources, paths, err := s.buildWorkspaceRepositoryPlacementPreviewSources(ctx, task.WorkspaceID, env, sources, placement)
+	if err != nil {
+		return nil, err
+	}
+	preview.Sources = previewSources
+	if err := preflightWorkspaceRepositoryDestinations(paths); err != nil {
+		return nil, err
+	}
+	preview.Revision, err = s.workspaceRepositoryPlacementRevision(ctx, taskID, env)
+	if err != nil {
+		return nil, err
+	}
+	return preview, nil
+}
+
+func (s *Service) buildWorkspaceRepositoryPlacementPreviewSources(ctx context.Context, workspaceID string, env *models.TaskEnvironment, sources []WorkspaceSourceInput, placement WorkspaceRepositoryPlacement) ([]WorkspaceRepositoryPreviewSource, []string, error) {
+	previewSources := make([]WorkspaceRepositoryPreviewSource, 0, len(sources))
+	paths := make([]string, 0, len(sources))
+	for _, source := range sources {
+		if source.Kind != WorkspaceSourceRepository || source.RepositoryID == "" || repositoryLocatorCount(source) != 1 {
+			return nil, nil, fmt.Errorf("%w: preview requires existing repository IDs", ErrInvalidWorkspaceSource)
+		}
+		entity, err := s.repositoryEntityInWorkspace(ctx, workspaceID, source.RepositoryID)
+		if err != nil {
+			return nil, nil, err
+		}
+		tr := &models.TaskRepository{RepositoryID: source.RepositoryID, BaseBranch: source.BaseBranch, CheckoutBranch: source.CheckoutBranch}
+		if tr.BaseBranch == "" {
+			tr.BaseBranch = entity.DefaultBranch
+		}
+		target, path, err := s.buildWorkspaceRepositoryPlacementTarget(ctx, workspaceID, env, tr, placement)
+		if err != nil {
+			return nil, nil, err
+		}
+		paths = append(paths, path)
+		previewSources = append(previewSources, WorkspaceRepositoryPreviewSource{RepositoryID: entity.ID, RepositoryName: entity.Name, WorkspaceRelativePath: target.relative})
+	}
+	return previewSources, paths, nil
+}
+
+func (s *Service) validateExactWorkspaceRepositoryPlacement(ctx context.Context, task *models.Task, sources []WorkspaceSourceInput, placement WorkspaceRepositoryPlacement) error {
+	if err := validateWorkspaceRepositoryPlacement(placement); err != nil {
+		return err
+	}
+	if placement == WorkspacePlacementExpandRoot {
+		return ErrWorkspaceExpansionUnavailable
+	}
+	env, existing, err := s.exactWorkspaceRepositoryPlacementState(ctx, task.ID)
+	if err != nil {
+		return err
+	}
+	for _, source := range sources {
+		if err := s.validateExactWorkspaceRepositorySource(ctx, task.WorkspaceID, env, existing, source, placement); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) exactWorkspaceRepositoryPlacementState(ctx context.Context, taskID string) (*models.TaskEnvironment, []*models.TaskRepository, error) {
+	if s.taskEnvironments == nil {
+		return nil, nil, fmt.Errorf("%w: task environment persistence is unavailable", ErrWorkspaceSourceMaterialize)
+	}
+	env, err := s.taskEnvironments.GetTaskEnvironmentByTaskID(ctx, taskID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if env == nil || env.ExecutorType != string(models.ExecutorTypeWorktree) || env.WorkspacePath == "" || env.TaskDirName == "" {
+		return nil, nil, fmt.Errorf("%w: the task workspace root is not ready", ErrInvalidWorkspaceRepositoryPlacement)
+	}
+	existing, err := s.taskRepos.ListTaskRepositories(ctx, taskID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return env, existing, nil
+}
+
+func (s *Service) validateExactWorkspaceRepositorySource(ctx context.Context, workspaceID string, env *models.TaskEnvironment, existing []*models.TaskRepository, source WorkspaceSourceInput, placement WorkspaceRepositoryPlacement) error {
+	if source.Kind != WorkspaceSourceRepository || source.RepositoryID == "" || repositoryLocatorCount(source) != 1 {
+		return fmt.Errorf("%w: exact placement retries require repository IDs", ErrInvalidWorkspaceSource)
+	}
+	entity, err := s.repositoryEntityInWorkspace(ctx, workspaceID, source.RepositoryID)
+	if err != nil {
+		return err
+	}
+	base := source.BaseBranch
+	if base == "" {
+		base = entity.DefaultBranch
+	}
+	matched := findExactWorkspaceRepository(existing, source.RepositoryID, base, source.CheckoutBranch)
+	if matched == nil {
+		return fmt.Errorf("%w: source was not already attached", ErrWorkspaceSourcePreviewStale)
+	}
+	name, err := WorkspaceSourceRuntimeEntryName(string(models.ExecutorTypeWorktree), entity, matched)
+	if err != nil {
+		return err
+	}
+	expected, err := workspaceRepositoryRelativePath(env, placement, name)
+	if err != nil {
+		return err
+	}
+	if matched.WorkspaceRelativePath != expected {
+		return fmt.Errorf("%w: refresh the workspace preview", ErrWorkspaceSourcePreviewStale)
+	}
+	return nil
+}
+
+func (s *Service) repositoryEntityInWorkspace(ctx context.Context, workspaceID, repositoryID string) (*models.Repository, error) {
+	entity, err := s.repoEntities.GetRepository(ctx, repositoryID)
+	if err != nil {
+		return nil, err
+	}
+	if entity == nil {
+		return nil, fmt.Errorf("%w: repository %q", repository.ErrRepositoryNotFound, repositoryID)
+	}
+	if entity.WorkspaceID != workspaceID {
+		return nil, fmt.Errorf("%w: repository %q does not belong to workspace %q", ErrTaskReferenceNotFound, repositoryID, workspaceID)
+	}
+	return entity, nil
+}
+
+func findExactWorkspaceRepository(existing []*models.TaskRepository, repositoryID, baseBranch, checkoutBranch string) *models.TaskRepository {
+	for _, candidate := range existing {
+		if candidate != nil && candidate.RepositoryID == repositoryID && candidate.BaseBranch == baseBranch && candidate.CheckoutBranch == checkoutBranch {
+			return candidate
+		}
+	}
+	return nil
+}
+
+func placementUnavailableReason(enabled bool, reason string) string {
+	if enabled {
+		return ""
+	}
+	return reason
+}
+
+func (s *Service) workspaceRepositoryPlacementRevision(ctx context.Context, taskID string, env *models.TaskEnvironment) (string, error) {
+	sessions, err := s.sessions.ListTaskSessions(ctx, taskID)
+	if err != nil {
+		return "", err
+	}
+	h := sha256.New()
+	values := []string{env.ID, fmt.Sprint(env.OwnershipGeneration), env.TaskDirName, env.WorkspacePath, env.WorkspaceLayout}
+	for _, row := range env.Repos {
+		if row == nil {
+			continue
+		}
+		values = append(values, row.RepositoryID, row.BranchSlug, row.WorktreeID, row.WorktreePath, row.WorkspaceRelativePath)
+	}
+	for _, session := range sessions {
+		if session != nil {
+			values = append(values, session.ID, session.TaskEnvironmentID, session.WorkspacePath, string(session.State))
+		}
+	}
+	_, _ = h.Write([]byte(strings.Join(values, "\x00")))
+	return hex.EncodeToString(h.Sum(nil)), nil
+}

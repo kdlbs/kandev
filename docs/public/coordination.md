@@ -248,6 +248,13 @@ Read the consequence summary in the dialog or drawer before submitting. It descr
 current executor will restart the agent or update the live remote workspace. **Cancel** or closing
 the surface sends no attachment request and leaves the workspace unchanged.
 
+On a single-repository Worktree task, a repository-only batch also shows a placement choice. Choose
+`kandev/` to group new repositories below the current root, or choose the current root to place each
+one beside the existing repository files. The preview shows the exact relative paths. These nested
+choices keep the agent CWD and workspace processes unchanged, and Kandev protects the outer Git
+worktree from staging the nested checkouts. Parent-rooted tasks add repository siblings directly.
+Workspace-root expansion stays disabled until explicit idle session recovery is available.
+
 Kandev rejects the entire request if a source is invalid, duplicated, inaccessible, or cannot be materialized. A failure removes new source records and Kandev-owned materialization; existing task contents remain intact. Attachments persist across reload, relaunch, and reset. A missing persisted folder is surfaced during a new or reset environment rather than silently omitted.
 
 When a second source promotes a single-repository workspace to the task root, Kandev restarts the

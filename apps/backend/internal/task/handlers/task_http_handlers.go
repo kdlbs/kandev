@@ -35,7 +35,9 @@ import (
 )
 
 type httpWorkspaceSourcesRequest struct {
-	Sources []json.RawMessage `json:"sources"`
+	Sources             []json.RawMessage                    `json:"sources"`
+	RepositoryPlacement service.WorkspaceRepositoryPlacement `json:"repository_placement,omitempty"`
+	PreviewRevision     string                               `json:"preview_revision,omitempty"`
 }
 
 const taskDeleteConfirmationHeader = "X-Kandev-Task-Delete-Confirmation"
@@ -70,13 +72,39 @@ func (h *TaskHandlers) httpAttachWorkspaceSources(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	result, err := h.service.AttachWorkspaceSources(c.Request.Context(), service.AttachWorkspaceSourcesRequest{TaskID: c.Param("id"), Sources: sources})
+	result, err := h.service.AttachWorkspaceSources(c.Request.Context(), service.AttachWorkspaceSourcesRequest{
+		TaskID:              c.Param("id"),
+		Sources:             sources,
+		RepositoryPlacement: body.RepositoryPlacement,
+		PreviewRevision:     body.PreviewRevision,
+	})
 	if err != nil {
 		h.writeWorkspaceSourceError(c, err)
 		return
 	}
 	response := gin.H{"task_id": result.Task.ID, "repositories": result.Task.Repositories, "workspace_folders": result.Task.WorkspaceFolders, "workspace_path": result.WorkspacePath, "session_ids": result.SessionIDs}
 	c.JSON(http.StatusOK, response)
+}
+
+func (h *TaskHandlers) httpPreviewWorkspaceSources(c *gin.Context) {
+	var body httpWorkspaceSourcesRequest
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&body); err != nil || len(body.Sources) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "sources is required"})
+		return
+	}
+	sources, err := parseHTTPWorkspaceSources(body.Sources)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	preview, err := h.service.PreviewWorkspaceRepositoryPlacement(c.Request.Context(), c.Param("id"), sources, body.RepositoryPlacement)
+	if err != nil {
+		h.writeWorkspaceSourceError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, preview)
 }
 
 func parseHTTPWorkspaceSources(raw []json.RawMessage) ([]service.WorkspaceSourceInput, error) {
@@ -119,6 +147,12 @@ func workspaceSourceHTTPStatus(err error) int {
 	switch {
 	case errors.Is(err, service.ErrInvalidWorkspaceSource):
 		return http.StatusBadRequest
+	case errors.Is(err, service.ErrInvalidWorkspaceRepositoryPlacement):
+		return http.StatusBadRequest
+	case errors.Is(err, service.ErrWorkspaceSourcePreviewStale):
+		return http.StatusConflict
+	case errors.Is(err, service.ErrWorkspaceExpansionUnavailable):
+		return http.StatusUnprocessableEntity
 	case errors.Is(err, taskrepo.ErrTaskNotFound), errors.Is(err, taskrepository.ErrRepositoryNotFound), errors.Is(err, service.ErrTaskRepositoryNotFound):
 		return http.StatusNotFound
 	case errors.Is(err, service.ErrWorkspaceSourceConflict), errors.Is(err, service.ErrWorkspaceSourceActive):
@@ -957,6 +991,7 @@ type httpCreateTaskRequest struct {
 	ParentID               string                 `json:"parent_id,omitempty"`
 	WorkspacePath          string                 `json:"workspace_path,omitempty"`
 	BlockedBy              []string               `json:"blocked_by,omitempty"`
+	InitialWorkspaceLayout string `json:"initial_workspace_layout,omitempty"`
 	// StartWhenUnblocked records the agent start as an intent consumed by
 	// dependency resolution. nil derives it from StartAgent when BlockedBy is set.
 	StartWhenUnblocked *bool  `json:"start_when_unblocked,omitempty"`
@@ -1190,6 +1225,7 @@ func (h *TaskHandlers) httpCreateTask(c *gin.Context) {
 		Labels:                                labels,
 		ExternalID:                            body.ExternalID,
 		WorkspacePolicy:                       &wsPolicy,
+		InitialWorkspaceLayout: body.InitialWorkspaceLayout,
 	})
 	if err != nil {
 		handleNotFound(c, h.logger, err, "task not created")

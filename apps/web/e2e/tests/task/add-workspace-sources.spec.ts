@@ -300,6 +300,7 @@ test.describe("Attach local workspace sources", () => {
       backend.tmpDir,
       folderPath,
     );
+    await expect(testPage.getByTestId("folder-picker-popover")).toHaveCount(0);
     await prCapture.screenshot("workspace-actions-mixed-sources", {
       caption: "Desktop Add to workspace dialog with a local folder configured",
     });

@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/worktree"
 )
+
+const workspaceLayoutTaskRoot = "task_root"
 
 func ownedDirectoryLinkOwner(taskID, taskDirName string) worktree.OwnedDirectoryLinkOwner {
 	return worktree.OwnedDirectoryLinkOwner{TaskID: taskID, TaskDirName: taskDirName}
@@ -40,36 +43,56 @@ func reconcileWorkspaceSources(_ context.Context, root string, folders []Workspa
 	return nil
 }
 
-// reconcileWorkspaceRepositories recreates Kandev-owned repository links below
-// root. A spec whose repository IS the workspace root is skipped: for the local
-// executor the primary repository is the workspace root itself, so linking it
-// would plant a self-referential junction/symlink inside the user's own
-// checkout. This mirrors buildRemoteWorkspaceRepositories, which skips the
-// primary for the same reason. The comparison is by filesystem identity, not
-// by index, because a host-materialized multi-repo local task roots the
-// workspace at ~/.kandev/tasks/<taskDir> — there repositories[0] is a real
-// sibling and must keep its link.
+// reconcileWorkspaceRepositories preserves the legacy call shape used by tests
+// and older callers whose root is already the directory where links belong.
 func reconcileWorkspaceRepositories(root string, repositories []WorkspaceRepositorySpec, log *logger.Logger, owner worktree.OwnedDirectoryLinkOwner) error {
+	return reconcileWorkspaceRepositoriesAtLayout(root, "", repositories, log, owner)
+}
+
+// reconcileWorkspaceRepositoriesAtLayout recreates Kandev-owned repository
+// links for a durable workspace. WorkspaceRelativePath is rooted at the task
+// directory, so nested placements must be resolved from the task root before
+// creating their link. A spec whose destination is already the repository is
+// skipped: linking it would plant a self-referential junction/symlink inside
+// the checkout. The comparison is by filesystem identity, not by index,
+// because a host-materialized multi-repo local task roots the workspace at
+// ~/.kandev/tasks/<taskDir> and the primary repository is then a sibling.
+func reconcileWorkspaceRepositoriesAtLayout(workspacePath, workspaceLayout string, repositories []WorkspaceRepositorySpec, log *logger.Logger, owner worktree.OwnedDirectoryLinkOwner) error {
 	if len(repositories) == 0 {
 		return nil
 	}
-	if root == "" {
+	if workspacePath == "" {
 		return fmt.Errorf("workspace root is required for durable repositories")
 	}
-	for _, repository := range repositories {
+	for index, repository := range repositories {
 		if !isWorkspaceEntryName(repository.RepoName) || repository.RepositoryPath == "" {
 			return fmt.Errorf("invalid durable workspace repository")
 		}
-		if sameDirectory(root, repository.RepositoryPath) {
-			warnSelfReferentialEntry(root, repository.RepoName, log)
+		linkRoot, linkName, target := workspacePath, workspaceRepositoryEntryName(repository.RepoName), ""
+		switch {
+		case repository.WorkspaceRelativePath != "":
+			target = workspaceRepositoryCandidate(workspacePath, workspaceLayout, repository.RepoName, repository.WorkspaceRelativePath)
+			if target == "" {
+				return fmt.Errorf("invalid durable workspace repository %q placement", repository.RepoName)
+			}
+			linkRoot, linkName = filepath.Dir(target), filepath.Base(target)
+		case workspaceLayout == workspaceLayoutTaskRoot:
+			target = filepath.Join(workspacePath, linkName)
+		case index == 0:
+			target = workspacePath
+		default:
+			target = filepath.Join(linkRoot, linkName)
+		}
+		if sameDirectory(target, repository.RepositoryPath) {
+			warnSelfReferentialEntry(linkRoot, linkName, log)
 			continue
 		}
 		info, err := os.Stat(repository.RepositoryPath)
 		if err != nil || !info.IsDir() {
 			return fmt.Errorf("workspace repository %q target is missing: %s", repository.RepoName, repository.RepositoryPath)
 		}
-		if _, err := worktree.EnsureOwnedDirectoryLink(root, repository.RepoName, repository.RepositoryPath, owner); err != nil {
-			return fmt.Errorf("link workspace repository %q: %w", repository.RepoName, err)
+		if _, err := worktree.EnsureOwnedDirectoryLink(linkRoot, linkName, repository.RepositoryPath, owner); err != nil {
+			return fmt.Errorf("link workspace repository %q: %w", linkName, err)
 		}
 	}
 	return nil
@@ -166,9 +189,41 @@ func workspaceRepositorySpecsFromLaunch(req *LaunchRequest) []WorkspaceRepositor
 			WorktreeBranchTemplate: spec.WorktreeBranchTemplate, PullBeforeWorktree: spec.PullBeforeWorktree,
 			RemoteSyncHandled: spec.RemoteSyncHandled,
 			BranchSlug:        spec.BranchSlug, BranchIdentitySlug: spec.BranchIdentitySlug,
+			WorkspaceRelativePath: spec.WorkspaceRelativePath,
 		})
 	}
 	return result
+}
+
+// workspaceRepositoryCandidate resolves the physical checkout represented by
+// one durable repository spec. WorkspaceRelativePath is rooted at the task
+// directory. A repository-layout workspace exposes the primary checkout as
+// WorkspacePath, so its task root is the parent of that path; a task-root
+// workspace exposes the task directory itself.
+func workspaceRepositoryCandidate(workspacePath, workspaceLayout, repoName, workspaceRelativePath string) string {
+	if workspacePath == "" {
+		return ""
+	}
+	if workspaceRelativePath != "" {
+		root := workspacePath
+		if workspaceLayout != workspaceLayoutTaskRoot {
+			root = filepath.Dir(workspacePath)
+		}
+		relative := filepath.Clean(filepath.FromSlash(workspaceRelativePath))
+		if relative == "." || filepath.IsAbs(relative) || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return ""
+		}
+		candidate := filepath.Join(root, relative)
+		contained, err := filepath.Rel(root, candidate)
+		if err != nil || contained == ".." || strings.HasPrefix(contained, ".."+string(filepath.Separator)) {
+			return ""
+		}
+		return candidate
+	}
+	if workspaceLayout == workspaceLayoutTaskRoot {
+		return filepath.Join(workspacePath, workspaceRepositoryEntryName(repoName))
+	}
+	return workspacePath
 }
 
 func workspaceSourceRoots(folders []WorkspaceFolderSpec, repositories []WorkspaceRepositorySpec) []string {

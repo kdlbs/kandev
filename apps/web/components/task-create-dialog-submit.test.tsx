@@ -72,6 +72,7 @@ type BuildCreateTaskPayloadCall = {
   agentProfileId: string;
   executorId: string;
   executorProfileId: string;
+  initialWorkspaceLayout?: "repository" | "task_root";
   withAgent: boolean;
   trimmedDescription: string;
 };
@@ -197,6 +198,7 @@ function makeDeps(overrides: Partial<SubmitHandlersDeps>): SubmitHandlersDeps {
     setExecutorId: vi.fn(),
     setSelectedWorkflowId: vi.fn(),
     setFetchedSteps: vi.fn(),
+    setInitialWorkspaceLayout: vi.fn(),
     clearDraft: vi.fn(),
     freshBranchEnabled: false,
     isLocalExecutor: false,
@@ -967,6 +969,22 @@ describe("useTaskSubmitHandlers — handleCreateSubmit (CLI-mode parity)", () =>
     };
     expect(payloadArg.withAgent).toBe(true);
     expect(payloadArg.trimmedDescription).toBe("refactor module");
+  });
+
+  it("passes the selected initial workspace layout to the create payload builder", async () => {
+    const deps = makeDeps({
+      initialWorkspaceLayout: "task_root",
+      descriptionInputRef: makeRef("use the parent workspace"),
+    });
+    const { result } = renderHook(() => useTaskSubmitHandlers(deps));
+
+    await act(async () => {
+      await result.current.handleSubmit({ preventDefault: () => {} } as never);
+    });
+
+    expect(buildCreateTaskPayloadMock).toHaveBeenCalledWith(
+      expect.objectContaining({ initialWorkspaceLayout: "task_root" }),
+    );
   });
 
   it("replaces the queued last-used overlay with the final create payload", async () => {

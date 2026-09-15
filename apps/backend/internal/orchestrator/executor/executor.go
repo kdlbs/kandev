@@ -576,6 +576,7 @@ type LaunchAgentRequest struct {
 	IsEphemeral           bool                // Ephemeral task (quick chat) — enables fallback workspace creation
 	WorkspacePath         string              // Optional host folder for repo-less tasks (overrides scratch fallback)
 	OriginalWorkspacePath string              // First agent-visible path used for native restore policy
+	WorkspaceLayout string // Persisted Worktree agent-root layout
 
 	// IsPassthrough is the session's mode snapshot (TaskSession.IsPassthrough)
 	// at session-creation time. Forwarded to the lifecycle manager so
@@ -630,7 +631,8 @@ type LaunchAgentRequest struct {
 	BranchSlug string
 	// BranchIdentitySlug is the stable branch key for top-level single-repo
 	// reuse. It may be non-empty when BranchSlug is empty to preserve a flat path.
-	BranchIdentitySlug string
+	BranchIdentitySlug    string
+	WorkspaceRelativePath string
 
 	// Repositories carries one entry per repository when the launch is multi-repo.
 	// When non-empty it is the source of truth and the legacy single-repo
@@ -693,6 +695,9 @@ type RepoSpec struct {
 	// persisted environment metadata. It may be non-empty even when BranchSlug
 	// is empty so the primary branch can keep the legacy flat path.
 	BranchIdentitySlug string
+	// WorkspaceRelativePath is a server-owned destination relative to the task
+	// root. It is empty for the legacy repository layout.
+	WorkspaceRelativePath string
 }
 
 // McpModeConfig activates config-mode MCP tools (workflow steps, agents, MCP
@@ -821,6 +826,7 @@ type LaunchAgentResponse struct {
 type RepoWorktreeResult struct {
 	TaskRepositoryID          string
 	RepositoryID              string
+	WorkspaceRelativePath     string
 	BranchSlug                string
 	WorktreeID                string
 	WorktreeBranch            string

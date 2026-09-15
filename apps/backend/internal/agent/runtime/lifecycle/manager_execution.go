@@ -456,7 +456,7 @@ func validateWorkspaceRepositoryInfo(
 	repository WorkspaceRepositorySpec,
 	deferManagedCloneMismatch bool,
 ) error {
-	candidate := workspaceRepositoryCandidate(ctx, info, index, repository)
+	candidate := executionWorkspaceRepositoryCandidate(ctx, info, index, repository)
 	expected := localWorkspaceExpectedRepository(info, repository)
 	err := validateLocalRepositoryWorkspace(ctx, candidate, expected)
 	if err == nil || managedCloneMismatchCanDefer(ctx, info, repository, candidate, deferManagedCloneMismatch) {
@@ -465,13 +465,15 @@ func validateWorkspaceRepositoryInfo(
 	return err
 }
 
-func workspaceRepositoryCandidate(
+func executionWorkspaceRepositoryCandidate(
 	ctx context.Context,
 	info *WorkspaceInfo,
 	index int,
 	repository WorkspaceRepositorySpec,
 ) string {
 	switch {
+	case repository.WorkspaceRelativePath != "" || info.WorkspaceLayout == workspaceLayoutTaskRoot:
+		return workspaceRepositoryCandidate(info.WorkspacePath, info.WorkspaceLayout, repository.RepoName, repository.WorkspaceRelativePath)
 	case info.ExecutorType == string(models.ExecutorTypeWorktree) && repository.WorktreePath != "":
 		return repository.WorktreePath
 	case index > 0:
@@ -1028,7 +1030,7 @@ func (m *Manager) reconcileExecutionWorkspace(ctx context.Context, taskID string
 		return err
 	}
 	if info.ExecutorType == string(models.ExecutorTypeLocal) || info.ExecutorType == "local_pc" {
-		if err := reconcileWorkspaceRepositories(info.WorkspacePath, info.WorkspaceRepositories, m.logger, owner); err != nil {
+		if err := reconcileWorkspaceRepositoriesAtLayout(info.WorkspacePath, info.WorkspaceLayout, info.WorkspaceRepositories, m.logger, owner); err != nil {
 			return err
 		}
 	}
@@ -1315,6 +1317,7 @@ func (m *Manager) reconcileWorkspaceWorktrees(ctx context.Context, taskID string
 			WorktreeBranchTemplate: repository.WorktreeBranchTemplate, PullBeforeWorktree: repository.PullBeforeWorktree,
 			RemoteSyncHandled: repository.RemoteSyncHandled,
 			BranchSlug:        repository.BranchSlug, BranchIdentitySlug: repository.BranchIdentitySlug,
+			WorkspaceRelativePath: repository.WorkspaceRelativePath,
 		}); err != nil {
 			return fmt.Errorf("recreate workspace worktree %q: %w", repository.RepoName, err)
 		}

@@ -80,6 +80,7 @@ type repoInfo struct {
 	PRBase                     *models.PRBase
 	QualifiedPRBase            *models.PRBase
 	Position                   int
+	WorkspaceRelativePath      string
 	WorktreeBranchPrefix       string
 	WorktreeBranchTemplate     string
 	PullBeforeWorktree         bool
@@ -186,6 +187,7 @@ func (e *Executor) resolveTaskRepoInfoForSession(
 		CheckoutBranch:          tr.CheckoutBranch,
 		PRNumber:                prNumberFromMetadata(tr.Metadata),
 		Position:                tr.Position,
+		WorkspaceRelativePath: tr.WorkspaceRelativePath,
 	}
 	if binding, found, err := models.LoadRemoteContribution(tr.Metadata); err != nil {
 		return nil, fmt.Errorf("load remote contribution for task repository %q: %w", tr.ID, err)
@@ -2089,6 +2091,7 @@ func newResumeLaunchRequest(
 		executionProfileID = session.AgentProfileID
 	}
 	req := &LaunchAgentRequest{
+		WorkspaceLayout: task.InitialWorkspaceLayout,
 		TaskID:                       task.ID,
 		SessionSettingsPolicy:        options.SettingsPolicy,
 		RequiredNativeConversationID: options.RequiredNativeConversationID,
@@ -2815,6 +2818,7 @@ func (e *Executor) applyResumeWorktreeConfig(
 	primaryTaskRepo, _ := e.repo.GetPrimaryTaskRepository(ctx, task.ID)
 	if primaryTaskRepo != nil && primaryTaskRepo.RepositoryID == repositoryID {
 		req.TaskRepositoryID = primaryTaskRepo.ID
+		req.WorkspaceRelativePath = primaryTaskRepo.WorkspaceRelativePath
 	}
 	if primaryTaskRepo != nil && primaryTaskRepo.CheckoutBranch != "" {
 		req.CheckoutBranch = primaryTaskRepo.CheckoutBranch

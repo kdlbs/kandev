@@ -4,11 +4,16 @@ import { useEffect, useRef, useState } from "react";
 import { AddWorkspaceSourcesDialog } from "./add-workspace-sources-dialog";
 import { StateProvider, useAppStore, useAppStoreApi } from "@/components/state-provider";
 import { sessionId as toSessionId, taskId as toTaskId } from "@/lib/types/http";
+import type { Repository } from "@/lib/types/http";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { repositoryDiscoveryCoordinator } from "@/hooks/domains/workspace/use-repository-discovery";
 
 let isMobile = false;
 const ADD_SOURCES_LABEL = "Add sources";
+const SURFACE_CASES = [
+  ["desktop", false, "add-workspace-sources-dialog"],
+  ["mobile", true, "add-workspace-sources-drawer"],
+] as const;
 const {
   attachTaskWorkspaceSources,
   discoverRepositoriesAction,
@@ -16,6 +21,7 @@ const {
   refreshRepositoryDiscoveryAction,
   addDesktopDiscoveryRootAction,
   refreshRepositories,
+  savedRepositories,
 } = vi.hoisted(() => {
   const discover = vi.fn().mockResolvedValue({ repositories: [], desktop_runtime: true });
   return {
@@ -25,6 +31,7 @@ const {
     refreshRepositoryDiscoveryAction: discover,
     addDesktopDiscoveryRootAction: vi.fn().mockResolvedValue({}),
     refreshRepositories: vi.fn().mockResolvedValue(undefined),
+    savedRepositories: [] as Repository[],
   };
 });
 
@@ -36,7 +43,7 @@ vi.mock("@/hooks/use-responsive-breakpoint", () => ({
 }));
 vi.mock("@/hooks/domains/workspace/use-repositories", () => ({
   useRepositories: () => ({
-    repositories: [],
+    repositories: savedRepositories,
     isLoading: false,
     refresh: refreshRepositories,
   }),
@@ -144,31 +151,32 @@ afterEach(() => {
   attachTaskWorkspaceSources.mockReset();
   discoverRepositoriesAction.mockClear();
   refreshRepositories.mockClear();
+  savedRepositories.length = 0;
 });
 
 describe("AddWorkspaceSourcesDialog consequences", () => {
-  it.each([
-    ["desktop", false, "add-workspace-sources-dialog"],
-    ["mobile", true, "add-workspace-sources-drawer"],
-  ])("explains the workspace and session consequences on %s", async (_, mobile, surfaceTestId) => {
-    isMobile = mobile;
-    render(<Harness />);
+  it.each(SURFACE_CASES)(
+    "explains the workspace and session consequences on %s",
+    async (_, mobile, surfaceTestId) => {
+      isMobile = mobile;
+      render(<Harness />);
 
-    fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
-    const surface = await screen.findByTestId(surfaceTestId);
-    const consequences = screen.getByTestId("workspace-change-consequences");
+      fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
+      const surface = await screen.findByTestId(surfaceTestId);
+      const consequences = screen.getByTestId("workspace-change-consequences");
 
-    expect(surface.contains(consequences)).toBe(true);
-    expect(screen.getByText("This restarts the task workspace")).toBeTruthy();
-    expect(consequences.textContent).toMatch(/task root becomes the agent's working directory/i);
-    expect(consequences.textContent).toMatch(
-      /terminals, dev servers, and other workspace processes stop/i,
-    );
-    expect(consequences.textContent).toMatch(
-      /provider-private context that Kandev did not record may not carry over/i,
-    );
-    expect(screen.getByText(/Cancel leaves the workspace unchanged/i)).toBeTruthy();
-  });
+      expect(surface.contains(consequences)).toBe(true);
+      expect(screen.getByText("This restarts the task workspace")).toBeTruthy();
+      expect(consequences.textContent).toMatch(/task root becomes the agent's working directory/i);
+      expect(consequences.textContent).toMatch(
+        /terminals, dev servers, and other workspace processes stop/i,
+      );
+      expect(consequences.textContent).toMatch(
+        /provider-private context that Kandev did not record may not carry over/i,
+      );
+      expect(screen.getByText(/Cancel leaves the workspace unchanged/i)).toBeTruthy();
+    },
+  );
 
   it("explains that remote executor sources are attached without restarting the agent", async () => {
     render(<Harness executorType="ssh" />);
@@ -295,27 +303,24 @@ describe("AddWorkspaceSourcesDialog", () => {
     expect(screen.queryByRole("button", { name: /Add folder/ })).toBeNull();
   });
 
-  it.each([
-    ["desktop", false, "add-workspace-sources-dialog"],
-    ["mobile", true, "add-workspace-sources-drawer"],
-  ])("returns focus to the external %s opener after Cancel", async (_, mobile, surfaceTestId) => {
-    isMobile = mobile;
-    render(<Harness />);
+  it.each(SURFACE_CASES)(
+    "returns focus to the external %s opener after Cancel",
+    async (_, mobile, surfaceTestId) => {
+      isMobile = mobile;
+      render(<Harness />);
 
-    const opener = screen.getByRole("button", { name: ADD_SOURCES_LABEL });
-    fireEvent.click(opener);
-    const surface = await screen.findByTestId(surfaceTestId);
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      const opener = screen.getByRole("button", { name: ADD_SOURCES_LABEL });
+      fireEvent.click(opener);
+      const surface = await screen.findByTestId(surfaceTestId);
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
 
-    await finishClose(surface, mobile);
-    expect(attachTaskWorkspaceSources).not.toHaveBeenCalled();
-    await waitFor(() => expect(document.activeElement).toBe(opener));
-  });
+      await finishClose(surface, mobile);
+      expect(attachTaskWorkspaceSources).not.toHaveBeenCalled();
+      await waitFor(() => expect(document.activeElement).toBe(opener));
+    },
+  );
 
-  it.each([
-    ["desktop", false, "add-workspace-sources-dialog"],
-    ["mobile", true, "add-workspace-sources-drawer"],
-  ])(
+  it.each(SURFACE_CASES)(
     "reconciles adopted stale work before returning focus to the enabled %s opener",
     async (_, mobile, surfaceTestId) => {
       isMobile = mobile;
@@ -378,4 +383,51 @@ describe("AddWorkspaceSourcesDialog saved repository picker", () => {
     fireEvent.click(screen.getByTestId("repo-refresh-button"));
     await waitFor(() => expect(refreshRepositories).toHaveBeenCalledOnce());
   });
+
+  it.each(SURFACE_CASES)(
+    "shows the required placement choice on %s",
+    async (_, mobile, surfaceTestId) => {
+      isMobile = mobile;
+      savedRepositories.push({
+        id: "repo-1" as Repository["id"],
+        workspace_id: "workspace-1" as Repository["workspace_id"],
+        name: "payments",
+        source_type: "local",
+        local_path: "/projects/payments",
+        provider: "",
+        provider_repo_id: "",
+        provider_owner: "",
+        provider_name: "",
+        default_branch: "main",
+        worktree_branch_prefix: "task",
+        pull_before_worktree: false,
+        setup_script: "",
+        cleanup_script: "",
+        dev_script: "",
+        copy_files: "",
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      });
+      render(
+        <TooltipProvider>
+          <Harness />
+        </TooltipProvider>,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
+      await screen.findByTestId(surfaceTestId);
+      await openRepositoryMenu();
+      await selectRepositoryMenuItem("Workspace repository");
+      fireEvent.click(screen.getByTestId("repo-chip-trigger"));
+      fireEvent.click(await screen.findByRole("option", { name: /payments/ }));
+
+      expect(screen.getByTestId("workspace-source-placement")).toBeTruthy();
+      expect(screen.getByRole("alert").textContent).toContain(
+        "Choose where to add the repositories.",
+      );
+      expect(
+        (screen.getByTestId("add-workspace-sources-submit") as HTMLButtonElement).disabled,
+      ).toBe(true);
+    },
+  );
 });
