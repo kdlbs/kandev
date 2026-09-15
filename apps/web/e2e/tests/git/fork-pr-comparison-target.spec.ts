@@ -88,8 +88,11 @@ test.describe("Fork pull-request comparison target", () => {
       session.changes.locator('[data-changes-file="local-auth-recovery.txt"]'),
     ).toBeVisible();
 
+    // Changes is a right-column panel and stays active while the chat session
+    // tab changes. Leave it explicitly so returning to Changes fires the
+    // activation refresh that recovers the comparison target.
+    await session.clickTab("Files");
     comparisonTargetFixture?.setAvailable(true);
-    await session.clickSessionChatTab();
     await session.clickTab("Changes");
     await expect(testPage.getByTestId("comparison-target-notice")).toHaveCount(0, {
       timeout: 30_000,

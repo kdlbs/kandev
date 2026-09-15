@@ -4,6 +4,7 @@ export type GatewayTrafficFrame = {
   direction: "sent" | "received";
   action?: string;
   type?: string;
+  eventType?: string;
   sessionId?: string;
   taskId?: string;
   bytes: number;
@@ -74,6 +75,7 @@ function frameFromPayload(
   return {
     direction,
     action: stringField(message?.action),
+    eventType: stringField((message as Record<string, unknown> | null)?.event_type),
     type: stringField(message?.type),
     sessionId:
       stringField(messagePayload?.session_id) ??

@@ -22,6 +22,9 @@ vi.mock("@/components/diff-worker-pool-provider", () => ({
 vi.mock("@/components/desktop-command-host", () => ({ DesktopCommandHost: () => null }));
 vi.mock("@/components/global-commands", () => ({ GlobalCommands: () => null }));
 vi.mock("@/components/log-buffer-bridge", () => ({ LogBufferBridge: () => null }));
+vi.mock("@/components/needs-you-inbox/needs-you-inbox-bridge", () => ({
+  NeedsYouInboxBridge: () => null,
+}));
 vi.mock("@/components/quick-chat/quick-chat-provider", () => ({
   QuickChatProvider: mocks.passthrough,
 }));

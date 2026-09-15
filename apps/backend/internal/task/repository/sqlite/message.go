@@ -132,7 +132,7 @@ func (r *Repository) insertMessageWithSessionLock(
 	messageType, metadataJSON string,
 ) error {
 	if !dialect.IsPostgres(r.db.DriverName()) {
-		return r.insertMessageRow(ctx, r.db, message, requestsInput, messageType, metadataJSON)
+		return r.insertMessageWithPayloadGuard(ctx, message, requestsInput, messageType, metadataJSON)
 	}
 	tx, err := r.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -455,9 +455,20 @@ func buildListMessagesQuery(driverName, sessionID string, opts models.ListMessag
 		FROM task_session_messages
 		WHERE task_session_id = ?`
 	args := []interface{}{sessionID}
-	if opts.AuthorType != "" {
+	if len(opts.AuthorTypes) > 0 {
+		placeholders := make([]string, len(opts.AuthorTypes))
+		for index, author := range opts.AuthorTypes {
+			placeholders[index] = "?"
+			args = append(args, author)
+		}
+		query += " AND author_type IN (" + strings.Join(placeholders, ",") + ")"
+	} else if opts.AuthorType != "" {
 		query += " AND author_type = ?"
 		args = append(args, opts.AuthorType)
+	}
+	if opts.TaskID != "" {
+		query += " AND task_id = ?"
+		args = append(args, opts.TaskID)
 	}
 	if cursor != nil {
 		if opts.Before != "" {
@@ -684,6 +695,47 @@ func (r *Repository) FindMessagesByPendingID(ctx context.Context, pendingID stri
 	defer func() { _ = rows.Close() }()
 	result, _, err := scanMessageRows(rows, 0)
 	return result, err
+}
+
+// FindMessagesByPendingIDs returns all messages for the requested pending IDs
+// in one or more bounded queries, grouped by pending ID. The chunking keeps
+// the query below SQLite's host-parameter limit while replacing the inbox's
+// per-row message hydration loop.
+func (r *Repository) FindMessagesByPendingIDs(
+	ctx context.Context, pendingIDs []string,
+) (map[string][]*models.Message, error) {
+	result := make(map[string][]*models.Message, len(pendingIDs))
+	if len(pendingIDs) == 0 {
+		return result, nil
+	}
+	driverName := r.ro.DriverName()
+	pendingExpr := dialect.JSONExtract(driverName, "metadata", "pending_id")
+	for _, chunk := range chunkIDs(pendingIDs, sqliteMaxHostParams) {
+		placeholders, args := buildInPlaceholders(chunk)
+		query := fmt.Sprintf(`
+			SELECT id, task_session_id, task_id, turn_id, author_type, author_id, content,
+			       requests_input, type, metadata, created_at, updated_at
+			FROM task_session_messages
+			WHERE %s IN (%s)
+			ORDER BY %s ASC, created_at ASC, id ASC
+		`, pendingExpr, placeholders, pendingExpr)
+		rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(query), args...)
+		if err != nil {
+			return nil, err
+		}
+		messages, _, scanErr := scanMessageRows(rows, 0)
+		_ = rows.Close()
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		for _, message := range messages {
+			pendingID, _ := message.Metadata["pending_id"].(string)
+			if pendingID != "" {
+				result[pendingID] = append(result[pendingID], message)
+			}
+		}
+	}
+	return result, nil
 }
 
 // findMessagesByPendingIDQuery is shared with query-plan tests so the
@@ -920,6 +972,9 @@ func (r *Repository) UpdateMessage(ctx context.Context, message *models.Message)
 	}
 
 	message.UpdatedAt = time.Now().UTC()
+	if !dialect.IsPostgres(r.db.DriverName()) {
+		return r.updateMessageWithPayloadGuard(ctx, message, metadataJSON, requestsInput)
+	}
 	result, err := r.db.ExecContext(ctx, r.db.Rebind(`
 		UPDATE task_session_messages SET content = ?, requests_input = ?, type = ?, metadata = ?, updated_at = ?
 		WHERE id = ?

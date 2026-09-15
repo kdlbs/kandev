@@ -51,6 +51,7 @@ export function createDefaultUserSettings(): UserSettingsState {
     preventAutoStartAgentOnOpen: false,
     unreadDivider: false,
     agentGeneratedTaskTitles: true,
+    autoFocusNewTasks: true,
     mcpTaskAgentProfileDefault: "current_task",
     showAnchoredPromptBar: false,
     showScrollToLastPrompt: true,
@@ -98,6 +99,8 @@ export function createDefaultUserSettings(): UserSettingsState {
     lastSeenDisplay: "absolute",
     systemMetricsDisplay: { showInTopbar: false, simplified: false },
     appStatusBarEnabled: false,
+    sidebarHoverEnabled: true,
+    sidebarHoverDelayMs: 500,
     resolveSessionHostnames: false,
     appStatusBarOrder: { leftItemIds: [], rightItemIds: [] },
     quickChatTabOrderByWorkspace: {},
@@ -272,6 +275,7 @@ function buildBehaviorFields(s: UserSettingsData, current: UserSettingsState) {
       s.prevent_auto_start_agent_on_open ?? current.preventAutoStartAgentOnOpen,
     unreadDivider: s.unread_divider ?? current.unreadDivider,
     agentGeneratedTaskTitles: s.agent_generated_task_titles ?? current.agentGeneratedTaskTitles,
+    autoFocusNewTasks: s.auto_focus_new_tasks ?? current.autoFocusNewTasks,
     mcpTaskAgentProfileDefault: mapDefined(
       s.mcp_task_agent_profile_default,
       current.mcpTaskAgentProfileDefault,
@@ -375,6 +379,8 @@ export function buildCoreFields(
       parseAppStatusBarOrder,
     ),
     appStatusBarEnabled: s.app_status_bar_enabled ?? current.appStatusBarEnabled,
+    sidebarHoverEnabled: s.sidebar_hover_enabled ?? current.sidebarHoverEnabled,
+    sidebarHoverDelayMs: s.sidebar_hover_delay_ms ?? current.sidebarHoverDelayMs,
     quickChatTabOrderByWorkspace:
       s.quick_chat_tab_order_by_workspace ?? current.quickChatTabOrderByWorkspace,
     resolveSessionHostnames: s.resolve_session_hostnames ?? current.resolveSessionHostnames,

@@ -145,13 +145,13 @@ type taskDeleterAdapter struct {
 }
 
 func (a *taskDeleterAdapter) DeleteTask(ctx context.Context, taskID string) error {
-	return a.translateDeleteErr(a.svc.DeleteTask(ctx, taskID))
+	return a.translateDeleteErr(a.svc.DeleteTaskWithLifecycle(ctx, taskID))
 }
 
-// DeleteTaskWithReason satisfies github.TaskDeleterWithReason so the review/issue
-// cleanup paths can attach a deletion reason to the task.deleted event.
+// DeleteTaskWithReason satisfies github.TaskDeleterWithReason so cleanup
+// attribution survives the lifecycle coordinator when one is configured.
 func (a *taskDeleterAdapter) DeleteTaskWithReason(ctx context.Context, taskID, reason string) error {
-	return a.translateDeleteErr(a.svc.DeleteTaskWithReason(ctx, taskID, reason))
+	return a.translateDeleteErr(a.svc.DeleteTaskWithLifecycleAndReason(ctx, taskID, reason))
 }
 
 // translateDeleteErr maps the task repository's ErrTaskNotFound sentinel to
@@ -240,7 +240,7 @@ type automationTaskDeleterAdapter struct {
 }
 
 func (a *automationTaskDeleterAdapter) DeleteTask(ctx context.Context, taskID string) error {
-	err := a.svc.DeleteTask(ctx, taskID)
+	err := a.svc.DeleteTaskWithLifecycle(ctx, taskID)
 	if err == nil {
 		return nil
 	}
@@ -250,9 +250,6 @@ func (a *automationTaskDeleterAdapter) DeleteTask(ctx context.Context, taskID st
 	return err
 }
 
-// taskOriginGetter is the minimal read interface automationTaskOriginLookupAdapter
-// needs from the task service — extracted so the adapter is testable without a
-// full service instance.
 type taskOriginGetter interface {
 	GetTask(ctx context.Context, id string) (*models.Task, error)
 }

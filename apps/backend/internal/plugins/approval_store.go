@@ -397,18 +397,6 @@ func (l *approvalLedger) reviewManifestChange(installationID, manifestDigest str
 	return l.save(file)
 }
 
-func equalStrings(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
-
 func intersectStrings(a, b []string) []string {
 	if len(a) == 0 || len(b) == 0 {
 		return nil

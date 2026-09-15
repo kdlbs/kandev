@@ -8,7 +8,10 @@ import (
 func TestServiceApprovalQueriesReturnCurrentRows(t *testing.T) {
 	dir := t.TempDir()
 	svc := &Service{}
-	svc.SetPluginsDir(dir)
+	if err := svc.SetPluginsDir(dir); err != nil {
+		t.Fatalf("SetPluginsDir: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
 
 	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"host.v2.read:tasks"}, "human", "grant", "audit-1"); err != nil {
 		t.Fatalf("grant ws-1: %v", err)
@@ -29,7 +32,10 @@ func TestServiceApprovalQueriesReturnCurrentRows(t *testing.T) {
 func TestServiceApprovalRevokeBumpsRevisionAndDenies(t *testing.T) {
 	dir := t.TempDir()
 	svc := &Service{}
-	svc.SetPluginsDir(dir)
+	if err := svc.SetPluginsDir(dir); err != nil {
+		t.Fatalf("SetPluginsDir: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
 	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"host.v2.read:tasks"}, "human", "grant", "audit-1"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -49,7 +55,10 @@ func TestServiceApprovalRevokeBumpsRevisionAndDenies(t *testing.T) {
 func TestServiceApprovalRevokeRetryReplaysOriginalResult(t *testing.T) {
 	dir := t.TempDir()
 	svc := &Service{}
-	svc.SetPluginsDir(dir)
+	if err := svc.SetPluginsDir(dir); err != nil {
+		t.Fatalf("SetPluginsDir: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
 	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"host.v2.read:tasks"}, "human", "grant", "audit-1"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -69,7 +78,10 @@ func TestServiceApprovalRevokeRetryReplaysOriginalResult(t *testing.T) {
 func TestServiceApprovalTombstoneRetainsStateOnReinstall(t *testing.T) {
 	dir := t.TempDir()
 	svc := &Service{}
-	svc.SetPluginsDir(dir)
+	if err := svc.SetPluginsDir(dir); err != nil {
+		t.Fatalf("SetPluginsDir: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
 	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"host.v2.read:tasks"}, "human", "grant", "audit-1"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}

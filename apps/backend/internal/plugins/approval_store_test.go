@@ -53,7 +53,10 @@ func TestApprovalLedgerGrantRevokeAndTombstone(t *testing.T) {
 func TestAuthorizePluginCapabilityStableDenyReasons(t *testing.T) {
 	dir := t.TempDir()
 	svc := &Service{}
-	svc.SetPluginsDir(dir)
+	if err := svc.SetPluginsDir(dir); err != nil {
+		t.Fatalf("SetPluginsDir: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
 
 	decision := svc.authorizePluginCapability("inst-1", "ws-1", "host.v2.read:tasks", 1, "req", "method")
 	if decision.Allowed {
@@ -140,7 +143,10 @@ func TestApprovalLedgerTombstonePersistsAcrossReload(t *testing.T) {
 func TestAuthorizePluginCapabilityAllowsExactCurrentRevision(t *testing.T) {
 	dir := t.TempDir()
 	svc := &Service{}
-	svc.SetPluginsDir(dir)
+	if err := svc.SetPluginsDir(dir); err != nil {
+		t.Fatalf("SetPluginsDir: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
 	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"host.v2.read:tasks"}, "human", "grant", "audit-1"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -157,7 +163,10 @@ func TestAuthorizePluginCapabilityAllowsExactCurrentRevision(t *testing.T) {
 func TestAuthorizePluginCapabilityDeniesStaleRevision(t *testing.T) {
 	dir := t.TempDir()
 	svc := &Service{}
-	svc.SetPluginsDir(dir)
+	if err := svc.SetPluginsDir(dir); err != nil {
+		t.Fatalf("SetPluginsDir: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
 	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"host.v2.read:tasks"}, "human", "grant", "audit-1"); err != nil {
 		t.Fatalf("initial grant: %v", err)
 	}
@@ -177,7 +186,10 @@ func TestAuthorizePluginCapabilityDeniesStaleRevision(t *testing.T) {
 func TestAuthorizePluginCapabilityDeniesHumanReservedCapability(t *testing.T) {
 	dir := t.TempDir()
 	svc := &Service{}
-	svc.SetPluginsDir(dir)
+	if err := svc.SetPluginsDir(dir); err != nil {
+		t.Fatalf("SetPluginsDir: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
 	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"merge"}, "human", "grant", "audit-1"); err == nil {
 		t.Fatal("approvalGrant persisted a Human-reserved capability")
 	}
@@ -194,7 +206,10 @@ func TestAuthorizePluginCapabilityDeniesHumanReservedCapability(t *testing.T) {
 func TestAuthorizePluginCapabilityDeniesMalformedRequest(t *testing.T) {
 	dir := t.TempDir()
 	svc := &Service{}
-	svc.SetPluginsDir(dir)
+	if err := svc.SetPluginsDir(dir); err != nil {
+		t.Fatalf("SetPluginsDir: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
 
 	cases := []struct {
 		name           string
@@ -224,7 +239,10 @@ func TestAuthorizePluginCapabilityDeniesMalformedRequest(t *testing.T) {
 func TestAuthorizePluginCapabilityDeniesUnsupportedCapabilityID(t *testing.T) {
 	dir := t.TempDir()
 	svc := &Service{}
-	svc.SetPluginsDir(dir)
+	if err := svc.SetPluginsDir(dir); err != nil {
+		t.Fatalf("SetPluginsDir: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
 	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"host.v2.read:tasks"}, "human", "grant", "audit-1"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -468,7 +486,10 @@ func TestApprovalLedgerRejectsMissingAuditID(t *testing.T) {
 func TestAuthorizePluginCapabilityRequiresCurrentInstalledManifest(t *testing.T) {
 	dir := t.TempDir()
 	svc := &Service{registry: NewRegistry()}
-	svc.SetPluginsDir(dir)
+	if err := svc.SetPluginsDir(dir); err != nil {
+		t.Fatalf("SetPluginsDir: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
 	svc.registry.Add(&store.Record{
 		Manifest:       manifest.Manifest{ID: "plugin-a", Capabilities: manifest.Capabilities{APIRead: []string{"tasks"}}},
 		InstallationID: "inst-1",

@@ -161,6 +161,8 @@ export type ChangesPanelBodyProps = {
   workspaceRestoration?: WorkspaceRestorationAttempt | null;
   onRestoreWorkspace?: () => void;
   restoreWorkspaceDisabled?: boolean;
+  /** Monotonic token used to expand both histories after comparison navigation. */
+  comparisonRequestToken?: number;
 };
 
 function usePerRepoCallbacks(
@@ -340,9 +342,11 @@ function useChangesPanelPRData(repositoryNames: string[], sessionId: string | nu
     useRepositoryKeys,
     relation: relationState.relation,
     prs,
+    repositoryScope: relationState.repositoryScope,
     repositoryName: relationState.repositoryName,
     selectedPR: taskPR,
     refreshProviderEvidence: relationState.refreshProviderEvidence,
+    contributionHistoryTarget: relationState.contributionHistoryTarget,
   };
 }
 
@@ -352,7 +356,7 @@ function hasCumulativeFiles(files: Record<string, unknown> | null | undefined): 
 
 function useChangesPanelResolutionTarget(
   relation: RemoteContributionRelation,
-  repositoryName: string | undefined,
+  repositoryScope: string,
   selectedPR: TaskPR | null | undefined,
   t: (key: string) => string,
 ) {
@@ -361,11 +365,11 @@ function useChangesPanelResolutionTarget(
     () =>
       buildRemoteContributionResolutionTarget(
         relation,
-        repositoryName,
+        repositoryScope,
         selectedPR,
         remoteRepositoryLabel,
       ),
-    [relation, repositoryName, selectedPR, remoteRepositoryLabel],
+    [relation, repositoryScope, selectedPR, remoteRepositoryLabel],
   );
 }
 
@@ -389,7 +393,7 @@ export function useChangesPanelData() {
   );
   const resolutionTarget = useChangesPanelResolutionTarget(
     prData.relation,
-    prData.repositoryName,
+    prData.repositoryScope,
     prData.selectedPR,
     t,
   );

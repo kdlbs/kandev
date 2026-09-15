@@ -168,6 +168,7 @@ func (r *Registry) SetRuntimeState(id string, status Status, lastError string, l
 
 func cloneRecord(rec *store.Record) *store.Record {
 	clone := *rec
+	clone.Manifest = rec.Clone()
 	if rec.AutoUpdate != nil {
 		autoUpdate := *rec.AutoUpdate
 		clone.AutoUpdate = &autoUpdate

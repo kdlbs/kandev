@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/kandev/kandev/internal/plugins/manifest"
 	"github.com/kandev/kandev/internal/plugins/pkgtar"
 	"github.com/kandev/kandev/internal/plugins/pkgtar/pkgtartest"
 	"github.com/kandev/kandev/internal/plugins/store"
@@ -214,8 +215,11 @@ func TestServiceInstallUpgradeReviewRollbackFailureKeepsNewRecordCoherent(t *tes
 		failErr: errors.New("simulated compensating save failure"),
 	}
 	svc := NewService(failing, NewRegistry(), nil, testLogger(t))
-	svc.SetPluginsDir(dir)
+	if err := svc.SetPluginsDir(dir); err != nil {
+		t.Fatalf("SetPluginsDir: %v", err)
+	}
 	svc.SetRuntime(newFakeRuntime())
+	t.Cleanup(func() { _ = svc.Close() })
 	if _, err := svc.Install(context.Background(), testPackageWithAPIRead(t, "kandev-plugin-slack", "1.0.0", "tasks")); err != nil {
 		t.Fatalf("install initial plugin: %v", err)
 	}
@@ -338,6 +342,7 @@ func TestServiceInstallUpgradeSaveFailurePreservesOldVersionAndData(t *testing.T
 	svc.SetPluginsDir(dir)
 	rt := newFakeRuntime()
 	svc.SetRuntime(rt)
+	t.Cleanup(func() { _ = svc.Close() })
 
 	rec1 := installTestPlugin(t, svc, "kandev-plugin-slack") // v1.0.0, active + running
 	if !rt.Running("kandev-plugin-slack") {
@@ -567,18 +572,26 @@ func testPackageWithAPIRead(t *testing.T, id, version string, resources ...strin
 	for _, resource := range resources {
 		quotedResources = append(quotedResources, fmt.Sprintf("%q", resource))
 	}
+	minimumVersion := ""
+	for _, resource := range resources {
+		if resource == "messages" {
+			minimumVersion = fmt.Sprintf("min_kandev_version: %q\n", manifest.MinimumMessagesCapabilityVersion)
+			break
+		}
+	}
 	manifestYAML := fmt.Sprintf(`
 id: %s
 api_version: 1
 version: %s
 display_name: Test Plugin
+%s
 capabilities:
   api_read: [%s]
 runtime:
   type: binary
   executables:
     %s: server/plugin
-`, id, version, strings.Join(quotedResources, ", "), platformKey)
+`, id, version, minimumVersion, strings.Join(quotedResources, ", "), platformKey)
 
 	var buf bytes.Buffer
 	if err := pkgtartest.WritePackage(&buf, map[string][]byte{
@@ -588,4 +601,77 @@ runtime:
 		t.Fatalf("WritePackage: %v", err)
 	}
 	return &buf
+}
+
+// messagesMinKandevVersionPackage is like minKandevVersionPackage but
+// declares capabilities.api_read: messages, which subjects the manifest to
+// the capability minimum floor (MinimumMessagesCapabilityVersion).
+func messagesMinKandevVersionPackage(t *testing.T, id, version, minKandevVersion string) *bytes.Buffer {
+	t.Helper()
+	platformKey := goruntime.GOOS + "-" + goruntime.GOARCH
+	manifestYAML := fmt.Sprintf(`
+id: %s
+api_version: 1
+version: %s
+display_name: Test Plugin
+min_kandev_version: %q
+capabilities:
+  api_read:
+    - messages
+runtime:
+  type: binary
+  executables:
+    %s: server/plugin
+`, id, version, minKandevVersion, platformKey)
+
+	var buf bytes.Buffer
+	files := map[string][]byte{
+		"manifest.yaml": []byte(manifestYAML),
+		"server/plugin": []byte("#!/bin/sh\necho fake\n"),
+	}
+	if err := pkgtartest.WritePackage(&buf, files); err != nil {
+		t.Fatalf("WritePackage: %v", err)
+	}
+	return &buf
+}
+
+// TestServiceInstall_EnforcesMessagesCapabilityFloorOnDevAndUnwiredBuilds
+// pins the design contract that the api_read:messages minimum (0.91.1) is a
+// manifest-level floor enforced in every build - including unstamped dev
+// builds where the newer-than-running release gate is intentionally a no-op.
+// The dev escape hatch applies only to the release-boundary comparison, never
+// to the capability floor.
+func TestServiceInstall_EnforcesMessagesCapabilityFloorOnDevAndUnwiredBuilds(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		want string
+	}{
+		{name: "below floor is rejected", want: "0.9.0"},
+		{name: "malformed minimum is rejected", want: "not-a-release"},
+	} {
+		t.Run("dev/"+tc.name, func(t *testing.T) {
+			svc, _, _ := newTestService(t)
+			svc.SetKandevVersion(DevKandevVersion)
+			if _, err := svc.Install(context.Background(), messagesMinKandevVersionPackage(t, "kandev-plugin-messages", "1.0.0", tc.want)); err == nil {
+				t.Fatalf("Install() on a dev build accepted a messages manifest with min %q", tc.want)
+			}
+		})
+		t.Run("unwired/"+tc.name, func(t *testing.T) {
+			svc, _, _ := newTestService(t)
+			if _, err := svc.Install(context.Background(), messagesMinKandevVersionPackage(t, "kandev-plugin-messages", "1.0.0", tc.want)); err == nil {
+				t.Fatalf("Install() with no running version accepted a messages manifest with min %q", tc.want)
+			}
+		})
+	}
+	t.Run("dev/floor allowed", func(t *testing.T) {
+		svc, _, _ := newTestService(t)
+		svc.SetKandevVersion(DevKandevVersion)
+		rec, err := svc.Install(context.Background(), messagesMinKandevVersionPackage(t, "kandev-plugin-messages", "1.0.0", "0.91.1"))
+		if err != nil {
+			t.Fatalf("Install() on a dev build rejected the floor minimum: %v", err)
+		}
+		if rec.Status != StatusActive {
+			t.Fatalf("Install() Status = %q, want %q", rec.Status, StatusActive)
+		}
+	})
 }

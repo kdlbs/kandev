@@ -39,6 +39,13 @@ compatible privileged/host settings are warned about and left to administrator
 trust plus cluster admission policy; fields that collide with Kandev invariants
 are rejected.
 
+An ordinary non-main container may explicitly request one RO/RW workspace
+mount at exactly `/workspace`. Kandev retains the volume definition; redirected,
+overlapping, subpath, propagation and recursive grants remain prohibited.
+Admission compares grants in both directions by named recipient. Runtime/auth
+mounts and init/ephemeral recipients remain excluded. The recorded launch
+snapshot governs replacements. See the [workspace grant design](../specs/executors/system-design/kubernetes-docker-workloads.md).
+
 Managed PVCs do not receive a Pod owner reference. Kandev preserves them on
 ordinary stop, backend shutdown, and unexpected Pod loss, then explicitly
 deletes them after a terminal cleanup proves the stored UID and full ownership

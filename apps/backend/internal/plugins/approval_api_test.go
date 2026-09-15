@@ -11,7 +11,10 @@ import (
 func TestApprovalAPIExportsCurrentRowsAndDecision(t *testing.T) {
 	dir := t.TempDir()
 	svc := &Service{}
-	svc.SetPluginsDir(dir)
+	if err := svc.SetPluginsDir(dir); err != nil {
+		t.Fatalf("SetPluginsDir: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
 	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"host.v2.read:tasks"}, "human", "grant", "audit-1"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -40,7 +43,10 @@ func TestApprovalAPIExportsCurrentRowsAndDecision(t *testing.T) {
 
 func TestApprovalAPIRevokeRetryReplaysOriginalResult(t *testing.T) {
 	svc := &Service{}
-	svc.SetPluginsDir(t.TempDir())
+	if err := svc.SetPluginsDir(t.TempDir()); err != nil {
+		t.Fatalf("SetPluginsDir: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
 	if _, err := svc.GrantCapabilityApproval("inst-1", "ws-1", 1, "digest-a", []string{"host.v2.read:tasks"}, "human", "grant", "grant-1"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -62,7 +68,10 @@ func TestApprovalAPIRevokeRetryReplaysOriginalResult(t *testing.T) {
 
 func TestGrantCapabilityApprovalRequiresInstalledManifestBinding(t *testing.T) {
 	svc := &Service{registry: NewRegistry()}
-	svc.SetPluginsDir(t.TempDir())
+	if err := svc.SetPluginsDir(t.TempDir()); err != nil {
+		t.Fatalf("SetPluginsDir: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
 	installed := &store.Record{
 		Manifest:       manifest.Manifest{ID: "plugin-a", Capabilities: manifest.Capabilities{APIRead: []string{"tasks"}}},
 		InstallationID: "inst-1",

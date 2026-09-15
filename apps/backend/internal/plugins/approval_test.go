@@ -69,7 +69,10 @@ func TestCanonicalCapabilityListRejectsNamespacedHumanReservedCapabilities(t *te
 
 func TestAuthorizePluginCapabilityDoesNotTreatV1DeclarationsAsH6Authority(t *testing.T) {
 	svc := &Service{}
-	svc.SetPluginsDir(t.TempDir())
+	if err := svc.SetPluginsDir(t.TempDir()); err != nil {
+		t.Fatalf("SetPluginsDir: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
 	if _, err := svc.approvalGrant("inst-1", "ws-1", 1, "digest-a", []string{"host.v2.write:tasks"}, "human", "grant", "audit-1"); err != nil {
 		t.Fatalf("grant: %v", err)
 	}
@@ -154,7 +157,10 @@ func TestApprovalReceiptCarriesSafeMetadata(t *testing.T) {
 
 func TestAuthorizePluginCapabilityCopiesAuditIDToDeniedDecision(t *testing.T) {
 	svc := &Service{}
-	svc.SetPluginsDir(t.TempDir())
+	if err := svc.SetPluginsDir(t.TempDir()); err != nil {
+		t.Fatalf("SetPluginsDir: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
 	decision := svc.authorizePluginCapability("inst-1", "ws-1", "host.v2.read:tasks", 1, "req", "method")
 	if decision.AuditID == "" || decision.AuditID != decision.Receipt.AuditID {
 		t.Fatalf("denied decision audit id = %q, receipt audit id = %q", decision.AuditID, decision.Receipt.AuditID)
@@ -163,7 +169,10 @@ func TestAuthorizePluginCapabilityCopiesAuditIDToDeniedDecision(t *testing.T) {
 
 func TestAuthorizePluginCapabilityBoundsAndDigestsReceiptInputs(t *testing.T) {
 	svc := &Service{}
-	svc.SetPluginsDir(t.TempDir())
+	if err := svc.SetPluginsDir(t.TempDir()); err != nil {
+		t.Fatalf("SetPluginsDir: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
 	secret := "token=super-secret-value"
 	decision := svc.authorizePluginCapability("inst-1", "ws-1", "host.v2.read:tasks", 1, secret, "method=secret")
 	if decision.Receipt.RequestDigest == secret || decision.Receipt.MethodDigest == "method=secret" {
@@ -211,7 +220,10 @@ func TestAuthorizePluginCapabilityBoundsAndDigestsReceiptInputs(t *testing.T) {
 
 func TestAuthorizePluginCapabilityBoundsReservedCapabilityReceipt(t *testing.T) {
 	svc := &Service{}
-	svc.SetPluginsDir(t.TempDir())
+	if err := svc.SetPluginsDir(t.TempDir()); err != nil {
+		t.Fatalf("SetPluginsDir: %v", err)
+	}
+	t.Cleanup(func() { _ = svc.Close() })
 	tooLong := strings.Repeat("a", maxCapabilityIDLength) + ":merge"
 	for _, capabilityID := range []string{tooLong, "host.v2.read\x00:merge"} {
 		t.Run(capabilityID, func(t *testing.T) {

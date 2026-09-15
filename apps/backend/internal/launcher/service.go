@@ -481,6 +481,7 @@ type nativeServiceUnitInput struct {
 
 const (
 	systemdServicePath = "/usr/local/bin:/usr/bin:/bin:/opt/homebrew/bin:/home/linuxbrew/.linuxbrew/bin:%h/.local/bin:%h/.bun/bin:%h/.opencode/bin:%h/.npm-global/bin"
+	// launchd has no home-directory specifier; withLocalAgentPath adds the runtime user's bin directory.
 	launchdServicePath = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 )
 

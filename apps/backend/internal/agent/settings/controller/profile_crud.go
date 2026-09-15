@@ -1052,7 +1052,7 @@ func (c *Controller) cleanupEphemeralTasks(ctx context.Context, profileID string
 	}
 }
 
-func toAgentDTO(agent *models.Agent, profiles []*models.AgentProfile) dto.AgentDTO {
+func (c *Controller) toAgentDTO(agent *models.Agent, profiles []*models.AgentProfile) dto.AgentDTO {
 	profileDTOs := make([]dto.AgentProfileDTO, 0, len(profiles))
 	for _, profile := range profiles {
 		profileDTOs = append(profileDTOs, toProfileDTO(profile))
@@ -1077,6 +1077,9 @@ func toAgentDTO(agent *models.Agent, profiles []*models.AgentProfile) dto.AgentD
 			WaitForTerminal: agent.TUIConfig.WaitForTerminal,
 			MCPStrategy:     agent.TUIConfig.MCPStrategy,
 		}
+	}
+	if c.agentRegistry != nil {
+		_, result.InferenceCapable = c.agentRegistry.GetInferenceAgent(agent.Name)
 	}
 	return result
 }

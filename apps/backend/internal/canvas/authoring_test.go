@@ -419,6 +419,48 @@ func TestCanvasCreationAuthorityRollsBackOnActivationFailure(t *testing.T) {
 	}
 }
 
+func TestInstallCanvasPackageCommitsReceiptWithCanvasLifecycle(t *testing.T) {
+	service, instanceStore, _ := newCanvasService(t)
+	ctx := context.Background()
+	result, err := service.InstallCanvasPackage(ctx, InstallCanvasPackageRequest{
+		WorkspaceID:     "workspace-install",
+		Title:           "Installed board",
+		Package:         testCanvasPackage("atomic-install", nil),
+		Artifact:        webapp.Artifact{Digest: "atomic-install", RelativePath: "releases/atomic-install", Bytes: 1},
+		SourceActorKind: "canvas-install:upload",
+		SourceUserID:    "user-1",
+		Approved:        true,
+		Receipt: InstallReceipt{
+			PreparationID: "preparation-atomic",
+			UserID:        "user-1",
+			PackageID:     "canvas-board",
+			Version:       "atomic-install",
+			Digest:        "atomic-install",
+			OriginKind:    "upload",
+		},
+	})
+	if err != nil {
+		t.Fatalf("InstallCanvasPackage() error = %v", err)
+	}
+	if result == nil || result.Canvas == nil || result.Receipt.CanvasID != result.Canvas.ID {
+		t.Fatalf("install result = %+v", result)
+	}
+	receipt, err := service.repo.GetInstallReceipt(ctx, "preparation-atomic", "user-1")
+	if err != nil {
+		t.Fatalf("GetInstallReceipt() error = %v", err)
+	}
+	if receipt.CanvasID != result.Canvas.ID || receipt.WorkspaceID != "workspace-install" {
+		t.Fatalf("receipt = %+v", receipt)
+	}
+	releases, err := instanceStore.ListReleases(ctx, result.Canvas.PluginInstanceID)
+	if err != nil {
+		t.Fatalf("ListReleases() error = %v", err)
+	}
+	if len(releases) != 1 || releases[0].PackageDigest != "atomic-install" {
+		t.Fatalf("releases = %+v", releases)
+	}
+}
+
 func TestFirstTaskReleaseCanBeReviewedAndApproved(t *testing.T) {
 	service, instanceStore, _ := newCanvasService(t)
 	canvas := createCanvas(t, service, CreateCanvasRequest{

@@ -81,10 +81,14 @@ export function CanvasTaskCreateLauncher({
   }, [dialogWorkspaceId, enabled, workspaceId]);
 
   const handleSuccess = useCallback(
-    (task: Task, _mode: "create" | "edit", meta?: { willNavigate?: boolean }) => {
+    (
+      task: Task,
+      _mode: "create" | "edit",
+      meta?: { willNavigate?: boolean; autoFocus?: boolean },
+    ) => {
       setOpen(false);
       setDialogWorkspaceId(null);
-      if (!meta?.willNavigate) router.push(linkToTask(task.id));
+      if (meta?.autoFocus !== false && !meta?.willNavigate) router.push(linkToTask(task.id));
     },
     [router],
   );

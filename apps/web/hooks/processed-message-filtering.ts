@@ -91,22 +91,23 @@ function isRecoveryMessage(message: Message): boolean {
   return metadata?.recovery_actions === true;
 }
 
-function deduplicateRecoveryMessages(messages: Message[]): Message[] {
-  let lastRecoveryIndex = -1;
-  for (let index = messages.length - 1; index >= 0; index--) {
-    if (isRecoveryMessage(messages[index])) {
-      lastRecoveryIndex = index;
-      break;
-    }
+function recoveryMessageStamp(message: Message): string | null {
+  const metadata = message.metadata as Record<string, unknown> | undefined;
+  for (const key of ["recovery_stamp", "error_stamp", "failure_stamp"]) {
+    const value = metadata?.[key];
+    if (typeof value === "string" && value !== "") return value;
   }
-  if (lastRecoveryIndex === -1) return messages;
-  const hasLaterActivity = messages
-    .slice(lastRecoveryIndex + 1)
-    .some((message) => message.type === "message" || message.type === "content");
-  return messages.filter((message, index) => {
+  return null;
+}
+
+function deduplicateRecoveryMessages(messages: Message[]): Message[] {
+  const seenStamps = new Set<string>();
+  return messages.filter((message) => {
     if (!isRecoveryMessage(message)) return true;
-    if (hasLaterActivity) return false;
-    return index === lastRecoveryIndex;
+    const stamp = recoveryMessageStamp(message);
+    if (!stamp || seenStamps.has(stamp)) return !stamp;
+    seenStamps.add(stamp);
+    return true;
   });
 }
 
@@ -316,7 +317,9 @@ function findActiveClarification(
   messages: Message[],
   scope?: PendingClarificationScope,
 ): Message | undefined {
-  return findPendingClarification(messages, scope) ?? undefined;
+  const pending = findPendingClarification(messages, scope);
+  const metadata = pending?.metadata as ClarificationRequestMetadata | undefined;
+  return metadata?.agent_disconnected === true ? undefined : (pending ?? undefined);
 }
 
 function isClarificationVisible(

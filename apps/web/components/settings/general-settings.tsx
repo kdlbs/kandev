@@ -27,6 +27,7 @@ import { updateUserSettings } from "@/lib/api";
 import type { Theme } from "@/lib/settings/types";
 import type { UserSettingsState } from "@/lib/state/slices/settings/types";
 import { ArchiveConfirmationSettings } from "@/components/settings/archive-confirmation-settings";
+import { CreationAutoFocusSettings } from "@/components/settings/creation-auto-focus-settings";
 import { PreventAutoStartAgentSettings } from "@/components/settings/prevent-auto-start-agent-settings";
 import { LanguageSettings } from "@/components/settings/language-settings";
 import { MCPTaskAgentProfileDefaultSettings } from "@/components/settings/mcp-task-agent-profile-default-settings";
@@ -49,6 +50,7 @@ import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
 import {
   appearanceRevision,
+  parseSidebarHoverDelay,
   buildAppearanceUserSettingsPatch,
   createAppearanceSavedState,
   rebaseAppearanceDraft,
@@ -233,6 +235,7 @@ export function TaskActionsSettings() {
       >
         <div className="space-y-4">
           <PreventAutoStartAgentSettings />
+          <CreationAutoFocusSettings />
           <MCPTaskAgentProfileDefaultSettings />
           <AgentGeneratedTaskTitleSettings />
           <ArchiveConfirmationSettings />
@@ -297,10 +300,14 @@ function useAppearanceSaveContributor({
   const previewRichOutputAnimations = useAppStore((state) => state.previewRichOutputAnimations);
   const commitRichOutputAnimations = useAppStore((state) => state.commitRichOutputAnimations);
   const restoreRichOutputAnimations = useAppStore((state) => state.restoreRichOutputAnimations);
+  const { t } = useTranslation();
+  const delayValid = parseSidebarHoverDelay(draft.sidebarHoverDelayMs) !== null;
   const revision = appearanceRevision(draft);
 
   useSettingsSaveContributor({
     id: "general-appearance",
+    canSave: delayValid,
+    invalidReason: delayValid ? undefined : t("settings:sidebarHoverDelayError"),
     order: 10,
     revision,
     isDirty: revision !== appearanceRevision(saved),

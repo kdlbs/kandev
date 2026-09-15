@@ -74,7 +74,9 @@ export function useAppNavDialogs(closeMenu: () => void): AppNavDialogControls {
           open
           onOpenChange={setImproveOpen}
           workspaceId={workspaceId}
-          onSuccess={(task) => router.push(linkToTask(task.id))}
+          onSuccess={(task, meta) => {
+            if (meta?.autoFocus !== false) router.push(linkToTask(task.id));
+          }}
         />
       )}
       {health.dialogOpen && (
