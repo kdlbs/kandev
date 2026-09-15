@@ -1092,6 +1092,68 @@ func (r *Repository) readTaskPositionInTx(ctx context.Context, tx *sql.Tx, taskI
 	return position, true, nil
 }
 
+// applyPreservedPositionInTx overwrites task.Position with the value read
+// fresh inside this transaction when preservePosition is set, so a caller's
+// task object read before the transaction began does not clobber a
+// concurrent reorder or arrival's position with a stale one.
+func (r *Repository) applyPreservedPositionInTx(ctx context.Context, tx *sql.Tx, task *models.Task, preservePosition bool) error {
+	if !preservePosition {
+		return nil
+	}
+	currentPosition, positionFound, err := r.readTaskPositionInTx(ctx, tx, task.ID)
+	if err != nil {
+		return err
+	}
+	if positionFound {
+		task.Position = currentPosition
+	}
+	return nil
+}
+
+// buildTaskUpdateQuery builds updateTaskTx's UPDATE statement and the
+// metadata payload it binds. protectDeferredLaunch strips deferred_launch
+// from the payload regardless of which query shape below owns the write: a
+// key absent from the patch document leaves the row's own current value in
+// place for both merge mechanisms (json_patch/jsonb `||` in the
+// title-pending branch below, and the explicit splice
+// protectedTaskMetadataMergeExpression performs for the plain-replace
+// branch), so a stale in-memory snapshot can never resurrect or clobber
+// whatever the session ceiling's own CAS writers did to that key in the
+// meantime.
+func (r *Repository) buildTaskUpdateQuery(
+	task *models.Task, metadata []byte, protectDeferredLaunch bool,
+) (query string, finalMetadata []byte, err error) {
+	metadataExpr := "?"
+	if protectDeferredLaunch {
+		stripped, marshalErr := json.Marshal(stripProtectedTaskMetadata(task.Metadata))
+		if marshalErr != nil {
+			return "", nil, marshalErr
+		}
+		metadata = stripped
+		if !models.IsAgentTitlePending(task.Metadata) {
+			metadataExpr = protectedTaskMetadataMergeExpression(r.db.DriverName())
+		}
+	}
+	updateQuery := fmt.Sprintf(`
+		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = %s, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
+		WHERE id = ?
+	`, metadataExpr)
+	if models.IsAgentTitlePending(task.Metadata) {
+		pending := agentTitlePendingPredicate(r.db.DriverName())
+		metadataMerge := pendingTaskMetadataMergeExpression(r.db.DriverName())
+		updateQuery = fmt.Sprintf(`
+			UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?,
+				title = CASE WHEN %s THEN ? ELSE title END,
+				description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?,
+				queued_for_step_id = ?, queued_at = ?,
+				metadata = %s,
+				parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
+			WHERE id = ?
+		`, pending, metadataMerge)
+	}
+	return updateQuery, metadata, nil
+}
+
 // updateTaskTx writes the full task row. preservePosition, true for every
 // caller except the one path that honors an explicit caller-supplied
 // position (UpdateTaskWithExplicitPosition), overwrites task.Position with
@@ -1117,14 +1179,8 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 		// ladder over every other case (design's error-mapping table).
 		return "", 0, fmt.Errorf("%w: %s", ErrTaskNotFound, task.ID)
 	}
-	if preservePosition {
-		currentPosition, positionFound, posErr := r.readTaskPositionInTx(ctx, tx, task.ID)
-		if posErr != nil {
-			return "", 0, posErr
-		}
-		if positionFound {
-			task.Position = currentPosition
-		}
+	if err := r.applyPreservedPositionInTx(ctx, tx, task, preservePosition); err != nil {
+		return "", 0, err
 	}
 	if expectedWorkflowID != "" && fromWorkflowID != expectedWorkflowID {
 		// Checked here, immediately before the UPDATE below and using the
@@ -1145,41 +1201,9 @@ func (r *Repository) updateTaskTx(ctx context.Context, tx *sql.Tx, task *models.
 	// was invisible until exercised against Postgres with real concurrency.
 	task.UpdatedAt = r.nowUTC()
 
-	metadataExpr := "?"
-	// protectDeferredLaunch strips deferred_launch from the payload
-	// regardless of which query shape below owns the write: a key absent
-	// from the patch document leaves the row's own current value in place
-	// for both merge mechanisms (json_patch/jsonb `||` in the title-pending
-	// branch below, and the explicit splice protectedTaskMetadataMergeExpression
-	// performs for the plain-replace branch), so a stale in-memory snapshot
-	// can never resurrect or clobber whatever the session ceiling's own CAS
-	// writers did to that key in the meantime.
-	if protectDeferredLaunch {
-		stripped, err := json.Marshal(stripProtectedTaskMetadata(task.Metadata))
-		if err != nil {
-			return "", 0, err
-		}
-		metadata = stripped
-		if !models.IsAgentTitlePending(task.Metadata) {
-			metadataExpr = protectedTaskMetadataMergeExpression(r.db.DriverName())
-		}
-	}
-	updateQuery := fmt.Sprintf(`
-		UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?, title = ?, description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?, queued_for_step_id = ?, queued_at = ?, metadata = %s, parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
-		WHERE id = ?
-	`, metadataExpr)
-	if models.IsAgentTitlePending(task.Metadata) {
-		pending := agentTitlePendingPredicate(r.db.DriverName())
-		metadataMerge := pendingTaskMetadataMergeExpression(r.db.DriverName())
-		updateQuery = fmt.Sprintf(`
-			UPDATE tasks SET workspace_id = ?, workflow_id = ?, workflow_step_id = ?,
-				title = CASE WHEN %s THEN ? ELSE title END,
-				description = ?, state = ?, priority = ?, position = ?, wip_admitted = ?,
-				queued_for_step_id = ?, queued_at = ?,
-				metadata = %s,
-				parent_id = ?, updated_at = ?, origin = ?, project_id = ?, labels = ?, identifier = ?, assignee_user_id = ?
-			WHERE id = ?
-		`, pending, metadataMerge)
+	updateQuery, metadata, err := r.buildTaskUpdateQuery(task, metadata, protectDeferredLaunch)
+	if err != nil {
+		return "", 0, err
 	}
 	result, err := tx.ExecContext(ctx, r.db.Rebind(updateQuery), task.WorkspaceID, task.WorkflowID, task.WorkflowStepID, task.Title, task.Description, task.State, task.Priority, task.Position, dialect.BoolToInt(task.WIPAdmitted), task.QueuedForStepID, task.QueuedAt, string(metadata), task.ParentID, task.UpdatedAt, task.Origin, task.ProjectID, task.Labels, task.Identifier, task.AssigneeUserID, task.ID)
 	if err != nil {
@@ -3289,14 +3313,18 @@ func (r *Repository) ListTasksWithMetadataKey(ctx context.Context, key string) (
 // Ordered by id ascending alone (AC-50b, AC-50c) — no timestamp term, so an
 // unrelated write to a deferred task cannot move it in the drain order
 // between ticks, unlike ListTasksWithMetadataKey's three-column sort.
+//
+// The predicate matches on value equality, not mere key presence: a
+// key-presence test would also match a record left behind with the flag
+// explicitly false.
 func (r *Repository) ListTasksWithCeilingDeferred(ctx context.Context) ([]*models.Task, error) {
 	var predicate string
 	var args []interface{}
 	if dialect.IsPostgres(r.ro.DriverName()) {
-		predicate = "jsonb_extract_path(CASE WHEN t.metadata IS NULL OR t.metadata = 'null' OR t.metadata = '' THEN '{}'::jsonb ELSE t.metadata::jsonb END, ?, ?) IS NOT NULL"
+		predicate = "jsonb_extract_path(CASE WHEN t.metadata IS NULL OR t.metadata = 'null' OR t.metadata = '' THEN '{}'::jsonb ELSE t.metadata::jsonb END, ?, ?) = 'true'::jsonb"
 		args = []interface{}{models.MetaKeyDeferredLaunch, models.CeilingDeferredKey}
 	} else {
-		predicate = "json_type(CASE WHEN t.metadata IS NULL OR t.metadata = 'null' OR t.metadata = '' THEN '{}' ELSE t.metadata END, ?) IS NOT NULL"
+		predicate = "json_type(CASE WHEN t.metadata IS NULL OR t.metadata = 'null' OR t.metadata = '' THEN '{}' ELSE t.metadata END, ?) = 'true'"
 		args = []interface{}{jsonPath(models.MetaKeyDeferredLaunch + "." + models.CeilingDeferredKey)}
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`

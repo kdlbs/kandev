@@ -147,11 +147,11 @@ func TestListAdmittedSessionIDsIgnoresTaskShape(t *testing.T) {
 	}
 }
 
-// TestListTasksWithCeilingDeferralAppliesNoneOfTheThreeFilters pins AC-50b: the
-// new method must not inherit ListTasksWithMetadataKey's archived_at, is_ephemeral
-// or automation-origin filters. Each one would strand records the sweep is
-// required to find.
-func TestListTasksWithCeilingDeferralAppliesNoneOfTheThreeFilters(t *testing.T) {
+// TestListTasksWithCeilingDeferredAppliesNoneOfTheThreeFilters pins AC-50b: the
+// sweep's lister must not inherit ListTasksWithMetadataKey's archived_at,
+// is_ephemeral or automation-origin filters. Each one would strand records the
+// sweep is required to find.
+func TestListTasksWithCeilingDeferredAppliesNoneOfTheThreeFilters(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 
@@ -168,9 +168,9 @@ func TestListTasksWithCeilingDeferralAppliesNoneOfTheThreeFilters(t *testing.T) 
 	}
 	archiveTaskForCeilingTests(t, repo, "task-defer-archived")
 
-	got, err := repo.ListTasksWithCeilingDeferral(ctx)
+	got, err := repo.ListTasksWithCeilingDeferred(ctx)
 	if err != nil {
-		t.Fatalf("ListTasksWithCeilingDeferral: %v", err)
+		t.Fatalf("ListTasksWithCeilingDeferred: %v", err)
 	}
 	index := make(map[string]bool, len(got))
 	for _, task := range got {
@@ -178,19 +178,19 @@ func TestListTasksWithCeilingDeferralAppliesNoneOfTheThreeFilters(t *testing.T) 
 	}
 	for _, task := range tasks {
 		if !index[task.ID] {
-			t.Errorf("ListTasksWithCeilingDeferral omitted %s; got %d tasks", task.ID, len(got))
+			t.Errorf("ListTasksWithCeilingDeferred omitted %s; got %d tasks", task.ID, len(got))
 		}
 	}
 	if len(got) != len(tasks) {
-		t.Fatalf("ListTasksWithCeilingDeferral returned %d tasks, want %d", len(got), len(tasks))
+		t.Fatalf("ListTasksWithCeilingDeferred returned %d tasks, want %d", len(got), len(tasks))
 	}
 }
 
-// TestListTasksWithCeilingDeferralOrdersByIDAscending pins AC-50c: ordering is by
+// TestListTasksWithCeilingDeferredOrdersByIDAscending pins AC-50c: ordering is by
 // tasks.id ascending alone. Insertion order below is deliberately not id order,
 // and updated_at is deliberately moved afterwards on the id-first task so a
 // three-column sort copied from ListTasksWithMetadataKey would fail here.
-func TestListTasksWithCeilingDeferralOrdersByIDAscending(t *testing.T) {
+func TestListTasksWithCeilingDeferredOrdersByIDAscending(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 
@@ -206,9 +206,9 @@ func TestListTasksWithCeilingDeferralOrdersByIDAscending(t *testing.T) {
 		t.Fatalf("bump updated_at: %v", err)
 	}
 
-	got, err := repo.ListTasksWithCeilingDeferral(ctx)
+	got, err := repo.ListTasksWithCeilingDeferred(ctx)
 	if err != nil {
-		t.Fatalf("ListTasksWithCeilingDeferral: %v", err)
+		t.Fatalf("ListTasksWithCeilingDeferred: %v", err)
 	}
 	var ids []string
 	for _, task := range got {
@@ -216,19 +216,21 @@ func TestListTasksWithCeilingDeferralOrdersByIDAscending(t *testing.T) {
 	}
 	want := []string{"ceil-a", "ceil-b", "ceil-c"}
 	if len(ids) != len(want) {
-		t.Fatalf("ListTasksWithCeilingDeferral returned %v, want %v", ids, want)
+		t.Fatalf("ListTasksWithCeilingDeferred returned %v, want %v", ids, want)
 	}
 	for i := range want {
 		if ids[i] != want[i] {
-			t.Fatalf("ListTasksWithCeilingDeferral returned %v, want %v", ids, want)
+			t.Fatalf("ListTasksWithCeilingDeferred returned %v, want %v", ids, want)
 		}
 	}
 }
 
-// TestListTasksWithCeilingDeferralSkipsOtherDeferredLaunchRecords pins the
+// TestListTasksWithCeilingDeferredSkipsOtherDeferredLaunchRecords pins the
 // discriminator: deferred_launch is a shared record carrying three independent
-// meanings, and only the ceiling_deferred one is this sweep's candidate.
-func TestListTasksWithCeilingDeferralSkipsOtherDeferredLaunchRecords(t *testing.T) {
+// meanings, and only the ceiling_deferred one is this sweep's candidate. It also
+// pins that the predicate matches on value equality, not mere key presence: a
+// task carrying ceiling_deferred explicitly set to false must not be swept.
+func TestListTasksWithCeilingDeferredSkipsOtherDeferredLaunchRecords(t *testing.T) {
 	repo := newRepoForSessionTests(t)
 	ctx := context.Background()
 
@@ -255,16 +257,16 @@ func TestListTasksWithCeilingDeferralSkipsOtherDeferredLaunchRecords(t *testing.
 		}
 	}
 
-	got, err := repo.ListTasksWithCeilingDeferral(ctx)
+	got, err := repo.ListTasksWithCeilingDeferred(ctx)
 	if err != nil {
-		t.Fatalf("ListTasksWithCeilingDeferral: %v", err)
+		t.Fatalf("ListTasksWithCeilingDeferred: %v", err)
 	}
 	if len(got) != 1 || got[0].ID != "keep-ceiling-true" {
 		var ids []string
 		for _, task := range got {
 			ids = append(ids, task.ID)
 		}
-		t.Fatalf("ListTasksWithCeilingDeferral returned %v, want [keep-ceiling-true]", ids)
+		t.Fatalf("ListTasksWithCeilingDeferred returned %v, want [keep-ceiling-true]", ids)
 	}
 	if !models.HasCeilingDeferredIntent(got[0]) {
 		t.Fatalf("scanned task lost its ceiling deferral: %+v", got[0].Metadata)

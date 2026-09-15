@@ -100,7 +100,12 @@ func TestMoveTaskWithOptionsSameStepSurvivesAConcurrentCeilingWrite(t *testing.T
 
 	current, err := repo.GetTask(ctx, "task-move-race")
 	require.NoError(t, err)
-	require.Equal(t, 1, current.Position, "the caller's own move must still apply")
+	// A same-step move ignores the caller-supplied position literal
+	// (REQ-TASKS-KANBAN-TASK-REORDERING-001.28: see
+	// TestService_MoveTaskAllowsSameStepReorderWhenStepAlreadyOverLimit), so
+	// "the caller's own move must still apply" is pinned by the absence of
+	// an error and the unchanged position below, not by position becoming 1.
+	require.Equal(t, 0, current.Position, "a same-step move must leave position unchanged")
 
 	deferred, ok := current.Metadata[models.MetaKeyDeferredLaunch].(map[string]interface{})
 	require.True(t, ok, "deferred_launch missing or wrong shape: %#v", current.Metadata[models.MetaKeyDeferredLaunch])
