@@ -225,7 +225,7 @@ function SettledFailureMessage({
       ? "text-amber-600 dark:text-amber-400"
       : "text-red-600 dark:text-red-400";
   return (
-    <div className="w-full">
+    <div className="w-full" data-testid="session-recovery-action-message">
       <div className="flex items-start gap-3 w-full rounded px-2 py-1 -mx-2">
         <div className="flex-shrink-0 mt-0.5">
           <IconAlertTriangle className={cn("h-4 w-4", iconClass)} />
