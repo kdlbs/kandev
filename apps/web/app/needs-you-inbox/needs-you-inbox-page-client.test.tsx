@@ -185,6 +185,21 @@ describe("NeedsYouInboxPageClient loading vs. settled/refresh states", () => {
     expect(screen.queryByRole("status")).toBeNull();
   });
 
+  it("keeps the settled list during a background refresh, instead of re-flashing loading", () => {
+    state = {
+      status: "loading",
+      bundles: [bundle("p1")],
+      hiddenCount: 0,
+      hasMore: false,
+      appliedGeneration: 1,
+      lastAppliedOk: true,
+    };
+    render(<NeedsYouInboxPageClient />);
+
+    expect(screen.getAllByTestId("stub-row")).toHaveLength(1);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
   it("does not flash the error state for a truncated boot payload before the first read resolves", () => {
     state = {
       status: "loading",

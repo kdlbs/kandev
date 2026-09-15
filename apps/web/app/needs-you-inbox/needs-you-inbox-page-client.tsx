@@ -12,6 +12,7 @@ import {
   selectNeedsYouInboxRevision,
   selectNeedsYouInboxStatus,
 } from "@/lib/state/slices/needs-you-inbox/selectors";
+import type { NeedsYouInboxReadStatus } from "@/lib/state/slices/needs-you-inbox/types";
 import type { ClarificationInboxBundle } from "@/lib/types/clarification-inbox";
 import { NeedsYouInboxRow } from "@/components/needs-you-inbox/needs-you-inbox-row";
 import { NeedsYouInboxEmptyState } from "@/components/needs-you-inbox/needs-you-inbox-empty-state";
@@ -20,34 +21,16 @@ import { NeedsYouInboxHiddenPanel } from "@/components/needs-you-inbox/needs-you
 
 type ViewMode = "error" | "loading" | "empty" | "list";
 
-// `status` alone can't tell a first read from a background refresh, or a
-// refresh that follows success from one that follows a failure:
-// `beginNeedsYouInboxRead` overwrites `status` to "loading" without touching
-// what preceded it, so both refresh cases reach here as the identical tuple
-// of the other two state arguments (`bundleCount`, `hasMore`). `lastAppliedOk`
-// (whether the last applied response was a successful page, set by
-// `setNeedsYouInboxPage` and cleared by `setNeedsYouInboxError`) is what
-// actually distinguishes them, and gates the spinner: it stays up for the
-// very first read, for "idle" (boot-seeded but not yet read), and for a
-// refresh following a failure, so a failed read never reads as a false
-// all-clear while its retry is in flight; it steps aside for a refresh over
-// an already-settled (possibly empty) inbox, which keeps its settled view
-// instead of reverting to a spinner.
-//
-// `hasActiveWorkspace` short-circuits all of the above: with no active
-// workspace, every read trigger in the controller is guarded on
-// `workspaceId` and none ever fires, so `lastAppliedOk` can never flip and
-// the spinner would otherwise hang forever with no retry affordance. That
-// case resolves to "empty" instead, which the empty state already renders
-// correctly (its own workspace-name lookup falls back to unnamed copy).
-//
-// A page reporting truncation while listing zero rows means enrichment
-// emptied a page the query had filled, so this resolves to the retryable
-// "error" state rather than "empty" (design-01#Data-and-contracts) -- the
-// `lastAppliedOk` gate above already keeps this from firing on the pre-read
-// boot seed's own truncation flag.
+// `status` alone can't distinguish a refresh after success from one after a
+// failure, since `beginNeedsYouInboxRead` overwrites it to "loading" without
+// touching what preceded it; `lastAppliedOk` carries that distinction and
+// gates the loading view. `hasActiveWorkspace` short-circuits to the empty
+// view, since with no active workspace no controller trigger ever applies a
+// response and `lastAppliedOk` can never flip. A truncated page with zero
+// rows is enrichment having emptied a filled page, not an empty inbox, so it
+// resolves to the retryable error view instead.
 function resolveViewMode(
-  status: string,
+  status: NeedsYouInboxReadStatus,
   bundleCount: number,
   hasMore: boolean,
   lastAppliedOk: boolean,
