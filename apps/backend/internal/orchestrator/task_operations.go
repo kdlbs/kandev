@@ -1630,19 +1630,21 @@ func (s *Service) startTask(ctx context.Context, taskID string, agentProfileID s
 	s.rememberTurnPrompt(sessionID, prompt, "", planMode, attachments)
 
 	execution, err := s.launchPreparedSessionWithDynamicFallback(ctx, task, sessionID, executor.LaunchOptions{
-		AgentProfileID:       agentProfileID,
-		ExactProfile:         opts.ExactProfile,
-		OfficeAgentProfileID: officeAgentProfileID,
-		ExecutorID:           executorID,
-		TurnID:               initialTurnID,
-		Prompt:               effectivePrompt,
-		WorkflowStepID:       workflowStepID,
-		StartAgent:           true,
-		McpMode:              mcpMode,
-		Attachments:          attachments,
-		Env:                  env,
-		AdditionalSkillSlugs: append([]string(nil), opts.AdditionalSkillSlugs...),
-		RouteOverride:        route,
+		AgentProfileID:         agentProfileID,
+		ExactProfile:           opts.ExactProfile,
+		ExactProfileGeneration: exactAssignmentGeneration(exactAssignment),
+		ExactProfileRevision:   exactAssignmentRevision(exactAssignment),
+		OfficeAgentProfileID:   officeAgentProfileID,
+		ExecutorID:             executorID,
+		TurnID:                 initialTurnID,
+		Prompt:                 effectivePrompt,
+		WorkflowStepID:         workflowStepID,
+		StartAgent:             true,
+		McpMode:                mcpMode,
+		Attachments:            attachments,
+		Env:                    env,
+		AdditionalSkillSlugs:   append([]string(nil), opts.AdditionalSkillSlugs...),
+		RouteOverride:          route,
 	})
 	if err != nil {
 		s.recordExactProfileLaunchReceipt(ctx, taskID, sessionID, exactAssignment, exactProfileModel(exactAssignment), err)

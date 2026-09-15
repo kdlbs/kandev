@@ -183,3 +183,16 @@ func exactProfileModel(exact *ExactProfileLaunchDecision) string {
 	}
 	return exact.Model
 }
+
+func exactAssignmentGeneration(exact *ExactProfileLaunchDecision) int64 {
+	if exact == nil {
+		return 0
+	}
+	return exact.Generation
+}
+func exactAssignmentRevision(exact *ExactProfileLaunchDecision) int64 {
+	if exact == nil {
+		return 0
+	}
+	return exact.Revision
+}

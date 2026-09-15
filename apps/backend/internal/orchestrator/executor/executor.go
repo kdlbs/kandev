@@ -673,19 +673,21 @@ const McpModeAutomation = mcpmode.Automation
 
 // LaunchOptions contains optional parameters for LaunchPreparedSession.
 type LaunchOptions struct {
-	AgentProfileID       string
-	ExactProfile         bool
-	OfficeAgentProfileID string
-	ExecutorID           string
-	TurnID               string
-	Prompt               string
-	PriorACPSession      string // ACP session ID to resume for the same concrete profile
-	WorkflowStepID       string
-	StartAgent           bool
-	McpMode              string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, or McpModeAutomation
-	McpProfile           *mcpprofile.Context
-	Attachments          []v1.MessageAttachment
-	Env                  map[string]string
+	AgentProfileID         string
+	ExactProfile           bool
+	ExactProfileGeneration int64
+	ExactProfileRevision   int64
+	OfficeAgentProfileID   string
+	ExecutorID             string
+	TurnID                 string
+	Prompt                 string
+	PriorACPSession        string // ACP session ID to resume for the same concrete profile
+	WorkflowStepID         string
+	StartAgent             bool
+	McpMode                string // MCP tool mode: empty task default, McpModeTaskTitlePending, McpModeConfig, McpModeOffice, or McpModeAutomation
+	McpProfile             *mcpprofile.Context
+	Attachments            []v1.MessageAttachment
+	Env                    map[string]string
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
 	// durable profile selection.
 	AdditionalSkillSlugs []string
