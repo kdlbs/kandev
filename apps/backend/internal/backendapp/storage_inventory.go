@@ -5,12 +5,16 @@ import (
 	"database/sql"
 	"errors"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jmoiron/sqlx"
 
+	agentdocker "github.com/kandev/kandev/internal/agent/docker"
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	storagepkg "github.com/kandev/kandev/internal/system/storage"
+	"github.com/kandev/kandev/internal/system/storage/docknet"
 	"github.com/kandev/kandev/internal/system/storage/workspaces"
 	"github.com/kandev/kandev/internal/task/models"
 	"github.com/kandev/kandev/internal/worktree"
@@ -123,6 +127,95 @@ func taskEligibilitySets(tasks []taskWorkspaceState) (map[string]struct{}, map[s
 }
 
 type containerInventory struct{ reader *sqlx.DB }
+
+// networkTaskOracle resolves network ownership keys to owning-task liveness
+// for the docknet provider. Keys are kandev task IDs (from kandev.* labels)
+// or compose project names (kd_<task-hash> on the governed deployment).
+type networkTaskOracle struct{ reader *sqlx.DB }
+
+// Ownership resolves the network's ownership key, then looks the key up as a
+// task ID first and as a kd_-prefixed compose project name second: broker-
+// launched projects hom via labels only.
+func (o *networkTaskOracle) Ownership(network agentdocker.NetworkInfo) (string, docknet.TaskLookup, error) {
+	key := docknet.OwnershipKeyFromLabels(network.Labels)
+	if key == "" {
+		return "", docknet.TaskLookupUnknown, nil
+	}
+	taskID := key
+	if !isUUID(key) {
+		resolved, ok, err := o.taskIDForProjectName(key)
+		if err != nil {
+			return key, docknet.TaskLookupUnknown, err
+		}
+		if !ok {
+			return key, docknet.TaskLookupUnknown, nil
+		}
+		taskID = resolved
+	}
+	removable, err := o.taskRemovable(taskID)
+	if err != nil {
+		return key, docknet.TaskLookupUnknown, err
+	}
+	if removable {
+		return key, docknet.TaskLookupInactive, nil
+	}
+	return key, docknet.TaskLookupActive, nil
+}
+
+// taskRemovable mirrors containerInventory's liveness composite: done means
+// the task is archived or terminal AND has no live environment/executor.
+// A missing task row is removable-by-unknown handled by the caller.
+func (o *networkTaskOracle) taskRemovable(taskID string) (bool, error) {
+	inventory := &containerInventory{reader: o.reader}
+	removable, err := inventory.ContainerTaskRemovable(context.Background(), taskID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return true, nil
+		}
+		return false, err
+	}
+	return removable, nil
+}
+
+// taskIDForProjectName resolves a kd_<task-hash> compose project name to a
+// task row. Compose project names cannot carry arbitrary characters, so the
+// deployment encodes a task identifier fragment after the kd_ prefix; the
+// exact encoding is operator-side. This mirrors the natural prefixes the
+// backend itself can generate: any task whose ID suffix matches.
+func (o *networkTaskOracle) taskIDForProjectName(name string) (string, bool, error) {
+	if !strings.HasPrefix(name, "kd_") {
+		return "", false, nil
+	}
+	fragment := strings.TrimPrefix(name, "kd_")
+	if fragment == "" {
+		return "", false, nil
+	}
+	var taskID string
+	// Exact task-ID match first (the deployment's canonical form).
+	query := o.reader.Rebind("SELECT id FROM tasks WHERE id = ?")
+	if err := o.reader.GetContext(context.Background(), &taskID, query, fragment); err == nil {
+		return taskID, true, nil
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return "", false, err
+	}
+	// Suffix fallback: project names may hash or truncate the ID.
+	var ids []string
+	query = o.reader.Rebind("SELECT id FROM tasks")
+	if err := o.reader.SelectContext(context.Background(), &ids, query); err != nil {
+		return "", false, err
+	}
+	for _, id := range ids {
+		if strings.HasSuffix(id, fragment) {
+			return id, true, nil
+		}
+	}
+	return "", false, nil
+}
+
+func isUUID(value string) bool {
+	_, err := uuid.Parse(value)
+	return err == nil
+}
 
 func (i *containerInventory) ContainerTaskRemovable(ctx context.Context, taskID string) (bool, error) {
 	task, err := i.loadContainerTask(ctx, taskID)

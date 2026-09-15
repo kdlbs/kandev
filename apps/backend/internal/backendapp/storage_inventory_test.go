@@ -10,6 +10,8 @@ import (
 	"github.com/jmoiron/sqlx"
 	_ "github.com/mattn/go-sqlite3"
 
+	agentdocker "github.com/kandev/kandev/internal/agent/docker"
+	"github.com/kandev/kandev/internal/system/storage/docknet"
 	"github.com/kandev/kandev/internal/task/models"
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
@@ -340,4 +342,99 @@ func insertContainerInventoryExecutor(
 	); err != nil {
 		t.Fatalf("insert executor handle for %q: %v", taskID, err)
 	}
+}
+
+func TestNetworkTaskOracleResolvesKandevTaskLabels(t *testing.T) {
+	database := newContainerInventoryDatabase(t)
+	insertContainerInventoryTask(t, database, "11111111-1111-4111-8111-111111111111", v1.TaskStateInProgress, false)
+	insertContainerInventoryTask(t, database, "22222222-2222-4222-8222-222222222222", v1.TaskStateCompleted, true)
+	oracle := &networkTaskOracle{reader: database}
+
+	active := oracleLookup(t, oracle, "11111111-1111-4111-8111-111111111111")
+	if active != docknet.TaskLookupActive {
+		t.Fatalf("active task lookup = %v, want active", active)
+	}
+	inactive := oracleLookup(t, oracle, "22222222-2222-4222-8222-222222222222")
+	if inactive != docknet.TaskLookupInactive {
+		t.Fatalf("archived task lookup = %v, want inactive", inactive)
+	}
+	// A kandev-labeled network whose task row is gone is an orphan (owned
+	// once, finished now): the classifier reclaims it after the grace window.
+	deleted := oracleLookup(t, oracle, "99999999-9999-4999-8999-999999999999")
+	if deleted != docknet.TaskLookupInactive {
+		t.Fatalf("deleted task lookup = %v, want inactive (orphan)", deleted)
+	}
+}
+
+func TestNetworkTaskOracleResolvesComposeProjectNames(t *testing.T) {
+	database := newContainerInventoryDatabase(t)
+	taskID := "33333333-3333-4333-8333-333333333333"
+	insertContainerInventoryTask(t, database, taskID, v1.TaskStateInProgress, false)
+	oracle := &networkTaskOracle{reader: database}
+
+	// Exact project form: kd_<task id>.
+	lookup := oracleLookup(t, oracle, "kd_"+taskID)
+	if lookup != docknet.TaskLookupActive {
+		t.Fatalf("compose project lookup = %v, want active", lookup)
+	}
+	// Unknown project names stay unknown (fail-closed observation).
+	unknown := oracleLookup(t, oracle, "kd_nope")
+	if unknown != docknet.TaskLookupUnknown {
+		t.Fatalf("unknown project lookup = %v, want unknown", unknown)
+	}
+	// Non-kd_ project names are third-party and never resolved.
+	foreign := oracleLookup(t, oracle, "myapp_default")
+	if foreign != docknet.TaskLookupUnknown {
+		t.Fatalf("foreign project lookup = %v, want unknown", foreign)
+	}
+}
+
+func TestNetworkTaskOracleOwnershipKeyResolution(t *testing.T) {
+	database := newContainerInventoryDatabase(t)
+	taskID := "44444444-4444-4444-8444-444444444444"
+	insertContainerInventoryTask(t, database, taskID, v1.TaskStateCompleted, true)
+	oracle := &networkTaskOracle{reader: database}
+
+	kandevLabeled := agentdocker.NetworkInfo{
+		ID: "n1", Name: "kd_x_default", Driver: "bridge",
+		Labels: map[string]string{"kandev.task_id": taskID},
+	}
+	key, lookup, err := oracle.Ownership(kandevLabeled)
+	if err != nil {
+		t.Fatalf("Ownership: %v", err)
+	}
+	if key != taskID || lookup != docknet.TaskLookupInactive {
+		t.Fatalf("kandev label lookup = key %q %v, want inactive task", key, lookup)
+	}
+
+	composeLabeled := agentdocker.NetworkInfo{
+		ID: "n2", Name: "kd_y_default", Driver: "bridge",
+		Labels: map[string]string{"com.docker.compose.project": "kd_" + taskID},
+	}
+	key, lookup, err = oracle.Ownership(composeLabeled)
+	if err != nil {
+		t.Fatalf("Ownership compose: %v", err)
+	}
+	if key != "kd_"+taskID || lookup != docknet.TaskLookupInactive {
+		t.Fatalf("compose label lookup = key %q %v, want inactive task", key, lookup)
+	}
+
+	// Label-less networks never consult the task store.
+	_, lookup, err = oracle.Ownership(agentdocker.NetworkInfo{ID: "n3", Name: "anon", Labels: map[string]string{}})
+	if err != nil || lookup != docknet.TaskLookupUnknown {
+		t.Fatalf("label-free lookup = %v (%v), want unknown without error", lookup, err)
+	}
+}
+
+func oracleLookup(t *testing.T, oracle *networkTaskOracle, key string) docknet.TaskLookup {
+	t.Helper()
+	network := agentdocker.NetworkInfo{Labels: map[string]string{"kandev.task_id": key}}
+	if !isUUID(key) {
+		network = agentdocker.NetworkInfo{Labels: map[string]string{"com.docker.compose.project": key}}
+	}
+	_, lookup, err := oracle.Ownership(network)
+	if err != nil {
+		t.Fatalf("Ownership for %q: %v", key, err)
+	}
+	return lookup
 }
