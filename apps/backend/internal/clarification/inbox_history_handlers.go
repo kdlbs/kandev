@@ -13,6 +13,12 @@ import (
 	"go.uber.org/zap"
 )
 
+// inboxHistoryBundleKind's two wire values.
+const (
+	inboxHistoryBundleKindPermission    = "permission"
+	inboxHistoryBundleKindClarification = "clarification"
+)
+
 // inboxHistoryBundleView is one row of the History tab's bundle listing: the
 // same shape as inboxBundleView (the message payload carries every field a
 // row needs to render a clarification or permission bundle) plus the
@@ -219,9 +225,9 @@ func inboxHistoryBundleKind(ordered []*taskmodels.Message) string {
 		return ""
 	}
 	if ordered[0].Type == taskmodels.MessageTypePermissionRequest {
-		return "permission"
+		return inboxHistoryBundleKindPermission
 	}
-	return "clarification"
+	return inboxHistoryBundleKindClarification
 }
 
 // orderInboxHistoryMessages orders messages by question_index ascending

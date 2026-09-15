@@ -138,7 +138,7 @@ func TestHttpListInboxHistory_ReturnsHydratedBundles(t *testing.T) {
 		t.Fatalf("expected 1 bundle, got %d", len(resp.Bundles))
 	}
 	got := resp.Bundles[0]
-	if got.PendingID != "pend-1" || got.Reason != "session_ended" || got.Kind != "clarification" {
+	if got.PendingID != "pend-1" || got.Reason != "session_ended" || got.Kind != inboxHistoryBundleKindClarification {
 		t.Fatalf("unexpected bundle view: %+v", got)
 	}
 	if got.AskingTurnID != "turn-1" {
@@ -426,11 +426,11 @@ func TestPermissionGroupKeyFromMessage_FallsBackToMessageIDWhenRequestIDAbsent(t
 
 func TestInboxHistoryBundleKind_PermissionVsClarification(t *testing.T) {
 	perm := []*taskmodels.Message{{Type: taskmodels.MessageTypePermissionRequest}}
-	if got := inboxHistoryBundleKind(perm); got != "permission" {
+	if got := inboxHistoryBundleKind(perm); got != inboxHistoryBundleKindPermission {
 		t.Fatalf("expected permission, got %q", got)
 	}
 	clar := []*taskmodels.Message{{Type: taskmodels.MessageTypeClarificationRequest}}
-	if got := inboxHistoryBundleKind(clar); got != "clarification" {
+	if got := inboxHistoryBundleKind(clar); got != inboxHistoryBundleKindClarification {
 		t.Fatalf("expected clarification, got %q", got)
 	}
 	if got := inboxHistoryBundleKind(nil); got != "" {
