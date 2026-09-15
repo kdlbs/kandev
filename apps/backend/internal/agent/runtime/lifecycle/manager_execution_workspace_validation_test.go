@@ -38,6 +38,26 @@ func TestValidateWorkspaceInfoForExecutionAcceptsCanonicalLocalRepository(t *tes
 	}
 }
 
+func TestValidateWorkspaceInfoForExecutionAcceptsRepositoryInEstablishedFolderRoot(t *testing.T) {
+	root := t.TempDir()
+	repository := initGitRepo(t)
+	if err := linkDirectory(repository, filepath.Join(root, "repository")); err != nil {
+		t.Fatal(err)
+	}
+
+	err := validateWorkspaceInfoForExecution(context.Background(), &WorkspaceInfo{
+		ExecutorType:    string(models.ExecutorTypeLocal),
+		WorkspacePath:   root,
+		WorkspaceLayout: "current_root",
+		WorkspaceRepositories: []WorkspaceRepositorySpec{{
+			RepositoryID: "repository-1", RepositoryPath: repository, RepoName: "repository",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("validateWorkspaceInfoForExecution() rejected established folder root: %v", err)
+	}
+}
+
 func TestValidateWorkspaceInfoForExecutionAcceptsMatchingWorktree(t *testing.T) {
 	source := initGitRepo(t)
 	worktreePath := filepath.Join(t.TempDir(), "linked")
@@ -110,6 +130,32 @@ func TestValidateWorkspaceInfoForExecutionAcceptsMultiRepoTaskRoot(t *testing.T)
 	})
 	if err != nil {
 		t.Fatalf("validateWorkspaceInfoForExecution() error = %v", err)
+	}
+}
+
+func TestValidateWorkspaceInfoForExecutionUsesNestedRepositoryRelativePaths(t *testing.T) {
+	root := t.TempDir()
+	first := initGitRepo(t)
+	second := initGitRepo(t)
+	firstPath := filepath.Join(root, "first")
+	secondPath := filepath.Join(firstPath, "kandev", "second")
+	addLinkedWorktree(t, first, firstPath)
+	if err := os.MkdirAll(filepath.Dir(secondPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	addLinkedWorktree(t, second, secondPath)
+
+	err := validateWorkspaceInfoForExecution(context.Background(), &WorkspaceInfo{
+		ExecutorType:    string(models.ExecutorTypeWorktree),
+		WorkspacePath:   root,
+		WorkspaceLayout: "task_root",
+		WorkspaceRepositories: []WorkspaceRepositorySpec{
+			{RepositoryID: "repository-1", RepositoryPath: first, RepoName: "first", WorkspaceRelativePath: "first"},
+			{RepositoryID: "repository-2", RepositoryPath: second, RepoName: "second", WorkspaceRelativePath: "first/kandev/second"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("validateWorkspaceInfoForExecution() rejected nested repository paths: %v", err)
 	}
 }
 

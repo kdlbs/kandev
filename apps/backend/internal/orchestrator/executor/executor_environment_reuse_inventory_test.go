@@ -209,3 +209,19 @@ func TestValidateReuseEnvironmentInventory_NonWorktreeLegacyToleranceRequiresRea
 		t.Fatalf("validateReuseEnvironmentInventory() = %v, want nil: a spec requiring branch %q must match only the branch-scoped row, not also the stray empty-branch row", err, "main")
 	}
 }
+
+func TestCanonicalInventoryMatchesRequiresWorkspacePlacementIdentity(t *testing.T) {
+	spec := RepoSpec{RepositoryID: "repo-1", BranchIdentitySlug: "main", WorkspaceRelativePath: "repo/kandev/api"}
+	rows := []*models.TaskEnvironmentRepo{
+		{RepositoryID: "repo-1", BranchSlug: "main", WorkspaceRelativePath: "repo/api", WorktreeID: "wt-wrong"},
+		{RepositoryID: "repo-1", BranchSlug: "main", WorkspaceRelativePath: "repo/kandev/api", WorktreeID: "wt-right"},
+	}
+	if got := canonicalInventoryMatches(spec, rows, true); got != 1 {
+		t.Fatalf("canonicalInventoryMatches() = %d, want only the matching placement", got)
+	}
+
+	rows[1].WorkspaceRelativePath = "repo/other"
+	if got := canonicalInventoryMatches(spec, rows, true); got != 0 {
+		t.Fatalf("canonicalInventoryMatches() = %d after placement change, want no match", got)
+	}
+}

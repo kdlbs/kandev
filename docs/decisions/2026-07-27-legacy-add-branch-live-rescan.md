@@ -66,3 +66,9 @@ restart a host execution when adopting a new root.
    processes.
 4. **Return only repository and branch identifiers.** Rejected because the unchanged agent working
    directory gives the caller no reliable path to the new sibling.
+
+
+## Later explicit placement decision
+
+[Explicit workspace repository placement](2026-09-14-explicit-workspace-repository-placement.md) permits user-selected nesting in the idle batch flow.
+The no-nesting and no-restart rules here remain unchanged for legacy add-branch.

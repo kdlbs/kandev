@@ -843,12 +843,12 @@ func (r *Repository) insertCreatingWorkspaceEnvironment(ctx context.Context, tx 
 	if _, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_environments (
 			id, task_id, executor_type, executor_id, executor_profile_id,
-			control_port, status, materialization_session_id, workspace_path,
+			control_port, status, materialization_session_id, workspace_path, workspace_layout,
 			container_id, sandbox_id, task_dir_name, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`), candidate.ID, candidate.TaskID, candidate.ExecutorType, candidate.ExecutorID,
 		candidate.ExecutorProfileID, candidate.ControlPort, string(candidate.Status),
-		candidate.MaterializationSessionID, candidate.WorkspacePath, candidate.ContainerID,
+		candidate.MaterializationSessionID, candidate.WorkspacePath, candidate.WorkspaceLayout, candidate.ContainerID,
 		candidate.SandboxID, candidate.TaskDirName, candidate.CreatedAt, candidate.UpdatedAt); err != nil {
 		return fmt.Errorf("create workspace binding: %w", err)
 	}
@@ -3486,7 +3486,7 @@ func (r *Repository) purgeTaskSessionStateTx(
 // in session-scoped worktree queries.
 const envRepoSelectCols = `
 	ter.id, ter.task_environment_id, ter.repository_id,
-	COALESCE(ter.branch_slug, ''), COALESCE(ter.worktree_id, ''),
+	COALESCE(ter.workspace_relative_path, ''), COALESCE(ter.branch_slug, ''), COALESCE(ter.worktree_id, ''),
 	COALESCE(ter.worktree_path, ''), COALESCE(ter.worktree_branch, ''),
 	ter.position, COALESCE(ter.error_message, ''), ter.status,
 	ter.created_at, ter.updated_at, ter.merged_at, ter.deleted_at`
@@ -3497,7 +3497,7 @@ func scanEnvRepoRow(scanner rowScanner) (*models.TaskEnvironmentRepo, error) {
 	row := &models.TaskEnvironmentRepo{}
 	var mergedAt, deletedAt sql.NullTime
 	if err := scanner.Scan(
-		&row.ID, &row.TaskEnvironmentID, &row.RepositoryID, &row.BranchSlug,
+		&row.ID, &row.TaskEnvironmentID, &row.RepositoryID, &row.WorkspaceRelativePath, &row.BranchSlug,
 		&row.WorktreeID, &row.WorktreePath, &row.WorktreeBranch, &row.Position,
 		&row.ErrorMessage, &row.Status, &row.CreatedAt, &row.UpdatedAt,
 		&mergedAt, &deletedAt,
@@ -3678,7 +3678,7 @@ func (r *Repository) appendWorktreesForSessionChunk(
 		var mergedAt, deletedAt sql.NullTime
 		row := &models.TaskEnvironmentRepo{}
 		if err := rows.Scan(&sessionID, &row.ID, &row.TaskEnvironmentID, &row.RepositoryID,
-			&row.BranchSlug, &row.WorktreeID, &row.WorktreePath, &row.WorktreeBranch,
+			&row.WorkspaceRelativePath, &row.BranchSlug, &row.WorktreeID, &row.WorktreePath, &row.WorktreeBranch,
 			&row.Position, &row.ErrorMessage, &row.Status, &row.CreatedAt, &row.UpdatedAt,
 			&mergedAt, &deletedAt); err != nil {
 			return err

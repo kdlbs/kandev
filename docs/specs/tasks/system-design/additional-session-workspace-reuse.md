@@ -54,9 +54,10 @@ canonical attach checks.
 ## Recovery and path authority
 
 `task/service.GetWorkspaceInfoForSession` reconstructs the runtime workspace
-from the canonical environment-repository inventory. For a single repository,
-the effective workspace is its worktree. For multiple repositories, it is their
-task root. The lifecycle manager uses that value as the recovered
+from the canonical environment-repository inventory. The recorded layout and validated environment path define the effective workspace.
+Repository count alone cannot select a root for explicit parent or nested layouts.
+Legacy environments retain their validated recorded paths. See the
+[repository placement design](workspace-repository-placement.md). The lifecycle manager uses that value as the recovered
 `AgentExecution.WorkspacePath` and as the agentctl working directory.
 
 The lifecycle adapter returns both the execution workspace and any optional

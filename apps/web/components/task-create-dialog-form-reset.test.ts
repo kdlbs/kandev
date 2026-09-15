@@ -23,6 +23,7 @@ function makeResetters(): FormResetters {
     setPreferLocalExecutor: vi.fn(),
     setAutopilot: vi.fn(),
     setPriority: vi.fn(),
+    setInitialWorkspaceLayout: vi.fn(),
     setGitHubUrlError: vi.fn(),
     setFreshBranchEnabled: vi.fn(),
     setCurrentLocalBranch: vi.fn(),
@@ -56,5 +57,6 @@ describe("resetTaskForm canvas source preset", () => {
     expect(resetters.setNoRepository).toHaveBeenCalledWith(false);
     expect(resetters.setWorkspacePath).toHaveBeenCalledWith("");
     expect(resetters.setPreferLocalExecutor).toHaveBeenCalledWith(false);
+    expect(resetters.setInitialWorkspaceLayout).toHaveBeenCalledWith("repository");
   });
 });

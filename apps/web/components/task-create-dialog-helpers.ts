@@ -1,11 +1,20 @@
 import type { useRouter } from "@/lib/routing/client-router";
-import type { Task, Branch, LocalRepository, Repository, TaskPriority } from "@/lib/types/http";
+import type {
+  Task,
+  Branch,
+  Executor,
+  LocalRepository,
+  Repository,
+  TaskPriority,
+  InitialWorkspaceLayout,
+} from "@/lib/types/http";
 import type { AgentProfileOption } from "@/lib/state/slices";
 import type { AppState } from "@/lib/state/store";
 import type {
   StepType,
   TaskRemoteRepoRow,
   TaskRepoRow,
+  InitialWorkspaceLayoutMode,
 } from "@/components/task-create-dialog-types";
 import type { UsePRInfoByURLResult } from "@/hooks/domains/github/use-pr-info-by-url";
 import { parseGitHubAnyUrl } from "@/hooks/domains/github/use-pr-info-by-url";
@@ -213,6 +222,7 @@ export type BuildCreatePayloadArgs = {
   /** Task IDs this task must wait for. */
   blockedBy?: string[];
   priority?: TaskPriority;
+  initialWorkspaceLayout?: InitialWorkspaceLayout;
 };
 
 export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTaskParams {
@@ -234,11 +244,64 @@ export function buildCreateTaskPayload(args: BuildCreatePayloadArgs): CreateTask
     workspace_path: args.workspacePath || undefined,
     autopilot: args.autopilot || undefined,
     priority: args.priority ?? "medium",
+    initial_workspace_layout: args.initialWorkspaceLayout,
     // Dependencies declared at creation time. With edges present the backend
     // records the requested agent start as a start-when-unblocked intent rather
     // than launching now, so a chain runs in order instead of all at once.
     blocked_by: args.blockedBy && args.blockedBy.length > 0 ? args.blockedBy : undefined,
   };
+}
+
+const PARENT_WORKSPACE_EXECUTOR_TYPES: ReadonlySet<Executor["type"]> = new Set(["worktree"]);
+
+export function resolveSelectedExecutorType(
+  executors: Executor[],
+  selectedProfileId: string,
+): Executor["type"] | null {
+  for (const executor of executors) {
+    const profile = executor.profiles?.find((candidate) => candidate.id === selectedProfileId);
+    if (profile) return profile.executor_type ?? executor.type;
+  }
+  return null;
+}
+
+export function resolveInitialWorkspaceLayoutMode({
+  isCreateMode,
+  isTaskStarted,
+  noRepository,
+  repositoryCount,
+  executorType,
+}: {
+  isCreateMode: boolean;
+  isTaskStarted: boolean;
+  noRepository: boolean;
+  repositoryCount: number;
+  executorType: Executor["type"] | null;
+}): InitialWorkspaceLayoutMode {
+  if (
+    !isCreateMode ||
+    isTaskStarted ||
+    noRepository ||
+    repositoryCount === 0 ||
+    !executorType ||
+    !PARENT_WORKSPACE_EXECUTOR_TYPES.has(executorType)
+  ) {
+    return "unavailable";
+  }
+  if (repositoryCount > 1) return "multiple-repositories";
+  return executorType === "worktree" ? "single-repository" : "unavailable";
+}
+
+export function resolveInitialWorkspaceLayout({
+  requested,
+  mode,
+}: {
+  requested: InitialWorkspaceLayout;
+  mode: InitialWorkspaceLayoutMode;
+}): InitialWorkspaceLayout | undefined {
+  if (mode === "multiple-repositories") return "task_root";
+  if (mode === "single-repository") return requested;
+  return undefined;
 }
 
 export function validateCreateInputs(inputs: {

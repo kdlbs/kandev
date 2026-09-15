@@ -129,6 +129,9 @@ func canonicalInventoryMatches(spec RepoSpec, rows []*models.TaskEnvironmentRepo
 		if row.RepositoryID != spec.RepositoryID || !branchMatches {
 			continue
 		}
+		if row.WorkspaceRelativePath != spec.WorkspaceRelativePath {
+			continue
+		}
 		if row.DeletedAt != nil || row.Status == taskEnvironmentRepoStatusFailed || row.Status == taskEnvironmentRepoStatusDeleted || (useWorktree && row.WorktreeID == "") {
 			continue
 		}
@@ -176,6 +179,9 @@ func (e *Executor) reuseExistingEnvironment(ctx context.Context, req *LaunchAgen
 
 	if env.TaskDirName != "" && req.UseWorktree {
 		req.TaskDirName = env.TaskDirName
+	}
+	if env.WorkspaceLayout != "" {
+		req.WorkspaceLayout = env.WorkspaceLayout
 	}
 	// SSH uses the remote task directory as an environment-scoped attachment
 	// handle. It is distinct from the per-session agentctl directory and must
@@ -409,6 +415,7 @@ func topLevelLaunchRepoSpec(req *LaunchAgentRequest) (RepoSpec, bool) {
 		RemoteRefState:             req.RemoteRefState,
 		CopyFiles:                  req.CopyFiles,
 		BranchIdentitySlug:         topLevelBranchIdentitySlug(req),
+		WorkspaceRelativePath:      req.WorkspaceRelativePath,
 	}, true
 }
 

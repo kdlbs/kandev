@@ -58,3 +58,22 @@ func TestApplyTaskEnvironmentToWorkspaceInfoProjectsEnvironmentAttachmentHandles
 		})
 	}
 }
+
+func TestApplyTaskEnvironmentToWorkspaceInfoUsesEffectiveParentWorkspaceRoot(t *testing.T) {
+	info := &lifecycle.WorkspaceInfo{WorkspacePath: "/tasks/task-1/repository"}
+	applyTaskEnvironmentToWorkspaceInfo(info, &models.TaskEnvironment{
+		WorkspacePath:   "/tasks/task-1",
+		WorkspaceLayout: "",
+		TaskDirName:     "task-1",
+		Repos: []*models.TaskEnvironmentRepo{{
+			WorktreePath: "/tasks/task-1/repository",
+		}},
+	})
+
+	if info.WorkspaceLayout != WorkspaceLayoutTaskRoot {
+		t.Fatalf("effective workspace layout = %q, want task_root", info.WorkspaceLayout)
+	}
+	if info.WorkspacePath != "/tasks/task-1" {
+		t.Fatalf("workspace path = %q, want parent task workspace", info.WorkspacePath)
+	}
+}

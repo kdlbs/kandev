@@ -424,10 +424,12 @@ func TestCollectRemoteContributionsEmptyInputs(t *testing.T) {
 // request-level one, and an entry with one keeps it.
 func TestBuildEnvPrepareRequestForwardsMultiRepoSpecs(t *testing.T) {
 	req := &LaunchRequest{
-		TaskID:      "task-1",
-		WorkspaceID: "ws-1",
-		SessionID:   "session-1",
-		TaskTitle:   "Fix the widget",
+		TaskID:                "task-1",
+		WorkspaceID:           "ws-1",
+		SessionID:             "session-1",
+		TaskTitle:             "Fix the widget",
+		WorkspaceLayout:       "repository",
+		WorkspaceRelativePath: "widget/kandev/gadget",
 		Metadata: map[string]interface{}{
 			MetadataKeyRepoSetupScript: "shared-setup.sh",
 			MetadataKeyWorktreeBranch:  "kandev/fix-widget",
@@ -445,6 +447,8 @@ func TestBuildEnvPrepareRequestForwardsMultiRepoSpecs(t *testing.T) {
 	require.Equal(t, "Fix the widget", prep.TaskTitle)
 	require.Equal(t, executor.NameStandalone, prep.ExecutorType)
 	require.Equal(t, "/work/task-1", prep.WorkspacePath)
+	require.Equal(t, "repository", prep.WorkspaceLayout)
+	require.Equal(t, "widget/kandev/gadget", prep.WorkspaceRelativePath)
 	require.Equal(t, "shared-setup.sh", prep.RepoSetupScript)
 	require.Equal(t, "kandev/fix-widget", prep.WorktreeBranch,
 		"the worktree branch is read out of launch metadata, not a request field")
@@ -460,17 +464,21 @@ func TestBuildEnvPrepareRequestForwardsMultiRepoSpecs(t *testing.T) {
 
 func TestBuildEnvPrepareRequestSingleRepoLeavesRepositoriesEmpty(t *testing.T) {
 	req := &LaunchRequest{
-		TaskID:         "task-1",
-		RepositoryPath: "/repos/widget",
-		UseWorktree:    true,
-		BaseBranch:     "main",
-		Env:            map[string]string{"FOO": "bar"},
+		TaskID:                "task-1",
+		RepositoryPath:        "/repos/widget",
+		WorkspaceLayout:       "repository",
+		WorkspaceRelativePath: "widget/gadget",
+		UseWorktree:           true,
+		BaseBranch:            "main",
+		Env:                   map[string]string{"FOO": "bar"},
 	}
 
 	prep := buildEnvPrepareRequest(req, "/work/task-1", executor.NameDocker)
 
 	require.Empty(t, prep.Repositories, "a legacy single-repo launch carries no per-repo spec list")
 	require.Equal(t, "/repos/widget", prep.RepositoryPath)
+	require.Equal(t, "repository", prep.WorkspaceLayout)
+	require.Equal(t, "widget/gadget", prep.WorkspaceRelativePath)
 	require.True(t, prep.UseWorktree)
 	require.Equal(t, map[string]string{"FOO": "bar"}, prep.Env)
 	require.Empty(t, prep.RepoSetupScript)

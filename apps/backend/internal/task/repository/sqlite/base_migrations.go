@@ -90,6 +90,9 @@ func (r *Repository) runMigrations() error {
 	r.migrate.Apply("executors_running.local_pid", `ALTER TABLE executors_running ADD COLUMN local_pid INTEGER DEFAULT 0`)
 	r.migrate.Apply("tasks.is_ephemeral", `ALTER TABLE tasks ADD COLUMN is_ephemeral INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_repositories.checkout_branch", `ALTER TABLE task_repositories ADD COLUMN checkout_branch TEXT DEFAULT ''`)
+	if err := r.migrate.Apply("task_workspace_folders.workspace_relative_path", `ALTER TABLE task_workspace_folders ADD COLUMN workspace_relative_path TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 	r.migrate.Apply("task_repositories.branch_policy_id", `ALTER TABLE task_repositories ADD COLUMN branch_policy_id TEXT DEFAULT ''`)
 	r.migrate.Apply("task_repositories.branch_policy_name", `ALTER TABLE task_repositories ADD COLUMN branch_policy_name TEXT DEFAULT ''`)
 	r.migrate.Apply("task_repositories.branch_policy_base_branch", `ALTER TABLE task_repositories ADD COLUMN branch_policy_base_branch TEXT DEFAULT ''`)
@@ -101,6 +104,9 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateTaskRepositoriesAllowMultiBranch(); err != nil {
 		return err
 	}
+	// Must run after the task_repositories rebuild above. The rebuild copies an
+	// explicit column list and supplies the legacy empty default for this field.
+	_ = r.migrate.Apply("task_repositories.workspace_relative_path", `ALTER TABLE task_repositories ADD COLUMN workspace_relative_path TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("tasks.wip_admitted", `ALTER TABLE tasks ADD COLUMN wip_admitted INTEGER NOT NULL DEFAULT 1`)
 	r.migrate.Apply("tasks.queued_for_step_id", `ALTER TABLE tasks ADD COLUMN queued_for_step_id TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("tasks.queued_at", `ALTER TABLE tasks ADD COLUMN queued_at TIMESTAMP`)
@@ -122,6 +128,9 @@ func (r *Repository) runMigrations() error {
 	// the legacy FK, leaving it absent for the remainder of that boot (the
 	// same hazard class as the task_sessions.name comment above).
 	_ = r.migrate.Apply("tasks.assignment_generation", `ALTER TABLE tasks ADD COLUMN assignment_generation INTEGER NOT NULL DEFAULT 0`)
+	// Must run after migrateTasksRemoveWorkflowFK because that migration
+	// recreates tasks from an explicit column list.
+	_ = r.migrate.Apply("tasks.initial_workspace_layout", `ALTER TABLE tasks ADD COLUMN initial_workspace_layout TEXT NOT NULL DEFAULT ''`)
 	if err := r.dropRetiredSlackIntegration(); err != nil {
 		return err
 	}
@@ -151,9 +160,15 @@ func (r *Repository) runMigrations() error {
 	if err := r.migrateTaskEnvironmentsRemoveAgentExecutionID(); err != nil {
 		return err
 	}
+	// Must run after the task_environments rebuild above, which copies an
+	// explicit column list and supplies the legacy empty default for this field.
+	_ = r.migrate.Apply("task_environments.workspace_layout", `ALTER TABLE task_environments ADD COLUMN workspace_layout TEXT NOT NULL DEFAULT ''`)
 	if err := r.migrateTaskEnvironmentReposAllowMultiBranch(); err != nil {
 		return err
 	}
+	// Must run after the task_environment_repos rebuild above, which copies an
+	// explicit column list and supplies the legacy empty default for this field.
+	_ = r.migrate.Apply("task_environment_repos.workspace_relative_path", `ALTER TABLE task_environment_repos ADD COLUMN workspace_relative_path TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("workflows.sort_order", `ALTER TABLE workflows ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("workflows.agent_profile_id", `ALTER TABLE workflows ADD COLUMN agent_profile_id TEXT DEFAULT ''`)
 	r.migrate.Apply("workflows.hidden", `ALTER TABLE workflows ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0`)
@@ -683,6 +698,7 @@ func (r *Repository) ensureTaskWorkspaceFoldersSchema() error {
 			task_id TEXT NOT NULL,
 			local_path TEXT NOT NULL,
 			display_name TEXT NOT NULL,
+			workspace_relative_path TEXT NOT NULL DEFAULT '',
 			position INTEGER NOT NULL DEFAULT 0,
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL,
@@ -786,6 +802,7 @@ func (r *Repository) migrateTasksRemoveWorkflowFK() error {
 		`CREATE TABLE tasks_new (
 			id TEXT PRIMARY KEY,
 			workspace_id TEXT NOT NULL DEFAULT '',
+			initial_workspace_layout TEXT NOT NULL DEFAULT '',
 			workflow_id TEXT NOT NULL DEFAULT '',
 			workflow_step_id TEXT NOT NULL DEFAULT '',
 			title TEXT NOT NULL,
@@ -805,7 +822,7 @@ func (r *Repository) migrateTasksRemoveWorkflowFK() error {
 			updated_at TIMESTAMP NOT NULL
 		)`,
 		`INSERT INTO tasks_new SELECT
-			id, workspace_id, workflow_id, workflow_step_id, title, description,
+			id, workspace_id, '', workflow_id, workflow_step_id, title, description,
 			state, priority, position, wip_admitted, queued_for_step_id, queued_at, metadata, is_ephemeral, parent_id, autopilot_enabled, archived_at, created_at, updated_at
 		FROM tasks`,
 		`DROP TABLE tasks`,
@@ -1046,6 +1063,7 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 			worktree_path TEXT DEFAULT '',
 			worktree_branch TEXT DEFAULT '',
 			workspace_path TEXT DEFAULT '',
+			workspace_layout TEXT NOT NULL DEFAULT '',
 			container_id TEXT DEFAULT '',
 			container_bootstrap_nonce_secret_id TEXT DEFAULT '',
 			container_control_auth_token_secret_id TEXT DEFAULT '',
@@ -1058,7 +1076,7 @@ func (r *Repository) migrateTaskEnvironmentsRemoveAgentExecutionID() error {
 		`INSERT INTO task_environments_new SELECT
 			id, task_id, ownership_generation, repository_id, executor_type, executor_id, executor_profile_id,
 			control_port, status, '', worktree_id, worktree_path, worktree_branch,
-			workspace_path, container_id, COALESCE(container_bootstrap_nonce_secret_id, ''), COALESCE(container_control_auth_token_secret_id, ''), sandbox_id,
+			workspace_path, '', container_id, COALESCE(container_bootstrap_nonce_secret_id, ''), COALESCE(container_control_auth_token_secret_id, ''), sandbox_id,
 			COALESCE(task_dir_name, ''), created_at, updated_at
 		FROM task_environments`,
 		`DROP TABLE task_environments`,
@@ -1084,6 +1102,7 @@ func (r *Repository) migrateTaskEnvironmentReposAllowMultiBranch() error {
 				id TEXT PRIMARY KEY,
 				task_environment_id TEXT NOT NULL,
 				repository_id TEXT NOT NULL,
+				workspace_relative_path TEXT NOT NULL DEFAULT '',
 				branch_slug TEXT NOT NULL DEFAULT '',
 				worktree_id TEXT DEFAULT '',
 				worktree_path TEXT DEFAULT '',
@@ -1096,7 +1115,7 @@ func (r *Repository) migrateTaskEnvironmentReposAllowMultiBranch() error {
 				UNIQUE(task_environment_id, repository_id, branch_slug)
 			)`,
 			`INSERT INTO task_environment_repos_new SELECT
-				id, task_environment_id, repository_id, '',
+				id, task_environment_id, repository_id, '', '',
 				worktree_id, worktree_path, worktree_branch,
 				position, error_message, created_at, updated_at
 			FROM task_environment_repos`,
@@ -1185,6 +1204,7 @@ func (r *Repository) recreateTaskRepositoriesForMultiBranch(trigger string) erro
 				id TEXT PRIMARY KEY,
 				task_id TEXT NOT NULL,
 				repository_id TEXT NOT NULL,
+				workspace_relative_path TEXT NOT NULL DEFAULT '',
 				base_branch TEXT DEFAULT '',
 				checkout_branch TEXT DEFAULT '',
 				branch_policy_id TEXT DEFAULT '',
@@ -1201,7 +1221,7 @@ func (r *Repository) recreateTaskRepositoriesForMultiBranch(trigger string) erro
 				UNIQUE(task_id, repository_id, base_branch, checkout_branch)
 			)`,
 			`INSERT INTO task_repositories_new SELECT
-				id, task_id, repository_id, base_branch,
+				id, task_id, repository_id, '', base_branch,
 				COALESCE(checkout_branch, ''),
 				COALESCE(branch_policy_id, ''), COALESCE(branch_policy_name, ''),
 				COALESCE(branch_policy_base_branch, ''), COALESCE(branch_policy_branch_template, ''),

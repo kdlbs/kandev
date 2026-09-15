@@ -7,11 +7,13 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@kandev/ui/
 import { Tooltip, TooltipContent, TooltipTrigger } from "@kandev/ui/tooltip";
 import { useTranslation } from "react-i18next";
 import { TaskCreateDependencies } from "@/components/task-create-dialog-dependencies";
+import { TaskCreateParentWorkspaceSetting } from "@/components/task-create-dialog-parent-workspace-setting";
 import { TaskCreatePrioritySelect } from "@/components/task-create-dialog-priority-select";
 import { cn } from "@/lib/utils";
 import type { TaskPriority } from "@/lib/types/http";
+import type { TaskCreateParentWorkspaceSettingProps } from "@/components/task-create-dialog-parent-workspace-setting";
 
-type TaskCreateAdvancedSettingsProps = {
+type TaskCreateAdvancedSettingsProps = TaskCreateParentWorkspaceSettingProps & {
   isCreateMode: boolean;
   isTaskStarted: boolean;
   blockedBy: string[];
@@ -28,6 +30,9 @@ export function TaskCreateAdvancedSettings({
   onBlockedByChange,
   priority,
   onPriorityChange,
+  initialWorkspaceLayout,
+  onInitialWorkspaceLayoutChange,
+  initialWorkspaceLayoutMode,
   dependenciesDisabled,
 }: TaskCreateAdvancedSettingsProps) {
   const { t } = useTranslation();
@@ -106,6 +111,11 @@ export function TaskCreateAdvancedSettings({
             <TaskCreatePrioritySelect value={priority} onChange={onPriorityChange} />
           </div>
         </div>
+        <TaskCreateParentWorkspaceSetting
+          initialWorkspaceLayout={initialWorkspaceLayout}
+          onInitialWorkspaceLayoutChange={onInitialWorkspaceLayoutChange}
+          initialWorkspaceLayoutMode={initialWorkspaceLayoutMode}
+        />
       </CollapsibleContent>
     </Collapsible>
   );

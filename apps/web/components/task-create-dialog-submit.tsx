@@ -319,6 +319,7 @@ export function useTaskSubmitHandlers({
   setExecutorId,
   setSelectedWorkflowId,
   setFetchedSteps,
+  setInitialWorkspaceLayout,
   clearDraft,
   freshBranchEnabled,
   isLocalExecutor,
@@ -326,6 +327,7 @@ export function useTaskSubmitHandlers({
   noRepository,
   workspacePath,
   priority,
+  initialWorkspaceLayout,
   blockedBy,
   editDependencies,
   transformDescriptionBeforeSubmit,
@@ -448,6 +450,7 @@ export function useTaskSubmitHandlers({
     setExecutorId("");
     setSelectedWorkflowId(workflowId);
     setFetchedSteps(null);
+    setInitialWorkspaceLayout("repository");
     // State setters are stable; only workflowId can change
   }, [
     workflowId,
@@ -460,6 +463,7 @@ export function useTaskSubmitHandlers({
     setExecutorId,
     setSelectedWorkflowId,
     setFetchedSteps,
+    setInitialWorkspaceLayout,
   ]);
 
   const getRepositoriesPayload = useCallback(
@@ -735,6 +739,7 @@ export function useTaskSubmitHandlers({
           workspacePath: resolveWorkspacePath(noRepository, workspacePath),
           autopilot,
           priority,
+          initialWorkspaceLayout,
           blockedBy,
         });
         submittedPayload = payload;
@@ -789,6 +794,7 @@ export function useTaskSubmitHandlers({
       noRepository,
       workspacePath,
       priority,
+      initialWorkspaceLayout,
       onSuccess,
       onOpenChange,
       preserveTaskCreateLastUsedOnClose,
@@ -1028,6 +1034,7 @@ export function useTaskSubmitHandlers({
           workspacePath: resolveWorkspacePath(noRepository, workspacePath),
           autopilot,
           priority,
+          initialWorkspaceLayout,
           blockedBy,
         });
         submittedPayload = p;
@@ -1078,6 +1085,7 @@ export function useTaskSubmitHandlers({
     descriptionInputRef,
     setIsCreatingTask,
     blockedBy,
+    initialWorkspaceLayout,
   ]);
 
   const editSubmitHandler = isStartedEdit ? handleUpdateWithoutAgent : handleEditSubmit;

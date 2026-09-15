@@ -7,6 +7,9 @@ import {
   computeRunnerEditable,
   computeRunnerIneligibleReason,
   findUnresolvedProviderRemote,
+  resolveInitialWorkspaceLayout,
+  resolveInitialWorkspaceLayoutMode,
+  resolveSelectedExecutorType,
   shouldShowTaskTitleField,
   validateCreateInputs,
 } from "./task-create-dialog-helpers";
@@ -334,6 +337,118 @@ describe("buildCreateTaskPayload priority", () => {
 
   it("defaults to medium when no priority is selected", () => {
     expect(buildCreateTaskPayload(base).priority).toBe("medium");
+  });
+
+  it("submits the selected initial workspace layout", () => {
+    expect(
+      buildCreateTaskPayload({ ...base, initialWorkspaceLayout: "task_root" } as Parameters<
+        typeof buildCreateTaskPayload
+      >[0]).initial_workspace_layout,
+    ).toBe("task_root");
+  });
+});
+
+describe("initial workspace layout", () => {
+  it("shows the opt-in for one worktree repository and preserves its choice", () => {
+    const mode = resolveInitialWorkspaceLayoutMode({
+      isCreateMode: true,
+      isTaskStarted: false,
+      noRepository: false,
+      repositoryCount: 1,
+      executorType: "worktree",
+    });
+
+    expect(mode).toBe("single-repository");
+    expect(resolveInitialWorkspaceLayout({ requested: "task_root", mode })).toBe("task_root");
+    expect(resolveInitialWorkspaceLayout({ requested: "repository", mode })).toBe("repository");
+  });
+
+  it("offers a parent layout for multi-repository Worktree tasks", () => {
+    const mode = resolveInitialWorkspaceLayoutMode({
+      isCreateMode: true,
+      isTaskStarted: false,
+      noRepository: false,
+      repositoryCount: 2,
+      executorType: "worktree",
+    });
+
+    expect(mode).toBe("multiple-repositories");
+    expect(resolveInitialWorkspaceLayout({ requested: "repository", mode })).toBe("task_root");
+  });
+
+  it("omits the parent layout for multi-repository remote tasks", () => {
+    const mode = resolveInitialWorkspaceLayoutMode({
+      isCreateMode: true,
+      isTaskStarted: false,
+      noRepository: false,
+      repositoryCount: 2,
+      executorType: "ssh",
+    });
+
+    expect(mode).toBe("unavailable");
+    expect(resolveInitialWorkspaceLayout({ requested: "task_root", mode })).toBeUndefined();
+  });
+
+  it.each([
+    [
+      "repositoryless",
+      { noRepository: true, repositoryCount: 0, executorType: "worktree" as const },
+    ],
+    [
+      "unsupported executor",
+      { noRepository: false, repositoryCount: 1, executorType: "local" as const },
+    ],
+    [
+      "editing",
+      {
+        noRepository: false,
+        repositoryCount: 1,
+        executorType: "worktree" as const,
+        isCreateMode: false,
+      },
+    ],
+  ])("omits the layout for %s tasks", (_name, input) => {
+    const mode = resolveInitialWorkspaceLayoutMode({
+      isCreateMode: true,
+      isTaskStarted: false,
+      ...input,
+    });
+
+    expect(mode).toBe("unavailable");
+    expect(resolveInitialWorkspaceLayout({ requested: "task_root", mode })).toBeUndefined();
+  });
+
+  it("resolves a profile's executor type from its containing executor", () => {
+    expect(
+      resolveSelectedExecutorType(
+        [
+          {
+            id: "executor-1",
+            name: "Worktree",
+            type: "worktree",
+            status: "available",
+            is_system: true,
+            profiles: [{ id: "profile-1" }],
+          } as never,
+        ],
+        "profile-1",
+      ),
+    ).toBe("worktree");
+    expect(
+      resolveSelectedExecutorType(
+        [
+          {
+            id: "executor-1",
+            name: "Worktree",
+            type: "worktree",
+            status: "available",
+            is_system: true,
+            profiles: [],
+          } as never,
+        ],
+        "missing-profile",
+      ),
+    ).toBeNull();
   });
 });
 

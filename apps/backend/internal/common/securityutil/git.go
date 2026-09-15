@@ -111,6 +111,9 @@ func IsKnownSafeGitFlag(arg string) bool {
 	// editor), and "--abort" would let through "--abort-*".
 	exactFlags := []string{
 		"--", // Path separator - everything after this is treated as paths, not flags
+		"--no-index",
+		"--quiet",
+		"--stage",
 		"--rebase",
 		"--abort",
 	}

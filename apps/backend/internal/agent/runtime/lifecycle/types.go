@@ -1068,14 +1068,16 @@ type RepoLaunchSpec struct {
 	// BranchIdentitySlug is the stable branch key used for worktree reuse and
 	// persisted environment metadata. It may differ from BranchSlug when a
 	// primary branch keeps the flat legacy path.
-	BranchIdentitySlug string
+	BranchIdentitySlug    string
+	WorkspaceRelativePath string
 }
 
 // WorkspaceFolderSpec is a durable host folder attachment projected into both
 // fresh launches and workspace-only resume construction.
 type WorkspaceFolderSpec struct {
-	Name      string
-	LocalPath string
+	Name                  string
+	LocalPath             string
+	WorkspaceRelativePath string
 }
 
 // WorkspaceRepositorySpec is the durable host-side source needed to recreate
@@ -1095,6 +1097,7 @@ type WorkspaceRepositorySpec struct {
 	RemoteSyncHandled      bool
 	BranchSlug             string
 	BranchIdentitySlug     string
+	WorkspaceRelativePath  string
 }
 
 // RouteOverride carries a fully resolved provider profile for one
@@ -1129,12 +1132,15 @@ type LaunchRequest struct {
 	// ExecutionProfileID selects the complete CLI runtime profile. Empty keeps
 	// backward-compatible behavior by using AgentProfileID.
 	ExecutionProfileID string
-	StartAgent         bool                // Transfer launch activity through initial startup/prompt
-	TurnID             string              // Durable Kandev turn for the initial prompt, when present
-	WorkspacePath      string              // Host path to workspace (original repository path)
-	TaskDescription    string              // Task description to send via ACP prompt
-	Attachments        []MessageAttachment // Attachments (images/files) for the initial prompt
-	Env                map[string]string   // Additional env vars
+	StartAgent         bool   // Transfer launch activity through initial startup/prompt
+	TurnID             string // Durable Kandev turn for the initial prompt, when present
+	WorkspacePath      string // Host path to workspace (original repository path)
+	// WorkspaceLayout selects the persisted effective agent root for Worktree
+	// preparation. Empty keeps legacy environment behavior.
+	WorkspaceLayout string
+	TaskDescription string              // Task description to send via ACP prompt
+	Attachments     []MessageAttachment // Attachments (images/files) for the initial prompt
+	Env             map[string]string   // Additional env vars
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
 	// durable profile selection.
 	AdditionalSkillSlugs []string
@@ -1215,7 +1221,8 @@ type LaunchRequest struct {
 	BranchSlug  string // Optional branch directory suffix for multi-branch tasks
 	// BranchIdentitySlug is the stable branch key used for single-repo reuse.
 	// It may be non-empty when BranchSlug is empty to preserve a flat path.
-	BranchIdentitySlug string
+	BranchIdentitySlug    string
+	WorkspaceRelativePath string
 
 	// Repositories carries one entry per repository when the launch is multi-repo.
 	// When non-empty it is the source of truth; the legacy single-repo top-level
@@ -1265,6 +1272,7 @@ func (r *LaunchRequest) RepoSpecs() []RepoLaunchSpec {
 		CopyFiles:                  r.CopyFiles,
 		BranchSlug:                 r.BranchSlug,
 		BranchIdentitySlug:         r.BranchIdentitySlug,
+		WorkspaceRelativePath:      r.WorkspaceRelativePath,
 	}}
 }
 
@@ -1376,16 +1384,19 @@ type WorkspaceInfo struct {
 	// direct workspace entry point.
 	TaskArchived           bool
 	WorkspaceOwnerArchived bool
-	WorkspacePath          string // Path to the workspace/repository
-	WorkspaceFolders       []WorkspaceFolderSpec
-	WorkspaceRepositories  []WorkspaceRepositorySpec
-	TaskDirName            string
-	WorkspaceID            string
-	AgentProfileID         string // Stable Office agent identity (or the execution profile for legacy sessions)
-	ExecutionProfileID     string // Concrete CLI profile selected for this execution
-	ExecutorProfileID      string // Concrete executor profile selected for this execution
-	AgentID                string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
-	ACPSessionID           string // Agent's session ID for conversation resumption (from session metadata)
+	WorkspacePath          string // Path to the effective workspace root or repository
+	// WorkspaceLayout classifies WorkspacePath so repository-relative source
+	// destinations can be resolved after a restart. Empty is legacy data.
+	WorkspaceLayout       string
+	WorkspaceFolders      []WorkspaceFolderSpec
+	WorkspaceRepositories []WorkspaceRepositorySpec
+	TaskDirName           string
+	WorkspaceID           string
+	AgentProfileID        string // Stable Office agent identity (or the execution profile for legacy sessions)
+	ExecutionProfileID    string // Concrete CLI profile selected for this execution
+	ExecutorProfileID     string // Concrete executor profile selected for this execution
+	AgentID               string // Agent type ID (e.g., "auggie", "codex") - required for runtime creation
+	ACPSessionID          string // Agent's session ID for conversation resumption (from session metadata)
 	// SessionMode is the persisted session permission mode (e.g. "acceptEdits")
 	// from session metadata, declared via the set_session_mode workflow action or
 	// a user toggle. Applied as a mode override at ACP session init so a fresh

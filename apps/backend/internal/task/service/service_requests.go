@@ -98,6 +98,15 @@ type CreateTaskRequest struct {
 	ParentID      string `json:"parent_id,omitempty"`
 	Autopilot     bool   `json:"autopilot,omitempty"`
 	WorkspacePath string `json:"workspace_path,omitempty"` // Optional host folder for repo-less tasks
+	// InitialWorkspaceLayout selects the agent root for the first Worktree
+	// environment. Empty uses the safe repository-root default.
+	InitialWorkspaceLayout string `json:"initial_workspace_layout,omitempty"`
+	// Executor selection is supplied by authenticated API adapters for creation
+	// time layout validation. These fields are internal to the service request;
+	// the public JSON shape belongs to the adapters.
+	ExecutorID        string `json:"-"`
+	ExecutorProfileID string `json:"-"`
+	ExecutorType      string `json:"-"`
 	// WorkspacePolicy carries the effective policy resolved by an API adapter.
 	// When omitted, CreateTask derives child defaults from the persisted parent.
 	WorkspacePolicy *WorkspacePolicy `json:"-"`

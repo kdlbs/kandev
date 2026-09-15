@@ -187,6 +187,7 @@ type EnvironmentDTO struct {
 type TaskDTO struct {
 	ID                          string                   `json:"id"`
 	WorkspaceID                 string                   `json:"workspace_id"`
+	InitialWorkspaceLayout      string                   `json:"initial_workspace_layout,omitempty"`
 	WorkflowID                  string                   `json:"workflow_id"`
 	WorkflowStepID              string                   `json:"workflow_step_id"`
 	Title                       string                   `json:"title"`
@@ -326,6 +327,7 @@ type TaskRepositoryDTO struct {
 	ID                            string                 `json:"id"`
 	TaskID                        string                 `json:"task_id"`
 	RepositoryID                  string                 `json:"repository_id"`
+	WorkspaceRelativePath         string                 `json:"workspace_relative_path,omitempty"`
 	BaseBranch                    string                 `json:"base_branch"`
 	CheckoutBranch                string                 `json:"checkout_branch,omitempty"`
 	BranchPolicyID                string                 `json:"branch_policy_id,omitempty"`
@@ -341,13 +343,14 @@ type TaskRepositoryDTO struct {
 
 // TaskWorkspaceFolderDTO is the API projection of a durable non-Git source.
 type TaskWorkspaceFolderDTO struct {
-	ID          string    `json:"id"`
-	TaskID      string    `json:"task_id"`
-	LocalPath   string    `json:"local_path"`
-	DisplayName string    `json:"display_name"`
-	Position    int       `json:"position"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID                    string    `json:"id"`
+	TaskID                string    `json:"task_id"`
+	LocalPath             string    `json:"local_path"`
+	DisplayName           string    `json:"display_name"`
+	WorkspaceRelativePath string    `json:"workspace_relative_path,omitempty"`
+	Position              int       `json:"position"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
 }
 
 type TaskSessionDTO struct {
@@ -941,6 +944,7 @@ func FromTaskWithSessionInfo(
 			ID:                            repo.ID,
 			TaskID:                        repo.TaskID,
 			RepositoryID:                  repo.RepositoryID,
+			WorkspaceRelativePath:         repo.WorkspaceRelativePath,
 			BaseBranch:                    repo.BaseBranch,
 			CheckoutBranch:                repo.CheckoutBranch,
 			BranchPolicyID:                repo.BranchPolicyID,
@@ -957,19 +961,21 @@ func FromTaskWithSessionInfo(
 	var workspaceFolders []TaskWorkspaceFolderDTO
 	for _, folder := range task.WorkspaceFolders {
 		workspaceFolders = append(workspaceFolders, TaskWorkspaceFolderDTO{
-			ID:          folder.ID,
-			TaskID:      folder.TaskID,
-			LocalPath:   folder.LocalPath,
-			DisplayName: folder.DisplayName,
-			Position:    folder.Position,
-			CreatedAt:   folder.CreatedAt,
-			UpdatedAt:   folder.UpdatedAt,
+			ID:                    folder.ID,
+			TaskID:                folder.TaskID,
+			LocalPath:             folder.LocalPath,
+			DisplayName:           folder.DisplayName,
+			WorkspaceRelativePath: folder.WorkspaceRelativePath,
+			Position:              folder.Position,
+			CreatedAt:             folder.CreatedAt,
+			UpdatedAt:             folder.UpdatedAt,
 		})
 	}
 
 	return TaskDTO{
 		ID:                          task.ID,
 		WorkspaceID:                 task.WorkspaceID,
+		InitialWorkspaceLayout:      task.InitialWorkspaceLayout,
 		WorkflowID:                  task.WorkflowID,
 		WorkflowStepID:              task.WorkflowStepID,
 		Title:                       task.Title,

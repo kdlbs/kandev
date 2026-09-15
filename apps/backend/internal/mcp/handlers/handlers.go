@@ -918,6 +918,8 @@ func (h *Handlers) handleCreateTask(ctx context.Context, msg *ws.Message) (*ws.M
 		Metadata:               metadata,
 		DeferredLaunch:         deferredLaunch,
 		StartAgent:             startAgent,
+		ExecutorID:             launchConfig.ExecutorID,
+		ExecutorProfileID:      launchConfig.ExecutorProfileID,
 		ExternalID:             req.ExternalID,
 		WorkspacePolicy:        &workspacePolicy,
 	})
