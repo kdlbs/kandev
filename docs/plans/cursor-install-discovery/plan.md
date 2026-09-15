@@ -137,3 +137,18 @@ Remediation validation:
 - `python3 scripts/list-docs.py validate`, `python3 scripts/lint-spec-files.py --all`, and `git diff --check`: passed.
 
 Remote CI/review evidence remains pending for the remediation head.
+
+
+## CI test remediation
+
+Backend shard 2 failed in `TestCompletedTaskFollowUpAdmissionIsConversationalOnly`
+because the follow-up raced unfinished terminal-step session preparation.
+The test now joins the existing `onProcessOnEnterComplete` signal before
+admitting the follow-up. Its behavior assertions are unchanged; no production
+contract or public documentation change is needed.
+
+With inherited `KANDEV_*` settings removed and writable GOCACHE,
+`go test -race ./internal/orchestrator -run '^TestCompletedTaskFollowUpAdmissionIsConversationalOnly$' -count=20`
+reproduced the original assertion failure in root and child cases (189.376s),
+then passed after synchronization (191.113s). Remote suite validation remains
+pending for the new test-fix head.
