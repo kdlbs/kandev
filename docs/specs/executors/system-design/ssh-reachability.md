@@ -29,8 +29,7 @@ Contracts this design uses but does not own:
 - `internal/common/config` owns the operator configuration catalog.
 - `internal/integrations/healthpoll` is precedent, not a dependency: its
   `Prober` is shaped around one integration with many workspaces, while this
-  poller sweeps many independent hosts with per-host results and bounded
-  concurrency. Its conventions are kept without importing it.
+  poller sweeps many independent hosts. Its conventions are kept, not imported.
 
 ## Requirement mapping
 
@@ -40,12 +39,8 @@ Contracts this design uses but does not own:
 | `REQ-EXECUTORS-SSH-REACHABILITY-002` | [Surfaces design](ssh-reachability-surfaces.md) |
 | `REQ-EXECUTORS-SSH-REACHABILITY-003` | [Surfaces design](ssh-reachability-surfaces.md) |
 
-This document owns the engine: probing, classification, state, persistence and
-configuration. Its sibling
-[SSH Host Reachability Surfaces](ssh-reachability-surfaces.md) owns the
-projection: HTTP and event contracts, the web components, and the launch
-interaction. The task-card indicator and the launch-path record write are
-deferred; see the requirement document's `## Out of scope`.
+The task-card indicator and the launch-path record write are deferred; see the
+requirement document's `## Out of scope`.
 
 ## Components and responsibilities
 
@@ -63,17 +58,24 @@ This package gains **three** exported functions and the two types they need:
   without this the reachability package must import `internal/ssh` to read an
   executor's own config.
 - `ProbeSSHHost(ctx, target *SSHTarget) ProbeOutcome` — dials with the pinned
-  fingerprint, closes immediately, runs no remote command.
+  fingerprint, closes immediately, runs no remote command. **It must bound the
+  handshake on `ctx`, not only the TCP dial.** `ssh.NewClientConn` takes no
+  context and `ssh.ClientConfig.Timeout` covers only `ssh.Dial`'s own TCP
+  connect, so a host that completes TCP and then stalls the handshake — a hung
+  or filtered sshd, the 2026-09-09 shape — would hold its goroutine past
+  `probeTimeout` and past `Stop`. `ProbeSSHHost` sets a deadline on the
+  connection covering the handshake and clears it once the transport is up, so
+  `AC-EXECUTORS-SSH-REACHABILITY-001.8` can abandon the probe and `001.26` can
+  drain.
 - `ClassifyDialError(err error) Reason` — maps a dial error to exactly one
   reason, and `ProbeOutcome` embeds its result.
 
 **Classification lives here, not in the reachability package, and that is the
 load-bearing decision in this section.** The error types it must distinguish are
-`lifecycle`'s own and unexported — `errHostKeyMismatch`
-(`executor_ssh_connection.go`) is lowercase, so no other package can `errors.As`
-it. Exporting the *classifier* rather than the *error types* keeps that boundary
-intact and gives the launch path identical classification without a second
-implementation; the reachability package never inspects a dial error.
+`lifecycle`'s own and unexported: `errHostKeyMismatch` is lowercase, so no other
+package can `errors.As` it. Exporting the *classifier* rather than the *error
+types* keeps that boundary intact and gives the launch path identical
+classification without a second implementation.
 `Reason` is a string enum whose members are exactly `config`, `network`,
 `timeout`, `auth`, `host_key`, `unknown`, plus the empty string for success.
 
@@ -87,10 +89,27 @@ repository interface, not the full task repository.
 `executor_reachability` table, its additive migration, its queries and the
 explicit record delete in [Persistence](#persistence).
 
-**`internal/ssh` (extended).** Owns the HTTP and WebSocket projection: read one
-record, read all records, and the immediate-probe action.
+**`internal/task/service` (extended).** Owns save detection, because it is the
+only layer holding both the stored executor and the incoming change.
+`Service.UpdateExecutor` (`service_resources.go`) loads the row, applies the
+request and bumps `UpdatedAt`; `Service.CreateExecutor` is the creation call
+site. Each notifies an `ExecutorSaveObserver` — an interface the service
+declares and the reachability package implements, wired at construction, so the
+service depends on an interface rather than on the reachability package. The
+observer is handed the connection-configuration fields as they stood before the
+save and as they stand after, compares exactly the fields Terminology names,
+and on any difference performs the reset in [Persistence](#persistence) and
+schedules the off-cycle probe. A create is a difference by definition.
 
-**`internal/ssh` and `apps/web`.** See the [surfaces design](ssh-reachability-surfaces.md).
+**`applyExecutorUpdates` mutates the loaded executor in place**, so the before
+values must be copied out before it runs. Read afterwards they compare the row
+against itself, every save looks like a no-op, the reset never fires, and a
+re-pointed executor keeps reporting the previous host's state indefinitely.
+
+**`internal/ssh` and `apps/web`.** The HTTP and WebSocket projection, the web
+components and the launch interaction. Specified in the
+[surfaces design](ssh-reachability-surfaces.md), which owns them; this document
+states no contract for them.
 
 ## The poller
 
@@ -100,17 +119,18 @@ idempotent. Every probe the package starts is registered on one package-owned
 `WaitGroup` and derives from one package context, so `Stop` cancels and awaits
 *all* of them — the in-flight pass, an off-cycle probe after a save, a coalesced
 immediate probe — not only the pass. That is what makes an immediate probe's
-background context safe: it outlives its caller but not the package. Draining is
-bounded because every probe carries `probeTimeout`. A `goleak`
+package-owned context safe: it outlives its caller but not the package. Draining
+is bounded because every probe carries `probeTimeout` *and* because
+`ProbeSSHHost` bounds the handshake phase as well as the TCP dial; without that
+second half a stalled handshake outlives both its deadline and `Stop`. A `goleak`
 `TestMain` guards the package, matching `healthpoll`.
 
-When the effective interval is `0` the poller does not start at all: there is no
-startup pass and no ticker. The immediate-probe route still works, because it
-does not go through the poller loop. The package context, `WaitGroup` and
-semaphore are still created and registered for cleanup; only the pass and ticker
-are skipped. A `Start` returning early before creating them leaves immediate
-probes unowned at shutdown, breaking the drain contract and the `goleak`
-guard.
+When the effective interval is `0` the poller does not start: no startup pass
+and no ticker. The immediate-probe route still works, not going through the
+poller loop. The package context, `WaitGroup` and semaphore are still created
+and registered for cleanup; only the pass and ticker are skipped. A `Start`
+returning early before creating them leaves immediate probes unowned at
+shutdown, breaking the drain contract and the `goleak` guard.
 
 One pass:
 
@@ -122,21 +142,20 @@ One pass:
 4. Await all workers, then release the pass.
 
 A `sync.Mutex`-guarded `passRunning` flag makes an overlapping tick a no-op: the
-tick is dropped, not queued, and increments a skipped-pass counter. A queued tick
+tick is dropped, not queued, and increments a skipped-pass counter. Queueing it
 would compound the overload that caused the overlap, and the next tick carries
 identical information.
 
 **The semaphore is process-global, not per-pass.** One `passConcurrency`-slot
-semaphore, owned by the reachability package, is acquired by every probe whoever
-asked for it: a scheduled pass, an off-cycle probe after a save, or an
-immediate-probe request. Saving twenty executors in a script therefore opens at
-most `passConcurrency` connections, not twenty. A launch's own `DialSSH` is not a
-probe and never takes a slot: a launch must not queue behind background
-probing.
+semaphore, owned by the package, is acquired by every probe whoever asked for
+it: a scheduled pass, an off-cycle probe after a save, an immediate-probe
+request. Saving twenty executors in a script therefore opens at most
+`passConcurrency` connections, not twenty. A launch's own `DialSSH` is not a
+probe and never takes a slot: a launch must not queue behind background probing.
 
 Cost per pass is `N` TCP connections and handshakes for `N` hosts, at most
 `passConcurrency` at a time, each bounded by `probeTimeout`. At the defaults
-below a single host costs one handshake per minute.
+below, one host costs one handshake per minute.
 
 ## The probe
 
@@ -145,9 +164,14 @@ Per executor, inside its own `context.WithTimeout(ctx, probeTimeout)`:
 1. Project `executors.config` into an `SSHConnConfig` and resolve it with
    `lifecycle.ResolveSSHTarget` — the same projection the existing handler
    performs in `sshTargetFromExecutorConfig`, lifted into a shared helper so the
-   poller and the handlers cannot drift. A resolution failure, including a
-   missing host or `ssh_host_fingerprint`, classifies as `config` and returns
-   without touching the network.
+   poller and the handlers cannot drift. A resolution failure classifies as
+   `config` and returns without touching the network. **`ResolveSSHTarget` does
+   not validate the pin, so the probe checks it separately** and returns `config`
+   when the resolved target's `PinnedFingerprint` is empty, before any dial.
+   Leaving this to resolution is a security defect rather than a gap:
+   `buildClientConfig`'s host-key callback returns `nil` unconditionally when the
+   pin is empty, so the probe would dial unpinned, accept whatever key answered,
+   and record a substituted host as `reachable`.
 2. `lifecycle.ProbeSSHHost(ctx, target)`, dialing with the pinned fingerprint
    set, so a changed host key fails the handshake rather than being silently
    accepted. That is the substantive difference from the manual test path, which
@@ -159,7 +183,7 @@ below is written **in that order**, and the order is the contract:
 
 | Order | Reason | Condition |
 | --- | --- | --- |
-| 1 | `config` | Target resolution failed before any dial. |
+| 1 | `config` | Target resolution failed, or resolved with no pinned fingerprint, before any dial. |
 | 2 | `timeout` | The probe deadline expired, or the error unwraps to a net timeout. |
 | 3 | `host_key` | The handshake failed host-key verification against the pin. |
 | 4 | `auth` | Transport negotiation completed; authentication failed. |
@@ -199,15 +223,15 @@ where the counter reaches `failureThreshold`. Until then the state is left
 **exactly as it was**: `reachable` stays `reachable` and `unknown` stays
 `unknown`. A failing probe never *promotes* a state, so it cannot turn `unknown`
 into `reachable`; it changes the reason and the counter while the state stands
-still. That pair — a non-empty reason under `reachable` or `unknown` — is the
-intended representation of a below-threshold failure, not a contradiction. A single dropped packet must not
-paint a healthy host as down, while recovery is reported at once.
+still. That pair, a non-empty reason under `reachable` or `unknown`, is the
+intended representation of a below-threshold failure, not a contradiction: one
+dropped packet must not paint a healthy host as down, while recovery is reported
+at once.
 
-A save that changes the connection configuration resets the record to `unknown`
-with a zero counter, an empty reason and message, and both timestamps cleared,
+A save that changes the connection configuration resets the record to `unknown`,
 then probes out of band if the executor is still eligible, because the prior
 streak and success describe a different target. A save that changes nothing
-resets nothing.
+resets nothing; the mechanism is in [Persistence](#persistence).
 
 ## Persistence
 
@@ -233,16 +257,15 @@ last *successful* probe, and `checked_at` is overwritten by every failure. It is
 
 A separate table rather than columns on `executors`: `config` is user-authored
 input and `status` a user-controlled switch, so observed state must not share
-either, and a per-interval write path stays off the row every read touches.
+either, and a per-interval write stays off the row every read touches.
 
 **Deletion is explicit, not a cascade.** `Repository.DeleteExecutor` is a *soft*
 delete (`UPDATE executors SET deleted_at = ?, updated_at = ?`), so no foreign-key
-cascade can ever fire, and the table declares none. `DeleteExecutor` issues
-`DELETE FROM executor_reachability WHERE executor_id = ?` in the same
-transaction as the soft delete. That call site is the only place a record is
-removed.
+cascade can fire and the table declares none. `DeleteExecutor` issues `DELETE
+FROM executor_reachability WHERE executor_id = ?` in the same transaction as the
+soft delete, and is the only call site that removes a record.
 
-**One statement decides everything.** The write is a single upsert; the caller
+**One statement decides every observation.** The write is a single upsert; the caller
 supplies the observation (reason, message, host, `checked_at`) and the statement
 derives the counter and the state from the row's own prior values, so no
 read-modify-write in Go can lose a streak to an interleaving:
@@ -278,8 +301,7 @@ row. The `ON CONFLICT` `WHERE` is last-write-wins on `checked_at`: a scheduled
 pass and an immediate probe racing on one executor converge on the later
 observation rather than on whichever transaction committed second, and an equal
 timestamp is not later, so the incoming row loses. `checked_at` is stored at
-millisecond resolution or finer, keeping the tie rule a backstop, not the common
-path.
+millisecond resolution or finer, keeping the tie rule a backstop.
 
 **That `>` is a text comparison, so the encoding is part of the contract.**
 `TIMESTAMP` takes NUMERIC affinity and the driver binds `time.Time` as text
@@ -287,23 +309,60 @@ path.
 temporally. Two rules make lexical order equal time order, and both are
 required: **normalize to UTC** before writing, because the driver keeps whatever
 offset it is handed and a DST fall-back then sorts an earlier observation later;
-and **bind `time.Time`, never a pre-formatted string**, because the wire format
-is RFC3339 where UTC renders as `Z`, which sorts after `.` and would let a
-whole-second observation beat a later sub-second one. With both held the offset
-is constant and fixed-width and the fraction left-aligned. Postgres compares its
-`timestamp` type temporally and is unaffected, which is why this belongs in the
-SQLite tests: the parity test passes on Postgres while SQLite keeps the wrong
-row.
+and **bind `time.Time`, never a pre-formatted string**, because RFC3339 renders
+UTC as `Z`, which sorts after `.` and would let a whole-second observation beat
+a later sub-second one. Postgres compares temporally and is unaffected, which is
+why this belongs in the SQLite tests: the parity test passes on Postgres while
+SQLite keeps the wrong row.
 
-The eligibility guard is the `EXISTS` clause above, and `:seen_updated_at` is the
+The eligibility guard is the `EXISTS` above, and `:seen_updated_at` is the
 `updated_at` the probe captured before it dialed. Every mutation of the executor
-row — configuration save, status change, soft delete — bumps `updated_at`, so
-that one comparison covers all three: it stops a probe in flight against the
-*old* target from landing after a configuration reset, and stops a worker from
-re-creating a deleted record or writing one for an executor deactivated
-mid-pass. The `EXISTS` gates the insert path; the `ON CONFLICT` arm inherits it,
-because a row can only conflict if the insert was admitted. A refused write is
-logged at debug and dropped; the next probe supersedes it.
+row — configuration save, status change, soft delete — bumps `updated_at`, so one
+comparison covers all three: it stops a probe in flight against the *old* target
+from landing after a reset, and stops a worker from re-creating a deleted record
+or writing one for an executor deactivated mid-pass. The `EXISTS` gates the
+insert; the `ON CONFLICT` arm inherits it, because a row can only conflict if the
+insert was admitted. A refused write is logged at debug and dropped.
+
+**The reset is a second statement, and deliberately not that one.** A
+configuration reset is not an observation; it invalidates one. The upsert above
+cannot express it — its `state` CASE has no `unknown` branch, and its `WHERE`
+admits only a strictly later `checked_at`, which a reset does not carry. Nor may
+it be expressed as a delete: `DeleteExecutor` is the only call site permitted to
+remove a row.
+
+```sql
+INSERT INTO executor_reachability (executor_id, state, reason, message,
+       consecutive_failures, host, checked_at, last_success_at, updated_at)
+SELECT :id, 'unknown', '', '', 0, :host, NULL, NULL, :now
+ WHERE EXISTS (SELECT 1 FROM executors e
+                WHERE e.id = :id AND e.type = 'ssh'
+                  AND e.deleted_at IS NULL AND e.status = 'active')
+ON CONFLICT (executor_id) DO UPDATE SET
+    state = 'unknown', reason = '', message = '', consecutive_failures = 0,
+    host = :host, checked_at = NULL, last_success_at = NULL, updated_at = :now;
+```
+
+The `EXISTS` carries a decision, not just a safety check: an executor whose
+`status` is not `active` is **not** reset by a save, because
+`AC-EXECUTORS-SSH-REACHABILITY-001.17` retains its record unchanged and
+eligibility wins over the reset trigger. The statement lands zero rows and the
+retained record stands until the executor is reactivated and probed.
+
+`:host` is the newly saved host, so the settings page never renders a pre-change
+host beside `unknown` — the window this capability exists to illuminate is
+exactly the one that would otherwise lie. There is deliberately no `checked_at`
+guard and no `:seen_updated_at` pin: a reset is ordered by the save that caused
+it, not by an observation clock, so it must win over whatever is stored. A probe
+already in flight against the pre-save target cannot overwrite it afterwards,
+because that probe's own write still carries the pre-save `updated_at` and the
+upsert's `EXISTS` rejects it. That is the mechanism
+`AC-EXECUTORS-SSH-REACHABILITY-001.19` requires, and it is why the reset needs no
+clock of its own.
+
+The reset advances the row's `updated_at` like any other write, which is what
+lets a client order it against a concurrent probe result: see the surfaces
+design's reconciliation rule.
 
 Retention is one row per executor. The table survives restart and the surface
 reports the preserved record until a new probe replaces it: a blank panel after
@@ -326,10 +385,26 @@ not clamp.** `applyNonNegativeIntEnv` falls back to the *default* — never to a
 bound — for a value that is absent, empty, negative, fractional or unparsable, so
 every one of those yields `60`. Its minimum must stay `0`: widening it to `15` to
 express the supported range would push `0` below the minimum and silently turn
-the documented kill switch into a 60-second cadence. Clamping is therefore the
-package's job, applied to the non-negative value the catalog returns: `0`
-disables, `1`-`14` becomes `15`, above `3600` becomes `3600`, and a clamp logs
-once at startup rather than refusing to boot.
+the documented kill switch into a 60-second cadence.
+
+**That normalization is the environment path only, and the two sources do not
+behave alike.** `applyBoundedIntEnv`, which `applyNonNegativeIntEnv` wraps, reads
+`nonEmptyEnv(env, entry.EnvVars...)` and returns early when no environment
+variable is set, so a value written in `config.yaml` never reaches its
+fallback-and-bounds logic at all. A YAML value is decoded by `decodeConfig`,
+which sets no `WeaklyTypedInput`, and `Load` returns the decode error, so a
+non-integer in `config.yaml` refuses boot exactly as it does for every other
+typed key in the catalog. That is the documented behavior rather than an
+exception carved out for this key, and
+`AC-EXECUTORS-SSH-REACHABILITY-001.24` states it that way instead of promising a
+leniency the loader does not implement. A *negative whole number* does decode
+cleanly and so does reach the package, which is why the clamp below needs a
+negative branch of its own.
+
+Clamping is therefore the package's job, applied to whatever value reaches it:
+below `0` yields the default `60`, `0` disables, `1`-`14` becomes `15`, above
+`3600` becomes `3600`, and a clamp logs once at startup rather than refusing to
+boot.
 
 **The clamped value is the effective interval, and every consumer uses it.**
 Staleness (three times the interval), the `probing_enabled` projection, and the
@@ -347,27 +422,30 @@ key is a permanent contract:
 | `passConcurrency` | 4 | Bounds simultaneous outbound connections and file descriptors while keeping a pass short. |
 | `failureThreshold` | 2 | Smallest value that suppresses a single-probe blip; worst-case detection is two intervals. |
 
-This capability adds no runtime feature toggle. The interval key already
-provides the kill switch through the mechanism the repository designates for
-operator startup settings, and a toggle would leave a retired identity to carry
-forever.
+This capability adds no runtime feature toggle: the interval key already
+provides the kill switch through the designated operator-startup mechanism, and
+a toggle would leave a retired identity to carry forever.
 
 ## Control flow
 
 ```text
-ticker ──▶ poller.pass()   (only if effective interval > 0)
-             │  list eligible SSH executors by executors.id, with updated_at
-             ▼
-           global semaphore(passConcurrency)  ◀── off-cycle + immediate probes
-             ▼
-           probe(executor)   SSHTargetFromExecutorConfig ▸ ProbeSSHHost ▸ ClassifyDialError
-             ▼
-           store.Upsert(observation)   guards: eligible, updated_at, checked_at
-             ├─ state or reason changed ──▶ bus.Publish ──▶ WS ──▶ store slice
-             └─ unchanged ──▶ stop
+ticker -> poller.pass()        (only if effective interval > 0)
+  | list eligible SSH executors by executors.id, with updated_at
+  v
+global semaphore(passConcurrency)   <- off-cycle and immediate probes
+  v
+probe()   SSHTargetFromExecutorConfig > ProbeSSHHost > ClassifyDialError
+  v
+store.Upsert(observation)      guards: eligible, updated_at, checked_at
+  |- state or reason changed -> bus.Publish -> WS -> store slice
+  '- unchanged -> stop
 
-launch ──▶ SSHExecutor.CreateInstance   (reads no record, writes no record)
-             └─ failed at its dial ────▶ ClassifyDialError ──▶ error names host
+save -> ExecutorSaveObserver   (do the connection-config fields differ?)
+  '- yes -> store.Reset(host)  guard: eligible -> bus.Publish -> off-cycle probe
+
+launch -> session creation     reads record, emits session.launch.warning
+  '- SSHExecutor.CreateInstance      (reads no record, writes no record)
+       '- failed at its dial -> ClassifyDialError -> error names host
 ```
 
 ## Failure and recovery
@@ -376,42 +454,40 @@ The poller is best-effort and never a source of truth for a caller. Every
 failure mode degrades to a stale or `unknown` record and a log line:
 
 - Listing executors fails: the pass is abandoned with a warning, nothing is
-  written, and the next tick retries.
+  written, the next tick retries.
 - A probe panics or errors unexpectedly: it classifies `unknown` and the pass
   continues; no other executor is affected.
-- A record write fails: logged, the pass completes, the next probe rewrites. A
-  lost write costs one interval of freshness.
-- A write refused by the eligibility or `updated_at` guard is expected, not an
-  error: logged at debug and dropped.
+- A record write fails: logged, the pass completes, the next probe rewrites,
+  costing one interval of freshness.
+- A write refused by a guard is expected, not an error: logged at debug and
+  dropped.
 - A probe exceeding `probeTimeout` is abandoned by its context; the client is
   closed on the returning path so it leaks no connection, and its slot released.
-- A probe cancelled by `Stop` writes **nothing**, and this is not the same case
-  as the one above. Shutdown cancels the package context, so an in-flight dial
-  returns `context.Canceled` rather than its own `context.DeadlineExceeded`, and
-  none of the guards catch it: a shutdown mutates no executor row, so the
-  `EXISTS` and `updated_at` predicates still admit the write. Recorded, it would
+- A probe cancelled by `Stop` writes **nothing**, which is not the case above.
+  Shutdown cancels the package context, so an in-flight dial returns
+  `context.Canceled`, and no guard catches it: a shutdown mutates no executor
+  row, so `EXISTS` and `updated_at` still admit the write. Recorded, it would
   increment `consecutive_failures` for every probe in flight — up to
   `passConcurrency` hosts per restart — and at `failureThreshold` a second
-  restart would flip a healthy host to `unreachable`. An operator would then
-  come back from a routine deploy to exactly the false alarm this capability
-  exists to prevent. `ClassifyDialError` must therefore separate the two context
-  errors: only a deadline is a `timeout` observation, and a cancellation is not
-  an observation at all.
+  restart would flip a healthy host to `unreachable`, turning a routine deploy
+  into exactly the false alarm this capability exists to prevent.
+  `ClassifyDialError` must therefore separate the two context errors: only a
+  deadline is a `timeout` observation, and a cancellation is not an observation.
 - The store is unreachable on an API read: the route errors and the surface
   reports reachability as not known, never `unreachable`.
 
-There are no retries inside a pass. The next tick is the retry; an immediate
+There are no retries inside a pass: the next tick is the retry, and an immediate
 retry against a host that just refused a connection adds cost, not information.
 
 ## Security
 
 The probe uses the pinned fingerprint on the dial to the **target**, so a
 host-key change there is a detected `host_key` failure and never a silent
-re-pin; the stored fingerprint is read-only to this path. `host_key` reports `unreachable` on its first occurrence
-rather than waiting out the threshold: a mismatch is possible interception, and
-delaying it a full interval is a security cost with no accuracy benefit.
-Credentials are unchanged: the probe reuses the executor's configured identity
-source (`ssh-agent` or an identity file) and holds no secret of its own.
+re-pin; the stored fingerprint is read-only to this path. `host_key` reports
+`unreachable` on its first occurrence rather than waiting out the threshold: a
+mismatch is possible interception, and delaying it a full interval is a security
+cost with no accuracy benefit. Credentials are unchanged: the probe reuses the
+executor's configured identity source and holds no secret of its own.
 
 `message` carries an SSH error string, which can include host, port, username
 and identity path — all values the user configured and can already see on the
@@ -422,69 +498,66 @@ The probe opens no remote shell and runs no remote command, so it grants nothing
 beyond what the manual test already exercises, and adds no new trust boundary.
 
 **`ProxyJump` is a second hop with a weaker trust model, and the reason set must
-not paper over it.** An executor pins one fingerprint, and it belongs to the
-target. `dialViaJump` verifies the bastion against `~/.ssh/known_hosts` instead,
-accepting an absent host with a logged warning — OpenSSH's
-`StrictHostKeyChecking=accept-new`. Two consequences the probe inherits:
+not paper over it.** An executor pins one fingerprint and it belongs to the
+target; `dialViaJump` verifies the bastion against `~/.ssh/known_hosts` instead,
+accepting an absent host with a logged warning (OpenSSH's
+`StrictHostKeyChecking=accept-new`). Two consequences the probe inherits:
 
-- A bastion key *mismatch* is rejected, but it surfaces as `ssh: bastion dial:
-  …`, not as `errHostKeyMismatch`, so `ClassifyDialError` would call it
-  `network` or `unknown`. The interception signal that
-  `AC-EXECUTORS-SSH-REACHABILITY-001.7` requires to flip `unreachable` on the
-  first occurrence would instead wait out `failureThreshold` under the wrong
-  reason. The classifier must map a bastion host-key rejection to `host_key`
-  too; the reason describes what failed, not which hop failed.
+- A bastion key *mismatch* is rejected, but surfaces as `ssh: bastion dial: …`,
+  not as `errHostKeyMismatch`, so `ClassifyDialError` would call it `network` or
+  `unknown` and wait out `failureThreshold` under the wrong reason. The
+  classifier must map a bastion host-key rejection to `host_key`, which
+  `AC-EXECUTORS-SSH-REACHABILITY-001.29` now requires observably.
 - Every bastion-path error is about the *bastion*, while the record's `host` is
   the target. A bastion that is down reports the target unreachable and sends an
   operator to a machine that is fine — the same misattribution as the firewall
-  message of 2026-09-06, from a different cause. The record must name the host
-  actually dialled, or say the failure was on the jump hop.
+  message of 2026-09-06, from a different cause. **`host` stays the target in
+  every case**: it identifies the executor's subject, the column keeps one
+  meaning for success and failure alike, and `AC-…-001.4` and `AC-…-002.1` stay
+  true for a probe that succeeds through a jump. The disambiguation belongs in
+  `message`, which must name the bastion and state that the failure arose on the
+  jump hop whenever it did. `message` is rendered beside the state wherever an
+  unreachable record is shown, so the operator reads "unreachable … via bastion
+  X" instead of being sent to a healthy target.
 
 ## Observability
 
 Structured `zap` logs plus `expvar` counters under `/debug/vars`, following the
-`office_stall_*` and `routing_*` precedent:
+`office_stall_*` and `routing_*` precedent. Every name below carries the prefix
+`executor_ssh_reachability_`:
 
-- `executor_ssh_reachability_probe_total`, labelled by outcome (`reachable` plus
-  each failure reason).
-- `executor_ssh_reachability_state_transitions_total`, by destination state.
-- `executor_ssh_reachability_pass_skipped_total`, when a tick is dropped because
-  a pass is still running: the interval is shorter than a pass.
-- `executor_ssh_reachability_write_refused_total`, when a guard drops a write. A
-  rising value means configuration churn, not a fault.
-- `executor_ssh_reachability_probe_discarded_total`, when a probe is dropped
-  because `Stop` cancelled it. `probe_total` is labelled by outcome, and a
-  cancelled probe has no outcome, so without this the shutdown discard above is
-  the one drop in the package with no counter behind it — the same reason
-  `write_refused_total` exists.
-- `executor_ssh_reachability_probe_duration_ms`, the last pass's aggregate
-  probe duration.
+- `probe_total`, labelled by outcome (`reachable` plus each failure reason).
+- `state_transitions_total`, by destination state.
+- `pass_skipped_total`, when a tick is dropped because a pass is still running:
+  the interval is shorter than a pass.
+- `write_refused_total`, when a guard drops a write. A rising value means
+  configuration churn, not a fault.
+- `reset_total`, when a save invalidates a record.
+- `probe_discarded_total`, when `Stop` cancelled a probe. `probe_total` is
+  labelled by outcome and a cancelled probe has none, so without this the
+  shutdown discard is the package's only uncounted drop.
+- `probe_duration_ms`, the last pass's aggregate probe duration.
 
 A transition logs at `Warn` for `reachable` to `unreachable` and `Info` for the
 reverse, with executor id, host, reason and failure count. Unchanged results do
-not log, so a steady host is silent.
+not log, so a steady host stays silent.
 
 ## Prior art and departures
 
 `internal/integrations/healthpoll` is the closest in-repo precedent: an
 immediate probe on start, a fixed cadence, a configured-or-skip gate,
 best-effort semantics, idempotent `Start`/`Stop`, and a goroutine-leak test.
-Jira and Linear persist a last-checked timestamp, a boolean, and an error string
-on the config row. This design keeps those conventions and departs from that
-persistence shape in four places, because an SSH host is not an HTTP API:
-
-1. **A closed reason set, not only an error string.** Integration health has one
-   meaningful failure, credentials rejected. An SSH probe has five a user acts on
-   differently, and only a typed reason lets the UI say "fingerprint changed".
-2. **Asymmetric hysteresis, with an immediate flip for a deterministic
-   failure.** The integration pollers flip on the first result, which would let
-   one dropped packet paint a healthy host as unreachable. The rule and its
-   reasoning are in [State transitions](#state-transitions).
-3. **A separate record, not a column on the configuration row.** Argued in
-   [Persistence](#persistence): observed state must not share a row with
-   user-authored input.
-4. **Changes are pushed, results are not.** Pushing every probe result would put
-   one message per executor per interval on the wire forever.
+Those conventions are kept. Its persistence shape — a timestamp, a boolean and an
+error string on the config row — is not, in four places, because an SSH host is
+not an HTTP API: a **closed reason set** rather than an error string, since five
+failures are acted on differently and only a typed reason lets the UI say
+"fingerprint changed"; **asymmetric hysteresis** rather than flipping on the
+first result, which would let one dropped packet paint a healthy host as down
+(see [State transitions](#state-transitions)); a **separate record** rather than
+a column, since observed state must not share a row with user-authored input
+(see [Persistence](#persistence)); and **changes pushed, results not**, since
+pushing every result would put one message per executor per interval on the wire
+forever.
 
 ## Testing
 
@@ -492,14 +565,15 @@ Strategy only; the plan's `## Tests` table owns the per-criterion evidence.
 
 - Poller tests drive the ticker with `testing/synctest`, matching
   `healthpoll_test.go`, under a `goleak` `TestMain`.
-- Classification and hysteresis are both table-driven — over constructed errors
-  for the first, over probe sequences for the second — so the ordering rules and
-  the exact probe each state flips on are asserted, not inferred.
+- Classification and hysteresis are table-driven — over constructed errors and
+  over probe sequences — so the ordering rules and the exact probe each state
+  flips on are asserted, not inferred.
 - The upsert's ordering rule is exercised on **both** dialects, including the
-  whole-second versus sub-second pair that the text-encoding trap above turns
-  into a silent SQLite-only failure.
-- The guards get a negative test each: soft-deleted, deactivated, or
-  reconfigured mid-probe writes nothing.
+  whole-second versus sub-second pair the text-encoding trap turns into a silent
+  SQLite-only failure.
+- The guards get a negative test each: soft-deleted, deactivated or reconfigured
+  mid-probe writes nothing. The reset gets its own: it lands with no
+  `checked_at`, and a probe in flight from before the save does not overwrite it.
 - The immediate-probe route is tested for caller cancellation and for a
   guard-refused write returning `persisted: false`.
 - Web E2E lives in `apps/web/e2e/tests/ssh/` under the `containers` project,
@@ -507,8 +581,8 @@ Strategy only; the plan's `## Tests` table owns the per-criterion evidence.
 
 ## Related decisions
 
-No new ADR. This design creates no new system boundary and no new ownership
-rule: it extends an existing contract using the repository's designated
-mechanisms for configuration
+No new ADR: this design creates no system boundary and no ownership rule, and
+extends an existing contract through the repository's designated mechanisms for
+configuration, persistence, events and metrics.
 ([0018](../../../decisions/0018-runtime-settings-overrides.md) covers the
-adjacent runtime-override tier), persistence, events and metrics.
+adjacent runtime-override tier.)
