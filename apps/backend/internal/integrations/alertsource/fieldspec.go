@@ -3,6 +3,7 @@ package alertsource
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"time"
 )
@@ -262,9 +263,12 @@ func coerceInt(v any) (int, bool) {
 	case int:
 		return n, true
 	case int64:
+		if n < math.MinInt || n > math.MaxInt {
+			return 0, false
+		}
 		return int(n), true
 	case float64:
-		if n != float64(int64(n)) {
+		if n != float64(int64(n)) || n < math.MinInt || n > math.MaxInt {
 			return 0, false
 		}
 		return int(n), true

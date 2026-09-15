@@ -132,6 +132,8 @@ func createTablesSQL(driver string) string {
 		);
 		CREATE UNIQUE INDEX IF NOT EXISTS uniq_alert_reservations_live
 			ON alert_reservations(watch_id, fingerprint) WHERE released_at IS NULL;
+		CREATE INDEX IF NOT EXISTS idx_alert_reservations_task
+			ON alert_reservations(task_id) WHERE task_id != '';
 	`, alertSourcesColumns, alertWatchesColumns, reservations)
 }
 
