@@ -168,6 +168,13 @@ exactly match the repository. A broker-aware `gh` shim redeems the primary repos
 each invocation, sets `GH_TOKEN` only on the child `gh` process, and isolates CLI configuration
 from the host.
 
+For Local and Worktree tasks, managed credentials cover Kandev's checkout operations and the
+launched task processes. Per-repository setup scripts still receive executor-profile and repository
+environment bindings, user-configured Git settings, and Kandev's managed build cache, but Kandev
+removes broker leases and generated Git and `gh` helper routing before those scripts start. If a
+repository setup script needs authenticated GitHub access, configure an explicit scoped profile or
+repository credential, or select **Inherit executor Git credentials** and configure the host.
+
 When the workspace uses a GitHub App, the redeemed installation token is minted for that one
 repository. On a multi-repository task, Git can redeem each repository's lease, but App-backed
 `gh` commands are primary-repository scoped. Run cross-repository GitHub API work through Kandev's
