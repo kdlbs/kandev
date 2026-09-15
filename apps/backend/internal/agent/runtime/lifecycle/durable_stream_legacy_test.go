@@ -41,8 +41,9 @@ func TestLegacyStreamRealRepository(t *testing.T) {
 		},
 	}, nil, nil)
 	execution := &AgentExecution{
-		SessionID:    "legacy-session",
-		DeliveryMode: DurableDeliveryLegacy,
+		SessionID:        "legacy-session",
+		DeliveryMode:     DurableDeliveryLegacy,
+		DeliveryStreamID: "legacy-stream",
 	}
 
 	for _, event := range []agentctl.AgentEvent{

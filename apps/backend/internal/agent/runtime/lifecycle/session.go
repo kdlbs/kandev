@@ -147,6 +147,7 @@ type InitializeResult struct {
 //   - Otherwise: use session/new
 func (sm *SessionManager) InitializeSession(
 	ctx context.Context,
+	execution *AgentExecution,
 	client *agentctl.Client,
 	agentConfig agents.Agent,
 	existingSessionID string,
@@ -204,6 +205,11 @@ func (sm *SessionManager) InitializeSession(
 	)
 	if deliveryDecision.Mode == DurableDeliveryBlocked {
 		return nil, fmt.Errorf("durable delivery negotiation blocked: %s", deliveryDecision.Reason)
+	}
+	if execution != nil {
+		// Publish the negotiated mode before session/new or session/load can
+		// emit events on the already-connected updates stream.
+		execution.DeliveryMode = deliveryDecision.Mode
 	}
 	sm.logger.Info("agentctl delivery capability negotiated",
 		zap.String("agent_type", agentConfig.ID()),
@@ -647,6 +653,7 @@ func (sm *SessionManager) initializeACPConnection(
 	}
 	result, err := sm.InitializeSession(
 		ctx,
+		execution,
 		client,
 		agentConfig,
 		execution.ACPSessionID,

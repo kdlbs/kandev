@@ -160,7 +160,7 @@ func TestInitializeSessionNativeLoadFailureDoesNotCreateReplacement(t *testing.T
 		},
 	}
 
-	_, err := sm.InitializeSession(context.Background(), client, config, "native-1", "/workspace", nil)
+	_, err := sm.InitializeSession(context.Background(), nil, client, config, "native-1", "/workspace", nil)
 	if err == nil {
 		t.Fatal("expected native load failure")
 	}
