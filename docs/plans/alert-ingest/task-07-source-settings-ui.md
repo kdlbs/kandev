@@ -78,7 +78,7 @@ the descriptor; `Secret` renders masked; `Advanced` collapses.
 
 ## Dependencies
 
-T05 for the schema shape, T06 for the endpoints that serve it.
+T04 for the schema shape, T06 for the endpoints that serve it.
 
 ## Results
 

@@ -161,11 +161,12 @@ func requireFingerprint(fingerprint string) error {
 }
 
 // ReserveFingerprint claims the (watchID, fingerprint) pair for a new
-// reservation. It contains no SELECT (D16.1): a single INSERT whose ON
-// CONFLICT target carries the partial index's predicate absorbs a
-// concurrent duplicate delivery by index rejection alone. reserved=false,
-// err=nil means another caller already holds a live reservation for this
-// pair — not an error condition.
+// reservation. It returns the reservation ID only when the insert wins.
+// It contains no SELECT (D16.1): a single INSERT whose ON CONFLICT target
+// carries the partial index's predicate absorbs a concurrent duplicate
+// delivery by index rejection alone. reserved=false, err=nil means another
+// caller already holds a live reservation for this pair — not an error
+// condition.
 //
 // alertRaw is stored as ” when nil or empty (the column is NOT NULL
 // DEFAULT ”), never NULL. Row id and created_at are generated in Go at the
@@ -178,37 +179,42 @@ func requireFingerprint(fingerprint string) error {
 // — the index entry it conflicted with was live at check time — and the
 // alert is re-reserved on the next delivery. That produces a task one
 // delivery later, never zero tasks forever.
-func (s *Store) ReserveFingerprint(ctx context.Context, watchID, fingerprint string, alertRaw []byte) (bool, error) {
+func (s *Store) ReserveFingerprint(ctx context.Context, watchID, fingerprint string, alertRaw []byte) (string, bool, error) {
 	if err := requireNonEmpty("watchID", watchID); err != nil {
-		return false, err
+		return "", false, err
 	}
 	if err := requireFingerprint(fingerprint); err != nil {
-		return false, err
+		return "", false, err
 	}
 	raw := ""
 	if len(alertRaw) > 0 {
 		raw = string(alertRaw)
 	}
+	reservationID := uuid.New().String()
 	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		INSERT INTO alert_reservations (id, watch_id, fingerprint, task_id, alert_raw, created_at)
 		VALUES (?, ?, ?, '', ?, ?)
 		ON CONFLICT (watch_id, fingerprint) WHERE released_at IS NULL DO NOTHING`),
-		uuid.New().String(), watchID, fingerprint, raw, time.Now().UTC())
+		reservationID, watchID, fingerprint, raw, time.Now().UTC())
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
 	rows, err := res.RowsAffected()
 	if err != nil {
-		return false, err
+		return "", false, err
 	}
-	return rows == 1, nil
+	if rows != 1 {
+		return "", false, nil
+	}
+	return reservationID, true, nil
 }
 
 // AttachReservationTaskID is a compare-and-set, idempotent for its own task
-// ID (D3(b)): the guard `(task_id = ” OR task_id = ?)` means a retry after
-// an ambiguous commit (the first UPDATE landed but the response was lost)
-// reports the same success as a fresh attach, rather than a spurious
-// conflict.
+// ID (D3(b)). The reservation ID identifies the exact row claimed by the
+// caller, so a delayed retry cannot attach a task to a later reservation for
+// the same watch and fingerprint. The guard `(task_id = ” OR task_id = ?)`
+// means a retry after an ambiguous commit reports the same success as a
+// fresh attach, rather than a spurious conflict.
 //
 // On the zero-row path only, a single diagnostic SELECT (scoped by
 // `released_at IS NULL`, so it can return at most one row) classifies the
@@ -218,11 +224,8 @@ func (s *Store) ReserveFingerprint(ctx context.Context, watchID, fingerprint str
 // NEVER reported as ErrReservationGone (A5) — a transient query failure
 // must stay retryable, while ErrReservationGone tells the caller to stop
 // retrying and release the reservation.
-func (s *Store) AttachReservationTaskID(ctx context.Context, watchID, fingerprint, taskID string) error {
-	if err := requireNonEmpty("watchID", watchID); err != nil {
-		return err
-	}
-	if err := requireFingerprint(fingerprint); err != nil {
+func (s *Store) AttachReservationTaskID(ctx context.Context, reservationID, taskID string) error {
+	if err := requireNonEmpty("reservationID", reservationID); err != nil {
 		return err
 	}
 	if err := requireNonEmpty("taskID", taskID); err != nil {
@@ -230,8 +233,8 @@ func (s *Store) AttachReservationTaskID(ctx context.Context, watchID, fingerprin
 	}
 	res, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE alert_reservations SET task_id = ?
-		WHERE watch_id = ? AND fingerprint = ? AND released_at IS NULL AND (task_id = '' OR task_id = ?)`),
-		taskID, watchID, fingerprint, taskID)
+		WHERE id = ? AND released_at IS NULL AND (task_id = '' OR task_id = ?)`),
+		taskID, reservationID, taskID)
 	if err != nil {
 		return err
 	}
@@ -242,14 +245,14 @@ func (s *Store) AttachReservationTaskID(ctx context.Context, watchID, fingerprin
 	if rows == 1 {
 		return nil
 	}
-	return s.classifyAttachFailure(ctx, watchID, fingerprint)
+	return s.classifyAttachFailure(ctx, reservationID)
 }
 
-func (s *Store) classifyAttachFailure(ctx context.Context, watchID, fingerprint string) error {
+func (s *Store) classifyAttachFailure(ctx context.Context, reservationID string) error {
 	var attachedTaskID string
 	err := s.ro.QueryRowContext(ctx, s.ro.Rebind(`
-		SELECT task_id FROM alert_reservations WHERE watch_id = ? AND fingerprint = ? AND released_at IS NULL`),
-		watchID, fingerprint).Scan(&attachedTaskID)
+		SELECT task_id FROM alert_reservations WHERE id = ? AND released_at IS NULL`),
+		reservationID).Scan(&attachedTaskID)
 	switch {
 	case err == nil:
 		return ErrReservationAttachedElsewhere
@@ -261,22 +264,17 @@ func (s *Store) classifyAttachFailure(ctx context.Context, watchID, fingerprint 
 }
 
 // DeleteReservation removes a live reservation outright. It runs after task
-// creation has already failed (the pipeline's own compensating action for a
-// failed CreateIssueTask, before any task ID exists to attach), so a
-// zero-row result is a no-op rather than an error — a second error here
-// would mask the first. The added guard requiring an empty task_id, matching
-// ReleaseOrphanedReservation's, makes it structurally incapable of deleting
-// a reservation a concurrent AttachReservationTaskID has already attached.
-func (s *Store) DeleteReservation(ctx context.Context, watchID, fingerprint string) error {
-	if err := requireNonEmpty("watchID", watchID); err != nil {
-		return err
-	}
-	if err := requireFingerprint(fingerprint); err != nil {
+// creation has already failed, before any task ID exists to attach, so a
+// zero-row result is a no-op rather than an error. The reservation ID makes
+// this compensating action safe when a later delivery has already reserved
+// the same fingerprint again.
+func (s *Store) DeleteReservation(ctx context.Context, reservationID string) error {
+	if err := requireNonEmpty("reservationID", reservationID); err != nil {
 		return err
 	}
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(
-		`DELETE FROM alert_reservations WHERE watch_id = ? AND fingerprint = ? AND released_at IS NULL AND task_id = ''`),
-		watchID, fingerprint)
+		`DELETE FROM alert_reservations WHERE id = ? AND released_at IS NULL AND task_id = ''`),
+		reservationID)
 	return err
 }
 
@@ -298,24 +296,16 @@ func (s *Store) ReleaseReservationForTask(ctx context.Context, taskID string) er
 }
 
 // ReleaseOrphanedReservation stamps released_at for a reservation whose
-// attach permanently failed after a successful task create (T06 calls this
-// once its attach retries are exhausted). The `AND task_id = ”` guard
-// makes it structurally incapable of releasing a correctly-attached
-// reservation, so it cannot corrupt a concurrent AttachReservationTaskID:
-// whichever of the two single-statement conditional updates the database
-// serializes first determines whether the row survives attached or ends up
-// released with task_id still ” (auditable, and the fingerprint becomes
-// reservable again).
-func (s *Store) ReleaseOrphanedReservation(ctx context.Context, watchID, fingerprint string) error {
-	if err := requireNonEmpty("watchID", watchID); err != nil {
-		return err
-	}
-	if err := requireFingerprint(fingerprint); err != nil {
+// attach permanently failed after a successful task create. The reservation
+// ID prevents a delayed cleanup from releasing a later reservation for the
+// same watch and fingerprint.
+func (s *Store) ReleaseOrphanedReservation(ctx context.Context, reservationID string) error {
+	if err := requireNonEmpty("reservationID", reservationID); err != nil {
 		return err
 	}
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(`
 		UPDATE alert_reservations SET released_at = ?
-		WHERE watch_id = ? AND fingerprint = ? AND released_at IS NULL AND task_id = ''`),
-		time.Now().UTC(), watchID, fingerprint)
+		WHERE id = ? AND released_at IS NULL AND task_id = ''`),
+		time.Now().UTC(), reservationID)
 	return err
 }

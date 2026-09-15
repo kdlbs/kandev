@@ -110,7 +110,7 @@ func TestStore_ReserveFingerprint_ConcurrentRace_ExactlyOneWins(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			reserved, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil)
+			_, reserved, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil)
 			results[i] = reserved
 			errs[i] = err
 		}(i)
@@ -146,7 +146,7 @@ func TestStore_ReserveFingerprint_ConcurrentRace_ExactlyOneWins(t *testing.T) {
 func TestStore_ReserveFingerprint_EmptyWatchID(t *testing.T) {
 	store, db := newTestStore(t)
 	seedSourceAndWatch(t, db)
-	if _, err := store.ReserveFingerprint(context.Background(), "", testFingerprint("x"), nil); err == nil {
+	if _, _, err := store.ReserveFingerprint(context.Background(), "", testFingerprint("x"), nil); err == nil {
 		t.Fatal("expected error for empty watchID")
 	}
 }
@@ -155,7 +155,7 @@ func TestStore_ReserveFingerprint_InvalidFingerprint(t *testing.T) {
 	store, db := newTestStore(t)
 	seedSourceAndWatch(t, db)
 	for _, fp := range []string{"", "too-short", "UPPERCASEUPPERCASEUPPERCASEUPPERCASEUPPERCASEUPPERCASEUPPERCASE"} {
-		if _, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil); err == nil {
+		if _, _, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil); err == nil {
 			t.Fatalf("expected error for fingerprint %q", fp)
 		}
 	}
@@ -166,13 +166,13 @@ func TestStore_ReserveFingerprint_FirstReserveWinsSecondLoses(t *testing.T) {
 	seedSourceAndWatch(t, db)
 	fp := testFingerprint("dup")
 
-	reserved, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, []byte(`{"a":1}`))
-	if err != nil || !reserved {
-		t.Fatalf("first reserve: reserved=%v err=%v", reserved, err)
+	firstID, reserved, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, []byte(`{"a":1}`))
+	if err != nil || !reserved || firstID == "" {
+		t.Fatalf("first reserve: id=%q reserved=%v err=%v", firstID, reserved, err)
 	}
-	reserved, err = store.ReserveFingerprint(context.Background(), "watch-1", fp, nil)
-	if err != nil || reserved {
-		t.Fatalf("second reserve: expected reserved=false err=nil, got reserved=%v err=%v", reserved, err)
+	secondID, reserved, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil)
+	if err != nil || reserved || secondID != "" {
+		t.Fatalf("second reserve: expected no id, reserved=false, err=nil, got id=%q reserved=%v err=%v", secondID, reserved, err)
 	}
 }
 
@@ -180,7 +180,7 @@ func TestStore_ReserveFingerprint_NilAlertRawStoredAsEmptyString(t *testing.T) {
 	store, db := newTestStore(t)
 	seedSourceAndWatch(t, db)
 	fp := testFingerprint("nil-raw")
-	if _, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil); err != nil {
+	if _, _, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil); err != nil {
 		t.Fatalf("reserve: %v", err)
 	}
 	var raw sql.NullString
@@ -198,14 +198,10 @@ func TestStore_ReserveFingerprint_NilAlertRawStoredAsEmptyString(t *testing.T) {
 func TestStore_AttachReservationTaskID_EmptyArgs(t *testing.T) {
 	store, db := newTestStore(t)
 	seedSourceAndWatch(t, db)
-	fp := testFingerprint("attach-empty")
-	if err := store.AttachReservationTaskID(context.Background(), "", fp, "task-1"); err == nil {
-		t.Fatal("expected error for empty watchID")
+	if err := store.AttachReservationTaskID(context.Background(), "", "task-1"); err == nil {
+		t.Fatal("expected error for empty reservationID")
 	}
-	if err := store.AttachReservationTaskID(context.Background(), "watch-1", "not-a-fingerprint", "task-1"); err == nil {
-		t.Fatal("expected error for invalid fingerprint")
-	}
-	if err := store.AttachReservationTaskID(context.Background(), "watch-1", fp, ""); err == nil {
+	if err := store.AttachReservationTaskID(context.Background(), "reservation-1", ""); err == nil {
 		t.Fatal("expected error for empty taskID")
 	}
 }
@@ -214,10 +210,11 @@ func TestStore_AttachReservationTaskID_FreshAttachSucceeds(t *testing.T) {
 	store, db := newTestStore(t)
 	seedSourceAndWatch(t, db)
 	fp := testFingerprint("attach-fresh")
-	if _, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil); err != nil {
-		t.Fatalf("reserve: %v", err)
+	reservationID, reserved, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil)
+	if err != nil || !reserved {
+		t.Fatalf("reserve: id=%q reserved=%v err=%v", reservationID, reserved, err)
 	}
-	if err := store.AttachReservationTaskID(context.Background(), "watch-1", fp, "task-1"); err != nil {
+	if err := store.AttachReservationTaskID(context.Background(), reservationID, "task-1"); err != nil {
 		t.Fatalf("attach: %v", err)
 	}
 	var taskID string
@@ -234,15 +231,16 @@ func TestStore_AttachReservationTaskID_IdempotentForOwnTaskID(t *testing.T) {
 	store, db := newTestStore(t)
 	seedSourceAndWatch(t, db)
 	fp := testFingerprint("attach-idempotent")
-	if _, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil); err != nil {
-		t.Fatalf("reserve: %v", err)
+	reservationID, reserved, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil)
+	if err != nil || !reserved {
+		t.Fatalf("reserve: id=%q reserved=%v err=%v", reservationID, reserved, err)
 	}
-	if err := store.AttachReservationTaskID(context.Background(), "watch-1", fp, "task-1"); err != nil {
+	if err := store.AttachReservationTaskID(context.Background(), reservationID, "task-1"); err != nil {
 		t.Fatalf("first attach: %v", err)
 	}
 	// Simulates a retry after an ambiguous commit: same taskID, must succeed
 	// again rather than being classified as AttachedElsewhere.
-	if err := store.AttachReservationTaskID(context.Background(), "watch-1", fp, "task-1"); err != nil {
+	if err := store.AttachReservationTaskID(context.Background(), reservationID, "task-1"); err != nil {
 		t.Fatalf("retry attach with same taskID: %v", err)
 	}
 }
@@ -251,13 +249,14 @@ func TestStore_AttachReservationTaskID_DifferentTaskIDReturnsAttachedElsewhere(t
 	store, db := newTestStore(t)
 	seedSourceAndWatch(t, db)
 	fp := testFingerprint("attach-conflict")
-	if _, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil); err != nil {
-		t.Fatalf("reserve: %v", err)
+	reservationID, reserved, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil)
+	if err != nil || !reserved {
+		t.Fatalf("reserve: id=%q reserved=%v err=%v", reservationID, reserved, err)
 	}
-	if err := store.AttachReservationTaskID(context.Background(), "watch-1", fp, "task-1"); err != nil {
+	if err := store.AttachReservationTaskID(context.Background(), reservationID, "task-1"); err != nil {
 		t.Fatalf("first attach: %v", err)
 	}
-	err := store.AttachReservationTaskID(context.Background(), "watch-1", fp, "task-2")
+	err = store.AttachReservationTaskID(context.Background(), reservationID, "task-2")
 	if !errors.Is(err, ErrReservationAttachedElsewhere) {
 		t.Fatalf("expected ErrReservationAttachedElsewhere, got %v", err)
 	}
@@ -266,8 +265,7 @@ func TestStore_AttachReservationTaskID_DifferentTaskIDReturnsAttachedElsewhere(t
 func TestStore_AttachReservationTaskID_NeverReservedReturnsGone(t *testing.T) {
 	store, db := newTestStore(t)
 	seedSourceAndWatch(t, db)
-	fp := testFingerprint("attach-never-reserved")
-	err := store.AttachReservationTaskID(context.Background(), "watch-1", fp, "task-1")
+	err := store.AttachReservationTaskID(context.Background(), "reservation-never-existed", "task-1")
 	if !errors.Is(err, ErrReservationGone) {
 		t.Fatalf("expected ErrReservationGone, got %v", err)
 	}
@@ -277,13 +275,14 @@ func TestStore_AttachReservationTaskID_ReleasedReturnsGone(t *testing.T) {
 	store, db := newTestStore(t)
 	seedSourceAndWatch(t, db)
 	fp := testFingerprint("attach-released")
-	if _, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil); err != nil {
-		t.Fatalf("reserve: %v", err)
+	reservationID, reserved, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil)
+	if err != nil || !reserved {
+		t.Fatalf("reserve: id=%q reserved=%v err=%v", reservationID, reserved, err)
 	}
-	if err := store.DeleteReservation(context.Background(), "watch-1", fp); err != nil {
+	if err := store.DeleteReservation(context.Background(), reservationID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	err := store.AttachReservationTaskID(context.Background(), "watch-1", fp, "task-1")
+	err = store.AttachReservationTaskID(context.Background(), reservationID, "task-1")
 	if !errors.Is(err, ErrReservationGone) {
 		t.Fatalf("expected ErrReservationGone, got %v", err)
 	}
@@ -319,8 +318,6 @@ func TestStore_AttachReservationTaskID_DiagnosticSelectFailureIsNeverGone(t *tes
 		t.Fatalf("new store: %v", err)
 	}
 	seedSourceAndWatch(t, writer)
-	fp := testFingerprint("attach-select-fails")
-
 	// Break the read handle only. The UPDATE (on writer) affects zero rows
 	// because nothing was ever reserved, so AttachReservationTaskID reaches
 	// classifyAttachFailure's SELECT, which must now fail.
@@ -328,7 +325,7 @@ func TestStore_AttachReservationTaskID_DiagnosticSelectFailureIsNeverGone(t *tes
 		t.Fatalf("close reader: %v", err)
 	}
 
-	err = store.AttachReservationTaskID(context.Background(), "watch-1", fp, "task-1")
+	err = store.AttachReservationTaskID(context.Background(), "reservation-never-existed", "task-1")
 	if err == nil {
 		t.Fatal("expected an error")
 	}
@@ -345,11 +342,8 @@ func TestStore_AttachReservationTaskID_DiagnosticSelectFailureIsNeverGone(t *tes
 func TestStore_DeleteReservation_EmptyArgs(t *testing.T) {
 	store, db := newTestStore(t)
 	seedSourceAndWatch(t, db)
-	if err := store.DeleteReservation(context.Background(), "", testFingerprint("x")); err == nil {
-		t.Fatal("expected error for empty watchID")
-	}
-	if err := store.DeleteReservation(context.Background(), "watch-1", "bad"); err == nil {
-		t.Fatal("expected error for invalid fingerprint")
+	if err := store.DeleteReservation(context.Background(), ""); err == nil {
+		t.Fatal("expected error for empty reservationID")
 	}
 }
 
@@ -357,10 +351,11 @@ func TestStore_DeleteReservation_DeletesLiveReservation(t *testing.T) {
 	store, db := newTestStore(t)
 	seedSourceAndWatch(t, db)
 	fp := testFingerprint("delete-live")
-	if _, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil); err != nil {
-		t.Fatalf("reserve: %v", err)
+	reservationID, reserved, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil)
+	if err != nil || !reserved {
+		t.Fatalf("reserve: id=%q reserved=%v err=%v", reservationID, reserved, err)
 	}
-	if err := store.DeleteReservation(context.Background(), "watch-1", fp); err != nil {
+	if err := store.DeleteReservation(context.Background(), reservationID); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 	var count int
@@ -376,7 +371,7 @@ func TestStore_DeleteReservation_DeletesLiveReservation(t *testing.T) {
 func TestStore_DeleteReservation_NoOpOnMissingRow(t *testing.T) {
 	store, db := newTestStore(t)
 	seedSourceAndWatch(t, db)
-	if err := store.DeleteReservation(context.Background(), "watch-1", testFingerprint("never-existed")); err != nil {
+	if err := store.DeleteReservation(context.Background(), "reservation-never-existed"); err != nil {
 		t.Fatalf("expected nil (no-op), got %v", err)
 	}
 }
@@ -389,13 +384,14 @@ func TestStore_DeleteReservation_NoOpOnAttachedReservation(t *testing.T) {
 	store, db := newTestStore(t)
 	seedSourceAndWatch(t, db)
 	fp := testFingerprint("delete-attached")
-	if _, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil); err != nil {
-		t.Fatalf("reserve: %v", err)
+	reservationID, reserved, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil)
+	if err != nil || !reserved {
+		t.Fatalf("reserve: id=%q reserved=%v err=%v", reservationID, reserved, err)
 	}
-	if err := store.AttachReservationTaskID(context.Background(), "watch-1", fp, "task-1"); err != nil {
+	if err := store.AttachReservationTaskID(context.Background(), reservationID, "task-1"); err != nil {
 		t.Fatalf("attach: %v", err)
 	}
-	if err := store.DeleteReservation(context.Background(), "watch-1", fp); err != nil {
+	if err := store.DeleteReservation(context.Background(), reservationID); err != nil {
 		t.Fatalf("expected nil (no-op), got %v", err)
 	}
 	var count int
@@ -414,7 +410,7 @@ func TestStore_ReleaseReservationForTask_EmptyTaskIDDoesNotReleaseUnattachedRows
 	store, db := newTestStore(t)
 	seedSourceAndWatch(t, db)
 	fp := testFingerprint("release-empty-taskid")
-	if _, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil); err != nil {
+	if _, _, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil); err != nil {
 		t.Fatalf("reserve: %v", err)
 	}
 	if err := store.ReleaseReservationForTask(context.Background(), ""); err == nil {
@@ -434,10 +430,11 @@ func TestStore_ReleaseReservationForTask_ReleasesAttachedReservation(t *testing.
 	store, db := newTestStore(t)
 	seedSourceAndWatch(t, db)
 	fp := testFingerprint("release-attached")
-	if _, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil); err != nil {
-		t.Fatalf("reserve: %v", err)
+	reservationID, reserved, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil)
+	if err != nil || !reserved {
+		t.Fatalf("reserve: id=%q reserved=%v err=%v", reservationID, reserved, err)
 	}
-	if err := store.AttachReservationTaskID(context.Background(), "watch-1", fp, "task-1"); err != nil {
+	if err := store.AttachReservationTaskID(context.Background(), reservationID, "task-1"); err != nil {
 		t.Fatalf("attach: %v", err)
 	}
 	if err := store.ReleaseReservationForTask(context.Background(), "task-1"); err != nil {
@@ -465,10 +462,11 @@ func TestStore_ReleaseReservationForTask_IdempotentAgainstRedeliveredClose(t *te
 	store, db := newTestStore(t)
 	seedSourceAndWatch(t, db)
 	fp := testFingerprint("release-idempotent")
-	if _, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil); err != nil {
-		t.Fatalf("reserve: %v", err)
+	reservationID, reserved, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil)
+	if err != nil || !reserved {
+		t.Fatalf("reserve: id=%q reserved=%v err=%v", reservationID, reserved, err)
 	}
-	if err := store.AttachReservationTaskID(context.Background(), "watch-1", fp, "task-1"); err != nil {
+	if err := store.AttachReservationTaskID(context.Background(), reservationID, "task-1"); err != nil {
 		t.Fatalf("attach: %v", err)
 	}
 	if err := store.ReleaseReservationForTask(context.Background(), "task-1"); err != nil {
@@ -484,11 +482,8 @@ func TestStore_ReleaseReservationForTask_IdempotentAgainstRedeliveredClose(t *te
 func TestStore_ReleaseOrphanedReservation_EmptyArgs(t *testing.T) {
 	store, db := newTestStore(t)
 	seedSourceAndWatch(t, db)
-	if err := store.ReleaseOrphanedReservation(context.Background(), "", testFingerprint("x")); err == nil {
-		t.Fatal("expected error for empty watchID")
-	}
-	if err := store.ReleaseOrphanedReservation(context.Background(), "watch-1", "bad"); err == nil {
-		t.Fatal("expected error for invalid fingerprint")
+	if err := store.ReleaseOrphanedReservation(context.Background(), ""); err == nil {
+		t.Fatal("expected error for empty reservationID")
 	}
 }
 
@@ -496,10 +491,11 @@ func TestStore_ReleaseOrphanedReservation_ReleasesOnlyUnattachedRow(t *testing.T
 	store, db := newTestStore(t)
 	seedSourceAndWatch(t, db)
 	fp := testFingerprint("release-orphan")
-	if _, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil); err != nil {
-		t.Fatalf("reserve: %v", err)
+	reservationID, reserved, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil)
+	if err != nil || !reserved {
+		t.Fatalf("reserve: id=%q reserved=%v err=%v", reservationID, reserved, err)
 	}
-	if err := store.ReleaseOrphanedReservation(context.Background(), "watch-1", fp); err != nil {
+	if err := store.ReleaseOrphanedReservation(context.Background(), reservationID); err != nil {
 		t.Fatalf("release orphaned: %v", err)
 	}
 	var releasedAt sql.NullTime
@@ -517,13 +513,14 @@ func TestStore_ReleaseOrphanedReservation_CannotReleaseAttachedReservation(t *te
 	store, db := newTestStore(t)
 	seedSourceAndWatch(t, db)
 	fp := testFingerprint("release-orphan-guard")
-	if _, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil); err != nil {
-		t.Fatalf("reserve: %v", err)
+	reservationID, reserved, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil)
+	if err != nil || !reserved {
+		t.Fatalf("reserve: id=%q reserved=%v err=%v", reservationID, reserved, err)
 	}
-	if err := store.AttachReservationTaskID(context.Background(), "watch-1", fp, "task-1"); err != nil {
+	if err := store.AttachReservationTaskID(context.Background(), reservationID, "task-1"); err != nil {
 		t.Fatalf("attach: %v", err)
 	}
-	if err := store.ReleaseOrphanedReservation(context.Background(), "watch-1", fp); err != nil {
+	if err := store.ReleaseOrphanedReservation(context.Background(), reservationID); err != nil {
 		t.Fatalf("release orphaned: %v", err)
 	}
 	var releasedAt sql.NullTime
@@ -533,6 +530,54 @@ func TestStore_ReleaseOrphanedReservation_CannotReleaseAttachedReservation(t *te
 	}
 	if releasedAt.Valid {
 		t.Fatal("expected the attached reservation to remain live")
+	}
+}
+
+func TestStore_ReservationIdentityPreventsStaleOperations(t *testing.T) {
+	store, db := newTestStore(t)
+	seedSourceAndWatch(t, db)
+	fp := testFingerprint("replacement")
+
+	firstID, reserved, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil)
+	if err != nil || !reserved || firstID == "" {
+		t.Fatalf("first reserve: id=%q reserved=%v err=%v", firstID, reserved, err)
+	}
+	if err := store.AttachReservationTaskID(context.Background(), firstID, "task-1"); err != nil {
+		t.Fatalf("attach first reservation: %v", err)
+	}
+	if err := store.ReleaseReservationForTask(context.Background(), "task-1"); err != nil {
+		t.Fatalf("release first reservation: %v", err)
+	}
+
+	secondID, reserved, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil)
+	if err != nil || !reserved || secondID == "" || secondID == firstID {
+		t.Fatalf("replacement reserve: id=%q reserved=%v err=%v", secondID, reserved, err)
+	}
+	if err := store.AttachReservationTaskID(context.Background(), firstID, "stale-task"); !errors.Is(err, ErrReservationGone) {
+		t.Fatalf("stale attach: expected ErrReservationGone, got %v", err)
+	}
+
+	var taskID string
+	if err := db.Get(&taskID, db.Rebind(`SELECT task_id FROM alert_reservations WHERE id = ?`), secondID); err != nil {
+		t.Fatalf("read replacement task_id: %v", err)
+	}
+	if taskID != "" {
+		t.Fatalf("stale attach mutated replacement reservation: task_id=%q", taskID)
+	}
+
+	if err := store.ReleaseOrphanedReservation(context.Background(), firstID); err != nil {
+		t.Fatalf("stale orphan release: %v", err)
+	}
+	if err := store.DeleteReservation(context.Background(), firstID); err != nil {
+		t.Fatalf("stale delete: %v", err)
+	}
+
+	var releasedAt sql.NullTime
+	if err := db.Get(&releasedAt, db.Rebind(`SELECT released_at FROM alert_reservations WHERE id = ?`), secondID); err != nil {
+		t.Fatalf("read replacement released_at: %v", err)
+	}
+	if releasedAt.Valid {
+		t.Fatal("stale cleanup mutated replacement reservation")
 	}
 }
 
@@ -659,7 +704,7 @@ func TestStore_Schema_WatchDeleteCascadesToReservations(t *testing.T) {
 	store, db := newTestStore(t)
 	seedSourceAndWatch(t, db)
 	fp := testFingerprint("cascade")
-	if _, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil); err != nil {
+	if _, _, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil); err != nil {
 		t.Fatalf("reserve: %v", err)
 	}
 	if _, err := db.Exec(db.Rebind(`DELETE FROM alert_watches WHERE id = ?`), "watch-1"); err != nil {

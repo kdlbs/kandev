@@ -41,37 +41,38 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 
 	fp := Fingerprint(map[string]string{"seed": "pg-lifecycle"}, []string{"seed"})
 
-	reserved, err := store.ReserveFingerprint(ctx, "watch-1", fp, []byte(`{"a":1}`))
+	reservationID, reserved, err := store.ReserveFingerprint(ctx, "watch-1", fp, []byte(`{"a":1}`))
 	if err != nil || !reserved {
-		t.Fatalf("reserve: reserved=%v err=%v", reserved, err)
+		t.Fatalf("reserve: id=%q reserved=%v err=%v", reservationID, reserved, err)
 	}
-	reserved, err = store.ReserveFingerprint(ctx, "watch-1", fp, nil)
+	_, reserved, err = store.ReserveFingerprint(ctx, "watch-1", fp, nil)
 	if err != nil || reserved {
 		t.Fatalf("duplicate reserve: expected reserved=false err=nil, got reserved=%v err=%v", reserved, err)
 	}
 
-	if err := store.AttachReservationTaskID(ctx, "watch-1", fp, "task-1"); err != nil {
+	if err := store.AttachReservationTaskID(ctx, reservationID, "task-1"); err != nil {
 		t.Fatalf("attach: %v", err)
 	}
-	if err := store.AttachReservationTaskID(ctx, "watch-1", fp, "task-1"); err != nil {
+	if err := store.AttachReservationTaskID(ctx, reservationID, "task-1"); err != nil {
 		t.Fatalf("idempotent re-attach: %v", err)
 	}
-	if err := store.AttachReservationTaskID(ctx, "watch-1", fp, "task-2"); !errors.Is(err, ErrReservationAttachedElsewhere) {
+	if err := store.AttachReservationTaskID(ctx, reservationID, "task-2"); !errors.Is(err, ErrReservationAttachedElsewhere) {
 		t.Fatalf("expected ErrReservationAttachedElsewhere, got %v", err)
 	}
 
 	if err := store.ReleaseReservationForTask(ctx, "task-1"); err != nil {
 		t.Fatalf("release: %v", err)
 	}
-	if err := store.AttachReservationTaskID(ctx, "watch-1", fp, "task-3"); !errors.Is(err, ErrReservationGone) {
+	if err := store.AttachReservationTaskID(ctx, reservationID, "task-3"); !errors.Is(err, ErrReservationGone) {
 		t.Fatalf("expected ErrReservationGone after release, got %v", err)
 	}
 
 	fp2 := Fingerprint(map[string]string{"seed": "pg-orphan"}, []string{"seed"})
-	if _, err := store.ReserveFingerprint(ctx, "watch-1", fp2, nil); err != nil {
-		t.Fatalf("reserve fp2: %v", err)
+	reservationID2, reserved, err := store.ReserveFingerprint(ctx, "watch-1", fp2, nil)
+	if err != nil || !reserved {
+		t.Fatalf("reserve fp2: id=%q reserved=%v err=%v", reservationID2, reserved, err)
 	}
-	if err := store.DeleteReservation(ctx, "watch-1", fp2); err != nil {
+	if err := store.DeleteReservation(ctx, reservationID2); err != nil {
 		t.Fatalf("delete fp2: %v", err)
 	}
 	var count int
@@ -84,10 +85,11 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 	}
 
 	fp3 := Fingerprint(map[string]string{"seed": "pg-release-orphan"}, []string{"seed"})
-	if _, err := store.ReserveFingerprint(ctx, "watch-1", fp3, nil); err != nil {
-		t.Fatalf("reserve fp3: %v", err)
+	reservationID3, reserved, err := store.ReserveFingerprint(ctx, "watch-1", fp3, nil)
+	if err != nil || !reserved {
+		t.Fatalf("reserve fp3: id=%q reserved=%v err=%v", reservationID3, reserved, err)
 	}
-	if err := store.ReleaseOrphanedReservation(ctx, "watch-1", fp3); err != nil {
+	if err := store.ReleaseOrphanedReservation(ctx, reservationID3); err != nil {
 		t.Fatalf("release orphaned fp3: %v", err)
 	}
 	var releasedAt *time.Time
@@ -97,6 +99,45 @@ func TestPostgresStoreSchemaReplay(t *testing.T) {
 	}
 	if releasedAt == nil {
 		t.Fatal("expected fp3 to be released")
+	}
+
+	fp4 := Fingerprint(map[string]string{"seed": "pg-replacement"}, []string{"seed"})
+	firstID, reserved, err := store.ReserveFingerprint(ctx, "watch-1", fp4, nil)
+	if err != nil || !reserved {
+		t.Fatalf("reserve first fp4: id=%q reserved=%v err=%v", firstID, reserved, err)
+	}
+	if err := store.AttachReservationTaskID(ctx, firstID, "task-replacement-1"); err != nil {
+		t.Fatalf("attach first fp4: %v", err)
+	}
+	if err := store.ReleaseReservationForTask(ctx, "task-replacement-1"); err != nil {
+		t.Fatalf("release first fp4: %v", err)
+	}
+	secondID, reserved, err := store.ReserveFingerprint(ctx, "watch-1", fp4, nil)
+	if err != nil || !reserved || secondID == firstID {
+		t.Fatalf("reserve replacement fp4: id=%q reserved=%v err=%v", secondID, reserved, err)
+	}
+	if err := store.AttachReservationTaskID(ctx, firstID, "stale-task"); !errors.Is(err, ErrReservationGone) {
+		t.Fatalf("stale attach fp4: expected ErrReservationGone, got %v", err)
+	}
+	var taskID string
+	if err := db.Get(&taskID, `SELECT task_id FROM alert_reservations WHERE id = $1`, secondID); err != nil {
+		t.Fatalf("read replacement task_id: %v", err)
+	}
+	if taskID != "" {
+		t.Fatalf("stale attach mutated replacement reservation: task_id=%q", taskID)
+	}
+	if err := store.ReleaseOrphanedReservation(ctx, firstID); err != nil {
+		t.Fatalf("stale orphan release fp4: %v", err)
+	}
+	if err := store.DeleteReservation(ctx, firstID); err != nil {
+		t.Fatalf("stale delete fp4: %v", err)
+	}
+	var replacementReleasedAt *time.Time
+	if err := db.Get(&replacementReleasedAt, `SELECT released_at FROM alert_reservations WHERE id = $1`, secondID); err != nil {
+		t.Fatalf("read replacement released_at: %v", err)
+	}
+	if replacementReleasedAt != nil {
+		t.Fatal("stale cleanup mutated replacement reservation")
 	}
 }
 

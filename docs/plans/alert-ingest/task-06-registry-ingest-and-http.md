@@ -87,7 +87,7 @@ orchestrator path.
 
 ## Dependencies
 
-T04, T05.
+T04.
 
 ## Results
 
