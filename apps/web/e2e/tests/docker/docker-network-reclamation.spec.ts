@@ -71,12 +71,14 @@ test.afterAll(() => {
   for (const container of createdContainers) dockerRemove(container);
 });
 
-async function getStorageOverview(apiClient: {
+async function getDockerNetworksSummary(apiClient: {
   rawRequest: (method: string, path: string) => Promise<Response>;
-}): Promise<{ summary: { docker_networks?: DockerNetworksSummary } }> {
+}): Promise<DockerNetworksSummary | null> {
   const res = await apiClient.rawRequest("GET", "/api/v1/system/storage");
   expect(res.ok, `storage overview responded: ${res.status}`).toBe(true);
-  return res.json();
+  const overview: { summary: { docker_networks?: DockerNetworksSummary } | null } =
+    await res.json();
+  return overview.summary?.docker_networks ?? null;
 }
 
 interface DockerNetworksSummary {
@@ -123,14 +125,18 @@ test("classifies orphan and active networks and probe passes without removing an
     // The read-only analysis census classifies both networks. The orphan's
     // first seeing is now, so while it is not yet past any window, the
     // DISABLED cleanup below proves nothing is removed even so.
-    const overview = await getStorageOverview(apiClient);
-    const networksSummary = overview.summary.docker_networks;
-    expect(networksSummary?.available, "network census available").toBe(true);
+    await expect
+      .poll(async () => (await getDockerNetworksSummary(apiClient))?.available, {
+        timeout: 60_000,
+      })
+      .toBe(true);
+    const networksSummary = await getDockerNetworksSummary(apiClient);
+    expect(networksSummary, "network census available").not.toBeNull();
 
     // The active network is classified active (connected container) and the
     // orphan appears in the census classified set. Ids can shift between the
     // census and assertions, so assert by shape, not exact counts.
-    const classified = networksSummary?.classified ?? {};
+    const classified = networksSummary.classified ?? {};
     expect(classified.active ?? 0).toBeGreaterThanOrEqual(1);
     expect(Number(Object.values(classified).reduce((a, b) => a + b, 0))).toBeGreaterThan(0);
 
