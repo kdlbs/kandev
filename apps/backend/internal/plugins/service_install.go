@@ -391,9 +391,11 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 		s.runtime.Stop(id)
 	}
 	s.revokeGitCredentialProviderLeases(rec.RepositoryProviders)
-	if err := s.approvalTombstoneInstallation(rec.InstallationID); err != nil {
-		s.reconcileAbortedUninstall(id, wasRunning)
-		return fmt.Errorf("plugins: tombstone approval history: %w", err)
+	if rec.InstallationID != "" {
+		if err := s.approvalTombstoneInstallation(rec.InstallationID); err != nil {
+			s.reconcileAbortedUninstall(id, wasRunning)
+			return fmt.Errorf("plugins: tombstone approval history: %w", err)
+		}
 	}
 	if err := s.deletePluginSecrets(ctx, id); err != nil {
 		s.reconcileAbortedUninstall(id, wasRunning)

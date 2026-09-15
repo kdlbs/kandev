@@ -218,6 +218,10 @@ func (l *approvalLedger) grant(installationID, workspaceID string, revision uint
 	if current.Revision != 0 {
 		approval.CreatedAt = current.CreatedAt
 	}
+	eventType := CapabilityApprovalEventGrant
+	if isStrictSubset(capabilityIDs, current.CapabilityIDs) {
+		eventType = CapabilityApprovalEventNarrow
+	}
 	file.Approvals[key] = approval
 	file.Idempotency[approvalIdempotencyKey(CapabilityApprovalEventGrant, auditID, installationID, workspaceID)] = approval
 	file.IdempotencyInputs[approvalIdempotencyKey(CapabilityApprovalEventGrant, auditID, installationID, workspaceID)] = approvalIdempotencyInput{
@@ -227,9 +231,13 @@ func (l *approvalLedger) grant(installationID, workspaceID string, revision uint
 		AuditID: auditID, InstallationID: installationID, WorkspaceID: workspaceID,
 		BeforeRevision: current.Revision, AfterRevision: revision,
 		BeforeDigest: current.ManifestDigest, AfterDigest: manifestDigest,
-		Actor: actor, Reason: reason, Type: CapabilityApprovalEventGrant, ObservedAt: at,
+		Actor: actor, Reason: reason, Type: eventType, ObservedAt: at,
 	})
 	return approval, l.save(file)
+}
+
+func isStrictSubset(candidate, current []string) bool {
+	return len(candidate) < len(current) && equalStrings(intersectStrings(current, candidate), candidate)
 }
 
 func approvalGrantReplay(file *approvalLedgerFile, installationID, workspaceID string, revision uint64, manifestDigest string, capabilityIDs []string, actor, reason, auditID string) (CapabilityApproval, bool, error) {

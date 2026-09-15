@@ -76,6 +76,26 @@ func TestApprovalLedgerGrantRejectsRevisionRegression(t *testing.T) {
 	}
 }
 
+func TestApprovalLedgerGrantRecordsHumanNarrowing(t *testing.T) {
+	dir := t.TempDir()
+	ledger := newApprovalLedger(dir)
+	at := time.Now().UTC()
+	if _, err := ledger.grant("inst-1", "ws-1", 1, "digest-a", []string{"host.v2.read:messages", "host.v2.read:tasks"}, "human", "grant", "audit-1", at); err != nil {
+		t.Fatalf("initial grant: %v", err)
+	}
+	if _, err := ledger.grant("inst-1", "ws-1", 2, "digest-a", []string{"host.v2.read:tasks"}, "human", "remove messages access", "audit-2", at.Add(time.Second)); err != nil {
+		t.Fatalf("narrow approval: %v", err)
+	}
+
+	file, err := ledger.load()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if got := file.Events[1].Type; got != CapabilityApprovalEventNarrow {
+		t.Fatalf("narrowing event type = %q, want %q", got, CapabilityApprovalEventNarrow)
+	}
+}
+
 func TestApprovalLedgerGrantRejectsZeroRevision(t *testing.T) {
 	dir := t.TempDir()
 	ledger := newApprovalLedger(dir)

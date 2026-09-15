@@ -161,6 +161,40 @@ func TestRegistryLoadRetainsRecordsWhenMigrationSaveFails(t *testing.T) {
 	}
 }
 
+func TestServiceUninstallLegacyRecordAfterInstallationIDMigrationFails(t *testing.T) {
+	pluginsDir := t.TempDir()
+	fsStore := store.NewFSStore(pluginsDir)
+	legacy := &store.Record{
+		Manifest:    *testManifest("kandev-plugin-legacy"),
+		Status:      store.StatusDisabled,
+		InstallPath: filepath.Join(pluginsDir, "kandev-plugin-legacy", "1.0.0"),
+	}
+	if err := os.MkdirAll(legacy.InstallPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll() = %v", err)
+	}
+	if err := fsStore.Save(legacy); err != nil {
+		t.Fatalf("Save() = %v", err)
+	}
+
+	registry := NewRegistry()
+	backend := &migrationSaveErrorStore{Store: fsStore, records: []*store.Record{legacy}}
+	if err := registry.Load(backend); err == nil {
+		t.Fatal("Load() expected migration error")
+	}
+	svc := NewService(backend, registry, nil, testLogger(t))
+	svc.SetPluginsDir(pluginsDir)
+
+	if err := svc.Uninstall(t.Context(), legacy.ID); err != nil {
+		t.Fatalf("Uninstall() legacy record: %v", err)
+	}
+	if _, err := fsStore.Get(legacy.ID); !errors.Is(err, store.ErrNotFound) {
+		t.Fatalf("store.Get() after Uninstall() = %v, want store.ErrNotFound", err)
+	}
+	if _, ok := registry.Get(legacy.ID); ok {
+		t.Fatal("registry retained legacy record after Uninstall()")
+	}
+}
+
 func TestRegistryGetMissingReturnsNotOK(t *testing.T) {
 	reg := NewRegistry()
 	if _, ok := reg.Get("missing"); ok {
