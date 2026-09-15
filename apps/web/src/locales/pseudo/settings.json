@@ -789,5 +789,11 @@
   "unitAddMember": "Àďď",
   "unitRemoveMember": "Ŕēḿōvē ḿēḿƀēŕ",
   "unitPickPerson": "Ƥĩćķ śōḿēōńē",
-  "unitActionFailed": "Ţĥàţ ďĩď ńōţ ŵōŕķ."
+  "unitActionFailed": "Ţĥàţ ďĩď ńōţ ŵōŕķ.",
+  "sidebarHoverTitle": "Śĩďēƀàŕ",
+  "sidebarHoverEnabled": "Śĥōŵ śĩďēƀàŕ ōń ĥōvēŕ",
+  "sidebarHoverDelay": "Ĥōvēŕ ďēĺàŷ (ḿś)",
+  "sidebarHoverHelp": "Ũśē à ḿōũśē ōŕ ţŕàćķƥàď ţō ŕēvēàĺ ţĥē ćōĺĺàƥśēď śĩďēƀàŕ. Śēţ ţĥē ďēĺàŷ ƒŕōḿ 0 ţō 5000 ḿś; 0 ŕēvēàĺś ĩḿḿēďĩàţēĺŷ.",
+  "sidebarHoverDelayError": "Ēńţēŕ à ŵĥōĺē ńũḿƀēŕ ƒŕōḿ 0 ţō 5000.",
+  "discoveryAliasesSidebarHover": "śĩďēƀàŕ ĥōvēŕ ŕēvēàĺ ďēĺàŷ ŵàĩţ ḿōũśē ţŕàćķƥàď"
 }

@@ -758,3 +758,19 @@ describe("prevent auto-start on open preference", () => {
     ).toBe(false);
   });
 });
+
+it("maps hover settings and retains false/zero through omitted updates", () => {
+  expect(createDefaultUserSettings()).toMatchObject({
+    sidebarHoverEnabled: true,
+    sidebarHoverDelayMs: 500,
+  });
+  const current = mapUserSettingsData({ sidebar_hover_enabled: false, sidebar_hover_delay_ms: 0 });
+  expect(current).toMatchObject({ sidebarHoverEnabled: false, sidebarHoverDelayMs: 0 });
+  expect(buildCoreFields({}, current)).toMatchObject({
+    sidebarHoverEnabled: false,
+    sidebarHoverDelayMs: 0,
+  });
+  expect(
+    mapUserSettingsData({ sidebar_hover_enabled: true, sidebar_hover_delay_ms: 1200 }),
+  ).toMatchObject({ sidebarHoverEnabled: true, sidebarHoverDelayMs: 1200 });
+});

@@ -789,5 +789,11 @@
   "unitAddMember": "新增",
   "unitRemoveMember": "移除成員",
   "unitPickPerson": "選擇成員",
-  "unitActionFailed": "操作未成功。"
+  "unitActionFailed": "操作未成功。",
+  "sidebarHoverTitle": "側邊欄",
+  "sidebarHoverEnabled": "懸停時顯示側邊欄",
+  "sidebarHoverDelay": "懸停延遲（毫秒）",
+  "sidebarHoverHelp": "使用鼠標或觸控板懸停以顯示已摺疊的側邊欄。延遲可設為 0 到 5000 毫秒；設為 0 時立即顯示。",
+  "sidebarHoverDelayError": "請輸入 0 到 5000 之間的整數。",
+  "discoveryAliasesSidebarHover": "側邊欄 懸停 顯示 延遲 等待 鼠標 觸控板"
 }

@@ -143,6 +143,8 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		LastSeenDisplay:                   req.LastSeenDisplay,
 		SystemMetricsDisplay:              systemMetricsDisplayPatch(req.SystemMetricsDisplay),
 		AppStatusBarEnabled:               req.AppStatusBarEnabled,
+		SidebarHoverEnabled:               req.SidebarHoverEnabled,
+		SidebarHoverDelayMs:               req.SidebarHoverDelayMs,
 		ResolveSessionHostnames:           req.ResolveSessionHostnames,
 		AppStatusBarOrder:                 req.AppStatusBarOrder,
 		QuickChatTabOrderByWorkspace:      req.QuickChatTabOrderByWorkspace,

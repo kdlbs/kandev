@@ -670,6 +670,8 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"last_seen_display":                        models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
+		"sidebar_hover_enabled":                    settings.SidebarHoverEnabled,
+		"sidebar_hover_delay_ms":                   settings.SidebarHoverDelayMs,
 		"resolve_session_hostnames":                settings.ResolveSessionHostnames,
 		"app_status_bar_order":                     normalizeAppStatusBarOrder(settings.AppStatusBarOrder),
 		"quick_chat_tab_order_by_workspace":        quickChatTabOrderByWorkspace,
@@ -756,6 +758,8 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		SidebarTaskColorAutomation:        models.DefaultSidebarTaskColorAutomation(),
 		SidebarTaskColors:                 map[string]*string{},
 		AppStatusBarEnabled:               false,
+		SidebarHoverEnabled:               true,
+		SidebarHoverDelayMs:               500,
 		ResolveSessionHostnames:           false,
 		AppStatusBarOrder:                 normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
 		QuickChatTabOrderByWorkspace:      map[string][]string{},
@@ -848,6 +852,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		LastSeenDisplay                   json.RawMessage                     `json:"last_seen_display"`
 		SystemMetricsDisplay              models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
 		AppStatusBarEnabled               *bool                               `json:"app_status_bar_enabled"`
+		SidebarHoverEnabled               *bool                               `json:"sidebar_hover_enabled"`
+		SidebarHoverDelayMs               json.RawMessage                     `json:"sidebar_hover_delay_ms"`
 		ResolveSessionHostnames           *bool                               `json:"resolve_session_hostnames"`
 		AppStatusBarOrder                 models.AppStatusBarOrder            `json:"app_status_bar_order"`
 		QuickChatTabOrderByWorkspace      map[string][]string                 `json:"quick_chat_tab_order_by_workspace"`
@@ -1006,6 +1012,13 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.TerminalFontFamily = payload.TerminalFontFamily
 	settings.TerminalFontSize = payload.TerminalFontSize
 	settings.SystemMetricsDisplay = payload.SystemMetricsDisplay
+	if payload.SidebarHoverEnabled != nil {
+		settings.SidebarHoverEnabled = *payload.SidebarHoverEnabled
+	}
+	var hoverDelay *int
+	if json.Unmarshal(payload.SidebarHoverDelayMs, &hoverDelay) == nil && hoverDelay != nil && *hoverDelay >= 0 && *hoverDelay <= 5000 {
+		settings.SidebarHoverDelayMs = *hoverDelay
+	}
 	if payload.AppStatusBarEnabled != nil {
 		settings.AppStatusBarEnabled = *payload.AppStatusBarEnabled
 	}
