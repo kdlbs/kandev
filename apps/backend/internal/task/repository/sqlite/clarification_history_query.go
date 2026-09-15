@@ -10,9 +10,9 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-// ListInboxHistoryBundles is the History tab's exported entry point
-// (AC-UI-INBOX-HISTORY-001.5): a separate, additive read from the
-// operational pending-interaction path. It reuses this package's unexported
+// ListInboxHistoryBundles is the History tab's exported entry point: a
+// separate, additive read from the operational pending-interaction path. It
+// reuses this package's unexported
 // currentTurnAuthority and nonTerminalSessionPredicate machinery only
 // through turnAuthorityCurrentTurnIDExpr, and is never called from any sink
 // that gates a workflow transition, emits a pending-action event, resolves
@@ -55,9 +55,9 @@ func (r *Repository) ListInboxHistoryBundles(ctx context.Context, opts models.Li
 	return page, nil
 }
 
-// CountInboxHistoryBundles is the History tab's second exported entry point
-// (AC .5/.20): the unbounded, workspace-wide bundle total, independent of
-// page size and of any cursor. Subject to the same ARCH-INBOX-HISTORY-ISOLATION
+// CountInboxHistoryBundles is the History tab's second exported entry
+// point: the unbounded, workspace-wide bundle total, independent of page
+// size and of any cursor. Subject to the same ARCH-INBOX-HISTORY-ISOLATION
 // isolation as ListInboxHistoryBundles.
 func (r *Repository) CountInboxHistoryBundles(ctx context.Context, opts models.ListClarificationHistoryOptions) (int, error) {
 	if opts.WorkspaceID == "" {
@@ -73,7 +73,7 @@ func (r *Repository) CountInboxHistoryBundles(ctx context.Context, opts models.L
 	return total, nil
 }
 
-// inboxHistoryWhereClause is shared by the page and count queries: the AC .2
+// inboxHistoryWhereClause is shared by the page and count queries: the
 // eligibility gate (non-terminal, unarchived, workspace-scoped) AND
 // (superseded OR session_ended OR unreadable) -- a bundle matching none of
 // the three is live and excluded from both queries.
@@ -95,7 +95,7 @@ const inboxHistorySelectColumns = `r.pending_id, r.session_id, r.task_id, r.crea
 // inboxHistoryQueryBase builds the two CTEs shared by the page and count
 // queries: `bundles` groups messages into per-pending_id aggregates exactly
 // like clarificationBundleTableExpr's inner subquery, but across BOTH
-// clarification_request and permission_request (AC .2 is evaluated per
+// clarification_request and permission_request (eligibility is evaluated per
 // bundle regardless of kind), additionally split by request_id for a
 // permission_request row so a reused pending_id never merges two distinct
 // requests; `reasoned` resolves the three raw exclusion signals once per
@@ -168,8 +168,8 @@ reasoned AS (
 }
 
 // turnAuthorityCurrentTurnIDExpr resolves the session's current turn by
-// currentTurnAuthority ALONE (AC .2's "superseded" clause), never composed
-// with nonTerminalSessionPredicate: composing the two would give a
+// currentTurnAuthority ALONE, never composed with
+// nonTerminalSessionPredicate: composing the two would give a
 // terminated session no current turn at all, making every one of its rows
 // read superseded and making session_ended unreachable (system design, "Why
 // superseded resolves on turn authority alone").

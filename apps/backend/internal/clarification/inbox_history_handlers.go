@@ -14,34 +14,34 @@ import (
 )
 
 // inboxHistoryBundleView is one row of the History tab's bundle listing: the
-// same shape as inboxBundleView (AC .30's message payload carries every
-// field a row needs to render a clarification or permission bundle) plus
-// AC .2's exclusion reason, AC .10's turn identity, AC .12's kind label, and
-// AC .11's step-starts-no-agent flag.
+// same shape as inboxBundleView (the message payload carries every field a
+// row needs to render a clarification or permission bundle) plus the
+// exclusion reason, the turn identity, the kind label, and the
+// step-starts-no-agent flag.
 type inboxHistoryBundleView struct {
 	inboxBundleView
-	// Kind distinguishes a permission bundle from a clarification bundle
-	// (AC .12, AC .30), derived from the bundle's own messages rather than
-	// carried as a second source of truth.
+	// Kind distinguishes a permission bundle from a clarification bundle,
+	// derived from the bundle's own messages rather than carried as a second
+	// source of truth.
 	Kind string `json:"kind"`
-	// Reason is the AC .2 exclusion reason: superseded, session_ended, or
+	// Reason is the exclusion reason: superseded, session_ended, or
 	// unreadable.
 	Reason string `json:"reason"`
 	// AskingTurnID is the turn that asked the bundle's question(s).
 	AskingTurnID string `json:"asking_turn_id"`
 	// SupersedingTurnID is set only when Reason is superseded via a
-	// turn-level supersession; nil (omitted) for every other case,
-	// including a same-turn permission supersession, per AC .10.
+	// turn-level supersession; nil (omitted) for every other case, including
+	// a same-turn permission supersession.
 	SupersedingTurnID *string `json:"superseding_turn_id,omitempty"`
-	// StepStartsNoAgent is AC .11's label: true when the task's current
-	// workflow step starts no agent, false when it does, and nil (omitted)
-	// when the step cannot be read -- never a guess.
+	// StepStartsNoAgent is true when the task's current workflow step starts
+	// no agent, false when it does, and nil (omitted) when the step cannot
+	// be read -- never a guess.
 	StepStartsNoAgent *bool `json:"step_starts_no_agent,omitempty"`
 }
 
 // inboxHistoryListResponse is GET /api/v1/clarification-inbox/history's
-// response envelope. total is the AC .16/.20 workspace-wide bundle count,
-// distinct from count, the page size.
+// response envelope. total is the workspace-wide bundle count, distinct
+// from count, the page size.
 type inboxHistoryListResponse struct {
 	Bundles    []inboxHistoryBundleView `json:"bundles"`
 	Count      int                      `json:"count"`
@@ -81,9 +81,8 @@ func (h *Handlers) httpListInboxHistory(c *gin.Context) {
 		return
 	}
 
-	// The workspace-wide total is its own query (AC .16/.20): a failure
-	// here fails the whole read rather than defaulting the badge to zero or
-	// a stale value, matching AC .25's "no count rather than a stale one".
+	// The workspace-wide total is its own query: a failure here fails the
+	// whole read rather than defaulting the badge to zero or a stale value.
 	total, err := h.inboxBundles.CountInboxHistoryBundles(ctx, taskmodels.ListClarificationHistoryOptions{WorkspaceID: workspaceID})
 	if err != nil {
 		h.logger.Error("failed to count inbox history bundles", zap.Error(err))
@@ -213,8 +212,8 @@ func permissionGroupKeyFromMessage(m *taskmodels.Message) string {
 	return m.ID
 }
 
-// inboxHistoryBundleKind derives AC .12/.30's kind label from the bundle's
-// own first message rather than carrying it as a second source of truth.
+// inboxHistoryBundleKind derives the kind label from the bundle's own first
+// message rather than carrying it as a second source of truth.
 func inboxHistoryBundleKind(ordered []*taskmodels.Message) string {
 	if len(ordered) == 0 {
 		return ""
@@ -225,13 +224,12 @@ func inboxHistoryBundleKind(ordered []*taskmodels.Message) string {
 	return "clarification"
 }
 
-// orderInboxHistoryMessages implements AC .19's three-key order:
-// question_index ascending (normalized per normalizedInboxQuestionIndex),
-// then question_id ascending, then message id ascending. The third key is
-// NOT part of orderInboxMessages: it only breaks a remaining tie for the
-// empty-question_id bundles AC .13 uniquely admits to History, which
-// Needs-you never lists, so the two Inbox tabs still never order a shared
-// bundle differently.
+// orderInboxHistoryMessages orders messages by question_index ascending
+// (normalized per normalizedInboxQuestionIndex), then question_id ascending,
+// then message id ascending. The third key is NOT part of orderInboxMessages:
+// it only breaks a remaining tie for the empty-question_id bundles History
+// uniquely admits, which Needs-you never lists, so the two Inbox tabs still
+// never order a shared bundle differently.
 func orderInboxHistoryMessages(msgs []*taskmodels.Message) []*taskmodels.Message {
 	sorted := make([]*taskmodels.Message, len(msgs))
 	copy(sorted, msgs)
@@ -250,10 +248,10 @@ func orderInboxHistoryMessages(msgs []*taskmodels.Message) []*taskmodels.Message
 }
 
 // batchInboxHistoryTaskInfo fetches every bundle's owning task once, and
-// resolves AC .11's step-starts-no-agent flag per unique workflow step
-// (cached; History pages are bounded, and a task's steps repeat across
-// bundles more often than not). A read failure at either layer omits the
-// affected field rather than guessing.
+// resolves the step-starts-no-agent flag per unique workflow step (cached;
+// History pages are bounded, and a task's steps repeat across bundles more
+// often than not). A read failure at either layer omits the affected field
+// rather than guessing.
 func (h *Handlers) batchInboxHistoryTaskInfo(ctx context.Context, taskIDs []string) (titles map[string]string, stepStartsNoAgent map[string]*bool) {
 	titles = make(map[string]string, len(taskIDs))
 	stepStartsNoAgent = make(map[string]*bool, len(taskIDs))
@@ -284,10 +282,10 @@ func (h *Handlers) batchInboxHistoryTaskInfo(ctx context.Context, taskIDs []stri
 	return titles, stepStartsNoAgent
 }
 
-// resolveStepStartsNoAgent implements AC .11: presence of an
-// auto_start_agent on_enter action is the only test -- there is no
-// disabled-entry concept to discount. A read failure (step not found, or
-// the workflow cannot be read) omits the label rather than guessing.
+// resolveStepStartsNoAgent uses presence of an auto_start_agent on_enter
+// action as the only test -- there is no disabled-entry concept to discount.
+// A read failure (step not found, or the workflow cannot be read) omits the
+// label rather than guessing.
 func (h *Handlers) resolveStepStartsNoAgent(ctx context.Context, stepID string) *bool {
 	step, err := h.inboxTasks.GetWorkflowStep(ctx, stepID)
 	if err != nil || step == nil {

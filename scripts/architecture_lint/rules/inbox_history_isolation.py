@@ -18,6 +18,11 @@ system design's "The rule's own module shall enumerate all of them rather
 than infer them from a substring match", and AC .16 requires the History
 tab to render its own bundle count, so the bare identifier "count" can never
 be a forbidden target.
+
+Matching is a raw source-text scan (see _find_all below), so it also matches
+a forbidden target's name inside a comment, not just live code. Do not name
+a forbidden target in an explanatory comment in a history source file --
+there is no way to except it short of removing the comment.
 """
 
 from pathlib import Path

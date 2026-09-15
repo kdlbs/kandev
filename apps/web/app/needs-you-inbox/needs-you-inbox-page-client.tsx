@@ -99,8 +99,8 @@ function NeedsYouInboxList({
   );
 }
 
-// AC .1: "Needs you" is the tab strip's default-selected tab, and this
-// content, count and behavior are unchanged by the strip's presence.
+// "Needs you" is the tab strip's default-selected tab, and this content,
+// count and behavior are unchanged by the strip's presence.
 function NeedsYouInboxTabContent({ retry }: { retry: () => void }) {
   const { t } = useTranslation();
   const status = useAppStore(selectNeedsYouInboxStatus);
@@ -149,8 +149,9 @@ function NeedsYouInboxTabContent({ retry }: { retry: () => void }) {
   );
 }
 
-// AC .24/.25: a truncated-to-zero page still resolves to the retryable error
-// state, matching the Needs-you sibling's own F42 handling.
+// A truncated-to-zero page (bundleCount === 0 with hasMore) still resolves
+// to the retryable error state, matching the Needs-you sibling's own
+// handling of the same shape.
 function resolveHistoryViewMode(status: string, bundleCount: number, hasMore: boolean): ViewMode {
   if (status === "error" || (bundleCount === 0 && hasMore)) return "error";
   if (status === "loading" && bundleCount === 0) return "loading";
@@ -158,8 +159,8 @@ function resolveHistoryViewMode(status: string, bundleCount: number, hasMore: bo
   return "list";
 }
 
-// AC .2-.31: the History tab's own read-only content, driven by its own
-// isolated slice -- never the Needs-you slice or its refresh trigger. Takes
+// The History tab's own read-only content, driven by its own isolated
+// slice -- never the Needs-you slice or its refresh trigger. Takes
 // `refresh` from the parent rather than calling useInboxHistoryController
 // itself, so the controller (and its single read) is mounted exactly once
 // per page, not once per tab activation.
@@ -202,8 +203,8 @@ export function NeedsYouInboxPageClient() {
   const failedCount = useAppStore(selectFailedInboxCount);
   const failedCountKnown = useAppStore(selectFailedInboxCountIsKnown);
   const failedTruncated = useAppStore(selectFailedInboxTruncated);
-  // AC .16: the History tab's own bundle count, populated the moment the
-  // Inbox page opens, without requiring a click into the tab.
+  // The History tab's own bundle count, populated the moment the Inbox page
+  // opens, without requiring a click into the tab.
   const historyCount = useAppStore(selectInboxHistoryCount);
 
   const pathname = usePathname();
@@ -215,9 +216,9 @@ export function NeedsYouInboxPageClient() {
   // bucket's own refresh triggers, independent of the Needs-you controller
   // mounted at the app shell.
   useFailedInboxController(selectedTab);
-  // AC .2-.31: the History tab's own single read, driven by its own isolated
-  // slice -- mounted once at the page level (not gated by which tab is
-  // active), never the Needs-you slice or its refresh trigger.
+  // The History tab's own single read, driven by its own isolated slice --
+  // mounted once at the page level (not gated by which tab is active), never
+  // the Needs-you slice or its refresh trigger.
   const refreshHistory = useInboxHistoryController();
 
   const retry = useCallback(() => bumpRefreshTick(), [bumpRefreshTick]);

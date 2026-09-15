@@ -339,6 +339,91 @@ func TestBuildInboxHistoryBundleViews_FiltersReusedPendingIDMessagesByPermission
 	}
 }
 
+// TestBuildInboxHistoryBundleViews_OmitsBundleWhenPermissionGroupKeyFiltersAllMessages
+// pins the zero-message-after-filtering branch: a bundle whose
+// PermissionGroupKey matches none of the messages FindMessagesByPendingIDs
+// returned for its pending_id (a misaligned group key) is omitted from the
+// page rather than rendered empty or with the wrong request's content.
+func TestBuildInboxHistoryBundleViews_OmitsBundleWhenPermissionGroupKeyFiltersAllMessages(t *testing.T) {
+	created := testInboxNow.Add(-time.Hour)
+	unrelatedMsg := &taskmodels.Message{
+		ID: "perm-unrelated-msg", TaskSessionID: "sess-1", TaskID: "task-1",
+		Type: taskmodels.MessageTypePermissionRequest, Content: "unrelated request",
+		CreatedAt: created,
+		Metadata:  map[string]any{"request_id": "req-unrelated"},
+	}
+	msgs := map[string][]*taskmodels.Message{
+		"pend-reused": {unrelatedMsg},
+	}
+	tasks := &fakeInboxTasksWithWorkflow{fakeInboxTasks: &fakeInboxTasks{
+		tasks: map[string]*taskmodels.Task{"task-1": {ID: "task-1", Title: "Do the thing"}},
+	}}
+	bundles := &fakeInboxBundleStoreWithHistory{fakeInboxBundleStore: &fakeInboxBundleStore{}}
+	h := newInboxHistoryTestHandler(t, msgs, tasks, bundles)
+
+	views, err := h.buildInboxHistoryBundleViews(context.Background(), []taskmodels.ClarificationHistoryBundleSummary{
+		{
+			PendingID:          "pend-reused",
+			TaskID:             "task-1",
+			SessionID:          "sess-1",
+			CreatedAt:          created,
+			Reason:             taskmodels.ClarificationHistoryReasonSuperseded,
+			AskingTurnID:       "turn-a",
+			PermissionGroupKey: "req-does-not-match-anything",
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildInboxHistoryBundleViews: %v", err)
+	}
+	if len(views) != 0 {
+		t.Fatalf("expected the bundle omitted when its group key filters out every message, got %d: %+v", len(views), views)
+	}
+}
+
+// TestPermissionGroupKeyFromMessage_FallsBackToMessageIDWhenRequestIDAbsent
+// pins that the Go-side fallback (absent request_id -> message id) matches
+// clarification_history_query.go's permissionGroupKeyExpr SQL fallback
+// exactly, end to end through filterMessagesByPermissionGroupKey: a bundle
+// whose PermissionGroupKey is the message's own id (because the SQL side
+// took the same fallback) must still keep that message.
+func TestPermissionGroupKeyFromMessage_FallsBackToMessageIDWhenRequestIDAbsent(t *testing.T) {
+	created := testInboxNow.Add(-time.Hour)
+	msgWithoutRequestID := &taskmodels.Message{
+		ID: "perm-no-request-id-msg", TaskSessionID: "sess-1", TaskID: "task-1",
+		Type: taskmodels.MessageTypePermissionRequest, Content: "delete the branch?",
+		CreatedAt: created,
+	}
+	msgs := map[string][]*taskmodels.Message{
+		"pend-1": {msgWithoutRequestID},
+	}
+	tasks := &fakeInboxTasksWithWorkflow{fakeInboxTasks: &fakeInboxTasks{
+		tasks: map[string]*taskmodels.Task{"task-1": {ID: "task-1", Title: "Do the thing"}},
+	}}
+	bundles := &fakeInboxBundleStoreWithHistory{fakeInboxBundleStore: &fakeInboxBundleStore{}}
+	h := newInboxHistoryTestHandler(t, msgs, tasks, bundles)
+
+	views, err := h.buildInboxHistoryBundleViews(context.Background(), []taskmodels.ClarificationHistoryBundleSummary{
+		{
+			PendingID:          "pend-1",
+			TaskID:             "task-1",
+			SessionID:          "sess-1",
+			CreatedAt:          created,
+			Reason:             taskmodels.ClarificationHistoryReasonSuperseded,
+			AskingTurnID:       "turn-a",
+			PermissionGroupKey: "perm-no-request-id-msg",
+		},
+	})
+	if err != nil {
+		t.Fatalf("buildInboxHistoryBundleViews: %v", err)
+	}
+	if len(views) != 1 {
+		t.Fatalf("expected 1 view, got %d: %+v", len(views), views)
+	}
+	if len(views[0].Messages) != 1 || views[0].Messages[0].ID != "perm-no-request-id-msg" {
+		t.Fatalf("expected the request_id-absent message to survive the message-id fallback, got %+v", views[0].Messages)
+	}
+}
+
 func TestInboxHistoryBundleKind_PermissionVsClarification(t *testing.T) {
 	perm := []*taskmodels.Message{{Type: taskmodels.MessageTypePermissionRequest}}
 	if got := inboxHistoryBundleKind(perm); got != "permission" {

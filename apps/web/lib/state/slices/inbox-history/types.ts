@@ -8,7 +8,7 @@ export type InboxHistoryWorkspaceState = {
   hasMore: boolean;
   status: InboxHistoryReadStatus;
   // The generation of the last response actually applied to this workspace's
-  // rows, for the stale-response guard (AC .23).
+  // rows, for the stale-response guard.
   appliedGeneration: number;
 };
 
@@ -32,8 +32,7 @@ export type InboxHistorySliceActions = {
     page: { bundles: InboxHistoryBundle[]; total: number; hasMore: boolean },
   ) => void;
   /** Applies a failed read if its generation is still current -- clears rows
-   * and total in the same update, so the badge never shows a stale count
-   * (AC .25). */
+   * and total in the same update, so the badge never shows a stale count. */
   setInboxHistoryError: (workspaceId: string, generation: number) => void;
 };
 

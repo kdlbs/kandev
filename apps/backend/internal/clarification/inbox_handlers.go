@@ -40,9 +40,8 @@ type inboxTaskLookup interface {
 }
 
 // inboxWorkflowStepReader resolves a task's current workflow step for the
-// History tab's step-starts-no-agent label (AC-UI-INBOX-HISTORY-001.11).
-// The clarification package has no other workflow dependency; this is that
-// one, narrow read.
+// History tab's step-starts-no-agent label. The clarification package has no
+// other workflow dependency; this is that one, narrow read.
 type inboxWorkflowStepReader interface {
 	GetWorkflowStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error)
 }
@@ -58,7 +57,7 @@ type inboxTaskService interface {
 // inboxBundleStore is the bounded read/write surface the Needs-you Inbox and
 // Inbox History endpoints need: the existing bundle-query machinery, the
 // per-user dismiss/snooze sidecar (needs-you-inbox design, "Persistence"),
-// and the additive history read (AC-UI-INBOX-HISTORY-001.5).
+// and the additive, isolated history read.
 type inboxBundleStore interface {
 	ListUnresolvedClarificationBundles(ctx context.Context, opts taskmodels.ListClarificationBundlesOptions) (*taskmodels.ClarificationBundlePage, error)
 	FindMessagesByPendingIDs(ctx context.Context, pendingIDs []string) (map[string][]*taskmodels.Message, error)

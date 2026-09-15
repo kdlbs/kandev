@@ -5,10 +5,10 @@ import { useForegroundRefresh } from "@/hooks/use-foreground-refresh";
 import { listInboxHistory } from "@/lib/api/domains/inbox-history-api";
 
 /**
- * Owns the History tab's single read. AC .22 makes this a point-in-time
- * projection: unlike the Needs-you controller, this hook subscribes to no
- * WebSocket event and re-reads only on mount, workspace change, and the
- * browser regaining foreground -- never on a server-pushed signal.
+ * Owns the History tab's single read: a point-in-time projection. Unlike the
+ * Needs-you controller, this hook subscribes to no WebSocket event and
+ * re-reads only on mount, workspace change, and the browser regaining
+ * foreground -- never on a server-pushed signal.
  */
 export function useInboxHistoryController() {
   const enabled = useFeature("needsYouInbox");

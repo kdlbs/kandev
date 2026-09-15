@@ -1894,10 +1894,9 @@ func (s *Service) GetTasksByIDs(ctx context.Context, ids []string) ([]*models.Ta
 
 // GetWorkflowStep resolves one workflow step by ID for a caller that has
 // already authorized the owning task/workspace, mirroring GetTasksByIDs.
-// The Inbox History read (AC-UI-INBOX-HISTORY-001.11) uses this to test
-// whether a task's current step starts an agent; s.workflowStepGetter is
-// always wired in production, but a nil getter omits the label rather than
-// panicking.
+// The Inbox History read uses this to test whether a task's current step
+// starts an agent; s.workflowStepGetter is always wired in production, but a
+// nil getter omits the label rather than panicking.
 func (s *Service) GetWorkflowStep(ctx context.Context, stepID string) (*wfmodels.WorkflowStep, error) {
 	if s.workflowStepGetter == nil {
 		return nil, nil

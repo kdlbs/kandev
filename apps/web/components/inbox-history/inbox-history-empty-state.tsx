@@ -3,7 +3,7 @@
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "@/components/state-provider";
 
-// AC .24: name what the bucket contains rather than a bare success message.
+// Names what the bucket contains rather than a bare success message.
 export function InboxHistoryEmptyState() {
   const { t } = useTranslation();
   const workspaceName = useAppStore(

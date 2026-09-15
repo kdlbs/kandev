@@ -103,7 +103,7 @@ function inboxHistoryPrimaryText(bundle: InboxHistoryBundle, fallback: string): 
   return questions[0]?.title || questions[0]?.prompt || bundle.context || fallback;
 }
 
-// AC .14's two actions. Icon-only with an aria-label on a phone or
+// The tab's two actions. Icon-only with an aria-label on a phone or
 // coarse-pointer viewport, where the labelled desktop pair does not fit
 // alongside the reason badge and asked time without clipping; text-labelled
 // otherwise. Rendering one pair rather than both keeps a hidden duplicate
@@ -173,7 +173,11 @@ function InboxHistoryRowActions({
 export function InboxHistoryRow({ bundle }: { bundle: InboxHistoryBundle }) {
   const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
-  const { isMobile } = useResponsiveBreakpoint();
+  const { isMobile, isFinePointer } = useResponsiveBreakpoint();
+  // Tablet (md-lg) is a coarse-pointer breakpoint (apps/web/AGENTS.md,
+  // "Responsive and touch surfaces"): its actions need the same touch
+  // treatment as phone, not the fine-pointer desktop pair.
+  const compactActions = isMobile || !isFinePointer;
 
   const primaryText = inboxHistoryPrimaryText(bundle, t("inboxHistory:noContent"));
   const secondaryText = inboxHistorySecondaryText(bundle);
@@ -209,7 +213,7 @@ export function InboxHistoryRow({ bundle }: { bundle: InboxHistoryBundle }) {
           )}
         </button>
         {/* Second line on a narrow viewport: the icon/text row above already
-            uses the full width, so the reason, asked time and the two AC .14
+            uses the full width, so the reason, asked time and the two
             actions would clip if forced onto one row with it. */}
         <div className="flex min-w-0 items-center justify-between gap-2 pl-[2.75rem] md:shrink-0 md:justify-end md:gap-3 md:pl-0">
           <div className="flex min-w-0 items-center gap-2">
@@ -227,7 +231,7 @@ export function InboxHistoryRow({ bundle }: { bundle: InboxHistoryBundle }) {
             <InboxHistoryRowActions
               taskHref={taskHref}
               onCopyId={handleCopyId}
-              compact={isMobile}
+              compact={compactActions}
             />
           </div>
         </div>

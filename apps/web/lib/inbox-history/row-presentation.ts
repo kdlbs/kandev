@@ -12,9 +12,9 @@ export type InboxHistoryQuestionView = {
   optionLabels: string[];
 };
 
-// AC .30: a clarification bundle renders each question's title/prompt and
-// option labels, in the order the API already returned them (AC .19) --
-// including a question whose own status is already terminal.
+// A clarification bundle renders each question's title/prompt and option
+// labels, in the order the API already returned them -- including a
+// question whose own status is already terminal.
 export function inboxHistoryClarificationQuestions(
   bundle: InboxHistoryBundle,
 ): InboxHistoryQuestionView[] {
@@ -30,7 +30,7 @@ export function inboxHistoryClarificationQuestions(
   });
 }
 
-// AC .30: a permission bundle carries no `question` object -- its text is the
+// A permission bundle carries no `question` object -- its text is the
 // message's own `content` and its choices are `metadata.options[].name`, not
 // `.label`. A permission bundle is always a bundle of one (system design
 // "Record shape").
@@ -52,8 +52,8 @@ const REASON_LABEL_KEYS: Record<InboxHistoryReason, string> = {
   unreadable: "inboxHistory:reasonUnreadable",
 };
 
-// AC .9: the three reasons must read as distinguishable statements, never the
-// raw `pending` status.
+// The three reasons must read as distinguishable statements, never the raw
+// `pending` status.
 export function inboxHistoryReasonLabelKey(reason: InboxHistoryReason): string {
   return REASON_LABEL_KEYS[reason];
 }

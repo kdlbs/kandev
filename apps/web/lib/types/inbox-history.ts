@@ -8,16 +8,16 @@ export type InboxHistoryReason = "superseded" | "session_ended" | "unreadable";
 
 export type InboxHistoryBundleKind = "clarification" | "permission";
 
-// Extends the shipped bundle shape (AC .30's clarification fields reuse the
-// same `context`/`messages` projection) with the AC .2 exclusion reason and
-// the AC .10 turn identity.
+// Extends the shipped bundle shape (clarification fields reuse the same
+// `context`/`messages` projection) with the exclusion reason and the turn
+// identity.
 export type InboxHistoryBundle = ClarificationInboxBundle & {
   kind: InboxHistoryBundleKind;
   reason: InboxHistoryReason;
   asking_turn_id: string;
   superseding_turn_id?: string;
-  // Absent when the owning task's current step could not be read (AC .11):
-  // the row omits the label rather than guessing.
+  // Absent when the owning task's current step could not be read: the row
+  // omits the label rather than guessing.
   step_starts_no_agent?: boolean;
 };
 
