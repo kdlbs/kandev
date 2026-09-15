@@ -126,16 +126,30 @@ func firstEnabledWebhookTrigger(a *Automation) *AutomationTrigger {
 	return nil
 }
 
+// maxDedupKeyValueLength bounds the resolved (trimmed, pre-"webhook:"-prefix)
+// dedup key value. lookupPath JSON-marshals a non-leaf payload node into a
+// string, so an operator-authored dot path can resolve to a value bounded
+// only by the webhook body's 1MB read limit. The new
+// idx_automation_runs_dedup_unique Postgres index is a plain btree, which
+// rejects an index entry once it nears ~2700 bytes with a different error
+// class than the unique-violation admitTriggerLocked already handles —
+// silently dropping the run instead of admitting or skipping it (the webhook
+// route always answers 200, so the sender never learns). 512 bytes is well
+// under that ceiling while comfortably covering any realistic scalar
+// identifier.
+const maxDedupKeyValueLength = 512
+
 // resolveWebhookDedupBinding resolves a webhook trigger's declared dedup key
 // path against the payload: trim, then test non-empty, then namespace with
 // "webhook:" — a value that trims to empty is treated as unresolved, never
-// becoming the literal key "webhook:   ".
+// becoming the literal key "webhook:   ". A value over maxDedupKeyValueLength
+// is likewise treated as unresolved rather than ever reaching the store.
 func resolveWebhookDedupBinding(dedupKeyPath string, triggerData json.RawMessage) DedupBinding {
 	if dedupKeyPath == "" {
 		return DedupNotConfigured()
 	}
 	value, ok := ResolvePayloadPath(triggerData, dedupKeyPath)
-	if !ok {
+	if !ok || len(value) > maxDedupKeyValueLength {
 		return DedupUnresolved()
 	}
 	return DedupKey("webhook:" + value)

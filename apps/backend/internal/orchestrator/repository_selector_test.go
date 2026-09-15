@@ -175,6 +175,26 @@ func TestResolveAutomationRepository_OwnerNameShapedValueNoMatch_NoParsing(t *te
 	require.Equal(t, "selector_no_match: other/api", reason)
 }
 
+// A declared selector with an empty path is a commitment that resolves to
+// nothing (S3/the WebhookRepositorySelector doc comment): it must fail
+// closed the same as any other unresolved selector, not silently fall back
+// to binding every configured repository the way "no selector declared"
+// does. Unreachable through the shipped UI (clearing the field sends
+// Repository: undefined, not an empty selector_path) but reachable via
+// direct API/MCP use.
+func TestResolveAutomationRepository_SelectorDeclaredEmpty_BindsNothing(t *testing.T) {
+	repo := setupTestRepo(t)
+	seedAutomationWorkspaceRepos(t, repo, "ws-sel-empty", []string{"acme/api"})
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+
+	a, evt := webhookAutomationWithSelector("ws-sel-empty", "", []string{"acme/api"})
+	evt.TriggerData = json.RawMessage(`{"repo_name":"acme/api"}`)
+
+	resolved, reason := svc.resolveAutomationRepository(context.Background(), a, evt)
+	require.Nil(t, resolved)
+	require.Equal(t, "selector_unresolved", reason)
+}
+
 // No selector declared at all preserves today's behavior: whatever
 // resolveExplicitRepositories resolves is returned with no reason.
 func TestResolveAutomationRepository_NoSelectorDeclared_PreservesLegacyBehavior(t *testing.T) {

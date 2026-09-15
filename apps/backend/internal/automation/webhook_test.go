@@ -144,3 +144,42 @@ func TestWebhookHandle_DedupKeyResolvesToBlank_TreatedAsUnresolved(t *testing.T)
 	require.Empty(t, runs[0].DedupKey)
 	require.Equal(t, "dedup_unresolved", runs[0].DedupReason)
 }
+
+// A declared dedup_key path that resolves to a value beyond
+// maxDedupKeyValueLength (lookupPath JSON-marshals a non-leaf node, so an
+// operator-authored path can resolve to an arbitrarily large string, bounded
+// only by the webhook body's 1MB read limit) is treated as unresolved rather
+// than stored: the new Postgres unique index on (automation_id, dedup_key) is
+// a plain btree, which rejects an index entry once it nears ~2700 bytes with
+// a different error than the unique-violation admitTriggerLocked already
+// handles, silently dropping the run instead of admitting or skipping it.
+func TestWebhookHandle_DedupKeyResolvesTooLarge_TreatedAsUnresolved(t *testing.T) {
+	h, svc := newWebhookTestHandler(t)
+	a, _ := createWebhookAutomation(t, svc, `{"dedup_key":"id"}`)
+
+	oversized := strings.Repeat("x", maxDedupKeyValueLength+1)
+	w := doWebhookPost(h, a.ID, a.WebhookSecret, `{"id":"`+oversized+`"}`)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	runs, err := svc.store.ListRuns(context.Background(), a.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
+	require.Empty(t, runs[0].DedupKey)
+	require.Equal(t, "dedup_unresolved", runs[0].DedupReason)
+}
+
+// A resolved value exactly at the cap is still stored normally — the guard
+// rejects only what's strictly over the limit.
+func TestWebhookHandle_DedupKeyResolvesAtLengthCap_Admits(t *testing.T) {
+	h, svc := newWebhookTestHandler(t)
+	a, _ := createWebhookAutomation(t, svc, `{"dedup_key":"id"}`)
+
+	atCap := strings.Repeat("x", maxDedupKeyValueLength)
+	w := doWebhookPost(h, a.ID, a.WebhookSecret, `{"id":"`+atCap+`"}`)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	runs, err := svc.store.ListRuns(context.Background(), a.ID, 10)
+	require.NoError(t, err)
+	require.Len(t, runs, 1)
+	require.Equal(t, "webhook:"+atCap, runs[0].DedupKey)
+}

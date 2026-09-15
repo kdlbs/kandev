@@ -970,19 +970,29 @@ func (s *Service) resolveAutomationRepository(
 		return s.resolveGitHubPRTriggerRepository(ctx, a.WorkspaceID, evt.TriggerData), ""
 	}
 	resolved, outcome := s.resolveExplicitRepositories(ctx, configuredAutomationRepositories(a))
-	selectorPath := webhookRepositorySelectorPath(a, evt)
-	if selectorPath == "" {
+	selectorPath, declared := webhookRepositorySelectorPath(a, evt)
+	if !declared {
 		return resolved, ""
 	}
+	// A declared selector with an empty path is still a commitment (the
+	// WebhookRepositorySelector doc comment): matchRepositoryBySelector's own
+	// automation.ResolvePayloadPath("", ...) call already returns ok=false for
+	// an empty path, so routing it through the same match path fails closed
+	// (selector_unresolved) instead of the "no selector declared" shortcut
+	// above, which binds every configured repository.
 	return matchRepositoryBySelector(resolved, outcome, selectorPath, evt.TriggerData)
 }
 
 // webhookRepositorySelectorPath returns the declared repository.selector_path
-// for the exact trigger that fired, or "" when none is declared (or the
-// firing trigger type is not webhook — a selector is a webhook-only concept).
-func webhookRepositorySelectorPath(a *automation.Automation, evt *automation.AutomationTriggeredEvent) string {
+// for the exact trigger that fired and whether a selector was declared at
+// all (Repository non-nil) — distinct from an empty declared path, which
+// must still fail closed rather than being treated as "no selector". Returns
+// declared=false when no selector is declared, the trigger config can't be
+// read, or the firing trigger type is not webhook (a selector is a
+// webhook-only concept).
+func webhookRepositorySelectorPath(a *automation.Automation, evt *automation.AutomationTriggeredEvent) (path string, declared bool) {
 	if evt.TriggerType != automation.TriggerTypeWebhook {
-		return ""
+		return "", false
 	}
 	for _, t := range a.Triggers {
 		if t.ID != evt.TriggerID {
@@ -990,11 +1000,11 @@ func webhookRepositorySelectorPath(a *automation.Automation, evt *automation.Aut
 		}
 		var cfg automation.WebhookTriggerConfig
 		if err := json.Unmarshal(t.Config, &cfg); err != nil || cfg.Repository == nil {
-			return ""
+			return "", false
 		}
-		return cfg.Repository.SelectorPath
+		return cfg.Repository.SelectorPath, true
 	}
-	return ""
+	return "", false
 }
 
 // matchRepositoryBySelector resolves a declared selector's value against the
