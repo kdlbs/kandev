@@ -12,6 +12,7 @@ function projectFileChange(
   return {
     ...file,
     status: facet.status,
+    is_symlink: facet.is_symlink,
     staged: layer === "staged",
     additions: facet.additions,
     deletions: facet.deletions,

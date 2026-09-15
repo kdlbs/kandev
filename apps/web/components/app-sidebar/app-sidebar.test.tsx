@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@kandev/ui/tooltip";
 import { APP_SIDEBAR_EXPANDED_WIDTH } from "./app-sidebar-constants";
 
@@ -112,6 +112,7 @@ const storeState = {
   workspaces: {
     activeId: undefined as string | undefined,
   },
+  userSettings: { sidebarHoverEnabled: true, sidebarHoverDelayMs: 500 },
   appSidebar: {
     collapsed: false,
     sectionExpanded: {
@@ -164,6 +165,8 @@ function renderSidebar() {
   return render(sidebar());
 }
 
+const SIDEBAR = "app-sidebar";
+const COLLAPSED_ATTRIBUTE = "data-collapsed";
 const TASKS_SECTION = "tasks-section";
 const INTEGRATIONS_SECTION = "integrations-section";
 const OFFICE_WORK_SECTION = "office-navigation-section-work";
@@ -193,13 +196,13 @@ describe("AppSidebar", () => {
 
   it("renders the expanded nav inside a clipped animation layer", () => {
     renderSidebar();
-    expect(screen.getByTestId("app-sidebar").getAttribute("data-collapsed")).toBe("false");
+    expect(screen.getByTestId(SIDEBAR).getAttribute(COLLAPSED_ATTRIBUTE)).toBe("false");
     expect(screen.getByTestId(TASKS_SECTION)).toBeTruthy();
     expect(screen.getByTestId("projects-section")).toBeTruthy();
     expect(screen.getByTestId("agents-section")).toBeTruthy();
     expect(screen.queryByTestId("settings-section")).toBeNull();
     expect(screen.getByTestId("app-sidebar-content").classList).toContain("overflow-hidden");
-    expect(screen.getByTestId("app-sidebar").classList).not.toContain("overflow-hidden");
+    expect(screen.getByTestId(SIDEBAR).classList).not.toContain("overflow-hidden");
   });
 
   it("renders office navigation without kanban-only sections in office mode", () => {
@@ -250,8 +253,8 @@ describe("AppSidebar", () => {
   it("renders collapsed when store reports collapsed=true", () => {
     storeState.appSidebar.collapsed = true;
     renderSidebar();
-    expect(screen.getByTestId("app-sidebar").getAttribute("data-collapsed")).toBe("true");
-    expect(screen.getByTestId(TASKS_SECTION).getAttribute("data-collapsed")).toBe("true");
+    expect(screen.getByTestId(SIDEBAR).getAttribute(COLLAPSED_ATTRIBUTE)).toBe("true");
+    expect(screen.getByTestId(TASKS_SECTION).getAttribute(COLLAPSED_ATTRIBUTE)).toBe("true");
   });
 
   it("invokes toggleAppSidebar when the header collapse button is clicked", () => {
@@ -350,5 +353,41 @@ describe("AppSidebar before the workspace resolves", () => {
     expect(screen.queryByTestId(TASKS_SECTION)).toBeNull();
     expect(screen.queryByTestId(INTEGRATIONS_SECTION)).toBeNull();
     expect(screen.queryByTestId(OFFICE_WORK_SECTION)).toBeNull();
+  });
+});
+
+// @covers AC-UI-SIDEBAR-HOVER-001.1, AC-UI-SIDEBAR-HOVER-001.2
+describe("sidebar hover reveal", () => {
+  beforeEach(() => {
+    resetSidebarState();
+    vi.useFakeTimers();
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((query: string) => ({
+        matches: !query.includes("max-width"),
+        media: query,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
+    );
+    storeState.appSidebar.collapsed = true;
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("reveals at 500 ms without expanding the layout reservation or saved state", () => {
+    renderSidebar();
+    const panel = screen.getByTestId(SIDEBAR);
+    fireEvent.pointerOver(panel, { pointerType: "mouse" });
+    act(() => vi.advanceTimersByTime(499));
+    expect(panel.style.width).toBe("56px");
+    act(() => vi.advanceTimersByTime(1));
+    expect(panel.style.width).toBe(`${APP_SIDEBAR_EXPANDED_WIDTH}px`);
+    expect(screen.getByTestId("app-sidebar-layout").style.width).toBe("56px");
+    expect(panel.getAttribute(COLLAPSED_ATTRIBUTE)).toBe("true");
+    expect(storeState.toggleAppSidebar).not.toHaveBeenCalled();
   });
 });

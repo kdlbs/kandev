@@ -790,6 +790,12 @@
   "unitRemoveMember": "Ŕēḿōvē ḿēḿƀēŕ",
   "unitPickPerson": "Ƥĩćķ śōḿēōńē",
   "unitActionFailed": "Ţĥàţ ďĩď ńōţ ŵōŕķ.",
+  "sidebarHoverTitle": "Śĩďēƀàŕ",
+  "sidebarHoverEnabled": "Śĥōŵ śĩďēƀàŕ ōń ĥōvēŕ",
+  "sidebarHoverDelay": "Ĥōvēŕ ďēĺàŷ (ḿś)",
+  "sidebarHoverHelp": "Ũśē à ḿōũśē ōŕ ţŕàćķƥàď ţō ŕēvēàĺ ţĥē ćōĺĺàƥśēď śĩďēƀàŕ. Śēţ ţĥē ďēĺàŷ ƒŕōḿ 0 ţō 5000 ḿś; 0 ŕēvēàĺś ĩḿḿēďĩàţēĺŷ.",
+  "sidebarHoverDelayError": "Ēńţēŕ à ŵĥōĺē ńũḿƀēŕ ƒŕōḿ 0 ţō 5000.",
+  "discoveryAliasesSidebarHover": "śĩďēƀàŕ ĥōvēŕ ŕēvēàĺ ďēĺàŷ ŵàĩţ ḿōũśē ţŕàćķƥàď",
   "autoFocusNewTasks": "Àũţō-ƒōćũś ńēŵ ţàśķś",
   "autoFocusNewTasksHelp": "Ōƥēń ńēŵĺŷ ćŕēàţēď ţàśķś àũţōḿàţĩćàĺĺŷ. Ţũŕń ţĥĩś ōƒƒ ţō śţàŷ ōń ŷōũŕ ćũŕŕēńţ vĩēŵ. Ţàśķś àńď àĝēńţś śţĩĺĺ śţàŕţ àś ŕēqũēśţēď."
 }

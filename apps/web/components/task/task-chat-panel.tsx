@@ -52,16 +52,10 @@ import { routePanelMouseDown } from "./chat/route-panel-mouse-down";
 import { useTranslation } from "react-i18next";
 
 import { loadMessageWindowAround } from "@/hooks/domains/session/load-message-window";
-import { TaskChatLaunchError } from "./simple/components/task-chat-launch-error";
-import { isTypedTaskLaunchError } from "./simple/components/task-launch-error-entry";
 import { useTaskLaunchErrorContext } from "./task-launch-error-context";
 import { useTaskStatusSummary } from "@/hooks/domains/task/use-task-status-summary";
-import {
-  isTaskLaunchErrorOwnedBySession,
-  isTaskLaunchErrorVisibleForSession,
-} from "@/components/task/chat/types";
 import { TaskMarkdownFileLinkProvider } from "@/components/shared/task-markdown-file-link-provider";
-import { selectSessionRecoveryError } from "@/lib/session-recovery-presentation";
+import { statusSummaryTaskError } from "@/lib/task-status-summary";
 
 /** Returns a `clarificationKey` that increments each time a pending
  * clarification is resolved, letting the composer reset its input state for
@@ -1034,22 +1028,8 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     pendingClarification,
     pendingClarificationGroup,
   } = panelState;
-  const activeLaunchError = launchStatusSummary?.active_error;
-  const selectedSessionRecoveryError = selectSessionRecoveryError(
-    activeLaunchError,
-    resolvedSessionId,
-    session?.metadata,
-  );
-  const visibleRecoveryError =
-    selectedSessionRecoveryError ??
-    (isTypedTaskLaunchError(activeLaunchError) &&
-    isTaskLaunchErrorVisibleForSession(activeLaunchError, resolvedSessionId)
-      ? activeLaunchError
-      : null);
-  const launchErrorOwned = Boolean(
-    isTypedTaskLaunchError(activeLaunchError) &&
-    isTaskLaunchErrorOwnedBySession(activeLaunchError, resolvedSessionId),
-  );
+  const taskLaunchError = statusSummaryTaskError(launchStatusSummary);
+  const launchErrorOwned = Boolean(taskLaunchError);
   const showAgentStartHint = useComposerAgentStartHint(
     resolvedSessionId,
     session?.state,
@@ -1174,20 +1154,6 @@ export const TaskChatPanel = memo(function TaskChatPanel({
     (e: React.MouseEvent<HTMLDivElement>) => routePanelMouseDown(e, panelRef),
     [],
   );
-  const launchErrorContent = launchErrorContext ? (
-    <TaskChatLaunchError
-      taskId={launchErrorContext.taskId}
-      workspaceId={launchErrorContext.workspaceId}
-      statusSummary={launchStatusSummary}
-      sessionId={resolvedSessionId}
-      sessionMetadata={session?.metadata}
-      repositories={launchErrorContext.repositories}
-    />
-  ) : null;
-  const recoveryRevealKey = visibleRecoveryError
-    ? `${resolvedSessionId ?? ""}:${visibleRecoveryError.stamp || visibleRecoveryError.occurred_at}`
-    : null;
-
   return (
     <PanelRoot
       ref={panelRef}
@@ -1231,10 +1197,8 @@ export const TaskChatPanel = memo(function TaskChatPanel({
             anchoredBarHeight={showAnchoredBar && lastPromptMessage ? anchoredBarHeight : 0}
             isVisible={transcriptIsVisible}
             launchErrorOwned={launchErrorOwned}
-            launchErrorStamp={launchErrorOwned ? activeLaunchError?.stamp : undefined}
-            launchErrorOccurredAt={launchErrorOwned ? activeLaunchError?.occurred_at : undefined}
-            prependContent={launchErrorContent}
-            recoveryRevealKey={recoveryRevealKey}
+            launchErrorStamp={launchErrorOwned ? taskLaunchError?.stamp : undefined}
+            launchErrorOccurredAt={launchErrorOwned ? taskLaunchError?.occurred_at : undefined}
             stickyPromptBar={
               showAnchoredBar && lastPromptMessage ? (
                 <AnchoredLastPromptBar

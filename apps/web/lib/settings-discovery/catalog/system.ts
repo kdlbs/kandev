@@ -10,6 +10,7 @@ export const SYSTEM_ABOUT_SETTINGS_HREF = `${SYSTEM_SETTINGS_HREF}/about`;
 export const SYSTEM_SETTINGS_TARGETS = {
   database: "setting-system-database",
   retention: "setting-system-retention",
+  toolPayloadRetention: "setting-system-tool-payload-retention",
   backups: "setting-system-backups",
   logs: "setting-system-logs",
   licenses: "setting-system-licenses",
@@ -69,6 +70,16 @@ export const SYSTEM_DISCOVERY_DEFINITIONS: SettingsDiscoveryDefinition[] = [
     href: SYSTEM_DATA_STORAGE_SETTINGS_HREF,
     targetId: SYSTEM_SETTINGS_TARGETS.retention,
     order: 622,
+  },
+  {
+    id: "system-tool-payload-retention",
+    kind: "section",
+    labelKey: "system:toolPayload.title",
+    parentId: SYSTEM_DATA_STORAGE_DISCOVERY_ID,
+    groupId: "system",
+    href: SYSTEM_DATA_STORAGE_SETTINGS_HREF,
+    targetId: SYSTEM_SETTINGS_TARGETS.toolPayloadRetention,
+    order: 622.5,
   },
   {
     id: "system-backups",

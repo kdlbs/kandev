@@ -69,6 +69,11 @@ func TestTaskStatusSummarySemanticJSONIsBoundedAndOmitsTransportMetadata(t *test
 			Stamp:     "error-1",
 			Preview:   "safe preview",
 		},
+		TaskError: &ActiveErrorSummary{
+			Scope:   models.ErrorScopeTask,
+			Stamp:   "task-error-1",
+			Preview: "safe task preview",
+		},
 		Git: &GitSummary{ChangedFiles: 2, Additions: 3},
 	}
 	payload, err := summary.SemanticJSON()
@@ -84,6 +89,9 @@ func TestTaskStatusSummarySemanticJSONIsBoundedAndOmitsTransportMetadata(t *test
 	}
 	if !summary.SemanticEqual(decoded) {
 		t.Fatalf("semantic round trip changed value: %#v", decoded)
+	}
+	if decoded.TaskError == nil || decoded.TaskError.Scope != models.ErrorScopeTask {
+		t.Fatalf("task error missing from semantic payload: %#v", decoded.TaskError)
 	}
 }
 
@@ -172,6 +180,9 @@ func TestTaskStatusSummaryProjectsTaskOwnedErrorFields(t *testing.T) {
 	}
 	if got.ActiveError.Category != "pr_already_closed" {
 		t.Fatalf("active error category = %q", got.ActiveError.Category)
+	}
+	if got.TaskError == nil || got.TaskError.Scope != models.ErrorScopeTask {
+		t.Fatalf("task error = %+v, want independent task projection", got.TaskError)
 	}
 	wantActions := []string{"mark_review_done"}
 	if !reflect.DeepEqual(got.ActiveError.RecoveryActions, wantActions) {

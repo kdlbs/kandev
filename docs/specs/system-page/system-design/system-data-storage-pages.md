@@ -75,6 +75,12 @@ shared save action and navigation guard for dirty storage policy settings.
 The `Data & Logs` page will not mount the storage contributor. Database,
 backup, and log commands will continue to execute immediately.
 
+Data & Logs mounts independent contributors for Office run retention
+(`system:retention`) and [tool payload retention](tool-payload-retention.md)
+(`system:tool-payload-retention`). Both use the shared save/discard lifecycle.
+Tool-payload activation can remain in preparation after Save while its selected
+backup completes. It does not change the Office retention policy.
+
 ## Mobile design contract
 
 The desktop outcome and the phone outcome are the same. Both surfaces provide

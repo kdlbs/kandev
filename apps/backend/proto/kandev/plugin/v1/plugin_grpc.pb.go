@@ -491,39 +491,40 @@ var Plugin_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	Host_GetState_FullMethodName                   = "/kandev.plugin.v1.Host/GetState"
-	Host_SetState_FullMethodName                   = "/kandev.plugin.v1.Host/SetState"
-	Host_DeleteState_FullMethodName                = "/kandev.plugin.v1.Host/DeleteState"
-	Host_ListState_FullMethodName                  = "/kandev.plugin.v1.Host/ListState"
-	Host_RevealSecret_FullMethodName               = "/kandev.plugin.v1.Host/RevealSecret"
-	Host_EmitEvent_FullMethodName                  = "/kandev.plugin.v1.Host/EmitEvent"
-	Host_GetSecret_FullMethodName                  = "/kandev.plugin.v1.Host/GetSecret"
-	Host_SetSecret_FullMethodName                  = "/kandev.plugin.v1.Host/SetSecret"
-	Host_DeleteSecret_FullMethodName               = "/kandev.plugin.v1.Host/DeleteSecret"
-	Host_GetConfig_FullMethodName                  = "/kandev.plugin.v1.Host/GetConfig"
-	Host_ListTasks_FullMethodName                  = "/kandev.plugin.v1.Host/ListTasks"
-	Host_GetTask_FullMethodName                    = "/kandev.plugin.v1.Host/GetTask"
-	Host_ListWorkspaces_FullMethodName             = "/kandev.plugin.v1.Host/ListWorkspaces"
-	Host_ListWorkflows_FullMethodName              = "/kandev.plugin.v1.Host/ListWorkflows"
-	Host_ListWorkflowSteps_FullMethodName          = "/kandev.plugin.v1.Host/ListWorkflowSteps"
-	Host_ListAgentProfiles_FullMethodName          = "/kandev.plugin.v1.Host/ListAgentProfiles"
-	Host_ListExecutorProfiles_FullMethodName       = "/kandev.plugin.v1.Host/ListExecutorProfiles"
-	Host_ListRepositories_FullMethodName           = "/kandev.plugin.v1.Host/ListRepositories"
-	Host_ListSessions_FullMethodName               = "/kandev.plugin.v1.Host/ListSessions"
-	Host_ListSessionCodeStats_FullMethodName       = "/kandev.plugin.v1.Host/ListSessionCodeStats"
-	Host_ListMessages_FullMethodName               = "/kandev.plugin.v1.Host/ListMessages"
-	Host_ListPendingInteractions_FullMethodName    = "/kandev.plugin.v1.Host/ListPendingInteractions"
-	Host_GetInteraction_FullMethodName             = "/kandev.plugin.v1.Host/GetInteraction"
-	Host_InvokeUtilityAgent_FullMethodName         = "/kandev.plugin.v1.Host/InvokeUtilityAgent"
-	Host_CreateTask_FullMethodName                 = "/kandev.plugin.v1.Host/CreateTask"
-	Host_UpdateTask_FullMethodName                 = "/kandev.plugin.v1.Host/UpdateTask"
-	Host_MoveTask_FullMethodName                   = "/kandev.plugin.v1.Host/MoveTask"
-	Host_SendMessage_FullMethodName                = "/kandev.plugin.v1.Host/SendMessage"
-	Host_PreviewPluginOwnedTaskTree_FullMethodName = "/kandev.plugin.v1.Host/PreviewPluginOwnedTaskTree"
-	Host_DeletePluginOwnedTaskTree_FullMethodName  = "/kandev.plugin.v1.Host/DeletePluginOwnedTaskTree"
-	Host_RespondToPermission_FullMethodName        = "/kandev.plugin.v1.Host/RespondToPermission"
-	Host_AnswerClarification_FullMethodName        = "/kandev.plugin.v1.Host/AnswerClarification"
-	Host_CancelClarification_FullMethodName        = "/kandev.plugin.v1.Host/CancelClarification"
+	Host_GetState_FullMethodName                      = "/kandev.plugin.v1.Host/GetState"
+	Host_SetState_FullMethodName                      = "/kandev.plugin.v1.Host/SetState"
+	Host_DeleteState_FullMethodName                   = "/kandev.plugin.v1.Host/DeleteState"
+	Host_ListState_FullMethodName                     = "/kandev.plugin.v1.Host/ListState"
+	Host_RevealSecret_FullMethodName                  = "/kandev.plugin.v1.Host/RevealSecret"
+	Host_EmitEvent_FullMethodName                     = "/kandev.plugin.v1.Host/EmitEvent"
+	Host_GetSecret_FullMethodName                     = "/kandev.plugin.v1.Host/GetSecret"
+	Host_SetSecret_FullMethodName                     = "/kandev.plugin.v1.Host/SetSecret"
+	Host_DeleteSecret_FullMethodName                  = "/kandev.plugin.v1.Host/DeleteSecret"
+	Host_GetConfig_FullMethodName                     = "/kandev.plugin.v1.Host/GetConfig"
+	Host_ListTasks_FullMethodName                     = "/kandev.plugin.v1.Host/ListTasks"
+	Host_GetTask_FullMethodName                       = "/kandev.plugin.v1.Host/GetTask"
+	Host_ListWorkspaces_FullMethodName                = "/kandev.plugin.v1.Host/ListWorkspaces"
+	Host_ListWorkflows_FullMethodName                 = "/kandev.plugin.v1.Host/ListWorkflows"
+	Host_ListWorkflowSteps_FullMethodName             = "/kandev.plugin.v1.Host/ListWorkflowSteps"
+	Host_ListAgentProfiles_FullMethodName             = "/kandev.plugin.v1.Host/ListAgentProfiles"
+	Host_ListExecutorProfiles_FullMethodName          = "/kandev.plugin.v1.Host/ListExecutorProfiles"
+	Host_ListRepositories_FullMethodName              = "/kandev.plugin.v1.Host/ListRepositories"
+	Host_ListSessions_FullMethodName                  = "/kandev.plugin.v1.Host/ListSessions"
+	Host_ListSessionCodeStats_FullMethodName          = "/kandev.plugin.v1.Host/ListSessionCodeStats"
+	Host_ListMessages_FullMethodName                  = "/kandev.plugin.v1.Host/ListMessages"
+	Host_ListPendingInteractions_FullMethodName       = "/kandev.plugin.v1.Host/ListPendingInteractions"
+	Host_GetInteraction_FullMethodName                = "/kandev.plugin.v1.Host/GetInteraction"
+	Host_InvokeUtilityAgent_FullMethodName            = "/kandev.plugin.v1.Host/InvokeUtilityAgent"
+	Host_InvokeUtilityAgentWithOptions_FullMethodName = "/kandev.plugin.v1.Host/InvokeUtilityAgentWithOptions"
+	Host_CreateTask_FullMethodName                    = "/kandev.plugin.v1.Host/CreateTask"
+	Host_UpdateTask_FullMethodName                    = "/kandev.plugin.v1.Host/UpdateTask"
+	Host_MoveTask_FullMethodName                      = "/kandev.plugin.v1.Host/MoveTask"
+	Host_SendMessage_FullMethodName                   = "/kandev.plugin.v1.Host/SendMessage"
+	Host_PreviewPluginOwnedTaskTree_FullMethodName    = "/kandev.plugin.v1.Host/PreviewPluginOwnedTaskTree"
+	Host_DeletePluginOwnedTaskTree_FullMethodName     = "/kandev.plugin.v1.Host/DeletePluginOwnedTaskTree"
+	Host_RespondToPermission_FullMethodName           = "/kandev.plugin.v1.Host/RespondToPermission"
+	Host_AnswerClarification_FullMethodName           = "/kandev.plugin.v1.Host/AnswerClarification"
+	Host_CancelClarification_FullMethodName           = "/kandev.plugin.v1.Host/CancelClarification"
 )
 
 // HostClient is the client API for Host service.
@@ -609,10 +610,14 @@ type HostClient interface {
 	ListPendingInteractions(ctx context.Context, in *ListPendingInteractionsRequest, opts ...grpc.CallOption) (*ListPendingInteractionsResponse, error)
 	GetInteraction(ctx context.Context, in *GetInteractionRequest, opts ...grpc.CallOption) (*GetInteractionResponse, error)
 	// Utility agent — capability agent_invoke. Runs a one-shot, non-interactive
-	// completion using the operator-configured "utility agent" profile (Settings
-	// > System), so a plugin can delegate a lightweight LLM step without holding
-	// its own API key. FailedPrecondition when no utility agent is configured.
+	// completion using the platform default utility profile when no explicit
+	// profile is supplied. Existing prompt-only clients continue to use this
+	// method and therefore receive the platform default.
 	InvokeUtilityAgent(ctx context.Context, in *InvokeUtilityAgentRequest, opts ...grpc.CallOption) (*InvokeUtilityAgentResponse, error)
+	// Explicit utility profile selection. This separate method prevents an old
+	// host from silently ignoring a profile override and executing a different
+	// profile.
+	InvokeUtilityAgentWithOptions(ctx context.Context, in *InvokeUtilityAgentWithOptionsRequest, opts ...grpc.CallOption) (*InvokeUtilityAgentResponse, error)
 	// Writes — capability api_write:<resource>. Route through the first-party
 	// service layer so events fire and WS clients update — the whole reason not
 	// to let plugins write the DB. CreateTask/UpdateTask require api_write:tasks
@@ -892,6 +897,16 @@ func (c *hostClient) InvokeUtilityAgent(ctx context.Context, in *InvokeUtilityAg
 	return out, nil
 }
 
+func (c *hostClient) InvokeUtilityAgentWithOptions(ctx context.Context, in *InvokeUtilityAgentWithOptionsRequest, opts ...grpc.CallOption) (*InvokeUtilityAgentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InvokeUtilityAgentResponse)
+	err := c.cc.Invoke(ctx, Host_InvokeUtilityAgentWithOptions_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *hostClient) CreateTask(ctx context.Context, in *CreateTaskRequest, opts ...grpc.CallOption) (*CreateTaskResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(CreateTaskResponse)
@@ -1065,10 +1080,14 @@ type HostServer interface {
 	ListPendingInteractions(context.Context, *ListPendingInteractionsRequest) (*ListPendingInteractionsResponse, error)
 	GetInteraction(context.Context, *GetInteractionRequest) (*GetInteractionResponse, error)
 	// Utility agent — capability agent_invoke. Runs a one-shot, non-interactive
-	// completion using the operator-configured "utility agent" profile (Settings
-	// > System), so a plugin can delegate a lightweight LLM step without holding
-	// its own API key. FailedPrecondition when no utility agent is configured.
+	// completion using the platform default utility profile when no explicit
+	// profile is supplied. Existing prompt-only clients continue to use this
+	// method and therefore receive the platform default.
 	InvokeUtilityAgent(context.Context, *InvokeUtilityAgentRequest) (*InvokeUtilityAgentResponse, error)
+	// Explicit utility profile selection. This separate method prevents an old
+	// host from silently ignoring a profile override and executing a different
+	// profile.
+	InvokeUtilityAgentWithOptions(context.Context, *InvokeUtilityAgentWithOptionsRequest) (*InvokeUtilityAgentResponse, error)
 	// Writes — capability api_write:<resource>. Route through the first-party
 	// service layer so events fire and WS clients update — the whole reason not
 	// to let plugins write the DB. CreateTask/UpdateTask require api_write:tasks
@@ -1179,6 +1198,9 @@ func (UnimplementedHostServer) GetInteraction(context.Context, *GetInteractionRe
 }
 func (UnimplementedHostServer) InvokeUtilityAgent(context.Context, *InvokeUtilityAgentRequest) (*InvokeUtilityAgentResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method InvokeUtilityAgent not implemented")
+}
+func (UnimplementedHostServer) InvokeUtilityAgentWithOptions(context.Context, *InvokeUtilityAgentWithOptionsRequest) (*InvokeUtilityAgentResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method InvokeUtilityAgentWithOptions not implemented")
 }
 func (UnimplementedHostServer) CreateTask(context.Context, *CreateTaskRequest) (*CreateTaskResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method CreateTask not implemented")
@@ -1660,6 +1682,24 @@ func _Host_InvokeUtilityAgent_Handler(srv interface{}, ctx context.Context, dec 
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Host_InvokeUtilityAgentWithOptions_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InvokeUtilityAgentWithOptionsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HostServer).InvokeUtilityAgentWithOptions(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Host_InvokeUtilityAgentWithOptions_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HostServer).InvokeUtilityAgentWithOptions(ctx, req.(*InvokeUtilityAgentWithOptionsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _Host_CreateTask_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(CreateTaskRequest)
 	if err := dec(in); err != nil {
@@ -1924,6 +1964,10 @@ var Host_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "InvokeUtilityAgent",
 			Handler:    _Host_InvokeUtilityAgent_Handler,
+		},
+		{
+			MethodName: "InvokeUtilityAgentWithOptions",
+			Handler:    _Host_InvokeUtilityAgentWithOptions_Handler,
 		},
 		{
 			MethodName: "CreateTask",

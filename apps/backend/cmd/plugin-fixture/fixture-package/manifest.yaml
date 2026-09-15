@@ -25,6 +25,7 @@ runtime:
 capabilities:
   events: ["task.created"]
   api_write: ["tasks"]
+  agent_invoke: true
   state: true
   secrets: true
   user_state: true
@@ -37,6 +38,12 @@ repository_providers: ["fixture-source-control"]
 
 actions:
   - key: "connection-status"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "utility-default"
+    scope: "workspace"
+    max_body_bytes: 4096
+  - key: "utility-preference"
     scope: "workspace"
     max_body_bytes: 4096
   - key: "repositories.inspect"
@@ -115,6 +122,11 @@ config_schema:
     greeting:
       type: string
       title: "Greeting"
+    agent_profile:
+      type: string
+      format: agent-profile
+      title: "Utility agent profile"
+      description: "Optional profile used for utility-agent completion actions."
 
 automation_conditions:
   - key: "signed-event"
