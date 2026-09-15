@@ -136,13 +136,18 @@ test("classifies orphan and active networks and probe passes without removing an
       "succeeded",
       { timeout: 120_000 },
     );
+    await expect
+      .poll(async () => (await getDockerNetworksSummary(apiClient))?.classified?.active ?? 0, {
+        timeout: 60_000,
+      })
+      .toBeGreaterThanOrEqual(1);
     const networksSummary = await getDockerNetworksSummary(apiClient);
     expect(networksSummary, "network census available").not.toBeNull();
 
     // The active network is classified active (connected container) and the
     // orphan appears in the census classified set. Ids can shift between the
     // census and assertions, so assert by shape, not exact counts.
-    const classified = networksSummary.classified ?? {};
+    const classified = networksSummary?.classified ?? {};
     expect(classified.active ?? 0).toBeGreaterThanOrEqual(1);
     expect(Number(Object.values(classified).reduce((a, b) => a + b, 0))).toBeGreaterThan(0);
 
