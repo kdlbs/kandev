@@ -16,7 +16,6 @@ func TestNewSessionPrimesKandevMCPToolCatalog(t *testing.T) {
 		return mcp.NewToolResultText("ok"), nil
 	})
 	testServer := mcpserver.NewTestServer(server)
-	defer testServer.Close()
 
 	previousServers := mcpServers
 	mcpServers = nil
@@ -24,6 +23,7 @@ func TestNewSessionPrimesKandevMCPToolCatalog(t *testing.T) {
 	mcpClients = make(map[string]*mcpclient.Client)
 	t.Cleanup(func() {
 		closeMCPClients()
+		testServer.Close()
 		mcpServers = previousServers
 		mcpClients = previousClients
 	})
@@ -33,17 +33,24 @@ func TestNewSessionPrimesKandevMCPToolCatalog(t *testing.T) {
 		sessionConfig:   make(map[acp.SessionId][]acp.SessionConfigOption),
 		commandsEmitted: make(map[acp.SessionId]bool),
 	}
-	_, err := agent.NewSession(context.Background(), acp.NewSessionRequest{
+	sessionCtx, cancelSession := context.WithCancel(context.Background())
+	_, err := agent.NewSession(sessionCtx, acp.NewSessionRequest{
 		McpServers: []acp.McpServer{{Sse: &acp.McpServerSseInline{
 			Name: "kandev",
 			Url:  testServer.URL + "/sse",
 		}}},
 	})
+	cancelSession()
 	if err != nil {
 		t.Fatalf("NewSession() error = %v", err)
 	}
 
 	if _, ok := mcpClients["kandev"]; !ok {
 		t.Fatal("NewSession() did not prime the Kandev MCP client")
+	}
+	if result, err := callMCPTool("kandev", "report_change_request_auto_fix_outcome_kandev", nil); err != nil {
+		t.Fatalf("callMCPTool() after NewSession context cancellation error = %v", err)
+	} else if result != "ok" {
+		t.Fatalf("callMCPTool() result = %q, want %q", result, "ok")
 	}
 }
