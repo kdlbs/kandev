@@ -258,13 +258,15 @@ func (s *FieldSpec) Schema() ([]byte, error) {
 }
 
 // coerceInt accepts the JSON representations D10 lists for an int field:
-// a JSON number (decoded by encoding/json as float64) that is integral, or
-// a Go int (already-typed input, e.g. a test constructing a Config
-// directly). Anything else, including a non-integral float64, is rejected.
+// int, int64 (already-typed input, e.g. a test constructing a Config
+// directly), or a JSON number (decoded by encoding/json as float64) that is
+// integral. Anything else, including a non-integral float64, is rejected.
 func coerceInt(v any) (int, bool) {
 	switch n := v.(type) {
 	case int:
 		return n, true
+	case int64:
+		return int(n), true
 	case float64:
 		if n != float64(int64(n)) {
 			return 0, false

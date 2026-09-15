@@ -350,6 +350,17 @@ func TestCoerceValue_Duration(t *testing.T) {
 	}
 }
 
+// assertValidationError fails the test if err is not a non-nil
+// *ValidationError, and returns it for further inspection.
+func assertValidationError(t *testing.T, err error) *ValidationError {
+	t.Helper()
+	verr, ok := err.(*ValidationError)
+	if !ok || verr == nil {
+		t.Fatalf("expected *ValidationError, got %#v", err)
+	}
+	return verr
+}
+
 // assertSpecError fails the test if err is not a non-nil *SpecError, and
 // returns it for further inspection.
 func assertSpecError(t *testing.T, err error) *SpecError {
