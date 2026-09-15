@@ -2771,10 +2771,16 @@ func (s *Service) resumeTaskSessionWithContinuation(
 	}
 	if exact, err := s.resolveExactProfileAssignment(ctx, taskID); err != nil {
 		return nil, err
-	} else if exact != nil && (session.ExactProfileGeneration != exact.Generation || session.ExactProfileRevision != exact.Revision) {
-		return nil, ErrExactProfileAssignmentInvalid
-	} else if exact != nil {
-		options.ExactProfile = true
+	} else {
+		if exact == nil && session.ExactProfileGeneration != 0 {
+			return nil, ErrExactProfileAssignmentInvalid
+		}
+		if exact != nil && (session.ExactProfileGeneration != exact.Generation || session.ExactProfileRevision != exact.Revision) {
+			return nil, ErrExactProfileAssignmentInvalid
+		}
+		if exact != nil {
+			options.ExactProfile = true
+		}
 	}
 	allowCompletedResume := options.AllowCompletedSessionResume &&
 		session.State == models.TaskSessionStateCompleted
