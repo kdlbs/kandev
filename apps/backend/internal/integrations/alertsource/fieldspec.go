@@ -3,6 +3,7 @@ package alertsource
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 )
 
@@ -99,7 +100,7 @@ func isIdentifier(s string) bool {
 // problem in one pass.
 func (s *FieldSpec) Validate() error {
 	var errs []FieldError
-	seen := map[string]bool{}
+	counts := map[string]int{}
 	for i, e := range s.fields {
 		if e.isNil {
 			errs = append(errs, FieldError{
@@ -124,14 +125,17 @@ func (s *FieldSpec) Validate() error {
 				Message: "field name must start with a lowercase letter and contain only lowercase letters, digits and underscores",
 			})
 		}
-		if seen[e.name] {
+		// A7: reported once per repeated DECLARATION after the first, with
+		// the 1-based declaration ordinal in Message so entries that
+		// otherwise tie on Field and Code still sort deterministically.
+		counts[e.name]++
+		if counts[e.name] > 1 {
 			errs = append(errs, FieldError{
 				Field:   e.name,
 				Code:    ErrCodeDuplicateField,
-				Message: "field name declared more than once",
+				Message: fmt.Sprintf("field declared more than once; this is declaration %d", counts[e.name]),
 			})
 		}
-		seen[e.name] = true
 		errs = append(errs, validateFieldEntry(e)...)
 	}
 	return newSpecError(errs)
@@ -182,23 +186,32 @@ func validateFieldEntry(e fieldEntry) []FieldError {
 // (D9). A struct (not a map) is used here specifically so encoding/json
 // preserves this declaration order; Properties below is a map because D9
 // only requires its keys to be deterministic, and encoding/json already
-// sorts map keys alphabetically.
+// sorts map keys alphabetically. Required is the only root key that is ever
+// absent (D9: "omitted entirely when empty"); every other key, including
+// FieldOrder and RequiredMode, is present even for a spec with zero fields.
 type schemaRoot struct {
-	Schema       string                    `json:"$schema"`
-	Type         string                    `json:"type"`
-	Properties   map[string]schemaProperty `json:"properties"`
-	Required     []string                  `json:"required"`
-	FieldOrder   []string                  `json:"x-kandev-field-order"`
-	RequiredMode string                    `json:"x-kandev-required-mode"`
+	Schema               string                    `json:"$schema"`
+	Type                 string                    `json:"type"`
+	AdditionalProperties bool                      `json:"additionalProperties"`
+	Required             []string                  `json:"required,omitempty"`
+	Properties           map[string]schemaProperty `json:"properties"`
+	FieldOrder           []string                  `json:"x-kandev-field-order"`
+	RequiredMode         string                    `json:"x-kandev-required-mode"`
 }
 
 // schemaProperty is one field's JSON Schema property object (D9), including
 // the x-kandev-* extension keywords the frontend form renderer reads.
+// Examples is Draft 7's array form ("examples": [v]), holding at most the
+// one declared Example value. WriteOnly and Secret both come from the same
+// Secret() modifier; a Secret field can never carry Default or Examples
+// (FieldSpec.Validate rejects the declaration), so those keys are
+// structurally impossible to leak for one, not merely unset for one.
 type schemaProperty struct {
 	Type        string `json:"type"`
 	Description string `json:"description,omitempty"`
 	Default     any    `json:"default,omitempty"`
-	Example     any    `json:"examples,omitempty"`
+	Examples    []any  `json:"examples,omitempty"`
+	WriteOnly   bool   `json:"writeOnly,omitempty"`
 	FieldKind   string `json:"x-kandev-field-kind"`
 	Secret      bool   `json:"x-kandev-secret,omitempty"`
 	Advanced    bool   `json:"x-kandev-advanced,omitempty"`
@@ -216,6 +229,7 @@ func (s *FieldSpec) Schema() ([]byte, error) {
 		Schema:       "http://json-schema.org/draft-07/schema#",
 		Type:         "object",
 		Properties:   map[string]schemaProperty{},
+		FieldOrder:   make([]string, 0, len(s.fields)),
 		RequiredMode: "create",
 	}
 	for _, e := range s.fields {
@@ -226,6 +240,7 @@ func (s *FieldSpec) Schema() ([]byte, error) {
 		prop := schemaProperty{
 			Type:        e.kind.jsonType(),
 			Description: e.description,
+			WriteOnly:   e.secret,
 			FieldKind:   e.kind.tag(),
 			Secret:      e.secret,
 			Advanced:    e.advanced,
@@ -234,10 +249,11 @@ func (s *FieldSpec) Schema() ([]byte, error) {
 			prop.Default = render(e.kind, e.defaultVal)
 		}
 		if e.hasExample {
-			prop.Example = render(e.kind, e.exampleVal)
+			prop.Examples = []any{render(e.kind, e.exampleVal)}
 		}
 		root.Properties[e.name] = prop
 	}
+	sort.Strings(root.Required)
 	return json.Marshal(root)
 }
 

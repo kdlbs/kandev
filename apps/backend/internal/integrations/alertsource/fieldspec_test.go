@@ -106,6 +106,38 @@ func TestFieldSpec_Validate_CollectsAllErrors(t *testing.T) {
 	}
 }
 
+// TestFieldSpec_Validate_DuplicateField_CardinalityAndOrdinal is A7's pinned
+// rule: three declarations of the same name yield exactly two DuplicateField
+// errors (never one, never three), the first declaration is never flagged,
+// and each flagged occurrence's Message carries its own 1-based declaration
+// ordinal so the two entries — which tie on both Field and Code — still sort
+// deterministically under D10's third key.
+func TestFieldSpec_Validate_DuplicateField_CardinalityAndOrdinal(t *testing.T) {
+	spec := NewFieldSpec().
+		Field(NewStringField("a")).
+		Field(NewStringField("a")).
+		Field(NewStringField("a"))
+	serr := assertSpecError(t, spec.Validate())
+
+	var dups []FieldError
+	for _, e := range serr.Errors {
+		if e.Code == ErrCodeDuplicateField {
+			dups = append(dups, e)
+		}
+	}
+	if len(dups) != 2 {
+		t.Fatalf("expected exactly 2 DuplicateField errors for 3 declarations, got %d: %+v", len(dups), dups)
+	}
+	for _, d := range dups {
+		if d.Field != "a" {
+			t.Fatalf("DuplicateField.Field must be the field name, got %q", d.Field)
+		}
+	}
+	if dups[0].Message == dups[1].Message {
+		t.Fatalf("expected distinct ordinals in Message to break the Field+Code tie, got identical: %q", dups[0].Message)
+	}
+}
+
 func TestFieldSpec_Schema_InvalidSpecReturnsError(t *testing.T) {
 	spec := NewFieldSpec().Field(nil)
 	if _, err := spec.Schema(); err == nil {
@@ -145,6 +177,9 @@ func TestFieldSpec_Schema_ShapeAndDeterminism(t *testing.T) {
 	if doc["x-kandev-required-mode"] != "create" {
 		t.Fatalf("unexpected x-kandev-required-mode: %v", doc["x-kandev-required-mode"])
 	}
+	if doc["additionalProperties"] != false {
+		t.Fatalf("unexpected additionalProperties: %v", doc["additionalProperties"])
+	}
 	order, ok := doc["x-kandev-field-order"].([]any)
 	if !ok || len(order) != 4 || order[0] != "api_token" {
 		t.Fatalf("unexpected x-kandev-field-order: %v", doc["x-kandev-field-order"])
@@ -165,8 +200,14 @@ func TestFieldSpec_Schema_ShapeAndDeterminism(t *testing.T) {
 	if tokenProp["x-kandev-secret"] != true {
 		t.Fatalf("expected api_token to be marked x-kandev-secret: %v", tokenProp)
 	}
+	if tokenProp["writeOnly"] != true {
+		t.Fatalf("expected api_token to be marked writeOnly: %v", tokenProp)
+	}
 	if _, hasDefault := tokenProp["default"]; hasDefault {
 		t.Fatalf("secret field must never emit a default in the schema: %v", tokenProp)
+	}
+	if _, hasExamples := tokenProp["examples"]; hasExamples {
+		t.Fatalf("secret field must never emit examples in the schema: %v", tokenProp)
 	}
 
 	timeoutProp, ok := props["timeout"].(map[string]any)
@@ -198,8 +239,44 @@ func TestFieldSpec_Schema_ShapeAndDeterminism(t *testing.T) {
 	if intervalProp["type"] != "integer" {
 		t.Fatalf("int field must render JSON type integer, got %v", intervalProp["type"])
 	}
-	if intervalProp["examples"] != float64(60) {
-		t.Fatalf("unexpected examples: %v", intervalProp["examples"])
+	if intervalProp["x-kandev-field-kind"] != "int" {
+		t.Fatalf("unexpected x-kandev-field-kind for int: %v", intervalProp["x-kandev-field-kind"])
+	}
+	examples, ok := intervalProp["examples"].([]any)
+	if !ok || len(examples) != 1 || examples[0] != float64(60) {
+		t.Fatalf("expected examples to be the Draft 7 array form [60], got %v", intervalProp["examples"])
+	}
+}
+
+// TestFieldSpec_Schema_EmptySpecStillWellFormed is D9's "the empty spec still
+// emits a well-formed root" clause: every root key except the
+// omission-conditional "required" is present even with zero declared fields.
+func TestFieldSpec_Schema_EmptySpecStillWellFormed(t *testing.T) {
+	spec := NewFieldSpec()
+	b, err := spec.Schema()
+	if err != nil {
+		t.Fatalf("Schema() error on empty spec: %v", err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatalf("Schema() did not produce valid JSON: %v", err)
+	}
+	if _, present := doc["required"]; present {
+		t.Fatalf("required must be omitted entirely when empty, got %v", doc["required"])
+	}
+	order, ok := doc["x-kandev-field-order"].([]any)
+	if !ok || len(order) != 0 {
+		t.Fatalf("x-kandev-field-order must be present and empty, got %v", doc["x-kandev-field-order"])
+	}
+	props, ok := doc["properties"].(map[string]any)
+	if !ok || len(props) != 0 {
+		t.Fatalf("properties must be present and empty, got %v", doc["properties"])
+	}
+	if doc["x-kandev-required-mode"] != "create" {
+		t.Fatalf("x-kandev-required-mode must still be present, got %v", doc["x-kandev-required-mode"])
+	}
+	if doc["additionalProperties"] != false {
+		t.Fatalf("additionalProperties must still be present, got %v", doc["additionalProperties"])
 	}
 }
 
