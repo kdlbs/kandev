@@ -528,6 +528,7 @@ export function ChatInputArea(props: ChatInputAreaProps) {
               taskId={statusRowTaskId}
               sessionId={resolvedSessionId}
               sessionState={sessionState}
+              previewTarget={planActions.proceedPreviewTarget}
               nextStepName={proceedStepName}
               onProceed={proceed}
               isAgentBusy={isAgentBusy}

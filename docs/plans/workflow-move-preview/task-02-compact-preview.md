@@ -58,18 +58,22 @@ UI-01 desktop and UI-02 phone excerpts; see [full previews](plan.md#ascii-ui-pre
 for UI-03 loading/error, all variants, structural notes, and criterion mappings.
 
 ```text
-Desktop                     Phone drawer
-+-------------------------+ +--------------------------------+
-| Reuse current session   | | Move to                     x  |
-| Astra -> Luna  +1     i | |--------------------------------|
-|       Move here         | | Implement                      |
-|        Options          | | Reuse current session          |
-+-------------------------+ | Astra -> Luna +1     [Details] |
-                            | [Options]        [Move here]   |
-                            +--------------------------------+
+Desktop                       Phone drawer
++---------------------------+ +------------------------------+
+|        Move here          | | Move to                   x  |
+|         Options           | |------------------------------|
+|    [step capabilities]    | | Implement                    |
+|---------------------------| | [Options]      [Move here]   |
+|   Reuse current session   | |------------------------------|
+|    Astra -> Luna +1 (i)    | |    Reuse current session     |
++---------------------------+ |     Astra -> Luna +1 (i)     |
+                              +------------------------------+
 ```
 
-Collapsed summaries stay two lines. Details expand inline; phone rows share
+The approved footer also appears below the Move action in the next-step
+options popover and drawer above chat. It uses that action's destination and draft.
+
+Collapsed summaries stay two centered lines. Details expand inline; phone rows share
 one internal scroll region. The +1 denotes a non-model setting change here.
 AC-TASKS-WORKFLOW-MOVE-PREVIEW-002.1 through .4 apply.
 

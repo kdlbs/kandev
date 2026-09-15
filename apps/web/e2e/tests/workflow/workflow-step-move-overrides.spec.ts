@@ -1,3 +1,4 @@
+import { expectPreviewFooter } from "./workflow-move-preview-assertions";
 import { expect, test } from "../../fixtures/test-base";
 import { dwell } from "../../helpers/causal-waits";
 import {
@@ -130,6 +131,10 @@ test("uses the desktop next-step anchored form for the same one-shot move contra
   await expect(nextStepButton).toBeVisible();
   await nextStepButton.hover();
   await expect(testPage.getByTestId("proceed-next-step-options")).toBeVisible();
+  await expectPreviewFooter(
+    testPage.getByTestId("proceed-next-step-options"),
+    "workflow-move-submit",
+  );
   await fillMoveOverrides(testPage);
   const moveRequest = waitForMoveRequest(testPage, fixture.taskId);
   await testPage.getByTestId("workflow-move-submit").click();

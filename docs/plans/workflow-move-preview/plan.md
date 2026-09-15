@@ -57,8 +57,8 @@ existing lifecycle. Public documentation changes belong to implementation.
 
 ## ASCII UI preview
 
-Structural requirements: exactly two collapsed summary rows above Move here;
-optional details expand below the summary; Options and existing capability/progress
+Structural requirements: exactly two centered collapsed summary rows below actions and capabilities;
+an icon-only info button expands details below the summary; Options and existing capability/progress
 content stay available. Spacing and abbreviated data below are illustrative.
 All drawn strings become localized copy or model/session data.
 
@@ -67,35 +67,22 @@ All drawn strings become localized copy or model/session data.
 AC-TASKS-WORKFLOW-MOVE-PREVIEW-001.1 through .5 and -002.1, .4.
 
 ```text
-Retained override           Conditional model change
-+-------------------------+ +-------------------------+
-| Reuse current session   | | Reuse current session   |
-| Astra (overrides Luna) i| | Astra -> Luna  +2     i |
-|       Move here         | |       Move here         |
-|        Options          | |        Options          |
-| [existing capabilities] | | [existing capabilities] |
-+-------------------------+ +-------------------------+
++--------------------------------+
+|         -> Move here           |
+|            Options             |
+|       [step capabilities]      |
+|--------------------------------|
+|     Reuse current session      |
+|      Astra -> Luna  +2 (i)      |
++--------------------------------+
 
-Unchanged model             New conversation
-+-------------------------+ +-------------------------+
-| Reuse current session   | | New session             |
-| Astra                 i | | 5.6 Luna              i |
-|       Move here         | |       Move here         |
-|        Options          | |        Options          |
-+-------------------------+ +-------------------------+
-
-Other conversation          Expanded details
-+-------------------------+ +------------------------------+
-| Reuse: Implementation   | | Reuse current session        |
-| Luna                  i | | Astra -> Luna  +2       Hide |
-|       Move here         | | Planned changes              |
-|        Options          | | Reasoning: medium -> max     |
-+-------------------------+ | Context: reset               |
-                            | Checked again when moving.   |
-                            |         Move here            |
-                            |          Options             |
-                            +------------------------------+
+Expanded details appear beneath the footer.
+Other outcomes: New session; Reuse: Implementation; No session starts.
+Unchanged model: Astra (override retained), or Luna without an override.
 ```
+
+The footer layout was revised after implementation with user approval. The
+next-step options form above chat uses the same footer below its Move action.
 
 `+2` means reasoning and context reset here, excluding the already displayed
 model change. A model-only change has no count. Details disclose uncertainty,
@@ -113,14 +100,14 @@ header and one scroll body. AC-TASKS-WORKFLOW-MOVE-PREVIEW-002.2, .4.
 | Analysis (current)              |
 |--------------------------------|
 | Implement                      |
-| Reuse current session          |
-| Astra -> Luna  +1    [Details]  |
 | [Options]        [Move here]    |
+|     Reuse current session      |
+|      Astra -> Luna  +1 (i)      |
 |--------------------------------|
 | Review                         |
-| Reuse: Analysis                |
-| Astra               [Details]  |
 | [Options]        [Move here]    |
+|        Reuse: Analysis         |
+|          Astra (i)             |
 |________________________________|  safe-area clearance
 ```
 
@@ -134,17 +121,19 @@ AC-TASKS-WORKFLOW-MOVE-PREVIEW-001.5, .7 and -002.3.
 
 ```text
 +-------------------------+ +-------------------------+
-| Checking session...     | | Preview unavailable     |
-|                         | | Retry                   |
 |       Move here         | |       Move here         |
 |        Options          | |        Options          |
+|-------------------------| |-------------------------|
+|   Checking session...   | |   Preview unavailable   |
+|                         | |          Retry          |
 +-------------------------+ +-------------------------+
 
 +-------------------------+
-| New session             |
-| Model not known       i |
 |       Move here         |
 |        Options          |
+|-------------------------|
+|       New session       |
+|    Model not known (i)  |
 +-------------------------+
 ```
 
@@ -255,6 +244,15 @@ Final post-remediation verification passed on 2026-09-15:
 - `go test ./internal/orchestrator -run '^TestCompletedTaskFollowUpAdmissionIsConversationalOnly$' -count=100 -failfast`.
 - Specification, public-doc, formatting, and localization checks passed after
   trimming unrelated generated catalog churn.
+
+### Approved footer revision (2026-09-15)
+
+- Centered the preview below step actions and capabilities, with an info icon.
+- Added the same live-draft footer to chat and passthrough next-step options.
+- Passed 79 focused unit/component tests, typecheck, and changed-file lint.
+- Passed two desktop and two touch browser scenarios covering footer placement,
+  next-step submission, inline details, and 44px touch targets.
+- Updated the requirements, design, work order, and public workflow guide.
 
 ## Risks
 
