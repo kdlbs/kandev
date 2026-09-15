@@ -11,10 +11,14 @@ import type {
 import type { ActiveDocument } from "@/lib/state/slices/ui/types";
 import type { PlanComment } from "@/lib/state/slices/comments";
 import type { ContextFile } from "@/lib/state/context-files-store";
-import type { CustomPrompt, Message, TaskPlanCommentRef } from "@/lib/types/http";
+import type {
+  CustomPrompt,
+  TaskPlanCommentRef,
+  TaskPreviewFeedback,
+  TaskPreviewFeedbackRef,
+} from "@/lib/types/http";
 import type { TaskMentionData } from "@/hooks/use-inline-mention";
 import type { AppState } from "@/lib/state/store";
-import type { EntityReference } from "@/lib/types/entity-reference";
 import { planCommentAdmissionConflict, toTaskPlanCommentRefs } from "@/lib/plan-comment-refs";
 import {
   collectPromptReferenceExpansions,
@@ -27,7 +31,14 @@ import {
 } from "./domains/session/session-input-mode";
 import { t } from "@/lib/i18n";
 import { getTaskPlanComments } from "@/lib/api/domains/plan-comment-api";
-import { listTaskSessions } from "@/lib/api/domains/session-api";
+import { getTaskPreviewFeedback } from "@/lib/api/domains/preview-feedback-api";
+import {
+  previewFeedbackAdmissionConflict,
+  toTaskPreviewFeedbackRefs,
+} from "@/lib/preview-feedback-refs";
+import { findMessageByID, sendMessageRequest } from "./message-request";
+
+export { sendMessageRequest } from "./message-request";
 
 export function buildDocumentContext(
   activeDocument: ActiveDocument | null,
@@ -144,170 +155,9 @@ export interface UseMessageHandlerParams {
   hasPendingClarification?: boolean;
   activeDocument?: ActiveDocument | null;
   planComments?: PlanComment[];
+  previewFeedback?: TaskPreviewFeedback[];
   contextFiles?: ContextFile[];
   prompts?: CustomPrompt[];
-}
-
-type SendMessagePayload = {
-  taskId: string;
-  resolvedSessionId: string;
-  clientMessageId?: string;
-  finalMessage: string;
-  modelToSend: string | undefined;
-  planMode: boolean;
-  hasReviewComments?: boolean;
-  attachments?: MessageAttachment[];
-  contextFilesMeta?: Array<{ path: string; name: string; is_directory?: boolean }>;
-  entityReferences?: EntityReference[];
-  planCommentRefs?: TaskPlanCommentRef[];
-  requirePrimarySession?: boolean;
-};
-
-type MessageListResponse = { messages?: Message[] };
-
-function isUncertainMessageTransportError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const message = error.message.toLowerCase();
-  return (
-    message.includes("websocket request timed out") || message === "websocket connection closed"
-  );
-}
-
-async function findMessageByID(
-  client: ReturnType<typeof getWebSocketClient>,
-  taskId: string,
-  sessionId: string,
-  messageId: string,
-): Promise<Message | undefined> {
-  if (!client) return undefined;
-  const sessionIds = [sessionId];
-  try {
-    const response = await listTaskSessions(taskId);
-    for (const session of response.sessions ?? []) {
-      if (session.id && !sessionIds.includes(session.id)) sessionIds.push(session.id);
-    }
-  } catch {
-    // The submitted session remains a useful reconciliation fallback.
-  }
-  try {
-    for (const candidateSessionId of sessionIds) {
-      const response = await client.request<MessageListResponse>(
-        "message.list",
-        { session_id: candidateSessionId, limit: 100, sort: "desc" },
-        5000,
-      );
-      const found = response.messages?.find((message) => message.id === messageId);
-      if (found) return found;
-    }
-    return undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function waitForConnected(client: NonNullable<ReturnType<typeof getWebSocketClient>>) {
-  const getStatus = client.getStatus?.bind(client);
-  if (!getStatus || getStatus() === "connected") return true;
-  const deadline = Date.now() + 3000;
-  while (Date.now() < deadline) {
-    await new Promise((resolve) => setTimeout(resolve, 100));
-    if (getStatus() === "connected") return true;
-  }
-  return false;
-}
-
-type MessageReconciliation = {
-  client: NonNullable<ReturnType<typeof getWebSocketClient>>;
-  taskId: string;
-  sessionId: string;
-  messageId: string;
-  request: () => Promise<Message | undefined>;
-  originalError: unknown;
-};
-
-async function reconcileUncertainMessage({
-  client,
-  taskId,
-  sessionId,
-  messageId,
-  request,
-  originalError,
-}: MessageReconciliation) {
-  const committed = await findMessageByID(client, taskId, sessionId, messageId);
-  if (committed) return committed;
-  if (!(await waitForConnected(client))) throw originalError;
-
-  try {
-    return await request();
-  } catch (retryError) {
-    const retriedMessage = await findMessageByID(client, taskId, sessionId, messageId);
-    if (retriedMessage) return retriedMessage;
-    throw retryError;
-  }
-}
-
-export async function sendMessageRequest(
-  payload: SendMessagePayload,
-): Promise<Message | undefined> {
-  const client = getWebSocketClient();
-  if (!client) {
-    throw new MessageSendError(
-      "connection-unavailable",
-      "Connection unavailable. Reconnect and try again.",
-    );
-  }
-
-  const {
-    taskId,
-    resolvedSessionId,
-    clientMessageId,
-    finalMessage,
-    modelToSend,
-    planMode,
-    hasReviewComments,
-    attachments,
-    contextFilesMeta,
-    entityReferences,
-    planCommentRefs,
-    requirePrimarySession,
-  } = payload;
-  const hasAttachments = attachments && attachments.length > 0;
-  const stableMessageId = clientMessageId ?? generateUUID();
-  const requestPayload = {
-    task_id: taskId,
-    session_id: resolvedSessionId,
-    client_message_id: stableMessageId,
-    content: finalMessage,
-    ...(modelToSend && { model: modelToSend }),
-    ...(planMode && { plan_mode: true }),
-    ...(hasReviewComments && { has_review_comments: true }),
-    ...(hasAttachments && { attachments }),
-    ...(contextFilesMeta && { context_files: contextFilesMeta }),
-    ...(entityReferences && { entity_references: entityReferences }),
-    ...(planCommentRefs?.length && { plan_comment_refs: planCommentRefs }),
-    ...(requirePrimarySession && { require_primary_session: true }),
-  };
-
-  const request = () =>
-    client.request<Message | undefined>(
-      "message.add",
-      requestPayload,
-      hasAttachments ? 30000 : 10000,
-    );
-
-  try {
-    return await request();
-  } catch (error) {
-    if (!isUncertainMessageTransportError(error)) throw error;
-    return reconcileUncertainMessage({
-      client,
-      taskId,
-      sessionId: resolvedSessionId,
-      messageId: stableMessageId,
-      request,
-      originalError: error,
-    });
-  }
 }
 
 const TERMINAL_SESSION_STATES = new Set(["FAILED", "CANCELLED", "COMPLETED"]);
@@ -353,6 +203,17 @@ function normalizePlanCommentSendError(
     : new MessageSendError("primary-session-changed", t("task:primarySessionChangedRetry"));
 }
 
+function normalizePreviewFeedbackSendError(
+  error: unknown,
+  taskId: string,
+  storeApi: ReturnType<typeof useAppStoreApi>,
+): unknown {
+  const snapshot = previewFeedbackAdmissionConflict(error);
+  if (!snapshot) return error;
+  storeApi.getState().setTaskPreviewFeedback(taskId, snapshot);
+  return new MessageSendError("preview-feedback-changed", t("task:previewFeedbackChangedRetry"));
+}
+
 function buildContextFilesMetadata(contextFiles: ContextFile[]) {
   const realFiles = contextFiles.filter(
     (file) => !file.path.startsWith("prompt:") && file.path !== "plan:context",
@@ -374,6 +235,7 @@ async function deliverComposedMessage({
   planModeEnabled,
   hasPendingClarification,
   planCommentRefs,
+  previewFeedbackRefs,
   contextFilesMeta,
   inputMode,
   queue,
@@ -388,6 +250,7 @@ async function deliverComposedMessage({
   planModeEnabled: boolean;
   hasPendingClarification: boolean;
   planCommentRefs: TaskPlanCommentRef[];
+  previewFeedbackRefs: TaskPreviewFeedbackRef[];
   contextFilesMeta: ReturnType<typeof buildContextFilesMetadata>;
   inputMode: SessionInputMode;
   queue: ReturnType<typeof useQueue>["queue"];
@@ -405,12 +268,14 @@ async function deliverComposedMessage({
         entityReferences: payload.entityReferences,
         clientQueueId: clientAdmissionId,
         ...(planCommentRefs.length > 0 ? { planCommentRefs } : {}),
+        ...(previewFeedbackRefs.length > 0 ? { previewFeedbackRefs } : {}),
         ...(contextFilesMeta ? { contextFilesMeta } : {}),
       });
       if (!accepted) {
         return false;
       }
       await refreshAcceptedPlanComments(taskId, planCommentRefs, storeApi);
+      await refreshAcceptedPreviewFeedback(taskId, previewFeedbackRefs, storeApi);
       return;
     }
 
@@ -426,11 +291,32 @@ async function deliverComposedMessage({
       contextFilesMeta,
       entityReferences: payload.entityReferences,
       planCommentRefs,
+      previewFeedbackRefs,
     });
     if (created?.id && created.session_id) storeApi.getState().addMessage(created);
     await refreshAcceptedPlanComments(taskId, planCommentRefs, storeApi);
+    await refreshAcceptedPreviewFeedback(taskId, previewFeedbackRefs, storeApi);
   } catch (error) {
-    throw normalizePlanCommentSendError(error, taskId, storeApi);
+    throw normalizePreviewFeedbackSendError(
+      normalizePlanCommentSendError(error, taskId, storeApi),
+      taskId,
+      storeApi,
+    );
+  }
+}
+
+async function refreshAcceptedPreviewFeedback(
+  taskId: string,
+  refs: TaskPreviewFeedbackRef[],
+  storeApi: ReturnType<typeof useAppStoreApi>,
+) {
+  if (refs.length === 0) return;
+  try {
+    const snapshot = await getTaskPreviewFeedback(taskId);
+    storeApi.getState().setTaskPreviewFeedback(taskId, snapshot);
+  } catch (error) {
+    // i18n-exempt: accepted delivery remains successful; foreground recovery retries this refresh.
+    console.error("Failed to refresh task preview feedback after delivery:", error);
   }
 }
 
@@ -459,6 +345,7 @@ function messageAdmissionKey(parts: {
   planModeEnabled: boolean;
   hasReviewComments: boolean;
   planCommentRefs: TaskPlanCommentRef[];
+  previewFeedbackRefs: TaskPreviewFeedbackRef[];
   contextFilesMeta: ReturnType<typeof buildContextFilesMetadata>;
   attachments: ChatSubmitPayload["attachments"];
   entityReferences: ChatSubmitPayload["entityReferences"];
@@ -466,13 +353,23 @@ function messageAdmissionKey(parts: {
   return JSON.stringify(parts);
 }
 
-async function recoverPendingMessageAdmission(
-  admission: PendingMessageAdmission | null,
-  taskId: string,
-  sessionId: string,
-  refs: TaskPlanCommentRef[],
-  storeApi: ReturnType<typeof useAppStoreApi>,
-) {
+type PendingMessageRecovery = {
+  admission: PendingMessageAdmission | null;
+  taskId: string;
+  sessionId: string;
+  refs: TaskPlanCommentRef[];
+  previewRefs: TaskPreviewFeedbackRef[];
+  storeApi: ReturnType<typeof useAppStoreApi>;
+};
+
+async function recoverPendingMessageAdmission({
+  admission,
+  taskId,
+  sessionId,
+  refs,
+  previewRefs,
+  storeApi,
+}: PendingMessageRecovery) {
   if (!admission) return false;
   const client = getWebSocketClient();
   const committed = client
@@ -481,6 +378,7 @@ async function recoverPendingMessageAdmission(
   if (!committed) return false;
   storeApi.getState().addMessage(committed);
   await refreshAcceptedPlanComments(taskId, refs, storeApi);
+  await refreshAcceptedPreviewFeedback(taskId, previewRefs, storeApi);
   return true;
 }
 
@@ -512,6 +410,100 @@ function buildFinalMessageForSubmit({
   };
 }
 
+type ComposedMessageContext = {
+  resolvedSessionId: string | null;
+  taskId: string | null;
+  sessionModel: string | null;
+  activeModel: string | null;
+  planModeEnabled: boolean;
+  hasPendingClarification: boolean;
+  activeDocument: ActiveDocument | null;
+  planComments: PlanComment[];
+  previewFeedback: TaskPreviewFeedback[];
+  contextFiles: ContextFile[];
+  prompts: CustomPrompt[];
+  queue: ReturnType<typeof useQueue>["queue"];
+  storeApi: ReturnType<typeof useAppStoreApi>;
+  pendingAdmissionRef: { current: PendingMessageAdmission | null };
+};
+
+async function sendComposedMessage(payload: ChatSubmitPayload, context: ComposedMessageContext) {
+  const { taskId, resolvedSessionId, storeApi, pendingAdmissionRef } = context;
+  if (!taskId || !resolvedSessionId) {
+    const error = new MessageSendError(
+      "no-active-session",
+      "No active task session. Start an agent before sending a message.",
+    );
+    console.error(error.message);
+    throw error;
+  }
+
+  const { finalMessage, allContextFiles } = buildFinalMessageForSubmit({
+    payload,
+    contextFiles: context.contextFiles,
+    activeDocument: context.activeDocument,
+    planModeEnabled: context.planModeEnabled,
+    prompts: context.prompts,
+    state: storeApi.getState(),
+  });
+  const modelToSend =
+    context.activeModel && context.activeModel !== context.sessionModel
+      ? context.activeModel
+      : undefined;
+  const planCommentRefs = payload.planCommentRefs ?? toTaskPlanCommentRefs(context.planComments);
+  const previewFeedbackRefs =
+    payload.previewFeedbackRefs ?? toTaskPreviewFeedbackRefs(context.previewFeedback);
+  const contextFilesMeta = buildContextFilesMetadata(allContextFiles);
+  const inputMode = requireSessionInputMode(storeApi.getState(), resolvedSessionId);
+  const admissionKey = messageAdmissionKey({
+    taskId,
+    resolvedSessionId,
+    finalMessage,
+    modelToSend,
+    planModeEnabled: context.planModeEnabled,
+    hasReviewComments: !!payload.reviewComments?.length,
+    planCommentRefs,
+    previewFeedbackRefs,
+    contextFilesMeta,
+    attachments: payload.attachments,
+    entityReferences: payload.entityReferences,
+  });
+  const previousAdmission =
+    pendingAdmissionRef.current?.key === admissionKey ? pendingAdmissionRef.current : null;
+  const admission = previousAdmission ?? { key: admissionKey, id: generateUUID() };
+  pendingAdmissionRef.current = admission;
+  const recovered = await recoverPendingMessageAdmission({
+    admission: previousAdmission,
+    taskId,
+    sessionId: resolvedSessionId,
+    refs: planCommentRefs,
+    previewRefs: previewFeedbackRefs,
+    storeApi,
+  });
+  if (recovered) {
+    if (pendingAdmissionRef.current === admission) pendingAdmissionRef.current = null;
+    return;
+  }
+  const delivered = await deliverComposedMessage({
+    payload,
+    taskId,
+    resolvedSessionId,
+    finalMessage,
+    modelToSend,
+    planModeEnabled: context.planModeEnabled,
+    hasPendingClarification: context.hasPendingClarification,
+    planCommentRefs,
+    previewFeedbackRefs,
+    contextFilesMeta,
+    inputMode,
+    queue: context.queue,
+    storeApi,
+    clientAdmissionId: admission.id,
+  });
+  if (delivered === false) return false;
+  if (pendingAdmissionRef.current === admission) pendingAdmissionRef.current = null;
+}
+
 export function useMessageHandler({
   resolvedSessionId,
   taskId,
@@ -521,6 +513,7 @@ export function useMessageHandler({
   hasPendingClarification = false,
   activeDocument = null,
   planComments = [],
+  previewFeedback = [],
   contextFiles = [],
   prompts = [],
 }: UseMessageHandlerParams) {
@@ -529,74 +522,23 @@ export function useMessageHandler({
   const pendingAdmissionRef = useRef<PendingMessageAdmission | null>(null);
 
   const handleSendMessage = useCallback(
-    async (payload: ChatSubmitPayload) => {
-      if (!taskId || !resolvedSessionId) {
-        const error = new MessageSendError(
-          "no-active-session",
-          "No active task session. Start an agent before sending a message.",
-        );
-        console.error(error.message);
-        throw error;
-      }
-
-      const { finalMessage, allContextFiles } = buildFinalMessageForSubmit({
-        payload,
-        contextFiles,
-        activeDocument,
-        planModeEnabled,
-        prompts,
-        state: storeApi.getState(),
-      });
-      const modelToSend = activeModel && activeModel !== sessionModel ? activeModel : undefined;
-      const planCommentRefs = payload.planCommentRefs ?? toTaskPlanCommentRefs(planComments);
-      const contextFilesMeta = buildContextFilesMetadata(allContextFiles);
-      const inputMode = requireSessionInputMode(storeApi.getState(), resolvedSessionId);
-      const admissionKey = messageAdmissionKey({
+    (payload: ChatSubmitPayload) =>
+      sendComposedMessage(payload, {
         taskId,
         resolvedSessionId,
-        finalMessage,
-        modelToSend,
-        planModeEnabled,
-        hasReviewComments: !!payload.reviewComments?.length,
-        planCommentRefs,
-        contextFilesMeta,
-        attachments: payload.attachments,
-        entityReferences: payload.entityReferences,
-      });
-      const previousAdmission =
-        pendingAdmissionRef.current?.key === admissionKey ? pendingAdmissionRef.current : null;
-      const admission = previousAdmission ?? { key: admissionKey, id: generateUUID() };
-      pendingAdmissionRef.current = admission;
-      if (
-        await recoverPendingMessageAdmission(
-          previousAdmission,
-          taskId,
-          resolvedSessionId,
-          planCommentRefs,
-          storeApi,
-        )
-      ) {
-        if (pendingAdmissionRef.current === admission) pendingAdmissionRef.current = null;
-        return;
-      }
-      const delivered = await deliverComposedMessage({
-        payload,
-        taskId,
-        resolvedSessionId,
-        finalMessage,
-        modelToSend,
+        sessionModel,
+        activeModel,
         planModeEnabled,
         hasPendingClarification,
-        planCommentRefs,
-        contextFilesMeta,
-        inputMode,
-        queue,
+        activeDocument,
+        planComments,
+        previewFeedback,
+        contextFiles,
+        prompts,
+        queue: queue,
         storeApi,
-        clientAdmissionId: admission.id,
-      });
-      if (delivered === false) return false;
-      if (pendingAdmissionRef.current === admission) pendingAdmissionRef.current = null;
-    },
+        pendingAdmissionRef,
+      }),
     [
       resolvedSessionId,
       taskId,
@@ -607,6 +549,7 @@ export function useMessageHandler({
       queue,
       storeApi,
       planComments,
+      previewFeedback,
       contextFiles,
       activeDocument,
       prompts,

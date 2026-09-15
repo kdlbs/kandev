@@ -20,6 +20,9 @@ The feature does not create a virtual browser, transform user scripts, or
 introduce a second executor-routing protocol. It also does not make a security
 claim for arbitrary workspace HTML. The user-selected trust model is recorded
 in [ADR-2026-09-05-trusted-browser-html-preview](../../../decisions/2026-09-05-trusted-browser-html-preview.md).
+Task-owned text, element, and screenshot review is an adjacent delivery
+contract specified by the
+[Web Preview Feedback design](../../tasks/system-design/web-preview-feedback.md).
 
 ## Requirement mapping
 
@@ -235,6 +238,8 @@ must not enable or use this action until a dedicated-origin mode exists.
   instance and obtains a valid URL.
 - Preview state is scoped to the active session plus repository-and-path
   identity and resets when that identity changes.
+- Task-owned feedback captured from a preview has an independent lifecycle and
+  remains durable when this ephemeral execution state resets.
 
 ## Responsive contract
 
@@ -326,3 +331,4 @@ continue to cover browser routing.
 
 - [ADR-2026-07-24-operator-owned-agent-launcher-settings](../../../decisions/2026-07-24-operator-owned-agent-launcher-settings.md)
 - [ADR-2026-09-05-trusted-browser-html-preview](../../../decisions/2026-09-05-trusted-browser-html-preview.md)
+- [ADR-2026-09-15-task-owned-web-preview-feedback](../../../decisions/2026-09-15-task-owned-web-preview-feedback.md)

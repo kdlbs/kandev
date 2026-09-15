@@ -166,6 +166,7 @@ function panelState(overrides = {}) {
     isAgentBusy: false,
     activeDocument: null,
     planComments: [],
+    previewFeedback: [],
     pendingPRFeedback: [],
     walkthroughComments: [],
     messageComments: [],
@@ -447,7 +448,9 @@ describe("useSubmitHandler task plan comments", () => {
       });
     },
   );
+});
 
+describe("useSubmitHandler task feedback references", () => {
   it("submits displayed IDs and versions without clearing the shared snapshot locally", async () => {
     const clearSessionPlanComments = vi.fn();
     const comment = {
@@ -480,6 +483,32 @@ describe("useSubmitHandler task plan comments", () => {
       planCommentRefs: [{ id: "plan-comment-1", version: 3 }],
     });
     expect(clearSessionPlanComments).not.toHaveBeenCalled();
+  });
+
+  it("freezes the displayed preview feedback versions for the shared send", async () => {
+    const { result } = renderHook(() =>
+      useSubmitHandler(
+        panelState({
+          previewFeedback: [
+            {
+              id: "preview-1",
+              version: 6,
+              kind: "text",
+              comment: "Keep this runtime text",
+            },
+          ],
+        }),
+      ),
+    );
+
+    await act(async () => {
+      await result.current.handleSubmit({ message: "" });
+    });
+
+    expect(handleSendMessageMock).toHaveBeenCalledWith({
+      message: "",
+      previewFeedbackRefs: [{ id: "preview-1", version: 6 }],
+    });
   });
 });
 

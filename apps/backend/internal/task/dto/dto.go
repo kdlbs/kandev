@@ -1,6 +1,7 @@
 package dto
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/kandev/kandev/internal/authz"
@@ -1345,6 +1346,77 @@ func TaskPlanCommentSnapshotFromModel(snapshot *models.TaskPlanCommentSnapshot) 
 			AnchorFrom: comment.AnchorFrom, AnchorTo: comment.AnchorTo, Version: comment.Version,
 			CreatedAt: comment.CreatedAt, UpdatedAt: comment.UpdatedAt,
 		})
+	}
+	return out
+}
+
+type TaskPreviewScreenshotDTO struct {
+	AttachmentID string `json:"attachment_id"`
+	Name         string `json:"name"`
+	MimeType     string `json:"mime_type"`
+	Kind         string `json:"kind"`
+	DeliveryMode string `json:"delivery_mode"`
+	SizeBytes    int64  `json:"size_bytes"`
+	State        string `json:"state"`
+}
+
+type TaskPreviewFeedbackDTO struct {
+	ID                     string                               `json:"id"`
+	TaskID                 string                               `json:"task_id"`
+	Kind                   models.TaskPreviewFeedbackKind       `json:"kind"`
+	Comment                string                               `json:"comment"`
+	SourceKind             models.TaskPreviewFeedbackSourceKind `json:"source_kind"`
+	SourceSessionID        string                               `json:"source_session_id,omitempty"`
+	SourceLabel            string                               `json:"source_label"`
+	SourcePath             string                               `json:"source_path,omitempty"`
+	PageRoute              string                               `json:"page_route"`
+	PageTitle              string                               `json:"page_title"`
+	SelectedText           string                               `json:"selected_text,omitempty"`
+	TextAnchor             json.RawMessage                      `json:"text_anchor,omitempty"`
+	ElementSnapshot        json.RawMessage                      `json:"element_snapshot,omitempty"`
+	CaptureRect            json.RawMessage                      `json:"capture_rect,omitempty"`
+	ScreenshotAttachmentID string                               `json:"screenshot_attachment_id,omitempty"`
+	ScreenshotAttachment   *TaskPreviewScreenshotDTO            `json:"screenshot_attachment,omitempty"`
+	Version                int64                                `json:"version"`
+	CreatedAt              time.Time                            `json:"created_at"`
+	UpdatedAt              time.Time                            `json:"updated_at"`
+}
+
+type TaskPreviewFeedbackSnapshotDTO struct {
+	TaskID   string                    `json:"task_id"`
+	Revision int64                     `json:"revision"`
+	Items    []*TaskPreviewFeedbackDTO `json:"items"`
+}
+
+func TaskPreviewFeedbackSnapshotFromModel(
+	snapshot *models.TaskPreviewFeedbackSnapshot,
+) *TaskPreviewFeedbackSnapshotDTO {
+	if snapshot == nil {
+		return nil
+	}
+	out := &TaskPreviewFeedbackSnapshotDTO{
+		TaskID: snapshot.TaskID, Revision: snapshot.Revision,
+		Items: make([]*TaskPreviewFeedbackDTO, 0, len(snapshot.Items)),
+	}
+	for _, item := range snapshot.Items {
+		dtoItem := &TaskPreviewFeedbackDTO{
+			ID: item.ID, TaskID: item.TaskID, Kind: item.Kind, Comment: item.Comment,
+			SourceKind: item.SourceKind, SourceSessionID: item.SourceSessionID,
+			SourceLabel: item.SourceLabel, SourcePath: item.SourcePath,
+			PageRoute: item.PageRoute, PageTitle: item.PageTitle,
+			SelectedText: item.SelectedText, TextAnchor: item.TextAnchor,
+			ElementSnapshot: item.ElementSnapshot, CaptureRect: item.CaptureRect,
+			ScreenshotAttachmentID: item.ScreenshotAttachmentID,
+			Version:                item.Version, CreatedAt: item.CreatedAt, UpdatedAt: item.UpdatedAt,
+		}
+		if attachment := item.ScreenshotAttachment; attachment != nil {
+			dtoItem.ScreenshotAttachment = &TaskPreviewScreenshotDTO{
+				AttachmentID: attachment.ID, Name: attachment.Name, MimeType: attachment.MimeType,
+				Kind: attachment.Kind, DeliveryMode: attachment.DeliveryMode,
+				SizeBytes: attachment.SizeBytes, State: attachment.State,
+			}
+		}
+		out.Items = append(out.Items, dtoItem)
 	}
 	return out
 }

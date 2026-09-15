@@ -91,6 +91,52 @@ describe("buildContextItems task plan comments", () => {
   });
 });
 
+describe("buildContextItems task preview feedback", () => {
+  it("keeps the shared collection local to the context chip", () => {
+    const items = buildContextItems({
+      planContextEnabled: false,
+      contextFiles: [],
+      resolvedSessionId: "session-secondary",
+      removeContextFile: vi.fn(),
+      unpinFile: vi.fn(),
+      addPlan: vi.fn(),
+      promptsMap: new Map(),
+      pendingCommentsByFile: {},
+      handleRemoveCommentFile: vi.fn(),
+      handleRemoveComment: vi.fn(),
+      planComments: [],
+      handleClearPlanComments: vi.fn(),
+      previewFeedback: [
+        {
+          id: "preview-1",
+          version: 2,
+          comment: "Increase contrast",
+          kind: "element",
+          source_label: "Checkout preview",
+          page_route: "/cart",
+        },
+      ],
+      pendingPRFeedback: [],
+      handleRemovePRFeedback: vi.fn(),
+      handleClearPRFeedback: vi.fn(),
+      walkthroughComments: [],
+      handleRemoveWalkthroughComment: vi.fn(),
+      handleClearWalkthroughComments: vi.fn(),
+      messageComments: [],
+      handleClearMessageComments: vi.fn(),
+      taskId: "task-1",
+    } as never);
+
+    const item = items.find((candidate) => candidate.kind === "preview-feedback");
+    expect(item).toMatchObject({
+      kind: "preview-feedback",
+      label: "1 preview feedback item",
+    });
+    expect(item).not.toHaveProperty("onOpen");
+    expect(item?.onRemove).toBeUndefined();
+  });
+});
+
 describe("buildContextItems file and directory context", () => {
   function buildItems(contextFiles: never[]) {
     return buildContextItems({

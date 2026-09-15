@@ -36,6 +36,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initStepEntriesSchema,
 		r.initTaskUsageEventsSchema,
 		r.initAttachmentsSchema,
+		r.initPreviewFeedbackSchema,
 		r.initTaskResourceCleanupSchema,
 		r.initControlServerRecordSchema,
 		r.initGitSchema,
@@ -918,6 +919,64 @@ func (r *Repository) initAttachmentsSchema() error {
 	`)
 	if err != nil {
 		return fmt.Errorf("init attachments schema: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) initPreviewFeedbackSchema() error {
+	_, err := r.db.ExecContext(r.migrationContext(), `
+	CREATE TABLE IF NOT EXISTS task_preview_feedback_collections (
+		task_id TEXT PRIMARY KEY,
+		revision INTEGER NOT NULL DEFAULT 0,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+	CREATE TABLE IF NOT EXISTS task_preview_feedback (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		kind TEXT NOT NULL CHECK (kind IN ('text', 'element', 'screenshot')),
+		comment TEXT NOT NULL,
+		source_kind TEXT NOT NULL CHECK (source_kind IN ('browser', 'html_file')),
+		source_session_id TEXT,
+		source_label TEXT NOT NULL,
+		source_path TEXT,
+		page_route TEXT NOT NULL,
+		page_title TEXT NOT NULL,
+		selected_text TEXT,
+		text_anchor_json TEXT,
+		element_snapshot_json TEXT,
+		capture_rect_json TEXT,
+		screenshot_attachment_id TEXT UNIQUE,
+		version INTEGER NOT NULL DEFAULT 1,
+		created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE,
+		FOREIGN KEY (screenshot_attachment_id) REFERENCES task_message_attachments(id),
+		CHECK (
+			(kind = 'text' AND selected_text IS NOT NULL AND text_anchor_json IS NOT NULL
+				AND element_snapshot_json IS NULL AND screenshot_attachment_id IS NULL)
+			OR (kind = 'element' AND selected_text IS NULL AND text_anchor_json IS NULL
+				AND element_snapshot_json IS NOT NULL AND screenshot_attachment_id IS NULL)
+			OR (kind = 'screenshot' AND selected_text IS NULL AND text_anchor_json IS NULL
+				AND element_snapshot_json IS NULL AND capture_rect_json IS NOT NULL
+				AND screenshot_attachment_id IS NOT NULL)
+		)
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_preview_feedback_order
+		ON task_preview_feedback(task_id, created_at, id);
+	CREATE TABLE IF NOT EXISTS task_preview_feedback_admissions (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		request_fingerprint TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL,
+		FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+	);
+	CREATE INDEX IF NOT EXISTS idx_task_preview_feedback_admissions_task
+		ON task_preview_feedback_admissions(task_id);
+	`)
+	if err != nil {
+		return fmt.Errorf("init preview feedback schema: %w", err)
 	}
 	return nil
 }

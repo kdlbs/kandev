@@ -25,6 +25,7 @@ function runnerEnv(binDir: string, extra: Record<string, string> = {}): NodeJS.P
   delete env.KANDEV_E2E_CONTAINERS;
   delete env.KANDEV_E2E_DOCKER;
   delete env.CAPTURE_PR_ASSETS;
+  delete env.BASH_ENV;
   return env;
 }
 
@@ -206,11 +207,7 @@ describe("run-e2e.sh", () => {
 
     const result = spawnSync("bash", [rawScriptPath, "--project=docker", "--help"], {
       encoding: "utf8",
-      env: {
-        ...process.env,
-        KANDEV_E2E_ALLOW_UNSAFE_PARALLELISM: "",
-        PATH: `${binDir}:${process.env.PATH ?? ""}`,
-      },
+      env: runnerEnv(binDir),
     });
 
     expect(result.status).toBe(0);
@@ -229,17 +226,15 @@ describe("run-e2e.sh", () => {
     );
     fs.chmodSync(pnpmPath, 0o755);
 
+    const env = runnerEnv(binDir);
+    env.KANDEV_E2E_CONTAINERS = "1";
+    env.KANDEV_E2E_DOCKER = "1";
     const result = spawnSync(
       "bash",
       [scriptPath, "--host", "--no-build", "--project", "chromium", "--", "--help"],
       {
         encoding: "utf8",
-        env: {
-          ...process.env,
-          PATH: `${binDir}:${process.env.PATH ?? ""}`,
-          KANDEV_E2E_CONTAINERS: "1",
-          KANDEV_E2E_DOCKER: "1",
-        },
+        env,
       },
     );
 

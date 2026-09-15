@@ -46,6 +46,7 @@ import {
   defaultReviewState,
   defaultNeedsYouInboxState,
   defaultFailedInboxState,
+  defaultPreviewFeedbackState,
 } from "./slices";
 import type {
   WorkspaceState,
@@ -224,6 +225,9 @@ export type AppState = KanbanSlice & {
   // Failed Inbox slice (actions merged via FailedInboxSliceActions
   // intersection on AppState)
   failedInbox: (typeof defaultFailedInboxState)["failedInbox"];
+
+  // Task-owned pending feedback captured from rendered previews.
+  previewFeedback: (typeof defaultPreviewFeedbackState)["previewFeedback"];
 
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];

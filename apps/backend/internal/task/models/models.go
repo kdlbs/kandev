@@ -2537,6 +2537,57 @@ type TaskPlanCommentRef struct {
 	Version int64  `json:"version"`
 }
 
+type TaskPreviewFeedbackKind string
+
+const (
+	TaskPreviewFeedbackText       TaskPreviewFeedbackKind = "text"
+	TaskPreviewFeedbackElement    TaskPreviewFeedbackKind = "element"
+	TaskPreviewFeedbackScreenshot TaskPreviewFeedbackKind = "screenshot"
+)
+
+type TaskPreviewFeedbackSourceKind string
+
+const (
+	TaskPreviewFeedbackBrowser  TaskPreviewFeedbackSourceKind = "browser"
+	TaskPreviewFeedbackHTMLFile TaskPreviewFeedbackSourceKind = "html_file"
+)
+
+// TaskPreviewFeedback is one immutable rendered-page capture with an editable comment.
+type TaskPreviewFeedback struct {
+	ID                     string                        `json:"id"`
+	TaskID                 string                        `json:"task_id"`
+	Kind                   TaskPreviewFeedbackKind       `json:"kind"`
+	Comment                string                        `json:"comment"`
+	SourceKind             TaskPreviewFeedbackSourceKind `json:"source_kind"`
+	SourceSessionID        string                        `json:"source_session_id,omitempty"`
+	SourceLabel            string                        `json:"source_label"`
+	SourcePath             string                        `json:"source_path,omitempty"`
+	PageRoute              string                        `json:"page_route"`
+	PageTitle              string                        `json:"page_title"`
+	SelectedText           string                        `json:"selected_text,omitempty"`
+	TextAnchor             json.RawMessage               `json:"text_anchor,omitempty"`
+	ElementSnapshot        json.RawMessage               `json:"element_snapshot,omitempty"`
+	CaptureRect            json.RawMessage               `json:"capture_rect,omitempty"`
+	ScreenshotAttachmentID string                        `json:"screenshot_attachment_id,omitempty"`
+	ScreenshotAttachment   *TaskMessageAttachment        `json:"screenshot_attachment,omitempty"`
+	Version                int64                         `json:"version"`
+	CreatedAt              time.Time                     `json:"created_at"`
+	UpdatedAt              time.Time                     `json:"updated_at"`
+}
+
+// TaskPreviewFeedbackSnapshot is the authoritative pending collection for a task.
+type TaskPreviewFeedbackSnapshot struct {
+	TaskID   string                 `json:"task_id" db:"task_id"`
+	Revision int64                  `json:"revision" db:"revision"`
+	Items    []*TaskPreviewFeedback `json:"items"`
+}
+
+// TaskPreviewFeedbackRef identifies the exact pending item version included in delivery.
+type TaskPreviewFeedbackRef struct {
+	ID      string `json:"id"`
+	Version int64  `json:"version"`
+}
+
 // TaskPlanRevision is one immutable snapshot in the revision history of a task plan.
 // Revisions are the source of truth for history; TaskPlan stores the latest revision's content as HEAD.
 type TaskPlanRevision struct {
