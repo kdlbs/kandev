@@ -804,8 +804,9 @@ Declare `agent_conversation: true` before using the manager. `Ensure` returns
 task or session. `Dispatch` returns `started`, `sent`, `duplicate_occurrence`,
 or `skipped_busy`. Supply a stable occurrence key when a scheduled event may be
 retried; a busy dispatch does not consume it. `Delete` is idempotent and only
-removes conversations owned by the calling plugin. Uninstall removes all of
-that plugin's managed conversations across workspaces.
+removes conversations owned by the calling plugin. Disabling or uninstalling
+the plugin removes all of that plugin's managed conversations across
+workspaces.
 
 **Host state** is a small key/value store kandev keeps for your plugin in
 its own database. Each entry is addressed by a `(scope, scopeID, key)`

@@ -367,11 +367,39 @@ func TestDispatchWithOccurrenceKeyDeduplicates(t *testing.T) {
 	if second.Status != "duplicate_occurrence" {
 		t.Fatalf("second status = %q, want duplicate_occurrence", second.Status)
 	}
+	if second.SessionID != first.SessionID || second.Descriptor != first.Descriptor {
+		t.Fatalf("duplicate dispatch identity = %#v, want %#v", second, first)
+	}
 
 	// Only one call must have reached the runtime — a duplicate occurrence
 	// must never fire the agent twice.
 	if deps.dispatcher.callCount() != 1 {
 		t.Fatalf("expected 1 runtime dispatch, got %d", deps.dispatcher.callCount())
+	}
+}
+
+func TestDispatchDelimiterCoordinatesUseDistinctMessageIDs(t *testing.T) {
+	if left, right := deriveOccurrenceMessageID("plugin-coordinator", "ws-1", "a|b", "c"), deriveOccurrenceMessageID("plugin-coordinator", "ws-1", "a", "b|c"); left == right {
+		t.Fatalf("delimiter coordinates collided at message ID %q", left)
+	}
+
+	svc, deps := newACTestService()
+	for _, key := range []string{"a|b", "a"} {
+		if _, _, err := svc.Ensure(context.Background(), "plugin-coordinator", pluginsdk.AgentConversationSpec{WorkspaceID: "ws-1", ConversationKey: key}); err != nil {
+			t.Fatalf("Ensure(%q): %v", key, err)
+		}
+	}
+
+	first, err := svc.Dispatch(context.Background(), "plugin-coordinator", "ws-1", "a|b", "first", "c")
+	if err != nil || first.Status != "started" {
+		t.Fatalf("first Dispatch: status=%q err=%v", first.Status, err)
+	}
+	second, err := svc.Dispatch(context.Background(), "plugin-coordinator", "ws-1", "a", "second", "b|c")
+	if err != nil || second.Status != "started" {
+		t.Fatalf("second Dispatch: status=%q err=%v", second.Status, err)
+	}
+	if deps.dispatcher.callCount() != 2 {
+		t.Fatalf("runtime calls = %d, want 2 distinct conversations", deps.dispatcher.callCount())
 	}
 }
 

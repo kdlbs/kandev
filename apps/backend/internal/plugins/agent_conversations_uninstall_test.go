@@ -89,6 +89,45 @@ func TestServiceUninstallDeletesAgentConversations(t *testing.T) {
 	}
 }
 
+func TestServiceDisableDeletesAgentConversations(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	cleanup := newFakeAgentConversationCleanup()
+	cleanup.seed("kandev-plugin-coordinator", 2)
+	svc.SetAgentConversations(cleanup)
+	installTestPlugin(t, svc, "kandev-plugin-coordinator")
+
+	if err := svc.Disable("kandev-plugin-coordinator"); err != nil {
+		t.Fatalf("Disable() unexpected error: %v", err)
+	}
+	if cleanup.calls != 1 {
+		t.Fatalf("DeleteAllForPlugin calls = %d, want 1", cleanup.calls)
+	}
+	if got := cleanup.remaining("kandev-plugin-coordinator"); got != 0 {
+		t.Fatalf("remaining owned conversations after disable = %d, want 0", got)
+	}
+}
+
+func TestServiceDisableFailsVisibleWhenConversationCleanupFails(t *testing.T) {
+	svc, _, _ := newTestService(t)
+	cleanup := newFakeAgentConversationCleanup()
+	cleanup.seed("kandev-plugin-coordinator", 1)
+	cleanup.deleteErr = errors.New("conversation store unavailable")
+	svc.SetAgentConversations(cleanup)
+	installTestPlugin(t, svc, "kandev-plugin-coordinator")
+
+	err := svc.Disable("kandev-plugin-coordinator")
+	if err == nil || !strings.Contains(err.Error(), cleanup.deleteErr.Error()) {
+		t.Fatalf("Disable() error = %v, want cleanup failure", err)
+	}
+	rec, err := svc.Get("kandev-plugin-coordinator")
+	if err != nil {
+		t.Fatalf("Get(): %v", err)
+	}
+	if rec.Status != StatusError {
+		t.Fatalf("status after failed cleanup = %q, want %q", rec.Status, StatusError)
+	}
+}
+
 // TestServiceUninstallLeavesOtherPluginsConversationsAlone is the
 // provenance-safety regression at the plugin-lifecycle layer: uninstalling
 // one plugin must call DeleteAllForPlugin scoped to ITS OWN id only, never

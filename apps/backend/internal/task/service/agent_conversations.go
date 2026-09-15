@@ -412,12 +412,11 @@ func (s *AgentConversationService) repairIfNeeded(ctx context.Context, existing 
 	// changed plugin setting is reconciled instead of silently continuing with
 	// an old (or subsequently disabled) binding.
 	profileID := spec.AgentProfileID
-	if err := s.reconcileConversationTask(ctx, existing, profileID, spec.BasePrompt); err != nil {
-		return pluginsdk.AgentConversationDescriptor{}, "", err
-	}
-
 	primary, err := s.ensureConversationPrimarySession(ctx, existing.ID, profileID)
 	if err != nil {
+		return pluginsdk.AgentConversationDescriptor{}, "", err
+	}
+	if err := s.reconcileConversationTask(ctx, existing, profileID, spec.BasePrompt); err != nil {
 		return pluginsdk.AgentConversationDescriptor{}, "", err
 	}
 
@@ -444,6 +443,9 @@ func (s *AgentConversationService) ensureConversationPrimarySession(ctx context.
 	}
 	if primary.AgentProfileID == profileID {
 		return primary, nil
+	}
+	if primary.State == models.TaskSessionStateRunning || primary.State == models.TaskSessionStateStarting || primary.AgentExecutionID != "" {
+		return nil, status.Error(codes.FailedPrecondition, "conversation session has a live agent execution; delete and recreate it before changing agent profile")
 	}
 	primary.AgentProfileID = profileID
 	primary.UpdatedAt = time.Now().UTC()
@@ -575,7 +577,7 @@ func (s *AgentConversationService) Dispatch(ctx context.Context, pluginID, works
 		return pluginsdk.AgentConversationDispatch{}, err
 	}
 	if duplicate {
-		return pluginsdk.AgentConversationDispatch{Status: "duplicate_occurrence"}, nil
+		return agentConversationDispatch(existing, primary, workspaceID, conversationKey, "duplicate_occurrence"), nil
 	}
 
 	// 5. Deliver through the real agent runtime (start a never-launched
@@ -585,16 +587,20 @@ func (s *AgentConversationService) Dispatch(ctx context.Context, pluginID, works
 		return pluginsdk.AgentConversationDispatch{}, err
 	}
 
+	return agentConversationDispatch(existing, primary, workspaceID, conversationKey, deliverStatus), nil
+}
+
+func agentConversationDispatch(task *models.Task, session *models.TaskSession, workspaceID, conversationKey, dispatchStatus string) pluginsdk.AgentConversationDispatch {
 	return pluginsdk.AgentConversationDispatch{
-		SessionID: primary.ID,
-		Status:    deliverStatus,
+		SessionID: session.ID,
+		Status:    dispatchStatus,
 		Descriptor: pluginsdk.AgentConversationDescriptor{
-			TaskID:          existing.ID,
-			SessionID:       primary.ID,
+			TaskID:          task.ID,
+			SessionID:       session.ID,
 			WorkspaceID:     workspaceID,
 			ConversationKey: conversationKey,
 		},
-	}, nil
+	}
 }
 
 func (s *AgentConversationService) dispatchTarget(ctx context.Context, pluginID, workspaceID, conversationKey string) (*models.Task, *models.TaskSession, *pluginsdk.AgentConversationDispatch, error) {
@@ -677,8 +683,7 @@ func composeConversationPrompt(task *models.Task, text string) string {
 // occurrenceKey strings may otherwise collide) and repeated calls for the
 // same occurrence are naturally idempotent at the storage layer too.
 func deriveOccurrenceMessageID(pluginID, workspaceID, conversationKey, occurrenceKey string) string {
-	name := pluginID + "|" + workspaceID + "|" + conversationKey + "|" + occurrenceKey
-	return uuid.NewSHA1(uuid.NameSpaceOID, []byte(name)).String()
+	return conversationIdentity("occurrence-message", pluginID, workspaceID, conversationKey, occurrenceKey)
 }
 
 // Delete removes all managed conversations owned by pluginID matching

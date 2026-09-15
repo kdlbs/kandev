@@ -203,8 +203,9 @@ binary an operator hasn't explicitly approved via install or Sync.
 
 ## Enable, disable, uninstall
 
-- **Disable** stops the subprocess. Config and state are preserved; no
-  events or webhooks are delivered while disabled.
+- **Disable** stops the subprocess and removes the plugin's managed agent
+  conversations. Config and other state are preserved; no events or webhooks
+  are delivered while disabled.
 - **Enable** respawns the subprocess and re-completes the handshake. It is also
   the manual recovery action for an `error` plugin; the Settings row and detail
   page show the last failure diagnostic when one is available. A successful

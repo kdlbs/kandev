@@ -30,6 +30,7 @@ type fakeMessengerTaskSvc struct {
 	waitErr                  error
 	idempotentMessagePresent bool
 	deleteRequiresLiveCtx    bool
+	deleteErr                error
 }
 
 func (f *fakeMessengerTaskSvc) GetTaskSession(_ context.Context, id string) (*taskmodels.TaskSession, error) {
@@ -67,11 +68,19 @@ func (f *fakeMessengerTaskSvc) DeleteMessage(ctx context.Context, id string) err
 		return ctx.Err()
 	}
 	f.deleted = append(f.deleted, id)
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
 	if f.created != nil && f.created.ID == id {
 		f.idempotentMessagePresent = false
 	}
 	return nil
 }
+
+type acceptedPromptError struct{ err error }
+
+func (e acceptedPromptError) Error() string              { return e.err.Error() }
+func (acceptedPromptError) DetachedResumeAccepted() bool { return true }
 
 func (f *fakeMessengerTaskSvc) WaitForSessionReady(_ context.Context, _ string) error {
 	return f.waitErr
@@ -241,6 +250,39 @@ func TestPluginsMessenger_IdempotentFailureDeletesMessageAfterRequestCancellatio
 	_, err := a.StartOrPromptIdempotent(ctx, "t1", tasks.primary, "nope", "plugin:p", "occurrence-message")
 	require.Error(t, err)
 	require.False(t, tasks.idempotentMessagePresent, "a failed dispatch must not leave an idempotent message that suppresses the retry")
+}
+
+func TestPluginsMessenger_IdempotentRetryReconcilesMarkerAfterDeleteFailure(t *testing.T) {
+	tasks := &fakeMessengerTaskSvc{
+		primary:   &taskmodels.TaskSession{ID: "s1", TaskID: "t1", State: taskmodels.TaskSessionStateWaitingForInput, AgentExecutionID: "exec-1"},
+		deleteErr: errors.New("marker store unavailable"),
+	}
+	orch := &fakeMessengerOrch{promptErr: errors.New("dispatch boom")}
+	a := newMessengerAdapter(t, tasks, orch)
+
+	_, err := a.StartOrPromptIdempotent(context.Background(), "t1", tasks.primary, "wake", "plugin:p", "occurrence-message")
+	require.Error(t, err)
+	require.True(t, tasks.idempotentMessagePresent, "a failed marker delete leaves a reconciliable pending delivery")
+
+	tasks.deleteErr = nil
+	orch.promptErr = nil
+	status, err := a.StartOrPromptIdempotent(context.Background(), "t1", tasks.primary, "wake", "plugin:p", "occurrence-message")
+	require.NoError(t, err)
+	require.Equal(t, "sent", status)
+	require.Equal(t, 2, orch.promptCalls, "retry must deliver instead of treating the orphan marker as success")
+	require.Len(t, tasks.deleted, 2, "retry removes the stale marker before recording its new dispatch")
+}
+
+func TestPluginsMessenger_IdempotentAcceptedPromptErrorKeepsOccurrenceMarker(t *testing.T) {
+	tasks := &fakeMessengerTaskSvc{primary: &taskmodels.TaskSession{ID: "s1", TaskID: "t1", State: taskmodels.TaskSessionStateWaitingForInput, AgentExecutionID: "exec-1"}}
+	orch := &fakeMessengerOrch{promptErr: acceptedPromptError{err: errors.New("publication failed after acceptance")}}
+	a := newMessengerAdapter(t, tasks, orch)
+
+	status, err := a.StartOrPromptIdempotent(context.Background(), "t1", tasks.primary, "wake", "plugin:p", "occurrence-message")
+	require.NoError(t, err, "accepted prompt must not be replayed")
+	require.Equal(t, "sent", status)
+	require.True(t, tasks.idempotentMessagePresent, "accepted prompt marker must remain durable")
+	require.Empty(t, tasks.deleted, "accepted prompt marker must not be compensated away")
 }
 
 func TestPluginsMessenger_ExplicitSessionMustBelongToTask(t *testing.T) {

@@ -781,6 +781,32 @@ func TestEnsureReconcilesExistingConversationProfileAndBasePrompt(t *testing.T) 
 	}
 }
 
+func TestEnsureRejectsProfileChangeForLiveConversationSession(t *testing.T) {
+	svc, deps := newACTestService()
+	ctx := context.Background()
+	desc, _, err := svc.Ensure(ctx, "plugin-coordinator", pluginsdk.AgentConversationSpec{
+		WorkspaceID: "ws-1", ConversationKey: "coordinator", AgentProfileID: "profile-old",
+	})
+	if err != nil {
+		t.Fatalf("first Ensure: %v", err)
+	}
+	deps.sess.setState(desc.SessionID, models.TaskSessionStateRunning)
+
+	_, _, err = svc.Ensure(ctx, "plugin-coordinator", pluginsdk.AgentConversationSpec{
+		WorkspaceID: "ws-1", ConversationKey: "coordinator", AgentProfileID: "profile-new",
+	})
+	if status.Code(err) != codes.FailedPrecondition {
+		t.Fatalf("Ensure() error code = %v, want FailedPrecondition (err=%v)", status.Code(err), err)
+	}
+	primary, err := deps.sess.GetPrimarySessionByTaskID(ctx, desc.TaskID)
+	if err != nil {
+		t.Fatalf("GetPrimarySessionByTaskID: %v", err)
+	}
+	if primary.AgentProfileID != "profile-old" {
+		t.Fatalf("live session profile = %q, want profile-old", primary.AgentProfileID)
+	}
+}
+
 func TestDispatchRetriesOccurrenceAfterDeliveryFailure(t *testing.T) {
 	svc, deps := newACTestService()
 	ctx := context.Background()
