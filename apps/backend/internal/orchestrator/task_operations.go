@@ -2773,6 +2773,8 @@ func (s *Service) resumeTaskSessionWithContinuation(
 		return nil, err
 	} else if exact != nil && (session.ExactProfileGeneration != exact.Generation || session.ExactProfileRevision != exact.Revision) {
 		return nil, ErrExactProfileAssignmentInvalid
+	} else if exact != nil {
+		options.ExactProfile = true
 	}
 	allowCompletedResume := options.AllowCompletedSessionResume &&
 		session.State == models.TaskSessionStateCompleted
