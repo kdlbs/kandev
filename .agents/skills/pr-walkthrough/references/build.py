@@ -444,9 +444,15 @@ def sec_tldr(pr):
 
 def sec_why(why):
     items = "".join(f'<li>{esc(w)}</li>' for w in why["what"])
+    context = "".join(
+        f'<p class="mb-3"><strong>{label}:</strong> {esc(why[key])}</p>'
+        for key, label in (("audience", "Who is affected"), ("outcome", "Result"))
+        if why.get(key)
+    )
     return f'''<section id="why" class="anchor-target mb-14">
-      <h2 class="text-xl font-semibold mb-3">Why this change</h2>
+      <h2 class="text-xl font-semibold mb-3">Why this PR exists</h2>
       <p class="mb-4">{esc(why["problem"])}</p>
+      {context}
       <h3 class="text-sm font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-2">What it does</h3>
       <ul class="list-disc pl-5 space-y-1.5 marker:text-brand">{items}</ul>
     </section>'''
@@ -562,14 +568,113 @@ def sec_review(review):
     </section>'''
 
 
+IMPACT_COLUMNS = {
+    "breaking": ("Breaking changes", (("audience", "Affected users / trigger"),
+        ("before", "Before"), ("after", "After"), ("action", "Required action"))),
+    "ux": ("User experience", (("surface", "Entry point"),
+        ("before", "Before"), ("after", "After"))),
+    "plugins": ("Kandev plugin interfaces", (("name", "API / interface"),
+        ("change", "Change"), ("contract", "Before / after contract"),
+        ("compatibility", "Compatibility / action"))),
+    "mcp": ("MCP tools", (("name", "Tool"), ("context", "Context / audience"),
+        ("change", "Change"), ("contract", "Before / after contract"),
+        ("compatibility", "Compatibility / action"))),
+    "database": ("Database changes", (("migration", "Migration / database"),
+        ("object", "Table / column / index"), ("change", "Before / after schema"),
+        ("upgrade", "Existing data / upgrade / rollback"))),
+}
+IMPACT_STATUS = {"changed": "Changed", "none": "No changes found", "unknown": "Not verified"}
+
+
+def validate_impact(impact):
+    require(isinstance(impact, dict), "impact must be an object")
+    for key, (_, columns) in IMPACT_COLUMNS.items():
+        ctx = f"impact.{key}"
+        section = impact.get(key)
+        require(isinstance(section, dict), f"{ctx} must be an object")
+        status = section.get("status")
+        require(isinstance(status, str) and status in IMPACT_STATUS, f"{ctx}.status is invalid")
+        items = section.get("items")
+        require(isinstance(items, list), f"{ctx}.items must be a list")
+        require(bool(items) == (status == "changed"), f"{ctx}.items must match status")
+        if status == "unknown" or "note" in section:
+            require(isinstance(section.get("note"), str) and section["note"].strip(),
+                    f"{ctx}.note must explain the evidence limit")
+        identities = set()
+        for i, item in enumerate(items):
+            row = f"{ctx}.items[{i}]"
+            require(isinstance(item, dict), f"{row} must be an object")
+            for field in [c[0] for c in columns] + ["file"]:
+                require(isinstance(item.get(field), str) and item[field].strip(),
+                        f"{row}.{field} must be a non-empty string")
+            if key in ("plugins", "mcp"):
+                require(item["change"] in ("added", "changed", "removed"),
+                        f"{row}.change must be added, changed, or removed")
+            if key == "mcp":
+                identity = (item["context"], item["name"])
+                require(identity not in identities, f"{row} repeats a tool in the same context")
+                identities.add(identity)
+
+
+def impact_table(columns, items, pr):
+    headings = "".join(f'<th scope="col">{esc(label)}</th>' for _, label in columns)
+    rows = []
+    for item in items:
+        cells = "".join(f'<td data-label="{esc_attr(label)}">{esc(item[key])}</td>'
+                        for key, label in columns)
+        # Evidence always uses the trusted PR diff, never a supplied URL override.
+        url = file_url({"file": item["file"]}, pr)
+        rows.append(f'<tr>{cells}<td data-label="Source"><a href="{esc_attr(url)}">'
+                    f'{esc(item["file"])}</a></td></tr>')
+    return ('<table class="impact-table"><thead><tr>' + headings +
+            '<th scope="col">Source</th></tr></thead><tbody>' + "".join(rows) + '</tbody></table>')
+
+
+def mcp_counts(items):
+    contexts = {}
+    for item in items:
+        counts = contexts.setdefault(item["context"], dict.fromkeys(("added", "changed", "removed"), 0))
+        counts[item["change"]] += 1
+    return '<ul class="impact-counts">' + "".join(
+        f'<li>{esc(context)}: +{c["added"]} added, {c["changed"]} changed, '
+        f'-{c["removed"]} removed; net {c["added"] - c["removed"]:+d}</li>'
+        for context, c in contexts.items()
+    ) + '</ul>'
+
+
+def sec_impact(impact, pr):
+    summary, details = [], []
+    for key, (title, columns) in IMPACT_COLUMNS.items():
+        section = impact[key]
+        status = section["status"]
+        label = IMPACT_STATUS[status]
+        if key == "breaking" and status == "changed":
+            label = "Breaking changes detected"
+        summary.append(f'<li><strong>{esc(title)}:</strong> {label}'
+                       + (f' ({len(section["items"])})' if status == "changed" else '')
+                       + (f' <span>{esc(section["note"])}</span>' if section.get("note") else '') + '</li>')
+        if status != "changed":
+            continue
+        counts = mcp_counts(section["items"]) if key == "mcp" else ""
+        details.append(f'<section id="impact-{key}" class="impact-detail anchor-target">'
+                       f'<h3>{title}</h3>{counts}'
+                       f'{impact_table(columns, section["items"], pr)}</section>')
+    alert = ' impact-alert' if impact["breaking"]["status"] == "changed" else ''
+    return (f'<section id="impact" class="anchor-target mb-14{alert}">'
+            '<h2 class="text-xl font-semibold mb-3">Impact at a glance</h2>'
+            '<ul class="impact-summary">' + "".join(summary) + '</ul>' + "".join(details) + '</section>')
+
+
 def render_content(data):
     pr = data["pr"]
     parts = [sec_tldr(pr), sec_why(data["why"])]
+    if "impact" in data:
+        parts.append(sec_impact(data["impact"], pr))
+    if data.get("data"):
+        parts.append(sec_data(data["data"]))
     if data.get("architecture"):
         parts.append(sec_arch(data["architecture"]))
     parts.append(sec_changes(data["changes"], data.get("edges", []), pr))
-    if data.get("data"):
-        parts.append(sec_data(data["data"]))
     parts.append(sec_risk(data["risk"]))
     parts.append(sec_review(data["review"]))
     return "\n\n    ".join(parts)
@@ -596,6 +701,12 @@ def validate(data):
         require(pr.get(k) not in (None, ""), f'pr.{k} is required')
     require(data.get("why", {}).get("problem"), "why.problem is required")
     require_str_list(data.get("why", {}).get("what"), "why.what")
+    for key in ("audience", "outcome"):
+        if key in data["why"]:
+            require(isinstance(data["why"][key], str) and data["why"][key].strip(),
+                    f"why.{key} must be a non-empty string")
+    if "impact" in data:
+        validate_impact(data["impact"])
     changes = data.get("changes") or []
     require(len(changes) >= 1, "changes needs at least one entry")
     for i, c in enumerate(changes):
