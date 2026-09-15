@@ -15,15 +15,13 @@ export function StepPromptSection({
   step,
   savedStep,
   localPrompt,
-  onLocalPromptChange,
-  debouncedUpdatePrompt,
+  onPromptChange,
   readOnly,
 }: {
   step: WorkflowStep;
   savedStep?: WorkflowStep;
   localPrompt: string;
-  onLocalPromptChange: (prompt: string) => void;
-  debouncedUpdatePrompt: (prompt: string) => void;
+  onPromptChange: (prompt: string) => void;
   readOnly: boolean;
 }) {
   const { t } = useTranslation();
@@ -46,10 +44,7 @@ export function StepPromptSection({
             <button
               key={template.labelKey}
               type="button"
-              onClick={() => {
-                onLocalPromptChange(template.prompt);
-                debouncedUpdatePrompt(template.prompt);
-              }}
+              onClick={() => onPromptChange(template.prompt)}
               className="cursor-pointer rounded-md border border-border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             >
               {t(template.labelKey)}
@@ -61,8 +56,7 @@ export function StepPromptSection({
         value={localPrompt}
         onChange={(value) => {
           if (readOnly) return;
-          onLocalPromptChange(value);
-          debouncedUpdatePrompt(value);
+          onPromptChange(value);
         }}
         language="markdown"
         readOnly={readOnly}
@@ -74,7 +68,6 @@ export function StepPromptSection({
       />
       <p className="text-[11px] text-muted-foreground/60">
         {t("workflows:stepPromptUsageHint", {
-          open: "{{",
           taskPrompt: "{{task_prompt}}",
         })}
       </p>
