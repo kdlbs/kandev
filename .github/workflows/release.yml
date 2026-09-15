@@ -39,6 +39,13 @@ name: release
 #   APPLE_ID / APPLE_PASSWORD / APPLE_TEAM_ID or APPLE_API_KEY / APPLE_API_ISSUER / APPLE_API_KEY_P8 — macOS notarization
 #   WINDOWS_CERTIFICATE / WINDOWS_CERTIFICATE_PASSWORD — Windows installer signing
 #   TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD — updater artifact signing
+# Optional configuration for a signed Windows runtime bundle. Incomplete
+# inputs publish an unsigned bundle instead of failing the release.
+# A test-signing policy is honoured only on desktop_validation_only runs, and
+# the nightly channel is never signed: release signing needs a manual approval
+# per request (a SignPath Foundation requirement).
+#   SIGNPATH_API_TOKEN — secret holding the SignPath CI user token
+#   SIGNPATH_ORGANIZATION_ID / SIGNPATH_PROJECT_SLUG / SIGNPATH_SIGNING_POLICY_SLUG — variables identifying the signing policy
 
 on:
   schedule:
@@ -848,6 +855,94 @@ jobs:
           # what Apple Silicon (AMFI) requires; bundle validation enforces it.
           GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-darwin-arm64 ./cmd/agentctl
           GOOS=darwin GOARCH=amd64 CGO_ENABLED=0 CC= go build -ldflags "${LDFLAGS}" -o bin/agentctl-darwin-amd64 ./cmd/agentctl
+
+      # Signing runs here, before packaging, so the published archives contain
+      # signed binaries. SignPath signs remotely, so Windows keeps
+      # cross-compiling on Linux; the binaries are uploaded as a workflow
+      # artifact so SignPath can verify the build's origin.
+      - name: Detect SignPath signing inputs
+        if: matrix.goos == 'windows'
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+        run: |
+          set -euo pipefail
+          # A token without the variables would hand the signing action empty
+          # inputs and fail the release rather than fall back to an unsigned
+          # build, so the guard requires all four together. A test-signing
+          # policy is only honoured when nothing is published: its certificate
+          # is not trusted by Windows, so a published bundle stays unsigned
+          # rather than carrying an untrusted signature. Nightlies are never
+          # signed: every release signing request needs a manual approval.
+          purpose="${{ needs.nightly-prepare.result == 'success' && 'nightly' || inputs.desktop_validation_only && 'validate' || 'publish' }}"
+          status=0
+          reason="$(bash scripts/release/signpath-signing-ready.sh "$purpose" 2>&1 >/dev/null)" || status=$?
+          if [ "$status" -eq 0 ]; then
+            echo "SIGNPATH_SIGNING_ENABLED=true" >> "$GITHUB_ENV"
+          else
+            echo "SIGNPATH_SIGNING_ENABLED=false" >> "$GITHUB_ENV"
+            if [ "$status" -eq 2 ]; then
+              echo "::warning::${reason} Publishing an unsigned Windows runtime bundle."
+            else
+              echo "::notice::${reason} Publishing an unsigned Windows runtime bundle."
+            fi
+          fi
+
+      # upload-artifact reduces multiple paths to their least common ancestor,
+      # so the stored ZIP holds kandev.exe and agentctl.exe at its root, not
+      # under apps/backend/bin. The SignPath artifact configuration has to
+      # match that shape: <zip-file> containing the two <pe-file> entries by
+      # bare name. The bundle has no other PE files: the remote agentctl
+      # helpers are built for linux and darwin only.
+      #
+      # SignPath reads the workflow run and downloads this artifact with the
+      # job's GITHUB_TOKEN. That needs no `actions: read` grant while the
+      # repository is public; a private fork would have to add one.
+      - name: Upload unsigned Windows binaries
+        id: unsigned-windows-binaries
+        if: matrix.goos == 'windows' && env.SIGNPATH_SIGNING_ENABLED == 'true'
+        continue-on-error: true
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: unsigned-windows-binaries
+          path: |
+            apps/backend/bin/kandev.exe
+            apps/backend/bin/agentctl.exe
+
+      - name: Sign Windows runtime binaries
+        id: signpath
+        if: matrix.goos == 'windows' && env.SIGNPATH_SIGNING_ENABLED == 'true' && steps.unsigned-windows-binaries.outcome == 'success'
+        # Best effort: the Foundation approves every release signing request by
+        # hand, so a request can outlive any timeout. A failure here must not
+        # fail the job; the tag is already pushed and unsigned is the fallback.
+        continue-on-error: true
+        uses: signpath/github-action-submit-signing-request@c92b958760219087e01f8d67a1669ed57afe2627 # v2.3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.unsigned-windows-binaries.outputs.artifact-id }}
+          wait-for-completion: true
+          # An hour covers a maintainer approving during working hours; the
+          # action's default of 600 s does not.
+          wait-for-completion-timeout-in-seconds: 3600
+          # Extracted back over the unsigned binaries so the packaging step
+          # below copies the signed ones without knowing signing happened.
+          output-artifact-directory: apps/backend/bin
+
+      - name: Report incomplete signing
+        if: matrix.goos == 'windows' && env.SIGNPATH_SIGNING_ENABLED == 'true' && steps.signpath.outcome != 'success'
+        run: echo "::warning::SignPath signing did not complete (approval still pending, or the upload or signing step failed); publishing the Windows runtime bundle unsigned."
+
+      # upload-artifact stores files without their mode bits, so the signed
+      # binaries come back 0644 and package-bundle.sh rejects a launcher that
+      # is not executable. Only signed binaries went through that round trip.
+      - name: Restore execute bits on signed binaries
+        if: matrix.goos == 'windows' && steps.signpath.outcome == 'success'
+        run: chmod +x apps/backend/bin/kandev.exe apps/backend/bin/agentctl.exe
 
       - name: Package bundle
         run: |
