@@ -1,11 +1,15 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { moveTask } from "@/lib/api";
 import { WorkflowStepper, type WorkflowStepperStep } from "./workflow-stepper";
 
-const { appStoreState, moveTaskMock } = vi.hoisted(() => ({
+const { appStoreState, moveTaskMock, previewWorkflowMoveMock } = vi.hoisted(() => ({
   moveTaskMock: vi.fn(),
+  previewWorkflowMoveMock: vi.fn().mockResolvedValue(undefined),
   appStoreState: {
+    connection: { status: "connected", error: null, issueSeverity: "none" },
+    workspaceContextGeneration: 1,
+    workflows: { items: [], activeId: null },
     tasks: { activeSessionId: null },
     chatInput: { planModeBySessionId: {} },
     kanban: {
@@ -19,14 +23,17 @@ const { appStoreState, moveTaskMock } = vi.hoisted(() => ({
     },
     kanbanMulti: { snapshots: {} },
     taskSessions: { items: {} },
-    taskSessionsByTask: { itemsByTaskId: {} },
+    taskSessionsByTask: { itemsByTaskId: {}, loadedByTaskId: {} },
     agentProfiles: { items: [] },
     setPlanMode: vi.fn(),
     setActiveDocument: vi.fn(),
   },
 }));
 
-vi.mock("@/lib/api", () => ({ moveTask: moveTaskMock }));
+vi.mock("@/lib/api", () => ({
+  moveTask: moveTaskMock,
+  previewWorkflowMove: previewWorkflowMoveMock,
+}));
 
 vi.mock("@/components/state-provider", () => ({
   useAppStore: (selector: (state: typeof appStoreState) => unknown) => selector(appStoreState),
@@ -52,6 +59,8 @@ vi.mock("./workflow-move-options", () => ({
   WorkflowMoveOptionsFields: () => null,
   workflowMoveOptionsPayload: () => undefined,
 }));
+
+const EXPANDED_ATTRIBUTE = "aria-expanded";
 
 const STEPS: WorkflowStepperStep[] = [
   { id: "spec", name: "Spec", color: "#111", position: 0 },
@@ -138,5 +147,43 @@ describe("WorkflowStepper full-layout keyboard disclosure", () => {
         position: 0,
       }),
     );
+  });
+});
+
+describe("WorkflowStepper exclusive hover", () => {
+  it("replaces a focused step hover when the pointer enters another step", async () => {
+    vi.useFakeTimers();
+    try {
+      render(
+        <WorkflowStepper
+          steps={STEPS}
+          currentStepId="work"
+          taskId="task-1"
+          workflowId="workflow-1"
+        />,
+      );
+      const work = screen.getByTestId("workflow-step-Work");
+      const review = screen.getByTestId("workflow-step-Review");
+      act(() => work.focus());
+      await act(() => vi.advanceTimersByTimeAsync(200));
+      expect(work.getAttribute(EXPANDED_ATTRIBUTE)).toBe("true");
+
+      fireEvent.pointerEnter(review);
+      await act(() => vi.advanceTimersByTimeAsync(200));
+      expect(review.getAttribute(EXPANDED_ATTRIBUTE)).toBe("true");
+      expect(screen.getAllByTestId("workflow-step-popover")).toHaveLength(1);
+      expect(work.getAttribute(EXPANDED_ATTRIBUTE)).toBe("false");
+
+      // The old close timer and focus restoration must not reclaim the disclosure.
+      fireEvent.pointerLeave(review);
+      fireEvent.pointerEnter(work);
+      await act(() => vi.advanceTimersByTimeAsync(200));
+      expect(work.getAttribute(EXPANDED_ATTRIBUTE)).toBe("true");
+      expect(review.getAttribute(EXPANDED_ATTRIBUTE)).toBe("false");
+      expect(screen.getAllByTestId("workflow-step-popover")).toHaveLength(1);
+    } finally {
+      cleanup();
+      vi.useRealTimers();
+    }
   });
 });
