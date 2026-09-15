@@ -60,7 +60,7 @@ function networkHasContainer(networkName: string, containerId: string): boolean 
 const createdNetworks: string[] = [];
 const createdContainers: string[] = [];
 
-function createStoppedContainer(name: string, labels: string[]): string {
+function createRunningContainer(name: string, labels: string[]): string {
   const args = [
     "create",
     "--name",
@@ -69,7 +69,7 @@ function createStoppedContainer(name: string, labels: string[]): string {
     E2E_IMAGE_TAG,
     "sh",
     "-c",
-    "true",
+    "while :; do sleep 1; done",
   ];
   const id = execFileSync("docker", args, { encoding: "utf8" }).trim();
   createdContainers.push(id);
@@ -120,7 +120,7 @@ test("classifies orphan and active networks and probe passes without removing an
     "kandev.task_id=e2e-network-active-live",
   ]);
   createdNetworks.push(activeNetworkName);
-  const activeContainer = createStoppedContainer(`kd-e2e-net-active-${suffix}`, [
+  const activeContainer = createRunningContainer(`kd-e2e-net-active-${suffix}`, [
     SCOPE_LABEL,
     // No kandev.managed label: the container-cleanup provider owns managed
     // containers, and this fixture exists only to attach to the network.
