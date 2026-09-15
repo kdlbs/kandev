@@ -1699,6 +1699,9 @@ func (a *schedulerTaskStarterAdapter) StartTaskWithRouteReturningSession(
 	route officescheduler.RouteOverride,
 ) (string, error) {
 	execution, err := a.startTaskWithRoute(ctx, taskID, agentProfileID, launch, route)
+	if errors.Is(err, orchestrator.ErrCeilingLaunchDeferred) {
+		return "", officeservice.ErrLaunchDeferredByCapacity
+	}
 	if err != nil || execution == nil {
 		return "", err
 	}
@@ -1750,6 +1753,10 @@ func startSchedulingRuntime(
 	orchScheduler := officeservice.NewSchedulerIntegration(
 		runProcessorSvc, tickInterval,
 	)
+	// A ceiling-deferred Office launch is replayed by the orchestrator's own
+	// sweep, independent of this scheduler; it needs a fresh runtime JWT
+	// rather than the one captured (and redacted) at defer time.
+	orchestratorSvc.SetCeilingLaunchCredentialReminter(orchScheduler)
 	// Office task-handoffs prompt enrichment. The HandoffService is
 	// constructed alongside the HTTP routes (helpers.go); we stash the
 	// scheduler reference on the Services struct so registerRoutes can
@@ -2251,6 +2258,9 @@ func (a *officeOrchestratorTaskStarter) StartTaskWithEnvReturningSession(
 ) (string, error) {
 	execution, err := a.startTaskWithEnvAndSkills(ctx, taskID, agentProfileID, executorID,
 		executorProfileID, priority, prompt, workflowStepID, planMode, attachments, env, nil)
+	if errors.Is(err, orchestrator.ErrCeilingLaunchDeferred) {
+		return "", officeservice.ErrLaunchDeferredByCapacity
+	}
 	if err != nil || execution == nil {
 		return "", err
 	}
@@ -2277,6 +2287,9 @@ func (a *officeOrchestratorTaskStarter) StartTaskWithLaunchContextReturningSessi
 		launch.ExecutorID, launch.ExecutorProfileID, launch.Priority, launch.Prompt,
 		launch.WorkflowStepID, launch.PlanMode, launch.Attachments, launch.Env,
 		launch.AdditionalSkillSlugs)
+	if errors.Is(err, orchestrator.ErrCeilingLaunchDeferred) {
+		return "", officeservice.ErrLaunchDeferredByCapacity
+	}
 	if err != nil || execution == nil {
 		return "", err
 	}

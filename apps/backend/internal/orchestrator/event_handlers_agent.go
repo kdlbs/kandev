@@ -1470,6 +1470,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 	}
 	_, err := s.promptTask(promptCtx, queuedMsg.TaskID, queuedMsg.SessionID,
 		promptContent, queuedMsg.Model, queuedMsg.PlanMode, attachments, false,
+		launchOriginAutomatic,
 		promptTaskOptions{
 			claimEntryID:         claimEntryID,
 			lifecyclePrompt:      lifecyclePrompt,
@@ -1723,13 +1724,14 @@ func (s *Service) handleQueuedMessageExecutionError(
 		zap.Error(err))
 
 	manualRecovery := isManualRecoveryPromptError(err)
+	_, seam3Refusal := isSeam3Refusal(err)
 	passthroughAttachmentRecovery := !lifecyclePrompt &&
 		len(queuedMsg.Attachments) > 0 &&
 		s.agentManager != nil &&
 		s.agentManager.IsPassthroughSession(ctx, queuedMsg.SessionID)
 	if passthroughAttachmentRecovery || lifecyclePrompt || queuedMsg.IsDurablePlanComment() || errors.Is(err, errLifecyclePromptClaim) ||
 		errors.Is(err, errLifecyclePromptMessagePersistence) ||
-		isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery ||
+		isSessionBusyError(err) || isTransientPromptError(err) || manualRecovery || seam3Refusal ||
 		errors.Is(err, lifecycle.ErrCancelEscalated) || isSessionResetInProgressError(err) ||
 		errors.Is(err, ErrSessionRuntimeUnavailable) {
 		if userMessageRecorded {

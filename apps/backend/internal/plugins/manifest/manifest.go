@@ -54,6 +54,8 @@ type Manifest struct {
 	Endpoints    Endpoints    `yaml:"endpoints" json:"endpoints"`
 	Capabilities Capabilities `yaml:"capabilities" json:"capabilities"`
 
+	AutomationConditions []AutomationCondition `yaml:"automation_conditions,omitempty" json:"automation_conditions,omitempty"`
+
 	Webhooks []Webhook `yaml:"webhooks,omitempty" json:"webhooks,omitempty"`
 	Actions  []Action  `yaml:"actions,omitempty" json:"actions,omitempty"`
 	// RepositoryProviders declares provider IDs this plugin owns while active.

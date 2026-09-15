@@ -55,6 +55,9 @@ func (s *Service) Disable(id string) error {
 	if rec.Status == StatusDisabled {
 		return nil
 	}
+	if err := s.cancelAutomationDeliveries(id); err != nil {
+		return err
+	}
 	if s.runtime != nil {
 		s.runtime.Stop(id)
 	}
@@ -213,6 +216,9 @@ func (s *Service) setStatusAndDiagnostic(id string, status Status, failure error
 	}
 	s.mu.Unlock()
 	if status != StatusActive {
+		if err := s.cancelAutomationDeliveries(id); err != nil {
+			return err
+		}
 		s.revokeGitCredentialProviderLeases(updated.RepositoryProviders)
 	}
 	return nil

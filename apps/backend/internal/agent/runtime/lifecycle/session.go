@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -230,7 +231,7 @@ func (sm *SessionManager) createOrLoadSession(
 		// the provider conversation. An internal error, timeout, cancellation,
 		// authentication failure, or unknown transport error is inconclusive:
 		// preserve the stored identity so a later retry can load it.
-		if !isSessionLoadFallbackErr(err) {
+		if !isSessionLoadFallbackErr(err, existingSessionID) {
 			sm.logger.Warn("session/load failed with an inconclusive error, preserving session identity",
 				zap.String("agent_type", agentConfig.ID()),
 				zap.String("existing_session_id", existingSessionID),
@@ -249,7 +250,8 @@ func (sm *SessionManager) createOrLoadSession(
 			zap.String("reason", err.Error()),
 			zap.Bool("method_not_found", isMethodNotFoundErr(err)),
 			zap.Bool("capability_mismatch", hasCanonicalSessionLoadMessage(err, "agent does not support session loading (LoadSession capability is false)")),
-			zap.Bool("session_unknown", isSessionUnknownErr(err)))
+			zap.Bool("session_unknown", isSessionUnknownErr(err)),
+			zap.Bool("provider_session_missing", isMissingProviderRolloutErr(err, existingSessionID)))
 		return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
 	}
 	return sm.createNewSession(ctx, client, agentConfig, workspacePath, mcpServers)
@@ -1887,16 +1889,69 @@ func isSessionUnknownErr(err error) bool {
 // which replacing the provider conversation is known to be safe. Errors from
 // the agentctl WebSocket boundary are message-only, so retain the structured
 // ACP checks and match only their canonical projected messages here.
-func isSessionLoadFallbackErr(err error) bool {
+func isSessionLoadFallbackErr(err error, expectedSessionID string) bool {
 	if err == nil {
 		return false
 	}
-	if isMethodNotFoundErr(err) || isSessionUnknownErr(err) {
+	if isMethodNotFoundErr(err) || isSessionUnknownErr(err) ||
+		isMissingProviderRolloutErr(err, expectedSessionID) {
 		return true
 	}
 	return hasCanonicalSessionLoadMessage(err, "Method not found") ||
 		hasCanonicalSessionLoadMessage(err, "agent does not support session loading (LoadSession capability is false)") ||
 		hasCanonicalSessionLoadMessage(err, "Resource not found")
+}
+
+const (
+	jsonRPCInternalError         = -32603
+	missingProviderRolloutPrefix = "no rollout found for thread id "
+)
+
+type sessionLoadRequestError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+	Data    struct {
+		Details string `json:"details"`
+	} `json:"data"`
+}
+
+// isMissingProviderRolloutErr recognizes Codex's explicit not-found response
+// after its process-local rollout state disappeared. The session ID must match
+// the one Kandev attempted to load; unrelated internal errors remain fatal.
+func isMissingProviderRolloutErr(err error, expectedSessionID string) bool {
+	if err == nil || strings.TrimSpace(expectedSessionID) == "" {
+		return false
+	}
+	var reqErr *acp.RequestError
+	if errors.As(err, &reqErr) {
+		encoded, marshalErr := json.Marshal(reqErr)
+		if marshalErr == nil && matchesMissingProviderRollout(encoded, expectedSessionID) {
+			return true
+		}
+	}
+	message := err.Error()
+	for offset := strings.IndexByte(message, '{'); offset >= 0; {
+		candidate := message[offset:]
+		if matchesMissingProviderRollout([]byte(candidate), expectedSessionID) {
+			return true
+		}
+		next := strings.IndexByte(candidate[1:], '{')
+		if next < 0 {
+			break
+		}
+		offset += next + 1
+	}
+	return false
+}
+
+func matchesMissingProviderRollout(encoded []byte, expectedSessionID string) bool {
+	var projected sessionLoadRequestError
+	if err := json.Unmarshal(encoded, &projected); err != nil {
+		return false
+	}
+	return projected.Code == jsonRPCInternalError &&
+		projected.Message == "Internal error" &&
+		projected.Data.Details == missingProviderRolloutPrefix+expectedSessionID
 }
 
 func hasCanonicalSessionLoadMessage(err error, canonical string) bool {

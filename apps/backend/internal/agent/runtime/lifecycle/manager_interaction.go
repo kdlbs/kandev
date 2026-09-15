@@ -1062,7 +1062,15 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	if current, currentExists := m.executionStore.Get(executionID); !currentExists || current != execution {
 		return fmt.Errorf("execution %q not found: %w", executionID, ErrExecutionNotFound)
 	}
-	activityLease, err := m.acquireActivity(ctx, activity.KindExecutionStopping)
+	backendForce := force
+	stopCtx := ctx
+	if shouldPreserveFailedKubernetesResume(execution, reason) {
+		backendForce = false
+		var cancelStop context.CancelFunc
+		stopCtx, cancelStop = kubernetesDurableContext(ctx)
+		defer cancelStop()
+	}
+	activityLease, err := m.acquireActivity(stopCtx, activity.KindExecutionStopping)
 	if err != nil {
 		return err
 	}
@@ -1093,18 +1101,21 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 		zap.String("execution_id", executionID),
 		zap.String("reason", reason),
 		zap.Bool("force", force),
+		zap.Bool("runtime_force", backendForce),
 		zap.Stringer("runtime", execution.RuntimeName))
 
 	// Try to gracefully stop via agentctl first, then always close connections.
-	agentStopFailed := m.stopExecutionAgentctl(ctx, executionID, execution, force)
+	// A retained Kubernetes resume gets a bounded non-cancelled opportunity to
+	// stop the failed process before its Pod is preserved for another retry.
+	agentStopFailed := m.stopExecutionAgentctl(stopCtx, executionID, execution, backendForce)
 
 	// Stop the agent execution via the runtime that created it. A failed stop
 	// must remain tracked: removing it here would turn a retryable cleanup into
 	// an unobservable orphan process.
-	if err := m.stopAgentViaBackend(ctx, executionID, execution, reason, force, agentStopFailed); err != nil {
+	if err := m.stopAgentViaBackend(stopCtx, executionID, execution, reason, backendForce, agentStopFailed); err != nil {
 		return fmt.Errorf("stop runtime for execution %q: %w", executionID, err)
 	}
-	if execution.RuntimeName == executor.NameKubernetes && (force || shouldRunExecutorCleanup(reason)) {
+	if execution.RuntimeName == executor.NameKubernetes && (backendForce || shouldRunExecutorCleanup(reason)) {
 		cleanupCtx, cancelCleanup := kubernetesDurableContext(ctx)
 		err := m.deleteKubernetesRuntimeSecrets(cleanupCtx, execution.MetadataSnapshot())
 		cancelCleanup()
@@ -1142,6 +1153,11 @@ func (m *Manager) StopAgentWithReason(ctx context.Context, executionID string, r
 	m.eventPublisher.PublishAgentEvent(ctx, events.AgentStopped, execution)
 
 	return nil
+}
+
+func shouldPreserveFailedKubernetesResume(execution *AgentExecution, reason string) bool {
+	return execution != nil && execution.RuntimeName == executor.NameKubernetes &&
+		execution.isResumedSession && reason == StopReasonAgentBootstrapFailed
 }
 
 // detachAgentExecution implements the AC-EXECUTORS-SURVIVAL survivable-detach

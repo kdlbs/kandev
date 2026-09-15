@@ -10,6 +10,9 @@ option go_package = "github.com/kandev/kandev/proto/kandev/plugin/v1;pluginv1";
 service Plugin {
   rpc DeliverEvent(Event) returns (EventAck);
   rpc HandleWebhook(WebhookRequest) returns (WebhookResponse);
+  // Optional automation adapter extension. Old plugins return Unimplemented.
+  rpc DescribeAutomationCondition(AutomationConditionRequest) returns (AutomationConditionResponse);
+  rpc VerifyAutomationWebhook(AutomationWebhookRequest) returns (AutomationWebhookResponse);
   // Browser-originated calls reach this method only through Kandev's
   // authenticated declared-action route. Context is host-verified; body is
   // bounded untrusted JSON.
@@ -1011,4 +1014,35 @@ message DeleteAgentConversationRequest {
 // DeleteAgentConversationResponse carries the result.
 message DeleteAgentConversationResponse {
   int32 deleted_count = 1;
+}
+
+// Configuration and connection eligibility are always resolved within the host's workspace.
+message AutomationConditionRequest {
+  string workspace_id = 1;
+  string condition_key = 2;
+  bytes config = 3;
+}
+message AutomationConditionResponse {
+  bool available = 1;
+  string reason = 2;
+  string connection_id = 3;
+  string connection_revision = 4;
+  // Optional workspace-authorized field suggestions: JSON object of string arrays.
+  bytes config_options = 5;
+}
+message AutomationWebhookRequest {
+  string workspace_id = 1;
+  string condition_key = 2;
+  string connection_id = 3;
+  string connection_revision = 4;
+  bytes config = 5;
+  bytes body = 6;
+  map<string, string> headers = 7;
+  string secret = 8;
+}
+message AutomationWebhookResponse {
+  // accepted, ignored, rejected, or malformed (authenticated invalid JSON). RPC errors are transient failures.
+  string outcome = 1;
+  string event_kind = 2;
+  bytes data = 3;
 }

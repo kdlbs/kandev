@@ -83,6 +83,14 @@ type ClarificationInputPauser interface {
 	PauseForClarificationInput(ctx context.Context, sessionID string) (int, error)
 }
 
+// SessionCeilingReleaser releases the orchestrator's session-ceiling
+// reservation for a session that this package just moved out of the counted
+// population (STARTING/RUNNING) directly against the repository, bypassing
+// the orchestrator's own persistence funnels.
+type SessionCeilingReleaser interface {
+	ReleaseCeilingReservation(sessionID string)
+}
+
 type clarificationInputPauserWithOptions interface {
 	PauseForClarificationInputWithOptions(
 		ctx context.Context,
@@ -254,28 +262,29 @@ type UserSettingsProvider interface {
 
 // Handlers provides MCP WebSocket handlers.
 type Handlers struct {
-	taskSvc              *service.Service
-	workflowCtrl         *workflowctrl.Controller
-	clarificationSvc     ClarificationService
-	sessionCanceller     SessionCanceller
-	inputPauser          ClarificationInputPauser
-	messageCreator       MessageCreator
-	sessionRepo          SessionRepository
-	taskRepo             TaskRepository
-	eventBus             EventBus
-	planService          *service.PlanService
-	walkthroughService   *service.WalkthroughService
-	sessionLauncher      SessionLauncher
-	taskStopper          TaskStopper
-	titleBranchRenamer   TaskTitleBranchRenamer
-	stopTaskGetter       func(context.Context, string) (*models.Task, error)
-	messageQueue         MessageQueuer
-	promptResolver       PromptReferenceResolver
-	promptReader         PromptReader
-	userSettingsProvider UserSettingsProvider
-	settingsRegistry     *settingscatalog.Registry
-	settingsOperations   SettingsOperations
-	logger               *logger.Logger
+	taskSvc                *service.Service
+	workflowCtrl           *workflowctrl.Controller
+	clarificationSvc       ClarificationService
+	sessionCanceller       SessionCanceller
+	inputPauser            ClarificationInputPauser
+	sessionCeilingReleaser SessionCeilingReleaser
+	messageCreator         MessageCreator
+	sessionRepo            SessionRepository
+	taskRepo               TaskRepository
+	eventBus               EventBus
+	planService            *service.PlanService
+	walkthroughService     *service.WalkthroughService
+	sessionLauncher        SessionLauncher
+	taskStopper            TaskStopper
+	titleBranchRenamer     TaskTitleBranchRenamer
+	stopTaskGetter         func(context.Context, string) (*models.Task, error)
+	messageQueue           MessageQueuer
+	promptResolver         PromptReferenceResolver
+	promptReader           PromptReader
+	userSettingsProvider   UserSettingsProvider
+	settingsRegistry       *settingscatalog.Registry
+	settingsOperations     SettingsOperations
+	logger                 *logger.Logger
 
 	// Config-mode dependencies (optional, set via SetConfigDeps)
 	workflowSvc         *workflowsvc.Service
@@ -382,6 +391,13 @@ func NewHandlers(
 // a clarification tool call ends without delivering an answer to the agent.
 func (h *Handlers) SetClarificationInputPauser(pauser ClarificationInputPauser) {
 	h.inputPauser = pauser
+}
+
+// SetSessionCeilingReleaser wires the orchestrator-owned session-ceiling
+// release used when this package's own clarification write moves a session
+// out of the counted population.
+func (h *Handlers) SetSessionCeilingReleaser(releaser SessionCeilingReleaser) {
+	h.sessionCeilingReleaser = releaser
 }
 
 func (h *Handlers) SetPromptReferenceResolver(resolver PromptReferenceResolver) {
@@ -4258,12 +4274,32 @@ func (h *Handlers) updateClarificationSessionState(
 	expected, state models.TaskSessionState,
 ) (bool, time.Time, error) {
 	if updater, ok := h.sessionRepo.(conditionalSessionStateUpdater); ok {
-		return updater.UpdateTaskSessionStateIfCurrent(ctx, sessionID, expected, state, "")
+		changed, updatedAt, err := updater.UpdateTaskSessionStateIfCurrent(ctx, sessionID, expected, state, "")
+		if err == nil && changed {
+			h.releaseSessionCeilingIfLeftPopulation(sessionID, expected, state)
+		}
+		return changed, updatedAt, err
 	}
 	if err := h.sessionRepo.UpdateTaskSessionState(ctx, sessionID, state, ""); err != nil {
 		return false, time.Time{}, err
 	}
+	h.releaseSessionCeilingIfLeftPopulation(sessionID, expected, state)
 	return true, time.Time{}, nil
+}
+
+// releaseSessionCeilingIfLeftPopulation is this package's half of AC-51a's
+// "mcp/handlers/handlers.go, various, SHALL release when leaving an AC-1
+// state" row: both the CAS-preferred branch and the raw fallback above count.
+func (h *Handlers) releaseSessionCeilingIfLeftPopulation(sessionID string, priorState, nextState models.TaskSessionState) {
+	if h.sessionCeilingReleaser == nil {
+		return
+	}
+	leftPopulation := priorState == models.TaskSessionStateStarting || priorState == models.TaskSessionStateRunning
+	enteredPopulation := nextState == models.TaskSessionStateStarting || nextState == models.TaskSessionStateRunning
+	if !leftPopulation || enteredPopulation {
+		return
+	}
+	h.sessionCeilingReleaser.ReleaseCeilingReservation(sessionID)
 }
 
 func (h *Handlers) sessionUpdatedAtForStateEvent(ctx context.Context, sessionID string) (string, bool) {
