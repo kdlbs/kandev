@@ -102,6 +102,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		PreventAutoStartAgentOnOpen:       req.PreventAutoStartAgentOnOpen,
 		UnreadDivider:                     req.UnreadDivider,
 		AgentGeneratedTaskTitles:          req.AgentGeneratedTaskTitles,
+		AutoFocusNewTasks:                 req.AutoFocusNewTasks,
 		MCPTaskAgentProfileDefault:        req.MCPTaskAgentProfileDefault,
 		ShowAnchoredPromptBar:             req.ShowAnchoredPromptBar,
 		ShowScrollToLastPrompt:            req.ShowScrollToLastPrompt,
@@ -150,6 +151,8 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		QuickChatTabOrderByWorkspace:      req.QuickChatTabOrderByWorkspace,
 		KanbanHiddenStepIDs:               req.KanbanHiddenStepIDs,
 		WorkflowIDsWithAutoHideEmptySteps: req.WorkflowIDsWithAutoHideEmptySteps,
+		KanbanSort:                        req.KanbanSort,
+		KanbanPriorityFilterTokens:        req.KanbanPriorityFilterTokens,
 	})
 	if err != nil {
 		return dto.UserSettingsResponse{}, err

@@ -55,7 +55,7 @@ A SQLite-persisted queue of "wake this agent up" requests. Every periodic, event
 
 | Source | Trigger | Payload |
 |--------|---------|---------|
-| `routine` | A routine's cron / webhook / manual trigger fires | `{routine_id, variables, missed_ticks?}` |
+| `routine` | A routine's cron / webhook / manual trigger fires | `{routine_id, variables, missed_ticks?, missed_since?, missed_truncated?}` |
 | `comment` | Comment posted on a task assigned to this agent (non-self). Also the channel pathway: inbound Telegram/Slack messages become comments on a channel task. | `{task_id, comment_id}` |
 | `agent_error` | A sub-agent's session failed (escalation to coordinator) | `{failed_agent_id, failed_session_id?, run_id?, error}` |
 | `self` | Agent self-wake via tool call | `{reason, payload?}` |
@@ -112,7 +112,7 @@ Routine fields:
 - `assignee_agent_instance_id` - who gets the resulting task / run.
 - `status`: `active` | `paused` | `archived`.
 - `concurrency_policy`: `coalesce_if_active` (default) | `skip_if_active` | `always_enqueue`.
-- `catch_up_policy`: `enqueue_missed_with_cap` (default, cap 25) | `skip_missed`.
+- `catch_up_policy`: `summarize_missed` (default, cap 25; `enqueue_missed_with_cap` is a deprecated alias) | `skip_missed`.
 - `catch_up_max`: integer, default 25.
 - `task_template`: JSON. Empty means **lightweight** routine (taskless run per fire). Non-empty means **heavy** routine (fresh task created on the `routine` workflow).
 - `variables`: declared template variables (type, default, required).
@@ -144,9 +144,17 @@ Evaluated at dispatch by querying for an in-flight run for the same routine fing
 
 #### Catch-up policy
 
-If the scheduler was down and missed cron ticks:
-- `skip_missed`: fire only the current tick.
-- `enqueue_missed_with_cap` (default, cap 25): fire missed ticks up to the cap; dropped ticks are not recorded individually but summarized into the next prompt's wake context ("you missed N ticks since X").
+If the scheduler was down and missed cron ticks, resuming always produces exactly
+one run per due trigger, never one run per missed tick. `catch_up_policy` only
+governs whether that one run's gap is measured and reported:
+- `skip_missed`: no gap is recorded or reported.
+- `summarize_missed` (default, cap 25; `enqueue_missed_with_cap` is a deprecated
+  alias): the gap (missed-tick count, first-missed timestamp, truncated flag) is
+  measured, capped at `catch_up_max`, and summarized into the run's wake context
+  ("you missed N ticks since X").
+
+See [the routine catch-up requirement](../requirements/routine-catch-up.md) for
+the full contract.
 
 #### The pre-installed coordinator routine
 
@@ -158,7 +166,7 @@ description:         "Wakes the coordinator every 5 minutes to check workspace a
 assignee_agent_id:   <new coordinator agent id>
 status:              active
 concurrency_policy:  coalesce_if_active
-catch_up_policy:     enqueue_missed_with_cap
+catch_up_policy:     summarize_missed
 catch_up_max:        25
 task_template:       ""
 variables:           []

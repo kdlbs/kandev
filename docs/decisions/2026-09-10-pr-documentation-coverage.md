@@ -20,6 +20,8 @@ Other changes require a changed work order linked to a plan, requirements, accep
 Previously merged specifications can be referenced without cosmetic edits. Reviewers judge whether changed behavior needs updated contracts.
 The override persists while the label is present and affects only this check.
 
+Harness configuration and definitions are exempt when they use the repository's recognized harness formats: Codex agent or config TOML, Claude settings JSON, or Cursor rule MDC. Markdown harness files are covered by the general Markdown exemption. This avoids requiring delivery records for contributor tooling changes while keeping arbitrary JSON, YAML, and other files subject to normal evaluation.
+
 CI owns this policy. It does not require use of a particular agent or prove that plans were committed before code.
 The check reports failures before ruleset activation; mandatory merge enforcement requires a separately verified administrator rollout.
 

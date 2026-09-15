@@ -67,7 +67,17 @@ func ParseRateLimitResetTimeForTest(errMsg string, now time.Time) *time.Time {
 // This is exposed so integration tests in the _test package can verify prompt building.
 func BuildPromptContextForTest(svc *Service, ctx context.Context, reason, payload string) *PromptContext {
 	si := &SchedulerIntegration{svc: svc, logger: svc.logger}
-	return si.buildPromptContext(ctx, reason, payload)
+	return si.buildPromptContext(ctx, reason, payload, "")
+}
+
+// BuildPromptContextWithSnapshotForTest is BuildPromptContextForTest plus
+// contextSnapshot (run.ContextSnapshot), the run-reason-gated source for
+// the routine catch-up gap fields (AC-OFFICE-ROUTINE-CATCHUP-002.5). A
+// separate helper, rather than extending BuildPromptContextForTest's
+// signature, so its nine existing callers stay untouched.
+func BuildPromptContextWithSnapshotForTest(svc *Service, ctx context.Context, reason, payload, contextSnapshot string) *PromptContext {
+	si := &SchedulerIntegration{svc: svc, logger: svc.logger}
+	return si.buildPromptContext(ctx, reason, payload, contextSnapshot)
 }
 
 // CoalesceRoutineWakeupForTest creates a wakeup-request carrying the

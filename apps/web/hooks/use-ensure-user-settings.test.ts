@@ -70,6 +70,7 @@ function makeUnloadedSettings(): UserSettingsState {
     preventAutoStartAgentOnOpen: false,
     unreadDivider: true,
     agentGeneratedTaskTitles: false,
+    autoFocusNewTasks: true,
     mcpTaskAgentProfileDefault: "current_task",
     showAnchoredPromptBar: false,
     showScrollToLastPrompt: true,
@@ -123,6 +124,8 @@ function makeUnloadedSettings(): UserSettingsState {
     lspStatusLocation: "toolbar",
     hiddenWorkflowStepIds: {},
     workflowIdsWithAutoHideEmptySteps: [],
+    kanbanSort: "created_desc",
+    kanbanPriorityFilterTokens: [],
     loaded: false,
   };
 }

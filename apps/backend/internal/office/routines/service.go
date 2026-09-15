@@ -28,6 +28,11 @@ import (
 // concrete adapter translates the sqlite layer's
 // ErrWakeupIdempotencyConflict into this sentinel so routines never
 // imports office/repository/sqlite directly (see routineWakeupAdapter).
+// It is not a materialisation failure (AC-OFFICE-ROUTINE-CATCHUP-001.10
+// second sentence): a duplicate wakeup request within the same
+// wall-clock minute is a successful dedup, so
+// materialiseLightweightRoutineRun absorbs it as a terminal "done" run
+// rather than failing.
 var ErrWakeupAlreadyRequested = errors.New("wakeup request already requested")
 
 // ErrInvalidTrigger indicates a trigger create request that failed
@@ -49,6 +54,8 @@ type Repository interface {
 	GetDueTriggers(ctx context.Context, now time.Time) ([]*RoutineTrigger, error)
 	ClaimTrigger(ctx context.Context, triggerID string, oldNextRunAt time.Time) (bool, error)
 	UpdateTriggerNextRun(ctx context.Context, triggerID string, nextRunAt *time.Time) error
+	ListStrandedTriggers(ctx context.Context, olderThan time.Time) ([]*RoutineTrigger, error)
+	ReconcileTriggerNextRun(ctx context.Context, triggerID string, nextRunAt time.Time) (bool, error)
 	DeleteRoutineTrigger(ctx context.Context, id string) error
 
 	CreateRoutineRun(ctx context.Context, run *RoutineRun) error
@@ -185,7 +192,7 @@ const CoordinatorRoutineCron = "*/5 * * * *"
 // CreateDefaultCoordinatorRoutine installs the pre-baked
 // "Coordinator heartbeat" routine for a coordinator-role agent. The
 // shape is described in office-heartbeat-as-routine: lightweight
-// (empty task_template), coalesce_if_active, enqueue_missed_with_cap
+// (empty task_template), coalesce_if_active, summarize_missed
 // with a max of 25, status=active, with a single cron trigger firing
 // every five minutes (UTC).
 //
@@ -210,7 +217,7 @@ func (s *RoutineService) CreateDefaultCoordinatorRoutine(
 		AssigneeAgentProfileID: agentID,
 		Status:                 "active",
 		ConcurrencyPolicy:      models.ConcurrencyPolicyCoalesceIfActive,
-		CatchUpPolicy:          models.CatchUpPolicyEnqueueMissedWithCap,
+		CatchUpPolicy:          models.CatchUpPolicySummarizeMissed,
 		CatchUpMax:             25,
 		Variables:              "{}",
 	}
@@ -401,7 +408,27 @@ func (s *RoutineService) ListAllRoutineRuns(ctx context.Context, wsID string, li
 
 // -- Dispatch --
 
-// TickScheduledTriggers queries due cron triggers, claims each, and dispatches.
+// catchUpFallbackInterval is the re-arm interval computeCatchUp uses when
+// the elapsed-tick walk fails for a reason other than
+// shared.ErrUnsatisfiableCron (AC-OFFICE-ROUTINE-CATCHUP-001.11). The
+// failure is deterministic in the trigger's stored (expression, timezone)
+// pair, not in the time argument: re-arming to the original due time
+// instead would make the trigger due again on the very next 30-second
+// scheduler tick, retrying (and failing) forever with no backoff. 24 hours
+// caps the trigger at one dispatch a day until it is deleted and
+// recreated, matching shared.findNextMatch's own give-up interval.
+const catchUpFallbackInterval = 24 * time.Hour
+
+// catchUpReclaimAfter is how stale a claimed-but-never-armed trigger's
+// updated_at must be before the reconciliation pass in TickScheduledTriggers
+// treats it as abandoned rather than a live claim still mid-tick — enough
+// headroom that a claim taken this tick or the previous one is never
+// reconciled (AC-OFFICE-ROUTINE-CATCHUP-001.9).
+const catchUpReclaimAfter = 60 * time.Second
+
+// TickScheduledTriggers queries due cron triggers, claims and dispatches
+// each in ascending (next_run_at, id) order (AC-001.7), then reconciles
+// any trigger left claimed-but-unarmed by a process that stopped mid-tick.
 func (s *RoutineService) TickScheduledTriggers(ctx context.Context, now time.Time) error {
 	service.IncLoopCronTick(now.Format(time.RFC3339))
 	triggers, err := s.repo.GetDueTriggers(ctx, now)
@@ -414,7 +441,35 @@ func (s *RoutineService) TickScheduledTriggers(ctx context.Context, now time.Tim
 				zap.String("trigger_id", trigger.ID), zap.Error(err))
 		}
 	}
+	s.reconcileStrandedTriggers(ctx, now)
 	return nil
+}
+
+// reconcileStrandedTriggers arms enabled cron triggers whose claim was
+// abandoned before the re-arm write landed. It never dispatches a run by
+// this path (AC-OFFICE-ROUTINE-CATCHUP-001.9): the row cannot distinguish
+// "crashed after claiming" from "crashed after claiming and dispatching",
+// and a spurious wake is the more expensive error. A parse failure leaves
+// next_run_at null and only warns — no claim was taken by this path, so no
+// run is owed and AC-001.11's fallback does not apply.
+func (s *RoutineService) reconcileStrandedTriggers(ctx context.Context, now time.Time) {
+	stale, err := s.repo.ListStrandedTriggers(ctx, now.Add(-catchUpReclaimAfter))
+	if err != nil {
+		s.logger.Warn("list stranded triggers", zap.Error(err))
+		return
+	}
+	for _, trigger := range stale {
+		next, err := shared.NextCronTime(trigger.CronExpression, trigger.Timezone, now)
+		if err != nil {
+			s.logger.Warn("reconcile stranded trigger: compute next run",
+				zap.String("trigger_id", trigger.ID), zap.Error(err))
+			continue
+		}
+		if _, err := s.repo.ReconcileTriggerNextRun(ctx, trigger.ID, next); err != nil {
+			s.logger.Warn("reconcile stranded trigger: arm",
+				zap.String("trigger_id", trigger.ID), zap.Error(err))
+		}
+	}
 }
 
 func (s *RoutineService) processCronTrigger(ctx context.Context, trigger *RoutineTrigger, now time.Time) error {
@@ -433,51 +488,41 @@ func (s *RoutineService) processCronTrigger(ctx context.Context, trigger *Routin
 		return fmt.Errorf("get routine: %w", err)
 	}
 	service.IncLoopTriggerClaimed(routine.WorkspaceID)
-	// Catch-up cap: count how many cron ticks elapsed between the missed
-	// trigger.NextRunAt (inclusive) and now, capped at routine.CatchUpMax.
-	// Mirror of the agent_heartbeat catch-up math, adapted for cron
-	// expressions (no fixed interval — we walk NextCronTime).
-	runCount, advanceTo, err := computeRoutineMissed(trigger, routine, now)
-	if err != nil {
-		if errors.Is(err, shared.ErrUnsatisfiableCron) {
+	result := computeCatchUp(trigger, routine, now)
+	if result.Unknown {
+		if errors.Is(result.Err, shared.ErrUnsatisfiableCron) {
 			// The expression can never fire again. ClaimTrigger already
 			// cleared next_run_at; leave it cleared rather than re-arming,
 			// which would dispatch nothing but retry (and fail) forever.
 			s.logger.Error("cron expression unsatisfiable; trigger permanently disarmed",
-				zap.String("trigger_id", trigger.ID), zap.Error(err))
-			return err
+				zap.String("trigger_id", trigger.ID), zap.Error(result.Err))
+			return result.Err
 		}
-		// Any other failure (e.g. the timezone database is temporarily
-		// unavailable) is presumed recoverable: re-arm to the original due
-		// time so the next tick retries instead of leaving the trigger
-		// disarmed forever once the underlying issue clears.
-		if rearmErr := s.repo.UpdateTriggerNextRun(ctx, trigger.ID, trigger.NextRunAt); rearmErr != nil {
-			s.logger.Warn("re-arm trigger after recoverable catch-up failure failed",
-				zap.String("trigger_id", trigger.ID), zap.Error(rearmErr))
-		}
-		s.logger.Warn("compute routine catch-up failed; will retry next tick",
-			zap.String("trigger_id", trigger.ID), zap.Error(err))
-		return err
+		// AC-OFFICE-ROUTINE-CATCHUP-001.11: any other computation failure
+		// (e.g. an unparseable expression/timezone, or the timezone
+		// database being temporarily unavailable) arms next_run_at to
+		// now+24h below rather than leaving the trigger disarmed forever
+		// or retrying every 30-second tick with no backoff.
+		s.logger.Warn("compute routine catch-up failed",
+			zap.String("trigger_id", trigger.ID),
+			zap.String("cron_expression", trigger.CronExpression),
+			zap.Error(result.Err))
 	}
 	// The claimed tick: UpdateTriggerNextRun below advances the trigger
 	// row's next_run_at to the next slot, so trigger.NextRunAt is captured
 	// here, before that write, and carried through to the key builder
 	// rather than re-read afterward.
 	claimedTick := trigger.NextRunAt
-	if err := s.repo.UpdateTriggerNextRun(ctx, trigger.ID, &advanceTo); err != nil {
+	if err := s.repo.UpdateTriggerNextRun(ctx, trigger.ID, &result.NextRunAt); err != nil {
+		// AC-001.2: an arming-write failure means this claim dispatches
+		// nothing at all; next_run_at is left null for the reconciliation
+		// pass (AC-001.9) to arm on a later tick. That tick is lost.
 		s.logger.Warn("update trigger next_run_at failed",
 			zap.String("trigger_id", trigger.ID), zap.Error(err))
+		return fmt.Errorf("arm trigger: %w", err)
 	}
-	missedForPayload := 0
-	if routine.CatchUpPolicy == models.CatchUpPolicySkipMissed {
-		// skip_missed: collapse all misses, fire once with no attribution.
-		missedForPayload = 0
-	} else if runCount > 0 {
-		// enqueue_missed_with_cap (default and unknowns): fire once, surface
-		// runCount-1 as missed_ticks ("you missed N since the last fire").
-		missedForPayload = runCount - 1
-	}
-	_, err = s.DispatchRoutineRunWithMissed(ctx, routine, trigger, shared.RoutineSourceCron, nil, missedForPayload, claimedTick)
+	gap := buildGapSummary(routine, result)
+	run, err := s.dispatchRoutineRun(ctx, routine, trigger, shared.RoutineSourceCron, nil, "", gap, claimedTick)
 	if errors.Is(err, shared.ErrWorkspacePaused) {
 		// A confirmed operator pause is not a cron-tick failure — the
 		// blocked fire is already recorded as a skipped run, and
@@ -485,55 +530,114 @@ func (s *RoutineService) processCronTrigger(ctx context.Context, trigger *Routin
 		// would otherwise page on-call for expected behaviour.
 		return nil
 	}
+	if err != nil && run != nil {
+		// The status flip has one home: whichever branch of dispatch
+		// failed, the run created for this claim is marked failed exactly
+		// once, here (AC-001.10).
+		if updateErr := s.repo.UpdateRunStatus(ctx, run.ID, models.RoutineRunStatusFailed, ""); updateErr != nil {
+			s.logger.Warn("mark routine run failed",
+				zap.String("run_id", run.ID), zap.Error(updateErr))
+		}
+	}
 	return err
 }
 
-const defaultCatchUpMax = 25
+// catchUpResult is what computeCatchUp returns instead of a bare
+// (int, time.Time, error): a single value object so no call site can
+// discard a computed re-arm time on the error path.
+type catchUpResult struct {
+	// ElapsedTicks is >= 1 on success (Unknown false); includes the tick
+	// due now. Not meaningful when Unknown is true.
+	ElapsedTicks int
+	// FirstMissedAt is the armed next_run_at at claim time, read directly
+	// rather than derived from the walk so it stays exact under
+	// truncation. Zero when ElapsedTicks <= 1.
+	FirstMissedAt time.Time
+	// Truncated is true only when the walk stopped at the cap with the
+	// cursor still at or before the processing instant.
+	Truncated bool
+	// NextRunAt is strictly after the processing instant on every path,
+	// including Unknown — it is never `now`. On Unknown it is the
+	// AC-001.11 fallback (now + catchUpFallbackInterval); the caller
+	// overrides it with a permanent disarm only for
+	// shared.ErrUnsatisfiableCron.
+	NextRunAt time.Time
+	// Unknown is true when the walk failed; ElapsedTicks, FirstMissedAt
+	// and Truncated are not meaningful in that case.
+	Unknown bool
+	// Err is the underlying cron computation error when Unknown is true.
+	// Nil otherwise.
+	Err error
+}
 
-// computeRoutineMissed counts cron ticks between trigger.NextRunAt
-// (inclusive — that's the tick "due now") and `now`, capped at
-// routine.CatchUpMax (default 25). Returns the count plus the next
-// future tick the trigger should re-arm to.
-//
-// For an "every minute" cron with a 10-minute backend outage, this
-// returns 11 (10 missed + 1 due now) and the next-minute tick. With a
-// cap of 5, it returns 5 and aligns the cursor to the next future tick
-// from `now` so the trigger leaves the catch-up window cleanly.
-func computeRoutineMissed(trigger *RoutineTrigger, routine *Routine, now time.Time) (int, time.Time, error) {
-	cap := routine.CatchUpMax
-	if cap <= 0 {
-		cap = defaultCatchUpMax
-	}
-	cursor := *trigger.NextRunAt
-	runCount := 0
-	for runCount < cap && !cursor.After(now) {
-		runCount++
+// computeCatchUp walks cron ticks between trigger.NextRunAt (inclusive —
+// that's the tick "due now") and now, capped at
+// models.NormaliseCatchUpMax(routine.CatchUpMax). It replaces
+// computeRoutineMissed: catch_up_max bounds only how many elapsed ticks are
+// counted, never how many runs are dispatched
+// (AC-OFFICE-ROUTINE-CATCHUP-001.3).
+func computeCatchUp(trigger *RoutineTrigger, routine *Routine, now time.Time) catchUpResult {
+	cap := models.NormaliseCatchUpMax(routine.CatchUpMax)
+	firstMissedAt := *trigger.NextRunAt
+	cursor := firstMissedAt
+	elapsed := 0
+	for elapsed < cap && !cursor.After(now) {
+		elapsed++
 		next, err := shared.NextCronTime(trigger.CronExpression, trigger.Timezone, cursor)
 		if err != nil {
-			return runCount, cursor, fmt.Errorf("next cron tick: %w", err)
+			return catchUpResult{NextRunAt: now.Add(catchUpFallbackInterval), Unknown: true, Err: err}
 		}
 		cursor = next
 	}
-	if runCount == cap && !cursor.After(now) {
-		// Hit the cap with more pending ticks. Advance cursor to the next
-		// future tick from now to leave the catch-up window cleanly.
+	truncated := false
+	if elapsed == cap && !cursor.After(now) {
+		// Hit the cap with more pending ticks. Advance the cursor to the
+		// next future tick from now so the trigger leaves the catch-up
+		// window cleanly, and record the count as a lower bound.
 		next, err := shared.NextCronTime(trigger.CronExpression, trigger.Timezone, now)
 		if err != nil {
-			return runCount, cursor, fmt.Errorf("next cron tick from now: %w", err)
+			return catchUpResult{NextRunAt: now.Add(catchUpFallbackInterval), Unknown: true, Err: err}
 		}
 		cursor = next
+		truncated = true
 	}
-	if runCount == 0 {
-		// Defensive: ClaimTrigger should only succeed when NextRunAt <= now,
-		// so the loop must have iterated at least once. If clock skew leaves
-		// us here, fire once and advance by one tick.
-		next, err := shared.NextCronTime(trigger.CronExpression, trigger.Timezone, *trigger.NextRunAt)
-		if err != nil {
-			return 1, *trigger.NextRunAt, fmt.Errorf("defensive next cron tick: %w", err)
-		}
-		return 1, next, nil
+	result := catchUpResult{ElapsedTicks: elapsed, NextRunAt: cursor, Truncated: truncated}
+	if elapsed > 1 {
+		result.FirstMissedAt = firstMissedAt
 	}
-	return runCount, cursor, nil
+	return result
+}
+
+// gapSummary is the durable measurement of one claim's gap, threaded from
+// processCronTrigger through the dispatch chain into the created run's
+// three catch_up_* columns and, for a lightweight routine under the
+// summarizing policy, the wakeup payload. A nil *gapSummary means no gap
+// summary applies for this claim.
+type gapSummary struct {
+	MissedTicks int
+	FirstMissed time.Time
+	Truncated   bool
+}
+
+// buildGapSummary decides whether a claim's computed catch-up result
+// produces a gap summary. A gap summary exists only when the walk
+// succeeded, the policy is summarize_missed, and at least one tick was
+// missed — collapsing what would otherwise be several near-identical states
+// into one rule (AC-002.1, AC-002.2, AC-002.7, AC-002.11, AC-002.12: manual
+// and webhook fires never reach this function, since only processCronTrigger
+// calls it).
+func buildGapSummary(routine *Routine, result catchUpResult) *gapSummary {
+	if result.Unknown {
+		return nil // AC-001.6: never report a gap that was not measured.
+	}
+	if routine.CatchUpPolicy == models.CatchUpPolicySkipMissed {
+		return nil // AC-002.7
+	}
+	missed := result.ElapsedTicks - 1
+	if missed < 1 {
+		return nil // AC-002.2 (zero missed); AC-002.11 (catch_up_max == 1).
+	}
+	return &gapSummary{MissedTicks: missed, FirstMissed: result.FirstMissedAt, Truncated: result.Truncated}
 }
 
 // DispatchRoutineRun resolves variables, applies concurrency policy, creates run.
@@ -549,6 +653,10 @@ func computeRoutineMissed(trigger *RoutineTrigger, routine *Routine, now time.Ti
 //   - heavy (task_template != "") — create a real task in the routine
 //     system workflow (auto_start_agent on the start step kicks off the
 //     agent). LinkedTaskID is the new task's id.
+//
+// Manual and webhook fires call this directly and never carry a gap
+// summary (AC-OFFICE-ROUTINE-CATCHUP-002.12) — gap measurement applies only
+// to a cron trigger's armed next_run_at, computed by processCronTrigger.
 func (s *RoutineService) DispatchRoutineRun(
 	ctx context.Context,
 	routine *Routine,
@@ -556,7 +664,7 @@ func (s *RoutineService) DispatchRoutineRun(
 	source string,
 	provided map[string]string,
 ) (*RoutineRun, error) {
-	return s.dispatchRoutineRun(ctx, routine, trigger, source, provided, "", 0, nil)
+	return s.dispatchRoutineRun(ctx, routine, trigger, source, provided, "", nil, nil)
 }
 
 // DispatchRoutineRunWithIdempotencyKey dispatches a fire with an explicit
@@ -570,34 +678,14 @@ func (s *RoutineService) DispatchRoutineRunWithIdempotencyKey(
 	provided map[string]string,
 	idempotencyKey string,
 ) (*RoutineRun, error) {
-	return s.dispatchRoutineRun(ctx, routine, trigger, source, provided, idempotencyKey, 0, nil)
+	return s.dispatchRoutineRun(ctx, routine, trigger, source, provided, idempotencyKey, nil, nil)
 }
 
-// DispatchRoutineRunWithMissed is the cron-tick entry point that
-// surfaces the catch-up cap's missed-tick count to the wakeup payload.
-// missedTicks is set to N-1 by the cron tick when N consecutive cron
-// ticks fell within the catch-up window — the agent gets one fire and
-// learns "you missed N-1 ticks" via wakeup.RoutinePayload.MissedTicks.
-// Manual fires (UI / API) call DispatchRoutineRun directly with no
-// missed-tick attribution.
-//
 // claimedTick is the scheduled tick processCronTrigger claimed off the
 // trigger row before advancing it — the dedup key's occurrence identity
 // for a cron fire. It travels as a parameter rather than being re-read
 // from the trigger row, which by dispatch time already names the next
-// slot.
-func (s *RoutineService) DispatchRoutineRunWithMissed(
-	ctx context.Context,
-	routine *Routine,
-	trigger *RoutineTrigger,
-	source string,
-	provided map[string]string,
-	missedTicks int,
-	claimedTick *time.Time,
-) (*RoutineRun, error) {
-	return s.dispatchRoutineRun(ctx, routine, trigger, source, provided, "", missedTicks, claimedTick)
-}
-
+// slot. nil for manual/webhook fires, which have no claimed slot.
 func (s *RoutineService) dispatchRoutineRun(
 	ctx context.Context,
 	routine *Routine,
@@ -605,7 +693,7 @@ func (s *RoutineService) dispatchRoutineRun(
 	source string,
 	provided map[string]string,
 	idempotencyKey string,
-	missedTicks int,
+	gap *gapSummary,
 	claimedTick *time.Time,
 ) (*RoutineRun, error) {
 	now := time.Now().UTC()
@@ -639,8 +727,18 @@ func (s *RoutineService) dispatchRoutineRun(
 		// and copied onto every wakeup request and run this fire produces.
 		CausationID: uuid.New().String(),
 	}
+	if gap != nil {
+		missed := gap.MissedTicks
+		firstMissed := gap.FirstMissed
+		run.CatchUpMissedTicks = &missed
+		run.CatchUpFirstMissedAt = &firstMissed
+		run.CatchUpTruncated = gap.Truncated
+	}
+	// The gap summary is written once, here, before applyConcurrencyPolicy
+	// runs — a run later marked skipped, coalesced or failed still carries
+	// the gap measured for its tick (AC-002.10).
 	if err := s.repo.CreateRoutineRun(ctx, run); err != nil {
-		return nil, fmt.Errorf("create run: %w", err)
+		return nil, fmt.Errorf("create run: %w", err) // AC-001.12: no run row exists.
 	}
 
 	// AC-003.1/AC-003.9 (Review round 3, R3-4): office_loop_routine_run_total
@@ -678,7 +776,7 @@ func (s *RoutineService) dispatchRoutineRun(
 		return run, nil
 	}
 
-	if err := s.materialiseRoutineRun(ctx, routine, run, tmpl, title, description, vars, source, idempotencyKey, missedTicks, claimedTick); err != nil {
+	if err := s.materialiseRoutineRun(ctx, routine, run, tmpl, title, description, vars, source, idempotencyKey, gap, claimedTick); err != nil {
 		return run, err
 	}
 	// A nil error only means materialiseRoutineRun's terminal write
@@ -708,7 +806,7 @@ func (s *RoutineService) dispatchRoutineRun(
 // pause reason in the response body" without a second PauseState read —
 // which would race a resume between the block decision and the response.
 // Every existing errors.Is(err, shared.ErrWorkspacePaused) call site
-// (processCronTrigger below, writeDispatchError, scheduler/wakeup) keeps
+// (processCronTrigger above, writeDispatchError, scheduler/wakeup) keeps
 // matching unchanged, since Unwrap chains to the shared sentinel.
 type pausedDispatchError struct {
 	workspaceID string
@@ -763,8 +861,10 @@ func (s *RoutineService) checkPauseGate(ctx context.Context, workspaceID, routin
 // (see SyncRunStatus). The lightweight path has no task to wait on, so
 // it resolves to a terminal status (done/failed) immediately; see
 // materialiseLightweightRoutineRun.
-// missedTicks is forwarded to the lightweight wakeup payload; the heavy
-// path doesn't attribute it (the agent reads context from the task).
+// gap is forwarded to the lightweight wakeup payload; the heavy path
+// doesn't render it — mutating a user's template text with scheduler
+// metadata would be a worse contract than leaving the gap on the routine
+// run where the API exposes it (AC-002.6).
 func (s *RoutineService) materialiseRoutineRun(
 	ctx context.Context,
 	routine *Routine,
@@ -774,13 +874,13 @@ func (s *RoutineService) materialiseRoutineRun(
 	vars map[string]string,
 	source string,
 	idempotencyKey string,
-	missedTicks int,
+	gap *gapSummary,
 	claimedTick *time.Time,
 ) error {
 	if tmpl.Title != "" && s.workflowEnsurer != nil && s.taskCreator != nil {
 		return s.materialiseHeavyRoutineRun(ctx, routine, run, title, description)
 	}
-	return s.materialiseLightweightRoutineRun(ctx, routine, run, vars, source, idempotencyKey, missedTicks, claimedTick)
+	return s.materialiseLightweightRoutineRun(ctx, routine, run, vars, source, idempotencyKey, gap, claimedTick)
 }
 
 // materialiseHeavyRoutineRun creates a real task in the routine system
@@ -828,9 +928,11 @@ func (s *RoutineService) materialiseHeavyRoutineRun(
 // wakeup queue because no background poller retries direct dispatch.
 // LinkedTaskID stays empty for lightweight runs.
 //
-// missedTicks > 0 surfaces in the wakeup payload when the cron tick
-// collapsed N missed fires into one (catch-up cap policy
-// enqueue_missed_with_cap). Zero on the happy path.
+// gap, when non-nil, surfaces in the wakeup payload as the gap this claim
+// measured (catch-up policy summarize_missed). CreateWakeupRequest and
+// Dispatch errors are returned rather than absorbed — the only exception is
+// the idempotency-key-conflict sentinel, which is a successful dedup, not a
+// failed dispatch, and stays a no-op (AC-OFFICE-ROUTINE-CATCHUP-001.10).
 func (s *RoutineService) materialiseLightweightRoutineRun(
 	ctx context.Context,
 	routine *Routine,
@@ -838,14 +940,14 @@ func (s *RoutineService) materialiseLightweightRoutineRun(
 	vars map[string]string,
 	source string,
 	idempotencyKey string,
-	missedTicks int,
+	gap *gapSummary,
 	claimedTick *time.Time,
 ) error {
 	if s.wakeup == nil || routine.AssigneeAgentProfileID == "" {
 		return s.finalizeLightweightRun(ctx, run, models.RoutineRunStatusDone)
 	}
 	idemKey := buildRoutineIdempotencyKey(source, routine.ID, run.TriggerID, idempotencyKey, claimedTick, run.ID)
-	payloadStr, _ := marshalRoutinePayload(routine.ID, vars, missedTicks)
+	payloadStr, _ := marshalRoutinePayload(routine.ID, vars, gap)
 	req := &WakeupRequest{
 		ID:             uuid.New().String(),
 		AgentProfileID: routine.AssigneeAgentProfileID,
@@ -934,17 +1036,24 @@ func buildRoutineIdempotencyKey(
 
 // marshalRoutinePayload renders the wakeup-request payload for a
 // routine fire as JSON. The shape mirrors wakeup.RoutinePayload:
-// {routine_id, variables, missed_ticks}. missed_ticks is set by the
-// cron tick when the catch-up cap collapsed N missed fires into one.
-func marshalRoutinePayload(routineID string, vars map[string]string, missedTicks int) (string, error) {
+// {routine_id, variables, missed_ticks, missed_since, missed_truncated}.
+// The three catch-up fields are set together, from gap, only when the
+// claim measured at least one missed tick under the summarize_missed
+// policy — they state the ticks counted and reported, never the ticks
+// fired (only one run is ever dispatched per claim).
+func marshalRoutinePayload(routineID string, vars map[string]string, gap *gapSummary) (string, error) {
 	body := map[string]any{
 		"routine_id": routineID,
 	}
 	if len(vars) > 0 {
 		body["variables"] = vars
 	}
-	if missedTicks > 0 {
-		body["missed_ticks"] = missedTicks
+	if gap != nil {
+		body["missed_ticks"] = gap.MissedTicks
+		body["missed_since"] = gap.FirstMissed.UTC().Format(time.RFC3339)
+		if gap.Truncated {
+			body["missed_truncated"] = true
+		}
 	}
 	b, err := json.Marshal(body)
 	if err != nil {

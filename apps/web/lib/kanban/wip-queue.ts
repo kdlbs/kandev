@@ -6,6 +6,8 @@ export type WipQueueTask = StepOrderTask & {
   wipAdmitted?: boolean | null;
 };
 
+export type WipQueueComparator = (left: WipQueueTask, right: WipQueueTask) => number;
+
 export type WipQueueEntry<T extends WipQueueTask = WipQueueTask> = {
   task: T;
   position: number;
@@ -36,20 +38,22 @@ function isDestinationQueued(task: WipQueueTask, destinationStepId: string): boo
 export function getDestinationQueue<T extends WipQueueTask>(
   tasks: T[],
   destinationStepId: string,
+  compareTasks: WipQueueComparator = compareWipQueueTasks,
 ): WipQueueEntry<T>[] {
   const queued = tasks.filter((task) => isDestinationQueued(task, destinationStepId));
-  queued.sort(compareWipQueueTasks);
+  queued.sort(compareTasks);
   return queued.map((task, index) => ({ task, position: index + 1, total: queued.length }));
 }
 
 export function partitionWipTasks<T extends WipQueueTask>(
   tasks: T[],
   destinationStepId: string,
+  compareTasks: WipQueueComparator = compareWipQueueTasks,
 ): { admitted: T[]; queued: T[] } {
-  const queuedEntries = getDestinationQueue(tasks, destinationStepId);
+  const queuedEntries = getDestinationQueue(tasks, destinationStepId, compareTasks);
   const queuedIds = new Set(queuedEntries.map(({ task }) => task.id));
   const admitted = tasks.filter((task) => !queuedIds.has(task.id));
-  admitted.sort(compareWipQueueTasks);
+  admitted.sort(compareTasks);
   return {
     admitted,
     queued: queuedEntries.map(({ task }) => task),

@@ -63,9 +63,13 @@ func (r *Repository) runMigrations() error {
 	r.migrateWakeWaveColumns()
 	r.migrate.Apply("task_workspace_groups.ownership_generation",
 		`ALTER TABLE task_workspace_groups ADD COLUMN ownership_generation INTEGER NOT NULL DEFAULT 1`)
+	r.migrateRoutineCatchUp()
 	r.migrateBudgetPolicyRevision()
 	r.migrateWorkspacePauseSkipAttribution()
 	r.migrateLoopLivenessCausationID()
+	if err := r.migrateRetentionIndexes(); err != nil {
+		return err
+	}
 	if err := r.migrate.Err(); err != nil {
 		return err
 	}
@@ -139,6 +143,27 @@ func (r *Repository) migrateLoopLivenessCausationID() {
 	_ = r.migrate.Apply("idx_runs_causation_id",
 		`CREATE INDEX IF NOT EXISTS idx_runs_causation_id
 			ON runs(causation_id) WHERE causation_id != ''`)
+}
+
+// migrateRetentionIndexes adds the two indexes the run-history retention
+// sweep depends on (docs/specs/office/system-design/run-history-retention.md
+// "Indexes to add"). Both are expression indexes over the same
+// COALESCE(...) the sweep both filters and orders by; a plain-column index
+// on the nullable completion column would serve neither the WHERE clause
+// nor the ORDER BY the sweep actually issues, on either engine.
+func (r *Repository) migrateRetentionIndexes() error {
+	if err := r.migrate.Apply(
+		"idx_office_routine_runs_retention",
+		`CREATE INDEX IF NOT EXISTS idx_office_routine_runs_retention
+			ON office_routine_runs(routine_id, status, (COALESCE(completed_at, created_at)) DESC, id DESC)`,
+	); err != nil {
+		return err
+	}
+	return r.migrate.Apply(
+		"idx_runs_retention",
+		`CREATE INDEX IF NOT EXISTS idx_runs_retention
+			ON runs(agent_profile_id, status, (COALESCE(finished_at, requested_at)) DESC, id DESC)`,
+	)
 }
 
 // migrateContinuationScope adds runs.continuation_scope for databases
@@ -417,6 +442,9 @@ func (r *Repository) migrateFailureColumns() error {
 	}
 	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_office_agent_pause_recoveries_agent ON office_agent_pause_recoveries(agent_id)`); err != nil {
 		return fmt.Errorf("idx_office_agent_pause_recoveries_agent: %w", err)
+	}
+	if _, err := r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_office_agent_pause_recoveries_failed_run ON office_agent_pause_recoveries(failed_run_id)`); err != nil {
+		return fmt.Errorf("idx_office_agent_pause_recoveries_failed_run: %w", err)
 	}
 	return nil
 }

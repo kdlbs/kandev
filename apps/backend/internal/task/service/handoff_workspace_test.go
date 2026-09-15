@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -196,6 +197,19 @@ func (f *fakeBlockerRepo) DeleteTaskBlocker(_ context.Context, taskID, blockerTa
 	return nil
 }
 
+func (f *fakeBlockerRepo) DeleteTaskBlockersForTask(_ context.Context, taskID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	kept := f.blockers[:0]
+	for _, blocker := range f.blockers {
+		if blocker.TaskID != taskID && blocker.BlockerTaskID != taskID {
+			kept = append(kept, blocker)
+		}
+	}
+	f.blockers = kept
+	return nil
+}
+
 func (f *fakeBlockerRepo) ListTasksBlockedBy(_ context.Context, blockerTaskID string) ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -345,6 +359,30 @@ func (f *fakeTaskRepo) ReparentDirectChildren(_ context.Context, oldParentID, ne
 	return nil
 }
 
+func (f *fakeTaskRepo) ReparentDirectChildrenInWorkspace(
+	_ context.Context,
+	oldParentID, newParentID, workspaceID string,
+) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	ids := f.children[oldParentID]
+	for _, id := range ids {
+		if task := f.tasks[id]; task != nil && task.WorkspaceID != workspaceID {
+			return errors.New("cross-workspace child")
+		}
+	}
+	delete(f.children, oldParentID)
+	for _, id := range ids {
+		if task := f.tasks[id]; task != nil {
+			task.ParentID = newParentID
+		}
+		if newParentID != "" {
+			f.children[newParentID] = append(f.children[newParentID], id)
+		}
+	}
+	return nil
+}
+
 func (f *fakeTaskRepo) SetTaskMetadataKey(_ context.Context, taskID, key string, value interface{}) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -356,6 +394,28 @@ func (f *fakeTaskRepo) SetTaskMetadataKey(_ context.Context, taskID, key string,
 		task.Metadata = map[string]interface{}{}
 	}
 	task.Metadata[key] = value
+	return nil
+}
+func (f *fakeTaskRepo) RestoreTaskParentIfUnchanged(
+	_ context.Context,
+	taskID, expectedParentID, restoredParentID, restoredWorkspaceMode string,
+) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	task := f.tasks[taskID]
+	if task == nil {
+		return errors.New("task not found")
+	}
+	if task.ParentID != expectedParentID {
+		return errors.New("task parent changed during compensation")
+	}
+	task.ParentID = restoredParentID
+	if restoredWorkspaceMode == workspaceModeInheritParent {
+		if workspace, ok := task.Metadata["workspace"].(map[string]interface{}); ok &&
+			workspace["mode"] == workspaceModeSharedGroup {
+			workspace["mode"] = restoredWorkspaceMode
+		}
+	}
 	return nil
 }
 
@@ -458,6 +518,66 @@ func (f *fakeTaskRepo) ListChildrenIncludingArchived(_ context.Context, parentID
 	return out, nil
 }
 
+func (f *fakeTaskRepo) ListChildrenLimited(ctx context.Context, parentID string, limit int) ([]*models.Task, error) {
+	children, err := f.ListChildren(ctx, parentID)
+	if err != nil || limit <= 0 || len(children) <= limit {
+		return children, err
+	}
+	return children[:limit], nil
+}
+
+func (f *fakeTaskRepo) ListChildrenIncludingArchivedLimited(
+	ctx context.Context,
+	parentID string,
+	limit int,
+) ([]*models.Task, error) {
+	children, err := f.ListChildrenIncludingArchived(ctx, parentID)
+	if err != nil || limit <= 0 || len(children) <= limit {
+		return children, err
+	}
+	return children[:limit], nil
+}
+
+func (f *fakeTaskRepo) ListChildrenIncludingArchivedByCascadeLimited(
+	ctx context.Context,
+	parentID, cascadeID string,
+	limit int,
+) ([]*models.Task, error) {
+	children, err := f.ListChildrenIncludingArchived(ctx, parentID)
+	if err != nil {
+		return nil, err
+	}
+	filtered := make([]*models.Task, 0, min(limit, len(children)))
+	for _, child := range children {
+		if child.ArchivedByCascadeID == cascadeID {
+			filtered = append(filtered, child)
+			if limit > 0 && len(filtered) == limit {
+				break
+			}
+		}
+	}
+	return filtered, nil
+}
+
+func (f *fakeTaskRepo) ListStructuralChildrenLimited(
+	_ context.Context,
+	parentID string,
+	limit int,
+) ([]*models.Task, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	children := make([]*models.Task, 0, len(f.children[parentID]))
+	for _, id := range f.children[parentID] {
+		if child, ok := f.tasks[id]; ok {
+			children = append(children, child)
+			if limit > 0 && len(children) >= limit {
+				break
+			}
+		}
+	}
+	return children, nil
+}
+
 // Stubs to satisfy repository.TaskRepository — only the methods actually
 // used by AttachWorkspacePolicy do real work.
 func (f *fakeTaskRepo) ListSiblings(context.Context, string) ([]*models.Task, error) {
@@ -489,8 +609,39 @@ func (r *phase4TaskRepo) ListChildren(ctx context.Context, parentID string) ([]*
 func (r *phase4TaskRepo) ListChildrenIncludingArchived(ctx context.Context, parentID string) ([]*models.Task, error) {
 	return r.base.ListChildrenIncludingArchived(ctx, parentID)
 }
+func (r *phase4TaskRepo) ListChildrenLimited(ctx context.Context, parentID string, limit int) ([]*models.Task, error) {
+	return r.base.ListChildrenLimited(ctx, parentID, limit)
+}
+func (r *phase4TaskRepo) ListChildrenIncludingArchivedLimited(
+	ctx context.Context,
+	parentID string,
+	limit int,
+) ([]*models.Task, error) {
+	return r.base.ListChildrenIncludingArchivedLimited(ctx, parentID, limit)
+}
+func (r *phase4TaskRepo) ListStructuralChildrenLimited(
+	ctx context.Context,
+	parentID string,
+	limit int,
+) ([]*models.Task, error) {
+	return r.base.ListStructuralChildrenLimited(ctx, parentID, limit)
+}
+func (r *phase4TaskRepo) ListChildrenIncludingArchivedByCascadeLimited(
+	ctx context.Context,
+	parentID, cascadeID string,
+	limit int,
+) ([]*models.Task, error) {
+	return r.base.ListChildrenIncludingArchivedByCascadeLimited(ctx, parentID, cascadeID, limit)
+}
 func (r *phase4TaskRepo) ReparentDirectChildren(ctx context.Context, oldParentID, newParentID string) error {
 	return r.base.ReparentDirectChildren(ctx, oldParentID, newParentID)
+}
+
+func (r *phase4TaskRepo) ReparentDirectChildrenInWorkspace(
+	ctx context.Context,
+	oldParentID, newParentID, workspaceID string,
+) error {
+	return r.base.ReparentDirectChildrenInWorkspace(ctx, oldParentID, newParentID, workspaceID)
 }
 func (r *phase4TaskRepo) SetTaskMetadataKey(ctx context.Context, taskID, key string, value interface{}) error {
 	return r.base.SetTaskMetadataKey(ctx, taskID, key, value)

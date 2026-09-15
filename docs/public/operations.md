@@ -348,6 +348,34 @@ the Kandev service first provides the clearest maintenance boundary.
 
 </details>
 
+## Office run history retention
+
+Open **Settings > System > Data & Logs** to manage automatic deletion of old
+Office run history. Deletion is enabled by default. The first sweep starts five
+minutes after the backend starts or after you enable deletion.
+
+The first sweep for each history table is a preview. It reports the rows that
+would be deleted and removes no rows. A later sweep can delete eligible rows.
+Deletion is permanent. Back up the database before you enable deletion if you
+need to keep old history outside the configured window.
+
+The retention window controls the age of rows that can be deleted. The minimum
+kept per owner control keeps the newest rows for each routine or agent, even
+when those rows are older than the window. A floor of zero removes this extra
+protection. Run event, route attempt, and skill rows are deleted with their
+parent run.
+
+The page shows the current policy, retained row counts, preview results, the
+last sweep, and any backlog or errors. Counts continue to update when deletion
+is disabled, so you can monitor growth before you enable it again.
+
+To disable automatic deletion:
+
+1. Open **Settings > System > Data & Logs**.
+2. Clear **Delete eligible run history**.
+3. Select **Save changes**.
+4. Check the retention status. It must show that deletion is disabled.
+
 ## Database operation
 
 > **Single-owner rule:** SQLite uses one writer connection in WAL mode; only one Kandev backend should own the file. **Factory reset** is destructive and removes managed data after creating a pre-reset backup.

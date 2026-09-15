@@ -24,6 +24,22 @@ Use the task's **Changes** panel to inspect, stage, discard, commit, push, reset
 
 The state transitions are separate operations. Inspect the diff before staging, verify checks before pushing, and decide whether cleanup may remove a worktree or other local data.
 
+### When task and PR histories differ
+
+For an associated pull request, Kandev keeps the task checkout and the published PR history
+separate when their commit histories differ. It may identify a completed local rebase when the
+current repository evidence supports that explanation. If the evidence is missing or incomplete,
+Kandev uses neutral wording instead of guessing which history changed.
+
+Choose **Compare versions** first. Kandev opens **Changes** with the task and PR histories visible;
+the comparison does not fetch, rewrite, or publish Git history. Review the selected repository,
+branch, pull request, and both displayed heads before choosing a replacement action.
+
+**Publish task version...** replaces the published PR history after an exact provider-head check and
+confirmation. **Restore published PR version...** replaces the task checkout history, creates a
+recovery branch at the current task head first, and requires a clean working tree. If the provider
+head changes before confirmation, Kandev leaves both versions unchanged and asks for a fresh review.
+
 ## Prerequisites and trust boundary
 
 The repository must be a valid Git checkout in the executor workspace and the session's `agentctl` must be reachable. Remote commands use the remote named `origin`; configure its URL and credentials in the executor where the command runs before relying on Pull, Push, or change-request creation. Rebase and Merge use `origin` when it exists, or a local base branch when it does not. The workspace's provider automation identity does not replace the task's Git credential policy or executor-local SSH setup; see [Executors](executors.md#workspace-automation-identity-and-task-git-transport).
@@ -370,6 +386,8 @@ Before deleting a task or performing a hard reset, commit and push anything you 
 
 - **No agent/client available:** launch or prepare the session and confirm its executor is healthy. Workspace Git actions can reconstruct runtime control after a backend restart, but still need a valid task environment.
 - **Remote/authentication error during worktree preparation:** test `git fetch origin` inside the same executor workspace. Verify the remote URL, SSH agent or key, known-hosts entry, token or credential-helper availability, DNS, and firewall access there. Do not paste command output containing tokens or authenticated URLs into a task or issue.
+- **Noninteractive Git authentication failure:** Kandev-owned Git commands finish with a bounded error when the selected executor credential source cannot authenticate. Repair the SSH, credential-helper, or eligible host GitHub access in that same executor and retry the operation. Kandev does not replace credentials or switch transports after the failure. Existing host bridge registration can recover on a later operation; when registration was skipped, launch, resume, or prepared-start re-evaluates it. See [Choose task Git credentials](integrations.md#choose-task-git-credentials) for the credential scope.
+- **Comparison target unavailable:** local Changes and local file status remain usable while a fork comparison target is unavailable. The target's commits, diff, ahead/behind values, and numeric totals remain unavailable until authentication recovers. Refresh Changes or request fresh status to trigger the one explicit re-evaluation; Kandev does not substitute a same-named `origin` branch.
 - **Host GitHub SSH setup:** for host-based Git credentials, run `gh config set git_protocol ssh --host github.com`, restart Kandev, and retry the task. For Docker, SSH, or Sprites, configure the same Git and SSH access in that executor instead of relying on the host.
 - **Merge or Rebase without `origin`:** the selected base branch must exist locally. If it does not, Kandev returns `base branch "BASE" does not exist locally` before changing history. If `origin` exists, Kandev does not fall back to a local branch after a fetch or authentication error.
 - **Pull fetched the wrong branch:** Kandev always uses `origin` and, once any upstream exists, the current local branch name. Align local and remote branch names or use an explicit terminal command.

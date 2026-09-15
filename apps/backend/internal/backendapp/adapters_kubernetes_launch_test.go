@@ -41,7 +41,7 @@ func (b *capturingKubernetesBackend) CreateInstance(
 func (b *capturingKubernetesBackend) StopInstance(context.Context, *lifecycle.ExecutorInstance, bool) error {
 	return nil
 }
-func (b *capturingKubernetesBackend) RecoverInstances(context.Context) ([]*lifecycle.ExecutorInstance, error) {
+func (b *capturingKubernetesBackend) RecoverInstances(context.Context, []*models.ExecutorRunning) ([]*lifecycle.ExecutorInstance, error) {
 	return nil, nil
 }
 func (b *capturingKubernetesBackend) GetInteractiveRunner() *process.InteractiveRunner { return nil }

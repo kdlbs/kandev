@@ -313,7 +313,12 @@ function SidebarRightActions() {
   );
 
   const handleTaskCreated = useCallback(
-    (task: Task, _mode: "create" | "edit", meta?: { taskSessionId?: string | null }) => {
+    (
+      task: Task,
+      _mode: "create" | "edit",
+      meta?: { taskSessionId?: string | null; autoFocus?: boolean },
+    ) => {
+      if (meta?.autoFocus === false) return;
       const state = appStore.getState();
       const oldSessionId = state.tasks.activeSessionId;
       const oldEnvId = oldSessionId ? (state.environmentIdBySessionId[oldSessionId] ?? null) : null;

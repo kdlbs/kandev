@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"testing"
 
+	"github.com/kandev/kandev/internal/agent/runtime/routingerr"
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 )
 
@@ -41,6 +42,42 @@ func TestDynamicPreResultRequiresExplicitKnownEvidence(t *testing.T) {
 				t.Fatalf("case %q was incorrectly treated as pre-result safe", test.name)
 			}
 		})
+	}
+}
+
+func TestDynamicAttemptEvidenceTreatsMatchingACPProviderDiagnosticAsPreResult(t *testing.T) {
+	var service Service
+	const message = "API Error: Repeated 529 Overloaded errors. The API is at capacity."
+	service.beginPromptAttempt("session-1", "execution-1", 1, true)
+	service.observeProviderDiagnostic("session-1", "execution-1", 1, message)
+
+	got := service.withDynamicAttemptEvidence(watcher.AgentEventData{
+		SessionID:        "session-1",
+		AgentExecutionID: "execution-1",
+		PromptGeneration: 1,
+		ErrorMessage:     message,
+	})
+	if got.OutputObserved {
+		t.Fatal("matching ACP provider diagnostic was treated as generated output")
+	}
+	if !dynamicPreResultSafe(got) {
+		t.Fatal("matching ACP provider diagnostic was not safe to route")
+	}
+
+	// A different failure must not erase the output fence.
+	service.beginPromptAttempt("session-2", "execution-2", 1, true)
+	service.observeProviderDiagnostic("session-2", "execution-2", 1, message)
+	other := service.withDynamicAttemptEvidence(watcher.AgentEventData{
+		SessionID:        "session-2",
+		AgentExecutionID: "execution-2",
+		PromptGeneration: 1,
+		ErrorMessage:     "API Error: 500 Internal server error",
+	})
+	if !other.OutputObserved {
+		t.Fatal("mismatched provider failure erased the output fence")
+	}
+	if gotCode := matchingProviderFailureCode(got); gotCode != routingerr.CodeProviderOverloaded {
+		t.Fatalf("matching provider failure code = %q, want %q", gotCode, routingerr.CodeProviderOverloaded)
 	}
 }
 

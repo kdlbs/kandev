@@ -181,3 +181,18 @@ Follow-up verification: 67 tests in three settings/mapper suites passed; targete
 ESLint, frontend build, spec lint and whitespace checks passed. Browser checks on
 the existing Tailscale instance confirmed the icon-bearing heading is outside the
 card, the saved delay is 500 ms, and the phone viewport has no horizontal overflow.
+
+## PR review validation
+
+Merged current main while preserving task auto-focus settings and both sets of
+translation keys and hydration tests. Post-merge verification passed: 226 frontend
+tests, affected backend settings and boot tests, typecheck, targeted lint, i18n,
+spec lint, fresh backend/plugin/web builds, five desktop and two phone E2E tests
+with retries disabled.
+
+Codex identified stale generated settings snapshots. Reproduced with
+`cd apps/backend && go run ./cmd/settings-catalog --check`, regenerated with
+`go run ./cmd/settings-catalog`, and verified with
+`GOCACHE=/tmp/kandev-sidebar-go-cache node --test scripts/settings-contract-ci.test.mjs`
+from the repository root. This restores the existing catalog contract without
+changing product behavior or requirements.

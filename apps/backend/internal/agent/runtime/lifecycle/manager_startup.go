@@ -19,7 +19,7 @@ import (
 	"github.com/kandev/kandev/internal/task/models"
 )
 
-const defaultRemoteContributionPreflightTimeout = 30 * time.Second
+const defaultRemoteContributionPreflightTimeout = 2 * time.Minute
 
 func (m *Manager) contributionPreflightTimeout() time.Duration {
 	if m.remoteContributionPreflightTimeout > 0 {
@@ -104,6 +104,9 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 	if !exists {
 		return fmt.Errorf("execution %q not found", executionID)
 	}
+	if err := execution.contextResetAdmissionError(); err != nil {
+		return err
+	}
 	defer func() {
 		retErr = wrapBootstrapFailure(execution, retErr)
 	}()
@@ -115,6 +118,12 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 		return err
 	}
 	operationCtx := activityClaim.Context(ctx)
+	operationRelease, err := execution.acquireContextResetOperation(operationCtx)
+	if err != nil {
+		activityClaim.Release()
+		return err
+	}
+	defer operationRelease()
 	defer func() {
 		if retErr != nil {
 			activityClaim.Release()
@@ -171,9 +180,7 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 		m.updateExecutionError(executionID, "agentctl not ready: "+err.Error())
 		return fmt.Errorf("agentctl not ready: %w", err)
 	}
-	preflightCtx, cancelPreflight := context.WithTimeout(operationCtx, m.contributionPreflightTimeout())
-	err = m.preflightRemoteContributionPushes(preflightCtx, execution)
-	cancelPreflight()
+	err = m.preflightRemoteContributionPushes(operationCtx, execution)
 	if err != nil {
 		m.updateExecutionError(executionID, "contribution push preflight failed: "+err.Error())
 		return err
@@ -221,6 +228,9 @@ func (m *Manager) startAgentProcess(ctx context.Context, executionID string) (re
 }
 
 func (m *Manager) preflightRemoteContributionPushes(ctx context.Context, execution *AgentExecution) error {
+	preflightCtx, cancel := context.WithTimeout(ctx, m.contributionPreflightTimeout())
+	defer cancel()
+
 	if execution == nil {
 		return nil
 	}
@@ -242,7 +252,7 @@ func (m *Manager) preflightRemoteContributionPushes(ctx context.Context, executi
 	}
 	sort.Strings(keys)
 	for _, key := range keys {
-		result, err := client.GitPushPreflight(ctx, key, agentctl.PushOptions{})
+		result, err := client.GitPushPreflight(preflightCtx, key, agentctl.PushOptions{})
 		if err != nil {
 			return &BootstrapFailure{
 				Operation: bootstrapOperation(execution),

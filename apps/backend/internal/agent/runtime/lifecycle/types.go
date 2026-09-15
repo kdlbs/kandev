@@ -99,6 +99,37 @@ type AgentExecution struct {
 	promptTurnID      string
 	promptLifecycleMu sync.Mutex
 
+	// recoveryAppliedControlTurnID is the control-server-assigned turn
+	// identifier (streams.AgentEvent.ControlTurnID) of a retained turn
+	// outcome this execution already applied during re-tracking
+	// (AC-EXECUTORS-SURVIVAL-004.2). A later live-delivered event carrying
+	// the same identifier is the redelivery design 03 describes -- the
+	// backend re-attaching finally unblocks agentctl's parked send of the
+	// exact same event the recovery loop already fetched and applied via
+	// GetTurnOutcome -- and must be a no-op (AC-EXECUTORS-SURVIVAL-004.4).
+	// Zero means "nothing applied via recovery," matching ControlTurnID's
+	// own "not retained" zero value, so the check in handleAgentEvent is a
+	// single comparison with no separate presence flag needed. atomic
+	// because it is set once during recovery (before streams reconnect) but
+	// read from the stream-processing goroutine handleAgentEvent runs on.
+	recoveryAppliedControlTurnID atomic.Int64
+
+	// recoveredPromptGenerationPending is true when this execution was
+	// reconstructed by recovery with a turn believed still in flight (nothing
+	// retained per AC-EXECUTORS-SURVIVAL-004.2's outcome peek):
+	// promptGeneration was recreated from zero along with the rest of this
+	// execution object, so it cannot match the nonzero PromptGeneration the
+	// live completion for that pre-restart turn will carry. claimPromptCompletion
+	// adopts the event's own PromptGeneration as this execution's generation
+	// the first time this flag is observed true, mirroring what
+	// applyRecoveredTurnOutcome already does explicitly for a turn that
+	// completed while the backend was detached -- there is nothing to
+	// supersede yet, since no prompt has ever been dispatched through this
+	// object. beginExecutionPrompt clears it the moment a prompt IS
+	// dispatched through this object, so a late, genuinely-stale completion
+	// from before that dispatch cannot clobber the newly assigned generation.
+	recoveredPromptGenerationPending atomic.Bool
+
 	// PrepareResult carries the environment preparation result back to the caller
 	// so it can be persisted synchronously before UpdateTaskSession clobbers metadata.
 	PrepareResult *EnvPrepareResult `json:"-"`
@@ -108,6 +139,21 @@ type AgentExecution struct {
 	agentctlOverride          atomic.Pointer[agentctl.Client]
 	agentctlLifecycleMu       sync.RWMutex
 	remoteInstanceLifecycleMu sync.Mutex
+	// contextResetMu owns the reset attempt boundary. While a session reset is
+	// in flight, fresh-session setup events are retained until the lifecycle
+	// manager has committed the new ACP session. A timed-out attempt discards
+	// those events and fences all later provider use until an explicit restart
+	// succeeds.
+	// contextResetAdmissionMu is the shared operation lease: ordinary provider
+	// operations hold a read lease, while a reset holds the write lease through
+	// session replacement, configuration restoration, and ready publication.
+	contextResetAdmissionMu      sync.RWMutex
+	contextResetMu               sync.Mutex
+	contextResetInFlight         bool
+	contextResetFenced           bool
+	contextResetFenceReason      string
+	contextResetRecoveryInFlight bool
+	contextResetEvents           []agentctl.AgentEvent
 	// agentctlReady records the successful health check independently of the
 	// agent process and workspace stream lifecycles. Prepared sessions have a
 	// healthy agentctl before either of those is started or attached.
@@ -157,11 +203,17 @@ type AgentExecution struct {
 	isResumedSession bool
 
 	// Buffers for accumulating agent response during a prompt
-	messageBuffer  strings.Builder
-	thinkingBuffer strings.Builder
-	messageMu      sync.Mutex
-	streamMu       sync.Mutex
-	stream         *streamCoalescer
+	messageBuffer strings.Builder
+	// messageBufferDiagnostic is the ProviderDiagnosticCandidate value of the
+	// chunk(s) currently held in messageBuffer (legacy no-protocol-ID path).
+	// A chunk whose marker differs from this flag forces an immediate flush of
+	// the buffered segment first, so a diagnostic chunk's marker is never
+	// merged away by concatenation with ordinary output.
+	messageBufferDiagnostic bool
+	thinkingBuffer          strings.Builder
+	messageMu               sync.Mutex
+	streamMu                sync.Mutex
+	stream                  *streamCoalescer
 
 	// Legacy streaming message tracking for agents that omit protocol message IDs.
 	// These are set when we create a streaming message and cleared on tool_call/complete.
@@ -239,6 +291,12 @@ type AgentExecution struct {
 	// produced a single frame for this prompt" from "it worked, then paused" —
 	// both cases otherwise bump the same lastActivityAt timestamp.
 	agentEventSincePrompt bool
+	// providerDiagnosticCandidate and providerDiagnosticText retain the
+	// sanitized marked diagnostic for the terminal evidence snapshot. A marked
+	// diagnostic does not count as ordinary output, but its text is needed to
+	// correlate a failure when stream and failure events are delivered out of order.
+	providerDiagnosticCandidate bool
+	providerDiagnosticText      string
 	// promptActivityEpoch changes when a prompt is armed or a genuine agent
 	// event arrives. Stall consumers use it to reject a snapshot that became
 	// stale while the event was crossing the bus.
@@ -380,10 +438,37 @@ func (e *AgentExecution) promptGenerationSnapshot() uint64 {
 	return e.promptGeneration
 }
 
+// markRecoveryTurnOutcomeApplied records turnID as the control-server-
+// assigned identifier of a retained turn outcome just applied during
+// re-tracking (AC-EXECUTORS-SURVIVAL-004.2). A zero turnID is a no-op: it
+// means nothing was retained, and zero is also ControlTurnID's own
+// "not retained" value, so recording it would make every ordinary live
+// event with an unset ControlTurnID look like a match.
+func (e *AgentExecution) markRecoveryTurnOutcomeApplied(turnID int64) {
+	if turnID == 0 {
+		return
+	}
+	e.recoveryAppliedControlTurnID.Store(turnID)
+}
+
+// isRecoveryDuplicateEvent reports whether event is a live redelivery of a
+// turn outcome this execution already applied from a retained read
+// (AC-EXECUTORS-SURVIVAL-004.4). An event with no ControlTurnID stamp (the
+// overwhelming majority -- only a terminal event that was ever retained
+// while detached carries one) never matches.
+func (e *AgentExecution) isRecoveryDuplicateEvent(event *agentctl.AgentEvent) bool {
+	if event == nil || event.ControlTurnID == 0 {
+		return false
+	}
+	return e.recoveryAppliedControlTurnID.Load() == event.ControlTurnID
+}
+
 func (e *AgentExecution) armPromptActivity() {
 	e.lastActivityAtMu.Lock()
 	e.lastActivityAt = time.Now()
 	e.agentEventSincePrompt = false
+	e.providerDiagnosticCandidate = false
+	e.providerDiagnosticText = ""
 	e.promptActivityEpoch++
 	e.lastActivityAtMu.Unlock()
 }
@@ -410,9 +495,11 @@ func (e *AgentExecution) promptAttemptEvidenceSnapshot() PromptAttemptEvidence {
 	e.lastActivityAtMu.Lock()
 	defer e.lastActivityAtMu.Unlock()
 	return PromptAttemptEvidence{
-		EvidenceKnown:  true,
-		OutputObserved: e.agentEventSincePrompt,
-		EffectObserved: e.agentEventSincePrompt,
+		EvidenceKnown:               true,
+		OutputObserved:              e.agentEventSincePrompt,
+		EffectObserved:              e.agentEventSincePrompt,
+		ProviderDiagnosticCandidate: e.providerDiagnosticCandidate,
+		ProviderDiagnosticText:      e.providerDiagnosticText,
 	}
 }
 
@@ -1324,6 +1411,14 @@ type WorkspaceInfoProvider interface {
 	GetWorkspaceInfoForSession(ctx context.Context, taskID, sessionID string) (*WorkspaceInfo, error)
 	// GetWorkspaceInfoForEnvironment returns workspace info for a task environment.
 	GetWorkspaceInfoForEnvironment(ctx context.Context, taskEnvironmentID string) (*WorkspaceInfo, error)
+}
+
+// PassthroughSessionProvider reads a task session's durable passthrough-mode
+// snapshot (TaskSession.IsPassthrough) so backend startup composition can
+// build the PassthroughLookup used by SetPassthroughLookup
+// (AC-EXECUTORS-SURVIVAL-005.3).
+type PassthroughSessionProvider interface {
+	GetTaskSession(ctx context.Context, sessionID string) (*models.TaskSession, error)
 }
 
 // RecoveredExecution contains info about an execution recovered from a runtime.

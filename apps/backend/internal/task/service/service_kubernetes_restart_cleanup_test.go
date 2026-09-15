@@ -215,7 +215,7 @@ func (b *persistedKubernetesCleanupBackend) StopInstance(
 	b.pvcDeleted = true
 	return nil
 }
-func (*persistedKubernetesCleanupBackend) RecoverInstances(context.Context) ([]*lifecycle.ExecutorInstance, error) {
+func (*persistedKubernetesCleanupBackend) RecoverInstances(context.Context, []*models.ExecutorRunning) ([]*lifecycle.ExecutorInstance, error) {
 	return nil, nil
 }
 func (*persistedKubernetesCleanupBackend) GetInteractiveRunner() *process.InteractiveRunner {

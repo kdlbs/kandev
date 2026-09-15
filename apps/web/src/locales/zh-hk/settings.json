@@ -795,5 +795,7 @@
   "sidebarHoverDelay": "懸停延遲（毫秒）",
   "sidebarHoverHelp": "使用鼠標或觸控板懸停以顯示已摺疊的側邊欄。延遲可設為 0 到 5000 毫秒；設為 0 時立即顯示。",
   "sidebarHoverDelayError": "請輸入 0 到 5000 之間的整數。",
-  "discoveryAliasesSidebarHover": "側邊欄 懸停 顯示 延遲 等待 鼠標 觸控板"
+  "discoveryAliasesSidebarHover": "側邊欄 懸停 顯示 延遲 等待 鼠標 觸控板",
+  "autoFocusNewTasks": "自動聚焦新任務",
+  "autoFocusNewTasksHelp": "自動開啟新建立的任務。關閉此選項可保留目前視圖。任務和代理仍會按要求啓動。"
 }

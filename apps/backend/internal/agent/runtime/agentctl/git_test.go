@@ -4,12 +4,38 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 // gitOperationOK is the canonical success body every /api/v1/git/* POST returns.
 const gitOperationOK = `{"success":true,"operation":"pull","output":"Already up to date."}`
+
+func TestGitPushPreflightHonorsOperationBudget(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		timer := time.NewTimer(25 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"success":true,"operation":"push-preflight"}`))
+		case <-r.Context().Done():
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	client := newHTTPOnlyClient(server.URL)
+	client.httpClient.Timeout = 10 * time.Millisecond
+	result, err := client.GitPushPreflight(context.Background(), "", PushOptions{})
+	if err != nil || result == nil || !result.Success {
+		t.Fatalf("GitPushPreflight() = result %#v, error %v; want delayed response to succeed", result, err)
+	}
+	if got := client.httpClient.Timeout; got != 10*time.Millisecond {
+		t.Fatalf("ordinary client timeout = %s, want unchanged 10ms", got)
+	}
+}
 
 func TestGitPushSendsPushOptions(t *testing.T) {
 	srv, got := captureServer(t, jsonResponder(http.StatusOK, gitOperationOK))

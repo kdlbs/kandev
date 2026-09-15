@@ -10,7 +10,10 @@ import {
   useKanbanCardMenus,
   type KanbanCardMenuState,
 } from "@/components/kanban-card-menu";
-export { buildPluginMenuContext } from "@/components/kanban-card-menu";
+export {
+  buildPluginMenuContext,
+  useKanbanCardMoveMenuActions,
+} from "@/components/kanban-card-menu";
 import { useAppStore } from "@/components/state-provider";
 import { TaskArchiveConfirmation } from "@/components/task/task-archive-confirmation";
 import { TaskDetachConfirmationSurface } from "@/components/task/task-detach-confirm-dialog";

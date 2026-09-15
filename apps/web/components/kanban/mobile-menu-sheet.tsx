@@ -2,8 +2,6 @@
 import { type ReactNode, type RefObject } from "react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@kandev/ui/sheet";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@kandev/ui/drawer";
-import { Checkbox } from "@kandev/ui/checkbox";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@kandev/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@kandev/ui/toggle-group";
 import { IconColumns, IconLayoutKanban, IconList, IconTimeline } from "@tabler/icons-react";
 import { MobileWorkspaceActionsSection } from "@/components/app-sidebar/app-sidebar-workspace-actions";
@@ -14,22 +12,16 @@ import {
   type AppNavDialogControls,
 } from "@/components/navigation/app-nav-sections";
 import { TaskSearchInput } from "./task-search-input";
-import {
-  MobileTasksListOptions,
-  type TasksListDisplayOptions,
-} from "./mobile-menu-task-list-options";
+import type { TasksListDisplayOptions } from "./mobile-menu-task-list-options";
 import { cn } from "@/lib/utils";
-import type { Repository } from "@/lib/types/http";
-import type { WorkflowsState } from "@/lib/state/slices";
 import { useTranslation } from "react-i18next";
-import { getRepositoryPlaceholderKey } from "@/lib/kanban/repository-placeholder";
 import { useMobileMenuSheetState } from "@/hooks/use-mobile-menu-sheet-state";
-import { ColumnsMenu, type ColumnsMenuStep } from "./columns-menu";
+import { MobileDisplayOptions } from "./mobile-display-options";
+import type { MobileDisplayOptionsProps } from "./mobile-display-options";
+export type { MobileDisplayOptionsProps, MobileColumnsSection } from "./mobile-display-options";
 import {
   mobileControlClass,
   mobileControlIconClass,
-  mobileFieldClass,
-  mobileFieldLabelClass,
   mobileSectionClass,
   mobileSectionTitleClass,
 } from "./mobile-menu-styles";
@@ -46,173 +38,6 @@ export type MobileMenuSheetProps = {
   tasksListOptions?: TasksListDisplayOptions;
   pageActions?: ReactNode;
 };
-
-export type MobileDisplayOptionsProps = {
-  activeWorkflowId: string | null;
-  workflows: WorkflowsState["items"];
-  onWorkflowChange: (id: string | null) => void;
-  repositoryValue: string;
-  repositories: Repository[];
-  repositoriesLoading: boolean;
-  onRepositoryChange: (value: string | "all") => void;
-  enablePreviewOnClick: boolean | undefined;
-  onTogglePreviewOnClick: ((checked: boolean) => void) | undefined;
-  tasksListShowDetails: boolean;
-  onToggleTasksListShowDetails: (checked: boolean) => void;
-  showTaskDetails: boolean;
-  showWorkflow: boolean;
-  showRepository: boolean;
-  showPreviewPanel: boolean;
-  tasksListOptions?: TasksListDisplayOptions;
-  /**
-   * Column visibility for the workflow the phone board is focused on. Null off
-   * the phone kanban, where the lane header owns the control instead.
-   */
-  columnsSection: MobileColumnsSection | null;
-};
-
-export type MobileColumnsSection = {
-  workflowId: string;
-  workflowName: string;
-  steps: ColumnsMenuStep[];
-  hiddenStepIds: string[];
-  onToggle: (workflowId: string, stepId: string) => void;
-  autoHideEmpty: boolean;
-  onToggleAutoHide: (workflowId: string) => void;
-};
-
-function MobileDisplaySelects({
-  activeWorkflowId,
-  workflows,
-  onWorkflowChange,
-  repositoryValue,
-  repositories,
-  repositoriesLoading,
-  onRepositoryChange,
-  showWorkflow,
-  showRepository,
-}: Omit<
-  MobileDisplayOptionsProps,
-  | "enablePreviewOnClick"
-  | "onTogglePreviewOnClick"
-  | "tasksListShowDetails"
-  | "onToggleTasksListShowDetails"
-  | "showTaskDetails"
-  | "showPreviewPanel"
-  | "tasksListOptions"
-  | "columnsSection"
->) {
-  const { t } = useTranslation();
-  return (
-    <>
-      {showWorkflow && (
-        <div className={mobileFieldClass}>
-          <label className={mobileFieldLabelClass}>{t("kanban:workflow")}</label>
-          <Select
-            value={activeWorkflowId ?? "all"}
-            onValueChange={(value) => onWorkflowChange(value === "all" ? null : value)}
-          >
-            <SelectTrigger className={mobileControlClass}>
-              <SelectValue placeholder={t("kanban:allWorkflows")} />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t("kanban:allWorkflows")}</SelectItem>
-              {workflows.map((workflow: WorkflowsState["items"][number]) => (
-                <SelectItem key={workflow.id} value={workflow.id}>
-                  {workflow.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-
-      {showRepository && (
-        <div className={mobileFieldClass}>
-          <label className={mobileFieldLabelClass}>{t("kanban:repository")}</label>
-          <Select
-            value={repositoryValue}
-            onValueChange={(value) => onRepositoryChange(value as string | "all")}
-            disabled={repositories.length === 0}
-          >
-            <SelectTrigger className={mobileControlClass}>
-              <SelectValue
-                placeholder={t(
-                  getRepositoryPlaceholderKey(repositoriesLoading, repositories.length === 0),
-                )}
-              />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t("kanban:allRepositories")}</SelectItem>
-              {repositories.map((repo: Repository) => (
-                <SelectItem key={repo.id} value={repo.id}>
-                  {repo.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      )}
-    </>
-  );
-}
-
-function MobileDisplayOptions(props: MobileDisplayOptionsProps) {
-  const { t } = useTranslation();
-  const {
-    enablePreviewOnClick,
-    onTogglePreviewOnClick,
-    tasksListShowDetails,
-    onToggleTasksListShowDetails,
-    showTaskDetails,
-    showPreviewPanel,
-    tasksListOptions,
-    columnsSection,
-    ...selectProps
-  } = props;
-  return (
-    <div className="space-y-4">
-      <label className={mobileSectionTitleClass}>{t("kanban:displayOptions")}</label>
-      <MobileDisplaySelects {...selectProps} />
-      {columnsSection && (
-        <div className={mobileFieldClass}>
-          <label className={mobileFieldLabelClass}>{t("kanban:columns")}</label>
-          <ColumnsMenu {...columnsSection} touchTargets />
-        </div>
-      )}
-      {showPreviewPanel && (
-        <div className={mobileFieldClass}>
-          <label className={mobileFieldLabelClass}>{t("kanban:previewPanel")}</label>
-          <label className="flex h-10 cursor-pointer items-center gap-3 rounded-md px-0 text-sm font-medium">
-            <Checkbox
-              checked={enablePreviewOnClick ?? false}
-              onCheckedChange={(checked) => {
-                onTogglePreviewOnClick?.(!!checked);
-              }}
-            />
-            <span className="text-sm">{t("kanban:openPreviewOnClick")}</span>
-          </label>
-        </div>
-      )}
-      {showTaskDetails && (
-        <div className={mobileFieldClass}>
-          <label className={mobileFieldLabelClass}>{t("kanban:listRows")}</label>
-          <label className="flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-0 text-sm font-medium">
-            <Checkbox
-              checked={tasksListShowDetails}
-              onCheckedChange={(checked) => onToggleTasksListShowDetails(checked === true)}
-            />
-            <span>{t("kanban:showTaskDetails")}</span>
-          </label>
-          <p className="pl-6 text-xs text-muted-foreground">
-            {t("kanban:addRepositoryPullRequestSessionParent")}
-          </p>
-        </div>
-      )}
-      {tasksListOptions && <MobileTasksListOptions options={tasksListOptions} />}
-    </div>
-  );
-}
 
 function MobileSearchSection({
   searchQuery,
@@ -348,7 +173,10 @@ function ResponsiveMenuSurface({
             <DrawerHeader className="shrink-0 border-b border-border/70 pb-3 text-left">
               <DrawerTitle>{t("kanban:menu")}</DrawerTitle>
             </DrawerHeader>
-            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom,0px)]">
+            <div
+              data-testid="mobile-home-menu-scroll"
+              className="min-h-0 flex-1 overflow-y-auto overscroll-contain pb-[env(safe-area-inset-bottom,0px)]"
+            >
               {children}
             </div>
           </div>
@@ -378,6 +206,7 @@ function ResponsiveMenuSurface({
 
 function MobileMenuContent({
   isMobile,
+  open,
   workspaceId,
   searchQuery,
   onSearchChange,
@@ -399,6 +228,7 @@ function MobileMenuContent({
   | "pageActions"
 > & {
   isMobile: boolean;
+  open: boolean;
   viewValue: string;
   onViewChange: (value: string) => void;
   showPipeline: boolean;
@@ -420,7 +250,7 @@ function MobileMenuContent({
         onViewChange={onViewChange}
         showPipeline={showPipeline}
       />
-      <MobileDisplayOptions {...displayOptions} />
+      <MobileDisplayOptions open={open} {...displayOptions} />
       {/* Phone Home lives in this menu; the View toggle owns listing modes. */}
       <AppNavSections
         onNavigate={() => onOpenChange(false)}

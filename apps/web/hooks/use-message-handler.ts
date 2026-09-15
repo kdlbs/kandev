@@ -403,9 +403,8 @@ async function deliverComposedMessage({
         planMode: planModeEnabled,
         attachments: buildQueueAttachments(payload.attachments),
         entityReferences: payload.entityReferences,
-        ...(planCommentRefs.length > 0
-          ? { clientQueueId: clientAdmissionId, planCommentRefs }
-          : {}),
+        clientQueueId: clientAdmissionId,
+        ...(planCommentRefs.length > 0 ? { planCommentRefs } : {}),
         ...(contextFilesMeta ? { contextFilesMeta } : {}),
       });
       if (!accepted) {
