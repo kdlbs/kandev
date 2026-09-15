@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/kandev/kandev/internal/orchestrator/watcher"
 	"github.com/kandev/kandev/internal/task/models"
@@ -29,9 +30,17 @@ func TestCompletedTaskFollowUpAdmissionIsConversationalOnly(t *testing.T) {
 
 			agentMgr := &mockAgentManager{repoForExecutionLookup: repo, isAgentRunning: true}
 			svc := createEngineService(t, repo, steps, agentMgr)
+			onEnterDone := make(chan struct{})
+			svc.onProcessOnEnterComplete = func() { close(onEnterDone) }
 			session, err := repo.GetTaskSession(ctx, "session")
 			require.NoError(t, err)
 			require.True(t, svc.processOnTurnCompleteViaEngine(ctx, "task", session))
+			// Finish terminal-step session preparation before admitting a follow-up.
+			select {
+			case <-onEnterDone:
+			case <-time.After(2 * time.Second):
+				t.Fatal("timed out waiting for terminal step setup")
+			}
 
 			task, err := repo.GetTask(ctx, "task")
 			require.NoError(t, err)

@@ -42,7 +42,7 @@ func TestPromptTaskExpectedIdentityRejectsReplacementAfterClaim(t *testing.T) {
 	}
 
 	_, err = svc.promptTask(
-		ctx, taskID, sessionID, "queued prompt", "", false, nil, true,
+		ctx, taskID, sessionID, "queued prompt", "", false, nil, true, launchOriginAutomatic,
 		promptTaskOptions{
 			expectedSessionIdentity: &identity,
 			afterClaim: func() error {
@@ -128,6 +128,7 @@ func TestPromptTaskReleasesDispatchGuardBeforeMissingExecutionRecovery(t *testin
 	go func() {
 		_, promptErr := svc.promptTask(
 			ctx, taskID, sessionID, "queued prompt", "", false, nil, true,
+			launchOriginAutomatic,
 			promptTaskOptions{
 				claimEntryID:            queued.ID,
 				expectedSessionIdentity: &identity,
@@ -210,6 +211,7 @@ func TestPromptTaskKeepsQueuedDispatchGuardThroughModelSwitch(t *testing.T) {
 	go func() {
 		_, promptErr := svc.promptTask(
 			ctx, taskID, sessionID, "queued prompt", "new-model", false, nil, true,
+			launchOriginAutomatic,
 			promptTaskOptions{
 				claimEntryID:            queued.ID,
 				expectedSessionIdentity: &identity,

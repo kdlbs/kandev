@@ -53,8 +53,11 @@ document's own "Out of scope" section for the full list.
 
 - [x] [Task 01: Needs-you Inbox delivery](task-01-needs-you-inbox-delivery.md)
 - [x] [Task 02: Inbox feature-toggle terminology](task-02-inbox-label-alignment.md)
+- [x] [Task 03: Fix background-refresh loading state](task-03-fix-background-refresh-loading-state.md)
 
 Task 02 depends on Task 01 and records the follow-up display-name alignment.
+Task 03 depends on Task 01 and fixes a `resolveViewMode` / WS-coalescing
+regression against AC .19-.21; see its own file for scope and verification.
 
 ## Verification results
 
@@ -74,3 +77,15 @@ route, and runtime behavior unchanged. The runtime flag and public configuration
 reference now use `Inbox`, matching the destination copy contract in Part 3.
 
 Follow-up PR: https://github.com/kdlbs/kandev/pull/3673
+
+## Task 03 results
+
+`resolveViewMode` could not distinguish a background refresh that followed a
+successful read from one that followed a failure, so the Inbox re-flashed
+"Loading..." on every WS/periodic refresh trigger and never resolved at all
+with no active workspace. Fixed via a `lastAppliedOk` slice field that
+survives the `status -> "loading"` overwrite a refresh performs, a
+`hasActiveWorkspace` short-circuit to the empty view, and trailing-edge
+queueing for WS refresh triggers that land inside the coalescing window.
+
+Follow-up PR: https://github.com/kdlbs/kandev/pull/3685

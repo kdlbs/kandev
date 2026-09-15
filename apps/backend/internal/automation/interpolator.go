@@ -36,6 +36,9 @@ func InterpolatePrompt(prompt string, triggerType TriggerType, triggerData json.
 		pairs = append(pairs, pushPlaceholders(data)...)
 	case TriggerTypeGitHubCI:
 		pairs = append(pairs, ciPlaceholders(data)...)
+	case TriggerTypePluginEvent:
+		original, _ := data["webhook"].(map[string]interface{})
+		pairs = append(pairs, webhookPlaceholders(original)...)
 	case TriggerTypeWebhook:
 		pairs = append(pairs, webhookPlaceholders(data)...)
 	}
@@ -44,7 +47,19 @@ func InterpolatePrompt(prompt string, triggerType TriggerType, triggerData json.
 	// Resolve {{data.<path>}} and {{webhook.<path>}} tokens that didn't
 	// match the fixed list above. Dot-segments traverse nested objects;
 	// numeric segments index arrays (e.g. commits.0.message).
-	result = resolvePathPlaceholders(result, data)
+	if triggerType == TriggerTypePluginEvent {
+		result = pathPlaceholderRe.ReplaceAllStringFunc(result, func(match string) string {
+			parts := pathPlaceholderRe.FindStringSubmatch(match)
+			root, _ := data[parts[1]].(map[string]interface{})
+			value, ok := lookupPath(root, parts[2])
+			if !ok {
+				return match
+			}
+			return value
+		})
+	} else {
+		result = resolvePathPlaceholders(result, data)
+	}
 	return stripUnresolved(result)
 }
 

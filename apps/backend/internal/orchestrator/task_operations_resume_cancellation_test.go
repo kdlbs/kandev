@@ -223,6 +223,7 @@ func TestResumeTaskSessionAndPrompt_CancelAtContinuationBarrierDoesNotDispatchPr
 					false,
 					nil,
 					false,
+					launchOriginManual,
 					promptTaskOptions{resumeAttempt: attempt},
 				)
 				return promptErr
@@ -312,6 +313,7 @@ func TestPromptTask_ResumeAttemptKeepsCancellationOutOfAcceptanceCallback(t *tes
 			false,
 			nil,
 			false,
+			launchOriginManual,
 			promptTaskOptions{
 				resumeAttempt: attempt,
 				afterDispatch: func() error {
