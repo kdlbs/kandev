@@ -87,6 +87,27 @@ type Service struct {
 	// Wired post-construction via SetRepositoryLookup. When nil (e.g. unit
 	// tests), the binding is accepted as-is and default-branch fill is skipped.
 	repoLookup RepositoryLookup
+	// workspaceAuthorizer is the per-user workspace access boundary, wired
+	// post-construction via SetWorkspaceAuthorizer. Nil (unit tests, auth
+	// disabled) means unscoped — every workspace is visible, as before auth.
+	workspaceAuthorizer func(context.Context, string) error
+}
+
+// SetWorkspaceAuthorizer installs the per-user workspace access boundary
+// applied to ListAllIssueWatches. Wired to taskSvc.AuthorizeWorkspaceAccess so
+// an unscoped list (workspace_id omitted) returns only the caller's own
+// workspaces' watches.
+func (s *Service) SetWorkspaceAuthorizer(authorizer func(context.Context, string) error) {
+	if s != nil {
+		s.workspaceAuthorizer = authorizer
+	}
+}
+
+func (s *Service) authorizeWorkspaceAccess(ctx context.Context, workspaceID string) error {
+	if s == nil || s.workspaceAuthorizer == nil {
+		return nil
+	}
+	return s.workspaceAuthorizer(ctx, workspaceID)
 }
 
 // SetTaskDeleter wires the cascade-delete dependency used by ResetIssueWatch.
