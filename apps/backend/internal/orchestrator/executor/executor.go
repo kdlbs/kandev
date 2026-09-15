@@ -494,9 +494,12 @@ type LaunchAgentRequest struct {
 	Branch               string
 	TaskDescription      string                 // Task description to send via ACP prompt
 	Attachments          []v1.MessageAttachment // Attachments for the initial prompt (images/files)
-	Priority             string
-	Metadata             map[string]interface{}
-	Env                  map[string]string
+	// OnInitialPromptAccepted is an in-process receipt callback. It runs only
+	// after the initial prompt crosses the agentctl acceptance boundary.
+	OnInitialPromptAccepted func()
+	Priority                string
+	Metadata                map[string]interface{}
+	Env                     map[string]string
 	// AdditionalSkillSlugs are launch-scoped skills selected by Office.
 	AdditionalSkillSlugs []string
 	// ApprovedSecretEnvKeys contains repository binding keys that SSH may
@@ -662,6 +665,9 @@ type LaunchOptions struct {
 	McpProfile           *mcpprofile.Context
 	Attachments          []v1.MessageAttachment
 	Env                  map[string]string
+	// OnInitialPromptAccepted runs only after agentctl accepts the first
+	// prompt. Launch completion is intentionally not treated as acceptance.
+	OnInitialPromptAccepted func()
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
 	// durable profile selection.
 	AdditionalSkillSlugs []string

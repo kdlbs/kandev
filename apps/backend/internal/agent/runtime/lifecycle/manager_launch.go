@@ -1771,6 +1771,7 @@ func (m *Manager) buildExecutionFromInstance(
 	execution := execInstance.ToAgentExecution(execReq)
 	execution.ResumeAttemptID = ResumeAttemptIDFromContext(ctx)
 	execution.RuntimeName = rt.Name()
+	execution.initialPromptAccepted = req.OnInitialPromptAccepted
 	if req.ACPSessionID != "" {
 		execution.ACPSessionID = req.ACPSessionID
 	}

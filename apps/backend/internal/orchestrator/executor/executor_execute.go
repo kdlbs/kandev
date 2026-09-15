@@ -1559,6 +1559,7 @@ func (e *Executor) LaunchPreparedSession(ctx context.Context, task *v1.Task, ses
 		req.OfficeAgentProfileID = session.AgentProfileID
 	}
 	req.StartAgent = startAgent
+	req.OnInitialPromptAccepted = opts.OnInitialPromptAccepted
 	mergeEnv(req, opts.Env)
 	req.AdditionalSkillSlugs = append([]string(nil), opts.AdditionalSkillSlugs...)
 	if opts.RouteOverride != nil {
@@ -2399,6 +2400,17 @@ func (e *Executor) startAgentOnExistingWorkspaceWithRequest(
 		}
 	}
 	e.bindPromptTurnID(ctx, session.ID, executionID, turnIDs)
+	if request.OnInitialPromptAccepted != nil {
+		configurer, ok := e.agentManager.(interface {
+			SetInitialPromptAcceptedCallback(context.Context, string, func()) error
+		})
+		if !ok {
+			return nil, ErrPromptDispatchCallbackUnsupported
+		}
+		if err := configurer.SetInitialPromptAcceptedCallback(ctx, executionID, request.OnInitialPromptAccepted); err != nil {
+			return nil, err
+		}
+	}
 	if err := e.configureExistingWorkspace(ctx, task, session, executionID, mcpMode, request); err != nil {
 		return nil, err
 	}

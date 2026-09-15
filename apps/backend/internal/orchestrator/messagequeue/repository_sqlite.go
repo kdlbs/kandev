@@ -483,6 +483,18 @@ func (r *sqliteRepository) initSchema() error {
 		status_generation     BIGINT NOT NULL DEFAULT 0,
 		next_position         BIGINT NOT NULL DEFAULT 0
 	);
+
+	CREATE TABLE IF NOT EXISTS message_deliveries (
+		id TEXT PRIMARY KEY, sender_task_id TEXT NOT NULL DEFAULT '', sender_session_id TEXT NOT NULL,
+		source_turn_id TEXT NOT NULL, idempotency_key TEXT NOT NULL, target_task_id TEXT NOT NULL,
+		target_session_id TEXT NOT NULL, delivery_mode TEXT NOT NULL DEFAULT '', content TEXT NOT NULL,
+		metadata_json TEXT NOT NULL DEFAULT '{}', state TEXT NOT NULL, queue_entry_id TEXT NOT NULL DEFAULT '',
+		attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at TIMESTAMP NOT NULL, lease_owner TEXT,
+		lease_expires_at TIMESTAMP, last_error TEXT NOT NULL DEFAULT '', created_at TIMESTAMP NOT NULL,
+		updated_at TIMESTAMP NOT NULL, delivered_at TIMESTAMP
+	);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_message_deliveries_source_idempotency ON message_deliveries(sender_session_id, source_turn_id, idempotency_key);
+	CREATE INDEX IF NOT EXISTS idx_message_deliveries_due ON message_deliveries(state, next_attempt_at, lease_expires_at);
 	`)
 	if err != nil {
 		return err
@@ -855,19 +867,59 @@ func (r *sqliteRepository) ensureQueueCapacityTx(
 	if maxPerSession <= 0 {
 		return nil
 	}
-	var count int
-	if err := tx.GetContext(
-		ctx,
-		&count,
-		r.db.Rebind(`SELECT COUNT(*) FROM queued_messages WHERE session_id = ?`),
-		sessionID,
-	); err != nil {
-		return fmt.Errorf("count: %w", err)
+	count, err := ordinaryQueueEntryCountTx(ctx, tx, r.db, sessionID)
+	if err != nil {
+		return err
 	}
 	if count >= maxPerSession {
 		return ErrQueueFull
 	}
 	return nil
+}
+
+// ordinaryQueueEntryCountTx counts the session's queue entries excluding
+// workflow-control prompts. Those prompts are durable state-transition
+// instructions with their own coalescing key and must remain admissible
+// without consuming an operator's ordinary backlog capacity. The transaction
+// guards below call it as a free function with the shared db handle.
+func ordinaryQueueEntryCountTx(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, sessionID string) (int, error) {
+	rows, err := tx.QueryxContext(ctx, db.Rebind(`
+		SELECT metadata_json FROM queued_messages WHERE session_id = ?
+	`), sessionID)
+	if err != nil {
+		return 0, fmt.Errorf("list queue metadata for capacity: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	count := 0
+	for rows.Next() {
+		var metadataJSON string
+		if err := rows.Scan(&metadataJSON); err != nil {
+			return 0, fmt.Errorf("scan queue metadata for capacity: %w", err)
+		}
+		workflowControl, err := isWorkflowControlMetadataJSON(metadataJSON)
+		if err != nil {
+			return 0, err
+		}
+		if !workflowControl {
+			count++
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("iterate queue metadata for capacity: %w", err)
+	}
+	return count, nil
+}
+
+func isWorkflowControlMetadataJSON(metadataJSON string) (bool, error) {
+	if metadataJSON == "" || metadataJSON == "{}" {
+		return false, nil
+	}
+	metadata := map[string]interface{}{}
+	if err := json.Unmarshal([]byte(metadataJSON), &metadata); err != nil {
+		return false, fmt.Errorf("decode queue metadata for capacity: %w", err)
+	}
+	control, _ := metadata[MetadataWorkflowControl].(bool)
+	return control, nil
 }
 
 // RequeuePreservingFIFO re-enqueues an entry, preserving both FIFO order
@@ -1788,6 +1840,19 @@ func DeleteSessionInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, i
 	if incarnationID != identity.SessionIncarnationID {
 		return ErrSessionIdentityMismatch
 	}
+	// A delivery receipt can outlive its visible FIFO entry while the worker is
+	// retrying. Tombstone receipts targeting this exact session before deleting
+	// the session row, so a later retry cannot recreate a prompt for a reused
+	// textual session ID.
+	if _, err := tx.ExecContext(ctx, db.Rebind(`
+		UPDATE message_deliveries
+		SET state = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+		WHERE target_task_id = ? AND target_session_id = ?
+		  AND state NOT IN (?, ?, ?)
+	`), DeliveryCancelled, time.Now().UTC(), identity.TaskID, identity.SessionID,
+		DeliveryDelivered, DeliveryCancelled, DeliveryTerminalFailed); err != nil && !internaldb.IsMissingTableError(err) {
+		return fmt.Errorf("cancel delivery receipts for deleted session: %w", err)
+	}
 	if _, err := PurgeSessionInTransaction(ctx, tx, db, identity.SessionID); err != nil {
 		return fmt.Errorf("delete queue session state: %w", err)
 	}
@@ -1896,7 +1961,45 @@ func PurgeTaskInTransaction(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, taskI
 	`), taskID); err != nil {
 		return 0, fmt.Errorf("advance lifecycle queue generation: %w", err)
 	}
+	// Cancel every nonterminal delivery touching the purged task. An admitted
+	// outbound delivery owns a queue entry in the target task, so remove that
+	// entry as part of the same transaction to prevent a cancelled prompt from
+	// being delivered after its source task disappears.
+	rows, err := tx.QueryContext(ctx, db.Rebind(`
+		UPDATE message_deliveries
+		SET state = ?, lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+		WHERE (sender_task_id = ? OR target_task_id = ?)
+		  AND state NOT IN (?, ?, ?)
+		RETURNING queue_entry_id
+	`), DeliveryCancelled, time.Now().UTC(), taskID, taskID, DeliveryDelivered, DeliveryCancelled, DeliveryTerminalFailed)
+	if err != nil && !internaldb.IsMissingTableError(err) {
+		return 0, fmt.Errorf("cancel delivery receipts for purged task: %w", err)
+	}
+	if err == nil {
+		if err := deletePurgedDeliveryQueueEntries(ctx, tx, db, rows); err != nil {
+			return 0, err
+		}
+	}
 	return int(removed), nil
+}
+
+// deletePurgedDeliveryQueueEntries removes the queue entries owned by the
+// deliveries cancelled by PurgeTaskInTransaction, so a cancelled prompt is not
+// delivered after its source task disappears.
+func deletePurgedDeliveryQueueEntries(ctx context.Context, tx *sqlx.Tx, db *sqlx.DB, rows *sql.Rows) error {
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var entryID string
+		if err := rows.Scan(&entryID); err != nil {
+			return err
+		}
+		if entryID != "" {
+			if _, err := tx.ExecContext(ctx, db.Rebind(`DELETE FROM queued_messages WHERE id = ?`), entryID); err != nil {
+				return err
+			}
+		}
+	}
+	return rows.Err()
 }
 
 // PurgeSessionInTransaction removes all durable queue state for a deleted
@@ -2097,9 +2200,9 @@ func ensureQueueCapacityInTransaction(
 	if maxPerSession <= 0 {
 		return nil
 	}
-	var count int
-	if err := tx.GetContext(ctx, &count, db.Rebind(`SELECT COUNT(*) FROM queued_messages WHERE session_id = ?`), sessionID); err != nil {
-		return fmt.Errorf("count: %w", err)
+	count, err := ordinaryQueueEntryCountTx(ctx, tx, db, sessionID)
+	if err != nil {
+		return err
 	}
 	if count >= maxPerSession {
 		return ErrQueueFull

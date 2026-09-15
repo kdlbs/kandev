@@ -16,6 +16,74 @@ import (
 	v1 "github.com/kandev/kandev/pkg/api/v1"
 )
 
+// TestPersistSpawnSupervision_RetryAfterFirstCallIsIdempotent covers the
+// retry gap: a launch call whose first attempt persisted spawn supervision
+// but then failed downstream (leaving the session row committed) must be
+// able to retry persistSpawnSupervision directly against the same origin
+// without erroring — the original SetSessionMetadataKeyIfAbsent-only
+// implementation treated any existing record as a hard failure, and the
+// caller's sessionCreated-gated call site skipped the retry attempt entirely.
+func TestPersistSpawnSupervision_RetryAfterFirstCallIsIdempotent(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	origin := &SpawnOrigin{TaskID: "supervisor-task", SessionID: "supervisor-session"}
+
+	if err := svc.persistSpawnSupervision(ctx, "s1", origin); err != nil {
+		t.Fatalf("first persistSpawnSupervision call: %v", err)
+	}
+	// Simulates the retry after a first attempt's downstream launch step
+	// failed post-persistence: same origin, same session, called again.
+	if err := svc.persistSpawnSupervision(ctx, "s1", origin); err != nil {
+		t.Fatalf("retried persistSpawnSupervision call with the same origin must succeed: %v", err)
+	}
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	stored, ok := models.LoadSessionSpawnSupervision(session.Metadata)
+	if !ok {
+		t.Fatal("spawn supervision record missing after retry")
+	}
+	if stored.SupervisorTaskID != origin.TaskID || stored.SupervisorSessionID != origin.SessionID {
+		t.Fatalf("stored supervision = %+v, want origin %+v", stored, origin)
+	}
+}
+
+// TestPersistSpawnSupervision_ConflictingOriginFailsClosed covers the other
+// half: a second, DIFFERENT origin claiming the same already-supervised
+// session must be rejected, not silently overwrite or silently keep the
+// wrong authority.
+func TestPersistSpawnSupervision_ConflictingOriginFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	repo := setupTestRepo(t)
+	seedSession(t, repo, "t1", "s1", "step1")
+	svc := createTestService(repo, newMockStepGetter(), newMockTaskRepo())
+	first := &SpawnOrigin{TaskID: "supervisor-task-a", SessionID: "supervisor-session-a"}
+	second := &SpawnOrigin{TaskID: "supervisor-task-b", SessionID: "supervisor-session-b"}
+
+	if err := svc.persistSpawnSupervision(ctx, "s1", first); err != nil {
+		t.Fatalf("first persistSpawnSupervision call: %v", err)
+	}
+	if err := svc.persistSpawnSupervision(ctx, "s1", second); err == nil {
+		t.Fatal("a conflicting spawn origin must be rejected, not silently accepted")
+	}
+
+	session, err := repo.GetTaskSession(ctx, "s1")
+	if err != nil {
+		t.Fatalf("GetTaskSession: %v", err)
+	}
+	stored, ok := models.LoadSessionSpawnSupervision(session.Metadata)
+	if !ok {
+		t.Fatal("spawn supervision record missing after rejected conflict")
+	}
+	if stored.SupervisorTaskID != first.TaskID || stored.SupervisorSessionID != first.SessionID {
+		t.Fatalf("stored supervision = %+v, want the original first claim %+v", stored, first)
+	}
+}
+
 type rejectingLaunchAttachmentClaimer struct {
 	wantErr     error
 	taskID      string

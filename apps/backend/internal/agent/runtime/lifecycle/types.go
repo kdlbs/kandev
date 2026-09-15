@@ -79,9 +79,10 @@ type AgentExecution struct {
 	// runtime instance. It is kept in memory only so authorized task-scoped
 	// terminals and passthrough processes can inherit the same credentials and
 	// PATH as the agent subprocess without persisting secrets in metadata.
-	runtimeEnv       map[string]string
-	runtimeEnvMu     sync.RWMutex
-	promptGeneration uint64
+	runtimeEnv              map[string]string
+	runtimeEnvMu            sync.RWMutex
+	promptGeneration        uint64
+	promptGenerationUnknown bool
 	// promptCompletionGeneration prevents duplicate terminal events for the
 	// same prompt from replacing the first terminal outcome or provider error.
 	promptCompletionGeneration uint64
@@ -98,6 +99,9 @@ type AgentExecution struct {
 	// completion's attribution while its stream frame is in flight.
 	promptTurnID      string
 	promptLifecycleMu sync.Mutex
+	// initialPromptAccepted is consumed at the real initial-prompt acceptance
+	// boundary. A crash before it runs leaves the durable receipt reclaimable.
+	initialPromptAccepted func()
 
 	// recoveryAppliedControlTurnID is the control-server-assigned turn
 	// identifier (streams.AgentEvent.ControlTurnID) of a retained turn
@@ -329,6 +333,14 @@ type AgentExecution struct {
 	// callback cannot validate one generation and mutate another after the
 	// validation lock is released.
 	startupCallbackMu sync.RWMutex
+}
+
+func (e *AgentExecution) takeInitialPromptAcceptedCallback() func() {
+	e.promptLifecycleMu.Lock()
+	callback := e.initialPromptAccepted
+	e.initialPromptAccepted = nil
+	e.promptLifecycleMu.Unlock()
+	return callback
 }
 
 func (e *AgentExecution) isSessionInitialized() bool {
@@ -1128,13 +1140,14 @@ type LaunchRequest struct {
 	AgentProfileID string
 	// ExecutionProfileID selects the complete CLI runtime profile. Empty keeps
 	// backward-compatible behavior by using AgentProfileID.
-	ExecutionProfileID string
-	StartAgent         bool                // Transfer launch activity through initial startup/prompt
-	TurnID             string              // Durable Kandev turn for the initial prompt, when present
-	WorkspacePath      string              // Host path to workspace (original repository path)
-	TaskDescription    string              // Task description to send via ACP prompt
-	Attachments        []MessageAttachment // Attachments (images/files) for the initial prompt
-	Env                map[string]string   // Additional env vars
+	ExecutionProfileID      string
+	StartAgent              bool                // Transfer launch activity through initial startup/prompt
+	TurnID                  string              // Durable Kandev turn for the initial prompt, when present
+	WorkspacePath           string              // Host path to workspace (original repository path)
+	TaskDescription         string              // Task description to send via ACP prompt
+	Attachments             []MessageAttachment // Attachments (images/files) for the initial prompt
+	OnInitialPromptAccepted func()
+	Env                     map[string]string // Additional env vars
 	// AdditionalSkillSlugs are materialized for this launch in addition to the
 	// durable profile selection.
 	AdditionalSkillSlugs []string

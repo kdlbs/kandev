@@ -1381,7 +1381,7 @@ func (s *Service) executeQueuedMessageWithReservation(
 			s.onQueuedMessageExecutionComplete()
 		}
 	}()
-	lifecyclePrompt := isLifecycleAutomationMessage(queuedMsg)
+	lifecyclePrompt := isLifecycleAutomationMessage(queuedMsg) || queuedMsg.IsWorkflowControl()
 
 	claimEntryID, handoffDone := s.claimQueuedMessageHandoff(
 		promptCtx, callerSessionID, queuedMsg, reservation,
@@ -1429,6 +1429,12 @@ func (s *Service) executeQueuedMessageWithReservation(
 				queuedMsg,
 				reservation.identity,
 			)
+		} else if err := s.messageQueue.AcknowledgeQueued(promptCtx, queuedMsg); err != nil {
+			s.logger.Warn("failed to remove stale workflow control prompt",
+				zap.String("session_id", callerSessionID),
+				zap.String("queue_id", queuedMsg.ID), zap.Error(err))
+		} else {
+			s.publishQueueStatusEvent(promptCtx, callerSessionID)
 		}
 		return
 	}
@@ -1849,6 +1855,9 @@ func (s *Service) lifecycleQueuedDispatchIsCurrent(
 	task, err := s.repo.GetTask(ctx, queuedMsg.TaskID)
 	if err != nil || task == nil || task.ArchivedAt != nil {
 		return false
+	}
+	if queuedMsg.IsWorkflowControl() {
+		return s.workflowControlDeliveryIsCurrent(ctx, queuedMsg, task)
 	}
 	dispatchTracked := s.isQueuedDispatchInFlight(queuedMsg.SessionID)
 	if dispatchTracked && !s.isCurrentQueuedDispatch(queuedMsg.SessionID, queuedMsg.ID) {
