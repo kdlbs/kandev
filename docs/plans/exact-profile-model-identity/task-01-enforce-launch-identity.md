@@ -16,6 +16,13 @@ system_design:
 
 # Task 01: Enforce Exact Profile Model Identity
 
+## Historical scope
+
+This work order is complete for the original PR implementation. The 2026-09-15
+amendment in [Task 02](task-02-explicit-profile-policy.md) supersedes its implicit
+strict predicate. Its transport, warning, and validated-reuse fixes remain.
+The original scope below is historical, not the current compatibility contract.
+
 ## Change
 
 Apply the shared start-model policy before the first inference on every

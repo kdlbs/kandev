@@ -366,6 +366,9 @@ export type AgentProfilePayload = {
   name: string;
   agent_display_name: string;
   model: string;
+  fallback_model?: string;
+  auto_fallback?: boolean;
+  require_exact_model?: boolean;
   auto_approve: boolean;
   dangerously_skip_permissions: boolean;
   allow_indexing: boolean;

@@ -718,6 +718,7 @@ export class ApiClient {
       model: string;
       fallback_model?: string;
       auto_fallback?: boolean;
+      require_exact_model?: boolean;
       auto_approve?: boolean;
       mode?: string;
       config_options?: Record<string, string>;
@@ -732,6 +733,7 @@ export class ApiClient {
       model: opts.model,
       fallback_model: opts.fallback_model,
       auto_fallback: opts.auto_fallback,
+      require_exact_model: opts.require_exact_model,
       auto_approve: opts.auto_approve,
       mode: opts.mode,
       config_options: opts.config_options,
@@ -762,6 +764,9 @@ export class ApiClient {
     patch: {
       name?: string;
       model?: string;
+      fallback_model?: string;
+      auto_fallback?: boolean;
+      require_exact_model?: boolean;
       mode?: string;
       config_options?: Record<string, string>;
       cli_passthrough?: boolean;

@@ -15,6 +15,7 @@ import {
 import {
   profileAutoFallbackIsDirty,
   profileFallbackModelIsDirty,
+  profileRequireExactModelIsDirty,
 } from "@/components/settings/profile-capability-helpers";
 import {
   FallbackOptionHelp,
@@ -35,6 +36,7 @@ export type ProfileFormData = {
   fallback_model?: string;
   /** Legacy automatic-fallback opt-in; hides the fallback_model field. */
   auto_fallback?: boolean;
+  require_exact_model?: boolean;
   mode: string;
   config_options?: Record<string, string>;
   cli_passthrough: boolean;
@@ -254,8 +256,9 @@ function FallbackModelPicker({
 // fallback model: the toggle switches between the two. Selecting a fallback
 // model is only meaningful when auto-fallback is off, because auto-fallback
 // already allows the provider to switch to any advertised model — the
-// configured fallback would be redundant. The strict mode (both off) is the
-// only automatic model switch allowed when auto-fallback is off.
+// configured fallback would be redundant. Strict mode disables both fallback
+// controls while preserving their saved values. Compatible mode keeps the
+// legacy explicit/automatic/default order.
 export function ModelFallbackSection({
   profile,
   models,
@@ -275,13 +278,36 @@ export function ModelFallbackSection({
 }) {
   const { t } = useTranslation();
   const autoFallback = profile.auto_fallback ?? false;
+  const requireExactModel = profile.require_exact_model ?? false;
   const isDirty =
     profileAutoFallbackIsDirty(profile, baselineProfile) ||
-    profileFallbackModelIsDirty(profile, baselineProfile);
+    profileFallbackModelIsDirty(profile, baselineProfile) ||
+    profileRequireExactModelIsDirty(profile, baselineProfile);
 
   return (
     <ModelFallbackSettingsShell
       autoFallback={autoFallback}
+      requireExactModel={requireExactModel}
+      strictOption={
+        <div className={gapCls}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-1">
+              <SettingsFieldLabel className={labelCls}>
+                {t("settings:requireExactModel")}
+              </SettingsFieldLabel>
+              <FallbackOptionHelp kind="strict" />
+            </div>
+            <Switch
+              checked={requireExactModel}
+              onCheckedChange={(checked) => onChange({ require_exact_model: checked })}
+              aria-label={t("settings:requireExactModel")}
+            />
+          </div>
+          <SettingsFieldDescription>
+            {t("settings:requireExactModelHelper")}
+          </SettingsFieldDescription>
+        </div>
+      }
       fallbackModel={profile.fallback_model ?? ""}
       isDirty={isDirty}
       automaticOption={
@@ -301,6 +327,7 @@ export function ModelFallbackSection({
             <Switch
               checked={autoFallback}
               onCheckedChange={(checked) => onChange({ auto_fallback: checked })}
+              disabled={requireExactModel}
               aria-label={t("settings:autoFallback")}
             />
           </div>
@@ -315,7 +342,7 @@ export function ModelFallbackSection({
           baselineProfile={baselineProfile}
           labelCls={labelCls}
           gapCls={gapCls}
-          disabled={autoFallback}
+          disabled={autoFallback || requireExactModel}
           onChange={onChange}
         />
       }

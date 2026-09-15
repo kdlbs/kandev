@@ -977,6 +977,7 @@ func (a *lifecycleAdapter) ResolveAgentProfile(ctx context.Context, profileID st
 		Mode:                       info.Mode,
 		FallbackModel:              info.FallbackModel,
 		AutoFallback:               info.AutoFallback,
+		RequireExactModel:          info.RequireExactModel,
 		ConfigOptions:              info.ConfigOptions,
 		AutoApprove:                info.AutoApprove,
 		DangerouslySkipPermissions: info.DangerouslySkipPermissions,

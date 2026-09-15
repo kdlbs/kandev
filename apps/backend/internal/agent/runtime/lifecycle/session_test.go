@@ -364,7 +364,7 @@ func TestInitializeAndPromptWithLayers_UnadvertisedModelFailsBeforeInference(t *
 				},
 				tc.profileModel, "plan", nil,
 				tc.runtimeModel, "", nil,
-				StartModelPolicy{},
+				StartModelPolicy{RequireExactModel: true},
 			)
 			if err == nil || !strings.Contains(err.Error(), "requested_not_advertised") {
 				t.Fatalf("unadvertised model error = %v, want requested_not_advertised", err)

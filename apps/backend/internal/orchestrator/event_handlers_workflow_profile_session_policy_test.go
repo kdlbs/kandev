@@ -662,7 +662,7 @@ func TestPrepareWorkflowStepSession_HumanQAToWorkReplacesExactProfileRuntimeOver
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
 	fixture.agentMgr.resolveProfileInfo = &executor.AgentProfileInfo{
-		Model: "gpt-5.6-terra",
+		Model: "gpt-5.6-terra", RequireExactModel: true,
 	}
 	fixture.current.AgentProfileID = "terra-work-profile"
 	fixture.current.AgentProfileSnapshot = map[string]interface{}{"model": "gpt-5.6-terra"}
@@ -722,7 +722,7 @@ func TestPrepareWorkflowStepSession_ExactProfileModelMismatchDoesNotReuseWhenPro
 func TestPrepareWorkflowStepSession_ExactProfileDoesNotPromoteParkedMismatchedRuntime(t *testing.T) {
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
-	fixture.agentMgr.resolveProfileInfo = &executor.AgentProfileInfo{Model: "gpt-5.6-terra"}
+	fixture.agentMgr.resolveProfileInfo = &executor.AgentProfileInfo{Model: "gpt-5.6-terra", RequireExactModel: true}
 
 	parked := &models.TaskSession{
 		ID: "session-parked-terra", TaskID: "t1", AgentProfileID: "terra-work-profile",
@@ -792,7 +792,7 @@ func TestPrepareWorkflowStepSession_FallbackProfileDoesNotReuseUnauthorizedRunti
 	ctx := context.Background()
 	fixture := newProfileSwitchFixture(t, models.WorkflowProfileSessionStartPolicyReuse, models.WorkflowProfileSessionEndPolicyPark)
 	fixture.agentMgr.resolveProfileInfo = &executor.AgentProfileInfo{
-		Model: "gpt-5.6-terra", FallbackModel: "gpt-5.6-luna",
+		Model: "gpt-5.6-terra", FallbackModel: "gpt-5.6-luna", RequireExactModel: true,
 	}
 
 	parked := &models.TaskSession{

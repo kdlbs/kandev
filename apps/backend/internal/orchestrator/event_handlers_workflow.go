@@ -3880,8 +3880,8 @@ func (s *Service) exactModelWorkflowStartPolicy(
 // resuming a parked session whose persisted provider model disagrees with the
 // profile's configured model policy. Explicit session overrides remain valid
 // within a lane; this boundary applies only while entering a different workflow
-// step. Auto-fallback profiles intentionally allow provider-default reuse, but
-// explicit fallback profiles may reuse only the configured model or fallback.
+// step. Only profiles with exactness explicitly enabled require a fresh session
+// when the persisted effective model is unknown or different.
 func (s *Service) workflowEntryRequiresFreshExactModelSession(
 	ctx context.Context,
 	session *models.TaskSession,
@@ -3925,14 +3925,14 @@ func (s *Service) sessionHasUnauthorizedExactModelDrift(
 	if profile == nil {
 		return false, fmt.Errorf("resolve exact workflow profile %q: profile is unavailable", profileID)
 	}
-	if profile.Model == "" || profile.AutoFallback {
+	if !profile.RequireExactModel || profile.Model == "" {
 		return false, nil
 	}
 	effective, ok := models.LoadEffectiveSessionRuntimeConfig(session)
-	if !ok || effective.Model == "" || effective.Model == profile.Model {
-		return false, nil
+	if !ok || effective.Model == "" {
+		return true, nil
 	}
-	return profile.FallbackModel == "" || effective.Model != profile.FallbackModel, nil
+	return effective.Model != profile.Model, nil
 }
 
 func (s *Service) keepCurrentWorkflowStepSession(

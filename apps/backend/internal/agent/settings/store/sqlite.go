@@ -193,6 +193,7 @@ func (r *sqliteRepository) initSchema() error {
 	// recreates agent_profiles would otherwise lose columns added before it.
 	r.migrate.Apply("agent_profiles.fallback_model", `ALTER TABLE agent_profiles ADD COLUMN fallback_model TEXT NOT NULL DEFAULT ''`)
 	r.migrate.Apply("agent_profiles.auto_fallback", `ALTER TABLE agent_profiles ADD COLUMN auto_fallback INTEGER NOT NULL DEFAULT 0`)
+	_ = r.migrate.Apply("agent_profiles.require_exact_model", `ALTER TABLE agent_profiles ADD COLUMN require_exact_model INTEGER NOT NULL DEFAULT 0`)
 	if err := r.migrate.Err(); err != nil {
 		return fmt.Errorf("required agent settings migration: %w", err)
 	}
@@ -320,6 +321,10 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 	srcHasCLIFlags := columnExists(tx, "agent_profiles", "cli_flags")
 	srcHasEnvVars := columnExists(tx, "agent_profiles", "env_vars")
 	srcHasEnabled := columnExists(tx, "agent_profiles", "enabled")
+	srcHasCommandPrefix := columnExists(tx, "agent_profiles", "command_prefix")
+	srcHasFallbackModel := columnExists(tx, "agent_profiles", "fallback_model")
+	srcHasAutoFallback := columnExists(tx, "agent_profiles", "auto_fallback")
+	srcHasRequireExactModel := columnExists(tx, "agent_profiles", "require_exact_model")
 	srcCols := `id, agent_id, name, agent_display_name, model, mode, migrated_from,
 		auto_approve, dangerously_skip_permissions, allow_indexing,
 		cli_passthrough, user_modified, plan, created_at, updated_at, deleted_at`
@@ -335,6 +340,22 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 	if srcHasEnabled {
 		srcCols += ", enabled"
 		dstCols += ", enabled"
+	}
+	if srcHasCommandPrefix {
+		srcCols += ", command_prefix"
+		dstCols += ", command_prefix"
+	}
+	if srcHasFallbackModel {
+		srcCols += ", fallback_model"
+		dstCols += ", fallback_model"
+	}
+	if srcHasAutoFallback {
+		srcCols += ", auto_fallback"
+		dstCols += ", auto_fallback"
+	}
+	if srcHasRequireExactModel {
+		srcCols += ", require_exact_model"
+		dstCols += ", require_exact_model"
 	}
 
 	if _, err := tx.Exec(`CREATE TABLE agent_profiles_new (
@@ -357,6 +378,10 @@ func (r *sqliteRepository) recreateAgentProfilesWithoutModelCheck() error {
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,
 		deleted_at TIMESTAMP,
+		command_prefix TEXT NOT NULL DEFAULT '',
+		fallback_model TEXT NOT NULL DEFAULT '',
+		auto_fallback INTEGER NOT NULL DEFAULT 0,
+		require_exact_model INTEGER NOT NULL DEFAULT 0,
 		FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE
 	)`); err != nil {
 		return fmt.Errorf("create new table: %w", err)
@@ -987,7 +1012,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 			max_concurrent_sessions, cooldown_sec, skip_idle_runs,
 			consecutive_failures, failure_threshold,
 			executor_preference, budget_monthly_cents, settings, permissions,
-			command_prefix, fallback_model, auto_fallback
+			command_prefix, fallback_model, auto_fallback, require_exact_model
 		) VALUES (
 			?, ?, ?, ?, ?, ?, ?,
 			?, ?, ?, ?,
@@ -998,7 +1023,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 			?, ?, ?,
 			?, ?,
 			?, ?, ?, ?,
-			?, ?, ?
+			?, ?, ?, ?
 		)
 	`),
 		profile.ID, profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
@@ -1015,6 +1040,7 @@ func (r *sqliteRepository) insertAgentProfile(ctx context.Context, execer profil
 		profile.CommandPrefix,
 		profile.FallbackModel,
 		dialect.BoolToInt(profile.AutoFallback),
+		dialect.BoolToInt(profile.RequireExactModel),
 	)
 	return err
 }
@@ -1262,7 +1288,7 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profil
 			consecutive_failures = ?, failure_threshold = ?,
 			executor_preference = ?,
 			budget_monthly_cents = ?, settings = ?, permissions = ?,
-			command_prefix = ?, fallback_model = ?, auto_fallback = ?
+			command_prefix = ?, fallback_model = ?, auto_fallback = ?, require_exact_model = ?
 		WHERE id = ? AND deleted_at IS NULL
 	`), profile.AgentID, profile.Name, profile.AgentDisplayName, profile.Model,
 		nullableString(profile.Mode), nullableString(profile.MigratedFrom),
@@ -1279,6 +1305,7 @@ func (r *sqliteRepository) updateAgentProfile(ctx context.Context, execer profil
 		profile.CommandPrefix,
 		profile.FallbackModel,
 		dialect.BoolToInt(profile.AutoFallback),
+		dialect.BoolToInt(profile.RequireExactModel),
 		profile.ID)
 	if err != nil {
 		return err
@@ -1349,7 +1376,8 @@ const agentProfileSelectColumns = `
 		COALESCE(budget_monthly_cents, 0),
 		COALESCE(settings, '{}'), COALESCE(permissions, '{}'),
 		COALESCE(command_prefix, ''),
-		COALESCE(fallback_model, ''), COALESCE(auto_fallback, 0)
+		COALESCE(fallback_model, ''), COALESCE(auto_fallback, 0),
+		COALESCE(require_exact_model, 0)
 	FROM agent_profiles`
 
 func (r *sqliteRepository) GetAgentProfile(ctx context.Context, id string) (*models.AgentProfile, error) {
@@ -1530,6 +1558,7 @@ func scanAgentProfile(scanner interface {
 	var skipIdleRuns int
 	var failureThreshold int
 	var autoFallback int
+	var requireExactModel int
 	if err := scanner.Scan(
 		&profile.ID,
 		&profile.AgentID,
@@ -1572,6 +1601,7 @@ func scanAgentProfile(scanner interface {
 		&profile.CommandPrefix,
 		&profile.FallbackModel,
 		&autoFallback,
+		&requireExactModel,
 	); err != nil {
 		return nil, err
 	}
@@ -1589,6 +1619,7 @@ func scanAgentProfile(scanner interface {
 	profile.UserModified = userModified == 1
 	profile.SkipIdleRuns = skipIdleRuns == 1
 	profile.AutoFallback = autoFallback == 1
+	profile.RequireExactModel = requireExactModel == 1
 	profile.Role = models.AgentRole(role)
 	profile.Status = models.AgentStatus(status)
 	profile.ConfigOptions = configOptionsFromSettings(profile.Settings)
