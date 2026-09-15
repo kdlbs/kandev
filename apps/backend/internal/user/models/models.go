@@ -60,6 +60,20 @@ func NormalizeLastSeenDisplay(value string) string {
 }
 
 const (
+	AgentTabCloseBehaviorDeleteSession = "delete_session"
+	AgentTabCloseBehaviorHidePanel     = "hide_panel"
+)
+
+// NormalizeAgentTabCloseBehavior preserves the opt-in panel-hide behavior;
+// omitted and unknown values retain the established delete-session behavior.
+func NormalizeAgentTabCloseBehavior(value string) string {
+	if value == AgentTabCloseBehaviorHidePanel {
+		return value
+	}
+	return AgentTabCloseBehaviorDeleteSession
+}
+
+const (
 	// RoleAdmin unlocks user management and system settings mutation when
 	// authentication is enabled. It does NOT grant visibility into other
 	// users' workspaces (hard privacy isolation).
@@ -168,6 +182,7 @@ type UserSettings struct {
 	TerminalFontSize                  int                               `json:"terminal_font_size"`
 	ChangesPanelLayout                string                            `json:"changes_panel_layout"` // "flat" | "tree"
 	LastSeenDisplay                   string                            `json:"last_seen_display"`    // "absolute" | "relative"
+	AgentTabCloseBehavior             string                            `json:"agent_tab_close_behavior"`
 	SystemMetricsDisplay              SystemMetricsDisplaySettings      `json:"system_metrics_display"`
 	AppStatusBarEnabled               bool                              `json:"app_status_bar_enabled"`
 	ResolveSessionHostnames           bool                              `json:"resolve_session_hostnames"`

@@ -669,6 +669,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"terminal_font_size":                       settings.TerminalFontSize,
 		"changes_panel_layout":                     settings.ChangesPanelLayout,
 		"last_seen_display":                        models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
+		"agent_tab_close_behavior":                 models.NormalizeAgentTabCloseBehavior(settings.AgentTabCloseBehavior),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
 		"resolve_session_hostnames":                settings.ResolveSessionHostnames,
@@ -752,6 +753,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		TerminalLinkBehavior:              "new_tab",
 		ChangesPanelLayout:                defaultChangesPanelLayout,
 		LastSeenDisplay:                   models.LastSeenDisplayAbsolute,
+		AgentTabCloseBehavior:             models.AgentTabCloseBehaviorDeleteSession,
 		SidebarViews:                      DefaultSidebarViews(),
 		SidebarActiveViewID:               DefaultSidebarViewID,
 		ThreadViews:                       DefaultThreadViews(),
@@ -853,6 +855,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		TerminalFontSize                  int                                 `json:"terminal_font_size"`
 		ChangesPanelLayout                string                              `json:"changes_panel_layout"`
 		LastSeenDisplay                   json.RawMessage                     `json:"last_seen_display"`
+		AgentTabCloseBehavior             json.RawMessage                     `json:"agent_tab_close_behavior"`
 		SystemMetricsDisplay              models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
 		AppStatusBarEnabled               *bool                               `json:"app_status_bar_enabled"`
 		ResolveSessionHostnames           *bool                               `json:"resolve_session_hostnames"`
@@ -1035,6 +1038,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		settings.ChangesPanelLayout = defaultChangesPanelLayout
 	}
 	settings.LastSeenDisplay = normalizeLastSeenDisplayStored(payload.LastSeenDisplay)
+	settings.AgentTabCloseBehavior = normalizeAgentTabCloseBehaviorStored(payload.AgentTabCloseBehavior)
 	settings.KanbanHiddenStepIDs = decodeKanbanHiddenStepIDs(payload.KanbanHiddenStepIDs)
 	settings.WorkflowIDsWithAutoHideEmptySteps = decodeStringIDs(payload.WorkflowIDsWithAutoHideEmptySteps)
 	settings.KanbanSort = models.NormalizeKanbanSort(payload.KanbanSort)
@@ -1086,6 +1090,17 @@ func normalizeLastSeenDisplayStored(raw json.RawMessage) string {
 		return models.LastSeenDisplayAbsolute
 	}
 	return models.NormalizeLastSeenDisplay(value)
+}
+
+func normalizeAgentTabCloseBehaviorStored(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return models.AgentTabCloseBehaviorDeleteSession
+	}
+	var value string
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return models.AgentTabCloseBehaviorDeleteSession
+	}
+	return models.NormalizeAgentTabCloseBehavior(value)
 }
 
 // decodeKanbanHiddenStepIDs parses the persisted per-workflow hidden-step-id

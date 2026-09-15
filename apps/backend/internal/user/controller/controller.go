@@ -142,6 +142,7 @@ func (c *Controller) UpdateUserSettings(ctx context.Context, req dto.UpdateUserS
 		TerminalFontSize:                  req.TerminalFontSize,
 		ChangesPanelLayout:                req.ChangesPanelLayout,
 		LastSeenDisplay:                   req.LastSeenDisplay,
+		AgentTabCloseBehavior:             req.AgentTabCloseBehavior,
 		SystemMetricsDisplay:              systemMetricsDisplayPatch(req.SystemMetricsDisplay),
 		AppStatusBarEnabled:               req.AppStatusBarEnabled,
 		ResolveSessionHostnames:           req.ResolveSessionHostnames,

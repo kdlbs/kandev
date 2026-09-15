@@ -169,6 +169,20 @@ describe("agent-generated task title defaults", () => {
   });
 });
 
+describe("agent tab close behavior defaults", () => {
+  it("defaults unknown and missing values to delete_session", () => {
+    expect(buildCoreFields({}).agentTabCloseBehavior).toBe("delete_session");
+    expect(buildCoreFields({ agent_tab_close_behavior: "hide_panel" }).agentTabCloseBehavior).toBe(
+      "hide_panel",
+    );
+    expect(
+      buildCoreFields({ agent_tab_close_behavior: "unknown" } as Parameters<
+        typeof buildCoreFields
+      >[0]).agentTabCloseBehavior,
+    ).toBe("delete_session");
+  });
+});
+
 describe("app status bar visibility hydration", () => {
   it("defaults missing values to disabled and preserves explicit values", () => {
     const defaults = buildCoreFields({}) as Record<string, unknown>;
