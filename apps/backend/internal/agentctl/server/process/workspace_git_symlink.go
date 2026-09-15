@@ -33,6 +33,9 @@ func (wt *WorkspaceTracker) enrichSymlinkMetadata(ctx context.Context, update *t
 				if info, err := os.Lstat(filepath.Join(wt.workDir, path)); err == nil {
 					value := info.Mode()&os.ModeSymlink != 0
 					file.IsSymlink = &value
+					if file.UnstagedChange != nil {
+						file.UnstagedChange.IsSymlink = &value
+					}
 				}
 			}
 		case file.Staged:

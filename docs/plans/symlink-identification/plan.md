@@ -112,6 +112,8 @@ Unit, integration, typecheck, localization and lint checks passed. Desktop E2E
 passed (4 tests); mobile E2E passed (1 test). Exact commands and results are recorded in
 [Task 01](task-01-identify-symlinks.md#results).
 
+Post-fixup review regressions are recorded in [Task 01](task-01-identify-symlinks.md#post-fixup-verification): same-path delete/recreate layers are preserved and an existing editor tab refreshes symlink identity without losing dirty content.
+
 ## Risks
 
 Mode changes and deleted paths cannot be classified from today's filesystem

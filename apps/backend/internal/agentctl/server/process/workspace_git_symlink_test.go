@@ -12,7 +12,7 @@ import (
 
 // @covers AC-WORKSPACES-SYMLINK-001.1, AC-WORKSPACES-SYMLINK-001.3
 func TestSymlinkStatusMetadata(t *testing.T) {
-	for _, scenario := range []string{"untracked", "staged", "unstaged", "deleted", "staged-deleted", "renamed", "mixed-type"} {
+	for _, scenario := range []string{"untracked", "staged", "unstaged", "deleted", "staged-deleted", "staged-delete-recreate", "renamed", "mixed-type"} {
 		t.Run(scenario, func(t *testing.T) {
 			repo, cleanup := setupTestRepo(t)
 			defer cleanup()
@@ -43,11 +43,11 @@ func TestSymlinkStatusMetadata(t *testing.T) {
 			if err := json.Unmarshal(b, &file); err != nil {
 				t.Fatal(err)
 			}
-			want := scenario != "mixed-type"
+			want := scenario != "mixed-type" && scenario != "staged-delete-recreate"
 			if file.IsSymlink == nil || *file.IsSymlink != want {
 				t.Fatalf("symlink metadata = %s, want %v", b, want)
 			}
-			if scenario == "mixed-type" && (file.Staged == nil || file.Unstaged == nil || file.Staged.IsSymlink == nil || !*file.Staged.IsSymlink || file.Unstaged.IsSymlink == nil || *file.Unstaged.IsSymlink) {
+			if (scenario == "mixed-type" || scenario == "staged-delete-recreate") && (file.Staged == nil || file.Unstaged == nil || file.Staged.IsSymlink == nil || !*file.Staged.IsSymlink || file.Unstaged.IsSymlink == nil || *file.Unstaged.IsSymlink) {
 				t.Fatalf("mixed layer metadata = %s", b)
 			}
 		})
@@ -74,6 +74,9 @@ func prepareSymlinkScenario(t *testing.T, repo, name, scenario string) string {
 		}
 	case "staged-deleted":
 		runGit(t, repo, "add", "--", name)
+	case "staged-delete-recreate":
+		runGit(t, repo, "add", "--", name)
+		writeFile(t, repo, name, "regular now\n")
 	case "renamed":
 		name = "renamed link.txt"
 		if err := os.Symlink("missing-target", filepath.Join(repo, name)); err != nil {

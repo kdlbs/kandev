@@ -137,7 +137,7 @@ and avoid introducing per-row filesystem requests or Git subprocesses.
 
 ## Results
 
-Implementation and verification complete. No commit or push made.
+Implementation and initial verification complete.
 
 - Red: seven real-Git metadata scenarios failed on missing `is_symlink`;
   four frontend assertions failed on dropped metadata, layer projection,
@@ -197,4 +197,20 @@ editor-marker assertions then matched the new tree markers too; scoped them
 outside Files. Final desktop suite: 4 passed (26.2s); mobile suite: 1 passed
 (6.4s). Focused ESLint, typecheck, spec validation/lint, and whitespace checks
 passed. Reloaded the isolated Tailscale instance and verified its real Files
-icons in a headless browser. No main-instance changes or commit were made.
+icons in a headless browser. No main-instance changes were made.
+
+## Post-fixup verification
+
+Addressed review findings for same-path staged deletion plus untracked
+replacement and already-open editor tabs whose symlink type changes. The
+backend now preserves both change layers and the tab upsert refreshes
+`resolvedPath` without overwriting dirty content.
+
+```bash
+(cd apps/backend && GOCACHE=/tmp/kandev-symlink-go-cache go test ./internal/agentctl/server/process -count=1)
+(cd apps/web && pnpm test -- --run components/task/task-center-panel-file-tabs.test.ts hooks/use-file-editors.build-state.test.ts hooks/file-editors-sync.test.ts hooks/use-task-center-file-open.test.ts)
+(cd apps/web && pnpm exec eslint components/task/task-center-panel-file-tabs.ts components/task/task-center-panel-file-tabs.test.ts hooks/use-task-center-file-open.ts)
+```
+
+The focused frontend run passed 34 tests, the full backend process package
+passed, and the new regression cases passed before the fixup commit.
