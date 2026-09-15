@@ -51,12 +51,19 @@ container's non-root security context does not contain commands that use Docker.
 Schedule these Pods only on a worker node pool isolated from trusted workloads.
 
 The daemon reads the Pod interface MTU and applies it to default and
-user-defined bridges. Verify nested HTTPS transfers for the actual CNI/runtime.
+user-defined bridges. It selects Docker's cgroupfs driver with a relative
+`docker` parent so nested container cgroups remain below the daemon container's
+cgroup on compatible cgroup-v2 runtimes. Verify both properties on the actual
+CNI and container runtime before rollout.
+
 The preparation script waits at most 60 seconds (plus a bounded client call)
 for Docker before the standard clone/origin verification, repository setup and
-agent installation. Kandev still adds task-branch preparation. Cache directories
-are created only after repository materialization. Kandev owns `HOME`; baked
-tools and browsers remain outside `/workspace` and `/run/kandev`.
+agent installation. Kandev uploads and runs that script through its existing
+restricted Pod exec channel, then releases the managed entrypoint only after
+preparation succeeds. A failed script returns a bounded, sanitized diagnostic
+and never starts agentctl. Kandev still adds task-branch preparation. Cache
+directories are created only after repository materialization. Kandev owns
+`HOME`; baked tools and browsers remain outside `/workspace` and `/run/kandev`.
 
 ## Exercise source and Docker execution
 
@@ -81,11 +88,16 @@ existing claims remain operator-owned.
 
 ## Compatibility limits
 
-Real acceptance results are recorded in the implementation work orders. A
-successful image smoke alone does not establish Kubernetes Docker acceptance.
+The focused lifecycle suite passed on Linux/amd64 with Kind v0.32.0,
+Kubernetes v1.36.1 and Docker 29.1.5. It exercised source/browser work, Docker
+build/run, Compose binds, finite readiness failure, Stop/Resume, lost-Pod
+replacement, independent daemons, nested cgroup accounting and exact cleanup.
+The implementation work orders record the commands, timings and accepted image
+config digest.
+
 Kind evidence applies only to the recorded architecture and runtime. Measure
-nested cgroup ancestry and counters before claiming resource enforcement;
-privileged DinD is not an adversarial isolation boundary.
+nested cgroup ancestry and counters before claiming resource enforcement on a
+different runtime; privileged DinD is not an adversarial isolation boundary.
 
 Only `/workspace` is shared with the daemon. Agent-only HOME/temp bind sources,
 callbacks, SSH fixtures and arbitrary Docker plugins are not promised to work.

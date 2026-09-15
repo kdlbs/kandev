@@ -1443,6 +1443,27 @@ func (a *messageCreatorAdapter) CreateSessionMessage(ctx context.Context, taskID
 	return err
 }
 
+// CreateSessionMessageIdempotent persists a lifecycle/status message with a
+// deterministic ID so a replayed failure event cannot add another transcript
+// entry for the same failure stamp.
+func (a *messageCreatorAdapter) CreateSessionMessageIdempotent(
+	ctx context.Context,
+	messageID, taskID, content, agentSessionID, messageType, turnID string,
+	metadata map[string]interface{}, requestsInput bool,
+) error {
+	_, err := a.svc.CreateMessageIdempotent(ctx, messageID, &taskservice.CreateMessageRequest{
+		TaskSessionID: agentSessionID,
+		TaskID:        taskID,
+		TurnID:        turnID,
+		Content:       content,
+		AuthorType:    "agent",
+		Type:          messageType,
+		Metadata:      metadata,
+		RequestsInput: requestsInput,
+	})
+	return err
+}
+
 // CreatePermissionRequestMessage creates a message for a permission request
 func (a *messageCreatorAdapter) CreatePermissionRequestMessage(ctx context.Context, taskID, sessionID, requestID, pendingID, toolCallID, title, turnID string, options []map[string]interface{}, actionType string, actionDetails map[string]interface{}) (string, error) {
 	metadata := map[string]interface{}{

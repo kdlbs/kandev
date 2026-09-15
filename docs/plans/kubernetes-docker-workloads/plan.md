@@ -1,6 +1,6 @@
 ---
 created: 2026-09-13
-status: draft
+status: completed
 requirements:
   - REQ-EXECUTORS-K8S-DOCKER-001
   - REQ-EXECUTORS-K8S-DOCKER-002
@@ -13,7 +13,7 @@ legacy_specs:
 
 # Implementation Plan: Kubernetes Docker workloads
 
-**Implementation authored; image and real Docker acceptance blocked.**
+**Implemented and accepted in a bounded Linux/amd64 Kind environment.**
 
 ## Overview
 
@@ -72,9 +72,13 @@ sidecar through a Pod-local Unix socket. Both mount the workspace; only the
 agent gets Kandev runtime/auth mounts. Daemon data is explicitly disposable.
 
 Provide explicit resources, writable caches and a finite daemon readiness gate
-while preserving default clone/setup/agent-install/branch preparation. Deployers
-must choose their own namespace policy, placement, limits and network MTU.
-The recipe does not grant privileges or install anything by itself.
+while preserving default clone/setup/agent-install/branch preparation. Run the
+resolved preparation through the existing restricted Pod exec channel before
+releasing the managed entrypoint, with a bounded sanitized failure diagnostic.
+Use Docker's cgroupfs driver and a relative cgroup parent, then require runtime
+evidence that nested scopes remain inside the Pod budget. Deployers must choose
+their own namespace policy, placement, limits and network MTU. The recipe does
+not grant privileges or install anything by itself.
 
 ## Tests
 
@@ -117,21 +121,26 @@ Keep test evidence limited to generic fixtures, runtime versions and outcomes.
 Run sequentially in the primary session after an implementation request.
 
 - [x] [Task 01: Explicit companion workspace grants](task-01-workspace-grants.md)
-- [ ] [Task 02: Full worker image and daemon recipe](task-02-full-worker-image.md)
-- [ ] [Task 03: Real Kubernetes Docker lifecycle tests](task-03-docker-lifecycle.md)
+- [x] [Task 02: Full worker image and daemon recipe](task-02-full-worker-image.md)
+- [x] [Task 03: Real Kubernetes Docker lifecycle tests](task-03-docker-lifecycle.md)
 
 ## Verification results
 
 - Required Kubernetes and lifecycle Go packages passed after workspace-grant implementation.
-- Focused template/readiness and clone/cache/retained-workspace tests passed.
-- Documentation catalog, specification lint and public-doc validation passed.
-- Recipe shell syntax, immutable-input check and renderer smoke passed.
-- Four opt-in lifecycle cases are discoverable. They have not executed.
+- The pinned Linux/amd64 image built and passed non-root source, browser and
+  tool verification with image config digest
+  `sha256:101d44047de5238b7846295a2e175c162c79328b42db9a2693d568a9ac59a0f6`.
+- Template/readiness, clone/cache/retained-workspace, renderer and immutable-input
+  tests passed.
+- All four Docker lifecycle cases passed against Kubernetes v1.36.1 in Kind:
+  full source/browser/Docker/Compose execution, finite daemon failure,
+  Stop/Resume and lost-Pod replacement, and isolated-daemon accounting/cleanup.
+- The focused browser run completed in 3.3 minutes. Required Go packages,
+  documentation catalog, specification lint and public-doc validation passed.
 
-The full image build/verification did not complete. Task 02 and task 03 remain
-blocked pending a suitable isolated test environment. No Docker acceptance,
-portable resource enforcement or production compatibility is claimed. See each
-work order's Results for the exact scope of evidence and remaining work.
+These results establish the documented recipe on the recorded Linux/amd64,
+Kubernetes and Docker versions. They do not establish portable enforcement on
+every container runtime or remove the documented privileged-DinD boundary.
 
 ## Risks
 

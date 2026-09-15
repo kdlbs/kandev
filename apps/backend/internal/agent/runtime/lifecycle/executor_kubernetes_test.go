@@ -148,7 +148,7 @@ func TestKubernetesCreateInstanceProvisionsBootstrapsAndForwardsAgentctl(t *test
 	require.NotNil(t, instance.Client)
 	require.Len(t, resources.createdPVCs, 1)
 	require.Len(t, resources.createdPods, 1)
-	require.Len(t, execs.requests, 4, "binary, runtime config, auth config, then start signal")
+	require.Len(t, execs.requests, 5, "binary, runtime config, auth config, prepare, then start signal")
 	require.Equal(t, []uint16{uint16(kubeexecutor.DefaultAgentctlPort), 41001}, forwards.remotePorts())
 	for _, request := range forwards.requests {
 		require.Equal(t, "127.0.0.1", request.LocalAddress)
@@ -428,7 +428,7 @@ func TestKubernetesCreateInstanceRebuildsLostPodAgainstVerifiedManagedPVC(t *tes
 	require.Equal(t, "pvc-uid", reconnected.Metadata[MetadataKeyKubernetesPVCUID])
 	require.Len(t, resources.createdPVCs, 1, "resume must reuse the recorded PVC")
 	require.Len(t, resources.createdPods, 2)
-	require.Len(t, reconnectExecs.requests, 4, "replacement Pod needs full bootstrap materialization")
+	require.Len(t, reconnectExecs.requests, 5, "replacement Pod needs full bootstrap materialization")
 }
 
 func TestKubernetesStopInstancePreservesOrdinaryStopAndForceCleansManagedResources(t *testing.T) {

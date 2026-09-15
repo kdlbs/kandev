@@ -4,6 +4,7 @@ import {
   pickFreshestStatusSummary,
   selectTaskStatusSummary,
   statusSummaryActiveErrorPreview,
+  statusSummaryTaskError,
 } from "./task-status-summary";
 import type { TaskStatusSummary } from "./types/task-status-summary";
 
@@ -89,5 +90,23 @@ describe("selectTaskStatusSummary", () => {
       preview: "Choose a base branch",
     };
     expect(statusSummaryActiveErrorPreview(taskOwned, {}, {})).toBe("Choose a base branch");
+  });
+
+  it("selects the independent task error even when a session error is newer", () => {
+    const taskOwned = summary(3);
+    taskOwned.task_error = {
+      scope: "task",
+      stamp: "task-error-3",
+      occurred_at: "2026-08-19T10:00:00Z",
+      preview: "Choose a base branch",
+    };
+    taskOwned.active_error = {
+      scope: "session",
+      session_id: "session-1",
+      stamp: "session-error-4",
+      occurred_at: "2026-08-19T11:00:00Z",
+      preview: "The session failed",
+    };
+    expect(statusSummaryTaskError(taskOwned)).toBe(taskOwned.task_error);
   });
 });

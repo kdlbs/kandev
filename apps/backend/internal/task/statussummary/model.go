@@ -45,6 +45,7 @@ type TaskStatusSummary struct {
 	ActiveSubagentCount int                    `json:"active_subagent_count,omitempty"`
 	PendingAction       string                 `json:"pending_action,omitempty"`
 	ActiveError         *ActiveErrorSummary    `json:"active_error,omitempty"`
+	TaskError           *ActiveErrorSummary    `json:"task_error,omitempty"`
 	Git                 *GitSummary            `json:"git,omitempty"`
 	PullRequest         *PullRequestSummary    `json:"pull_request,omitempty"`
 	// QueuedPromptCount is the number of prompts currently en-queued for the
@@ -60,6 +61,7 @@ type PrimarySessionSummary struct {
 }
 
 type ActiveErrorSummary struct {
+	Scope            string                   `json:"scope,omitempty"`
 	SessionID        string                   `json:"session_id,omitempty"`
 	TaskRepositoryID string                   `json:"task_repository_id,omitempty"`
 	ExecutionID      string                   `json:"execution_id,omitempty"`
@@ -136,6 +138,9 @@ func (s TaskStatusSummary) Validate() error {
 	if err := validateActiveError(s.ActiveError); err != nil {
 		return err
 	}
+	if err := validateActiveError(s.TaskError); err != nil {
+		return err
+	}
 	return validatePullRequest(s.PullRequest)
 }
 
@@ -158,6 +163,7 @@ func validateActiveError(activeError *ActiveErrorSummary) error {
 		value string
 		limit int
 	}{
+		{"active error scope", activeError.Scope, maxActiveErrorCategoryBytes},
 		{"active error session id", activeError.SessionID, maxSessionIDBytes},
 		{"active error task repository id", activeError.TaskRepositoryID, maxTaskRepositoryIDBytes},
 		{"active error execution id", activeError.ExecutionID, maxSessionIDBytes},
@@ -167,6 +173,9 @@ func validateActiveError(activeError *ActiveErrorSummary) error {
 		{"active error preview", activeError.Preview, MaxActiveErrorPreviewBytes},
 		{"active error details", activeError.Details, MaxActiveErrorDetailsBytes},
 		{"active error category", activeError.Category, maxActiveErrorCategoryBytes},
+	}
+	if activeError.Scope != "" && activeError.Scope != models.ErrorScopeSession && activeError.Scope != models.ErrorScopeTask {
+		return fmt.Errorf("active error has unknown scope")
 	}
 	for _, field := range fields {
 		if err := validateUTF8Bytes(field.name, field.value, field.limit); err != nil {
@@ -239,6 +248,7 @@ func (s TaskStatusSummary) SemanticJSON() ([]byte, error) {
 		ActiveSubagentCount: s.ActiveSubagentCount,
 		PendingAction:       s.PendingAction,
 		ActiveError:         s.ActiveError,
+		TaskError:           s.TaskError,
 		Git:                 s.Git,
 		PullRequest:         s.PullRequest,
 		QueuedPromptCount:   s.QueuedPromptCount,
@@ -252,6 +262,7 @@ type semanticPayload struct {
 	ActiveSubagentCount int                    `json:"active_subagent_count,omitempty"`
 	PendingAction       string                 `json:"pending_action,omitempty"`
 	ActiveError         *ActiveErrorSummary    `json:"active_error,omitempty"`
+	TaskError           *ActiveErrorSummary    `json:"task_error,omitempty"`
 	Git                 *GitSummary            `json:"git,omitempty"`
 	PullRequest         *PullRequestSummary    `json:"pull_request,omitempty"`
 	QueuedPromptCount   int                    `json:"queued_prompt_count,omitempty"`

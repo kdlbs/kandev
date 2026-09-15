@@ -170,6 +170,9 @@ func TestBuildLastAgentErrorSanitizesRepositoryPreparationDetails(t *testing.T) 
 	if !strings.Contains(errorValue.Details, "repo-back") || !strings.Contains(errorValue.Details, "backend") {
 		t.Fatalf("launch details = %q, want repository identity", errorValue.Details)
 	}
+	if errorValue.Phase != models.LaunchErrorPhaseBootstrap {
+		t.Fatalf("launch phase = %q, want bootstrap", errorValue.Phase)
+	}
 	if strings.Contains(errorValue.Details, "ghp_abcdefghijklmnopqrstuvwxyz1234567890AB") ||
 		strings.Contains(errorValue.Details, "user:") {
 		t.Fatalf("launch details exposed credential-bearing URL: %q", errorValue.Details)
@@ -235,6 +238,27 @@ func TestBootstrapFailureProjection(t *testing.T) {
 	exec.SetOnSessionStateChange(func(ctx context.Context, _, sessionID string, state models.TaskSessionState, message string) error {
 		return repo.UpdateTaskSessionState(ctx, sessionID, state, message)
 	})
+	exec.SetOnBootstrapFailureTransition(func(
+		ctx context.Context,
+		taskID, sessionID, _ string,
+		_ models.TaskSessionState,
+		_ string,
+		errorValue models.LastAgentError,
+	) (bool, models.TaskSessionState, error) {
+		changed, _, err := repo.CommitBootstrapFailureIfCurrentExecution(
+			ctx,
+			taskID,
+			sessionID,
+			"exec-1",
+			models.TaskSessionStateStarting,
+			"",
+			errorValue,
+		)
+		if err != nil || !changed {
+			return changed, models.TaskSessionStateStarting, err
+		}
+		return true, models.TaskSessionStateFailed, nil
+	})
 
 	exec.runAgentProcessAsync(
 		context.Background(), "task-1", "session-1", "exec-1",
@@ -270,6 +294,54 @@ func TestBootstrapFailureProjection(t *testing.T) {
 	}
 	if strings.Contains(errorValue.Details, "private/worktree") || strings.Contains(errorValue.Details, "ghp_secret") {
 		t.Fatalf("bootstrap details exposed raw startup error: %q", errorValue.Details)
+	}
+}
+
+func TestBootstrapFailureHistoryRepairRunsAfterAcceptedCommitError(t *testing.T) {
+	repo := newMockRepository()
+	repo.sessions["session-repair"] = &models.TaskSession{
+		ID:               "session-repair",
+		TaskID:           "task-repair",
+		State:            models.TaskSessionStateStarting,
+		AgentExecutionID: "exec-repair",
+	}
+	repo.tasks["task-repair"] = &models.Task{ID: "task-repair", State: v1.TaskStateReview}
+	exec := newTestExecutor(t, &mockAgentManager{}, repo)
+	var repairCalls int
+	exec.SetOnBootstrapFailureTransition(func(
+		context.Context,
+		string,
+		string,
+		string,
+		models.TaskSessionState,
+		string,
+		models.LastAgentError,
+	) (bool, models.TaskSessionState, error) {
+		return true, models.TaskSessionStateFailed, errors.New("transcript write failed after admission")
+	})
+	exec.SetOnBootstrapFailureMessageRepair(func(
+		context.Context,
+		string,
+		string,
+		string,
+		models.LastAgentError,
+	) error {
+		repairCalls++
+		return nil
+	})
+
+	exec.handleAgentProcessStartFailure(
+		context.Background(),
+		"task-repair",
+		"session-repair",
+		"exec-repair",
+		errors.New("agent process failed to start"),
+		false,
+		false,
+	)
+
+	if repairCalls != 1 {
+		t.Fatalf("bootstrap history repair calls = %d, want 1", repairCalls)
 	}
 }
 

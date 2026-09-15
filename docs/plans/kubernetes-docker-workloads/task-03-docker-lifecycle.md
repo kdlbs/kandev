@@ -1,7 +1,7 @@
 ---
 id: "03-docker-lifecycle"
 title: "Real Kubernetes Docker lifecycle tests"
-status: blocked
+status: completed
 wave: 3
 depends_on:
   - "02-full-worker-image"
@@ -113,21 +113,24 @@ are outside the shared workspace; tests must not conceal incompatible paths.
 
 ## Results
 
-Implementation authored; runtime acceptance remains blocked. Do not treat this
-work order as accepted or promote the pull request to ready.
+All four opt-in browser cases passed on Linux/amd64 with Kind v0.32.0,
+Kubernetes v1.36.1 and Docker 29.1.5. The focused run used one worker and
+completed in 3.3 minutes:
 
-Four opt-in browser cases and a full-worker fixture are authored. Playwright
-`--list` discovers all four cases; discovery is not runtime evidence. Existing
-managed workspace snapshot and cleanup Go tests passed in task 01.
+- `full worker returns source and Docker results` passed in 44.4 seconds,
+  including source builds/tests, Chromium, an image build/run, HTTPS transfer,
+  Compose RO/RW binds and Kandev-visible workspace output.
+- `unavailable daemon fails preparation` passed in 5.1 seconds with a finite,
+  visible preparation failure and no agent start.
+- `resume and replacement retain workspace` passed in 14.4 seconds, preserving
+  the result through Stop/Resume and a lost-Pod replacement while discarding
+  daemon state.
+- `isolated daemons clean up with owned Pods` passed in 20.0 seconds, proving
+  distinct daemon identities, nested cgroup ancestry/counter movement, one Pod
+  per session and exact cleanup without deleting the existing claim fixture.
 
-No Kind cluster or nested daemon was launched for these cases. Source/browser
-execution in the full image, real API defaulting, Compose binds, visible results,
-Stop/Resume/replacement, daemon failure, cgroup accounting and exact real-resource
-cleanup remain unverified. The draft must remain blocked until the full focused
-suite executes successfully on a suitable isolated test host. No production
-compatibility or deployment acceptance is claimed.
-
-Static validation: changed-file ESLint passed. A focused TypeScript check of the
-spec and its imports found existing E2E support-file errors (duplicate members,
-missing window augmentation and `node:sqlite` declarations), with no diagnostics
-in the two new files. This is not a passing E2E typecheck or runtime result.
+The exact implementation revision was exercised with image config digest
+`sha256:101d44047de5238b7846295a2e175c162c79328b42db9a2693d568a9ac59a0f6`.
+Required Kubernetes and lifecycle Go packages, changed-file ESLint and test
+discovery also passed. This evidence applies to the recorded Kind/runtime
+combination; other container runtimes still require their own cgroup validation.

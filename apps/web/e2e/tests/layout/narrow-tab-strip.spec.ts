@@ -80,6 +80,10 @@ const rowOverflow = (row: Locator): Promise<number> =>
 const rowScrollLeft = (row: Locator): Promise<number> =>
   row.evaluate((element) => element.scrollLeft);
 
+// Leave less room than the two-tab minimum after Dockview's header actions are
+// accounted for, while staying above the production column minimum.
+const NARROW_RIGHT_COLUMN_WIDTH = 200;
+
 test.describe("narrow tab strip", () => {
   test("squeezes tab titles rather than the close buttons", async ({
     testPage,
@@ -94,7 +98,7 @@ test.describe("narrow tab strip", () => {
     expect(wide.map((tab) => tab.truncated)).not.toContain(true);
     expect(wide.every((tab) => tab.closeWidth > 0)).toBe(true);
 
-    await resizeColumnViaSplitview(testPage, "right", 240);
+    await resizeColumnViaSplitview(testPage, "right", NARROW_RIGHT_COLUMN_WIDTH);
     const narrow = await probeTabStrip(strip);
 
     expect(narrow.map((tab) => tab.title)).toEqual(wide.map((tab) => tab.title));
@@ -112,7 +116,7 @@ test.describe("narrow tab strip", () => {
     seedData,
   }) => {
     await openWideTask(testPage, apiClient, seedData, "Horizontal tab scroll");
-    await resizeColumnViaSplitview(testPage, "right", 240);
+    await resizeColumnViaSplitview(testPage, "right", NARROW_RIGHT_COLUMN_WIDTH);
     const { row } = await markFilesGroup(testPage);
 
     const filesTab = row.locator(".dv-default-tab").filter({ hasText: /^Files$/ });
