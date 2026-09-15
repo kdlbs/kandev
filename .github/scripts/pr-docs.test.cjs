@@ -730,6 +730,448 @@ test('GitHub client rejects incomplete pages and decodes bounded file contents',
   assert.equal(requests[1].options.headers.Authorization, 'Bearer token-is-not-logged');
 });
 
+test('GitHub client retries a transient response with the server delay', async () => {
+  let calls = 0;
+  const delays = [];
+  const client = new validator.GitHubClient({
+    owner: 'kdlbs',
+    repo: 'kandev',
+    token: 'token',
+    sleepImpl: async delay => delays.push(delay),
+    fetchImpl: async () => {
+      calls += 1;
+      if (calls === 1) {
+        return {
+          ok: false,
+          status: 503,
+          headers: { 'retry-after': '0' },
+          async text() {
+            return JSON.stringify({ message: 'Service Unavailable' });
+          },
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        async text() {
+          return JSON.stringify({
+            number: 42,
+            head: { sha: SHA_B },
+            base: { sha: SHA_A, ref: 'main' },
+            labels: [],
+            changed_files: 0,
+          });
+        },
+      };
+    },
+  });
+
+  const result = await client.getPullRequest(42);
+
+  assert.equal(result.head.sha, SHA_B);
+  assert.equal(calls, 2);
+  assert.deepEqual(delays, [0]);
+});
+
+test('GitHub client uses the documented secondary-limit delays without headers', async () => {
+  let calls = 0;
+  const delays = [];
+  const logs = [];
+  const client = new validator.GitHubClient({
+    owner: 'kdlbs',
+    repo: 'kandev',
+    token: 'secret-token',
+    sleepImpl: async delay => delays.push(delay),
+    logImpl: message => logs.push(message),
+    fetchImpl: async () => {
+      calls += 1;
+      return {
+        ok: false,
+        status: 429,
+        async text() {
+          return JSON.stringify({ message: 'private response details' });
+        },
+      };
+    },
+  });
+
+  await assert.rejects(client.getPullRequest(42), /HTTP 429/);
+
+  assert.equal(calls, 3);
+  assert.deepEqual(delays, [60_000, 120_000]);
+  assert.equal(logs.some(log => log.includes('delay_ms=60000')), true);
+  assert.equal(logs.some(log => log.includes('delay_ms=120000')), true);
+  assert.equal(logs.every(log => !log.includes('secret-token')), true);
+  assert.equal(logs.every(log => !log.includes('private response details')), true);
+  assert.equal(logs.every(log => !log.includes('q=')), true);
+  assert.equal(logs.some(log => log.includes('outcome=retry-exhausted')), true);
+});
+
+test('GitHub client retries status writes with the original request payload', async () => {
+  const requests = [];
+  let calls = 0;
+  const client = new validator.GitHubClient({
+    owner: 'kdlbs',
+    repo: 'kandev',
+    token: 'token',
+    sleepImpl: async () => {},
+    logImpl: () => {},
+    fetchImpl: async (url, options) => {
+      calls += 1;
+      requests.push({ url, body: options.body });
+      return {
+        ok: calls > 1,
+        status: calls > 1 ? 201 : 503,
+        headers: { 'retry-after': '0' },
+        async text() {
+          return calls > 1 ? '{}' : JSON.stringify({ message: 'temporary failure' });
+        },
+      };
+    },
+  });
+
+  await client.createCommitStatus(SHA_B, {
+    description: 'Coverage failed',
+    state: 'failure',
+    targetUrl: 'https://github.com/kdlbs/kandev/actions/runs/42',
+  });
+
+  assert.equal(calls, 2);
+  assert.deepEqual(requests[1], requests[0]);
+});
+
+test('GitHub client uses a due primary rate-limit reset', async () => {
+  let calls = 0;
+  const delays = [];
+  const client = new validator.GitHubClient({
+    owner: 'kdlbs',
+    repo: 'kandev',
+    token: 'token',
+    sleepImpl: async delay => delays.push(delay),
+    fetchImpl: async () => {
+      calls += 1;
+      if (calls === 1) {
+        return {
+          ok: false,
+          status: 403,
+          headers: {
+            'x-ratelimit-remaining': '0',
+            'x-ratelimit-reset': String(Math.floor(Date.now() / 1000)),
+          },
+          async text() {
+            return JSON.stringify({ message: 'API rate limit exceeded' });
+          },
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        async text() {
+          return JSON.stringify({
+            number: 42,
+            head: { sha: SHA_B },
+            base: { sha: SHA_A, ref: 'main' },
+            labels: [],
+            changed_files: 0,
+          });
+        },
+      };
+    },
+  });
+
+  const result = await client.getPullRequest(42);
+
+  assert.equal(result.number, 42);
+  assert.equal(calls, 2);
+  assert.deepEqual(delays, [0]);
+});
+
+test('GitHub client stops before an explicit wait exceeds the sleep budget', async () => {
+  let calls = 0;
+  const delays = [];
+  const logs = [];
+  const client = new validator.GitHubClient({
+    owner: 'kdlbs',
+    repo: 'kandev',
+    token: 'token',
+    sleepImpl: async delay => delays.push(delay),
+    logImpl: message => logs.push(message),
+    fetchImpl: async () => {
+      calls += 1;
+      return {
+        ok: false,
+        status: 503,
+        headers: { 'retry-after': '181' },
+        async text() {
+          return JSON.stringify({ message: 'Service Unavailable' });
+        },
+      };
+    },
+  });
+
+  await assert.rejects(client.getPullRequest(42), /wait-budget-exhausted/);
+
+  assert.equal(calls, 1);
+  assert.deepEqual(delays, []);
+  assert.equal(logs.some(log => log.includes('next_delay_ms=181000')), true);
+});
+
+test('GitHub client retries transport failures with short exponential backoff', async () => {
+  let calls = 0;
+  const delays = [];
+  const client = new validator.GitHubClient({
+    owner: 'kdlbs',
+    repo: 'kandev',
+    token: 'token',
+    sleepImpl: async delay => delays.push(delay),
+    fetchImpl: async () => {
+      calls += 1;
+      if (calls < 3) {
+        throw new Error('network unavailable');
+      }
+      return {
+        ok: true,
+        status: 200,
+        async text() {
+          return JSON.stringify({
+            number: 42,
+            head: { sha: SHA_B },
+            base: { sha: SHA_A, ref: 'main' },
+            labels: [],
+            changed_files: 0,
+          });
+        },
+      };
+    },
+  });
+
+  const result = await client.getPullRequest(42);
+
+  assert.equal(result.number, 42);
+  assert.equal(calls, 3);
+  assert.deepEqual(delays, [250, 500]);
+});
+
+test('GitHub client retries HTTP 408 and secondary rate-limit 403 responses', async t => {
+  const cases = [
+    {
+      name: '408',
+      response: { ok: false, status: 408 },
+      expectedDelay: 250,
+    },
+    {
+      name: 'secondary 403',
+      response: {
+        ok: false,
+        status: 403,
+        async text() {
+          return JSON.stringify({ message: 'You have exceeded a secondary rate limit.' });
+        },
+      },
+      expectedDelay: 60_000,
+    },
+  ];
+
+  for (const scenario of cases) {
+    await t.test(scenario.name, async () => {
+      let calls = 0;
+      const delays = [];
+      const client = new validator.GitHubClient({
+        owner: 'kdlbs',
+        repo: 'kandev',
+        token: 'token',
+        sleepImpl: async delay => delays.push(delay),
+        fetchImpl: async () => {
+          calls += 1;
+          if (calls === 1) {
+            return {
+              ...scenario.response,
+              async text() {
+                return scenario.response.text
+                  ? scenario.response.text()
+                  : JSON.stringify({ message: 'Request timed out' });
+              },
+            };
+          }
+          return {
+            ok: true,
+            status: 200,
+            async text() {
+              return JSON.stringify({
+                number: 42,
+                head: { sha: SHA_B },
+                base: { sha: SHA_A, ref: 'main' },
+                labels: [],
+                changed_files: 0,
+              });
+            },
+          };
+        },
+      });
+
+      const result = await client.getPullRequest(42);
+
+      assert.equal(result.number, 42);
+      assert.equal(calls, 2);
+      assert.deepEqual(delays, [scenario.expectedDelay]);
+    });
+  }
+});
+
+test('GitHub client retries an unreadable transient body and invalid retryable JSON', async t => {
+  for (const mode of ['body', 'json']) {
+    await t.test(mode, async () => {
+      let calls = 0;
+      const client = new validator.GitHubClient({
+        owner: 'kdlbs',
+        repo: 'kandev',
+        token: 'token',
+        sleepImpl: async () => {},
+        fetchImpl: async () => {
+          calls += 1;
+          if (calls === 1) {
+            return {
+              ok: false,
+              status: 503,
+              async text() {
+                if (mode === 'body') {
+                  throw new Error('response body stream closed');
+                }
+                return '<html>temporarily unavailable</html>';
+              },
+            };
+          }
+          return {
+            ok: true,
+            status: 200,
+            async text() {
+              return JSON.stringify({
+                number: 42,
+                head: { sha: SHA_B },
+                base: { sha: SHA_A, ref: 'main' },
+                labels: [],
+                changed_files: 0,
+              });
+            },
+          };
+        },
+      });
+
+      const result = await client.getPullRequest(42);
+
+      assert.equal(result.number, 42);
+      assert.equal(calls, 2);
+    });
+  }
+});
+
+test('GitHub client fails permanent 4xx body and JSON errors without retry', async t => {
+  for (const mode of ['body', 'json']) {
+    await t.test(mode, async () => {
+      let calls = 0;
+      const delays = [];
+      const logs = [];
+      const client = new validator.GitHubClient({
+        owner: 'kdlbs',
+        repo: 'kandev',
+        token: 'token',
+        sleepImpl: async delay => delays.push(delay),
+        logImpl: message => logs.push(message),
+        fetchImpl: async () => {
+          calls += 1;
+          return {
+            ok: false,
+            status: 404,
+            async text() {
+              if (mode === 'body') {
+                throw new Error('response body stream closed');
+              }
+              return '<html>not found</html>';
+            },
+          };
+        },
+      });
+
+      await assert.rejects(client.getPullRequest(42), /HTTP 404/);
+
+      assert.equal(calls, 1);
+      assert.deepEqual(delays, []);
+      assert.equal(logs.some(log => log.includes('status=HTTP 404')), true);
+      assert.equal(logs.some(log => log.includes('attempts=1')), true);
+      assert.equal(logs.some(log => log.includes('outcome=permanent')), true);
+      assert.equal(logs.some(log => log.includes('request retry')), false);
+    });
+  }
+});
+
+test('GitHub client fails permanent responses after one attempt', async () => {
+  let calls = 0;
+  const delays = [];
+  const logs = [];
+  const client = new validator.GitHubClient({
+    owner: 'kdlbs',
+    repo: 'kandev',
+    token: 'token',
+    sleepImpl: async delay => delays.push(delay),
+    logImpl: message => logs.push(message),
+    fetchImpl: async () => {
+      calls += 1;
+      return {
+        ok: false,
+        status: 404,
+        async text() {
+          return JSON.stringify({ message: 'Not Found' });
+        },
+      };
+    },
+  });
+
+  await assert.rejects(client.getPullRequest(42), /HTTP 404/);
+
+  assert.equal(calls, 1);
+  assert.deepEqual(delays, []);
+  assert.equal(logs.some(log => log.includes('category=http')), true);
+  assert.equal(logs.some(log => log.includes('outcome=permanent')), true);
+});
+
+test('GitHub client retries request timeouts as transport failures', async () => {
+  let calls = 0;
+  const delays = [];
+  const client = new validator.GitHubClient({
+    owner: 'kdlbs',
+    repo: 'kandev',
+    token: 'token',
+    sleepImpl: async delay => delays.push(delay),
+    fetchImpl: async () => {
+      calls += 1;
+      if (calls === 1) {
+        const error = new Error('request timed out');
+        error.name = 'TimeoutError';
+        throw error;
+      }
+      return {
+        ok: true,
+        status: 200,
+        async text() {
+          return JSON.stringify({
+            number: 42,
+            head: { sha: SHA_B },
+            base: { sha: SHA_A, ref: 'main' },
+            labels: [],
+            changed_files: 0,
+          });
+        },
+      };
+    },
+  });
+
+  const result = await client.getPullRequest(42);
+
+  assert.equal(result.number, 42);
+  assert.equal(calls, 2);
+  assert.deepEqual(delays, [250]);
+});
+
 test('GitHub client rejects malformed changed-file entries and mismatched content paths', async () => {
   const responses = [
     {
@@ -804,6 +1246,8 @@ test('GitHub client converts a request timeout into a bounded error', async () =
     owner: 'kdlbs',
     repo: 'kandev',
     token: 'token',
+    sleepImpl: async () => {},
+    logImpl: () => {},
     fetchImpl: async (_url, options) => {
       signal = options.signal;
       const error = new Error('request timed out');
@@ -859,6 +1303,119 @@ test('coverage loading searches only the referenced requirement files', async ()
   ]);
 });
 
+test('a changed requirement body with the same identity avoids code search', async () => {
+  const baseContents = uiFixtureContents();
+  const headContents = uiFixtureContents();
+  const requirementPath = 'docs/specs/ui/requirements/ui-coverage.md';
+  headContents[requirementPath] = headContents[requirementPath].replace(
+    'Runtime changes have a work order.',
+    'Runtime changes have an updated work order.',
+  );
+  const changed = [
+    { filename: 'apps/web/lib/runtime.ts', status: 'modified' },
+    {
+      filename: 'docs/plans/recovery/task-01-recovery.md',
+      status: 'modified',
+      additions: 1,
+      changes: 1,
+    },
+    { filename: requirementPath, status: 'modified', additions: 1, changes: 1 },
+  ];
+  const loaded = [];
+  const searches = [];
+  const client = {
+    async getPullRequest() {
+      return pullRequest(42, SHA_B, [], changed.length);
+    },
+    async listFiles() {
+      return changed;
+    },
+    async getFile(pathname, ref) {
+      loaded.push({ pathname, ref });
+      if (ref === SHA_A) {
+        return baseContents[pathname];
+      }
+      if (Object.hasOwn(headContents, pathname)) {
+        return headContents[pathname];
+      }
+      throw new Error('GitHub API request failed with HTTP 404: Not Found');
+    },
+    async searchCode(requirementId, directory) {
+      searches.push({ requirementId, directory });
+      throw new Error('code search should not run for an unchanged identity');
+    },
+  };
+
+  const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+
+  assert.equal(result.status, 'covered', result.errors.join('; '));
+  assert.deepEqual(searches, []);
+  assert.deepEqual(
+    loaded.filter(entry => entry.pathname === requirementPath),
+    [
+      { pathname: requirementPath, ref: SHA_B },
+      { pathname: requirementPath, ref: SHA_A },
+    ],
+  );
+});
+
+test('a requirement rename can reuse its unchanged base identity', async () => {
+  const requirementPath = 'docs/specs/ui/requirements/ui-coverage.md';
+  const renamedPath = 'docs/specs/ui/requirements/renamed-coverage.md';
+  const baseContents = uiFixtureContents();
+  const headContents = uiFixtureContents();
+  headContents[renamedPath] = headContents[requirementPath];
+  delete headContents[requirementPath];
+  const changed = [
+    { filename: 'apps/web/lib/runtime.ts', status: 'modified' },
+    {
+      filename: 'docs/plans/recovery/task-01-recovery.md',
+      status: 'modified',
+      additions: 1,
+      changes: 1,
+    },
+    {
+      filename: renamedPath,
+      previous_filename: requirementPath,
+      status: 'renamed',
+      additions: 1,
+      deletions: 1,
+      changes: 2,
+    },
+  ];
+  const loaded = [];
+  const client = {
+    async getPullRequest() {
+      return pullRequest(42, SHA_B, [], changed.length);
+    },
+    async listFiles() {
+      return changed;
+    },
+    async getFile(pathname, ref) {
+      loaded.push({ pathname, ref });
+      const source = ref === SHA_A ? baseContents : headContents;
+      if (Object.hasOwn(source, pathname)) {
+        return source[pathname];
+      }
+      throw new Error('GitHub API request failed with HTTP 404: Not Found');
+    },
+    async searchCode() {
+      throw new Error('code search should not run for an unchanged rename');
+    },
+  };
+
+  const result = await validator.evaluatePullRequest({ client, pullNumber: 42 });
+
+  assert.equal(result.status, 'covered', result.errors.join('; '));
+  assert.deepEqual(
+    loaded.filter(entry => entry.pathname === renamedPath || entry.pathname === requirementPath),
+    [
+      { pathname: renamedPath, ref: SHA_B },
+      { pathname: requirementPath, ref: SHA_A },
+    ],
+  );
+});
+
 function repeatedCoverageFixture() {
   const contents = uiFixtureContents();
   const planPath = 'docs/plans/recovery/plan.md';
@@ -899,7 +1456,13 @@ function coverageClient(contents, changed, overrides = {}) {
       return changed;
     },
     async getFile(pathname, ref) {
-      assert.equal(ref, SHA_B);
+      assert.ok([SHA_A, SHA_B].includes(ref));
+      if (
+        ref === SHA_A
+        && changed.some(change => change?.filename === pathname && change?.status === 'added')
+      ) {
+        throw new Error('GitHub API request failed with HTTP 404: Not Found');
+      }
       if (!Object.hasOwn(contents, pathname)) {
         throw new Error('GitHub API request failed with HTTP 404: Not Found');
       }
@@ -1428,6 +1991,35 @@ test('run publishes pending and final status for the stable current pull-request
   assert.deepEqual(statuses.map(status => status.sha), [SHA_B, SHA_B]);
   assert.equal(summaries.length, 1);
   assert.match(summaries[0], /docs\/guide\.md/);
+});
+
+test('run reuses the snapshot used for the pending status', async () => {
+  let metadataCalls = 0;
+  const statuses = [];
+  const client = {
+    async getPullRequest() {
+      metadataCalls += 1;
+      return pullRequest(42, SHA_B);
+    },
+    async listFiles() {
+      return [{ filename: 'docs/guide.md', status: 'modified' }];
+    },
+    async createCommitStatus(sha, status) {
+      statuses.push({ sha, state: status.state });
+    },
+  };
+
+  const result = await validator.run({
+    client,
+    env: {},
+    event: { pull_request: { number: 42 } },
+    eventName: 'pull_request_target',
+    writeSummary: () => {},
+  });
+
+  assert.equal(result.exitCode, 0);
+  assert.equal(metadataCalls, 2);
+  assert.deepEqual(statuses.map(status => status.state), ['pending', 'success']);
 });
 
 test('workflow dispatch reads the pull-request number from its input', async () => {
