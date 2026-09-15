@@ -28,7 +28,7 @@ func (r *Repository) ListTaskWorkspaceFoldersByTaskIDs(ctx context.Context, task
 		placeholders[i], args[i] = "?", id
 	}
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(fmt.Sprintf(`
-		SELECT id, task_id, local_path, display_name, position, created_at, updated_at
+		SELECT id, task_id, local_path, display_name, workspace_relative_path, position, created_at, updated_at
 		FROM task_workspace_folders WHERE task_id IN (%s)
 		ORDER BY position ASC, created_at ASC
 	`, strings.Join(placeholders, ","))), args...)
@@ -49,7 +49,7 @@ func (r *Repository) ListTaskWorkspaceFoldersByTaskIDs(ctx context.Context, task
 // ListTaskWorkspaceFolders returns task-owned folders in durable source order.
 func (r *Repository) ListTaskWorkspaceFolders(ctx context.Context, taskID string) ([]*models.TaskWorkspaceFolder, error) {
 	rows, err := r.ro.QueryContext(ctx, r.ro.Rebind(`
-		SELECT id, task_id, local_path, display_name, position, created_at, updated_at
+		SELECT id, task_id, local_path, display_name, workspace_relative_path, position, created_at, updated_at
 		FROM task_workspace_folders
 		WHERE task_id = ?
 		ORDER BY position ASC, created_at ASC
@@ -179,9 +179,9 @@ func (r *Repository) insertWorkspaceFolderTx(ctx context.Context, tx *sqlx.Tx, t
 	folder.CreatedAt, folder.UpdatedAt = now, now
 	_, err := tx.ExecContext(ctx, r.db.Rebind(`
 		INSERT INTO task_workspace_folders
-			(id, task_id, local_path, display_name, position, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`), folder.ID, folder.TaskID, folder.LocalPath, folder.DisplayName, folder.Position, folder.CreatedAt, folder.UpdatedAt)
+			(id, task_id, local_path, display_name, workspace_relative_path, position, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`), folder.ID, folder.TaskID, folder.LocalPath, folder.DisplayName, folder.WorkspaceRelativePath, folder.Position, folder.CreatedAt, folder.UpdatedAt)
 	return err
 }
 
@@ -260,6 +260,7 @@ func scanTaskWorkspaceFolder(scanner interface{ Scan(...any) error }) (*models.T
 		&folder.TaskID,
 		&folder.LocalPath,
 		&folder.DisplayName,
+		&folder.WorkspaceRelativePath,
 		&folder.Position,
 		&folder.CreatedAt,
 		&folder.UpdatedAt,

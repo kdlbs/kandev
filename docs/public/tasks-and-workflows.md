@@ -465,7 +465,7 @@ unavailable once several repositories are selected, exactly as when you add the 
 <details>
 <summary>Adding sources details</summary>
 
-For a non-archived, repository-backed task, open the **Files** panel and choose **Workspace actions → Add Repositories to workspace**. Use **Add repository** to choose a workspace repository, an existing local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, refresh, and create-repository actions. Use **Add folder** for an arbitrary local folder when the executor supports it. Add one or more rows in a single submission. Repository rows choose a base branch once; the flow does not ask for a second checkout branch. Local/Local PC uses the user-owned repository's current checkout and never switches it. The whole mixed batch succeeds or fails together.
+For an idle, non-archived task with a prepared workspace, open the **Files** panel and choose **+ > Add repositories or folders**. This works for repository-backed tasks, Local folder tasks, and scratch tasks when the executor supports the selected source kind. Use **Add repository** to choose a workspace repository, an existing local Git checkout, or a provider-backed/pasted remote URL. The workspace option shares task creation's saved/discovered selector, refresh, and create-repository actions. Use **Add folder** for an arbitrary local folder on **Worktree** or **Local/Local PC**. Add one or more rows in a single submission. Repository rows choose a base branch once; the flow does not ask for a second checkout branch. Local/Local PC uses the user-owned repository's current checkout and never switches it. The whole mixed batch succeeds or fails together.
 
 The task must be idle: Kandev disables the action while a turn or tool call is active, and rejects a race without changing the task. Desktop opens a dialog; phones open the same flow in a full-height drawer. On success, repositories appear in Files and repository-aware Changes, branch, editor, and pull-request surfaces; folders are Files-only.
 
@@ -477,29 +477,17 @@ For a single-repository Worktree task that still uses the repository as its work
 repository-only batch lets you choose **Inside kandev/** or **Inside the current repository**. Both
 choices keep the agent CWD and running workspace processes unchanged. Kandev records the selected
 relative path, previews the destination, and protects the outer repository from staging the nested
-worktree. The **Expand workspace root** choice is shown as unavailable until explicit idle session
+worktree. The **Expand workspace root** choice remains unavailable until explicit idle session
 recovery is available. A task that already starts in a parent workspace adds repositories as
 siblings and does not show these placement choices.
 
-If adding a source promotes a Worktree or Local/Local PC workspace from one repository directory to
-the task root, Kandev restarts the idle agent in the new root. Existing files, Git changes, task
-state, messages, plan, attached sources, model, and mode remain. Native cross-directory resume is
-retained where supported. When it is unavailable, Kandev presents an explicit recorded-history
-continuation that requires user confirmation before it starts a replacement provider session. The
-user can cancel the continuation. Provider-private context not recorded by Kandev may not carry
-over. The intentional restart is not shown as a previous agent error.
-
-The host rebind stops open task terminals, dev servers, the task editor server, and other
-agentctl-managed workspace processes, so save unsaved work and restart those processes afterward.
-Local Docker, Kubernetes, SSH, and Sprites attach repository siblings to the current remote workspace and rescan
-without restarting the agent or changing its CWD.
-
-| Source         | Supported use                                                                                                                                                  |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Repository** | Worktree, Local/Local PC, Local Docker, Kubernetes, SSH, or Sprites. Appears in Files and repository-aware Changes, branch, editor, and pull-request surfaces. |
-| **Folder**     | Local/Local PC or Worktree only. A live host path that appears in Files only.                                                                                  |
-
-Local Git repositories need a cloneable origin on Local Docker, Kubernetes, SSH, and Sprites. Worktree and Local/Local PC can use the host repository directly. See [Executors](executors.md#workspace-sources) and [Coordinate work](coordination.md#add-sources-after-creation) for runtime limits and recovery behavior.
+Local folder, Local scratch, and supported remote/container workspaces keep their established root,
+agent CWD, and running processes unchanged. Local sources are live links into the current workspace;
+folder edits therefore affect the original host folder. Docker, Kubernetes, SSH, and Sprites clone
+repository sources inside the current executor workspace. Local Git rows need a cloneable origin on
+those executors. Host folders are unavailable there; **Upload folder** remains a separate copy flow
+when uploads are supported. This current-workspace flow does not expand the root or replace a native
+provider session. See [Executors](executors.md#workspace-sources) and [Coordinate work](coordination.md#add-sources-after-creation) for runtime limits.
 
 ### Attachments and local-change consent
 

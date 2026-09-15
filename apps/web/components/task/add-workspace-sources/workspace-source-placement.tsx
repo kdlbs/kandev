@@ -106,10 +106,11 @@ export function WorkspaceSourcePlacement({
           <p className="font-medium">{t("task:workspaceSourcePlacementPreviewTitle")}</p>
           {preview.sources.map((source) => (
             <p
-              key={`${source.repository_id}:${source.workspace_relative_path}`}
+              key={`${source.kind ?? "repository"}:${source.repository_id ?? source.source_name}:${source.workspace_relative_path}`}
               className="truncate"
             >
-              {source.repository_name}: <code>{source.workspace_relative_path}</code>
+              {source.source_name ?? source.repository_name}:{" "}
+              <code>{source.workspace_relative_path}</code>
             </p>
           ))}
         </div>

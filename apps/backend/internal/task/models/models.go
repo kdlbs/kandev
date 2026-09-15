@@ -1884,13 +1884,14 @@ type TaskRepository struct {
 // TaskWorkspaceFolder is a canonical host-folder attachment owned by a task.
 // It stays separate from TaskRepository because folders are not Git sources.
 type TaskWorkspaceFolder struct {
-	ID          string    `json:"id"`
-	TaskID      string    `json:"task_id"`
-	LocalPath   string    `json:"local_path"`
-	DisplayName string    `json:"display_name"`
-	Position    int       `json:"position"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID                    string    `json:"id"`
+	TaskID                string    `json:"task_id"`
+	LocalPath             string    `json:"local_path"`
+	DisplayName           string    `json:"display_name"`
+	WorkspaceRelativePath string    `json:"workspace_relative_path,omitempty"`
+	Position              int       `json:"position"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
 }
 
 // WorkspaceSourceBatch identifies exactly the durable rows created by one

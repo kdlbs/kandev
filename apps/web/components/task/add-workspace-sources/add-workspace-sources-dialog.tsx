@@ -239,6 +239,7 @@ function workspaceChangeRestarts(
   executorType: string | null | undefined,
 ): boolean {
   if (placementEligible) return false;
+  if (executorType === "local" || executorType === "local_pc") return false;
   return !isRemoteWorkspaceExecutor(executorType);
 }
 

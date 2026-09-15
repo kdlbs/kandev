@@ -13,7 +13,11 @@ import (
 	"github.com/kandev/kandev/internal/worktree"
 )
 
-const workspaceLayoutTaskRoot = "task_root"
+const (
+	workspaceLayoutTaskRoot        = "task_root"
+	workspaceLayoutCurrentRoot     = "current_root"
+	workspaceLayoutKandevDirectory = "kandev_directory"
+)
 
 func ownedDirectoryLinkOwner(taskID, taskDirName string) worktree.OwnedDirectoryLinkOwner {
 	return worktree.OwnedDirectoryLinkOwner{TaskID: taskID, TaskDirName: taskDirName}
@@ -22,6 +26,10 @@ func ownedDirectoryLinkOwner(taskID, taskDirName string) worktree.OwnedDirectory
 // reconcileWorkspaceSources recreates Kandev-owned links from durable source
 // specs before a host launch or workspace-only resume.
 func reconcileWorkspaceSources(_ context.Context, root string, folders []WorkspaceFolderSpec, owner worktree.OwnedDirectoryLinkOwner) error {
+	return reconcileWorkspaceSourcesAtLayout(context.Background(), root, "", folders, owner)
+}
+
+func reconcileWorkspaceSourcesAtLayout(_ context.Context, root, workspaceLayout string, folders []WorkspaceFolderSpec, owner worktree.OwnedDirectoryLinkOwner) error {
 	if len(folders) == 0 {
 		return nil
 	}
@@ -32,11 +40,18 @@ func reconcileWorkspaceSources(_ context.Context, root string, folders []Workspa
 		if !isWorkspaceEntryName(folder.Name) || folder.LocalPath == "" {
 			return fmt.Errorf("invalid durable workspace folder")
 		}
+		linkRoot, linkName, target := workspaceFolderDestination(root, workspaceLayout, folder)
+		if target == "" || !isWorkspaceEntryName(linkName) {
+			return fmt.Errorf("invalid durable workspace folder %q placement", folder.Name)
+		}
 		info, err := os.Stat(folder.LocalPath)
 		if err != nil || !info.IsDir() {
 			return fmt.Errorf("workspace folder %q target is missing: %s", folder.Name, folder.LocalPath)
 		}
-		if _, err := worktree.EnsureOwnedDirectoryLink(root, folder.Name, folder.LocalPath, owner); err != nil {
+		if sameDirectory(target, folder.LocalPath) {
+			continue
+		}
+		if _, err := worktree.EnsureOwnedDirectoryLink(linkRoot, linkName, folder.LocalPath, owner); err != nil {
 			return fmt.Errorf("link workspace folder %q: %w", folder.Name, err)
 		}
 	}
@@ -68,20 +83,9 @@ func reconcileWorkspaceRepositoriesAtLayout(workspacePath, workspaceLayout strin
 		if !isWorkspaceEntryName(repository.RepoName) || repository.RepositoryPath == "" {
 			return fmt.Errorf("invalid durable workspace repository")
 		}
-		linkRoot, linkName, target := workspacePath, workspaceRepositoryEntryName(repository.RepoName), ""
-		switch {
-		case repository.WorkspaceRelativePath != "":
-			target = workspaceRepositoryCandidate(workspacePath, workspaceLayout, repository.RepoName, repository.WorkspaceRelativePath)
-			if target == "" {
-				return fmt.Errorf("invalid durable workspace repository %q placement", repository.RepoName)
-			}
-			linkRoot, linkName = filepath.Dir(target), filepath.Base(target)
-		case workspaceLayout == workspaceLayoutTaskRoot:
-			target = filepath.Join(workspacePath, linkName)
-		case index == 0:
-			target = workspacePath
-		default:
-			target = filepath.Join(linkRoot, linkName)
+		linkRoot, linkName, target, err := workspaceRepositoryLinkTarget(workspacePath, workspaceLayout, repository, index)
+		if err != nil {
+			return err
 		}
 		if sameDirectory(target, repository.RepositoryPath) {
 			warnSelfReferentialEntry(linkRoot, linkName, log)
@@ -96,6 +100,28 @@ func reconcileWorkspaceRepositoriesAtLayout(workspacePath, workspaceLayout strin
 		}
 	}
 	return nil
+}
+
+func workspaceRepositoryLinkTarget(workspacePath, workspaceLayout string, repository WorkspaceRepositorySpec, index int) (string, string, string, error) {
+	linkRoot := workspacePath
+	linkName := workspaceRepositoryEntryName(repository.RepoName)
+	switch {
+	case repository.WorkspaceRelativePath != "":
+		target := workspaceRepositoryCandidate(workspacePath, workspaceLayout, repository.RepoName, repository.WorkspaceRelativePath)
+		if target == "" {
+			return "", "", "", fmt.Errorf("invalid durable workspace repository %q placement", repository.RepoName)
+		}
+		return filepath.Dir(target), filepath.Base(target), target, nil
+	case workspaceLayout == workspaceLayoutTaskRoot:
+		return linkRoot, linkName, filepath.Join(workspacePath, linkName), nil
+	case workspaceLayout == workspaceLayoutKandevDirectory:
+		linkRoot = filepath.Join(workspacePath, "kandev")
+		return linkRoot, linkName, filepath.Join(linkRoot, linkName), nil
+	case index == 0:
+		return linkRoot, linkName, workspacePath, nil
+	default:
+		return linkRoot, linkName, filepath.Join(linkRoot, linkName), nil
+	}
 }
 
 // selfReferentialEntryWarning is shared with the tests that assert the user is
@@ -206,7 +232,7 @@ func workspaceRepositoryCandidate(workspacePath, workspaceLayout, repoName, work
 	}
 	if workspaceRelativePath != "" {
 		root := workspacePath
-		if workspaceLayout != workspaceLayoutTaskRoot {
+		if workspaceLayout != workspaceLayoutTaskRoot && workspaceLayout != workspaceLayoutCurrentRoot && workspaceLayout != workspaceLayoutKandevDirectory {
 			root = filepath.Dir(workspacePath)
 		}
 		relative := filepath.Clean(filepath.FromSlash(workspaceRelativePath))
@@ -220,10 +246,54 @@ func workspaceRepositoryCandidate(workspacePath, workspaceLayout, repoName, work
 		}
 		return candidate
 	}
+	if workspaceLayout == workspaceLayoutKandevDirectory {
+		return filepath.Join(workspacePath, "kandev", workspaceRepositoryEntryName(repoName))
+	}
 	if workspaceLayout == workspaceLayoutTaskRoot {
 		return filepath.Join(workspacePath, workspaceRepositoryEntryName(repoName))
 	}
 	return workspacePath
+}
+
+func workspaceRepositoryValidationCandidates(workspacePath, workspaceLayout string, repositories []WorkspaceRepositorySpec, index int) []string {
+	if index < 0 || index >= len(repositories) {
+		return nil
+	}
+	repository := repositories[index]
+	candidate := workspaceRepositoryCandidate(workspacePath, workspaceLayout, repository.RepoName, repository.WorkspaceRelativePath)
+	if repository.WorkspaceRelativePath != "" {
+		return []string{candidate}
+	}
+	if workspaceLayout == workspaceLayoutKandevDirectory {
+		return []string{candidate}
+	}
+	if index > 0 {
+		return []string{filepath.Join(workspacePath, workspaceRepositoryEntryName(repository.RepoName))}
+	}
+	if workspaceLayout == workspaceLayoutCurrentRoot || len(repositories) > 1 {
+		return []string{candidate, filepath.Join(workspacePath, workspaceRepositoryEntryName(repository.RepoName))}
+	}
+	return []string{candidate}
+}
+
+func workspaceFolderDestination(workspacePath, workspaceLayout string, folder WorkspaceFolderSpec) (string, string, string) {
+	if folder.WorkspaceRelativePath != "" {
+		relative := filepath.Clean(filepath.FromSlash(folder.WorkspaceRelativePath))
+		if relative == "." || filepath.IsAbs(relative) || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+			return "", "", ""
+		}
+		target := filepath.Join(workspacePath, relative)
+		contained, err := filepath.Rel(workspacePath, target)
+		if err != nil || contained == ".." || strings.HasPrefix(contained, ".."+string(filepath.Separator)) {
+			return "", "", ""
+		}
+		return filepath.Dir(target), filepath.Base(target), target
+	}
+	if workspaceLayout == workspaceLayoutKandevDirectory {
+		root := filepath.Join(workspacePath, "kandev")
+		return root, folder.Name, filepath.Join(root, folder.Name)
+	}
+	return workspacePath, folder.Name, filepath.Join(workspacePath, folder.Name)
 }
 
 func workspaceSourceRoots(folders []WorkspaceFolderSpec, repositories []WorkspaceRepositorySpec) []string {

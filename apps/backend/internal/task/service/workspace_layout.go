@@ -9,8 +9,10 @@ import (
 )
 
 const (
-	WorkspaceLayoutRepository = "repository"
-	WorkspaceLayoutTaskRoot   = "task_root"
+	WorkspaceLayoutRepository      = "repository"
+	WorkspaceLayoutTaskRoot        = "task_root"
+	WorkspaceLayoutCurrentRoot     = "current_root"
+	WorkspaceLayoutKandevDirectory = "kandev_directory"
 )
 
 var ErrInvalidInitialWorkspaceLayout = fmt.Errorf("invalid initial workspace layout")

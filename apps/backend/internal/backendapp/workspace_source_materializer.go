@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,7 +14,6 @@ import (
 	"github.com/kandev/kandev/internal/agent/runtime/lifecycle"
 	"github.com/kandev/kandev/internal/common/logger"
 	"github.com/kandev/kandev/internal/orchestrator"
-	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 	taskservice "github.com/kandev/kandev/internal/task/service"
 	"github.com/kandev/kandev/internal/worktree"
@@ -40,6 +38,8 @@ type workspaceSourceMaterializerRepo interface {
 	ListTaskWorkspaceFolders(context.Context, string) ([]*models.TaskWorkspaceFolder, error)
 	GetRepository(context.Context, string) (*models.Repository, error)
 }
+
+type workspaceRepositoryMaterialization = lifecycle.WorkspaceRepositoryMaterialization
 
 // workspaceSourceMaterializer is the host-only materialization boundary. It
 // creates only Kandev-owned directory entries; each source itself remains a
@@ -73,15 +73,17 @@ type workspaceSourceMaterializationState struct {
 }
 
 type hostWorkspaceMaterialization struct {
-	root          string
-	oldPath       string
-	oldLayout     string
-	rootExisted   bool
-	knownWorktree map[string]bool
-	newWorktrees  []*worktree.Worktree
-	priorRoots    []string
-	postRoots     []string
-	linkUndo      []ownedDirectoryLinkUndo
+	root            string
+	linkRoot        string
+	oldPath         string
+	oldLayout       string
+	rootExisted     bool
+	linkRootExisted bool
+	knownWorktree   map[string]bool
+	newWorktrees    []*worktree.Worktree
+	priorRoots      []string
+	postRoots       []string
+	linkUndo        []ownedDirectoryLinkUndo
 }
 
 type ownedDirectoryLinkUndo struct {
@@ -172,7 +174,7 @@ func (m *workspaceSourceMaterializer) materializeHostWorkspaceSources(ctx contex
 	if materializeErr != nil {
 		return nil, materializeErr
 	}
-	if workspaceSourcePlacementKeepsRoot(batch) || materialization.root == materialization.oldPath {
+	if workspaceSourcePlacementKeepsRoot(batch) || sameWorkspacePath(materialization.root, materialization.oldPath) {
 		ids, rescanned, inventory, nestedErr := m.materializeNestedHostWorkspaceSources(ctx, state, batch, materialization, branchMaterializations)
 		rescannedSessions = append(rescannedSessions, rescanned...)
 		createdInventory = append(createdInventory, inventory...)
@@ -225,8 +227,9 @@ func (m *workspaceSourceMaterializer) materializeNestedHostWorkspaceSources(ctx 
 	if err != nil {
 		return nil, rescanned, createdInventory, err
 	}
-	if state.environment.WorkspaceLayout == "" {
-		state.environment.WorkspaceLayout = taskservice.EffectiveTaskEnvironmentWorkspaceLayout(state.environment)
+	desiredLayout := workspaceSourceMaterializationLayout(state.environment, batch)
+	if desiredLayout != "" && state.environment.WorkspaceLayout != desiredLayout {
+		state.environment.WorkspaceLayout = desiredLayout
 		state.environment.UpdatedAt = time.Now().UTC()
 		if err := m.repo.UpdateTaskEnvironment(ctx, state.environment); err != nil {
 			return nil, rescanned, createdInventory, fmt.Errorf("persist task workspace layout: %w", err)
@@ -249,25 +252,75 @@ func (m *workspaceSourceMaterializer) prepareHostWorkspaceMaterialization(ctx co
 	if err != nil {
 		return nil, err
 	}
-	root, err := m.worktreeMgr.TaskRoot(state.environment.TaskDirName)
+	root, err := m.resolveHostWorkspaceRoot(state, batch)
 	if err != nil {
-		return nil, fmt.Errorf("resolve owned task root: %w", err)
+		return nil, err
 	}
-	if workspaceSourcePlacementKeepsRoot(batch) && taskservice.EffectiveTaskEnvironmentWorkspaceLayout(state.environment) != taskservice.WorkspaceLayoutTaskRoot {
-		root, err = nestedWorkspaceMaterializationRoot(root, state.environment.WorkspacePath)
-		if err != nil {
-			return nil, err
-		}
+	linkRoot := root
+	if isLocalWorkspaceExecutor(state.environment.ExecutorType) && workspaceSourceMaterializationLayout(state.environment, batch) == taskservice.WorkspaceLayoutKandevDirectory {
+		linkRoot = filepath.Join(root, "kandev")
 	}
 	worktrees, err := m.worktreeMgr.GetAllByTaskID(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("snapshot task worktrees: %w", err)
 	}
 	return &hostWorkspaceMaterialization{
-		root: root, oldPath: state.environment.WorkspacePath, oldLayout: state.environment.WorkspaceLayout, rootExisted: pathExists(root),
-		knownWorktree: worktreeIDs(worktrees), priorRoots: priorRoots, postRoots: postRoots,
-		linkUndo: make([]ownedDirectoryLinkUndo, 0, len(batch.Sources)),
+		root: root, linkRoot: linkRoot, oldPath: state.environment.WorkspacePath, oldLayout: state.environment.WorkspaceLayout,
+		rootExisted: pathExists(root), linkRootExisted: pathExists(linkRoot), knownWorktree: worktreeIDs(worktrees),
+		priorRoots: priorRoots, postRoots: postRoots, linkUndo: make([]ownedDirectoryLinkUndo, 0, len(batch.Sources)),
 	}, nil
+}
+
+func (m *workspaceSourceMaterializer) resolveHostWorkspaceRoot(state *workspaceSourceMaterializationState, batch *models.WorkspaceSourceBatch) (string, error) {
+	if isLocalWorkspaceExecutor(state.environment.ExecutorType) && state.environment.WorkspacePath != "" {
+		root, err := filepath.Abs(filepath.Clean(state.environment.WorkspacePath))
+		if err != nil {
+			return "", fmt.Errorf("resolve established workspace root: %w", err)
+		}
+		return root, nil
+	}
+	root, err := m.worktreeMgr.TaskRoot(state.environment.TaskDirName)
+	if err != nil {
+		return "", fmt.Errorf("resolve owned task root: %w", err)
+	}
+	if !workspaceSourcePlacementKeepsRoot(batch) || taskservice.EffectiveTaskEnvironmentWorkspaceLayout(state.environment) == taskservice.WorkspaceLayoutTaskRoot {
+		return root, nil
+	}
+	return nestedWorkspaceMaterializationRoot(root, state.environment.WorkspacePath)
+}
+
+func isLocalWorkspaceExecutor(executorType string) bool {
+	return executorType == string(models.ExecutorTypeLocal) || executorType == legacyLocalPCExecutor
+}
+
+func workspaceSourceMaterializationLayout(environment *models.TaskEnvironment, batch *models.WorkspaceSourceBatch) string {
+	if environment == nil {
+		return ""
+	}
+	if batch != nil {
+		switch batch.RepositoryPlacement {
+		case string(taskservice.WorkspacePlacementKandevDirectory):
+			return taskservice.WorkspaceLayoutKandevDirectory
+		case string(taskservice.WorkspacePlacementCurrentRoot):
+			return taskservice.WorkspaceLayoutCurrentRoot
+		}
+	}
+	if environment.WorkspaceLayout != "" {
+		return environment.WorkspaceLayout
+	}
+	if isLocalWorkspaceExecutor(environment.ExecutorType) && environment.WorkspacePath != "" {
+		return taskservice.WorkspaceLayoutCurrentRoot
+	}
+	return taskservice.EffectiveTaskEnvironmentWorkspaceLayout(environment)
+}
+
+func sameWorkspacePath(left, right string) bool {
+	if left == "" || right == "" {
+		return false
+	}
+	leftAbs, leftErr := filepath.Abs(filepath.Clean(left))
+	rightAbs, rightErr := filepath.Abs(filepath.Clean(right))
+	return leftErr == nil && rightErr == nil && leftAbs == rightAbs
 }
 
 func nestedWorkspaceMaterializationRoot(taskRoot, workspacePath string) (string, error) {
@@ -327,16 +380,43 @@ func (m *workspaceSourceMaterializer) materializeHostRuntime(ctx context.Context
 
 func materializeDirectoryLinks(root string, entries map[string]string, description string, owner worktree.OwnedDirectoryLinkOwner) ([]ownedDirectoryLinkUndo, error) {
 	created := make([]ownedDirectoryLinkUndo, 0, len(entries))
-	for name, target := range entries {
-		result, err := worktree.EnsureOwnedDirectoryLink(root, name, target, owner)
+	for entry, target := range entries {
+		if sameDirectory(root, target) {
+			continue
+		}
+		linkRoot, name, err := workspaceDirectoryLinkLocation(root, entry)
 		if err != nil {
-			return created, fmt.Errorf("link %s %q: %w", description, name, err)
+			return created, fmt.Errorf("link %s %q: %w", description, entry, err)
+		}
+		result, err := worktree.EnsureOwnedDirectoryLink(linkRoot, name, target, owner)
+		if err != nil {
+			return created, fmt.Errorf("link %s %q: %w", description, entry, err)
 		}
 		if result.Created {
 			created = append(created, ownedDirectoryLinkUndo{Path: result.Path, PriorTarget: result.PriorTarget})
 		}
 	}
 	return created, nil
+}
+
+func workspaceDirectoryLinkLocation(root, entry string) (string, string, error) {
+	if root == "" || !filepath.IsAbs(root) || entry == "" {
+		return "", "", errors.New("workspace link root and entry are required")
+	}
+	relative := filepath.Clean(filepath.FromSlash(entry))
+	if relative == "." || filepath.IsAbs(relative) || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return "", "", fmt.Errorf("unsafe workspace link entry %q", entry)
+	}
+	target := filepath.Join(root, relative)
+	contained, err := filepath.Rel(root, target)
+	if err != nil || contained == ".." || strings.HasPrefix(contained, ".."+string(filepath.Separator)) {
+		return "", "", fmt.Errorf("workspace link entry %q escapes root", entry)
+	}
+	name := filepath.Base(target)
+	if name == "." || name == ".." || name == "" || filepath.Base(name) != name {
+		return "", "", fmt.Errorf("unsafe workspace link entry %q", entry)
+	}
+	return filepath.Dir(target), name, nil
 }
 
 func (m *workspaceSourceMaterializer) adoptSessionWorkspaces(ctx context.Context, sessions []*models.TaskSession, root string, sourceRoots []string) ([]string, []*models.TaskSession, error) {
@@ -383,6 +463,9 @@ func (m *workspaceSourceMaterializer) rollbackHostWorkspaceMaterialization(ctx c
 		rollbackErr = errors.Join(rollbackErr, err)
 	}
 	m.cleanupNewWorktrees(ctx, taskID, materialization.knownWorktree, materialization.newWorktrees...)
+	if !materialization.linkRootExisted && materialization.linkRoot != materialization.root {
+		_ = os.Remove(materialization.linkRoot)
+	}
 	if !materialization.rootExisted {
 		_ = os.Remove(materialization.root)
 	}
@@ -505,6 +588,9 @@ func newWorkspaceSourceRootCollector(capacity int) *workspaceSourceRootCollector
 
 func (c *workspaceSourceRootCollector) addRepositories(repositories []*models.TaskRepository, entities map[string]*models.Repository, batchIDs map[string]bool, includeBatch bool) error {
 	for _, taskRepository := range repositories {
+		if taskRepository == nil {
+			continue
+		}
 		if !includeBatch && batchIDs[taskRepository.ID] {
 			continue
 		}
@@ -519,6 +605,9 @@ func (c *workspaceSourceRootCollector) addRepositories(repositories []*models.Ta
 
 func (c *workspaceSourceRootCollector) addFolders(folders []*models.TaskWorkspaceFolder, batchIDs map[string]bool, includeBatch bool) error {
 	for _, folder := range folders {
+		if folder == nil {
+			continue
+		}
 		if !includeBatch && batchIDs[folder.ID] {
 			continue
 		}
@@ -646,7 +735,6 @@ func (m *workspaceSourceMaterializer) loadMaterializationState(ctx context.Conte
 	}
 	return &workspaceSourceMaterializationState{environment: environment, sessions: sessions, repositories: repositories, folders: folders, entities: entities}, nil
 }
-
 func (m *workspaceSourceMaterializer) materializeRemoteWorkspaceSources(ctx context.Context, taskID string, state *workspaceSourceMaterializationState, batch *models.WorkspaceSourceBatch) (*taskservice.WorkspaceSourceMaterializationResult, error) {
 	if m.remoteMaterializer == nil {
 		return nil, fmt.Errorf("remote workspace materializer is unavailable")

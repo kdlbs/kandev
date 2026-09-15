@@ -138,9 +138,38 @@ The existing source-attachment requirement and its materialization guarantees re
 - **AC-TASKS-ATTACH-WORKSPACE-SOURCES-004.5:** Busy, unsupported, collision, and recovery-required states shall show actionable reasons. Failed submission shall preserve selected repositories, branches, and placement.
 - **AC-TASKS-ATTACH-WORKSPACE-SOURCES-004.6:** Cancel shall leave the task unchanged. Submission shall prevent duplicates and show progress. Context continuation shall never be inferred from opening the dialog or choosing a placement.
 
+### REQ-TASKS-ATTACH-WORKSPACE-SOURCES-005: Add sources from the Files toolbar
+
+**Intent:** Make adding sources discoverable beside file creation and uploads.
+
+#### Acceptance criteria
+
+- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-005.1:** The Files toolbar + menu shall contain Add repositories or folders alongside existing New file and upload actions. The overflow menu shall retain Open workspace folder and shall no longer duplicate source attachment.
+- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-005.2:** A task with no repositories shall be eligible to add supported sources. Busy, loading, disconnected, and unsupported states shall show specific visible reasons, independent of repository count.
+- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-005.3:** Desktop keyboard and phone touch users shall complete the same flow. Closing the source dialog shall restore focus to +. Existing file creation and upload actions shall remain available according to their capabilities.
+
+### REQ-TASKS-ATTACH-WORKSPACE-SOURCES-006: Grow an established folder or scratch workspace
+
+**Intent:** Add repositories and folders without replacing the workspace where work started.
+
+#### Acceptance criteria
+
+- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-006.1:** An idle task started from a local folder or None/scratch shall add supported repositories, folders, or mixed batches beneath its established CWD. It shall preserve existing files, task identity, conversation, native session, and running workspace processes.
+- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-006.2:** Local folder and scratch tasks shall offer direct child placement or grouping under ./kandev/. The preview shall show resolved destinations and unchanged agent CWD. Folder links shall disclose that edits affect their original folder and that a provider may restrict access to the target.
+- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-006.3:** Adding the first repository shall expose repository-specific Changes, branch, and PR capabilities when supported. It shall not initialize Git in the enclosing folder, change executor, move the workspace, or convert unrelated files into repository content. Folder-only attachment shall remain file-only.
+- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-006.4:** Resume, restart, and additional sessions shall retain the original root and recorded source locations regardless of source count. Cleanup shall preserve user-owned roots and linked source folders and apply existing preservation rules to owned resources.
+- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-006.5:** Remote and container tasks shall add cloneable repositories inside their existing executor workspace when supported, including tasks started without a repository. Paths and consequences shall identify the executor filesystem. Host-only repository paths shall require a cloneable remote identity.
+- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-006.6:** The source picker shall distinguish live folder attachment from Upload folder. Arbitrary host folder attachment shall remain unavailable on remote/container executors with an explicit reason; existing upload support may offer a separate, explicitly described copy action. No automatic mount, transfer, or synchronization is implied.
+- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-006.7:** Capability and destination checks shall use the actual environment and all live sessions. Unknown or disconnected environments shall not fall back to host operations. Stale previews, busy races, collisions, inaccessible sources, and authorization failures shall leave the prior workspace intact.
+- **AC-TASKS-ATTACH-WORKSPACE-SOURCES-006.8:** A failed batch shall compensate its new filesystem entries, source records, inventory, and tracking changes. Exact retries shall not duplicate sources or restart processes. Git enclosing a destination shall retain effective staging protection for attached repositories.
+
 ## Scope and compatibility
 
 The new layout controls target the Worktree executor. Existing Local and remote source flows remain supported with their current capabilities.
 Nested destinations are exactly `./kandev/<entry>/` and `./<entry>/`. They are not `.kandev/`, filesystem-root paths, arbitrary paths, or submodules.
 The controls do not promise uniform harness discovery or bypass provider permissions.
 The initial-layout and nested-placement portions are implemented in the [placement package](../../../plans/workspace-repository-placement/plan.md). Explicit root expansion remains blocked until the workspace-aware native restore contract in PR #3598 is available.
+
+## Follow-up implementation plan
+
+[Add sources to the current workspace](../../../plans/current-workspace-sources/plan.md) owns REQ-005/006. This follow-up extends repositoryless attachment and Local placement; it retains the remote host-folder restriction. Earlier Worktree-only placement limits describe the preceding package, not a prohibition on this extension.

@@ -41,6 +41,7 @@ export type WorkspaceFolder = {
   task_id: TaskId;
   local_path: string;
   display_name: string;
+  workspace_relative_path?: string;
   position: number;
   created_at?: string;
   updated_at?: string;
@@ -83,8 +84,10 @@ export type WorkspaceRepositoryPlacementPreview = {
   workspace_path: string;
   placement: WorkspaceRepositoryPlacement;
   sources: Array<{
-    repository_id: RepositoryId;
-    repository_name: string;
+    kind?: "repository" | "folder";
+    repository_id?: RepositoryId;
+    repository_name?: string;
+    source_name?: string;
     workspace_relative_path: string;
   }>;
   supported_placements: WorkspaceRepositoryPlacementOption[];

@@ -76,9 +76,15 @@ function isWorkspaceRepositoryPlacementEligible(
   rows: WorkspaceSourceRow[],
   executorType: string | null | undefined,
 ): boolean {
+  if (rows.length === 0) return false;
+  if (executorType === "local" || executorType === "local_pc") {
+    return rows.every((row) => {
+      if (row.kind === "folder") return Boolean(row.localPath);
+      return Boolean(row.repositoryId) && !row.localPath && !row.remoteUrl;
+    });
+  }
   return (
     executorType === "worktree" &&
-    rows.length > 0 &&
     rows.every(
       (row) =>
         row.kind === "repository" && Boolean(row.repositoryId) && !row.localPath && !row.remoteUrl,

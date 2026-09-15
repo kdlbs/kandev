@@ -38,7 +38,7 @@ manually moving files into the task workspace.
 
 ## What
 
-- A repository-backed task exposes one **Workspace actions** menu in the Files panel on desktop and
+- The original delivery exposes one **Workspace actions** menu in the Files panel on desktop and
   mobile. The menu contains **Add Repositories to workspace** and **Open workspace folder** rather
   than separate toolbar controls.
 - **Add sources** uses the same repository-selection language as task creation without adding a
@@ -397,7 +397,7 @@ persisted; every relaunch and resume of that task reuses the persisted name.
 ## Out of scope
 
 - Removing or detaching sources after they have been attached.
-- Promoting a repository-less task into a repository-backed task.
+- Repositoryless attachment was excluded from the original delivery. The [current-workspace extension](current-workspace-sources.md) now owns this behavior.
 - Copying, mounting, or synchronizing arbitrary host folders into container or remote executors.
 - Running batch workspace-source attachment while an agent turn or tool call is active; the legacy
   worktree-only `add_branch_to_task_kandev` compatibility path is the explicit exception.
@@ -420,3 +420,7 @@ See [Attach Workspace Sources plan](../../../plans/attach-workspace-sources/plan
 [owned link target mismatch repair plan](../../../plans/owned-link-target-mismatch-repair/plan.md).
 
 See also the [repository placement implementation package](../../../plans/workspace-repository-placement/plan.md).
+
+## Current-workspace extension
+
+The [current-workspace design](current-workspace-sources.md) supersedes the original toolbar location and repositoryless exclusion. It adds root-preserving Local/scratch attachment while retaining remote host-folder restrictions. [New plan](../../../plans/current-workspace-sources/plan.md).

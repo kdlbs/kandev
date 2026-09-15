@@ -1429,8 +1429,9 @@ type RepoLaunchSpec struct {
 // WorkspaceFolderSpec is a durable host folder attachment projected into both
 // fresh launches and workspace-only resume construction.
 type WorkspaceFolderSpec struct {
-	Name      string
-	LocalPath string
+	Name                  string
+	LocalPath             string
+	WorkspaceRelativePath string
 }
 
 // WorkspaceRepositorySpec is the durable host-side source needed to recreate

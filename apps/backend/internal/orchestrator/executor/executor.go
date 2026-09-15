@@ -647,7 +647,11 @@ type LaunchAgentRequest struct {
 	RouteOverride *RouteOverride
 }
 
-type WorkspaceFolderSpec struct{ Name, LocalPath string }
+type WorkspaceFolderSpec struct {
+	Name                  string
+	LocalPath             string
+	WorkspaceRelativePath string
+}
 
 // RepoSpec describes one repository for a multi-repo task launch from the
 // orchestrator. Mirrors lifecycle.RepoLaunchSpec; kept as a separate type so

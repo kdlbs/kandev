@@ -373,3 +373,7 @@ This proof does not substitute for the work orders' failure, platform, and lifec
 - Current live agents can disagree with promoted database paths after legacy attachment. A database path alone cannot prove sandbox access.
 - No generic permission widening is included. Providers can still restrict operations for other reasons.
 - Explicit native-session replacement remains unauthorized. Expansion must wait for the durable recovery contract and an explicit continuation action.
+
+## Current-workspace follow-up
+
+The [new uncommitted planning package](../current-workspace-sources/plan.md) owns the Files + menu entry and Local/scratch/remote source extension. Historical test results and existing work-order statuses remain unchanged. This follow-up does not satisfy or remove any pending root-expansion recovery gate.

@@ -392,7 +392,7 @@ func TestAttachWorkspaceSources_CancellationBeforeMaterializationPreventsMutatio
 	}
 }
 
-func TestAttachWorkspaceSources_RejectsRepositorylessTaskBeforePersistingFolders(t *testing.T) {
+func TestAttachWorkspaceSources_RepositorylessMixedBatch(t *testing.T) {
 	svc, _, repo := createTestService(t)
 	svc.workspaceFolders = repo
 	ctx := context.Background()
@@ -403,21 +403,46 @@ func TestAttachWorkspaceSources_RejectsRepositorylessTaskBeforePersistingFolders
 		t.Fatal(err)
 	}
 	taskResult, err := svc.CreateTask(ctx, &CreateTaskRequest{WorkspaceID: "ws-repositoryless", WorkflowID: "wf-repositoryless", WorkflowStepID: "step", Title: "Task"})
-	task := taskResult.Task
 	if err != nil {
 		t.Fatal(err)
 	}
+	task := taskResult.Task
+	workspaceRoot := t.TempDir()
+	if err := repo.CreateTaskEnvironment(ctx, &models.TaskEnvironment{
+		ID: "env-repositoryless", TaskID: task.ID, ExecutorType: string(models.ExecutorTypeLocal),
+		Status: models.TaskEnvironmentStatusReady, WorkspacePath: workspaceRoot,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	materializer := &recordingWorkspaceSourceMaterializer{}
+	svc.SetWorkspaceSourceMaterializer(materializer)
+	localRepository := t.TempDir()
+	seedBareGitDir(t, localRepository, "ref: refs/heads/main\n")
+	folder := t.TempDir()
 
-	_, err = svc.AttachWorkspaceSources(ctx, AttachWorkspaceSourcesRequest{TaskID: task.ID, Sources: []WorkspaceSourceInput{{Kind: WorkspaceSourceFolder, LocalPath: t.TempDir(), DisplayName: "docs"}}})
-	if !errors.Is(err, ErrInvalidWorkspaceSource) {
-		t.Fatalf("error = %v, want invalid workspace source", err)
+	result, err := svc.AttachWorkspaceSources(ctx, AttachWorkspaceSourcesRequest{TaskID: task.ID, Sources: []WorkspaceSourceInput{
+		{Kind: WorkspaceSourceRepository, LocalPath: localRepository, BaseBranch: "main"},
+		{Kind: WorkspaceSourceFolder, LocalPath: folder, DisplayName: "docs"},
+	}})
+	if err != nil {
+		t.Fatalf("AttachWorkspaceSources: %v", err)
+	}
+	if result == nil || !result.Changed || !materializer.called {
+		t.Fatalf("result = %#v, materializer called = %t, want changed mixed attachment", result, materializer.called)
 	}
 	folders, err := repo.ListTaskWorkspaceFolders(ctx, task.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(folders) != 0 {
-		t.Fatalf("folders after rejected attachment = %#v", folders)
+	if len(folders) != 1 || folders[0].DisplayName != "docs" {
+		t.Fatalf("folders after attachment = %#v, want docs", folders)
+	}
+	repositories, err := repo.ListTaskRepositories(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repositories) != 1 {
+		t.Fatalf("repositories after attachment = %#v, want one repository", repositories)
 	}
 }
 

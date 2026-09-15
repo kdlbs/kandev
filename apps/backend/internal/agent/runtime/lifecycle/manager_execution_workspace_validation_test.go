@@ -40,6 +40,26 @@ func TestValidateWorkspaceInfoForExecutionAcceptsCanonicalLocalRepository(t *tes
 	}
 }
 
+func TestValidateWorkspaceInfoForExecutionAcceptsRepositoryInEstablishedFolderRoot(t *testing.T) {
+	root := t.TempDir()
+	repository := initGitRepo(t)
+	if err := linkDirectory(repository, filepath.Join(root, "repository")); err != nil {
+		t.Fatal(err)
+	}
+
+	err := validateWorkspaceInfoForExecution(context.Background(), &WorkspaceInfo{
+		ExecutorType:    string(models.ExecutorTypeLocal),
+		WorkspacePath:   root,
+		WorkspaceLayout: "current_root",
+		WorkspaceRepositories: []WorkspaceRepositorySpec{{
+			RepositoryID: "repository-1", RepositoryPath: repository, RepoName: "repository",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("validateWorkspaceInfoForExecution() rejected established folder root: %v", err)
+	}
+}
+
 func TestValidateWorkspaceInfoForExecutionAcceptsMatchingWorktree(t *testing.T) {
 	source := initGitRepo(t)
 	worktreePath := filepath.Join(t.TempDir(), "linked")

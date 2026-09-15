@@ -224,6 +224,138 @@ func TestWorkspaceSourceMaterializer_RemoteMaterializesAdditionalRepositories(t 
 	}
 }
 
+func TestWorkspaceSourceMaterializer_LocalScratchPreservesEstablishedRoot(t *testing.T) {
+	ctx := context.Background()
+	repo := newMaterializerRepo(t)
+	workspaceRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspaceRoot, "keep.txt"), []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	seedWorkspaceSourceTask(t, repo, workspaceRoot)
+	env, err := repo.GetTaskEnvironmentByTaskID(ctx, "task-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.TaskDirName = ""
+	env.WorkspacePath = workspaceRoot
+	if err := repo.UpdateTaskEnvironment(ctx, env); err != nil {
+		t.Fatal(err)
+	}
+
+	sourceFolder := t.TempDir()
+	if err := os.WriteFile(filepath.Join(sourceFolder, "note.txt"), []byte("before"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sourceRepository := t.TempDir()
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-scratch-added", WorkspaceID: "ws-1", Name: "added", LocalPath: sourceRepository,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	taskRepository := &models.TaskRepository{
+		ID: "task-repo-scratch-added", TaskID: "task-1", RepositoryID: "repo-scratch-added",
+		BaseBranch: "main", Position: 0, Metadata: map[string]interface{}{},
+	}
+	if err := repo.CreateTaskRepository(ctx, taskRepository); err != nil {
+		t.Fatal(err)
+	}
+	rescan := &nestedWorkspaceRescanStub{}
+	m := &workspaceSourceMaterializer{
+		repo: repo, worktreeMgr: newMaterializerWorktreeMgr(t, filepath.Join(t.TempDir(), "unrelated-task-root")),
+		rescanner: rescan, logger: newTestLogger(),
+	}
+
+	result, err := m.MaterializeWorkspaceSources(ctx, "task-1", &models.WorkspaceSourceBatch{
+		TaskID: "task-1",
+		Sources: []models.WorkspaceSource{
+			{Repository: taskRepository},
+			{Folder: &models.TaskWorkspaceFolder{ID: "folder-scratch-added", DisplayName: "notes", LocalPath: sourceFolder}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("MaterializeWorkspaceSources: %v", err)
+	}
+	if result == nil || result.WorkspacePath != workspaceRoot {
+		t.Fatalf("result = %#v, want established workspace root %q", result, workspaceRoot)
+	}
+	if len(rescan.rebindCalls) != 0 {
+		t.Fatalf("local scratch materialization rebound sessions: %+v", rescan.rebindCalls)
+	}
+	if len(rescan.rescanCalls) != 1 || rescan.rescanCalls[0].workDir != workspaceRoot {
+		t.Fatalf("rescan calls = %+v, want one rescan at %q", rescan.rescanCalls, workspaceRoot)
+	}
+	if got, err := os.ReadFile(filepath.Join(workspaceRoot, "keep.txt")); err != nil || string(got) != "keep" {
+		t.Fatalf("existing workspace file = %q, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(workspaceRoot, "added")); err != nil {
+		t.Fatalf("repository link was not placed in established root: %v", err)
+	}
+	if got, err := os.ReadFile(filepath.Join(workspaceRoot, "notes", "note.txt")); err != nil || string(got) != "before" {
+		t.Fatalf("folder link = %q, %v", got, err)
+	}
+	updated, err := repo.GetTaskEnvironmentByTaskID(ctx, "task-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.WorkspacePath != workspaceRoot {
+		t.Fatalf("persisted workspace path = %q, want %q", updated.WorkspacePath, workspaceRoot)
+	}
+}
+
+func TestWorkspaceSourceMaterializer_RemoteScratchMaterializesFirstRepository(t *testing.T) {
+	ctx := context.Background()
+	repo := newMaterializerRepo(t)
+	workspaceRoot := t.TempDir()
+	seedWorkspaceSourceTask(t, repo, workspaceRoot)
+	env, err := repo.GetTaskEnvironmentByTaskID(ctx, "task-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.ExecutorType = string(models.ExecutorTypeSSH)
+	env.TaskDirName = ""
+	env.WorkspacePath = workspaceRoot
+	if err := repo.UpdateTaskEnvironment(ctx, env); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateRepository(ctx, &models.Repository{
+		ID: "repo-remote-scratch", WorkspaceID: "ws-1", Name: "scratch-api", RemoteURL: "https://github.com/acme/scratch-api.git",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	taskRepository := &models.TaskRepository{
+		ID: "task-repo-remote-scratch", TaskID: "task-1", RepositoryID: "repo-remote-scratch",
+		BaseBranch: "main", Position: 0, Metadata: map[string]interface{}{},
+	}
+	if err := repo.CreateTaskRepository(ctx, taskRepository); err != nil {
+		t.Fatal(err)
+	}
+	remote := &remoteWorkspaceMaterializerStub{ids: []string{"session-1"}}
+	m := &workspaceSourceMaterializer{
+		repo: repo, worktreeMgr: newMaterializerWorktreeMgr(t, filepath.Join(t.TempDir(), "unrelated-task-root")),
+		remoteMaterializer: remote, logger: newTestLogger(),
+	}
+
+	result, err := m.MaterializeWorkspaceSources(ctx, "task-1", &models.WorkspaceSourceBatch{
+		TaskID: "task-1", Sources: []models.WorkspaceSource{{Repository: taskRepository}},
+	})
+	if err != nil {
+		t.Fatalf("MaterializeWorkspaceSources: %v", err)
+	}
+	if result == nil || result.WorkspacePath != workspaceRoot || len(result.SessionIDs) != 1 {
+		t.Fatalf("result = %#v, want scratch root and adopted session", result)
+	}
+	if len(remote.calls) != 1 || len(remote.calls[0]) != 1 || remote.calls[0][0].Destination != "scratch-api-main" {
+		t.Fatalf("remote projection = %+v, want first repository in scratch workspace", remote.calls)
+	}
+	inventory, err := repo.ListTaskEnvironmentRepos(ctx, env.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inventory) != 1 || inventory[0].RepositoryID != taskRepository.RepositoryID {
+		t.Fatalf("remote scratch inventory = %+v, want attached repository", inventory)
+	}
+}
+
 func TestWorkspaceSourceMaterializer_RemoteReturnsOnlyLifecycleAdoptedSessions(t *testing.T) {
 	ctx := context.Background()
 	repo := newMaterializerRepo(t)
@@ -329,11 +461,12 @@ func TestWorkspaceSourceMaterializer_RemoteRejectsLocalOnlyAdditionalRepositoryB
 	}
 }
 
-func TestWorkspaceSourceMaterializer_LocalFolderCreatesLiveTaskEntryAndRebindsSessions(t *testing.T) {
+func TestWorkspaceSourceMaterializer_LocalFolderCreatesLiveTaskEntryAtEstablishedRoot(t *testing.T) {
 	ctx := context.Background()
 	repo := newMaterializerRepo(t)
 	tasksBase := filepath.Join(canonicalTempDir(t), "tasks")
 	mgr := newMaterializerWorktreeMgr(t, filepath.Join(tasksBase, "task-1"))
+	workspaceRoot := t.TempDir()
 	source := filepath.Join(t.TempDir(), "notes")
 	if err := os.MkdirAll(source, 0o755); err != nil {
 		t.Fatal(err)
@@ -341,7 +474,7 @@ func TestWorkspaceSourceMaterializer_LocalFolderCreatesLiveTaskEntryAndRebindsSe
 	if err := os.WriteFile(filepath.Join(source, "note.txt"), []byte("before"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	seedWorkspaceSourceTask(t, repo, source)
+	seedWorkspaceSourceTask(t, repo, workspaceRoot)
 	env, err := repo.GetTaskEnvironmentByTaskID(ctx, "task-1")
 	if err != nil {
 		t.Fatal(err)
@@ -357,7 +490,7 @@ func TestWorkspaceSourceMaterializer_LocalFolderCreatesLiveTaskEntryAndRebindsSe
 	if err != nil {
 		t.Fatalf("MaterializeWorkspaceSources: %v", err)
 	}
-	root := filepath.Join(tasksBase, "task-1")
+	root := workspaceRoot
 	if got, err := os.ReadFile(filepath.Join(root, "notes", "note.txt")); err != nil || string(got) != "before" {
 		t.Fatalf("live entry = %q, %v", got, err)
 	}
@@ -384,6 +517,7 @@ func TestWorkspaceSourceMaterializer_LocalFolderUsesPersistedBatchSourceOnlyOnce
 	repo := newMaterializerRepo(t)
 	tasksBase := filepath.Join(canonicalTempDir(t), "tasks")
 	mgr := newMaterializerWorktreeMgr(t, filepath.Join(tasksBase, "task-1"))
+	workspaceRoot := t.TempDir()
 	source := filepath.Join(t.TempDir(), "notes")
 	if err := os.MkdirAll(source, 0o755); err != nil {
 		t.Fatal(err)
@@ -391,7 +525,7 @@ func TestWorkspaceSourceMaterializer_LocalFolderUsesPersistedBatchSourceOnlyOnce
 	if err := os.WriteFile(filepath.Join(source, "note.txt"), []byte("persisted"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	seedWorkspaceSourceTask(t, repo, source)
+	seedWorkspaceSourceTask(t, repo, workspaceRoot)
 	env, err := repo.GetTaskEnvironmentByTaskID(ctx, "task-1")
 	if err != nil {
 		t.Fatal(err)
@@ -407,16 +541,17 @@ func TestWorkspaceSourceMaterializer_LocalFolderUsesPersistedBatchSourceOnlyOnce
 		t.Fatal(err)
 	}
 
-	materializer := &workspaceSourceMaterializer{repo: repo, worktreeMgr: mgr, logger: newTestLogger()}
+	rescan := &workspaceSourceRescanStub{}
+	materializer := &workspaceSourceMaterializer{repo: repo, worktreeMgr: mgr, rescanner: rescan, logger: newTestLogger()}
 	if _, err := materializer.MaterializeWorkspaceSources(ctx, "task-1", batch); err != nil {
 		t.Fatalf("MaterializeWorkspaceSources after persistence: %v", err)
 	}
-	if got, err := os.ReadFile(filepath.Join(tasksBase, "task-1", "notes", "note.txt")); err != nil || string(got) != "persisted" {
+	if got, err := os.ReadFile(filepath.Join(workspaceRoot, "notes", "note.txt")); err != nil || string(got) != "persisted" {
 		t.Fatalf("persisted folder entry = %q, %v", got, err)
 	}
 }
 
-func TestWorkspaceSourceMaterializer_LocalPromotionPreservesPrimaryRepository(t *testing.T) {
+func TestWorkspaceSourceMaterializer_LocalEstablishedRootPreservesPrimaryRepository(t *testing.T) {
 	ctx := context.Background()
 	repo := newMaterializerRepo(t)
 	tasksBase := filepath.Join(canonicalTempDir(t), "tasks")
@@ -447,8 +582,8 @@ func TestWorkspaceSourceMaterializer_LocalPromotionPreservesPrimaryRepository(t 
 	if _, err := m.MaterializeWorkspaceSources(ctx, "task-1", batch); err != nil {
 		t.Fatal(err)
 	}
-	root := filepath.Join(tasksBase, "task-1")
-	for _, file := range []string{"primary/repo.txt", "notes/note.txt"} {
+	root := primary
+	for _, file := range []string{"repo.txt", "notes/note.txt"} {
 		if _, err := os.ReadFile(filepath.Join(root, file)); err != nil {
 			t.Fatalf("missing promoted source %s: %v", file, err)
 		}
@@ -467,7 +602,8 @@ func TestWorkspaceSourceMaterializer_LocalClonesProviderRepositoryBeforeLinking(
 	repo := newMaterializerRepo(t)
 	tasksBase := filepath.Join(canonicalTempDir(t), "tasks")
 	mgr := newMaterializerWorktreeMgr(t, filepath.Join(tasksBase, "task-1"))
-	seedWorkspaceSourceTask(t, repo, t.TempDir())
+	workspaceRoot := t.TempDir()
+	seedWorkspaceSourceTask(t, repo, workspaceRoot)
 	clonePath := filepath.Join(canonicalTempDir(t), "cloned")
 	if err := os.MkdirAll(clonePath, 0o755); err != nil {
 		t.Fatal(err)
@@ -479,7 +615,8 @@ func TestWorkspaceSourceMaterializer_LocalClonesProviderRepositoryBeforeLinking(
 		t.Fatal(err)
 	}
 	cloner := &hostRepositoryClonerStub{path: clonePath}
-	materializer := &workspaceSourceMaterializer{repo: repo, worktreeMgr: mgr, hostCloner: cloner, logger: newTestLogger()}
+	rescan := &workspaceSourceRescanStub{}
+	materializer := &workspaceSourceMaterializer{repo: repo, worktreeMgr: mgr, hostCloner: cloner, rescanner: rescan, logger: newTestLogger()}
 	if _, err := materializer.MaterializeWorkspaceSources(ctx, "task-1", &models.WorkspaceSourceBatch{TaskID: "task-1"}); err != nil {
 		t.Fatalf("MaterializeWorkspaceSources: %v", err)
 	}
@@ -489,7 +626,7 @@ func TestWorkspaceSourceMaterializer_LocalClonesProviderRepositoryBeforeLinking(
 	if cloner.taskID != "task-1" || cloner.sessionID != "session-1" {
 		t.Fatalf("clone scope = task %q session %q", cloner.taskID, cloner.sessionID)
 	}
-	if got, err := os.Readlink(filepath.Join(tasksBase, "task-1", "remote")); err != nil || got != clonePath {
+	if got, err := os.Readlink(filepath.Join(workspaceRoot, "remote")); err != nil || got != clonePath {
 		t.Fatalf("repository link = %q, %v; want %q", got, err, clonePath)
 	}
 }
@@ -843,7 +980,10 @@ func TestWorkspaceSourceMaterializer_RestoresRepointedLinkWhenAdoptionFails(t *t
 			t.Fatal(err)
 		}
 	}
-	seedWorkspaceSourceTask(t, repo, original)
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seedWorkspaceSourceTask(t, repo, root)
 	if _, err := worktree.CreateOwnedDirectoryLink(root, "notes", original); err != nil {
 		t.Fatalf("seed owned directory link: %v", err)
 	}
@@ -858,16 +998,20 @@ func TestWorkspaceSourceMaterializer_RestoresRepointedLinkWhenAdoptionFails(t *t
 	}
 }
 
-func TestWorkspaceSourceMaterializer_RebindFailureRestoresEarlierSessionsInReverseOrder(t *testing.T) {
+func TestWorkspaceSourceMaterializer_RescanFailureRestoresEarlierSessionsInReverseOrder(t *testing.T) {
 	ctx := context.Background()
 	repo := newMaterializerRepo(t)
 	tasksBase := filepath.Join(canonicalTempDir(t), "tasks")
 	mgr := newMaterializerWorktreeMgr(t, filepath.Join(tasksBase, "task-1"))
+	workspaceRoot := filepath.Join(tasksBase, "task-1")
 	source := filepath.Join(canonicalTempDir(t), "notes")
 	if err := os.MkdirAll(source, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	seedWorkspaceSourceTask(t, repo, source)
+	if err := os.MkdirAll(workspaceRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	seedWorkspaceSourceTask(t, repo, workspaceRoot)
 	now := time.Now().UTC()
 	if err := repo.CreateTaskSession(ctx, &models.TaskSession{ID: "session-2", TaskID: "task-1", State: models.TaskSessionStateWaitingForInput, StartedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
@@ -877,17 +1021,17 @@ func TestWorkspaceSourceMaterializer_RebindFailureRestoresEarlierSessionsInRever
 
 	batch := &models.WorkspaceSourceBatch{TaskID: "task-1", Sources: []models.WorkspaceSource{{Folder: &models.TaskWorkspaceFolder{DisplayName: "notes", LocalPath: source}}}}
 	if _, err := materializer.MaterializeWorkspaceSources(ctx, "task-1", batch); err == nil {
-		t.Fatal("MaterializeWorkspaceSources succeeded despite second rebind failure")
+		t.Fatal("MaterializeWorkspaceSources succeeded despite second rescan failure")
 	}
-	root := filepath.Join(tasksBase, "task-1")
+	root := workspaceRoot
 	if len(rescan.calls) != 3 {
 		t.Fatalf("rebind calls = %+v, want two adoptions and one restore", rescan.calls)
 	}
 	if rescan.calls[0].workDir != root || rescan.calls[1].workDir != root || rescan.calls[0].sessionID == rescan.calls[1].sessionID {
 		t.Fatalf("adoption calls = %+v, want distinct sessions at %q", rescan.calls[:2], root)
 	}
-	if !reflect.DeepEqual(rescan.calls[2], stubRescanCall{sessionID: rescan.calls[0].sessionID, workDir: source}) {
-		t.Fatalf("restore call = %+v, want reverse restoration to %q", rescan.calls[2], source)
+	if !reflect.DeepEqual(rescan.calls[2], stubRescanCall{sessionID: rescan.calls[0].sessionID, workDir: root}) {
+		t.Fatalf("restore call = %+v, want reverse restoration to %q", rescan.calls[2], root)
 	}
 	if len(rescan.roots) != 3 || !reflect.DeepEqual(rescan.roots[0], []string{source}) || !reflect.DeepEqual(rescan.roots[1], []string{source}) || len(rescan.roots[2]) != 0 {
 		t.Fatalf("authoritative roots = %+v, want post-state roots followed by prior roots", rescan.roots)
@@ -996,7 +1140,23 @@ func (s *orderedWorkspaceRebindStub) RebindWorkspaceForSession(_ context.Context
 	return nil
 }
 
+func (s *orderedWorkspaceRebindStub) RescanWorkspaceForSession(_ context.Context, id, dir string, sourceRoots ...[]string) error {
+	s.calls = append(s.calls, stubRescanCall{sessionID: id, workDir: dir})
+	if len(sourceRoots) == 1 {
+		s.roots = append(s.roots, append([]string(nil), sourceRoots[0]...))
+	}
+	if len(s.calls) == s.failOnCall {
+		return errors.New("rescan failed")
+	}
+	return nil
+}
+
 func (s *workspaceSourceRescanStub) RebindWorkspaceForSession(_ context.Context, id, dir string, _ ...[]string) error {
+	s.calls = append(s.calls, stubRescanCall{sessionID: id, workDir: dir})
+	return s.err
+}
+
+func (s *workspaceSourceRescanStub) RescanWorkspaceForSession(_ context.Context, id, dir string, _ ...[]string) error {
 	s.calls = append(s.calls, stubRescanCall{sessionID: id, workDir: dir})
 	return s.err
 }

@@ -918,7 +918,7 @@ func (s *Service) GetWorkspaceInfoForSession(ctx context.Context, taskID, sessio
 		}
 		for _, folder := range folders {
 			if folder != nil {
-				info.WorkspaceFolders = append(info.WorkspaceFolders, lifecycle.WorkspaceFolderSpec{Name: folder.DisplayName, LocalPath: folder.LocalPath})
+				info.WorkspaceFolders = append(info.WorkspaceFolders, lifecycle.WorkspaceFolderSpec{Name: folder.DisplayName, LocalPath: folder.LocalPath, WorkspaceRelativePath: folder.WorkspaceRelativePath})
 			}
 		}
 	}

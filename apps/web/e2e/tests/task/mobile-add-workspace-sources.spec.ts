@@ -104,7 +104,7 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   await session.waitForLoad();
   await session.waitForChatIdle({ timeout: 30_000 });
   await testPage.getByRole("button", { name: "Files", exact: true }).tap();
-  const entryPoint = testPage.getByTestId("files-workspace-actions");
+  const entryPoint = testPage.getByTestId("files-create-menu");
   await expect(entryPoint).toBeVisible();
   await expect(entryPoint).toBeEnabled();
   const entryBox = await entryPoint.boundingBox();
@@ -114,9 +114,8 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   expect(entryBox!.width).toBeLessThanOrEqual(48);
   await entryPoint.tap();
   const addSources = testPage.getByRole("menuitem", {
-    name: "Add Repositories to workspace",
+    name: "Add repositories or folders",
   });
-  const openFolder = testPage.getByRole("menuitem", { name: "Open workspace folder" });
   const actionMenu = addSources.locator("xpath=ancestor::*[@role='menu'][1]");
   await actionMenu.evaluate((element) =>
     Promise.all(
@@ -125,19 +124,40 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
         .map((animation) => animation.finished.catch(() => undefined)),
     ),
   );
-  const [menuBox, addSourcesBox, openFolderBox] = await Promise.all([
+  const [menuBox, addSourcesBox] = await Promise.all([
     actionMenu.boundingBox(),
     addSources.boundingBox(),
-    openFolder.boundingBox(),
   ]);
   const menuViewport = testPage.viewportSize();
-  if (!menuBox || !addSourcesBox || !openFolderBox || !menuViewport) {
-    throw new Error("mobile workspace actions menu has no layout box");
+  if (!menuBox || !addSourcesBox || !menuViewport) {
+    throw new Error("mobile Files create menu has no layout box");
   }
   expect(menuBox.x).toBeGreaterThanOrEqual(8);
   expect(menuBox.x + menuBox.width).toBeLessThanOrEqual(menuViewport.width - 8);
   expect(menuViewport.height - (menuBox.y + menuBox.height)).toBeGreaterThanOrEqual(7);
   expect(addSourcesBox.height).toBeGreaterThanOrEqual(44);
+  await testPage.keyboard.press("Escape");
+  await expect(addSources).not.toBeVisible();
+  const workspaceActions = testPage.getByTestId("files-workspace-actions");
+  await workspaceActions.tap();
+  const openFolder = testPage.getByRole("menuitem", { name: "Open workspace folder" });
+  const workspaceActionsMenu = openFolder.locator("xpath=ancestor::*[@role='menu'][1]");
+  await workspaceActionsMenu.evaluate((element) =>
+    Promise.all(
+      element
+        .getAnimations({ subtree: true })
+        .map((animation) => animation.finished.catch(() => undefined)),
+    ),
+  );
+  const [overflowBox, openFolderBox] = await Promise.all([
+    workspaceActionsMenu.boundingBox(),
+    openFolder.boundingBox(),
+  ]);
+  if (!overflowBox || !openFolderBox) {
+    throw new Error("mobile workspace actions menu has no layout box");
+  }
+  expect(overflowBox.x).toBeGreaterThanOrEqual(8);
+  expect(overflowBox.x + overflowBox.width).toBeLessThanOrEqual(menuViewport.width - 8);
   expect(openFolderBox.height).toBeGreaterThanOrEqual(44);
   await testPage.route("**/api/v1/task-sessions/*/open-folder", (route) =>
     route.fulfill({ json: { success: true } }),
@@ -152,7 +172,7 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
   ]);
   await expect(openFolder).not.toBeVisible();
   await entryPoint.tap();
-  await testPage.getByRole("menuitem", { name: "Add Repositories to workspace" }).tap();
+  await testPage.getByRole("menuitem", { name: "Add repositories or folders" }).tap();
 
   const drawer = testPage.getByTestId("add-workspace-sources-drawer");
   await expect(drawer).toBeVisible();

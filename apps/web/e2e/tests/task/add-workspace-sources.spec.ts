@@ -180,17 +180,14 @@ test.describe("Attach local workspace sources", () => {
     await session.clickTab("Files");
 
     const workspaceActions = testPage.getByTestId("files-workspace-actions");
+    const createMenu = testPage.getByTestId("files-create-menu");
     await expect(workspaceActions).toBeEnabled();
     await expect(workspaceActions).toHaveAccessibleName("Workspace actions");
     const workspaceActionsBox = await workspaceActions.boundingBox();
     expect(workspaceActionsBox).not.toBeNull();
     expect(workspaceActionsBox!.width).toBeLessThanOrEqual(44);
     await workspaceActions.click();
-    const addSources = testPage.getByRole("menuitem", {
-      name: "Add Repositories to workspace",
-    });
     const openFolder = testPage.getByRole("menuitem", { name: "Open workspace folder" });
-    await expect(addSources).toBeEnabled();
     await expect(openFolder).toBeEnabled();
     await Promise.all([
       testPage.waitForRequest(
@@ -201,8 +198,8 @@ test.describe("Attach local workspace sources", () => {
       openFolder.click(),
     ]);
     await expect(openFolder).not.toBeVisible();
-    await workspaceActions.click();
-    await testPage.getByRole("menuitem", { name: "Add Repositories to workspace" }).click();
+    await createMenu.click();
+    await testPage.getByRole("menuitem", { name: "Add repositories or folders" }).click();
     const dialog = testPage.getByTestId("add-workspace-sources-dialog");
     await expect(dialog).toBeVisible();
     const [dialogBox, viewport] = await Promise.all([
@@ -289,8 +286,8 @@ test.describe("Attach local workspace sources", () => {
       "all persisted turns should be complete before attaching another workspace source",
     );
 
-    await workspaceActions.click();
-    await testPage.getByRole("menuitem", { name: "Add Repositories to workspace" }).click();
+    await createMenu.click();
+    await testPage.getByRole("menuitem", { name: "Add repositories or folders" }).click();
     await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "Add folder" }).click();
     const folderRow = dialog.getByTestId("workspace-source-row");
@@ -444,16 +441,18 @@ test.describe("Attach local workspace sources", () => {
     await expect(session.agentStatus()).toBeVisible({ timeout: 15_000 });
     await session.clickTab("Files");
 
-    const workspaceActions = testPage.getByTestId("files-workspace-actions");
-    await expect(workspaceActions).toBeEnabled();
-    await workspaceActions.click();
+    const createMenu = testPage.getByTestId("files-create-menu");
+    await expect(createMenu).toBeEnabled();
+    await createMenu.click();
     const action = testPage.getByRole("menuitem", {
-      name: "Add Repositories to workspace",
+      name: "Add repositories or folders",
     });
     await expect(action).toBeDisabled();
     await expect(action).toContainText(
       "Wait for the active turn or tool call to finish before adding sources.",
     );
+    await testPage.keyboard.press("Escape");
+    await testPage.getByTestId("files-workspace-actions").click();
     await expect(testPage.getByRole("menuitem", { name: "Open workspace folder" })).toBeEnabled();
   });
 });

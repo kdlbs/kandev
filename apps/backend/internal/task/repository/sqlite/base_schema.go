@@ -805,6 +805,7 @@ func (r *Repository) initTaskSchema() error {
 		task_id TEXT NOT NULL,
 		local_path TEXT NOT NULL,
 		display_name TEXT NOT NULL,
+		workspace_relative_path TEXT NOT NULL DEFAULT '',
 		position INTEGER NOT NULL DEFAULT 0,
 		created_at TIMESTAMP NOT NULL,
 		updated_at TIMESTAMP NOT NULL,

@@ -187,3 +187,7 @@ Log placement, environment identity, and operation outcome through existing stru
 ## Implementation plan
 
 [Workspace repository placement](../../../plans/workspace-repository-placement/plan.md) owns work orders, exact checks, and results.
+
+## Follow-up scope
+
+[Current workspace sources](current-workspace-sources.md) extends placement to Local folder/scratch tasks and clarifies remote capabilities. Its [separate plan](../../../plans/current-workspace-sources/plan.md) owns the + menu move and repositoryless attachment. This package retains its expansion recovery dependency.

@@ -2605,7 +2605,11 @@ func (e *Executor) buildLaunchAgentRequest(ctx context.Context, task *v1.Task, s
 	} else {
 		for _, f := range folders {
 			if f != nil {
-				req.WorkspaceFolders = append(req.WorkspaceFolders, WorkspaceFolderSpec{Name: f.DisplayName, LocalPath: f.LocalPath})
+				req.WorkspaceFolders = append(req.WorkspaceFolders, WorkspaceFolderSpec{
+					Name:                  f.DisplayName,
+					LocalPath:             f.LocalPath,
+					WorkspaceRelativePath: f.WorkspaceRelativePath,
+				})
 			}
 		}
 	}

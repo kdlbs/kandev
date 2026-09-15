@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,6 +16,7 @@ import (
 
 	"github.com/kandev/kandev/internal/common/securityutil"
 	"github.com/kandev/kandev/internal/events"
+	"github.com/kandev/kandev/internal/repoclone"
 	"github.com/kandev/kandev/internal/task/models"
 	taskrepository "github.com/kandev/kandev/internal/task/repository"
 	"github.com/kandev/kandev/internal/worktree"
@@ -111,9 +114,6 @@ func (s *Service) AttachWorkspaceSources(ctx context.Context, req AttachWorkspac
 	existing, err := s.taskRepos.ListTaskRepositories(ctx, task.ID)
 	if err != nil {
 		return nil, err
-	}
-	if len(existing) == 0 {
-		return nil, fmt.Errorf("%w: task must have a repository before attaching workspace sources", ErrInvalidWorkspaceSource)
 	}
 	store := s.workspaceSourceStore()
 	if store == nil {
@@ -467,10 +467,28 @@ func (s *Service) requireCloneableLocalRepository(ctx context.Context, taskID st
 	if err != nil || executorType == "" || isLocalWorkspaceExecutor(executorType) || executorType == string(models.ExecutorTypeWorktree) {
 		return err
 	}
-	if repository == nil || repository.RemoteURL == "" {
+	if !hasCloneableWorkspaceRepositoryLocator(repository) {
 		return fmt.Errorf("%w: local repository has no safe cloneable origin", ErrUnsupportedWorkspaceSource)
 	}
 	return nil
+}
+
+func hasCloneableWorkspaceRepositoryLocator(repository *models.Repository) bool {
+	if repository == nil {
+		return false
+	}
+	locator := strings.TrimSpace(repository.RemoteURL)
+	if locator == "" && repository.ProviderOwner != "" && repository.ProviderName != "" {
+		locator, _ = repoclone.CloneURLWithHost(repository.Provider, repository.ProviderHost, repository.ProviderOwner, repository.ProviderName, repoclone.ProtocolHTTPS)
+	}
+	if locator == "" || strings.HasPrefix(locator, "/") || strings.HasPrefix(locator, "file:") {
+		return false
+	}
+	if strings.HasPrefix(locator, "git@") {
+		return true
+	}
+	parsed, err := url.Parse(locator)
+	return err == nil && parsed.Host != "" && (parsed.Scheme == protocolHTTPS || parsed.Scheme == protocolHTTP || parsed.Scheme == repoclone.ProtocolSSH || parsed.Scheme == "git")
 }
 
 func classifyWorkspaceRepositoryError(err error) error {

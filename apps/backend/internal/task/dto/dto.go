@@ -352,13 +352,14 @@ type TaskRepositoryDTO struct {
 
 // TaskWorkspaceFolderDTO is the API projection of a durable non-Git source.
 type TaskWorkspaceFolderDTO struct {
-	ID          string    `json:"id"`
-	TaskID      string    `json:"task_id"`
-	LocalPath   string    `json:"local_path"`
-	DisplayName string    `json:"display_name"`
-	Position    int       `json:"position"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID                    string    `json:"id"`
+	TaskID                string    `json:"task_id"`
+	LocalPath             string    `json:"local_path"`
+	DisplayName           string    `json:"display_name"`
+	WorkspaceRelativePath string    `json:"workspace_relative_path,omitempty"`
+	Position              int       `json:"position"`
+	CreatedAt             time.Time `json:"created_at"`
+	UpdatedAt             time.Time `json:"updated_at"`
 }
 
 // WorkspaceRecoveryDTO contains only the path-free public progress projection.
@@ -1059,13 +1060,14 @@ func FromTaskWithSessionInfo(
 	var workspaceFolders []TaskWorkspaceFolderDTO
 	for _, folder := range task.WorkspaceFolders {
 		workspaceFolders = append(workspaceFolders, TaskWorkspaceFolderDTO{
-			ID:          folder.ID,
-			TaskID:      folder.TaskID,
-			LocalPath:   folder.LocalPath,
-			DisplayName: folder.DisplayName,
-			Position:    folder.Position,
-			CreatedAt:   folder.CreatedAt,
-			UpdatedAt:   folder.UpdatedAt,
+			ID:                    folder.ID,
+			TaskID:                folder.TaskID,
+			LocalPath:             folder.LocalPath,
+			DisplayName:           folder.DisplayName,
+			WorkspaceRelativePath: folder.WorkspaceRelativePath,
+			Position:              folder.Position,
+			CreatedAt:             folder.CreatedAt,
+			UpdatedAt:             folder.UpdatedAt,
 		})
 	}
 

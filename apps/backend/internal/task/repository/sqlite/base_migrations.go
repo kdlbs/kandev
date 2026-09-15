@@ -142,6 +142,9 @@ func (r *Repository) runMigrations(ctx context.Context) error {
 	r.migrate.Apply("executors_running.local_pid", `ALTER TABLE executors_running ADD COLUMN local_pid INTEGER DEFAULT 0`)
 	r.migrate.Apply("tasks.is_ephemeral", `ALTER TABLE tasks ADD COLUMN is_ephemeral INTEGER NOT NULL DEFAULT 0`)
 	r.migrate.Apply("task_repositories.checkout_branch", `ALTER TABLE task_repositories ADD COLUMN checkout_branch TEXT DEFAULT ''`)
+	if err := r.migrate.Apply("task_workspace_folders.workspace_relative_path", `ALTER TABLE task_workspace_folders ADD COLUMN workspace_relative_path TEXT NOT NULL DEFAULT ''`); err != nil {
+		return err
+	}
 	r.migrate.Apply("task_repositories.branch_policy_id", `ALTER TABLE task_repositories ADD COLUMN branch_policy_id TEXT DEFAULT ''`)
 	r.migrate.Apply("task_repositories.branch_policy_name", `ALTER TABLE task_repositories ADD COLUMN branch_policy_name TEXT DEFAULT ''`)
 	r.migrate.Apply("task_repositories.branch_policy_base_branch", `ALTER TABLE task_repositories ADD COLUMN branch_policy_base_branch TEXT DEFAULT ''`)
@@ -983,6 +986,7 @@ func (r *Repository) ensureTaskWorkspaceFoldersSchema() error {
 			task_id TEXT NOT NULL,
 			local_path TEXT NOT NULL,
 			display_name TEXT NOT NULL,
+			workspace_relative_path TEXT NOT NULL DEFAULT '',
 			position INTEGER NOT NULL DEFAULT 0,
 			created_at TIMESTAMP NOT NULL,
 			updated_at TIMESTAMP NOT NULL,

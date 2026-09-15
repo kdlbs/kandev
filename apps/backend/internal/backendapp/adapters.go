@@ -537,7 +537,11 @@ func lifecycleWorkspaceFolders(folders []executor.WorkspaceFolderSpec) []lifecyc
 	}
 	result := make([]lifecycle.WorkspaceFolderSpec, 0, len(folders))
 	for _, f := range folders {
-		result = append(result, lifecycle.WorkspaceFolderSpec{Name: f.Name, LocalPath: f.LocalPath})
+		result = append(result, lifecycle.WorkspaceFolderSpec{
+			Name:                  f.Name,
+			LocalPath:             f.LocalPath,
+			WorkspaceRelativePath: f.WorkspaceRelativePath,
+		})
 	}
 	return result
 }
