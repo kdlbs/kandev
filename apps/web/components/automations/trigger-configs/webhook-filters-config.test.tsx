@@ -15,6 +15,8 @@ beforeAll(() => {
 
 afterEach(cleanup);
 
+const VALUES_PLACEHOLDER = "critical, fatal";
+
 function renderFilters(filters: WebhookFilter[]) {
   const onChange = vi.fn();
   render(<WebhookFiltersConfig filters={filters} onChange={onChange} />);
@@ -75,12 +77,49 @@ describe("WebhookFiltersConfig", () => {
   it("commits comma-separated values as a trimmed array on blur", () => {
     const onChange = renderFilters([{ path: "severity", op: "in", values: [] }]);
 
-    const input = screen.getByPlaceholderText("critical, fatal");
+    const input = screen.getByPlaceholderText(VALUES_PLACEHOLDER);
     fireEvent.change(input, { target: { value: "critical, fatal ," } });
     fireEvent.blur(input);
 
     expect(onChange).toHaveBeenCalledWith([
       { path: "severity", op: "in", values: ["critical", "fatal"] },
     ]);
+  });
+
+  it("commits a lone comma as an explicit single empty-string value", () => {
+    const onChange = renderFilters([{ path: "issue.id", op: "ne", values: [] }]);
+
+    const input = screen.getByPlaceholderText(VALUES_PLACEHOLDER);
+    fireEvent.change(input, { target: { value: "," } });
+    fireEvent.blur(input);
+
+    expect(onChange).toHaveBeenCalledWith([{ path: "issue.id", op: "ne", values: [""] }]);
+  });
+
+  it("commits a blank, never-edited values field as an empty array", () => {
+    const onChange = renderFilters([{ path: "severity", op: "in", values: [] }]);
+
+    const input = screen.getByPlaceholderText(VALUES_PLACEHOLDER);
+    fireEvent.blur(input);
+
+    expect(onChange).toHaveBeenCalledWith([{ path: "severity", op: "in", values: [] }]);
+  });
+
+  it("clears stale values when switching the operator to exists", () => {
+    const onChange = renderFilters([{ path: "severity", op: "eq", values: ["critical"] }]);
+
+    fireEvent.click(screen.getByText("Equals"));
+    fireEvent.click(screen.getByText("Exists"));
+
+    expect(onChange).toHaveBeenCalledWith([{ path: "severity", op: "exists", values: [] }]);
+  });
+
+  it("clears stale values when switching the operator to not_exists", () => {
+    const onChange = renderFilters([{ path: "severity", op: "in", values: ["critical", "fatal"] }]);
+
+    fireEvent.click(screen.getByText("In list"));
+    fireEvent.click(screen.getByText("Does not exist"));
+
+    expect(onChange).toHaveBeenCalledWith([{ path: "severity", op: "not_exists", values: [] }]);
   });
 });

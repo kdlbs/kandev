@@ -138,13 +138,43 @@ func TestFireTrigger_DuplicateWebhookDedupKey_RecordsOneSkip(t *testing.T) {
 		case RunStatusSkipped:
 			skipped++
 			require.Equal(t, "duplicate trigger: dedup key already fired", r.ErrorMessage)
-			require.Equal(t, "webhook:same", r.DedupKey)
+			require.Empty(t, r.DedupKey,
+				"a duplicate-skip audit row must not carry the dedup key, or it would permanently "+
+					"block re-admission of that key even after the original run is deleted")
 		case RunStatusTriggered:
 			admitted++
 		}
 	}
 	require.Equal(t, 1, skipped, "expected exactly one recorded duplicate-skip run")
 	require.Equal(t, 1, admitted, "expected exactly one admitted run")
+}
+
+// Deleting the original admitted run for a dedup key must unblock
+// re-admission of that same key, even though a duplicate-skip audit row for
+// it still exists — the recovery flow crashlytics-alerts.md documents
+// ("delete a run... to reprocess one"). This only holds because the
+// duplicate-skip row's own dedup key is blanked (see the test above); a
+// lingering skip row that still carried the key would defeat the delete.
+func TestFireTrigger_DeleteAdmittedRunAfterDuplicateSkip_UnblocksReAdmission(t *testing.T) {
+	svc := newTestService(t)
+	ctx := context.Background()
+	a := newWebhookAutomation(t, svc, "delete-and-retry")
+	trig := &AutomationTrigger{AutomationID: a.ID, Type: TriggerTypeWebhook, Config: json.RawMessage(`{}`), Enabled: true}
+	require.NoError(t, svc.store.CreateTrigger(ctx, trig))
+
+	first, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeWebhook, json.RawMessage(`{"a":1}`), DedupKey("webhook:reopen"))
+	require.NoError(t, err)
+	require.False(t, first.Skipped)
+
+	second, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeWebhook, json.RawMessage(`{"a":1}`), DedupKey("webhook:reopen"))
+	require.NoError(t, err)
+	require.True(t, second.Skipped, "the redelivery must be recorded as a duplicate skip, not silently dropped")
+
+	require.NoError(t, svc.DeleteRun(ctx, first.RunID))
+
+	third, err := svc.FireTrigger(ctx, a.ID, trig.ID, TriggerTypeWebhook, json.RawMessage(`{"a":1}`), DedupKey("webhook:reopen"))
+	require.NoError(t, err)
+	require.False(t, third.Skipped, "deleting the original admitted run must unblock re-admission of its dedup key")
 }
 
 // A webhook trigger declaring no dedup_key path at all behaves as it always

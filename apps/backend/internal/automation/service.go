@@ -1603,6 +1603,20 @@ func (s *Service) admitTriggerLocked(
 	return run, "", false, nil
 }
 
+// skipAuditDedupKey returns the dedup key to persist on a skip-status audit
+// row. HasRunWithDedupKey counts any row with a matching dedup key regardless
+// of status, so a skip row that kept the key would permanently block
+// re-admission of that key — including after the run that actually produced
+// it is deleted. For webhook and github_pr_merged, deleting a run is the
+// documented way to reprocess a dedup'd delivery, so their skip rows must not
+// carry the key that would defeat that.
+func skipAuditDedupKey(triggerType TriggerType, dedupKey string) string {
+	if triggerType == TriggerTypeGitHubPRMerged || triggerType == TriggerTypeWebhook {
+		return ""
+	}
+	return dedupKey
+}
+
 // recordDuplicateSkippedTrigger persists the AC-001.2-required skip record
 // for a firing suppressed by dedup — previously this branch only logged at
 // Debug and left no audit trail.
@@ -1615,7 +1629,7 @@ func (s *Service) recordDuplicateSkippedTrigger(
 		TriggerID:    triggerID,
 		TriggerType:  triggerType,
 		Status:       RunStatusSkipped,
-		DedupKey:     dedupKey,
+		DedupKey:     skipAuditDedupKey(triggerType, dedupKey),
 		TriggerData:  triggerData,
 		ErrorMessage: "duplicate trigger: dedup key already fired",
 		DisplayTitle: RenderRunDisplayTitle(a, triggerType, triggerData),
@@ -1648,16 +1662,12 @@ func (s *Service) recordSkippedTrigger(
 	dedupKey, dedupReason, reason string,
 	active int,
 ) {
-	skipDedupKey := dedupKey
-	if triggerType == TriggerTypeGitHubPRMerged || triggerType == TriggerTypeWebhook {
-		skipDedupKey = ""
-	}
 	skipRun := &AutomationRun{
 		AutomationID: a.ID,
 		TriggerID:    triggerID,
 		TriggerType:  triggerType,
 		Status:       RunStatusSkipped,
-		DedupKey:     skipDedupKey,
+		DedupKey:     skipAuditDedupKey(triggerType, dedupKey),
 		DedupReason:  dedupReason,
 		TriggerData:  triggerData,
 		ErrorMessage: reason,

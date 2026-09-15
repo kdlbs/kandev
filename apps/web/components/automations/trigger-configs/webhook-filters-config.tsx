@@ -98,7 +98,14 @@ function FilterRow({
       />
       <Select
         value={filter.op}
-        onValueChange={(op) => onChange({ ...filter, op: op as WebhookFilterOp })}
+        onValueChange={(op) => {
+          const nextOp = op as WebhookFilterOp;
+          onChange({
+            ...filter,
+            op: nextOp,
+            values: FILTER_OPS_WITHOUT_VALUES.has(nextOp) ? [] : filter.values,
+          });
+        }}
       >
         <SelectTrigger className="cursor-pointer w-[140px] shrink-0">
           <SelectValue />
@@ -134,8 +141,26 @@ function FilterRow({
 }
 
 // Buffers the comma-separated text locally so a trailing ", " mid-edit isn't
-// immediately reformatted away; committed as a trimmed, non-empty string
-// array on blur. Mirrors GitHubPRConfig's branches/authors fields.
+// immediately reformatted away; committed as a trimmed string array on blur.
+// Mirrors GitHubPRConfig's branches/authors fields.
+//
+// A lone trailing segment produced only by an in-progress trailing comma is
+// dropped (so "critical, fatal ," commits as ["critical", "fatal"]), but an
+// otherwise-empty segment is kept — so typing "," commits an explicit single
+// empty-string value (values: [""]), which some operators such as `ne`
+// legitimately need. A field that was never edited, or holds only
+// whitespace, commits as an empty array rather than [""].
+function commitFilterValues(text: string): string[] {
+  if (text.trim() === "") {
+    return [];
+  }
+  const parts = text.split(",").map((v) => v.trim());
+  if (parts.length > 1 && parts[parts.length - 1] === "") {
+    return parts.slice(0, -1);
+  }
+  return parts;
+}
+
 function FilterValuesInput({
   values,
   onChange,
@@ -151,14 +176,7 @@ function FilterValuesInput({
     <Input
       value={text}
       onChange={(e) => setText(e.target.value)}
-      onBlur={() =>
-        onChange(
-          text
-            .split(",")
-            .map((v) => v.trim())
-            .filter(Boolean),
-        )
-      }
+      onBlur={() => onChange(commitFilterValues(text))}
       className="font-mono text-xs"
       // eslint-disable-next-line i18next/no-literal-string -- example comparison values, not copy
       placeholder="critical, fatal"
