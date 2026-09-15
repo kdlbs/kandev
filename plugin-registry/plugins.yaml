@@ -56,6 +56,9 @@ plugins:
   - id: kandev-plugin-youtrack
     repo: ahmedbally/kandev-plugin-youtrack
     categories: [integrations]
+  - id: kandev-plugin-redmine
+    repo: yattdev/kandev-plugin-redmine
+    categories: [integrations]
   - id: kandev-plugin-deepseek-balance
     repo: Fclem/kandev-plugin-deepseek-balance
     categories: [analytics]
