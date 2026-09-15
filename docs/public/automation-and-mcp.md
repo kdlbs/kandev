@@ -970,3 +970,19 @@ workspace. Unknown and unauthorized task/session IDs return the same not-found r
 - **External client cannot stream:** verify the base backend URL and configure the reverse proxy for both the selected MCP transport and long-lived requests.
 
 Related: [Tasks and workflows](tasks-and-workflows.md), [Coordination](coordination.md), [Agents and profiles](agents-and-profiles.md), and [Integrations](integrations.md).
+
+
+## Plugin webhooks
+
+Plugins with automation adapters add their own provider group under **Add
+Condition**. Choose a condition, configure its repository and filters, and save
+the automation. Expand the condition and select **Configure webhook**, then copy
+its URL and use **Reveal secret** to obtain the signing secret for the provider's
+webhook settings. Keep both the automation and condition enabled.
+
+Save filter changes before configuring the binding again. After **Rotate secret**,
+update the provider's webhook secret. **Revoke webhook** removes the binding URL;
+configuring it again creates a new URL. **Refresh deliveries** shows receipt
+outcomes and links to the task when one exists. A 202 response means Kandev stored
+the delivery; it does not mean the agent has finished or started successfully.
+The original generic **Webhook** condition continues to use `X-Webhook-Secret`.

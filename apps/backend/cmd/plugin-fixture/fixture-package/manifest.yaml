@@ -115,3 +115,16 @@ config_schema:
     greeting:
       type: string
       title: "Greeting"
+
+automation_conditions:
+  - key: "signed-event"
+    adapter_key: "fixture"
+    access: "public"
+    verification_headers: ["x-fixture-signature"]
+    config_version: 1
+    label: "Fixture signed event"
+    description: "Signed event fixture"
+    default_config: {}
+    config_schema:
+      type: "object"
+      properties: {}

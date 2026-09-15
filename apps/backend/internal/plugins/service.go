@@ -47,7 +47,8 @@ type userStateCleanupStore interface {
 //     (e.g. proxies checking a plugin's manifest/capabilities without
 //     going through Service's error-wrapping Get).
 type Service struct {
-	mu sync.Mutex
+	automationRevoker func(string) error
+	mu                sync.Mutex
 	// ownershipMu makes cross-plugin provider/reference ownership checks and
 	// transitions into active one atomic reservation. Per-plugin lifecycle
 	// locks cannot protect two different IDs claiming the same identity.

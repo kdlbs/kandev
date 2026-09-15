@@ -1,5 +1,7 @@
 "use client";
 
+import { findTriggerInfo } from "./plugin-condition";
+
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { t } from "@/lib/i18n";
@@ -98,14 +100,14 @@ function formFromAutomation(a: Automation): FormState {
   };
 }
 
-function useTriggerTypeMetadata() {
+function useTriggerTypeMetadata(workspaceId: string) {
   const [triggerTypes, setTriggerTypes] = useState<TriggerTypeInfo[]>([]);
 
   useEffect(() => {
-    listTriggerTypes()
+    listTriggerTypes(workspaceId)
       .then(setTriggerTypes)
       .catch(() => setTriggerTypes([]));
-  }, []);
+  }, [workspaceId]);
 
   return triggerTypes;
 }
@@ -242,8 +244,12 @@ function useLoadAutomation(opts: LoadAutomationOpts) {
 function useConditionMetadata(triggers: AutomationTrigger[], triggerTypes: TriggerTypeInfo[]) {
   const conditionType = getConditionType(triggers);
   const activeTriggerInfo = useMemo(
-    () => triggerTypes.find((t) => t.type === (conditionType ?? "scheduled")),
-    [triggerTypes, conditionType],
+    () =>
+      findTriggerInfo(
+        triggers.find((trigger) => trigger.type === conditionType),
+        triggerTypes,
+      ),
+    [triggerTypes, conditionType, triggers],
   );
   return {
     conditionType,
@@ -437,7 +443,7 @@ export function AutomationEditor({ workspaceId, automationId }: AutomationEditor
   const isNew = currentId === null;
   const triggerActions = useAutomationTriggerDrafts(currentId);
   const [savedForm, setSavedForm] = useState(defaultForm);
-  const triggerTypes = useTriggerTypeMetadata();
+  const triggerTypes = useTriggerTypeMetadata(workspaceId);
 
   const { placeholders, defaultTaskTitle, activeTriggerInfo, conditionType } = useConditionMetadata(
     triggerActions.allTriggers,

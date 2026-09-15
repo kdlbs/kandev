@@ -96,6 +96,9 @@ func (s *Service) Install(ctx context.Context, r io.Reader) (*store.Record, erro
 	// package versions declare the same provider, so revoke before stopping the
 	// old runtime and exposing the new record.
 	if hadOldRec && oldRec.Status == StatusActive {
+		if err := s.cancelAutomationDeliveries(oldRec.ID); err != nil {
+			return nil, err
+		}
 		s.revokeGitCredentialProviderLeases(oldRec.RepositoryProviders)
 	}
 	if wasRunning {
@@ -336,6 +339,9 @@ func (s *Service) Uninstall(ctx context.Context, id string) error {
 
 	rec, err := s.Get(id)
 	if err != nil {
+		return err
+	}
+	if err := s.cancelAutomationDeliveries(id); err != nil {
 		return err
 	}
 	wasRunning := s.runtime != nil && s.runtime.Running(id)

@@ -189,7 +189,7 @@ const automationColumns = `id, workspace_id, name, description, workflow_id, wor
 	execution_mode = 'task' AS legacy_board_card`
 
 func (s *Store) initSchema() error {
-	if _, err := s.db.Exec(schemaSQLForDriver(createTablesSQL, s.db.DriverName())); err != nil {
+	if _, err := s.db.Exec(schemaSQLForDriver(createTablesSQL+pluginWebhookTablesSQL, s.db.DriverName())); err != nil {
 		return err
 	}
 	migrate := db.NewRequiredMigrateLogger(s.db, nil)

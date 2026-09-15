@@ -103,18 +103,23 @@ export function TriggersSection({
 
   return (
     <div className="space-y-4">
-      <ScheduleArea
-        scheduleTrigger={scheduleTrigger}
-        savedScheduleTrigger={savedScheduleTrigger}
-        onScheduleChange={handleScheduleChange}
-      />
+      {conditionTrigger?.type !== "plugin_event" && (
+        <ScheduleArea
+          scheduleTrigger={scheduleTrigger}
+          savedScheduleTrigger={savedScheduleTrigger}
+          onScheduleChange={handleScheduleChange}
+        />
+      )}
       <ConditionArea
         trigger={conditionTrigger}
         savedTrigger={savedConditionTrigger}
         automationId={automationId}
         workspaceId={workspaceId}
         triggerTypes={triggerTypes}
-        onAddTrigger={onAddTrigger}
+        onAddTrigger={(type, config) => {
+          if (type === "plugin_event" && scheduleTrigger) onDeleteTrigger(scheduleTrigger.id);
+          onAddTrigger(type, config);
+        }}
         onUpdateTrigger={onUpdateTrigger}
         onToggleTrigger={onToggleTrigger}
         onDeleteTrigger={onDeleteTrigger}

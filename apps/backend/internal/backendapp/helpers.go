@@ -1513,6 +1513,10 @@ func registerSecondaryRoutes(
 	}
 
 	if p.services.Automation != nil {
+		if p.services.Plugins != nil {
+			p.services.Automation.Service.SetPluginAutomationProvider(p.services.Plugins)
+			p.services.Plugins.SetAutomationRevoker(p.services.Automation.Service.CancelPluginWebhookDeliveries)
+		}
 		automation.RegisterRoutes(p.router, p.gateway.Dispatcher, p.services.Automation.Service, p.log)
 		p.log.Debug("Registered Automation handlers (HTTP + WebSocket)")
 	}

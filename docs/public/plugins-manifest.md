@@ -454,3 +454,98 @@ they have no effect there and are overwritten on install:
 Related: [Plugins](plugins.md), [Authoring a plugin](plugins-authoring.md).
 
 </details>
+
+
+## Automation conditions and signed webhook adapters
+
+The optional `automation_conditions` contribution adds native conditions to a
+workspace's automation editor. It requires a host build with the automation
+adapter extension and an implementation of `pluginsdk.AutomationAdapter`.
+Older plugins keep their existing RPC interface.
+
+```yaml
+automation_conditions:
+  - key: push
+    adapter_key: repository-events
+    access: public
+    verification_headers: [x-hub-signature, x-event-key]
+    config_version: 1
+    label: Push to branch
+    description: Run for verified repository pushes.
+    label_key: automationPush
+    config_schema:
+      type: object
+      additionalProperties: false
+      properties:
+        repository:
+          type: string
+          title: Repository
+        branches:
+          type: array
+          title: Branches
+          items: {type: string}
+      required: [repository]
+    default_config: {repository: "", branches: []}
+```
+
+Identity is the plugin ID plus condition key. `adapter_key` identifies a local
+adapter; the plugin routes its optional RPC implementation by condition key. All
+conditions require explicit `public` access. The host accepts at most 32 conditions
+and 32 fields per schema, with string, boolean, string-enum, and string-list
+controls. Unknown schema keywords and field types are rejected. Settings are
+limited to 64 KiB, strings to 4,096 bytes, and lists to 100 strings.
+
+`DescribeAutomationCondition` receives the host-authorized workspace and condition
+configuration. It checks availability and validates repository access without
+creating work. Return an opaque connection ID and revision that changes whenever
+the underlying credentials or account binding changes. With no configuration,
+the response can include `config_options`, a JSON object mapping string field
+names to at most 100 workspace-authorized suggestions. The host renders these as
+native searchable suggestions; the plugin must validate the chosen value again
+before save and verification. Labels and descriptions use the existing plugin
+localization namespace and English fallbacks.
+
+`VerifyAutomationWebhook` receives the original bytes, declared verification
+headers, immutable condition configuration, connection identity/revision, and a
+transient host-generated signing secret. Verify the signature before parsing the
+payload. Never persist or log the signing secret. Return one of:
+
+| Outcome | Meaning | HTTP response |
+| --- | --- | --- |
+| `rejected` | Authentication or connection binding failed | 401 |
+| `malformed` | Authenticated body is not a valid event JSON object | 400 |
+| `ignored` | Verified event does not match the configured condition | 200 |
+| `accepted` | One matching normalized JSON object with the exact condition key | 202 |
+| RPC error | Verification cannot currently complete | 503 |
+
+The host rejects compressed requests, bodies over 1 MiB, duplicate declared
+headers, unknown event kinds, and invalid or oversized adapter output. Verification
+has a ten-second deadline. Only declared `x-` provider headers are forwarded;
+Kandev credentials are excluded. No adapter response can choose an automation,
+workspace, task, or agent.
+
+The host generates one binding URL and vault-backed secret per saved condition.
+Authenticated `automation.webhook_binding` management accepts `automation_id`,
+`trigger_id`, and operation `get`, `configure`, `rotate`, `reveal`, or `delete`.
+The `receipts` operation lists the automation's latest 50 outcomes without secrets
+or retained payloads. Configuration and rotation return a URL; only `reveal`
+returns the plaintext signing secret.
+
+A verified delivery is durably recorded before 202. Identical original bodies at
+the same binding deduplicate for seven days after terminal handling, regardless
+of unsigned delivery headers and run-history deletion. A transactional run and
+pending dispatch record feed the ordinary automation consumer; a durable claim
+prevents duplicate task creation. Pending work survives restart. If the host
+stops after the task-creation claim, recovery marks the delivery failed instead
+of replaying an operation with an uncertain outcome. Acceptance is distinct from
+run success. Ordinary concurrency limits still apply.
+
+Condition edits, binding changes, rotation, disabled automations, and plugin
+lifecycle changes fence obsolete deliveries. Exports contain portable condition
+configuration, with no binding IDs, receipts, or secrets; copied/imported
+conditions need fresh binding configuration before receiving events.
+`{{webhook.body}}` and `{{webhook.<path>}}` expose the verified original JSON;
+`{{data.<path>}}` exposes normalized output. Payload content remains untrusted
+context. Host diagnostics expose bounded `automation_webhooks` expvar counters
+for HTTP outcomes, accepted/ignored/duplicate deliveries, cancellations, and
+recovery passes.

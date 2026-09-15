@@ -1,5 +1,7 @@
 "use client";
 
+import { PluginEventConfig } from "./trigger-configs/plugin-event-config";
+
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@kandev/ui/button";
@@ -40,6 +42,7 @@ const TRIGGER_ICON: Record<TriggerType, typeof IconClock> = {
   github_push: IconBrandGithub,
   github_ci: IconBrandGithub,
   webhook: IconWebhook,
+  plugin_event: IconWebhook,
 };
 
 const GITHUB_COLOR = "text-purple-400";
@@ -51,6 +54,7 @@ const TRIGGER_COLOR: Record<TriggerType, string> = {
   github_push: GITHUB_COLOR,
   github_ci: GITHUB_COLOR,
   webhook: "text-orange-400",
+  plugin_event: "text-orange-400",
 };
 
 // Keyed by the cron expression the backend parses — syntax, never translated.
@@ -79,6 +83,7 @@ const TRIGGER_INFO_KEYS: Record<TriggerType, string> = {
   github_push: "automations:triggerInfoNotImplemented",
   github_ci: "automations:triggerInfoNotImplemented",
   webhook: "automations:triggerInfoWebhook",
+  plugin_event: "automations:pluginWebhookHelp",
 };
 
 // A plain function returning copy is invisible to `i18next/no-literal-string`,
@@ -88,6 +93,7 @@ function getTriggerSummary(
   trigger: AutomationTrigger,
   t: (key: string, values?: Record<string, unknown>) => string,
 ): string {
+  if (trigger.type === "plugin_event") return String(trigger.config.condition_key ?? trigger.type);
   const simple = SIMPLE_SUMMARY_KEYS[trigger.type];
   if (simple) return t(simple);
 
@@ -185,6 +191,7 @@ export function TriggerCard({
         <div className="px-4 pb-4 pt-1 border-t">
           <TriggerConfigForm
             trigger={trigger}
+            dirty={isDirty}
             automationId={automationId}
             workspaceId={workspaceId}
             onUpdate={onUpdate}
@@ -197,11 +204,13 @@ export function TriggerCard({
 
 function TriggerConfigForm({
   trigger,
+  dirty,
   automationId,
   workspaceId,
   onUpdate,
 }: {
   trigger: AutomationTrigger;
+  dirty: boolean;
   automationId: string | null;
   workspaceId: string;
   onUpdate: (config: Record<string, unknown>) => void;
@@ -224,6 +233,15 @@ function TriggerConfigForm({
       return <GitHubPushConfig config={trigger.config} onUpdate={onUpdate} />;
     case "github_ci":
       return <GitHubCIConfig config={trigger.config} onUpdate={onUpdate} />;
+    case "plugin_event":
+      return (
+        <PluginEventConfig
+          trigger={trigger}
+          workspaceId={workspaceId}
+          onUpdate={onUpdate}
+          dirty={dirty}
+        />
+      );
     case "webhook":
       return <WebhookConfig automationId={automationId} workspaceId={workspaceId} />;
     default:
