@@ -110,13 +110,17 @@ export async function expectSendNowWorkflowRunning(
   await expect(session.cancelAgentButton()).toBeHidden();
 }
 
-function activeQueuedMessage(marker: string, holdMs = 15_000): string {
+function activeQueuedMessage(
+  marker: string,
+  holdMs = 15_000,
+  completionMarker = `${marker} finished`,
+): string {
   return [
     `e2e:message("${marker}")`,
     'e2e:tool_use("Check", {})',
     'e2e:tool_result("checked")',
     `e2e:delay(${holdMs})`,
-    'e2e:message("turn finished")',
+    `e2e:message("${completionMarker}")`,
   ].join("\n");
 }
 
@@ -171,7 +175,10 @@ export async function expectSendNowInterruptsRunningFIFOTurn(
   const markerA = "fifo A response";
   const markerB = "fifo B response";
   const markerC = "fifo C response";
-  await api.queueMessage(identity, activeQueuedMessage(markerA));
+  const completionA = "fifo A finished";
+  const completionB = "fifo B finished";
+  const completionC = "fifo C finished";
+  await api.queueMessage(identity, activeQueuedMessage(markerA, 15_000, completionA));
   await waitForAgentMessage(api, sessionId, markerA, 60_000);
   await waitForSessionState(api, {
     taskId: task.id,
@@ -181,8 +188,8 @@ export async function expectSendNowInterruptsRunningFIFOTurn(
   });
   const workflowStepBefore = (await api.getTask(task.id)).workflow_step_id;
 
-  await api.queueMessage(identity, activeQueuedMessage(markerB, 10_000));
-  await api.queueMessage(identity, activeQueuedMessage(markerC, 250));
+  await api.queueMessage(identity, activeQueuedMessage(markerB, 10_000, completionB));
+  await api.queueMessage(identity, activeQueuedMessage(markerC, 250, completionC));
 
   const chat = session.activeChat();
   const chip = chat.getByTestId("queue-chip");
@@ -236,5 +243,8 @@ export async function expectSendNowInterruptsRunningFIFOTurn(
   await expect(agentBodies.filter({ hasText: markerA })).toHaveCount(1);
   await expect(agentBodies.filter({ hasText: markerB })).toHaveCount(1);
   await expect(agentBodies.filter({ hasText: markerC })).toHaveCount(1);
+  await expect(agentBodies.filter({ hasText: completionA })).toHaveCount(0);
+  await expect(agentBodies.filter({ hasText: completionB })).toHaveCount(1);
+  await expect(agentBodies.filter({ hasText: completionC })).toHaveCount(1);
   await expect(chat).not.toContainText("Turn cancelled by user");
 }

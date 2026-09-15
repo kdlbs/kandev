@@ -5385,6 +5385,26 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		s.releaseForegroundClaimOnFailure(resumePromptCtx, taskID, sessionID, foregroundClaim)
 		return nil, fmt.Errorf("%w, please wait for completion", ErrAgentPromptInProgress)
 	}
+	// A queued prompt may restart the provider as part of model switching
+	// before the normal claim helper runs. Keep the same session guard across
+	// that I/O and transfer it into the claim so Send Now cannot admit a
+	// replacement between the restart and provider acceptance. Resume-owned
+	// switches already hold this boundary through modelSwitchGuard below.
+	var queuedDispatchGuard *lockedCancelInFlightGuard
+	if options.claimEntryID != "" && !options.lifecyclePrompt && options.resumeAttempt == nil {
+		queuedDispatchGuard = s.lockCancelInFlightGuard(sessionID)
+		defer func() {
+			if queuedDispatchGuard != nil {
+				queuedDispatchGuard.release()
+			}
+		}()
+		if err := s.waitForCancellationWithGuard(
+			resumePromptCtx, sessionID, queuedDispatchGuard.unlock, queuedDispatchGuard.relock,
+		); err != nil {
+			s.rollbackForegroundDispatchOnFailure(resumePromptCtx, taskID, sessionID, foregroundDispatch)
+			return nil, err
+		}
+	}
 	beforeDispatch := options.beforeDispatch
 	runBeforeDispatch := func() error {
 		if beforeDispatch == nil {
@@ -5450,7 +5470,7 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		resumePromptCtx, taskID, sessionID, options.claimEntryID, options.lifecyclePrompt,
 		options.reserveTurnUntilDispatch, options.promptDispatchRecovery,
 		options.afterClaim, foregroundClaim, options.expectedCurrentTurnID,
-		options.requireNonterminalSession, resumeAttempt, options.expectedSessionIdentity,
+		options.requireNonterminalSession, resumeAttempt, queuedDispatchGuard, options.expectedSessionIdentity,
 	)
 	if err != nil {
 		if errors.Is(err, ErrResumeAttemptCancelled) {
@@ -5543,6 +5563,11 @@ func (s *Service) promptTask(ctx context.Context, taskID, sessionID string, prom
 		promptCtx, rollback.sessionIdentity, taskID, sessionID, session,
 	)
 	if identityValidationErr != nil {
+		// Missing-execution recovery reacquires the cancel guard while it resets
+		// the session. Release dispatch admission before entering that path.
+		if releaseDispatchGuard != nil {
+			releaseDispatchGuard()
+		}
 		return s.finishPromptDispatchFailure(
 			resumePromptCtx, taskID, sessionID, prompt, planMode, resumedForPrompt, attachments,
 			rollback, options, identityValidationErr, foregroundDispatch, false, nil,
@@ -5909,7 +5934,7 @@ func (s *Service) claimPromptDispatch(
 	return s.claimPromptDispatchWithResumeAttempt(
 		ctx, taskID, sessionID, claimEntryID, lifecyclePrompt,
 		reserveTurnUntilDispatch, promptDispatchRecovery, afterClaim, foregroundClaim,
-		expectedCurrentTurnID, requireNonterminalSession, nil, expectedIdentities...,
+		expectedCurrentTurnID, requireNonterminalSession, nil, nil, expectedIdentities...,
 	)
 }
 
@@ -5924,6 +5949,7 @@ func (s *Service) claimPromptDispatchWithResumeAttempt(
 	expectedCurrentTurnID string,
 	requireNonterminalSession bool,
 	resumeAttempt *resumeAttempt,
+	admissionGuard *lockedCancelInFlightGuard,
 	expectedIdentities ...*messagequeue.QueueSessionIdentity,
 ) (*models.TaskSession, promptClaimRollback, error) {
 	claimCtx := ctx
@@ -5940,6 +5966,9 @@ func (s *Service) claimPromptDispatchWithResumeAttempt(
 		)
 	}
 	claimArgs := []interface{}{expectedIdentity, afterClaim}
+	if admissionGuard != nil {
+		claimArgs = append(claimArgs, admissionGuard)
+	}
 	if resumeAttempt != nil {
 		claimArgs = append(claimArgs, resumeAttempt)
 	}
@@ -6333,6 +6362,7 @@ func (s *Service) claimSessionRunningForPrompt(
 		afterClaim       func() error
 		expectedIdentity *messagequeue.QueueSessionIdentity
 		startupAttempt   *resumeAttempt
+		admissionGuard   *lockedCancelInFlightGuard
 	)
 	for _, arg := range optionalClaimArgs {
 		switch value := arg.(type) {
@@ -6342,17 +6372,20 @@ func (s *Service) claimSessionRunningForPrompt(
 			expectedIdentity = value
 		case *resumeAttempt:
 			startupAttempt = value
+		case *lockedCancelInFlightGuard:
+			admissionGuard = value
 		}
 	}
-	lock, release := s.acquireCancelInFlightGuard(sessionID)
+	if admissionGuard == nil {
+		admissionGuard = s.lockCancelInFlightGuard(sessionID)
+	}
 	keepDispatchGuard := false
 	defer func() {
 		if !keepDispatchGuard {
-			lock.Unlock()
-			release()
+			admissionGuard.release()
 		}
 	}()
-	lock.Lock()
+	lock := admissionGuard.mutex
 	// A reset-owned cancellation must not make prompt admission wait for the
 	// reset that already forbids it. Keep the second check below for a reset
 	// that starts while this prompt is waiting on an unrelated cancellation.
@@ -6503,10 +6536,7 @@ func (s *Service) claimSessionRunningForPrompt(
 	if claimEntryID != "" {
 		var releaseOnce sync.Once
 		dispatchGuardRelease = func() {
-			releaseOnce.Do(func() {
-				lock.Unlock()
-				release()
-			})
+			releaseOnce.Do(admissionGuard.release)
 		}
 		keepDispatchGuard = true
 	}

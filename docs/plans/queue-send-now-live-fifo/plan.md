@@ -116,6 +116,12 @@ control order remain authoritative. Maps to .1, .2, .9, .11.
   Send Now B, and verifies that B waits for A's bounded admission, replaces it
   exactly once, preserves C, and survives late A completion without stale turn,
   ownership, or prompt-attempt mutation.
+- Dispatch recovery: `TestPromptTaskReleasesDispatchGuardBeforeMissingExecutionRecovery`
+  drives queued identity validation to `ErrExecutionNotFound` and verifies that
+  fresh-launch recovery can reacquire the per-session guard without deadlock.
+- Model switching: `TestPromptTaskKeepsQueuedDispatchGuardThroughModelSwitch`
+  pauses provider model selection before prompt claim and verifies that the
+  queued dispatch guard remains held across that I/O.
 - .11: real-class conflict test in `queue-api.test.ts`.
 
 Task 01 records the backend RED and GREEN results in its work order. Task 02
@@ -173,6 +179,11 @@ Task 01 implementation results:
   FIFO cancellation guard remains held from live promotion through provider
   acceptance, then B replaces A exactly once, C remains queued, and a late A
   completion cannot mutate B's turn, ownership, or prompt-attempt record.
+- `TestPromptTaskReleasesDispatchGuardBeforeMissingExecutionRecovery`: PASS;
+  queued identity validation can enter missing-execution recovery only after
+  releasing the transferred dispatch guard.
+- `TestPromptTaskKeepsQueuedDispatchGuardThroughModelSwitch`: PASS; queued
+  provider model selection remains inside the dispatch admission guard.
 - `go test -tags fts5 -race ./internal/orchestrator -run
   'Test.*(SendNow|SendQueuedNow|QueuedDispatch|FIFOHandoff)' -count=1`: PASS.
 - `git diff --check`: PASS.

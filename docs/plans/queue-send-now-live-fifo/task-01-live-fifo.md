@@ -47,6 +47,11 @@ turn, session incarnation, and cancellation protections.
   cancellation guard through the bounded acceptance callback, then prove Send
   Now B replaces A exactly once, C remains pending, and late A completion
   cannot mutate B's turn, ownership, or prompt-attempt record.
+- Release a transferred dispatch guard before identity validation routes a
+  missing execution into fresh-launch recovery, which reacquires the same
+  per-session guard.
+- Keep the queued dispatch guard through model-switch provider I/O before the
+  normal prompt claim takes ownership.
 - Remove the origin-specific `liveEligible` gate, field, and setter if redundant;
   promote only the exact current reservation after successful claim effects.
   Keep accepted-record cleanup, turn binding, and identity fencing intact.
@@ -88,6 +93,7 @@ suite to this work order before marking it done.
 - `apps/backend/internal/orchestrator/queue_send_now.go`
 - `apps/backend/internal/orchestrator/queue_send_now_test.go`
 - `apps/backend/internal/orchestrator/queue_send_now_workflow_state_test.go`
+- `apps/backend/internal/orchestrator/prompt_dispatch_identity_test.go`
 
 ## Dependencies
 
@@ -120,6 +126,7 @@ RED recorded before production changes:
 ```text
 (cd apps/backend && go test -tags fts5 ./internal/orchestrator -run '^TestSendQueuedNowCancelsLiveFIFOTurn$' -count=1)
 FAIL: both table cases returned send-now operation is already in progress.
+```
 
 GREEN and focused race verification after production changes:
 
@@ -128,6 +135,12 @@ GREEN and focused race verification after production changes:
 PASS
 
 (cd apps/backend && go test -tags fts5 -race ./internal/orchestrator -run 'Test.*(SendNow|SendQueuedNow|QueuedDispatch|FIFOHandoff)' -count=1)
+PASS
+
+(cd apps/backend && go test -tags fts5 ./internal/orchestrator -run '^(TestPromptTaskReleasesDispatchGuardBeforeMissingExecutionRecovery|TestPromptTaskExpectedIdentityRejectsReplacementAfterClaim|TestSendQueuedNowSerializesFIFOPredispatchAdmission)$' -count=1)
+PASS
+
+(cd apps/backend && go test -tags fts5 ./internal/orchestrator -run '^TestPromptTaskKeepsQueuedDispatchGuardThroughModelSwitch$' -count=1)
 PASS
 
 TestStreamCompletePreservesLiveFIFOSuccessorForStalePromptGeneration
@@ -152,4 +165,8 @@ ordinary FIFO A keeps the per-session cancellation guard until provider
 acceptance, so a concurrent Send Now cannot supersede A before its dispatch
 side effects are durable. It also checks that the provider receives exactly one
 B and that the replacement prompt-attempt record remains after late A return.
-```
+The identity-recovery regression drives a queued resume through
+`ErrExecutionNotFound` during identity validation and verifies that fresh-launch
+recovery returns after the transferred dispatch guard is released.
+The model-switch regression pauses provider model selection before prompt claim
+and verifies that the queued dispatch guard remains held across that I/O.

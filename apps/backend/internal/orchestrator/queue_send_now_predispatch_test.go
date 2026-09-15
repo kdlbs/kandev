@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -60,6 +61,8 @@ func (m *preDispatchGateAgentManager) PromptAgentWithDispatchCallback(
 		m.secondAcceptedOnce.Do(func() { close(m.secondAccepted) })
 		<-m.allowSecondReturn
 		m.secondReturnedOnce.Do(func() { close(m.secondReturned) })
+	default:
+		panic(fmt.Sprintf("preDispatchGateAgentManager: unexpected prompt call %d", call))
 	}
 	return result, nil
 }

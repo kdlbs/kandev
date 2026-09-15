@@ -838,6 +838,10 @@ func TestSendQueuedNowConflictsAfterFIFOHandoffAccepted(t *testing.T) {
 	}
 	select {
 	case <-preClaimEntered:
+		// GetExecutionIDForSession fires before claimSessionRunningForPrompt
+		// acquires the cancelInFlight guard. Blocking here lets Send Now detect
+		// the accepted FIFO reservation without waiting on the guard held through
+		// provider acceptance.
 	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for FIFO prompt claim barrier")
 	}

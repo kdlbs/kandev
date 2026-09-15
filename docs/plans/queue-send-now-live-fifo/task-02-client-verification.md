@@ -134,6 +134,9 @@ any shared settings; prefer per-session overrides on disposable records.
 - `pnpm exec vitest run lib/api/domains/queue-api.test.ts`: 30 tests passed,
   including an actual `WebSocketRequestError` with `send_now_conflict`.
 - Web typecheck, Prettier, and targeted ESLint passed.
+- `cd apps/web && pnpm run typecheck`
+- `cd apps/web && pnpm exec prettier --check e2e/tests/chat/message-queue-workflow-helpers.ts lib/api/domains/queue-api.test.ts`
+- `cd apps/web && pnpm exec eslint e2e/tests/chat/message-queue-workflow-helpers.ts lib/api/domains/queue-api.test.ts`
 - Chromium Send Now subset: 3 tests passed.
 - Mobile Chrome Send Now subset: 3 tests passed, including the touch-sized
   visible action and overflow assertion.
