@@ -64,12 +64,9 @@ async function assertUserVisibleFailure(page: Page, taskId: string, expected: Re
   const session = new SessionPage(page);
   await session.waitForLoad(30_000);
   const chat = session.activeChat();
-  const recoveryAction = chat.locator(
-    "[data-testid='recovery-resume-button'], [data-testid='recovery-fresh-button'], [data-testid='recovery-restart-button']",
+  const recoveryRows = chat.locator(
+    "[data-testid='session-recovery-action-message']:has([data-testid='recovery-resume-button'], [data-testid='recovery-fresh-button'], [data-testid='recovery-restart-button'])",
   );
-  const recoveryRows = chat.locator("[data-testid='session-recovery-action-message']").filter({
-    has: recoveryAction,
-  });
   await expect(recoveryRows).toHaveCount(1, { timeout: 30_000 });
   const recovery = recoveryRows.first();
   await expect(recovery).toBeVisible();
