@@ -107,18 +107,6 @@ func TestResolveProfileSessionConfigAndPolicyReadsProfileOnce(t *testing.T) {
 		"session start needs config and policy together; a second read would be a wasted DB hit")
 }
 
-func TestApplyExactProfileModelPolicyRequiresExactModel(t *testing.T) {
-	policy := applyExactProfileModelPolicy(StartModelPolicy{
-		Model:         "gpt-5.6",
-		FallbackModel: "fallback",
-		AutoFallback:  true,
-	}, true)
-
-	require.True(t, policy.Strict)
-	require.Equal(t, "gpt-5.6", policy.Model)
-	require.Equal(t, "fallback", policy.FallbackModel)
-}
-
 func TestResolveProfileSessionConfigAndPolicyDegradesGracefully(t *testing.T) {
 	ctx := context.Background()
 

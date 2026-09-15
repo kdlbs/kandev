@@ -3007,6 +3007,20 @@ func (s *Service) switchSessionForStepWithPolicies(
 	startPolicy models.WorkflowProfileSessionStartPolicy,
 	endPolicy models.WorkflowProfileSessionEndPolicy,
 ) (*models.TaskSession, error) {
+	return s.switchSessionForStepWithPoliciesAndCandidate(
+		ctx, taskID, currentSession, newAgentProfileID, startPolicy, endPolicy, nil,
+	)
+}
+
+func (s *Service) switchSessionForStepWithPoliciesAndCandidate(
+	ctx context.Context,
+	taskID string,
+	currentSession *models.TaskSession,
+	newAgentProfileID string,
+	startPolicy models.WorkflowProfileSessionStartPolicy,
+	endPolicy models.WorkflowProfileSessionEndPolicy,
+	validatedExisting *models.TaskSession,
+) (*models.TaskSession, error) {
 	startPolicy = models.NormalizeWorkflowProfileSessionStartPolicy(string(startPolicy))
 	endPolicy = models.NormalizeWorkflowProfileSessionEndPolicy(string(endPolicy))
 	s.logger.Info("switching session for workflow step agent profile change",
@@ -3018,13 +3032,17 @@ func (s *Service) switchSessionForStepWithPolicies(
 		zap.String("profile_session_end_policy", string(endPolicy)))
 	var existing *models.TaskSession
 	if startPolicy == models.WorkflowProfileSessionStartPolicyReuse {
-		var lookupErr error
-		existing, lookupErr = s.findReusableSessionForProfile(ctx, taskID, newAgentProfileID, currentSession.ID)
-		if lookupErr != nil {
-			s.logger.Warn("failed to look up reusable session, falling through to create new",
-				zap.String("task_id", taskID),
-				zap.String("agent_profile_id", newAgentProfileID),
-				zap.Error(lookupErr))
+		if validatedExisting != nil {
+			existing = validatedExisting
+		} else {
+			var lookupErr error
+			existing, lookupErr = s.findReusableSessionForProfile(ctx, taskID, newAgentProfileID, currentSession.ID)
+			if lookupErr != nil {
+				s.logger.Warn("failed to look up reusable session, falling through to create new",
+					zap.String("task_id", taskID),
+					zap.String("agent_profile_id", newAgentProfileID),
+					zap.Error(lookupErr))
+			}
 		}
 	}
 	targetSession := currentSession
@@ -3770,13 +3788,28 @@ func (s *Service) prepareWorkflowStepSession(
 	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
 	startPolicy := s.resolveStepProfileSessionStartPolicy(step)
 	if shouldKeepCurrentWorkflowStepSession(effectiveProfile, session.AgentProfileID, startPolicy) {
+		requiresFreshSession, err := s.workflowEntryRequiresFreshExactModelSession(ctx, session, step, sourceStep, effectiveProfile)
+		if err != nil {
+			return nil, false, err
+		}
+		if requiresFreshSession {
+			if sourceStep == nil {
+				return nil, false, fmt.Errorf("workflow profile switch source step is unavailable")
+			}
+			endPolicy := s.resolveStepProfileSessionEndPolicy(sourceStep)
+			return s.replaceExactModelWorkflowStepSession(ctx, taskID, session, step, effectiveProfile, endPolicy, entryIDs...)
+		}
 		return s.keepCurrentWorkflowStepSession(ctx, taskID, session, step, entryIDs...)
 	}
 	if sourceStep == nil {
 		return nil, false, fmt.Errorf("workflow profile switch source step is unavailable")
 	}
+	startPolicy, validatedExisting, err := s.exactModelWorkflowStartPolicy(ctx, taskID, session.ID, step, sourceStep, effectiveProfile, startPolicy)
+	if err != nil {
+		return nil, false, err
+	}
 	endPolicy := s.resolveStepProfileSessionEndPolicy(sourceStep)
-	newSession, err := s.switchSessionForStepWithPolicies(ctx, taskID, session, effectiveProfile, startPolicy, endPolicy)
+	newSession, err := s.switchSessionForStepWithPoliciesAndCandidate(ctx, taskID, session, effectiveProfile, startPolicy, endPolicy, validatedExisting)
 	if err != nil {
 		return nil, false, err
 	}
@@ -3784,6 +3817,122 @@ func (s *Service) prepareWorkflowStepSession(
 		return nil, false, err
 	}
 	return newSession, true, nil
+}
+
+// replaceExactModelWorkflowStepSession creates a clean session for a step whose
+// profile matches the current session but whose persisted runtime model drifted
+// from the profile's configured model. It shares the switch path's source
+// binding semantics so entry routing observes one uniform hand-off.
+func (s *Service) replaceExactModelWorkflowStepSession(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	step *wfmodels.WorkflowStep,
+	profileID string,
+	endPolicy models.WorkflowProfileSessionEndPolicy,
+	entryIDs ...int64,
+) (*models.TaskSession, bool, error) {
+	newSession, err := s.createNewSessionForStepWithEndPolicy(ctx, taskID, session, profileID, endPolicy)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := s.recordWorkflowSourceBinding(ctx, taskID, step, newSession, entryIDs...); err != nil {
+		return nil, false, err
+	}
+	return newSession, true, nil
+}
+
+func (s *Service) exactModelWorkflowStartPolicy(
+	ctx context.Context,
+	taskID, currentSessionID string,
+	step, sourceStep *wfmodels.WorkflowStep,
+	profileID string,
+	startPolicy models.WorkflowProfileSessionStartPolicy,
+) (models.WorkflowProfileSessionStartPolicy, *models.TaskSession, error) {
+	if startPolicy != models.WorkflowProfileSessionStartPolicyReuse {
+		return startPolicy, nil, nil
+	}
+	existing, err := s.findReusableSessionForProfile(ctx, taskID, profileID, currentSessionID)
+	if err != nil {
+		s.logger.Warn("failed to inspect reusable session for exact model identity",
+			zap.String("task_id", taskID),
+			zap.String("agent_profile_id", profileID),
+			zap.Error(err))
+		return startPolicy, nil, fmt.Errorf("find reusable session for exact model identity: %w", err)
+	}
+	if existing == nil {
+		// The lookup above is the validated candidate decision. Do not return
+		// reuse with a nil candidate, because the switch path would perform a
+		// second lookup against a potentially changed session set.
+		return models.WorkflowProfileSessionStartPolicyNew, nil, nil
+	}
+	requiresFreshSession, err := s.workflowEntryRequiresFreshExactModelSession(ctx, existing, step, sourceStep, profileID)
+	if err != nil {
+		return startPolicy, nil, err
+	}
+	if requiresFreshSession {
+		return models.WorkflowProfileSessionStartPolicyNew, nil, nil
+	}
+	return startPolicy, existing, nil
+}
+
+// workflowEntryRequiresFreshExactModelSession prevents a workflow lane from
+// resuming a parked session whose persisted provider model disagrees with the
+// profile's configured model policy. Explicit session overrides remain valid
+// within a lane; this boundary applies only while entering a different workflow
+// step. Auto-fallback profiles intentionally allow provider-default reuse, but
+// explicit fallback profiles may reuse only the configured model or fallback.
+func (s *Service) workflowEntryRequiresFreshExactModelSession(
+	ctx context.Context,
+	session *models.TaskSession,
+	step, sourceStep *wfmodels.WorkflowStep,
+	profileID string,
+) (bool, error) {
+	if session == nil || step == nil || sourceStep == nil || sourceStep.ID == step.ID || profileID == "" {
+		return false, nil
+	}
+	drifted, err := s.sessionHasUnauthorizedExactModelDrift(ctx, session, profileID)
+	if err != nil || !drifted {
+		return drifted, err
+	}
+	profile, err := s.agentManager.ResolveAgentProfile(ctx, profileID)
+	if err != nil {
+		return false, fmt.Errorf("resolve exact workflow profile %q: %w", profileID, err)
+	}
+	effective, _ := models.LoadEffectiveSessionRuntimeConfig(session)
+	s.logger.Info("creating fresh workflow session for exact model identity",
+		zap.String("session_id", session.ID),
+		zap.String("profile_id", profileID),
+		zap.String("source_step_id", sourceStep.ID),
+		zap.String("target_step_id", step.ID),
+		zap.String("configured_model", profile.Model),
+		zap.String("persisted_model", effective.Model))
+	return true, nil
+}
+
+func (s *Service) sessionHasUnauthorizedExactModelDrift(
+	ctx context.Context,
+	session *models.TaskSession,
+	profileID string,
+) (bool, error) {
+	if session == nil || profileID == "" {
+		return false, nil
+	}
+	profile, err := s.agentManager.ResolveAgentProfile(ctx, profileID)
+	if err != nil {
+		return false, fmt.Errorf("resolve exact workflow profile %q: %w", profileID, err)
+	}
+	if profile == nil {
+		return false, fmt.Errorf("resolve exact workflow profile %q: profile is unavailable", profileID)
+	}
+	if profile.Model == "" || profile.AutoFallback {
+		return false, nil
+	}
+	effective, ok := models.LoadEffectiveSessionRuntimeConfig(session)
+	if !ok || effective.Model == "" || effective.Model == profile.Model {
+		return false, nil
+	}
+	return profile.FallbackModel == "" || effective.Model != profile.FallbackModel, nil
 }
 
 func (s *Service) keepCurrentWorkflowStepSession(
@@ -3844,7 +3993,16 @@ func (s *Service) preflightWorkflowStepCredentials(
 	effectiveProfile := s.resolveStepAgentProfile(ctx, targetStep)
 	startPolicy := s.resolveStepProfileSessionStartPolicy(targetStep)
 	if shouldKeepCurrentWorkflowStepSession(effectiveProfile, currentSession.AgentProfileID, startPolicy) {
-		return nil
+		if effectiveProfile == "" || startPolicy != models.WorkflowProfileSessionStartPolicyReuse {
+			return nil
+		}
+		drifted, err := s.sessionHasUnauthorizedExactModelDrift(ctx, currentSession, effectiveProfile)
+		if err != nil {
+			return err
+		}
+		if !drifted {
+			return nil
+		}
 	}
 	targetSession := currentSession
 	if startPolicy == models.WorkflowProfileSessionStartPolicyReuse {
