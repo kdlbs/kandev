@@ -50,8 +50,10 @@ document's own "Out of scope" section for the full list.
 ## Work orders
 
 - [x] [Task 01: Needs-you Inbox delivery](task-01-needs-you-inbox-delivery.md)
+- [x] [Task 02: Fix background-refresh loading state](task-02-fix-background-refresh-loading-state.md)
 
-Single work order; no dependents.
+Task 02 depends on Task 01 and fixes a `resolveViewMode` / WS-coalescing
+regression against AC .19-.21; see its own file for scope and verification.
 
 ## Verification results
 
