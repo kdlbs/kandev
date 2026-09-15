@@ -71,11 +71,10 @@ function stubApis() {
   fetchUserSettingsMock.mockResolvedValue(null);
 }
 
-// CR-001 (round 4 review): `SettingsRouteBootstrap` used to hydrate
-// `workspaces.activeId` directly, bypassing `setActiveWorkspace` and leaving
-// `activeIdRevision` unbumped. Consumers keyed on that revision (the
-// Failed-inbox cache) could then render a stale, pre-switch snapshot after
-// navigating through Settings instead of a real `setActiveWorkspace` call.
+// `SettingsRouteBootstrap` used to hydrate `workspaces.activeId` directly,
+// bypassing `setActiveWorkspace` and leaving `activeIdRevision` unbumped.
+// Consumers keyed on that revision (the Failed-inbox cache) could then render
+// a stale, pre-switch snapshot after navigating through Settings.
 describe("SettingsRouteBootstrap", () => {
   it("routes the resolved active workspace through setActiveWorkspace, bumping activeIdRevision", async () => {
     stubApis();

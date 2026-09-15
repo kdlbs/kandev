@@ -56,11 +56,10 @@ function makeWrapper(initialActiveId: string | null) {
   return { Wrapper, getStore: () => captured };
 }
 
-// CR-001 (round 4 review): `useOfficeRouteBootstrap` used to hydrate
-// `workspaces.activeId` directly, bypassing `setActiveWorkspace` and leaving
-// `activeIdRevision` unbumped. Consumers keyed on that revision (the
-// Failed-inbox cache) could then render a stale, pre-switch snapshot after
-// navigating through Office instead of a real `setActiveWorkspace` call.
+// `useOfficeRouteBootstrap` used to hydrate `workspaces.activeId` directly,
+// bypassing `setActiveWorkspace` and leaving `activeIdRevision` unbumped.
+// Consumers keyed on that revision (the Failed-inbox cache) could then render
+// a stale, pre-switch snapshot after navigating through Office.
 describe("useOfficeRouteBootstrap", () => {
   it("routes the resolved active workspace through setActiveWorkspace, bumping activeIdRevision", async () => {
     getOnboardingStateMock.mockResolvedValue({ completed: true });

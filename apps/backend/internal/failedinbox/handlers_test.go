@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gin-gonic/gin"
 	"github.com/kandev/kandev/internal/authz"
@@ -216,7 +217,7 @@ func TestHttpListFailedInbox_ReasonSanitizedAndTruncated(t *testing.T) {
 		} `json:"rows"`
 	}
 	decodeFailedInboxBody(t, rec, &body)
-	if len(body.Rows[0].Reason) != 512 {
-		t.Errorf("expected the reason truncated to 512 code points, got length %d", len(body.Rows[0].Reason))
+	if got := utf8.RuneCountInString(body.Rows[0].Reason); got != 512 {
+		t.Errorf("expected the reason truncated to 512 code points, got length %d", got)
 	}
 }

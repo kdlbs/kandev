@@ -82,6 +82,20 @@ describe("FailedInboxRow", () => {
     expect(screen.getByTestId("failed-inbox-unknown-time")).not.toBeNull();
   });
 
+  it("states the failure time is unknown for a syntactically malformed wire value rather than rendering Date's lenient parse of it", () => {
+    // `new Date("0")` parses to 1970, not NaN, so a naive `formatRelativeTime`
+    // call would render a plausible-but-wrong age instead of the fallback.
+    render(<FailedInboxRow row={row({ failure_instant: "0" })} />);
+    expect(screen.getByTestId("failed-inbox-unknown-time")).not.toBeNull();
+  });
+
+  it("states the failure time is unknown for a calendar-invalid wire value Date.parse would otherwise normalize", () => {
+    // `new Date("2026-02-30T10:00:00Z")` normalizes to March 2 instead of
+    // rejecting the nonexistent date.
+    render(<FailedInboxRow row={row({ failure_instant: "2026-02-30T10:00:00Z" })} />);
+    expect(screen.getByTestId("failed-inbox-unknown-time")).not.toBeNull();
+  });
+
   it("carries a session id in the task href when the row has none, since the row model carries none", () => {
     render(<FailedInboxRow row={row()} />);
     const link = screen.getByTestId("failed-inbox-open-task") as HTMLAnchorElement;

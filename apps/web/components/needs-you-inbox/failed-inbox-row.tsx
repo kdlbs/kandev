@@ -6,6 +6,7 @@ import Link from "@/components/routing/app-link";
 import { formatRelativeTime } from "@/lib/i18n/formats";
 import { getTaskStateIcon } from "@/lib/ui/state-icons";
 import { FAILED_TASK_STATUS } from "@/lib/threads/thread-session-status";
+import { parseStrictRfc3339Timestamp } from "@/lib/utils/strict-timestamp";
 import {
   failedInboxOriginMarkerKey,
   hasResolvableFailedInboxReason,
@@ -24,7 +25,15 @@ export function FailedInboxRow({ row }: { row: FailedInboxRowData }) {
   const reasonText = hasResolvableFailedInboxReason(row.reason)
     ? row.reason
     : t("failedInbox:reasonUnknown");
-  const relativeTime = row.failure_instant ? formatRelativeTime(row.failure_instant) : null;
+  // Date.parse (which formatRelativeTime's `new Date(...)` uses internally)
+  // normalizes malformed or non-RFC3339 wire values -- e.g. "0" becomes 1970
+  // and "2026-02-30" becomes March 2 -- into a plausible but wrong instant
+  // instead of failing, so shape validation must happen first or the unknown-
+  // time fallback below is silently bypassed.
+  const relativeTime =
+    row.failure_instant && parseStrictRfc3339Timestamp(row.failure_instant) !== null
+      ? formatRelativeTime(row.failure_instant)
+      : null;
 
   return (
     <div className="flex items-center gap-3 px-4 py-2.5" data-testid="failed-inbox-row">
