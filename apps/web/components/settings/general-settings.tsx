@@ -50,6 +50,7 @@ import { mapUserSettingsResponse } from "@/lib/ssr/user-settings";
 import { compareUserSettingsRevisions } from "@/lib/settings/user-settings-revision";
 import {
   appearanceRevision,
+  parseSidebarHoverDelay,
   buildAppearanceUserSettingsPatch,
   createAppearanceSavedState,
   rebaseAppearanceDraft,
@@ -299,10 +300,14 @@ function useAppearanceSaveContributor({
   const previewRichOutputAnimations = useAppStore((state) => state.previewRichOutputAnimations);
   const commitRichOutputAnimations = useAppStore((state) => state.commitRichOutputAnimations);
   const restoreRichOutputAnimations = useAppStore((state) => state.restoreRichOutputAnimations);
+  const { t } = useTranslation();
+  const delayValid = parseSidebarHoverDelay(draft.sidebarHoverDelayMs) !== null;
   const revision = appearanceRevision(draft);
 
   useSettingsSaveContributor({
     id: "general-appearance",
+    canSave: delayValid,
+    invalidReason: delayValid ? undefined : t("settings:sidebarHoverDelayError"),
     order: 10,
     revision,
     isDirty: revision !== appearanceRevision(saved),

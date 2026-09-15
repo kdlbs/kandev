@@ -58,6 +58,7 @@ func TestFullWorkerPreparationClonesBeforeCachesAndRetainsWorkspace(t *testing.T
 	if err := os.MkdirAll(bin, 0755); err != nil {
 		t.Fatal(err)
 	}
+	installMetadataRestrictedCopy(t, bin)
 	if err := os.WriteFile(filepath.Join(bin, "docker"), []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
 		t.Fatal(err)
 	}
