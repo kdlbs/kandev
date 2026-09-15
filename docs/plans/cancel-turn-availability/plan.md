@@ -222,10 +222,33 @@ Review fixup and delivery validation for PR #3705:
 - At implementation head `96ff68d3f5b35704065e3aa43fefcf383f8a4e92`,
   authenticated connector evidence reported no failed workflow runs; Backend
   Tests and E2E Tests were queued or pending, while Frontend Tests and Preview
-  Environment were in progress. The later docs-only push reset the workflow
-  rollup. The managed `pr-await` check could not complete its final rollup
-  because GitHub's status policy API rate limit was reached, so remote CI for
-  the latest head remains pending or unknown rather than green.
+  Environment were in progress. The later docs-only push reset that workflow
+  rollup. This historical snapshot was pending or unknown at the time and is
+  superseded by the CI remediation results below.
+
+CI remediation results on 2026-09-16:
+
+- CI reproduced two deterministic stale assertions after the cancellation
+  status was made accessible: the task-switch and mobile-reload regressions
+  still expected the generic `Loading` status while the UI exposed the
+  translated `Cancelling...` status. Both now assert the cancellation status.
+- CI also exposed a retry-only Kanban propagation race in
+  `session-resume-cli-fallback.spec.ts`. The test now navigates directly to the
+  API-created task route, avoiding a separate websocket list refresh while
+  retaining the persisted-session assertions.
+- The latest `main` tip `02120b907c68f243b4f70f34b73d9fffef2a6385` was merged
+  into the branch in merge commit `145b39f89031cc66d4bb9b614a705f99f009b6ae`.
+  The E2E fix commit is `fb1cd3cecc`.
+- Local managed E2E validation passed: the desktop task-switch and resume
+  regressions passed together, the mobile reload regression passed, and the
+  resume regression passed three consecutive times.
+- PR #3705 is green at head `145b39f89031cc66d4bb9b614a705f99f009b6ae`:
+  50 checks passed, including all 14 E2E shards, the E2E aggregate, frontend,
+  backend, architecture, action-pinning, harness, and documentation coverage;
+  zero checks failed or remained pending, and no review threads are unresolved.
+- The first documentation coverage publisher attempt failed without a
+  validator error and was rerun successfully. No source change was needed for
+  that transient workflow failure.
 
 The repo-wide `pnpm run lint:e2e-sleeps` audit still reports unrelated baseline
 errors in other files, including missing rule definitions and existing

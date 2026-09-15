@@ -153,3 +153,7 @@ steering delivery. Palette sources do not deduplicate matching command IDs.
   composer target, composer containment, screenshot capture, and no horizontal
   overflow. Quick Chat direct composer coverage is recorded in Task 02 because
   it shares the Quick Chat palette fixture.
+- CI follow-up corrected the existing desktop task-switch and mobile reload
+  assertions to expect the translated `Cancelling...` status exposed by the
+  cancellation spinner. Both passed in the PR E2E matrix, including all 14
+  shards.
