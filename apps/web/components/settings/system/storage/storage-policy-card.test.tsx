@@ -454,7 +454,7 @@ describe("StoragePolicyCard interactions", () => {
     ]) {
       expect(screen.getByText(heading)).toBeTruthy();
     }
-    expect(screen.getAllByLabelText(/^More information about /)).toHaveLength(19);
+    expect(screen.getAllByLabelText(/^More information about /)).toHaveLength(24);
   });
 });
 
