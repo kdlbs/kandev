@@ -1603,14 +1603,16 @@ func (s *Service) admitTriggerLocked(
 	return run, "", false, nil
 }
 
-// skipAuditDedupKey returns the dedup key to persist on a skip-status audit
-// row. HasRunWithDedupKey counts any row with a matching dedup key regardless
-// of status, so a skip row that kept the key would permanently block
-// re-admission of that key — including after the run that actually produced
-// it is deleted. For webhook and github_pr_merged, deleting a run is the
-// documented way to reprocess a dedup'd delivery, so their skip rows must not
-// carry the key that would defeat that.
-func skipAuditDedupKey(triggerType TriggerType, dedupKey string) string {
+// PreTaskCreationDedupKey returns the dedup key to persist on an audit row
+// recorded before any task exists for the firing — a duplicate-skip row, a
+// capacity-skip row, or a failed-run row recorded outside the primary
+// MarkRunTerminal path. HasRunWithDedupKey counts any row with a matching
+// dedup key regardless of status, so such a row that kept the key would
+// permanently block re-admission of that key — including after the run that
+// actually produced it is deleted. For webhook and github_pr_merged, deleting
+// a run is the documented way to reprocess a dedup'd delivery, so these rows
+// must not carry the key that would defeat that.
+func PreTaskCreationDedupKey(triggerType TriggerType, dedupKey string) string {
 	if triggerType == TriggerTypeGitHubPRMerged || triggerType == TriggerTypeWebhook {
 		return ""
 	}
@@ -1629,7 +1631,7 @@ func (s *Service) recordDuplicateSkippedTrigger(
 		TriggerID:    triggerID,
 		TriggerType:  triggerType,
 		Status:       RunStatusSkipped,
-		DedupKey:     skipAuditDedupKey(triggerType, dedupKey),
+		DedupKey:     PreTaskCreationDedupKey(triggerType, dedupKey),
 		TriggerData:  triggerData,
 		ErrorMessage: "duplicate trigger: dedup key already fired",
 		DisplayTitle: RenderRunDisplayTitle(a, triggerType, triggerData),
@@ -1667,7 +1669,7 @@ func (s *Service) recordSkippedTrigger(
 		TriggerID:    triggerID,
 		TriggerType:  triggerType,
 		Status:       RunStatusSkipped,
-		DedupKey:     skipAuditDedupKey(triggerType, dedupKey),
+		DedupKey:     PreTaskCreationDedupKey(triggerType, dedupKey),
 		DedupReason:  dedupReason,
 		TriggerData:  triggerData,
 		ErrorMessage: reason,

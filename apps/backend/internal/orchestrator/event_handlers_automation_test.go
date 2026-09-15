@@ -627,6 +627,22 @@ func TestRecordFailedRun_MergedPRDoesNotConsumeDedupKey(t *testing.T) {
 	require.Empty(t, autoSvc.runs[0].DedupKey)
 }
 
+// Webhook is the trigger type whose delete-and-retry recovery flow this
+// blanking rule protects (crashlytics-alerts.md documents "delete a run...
+// to reprocess one"); it must not leak the key on this fallback path any
+// more than github_pr_merged does above.
+func TestRecordFailedRun_WebhookDoesNotConsumeDedupKey(t *testing.T) {
+	autoSvc := &stubAutomationService{}
+	svc := &Service{automationService: autoSvc}
+	svc.recordFailedRun(context.Background(), &automation.AutomationTriggeredEvent{
+		AutomationID: "a-webhook", TriggerID: "trg-webhook", TriggerType: automation.TriggerTypeWebhook,
+		DedupKey: "webhook:alert-1", TriggerData: json.RawMessage(`{}`),
+	}, "no repository available")
+
+	require.Len(t, autoSvc.runs, 1)
+	require.Empty(t, autoSvc.runs[0].DedupKey)
+}
+
 func TestRecordFailedRun_OtherTriggerKeepsDedupKey(t *testing.T) {
 	autoSvc := &stubAutomationService{}
 	svc := &Service{automationService: autoSvc}
