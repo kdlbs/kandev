@@ -265,6 +265,105 @@ func TestActionsHandoff_CreatesTaskRecordsReverseLinkAndLogsActivity(t *testing.
 	}
 }
 
+// TestValidateHandoffShape is D3a step 2 (the R1 table): every required-field
+// and shape check validateHandoffShape performs before any dependency is
+// consulted, including AC-CROSS-WORKSPACE-TASK-HANDOFF-CLI-ROUTE-001.12's
+// title-length boundary (60 runes shall pass, 61 shall be rejected naming
+// both the limit and the actual rune length).
+func TestValidateHandoffShape(t *testing.T) {
+	blank := ""
+	title60 := strings.Repeat("a", 60)
+	title61 := strings.Repeat("a", 61)
+
+	tests := []struct {
+		name    string
+		mutate  func(*HandoffRequest)
+		wantErr string
+	}{
+		{
+			name:    "missing target_workspace_id",
+			mutate:  func(r *HandoffRequest) { r.TargetWorkspaceID = "  " },
+			wantErr: "target_workspace_id is required",
+		},
+		{
+			name:    "missing workflow_id",
+			mutate:  func(r *HandoffRequest) { r.WorkflowID = "" },
+			wantErr: "workflow_id is required",
+		},
+		{
+			name:    "missing title",
+			mutate:  func(r *HandoffRequest) { r.Title = "   " },
+			wantErr: "title is required",
+		},
+		{
+			name:    "title exactly 60 runes is accepted",
+			mutate:  func(r *HandoffRequest) { r.Title = title60 },
+			wantErr: "",
+		},
+		{
+			name:    "title of 61 runes is rejected naming limit and actual length",
+			mutate:  func(r *HandoffRequest) { r.Title = title61 },
+			wantErr: "title must be 60 characters or fewer (got 61)",
+		},
+		{
+			name:    "missing prompt",
+			mutate:  func(r *HandoffRequest) { r.Prompt = "" },
+			wantErr: "prompt is required",
+		},
+		{
+			name:    "missing agent_profile_id",
+			mutate:  func(r *HandoffRequest) { r.AgentProfileID = "" },
+			wantErr: "agent_profile_id is required",
+		},
+		{
+			name:    "missing executor_profile_id",
+			mutate:  func(r *HandoffRequest) { r.ExecutorProfileID = "" },
+			wantErr: "executor_profile_id is required",
+		},
+		{
+			name:    "blank repository_id when supplied",
+			mutate:  func(r *HandoffRequest) { r.RepositoryID = &blank },
+			wantErr: "repository_id must not be blank when supplied",
+		},
+		{
+			name:    "blank base_branch when supplied",
+			mutate:  func(r *HandoffRequest) { r.BaseBranch = &blank },
+			wantErr: "base_branch must not be blank when supplied",
+		},
+		{
+			name:    "blank external_id when supplied",
+			mutate:  func(r *HandoffRequest) { r.ExternalID = &blank },
+			wantErr: "external_id must not be blank when supplied",
+		},
+		{
+			name:    "fully valid request",
+			mutate:  func(_ *HandoffRequest) {},
+			wantErr: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := baseHandoffRequest()
+			tt.mutate(&req)
+
+			_, err := validateHandoffShape(req)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("validateHandoffShape() error = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("validateHandoffShape() error = nil, want %q", tt.wantErr)
+			}
+			if err.Error() != tt.wantErr {
+				t.Errorf("validateHandoffShape() error = %q, want %q", err.Error(), tt.wantErr)
+			}
+		})
+	}
+}
+
 // TestActionsHandoff_SameWorkspaceRefused is AC-22: D3a step 3 rejects a
 // same-workspace target before any dependency is consulted.
 func TestActionsHandoff_SameWorkspaceRefused(t *testing.T) {
