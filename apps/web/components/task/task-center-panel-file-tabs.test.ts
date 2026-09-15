@@ -33,7 +33,7 @@ describe("upsertOpenFileTab", () => {
   it.each([
     [{ previous: "target.txt", next: undefined }, "symlink to regular file"],
     [{ previous: undefined, next: "target.txt" }, "regular file to symlink"],
-  ] as const)("refreshes resolvedPath for an existing clean tab (%s)", (paths) => {
+  ] as const)("refreshes resolvedPath for an existing clean tab (%s)", (paths, _label) => {
     const existing = { ...file, resolvedPath: paths.previous };
     const refreshed = { ...file, resolvedPath: paths.next, content: "fresh content" };
 
