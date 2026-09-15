@@ -15,11 +15,23 @@ type Capabilities struct {
 	Enrich  bool
 }
 
-// fieldCapabilities is the FieldError.Field value for all five capability
-// codes (MissingCapability plus the four CheckCapabilities codes) — none of
-// them names a sub-part of Capabilities, so one shared path is correct, not
-// merely deduplicated.
+// fieldCapabilities is the FieldError.Field value for MissingCapability and
+// NilSource: neither describes a single capability axis, so one shared path
+// is correct, not merely deduplicated. CapabilityNotImplemented and
+// CapabilityNotDeclared instead use the per-axis fieldCapabilitiesPoll/
+// fieldCapabilitiesEnrich below — two errors both scoped to "Capabilities"
+// would tie on Field, Code AND Message when Poll and Enrich disagree the
+// same way at once, leaving sortFieldErrors' documented tiebreak with
+// nothing left to break the tie on and the result undiagnosable.
 const fieldCapabilities = "Capabilities"
+
+// fieldCapabilitiesPoll and fieldCapabilitiesEnrich are CheckCapabilities'
+// per-axis Field values (see fieldCapabilities above for why they are not
+// the shared constant).
+const (
+	fieldCapabilitiesPoll   = "Capabilities.Poll"
+	fieldCapabilitiesEnrich = "Capabilities.Enrich"
+)
 
 // Descriptor is a Source's static declaration: identity, the field spec
 // governing its configuration, how it participates in dedup
@@ -183,23 +195,23 @@ func CheckCapabilities(d Descriptor, s Source) error {
 	}
 	var errs []FieldError
 	_, isPoller := s.(Poller)
-	errs = append(errs, capabilityAgreement(d.Capabilities.Poll, isPoller)...)
+	errs = append(errs, capabilityAgreement(fieldCapabilitiesPoll, d.Capabilities.Poll, isPoller)...)
 	_, isEnricher := s.(Enricher)
-	errs = append(errs, capabilityAgreement(d.Capabilities.Enrich, isEnricher)...)
+	errs = append(errs, capabilityAgreement(fieldCapabilitiesEnrich, d.Capabilities.Enrich, isEnricher)...)
 	return newSpecError(errs)
 }
 
-func capabilityAgreement(declared, implemented bool) []FieldError {
+func capabilityAgreement(field string, declared, implemented bool) []FieldError {
 	switch {
 	case declared && !implemented:
 		return []FieldError{{
-			Field:   fieldCapabilities,
+			Field:   field,
 			Code:    ErrCodeCapabilityNotImplemented,
 			Message: "capability declared but not implemented",
 		}}
 	case !declared && implemented:
 		return []FieldError{{
-			Field:   fieldCapabilities,
+			Field:   field,
 			Code:    ErrCodeCapabilityNotDeclared,
 			Message: "capability implemented but not declared",
 		}}

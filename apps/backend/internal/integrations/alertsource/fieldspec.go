@@ -118,7 +118,7 @@ func (s *FieldSpec) Validate() error {
 			errs = append(errs, FieldError{
 				Field:   e.name,
 				Code:    ErrCodeInvalidFieldName,
-				Message: "field name must start with a lowercase letter and contain only lowercase letters, digits and underscores",
+				Message: "field name must contain only letters, digits and underscores",
 			})
 		}
 		// A7: reported once per repeated DECLARATION after the first, with
@@ -165,14 +165,14 @@ func validateFieldEntry(e fieldEntry) []FieldError {
 		errs = append(errs, FieldError{
 			Field:   e.name,
 			Code:    ErrCodeDefaultKindMismatch,
-			Message: fmt.Sprintf("default value %v does not match field kind %s", e.defaultVal, e.kind.tag()),
+			Message: fmt.Sprintf("default value does not match field kind %s", e.kind.tag()),
 		})
 	}
 	if e.hasExample && !kindMatches(e.kind, e.exampleVal) {
 		errs = append(errs, FieldError{
 			Field:   e.name,
 			Code:    ErrCodeExampleKindMismatch,
-			Message: fmt.Sprintf("example value %v does not match field kind %s", e.exampleVal, e.kind.tag()),
+			Message: fmt.Sprintf("example value does not match field kind %s", e.kind.tag()),
 		})
 	}
 	return errs

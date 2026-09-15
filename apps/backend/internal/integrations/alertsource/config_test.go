@@ -99,6 +99,28 @@ func TestValidateConfig_EmptySecretRejectedBothModes(t *testing.T) {
 	}
 }
 
+func TestValidateConfig_UnknownFieldRejected(t *testing.T) {
+	raw := map[string]any{"site": "datadoghq.com", "api_token": "secret-value", "sit": "typo"}
+	_, err := ValidateConfig(basicSpec(), raw, ConfigCreate)
+	verr := assertValidationError(t, err)
+	assertValidationHasCode(t, verr, "sit", ErrCodeUnknownField)
+}
+
+func TestValidateConfig_UnknownFieldRejectedUnderUpdateToo(t *testing.T) {
+	raw := map[string]any{"site": "datadoghq.com", "sit": "typo"}
+	_, err := ValidateConfig(basicSpec(), raw, ConfigUpdate)
+	verr := assertValidationError(t, err)
+	assertValidationHasCode(t, verr, "sit", ErrCodeUnknownField)
+}
+
+func TestValidateConfig_NoUnknownFieldErrorWhenEveryKeyDeclared(t *testing.T) {
+	raw := map[string]any{"site": "datadoghq.com", "api_token": "secret-value"}
+	_, err := ValidateConfig(basicSpec(), raw, ConfigCreate)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateConfig_DefaultsApplied(t *testing.T) {
 	raw := map[string]any{"site": "datadoghq.com", "api_token": "secret-value"}
 	vc, err := ValidateConfig(basicSpec(), raw, ConfigCreate)
@@ -344,6 +366,34 @@ func TestConfig_String_RedactsEveryDeclaredFieldByName(t *testing.T) {
 	}
 	if cfg.GoString() != got {
 		t.Fatalf("GoString() must match String(): %q vs %q", cfg.GoString(), got)
+	}
+}
+
+// TestValidatedConfig_String_RedactsSecretsButNotPublic mirrors
+// TestConfig_String_RedactsEveryDeclaredFieldByName above, but for
+// ValidatedConfig: unlike Config (which merges secrets and public values
+// into one flat map and redacts every entry), ValidatedConfig keeps Public
+// and Secrets structurally separate, so only Secrets need redaction —
+// Public values must render as-is.
+func TestValidatedConfig_String_RedactsSecretsButNotPublic(t *testing.T) {
+	raw := map[string]any{"site": "datadoghq.com", "api_token": "the-secret"}
+	vc, err := ValidateConfig(basicSpec(), raw, ConfigCreate)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	got := vc.String()
+	if strings.Contains(got, "the-secret") {
+		t.Fatalf("String() leaked the real secret value: %s", got)
+	}
+	if !strings.Contains(got, "datadoghq.com") {
+		t.Fatalf("String() must not redact Public values, got %s", got)
+	}
+	want := fmt.Sprintf("{Public:map[poll_interval:30 site:datadoghq.com] Secrets:map[api_token:%s]}", secretRedactionMarker)
+	if got != want {
+		t.Fatalf("expected %q, got %q", want, got)
+	}
+	if vc.GoString() != got {
+		t.Fatalf("GoString() must match String(): %q vs %q", vc.GoString(), got)
 	}
 }
 

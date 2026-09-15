@@ -262,7 +262,9 @@ func (s *Store) classifyAttachFailure(ctx context.Context, watchID, fingerprint 
 // creation has already failed (the pipeline's own compensating action for a
 // failed CreateIssueTask, before any task ID exists to attach), so a
 // zero-row result is a no-op rather than an error — a second error here
-// would mask the first.
+// would mask the first. The added guard requiring an empty task_id, matching
+// ReleaseOrphanedReservation's, makes it structurally incapable of deleting
+// a reservation a concurrent AttachReservationTaskID has already attached.
 func (s *Store) DeleteReservation(ctx context.Context, watchID, fingerprint string) error {
 	if err := requireNonEmpty("watchID", watchID); err != nil {
 		return err
@@ -271,7 +273,7 @@ func (s *Store) DeleteReservation(ctx context.Context, watchID, fingerprint stri
 		return err
 	}
 	_, err := s.db.ExecContext(ctx, s.db.Rebind(
-		`DELETE FROM alert_reservations WHERE watch_id = ? AND fingerprint = ? AND released_at IS NULL`),
+		`DELETE FROM alert_reservations WHERE watch_id = ? AND fingerprint = ? AND released_at IS NULL AND task_id = ''`),
 		watchID, fingerprint)
 	return err
 }

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jmoiron/sqlx"
+
 	"github.com/kandev/kandev/internal/testutil"
 )
 
@@ -205,6 +207,114 @@ func TestPostgresStore_SchemaBehaviors(t *testing.T) {
 		}
 		if count != 2 {
 			t.Fatalf("expected 2 distinct live rows under case-sensitive collation, got %d", count)
+		}
+	})
+}
+
+// --- AC3: introspective exact column list (PostgreSQL) ---
+//
+// Mirrors store_test.go's PRAGMA table_info assertions under SQLite: D16
+// requires DDL introspection for exact column lists "under both dialects",
+// and information_schema.columns is PostgreSQL's equivalent catalog.
+
+type postgresColumn struct {
+	Name     string `db:"column_name"`
+	DataType string `db:"data_type"`
+	Nullable string `db:"is_nullable"`
+}
+
+func postgresTableColumns(t *testing.T, db *sqlx.DB, table string) []postgresColumn {
+	t.Helper()
+	var cols []postgresColumn
+	if err := db.Select(&cols, `
+		SELECT column_name, data_type, is_nullable
+		FROM information_schema.columns
+		WHERE table_schema = current_schema() AND table_name = $1
+		ORDER BY ordinal_position`, table); err != nil {
+		t.Fatalf("information_schema.columns(%s): %v", table, err)
+	}
+	return cols
+}
+
+func assertPostgresColumnsEqual(t *testing.T, table string, want, got []postgresColumn) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("%s: expected %d columns, got %d: %+v", table, len(want), len(got), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("%s: column %d mismatch: want %+v, got %+v", table, i, want[i], got[i])
+		}
+	}
+}
+
+func TestPostgresStore_Schema_ExactColumnLists(t *testing.T) {
+	db := testutil.OpenIsolatedPostgres(t, testutil.PostgresDSNFromEnv(t))
+	if _, err := NewStore(db, db); err != nil {
+		t.Fatalf("schema init: %v", err)
+	}
+
+	t.Run("alert_sources", func(t *testing.T) {
+		got := postgresTableColumns(t, db, "alert_sources")
+		want := []postgresColumn{
+			{Name: "id", DataType: "text", Nullable: "NO"},
+			{Name: "workspace_id", DataType: "text", Nullable: "NO"},
+			{Name: "type", DataType: "text", Nullable: "NO"},
+			{Name: "name", DataType: "text", Nullable: "NO"},
+			{Name: "config_json", DataType: "text", Nullable: "NO"},
+			{Name: "enabled", DataType: "boolean", Nullable: "NO"},
+			{Name: "health_status", DataType: "text", Nullable: "NO"},
+			{Name: "last_error", DataType: "text", Nullable: "NO"},
+			{Name: "last_error_at", DataType: "timestamp with time zone", Nullable: "YES"},
+			{Name: "created_at", DataType: "timestamp with time zone", Nullable: "NO"},
+			{Name: "updated_at", DataType: "timestamp with time zone", Nullable: "NO"},
+		}
+		assertPostgresColumnsEqual(t, "alert_sources", want, got)
+	})
+
+	t.Run("alert_watches", func(t *testing.T) {
+		got := postgresTableColumns(t, db, "alert_watches")
+		want := []postgresColumn{
+			{Name: "id", DataType: "text", Nullable: "NO"},
+			{Name: "workspace_id", DataType: "text", Nullable: "NO"},
+			{Name: "source_id", DataType: "text", Nullable: "NO"},
+			{Name: "workflow_id", DataType: "text", Nullable: "NO"},
+			{Name: "workflow_step_id", DataType: "text", Nullable: "NO"},
+			{Name: "repository_id", DataType: "text", Nullable: "NO"},
+			{Name: "base_branch", DataType: "text", Nullable: "NO"},
+			{Name: "filter_json", DataType: "text", Nullable: "NO"},
+			{Name: "agent_profile_id", DataType: "text", Nullable: "NO"},
+			{Name: "executor_profile_id", DataType: "text", Nullable: "NO"},
+			{Name: "prompt", DataType: "text", Nullable: "NO"},
+			{Name: "enabled", DataType: "boolean", Nullable: "NO"},
+			{Name: "poll_interval_seconds", DataType: "integer", Nullable: "NO"},
+			{Name: "max_inflight_tasks", DataType: "integer", Nullable: "YES"},
+			{Name: "last_polled_at", DataType: "timestamp with time zone", Nullable: "YES"},
+			{Name: "last_error", DataType: "text", Nullable: "NO"},
+			{Name: "last_error_at", DataType: "timestamp with time zone", Nullable: "YES"},
+			{Name: "created_at", DataType: "timestamp with time zone", Nullable: "NO"},
+			{Name: "updated_at", DataType: "timestamp with time zone", Nullable: "NO"},
+		}
+		assertPostgresColumnsEqual(t, "alert_watches", want, got)
+	})
+
+	t.Run("alert_reservations", func(t *testing.T) {
+		got := postgresTableColumns(t, db, "alert_reservations")
+		want := []postgresColumn{
+			{Name: "id", DataType: "text", Nullable: "NO"},
+			{Name: "watch_id", DataType: "text", Nullable: "NO"},
+			{Name: "fingerprint", DataType: "text", Nullable: "NO"},
+			{Name: "task_id", DataType: "text", Nullable: "NO"},
+			{Name: "alert_raw", DataType: "text", Nullable: "NO"},
+			{Name: "created_at", DataType: "timestamp with time zone", Nullable: "NO"},
+			{Name: "released_at", DataType: "timestamp with time zone", Nullable: "YES"},
+		}
+		assertPostgresColumnsEqual(t, "alert_reservations", want, got)
+
+		for _, c := range got {
+			if c.Name == "updated_at" {
+				t.Fatal("alert_reservations must not have an updated_at column (D14)")
+			}
 		}
 	})
 }

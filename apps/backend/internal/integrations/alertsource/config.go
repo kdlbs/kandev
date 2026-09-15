@@ -67,6 +67,23 @@ type ValidatedConfig struct {
 	Secrets map[string]string
 }
 
+// String returns a redacted rendering: Public as-is, Secrets replaced by a
+// fixed marker. fmt reaches every exported field by reflection, so %+v/%#v
+// would otherwise print Secrets' plaintext values in full without this.
+func (c ValidatedConfig) String() string { return c.redacted() }
+
+// GoString mirrors String: %#v dispatches to GoStringer, and Go's default
+// %#v rendering of an exported map would otherwise print every value.
+func (c ValidatedConfig) GoString() string { return c.redacted() }
+
+func (c ValidatedConfig) redacted() string {
+	redactedSecrets := make(map[string]string, len(c.Secrets))
+	for k := range c.Secrets {
+		redactedSecrets[k] = secretRedactionMarker
+	}
+	return fmt.Sprintf("{Public:%v Secrets:%v}", c.Public, redactedSecrets)
+}
+
 // ValidateConfig type-checks raw against spec, applies requiredness (relaxed
 // for Secret fields under ConfigUpdate per D6), and resolves declared
 // defaults. It is pure: no I/O, used at source create/update. raw is the API
@@ -81,6 +98,7 @@ func ValidateConfig(spec *FieldSpec, raw map[string]any, mode ConfigMode) (*Vali
 
 	result := &ValidatedConfig{Public: map[string]any{}, Secrets: map[string]string{}}
 	var errs []FieldError
+	errs = append(errs, checkUnknownFields(spec, raw)...)
 	for _, e := range spec.fields {
 		errs = append(errs, applyField(e, raw, mode, result)...)
 	}
@@ -122,6 +140,23 @@ func checkConfigCall(spec *FieldSpec, mode ConfigMode) error {
 		return newSpecError([]FieldError{{Field: "mode", Code: ErrCodeInvalidConfigMode, Message: "config mode must be ConfigCreate or ConfigUpdate"}})
 	}
 	return nil
+}
+
+// checkUnknownFields reports any raw key the spec does not declare, matching
+// the additionalProperties:false contract Schema emits (D9) — a key the
+// schema would reject must be rejected here too, not silently dropped.
+func checkUnknownFields(spec *FieldSpec, raw map[string]any) []FieldError {
+	declared := make(map[string]bool, len(spec.fields))
+	for _, e := range spec.fields {
+		declared[e.name] = true
+	}
+	var errs []FieldError
+	for k := range raw {
+		if !declared[k] {
+			errs = append(errs, FieldError{Field: k, Code: ErrCodeUnknownField, Message: "field is not declared by this source's config spec"})
+		}
+	}
+	return errs
 }
 
 // applyField type-checks, defaults and routes a single declared field from

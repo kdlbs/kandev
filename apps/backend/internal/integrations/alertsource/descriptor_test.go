@@ -242,13 +242,16 @@ func TestCheckCapabilities_CollectsBothPollAndEnrichMismatches(t *testing.T) {
 	d.Capabilities.Enrich = true
 	err := assertSpecError(t, CheckCapabilities(d, fakeSourceBase{}))
 	assertHasCode(t, err, ErrCodeCapabilityNotImplemented)
-	count := 0
+	fields := map[string]int{}
 	for _, fe := range err.Errors {
 		if fe.Code == ErrCodeCapabilityNotImplemented {
-			count++
+			fields[fe.Field]++
 		}
 	}
-	if count != 2 {
-		t.Fatalf("expected 2 CapabilityNotImplemented errors (Poll and Enrich), got %d: %+v", count, err.Errors)
+	if len(fields) != 2 {
+		t.Fatalf("expected 2 distinctly-identified CapabilityNotImplemented errors (Poll and Enrich), got fields %v: %+v", fields, err.Errors)
+	}
+	if fields["Capabilities.Poll"] != 1 || fields["Capabilities.Enrich"] != 1 {
+		t.Fatalf("expected exactly one CapabilityNotImplemented error each for Capabilities.Poll and Capabilities.Enrich, got %v", fields)
 	}
 }

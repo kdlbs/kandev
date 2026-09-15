@@ -312,6 +312,7 @@ func TestStore_AttachReservationTaskID_DiagnosticSelectFailureIsNeverGone(t *tes
 		t.Fatalf("open reader: %v", err)
 	}
 	reader := sqlx.NewDb(readerRaw, "sqlite3")
+	t.Cleanup(func() { _ = reader.Close() })
 
 	store, err := NewStore(writer, reader)
 	if err != nil {
@@ -377,6 +378,33 @@ func TestStore_DeleteReservation_NoOpOnMissingRow(t *testing.T) {
 	seedSourceAndWatch(t, db)
 	if err := store.DeleteReservation(context.Background(), "watch-1", testFingerprint("never-existed")); err != nil {
 		t.Fatalf("expected nil (no-op), got %v", err)
+	}
+}
+
+// TestStore_DeleteReservation_NoOpOnAttachedReservation guards the
+// task_id = ” condition against a concurrent AttachReservationTaskID: once a
+// reservation is attached to a task, DeleteReservation must leave it in
+// place rather than deleting the record a task now depends on.
+func TestStore_DeleteReservation_NoOpOnAttachedReservation(t *testing.T) {
+	store, db := newTestStore(t)
+	seedSourceAndWatch(t, db)
+	fp := testFingerprint("delete-attached")
+	if _, err := store.ReserveFingerprint(context.Background(), "watch-1", fp, nil); err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+	if err := store.AttachReservationTaskID(context.Background(), "watch-1", fp, "task-1"); err != nil {
+		t.Fatalf("attach: %v", err)
+	}
+	if err := store.DeleteReservation(context.Background(), "watch-1", fp); err != nil {
+		t.Fatalf("expected nil (no-op), got %v", err)
+	}
+	var count int
+	if err := db.Get(&count, db.Rebind(`SELECT COUNT(*) FROM alert_reservations WHERE watch_id = ? AND fingerprint = ?`),
+		"watch-1", fp); err != nil {
+		t.Fatalf("count: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected the attached reservation to survive DeleteReservation, got %d rows", count)
 	}
 }
 
