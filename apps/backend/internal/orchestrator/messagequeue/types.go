@@ -82,6 +82,9 @@ const MetadataLifecycleGeneration = "lifecycle_queue_generation"
 // but are hidden from pending queue status until acknowledged or released.
 const MetadataLifecycleReserved = "lifecycle_reserved_in_flight"
 
+const MetadataDeliveryID = "delivery_id"
+const MetadataWorkflowTransitionID = "workflow_transition_id"
+const MetadataWorkflowControl = "workflow_control"
 const metadataLifecycleReservationID = "lifecycle_reservation_id"
 
 // MetadataLifecycleReservationIncarnation binds a retained row to the
@@ -160,7 +163,8 @@ var (
 	ErrSessionIdentityMismatch = errors.New("queue session identity mismatch")
 	// ErrLifecycleCancelled means an archive/delete purge invalidated a
 	// previously accepted lifecycle entry before it could be retried.
-	ErrLifecycleCancelled = errors.New("lifecycle queue entry cancelled")
+	ErrLifecycleCancelled          = errors.New("lifecycle queue entry cancelled")
+	ErrDeliveryReceiptsUnsupported = errors.New("delivery receipts are not available")
 	// ErrQueueDispatchClaimChanged means the durable ordinary-dispatch claim
 	// was cleared or transferred before its worker attempted to settle it.
 	ErrQueueDispatchClaimChanged = errors.New("queue dispatch claim changed")
@@ -334,6 +338,14 @@ func (m *QueuedMessage) IsDurablePlanComment() bool {
 // transcript record or executor acknowledgement closes its replay window.
 func (m *QueuedMessage) IsDurableDelivery() bool {
 	return m != nil && (m.IsDurableLifecycle() || m.IsDurablePlanComment())
+}
+
+func (m *QueuedMessage) IsWorkflowControl() bool {
+	if m == nil {
+		return false
+	}
+	value, _ := m.Metadata[MetadataWorkflowControl].(bool)
+	return value
 }
 
 // IsReservedInFlight reports whether this row was retained for an in-flight

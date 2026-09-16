@@ -49,6 +49,18 @@ type Service struct {
 	editRevisions                                 map[editLeaseKey]int64
 	editRevisionTaskIDs                           map[editLeaseKey]string
 	sessionTransferCompensationLeaseRenewInterval time.Duration
+	deliveryWorkerMu                              sync.Mutex
+	deliveryWorkerCtx                             context.Context
+	deliveryWorkerCancel                          context.CancelFunc
+	deliveryWorkerStarted                         bool
+	deliveryWorkerStopped                         bool
+	deliveryWorkerWG                              sync.WaitGroup
+	deliveryWorkerInterval                        time.Duration
+	queuePromotionNotifier                        func(context.Context, string)
+}
+
+func (s *Service) SetQueuePromotionNotifier(notifier func(context.Context, string)) {
+	s.queuePromotionNotifier = notifier
 }
 
 type sessionAdmission struct {
@@ -114,6 +126,7 @@ func NewService(repo Repository, maxPerSession int, log *logger.Logger) *Service
 	service.SetMaxPerSession(maxPerSession)
 	service.mergeEnabled.Store(true)
 	service.SetAutoMergePolicy(true, 0)
+	service.deliveryWorkerInterval = time.Second
 	return service
 }
 
@@ -121,6 +134,103 @@ func NewService(repo Repository, maxPerSession int, log *logger.Logger) *Service
 // Convenience constructor for tests; cap defaults to 10 for parity with prod.
 func NewServiceMemory(log *logger.Logger) *Service {
 	return NewService(NewMemoryRepository(), DefaultMaxPerSession, log)
+}
+
+// SupportsDeliveryReceipts reports whether this queue persists cross-task
+// delivery independently of the sender turn.
+func (s *Service) SupportsDeliveryReceipts() bool {
+	_, ok := s.repo.(DeliveryLedger)
+	return ok
+}
+
+// GetDeliveryReceipt loads a receipt for a trusted caller that will project a
+// safe status view rather than exposing its content.
+func (s *Service) GetDeliveryReceipt(ctx context.Context, deliveryID string) (*Delivery, error) {
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil, ErrDeliveryReceiptsUnsupported
+	}
+	return ledger.GetDelivery(ctx, deliveryID)
+}
+
+func (s *Service) GetDeliveryReceiptBySourceKey(ctx context.Context, senderSessionID, sourceTurnID, idempotencyKey string) (*Delivery, error) {
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil, ErrDeliveryReceiptsUnsupported
+	}
+	return ledger.GetDeliveryBySourceKey(ctx, senderSessionID, sourceTurnID, idempotencyKey)
+}
+
+func (s *Service) CreateOrGetDeliveryReceipt(ctx context.Context, delivery Delivery) (*Delivery, bool, error) {
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil, false, ErrDeliveryReceiptsUnsupported
+	}
+	return ledger.CreateOrGetDelivery(ctx, delivery)
+}
+
+func (s *Service) ReserveDeliveryForDirectDispatch(ctx context.Context, deliveryID, leaseOwner string) (*Delivery, bool, error) {
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil, false, ErrEntryNotFound
+	}
+	return ledger.ReserveDeliveryForDirectDispatch(ctx, deliveryID, leaseOwner, time.Minute)
+}
+
+func (s *Service) AcknowledgeDirectDelivery(ctx context.Context, deliveryID, leaseOwner string) (*Delivery, error) {
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil, ErrEntryNotFound
+	}
+	return ledger.AcknowledgeDirectDelivery(ctx, deliveryID, leaseOwner, time.Now().UTC())
+}
+
+// MarkDirectDeliveryAcceptanceUncertain fences an accepted agentctl prompt
+// before its terminal receipt update, preventing automatic replay.
+func (s *Service) MarkDirectDeliveryAcceptanceUncertain(ctx context.Context, deliveryID, leaseOwner string) (*Delivery, error) {
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil, ErrEntryNotFound
+	}
+	return ledger.MarkDirectDeliveryAcceptanceUncertain(ctx, deliveryID, leaseOwner)
+}
+
+func (s *Service) MarkDeliveryQueued(ctx context.Context, deliveryID, leaseOwner, queueEntryID string) (*Delivery, error) {
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil, ErrEntryNotFound
+	}
+	return ledger.MarkDeliveryQueued(ctx, deliveryID, leaseOwner, queueEntryID)
+}
+
+func (s *Service) MarkDirectDeliveryAmbiguous(ctx context.Context, deliveryID, leaseOwner, lastError string) (*Delivery, error) {
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil, ErrEntryNotFound
+	}
+	return ledger.MarkDirectDeliveryAmbiguous(ctx, deliveryID, leaseOwner, lastError)
+}
+
+func (s *Service) RescheduleDelivery(ctx context.Context, deliveryID, leaseOwner, lastError string) (*Delivery, error) {
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil, ErrEntryNotFound
+	}
+	return ledger.RescheduleDelivery(ctx, deliveryID, leaseOwner, time.Now().UTC(), lastError)
+}
+
+// FindQueueEntryForDelivery closes the handoff gap when a state transition
+// queues the prompt through a legacy path that does not return its entry ID.
+func (s *Service) FindQueueEntryForDelivery(ctx context.Context, sessionID, deliveryID string) (string, bool, error) {
+	return s.findQueueEntryForDelivery(ctx, sessionID, deliveryID)
+}
+
+func (s *Service) RetryDeliveryReceipt(ctx context.Context, deliveryID string) (*Delivery, error) {
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil, ErrDeliveryReceiptsUnsupported
+	}
+	return ledger.RetryDelivery(ctx, deliveryID, time.Now().UTC())
 }
 
 // ResolveSessionIdentity returns the repository-authoritative immutable queue
@@ -1708,6 +1818,16 @@ func (s *Service) RequeueLifecycleMessageWithCoalesceKey(ctx context.Context, se
 	return s.queueLifecycleMessageWithCoalesceKey(ctx, nil, sessionID, taskID, content, model, userID, planMode, attachments, metadata, coalesceKey, allowInsert, true, nil)
 }
 
+func (s *Service) QueueWorkflowControlMessage(ctx context.Context, sessionID, taskID, content, model, userID string, planMode bool, attachments []MessageAttachment, metadata map[string]interface{}, transitionID int64) (*QueuedMessage, bool, bool, error) {
+	if transitionID <= 0 {
+		return nil, false, false, errors.New("workflow transition identity is required")
+	}
+	copy := copyMessageMetadata(metadata, 2)
+	copy[MetadataWorkflowTransitionID] = transitionID
+	copy[MetadataWorkflowControl] = true
+	return s.queueLifecycleMessageWithCoalesceKey(ctx, nil, sessionID, taskID, content, model, userID, planMode, attachments, copy, fmt.Sprintf("workflow-transition:%d", transitionID), true, false, nil)
+}
+
 func (s *Service) RequeueLifecycleMessageWithCoalesceKeyForSession(
 	ctx context.Context,
 	identity QueueSessionIdentity,
@@ -1803,7 +1923,7 @@ func (s *Service) insertLifecycleMessageWithCoalesceKey(ctx context.Context, ide
 	metadataCopy[MetadataLifecycleGeneration] = generation
 	msg := &QueuedMessage{SessionID: sessionID, TaskID: taskID, Content: content, Model: model, PlanMode: planMode, Attachments: attachments, Metadata: metadataCopy, QueuedBy: userID}
 	maxPerSession := s.MaxPerSession()
-	if isRetry {
+	if isRetry || msg.IsWorkflowControl() {
 		maxPerSession = 0
 	}
 	var queued *QueuedMessage
@@ -2051,17 +2171,48 @@ func (s *Service) PauseAutoRunIfPendingForSession(
 }
 
 // AcknowledgeQueued settles only the exact server reservation carried by msg.
+// When the repository owns a durable delivery ledger, the FIFO deletion and
+// the delivery-receipt transition commit atomically in one transaction
+// (acknowledgeQueuedDurably); otherwise the ledger is settled on a
+// best-effort queue-entry lookup after the plain acknowledgment.
 func (s *Service) AcknowledgeQueued(ctx context.Context, msg *QueuedMessage) error {
 	if msg == nil {
 		return errors.New("queued message is nil")
 	}
-	return s.WithSessionAdmission(ctx, msg.SessionID, func(admittedCtx context.Context) error {
-		err := s.repo.AcknowledgeReserved(admittedCtx, msg)
-		if err != nil && !errors.Is(err, ErrEntryNotFound) {
-			return err
+	if acknowledger, ok := s.repo.(deliveryQueueAcknowledger); ok {
+		ackErr := acknowledger.AcknowledgeQueueEntryAndDelivery(ctx, msg.SessionID, msg.ID, time.Now().UTC())
+		// A claimed entry's FIFO row is removed when the dispatch claim is
+		// persisted (TakeHead), so the durable transaction can legitimately
+		// report entry-not-found. The claim itself must still be settled so
+		// startup recovery does not re-dispatch an accepted prompt.
+		if errors.Is(ackErr, ErrEntryNotFound) {
+			claimErr := s.deletePendingQueueDispatch(ctx, msg)
+			return s.handleDurableAcknowledgementFailure(ctx, msg.SessionID, msg.ID, claimErr)
+		}
+		return s.handleDurableAcknowledgementFailure(ctx, msg.SessionID, msg.ID, ackErr)
+	}
+	err := s.WithSessionAdmission(ctx, msg.SessionID, func(admittedCtx context.Context) error {
+		entryErr := s.repo.AcknowledgeReserved(admittedCtx, msg)
+		if entryErr != nil && !errors.Is(entryErr, ErrEntryNotFound) {
+			return entryErr
 		}
 		return s.deletePendingQueueDispatch(admittedCtx, msg)
 	})
+	if err != nil {
+		if errors.Is(err, ErrEntryNotFound) {
+			return nil
+		}
+		return err
+	}
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return nil
+	}
+	_, err = ledger.AcknowledgeDeliveryByQueueEntry(ctx, msg.ID, time.Now().UTC())
+	if errors.Is(err, ErrEntryNotFound) {
+		return nil
+	}
+	return err
 }
 
 func (s *Service) AcknowledgeQueuedForSession(
@@ -2069,6 +2220,12 @@ func (s *Service) AcknowledgeQueuedForSession(
 	identity QueueSessionIdentity,
 	reserved *QueuedMessage,
 ) error {
+	if reserved == nil {
+		return errors.New("reserved queued message is nil")
+	}
+	if acknowledger, ok := s.repo.(deliveryQueueIdentityAcknowledger); ok {
+		return s.acknowledgeQueuedForSessionDurably(ctx, acknowledger, identity, reserved.ID)
+	}
 	err := s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
 		if err := s.validateSessionIdentity(admittedCtx, identity); err != nil {
 			return err
@@ -2091,6 +2248,35 @@ func (s *Service) MarkDeliveryAttemptedForSession(
 	return s.WithSessionAdmission(ctx, identity.SessionID, func(admittedCtx context.Context) error {
 		return s.repo.MarkDeliveryAttemptedForSession(admittedCtx, identity, messages)
 	})
+}
+
+func (s *Service) acknowledgeQueuedForSessionDurably(
+	ctx context.Context, acknowledger deliveryQueueIdentityAcknowledger, identity QueueSessionIdentity, entryID string,
+) error {
+	err := acknowledger.AcknowledgeQueueEntryAndDeliveryForSession(ctx, identity, entryID, time.Now().UTC())
+	return s.handleDurableAcknowledgementFailure(ctx, identity.SessionID, entryID, err)
+}
+
+func (s *Service) handleDurableAcknowledgementFailure(ctx context.Context, sessionID, entryID string, err error) error {
+	if err == nil || errors.Is(err, ErrEntryNotFound) {
+		return nil
+	}
+	// This method is called only from the executor-acceptance callback. If the
+	// atomic terminal transaction cannot be confirmed, retain an explicit
+	// non-replayable receipt instead of treating the row as pre-dispatch.
+	ledger, ok := s.repo.(DeliveryLedger)
+	if !ok {
+		return err
+	}
+	_, markErr := ledger.MarkDeliveryAmbiguousByQueueEntry(ctx, entryID, "accepted_prompt_acknowledgement_failed")
+	if markErr == nil || errors.Is(markErr, ErrEntryNotFound) {
+		// The prompt was already handed to the executor. Remove the retained
+		// row so it cannot block later messages; the ambiguous receipt remains
+		// available for operator inspection and cannot replay automatically.
+		_ = s.repo.AcknowledgeByID(ctx, sessionID, entryID)
+		return err
+	}
+	return errors.Join(err, markErr)
 }
 
 // ReleaseQueuedDeliveryForSession makes an unaccepted retained entry visible
@@ -3130,6 +3316,25 @@ func (s *Service) GetStatus(ctx context.Context, sessionID string) *QueueStatus 
 		return nil
 	})
 	return status
+}
+
+// HasUserOwnedEntryAtOrAfter is the error-preserving queue read used by
+// completion settlement. A storage failure must remain visible to the caller:
+// treating it as an empty queue could let an old administrative turn settle
+// over newer user work.
+func (s *Service) HasUserOwnedEntryAtOrAfter(ctx context.Context, sessionID string, at time.Time) (bool, error) {
+	entries, err := s.repo.ListBySession(ctx, sessionID)
+	if err != nil {
+		return false, err
+	}
+	for _, entry := range entries {
+		if !entry.IsReservedInFlight() &&
+			!IsReservedQueuedBy(entry.QueuedBy) &&
+			!entry.QueuedAt.Before(at) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // Snapshot returns an ordered status bound to one immutable session identity.

@@ -46,6 +46,20 @@ func TestBuildLifecycleLaunchRequestForwardsRemoteContributions(t *testing.T) {
 	}
 }
 
+func TestBuildLifecycleLaunchRequestForwardsInitialPromptAcceptanceCallback(t *testing.T) {
+	called := false
+	launchReq := buildLifecycleLaunchRequest(&orchestratorexecutor.LaunchAgentRequest{
+		OnInitialPromptAccepted: func() { called = true },
+	}, "/workspace", "office-profile")
+	if launchReq.OnInitialPromptAccepted == nil {
+		t.Fatal("initial prompt acceptance callback was not forwarded")
+	}
+	launchReq.OnInitialPromptAccepted()
+	if !called {
+		t.Fatal("initial prompt acceptance callback was not forwarded")
+	}
+}
+
 // distinctFiller populates struct fields with non-zero values that are unique
 // per field, so a mapper that drops a field (or crosswires two of the same
 // type) produces an observable difference rather than two matching zero

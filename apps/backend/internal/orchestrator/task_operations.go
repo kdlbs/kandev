@@ -6276,10 +6276,11 @@ func (s *Service) promptDispatchCallback(
 	reservedTurn *models.Turn,
 	dispatch *foregroundDispatch,
 	outcome *promptDispatchOutcome,
+	afterDispatch ...func() error,
 ) func() {
 	return s.promptDispatchCallbackForIdentity(
 		ctx, taskID, sessionID, messagequeue.QueueSessionIdentity{}, "",
-		reservedTurn, dispatch, outcome,
+		reservedTurn, dispatch, outcome, afterDispatch...,
 	)
 }
 
@@ -6303,6 +6304,7 @@ func (s *Service) promptDispatchCallbackForIdentity(
 	reservedTurn *models.Turn,
 	dispatch *foregroundDispatch,
 	outcome *promptDispatchOutcome,
+	afterDispatch ...func() error,
 ) func() {
 	return func() {
 		executionID, _ := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
@@ -6334,6 +6336,12 @@ func (s *Service) promptDispatchCallbackForIdentity(
 				s.bindAcceptedDispatchTurn(sessionID, reservedTurn.ID)
 			}
 			s.resolveReservedPromptTurn(sessionID, reservedTurn.ID, true)
+		}
+		if len(afterDispatch) > 0 && afterDispatch[0] != nil {
+			if err := afterDispatch[0](); err != nil {
+				publicationErr = errors.Join(publicationErr, err)
+				s.logger.Error("failed to persist accepted queued delivery", zap.String("session_id", sessionID), zap.Error(err))
+			}
 		}
 		if outcome != nil && outcome.onAccepted != nil {
 			acceptedTurnID := outcome.turnID

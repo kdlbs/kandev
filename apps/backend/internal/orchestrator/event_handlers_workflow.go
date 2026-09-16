@@ -2972,10 +2972,17 @@ func (s *Service) resolveStepProfileSessionEndPolicy(step *wfmodels.WorkflowStep
 // tagSessionAsWorkflowSwitched records that a session's profile came from a
 // workflow step override rather than direct user selection. Uses the atomic
 // SetSessionMetadataKey (json_set) so other metadata keys are preserved.
-func (s *Service) tagSessionAsWorkflowSwitched(ctx context.Context, sessionID string) {
+func (s *Service) tagSessionAsWorkflowSwitched(ctx context.Context, sessionID string, options ...tagSessionOption) {
+	config := tagSessionConfig{}
+	for _, option := range options {
+		option.apply(&config)
+	}
 	if err := s.repo.SetSessionMetadataKey(ctx, sessionID, models.SessionMetaKeyCreatedBy, models.SessionCreatedByWorkflowSwitch); err != nil {
 		s.logger.Warn("failed to persist workflow-switch tag",
 			zap.String("session_id", sessionID), zap.Error(err))
+	}
+	if config.preserveFollowUpMarker {
+		return
 	}
 	// A workflow step explicitly taking ownership of this session is the only
 	// path that clears conversational-only follow-up ownership. Ordinary sends,
@@ -2984,6 +2991,31 @@ func (s *Service) tagSessionAsWorkflowSwitched(ctx context.Context, sessionID st
 		s.logger.Warn("failed to clear completed-conversation follow-up marker",
 			zap.String("session_id", sessionID), zap.Error(err))
 	}
+}
+
+// tagSessionConfig carries per-call tag semantics.
+type tagSessionConfig struct {
+	preserveFollowUpMarker bool
+}
+
+// tagSessionOption customizes one tagSessionAsWorkflowSwitched call.
+type tagSessionOption interface {
+	apply(*tagSessionConfig)
+}
+
+// preserveFollowUpMarkerOption keeps completion_follow_up untouched. Used by
+// keep-current routing, which does not take session ownership for a new
+// workflow run and must not wipe a completed-task follow-up marker the
+// admission path just stamped.
+type preserveFollowUpMarkerOption struct{}
+
+func (preserveFollowUpMarkerOption) apply(config *tagSessionConfig) {
+	config.preserveFollowUpMarker = true
+}
+
+// preserveFollowUpMarker returns the keep-current tag option.
+func preserveFollowUpMarker() tagSessionOption {
+	return preserveFollowUpMarkerOption{}
 }
 
 // switchSessionForStep activates a session for the new agent profile.
@@ -3834,6 +3866,13 @@ func (s *Service) prepareWorkflowStepSession(
 	return newSession, true, nil
 }
 
+// keepCurrentWorkflowStepSession keeps the session for a step whose profile
+// did not change. On a completed task it preserves the conversational-only
+// follow-up marker: keep-current routing did not take ownership of the
+// session for a new workflow run, and the async on_enter dispatch of the
+// completing transition would otherwise race the follow-up admission's
+// marker stamp (finalizeStepEnter can land after ProcessOnTurnStart stamps
+// completion_follow_up, wiping it mid-admission).
 // replaceExactModelWorkflowStepSession creates a clean session for a step whose
 // profile matches the current session but whose persisted runtime model drifted
 // from the profile's configured model. It shares the switch path's source
@@ -3957,7 +3996,11 @@ func (s *Service) keepCurrentWorkflowStepSession(
 	step *wfmodels.WorkflowStep,
 	entryIDs ...int64,
 ) (*models.TaskSession, bool, error) {
-	s.tagSessionAsWorkflowSwitched(ctx, session.ID)
+	if s.sessionTaskIsCompleted(ctx, taskID) {
+		s.tagSessionAsWorkflowSwitched(ctx, session.ID, preserveFollowUpMarker())
+	} else {
+		s.tagSessionAsWorkflowSwitched(ctx, session.ID)
+	}
 	if !session.IsPrimary {
 		if err := s.SetPrimarySession(ctx, session.ID); err != nil {
 			s.logger.Warn("failed to preserve session as primary for workflow step",
@@ -3973,6 +4016,14 @@ func (s *Service) keepCurrentWorkflowStepSession(
 		return nil, false, err
 	}
 	return session, false, nil
+}
+
+// sessionTaskIsCompleted reports whether the session's task is in the
+// terminal COMPLETED state. Keep-current routing consults it to decide
+// whether clearing the conversational follow-up marker is legitimate.
+func (s *Service) sessionTaskIsCompleted(ctx context.Context, taskID string) bool {
+	task, err := s.repo.GetTask(ctx, taskID)
+	return err == nil && task != nil && task.State == v1.TaskStateCompleted
 }
 
 func (s *Service) preflightWorkflowStepCredentials(
@@ -6181,6 +6232,25 @@ func (s *Service) queueAutoStartPrompt(
 	}
 	if handoffText != "" {
 		meta[messagequeue.MetadataStepHandoff] = handoffText
+	}
+	transitionID, tracked, err := s.currentWorkflowTransitionID(ctx, taskID, origin.StepID)
+	if err != nil {
+		return fmt.Errorf("resolve workflow transition for auto-start prompt: %w", err)
+	}
+	if tracked && transitionID > 0 {
+		queued, _, accepted, err := s.messageQueue.QueueWorkflowControlMessage(
+			ctx, sessionID, taskID, prompt, "", messagequeue.QueuedByWorkflow,
+			planMode, toQueuedAttachments(attachments), meta, transitionID,
+		)
+		if err != nil {
+			return fmt.Errorf("failed to queue workflow auto-start control prompt: %w", err)
+		}
+		if !accepted {
+			return fmt.Errorf("workflow auto-start control prompt was not accepted")
+		}
+		s.publishQueueStatusEvent(ctx, sessionID)
+		s.scheduleAutoResumeForWorkflowQueue(ctx, sessionID, queued.ID)
+		return nil
 	}
 	queued, err := s.messageQueue.QueueMessageWithMetadata(
 		ctx,

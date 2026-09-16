@@ -441,6 +441,7 @@ func buildLifecycleLaunchRequest(
 		WorkspacePath:                 workspacePath,
 		TaskDescription:               req.TaskDescription,
 		Attachments:                   convertToLifecycleAttachments(req.Attachments),
+		OnInitialPromptAccepted:       req.OnInitialPromptAccepted,
 		Env:                           req.Env,
 		AdditionalSkillSlugs:          append([]string(nil), req.AdditionalSkillSlugs...),
 		ApprovedSecretEnvKeys:         append([]string(nil), req.ApprovedSecretEnvKeys...),

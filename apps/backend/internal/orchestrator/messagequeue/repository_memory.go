@@ -338,7 +338,7 @@ func (r *memoryRepository) restoreLocked(msg *QueuedMessage, maxPerSession int) 
 		return ErrQueueDispatchClaimChanged
 	}
 	list := r.entries[msg.SessionID]
-	if maxPerSession > 0 && len(list) >= maxPerSession {
+	if maxPerSession > 0 && ordinaryQueueEntryCount(list) >= maxPerSession {
 		return ErrQueueFull
 	}
 	if msg.ID == "" {
@@ -423,7 +423,7 @@ func (r *memoryRepository) validateAutoMergePolicyLocked(identity QueueSessionId
 // insertLocked performs the actual insert. Caller must already hold r.mu.
 func (r *memoryRepository) insertLocked(msg *QueuedMessage, maxPerSession int) error {
 	list := r.entries[msg.SessionID]
-	if maxPerSession > 0 && len(list) >= maxPerSession {
+	if maxPerSession > 0 && ordinaryQueueEntryCount(list) >= maxPerSession {
 		return ErrQueueFull
 	}
 	if msg.ID == "" {
@@ -437,6 +437,16 @@ func (r *memoryRepository) insertLocked(msg *QueuedMessage, maxPerSession int) e
 	clone := cloneQueuedMessage(msg)
 	r.entries[msg.SessionID] = append(list, clone)
 	return nil
+}
+
+func ordinaryQueueEntryCount(entries []*QueuedMessage) int {
+	count := 0
+	for _, entry := range entries {
+		if entry != nil && !entry.IsWorkflowControl() {
+			count++
+		}
+	}
+	return count
 }
 
 // RequeuePreservingFIFO inserts the entry at a position strictly lower than
