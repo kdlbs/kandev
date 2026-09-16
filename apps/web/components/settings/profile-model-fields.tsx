@@ -112,8 +112,19 @@ export function ModelPicker({
     );
   }
   const modelConfig = configOptions.find(isModelConfigOption);
+  // The config_options model list drops the ACP `_meta`, so the usage
+  // multiplier (e.g. Copilot's "15x") only survives on `models`. Look it up by
+  // id to enrich the config-option-derived options.
+  const usageByModelId = new Map(
+    models
+      .filter((model) => typeof model.meta?.copilotUsage === "string")
+      .map((model) => [model.id, model.meta!.copilotUsage as string]),
+  );
   const modelOptions: ModelSelectorOption[] = modelConfig
-    ? configOptionToModelOptions(modelConfig)
+    ? configOptionToModelOptions(modelConfig).map((option) => ({
+        ...option,
+        usageMultiplier: option.usageMultiplier ?? usageByModelId.get(option.id),
+      }))
     : models.map((model) => ({
         id: model.id,
         name: model.name,
