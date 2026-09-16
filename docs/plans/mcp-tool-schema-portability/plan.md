@@ -8,6 +8,7 @@ requirements:
 system_design:
   - ../../specs/integrations/system-design/mcp-tool-schema-portability.md
   - ../../specs/agents/system-design/session-recovery-failures.md
+  - ../../specs/ui/system-design/empty-turn-notice.md
 legacy_specs: []
 ---
 

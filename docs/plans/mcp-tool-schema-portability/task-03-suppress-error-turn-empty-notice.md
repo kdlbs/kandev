@@ -11,7 +11,7 @@ acceptance_criteria:
   - AC-UI-EMPTY-TURN-NOTICE-001.9
   - AC-UI-EMPTY-TURN-NOTICE-001.10
 system_design:
-  - ../../specs/agents/system-design/session-recovery-failures.md
+  - ../../specs/ui/system-design/empty-turn-notice.md
 ---
 
 # Task 03: Suppress the duplicate empty-turn notice on error-terminated turns
