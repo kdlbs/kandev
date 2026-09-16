@@ -44,7 +44,7 @@ func TestCheckSelfTriggerTotalAllowance_GenuineErrorIncrementsLaunchRefusedTotal
 
 	before := launchRefusedCount(string(RefusalSelfTriggerTotal))
 
-	err = svc.checkSelfTriggerTotalAllowance(ctx, tx, rec, "agent-1", req, "ws-1", "causation-1")
+	err = svc.checkSelfTriggerTotalAllowance(ctx, tx, rec, "agent-1", req, "ws-1", "causation-1", 0)
 	if err == nil {
 		t.Fatal("checkSelfTriggerTotalAllowance returned nil error for a genuinely unreadable count")
 	}
@@ -90,7 +90,7 @@ func TestCheckSelfTriggerTotalAllowance_ContextCanceledDefersWithoutRecordingFai
 		ActorID:        "agent-1",
 	}
 
-	err = svc.checkSelfTriggerTotalAllowance(canceledCtx, tx, rec, "agent-1", req, "ws-1", "causation-1")
+	err = svc.checkSelfTriggerTotalAllowance(canceledCtx, tx, rec, "agent-1", req, "ws-1", "causation-1", 0)
 	if err == nil {
 		t.Fatal("checkSelfTriggerTotalAllowance returned nil error for a context-canceled read")
 	}

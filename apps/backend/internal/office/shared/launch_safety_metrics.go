@@ -50,6 +50,13 @@ var (
 	// propagated as an error the caller acts on.
 	GateOutcomeRecordFailedTotal = expvar.NewMap("office_gate_outcome_record_failed_total")
 
+	// CausationRefusalRecordFailedTotal counts a failure to persist a
+	// durable causation-refusal record (RecordCausationRefusal), labelled
+	// by gate. Per AC-OFFICE-BACKPRESSURE-003.4 this failure must never
+	// affect the admission decision, so it is only ever counted, not
+	// propagated as an error the caller acts on.
+	CausationRefusalRecordFailedTotal = expvar.NewMap("office_causation_refusal_record_failed_total")
+
 	// LaunchClaimScanCapHitTotal counts a ClaimNextEligibleRun attempt
 	// that exhausted its candidate-scan safety valve (claimCandidateScanCap
 	// in internal/runs/repository/sqlite/claim.go) without finding a

@@ -62,7 +62,7 @@ func TestCheckSelfTriggerAllowance_GenuineErrorIncrementsLaunchRefusedTotal(t *t
 
 	before := launchRefusedCount(string(RefusalSelfTrigger))
 
-	err = svc.checkSelfTriggerAllowance(ctx, tx, rec, "agent-1", req, models.ActorKindAgent, "agent-1", "ws-1", "causation-1")
+	err = svc.checkSelfTriggerAllowance(ctx, tx, rec, "agent-1", req, models.ActorKindAgent, "agent-1", "ws-1", "causation-1", 0)
 	if err == nil {
 		t.Fatal("checkSelfTriggerAllowance returned nil error for a genuinely unreadable count")
 	}

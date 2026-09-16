@@ -109,6 +109,20 @@ func (r *Repository) migrateLaunchSafetyColumns() {
 		updated_at           TIMESTAMP NOT NULL,
 		PRIMARY KEY (workspace_id, gate)
 	)`)
+
+	_, _ = r.db.Exec(`
+	CREATE TABLE IF NOT EXISTS office_causation_refusal (
+		id               TEXT      PRIMARY KEY,
+		workspace_id     TEXT      NOT NULL,
+		gate             TEXT      NOT NULL,
+		agent_profile_id TEXT      NOT NULL,
+		causation_id     TEXT      NOT NULL DEFAULT '',
+		causation_depth  INTEGER   NOT NULL DEFAULT 0,
+		reason           TEXT      NOT NULL DEFAULT '',
+		refused_at       TIMESTAMP NOT NULL
+	)`)
+	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_causation_refusal_ws_time ON office_causation_refusal(workspace_id, refused_at)`)
+	_, _ = r.db.Exec(`CREATE INDEX IF NOT EXISTS idx_causation_refusal_agent_time ON office_causation_refusal(agent_profile_id, refused_at)`)
 }
 
 // backfillLaunchSafetyWorkspaceIDs repairs runs.workspace_id for runs still

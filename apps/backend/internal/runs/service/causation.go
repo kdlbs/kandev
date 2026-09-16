@@ -70,6 +70,7 @@ func (e *RefusalError) Error() string {
 // admission decision.
 type gateOutcomeRecorder struct {
 	outcomes []gateOutcome
+	refusals []causationRefusal
 }
 
 type gateOutcome struct {
@@ -78,8 +79,34 @@ type gateOutcome struct {
 	success     bool
 }
 
+// causationRefusal is one enqueue refused for exceeding the causation
+// depth ceiling or a self-trigger allowance, queued for the same
+// after-transaction durable write as gateOutcome (AC-OFFICE-LAUNCH-SAFETY-003.5,
+// -004.3, -004.8).
+type causationRefusal struct {
+	workspaceID    string
+	gate           RefusalGate
+	agentProfileID string
+	causationID    string
+	causationDepth int
+	reason         string
+}
+
 func (r *gateOutcomeRecorder) record(workspaceID string, gate RefusalGate, success bool) {
 	r.outcomes = append(r.outcomes, gateOutcome{workspaceID: workspaceID, gate: gate, success: success})
+}
+
+func (r *gateOutcomeRecorder) recordRefusal(
+	workspaceID string, gate RefusalGate, agentProfileID, causationID string, causationDepth int, reason string,
+) {
+	r.refusals = append(r.refusals, causationRefusal{
+		workspaceID:    workspaceID,
+		gate:           gate,
+		agentProfileID: agentProfileID,
+		causationID:    causationID,
+		causationDepth: causationDepth,
+		reason:         reason,
+	})
 }
 
 // causationResolution is the resolved causation-chain identity for a
@@ -147,6 +174,7 @@ func (s *Service) resolveCausation(
 			zap.Int("causation_depth", res.CausationDepth),
 			zap.Int("max_causation_depth", s.effectiveMaxCausationDepth()),
 		)
+		rec.recordRefusal(res.WorkspaceID, RefusalCausationDepth, agentInstanceID, res.CausationID, res.CausationDepth, req.Reason)
 		// The depth compared above was already read without error inside
 		// applyCausationLineage, so this gate can never fail closed on an
 		// unreadable input; only a genuinely successful evaluation is
@@ -159,7 +187,7 @@ func (s *Service) resolveCausation(
 		}
 	}
 
-	if err := s.checkSelfTriggerAllowance(ctx, tx, rec, agentInstanceID, req, actorKind, actorID, res.WorkspaceID, res.CausationID); err != nil {
+	if err := s.checkSelfTriggerAllowance(ctx, tx, rec, agentInstanceID, req, actorKind, actorID, res.WorkspaceID, res.CausationID, res.CausationDepth); err != nil {
 		return causationResolution{}, err
 	}
 
@@ -287,7 +315,7 @@ func causingCausationID(causing *models.Run) string {
 // insert alone does not lock.
 func (s *Service) checkSelfTriggerAllowance(
 	ctx context.Context, tx *sqlx.Tx, rec *gateOutcomeRecorder, agentInstanceID string, req QueueRunRequest, actorKind models.ActorKind, actorID string,
-	workspaceID, causationID string,
+	workspaceID, causationID string, causationDepth int,
 ) error {
 	if actorKind != models.ActorKindAgent || actorID != agentInstanceID {
 		// Not applicable to this actor: the gate is not evaluated, so
@@ -295,16 +323,16 @@ func (s *Service) checkSelfTriggerAllowance(
 		// applies and RecordGateOutcome is not called.
 		return nil
 	}
-	if err := s.checkSelfTriggerPerReasonAllowance(ctx, tx, rec, agentInstanceID, req, workspaceID, causationID); err != nil {
+	if err := s.checkSelfTriggerPerReasonAllowance(ctx, tx, rec, agentInstanceID, req, workspaceID, causationID, causationDepth); err != nil {
 		return err
 	}
-	return s.checkSelfTriggerTotalAllowance(ctx, tx, rec, agentInstanceID, req, workspaceID, causationID)
+	return s.checkSelfTriggerTotalAllowance(ctx, tx, rec, agentInstanceID, req, workspaceID, causationID, causationDepth)
 }
 
 // checkSelfTriggerPerReasonAllowance implements AC-OFFICE-LAUNCH-SAFETY-004.3.
 func (s *Service) checkSelfTriggerPerReasonAllowance(
 	ctx context.Context, tx *sqlx.Tx, rec *gateOutcomeRecorder, agentInstanceID string, req QueueRunRequest,
-	workspaceID, causationID string,
+	workspaceID, causationID string, causationDepth int,
 ) error {
 	reason := req.Reason
 	since := time.Now().UTC().Add(-SelfTriggerWindow)
@@ -328,6 +356,7 @@ func (s *Service) checkSelfTriggerPerReasonAllowance(
 	if count >= s.effectiveSelfTriggerAllowance() {
 		shared.LaunchRefusedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalSelfTrigger)), 1)
 		s.logRefusal(RefusalSelfTrigger, agentInstanceID, req, causationID)
+		rec.recordRefusal(workspaceID, RefusalSelfTrigger, agentInstanceID, causationID, causationDepth, reason)
 		return &RefusalError{
 			Gate: RefusalSelfTrigger,
 			Reason: fmt.Sprintf("agent %s exceeded self-trigger allowance %d for reason %q within %s",
@@ -343,7 +372,7 @@ func (s *Service) checkSelfTriggerPerReasonAllowance(
 // gate's own refusal never doubles as a per-reason one.
 func (s *Service) checkSelfTriggerTotalAllowance(
 	ctx context.Context, tx *sqlx.Tx, rec *gateOutcomeRecorder, agentInstanceID string, req QueueRunRequest,
-	workspaceID, causationID string,
+	workspaceID, causationID string, causationDepth int,
 ) error {
 	since := time.Now().UTC().Add(-SelfTriggerWindow)
 	count, err := s.repo.CountSelfTriggeredRunsAnyReasonTx(ctx, tx, agentInstanceID, since)
@@ -363,6 +392,7 @@ func (s *Service) checkSelfTriggerTotalAllowance(
 	if count >= s.effectiveSelfTriggerTotalAllowance() {
 		shared.LaunchRefusedTotal.Add(shared.LaunchSafetyLabel("gate", string(RefusalSelfTriggerTotal)), 1)
 		s.logRefusal(RefusalSelfTriggerTotal, agentInstanceID, req, causationID)
+		rec.recordRefusal(workspaceID, RefusalSelfTriggerTotal, agentInstanceID, causationID, causationDepth, req.Reason)
 		return &RefusalError{
 			Gate: RefusalSelfTriggerTotal,
 			Reason: fmt.Sprintf("agent %s exceeded total self-trigger allowance %d within %s",
@@ -410,6 +440,13 @@ func (s *Service) flushGateOutcomes(ctx context.Context, rec *gateOutcomeRecorde
 	for _, o := range rec.outcomes {
 		if err := s.repo.RecordGateOutcome(ctx, o.workspaceID, string(o.gate), o.success); err != nil {
 			shared.GateOutcomeRecordFailedTotal.Add(shared.LaunchSafetyLabel("gate", string(o.gate)), 1)
+		}
+	}
+	for _, ref := range rec.refusals {
+		if err := s.repo.RecordCausationRefusal(
+			ctx, ref.workspaceID, string(ref.gate), ref.agentProfileID, ref.causationID, ref.causationDepth, ref.reason,
+		); err != nil {
+			shared.CausationRefusalRecordFailedTotal.Add(shared.LaunchSafetyLabel("gate", string(ref.gate)), 1)
 		}
 	}
 }

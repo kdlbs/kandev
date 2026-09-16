@@ -28,3 +28,18 @@ type GateFailureState struct {
 	LastEscalationAt    *time.Time `json:"last_escalation_at" db:"last_escalation_at"`
 	UpdatedAt           time.Time  `json:"updated_at" db:"updated_at"`
 }
+
+// CausationRefusalEntry is one durable, append-only record of an enqueue
+// refused for exceeding the causation depth ceiling or a self-trigger
+// allowance (AC-OFFICE-LAUNCH-SAFETY-003.5, -004.3, -004.8). A refusal
+// creates no runs row, so this is the only durable trace it leaves.
+type CausationRefusalEntry struct {
+	ID             string    `json:"id" db:"id"`
+	WorkspaceID    string    `json:"workspace_id" db:"workspace_id"`
+	Gate           string    `json:"gate" db:"gate"`
+	AgentProfileID string    `json:"agent_profile_id" db:"agent_profile_id"`
+	CausationID    string    `json:"causation_id" db:"causation_id"`
+	CausationDepth int       `json:"causation_depth" db:"causation_depth"`
+	Reason         string    `json:"reason" db:"reason"`
+	RefusedAt      time.Time `json:"refused_at" db:"refused_at"`
+}
