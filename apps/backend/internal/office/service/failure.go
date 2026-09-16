@@ -242,9 +242,8 @@ func (s *Service) clearAutoPauseAttempt(
 func (s *Service) unpauseAgentIfCurrent(
 	ctx context.Context, agent *models.AgentInstance,
 ) (bool, error) {
-	changed, err := s.repo.UpdateAgentStatusFieldsIfCurrent(
-		ctx, agent.ID, string(models.AgentStatusPaused),
-		string(models.AgentStatusIdle), "",
+	changed, err := s.repo.UnpauseAgentIfCurrent(
+		ctx, agent.ID, agent.PauseReason, string(models.AgentStatusIdle),
 	)
 	if err != nil {
 		return false, fmt.Errorf("unpause agent: %w", err)
