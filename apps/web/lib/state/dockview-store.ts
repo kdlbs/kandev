@@ -180,6 +180,7 @@ export type SavedLayoutConfig = {
 export type ApplyCustomLayoutOptions = {
   activeSessionId?: string | null;
   sessionIds?: string[];
+  envId?: string | null;
 };
 export type TranscriptScrollTarget = {
   sessionId: string;
@@ -839,7 +840,12 @@ function restoreCustomLayout({
 
   try {
     api.fromJSON(layout.layout as unknown as SerializedDockview);
-    replaceStaleSessionPanels(api, opts?.activeSessionId ?? null, opts?.sessionIds ?? []);
+    replaceStaleSessionPanels(
+      api,
+      opts?.activeSessionId ?? null,
+      opts?.sessionIds ?? [],
+      opts?.envId ?? null,
+    );
     set(applyLayoutFixups(api));
     return { appliedState: state, oldFormatRestoreFailed: false };
   } catch (e) {
@@ -872,7 +878,7 @@ function restoreMaximizeFromStorage(
   if (!saved) return false;
   try {
     api.fromJSON(saved.maximizedDockviewJson as SerializedDockview);
-    replaceStaleSessionPanels(api, activeSessionId, currentSessionIds);
+    replaceStaleSessionPanels(api, activeSessionId, currentSessionIds, envId);
     // After fromJSON, `api.width/height` reflect the JSON's recorded grid
     // dims, which may not match the live container. Always lay out against
     // the measured DOM size so a stale value can't pin the dockview at the

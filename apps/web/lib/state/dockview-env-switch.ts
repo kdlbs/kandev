@@ -10,7 +10,6 @@
 import type { DockviewApi, SerializedDockview } from "dockview-react";
 import { getEnvLayout, getManualRightWidth } from "@/lib/local-storage";
 import { getEnvHiddenSessions } from "@/lib/env-hidden-sessions";
-import { useDockviewStore } from "./dockview-store";
 import { applyLayoutFixups } from "./dockview-layout-builders";
 import { isLayoutShapeHealthy } from "./dockview-layout-health";
 import {
@@ -137,7 +136,7 @@ export function replaceStaleSessionPanels(
   api: DockviewApi,
   keepSessionId: string | null,
   currentSessionIds: string[] = [],
-  envId = useDockviewStore.getState().currentLayoutEnvId,
+  envId: string | null = null,
 ): void {
   const keepId = keepSessionId ? `session:${keepSessionId}` : null;
   // keepId=null (sessionless task) → strips all session panels. In practice
