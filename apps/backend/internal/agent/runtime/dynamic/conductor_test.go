@@ -184,6 +184,9 @@ func TestConductorPreservesLongUserAuthoredPromptOnEveryDownstreamLaunch(t *test
 		if strings.Contains(launch.Prompt, secret) {
 			t.Fatalf("launch %d prompt retained the raw secret: %q", i, launch.Prompt)
 		}
+		if !strings.Contains(launch.Prompt, "API_KEY: ***") {
+			t.Fatalf("launch %d prompt was not redacted, just dropped: %q", i, launch.Prompt)
+		}
 	}
 }
 
