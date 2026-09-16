@@ -458,7 +458,7 @@ flows live in `apps/web/e2e/tests/ssh/reachability.spec.ts` under that project.
 - [x] [Task 05: Launch-path non-gating and failure attribution](task-05-launch-non-gating.md)
 - [x] [Task 06: Reachability data layer and settings surface](task-06-settings-surface.md)
 - [x] [Task 07: Pre-launch reachability warning](task-07-pre-launch-warning.md)
-- [ ] [Task 08: Container E2E coverage and operator documentation](task-08-e2e-and-docs.md)
+- [x] [Task 08: Container E2E coverage and operator documentation](task-08-e2e-and-docs.md)
 
 ### Waves
 
@@ -473,7 +473,14 @@ flows live in `apps/web/e2e/tests/ssh/reachability.spec.ts` under that project.
 
 ## Verification results
 
-Pending.
+All 8 work orders are done. Each task's exact verification commands and
+results are recorded in its own `## Results` section
+(`task-01-probe-and-classification.md` through
+`task-08-e2e-and-docs.md`). Task 08's container E2E spec
+(`apps/web/e2e/tests/ssh/reachability.spec.ts`) is the plan's only
+end-to-end evidence and passes against a real sshd container
+(`KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --project=containers
+tests/ssh/reachability.spec.ts`, 2 passed).
 
 ## Risks
 

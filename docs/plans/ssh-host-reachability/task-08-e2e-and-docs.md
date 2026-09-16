@@ -1,7 +1,7 @@
 ---
 id: "08-e2e-and-docs"
 title: "Container E2E coverage and operator documentation"
-status: pending
+status: done
 wave: 6
 depends_on: ["05-launch-non-gating", "07-pre-launch-warning"]
 plan: "plan.md"
@@ -124,4 +124,59 @@ pre-launch warning.
 
 ## Results
 
-Pending.
+Implemented `apps/web/e2e/tests/ssh/reachability.spec.ts` under the
+`containers` project, extended `apps/web/e2e/pages/SSHSettingsPage.ts` with
+reachability-card locators and a `probeNow()` helper, and documented
+`executors.sshReachabilityIntervalSeconds` /
+`KANDEV_EXECUTORS_SSHREACHABILITYINTERVALSECONDS` in
+`docs/public/configuration.md` plus a new "Reachability" section in
+`docs/public/executors.md`. `apps/web/e2e/helpers/ssh.ts` needed no change;
+`dropTrafficToPort22`/`restoreTraffic` already existed from `concurrency.spec.ts`.
+
+Two deliberate deviations from this work order's literal text, both verified
+against real backend source before writing:
+
+1. **Threshold driven by repeated "Probe now" clicks, not a short configured
+   poller interval.** `httpProbeReachability` → `Poller.ProbeAndWait` runs the
+   exact same `store.Observe` hysteresis path (`consecutive_failures`
+   increment, threshold-gated state flip, immediate clear on success) that the
+   scheduled poller would, and the route is synchronous, so a click-then-await
+   drives the identical production logic with zero wall-clock dependency. This
+   more directly satisfies this file's own Risk ("timing part of the
+   assertion... becomes the slowest and flakiest file in the project") than
+   configuring a short interval and waiting on ticks would have.
+2. **The launch-failure flow needed a far larger timeout budget than a
+   dial-timeout calculation predicts, discovered by running the spec for
+   real, not by reasoning from source alone.** The client's own
+   `sshDialTimeout` is 30s, so the first version of the launch-failure
+   assertion used a 60s poll (matching `error-surfacing.spec.ts`'s equivalent
+   assertion). It reliably timed out with the session still `CREATED`. A debug
+   run with `E2E_DEBUG=1` showed the real failure surfacing only after ~148s,
+   with the client-side error itself an SSH handshake EOF
+   (`ssh: handshake with 127.0.0.1:<port>: ssh: handshake failed: EOF`), not a
+   dial timeout — meaning the TCP connect to the published port succeeds
+   (completed against Docker's own port-publishing plumbing) before the
+   connection stalls and is eventually torn down. That stall, not the
+   client's dial budget, dominates the wall-clock cost, and its length is a
+   property of the host's Docker networking mode rather than of this
+   codebase's own configured timeouts. The assertion's poll timeout is now
+   200s (test timeout 240s) to cover that path with margin rather than one
+   tuned to a fast local failure (`error-surfacing.spec.ts`'s missing-binary
+   case, which fails almost immediately and never pays this cost).
+
+## Verification
+
+```
+$ cd apps/web && pnpm run lint
+> @kandev/web@0.1.0 lint
+> eslint --max-warnings 0
+(clean, exit 0)
+
+$ node scripts/validate-public-docs.mjs
+Validated 46 published docs pages.
+
+$ cd apps/web && KANDEV_E2E_CONTAINERS=1 pnpm e2e:run --project=containers tests/ssh/reachability.spec.ts
+  ✓  ssh executor — reachability › reflects reachable, then unreachable after the failure threshold, then clears on a single success
+  ✓  ssh executor — reachability › a launch started while the host is unreachable is attempted and fails naming the host, not refused
+  2 passed
+```
