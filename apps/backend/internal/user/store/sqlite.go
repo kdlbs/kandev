@@ -629,6 +629,7 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"prevent_auto_start_agent_on_open":         settings.PreventAutoStartAgentOnOpen,
 		"unread_divider":                           settings.UnreadDivider,
 		"agent_generated_task_titles":              settings.AgentGeneratedTaskTitles,
+		"auto_focus_new_tasks":                     settings.AutoFocusNewTasks,
 		"mcp_task_agent_profile_default":           models.NormalizeMCPTaskAgentProfileDefault(settings.MCPTaskAgentProfileDefault),
 		"show_anchored_prompt_bar":                 settings.ShowAnchoredPromptBar,
 		"show_scroll_to_last_prompt":               settings.ShowScrollToLastPrompt,
@@ -670,6 +671,8 @@ func marshalUserSettingsPayload(settings *models.UserSettings) ([]byte, error) {
 		"last_seen_display":                        models.NormalizeLastSeenDisplay(settings.LastSeenDisplay),
 		"system_metrics_display":                   settings.SystemMetricsDisplay,
 		"app_status_bar_enabled":                   settings.AppStatusBarEnabled,
+		"sidebar_hover_enabled":                    settings.SidebarHoverEnabled,
+		"sidebar_hover_delay_ms":                   settings.SidebarHoverDelayMs,
 		"resolve_session_hostnames":                settings.ResolveSessionHostnames,
 		"app_status_bar_order":                     normalizeAppStatusBarOrder(settings.AppStatusBarOrder),
 		"quick_chat_tab_order_by_workspace":        quickChatTabOrderByWorkspace,
@@ -732,6 +735,7 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		ConfirmTaskArchive:                true,
 		UnreadDivider:                     false,
 		AgentGeneratedTaskTitles:          true,
+		AutoFocusNewTasks:                 true,
 		MCPTaskAgentProfileDefault:        models.MCPTaskAgentProfileDefaultCurrentTask,
 		ShowAnchoredPromptBar:             false,
 		ShowScrollToLastPrompt:            true,
@@ -758,6 +762,8 @@ func defaultUserSettings(userID string) *models.UserSettings {
 		SidebarTaskColorAutomation:        models.DefaultSidebarTaskColorAutomation(),
 		SidebarTaskColors:                 map[string]*string{},
 		AppStatusBarEnabled:               false,
+		SidebarHoverEnabled:               true,
+		SidebarHoverDelayMs:               500,
 		ResolveSessionHostnames:           false,
 		AppStatusBarOrder:                 normalizeAppStatusBarOrder(models.AppStatusBarOrder{}),
 		QuickChatTabOrderByWorkspace:      map[string][]string{},
@@ -811,6 +817,7 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		PreventAutoStartAgentOnOpen       *bool                               `json:"prevent_auto_start_agent_on_open"`
 		UnreadDivider                     *bool                               `json:"unread_divider"`
 		AgentGeneratedTaskTitles          *bool                               `json:"agent_generated_task_titles"`
+		AutoFocusNewTasks                 *bool                               `json:"auto_focus_new_tasks"`
 		MCPTaskAgentProfileDefault        string                              `json:"mcp_task_agent_profile_default"`
 		ShowAnchoredPromptBar             *bool                               `json:"show_anchored_prompt_bar"`
 		ShowScrollToLastPrompt            *bool                               `json:"show_scroll_to_last_prompt"`
@@ -852,6 +859,8 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 		LastSeenDisplay                   json.RawMessage                     `json:"last_seen_display"`
 		SystemMetricsDisplay              models.SystemMetricsDisplaySettings `json:"system_metrics_display"`
 		AppStatusBarEnabled               *bool                               `json:"app_status_bar_enabled"`
+		SidebarHoverEnabled               *bool                               `json:"sidebar_hover_enabled"`
+		SidebarHoverDelayMs               json.RawMessage                     `json:"sidebar_hover_delay_ms"`
 		ResolveSessionHostnames           *bool                               `json:"resolve_session_hostnames"`
 		AppStatusBarOrder                 models.AppStatusBarOrder            `json:"app_status_bar_order"`
 		QuickChatTabOrderByWorkspace      map[string][]string                 `json:"quick_chat_tab_order_by_workspace"`
@@ -895,6 +904,9 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	}
 	if payload.AgentGeneratedTaskTitles != nil {
 		settings.AgentGeneratedTaskTitles = *payload.AgentGeneratedTaskTitles
+	}
+	if payload.AutoFocusNewTasks != nil {
+		settings.AutoFocusNewTasks = *payload.AutoFocusNewTasks
 	}
 	settings.MCPTaskAgentProfileDefault = models.NormalizeMCPTaskAgentProfileDefault(payload.MCPTaskAgentProfileDefault)
 	if payload.ShowAnchoredPromptBar != nil {
@@ -1012,6 +1024,13 @@ func scanUserSettings(scanner interface{ Scan(dest ...any) error }, userID strin
 	settings.TerminalFontFamily = payload.TerminalFontFamily
 	settings.TerminalFontSize = payload.TerminalFontSize
 	settings.SystemMetricsDisplay = payload.SystemMetricsDisplay
+	if payload.SidebarHoverEnabled != nil {
+		settings.SidebarHoverEnabled = *payload.SidebarHoverEnabled
+	}
+	var hoverDelay *int
+	if json.Unmarshal(payload.SidebarHoverDelayMs, &hoverDelay) == nil && hoverDelay != nil && *hoverDelay >= 0 && *hoverDelay <= 5000 {
+		settings.SidebarHoverDelayMs = *hoverDelay
+	}
 	if payload.AppStatusBarEnabled != nil {
 		settings.AppStatusBarEnabled = *payload.AppStatusBarEnabled
 	}

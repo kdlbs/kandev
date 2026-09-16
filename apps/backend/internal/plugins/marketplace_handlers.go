@@ -64,6 +64,13 @@ func (c *Controller) marketplaceCatalog(ctx *gin.Context) {
 		Text:     ctx.Query("q"),
 		Category: ctx.Query("category"),
 		Sort:     ctx.Query("sort"),
+		Kind:     ctx.Query("kind"),
+	})
+	result.Canvases = marketplace.ApplyQuery(result.Canvases, marketplace.Query{
+		Text:     ctx.Query("q"),
+		Category: ctx.Query("category"),
+		Sort:     ctx.Query("sort"),
+		Kind:     ctx.Query("kind"),
 	})
 	ctx.JSON(http.StatusOK, result)
 }

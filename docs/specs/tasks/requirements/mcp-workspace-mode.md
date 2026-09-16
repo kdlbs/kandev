@@ -1,5 +1,5 @@
 ---
-status: draft
+status: active
 system: tasks
 created: 2026-09-11
 owners:
@@ -98,11 +98,36 @@ skills and CLI, with no Office task-creation MCP tool.
   shall remain indistinguishable. Documentation shall distinguish session MCP,
   Office skills/CLI, external MCP, and materialized-workspace policy.
 
+### REQ-TASKS-MCP-WORKSPACE-MODE-004: Discoverable materialization choices
+
+**Intent:** Let MCP callers select a supported materialized-workspace policy
+from the advertised contract.
+
+#### Acceptance criteria
+
+- **AC-TASKS-MCP-WORKSPACE-MODE-004.1:** Task and external MCP catalogs shall
+  advertise optional string `workspace_mode` with exactly the ordered enum
+  `["inherit_parent", "new_workspace"]` and no schema default.
+- **AC-TASKS-MCP-WORKSPACE-MODE-004.2:** The field description shall explain
+  that omission for a subtask inherits its parent's materialized workspace,
+  explicit `inherit_parent` requires `parent_id` and reuses that workspace or
+  worktree, and `new_workspace` requests a separate workspace or worktree.
+- **AC-TASKS-MCP-WORKSPACE-MODE-004.3:** Omitted input shall retain existing
+  parent-dependent defaulting. Both explicit enum values shall reach existing
+  backend validation, including the parent requirement for `inherit_parent`.
+  No workspace modes or execution behavior shall be added.
+- **AC-TASKS-MCP-WORKSPACE-MODE-004.4:** MCP schema validation shall reject
+  out-of-enum input before backend dispatch, including `shared`, `shared_group`,
+  empty strings, whitespace-only strings, and padded mode names. Public caller
+  guidance shall explain using omission instead of blank input for defaulting.
+  Backend handling of blank values shall remain unchanged.
+
 ## Exclusions
 
 - New Office MCP tools or external assignment fields.
 - Office CLI, permission, scheduler, or lifecycle redesign.
-- Changes to external creation schemas, launch behavior, or idempotency contracts.
+- External creation schema changes beyond materialization enum metadata and its
+  description; changes to launch behavior or idempotency contracts.
 - Workspace conversion, historical migration, rendered UI, or new endpoints.
 - Changes to automation/configuration catalogs or their established authority.
 
@@ -110,3 +135,4 @@ skills and CLI, with no Office task-creation MCP tool.
 
 - [System design](../system-design/mcp-workspace-mode.md)
 - [Implementation plan](../../../plans/mcp-workspace-mode/plan.md)
+- [Enum discoverability follow-up](../../../plans/mcp-workspace-mode-enum/plan.md)

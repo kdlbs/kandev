@@ -16,6 +16,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/kandev/kandev/internal/agent/agents"
+	agentruntime "github.com/kandev/kandev/internal/agent/runtime"
 	"github.com/kandev/kandev/internal/entityrefs"
 	"github.com/kandev/kandev/internal/events"
 	"github.com/kandev/kandev/internal/events/bus"
@@ -48,6 +49,16 @@ var (
 	errContextResetCancellationConflict     = errors.New("context reset cancellation is already in progress")
 	errSessionAttachmentTransferUnavailable = errors.New("session attachment transfer service is unavailable")
 )
+
+const (
+	workflowResetFailureCode    = "workflow_context_reset_failed"
+	workflowResetFailureMessage = "Context reset failed. The workflow step prompt did not start."
+)
+
+// workflowResetFailureCleanupTimeout bounds each failure-settlement stage. It
+// remains a variable so tests can force a persistence timeout without waiting
+// for the production budget.
+var workflowResetFailureCleanupTimeout = 5 * time.Second
 
 func sessionAttachmentTransfererAvailable(transfer SessionAttachmentTransferer) bool {
 	if transfer == nil {
@@ -587,7 +598,7 @@ func (s *Service) updateTransitionTaskWithCapacity(
 	targetStep *wfmodels.WorkflowStep,
 ) error {
 	if targetStep == nil {
-		return s.repo.UpdateTask(ctx, task)
+		return s.repo.UpdateTaskPreservingDeferredLaunch(ctx, task)
 	}
 	admissionRepo, ok := s.repo.(workflowMoveAdmissionRepository)
 	if !ok {
@@ -780,15 +791,7 @@ func (s *Service) workflowMovePendingOptions(task *models.Task) *workflowmove.En
 // has been dispatched. A missing marker is a no-op. The options are already
 // captured by the caller (overlaid step or threaded value) before this runs.
 func (s *Service) clearWorkflowMovePending(ctx context.Context, taskID string) {
-	task, err := s.repo.GetTask(ctx, taskID)
-	if err != nil || task == nil || task.Metadata == nil {
-		return
-	}
-	if _, ok := task.Metadata[models.MetaKeyWorkflowMovePending]; !ok {
-		return
-	}
-	delete(task.Metadata, models.MetaKeyWorkflowMovePending)
-	if err := s.repo.UpdateTask(ctx, task); err != nil {
+	if _, err := s.repo.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyWorkflowMovePending); err != nil {
 		s.logger.Warn("failed to clear workflow move pending marker",
 			zap.String("task_id", taskID), zap.Error(err))
 	}
@@ -1665,7 +1668,7 @@ func (s *Service) syncTaskStateForQueuePromotion(ctx context.Context, task *mode
 		return nil
 	}
 	task.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpdateTask(ctx, task); err != nil {
+	if err := s.repo.UpdateTaskPreservingDeferredLaunch(ctx, task); err != nil {
 		return fmt.Errorf("persist promoted task state: %w", err)
 	}
 	s.publishTaskUpdated(ctx, task)
@@ -2047,6 +2050,20 @@ func (s *Service) autoStartTaskForLoadedStep(ctx context.Context, task *models.T
 			EntryOptions:    moveOptions,
 			WorkflowEntryID: stepTransitionID,
 		})
+		if errors.Is(err, ErrCeilingLaunchDeferred) {
+			// The sweep already persisted a replay record and owns retrying
+			// this launch; restoring the claim tokens here (as the generic
+			// failure path below does) would let a second auto-start attempt
+			// race that replay into a double launch, and marking the task's
+			// auto-start-failed marker would mislabel a queued launch as a
+			// failed one.
+			s.logger.Debug(eventName+": auto-start deferred by session ceiling; will replay once capacity frees up",
+				zap.String("task_id", task.ID))
+			if restoreAutoStartOnCreate {
+				s.completeAutoStartOnCreate(asyncCtx, task.ID, eventName)
+			}
+			return
+		}
 		if err != nil {
 			s.logger.Error(eventName+": failed to auto-start task",
 				zap.String("task_id", task.ID),
@@ -2278,7 +2295,7 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 	}
 	go func() {
 		launchCtx := context.WithoutCancel(ctx)
-		metadataClaimed, claimOK := s.claimDeferredLaunch(launchCtx, task.ID, eventName)
+		wip, claimOK := s.claimDeferredLaunch(launchCtx, task.ID, eventName)
 		if !claimOK {
 			if createClaimed {
 				s.restoreAutoStartOnCreate(launchCtx, task.ID, eventName)
@@ -2296,7 +2313,7 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 				launchErr = errors.New("deferred launch returned an unsuccessful response")
 			}
 			s.logger.Error(eventName+": failed to launch deferred task", zap.String("task_id", task.ID), zap.Error(launchErr))
-			s.restoreDeferredLaunch(launchCtx, task.ID, raw, eventName, metadataClaimed)
+			s.restoreDeferredLaunch(launchCtx, task.ID, wip, eventName)
 			if restoreQueuePromotion {
 				s.restoreTaskLifecycleToken(launchCtx, task.ID, models.MetaKeyQueuePromotionPending, queuePromotionLifecycleToken(task), eventName)
 			}
@@ -2311,46 +2328,48 @@ func (s *Service) launchDeferredTask(ctx context.Context, task *models.Task, eve
 		if intent.RecordRecentUse {
 			s.recordSuccessfulDeferredTaskProfileAsync(launchCtx, intent.UserID, launchResp.AgentProfileID)
 		}
-		delete(task.Metadata, models.MetaKeyDeferredLaunch)
-		if metadataClaimed {
-			task.UpdatedAt = time.Now().UTC()
-			s.publishTaskUpdated(launchCtx, task)
-			return
+		// Publish the repository-backed task, not the pre-claim snapshot this
+		// closure captured: a concurrent ceiling deferral can write a fresh
+		// deferred_launch record while LaunchSession runs, and deleting the
+		// key from the stale in-memory copy would both discard that
+		// concurrent write and publish it as gone.
+		current, err := s.repo.GetTask(launchCtx, task.ID)
+		if err != nil {
+			s.logger.Warn(eventName+": failed to reload task after deferred launch; publishing pre-launch snapshot",
+				zap.String("task_id", task.ID), zap.Error(err))
+			current = task
+			delete(current.Metadata, models.MetaKeyDeferredLaunch)
+			current.UpdatedAt = time.Now().UTC()
 		}
-		task.UpdatedAt = time.Now().UTC()
-		if updateErr := s.repo.UpdateTask(launchCtx, task); updateErr == nil {
-			s.publishTaskUpdated(launchCtx, task)
-		}
+		s.publishTaskUpdated(launchCtx, current)
 	}()
 	return true
 }
 
-func (s *Service) claimDeferredLaunch(ctx context.Context, taskID, eventName string) (bool, bool) {
-	remover, ok := s.repo.(taskMetadataKeyRemover)
-	if !ok {
-		return false, true
+// claimDeferredLaunch reserves the launch-intent keys of a task's shared
+// deferred_launch record for the gate that is about to fire (WIP promotion or
+// dependency resolution). It takes only the launch-intent keys and leaves any
+// concurrently-written ceiling_* keys in place (AC-59a) — the same sub-key
+// take/restore protocol claimDeferredLaunchForStart uses for the direct-start
+// path, so the two consumers of the shared record can never clobber each
+// other's half of it.
+func (s *Service) claimDeferredLaunch(ctx context.Context, taskID, eventName string) (map[string]interface{}, bool) {
+	wip, claimed, err := s.repo.TakeTaskDeferredLaunchWIPKeys(ctx, taskID)
+	if err != nil {
+		s.logger.Warn(eventName+": failed to claim deferred launch", zap.String("task_id", taskID), zap.Error(err))
+		return nil, false
 	}
-	claimed, err := remover.RemoveTaskMetadataKey(ctx, taskID, models.MetaKeyDeferredLaunch)
-	if err != nil || !claimed {
-		if err != nil {
-			s.logger.Warn(eventName+": failed to claim deferred launch", zap.String("task_id", taskID), zap.Error(err))
-		}
-		return false, false
-	}
-	return true, true
+	return wip, claimed
 }
 
-func (s *Service) restoreDeferredLaunch(ctx context.Context, taskID string, raw interface{}, eventName string, claimed bool) {
-	if !claimed {
+// restoreDeferredLaunch puts a failed launch's claimed keys back, merging
+// into whatever the record holds now rather than replacing it — so a ceiling
+// record written while the launch was in flight survives the restore.
+func (s *Service) restoreDeferredLaunch(ctx context.Context, taskID string, wip map[string]interface{}, eventName string) {
+	if len(wip) == 0 {
 		return
 	}
-	setter, ok := s.repo.(interface {
-		SetTaskMetadataKey(context.Context, string, string, interface{}) error
-	})
-	if !ok {
-		return
-	}
-	if err := setter.SetTaskMetadataKey(ctx, taskID, models.MetaKeyDeferredLaunch, raw); err != nil {
+	if err := s.repo.RestoreTaskDeferredLaunchWIPKeys(ctx, taskID, wip); err != nil {
 		s.logger.Warn(eventName+": failed to restore deferred launch intent", zap.String("task_id", taskID), zap.Error(err))
 	}
 }
@@ -2996,6 +3015,20 @@ func (s *Service) switchSessionForStepWithPolicies(
 	startPolicy models.WorkflowProfileSessionStartPolicy,
 	endPolicy models.WorkflowProfileSessionEndPolicy,
 ) (*models.TaskSession, error) {
+	return s.switchSessionForStepWithPoliciesAndCandidate(
+		ctx, taskID, currentSession, newAgentProfileID, startPolicy, endPolicy, nil,
+	)
+}
+
+func (s *Service) switchSessionForStepWithPoliciesAndCandidate(
+	ctx context.Context,
+	taskID string,
+	currentSession *models.TaskSession,
+	newAgentProfileID string,
+	startPolicy models.WorkflowProfileSessionStartPolicy,
+	endPolicy models.WorkflowProfileSessionEndPolicy,
+	validatedExisting *models.TaskSession,
+) (*models.TaskSession, error) {
 	startPolicy = models.NormalizeWorkflowProfileSessionStartPolicy(string(startPolicy))
 	endPolicy = models.NormalizeWorkflowProfileSessionEndPolicy(string(endPolicy))
 	s.logger.Info("switching session for workflow step agent profile change",
@@ -3007,13 +3040,17 @@ func (s *Service) switchSessionForStepWithPolicies(
 		zap.String("profile_session_end_policy", string(endPolicy)))
 	var existing *models.TaskSession
 	if startPolicy == models.WorkflowProfileSessionStartPolicyReuse {
-		var lookupErr error
-		existing, lookupErr = s.findReusableSessionForProfile(ctx, taskID, newAgentProfileID, currentSession.ID)
-		if lookupErr != nil {
-			s.logger.Warn("failed to look up reusable session, falling through to create new",
-				zap.String("task_id", taskID),
-				zap.String("agent_profile_id", newAgentProfileID),
-				zap.Error(lookupErr))
+		if validatedExisting != nil {
+			existing = validatedExisting
+		} else {
+			var lookupErr error
+			existing, lookupErr = s.findReusableSessionForProfile(ctx, taskID, newAgentProfileID, currentSession.ID)
+			if lookupErr != nil {
+				s.logger.Warn("failed to look up reusable session, falling through to create new",
+					zap.String("task_id", taskID),
+					zap.String("agent_profile_id", newAgentProfileID),
+					zap.Error(lookupErr))
+			}
 		}
 	}
 	targetSession := currentSession
@@ -3544,7 +3581,7 @@ func (s *Service) prepareWorkflowReplacementSession(
 	launchProfileID, err := s.resolveDynamicLaunchExecution(ctx, newSession, newAgentProfileID, true)
 	if err != nil {
 		resolutionErr := fmt.Errorf("failed to resolve workflow replacement profile: %w", err)
-		if deleteErr := s.deleteSessionAndCleanAttachments(ctx, newSession); deleteErr != nil {
+		if deleteErr := s.deleteSessionAndPublishRemoval(ctx, taskID, sessionID); deleteErr != nil {
 			s.logger.Warn("failed to delete workflow replacement after profile resolution failure",
 				zap.String("task_id", taskID),
 				zap.String("session_id", sessionID),
@@ -3554,6 +3591,8 @@ func (s *Service) prepareWorkflowReplacementSession(
 					zap.String("task_id", taskID),
 					zap.String("session_id", sessionID),
 					zap.Error(terminalErr))
+			} else {
+				s.releaseCeilingReservation(sessionID)
 			}
 		}
 		return nil, resolutionErr
@@ -3624,6 +3663,8 @@ func (s *Service) rollbackNewWorkflowProfileSwitch(
 				ctx, destination.ID, models.TaskSessionStateFailed, cleanupErr.Error(),
 			); terminalErr != nil {
 				cleanupErr = errors.Join(cleanupErr, fmt.Errorf("terminalize failed workflow destination: %w", terminalErr))
+			} else {
+				s.releaseCeilingReservation(destination.ID)
 			}
 			return errors.Join(cause, cleanupErr)
 		}
@@ -3634,6 +3675,8 @@ func (s *Service) rollbackNewWorkflowProfileSwitch(
 			ctx, destination.ID, models.TaskSessionStateFailed, deleteErr.Error(),
 		); terminalErr != nil {
 			deleteErr = errors.Join(deleteErr, fmt.Errorf("terminalize failed workflow destination: %w", terminalErr))
+		} else {
+			s.releaseCeilingReservation(destination.ID)
 		}
 		return errors.Join(cause, deleteErr)
 	}
@@ -3682,6 +3725,7 @@ func (s *Service) retainFailedWorkflowDestination(
 	); err != nil {
 		return fmt.Errorf("terminalize retained workflow destination: %w", err)
 	}
+	s.releaseCeilingReservation(destination.ID)
 	s.logger.Warn("retained failed workflow destination for durable recovery",
 		zap.String("task_id", taskID),
 		zap.String("session_id", destination.ID),
@@ -3759,13 +3803,28 @@ func (s *Service) prepareWorkflowStepSession(
 	effectiveProfile := s.resolveStepAgentProfile(ctx, step)
 	startPolicy := s.resolveStepProfileSessionStartPolicy(step)
 	if shouldKeepCurrentWorkflowStepSession(effectiveProfile, session.AgentProfileID, startPolicy) {
+		requiresFreshSession, err := s.workflowEntryRequiresFreshExactModelSession(ctx, session, step, sourceStep, effectiveProfile)
+		if err != nil {
+			return nil, false, err
+		}
+		if requiresFreshSession {
+			if sourceStep == nil {
+				return nil, false, fmt.Errorf("workflow profile switch source step is unavailable")
+			}
+			endPolicy := s.resolveStepProfileSessionEndPolicy(sourceStep)
+			return s.replaceExactModelWorkflowStepSession(ctx, taskID, session, step, effectiveProfile, endPolicy, entryIDs...)
+		}
 		return s.keepCurrentWorkflowStepSession(ctx, taskID, session, step, entryIDs...)
 	}
 	if sourceStep == nil {
 		return nil, false, fmt.Errorf("workflow profile switch source step is unavailable")
 	}
+	startPolicy, validatedExisting, err := s.exactModelWorkflowStartPolicy(ctx, taskID, session.ID, step, sourceStep, effectiveProfile, startPolicy)
+	if err != nil {
+		return nil, false, err
+	}
 	endPolicy := s.resolveStepProfileSessionEndPolicy(sourceStep)
-	newSession, err := s.switchSessionForStepWithPolicies(ctx, taskID, session, effectiveProfile, startPolicy, endPolicy)
+	newSession, err := s.switchSessionForStepWithPoliciesAndCandidate(ctx, taskID, session, effectiveProfile, startPolicy, endPolicy, validatedExisting)
 	if err != nil {
 		return nil, false, err
 	}
@@ -3773,6 +3832,122 @@ func (s *Service) prepareWorkflowStepSession(
 		return nil, false, err
 	}
 	return newSession, true, nil
+}
+
+// replaceExactModelWorkflowStepSession creates a clean session for a step whose
+// profile matches the current session but whose persisted runtime model drifted
+// from the profile's configured model. It shares the switch path's source
+// binding semantics so entry routing observes one uniform hand-off.
+func (s *Service) replaceExactModelWorkflowStepSession(
+	ctx context.Context,
+	taskID string,
+	session *models.TaskSession,
+	step *wfmodels.WorkflowStep,
+	profileID string,
+	endPolicy models.WorkflowProfileSessionEndPolicy,
+	entryIDs ...int64,
+) (*models.TaskSession, bool, error) {
+	newSession, err := s.createNewSessionForStepWithEndPolicy(ctx, taskID, session, profileID, endPolicy)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := s.recordWorkflowSourceBinding(ctx, taskID, step, newSession, entryIDs...); err != nil {
+		return nil, false, err
+	}
+	return newSession, true, nil
+}
+
+func (s *Service) exactModelWorkflowStartPolicy(
+	ctx context.Context,
+	taskID, currentSessionID string,
+	step, sourceStep *wfmodels.WorkflowStep,
+	profileID string,
+	startPolicy models.WorkflowProfileSessionStartPolicy,
+) (models.WorkflowProfileSessionStartPolicy, *models.TaskSession, error) {
+	if startPolicy != models.WorkflowProfileSessionStartPolicyReuse {
+		return startPolicy, nil, nil
+	}
+	existing, err := s.findReusableSessionForProfile(ctx, taskID, profileID, currentSessionID)
+	if err != nil {
+		s.logger.Warn("failed to inspect reusable session for exact model identity",
+			zap.String("task_id", taskID),
+			zap.String("agent_profile_id", profileID),
+			zap.Error(err))
+		return startPolicy, nil, fmt.Errorf("find reusable session for exact model identity: %w", err)
+	}
+	if existing == nil {
+		// The lookup above is the validated candidate decision. Do not return
+		// reuse with a nil candidate, because the switch path would perform a
+		// second lookup against a potentially changed session set.
+		return models.WorkflowProfileSessionStartPolicyNew, nil, nil
+	}
+	requiresFreshSession, err := s.workflowEntryRequiresFreshExactModelSession(ctx, existing, step, sourceStep, profileID)
+	if err != nil {
+		return startPolicy, nil, err
+	}
+	if requiresFreshSession {
+		return models.WorkflowProfileSessionStartPolicyNew, nil, nil
+	}
+	return startPolicy, existing, nil
+}
+
+// workflowEntryRequiresFreshExactModelSession prevents a workflow lane from
+// resuming a parked session whose persisted provider model disagrees with the
+// profile's configured model policy. Explicit session overrides remain valid
+// within a lane; this boundary applies only while entering a different workflow
+// step. Only profiles with exactness explicitly enabled require a fresh session
+// when the persisted effective model is unknown or different.
+func (s *Service) workflowEntryRequiresFreshExactModelSession(
+	ctx context.Context,
+	session *models.TaskSession,
+	step, sourceStep *wfmodels.WorkflowStep,
+	profileID string,
+) (bool, error) {
+	if session == nil || step == nil || sourceStep == nil || sourceStep.ID == step.ID || profileID == "" {
+		return false, nil
+	}
+	drifted, err := s.sessionHasUnauthorizedExactModelDrift(ctx, session, profileID)
+	if err != nil || !drifted {
+		return drifted, err
+	}
+	profile, err := s.agentManager.ResolveAgentProfile(ctx, profileID)
+	if err != nil {
+		return false, fmt.Errorf("resolve exact workflow profile %q: %w", profileID, err)
+	}
+	effective, _ := models.LoadEffectiveSessionRuntimeConfig(session)
+	s.logger.Info("creating fresh workflow session for exact model identity",
+		zap.String("session_id", session.ID),
+		zap.String("profile_id", profileID),
+		zap.String("source_step_id", sourceStep.ID),
+		zap.String("target_step_id", step.ID),
+		zap.String("configured_model", profile.Model),
+		zap.String("persisted_model", effective.Model))
+	return true, nil
+}
+
+func (s *Service) sessionHasUnauthorizedExactModelDrift(
+	ctx context.Context,
+	session *models.TaskSession,
+	profileID string,
+) (bool, error) {
+	if session == nil || profileID == "" {
+		return false, nil
+	}
+	profile, err := s.agentManager.ResolveAgentProfile(ctx, profileID)
+	if err != nil {
+		return false, fmt.Errorf("resolve exact workflow profile %q: %w", profileID, err)
+	}
+	if profile == nil {
+		return false, fmt.Errorf("resolve exact workflow profile %q: profile is unavailable", profileID)
+	}
+	if !profile.RequireExactModel || profile.Model == "" {
+		return false, nil
+	}
+	effective, ok := models.LoadEffectiveSessionRuntimeConfig(session)
+	if !ok || effective.Model == "" {
+		return true, nil
+	}
+	return effective.Model != profile.Model, nil
 }
 
 func (s *Service) keepCurrentWorkflowStepSession(
@@ -3833,7 +4008,16 @@ func (s *Service) preflightWorkflowStepCredentials(
 	effectiveProfile := s.resolveStepAgentProfile(ctx, targetStep)
 	startPolicy := s.resolveStepProfileSessionStartPolicy(targetStep)
 	if shouldKeepCurrentWorkflowStepSession(effectiveProfile, currentSession.AgentProfileID, startPolicy) {
-		return nil
+		if effectiveProfile == "" || startPolicy != models.WorkflowProfileSessionStartPolicyReuse {
+			return nil
+		}
+		drifted, err := s.sessionHasUnauthorizedExactModelDrift(ctx, currentSession, effectiveProfile)
+		if err != nil {
+			return err
+		}
+		if !drifted {
+			return nil
+		}
 	}
 	targetSession := currentSession
 	if startPolicy == models.WorkflowProfileSessionStartPolicyReuse {
@@ -4019,9 +4203,10 @@ func (s *Service) processOnEnter(ctx context.Context, taskID string, session *mo
 		// skips the actual reset and no "Context reset" divider should show.
 		// Capture this before the call, which may flip session.State.
 		hadConversation := session.State != models.TaskSessionStateCreated
-		if !s.resetAgentContext(ctx, taskID, session, step.Name) {
-			s.setSessionWaitingForInput(ctx, taskID, sessionID, session)
-			s.publishSessionWaitingEvent(ctx, taskID, sessionID, step.ID, session)
+		_, resetErr := s.resetAgentContextWithError(ctx, taskID, session, step.Name, func(executionID string, err error) {
+			s.persistWorkflowResetFailure(ctx, taskID, sessionID, step.ID, step.Name, executionID, err)
+		})
+		if resetErr != nil {
 			return
 		}
 		s.markIdleAfterReset(ctx, taskID, sessionID, session, step, isPassthrough)
@@ -4886,7 +5071,7 @@ func (s *Service) syncTaskStateForPendingMove(ctx context.Context, taskID, fromS
 	oldState := task.State
 	task.State = v1.TaskStateTODO
 	task.UpdatedAt = time.Now().UTC()
-	if err := s.repo.UpdateTask(ctx, task); err != nil {
+	if err := s.repo.UpdateTaskPreservingDeferredLaunch(ctx, task); err != nil {
 		s.taskRuntimeStateMu.Unlock()
 		s.logger.Warn("pending move state sync: failed to reopen completed task",
 			zap.String("task_id", taskID),
@@ -5616,7 +5801,7 @@ func (s *Service) autoStartStepPrompt(
 
 	const maxRetryAttempts = 5
 	for attempt := 1; attempt <= maxRetryAttempts; attempt++ {
-		_, err := s.promptTask(ctx, taskID, sessionID, dispatchPrompt, "", planMode, attachments, false, promptTaskOptions{
+		_, err := s.promptTask(ctx, taskID, sessionID, dispatchPrompt, "", planMode, attachments, false, launchOriginAutomatic, promptTaskOptions{
 			requireNonterminalSession: true,
 			// dispatchPrompt is already fully composed for this step entry
 			// (handoff included, see the ErrExecutionNotFound branch below):
@@ -5633,6 +5818,18 @@ func (s *Service) autoStartStepPrompt(
 		}
 		if errors.Is(err, errWorkflowAutoStartSessionTerminalized) {
 			requeueTaken()
+			return err
+		}
+		// AC-47c2: the two seam-3 dispositions carry opposite restoration
+		// obligations. A deferred refusal already holds the prompt and its
+		// AC-47c(c) strings in the written record, so requeuing here would
+		// redeliver the same content twice; an undeferred one (AC-47c1) is
+		// the caller's own to restore, exactly like the terminalized branch
+		// above.
+		if refusal, ok := isSeam3Refusal(err); ok {
+			if !refusal.deferred {
+				requeueTaken()
+			}
 			return err
 		}
 
@@ -5985,7 +6182,7 @@ func (s *Service) queueAutoStartPrompt(
 	if handoffText != "" {
 		meta[messagequeue.MetadataStepHandoff] = handoffText
 	}
-	_, err := s.messageQueue.QueueMessageWithMetadata(
+	queued, err := s.messageQueue.QueueMessageWithMetadata(
 		ctx,
 		sessionID,
 		taskID,
@@ -6000,7 +6197,7 @@ func (s *Service) queueAutoStartPrompt(
 		return fmt.Errorf("failed to queue workflow auto-start prompt: %w", err)
 	}
 	s.publishQueueStatusEvent(ctx, sessionID)
-	s.scheduleAutoResumeForWorkflowQueue(ctx, sessionID)
+	s.scheduleAutoResumeForWorkflowQueue(ctx, sessionID, queued.ID)
 	return nil
 }
 
@@ -6015,14 +6212,14 @@ func (s *Service) queueAutoStartPrompt(
 // crashed just before the on_enter transition). If the agent is alive when
 // the queue is written but dies later, the queue is drained by the next
 // handleAgentBootReady (manual or automatic resume).
-func (s *Service) scheduleAutoResumeForWorkflowQueue(ctx context.Context, sessionID string) {
+func (s *Service) scheduleAutoResumeForWorkflowQueue(ctx context.Context, sessionID, queuedMessageID string) {
 	if s.executor == nil {
 		return
 	}
 	if exec, ok := s.executor.GetExecutionBySession(sessionID); ok && exec != nil {
 		return
 	}
-	go s.tryEnsureExecution(context.WithoutCancel(ctx), sessionID)
+	go s.tryEnsureExecution(context.WithoutCancel(ctx), sessionID, seam3CallShapeQueueDrain, launchOriginAutomatic, queuedMessageID)
 }
 
 // flipStaleRunningToWaiting flips the session to WAITING_FOR_INPUT when its
@@ -6120,7 +6317,29 @@ func (s *Service) markIdleAfterReset(
 // resetAgentContext restarts the agent subprocess with a fresh ACP session, clearing
 // the agent's conversation context. The workspace environment is preserved.
 func (s *Service) resetAgentContext(ctx context.Context, taskID string, session *models.TaskSession, stepName string) bool {
+	_, err := s.resetAgentContextWithError(ctx, taskID, session, stepName)
+	return err == nil
+}
+
+type workflowResetFailureHandler func(executionID string, err error)
+
+// resetAgentContextWithError performs a workflow context reset and retains the
+// execution identity for callers that need to report a failed reset. The
+// boolean wrapper above keeps manual and callback callers focused on the
+// existing success contract.
+//
+//nolint:funlen // Reset settlement must keep provider, persistence, and guard stages together.
+func (s *Service) resetAgentContextWithError(
+	ctx context.Context, taskID string, session *models.TaskSession, stepName string,
+	failureHandlers ...workflowResetFailureHandler,
+) (string, error) {
 	sessionID := session.ID
+	settleFailure := func(executionID string, err error) (string, error) {
+		if len(failureHandlers) > 0 && failureHandlers[0] != nil {
+			failureHandlers[0](executionID, err)
+		}
+		return executionID, err
+	}
 
 	// A CREATED session has never been prompted, so there is no agent
 	// conversation to clear. Its execution may still be workspace-only
@@ -6135,7 +6354,7 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 		s.logger.Debug("session has no agent context to reset, skipping",
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName))
-		return true
+		return "", nil
 	}
 
 	releaseLifecycleLock := s.acquireSessionLifecycleLock(sessionID)
@@ -6155,7 +6374,7 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName),
 			zap.Error(err))
-		return false
+		return settleFailure(session.AgentExecutionID, fmt.Errorf("quiesce active turn: %w", err))
 	}
 
 	executionID, err := s.agentManager.GetExecutionIDForSession(ctx, sessionID)
@@ -6178,10 +6397,10 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 				zap.String("session_id", sessionID),
 				zap.String("step_name", stepName),
 				zap.Error(err))
-			return false
+			return settleFailure("", fmt.Errorf("clear lazy resume token: %w", err))
 		}
 		s.clearPersistedResetState(ctx, sessionID, session)
-		return true
+		return "", nil
 	}
 
 	s.logger.Info("resetting agent context for workflow step",
@@ -6191,14 +6410,23 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 		zap.String("agent_execution_id", executionID))
 
 	previousACPSessionID := s.currentACPSessionID(sessionID)
-	if err := s.agentManager.ResetAgentContext(ctx, executionID); err != nil {
+	// The lifecycle manager synchronously republishes setup events that arrived
+	// during session replacement. Those publications enter the orchestrator's
+	// stream handler, which acquires this same guard. Keep reset admission fenced
+	// by the reset marker and lifecycle lock, but yield the stream guard while the
+	// provider operation and its event replay run; reacquire it before any result
+	// reconciliation or failure settlement.
+	resetGuard.unlock()
+	resetErr := s.agentManager.ResetAgentContext(ctx, executionID)
+	resetGuard.relock()
+	if resetErr != nil {
 		s.logger.Error("failed to reset agent context",
 			zap.String("task_id", taskID),
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName),
-			zap.Error(err))
+			zap.Error(resetErr))
 		s.reconcileFailedContextReset(ctx, taskID, session, executionID, previousACPSessionID)
-		return false
+		return settleFailure(executionID, fmt.Errorf("provider context reset: %w", resetErr))
 	}
 
 	// Clear the old resume token only after the provider reset succeeds. This
@@ -6211,7 +6439,7 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 			zap.String("session_id", sessionID),
 			zap.String("step_name", stepName),
 			zap.Error(err))
-		return false
+		return settleFailure(executionID, fmt.Errorf("clear resume token after context reset: %w", err))
 	}
 	if acpSessionID := s.currentACPSessionID(sessionID); acpSessionID != "" {
 		s.storeResumeToken(ctx, taskID, sessionID, executionID, acpSessionID, "")
@@ -6220,7 +6448,51 @@ func (s *Service) resetAgentContext(ctx context.Context, taskID string, session 
 	// Clear the remaining persisted state (ACP session metadata, context window)
 	// after the provider reset succeeds. The token is handled explicitly above.
 	s.clearPersistedResetState(ctx, sessionID, session)
-	return true
+	return executionID, nil
+}
+
+// persistWorkflowResetFailure settles the visible failure while the caller's
+// session lifecycle lock and cancel guard still own reset admission. A queued
+// successor or deletion therefore cannot observe the reset error midway
+// through its metadata/state publication and overwrite the successor turn.
+func (s *Service) persistWorkflowResetFailure(
+	ctx context.Context,
+	taskID, sessionID, stepID, stepName, executionID string,
+	resetErr error,
+) {
+	failureCtx, cancelFailure := context.WithTimeout(
+		context.WithoutCancel(ctx), workflowResetFailureCleanupTimeout,
+	)
+	defer cancelFailure()
+	if executionID == "" {
+		if session, err := s.repo.GetTaskSession(failureCtx, sessionID); err == nil && session != nil {
+			executionID = session.AgentExecutionID
+		}
+	}
+	failureData := watcher.AgentEventData{
+		TaskID:           taskID,
+		SessionID:        sessionID,
+		AgentExecutionID: executionID,
+		ErrorMessage:     workflowResetFailureMessage,
+		FailureCode:      workflowResetFailureCode,
+		FailureDetails:   fmt.Sprintf("workflow step %q: %s", stepName, resetErr),
+	}
+	if persistErr := s.persistLastAgentError(failureCtx, failureData); persistErr != nil {
+		s.logger.Error("failed to persist workflow context reset failure",
+			zap.String("task_id", taskID),
+			zap.String("session_id", sessionID),
+			zap.String("step_name", stepName),
+			zap.Error(persistErr))
+	}
+	cancelFailure()
+	settlementCtx, cancelSettlement := context.WithTimeout(
+		context.WithoutCancel(ctx), workflowResetFailureCleanupTimeout,
+	)
+	defer cancelSettlement()
+	// Do not pass the pre-reset session snapshot to either operation. The
+	// metadata write above must be visible in the waiting-state projection.
+	s.setSessionWaitingForInput(settlementCtx, taskID, sessionID)
+	s.publishSessionWaitingEvent(settlementCtx, taskID, sessionID, stepID)
 }
 
 // quiesceActiveResetTurn stops an in-flight turn through the internal silent
@@ -6248,11 +6520,19 @@ func (s *Service) quiesceActiveResetTurn(
 		// best-effort cancellation behavior without an expected durable ID.
 		turnID = ""
 	}
-	if _, err := s.cancelAgentSilentWithGuardActionKindExclusiveConflict(
+	operation, _, err := s.cancelAgentSilentWithGuardActionKindExclusiveConflict(
 		ctx, taskID, sessionID, resetGuard.unlock, resetGuard.relock,
 		nil, cancellationKindInternal, turnID, errContextResetCancellationConflict,
-	); err != nil {
+	)
+	if err != nil {
 		return fmt.Errorf("cancel active turn for context reset at %s: %w", stepName, err)
+	}
+	providerErr, outcomeReady := s.cancellationProviderOutcomeSnapshot(operation)
+	if !outcomeReady {
+		return fmt.Errorf("cancel active turn for context reset at %s: provider outcome unavailable", stepName)
+	}
+	if errors.Is(providerErr, agentruntime.ErrCancelEscalated) {
+		return fmt.Errorf("cancel active turn for context reset at %s: provider cancellation escalated: %w", stepName, providerErr)
 	}
 	return nil
 }

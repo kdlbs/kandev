@@ -75,6 +75,19 @@ Closing a real chat tab permanently deletes its conversation, hidden backing tas
 
 If **Start chat** is disabled, select a profile and finish every repository/branch row. If a repository is missing, confirm that it belongs to the current workspace and refresh the repository configuration. Use a normal task when the result must remain visible on a board or become a reviewed PR.
 
+### Agent continuation goals
+
+Some ACP agents keep an explicit goal after a reply. When the selected task or Quick Chat session
+reports an active goal, Kandev shows a **Goal Active** chip above the composer. Select the chip, or
+focus it with the keyboard, to read the goal and its status. The details explain that the agent may
+continue automatically between replies. They do not provide a wakeup time or change the agent's
+goal.
+
+The chip remains visible while the provider reports the goal as active, including while the session
+is idle. Completion, clearing, pausing, blocking, or a usage limit removes it. On a phone, select
+the chip to open the details in a drawer. The drawer keeps long goal text inside its own scroll
+area.
+
 <details>
 <summary>Utility agents and configuration chat</summary>
 

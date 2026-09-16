@@ -41,6 +41,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.initGitSchema,
 		r.initReviewSchema,
 		r.initTaskReviewSchema,
+		r.initClarificationInboxSidecarSchema,
 		r.migrateExecutorProfiles,
 		r.migrateTaskSessions,
 		r.ensureDefaultWorkspace,
@@ -60,6 +61,7 @@ func (r *Repository) initSchemaContext(ctx context.Context) error {
 		r.ensureMessageMetadataIndexes,
 		r.ensurePromptOrderIndex,
 		r.initWorkspaceInventoryRecoverySchema,
+		r.initConversationJournalSchema,
 	}
 	// Every boundary is checked before and after its step. The task repository
 	// passes the same context to startup SQL through migrationContext, so a

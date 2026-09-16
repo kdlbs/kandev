@@ -115,7 +115,7 @@ Detaching changes task hierarchy only. An inherited workspace remains shared wit
 
 ### Create a subtask from an agent
 
-Call `create_task_kandev` with `parent_id: "self"`. `workspace_mode` defaults to `inherit_parent`; set it to `new_workspace` for isolated materialization.
+Call `create_task_kandev` with `parent_id: "self"`. Omit `workspace_mode` to inherit the parent's materialized workspace/worktree, or set it to `new_workspace` for a separate workspace/worktree. The only explicit values are `inherit_parent` and `new_workspace`; `inherit_parent` requires `parent_id`. Send an exact value or omit the field: empty, whitespace-only, and padded strings fail MCP schema validation.
 
 - `start_agent` defaults to `true`. Supply a detailed `prompt` when it is true; if omitted, Kandev still starts the agent without task-specific instructions. Set it to `false` for a placeholder task.
 - `autopilot` defaults to `false`. Set it to `true` to start an autonomous task. This choice is immutable and is not inherited by subtasks. An autopilot child receives `ask_parent_question_kandev` instead of `ask_user_question_kandev`; an autopilot root receives neither question tool. See [Agent Communication](agent-communication.md#autopilot-parent-questions) for the answer protocol.
@@ -151,7 +151,7 @@ Use the queue controls according to the outcome you want:
 
 - **Auto-run** is ON by default. ON runs eligible messages one at a time in FIFO order. OFF lets the current response finish, then holds every later message. The per-session setting survives an empty queue, reload, and backend restart. Turning it ON starts the head immediately when the session is promptable; clarification, workflow transitions, cancellation, and other lifecycle guards can defer delivery without changing the displayed ON state.
 - **Auto-merge** shows the effective automatic-fold policy for this session. Changing it creates a permanent session override; untouched sessions continue to inherit the install-wide setting.
-- Every row's **Send Now** targets that message. It sends directly when the session is promptable; when an agent turn is active, it waits for backend cancellation acknowledgement and replaces that captured turn. A successful Send Now turns Auto-run ON, runs the selected row first, then continues the preserved remainder as separate FIFO turns. It does not record ordinary Cancel side effects, complete the cancelled workflow step, or move the task to review.
+- Every row's **Send Now** targets that message. It sends directly when the session is promptable; when an agent turn is active, it waits for backend cancellation acknowledgement and replaces that captured turn. This includes a turn that Auto-run delivered from the FIFO queue after its prompt handoff completes. The handoff remains protected while it is completing, so a concurrent Send Now conflict keeps the rows pending for retry. A successful Send Now turns Auto-run ON, runs the selected row first, then continues the preserved remainder as separate FIFO turns. It does not record ordinary Cancel side effects, complete the cancelled workflow step, or move the task to review.
 - **Clear all** removes every visible pending row without sending a prompt.
 - **Cancel** in the chat toolbar stops the active turn immediately as a user cancellation. It may record the cancellation, complete an eligible workflow step, and move the task to review. It does not send queued content; when pending rows remain, Auto-run becomes OFF so they stay parked.
 

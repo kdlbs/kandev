@@ -12,15 +12,16 @@ type PlaceholderInfo struct {
 // TriggerTypeInfo describes a trigger type and its associated metadata.
 // Served to clients so they can build UIs dynamically.
 type TriggerTypeInfo struct {
-	Type             TriggerType       `json:"type"`
-	Label            string            `json:"label"`
-	Description      string            `json:"description"`
-	Category         string            `json:"category"` // "schedule", "github", "webhook"
-	Enabled          bool              `json:"enabled"`
-	Placeholders     []PlaceholderInfo `json:"placeholders"`
-	DefaultPrompt    string            `json:"default_prompt"`
-	DefaultTaskTitle string            `json:"default_task_title"`
-	DefaultConfig    json.RawMessage   `json:"default_config"`
+	Plugin           *PluginConditionInfo `json:"plugin,omitempty"`
+	Type             TriggerType          `json:"type"`
+	Label            string               `json:"label"`
+	Description      string               `json:"description"`
+	Category         string               `json:"category"` // "schedule", "github", "webhook"
+	Enabled          bool                 `json:"enabled"`
+	Placeholders     []PlaceholderInfo    `json:"placeholders"`
+	DefaultPrompt    string               `json:"default_prompt"`
+	DefaultTaskTitle string               `json:"default_task_title"`
+	DefaultConfig    json.RawMessage      `json:"default_config"`
 }
 
 // Common placeholders available for every trigger type.

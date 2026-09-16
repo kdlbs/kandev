@@ -178,6 +178,7 @@ export type UserSettings = {
   prevent_auto_start_agent_on_open?: boolean;
   unread_divider?: boolean;
   agent_generated_task_titles?: boolean;
+  auto_focus_new_tasks?: boolean;
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
   show_release_notification?: boolean;
   release_notes_last_seen_version?: string;
@@ -213,6 +214,8 @@ export type UserSettings = {
   last_seen_display?: LastSeenDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
+  sidebar_hover_enabled?: boolean;
+  sidebar_hover_delay_ms?: number;
   resolve_session_hostnames?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
   quick_chat_tab_order_by_workspace?: Record<string, string[]>;
@@ -253,6 +256,7 @@ export type UserSettingsUpdatePayload = {
   prevent_auto_start_agent_on_open?: boolean;
   unread_divider?: boolean;
   agent_generated_task_titles?: boolean;
+  auto_focus_new_tasks?: boolean;
   mcp_task_agent_profile_default?: MCPTaskAgentProfileDefault;
   show_release_notification?: boolean;
   release_notes_last_seen_version?: string;
@@ -288,6 +292,8 @@ export type UserSettingsUpdatePayload = {
   last_seen_display?: LastSeenDisplay;
   system_metrics_display?: { show_in_topbar?: boolean; simplified?: boolean };
   app_status_bar_enabled?: boolean;
+  sidebar_hover_enabled?: boolean;
+  sidebar_hover_delay_ms?: number;
   resolve_session_hostnames?: boolean;
   app_status_bar_order?: AppStatusBarOrderApi;
   quick_chat_tab_order_by_workspace?: Record<string, string[]>;

@@ -80,7 +80,7 @@ func (h *Handlers) handleDeleteWorkflow(ctx context.Context, msg *ws.Message) (*
 
 	if err := h.taskSvc.DeleteWorkflow(ctx, workflowID); err != nil {
 		h.logger.Error("failed to delete workflow", zap.Error(err))
-		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "Failed to delete workflow", nil)
+		return h.workflowScopeError(msg, err, "Failed to delete workflow")
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]interface{}{"success": true})
 }

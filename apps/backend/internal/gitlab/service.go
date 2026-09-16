@@ -696,7 +696,9 @@ func (s *Service) syncTaskMRWithClient(
 		MRURL:               mr.WebURL,
 		MRTitle:             mr.Title,
 		HeadBranch:          mr.HeadBranch,
+		HeadSHA:             mr.HeadSHA,
 		BaseBranch:          mr.BaseBranch,
+		BaseSHA:             mr.BaseSHA,
 		AuthorUsername:      mr.AuthorUsername,
 		State:               mr.State,
 		ApprovalState:       status.ApprovalState,
@@ -747,4 +749,15 @@ func (s *Service) ListTaskMRsByTask(ctx context.Context, taskID string) ([]*Task
 		return nil, nil
 	}
 	return store.ListTaskMRsByTask(ctx, taskID)
+}
+
+// ListTaskMRsByTaskIDs surfaces GitLab MR associations grouped by task ID.
+func (s *Service) ListTaskMRsByTaskIDs(ctx context.Context, taskIDs []string) (map[string][]*TaskMR, error) {
+	s.mu.RLock()
+	store := s.store
+	s.mu.RUnlock()
+	if store == nil {
+		return map[string][]*TaskMR{}, nil
+	}
+	return store.ListTaskMRsByTaskIDs(ctx, taskIDs)
 }

@@ -1,6 +1,8 @@
 /* eslint-disable sonarjs/no-duplicate-string -- Wire action and fixture IDs are intentionally repeated for readability. */
 import { beforeEach, describe, it, expect, vi } from "vitest";
 import type { EntityReference } from "@/lib/types/entity-reference";
+import { planCommentAdmissionConflict } from "@/lib/plan-comment-refs";
+import { WebSocketRequestError } from "@/lib/ws/request-error";
 
 const getWebSocketClientMock = vi.hoisted(() => vi.fn());
 const QUEUE_ADD_ACTION = "message.queue.add";
@@ -131,7 +133,83 @@ describe("rethrowQueueError", () => {
     }
     expect(caught).toBe(original);
   });
+});
 
+describe("structured plan comment conflicts", () => {
+  it("preserves structured plan comment conflicts and their snapshots", () => {
+    const details = {
+      snapshot: {
+        task_id: "task-1",
+        plan_id: "plan-1",
+        revision: 3,
+        comments: [],
+      },
+    };
+    const original = new WebSocketRequestError(
+      "Plan comments changed",
+      "plan_comments_changed",
+      details,
+    );
+    let caught: unknown;
+    try {
+      rethrowQueueError(original);
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBe(original);
+    expect((caught as WebSocketRequestError).code).toBe("plan_comments_changed");
+    expect((caught as WebSocketRequestError).details).toEqual(details);
+    expect(planCommentAdmissionConflict(caught)).toMatchObject({
+      code: "plan_comments_changed",
+      snapshot: details.snapshot,
+    });
+  });
+
+  it("preserves structured primary-session conflicts and their details", () => {
+    const details = {
+      primary_session_id: "session-2",
+      primary_session_state: "RUNNING",
+    };
+    const original = new WebSocketRequestError(
+      "Primary session changed",
+      "primary_session_changed",
+      details,
+    );
+    let caught: unknown;
+    try {
+      rethrowQueueError(original);
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBe(original);
+    expect((caught as WebSocketRequestError).code).toBe("primary_session_changed");
+    expect((caught as WebSocketRequestError).details).toEqual(details);
+    expect(planCommentAdmissionConflict(caught)).toMatchObject({
+      code: "primary_session_changed",
+      primarySessionId: "session-2",
+      primarySessionState: "RUNNING",
+    });
+  });
+
+  it("preserves admission-only validation errors for non-admission operations", () => {
+    const details = { field: "content" };
+    const original = new WebSocketRequestError("Invalid queue edit", "VALIDATION_ERROR", details);
+    let caught: unknown;
+    try {
+      rethrowQueueError(original);
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBe(original);
+    expect((caught as WebSocketRequestError).code).toBe("VALIDATION_ERROR");
+    expect((caught as WebSocketRequestError).details).toEqual(details);
+  });
+});
+
+describe("rethrowQueueError values", () => {
   it("wraps non-Error non-WSError values in an Error so callers can rely on stack traces", () => {
     let caught: unknown;
     try {
@@ -432,10 +510,12 @@ describe("sendQueuedNow", () => {
   });
 
   it("maps send-now conflict codes to a typed error", async () => {
-    const request = vi.fn().mockRejectedValue({
-      code: "send_now_conflict",
-      message: "Another cancellation is in progress",
-    });
+    const conflict = new WebSocketRequestError(
+      "Another cancellation is in progress",
+      "send_now_conflict",
+      { session_id: SESSION_ID },
+    );
+    const request = vi.fn().mockRejectedValue(conflict);
     getWebSocketClientMock.mockReturnValue({ request });
 
     await expect(

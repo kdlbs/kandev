@@ -155,6 +155,7 @@ export async function fetchAndOpenFile(
       originalHash: hash,
       isDirty: false,
       isBinary: response.is_binary,
+      resolvedPath: response.resolved_path,
     });
   } catch (error) {
     if (signal?.aborted) return;

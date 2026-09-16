@@ -42,9 +42,8 @@ import type {
   TaskPR,
   TaskPRDeletedEvent,
 } from "@/lib/types/github";
-import type { TaskMR } from "@/lib/types/gitlab";
+import type { TaskMR, TaskMRDeletedEvent, TaskMRAutomationOptions } from "@/lib/types/gitlab";
 import type { TaskStatusSummary } from "@/lib/types/task-status-summary";
-import type { TaskMRAutomationOptions } from "@/lib/types/gitlab";
 import type { AgentProfileRecentUseApiRecord } from "@/lib/types/http-agent-profile-recent-use";
 import type { SystemMetricsSnapshot, StorageAnalysisUpdatedPayload } from "./system";
 import type { AgentRuntimeAvailability } from "./agent-runtime";
@@ -330,6 +329,7 @@ export type OfficeInboxItemNotificationPayload = {
 };
 
 export type FileChangeFacet = {
+  is_symlink?: boolean;
   status: "modified" | "added" | "deleted" | "untracked" | "renamed";
   additions?: number;
   deletions?: number;
@@ -339,6 +339,7 @@ export type FileChangeFacet = {
 };
 
 export type FileInfo = {
+  is_symlink?: boolean;
   path: string;
   status: "modified" | "added" | "deleted" | "untracked" | "renamed";
   staged: boolean;
@@ -366,6 +367,9 @@ export type AgentProfilePayload = {
   name: string;
   agent_display_name: string;
   model: string;
+  fallback_model?: string;
+  auto_fallback?: boolean;
+  require_exact_model?: boolean;
   auto_approve: boolean;
   dangerously_skip_permissions: boolean;
   allow_indexing: boolean;
@@ -381,6 +385,8 @@ export type AgentProfileDeletedPayload = {
 
 export type AgentProfileChangedPayload = {
   profile: AgentProfilePayload;
+  /** Sessionless-inference capability for profile events received before agent hydration. */
+  inference_capable?: boolean;
 };
 
 export type UserSettingsUpdatedPayload = Omit<
@@ -581,6 +587,7 @@ export type BackendMessageMap = SessionBackendMessageMap &
       "gitlab.task_mr.updated",
       TaskMR & { workspace_id: string }
     >;
+    "gitlab.task_mr.deleted": BackendMessage<"gitlab.task_mr.deleted", TaskMRDeletedEvent>;
     "gitlab.task_mr_options.updated": BackendMessage<
       "gitlab.task_mr_options.updated",
       TaskMRAutomationOptions

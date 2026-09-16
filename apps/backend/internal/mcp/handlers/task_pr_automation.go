@@ -148,11 +148,62 @@ func (h *Handlers) handleReportTaskPRAutoFixOutcome(ctx context.Context, msg *ws
 	if req.Summary == "" {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "summary is required", nil)
 	}
+	return h.reportTaskPRAutoFixOutcome(ctx, msg, req.TaskID, req.SessionID, req.Outcome, req.Summary)
+}
+
+// handleReportTaskChangeRequestAutoFixOutcome is the neutral transport
+// boundary. The MCP server supplies the current task and session internally;
+// the public tool accepts only the outcome and summary.
+func (h *Handlers) handleReportTaskChangeRequestAutoFixOutcome(ctx context.Context, msg *ws.Message) (*ws.Message, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(msg.Payload, &fields); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	for field := range fields {
+		switch field {
+		case "task_id", "session_id", "outcome", "summary":
+		default:
+			return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "unknown field: "+field, nil)
+		}
+	}
+	var req struct {
+		TaskID    string `json:"task_id"`
+		SessionID string `json:"session_id"`
+		Outcome   string `json:"outcome"`
+		Summary   string `json:"summary"`
+	}
+	if err := json.Unmarshal(msg.Payload, &req); err != nil {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeBadRequest, "Invalid payload: "+err.Error(), nil)
+	}
+	principal, ok := mcpscope.PrincipalFromContext(ctx)
+	if !ok {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "MCP caller identity is unavailable", nil)
+	}
+	if strings.TrimSpace(req.TaskID) != principal.CallerTaskID ||
+		strings.TrimSpace(req.SessionID) != principal.CallerSessionID {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeForbidden, "task_id and session_id must match the current MCP caller", nil)
+	}
+	req.TaskID = principal.CallerTaskID
+	req.SessionID = principal.CallerSessionID
+	req.Outcome = strings.TrimSpace(req.Outcome)
+	req.Summary = strings.TrimSpace(req.Summary)
+	if req.Outcome != string(github.TaskCIAutoFixOutcomeActionTaken) &&
+		req.Outcome != string(github.TaskCIAutoFixOutcomeNonActionable) &&
+		req.Outcome != string(github.TaskCIAutoFixOutcomeBlocked) {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "outcome must be action_taken, non_actionable, or blocked", nil)
+	}
+	if req.Summary == "" {
+		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeValidation, "summary is required", nil)
+	}
+	return h.reportTaskPRAutoFixOutcome(ctx, msg, req.TaskID, req.SessionID, req.Outcome, req.Summary)
+}
+
+func (h *Handlers) reportTaskPRAutoFixOutcome(ctx context.Context, msg *ws.Message, taskID, sessionID, outcome, summary string) (*ws.Message, error) {
 	if h.taskPRAutoFixOutcome == nil {
 		return ws.NewError(msg.ID, msg.Action, ws.ErrorCodeInternalError, "GitHub PR auto-fix outcome reporting is not available", nil)
 	}
 	if err := h.taskPRAutoFixOutcome.ReportTaskPRAutoFixOutcome(
-		ctx, req.TaskID, req.SessionID, req.Outcome, req.Summary,
+		ctx, taskID, sessionID, outcome, summary,
 	); err != nil {
 		switch {
 		case errors.Is(err, github.ErrTaskCIAutoFixAttemptNotFound):
@@ -165,7 +216,7 @@ func (h *Handlers) handleReportTaskPRAutoFixOutcome(ctx context.Context, msg *ws
 	}
 	return ws.NewResponse(msg.ID, msg.Action, map[string]string{
 		"status":  "recorded",
-		"outcome": req.Outcome,
+		"outcome": outcome,
 	})
 }
 

@@ -1,3 +1,4 @@
+/* eslint-disable max-lines -- AppState keeps the explicit cross-slice store contract in one type. */
 import type { HydrationOptions } from "./hydration/hydrator";
 import type {
   Repository,
@@ -43,6 +44,8 @@ import {
   defaultSystemState,
   defaultPluginsState,
   defaultReviewState,
+  defaultNeedsYouInboxState,
+  defaultFailedInboxState,
 } from "./slices";
 import type {
   WorkspaceState,
@@ -69,20 +72,10 @@ import type {
   PreviewViewMode,
   PreviewDevicePreset,
   ConnectionState,
-  SystemSliceActions,
-  AutomationsSliceActions,
-  FeaturesSliceActions,
-  AuthSliceActions,
-  GitHubSliceActions,
-  GitLabSliceActions,
-  AzureDevOpsSliceActions,
-  JiraSliceActions,
-  LinearSliceActions,
-  OfficeSliceActions,
-  PluginsSliceActions,
-  ReviewSliceActions,
   KanbanSlice,
+  NeedsYouInboxBootSeed,
 } from "./slices";
+import type { AppStateExtraActions } from "./app-state-extra-actions";
 import type {
   AvailableCommand,
   SessionModeEntry,
@@ -223,6 +216,14 @@ export type AppState = KanbanSlice & {
 
   // Review slice (actions merged via ReviewSliceActions intersection on AppState)
   taskReview: (typeof defaultReviewState)["taskReview"];
+
+  // Needs-you Inbox slice (actions merged via NeedsYouInboxSliceActions
+  // intersection on AppState)
+  needsYouInbox: (typeof defaultNeedsYouInboxState)["needsYouInbox"];
+
+  // Failed Inbox slice (actions merged via FailedInboxSliceActions
+  // intersection on AppState)
+  failedInbox: (typeof defaultFailedInboxState)["failedInbox"];
 
   // UI slice
   previewPanel: (typeof defaultUIState)["previewPanel"];
@@ -397,7 +398,6 @@ export type AppState = KanbanSlice & {
   closeQuickChatSession: (sessionId: string) => void;
   setActiveQuickChatSession: (sessionId: string, workspaceId: string) => void;
   renameQuickChatSession: (sessionId: string, name: string) => void;
-  setQuickChatInitialPrompt: UIA["setQuickChatInitialPrompt"];
   setSessionFailureNotification: (n: UISliceTypes.SessionFailureNotification | null) => void;
   setTaskDeletedNotification: (n: UISliceTypes.TaskDeletedNotification | null) => void;
   setUpdateAvailableNotification: (n: UISliceTypes.UpdateAvailableNotification | null) => void;
@@ -427,7 +427,12 @@ export type AppState = KanbanSlice & {
   /** Upserts a turn row, rejecting stale updates (see shouldApplyTurnUpdate). */
   addTurn: (turn: Turn) => void;
   /** Merges a complete REST snapshot and reconciles its marker atomically. */
-  mergeTurnsSnapshot: (sessionId: string, turns: Turn[], hydrationEpoch: number) => void;
+  mergeTurnsSnapshot: (
+    sessionId: string,
+    turns: Turn[],
+    hydrationEpoch: number,
+    options?: { replace?: boolean },
+  ) => void;
   completeTurn: (
     sessionId: string,
     turnId: string,
@@ -635,20 +640,8 @@ export type AppState = KanbanSlice & {
   restoreRichOutputAnimations: UIA["restoreRichOutputAnimations"];
   acknowledgeAgentErrors: UIA["acknowledgeAgentErrors"];
   dismissAgentError: UIA["dismissAgentError"];
-} & Pick<UIA, "setThreadActiveView" | "createThreadView"> &
-  GitHubSliceActions &
-  GitLabSliceActions &
-  JiraSliceActions &
-  LinearSliceActions &
-  OfficeSliceActions &
-  import("./store-reexports").WorkspaceSourceStoreState &
-  AzureDevOpsSliceActions &
-  SystemSliceActions &
-  FeaturesSliceActions &
-  AuthSliceActions &
-  AutomationsSliceActions &
-  PluginsSliceActions &
-  ReviewSliceActions;
+} & AppStateExtraActions &
+  Pick<UIA, "setQuickChatInitialPrompt" | "requestQuickChatOpen" | "setQuickChatSelectionIdentity">;
 
 // Most callers hydrate a fully-shaped slice per top-level key (see
 // mergeInitialState / hydrateState), but `system` is a grab-bag of many
@@ -659,4 +652,8 @@ export type AppState = KanbanSlice & {
 export type HydrationState = Omit<Partial<AppState>, "system" | "quickChat"> & {
   quickChat?: Partial<AppState["quickChat"]>;
   system?: Partial<AppState["system"]>;
+  // The Needs-you Inbox boot-hydration producer's raw wire shape, carried
+  // alongside (not inside) the `needsYouInbox` slice's own hydration key. See
+  // useNeedsYouInboxController's boot-seed effect, the only consumer.
+  needsYouInboxBoot?: NeedsYouInboxBootSeed;
 };

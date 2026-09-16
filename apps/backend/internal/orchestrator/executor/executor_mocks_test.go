@@ -559,6 +559,45 @@ func (m *mockRepository) UpdateTaskSessionStateIfCurrent(
 	return true, now, nil
 }
 
+// CommitBootstrapFailureIfCurrentExecution mirrors the production admission
+// boundary for executor tests. The fake has no separate executor table, so the
+// session's execution identity is the equivalent ownership fence.
+func (m *mockRepository) CommitBootstrapFailureIfCurrentExecution(
+	_ context.Context,
+	taskID, sessionID, agentExecutionID string,
+	expectedState models.TaskSessionState,
+	expectedStamp string,
+	errorValue models.LastAgentError,
+) (bool, time.Time, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	session, ok := m.sessions[sessionID]
+	if !ok || session == nil || (session.TaskID != "" && session.TaskID != taskID) || session.State != expectedState {
+		return false, time.Time{}, nil
+	}
+	if agentExecutionID != "" && session.AgentExecutionID != "" && session.AgentExecutionID != agentExecutionID {
+		return false, time.Time{}, nil
+	}
+	current, hasCurrent := models.LoadLastAgentError(session.Metadata)
+	if expectedStamp == "" {
+		if hasCurrent {
+			return false, time.Time{}, nil
+		}
+	} else if !hasCurrent || current.Stamp() != expectedStamp {
+		return false, time.Time{}, nil
+	}
+	if session.Metadata == nil {
+		session.Metadata = make(map[string]interface{})
+	}
+	session.Metadata[models.SessionMetaKeyLastAgentError] = errorValue
+	now := time.Now().UTC()
+	session.State = models.TaskSessionStateFailed
+	session.ErrorMessage = errorValue.Message
+	session.CompletedAt = &now
+	session.UpdatedAt = now
+	return true, now, nil
+}
+
 func (m *mockRepository) UpdateTaskSessionIfCurrentStateRemovingMetadataKeys(
 	ctx context.Context,
 	session *models.TaskSession,
@@ -825,6 +864,9 @@ func (m *mockRepository) GetTasksByIDs(ctx context.Context, ids []string) ([]*mo
 }
 func (m *mockRepository) UpdateTask(ctx context.Context, task *models.Task) error { return nil }
 func (m *mockRepository) UpdateTaskWithExplicitPosition(ctx context.Context, task *models.Task) error {
+	return nil
+}
+func (m *mockRepository) UpdateTaskPreservingDeferredLaunch(ctx context.Context, task *models.Task) error {
 	return nil
 }
 func (m *mockRepository) DeleteTask(ctx context.Context, id string) error { return nil }

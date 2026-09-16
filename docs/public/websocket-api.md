@@ -133,7 +133,12 @@ Malformed JSON produces a `BAD_REQUEST` error with empty `id` and `action`, beca
 | Hub-wide broadcast queue  | 256 messages                      | Global publishers block when this internal queue is saturated; delivery to each client can still drop at that client's queue.                                                                  |
 | Request dispatch          | One goroutine per inbound message | Handlers execute concurrently and responses can arrive out of request order. Correlate only by `id`.                                                                                           |
 
-There is no sequence number, durable replay, acknowledgement, or exactly-once guarantee. Notifications are invalidation hints: after a reconnect, gap, or dropped frame, refetch authoritative state through the appropriate list/get request or HTTP route.
+Ordinary notifications have no sequence number, durable replay,
+acknowledgement, or exactly-once guarantee. They are invalidation hints: after
+a reconnect, gap, or dropped frame, refetch authoritative state through the
+appropriate list/get request or HTTP route. The Host-owned prompt-history
+conversation stream is a separate ordered internal exception documented in
+the plugin contract below.
 
 ### Prompt attachments
 
@@ -164,9 +169,26 @@ Subscription actions are handled by the gateway before the normal dispatcher:
 | `run.subscribe` / `run.unsubscribe`                       | `{"run_id":"..."}`                   | Routes future `run.event.appended` messages for one Office run. No snapshot is replayed.                                                                                                              |
 | `system.metrics.subscribe` / `system.metrics.unsubscribe` | `{}`                                 | Starts/stops delivery of live `system.metrics.updated` snapshots and contributes to metrics collection interest.                                                                                      |
 
-All subscriptions are connection-local and are removed on disconnect. `session.subscribe` and `session.focus` can send an initial live snapshot, but other subscriptions do not replay missed notifications. For an Office run, fetch the REST snapshot before subscribing and reconcile again after a gap.
+All ordinary subscriptions are connection-local and are removed on
+disconnect. Ordinary `session.subscribe` and `session.focus` can send an
+initial live snapshot, but other ordinary subscriptions do not replay missed
+notifications. For an Office run, fetch the REST snapshot before subscribing
+and reconcile again after a gap.
 
 The first-party web client reconnects by default: at most 10 attempts, starting at 1 second, multiplying delay by 1.5, capped at 30 seconds. On open it flushes frames queued while disconnected, then resubscribes to tasks, sessions, focus state, runs, the default user, and metrics. Its ordinary request timeout defaults to 5 seconds; selected Git and PR requests use longer timeouts. A custom client must implement its own backoff, resubscription, refetch, and timeout policy.
+
+### Host-only prompt-history conversation stream
+
+The browser `host.conversation` facade uses an internal ordered session stream
+that is not a caller-visible WebSocket API. It has Host-minted per-consumer
+identities, monotonic sequence numbers, durable cursors, subscribe readiness,
+ACKs, reconnect replay, and terminal session-removal barriers. Its migrated
+event names are `message.added`, `message.updated`, `message.deleted`,
+`session.turn.started`, `session.turn.completed`, and `session.removed`.
+The authoritative request, ACK, result, event, and compatibility rules are in
+the Host-only conversation wire contract in
+`docs/plans/plugins/PLUGIN-API.md`; ordinary subscription behavior above does
+not override that internal contract.
 
 ## Core task and session requests
 

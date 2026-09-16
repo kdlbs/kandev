@@ -56,6 +56,7 @@ type FormState = {
   model: string;
   fallbackModel: string;
   autoFallback: boolean;
+  requireExactModel: boolean;
   mode: string;
   cliFlags: CLIFlag[];
   cliPassthrough: boolean;
@@ -74,6 +75,7 @@ function fromExistingProfile(profile: AgentProfile): FormState {
     model: profile.model ?? "",
     fallbackModel: profile.fallbackModel ?? "",
     autoFallback: profile.autoFallback ?? false,
+    requireExactModel: profile.requireExactModel ?? false,
     mode: profile.mode ?? "",
     cliFlags: profile.cliFlags ?? [],
     cliPassthrough: profile.cliPassthrough ?? false,
@@ -95,6 +97,7 @@ function fromDefaultAgent(
     model: cfg?.default_model ?? "",
     fallbackModel: "",
     autoFallback: false,
+    requireExactModel: false,
     mode: cfg?.current_mode_id ?? "",
     cliFlags: seedDefaultCLIFlags(permissionSettings),
     cliPassthrough: false,
@@ -334,10 +337,12 @@ function ModelModeFieldsBinding({
       model={form.model}
       fallbackModel={form.fallbackModel}
       autoFallback={form.autoFallback}
+      requireExactModel={form.requireExactModel}
       mode={form.mode}
       onModelChange={(v) => patch({ model: v })}
       onFallbackModelChange={(v) => patch({ fallbackModel: v })}
       onAutoFallbackChange={(v) => patch({ autoFallback: v })}
+      onRequireExactModelChange={(v) => patch({ requireExactModel: v })}
       onModeChange={(v) => patch({ mode: v })}
     />
   );
@@ -348,10 +353,12 @@ type ModelModeFieldsProps = {
   model: string;
   fallbackModel: string;
   autoFallback: boolean;
+  requireExactModel: boolean;
   mode: string;
   onModelChange: (v: string) => void;
   onFallbackModelChange: (v: string) => void;
   onAutoFallbackChange: (v: boolean) => void;
+  onRequireExactModelChange: (v: boolean) => void;
   onModeChange: (v: string) => void;
 };
 
@@ -360,10 +367,12 @@ function ModelModeFields({
   model,
   fallbackModel,
   autoFallback,
+  requireExactModel,
   mode,
   onModelChange,
   onFallbackModelChange,
   onAutoFallbackChange,
+  onRequireExactModelChange,
   onModeChange,
 }: ModelModeFieldsProps) {
   const { t } = useTranslation();
@@ -415,9 +424,11 @@ function ModelModeFields({
         fallbackModel={fallbackModel}
         fallbackModelGone={fallbackModelGone}
         autoFallback={autoFallback}
+        requireExactModel={requireExactModel}
         currentModelId={modelConfig.current_model_id}
         onFallbackModelChange={onFallbackModelChange}
         onAutoFallbackChange={onAutoFallbackChange}
+        onRequireExactModelChange={onRequireExactModelChange}
       />
     </div>
   );
@@ -573,6 +584,7 @@ async function saveExistingProfile(id: string, form: FormState): Promise<AgentPr
     model: form.model,
     fallback_model: form.fallbackModel ?? "",
     auto_fallback: form.autoFallback,
+    require_exact_model: form.requireExactModel,
     mode: form.mode || undefined,
     allow_indexing: form.allowIndexing,
     auto_approve: form.autoApprove,
@@ -588,6 +600,7 @@ async function saveNewProfile(form: FormState, settingsAgents: Agent[]): Promise
     model: form.model,
     fallback_model: form.fallbackModel ?? "",
     auto_fallback: form.autoFallback,
+    require_exact_model: form.requireExactModel,
     mode: form.mode || undefined,
     allow_indexing: form.allowIndexing,
     auto_approve: form.autoApprove,
