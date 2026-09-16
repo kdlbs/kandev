@@ -182,9 +182,9 @@ func (a *Authority) auditDenied(ctx context.Context, request Request, principalI
 
 // AuditMaterializationDenied produces a denied audit row when caller or target
 // task materialization fails, without running the full grant-checking path
-// (which requires both tasks to be resolved). This prevents the "zero Decision
-// bypasses audit" problem (Finding 2). Returns a denied Decision with an audit
-// ID when the store succeeds, or a zero Decision on store error.
+// (which requires both tasks to be resolved). Materialization failures with an
+// attributable active principal must remain auditable. Returns a denied Decision
+// with an audit ID when the store succeeds, or a zero Decision on store error.
 func (a *Authority) AuditMaterializationDenied(ctx context.Context, actorTaskID, callerSessionID, targetTaskID, workspaceID, action string, capability Capability) (Decision, error) {
 	if a == nil || a.store == nil || !a.enabled() || actorTaskID == "" || workspaceID == "" {
 		return Decision{Basis: BasisDenied}, nil

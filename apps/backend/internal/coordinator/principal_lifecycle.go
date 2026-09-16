@@ -93,9 +93,9 @@ func useExistingTaskPrincipal(ctx context.Context, store PrincipalLifecycleStore
 // rebindExistingTaskPrincipal rotates the server-owned task principal to the
 // session that is actually dispatching. Sessions of one task are sequential:
 // when a new session starts, the previous binding is stale by construction,
-// so the rebind applies to the next authorization check (AC-...-003.4) while
-// the unique task/session indexes still keep two principals off the same
-// backing task or session.
+// so the rebind applies to the next authorization check while the unique
+// task/session indexes still keep two principals off the same backing task or
+// session.
 func rebindExistingTaskPrincipal(ctx context.Context, store PrincipalLifecycleStore, principal *models.WorkspaceAgentPrincipal, taskID, sessionID string) (*models.WorkspaceAgentPrincipal, error) {
 	boundAt := time.Now().UTC()
 	if err := store.RebindWorkspaceAgentPrincipal(ctx, principal.ID, taskID, sessionID, boundAt); err != nil {
