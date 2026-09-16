@@ -846,6 +846,11 @@ func TestStopTask_ToolSchemaIsMinimalAndDescriptionIsAccurate(t *testing.T) {
 	require.True(t, ok, "stop schema must declare properties")
 	require.Len(t, properties, 1, "stop schema must not expose sender, session, reason, or force controls")
 	assert.Contains(t, properties, "task_id")
+	taskIDProperty, ok := properties["task_id"].(map[string]interface{})
+	require.True(t, ok, "stop task_id schema must describe the target scope")
+	taskIDDescription, ok := taskIDProperty["description"].(string)
+	require.True(t, ok, "stop task_id schema must have a description")
+	assert.Contains(t, taskIDDescription, "granted coordinator scope")
 	for _, forbidden := range []string{"sender_task_id", "sender_session_id", "session_id", "reason", "force"} {
 		assert.NotContains(t, properties, forbidden)
 	}
