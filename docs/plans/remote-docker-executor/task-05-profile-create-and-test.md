@@ -1,7 +1,7 @@
 ---
 id: "05-profile-create-and-test"
 title: "Profile create flow and connection test"
-status: pending
+status: done
 wave: 3
 depends_on:
   - "04-remote-docker-runtime"
@@ -99,4 +99,39 @@ Task 04.
 
 ## Results
 
-_Not started._
+- Added the connection test behind the agent-runtime seam
+  (`RemoteDockerProber`), with `internal/dockerremote` reduced to HTTP only.
+  The architecture lint rejected the original design's package placement: only
+  `internal/agent/runtime/` may import `runtime/lifecycle`, and the per-file
+  baseline correctly refused a new exemption. The design doc was wrong, not the
+  rule.
+- The probe reports one step per failure cause and stops at the first failure.
+  A green daemon under a red connection would point the user at the wrong
+  problem.
+- Socket-permission-denied, a missing Docker CLI, and an unreachable daemon
+  carry distinct remediation hints. Each needs a different fix on the remote.
+- Added `Client.PingVersion` so the test names the daemon that answered rather
+  than reporting a bare success.
+- Reused the SSH connection card through a `testConnection` prop rather than
+  forking it, so remote Docker inherits the whole test-then-trust flow,
+  fingerprint gating, and result-staleness handling. A test asserts the SSH
+  endpoint is never called when the override is supplied.
+- Added the create page, the hub card, and a persistent notice that the profile
+  grants effective root on the remote host.
+- Simplified the API client after reading `fetchJson`: it already sets the JSON
+  content type and merges caller headers, so the first version duplicated both.
+- Copy added in five locales; Traditional Chinese generated with
+  `pnpm run i18n:zh-hant`.
+- Verified with:
+  - `go test ./internal/agent/runtime/ -run Probe -count=1`
+  - `golangci-lint run ./internal/agent/runtime/ ./internal/dockerremote/...` (0 issues)
+  - `pnpm run typecheck`, `pnpm --filter @kandev/web lint` (clean)
+  - `pnpm vitest run components/settings lib/api/domains` (253 files, 1679 tests)
+  - `pnpm run i18n:check` (all five locales complete)
+
+## Known gaps
+
+- Routing the profile's Dockerfile build to the remote daemon is not wired into
+  the create form yet. The runtime builds against the remote daemon because the
+  client is remote, but the create page does not yet expose the image tag and
+  Dockerfile fields that `local_docker` has. Deferred into task 06 scope.
