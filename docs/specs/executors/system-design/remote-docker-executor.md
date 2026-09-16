@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: executors
 requirements:
   - REQ-EXECUTORS-REMOTE-DOCKER-001
@@ -202,11 +202,20 @@ builds `kandev-sshd:e2e` for SSH and already exercises the Docker executor. A
 remote Docker scenario runs a Docker daemon reachable over that sshd container,
 which is the one piece of fixture work this design adds.
 
+## Implementation notes
+
+- The probe and build live in `internal/agent/runtime`, not a separate
+  package. Only `internal/agent/runtime/` may import `runtime/lifecycle`, and
+  the architecture lint's baseline is per-file, so a new package had no
+  legitimate exemption. `internal/dockerremote` is HTTP only.
+- Image builds are executor-scoped (`/api/v1/remote-docker/executors/:id/build`)
+  and run on that executor's daemon. The create form cannot build, because the
+  daemon is not trusted until the profile is saved.
+
 ## Open questions
 
 - Whether the pooled SSH connection should be shared with an `ssh` executor
   profile that happens to target the same host, or kept separate per executor
-  type. Separate is assumed here; sharing is an optimization, not a contract.
-- Whether remote image builds should stream build output to the profile editor
-  as the local build does. Assumed yes, since the client is unchanged, but the
-  transfer size over SSH is unmeasured.
+  type. Separate is implemented; sharing is an optimization, not a contract.
+- Browser-level coverage of the settings form and a full task launch is not
+  written. The Go integration test covers the transport against a real daemon.

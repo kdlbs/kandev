@@ -1,7 +1,7 @@
 ---
 id: "06-e2e-and-docs"
 title: "E2E scenario and public documentation"
-status: pending
+status: done
 wave: 4
 depends_on:
   - "05-profile-create-and-test"
@@ -90,4 +90,44 @@ Task 05.
 
 ## Results
 
-_Not started._
+- Added an executor-scoped build path: `RemoteDockerBuilder` plus
+  `POST /api/v1/remote-docker/executors/:id/build`, admin-gated because a build
+  runs arbitrary Dockerfile instructions with the remote daemon's authority.
+  The build refuses an executor with no trusted fingerprint.
+- Threaded `remoteExecutorId` through the profile page's Docker sections so a
+  remote profile builds on its own daemon. Building on the install-wide daemon
+  would place the image where the task container never runs, which closes the
+  gap recorded in task 05.
+- The build stream owns its connection: closing the stream releases SSH, and a
+  failed build releases it too rather than leaking.
+- Replaced the Playwright-only plan with a Go integration test,
+  `TestRemoteDockerTransportReachesARealDaemon`. It starts an sshd host with
+  the Docker CLI and the machine's daemon socket mounted, then drives the real
+  transport: dial, `docker system dial-stdio`, Engine API. Verified live
+  against Docker 29.7.2, API 1.55. It also asserts connection reuse and a
+  response-body request, which are what a wrong option order and a broken
+  half-close would each break.
+- Added `scripts/build-remote-docker-test-image.sh` to reproduce that host.
+  Mounting the machine's own socket avoids nesting a second daemon, which the
+  plan flagged as the least certain estimate.
+- Two fixture facts the first attempt got wrong, both found by running it:
+  Alpine needs `shadow` for `usermod` or sshd refuses public-key auth on the
+  locked account, and the published port accepts TCP before sshd is ready, so
+  the handshake itself has to be retried.
+- Updated `docs/public/executors.md` and `docs/public/feature-status.md`:
+  Remote Docker is supported, `tcp://` is excluded by construction, and the
+  guidance states when to choose this over a single-node Kubernetes cluster.
+- Verified with:
+  - `KANDEV_TEST_REMOTE_DOCKER=1 go test ./internal/agent/runtime/lifecycle/ -run TestRemoteDockerTransportReachesARealDaemon`
+  - `go test ./internal/agent/... ./internal/dockerremote/ -count=1` (clean)
+  - `golangci-lint run ./internal/agent/... ./internal/dockerremote/... ./internal/backendapp/...` (0 issues)
+  - `pnpm run typecheck`, `pnpm --filter @kandev/web lint` (clean)
+  - `pnpm vitest run components/settings/profile-edit lib/api/domains` (71 files, 479 tests)
+  - `scripts/list-docs.py validate`, `scripts/lint-spec-files.py --all`
+
+## Known gaps
+
+- No Playwright spec in the `containers` project. The Go integration test
+  covers the transport against a real daemon, which is the part that could not
+  be proven with stubs; a browser-level scenario driving the settings form and
+  a full task launch is still missing.
