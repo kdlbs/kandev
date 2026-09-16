@@ -56,6 +56,20 @@ var officeLegacyTransientBackoff = []time.Duration{
 // user resolves via Resume session in the chat or Mark fixed in the
 // inbox.
 //
+// tryLegacyTransientRetry runs before MarkRunFailed, not after (Review
+// round 6, R6-1): every policy cancel (task-tree cancel, workspace
+// pause, participant eviction) guards its write to
+// status IN ('queued','claimed'), and MarkRunFailed always used its own
+// 'claimed' guard, so marking the run 'failed' first and requeuing
+// second left a claimed -> failed -> queued window neither guard
+// covers — a cancel landing in that window matches nothing, and the
+// unconditional requeue write resurrected the run anyway. Classifying
+// and attempting the guarded requeue first means a retry-eligible run
+// never visits 'failed' at all: it goes claimed -> queued directly, or
+// (if a concurrent writer already moved it off 'claimed') the requeue
+// itself no-ops and MarkRunFailed's identical guard below catches it the
+// same way it always has.
+//
 // Returns wrote=false when MarkRunFailed's guarded write was a no-op —
 // the run reached a terminal state through another writer (e.g. a
 // concurrent cancel) between the caller's read and this call — so
@@ -70,6 +84,10 @@ func (s *Service) HandleAgentFailure(
 	agentID string,
 	providerError *streams.ProviderError,
 ) (bool, error) {
+	if s.tryLegacyTransientRetry(ctx, run, errorMessage, agentID, providerError) {
+		return false, nil
+	}
+
 	wrote, err := s.repo.MarkRunFailed(ctx, run.ID, errorMessage)
 	if err != nil {
 		return false, fmt.Errorf("mark run failed: %w", err)
@@ -79,9 +97,6 @@ func (s *Service) HandleAgentFailure(
 		// terminal state was written by someone else. Still make sure
 		// the agent isn't left stuck "working" from the launch.
 		s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
-		return false, nil
-	}
-	if s.tryLegacyTransientRetry(ctx, run, errorMessage, agentID, providerError) {
 		return false, nil
 	}
 	// MarkRunFailed bypasses transitionRunTerminal (this is the office v1
@@ -131,10 +146,17 @@ func (s *Service) HandleAgentFailure(
 // tryLegacyTransientRetry requeues run for another attempt instead of
 // letting HandleAgentFailure treat it as terminal, when the failure
 // classifies as transient (ClassTransient, AutoRetryable, FallbackAllowed)
-// and the run still has legacy-transient retry budget. Called after
-// MarkRunFailed has already recorded the row as failed, so on success the
-// caller must not also run the terminal-shape/counter/auto-pause
-// accounting below — that is exactly what returning true signals.
+// and the run still has legacy-transient retry budget. Called before
+// MarkRunFailed runs at all (Review round 6, R6-1), so a successful
+// retry never marks the row 'failed' — the requeue write is itself
+// guarded to status = 'claimed', mirroring MarkRunFailed's own guard,
+// so the caller must not also run the terminal-shape/counter/auto-pause
+// accounting below — that is exactly what returning true signals. A
+// false return means either the failure is not retry-eligible, or the
+// guarded requeue lost a race against a concurrent writer (a cancel,
+// pause, or eviction that moved the run off 'claimed' first) — either
+// way the caller falls through to MarkRunFailed, whose identical guard
+// resolves the second case the same way it always has.
 //
 // providerError.Message is preferred over the bare errorMessage when
 // present: a raw agent stderr string ("Overloaded", a bare 429) usually
@@ -202,9 +224,17 @@ func (s *Service) tryLegacyTransientRetry(
 
 	s.releaseTaskCheckoutForRun(ctx, run)
 	s.clearAgentWorking(ctx, run.AgentProfileID, run.ID)
-	if err := s.repo.ScheduleRetry(ctx, run.ID, retryAt, newRetryCount); err != nil {
+	wrote, err := s.repo.ScheduleRetryIfClaimed(ctx, run.ID, retryAt, newRetryCount)
+	if err != nil {
 		s.logger.Error("failed to schedule legacy transient retry",
 			zap.String("run_id", run.ID), zap.Error(err))
+		return false
+	}
+	if !wrote {
+		// A concurrent writer (cancel, pause, or eviction) already moved
+		// the run off 'claimed': it is no longer ours to resurrect.
+		// MarkRunFailed's identical guard, called next by the caller,
+		// will see the same thing and no-op the same way.
 		return false
 	}
 	s.logger.Info("retrying transient post-start failure before it counts toward auto-pause",

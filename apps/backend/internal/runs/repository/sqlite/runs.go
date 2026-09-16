@@ -628,6 +628,32 @@ func (r *Repository) ScheduleRetry(ctx context.Context, runID string, retryAt ti
 	return err
 }
 
+// ScheduleRetryIfClaimed behaves like ScheduleRetry but only when the run
+// is still status='claimed', mirroring the same guard MarkRunFailed uses.
+// A caller that wants to requeue a run it has not itself moved off
+// 'claimed' must not resurrect a row a concurrent writer already
+// terminalized (a task-tree cancel, workspace pause, or participant
+// eviction) out from under it — every one of those writers targets
+// exactly the 'claimed' status this guard checks. wrote=false means a
+// concurrent writer already changed the row's status; the caller must
+// not retry again or treat the run as requeued.
+func (r *Repository) ScheduleRetryIfClaimed(ctx context.Context, runID string, retryAt time.Time, retryCount int) (bool, error) {
+	res, err := r.db.ExecContext(ctx, r.db.Rebind(`
+		UPDATE runs
+		SET status = 'queued', retry_count = ?, scheduled_retry_at = ?,
+		    claimed_at = NULL, finished_at = NULL, session_id = '', error_message = ''
+		WHERE id = ? AND status = 'claimed'
+	`), retryCount, retryAt, runID)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
+}
+
 // CleanExpired deletes finished/failed runs older than the given time.
 func (r *Repository) CleanExpired(ctx context.Context, olderThan time.Time) (int64, error) {
 	res, err := r.db.ExecContext(ctx, r.db.Rebind(`

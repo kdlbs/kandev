@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -679,5 +680,104 @@ func TestAgentFailedEvent_ThreadsAgentIDThroughToTransientRetry(t *testing.T) {
 	}
 	if refreshed.RetryCount != 1 {
 		t.Fatalf("retry_count = %d, want 1", refreshed.RetryCount)
+	}
+}
+
+// TestHandleAgentFailure_TransientRetryNeverMarksRunFailed pins Review
+// round 6's R6-1 fix: a classified-transient failure must requeue
+// straight off the row's 'claimed' status without ever passing through
+// status='failed' on the way. Before the reorder, HandleAgentFailure
+// wrote 'failed' first and requeued second, leaving a
+// claimed -> failed -> queued window: every policy cancel (task-tree
+// cancel, workspace pause, participant eviction) guards its write to
+// status IN ('queued','claimed'), so a cancel landing in that window
+// would silently no-op and this handler would then resurrect a run the
+// canceller believed it had stopped. A trigger that fails the write the
+// instant status is set to 'failed' turns that window into a test
+// failure instead of a race that only shows up in production.
+func TestHandleAgentFailure_TransientRetryNeverMarksRunFailed(t *testing.T) {
+	svc, _ := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "agent-never-failed")
+	taskID := "task-never-failed"
+	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-never-failed")
+	run := queueAndReadRun(t, svc, "agent-never-failed", taskID)
+
+	svc.ExecSQL(t, fmt.Sprintf(`
+		CREATE TRIGGER guard_no_failed_on_retry
+		BEFORE UPDATE OF status ON runs
+		WHEN NEW.status = 'failed' AND OLD.id = '%s'
+		BEGIN
+			SELECT RAISE(FAIL, 'run must not be marked failed on the retry path');
+		END;
+	`, run.ID))
+
+	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil)
+	if err != nil {
+		t.Fatalf("handle failure: %v (the run was written to status=failed before requeuing)", err)
+	}
+	if wrote {
+		t.Fatal("wrote = true, want false (retry scheduled, run not terminal)")
+	}
+
+	refreshed, err := svc.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if refreshed.Status != service.RunStatusQueued {
+		t.Fatalf("run status = %q, want %q", refreshed.Status, service.RunStatusQueued)
+	}
+	if refreshed.RetryCount != 1 {
+		t.Fatalf("retry_count = %d, want 1", refreshed.RetryCount)
+	}
+}
+
+// TestHandleAgentFailure_TransientRetryLostRaceFallsThroughWithoutTerminalAccounting
+// covers the other half of R6-1's fix: when the guarded requeue loses the
+// race because a concurrent writer already moved the run off 'claimed'
+// (simulating a task-tree cancel, workspace pause, or participant
+// eviction that landed first), the handler must not resurrect the run to
+// 'queued' and must not run terminal accounting (no consecutive-failure
+// increment, no auto-pause) for a run it no longer owns — it must fall
+// through to MarkRunFailed's identical 'claimed' guard, which also no-ops
+// and leaves the winning writer's terminal state untouched.
+func TestHandleAgentFailure_TransientRetryLostRaceFallsThroughWithoutTerminalAccounting(t *testing.T) {
+	svc, _ := newTestServiceWithBus(t)
+	ctx := context.Background()
+
+	createTestAgent(t, svc, "ws-1", "agent-lost-race")
+	taskID := "task-lost-race"
+	insertSyntheticTask(t, svc, taskID, "ws-1", "agent-lost-race")
+	run := queueAndReadRun(t, svc, "agent-lost-race", taskID)
+
+	// Simulate a concurrent cancel winning the race and moving the run off
+	// 'claimed' before this handler's guarded requeue attempt runs.
+	svc.ExecSQL(t, `UPDATE runs SET status = 'cancelled', finished_at = ? WHERE id = ?`,
+		time.Now().UTC(), run.ID)
+
+	wrote, err := svc.HandleAgentFailure(ctx, run, transientMessage, "", nil)
+	if err != nil {
+		t.Fatalf("handle failure: %v", err)
+	}
+	if wrote {
+		t.Fatal("wrote = true, want false: a lost race must not run terminal accounting")
+	}
+
+	agent, err := svc.GetAgentInstance(ctx, "agent-lost-race")
+	if err != nil {
+		t.Fatalf("get agent: %v", err)
+	}
+	if agent.ConsecutiveFailures != 0 {
+		t.Fatalf("consecutive_failures = %d, want 0: the cancel already resolved this run", agent.ConsecutiveFailures)
+	}
+
+	refreshed, err := svc.GetRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("get run: %v", err)
+	}
+	if refreshed.Status != service.RunStatusCancelled {
+		t.Fatalf("run status = %q, want %q (the winning writer's terminal state must survive)",
+			refreshed.Status, service.RunStatusCancelled)
 	}
 }

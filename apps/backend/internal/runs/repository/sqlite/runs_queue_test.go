@@ -556,6 +556,66 @@ func TestScheduleRetry_WritesTheAttemptCountVerbatim(t *testing.T) {
 	}
 }
 
+// TestScheduleRetryIfClaimed_RequeuesWhenStillClaimed asserts the guarded
+// requeue behaves exactly like ScheduleRetry — same column writes, same
+// clearing of session_id/error_message — when the run is still the
+// 'claimed' status the caller read it as.
+func TestScheduleRetryIfClaimed_RequeuesWhenStillClaimed(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	run := queueRunAt(t, repo, "guarded", "a1", now.Add(-time.Hour))
+	setStatus(t, repo, run.ID, "claimed", timePtr(now.Add(-time.Minute)), nil)
+
+	wrote, err := repo.ScheduleRetryIfClaimed(ctx, run.ID, fixedRetryAt, 1)
+	if err != nil {
+		t.Fatalf("schedule retry if claimed: %v", err)
+	}
+	if !wrote {
+		t.Fatal("wrote = false, want true: run was still claimed")
+	}
+
+	got := mustGetRun(t, repo, run.ID)
+	checkString(t, "status", string(got.Status), "queued")
+	checkInt(t, "retry_count", got.RetryCount, 1)
+	if got.ClaimedAt != nil {
+		t.Errorf("claimed_at = %s, want nil", got.ClaimedAt)
+	}
+	if got.ScheduledRetryAt == nil || !got.ScheduledRetryAt.Equal(fixedRetryAt) {
+		t.Errorf("scheduled_retry_at = %v, want %s", got.ScheduledRetryAt, fixedRetryAt)
+	}
+}
+
+// TestScheduleRetryIfClaimed_NoopWhenNoLongerClaimed pins the guard this
+// method exists for: a run a concurrent writer already moved off
+// 'claimed' (simulating a task-tree cancel, workspace pause, or
+// participant eviction landing between the caller's read and this write)
+// must not be resurrected to 'queued', and none of its columns may move —
+// the caller has to see wrote=false and leave the row exactly as the
+// other writer left it.
+func TestScheduleRetryIfClaimed_NoopWhenNoLongerClaimed(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	run := queueRunAt(t, repo, "raced", "a1", now.Add(-time.Hour))
+	setStatus(t, repo, run.ID, "cancelled", timePtr(now.Add(-time.Minute)), timePtr(now))
+
+	wrote, err := repo.ScheduleRetryIfClaimed(ctx, run.ID, fixedRetryAt, 1)
+	if err != nil {
+		t.Fatalf("schedule retry if claimed: %v", err)
+	}
+	if wrote {
+		t.Fatal("wrote = true, want false: a concurrent writer already moved the run off claimed")
+	}
+
+	got := mustGetRun(t, repo, run.ID)
+	checkString(t, "status untouched", string(got.Status), "cancelled")
+	checkInt(t, "retry_count untouched", got.RetryCount, 0)
+	if got.ScheduledRetryAt != nil {
+		t.Errorf("scheduled_retry_at = %v, want nil (untouched)", got.ScheduledRetryAt)
+	}
+}
+
 // TestRecoverStale_ResetsOnlyClaimedRunsStrictlyOlderThanTheCutoff
 // exercises the staleness boundary in both directions. The cutoff is a
 // parameter, so the equality case is exact rather than clock-dependent.
