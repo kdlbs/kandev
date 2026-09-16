@@ -1,8 +1,11 @@
 "use client";
 
 import { useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import type { WorkflowStep } from "@/components/kanban-column";
+import { useKanbanOverflow } from "@/hooks/domains/kanban/use-kanban-overflow";
 import { getKanbanColumnGridTemplate, KANBAN_COLUMN_MIN_PX } from "./kanban-grid-template";
+import { KanbanOverflowFades } from "./kanban-overflow-fades";
 
 type AdaptiveDesktopKanbanProps = {
   columnHeight?: string;
@@ -26,7 +29,7 @@ const INTERACTIVE_TARGET_SELECTOR = [
   "[draggable='true']",
   "[data-kanban-card]",
   "[role='button'], [role='link'], [role='checkbox'], [role='radio'], [role='menuitem'], [role='option'], [role='switch'], [role='tab'], [role='combobox'], [role='textbox'], [role='gridcell'], [role='treeitem']",
-  "[tabindex]:not([tabindex='-1'])",
+  "[tabindex]:not([tabindex='-1']):not(.kanban-scroll-region)",
 ].join(", ");
 
 type PanStart = {
@@ -34,6 +37,7 @@ type PanStart = {
   scrollLeft: number;
 };
 
+// eslint-disable-next-line max-lines-per-function -- coordinates drag panning and overflow presentation.
 export function AdaptiveDesktopKanban({
   columnHeight,
   steps,
@@ -41,9 +45,16 @@ export function AdaptiveDesktopKanban({
   renderColumn,
 }: AdaptiveDesktopKanbanProps) {
   const scrollWindowRef = useRef<HTMLDivElement | null>(null);
+  const laneGridRef = useRef<HTMLDivElement | null>(null);
+  const { t } = useTranslation();
   const panStartRef = useRef<PanStart | null>(null);
   const [isPanCandidate, setIsPanCandidate] = useState(false);
   const [isPanning, setIsPanning] = useState(false);
+  const overflow = useKanbanOverflow(scrollWindowRef, {
+    axis: "horizontal",
+    contentRef: laneGridRef,
+    revision: `${steps.length}:${isDragging ? 1 : 0}`,
+  });
 
   const cancelPan = () => {
     panStartRef.current = null;
@@ -85,15 +96,20 @@ export function AdaptiveDesktopKanban({
   return (
     <div
       data-testid="desktop-kanban-layout"
-      className="h-full min-h-0 min-w-0"
+      className="relative h-full min-h-0 min-w-0"
       style={{ height: columnHeight ? "auto" : undefined }}
     >
       <div
         ref={scrollWindowRef}
+        aria-label={t("kanban:columns")}
         data-testid="desktop-kanban-scroll-window"
-        className={`h-full min-h-0 min-w-0 overflow-x-auto snap-x snap-mandatory ${
+        className={`kanban-scroll-region h-full min-h-0 min-w-0 overflow-x-auto overscroll-y-auto snap-x snap-mandatory ${
           isPanCandidate ? "cursor-grabbing" : ""
         } ${isPanning ? "select-none" : ""} ${isDragging ? "scrollbar-hide" : ""}`}
+        data-kanban-scroll-axis="horizontal"
+        data-kanban-scroll-active={overflow.isScrolling}
+        data-kanban-scroll-left={overflow.canScrollLeft}
+        data-kanban-scroll-right={overflow.canScrollRight}
         style={{
           height: columnHeight ? "auto" : undefined,
           containerType: "inline-size",
@@ -103,6 +119,7 @@ export function AdaptiveDesktopKanban({
         onMouseMove={handleMouseMove}
         onMouseUp={cancelPan}
         onMouseLeave={cancelPan}
+        tabIndex={0}
       >
         <div
           className="flex h-full min-h-0"
@@ -114,6 +131,7 @@ export function AdaptiveDesktopKanban({
           }}
         >
           <div
+            ref={laneGridRef}
             data-testid="desktop-kanban-lane-grid"
             className="grid h-full min-h-0 flex-none gap-0"
             style={{
@@ -134,6 +152,7 @@ export function AdaptiveDesktopKanban({
           {isDragging && <DragEndReserve />}
         </div>
       </div>
+      <KanbanOverflowFades axis="horizontal" state={overflow} />
     </div>
   );
 }

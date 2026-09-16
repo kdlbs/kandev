@@ -118,6 +118,59 @@ test.describe("Mobile kanban view", () => {
     await expect(mobile.taskCardByTitle("Mobile Layout Task")).toBeVisible();
   });
 
+  test("keeps phone overflow cues and final-card navigation inside the focused column", async ({
+    testPage,
+    apiClient,
+    seedData,
+  }) => {
+    // @covers AC-UI-ADAPTIVE-KANBAN-002.6, AC-UI-ADAPTIVE-KANBAN-003.7
+    const taskIds: string[] = [];
+    for (let index = 0; index < 12; index++) {
+      const task = await apiClient.createTask(
+        seedData.workspaceId,
+        `Mobile overflow ${index + 1}`,
+        {
+          workflow_id: seedData.workflowId,
+          workflow_step_id: seedData.startStepId,
+        },
+      );
+      taskIds.push(task.id);
+    }
+
+    const mobile = new MobileKanbanPage(testPage);
+    await mobile.goto();
+    const column = testPage.getByTestId(`kanban-column-${seedData.startStepId}`);
+    const scroll = column.getByTestId("kanban-column-scroll");
+    await expect
+      .poll(() => scroll.evaluate((element) => element.scrollHeight - element.clientHeight))
+      .toBeGreaterThan(1);
+    await expect(column.getByTestId("kanban-overflow-top-fade")).toHaveAttribute(
+      "data-visible",
+      "false",
+    );
+    await expect(column.getByTestId("kanban-overflow-bottom-fade")).toHaveAttribute(
+      "data-visible",
+      "true",
+    );
+
+    await scroll.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    await expect(column.getByTestId("kanban-overflow-top-fade")).toHaveAttribute(
+      "data-visible",
+      "true",
+    );
+    await expect(column.getByTestId("kanban-overflow-bottom-fade")).toHaveAttribute(
+      "data-visible",
+      "false",
+    );
+    await expect(mobile.taskCard(taskIds.at(-1)!)).toBeInViewport();
+    await expectNoDocumentOverflow(testPage);
+    await mobile.taskCard(taskIds.at(-1)!).tap();
+    await expect(testPage).toHaveURL(new RegExp(`/t/${taskIds.at(-1)!}`));
+  });
+
   test("keeps workflow navigation visible when every mobile board is empty", async ({
     testPage,
     apiClient,

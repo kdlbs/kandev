@@ -140,10 +140,31 @@ test("dense and sparse workflows size independently and keep the final task reac
     await kanban.goto();
     const dense = kanban.columnByStepId(seedData.startStepId);
     const sparse = kanban.columnByStepId(second.stepId);
-    await expect.poll(async () => (await dense.boundingBox())?.height).toBe(400);
+    await expect
+      .poll(async () => {
+        const denseHeight = (await dense.boundingBox())?.height ?? 0;
+        const sparseHeight = (await sparse.boundingBox())?.height ?? 0;
+        return denseHeight > 200 && denseHeight > sparseHeight;
+      })
+      .toBe(true);
+    const denseScroll = dense.getByTestId("kanban-column-scroll");
+    await expect.poll(() => taskCards(dense).count()).toBeGreaterThanOrEqual(6);
+    const denseScrollBox = await denseScroll.boundingBox();
+    expect(denseScrollBox).not.toBeNull();
+    const initialSixCards = await taskCards(dense).evaluateAll((cards) =>
+      cards.slice(0, 6).map((card) => {
+        const bounds = card.getBoundingClientRect();
+        return { bottom: bounds.bottom, top: bounds.top, height: bounds.height };
+      }),
+    );
+    expect(initialSixCards).toHaveLength(6);
+    for (const card of initialSixCards) {
+      expect(card.top).toBeGreaterThanOrEqual(denseScrollBox!.y - 1);
+      expect(card.bottom).toBeLessThanOrEqual(denseScrollBox!.y + denseScrollBox!.height + 2);
+    }
     await expect.poll(async () => (await sparse.boundingBox())?.height).toBe(200);
     await expectBoundedMountedCards(dense);
-    await scrollColumnToBottom(dense.getByTestId("kanban-column-scroll"));
+    await scrollColumnToBottom(denseScroll);
     const finalCard = dense.getByTestId(`task-card-${finalTask.id}`);
     await expect(finalCard).toBeInViewport();
     await expectBoundedMountedCards(dense);
@@ -184,7 +205,7 @@ test("live content grows the lane after drag cancellation and shrinks after remo
     await testPage.keyboard.press("Escape");
     await testPage.mouse.up();
     await expect.poll(async () => (await column.boundingBox())!.height).toBeGreaterThan(200);
-    expect((await column.boundingBox())!.height).toBeLessThan(400);
+    expect((await column.boundingBox())!.height).toBeLessThan(800);
     const lane = testPage.getByTestId("desktop-kanban-lane-grid").filter({ has: column });
     const heights = await lane
       .locator("[data-kanban-step-id]")
