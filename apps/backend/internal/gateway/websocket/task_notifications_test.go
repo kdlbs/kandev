@@ -31,12 +31,78 @@ type recordingSubscription struct{}
 func (recordingSubscription) Unsubscribe() error { return nil }
 func (recordingSubscription) IsValid() bool      { return true }
 
+type queuedTransportSubscription struct {
+	subject string
+	handler bus.EventHandler
+	events  []*bus.Event
+	valid   bool
+}
+
+func (s *queuedTransportSubscription) Unsubscribe() error {
+	s.valid = false
+	return nil
+}
+
+func (s *queuedTransportSubscription) IsValid() bool { return s.valid }
+
+// queuedTransportEventBus models NATS' independent per-subscription queues.
+// Tests can schedule one subject's subscription ahead of another while each
+// subscription still preserves FIFO delivery internally.
+type queuedTransportEventBus struct {
+	*bus.MemoryEventBus
+	subscriptions []*queuedTransportSubscription
+}
+
+func (b *queuedTransportEventBus) Subscribe(
+	subject string,
+	handler bus.EventHandler,
+) (bus.Subscription, error) {
+	subscription := &queuedTransportSubscription{subject: subject, handler: handler, valid: true}
+	b.subscriptions = append(b.subscriptions, subscription)
+	return subscription, nil
+}
+
+func (b *queuedTransportEventBus) Publish(_ context.Context, subject string, event *bus.Event) error {
+	event.Subject = subject
+	for _, subscription := range b.subscriptions {
+		if subscription.valid && (subscription.subject == subject || subscription.subject == ">") {
+			subscription.events = append(subscription.events, event)
+		}
+	}
+	return nil
+}
+
+func (b *queuedTransportEventBus) deliverSubjectFirst(ctx context.Context, subject string) error {
+	for _, subscription := range b.subscriptions {
+		if subscription.subject != subject || len(subscription.events) == 0 {
+			continue
+		}
+		event := subscription.events[0]
+		subscription.events = subscription.events[1:]
+		return subscription.handler(ctx, event)
+	}
+	return nil
+}
+
+func (b *queuedTransportEventBus) deliverAll(ctx context.Context) error {
+	for _, subscription := range b.subscriptions {
+		for len(subscription.events) > 0 {
+			event := subscription.events[0]
+			subscription.events = subscription.events[1:]
+			if err := subscription.handler(ctx, event); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (b *subscriptionRecordingEventBus) Subscribe(subject string, _ bus.EventHandler) (bus.Subscription, error) {
 	b.subjects = append(b.subjects, subject)
 	return recordingSubscription{}, nil
 }
 
-func TestTaskEventBroadcaster_UsesOrderedWildcardForLifecycleStates(t *testing.T) {
+func TestTaskEventBroadcaster_UsesOrderedWildcardsForRelatedTaskEvents(t *testing.T) {
 	log := testLogger()
 	eventBus := &subscriptionRecordingEventBus{MemoryEventBus: bus.NewMemoryEventBus(log)}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -45,18 +111,23 @@ func TestTaskEventBroadcaster_UsesOrderedWildcardForLifecycleStates(t *testing.T
 	hub := NewHub(nil, log)
 	b := RegisterTaskNotifications(ctx, eventBus, hub, log)
 
-	seenWildcard := false
+	wildcardCount := 0
+	orderedSubjects := map[string]bool{
+		events.TaskStateChanged:        true,
+		events.TaskSessionStateChanged: true,
+		events.MessageAdded:            true,
+		events.MessageUpdated:          true,
+		events.MessageDeleted:          true,
+	}
 	for _, subject := range eventBus.subjects {
 		if subject == ">" {
-			seenWildcard = true
+			wildcardCount++
 		}
-		if subject == events.TaskStateChanged || subject == events.TaskSessionStateChanged {
-			t.Fatalf("lifecycle state subject %q must use the ordered wildcard subscription", subject)
+		if orderedSubjects[subject] {
+			t.Fatalf("ordered task event subject %q must use the shared wildcard subscription", subject)
 		}
 	}
-	if !seenWildcard {
-		t.Fatal("lifecycle state notifications must share a NATS-style wildcard subscription")
-	}
+	require.Equal(t, 2, wildcardCount, "each ordered event group must use one NATS-style subscription")
 
 	_ = b
 }
@@ -88,6 +159,49 @@ func TestTaskEventBroadcaster_OrdersLifecycleStateNotifications(t *testing.T) {
 	}
 }
 
+func TestTaskEventBroadcaster_OrdersTranscriptMutationsAcrossTransportSubjects(t *testing.T) {
+	log := testLogger()
+	eventBus := &queuedTransportEventBus{MemoryEventBus: bus.NewMemoryEventBus(log)}
+	hub := newTestHub(t)
+	client := newTestClient("ordered-transcript")
+	registerTestClient(hub, client)
+	hub.SubscribeToSession(client, "session-1")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_ = RegisterTaskNotifications(ctx, eventBus, hub, log)
+
+	deleted := bus.NewEvent(events.MessageDeleted, "test", map[string]interface{}{
+		"session_id": "session-1", "message_id": "abandoned-message",
+	})
+	added := bus.NewEvent(events.MessageAdded, "test", map[string]interface{}{
+		"session_id": "session-1", "message_id": "replacement-message",
+	})
+	require.NoError(t, eventBus.Publish(ctx, events.MessageDeleted, deleted))
+	require.NoError(t, eventBus.Publish(ctx, events.MessageAdded, added))
+
+	// A NATS callback on an independent message.added subscription can run
+	// while message.deleted is delayed. A shared subscription must keep the
+	// replacement queued behind the deletion even under that schedule.
+	require.NoError(t, eventBus.deliverSubjectFirst(ctx, events.MessageAdded))
+	require.NoError(t, eventBus.deliverAll(ctx))
+
+	actions := make([]string, 0, 2)
+	for range 2 {
+		select {
+		case data := <-client.send:
+			var message ws.Message
+			require.NoError(t, json.Unmarshal(data, &message))
+			actions = append(actions, message.Action)
+		default:
+			t.Fatal("expected two transcript notifications")
+		}
+	}
+	require.Equal(t, []string{
+		ws.ActionSessionMessageDeleted,
+		ws.ActionSessionMessageAdded,
+	}, actions)
+}
+
 // TestTaskEventBroadcaster_NoDuplicateSubscriptions verifies that
 // RegisterTaskNotifications creates one subscription per routed subject (with
 // lifecycle state events intentionally sharing one ordered wildcard).
@@ -112,7 +226,7 @@ func TestTaskEventBroadcaster_NoDuplicateSubscriptions(t *testing.T) {
 	//
 	// Update this number when adding or removing event subscriptions in
 	// RegisterTaskNotifications — it is intentionally exact.
-	const wantSubscriptions = 77
+	const wantSubscriptions = 75
 	if got := len(b.subscriptions); got != wantSubscriptions {
 		t.Errorf("RegisterTaskNotifications created %d subscriptions, want %d — "+
 			"did an event get subscribed twice?", got, wantSubscriptions)

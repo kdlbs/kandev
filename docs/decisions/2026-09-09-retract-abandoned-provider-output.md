@@ -44,10 +44,16 @@ the durable mutation and publishes the existing `session.message.deleted`
 event, so connected desktop and mobile clients remove the same rows that a
 reload, search, or another viewer no longer reads.
 
+The WebSocket gateway consumes all task-service message mutations through one
+ordered NATS wildcard subscription. This carries producer order into both the
+per-session journal and legacy live fan-out even though the underlying event
+subjects differ, so a replacement callback cannot overtake a delayed deletion
+callback.
+
 A reset does not clear prompt-level output or effect evidence. That evidence
-continues to fail a later Kandev-owned automatic replay closed. Empty and
-repeated resets are idempotent. A deletion failure is logged and does not stop
-the provider's replacement attempt.
+continues to fail a later Kandev-owned automatic replay closed. A repeated
+reset without newly eligible output is idempotent. A deletion failure is logged
+and does not stop the provider's replacement attempt.
 
 ## Consequences
 

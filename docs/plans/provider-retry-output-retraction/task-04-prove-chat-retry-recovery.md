@@ -97,8 +97,10 @@ Added explicit-ID mock assistant and thinking emitters, a mock-only structured
 reset marker, and a deterministic `/e2e:response-retry` scenario. The mock ACP
 dialect translates that marker through the same provider-neutral reset path as
 Codex while production dialects ignore it. Desktop and mobile Playwright tests
-observe the provisional rows, their live removal, the replacement-only durable
-transcript, and the same result after reload.
+arm causal WebSocket observers before the retry, correlate the provisional row
+IDs with their deletion events, require both deletions before replacement, and
+verify the replacement-only durable transcript and the same result after
+reload. The mock no longer pauses to create a transient DOM assertion window.
 
 Verified with:
 

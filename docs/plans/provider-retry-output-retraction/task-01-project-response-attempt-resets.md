@@ -77,7 +77,7 @@ None.
 
 ## Inputs
 
-- Provider Error Recovery criterion `.16`.
+- Provider Error Recovery criterion `.26`.
 - Adapter evidence projection in the response-attempt recovery design.
 - Existing Codex capacity and Cursor retry evidence observers.
 - Sanitized ACP metadata captured from the reported task.

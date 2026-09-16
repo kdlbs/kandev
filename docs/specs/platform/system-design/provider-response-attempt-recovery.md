@@ -1,5 +1,5 @@
 ---
-status: draft
+status: current
 system: platform
 requirements:
   - REQ-PLATFORM-PROVIDER-ERROR-RECOVERY-001
@@ -121,9 +121,13 @@ message from the shared session store. Desktop and mobile task chat use that
 same store and renderer, so no responsive layout or new user-facing copy is
 needed.
 
-The session event subject preserves the create, reset, delete, and replacement
-order. A reload or a second viewer reads the durable transcript after deletion
-and therefore cannot restore the abandoned row.
+The lifecycle session stream serializes provisional creation, reset handling,
+deletion, and replacement persistence. The WebSocket gateway consumes
+`message.added`, `message.updated`, and `message.deleted` through one ordered
+NATS wildcard subscription, so independently scheduled subject callbacks cannot
+overtake one another before the per-session journal and live fan-out. A reload
+or a second viewer reads the durable transcript after deletion and therefore
+cannot restore the abandoned row.
 
 ## Failure behavior
 
@@ -157,10 +161,14 @@ legitimate messages.
   history.
 - Orchestrator tests use the real task service and event bus to prove durable
   deletion, `session.message.deleted` publication, continued cleanup after an
-  individual failure, and safe behavior without wiring.
-- Desktop and mobile Playwright scenarios use the controlled mock dialect to
-  stream an abandoned response, signal a retry boundary, stream its
-  replacement, reload, and assert that only the replacement remains.
+  individual failure, and safe behavior without wiring. A gateway transport
+  test schedules the replacement subscription ahead of delayed deletion and
+  proves that the shared subscription retains deletion-first delivery.
+- Desktop and mobile Playwright scenarios arm causal WebSocket observations
+  before the controlled mock dialect streams an abandoned response. They
+  correlate both created message IDs with their deletion events, require both
+  deletions before replacement, then reload and assert that only the
+  replacement remains.
 
 ## Related decisions
 

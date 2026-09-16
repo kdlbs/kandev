@@ -141,11 +141,8 @@ func scenarioSimpleMessage(e *emitter) {
 
 func scenarioResponseRetry(e *emitter) {
 	e.thoughtWithID("Abandoned response attempt reasoning.")
-	waitForDelay(e.ctx, 1000)
 	e.textWithID("Abandoned response attempt answer.")
-	waitForDelay(e.ctx, 1000)
 	e.responseAttemptReset()
-	waitForDelay(e.ctx, 100)
 	e.textWithID("Replacement response after provider retry.")
 }
 
