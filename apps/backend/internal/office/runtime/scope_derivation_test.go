@@ -499,16 +499,28 @@ func TestBuildAndPersist_NoAppenderSkipsEventButStillPersists(t *testing.T) {
 
 func TestBuildAndPersist_CASLoserAdoptsPersistedFinalScopeAndEmitsNoEvent(t *testing.T) {
 	lister := &stubRunnerLister{ids: []string{"mine"}, total: 1}
-	winnerCaps, err := MarshalCapabilities(Capabilities{
-		AllowedTaskIDs:  []string{"winner-task"},
-		TaskScopeSource: TaskScopeSourceRunnerSet,
-	})
+	winnerRunCtx := RunContext{
+		WorkspaceID: "ws-1",
+		AgentID:     "agent-1",
+		RunID:       "run-1",
+		Capabilities: Capabilities{
+			AllowedTaskIDs:  []string{"winner-task"},
+			TaskScopeSource: TaskScopeSourceRunnerSet,
+		},
+	}
+	winnerCaps, err := MarshalCapabilities(winnerRunCtx.Capabilities)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	winnerInput, err := MarshalRunContext(winnerRunCtx)
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
 	store := &recordingRunSnapshotStore{
 		casWins: false,
-		runs:    map[string]*models.Run{"run-1": {ID: "run-1", Capabilities: winnerCaps}},
+		runs: map[string]*models.Run{
+			"run-1": {ID: "run-1", Capabilities: winnerCaps, InputSnapshot: winnerInput},
+		},
 	}
 	events := &recordingRunEvents{}
 	builder := ContextBuilder{
@@ -529,9 +541,10 @@ func TestBuildAndPersist_CASLoserAdoptsPersistedFinalScopeAndEmitsNoEvent(t *tes
 	if len(events.events) != 0 {
 		t.Fatalf("loser must emit no scope event, got %+v", events.events)
 	}
-	// The loser still performs the ordinary write with the adopted scope.
-	if len(store.calls) != 1 {
-		t.Fatalf("expected the loser to persist the adopted scope, got %d calls", len(store.calls))
+	// The loser adopts the winner's already-persisted snapshot verbatim
+	// instead of performing a second, unguarded write that could clobber it.
+	if len(store.calls) != 0 {
+		t.Fatalf("expected no additional write once the winner's snapshot is adopted, got %d calls", len(store.calls))
 	}
 }
 

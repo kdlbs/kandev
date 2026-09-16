@@ -315,15 +315,13 @@ func (b *ContextBuilder) persistWithCAS(
 		if err != nil {
 			return RunContext{}, fmt.Errorf("re-read run after lost scope race: %w", err)
 		}
-		if persisted, ok := reusePersistedTaskScope(current); ok {
-			runCtx.Capabilities = withScope(runCtx.Capabilities, scopeDerivation{
-				taskIDs: persisted.AllowedTaskIDs,
-				marker:  persisted.TaskScopeSource,
-			})
-			if err := b.persistUnconditional(ctx, run, runCtx); err != nil {
-				return RunContext{}, err
+		if _, ok := reusePersistedTaskScope(current); ok {
+			if adopted, ok := unmarshalRunContext(current.InputSnapshot); ok {
+				run.Capabilities = current.Capabilities
+				run.InputSnapshot = current.InputSnapshot
+				run.SessionID = current.SessionID
+				return adopted, nil
 			}
-			return runCtx, nil
 		}
 		if attempt >= maxScopeSwapAttempts {
 			return RunContext{}, fmt.Errorf("scope snapshot race: exceeded %d attempts", maxScopeSwapAttempts)
@@ -387,6 +385,24 @@ func MarshalRunContext(runCtx RunContext) (string, error) {
 		return "", fmt.Errorf("marshal run context: %w", err)
 	}
 	return string(body), nil
+}
+
+// unmarshalRunContext parses a persisted input_snapshot back into a
+// RunContext. The losing side of a scope CAS race uses this to adopt the
+// winner's complete snapshot verbatim, rather than re-marshaling its own
+// build's RunContext with only the task scope patched in — the latter
+// would silently overwrite winner-owned fields (capabilities, session id)
+// with this build's own values if they diverged from the winner's, for
+// example when agent permissions changed between the two builds' reads.
+func unmarshalRunContext(inputSnapshot string) (RunContext, bool) {
+	var runCtx RunContext
+	if inputSnapshot == "" {
+		return RunContext{}, false
+	}
+	if err := json.Unmarshal([]byte(inputSnapshot), &runCtx); err != nil {
+		return RunContext{}, false
+	}
+	return runCtx, true
 }
 
 func parsePayload(payload string) map[string]string {
