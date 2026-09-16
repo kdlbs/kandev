@@ -10,6 +10,10 @@ import (
 	"go.uber.org/zap"
 )
 
+// injectedKandevMCPServerName is the reserved server identifier used by the
+// host-injected Kandev MCP entry. This must match kandevMCPServerName in
+// adapter/transport/acp/adapter_session.go and kandevMcpServerName in
+// server/config/config.go.
 const injectedKandevMCPServerName = "kandev"
 
 func (m *Manager) autoApproveInjectedKandevPermission(req *adapter.PermissionRequest) (*adapter.PermissionResponse, bool) {

@@ -45,6 +45,9 @@ func TestPermissionProgrammaticName(t *testing.T) {
 	if captured.ToolName == nil || *captured.ToolName != programmaticName {
 		t.Fatalf("ToolName = %v, want %q", captured.ToolName, programmaticName)
 	}
+	// claudeCode.toolName uses the short form intentionally. The client passes
+	// both fields through as-is, and dialect normalization happens later in the
+	// adapter. The mismatch proves that the client is not synthesizing a name.
 	if captured.ToolMeta["claudeCode"].(map[string]any)["toolName"] != "update_task_plan_kandev" {
 		t.Fatalf("ToolMeta = %#v, want Claude metadata", captured.ToolMeta)
 	}

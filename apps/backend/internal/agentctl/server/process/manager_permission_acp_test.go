@@ -161,6 +161,8 @@ func resolvePendingPermissionACP(t *testing.T, manager *Manager, test permission
 
 func awaitAutoApprovedPermission(t *testing.T, manager *Manager, fake *permissionFlowAgent, wantOption string) {
 	t.Helper()
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
 	select {
 	case event := <-manager.GetUpdates():
 		t.Fatalf("injected Kandev request emitted manager event %q", event.Type)
@@ -168,7 +170,7 @@ func awaitAutoApprovedPermission(t *testing.T, manager *Manager, fake *permissio
 		if fake.selectedOption() != wantOption {
 			t.Fatalf("selected permission option = %q, want %q", fake.selectedOption(), wantOption)
 		}
-	case <-time.After(2 * time.Second):
+	case <-deadline.C:
 		t.Fatal("injected Kandev permission did not complete")
 	}
 }
