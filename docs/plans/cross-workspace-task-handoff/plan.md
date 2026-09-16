@@ -1,8 +1,14 @@
 ---
-status: superseded
+status: done
 requirements:
-  - REQ-TASKS-CROSS-WORKSPACE-HANDOFF-001
-  - REQ-TASKS-CROSS-WORKSPACE-HANDOFF-002
+  - REQ-CROSS-WORKSPACE-TASK-HANDOFF-CLI-ROUTE-001
+  - REQ-CROSS-WORKSPACE-TASK-HANDOFF-AUTHORIZATION-001
+  - REQ-CROSS-WORKSPACE-TASK-HANDOFF-PROFILES-001
+  - REQ-CROSS-WORKSPACE-TASK-HANDOFF-PROVENANCE-001
+  - REQ-CROSS-WORKSPACE-TASK-HANDOFF-SAME-WORKSPACE-001
+  - REQ-CROSS-WORKSPACE-TASK-HANDOFF-IDEMPOTENCY-001
+  - REQ-CROSS-WORKSPACE-TASK-HANDOFF-REVERSE-LINK-001
+  - REQ-CROSS-WORKSPACE-TASK-HANDOFF-START-001
 system_design:
   - ../../specs/cross-workspace-task-handoff/system-design/handoff-mechanism.md
   - ../../specs/cross-workspace-task-handoff/system-design/failure-modes-and-verification.md
@@ -13,14 +19,16 @@ legacy_specs: []
 
 ## Status
 
-Superseded by revision 5 of the cross-workspace task handoff spec, which
-withdrew the mechanism this plan delivered. The requirements and the system
-design are unchanged; only the transport and the gating vocabulary moved. The
-spec now lives as `docs/specs/cross-workspace-task-handoff/README.md` plus its
-`requirements/` and `system-design/` subdirectories (the single-file
-`spec.md` this section originally pointed at was retired by the revision-6
-spec split). No work order has been written for the replacement yet, so this
-plan describes the gap rather than a schedule.
+Delivered against revision 6 of the cross-workspace task handoff spec. An
+earlier iteration of this plan targeted a withdrawn Office-only MCP tool,
+`handoff_task_kandev` (spec revisions 1-4); revision 5 replaced it with
+`kandev task handoff`, a subcommand of the existing `task` group, and
+revision 6 completed the spec's split into
+`docs/specs/cross-workspace-task-handoff/README.md` plus its `requirements/`
+and `system-design/` subdirectories (the single-file `spec.md` this section
+originally pointed at was retired by that split). [Task 01](task-01-cross-workspace-task-handoff.md)
+records the CLI/route mechanism actually delivered; no MCP tool, profile
+capability, or tool-group entry backs this capability on any surface.
 
 ## Overview
 
@@ -40,47 +48,46 @@ No authorization is lost by the move. `contextFromRequest` re-derives the
 capability set from the signed run token on every request, giving the route the
 same never-trust-the-payload property the MCP principal provided.
 
-## Delivered against the withdrawn mechanism
+## Withdrawn mechanism (superseded before merge)
 
-The tree currently implements revisions 1-4: `internal/mcp/server/handoff_task_tool.go`,
-the `handleHandoffTask` handler in `internal/mcp/handlers/`, the
-`mcpprofile.CapabilityHandoffTask` gate, the `office-handoff` entry in
-`profileToolGroups`, and the `officeHandoffToolInstruction` prompt line in
-`internal/sysprompt/sysprompt.go`. AC-1a makes this a deletion rather than a
-deprecation, so that surface is removed rather than left alongside the CLI.
+An earlier iteration of this branch implemented revisions 1-4:
+`internal/mcp/server/handoff_task_tool.go`, the `handleHandoffTask` handler in
+`internal/mcp/handlers/`, the `mcpprofile.CapabilityHandoffTask` gate, the
+`office-handoff` entry in `profileToolGroups`, and the
+`officeHandoffToolInstruction` prompt line in
+`internal/sysprompt/sysprompt.go`. AC-1a made this a deletion rather than a
+deprecation, so that surface was removed rather than left alongside the CLI;
+no MCP tool, profile capability, or tool-group entry for this capability
+remains on any surface.
 
 The provenance records, reverse-link compare-and-set
 (`task/repository/sqlite/task_handoffs_cas.go`), activity events, permission
 resolution, and deferred-start profile retention are mechanism-independent and
-carry forward unchanged.
+carried forward unchanged from that iteration.
 
-## Gap to the specified mechanism
+## Delivered mechanism
 
-- Add `kandev task handoff` to `runTaskCmd`'s switch alongside `get`, `update`,
-  `create` and `decision`, named in that function's usage line, obtaining
-  credentials through `newKandevClient()` and issuing through `client.do`. No new
-  transport, client or credential path (AC-1).
-- Mount `POST /api/v1/office/runtime/handoffs` in `runtime.RegisterRoutes`
+- `kandev task handoff` is a case in `runTaskCmd`'s switch alongside `get`,
+  `update`, `create` and `decision`, named in that function's usage line,
+  obtaining credentials through `newKandevClient()` and issuing through
+  `client.do`. No new transport, client or credential path (AC-1).
+- `POST /api/v1/office/runtime/handoffs` is mounted in `runtime.RegisterRoutes`
   alongside `POST /runtime/tasks`, deriving every identity field from the signed
   run token and honouring no caller identity, workspace, agent, role or
   capability field from the request (AC-2).
-- Define the runtime capability `CapabilityHandoffTask = "handoff_task"` in
+- The runtime capability `CapabilityHandoffTask = "handoff_task"` is defined in
   `internal/office/runtime/capabilities.go`, with the `CanHandoffTasks` field on
   `runtime.Capabilities`, a case in `Capabilities.Allows`, and an `AllowedKeys()`
   entry at the position matching the struct field order (AC-8).
-- Remove the `mcpprofile.Capability` value so no MCP surface can gate, advertise
-  or reach the feature (AC-8a).
-- Keep `can_handoff_tasks` as the operator-visible grant (AC-7), now feeding the
+- The `mcpprofile.Capability` value is removed so no MCP surface can gate,
+  advertise or reach the feature (AC-8a).
+- `can_handoff_tasks` remains the operator-visible grant (AC-7), now feeding the
   runtime capability through `FromAgent` rather than an MCP profile capability.
 
 ## Work orders
 
 - [Task 01: Cross-workspace task handoff](task-01-cross-workspace-task-handoff.md)
-  — delivered the withdrawn MCP mechanism. Superseded; it is retained as the
-  record of what shipped, not as work to schedule.
-
-No work order exists for the CLI mechanism. Writing one is the next planning
-step.
+  — delivers the CLI/route mechanism described above.
 
 ## Delivery notes
 
