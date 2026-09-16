@@ -651,6 +651,33 @@ type ExecutorRepository interface {
 	// the resume-safety invariant instead of deleting a resumable row.
 	// Returns models.ErrExecutorRunningNotFound if no row exists for the session.
 	RepairExecutorRunningDead(ctx context.Context, sessionID string) error
+
+	// ListSSHExecutorsForReachability returns every eligible SSH executor
+	// (type=ssh, not soft-deleted, status=active) ordered ascending by id —
+	// the poller's per-pass work list.
+	ListSSHExecutorsForReachability(ctx context.Context) ([]*models.Executor, error)
+	// GetExecutorReachability returns the stored record for one executor.
+	// Returns models.ErrExecutorReachabilityNotFound if none exists.
+	GetExecutorReachability(ctx context.Context, executorID string) (*models.ExecutorReachability, error)
+	// ListExecutorReachability returns every stored reachability record.
+	ListExecutorReachability(ctx context.Context) ([]*models.ExecutorReachability, error)
+	// UpsertExecutorReachability records a single probe (or launch dial)
+	// observation. The consecutive-failure counter and derived state are
+	// computed by the statement itself from the row's own prior values, and
+	// a write is discarded when obs.CheckedAt is not strictly later than the
+	// stored checked_at — see the system design's Persistence section.
+	UpsertExecutorReachability(ctx context.Context, obs models.ExecutorReachabilityObservation) error
+	// ResetExecutorReachability invalidates the stored record after a
+	// connection-configuration save: state becomes unknown, the counter and
+	// reason/message clear, host is set to the newly saved value, and both
+	// timestamps become NULL. It is ordered by the save that caused it, not
+	// by an observation clock, so it always wins over the stored record. A
+	// no-op (zero rows affected) when the executor is not an active SSH
+	// executor.
+	ResetExecutorReachability(ctx context.Context, executorID, host string) error
+	// DeleteExecutorReachability removes the stored record. DeleteExecutor
+	// calls this in the same transaction as the soft delete.
+	DeleteExecutorReachability(ctx context.Context, executorID string) error
 }
 
 // EnvironmentRepository handles environment CRUD.

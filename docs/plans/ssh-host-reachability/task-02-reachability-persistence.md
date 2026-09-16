@@ -1,7 +1,7 @@
 ---
 id: "02-reachability-persistence"
 title: "Reachability record persistence"
-status: pending
+status: done
 wave: 1
 depends_on: []
 plan: "plan.md"
@@ -158,4 +158,81 @@ schema change.
 
 ## Results
 
-Pending.
+Implemented as specified:
+
+- `models.ExecutorReachability` (`internal/task/models/executor_reachability.go`)
+  with `ExecutorReachabilityState`/`ExecutorReachabilityReason` constants,
+  `ErrExecutorReachabilityNotFound`, and `ExecutorReachabilityObservation` (the
+  upsert's input struct, carrying `InitialState`/`InitialFailures` for the
+  insert-only path plus `SeenUpdatedAt`/`FailureThreshold` for the eligibility
+  and hysteresis guards).
+- `executor_reachability` table added via one additive
+  `r.migrate.Apply("executor_reachability.table", …)` in `base_migrations.go`,
+  following the `repository_secret_bindings` precedent (idempotent
+  `CREATE TABLE IF NOT EXISTS`, no separate `init*Schema` entry needed for a
+  brand-new table).
+- `ListSSHExecutorsForReachability`, `GetExecutorReachability`,
+  `ListExecutorReachability`, `UpsertExecutorReachability`,
+  `ResetExecutorReachability`, `DeleteExecutorReachability` added to
+  `ExecutorRepository` (`repository/interface.go`) and implemented in the new
+  `repository/sqlite/executor_reachability.go`.
+- `UpsertExecutorReachability` is a single `INSERT … SELECT … WHERE EXISTS …
+  ON CONFLICT DO UPDATE` statement per the system design: the `WHERE EXISTS`
+  guard checks the executor is still active SSH with the caller's observed
+  `updated_at`; the conflict clause derives `consecutive_failures` and `state`
+  from the stored row via `CASE`, and the final `WHERE` on `checked_at`
+  enforces last-write-wins (a `NULL` stored `checked_at` or a strictly later
+  incoming one wins; an equal or older one is a no-op). `InitialState`/
+  `InitialFailures` are used only by the `INSERT` branch (no prior row); every
+  later write derives both from the stored row.
+- `ResetExecutorReachability` is its own statement (not a branch of the
+  upsert): unconditionally writes `unknown`/zeroed counter/cleared reason and
+  message/new `host`/`NULL` timestamps, guarded only by
+  `type='ssh' AND deleted_at IS NULL AND status='active'` — no timestamp pin,
+  since a reset must win over whatever is stored regardless of observation
+  order. A non-active-but-not-deleted SSH executor is a no-op (`AC-…-001.17`).
+- `DeleteExecutor` (`repository/sqlite/executor.go`) now runs the soft-delete
+  `UPDATE` and `DELETE FROM executor_reachability` in one transaction.
+- Both writes normalize to UTC and bind `time.Time` directly (never a
+  pre-formatted string), per the design's SQLite-lexical-vs-Postgres-temporal
+  `TIMESTAMP` comparison risk.
+- Widening `ExecutorRepository` broke one pre-existing test fake
+  (`mockRepository` in `internal/task/handlers/process_handlers_test.go`, which
+  hand-implements methods rather than embedding the interface); extended it
+  with the six new methods rather than narrowing the interface, per the task's
+  own Risks section.
+
+Tests added (`repository/sqlite/executor_reachability_test.go`,
+`executor_reachability_postgres_test.go`):
+
+- `TestUpsertExecutorReachabilityNewerCheckedAtWinsRegardlessOfOrder` — issues
+  the newer write first and the older write second (including a
+  whole-second/sub-second pair), asserts the newer values survive.
+- `TestUpsertExecutorReachabilityEqualCheckedAtIsDiscarded`
+- `TestExecutorReachabilityRoundTripAcrossReopen` — write, reopen the SQLite
+  file, read back byte-identical `checked_at`/`last_success_at`.
+- `TestDeleteExecutorRemovesReachabilityRecord`
+- `TestResetExecutorReachabilityClearsTheRecordButAdvancesUpdatedAt`
+- `TestResetExecutorReachabilityIsANoOpForANonActiveExecutor`
+- `TestListSSHExecutorsForReachabilityOrdersByID`
+- `TestPostgresExecutorReachabilityCheckedAtOrdering` (env-gated on
+  `KANDEV_TEST_POSTGRES_DSN`; skipped in this environment, proves the fix
+  doesn't regress on Postgres — the SQLite test above is the one that actually
+  catches the lexical-comparison bug).
+
+Verification commands run from `apps/backend`, all green:
+
+```
+go test -tags fts5 -race ./internal/task/repository/sqlite/ -run 'Reachability'   # 7 passed, 1 skipped (no Postgres DSN)
+go test -tags fts5 -race ./internal/task/repository/... -run 'Migration|Schema'   # all passed, several skipped (no Postgres DSN)
+make lint                                                                          # 0 issues
+go build ./... && go vet ./...                                                    # clean
+```
+
+`go test -race ./internal/task/...` also run as a broader sanity check: one
+unrelated pre-existing failure
+(`TestRepositoryBranchPolicyServiceGitflowStarterIsAtomicAndOneTime`, a
+`/tmp` vs `/private/tmp` path-canonicalization issue on this macOS
+environment) reproduces identically on the task-01 commit before any task-02
+change, confirmed via a throwaway git worktree at `7ca5d4b0e`. Not caused by
+this work order.
