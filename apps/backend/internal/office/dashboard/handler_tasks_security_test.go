@@ -162,6 +162,18 @@ func listTasksReq(wsID, token string) *http.Request {
 	return req
 }
 
+func searchTasksReq(wsID, token string) *http.Request {
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/office/workspaces/"+wsID+"/tasks/search",
+		nil,
+	)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	return req
+}
+
 // TestListTasks_AgentCallerMustUseRuntimeEndpoint proves the fix for the
 // bypass an agent JWT had of the list_tasks capability gate: GET
 // /workspaces/:wsId/tasks sits under the same Office route group as GET
@@ -198,6 +210,43 @@ func TestListTasks_UICallerWithoutTokenSucceeds(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	f.router.ServeHTTP(rec, listTasksReq("ws-1", ""))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestSearchTasks_AgentCallerMustUseRuntimeEndpoint proves the same fix for
+// the sibling GET /workspaces/:wsId/tasks/search route: an empty query
+// invokes the same unbounded ListTasks read as the plain list route, and a
+// nonempty query searches the same workspace, so this route needs the
+// identical agent-caller guard.
+func TestSearchTasks_AgentCallerMustUseRuntimeEndpoint(t *testing.T) {
+	f := newTasksSecurityFixture(t)
+	agent := seedTasksAgent(t, f.agentsSvc, f.repo, "agent-a", "ws-1")
+
+	token, err := f.agentsSvc.MintRuntimeJWT(agent.ID, "", agent.WorkspaceID, "run-1", "sess-1", "{}")
+	if err != nil {
+		t.Fatalf("mint jwt: %v", err)
+	}
+
+	rec := httptest.NewRecorder()
+	f.router.ServeHTTP(rec, searchTasksReq("ws-1", token))
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestSearchTasks_UICallerWithoutTokenSucceeds proves the fix is scoped to
+// agent callers only: a browser/UI request with no bearer token keeps
+// working exactly as before.
+func TestSearchTasks_UICallerWithoutTokenSucceeds(t *testing.T) {
+	f := newTasksSecurityFixture(t)
+	seedTasksWorkspace(t, f.repo, "ws-1")
+
+	rec := httptest.NewRecorder()
+	f.router.ServeHTTP(rec, searchTasksReq("ws-1", ""))
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
