@@ -391,15 +391,16 @@ func commentIDFromPayload(payload string, wanted map[string]struct{}) string {
 func (r *Repository) GetClaimedTasklessRunForAgent(
 	ctx context.Context, agentProfileID string,
 ) (*models.Run, error) {
+	taskIDExpr := dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id")
 	var req models.Run
-	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(fmt.Sprintf(`
 		SELECT * FROM runs
 		WHERE agent_profile_id = ?
 		  AND status = 'claimed'
-		  AND COALESCE(json_extract(payload, '$.task_id'), '') = ''
+		  AND COALESCE(%s, '') = ''
 		ORDER BY claimed_at DESC
 		LIMIT 1
-	`), agentProfileID).StructScan(&req)
+	`, taskIDExpr)), agentProfileID).StructScan(&req)
 	if err != nil {
 		return nil, err
 	}
@@ -408,14 +409,15 @@ func (r *Repository) GetClaimedTasklessRunForAgent(
 
 // GetClaimedRunByTaskID returns the claimed run associated with a task payload.
 func (r *Repository) GetClaimedRunByTaskID(ctx context.Context, taskID string) (*models.Run, error) {
+	taskIDExpr := dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id")
 	var req models.Run
-	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(fmt.Sprintf(`
 		SELECT * FROM runs
 		WHERE status = 'claimed'
-		  AND json_extract(payload, '$.task_id') = ?
+		  AND %s = ?
 		ORDER BY claimed_at DESC
 		LIMIT 1
-	`), taskID).StructScan(&req)
+	`, taskIDExpr)), taskID).StructScan(&req)
 	if err != nil {
 		return nil, err
 	}
@@ -434,15 +436,16 @@ func (r *Repository) GetClaimedRunByTaskID(ctx context.Context, taskID string) (
 func (r *Repository) GetClaimedRunByTaskAndAgent(
 	ctx context.Context, taskID, agentProfileID string,
 ) (*models.Run, error) {
+	taskIDExpr := dialect.JSONExtract(r.ro.DriverName(), "payload", "task_id")
 	var req models.Run
-	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(`
+	err := r.ro.QueryRowxContext(ctx, r.ro.Rebind(fmt.Sprintf(`
 		SELECT * FROM runs
 		WHERE status = 'claimed'
 		  AND agent_profile_id = ?
-		  AND json_extract(payload, '$.task_id') = ?
+		  AND %s = ?
 		ORDER BY claimed_at DESC
 		LIMIT 1
-	`), agentProfileID, taskID).StructScan(&req)
+	`, taskIDExpr)), agentProfileID, taskID).StructScan(&req)
 	if err != nil {
 		return nil, err
 	}
