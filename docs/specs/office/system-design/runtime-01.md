@@ -91,9 +91,11 @@ For `agent_run_failed`:
 3. Re-queue a wakeup for that (task, agent) with reason `manual_resume_after_failure`.
 
 For `agent_paused_after_failures`:
-1. Insert into `inbox_dismissals`.
-2. Clear the agent's `pause_reason`, reset `consecutive_failures` to zero. (Counter reset is the user saying "I fixed the cause; start over".)
+1. Compare-and-set clear of the agent's `pause_reason`, reset `consecutive_failures` to zero. (Counter reset is the user saying "I fixed the cause; start over".) The write is conditioned on `pause_reason` still matching what the entry showed; a second auto-pause that replaced it first wins - the clear is refused and the call aborts rather than adopting the newer reason (`AC-OFFICE-RUNTIME-001.9`).
+2. Insert into `inbox_dismissals`, only after step 1 succeeds. An aborted clear leaves the entry actionable for the still-paused agent (`AC-OFFICE-RUNTIME-001.10`).
 3. Re-queue wakeups for every (task, agent) listed on the entry with reason `manual_resume_after_failure`.
+
+See [part 2](runtime-02.md#migrated-source-detail) for the compare-and-set scenario detail.
 
 There is no separate "Dismiss without retry" affordance. If the user wants to silence the inbox without re-running the task, they reassign the task to a different agent - that's the explicit recovery path described below.
 
@@ -275,6 +277,7 @@ Recovery and runtime-action authorization splits across three actors: human user
 - **Transient network failure**: treated as terminal in v1. User clicks Resume / Mark fixed to retry. Future classifier may auto-retry.
 - **Auto-paused agent's wakeup fires**: scheduler refuses to claim it; behaviour identical to a manually-paused agent.
 - **Reassignment during failure**: cancels the (task, old agent) wakeup via the existing staleness check; auto-dismisses `agent_run_failed` for (task, old agent). Does not unpause the old agent.
+- **Second auto-pause lands during Mark fixed**: the compare-and-set clear on `pause_reason` is refused; the call aborts instead of retrying against the newer reason. `consecutive_failures` is unchanged, no wakeup is queued, and the inbox entry is not dismissed - the newer pause remains actionable.
 
 ## Persistence guarantees
 

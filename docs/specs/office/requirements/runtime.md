@@ -27,6 +27,8 @@ When an agent run fails mid-turn (invalid model, auth failure, malformed respons
 - **AC-OFFICE-RUNTIME-001.6:** Changing `assignee_agent_instance_id` on a task fires the existing reactivity pipeline, which queues a fresh `task_assigned` wakeup for the new agent.
 - **AC-OFFICE-RUNTIME-001.7:** The existing staleness check (`recovery-reliability` spec) cancels the prior wakeup for the (task, **old** agent) since the assignee has changed.
 - **AC-OFFICE-RUNTIME-001.8:** Any per-task `agent_run_failed` inbox entry tied to the old (task, agent) auto-dismisses - the failure is no longer actionable on this task.
+- **AC-OFFICE-RUNTIME-001.9:** If a second auto-pause replaces the agent's `pause_reason` after **Mark fixed** on `agent_paused_after_failures` has read it but before its clear commits, the clear is refused and the call aborts instead of adopting the newer reason: `consecutive_failures` is not reset and no wakeup is re-queued.
+- **AC-OFFICE-RUNTIME-001.10:** A **Mark fixed** call aborted under AC-OFFICE-RUNTIME-001.9 does not dismiss the inbox entry - it stays actionable for the still-paused agent, and is dismissed only once a clear against the then-current `pause_reason` succeeds.
 
 ## System design
 
