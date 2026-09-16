@@ -242,7 +242,7 @@ func (s *Service) resumeDetachedClarificationWithPrompt(
 	s.writeTaskInProgressForRuntime(ctx, data.TaskID, data.SessionID)
 
 	if _, err := s.promptTask(
-		ctx, data.TaskID, data.SessionID, prompt, "", false, nil, dispatchOnly, options,
+		ctx, data.TaskID, data.SessionID, prompt, "", false, nil, dispatchOnly, launchOriginManual, options,
 	); err != nil {
 		// The synchronous HTTP path must not turn an asynchronous queue handoff
 		// into false acknowledgement. Its handler restores the claimed bundle on
@@ -405,6 +405,7 @@ func (s *Service) resumeClarificationViaFallback(ctx context.Context, data clari
 		false,
 		nil,
 		false,
+		launchOriginAutomatic,
 		promptTaskOptions{expectedCurrentTurnID: data.ClarificationTurnID},
 	); err != nil {
 		if !s.retryClarificationAfterCancel(ctx, data, prompt, err) {

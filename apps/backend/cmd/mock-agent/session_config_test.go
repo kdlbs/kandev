@@ -152,6 +152,43 @@ func TestSetSessionConfigOptionModelChangesAvailableOptions(t *testing.T) {
 	}
 }
 
+func TestPromptUsesCurrentSessionModel(t *testing.T) {
+	updater := newCapturingUpdater()
+	agent := &mockAgent{
+		model:           "mock-default",
+		conn:            updater,
+		sessions:        make(map[acp.SessionId]bool),
+		promptCancels:   make(map[acp.SessionId]context.CancelFunc),
+		sessionConfig:   make(map[acp.SessionId][]acp.SessionConfigOption),
+		commandsEmitted: make(map[acp.SessionId]bool),
+	}
+	session, err := agent.NewSession(context.Background(), acp.NewSessionRequest{})
+	if err != nil {
+		t.Fatalf("NewSession: %v", err)
+	}
+	if _, err := agent.SetSessionConfigOption(context.Background(), acp.SetSessionConfigOptionRequest{
+		ValueId: &acp.SetSessionConfigOptionValueId{
+			SessionId: session.SessionId,
+			ConfigId:  "model",
+			Value:     modelSmart,
+		},
+	}); err != nil {
+		t.Fatalf("set model: %v", err)
+	}
+
+	if _, err := agent.Prompt(context.Background(), acp.PromptRequest{
+		SessionId: session.SessionId,
+		Prompt:    []acp.ContentBlock{acp.TextBlock("/e2e:utility-profile")},
+	}); err != nil {
+		t.Fatalf("Prompt: %v", err)
+	}
+
+	texts := updater.textMessages()
+	if len(texts) == 0 || texts[len(texts)-1] != "utility profile model: "+modelSmart {
+		t.Fatalf("utility profile response = %v, want final response %q", texts, "utility profile model: "+modelSmart)
+	}
+}
+
 func TestSessionConfigIsIsolatedAcrossNewSessions(t *testing.T) {
 	agent := &mockAgent{
 		sessions:        make(map[acp.SessionId]bool),

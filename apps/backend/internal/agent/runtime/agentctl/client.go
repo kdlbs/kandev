@@ -62,9 +62,9 @@ type Client struct {
 	pendingRequestConns map[string]*websocket.Conn
 	pendingMu           sync.Mutex
 
-	// lastSessionModelState is populated synchronously by session/new,
-	// session/reset, or session/load responses. Lifecycle policy evaluation can
-	// use it before the corresponding session_models event reaches its handler.
+	// lastSessionModelState is populated by session/new, session/reset, and
+	// session/load responses and by asynchronous session_models events. Lifecycle
+	// policy evaluation can use it before the event reaches its handler.
 	lastSessionModelState *streams.SessionModelState
 }
 
@@ -74,8 +74,8 @@ func (c *Client) setLastSessionModelState(state *streams.SessionModelState) {
 	c.lastSessionModelState = cloneSessionModelState(state)
 }
 
-// GetLastSessionModelState returns the model catalog included in the most
-// recent session creation or load response.
+// GetLastSessionModelState returns the latest session model catalog observed
+// in a session response or asynchronous session_models event.
 func (c *Client) GetLastSessionModelState() *streams.SessionModelState {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -87,9 +87,10 @@ func cloneSessionModelState(state *streams.SessionModelState) *streams.SessionMo
 		return nil
 	}
 	cloned := &streams.SessionModelState{
-		CurrentModelID: state.CurrentModelID,
-		Models:         append([]streams.SessionModelInfo(nil), state.Models...),
-		ConfigOptions:  append([]streams.ConfigOption(nil), state.ConfigOptions...),
+		CurrentModelID:       state.CurrentModelID,
+		Models:               append([]streams.SessionModelInfo(nil), state.Models...),
+		ConfigOptions:        append([]streams.ConfigOption(nil), state.ConfigOptions...),
+		ConfigOptionsSettled: state.ConfigOptionsSettled,
 	}
 	for i, model := range cloned.Models {
 		if model.Meta == nil {

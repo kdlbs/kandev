@@ -465,6 +465,11 @@ function useSessionData(
     () => clarificationTurnIdForSession(session?.state, turns),
     [session?.state, turns],
   );
+  const currentTurnCompleted = useMemo(() => {
+    if (currentTurnId === null) return true;
+    if (currentTurnId === undefined || !turns) return undefined;
+    return turns.find((turn) => turn.id === currentTurnId)?.completed_at != null;
+  }, [currentTurnId, turns]);
   const lastAgentError = useMemo(() => readLastAgentError(session?.metadata), [session?.metadata]);
   const processed = useProcessedMessages(messages, taskId, resolvedSessionId, taskDescription, {
     initialPromptPreview: session?.metadata?.initial_prompt_preview,
@@ -472,6 +477,7 @@ function useSessionData(
     hasOlderMessages,
     lastAgentError,
     currentTurnId,
+    currentTurnCompleted,
     pendingAction: session?.pending_action,
   });
   const { sessionModel, activeModel } = useSessionModel(

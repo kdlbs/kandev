@@ -14,6 +14,7 @@ function dispatch(handlers: WsHandlers, type: string, payload: unknown) {
 }
 
 type WorkspaceItem = AppState["workspaces"]["items"][number];
+const SECOND_WORKSPACE_ID = "workspace-2";
 
 function storeWith(items: WorkspaceItem[]): StoreApi<AppState> {
   return createStore<AppState>(
@@ -73,6 +74,16 @@ describe("workspace.updated placement", () => {
 
     expect(store.getState().workspaces.items[0].unit_id).toBe("unit-new");
   });
+
+  it("bumps the active workspace revision when the first workspace becomes active", () => {
+    const store = storeWith([]);
+    const handlers = registerWorkspacesHandlers(store);
+
+    dispatch(handlers, "workspace.created", { id: "ws-2", name: "Runtime" });
+
+    expect(store.getState().workspaces.activeId).toBe("ws-2");
+    expect(store.getState().workspaces.activeIdRevision).toBe(1);
+  });
 });
 
 describe("workspace.deleted queue cleanup", () => {
@@ -82,7 +93,7 @@ describe("workspace.deleted queue cleanup", () => {
     const clearQueueStatus = vi.fn();
     let state = {
       workspaces: {
-        items: [{ id: WORKSPACE_ID }, { id: "workspace-2" }],
+        items: [{ id: WORKSPACE_ID }, { id: SECOND_WORKSPACE_ID }],
         activeId: WORKSPACE_ID,
       },
       workflows: { items: [], activeId: null },
@@ -118,5 +129,61 @@ describe("workspace.deleted queue cleanup", () => {
 
     expect(clearQueueStatus).toHaveBeenCalledOnce();
     expect(clearQueueStatus).toHaveBeenCalledWith("session-1");
+  });
+
+  it("bumps the active workspace revision when deletion selects a fallback", () => {
+    const clearQueueStatus = vi.fn();
+    const first = { ...workspace(), id: WORKSPACE_ID };
+    const second = { ...workspace(), id: SECOND_WORKSPACE_ID };
+    const store = createStore<AppState>(
+      () =>
+        ({
+          workspaces: {
+            items: [first, second],
+            activeId: WORKSPACE_ID,
+            activeIdRevision: 4,
+          },
+          workflows: { items: [], activeId: null },
+          kanban: { workflowId: null, steps: [], tasks: [] },
+          kanbanMulti: { snapshots: {} },
+          taskSessions: { items: {} },
+          clearQueueStatus,
+        }) as unknown as AppState,
+    );
+
+    registerWorkspacesHandlers(store)["workspace.deleted"]!({
+      payload: { id: WORKSPACE_ID },
+    } as never);
+
+    expect(store.getState().workspaces.activeId).toBe(SECOND_WORKSPACE_ID);
+    expect(store.getState().workspaces.activeIdRevision).toBe(5);
+  });
+
+  it("preserves the active workspace revision when deletion leaves the selection unchanged", () => {
+    const clearQueueStatus = vi.fn();
+    const first = { ...workspace(), id: WORKSPACE_ID };
+    const second = { ...workspace(), id: SECOND_WORKSPACE_ID };
+    const store = createStore<AppState>(
+      () =>
+        ({
+          workspaces: {
+            items: [first, second],
+            activeId: SECOND_WORKSPACE_ID,
+            activeIdRevision: 4,
+          },
+          workflows: { items: [], activeId: null },
+          kanban: { workflowId: null, steps: [], tasks: [] },
+          kanbanMulti: { snapshots: {} },
+          taskSessions: { items: {} },
+          clearQueueStatus,
+        }) as unknown as AppState,
+    );
+
+    registerWorkspacesHandlers(store)["workspace.deleted"]!({
+      payload: { id: WORKSPACE_ID },
+    } as never);
+
+    expect(store.getState().workspaces.activeId).toBe(SECOND_WORKSPACE_ID);
+    expect(store.getState().workspaces.activeIdRevision).toBe(4);
   });
 });

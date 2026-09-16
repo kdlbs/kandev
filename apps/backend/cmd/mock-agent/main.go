@@ -21,6 +21,7 @@ import (
 // fixtures select for slow responses; it must be advertised for the
 // no-silent-model-fallback strict policy to accept it.
 const (
+	modelConfigID       = "model"
 	modelFast           = "mock-fast"
 	modelSmart          = "mock-smart"
 	modelSlow           = "mock-slow"
@@ -132,7 +133,7 @@ func mockPromptQueueingEnabled() bool {
 // them in the cache — this is what makes the utility-agents settings page
 // show model and mode options for mock-agent in E2E, and lets profile-mode
 // tests select a non-default mode.
-func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+func (a *mockAgent) NewSession(ctx context.Context, req acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	configOptions := mockSessionConfigOptions()
 	a.mu.Lock()
 	a.nextSessionID++
@@ -147,6 +148,7 @@ func (a *mockAgent) NewSession(_ context.Context, req acp.NewSessionRequest) (ac
 	// Register MCP servers from the ACP session request (SSE servers).
 	// This bridges ACP protocol MCP config to the mock agent's MCP client.
 	registerACPMcpServers(req.McpServers)
+	primeKandevMCPToolCatalog(ctx)
 
 	// Emit available commands asynchronously after the session/new response
 	// flushes. Real ACP agents (OpenCode, Claude) emit available_commands_update
@@ -224,7 +226,7 @@ func mockSessionConfigOptionsForModel(model string) []acp.SessionConfigOption {
 		{Select: &acp.SessionConfigOptionSelect{
 			Category:     &modelCat,
 			CurrentValue: acp.SessionConfigValueId(model),
-			Id:           "model",
+			Id:           modelConfigID,
 			Name:         "Model",
 			Options:      acp.SessionConfigSelectOptions{Ungrouped: &modelOptions},
 			Type:         "select",
@@ -327,6 +329,7 @@ func (a *mockAgent) LoadSession(ctx context.Context, req acp.LoadSessionRequest)
 	_, _ = fmt.Fprintf(logOutput, "mock-agent[%d]: resumed session %s\n", os.Getpid(), req.SessionId)
 
 	// Re-emit available commands after the session/load response flushes.
+	primeKandevMCPToolCatalog(ctx)
 	go a.emitAvailableCommandsAfterDelay(req.SessionId)
 
 	return acp.LoadSessionResponse{
@@ -368,11 +371,22 @@ func (a *mockAgent) Prompt(ctx context.Context, req acp.PromptRequest) (acp.Prom
 		return resp, err
 	}
 	e := &emitter{ctx: promptCtx, conn: a.conn, sid: req.SessionId}
-	handlePrompt(e, prompt, a.model)
+	handlePrompt(e, prompt, a.sessionModel(req.SessionId))
 	if promptCtx.Err() != nil {
 		return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
 	}
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+}
+
+func (a *mockAgent) sessionModel(sessionID acp.SessionId) string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, option := range a.sessionConfig[sessionID] {
+		if option.Select != nil && option.Select.Id == modelConfigID && option.Select.CurrentValue != "" {
+			return string(option.Select.CurrentValue)
+		}
+	}
+	return a.model
 }
 
 // Cancel handles session cancellation.
@@ -425,7 +439,7 @@ func (a *mockAgent) SetSessionConfigOption(_ context.Context, req acp.SetSession
 	if !found {
 		return acp.SetSessionConfigOptionResponse{}, fmt.Errorf("unknown mock config option %q", req.ValueId.ConfigId)
 	}
-	if req.ValueId.ConfigId == "model" {
+	if req.ValueId.ConfigId == modelConfigID {
 		modeValue := mockConfigOptionValue(options, "mode")
 		options = mockSessionConfigOptionsForModel(string(req.ValueId.Value))
 		for i := range options {

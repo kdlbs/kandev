@@ -1090,7 +1090,6 @@ func (s *Server) profileToolGroups() []profileToolGroup {
 				mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab)
 		}), register: func(s *Server) { s.registerTaskPRLinkTools() }},
 		{name: "github-pr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitHub) }), register: func(s *Server) { s.registerPRAutomationTools() }},
-		{name: "gitlab-mr", enabled: andProfilePredicates(kanban, func(ctx mcpprofile.Context) bool { return mcpproviders.Contains(ctx.Providers, mcpproviders.GitLab) }), register: func(s *Server) { s.registerMRAutomationTools() }},
 		{name: "user-question", enabled: capabilityEnabled(mcpprofile.CapabilityUserQuestion), register: func(s *Server) { s.registerInteractionTools() }},
 		{name: "parent-question", enabled: andProfilePredicates(kanban, capabilityEnabled(mcpprofile.CapabilityParentQuestion)), register: func(s *Server) { s.registerParentQuestionTool() }},
 		{name: "plan", enabled: func(ctx mcpprofile.Context) bool { return kanban(ctx) || office(ctx) }, register: func(s *Server) { s.registerPlanTools() }},
@@ -1364,117 +1363,161 @@ func (s *Server) registerKanbanTools() {
 
 func (s *Server) registerPRAutomationTools() {
 	s.mcpServer.AddTool(
-		mcp.NewToolWithRawSchema("get_task_pr_automation_kandev",
-			"Get the current task's GitHub PR automation settings, including lifecycle notification switches. "+
-				"The five automation switches are scoped per linked PR; pr_options carries one entry per PR "+
-				"(repository_id, pr_number, and the five booleans). The top-level booleans are an aggregate "+
-				"that reports true only when every linked PR has that switch on and at least one PR is linked "+
-				"— use them to check whether a task-wide enable fully took, and use pr_options for anything "+
-				"PR-specific.",
-			json.RawMessage(`{"type":"object","properties":{}}`),
-		),
-		s.wrapHandler("get_task_pr_automation_kandev", s.getTaskPRAutomationHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("update_task_pr_automation_kandev",
+		mcp.NewTool("report_change_request_auto_fix_outcome_kandev",
 			mcp.WithDescription(
-				"Update this task's PR automation options (auto-fix, auto-merge, and lifecycle notifications). "+
-					"The five switches are scoped per linked PR: pass both repository_id and pr_number to target "+
-					"one linked PR, or omit both to apply the change to every PR currently linked to the task "+
-					"(unchanged default behavior). auto_fix_prompt_override applies task-wide regardless of PR identity.",
-			),
-			mcp.WithString("repository_id", mcp.Description("Target one linked PR's repository_id; must be paired with pr_number. Omit both to apply to every linked PR.")),
-			mcp.WithNumber("pr_number", mcp.Description("Target one linked PR's number; must be paired with repository_id. Omit both to apply to every linked PR.")),
-			mcp.WithBoolean("auto_fix_enabled", mcp.Description("Enable or disable auto-fix when CI checks fail")),
-			mcp.WithBoolean("auto_merge_enabled", mcp.Description("Enable or disable auto-merge when PR passes all checks")),
-			mcp.WithString("auto_fix_prompt_override", mcp.Description("Custom prompt for auto-fix (empty string clears the override). Task-wide; not affected by repository_id/pr_number.")),
-			mcp.WithBoolean("prompt_on_review_requested", mcp.Description("Prompt this task's agent when a review is requested for the authenticated user")),
-			mcp.WithBoolean("prompt_on_merged", mcp.Description("Prompt this task's agent once when the linked PR becomes merged")),
-			mcp.WithBoolean("prompt_on_closed", mcp.Description("Prompt this task's agent once when the linked PR becomes closed without merge")),
-		),
-		s.wrapHandler("update_task_pr_automation_kandev", s.updateTaskPRAutomationHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("report_pr_auto_fix_outcome_kandev",
-			mcp.WithDescription(
-				"Report the one explicit outcome for the current Kandev-dispatched auto-fix turn. "+
+				"Report the one explicit outcome for the current Kandev-dispatched change request auto-fix turn. "+
 					"Use this tool only when this turn received the server-owned outcome protocol. "+
-					"Do not use it for manual PR fixup, sibling review messages, or instructions carried over from an earlier auto-fix turn. "+
+					"Do not use it for manual fixup, sibling review messages, or instructions carried over from an earlier auto-fix turn. "+
 					"Tool availability or enabled automation settings alone do not establish an obligation to report. "+
 					"Use action_taken when a concrete provider-visible change was made, "+
 					"non_actionable when the feedback identifies no change this task can make, "+
 					"or blocked when an external condition prevents the needed change. "+
 					"Report exactly once for the dispatched turn. "+
-					"The task, session, turn, and PR are bound by Kandev and are not tool arguments.",
+					"The task, session, turn, provider, and change request are bound by Kandev and are not tool arguments.",
 			),
 			mcp.WithString("outcome", mcp.Required(), mcp.Enum("action_taken", "non_actionable", "blocked"), mcp.Description("The disposition of this auto-fix turn.")),
 			mcp.WithString("summary", mcp.Required(), mcp.Description("A short plain-text explanation of the outcome.")),
 		),
-		s.wrapHandler("report_pr_auto_fix_outcome_kandev", s.reportTaskPRAutoFixOutcomeHandler()),
+		s.wrapHandler("report_change_request_auto_fix_outcome_kandev", s.reportTaskChangeRequestAutoFixOutcomeHandler()),
 	)
 }
 
 func (s *Server) registerTaskPRLinkTools() {
 	s.mcpServer.AddTool(
-		mcp.NewTool("link_task_pr_kandev", taskPRLinkToolOptions(false)...),
-		s.wrapHandler("link_task_pr_kandev", s.taskPRLinkHandler("link_task_pr_kandev")),
+		mcp.NewToolWithRawSchema("get_task_change_requests_kandev",
+			"Get the current task's linked GitHub pull requests and GitLab merge requests, automation settings, and provider capabilities.",
+			json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`),
+		),
+		s.wrapHandler("get_task_change_requests_kandev", s.getTaskChangeRequestsHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("unlink_task_pr_kandev", taskPRLinkToolOptions(false)...),
-		s.wrapHandler("unlink_task_pr_kandev", s.taskPRLinkHandler("unlink_task_pr_kandev")),
+		mcp.NewToolWithRawSchema("manage_task_change_request_kandev",
+			"Link, unlink, or replace a GitHub pull request or GitLab merge request for a task. Provide the operation, target task, provider, canonical repository identity, and positive change request number. Replacement requires the complete old identity and keeps both identities on the same provider.",
+			taskChangeRequestToolSchema(),
+		),
+		s.wrapHandler("manage_task_change_request_kandev", s.manageTaskChangeRequestHandler()),
 	)
 	s.mcpServer.AddTool(
-		mcp.NewTool("replace_task_pr_kandev", taskPRLinkToolOptions(true)...),
-		s.wrapHandler("replace_task_pr_kandev", s.taskPRLinkHandler("replace_task_pr_kandev")),
+		mcp.NewToolWithRawSchema("update_task_change_request_automation_kandev",
+			"Update automation switches for one linked change request or for explicitly selected providers on the current task. Task prompts are provider-scoped and task-level; association targets cannot set a prompt.",
+			taskChangeRequestAutomationToolSchema(),
+		),
+		s.wrapHandler("update_task_change_request_automation_kandev", s.updateTaskChangeRequestAutomationHandler()),
 	)
 }
 
-func taskPRLinkToolOptions(replace bool) []mcp.ToolOption {
-	options := []mcp.ToolOption{
-		mcp.WithDescription("Manage an explicit GitHub PR or GitLab MR association. Provide task_id, provider, canonical repository_id, and pull-request or merge-request number."),
-		mcp.WithString(mcpKeyTaskID, mcp.Required(), mcp.Description("Target task identifier")),
-		mcp.WithString("provider", mcp.Required(), mcp.Description("Provider identity: github or gitlab")),
-		mcp.WithString("repository_id", mcp.Required(), mcp.Description("Canonical task repository identity")),
-		mcp.WithNumber("number", mcp.Required(), mcp.Description("Pull request or merge request number")),
-	}
-	if replace {
-		options[0] = mcp.WithDescription("Replace an explicit GitHub PR or GitLab MR association. Provide task_id, provider, canonical repository_id, and pull-request or merge-request number. The old and new associations must use the same provider.")
-		options = append(options,
-			mcp.WithString("old_provider", mcp.Required(), mcp.Description("Current association provider identity: github or gitlab")),
-			mcp.WithString("old_repository_id", mcp.Required(), mcp.Description("Current association canonical repository identity")),
-			mcp.WithNumber("old_number", mcp.Required(), mcp.Description("Current pull request or merge request number")),
-		)
-	}
-	return options
+func taskChangeRequestAutomationToolSchema() json.RawMessage {
+	return json.RawMessage(`{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scope": {"type": "string", "enum": ["association", "task"]},
+        "provider": {"type": "string", "enum": ["github", "gitlab"]},
+        "repository_id": {"type": "string", "minLength": 1},
+        "number": {"type": "integer", "minimum": 1},
+        "providers": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "enum": ["github", "gitlab"]}
+        }
+      },
+      "required": ["scope"],
+      "oneOf": [
+        {
+          "properties": {"scope": {"const": "association"}},
+          "required": ["provider", "repository_id", "number"],
+          "not": {"required": ["providers"]}
+        },
+        {
+          "properties": {"scope": {"const": "task"}},
+          "required": ["providers"],
+          "not": {"anyOf": [
+            {"required": ["provider"]},
+            {"required": ["repository_id"]},
+            {"required": ["number"]}
+          ]}
+        }
+      ]
+    },
+    "patch": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": false,
+      "properties": {
+        "auto_fix_enabled": {"type": "boolean"},
+        "auto_merge_enabled": {"type": "boolean"},
+        "prompt_on_review_requested": {"type": "boolean"},
+        "prompt_on_merged": {"type": "boolean"},
+        "prompt_on_closed": {"type": "boolean"},
+        "auto_fix_prompt_override": {"type": "string"}
+      }
+    }
+  },
+  "required": ["target", "patch"],
+  "allOf": [{
+    "if": {
+      "properties": {
+        "target": {
+          "properties": {"scope": {"const": "association"}},
+          "required": ["scope"]
+        }
+      },
+      "required": ["target"]
+    },
+    "then": {
+      "properties": {
+        "patch": {
+          "not": {"required": ["auto_fix_prompt_override"]}
+        }
+      }
+    }
+  }]
+}`)
 }
 
-func (s *Server) registerMRAutomationTools() {
-	s.mcpServer.AddTool(
-		mcp.NewToolWithRawSchema("get_task_mr_automation_kandev",
-			"Get the current task's GitLab MR automation settings, including lifecycle notification switches.",
-			json.RawMessage(`{"type":"object","properties":{}}`),
-		),
-		s.wrapHandler("get_task_mr_automation_kandev", s.getTaskMRAutomationHandler()),
-	)
-	s.mcpServer.AddTool(
-		mcp.NewTool("update_task_mr_automation_kandev",
-			mcp.WithDescription("Update this task's GitLab merge request automation options (auto-fix, auto-merge, "+
-				"and lifecycle notifications). The five switches are per merge request: pass repository_id, "+
-				"project_path and mr_iid together to target one linked MR, or omit all three to apply them to "+
-				"every MR linked to this task. auto_fix_prompt_override applies to every linked MR regardless "+
-				"of MR identity."),
-			mcp.WithString("repository_id", mcp.Description("Repository ID of the linked MR to target (omit to target every linked MR)")),
-			mcp.WithString("project_path", mcp.Description("Project path of the linked MR to target, e.g. group/project")),
-			mcp.WithNumber("mr_iid", mcp.Description("IID of the linked MR to target")),
-			mcp.WithBoolean("auto_fix_enabled", mcp.Description("Enable or disable auto-fix when the linked MR's pipeline fails")),
-			mcp.WithBoolean("auto_merge_enabled", mcp.Description("Enable or disable auto-merge when the linked MR is ready")),
-			mcp.WithString("auto_fix_prompt_override", mcp.Description("Task-level custom prompt for auto-fix; valid without linked MRs and not scoped by MR identity (empty string clears the override)")),
-			mcp.WithBoolean("prompt_on_review_requested", mcp.Description("Prompt this task's agent when a review is requested for the authenticated user")),
-			mcp.WithBoolean("prompt_on_merged", mcp.Description("Prompt this task's agent once when the linked MR becomes merged")),
-			mcp.WithBoolean("prompt_on_closed", mcp.Description("Prompt this task's agent once when the linked MR becomes closed without merge")),
-		),
-		s.wrapHandler("update_task_mr_automation_kandev", s.updateTaskMRAutomationHandler()),
-	)
+func taskChangeRequestToolSchema() json.RawMessage {
+	return json.RawMessage(`{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "operation": {"type": "string", "enum": ["link", "unlink", "replace"]},
+    "task_id": {"type": "string", "minLength": 1},
+    "provider": {"type": "string", "enum": ["github", "gitlab"]},
+    "repository_id": {"type": "string", "minLength": 1},
+    "number": {"type": "integer", "minimum": 1},
+    "old_provider": {"type": "string", "enum": ["github", "gitlab"]},
+    "old_repository_id": {"type": "string", "minLength": 1},
+    "old_number": {"type": "integer", "minimum": 1}
+  },
+  "required": ["operation", "task_id", "provider", "repository_id", "number"],
+  "oneOf": [
+    {
+      "properties": {"operation": {"const": "link"}},
+      "not": {"anyOf": [
+        {"required": ["old_provider"]},
+        {"required": ["old_repository_id"]},
+        {"required": ["old_number"]}
+      ]}
+    },
+    {
+      "properties": {"operation": {"const": "unlink"}},
+      "not": {"anyOf": [
+        {"required": ["old_provider"]},
+        {"required": ["old_repository_id"]},
+        {"required": ["old_number"]}
+      ]}
+    },
+    {
+      "properties": {"operation": {"const": "replace"}},
+      "required": ["old_provider", "old_repository_id", "old_number"]
+    }
+  ]
+}`)
 }
 
 // registerCreateTaskTool registers the create_task_kandev tool. Shared between

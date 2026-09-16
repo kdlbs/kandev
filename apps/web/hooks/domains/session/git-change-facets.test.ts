@@ -3,6 +3,19 @@ import type { FileInfo } from "@/lib/state/slices/session-runtime/types";
 import { splitFilesByChangeLayer } from "./git-change-facets";
 
 describe("splitFilesByChangeLayer", () => {
+  it("uses independent link metadata for mixed layers", () => {
+    const file = {
+      path: "link",
+      status: "modified" as const,
+      staged: false,
+      is_symlink: false,
+      staged_change: { status: "modified" as const, is_symlink: true },
+      unstaged_change: { status: "modified" as const, is_symlink: false },
+    };
+    const result = splitFilesByChangeLayer([file]);
+    expect(result.stagedFiles[0]).toHaveProperty("is_symlink", true);
+    expect(result.unstagedFiles[0]).toHaveProperty("is_symlink", false);
+  });
   it("projects one mixed raw file into staged and unstaged views", () => {
     const mixed = {
       path: "src/mixed.ts",

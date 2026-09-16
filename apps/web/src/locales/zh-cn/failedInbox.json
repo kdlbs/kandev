@@ -1,0 +1,18 @@
+{
+  "tabLabel": "失败",
+  "openTask": "打开任务",
+  "reasonUnknown": "未记录失败原因。",
+  "unknownFailureTime": "失败时间未知",
+  "originAgentCreated": "由代理创建",
+  "originRoutine": "由例行程序创建",
+  "originOnboarding": "在引导过程中创建",
+  "originAutomationRun": "自动化运行",
+  "originAutomationTask": "由自动化创建",
+  "originGeneric": "自动化",
+  "emptyTitle": "{{workspace}} 中没有任何失败事项。",
+  "emptyTitleUnnamedWorkspace": "此工作区中没有任何失败事项。",
+  "emptyDescription": "失败的任务会显示在此处以供排查,永远不会计入侧边栏的总数。",
+  "errorTitle": "无法加载失败的任务",
+  "errorDescription": "加载此工作区中失败的任务时出错,系统将自动重试。",
+  "truncatedNotice": "仅显示最先出现的失败任务,还有更多等待处理。"
+}

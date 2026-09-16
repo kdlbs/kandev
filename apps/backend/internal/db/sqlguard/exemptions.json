@@ -1,5 +1,7 @@
 {
   "exemptions": [
+    {"file": "internal/system/toolretention/scan.go", "symbol": "consumeRow", "rule": "sqlite-date-function", "reason": "Tool payload retention rejects non-SQLite engines before scanning; julianday validates legacy SQLite timestamp strings"},
+    {"file": "internal/task/repository/sqlite/tool_payload_retention_scan.go", "symbol": "payloadTaskEligibilityTemplate", "rule": "sqlite-date-function", "reason": "PayloadTaskEligible requires the sqlite3 driver before validating legacy timestamps with SQLite date functions"},
     {"file": "internal/agent/settings/store/sqlite.go", "symbol": "migrateDropModelCheckConstraint", "rule": "sqlite-catalog", "reason": "SQLite-only migration for a legacy CHECK constraint"},
     {"file": "internal/agent/settings/store/sqlite.go", "symbol": "recreateAgentProfilesWithoutModelCheck", "rule": "sqlite-catalog", "reason": "SQLite-only table-recreation migration"},
     {"file": "internal/automation/store.go", "symbol": "createTablesSQL", "rule": "boolean-integer", "reason": "The provider schema template is rendered by dialect.MustRenderSchema"},
@@ -40,6 +42,9 @@
     {"file": "internal/gitlab/store.go", "symbol": "rebuildIfHasLegacyConstraint", "rule": "raw-placeholder", "reason": "SQLite-only table rebuild migration"},
     {"file": "internal/gitlab/store_mr_automation.go", "symbol": "createMRAutomationTablesSQL", "rule": "boolean-integer", "reason": "The provider schema template is rendered by dialect.MustRenderSchema"},
     {"file": "internal/gitlab/store_mr_automation.go", "symbol": "createMRAutomationTablesSQL", "rule": "datetime-type", "reason": "The provider schema template is rendered by dialect.MustRenderSchema"},
+    {"file": "internal/integrations/alertsource/store.go", "symbol": "alertWatchesColumns", "rule": "boolean-integer", "reason": "The provider schema template is rendered by dialect.RenderSchema"},
+    {"file": "internal/integrations/alertsource/store.go", "symbol": "alertWatchesColumns", "rule": "datetime-type", "reason": "The provider schema template is rendered by dialect.RenderSchema"},
+    {"file": "internal/integrations/alertsource/store.go", "symbol": "alertReservationsColumnsFmt", "rule": "datetime-type", "reason": "The provider schema template is rendered by dialect.RenderSchema"},
     {"file": "internal/integrations/workspacescope/workspacescope.go", "symbol": "tableExists", "rule": "sqlite-catalog", "reason": "Legacy workspace migration currently probes the SQLite catalog"},
     {"file": "internal/integrations/workspacescope/workspacescope.go", "symbol": "tableExists", "rule": "raw-placeholder", "reason": "Legacy workspace migration currently uses a SQLite-only probe"},
     {"file": "internal/integrations/workspacescope/workspacescope.go", "symbol": "workspaceExists", "rule": "raw-placeholder", "reason": "Legacy workspace migration runs against the SQLite database"},

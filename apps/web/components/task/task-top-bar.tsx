@@ -10,6 +10,7 @@ import { useOfficeProject } from "@/hooks/use-office-workspace-data";
 import { TaskTopBarTitle } from "@/components/task/task-top-bar-title";
 import { EditorsMenu } from "@/components/task/editors-menu";
 import { LayoutPresetSelector } from "@/components/task/layout-preset-selector";
+import { TaskRightPanelsToggle } from "@/components/task/task-right-panels-toggle";
 import { DocumentControls } from "@/components/task/document/document-controls";
 import { PRTopbarButton } from "@/components/github/pr-topbar-button";
 import { MRTopbarButton } from "@/components/gitlab/mr-topbar-button";
@@ -346,15 +347,16 @@ function TopbarToolsGroup({
   const showDebugToggle = isDebugUI() && onToggleDebugOverlay;
 
   return (
-    <TopbarCluster label={t("task:taskTools")} className="[&_button]:h-7 [&_button]:text-xs">
+    <TopbarCluster label={t("task:taskTools")}>
+      <TaskRightPanelsToggle sessionId={activeSessionId ?? null} />
       {!isArchived && (
-        <>
+        <div className="inline-flex items-center gap-1 [&_button]:h-7 [&_button]:text-xs">
           <LayoutPresetSelector />
           <EditorsMenu
             activeSessionId={activeSessionId ?? null}
             embeddedVscodeSupported={embeddedVscodeSupported ?? false}
           />
-        </>
+        </div>
       )}
       {showDebugToggle && (
         <DebugOverlayToggle

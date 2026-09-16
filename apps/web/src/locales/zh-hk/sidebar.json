@@ -120,6 +120,6 @@
   "morePluginItems": "更多外掛程式項",
   "newViewNumbered": "新視圖 {{suffix}}",
   "untitledView": "未命名視圖",
-  "workspaceContextRefreshFailed": "無法重新整理任務。",
+  "workspaceContextRefreshFailed": "無法刷新任務。",
   "workspaceContextAccessDenied": "您已無法存取此工作區。"
 }

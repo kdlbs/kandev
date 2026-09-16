@@ -52,6 +52,7 @@ export async function loadSavedFileTabs(sessionId: string, savedTabs: StoredFile
         originalHash: hash,
         isDirty: false,
         isBinary: response.is_binary,
+        resolvedPath: response.resolved_path,
         repo: savedTab.repo,
         renderedPreview:
           getFilePreviewKind(savedTab.path, response.is_binary) === "markdown"

@@ -330,12 +330,18 @@ func applySummaryBaseline(state *projectionState, summary *TaskStatusSummary) {
 			isPrimary: true,
 		}
 	}
+	if summary.TaskError != nil {
+		copy := *summary.TaskError
+		copy.RecoveryActions = normalizeRecoveryActionsForCategory(copy.Category, copy.RecoveryActions)
+		state.taskError = &copy
+	}
 	if summary.ActiveError != nil {
 		copy := *summary.ActiveError
 		copy.RecoveryActions = normalizeRecoveryActionsForCategory(copy.Category, copy.RecoveryActions)
-		if copy.SessionID != "" {
+		scope := activeErrorScope(&copy)
+		if scope == models.ErrorScopeSession && copy.SessionID != "" {
 			state.errors[copy.SessionID] = &copy
-		} else {
+		} else if scope == models.ErrorScopeTask && summary.TaskError == nil {
 			state.taskError = &copy
 		}
 	}
