@@ -274,6 +274,14 @@ func TestIssueCoordinatorAuthorityGrantRejectsMismatchedWorkspaceScope(t *testin
 	if !errors.Is(err, repoerrors.ErrCoordinatorGrantConflict) {
 		t.Fatalf("IssueCoordinatorAuthorityGrant mismatch = %v, want conflict", err)
 	}
+	designatedTaskID, err := repo.GetWorkspaceCoordinatorTaskID(ctx, "ws-1")
+	if err != nil || designatedTaskID != "" {
+		t.Fatalf("workspace designation = %q, %v; want none", designatedTaskID, err)
+	}
+	grants, err := repo.ListActiveWorkspaceAgentPrincipalGrants(ctx, "principal", "ws-1")
+	if err != nil || len(grants) != 0 {
+		t.Fatalf("active grants = %#v, %v; want none", grants, err)
+	}
 }
 
 func TestRevokeCoordinatorGrantRemovesDesignationWithFinalPrincipalBoundGrant(t *testing.T) {
