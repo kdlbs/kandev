@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/kandev/kandev/internal/office/models"
+	"github.com/kandev/kandev/internal/office/shared"
 )
 
 // CommentWriter is the comment mutation dependency used by runtime actions.
@@ -598,6 +599,15 @@ func (a *Actions) SpawnAgentRun(
 	}
 	if a.deps.Runs == nil || a.deps.AgentModifier == nil {
 		return fmt.Errorf("%w: runs", ErrRuntimeDependencyMissing)
+	}
+	// AC-OFFICE-LAUNCH-SAFETY-004.3: an agent-requested enqueue must name a
+	// registry member, not free text of its own choosing (the empty string
+	// included). This runs before the authoritative enqueue and before any
+	// dependency lookup, so it is not one of the ordered refusal gates,
+	// records no idempotency key, and consumes neither self-trigger
+	// allowance.
+	if _, ok := shared.WakeReasonRegistry[input.Reason]; !ok {
+		return fmt.Errorf("%w: %q", ErrInvalidWakeReason, input.Reason)
 	}
 	target, err := a.deps.AgentModifier.GetAgentInstance(ctx, input.AgentID)
 	if err != nil {

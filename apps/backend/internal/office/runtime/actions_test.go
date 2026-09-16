@@ -1074,7 +1074,7 @@ func TestActionsSpawnAgentRunSelfTargetThreadsMatchingActor(t *testing.T) {
 
 	err := actions.SpawnAgentRun(context.Background(), runCtx, SpawnAgentRunInput{
 		AgentID: "agent-1",
-		Reason:  "self_check",
+		Reason:  shared.RunReasonHeartbeat,
 	})
 	if err != nil {
 		t.Fatalf("spawn agent run: %v", err)
@@ -1086,6 +1086,105 @@ func TestActionsSpawnAgentRunSelfTargetThreadsMatchingActor(t *testing.T) {
 	if call.AgentID != call.ActorID {
 		t.Errorf("agent_id = %q, actorID = %q, want equal for a self-targeted spawn",
 			call.AgentID, call.ActorID)
+	}
+}
+
+// TestActionsSpawnAgentRunRejectsReasonOutsideRegistry pins
+// AC-OFFICE-LAUNCH-SAFETY-004.3: an agent-requested enqueue must name a
+// reason that is a member of the declared wake-reason registry, not free
+// text of its own choosing. Rejecting it here, before QueueRunWithActor is
+// ever called, is what closes the self-trigger allowance bypass: a free
+// reason lets an agent spread its wakes across arbitrarily many distinct
+// per-reason buckets.
+func TestActionsSpawnAgentRunRejectsReasonOutsideRegistry(t *testing.T) {
+	agents := &recordingAgentModifier{
+		agents: map[string]*models.AgentInstance{
+			"agent-1": {ID: "agent-1", WorkspaceID: "ws-1"},
+		},
+	}
+	runs := &recordingRunSpawner{}
+	actions := NewActions(ActionDependencies{Runs: runs, AgentModifier: agents})
+	runCtx := RunContext{
+		AgentID:     "agent-1",
+		WorkspaceID: "ws-1",
+		Capabilities: Capabilities{
+			CanSpawnAgentRun: true,
+		},
+	}
+
+	err := actions.SpawnAgentRun(context.Background(), runCtx, SpawnAgentRunInput{
+		AgentID: "agent-1",
+		Reason:  "whatever-reason-the-agent-invents",
+	})
+	if !errors.Is(err, ErrInvalidWakeReason) {
+		t.Fatalf("err = %v, want ErrInvalidWakeReason", err)
+	}
+	if len(runs.calls) != 0 {
+		t.Fatal("run spawner should not be called for a reason outside the registry")
+	}
+}
+
+// TestActionsSpawnAgentRunRejectsEmptyReason pins AC-OFFICE-LAUNCH-SAFETY-004.3's
+// explicit "the empty string included" clause.
+func TestActionsSpawnAgentRunRejectsEmptyReason(t *testing.T) {
+	agents := &recordingAgentModifier{
+		agents: map[string]*models.AgentInstance{
+			"agent-1": {ID: "agent-1", WorkspaceID: "ws-1"},
+		},
+	}
+	runs := &recordingRunSpawner{}
+	actions := NewActions(ActionDependencies{Runs: runs, AgentModifier: agents})
+	runCtx := RunContext{
+		AgentID:     "agent-1",
+		WorkspaceID: "ws-1",
+		Capabilities: Capabilities{
+			CanSpawnAgentRun: true,
+		},
+	}
+
+	err := actions.SpawnAgentRun(context.Background(), runCtx, SpawnAgentRunInput{
+		AgentID: "agent-1",
+		Reason:  "",
+	})
+	if !errors.Is(err, ErrInvalidWakeReason) {
+		t.Fatalf("err = %v, want ErrInvalidWakeReason", err)
+	}
+	if len(runs.calls) != 0 {
+		t.Fatal("run spawner should not be called for an empty reason")
+	}
+}
+
+// TestActionsSpawnAgentRunAcceptsEveryRegistryReason pins the positive
+// side of AC-OFFICE-LAUNCH-SAFETY-004.3: every reason actually declared in
+// shared.WakeReasonRegistry must still be accepted, so the new guard
+// narrows to exactly the registry rather than an accidental subset of it.
+func TestActionsSpawnAgentRunAcceptsEveryRegistryReason(t *testing.T) {
+	for reason := range shared.WakeReasonRegistry {
+		reason := reason
+		t.Run(reason, func(t *testing.T) {
+			agents := &recordingAgentModifier{
+				agents: map[string]*models.AgentInstance{
+					"agent-2": {ID: "agent-2", WorkspaceID: "ws-1"},
+				},
+			}
+			runs := &recordingRunSpawner{}
+			actions := NewActions(ActionDependencies{Runs: runs, AgentModifier: agents})
+			runCtx := RunContext{
+				AgentID:     "agent-1",
+				WorkspaceID: "ws-1",
+				Capabilities: Capabilities{
+					CanSpawnAgentRun: true,
+				},
+			}
+
+			err := actions.SpawnAgentRun(context.Background(), runCtx, SpawnAgentRunInput{
+				AgentID: "agent-2",
+				Reason:  reason,
+			})
+			if err != nil {
+				t.Fatalf("spawn agent run with registry reason %q: %v", reason, err)
+			}
+		})
 	}
 }
 

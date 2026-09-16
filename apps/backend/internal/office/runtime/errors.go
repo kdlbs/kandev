@@ -20,4 +20,9 @@ var (
 	// either) in a workspace that has at least one project to choose from.
 	// Caller-correctable: the caller should retry with an explicit project_id.
 	ErrProjectRequired = fmt.Errorf("project_id is required")
+	// ErrInvalidWakeReason is returned when SpawnAgentRunInput.Reason is
+	// not a member of shared.WakeReasonRegistry, the empty string
+	// included (AC-OFFICE-LAUNCH-SAFETY-004.3). Caller-correctable: the
+	// caller should retry with a registry member.
+	ErrInvalidWakeReason = fmt.Errorf("reason must be a member of the declared wake-reason registry")
 )
