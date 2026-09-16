@@ -139,9 +139,30 @@ Task 05.
   `pngquant` per the PR skill's recipe (239 KB to 75 KB), and corrected the alt
   text, which claimed an existing Sprites profile the capture does not show.
 
-## Known gaps
+### Container-backed launch scenario
 
-- No Playwright spec in the `containers` project. The Go integration test
-  covers the transport against a real daemon, which is the part that could not
-  be proven with stubs; a browser-level scenario driving the settings form and
-  a full task launch is still missing.
+- Added `e2e/tests/remote-docker/remote-docker-task.spec.ts` in the
+  `containers` project: launch a task into a container on a daemon reached
+  over SSH, resume into that same container, and delete the task and confirm
+  the container is gone.
+- The SSH host shares the machine's Docker socket and network namespace.
+  Without `--network host` the executor's port forward reaches this
+  container's loopback while the task container publishes on the machine's,
+  so the forward finds nothing. `--network host` is scoped to this fixture;
+  the ordinary SSH specs keep their isolated namespace and NET_ADMIN fault
+  injection.
+- Running it found three defects that stubs could not:
+  - The remote provider dropped the E2E mock agent instead of delivering it,
+    producing a container that started and then reported only "the agent
+    could not start". It is now uploaded like `agentctl`; production resolves
+    none, so nothing is uploaded there.
+  - The reconnect path called `resolveDockerEndpoint` directly, bypassing the
+    endpoint resolver, so a resume was handed the remote host's loopback.
+    Reconnect endpoint lookups now route through the resolver.
+  - The remote reconnect returned an instance with no agentctl client. It now
+    delegates to the Docker executor's reconnect, which re-establishes the
+    control client and re-runs the bootstrap handshake.
+- Two fixture facts worth recording: the per-test container sweep matches
+  `kandev.e2e.run`, so the SSH host must not carry that label or it is reaped
+  between tests; and the fingerprint must come from the backend's own dial,
+  not `ssh-keyscan`, matching the SSH fixture.

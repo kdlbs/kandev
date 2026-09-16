@@ -202,11 +202,9 @@ func (r *RemoteDockerExecutor) dialRemote(ctx context.Context, req *ExecutorCrea
 	session.hostFileStore = newSSHHostFileStore(sshClient, NewAgentctlResolver(r.logger), r.logger)
 
 	mgr := NewContainerManager(dockerClient, "", "", r.logger)
-	mgr.containerHostFiles = newRemoteContainerHostFiles(
-		session.hostFileStore,
-		info.Platform,
-		mgr.commandBuilder,
-	)
+	remoteFiles := newRemoteContainerHostFiles(session.hostFileStore, info.Platform, mgr.commandBuilder)
+	remoteFiles.resolveMockAgentBinary = mgr.resolveMockAgentBinary
+	mgr.containerHostFiles = remoteFiles
 	mgr.endpointResolver = session.endpoints
 	session.containerMgr = mgr
 
@@ -260,9 +258,6 @@ func (r *RemoteDockerExecutor) CreateInstance(ctx context.Context, req *Executor
 	return instance, nil
 }
 
-// remoteDockerTaskLabel is the owning task stamped on every managed container.
-const remoteDockerTaskLabel = "kandev.task_id"
-
 // launchFresh provisions a new container for the request.
 func (r *RemoteDockerExecutor) launchFresh(
 	ctx context.Context, session *remoteDockerSession, req *ExecutorCreateRequest,
@@ -279,39 +274,30 @@ func (r *RemoteDockerExecutor) launchFresh(
 // reconnectToContainer adopts the container the request names, when it is
 // still running on the remote daemon.
 //
-// The container is verified before adoption: a recycled ID on a shared daemon
-// would otherwise hand the session somebody else's container.
+// This delegates to the Docker executor's reconnect rather than reimplementing
+// it: that path re-establishes the agentctl control client, re-runs the
+// bootstrap handshake when the token is stale, and finds the existing agent
+// instance. A simplified version returned an instance with no client, which
+// launched fine and then failed on the first prompt.
+//
+// The delegate carries the session's forwarding endpoint resolver, so the
+// endpoints it reports are backend loopback rather than the remote host's.
 func (r *RemoteDockerExecutor) reconnectToContainer(
 	ctx context.Context, session *remoteDockerSession, req *ExecutorCreateRequest,
 ) (*ExecutorInstance, bool) {
-	containerID := getMetadataString(req.Metadata, MetadataKeyContainerID)
-	if containerID == "" {
+	if getMetadataString(req.Metadata, MetadataKeyContainerID) == "" && req.PreviousExecutionID == "" {
 		return nil, false
 	}
 
-	info, err := session.dockerClient.GetContainerInfo(ctx, containerID)
-	if err != nil || info == nil || info.State != containerStateRunning {
-		r.logger.Info("remote docker: preserved container is not adoptable, launching fresh",
-			zap.String("container_id", containerID), zap.Error(err))
+	delegate := &DockerExecutor{logger: r.logger, endpoints: session.endpoints}
+	instance, err := delegate.reconnectToContainer(ctx, session.dockerClient, req)
+	if err != nil {
+		r.logger.Info("remote docker: could not reconnect, launching fresh",
+			zap.String("instance_id", req.InstanceID), zap.Error(err))
 		return nil, false
 	}
-	if owner := info.Labels[remoteDockerTaskLabel]; owner != "" && owner != req.TaskID {
-		r.logger.Warn("remote docker: refusing a container owned by another task",
-			zap.String("container_id", containerID), zap.String("owner_task_id", owner))
-		return nil, false
-	}
-
-	containerIP, _ := session.dockerClient.GetContainerIP(ctx, containerID)
-	return &ExecutorInstance{
-		InstanceID:    req.InstanceID,
-		TaskID:        req.TaskID,
-		SessionID:     req.SessionID,
-		RuntimeName:   r.Name(),
-		ContainerID:   containerID,
-		ContainerIP:   containerIP,
-		WorkspacePath: dockerWorkspacePath,
-		Metadata:      map[string]interface{}{MetadataKeyIsRemote: true},
-	}, true
+	instance.RuntimeName = r.Name()
+	return instance, true
 }
 
 // startTransportWatchdog surfaces a dropped SSH connection as a failure

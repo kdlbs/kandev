@@ -131,6 +131,7 @@ type fakeRemoteStore struct {
 	sessionErr    error
 	gotPlatform   SSHRemotePlatform
 	gotInstanceID string
+	uploadedFiles []string
 }
 
 func (f *fakeRemoteStore) EnsureAgentctl(platform SSHRemotePlatform) (string, error) {
@@ -141,6 +142,11 @@ func (f *fakeRemoteStore) EnsureAgentctl(platform SSHRemotePlatform) (string, er
 func (f *fakeRemoteStore) EnsureSessionDir(instanceID string) (string, error) {
 	f.gotInstanceID = instanceID
 	return f.sessionDir, f.sessionErr
+}
+
+func (f *fakeRemoteStore) EnsureFile(name, _ string) (string, error) {
+	f.uploadedFiles = append(f.uploadedFiles, name)
+	return "/home/dev/.kandev/bin/" + name, nil
 }
 
 // TestRemoteHostFilesResolveOnTheRemote is the contract that makes a remote
@@ -202,16 +208,44 @@ func TestRemoteHostFilesSelectsProbedPlatform(t *testing.T) {
 	}
 }
 
-// TestRemoteHostFilesNeverMountsAMockAgent keeps the E2E-only host binary out
-// of a remote container, where the backend path does not exist.
-func TestRemoteHostFilesNeverMountsAMockAgent(t *testing.T) {
-	provider := newRemoteContainerHostFiles(&fakeRemoteStore{}, SSHRemotePlatform{GOOS: "linux", GOARCH: "amd64"}, NewCommandBuilder())
+// TestRemoteHostFilesMockAgentIsAbsentInProduction keeps the E2E-only binary
+// out of a production remote container: the production resolver returns "",
+// so nothing is uploaded.
+func TestRemoteHostFilesMockAgentIsAbsentInProduction(t *testing.T) {
+	store := &fakeRemoteStore{}
+	provider := newRemoteContainerHostFiles(store, SSHRemotePlatform{GOOS: "linux", GOARCH: "amd64"}, NewCommandBuilder())
+	provider.resolveMockAgentBinary = func() (string, error) { return "", nil }
+
 	path, err := provider.MockAgentBinary()
 	if err != nil {
 		t.Fatalf("MockAgentBinary: %v", err)
 	}
 	if path != "" {
-		t.Fatalf("MockAgentBinary = %q, want empty for a remote daemon", path)
+		t.Fatalf("MockAgentBinary = %q, want empty when the backend resolves none", path)
+	}
+	if len(store.uploadedFiles) != 0 {
+		t.Fatalf("uploaded %v with no mock agent to deliver", store.uploadedFiles)
+	}
+}
+
+// TestRemoteHostFilesUploadsTheMockAgent covers the E2E path: the binary lives
+// in the backend's build tree, so it is delivered to the remote rather than
+// dropped. Dropping it yields a container that starts and then fails with "the
+// agent could not start", which names nothing useful.
+func TestRemoteHostFilesUploadsTheMockAgent(t *testing.T) {
+	store := &fakeRemoteStore{}
+	provider := newRemoteContainerHostFiles(store, SSHRemotePlatform{GOOS: "linux", GOARCH: "amd64"}, NewCommandBuilder())
+	provider.resolveMockAgentBinary = func() (string, error) { return "/backend/build/mock-agent", nil }
+
+	got, err := provider.MockAgentBinary()
+	if err != nil {
+		t.Fatalf("MockAgentBinary: %v", err)
+	}
+	if got == "/backend/build/mock-agent" {
+		t.Fatal("returned the backend-host path; the remote daemon cannot mount it")
+	}
+	if len(store.uploadedFiles) != 1 || store.uploadedFiles[0] != "mock-agent" {
+		t.Fatalf("uploaded %v, want exactly [mock-agent]", store.uploadedFiles)
 	}
 }
 

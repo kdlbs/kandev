@@ -98,6 +98,10 @@ type remoteHostFileStore interface {
 	// EnsureSessionDir creates the per-instance session directory on the
 	// remote host and returns its remote path.
 	EnsureSessionDir(instanceID string) (string, error)
+
+	// EnsureFile uploads a local file to the remote host under name and
+	// returns its remote path.
+	EnsureFile(name, localPath string) (string, error)
 }
 
 // remoteContainerHostFiles resolves every mount source on the remote host.
@@ -105,6 +109,9 @@ type remoteContainerHostFiles struct {
 	store          remoteHostFileStore
 	platform       SSHRemotePlatform
 	commandBuilder *CommandBuilder
+	// resolveMockAgentBinary is the backend-side E2E mock-agent lookup. It
+	// returns "" in production, so the upload below never runs there.
+	resolveMockAgentBinary func() (string, error)
 }
 
 func newRemoteContainerHostFiles(
@@ -128,11 +135,30 @@ func (r *remoteContainerHostFiles) AgentctlBinary() (string, error) {
 	return path, nil
 }
 
-// MockAgentBinary is always empty for a remote daemon: the mock agent is an
-// E2E affordance resolved from the backend's own build tree, and that path
-// does not exist on the remote host.
+// MockAgentBinary uploads the E2E mock agent when the backend resolves one.
+//
+// The binary lives in the backend's own build tree, so the remote daemon
+// cannot mount that path. It is delivered the same way agentctl is, rather
+// than dropped: dropping it produces a container that starts and then fails
+// with "the agent could not start", which names nothing useful.
+//
+// The production resolver returns "", so nothing is uploaded there.
 func (r *remoteContainerHostFiles) MockAgentBinary() (string, error) {
-	return "", nil
+	if r.resolveMockAgentBinary == nil {
+		return "", nil
+	}
+	localPath, err := r.resolveMockAgentBinary()
+	if err != nil {
+		return "", fmt.Errorf("mock-agent binary lookup: %w", err)
+	}
+	if localPath == "" {
+		return "", nil
+	}
+	remotePath, err := r.store.EnsureFile("mock-agent", localPath)
+	if err != nil {
+		return "", fmt.Errorf("remote docker: deliver mock-agent: %w", err)
+	}
+	return remotePath, nil
 }
 
 func (r *remoteContainerHostFiles) SessionDir(ag agents.Agent, instanceID string) (string, string, error) {

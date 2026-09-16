@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"os"
 	"path"
 	"sync"
 	"time"
@@ -26,6 +27,7 @@ type sshHostFileStore struct {
 	mu           sync.Mutex
 	agentctlPath string
 	sessionDirs  map[string]string
+	files        map[string]string
 }
 
 func newSSHHostFileStore(client *ssh.Client, resolver *AgentctlResolver, log *logger.Logger) *sshHostFileStore {
@@ -34,6 +36,7 @@ func newSSHHostFileStore(client *ssh.Client, resolver *AgentctlResolver, log *lo
 		resolver:    resolver,
 		logger:      log,
 		sessionDirs: map[string]string{},
+		files:       map[string]string{},
 	}
 }
 
@@ -94,6 +97,48 @@ func (s *sshHostFileStore) EnsureSessionDir(instanceID string) (string, error) {
 	s.sessionDirs[instanceID] = dir
 	s.mu.Unlock()
 	return dir, nil
+}
+
+// EnsureFile uploads a local file into the remote Kandev bin directory,
+// alongside the cached agentctl helper, and returns its remote path.
+func (s *sshHostFileStore) EnsureFile(name, localPath string) (string, error) {
+	if name == "" || localPath == "" {
+		return "", fmt.Errorf("remote docker: file name and source are required")
+	}
+
+	s.mu.Lock()
+	cached := s.files[name]
+	s.mu.Unlock()
+	if cached != "" {
+		return cached, nil
+	}
+
+	data, err := os.ReadFile(localPath) //nolint:gosec // operator-supplied build artifact
+	if err != nil {
+		return "", fmt.Errorf("remote docker: read %s: %w", localPath, err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), remoteHostFileTimeout)
+	defer cancel()
+
+	root, err := expandRemoteHome(ctx, s.client, remoteKandevHomeDir)
+	if err != nil {
+		return "", fmt.Errorf("remote docker: resolve remote home: %w", err)
+	}
+	dir := path.Join(root, "bin")
+	if _, stderr, err := runSSHCommand(ctx, s.client, "mkdir -p "+shellQuote(dir)); err != nil {
+		return "", fmt.Errorf("remote docker: create %s: %w (%s)", dir, err, stderr)
+	}
+
+	remotePath := path.Join(dir, name)
+	if err := sftpUploadBytes(s.client, remotePath, data, 0o755); err != nil {
+		return "", fmt.Errorf("remote docker: upload %s: %w", name, err)
+	}
+
+	s.mu.Lock()
+	s.files[name] = remotePath
+	s.mu.Unlock()
+	return remotePath, nil
 }
 
 // remoteKandevHomeDir is the Kandev root on the remote host, matching the SSH
