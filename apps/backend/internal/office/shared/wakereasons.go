@@ -39,6 +39,7 @@ var WakeReasonRegistry = map[string]models.PriorityClass{
 	RunReasonRoutineDispatchEvent:     models.PriorityClassEvent,
 	RunReasonRoutineDispatch:          models.PriorityClassEvent,
 	RunReasonManualResumeAfterFailure: models.PriorityClassEvent,
+	RunReasonQueueRun:                 models.PriorityClassEvent,
 
 	// Reactivity-pipeline reasons (office/scheduler/run.go's
 	// RunReasonTaskUnblocked family). All are triggered by a task-state

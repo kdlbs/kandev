@@ -40,11 +40,16 @@ var ErrParticipantSeatUnfillable = errors.New("ensure_participant_seat: role unf
 
 // Target prefixes / sentinels recognised by QueueRunCallback.
 const (
-	TargetPrimary       = "primary"
-	TargetParticipant   = "participant_role:"
-	TargetAgentProfile  = "agent_profile_id:"
-	TargetWorkspaceCEO  = "workspace.ceo_agent"
-	TaskIDThis          = "this"
+	TargetPrimary      = "primary"
+	TargetParticipant  = "participant_role:"
+	TargetAgentProfile = "agent_profile_id:"
+	TargetWorkspaceCEO = "workspace.ceo_agent"
+	TaskIDThis         = "this"
+
+	// defaultQueueReasonR must stay equal to
+	// internal/office/shared.RunReasonQueueRun, which cannot be imported
+	// here (internal/office/shared imports this package). See that
+	// constant's doc comment and TestDefaultQueueReasonResolvesInWakeReasonRegistry.
 	defaultQueueReasonR = "queue_run"
 )
 

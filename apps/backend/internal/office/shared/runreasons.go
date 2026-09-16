@@ -61,6 +61,17 @@ const (
 	RunReasonAgentError               = "agent_error"
 	RunReasonManualResumeAfterFailure = "manual_resume_after_failure"
 
+	// RunReasonQueueRun is internal/workflow/engine's defaultQueueReasonR:
+	// the workflow engine's queue_run action falls back to this value when
+	// the action configures no reason and the triggering event carries no
+	// trigger name. Declared here rather than aliased from that package
+	// because internal/office/shared imports internal/workflow/engine
+	// (QueueRunCallback's RunQueueAdapter dependency), so the reverse
+	// import needed to alias it would cycle;
+	// TestDefaultQueueReasonResolvesInWakeReasonRegistry in
+	// internal/workflow/engine keeps the two literals in sync instead.
+	RunReasonQueueRun = "queue_run"
+
 	// Reactivity-pipeline reasons (office/scheduler's reactivity.go).
 	RunReasonTaskUnblocked         = "task_unblocked"
 	RunReasonTaskReopened          = "task_reopened"
