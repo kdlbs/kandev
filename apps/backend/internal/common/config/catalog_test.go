@@ -133,6 +133,7 @@ func auditedStartupEnvironmentInventory() []auditedStartupEnvironment {
 		{envVar: "KANDEV_WEB_PORT", class: "catalog"},
 		{envVar: "KANDEV_HEALTH_TIMEOUT_MS", class: "catalog"},
 		{envVar: "KANDEV_NO_BROWSER", class: "catalog"},
+		{envVar: "KANDEV_EXECUTORS_SSHREACHABILITYINTERVALSECONDS", class: "catalog"},
 		{envVar: InternalConfigFileEnv, class: "exclusion"},
 		{envVar: InternalConfigHomeFileEnv, class: "exclusion"},
 		{envVar: InternalAgentctlStartupConfigEnv, class: "exclusion"},

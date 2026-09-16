@@ -1,7 +1,7 @@
 ---
 id: "03-reachability-poller"
 title: "Reachability poller, hysteresis, and configuration"
-status: pending
+status: done
 wave: 2
 depends_on: ["01-probe-and-classification", "02-reachability-persistence"]
 plan: "plan.md"
@@ -217,4 +217,114 @@ anything sweeps hosts on a timer.
 
 ## Results
 
-Pending.
+Implemented `internal/executors/reachability` (`interval.go`, `store.go`,
+`metrics.go`, `probe.go`, `poller.go`, plus `goleak_test.go`,
+`interval_test.go`, `store_test.go`, `poller_test.go`), the
+`executors.sshReachabilityIntervalSeconds` catalog key, and the
+`internal/backendapp` wiring, all under strict TDD (RED confirmed before each
+GREEN).
+
+**`interval.go`**: compile-time constants `probeTimeout` (10s),
+`passConcurrency` (4), `failureThreshold` (2), `DefaultIntervalSeconds` (60),
+`MinIntervalSeconds`/`MaxIntervalSeconds` (15/3600), and `ClampInterval`, which
+owns the negative/0/below-min/above-max normalization independent of the
+catalog layer. `TestClampInterval` covers all nine cases.
+
+**`store.go`**: the narrow `Repository` interface (the four reachability
+methods this package needs, not the full `ExecutorRepository`), and `store`,
+whose `Observe` brackets Task 02's `UpsertExecutorReachability` with
+before/after `GetExecutorReachability` reads to detect a refused write
+(`checked_at` didn't move) and a state transition, without changing Task 02's
+already-committed write signature. `buildObservation` derives
+`InitialState`/`InitialFailures` for the insert-only (never-before-seen row)
+path, mirroring the same "sticky reason always unreachable, transient failure
+never promotes below threshold" rule the SQL enforces for an existing row.
+`TestStoreObserveHysteresisSequence` drives a real SQLite-backed
+success/fail/fail/success sequence and asserts the exact probe index each
+direction flips on (a naive flip-on-first-result implementation fails it);
+`TestStoreObserveStickyFailureIsUnreachableOnFirstProbe` covers `config` and
+`host_key` landing `unreachable` on the very first probe, counter still below
+threshold.
+
+**`probe.go`**: `defaultProbe` resolves an executor's SSH target via
+`lifecycle.SSHTargetFromExecutorConfig` and probes it with
+`lifecycle.ProbeSSHHost(ctx, target, probeTimeout)`; a resolution failure is
+reported as `SSHReachabilityReasonConfig` without dialing.
+
+**`poller.go`**: `Poller` with idempotent `Start`/`Stop`, a package-owned
+`WaitGroup`/context so `Stop` cancels and awaits every in-flight unit of work
+— the scheduled loop, the pass it dispatched, and any off-cycle `ProbeNow`
+call — gated through a race-safe `acquire()` that registers new work on the
+`WaitGroup` under the same mutex `Stop` locks, so a new registration can never
+race a concurrent `wg.Wait()`. An interval of `0` starts the poller (so
+`ProbeNow` still works) but never spawns the scheduled loop at all. Each tick
+is dispatched via `dispatchPass`, a single-flight gate (`passRunning` +
+mutex) that drops and counts (`pass_skipped_total`) an overlapping tick
+rather than queuing it — this required dispatching each pass on its own
+goroutine/WaitGroup unit rather than blocking the ticker-consuming loop
+directly, so a tick firing mid-pass is actually observable rather than being
+serialized away by the loop's own single-threadedness. `runPass` lists
+eligible executors (already ascending by `executors.id` per Task 02's query),
+fans out over a `passConcurrency`-slot semaphore, and abandons dispatching
+(without abandoning in-flight probes) on cancellation. `probeAndPersist`
+discards a `Cancelled` outcome (`probe_discarded_total`) instead of writing
+it, satisfying "`Stop` leaves no failure record behind."
+
+**`metrics.go`**: `expvar` counters/maps for all six named metrics
+(`probe_total`, `state_transitions_total`, `pass_skipped_total`,
+`write_refused_total`, `reset_total`, `probe_discarded_total`,
+`probe_duration_ms`), each paired with a structured zap log where the design
+calls for one. `RecordReset` is exported (unused within this package, since
+Task 04's save observer is the only caller of `ResetExecutorReachability`) so
+the counter lives with the rest of this package's metrics rather than being
+declared dead code.
+
+**`poller_test.go`**: `testing/synctest`-based coverage (a fake `probeFunc`
+and an in-memory fake `Repository`, no real SSH/network/DB) for: an immediate
+pass on `Start`; `Start` idempotency; `Stop` before `Start` as a no-op; an
+interval of `0` running no scheduled pass while `ProbeNow` still works;
+`ProbeNow` refused after `Stop`; the `passConcurrency` bound (verified exactly
+met, not just not-exceeded, with more executors than slots); an overlapping
+tick being skipped and counted rather than queued; `Stop` discarding a
+cancelled in-flight probe's result entirely; and a listing failure abandoning
+the pass without writing. Stable across `-race -count=20`.
+
+**Config catalog** (`catalog.go`, `source.go`, `config.go`,
+`catalog_test.go`): added `executors.sshReachabilityIntervalSeconds` /
+`KANDEV_EXECUTORS_SSHREACHABILITYINTERVALSECONDS` (default `60`) and the
+`ExecutorsConfig` section. Confirmed the environment/YAML split the risk
+called out: `applyNonNegativeIntEnv` (the existing generic helper, no new
+bespoke function needed) already gives the right ENV-path behavior — absent,
+empty, unparsable, or negative falls back to 60; `0` and any other
+non-negative integer pass through **unclamped** — because the 15-3600
+bound-clamping is deliberately `ClampInterval`'s job alone, applied once in
+`Poller.New`. A YAML value decodes straight into the typed int field
+(verified a YAML `-5` reaches the config struct unclamped, confirming
+`ClampInterval` is the only place that normalizes it) and a non-integer YAML
+value refuses boot via the ordinary typed-key decode path, with no extra code
+required. Added the matching `auditedStartupEnvironmentInventory()` entry in
+the same change as the catalog entry, per the plan's flagged risk.
+
+**`internal/backendapp` wiring**: extracted `startSSHReachabilityPoller`
+(`ssh_reachability_wiring.go`) rather than inlining construction in
+`startAgentInfrastructure`, mirroring the existing `startTaskUsageWriter`
+pattern — an AST-based test (`ssh_reachability_wiring_test.go`) asserts the
+composition root calls it exactly once, and a direct test proves it starts
+the poller, registers exactly one `Stop` cleanup, and that the poller
+actually runs its immediate pass (a fake repository signals on a channel from
+inside `ListSSHExecutorsForReachability`). Wired alongside the Jira/Linear/
+Sentry/WorkflowSync/Office-config-sync poller block using `repos.Task` (which
+structurally satisfies the package's narrow `Repository` interface with no
+adapter) and `cfg.Executors.SSHReachabilityIntervalSeconds`.
+
+Verification, all green:
+
+```bash
+go test -tags fts5 -race ./internal/executors/reachability/...
+go test -tags fts5 -race ./internal/common/config/ -run 'Catalog|SSHReachability'
+go test -tags fts5 -race ./internal/backendapp/ -run 'Wiring|Cleanup|Poller'
+make lint
+```
+
+Also ran `go build ./...` and `go vet ./...` across the whole repo (clean)
+after the config/backendapp changes.

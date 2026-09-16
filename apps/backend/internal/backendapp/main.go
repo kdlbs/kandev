@@ -870,6 +870,11 @@ func startAgentInfrastructure(
 		log.Info("Office config sync poller started")
 	}
 
+	// Start SSH executor reachability poller: sweeps every eligible SSH
+	// executor on a configurable interval, probing reachability and
+	// persisting results through a hysteresis-owning write path.
+	startSSHReachabilityPoller(ctx, repos.Task, cfg.Executors.SSHReachabilityIntervalSeconds, log, addRuntimeCleanup)
+
 	// Start the plugin system's event delivery and health monitor
 	// background loops.
 	if services.Plugins != nil {

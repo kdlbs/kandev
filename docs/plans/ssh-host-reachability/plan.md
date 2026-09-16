@@ -453,7 +453,7 @@ flows live in `apps/web/e2e/tests/ssh/reachability.spec.ts` under that project.
 
 - [x] [Task 01: Single-host SSH probe and failure classification](task-01-probe-and-classification.md)
 - [x] [Task 02: Reachability record persistence](task-02-reachability-persistence.md)
-- [ ] [Task 03: Reachability poller, hysteresis, and configuration](task-03-reachability-poller.md)
+- [x] [Task 03: Reachability poller, hysteresis, and configuration](task-03-reachability-poller.md)
 - [ ] [Task 04: Reachability API, change event, and immediate probe](task-04-reachability-api-and-events.md)
 - [ ] [Task 05: Launch-path non-gating and failure attribution](task-05-launch-non-gating.md)
 - [ ] [Task 06: Reachability data layer and settings surface](task-06-settings-surface.md)
