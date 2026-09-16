@@ -244,8 +244,8 @@ Repository sources work on **Worktree**, **Local/Local PC**, **Local Docker**, *
 
 Use a base branch for every repository attachment. Local/Local PC never changes the user-owned repository checkout.
 
-Read the consequence summary in the dialog or drawer before submitting. It describes whether the
-current executor links or clones the source while keeping the established CWD and running processes.
+Choose sources first, then review their locations. Additions within the current workspace show a brief
+continuity note. A prominent restart warning appears only when workspace-root expansion is selected.
 **Cancel** or closing the surface sends no attachment request and leaves the workspace unchanged.
 
 On a single-repository Worktree task, a repository-only batch also shows a placement choice. Choose

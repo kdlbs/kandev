@@ -9,6 +9,7 @@ import type {
 import { cn } from "@/lib/utils";
 
 type Props = {
+  hasRepositories?: boolean;
   placement?: WorkspaceRepositoryPlacement | null;
   onPlacementChange: (placement: WorkspaceRepositoryPlacement) => void;
   preview?: WorkspaceRepositoryPlacementPreview | null;
@@ -22,28 +23,28 @@ const placements: WorkspaceRepositoryPlacement[] = [
 ];
 
 export function WorkspaceSourcePlacement({
+  hasRepositories = true,
   placement,
   onPlacementChange,
   preview,
   previewLoading = false,
 }: Props) {
   const { t } = useTranslation();
-  const options = placements.map((value) => {
-    const serverOption = preview?.supported_placements.find((option) => option.placement === value);
-    if (serverOption)
+  const options = placements
+    .filter((value) => hasRepositories || value !== "expand_root")
+    .map((value) => {
+      const server = preview?.supported_placements.find((option) => option.placement === value);
+      if (server)
+        return {
+          ...server,
+          reason: server.enabled ? undefined : placementDisabledReason(t, value, server.reason),
+        };
       return {
-        ...serverOption,
-        reason: serverOption.enabled
-          ? undefined
-          : placementDisabledReason(t, value, serverOption.reason),
+        placement: value,
+        enabled: value !== "expand_root",
+        reason: placementDisabledReason(t, value),
       };
-    return {
-      placement: value,
-      enabled: value !== "expand_root",
-      reason: placementDisabledReason(t, value),
-    };
-  });
-
+    });
   return (
     <fieldset className="space-y-3 rounded border p-3" data-testid="workspace-source-placement">
       <legend className="text-sm font-medium">{t("task:workspaceSourcePlacementTitle")}</legend>
@@ -57,7 +58,7 @@ export function WorkspaceSourcePlacement({
             onPlacementChange(value as WorkspaceRepositoryPlacement);
           }
         }}
-        className="grid gap-2 md:grid-cols-3"
+        className="grid grid-cols-1 gap-2"
         aria-label={t("task:workspaceSourcePlacementTitle")}
       >
         {options.map((option) => (
@@ -107,7 +108,7 @@ export function WorkspaceSourcePlacement({
           {preview.sources.map((source) => (
             <p
               key={`${source.kind ?? "repository"}:${source.repository_id ?? source.source_name}:${source.workspace_relative_path}`}
-              className="truncate"
+              className="break-words [overflow-wrap:anywhere]"
             >
               {source.source_name ?? source.repository_name}:{" "}
               <code>{source.workspace_relative_path}</code>

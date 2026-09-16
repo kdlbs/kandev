@@ -187,3 +187,9 @@ Implementation checks passed for the changed backend packages, focused frontend 
 - First-repository launch paths can mistakenly switch root based on source count. Cover restart and additional sessions explicitly.
 - Remote RPC success followed by database failure requires executor-side compensation, not only row deletion.
 - Existing upload/source E2E selectors may assume the old overflow entry; update affected callers together.
+
+## Dialog refinement (2026-09-16)
+
+Desktop uses a viewport-constrained 960px dialog and full-width stacked placement rows. Source selection comes first, followed by locations and impact information. Only selected root expansion shows the prominent restart warning; unchanged-CWD additions show a short neutral continuity note. Use Source location for repository or folder placement and omit expansion for folder-only batches. The phone retains its full-height drawer and fixed footer. These refinements apply to the saved UI-02/UI-03/UI-04 previews.
+
+Refinement verification: 27 focused UI tests passed; desktop attachment E2E passed (2 tests); phone attachment E2E passed (1 test). Typecheck, targeted ESLint, i18n completeness and ratchet, production web build, specification/catalog validation, public-doc validation, and diff whitespace checks passed. The first phone attempt exposed a stale test reference to removed warning details; that reference was removed and the rerun passed. Existing broader work-order statuses are unchanged.

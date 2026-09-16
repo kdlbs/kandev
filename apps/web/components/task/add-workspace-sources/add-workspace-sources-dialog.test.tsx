@@ -173,50 +173,25 @@ afterEach(() => {
 
 describe("AddWorkspaceSourcesDialog consequences", () => {
   it.each(SURFACE_CASES)(
-    "explains the workspace and session consequences on %s",
+    "does not warn before selecting expansion on %s",
     async (_, mobile, surfaceTestId) => {
       isMobile = mobile;
       render(<Harness />);
-
       fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
-      const surface = await screen.findByTestId(surfaceTestId);
-      const consequences = screen.getByTestId("workspace-change-consequences");
-
-      expect(surface.contains(consequences)).toBe(true);
-      expect(screen.getByText("This restarts the task workspace")).toBeTruthy();
-      expect(consequences.textContent).toMatch(/task root becomes the agent's working directory/i);
-      expect(consequences.textContent).toMatch(
-        /terminals, dev servers, and other workspace processes stop/i,
-      );
-      expect(consequences.textContent).toMatch(
-        /provider-private context that Kandev did not record may not carry over/i,
-      );
-      expect(screen.getByText(/Cancel leaves the workspace unchanged/i)).toBeTruthy();
+      await screen.findByTestId(surfaceTestId);
+      expect(screen.queryByTestId("workspace-change-consequences")).toBeNull();
+      expect(screen.getByTestId("workspace-source-continuity")).toBeTruthy();
     },
   );
-
-  it("explains that remote executor sources are attached without restarting the agent", async () => {
-    render(<Harness executorType="ssh" />);
-
-    fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
-    const consequences = await screen.findByTestId("workspace-change-consequences");
-
-    expect(consequences.textContent).toContain("This updates the live task workspace");
-    expect(consequences.textContent).toContain(
-      "The agent and running workspace processes continue",
-    );
-    expect(consequences.textContent).not.toContain("This restarts the task workspace");
-  });
-
-  it("treats Kubernetes as a live remote workspace", async () => {
-    render(<Harness executorType="k8s" />);
-
-    fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
-    const consequences = await screen.findByTestId("workspace-change-consequences");
-
-    expect(consequences.textContent).toContain("This updates the live task workspace");
-    expect(consequences.textContent).not.toContain("This restarts the task workspace");
-  });
+  it.each(["ssh", "k8s", "local"])(
+    "does not warn for unchanged %s workspaces",
+    async (executorType) => {
+      render(<Harness executorType={executorType} />);
+      fireEvent.click(screen.getByRole("button", { name: ADD_SOURCES_LABEL }));
+      await screen.findByTestId("workspace-source-continuity");
+      expect(screen.queryByTestId("workspace-change-consequences")).toBeNull();
+    },
+  );
 });
 
 describe("AddWorkspaceSourcesDialog repository discovery", () => {
@@ -439,9 +414,7 @@ describe("AddWorkspaceSourcesDialog saved repository picker", () => {
       fireEvent.click(await screen.findByRole("option", { name: /payments/ }));
 
       expect(screen.getByTestId("workspace-source-placement")).toBeTruthy();
-      expect(screen.getByRole("alert").textContent).toContain(
-        "Choose where to add the repositories.",
-      );
+      expect(screen.getByRole("alert").textContent).toContain("Choose where to add the sources.");
       expect(
         (screen.getByTestId(ADD_WORKSPACE_SOURCES_SUBMIT_TEST_ID) as HTMLButtonElement).disabled,
       ).toBe(true);

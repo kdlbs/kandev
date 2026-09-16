@@ -86,3 +86,7 @@ Keep credentials out of previews and errors. Validate task ownership and same-wo
 Tests must prove user-folder preservation, scratch first-repository reuse, folder-only and mixed batches, remote clone and rollback, unknown capabilities, focus restoration, and Files/Changes visibility.
 The implementation and verification results are recorded in the plan and work orders. The earlier
 workspace-repository-placement package retains its separate explicit expansion and recovery gate.
+
+## Dialog refinement (2026-09-16)
+
+Desktop uses a viewport-constrained 960px dialog and full-width stacked placement rows. Source selection comes first, followed by locations and impact information. Only selected root expansion shows the prominent restart warning; unchanged-CWD additions show a short neutral continuity note. Use Source location for repository or folder placement and omit expansion for folder-only batches. The phone retains its full-height drawer and fixed footer. These refinements apply to the saved UI-02/UI-03/UI-04 previews.

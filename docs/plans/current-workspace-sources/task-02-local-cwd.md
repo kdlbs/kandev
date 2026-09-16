@@ -166,3 +166,7 @@ Verification passed:
 - Focused source-picker, placement, dialog, file-tree, and toolbar tests passed, 43 tests across five files.
 - Desktop and mobile Local folder, scratch, mixed-batch, retry, resume, and focus flows passed.
 - Git staging protection, persistence, rollback, and additional-session coverage passed in the backend tests.
+
+## Dialog refinement (2026-09-16)
+
+Desktop uses a viewport-constrained 960px dialog and full-width stacked placement rows. Source selection comes first, followed by locations and impact information. Only selected root expansion shows the prominent restart warning; unchanged-CWD additions show a short neutral continuity note. Use Source location for repository or folder placement and omit expansion for folder-only batches. The phone retains its full-height drawer and fixed footer. These refinements apply to the saved UI-02/UI-03/UI-04 previews.

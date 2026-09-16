@@ -104,6 +104,7 @@ export function SourceForm({
       ))}
       {repositoryPlacement !== undefined && (
         <WorkspaceSourcePlacement
+          hasRepositories={rows.some((row) => row.kind === "repository")}
           placement={repositoryPlacement}
           onPlacementChange={onRepositoryPlacementChange}
           preview={placementPreview}

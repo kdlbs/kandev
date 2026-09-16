@@ -176,23 +176,8 @@ test("mobile Files drawer attaches sources with fixed controls and persisted wor
 
   const drawer = testPage.getByTestId("add-workspace-sources-drawer");
   await expect(drawer).toBeVisible();
-  await waitForFiniteAnimations(drawer);
-  const consequences = drawer.getByTestId("workspace-change-consequences");
-  await expect(consequences).toBeVisible();
-  await expect(consequences).toContainText("This restarts the task workspace");
-  await expect(consequences).toContainText("Cancel leaves the workspace unchanged");
-  await expect(consequences).toContainText(
-    "terminals, dev servers, and other workspace processes stop",
-  );
-  const fullImpactDetails = consequences.getByText("Full impact details");
-  const fullImpactDetailsBox = await fullImpactDetails.boundingBox();
-  expect(fullImpactDetailsBox?.height).toBeGreaterThanOrEqual(44);
-  await fullImpactDetails.tap();
-  await expect(
-    consequences.getByText(/The task root becomes the agent's working directory/),
-  ).toBeVisible();
-  await fullImpactDetails.tap();
-  await waitForFiniteAnimations(drawer);
+  await expect(drawer.getByTestId("workspace-change-consequences")).toHaveCount(0);
+  await expect(drawer.getByTestId("workspace-source-continuity")).toBeVisible();
   const [drawerBox, viewport] = await Promise.all([
     drawer.boundingBox(),
     testPage.evaluate(() => ({ width: innerWidth, height: innerHeight })),

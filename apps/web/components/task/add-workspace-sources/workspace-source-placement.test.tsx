@@ -6,12 +6,16 @@ import { repositoryId, taskId } from "@/lib/types/ids";
 afterEach(() => cleanup());
 
 describe("WorkspaceSourcePlacement", () => {
+  it("omits root expansion for folder-only batches", () => {
+    render(<WorkspaceSourcePlacement hasRepositories={false} onPlacementChange={vi.fn()} />);
+    expect(screen.getAllByRole("radio")).toHaveLength(2);
+    expect(screen.queryByText("Expand workspace root")).toBeNull();
+    expect(screen.getByText("Source location")).toBeTruthy();
+  });
   it("requires a placement before showing a selected result", () => {
     render(<WorkspaceSourcePlacement onPlacementChange={vi.fn()} />);
 
-    expect(screen.getByRole("alert").textContent).toContain(
-      "Choose where to add the repositories.",
-    );
+    expect(screen.getByRole("alert").textContent).toContain("Choose where to add the sources.");
     expect(screen.queryByTestId("workspace-source-placement-preview")).toBeNull();
   });
 

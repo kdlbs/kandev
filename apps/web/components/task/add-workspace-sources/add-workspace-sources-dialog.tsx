@@ -60,7 +60,7 @@ function useDialogWorkspacePlacement(
   });
   return {
     ...placement,
-    restartsWorkspace: workspaceChangeRestarts(placement.eligible, executorType),
+    restartsWorkspace: placement.placement === "expand_root",
   };
 }
 
@@ -234,15 +234,6 @@ function canSubmitWorkspaceSources(
   );
 }
 
-function workspaceChangeRestarts(
-  placementEligible: boolean,
-  executorType: string | null | undefined,
-): boolean {
-  if (placementEligible) return false;
-  if (executorType === "local" || executorType === "local_pc") return false;
-  return !isRemoteWorkspaceExecutor(executorType);
-}
-
 function selectableRepositories(
   repositories: Repository[],
   capabilities: ReturnType<typeof getWorkspaceSourceCapabilities>,
@@ -250,10 +241,6 @@ function selectableRepositories(
   return capabilities.requiresCloneableLocalRepository
     ? repositories.filter(hasCloneableSavedRepository)
     : repositories;
-}
-
-function isRemoteWorkspaceExecutor(executorType: string | null | undefined): boolean {
-  return ["local_docker", "remote_docker", "ssh", "sprites", "k8s"].includes(executorType ?? "");
 }
 
 type AddWorkspaceSourcesSurfaceProps = {
@@ -330,8 +317,8 @@ function AddWorkspaceSourcesSurface({
           </DrawerHeader>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4">
             {errorMessage}
-            <div className="mb-4">{consequences}</div>
             {form}
+            <div className="my-4">{consequences}</div>
           </div>
           <div className="shrink-0 border-t p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
             {footer}
@@ -343,7 +330,7 @@ function AddWorkspaceSourcesSurface({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         data-testid="add-workspace-sources-dialog"
-        className="flex max-h-[calc(100dvh-2rem)] max-w-xl flex-col overflow-hidden"
+        className="flex max-h-[calc(100dvh-2rem)] max-w-[960px] sm:max-w-[960px] flex-col overflow-hidden"
         onCloseAutoFocus={onCloseAutoFocus}
       >
         <DialogHeader className="shrink-0">
@@ -355,8 +342,8 @@ function AddWorkspaceSourcesSurface({
           className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain pr-1"
         >
           {errorMessage}
-          {consequences}
           {form}
+          {consequences}
         </div>
         <DialogFooter className="shrink-0">{footer}</DialogFooter>
       </DialogContent>
