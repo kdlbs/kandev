@@ -16,6 +16,7 @@ export type SubtaskToggleInfo = {
 
 export type TaskRowProps = {
   task: TaskSwitcherItem;
+  nestCandidateTasks?: TaskSwitcherItem[];
   isSubTask?: boolean;
   depth?: number;
   subtaskToggle?: SubtaskToggleInfo;
@@ -66,6 +67,7 @@ function archiveAware<T>(value: T | undefined, isArchived: boolean): T | undefin
 
 function getContextMenuProps(props: TaskRowProps, isArchived: boolean) {
   return {
+    nestCandidateTasks: props.nestCandidateTasks,
     onEditTask: archiveAware(props.onEditTask, isArchived),
     onRenameTask: archiveAware(props.onRenameTask, isArchived),
     onArchiveTask: archiveAware(props.onArchiveTask, isArchived),

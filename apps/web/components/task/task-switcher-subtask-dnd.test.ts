@@ -18,12 +18,20 @@ const OTHER_WORKFLOW = "wf-2";
 const PWC = "parent-with-child"; // root that already has a child
 const PWC_CHILD = "child-of-pwc";
 
-function task(id: string, overrides: { workflowId?: string; parentTaskId?: string | null } = {}) {
+function task(
+  id: string,
+  overrides: {
+    workflowId?: string;
+    parentTaskId?: string | null;
+    isFromOffice?: boolean;
+  } = {},
+) {
   return {
     id,
     title: id,
     workflowId: overrides.workflowId ?? WORKFLOW,
     parentTaskId: overrides.parentTaskId ?? undefined,
+    isFromOffice: overrides.isFromOffice,
   };
 }
 
@@ -153,5 +161,26 @@ describe("computeNestTargets", () => {
     expect(targets.has(SUB_E)).toBe(false);
     expect(targets.has("other-wf")).toBe(false);
     expect(targets.has(SUB_C)).toBe(false);
+  });
+
+  // @covers AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.1
+  // @covers AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.4
+  it("matches the shared Office candidates for a subject with children", () => {
+    const officeTasks = [
+      task("office-subject", { isFromOffice: true }),
+      task("office-descendant", {
+        parentTaskId: "office-subject",
+        isFromOffice: true,
+      }),
+      task("office-target-root", { isFromOffice: true }),
+      task("office-target-child", {
+        parentTaskId: "office-target-root",
+        isFromOffice: true,
+      }),
+    ];
+
+    expect(computeNestTargets(officeTasks[0], officeTasks)).toEqual(
+      new Set(["office-target-root", "office-target-child"]),
+    );
   });
 });

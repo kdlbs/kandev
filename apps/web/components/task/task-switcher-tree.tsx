@@ -14,7 +14,7 @@ import type { TaskSwitcherItem } from "./task-switcher-types";
 
 export type TaskRowBaseProps = Omit<
   TaskRowProps,
-  "task" | "subtaskToggle" | "isPinned" | "isSubTask" | "depth"
+  "task" | "nestCandidateTasks" | "subtaskToggle" | "isPinned" | "isSubTask" | "depth"
 >;
 
 type TaskTreeContext = {
@@ -23,6 +23,7 @@ type TaskTreeContext = {
   onToggleSubtasks?: (parentTaskId: string) => void;
   pinnedSet: Set<string>;
   rowProps: TaskRowBaseProps;
+  groupTasks: TaskSwitcherItem[];
   onReorderGroup?: (groupTaskIds: string[]) => void;
   onReorderSubtasks?: (parentTaskId: string, orderedSubtaskIds: string[]) => void;
   onNestTask?: (taskId: string, parentTaskId: string) => void;
@@ -74,6 +75,7 @@ function taskTreeNodeEqual(previous: TaskTreeNodeProps, next: TaskTreeNodeProps)
     previous.depth !== next.depth ||
     previous.isDraggable !== next.isDraggable ||
     previous.ctx.rowProps !== next.ctx.rowProps ||
+    previous.ctx.groupTasks !== next.ctx.groupTasks ||
     previous.ctx.onToggleSubtasks !== next.ctx.onToggleSubtasks ||
     previous.ctx.onReorderGroup !== next.ctx.onReorderGroup ||
     previous.ctx.onReorderSubtasks !== next.ctx.onReorderSubtasks ||
@@ -125,6 +127,7 @@ const TaskTreeNode = memo(function TaskTreeNode({
         subtaskToggle={toggleInfo}
         isPinned={isRoot && ctx.pinnedSet.has(task.id)}
         {...ctx.rowProps}
+        nestCandidateTasks={ctx.groupTasks}
         onTogglePin={isRoot ? ctx.rowProps.onTogglePin : undefined}
       />
       {isNestTarget && <NestDropZone taskId={task.id} title={task.title} />}
@@ -311,6 +314,7 @@ export const GroupSection = memo(function GroupSection({
       onToggleSubtasks,
       pinnedSet,
       rowProps,
+      groupTasks,
       onReorderGroup,
       onReorderSubtasks,
       onNestTask,

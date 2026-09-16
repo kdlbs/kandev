@@ -62,6 +62,7 @@ export type TaskSwitcherItem = {
   lastActivityAt?: string;
   createdAt?: string;
   isArchived?: boolean;
+  isFromOffice?: boolean;
   primarySessionId?: string | null;
   hasPendingClarification?: boolean;
   hasPendingPermission?: boolean;

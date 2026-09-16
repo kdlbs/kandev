@@ -47,6 +47,7 @@ type LinkActions = ReturnType<typeof selectTaskLinkActions>;
 type SingleGroupProps = Pick<
   SingleSelectionMenuProps,
   | "task"
+  | "nestCandidateTasks"
   | "isDeleting"
   | "isArchiving"
   | "isPinned"
@@ -282,6 +283,7 @@ function SingleEditGroup({
 
 function SingleRelationshipsGroup({
   task,
+  nestCandidateTasks,
   isDeleting,
   onCreateSubtask,
   onDetachTask,
@@ -292,6 +294,7 @@ function SingleRelationshipsGroup({
 }: Pick<
   SingleGroupProps,
   | "task"
+  | "nestCandidateTasks"
   | "isDeleting"
   | "onCreateSubtask"
   | "onDetachTask"
@@ -303,7 +306,13 @@ function SingleRelationshipsGroup({
   return (
     <>
       <TaskCreateSubtaskItem task={task} disabled={isDeleting} onCreateSubtask={onCreateSubtask} />
-      {!task.isArchived && <TaskNestContextMenuItems task={task} disabled={isDeleting} />}
+      {!task.isArchived && (
+        <TaskNestContextMenuItems
+          task={task}
+          nestCandidateTasks={nestCandidateTasks}
+          disabled={isDeleting}
+        />
+      )}
       {hasLinkGroup && linkActions && pluginLinkActions && (
         <TaskPluginLinkMenu
           disabled={isDeleting}

@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { computeNestCandidates } from "./nest-candidates";
 
-type T = { id: string; title: string; parentTaskId?: string | null };
+type T = {
+  id: string;
+  title: string;
+  parentTaskId?: string | null;
+  isFromOffice?: boolean;
+};
 
 const tasks: T[] = [
   { id: "a", title: "A" }, // root with a child
@@ -51,5 +56,40 @@ describe("computeNestCandidates", () => {
 
   it("returns empty when the task is the only one", () => {
     expect(computeNestCandidates([{ id: "solo", title: "Solo" }], "solo")).toEqual([]);
+  });
+
+  // @covers AC-TASKS-SUBTASK-REPARENTING-DRAG-DROP-001.4
+  it("allows deep Office targets and excludes descendants", () => {
+    const officeTasks: T[] = [
+      { id: "office-root", title: "Office root", isFromOffice: true },
+      {
+        id: "office-child",
+        title: "Office child",
+        parentTaskId: "office-root",
+        isFromOffice: true,
+      },
+      {
+        id: "office-grandchild",
+        title: "Office grandchild",
+        parentTaskId: "office-child",
+        isFromOffice: true,
+      },
+      { id: "office-target-root", title: "Target root", isFromOffice: true },
+      {
+        id: "office-target-child",
+        title: "Target child",
+        parentTaskId: "office-target-root",
+        isFromOffice: true,
+      },
+    ];
+
+    expect(computeNestCandidates(officeTasks, "office-root").map((task) => task.id)).toEqual([
+      "office-target-root",
+      "office-target-child",
+    ]);
+  });
+
+  it("returns empty when the subject is missing", () => {
+    expect(computeNestCandidates(tasks, "missing")).toEqual([]);
   });
 });

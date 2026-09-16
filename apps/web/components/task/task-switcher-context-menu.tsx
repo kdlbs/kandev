@@ -26,6 +26,7 @@ export { createTaskLinkSelectAction } from "./task-switcher-link-menu";
 
 type ContextMenuProps = TaskLinkHandlers & {
   task: TaskSwitcherItem;
+  nestCandidateTasks?: TaskSwitcherItem[];
   workflows?: TaskMoveWorkflow[];
   stepsByWorkflowId?: Record<string, StepDef[]>;
   steps?: StepDef[];

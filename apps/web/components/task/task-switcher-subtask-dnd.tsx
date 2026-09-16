@@ -122,8 +122,9 @@ const GROUP_ROOT_LEVEL = "__group_root__";
 /**
  * Computes the rows a drag may nest the active task under, mirroring the
  * context menu's candidate rules (computeNestCandidates) scoped to the
- * active task's workflow: same-workflow roots, excluding the task itself,
- * its current parent, and any subtask (which also excludes its descendants).
+ * active task's workflow. Every mode excludes the task, its current parent,
+ * and descendants; Kanban keeps the root-only depth limit while Office may
+ * target tasks at any depth.
  */
 export function computeNestTargets(
   activeTask: Pick<TaskSwitcherItem, "id" | "workflowId" | "parentTaskId"> | undefined,

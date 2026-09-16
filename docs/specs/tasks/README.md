@@ -171,6 +171,7 @@ signals, and task-scoped scheduling contracts.
 - [Prompt attachments](system-design/prompt-attachments.md)
 - [Task Actions Menu on Preview and Detail Surfaces](system-design/task-actions-menu.md)
 - [Task menu grouping](system-design/task-menu-grouping.md)
+- [Subtask re-parenting by drag and drop](system-design/subtask-reparenting-drag-drop.md)
 - [Task Archive Confirmation](system-design/archive-confirmation.md)
 - [Task removal navigation](system-design/removal-navigation.md)
 - [Task plan content size limit](system-design/plan-content-size-limit.md)
