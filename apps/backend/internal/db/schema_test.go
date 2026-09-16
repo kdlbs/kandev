@@ -1,6 +1,8 @@
 package db
 
 import (
+	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -28,6 +30,14 @@ func TestTableColumnsAndExistsSQLite(t *testing.T) {
 	}
 	if !exists {
 		t.Fatal("TableExists = false, want true")
+	}
+
+	schema, err := SQLiteTableSQL(database, "sample_schema")
+	if err != nil {
+		t.Fatalf("SQLiteTableSQL: %v", err)
+	}
+	if schema == "" {
+		t.Fatal("SQLiteTableSQL returned an empty schema")
 	}
 
 	columns, err := TableColumns(database, "sample_schema")
@@ -68,5 +78,23 @@ func TestTableColumnsAndExistsSQLite(t *testing.T) {
 	}
 	if len(missingColumns) != 0 {
 		t.Fatalf("missing table columns = %#v, want empty", missingColumns)
+	}
+}
+
+// Reviewer-requested regression coverage for SQLite-only schema inspection.
+func TestSQLiteTableSQLRejectsUnsupportedOrMissingSchemas(t *testing.T) {
+	postgres := sqlx.NewDb(nil, "pgx")
+	if _, err := SQLiteTableSQL(postgres, "sample_schema"); err == nil {
+		t.Fatal("SQLiteTableSQL accepted a PostgreSQL connection")
+	}
+
+	rawDB, err := OpenSQLite(filepath.Join(t.TempDir(), "missing-schema.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	database := sqlx.NewDb(rawDB, "sqlite3")
+	t.Cleanup(func() { _ = database.Close() })
+	if _, err := SQLiteTableSQL(database, "missing_schema"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("SQLiteTableSQL missing table error = %v, want sql.ErrNoRows", err)
 	}
 }

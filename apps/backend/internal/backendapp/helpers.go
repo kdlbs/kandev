@@ -2027,6 +2027,7 @@ func registerMCPAndDebugRoutes(
 	if p.services.GitHub != nil {
 		mcpHandlers.SetTaskPRLister(mcpTaskPRListerAdapter{gh: p.services.GitHub})
 		mcpHandlers.SetTaskPRAutomationService(p.services.GitHub)
+		mcpHandlers.SetFreshCIRunService(p.services.GitHub)
 	}
 	if p.orchestratorSvc != nil {
 		mcpHandlers.SetTaskPRAutoFixOutcomeService(p.orchestratorSvc)

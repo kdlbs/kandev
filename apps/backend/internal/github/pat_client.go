@@ -33,7 +33,13 @@ type GitHubAPIError struct {
 	StatusCode int
 	Endpoint   string
 	Body       string
-	RetryAt    *time.Time
+	// RetryAt preserves provider-supplied retry evidence so PR discovery
+	// backs off to the later of Retry-After and X-RateLimit-Reset.
+	RetryAt *time.Time
+	// RequestID and URL carry provider-side evidence recorded with scoped
+	// CI run provider errors.
+	RequestID string
+	URL       string
 }
 
 func (e *GitHubAPIError) Error() string {
@@ -86,19 +92,54 @@ func (c *PATClient) WithRateTracker(t *RateTracker) *PATClient {
 	return c
 }
 
+// providerResetEvidence extracts raw provider retry evidence for scoped CI
+// run errors. Unlike retryAtFromHTTPResponse it does not gate on "now": the
+// stored ProviderRetryAfter is evidence of what the provider sent, and the
+// CI rate-limit deferral logic decides whether the reset is still actionable.
+func providerResetEvidence(resp *http.Response) *time.Time {
+	if resp == nil {
+		return nil
+	}
+	if raw := resp.Header.Get("Retry-After"); raw != "" {
+		if seconds, err := strconv.Atoi(raw); err == nil && seconds >= 0 {
+			reset := time.Now().UTC().Add(time.Duration(seconds) * time.Second)
+			return &reset
+		}
+		if parsed, err := http.ParseTime(raw); err == nil {
+			reset := parsed.UTC()
+			return &reset
+		}
+	}
+	if raw := resp.Header.Get("X-RateLimit-Reset"); raw != "" {
+		if unix, err := strconv.ParseInt(raw, 10, 64); err == nil && unix > 0 {
+			reset := time.Unix(unix, 0).UTC()
+			return &reset
+		}
+	}
+	return nil
+}
+
+// resourceForEndpoint maps a REST endpoint prefix to the rate-limit resource
+// bucket GitHub uses for it, used when a response omits the
+// X-RateLimit-Resource header.
+func resourceForEndpoint(endpoint string) Resource {
+	if strings.HasPrefix(endpoint, "/search/") {
+		return ResourceSearch
+	}
+	if strings.HasPrefix(endpoint, "/graphql") {
+		return ResourceGraphQL
+	}
+	return ResourceCore
+}
+
 // recordRateHeaders feeds rate-limit data from a response into the tracker.
 // endpoint is used to pick the default resource bucket when the response
-// omits the X-RateLimit-Resource header.
+// omits X-RateLimit-Resource.
 func (c *PATClient) recordRateHeaders(resp *http.Response, endpoint string) {
 	if c.rateTracker == nil || resp == nil {
 		return
 	}
-	defaultResource := ResourceCore
-	if strings.HasPrefix(endpoint, "/search/") {
-		defaultResource = ResourceSearch
-	} else if strings.HasPrefix(endpoint, "/graphql") {
-		defaultResource = ResourceGraphQL
-	}
+	defaultResource := resourceForEndpoint(endpoint)
 	snap, headersOK := parseRateHeaders(resp, defaultResource)
 	if headersOK {
 		c.rateTracker.Record(snap)
@@ -967,30 +1008,63 @@ func (c *PATClient) requestJSON(
 	body []byte,
 	result interface{},
 ) error {
+	_, err := c.requestJSONWithMetadata(ctx, method, endpoint, body, result)
+	return err
+}
+
+func (c *PATClient) requestJSONWithMetadata(
+	ctx context.Context,
+	method string,
+	endpoint string,
+	body []byte,
+	result interface{},
+) (GitHubRequestMetadata, error) {
+	return c.requestJSONWithMetadataVersion(ctx, method, endpoint, body, result, githubAPIVersion)
+}
+
+func (c *PATClient) requestJSONWithMetadataVersion(
+	ctx context.Context,
+	method string,
+	endpoint string,
+	body []byte,
+	result interface{},
+	apiVersion string,
+) (GitHubRequestMetadata, error) {
 	u := githubAPIBase + endpoint
+	metadata := GitHubRequestMetadata{URL: u}
 	req, err := http.NewRequestWithContext(ctx, method, u, bytes.NewReader(body))
 	if err != nil {
-		return err
+		return metadata, err
 	}
 	c.setGitHubHeaders(req)
+	if apiVersion != "" {
+		req.Header.Set("X-GitHub-Api-Version", apiVersion)
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return fmt.Errorf("request %s %s: %w", method, endpoint, err)
+		return metadata, fmt.Errorf("request %s %s: %w", method, endpoint, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	metadata.RequestID = resp.Header.Get("X-GitHub-Request-Id")
 	c.recordRateHeaders(resp, endpoint)
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, respBody)
-		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(respBody)}
+		return metadata, &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint,
+			Body: string(respBody), RetryAt: providerResetEvidence(resp),
+			RequestID: metadata.RequestID, URL: metadata.URL}
 	}
 	if result == nil {
-		return nil
+		return metadata, nil
 	}
-	return json.NewDecoder(resp.Body).Decode(result)
+	err = json.NewDecoder(resp.Body).Decode(result)
+	if errors.Is(err, io.EOF) {
+		return metadata, nil
+	}
+	return metadata, err
 }
 
 // delete sends a DELETE request. 2xx and 404 both return nil-or-typed-error per caller intent.
@@ -1044,7 +1118,8 @@ func (c *PATClient) get(ctx context.Context, endpoint string, result interface{}
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		c.maybeMarkRateExhaustedFromBody(endpoint, resp.StatusCode, body)
-		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint, Body: string(body)}
+		return &GitHubAPIError{StatusCode: resp.StatusCode, Endpoint: endpoint,
+			Body: string(body), RetryAt: providerResetEvidence(resp)}
 	}
 	return json.NewDecoder(resp.Body).Decode(result)
 }

@@ -31,8 +31,8 @@ test.describe("Cancel progress across task switches", () => {
 
     const session = await seedIdleSession(testPage, apiClient, seedData, "Cancel progress A");
     // Reload hydration is covered independently by mobile-cancel-progress-reload.spec.ts.
-    // Keep this regression focused on the two component remounts caused by task navigation.
-    await session.sendMessage("/slow 30s");
+    // /sleep keeps this regression focused on the task-navigation remounts with stable cancellation.
+    await session.sendMessage("/sleep 30");
 
     const activeCancel = session.activeChat().getByTestId("cancel-agent-button");
     await expect(activeCancel).toBeVisible({ timeout: 15_000 });
